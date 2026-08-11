@@ -2104,18 +2104,26 @@ Agent 可以在授权范围内重新分配预算，例如减少低价值搜索�
 
 可以为 Agent 提供一小部分预授权弹性额度。当进展明确且风险低时自动使用；超过总上限仍需治理规则或人类决定。
 
-### 19.10 学习不能吞噬用户目标
+### 19.10 多个学习循环不能互相吞噬
 
 持续学习 Agent 可能产生“自我改进成瘾”：不断研究怎样让自己更强，却迟迟不交付用户真正需要的结果。
 
-学习活动应分成：
+这不意味着“完善天问”必须等待用户目标结束。更合理的方式是让两者成为目标互不篡改、预算相互隔离的并行循环：
+
+- 用户目标循环负责交付用户当前需要的结果；
+- “完善天问”元循环订阅用户循环产生的事件、问题和反馈；
+- 元循环发现值得解决的问题后，创建有明确终点的小型学习循环；
+- 小型学习循环只产生候选改进，不能在当前任务中偷偷替换稳定版；
+- 用户任务拥有交互延迟、前台算力和外部操作的调度优先权，后台学习只能使用自己的资源额度。
+
+每个循环内部的学习活动仍可分成：
 
 - 内联学习：当前任务必须解决的知识缺口；
 - 后台学习：不阻塞当前交付，但未来价值较高；
 - 延期学习：记录进学习队列，等待重复信号或更高优先级；
 - 放弃学习：预期价值低于成本。
 
-当前用户目标拥有优先权。除非学习是完成目标的必要条件，Agent 不应把大部分执行预算自动转为自我改进预算。
+因此，用户目标与完善天问并不冲突；真正需要治理的是资源竞争、当前稳定版本污染、隐私泄漏和未来版本发布风险。元循环可以持续运行，但不能把用户循环的预算、控制权和当前执行环境据为己有。
 
 ### 19.11 用户控制面应展示资源状态
 
@@ -2213,6 +2221,8 @@ Agent 可以在授权范围内重新分配预算，例如减少低价值搜索�
 - 学习候选与正式生效版本分离；
 - 学习者不能自我评测、自我放行或自行扩大权限；
 - 任务执行与学习更新使用不同状态和发布节奏；
+- 每个目标循环拥有独立目标、状态、预算、授权和版本视图；
+- 循环之间通过受治理的事件订阅协作，不能直接改写对方状态；
 - 权限、预算、版本与回滚由外部程序执行；
 - 所有长期改变必须有来源、证据、版本和影响范围；
 - 持续学习核心与底层 Runtime 保持清楚接口；
@@ -2240,10 +2250,11 @@ Agent 可以在授权范围内重新分配预算，例如减少低价值搜索�
 
 ```mermaid
 flowchart TB
-    H["人类控制面：目标、任务、学习、版本、授权"] <--> O["目标协调与任务编排"]
+    H["人类控制面：目标、任务、学习、版本、授权"] <--> O["目标循环注册、协调与任务编排"]
 
-    O --> X["任务执行循环"]
-    O --> L["学习更新循环"]
+    O --> Q["目标循环实例：用户循环 / 元目标循环 / 子学习循环"]
+    Q --> X["该循环的任务执行"]
+    Q --> L["该循环的学习更新"]
 
     X --> A["Agent Runtime Adapter"]
     A --> R["Codex / OpenCode / Hermes / 其他 Runtime"]
@@ -2253,7 +2264,10 @@ flowchart TB
     T --> E
     H --> E
 
-    E --> L
+    E --> S["受治理的事件订阅、问题聚类与学习触发"]
+    S --> L
+    S --> N["派生新的有限子目标循环"]
+    N --> Q
     L --> C["项目 / Agent / Skill / 知识 / 策略等目标对象候选版本"]
     C --> V["独立评测与治理"]
     V --> G["版本注册、灰度、晋升与回滚"]
@@ -2268,7 +2282,7 @@ flowchart TB
 总体可以理解为八层：
 
 1. 人类控制面；
-2. 目标与任务协调；
+2. 目标循环注册、父子关系与任务协调；
 3. 任务上下文和 Skill 适配；
 4. 任务执行循环；
 5. 事件、证据与持久状态；
@@ -2277,6 +2291,8 @@ flowchart TB
 8. Runtime 适配与外部工具。
 
 权限、预算、审计和恢复作为横跨所有层的确定性护栏。
+
+图中的“目标循环实例”不是一种固定 Agent 类型。每个用户目标、“完善天问”元目标以及元目标派生出的具体改进目标，都使用同一套通用循环协议，只是目标对象、证据来源、资源优先级和版本发布策略不同。
 
 ### 20.4 人类控制面
 
@@ -2299,12 +2315,14 @@ flowchart TB
 目标协调者维护：
 
 - 目标契约；
+- 活跃目标循环注册表及其父子关系；
 - 任务图和依赖；
 - 当前优先级；
 - 检查点；
 - 任务与学习预算；
 - 暂停、恢复和停止状态；
-- 任务执行循环与学习更新循环的调度关系。
+- 循环之间的事件订阅与数据权限；
+- 任务执行循环、学习更新循环和元学习循环的调度关系。
 
 它可以调整计划和方法，但不能自行改变核心意图。
 
@@ -2351,7 +2369,15 @@ flowchart TB
 → 继续观察和循环
 ```
 
-“完善天问”可以作为长期默认元目标，但当前用户指定的目标拥有优先权。用户要求完成项目时，主要学习预算应服务于项目；过程中发现的天问自身问题可以进入学习队列，除非它直接阻塞当前目标，否则不能自动吞噬主要资源。
+系统中可以同时存在多个持续学习循环，而不是让一个循环轮流切换目标：
+
+- 用户指定一个项目方向，会创建以该项目为目标对象的用户目标循环；
+- “完善天问”是长期存在的元目标循环，持续订阅各用户目标循环产生的合规事件；
+- 元循环把具体问题、用户意见和意外结果转成新的子学习目标；
+- 每个子目标再运行同一套探索、规划、实践、验证和版本更新过程；
+- 不同循环拥有独立状态、预算、授权、目标对象和停止条件。
+
+因此，整个结构是“并行循环 + 父子循环”：用户目标循环与完善天问循环彼此并行；完善天问循环内部又派生许多解决具体问题的小循环。用户任务仍拥有前台资源和交互响应的调度优先权，但后台元循环不必停下，只要它不改变当前用户循环的目标、稳定版本和授权边界。
 
 ### 20.7 任务上下文编译
 
@@ -2458,6 +2484,7 @@ flowchart TB
 
 执行循环产生的真实经历进入事件与证据账本：
 
+- 事件所属的目标循环、父目标和任务；
 - 用户输入和纠正；
 - 当前目标和任务版本；
 - 任务上下文摘要；
@@ -2473,9 +2500,11 @@ flowchart TB
 
 并非所有原始内容都要永久保存。隐私、敏感数据和低价值轨迹应按数据治理规则进行最小化、脱敏、归档或删除。
 
+账本同时是循环之间的受控数据总线。其他循环只能订阅被授权的事件视图，而不能直接读取全部原始上下文。例如，“完善天问”循环通常只需要问题类型、失败证据、用户反馈和有效配置，不应默认复制用户的简历、密钥、私有代码或完整会话。
+
 ### 20.11 学习更新循环
 
-学习更新循环读取执行证据，判断当前学习目标所指向的对象应怎样改变：
+每个目标循环都可以拥有自己的学习更新循环。它读取与该目标相关的执行证据，判断当前目标对象应怎样改变：
 
 ```text
 学习触发
@@ -2502,6 +2531,20 @@ flowchart TB
 - 目标长期停滞。
 
 学习更新循环并不只是总结。它还可能启动新的隔离实验，取得足够证据后才改变项目、Agent、Skill、知识或其他目标对象的正式版本。
+
+“完善天问”元循环使用相同机制，但多一层问题编排：
+
+```text
+订阅用户循环的合规事件
+→ 聚类问题、意见、重复劳动和意外成功
+→ 判断是否值得建立改进目标
+→ 派生一个有预算和终点的子学习循环
+→ 子循环探索、实验并产生天问候选改进
+→ 回归、影子和灰度验证
+→ 晋升、限定路由、继续改造或淘汰
+```
+
+元循环不是一个永远不结束的单次模型调用。它是长期目标和调度器；真正执行研究与改进的是许多有限、可停止、可恢复的子循环。
 
 ### 20.12 学习更新可以作用的目标对象
 
@@ -2559,10 +2602,13 @@ flowchart TB
 
 ### 20.14 Agent Runtime Adapter
 
+目标循环不等于 Runtime 会话。一个目标循环可能因为上下文压缩、故障恢复、并行实验或更换执行宿主而使用多个 Runtime 会话；Runtime 会话结束也不能让目标、证据和学习状态消失。循环的权威状态由天问持有，Runtime 只是执行当前任务的宿主。
+
 适配层为天问核心提供统一能力：
 
 - 查询 Runtime 支持的模型、工具和权限；
 - 创建、恢复、暂停、取消任务；
+- 把天问循环标识与一个或多个 Runtime 会话关联；
 - 提交任务包和有效 Skill 方案；
 - 接收流式状态和结构化事件；
 - 获取工具调用、产物和验证结果；
@@ -2578,6 +2624,7 @@ flowchart TB
 | 状态 | 主要内容 | 正式写入者 |
 | --- | --- | --- |
 | 目标账本 | 核心意图、完成条件、约束、目标版本 | 人类；协调者记录 |
+| 循环注册表 | 循环状态、父子关系、事件订阅、目标对象、预算、授权和 Runtime 绑定 | 目标循环协调者 |
 | 学习目标对象 | 对象类型、当前版本、关键差距、可修改范围和评价证据 | 目标协调者记录；对应发布器更新版本 |
 | 任务账本 | 任务、依赖、检查点、状态、产物 | 目标协调者 |
 | 事件与证据账本 | 动作、工具结果、用户反馈、真实效果 | 事件记录器 |
@@ -2602,32 +2649,38 @@ flowchart TB
 - 依赖关系；
 - 失效和重新验证条件。
 
-### 20.16 端到端数据流
+### 20.16 多循环端到端数据流
 
 ```mermaid
-flowchart LR
-    A["用户给出长期目标"] --> B["目标契约、目标对象与授权包络"]
-    B --> C["目标协调者生成任务包"]
-    C --> D["Skill 适配层生成本次执行方案"]
-    D --> E["Runtime 执行与验证"]
-    E --> F["事件与证据账本"]
-    F --> G{"是否触发学习？"}
-    G -- "否" --> H["继续任务或完成"]
-    G -- "是" --> I["学习工单与预算"]
-    I --> J["归因、假设与实验"]
-    J --> K["项目 / Agent / Skill / 知识 / 策略等目标对象候选版本"]
-    K --> L["独立评测与治理"]
-    L --> M{"是否允许进入真实使用？"}
-    M -- "否" --> N["改造、延期、隔离或淘汰"]
-    M -- "是" --> O["影子、灰度与真实监测"]
-    O --> P{"真实效果是否改善？"}
-    P -- "否" --> Q["回滚或形成版本 C"]
-    P -- "是" --> R["晋升、限定路由与更新自我模型"]
-    R --> C
-    O --> F
+flowchart TB
+    U["用户目标循环 A：例如完成一个项目"] --> UE["该循环的任务执行、验证与版本更新"]
+    V["用户目标循环 B：另一个用户或目标"] --> VE["该循环的任务执行、验证与版本更新"]
+    UE --> E["受治理的事件与证据账本"]
+    VE --> E
+
+    E --> M["完善天问：长期元目标循环"]
+    M --> T{"形成了值得解决的具体问题？"}
+    T -- "否" --> W["继续观察、聚类或等待更多证据"]
+    T -- "是" --> C1["派生子学习循环：问题 1"]
+    T -- "是" --> C2["派生子学习循环：意见 2"]
+    T -- "是" --> C3["派生子学习循环：能力机会 3"]
+
+    C1 --> X["探索、规划、实验与归因"]
+    C2 --> X
+    C3 --> X
+    X --> K["天问目标对象的候选版本"]
+    K --> G["独立评测、影子、灰度与治理"]
+    G --> D{"是否晋升？"}
+    D -- "否" --> R["改造、限定、延期或淘汰"]
+    D -- "是" --> S["新的稳定版或条件化路由"]
+    S --> U
+    S --> V
+    S --> E
 ```
 
-这一闭环可能跨越多个任务和多个会话，不要求在一次对话中完成。
+每个用户目标循环内部仍然使用“目标—差距—探索—实践—验证—更新”的通用过程。图中强调的是循环之间的关系：用户循环提供真实经验，元循环消费经过治理的经验并派生改进子循环，候选改进经过验证后只影响未来或灰度流量，不回写正在运行的历史任务。
+
+这一循环网络可以跨越多个任务、多个会话和多个版本，不要求在一次对话中完成。
 
 ### 20.17 主要失败和恢复路径
 
@@ -2709,11 +2762,396 @@ flowchart LR
 
 本章核心结论：
 
-> 天问应以人类目标为顶层输入，以目标对象明确需要改善什么，以任务执行循环创造真实经历，以事件与证据账本保存事实，以学习更新循环产生目标对象的受控候选版本，再通过独立评测、灰度和版本治理改变其后续状态。持续学习核心与底层 Runtime 分离，对外保持一个 Agent，初版采用模块化单体，并允许内部实现根据真实使用持续演化。
+> 天问应以人类目标为顶层输入，把每个目标实例化为独立、有限和可恢复的持续学习循环。多个用户目标循环创造真实经历；“完善天问”长期元循环通过受治理的事件流学习这些经历，再派生许多解决具体问题的小型学习循环。所有改进先形成隔离的候选版本，再通过独立评测、灰度和版本治理影响未来行为。持续学习核心与底层 Runtime 分离，对外保持一个 Agent，初版采用模块化单体，并允许内部实现根据真实使用持续演化。
 
-## 21. 当前共识、暂定建议与未决问题
+## 21. 第十一章：开源生态对照与复用矩阵
 
-### 21.1 已形成的共识
+本章不根据项目宣传语选择“底座”，而是以实际源码回答四个问题：
+
+1. 哪些能力可以作为稳定依赖直接使用；
+2. 哪些能力适合通过 Runtime Adapter 接入；
+3. 哪些设计只适合借鉴，复制反而会继承上游耦合；
+4. 哪些能力构成天问的差异化核心，必须由天问自己掌握。
+
+这里的“直接依赖”特指具有清楚许可证、可版本锁定、相对稳定公开接口的包或协议。某个仓库里存在一份看似独立的源文件，不自动等于适合复制进天问。
+
+### 21.1 审计快照与许可证边界
+
+本次只读审计固定在以下源码快照：
+
+| 项目 | 审计提交 | 主许可证 | 实际开放边界 |
+| --- | --- | --- | --- |
+| Codex | `41ece455b7fa7166f4fc38522952afdaa2604e18` | Apache-2.0 | CLI、SDK、App Server、Skills、Plugins 等公开；官方开源清单没有把桌面应用 UI 列为开源组件，IDE 扩展和 Codex Cloud 明确不开源 |
+| OpenCode | `d041eee55c4b669f583fcbe0eb73e78d53393ae8` | MIT | 运行时、协议、客户端、插件和主要 UI 源码公开；部分子包有独立许可证，引用时仍需逐项确认 |
+| Hermes Agent | `9829746dfe3d5077f4f076e257505ec7f8feaa65` | MIT | 通用 Agent、网关、记忆、Skill、后台评审、cron 和子 Agent 源码公开 |
+| Claude Agent SDK Python | `e3320df6f03ac9479dc0a8b49ff753dcc3316519` | SDK 为 MIT | SDK 源码开放，但它驱动的 Claude Code CLI 是专有软件，使用还受 Anthropic 商业条款约束 |
+
+因此：
+
+- “GitHub 仓库公开”不等于传统开源；
+- “SDK 开源”不等于被驱动的 Runtime 也开源；
+- “许可证允许复制”不等于复制是维护成本最低的方案；
+- 所有实际依赖都应锁定版本，并记录上游提交、许可证、修改和契约测试。
+
+### 21.2 共同结论：现有 Agent 管的是会话，天问要管的是目标循环
+
+四个项目都提供了有价值的 Agent 能力，但没有任何一个原生实现完整的天问循环网络：
+
+```text
+多个用户目标循环
+→ 产生真实事件、问题和反馈
+→ 完善天问长期元循环订阅合规数据
+→ 派生多个有限的改进子循环
+→ 产生候选版本
+→ 独立评测、灰度、晋升或回滚
+```
+
+它们主要提供的是：
+
+- 模型与工具执行；
+- 会话、线程和消息；
+- 事件流；
+- 权限和审批；
+- Skill、插件和 MCP；
+- 子 Agent 或后台任务；
+- 一定程度的暂停、恢复和分支。
+
+而天问仍需要自己管理：
+
+- 目标循环注册表；
+- 循环的父子关系和事件订阅；
+- 目标主权、预算、授权和停止条件；
+- 用户事件向元循环开放的脱敏视图；
+- 学习工单与目标对象；
+- Champion、Challenger 和候选版本；
+- 跨 Runtime 的评测、灰度、路由和回滚。
+
+这也进一步说明：
+
+> Runtime 会话不是目标循环。一个目标循环可以先后使用多个 Runtime 会话，也可以同时启动多个隔离实验；会话丢失、压缩或更换 Runtime 时，目标循环仍然存在。
+
+### 21.3 Codex：最适合成为首个执行 Runtime，但不是天问核心
+
+#### 实际可复用能力
+
+Codex App Server 暴露了完整的 thread、turn 和 item 模型，以及结构化通知、审批请求、Skill、Plugin、Goal、MCP、命令、进程、权限配置和线程生命周期接口。协议采用类似 JSON-RPC 的双向消息，默认可通过 stdio 使用。
+
+源码中的关键边界包括：
+
+- [App Server 协议方法与通知](https://github.com/openai/codex/blob/41ece455b7fa7166f4fc38522952afdaa2604e18/codex-rs/app-server-protocol/src/protocol/common.rs)；
+- [Thread、Turn 与 Item 数据模型](https://github.com/openai/codex/tree/41ece455b7fa7166f4fc38522952afdaa2604e18/codex-rs/app-server-protocol/src/protocol/v2)；
+- [Goal 扩展](https://github.com/openai/codex/tree/41ece455b7fa7166f4fc38522952afdaa2604e18/codex-rs/ext/goal)；
+- [App Server Python SDK 客户端](https://github.com/openai/codex/blob/41ece455b7fa7166f4fc38522952afdaa2604e18/sdk/python/src/openai_codex/client.py)；
+- [TypeScript SDK 的 CLI 执行器](https://github.com/openai/codex/blob/41ece455b7fa7166f4fc38522952afdaa2604e18/sdk/typescript/src/exec.ts)。
+
+需要特别区分两条 SDK 路径：
+
+- Python SDK 通过 stdio 启动并控制本地 App Server，使用类型化 JSON-RPC，能访问 thread、fork、archive、turn、审批和结构化事件等较丰富能力；
+- 当前 TypeScript SDK 主要包装 `codex exec` 的 JSONL 事件，接口更简单，但不是完整 App Server 控制面。
+
+官方文档也明确把 Codex SDK定位为“编程任务线程”的控制方式；如果 Codex 只是更大编排系统中的一个专家，应由外层系统编排。
+
+#### 对多循环的支持程度
+
+Codex 可以跨多个 thread 并行执行，一个连接也可以订阅多个 thread 的事件，因此它可以承载多个天问目标循环的底层执行。
+
+但它仍有边界：
+
+- 同一个 thread 同一时刻只有一个活跃 turn，新的输入可能成为当前 turn 的 steer，而不是新并行循环；
+- Goal 是“单 thread 的目标、状态和预算”，不是跨 thread 的目标树；
+- 子 Agent 可以产生子 thread，但外部客户端仍要自己维护天问的父子目标语义；
+- thread fork 主要分叉会话历史；
+- `thread/rollback` 不恢复工作区文件；
+- 上下文 compaction 不是候选实验快照；
+- Runtime 没有 Champion/Challenger、对比评测和版本晋升协议。
+
+#### 复用判定
+
+- **直接依赖候选**：稳定版 Python SDK；App Server 的生成 schema；Skills、MCP 和公开协议。
+- **适配器**：把 thread、turn、item、approval、goal 和 sandbox 映射为天问统一事件与权限模型。
+- **只宜借鉴**：Codex 内部多 Agent 调度、自动审批和产品级扩展注册。
+- **不能依赖的部分**：用户欣赏的桌面任务面板和完整交互体验不能假设有可复用源码；天问可以学习其设计原则，但需要自己的控制面。
+
+综合判断：
+
+> Codex 最适合成为天问的第一个执行宿主，尤其适合代码、项目构建和验证任务；但目标循环、学习、版本治理和用户控制面仍应在 Codex 外部。
+
+### 21.4 OpenCode：最适合验证 Runtime 中立性，并提供事件架构参考
+
+OpenCode 的优势是模型供应商中立、客户端与服务端分离、HTTP/OpenAPI 接口、SDK、插件、权限、会话、事件和子 Agent 都是公开实现。
+
+本次源码快照处于两代架构并存状态：
+
+- v1 运行时功能较完整，提供 session、fork、abort、permission、tool、provider 和 UI；
+- v2 使用 Effect、SQLite 和事件溯源思路，提供 durable event、session inbox、SSE、生成客户端和新的协议包，但多个接口仍标记为 experimental。
+
+关键源码包括：
+
+- [v2 Session 协议](https://github.com/anomalyco/opencode/blob/d041eee55c4b669f583fcbe0eb73e78d53393ae8/packages/protocol/src/groups/session.ts)；
+- [持久事件接口](https://github.com/anomalyco/opencode/blob/d041eee55c4b669f583fcbe0eb73e78d53393ae8/packages/core/src/event.ts)；
+- [Session 输入队列](https://github.com/anomalyco/opencode/blob/d041eee55c4b669f583fcbe0eb73e78d53393ae8/packages/core/src/session/input.ts)；
+- [工具定义模型](https://github.com/anomalyco/opencode/blob/d041eee55c4b669f583fcbe0eb73e78d53393ae8/packages/core/src/tool/tool.ts)；
+- [Plugin Hooks 契约](https://github.com/anomalyco/opencode/blob/d041eee55c4b669f583fcbe0eb73e78d53393ae8/packages/plugin/src/index.ts)。
+
+OpenCode 对天问最有价值的不是“整个 Fork”，而是三种设计：
+
+1. 运行时与客户端分离；
+2. 真实事件先追加记录，再投影成会话视图；
+3. 输入先进入幂等 inbox，再由每个 session 的执行协调器消费。
+
+这些设计非常适合天问的多循环和事件账本，但当前不宜直接把 v2 内部源码作为天问核心依赖：
+
+- v2 协议仍在变化；
+- Bun、Effect、Drizzle 和内部数据类型形成较强技术栈绑定；
+- v1 与 v2 的能力尚未完全对齐；
+- 部分审批和运行状态仍在进程内，重启可能丢失；
+- 多 session 能并行，但没有天问需要的全局预算和资源调度；
+- fork 不等于完整候选环境隔离。
+
+复用判定：
+
+- **直接依赖候选**：锁定版本后的公开 Client/SDK 和协议类型，不直接复制开发分支内部模块。
+- **适配器**：通过 HTTP、SSE、session、permission 和 interrupt 接口把 OpenCode 当外部执行器。
+- **设计借鉴**：事件存储、幂等 inbox、按 session 串行而跨 session 并行、插件 Hook。
+- **定位**：第二个 Runtime Adapter，用来证明天问没有被 Codex 和 OpenAI 模型绑定。
+
+### 21.5 Hermes：最接近“从使用中改进”，但学习目标仍然过窄
+
+Hermes 是四个项目中最接近通用个人 Agent 的实现。它已经具有：
+
+- 多平台网关；
+- 记忆与用户档案；
+- Session 搜索；
+- Skill 创建、编辑、统计和按需加载；
+- toolset 白名单；
+- 子 Agent；
+- cron；
+- 多种终端与沙箱后端；
+- 回合结束后的后台自我评审。
+
+最值得关注的实际闭环是：
+
+```text
+用户回合结束
+→ 判断是否需要复盘记忆或 Skill
+→ fork 一个受限后台 Agent
+→ 只开放 memory 和 skills 工具
+→ 重放本轮快照并提出记忆或 Skill 更新
+→ 写入闸门、待审批或落盘
+→ 定期整理与快照回滚
+```
+
+关键源码包括：
+
+- [回合结束与后台触发](https://github.com/NousResearch/hermes-agent/blob/9829746dfe3d5077f4f076e257505ec7f8feaa65/agent/turn_finalizer.py)；
+- [后台自我评审](https://github.com/NousResearch/hermes-agent/blob/9829746dfe3d5077f4f076e257505ec7f8feaa65/agent/background_review.py)；
+- [Skill 管理](https://github.com/NousResearch/hermes-agent/blob/9829746dfe3d5077f4f076e257505ec7f8feaa65/tools/skill_manager_tool.py)；
+- [持久写入审批闸门](https://github.com/NousResearch/hermes-agent/blob/9829746dfe3d5077f4f076e257505ec7f8feaa65/tools/write_approval.py)；
+- [Skill 使用和生命周期统计](https://github.com/NousResearch/hermes-agent/blob/9829746dfe3d5077f4f076e257505ec7f8feaa65/tools/skill_usage.py)；
+- [Skill 快照与回滚](https://github.com/NousResearch/hermes-agent/blob/9829746dfe3d5077f4f076e257505ec7f8feaa65/agent/curator_backup.py)。
+
+这验证了“用户循环产生数据，后台完善 Agent”是可行路径，但 Hermes 的实现仍然是专用管道：
+
+- 自动学习主要面向记忆和 Skill；
+- 没有通用目标循环注册表；
+- 没有“完善 Hermes”元目标下的问题聚类和多子目标调度；
+- Skill 修改通常没有进入统一 Champion/Challenger 评测；
+- 默认更多依赖审批和快照回滚，而不是自动对照实验后晋升；
+- 主循环和网关是较大的 Python 单体，整体 Fork 会把天问绑定到 Hermes 内部结构。
+
+复用判定：
+
+- **选择性提取或小型分叉候选**：Skill 生命周期统计、pending 写入、快照回滚等相对独立模块；只有在天问确定使用 Python 且完成依赖审计后再做。
+- **适配器或机制复用**：受限后台复盘 Agent、Memory Provider 生命周期、toolset 白名单。
+- **只宜借鉴**：Hermes 主循环、完整网关和与 AIAgent 强耦合的子 Agent 实现。
+- **定位**：天问学习子系统最重要的上游参考，而不是天问的整体底座。
+
+### 21.6 Claude Agent SDK：兼容性适配器，不应成为核心依赖
+
+Claude Agent SDK Python 本身采用 MIT 许可证，提供：
+
+- 启动与控制 Claude Code 子进程；
+- 流式消息；
+- resume 与 fork；
+- hooks；
+- MCP；
+- 工具权限回调；
+- interrupt 和后台任务停止；
+- SessionStore 抽象。
+
+但源码显示它不是独立 Runtime：
+
+- 唯一正式传输是本地 Claude Code CLI 子进程；
+- 使用私有 NDJSON 控制协议；
+- resume 和 fork 深度依赖 Claude Code 私有 JSONL 会话格式；
+- 多循环意味着启动和管理多个进程，SDK 自身没有循环调度；
+- 不能换成其他模型 Runtime；
+- SDK 代码虽为 MIT，实际 Claude Code 使用和分发仍受 Anthropic 条款约束。
+
+关键源码包括：
+
+- [子进程传输](https://github.com/anthropics/claude-agent-sdk-python/blob/e3320df6f03ac9479dc0a8b49ff753dcc3316519/src/claude_agent_sdk/_internal/transport/subprocess_cli.py)；
+- [控制请求、Hook、权限和流式消息](https://github.com/anthropics/claude-agent-sdk-python/blob/e3320df6f03ac9479dc0a8b49ff753dcc3316519/src/claude_agent_sdk/_internal/query.py)；
+- [会话 fork 的私有格式处理](https://github.com/anthropics/claude-agent-sdk-python/blob/e3320df6f03ac9479dc0a8b49ff753dcc3316519/src/claude_agent_sdk/_internal/session_mutations.py)。
+
+复用判定：
+
+- **可直接依赖**：未来作为可选 Claude Runtime 驱动器；
+- **适配器**：把 hooks、权限、消息、interrupt 和 SessionStore 映射到天问协议；
+- **禁止形成核心耦合**：不复制私有会话格式，不让天问目标和版本状态只存在于 Claude Code；
+- **接入顺序**：晚于 Codex 和 OpenCode，除非真实用户需求证明 Claude 兼容性具有更高价值。
+
+### 21.7 横向复用矩阵
+
+| 能力 | Codex | OpenCode | Hermes | Claude Agent SDK |
+| --- | --- | --- | --- | --- |
+| 成熟 Agent 执行 | 强，编程任务尤其成熟 | 强，模型供应商中立 | 强，更偏通用个人 Agent | 强，但依赖专有 Claude Code |
+| 程序化控制面 | App Server 最丰富；Python SDK可直接使用 | HTTP/OpenAPI、SDK、SSE | API 与内部 Python 调用均有，但结构化控制面较弱 | Python SDK 与 hooks |
+| 结构化事件 | 丰富的 thread/turn/item 通知 | v1 事件 + v2 durable events/SSE | 有日志与回合状态，但学习事件协议不统一 | 流式帧与 Hook 事件 |
+| 权限与审批 | 沙箱、命令、文件、网络和动态权限较完整 | 可配置规则和审批，但部分 pending 在内存 | 工具白名单、路径防护、写入闸门；OS 隔离依赖后端 | 权限模式与 `can_use_tool` 回调 |
+| 多执行会话 | 跨 thread 并行 | 跨 session 并行 | 会话、子 Agent 和后台任务 | 多进程并行 |
+| 父子目标语义 | 只有 thread、subagent 和单 thread Goal 的部分原语 | 有 parent session 与子 Agent，但无学习目标树 | 有 delegation，但无通用学习目标树 | 有 fork/session，无目标树 |
+| 从任务中自我完善 | 无通用自动闭环 | 无通用自动闭环 | 已有记忆/Skill 后台复盘 | 无 |
+| 候选版本与评测晋升 | 无完整机制 | fork 和事件可辅助，但无完整机制 | 有审批和回滚，缺自动对照评测 | 无 |
+| 模型中立 | 否 | 是 | 基本是 | 否 |
+| 主要采用方式 | 首个 Runtime Adapter | 第二 Runtime + 事件架构参考 | 学习机制与少量模块参考 | 可选兼容适配器 |
+
+### 21.8 Goal、Skill、MCP 和 Loop 的职责不能混在一起
+
+| 概念 | 主要解决什么 | 不能单独解决什么 |
+| --- | --- | --- |
+| Goal | 保持一个执行线程的目标、状态和预算 | 多目标关系、跨 Runtime 状态和版本进化 |
+| Skill | 保存可复用程序性方法 | 该方法是否真实有效、适用条件和是否应晋升 |
+| MCP | 统一模型调用外部工具和数据的方式 | 学习目标、事件账本、候选版本和治理 |
+| Runtime Session | 承载一次或一段 Agent 执行 | 长期目标主权、跨会话学习和正式版本 |
+| Event Ledger | 保存实际发生了什么 | 自动决定应该学习什么和发布哪个版本 |
+| Tian-wen Loop | 连接目标、执行、证据、学习、版本和治理 | 底层模型、浏览器、文件和命令等具体执行能力 |
+
+因此，Codex Goal、Hermes Skill、OpenCode Event 和 MCP 都是天问可利用的组件，但任何一个都不是持续学习本身。
+
+### 21.9 天问必须自己掌握的最小核心
+
+源码审计后，天问核心边界可以进一步收紧为：
+
+1. **Loop Registry**
+   - `loop_id`、`parent_loop_id`；
+   - 目标契约和目标对象；
+   - 订阅哪些循环的哪些事件；
+   - 当前状态、预算、授权和停止条件；
+   - 绑定的 Runtime 与会话列表。
+
+2. **Governed Event Ledger**
+   - 接收不同 Runtime 的原始事件；
+   - 转换为统一事件；
+   - 保留事实、来源和版本；
+   - 为不同循环生成脱敏、最小化的订阅视图；
+   - 支持幂等重放和断线恢复。
+
+3. **Learning Work Order**
+   - 从事件中形成问题；
+   - 判断是否值得创建子目标；
+   - 记录假设、实验、证据增量和停止条件；
+   - 把一次无限“自我完善”拆成许多有限子循环。
+
+4. **Candidate and Version Governance**
+   - 目标对象基线；
+   - 候选版本；
+   - 独立环境；
+   - 评测、影子、灰度和真实效果；
+   - 晋升、限定路由、继续改造或回滚。
+
+5. **Authorization and Resource Governance**
+   - 顶层目标主权；
+   - 不可变底线；
+   - 循环之间的预算和资源隔离；
+   - 前台用户任务优先级；
+   - 自主边界扩大和缩小。
+
+这些数据不能只放在 Codex thread、OpenCode session、Hermes memory 或 Claude JSONL 中。
+
+### 21.10 Runtime Adapter 的最小契约
+
+每个 Runtime Adapter 至少应声明并实现：
+
+- 能力发现：模型、工具、Skill、权限、事件、暂停、fork 和环境隔离；
+- 生命周期：创建、恢复、提交输入、steer、暂停、取消、完成；
+- 事件：模型消息、计划、工具调用、工具结果、产物、错误、使用量和状态；
+- 审批：把 Runtime 请求交给天问授权层，并返回明确决定；
+- 上下文：提交本轮任务包和有效 Skill；
+- 会话绑定：一个天问循环可绑定一个或多个 Runtime 会话；
+- 恢复：断线后读取状态、去重事件和重建视图；
+- 隔离：声明 fork、工作区、沙箱和快照到底保证什么；
+- 降级：无法提供的能力必须显式报告。
+
+建议采用能力协商，而不是假设所有 Runtime 完全等价。例如：
+
+```text
+supports_structured_events
+supports_persistent_approvals
+supports_thread_fork
+supports_workspace_snapshot
+supports_dynamic_tools
+supports_goal_budget
+supports_multi_session
+```
+
+天问可以根据能力调整自主性。无法提供可靠事件或回滚的 Runtime，可以完成低风险任务，但不能获得与完整 Runtime 相同的自动学习和版本发布权限。
+
+### 21.11 三种工程路线的源码审计后结论
+
+#### 路线 A：直接 Fork Hermes
+
+优点是最快看到通用 Agent、记忆和 Skill 自我更新。
+
+问题是天问会被绑定到 Hermes 的大 Python 主循环，而“学习”仍然容易被实现成记忆和 Skill 的专用后台复盘。
+
+#### 路线 B：直接 Fork Codex 或 OpenCode
+
+优点是执行、会话、工具、权限和客户端基础强。
+
+问题是持续学习核心会进入编程 Agent 内部，上游快速变化时难以维护，也不利于多 Runtime 和通用目标对象。
+
+#### 路线 C：天问核心 + Runtime Adapter + 选择性复用
+
+天问自己维护目标循环、证据、学习工单和版本治理；Codex、OpenCode、Hermes 或 Claude 只提供执行和局部组件。
+
+这条路线需要先设计一层稳定协议，但它最符合当前愿景，也最能灵活使用现成轮子。
+
+源码审计后继续推荐路线 C。
+
+### 21.12 当前推荐的复用顺序
+
+这不是最终技术选型，而是下一步验证顺序：
+
+1. **Codex Python SDK / App Server 作为第一个 Runtime 候选**
+   - 与用户喜欢的 Codex 行为最接近；
+   - thread、turn、item、approval、sandbox、Goal 和 Skill 事件丰富；
+   - Python SDK 已提供类型化 App Server 边界；
+   - 先通过 stdio 使用，不把实验性 WebSocket 当生产前提。
+
+2. **Hermes 作为学习机制参考**
+   - 复用后台受限复盘、Skill 写入闸门、生命周期统计和快照思路；
+   - 不直接 Fork 主循环；
+   - 给它补上天问的通用目标、候选评测和晋升协议。
+
+3. **OpenCode 作为第二个 Runtime 和事件模型对照**
+   - 验证 Runtime 中立；
+   - 借鉴 durable event、inbox 和插件 Hook；
+   - 在 v2 接口稳定前，必须锁版本并通过契约测试。
+
+4. **Claude Agent SDK 作为后续兼容层**
+   - 真实需求出现后再接；
+   - 不进入天问核心状态和版本协议。
+
+初步技术倾向是：如果首个原型选择 Python，可以同时使用 Codex Python SDK，并更容易有选择地吸收 Hermes 的独立模块；控制面仍可使用 TypeScript。这个倾向需要通过小型适配器验证，暂不视为最终决定。
+
+本章核心结论：
+
+> 天问不应寻找一个可以整包改造成持续学习 Agent 的唯一底座。更合理的方式是把现有 Agent 当成执行 Runtime 和机制来源：Codex 提供第一执行宿主，OpenCode验证中立性并提供事件架构参考，Hermes 提供后台复盘与 Skill 沉淀的实现经验，Claude Agent SDK提供可选兼容性。天问真正独有的核心，是把多个目标实例化为相互隔离又能通过事件协作的持续学习循环，并管理这些循环产生的候选版本、证据和发布结果。
+
+## 22. 当前共识、暂定建议与未决问题
+
+### 22.1 已形成的共识
 
 - 顶层目标由人类掌握。
 - Agent 应具有较高自主性。
@@ -2745,7 +3183,9 @@ flowchart LR
 - 子任务、重试、后台任务和子 Agent 必须继承上级预算，不能通过拆分工作绕过限制。
 - 预算耗尽不自动等于失败，停止应形成可恢复检查点。
 - 学习进展应以证据和不确定性变化衡量，而不是以运行时长或输出文字数量衡量。
-- 自我改进必须服务于用户目标，不能吞噬主要执行预算。
+- 用户目标循环与“完善天问”元循环可以并行运行，彼此不能篡改目标、授权和当前稳定版本。
+- “完善天问”元循环应订阅用户循环产生的合规事件，并把具体问题派生为有终点的子学习循环。
+- 后台自我改进拥有独立预算和执行环境，不能吞噬用户任务的前台资源。
 - 工程实现应优先复用成熟开源组件，只有持续学习差异化能力或现有实现确实不合适时才自研。
 - 公开仓库不自动等于可自由复用，许可证和组件边界必须逐项核实。
 - 任务执行循环负责行动、构建和实验，学习更新循环负责依据证据更新当前学习目标所指向的对象。
@@ -2756,7 +3196,7 @@ flowchart LR
 - 架构应稳定责任边界和数据契约，同时允许 Runtime、模型、存储、UI、算法和阈值根据真实使用调整。
 - 持续学习核心应独立于底层 Agent Runtime。
 
-### 21.2 暂定技术方向
+### 22.2 暂定技术方向
 
 - 使用 Champion/Challenger 版本体系。
 - 使用共享基础知识与版本化程序记忆。
@@ -2792,12 +3232,11 @@ flowchart LR
 - 为目标、任务、知识、Skill、评测、版本和自我模型建立明确的正式写入者。
 - 通过接口版本、契约测试、数据迁移、功能开关和可回放事件支持后续架构调整。
 
-### 21.3 后续章节
+### 22.3 后续章节
 
-1. 开源生态对照与复用矩阵：Codex、Hermes、OpenCode、Claude Agent SDK、Goal、Skill、MCP 和其他执行框架。
-2. 最后再选择第一个可验证的项目范围。
+1. 最后再选择第一个可验证的项目范围。
 
-## 22. 官方参考
+## 23. 官方参考
 
 - [OpenAI Docs：Follow a goal](https://learn.chatgpt.com/use-cases/follow-goals)
 - [OpenAI Docs：Guardrails and human review](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals)
@@ -2805,8 +3244,12 @@ flowchart LR
 - [OpenAI Docs：Evaluate agent workflows](https://developers.openai.com/api/docs/guides/agent-evals)
 - [OpenAI Docs：Compaction](https://developers.openai.com/api/docs/guides/compaction)
 - [OpenAI Docs：Codex open-source components](https://learn.chatgpt.com/docs/open-source)
+- [OpenAI Docs：Codex App Server](https://learn.chatgpt.com/docs/app-server)
+- [OpenAI Docs：Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)
 - [Claude Code 官方仓库与许可证](https://github.com/anthropics/claude-code/blob/main/LICENSE.md)
 - [Claude Agent SDK for Python 官方仓库](https://github.com/anthropics/claude-agent-sdk-python)
 - [OpenCode 官方仓库](https://github.com/anomalyco/opencode)
+- [OpenCode 官方 Server 文档](https://opencode.ai/docs/server/)
 - [Hermes Agent 官方仓库](https://github.com/NousResearch/hermes-agent)
 - [Hermes Agent 官方 Skills 文档](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)
+- [Hermes Agent 官方 Memory 文档](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/)
