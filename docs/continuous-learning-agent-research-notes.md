@@ -3357,7 +3357,7 @@ supports_multi_session
 | 依赖层 | 典型对象 | 当前策略 |
 | --- | --- | --- |
 | 通用基础库 | Pydantic、SQLite、HTTPX、FastAPI、模型官方 SDK、MCP SDK | 优先直接依赖，锁定版本并正常升级 |
-| 嵌入式 Agent 执行引擎 | PydanticAI、OpenAI Agents SDK 等 | 可以依赖，但必须隔离在天问 Runtime 内部，不能拥有天问正式状态 |
+| 嵌入式 Agent 执行引擎与能力库 | PydanticAI、PydanticAI Harness、OpenAI Agents SDK 等 | 可以依赖，但必须隔离在天问 Runtime 内部，不能拥有天问正式状态 |
 | 天问主权核心 | 目标、任务、权限、预算、事件证据、Worker 继承、学习与版本治理 | 由天问定义数据与规则，不交给外部框架 |
 | 完整 Agent 产品 | Codex、Hermes、OpenCode、Claude Code | 未来只作可选外部 Worker，不作为天问宿主 |
 
@@ -3389,9 +3389,9 @@ OpenAI Python SDK 属于第一层，只负责调用模型 API；PydanticAI 属�
 - Provider 与模型范围扩大后，维护成本会快速上升；
 - 容易把大量精力投入非差异化基础设施。
 
-#### 路线 B：嵌入式 Agent Framework
+#### 路线 B：嵌入式 Agent Framework 与能力库
 
-天问在自己的 Runtime 内调用 PydanticAI，由它处理一次内部模型—工具往返；天问在外层维护目标、状态、权限、预算、动作闸门和学习。
+天问在自己的 Runtime 内调用 PydanticAI，由它处理一次内部模型—工具往返，并复用 PydanticAI Harness 的文件、Shell、步骤持久化、计划、Skill、Memory 和工具守卫等通用能力；天问在外层维护目标、状态、权限、预算、动作闸门、证据语义和学习治理。
 
 优点：
 
@@ -3413,7 +3413,7 @@ OpenAI Python SDK 属于第一层，只负责调用模型 API；PydanticAI 属�
 
 当前决定：
 
-> 第一版采用路线 B，以 PydanticAI 作为可撤退的嵌入式执行引擎；路线 A 保留为未来选择，但只有真实约束证明迁移有价值时才建设。路线 C 仍然排除。
+> 第一版采用路线 B，以 Python、PydanticAI 和 PydanticAI Harness 作为可撤退的嵌入式执行底座；路线 A 保留为未来选择，但只有真实约束证明迁移有价值时才建设。路线 C 仍然排除。
 
 ### 23.3 Hermes 对路线 A 的实际证明
 
@@ -3442,7 +3442,9 @@ Hermes 自行维护 `AIAgent` 循环、消息兼容、工具调度、上下文�
 
 | 候选 | 审计快照与许可证 | 主要价值 | 主要限制 | 当前定位 |
 | --- | --- | --- | --- | --- |
-| PydanticAI | `d995cfee`，2.27.1，MIT | Provider 中立，工具/MCP、完整 Hook、审批、Token/费用限制、状态较透明 | 无轻量第一方持久检查点；子 Worker 不自动继承预算；内部 Agent 循环仍由框架管理 | 第一版嵌入式执行引擎 |
+| PydanticAI | `d995cfee`，2.27.1，MIT | Provider 中立，工具/MCP、完整 Hook、审批、Token/费用限制、状态较透明 | 子 Worker 不自动继承预算；内部 Agent 循环仍由框架管理 | 第一版模型—工具执行引擎 |
+| PydanticAI Harness | 0.13.0，MIT，0.x Alpha | FileSystem、Shell、StepPersistence、Planning、Skills、Memory、Guardrails、审批与花费控制可以按能力组合 | Shell 检查不是操作系统安全边界；持久化不是完整图检查点；副作用去重与核对仍由编排层负责；0.x 接口可能变化 | 第一版通用 Agent 能力库，精确锁版本并做契约测试 |
+| Pi Agent | `@earendil-works/pi-coding-agent` 0.82.1，MIT | TypeScript Agent Core、会话树、压缩、TUI、SDK 与扩展 Hook 轻量且模块化 | 没有天问式 Goal、学习与版本治理；没有内建权限系统；切换会引入第二主语言 | 已审计的后备底座，不进入 Python 第一版 |
 | OpenAI Agents SDK | `863b96cf`，0.20.0，MIT | 工具、MCP、审批、RunState、Session、流式事件成熟 | 消息和恢复语义明显偏 OpenAI；第三方 Provider 与预算治理较弱 | 审批、Session 和事件设计参考 |
 | LangGraph | `d56666f7`，1.2.10，MIT | 检查点、恢复、Interrupt、流式状态和子图成熟 | Pregel/图运行时拥有调度语义；依赖 LangChain Core；无权限和成本预算 | 耐久执行参考，首版不依赖 |
 | Microsoft Agent Framework | `db979b61`，1.13.0，MIT | Provider 抽象、Session、工作流检查点、审批、Windows 工具较完整 | Python 总体规模大；Harness、后台 Agent 和部分安全能力仍处于实验阶段 | 组件与 Windows 实现参考 |
@@ -3457,9 +3459,9 @@ Hermes 自行维护 `AIAgent` 循环、消息兼容、工具调度、上下文�
 - 权限与 Worker 预算继承无论选择哪个框架都需要天问自己实现；
 - 引入两个 Agent Framework 不会自动补齐持续学习，只会带来两套状态和调度语义。
 
-### 23.5 为什么第一版选择 PydanticAI
+### 23.5 为什么第一版选择 PydanticAI + Harness
 
-PydanticAI 不是所有维度都最强，但目前作为进程内执行引擎最均衡：
+PydanticAI 不是所有维度都最强，但目前作为进程内模型—工具执行引擎最均衡：
 
 - 支持多个模型和 Provider，并允许自定义 Model；
 - 工具、Toolset、MCP 和结构化输出较成熟；
@@ -3470,15 +3472,26 @@ PydanticAI 不是所有维度都最强，但目前作为进程内执行引擎最
 - 核心是纯 Python，Windows 可用；
 - MIT 许可证允许依赖、改造和必要时的选择性移植。
 
-第一版应使用 `pydantic-ai-slim` 和实际需要的 Provider/MCP extra，而不是安装全部能力。具体版本在实现时精确锁定并通过升级验证，不能无上限自动追随新版本。
+Harness 补上了此前准备由天问手写的一批非差异化能力：
 
-PydanticAI 只负责一次执行内部的：
+- 带根目录约束、受保护路径和内容哈希检查的文件操作；
+- 带命令规则、超时、输出上限和环境变量过滤的 Shell；
+- 追加式步骤事件、快照、工具副作用记录和 SQLite/File/InMemory Store；
+- 计划、Skill、Memory、上下文压缩、子 Agent 与运行期能力；
+- 工具 Guardrail、审批和花费控制。
+
+这些能力应优先通过组合和薄适配复用，不再自建平行的文件工具、Shell 封装、通用步骤日志、计划存储或 Skill 加载器。但 Harness 的 Shell 规则不是安全沙箱，StepPersistence 也不会替天问完成副作用去重、`unknown` 结果核对、Goal 恢复或版本治理。
+
+第一版应安装实际需要的 PydanticAI、Harness 与 Provider/MCP extra，而不是安装全部能力。PydanticAI 与 Harness 均在实现时精确锁定经兼容测试确认的版本，尤其不能无上限自动追随 Harness 的 0.x 版本。
+
+PydanticAI 与 Harness 负责一次执行内部和通用能力层的：
 
 - 模型请求与流式响应；
 - 工具调用识别和结果回填；
 - 参数与结构化输出校验；
 - 普通重试和内层使用量限制；
-- 公开事件与 Hook。
+- 公开事件与 Hook；
+- 文件、Shell、计划、Skill、Memory 和步骤持久化的基础实现。
 
 它不负责天问的：
 
@@ -3504,13 +3517,15 @@ stream events
 
 必须遵守以下红线：
 
-1. PydanticAI Session、Graph State、消息对象和运行 ID 不能成为天问目标、任务、学习或版本的正式数据；
+1. PydanticAI Session、Graph State、Harness Step/Event、消息对象和运行 ID 不能成为天问目标、任务、学习或版本的正式数据；
 2. 目标、学习、UI、数据库和版本模块不能散布对 `pydantic_ai.Agent` 的直接调用；
 3. 所有真实工具都由天问包装，副作用动作先进入动作账本，再检查权限、预算和审批；
-4. PydanticAI 的 Approval 与 UsageLimits 是内层保护，天问动作闸门和预算计量器拥有最终决定权；
+4. PydanticAI/Harness 的 Approval、Guardrail 与 UsageLimits 是内层保护，天问动作闸门和预算计量器拥有最终决定权；
 5. 内部 Worker 由天问创建新的隔离 Run，并从父 Run 划拨预算和权限，不能依赖框架自动继承；
 6. 只使用公开接口，不把 `_agent_graph.py` 等私有模块作为稳定依赖；
-7. 可以保存框架原始轨迹用于调试，但学习循环消费的是天问标准化事件。
+7. 可以保存框架原始轨迹用于调试，但学习循环消费的是天问标准化事件；
+8. Harness 提供的 Shell 检查不能代替操作系统隔离；第一切片仍在受限 worktree 或临时仓库中运行；
+9. Harness 的工具副作用记录只作为恢复证据，`unknown` 核对、幂等策略和正式 Action Ledger 语义由天问负责。
 
 ### 23.7 第一版执行数据流
 
@@ -3538,9 +3553,9 @@ flowchart TB
 
 这张图中最重要的边界是 `Action Gateway`：PydanticAI 可以提出和调度工具调用，但不能绕过天问直接执行真实副作用。
 
-### 23.8 何时才值得转向普通模型 SDK
+### 23.8 何时才值得更换底座
 
-“项目功能完善”本身不是迁移理由。只有出现可测量问题时，才建设路线 A：
+“项目功能完善”或主观觉得效果不好本身不是迁移理由。只有在同模型、同任务、同预算和同工具条件下出现可测量问题时，才比较普通模型 SDK 薄循环或 Hermes Fork：
 
 - 公开 API 无法在所需边界可靠暂停、恢复或取消；
 - 不能在副作用动作前实现不可绕过的检查；
@@ -3551,7 +3566,9 @@ flowchart TB
 - 为满足核心需求不得不持续依赖私有 API；
 - 天问形成了明显不同于普通 Agent 的执行语义。
 
-届时可以增加一个普通模型 SDK 实现，优先使用 OpenAI 兼容协议覆盖 OpenAI、OpenRouter、Ollama、vLLM 等，再按真实需求增加原生 Anthropic 或其他 Adapter。
+如果问题来自框架控制边界，可以增加一个普通模型 SDK 实现，优先使用 OpenAI 兼容协议覆盖 OpenAI、OpenRouter、Ollama、vLLM 等，再按真实需求增加原生 Anthropic 或其他 Adapter。
+
+如果问题来自通用 Agent 产品能力、用户体验或工具生态长期落后，并且 Hermes 在相同保护任务上稳定优于当前版本，可以再审计并试验 Hermes Fork。Fork 不能绕过天问的 Goal、Action Gateway、证据、评测、版本和回滚协议，也不能只凭一次演示决定迁移。
 
 迁移不采用一次性重写。PydanticAI 引擎作为 Champion，自有 SDK 引擎作为 Challenger，先运行同一组无副作用回归任务和影子任务；只有在控制力、可靠性、成本或性能上获得明确收益后才逐步晋升。
 
@@ -3561,15 +3578,29 @@ flowchart TB
 - 不建设通用多框架插件平台；
 - 不引入 LangGraph、Temporal、DBOS 等耐久执行系统；
 - 不把 Codex、Hermes 或 OpenCode 作为启动依赖；
+- 不在 Python Runtime 外再引入 Pi/Node 作为首版核心循环；
 - 不因许可证允许就提前复制大段上游源码；
 - 不为尚未出现的 Provider 兼容问题建立复杂抽象；
 - 不把“未来可能迁移”当作当前重复建设的理由。
 
 当 SQLite 检查点、单进程调度或 PydanticAI 公开接口出现真实上限时，再引入对应能力。
 
+### 23.10 2026-08-11 最终底座决定
+
+本轮在复核既有选型后，新增审计了 PydanticAI Harness、Pi Agent 和当前 Hermes：
+
+1. 第一版继续使用 Python，不引入 TypeScript/Node 双主栈；
+2. 运行底座确定为 PydanticAI + PydanticAI Harness；
+3. Harness 已有能力优先复用，天问只实现 Goal、正式状态、Action Gateway、证据语义、持续学习和版本治理等差异化部分；
+4. Pi 的 Core、会话树、扩展与 TUI 作为交互和模块化参考，不进入第一版依赖；
+5. Hermes 作为产品行为、Skill/Memory 和后台评审参考；只有当前路线在同条件评测中持续达不到关键门槛时，才把 Fork Hermes 作为 Challenger；
+6. 底座迁移也必须遵守 Champion/Challenger、保护任务、真实任务和可回滚原则。
+
+此前按“PydanticAI + 大量自研基础设施”编写的实施草案与本决定冲突，不能继续执行。新的逐任务实现计划必须先基于 Harness 公开接口做最小能力核查，再只为缺口安排代码。
+
 本章核心结论：
 
-> 第一版采用 PydanticAI，是为了用最少工程成本获得可靠的模型、工具和 MCP 执行能力；天问通过自己的正式状态、动作闸门、预算、内部 Worker 和学习协议保持产品主权。普通模型 SDK + 自有薄循环是一条有明确触发条件的后备路线，不是预先承诺的重写计划。
+> 第一版采用 Python + PydanticAI + PydanticAI Harness，以最少自研代码获得模型、工具、文件、Shell、持久步骤、计划、Skill 和 Memory 能力；天问通过自己的正式状态、动作闸门、预算、证据、内部 Worker 和学习协议保持产品主权。普通模型 SDK 薄循环和 Hermes Fork 都是有明确证据触发的后备路线，不是预先承诺的迁移。
 
 ## 24. 第十三章：权威运行状态、动作账本与恢复身份
 
@@ -4338,13 +4369,13 @@ proposed
 执行形态为：
 
 - Python 模块化单体；
-- `pydantic-ai-slim` 与一个模型 Provider；
+- PydanticAI、PydanticAI Harness 与一个模型 Provider；
 - SQLite；
 - 一个前台用户 Goal；
 - 一个串行学习队列；
 - 一个隔离 Git worktree 或临时测试仓库；
-- 文件读取、受限补丁或修改、Shell 测试三类工具；
-- 同进程内的 Tool Adapter、Policy Engine、Action Ledger、Executor 和 Reconciler；
+- Harness FileSystem、Shell、StepPersistence、Planning、Skills 与 Guardrails 中首切片实际需要的能力；
+- 天问自己的薄 Tool Adapter、Policy Engine、Action Ledger、证据适配器和 Reconciler；
 - 简单的终端状态与审批交互。
 
 第一版不需要 FastAPI、WebSocket、Web UI、守护进程、消息队列或并发 Worker。
@@ -4463,6 +4494,8 @@ proposed
 
 > 天问第一阶段不先建设缩小版“万能 Agent”，而是在本地 Git 仓库这个可测试、可隔离、可回滚的实验环境中，打通 `repo_task` Skill 的完整持续学习闭环。只有候选从真实证据产生、通过未参与生成的保护任务、晋升后改善不同后续任务并仍可回滚，才初步证明持续学习成立。代码是验证环境，不是产品边界。
 
+此前的逐任务实施草案以大量自研基础设施为前提，已经因底座改为 PydanticAI Harness 而撤回。新的实施计划将在完成 Harness 公开接口核查后重写，不能把旧草案继续当作执行依据。
+
 ## 28. 官方参考
 
 - [OpenAI Docs：Follow a goal](https://learn.chatgpt.com/use-cases/follow-goals)
@@ -4488,6 +4521,15 @@ proposed
 - [OpenAI Agents SDK 官方仓库](https://github.com/openai/openai-agents-python)
 - [PydanticAI 官方文档](https://ai.pydantic.dev/)
 - [PydanticAI 官方仓库](https://github.com/pydantic/pydantic-ai)
+- [PydanticAI Harness 官方文档](https://pydantic.dev/docs/ai/harness/)
+- [PydanticAI Harness 官方仓库](https://github.com/pydantic/pydantic-ai-harness)
+- [PydanticAI Harness FileSystem](https://pydantic.dev/docs/ai/harness/filesystem/)
+- [PydanticAI Harness Shell](https://pydantic.dev/docs/ai/harness/shell/)
+- [PydanticAI Harness Step Persistence](https://pydantic.dev/docs/ai/harness/step-persistence/)
+- [PydanticAI Harness Guardrails](https://pydantic.dev/docs/ai/harness/guardrails/)
+- [Pi Agent 官方仓库](https://github.com/earendil-works/pi)
+- [Pi Agent SDK 文档](https://pi.dev/docs/latest/sdk)
+- [Pi Agent Extensions 文档](https://pi.dev/docs/latest/extensions)
 - [LangGraph 官方文档](https://docs.langchain.com/oss/python/langgraph/overview)
 - [LangGraph 官方仓库](https://github.com/langchain-ai/langgraph)
 - [Microsoft Agent Framework 官方文档](https://learn.microsoft.com/en-us/agent-framework/overview/)
