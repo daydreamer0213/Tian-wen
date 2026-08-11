@@ -2543,7 +2543,7 @@ Skill 版本主权由天问持有：
 
 - Harness 保存可恢复和调试所需的原始执行轨迹；
 - 天问保存 Goal、Run、Action、版本、评测和学习所需的标准化正式证据；
-- 首切片可以物理共用一个 SQLite 文件，但使用 `harness_*` 与 `tw_*` 独立表；
+- 首切片可以物理共用一个 SQLite 文件；天问只管理 `tw_*` 表，Harness 表由公开 `StepStore` 接口管理，天问不直接查询或迁移；
 - 正式证据长期保留；原始轨迹首版不按固定天数自动删除，超过可配置容量阈值时提醒用户；
 - 敏感参数和凭证在写入任一层之前脱敏或改存受保护引用。
 
@@ -3215,7 +3215,7 @@ supports_multi_session
 2. **第一版采用 PydanticAI + PydanticAI Harness**
    - 精确锁定兼容版本，只通过公开接口接入；
    - PydanticAI 负责模型、Provider、工具往返与结构化输出；
-   - Harness 优先提供 FileSystem、Shell、StepPersistence、Guardrails 和 Skills；
+   - Harness 优先提供 FileSystem、Shell、StepPersistence、InputGuardrail、OutputGuardrail 和 Skills；
    - Planning 只有首切片证明需要时才启用；Memory、复杂压缩、动态能力和子 Agent 延后；
    - 两者都隔离在 Runtime 执行模块内。
 
@@ -3225,7 +3225,7 @@ supports_multi_session
    - 暂停、恢复和审批不能只存在于框架内存。
 
 4. **先建立 Harness 契约测试和薄适配边界**
-   - 验证 Guardrail 能在副作用前拦截；
+   - 验证 PydanticAI 公开工具执行前钩子能在副作用前进入天问 Action Gateway；
    - 验证 StepPersistence、暂停恢复、FileSystem、Shell 和 Skills 的公开语义；
    - 原始 Harness 类型不能进入 Goal、学习、版本或对外 API；
    - 公开接口不能满足关键边界时先缩小范围，不依赖私有 API。
@@ -3298,8 +3298,9 @@ supports_multi_session
 - “天问拥有 Runtime”不等于底层模型—工具循环必须手写；产品、控制和正式状态必须独立，底层实现可以依赖嵌入式 Agent Framework。
 - 依赖策略应按层治理：普通基础库可以直接依赖，Agent 执行框架必须隔离，持续学习主权核心由天问掌握，完整 Agent 产品只作可选外部 Worker。
 - 第一版采用 Python + PydanticAI + PydanticAI Harness 作为可撤退的嵌入式执行底座；普通模型 SDK 薄循环和 Hermes Fork 都是证据触发的后备路线。
-- 天问的 `Run` 是一次任务执行尝试的权威身份；PydanticAI Session 只是该次运行内部的模型对话上下文。
+- 天问的 `Run` 是一次任务执行尝试的权威身份；它可以映射多个拥有不同框架 `run_id`、共同 `conversation_id` 的 PydanticAI 调用，Session 只是内部模型上下文。
 - 暂停、恢复、上下文压缩和瞬时重试通常仍属于同一个 Run；改变策略、版本、工作区快照或创建独立实验时才创建新 Run。
+- 待审批消息由天问 Checkpoint 使用 PydanticAI 公开消息 JSON 保存和恢复；不能假定 Harness StepPersistence 会快照尚未闭合的审批前沿。
 - 运行状态采用少量主状态加 `waiting_reason`，不为每一种等待原因增加独立状态。
 - 副作用动作必须进入动作账本；外部结果不确定时标记为 `unknown`，先核对真实状态，不能盲目重试。
 - Harness 原始执行轨迹与天问正式证据分层保存；正式证据拥有长期解释权，原始轨迹用于恢复、调试和幂等回填。
@@ -3508,9 +3509,9 @@ Harness 补上了此前准备由天问手写的一批非差异化能力：
 - 带命令规则、超时、输出上限和环境变量过滤的 Shell；
 - 追加式步骤事件、快照、工具副作用记录和 SQLite/File/InMemory Store；
 - 计划、Skill、Memory、上下文压缩、子 Agent 与运行期能力；
-- 工具 Guardrail、审批和花费控制。
+- 输入/输出 Guardrail，以及 PydanticAI 的工具执行钩子、审批和花费控制。
 
-这些能力应优先通过组合和薄适配复用，不再自建平行的文件工具、Shell 封装、通用步骤日志、计划存储或 Skill 加载器。但 Harness 的 Shell 规则不是安全沙箱，StepPersistence 也不会替天问完成副作用去重、`unknown` 结果核对、Goal 恢复或版本治理。
+这些能力应优先通过组合和薄适配复用，不再自建平行的文件工具、Shell 封装、通用步骤日志、计划存储或 Skill 加载器。但 Harness 的 Shell 规则不是安全沙箱，StepPersistence 也不会替天问保存尚未闭合的待审批消息前沿，或完成副作用去重、`unknown` 结果核对、Goal 恢复与版本治理。
 
 第一版应安装实际需要的 PydanticAI、Harness 与 Provider/MCP extra，而不是安装全部能力。PydanticAI 与 Harness 均在实现时精确锁定经兼容测试确认的版本，尤其不能无上限自动追随 Harness 的 0.x 版本。
 
@@ -4151,7 +4152,7 @@ estimated_cost
 
 ```text
 模型提出工具调用
-→ Harness Guardrail 进入天问 Adapter
+→ PydanticAI 工具执行前钩子进入天问 Action Gateway
 → Adapter 标准化并冻结参数
 → Ledger 写入 proposed
 → Policy Engine 检查底线、Goal 包络和 Grant
@@ -4539,7 +4540,7 @@ Shell 返回非零退出码仍然是结果已知的动作，不属于 `unknown`�
 9. 后续任务提供支持改善、限制适用范围或推翻结论的真实证据；
 10. 系统保留旧 Champion，并能恢复 Skill 版本和自主等级；
 11. 报告明确样本范围和不确定性，不声称一次成功就是全面进化。
-12. PydanticAI/Harness 升级前的契约测试覆盖 Guardrail、StepPersistence、FileSystem、Shell 和 Skills；
+12. PydanticAI/Harness 升级前的契约测试覆盖 Action Gateway 工具钩子、InputGuardrail、OutputGuardrail、StepPersistence、FileSystem、Shell 和 Skills；
 13. Run 结束、Task 验收与 Goal 完成使用不同结论，不以模型总结代替验收。
 
 候选被评测拒绝可以证明隔离和治理在工作，但不能单独证明持续学习带来了改善。如果所有候选都被拒绝，系统应保留证据并分析原因，不能为了完成演示而降低门槛。

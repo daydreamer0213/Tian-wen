@@ -1,6 +1,7 @@
 # 天问 PydanticAI + Harness 集成设计
 
-**状态：** 会话设计已确认，书面规格待用户复审，尚未开始实现  
+**状态：** 已获用户确认，尚未开始实现
+
 **日期：** 2026-08-11  
 **范围：** 首个可验证持续学习切片  
 **研究记录：** `docs/continuous-learning-agent-research-notes.md`
@@ -71,6 +72,8 @@ Learning Job 不自动成为新 Goal。值得独立长期追踪的问题先在�
 
 Run 是一次 Task 执行尝试，也是天问的权威执行身份。Session 只是 Run 内部的模型上下文。
 
+一个天问 Run 可以跨越多个 PydanticAI `Agent.run(...)` 调用。每次框架调用使用不同的框架 `run_id`，并通过共同的 `conversation_id` 关联；Runtime 适配层保存它们与天问 Run ID 的映射。
+
 上下文压缩、进程恢复或上下文重建可以让同一 Run 使用多个 Session，但不能重置：
 
 - Run ID；
@@ -102,7 +105,7 @@ Harness 负责：
 - 步骤快照和内部副作用记录；
 - 单次执行计划；
 - 加载本次有效 Skill；
-- 框架内 Guardrail 与审批原语。
+- 输入/输出 Guardrail，以及审批与延后执行原语。
 
 它保存“执行录像”，不拥有事实的最终解释权。
 
@@ -142,7 +145,7 @@ Goal、学习、版本和对外接口只使用天问类型。框架 ID 可以作
 - FileSystem
 - Shell
 - StepPersistence
-- Guardrails
+- InputGuardrail 与 OutputGuardrail（不承担工具授权）
 - Skills
 
 ### 5.2 条件启用
@@ -165,11 +168,13 @@ Goal、学习、版本和对外接口只使用天问类型。框架 ID 可以作
 ### 6.1 逻辑分层
 
 ```text
-tw_*       天问权威状态与正式证据
-harness_*  Harness 原始执行轨迹
+tw_*                 天问权威状态与正式证据
+Harness 管理的表       Harness 原始执行轨迹
 ```
 
-如果 Harness 公开接口支持外部指定数据库并安全隔离表，首切片优先共用一个 SQLite 文件；否则允许在同一数据目录使用两个 SQLite 文件。逻辑所有权和稳定引用是硬要求，共用物理文件不是。
+天问只管理 `tw_*` 表。Harness 表名和结构由它自己的公开 `StepStore` 接口管理，天问产品代码不直接查询、修改或迁移这些表。
+
+如果 Harness 公开接口支持外部指定数据库并安全共存，首切片优先共用一个 SQLite 文件；否则允许在同一数据目录使用两个 SQLite 文件。逻辑所有权和稳定引用是硬要求，共用物理文件不是。
 
 ### 6.2 证据映射
 
@@ -199,7 +204,7 @@ harness_*  Harness 原始执行轨迹
 
 ```text
 模型提出工具调用
-→ Harness Guardrail 进入 Tianwen Tool Adapter
+→ PydanticAI 工具执行前钩子进入 Tianwen Action Gateway
 → 创建并持久化冻结 Action Proposal
 → Policy Engine 返回 allow / notify / ask / deny
 → Capability Executor 调用同一个 Harness 冻结能力
@@ -230,7 +235,7 @@ harness_*  Harness 原始执行轨迹
 - `ask`：持久化请求，只暂停依赖分支；
 - `deny`：不执行，返回结构化原因和合规替代方向。
 
-Harness Guardrail 是拦截入口和内层保护；天问 Policy Engine 与 Action Ledger 拥有最终授权语义。
+PydanticAI 的公开工具执行前钩子是统一拦截入口；Harness 的 InputGuardrail 和 OutputGuardrail 只作为输入/输出内层保护。天问 Policy Engine 与 Action Ledger 拥有最终授权语义。
 
 ### 7.3 结果语义
 
@@ -362,6 +367,8 @@ Action 可能已执行但未结算
 
 Harness Session 无法原样恢复时，可以在同一 Run 下创建新 Session 并追加 `context_rebuilt`，但不能重置版本、权限、预算、工作区基线或历史。
 
+等待审批的消息历史属于天问 Checkpoint。Runtime 使用 PydanticAI 公开的 `all_messages_json()` 保存，使用 `ModelMessagesTypeAdapter.validate_json(...)` 恢复，再提交 `DeferredToolResults`；不能假定 Harness `StepPersistence` 会为尚未闭合的待审批工具调用创建可恢复快照。
+
 其他规则：
 
 - Action 执行前无法写账本时禁止执行；
@@ -380,7 +387,8 @@ Harness Session 无法原样恢复时，可以在同一 Run 下创建新 Session
 
 锁定的 PydanticAI 与 Harness 版本必须通过公开接口证明：
 
-- Guardrail 在副作用前拦截；
+- Action Gateway 通过公开工具钩子在副作用前拦截；
+- InputGuardrail 与 OutputGuardrail 只处理输入和输出；
 - 暂停与恢复语义可映射；
 - FileSystem 根目录和受保护路径有效；
 - Shell 限制与已知结果语义正确；
