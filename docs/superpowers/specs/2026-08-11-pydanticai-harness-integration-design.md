@@ -449,6 +449,8 @@ Harness Session 无法原样恢复时，可以在同一 Run 下创建新 Session
 
 PydanticAI 与 Harness 锁定到契约测试验证过的精确版本；不能因为新版本存在就自动升级。
 
+首个已核查组合为 `pydantic-ai-slim==2.18.0` 与 `pydantic-ai-harness[skills]==0.13.0`。核查结论、限制和适配前提见 [`2026-08-11-harness-contract-audit.md`](../../research/2026-08-11-harness-contract-audit.md)。
+
 公开接口无法满足关键边界时：
 
 1. 缩小首切片能力；
