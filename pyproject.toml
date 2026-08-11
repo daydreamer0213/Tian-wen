@@ -1,0 +1,27 @@
+[project]
+name = "tianwen"
+version = "0.0.0"
+description = "A continual-learning agent runtime."
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    "pydantic-ai-harness[skills]==0.13.0",
+    "pydantic-ai-slim==2.18.0",
+]
+
+[dependency-groups]
+dev = [
+    "anyio==4.13.0",
+    "pytest==9.0.3",
+    "ruff==0.15.12",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
