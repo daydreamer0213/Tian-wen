@@ -1,5 +1,9 @@
+import asyncio
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass, field
 from importlib.metadata import version
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -12,11 +16,19 @@ from pydantic_ai import (
     RunContext,
     SkipToolExecution,
 )
-from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.capabilities import (
+    AbstractCapability,
+    WrapToolExecuteHandler,
+)
 from pydantic_ai.messages import ToolCallPart, ToolReturnPart
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import ToolDefinition
-from pydantic_ai_harness.step_persistence import InMemoryStepStore, StepPersistence
+from pydantic_ai_harness.step_persistence import (
+    InMemoryStepStore,
+    SqliteStepStore,
+    StepPersistence,
+    continue_run,
+)
 
 
 class _TouchModel(TestModel):
@@ -66,6 +78,22 @@ class _DenyProbe(AbstractCapability[object]):
         raise SkipToolExecution(
             {"status": "denied", "reason": "policy"}
         )
+
+
+@dataclass
+class _InterruptAfterEffect(AbstractCapability[object]):
+    async def wrap_tool_execute(
+        self,
+        ctx: RunContext[object],
+        *,
+        call: ToolCallPart,
+        tool_def: ToolDefinition,
+        args: dict[str, Any],
+        handler: WrapToolExecuteHandler,
+    ) -> Any:
+        del ctx, call, tool_def
+        await handler(args)
+        raise asyncio.CancelledError("worker lost after effect")
 
 
 def test_exact_dependency_versions() -> None:
@@ -172,3 +200,98 @@ async def test_denial_returns_structured_result_without_starting_effect() -> Non
     assert await store.list_unresolved_tool_effects(run_id="deny-run") == []
     events = await store.list_events(run_id="deny-run")
     assert "tool_call_started" not in [event.kind for event in events]
+
+
+@pytest.mark.anyio
+async def test_crash_after_effect_leaves_unresolved_started_record() -> None:
+    effects: list[str] = []
+    store = InMemoryStepStore()
+    agent = Agent(
+        TestModel(call_tools=["touch"]),
+        capabilities=[
+            StepPersistence(store=store, run_id="crash-after-effect"),
+            _InterruptAfterEffect(),
+        ],
+    )
+
+    @agent.tool_plain
+    def touch() -> str:
+        effects.append("touched")
+        return "ok"
+
+    with pytest.raises(asyncio.CancelledError, match="worker lost after effect"):
+        await agent.run("touch")
+
+    assert effects == ["touched"]
+    unresolved = await store.list_unresolved_tool_effects(
+        run_id="crash-after-effect"
+    )
+    assert len(unresolved) == 1
+    assert unresolved[0].status == "started"
+    events = await store.list_events(run_id="crash-after-effect")
+    assert [event.kind for event in events][-2:] == [
+        "tool_call_started",
+        "run_failed",
+    ]
+
+
+@pytest.mark.anyio
+async def test_step_persistence_reloads_a_closed_tool_cycle() -> None:
+    store = InMemoryStepStore()
+    agent = Agent(
+        TestModel(call_tools=["touch"], custom_output_text="done"),
+        capabilities=[StepPersistence(store=store, run_id="closed-run")],
+    )
+
+    @agent.tool_plain
+    def touch() -> str:
+        return "ok"
+
+    await agent.run("touch", conversation_id="closed-conversation")
+    history = await continue_run(store, run_id="closed-run")
+    returns = [
+        part
+        for message in history
+        for part in message.parts
+        if isinstance(part, ToolReturnPart)
+    ]
+
+    assert returns[-1].content == "ok"
+    resumed = await Agent(
+        TestModel(custom_output_text="resumed", call_tools=[])
+    ).run("next", message_history=history)
+    assert resumed.output == "resumed"
+    assert resumed.conversation_id == "closed-conversation"
+
+
+@pytest.mark.anyio
+async def test_sqlite_store_coexists_with_tianwen_owned_tables(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "state.db"
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute(
+            "CREATE TABLE tw_contract_marker (id TEXT PRIMARY KEY)"
+        )
+        connection.execute(
+            "INSERT INTO tw_contract_marker (id) VALUES ('kept')"
+        )
+        connection.commit()
+
+    store = SqliteStepStore(
+        database=database,
+        max_snapshots_per_run=3,
+    )
+    agent = Agent(
+        TestModel(custom_output_text="done", call_tools=[]),
+        capabilities=[StepPersistence(store=store, run_id="sqlite-probe")],
+    )
+    result = await agent.run("go")
+
+    assert result.output == "done"
+    assert await store.get_run(run_id="sqlite-probe") is not None
+    with closing(sqlite3.connect(database)) as connection:
+        marker = connection.execute(
+            "SELECT id FROM tw_contract_marker"
+        ).fetchone()
+    assert marker == ("kept",)
