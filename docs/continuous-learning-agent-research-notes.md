@@ -45,6 +45,8 @@
 
 > 2026-08-11 架构纠偏：此前“先把 Codex 作为第一个 Runtime”的建议已废止。当前有效方向是天问拥有独立原生 Runtime；Codex 等完整 Agent 仅为未来可选 Worker。后续设计和实现不得再以前一建议为基础。
 
+> 2026-08-11 边界细化：“天问拥有 Runtime”指产品入口、权威状态、权限预算、执行控制和内部 Worker 归天问所有，不表示模型—工具底层循环必须全部手写。成熟 Agent Framework 可以作为天问进程内的可替换执行引擎，但不能成为天问正式目标、学习和版本状态的唯一持有者。
+
 | 参考对象 | 值得吸收的部分 |
 | --- | --- |
 | Hermes Agent | 通用工具执行、跨会话记忆、从实践中形成和改进 Skill、后台任务与多入口交互 |
@@ -58,13 +60,19 @@
 这里的“自己的 Agent”具有明确的产品和架构含义：
 
 - 天问拥有自己的启动入口、身份、会话、目标、任务和控制面；
-- 天问拥有能够直接调用模型与工具的原生 Agent Runtime；
+- 天问拥有能够直接调用模型与工具、并由天问控制状态和权限边界的 Agent Runtime；
 - 不安装 Codex、OpenCode、Hermes 或 Claude Code，天问仍能运行完整的基础目标循环；
 - 天问内部子 Agent 默认是原生 Runtime 的隔离实例，而不是其他 Agent 产品；
 - 外部 Agent 可以作为以后可选的专业 Worker，但不能成为天问赖以存在的宿主；
 - 更换或删除外部 Agent 不会让天问丢失目标、记忆、证据、学习历史和正式版本。
 
-独立不等于每一行基础代码都自行开发。天问可以依赖成熟库、移植许可证允许且边界清楚的源码模块、维护小范围分叉并吸收其他 Agent 的设计；独立性的判断标准是天问是否掌握顶层控制权、正式状态、原生行动循环和用户入口。
+独立不等于每一行基础代码都自行开发。天问可以依赖成熟 Agent Framework 和普通库、移植许可证允许且边界清楚的源码模块、维护小范围分叉并吸收其他 Agent 的设计。独立性的判断标准是天问是否掌握顶层控制权、正式状态、动作与权限边界、内部 Worker 和用户入口，而不是底层 `while` 循环由谁编写。
+
+为避免再次混淆，独立性分为三层：
+
+1. **产品独立，必须满足**：天问可以独立启动、交互和完成基础目标循环；
+2. **控制与状态独立，必须满足**：目标、任务、权限、预算、事件、检查点、学习和版本以天问状态为准；
+3. **底层实现独立，不强求**：Provider 适配、模型—工具往返、MCP、流式解析和参数校验可以由嵌入式框架实现。
 
 这里的“用户控制面”不是最后附加的一层界面，而是自主 Agent 的核心架构：
 
@@ -132,7 +140,7 @@ Codex、OpenCode、Hermes 或 Claude Code 可以在未来作为专业 Worker 接
 
 当前推荐顺序是：
 
-> 以方式 A 和 B 组装天问原生 Runtime，以方式 C 处理确实无法直接复用的耦合模块；方式 D 属于后续增强能力，不作为天问首版成立的前提。完整 Fork 一个现有 Agent 不作为默认路线。
+> 优先以方式 A 组装天问 Runtime，包括把合适的 Agent Framework 当作进程内执行引擎；方式 B 和 C 只处理公开接口确实不能满足的部分。方式 D 属于后续增强能力，不作为天问首版成立的前提。完整 Fork 一个现有 Agent 不作为默认路线。
 
 #### 优先复用的通用能力
 
@@ -2201,7 +2209,7 @@ Agent 可以在授权范围内重新分配预算，例如减少低价值搜索�
 
 #### 方式 C：独立原生 Runtime + 组件复用 + 可选外部 Agent
 
-天问拥有自己的模型—工具循环、会话、上下文、事件、权限和内部 Worker。底层优先依赖成熟库、移植边界清楚的开源模块，并按天问接口改造强耦合设计。Codex 等外部 Agent 只作为以后可选的专业 Worker。
+天问拥有自己的 Runtime 契约、权威会话状态、上下文入口、事件、权限和内部 Worker，并能直接完成模型—工具执行。底层模型—工具循环可以由成熟 Agent Framework 作为进程内组件实现，也可以在必要时由天问维护小型循环。Codex 等完整 Agent 产品只作为以后可选的专业 Worker。
 
 优点：
 
@@ -2219,7 +2227,7 @@ Agent 可以在授权范围内重新分配预算，例如减少低价值搜索�
 
 当前推荐方式 C：
 
-> 天问首先形成最小但真实的原生 Agent Runtime；通过稳定组件、选择性源码移植和小范围改造复用开源成果。内部子 Agent 默认运行天问 Runtime，外部 Agent Adapter 延后到真实需求出现后再建设。
+> 天问首先形成最小但真实、由天问掌握状态与控制边界的 Agent Runtime；底层执行优先嵌入成熟框架，公开接口不够时再选择性移植或补写最小循环。内部子 Agent 默认运行同一套天问 Runtime，外部 Agent Adapter 延后到真实需求出现后再建设。
 
 ### 20.2 哪些边界应稳定，哪些细节应允许变化
 
@@ -2624,7 +2632,7 @@ flowchart TB
 天问原生 Runtime 至少负责：
 
 - 直接调用一个或多个模型 Provider；
-- 运行模型—工具迭代循环；
+- 提供模型—工具迭代执行能力；底层循环可由受约束的嵌入式框架实现；
 - 注册和调用原生工具、MCP 与外部服务；
 - 构建任务上下文并加载有效 Skill；
 - 产生结构化消息、计划、工具、产物、错误和使用量事件；
@@ -2634,6 +2642,17 @@ flowchart TB
 - 绑定稳定版本或候选版本的执行视图。
 
 原生 Runtime 可以由多个成熟组件组装，但这些组件必须服从天问统一的状态、事件和权限接口。不能因为采用某个框架，就把目标主权或正式学习状态交给框架内部的黑箱 Session。
+
+这里的“负责”指天问对外保证能力和边界，不要求天问逐行实现底层算法。例如 PydanticAI 可以管理一次内部模型—工具往返，但天问仍应在外层决定本次运行为什么发生、加载哪个版本、能调用哪些动作、能消耗多少预算、何时暂停恢复，以及哪些事件进入证据账本。
+
+判断一个嵌入式框架是否可接受，不看它是否拥有内部循环，而看以下条件：
+
+- 天问能在副作用动作前进行不可绕过的权限检查；
+- 天问能获得结构化事件、使用量、待审批动作和最终结果；
+- 运行状态可以映射或快照到天问自己的存储；
+- 暂停、恢复、取消和预算耗尽不会只存在于内存；
+- 框架 Session 不是目标、学习和版本状态的唯一来源；
+- 框架可以被适配器隔离，未来替换时不改变天问上层数据契约。
 
 外部 Agent Adapter 是另一类可选接口。它负责：
 
@@ -2963,10 +2982,14 @@ Hermes 是四个项目中最接近通用个人 Agent 的实现。它已经具有
 - 多种终端与沙箱后端；
 - 回合结束后的后台自我评审。
 
-Hermes 的产品独立性来自它自己的 `AIAgent` 原生循环，而不是把 Codex、OpenCode 或 Claude Code 当作必需 Worker。它的 `delegate_task` 通常创建新的 Hermes `AIAgent`，子实例可以使用不同模型或 Provider，但仍运行同一套 Hermes Runtime。因此，Hermes 同时证明了两点：
+Hermes 的产品独立性来自它自己的 `AIAgent` Runtime，而不是把 Codex、OpenCode 或 Claude Code 当作必需 Worker。它的 `delegate_task` 通常创建新的 Hermes `AIAgent`，子实例可以使用不同模型或 Provider，但仍运行同一套 Hermes Runtime。因此，Hermes 同时证明了两点：
 
 - 独立 Agent 可以通过直接调用模型与工具拥有自己的 Runtime；
 - 多 Agent 能力可以先由同构内部 Worker 实现，不必先集成其他 Agent 产品。
+
+依赖审计进一步表明，Hermes 没有把 LangGraph、PydanticAI、OpenAI Agents SDK、Microsoft Agent Framework、smolagents、Google ADK、AutoGen 或 CrewAI 作为底座。它的核心使用普通 OpenAI Python SDK、Pydantic、HTTP 与重试库、终端和 Web 库；Anthropic、MCP、搜索、沙箱和消息平台等作为可选依赖或适配器。LiteLLM 主要被视为外部兼容代理，而不是核心 Agent Framework。
+
+但这只是 Hermes 的实现选择，不是独立 Agent 的定义。Hermes 的大型主循环和大量配套模块也说明，直接在模型 SDK 上维护完整循环会产生可观的长期复杂度。天问可以采用更轻的折中：由成熟框架处理一次内部模型—工具运行，由天问持有外层权威状态和控制边界。
 
 最值得关注的实际闭环是：
 
@@ -3152,7 +3175,7 @@ supports_multi_session
 
 #### 路线 C：独立原生 Runtime + 组件复用 + 可选外部 Agent
 
-天问自己拥有模型—工具循环、会话、事件、权限、内部 Worker、目标循环、证据、学习工单和版本治理；成熟开源能力通过依赖、选择性源码移植、小分叉或按接口重写吸收。其他完整 Agent 只在以后作为可选 Worker。
+天问自己拥有 Runtime 契约、权威会话状态、事件、权限、内部 Worker、目标循环、证据、学习工单和版本治理；底层模型—工具循环可以通过受隔离的框架依赖实现，也可以在公开接口不够时补写。其他完整 Agent 产品只在以后作为可选 Worker。
 
 这条路线需要先完成底层 Agent Framework 和模块可移植性审计，但最符合“产品独立、组件复用、差异化自研”的愿景。
 
@@ -3160,32 +3183,38 @@ supports_multi_session
 
 ### 21.12 当前推荐的复用顺序
 
-这不是最终技术选型，而是下一步验证顺序：
+底层 Agent Framework 审计完成后，当前工程顺序调整为：
 
-1. **定义天问原生 Runtime 的最小职责**
-   - 模型 Provider、工具循环、MCP、上下文、会话、事件、权限、沙箱和内部 Worker；
-   - 明确哪些状态属于 Runtime，哪些属于持续学习核心。
+1. **先定义天问自己的运行数据和动作边界**
+   - Run、标准事件、动作账本、预算、权限、检查点和父子 Worker；
+   - 明确哪些状态属于 Runtime，哪些属于持续学习核心；
+   - 这些数据不采用任何框架的内部 Session 或 Graph State 作为正式格式。
 
-2. **审阅底层 Agent Framework**
-   - 不再只比较 Codex、Hermes 等完整产品；
-   - 重点检查可扩展循环、Provider 中立性、工具与 MCP、事件 Hook、持久化、暂停恢复和许可证。
+2. **第一版嵌入 PydanticAI**
+   - 使用 `pydantic-ai-slim` 和必要 extra；
+   - 只通过公开接口处理 Provider、工具、MCP、流式事件和内层限制；
+   - 框架隔离在 Runtime 执行模块内。
 
-3. **做模块级可移植性分析**
-   - Hermes：原生循环、Memory Provider、Skill 写入、内部 Worker 和后台评审；
-   - OpenCode：Provider、事件、Inbox、权限和 Plugin Hooks；
-   - Codex：Goal、审批、沙箱、事件与用户协作设计；
-   - 采用直接依赖、源码移植、小分叉或设计重写中的最低成本方式。
+3. **由天问补齐框架不能负责的治理**
+   - 所有副作用工具通过 Action Gateway；
+   - 使用天问自己的持久 RunStore、事件账本和外层预算；
+   - 暂停、恢复和审批不能只存在于框架内存。
 
 4. **先支持天问内部 Worker**
-   - 子 Agent 运行相同的天问原生 Runtime；
+   - 子 Agent 运行相同的天问 Runtime 和 PydanticAI 执行模块；
    - 可以具有隔离上下文、工具集、预算、权限和模型 Provider；
-   - 不依赖其他 Agent 产品。
+   - 子 Run 的预算与权限由天问从父 Run 划拨，不依赖框架自动继承。
 
-5. **外部 Agent Adapter 延后**
+5. **按真实问题决定是否移植或自研**
+   - Hermes 的 Memory、Skill、后台评审和内部 Worker 继续作为重点参考；
+   - PydanticAI 公开接口不够时，优先缩小使用范围，再考虑普通模型 SDK + 薄循环；
+   - 不因“以后可能需要”提前复制上游源码。
+
+6. **外部 Agent Adapter 延后**
    - Codex、OpenCode、Hermes 和 Claude Code 都不是首版前提；
    - 只有真实任务证明异构 Worker 有额外价值时才接入。
 
-Python 仍是原生 Runtime 的候选语言，因为 Hermes 及多个底层 Agent Framework 使用 Python，便于选择性移植；TypeScript 也可能在 OpenCode 组件和控制面上更有优势。语言选择应由下一轮框架与模块审计决定，不能再由“先接 Codex”反向锁定。
+第一版 Runtime 暂定使用 Python，因为 PydanticAI、Hermes 和主要验证组件均以 Python 为主。控制面以后仍可独立使用 TypeScript；这不要求执行 Runtime 与界面使用同一语言。
 
 本章核心结论：
 
@@ -3239,13 +3268,16 @@ Python 仍是原生 Runtime 的候选语言，因为 Hermes 及多个底层 Agen
 - 天问必须拥有自己的原生 Agent Runtime，不能依赖 Codex、OpenCode、Hermes 或 Claude Code 才能完成基础目标循环。
 - 天问内部 Worker 默认运行同一原生 Runtime；外部 Agent Worker 是以后可选的增强能力。
 - 独立性不要求所有代码自研，可以通过稳定依赖、选择性源码移植、小分叉和设计重写吸收开源成果。
+- “天问拥有 Runtime”不等于底层模型—工具循环必须手写；产品、控制和正式状态必须独立，底层实现可以依赖嵌入式 Agent Framework。
+- 依赖策略应按层治理：普通基础库可以直接依赖，Agent 执行框架必须隔离，持续学习主权核心由天问掌握，完整 Agent 产品只作可选外部 Worker。
+- 第一版采用 PydanticAI 作为可撤退的嵌入式执行引擎；未来保留普通模型 SDK + 天问薄循环的路线，但不预设一定迁移。
 
 ### 22.2 暂定技术方向
 
 - 使用 Champion/Challenger 版本体系。
 - 使用共享基础知识与版本化程序记忆。
 - 逻辑上分离学习者、评测者、治理规则和执行器。
-- 初期应先形成最小但完整的天问原生 Runtime，再把持续学习层与其连接；不能只在 Codex 等现有 Agent 外部增加调度壳。
+- 初期应先形成最小但完整、由天问掌握状态与控制边界的 Runtime，再把持续学习层与其连接；底层执行采用 PydanticAI，不能只在 Codex 等完整 Agent 产品外部增加调度壳。
 - 第一个验证环境可以有限，但架构和数据模型不应被限定为只能处理代码任务。
 - 使用持久化目标契约、任务账本、事件与证据账本、学习变更账本以及版本与权限账本。
 - 状态事实尽量来自实际事件和产物，Agent 生成的说明属于解释层。
@@ -3266,6 +3298,10 @@ Python 仍是原生 Runtime 的候选语言，因为 Hermes 及多个底层 Agen
 - 预留安全收尾额度，并将暂停状态持久化为可恢复检查点。
 - 将低优先级学习机会放入学习队列，而不是立即占用当前目标预算。
 - 在持续学习核心与天问原生 Runtime 之间定义稳定内部接口，避免被任何单一框架反向控制状态模型。
+- 第一版只实现一个 PydanticAI 执行引擎，不提前建设多引擎插件系统；使用最小内部边界隔离框架即可。
+- PydanticAI 类型、Session 和 Graph State 不进入目标、任务、学习、版本或对外 API 的正式数据模型。
+- 所有真实工具必须经天问动作闸门检查权限、预算和审批；PydanticAI 的 Approval 与 UsageLimits 只作为内层补充保护。
+- 只依赖 PydanticAI 公开接口并锁定版本；如果关键能力必须依赖私有 API，优先缩小使用范围或转向普通模型 SDK + 薄循环。
 - 设计和实现每个子系统前，针对相关主流开源 Agent 做源码与架构对照，形成复用决策记录。
 - 优先使用直接依赖或扩展接口；只有必要时才维护范围受控、便于同步上游的小分叉。
 - 为引入的代码和组件记录仓库、提交、许可证、修改和验证结果。
@@ -3278,10 +3314,233 @@ Python 仍是原生 Runtime 的候选语言，因为 Hermes 及多个底层 Agen
 
 ### 22.3 后续章节
 
-1. 天问原生 Runtime 的最小职责、底层 Agent Framework 对照与模块移植矩阵。
-2. 最后再选择第一个可验证的项目范围。
+1. 天问一次运行的权威状态模型、动作账本与检查点边界。
+2. 在运行状态明确后，再选择第一个可验证的项目范围。
 
-## 23. 官方参考
+## 23. 第十二章：依赖主权、嵌入式执行引擎与迁移策略
+
+本章解决的不是“天问能不能使用依赖”，而是不同层的依赖可以深入到什么程度。此前把“原生 Runtime”理解成底层 Agent 循环必须全部自研，边界过严；但如果把目标、权限和正式状态都交给一个框架，又会使天问退化为套壳。当前采用分层依赖主权。
+
+### 23.1 依赖深度不能用“用了多少第三方代码”判断
+
+| 依赖层 | 典型对象 | 当前策略 |
+| --- | --- | --- |
+| 通用基础库 | Pydantic、SQLite、HTTPX、FastAPI、模型官方 SDK、MCP SDK | 优先直接依赖，锁定版本并正常升级 |
+| 嵌入式 Agent 执行引擎 | PydanticAI、OpenAI Agents SDK 等 | 可以依赖，但必须隔离在天问 Runtime 内部，不能拥有天问正式状态 |
+| 天问主权核心 | 目标、任务、权限、预算、事件证据、Worker 继承、学习与版本治理 | 由天问定义数据与规则，不交给外部框架 |
+| 完整 Agent 产品 | Codex、Hermes、OpenCode、Claude Code | 未来只作可选外部 Worker，不作为天问宿主 |
+
+OpenAI Python SDK 属于第一层，只负责调用模型 API；PydanticAI 属于第二层，额外管理一次模型—工具运行；Codex 和 Hermes 属于第四层，已经是面向用户的完整 Agent 产品。天问要成为自己的完整产品，同时允许第一、二层组件在内部工作。
+
+判断独立性的标准不是“依赖树有多短”，而是删除或替换某个依赖后：
+
+- 用户目标和任务是否仍然存在；
+- 权限、预算和底线是否仍由天问强制；
+- 事件、检查点、学习历史和版本是否仍可读取；
+- 工具和内部 Worker 是否仍服从天问规则；
+- 用户入口和控制面是否仍属于天问。
+
+### 23.2 三条执行实现路线
+
+#### 路线 A：普通模型 SDK + 天问薄循环
+
+天问直接使用 OpenAI、Anthropic 等模型 SDK，自行实现模型请求、工具调用、结果回填、流式处理和循环停止。
+
+优点：
+
+- 对每个模型和工具边界拥有最高控制力；
+- 状态和消息格式可以完全按天问需要设计；
+- 不受 Agent Framework 内部循环和版本变化约束。
+
+代价：
+
+- 需要处理流式工具参数、重试、截断、Provider 差异、用量归一化和消息兼容；
+- Provider 与模型范围扩大后，维护成本会快速上升；
+- 容易把大量精力投入非差异化基础设施。
+
+#### 路线 B：嵌入式 Agent Framework
+
+天问在自己的 Runtime 内调用 PydanticAI，由它处理一次内部模型—工具往返；天问在外层维护目标、状态、权限、预算、动作闸门和学习。
+
+优点：
+
+- 第一版更快形成稳定行动能力；
+- 复用 Provider、工具、MCP、事件 Hook、审批和使用量计量；
+- 可以把主要精力放在持续学习核心。
+
+代价：
+
+- 内部运行语义受框架影响；
+- 暂停恢复和消息格式需要映射；
+- 如果框架类型泄漏到整个项目，未来替换会成为全量重写。
+
+#### 路线 C：依赖一个完整 Agent 产品
+
+天问只在 Codex、Hermes 或其他 Agent 外部增加目标和学习调度。
+
+这条路线起步最快，但天问离开宿主不能独立行动，产品形态会接近 Skill 或 Plugin，因此不采用。
+
+当前决定：
+
+> 第一版采用路线 B，以 PydanticAI 作为可撤退的嵌入式执行引擎；路线 A 保留为未来选择，但只有真实约束证明迁移有价值时才建设。路线 C 仍然排除。
+
+### 23.3 Hermes 对路线 A 的实际证明
+
+在提交 `9829746dfe3d5077f4f076e257505ec7f8feaa65` 的依赖与源码中，Hermes 没有使用 LangGraph、PydanticAI、OpenAI Agents SDK、Microsoft Agent Framework、smolagents、Google ADK、AutoGen 或 CrewAI 作为核心底座。
+
+它主要依赖：
+
+- 普通 OpenAI Python SDK；
+- 可选 Anthropic 和其他 Provider SDK；
+- Pydantic、HTTPX、Requests 与 Tenacity；
+- Rich、prompt_toolkit、FastAPI 与 Uvicorn；
+- 可选 MCP、搜索、沙箱、语音和消息平台组件。
+
+Hermes 自行维护 `AIAgent` 循环、消息兼容、工具调度、上下文、Provider 差异、子 Agent 和记忆。它证明路线 A 可行，也暴露了路线 A 的真实成本：成熟产品需要处理大量不同 Provider 的协议和边缘情况，主循环与兼容模块会逐渐变大。
+
+因此，天问学习的是 Hermes 的分层方法，而不是机械复制它的依赖选择：
+
+- 正式产品状态由自己掌握；
+- 普通基础设施大量复用；
+- 完整 Agent 产品不作为必需宿主；
+- 是否手写底层循环由成本和证据决定。
+
+### 23.4 底层框架源码审计快照
+
+以下审计均基于 2026-08-11 拉取的官方源码。判定重点不是宣传功能多少，而是能否在不夺走天问状态与控制权的前提下复用。
+
+| 候选 | 审计快照与许可证 | 主要价值 | 主要限制 | 当前定位 |
+| --- | --- | --- | --- | --- |
+| PydanticAI | `d995cfee`，2.27.1，MIT | Provider 中立，工具/MCP、完整 Hook、审批、Token/费用限制、状态较透明 | 无轻量第一方持久检查点；子 Worker 不自动继承预算；内部 Agent 循环仍由框架管理 | 第一版嵌入式执行引擎 |
+| OpenAI Agents SDK | `863b96cf`，0.20.0，MIT | 工具、MCP、审批、RunState、Session、流式事件成熟 | 消息和恢复语义明显偏 OpenAI；第三方 Provider 与预算治理较弱 | 审批、Session 和事件设计参考 |
+| LangGraph | `d56666f7`，1.2.10，MIT | 检查点、恢复、Interrupt、流式状态和子图成熟 | Pregel/图运行时拥有调度语义；依赖 LangChain Core；无权限和成本预算 | 耐久执行参考，首版不依赖 |
+| Microsoft Agent Framework | `db979b61`，1.13.0，MIT | Provider 抽象、Session、工作流检查点、审批、Windows 工具较完整 | Python 总体规模大；Harness、后台 Agent 和部分安全能力仍处于实验阶段 | 组件与 Windows 实现参考 |
+| smolagents | `e3a5b899`，1.27.0.dev0，Apache-2.0 | 循环简单透明，模型适配、工具、MCP 和步骤回调易理解 | 几乎没有持久恢复、权限审批、预算和 Worker 继承 | 极简循环与工具实现参考 |
+| Google ADK Python | `76027ddb`，2.6.3，Apache-2.0 | Event、Plugin、Session、MCP、Rewind 和多 Agent 能力丰富 | 核心消息使用 Google GenAI 类型；依赖较重；恢复和确认部分仍实验性 | Session、Plugin 与回放参考 |
+| LlamaAgents Workflows | `02e8b408`，Workflows 2.23.0，MIT | 事件驱动步骤、Context 序列化、HITL、SQLite/Postgres 耐久运行 | 它是工作流引擎，不提供模型、工具、MCP、权限或 Agent Worker | 后续耐久工作流参考 |
+
+共同结论：
+
+- 没有一个框架同时满足天问的目标主权、跨循环预算、动作权限、学习和版本治理；
+- 多数框架能很好地处理一次 Agent 运行，但不会管理天问意义上的长期目标循环；
+- 权限与 Worker 预算继承无论选择哪个框架都需要天问自己实现；
+- 引入两个 Agent Framework 不会自动补齐持续学习，只会带来两套状态和调度语义。
+
+### 23.5 为什么第一版选择 PydanticAI
+
+PydanticAI 不是所有维度都最强，但目前作为进程内执行引擎最均衡：
+
+- 支持多个模型和 Provider，并允许自定义 Model；
+- 工具、Toolset、MCP 和结构化输出较成熟；
+- 在模型请求、工具验证、工具执行、输出验证和事件流周围提供公开 Hook；
+- 具有请求、工具、Token 和费用限制；
+- 支持 Deferred Tool 与人工审批；
+- 状态以普通 Python/Pydantic 对象为主，便于映射；
+- 核心是纯 Python，Windows 可用；
+- MIT 许可证允许依赖、改造和必要时的选择性移植。
+
+第一版应使用 `pydantic-ai-slim` 和实际需要的 Provider/MCP extra，而不是安装全部能力。具体版本在实现时精确锁定并通过升级验证，不能无上限自动追随新版本。
+
+PydanticAI 只负责一次执行内部的：
+
+- 模型请求与流式响应；
+- 工具调用识别和结果回填；
+- 参数与结构化输出校验；
+- 普通重试和内层使用量限制；
+- 公开事件与 Hook。
+
+它不负责天问的：
+
+- 目标、任务和学习工单；
+- 正式 Run、事件与检查点存储；
+- 不可绕过的权限与预算；
+- 内部 Worker 的父子继承；
+- Skill、知识、评测和版本治理；
+- 用户控制面。
+
+### 23.6 第一版的最小隔离边界
+
+第一版不建设通用多引擎插件系统、Engine Registry 或复杂 Factory。只保留一个普通 Python 模块边界：
+
+```text
+run
+resume
+cancel
+stream events
+```
+
+天问在边界外使用自己的最小数据对象，例如 `RunRequest`、`RuntimeEvent` 和 `RunResult`；PydanticAI 对象只在执行模块内部出现。
+
+必须遵守以下红线：
+
+1. PydanticAI Session、Graph State、消息对象和运行 ID 不能成为天问目标、任务、学习或版本的正式数据；
+2. 目标、学习、UI、数据库和版本模块不能散布对 `pydantic_ai.Agent` 的直接调用；
+3. 所有真实工具都由天问包装，副作用动作先进入动作账本，再检查权限、预算和审批；
+4. PydanticAI 的 Approval 与 UsageLimits 是内层保护，天问动作闸门和预算计量器拥有最终决定权；
+5. 内部 Worker 由天问创建新的隔离 Run，并从父 Run 划拨预算和权限，不能依赖框架自动继承；
+6. 只使用公开接口，不把 `_agent_graph.py` 等私有模块作为稳定依赖；
+7. 可以保存框架原始轨迹用于调试，但学习循环消费的是天问标准化事件。
+
+### 23.7 第一版执行数据流
+
+```mermaid
+flowchart TB
+    G["目标与任务协调"] --> R["创建天问 Run：版本、预算、权限、上下文"]
+    R --> P["PydanticAI 执行引擎"]
+    P --> M["模型 Provider"]
+    M --> P
+    P --> A["天问 Action Gateway"]
+    A --> D{"权限、预算与审批"}
+    D -- "拒绝" --> P
+    D -- "等待确认" --> W["持久化暂停与审批请求"]
+    W --> H["用户或授权服务给出决定"]
+    H --> D
+    D -- "允许" --> X["文件 / 浏览器 / 终端 / MCP / 外部服务"]
+    X --> A
+    A --> P
+    P --> E["标准化 RuntimeEvent 与 RunResult"]
+    R --> E
+    A --> E
+    E --> S["天问 RunStore 与事件证据账本"]
+    S --> L["任务推进与后续学习循环"]
+```
+
+这张图中最重要的边界是 `Action Gateway`：PydanticAI 可以提出和调度工具调用，但不能绕过天问直接执行真实副作用。
+
+### 23.8 何时才值得转向普通模型 SDK
+
+“项目功能完善”本身不是迁移理由。只有出现可测量问题时，才建设路线 A：
+
+- 公开 API 无法在所需边界可靠暂停、恢复或取消；
+- 不能在副作用动作前实现不可绕过的检查；
+- 框架状态无法稳定持久化或升级频繁破坏兼容；
+- 内部 Worker 的预算、权限和取消难以统一；
+- 关键 Provider 能力无法接入；
+- 性能、依赖体积或成本成为真实瓶颈；
+- 为满足核心需求不得不持续依赖私有 API；
+- 天问形成了明显不同于普通 Agent 的执行语义。
+
+届时可以增加一个普通模型 SDK 实现，优先使用 OpenAI 兼容协议覆盖 OpenAI、OpenRouter、Ollama、vLLM 等，再按真实需求增加原生 Anthropic 或其他 Adapter。
+
+迁移不采用一次性重写。PydanticAI 引擎作为 Champion，自有 SDK 引擎作为 Challenger，先运行同一组无副作用回归任务和影子任务；只有在控制力、可靠性、成本或性能上获得明确收益后才逐步晋升。
+
+### 23.9 第一版明确不做什么
+
+- 不同时实现 PydanticAI 和自有 SDK 两套引擎；
+- 不建设通用多框架插件平台；
+- 不引入 LangGraph、Temporal、DBOS 等耐久执行系统；
+- 不把 Codex、Hermes 或 OpenCode 作为启动依赖；
+- 不因许可证允许就提前复制大段上游源码；
+- 不为尚未出现的 Provider 兼容问题建立复杂抽象；
+- 不把“未来可能迁移”当作当前重复建设的理由。
+
+当 SQLite 检查点、单进程调度或 PydanticAI 公开接口出现真实上限时，再引入对应能力。
+
+本章核心结论：
+
+> 第一版采用 PydanticAI，是为了用最少工程成本获得可靠的模型、工具和 MCP 执行能力；天问通过自己的正式状态、动作闸门、预算、内部 Worker 和学习协议保持产品主权。普通模型 SDK + 自有薄循环是一条有明确触发条件的后备路线，不是预先承诺的重写计划。
+
+## 24. 官方参考
 
 - [OpenAI Docs：Follow a goal](https://learn.chatgpt.com/use-cases/follow-goals)
 - [OpenAI Docs：Guardrails and human review](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals)
@@ -3301,3 +3560,18 @@ Python 仍是原生 Runtime 的候选语言，因为 Hermes 及多个底层 Agen
 - [Hermes Agent 官方 Python Library 文档](https://hermes-agent.nousresearch.com/docs/guides/python-library)
 - [Hermes Agent 官方 Skills 文档](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)
 - [Hermes Agent 官方 Memory 文档](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/)
+- [Hermes Agent 官方依赖清单](https://github.com/NousResearch/hermes-agent/blob/9829746dfe3d5077f4f076e257505ec7f8feaa65/pyproject.toml)
+- [OpenAI Agents SDK 官方文档](https://openai.github.io/openai-agents-python/)
+- [OpenAI Agents SDK 官方仓库](https://github.com/openai/openai-agents-python)
+- [PydanticAI 官方文档](https://ai.pydantic.dev/)
+- [PydanticAI 官方仓库](https://github.com/pydantic/pydantic-ai)
+- [LangGraph 官方文档](https://docs.langchain.com/oss/python/langgraph/overview)
+- [LangGraph 官方仓库](https://github.com/langchain-ai/langgraph)
+- [Microsoft Agent Framework 官方文档](https://learn.microsoft.com/en-us/agent-framework/overview/)
+- [Microsoft Agent Framework 官方仓库](https://github.com/microsoft/agent-framework)
+- [smolagents 官方文档](https://huggingface.co/docs/smolagents/)
+- [smolagents 官方仓库](https://github.com/huggingface/smolagents)
+- [Google ADK 官方文档](https://adk.dev/)
+- [Google ADK Python 官方仓库](https://github.com/google/adk-python)
+- [LlamaAgents Workflows 官方文档](https://developers.llamaindex.ai/python/llamaagents/workflows/)
+- [LlamaAgents 官方仓库](https://github.com/run-llama/llama-agents)
