@@ -68,7 +68,9 @@ def _action_identity(
     return f"{run_id}:{tool_call_id}:{tool_name}:{args_digest}"
 
 
-def _action_id(run_id: str, tool_call_id: str, tool_name: str, args: dict[str, Any]) -> str:
+def proposal_action_id(
+    run_id: str, tool_call_id: str, tool_name: str, args: dict[str, Any]
+) -> str:
     args_json = json.dumps(args, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return f"action:{content_digest(_action_identity(run_id, tool_call_id, tool_name, content_digest(args_json)))}"
 
@@ -84,7 +86,7 @@ def _proposal(
     args_json = json.dumps(args, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     args_digest = content_digest(args_json)
     identity = _action_identity(run_id, tool_call_id, tool_name, args_digest)
-    action_id = _action_id(run_id, tool_call_id, tool_name, args)
+    action_id = proposal_action_id(run_id, tool_call_id, tool_name, args)
     proposal = ActionRecord(
         action_id=action_id,
         run_id=run_id,
@@ -273,7 +275,7 @@ class ActionGatewayCapability(AbstractCapability[object]):
     ) -> Any:
         del ctx
         action = self.store.get_action(
-            _action_id(self.tianwen_run_id, call.tool_call_id, tool_def.name, args)
+            proposal_action_id(self.tianwen_run_id, call.tool_call_id, tool_def.name, args)
         )
         if action.status is ActionStatus.SUCCEEDED:
             return None

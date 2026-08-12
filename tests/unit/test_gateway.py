@@ -26,6 +26,7 @@ from tianwen.gateway import (
     decide_action,
     execute_action,
     freeze_action,
+    proposal_action_id,
 )
 from tianwen.store import BudgetExceeded, StateConflict, StateStore
 
@@ -97,6 +98,30 @@ def test_frozen_action_changes_identity_when_args_change(tmp_path: Path) -> None
             args={"path": "a.txt", "content": "different"},
             effect_class=EffectClass.REVERSIBLE_WORKSPACE_WRITE,
         )
+
+
+def test_proposal_action_id_is_canonical_and_changes_with_arguments() -> None:
+    first = proposal_action_id(
+        "run",
+        "call",
+        "web_fetch",
+        {"url": "https://example.org", "source": "docs"},
+    )
+    reordered = proposal_action_id(
+        "run",
+        "call",
+        "web_fetch",
+        {"source": "docs", "url": "https://example.org"},
+    )
+    changed = proposal_action_id(
+        "run",
+        "call",
+        "web_fetch",
+        {"url": "https://example.org/changed", "source": "docs"},
+    )
+
+    assert first == reordered
+    assert changed != first
 
 
 @pytest.mark.anyio
