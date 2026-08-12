@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import secrets
 import sys
@@ -21,6 +22,7 @@ from tianwen.domain import (
     FrozenModel,
     PromotionRecord,
     PromotionRequest,
+    content_digest,
     utc_now,
 )
 from tianwen.store import StateConflict, StateStore
@@ -100,6 +102,13 @@ _FAILURE_CATEGORIES = frozenset(
         "grader_error",
         "incomplete_evidence",
     }
+)
+_EVAL_BUNDLE_NAMES = (
+    "protocol.json",
+    "request.json",
+    "champion.snapshot",
+    "challenger.snapshot",
+    "receipt.json",
 )
 
 
@@ -192,6 +201,25 @@ def _inside(root: Path, candidate: Path) -> Path:
     return resolved
 
 
+def _eval_bundle_binding(
+    request_id: str,
+    protocol: EvalProtocol,
+    champion_version_id: str,
+    champion_digest: str,
+    challenger_version_id: str,
+    challenger_digest: str,
+) -> str:
+    body = {
+        "request_id": request_id,
+        "protocol": protocol.model_dump(mode="json"),
+        "champion": {"version_id": champion_version_id, "content_digest": champion_digest},
+        "challenger": {"version_id": challenger_version_id, "content_digest": challenger_digest},
+        "files": _EVAL_BUNDLE_NAMES,
+    }
+    encoded = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def write_eval_request(
     store: StateStore, protocol: EvalProtocol, champion: ArtifactVersion, challenger: ArtifactVersion, output_dir: Path
 ) -> EvalRequest:
@@ -206,6 +234,10 @@ def write_eval_request(
     protocol_path = _inside(request_dir, request_dir / "protocol.json")
     request_path = _inside(request_dir, request_dir / "request.json")
     for path, content in ((champion_snapshot, champion.content), (challenger_snapshot, challenger.content)):
+        if content_digest(content) != (
+            champion.content_digest if path == champion_snapshot else challenger.content_digest
+        ):
+            raise EvaluationError("artifact content digest does not match snapshot bytes")
         path.write_text(content, encoding="utf-8")
         path.chmod(0o444)
     protocol_path.write_text(
@@ -213,6 +245,14 @@ def write_eval_request(
         encoding="utf-8",
     )
     protocol_path.chmod(0o444)
+    binding = _eval_bundle_binding(
+        request_id,
+        protocol,
+        champion.version_id,
+        champion.content_digest,
+        challenger.version_id,
+        challenger.content_digest,
+    )
     request = EvalRequest(
         request_id=request_id,
         protocol_id=protocol.protocol_id,
@@ -222,7 +262,7 @@ def write_eval_request(
         challenger_version_id=challenger.version_id,
         challenger_digest=challenger.content_digest,
         challenger_snapshot=str(challenger_snapshot),
-        challenge=secrets.token_urlsafe(24),
+        challenge=f"{secrets.token_urlsafe(24)}.{binding}",
         receipt_path=str(receipt_path),
         expires_at=utc_now() + timedelta(hours=1),
     )

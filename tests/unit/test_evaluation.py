@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import base64
+import importlib.util
 import inspect
 import json
 import math
 import os
+import stat
 import subprocess
 import sys
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -21,6 +24,7 @@ from tianwen.domain import (
     EvalReceipt,
     EvalRun,
     PromotionRequest,
+    content_digest,
     utc_now,
 )
 from tianwen.evaluation import (
@@ -65,7 +69,7 @@ def artifact(version_id: str, status: ArtifactStatus, content: str) -> ArtifactV
         artifact_type="repo_task_skill",
         version_id=version_id,
         parent_version_id=None,
-        content_digest=f"sha256:{version_id}",
+        content_digest=content_digest(content),
         content=content,
         evidence_ids=(),
         status=status,
@@ -327,8 +331,9 @@ def test_write_eval_request_creates_a_frozen_complete_bundle(tmp_path: Path) -> 
 
 
 def test_sealed_evaluator_accepts_only_the_frozen_production_bundle(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
     request = write_eval_request(
-        store_at(tmp_path / "state.db"),
+        store,
         protocol(),
         artifact("champion", ArtifactStatus.ACTIVE, "champion"),
         artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
@@ -349,6 +354,7 @@ def test_sealed_evaluator_accepts_only_the_frozen_production_bundle(tmp_path: Pa
         request.challenge,
     )
     private_key.public_key().verify(base64.b64decode(receipt.signature_b64), receipt_canonical_bytes(receipt))
+    assert import_eval_receipt(store, receipt, private_key.public_key()).challenger_version_id == "challenger"
 
 
 @pytest.mark.parametrize("attack", ("protocol", "output", "snapshot", "challenge"))
@@ -383,6 +389,138 @@ def test_sealed_evaluator_rejects_unbound_cli_inputs(tmp_path: Path, attack: str
 
     assert completed.returncode != 0
     assert not Path(request.receipt_path).exists()
+
+
+@pytest.mark.parametrize("name", ("request.json", "protocol.json", "champion.snapshot", "challenger.snapshot"))
+def test_sealed_evaluator_rejects_a_writable_bundle_member(tmp_path: Path, name: str) -> None:
+    request = write_eval_request(
+        store_at(tmp_path / "state.db"),
+        protocol(),
+        artifact("champion", ArtifactStatus.ACTIVE, "champion"),
+        artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
+        tmp_path / "inbox",
+    )
+    path = Path(request.champion_snapshot).parent / name
+    path.chmod(path.stat().st_mode | stat.S_IWUSR)
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_text(json.dumps([sealed_case()]), encoding="utf-8")
+
+    completed = run_evaluator(request, evaluator_environment(dataset, Ed25519PrivateKey.generate()))
+
+    assert completed.returncode != 0
+    assert not Path(request.receipt_path).exists()
+
+
+@pytest.mark.parametrize("name", ("champion.snapshot", "challenger.snapshot", "protocol.json"))
+def test_sealed_evaluator_rejects_readonly_bundle_content_tampering(tmp_path: Path, name: str) -> None:
+    request = write_eval_request(
+        store_at(tmp_path / "state.db"),
+        protocol(),
+        artifact("champion", ArtifactStatus.ACTIVE, "champion"),
+        artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
+        tmp_path / "inbox",
+    )
+    path = Path(request.champion_snapshot).parent / name
+    path.chmod(path.stat().st_mode | stat.S_IWUSR)
+    if name == "protocol.json":
+        forged = protocol().model_dump(mode="json") | {"budget_digest": "sha256:forged"}
+        path.write_text(json.dumps(forged), encoding="utf-8")
+    else:
+        path.write_text("forged snapshot", encoding="utf-8")
+    path.chmod(0o444)
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_text(json.dumps([sealed_case()]), encoding="utf-8")
+
+    completed = run_evaluator(request, evaluator_environment(dataset, Ed25519PrivateKey.generate()))
+
+    assert completed.returncode != 0
+    assert not Path(request.receipt_path).exists()
+
+
+@pytest.mark.parametrize(
+    "updates",
+    (
+        {"champion_version_id": "forged-version"},
+        {"challenge": "forged-challenge"},
+    ),
+)
+def test_sealed_evaluator_rejects_readonly_request_tampering(tmp_path: Path, updates: dict[str, str]) -> None:
+    request = write_eval_request(
+        store_at(tmp_path / "state.db"),
+        protocol(),
+        artifact("champion", ArtifactStatus.ACTIVE, "champion"),
+        artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
+        tmp_path / "inbox",
+    )
+    request_path = Path(request.champion_snapshot).parent / "request.json"
+    request_path.chmod(request_path.stat().st_mode | stat.S_IWUSR)
+    forged = request.model_copy(update=updates)
+    request_path.write_text(forged.model_dump_json(), encoding="utf-8")
+    request_path.chmod(0o444)
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_text(json.dumps([sealed_case()]), encoding="utf-8")
+
+    completed = run_evaluator(
+        request, evaluator_environment(dataset, Ed25519PrivateKey.generate()), challenge=forged.challenge
+    )
+
+    assert completed.returncode != 0
+    assert not Path(request.receipt_path).exists()
+
+
+def _evaluator_module():
+    spec = importlib.util.spec_from_file_location(
+        "sealed_evaluator_for_test", Path("evaluator/run_sealed_evaluator.py")
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_sealed_evaluator_rejects_receipt_link_or_simulated_reparse_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = write_eval_request(
+        store_at(tmp_path / "state.db"),
+        protocol(),
+        artifact("champion", ArtifactStatus.ACTIVE, "champion"),
+        artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
+        tmp_path / "inbox",
+    )
+    receipt_path = Path(request.receipt_path)
+    outside = tmp_path / "outside.json"
+    try:
+        os.symlink(outside, receipt_path)
+    except OSError:
+        module = _evaluator_module()
+        original_lstat = os.lstat
+        request_path = receipt_path.parent / "request.json"
+
+        def reparse_lstat(path: os.PathLike[str] | str, *args: object, **kwargs: object):
+            result = original_lstat(path, *args, **kwargs)
+            if Path(path) == request_path:
+                return SimpleNamespace(
+                    st_mode=result.st_mode,
+                    st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT,
+                )
+            return result
+
+        monkeypatch.setattr(module.os, "lstat", reparse_lstat)
+        with pytest.raises(ValueError):
+            module._require_safe_path(request_path, receipt_path.parent, is_dir=False)
+        return
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_text(json.dumps([sealed_case()]), encoding="utf-8")
+
+    completed = run_evaluator(request, evaluator_environment(dataset, Ed25519PrivateKey.generate()))
+
+    assert completed.returncode != 0
+    assert not outside.exists()
 
 
 @pytest.mark.parametrize(

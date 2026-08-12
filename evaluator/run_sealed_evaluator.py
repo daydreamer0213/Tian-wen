@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import math
 import os
+import stat
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,7 +14,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from tianwen.domain import EvalProtocol, EvalReceipt, EvalRequest
+from tianwen.domain import EvalProtocol, EvalReceipt, EvalRequest, content_digest
 
 _FAILURE_CATEGORIES = frozenset(
     {
@@ -38,11 +40,69 @@ _OUTCOME_KEYS = frozenset(
     }
 )
 _CASE_KEYS = frozenset({"case_id", "hard_gates", "champion", "challenger"})
+_EVAL_BUNDLE_NAMES = (
+    "protocol.json",
+    "request.json",
+    "champion.snapshot",
+    "challenger.snapshot",
+    "receipt.json",
+)
 
 
 def _canonical(receipt: EvalReceipt) -> bytes:
     body = receipt.model_dump(mode="json", exclude={"signature_b64"})
     return json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _absolute_path(value: str | Path) -> Path:
+    return Path(os.path.abspath(os.fspath(value)))
+
+
+def _is_reparse_point(file_status: os.stat_result) -> bool:
+    return bool(getattr(file_status, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _require_safe_path(path: Path, request_dir: Path, *, is_dir: bool, must_not_exist: bool = False) -> None:
+    try:
+        file_status = os.lstat(path)
+    except FileNotFoundError:
+        if must_not_exist:
+            return
+        raise ValueError(f"required bundle path is missing: {path.name}") from None
+    if must_not_exist:
+        raise ValueError("receipt path already exists")
+    if _is_reparse_point(file_status) or stat.S_ISLNK(file_status.st_mode):
+        raise ValueError(f"bundle path is a link or reparse point: {path.name}")
+    if (stat.S_ISDIR(file_status.st_mode) if is_dir else stat.S_ISREG(file_status.st_mode)) is False:
+        raise ValueError(f"bundle path has the wrong type: {path.name}")
+    if not is_dir and file_status.st_mode & 0o222:
+        raise ValueError(f"bundle file is writable: {path.name}")
+    if path != request_dir and path.resolve().parent != request_dir.resolve():
+        raise ValueError(f"bundle path escapes request directory: {path.name}")
+
+
+def _bundle_binding(request: EvalRequest, protocol: EvalProtocol) -> str:
+    body = {
+        "request_id": request.request_id,
+        "protocol": protocol.model_dump(mode="json"),
+        "champion": {"version_id": request.champion_version_id, "content_digest": request.champion_digest},
+        "challenger": {"version_id": request.challenger_version_id, "content_digest": request.challenger_digest},
+        "files": _EVAL_BUNDLE_NAMES,
+    }
+    encoded = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _parse_challenge(challenge: str) -> str:
+    nonce, separator, binding = challenge.rpartition(".")
+    if (
+        not nonce
+        or not separator
+        or len(binding) != 64
+        or any(character not in "0123456789abcdef" for character in binding)
+    ):
+        raise ValueError("challenge has an invalid bundle binding")
+    return binding
 
 
 def _private_key(value: str) -> Ed25519PrivateKey:
@@ -130,29 +190,40 @@ def main() -> int:
     parser.add_argument("output_receipt")
     args = parser.parse_args()
     try:
-        champion_path = Path(args.champion_snapshot).resolve(strict=True)
-        challenger_path = Path(args.challenger_snapshot).resolve(strict=True)
+        champion_path = _absolute_path(args.champion_snapshot)
+        challenger_path = _absolute_path(args.challenger_snapshot)
+        if champion_path.name != "champion.snapshot" or challenger_path.name != "challenger.snapshot":
+            raise ValueError("snapshot basename mismatch")
         if challenger_path.parent != champion_path.parent:
             raise ValueError("snapshot parent mismatch")
         request_dir = champion_path.parent
-        request = EvalRequest.model_validate_json((request_dir / "request.json").read_text(encoding="utf-8"))
-        protocol_path = (request_dir / "protocol.json").resolve(strict=True)
-        output_path = (request_dir / "receipt.json").resolve()
+        _require_safe_path(request_dir, request_dir, is_dir=True)
+        request_path = request_dir / "request.json"
+        protocol_path = request_dir / "protocol.json"
+        output_path = request_dir / "receipt.json"
+        for path in (request_path, protocol_path, champion_path, challenger_path):
+            _require_safe_path(path, request_dir, is_dir=False)
+        _require_safe_path(output_path, request_dir, is_dir=False, must_not_exist=True)
+        request = EvalRequest.model_validate_json(request_path.read_text(encoding="utf-8"))
         if (
-            champion_path != (request_dir / "champion.snapshot").resolve(strict=True)
-            or challenger_path != (request_dir / "challenger.snapshot").resolve(strict=True)
-            or champion_path != Path(request.champion_snapshot).resolve(strict=True)
-            or challenger_path != Path(request.challenger_snapshot).resolve(strict=True)
-            or Path(args.protocol_manifest).resolve(strict=True) != protocol_path
+            champion_path != _absolute_path(request.champion_snapshot)
+            or challenger_path != _absolute_path(request.challenger_snapshot)
+            or _absolute_path(args.protocol_manifest) != protocol_path
             or args.challenge != request.challenge
-            or Path(args.output_receipt).resolve() != output_path
-            or Path(request.receipt_path).resolve() != output_path
-            or output_path.exists()
+            or _absolute_path(args.output_receipt) != output_path
+            or _absolute_path(request.receipt_path) != output_path
         ):
             raise ValueError("sealed evaluator input binding mismatch")
         protocol = EvalProtocol.model_validate_json(protocol_path.read_text(encoding="utf-8"))
         if protocol.protocol_id != request.protocol_id:
             raise ValueError("protocol binding mismatch")
+        if (
+            content_digest(champion_path.read_bytes()) != request.champion_digest
+            or content_digest(challenger_path.read_bytes()) != request.challenger_digest
+        ):
+            raise ValueError("snapshot digest mismatch")
+        if _parse_challenge(args.challenge) != _bundle_binding(request, protocol):
+            raise ValueError("challenge bundle binding mismatch")
         hard_gate_passed, metrics, failure_categories = _aggregate(Path(dataset_dir).resolve(strict=True))
         receipt = EvalReceipt(
             receipt_id=base64.urlsafe_b64encode(os.urandom(18)).decode("ascii").rstrip("="),
@@ -173,6 +244,7 @@ def main() -> int:
         )
         with output_path.open("x", encoding="utf-8") as receipt_file:
             json.dump(receipt.model_dump(mode="json"), receipt_file, separators=(",", ":"))
+        output_path.chmod(0o444)
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as error:
         print(f"sealed evaluator failed: {error}", file=sys.stderr)
         return 1
