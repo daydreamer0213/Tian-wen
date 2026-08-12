@@ -4615,10 +4615,37 @@ Shell 返回非零退出码仍然是结果已知的动作，不属于 `unknown`�
 6. 元循环只读取最小化、带用途与来源的数据投影；
 7. 首版使用单机 SQLite、版本冻结、幂等动作、租约和 `unknown` 对账实现可恢复运行；
 8. 第一阶段仍只开放 `repo_task` Skill，不开放其他策略、Runtime、Action Gateway、评测门槛、发布器或模型权重训练。
+9. “识别知识缺口”不等于“探索”；探索必须主动搜集本地上下文和必要外部信源，并把来源、冲突、剩余未知和停止原因保存下来。
 
 首个垂直切片的实施工作以 [PydanticAI + Harness 集成规格](superpowers/specs/2026-08-11-pydanticai-harness-integration-design.md) 和 [首个持续学习垂直切片实施计划](superpowers/plans/2026-08-12-first-continual-learning-vertical-slice.md) 为准。
 
-## 30. 官方参考
+## 30. 主动探索设计补充
+
+2026-08-12 进一步确认，之前的长期研究虽然把探索定义为“寻找概念、证据、方法和反例”，但收口规格和首版实施计划主要覆盖了已有证据的记录、学习与晋升，没有把主动搜集上下文落实成明确的工程能力。
+
+正式学习过程修正为：
+
+```text
+明确 Goal
+→ 盘点已知
+→ 识别关键知识缺口
+→ 创建有限探索简报
+→ 搜索本地项目、Git、测试、日志、记忆和历史证据
+→ 必要时搜索官方文档、论文、源码等外部信源
+→ 保存来源、版本、摘要、哈希、冲突与剩余未知
+→ 形成探索报告
+→ 规划、实验、询问必要裁决或以证据不足结束
+```
+
+首版不新增第三种循环或独立研究 Agent。探索属于普通 Task 和 Learning Job 的阶段，只新增探索简报、SourceRecord 和探索报告三类持久产物。外部搜索复用 PydanticAI 2.18.0 的 `duckduckgo_search_tool` 与具有 SSRF 防护的 `web_fetch_tool`，但只作为经过天问 Action Gateway 包装的普通本地函数工具；Provider 原生网页工具在一次模型请求内部执行，当前不能保证逐次进入天问执行前授权，因此首版不启用。浏览器自动化、通用爬虫、MCP 搜索市场和专业数据库连接延期。
+
+搜索摘要只能用于发现来源。外部结论必须尽量读取原始页面或固定版本，并以 SourceRecord 为来源形成 Evidence；外部内容始终是不可信数据，不能直接改变 Goal、权限、底线、正式记忆、评测或活跃 Skill。
+
+探索由问题、读写范围、查询/抓取/Token/时间/费用预算、证据充分性和停止条件约束。证据足够、继续搜索没有新增信息、预算耗尽、来源不可访问、冲突无法消解或风险越界时停止。“证据不足”是合法结果。
+
+上述决定已经写入 [PydanticAI + Harness 集成规格](superpowers/specs/2026-08-11-pydanticai-harness-integration-design.md) 和 [天问持续学习控制面收口研究](research/2026-08-12-continual-learning-governance-closure.md)。首个垂直切片实施计划需要在用户复核规格后同步，未同步前不开始实施。
+
+## 31. 官方参考
 
 - [OpenAI Docs：Follow a goal](https://learn.chatgpt.com/use-cases/follow-goals)
 - [OpenAI Docs：Guardrails and human review](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals)
