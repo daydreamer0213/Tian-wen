@@ -583,7 +583,7 @@ class TianwenApp:
                 if action.tool_name in {"write_file", "edit_file", "create_directory"}
                 else "execution_test"
                 if action.tool_name in {"run_command", "check_command", "start_command", "stop_command"}
-                else "execution_cost"
+                else "execution_test"
             )
             record = evidence_from_action(
                 action,
@@ -594,7 +594,7 @@ class TianwenApp:
                 update={
                     "evidence_type": evidence_type,
                     "source_class": "runtime_action",
-                    "cost_bucket": "governed_action_count",
+                    "cost_bucket": "unknown",
                 }
             )
             self.store.put_immutable_object("evidence", record.evidence_id, run_id, "recorded", record)
@@ -606,16 +606,19 @@ class TianwenApp:
         run = self.store.get_object("run", run_id, RunRecord)
         if actions and run.status is RunStatus.COMPLETED:
             action = actions[0]
+            task = self.store.get_object("task", run.task_id, TaskRecord)
+            limit, _usage, _reserved = self.store.get_budget(task.loop_id)
+            usage = self.store.get_run_budget_usage(run_id)
             cost = evidence_from_action(
                 action,
-                f"{len(actions)} governed actions completed",
+                f"budget usage tool_calls={usage.tool_calls} action_effects={usage.action_effects}",
                 scope=scope,
                 purpose="execution_evidence",
             ).model_copy(
                 update={
                     "evidence_type": "execution_cost",
-                    "source_class": "runtime_action_count",
-                    "cost_bucket": "governed_action_count",
+                    "source_class": "runtime_budget_usage",
+                    "cost_bucket": self._cost_bucket(usage, limit),
                 }
             )
             self.store.put_immutable_object("evidence", cost.evidence_id, run_id, "recorded", cost)
@@ -624,6 +627,22 @@ class TianwenApp:
             self.store.put_immutable_object(
                 "meta_telemetry", telemetry_id, meta.loop_id, "recorded", _Telemetry(**telemetry)
             )
+
+    @staticmethod
+    def _cost_bucket(usage: Any, limit: BudgetLimit) -> str:
+        ratios = [
+            getattr(usage, field) / getattr(limit, field)
+            for field in ("tool_calls", "action_effects")
+            if getattr(limit, field) > 0
+        ]
+        ratio = max(ratios, default=0.0)
+        if ratio == 0:
+            return "zero"
+        if ratio <= 0.25:
+            return "low"
+        if ratio <= 0.75:
+            return "medium"
+        return "high"
 
     def execution_evidence(self, run_id: str) -> tuple[EvidenceRecord, ...]:
         self.store.get_object("run", run_id, RunRecord)

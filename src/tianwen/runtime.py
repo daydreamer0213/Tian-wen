@@ -17,7 +17,7 @@ from pydantic_ai_harness import FileSystem, Shell
 from pydantic_ai_harness.skills import Skills
 from pydantic_ai_harness.step_persistence import StepPersistence, StepStore
 
-from tianwen.domain import ActionStatus, CheckpointRecord, RunRecord, RunStatus, content_digest
+from tianwen.domain import ActionStatus, CheckpointRecord, RunRecord, RunStatus, TaskRecord, content_digest
 from tianwen.gateway import ActionGatewayCapability, EffectClass
 from tianwen.store import StateConflict, StateStore
 
@@ -187,11 +187,13 @@ class RepoTaskRuntime:
 
     def _agent(self, run: RunRecord) -> Agent[object, str | DeferredToolRequests]:
         skills = self._frozen_skills()
+        task = self.store.get_object("task", run.task_id, TaskRecord)
         gateway = ActionGatewayCapability(
             store=self.store,
             tianwen_run_id=run.run_id,
             classify=self._classify,
             authorized=self._authorized,
+            loop_id=task.loop_id,
         )
         return Agent(
             self.model,

@@ -25,6 +25,7 @@ from tianwen.domain import (
     ExplorationBrief,
     ExplorationStopReason,
     LoopKind,
+    LoopRecord,
     SourceRecord,
     content_digest,
 )
@@ -225,6 +226,7 @@ def test_app_runs_the_governed_local_vertical_slice(tmp_path: Path, monkeypatch:
     assert output == "completed"
     assert run_a.manifest.skill_versions["repo_task"] == champion
     assert app.store.unresolved_actions(run_a.run_id) == []
+    user_root = app.store.get_object("loop", task_a.loop_id, LoopRecord)
     execution_evidence = app.execution_evidence(run_a.run_id)
     assert {item.evidence_type for item in execution_evidence} >= {
         "execution_diff",
@@ -232,6 +234,18 @@ def test_app_runs_the_governed_local_vertical_slice(tmp_path: Path, monkeypatch:
         "execution_cost",
     }
     assert all(item.action_id and item.provenance_ids == (item.action_id,) for item in execution_evidence)
+    cost = next(item for item in execution_evidence if item.evidence_type == "execution_cost")
+    run_usage = app.store.get_run_budget_usage(run_a.run_id)
+    _limit, global_usage, _reserved = app.store.get_budget(task_a.loop_id)
+    assert user_root.parent_loop_id is None
+    assert cost.source_class == "runtime_budget_usage"
+    assert cost.summary == f"budget usage tool_calls={run_usage.tool_calls} action_effects={run_usage.action_effects}"
+    assert global_usage.tool_calls >= run_usage.tool_calls
+    assert global_usage.action_effects >= run_usage.action_effects
+    evidence_ids = {item.evidence_id for item in execution_evidence}
+    app._project_run_outcomes(goal_a.goal_id, run_a.run_id)
+    assert {item.evidence_id for item in app.execution_evidence(run_a.run_id)} == evidence_ids
+    assert app.store.get_run_budget_usage(run_a.run_id) == run_usage
     telemetry = app.meta_telemetry(goal_a.goal_id)
     assert telemetry
     assert all("Write the selected" not in item.model_dump_json() for item in telemetry)

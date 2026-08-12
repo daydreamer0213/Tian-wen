@@ -461,6 +461,23 @@ async def test_runtime_inventory_excludes_provider_native_and_exploration_web_to
             workspace_digest=digests["workspace_digest"],
         ),
     )
+    loop = LoopRecord(
+        loop_id="runtime-loop",
+        goal_id="runtime-goal",
+        kind=LoopKind.USER,
+        objective="runtime inventory",
+        budget=BudgetLimit(model_requests=0, tool_calls=1, tokens=0, action_effects=1),
+    )
+    task = TaskRecord(
+        task_id=run.task_id,
+        loop_id=loop.loop_id,
+        kind=TaskKind.EXECUTION,
+        objective="runtime inventory",
+        acceptance=("inventory",),
+    )
+    store.put_object("loop", loop.loop_id, loop.goal_id, "active", loop)
+    store.create_budget(loop.loop_id, None, loop.budget)
+    store.put_object("task", task.task_id, loop.loop_id, "active", task)
     store.put_object("run", run.run_id, run.task_id, run.status.value, run)
 
     await runtime.run(run, prompt)

@@ -190,6 +190,13 @@ class StateStore:
                     UNIQUE (idempotency_key)
                 );
 
+                CREATE TABLE IF NOT EXISTS tw_action_budget_reservations (
+                    action_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    loop_id TEXT NOT NULL,
+                    delta_json TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS tw_budgets (
                     loop_id TEXT PRIMARY KEY,
                     parent_loop_id TEXT,
@@ -602,6 +609,30 @@ class StateStore:
                 return
             self._charge_budget(connection, loop_id, budget_delta)
             self._reserve_exploration_usage(connection, brief_id, exploration_delta)
+
+    def prepare_action_with_budget(self, action: ActionRecord, loop_id: str, delta: BudgetUsage) -> None:
+        """Atomically persist a new action and its one-time runtime budget charge."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            inserted = self._prepare_action(connection, action)
+            if not inserted:
+                return
+            self._charge_budget(connection, loop_id, delta)
+            connection.execute(
+                "INSERT INTO tw_action_budget_reservations "
+                "(action_id, run_id, loop_id, delta_json) VALUES (?, ?, ?, ?)",
+                (action.action_id, action.run_id, loop_id, delta.model_dump_json()),
+            )
+
+    def get_run_budget_usage(self, run_id: str) -> BudgetUsage:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT delta_json FROM tw_action_budget_reservations WHERE run_id = ?", (run_id,)
+            ).fetchall()
+        usage = _zero_usage()
+        for row in rows:
+            usage = _add(usage, BudgetUsage.model_validate_json(row["delta_json"]))
+        return usage
 
     def transition_action(
         self,

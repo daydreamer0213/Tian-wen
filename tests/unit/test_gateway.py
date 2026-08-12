@@ -290,12 +290,14 @@ class _GatewayModel(TestModel):
 @pytest.mark.anyio
 async def test_capability_denies_before_handler_and_defers_ask(tmp_path: Path) -> None:
     store = make_store(tmp_path)
+    store.create_budget("loop", None, BudgetLimit(model_requests=0, tool_calls=1, tokens=0, action_effects=1))
     effects: list[str] = []
     denied = ActionGatewayCapability(
         store=store,
         tianwen_run_id="deny-run",
         classify=lambda _name, _args: EffectClass.FORBIDDEN,
         authorized=lambda _name, _args: True,
+        loop_id="loop",
     )
     deny_agent = Agent(
         _GatewayModel(call_tools=["touch"], custom_output_text="done"),
@@ -310,12 +312,14 @@ async def test_capability_denies_before_handler_and_defers_ask(tmp_path: Path) -
     await deny_agent.run("touch")
     assert effects == []
     assert store.count_actions("deny-run", "touch") == 1
+    assert store.get_budget("loop")[1] == BudgetUsage()
 
     asked = ActionGatewayCapability(
         store=store,
         tianwen_run_id="ask-run",
         classify=lambda _name, _args: EffectClass.EXTERNAL_OR_IRREVERSIBLE,
         authorized=lambda _name, _args: True,
+        loop_id="loop",
     )
     ask_agent: Agent[object, str | DeferredToolRequests] = Agent(
         _GatewayModel(call_tools=["touch"], custom_output_text="done"),
@@ -334,6 +338,8 @@ async def test_capability_denies_before_handler_and_defers_ask(tmp_path: Path) -
     request = result.output.approvals[0]
     action_id = result.output.metadata[request.tool_call_id]["action_id"]
     assert store.get_action(action_id).status is ActionStatus.WAITING_APPROVAL
+    assert store.get_budget("loop")[1] == BudgetUsage(tool_calls=1, action_effects=1)
+    assert store.get_run_budget_usage("ask-run") == BudgetUsage(tool_calls=1, action_effects=1)
 
     resumed = await ask_agent.run(
         message_history=result.all_messages(),
@@ -344,6 +350,40 @@ async def test_capability_denies_before_handler_and_defers_ask(tmp_path: Path) -
     assert resumed.output == "done"
     assert effects == ["alpha"]
     assert store.get_action(action_id).status is ActionStatus.SUCCEEDED
+    assert store.get_run_budget_usage("ask-run") == BudgetUsage(tool_calls=1, action_effects=1)
+
+
+@pytest.mark.anyio
+async def test_capability_blocks_a_second_distinct_action_before_its_handler(tmp_path: Path) -> None:
+    """Break caught: charging after a handler permits an over-budget second effect."""
+    store = make_store(tmp_path)
+    store.create_budget("loop", None, BudgetLimit(model_requests=0, tool_calls=1, tokens=0, action_effects=1))
+    effects: list[str] = []
+
+    def agent_for(run_id: str) -> Agent[object, str]:
+        agent = Agent(
+            _GatewayModel(call_tools=["touch"], custom_output_text="done"),
+            capabilities=[
+                ActionGatewayCapability(
+                    store, run_id, lambda _name, _args: EffectClass.READ_ONLY, lambda _name, _args: True, "loop"
+                )
+            ],
+        )
+
+        @agent.tool_plain(name="touch")
+        def touch(label: str) -> str:
+            effects.append(label)
+            return label
+
+        return agent
+
+    assert (await agent_for("first-run").run("first")).output == "done"
+    with pytest.raises(BudgetExceeded):
+        await agent_for("second-run").run("second")
+
+    assert effects == ["alpha"]
+    assert store.get_run_budget_usage("first-run") == BudgetUsage(tool_calls=1, action_effects=1)
+    assert store.get_run_budget_usage("second-run") == BudgetUsage()
 
 
 @pytest.mark.anyio

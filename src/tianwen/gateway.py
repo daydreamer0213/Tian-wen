@@ -219,18 +219,21 @@ class ActionGatewayCapability(AbstractCapability[object]):
     tianwen_run_id: str
     classify: Callable[[str, dict[str, Any]], EffectClass]
     authorized: Callable[[str, dict[str, Any]], bool]
+    loop_id: str | None = None
 
     def _context(self, call: ToolCallPart, tool_def: ToolDefinition, args: dict[str, Any]) -> ActionContext:
         effect_class = self.classify(tool_def.name, args)
-        action = freeze_action(
-            self.store,
-            self.tianwen_run_id,
-            call.tool_call_id,
-            tool_def.name,
-            args,
-            effect_class,
+        decision = decide_action(effect_class, self.authorized(tool_def.name, args))
+        proposal = _proposal(
+            self.store, self.tianwen_run_id, call.tool_call_id, tool_def.name, args, effect_class
         )
-        return ActionContext(action, decide_action(effect_class, self.authorized(tool_def.name, args)))
+        if decision is PolicyDecision.DENY or self.loop_id is None:
+            self.store.prepare_action(proposal)
+        else:
+            self.store.prepare_action_with_budget(
+                proposal, self.loop_id, BudgetUsage(tool_calls=1, action_effects=1)
+            )
+        return ActionContext(self.store.get_action(proposal.action_id), decision)
 
     async def before_tool_execute(
         self,
@@ -277,6 +280,8 @@ class ActionGatewayCapability(AbstractCapability[object]):
         action = self.store.get_action(
             proposal_action_id(self.tianwen_run_id, call.tool_call_id, tool_def.name, args)
         )
+        if action.status is ActionStatus.WAITING_APPROVAL:
+            raise StateConflict(f"action {action.action_id} is waiting for approval")
         if action.status is ActionStatus.SUCCEEDED:
             return None
         action = _transition(

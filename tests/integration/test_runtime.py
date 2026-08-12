@@ -11,7 +11,20 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai_harness.step_persistence import InMemoryStepStore
 
-from tianwen.domain import ActionRecord, ActionStatus, RunManifest, RunRecord, RunStatus, content_digest
+from tianwen.domain import (
+    ActionRecord,
+    ActionStatus,
+    BudgetLimit,
+    BudgetUsage,
+    LoopKind,
+    LoopRecord,
+    RunManifest,
+    RunRecord,
+    RunStatus,
+    TaskKind,
+    TaskRecord,
+    content_digest,
+)
 from tianwen.gateway import ActionGatewayCapability, EffectClass, freeze_action
 from tianwen.store import StateConflict, StateStore
 
@@ -89,6 +102,23 @@ def _runtime(tmp_path: Path, model: Any, allowed_commands: tuple[str, ...] = ("p
 
 
 def _persist_run(runtime: Any, run: RunRecord) -> None:
+    loop = LoopRecord(
+        loop_id="loop-1",
+        goal_id="goal-1",
+        kind=LoopKind.USER,
+        objective="runtime test",
+        budget=BudgetLimit(model_requests=0, tool_calls=20, tokens=0, action_effects=20),
+    )
+    task = TaskRecord(
+        task_id=run.task_id,
+        loop_id=loop.loop_id,
+        kind=TaskKind.EXECUTION,
+        objective="runtime test",
+        acceptance=("works",),
+    )
+    runtime.store.put_object("loop", loop.loop_id, loop.goal_id, "active", loop)
+    runtime.store.create_budget(loop.loop_id, None, loop.budget)
+    runtime.store.put_object("task", task.task_id, loop.loop_id, "active", task)
     runtime.store.put_object("run", run.run_id, run.task_id, run.status.value, run)
 
 
@@ -121,6 +151,8 @@ async def test_run_writes_inside_workspace_through_gateway_and_records_tool_resu
     assert (tmp_path / "repo" / "inside.txt").read_text(encoding="utf-8") == "inside"
     assert (action.tool_name, action.status) == ("write_file", ActionStatus.SUCCEEDED)
     assert action.result_digest is not None
+    assert runtime.store.get_run_budget_usage(run.run_id) == BudgetUsage(tool_calls=1, action_effects=1)
+    assert runtime.store.get_budget("loop-1")[1] == BudgetUsage(tool_calls=1, action_effects=1)
     assert "tool_call_completed" in [event.kind for event in events]
 
 
