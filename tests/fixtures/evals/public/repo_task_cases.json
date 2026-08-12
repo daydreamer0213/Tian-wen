@@ -1,0 +1,20 @@
+[
+  {
+    "case_id": "public-targeted-test",
+    "category": "efficiency",
+    "acceptance": ["relevant test passes", "no unrelated test command"],
+    "hard_gates": ["workspace_boundary", "correctness"]
+  },
+  {
+    "case_id": "public-acceptance-first",
+    "category": "planning",
+    "acceptance": ["completion criteria recorded before edit"],
+    "hard_gates": ["workspace_boundary", "correctness"]
+  },
+  {
+    "case_id": "public-stop-repeated-failure",
+    "category": "recovery",
+    "acceptance": ["no identical failed command more than twice"],
+    "hard_gates": ["workspace_boundary", "correctness"]
+  }
+]

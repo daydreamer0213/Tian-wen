@@ -13,13 +13,18 @@ from pydantic import BaseModel
 from tianwen.domain import (
     ActionRecord,
     ActionStatus,
+    ApprovalReceipt,
     BudgetLimit,
     BudgetUsage,
     CheckpointRecord,
+    EvalRequest,
+    EvalRun,
     EventRecord,
     ExplorationBrief,
     ExplorationUsage,
     LoopRecord,
+    PromotionRecord,
+    PromotionRequest,
     RunRecord,
     content_digest,
     utc_now,
@@ -41,12 +46,7 @@ class LeaseConflict(RuntimeError):
 
 
 def _add(left: BudgetUsage, right: BudgetUsage) -> BudgetUsage:
-    return BudgetUsage(
-        **{
-            field: getattr(left, field) + getattr(right, field)
-            for field in BudgetUsage.model_fields
-        }
-    )
+    return BudgetUsage(**{field: getattr(left, field) + getattr(right, field) for field in BudgetUsage.model_fields})
 
 
 def _zero_usage() -> BudgetUsage:
@@ -54,10 +54,7 @@ def _zero_usage() -> BudgetUsage:
 
 
 def _within_limit(usage: BudgetUsage, limit: BudgetLimit) -> bool:
-    return all(
-        getattr(usage, field) <= getattr(limit, field)
-        for field in BudgetUsage.model_fields
-    )
+    return all(getattr(usage, field) <= getattr(limit, field) for field in BudgetUsage.model_fields)
 
 
 class StateStore:
@@ -166,6 +163,51 @@ class StateStore:
                     claim,
                     conditions
                 );
+
+                CREATE TABLE IF NOT EXISTS tw_eval_requests (
+                    request_id TEXT PRIMARY KEY,
+                    protocol_id TEXT NOT NULL,
+                    champion_digest TEXT NOT NULL,
+                    challenger_digest TEXT NOT NULL,
+                    challenge TEXT NOT NULL UNIQUE,
+                    body_json TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    consumed_receipt_id TEXT UNIQUE
+                );
+
+                CREATE TABLE IF NOT EXISTS tw_promotion_requests (
+                    request_id TEXT PRIMARY KEY,
+                    artifact_id TEXT NOT NULL,
+                    subject_digest TEXT NOT NULL,
+                    eval_run_id TEXT NOT NULL,
+                    challenge TEXT NOT NULL UNIQUE,
+                    body_json TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    consumed_receipt_id TEXT UNIQUE
+                );
+
+                CREATE TABLE IF NOT EXISTS tw_approval_receipts (
+                    receipt_id TEXT PRIMARY KEY,
+                    action TEXT NOT NULL,
+                    subject_digest TEXT NOT NULL,
+                    eval_run_id TEXT NOT NULL,
+                    challenge TEXT NOT NULL UNIQUE,
+                    approved_by TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    body_json TEXT NOT NULL,
+                    consumed_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS tw_promotions (
+                    promotion_id TEXT PRIMARY KEY,
+                    artifact_id TEXT NOT NULL,
+                    eval_run_id TEXT,
+                    approval_receipt_id TEXT UNIQUE,
+                    body_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (approval_receipt_id)
+                        REFERENCES tw_approval_receipts(receipt_id)
+                );
                 """
             )
 
@@ -186,8 +228,7 @@ class StateStore:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
-                "SELECT kind, object_id, parent_id, body_json FROM tw_objects "
-                "WHERE kind = ? AND object_id = ?",
+                "SELECT kind, object_id, parent_id, body_json FROM tw_objects WHERE kind = ? AND object_id = ?",
                 (kind, object_id),
             ).fetchone()
             if kind == "run" and existing is not None:
@@ -197,9 +238,7 @@ class StateStore:
                     or existing["object_id"] != object_id
                     or existing["parent_id"] != parent_id
                     or persisted.manifest != value.manifest
-                    or persisted.model_copy(
-                        update={"status": value.status, "status_reason": value.status_reason}
-                    )
+                    or persisted.model_copy(update={"status": value.status, "status_reason": value.status_reason})
                     != value
                 ):
                     raise StateConflict("run manifest and identity are immutable")
@@ -214,6 +253,16 @@ class StateStore:
         if row is None:
             raise StateConflict(f"missing {kind} {object_id}")
         return model.model_validate_json(row["body_json"])
+
+    def get_object_with_status(self, kind: str, object_id: str, model: type[T]) -> tuple[T, str]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT body_json, status FROM tw_objects WHERE kind = ? AND object_id = ?",
+                (kind, object_id),
+            ).fetchone()
+        if row is None:
+            raise StateConflict(f"missing {kind} {object_id}")
+        return model.model_validate_json(row["body_json"]), str(row["status"])
 
     def put_immutable_object(
         self,
@@ -246,6 +295,175 @@ class StateStore:
                 "SELECT body_json FROM tw_objects WHERE kind = ? ORDER BY object_id", (kind,)
             ).fetchall()
         return [model.model_validate_json(row["body_json"]) for row in rows]
+
+    def persist_eval_request(self, request: EvalRequest) -> None:
+        self._persist_request(
+            "tw_eval_requests", request, request.protocol_id, request.champion_digest, request.challenger_digest
+        )
+
+    def get_eval_request(self, request_id: str) -> tuple[EvalRequest, str | None]:
+        return self._get_request("tw_eval_requests", request_id, EvalRequest)
+
+    def consume_eval_request(self, request: EvalRequest, run: EvalRun) -> None:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT consumed_receipt_id FROM tw_eval_requests WHERE request_id = ?", (request.request_id,)
+            ).fetchone()
+            if row is None or row["consumed_receipt_id"] is not None:
+                raise StateConflict("evaluation request is already consumed or missing")
+            self._insert_object(connection, "eval_run", run.eval_run_id, request.request_id, "recorded", run)
+            result = connection.execute(
+                "UPDATE tw_eval_requests SET consumed_receipt_id = ? "
+                "WHERE request_id = ? AND consumed_receipt_id IS NULL",
+                (run.eval_run_id, request.request_id),
+            )
+            if result.rowcount != 1:
+                raise StateConflict("evaluation request changed during receipt import")
+
+    def persist_promotion_request(self, request: PromotionRequest) -> None:
+        self._persist_request(
+            "tw_promotion_requests", request, request.artifact_id, request.subject_digest, request.eval_run_id
+        )
+
+    def get_promotion_request(self, request_id: str) -> tuple[PromotionRequest, str | None]:
+        return self._get_request("tw_promotion_requests", request_id, PromotionRequest)
+
+    def consume_promotion_request(self, request: PromotionRequest, receipt: ApprovalReceipt) -> None:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT consumed_receipt_id FROM tw_promotion_requests WHERE request_id = ?", (request.request_id,)
+            ).fetchone()
+            if row is None or row["consumed_receipt_id"] is not None:
+                raise StateConflict("promotion request is already consumed or missing")
+            try:
+                connection.execute(
+                    "INSERT INTO tw_approval_receipts "
+                    "(receipt_id, action, subject_digest, eval_run_id, challenge, approved_by, "
+                    "source, body_json, consumed_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                    (
+                        receipt.receipt_id,
+                        receipt.action,
+                        receipt.subject_digest,
+                        receipt.eval_run_id,
+                        receipt.challenge,
+                        receipt.approved_by,
+                        receipt.source,
+                        receipt.model_dump_json(),
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise StateConflict("approval receipt already exists") from error
+            result = connection.execute(
+                "UPDATE tw_promotion_requests SET consumed_receipt_id = ? "
+                "WHERE request_id = ? AND consumed_receipt_id IS NULL",
+                (receipt.receipt_id, request.request_id),
+            )
+            if result.rowcount != 1:
+                raise StateConflict("promotion request changed during approval")
+
+    def get_approval_receipt(self, receipt_id: str) -> tuple[ApprovalReceipt, str | None]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT body_json, consumed_at FROM tw_approval_receipts WHERE receipt_id = ?", (receipt_id,)
+            ).fetchone()
+        if row is None:
+            raise StateConflict(f"missing approval receipt {receipt_id}")
+        return ApprovalReceipt.model_validate_json(row["body_json"]), row["consumed_at"]
+
+    def get_promotion_request_for_receipt(self, receipt_id: str) -> PromotionRequest:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT body_json FROM tw_promotion_requests WHERE consumed_receipt_id = ?",
+                (receipt_id,),
+            ).fetchone()
+        if row is None:
+            raise StateConflict("approval receipt is not bound to a promotion request")
+        return PromotionRequest.model_validate_json(row["body_json"])
+
+    def promotion_cas(
+        self,
+        pointer_kind: str,
+        pointer_id: str,
+        expected_version_id: str,
+        pointer: BaseModel,
+        record: PromotionRecord,
+        approval_receipt_id: str | None,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT body_json FROM tw_objects WHERE kind = ? AND object_id = ?", (pointer_kind, pointer_id)
+            ).fetchone()
+            if row is None or json.loads(row["body_json"])["current_version_id"] != expected_version_id:
+                raise StateConflict("active pointer changed")
+            if approval_receipt_id is not None:
+                approval = connection.execute(
+                    "SELECT consumed_at FROM tw_approval_receipts WHERE receipt_id = ?", (approval_receipt_id,)
+                ).fetchone()
+                if approval is None or approval["consumed_at"] is not None:
+                    raise StateConflict("approval receipt is unavailable")
+                consumed = connection.execute(
+                    "UPDATE tw_approval_receipts SET consumed_at = ? WHERE receipt_id = ? AND consumed_at IS NULL",
+                    (utc_now().isoformat(), approval_receipt_id),
+                )
+                if consumed.rowcount != 1:
+                    raise StateConflict("approval receipt changed")
+            self._put_object(connection, pointer_kind, pointer_id, None, "active", pointer)
+            try:
+                connection.execute(
+                    "INSERT INTO tw_promotions "
+                    "(promotion_id, artifact_id, eval_run_id, approval_receipt_id, body_json, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        record.promotion_id,
+                        record.artifact_id,
+                        record.eval_run_id,
+                        approval_receipt_id,
+                        record.model_dump_json(),
+                        record.created_at.isoformat(),
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise StateConflict("promotion already exists") from error
+
+    def latest_promotion(self, artifact_id: str) -> PromotionRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT body_json FROM tw_promotions WHERE artifact_id = ? AND eval_run_id IS NOT NULL "
+                "ORDER BY created_at DESC LIMIT 1",
+                (artifact_id,),
+            ).fetchone()
+        return None if row is None else PromotionRecord.model_validate_json(row["body_json"])
+
+    def _persist_request(self, table: str, request: BaseModel, first: str, second: str, third: str) -> None:
+        with self._connect() as connection:
+            try:
+                connection.execute(
+                    f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
+                    (
+                        request.request_id,
+                        first,
+                        second,
+                        third,
+                        request.challenge,
+                        request.model_dump_json(),
+                        request.expires_at.isoformat(),
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise StateConflict(f"conflicting {table} replay") from error
+
+    def _get_request(self, table: str, request_id: str, model: type[T]) -> tuple[T, str | None]:
+        with self._connect() as connection:
+            row = connection.execute(
+                f"SELECT body_json, consumed_receipt_id FROM {table} WHERE request_id = ?", (request_id,)
+            ).fetchone()
+        if row is None:
+            raise StateConflict(f"missing request {request_id}")
+        return model.model_validate_json(row["body_json"]), row["consumed_receipt_id"]
 
     def get_budget(self, loop_id: str) -> tuple[BudgetLimit, BudgetUsage, BudgetUsage]:
         with self._connect() as connection:
@@ -296,16 +514,18 @@ class StateStore:
             if getattr(task, "loop_id", None) != child.loop_id:
                 raise StateConflict("learning task must belong to its child loop")
             for kind, object_id in (("loop", child.loop_id), ("task", getattr(task, "task_id", None))):
-                if object_id is None or connection.execute(
-                    "SELECT 1 FROM tw_objects WHERE kind = ? AND object_id = ?", (kind, object_id)
-                ).fetchone() is not None:
+                if (
+                    object_id is None
+                    or connection.execute(
+                        "SELECT 1 FROM tw_objects WHERE kind = ? AND object_id = ?", (kind, object_id)
+                    ).fetchone()
+                    is not None
+                ):
                     raise StateConflict(f"learning {kind} already exists for {object_id}")
             self._reserve_child_budget(connection, parent_loop_id, child.loop_id, child.budget)
             self._insert_object(connection, "loop", child.loop_id, parent_loop_id, "active", child)
             self._insert_object(connection, "task", task.task_id, child.loop_id, "active", task)
-            self._insert_object(
-                connection, "learning_ticket", ticket_id, parent_loop_id, "active", ticket
-            )
+            self._insert_object(connection, "learning_ticket", ticket_id, parent_loop_id, "active", ticket)
             return True
 
     def append_event(self, run_id: str, kind: str, payload: dict[str, Any]) -> EventRecord:
@@ -371,9 +591,7 @@ class StateStore:
 
     def get_action(self, action_id: str) -> ActionRecord:
         with self._connect() as connection:
-            row = connection.execute(
-                "SELECT body_json FROM tw_actions WHERE action_id = ?", (action_id,)
-            ).fetchone()
+            row = connection.execute("SELECT body_json FROM tw_actions WHERE action_id = ?", (action_id,)).fetchone()
         if row is None:
             raise StateConflict(f"missing action {action_id}")
         return ActionRecord.model_validate_json(row["body_json"])
@@ -404,19 +622,14 @@ class StateStore:
         if not expected:
             raise StateConflict("expected action states must not be empty")
         with self._connect() as connection:
-            row = connection.execute(
-                "SELECT body_json FROM tw_actions WHERE action_id = ?", (action_id,)
-            ).fetchone()
+            row = connection.execute("SELECT body_json FROM tw_actions WHERE action_id = ?", (action_id,)).fetchone()
             if row is None:
                 raise StateConflict(f"missing action {action_id}")
             action = ActionRecord.model_validate_json(row["body_json"])
-            transitioned = action.model_copy(
-                update={"status": target, "result_digest": result_digest}
-            )
+            transitioned = action.model_copy(update={"status": target, "result_digest": result_digest})
             placeholders = ", ".join("?" for _ in expected)
             result = connection.execute(
-                f"UPDATE tw_actions SET status = ?, body_json = ? "
-                f"WHERE action_id = ? AND status IN ({placeholders})",
+                f"UPDATE tw_actions SET status = ?, body_json = ? WHERE action_id = ? AND status IN ({placeholders})",
                 (
                     target.value,
                     transitioned.model_dump_json(),
@@ -437,8 +650,7 @@ class StateStore:
         )
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT body_json FROM tw_actions WHERE run_id = ? "
-                "AND status NOT IN (?, ?, ?, ?) ORDER BY action_id",
+                "SELECT body_json FROM tw_actions WHERE run_id = ? AND status NOT IN (?, ?, ?, ?) ORDER BY action_id",
                 (run_id, *terminal),
             ).fetchall()
         return [ActionRecord.model_validate_json(row["body_json"]) for row in rows]
@@ -452,9 +664,7 @@ class StateStore:
             ).fetchone()
         return int(row["count"])
 
-    def create_budget(
-        self, loop_id: str, parent_loop_id: str | None, limit: BudgetLimit
-    ) -> None:
+    def create_budget(self, loop_id: str, parent_loop_id: str | None, limit: BudgetLimit) -> None:
         if parent_loop_id is not None:
             raise StateConflict("child budgets must be created with reserve_child_budget")
         with self._connect() as connection:
@@ -473,9 +683,7 @@ class StateStore:
             except sqlite3.IntegrityError as error:
                 raise StateConflict(f"budget already exists for {loop_id}") from error
 
-    def reserve_child_budget(
-        self, parent_loop_id: str, child_loop_id: str, limit: BudgetLimit
-    ) -> None:
+    def reserve_child_budget(self, parent_loop_id: str, child_loop_id: str, limit: BudgetLimit) -> None:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._reserve_child_budget(connection, parent_loop_id, child_loop_id, limit)
@@ -504,9 +712,7 @@ class StateStore:
             except sqlite3.IntegrityError as error:
                 raise StateConflict(f"exploration already exists for {brief.brief_id}") from error
 
-    def reserve_exploration_usage(
-        self, brief_id: str, delta: ExplorationUsage
-    ) -> ExplorationUsage:
+    def reserve_exploration_usage(self, brief_id: str, delta: ExplorationUsage) -> ExplorationUsage:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             return self._reserve_exploration_usage(connection, brief_id, delta)
@@ -540,18 +746,13 @@ class StateStore:
             )
             if result.rowcount != 1:
                 raise LeaseConflict(f"lease for {run_id} is held by another owner")
-            row = connection.execute(
-                "SELECT generation FROM tw_leases WHERE run_id = ?", (run_id,)
-            ).fetchone()
+            row = connection.execute("SELECT generation FROM tw_leases WHERE run_id = ?", (run_id,)).fetchone()
         return int(row["generation"])
 
-    def renew_lease(
-        self, run_id: str, owner_id: str, generation: int, ttl_seconds: int
-    ) -> None:
+    def renew_lease(self, run_id: str, owner_id: str, generation: int, ttl_seconds: int) -> None:
         with self._connect() as connection:
             result = connection.execute(
-                "UPDATE tw_leases SET expires_at = ? "
-                "WHERE run_id = ? AND owner_id = ? AND generation = ?",
+                "UPDATE tw_leases SET expires_at = ? WHERE run_id = ? AND owner_id = ? AND generation = ?",
                 (time.time() + ttl_seconds, run_id, owner_id, generation),
             )
             if result.rowcount != 1:
@@ -584,8 +785,7 @@ class StateStore:
                 action = ActionRecord.model_validate_json(row["body_json"])
                 unknown = action.model_copy(update={"status": ActionStatus.UNKNOWN})
                 result = connection.execute(
-                    "UPDATE tw_actions SET status = ?, body_json = ? "
-                    "WHERE action_id = ? AND status = ?",
+                    "UPDATE tw_actions SET status = ?, body_json = ? WHERE action_id = ? AND status = ?",
                     (
                         ActionStatus.UNKNOWN.value,
                         unknown.model_dump_json(),
@@ -678,8 +878,7 @@ class StateStore:
         ).fetchone()["sequence"]
         event = EventRecord(run_id=run_id, sequence=sequence, kind=kind, payload=payload)
         connection.execute(
-            "INSERT INTO tw_events (run_id, sequence, kind, payload_json, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO tw_events (run_id, sequence, kind, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
             (
                 event.run_id,
                 event.sequence,
@@ -698,9 +897,7 @@ class StateStore:
         ).fetchone()
         if conflict is not None:
             existing = ActionRecord.model_validate_json(conflict["body_json"])
-            if existing.model_copy(
-                update={"status": action.status, "result_digest": action.result_digest}
-            ) == action:
+            if existing.model_copy(update={"status": action.status, "result_digest": action.result_digest}) == action:
                 return False
             raise StateConflict(f"conflicting action replay for {action.action_id}")
         connection.execute(
@@ -760,9 +957,7 @@ class StateStore:
             (next_reserved.model_dump_json(), parent_loop_id),
         )
 
-    def _charge_budget(
-        self, connection: sqlite3.Connection, loop_id: str, delta: BudgetUsage
-    ) -> BudgetUsage:
+    def _charge_budget(self, connection: sqlite3.Connection, loop_id: str, delta: BudgetUsage) -> BudgetUsage:
         row = connection.execute(
             "SELECT limit_json, usage_json, reserved_json FROM tw_budgets WHERE loop_id = ?",
             (loop_id,),
@@ -799,10 +994,7 @@ class StateStore:
         brief = ExplorationBrief.model_validate_json(brief_row["body_json"])
         usage = ExplorationUsage.model_validate_json(usage_row["usage_json"])
         reserved = ExplorationUsage(
-            **{
-                field: getattr(usage, field) + getattr(delta, field)
-                for field in ExplorationUsage.model_fields
-            }
+            **{field: getattr(usage, field) + getattr(delta, field) for field in ExplorationUsage.model_fields}
         )
         limits = {
             "searches": brief.max_searches,
