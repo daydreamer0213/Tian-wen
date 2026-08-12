@@ -239,13 +239,41 @@ def sealed_case(case_id: str = "sealed-case-1") -> dict[str, object]:
 
 
 def evaluator_environment(dataset: Path, private_key: Ed25519PrivateKey) -> dict[str, str]:
+    private_key_path = dataset.parent / "evaluator-private.key"
+    private_key_path.write_text(
+        base64.b64encode(private_key.private_bytes_raw()).decode("ascii"), encoding="utf-8"
+    )
+    if os.name == "nt":
+        _secure_windows_evaluator_inputs(dataset, private_key_path)
+    else:
+        dataset.chmod(0o700)
+        (dataset / "cases.json").chmod(0o600)
+        private_key_path.chmod(0o600)
     return {
         **os.environ,
         "TIANWEN_SEALED_DATASET_DIR": str(dataset),
-        "TIANWEN_EVAL_PRIVATE_KEY": base64.b64encode(
-            private_key.private_bytes_raw()
-        ).decode("ascii"),
+        "TIANWEN_EVAL_PRIVATE_KEY": str(private_key_path),
+        "TIANWEN_RUNTIME_ACCOUNT": "TIANWEN\\runtime",
     }
+
+
+def _secure_windows_evaluator_inputs(dataset: Path, private_key_path: Path) -> None:
+    current_account = subprocess.run(
+        ["whoami"], capture_output=True, check=True, shell=False, text=True, timeout=5
+    ).stdout.strip()
+    for path, grant in (
+        (dataset, f"{current_account}:(OI)(CI)(RX)"),
+        (dataset / "cases.json", f"{current_account}:(R)"),
+        (private_key_path, f"{current_account}:(R)"),
+    ):
+        subprocess.run(["icacls", str(path), "/inheritance:r"], check=True, shell=False, timeout=5)
+        subprocess.run(["icacls", str(path), "/grant:r", grant], check=True, shell=False, timeout=5)
+        subprocess.run(
+            ["icacls", str(path), "/grant:r", "NT AUTHORITY\\SYSTEM:(F)"],
+            check=True,
+            shell=False,
+            timeout=5,
+        )
 
 
 def run_evaluator(
@@ -522,6 +550,49 @@ def test_sealed_evaluator_preserves_lf_snapshot_bytes_and_imports_receipt(tmp_pa
     assert import_eval_receipt(store, receipt, private_key.public_key()).challenger_version_id == challenger.version_id
 
 
+def test_sealed_evaluator_rejects_private_key_material_in_environment(tmp_path: Path) -> None:
+    request = write_eval_request(
+        store_at(tmp_path / "state.db"),
+        protocol(),
+        artifact("champion", ArtifactStatus.ACTIVE, "champion"),
+        artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
+        tmp_path / "inbox",
+    )
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_bytes(canonical_json_bytes([sealed_case()]))
+    private_key = Ed25519PrivateKey.generate()
+    environment = evaluator_environment(dataset, private_key)
+    environment["TIANWEN_EVAL_PRIVATE_KEY"] = base64.b64encode(private_key.private_bytes_raw()).decode("ascii")
+
+    completed = run_evaluator(request, environment)
+
+    assert completed.returncode != 0
+    assert not Path(request.receipt_path).exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="TIANWEN_RUNTIME_ACCOUNT is required only on Windows")
+def test_sealed_evaluator_requires_runtime_account_without_creating_a_receipt(tmp_path: Path) -> None:
+    request = write_eval_request(
+        store_at(tmp_path / "state.db"),
+        protocol(),
+        artifact("champion", ArtifactStatus.ACTIVE, "champion"),
+        artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
+        tmp_path / "inbox",
+    )
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_bytes(canonical_json_bytes([sealed_case()]))
+    environment = evaluator_environment(dataset, Ed25519PrivateKey.generate())
+    environment.pop("TIANWEN_RUNTIME_ACCOUNT")
+
+    completed = run_evaluator(request, environment)
+
+    assert completed.returncode != 0
+    assert "TIANWEN_RUNTIME_ACCOUNT" in completed.stderr
+    assert not Path(request.receipt_path).exists()
+
+
 def test_resigned_request_bundle_cannot_import_or_consume_the_persisted_request(tmp_path: Path) -> None:
     store = store_at(tmp_path / "state.db")
     proto = protocol()
@@ -676,6 +747,101 @@ def _evaluator_module():
     spec.loader.exec_module(module)
     return module
 
+
+def test_windows_acl_validation_rejects_isolation_attacks_and_accepts_explicit_evaluator_access(
+    tmp_path: Path,
+) -> None:
+    module = _evaluator_module()
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    cases = dataset / "cases.json"
+    cases.write_text("[]", encoding="utf-8")
+    private_key = tmp_path / "evaluator-private.key"
+    private_key.write_text("private", encoding="utf-8")
+
+    good_acl = {
+        private_key: f"{private_key} EVALUATOR\\agent:(R)\n                 NT AUTHORITY\\SYSTEM:(F)\n",
+        dataset: f"{dataset} EVALUATOR\\agent:(RX)\n            NT AUTHORITY\\SYSTEM:(F)\n",
+        cases: f"{cases} EVALUATOR\\agent:(R)\n      NT AUTHORITY\\SYSTEM:(F)\n",
+    }
+
+    def validate(
+        runtime: str, acl_overrides: dict[Path, str] | None = None, *, whoami: str = "EVALUATOR\\agent"
+    ) -> None:
+        outputs = good_acl | (acl_overrides or {})
+
+        def command_runner(arguments: list[str]) -> str:
+            if arguments == ["whoami"]:
+                return whoami
+            assert arguments[0] == "icacls"
+            return outputs[Path(arguments[1])]
+
+        module._validate_windows_evaluator_isolation(dataset, private_key, runtime, command_runner)
+
+    validate("runtime")
+    with pytest.raises(ValueError, match="must differ"):
+        validate("EVALUATOR\\agent", whoami="EVALUATOR\\agent")
+    with pytest.raises(ValueError, match="runtime account"):
+        validate("runtime", {private_key: f"{private_key} RUNTIME:(R)\n"})
+    with pytest.raises(ValueError, match="runtime account"):
+        validate("runtime", {cases: f"{cases} RUNTIME:(OI)(CI)\n"})
+    with pytest.raises(ValueError, match="unexpected principal"):
+        validate("runtime", {cases: f"{cases} 本地化未知组:(R)\n"})
+    with pytest.raises(ValueError, match="inherited"):
+        validate("runtime", {cases: f"{cases} EVALUATOR\\agent:(I)(R)\n"})
+    with pytest.raises(ValueError, match="DENY"):
+        validate("runtime", {cases: f"{cases} EVALUATOR\\agent:(DENY)(R)\n"})
+    with pytest.raises(ValueError, match="unexpected principal"):
+        validate("runtime", {cases: f"{cases} BUILTIN\\Administrators:(F)\n"})
+    with pytest.raises(ValueError, match="current evaluator"):
+        validate("runtime", {cases: f"{cases} EVALUATOR\\agent:(OI)(CI)\n"})
+    with pytest.raises(ValueError, match="unexpected principal"):
+        validate("runtime", {dataset: f"{dataset} OTHER:(RX)\n"})
+
+    def failed_command(_: list[str]) -> str:
+        raise OSError("command unavailable")
+
+    with pytest.raises(ValueError, match="identity or ACL query failed"):
+        module._validate_windows_evaluator_isolation(dataset, private_key, "runtime", failed_command)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires Windows icacls")
+def test_sealed_evaluator_accepts_real_temporary_windows_acl_without_leaving_acl_changes(tmp_path: Path) -> None:
+    request = write_eval_request(
+        store_at(tmp_path / "state.db"),
+        protocol(),
+        artifact("champion", ArtifactStatus.ACTIVE, "champion"),
+        artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
+        tmp_path / "inbox",
+    )
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_bytes(canonical_json_bytes([sealed_case()]))
+    private_key = Ed25519PrivateKey.generate()
+
+    completed = run_evaluator(request, evaluator_environment(dataset, private_key))
+
+    assert completed.returncode == 0, completed.stderr
+    assert Path(request.receipt_path).exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows ACLs are tested separately")
+def test_posix_evaluator_isolation_requires_private_evaluator_owned_regular_paths(tmp_path: Path) -> None:
+    module = _evaluator_module()
+    dataset = tmp_path / "sealed"
+    dataset.mkdir(mode=0o700)
+    cases = dataset / "cases.json"
+    cases.write_text("[]", encoding="utf-8")
+    cases.chmod(0o600)
+    private_key = tmp_path / "evaluator-private.key"
+    private_key.write_text("private", encoding="utf-8")
+    private_key.chmod(0o600)
+
+    module._validate_posix_evaluator_isolation(dataset, private_key)
+
+    cases.chmod(0o640)
+    with pytest.raises(ValueError, match="group or other"):
+        module._validate_posix_evaluator_isolation(dataset, private_key)
 
 def test_sealed_evaluator_rejects_receipt_link_or_simulated_reparse_point(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

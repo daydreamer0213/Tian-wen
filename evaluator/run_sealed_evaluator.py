@@ -6,8 +6,11 @@ import hashlib
 import json
 import math
 import os
+import re
 import stat
+import subprocess
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -106,7 +109,50 @@ def _parse_challenge(challenge: str) -> tuple[str, str]:
     return nonce, binding
 
 
-def _private_key(value: str) -> Ed25519PrivateKey:
+_ACL_INHERITANCE_FLAGS = frozenset({"CI", "IO", "NP", "OI"})
+_ACL_ACCESS_RIGHTS = frozenset(
+    {
+        "AD",
+        "AS",
+        "CR",
+        "D",
+        "DC",
+        "DT",
+        "F",
+        "GA",
+        "GE",
+        "GR",
+        "GW",
+        "GX",
+        "LC",
+        "LO",
+        "M",
+        "MA",
+        "R",
+        "RA",
+        "RC",
+        "RD",
+        "REA",
+        "RP",
+        "RX",
+        "S",
+        "SD",
+        "SW",
+        "W",
+        "WA",
+        "WD",
+        "WDAC",
+        "WEA",
+        "WO",
+        "WP",
+        "X",
+    }
+)
+_WINDOWS_SYSTEM_PRINCIPAL = "nt authority\\system"
+
+
+def _private_key(path: Path) -> Ed25519PrivateKey:
+    value = path.read_text(encoding="utf-8")
     raw = value.encode("utf-8")
     if "BEGIN" in value:
         key = serialization.load_pem_private_key(raw, password=None)
@@ -115,6 +161,156 @@ def _private_key(value: str) -> Ed25519PrivateKey:
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError("TIANWEN_EVAL_PRIVATE_KEY is not an Ed25519 private key")
     return key
+
+
+def _normalise_windows_principal(value: str) -> str:
+    compact = re.sub(r"\s*\\\s*", r"\\", " ".join(value.split()))
+    return compact.replace("/", "\\").casefold()
+
+
+def _run_windows_command(arguments: list[str]) -> str:
+    completed = subprocess.run(
+        arguments,
+        capture_output=True,
+        check=True,
+        shell=False,
+        text=True,
+        timeout=5,
+    )
+    if not completed.stdout.strip():
+        raise ValueError("command returned no output")
+    return completed.stdout
+
+
+def _windows_acl_entries(path: Path, output: str) -> tuple[tuple[str, frozenset[str]], ...]:
+    entries: list[tuple[str, frozenset[str]]] = []
+    path_prefix = str(path).casefold()
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped or "(" not in stripped:
+            continue
+        prefix, separator, suffix = stripped.rpartition(":")
+        if not separator or not prefix or not suffix:
+            raise ValueError(f"could not safely parse ACL for {path.name}")
+        rights = frozenset(token.upper() for token in re.findall(r"\(([A-Za-z]+)\)", suffix))
+        if not rights or "".join(f"({token})" for token in re.findall(r"\(([A-Za-z]+)\)", suffix)) != suffix.strip():
+            raise ValueError(f"could not safely parse ACL for {path.name}")
+        if "DENY" in rights:
+            raise ValueError(f"ACL contains DENY entry for {path.name}")
+        if "I" in rights:
+            raise ValueError(f"ACL contains inherited entry for {path.name}")
+        if not rights <= _ACL_INHERITANCE_FLAGS | _ACL_ACCESS_RIGHTS:
+            raise ValueError(f"could not safely parse ACL for {path.name}")
+        principal = prefix.strip()
+        if principal.casefold().startswith(path_prefix):
+            principal = principal[len(str(path)) :].strip()
+        if not principal:
+            raise ValueError(f"could not safely parse ACL for {path.name}")
+        entries.append((_normalise_windows_principal(principal), rights))
+    if not entries:
+        raise ValueError(f"could not parse ACL for {path.name}")
+    return tuple(entries)
+
+
+def _validate_windows_acl(
+    path: Path,
+    output: str,
+    *,
+    current_account: str,
+    runtime_account: str,
+    required_rights: frozenset[str],
+) -> None:
+    entries = _windows_acl_entries(path, output)
+    evaluator_granted = False
+    for principal, rights in entries:
+        if principal == runtime_account:
+            raise ValueError(f"runtime account has access to {path.name}")
+        if principal not in {current_account, _WINDOWS_SYSTEM_PRINCIPAL}:
+            raise ValueError(f"unexpected principal has access to {path.name}")
+        if principal == current_account and principal != _WINDOWS_SYSTEM_PRINCIPAL and rights & required_rights:
+            evaluator_granted = True
+    if not evaluator_granted:
+        raise ValueError(f"current evaluator lacks required access to {path.name}")
+
+
+def _validate_windows_evaluator_isolation(
+    dataset_dir: Path,
+    private_key_path: Path,
+    runtime_account: str,
+    command_runner: Callable[[list[str]], str],
+) -> None:
+    try:
+        current_account = _normalise_windows_principal(command_runner(["whoami"]))
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        raise ValueError("evaluator identity or ACL query failed") from error
+    excluded_account = _normalise_windows_principal(runtime_account)
+    if not current_account or not excluded_account:
+        raise ValueError("could not parse evaluator or runtime account")
+    if current_account == excluded_account:
+        raise ValueError("runtime account must differ from evaluator account")
+    cases_path = dataset_dir / "cases.json"
+    for path, required_rights in (
+        (private_key_path, frozenset({"R", "F"})),
+        (dataset_dir, frozenset({"RX", "F"})),
+        (cases_path, frozenset({"R", "F"})),
+    ):
+        try:
+            output = command_runner(["icacls", str(path)])
+        except (OSError, subprocess.SubprocessError, ValueError) as error:
+            raise ValueError("evaluator identity or ACL query failed") from error
+        _validate_windows_acl(
+            path,
+            output,
+            current_account=current_account,
+            runtime_account=excluded_account,
+            required_rights=required_rights,
+        )
+
+
+def _require_safe_sealed_path(path: Path, *, is_dir: bool) -> os.stat_result:
+    try:
+        file_status = os.lstat(path)
+    except OSError as error:
+        raise ValueError(f"sealed path is unavailable: {path.name}") from error
+    if _is_reparse_point(file_status) or stat.S_ISLNK(file_status.st_mode):
+        raise ValueError(f"sealed path is a link or reparse point: {path.name}")
+    if (stat.S_ISDIR(file_status.st_mode) if is_dir else stat.S_ISREG(file_status.st_mode)) is False:
+        raise ValueError(f"sealed path has the wrong type: {path.name}")
+    return file_status
+
+
+def _validate_posix_evaluator_isolation(dataset_dir: Path, private_key_path: Path) -> None:
+    if not hasattr(os, "getuid"):
+        raise ValueError("cannot determine evaluator owner")
+    current_uid = os.getuid()
+    for path, is_dir in ((dataset_dir, True), (dataset_dir / "cases.json", False), (private_key_path, False)):
+        file_status = _require_safe_sealed_path(path, is_dir=is_dir)
+        if file_status.st_uid != current_uid:
+            raise ValueError(f"sealed path is not owned by evaluator: {path.name}")
+        if file_status.st_mode & 0o077:
+            raise ValueError(f"sealed path grants group or other access: {path.name}")
+        if is_dir and not (file_status.st_mode & stat.S_IRUSR and file_status.st_mode & stat.S_IXUSR):
+            raise ValueError(f"sealed directory is not readable and searchable: {path.name}")
+        if not is_dir and not file_status.st_mode & stat.S_IRUSR:
+            raise ValueError(f"sealed file is not readable: {path.name}")
+
+
+def _validate_evaluator_isolation(
+    dataset_dir: Path,
+    private_key_path: Path,
+    runtime_account: str | None,
+    *,
+    command_runner: Callable[[list[str]], str] = _run_windows_command,
+) -> None:
+    _require_safe_sealed_path(dataset_dir, is_dir=True)
+    _require_safe_sealed_path(dataset_dir / "cases.json", is_dir=False)
+    _require_safe_sealed_path(private_key_path, is_dir=False)
+    if os.name == "nt":
+        if not runtime_account:
+            raise ValueError("TIANWEN_RUNTIME_ACCOUNT is required on Windows")
+        _validate_windows_evaluator_isolation(dataset_dir, private_key_path, runtime_account, command_runner)
+    else:
+        _validate_posix_evaluator_isolation(dataset_dir, private_key_path)
 
 
 def _outcome(case_id: str, hard_gates: set[str], value: object) -> dict[str, object]:
@@ -180,6 +376,7 @@ def _aggregate(dataset: Path) -> tuple[bool, dict[str, float], tuple[str, ...]]:
 def main() -> int:
     dataset_dir = os.environ.get("TIANWEN_SEALED_DATASET_DIR")
     private_key_value = os.environ.get("TIANWEN_EVAL_PRIVATE_KEY")
+    runtime_account = os.environ.get("TIANWEN_RUNTIME_ACCOUNT")
     if not dataset_dir or not private_key_value:
         print("TIANWEN_SEALED_DATASET_DIR and TIANWEN_EVAL_PRIVATE_KEY are required", file=sys.stderr)
         return 2
@@ -191,6 +388,9 @@ def main() -> int:
     parser.add_argument("output_receipt")
     args = parser.parse_args()
     try:
+        sealed_dataset_dir = _absolute_path(dataset_dir)
+        private_key_path = _absolute_path(private_key_value)
+        _validate_evaluator_isolation(sealed_dataset_dir, private_key_path, runtime_account)
         champion_path = _absolute_path(args.champion_snapshot)
         challenger_path = _absolute_path(args.challenger_snapshot)
         if champion_path.name != "champion.snapshot" or challenger_path.name != "challenger.snapshot":
@@ -227,7 +427,7 @@ def main() -> int:
         provisional = request.model_copy(update={"challenge": nonce})
         if binding != _bundle_binding(provisional, protocol):
             raise ValueError("challenge bundle binding mismatch")
-        hard_gate_passed, metrics, failure_categories = _aggregate(Path(dataset_dir).resolve(strict=True))
+        hard_gate_passed, metrics, failure_categories = _aggregate(sealed_dataset_dir)
         receipt = EvalReceipt(
             receipt_id=base64.urlsafe_b64encode(os.urandom(18)).decode("ascii").rstrip("="),
             request_id=request.request_id,
@@ -241,7 +441,7 @@ def main() -> int:
             issued_at=datetime.now(UTC),
             signature_b64="",
         )
-        signature = _private_key(private_key_value).sign(_canonical(receipt))
+        signature = _private_key(private_key_path).sign(_canonical(receipt))
         receipt = receipt.model_copy(
             update={"signature_b64": base64.b64encode(signature).decode("ascii")}
         )
