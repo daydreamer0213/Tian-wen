@@ -68,6 +68,11 @@ def _action_identity(
     return f"{run_id}:{tool_call_id}:{tool_name}:{args_digest}"
 
 
+def _action_id(run_id: str, tool_call_id: str, tool_name: str, args: dict[str, Any]) -> str:
+    args_json = json.dumps(args, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"action:{content_digest(_action_identity(run_id, tool_call_id, tool_name, content_digest(args_json)))}"
+
+
 def _proposal(
     store: StateStore,
     run_id: str,
@@ -79,7 +84,7 @@ def _proposal(
     args_json = json.dumps(args, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     args_digest = content_digest(args_json)
     identity = _action_identity(run_id, tool_call_id, tool_name, args_digest)
-    action_id = f"action:{content_digest(identity)}"
+    action_id = _action_id(run_id, tool_call_id, tool_name, args)
     proposal = ActionRecord(
         action_id=action_id,
         run_id=run_id,
@@ -168,16 +173,21 @@ async def execute_action(
             {ActionStatus.PROPOSED, ActionStatus.WAITING_APPROVAL, ActionStatus.APPROVED},
             ActionStatus.DENIED,
         ), None
-    if decision is PolicyDecision.ASK:
-        _transition(
-            store,
-            action,
-            {ActionStatus.PROPOSED},
-            ActionStatus.WAITING_APPROVAL,
-        )
-        raise ActionApprovalRequired(action.action_id)
     if action.status is ActionStatus.SUCCEEDED:
         return action, None
+    if decision is PolicyDecision.ASK:
+        if action.status is ActionStatus.PROPOSED:
+            _transition(
+                store,
+                action,
+                {ActionStatus.PROPOSED},
+                ActionStatus.WAITING_APPROVAL,
+            )
+            raise ActionApprovalRequired(action.action_id)
+        if action.status is ActionStatus.WAITING_APPROVAL:
+            raise ActionApprovalRequired(action.action_id)
+        if action.status is not ActionStatus.APPROVED:
+            raise StateConflict(f"action {action.action_id} is not approved")
     action = _transition(
         store,
         action,
@@ -249,12 +259,7 @@ class ActionGatewayCapability(AbstractCapability[object]):
                     ActionStatus.WAITING_APPROVAL,
                 )
                 raise ApprovalRequired(metadata={"action_id": action.action_id})
-            _transition(
-                self.store,
-                action,
-                {ActionStatus.WAITING_APPROVAL, ActionStatus.PROPOSED},
-                ActionStatus.APPROVED,
-            )
+            _transition(self.store, action, {ActionStatus.WAITING_APPROVAL}, ActionStatus.APPROVED)
         return args
 
     async def wrap_tool_execute(
@@ -267,7 +272,9 @@ class ActionGatewayCapability(AbstractCapability[object]):
         handler: WrapToolExecuteHandler,
     ) -> Any:
         del ctx
-        action = self._context(call, tool_def, args).action
+        action = self.store.get_action(
+            _action_id(self.tianwen_run_id, call.tool_call_id, tool_def.name, args)
+        )
         if action.status is ActionStatus.SUCCEEDED:
             return None
         action = _transition(

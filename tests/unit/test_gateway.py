@@ -136,19 +136,63 @@ async def test_direct_execution_persists_single_shared_lifecycle(tmp_path: Path)
 @pytest.mark.anyio
 async def test_direct_ask_persists_waiting_for_approval_before_raising(tmp_path: Path) -> None:
     store = make_store(tmp_path)
+    calls = 0
+
+    async def publish(_: dict[str, Any]) -> str:
+        nonlocal calls
+        calls += 1
+        return "published"
 
     with pytest.raises(ActionApprovalRequired) as raised:
         await execute_action(
             store, "run", "call", "publish", {}, EffectClass.EXTERNAL_OR_IRREVERSIBLE,
-            True, lambda args: _return(args),
+            True, publish,
         )
 
     assert store.get_action(raised.value.action_id).status is ActionStatus.WAITING_APPROVAL
     with pytest.raises(ActionApprovalRequired):
         await execute_action(
             store, "run", "call", "publish", {}, EffectClass.EXTERNAL_OR_IRREVERSIBLE,
-            True, lambda args: _return(args),
+            True, publish,
         )
+    assert calls == 0
+    store.transition_action(
+        raised.value.action_id,
+        {ActionStatus.WAITING_APPROVAL},
+        ActionStatus.APPROVED,
+    )
+
+    action, result = await execute_action(
+        store, "run", "call", "publish", {}, EffectClass.EXTERNAL_OR_IRREVERSIBLE,
+        True, publish,
+    )
+
+    assert (action.status, result, calls) == (ActionStatus.SUCCEEDED, "published", 1)
+    replay, raw_result = await execute_action(
+        store, "run", "call", "publish", {}, EffectClass.EXTERNAL_OR_IRREVERSIBLE,
+        True, publish,
+    )
+    assert (replay.status, raw_result, calls) == (ActionStatus.SUCCEEDED, None, 1)
+
+
+@pytest.mark.anyio
+async def test_direct_success_replay_does_not_repeat_handler(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    calls = 0
+
+    async def fetch(_: dict[str, Any]) -> str:
+        nonlocal calls
+        calls += 1
+        return "fetched"
+
+    await execute_action(
+        store, "run", "call", "fetch", {}, EffectClass.READ_ONLY, True, fetch,
+    )
+    replay, raw_result = await execute_action(
+        store, "run", "call", "fetch", {}, EffectClass.READ_ONLY, True, fetch,
+    )
+
+    assert (replay.status, raw_result, calls) == (ActionStatus.SUCCEEDED, None, 1)
 
 
 @pytest.mark.anyio
@@ -275,6 +319,69 @@ async def test_capability_denies_before_handler_and_defers_ask(tmp_path: Path) -
     assert resumed.output == "done"
     assert effects == ["alpha"]
     assert store.get_action(action_id).status is ActionStatus.SUCCEEDED
+
+
+@pytest.mark.anyio
+async def test_capability_rejects_fresh_approved_call_and_classifies_once(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    classify_calls = 0
+    authorization_calls = 0
+    effects: list[str] = []
+
+    def classify(_: str, __: dict[str, Any]) -> EffectClass:
+        nonlocal classify_calls
+        classify_calls += 1
+        return EffectClass.EXTERNAL_OR_IRREVERSIBLE
+
+    def authorized(_: str, __: dict[str, Any]) -> bool:
+        nonlocal authorization_calls
+        authorization_calls += 1
+        return True
+
+    gateway = ActionGatewayCapability(store, "run", classify, authorized)
+    agent: Agent[object, str | DeferredToolRequests] = Agent(
+        _GatewayModel(call_tools=["touch"], custom_output_text="done"),
+        output_type=[str, DeferredToolRequests],
+        capabilities=[gateway],
+    )
+
+    @agent.tool_plain(name="touch")
+    def touch(label: str) -> str:
+        effects.append(label)
+        return label
+
+    first = await agent.run("touch")
+    request = first.output.approvals[0]
+    action_id = first.output.metadata[request.tool_call_id]["action_id"]
+    store.transition_action(
+        action_id,
+        {ActionStatus.WAITING_APPROVAL},
+        ActionStatus.PROPOSED,
+    )
+    with pytest.raises(StateConflict):
+        await agent.run(
+            "touch",
+            message_history=first.all_messages(),
+            deferred_tool_results=DeferredToolResults(
+                approvals={request.tool_call_id: True}
+            ),
+        )
+    assert store.get_action(action_id).status is ActionStatus.PROPOSED
+    assert effects == []
+
+    store.transition_action(
+        action_id,
+        {ActionStatus.PROPOSED},
+        ActionStatus.WAITING_APPROVAL,
+    )
+    resumed = await agent.run(
+        message_history=first.all_messages(),
+        deferred_tool_results=DeferredToolResults(approvals={request.tool_call_id: True}),
+    )
+    assert resumed.output == "done"
+    assert store.get_action(action_id).status is ActionStatus.SUCCEEDED
+    assert effects == ["alpha"]
+    assert (classify_calls, authorization_calls) == (3, 3)
 
 
 async def _return(value: Any) -> Any:
