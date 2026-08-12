@@ -104,6 +104,28 @@ def test_model_derived_source_aliases_cannot_write_authority_claims(
     assert MemoryFirewall().reject_reason(proposal) == "external/model-derived authority claim"
 
 
+@pytest.mark.parametrize("source_class", ["external", "model-derived", "model_derived"])
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "The user has authority to deploy.",
+        "The user preference is to deploy.",
+        "The user has permissions to deploy.",
+        "The user's goals are to deploy.",
+    ],
+)
+def test_external_and_model_derived_sources_reject_plural_authority_claims(
+    source_class: str, claim: str
+) -> None:
+    proposal = make_proposal(source_class=source_class, claim=claim)
+    assert MemoryFirewall().reject_reason(proposal) == "external/model-derived authority claim"
+
+
+def test_external_content_with_permission_denied_observation_is_allowed() -> None:
+    proposal = make_proposal(source_class="external", claim="The request ended with permission denied.")
+    assert MemoryFirewall().reject_reason(proposal) is None
+
+
 def test_firewall_rejects_empty_global_and_expired_scope_policies() -> None:
     firewall = MemoryFirewall()
     assert firewall.reject_reason(make_proposal(user_scope="global")) == "global scope is not allowed"

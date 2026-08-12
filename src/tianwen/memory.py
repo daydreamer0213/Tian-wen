@@ -21,7 +21,16 @@ from tianwen.store import StateConflict, StateStore
 _MAX_CLAIM_LENGTH = 1000
 _EXTERNAL_SOURCE_CLASSES = {"external", "untrusted_external", "model", "model_derived"}
 _RESTRICTED_PURPOSES = {"authorization", "user_preference"}
-_AUTHORITY_CLAIM = re.compile(r"\b(?:authorization|permission|goal)\b", re.IGNORECASE)
+_AUTHORITY_CLAIM = re.compile(
+    r"(?:"
+    r"\b(?:change|grant)\s+(?:the\s+)?(?:authority|authorities|permissions?|goals?|preferences?)\b"
+    r"|\b(?:has|have|holds?)\s+(?:the\s+)?(?:authority|permissions?|goals?)\b"
+    r"|\b(?:user(?:'s)?\s+)?preferences?\s+(?:is|are)\b"
+    r"|\b(?:user(?:'s)?\s+)?goals?\s+(?:is|are)\b"
+    r"|\bauthorization\b"
+    r")",
+    re.IGNORECASE,
+)
 
 
 class MemoryProposal(FrozenModel):
