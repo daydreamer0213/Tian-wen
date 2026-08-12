@@ -5,3 +5,6 @@ __pycache__/
 .ruff_cache/
 .coverage
 .superpowers/
+.tianwen/
+*.db-wal
+*.db-shm
