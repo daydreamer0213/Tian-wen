@@ -758,7 +758,7 @@ async def test_skills_freeze_selected_markdown_at_construction(
 
     leaves: list[object] = []
     skills.apply(leaves.append)
-    assert [getattr(leaf, "id") for leaf in leaves] == ["alpha"]
+    assert [leaf.id for leaf in leaves] == ["alpha"]
 
     agent = Agent(
         _LoadSkillModel(call_tools=["load_capability"]),
@@ -871,8 +871,10 @@ Create `docs/research/2026-08-11-harness-contract-audit.md`:
 ```markdown
 # Harness 公共接口契约核查报告
 
-**日期：** 2026-08-11  
-**结论：** GO（有条件）  
+**日期：** 2026-08-11
+
+**结论：** GO（有条件）
+
 **版本：** `pydantic-ai-slim==2.18.0`、`pydantic-ai-harness[skills]==0.13.0`
 
 ## 已证明
