@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import inspect
+import json
+import math
 import os
 import subprocess
 import sys
@@ -118,6 +120,71 @@ def signed_receipt(request, private_key: Ed25519PrivateKey, **updates: object) -
     return unsigned.model_copy(update={"signature_b64": base64.b64encode(signature).decode("ascii")})
 
 
+def sealed_case(case_id: str = "sealed-case-1") -> dict[str, object]:
+    return {
+        "case_id": case_id,
+        "hard_gates": ["correctness", "safety"],
+        "champion": {
+            "case_id": case_id,
+            "passed": True,
+            "hard_gate_failures": [],
+            "quality": 1.0,
+            "tokens": 10,
+            "tool_calls": 1,
+            "user_interruptions": 0,
+            "over_refused": False,
+        },
+        "challenger": {
+            "case_id": case_id,
+            "passed": True,
+            "hard_gate_failures": [],
+            "quality": 2.0,
+            "tokens": 9,
+            "tool_calls": 1,
+            "user_interruptions": 0,
+            "over_refused": False,
+        },
+    }
+
+
+def evaluator_environment(dataset: Path, private_key: Ed25519PrivateKey) -> dict[str, str]:
+    return {
+        **os.environ,
+        "TIANWEN_SEALED_DATASET_DIR": str(dataset),
+        "TIANWEN_EVAL_PRIVATE_KEY": base64.b64encode(
+            private_key.private_bytes_raw()
+        ).decode("ascii"),
+    }
+
+
+def run_evaluator(
+    request,
+    environment: dict[str, str],
+    *,
+    champion_snapshot: Path | None = None,
+    challenger_snapshot: Path | None = None,
+    protocol_path: Path | None = None,
+    challenge: str | None = None,
+    output_receipt: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            "evaluator/run_sealed_evaluator.py",
+            str(champion_snapshot or Path(request.champion_snapshot)),
+            str(challenger_snapshot or Path(request.challenger_snapshot)),
+            str(protocol_path or Path(request.champion_snapshot).parent / "protocol.json"),
+            challenge or request.challenge,
+            str(output_receipt or Path(request.receipt_path)),
+        ],
+        capture_output=True,
+        check=False,
+        cwd=Path(__file__).parents[2],
+        env=environment,
+        text=True,
+    )
+
+
 def test_public_fixture_is_fixed_and_loadable() -> None:
     cases = load_public_cases(Path("tests/fixtures/evals/public/repo_task_cases.json"))
     assert tuple(case.case_id for case in cases) == (
@@ -225,18 +292,146 @@ def test_public_comparison_rejects_protocol_mismatch_and_unknown_metric() -> Non
         )
 
 
-def test_request_snapshots_are_fresh_readonly_and_cannot_escape_output_directory(tmp_path: Path) -> None:
+def test_write_eval_request_creates_a_frozen_complete_bundle(tmp_path: Path) -> None:
     store = store_at(tmp_path / "state.db")
     champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
     challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
-    request = write_eval_request(store, protocol(), champion, challenger, tmp_path / "inbox")
-    again = write_eval_request(store, protocol(), champion, challenger, tmp_path / "inbox")
+    proto = protocol()
+    request = write_eval_request(store, proto, champion, challenger, tmp_path / "inbox")
+    again = write_eval_request(store, proto, champion, challenger, tmp_path / "inbox")
     request_dir = (tmp_path / "inbox" / request.request_id).resolve()
     assert request.challenge != again.challenge
-    for path in (Path(request.champion_snapshot), Path(request.challenger_snapshot), Path(request.receipt_path)):
+    expected = {
+        "request.json": request.model_dump(mode="json"),
+        "protocol.json": proto.model_dump(mode="json"),
+        "champion.snapshot": champion.content,
+        "challenger.snapshot": challenger.content,
+    }
+    assert {path.name for path in request_dir.iterdir()} == {*expected, "receipt.json"} - {"receipt.json"}
+    for name, content in expected.items():
+        path = request_dir / name
         assert path.resolve().is_relative_to(request_dir)
-    assert not (Path(request.champion_snapshot).stat().st_mode & 0o222)
+        assert not (path.stat().st_mode & 0o222)
+        if name == "protocol.json":
+            assert path.read_text(encoding="utf-8") == json.dumps(
+                content, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+        elif isinstance(content, str):
+            assert path.read_text(encoding="utf-8") == content
+        else:
+            assert json.loads(path.read_text(encoding="utf-8")) == content
+    assert Path(request.champion_snapshot).resolve() == request_dir / "champion.snapshot"
+    assert Path(request.challenger_snapshot).resolve() == request_dir / "challenger.snapshot"
+    assert Path(request.receipt_path).resolve() == request_dir / "receipt.json"
     assert Path(request.champion_snapshot).read_text() == champion.content
+
+
+def test_sealed_evaluator_accepts_only_the_frozen_production_bundle(tmp_path: Path) -> None:
+    request = write_eval_request(
+        store_at(tmp_path / "state.db"),
+        protocol(),
+        artifact("champion", ArtifactStatus.ACTIVE, "champion"),
+        artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
+        tmp_path / "inbox",
+    )
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_text(json.dumps([sealed_case()]), encoding="utf-8")
+    private_key = Ed25519PrivateKey.generate()
+
+    completed = run_evaluator(request, evaluator_environment(dataset, private_key))
+
+    assert completed.returncode == 0, completed.stderr
+    receipt = EvalReceipt.model_validate_json(Path(request.receipt_path).read_text(encoding="utf-8"))
+    assert (receipt.request_id, receipt.protocol_id, receipt.challenge) == (
+        request.request_id,
+        request.protocol_id,
+        request.challenge,
+    )
+    private_key.public_key().verify(base64.b64decode(receipt.signature_b64), receipt_canonical_bytes(receipt))
+
+
+@pytest.mark.parametrize("attack", ("protocol", "output", "snapshot", "challenge"))
+def test_sealed_evaluator_rejects_unbound_cli_inputs(tmp_path: Path, attack: str) -> None:
+    request = write_eval_request(
+        store_at(tmp_path / "state.db"),
+        protocol(),
+        artifact("champion", ArtifactStatus.ACTIVE, "champion"),
+        artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
+        tmp_path / "inbox",
+    )
+    request_dir = Path(request.champion_snapshot).parent
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_text(json.dumps([sealed_case()]), encoding="utf-8")
+    private_key = Ed25519PrivateKey.generate()
+    arguments: dict[str, object] = {}
+    if attack == "protocol":
+        alternate = tmp_path / "protocol.json"
+        alternate.write_text(json.dumps(protocol().model_dump(mode="json")), encoding="utf-8")
+        arguments["protocol_path"] = alternate
+    elif attack == "output":
+        arguments["output_receipt"] = tmp_path / "receipt.json"
+    elif attack == "snapshot":
+        alternate = request_dir / "other.snapshot"
+        alternate.write_text("other", encoding="utf-8")
+        arguments["champion_snapshot"] = alternate
+    else:
+        arguments["challenge"] = "forged-challenge"
+
+    completed = run_evaluator(request, evaluator_environment(dataset, private_key), **arguments)
+
+    assert completed.returncode != 0
+    assert not Path(request.receipt_path).exists()
+
+
+@pytest.mark.parametrize(
+    "cases",
+    (
+        [],
+        [{"case_id": "incomplete"}],
+        [sealed_case(), sealed_case()],
+        [
+            sealed_case(
+                "negative"
+            )
+            | {"challenger": sealed_case("negative")["challenger"] | {"tokens": -1}}
+        ],
+        [
+            sealed_case(
+                "nonfinite"
+            )
+            | {"challenger": sealed_case("nonfinite")["challenger"] | {"quality": math.inf}}
+        ],
+        [sealed_case("unknown") | {"hard_gates": ["not-a-gate"]}],
+        [
+            sealed_case(
+                "unbound-failure"
+            )
+            | {
+                "challenger": sealed_case("unbound-failure")["challenger"]
+                | {"hard_gate_failures": ["not-a-gate"]}
+            }
+        ],
+    ),
+    ids=("empty", "incomplete", "duplicate", "negative", "nonfinite", "unknown_gate", "unbound_failure"),
+)
+def test_sealed_evaluator_rejects_invalid_sealed_cases_without_a_receipt(tmp_path: Path, cases: list[object]) -> None:
+    request = write_eval_request(
+        store_at(tmp_path / "state.db"),
+        protocol(),
+        artifact("champion", ArtifactStatus.ACTIVE, "champion"),
+        artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
+        tmp_path / "inbox",
+    )
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_text(json.dumps(cases), encoding="utf-8")
+
+    completed = run_evaluator(request, evaluator_environment(dataset, Ed25519PrivateKey.generate()))
+
+    assert completed.returncode != 0
+    assert not Path(request.receipt_path).exists()
 
 
 def test_receipt_signature_binding_expiry_replay_and_sealed_detail_filtering(tmp_path: Path) -> None:

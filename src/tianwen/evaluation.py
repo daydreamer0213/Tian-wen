@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import json
 import secrets
-import stat
 import sys
 from collections.abc import Callable
 from datetime import timedelta
@@ -204,9 +203,16 @@ def write_eval_request(
     champion_snapshot = _inside(request_dir, request_dir / "champion.snapshot")
     challenger_snapshot = _inside(request_dir, request_dir / "challenger.snapshot")
     receipt_path = _inside(request_dir, request_dir / "receipt.json")
+    protocol_path = _inside(request_dir, request_dir / "protocol.json")
+    request_path = _inside(request_dir, request_dir / "request.json")
     for path, content in ((champion_snapshot, champion.content), (challenger_snapshot, challenger.content)):
         path.write_text(content, encoding="utf-8")
-        path.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+        path.chmod(0o444)
+    protocol_path.write_text(
+        json.dumps(protocol.model_dump(mode="json"), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    protocol_path.chmod(0o444)
     request = EvalRequest(
         request_id=request_id,
         protocol_id=protocol.protocol_id,
@@ -221,7 +227,8 @@ def write_eval_request(
         expires_at=utc_now() + timedelta(hours=1),
     )
     store.persist_eval_request(request)
-    _inside(request_dir, request_dir / "request.json").write_text(request.model_dump_json(), encoding="utf-8")
+    request_path.write_text(request.model_dump_json(), encoding="utf-8")
+    request_path.chmod(0o444)
     return request
 
 
