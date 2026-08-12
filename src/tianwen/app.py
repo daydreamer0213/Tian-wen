@@ -158,7 +158,7 @@ class TianwenApp:
             raise AppError("public evaluator key does not match the initialized data directory") from error
 
     def _bootstrap(self) -> None:
-        champion_content = (Path(__file__).parents[2] / "skills" / "repo_task" / "SKILL.md").read_text(encoding="utf-8")
+        champion_content = (Path(__file__).parents[2] / "skills" / "repo-task" / "SKILL.md").read_text(encoding="utf-8")
         digest = content_digest(champion_content)
         champion = ArtifactVersion(
             artifact_id="repo-task",
@@ -273,7 +273,7 @@ class TianwenApp:
 
     def _materialize(self, version_id: str) -> Path:
         artifact = self.artifact(version_id)
-        root = self.data_dir / "materialized" / version_id.removeprefix("sha256:") / "repo_task"
+        root = self.data_dir / "materialized" / version_id.removeprefix("sha256:") / "repo-task"
         root.mkdir(parents=True, exist_ok=True)
         skill = root / "SKILL.md"
         if skill.exists() and skill.read_text(encoding="utf-8") != artifact.content:
@@ -483,6 +483,38 @@ class TianwenApp:
         if outcome.waiting_action_ids:
             return f"waiting_approval:{outcome.checkpoint_id}"
         return outcome.output or ""
+
+    def recover_run(self, run_id: str) -> str:
+        try:
+            run = self.store.get_object("run", run_id, RunRecord)
+            control = self.store.get_object("runtime_control", run_id, RuntimeControl)
+        except StateConflict as error:
+            raise AppError("run does not have a durable runtime control record") from error
+        if control.run_id != run.run_id or self.goal_task(control.goal_id).task_id != run.task_id:
+            raise AppError("run recovery controls do not match the persisted goal")
+        if run.status is not RunStatus.RUNNING:
+            raise AppError("only an interrupted running run can be recovered")
+        skill_version = run.manifest.skill_versions.get("repo_task")
+        if not skill_version:
+            raise AppError("run manifest does not contain a frozen repo_task skill version")
+        outcome = asyncio.run(
+            self._runtime(
+                RuntimeConfig(
+                    Path(control.workspace),
+                    self._materialize(skill_version),
+                    control.allowed_commands,
+                )
+            ).recover(run)
+        )
+        self._project_run_outcomes(control.goal_id, run.run_id)
+        recovered = self.store.get_object("run", run_id, RunRecord)
+        if recovered.status_reason == "unknown_action":
+            return f"waiting_unknown:{','.join(outcome.waiting_action_ids)}"
+        if recovered.status_reason == "user_approval":
+            return f"waiting_approval:{outcome.checkpoint_id}"
+        if outcome.output is not None:
+            return outcome.output
+        return f"waiting_recovery:{recovered.status_reason}"
 
     def _approval_checkpoint(self, checkpoint_id: str):
         try:
@@ -928,7 +960,10 @@ class TianwenApp:
             ),
             current_action="none",
             next_step="run the bounded repository task" if latest is None else "review or run the frozen task",
-            budget_usage=f"tool_calls:{usage.tool_calls}; reserved_children:{reserved.child_loops}",
+            budget_usage=(
+                f"model_requests:{usage.model_requests}; tokens:{usage.tokens}; "
+                f"tool_calls:{usage.tool_calls}; reserved_children:{reserved.child_loops}"
+            ),
             risks_and_unknowns=("external evaluation remains separate",),
             champion=self.active_version(),
             challenger=candidate_ids[-1] if candidate_ids else None,

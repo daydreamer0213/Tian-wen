@@ -57,11 +57,12 @@ markers; exceeded budgets fail their declared gates. The signed receipt exposes
 only aggregate Task8 metrics and failure categories—never cases, clauses, raw
 snapshots, or per-case outcomes.
 
-This is a v1 deterministic contract evaluator for a repo-task Skill. It checks
-declared behavioral clauses such as running the narrowest relevant check first;
-it does not prove that a real repository task was executed. A future sandbox
-executor may replace this rule engine while preserving the same aggregate
-receipt interface.
+This is the v1 evaluator boundary: it performs declarative text-snapshot
+contract checks on a repo-task Skill (required/forbidden clauses, budgets,
+markers), never runs the candidate, and never executes a real hidden repository
+task. It is not a hidden-repository sandbox. Real hidden tasks and adversarial
+execution are a later replacement direction for this rule engine; the aggregate
+receipt interface stays unchanged.
 
 ## 2. Remove inherited access and grant only the evaluator and SYSTEM
 
@@ -122,3 +123,9 @@ private key. All three variables are required for a Windows run. Missing
 variables, account overlap, unsafe paths, inherited, DENY, unexpected, or
 unparseable ACL output, or an ACL query failure produces a nonzero exit and no
 receipt.
+
+The live script and CLI never switch Windows identities, and this repository
+ships no cross-account bridge. A configured evaluator command must be a
+restricted bridge already set up under the evaluator account, or the operator
+uses the separated flow: the runtime writes the request, the evaluator runs
+independently under its own identity, and the runtime imports the receipt.

@@ -9,13 +9,13 @@ import pytest
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import ToolDefinition
+from pydantic_ai.usage import RequestUsage
 from pydantic_ai_harness.step_persistence import InMemoryStepStore
 
 from tianwen.domain import (
     ActionRecord,
     ActionStatus,
     BudgetLimit,
-    BudgetUsage,
     LoopKind,
     LoopRecord,
     RunManifest,
@@ -26,7 +26,7 @@ from tianwen.domain import (
     content_digest,
 )
 from tianwen.gateway import ActionGatewayCapability, EffectClass, freeze_action
-from tianwen.store import StateConflict, StateStore
+from tianwen.store import BudgetExceeded, StateConflict, StateStore
 
 
 class _WriteFileModel(TestModel):
@@ -45,6 +45,13 @@ class _ShellModel(TestModel):
         if tool_def.name == "run_command":
             return {"command": self.command}
         return super().gen_tool_args(tool_def)
+
+
+class _UnmeteredModel(TestModel):
+    async def request(self, *args: Any, **kwargs: Any) -> Any:
+        response = await super().request(*args, **kwargs)
+        response.usage = RequestUsage()
+        return response
 
 
 @pytest.fixture
@@ -79,7 +86,7 @@ def _run(prompt: str, runtime: Any, *, model_id: str = "test", **manifest_update
 
 
 def _skill_text() -> str:
-    return (Path(__file__).parents[2] / "skills" / "repo_task" / "SKILL.md").read_text(encoding="utf-8")
+    return (Path(__file__).parents[2] / "skills" / "repo-task" / "SKILL.md").read_text(encoding="utf-8")
 
 
 def _runtime(tmp_path: Path, model: Any, allowed_commands: tuple[str, ...] = ("python",)) -> Any:
@@ -101,13 +108,23 @@ def _runtime(tmp_path: Path, model: Any, allowed_commands: tuple[str, ...] = ("p
     )
 
 
-def _persist_run(runtime: Any, run: RunRecord) -> None:
+def _persist_run(
+    runtime: Any,
+    run: RunRecord,
+    budget: BudgetLimit | None = None,
+) -> None:
+    budget = budget or BudgetLimit(
+        model_requests=10,
+        tool_calls=20,
+        tokens=10_000,
+        action_effects=20,
+    )
     loop = LoopRecord(
         loop_id="loop-1",
         goal_id="goal-1",
         kind=LoopKind.USER,
         objective="runtime test",
-        budget=BudgetLimit(model_requests=0, tool_calls=20, tokens=0, action_effects=20),
+        budget=budget,
     )
     task = TaskRecord(
         task_id=run.task_id,
@@ -151,9 +168,82 @@ async def test_run_writes_inside_workspace_through_gateway_and_records_tool_resu
     assert (tmp_path / "repo" / "inside.txt").read_text(encoding="utf-8") == "inside"
     assert (action.tool_name, action.status) == ("write_file", ActionStatus.SUCCEEDED)
     assert action.result_digest is not None
-    assert runtime.store.get_run_budget_usage(run.run_id) == BudgetUsage(tool_calls=1, action_effects=1)
-    assert runtime.store.get_budget("loop-1")[1] == BudgetUsage(tool_calls=1, action_effects=1)
+    run_usage = runtime.store.get_run_budget_usage(run.run_id)
+    assert run_usage.model_requests == 2
+    assert run_usage.tokens > 0
+    assert (run_usage.tool_calls, run_usage.action_effects) == (1, 1)
+    assert runtime.store.get_budget("loop-1")[1] == run_usage
     assert "tool_call_completed" in [event.kind for event in events]
+
+
+def test_frozen_skills_keep_the_persisted_materialized_directory(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path, TestModel(custom_output_text="done", call_tools=[]))
+
+    skills = runtime._frozen_skills()
+
+    assert skills.directories == (runtime.config.skill_dir,)
+    assert Path(skills.directories[0]).is_dir()
+
+
+@pytest.mark.anyio
+async def test_zero_model_request_budget_fails_before_calling_the_model(tmp_path: Path) -> None:
+    model = TestModel(custom_output_text="must not run", call_tools=[])
+    runtime = _runtime(tmp_path, model)
+    run = _run("blocked", runtime)
+    _persist_run(
+        runtime,
+        run,
+        BudgetLimit(model_requests=0, tool_calls=20, tokens=100, action_effects=20),
+    )
+
+    with pytest.raises(BudgetExceeded):
+        await runtime.run(run, "blocked")
+
+    assert model.last_model_request_parameters is None
+
+
+@pytest.mark.anyio
+async def test_missing_provider_usage_keeps_the_full_token_reservation_and_waits(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path, _UnmeteredModel(custom_output_text="unmetered", call_tools=[]))
+    run = _run("unmetered", runtime)
+    _persist_run(
+        runtime,
+        run,
+        BudgetLimit(model_requests=1, tool_calls=20, tokens=100, action_effects=20),
+    )
+
+    with pytest.raises(StateConflict, match="no usable token accounting"):
+        await runtime.run(run, "unmetered")
+
+    assert runtime.store.get_run_budget_usage(run.run_id).model_dump() == {
+        "model_requests": 1,
+        "tool_calls": 0,
+        "tokens": 100,
+        "wall_seconds": 0,
+        "child_loops": 0,
+        "action_effects": 0,
+    }
+    persisted = runtime.store.get_object("run", run.run_id, RunRecord)
+    assert (persisted.status, persisted.status_reason) == (RunStatus.WAITING, "unmetered_model_usage")
+
+
+@pytest.mark.anyio
+async def test_recover_resumes_a_stable_checkpoint_but_not_an_unknown_action(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path, TestModel(custom_output_text="done", call_tools=[]))
+    run = _run("stable recovery", runtime)
+    _persist_run(runtime, run)
+    first = await runtime.run(run, "stable recovery")
+    assert first.output == "done"
+    interrupted = runtime.store.get_object("run", run.run_id, RunRecord).model_copy(
+        update={"status": RunStatus.RUNNING, "status_reason": None}
+    )
+    runtime.store.put_object("run", run.run_id, run.task_id, interrupted.status.value, interrupted)
+
+    recovered = await runtime.recover(interrupted)
+
+    assert recovered.output == "done"
+    assert runtime.store.get_object("run", run.run_id, RunRecord).status is RunStatus.COMPLETED
+    assert runtime.store.get_run_budget_usage(run.run_id).model_requests == 2
 
 
 @pytest.mark.anyio

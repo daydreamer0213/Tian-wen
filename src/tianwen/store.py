@@ -197,6 +197,15 @@ class StateStore:
                     delta_json TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS tw_model_request_reservations (
+                    request_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    loop_id TEXT NOT NULL,
+                    reserved_tokens INTEGER NOT NULL,
+                    observed_tokens INTEGER,
+                    status TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS tw_budgets (
                     loop_id TEXT PRIMARY KEY,
                     parent_loop_id TEXT,
@@ -624,14 +633,105 @@ class StateStore:
                 (action.action_id, action.run_id, loop_id, delta.model_dump_json()),
             )
 
+    def reserve_model_request(self, run_id: str, loop_id: str, request_id: str) -> BudgetUsage:
+        """Charge one request and temporarily hold all currently available tokens."""
+        if not run_id or not loop_id or not request_id:
+            raise StateConflict("model request reservation bindings must not be empty")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT run_id, loop_id, reserved_tokens, observed_tokens, status "
+                "FROM tw_model_request_reservations WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+            if existing is not None:
+                if existing["run_id"] != run_id or existing["loop_id"] != loop_id:
+                    raise StateConflict("model request reservation bindings changed")
+                tokens = (
+                    int(existing["observed_tokens"])
+                    if existing["status"] == "settled"
+                    else int(existing["reserved_tokens"])
+                )
+                return BudgetUsage(model_requests=1, tokens=tokens)
+            row = connection.execute(
+                "SELECT limit_json, usage_json, reserved_json FROM tw_budgets WHERE loop_id = ?",
+                (loop_id,),
+            ).fetchone()
+            if row is None:
+                raise StateConflict(f"missing budget {loop_id}")
+            limit = BudgetLimit.model_validate_json(row["limit_json"])
+            usage = BudgetUsage.model_validate_json(row["usage_json"])
+            reserved = BudgetUsage.model_validate_json(row["reserved_json"])
+            available_tokens = limit.tokens - usage.tokens - reserved.tokens
+            if available_tokens <= 0:
+                raise BudgetExceeded(f"budget exceeded for {loop_id}")
+            delta = BudgetUsage(model_requests=1, tokens=available_tokens)
+            self._charge_budget(connection, loop_id, delta)
+            connection.execute(
+                "INSERT INTO tw_model_request_reservations "
+                "(request_id, run_id, loop_id, reserved_tokens, observed_tokens, status) "
+                "VALUES (?, ?, ?, ?, NULL, 'reserved')",
+                (request_id, run_id, loop_id, available_tokens),
+            )
+            return delta
+
+    def settle_model_request(self, request_id: str, observed_tokens: int) -> BudgetUsage:
+        """Replace a conservative token hold with provider-reported usage."""
+        if isinstance(observed_tokens, bool) or not isinstance(observed_tokens, int) or observed_tokens < 0:
+            raise StateConflict("observed model tokens must be a non-negative integer")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT loop_id, reserved_tokens, observed_tokens, status "
+                "FROM tw_model_request_reservations WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+            if row is None:
+                raise StateConflict(f"missing model request reservation {request_id}")
+            if row["status"] == "settled":
+                if int(row["observed_tokens"]) != observed_tokens:
+                    raise StateConflict("settled model request usage cannot change")
+                return BudgetUsage(model_requests=1, tokens=observed_tokens)
+            reserved_tokens = int(row["reserved_tokens"])
+            if observed_tokens > reserved_tokens:
+                raise BudgetExceeded(f"model request exceeded its reserved token budget for {row['loop_id']}")
+            budget = connection.execute(
+                "SELECT usage_json FROM tw_budgets WHERE loop_id = ?",
+                (row["loop_id"],),
+            ).fetchone()
+            if budget is None:
+                raise StateConflict(f"missing budget {row['loop_id']}")
+            usage = BudgetUsage.model_validate_json(budget["usage_json"])
+            next_usage = usage.model_copy(
+                update={"tokens": usage.tokens - (reserved_tokens - observed_tokens)}
+            )
+            connection.execute(
+                "UPDATE tw_budgets SET usage_json = ? WHERE loop_id = ?",
+                (next_usage.model_dump_json(), row["loop_id"]),
+            )
+            connection.execute(
+                "UPDATE tw_model_request_reservations "
+                "SET observed_tokens = ?, status = 'settled' WHERE request_id = ? AND status = 'reserved'",
+                (observed_tokens, request_id),
+            )
+            return BudgetUsage(model_requests=1, tokens=observed_tokens)
+
     def get_run_budget_usage(self, run_id: str) -> BudgetUsage:
         with self._connect() as connection:
-            rows = connection.execute(
+            action_rows = connection.execute(
                 "SELECT delta_json FROM tw_action_budget_reservations WHERE run_id = ?", (run_id,)
             ).fetchall()
+            model_rows = connection.execute(
+                "SELECT reserved_tokens, observed_tokens, status "
+                "FROM tw_model_request_reservations WHERE run_id = ?",
+                (run_id,),
+            ).fetchall()
         usage = _zero_usage()
-        for row in rows:
+        for row in action_rows:
             usage = _add(usage, BudgetUsage.model_validate_json(row["delta_json"]))
+        for row in model_rows:
+            tokens = int(row["observed_tokens"]) if row["status"] == "settled" else int(row["reserved_tokens"])
+            usage = _add(usage, BudgetUsage(model_requests=1, tokens=tokens))
         return usage
 
     def transition_action(

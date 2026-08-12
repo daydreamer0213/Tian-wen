@@ -224,6 +224,47 @@ def test_budget_and_lease_survive_reopen(tmp_path: Path) -> None:
     reopened.renew_lease("run", "worker-a", generation, 60)
 
 
+def test_model_request_budget_is_reserved_then_settled_with_real_tokens(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    store.create_budget(
+        "loop",
+        None,
+        BudgetLimit(model_requests=2, tool_calls=0, tokens=10),
+    )
+
+    reserved = store.reserve_model_request("run", "loop", "model-call-1")
+
+    assert reserved == BudgetUsage(model_requests=1, tokens=10)
+    with pytest.raises(BudgetExceeded):
+        store.reserve_model_request("other-run", "loop", "model-call-other")
+
+    settled = store.settle_model_request("model-call-1", 4)
+    assert settled == BudgetUsage(model_requests=1, tokens=4)
+    assert store.get_run_budget_usage("run") == settled
+
+    second = store.reserve_model_request("run", "loop", "model-call-2")
+    assert second == BudgetUsage(model_requests=1, tokens=6)
+    assert store.settle_model_request("model-call-2", 6) == BudgetUsage(model_requests=1, tokens=6)
+    assert store.get_budget("loop")[1] == BudgetUsage(model_requests=2, tokens=10)
+    assert store.get_run_budget_usage("run") == BudgetUsage(model_requests=2, tokens=10)
+
+
+def test_model_request_settlement_is_idempotent_but_cannot_change_observed_tokens(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    store.create_budget(
+        "loop",
+        None,
+        BudgetLimit(model_requests=1, tool_calls=0, tokens=10),
+    )
+    store.reserve_model_request("run", "loop", "model-call")
+
+    first = store.settle_model_request("model-call", 3)
+
+    assert store.settle_model_request("model-call", 3) == first
+    with pytest.raises(StateConflict):
+        store.settle_model_request("model-call", 4)
+
+
 def test_started_action_without_terminal_result_is_unresolved(tmp_path: Path) -> None:
     store = store_at(tmp_path / "state.db")
     action = ActionRecord(

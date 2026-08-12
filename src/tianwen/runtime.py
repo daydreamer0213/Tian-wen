@@ -3,8 +3,6 @@ from __future__ import annotations
 import ntpath
 import re
 import shlex
-import shutil
-import tempfile
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
@@ -13,13 +11,14 @@ from uuid import uuid4
 
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, ModelMessagesTypeAdapter
 from pydantic_ai.models import KnownModelName, Model
+from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai_harness import FileSystem, Shell
 from pydantic_ai_harness.skills import Skills
 from pydantic_ai_harness.step_persistence import StepPersistence, StepStore
 
 from tianwen.domain import ActionStatus, CheckpointRecord, RunRecord, RunStatus, TaskRecord, content_digest
 from tianwen.gateway import ActionGatewayCapability, EffectClass
-from tianwen.store import StateConflict, StateStore
+from tianwen.store import BudgetExceeded, StateConflict, StateStore
 
 
 @dataclass(frozen=True)
@@ -34,6 +33,35 @@ class RuntimeOutcome:
     output: str | None
     waiting_action_ids: tuple[str, ...] = ()
     checkpoint_id: str | None = None
+
+
+class ModelUsageUnavailable(StateConflict):
+    """Raised when a completed provider request cannot be safely metered."""
+
+
+class _BudgetedModel(WrapperModel):
+    """Persistently reserve and settle every actual model request."""
+
+    def __init__(self, wrapped: Model | KnownModelName, store: StateStore, run_id: str, loop_id: str) -> None:
+        super().__init__(wrapped)
+        self._store = store
+        self._run_id = run_id
+        self._loop_id = loop_id
+
+    async def request(
+        self,
+        messages: list[Any],
+        model_settings: Any,
+        model_request_parameters: Any,
+    ) -> Any:
+        request_id = f"model-request:{uuid4().hex}"
+        self._store.reserve_model_request(self._run_id, self._loop_id, request_id)
+        response = await super().request(messages, model_settings, model_request_parameters)
+        observed_tokens = response.usage.total_tokens
+        if observed_tokens <= 0:
+            raise ModelUsageUnavailable("model provider returned no usable token accounting")
+        self._store.settle_model_request(request_id, observed_tokens)
+        return response
 
 
 _SHELL_DENIED_OPERATORS = (">>", "||", "&&", ">", "|", ";", "\n", "\r")
@@ -111,7 +139,14 @@ class RepoTaskRuntime:
             self._validate_manifest(run, prompt)
             self._set_run_status(run, RunStatus.RUNNING)
             self.store.append_event(run.run_id, "run_started", {"owner_id": owner_id})
-            result = await self._agent(run).run(prompt, conversation_id=run.run_id)
+            try:
+                result = await self._agent(run).run(prompt, conversation_id=run.run_id)
+            except ModelUsageUnavailable:
+                self._set_run_status(run, RunStatus.WAITING, "unmetered_model_usage")
+                raise
+            except BudgetExceeded:
+                self._set_run_status(run, RunStatus.WAITING, "model_budget_exhausted")
+                raise
             return self._persist_result(run, result)
         finally:
             self.store.renew_lease(run.run_id, owner_id, generation, ttl_seconds=0)
@@ -146,11 +181,18 @@ class RepoTaskRuntime:
                 if action_id in action_to_tool_call
             }
             self._set_run_status(run, RunStatus.RUNNING)
-            result = await self._agent(run).run(
-                message_history=history,
-                deferred_tool_results=DeferredToolResults(approvals=tool_approvals),
-                conversation_id=run.run_id,
-            )
+            try:
+                result = await self._agent(run).run(
+                    message_history=history,
+                    deferred_tool_results=DeferredToolResults(approvals=tool_approvals),
+                    conversation_id=run.run_id,
+                )
+            except ModelUsageUnavailable:
+                self._set_run_status(run, RunStatus.WAITING, "unmetered_model_usage")
+                raise
+            except BudgetExceeded:
+                self._set_run_status(run, RunStatus.WAITING, "model_budget_exhausted")
+                raise
             return self._persist_result(run, result)
         finally:
             self.store.renew_lease(run.run_id, owner_id, generation, ttl_seconds=0)
@@ -177,10 +219,17 @@ class RepoTaskRuntime:
                 self._set_run_status(run, RunStatus.WAITING, "missing_stable_checkpoint")
                 return RuntimeOutcome(None)
             history = ModelMessagesTypeAdapter.validate_json(checkpoint.state["messages_json"])
-            result = await self._agent(run).run(
-                message_history=history,
-                conversation_id=run.run_id,
-            )
+            try:
+                result = await self._agent(run).run(
+                    message_history=history,
+                    conversation_id=run.run_id,
+                )
+            except ModelUsageUnavailable:
+                self._set_run_status(run, RunStatus.WAITING, "unmetered_model_usage")
+                raise
+            except BudgetExceeded:
+                self._set_run_status(run, RunStatus.WAITING, "model_budget_exhausted")
+                raise
             return self._persist_result(run, result)
         finally:
             self.store.renew_lease(run.run_id, owner_id, generation, ttl_seconds=0)
@@ -196,7 +245,7 @@ class RepoTaskRuntime:
             loop_id=task.loop_id,
         )
         return Agent(
-            self.model,
+            _BudgetedModel(self.model, self.store, run.run_id, task.loop_id),
             output_type=[str, DeferredToolRequests],
             capabilities=[
                 gateway,
@@ -215,11 +264,7 @@ class RepoTaskRuntime:
         )
 
     def _frozen_skills(self) -> Skills[object]:
-        source = self.config.skill_dir / "repo_task"
-        with tempfile.TemporaryDirectory(dir=self.config.workspace) as directory:
-            destination = Path(directory) / "repo-task"
-            shutil.copytree(source, destination)
-            return Skills(Path(directory), include=["repo-task"])
+        return Skills(self.config.skill_dir, include=["repo-task"])
 
     def _persist_result(self, run: RunRecord, result: Any) -> RuntimeOutcome:
         if isinstance(result.output, DeferredToolRequests):
@@ -278,7 +323,7 @@ class RepoTaskRuntime:
             raise StateConflict("model does not match run manifest")
         if prompt is not None and manifest.prompt_digest != content_digest(prompt):
             raise StateConflict("prompt does not match run manifest")
-        skill = self.config.skill_dir / "repo_task" / "SKILL.md"
+        skill = self.config.skill_dir / "repo-task" / "SKILL.md"
         if manifest.skill_digests.get("repo_task") != content_digest(skill.read_text(encoding="utf-8")):
             raise StateConflict("repo_task skill does not match run manifest")
         digests = runtime_manifest_digests(self.config)

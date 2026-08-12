@@ -19,6 +19,7 @@ from pydantic_ai.tools import ToolDefinition
 
 from tianwen.app import AppError
 from tianwen.domain import (
+    ActionStatus,
     BudgetLimit,
     EvalProtocol,
     EvidenceRecord,
@@ -26,6 +27,8 @@ from tianwen.domain import (
     ExplorationStopReason,
     LoopKind,
     LoopRecord,
+    RunRecord,
+    RunStatus,
     SourceRecord,
     content_digest,
 )
@@ -598,6 +601,79 @@ def test_app_rejects_incomplete_or_extra_approval_decisions(tmp_path: Path) -> N
         app.resume_approval(checkpoint_id, {})
     with pytest.raises(AppError, match="exactly"):
         app.resume_approval(checkpoint_id, {action_id: True, "action:extra": False})
+
+
+def test_app_explicit_recovery_marks_an_inflight_action_unknown_without_retry(tmp_path: Path) -> None:
+    private = Ed25519PrivateKey.generate()
+    app, workspace = _approval_app(tmp_path, private)
+    goal = app.create_goal(
+        objective="Recover an interrupted command",
+        criteria=("do not repeat an unknown effect",),
+        workspace=workspace,
+        authorization=("workspace_read", "workspace_write"),
+        budget=BudgetLimit(model_requests=3, tool_calls=20, tokens=2000),
+    )
+    checkpoint_id = app.run_repo_task(goal.goal_id, workspace, "Run the reviewed command.").removeprefix(
+        "waiting_approval:"
+    )
+    checkpoint = app.store.get_checkpoint(checkpoint_id)
+    action_id = next(iter(checkpoint.state["action_to_tool_call"]))
+    app.store.transition_action(
+        action_id,
+        {ActionStatus.WAITING_APPROVAL},
+        ActionStatus.RUNNING,
+    )
+    interrupted = app.store.get_object("run", checkpoint.run_id, RunRecord).model_copy(
+        update={"status": RunStatus.RUNNING, "status_reason": None}
+    )
+    app.store.put_object("run", interrupted.run_id, interrupted.task_id, interrupted.status.value, interrupted)
+    reopened, _ = _approval_app(tmp_path, private, app.data_dir)
+
+    result = reopened.recover_run(interrupted.run_id)
+
+    assert result == f"waiting_unknown:{action_id}"
+    assert reopened.store.get_action(action_id).status is ActionStatus.UNKNOWN
+    recovered = reopened.store.get_object("run", interrupted.run_id, RunRecord)
+    assert (recovered.status, recovered.status_reason) == (RunStatus.WAITING, "unknown_action")
+
+
+def test_cli_parser_exposes_explicit_run_recovery() -> None:
+    from tianwen.cli import build_parser
+
+    args = build_parser().parse_args(["recover", "--run", "run:interrupted"])
+
+    assert (args.command, args.run) == ("recover", "run:interrupted")
+
+
+def test_cli_rejects_noninteractive_rollback_before_calling_app(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import tianwen.cli as cli
+
+    class NonInteractiveInput(StringIO):
+        def isatty(self) -> bool:
+            return False
+
+    class AppProbe:
+        def rollback(self, *_: Any) -> None:
+            raise AssertionError("rollback must not reach the app without a TTY")
+
+    monkeypatch.setattr(cli, "_app", lambda _args: AppProbe())
+    monkeypatch.setattr(sys, "stdin", NonInteractiveInput())
+
+    assert (
+        cli.main(
+            [
+                "rollback",
+                "--approved-by",
+                "alice",
+                "--reason",
+                "regression",
+            ]
+        )
+        == 2
+    )
+    assert "interactive TTY" in capsys.readouterr().err
 
 
 def _cli_env(key_path: Path | None) -> dict[str, str]:

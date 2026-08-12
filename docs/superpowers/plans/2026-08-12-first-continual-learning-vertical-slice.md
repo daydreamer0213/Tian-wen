@@ -2,11 +2,25 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态（2026-08-13）：** 本计划已于 2026-08-12 执行完成并提交，保留为历史实施依据；当前实现以 `src/`、`tests/`、`scripts/` 与 README 为准。文中的 checkbox 是当时的执行记录，按历史原样保留，不做机械勾选或回填。
+
 **Goal:** 在本地 Git 仓库任务中跑通“用户 Goal → 识别关键知识缺口 → 本地与必要外部探索 → 带来源的证据 → 真实执行 → Lesson → `repo_task` Challenger → 密封保护评测 → 首次人工晋升 → 不同后续任务 → 回滚”的第一条持续学习闭环。
 
 **Architecture:** 使用 Python 模块化单体和本地 SQLite。PydanticAI + Harness 负责模型—工具执行，并复用其本地 DuckDuckGo 搜索和 SSRF 防护网页抓取；所有本地与网络工具仍先经过天问 Action Gateway。天问掌握 Goal/Loop/Task/Run/Action/Event/Checkpoint、探索简报、信源、预算、授权、学习资产、评测协议和版本发布；首版串行调度，不建设常驻 Worker、微服务或通用搜索平台。
 
 **Tech Stack:** Python 3.11—3.14、Pydantic、PydanticAI 2.18.0（`duckduckgo`、`web-fetch` extras）、PydanticAI Harness 0.13.0、SQLite（标准库 `sqlite3`）、cryptography 49.0.0（仅用于 Ed25519 评测回执签名）、pytest 9.0.3、Ruff 0.15.12、Git CLI。
+
+## Current Implementation Differences（当前实现差异）
+
+> 2026-08-13：本计划按当时的接口草案编写，部分命令示例与最终实现不同，以当前 `src/`、`tests/`、`scripts/` 和 README 为准：
+
+- CLI 全局参数 `--data-dir`、`--workspace` 必须放在子命令前；`explore` 必须传 `--task root`（或真实 task ID）。普通 CLI 使用 `TestModel` 做确定性控制面演示，不能自行创建 learning candidate；当前已提供 `recover --run RUN_ID`，只允许显式恢复中断且仍为 `running` 的 Run。
+- evaluator 实际接口是五个位置参数：`champion.snapshot`、`challenger.snapshot`、`protocol.json`、`challenge`、`receipt.json`。下文 Task 9 中 `--request/--receipt` 形式的 evaluator 调用属于历史伪代码。
+- 普通 CLI 不校验 disposable worktree，只有 live 脚本校验；Harness 的 Shell 规则不是操作系统沙箱。
+- v1 sealed evaluator 只做声明式 `repo_task` Skill 文本快照合同检查（必需/禁止子句、预算、标记），不运行候选、不是真实隐藏仓库沙箱；真实隐藏任务与对抗执行以后替换 evaluator。
+- “用户/元 Loop 都可以套子 Loop”是设计目标；v1 公开实现只有 meta 学习子 Loop。
+- v1 无 shadow/canary/灰度（`ArtifactStatus.SHADOW` 只是领域枚举里的保留值，没有任何影子流程）。
+- live 脚本不会切换 Windows 账户身份，仓库未提供跨账户桥接器；evaluator 命令必须指向受限跨账户桥接器，或走 runtime 生成请求 → evaluator 独立运行 → runtime 导入回执的流程。
 
 ## Global Constraints
 
@@ -16,7 +30,7 @@
 - 首版单用户、本地优先；状态和测试数据放在项目目录或用户明确指定的 `D:` 路径，不在 `C:` 创建大型缓存。
 - 首版只允许 `artifact_type="repo_task_skill"` 形成可发布候选；路由和其他策略只能形成研究建议。
 - 顶层 Goal、不可变底线、Action Gateway、安全门槛、密封保护集、发布器和审计账本不能由学习者修改。
-- 用户目标循环和“完善天问”元目标循环都可以派生有限子 Loop；子 Loop 继承父级预算，不能通过新 ID 重置额度。
+- 用户目标循环和“完善天问”元目标循环都可以派生有限子 Loop；子 Loop 继承父级预算，不能通过新 ID 重置额度。（设计目标；v1 公开实现只有 meta 学习子 Loop。）
 - 模型只做局部语义判断；状态转换、权限、预算、版本、评测硬门槛和发布由确定性程序执行。
 - 所有文件、Shell、搜索和网页抓取动作都经过 Action Gateway；原始 Harness Toolset 与 Provider 原生 `WebSearchTool` / `WebFetchTool` 不得并行暴露给模型。
 - Run 创建时冻结 Goal、模型、Prompt、Skill、Policy、Harness、工具、权限、预算和工作区版本。
@@ -50,7 +64,7 @@ src/tianwen/
 └── cli.py            本地 CLI
 evaluator/
 └── run_sealed_evaluator.py 一次性评测程序与独立身份启动入口，不作为 `tianwen` 包导入
-skills/repo_task/
+skills/repo-task/
 └── SKILL.md          初始 Champion 的可读种子
 tests/
 ├── unit/
@@ -1107,7 +1121,7 @@ git commit -m "feat: enforce action gateway"
 **Files:**
 - Create: `src/tianwen/runtime.py`
 - Create: `tests/integration/test_runtime.py`
-- Create: `skills/repo_task/SKILL.md`
+- Create: `skills/repo-task/SKILL.md`
 
 **Interfaces:**
 - Consumes: `StateStore`, `ActionGatewayCapability`, `RunRecord`.
@@ -1121,7 +1135,7 @@ git commit -m "feat: enforce action gateway"
 
 - [ ] **Step 1: Seed the first Champion Skill**
 
-Create `skills/repo_task/SKILL.md`:
+Create `skills/repo-task/SKILL.md`:
 
 ```markdown
 ---
@@ -1190,7 +1204,7 @@ Only this assembled capability list is passed to the Agent. Do not register an u
 `run()`:
 
 1. Acquires a short Run lease.
-2. Verifies the persisted `RunManifest` equals the requested runtime versions and `skills/repo_task/SKILL.md` hashes to `manifest.skill_digests["repo_task"]`.
+2. Verifies the persisted `RunManifest` equals the requested runtime versions and `skills/repo-task/SKILL.md` hashes to `manifest.skill_digests["repo_task"]`.
 3. Appends `run_started`.
 4. Calls PydanticAI with `conversation_id=run.run_id`.
 5. On approval pause, saves serialized messages and pending Action IDs in a Tian-wen Checkpoint and sets Run to `waiting` with reason `user_approval`.
@@ -1220,7 +1234,7 @@ Expected: PASS. No test may write outside `tmp_path`.
 - [ ] **Step 6: Commit the recoverable runtime**
 
 ```powershell
-git add src/tianwen/runtime.py skills/repo_task tests/integration/test_runtime.py
+git add src/tianwen/runtime.py skills/repo-task tests/integration/test_runtime.py
 git commit -m "feat: add recoverable repository runtime"
 ```
 
@@ -1959,7 +1973,7 @@ one-time challenge
 output receipt path
 ```
 
-Its sealed dataset directory and Ed25519 private key come from an evaluator-only protected environment or OS account, not from `TianwenApp`, CLI arguments visible to the learner, or the EvalRequest. The worker writes only aggregate `EvalReceipt` JSON with candidate/champion digests, protocol ID, metrics, failure categories, challenge and Ed25519 signature. It never writes cases, answers, raw grader output or the private key.
+Its sealed dataset directory and Ed25519 private key come from an evaluator-only protected environment or OS account, not from `TianwenApp`, CLI arguments visible to the learner, or the EvalRequest. The worker writes only aggregate `EvalReceipt` JSON with candidate/champion digests, protocol ID, metrics, failure categories, challenge and Ed25519 signature. It never writes cases, answers, raw grader output or the private key. In v1 this evaluator performs only declarative text-snapshot contract checks on the repo-task Skill (required/forbidden clauses, budgets, markers); it does not run the candidate and is not a hidden-repository sandbox. Real hidden tasks and adversarial execution are a later replacement direction; the aggregate receipt interface stays unchanged.
 
 `write_eval_request` creates a fresh challenge and materializes read-only candidate/champion snapshots plus a request JSON. In the same transaction it persists the request, protocol/candidate/champion bindings, expiry and empty `consumed_receipt_id`. It does not know the sealed path or private key. The CLI reports the request and expected receipt locations; a human or OS scheduler then invokes `evaluator/run_sealed_evaluator.py` under the evaluator identity.
 
@@ -2198,24 +2212,28 @@ Use `argparse`; do not add Typer, Click, FastAPI or Rich.
 Examples:
 
 ```powershell
-uv run python -m tianwen goal-create `
+uv run python -m tianwen `
+  --workspace D:\work\sample `
+  --data-dir D:\DevData\tianwen-runtime `
+  goal-create `
   --objective "Improve the sample repository" `
   --criterion "tests pass" `
-  --workspace D:\work\sample `
-  --data-dir D:\DevData\tianwen-runtime
+  --authorization workspace_read --authorization workspace_write
 
-uv run python -m tianwen run --goal GOAL_ID --request "Fix the failing parser test"
-uv run python -m tianwen explore --goal GOAL_ID --question "Which parser API is currently supported?" --domain example.org
-uv run python -m tianwen status --goal GOAL_ID
-uv run python -m tianwen learn --goal GOAL_ID
-uv run python -m tianwen eval-request --candidate VERSION_ID
-uv run python evaluator/run_sealed_evaluator.py --request REQUEST_PATH --receipt RECEIPT_PATH
-uv run python -m tianwen eval-import --receipt RECEIPT_PATH
-uv run python -m tianwen promote --candidate VERSION_ID
-uv run python -m tianwen rollback --artifact repo_task --approved-by USER_NAME --reason "follow-up regression"
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime run --goal GOAL_ID --request "Fix the failing parser test"
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime explore --goal GOAL_ID --task root --question "Which parser API is currently supported?" --domain example.org
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime status --goal GOAL_ID
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime learn --goal GOAL_ID
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime eval-request --candidate VERSION_ID
+uv run python evaluator/run_sealed_evaluator.py <champion.snapshot> <challenger.snapshot> <protocol.json> <challenge> <receipt.json>
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime eval-import --receipt RECEIPT_PATH
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime promote --candidate VERSION_ID
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime rollback --artifact repo-task --approved-by USER_NAME --reason "follow-up regression"
 ```
 
 Default `--data-dir` is `.tianwen` under the current project, which is ignored by Git. On this machine, README recommends `D:\DevData\tianwen-runtime` for long-running data.
+
+联网探索的 Goal 需要额外传 `--authorization external_read`；`explore` 默认仅本地、联网关闭，只有 `--live-web` 且至少一个 `--domain` 时才联网。当前 `recover --run RUN_ID` 只接受中断且仍为 `running` 的 Run。
 
 Do not print prompts, file bodies, command parameters or secret values in status output.
 
@@ -2229,6 +2247,7 @@ Do not print prompts, file bodies, command parameters or secret values in status
 - requires `--workspace`, `--data-dir` and `--max-tokens`;
 - accepts `--live-web`, `--domain`, `--max-searches` and `--max-fetches`; network exploration is off unless `--live-web` is present;
 - invokes the preconfigured Evaluator command; it does not accept or print a sealed dataset path;
+- never switches Windows identities (this repository ships no cross-account bridge; configure a restricted bridge under the evaluator account or use the request → independent evaluator run → receipt import flow);
 - refuses to run if the workspace is not a disposable Git worktree or has uncommitted changes;
 - never creates or uploads a sealed dataset;
 - prints the generated Goal ID, Run IDs, candidate digest, EvalRun ID and rollback command;

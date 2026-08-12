@@ -452,7 +452,7 @@ async def test_runtime_inventory_excludes_provider_native_and_exploration_web_to
             skill_versions={"repo_task": "1"},
             skill_digests={
                 "repo_task": content_digest(
-                    (config.skill_dir / "repo_task" / "SKILL.md").read_text(encoding="utf-8")
+                    (config.skill_dir / "repo-task" / "SKILL.md").read_text(encoding="utf-8")
                 )
             },
             policy_digest=digests["policy_digest"],
@@ -466,7 +466,7 @@ async def test_runtime_inventory_excludes_provider_native_and_exploration_web_to
         goal_id="runtime-goal",
         kind=LoopKind.USER,
         objective="runtime inventory",
-        budget=BudgetLimit(model_requests=0, tool_calls=1, tokens=0, action_effects=1),
+        budget=BudgetLimit(model_requests=1, tool_calls=1, tokens=1000, action_effects=1),
     )
     task = TaskRecord(
         task_id=run.task_id,

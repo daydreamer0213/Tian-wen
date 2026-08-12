@@ -2,7 +2,7 @@
 
 ## 1. Tian-wen 是什么，不是什么
 
-Tian-wen 是一个本地串行协调器：把一个明确目标、受限探索、仓库任务、学习候选、外部评估和人工发布串成可追溯记录。它不是自主后台服务、网页产品、插件平台、第二套 Agent 框架、向量数据库，也不会训练模型。
+Tian-wen 是一个独立的 Python Agent 控制面，不是 Codex Skill、不是 Codex 插件，也不依赖 Codex 才能运行。它把一个明确目标、受限探索、仓库任务、学习候选、外部评估和人工发布串成可追溯记录。它不是自主后台服务、网页产品、插件平台、第二套 Agent 框架、向量数据库，也不会训练模型。持续学习是通用过程（先在仓库任务上验证），v1 只发布 `repo_task` Skill；路由、策略等其他对象只能形成研究建议。
 
 ## 2. 为什么先用代码验证
 
@@ -30,6 +30,8 @@ uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwe
 ```
 
 `--data-dir` 和 `--workspace` 必须放在子命令前。每个实际 CLI 命令都必须设置 `TIANWEN_EVALUATOR_PUBLIC_KEY`，其值是 Ed25519 **公钥** PEM 文件；同一 `data-dir` 重启时必须使用同一把公钥。
+
+普通 CLI 内置 `TestModel`（确定性测试模型），是控制面流程演示：不调用付费模型，也不执行真实工具；真实模型的工具执行只有 `scripts\run_live_vertical_slice.py` 这一个 live 脚本。普通 CLI 只能处理已有学习信号，不能自行创建 learning candidate。联网默认关闭；`explore` 需要联网时，创建 Goal 必须包含 `external_read` 授权（`goal-create` 加 `--authorization external_read`），并给 `explore` 传 `--task root --live-web --domain example.org`。
 
 高影响 action 会输出 `waiting_approval:CHECKPOINT_ID`。在真实 TTY 中逐项作出明确决定；不会有 approve-all，也不会显示工具参数：
 
@@ -62,7 +64,7 @@ Provider 原生网页工具可能绕过本地授权、预算和来源记录。�
 
 ## 9. 批准、unknown、恢复、发布与回滚
 
-高影响 runtime action 会暂停在已冻结检查点；崩溃后未完成效果标为 `unknown`，不会盲目重试。Promotion 先显示一次性 challenge，用户必须在真实 TTY 中重新输入。发布只能经 `Publisher` 写入活动指针；回滚同样需要真实 TTY、用户和非空原因。
+高影响 runtime action 会暂停在已冻结检查点；崩溃后不会盲目重试。使用 `recover --run RUN_ID` 可以显式接管仍为 `running` 的中断 Run：存在未结算动作时，会把已开始但结果不明的动作标为 `unknown` 并等待人工核对；只有稳定检查点时，则从原版本和原预算继续恢复。Promotion 先显示一次性 challenge，用户必须在真实 TTY 中重新输入。发布只能经 `Publisher` 写入活动指针；回滚同样需要真实 TTY、用户和非空原因。
 
 ## 10. Evaluator 专用密封目录与 Windows ACL
 
@@ -80,7 +82,7 @@ icacls D:\Evaluator\sealed
 icacls D:\Evaluator\private-key.pem
 ```
 
-移除 runtime 账户的读取权限、保留 evaluator 身份权限后，再由 evaluator 身份运行一次性 evaluator 命令。若无法建立 ACL 隔离，就不能导入 sealed receipt，也不能 promotion。v1 的 evaluator snapshot 是合约验证，不是完整的真实仓库沙箱。
+移除 runtime 账户的读取权限、保留 evaluator 身份权限后，再由 evaluator 身份运行一次性 evaluator 命令。若无法建立 ACL 隔离，就不能导入 sealed receipt，也不能 promotion。v1 的 sealed evaluator 只做声明式 `repo_task` Skill 文本快照合同检查：不运行候选、不执行真实任务，也不是真实隐藏仓库沙箱；真实隐藏任务与对抗执行属于后续替换方向。
 
 ## 11. 确定性测试和显式 live 实验
 
@@ -91,9 +93,9 @@ uv run python -m tianwen --help
 uv run python scripts\run_live_vertical_slice.py --workspace D:\DevData\tianwen-smoke\repo --data-dir D:\DevData\tianwen-smoke\state --max-tokens 200
 ```
 
-Live 脚本要求 `TIANWEN_MODEL`、相应 provider 凭据和 `TIANWEN_EVALUATOR_PUBLIC_KEY`（稳定的 Ed25519 公钥 PEM 路径），并且 workspace 必须是干净的可丢弃 Git worktree。普通主 checkout 不合格；只有明确的 Git worktree（`.git` 是文件）或 `D:\DevData\tianwen-smoke` 下的 smoke checkout 可以使用。默认不联网，只有 `--live-web --domain example.org` 才联网。
+Live 脚本要求 `TIANWEN_MODEL`、相应 provider 凭据和 `TIANWEN_EVALUATOR_PUBLIC_KEY`（稳定的 Ed25519 公钥 PEM 路径），并且 workspace 必须是干净的可丢弃 Git worktree。普通主 checkout 不合格；只有明确的 Git worktree（`.git` 是文件）或 `D:\DevData\tianwen-smoke` 下的 smoke checkout 可以使用。默认不联网，只有 `--live-web --domain example.org` 才联网。live 脚本创建的 Goal 授权包含 `external_read`（联网探索的授权前提）。普通 CLI 不校验 disposable worktree，那是 live 脚本独有的门禁；Harness 的 Shell 规则不是操作系统沙箱。v1 没有 shadow/canary/灰度机制。
 
-运行前由 evaluator 专用账户预先配置命令；推荐 JSON 参数数组而不是 shell 字符串：
+运行前由 evaluator 专用账户预先配置命令；推荐 JSON 参数数组而不是 shell 字符串。live 脚本不会切换 Windows 账户身份，仓库也未提供跨账户桥接器；`TIANWEN_EVALUATOR_COMMAND_JSON` 必须指向 evaluator 账户预先配置的受限桥接命令，或改用“runtime 生成 EvalRequest → evaluator 独立运行 → runtime 导入回执”的分离流程：
 
 ```powershell
 $env:TIANWEN_MODEL = 'openai:gpt-4.1-mini'
@@ -111,4 +113,4 @@ uv run python scripts\run_live_vertical_slice.py --workspace D:\DevData\tianwen-
 
 ## 12. 当前不包含的内容
 
-本版本不包含后台 daemon、Web UI、浏览器自动化、爬虫、分布式队列、插件平台、向量/图数据库或模型训练。若要加入其中任一项，先需要跨不同后续任务的可复现实证、明确的权限边界、回滚方案和独立评估证据。
+本版本不包含后台 daemon、Web UI、浏览器自动化、爬虫、分布式队列、插件平台、向量/图数据库或模型训练，也没有影子运行（shadow）、金丝雀（canary）或灰度发布。若要加入其中任一项，先需要跨不同后续任务的可复现实证、明确的权限边界、回滚方案和独立评估证据。

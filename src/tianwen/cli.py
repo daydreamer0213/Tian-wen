@@ -67,6 +67,8 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="run the active frozen repository skill")
     run.add_argument("--goal", required=True)
     run.add_argument("--request", required=True)
+    recover = sub.add_parser("recover", help="mark an interrupted run for explicit recovery")
+    recover.add_argument("--run", required=True)
     status = sub.add_parser("status", help="show safe, compact state")
     status.add_argument("--goal", required=True)
     approve = sub.add_parser("approve", help="resume a runtime approval checkpoint")
@@ -139,6 +141,8 @@ def main(argv: list[str] | None = None) -> int:
             print(app.explore(args.goal, brief, live=args.live_web).model_dump_json())
         elif args.command == "run":
             print(app.run_repo_task(args.goal, Path(args.workspace), args.request))
+        elif args.command == "recover":
+            print(app.recover_run(args.run))
         elif args.command == "status":
             print(app.status(args.goal).model_dump_json())
         elif args.command == "approve":
@@ -177,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
             approved_by = input("Approver name: ")
             print(app.confirm_promotion(request_id, approved_by, typed).model_dump_json())
         elif args.command == "rollback":
+            if not sys.stdin.isatty():
+                raise AppError("rollback requires an interactive TTY")
             print(app.rollback(args.artifact, args.approved_by, args.reason).model_dump_json())
         return 0
     except (AppError, StateConflict, EvaluationError, ValidationError, ValueError, OSError) as error:
