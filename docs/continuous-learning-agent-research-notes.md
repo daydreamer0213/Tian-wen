@@ -4574,6 +4574,8 @@ Shell 返回非零退出码仍然是结果已知的动作，不属于 `unknown`�
 
 2026-08-12 对 lifelong-learning agents、self-evolving agents、持续学习 Harness、Skill 演化、评测和安全研究做了专项调研。结论是现有方向基本成立，但需要在下一份垂直切片计划中补充显式 Lesson、软遗忘、连续学习指标、隐藏保护集和在线因果验证。完整材料见 [持续学习 Agent 与 Harness 专项调研](research/2026-08-12-continuous-learning-agent-landscape.md)。
 
+同日进一步固定并审计了 Agent Lightning、Memento-Skills、Meta-Harness 与 Continual Harness 的源码快照。审计确认上游分别具备轨迹、任务内恢复、候选搜索和多类 Harness 更新能力，但都没有完整覆盖天问所需的 Lesson、不可变版本、保护集隔离、原子晋升与回滚。完整证据见 [天问学习控制面上游源码审计](research/2026-08-12-learning-control-plane-source-audit.md)。
+
 ## 28. 官方参考
 
 - [OpenAI Docs：Follow a goal](https://learn.chatgpt.com/use-cases/follow-goals)
