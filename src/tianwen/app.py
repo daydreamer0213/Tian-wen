@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import secrets
 from dataclasses import dataclass
 from importlib.metadata import version
@@ -271,9 +273,20 @@ class TianwenApp:
         evidence = tuple(
             item for item in self.store.list_objects("evidence", EvidenceRecord) if item.run_id == run.run_id
         )
-        answered = brief.unknowns if evidence else ()
-        remaining = () if answered else brief.unknowns
-        stop = ExplorationStopReason.SUFFICIENT if answered else ExplorationStopReason.INSUFFICIENT_EVIDENCE
+        answered = tuple(unknown for unknown in brief.unknowns if self._covered_by_evidence(unknown, evidence, sources))
+        remaining = tuple(unknown for unknown in brief.unknowns if unknown not in answered)
+        sufficient = bool(evidence) and not remaining and all(
+            self._covered_by_evidence(criterion, evidence, ()) for criterion in brief.sufficiency_criteria
+        )
+        stop = ExplorationStopReason.SUFFICIENT if sufficient else ExplorationStopReason.INSUFFICIENT_EVIDENCE
+        planning_impact = (
+            "all exploration unknowns and sufficiency criteria have governed evidence coverage"
+            if sufficient
+            else (
+                f"{len(answered)} exploration unknowns have governed evidence coverage; "
+                f"{len(remaining)} remain unresolved"
+            )
+        )
         report = engine.finish(
             run.run_id,
             brief,
@@ -281,12 +294,28 @@ class TianwenApp:
             sources,
             answered,
             remaining,
-            "source-backed exploration informs the next bounded action",
+            planning_impact,
             stop,
         )
         completed = run.model_copy(update={"status": RunStatus.COMPLETED})
         self.store.put_object("run", run.run_id, task.task_id, RunStatus.COMPLETED.value, completed)
         return report
+
+    @staticmethod
+    def _coverage_tokens(value: str) -> frozenset[str]:
+        return frozenset(token for token in re.findall(r"[a-z0-9]+", value.casefold()) if len(token) >= 3)
+
+    def _covered_by_evidence(
+        self, subject: str, evidence: tuple[EvidenceRecord, ...], sources: tuple[SourceRecord, ...]
+    ) -> bool:
+        required = self._coverage_tokens(subject)
+        if not required:
+            return False
+        governed_text = " ".join(
+            [item.summary for item in evidence]
+            + [f"{source.title} {source.locator}" for source in sources]
+        )
+        return required <= self._coverage_tokens(governed_text)
 
     def _explorer(self, live: bool, brief: ExplorationBrief) -> ExplorationEngine:
         if live:
@@ -323,12 +352,13 @@ class TianwenApp:
             raise AppError("required exploration remains insufficient_evidence")
         champion_id = self.active_version()
         champion = self.artifact(champion_id)
-        source_ids = [
-            source.source_id
-            for source in self.store.list_objects("source", SourceRecord)
-            if source.purpose == "goal_exploration"
-        ]
-        prompt = f"Goal {goal.goal_id}. Request: {request}\nEvidence source IDs: {','.join(source_ids[:8])}"
+        packet = self.goal_evidence_packet(goal_id)
+        prompt = json.dumps(
+            {"goal_id": goal.goal_id, "request": request, "evidence_packet": packet},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         run = RunRecord(
             run_id=f"run:{secrets.token_urlsafe(18)}",
             task_id=task.task_id,
@@ -352,6 +382,82 @@ class TianwenApp:
         if outcome.waiting_action_ids:
             return f"waiting_approval:{outcome.checkpoint_id}"
         return outcome.output or ""
+
+    def goal_evidence_packet(self, goal_id: str) -> dict[str, tuple[dict[str, str], ...]]:
+        """Return a small, stable packet of completed current-goal exploration records."""
+        self.store.get_object("goal", goal_id, GoalContract)
+        loop_ids = {
+            loop.loop_id for loop in self.store.list_objects("loop", LoopRecord) if loop.goal_id == goal_id
+        }
+        task_ids = {
+            task.task_id for task in self.store.list_objects("task", TaskRecord) if task.loop_id in loop_ids
+        }
+        runs = {
+            run.run_id: run
+            for run in self.store.list_objects("run", RunRecord)
+            if run.task_id in task_ids and run.status is RunStatus.COMPLETED
+        }
+        expected_scope = f"goal:{goal_id}:workspace:{content_digest(str(self.config.workspace.resolve()))}"
+        source_records: dict[str, SourceRecord] = {}
+        evidence_records: dict[str, EvidenceRecord] = {}
+        for listed_report in self.store.list_objects("exploration_report", ExplorationReport):
+            try:
+                report, status = self.store.get_object_with_status(
+                    "exploration_report", listed_report.report_id, ExplorationReport
+                )
+                brief = self.store.get_object("exploration_brief", report.brief_id, ExplorationBrief)
+            except StateConflict:
+                continue
+            if status != "complete" or brief.task_id not in task_ids:
+                continue
+            report_sources: dict[str, SourceRecord] = {}
+            report_evidence: dict[str, EvidenceRecord] = {}
+            try:
+                for source_id in report.source_ids:
+                    source = self.store.get_object("source", source_id, SourceRecord)
+                    if (
+                        source.run_id not in runs
+                        or source.purpose != "goal_exploration"
+                        or source.scope != expected_scope
+                    ):
+                        raise AppError("exploration source is outside the current goal")
+                    report_sources[source_id] = source
+                for evidence_id in report.evidence_ids:
+                    record = self.store.get_object("evidence", evidence_id, EvidenceRecord)
+                    if (
+                        record.run_id not in runs
+                        or record.purpose != "goal_exploration"
+                        or record.scope != expected_scope
+                        or not record.provenance_ids
+                        or not set(record.provenance_ids) <= report_sources.keys()
+                        or any(
+                            report_sources[source_id].run_id != record.run_id for source_id in record.provenance_ids
+                        )
+                    ):
+                        raise AppError("exploration evidence is outside the current goal")
+                    report_evidence[evidence_id] = record
+            except StateConflict:
+                continue
+            source_records.update(report_sources)
+            evidence_records.update(report_evidence)
+        sources = tuple(
+            {
+                "source_id": source.source_id,
+                "source_class": source.source_class,
+                "locator": source.locator,
+                "title": source.title,
+            }
+            for source in sorted(source_records.values(), key=lambda item: item.source_id)[:8]
+        )
+        evidence = tuple(
+            {
+                "evidence_id": record.evidence_id,
+                "source_ids": ",".join(sorted(record.provenance_ids)),
+                "summary": record.summary,
+            }
+            for record in sorted(evidence_records.values(), key=lambda item: item.evidence_id)[:8]
+        )
+        return {"sources": sources, "evidence": evidence}
 
     def _brief_task(self, report: ExplorationReport) -> str:
         return self.store.get_object("exploration_brief", report.brief_id, ExplorationBrief).task_id

@@ -19,6 +19,7 @@ from tianwen.domain import (
     ExplorationBrief,
     ExplorationStopReason,
     SourceRecord,
+    content_digest,
 )
 from tianwen.evaluation import CaseOutcome, EvalCase, run_public_comparison
 
@@ -77,7 +78,9 @@ def test_app_runs_the_governed_local_vertical_slice(tmp_path: Path, monkeypatch:
 
     workspace = tmp_path / "repo"
     workspace.mkdir()
-    (workspace / "parser.py").write_text("# parser version\nPARSER_VERSION = 2\n", encoding="utf-8")
+    (workspace / "parser.py").write_text(
+        "# local parser declaration found: parser version\nPARSER_VERSION = 2\n", encoding="utf-8"
+    )
     subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
     private = Ed25519PrivateKey.generate()
     sealed = tmp_path / "sealed-evaluator-only"
@@ -136,6 +139,9 @@ def test_app_runs_the_governed_local_vertical_slice(tmp_path: Path, monkeypatch:
     report = app.explore(goal_a.goal_id, brief)
 
     assert report.stop_reason is ExplorationStopReason.SUFFICIENT
+    assert report.answered_unknowns == ("parser version",)
+    assert report.remaining_unknowns == ()
+    assert fetched.read_text(encoding="utf-8") not in json.dumps(app.goal_evidence_packet(goal_a.goal_id))
     sources = app.store.list_objects("source", SourceRecord)
     evidence = app.store.list_objects("evidence", EvidenceRecord)
     assert len(sources) >= 2
@@ -240,3 +246,116 @@ def test_app_runs_the_governed_local_vertical_slice(tmp_path: Path, monkeypatch:
     app.run_repo_task(goal_c.goal_id, workspace, "Write the selected parser version.")
     assert app.last_run(goal_c.goal_id).manifest.skill_versions["repo_task"] == champion
     assert eval_run.challenger_version_id == challenger.version_id
+
+
+def _exploration_app(tmp_path: Path) -> tuple[Any, Path]:
+    from tianwen.app import TianwenApp, TianwenConfig
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    (workspace / "parser.py").write_text(
+        "# local parser declaration found: parser version\nPARSER_VERSION = 2\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+    private = Ed25519PrivateKey.generate()
+    return (
+        TianwenApp(
+            TianwenConfig(
+                data_dir=tmp_path / "state",
+                workspace=workspace,
+                model=_WriteFileModel(call_tools=["write_file"], custom_output_text="completed"),
+                public_evaluator_key=private.public_key(),
+                approved_protocol=_protocol(),
+                allowed_commands=("python",),
+            )
+        ),
+        workspace,
+    )
+
+
+def _brief(task_id: str, brief_id: str, unknowns: tuple[str, ...]) -> ExplorationBrief:
+    return ExplorationBrief(
+        brief_id=brief_id,
+        task_id=task_id,
+        question="Which parser version should the task use?",
+        decision_use="Choose the parser API.",
+        known_evidence_ids=(),
+        unknowns=unknowns,
+        allowed_local_roots=(".",),
+        allowed_source_classes=(),
+        allowed_domains=(),
+        max_searches=len(unknowns),
+        max_fetches=0,
+        max_tokens=100,
+        max_cost_microunits=10,
+        wall_seconds=300,
+        expected_outputs=("source-backed answer",),
+        sufficiency_criteria=("local parser declaration found",),
+        stop_conditions=(ExplorationStopReason.SUFFICIENT, ExplorationStopReason.INSUFFICIENT_EVIDENCE),
+    )
+
+
+def test_exploration_only_answers_unknowns_covered_by_governed_evidence(tmp_path: Path) -> None:
+    """Break caught: one finding must not mark unrelated unknowns as resolved."""
+    app, workspace = _exploration_app(tmp_path)
+    budget = BudgetLimit(model_requests=2, tool_calls=20, tokens=2000)
+    goal = app.create_goal(
+        objective="Choose parser facts",
+        criteria=("write result",),
+        workspace=workspace,
+        authorization=("workspace_read", "workspace_write"),
+        budget=budget,
+    )
+    unknowns = ("parser version", "definitely_absent_review_token")
+
+    insufficient = app.explore(goal.goal_id, _brief(app.goal_task(goal.goal_id).task_id, "brief-partial", unknowns))
+
+    assert insufficient.stop_reason is ExplorationStopReason.INSUFFICIENT_EVIDENCE
+    assert insufficient.answered_unknowns == ("parser version",)
+    assert insufficient.remaining_unknowns == ("definitely_absent_review_token",)
+    assert "remain" in insufficient.planning_impact
+
+    (workspace / "review.txt").write_text("definitely_absent_review_token\n", encoding="utf-8")
+    sufficient = app.explore(goal.goal_id, _brief(app.goal_task(goal.goal_id).task_id, "brief-complete", unknowns))
+
+    assert sufficient.stop_reason is ExplorationStopReason.SUFFICIENT
+    assert sufficient.answered_unknowns == unknowns
+    assert sufficient.remaining_unknowns == ()
+
+
+def test_goal_evidence_packet_is_isolated_in_execution_manifest(tmp_path: Path) -> None:
+    """Break caught: evidence from Goal A must never alter Goal B's execution prompt."""
+    app, workspace = _exploration_app(tmp_path)
+    budget = BudgetLimit(model_requests=2, tool_calls=20, tokens=2000)
+    goal_a = app.create_goal(
+        objective="Explore parser facts",
+        criteria=("write result",),
+        workspace=workspace,
+        authorization=("workspace_read", "workspace_write"),
+        budget=budget,
+    )
+    app.explore(goal_a.goal_id, _brief(app.goal_task(goal_a.goal_id).task_id, "brief-a", ("parser version",)))
+    goal_b = app.create_goal(
+        objective="Write parser result",
+        criteria=("write result",),
+        workspace=workspace,
+        authorization=("workspace_read", "workspace_write"),
+        budget=budget,
+    )
+    request = "Write the selected parser version."
+    empty_packet = app.goal_evidence_packet(goal_b.goal_id)
+
+    assert empty_packet == {"sources": (), "evidence": ()}
+    app.run_repo_task(goal_b.goal_id, workspace, request)
+    first_run = app.last_run(goal_b.goal_id)
+    assert first_run.manifest.prompt_digest == content_digest(
+        {"goal_id": goal_b.goal_id, "request": request, "evidence_packet": empty_packet}
+    )
+
+    (workspace / "additional.txt").write_text("parser version\n", encoding="utf-8")
+    app.explore(goal_a.goal_id, _brief(app.goal_task(goal_a.goal_id).task_id, "brief-a-more", ("parser version",)))
+    app.run_repo_task(goal_b.goal_id, workspace, request)
+    second_run = app.last_run(goal_b.goal_id)
+
+    assert app.goal_evidence_packet(goal_b.goal_id) == empty_packet
+    assert second_run.manifest.prompt_digest == first_run.manifest.prompt_digest
