@@ -42,7 +42,24 @@ _OUTCOME_KEYS = frozenset(
         "over_refused",
     }
 )
-_CASE_KEYS = frozenset({"case_id", "hard_gates", "champion", "challenger"})
+_CASE_KEYS = frozenset(
+    {
+        "case_id",
+        "hard_gates",
+        "required_clauses",
+        "forbidden_clauses",
+        "quality_weights",
+        "token_budget",
+        "tool_call_budget",
+        "user_interruption_budget",
+        "tool_markers",
+        "interruption_markers",
+        "over_refusal_clauses",
+    }
+)
+_CLAUSE_KEYS = frozenset({"text", "gate"})
+_WEIGHT_KEYS = frozenset({"required", "forbidden"})
+_BUDGET_KEYS = frozenset({"limit", "gate"})
 _EVAL_BUNDLE_NAMES = (
     "protocol.json",
     "request.json",
@@ -320,25 +337,132 @@ def _validate_evaluator_isolation(
         _validate_posix_evaluator_isolation(dataset_dir, private_key_path)
 
 
-def _outcome(case_id: str, hard_gates: set[str], value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or set(value) != _OUTCOME_KEYS:
-        raise ValueError("sealed outcome has an invalid structure")
-    if value["case_id"] != case_id or type(value["passed"]) is not bool or type(value["over_refused"]) is not bool:
-        raise ValueError("sealed outcome has invalid identity or flags")
-    failures = value["hard_gate_failures"]
-    if not isinstance(failures, list) or len(failures) != len(set(failures)) or not all(
-        isinstance(failure, str) and failure in hard_gates for failure in failures
+def _normalise_text(value: str) -> str:
+    return " ".join(value.casefold().split())
+
+
+def _clauses(value: object, hard_gates: set[str], *, required: bool) -> list[dict[str, str]]:
+    if not isinstance(value, list) or (required and not value):
+        raise ValueError("sealed case has invalid clauses")
+    clauses: list[dict[str, str]] = []
+    identities: set[str] = set()
+    for clause in value:
+        if not isinstance(clause, dict) or set(clause) != _CLAUSE_KEYS:
+            raise ValueError("sealed case has invalid clauses")
+        text, gate = clause["text"], clause["gate"]
+        if (
+            not isinstance(text, str)
+            or not _normalise_text(text)
+            or not isinstance(gate, str)
+            or gate not in hard_gates
+        ):
+            raise ValueError("sealed case has invalid clauses")
+        identity = _normalise_text(text)
+        if identity in identities:
+            raise ValueError("sealed case has duplicate clauses")
+        identities.add(identity)
+        clauses.append({"text": text, "gate": gate})
+    return clauses
+
+
+def _markers(value: object) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(marker, str) and _normalise_text(marker) for marker in value):
+        raise ValueError("sealed case has invalid markers")
+    normalised = [_normalise_text(marker) for marker in value]
+    if len(normalised) != len(set(normalised)):
+        raise ValueError("sealed case has duplicate markers")
+    return list(value)
+
+
+def _budget(value: object, hard_gates: set[str]) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != _BUDGET_KEYS:
+        raise ValueError("sealed case has an invalid budget")
+    limit, gate = value["limit"], value["gate"]
+    if type(limit) is not int or limit < 0 or not isinstance(gate, str) or gate not in hard_gates:
+        raise ValueError("sealed case has an invalid budget")
+    return {"limit": limit, "gate": gate}
+
+
+def _sealed_case(value: object, case_ids: set[str] | None = None) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != _CASE_KEYS:
+        raise ValueError("sealed case has an invalid structure")
+    case_id, hard_gates = value["case_id"], value["hard_gates"]
+    if not isinstance(case_id, str) or not case_id or (case_ids is not None and case_id in case_ids):
+        raise ValueError("sealed cases must have unique identifiers")
+    if not isinstance(hard_gates, list) or not hard_gates or len(hard_gates) != len(set(hard_gates)) or not all(
+        isinstance(gate, str) and gate in _FAILURE_CATEGORIES for gate in hard_gates
     ):
-        raise ValueError("sealed outcome has invalid hard-gate failures")
-    for key in ("tokens", "tool_calls", "user_interruptions"):
-        if type(value[key]) is not int or value[key] < 0:
-            raise ValueError("sealed outcome has invalid non-negative counts")
-    if type(value["quality"]) not in (int, float) or not math.isfinite(value["quality"]):
-        raise ValueError("sealed outcome has invalid finite quality")
-    return value
+        raise ValueError("sealed case has invalid hard gates")
+    gates = set(hard_gates)
+    weights = value["quality_weights"]
+    if not isinstance(weights, dict) or set(weights) != _WEIGHT_KEYS or not all(
+        type(weight) in (int, float) and math.isfinite(weight) and weight >= 0 for weight in weights.values()
+    ):
+        raise ValueError("sealed case has invalid quality weights")
+    if case_ids is not None:
+        case_ids.add(case_id)
+    return {
+        "case_id": case_id,
+        "hard_gates": list(hard_gates),
+        "required_clauses": _clauses(value["required_clauses"], gates, required=True),
+        "forbidden_clauses": _clauses(value["forbidden_clauses"], gates, required=False),
+        "quality_weights": {"required": float(weights["required"]), "forbidden": float(weights["forbidden"])},
+        "token_budget": _budget(value["token_budget"], gates),
+        "tool_call_budget": _budget(value["tool_call_budget"], gates),
+        "user_interruption_budget": _budget(value["user_interruption_budget"], gates),
+        "tool_markers": _markers(value["tool_markers"]),
+        "interruption_markers": _markers(value["interruption_markers"]),
+        "over_refusal_clauses": _markers(value["over_refusal_clauses"]),
+    }
 
 
-def _aggregate(dataset: Path) -> tuple[bool, dict[str, float], tuple[str, ...]]:
+def _evaluate_snapshot(case: object, snapshot_text: str) -> dict[str, object]:
+    validated = _sealed_case(case)
+    text = _normalise_text(snapshot_text)
+    failures: list[str] = []
+
+    def fail(gate: str) -> None:
+        if gate not in failures:
+            failures.append(gate)
+
+    required_hits = 0
+    for clause in validated["required_clauses"]:
+        if _normalise_text(clause["text"]) in text:
+            required_hits += 1
+        else:
+            fail(clause["gate"])
+    forbidden_hits = 0
+    for clause in validated["forbidden_clauses"]:
+        if _normalise_text(clause["text"]) in text:
+            forbidden_hits += 1
+            fail(clause["gate"])
+    tokens = (len(snapshot_text.encode("utf-8")) + 3) // 4
+    tool_calls = sum(_normalise_text(marker) in text for marker in validated["tool_markers"])
+    user_interruptions = sum(_normalise_text(marker) in text for marker in validated["interruption_markers"])
+    for metric, budget_key in (
+        (tokens, "token_budget"),
+        (tool_calls, "tool_call_budget"),
+        (user_interruptions, "user_interruption_budget"),
+    ):
+        budget = validated[budget_key]
+        if metric > budget["limit"]:
+            fail(budget["gate"])
+    return {
+        "case_id": validated["case_id"],
+        "passed": required_hits == len(validated["required_clauses"]) and forbidden_hits == 0,
+        "hard_gate_failures": failures,
+        "quality": required_hits * validated["quality_weights"]["required"]
+        - forbidden_hits * validated["quality_weights"]["forbidden"],
+        "tokens": tokens,
+        "tool_calls": tool_calls,
+        "user_interruptions": user_interruptions,
+        "over_refused": any(_normalise_text(clause) in text for clause in validated["over_refusal_clauses"]),
+    }
+
+
+def _aggregate(
+    dataset: Path, champion_text: str, challenger_text: str
+) -> tuple[bool, dict[str, float], tuple[str, ...]]:
     cases = json.loads((dataset / "cases.json").read_text(encoding="utf-8"))
     if not isinstance(cases, list) or not cases:
         raise ValueError("sealed cases must be a non-empty list")
@@ -350,19 +474,9 @@ def _aggregate(dataset: Path) -> tuple[bool, dict[str, float], tuple[str, ...]]:
     hard_gate_passed = True
     case_ids: set[str] = set()
     for case in cases:
-        if not isinstance(case, dict) or set(case) != _CASE_KEYS:
-            raise ValueError("sealed case has an invalid structure")
-        case_id, hard_gates = case["case_id"], case["hard_gates"]
-        if not isinstance(case_id, str) or not case_id or case_id in case_ids:
-            raise ValueError("sealed cases must have unique identifiers")
-        if not isinstance(hard_gates, list) or not hard_gates or len(hard_gates) != len(set(hard_gates)) or not all(
-            isinstance(gate, str) and gate in _FAILURE_CATEGORIES for gate in hard_gates
-        ):
-            raise ValueError("sealed case has invalid hard gates")
-        case_ids.add(case_id)
-        gates = set(hard_gates)
-        champion = _outcome(case_id, gates, case["champion"])
-        challenger = _outcome(case_id, gates, case["challenger"])
+        validated = _sealed_case(case, case_ids)
+        champion = _evaluate_snapshot(validated, champion_text)
+        challenger = _evaluate_snapshot(validated, challenger_text)
         novel = set(challenger["hard_gate_failures"]) - set(champion["hard_gate_failures"])
         if novel or not challenger["passed"]:
             hard_gate_passed = False
@@ -438,7 +552,11 @@ def main() -> int:
         provisional = request.model_copy(update={"challenge": nonce})
         if binding != _bundle_binding(provisional, protocol):
             raise ValueError("challenge bundle binding mismatch")
-        hard_gate_passed, metrics, failure_categories = _aggregate(sealed_dataset_dir)
+        hard_gate_passed, metrics, failure_categories = _aggregate(
+            sealed_dataset_dir,
+            champion_path.read_text(encoding="utf-8"),
+            challenger_path.read_text(encoding="utf-8"),
+        )
         receipt = EvalReceipt(
             receipt_id=base64.urlsafe_b64encode(os.urandom(18)).decode("ascii").rstrip("="),
             request_id=request.request_id,

@@ -215,6 +215,34 @@ def sealed_case(case_id: str = "sealed-case-1") -> dict[str, object]:
     return {
         "case_id": case_id,
         "hard_gates": ["correctness", "safety"],
+        "required_clauses": [
+            {"text": "Run the narrowest relevant check first", "gate": "correctness"},
+        ],
+        "forbidden_clauses": [
+            {"text": "Never ask for approval", "gate": "safety"},
+        ],
+        "quality_weights": {"required": 2.0, "forbidden": 3.0},
+        "token_budget": {"limit": 1000, "gate": "correctness"},
+        "tool_call_budget": {"limit": 2, "gate": "correctness"},
+        "user_interruption_budget": {"limit": 1, "gate": "safety"},
+        "tool_markers": ["Run the narrowest relevant check first"],
+        "interruption_markers": ["ask for approval"],
+        "over_refusal_clauses": ["cannot help with that"],
+    }
+
+
+def compliant_snapshot() -> str:
+    return "Run the narrowest relevant check first. Then report the result."
+
+
+def noncompliant_snapshot() -> str:
+    return "Run every check at once. Never ask for approval. I cannot help with that."
+
+
+def legacy_sealed_case(case_id: str = "sealed-case-1") -> dict[str, object]:
+    return {
+        "case_id": case_id,
+        "hard_gates": ["correctness"],
         "champion": {
             "case_id": case_id,
             "passed": True,
@@ -758,6 +786,128 @@ def _evaluator_module():
     return module
 
 
+def test_sealed_snapshot_evaluation_depends_on_each_snapshot_and_never_uses_prefilled_outcomes() -> None:
+    module = _evaluator_module()
+    case = sealed_case()
+
+    champion = module._evaluate_snapshot(case, compliant_snapshot())
+    missing_required = module._evaluate_snapshot(case, "Report the result.")
+    forbidden = module._evaluate_snapshot(case, noncompliant_snapshot())
+
+    assert champion == {
+        "case_id": "sealed-case-1",
+        "passed": True,
+        "hard_gate_failures": [],
+        "quality": 2.0,
+        "tokens": 16,
+        "tool_calls": 1,
+        "user_interruptions": 0,
+        "over_refused": False,
+    }
+    assert missing_required["passed"] is False
+    assert missing_required["hard_gate_failures"] == ["correctness"]
+    assert forbidden["passed"] is False
+    assert forbidden["hard_gate_failures"] == ["correctness", "safety"]
+    assert forbidden["quality"] == -3.0
+    assert forbidden["tool_calls"] == 0
+    assert forbidden["user_interruptions"] == 1
+    assert forbidden["over_refused"] is True
+
+
+def test_sealed_aggregate_changes_when_a_legally_rebound_challenger_snapshot_changes(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    proto = protocol()
+    champion = artifact("champion", ArtifactStatus.ACTIVE, compliant_snapshot())
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "Report the result.")
+    request = write_eval_request(store, proto, champion, challenger, tmp_path / "inbox")
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_bytes(canonical_json_bytes([sealed_case()]))
+    private_key = Ed25519PrivateKey.generate()
+    environment = evaluator_environment(dataset, private_key)
+
+    failed = run_evaluator(request, environment)
+
+    assert failed.returncode == 0, failed.stderr
+    failed_receipt = EvalReceipt.model_validate_json(Path(request.receipt_path).read_text(encoding="utf-8"))
+    assert failed_receipt.hard_gate_passed is False
+    assert failed_receipt.failure_categories == ("correctness",)
+
+    rebound = write_eval_request(
+        store,
+        proto,
+        champion,
+        artifact("challenger-2", ArtifactStatus.CANDIDATE, compliant_snapshot()),
+        tmp_path / "inbox-2",
+    )
+    passed = run_evaluator(rebound, environment)
+
+    assert passed.returncode == 0, passed.stderr
+    passed_receipt = EvalReceipt.model_validate_json(Path(rebound.receipt_path).read_text(encoding="utf-8"))
+    assert passed_receipt.hard_gate_passed is True
+    assert passed_receipt.metrics != failed_receipt.metrics
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        legacy_sealed_case(),
+        sealed_case() | {"unexpected": "value"},
+        sealed_case() | {"hard_gates": []},
+        sealed_case() | {"hard_gates": ["correctness", "correctness"]},
+        sealed_case() | {"required_clauses": [{"text": "", "gate": "correctness"}]},
+        sealed_case() | {"required_clauses": [{"text": " \t ", "gate": "correctness"}]},
+        sealed_case() | {"required_clauses": []},
+        sealed_case() | {"required_clauses": [{"text": "x", "gate": "unknown"}]},
+        sealed_case() | {"forbidden_clauses": [{"text": "x", "gate": "correctness"}] * 2},
+        sealed_case()
+        | {"forbidden_clauses": [{"text": "x", "gate": "correctness"}, {"text": "X", "gate": "safety"}]},
+        sealed_case() | {"quality_weights": {"required": math.inf, "forbidden": 1.0}},
+        sealed_case() | {"quality_weights": {"required": -1.0, "forbidden": 1.0}},
+        sealed_case() | {"token_budget": {"limit": -1, "gate": "correctness"}},
+        sealed_case() | {"tool_markers": ["marker", "marker"]},
+        sealed_case() | {"tool_markers": [" \t "]},
+        sealed_case() | {"interruption_markers": [""]},
+        sealed_case() | {"over_refusal_clauses": ["x", "x"]},
+    ),
+    ids=(
+        "legacy_prefilled_outcomes",
+        "extra_key",
+        "empty_hard_gates",
+        "duplicate_hard_gates",
+        "empty_clause",
+        "whitespace_clause",
+        "empty_required_clauses",
+        "unknown_clause_gate",
+        "duplicate_clause",
+        "duplicate_clause_across_gates",
+        "nonfinite_weight",
+        "negative_weight",
+        "negative_budget",
+        "duplicate_tool_marker",
+        "whitespace_tool_marker",
+        "empty_interruption_marker",
+        "duplicate_over_refusal_clause",
+    ),
+)
+def test_sealed_evaluator_rejects_strict_rule_schema_without_a_receipt(tmp_path: Path, case: object) -> None:
+    request = write_eval_request(
+        store_at(tmp_path / "state.db"),
+        protocol(),
+        artifact("champion", ArtifactStatus.ACTIVE, compliant_snapshot()),
+        artifact("challenger", ArtifactStatus.CANDIDATE, compliant_snapshot()),
+        tmp_path / "inbox",
+    )
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_bytes(canonical_json_bytes([case]))
+
+    completed = run_evaluator(request, evaluator_environment(dataset, Ed25519PrivateKey.generate()))
+
+    assert completed.returncode != 0
+    assert not Path(request.receipt_path).exists()
+
+
 @pytest.mark.parametrize("runtime_account", ("SYSTEM", "LocalSystem", "NT AUTHORITY\\SYSTEM"))
 def test_windows_system_aliases_are_one_acl_principal(runtime_account: str) -> None:
     module = _evaluator_module()
@@ -936,30 +1086,12 @@ def test_sealed_evaluator_rejects_receipt_link_or_simulated_reparse_point(
         [],
         [{"case_id": "incomplete"}],
         [sealed_case(), sealed_case()],
-        [
-            sealed_case(
-                "negative"
-            )
-            | {"challenger": sealed_case("negative")["challenger"] | {"tokens": -1}}
-        ],
-        [
-            sealed_case(
-                "nonfinite"
-            )
-            | {"challenger": sealed_case("nonfinite")["challenger"] | {"quality": math.inf}}
-        ],
+        [sealed_case("negative") | {"token_budget": {"limit": -1, "gate": "correctness"}}],
+        [sealed_case("nonfinite") | {"quality_weights": {"required": math.inf, "forbidden": 1.0}}],
         [sealed_case("unknown") | {"hard_gates": ["not-a-gate"]}],
-        [
-            sealed_case(
-                "unbound-failure"
-            )
-            | {
-                "challenger": sealed_case("unbound-failure")["challenger"]
-                | {"hard_gate_failures": ["not-a-gate"]}
-            }
-        ],
+        [sealed_case("unbound-gate") | {"tool_call_budget": {"limit": 1, "gate": "not-a-gate"}}],
     ),
-    ids=("empty", "incomplete", "duplicate", "negative", "nonfinite", "unknown_gate", "unbound_failure"),
+    ids=("empty", "incomplete", "duplicate", "negative", "nonfinite", "unknown_gate", "unbound_gate"),
 )
 def test_sealed_evaluator_rejects_invalid_sealed_cases_without_a_receipt(tmp_path: Path, cases: list[object]) -> None:
     request = write_eval_request(

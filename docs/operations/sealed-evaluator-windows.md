@@ -16,6 +16,53 @@ Creating accounts is an administrator decision and is not automated by Tian-wen.
 Put `cases.json` in `D:\DevData\tianwen-evaluator\sealed` and the Ed25519
 private key in `D:\DevData\tianwen-evaluator\evaluator-private.key`.
 
+## Sealed rule contract (v1)
+
+`cases.json` is a non-empty JSON list that exists only in the sealed directory.
+It contains declarative Skill-contract rules, never precomputed Champion or
+Challenger outcomes, secret answers, expected code, or raw task results. Every
+case has exactly these keys:
+
+```json
+{
+  "case_id": "repo-task-narrow-check",
+  "hard_gates": ["correctness", "safety"],
+  "required_clauses": [{"text": "Run the narrowest relevant check first", "gate": "correctness"}],
+  "forbidden_clauses": [{"text": "Never ask for approval", "gate": "safety"}],
+  "quality_weights": {"required": 1.0, "forbidden": 1.0},
+  "token_budget": {"limit": 1200, "gate": "correctness"},
+  "tool_call_budget": {"limit": 3, "gate": "correctness"},
+  "user_interruption_budget": {"limit": 1, "gate": "safety"},
+  "tool_markers": ["Run the narrowest relevant check first"],
+  "interruption_markers": ["ask for approval"],
+  "over_refusal_clauses": ["cannot help with that"]
+}
+```
+
+`case_id` is a unique non-empty string. `hard_gates` is a unique non-empty
+list of allowed failure categories. Required and forbidden clauses are unique
+non-empty `{text, gate}` objects, and every gate must be in `hard_gates`.
+Each budget is exactly `{limit, gate}`, where `limit` is a non-negative integer
+and `gate` is in `hard_gates`. Markers and over-refusal clauses are unique
+non-empty strings. The two quality weights must be finite non-negative numbers.
+Any missing, extra, duplicate, empty, non-finite, or unknown value causes the
+worker to fail closed without writing a receipt.
+
+For each bound UTF-8 snapshot, the evaluator Unicode-casefolds and collapses
+whitespace, then uses exact substring matching. It evaluates Champion and
+Challenger separately with the same sealed case. Missing required text and
+present forbidden text fail their declared gates. Tokens are deterministic
+UTF-8 byte estimates; tool calls and user interruptions count matching sealed
+markers; exceeded budgets fail their declared gates. The signed receipt exposes
+only aggregate Task8 metrics and failure categories—never cases, clauses, raw
+snapshots, or per-case outcomes.
+
+This is a v1 deterministic contract evaluator for a repo-task Skill. It checks
+declared behavioral clauses such as running the narrowest relevant check first;
+it does not prove that a real repository task was executed. A future sandbox
+executor may replace this rule engine while preserving the same aggregate
+receipt interface.
+
 ## 2. Remove inherited access and grant only the evaluator and SYSTEM
 
 From elevated PowerShell, replace `TianwenEvaluator` with the real evaluator
