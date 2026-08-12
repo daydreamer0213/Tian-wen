@@ -215,12 +215,98 @@ class StateStore:
             raise StateConflict(f"missing {kind} {object_id}")
         return model.model_validate_json(row["body_json"])
 
+    def put_immutable_object(
+        self,
+        kind: str,
+        object_id: str,
+        parent_id: str | None,
+        status: str,
+        value: BaseModel,
+    ) -> None:
+        """Persist a content-immutable object, allowing only exact replay."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT parent_id, status, body_json FROM tw_objects WHERE kind = ? AND object_id = ?",
+                (kind, object_id),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    existing["parent_id"],
+                    existing["status"],
+                    existing["body_json"],
+                ) != (parent_id, status, value.model_dump_json()):
+                    raise StateConflict(f"conflicting immutable {kind} replay for {object_id}")
+                return
+            self._put_object(connection, kind, object_id, parent_id, status, value)
+
     def list_objects(self, kind: str, model: type[T]) -> list[T]:
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT body_json FROM tw_objects WHERE kind = ? ORDER BY object_id", (kind,)
             ).fetchall()
         return [model.model_validate_json(row["body_json"]) for row in rows]
+
+    def get_budget(self, loop_id: str) -> tuple[BudgetLimit, BudgetUsage, BudgetUsage]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT limit_json, usage_json, reserved_json FROM tw_budgets WHERE loop_id = ?",
+                (loop_id,),
+            ).fetchone()
+        if row is None:
+            raise StateConflict(f"missing budget {loop_id}")
+        return (
+            BudgetLimit.model_validate_json(row["limit_json"]),
+            BudgetUsage.model_validate_json(row["usage_json"]),
+            BudgetUsage.model_validate_json(row["reserved_json"]),
+        )
+
+    def create_learning_ticket(
+        self,
+        parent_loop_id: str,
+        child: LoopRecord,
+        task: BaseModel,
+        ticket_id: str,
+        ticket: BaseModel,
+    ) -> bool:
+        """Atomically reserve a child budget and create its governed learning records."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT body_json FROM tw_objects WHERE kind = 'learning_ticket' AND object_id = ?",
+                (ticket_id,),
+            ).fetchone()
+            if existing is not None:
+                if existing["body_json"] != ticket.model_dump_json():
+                    raise StateConflict(f"conflicting learning ticket replay for {ticket_id}")
+                return False
+            parent_row = connection.execute(
+                "SELECT body_json FROM tw_objects WHERE kind = 'loop' AND object_id = ?",
+                (parent_loop_id,),
+            ).fetchone()
+            if parent_row is None:
+                raise StateConflict(f"missing parent loop {parent_loop_id}")
+            parent = LoopRecord.model_validate_json(parent_row["body_json"])
+            goal_row = connection.execute(
+                "SELECT 1 FROM tw_objects WHERE kind = 'goal' AND object_id = ?",
+                (parent.goal_id,),
+            ).fetchone()
+            if goal_row is None or child.parent_loop_id != parent_loop_id or child.goal_id != parent.goal_id:
+                raise StateConflict("learning child must retain its persisted parent goal")
+            if getattr(task, "loop_id", None) != child.loop_id:
+                raise StateConflict("learning task must belong to its child loop")
+            for kind, object_id in (("loop", child.loop_id), ("task", getattr(task, "task_id", None))):
+                if object_id is None or connection.execute(
+                    "SELECT 1 FROM tw_objects WHERE kind = ? AND object_id = ?", (kind, object_id)
+                ).fetchone() is not None:
+                    raise StateConflict(f"learning {kind} already exists for {object_id}")
+            self._reserve_child_budget(connection, parent_loop_id, child.loop_id, child.budget)
+            self._insert_object(connection, "loop", child.loop_id, parent_loop_id, "active", child)
+            self._insert_object(connection, "task", task.task_id, child.loop_id, "active", task)
+            self._insert_object(
+                connection, "learning_ticket", ticket_id, parent_loop_id, "active", ticket
+            )
+            return True
 
     def append_event(self, run_id: str, kind: str, payload: dict[str, Any]) -> EventRecord:
         with self._connect() as connection:
@@ -549,6 +635,35 @@ class StateStore:
                 utc_now().isoformat(),
             ),
         )
+
+    def _insert_object(
+        self,
+        connection: sqlite3.Connection,
+        kind: str,
+        object_id: str,
+        parent_id: str | None,
+        status: str,
+        value: BaseModel,
+    ) -> None:
+        try:
+            connection.execute(
+                """
+                INSERT INTO tw_objects
+                    (kind, object_id, parent_id, status, body_json, body_digest, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    kind,
+                    object_id,
+                    parent_id,
+                    status,
+                    value.model_dump_json(),
+                    content_digest(value),
+                    utc_now().isoformat(),
+                ),
+            )
+        except sqlite3.IntegrityError as error:
+            raise StateConflict(f"{kind} already exists for {object_id}") from error
 
     def _append_event(
         self,
