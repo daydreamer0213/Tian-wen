@@ -11,23 +11,10 @@ from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from pydantic import ValidationError
 from pydantic_ai.models.test import TestModel
 
-from tianwen.app import AppError, TianwenApp, TianwenConfig
-from tianwen.domain import BudgetLimit, EvalProtocol, ExplorationBrief, ExplorationStopReason, TaskRecord
+from tianwen.app import AppError, TianwenApp, TianwenConfig, default_eval_protocol
+from tianwen.domain import BudgetLimit, ExplorationBrief, ExplorationStopReason, TaskRecord
 from tianwen.evaluation import EvaluationError
 from tianwen.store import StateConflict
-
-
-def _protocol() -> EvalProtocol:
-    return EvalProtocol(
-        protocol_id="local-v1",
-        task_set_digest="sha256:local",
-        evaluator_digest="sha256:external",
-        harness_digest="sha256:harness",
-        tool_digest="sha256:gateway",
-        budget_digest="sha256:budget",
-        environment_digest="sha256:environment",
-        model_digest="sha256:model",
-    )
 
 
 def _app(args: argparse.Namespace) -> TianwenApp:
@@ -46,7 +33,7 @@ def _app(args: argparse.Namespace) -> TianwenApp:
             workspace=Path(args.workspace).resolve(),
             model=TestModel(custom_output_text="deterministic local demo", call_tools=[]),
             public_evaluator_key=key,
-            approved_protocol=_protocol(),
+            approved_protocol=default_eval_protocol(),
             recorded_search_path=Path(args.recorded_search) if getattr(args, "recorded_search", None) else None,
             recorded_fetch_path=Path(args.recorded_fetch) if getattr(args, "recorded_fetch", None) else None,
         )

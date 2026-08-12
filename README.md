@@ -90,7 +90,23 @@ uv run python -m tianwen --help
 uv run python scripts\run_live_vertical_slice.py --workspace D:\DevData\tianwen-smoke\repo --data-dir D:\DevData\tianwen-smoke\state --max-tokens 200
 ```
 
-Live 脚本要求 `TIANWEN_MODEL` 与 provider 凭据、干净的可丢弃 Git worktree；默认不开网络，只有 `--live-web` 才联网。一次结果只能标为 `supported`、`limited`、`refuted` 或 `inconclusive`，绝不能说明模型已普遍持续学习。
+Live 脚本要求 `TIANWEN_MODEL`、相应 provider 凭据和 `TIANWEN_EVALUATOR_PUBLIC_KEY`（稳定的 Ed25519 公钥 PEM 路径），并且 workspace 必须是干净的可丢弃 Git worktree。普通主 checkout 不合格；只有明确的 Git worktree（`.git` 是文件）或 `D:\DevData\tianwen-smoke` 下的 smoke checkout 可以使用。默认不联网，只有 `--live-web --domain example.org` 才联网。
+
+运行前由 evaluator 专用账户预先配置命令；推荐 JSON 参数数组而不是 shell 字符串：
+
+```powershell
+$env:TIANWEN_MODEL = 'openai:gpt-4.1-mini'
+$env:OPENAI_API_KEY = '...'
+$env:TIANWEN_EVALUATOR_PUBLIC_KEY = 'D:\Evaluator\evaluator-public.pem'
+$env:TIANWEN_EVALUATOR_COMMAND_JSON = '["D:\\Evaluator\\run-evaluator.cmd","{champion_snapshot}","{challenger_snapshot}","{protocol_manifest}","{challenge}","{receipt_path}"]'
+uv run python scripts\run_live_vertical_slice.py --workspace D:\DevData\tianwen-smoke\repo --data-dir D:\DevData\tianwen-smoke\state --max-tokens 200 --objective "Fix the parser" --request "Run the bounded parser task" --criterion "targeted test passes"
+```
+
+`TIANWEN_EVALUATOR_COMMAND_JSON` 的每个元素只能使用固定文本或这五个占位符：`{champion_snapshot}`、`{challenger_snapshot}`、`{protocol_manifest}`、`{challenge}`、`{receipt_path}`。脚本不会使用 shell 执行命令；旧的 `TIANWEN_EVALUATOR_COMMAND` 仅适用于不带模板的预配置可执行命令。evaluator 命令必须在 receipt 路径写出签名 receipt，脚本才导入 EvalRun。
+
+密封数据目录和私钥只能存在于 evaluator 账户继承的环境中。live 脚本不接受 sealed 目录或私钥参数、不读取这些环境变量，也不打印它们。没有 evaluator 命令时，脚本只创建并打印受约束的 EvalRequest 标识，最终标记为 `inconclusive`，不会声称存在 EvalRun。
+
+默认不会发布候选版本。只有传入 `--interactive-promotion`、在真实 TTY 中逐项审批 runtime action、再输入审批人和精确 promotion challenge，脚本才会请求并确认发布、执行不同的 follow-up task 和记录 capability observation。输出中的 rollback 命令只在发布后才可用。最终 `supported` 只表示本次受控样本的硬门通过且质量不倒退；`refuted` 表示安全/硬门失败，`limited` 表示成功执行但没有正当学习候选，`inconclusive` 表示缺少探索或外部评估。任何标签都不证明广泛的持续学习能力。
 
 ## 12. 当前不包含的内容
 

@@ -71,6 +71,20 @@ class AppError(RuntimeError):
     """Raised when a public local-product operation cannot safely continue."""
 
 
+def default_eval_protocol() -> EvalProtocol:
+    """Return the one approved protocol used by both local entry points."""
+    return EvalProtocol(
+        protocol_id="local-v1",
+        task_set_digest="sha256:local",
+        evaluator_digest="sha256:external",
+        harness_digest="sha256:harness",
+        tool_digest="sha256:gateway",
+        budget_digest="sha256:budget",
+        environment_digest="sha256:environment",
+        model_digest="sha256:model",
+    )
+
+
 @dataclass(frozen=True)
 class TianwenConfig:
     data_dir: Path
