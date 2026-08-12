@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import shlex
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -14,7 +16,7 @@ from pydantic_ai_harness import FileSystem, Shell
 from pydantic_ai_harness.skills import Skills
 from pydantic_ai_harness.step_persistence import StepPersistence, StepStore
 
-from tianwen.domain import CheckpointRecord, RunRecord, RunStatus, content_digest
+from tianwen.domain import ActionStatus, CheckpointRecord, RunRecord, RunStatus, content_digest
 from tianwen.gateway import ActionGatewayCapability, EffectClass
 from tianwen.store import StateConflict, StateStore
 
@@ -31,6 +33,61 @@ class RuntimeOutcome:
     output: str | None
     waiting_action_ids: tuple[str, ...] = ()
     checkpoint_id: str | None = None
+
+
+_SHELL_DENIED_OPERATORS = (">>", "||", "&&", ">", "|", ";", "\n", "\r")
+_FILE_EFFECTS = {
+    "read_file": EffectClass.READ_ONLY,
+    "list_directory": EffectClass.READ_ONLY,
+    "find_files": EffectClass.READ_ONLY,
+    "search_files": EffectClass.READ_ONLY,
+    "file_info": EffectClass.READ_ONLY,
+    "write_file": EffectClass.REVERSIBLE_WORKSPACE_WRITE,
+    "edit_file": EffectClass.REVERSIBLE_WORKSPACE_WRITE,
+    "create_directory": EffectClass.REVERSIBLE_WORKSPACE_WRITE,
+}
+_SHELL_EFFECTS = {
+    "run_command": EffectClass.EXTERNAL_OR_IRREVERSIBLE,
+    "start_command": EffectClass.EXTERNAL_OR_IRREVERSIBLE,
+    "check_command": EffectClass.READ_ONLY,
+    "stop_command": EffectClass.REVERSIBLE_WORKSPACE_WRITE,
+}
+
+
+def _runtime_policy(config: RuntimeConfig) -> dict[str, Any]:
+    return {
+        "schema": "tianwen.runtime_policy.v1",
+        "file_effects": {name: effect.value for name, effect in sorted(_FILE_EFFECTS.items())},
+        "shell_effects": {name: effect.value for name, effect in sorted(_SHELL_EFFECTS.items())},
+        "allowed_commands": list(config.allowed_commands),
+        "denied_operators": list(_SHELL_DENIED_OPERATORS),
+        "workspace_rules_version": "best_effort_shell_boundary.v1",
+        "authorization": "workspace_tools_and_checked_shell_only; unknown_forbidden",
+    }
+
+
+def _tool_contract(config: RuntimeConfig) -> dict[str, Any]:
+    return {
+        "schema": "tianwen.runtime_tool_contract.v1",
+        "tools": {
+            **{name: effect.value for name, effect in sorted(_FILE_EFFECTS.items())},
+            **{name: effect.value for name, effect in sorted(_SHELL_EFFECTS.items())},
+        },
+        "shell": {
+            "allowed_commands": list(config.allowed_commands),
+            "denied_operators": list(_SHELL_DENIED_OPERATORS),
+            "default_timeout": 60,
+            "denied_env_patterns": ["*KEY*", "*TOKEN*", "*SECRET*", "*COOKIE*"],
+        },
+    }
+
+
+def runtime_manifest_digests(config: RuntimeConfig) -> dict[str, str]:
+    return {
+        "policy_digest": content_digest(_runtime_policy(config)),
+        "tool_contract_digest": content_digest(_tool_contract(config)),
+        "workspace_digest": content_digest(str(config.workspace.resolve())),
+    }
 
 
 class RepoTaskRuntime:
@@ -71,6 +128,17 @@ class RepoTaskRuntime:
             checkpoint = self._checkpoint(run, checkpoint_id)
             history = ModelMessagesTypeAdapter.validate_json(checkpoint.state["messages_json"])
             action_to_tool_call = checkpoint.state["action_to_tool_call"]
+            unknown = set(approvals).difference(action_to_tool_call)
+            if unknown:
+                raise StateConflict("approval contains an action outside the checkpoint")
+            for action_id, approved in approvals.items():
+                if not approved:
+                    self.store.transition_action(
+                        action_id,
+                        {ActionStatus.WAITING_APPROVAL},
+                        ActionStatus.DENIED,
+                    )
+                    self.store.append_event(run.run_id, "action_denied_by_approval", {"action_id": action_id})
             tool_approvals = {
                 action_to_tool_call[action_id]: approved
                 for action_id, approved in approvals.items()
@@ -122,7 +190,7 @@ class RepoTaskRuntime:
             store=self.store,
             tianwen_run_id=run.run_id,
             classify=self._classify,
-            authorized=lambda _name, _args: True,
+            authorized=self._authorized,
         )
         return Agent(
             self.model,
@@ -135,6 +203,7 @@ class RepoTaskRuntime:
                     cwd=self.config.workspace,
                     allowed_commands=list(self.config.allowed_commands),
                     denied_commands=[],
+                    denied_operators=list(_SHELL_DENIED_OPERATORS),
                     denied_env_patterns=["*KEY*", "*TOKEN*", "*SECRET*", "*COOKIE*"],
                     default_timeout=60,
                 ),
@@ -202,13 +271,17 @@ class RepoTaskRuntime:
             raise StateConflict("pydantic-ai version does not match run manifest")
         if manifest.harness_version != version("pydantic-ai-harness"):
             raise StateConflict("harness version does not match run manifest")
-        if manifest.model_id != getattr(self.model, "model_name", ""):
+        if manifest.model_id != self._model_id():
             raise StateConflict("model does not match run manifest")
         if prompt is not None and manifest.prompt_digest != content_digest(prompt):
             raise StateConflict("prompt does not match run manifest")
         skill = self.config.skill_dir / "repo_task" / "SKILL.md"
         if manifest.skill_digests.get("repo_task") != content_digest(skill.read_text(encoding="utf-8")):
             raise StateConflict("repo_task skill does not match run manifest")
+        digests = runtime_manifest_digests(self.config)
+        for field, digest in digests.items():
+            if getattr(manifest, field) != digest:
+                raise StateConflict(f"{field.removesuffix('_digest').replace('_', ' ')} does not match run manifest")
 
     def _set_run_status(self, run: RunRecord, status: RunStatus, reason: str | None = None) -> None:
         self.store.put_object(
@@ -219,15 +292,40 @@ class RepoTaskRuntime:
             run.model_copy(update={"status": status, "status_reason": reason}),
         )
 
-    @staticmethod
-    def _classify(tool_name: str, _args: dict[str, Any]) -> EffectClass:
-        if tool_name in {"read_file", "list_files", "find_files", "search_files", "load_capability"}:
-            return EffectClass.READ_ONLY
-        if tool_name in {"write_file", "edit_file", "delete_file", "move_file"}:
-            return EffectClass.REVERSIBLE_WORKSPACE_WRITE
-        if tool_name == "run_command":
-            return EffectClass.EXTERNAL_OR_IRREVERSIBLE
-        return EffectClass.FORBIDDEN
+    def _model_id(self) -> str:
+        if isinstance(self.model, str):
+            return self.model
+        return self.model.model_name
+
+    def _classify(self, tool_name: str, args: dict[str, Any]) -> EffectClass:
+        if not self._authorized(tool_name, args):
+            return EffectClass.FORBIDDEN
+        return _FILE_EFFECTS.get(tool_name, _SHELL_EFFECTS.get(tool_name, EffectClass.FORBIDDEN))
+
+    def _authorized(self, tool_name: str, args: dict[str, Any]) -> bool:
+        if tool_name in _FILE_EFFECTS:
+            return True
+        if tool_name in {"check_command", "stop_command"}:
+            command_id = args.get("command_id")
+            return isinstance(command_id, str) and bool(re.fullmatch(r"[A-Za-z0-9_-]+", command_id))
+        if tool_name not in {"run_command", "start_command"}:
+            return False
+        command = args.get("command")
+        if not isinstance(command, str) or not command.strip():
+            return False
+        if any(operator in command for operator in _SHELL_DENIED_OPERATORS):
+            return False
+        if ".." in command or "\\\\" in command or re.search(r"[A-Za-z]:[\\/]", command):
+            return False
+        if re.search(r"(?:^|[^A-Za-z0-9])/(?!/)", command):
+            return False
+        try:
+            tokens = shlex.split(command, posix=False)
+        except ValueError:
+            return False
+        if not tokens or tokens[0] not in self.config.allowed_commands:
+            return False
+        return tokens[0].lower() not in {"cd", "cmd", "powershell", "pwsh", "sh", "bash", "zsh"}
 
     @staticmethod
     def _lease_owner() -> str:
