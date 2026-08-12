@@ -88,14 +88,13 @@ def artifact(version_id: str, status: ArtifactStatus, content: str) -> ArtifactV
 def persist_governed_artifacts(
     store: StateStore, champion: ArtifactVersion, challenger: ArtifactVersion, protocol_: EvalProtocol
 ) -> None:
-    store.put_immutable_object("artifact", champion.version_id, None, champion.status.value, champion)
+    governance_at(store).bootstrap_repo_task(
+        champion,
+        protocol_,
+        ActivePointer(artifact_id=champion.artifact_id, current_version_id=champion.version_id, generation=1),
+    )
     store.put_immutable_object(
         "artifact", challenger.version_id, champion.version_id, challenger.status.value, challenger
-    )
-    store.put_immutable_object("eval_protocol", protocol_.protocol_id, None, "approved", protocol_)
-    store.put_immutable_object(
-        "active_pointer", champion.artifact_id, None, "active",
-        ActivePointer(artifact_id=champion.artifact_id, current_version_id=champion.version_id, generation=1),
     )
 
 
@@ -167,15 +166,16 @@ def test_persist_eval_request_rejects_unauthorized_bindings_without_inserting(tm
         request = request.model_copy(update={"champion_digest": "sha256:wrong"})
     elif state == "artifact_type_mismatch":
         mismatched = challenger.model_copy(update={"artifact_type": "other"})
+        mismatched = mismatched.model_copy(update={"version_id": "challenger-other"})
         store.put_immutable_object(
-            "artifact", "challenger-other", champion.version_id, mismatched.status.value, mismatched
+            "artifact", mismatched.version_id, champion.version_id, mismatched.status.value, mismatched
         )
         request = request.model_copy(
             update={"challenger_version_id": "challenger-other", "challenger_digest": mismatched.content_digest}
         )
 
     with pytest.raises(StateConflict):
-        governance_at(store).persist_eval_request(request)
+        governance_at(store).persist_eval_request(request, proto)
     with store._connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM tw_eval_requests").fetchone()[0] == 0
 
@@ -1067,6 +1067,79 @@ def test_state_store_has_no_governance_write_capabilities_and_runtime_learning_d
     assert "approval" in inspect.signature(GovernanceStore.promote).parameters
 
 
+def test_state_store_cannot_seed_governance_authority_or_active_artifacts(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    proto = protocol()
+    pointer = ActivePointer(artifact_id=champion.artifact_id, current_version_id=champion.version_id, generation=1)
+
+    for kind, object_id, status, value in (
+        ("artifact", champion.version_id, champion.status.value, champion),
+        ("eval_protocol", proto.protocol_id, "approved", proto),
+        ("active_pointer", pointer.artifact_id, "active", pointer),
+    ):
+        with pytest.raises(StateConflict, match="governance|candidate"):
+            store.put_immutable_object(kind, object_id, None, status, value)
+
+    assert store.list_objects("artifact", ArtifactVersion) == []
+    with pytest.raises(StateConflict, match="missing eval_protocol"):
+        store.get_object("eval_protocol", proto.protocol_id, EvalProtocol)
+    with pytest.raises(StateConflict, match="missing active_pointer"):
+        store.get_object("active_pointer", pointer.artifact_id, ActivePointer)
+
+
+def test_governance_bootstrap_requires_the_complete_exact_authority_chain(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    proto = protocol()
+    pointer = ActivePointer(artifact_id=champion.artifact_id, current_version_id=champion.version_id, generation=1)
+    governance = governance_at(store)
+
+    governance.bootstrap_repo_task(champion, proto, pointer)
+    governance.bootstrap_repo_task(champion, proto, pointer)
+
+    with pytest.raises(StateConflict, match="bootstrap"):
+        governance.bootstrap_repo_task(champion, proto, pointer.model_copy(update={"generation": 2}))
+
+    assert store.get_object("artifact", champion.version_id, ArtifactVersion) == champion
+    assert store.get_object_with_status("eval_protocol", proto.protocol_id, EvalProtocol) == (proto, "approved")
+    assert store.get_object("active_pointer", pointer.artifact_id, ActivePointer) == pointer
+
+
+def test_write_eval_request_rejects_a_same_id_different_protocol_without_bundle_or_request(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    approved = protocol()
+    persist_governed_artifacts(store, champion, challenger, approved)
+    supplied = approved.model_copy(update={"evaluator_digest": "sha256:forged-evaluator"})
+    inbox = tmp_path / "inbox"
+
+    with pytest.raises(StateConflict, match="protocol"):
+        _write_eval_request(store, supplied, champion, challenger, inbox)
+
+    assert not inbox.exists()
+    with store._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM tw_eval_requests").fetchone()[0] == 0
+
+
+def test_persist_eval_request_rejects_a_same_id_different_protocol_without_inserting(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    approved = protocol()
+    persist_governed_artifacts(store, champion, challenger, approved)
+    request = eval_request_for(approved, champion, challenger)
+
+    with pytest.raises(StateConflict, match="protocol"):
+        governance_at(store).persist_eval_request(
+            request, approved.model_copy(update={"environment_digest": "sha256:forged-environment"})
+        )
+
+    with store._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM tw_eval_requests").fetchone()[0] == 0
+
+
 def test_governance_store_cannot_promote_without_a_persisted_approval_chain(tmp_path: Path) -> None:
     store = store_at(tmp_path / "state.db")
     champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
@@ -1515,18 +1588,17 @@ def test_put_object_cannot_overwrite_immutable_governance_objects_or_active_poin
     assert pointer.current_version_id == champion.version_id
 
 
-def test_active_pointer_immutable_seed_allows_only_exact_replay(tmp_path: Path) -> None:
+def test_governance_bootstrap_rejects_partial_authority_state(tmp_path: Path) -> None:
     store = store_at(tmp_path / "state.db")
-    seed = ActivePointer(artifact_id="repo-task", current_version_id="champion", generation=1)
-    store.put_immutable_object("active_pointer", seed.artifact_id, None, "active", seed)
-    store.put_immutable_object("active_pointer", seed.artifact_id, None, "active", seed)
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    proto = protocol()
+    pointer = ActivePointer(artifact_id=champion.artifact_id, current_version_id=champion.version_id, generation=1)
+    governance = governance_at(store)
+    governance.bootstrap_repo_task(champion, proto, pointer)
+    with store._connect() as connection:
+        connection.execute(
+            "DELETE FROM tw_objects WHERE kind = 'eval_protocol' AND object_id = ?", (proto.protocol_id,)
+        )
 
-    for parent_id, status, value in (
-        ("other-parent", "active", seed),
-        (None, "candidate", seed),
-        (None, "active", seed.model_copy(update={"current_version_id": "challenger", "generation": 2})),
-    ):
-        with pytest.raises(StateConflict, match="immutable"):
-            store.put_immutable_object("active_pointer", seed.artifact_id, parent_id, status, value)
-
-    assert store.get_object("active_pointer", seed.artifact_id, ActivePointer) == seed
+    with pytest.raises(StateConflict, match="bootstrap"):
+        governance.bootstrap_repo_task(champion, proto, pointer)

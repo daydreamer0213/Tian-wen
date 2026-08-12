@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import secrets
+import shutil
 import sys
 from collections.abc import Callable
 from datetime import timedelta
@@ -201,44 +202,54 @@ def _eval_bundle_binding(request: EvalRequest, protocol: EvalProtocol) -> str:
 def write_eval_request(
     store: StateStore, protocol: EvalProtocol, champion: ArtifactVersion, challenger: ArtifactVersion, output_dir: Path
 ) -> EvalRequest:
+    persisted_protocol, protocol_status = store.get_object_with_status(
+        "eval_protocol", protocol.protocol_id, EvalProtocol
+    )
+    if protocol_status != "approved" or persisted_protocol != protocol:
+        raise StateConflict("evaluation request protocol is not the approved persisted protocol")
     root = output_dir.resolve()
-    root.mkdir(parents=True, exist_ok=True)
     request_id = secrets.token_urlsafe(18)
     request_dir = _inside(root, root / request_id)
-    request_dir.mkdir(mode=0o700)
-    champion_snapshot = _inside(request_dir, request_dir / "champion.snapshot")
-    challenger_snapshot = _inside(request_dir, request_dir / "challenger.snapshot")
-    receipt_path = _inside(request_dir, request_dir / "receipt.json")
-    protocol_path = _inside(request_dir, request_dir / "protocol.json")
-    request_path = _inside(request_dir, request_dir / "request.json")
-    for path, content in ((champion_snapshot, champion.content), (challenger_snapshot, challenger.content)):
-        if content_digest(content) != (
-            champion.content_digest if path == champion_snapshot else challenger.content_digest
-        ):
-            raise EvaluationError("artifact content digest does not match snapshot bytes")
-        path.write_bytes(content.encode("utf-8"))
-        path.chmod(0o444)
-    protocol_path.write_bytes(_canonical_json_bytes(protocol.model_dump(mode="json")))
-    protocol_path.chmod(0o444)
-    nonce = secrets.token_urlsafe(24)
-    provisional = EvalRequest(
-        request_id=request_id,
-        protocol_id=protocol.protocol_id,
-        champion_version_id=champion.version_id,
-        champion_digest=champion.content_digest,
-        champion_snapshot=str(champion_snapshot),
-        challenger_version_id=challenger.version_id,
-        challenger_digest=challenger.content_digest,
-        challenger_snapshot=str(challenger_snapshot),
-        challenge=nonce,
-        receipt_path=str(receipt_path),
-        expires_at=utc_now() + timedelta(hours=1),
-    )
-    request = provisional.model_copy(update={"challenge": f"{nonce}.{_eval_bundle_binding(provisional, protocol)}"})
-    GovernanceStore(store.database).persist_eval_request(request)
-    request_path.write_bytes(_canonical_json_bytes(request.model_dump(mode="json")))
-    request_path.chmod(0o444)
-    return request
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        request_dir.mkdir(mode=0o700)
+        champion_snapshot = _inside(request_dir, request_dir / "champion.snapshot")
+        challenger_snapshot = _inside(request_dir, request_dir / "challenger.snapshot")
+        receipt_path = _inside(request_dir, request_dir / "receipt.json")
+        protocol_path = _inside(request_dir, request_dir / "protocol.json")
+        request_path = _inside(request_dir, request_dir / "request.json")
+        for path, content in ((champion_snapshot, champion.content), (challenger_snapshot, challenger.content)):
+            if content_digest(content) != (
+                champion.content_digest if path == champion_snapshot else challenger.content_digest
+            ):
+                raise EvaluationError("artifact content digest does not match snapshot bytes")
+            path.write_bytes(content.encode("utf-8"))
+            path.chmod(0o444)
+        protocol_path.write_bytes(_canonical_json_bytes(protocol.model_dump(mode="json")))
+        protocol_path.chmod(0o444)
+        nonce = secrets.token_urlsafe(24)
+        provisional = EvalRequest(
+            request_id=request_id,
+            protocol_id=protocol.protocol_id,
+            champion_version_id=champion.version_id,
+            champion_digest=champion.content_digest,
+            champion_snapshot=str(champion_snapshot),
+            challenger_version_id=challenger.version_id,
+            challenger_digest=challenger.content_digest,
+            challenger_snapshot=str(challenger_snapshot),
+            challenge=nonce,
+            receipt_path=str(receipt_path),
+            expires_at=utc_now() + timedelta(hours=1),
+        )
+        request = provisional.model_copy(update={"challenge": f"{nonce}.{_eval_bundle_binding(provisional, protocol)}"})
+        GovernanceStore(store.database).persist_eval_request(request, protocol)
+        request_path.write_bytes(_canonical_json_bytes(request.model_dump(mode="json")))
+        request_path.chmod(0o444)
+        return request
+    except BaseException:
+        if request_dir.exists():
+            shutil.rmtree(request_dir)
+        raise
 
 
 def _validate_metrics(metrics: dict[str, float]) -> None:

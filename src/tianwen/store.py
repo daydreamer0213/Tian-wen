@@ -341,6 +341,23 @@ class StateStore:
         value: BaseModel,
     ) -> None:
         """Persist a content-immutable object, allowing only exact replay."""
+        if kind in {
+            "active_pointer",
+            "eval_protocol",
+            "eval_run",
+            "eval_request",
+            "promotion",
+            "promotion_request",
+            "approval",
+            "approval_receipt",
+        }:
+            raise StateConflict(f"governance {kind} must be written by GovernanceStore")
+        if kind == "artifact" and (
+            not isinstance(value, ArtifactVersion)
+            or value.status.value != "candidate"
+            or status != "candidate"
+        ):
+            raise StateConflict("StateStore may only persist candidate artifacts")
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
@@ -960,7 +977,48 @@ class GovernanceStore:
     def __init__(self, database: Path) -> None:
         self.database = database
 
-    def persist_eval_request(self, request: EvalRequest) -> None:
+    def bootstrap_repo_task(self, champion: ArtifactVersion, protocol: EvalProtocol, pointer: BaseModel) -> None:
+        if (
+            champion.artifact_type != "repo_task_skill"
+            or champion.status.value != "active"
+            or champion.parent_version_id is not None
+            or protocol.protocol_id.strip() == ""
+            or (
+                getattr(pointer, "artifact_id", None),
+                getattr(pointer, "current_version_id", None),
+                getattr(pointer, "generation", None),
+            )
+            != (champion.artifact_id, champion.version_id, 1)
+        ):
+            raise StateConflict("invalid bootstrap authority chain")
+        expected = (
+            ("artifact", champion.version_id, None, "active", champion),
+            ("eval_protocol", protocol.protocol_id, None, "approved", protocol),
+            ("active_pointer", champion.artifact_id, None, "active", pointer),
+        )
+        with _connect_database(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = [
+                connection.execute(
+                    "SELECT parent_id, status, body_json FROM tw_objects WHERE kind = ? AND object_id = ?",
+                    (kind, object_id),
+                ).fetchone()
+                for kind, object_id, _, _, _ in expected
+            ]
+            if all(row is None for row in rows):
+                for kind, object_id, parent_id, status, value in expected:
+                    self._insert_object(connection, kind, object_id, parent_id, status, value)
+                return
+            if any(row is None for row in rows):
+                raise StateConflict("partial bootstrap authority chain")
+            if any(
+                (row["parent_id"], row["status"], row["body_json"])
+                != (parent_id, status, value.model_dump_json())
+                for row, (_, _, parent_id, status, value) in zip(rows, expected, strict=True)
+            ):
+                raise StateConflict("conflicting bootstrap authority chain")
+
+    def persist_eval_request(self, request: EvalRequest, protocol: EvalProtocol) -> None:
         with _connect_database(self.database) as connection:
             connection.execute("BEGIN IMMEDIATE")
             protocol_row = connection.execute(
@@ -969,8 +1027,8 @@ class GovernanceStore:
             ).fetchone()
             if protocol_row is None or protocol_row["status"] != "approved":
                 raise StateConflict("evaluation request protocol is not approved")
-            protocol = EvalProtocol.model_validate_json(protocol_row["body_json"])
-            if protocol.protocol_id != request.protocol_id:
+            persisted_protocol = EvalProtocol.model_validate_json(protocol_row["body_json"])
+            if persisted_protocol != protocol or persisted_protocol.protocol_id != request.protocol_id:
                 raise StateConflict("evaluation request protocol binding does not match")
 
             artifact_rows = connection.execute(

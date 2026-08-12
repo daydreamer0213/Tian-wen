@@ -22,6 +22,7 @@ from tianwen.domain import (
     TaskKind,
     TaskRecord,
 )
+from tianwen.evaluation import ActivePointer
 from tianwen.exploration import ExplorationEngine
 from tianwen.learning import (
     AttributionRecord,
@@ -29,7 +30,7 @@ from tianwen.learning import (
     LearningSignal,
     MutationNotAllowed,
 )
-from tianwen.store import BudgetExceeded, StateConflict, StateStore
+from tianwen.store import BudgetExceeded, GovernanceStore, StateConflict, StateStore
 
 
 def make_engine(tmp_path: Path, *, parent_budget: BudgetLimit | None = None) -> LearningEngine:
@@ -100,6 +101,25 @@ def parent_skill() -> ArtifactVersion:
         content="---\nname: repo-task\n---\n# Repository task\nExisting guidance.",
         evidence_ids=("e-parent",),
         status=ArtifactStatus.ACTIVE,
+    )
+
+
+def bootstrap_parent(store: StateStore, parent: ArtifactVersion) -> None:
+    from tianwen.domain import EvalProtocol
+
+    GovernanceStore(store.database).bootstrap_repo_task(
+        parent,
+        EvalProtocol(
+            protocol_id="learning-bootstrap",
+            task_set_digest="sha256:tasks",
+            evaluator_digest="sha256:evaluator",
+            harness_digest="sha256:harness",
+            tool_digest="sha256:tools",
+            budget_digest="sha256:budget",
+            environment_digest="sha256:environment",
+            model_digest="sha256:model",
+        ),
+        ActivePointer(artifact_id=parent.artifact_id, current_version_id=parent.version_id, generation=1),
     )
 
 
@@ -337,8 +357,7 @@ def test_candidate_requires_accepted_lesson_and_preserves_front_matter(tmp_path:
     lesson = accepted_lesson()
     engine.accept_lesson(lesson)
     parent = parent_skill()
-    engine.store.put_immutable_object("artifact", parent.version_id, None, parent.status.value, parent)
-    engine.store.put_immutable_object("active_pointer", "repo-task", None, "active", parent)
+    bootstrap_parent(engine.store, parent)
 
     candidate = engine.create_repo_task_candidate(parent, lesson, candidate_markdown())
 
@@ -346,7 +365,7 @@ def test_candidate_requires_accepted_lesson_and_preserves_front_matter(tmp_path:
     assert candidate.parent_version_id == parent.version_id
     assert candidate.content.startswith("---\nname: repo-task\n---")
     assert candidate.version_id == candidate.content_digest
-    assert engine.store.get_object("active_pointer", "repo-task", ArtifactVersion) == parent
+    assert engine.store.get_object("artifact", parent.version_id, ArtifactVersion) == parent
 
 
 @pytest.mark.parametrize(
@@ -371,6 +390,7 @@ def test_candidate_exact_replay_is_idempotent_and_different_content_is_new_versi
     lesson = accepted_lesson()
     engine.accept_lesson(lesson)
     parent = parent_skill()
+    bootstrap_parent(engine.store, parent)
     first = engine.create_repo_task_candidate(parent, lesson, candidate_markdown())
     second = engine.create_repo_task_candidate(parent, lesson, candidate_markdown())
     changed = engine.create_repo_task_candidate(
@@ -381,7 +401,7 @@ def test_candidate_exact_replay_is_idempotent_and_different_content_is_new_versi
 
     assert second == first
     assert changed.version_id != first.version_id
-    assert len(engine.store.list_objects("artifact", ArtifactVersion)) == 2
+    assert len(engine.store.list_objects("artifact", ArtifactVersion)) == 3
 
 
 def test_candidate_rejects_non_skill_parent_or_unaccepted_lesson(tmp_path: Path) -> None:

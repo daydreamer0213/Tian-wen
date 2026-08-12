@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from tianwen.domain import ArtifactStatus, ArtifactVersion, EvidenceRecord, LessonRecord
+from tianwen.domain import ArtifactStatus, ArtifactVersion, EvalProtocol, EvidenceRecord, LessonRecord
+from tianwen.evaluation import ActivePointer
 from tianwen.memory import (
     CapabilityLedger,
     CapabilityObservation,
@@ -14,7 +15,7 @@ from tianwen.memory import (
     MemoryRecord,
     MemoryStore,
 )
-from tianwen.store import StateStore
+from tianwen.store import GovernanceStore, StateStore
 
 
 def make_proposal(**overrides: object) -> MemoryProposal:
@@ -292,8 +293,8 @@ def test_delete_source_deactivates_memory_removes_fts_and_invalidates_only_candi
         status=ArtifactStatus.CANDIDATE,
     )
     active = ArtifactVersion(
-        artifact_id="artifact-2",
-        artifact_type="skill",
+        artifact_id="repo-task",
+        artifact_type="repo_task_skill",
         version_id="active-v1",
         parent_version_id=None,
         content_digest="sha256:a",
@@ -302,7 +303,20 @@ def test_delete_source_deactivates_memory_removes_fts_and_invalidates_only_candi
         status=ArtifactStatus.ACTIVE,
     )
     state.put_immutable_object("artifact", candidate.version_id, None, candidate.status.value, candidate)
-    state.put_immutable_object("artifact", active.version_id, None, active.status.value, active)
+    GovernanceStore(state.database).bootstrap_repo_task(
+        active,
+        EvalProtocol(
+            protocol_id="memory-bootstrap",
+            task_set_digest="sha256:tasks",
+            evaluator_digest="sha256:evaluator",
+            harness_digest="sha256:harness",
+            tool_digest="sha256:tools",
+            budget_digest="sha256:budget",
+            environment_digest="sha256:environment",
+            model_digest="sha256:model",
+        ),
+        ActivePointer(artifact_id=active.artifact_id, current_version_id=active.version_id, generation=1),
+    )
 
     receipt = memories.delete_source("source-1")
 
