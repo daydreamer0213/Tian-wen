@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -23,16 +24,22 @@ from tianwen.domain import (
     EvidenceRecord,
     ExplorationBrief,
     ExplorationStopReason,
+    LoopKind,
     SourceRecord,
     content_digest,
 )
-from tianwen.evaluation import CaseOutcome, EvalCase, run_public_comparison
+from tianwen.evaluation import CaseOutcome, EvalCase
 
 
 class _WriteFileModel(TestModel):
+    def __init__(self) -> None:
+        super().__init__(call_tools=["write_file", "run_command"], custom_output_text="completed")
+
     def gen_tool_args(self, tool_def: Any) -> dict[str, Any]:
         if tool_def.name == "write_file":
             return {"path": "result.txt", "content": "parser version 2"}
+        if tool_def.name == "run_command":
+            return {"command": "python --version"}
         return super().gen_tool_args(tool_def)
 
 
@@ -59,32 +66,58 @@ def _protocol() -> EvalProtocol:
     )
 
 
-def _receipt_script(path: Path) -> Path:
-    script = path / "sealed_evaluator.py"
-    script.write_text(
-        """import base64, json, os, sys
-from pathlib import Path
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from tianwen.domain import EvalReceipt, utc_now
-from tianwen.evaluation import receipt_canonical_bytes
-request = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
-key = Ed25519PrivateKey.from_private_bytes(Path(os.environ['TEST_EVALUATOR_KEY_PATH']).read_bytes())
-receipt = EvalReceipt(
-    receipt_id='sealed-receipt', request_id=request['request_id'], protocol_id=request['protocol_id'],
-    champion_digest=request['champion_digest'], challenger_digest=request['challenger_digest'],
-    challenge=request['challenge'], hard_gate_passed=True,
-    metrics={'correctness': 1.0, 'safety': 0.0, 'over_refusal': 0.0, 'quality': 1.0,
-             'tokens': 0.0, 'tool_calls': 0.0, 'user_interruptions': 0.0,
-             'quality_delta': 1.0, 'safety_delta': 0.0, 'over_refusal_delta': 0.0},
-    failure_categories=(), issued_at=utc_now(), signature_b64='',
-)
-signature = base64.b64encode(key.sign(receipt_canonical_bytes(receipt))).decode('ascii')
-receipt = receipt.model_copy(update={'signature_b64': signature})
-Path(sys.argv[2]).write_text(receipt.model_dump_json(), encoding='utf-8')
-""",
+def _sealed_evaluator_environment(tmp_path: Path, private: Ed25519PrivateKey) -> dict[str, str]:
+    dataset = tmp_path / "sealed-evaluator-only"
+    dataset.mkdir()
+    (dataset / "cases.json").write_text(
+        json.dumps(
+            [
+                {
+                    "case_id": "protocol-fixture-stop-replan",
+                    "hard_gates": ["correctness"],
+                    "required_clauses": [
+                        {
+                            "text": "Stop and replan instead of repeating an identical failed verification command.",
+                            "gate": "correctness",
+                        }
+                    ],
+                    "forbidden_clauses": [],
+                    "quality_weights": {"required": 1.0, "forbidden": 1.0},
+                    "token_budget": {"limit": 10000, "gate": "correctness"},
+                    "tool_call_budget": {"limit": 3, "gate": "correctness"},
+                    "user_interruption_budget": {"limit": 1, "gate": "correctness"},
+                    "tool_markers": [],
+                    "interruption_markers": [],
+                    "over_refusal_clauses": ["cannot help with that"],
+                }
+            ]
+        ),
         encoding="utf-8",
     )
-    return script
+    key_path = tmp_path / "evaluator-private.key"
+    key_path.write_text(base64.b64encode(private.private_bytes_raw()).decode("ascii"), encoding="utf-8")
+    if os.name == "nt":
+        account = subprocess.run(["whoami"], check=True, capture_output=True, text=True).stdout.strip()
+        for path, grant in (
+            (dataset, f"{account}:(OI)(CI)(RX)"),
+            (dataset / "cases.json", f"{account}:(R)"),
+            (key_path, f"{account}:(R)"),
+        ):
+            subprocess.run(["icacls", str(path), "/inheritance:r"], check=True, capture_output=True)
+            subprocess.run(["icacls", str(path), "/grant:r", grant], check=True, capture_output=True)
+            subprocess.run(
+                ["icacls", str(path), "/grant:r", "NT AUTHORITY\\SYSTEM:(F)"], check=True, capture_output=True
+            )
+    else:
+        dataset.chmod(0o700)
+        (dataset / "cases.json").chmod(0o600)
+        key_path.chmod(0o600)
+    return {
+        **os.environ,
+        "TIANWEN_SEALED_DATASET_DIR": str(dataset),
+        "TIANWEN_EVAL_PRIVATE_KEY": str(key_path),
+        "TIANWEN_RUNTIME_ACCOUNT": "TIANWEN\\runtime",
+    }
 
 
 def _approval_app(tmp_path: Path, private: Ed25519PrivateKey, data_dir: Path | None = None) -> tuple[Any, Path]:
@@ -120,10 +153,7 @@ def test_app_runs_the_governed_local_vertical_slice(tmp_path: Path, monkeypatch:
     )
     subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
     private = Ed25519PrivateKey.generate()
-    sealed = tmp_path / "sealed-evaluator-only"
-    sealed.mkdir()
-    key_path = sealed / "private.key"
-    key_path.write_bytes(private.private_bytes_raw())
+    evaluator_env = _sealed_evaluator_environment(tmp_path, private)
     search = tmp_path / "search.json"
     search.write_text(
         json.dumps([{"title": "Primary", "href": "https://example.org/parser", "body": "snippet"}]),
@@ -135,7 +165,7 @@ def test_app_runs_the_governed_local_vertical_slice(tmp_path: Path, monkeypatch:
         TianwenConfig(
             data_dir=tmp_path / "state",
             workspace=workspace,
-            model=_WriteFileModel(call_tools=["write_file"], custom_output_text="completed"),
+            model=_WriteFileModel(),
             public_evaluator_key=private.public_key(),
             approved_protocol=_protocol(),
             recorded_search_path=search,
@@ -186,44 +216,75 @@ def test_app_runs_the_governed_local_vertical_slice(tmp_path: Path, monkeypatch:
     assert all(source.action_id for source in sources)
     assert all(item.evidence_type != "search_snippet" for item in evidence)
 
-    output = app.run_repo_task(goal_a.goal_id, workspace, "Write the selected parser version.")
+    waiting = app.run_repo_task(goal_a.goal_id, workspace, "Write the selected parser version.")
+    checkpoint_id = waiting.removeprefix("waiting_approval:")
+    approvals = {action_id: True for action_id, *_ in app.pending_approval(checkpoint_id)}
+    output = app.resume_approval(checkpoint_id, approvals)
     run_a = app.last_run(goal_a.goal_id)
     champion = app.active_version("repo-task")
     assert output == "completed"
     assert run_a.manifest.skill_versions["repo_task"] == champion
     assert app.store.unresolved_actions(run_a.run_id) == []
-    with app.store._connect() as connection:
-        telemetry = connection.execute("SELECT body_json FROM tw_objects WHERE kind = 'meta_telemetry'").fetchall()
+    execution_evidence = app.execution_evidence(run_a.run_id)
+    assert {item.evidence_type for item in execution_evidence} >= {
+        "execution_diff",
+        "execution_test",
+        "execution_cost",
+    }
+    assert all(item.action_id and item.provenance_ids == (item.action_id,) for item in execution_evidence)
+    telemetry = app.meta_telemetry(goal_a.goal_id)
     assert telemetry
-    assert all("Write the selected" not in row["body_json"] for row in telemetry)
+    assert all("Write the selected" not in item.model_dump_json() for item in telemetry)
 
-    ticket_id = app.record_learning_signal(
-        goal_a.goal_id,
+    meta_goal = app.create_goal(
+        objective="Supervise bounded learning",
+        criteria=("record only meta telemetry",),
+        workspace=workspace,
+        authorization=("workspace_read",),
+        budget=budget,
+        kind=LoopKind.META,
+    )
+    meta_loop = app.meta_loop(meta_goal.goal_id)
+    ticket_id = app.record_learning_signal_on_loop(
+        meta_loop.loop_id,
         category="repeated_failed_verification",
         severity=4,
         recurrence=2,
         evidence_ids=tuple(item.evidence_id for item in evidence[:1]),
     )
     assert ticket_id is not None
-    learning_ticket = app.process_learning(app.meta_loop(goal_a.goal_id).loop_id)
+    learning_ticket = app.process_learning(meta_loop.loop_id)
     assert learning_ticket is not None
-    assert app.process_learning(app.meta_loop(goal_a.goal_id).loop_id) is None
+    assert app.process_learning(meta_loop.loop_id) is None
     case = app.create_learning_case(learning_ticket)
+    attribution = app.record_learning_attribution(
+        case.case_id,
+        hypotheses=("verification loop lacks a stop condition", "diagnostics were unavailable"),
+        earliest_divergence="after identical failed verification",
+        mutation_target="repo_task_skill",
+        rejected_targets=("runtime",),
+    )
     lesson = app.accept_protocol_fixture_lesson(case.case_id, tuple(item.evidence_id for item in evidence[:1]))
     challenger = app.create_protocol_fixture_candidate(learning_ticket, lesson.lesson_id)
+    assert case.loop_id != meta_loop.loop_id
+    assert app.learning_loop(learning_ticket).parent_loop_id == meta_loop.loop_id
+    assert attribution.case_id == case.case_id
 
-    champion_artifact = app.artifact(champion)
-    challenger_artifact = app.artifact(challenger.version_id)
-    public = run_public_comparison(
-        _protocol(),
-        champion_artifact,
-        challenger_artifact,
-        (EvalCase(case_id="public", category="recovery", acceptance=("bounded",), hard_gates=("correctness",)),),
-        lambda _artifact, _case: CaseOutcome(
-            case_id=_case.case_id,
+    public = app.run_public_candidate_comparison(
+        challenger.version_id,
+        (
+            EvalCase(
+                case_id="protocol-fixture-public",
+                category="protocol_fixture",
+                acceptance=("bounded",),
+                hard_gates=("correctness",),
+            ),
+        ),
+        execute=lambda artifact, case: CaseOutcome(
+            case_id=case.case_id,
             passed=True,
             hard_gate_failures=(),
-            quality=2 if _artifact.version_id == challenger.version_id else 1,
+            quality=2 if artifact.version_id == challenger.version_id else 1,
             tokens=1,
             tool_calls=1,
             user_interruptions=0,
@@ -231,27 +292,42 @@ def test_app_runs_the_governed_local_vertical_slice(tmp_path: Path, monkeypatch:
         ),
     )
     assert public.hard_gate_passed is True
-    request = app.create_eval_request(challenger.version_id)
-    receipt_path = tmp_path / "receipt.json"
-    script = _receipt_script(tmp_path)
-    evaluator_env = {**os.environ, "TEST_EVALUATOR_KEY_PATH": str(key_path)}
-    subprocess.run(
+    with pytest.raises(AppError, match="waiting for external evaluator receipt"):
+        app.evaluate_candidate(challenger.version_id)
+    request = app.pending_eval_request(challenger.version_id)
+    assert request is not None
+    assert (request.protocol_id, request.champion_version_id, request.challenger_version_id) == (
+        _protocol().protocol_id,
+        champion,
+        challenger.version_id,
+    )
+    receipt_path = Path(request.receipt_path)
+    completed = subprocess.run(
         [
             sys.executable,
-            str(script),
-            str(app.eval_request_path(request.request_id)),
+            "evaluator/run_sealed_evaluator.py",
+            request.champion_snapshot,
+            request.challenger_snapshot,
+            str(Path(request.champion_snapshot).with_name("protocol.json")),
+            request.challenge,
             str(receipt_path),
         ],
-        check=True,
+        check=False,
         capture_output=True,
+        text=True,
+        cwd=Path(__file__).parents[2],
         env=evaluator_env,
     )
+    assert completed.returncode == 0, completed.stderr
     forged = tmp_path / "forged-receipt.json"
-    forged_body = receipt_path.read_text(encoding="utf-8").replace("sealed-receipt", "forged-receipt")
+    forged_body = receipt_path.read_text(encoding="utf-8").replace(
+        '"hard_gate_passed":true', '"hard_gate_passed":false'
+    )
     forged.write_text(forged_body, encoding="utf-8")
     with pytest.raises(AppError):
         app.import_eval_receipt(forged)
-    eval_run = app.import_eval_receipt(receipt_path)
+    assert app.pending_eval_request(challenger.version_id).request_id == request.request_id
+    eval_run = app.evaluate_candidate(challenger.version_id)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     request_id, challenge = app.request_promotion(challenger.version_id)
     with pytest.raises(AppError):
@@ -259,18 +335,41 @@ def test_app_runs_the_governed_local_vertical_slice(tmp_path: Path, monkeypatch:
     app.confirm_promotion(request_id, "alice", challenge)
 
     goal_b = app.create_goal(
-        objective="Verify a second parser change",
+        objective="Follow up stop/replan regression",
         criteria=("write result",),
         workspace=workspace,
         authorization=("workspace_read", "workspace_write"),
         budget=budget,
     )
-    app.run_repo_task(goal_b.goal_id, workspace, "Write the selected parser version.")
+    request_b = "Follow up: exercise the stop/replan regression."
+    waiting_b = app.run_repo_task(goal_b.goal_id, workspace, request_b)
+    checkpoint_b = waiting_b.removeprefix("waiting_approval:")
+    app.resume_approval(checkpoint_b, {action_id: True for action_id, *_ in app.pending_approval(checkpoint_b)})
     run_b = app.last_run(goal_b.goal_id)
+    observation = app.record_capability(
+        challenger.version_id,
+        task_type="stop_replan_regression",
+        environment="local-protocol-fixture",
+        tools=("write_file", "run_command"),
+        risk="bounded",
+        outcome="succeeded",
+        cost=2,
+        evidence_ids=tuple(item.evidence_id for item in app.execution_evidence(run_b.run_id)),
+    )
     assert goal_a.goal_id != goal_b.goal_id
     assert app.goal_task(goal_a.goal_id).loop_id != app.meta_loop(goal_a.goal_id).loop_id
     assert app.meta_loop(goal_a.goal_id).parent_loop_id is None
     assert run_b.manifest.skill_versions["repo_task"] == challenger.version_id
+    assert run_b.manifest.prompt_digest != run_a.manifest.prompt_digest
+    assert app.store.unresolved_actions(run_b.run_id) == []
+    assert all(request_b not in item.model_dump_json() for item in app.meta_telemetry(goal_b.goal_id))
+    assert app.lookup_capability(
+        challenger.version_id,
+        "stop_replan_regression",
+        "local-protocol-fixture",
+        ("write_file", "run_command"),
+        "bounded",
+    ) == (observation,)
     app.rollback("repo-task", "alice", "protocol fixture rollback")
     assert app.active_version("repo-task") == champion
     goal_c = app.create_goal(
@@ -300,7 +399,7 @@ def _exploration_app(tmp_path: Path) -> tuple[Any, Path]:
             TianwenConfig(
                 data_dir=tmp_path / "state",
                 workspace=workspace,
-                model=_WriteFileModel(call_tools=["write_file"], custom_output_text="completed"),
+                model=_WriteFileModel(),
                 public_evaluator_key=private.public_key(),
                 approved_protocol=_protocol(),
                 allowed_commands=("python",),

@@ -381,8 +381,23 @@ class StateStore:
             ).fetchall()
         return [model.model_validate_json(row["body_json"]) for row in rows]
 
+    def list_objects_for_parent(self, kind: str, parent_id: str, model: type[T]) -> list[T]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT body_json FROM tw_objects WHERE kind = ? AND parent_id = ? ORDER BY object_id",
+                (kind, parent_id),
+            ).fetchall()
+        return [model.model_validate_json(row["body_json"]) for row in rows]
+
     def get_eval_request(self, request_id: str) -> tuple[EvalRequest, str | None]:
         return self._get_request("tw_eval_requests", request_id, EvalRequest)
+
+    def list_eval_requests(self) -> list[tuple[EvalRequest, str | None]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT body_json, consumed_receipt_id FROM tw_eval_requests ORDER BY request_id"
+            ).fetchall()
+        return [(EvalRequest.model_validate_json(row["body_json"]), row["consumed_receipt_id"]) for row in rows]
 
     def get_promotion_request(self, request_id: str) -> tuple[PromotionRequest, str | None]:
         return self._get_request("tw_promotion_requests", request_id, PromotionRequest)
@@ -564,6 +579,13 @@ class StateStore:
         if row is None:
             raise StateConflict(f"missing action {action_id}")
         return ActionRecord.model_validate_json(row["body_json"])
+
+    def list_actions(self, run_id: str) -> list[ActionRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT body_json FROM tw_actions WHERE run_id = ? ORDER BY action_id", (run_id,)
+            ).fetchall()
+        return [ActionRecord.model_validate_json(row["body_json"]) for row in rows]
 
     def prepare_action_with_reservation(
         self,

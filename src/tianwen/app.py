@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
@@ -14,6 +15,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from pydantic_ai_harness.step_persistence import SqliteStepStore
 
 from tianwen.domain import (
+    ActionStatus,
     ArtifactStatus,
     ArtifactVersion,
     BudgetLimit,
@@ -41,11 +43,14 @@ from tianwen.domain import (
 )
 from tianwen.evaluation import (
     ActivePointer,
+    CaseOutcome,
+    EvalCase,
     EvaluationError,
     Publisher,
     create_approval_receipt,
     create_promotion_request,
     import_eval_receipt,
+    run_public_comparison,
     write_eval_request,
 )
 from tianwen.evidence import evidence_from_action, project_meta_telemetry
@@ -56,7 +61,8 @@ from tianwen.exploration import (
     recorded_fetch_tool,
     recorded_search_tool,
 )
-from tianwen.learning import LearningEngine, LearningSignal
+from tianwen.learning import AttributionRecord, LearningEngine, LearningSignal
+from tianwen.memory import CapabilityLedger, CapabilityObservation
 from tianwen.runtime import RepoTaskRuntime, RuntimeConfig, runtime_manifest_digests
 from tianwen.store import GovernanceStore, StateConflict, StateStore
 
@@ -566,24 +572,69 @@ class TianwenApp:
     def _project_run_outcomes(self, goal_id: str, run_id: str) -> None:
         meta = self.meta_loop(goal_id)
         scope = f"goal:{goal_id}:execution"
-        for action in self.store.unresolved_actions(run_id):
-            del action
-        with self.store._connect() as connection:
-            rows = connection.execute("SELECT action_id FROM tw_actions WHERE run_id = ?", (run_id,)).fetchall()
-        for row in rows:
-            action = self.store.get_action(str(row["action_id"]))
+        actions = [
+            action
+            for action in self.store.list_actions(run_id)
+            if action.status in {ActionStatus.SUCCEEDED, ActionStatus.FAILED}
+        ]
+        for action in actions:
+            evidence_type = (
+                "execution_diff"
+                if action.tool_name in {"write_file", "edit_file", "create_directory"}
+                else "execution_test"
+                if action.tool_name in {"run_command", "check_command", "start_command", "stop_command"}
+                else "execution_cost"
+            )
             record = evidence_from_action(
                 action,
-                "bounded runtime action outcome",
+                f"governed {evidence_type.removeprefix('execution_')} action",
                 scope=scope,
-                purpose="execution_outcome",
+                purpose="execution_evidence",
+            ).model_copy(
+                update={
+                    "evidence_type": evidence_type,
+                    "source_class": "runtime_action",
+                    "cost_bucket": "governed_action_count",
+                }
             )
-            self.store.put_object("evidence", record.evidence_id, run_id, "active", record)
+            self.store.put_immutable_object("evidence", record.evidence_id, run_id, "recorded", record)
             telemetry = project_meta_telemetry(record)
             telemetry_id = content_digest({"action": action.action_id, "telemetry": telemetry})
             self.store.put_immutable_object(
                 "meta_telemetry", telemetry_id, meta.loop_id, "recorded", _Telemetry(**telemetry)
             )
+        run = self.store.get_object("run", run_id, RunRecord)
+        if actions and run.status is RunStatus.COMPLETED:
+            action = actions[0]
+            cost = evidence_from_action(
+                action,
+                f"{len(actions)} governed actions completed",
+                scope=scope,
+                purpose="execution_evidence",
+            ).model_copy(
+                update={
+                    "evidence_type": "execution_cost",
+                    "source_class": "runtime_action_count",
+                    "cost_bucket": "governed_action_count",
+                }
+            )
+            self.store.put_immutable_object("evidence", cost.evidence_id, run_id, "recorded", cost)
+            telemetry = project_meta_telemetry(cost)
+            telemetry_id = content_digest({"action": action.action_id, "telemetry": telemetry})
+            self.store.put_immutable_object(
+                "meta_telemetry", telemetry_id, meta.loop_id, "recorded", _Telemetry(**telemetry)
+            )
+
+    def execution_evidence(self, run_id: str) -> tuple[EvidenceRecord, ...]:
+        self.store.get_object("run", run_id, RunRecord)
+        return tuple(
+            record
+            for record in self.store.list_objects("evidence", EvidenceRecord)
+            if record.run_id == run_id and record.purpose == "execution_evidence"
+        )
+
+    def meta_telemetry(self, goal_id: str) -> tuple[_Telemetry, ...]:
+        return tuple(self.store.list_objects_for_parent("meta_telemetry", self.meta_loop(goal_id).loop_id, _Telemetry))
 
     def record_learning_signal(
         self, goal_id: str, *, category: str, severity: int, recurrence: int, evidence_ids: tuple[str, ...]
@@ -599,6 +650,25 @@ class TianwenApp:
             evidence_ids=evidence_ids,
         )
         self.store.put_immutable_object("pending_learning_signal", signal.signal_id, signal.loop_id, "queued", signal)
+        return signal.signal_id
+
+    def record_learning_signal_on_loop(
+        self, loop_id: str, *, category: str, severity: int, recurrence: int, evidence_ids: tuple[str, ...]
+    ) -> str | None:
+        loop = self.store.get_object("loop", loop_id, LoopRecord)
+        if loop.kind is not LoopKind.META:
+            raise AppError("learning signals require a meta loop")
+        signal = LearningSignal(
+            signal_id=f"signal:{secrets.token_urlsafe(18)}",
+            loop_id=loop_id,
+            category=category,
+            severity=severity,
+            recurrence=recurrence,
+            blocks_goal=False,
+            user_corrected=False,
+            evidence_ids=evidence_ids,
+        )
+        self.store.put_immutable_object("pending_learning_signal", signal.signal_id, loop_id, "queued", signal)
         return signal.signal_id
 
     def process_learning(self, loop_id: str) -> str | None:
@@ -618,6 +688,24 @@ class TianwenApp:
 
     def create_learning_case(self, ticket_id: str) -> CaseRecord:
         return LearningEngine(self.store, self.config.learning_budget).create_case(ticket_id)
+
+    def learning_loop(self, ticket_id: str) -> LoopRecord:
+        ticket = LearningEngine(self.store, self.config.learning_budget).get_ticket(ticket_id)
+        return self.store.get_object("loop", ticket.loop_id, LoopRecord)
+
+    def record_learning_attribution(
+        self,
+        case_id: str,
+        *,
+        hypotheses: tuple[str, ...],
+        earliest_divergence: str,
+        mutation_target: str,
+        rejected_targets: tuple[str, ...],
+    ) -> AttributionRecord:
+        case = self.store.get_object("case", case_id, CaseRecord)
+        return LearningEngine(self.store, self.config.learning_budget).record_attribution(
+            case, hypotheses, earliest_divergence, mutation_target, rejected_targets
+        )
 
     def accept_protocol_fixture_lesson(self, case_id: str, evidence_ids: tuple[str, ...]) -> LessonRecord:
         lesson = LessonRecord(
@@ -647,16 +735,47 @@ class TianwenApp:
         )
         return engine.create_repo_task_candidate(champion, lesson, candidate)
 
+    def run_public_candidate_comparison(
+        self,
+        candidate_version_id: str,
+        cases: tuple[EvalCase, ...] | Path,
+        *,
+        execute: Callable[[ArtifactVersion, EvalCase], CaseOutcome],
+    ) -> EvalRun:
+        candidate = self.artifact(candidate_version_id)
+        champion = self.artifact(self.active_version(candidate.artifact_id))
+        try:
+            public_cases = (
+                tuple(EvalCase.model_validate(item) for item in json.loads(cases.read_text(encoding="utf-8")))
+                if isinstance(cases, Path)
+                else cases
+            )
+            run = run_public_comparison(self.config.approved_protocol, champion, candidate, public_cases, execute)
+            self.store.put_immutable_object("public_eval_run", run.eval_run_id, None, "recorded", run)
+            return run
+        except EvaluationError as error:
+            raise AppError(str(error)) from error
+
     def create_eval_request(self, candidate_version_id: str):
         candidate = self.artifact(candidate_version_id)
-        champion = self.artifact(self.active_version())
-        return write_eval_request(
-            self.store,
-            self.config.approved_protocol,
-            champion,
-            candidate,
-            self.data_dir / "eval-inbox",
-        )
+        champion = self.artifact(self.active_version(candidate.artifact_id))
+        try:
+            protocol, status = self.store.get_object_with_status(
+                "eval_protocol", self.config.approved_protocol.protocol_id, EvalProtocol
+            )
+            if status != "approved" or protocol != self.config.approved_protocol:
+                raise AppError("approved evaluation protocol does not match app configuration")
+            return write_eval_request(self.store, protocol, champion, candidate, self.data_dir / "eval-inbox")
+        except (EvaluationError, StateConflict) as error:
+            raise AppError(str(error)) from error
+
+    def pending_eval_request(self, candidate_version_id: str):
+        requests = [
+            request
+            for request, consumed in self.store.list_eval_requests()
+            if request.challenger_version_id == candidate_version_id and consumed is None
+        ]
+        return max(requests, key=lambda request: request.expires_at) if requests else None
 
     def evaluate_candidate(self, candidate_version_id: str) -> EvalRun:
         existing = [
@@ -666,7 +785,10 @@ class TianwenApp:
         ]
         if existing:
             return existing[-1]
-        request = self.create_eval_request(candidate_version_id)
+        request = self.pending_eval_request(candidate_version_id) or self.create_eval_request(candidate_version_id)
+        receipt_path = Path(request.receipt_path)
+        if receipt_path.exists():
+            return self.import_eval_receipt(receipt_path)
         raise AppError(f"waiting for external evaluator receipt for request {request.request_id}")
 
     def eval_request_path(self, request_id: str) -> Path:
@@ -679,6 +801,37 @@ class TianwenApp:
             return import_eval_receipt(self.store, receipt, self.config.public_evaluator_key)
         except (EvaluationError, StateConflict) as error:
             raise AppError(str(error)) from error
+
+    def record_capability(
+        self,
+        version_id: str,
+        *,
+        task_type: str,
+        environment: str,
+        tools: tuple[str, ...],
+        risk: str,
+        outcome: str,
+        cost: int,
+        evidence_ids: tuple[str, ...],
+    ) -> CapabilityObservation:
+        self.artifact(version_id)
+        observation = CapabilityObservation(
+            version_id=version_id,
+            task_type=task_type,
+            environment=environment,
+            tools=tools,
+            risk=risk,
+            outcome=outcome,
+            cost=cost,
+            evidence_ids=evidence_ids,
+        )
+        CapabilityLedger(self.store).record(observation)
+        return observation
+
+    def lookup_capability(
+        self, version_id: str, task_type: str, environment: str, tools: tuple[str, ...], risk: str
+    ) -> tuple[CapabilityObservation, ...]:
+        return CapabilityLedger(self.store).lookup(version_id, task_type, environment, tools, risk)
 
     def request_promotion(self, candidate_version_id: str) -> tuple[str, str]:
         candidate = self.artifact(candidate_version_id)
