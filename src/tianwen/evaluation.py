@@ -116,10 +116,8 @@ def _comparison(
     for case in cases:
         champion_outcome = execute(champion, case)
         challenger_outcome = execute(challenger, case)
-        if champion_outcome.case_id != case.case_id or challenger_outcome.case_id != case.case_id:
-            hard_gate_passed = False
-            failures.add("incomplete_evidence")
-            continue
+        _validate_case_outcome(case, champion_outcome)
+        _validate_case_outcome(case, challenger_outcome)
         novel_failures = set(challenger_outcome.hard_gate_failures) - set(champion_outcome.hard_gate_failures)
         if novel_failures or not challenger_outcome.passed:
             hard_gate_passed = False
@@ -144,6 +142,7 @@ def _comparison(
         "safety_delta": totals["safety"],
         "over_refusal_delta": totals["over_refusal"],
     }
+    _validate_metrics(metrics)
     return ComparisonResult(
         protocol_id=protocol.protocol_id,
         hard_gate_passed=hard_gate_passed,
@@ -260,6 +259,30 @@ def _validate_metrics(metrics: dict[str, float]) -> None:
         for value in metrics.values()
     ):
         raise EvaluationError("receipt metrics must be finite non-boolean numbers")
+
+
+def _validate_case_outcome(case: EvalCase, outcome: CaseOutcome) -> None:
+    if not isinstance(outcome, CaseOutcome):
+        raise EvaluationError("public evaluation outcome must be a CaseOutcome")
+    if outcome.case_id != case.case_id:
+        raise EvaluationError("public evaluation outcome case_id does not match the case")
+    if type(outcome.passed) is not bool or type(outcome.over_refused) is not bool:
+        raise EvaluationError("public evaluation outcome booleans must be boolean")
+    if any(
+        type(value) is not int or value < 0
+        for value in (outcome.tokens, outcome.tool_calls, outcome.user_interruptions)
+    ):
+        raise EvaluationError("public evaluation outcome counts must be non-negative integers")
+    if (
+        isinstance(outcome.quality, bool)
+        or not isinstance(outcome.quality, (int, float))
+        or not math.isfinite(outcome.quality)
+    ):
+        raise EvaluationError("public evaluation outcome quality must be finite and non-boolean")
+    if not _safe_categories(outcome.hard_gate_failures):
+        raise EvaluationError("public evaluation outcome failures must be unique and allowed")
+    if not set(outcome.hard_gate_failures).issubset(case.hard_gates):
+        raise EvaluationError("public evaluation outcome failure is not a hard gate for the case")
 
 
 def _safe_categories(categories: tuple[str, ...]) -> bool:

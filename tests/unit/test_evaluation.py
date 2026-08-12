@@ -429,7 +429,69 @@ def test_public_comparison_hard_gate_wins_over_quality_and_incomplete_evidence()
             over_refused=False,
         )
 
-    assert not run_public_comparison(protocol(), champion, challenger, cases, missing_case).hard_gate_passed
+    with pytest.raises(EvaluationError):
+        run_public_comparison(protocol(), champion, challenger, cases, missing_case)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("quality", math.nan),
+        ("quality", math.inf),
+        ("tokens", -1),
+        ("tool_calls", -1),
+        ("user_interruptions", -1),
+        ("tokens", True),
+        ("tool_calls", True),
+        ("user_interruptions", True),
+        ("hard_gate_failures", ("correctness", "correctness")),
+        ("hard_gate_failures", ("grader_error",)),
+        ("hard_gate_failures", ("not-a-hard-gate",)),
+        ("case_id", "wrong-case"),
+        ("passed", 1),
+        ("over_refused", 0),
+    ),
+)
+def test_public_comparison_rejects_invalid_case_outcomes(field: str, value: object) -> None:
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    cases = load_public_cases(Path("tests/fixtures/evals/public/repo_task_cases.json"))
+    case = cases[0]
+    outcome = CaseOutcome.model_construct(
+        case_id=case.case_id,
+        passed=True,
+        hard_gate_failures=(),
+        quality=1.0,
+        tokens=1,
+        tool_calls=1,
+        user_interruptions=0,
+        over_refused=False,
+    )
+    outcome = outcome.model_copy(update={field: value})
+
+    with pytest.raises(EvaluationError):
+        run_public_comparison(protocol(), champion, challenger, cases, lambda *_: outcome)
+
+
+def test_public_comparison_rejects_finite_quality_sum_overflow() -> None:
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    cases = load_public_cases(Path("tests/fixtures/evals/public/repo_task_cases.json"))
+
+    def execute(subject: ArtifactVersion, case) -> CaseOutcome:
+        return CaseOutcome(
+            case_id=case.case_id,
+            passed=True,
+            hard_gate_failures=(),
+            quality=sys.float_info.max if subject == challenger else 0.0,
+            tokens=0,
+            tool_calls=0,
+            user_interruptions=0,
+            over_refused=False,
+        )
+
+    with pytest.raises(EvaluationError):
+        run_public_comparison(protocol(), champion, challenger, cases, execute)
 
 
 def test_public_comparison_rejects_protocol_mismatch_and_unknown_metric() -> None:
