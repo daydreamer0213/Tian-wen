@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -99,6 +100,22 @@ def prepare_running_action(store: StateStore, *, run_id: str) -> None:
     )
     store.prepare_action(action)
     store.transition_action("a1", {ActionStatus.PROPOSED}, ActionStatus.RUNNING)
+
+
+def make_action(**overrides: object) -> ActionRecord:
+    values: dict[str, object] = {
+        "action_id": "action",
+        "run_id": "run",
+        "tool_call_id": "call",
+        "tool_name": "web_search",
+        "args_json": '{"query":"sqlite"}',
+        "args_digest": "sha256:args",
+        "effect_class": "read",
+        "idempotency_key": "run:call",
+        "status": ActionStatus.PROPOSED,
+    }
+    values.update(overrides)
+    return ActionRecord(**values)
 
 
 def test_event_sequence_is_append_only(tmp_path: Path) -> None:
@@ -225,6 +242,110 @@ def test_started_action_without_terminal_result_is_unresolved(tmp_path: Path) ->
         "a1", {ActionStatus.PROPOSED}, ActionStatus.RUNNING
     )
     assert store.unresolved_actions("run")[0].status is ActionStatus.RUNNING
+
+
+def test_get_action_reads_current_lifecycle_state(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    action = make_action()
+    store.prepare_action(action)
+    store.transition_action(
+        action.action_id,
+        {ActionStatus.PROPOSED},
+        ActionStatus.WAITING_APPROVAL,
+    )
+
+    assert store.get_action(action.action_id).status is ActionStatus.WAITING_APPROVAL
+
+
+def test_get_action_rejects_missing_action(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+
+    with pytest.raises(StateConflict):
+        store.get_action("missing")
+
+
+def test_frozen_action_replay_is_idempotent_after_waiting_for_approval(
+    tmp_path: Path,
+) -> None:
+    store = store_at(tmp_path / "state.db")
+    proposal = make_action()
+    store.prepare_action(proposal)
+    store.transition_action(
+        proposal.action_id,
+        {ActionStatus.PROPOSED},
+        ActionStatus.WAITING_APPROVAL,
+    )
+
+    store.prepare_action(proposal)
+
+    assert store.get_action(proposal.action_id).status is ActionStatus.WAITING_APPROVAL
+
+
+def test_succeeded_action_replay_does_not_repeat_reservations(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    store.create_budget(
+        "loop", None, BudgetLimit(model_requests=0, tool_calls=2, tokens=0)
+    )
+    brief = make_brief(max_tokens=0, max_cost_microunits=0)
+    store.create_exploration(brief)
+    proposal = make_action()
+    budget_delta = BudgetUsage(tool_calls=1)
+    exploration_delta = ExplorationUsage(searches=1)
+    store.prepare_action_with_reservation(
+        proposal,
+        "loop",
+        budget_delta,
+        brief.brief_id,
+        exploration_delta,
+    )
+    store.transition_action(
+        proposal.action_id,
+        {ActionStatus.PROPOSED},
+        ActionStatus.SUCCEEDED,
+        result_digest="sha256:result",
+    )
+
+    store.prepare_action_with_reservation(
+        proposal,
+        "loop",
+        budget_delta,
+        brief.brief_id,
+        exploration_delta,
+    )
+
+    assert store.get_action(proposal.action_id).status is ActionStatus.SUCCEEDED
+    assert store.get_exploration_usage(brief.brief_id).searches == 1
+    assert store.charge_budget("loop", BudgetUsage(tool_calls=1)).tool_calls == 2
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("action_id", "different-action"),
+        ("run_id", "different-run"),
+        ("tool_call_id", "different-call"),
+        ("tool_name", "web_fetch"),
+        ("args_json", '{"query":"different"}'),
+        ("args_digest", "sha256:different-args"),
+        ("effect_class", "external_read"),
+        ("idempotency_key", "different-key"),
+        ("created_at", timedelta(seconds=1)),
+    ],
+)
+def test_action_replay_rejects_changed_frozen_identity(
+    tmp_path: Path,
+    field: str,
+    replacement: object,
+) -> None:
+    store = store_at(tmp_path / "state.db")
+    proposal = make_action()
+    store.prepare_action(proposal)
+    if field == "created_at":
+        replacement = proposal.created_at + replacement
+    changed = proposal.model_copy(update={field: replacement})
+
+    with pytest.raises(StateConflict):
+        store.prepare_action(changed)
 
 
 def test_recovery_persists_running_action_as_unknown(tmp_path: Path) -> None:

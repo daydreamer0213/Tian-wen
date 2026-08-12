@@ -263,6 +263,15 @@ class StateStore:
             connection.execute("BEGIN IMMEDIATE")
             self._prepare_action(connection, action)
 
+    def get_action(self, action_id: str) -> ActionRecord:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT body_json FROM tw_actions WHERE action_id = ?", (action_id,)
+            ).fetchone()
+        if row is None:
+            raise StateConflict(f"missing action {action_id}")
+        return ActionRecord.model_validate_json(row["body_json"])
+
     def prepare_action_with_reservation(
         self,
         action: ActionRecord,
@@ -554,7 +563,9 @@ class StateStore:
         ).fetchone()
         if conflict is not None:
             existing = ActionRecord.model_validate_json(conflict["body_json"])
-            if existing == action:
+            if existing.model_copy(
+                update={"status": action.status, "result_digest": action.result_digest}
+            ) == action:
                 return False
             raise StateConflict(f"conflicting action replay for {action.action_id}")
         connection.execute(
