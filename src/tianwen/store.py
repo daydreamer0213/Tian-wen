@@ -20,6 +20,7 @@ from tianwen.domain import (
     ExplorationBrief,
     ExplorationUsage,
     LoopRecord,
+    RunRecord,
     content_digest,
     utc_now,
 )
@@ -158,7 +159,22 @@ class StateStore:
     ) -> None:
         if kind == "loop" and isinstance(value, LoopRecord) and value.parent_loop_id is not None:
             raise StateConflict("child loops must be created with create_child_loop")
+        if kind == "exploration_brief":
+            raise StateConflict("exploration briefs must be created with create_exploration")
+        if kind == "run" and (not isinstance(value, RunRecord) or status != value.status.value):
+            raise StateConflict("run object status must match its record")
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT body_json FROM tw_objects WHERE kind = ? AND object_id = ?",
+                (kind, object_id),
+            ).fetchone()
+            if kind == "run" and existing is not None:
+                persisted = RunRecord.model_validate_json(existing["body_json"])
+                if persisted.manifest != value.manifest or persisted.model_copy(
+                    update={"status": value.status, "status_reason": value.status_reason}
+                ) != value:
+                    raise StateConflict("run manifest and identity are immutable")
             self._put_object(connection, kind, object_id, parent_id, status, value)
 
     def get_object(self, kind: str, object_id: str, model: type[T]) -> T:
@@ -316,6 +332,8 @@ class StateStore:
     def create_budget(
         self, loop_id: str, parent_loop_id: str | None, limit: BudgetLimit
     ) -> None:
+        if parent_loop_id is not None:
+            raise StateConflict("child budgets must be created with reserve_child_budget")
         with self._connect() as connection:
             try:
                 connection.execute(

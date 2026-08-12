@@ -12,6 +12,9 @@ from tianwen.domain import (
     ExplorationUsage,
     LoopKind,
     LoopRecord,
+    RunManifest,
+    RunRecord,
+    RunStatus,
 )
 from tianwen.store import BudgetExceeded, LeaseConflict, StateConflict, StateStore
 
@@ -57,6 +60,28 @@ def make_brief(*, max_tokens: int, max_cost_microunits: int) -> ExplorationBrief
         expected_outputs=("answer",),
         sufficiency_criteria=("evidence",),
         stop_conditions=(ExplorationStopReason.SUFFICIENT,),
+    )
+
+
+def make_run(*, model_id: str = "model-a") -> RunRecord:
+    return RunRecord(
+        run_id="run",
+        task_id="task",
+        status=RunStatus.QUEUED,
+        manifest=RunManifest(
+            workflow_version="1",
+            schema_version="1",
+            pydantic_ai_version="2.18.0",
+            harness_version="0.13.0",
+            model_id=model_id,
+            prompt_digest="sha256:prompt",
+            skill_versions={},
+            skill_digests={},
+            policy_digest="sha256:policy",
+            tool_contract_digest="sha256:tools",
+            goal_contract_digest="sha256:goal",
+            workspace_digest="sha256:workspace",
+        ),
     )
 
 
@@ -111,6 +136,47 @@ def test_parent_charge_cannot_spend_child_reservation(tmp_path: Path) -> None:
     )
     with pytest.raises(BudgetExceeded):
         store.charge_budget("parent", BudgetUsage(model_requests=3))
+
+
+def test_create_budget_cannot_bypass_parent_reservation(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    store.create_budget(
+        "parent", None, BudgetLimit(model_requests=1, tool_calls=1, tokens=10)
+    )
+    with pytest.raises(StateConflict):
+        store.create_budget(
+            "unreserved-child",
+            "parent",
+            BudgetLimit(model_requests=1, tool_calls=1, tokens=10),
+        )
+
+
+def test_existing_exploration_brief_cannot_expand_persisted_limits(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    brief = make_brief(max_tokens=10, max_cost_microunits=10)
+    store.create_exploration(brief)
+    expanded = brief.model_copy(update={"max_tokens": 20})
+    with pytest.raises(StateConflict):
+        store.put_object("exploration_brief", brief.brief_id, None, "active", expanded)
+    with pytest.raises(BudgetExceeded):
+        store.reserve_exploration_usage(brief.brief_id, ExplorationUsage(admitted_tokens=11))
+
+
+def test_exploration_brief_can_only_be_created_with_create_exploration(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    brief = make_brief(max_tokens=10, max_cost_microunits=10)
+    with pytest.raises(StateConflict):
+        store.put_object("exploration_brief", brief.brief_id, None, "active", brief)
+
+
+def test_existing_run_cannot_replace_its_frozen_manifest(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    run = make_run()
+    store.put_object("run", run.run_id, None, run.status.value, run)
+    replacement = make_run(model_id="model-b")
+    with pytest.raises(StateConflict):
+        store.put_object("run", run.run_id, None, replacement.status.value, replacement)
+    assert store.get_object("run", run.run_id, RunRecord).manifest.model_id == "model-a"
 
 
 def test_budget_and_lease_survive_reopen(tmp_path: Path) -> None:
