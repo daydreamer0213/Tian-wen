@@ -6,11 +6,15 @@ import os
 import sys
 from pathlib import Path
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from pydantic import ValidationError
 from pydantic_ai.models.test import TestModel
 
 from tianwen.app import AppError, TianwenApp, TianwenConfig
 from tianwen.domain import BudgetLimit, EvalProtocol, ExplorationBrief, ExplorationStopReason, TaskRecord
+from tianwen.evaluation import EvaluationError
+from tianwen.store import StateConflict
 
 
 def _protocol() -> EvalProtocol:
@@ -28,12 +32,14 @@ def _protocol() -> EvalProtocol:
 
 def _app(args: argparse.Namespace) -> TianwenApp:
     key_path = os.environ.get("TIANWEN_EVALUATOR_PUBLIC_KEY")
-    if key_path:
+    if not key_path:
+        raise AppError("TIANWEN_EVALUATOR_PUBLIC_KEY must name an Ed25519 public PEM file")
+    try:
         key = load_pem_public_key(Path(key_path).read_bytes())
-    else:
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
-        key = Ed25519PrivateKey.generate().public_key()
+    except (OSError, ValueError) as error:
+        raise AppError("TIANWEN_EVALUATOR_PUBLIC_KEY must name a readable Ed25519 public PEM file") from error
+    if not isinstance(key, Ed25519PublicKey):
+        raise AppError("TIANWEN_EVALUATOR_PUBLIC_KEY must name an Ed25519 public PEM file")
     return TianwenApp(
         TianwenConfig(
             data_dir=Path(args.data_dir),
@@ -78,6 +84,8 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--goal", required=True)
     approve = sub.add_parser("approve", help="resume a runtime approval checkpoint")
     approve.add_argument("--checkpoint", required=True)
+    approve.add_argument("--approve", action="append", default=[], metavar="ACTION_ID")
+    approve.add_argument("--deny", action="append", default=[], metavar="ACTION_ID")
     learn = sub.add_parser("learn", help="process at most one queued learning signal")
     learn.add_argument("--loop", required=True)
     request = sub.add_parser("eval-request", help="write an external evaluator request")
@@ -94,7 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     try:
         app = _app(args)
         if args.command == "goal-create":
@@ -144,7 +153,20 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "status":
             print(app.status(args.goal).model_dump_json())
         elif args.command == "approve":
-            raise AppError(f"checkpoint {args.checkpoint} must be resumed through its exact frozen runtime action")
+            if not sys.stdin.isatty():
+                raise AppError("approval requires an interactive TTY")
+            approved = set(args.approve)
+            denied = set(args.deny)
+            if len(approved) != len(args.approve) or len(denied) != len(args.deny) or approved & denied:
+                raise AppError("each pending action needs one unambiguous decision")
+            approvals = {action_id: True for action_id in approved} | {action_id: False for action_id in denied}
+            if not approvals:
+                for action_id, tool_name, effect_class in app.pending_approval(args.checkpoint):
+                    answer = input(f"Approve {action_id} ({tool_name}, {effect_class})? [y/n]: ").strip().casefold()
+                    if answer not in {"y", "yes", "n", "no"}:
+                        raise AppError("approval answer must be yes or no")
+                    approvals[action_id] = answer in {"y", "yes"}
+            print(app.resume_approval(args.checkpoint, approvals))
         elif args.command == "learn":
             print(app.process_learning(args.loop) or "no queued high-value signal")
         elif args.command == "eval-request":
@@ -167,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "rollback":
             print(app.rollback(args.artifact, args.approved_by, args.reason).model_dump_json())
         return 0
-    except (AppError, ValueError, OSError) as error:
+    except (AppError, StateConflict, EvaluationError, ValidationError, ValueError, OSError) as error:
         print(f"tianwen: {error}", file=sys.stderr)
         return 2
 

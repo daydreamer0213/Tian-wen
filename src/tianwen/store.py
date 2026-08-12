@@ -544,6 +544,15 @@ class StateStore:
             ).fetchone()
         return None if row is None else CheckpointRecord.model_validate_json(row["body_json"])
 
+    def get_checkpoint(self, checkpoint_id: str) -> CheckpointRecord:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT body_json FROM tw_checkpoints WHERE checkpoint_id = ?", (checkpoint_id,)
+            ).fetchone()
+        if row is None:
+            raise StateConflict(f"missing checkpoint {checkpoint_id}")
+        return CheckpointRecord.model_validate_json(row["body_json"])
+
     def prepare_action(self, action: ActionRecord) -> None:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")

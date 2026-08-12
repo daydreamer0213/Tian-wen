@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import UTC, datetime
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.tools import ToolDefinition
 
 from tianwen.app import AppError
 from tianwen.domain import (
@@ -29,6 +33,16 @@ class _WriteFileModel(TestModel):
     def gen_tool_args(self, tool_def: Any) -> dict[str, Any]:
         if tool_def.name == "write_file":
             return {"path": "result.txt", "content": "parser version 2"}
+        return super().gen_tool_args(tool_def)
+
+
+class _ApprovalModel(TestModel):
+    def __init__(self) -> None:
+        super().__init__(call_tools=["run_command"], custom_output_text="approved command completed")
+
+    def gen_tool_args(self, tool_def: ToolDefinition) -> dict[str, Any]:
+        if tool_def.name == "run_command":
+            return {"command": "python --version"}
         return super().gen_tool_args(tool_def)
 
 
@@ -71,6 +85,28 @@ Path(sys.argv[2]).write_text(receipt.model_dump_json(), encoding='utf-8')
         encoding="utf-8",
     )
     return script
+
+
+def _approval_app(tmp_path: Path, private: Ed25519PrivateKey, data_dir: Path | None = None) -> tuple[Any, Path]:
+    from tianwen.app import TianwenApp, TianwenConfig
+
+    workspace = tmp_path / "approval-repo"
+    workspace.mkdir(exist_ok=True)
+    if not (workspace / ".git").exists():
+        subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+    return (
+        TianwenApp(
+            TianwenConfig(
+                data_dir=data_dir or tmp_path / "approval-state",
+                workspace=workspace,
+                model=_ApprovalModel(),
+                public_evaluator_key=private.public_key(),
+                approved_protocol=_protocol(),
+                allowed_commands=("python",),
+            )
+        ),
+        workspace,
+    )
 
 
 def test_app_runs_the_governed_local_vertical_slice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -405,3 +441,131 @@ def test_goal_evidence_packet_is_isolated_in_execution_manifest(tmp_path: Path) 
 
     assert app.goal_evidence_packet(goal_b.goal_id) == empty_packet
     assert second_run.manifest.prompt_digest == first_run.manifest.prompt_digest
+
+
+def test_app_resumes_exact_approval_once_from_a_new_process_instance(tmp_path: Path) -> None:
+    """Break caught: removing frozen runtime controls would permit a restarted App to resume with changed authority."""
+    private = Ed25519PrivateKey.generate()
+    app, workspace = _approval_app(tmp_path, private)
+    goal = app.create_goal(
+        objective="Run a reviewed command",
+        criteria=("command completes",),
+        workspace=workspace,
+        authorization=("workspace_read", "workspace_write"),
+        budget=BudgetLimit(model_requests=2, tool_calls=20, tokens=2000),
+    )
+
+    waiting = app.run_repo_task(goal.goal_id, workspace, "Run the reviewed command.")
+    checkpoint_id = waiting.removeprefix("waiting_approval:")
+    checkpoint = app.store.get_checkpoint(checkpoint_id)
+    action_id = next(iter(checkpoint.state["action_to_tool_call"]))
+    resumed, _ = _approval_app(tmp_path, private, app.data_dir)
+
+    assert resumed.resume_approval(checkpoint_id, {action_id: True}) == "approved command completed"
+    assert resumed.store.count_actions(checkpoint.run_id, "run_command") == 1
+
+
+def test_app_rejects_incomplete_or_extra_approval_decisions(tmp_path: Path) -> None:
+    """Break caught: accepting a partial or foreign decision can silently approve an unintended pending action."""
+    private = Ed25519PrivateKey.generate()
+    app, workspace = _approval_app(tmp_path, private)
+    goal = app.create_goal(
+        objective="Run a reviewed command",
+        criteria=("command completes",),
+        workspace=workspace,
+        authorization=("workspace_read", "workspace_write"),
+        budget=BudgetLimit(model_requests=2, tool_calls=20, tokens=2000),
+    )
+    checkpoint_id = app.run_repo_task(goal.goal_id, workspace, "Run the reviewed command.").removeprefix(
+        "waiting_approval:"
+    )
+    action_id = next(iter(app.store.get_checkpoint(checkpoint_id).state["action_to_tool_call"]))
+
+    with pytest.raises(AppError, match="exactly"):
+        app.resume_approval(checkpoint_id, {})
+    with pytest.raises(AppError, match="exactly"):
+        app.resume_approval(checkpoint_id, {action_id: True, "action:extra": False})
+
+
+def _cli_env(key_path: Path | None) -> dict[str, str]:
+    env = os.environ.copy()
+    if key_path is None:
+        env.pop("TIANWEN_EVALUATOR_PUBLIC_KEY", None)
+    else:
+        env["TIANWEN_EVALUATOR_PUBLIC_KEY"] = str(key_path)
+    return env
+
+
+def _write_public_key(path: Path, private: Ed25519PrivateKey) -> Path:
+    path.write_bytes(private.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo))
+    return path
+
+
+def test_cli_requires_stable_public_key_and_reopens_same_state(tmp_path: Path) -> None:
+    """Break caught: a random fallback key makes state restartable but evaluator trust unverifiable."""
+    workspace = tmp_path / "cli-repo"
+    workspace.mkdir()
+    state = tmp_path / "state"
+    private = Ed25519PrivateKey.generate()
+    key = _write_public_key(tmp_path / "evaluator-public.pem", private)
+    command = [sys.executable, "-m", "tianwen", "--data-dir", str(state), "--workspace", str(workspace)]
+
+    missing = subprocess.run(
+        [*command, "status", "--goal", "goal:missing"], text=True, capture_output=True, env=_cli_env(None)
+    )
+    assert missing.returncode == 2
+    assert "TIANWEN_EVALUATOR_PUBLIC_KEY" in missing.stderr
+    assert "Traceback" not in missing.stderr
+
+    missing_goal = subprocess.run(
+        [*command, "status", "--goal", "goal:missing"], text=True, capture_output=True, env=_cli_env(key)
+    )
+    assert missing_goal.returncode == 2
+    assert "missing goal" in missing_goal.stderr
+    assert "Traceback" not in missing_goal.stderr
+
+    created = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from io import StringIO; import sys; from tianwen.cli import main; "
+            "sys.stdin = type('TTY', (StringIO,), {'isatty': lambda self: True})('yes\\n'); "
+            f"raise SystemExit(main({command[3:]!r} + "
+            "['goal-create', '--objective', 'stable key', '--criterion', 'works']))",
+        ],
+        text=True,
+        capture_output=True,
+        env=_cli_env(key),
+    )
+    assert created.returncode == 0, created.stderr
+    goal_id = re.search(r"goal:[A-Za-z0-9_-]+", created.stdout).group(0)
+    reopened = subprocess.run(
+        [*command, "status", "--goal", goal_id], text=True, capture_output=True, env=_cli_env(key)
+    )
+    assert reopened.returncode == 0, reopened.stderr
+
+    wrong = _write_public_key(tmp_path / "wrong-public.pem", Ed25519PrivateKey.generate())
+    rejected = subprocess.run(
+        [*command, "status", "--goal", goal_id], text=True, capture_output=True, env=_cli_env(wrong)
+    )
+    assert rejected.returncode == 2
+    assert "public evaluator key" in rejected.stderr
+    assert "Traceback" not in rejected.stderr
+
+
+def test_cli_approve_requires_tty_and_readme_argument_order_parses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Break caught: noninteractive consent or README argument order could bypass the intended command boundary."""
+    from tianwen.cli import build_parser, main
+
+    parser = build_parser()
+    parsed = parser.parse_args(
+        ["--workspace", str(tmp_path), "--data-dir", str(tmp_path / "state"), "status", "--goal", "goal:example"]
+    )
+    assert parsed.command == "status"
+    key = _write_public_key(tmp_path / "evaluator-public.pem", Ed25519PrivateKey.generate())
+    monkeypatch.setenv("TIANWEN_EVALUATOR_PUBLIC_KEY", str(key))
+    monkeypatch.setattr(sys, "stdin", StringIO(""))
+
+    assert main(["approve", "--checkpoint", "checkpoint:example"]) == 2

@@ -21,11 +21,23 @@ uv sync
 以下命令在交互式终端运行；创建目标会要求输入 `yes`，不能用非交互开关绕过人工确认。
 
 ```powershell
-uv run python -m tianwen goal-create --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime --objective "修复 parser" --criterion "测试通过"
-uv run python -m tianwen explore --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime --goal GOAL_ID --task root --question "当前支持哪个 parser API？"
-uv run python -m tianwen run --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime --goal GOAL_ID --request "修复 parser 测试"
-uv run python -m tianwen status --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime --goal GOAL_ID
+$env:TIANWEN_EVALUATOR_PUBLIC_KEY = 'D:\Evaluator\evaluator-public.pem'
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime goal-create --objective "修复 parser" --criterion "测试通过"
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime explore --goal GOAL_ID --task root --question "当前支持哪个 parser API？"
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime run --goal GOAL_ID --request "修复 parser 测试"
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime status --goal GOAL_ID
 ```
+
+`--data-dir` 和 `--workspace` 必须放在子命令前。每个实际 CLI 命令都必须设置 `TIANWEN_EVALUATOR_PUBLIC_KEY`，其值是 Ed25519 **公钥** PEM 文件；同一 `data-dir` 重启时必须使用同一把公钥。
+
+高影响 action 会输出 `waiting_approval:CHECKPOINT_ID`。在真实 TTY 中逐项作出明确决定；不会有 approve-all，也不会显示工具参数：
+
+```powershell
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime approve --checkpoint CHECKPOINT_ID --approve ACTION_ID
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime approve --checkpoint CHECKPOINT_ID --deny ACTION_ID
+```
+
+不传 `--approve` 或 `--deny` 时，CLI 会按 pending action 逐个询问 `yes/no`。
 
 候选评估必须拆成外部请求和收据导入：`eval-request`、由 evaluator 身份运行一次评估命令、`eval-import`，最后才可 `promote`。`rollback` 只移动活动版本指针，不删除历史。
 
@@ -54,6 +66,13 @@ Provider 原生网页工具可能绕过本地授权、预算和来源记录。�
 ## 10. Evaluator 专用密封目录与 Windows ACL
 
 Tian-wen 进程只持有 Ed25519 公钥，不能读 sealed cases、私钥或 evaluator 配置。把密封目录和私钥放在 evaluator 专用 Windows 账户可读的位置，并确认 runtime 账户无读取权限：
+
+由 evaluator 身份生成私钥和可分发的公钥；不要把私钥放进 runtime 数据目录或环境变量：
+
+```powershell
+openssl genpkey -algorithm Ed25519 -out D:\Evaluator\private-key.pem
+openssl pkey -in D:\Evaluator\private-key.pem -pubout -out D:\Evaluator\evaluator-public.pem
+```
 
 ```powershell
 icacls D:\Evaluator\sealed

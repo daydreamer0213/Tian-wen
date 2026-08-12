@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from pydantic_ai_harness.step_persistence import SqliteStepStore
 
 from tianwen.domain import (
@@ -95,6 +96,18 @@ class DecisionBrief(FrozenModel):
     idle_outcome: str
 
 
+class RuntimeControl(FrozenModel):
+    run_id: str
+    goal_id: str
+    workspace: str
+    allowed_commands: tuple[str, ...]
+
+
+class AppConfig(FrozenModel):
+    public_evaluator_key_pem: str
+    public_evaluator_key_digest: str
+
+
 class TianwenApp:
     """Small serial coordinator for the bounded local Tian-wen product slice."""
 
@@ -104,7 +117,25 @@ class TianwenApp:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.store = StateStore(self.data_dir / "tianwen.db")
         self.store.initialize()
+        self._persist_app_config()
         self._bootstrap()
+
+    def _persist_app_config(self) -> None:
+        if not isinstance(self.config.public_evaluator_key, Ed25519PublicKey):
+            raise AppError("public evaluator key must be Ed25519")
+        pem = self.config.public_evaluator_key.public_bytes(
+            Encoding.PEM, PublicFormat.SubjectPublicKeyInfo
+        ).decode("ascii")
+        try:
+            self.store.put_immutable_object(
+                "app_config",
+                "app-config:v1",
+                None,
+                "active",
+                AppConfig(public_evaluator_key_pem=pem, public_evaluator_key_digest=content_digest(pem)),
+            )
+        except StateConflict as error:
+            raise AppError("public evaluator key does not match the initialized data directory") from error
 
     def _bootstrap(self) -> None:
         champion_content = (Path(__file__).parents[2] / "skills" / "repo_task" / "SKILL.md").read_text(encoding="utf-8")
@@ -377,17 +408,81 @@ class TianwenApp:
             ),
         )
         self.store.put_object("run", run.run_id, task.task_id, run.status.value, run)
-        runtime = RepoTaskRuntime(
-            self.store,
-            SqliteStepStore(database=self.store.database),
-            self.config.model,
-            RuntimeConfig(repo.resolve(), self._materialize(champion.version_id), self.config.allowed_commands),
+        self.store.put_immutable_object(
+            "runtime_control",
+            run.run_id,
+            goal.goal_id,
+            "active",
+            RuntimeControl(
+                run_id=run.run_id,
+                goal_id=goal.goal_id,
+                workspace=str(repo.resolve()),
+                allowed_commands=self.config.allowed_commands,
+            ),
+        )
+        runtime = self._runtime(
+            RuntimeConfig(repo.resolve(), self._materialize(champion.version_id), self.config.allowed_commands)
         )
         outcome = asyncio.run(runtime.run(run, prompt))
         self._project_run_outcomes(goal_id, run.run_id)
         if outcome.waiting_action_ids:
             return f"waiting_approval:{outcome.checkpoint_id}"
         return outcome.output or ""
+
+    def pending_approval(self, checkpoint_id: str) -> tuple[tuple[str, str, str], ...]:
+        checkpoint, _run, _control = self._approval_checkpoint(checkpoint_id)
+        action_ids = checkpoint.state.get("action_to_tool_call")
+        if not isinstance(action_ids, dict) or not action_ids:
+            raise AppError("checkpoint has no pending approval actions")
+        pending = []
+        for action_id in sorted(action_ids):
+            action = self.store.get_action(action_id)
+            pending.append((action_id, action.tool_name, action.effect_class))
+        return tuple(pending)
+
+    def resume_approval(self, checkpoint_id: str, approvals: dict[str, bool]) -> str:
+        checkpoint, run, control = self._approval_checkpoint(checkpoint_id)
+        action_to_tool_call = checkpoint.state.get("action_to_tool_call")
+        if not isinstance(action_to_tool_call, dict) or set(approvals) != set(action_to_tool_call):
+            raise AppError("approval decisions must exactly match the pending checkpoint actions")
+        if any(type(approved) is not bool for approved in approvals.values()):
+            raise AppError("approval decisions must be explicit booleans")
+        skill_version = run.manifest.skill_versions.get("repo_task")
+        if not skill_version:
+            raise AppError("run manifest does not contain a frozen repo_task skill version")
+        outcome = asyncio.run(
+            self._runtime(
+                RuntimeConfig(
+                    Path(control.workspace),
+                    self._materialize(skill_version),
+                    control.allowed_commands,
+                )
+            ).resume_approval(run, checkpoint_id, approvals)
+        )
+        self._project_run_outcomes(control.goal_id, run.run_id)
+        if outcome.waiting_action_ids:
+            return f"waiting_approval:{outcome.checkpoint_id}"
+        return outcome.output or ""
+
+    def _approval_checkpoint(self, checkpoint_id: str):
+        try:
+            checkpoint = self.store.get_checkpoint(checkpoint_id)
+            run = self.store.get_object("run", checkpoint.run_id, RunRecord)
+            control = self.store.get_object("runtime_control", run.run_id, RuntimeControl)
+        except StateConflict as error:
+            raise AppError("checkpoint does not have a durable runtime control record") from error
+        if (
+            control.run_id != run.run_id
+            or run.status is not RunStatus.WAITING
+            or run.status_reason != "user_approval"
+            or self.store.latest_checkpoint(run.run_id) != checkpoint
+            or self.goal_task(control.goal_id).task_id != run.task_id
+        ):
+            raise AppError("checkpoint is not the exact current user approval checkpoint")
+        return checkpoint, run, control
+
+    def _runtime(self, config: RuntimeConfig) -> RepoTaskRuntime:
+        return RepoTaskRuntime(self.store, SqliteStepStore(database=self.store.database), self.config.model, config)
 
     def goal_evidence_packet(self, goal_id: str) -> dict[str, tuple[dict[str, str], ...]]:
         """Return a small, stable packet of completed current-goal exploration records."""
