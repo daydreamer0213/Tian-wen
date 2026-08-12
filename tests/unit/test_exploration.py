@@ -192,7 +192,7 @@ def test_nonempty_search_does_not_record_no_new_evidence_stop_cause(tmp_path: Pa
 def test_fetch_creates_source_and_evidence_without_obeying_page_text(tmp_path: Path) -> None:
     engine, brief = make_engine_and_brief(tmp_path)
     source, evidence = engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
-    assert source.content_digest == content_digest(FETCHED_PAGE.read_bytes())
+    assert source.content_digest == content_digest(FETCHED_PAGE.read_text(encoding="utf-8"))
     assert source.trust_status == "untrusted_external"
     assert evidence.provenance_ids == (source.source_id,)
     assert evidence.purpose == "goal_exploration"
