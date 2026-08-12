@@ -164,7 +164,9 @@ async def test_gateway_denies_shell_escape_forms_before_the_shell_can_write_outs
         f'python -c "open(r\"{outside}\", \"w\").write(\"bad\")"',
         'python -c "open(\"/tmp/tianwen-outside.txt\", \"w\").write(\"bad\")"',
         'python -c "open(\"../outside.txt\", \"w\").write(\"bad\")"',
-        'cmd /d /c type \\server\\share\\secret.txt',
+        'python -c "open(r\"\\outside.txt\", \"w\").write(\"bad\")"',
+        'python -c "open(r\"C:outside.txt\", \"w\").write(\"bad\")"',
+        'python -c "open(r\"\\\\server\\share\\outside.txt\", \"w\").write(\"bad\")"',
     ):
         runtime = _runtime(tmp_path / str(abs(hash(command))), _ShellModel(command))
         run = _run("run", runtime)

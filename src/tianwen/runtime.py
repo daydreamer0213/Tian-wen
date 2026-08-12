@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ntpath
 import re
 import shlex
 import shutil
@@ -322,6 +323,8 @@ class RepoTaskRuntime:
         try:
             tokens = shlex.split(command, posix=False)
         except ValueError:
+            return False
+        if any(ntpath.isabs(token) or ntpath.splitdrive(token)[0] for token in tokens):
             return False
         if not tokens or tokens[0] not in self.config.allowed_commands:
             return False
