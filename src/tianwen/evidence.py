@@ -4,18 +4,29 @@ import re
 
 from tianwen.domain import ActionRecord, ActionStatus, EvidenceRecord, content_digest
 
+_PRIVATE_KEY_BLOCK = re.compile(
+    r"-----BEGIN (?P<kind>[A-Z0-9 ]*PRIVATE KEY)-----"
+    r".*?"
+    r"-----END (?P=kind)-----",
+    re.IGNORECASE | re.DOTALL,
+)
 _CREDENTIAL = re.compile(
-    r"(?ix)"
-    r"(?:api[_-]?key|token|secret|password)\s*(?:=|:)\s*[^\s,;]+"
+    r"(?:api[_-]?key|token|secret|password|passwd)\s*(?:=|:)\s*[^\s,;]+"
     r"|(?:authorization\s*:\s*(?:bearer|basic)\s+)[^\s,;]+"
     r"|(?:cookie\s*:\s*)[^\r\n]+"
-    r"|-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----"
+    r"|-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----",
+    re.IGNORECASE,
 )
-_WINDOWS_PATH = re.compile(r"(?i)(?:[a-z]:\\|\\\\)[^\s,;]+")
+_WINDOWS_PATH = re.compile(r"(?i)(?:[a-z]:[\\/]|\\\\)[^\s,;]+")
 _POSIX_PATH = re.compile(r"(?<!\w)/(?:[^\s,;]+)")
 
 
+def _contains_credential(value: str) -> bool:
+    return _CREDENTIAL.search(value) is not None
+
+
 def _safe_text(value: str) -> str:
+    value = _PRIVATE_KEY_BLOCK.sub("[REDACTED]", value)
     value = _CREDENTIAL.sub("[REDACTED]", value)
     value = _WINDOWS_PATH.sub("<workspace>", value)
     return _POSIX_PATH.sub("<workspace>", value)

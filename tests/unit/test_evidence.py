@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from tianwen.domain import ActionRecord, ActionStatus, EvidenceRecord
 from tianwen.evidence import evidence_from_action, project_meta_telemetry
 
@@ -54,15 +56,35 @@ def test_evidence_mapper_redacts_secret_values_before_persistence() -> None:
     assert "[REDACTED]" in evidence.summary
 
 
-def test_evidence_mapper_replaces_absolute_workspace_paths() -> None:
+def test_evidence_mapper_redacts_complete_multiline_openssh_private_key() -> None:
     evidence = evidence_from_action(
         action=make_action(),
-        summary=r"C:\\private\\client\\plan.md failed",
+        summary=(
+            "failure\n-----BEGIN OPENSSH PRIVATE KEY-----\n"
+            "sensitive-key-material\n-----END OPENSSH PRIVATE KEY-----\nafter"
+        ),
         scope="user:local/workspace:repo",
         purpose="user_goal",
     )
-    assert "client" not in evidence.summary
-    assert "<workspace>" in evidence.summary
+
+    assert evidence.summary == "failure\n[REDACTED]\nafter"
+    assert "sensitive-key-material" not in evidence.summary
+
+
+@pytest.mark.parametrize(
+    "path",
+    [r"C:\private\client\plan.md", "C:/private/client/plan.md"],
+)
+def test_evidence_mapper_replaces_complete_windows_absolute_paths(path: str) -> None:
+    evidence = evidence_from_action(
+        action=make_action(),
+        summary=f"{path} failed",
+        scope="user:local/workspace:repo",
+        purpose="user_goal",
+    )
+
+    assert evidence.summary == "<workspace> failed"
+    assert "C:" not in evidence.summary
 
 
 def test_evidence_mapper_uses_only_observable_action_fields() -> None:

@@ -15,18 +15,13 @@ from tianwen.domain import (
     content_digest,
     utc_now,
 )
+from tianwen.evidence import _contains_credential
 from tianwen.store import StateConflict, StateStore
 
 _MAX_CLAIM_LENGTH = 1000
-_CREDENTIAL = re.compile(
-    r"(?ix)"
-    r"(?:api[_-]?key|token|secret|password)\s*(?:=|:)\s*[^\s,;]+"
-    r"|(?:authorization\s*:\s*(?:bearer|basic)\s+)[^\s,;]+"
-    r"|(?:cookie\s*:\s*)[^\r\n]+"
-    r"|-----BEGIN[ ](?:RSA[ ]|EC[ ])?PRIVATE[ ]KEY-----"
-)
 _EXTERNAL_SOURCE_CLASSES = {"external", "untrusted_external", "model", "model_derived"}
 _RESTRICTED_PURPOSES = {"authorization", "user_preference"}
+_AUTHORITY_CLAIM = re.compile(r"\b(?:authorization|permission|goal)\b", re.IGNORECASE)
 
 
 class MemoryProposal(FrozenModel):
@@ -82,26 +77,31 @@ class CapabilityObservation(FrozenModel):
 
 class MemoryFirewall:
     def reject_reason(self, proposal: MemoryProposal) -> str | None:
-        if (
-            not proposal.user_scope
-            or not proposal.workspace_scope
-            or not proposal.purpose
-            or not proposal.provenance_ids
-        ):
-            return "scope, purpose, and provenance are required"
-        if proposal.user_scope in {"global", "*"} or proposal.workspace_scope in {"global", "*"}:
+        required = (
+            proposal.user_scope,
+            proposal.workspace_scope,
+            proposal.purpose,
+            proposal.source_class,
+            *proposal.provenance_ids,
+        )
+        if not proposal.provenance_ids or any(not value.strip() for value in required):
+            return "scope, purpose, source, and provenance are required"
+        user_scope = proposal.user_scope.strip()
+        workspace_scope = proposal.workspace_scope.strip()
+        purpose = proposal.purpose.strip().casefold()
+        source_class = proposal.source_class.strip().casefold().replace("-", "_")
+        if user_scope in {"global", "*"} or workspace_scope in {"global", "*"}:
             return "global scope is not allowed"
         if proposal.retention_until is None:
             return "expiry policy is required"
         if proposal.retention_until <= utc_now():
             return "expiry policy is expired"
-        if proposal.source_class.casefold() in _EXTERNAL_SOURCE_CLASSES and (
-            proposal.purpose in _RESTRICTED_PURPOSES
-            or any(word in proposal.claim.casefold() for word in ("authorization", "permission", "goal"))
+        if source_class in _EXTERNAL_SOURCE_CLASSES and (
+            purpose in _RESTRICTED_PURPOSES or _AUTHORITY_CLAIM.search(proposal.claim)
         ):
             return "external/model-derived authority claim"
-        if _CREDENTIAL.search(proposal.claim) or any(
-            _CREDENTIAL.search(value) for value in proposal.conditions.values()
+        if _contains_credential(proposal.claim) or any(
+            _contains_credential(value) for value in proposal.conditions.values()
         ):
             return "credential-like value"
         if len(proposal.claim) > _MAX_CLAIM_LENGTH:
@@ -122,6 +122,12 @@ class MemoryStore:
         self.state = state
 
     def save(self, memory: MemoryRecord) -> None:
+        proposal = MemoryProposal.model_validate(
+            memory.model_dump(exclude={"memory_id", "active"})
+        )
+        validated = MemoryFirewall().accept(proposal)
+        if memory.memory_id != validated.memory_id:
+            raise StateConflict(f"memory id does not match governed content for {memory.memory_id}")
         with self.state._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
@@ -177,8 +183,7 @@ class MemoryStore:
         if need.query.strip():
             query += "AND tw_memories_fts MATCH ? "
             params.append(need.query)
-        query += "ORDER BY m.memory_id LIMIT ?"
-        params.append(capped)
+        query += "ORDER BY m.memory_id"
         with self.state._connect() as connection:
             rows = connection.execute(query, params).fetchall()
         now = utc_now()
@@ -195,6 +200,8 @@ class MemoryStore:
                     evidence_ids=tuple(json.loads(row["provenance_json"])),
                 )
             )
+            if len(items) == capped:
+                break
         return EvidencePacket(items=tuple(items))
 
     def delete_source(self, provenance_id: str) -> DeletionReceipt:
