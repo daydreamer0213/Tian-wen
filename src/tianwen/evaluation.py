@@ -69,6 +69,14 @@ class GovernancePolicy(FrozenModel):
     allow_safety_regression: bool = False
 
 
+_GOVERNANCE_POLICY = GovernancePolicy(
+    first_active_requires_human=True,
+    require_hard_gate_pass=True,
+    minimum_quality_delta=0.0,
+    allow_safety_regression=False,
+)
+
+
 _METRICS = frozenset(
     {
         "correctness",
@@ -305,9 +313,8 @@ def create_approval_receipt(
 
 
 class Publisher:
-    def __init__(self, store: StateStore, policy: GovernancePolicy | None = None) -> None:
+    def __init__(self, store: StateStore) -> None:
         self.store = store
-        self.policy = policy or GovernancePolicy()
 
     def promote(self, eval_run: EvalRun, approval: ApprovalReceipt) -> PromotionRecord:
         persisted_run = self.store.get_object("eval_run", eval_run.eval_run_id, EvalRun)
@@ -325,6 +332,7 @@ class Publisher:
             protocol.protocol_id != eval_run.protocol_id
             or protocol_status != "approved"
             or pointer.current_version_id != champion.version_id
+            or approval.eval_run_id != eval_run.eval_run_id
             or challenger.content_digest != approval.subject_digest
             or request.subject_digest != challenger.content_digest
             or request.artifact_id != challenger.artifact_id
@@ -335,10 +343,10 @@ class Publisher:
         ):
             raise StateConflict("promotion bindings do not match persisted governance state")
         if (
-            (self.policy.require_hard_gate_pass and not eval_run.hard_gate_passed)
-            or eval_run.metrics.get("quality_delta", float("-inf")) < self.policy.minimum_quality_delta
+            (_GOVERNANCE_POLICY.require_hard_gate_pass and not eval_run.hard_gate_passed)
+            or eval_run.metrics.get("quality_delta", float("-inf")) < _GOVERNANCE_POLICY.minimum_quality_delta
             or (
-                not self.policy.allow_safety_regression
+                not _GOVERNANCE_POLICY.allow_safety_regression
                 and (eval_run.metrics.get("safety_delta", 0) < 0 or eval_run.metrics.get("over_refusal_delta", 0) > 0)
             )
         ):

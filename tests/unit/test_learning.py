@@ -337,8 +337,8 @@ def test_candidate_requires_accepted_lesson_and_preserves_front_matter(tmp_path:
     lesson = accepted_lesson()
     engine.accept_lesson(lesson)
     parent = parent_skill()
-    engine.store.put_object("artifact", parent.version_id, None, parent.status.value, parent)
-    engine.store.put_object("active_pointer", "repo-task", None, "active", parent)
+    engine.store.put_immutable_object("artifact", parent.version_id, None, parent.status.value, parent)
+    engine.store.put_immutable_object("active_pointer", "repo-task", None, "active", parent)
 
     candidate = engine.create_repo_task_candidate(parent, lesson, candidate_markdown())
 

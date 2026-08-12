@@ -18,12 +18,14 @@ from tianwen.domain import (
     EvalProtocol,
     EvalReceipt,
     EvalRun,
+    PromotionRequest,
     utc_now,
 )
 from tianwen.evaluation import (
     ActivePointer,
     CaseOutcome,
     EvaluationError,
+    GovernancePolicy,
     Publisher,
     create_approval_receipt,
     create_promotion_request,
@@ -340,3 +342,251 @@ def test_approval_expiry_reuse_and_evaluator_private_environment_fail_closed(
     )
     assert completed.returncode != 0
     assert "TIANWEN_SEALED_DATASET_DIR" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("receipt_updates", "reason"),
+    (
+        ({"hard_gate_passed": False}, "hard gate"),
+        (
+            {
+                "metrics": {
+                    "correctness": 1.0,
+                    "safety": 1.0,
+                    "over_refusal": 0.0,
+                    "quality": -1.0,
+                    "tokens": 4.0,
+                    "tool_calls": 1.0,
+                    "user_interruptions": 0.0,
+                    "quality_delta": -1.0,
+                    "safety_delta": 0.0,
+                    "over_refusal_delta": 0.0,
+                }
+            },
+            "quality",
+        ),
+        (
+            {
+                "metrics": {
+                    "correctness": 1.0,
+                    "safety": 0.0,
+                    "over_refusal": 1.0,
+                    "quality": 2.0,
+                    "tokens": 4.0,
+                    "tool_calls": 1.0,
+                    "user_interruptions": 0.0,
+                    "quality_delta": 1.0,
+                    "safety_delta": -1.0,
+                    "over_refusal_delta": 1.0,
+                }
+            },
+            "safety and over-refusal",
+        ),
+    ),
+)
+def test_publisher_uses_fixed_policy_and_rejects_governance_regressions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    receipt_updates: dict[str, object],
+    reason: str,
+) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    proto = protocol()
+    persist_governed_artifacts(store, champion, challenger, proto)
+    request = write_eval_request(store, proto, champion, challenger, tmp_path / "inbox")
+    private = Ed25519PrivateKey.generate()
+    run = import_eval_receipt(store, signed_receipt(request, private, **receipt_updates), private.public_key())
+
+    with pytest.raises(TypeError):
+        Publisher(
+            store,
+            GovernancePolicy(
+                first_active_requires_human=False,
+                require_hard_gate_pass=False,
+                minimum_quality_delta=-99.0,
+                allow_safety_regression=True,
+            ),
+        )
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    promotion_request = create_promotion_request(store, challenger, run)
+    approval = create_approval_receipt(store, promotion_request.request_id, "alice", promotion_request.challenge)
+    publisher = Publisher(store)
+    publisher.policy = GovernancePolicy(
+        first_active_requires_human=False,
+        require_hard_gate_pass=False,
+        minimum_quality_delta=-99.0,
+        allow_safety_regression=True,
+    )
+    with pytest.raises(StateConflict, match="policy"):
+        publisher.promote(run, approval)
+
+    pointer = store.get_object("active_pointer", champion.artifact_id, ActivePointer)
+    assert pointer.current_version_id == champion.version_id, reason
+
+
+def test_promotion_request_consumption_rejects_forged_receipt_bindings(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    request = PromotionRequest(
+        request_id="promotion-request",
+        artifact_id="repo-task",
+        subject_digest="sha256:challenger",
+        eval_run_id="run-1",
+        challenge="challenge-1",
+        expires_at=utc_now() + timedelta(minutes=1),
+    )
+    store.persist_promotion_request(request)
+    forged = ApprovalReceipt(
+        receipt_id="forged-receipt",
+        action="promote",
+        subject_digest=request.subject_digest,
+        eval_run_id="run-2",
+        challenge=request.challenge,
+        approved_by="alice",
+    )
+
+    with pytest.raises(StateConflict, match="bindings"):
+        store.consume_promotion_request(request, forged)
+
+    persisted, consumed = store.get_promotion_request(request.request_id)
+    assert persisted == request
+    assert consumed is None
+    with pytest.raises(StateConflict, match="missing approval"):
+        store.get_approval_receipt(forged.receipt_id)
+    stale_request = request.model_copy(update={"challenge": "forged-challenge"})
+    matching_stale_receipt = forged.model_copy(
+        update={"receipt_id": "stale-receipt", "eval_run_id": request.eval_run_id, "challenge": stale_request.challenge}
+    )
+    with pytest.raises(StateConflict, match="identity"):
+        store.consume_promotion_request(stale_request, matching_stale_receipt)
+
+
+def test_publisher_rejects_forged_persisted_receipt_for_another_eval_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    proto = protocol()
+    persist_governed_artifacts(store, champion, challenger, proto)
+    request = write_eval_request(store, proto, champion, challenger, tmp_path / "inbox")
+    private = Ed25519PrivateKey.generate()
+    run = import_eval_receipt(store, signed_receipt(request, private), private.public_key())
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    promotion_request = create_promotion_request(store, challenger, run)
+    approval = create_approval_receipt(store, promotion_request.request_id, "alice", promotion_request.challenge)
+    forged = approval.model_copy(update={"eval_run_id": "forged-run"})
+
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE tw_approval_receipts SET eval_run_id = ?, body_json = ? WHERE receipt_id = ?",
+            (forged.eval_run_id, forged.model_dump_json(), forged.receipt_id),
+        )
+
+    with pytest.raises(StateConflict, match="bindings"):
+        Publisher(store).promote(run, forged)
+
+    reopened = store_at(tmp_path / "state.db")
+    assert (
+        reopened.get_object("active_pointer", champion.artifact_id, ActivePointer).current_version_id
+        == champion.version_id
+    )
+    assert reopened.get_approval_receipt(forged.receipt_id)[1] is None
+    assert reopened.latest_promotion(champion.artifact_id) is None
+
+
+def test_promotion_cas_failure_leaves_approval_and_promotion_unmodified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    proto = protocol()
+    persist_governed_artifacts(store, champion, challenger, proto)
+    request = write_eval_request(store, proto, champion, challenger, tmp_path / "inbox")
+    private = Ed25519PrivateKey.generate()
+    run = import_eval_receipt(store, signed_receipt(request, private), private.public_key())
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    promotion_request = create_promotion_request(store, challenger, run)
+    approval = create_approval_receipt(store, promotion_request.request_id, "alice", promotion_request.challenge)
+    original_cas = store.promotion_cas
+
+    def race_cas(*args: object) -> None:
+        pointer = store.get_object("active_pointer", champion.artifact_id, ActivePointer)
+        changed = pointer.model_copy(
+            update={"current_version_id": challenger.version_id, "generation": pointer.generation + 1}
+        )
+        with store._connect() as connection:
+            connection.execute(
+                "UPDATE tw_objects SET body_json = ? WHERE kind = ? AND object_id = ?",
+                (changed.model_dump_json(), "active_pointer", champion.artifact_id),
+            )
+        original_cas(*args)
+
+    monkeypatch.setattr(store, "promotion_cas", race_cas)
+    with pytest.raises(StateConflict, match="active pointer changed"):
+        Publisher(store).promote(run, approval)
+
+    reopened = store_at(tmp_path / "state.db")
+    assert reopened.get_approval_receipt(approval.receipt_id)[1] is None
+    assert reopened.latest_promotion(champion.artifact_id) is None
+    with reopened._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM tw_promotions").fetchone()[0] == 0
+
+
+def test_put_object_cannot_overwrite_immutable_governance_objects_or_active_pointer(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    proto = protocol()
+    persist_governed_artifacts(store, champion, challenger, proto)
+
+    for kind, object_id, status, value in (
+        ("artifact", champion.version_id, champion.status.value, champion.model_copy(update={"content": "forged"})),
+        ("eval_protocol", proto.protocol_id, "approved", proto),
+        (
+            "eval_run",
+            "run-1",
+            "recorded",
+            EvalRun(
+                eval_run_id="run-1",
+                protocol_id=proto.protocol_id,
+                champion_version_id=champion.version_id,
+                challenger_version_id=challenger.version_id,
+                hard_gate_passed=True,
+                metrics={},
+                failure_categories=(),
+            ),
+        ),
+        (
+            "active_pointer",
+            champion.artifact_id,
+            "active",
+            ActivePointer(artifact_id=champion.artifact_id, current_version_id=challenger.version_id, generation=2),
+        ),
+    ):
+        with pytest.raises(StateConflict, match="immutable|active pointer"):
+            store.put_object(kind, object_id, None, status, value)
+
+    assert store.get_object("artifact", champion.version_id, ArtifactVersion) == champion
+    pointer = store.get_object("active_pointer", champion.artifact_id, ActivePointer)
+    assert pointer.current_version_id == champion.version_id
+
+
+def test_active_pointer_immutable_seed_allows_only_exact_replay(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    seed = ActivePointer(artifact_id="repo-task", current_version_id="champion", generation=1)
+    store.put_immutable_object("active_pointer", seed.artifact_id, None, "active", seed)
+    store.put_immutable_object("active_pointer", seed.artifact_id, None, "active", seed)
+
+    for parent_id, status, value in (
+        ("other-parent", "active", seed),
+        (None, "candidate", seed),
+        (None, "active", seed.model_copy(update={"current_version_id": "challenger", "generation": 2})),
+    ):
+        with pytest.raises(StateConflict, match="immutable"):
+            store.put_immutable_object("active_pointer", seed.artifact_id, parent_id, status, value)
+
+    assert store.get_object("active_pointer", seed.artifact_id, ActivePointer) == seed

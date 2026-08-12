@@ -32,6 +32,22 @@ from tianwen.domain import (
 
 T = TypeVar("T", bound=BaseModel)
 
+_IMMUTABLE_GOVERNANCE_KINDS = frozenset(
+    {
+        "active_pointer",
+        "artifact",
+        "attribution",
+        "capability_observation",
+        "case",
+        "eval_protocol",
+        "eval_run",
+        "learning_signal",
+        "learning_ticket",
+        "lesson",
+        "promotion",
+    }
+)
+
 
 class StateConflict(RuntimeError):
     """Raised when durable state no longer matches an expected state."""
@@ -219,6 +235,8 @@ class StateStore:
         status: str,
         value: BaseModel,
     ) -> None:
+        if kind in _IMMUTABLE_GOVERNANCE_KINDS:
+            raise StateConflict(f"immutable governance {kind} must not use put_object")
         if kind == "loop" and isinstance(value, LoopRecord) and value.parent_loop_id is not None:
             raise StateConflict("child loops must be created with create_child_loop")
         if kind == "exploration_brief":
@@ -333,10 +351,28 @@ class StateStore:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT consumed_receipt_id FROM tw_promotion_requests WHERE request_id = ?", (request.request_id,)
+                "SELECT body_json, consumed_receipt_id FROM tw_promotion_requests WHERE request_id = ?",
+                (request.request_id,),
             ).fetchone()
             if row is None or row["consumed_receipt_id"] is not None:
                 raise StateConflict("promotion request is already consumed or missing")
+            persisted = PromotionRequest.model_validate_json(row["body_json"])
+            if persisted != request or persisted.expires_at <= utc_now():
+                raise StateConflict("promotion request identity is stale or expired")
+            if (
+                receipt.action,
+                receipt.subject_digest,
+                receipt.eval_run_id,
+                receipt.challenge,
+                receipt.source,
+            ) != (
+                "promote",
+                persisted.subject_digest,
+                persisted.eval_run_id,
+                persisted.challenge,
+                "local_user_cli",
+            ):
+                raise StateConflict("approval receipt bindings do not match promotion request")
             try:
                 connection.execute(
                     "INSERT INTO tw_approval_receipts "
@@ -392,6 +428,8 @@ class StateStore:
         record: PromotionRecord,
         approval_receipt_id: str | None,
     ) -> None:
+        if pointer_kind != "active_pointer":
+            raise StateConflict("promotion CAS only updates active pointers")
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(

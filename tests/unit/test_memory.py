@@ -280,7 +280,7 @@ def test_delete_source_deactivates_memory_removes_fts_and_invalidates_only_candi
         confidence_basis="basis",
         target_scope="scope",
     )
-    state.put_object("lesson", lesson.lesson_id, None, "candidate", lesson)
+    state.put_immutable_object("lesson", lesson.lesson_id, None, "candidate", lesson)
     candidate = ArtifactVersion(
         artifact_id="artifact-1",
         artifact_type="skill",
@@ -301,8 +301,8 @@ def test_delete_source_deactivates_memory_removes_fts_and_invalidates_only_candi
         evidence_ids=("evidence-1",),
         status=ArtifactStatus.ACTIVE,
     )
-    state.put_object("artifact", candidate.version_id, None, candidate.status.value, candidate)
-    state.put_object("artifact", active.version_id, None, active.status.value, active)
+    state.put_immutable_object("artifact", candidate.version_id, None, candidate.status.value, candidate)
+    state.put_immutable_object("artifact", active.version_id, None, active.status.value, active)
 
     receipt = memories.delete_source("source-1")
 

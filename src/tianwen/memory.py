@@ -281,7 +281,9 @@ class CapabilityLedger:
         self.state = state
 
     def record(self, observation: CapabilityObservation) -> None:
-        self.state.put_object("capability_observation", content_digest(observation), None, "recorded", observation)
+        self.state.put_immutable_object(
+            "capability_observation", content_digest(observation), None, "recorded", observation
+        )
 
     def lookup(
         self, version_id: str, task_type: str, environment: str, tools: tuple[str, ...], risk: str
