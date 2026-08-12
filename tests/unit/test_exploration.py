@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # ruff: noqa: E501
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -20,15 +21,18 @@ from tianwen.domain import (
     TaskKind,
     TaskRecord,
     content_digest,
+    utc_now,
 )
 from tianwen.exploration import (
     ExplorationAuthorizationError,
     ExplorationBudgetExceeded,
     ExplorationEngine,
+    ExplorationError,
     ExplorationScopeError,
     recorded_fetch_tool,
     recorded_search_tool,
 )
+from tianwen.gateway import proposal_action_id
 from tianwen.store import StateStore
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "exploration"
@@ -36,7 +40,14 @@ FETCHED_PAGE = FIXTURES / "fetched_page.md"
 
 
 def make_engine_and_brief(
-    tmp_path: Path, *, max_searches: int = 2, goal_authorization: tuple[str, ...] = ("workspace_read", "external_read")
+    tmp_path: Path,
+    *,
+    max_searches: int = 2,
+    max_tokens: int = 200,
+    max_cost_microunits: int = 10,
+    wall_seconds: int = 300,
+    created_at: object | None = None,
+    goal_authorization: tuple[str, ...] = ("workspace_read", "external_read"),
 ) -> tuple[ExplorationEngine, ExplorationBrief]:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -87,12 +98,13 @@ def make_engine_and_brief(
         allowed_domains=("example.org",),
         max_searches=max_searches,
         max_fetches=2,
-        max_tokens=200,
-        max_cost_microunits=10,
-        wall_seconds=300,
+        max_tokens=max_tokens,
+        max_cost_microunits=max_cost_microunits,
+        wall_seconds=wall_seconds,
         expected_outputs=("answer",),
         sufficiency_criteria=("source",),
         stop_conditions=(ExplorationStopReason.SUFFICIENT,),
+        **({"created_at": created_at} if created_at is not None else {}),
     )
     store.create_exploration(brief)
     return ExplorationEngine(
@@ -185,12 +197,199 @@ def test_invalid_queries_and_urls_create_no_external_actions(tmp_path: Path) -> 
 
 def test_second_identical_fetch_reuses_persisted_source(tmp_path: Path) -> None:
     engine, brief = make_engine_and_brief(tmp_path)
+    calls: list[str] = []
+    original_factory = engine.fetch_tool_factory
+
+    def counted_factory(frozen_brief: ExplorationBrief):
+        tool = original_factory(frozen_brief)
+
+        async def counted_fetch(url: str) -> object:
+            calls.append(url)
+            return await tool.function(url=url)
+
+        from pydantic_ai.tools import Tool
+
+        return Tool(counted_fetch, name="counted_fetch")
+
+    engine.fetch_tool_factory = counted_factory
     first_source, first_evidence = engine.fetch_source(
         "run-1", brief, "https://example.org/parser", "official_documentation"
     )
     source, evidence = engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
     assert (source.source_id, evidence.evidence_id) == (first_source.source_id, first_evidence.evidence_id)
     assert engine.store.count_actions("run-1", "web_fetch") == 1
+    assert calls == ["https://example.org/parser"]
+    assert engine.store.get_exploration_usage("brief-1").fetches == 1
+
+
+def test_fetch_replay_requires_exactly_one_persisted_source_and_evidence(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    source, evidence = engine.fetch_source(
+        "run-1", brief, "https://example.org/parser", "official_documentation"
+    )
+    duplicate_source = source.model_copy(update={"source_id": "duplicate-source"})
+    engine.store.put_object("source", duplicate_source.source_id, "run-1", "active", duplicate_source)
+    with pytest.raises(ExplorationError, match="corrupt"):
+        engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+    assert evidence.provenance_ids == (source.source_id,)
+
+
+def test_fetch_replay_rejects_duplicate_evidence(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    source, evidence = engine.fetch_source(
+        "run-1", brief, "https://example.org/parser", "official_documentation"
+    )
+    duplicate_evidence = evidence.model_copy(
+        update={
+            "evidence_id": "duplicate-evidence",
+            "untrusted_excerpt": evidence.untrusted_excerpt.model_copy(
+                update={"evidence_id": "duplicate-evidence"}
+            ),
+        }
+    )
+    engine.store.put_object("evidence", duplicate_evidence.evidence_id, "run-1", "active", duplicate_evidence)
+    with pytest.raises(ExplorationError, match="corrupt"):
+        engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+    assert source.source_id in evidence.provenance_ids
+
+
+def test_fetch_replay_rejects_missing_persisted_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+    original_list = engine.store.list_objects
+
+    def missing_evidence(kind: str, model: object) -> list[object]:
+        if kind == "evidence":
+            return []
+        return original_list(kind, model)
+
+    monkeypatch.setattr(engine.store, "list_objects", missing_evidence)
+    with pytest.raises(ExplorationError, match="corrupt"):
+        engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+
+
+@pytest.mark.parametrize("failed_kind", ["source", "evidence"])
+def test_fetch_persistence_failure_leaves_action_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed_kind: str
+) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    original_put = engine.store.put_object
+
+    def fail_one_put(kind: str, *args: object, **kwargs: object) -> None:
+        if kind == failed_kind:
+            raise RuntimeError(f"{kind} storage unavailable")
+        original_put(kind, *args, **kwargs)
+
+    monkeypatch.setattr(engine.store, "put_object", fail_one_put)
+    with pytest.raises(RuntimeError, match="storage unavailable"):
+        engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+    action = engine.store.get_action(
+        proposal_action_id(
+            "run-1",
+            "explore:web_fetch:" + content_digest({"url": "https://example.org/parser"}),
+            "web_fetch",
+            {"url": "https://example.org/parser"},
+        )
+    )
+    assert action.status.value == "failed"
+
+
+def test_zero_remaining_admitted_tokens_stops_before_fetch_tool(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path, max_tokens=0)
+    calls: list[str] = []
+    original_factory = engine.fetch_tool_factory
+
+    def counted_factory(frozen_brief: ExplorationBrief):
+        tool = original_factory(frozen_brief)
+
+        async def counted_fetch(url: str) -> object:
+            calls.append(url)
+            return await tool.function(url=url)
+
+        from pydantic_ai.tools import Tool
+
+        return Tool(counted_fetch, name="counted_fetch")
+
+    engine.fetch_tool_factory = counted_factory
+    with pytest.raises(ExplorationBudgetExceeded, match="context budget"):
+        engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+    assert calls == []
+    assert engine.store.list_events("run-1")[-1].kind == "exploration_stopped"
+    assert engine.store.list_events("run-1")[-1].payload == {
+        "brief_id": "brief-1",
+        "reason": "budget_exhausted",
+    }
+
+
+def test_reopen_preserves_fetch_cost_and_admitted_tokens_before_network(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path, max_tokens=200, max_cost_microunits=2)
+    calls: list[str] = []
+    original_factory = engine.fetch_tool_factory
+
+    def counted_factory(frozen_brief: ExplorationBrief):
+        tool = original_factory(frozen_brief)
+
+        async def counted_fetch(url: str) -> object:
+            calls.append(url)
+            return await tool.function(url=url)
+
+        from pydantic_ai.tools import Tool
+
+        return Tool(counted_fetch, name="counted_fetch")
+
+    engine.fetch_tool_factory = counted_factory
+    engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+    reopened = reopen_engine(tmp_path)
+    reopened.fetch_tool_factory = counted_factory
+    with pytest.raises(ExplorationBudgetExceeded):
+        reopened.fetch_source("run-1", brief, "https://example.org/another", "official_documentation")
+    assert calls == ["https://example.org/parser"]
+    assert reopened.store.get_exploration_usage("brief-1").cost_microunits == 2
+    assert reopened.store.get_exploration_usage("brief-1").admitted_tokens > 0
+
+
+def test_reopen_admitted_token_exhaustion_stops_before_network(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path, max_tokens=10, max_cost_microunits=10)
+    calls: list[str] = []
+    original_factory = engine.fetch_tool_factory
+
+    def counted_factory(frozen_brief: ExplorationBrief):
+        tool = original_factory(frozen_brief)
+
+        async def counted_fetch(url: str) -> object:
+            calls.append(url)
+            return await tool.function(url=url)
+
+        from pydantic_ai.tools import Tool
+
+        return Tool(counted_fetch, name="counted_fetch")
+
+    engine.fetch_tool_factory = counted_factory
+    engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+    reopened = reopen_engine(tmp_path)
+    reopened.fetch_tool_factory = counted_factory
+    with pytest.raises(ExplorationBudgetExceeded, match="context budget"):
+        reopened.fetch_source("run-1", brief, "https://example.org/another", "official_documentation")
+    assert calls == ["https://example.org/parser"]
+    assert reopened.store.get_exploration_usage("brief-1").admitted_tokens == 10
+
+
+def test_reopen_wall_expiry_stops_before_creating_an_action(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(
+        tmp_path,
+        wall_seconds=1,
+        created_at=utc_now() - timedelta(seconds=2),
+    )
+    reopened = reopen_engine(tmp_path)
+    with pytest.raises(ExplorationBudgetExceeded, match="wall-clock"):
+        reopened.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+    assert reopened.store.count_actions("run-1", "web_fetch") == 0
+    assert reopened.store.list_events("run-1")[-1].payload == {
+        "brief_id": "brief-1",
+        "reason": "budget_exhausted",
+    }
 
 
 def test_git_view_is_fixed_and_creates_governed_evidence(tmp_path: Path) -> None:

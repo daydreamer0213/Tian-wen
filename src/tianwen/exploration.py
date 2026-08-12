@@ -32,7 +32,7 @@ from tianwen.domain import (
     content_digest,
     utc_now,
 )
-from tianwen.gateway import ActionReservation, EffectClass, execute_action
+from tianwen.gateway import ActionReservation, EffectClass, execute_action, proposal_action_id
 from tianwen.store import BudgetExceeded, StateConflict, StateStore
 
 
@@ -161,8 +161,16 @@ class ExplorationEngine:
         if persisted != brief or run.task_id != task.task_id:
             raise ExplorationAuthorizationError("run and brief must belong to the persisted task")
         if (utc_now() - persisted.created_at).total_seconds() > persisted.wall_seconds:
+            self._stop_for_budget(run_id, persisted)
             raise ExplorationBudgetExceeded("exploration wall-clock budget exhausted")
         return task, loop, goal
+
+    def _stop_for_budget(self, run_id: str, brief: ExplorationBrief) -> None:
+        self.store.append_event(
+            run_id,
+            "exploration_stopped",
+            {"brief_id": brief.brief_id, "reason": "budget_exhausted"},
+        )
 
     @staticmethod
     def _require_authorized(action: Any, capability: str) -> None:
@@ -344,17 +352,82 @@ class ExplorationEngine:
             raise ExplorationScopeError("source URL is outside the frozen exploration boundary")
         if self.fetch_tool_factory is None:
             raise ExternalSearchUnavailable("external fetch is unavailable")
-        tool = self.fetch_tool_factory(brief)
+        action_args = {"url": url}
+        tool_call_id = self._action_call_id("web_fetch", action_args)
 
-        async def handler(args: dict[str, Any]) -> Any:
-            return await _invoke_tool(tool, url=args["url"])
+        async def handler(args: dict[str, Any]) -> tuple[SourceRecord, EvidenceRecord]:
+            remaining_tokens = brief.max_tokens - self.store.get_exploration_usage(
+                brief.brief_id
+            ).admitted_tokens
+            if remaining_tokens <= 0:
+                raise ExplorationBudgetExceeded("exploration context budget exhausted")
+            raw = await _invoke_tool(self.fetch_tool_factory(brief), url=args["url"])
+            content = _field(raw, "content")
+            remaining_tokens = brief.max_tokens - self.store.get_exploration_usage(
+                brief.brief_id
+            ).admitted_tokens
+            excerpt = content[: remaining_tokens * 4]
+            admitted_tokens = (len(excerpt) + 3) // 4
+            if admitted_tokens <= 0:
+                raise ExplorationBudgetExceeded("exploration context budget exhausted")
+            try:
+                self.store.reserve_exploration_usage(
+                    brief.brief_id, ExplorationUsage(admitted_tokens=admitted_tokens)
+                )
+            except BudgetExceeded as error:
+                raise ExplorationBudgetExceeded("exploration context budget exhausted") from error
+            action_id = proposal_action_id(run_id, tool_call_id, "web_fetch", args)
+            digest = content_digest(content.encode("utf-8"))
+            source_id = content_digest({"url": url, "content": digest})
+            source = SourceRecord(
+                source_id=source_id,
+                run_id=run_id,
+                action_id=action_id,
+                source_class=source_class,
+                locator=url,
+                publisher_or_repository=parsed.hostname or "",
+                title=_field(raw, "title", url),
+                retrieved_at=utc_now(),
+                content_digest=digest,
+                scope="external",
+                purpose="goal_exploration",
+                fully_read=len(excerpt) == len(content),
+                trust_status="untrusted_external",
+            )
+            evidence_id = content_digest({"source": source_id, "excerpt": excerpt[:1000]})
+            evidence = EvidenceRecord(
+                evidence_id=evidence_id,
+                run_id=run_id,
+                action_id=action_id,
+                evidence_type="fetched_source",
+                result_class="success",
+                effect_class=EffectClass.EXTERNAL_READ_ONLY.value,
+                version_bucket="current",
+                cost_bucket="estimated",
+                needed_user=False,
+                safety_category="untrusted",
+                summary=f"Fetched {parsed.hostname} source for exploration.",
+                payload_digest=digest,
+                scope="external",
+                purpose="goal_exploration",
+                source_class=source_class,
+                sensitivity="untrusted_external",
+                provenance_ids=(source_id,),
+                untrusted_excerpt=UntrustedSourceExcerpt(
+                    source_id=source_id, evidence_id=evidence_id, text=excerpt[:1000]
+                ),
+            )
+            self.store.put_object("source", source_id, run_id, "active", source)
+            self.store.put_object("evidence", evidence_id, run_id, "active", evidence)
+            return source, evidence
 
-        action, raw = self._run_action(
-            self.store,
-            run_id,
-            self._action_call_id("web_fetch", {"url": url}),
+        try:
+            action, result = self._run_action(
+                self.store,
+                run_id,
+                tool_call_id,
             "web_fetch",
-            {"url": url},
+                action_args,
             EffectClass.EXTERNAL_READ_ONLY,
             "external_read" in goal.authorization,
             handler,
@@ -364,73 +437,40 @@ class ExplorationEngine:
                 brief.brief_id,
                 ExplorationUsage(fetches=1, cost_microunits=self.fetch_cost_estimate_microunits),
             ),
-        )
+            )
+        except ExplorationBudgetExceeded:
+            self._stop_for_budget(run_id, brief)
+            raise
         self._require_authorized(action, "external_read")
-        if raw is None:
-            source = next(
-                source
-                for source in self.store.list_objects("source", SourceRecord)
-                if source.action_id == action.action_id
-            )
-            evidence = next(
-                evidence
-                for evidence in self.store.list_objects("evidence", EvidenceRecord)
-                if evidence.action_id == action.action_id
-            )
-            return source, evidence
-        content = _field(raw, "content")
-        admitted = min(
-            len(content),
-            max(0, (brief.max_tokens - self.store.get_exploration_usage(brief.brief_id).admitted_tokens) * 4),
-        )
-        excerpt = content[:admitted]
-        try:
-            self.store.reserve_exploration_usage(
-                brief.brief_id, ExplorationUsage(admitted_tokens=(len(excerpt) + 3) // 4)
-            )
-        except BudgetExceeded as error:
-            raise ExplorationBudgetExceeded("exploration context budget exhausted") from error
-        digest = content_digest(content.encode("utf-8"))
-        source_id = content_digest({"url": url, "content": digest})
-        source = SourceRecord(
-            source_id=source_id,
-            run_id=run_id,
-            action_id=action.action_id,
-            source_class=source_class,
-            locator=url,
-            publisher_or_repository=parsed.hostname or "",
-            title=_field(raw, "title", url),
-            retrieved_at=utc_now(),
-            content_digest=digest,
-            scope="external",
-            purpose="goal_exploration",
-            fully_read=admitted == len(content),
-            trust_status="untrusted_external",
-        )
-        evidence_id = content_digest({"source": source_id, "excerpt": excerpt[:1000]})
-        evidence = EvidenceRecord(
-            evidence_id=evidence_id,
-            run_id=run_id,
-            action_id=action.action_id,
-            evidence_type="fetched_source",
-            result_class="success",
-            effect_class=EffectClass.EXTERNAL_READ_ONLY.value,
-            version_bucket="current",
-            cost_bucket="estimated",
-            needed_user=False,
-            safety_category="untrusted",
-            summary=f"Fetched {parsed.hostname} source for exploration.",
-            payload_digest=digest,
-            scope="external",
-            purpose="goal_exploration",
-            source_class=source_class,
-            sensitivity="untrusted_external",
-            provenance_ids=(source_id,),
-            untrusted_excerpt=UntrustedSourceExcerpt(source_id=source_id, evidence_id=evidence_id, text=excerpt[:1000]),
-        )
-        self.store.put_object("source", source_id, run_id, "active", source)
-        self.store.put_object("evidence", evidence_id, run_id, "active", evidence)
-        return source, evidence
+        if result is not None:
+            return result
+        return self._replay_fetched_records(run_id, action, source_class)
+
+    def _replay_fetched_records(
+        self, run_id: str, action: Any, source_class: str
+    ) -> tuple[SourceRecord, EvidenceRecord]:
+        sources = [
+            source
+            for source in self.store.list_objects("source", SourceRecord)
+            if source.run_id == run_id and source.action_id == action.action_id
+        ]
+        evidence = [
+            record
+            for record in self.store.list_objects("evidence", EvidenceRecord)
+            if record.run_id == run_id and record.action_id == action.action_id
+        ]
+        if len(sources) != 1 or len(evidence) != 1:
+            raise ExplorationError("corrupt fetch replay state")
+        source, record = sources[0], evidence[0]
+        if (
+            source.source_class != source_class
+            or record.provenance_ids != (source.source_id,)
+            or record.source_class != source_class
+            or record.untrusted_excerpt is None
+            or record.untrusted_excerpt.source_id != source.source_id
+        ):
+            raise ExplorationError("corrupt fetch replay state")
+        return source, record
 
     @staticmethod
     def _safe_url(parsed: Any, brief: ExplorationBrief) -> bool:
