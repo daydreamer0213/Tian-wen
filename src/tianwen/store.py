@@ -19,6 +19,7 @@ from tianwen.domain import (
     BudgetLimit,
     BudgetUsage,
     CheckpointRecord,
+    EvalProtocol,
     EvalRequest,
     EvalRun,
     EventRecord,
@@ -961,6 +962,46 @@ class GovernanceStore:
 
     def persist_eval_request(self, request: EvalRequest) -> None:
         with _connect_database(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            protocol_row = connection.execute(
+                "SELECT body_json, status FROM tw_objects WHERE kind = 'eval_protocol' AND object_id = ?",
+                (request.protocol_id,),
+            ).fetchone()
+            if protocol_row is None or protocol_row["status"] != "approved":
+                raise StateConflict("evaluation request protocol is not approved")
+            protocol = EvalProtocol.model_validate_json(protocol_row["body_json"])
+            if protocol.protocol_id != request.protocol_id:
+                raise StateConflict("evaluation request protocol binding does not match")
+
+            artifact_rows = connection.execute(
+                "SELECT object_id, status, body_json FROM tw_objects "
+                "WHERE kind = 'artifact' AND object_id IN (?, ?)",
+                (request.champion_version_id, request.challenger_version_id),
+            ).fetchall()
+            artifacts = {row["object_id"]: row for row in artifact_rows}
+            if request.champion_version_id not in artifacts or request.challenger_version_id not in artifacts:
+                raise StateConflict("evaluation request artifact is missing")
+            champion = ArtifactVersion.model_validate_json(artifacts[request.champion_version_id]["body_json"])
+            challenger = ArtifactVersion.model_validate_json(artifacts[request.challenger_version_id]["body_json"])
+            if (
+                champion.version_id != request.champion_version_id
+                or challenger.version_id != request.challenger_version_id
+                or champion.content_digest != request.champion_digest
+                or challenger.content_digest != request.challenger_digest
+                or champion.artifact_id != challenger.artifact_id
+                or champion.artifact_type != challenger.artifact_type
+                or artifacts[request.challenger_version_id]["status"] != "candidate"
+            ):
+                raise StateConflict("evaluation request artifact bindings do not match governance state")
+            pointer_row = connection.execute(
+                "SELECT body_json, status FROM tw_objects WHERE kind = 'active_pointer' AND object_id = ?",
+                (champion.artifact_id,),
+            ).fetchone()
+            if pointer_row is None or pointer_row["status"] != "active":
+                raise StateConflict("evaluation request active pointer is missing")
+            pointer = json.loads(pointer_row["body_json"])
+            if pointer.get("current_version_id") != champion.version_id:
+                raise StateConflict("evaluation request champion is not the active version")
             try:
                 connection.execute(
                     "INSERT INTO tw_eval_requests VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",

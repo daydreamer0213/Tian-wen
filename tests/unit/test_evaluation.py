@@ -42,7 +42,9 @@ from tianwen.evaluation import (
     load_public_cases,
     receipt_canonical_bytes,
     run_public_comparison,
-    write_eval_request,
+)
+from tianwen.evaluation import (
+    write_eval_request as _write_eval_request,
 )
 from tianwen.store import GovernanceStore, StateConflict, StateStore
 
@@ -92,12 +94,90 @@ def persist_governed_artifacts(
     )
     store.put_immutable_object("eval_protocol", protocol_.protocol_id, None, "approved", protocol_)
     store.put_immutable_object(
-        "active_pointer",
-        champion.artifact_id,
-        None,
-        "active",
+        "active_pointer", champion.artifact_id, None, "active",
         ActivePointer(artifact_id=champion.artifact_id, current_version_id=champion.version_id, generation=1),
     )
+
+
+def write_eval_request(store, protocol_, champion, challenger, output_dir):
+    persist_governed_artifacts(store, champion, challenger, protocol_)
+    return _write_eval_request(store, protocol_, champion, challenger, output_dir)
+
+
+def eval_request_for(
+    protocol_: EvalProtocol | None = None,
+    champion: ArtifactVersion | None = None,
+    challenger: ArtifactVersion | None = None,
+    **updates: object,
+) -> object:
+    protocol_ = protocol_ or protocol()
+    champion = champion or artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = challenger or artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    from tianwen.domain import EvalRequest
+
+    return EvalRequest(
+        request_id="request-1",
+        protocol_id=protocol_.protocol_id,
+        champion_version_id=champion.version_id,
+        champion_digest=champion.content_digest,
+        champion_snapshot="champion.snapshot",
+        challenger_version_id=challenger.version_id,
+        challenger_digest=challenger.content_digest,
+        challenger_snapshot="challenger.snapshot",
+        challenge="challenge",
+        receipt_path="receipt.json",
+        expires_at=utc_now() + timedelta(hours=1),
+        **updates,
+    )
+
+
+@pytest.mark.parametrize(
+    "state",
+    ("empty", "missing_protocol", "unapproved_protocol", "missing_champion", "missing_challenger",
+     "pointer_not_champion", "digest_mismatch", "artifact_type_mismatch"),
+)
+def test_persist_eval_request_rejects_unauthorized_bindings_without_inserting(tmp_path: Path, state: str) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    proto = protocol()
+    request = eval_request_for(proto, champion, challenger)
+    if state != "empty":
+        persist_governed_artifacts(store, champion, challenger, proto)
+    if state == "missing_protocol":
+        with store._connect() as connection:
+            connection.execute("DELETE FROM tw_objects WHERE kind = 'eval_protocol'")
+    elif state == "unapproved_protocol":
+        with store._connect() as connection:
+            connection.execute("UPDATE tw_objects SET status = 'candidate' WHERE kind = 'eval_protocol'")
+    elif state == "missing_champion":
+        with store._connect() as connection:
+            connection.execute("DELETE FROM tw_objects WHERE kind = 'artifact' AND object_id = 'champion'")
+    elif state == "missing_challenger":
+        with store._connect() as connection:
+            connection.execute("DELETE FROM tw_objects WHERE kind = 'artifact' AND object_id = 'challenger'")
+    elif state == "pointer_not_champion":
+        with store._connect() as connection:
+            connection.execute(
+                "UPDATE tw_objects SET body_json = ? WHERE kind = 'active_pointer' AND object_id = ?",
+                (json.dumps({"artifact_id": "repo-task", "current_version_id": "challenger", "generation": 1}),
+                 champion.artifact_id),
+            )
+    elif state == "digest_mismatch":
+        request = request.model_copy(update={"champion_digest": "sha256:wrong"})
+    elif state == "artifact_type_mismatch":
+        mismatched = challenger.model_copy(update={"artifact_type": "other"})
+        store.put_immutable_object(
+            "artifact", "challenger-other", champion.version_id, mismatched.status.value, mismatched
+        )
+        request = request.model_copy(
+            update={"challenger_version_id": "challenger-other", "challenger_digest": mismatched.content_digest}
+        )
+
+    with pytest.raises(StateConflict):
+        governance_at(store).persist_eval_request(request)
+    with store._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM tw_eval_requests").fetchone()[0] == 0
 
 
 def signed_receipt(request, private_key: Ed25519PrivateKey, **updates: object) -> EvalReceipt:
