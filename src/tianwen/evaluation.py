@@ -194,6 +194,10 @@ def receipt_canonical_bytes(receipt: EvalReceipt) -> bytes:
     return json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def _canonical_json_bytes(value: object) -> bytes:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
 def _inside(root: Path, candidate: Path) -> Path:
     resolved = candidate.resolve()
     if not resolved.is_relative_to(root):
@@ -201,23 +205,13 @@ def _inside(root: Path, candidate: Path) -> Path:
     return resolved
 
 
-def _eval_bundle_binding(
-    request_id: str,
-    protocol: EvalProtocol,
-    champion_version_id: str,
-    champion_digest: str,
-    challenger_version_id: str,
-    challenger_digest: str,
-) -> str:
+def _eval_bundle_binding(request: EvalRequest, protocol: EvalProtocol) -> str:
     body = {
-        "request_id": request_id,
+        "request": request.model_dump(mode="json"),
         "protocol": protocol.model_dump(mode="json"),
-        "champion": {"version_id": champion_version_id, "content_digest": champion_digest},
-        "challenger": {"version_id": challenger_version_id, "content_digest": challenger_digest},
         "files": _EVAL_BUNDLE_NAMES,
     }
-    encoded = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return hashlib.sha256(_canonical_json_bytes(body)).hexdigest()
 
 
 def write_eval_request(
@@ -238,22 +232,12 @@ def write_eval_request(
             champion.content_digest if path == champion_snapshot else challenger.content_digest
         ):
             raise EvaluationError("artifact content digest does not match snapshot bytes")
-        path.write_text(content, encoding="utf-8")
+        path.write_bytes(content.encode("utf-8"))
         path.chmod(0o444)
-    protocol_path.write_text(
-        json.dumps(protocol.model_dump(mode="json"), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
-        encoding="utf-8",
-    )
+    protocol_path.write_bytes(_canonical_json_bytes(protocol.model_dump(mode="json")))
     protocol_path.chmod(0o444)
-    binding = _eval_bundle_binding(
-        request_id,
-        protocol,
-        champion.version_id,
-        champion.content_digest,
-        challenger.version_id,
-        challenger.content_digest,
-    )
-    request = EvalRequest(
+    nonce = secrets.token_urlsafe(24)
+    provisional = EvalRequest(
         request_id=request_id,
         protocol_id=protocol.protocol_id,
         champion_version_id=champion.version_id,
@@ -262,12 +246,13 @@ def write_eval_request(
         challenger_version_id=challenger.version_id,
         challenger_digest=challenger.content_digest,
         challenger_snapshot=str(challenger_snapshot),
-        challenge=f"{secrets.token_urlsafe(24)}.{binding}",
+        challenge=nonce,
         receipt_path=str(receipt_path),
         expires_at=utc_now() + timedelta(hours=1),
     )
+    request = provisional.model_copy(update={"challenge": f"{nonce}.{_eval_bundle_binding(provisional, protocol)}"})
     store.persist_eval_request(request)
-    request_path.write_text(request.model_dump_json(), encoding="utf-8")
+    request_path.write_bytes(_canonical_json_bytes(request.model_dump(mode="json")))
     request_path.chmod(0o444)
     return request
 

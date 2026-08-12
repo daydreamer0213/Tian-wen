@@ -54,6 +54,10 @@ def _canonical(receipt: EvalReceipt) -> bytes:
     return json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def _canonical_json_bytes(value: object) -> bytes:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
 def _absolute_path(value: str | Path) -> Path:
     return Path(os.path.abspath(os.fspath(value)))
 
@@ -83,17 +87,14 @@ def _require_safe_path(path: Path, request_dir: Path, *, is_dir: bool, must_not_
 
 def _bundle_binding(request: EvalRequest, protocol: EvalProtocol) -> str:
     body = {
-        "request_id": request.request_id,
+        "request": request.model_dump(mode="json"),
         "protocol": protocol.model_dump(mode="json"),
-        "champion": {"version_id": request.champion_version_id, "content_digest": request.champion_digest},
-        "challenger": {"version_id": request.challenger_version_id, "content_digest": request.challenger_digest},
         "files": _EVAL_BUNDLE_NAMES,
     }
-    encoded = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return hashlib.sha256(_canonical_json_bytes(body)).hexdigest()
 
 
-def _parse_challenge(challenge: str) -> str:
+def _parse_challenge(challenge: str) -> tuple[str, str]:
     nonce, separator, binding = challenge.rpartition(".")
     if (
         not nonce
@@ -102,7 +103,7 @@ def _parse_challenge(challenge: str) -> str:
         or any(character not in "0123456789abcdef" for character in binding)
     ):
         raise ValueError("challenge has an invalid bundle binding")
-    return binding
+    return nonce, binding
 
 
 def _private_key(value: str) -> Ed25519PrivateKey:
@@ -222,7 +223,9 @@ def main() -> int:
             or content_digest(challenger_path.read_bytes()) != request.challenger_digest
         ):
             raise ValueError("snapshot digest mismatch")
-        if _parse_challenge(args.challenge) != _bundle_binding(request, protocol):
+        nonce, binding = _parse_challenge(args.challenge)
+        provisional = request.model_copy(update={"challenge": nonce})
+        if binding != _bundle_binding(provisional, protocol):
             raise ValueError("challenge bundle binding mismatch")
         hard_gate_passed, metrics, failure_categories = _aggregate(Path(dataset_dir).resolve(strict=True))
         receipt = EvalReceipt(
@@ -242,8 +245,8 @@ def main() -> int:
         receipt = receipt.model_copy(
             update={"signature_b64": base64.b64encode(signature).decode("ascii")}
         )
-        with output_path.open("x", encoding="utf-8") as receipt_file:
-            json.dump(receipt.model_dump(mode="json"), receipt_file, separators=(",", ":"))
+        with output_path.open("xb") as receipt_file:
+            receipt_file.write(_canonical_json_bytes(receipt.model_dump(mode="json")))
         output_path.chmod(0o444)
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as error:
         print(f"sealed evaluator failed: {error}", file=sys.stderr)

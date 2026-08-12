@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib.util
 import inspect
 import json
@@ -189,6 +190,31 @@ def run_evaluator(
     )
 
 
+def canonical_json_bytes(value: object) -> bytes:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def rewrite_readonly_request(path: Path, request) -> None:
+    path.chmod(path.stat().st_mode | stat.S_IWUSR)
+    path.write_bytes(canonical_json_bytes(request.model_dump(mode="json")))
+    path.chmod(0o444)
+
+
+def rebind_request(request, protocol_: EvalProtocol, **updates: object):
+    nonce = request.challenge.rpartition(".")[0]
+    provisional = request.model_copy(update=updates | {"challenge": nonce})
+    binding = hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "request": provisional.model_dump(mode="json"),
+                "protocol": protocol_.model_dump(mode="json"),
+                "files": ("protocol.json", "request.json", "champion.snapshot", "challenger.snapshot", "receipt.json"),
+            }
+        )
+    ).hexdigest()
+    return provisional.model_copy(update={"challenge": f"{nonce}.{binding}"})
+
+
 def test_public_fixture_is_fixed_and_loadable() -> None:
     cases = load_public_cases(Path("tests/fixtures/evals/public/repo_task_cases.json"))
     assert tuple(case.case_id for case in cases) == (
@@ -355,6 +381,90 @@ def test_sealed_evaluator_accepts_only_the_frozen_production_bundle(tmp_path: Pa
     )
     private_key.public_key().verify(base64.b64decode(receipt.signature_b64), receipt_canonical_bytes(receipt))
     assert import_eval_receipt(store, receipt, private_key.public_key()).challenger_version_id == "challenger"
+
+
+@pytest.mark.parametrize(
+    "field",
+    ("expires_at", "nonce"),
+    ids=("expiry", "nonce"),
+)
+def test_sealed_evaluator_rejects_readonly_request_binding_tampering(
+    tmp_path: Path, field: str
+) -> None:
+    request = write_eval_request(
+        store_at(tmp_path / "state.db"),
+        protocol(),
+        artifact("champion", ArtifactStatus.ACTIVE, "champion"),
+        artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
+        tmp_path / "inbox",
+    )
+    request_path = Path(request.champion_snapshot).parent / "request.json"
+    updates: dict[str, object] = {"expires_at": utc_now() + timedelta(days=1)}
+    if field == "nonce":
+        _, _, binding = request.challenge.rpartition(".")
+        updates = {"challenge": f"forged-nonce.{binding}"}
+    forged = request.model_copy(update=updates)
+    rewrite_readonly_request(request_path, forged)
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_bytes(canonical_json_bytes([sealed_case()]))
+
+    completed = run_evaluator(
+        request, evaluator_environment(dataset, Ed25519PrivateKey.generate()), challenge=forged.challenge
+    )
+
+    assert completed.returncode != 0
+    assert not Path(request.receipt_path).exists()
+
+
+def test_sealed_evaluator_preserves_lf_snapshot_bytes_and_imports_receipt(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion\nwith LF\n")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger\nwith LF\n")
+    request = write_eval_request(store, protocol(), champion, challenger, tmp_path / "inbox")
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_bytes(canonical_json_bytes([sealed_case()]))
+    private_key = Ed25519PrivateKey.generate()
+
+    assert Path(request.champion_snapshot).read_bytes() == champion.content.encode("utf-8")
+    assert Path(request.challenger_snapshot).read_bytes() == challenger.content.encode("utf-8")
+    completed = run_evaluator(request, evaluator_environment(dataset, private_key))
+
+    assert completed.returncode == 0, completed.stderr
+    receipt = EvalReceipt.model_validate_json(Path(request.receipt_path).read_bytes())
+    assert import_eval_receipt(store, receipt, private_key.public_key()).challenger_version_id == challenger.version_id
+
+
+def test_resigned_request_bundle_cannot_import_or_consume_the_persisted_request(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    proto = protocol()
+    request = write_eval_request(
+        store,
+        proto,
+        artifact("champion", ArtifactStatus.ACTIVE, "champion"),
+        artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
+        tmp_path / "inbox",
+    )
+    forged = rebind_request(request, proto, expires_at=request.expires_at + timedelta(minutes=1))
+    request_path = Path(request.champion_snapshot).parent / "request.json"
+    rewrite_readonly_request(request_path, forged)
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_bytes(canonical_json_bytes([sealed_case()]))
+    private_key = Ed25519PrivateKey.generate()
+
+    completed = run_evaluator(request, evaluator_environment(dataset, private_key), challenge=forged.challenge)
+
+    assert completed.returncode == 0, completed.stderr
+    receipt = EvalReceipt.model_validate_json(Path(request.receipt_path).read_bytes())
+    with pytest.raises(EvaluationError, match="bindings"):
+        import_eval_receipt(store, receipt, private_key.public_key())
+    persisted, consumed = store.get_eval_request(request.request_id)
+    assert persisted == request
+    assert consumed is None
+    with pytest.raises(StateConflict, match="missing eval_run"):
+        store.get_object("eval_run", receipt.receipt_id, EvalRun)
 
 
 @pytest.mark.parametrize("attack", ("protocol", "output", "snapshot", "challenge"))
