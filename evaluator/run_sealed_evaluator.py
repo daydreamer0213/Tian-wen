@@ -165,7 +165,10 @@ def _private_key(path: Path) -> Ed25519PrivateKey:
 
 def _normalise_windows_principal(value: str) -> str:
     compact = re.sub(r"\s*\\\s*", r"\\", " ".join(value.split()))
-    return compact.replace("/", "\\").casefold()
+    canonical = compact.replace("/", "\\").casefold()
+    if canonical in {"system", "localsystem", ".\\system", ".\\localsystem", _WINDOWS_SYSTEM_PRINCIPAL}:
+        return _WINDOWS_SYSTEM_PRINCIPAL
+    return canonical
 
 
 def _run_windows_command(arguments: list[str]) -> str:

@@ -748,6 +748,25 @@ def _evaluator_module():
     return module
 
 
+@pytest.mark.parametrize("runtime_account", ("SYSTEM", "LocalSystem", "NT AUTHORITY\\SYSTEM"))
+def test_windows_system_aliases_are_one_acl_principal(runtime_account: str) -> None:
+    module = _evaluator_module()
+
+    assert module._normalise_windows_principal(runtime_account) == "nt authority\\system"
+    assert module._normalise_windows_principal("SYSTEM") == module._normalise_windows_principal("NT AUTHORITY\\SYSTEM")
+
+    def command_runner(arguments: list[str]) -> str:
+        if arguments == ["whoami"]:
+            return "EVALUATOR\\agent"
+        return f"{arguments[1]} EVALUATOR\\agent:(R)\nNT AUTHORITY\\SYSTEM:(F)\n"
+
+    with pytest.raises(ValueError, match="runtime account"):
+        module._validate_windows_evaluator_isolation(
+            Path("dataset"), Path("private-key"), runtime_account, command_runner
+        )
+
+
+
 def test_windows_acl_validation_rejects_isolation_attacks_and_accepts_explicit_evaluator_access(
     tmp_path: Path,
 ) -> None:
