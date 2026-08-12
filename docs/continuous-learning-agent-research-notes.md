@@ -4639,11 +4639,13 @@ Shell 返回非零退出码仍然是结果已知的动作，不属于 `unknown`�
 
 首版不新增第三种循环或独立研究 Agent。探索属于普通 Task 和 Learning Job 的阶段，只新增探索简报、SourceRecord 和探索报告三类持久产物。外部搜索复用 PydanticAI 2.18.0 的 `duckduckgo_search_tool` 与具有 SSRF 防护的 `web_fetch_tool`，但只作为经过天问 Action Gateway 包装的普通本地函数工具；Provider 原生网页工具在一次模型请求内部执行，当前不能保证逐次进入天问执行前授权，因此首版不启用。浏览器自动化、通用爬虫、MCP 搜索市场和专业数据库连接延期。
 
+这里采用的是“核心自己掌握，非核心优先复用”的原则。天问自己掌握持续学习循环、授权、预算、信源、验证与版本治理；实际搜索由哪个成熟组件完成不属于产品核心。第一版用当前最省实现成本且足够验证闭环的方案，后续只有真实质量、成本或可用性证据表明其他搜索 API、Agent 搜索或本地实现更合适时才替换，不提前建设通用搜索插件平台。Hermes 同样主要作为参考而不 Fork：它能复用大量通用 Agent 能力，但在其上重新搭建天问的 Goal、证据、学习、评测和版本治理控制面，当前预计比复用底层组件的改造成本更高。
+
 搜索摘要只能用于发现来源。外部结论必须尽量读取原始页面或固定版本，并以 SourceRecord 为来源形成 Evidence；外部内容始终是不可信数据，不能直接改变 Goal、权限、底线、正式记忆、评测或活跃 Skill。
 
 探索由问题、读写范围、查询/抓取/Token/时间/费用预算、证据充分性和停止条件约束。证据足够、继续搜索没有新增信息、预算耗尽、来源不可访问、冲突无法消解或风险越界时停止。“证据不足”是合法结果。
 
-上述决定已经写入 [PydanticAI + Harness 集成规格](superpowers/specs/2026-08-11-pydanticai-harness-integration-design.md) 和 [天问持续学习控制面收口研究](research/2026-08-12-continual-learning-governance-closure.md)。首个垂直切片实施计划需要在用户复核规格后同步，未同步前不开始实施。
+上述决定已经写入 [PydanticAI + Harness 集成规格](superpowers/specs/2026-08-11-pydanticai-harness-integration-design.md) 和 [天问持续学习控制面收口研究](research/2026-08-12-continual-learning-governance-closure.md)，并在用户确认后同步到 [首个持续学习垂直切片实施计划](superpowers/plans/2026-08-12-first-continual-learning-vertical-slice.md)。
 
 ## 31. 官方参考
 

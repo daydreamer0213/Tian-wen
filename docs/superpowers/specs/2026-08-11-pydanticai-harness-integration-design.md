@@ -1,6 +1,6 @@
 # 天问 PydanticAI + Harness 集成设计
 
-**状态：** 已完成理论与源码复审；主动探索设计已补充，待用户复核后同步实施计划
+**状态：** 已完成理论与源码复审；主动探索设计已获用户确认并同步实施计划，可进入首个垂直切片实施
 
 **日期：** 2026-08-11（2026-08-12 收口）
 **范围：** 首个可验证持续学习切片  
@@ -37,11 +37,12 @@ Goal 与关键知识缺口
 6. Pi 只作为模块化和交互参考，不进入第一版依赖。
 7. 不把 PydanticAI 或 Harness 私有 API 作为稳定依赖。
 8. 首切片采用 Python 模块化单体、本地 SQLite 和简单 CLI。
-9. Harness 公开接口契约探针已经通过；锁定组合为 `pydantic-ai-slim==2.18.0` 与 `pydantic-ai-harness[skills]==0.13.0`。
+9. Harness 公开接口契约探针已经通过；锁定组合为 `pydantic-ai-slim[duckduckgo,web-fetch]==2.18.0` 与 `pydantic-ai-harness[skills]==0.13.0`。
 10. 首切片是单用户、本地优先，不上传用户数据，不做跨用户学习。
 11. 首切片串行调度，不引入分布式队列、并发 Worker、微服务或第二个 Agent Framework。
 12. 首切片只允许 `repo_task` Skill 形成可发布 Challenger；路由和其他策略只能形成研究建议，Runtime、Action Gateway、评测门槛、发布器和不可变底线不开放自我修改。
 13. “探索”是主动搜集上下文的正式阶段，不只是描述当前情况和识别未知；首切片同时覆盖受限本地探索与最小外部检索。
+14. 搜索、抓取、模型 Provider、数据库和沙箱属于可替换的非核心组件；首版选择当前接入最省、效果足够的成熟实现，不为未来替换提前建设通用插件平台。只有真实质量、成本或可用性证据证明需要时，才增加第二实现并比较。
 
 ## 3. 权威对象模型
 
@@ -372,6 +373,8 @@ Goal 与完成条件
 
 当本地证据不能回答关键未知，或者 Goal 明确依赖外部事实、当前版本、标准、论文或开源实现时，才启动外部探索。首切片复用 PydanticAI 已有的 `duckduckgo_search_tool` 与具有 SSRF 防护的 `web_fetch_tool`，但把它们作为普通本地函数工具放在天问 Capability Executor 后面；模型只能调用经过 Action Gateway 包装的版本。这样不自建搜索引擎，同时仍能在网络请求前冻结查询或 URL、检查作用域和预算、写入 Action Ledger，并在结果返回后生成 SourceRecord。
 
+这只是首切片实现选择，不是天问的产品身份或长期绑定。以后如果搜索 API、带搜索能力的 Agent API 或其他成熟组件在真实任务中质量更高、成本更低或维护更省，可以作为 Challenger 替换当前实现；Goal、探索简报、Action、SourceRecord、Evidence、预算和停止语义保持不变。没有第二个真实实现前不创建 Provider 注册表、插件协议或动态路由。
+
 PydanticAI 的 Provider 原生 `WebSearchTool` / `WebFetchTool` 由模型服务商在一次模型请求内部执行，当前锁定版本不会把每次服务端检索交给普通函数工具的执行前钩子。因此首切片明确不向执行模型暴露原生网页工具，避免绕过 Action Gateway。以后只有独立契约探针证明能够在调用前授权、逐次计量并取得充分来源信息时，才可以把原生工具作为受治理的优化路径。
 
 本地搜索或抓取能力不可用时，系统记录 `external_search_unavailable`，并根据问题重要性选择缩小结论、使用用户提供的资料或请求必要帮助，不能把模型记忆伪装成已检索事实。
@@ -679,7 +682,7 @@ owner_id + lease_generation + expires_at
 
 PydanticAI 与 Harness 锁定到契约测试验证过的精确版本；不能因为新版本存在就自动升级。主动探索启用 PydanticAI 官方 `duckduckgo` 与 `web-fetch` 可选依赖，不引入第二套 Agent 或搜索框架。
 
-首个已核查组合为 `pydantic-ai-slim==2.18.0` 与 `pydantic-ai-harness[skills]==0.13.0`。核查结论、限制和适配前提见 [`2026-08-11-harness-contract-audit.md`](../../research/2026-08-11-harness-contract-audit.md)。
+首个 Harness 契约核查组合为 `pydantic-ai-slim==2.18.0` 与 `pydantic-ai-harness[skills]==0.13.0`；产品实施在同一 PydanticAI 版本上启用官方 `duckduckgo` 与 `web-fetch` extras。核查结论、限制和适配前提见 [`2026-08-11-harness-contract-audit.md`](../../research/2026-08-11-harness-contract-audit.md)。
 
 密封评测回执使用 `cryptography==49.0.0` 的 Ed25519 实现；这是首切片唯一新增的安全依赖，不自行实现密码算法。
 
@@ -721,6 +724,6 @@ PydanticAI 与 Harness 锁定到契约测试验证过的精确版本；不能因
 
 [`2026-08-12-first-continual-learning-vertical-slice.md`](../plans/2026-08-12-first-continual-learning-vertical-slice.md)。
 
-该实施计划尚未包含本规格新增的主动探索任务；用户复核本规格后必须先同步计划，再开始产品实施。
+该实施计划已经包含本地探索、经 Action Gateway 包装的外部搜索与抓取、SourceRecord、探索报告及其确定性测试，可以作为产品实施依据。
 
 历史的 [`2026-08-11-harness-contract-probe.md`](../plans/2026-08-11-harness-contract-probe.md) 已经执行完成，只用于证明底层公开接口，不再是产品实施计划。
