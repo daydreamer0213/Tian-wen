@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -321,6 +322,51 @@ def test_exploration_only_answers_unknowns_covered_by_governed_evidence(tmp_path
     assert sufficient.stop_reason is ExplorationStopReason.SUFFICIENT
     assert sufficient.answered_unknowns == unknowns
     assert sufficient.remaining_unknowns == ()
+
+
+def test_exploration_coverage_requires_substantive_evidence() -> None:
+    from tianwen.app import TianwenApp
+
+    evidence = EvidenceRecord(
+        evidence_id="evidence:test",
+        run_id="run:test",
+        evidence_type="local_finding",
+        result_class="success",
+        effect_class="read_only",
+        version_bucket="current",
+        cost_bucket="none",
+        needed_user=False,
+        safety_category="safe",
+        summary="An unrelated summary and title.",
+        payload_digest="sha256:test",
+        scope="test",
+        purpose="goal_exploration",
+        source_class="local_repository",
+        sensitivity="internal",
+        provenance_ids=("source:test",),
+    )
+    source = SourceRecord(
+        source_id="source:test",
+        run_id="run:test",
+        action_id="action:test",
+        source_class="local_repository",
+        locator="https://example.org",
+        publisher_or_repository="example.org",
+        title="Unrelated title",
+        retrieved_at=datetime.now(UTC),
+        content_digest="sha256:test",
+        scope="test",
+        purpose="goal_exploration",
+        fully_read=False,
+        trust_status="local",
+    )
+    app = object.__new__(TianwenApp)
+
+    assert not app._covered_by_evidence("example org", (evidence,), (source,))
+    assert not app._covered_by_evidence("the", (evidence.model_copy(update={"summary": "the"}),), ())
+    assert app._covered_by_evidence(
+        "parser version", (evidence.model_copy(update={"summary": "parser version 2"}),), ()
+    )
 
 
 def test_goal_evidence_packet_is_isolated_in_execution_manifest(tmp_path: Path) -> None:

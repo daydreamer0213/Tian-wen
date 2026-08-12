@@ -303,18 +303,24 @@ class TianwenApp:
 
     @staticmethod
     def _coverage_tokens(value: str) -> frozenset[str]:
-        return frozenset(token for token in re.findall(r"[a-z0-9]+", value.casefold()) if len(token) >= 3)
+        stopwords = {
+            "the", "a", "an", "and", "or", "of", "to", "for", "in", "on", "is", "are", "what",
+            "which", "should", "current", "currently", "的", "了", "是", "和", "或", "在", "对", "于",
+            "与", "及", "这", "那", "什么", "哪个", "应该", "当前", "目前",
+        }
+        return frozenset(
+            token
+            for token in re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]+", value.casefold())
+            if token not in stopwords
+        )
 
     def _covered_by_evidence(
         self, subject: str, evidence: tuple[EvidenceRecord, ...], sources: tuple[SourceRecord, ...]
     ) -> bool:
         required = self._coverage_tokens(subject)
-        if not required:
+        if not required or not any(len(token) >= 4 or token.isdigit() for token in required):
             return False
-        governed_text = " ".join(
-            [item.summary for item in evidence]
-            + [f"{source.title} {source.locator}" for source in sources]
-        )
+        governed_text = " ".join(item.summary for item in evidence)
         return required <= self._coverage_tokens(governed_text)
 
     def _explorer(self, live: bool, brief: ExplorationBrief) -> ExplorationEngine:
