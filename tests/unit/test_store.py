@@ -179,6 +179,14 @@ def test_existing_run_cannot_replace_its_frozen_manifest(tmp_path: Path) -> None
     assert store.get_object("run", run.run_id, RunRecord).manifest.model_id == "model-a"
 
 
+def test_existing_run_cannot_replace_its_persisted_parent_id(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    run = make_run()
+    store.put_object("run", run.run_id, None, run.status.value, run)
+    with pytest.raises(StateConflict):
+        store.put_object("run", run.run_id, "different-parent", run.status.value, run)
+
+
 def test_budget_and_lease_survive_reopen(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     store = store_at(path)

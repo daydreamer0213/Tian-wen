@@ -166,14 +166,22 @@ class StateStore:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
-                "SELECT body_json FROM tw_objects WHERE kind = ? AND object_id = ?",
+                "SELECT kind, object_id, parent_id, body_json FROM tw_objects "
+                "WHERE kind = ? AND object_id = ?",
                 (kind, object_id),
             ).fetchone()
             if kind == "run" and existing is not None:
                 persisted = RunRecord.model_validate_json(existing["body_json"])
-                if persisted.manifest != value.manifest or persisted.model_copy(
-                    update={"status": value.status, "status_reason": value.status_reason}
-                ) != value:
+                if (
+                    existing["kind"] != kind
+                    or existing["object_id"] != object_id
+                    or existing["parent_id"] != parent_id
+                    or persisted.manifest != value.manifest
+                    or persisted.model_copy(
+                        update={"status": value.status, "status_reason": value.status_reason}
+                    )
+                    != value
+                ):
                     raise StateConflict("run manifest and identity are immutable")
             self._put_object(connection, kind, object_id, parent_id, status, value)
 
