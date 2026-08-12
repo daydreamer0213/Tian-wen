@@ -146,6 +146,26 @@ class StateStore:
                     brief_id TEXT PRIMARY KEY,
                     usage_json TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS tw_memories (
+                    memory_id TEXT PRIMARY KEY,
+                    user_scope TEXT NOT NULL,
+                    workspace_scope TEXT NOT NULL,
+                    purpose TEXT NOT NULL,
+                    source_class TEXT NOT NULL,
+                    claim TEXT NOT NULL,
+                    conditions_json TEXT NOT NULL,
+                    provenance_json TEXT NOT NULL,
+                    sensitivity TEXT NOT NULL,
+                    retention_until TEXT,
+                    active INTEGER NOT NULL
+                );
+
+                CREATE VIRTUAL TABLE IF NOT EXISTS tw_memories_fts USING fts5(
+                    memory_id UNINDEXED,
+                    claim,
+                    conditions
+                );
                 """
             )
 

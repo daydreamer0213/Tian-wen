@@ -67,6 +67,7 @@ class ArtifactStatus(str, Enum):  # noqa: UP042
     ACTIVE = "active"
     REJECTED = "rejected"
     RETIRED = "retired"
+    INVALIDATED_BY_DELETION = "invalidated_by_deletion"
 
 
 class ExplorationStopReason(str, Enum):  # noqa: UP042
