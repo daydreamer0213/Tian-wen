@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 from datetime import timedelta
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -378,39 +379,61 @@ with patch("pydantic_ai.models.create_async_http_client", return_value=client):
 
 
 @pytest.mark.anyio
-async def test_runtime_agent_inventory_excludes_provider_native_and_exploration_web_tools(tmp_path: Path) -> None:
+async def test_runtime_inventory_excludes_provider_native_and_exploration_web_tools(tmp_path: Path) -> None:
     from pydantic_ai_harness.step_persistence import InMemoryStepStore
 
-    from tianwen.runtime import RepoTaskRuntime, RuntimeConfig
+    from tianwen.runtime import RepoTaskRuntime, RuntimeConfig, runtime_manifest_digests
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     store = StateStore(tmp_path / "state.db")
     store.initialize()
+    config = RuntimeConfig(
+        workspace=workspace, skill_dir=Path(__file__).parents[2] / "skills", allowed_commands=("python",)
+    )
+    model = TestModel(custom_output_text="done", call_tools=[])
     runtime = RepoTaskRuntime(
         store=store,
         harness_store=InMemoryStepStore(),
-        model=TestModel(custom_output_text="done", call_tools=[]),
-        config=RuntimeConfig(workspace=workspace, skill_dir=Path(__file__).parents[2] / "skills", allowed_commands=("python",)),
+        model=model,
+        config=config,
     )
+    digests = runtime_manifest_digests(config)
+    prompt = "inventory"
     run = RunRecord(
         run_id="runtime-run",
         task_id="runtime-task",
-        status=RunStatus.RUNNING,
+        status=RunStatus.QUEUED,
         manifest=RunManifest(
-            workflow_version="1", schema_version="1", pydantic_ai_version="2.18.0", harness_version="0.13.0",
-            model_id="test", prompt_digest="sha256:p", skill_versions={}, skill_digests={}, policy_digest="sha256:p",
-            tool_contract_digest="sha256:t", goal_contract_digest="sha256:g", workspace_digest="sha256:w",
+            workflow_version="1",
+            schema_version="1",
+            pydantic_ai_version=version("pydantic-ai-slim"),
+            harness_version=version("pydantic-ai-harness"),
+            model_id="test",
+            prompt_digest=content_digest(prompt),
+            skill_versions={"repo_task": "1"},
+            skill_digests={
+                "repo_task": content_digest(
+                    (config.skill_dir / "repo_task" / "SKILL.md").read_text(encoding="utf-8")
+                )
+            },
+            policy_digest=digests["policy_digest"],
+            tool_contract_digest=digests["tool_contract_digest"],
+            goal_contract_digest="sha256:g",
+            workspace_digest=digests["workspace_digest"],
         ),
     )
+    store.put_object("run", run.run_id, run.task_id, run.status.value, run)
 
-    await runtime._agent(run).run("inventory", conversation_id=run.run_id)
-    parameters = runtime.model.last_model_request_parameters
+    await runtime.run(run, prompt)
+    parameters = model.last_model_request_parameters
     assert parameters is not None
     names = {tool.name for tool in parameters.function_tools}
+    native_names = {tool.name for tool in parameters.native_tools}
 
-    assert parameters.native_tools == []
     assert not {"duckduckgo_search", "web_fetch"}.intersection(names)
+    assert not {"WebSearch", "WebFetch"}.intersection(native_names)
+    assert {"read_file", "run_command"}.issubset(names)
 
 
 def test_format_untrusted_evidence_keeps_malicious_text_inside_escaped_data_envelope(
