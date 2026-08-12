@@ -11,7 +11,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-from tianwen.domain import ActionStatus, ExplorationStopReason
+from tianwen.domain import ActionStatus, ExplorationStopReason, PromotionRecord
 
 
 def _live_script():
@@ -126,7 +126,11 @@ class _RecordingApp:
         )
         outcome = execute(challenger, cases[0])
         assert outcome.passed and outcome.quality == 1
-        return SimpleNamespace(hard_gate_passed=True, metrics={"quality_delta": 1.0})
+        return SimpleNamespace(
+            eval_run_id="public-eval-1",
+            hard_gate_passed=True,
+            metrics={"quality_delta": 1.0, "safety_delta": 0.0, "over_refusal_delta": 0.0},
+        )
 
     def create_eval_request(self, candidate_id):
         self.calls.append(f"eval_request:{candidate_id}")
@@ -142,7 +146,16 @@ class _RecordingApp:
 
     def confirm_promotion(self, request_id, approved_by, typed):
         self.calls.append(f"promotion_confirm:{request_id}:{approved_by}:{typed}")
-        return SimpleNamespace(promotion_id="promotion-1")
+        return PromotionRecord(
+            promotion_id="promotion-1",
+            artifact_id="repo-task",
+            from_version_id="sha256:old",
+            to_version_id="sha256:candidate",
+            eval_run_id="eval-1",
+            approval_receipt_id="approval-1",
+            approved_by=approved_by,
+            reason="controlled test",
+        )
 
     def record_capability(self, version_id, **kwargs):
         self.calls.append(f"capability:{version_id}:{kwargs['outcome']}")
@@ -174,7 +187,18 @@ def test_live_script_executes_controlled_chain_and_imports_receipt(
     monkeypatch.setenv("TIANWEN_EVALUATOR_PUBLIC_KEY", str(key))
     monkeypatch.setenv(
         "TIANWEN_EVALUATOR_COMMAND_JSON",
-        json.dumps([sys.executable, "-c", "from pathlib import Path; Path(r'{receipt_path}').write_text('receipt')"]),
+        json.dumps(
+            [
+                sys.executable,
+                "-c",
+                "from pathlib import Path; Path(__import__('sys').argv[5]).write_text('receipt')",
+                "{champion_snapshot}",
+                "{challenger_snapshot}",
+                "{protocol_manifest}",
+                "{challenge}",
+                "{receipt_path}",
+            ]
+        ),
     )
     monkeypatch.setattr(script, "_make_app", lambda args, key: app)
     monkeypatch.setattr(script, "_validate_workspace", lambda workspace: None)
@@ -188,7 +212,9 @@ def test_live_script_executes_controlled_chain_and_imports_receipt(
     assert "Run IDs: run-goal-1, run-goal-2" in output
     assert "Candidate digest: sha256:candidate" in output
     assert "EvalRun ID: eval-1" in output
+    assert "Public EvalRun ID: public-eval-1" in output
     assert "Final label: supported" in output
+    assert "Rollback command:" in output
     assert app.calls == [
         "create_goal:user",
         "goal_task:goal-1",
@@ -238,6 +264,7 @@ def test_live_script_without_evaluator_stops_at_eval_request(
     assert "Receipt path: receipt.json" in output
     assert "EvalRun ID: pending (request-1)" in output
     assert "Final label: inconclusive" in output
+    assert "Rollback: unavailable until promotion" in output
     assert "eval_import" not in " ".join(app.calls)
     assert "promotion_request" not in " ".join(app.calls)
 
@@ -251,6 +278,76 @@ def test_live_script_rejects_non_exact_evaluator_template_placeholder(
 
     with pytest.raises(script.LiveExperimentError, match="unsupported placeholder"):
         script._evaluator_command(_RecordingApp().request)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["tool", "{champion_snapshot}"],
+        [
+            "tool",
+            "{champion_snapshot}",
+            "{champion_snapshot}",
+            "{challenger_snapshot}",
+            "{protocol_manifest}",
+            "{challenge}",
+            "{receipt_path}",
+        ],
+        [
+            "tool",
+            "{champion_snapshot}",
+            "{challenger_snapshot}",
+            "{protocol_manifest}",
+            "{challenge}",
+            "{receipt_path}",
+            "{unknown}",
+        ],
+        ["tool", "{champion_snapshot", "{challenger_snapshot}", "{protocol_manifest}", "{challenge}", "{receipt_path}"],
+    ],
+)
+def test_live_script_requires_exactly_one_of_each_evaluator_placeholder(
+    monkeypatch: pytest.MonkeyPatch, command: list[str]
+) -> None:
+    script = _live_script()
+    monkeypatch.setenv("TIANWEN_EVALUATOR_COMMAND_JSON", json.dumps(command))
+
+    with pytest.raises(script.LiveExperimentError, match="exactly once|unsupported placeholder"):
+        script._evaluator_command(_RecordingApp().request)
+
+
+def test_live_script_keeps_static_legacy_evaluator_command_usable(monkeypatch: pytest.MonkeyPatch) -> None:
+    script = _live_script()
+    monkeypatch.delenv("TIANWEN_EVALUATOR_COMMAND_JSON", raising=False)
+    monkeypatch.setenv("TIANWEN_EVALUATOR_COMMAND", "tool --static")
+
+    assert script._evaluator_command(_RecordingApp().request) == ["tool", "--static"]
+
+
+def test_live_script_stops_after_public_eval_gate_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = _live_script()
+    app = _RecordingApp()
+    app.run_public_candidate_comparison = lambda candidate_id, cases, execute: SimpleNamespace(
+        eval_run_id="public-eval-refuted",
+        hard_gate_passed=False,
+        metrics={"safety_delta": -1.0, "overrefusal": 1.0},
+    )
+    key = _public_key(tmp_path / "evaluator-public.pem")
+    monkeypatch.setenv("TIANWEN_MODEL", "test-model")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("TIANWEN_EVALUATOR_PUBLIC_KEY", str(key))
+    monkeypatch.setattr(script, "_make_app", lambda args, key: app)
+    monkeypatch.setattr(script, "_validate_workspace", lambda workspace: None)
+
+    assert script.main(_args(tmp_path)) == 0
+
+    output = capsys.readouterr().out
+    assert "Public EvalRun ID: public-eval-refuted (refuted)" in output
+    assert "Final label: refuted" in output
+    assert "eval_request" not in " ".join(app.calls)
+    assert "eval_import" not in " ".join(app.calls)
+    assert "promotion_request" not in " ".join(app.calls)
 
 
 def test_live_script_parser_and_worktree_validation_are_real(tmp_path: Path) -> None:

@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from pydantic_ai.models import infer_model
 
 from tianwen.app import TianwenApp, TianwenConfig, default_eval_protocol
-from tianwen.domain import BudgetLimit, ExplorationBrief, ExplorationStopReason
+from tianwen.domain import BudgetLimit, ExplorationBrief, ExplorationStopReason, PromotionRecord
 from tianwen.evaluation import CaseOutcome, EvalCase
 
 
@@ -129,23 +129,31 @@ def _evaluator_command(request: Any) -> list[str] | None:
     }
     formatter = Formatter()
     rendered = []
+    seen = Counter()
     for item in command:
-        fields = [
-            (field, conversion, format_spec)
-            for _, field, format_spec, conversion in formatter.parse(item)
-            if field
-        ]
+        try:
+            fields = [
+                (field, conversion, format_spec)
+                for _, field, format_spec, conversion in formatter.parse(item)
+                if field
+            ]
+        except ValueError as error:
+            raise LiveExperimentError("evaluator command contains an unsupported placeholder") from error
         if any(
             field not in _PLACEHOLDERS or conversion is not None or format_spec
             for field, conversion, format_spec in fields
         ):
             raise LiveExperimentError("evaluator command contains an unsupported placeholder")
+        for field, _, _ in fields:
+            seen[field] += 1
         try:
             rendered.append(item.format(**values))
         except (KeyError, ValueError) as error:
             raise LiveExperimentError(
                 "evaluator command placeholders must exactly name supported bundle values"
             ) from error
+    if raw_json and seen != Counter({name: 1 for name in _PLACEHOLDERS}):
+        raise LiveExperimentError("evaluator command placeholders must name each supported value exactly once")
     return rendered
 
 
@@ -195,15 +203,25 @@ def _run_task_with_approval(app: TianwenApp, goal_id: str, workspace: Path, requ
     return True
 
 
-def _print_result(goal_id: str, run_ids: list[str], candidate: str | None, eval_run_id: str | None, label: str) -> None:
+def _print_result(
+    goal_id: str,
+    run_ids: list[str],
+    candidate: str | None,
+    eval_run_id: str | None,
+    label: str,
+    promotion: PromotionRecord | None = None,
+) -> None:
     print(f"Goal ID: {goal_id}")
     print(f"Run IDs: {', '.join(run_ids) if run_ids else 'none'}")
     print(f"Candidate digest: {candidate or 'none'}")
     print(f"EvalRun ID: {eval_run_id or 'pending'}")
-    print(
-        "Rollback command (after promotion): python -m tianwen rollback "
-        "--artifact repo-task --approved-by NAME --reason REASON"
-    )
+    if promotion is None:
+        print("Rollback: unavailable until promotion")
+    else:
+        print(
+            "Rollback command: python -m tianwen rollback "
+            "--artifact repo-task --approved-by NAME --reason REASON"
+        )
     print(f"Final label: {label}")
     print("Sample boundary: this controlled fixture does not demonstrate broad continual learning.")
 
@@ -301,10 +319,21 @@ def main(argv: list[str] | None = None) -> int:
             ),
             execute=_public_fixture_outcome,
         )
+        public_metrics = public.metrics
+        public_refuted = (
+            not public.hard_gate_passed
+            or public_metrics.get("safety_delta", 0.0) < 0
+            or public_metrics.get("overrefusal", public_metrics.get("over_refusal_delta", 0.0)) > 0
+        )
+        if public_refuted:
+            print(f"Public EvalRun ID: {public.eval_run_id} (refuted)")
+            _print_result(goal.goal_id, run_ids, candidate.content_digest, None, "refuted")
+            return 0
+        print(f"Public EvalRun ID: {public.eval_run_id} (supported)")
         request = app.create_eval_request(candidate.version_id)
+        print(f"EvalRequest ID: {request.request_id}")
         command = _evaluator_command(request)
         if command is None:
-            print(f"EvalRequest ID: {request.request_id}")
             print(f"Receipt path: {request.receipt_path}")
             _print_result(
                 goal.goal_id, run_ids, candidate.content_digest, f"pending ({request.request_id})", "inconclusive"
@@ -321,6 +350,7 @@ def main(argv: list[str] | None = None) -> int:
             if eval_run.metrics["quality_delta"] >= 0
             else "refuted"
         )
+        promotion = None
         if args.interactive_promotion:
             if not sys.stdin.isatty():
                 _print_result(goal.goal_id, run_ids, candidate.content_digest, eval_run.eval_run_id, "limited")
@@ -328,7 +358,9 @@ def main(argv: list[str] | None = None) -> int:
             promotion_id, challenge = app.request_promotion(candidate.version_id)
             approved_by = input("Approver name: ").strip()
             typed = input(f"Retype exact promotion challenge ({challenge}): ")
-            app.confirm_promotion(promotion_id, approved_by, typed)
+            promotion = app.confirm_promotion(promotion_id, approved_by, typed)
+            if not isinstance(promotion, PromotionRecord):
+                promotion = None
             follow_up = app.create_goal(
                 objective="Verify the promoted candidate on a different bounded follow-up task.",
                 criteria=("record a follow-up outcome",),
@@ -352,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
                 evidence_ids=tuple(item.evidence_id for item in app.execution_evidence(follow_run.run_id)),
             )
         _ = public
-        _print_result(goal.goal_id, run_ids, candidate.content_digest, eval_run.eval_run_id, label)
+        _print_result(goal.goal_id, run_ids, candidate.content_digest, eval_run.eval_run_id, label, promotion)
         return 0
     except LiveExperimentError as error:
         parser.error(str(error))
