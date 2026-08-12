@@ -165,6 +165,10 @@ class ExplorationEngine:
             raise ExplorationBudgetExceeded("exploration wall-clock budget exhausted")
         return task, loop, goal
 
+    @staticmethod
+    def _goal_workspace_scope(goal: GoalContract, workspace: Path) -> str:
+        return f"goal:{goal.goal_id}:workspace:{content_digest(str(workspace.resolve()))}"
+
     def _stop_for_budget(self, run_id: str, brief: ExplorationBrief) -> None:
         self.store.append_event(
             run_id,
@@ -244,7 +248,7 @@ class ExplorationEngine:
         )
         self._require_authorized(action, "workspace_read")
         for finding in findings or ():
-            self._persist_local(run_id, action.action_id, finding)
+            self._persist_local(run_id, action.action_id, finding, goal)
         return findings or ()
 
     def _eligible_local_file(self, path: Path, brief: ExplorationBrief) -> bool:
@@ -262,7 +266,10 @@ class ExplorationEngine:
             for root in brief.allowed_local_roots
         )
 
-    def _persist_local(self, run_id: str, action_id: str, finding: LocalFinding) -> None:
+    def _persist_local(
+        self, run_id: str, action_id: str, finding: LocalFinding, goal: GoalContract
+    ) -> None:
+        scope = self._goal_workspace_scope(goal, self.workspace)
         source_id = content_digest({"locator": finding.locator, "content": finding.content_digest})
         source = SourceRecord(
             source_id=source_id,
@@ -274,7 +281,7 @@ class ExplorationEngine:
             title=finding.locator,
             retrieved_at=utc_now(),
             content_digest=finding.content_digest,
-            scope="workspace",
+            scope=scope,
             purpose="goal_exploration",
             fully_read=False,
             trust_status="local",
@@ -293,7 +300,7 @@ class ExplorationEngine:
             safety_category="safe",
             summary=f"{finding.locator}:{finding.line}: {finding.excerpt}",
             payload_digest=finding.content_digest,
-            scope="workspace",
+            scope=scope,
             purpose="goal_exploration",
             source_class="local_repository",
             sensitivity="internal",
@@ -347,6 +354,7 @@ class ExplorationEngine:
         self, run_id: str, brief: ExplorationBrief, url: str, source_class: str
     ) -> tuple[SourceRecord, EvidenceRecord]:
         _, loop, goal = self._authority(run_id, brief)
+        scope = self._goal_workspace_scope(goal, self.workspace)
         parsed = urlsplit(url)
         if source_class not in brief.allowed_source_classes or not self._safe_url(parsed, brief):
             raise ExplorationScopeError("source URL is outside the frozen exploration boundary")
@@ -400,7 +408,7 @@ class ExplorationEngine:
                 title=_field(raw, "title", url),
                 retrieved_at=utc_now(),
                 content_digest=digest,
-                scope="external",
+                scope=scope,
                 purpose="goal_exploration",
                 fully_read=len(excerpt) == len(content),
                 trust_status="untrusted_external",
@@ -419,7 +427,7 @@ class ExplorationEngine:
                 safety_category="untrusted",
                 summary=f"Fetched {parsed.hostname} source for exploration.",
                 payload_digest=digest,
-                scope="external",
+                scope=scope,
                 purpose="goal_exploration",
                 source_class=source_class,
                 sensitivity="untrusted_external",
@@ -529,15 +537,27 @@ class ExplorationEngine:
             ActionReservation(self._loop_id(brief), BudgetUsage(tool_calls=1), brief.brief_id, ExplorationUsage()),
         )
         self._require_authorized(action, "workspace_read")
-        self._persist_local(run_id, action.action_id, finding)
+        self._persist_local(run_id, action.action_id, finding, goal)
         return finding
 
     def search_prior_evidence(self, brief: ExplorationBrief, query: str) -> tuple[EvidenceRecord, ...]:
-        task = self.store.get_object("task", brief.task_id, TaskRecord)
-        loop = self.store.get_object("loop", task.loop_id, LoopRecord)
+        try:
+            persisted = self.store.get_object("exploration_brief", brief.brief_id, ExplorationBrief)
+            task = self.store.get_object("task", persisted.task_id, TaskRecord)
+            loop = self.store.get_object("loop", task.loop_id, LoopRecord)
+            goal = self.store.get_object("goal", loop.goal_id, GoalContract)
+        except StateConflict as error:
+            raise ExplorationAuthorizationError("missing or mismatched exploration authority") from error
+        if persisted != brief:
+            raise ExplorationAuthorizationError("missing or mismatched exploration authority")
+        expected_scope = self._goal_workspace_scope(goal, self.workspace)
         matching: list[EvidenceRecord] = []
         for record in self.store.list_objects("evidence", EvidenceRecord):
-            if record.purpose != "goal_exploration" or query.casefold() not in record.summary.casefold():
+            if (
+                record.purpose != "goal_exploration"
+                or record.scope != expected_scope
+                or query.casefold() not in record.summary.casefold()
+            ):
                 continue
             try:
                 evidence_run = self.store.get_object("run", record.run_id, RunRecord)
@@ -545,9 +565,68 @@ class ExplorationEngine:
                 evidence_loop = self.store.get_object("loop", evidence_task.loop_id, LoopRecord)
             except StateConflict:
                 continue
-            if evidence_loop.goal_id == loop.goal_id and evidence_task.loop_id == task.loop_id:
-                matching.append(record)
+            if evidence_loop.goal_id != goal.goal_id:
+                continue
+            matching.append(record)
         return tuple(matching[:8])
+
+    def _persisted_finish_records(
+        self,
+        run_id: str,
+        goal: GoalContract,
+        sources: tuple[SourceRecord, ...],
+        evidence: tuple[EvidenceRecord, ...],
+    ) -> None:
+        expected_scope = self._goal_workspace_scope(goal, self.workspace)
+        source_ids = {source.source_id for source in sources}
+        if len(source_ids) != len(sources):
+            raise ExplorationScopeError("supplied sources must be unique")
+        if len({record.evidence_id for record in evidence}) != len(evidence):
+            raise ExplorationScopeError("supplied evidence must be unique")
+        for source in sources:
+            try:
+                persisted = self.store.get_object("source", source.source_id, SourceRecord)
+                action = self.store.get_action(source.action_id)
+            except StateConflict as error:
+                raise ExplorationScopeError("source must be persisted") from error
+            if persisted != source:
+                raise ExplorationScopeError("supplied source must equal persisted source")
+            if (
+                source.run_id != run_id
+                or source.purpose != "goal_exploration"
+                or source.scope != expected_scope
+                or action.run_id != run_id
+            ):
+                raise ExplorationScopeError("source is outside the supplied run and scope")
+        for record in evidence:
+            try:
+                persisted = self.store.get_object("evidence", record.evidence_id, EvidenceRecord)
+                action = self.store.get_action(record.action_id or "")
+            except StateConflict as error:
+                raise ExplorationScopeError("evidence must be persisted") from error
+            if persisted != record:
+                raise ExplorationScopeError("supplied evidence must equal persisted evidence")
+            if (
+                record.run_id != run_id
+                or record.purpose != "goal_exploration"
+                or record.scope != expected_scope
+                or not record.provenance_ids
+                or not set(record.provenance_ids) <= source_ids
+                or action.run_id != run_id
+            ):
+                raise ExplorationScopeError("evidence provenance is outside the supplied run and scope")
+            for source_id in record.provenance_ids:
+                source = next(source for source in sources if source.source_id == source_id)
+                if source.run_id != record.run_id or source.action_id != record.action_id:
+                    raise ExplorationScopeError("evidence source action link does not match")
+
+    def _has_stop_cause(
+        self, run_id: str, brief_id: str, reason: ExplorationStopReason
+    ) -> bool:
+        for event in reversed(self.store.list_events(run_id)):
+            if event.kind == "exploration_stopped":
+                return event.payload == {"brief_id": brief_id, "reason": reason.value}
+        return False
 
     def finish(
         self,
@@ -560,14 +639,27 @@ class ExplorationEngine:
         planning_impact: str,
         stop_reason: ExplorationStopReason,
     ) -> ExplorationReport:
-        self._authority(run_id, brief)
-        source_ids = {source.source_id for source in sources}
-        if any(not set(item.provenance_ids) <= source_ids for item in evidence):
-            raise ExplorationScopeError("evidence must cite a supplied source")
+        _, _, goal = self._authority(run_id, brief)
+        self._persisted_finish_records(run_id, goal, sources, evidence)
         if stop_reason is ExplorationStopReason.SUFFICIENT and (
             not evidence or not answered_unknowns or remaining_unknowns
         ):
             raise ExplorationScopeError("sufficient exploration requires complete source-backed answers")
+        if stop_reason is ExplorationStopReason.NO_NEW_EVIDENCE:
+            if sources or evidence:
+                raise ExplorationScopeError("no new evidence requires an empty latest operation")
+            if not self._has_stop_cause(run_id, brief.brief_id, stop_reason):
+                self.store.append_event(
+                    run_id,
+                    "exploration_stopped",
+                    {"brief_id": brief.brief_id, "reason": stop_reason.value},
+                )
+        elif stop_reason in {
+            ExplorationStopReason.BUDGET_EXHAUSTED,
+            ExplorationStopReason.SOURCE_UNAVAILABLE,
+            ExplorationStopReason.RISK_BOUNDARY,
+        } and not self._has_stop_cause(run_id, brief.brief_id, stop_reason):
+            raise ExplorationScopeError("stop cause must be persisted for this run")
         report = ExplorationReport(
             report_id=content_digest({"brief": brief.brief_id, "evidence": [item.evidence_id for item in evidence]}),
             brief_id=brief.brief_id,

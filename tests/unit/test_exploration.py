@@ -154,6 +154,9 @@ def test_fetch_creates_source_and_evidence_without_obeying_page_text(tmp_path: P
     assert source.trust_status == "untrusted_external"
     assert evidence.provenance_ids == (source.source_id,)
     assert evidence.purpose == "goal_exploration"
+    assert source.scope == evidence.scope == (
+        f"goal:goal-original:workspace:{content_digest(str((tmp_path / 'workspace').resolve()))}"
+    )
     assert engine.store.get_object("goal", "goal-original", GoalContract).objective == "Keep the original Goal"
 
 
@@ -496,3 +499,146 @@ def test_finish_requires_evidence_for_sufficient_stop_reason(tmp_path: Path) -> 
             planning_impact="choose parser",
             stop_reason=ExplorationStopReason.SUFFICIENT,
         )
+
+
+def test_prior_evidence_uses_exact_goal_workspace_scope_across_loops(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    _, evidence = engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+    goal_scope = f"goal:goal-original:workspace:{content_digest(str((tmp_path / 'workspace').resolve()))}"
+    loop = LoopRecord(
+        loop_id="loop-2",
+        goal_id="goal-original",
+        kind=LoopKind.CHILD,
+        objective="another exploration",
+        budget=BudgetLimit(model_requests=0, tool_calls=20, tokens=1000),
+    )
+    task = TaskRecord(
+        task_id="task-2", loop_id=loop.loop_id, kind=TaskKind.LEARNING, objective="explore", acceptance=("evidence",)
+    )
+    first_run = engine.store.get_object("run", "run-1", RunRecord)
+    run = first_run.model_copy(update={"run_id": "run-2", "task_id": task.task_id})
+    same_goal_other_loop = evidence.model_copy(
+        update={"evidence_id": "same-goal-other-loop", "run_id": run.run_id, "scope": goal_scope, "untrusted_excerpt": None}
+    )
+    wrong_scope = evidence.model_copy(
+        update={"evidence_id": "wrong-workspace", "scope": "goal:goal-original:workspace:sha256:wrong", "untrusted_excerpt": None}
+    )
+    wrong_purpose = evidence.model_copy(
+        update={"evidence_id": "wrong-purpose", "purpose": "memory", "scope": goal_scope, "untrusted_excerpt": None}
+    )
+    other_goal = engine.store.get_object("goal", "goal-original", GoalContract).model_copy(update={"goal_id": "goal-other"})
+    other_loop = loop.model_copy(update={"loop_id": "loop-other", "goal_id": other_goal.goal_id})
+    other_task = task.model_copy(update={"task_id": "task-other", "loop_id": other_loop.loop_id})
+    other_run = run.model_copy(update={"run_id": "run-other", "task_id": other_task.task_id})
+    wrong_goal = evidence.model_copy(
+        update={"evidence_id": "wrong-goal", "run_id": other_run.run_id, "scope": goal_scope, "untrusted_excerpt": None}
+    )
+    engine.store.put_object("loop", loop.loop_id, loop.goal_id, "active", loop)
+    engine.store.create_budget(loop.loop_id, None, loop.budget)
+    engine.store.put_object("task", task.task_id, loop.loop_id, "active", task)
+    engine.store.put_object("run", run.run_id, task.task_id, run.status.value, run)
+    engine.store.put_object("evidence", same_goal_other_loop.evidence_id, run.run_id, "active", same_goal_other_loop)
+    engine.store.put_object("evidence", wrong_scope.evidence_id, "run-1", "active", wrong_scope)
+    engine.store.put_object("evidence", wrong_purpose.evidence_id, "run-1", "active", wrong_purpose)
+    engine.store.put_object("goal", other_goal.goal_id, None, "active", other_goal)
+    engine.store.put_object("loop", other_loop.loop_id, other_goal.goal_id, "active", other_loop)
+    engine.store.create_budget(other_loop.loop_id, None, other_loop.budget)
+    engine.store.put_object("task", other_task.task_id, other_loop.loop_id, "active", other_task)
+    engine.store.put_object("run", other_run.run_id, other_task.task_id, other_run.status.value, other_run)
+    engine.store.put_object("evidence", wrong_goal.evidence_id, other_run.run_id, "active", wrong_goal)
+
+    found = engine.search_prior_evidence(brief, "fetched")
+
+    assert {record.evidence_id for record in found} == {evidence.evidence_id, same_goal_other_loop.evidence_id}
+    assert all(record.scope == goal_scope for record in found)
+
+
+def test_finish_rejects_forged_or_empty_provenance_models(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    source, evidence = engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+    forged_source = source.model_copy(update={"title": "forged"})
+    empty_provenance = evidence.model_copy(
+        update={"evidence_id": "empty-provenance", "provenance_ids": (), "untrusted_excerpt": None}
+    )
+    engine.store.put_object("evidence", empty_provenance.evidence_id, "run-1", "active", empty_provenance)
+
+    with pytest.raises(ExplorationScopeError, match="persisted"):
+        engine.finish(
+            "run-1", brief, (evidence,), (forged_source,), ("supported version",), (), "choose parser", ExplorationStopReason.SUFFICIENT
+        )
+    with pytest.raises(ExplorationScopeError, match="provenance"):
+        engine.finish(
+            "run-1", brief, (empty_provenance,), (source,), (), ("supported version",), "wait", ExplorationStopReason.INSUFFICIENT_EVIDENCE
+        )
+
+
+def test_finish_rejects_persisted_cross_run_evidence(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    first_run = engine.store.get_object("run", "run-1", RunRecord)
+    engine.store.put_object("run", "run-2", first_run.task_id, first_run.status.value, first_run.model_copy(update={"run_id": "run-2"}))
+    source, evidence = engine.fetch_source("run-2", brief, "https://example.org/other", "official_documentation")
+
+    with pytest.raises(ExplorationScopeError, match="run"):
+        engine.finish(
+            "run-1", brief, (evidence,), (source,), (), ("supported version",), "wait", ExplorationStopReason.INSUFFICIENT_EVIDENCE
+        )
+
+
+def test_finish_sufficient_accepts_real_persisted_fetched_evidence(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    source, evidence = engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+
+    report = engine.finish(
+        "run-1", brief, (evidence,), (source,), ("supported version",), (), "choose parser", ExplorationStopReason.SUFFICIENT
+    )
+
+    assert report.evidence_ids == (evidence.evidence_id,)
+    assert engine.store.get_object("exploration_report", report.report_id, type(report)) == report
+
+
+@pytest.mark.parametrize(
+    "stop_reason",
+    (
+        ExplorationStopReason.BUDGET_EXHAUSTED,
+        ExplorationStopReason.SOURCE_UNAVAILABLE,
+        ExplorationStopReason.RISK_BOUNDARY,
+    ),
+)
+def test_finish_requires_persisted_stop_cause_for_terminal_causes(
+    tmp_path: Path, stop_reason: ExplorationStopReason
+) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    kwargs = dict(
+        run_id="run-1",
+        brief=brief,
+        evidence=(),
+        sources=(),
+        answered_unknowns=(),
+        remaining_unknowns=("supported version",),
+        planning_impact="wait",
+        stop_reason=stop_reason,
+    )
+
+    with pytest.raises(ExplorationScopeError, match="stop cause"):
+        engine.finish(**kwargs)
+    engine.store.append_event(
+        "run-1", "exploration_stopped", {"brief_id": brief.brief_id, "reason": stop_reason.value}
+    )
+
+    report = engine.finish(**kwargs)
+
+    assert report.stop_reason is stop_reason
+
+
+def test_finish_no_new_evidence_requires_empty_latest_operation(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    source, evidence = engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+
+    with pytest.raises(ExplorationScopeError, match="no new evidence"):
+        engine.finish(
+            "run-1", brief, (evidence,), (source,), (), (), "wait", ExplorationStopReason.NO_NEW_EVIDENCE
+        )
+    report = engine.finish("run-1", brief, (), (), (), (), "wait", ExplorationStopReason.NO_NEW_EVIDENCE)
+
+    assert report.stop_reason is ExplorationStopReason.NO_NEW_EVIDENCE
+    assert engine.store.list_events("run-1")[-2].payload == {"brief_id": brief.brief_id, "reason": "no_new_evidence"}
