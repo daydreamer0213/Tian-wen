@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import base64
 import hashlib
 import importlib.util
@@ -24,6 +25,7 @@ from tianwen.domain import (
     EvalProtocol,
     EvalReceipt,
     EvalRun,
+    PromotionRecord,
     PromotionRequest,
     content_digest,
     utc_now,
@@ -42,13 +44,17 @@ from tianwen.evaluation import (
     run_public_comparison,
     write_eval_request,
 )
-from tianwen.store import StateConflict, StateStore
+from tianwen.store import GovernanceStore, StateConflict, StateStore
 
 
 def store_at(path: Path) -> StateStore:
     store = StateStore(path)
     store.initialize()
     return store
+
+
+def governance_at(store: StateStore) -> GovernanceStore:
+    return GovernanceStore(store.database)
 
 
 def protocol(protocol_id: str = "protocol-v1") -> EvalProtocol:
@@ -702,6 +708,202 @@ def test_receipt_signature_binding_expiry_replay_and_sealed_detail_filtering(tmp
         import_eval_receipt(store, forged, private.public_key())
 
 
+@pytest.mark.parametrize(
+    "metrics_update",
+    (
+        pytest.param(
+            lambda metrics: {key: value for key, value in metrics.items() if key != "quality_delta"}, id="missing"
+        ),
+        pytest.param(lambda metrics: metrics | {"unexpected": 1.0}, id="extra"),
+        pytest.param(lambda metrics: metrics | {"quality_delta": math.nan}, id="nan"),
+        pytest.param(lambda metrics: metrics | {"quality_delta": math.inf}, id="infinity"),
+        pytest.param(lambda metrics: metrics | {"quality_delta": -math.inf}, id="negative_infinity"),
+    ),
+)
+def test_import_rejects_non_exact_or_nonfinite_metrics_without_consuming_request(
+    tmp_path: Path, metrics_update
+) -> None:
+    store = store_at(tmp_path / "state.db")
+    request = write_eval_request(
+        store,
+        protocol(),
+        artifact("champion", ArtifactStatus.ACTIVE, "champion"),
+        artifact("challenger", ArtifactStatus.CANDIDATE, "challenger"),
+        tmp_path / "inbox",
+    )
+    private = Ed25519PrivateKey.generate()
+    valid = signed_receipt(request, private)
+    receipt = signed_receipt(request, private, metrics=metrics_update(valid.metrics))
+
+    with pytest.raises(EvaluationError, match="metrics"):
+        import_eval_receipt(store, receipt, private.public_key())
+
+    persisted, consumed = store.get_eval_request(request.request_id)
+    assert persisted == request
+    assert consumed is None
+    with pytest.raises(StateConflict, match="missing eval_run"):
+        store.get_object("eval_run", receipt.receipt_id, EvalRun)
+
+
+def test_state_store_has_no_governance_write_capabilities_and_runtime_learning_do_not_hold_them(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    for method in (
+        "persist_eval_request",
+        "consume_eval_request",
+        "persist_promotion_request",
+        "consume_promotion_request",
+        "promotion_cas",
+    ):
+        assert not hasattr(store, method)
+        with pytest.raises(AttributeError):
+            getattr(store, method)
+
+    for module in ("runtime.py", "learning.py"):
+        tree = ast.parse((Path(__file__).parents[2] / "src" / "tianwen" / module).read_text(encoding="utf-8"))
+        imports_governance_store = any(
+            isinstance(node, ast.ImportFrom) and any(alias.name == "GovernanceStore" for alias in node.names)
+            for node in ast.walk(tree)
+        )
+        constructs_governance_store = any(
+            isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "GovernanceStore"
+            for node in ast.walk(tree)
+        )
+        holds_governance_store = any(
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.annotation, ast.Name)
+            and node.annotation.id == "GovernanceStore"
+            or isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == "GovernanceStore"
+            for node in ast.walk(tree)
+        )
+        assert not imports_governance_store
+        assert not constructs_governance_store
+        assert not holds_governance_store
+
+    assert not hasattr(GovernanceStore, "promotion_cas")
+    assert "approval" in inspect.signature(GovernanceStore.promote).parameters
+
+
+def test_governance_store_cannot_promote_without_a_persisted_approval_chain(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    proto = protocol()
+    persist_governed_artifacts(store, champion, challenger, proto)
+    request = write_eval_request(store, proto, champion, challenger, tmp_path / "inbox")
+    private = Ed25519PrivateKey.generate()
+    run = import_eval_receipt(store, signed_receipt(request, private), private.public_key())
+    approval = ApprovalReceipt(
+        receipt_id="unpersisted",
+        action="promote",
+        subject_digest=challenger.content_digest,
+        eval_run_id=run.eval_run_id,
+        challenge="unpersisted",
+        approved_by="alice",
+    )
+    record = PromotionRecord(
+        promotion_id="unpersisted-promotion",
+        artifact_id=challenger.artifact_id,
+        from_version_id=champion.version_id,
+        to_version_id=challenger.version_id,
+        eval_run_id=run.eval_run_id,
+        approval_receipt_id=approval.receipt_id,
+        approved_by=approval.approved_by,
+        reason="approved promotion",
+    )
+
+    with pytest.raises(StateConflict, match="approval chain"):
+        governance_at(store).promote(
+            run,
+            approval,
+            record,
+            ActivePointer(artifact_id=challenger.artifact_id, current_version_id=challenger.version_id, generation=2),
+        )
+
+
+def test_publisher_rejects_persisted_nonfinite_eval_metrics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    proto = protocol()
+    persist_governed_artifacts(store, champion, challenger, proto)
+    request = write_eval_request(store, proto, champion, challenger, tmp_path / "inbox")
+    private = Ed25519PrivateKey.generate()
+    run = import_eval_receipt(store, signed_receipt(request, private), private.public_key())
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    promotion_request = create_promotion_request(store, challenger, run)
+    approval = create_approval_receipt(store, promotion_request.request_id, "alice", promotion_request.challenge)
+    malformed = run.model_copy(update={"metrics": run.metrics | {"quality_delta": math.nan}})
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE tw_objects SET body_json = ? WHERE kind = 'eval_run' AND object_id = ?",
+            (json.dumps(malformed.model_dump(mode="json"), allow_nan=True), run.eval_run_id),
+        )
+
+    with pytest.raises(StateConflict, match="finite"):
+        Publisher(store).promote(malformed, approval)
+
+    assert store.get_approval_receipt(approval.receipt_id)[1] is None
+    assert store.latest_promotion(challenger.artifact_id) is None
+
+
+def test_promotion_request_rejects_persisted_malformed_eval_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    proto = protocol()
+    persist_governed_artifacts(store, champion, challenger, proto)
+    eval_request = write_eval_request(store, proto, champion, challenger, tmp_path / "inbox")
+    private = Ed25519PrivateKey.generate()
+    run = import_eval_receipt(store, signed_receipt(eval_request, private), private.public_key())
+    malformed = run.model_copy(update={"metrics": {"quality_delta": 1.0}})
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE tw_objects SET body_json = ? WHERE kind = 'eval_run' AND object_id = ?",
+            (malformed.model_dump_json(), run.eval_run_id),
+        )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    with pytest.raises(StateConflict, match="metrics"):
+        create_promotion_request(store, challenger, malformed)
+
+    with store._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM tw_promotion_requests").fetchone()[0] == 0
+
+
+def test_governance_store_rejects_missing_active_pointer_update(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    proto = protocol()
+    persist_governed_artifacts(store, champion, challenger, proto)
+    eval_request = write_eval_request(store, proto, champion, challenger, tmp_path / "inbox")
+    private = Ed25519PrivateKey.generate()
+    import_eval_receipt(store, signed_receipt(eval_request, private), private.public_key())
+    governance = governance_at(store)
+    with store._connect() as connection:
+        connection.execute(
+            "DELETE FROM tw_objects WHERE kind = 'active_pointer' AND object_id = ?", (challenger.artifact_id,)
+        )
+
+    with pytest.raises(StateConflict, match="missing active_pointer"):
+        with store._connect() as connection:
+            governance._put_object(
+                connection,
+                "active_pointer",
+                challenger.artifact_id,
+                None,
+                "active",
+                ActivePointer(
+                    artifact_id=challenger.artifact_id, current_version_id=challenger.version_id, generation=2
+                ),
+            )
+
+
 def test_expired_request_cannot_import_receipt(tmp_path: Path) -> None:
     store = store_at(tmp_path / "state.db")
     request = write_eval_request(
@@ -753,6 +955,9 @@ def test_first_promotion_requires_persisted_tty_approval_and_rolls_back_atomical
     rollback = publisher.rollback("repo-task", "alice", "regression")
     assert rollback.to_version_id == champion.version_id
     assert store_at(path).get_object("artifact", challenger.version_id, ArtifactVersion) == challenger
+    with pytest.raises(StateConflict, match="no rollback target"):
+        publisher.rollback("repo-task", "alice", "repeat regression")
+    assert store.get_object("active_pointer", "repo-task", ActivePointer).current_version_id == champion.version_id
 
 
 def test_approval_expiry_reuse_and_evaluator_private_environment_fail_closed(
@@ -872,15 +1077,23 @@ def test_publisher_uses_fixed_policy_and_rejects_governance_regressions(
 
 def test_promotion_request_consumption_rejects_forged_receipt_bindings(tmp_path: Path) -> None:
     store = store_at(tmp_path / "state.db")
+    governance = governance_at(store)
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "champion")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, "challenger")
+    proto = protocol()
+    persist_governed_artifacts(store, champion, challenger, proto)
+    eval_request = write_eval_request(store, proto, champion, challenger, tmp_path / "inbox")
+    private = Ed25519PrivateKey.generate()
+    run = import_eval_receipt(store, signed_receipt(eval_request, private), private.public_key())
     request = PromotionRequest(
         request_id="promotion-request",
         artifact_id="repo-task",
-        subject_digest="sha256:challenger",
-        eval_run_id="run-1",
+        subject_digest=challenger.content_digest,
+        eval_run_id=run.eval_run_id,
         challenge="challenge-1",
         expires_at=utc_now() + timedelta(minutes=1),
     )
-    store.persist_promotion_request(request)
+    governance.persist_promotion_request(request)
     forged = ApprovalReceipt(
         receipt_id="forged-receipt",
         action="promote",
@@ -891,7 +1104,7 @@ def test_promotion_request_consumption_rejects_forged_receipt_bindings(tmp_path:
     )
 
     with pytest.raises(StateConflict, match="bindings"):
-        store.consume_promotion_request(request, forged)
+        governance.consume_promotion_request(request, forged)
 
     persisted, consumed = store.get_promotion_request(request.request_id)
     assert persisted == request
@@ -903,7 +1116,7 @@ def test_promotion_request_consumption_rejects_forged_receipt_bindings(tmp_path:
         update={"receipt_id": "stale-receipt", "eval_run_id": request.eval_run_id, "challenge": stale_request.challenge}
     )
     with pytest.raises(StateConflict, match="identity"):
-        store.consume_promotion_request(stale_request, matching_stale_receipt)
+        governance.consume_promotion_request(stale_request, matching_stale_receipt)
 
 
 def test_publisher_rejects_forged_persisted_receipt_for_another_eval_run(
@@ -940,7 +1153,7 @@ def test_publisher_rejects_forged_persisted_receipt_for_another_eval_run(
     assert reopened.latest_promotion(champion.artifact_id) is None
 
 
-def test_promotion_cas_failure_leaves_approval_and_promotion_unmodified(
+def test_governance_promotion_failure_leaves_approval_and_promotion_unmodified(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = store_at(tmp_path / "state.db")
@@ -954,9 +1167,10 @@ def test_promotion_cas_failure_leaves_approval_and_promotion_unmodified(
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     promotion_request = create_promotion_request(store, challenger, run)
     approval = create_approval_receipt(store, promotion_request.request_id, "alice", promotion_request.challenge)
-    original_cas = store.promotion_cas
+    governance = Publisher(store)._governance_store
+    original_promote = governance.promote
 
-    def race_cas(*args: object) -> None:
+    def race_promote(*args: object) -> None:
         pointer = store.get_object("active_pointer", champion.artifact_id, ActivePointer)
         changed = pointer.model_copy(
             update={"current_version_id": challenger.version_id, "generation": pointer.generation + 1}
@@ -966,11 +1180,13 @@ def test_promotion_cas_failure_leaves_approval_and_promotion_unmodified(
                 "UPDATE tw_objects SET body_json = ? WHERE kind = ? AND object_id = ?",
                 (changed.model_dump_json(), "active_pointer", champion.artifact_id),
             )
-        original_cas(*args)
+        original_promote(*args)
 
-    monkeypatch.setattr(store, "promotion_cas", race_cas)
-    with pytest.raises(StateConflict, match="active pointer changed"):
-        Publisher(store).promote(run, approval)
+    monkeypatch.setattr(governance, "promote", race_promote)
+    publisher = Publisher(store)
+    monkeypatch.setattr(publisher, "_governance_store", governance)
+    with pytest.raises(StateConflict, match="promotion bindings"):
+        publisher.promote(run, approval)
 
     reopened = store_at(tmp_path / "state.db")
     assert reopened.get_approval_receipt(approval.receipt_id)[1] is None

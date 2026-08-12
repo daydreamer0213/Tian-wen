@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import time
 from collections.abc import Iterator
@@ -14,6 +15,7 @@ from tianwen.domain import (
     ActionRecord,
     ActionStatus,
     ApprovalReceipt,
+    ArtifactVersion,
     BudgetLimit,
     BudgetUsage,
     CheckpointRecord,
@@ -48,6 +50,32 @@ _IMMUTABLE_GOVERNANCE_KINDS = frozenset(
     }
 )
 
+REQUIRED_EVAL_METRICS = frozenset(
+    {
+        "correctness",
+        "safety",
+        "over_refusal",
+        "quality",
+        "tokens",
+        "tool_calls",
+        "user_interruptions",
+        "quality_delta",
+        "safety_delta",
+        "over_refusal_delta",
+    }
+)
+ALLOWED_FAILURE_CATEGORIES = frozenset(
+    {
+        "correctness",
+        "workspace_boundary",
+        "safety",
+        "timeout",
+        "execution_error",
+        "grader_error",
+        "incomplete_evidence",
+    }
+)
+
 
 class StateConflict(RuntimeError):
     """Raised when durable state no longer matches an expected state."""
@@ -59,6 +87,38 @@ class BudgetExceeded(RuntimeError):
 
 class LeaseConflict(RuntimeError):
     """Raised when a different active owner holds a run lease."""
+
+
+@contextmanager
+def _connect_database(database: Path) -> Iterator[sqlite3.Connection]:
+    connection = sqlite3.connect(database)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys=ON")
+    connection.execute("PRAGMA busy_timeout=5000")
+    try:
+        yield connection
+    except BaseException:
+        connection.rollback()
+        raise
+    else:
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _validate_governance_metrics(metrics: dict[str, float]) -> None:
+    if set(metrics) != REQUIRED_EVAL_METRICS:
+        raise StateConflict("evaluation metrics must exactly match the fixed allowlist")
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+        for value in metrics.values()
+    ):
+        raise StateConflict("evaluation metrics must be finite non-boolean numbers")
+
+
+def _validate_failure_categories(categories: tuple[str, ...]) -> None:
+    if len(categories) != len(set(categories)) or not set(categories).issubset(ALLOWED_FAILURE_CATEGORIES):
+        raise StateConflict("evaluation failure categories are invalid")
 
 
 def _add(left: BudgetUsage, right: BudgetUsage) -> BudgetUsage:
@@ -79,19 +139,8 @@ class StateStore:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.database)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout=5000")
-        try:
+        with _connect_database(self.database) as connection:
             yield connection
-        except BaseException:
-            connection.rollback()
-            raise
-        else:
-            connection.commit()
-        finally:
-            connection.close()
 
     def initialize(self) -> None:
         with self._connect() as connection:
@@ -314,91 +363,12 @@ class StateStore:
             ).fetchall()
         return [model.model_validate_json(row["body_json"]) for row in rows]
 
-    def persist_eval_request(self, request: EvalRequest) -> None:
-        self._persist_request(
-            "tw_eval_requests", request, request.protocol_id, request.champion_digest, request.challenger_digest
-        )
-
     def get_eval_request(self, request_id: str) -> tuple[EvalRequest, str | None]:
         return self._get_request("tw_eval_requests", request_id, EvalRequest)
-
-    def consume_eval_request(self, request: EvalRequest, run: EvalRun) -> None:
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                "SELECT consumed_receipt_id FROM tw_eval_requests WHERE request_id = ?", (request.request_id,)
-            ).fetchone()
-            if row is None or row["consumed_receipt_id"] is not None:
-                raise StateConflict("evaluation request is already consumed or missing")
-            self._insert_object(connection, "eval_run", run.eval_run_id, request.request_id, "recorded", run)
-            result = connection.execute(
-                "UPDATE tw_eval_requests SET consumed_receipt_id = ? "
-                "WHERE request_id = ? AND consumed_receipt_id IS NULL",
-                (run.eval_run_id, request.request_id),
-            )
-            if result.rowcount != 1:
-                raise StateConflict("evaluation request changed during receipt import")
-
-    def persist_promotion_request(self, request: PromotionRequest) -> None:
-        self._persist_request(
-            "tw_promotion_requests", request, request.artifact_id, request.subject_digest, request.eval_run_id
-        )
 
     def get_promotion_request(self, request_id: str) -> tuple[PromotionRequest, str | None]:
         return self._get_request("tw_promotion_requests", request_id, PromotionRequest)
 
-    def consume_promotion_request(self, request: PromotionRequest, receipt: ApprovalReceipt) -> None:
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                "SELECT body_json, consumed_receipt_id FROM tw_promotion_requests WHERE request_id = ?",
-                (request.request_id,),
-            ).fetchone()
-            if row is None or row["consumed_receipt_id"] is not None:
-                raise StateConflict("promotion request is already consumed or missing")
-            persisted = PromotionRequest.model_validate_json(row["body_json"])
-            if persisted != request or persisted.expires_at <= utc_now():
-                raise StateConflict("promotion request identity is stale or expired")
-            if (
-                receipt.action,
-                receipt.subject_digest,
-                receipt.eval_run_id,
-                receipt.challenge,
-                receipt.source,
-            ) != (
-                "promote",
-                persisted.subject_digest,
-                persisted.eval_run_id,
-                persisted.challenge,
-                "local_user_cli",
-            ):
-                raise StateConflict("approval receipt bindings do not match promotion request")
-            try:
-                connection.execute(
-                    "INSERT INTO tw_approval_receipts "
-                    "(receipt_id, action, subject_digest, eval_run_id, challenge, approved_by, "
-                    "source, body_json, consumed_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
-                    (
-                        receipt.receipt_id,
-                        receipt.action,
-                        receipt.subject_digest,
-                        receipt.eval_run_id,
-                        receipt.challenge,
-                        receipt.approved_by,
-                        receipt.source,
-                        receipt.model_dump_json(),
-                    ),
-                )
-            except sqlite3.IntegrityError as error:
-                raise StateConflict("approval receipt already exists") from error
-            result = connection.execute(
-                "UPDATE tw_promotion_requests SET consumed_receipt_id = ? "
-                "WHERE request_id = ? AND consumed_receipt_id IS NULL",
-                (receipt.receipt_id, request.request_id),
-            )
-            if result.rowcount != 1:
-                raise StateConflict("promotion request changed during approval")
 
     def get_approval_receipt(self, receipt_id: str) -> tuple[ApprovalReceipt, str | None]:
         with self._connect() as connection:
@@ -419,54 +389,6 @@ class StateStore:
             raise StateConflict("approval receipt is not bound to a promotion request")
         return PromotionRequest.model_validate_json(row["body_json"])
 
-    def promotion_cas(
-        self,
-        pointer_kind: str,
-        pointer_id: str,
-        expected_version_id: str,
-        pointer: BaseModel,
-        record: PromotionRecord,
-        approval_receipt_id: str | None,
-    ) -> None:
-        if pointer_kind != "active_pointer":
-            raise StateConflict("promotion CAS only updates active pointers")
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                "SELECT body_json FROM tw_objects WHERE kind = ? AND object_id = ?", (pointer_kind, pointer_id)
-            ).fetchone()
-            if row is None or json.loads(row["body_json"])["current_version_id"] != expected_version_id:
-                raise StateConflict("active pointer changed")
-            if approval_receipt_id is not None:
-                approval = connection.execute(
-                    "SELECT consumed_at FROM tw_approval_receipts WHERE receipt_id = ?", (approval_receipt_id,)
-                ).fetchone()
-                if approval is None or approval["consumed_at"] is not None:
-                    raise StateConflict("approval receipt is unavailable")
-                consumed = connection.execute(
-                    "UPDATE tw_approval_receipts SET consumed_at = ? WHERE receipt_id = ? AND consumed_at IS NULL",
-                    (utc_now().isoformat(), approval_receipt_id),
-                )
-                if consumed.rowcount != 1:
-                    raise StateConflict("approval receipt changed")
-            self._put_object(connection, pointer_kind, pointer_id, None, "active", pointer)
-            try:
-                connection.execute(
-                    "INSERT INTO tw_promotions "
-                    "(promotion_id, artifact_id, eval_run_id, approval_receipt_id, body_json, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        record.promotion_id,
-                        record.artifact_id,
-                        record.eval_run_id,
-                        approval_receipt_id,
-                        record.model_dump_json(),
-                        record.created_at.isoformat(),
-                    ),
-                )
-            except sqlite3.IntegrityError as error:
-                raise StateConflict("promotion already exists") from error
-
     def latest_promotion(self, artifact_id: str) -> PromotionRecord | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -475,24 +397,6 @@ class StateStore:
                 (artifact_id,),
             ).fetchone()
         return None if row is None else PromotionRecord.model_validate_json(row["body_json"])
-
-    def _persist_request(self, table: str, request: BaseModel, first: str, second: str, third: str) -> None:
-        with self._connect() as connection:
-            try:
-                connection.execute(
-                    f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
-                    (
-                        request.request_id,
-                        first,
-                        second,
-                        third,
-                        request.challenge,
-                        request.model_dump_json(),
-                        request.expires_at.isoformat(),
-                    ),
-                )
-            except sqlite3.IntegrityError as error:
-                raise StateConflict(f"conflicting {table} replay") from error
 
     def _get_request(self, table: str, request_id: str, model: type[T]) -> tuple[T, str | None]:
         with self._connect() as connection:
@@ -1047,3 +951,325 @@ class StateStore:
             (reserved.model_dump_json(), brief_id),
         )
         return reserved
+
+
+class GovernanceStore:
+    """Narrow object capability for evaluation and publication writes in this process."""
+
+    def __init__(self, database: Path) -> None:
+        self.database = database
+
+    def persist_eval_request(self, request: EvalRequest) -> None:
+        with _connect_database(self.database) as connection:
+            try:
+                connection.execute(
+                    "INSERT INTO tw_eval_requests VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
+                    (
+                        request.request_id,
+                        request.protocol_id,
+                        request.champion_digest,
+                        request.challenger_digest,
+                        request.challenge,
+                        request.model_dump_json(),
+                        request.expires_at.isoformat(),
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise StateConflict("conflicting evaluation request replay") from error
+
+    def consume_eval_request(self, request: EvalRequest, run: EvalRun) -> None:
+        _validate_governance_metrics(run.metrics)
+        _validate_failure_categories(run.failure_categories)
+        with _connect_database(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT body_json, consumed_receipt_id FROM tw_eval_requests WHERE request_id = ?",
+                (request.request_id,),
+            ).fetchone()
+            if row is None or row["consumed_receipt_id"] is not None:
+                raise StateConflict("evaluation request is already consumed or missing")
+            persisted = EvalRequest.model_validate_json(row["body_json"])
+            if persisted != request or persisted.expires_at <= utc_now():
+                raise StateConflict("evaluation request identity is stale or expired")
+            if (
+                run.protocol_id,
+                run.champion_version_id,
+                run.challenger_version_id,
+            ) != (request.protocol_id, request.champion_version_id, request.challenger_version_id):
+                raise StateConflict("evaluation run bindings do not match request")
+            self._insert_object(connection, "eval_run", run.eval_run_id, request.request_id, "recorded", run)
+            result = connection.execute(
+                "UPDATE tw_eval_requests SET consumed_receipt_id = ? "
+                "WHERE request_id = ? AND consumed_receipt_id IS NULL",
+                (run.eval_run_id, request.request_id),
+            )
+            if result.rowcount != 1:
+                raise StateConflict("evaluation request changed during receipt import")
+
+    def persist_promotion_request(self, request: PromotionRequest) -> None:
+        with _connect_database(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            run = self._object(connection, "eval_run", request.eval_run_id, EvalRun)
+            _validate_governance_metrics(run.metrics)
+            _validate_failure_categories(run.failure_categories)
+            candidate = self._object(connection, "artifact", run.challenger_version_id, ArtifactVersion)
+            pointer = self._object(connection, "active_pointer", request.artifact_id, BaseModel)
+            protocol_row = connection.execute(
+                "SELECT body_json, status FROM tw_objects WHERE kind = 'eval_protocol' AND object_id = ?",
+                (run.protocol_id,),
+            ).fetchone()
+            if protocol_row is None or protocol_row["status"] != "approved":
+                raise StateConflict("promotion request protocol is not approved")
+            if (
+                request.artifact_id,
+                request.subject_digest,
+                request.eval_run_id,
+                pointer["current_version_id"],
+            ) != (
+                candidate.artifact_id,
+                candidate.content_digest,
+                run.eval_run_id,
+                run.champion_version_id,
+            ):
+                raise StateConflict("promotion request bindings do not match governance state")
+            try:
+                connection.execute(
+                    "INSERT INTO tw_promotion_requests VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
+                    (
+                        request.request_id,
+                        request.artifact_id,
+                        request.subject_digest,
+                        request.eval_run_id,
+                        request.challenge,
+                        request.model_dump_json(),
+                        request.expires_at.isoformat(),
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise StateConflict("conflicting promotion request replay") from error
+
+    def consume_promotion_request(self, request: PromotionRequest, receipt: ApprovalReceipt) -> None:
+        with _connect_database(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT body_json, consumed_receipt_id FROM tw_promotion_requests WHERE request_id = ?",
+                (request.request_id,),
+            ).fetchone()
+            if row is None or row["consumed_receipt_id"] is not None:
+                raise StateConflict("promotion request is already consumed or missing")
+            persisted = PromotionRequest.model_validate_json(row["body_json"])
+            if persisted != request or persisted.expires_at <= utc_now():
+                raise StateConflict("promotion request identity is stale or expired")
+            if (
+                receipt.action,
+                receipt.subject_digest,
+                receipt.eval_run_id,
+                receipt.challenge,
+                receipt.source,
+            ) != ("promote", persisted.subject_digest, persisted.eval_run_id, persisted.challenge, "local_user_cli"):
+                raise StateConflict("approval receipt bindings do not match promotion request")
+            try:
+                connection.execute(
+                    "INSERT INTO tw_approval_receipts "
+                    "(receipt_id, action, subject_digest, eval_run_id, challenge, approved_by, "
+                    "source, body_json, consumed_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                    (
+                        receipt.receipt_id,
+                        receipt.action,
+                        receipt.subject_digest,
+                        receipt.eval_run_id,
+                        receipt.challenge,
+                        receipt.approved_by,
+                        receipt.source,
+                        receipt.model_dump_json(),
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise StateConflict("approval receipt already exists") from error
+            result = connection.execute(
+                "UPDATE tw_promotion_requests SET consumed_receipt_id = ? "
+                "WHERE request_id = ? AND consumed_receipt_id IS NULL",
+                (receipt.receipt_id, request.request_id),
+            )
+            if result.rowcount != 1:
+                raise StateConflict("promotion request changed during approval")
+
+    def promote(
+        self, eval_run: EvalRun, approval: ApprovalReceipt, record: PromotionRecord, next_pointer: BaseModel
+    ) -> None:
+        _validate_governance_metrics(eval_run.metrics)
+        _validate_failure_categories(eval_run.failure_categories)
+        with _connect_database(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            run = self._object(connection, "eval_run", eval_run.eval_run_id, EvalRun)
+            champion = self._object(connection, "artifact", run.champion_version_id, ArtifactVersion)
+            challenger = self._object(connection, "artifact", run.challenger_version_id, ArtifactVersion)
+            pointer = self._object(connection, "active_pointer", challenger.artifact_id, BaseModel)
+            protocol = connection.execute(
+                "SELECT status FROM tw_objects WHERE kind = 'eval_protocol' AND object_id = ?", (run.protocol_id,)
+            ).fetchone()
+            approval_row = connection.execute(
+                "SELECT body_json, consumed_at FROM tw_approval_receipts WHERE receipt_id = ?", (approval.receipt_id,)
+            ).fetchone()
+            request_row = connection.execute(
+                "SELECT body_json FROM tw_promotion_requests WHERE consumed_receipt_id = ?", (approval.receipt_id,)
+            ).fetchone()
+            if approval_row is None or request_row is None:
+                raise StateConflict("promotion requires persisted approval chain")
+            persisted_approval = ApprovalReceipt.model_validate_json(approval_row["body_json"])
+            request = PromotionRequest.model_validate_json(request_row["body_json"])
+            if (
+                run != eval_run
+                or persisted_approval != approval
+                or approval_row["consumed_at"] is not None
+                or protocol is None
+                or protocol["status"] != "approved"
+                or pointer["current_version_id"] != champion.version_id
+                or (approval.action, approval.source, approval.subject_digest, approval.eval_run_id, approval.challenge)
+                != ("promote", "local_user_cli", challenger.content_digest, run.eval_run_id, request.challenge)
+                or (request.artifact_id, request.subject_digest, request.eval_run_id)
+                != (challenger.artifact_id, challenger.content_digest, run.eval_run_id)
+                or (
+                    record.artifact_id,
+                    record.from_version_id,
+                    record.to_version_id,
+                    record.eval_run_id,
+                    record.approval_receipt_id,
+                    record.approved_by,
+                )
+                != (
+                    challenger.artifact_id,
+                    champion.version_id,
+                    challenger.version_id,
+                    run.eval_run_id,
+                    approval.receipt_id,
+                    approval.approved_by,
+                )
+                or (next_pointer.artifact_id, next_pointer.current_version_id, next_pointer.generation)
+                != (challenger.artifact_id, challenger.version_id, pointer["generation"] + 1)
+                or not run.hard_gate_passed
+                or run.metrics["quality_delta"] < 0
+                or run.metrics["safety_delta"] < 0
+                or run.metrics["over_refusal_delta"] > 0
+            ):
+                raise StateConflict("promotion bindings or policy do not match persisted governance state")
+            self._put_object(connection, "active_pointer", challenger.artifact_id, None, "active", next_pointer)
+            result = connection.execute(
+                "UPDATE tw_approval_receipts SET consumed_at = ? WHERE receipt_id = ? AND consumed_at IS NULL",
+                (utc_now().isoformat(), approval.receipt_id),
+            )
+            if result.rowcount != 1:
+                raise StateConflict("approval receipt changed")
+            self._insert_promotion(connection, record)
+
+    def rollback(
+        self,
+        artifact_id: str,
+        approved_by: str,
+        reason: str,
+        record: PromotionRecord,
+        next_pointer: BaseModel,
+    ) -> None:
+        with _connect_database(self.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            pointer = self._object(connection, "active_pointer", artifact_id, BaseModel)
+            row = connection.execute(
+                "SELECT body_json FROM tw_promotions WHERE artifact_id = ? AND eval_run_id IS NOT NULL "
+                "ORDER BY created_at DESC LIMIT 1",
+                (artifact_id,),
+            ).fetchone()
+            if row is None:
+                raise StateConflict("no rollback target for the current active version")
+            target = PromotionRecord.model_validate_json(row["body_json"])
+            self._object(connection, "artifact", target.from_version_id, ArtifactVersion)
+            if (
+                pointer["current_version_id"] != target.to_version_id
+                or (
+                    record.artifact_id,
+                    record.from_version_id,
+                    record.to_version_id,
+                    record.eval_run_id,
+                    record.approval_receipt_id,
+                    record.approved_by,
+                    record.reason,
+                )
+                != (artifact_id, pointer["current_version_id"], target.from_version_id, None, None, approved_by, reason)
+                or (next_pointer.artifact_id, next_pointer.current_version_id, next_pointer.generation)
+                != (artifact_id, target.from_version_id, pointer["generation"] + 1)
+            ):
+                raise StateConflict("rollback bindings do not match persisted governance state")
+            self._put_object(connection, "active_pointer", artifact_id, None, "active", next_pointer)
+            self._insert_promotion(connection, record)
+
+    @staticmethod
+    def _object(connection: sqlite3.Connection, kind: str, object_id: str, model: type[T]) -> T | dict[str, Any]:
+        row = connection.execute(
+            "SELECT body_json FROM tw_objects WHERE kind = ? AND object_id = ?", (kind, object_id)
+        ).fetchone()
+        if row is None:
+            raise StateConflict(f"missing {kind} {object_id}")
+        return json.loads(row["body_json"]) if model is BaseModel else model.model_validate_json(row["body_json"])
+
+    @staticmethod
+    def _put_object(
+        connection: sqlite3.Connection,
+        kind: str,
+        object_id: str,
+        parent_id: str | None,
+        status: str,
+        value: BaseModel,
+    ) -> None:
+        result = connection.execute(
+            "UPDATE tw_objects SET parent_id = ?, status = ?, body_json = ?, body_digest = ?, updated_at = ? "
+            "WHERE kind = ? AND object_id = ?",
+            (parent_id, status, value.model_dump_json(), content_digest(value), utc_now().isoformat(), kind, object_id),
+        )
+        if result.rowcount != 1:
+            raise StateConflict(f"missing {kind} {object_id}")
+
+    @staticmethod
+    def _insert_object(
+        connection: sqlite3.Connection,
+        kind: str,
+        object_id: str,
+        parent_id: str | None,
+        status: str,
+        value: BaseModel,
+    ) -> None:
+        try:
+            connection.execute(
+                "INSERT INTO tw_objects "
+                "(kind, object_id, parent_id, status, body_json, body_digest, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    kind,
+                    object_id,
+                    parent_id,
+                    status,
+                    value.model_dump_json(),
+                    content_digest(value),
+                    utc_now().isoformat(),
+                ),
+            )
+        except sqlite3.IntegrityError as error:
+            raise StateConflict(f"{kind} already exists for {object_id}") from error
+
+    @staticmethod
+    def _insert_promotion(connection: sqlite3.Connection, record: PromotionRecord) -> None:
+        try:
+            connection.execute(
+                "INSERT INTO tw_promotions "
+                "(promotion_id, artifact_id, eval_run_id, approval_receipt_id, body_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    record.promotion_id,
+                    record.artifact_id,
+                    record.eval_run_id,
+                    record.approval_receipt_id,
+                    record.model_dump_json(),
+                    record.created_at.isoformat(),
+                ),
+            )
+        except sqlite3.IntegrityError as error:
+            raise StateConflict("promotion already exists") from error

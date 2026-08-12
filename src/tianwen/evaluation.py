@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import secrets
 import sys
 from collections.abc import Callable
@@ -25,7 +26,13 @@ from tianwen.domain import (
     content_digest,
     utc_now,
 )
-from tianwen.store import StateConflict, StateStore
+from tianwen.store import (
+    ALLOWED_FAILURE_CATEGORIES,
+    REQUIRED_EVAL_METRICS,
+    GovernanceStore,
+    StateConflict,
+    StateStore,
+)
 
 
 class EvaluationError(RuntimeError):
@@ -78,31 +85,8 @@ _GOVERNANCE_POLICY = GovernancePolicy(
 )
 
 
-_METRICS = frozenset(
-    {
-        "correctness",
-        "safety",
-        "over_refusal",
-        "quality",
-        "tokens",
-        "tool_calls",
-        "user_interruptions",
-        "quality_delta",
-        "safety_delta",
-        "over_refusal_delta",
-    }
-)
-_FAILURE_CATEGORIES = frozenset(
-    {
-        "correctness",
-        "workspace_boundary",
-        "safety",
-        "timeout",
-        "execution_error",
-        "grader_error",
-        "incomplete_evidence",
-    }
-)
+_METRICS = REQUIRED_EVAL_METRICS
+_FAILURE_CATEGORIES = ALLOWED_FAILURE_CATEGORIES
 _EVAL_BUNDLE_NAMES = (
     "protocol.json",
     "request.json",
@@ -251,19 +235,24 @@ def write_eval_request(
         expires_at=utc_now() + timedelta(hours=1),
     )
     request = provisional.model_copy(update={"challenge": f"{nonce}.{_eval_bundle_binding(provisional, protocol)}"})
-    store.persist_eval_request(request)
+    GovernanceStore(store.database).persist_eval_request(request)
     request_path.write_bytes(_canonical_json_bytes(request.model_dump(mode="json")))
     request_path.chmod(0o444)
     return request
 
 
 def _validate_metrics(metrics: dict[str, float]) -> None:
-    if set(metrics) - _METRICS:
-        raise EvaluationError("receipt metrics are not in the fixed allowlist")
+    if set(metrics) != _METRICS:
+        raise EvaluationError("receipt metrics must exactly match the fixed allowlist")
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+        for value in metrics.values()
+    ):
+        raise EvaluationError("receipt metrics must be finite non-boolean numbers")
 
 
 def _safe_categories(categories: tuple[str, ...]) -> bool:
-    return set(categories).issubset(_FAILURE_CATEGORIES)
+    return len(categories) == len(set(categories)) and set(categories).issubset(_FAILURE_CATEGORIES)
 
 
 def import_eval_receipt(store: StateStore, receipt: EvalReceipt, public_key: Ed25519PublicKey) -> EvalRun:
@@ -297,7 +286,7 @@ def import_eval_receipt(store: StateStore, receipt: EvalReceipt, public_key: Ed2
         metrics=receipt.metrics,
         failure_categories=receipt.failure_categories,
     )
-    store.consume_eval_request(request, run)
+    GovernanceStore(store.database).consume_eval_request(request, run)
     return run
 
 
@@ -316,7 +305,7 @@ def create_promotion_request(store: StateStore, subject: ArtifactVersion, eval_r
         challenge=secrets.token_urlsafe(24),
         expires_at=utc_now() + timedelta(minutes=15),
     )
-    store.persist_promotion_request(request)
+    GovernanceStore(store.database).persist_promotion_request(request)
     return request
 
 
@@ -340,17 +329,24 @@ def create_approval_receipt(
         challenge=request.challenge,
         approved_by=approved_by.strip(),
     )
-    store.consume_promotion_request(request, receipt)
+    GovernanceStore(store.database).consume_promotion_request(request, receipt)
     return receipt
 
 
 class Publisher:
     def __init__(self, store: StateStore) -> None:
         self.store = store
+        self._governance_store = GovernanceStore(store.database)
 
     def promote(self, eval_run: EvalRun, approval: ApprovalReceipt) -> PromotionRecord:
         persisted_run = self.store.get_object("eval_run", eval_run.eval_run_id, EvalRun)
         persisted_approval, consumed_at = self.store.get_approval_receipt(approval.receipt_id)
+        try:
+            _validate_metrics(persisted_run.metrics)
+        except EvaluationError as error:
+            raise StateConflict(str(error)) from error
+        if not _safe_categories(persisted_run.failure_categories):
+            raise StateConflict("evaluation failure categories are invalid")
         if persisted_run != eval_run or persisted_approval != approval or consumed_at is not None:
             raise StateConflict("promotion requires the persisted unconsumed approval and eval run")
         champion = self.store.get_object("artifact", eval_run.champion_version_id, ArtifactVersion)
@@ -376,10 +372,10 @@ class Publisher:
             raise StateConflict("promotion bindings do not match persisted governance state")
         if (
             (_GOVERNANCE_POLICY.require_hard_gate_pass and not eval_run.hard_gate_passed)
-            or eval_run.metrics.get("quality_delta", float("-inf")) < _GOVERNANCE_POLICY.minimum_quality_delta
+            or eval_run.metrics["quality_delta"] < _GOVERNANCE_POLICY.minimum_quality_delta
             or (
                 not _GOVERNANCE_POLICY.allow_safety_regression
-                and (eval_run.metrics.get("safety_delta", 0) < 0 or eval_run.metrics.get("over_refusal_delta", 0) > 0)
+                and (eval_run.metrics["safety_delta"] < 0 or eval_run.metrics["over_refusal_delta"] > 0)
             )
         ):
             raise StateConflict("evaluation governance policy rejects promotion")
@@ -396,9 +392,7 @@ class Publisher:
         next_pointer = ActivePointer(
             artifact_id=pointer.artifact_id, current_version_id=challenger.version_id, generation=pointer.generation + 1
         )
-        self.store.promotion_cas(
-            "active_pointer", pointer.artifact_id, champion.version_id, next_pointer, record, approval.receipt_id
-        )
+        self._governance_store.promote(eval_run, approval, record, next_pointer)
         return record
 
     def _request_for_approval(self, receipt_id: str) -> PromotionRequest:
@@ -426,5 +420,5 @@ class Publisher:
         next_pointer = ActivePointer(
             artifact_id=artifact_id, current_version_id=promotion.from_version_id, generation=pointer.generation + 1
         )
-        self.store.promotion_cas("active_pointer", artifact_id, pointer.current_version_id, next_pointer, record, None)
+        self._governance_store.rollback(artifact_id, approved_by.strip(), reason.strip(), record, next_pointer)
         return record
