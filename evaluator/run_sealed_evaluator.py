@@ -381,19 +381,23 @@ def _aggregate(dataset: Path) -> tuple[bool, dict[str, float], tuple[str, ...]]:
 
 
 def main() -> int:
-    dataset_dir = os.environ.get("TIANWEN_SEALED_DATASET_DIR")
-    private_key_value = os.environ.get("TIANWEN_EVAL_PRIVATE_KEY")
-    runtime_account = os.environ.get("TIANWEN_RUNTIME_ACCOUNT")
-    if not dataset_dir or not private_key_value:
-        print("TIANWEN_SEALED_DATASET_DIR and TIANWEN_EVAL_PRIVATE_KEY are required", file=sys.stderr)
-        return 2
     parser = argparse.ArgumentParser()
     parser.add_argument("champion_snapshot")
     parser.add_argument("challenger_snapshot")
     parser.add_argument("protocol_manifest")
     parser.add_argument("challenge")
     parser.add_argument("output_receipt")
-    args = parser.parse_args()
+    arguments = sys.argv[1:]
+    if arguments == ["-h"] or arguments == ["--help"]:
+        parser.parse_args(arguments)
+    args = parser.parse_args(["--", *arguments])
+
+    dataset_dir = os.environ.get("TIANWEN_SEALED_DATASET_DIR")
+    private_key_value = os.environ.get("TIANWEN_EVAL_PRIVATE_KEY")
+    runtime_account = os.environ.get("TIANWEN_RUNTIME_ACCOUNT")
+    if not dataset_dir or not private_key_value:
+        print("TIANWEN_SEALED_DATASET_DIR and TIANWEN_EVAL_PRIVATE_KEY are required", file=sys.stderr)
+        return 2
     try:
         sealed_dataset_dir = _absolute_path(dataset_dir)
         private_key_path = _absolute_path(private_key_value)

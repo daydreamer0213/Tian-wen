@@ -470,7 +470,17 @@ def test_write_eval_request_creates_a_frozen_complete_bundle(tmp_path: Path) -> 
     assert Path(request.champion_snapshot).read_text() == champion.content
 
 
-def test_sealed_evaluator_accepts_only_the_frozen_production_bundle(tmp_path: Path) -> None:
+def test_sealed_evaluator_accepts_leading_hyphen_challenge_and_imports_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tianwen.evaluation as evaluation
+
+    original_token_urlsafe = evaluation.secrets.token_urlsafe
+    monkeypatch.setattr(
+        evaluation.secrets,
+        "token_urlsafe",
+        lambda size: "-nonce" if size == 24 else original_token_urlsafe(size),
+    )
     store = store_at(tmp_path / "state.db")
     request = write_eval_request(
         store,
@@ -1342,8 +1352,8 @@ def test_approval_expiry_reuse_and_evaluator_private_environment_fail_closed(
         text=True,
         check=False,
     )
-    assert completed.returncode != 0
-    assert "TIANWEN_SEALED_DATASET_DIR" in completed.stderr
+    assert completed.returncode == 0
+    assert "usage:" in completed.stdout
 
 
 @pytest.mark.parametrize(
