@@ -26,6 +26,7 @@ uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwe
 uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime explore --goal GOAL_ID --task root --question "当前支持哪个 parser API？"
 uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime run --goal GOAL_ID --request "修复 parser 测试"
 uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime status --goal GOAL_ID
+uv run python -m tianwen --workspace D:\work\sample --data-dir D:\DevData\tianwen-runtime learn --goal GOAL_ID
 ```
 
 `--data-dir` 和 `--workspace` 必须放在子命令前。每个实际 CLI 命令都必须设置 `TIANWEN_EVALUATOR_PUBLIC_KEY`，其值是 Ed25519 **公钥** PEM 文件；同一 `data-dir` 重启时必须使用同一把公钥。

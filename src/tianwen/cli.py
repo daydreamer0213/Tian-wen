@@ -74,7 +74,9 @@ def build_parser() -> argparse.ArgumentParser:
     approve.add_argument("--approve", action="append", default=[], metavar="ACTION_ID")
     approve.add_argument("--deny", action="append", default=[], metavar="ACTION_ID")
     learn = sub.add_parser("learn", help="process at most one queued learning signal")
-    learn.add_argument("--loop", required=True)
+    learn_target = learn.add_mutually_exclusive_group(required=True)
+    learn_target.add_argument("--goal")
+    learn_target.add_argument("--loop")
     request = sub.add_parser("eval-request", help="write an external evaluator request")
     request.add_argument("--candidate", required=True)
     imported = sub.add_parser("eval-import", help="verify and import an external evaluator receipt")
@@ -155,7 +157,8 @@ def main(argv: list[str] | None = None) -> int:
                     approvals[action_id] = answer in {"y", "yes"}
             print(app.resume_approval(args.checkpoint, approvals))
         elif args.command == "learn":
-            print(app.process_learning(args.loop) or "no queued high-value signal")
+            loop_id = app.meta_loop(args.goal).loop_id if args.goal else args.loop
+            print(app.process_learning(loop_id) or "no queued high-value signal")
         elif args.command == "eval-request":
             request = app.create_eval_request(args.candidate)
             print(

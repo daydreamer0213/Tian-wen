@@ -350,6 +350,26 @@ def test_live_script_stops_after_public_eval_gate_failure(
     assert "promotion_request" not in " ".join(app.calls)
 
 
+def test_cli_learn_accepts_goal_or_loop_and_resolves_goal_to_meta_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tianwen.cli import build_parser, main
+
+    app = _RecordingApp()
+    monkeypatch.setattr("tianwen.cli._app", lambda args: app)
+
+    parsed = build_parser().parse_args(["learn", "--goal", "goal-1"])
+    assert parsed.goal == "goal-1"
+    assert parsed.loop is None
+    assert main(["learn", "--goal", "goal-1"]) == 0
+    assert app.calls[-2:] == ["meta_loop:goal-1", "process_learning:meta-goal-1"]
+
+    app.calls.clear()
+    assert main(["learn", "--loop", "loop-1"]) == 0
+    assert app.calls == ["process_learning:loop-1"]
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["learn"])
+
+
 def test_live_script_parser_and_worktree_validation_are_real(tmp_path: Path) -> None:
     """Break caught: an ordinary checkout or dirty disposable worktree could be used for a live mutation."""
     script = _live_script()
