@@ -3,8 +3,10 @@ from __future__ import annotations
 # ruff: noqa: E501
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
+from pydantic_ai.tools import Tool
 
 from tianwen.domain import (
     BudgetLimit,
@@ -145,6 +147,39 @@ def test_search_snippet_cannot_become_evidence(tmp_path: Path) -> None:
     assert results[0].url == "https://example.org/parser"
     assert engine.store.list_objects("source", SourceRecord) == []
     assert engine.store.list_objects("evidence", EvidenceRecord) == []
+
+
+def test_empty_local_search_records_no_new_evidence_stop_cause(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+
+    assert engine.search_local("run-1", brief, "not-present") == ()
+
+    events = engine.store.list_events("run-1")
+    assert events[-1].kind == "exploration_stopped"
+    assert events[-1].payload == {"brief_id": brief.brief_id, "reason": "no_new_evidence"}
+
+
+def test_empty_web_search_records_no_new_evidence_stop_cause(tmp_path: Path) -> None:
+    async def empty_search(query: str) -> list[dict[str, Any]]:
+        del query
+        return []
+
+    engine, brief = make_engine_and_brief(tmp_path)
+    engine.search_tool = Tool(empty_search, name="empty_search")
+
+    assert engine.search_web("run-1", brief, "not-present") == ()
+
+    events = engine.store.list_events("run-1")
+    assert events[-1].kind == "exploration_stopped"
+    assert events[-1].payload == {"brief_id": brief.brief_id, "reason": "no_new_evidence"}
+
+
+def test_nonempty_search_does_not_record_no_new_evidence_stop_cause(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+
+    assert engine.search_local("run-1", brief, "parser_version")
+
+    assert not any(event.kind == "exploration_stopped" for event in engine.store.list_events("run-1"))
 
 
 def test_fetch_creates_source_and_evidence_without_obeying_page_text(tmp_path: Path) -> None:
@@ -630,7 +665,7 @@ def test_finish_requires_persisted_stop_cause_for_terminal_causes(
     assert report.stop_reason is stop_reason
 
 
-def test_finish_no_new_evidence_requires_empty_latest_operation(tmp_path: Path) -> None:
+def test_finish_no_new_evidence_requires_persisted_empty_operation_cause(tmp_path: Path) -> None:
     engine, brief = make_engine_and_brief(tmp_path)
     source, evidence = engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
 
@@ -638,7 +673,29 @@ def test_finish_no_new_evidence_requires_empty_latest_operation(tmp_path: Path) 
         engine.finish(
             "run-1", brief, (evidence,), (source,), (), (), "wait", ExplorationStopReason.NO_NEW_EVIDENCE
         )
+    assert not any(event.kind == "exploration_stopped" for event in engine.store.list_events("run-1"))
+
+    with pytest.raises(ExplorationScopeError, match="stop cause"):
+        engine.finish("run-1", brief, (), (), (), (), "wait", ExplorationStopReason.NO_NEW_EVIDENCE)
+
+    engine.search_local("run-1", brief, "not-present")
     report = engine.finish("run-1", brief, (), (), (), (), "wait", ExplorationStopReason.NO_NEW_EVIDENCE)
 
     assert report.stop_reason is ExplorationStopReason.NO_NEW_EVIDENCE
     assert engine.store.list_events("run-1")[-2].payload == {"brief_id": brief.brief_id, "reason": "no_new_evidence"}
+
+
+def test_finish_no_new_evidence_rejects_nonlatest_or_mismatched_cause(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    engine.store.append_event("run-1", "exploration_stopped", {"brief_id": "other", "reason": "no_new_evidence"})
+
+    with pytest.raises(ExplorationScopeError, match="stop cause"):
+        engine.finish("run-1", brief, (), (), (), (), "wait", ExplorationStopReason.NO_NEW_EVIDENCE)
+
+    engine.store.append_event(
+        "run-1", "exploration_stopped", {"brief_id": brief.brief_id, "reason": "no_new_evidence"}
+    )
+    engine.store.append_event("run-1", "exploration_stopped", {"brief_id": brief.brief_id, "reason": "budget_exhausted"})
+
+    with pytest.raises(ExplorationScopeError, match="stop cause"):
+        engine.finish("run-1", brief, (), (), (), (), "wait", ExplorationStopReason.NO_NEW_EVIDENCE)

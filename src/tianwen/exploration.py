@@ -176,6 +176,13 @@ class ExplorationEngine:
             {"brief_id": brief.brief_id, "reason": "budget_exhausted"},
         )
 
+    def _stop_for_no_new_evidence(self, run_id: str, brief: ExplorationBrief) -> None:
+        self.store.append_event(
+            run_id,
+            "exploration_stopped",
+            {"brief_id": brief.brief_id, "reason": ExplorationStopReason.NO_NEW_EVIDENCE.value},
+        )
+
     @staticmethod
     def _require_authorized(action: Any, capability: str) -> None:
         if action.status is ActionStatus.DENIED:
@@ -249,7 +256,10 @@ class ExplorationEngine:
         self._require_authorized(action, "workspace_read")
         for finding in findings or ():
             self._persist_local(run_id, action.action_id, finding, goal)
-        return findings or ()
+        result = findings or ()
+        if not result:
+            self._stop_for_no_new_evidence(run_id, brief)
+        return result
 
     def _eligible_local_file(self, path: Path, brief: ExplorationBrief) -> bool:
         relative = path.relative_to(self.workspace)
@@ -348,7 +358,10 @@ class ExplorationEngine:
             results.append(SearchResult(_field(item, "title"), url, _field(item, "body")))
             if len(results) == 8:
                 break
-        return tuple(results)
+        result = tuple(results)
+        if not result:
+            self._stop_for_no_new_evidence(run_id, brief)
+        return result
 
     def fetch_source(
         self, run_id: str, brief: ExplorationBrief, url: str, source_class: str
@@ -649,11 +662,7 @@ class ExplorationEngine:
             if sources or evidence:
                 raise ExplorationScopeError("no new evidence requires an empty latest operation")
             if not self._has_stop_cause(run_id, brief.brief_id, stop_reason):
-                self.store.append_event(
-                    run_id,
-                    "exploration_stopped",
-                    {"brief_id": brief.brief_id, "reason": stop_reason.value},
-                )
+                raise ExplorationScopeError("stop cause must be persisted for this run")
         elif stop_reason in {
             ExplorationStopReason.BUDGET_EXHAUSTED,
             ExplorationStopReason.SOURCE_UNAVAILABLE,
