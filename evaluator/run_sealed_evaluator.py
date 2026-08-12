@@ -109,7 +109,7 @@ def _parse_challenge(challenge: str) -> tuple[str, str]:
     return nonce, binding
 
 
-_ACL_INHERITANCE_FLAGS = frozenset({"CI", "IO", "NP", "OI"})
+_ACL_INHERITANCE_FLAGS = frozenset({"CI", "IO", "NP", "OA", "OI"})
 _ACL_ACCESS_RIGHTS = frozenset(
     {
         "AD",
@@ -187,8 +187,12 @@ def _windows_acl_entries(path: Path, output: str) -> tuple[tuple[str, frozenset[
     path_prefix = str(path).casefold()
     for line in output.splitlines():
         stripped = line.strip()
-        if not stripped or "(" not in stripped:
+        if not stripped:
             continue
+        if "(" not in stripped:
+            if re.fullmatch(r"Successfully processed \d+ files; Failed processing \d+ files", stripped):
+                continue
+            raise ValueError(f"could not safely parse ACL for {path.name}")
         prefix, separator, suffix = stripped.rpartition(":")
         if not separator or not prefix or not suffix:
             raise ValueError(f"could not safely parse ACL for {path.name}")

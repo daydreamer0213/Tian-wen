@@ -791,6 +791,22 @@ def test_windows_acl_validation_rejects_isolation_attacks_and_accepts_explicit_e
         validate("runtime", {cases: f"{cases} EVALUATOR\\agent:(I)(R)\n"})
     with pytest.raises(ValueError, match="DENY"):
         validate("runtime", {cases: f"{cases} EVALUATOR\\agent:(DENY)(R)\n"})
+    with pytest.raises(ValueError, match="could not safely parse"):
+        validate("runtime", {cases: f"{cases} EVALUATOR\\agent:(R)\nunexpected output\n"})
+    validate(
+        "runtime",
+        {
+            cases: (
+                f"{cases} EVALUATOR\\agent:(OA)(R)\n"
+                "NT AUTHORITY\\SYSTEM:(F)\n"
+                "Successfully processed 1 files; Failed processing 0 files\n"
+            )
+        },
+    )
+    with pytest.raises(ValueError, match="could not safely parse"):
+        validate("runtime", {cases: f"{cases} EVALUATOR\\agent:(ZZ)(R)\n"})
+    with pytest.raises(ValueError, match="could not safely parse"):
+        validate("runtime", {cases: f"{cases} EVALUATOR\\agent:(R)\nSuccessfully processed 1 files\n"})
     with pytest.raises(ValueError, match="unexpected principal"):
         validate("runtime", {cases: f"{cases} BUILTIN\\Administrators:(F)\n"})
     with pytest.raises(ValueError, match="current evaluator"):
