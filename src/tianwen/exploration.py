@@ -133,6 +133,16 @@ def _field(value: Any, name: str, default: str = "") -> str:
     return str(getattr(value, name, default))
 
 
+def _normalize_https_url(url: str) -> str:
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").casefold()
+    port = parsed.port
+    netloc = host if port in (None, 443) else f"{host}:{port}"
+    path = parsed.path or "/"
+    query = f"?{parsed.query}" if parsed.query else ""
+    return f"https://{netloc}{path}{query}"
+
+
 def format_untrusted_evidence(evidence: EvidenceRecord) -> str:
     """Return a data-only envelope suitable for a user/task evidence section."""
     validated = EvidenceRecord.model_validate(evidence.model_dump())
@@ -315,7 +325,9 @@ class ExplorationEngine:
         self, run_id: str, action_id: str, finding: LocalFinding, goal: GoalContract
     ) -> None:
         scope = self._goal_workspace_scope(goal, self.workspace)
-        source_id = content_digest({"locator": finding.locator, "content": finding.content_digest})
+        source_id = content_digest(
+            {"action": action_id, "locator": finding.locator, "content": finding.content_digest}
+        )
         source = SourceRecord(
             source_id=source_id,
             run_id=run_id,
@@ -409,9 +421,11 @@ class ExplorationEngine:
         parsed = urlsplit(url)
         if source_class not in brief.allowed_source_classes or not self._safe_url(parsed, brief):
             raise ExplorationScopeError("source URL is outside the frozen exploration boundary")
+        normalized_url = _normalize_https_url(url)
+        host = (parsed.hostname or "").casefold()
         if self.fetch_tool_factory is None:
             raise ExternalSearchUnavailable("external fetch is unavailable")
-        action_args = {"url": url}
+        action_args = {"url": normalized_url}
         tool_call_id = self._action_call_id("web_fetch", action_args)
         action_id = proposal_action_id(run_id, tool_call_id, "web_fetch", action_args)
         try:
@@ -448,15 +462,15 @@ class ExplorationEngine:
             except BudgetExceeded as error:
                 raise ExplorationBudgetExceeded("exploration context budget exhausted") from error
             digest = content_digest(content.encode("utf-8"))
-            source_id = content_digest({"url": url, "content": digest})
+            source_id = content_digest({"action": action_id, "locator": normalized_url, "content": digest})
             source = SourceRecord(
                 source_id=source_id,
                 run_id=run_id,
                 action_id=action_id,
                 source_class=source_class,
-                locator=url,
-                publisher_or_repository=parsed.hostname or "",
-                title=_field(raw, "title", url),
+                locator=normalized_url,
+                publisher_or_repository=host,
+                title=_field(raw, "title", normalized_url),
                 retrieved_at=utc_now(),
                 content_digest=digest,
                 scope=scope,
@@ -476,7 +490,7 @@ class ExplorationEngine:
                 cost_bucket="estimated",
                 needed_user=False,
                 safety_category="untrusted",
-                summary=f"Fetched {parsed.hostname} source for exploration.",
+                summary=f"Fetched {host} source for exploration.",
                 payload_digest=digest,
                 scope=scope,
                 purpose="goal_exploration",

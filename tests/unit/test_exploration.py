@@ -311,6 +311,44 @@ def test_local_pre_read_safety_skips_stat_and_read_errors(
     assert [finding.locator for finding in engine.search_local("run-1", brief, "parser_version")] == ["README.md"]
 
 
+def test_local_sources_are_not_overwritten_across_runs_and_prior_run_can_finish(
+    tmp_path: Path,
+) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    engine.search_local("run-1", brief, "parser_version")
+    source_one = engine.store.list_objects("source", SourceRecord)[0]
+    evidence_one = engine.store.list_objects("evidence", EvidenceRecord)[0]
+    first_run = engine.store.get_object("run", "run-1", RunRecord)
+    engine.store.put_object(
+        "run",
+        "run-2",
+        first_run.task_id,
+        first_run.status.value,
+        first_run.model_copy(update={"run_id": "run-2"}),
+    )
+
+    engine.search_local("run-2", brief, "parser_version")
+
+    sources = engine.store.list_objects("source", SourceRecord)
+    evidence = engine.store.list_objects("evidence", EvidenceRecord)
+    assert len(sources) == len(evidence) == 2
+    assert {record.run_id for record in sources} == {"run-1", "run-2"}
+    assert {record.run_id for record in evidence} == {"run-1", "run-2"}
+    assert engine.store.get_object("source", source_one.source_id, SourceRecord) == source_one
+    assert engine.store.get_object("evidence", evidence_one.evidence_id, EvidenceRecord) == evidence_one
+    report = engine.finish(
+        "run-1",
+        brief,
+        (evidence_one,),
+        (source_one,),
+        (),
+        ("supported version",),
+        "wait",
+        ExplorationStopReason.INSUFFICIENT_EVIDENCE,
+    )
+    assert report.source_ids == (source_one.source_id,)
+
+
 def test_domain_matching_normalizes_url_hostnames(tmp_path: Path) -> None:
     engine, brief = make_engine_and_brief(tmp_path)
     engine.search_tool = Tool(
@@ -320,7 +358,7 @@ def test_domain_matching_normalizes_url_hostnames(tmp_path: Path) -> None:
 
     assert engine.search_web("run-1", brief, "parser")[0].url == "https://EXAMPLE.ORG/parser"
     source, _ = engine.fetch_source("run-1", brief, "https://EXAMPLE.ORG/parser", "official_documentation")
-    assert source.locator == "https://EXAMPLE.ORG/parser"
+    assert source.locator == "https://example.org/parser"
 
 
 def test_public_web_fetch_rejects_redirect_before_outside_host_contact() -> None:
@@ -504,6 +542,76 @@ def test_second_identical_fetch_reuses_persisted_source(tmp_path: Path) -> None:
     assert engine.store.count_actions("run-1", "web_fetch") == 1
     assert calls == ["https://example.org/parser"]
     assert engine.store.get_exploration_usage("brief-1").fetches == 1
+
+
+def test_equivalent_url_spellings_fetch_once_and_replay_same_pair(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    calls: list[str] = []
+    original_factory = engine.fetch_tool_factory
+
+    def counted_factory(frozen_brief: ExplorationBrief):
+        tool = original_factory(frozen_brief)
+
+        async def counted_fetch(url: str) -> object:
+            calls.append(url)
+            return await tool.function(url=url)
+
+        return Tool(counted_fetch, name="counted_fetch")
+
+    engine.fetch_tool_factory = counted_factory
+    first_source, first_evidence = engine.fetch_source(
+        "run-1", brief, "https://example.org/parser", "official_documentation"
+    )
+    replayed_source, replayed_evidence = engine.fetch_source(
+        "run-1", brief, "https://EXAMPLE.ORG:443/parser", "official_documentation"
+    )
+
+    assert (replayed_source, replayed_evidence) == (first_source, first_evidence)
+    assert first_source.locator == "https://example.org/parser"
+    assert calls == ["https://example.org/parser"]
+    assert engine.store.count_actions("run-1", "web_fetch") == 1
+
+
+def test_external_sources_are_not_overwritten_across_runs_and_prior_run_can_finish(
+    tmp_path: Path,
+) -> None:
+    engine, brief = make_engine_and_brief(tmp_path)
+    source_one, evidence_one = engine.fetch_source(
+        "run-1", brief, "https://example.org/parser", "official_documentation"
+    )
+    first_run = engine.store.get_object("run", "run-1", RunRecord)
+    engine.store.put_object(
+        "run",
+        "run-2",
+        first_run.task_id,
+        first_run.status.value,
+        first_run.model_copy(update={"run_id": "run-2"}),
+    )
+    source_two, evidence_two = engine.fetch_source(
+        "run-2", brief, "https://example.org/parser", "official_documentation"
+    )
+
+    sources = engine.store.list_objects("source", SourceRecord)
+    evidence = engine.store.list_objects("evidence", EvidenceRecord)
+    assert len(sources) == len(evidence) == 2
+    assert {record.run_id for record in sources} == {"run-1", "run-2"}
+    assert {record.run_id for record in evidence} == {"run-1", "run-2"}
+    assert source_two.locator == source_one.locator == "https://example.org/parser"
+    assert source_two.source_id != source_one.source_id
+    assert evidence_two.evidence_id != evidence_one.evidence_id
+    assert engine.store.get_object("source", source_one.source_id, SourceRecord) == source_one
+    assert engine.store.get_object("evidence", evidence_one.evidence_id, EvidenceRecord) == evidence_one
+    report = engine.finish(
+        "run-1",
+        brief,
+        (evidence_one,),
+        (source_one,),
+        (),
+        ("supported version",),
+        "wait",
+        ExplorationStopReason.INSUFFICIENT_EVIDENCE,
+    )
+    assert report.source_ids == (source_one.source_id,)
 
 
 def test_fetch_replay_requires_exactly_one_persisted_source_and_evidence(tmp_path: Path) -> None:
