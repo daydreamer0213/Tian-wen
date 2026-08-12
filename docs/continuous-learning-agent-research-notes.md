@@ -4572,6 +4572,8 @@ Shell 返回非零退出码仍然是结果已知的动作，不属于 `unknown`�
 
 当前会话确认、待书面复审的设计依据是 [PydanticAI + Harness 集成规格](superpowers/specs/2026-08-11-pydanticai-harness-integration-design.md)。
 
+2026-08-12 对 lifelong-learning agents、self-evolving agents、持续学习 Harness、Skill 演化、评测和安全研究做了专项调研。结论是现有方向基本成立，但需要在下一份垂直切片计划中补充显式 Lesson、软遗忘、连续学习指标、隐藏保护集和在线因果验证。完整材料见 [持续学习 Agent 与 Harness 专项调研](research/2026-08-12-continuous-learning-agent-landscape.md)。
+
 ## 28. 官方参考
 
 - [OpenAI Docs：Follow a goal](https://learn.chatgpt.com/use-cases/follow-goals)
