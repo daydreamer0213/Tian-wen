@@ -11,6 +11,7 @@ from tianwen.domain import (
     EvidenceRecord,
     ExplorationBrief,
     ExplorationStopReason,
+    ExplorationUsage,
     GoalContract,
     LoopKind,
     LoopRecord,
@@ -374,6 +375,60 @@ def test_reopen_admitted_token_exhaustion_stops_before_network(tmp_path: Path) -
         reopened.fetch_source("run-1", brief, "https://example.org/another", "official_documentation")
     assert calls == ["https://example.org/parser"]
     assert reopened.store.get_exploration_usage("brief-1").admitted_tokens == 10
+
+
+def test_persisted_admitted_token_exhaustion_stops_before_action_and_fetch(
+    tmp_path: Path,
+) -> None:
+    engine, brief = make_engine_and_brief(tmp_path, max_tokens=10)
+    engine.store.reserve_exploration_usage(brief.brief_id, ExplorationUsage(admitted_tokens=10))
+    factory_calls: list[str] = []
+    tool_calls: list[str] = []
+    original_factory = engine.fetch_tool_factory
+
+    def counted_factory(frozen_brief: ExplorationBrief):
+        factory_calls.append(frozen_brief.brief_id)
+        tool = original_factory(frozen_brief)
+
+        async def counted_fetch(url: str) -> object:
+            tool_calls.append(url)
+            return await tool.function(url=url)
+
+        from pydantic_ai.tools import Tool
+
+        return Tool(counted_fetch, name="counted_fetch")
+
+    engine.fetch_tool_factory = counted_factory
+    with pytest.raises(ExplorationBudgetExceeded, match="context budget"):
+        engine.fetch_source("run-1", brief, "https://example.org/parser", "official_documentation")
+    assert factory_calls == []
+    assert tool_calls == []
+    assert engine.store.count_actions("run-1", "web_fetch") == 0
+    assert engine.store.list_events("run-1")[-1].payload == {
+        "brief_id": "brief-1",
+        "reason": "budget_exhausted",
+    }
+
+
+def test_exact_succeeded_fetch_replay_reads_records_when_tokens_are_full(tmp_path: Path) -> None:
+    engine, brief = make_engine_and_brief(tmp_path, max_tokens=10)
+    source, evidence = engine.fetch_source(
+        "run-1", brief, "https://example.org/parser", "official_documentation"
+    )
+    assert engine.store.get_exploration_usage(brief.brief_id).admitted_tokens == 10
+    factory_calls: list[str] = []
+    original_factory = engine.fetch_tool_factory
+
+    def counted_factory(frozen_brief: ExplorationBrief):
+        factory_calls.append(frozen_brief.brief_id)
+        return original_factory(frozen_brief)
+
+    engine.fetch_tool_factory = counted_factory
+    replayed_source, replayed_evidence = engine.fetch_source(
+        "run-1", brief, "https://example.org/parser", "official_documentation"
+    )
+    assert (replayed_source, replayed_evidence) == (source, evidence)
+    assert factory_calls == []
 
 
 def test_reopen_wall_expiry_stops_before_creating_an_action(tmp_path: Path) -> None:

@@ -354,6 +354,18 @@ class ExplorationEngine:
             raise ExternalSearchUnavailable("external fetch is unavailable")
         action_args = {"url": url}
         tool_call_id = self._action_call_id("web_fetch", action_args)
+        action_id = proposal_action_id(run_id, tool_call_id, "web_fetch", action_args)
+        try:
+            existing_action = self.store.get_action(action_id)
+        except StateConflict:
+            existing_action = None
+        if existing_action is None:
+            remaining_tokens = brief.max_tokens - self.store.get_exploration_usage(
+                brief.brief_id
+            ).admitted_tokens
+            if remaining_tokens <= 0:
+                self._stop_for_budget(run_id, brief)
+                raise ExplorationBudgetExceeded("exploration context budget exhausted")
 
         async def handler(args: dict[str, Any]) -> tuple[SourceRecord, EvidenceRecord]:
             remaining_tokens = brief.max_tokens - self.store.get_exploration_usage(
@@ -376,7 +388,6 @@ class ExplorationEngine:
                 )
             except BudgetExceeded as error:
                 raise ExplorationBudgetExceeded("exploration context budget exhausted") from error
-            action_id = proposal_action_id(run_id, tool_call_id, "web_fetch", args)
             digest = content_digest(content.encode("utf-8"))
             source_id = content_digest({"url": url, "content": digest})
             source = SourceRecord(
