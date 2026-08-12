@@ -848,6 +848,53 @@ def test_sealed_aggregate_changes_when_a_legally_rebound_challenger_snapshot_cha
     assert passed_receipt.metrics != failed_receipt.metrics
 
 
+def test_sealed_evaluator_rejects_quality_aggregate_overflow_without_receipt(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    proto = protocol()
+    champion = artifact("champion", ArtifactStatus.ACTIVE, "")
+    challenger = artifact("challenger", ArtifactStatus.CANDIDATE, compliant_snapshot())
+    request = write_eval_request(store, proto, champion, challenger, tmp_path / "inbox")
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    cases = [
+        sealed_case(f"overflow-{index}")
+        | {"quality_weights": {"required": 1.7e308, "forbidden": 1.0}}
+        for index in range(2)
+    ]
+    (dataset / "cases.json").write_bytes(canonical_json_bytes(cases))
+
+    completed = run_evaluator(request, evaluator_environment(dataset, Ed25519PrivateKey.generate()))
+
+    assert completed.returncode != 0
+    assert not Path(request.receipt_path).exists()
+
+
+def test_sealed_aggregate_rejects_integer_count_float_overflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _evaluator_module()
+    dataset = tmp_path / "sealed"
+    dataset.mkdir()
+    (dataset / "cases.json").write_bytes(canonical_json_bytes([sealed_case()]))
+    huge = 10**309
+
+    monkeypatch.setattr(
+        module,
+        "_evaluate_snapshot",
+        lambda case, snapshot: {
+            "case_id": case["case_id"],
+            "passed": True,
+            "hard_gate_failures": [],
+            "quality": 0.0,
+            "tokens": huge,
+            "tool_calls": huge,
+            "user_interruptions": 0,
+            "over_refused": False,
+        },
+    )
+
+    with pytest.raises((OverflowError, ValueError)):
+        module._aggregate(dataset, "champion", "challenger")
+
+
 @pytest.mark.parametrize(
     "case",
     (

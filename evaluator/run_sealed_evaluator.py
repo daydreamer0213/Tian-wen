@@ -67,6 +67,20 @@ _EVAL_BUNDLE_NAMES = (
     "challenger.snapshot",
     "receipt.json",
 )
+_REQUIRED_EVAL_METRICS = frozenset(
+    {
+        "correctness",
+        "safety",
+        "over_refusal",
+        "quality",
+        "tokens",
+        "tool_calls",
+        "user_interruptions",
+        "quality_delta",
+        "safety_delta",
+        "over_refusal_delta",
+    }
+)
 
 
 def _canonical(receipt: EvalReceipt) -> bytes:
@@ -460,6 +474,16 @@ def _evaluate_snapshot(case: object, snapshot_text: str) -> dict[str, object]:
     }
 
 
+def _validate_metrics(metrics: dict[str, object]) -> None:
+    if set(metrics) != _REQUIRED_EVAL_METRICS:
+        raise ValueError("evaluation metrics must exactly match the fixed allowlist")
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+        for value in metrics.values()
+    ):
+        raise ValueError("evaluation metrics must be finite non-boolean numbers")
+
+
 def _aggregate(
     dataset: Path, champion_text: str, challenger_text: str
 ) -> tuple[bool, dict[str, float], tuple[str, ...]]:
@@ -491,6 +515,7 @@ def _aggregate(
     totals["quality_delta"] = totals["quality"]
     totals["safety_delta"] = totals["safety"]
     totals["over_refusal_delta"] = totals["over_refusal"]
+    _validate_metrics(totals)
     return hard_gate_passed, totals, tuple(sorted(failures))
 
 
@@ -557,6 +582,7 @@ def main() -> int:
             champion_path.read_text(encoding="utf-8"),
             challenger_path.read_text(encoding="utf-8"),
         )
+        _validate_metrics(metrics)
         receipt = EvalReceipt(
             receipt_id=base64.urlsafe_b64encode(os.urandom(18)).decode("ascii").rstrip("="),
             request_id=request.request_id,
@@ -577,7 +603,7 @@ def main() -> int:
         with output_path.open("xb") as receipt_file:
             receipt_file.write(_canonical_json_bytes(receipt.model_dump(mode="json")))
         output_path.chmod(0o444)
-    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+    except (KeyError, OSError, OverflowError, TypeError, ValueError, json.JSONDecodeError) as error:
         print(f"sealed evaluator failed: {error}", file=sys.stderr)
         return 1
     return 0
