@@ -114,7 +114,7 @@ uv run pytest tests\live\test_deepseek_v4_pro.py -v
 Remove-Item Env:TIANWEN_RUN_LIVE_MODEL_TESTS
 ```
 
-该命令使用自动生成的临时仓库，会发起一次付费 API 调用，且不会发布候选版本。
+该命令使用自动生成的临时仓库，会发起多次计费的模型 API 请求；成功的工具调用往返通常至少 2 次，本探针最多允许 4 次模型请求；不会发布候选版本。
 
 ```powershell
 $env:TIANWEN_MODEL = 'openai:gpt-4.1-mini'
