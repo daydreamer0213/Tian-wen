@@ -174,6 +174,8 @@ def _bundle(tmp_path: Path) -> Any:
 
 
 def _write_trial_manifest(runtime: Any) -> None:
+    from tianwen.alpha_runtime import alpha_runtime_manifest_digests
+
     bundle = runtime.config.bundle
     named_checks = {check.check_id: check.model_dump(mode="json") for check in bundle.task.named_checks}
     verifier = bundle.task.final_verifier.model_dump(mode="json")
@@ -193,6 +195,31 @@ def _write_trial_manifest(runtime: Any) -> None:
         "verifier_snapshot": verifier,
         "verifier_digest": content_digest(verifier),
     }
+    digests = alpha_runtime_manifest_digests(runtime.config)
+    prompt_digest = content_digest("round prompt")
+    payload["runtime_policy_snapshot"] = {
+        "schema": "tianwen.alpha_trial_round_policy.v1",
+        "rounds": {
+            runtime.config.round_id: {
+                "prompt": {"round_id": runtime.config.round_id},
+                "prompt_digest": prompt_digest,
+                "policy": digests["policy_snapshot"],
+                "policy_digest": digests["policy_digest"],
+            }
+        },
+    }
+    payload["tool_contract_snapshot"] = {
+        "schema": "tianwen.alpha_trial_round_tools.v1",
+        "rounds": {
+            runtime.config.round_id: {
+                "prompt_digest": prompt_digest,
+                "tool_contract": digests["tool_contract_snapshot"],
+                "tool_contract_digest": digests["tool_contract_digest"],
+            }
+        },
+    }
+    payload["runtime_policy_digest"] = content_digest(payload["runtime_policy_snapshot"])
+    payload["tool_contract_digest"] = content_digest(payload["tool_contract_snapshot"])
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     runtime.config.paths.trial_manifest_json.write_bytes(raw)
     runtime.config = replace(runtime.config, trial_manifest_digest=content_digest(raw))
@@ -398,6 +425,38 @@ def test_trial_manifest_file_binds_task_and_container_authority(alpha_runtime: A
 
     with pytest.raises(Exception, match="trial manifest"):
         alpha_runtime._validate_manifest(alpha_run, _prompt(alpha_run))
+
+
+def test_trial_manifest_rejects_empty_round_authority_even_with_matching_digests(
+    alpha_runtime: Any, alpha_run: RunRecord
+) -> None:
+    """Break caught: empty policy/tool snapshots bypassed runtime authority validation."""
+    from tianwen.alpha_runtime import alpha_runtime_manifest_digests
+
+    payload = json.loads(alpha_runtime.config.paths.trial_manifest_json.read_text(encoding="utf-8"))
+    payload["runtime_policy_snapshot"] = {}
+    payload["tool_contract_snapshot"] = {}
+    payload["runtime_policy_digest"] = content_digest({})
+    payload["tool_contract_digest"] = content_digest({})
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    alpha_runtime.config.paths.trial_manifest_json.write_bytes(raw)
+    alpha_runtime.config = replace(alpha_runtime.config, trial_manifest_digest=content_digest(raw))
+    forged_run = alpha_run.model_copy(
+        update={
+            "manifest": alpha_run.manifest.model_copy(
+                update={
+                    "trial_manifest_digest": content_digest(raw),
+                    "policy_digest": alpha_runtime_manifest_digests(alpha_runtime.config)["policy_digest"],
+                    "tool_contract_digest": alpha_runtime_manifest_digests(alpha_runtime.config)[
+                        "tool_contract_digest"
+                    ],
+                }
+            )
+        }
+    )
+
+    with pytest.raises(Exception, match="round authority"):
+        alpha_runtime._validate_manifest(forged_run, _prompt(forged_run))
 
 
 @pytest.mark.anyio

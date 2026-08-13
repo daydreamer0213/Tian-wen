@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -293,6 +294,7 @@ def _persist_running_trial(runner: Any, prepared: Any, *, round_id: str = "round
         state.model_copy(
             update={
                 "stage": "running",
+                "trial_manifest_digest": content_digest(manifest),
                 "goal_id": goal.goal_id,
                 "run_ids": (run_id,),
                 "completed_round_ids": (round_id,),
@@ -395,6 +397,26 @@ async def test_a5_manifest_freezes_each_round_prompt_policy_and_tool_authority(t
     assert authorities["round-1"]["prompt_digest"] != authorities["round-2"]["prompt_digest"]
     assert manifest.runtime_policy_digest == content_digest(manifest.runtime_policy_snapshot)
     assert manifest.tool_contract_digest == content_digest(manifest.tool_contract_snapshot)
+    with pytest.raises(ValueError, match="task round set"):
+        TrialManifest.model_validate(
+            manifest.model_dump(mode="json")
+            | {
+                "runtime_policy_snapshot": {
+                    **manifest.runtime_policy_snapshot,
+                    "rounds": {"round-1": authorities["round-1"]},
+                },
+                "runtime_policy_digest": content_digest(
+                    {**manifest.runtime_policy_snapshot, "rounds": {"round-1": authorities["round-1"]}}
+                ),
+                "tool_contract_snapshot": {
+                    **manifest.tool_contract_snapshot,
+                    "rounds": {"round-1": tools["round-1"]},
+                },
+                "tool_contract_digest": content_digest(
+                    {**manifest.tool_contract_snapshot, "rounds": {"round-1": tools["round-1"]}}
+                ),
+            }
+        )
     runs = {
         run.manifest.round_id: run
         for run in (runner.store.get_object("run", run_id, RunRecord) for run_id in result.run_ids)
@@ -413,7 +435,6 @@ async def test_a5_manifest_freezes_each_round_prompt_policy_and_tool_authority(t
             }
         }
     )
-    runner.store.put_object("alpha_trial_manifest", result.trial_id, result.goal_id, "active", tampered)
     prepared.paths.trial_manifest_json.write_bytes(tampered.model_dump_json().encode("utf-8"))
     config = runner._runtime_config(prepared, tampered, "round-2", runs["round-2"].manifest.trial_manifest_digest)
     with pytest.raises(Exception, match="trial manifest"):
@@ -440,19 +461,24 @@ async def test_a5_recovery_revalidates_tampered_round_two_authority_before_model
             }
         }
     )
-    runner.store.put_object("alpha_trial_manifest", prepared.preview.trial_id, goal.goal_id, "active", tampered)
-    prepared.paths.trial_manifest_json.write_bytes(tampered.model_dump_json().encode("utf-8"))
+    forged_json = tampered.model_dump_json()
+    with sqlite3.connect(runner.store.database) as connection:
+        connection.execute(
+            "UPDATE tw_objects SET body_json = ? WHERE kind = ? AND object_id = ?",
+            (forged_json, "alpha_trial_manifest", prepared.preview.trial_id),
+        )
+    prepared.paths.trial_manifest_json.write_text(forged_json, encoding="utf-8")
     recovered_model = _Model()
     recovered = _runner(root, recovered_model, docker, prepared.paths.data_root)
 
-    result = await recovered.resume(prepared.preview.trial_id)
+    from tianwen.alpha import AlphaTrialError
 
-    round_two = recovered.store.get_object(
-        "run", f"alpha:{prepared.preview.trial_id}:round-2", RunRecord
-    )
+    with pytest.raises(AlphaTrialError, match="trial manifest"):
+        await recovered.resume(prepared.preview.trial_id)
+
     assert recovered_model.request_count == 0
-    assert round_two.status is RunStatus.QUEUED
-    assert result.execution_status == "stopped"
+    assert docker.check_calls == []
+    assert docker.final_calls == []
 
 
 @pytest.mark.anyio
@@ -936,7 +962,9 @@ async def test_resume_settling_with_unreconciled_final_action_is_boundary_unknow
         state.trial_id,
         None,
         "settling",
-        state.model_copy(update={"stage": "settling", "goal_id": goal.goal_id}),
+        state.model_copy(
+            update={"stage": "settling", "trial_manifest_digest": content_digest(manifest), "goal_id": goal.goal_id}
+        ),
     )
     recovered = AlphaTrialRunner(
         task_root=root,
@@ -1005,6 +1033,49 @@ async def test_manifest_mirror_tamper_prevents_first_model_request(tmp_path: Pat
         await runner.execute(prepared, _confirmation(prepared))
 
     assert runner.model.request_count == 0
+
+
+@pytest.mark.anyio
+async def test_resume_rejects_self_consistent_empty_manifest_authorities_before_effects(tmp_path: Path) -> None:
+    """Break caught: matching forged SQLite and JSON manifests could start a replacement Alpha Run."""
+    from tianwen.alpha import AlphaTrialError, AlphaTrialState
+
+    root, docker = _bundle(tmp_path / "tasks", "A1"), _Docker()
+    runner = _runner(root, _Model(), docker)
+    prepared = runner.prepare("A1", budget=_budget())
+    goal, manifest, _first = _persist_running_trial(runner, prepared)
+    forged = manifest.model_dump(mode="json")
+    forged.update(
+        {
+            "runtime_policy_snapshot": {},
+            "runtime_policy_digest": content_digest({}),
+            "tool_contract_snapshot": {},
+            "tool_contract_digest": content_digest({}),
+        }
+    )
+    forged_json = json.dumps(forged, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    with sqlite3.connect(runner.store.database) as connection:
+        connection.execute(
+            "UPDATE tw_objects SET body_json = ? WHERE kind = ? AND object_id = ?",
+            (forged_json, "alpha_trial_manifest", prepared.preview.trial_id),
+        )
+    prepared.paths.trial_manifest_json.write_text(forged_json, encoding="utf-8")
+    state = runner.store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
+    runner.store.put_object(
+        "alpha_trial_state", state.trial_id, None, "running", state.model_copy(update={"stage": "running"})
+    )
+    recovered_model = _Model()
+    recovered = _runner(root, recovered_model, docker, prepared.paths.data_root)
+    before_actions = len(runner.store.list_actions(_first.run_id))
+    before_checks = len(docker.check_calls)
+
+    with pytest.raises(AlphaTrialError, match="trial manifest"):
+        await recovered.resume(prepared.preview.trial_id)
+
+    assert recovered_model.request_count == 0
+    assert len(recovered.store.list_actions(_first.run_id)) == before_actions
+    assert len(docker.check_calls) == before_checks
+    assert docker.final_calls == []
 
 
 @pytest.mark.anyio
@@ -1089,7 +1160,14 @@ async def test_resume_running_recovers_the_persisted_incomplete_run(
         state.trial_id,
         None,
         "running",
-        state.model_copy(update={"stage": "running", "goal_id": goal.goal_id, "run_ids": (run_id,)}),
+        state.model_copy(
+            update={
+                "stage": "running",
+                "trial_manifest_digest": content_digest(manifest),
+                "goal_id": goal.goal_id,
+                "run_ids": (run_id,),
+            }
+        ),
     )
     recovered_runs: list[str] = []
 

@@ -48,6 +48,7 @@ _IMMUTABLE_GOVERNANCE_KINDS = frozenset(
         "learning_ticket",
         "lesson",
         "promotion",
+        "alpha_trial_manifest",
     }
 )
 

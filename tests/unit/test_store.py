@@ -196,6 +196,18 @@ def test_existing_run_cannot_replace_its_frozen_manifest(tmp_path: Path) -> None
     assert store.get_object("run", run.run_id, RunRecord).manifest.model_id == "model-a"
 
 
+def test_trial_manifest_requires_immutable_write_api(tmp_path: Path) -> None:
+    """Break caught: mutable writes could replace the recovered trial authority."""
+    store = store_at(tmp_path / "state.db")
+    manifest = make_run()
+
+    with pytest.raises(StateConflict, match="immutable governance alpha_trial_manifest"):
+        store.put_object("alpha_trial_manifest", "trial", None, "active", manifest)
+
+    store.put_immutable_object("alpha_trial_manifest", "trial", None, "active", manifest)
+    store.put_immutable_object("alpha_trial_manifest", "trial", None, "active", manifest)
+
+
 def test_existing_run_cannot_replace_its_persisted_parent_id(tmp_path: Path) -> None:
     store = store_at(tmp_path / "state.db")
     run = make_run()

@@ -141,6 +141,52 @@ class TrialManifest(FrozenModel):
     workspace_identity: str
     created_at: datetime = Field(default_factory=utc_now)
 
+    @model_validator(mode="after")
+    def validate_round_authority(self) -> TrialManifest:
+        policy_rounds = self.runtime_policy_snapshot.get("rounds")
+        tool_rounds = self.tool_contract_snapshot.get("rounds")
+        if (
+            not isinstance(policy_rounds, dict)
+            or not policy_rounds
+            or not isinstance(tool_rounds, dict)
+            or not tool_rounds
+        ):
+            raise ValueError("trial manifest round authority must be non-empty")
+        if set(policy_rounds) != set(tool_rounds):
+            raise ValueError("trial manifest policy and tool round authority must match")
+        if self.round_order_digest != content_digest(json.dumps(list(policy_rounds))):
+            raise ValueError("trial manifest round authority does not match task round set")
+        if self.runtime_policy_digest != content_digest(self.runtime_policy_snapshot):
+            raise ValueError("trial manifest runtime policy digest does not match snapshot")
+        if self.tool_contract_digest != content_digest(self.tool_contract_snapshot):
+            raise ValueError("trial manifest tool contract digest does not match snapshot")
+        for round_id in policy_rounds:
+            policy = policy_rounds[round_id]
+            tools = tool_rounds[round_id]
+            if not isinstance(policy, dict) or not isinstance(tools, dict):
+                raise ValueError("trial manifest round authority is invalid")
+            prompt = policy.get("prompt")
+            if not isinstance(prompt, dict) or prompt.get("round_id") != round_id:
+                raise ValueError("trial manifest round prompt authority is invalid")
+            policy_snapshot = policy.get("policy")
+            if (
+                not isinstance(policy_snapshot, dict)
+                or policy_snapshot.get("round_id") != round_id
+                or prompt.get("public_check_ids") != policy_snapshot.get("public_check_ids")
+            ):
+                raise ValueError("trial manifest round check authority is invalid")
+            if policy.get("prompt_digest") != content_digest(
+                json.dumps(prompt, ensure_ascii=False, sort_keys=True)
+            ):
+                raise ValueError("trial manifest round prompt digest does not match snapshot")
+            if policy.get("prompt_digest") != tools.get("prompt_digest"):
+                raise ValueError("trial manifest round prompt authority does not match")
+            if policy.get("policy_digest") != content_digest(policy.get("policy")):
+                raise ValueError("trial manifest round policy digest does not match snapshot")
+            if tools.get("tool_contract_digest") != content_digest(tools.get("tool_contract")):
+                raise ValueError("trial manifest round tool digest does not match snapshot")
+        return self
+
 
 class AlphaTrialState(FrozenModel):
     schema_version: Literal["tianwen.alpha_trial_state.v1"] = "tianwen.alpha_trial_state.v1"
@@ -543,8 +589,18 @@ class AlphaTrialRunner:
                 app,
             )
             return await self.execute(prepared, confirmation)
-        manifest = app.store.get_object("alpha_trial_manifest", trial_id, TrialManifest)
-        if TrialManifest.model_validate_json(paths.trial_manifest_json.read_bytes()) != manifest:
+        try:
+            manifest = app.store.get_object("alpha_trial_manifest", trial_id, TrialManifest)
+            mirrored_manifest = TrialManifest.model_validate_json(paths.trial_manifest_json.read_bytes())
+        except (OSError, ValueError, StateConflict) as error:
+            raise AlphaTrialError("trial manifest authority is invalid") from error
+        manifest_digest = content_digest(manifest)
+        mirrored_manifest_digest = content_digest(mirrored_manifest)
+        if (
+            not state.trial_manifest_digest
+            or state.trial_manifest_digest != manifest_digest
+            or state.trial_manifest_digest != mirrored_manifest_digest
+        ):
             raise AlphaTrialError("trial manifest authority does not match canonical mirror")
         goal = app.store.get_object("goal", state.goal_id or "", GoalContract)
         baseline = snapshot_tree(bundle.root / "seed")

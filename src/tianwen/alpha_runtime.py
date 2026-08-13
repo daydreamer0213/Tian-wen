@@ -380,25 +380,37 @@ class AlphaRuntime(RepoTaskRuntime):
             raise StateConflict("trial manifest does not bind current alpha authority")
         policy_snapshot = trial_manifest.get("runtime_policy_snapshot")
         tool_snapshot = trial_manifest.get("tool_contract_snapshot")
-        if policy_snapshot or tool_snapshot:
-            if not isinstance(policy_snapshot, dict) or not isinstance(tool_snapshot, dict):
-                raise StateConflict("trial manifest round authority is invalid")
-            rounds = policy_snapshot.get("rounds")
-            tools = tool_snapshot.get("rounds")
-            current = rounds.get(self.config.round_id) if isinstance(rounds, dict) else None
-            current_tools = tools.get(self.config.round_id) if isinstance(tools, dict) else None
-            digests = alpha_runtime_manifest_digests(self.config)
-            if not isinstance(current, dict) or not isinstance(current_tools, dict):
-                raise StateConflict("trial manifest does not bind current round authority")
-            if (
-                current.get("policy") != digests["policy_snapshot"]
-                or current.get("policy_digest") != digests["policy_digest"]
-                or current_tools.get("tool_contract") != digests["tool_contract_snapshot"]
-                or current_tools.get("tool_contract_digest") != digests["tool_contract_digest"]
-                or current.get("prompt_digest") != manifest.prompt_digest
-                or current_tools.get("prompt_digest") != manifest.prompt_digest
-            ):
-                raise StateConflict("trial manifest does not bind current round authority")
+        if not isinstance(policy_snapshot, dict) or not isinstance(tool_snapshot, dict):
+            raise StateConflict("trial manifest round authority is invalid")
+        if (
+            trial_manifest.get("runtime_policy_digest") != content_digest(policy_snapshot)
+            or trial_manifest.get("tool_contract_digest") != content_digest(tool_snapshot)
+        ):
+            raise StateConflict("trial manifest round authority digest is invalid")
+        rounds = policy_snapshot.get("rounds")
+        tools = tool_snapshot.get("rounds")
+        expected_round_ids = {item.round_id for item in self.config.bundle.task.rounds}
+        if (
+            not isinstance(rounds, dict)
+            or not isinstance(tools, dict)
+            or set(rounds) != expected_round_ids
+            or set(tools) != expected_round_ids
+        ):
+            raise StateConflict("trial manifest round authority does not match task rounds")
+        current = rounds.get(self.config.round_id)
+        current_tools = tools.get(self.config.round_id)
+        digests = alpha_runtime_manifest_digests(self.config)
+        if not isinstance(current, dict) or not isinstance(current_tools, dict):
+            raise StateConflict("trial manifest does not bind current round authority")
+        if (
+            current.get("policy") != digests["policy_snapshot"]
+            or current.get("policy_digest") != digests["policy_digest"]
+            or current_tools.get("tool_contract") != digests["tool_contract_snapshot"]
+            or current_tools.get("tool_contract_digest") != digests["tool_contract_digest"]
+            or current.get("prompt_digest") != manifest.prompt_digest
+            or current_tools.get("prompt_digest") != manifest.prompt_digest
+        ):
+            raise StateConflict("trial manifest does not bind current round authority")
         skill = self.config.skill_dir / "repo-task" / "SKILL.md"
         if manifest.skill_digests.get("repo_task") != content_digest(skill.read_text(encoding="utf-8")):
             raise StateConflict("repo_task skill does not match run manifest")
