@@ -1,0 +1,22 @@
+diff --git a/statuses.py b/statuses.py
+--- a/statuses.py
++++ b/statuses.py
+@@ -1,6 +1,4 @@
+ from __future__ import annotations
+-
++from collections.abc import Iterable
+ KNOWN_STATUSES = ("queued", "running", "done")
+-
+-
+ def normalize_status(value: str) -> str:
+@@ -8,5 +7,8 @@
+     return normalized if normalized in KNOWN_STATUSES else "unknown"
+-
+-
+ def status_label(value: str) -> str:
+     return normalize_status(value).title()
++def summarize_statuses(values: Iterable[str]) -> dict[str, int]:
++    counts = {status: 0 for status in (*KNOWN_STATUSES, "unknown")}
++    for value in values:
++        counts[normalize_status(value)] += 1
++    return counts
