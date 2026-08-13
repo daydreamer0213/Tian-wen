@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,7 @@ class _CheckExecutor:
         self.calls: list[tuple[str, str]] = []
         self.preflight_calls = 0
         self.reconciled: dict[str, dict[str, str]] = {}
+        self.reconcile_calls: list[str] = []
 
     def preflight(self) -> None:
         self.preflight_calls += 1
@@ -57,7 +59,13 @@ class _CheckExecutor:
         return {"check_id": check_id, "summary": "ok"}
 
     async def reconcile(self, action_id: str) -> dict[str, str] | None:
+        self.reconcile_calls.append(action_id)
         return self.reconciled.get(action_id)
+
+
+class _TimeoutModel(TestModel):
+    async def request(self, *args: Any, **kwargs: Any) -> Any:
+        raise TimeoutError("provider timeout")
 
 
 class _LoadSkillModel(TestModel):
@@ -165,6 +173,31 @@ def _bundle(tmp_path: Path) -> Any:
     return freeze_task_bundle(task_dir, lock)
 
 
+def _write_trial_manifest(runtime: Any) -> None:
+    bundle = runtime.config.bundle
+    named_checks = {check.check_id: check.model_dump(mode="json") for check in bundle.task.named_checks}
+    verifier = bundle.task.final_verifier.model_dump(mode="json")
+    container = {
+        "image_manifest_digest": bundle.image_lock.manifest_digest,
+        "image_platform_digest": bundle.image_lock.platform_digest,
+    }
+    payload = {
+        "task_bundle_digest": bundle.task_bundle_digest,
+        "model_input_digest": bundle.model_input_digest,
+        "image_manifest_digest": bundle.image_lock.manifest_digest,
+        "image_platform_digest": bundle.image_lock.platform_digest,
+        "container_config_snapshot": container,
+        "container_config_digest": content_digest(container),
+        "named_checks_snapshot": named_checks,
+        "named_checks_digest": content_digest(named_checks),
+        "verifier_snapshot": verifier,
+        "verifier_digest": content_digest(verifier),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    runtime.config.paths.trial_manifest_json.write_bytes(raw)
+    runtime.config = replace(runtime.config, trial_manifest_digest=content_digest(raw))
+
+
 @pytest.fixture
 def alpha_runtime(tmp_path: Path) -> Any:
     from tianwen.alpha_runtime import AlphaRuntime, AlphaRuntimeConfig
@@ -201,6 +234,7 @@ def alpha_runtime(tmp_path: Path) -> Any:
         ),
     )
     runtime.check_executor = _CheckExecutor()
+    _write_trial_manifest(runtime)
     return runtime
 
 
@@ -223,7 +257,7 @@ def alpha_run(alpha_runtime: Any) -> RunRecord:
         workspace_digest=digests["workspace_digest"],
         trial_id="trial-1",
         round_id="round-1",
-        trial_manifest_digest="sha256:manifest",
+        trial_manifest_digest=alpha_runtime.config.trial_manifest_digest,
     )
     run = RunRecord(run_id="run-alpha", task_id="task-alpha", status=RunStatus.QUEUED, manifest=manifest)
     goal = GoalContract(
@@ -333,6 +367,48 @@ async def test_recover_reconciles_unknown_named_check_without_rerunning(
     assert recovered.output == "done"
     assert alpha_runtime.check_executor.calls == []
     assert alpha_runtime.store.get_action(action.action_id).status is ActionStatus.SUCCEEDED
+
+
+@pytest.mark.anyio
+async def test_recover_reconciles_a_preexisting_unknown_check_before_resuming(
+    alpha_runtime: Any, alpha_run: RunRecord
+) -> None:
+    action = freeze_action(
+        alpha_runtime.store,
+        alpha_run.run_id,
+        "call-unknown",
+        "run_check",
+        {"check_id": "public"},
+        EffectClass.EXTERNAL_READ_ONLY,
+    )
+    alpha_runtime.store.transition_action(action.action_id, {ActionStatus.PROPOSED}, ActionStatus.RUNNING)
+    alpha_runtime.store.mark_inflight_actions_unknown(alpha_run.run_id)
+    alpha_runtime._save_initial_checkpoint(alpha_run, _prompt(alpha_run))
+
+    outcome = await alpha_runtime.recover(alpha_run)
+
+    assert outcome.waiting_action_ids == (action.action_id,)
+    assert alpha_runtime.check_executor.reconcile_calls == [action.action_id]
+    assert alpha_runtime.store.get_object("run", alpha_run.run_id, RunRecord).status is RunStatus.WAITING
+
+
+def test_trial_manifest_file_binds_task_and_container_authority(alpha_runtime: Any, alpha_run: RunRecord) -> None:
+    changed_bundle = replace(alpha_runtime.config.bundle, task_bundle_digest="sha256:changed-bundle")
+    alpha_runtime.config = replace(alpha_runtime.config, bundle=changed_bundle)
+
+    with pytest.raises(Exception, match="trial manifest"):
+        alpha_runtime._validate_manifest(alpha_run, _prompt(alpha_run))
+
+
+@pytest.mark.anyio
+async def test_non_check_timeout_fails_run_truthfully(alpha_runtime: Any, alpha_run: RunRecord) -> None:
+    alpha_runtime.model = _TimeoutModel(call_tools=[])
+
+    with pytest.raises(TimeoutError, match="provider timeout"):
+        await alpha_runtime.run(alpha_run, _prompt(alpha_run))
+
+    persisted = alpha_runtime.store.get_object("run", alpha_run.run_id, RunRecord)
+    assert (persisted.status, persisted.status_reason) == (RunStatus.FAILED, "TimeoutError")
 
 
 @pytest.mark.anyio

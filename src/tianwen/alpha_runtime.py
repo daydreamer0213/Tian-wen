@@ -133,14 +133,14 @@ class AlphaRuntime(RepoTaskRuntime):
                 self._set_run_status(run, RunStatus.WAITING, "model_budget_exhausted")
                 raise
             except TimeoutError:
-                action_ids = tuple(
-                    action.action_id
-                    for action in self.store.list_actions(run.run_id)
-                    if action.status is ActionStatus.UNKNOWN
-                )
-                self._set_run_status(run, RunStatus.WAITING, "unknown_action")
-                self.store.append_event(run.run_id, "run_check_timeout", {"action_ids": action_ids})
-                return RuntimeOutcome(None, action_ids)
+                action_ids = self._unknown_check_actions(run.run_id)
+                if len(action_ids) == 1:
+                    self._set_run_status(run, RunStatus.WAITING, "unknown_action")
+                    self.store.append_event(run.run_id, "run_check_timeout", {"action_id": action_ids[0]})
+                    return RuntimeOutcome(None, action_ids)
+                self._set_run_status(run, RunStatus.FAILED, "TimeoutError")
+                self.store.append_event(run.run_id, "run_failed", {"error_class": "TimeoutError"})
+                raise
             except Exception as error:
                 self._set_run_status(run, RunStatus.FAILED, type(error).__name__)
                 self.store.append_event(run.run_id, "run_failed", {"error_class": type(error).__name__})
@@ -155,15 +155,18 @@ class AlphaRuntime(RepoTaskRuntime):
         try:
             self._validate_manifest(run)
             self.check_executor.preflight()
-            affected = self.store.mark_inflight_actions_unknown(run.run_id)
+            self.store.mark_inflight_actions_unknown(run.run_id)
             reconciled: list[str] = []
-            for action in affected:
+            unknown = [
+                action for action in self.store.unresolved_actions(run.run_id) if action.status is ActionStatus.UNKNOWN
+            ]
+            for action in unknown:
                 result = (
                     await self.check_executor.reconcile(action.action_id) if action.tool_name == "run_check" else None
                 )
                 if result is None:
                     self._set_run_status(run, RunStatus.WAITING, "unknown_action")
-                    return RuntimeOutcome(None, tuple(item.action_id for item in affected))
+                    return RuntimeOutcome(None, tuple(item.action_id for item in unknown))
                 result_json = json.dumps(result, sort_keys=True)
                 self.store.transition_action(
                     action.action_id,
@@ -323,6 +326,13 @@ class AlphaRuntime(RepoTaskRuntime):
             args,
         )
 
+    def _unknown_check_actions(self, run_id: str) -> tuple[str, ...]:
+        return tuple(
+            action.action_id
+            for action in self.store.list_actions(run_id)
+            if action.tool_name == "run_check" and action.status is ActionStatus.UNKNOWN
+        )
+
     def _validate_manifest(self, run: RunRecord, prompt: str | None = None) -> None:
         manifest = run.manifest
         if manifest.schema_version != "2":
@@ -341,12 +351,48 @@ class AlphaRuntime(RepoTaskRuntime):
             self.config.trial_manifest_digest,
         ):
             raise StateConflict("alpha trial binding does not match run manifest")
+        trial_manifest = self._trial_manifest()
+        if content_digest(trial_manifest) != manifest.trial_manifest_digest:
+            raise StateConflict("trial manifest digest does not match run manifest")
+        expected_trial_bindings = {
+            "task_bundle_digest": self.config.bundle.task_bundle_digest,
+            "model_input_digest": self.config.bundle.model_input_digest,
+            "image_manifest_digest": self.config.bundle.image_lock.manifest_digest,
+            "image_platform_digest": self.config.bundle.image_lock.platform_digest,
+            "named_checks_snapshot": {
+                check.check_id: check.model_dump(mode="json") for check in self.config.bundle.task.named_checks
+            },
+        }
+        verifier = self.config.bundle.task.final_verifier.model_dump(mode="json")
+        expected_trial_bindings["named_checks_digest"] = content_digest(
+            expected_trial_bindings["named_checks_snapshot"]
+        )
+        expected_trial_bindings["verifier_snapshot"] = verifier
+        expected_trial_bindings["verifier_digest"] = content_digest(verifier)
+        container = {
+            "image_manifest_digest": self.config.bundle.image_lock.manifest_digest,
+            "image_platform_digest": self.config.bundle.image_lock.platform_digest,
+        }
+        expected_trial_bindings["container_config_snapshot"] = container
+        expected_trial_bindings["container_config_digest"] = content_digest(container)
+        if any(trial_manifest.get(field) != value for field, value in expected_trial_bindings.items()):
+            raise StateConflict("trial manifest does not bind current alpha authority")
         skill = self.config.skill_dir / "repo-task" / "SKILL.md"
         if manifest.skill_digests.get("repo_task") != content_digest(skill.read_text(encoding="utf-8")):
             raise StateConflict("repo_task skill does not match run manifest")
         for field, digest in alpha_runtime_manifest_digests(self.config).items():
             if getattr(manifest, field) != digest:
                 raise StateConflict(f"{field.removesuffix('_digest').replace('_', ' ')} does not match run manifest")
+
+    def _trial_manifest(self) -> dict[str, Any]:
+        try:
+            raw = self.config.paths.trial_manifest_json.read_bytes()
+            value = json.loads(raw.decode("utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise StateConflict("trial manifest is unreadable") from error
+        if not isinstance(value, dict):
+            raise StateConflict("trial manifest is invalid")
+        return value
 
     def _save_initial_checkpoint(self, run: RunRecord, prompt: str) -> CheckpointRecord:
         latest = self.store.latest_checkpoint(run.run_id)
