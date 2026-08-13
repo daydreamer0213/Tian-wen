@@ -230,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if not os.environ.get("TIANWEN_MODEL") or not any(
-        os.environ.get(name) for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+        os.environ.get(name) for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY")
     ):
         parser.error("TIANWEN_MODEL and a provider credential are required in the environment")
     if args.max_tokens <= 0:

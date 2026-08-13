@@ -243,15 +243,24 @@ def test_live_script_executes_controlled_chain_and_imports_receipt(
     ]
 
 
+@pytest.mark.parametrize(
+    "credential_name",
+    ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"],
+)
 def test_live_script_without_evaluator_stops_at_eval_request(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    credential_name: str,
 ) -> None:
-    """Break caught: an EvalRun claim without an external receipt bypasses the evaluator boundary."""
+    """Break caught: a valid provider credential can be rejected before its model is constructed."""
     script = _live_script()
     app = _RecordingApp()
     key = _public_key(tmp_path / "evaluator-public.pem")
     monkeypatch.setenv("TIANWEN_MODEL", "test-model")
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(credential_name, "test-key")
     monkeypatch.setenv("TIANWEN_EVALUATOR_PUBLIC_KEY", str(key))
     monkeypatch.delenv("TIANWEN_EVALUATOR_COMMAND_JSON", raising=False)
     monkeypatch.setattr(script, "_make_app", lambda args, key: app)
