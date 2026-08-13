@@ -1,6 +1,6 @@
 # 天问真实任务 Alpha-A：真实执行层详细设计
 
-**状态：** 待用户书面复审
+**状态：** 已获用户确认；实施计划见 `docs/superpowers/plans/2026-08-13-real-task-alpha-a-execution.md`
 **日期：** 2026-08-13
 **前置设计：** `2026-08-13-real-task-alpha-roadmap-design.md`
 **目标：** 用五个受控但真实的小型仓库任务，建立可重复、安全边界明确、结果可审计的真实执行基线
