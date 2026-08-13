@@ -97,6 +97,25 @@ Live 脚本要求 `TIANWEN_MODEL`、相应 provider 凭据和 `TIANWEN_EVALUATOR
 
 运行前由 evaluator 专用账户预先配置命令；推荐 JSON 参数数组而不是 shell 字符串。live 脚本不会切换 Windows 账户身份，仓库也未提供跨账户桥接器；`TIANWEN_EVALUATOR_COMMAND_JSON` 必须指向 evaluator 账户预先配置的受限桥接命令，或改用“runtime 生成 EvalRequest → evaluator 独立运行 → runtime 导入回执”的分离流程：
 
+使用 DeepSeek V4 Pro 时，设置模型与 DeepSeek 控制台创建的密钥：
+
+```powershell
+$env:TIANWEN_MODEL = 'deepseek:deepseek-v4-pro'
+$env:DEEPSEEK_API_KEY = '在 DeepSeek 控制台创建的密钥'
+```
+
+只在当前终端环境中保留该密钥；不要粘贴到聊天中，也不要提交到仓库。真实运行会将模型可见的提示、工具结果和上下文发送到 DeepSeek 官方 API。请先使用可丢弃的临时仓库或公开仓库。
+
+要显式运行 DeepSeek 的付费只读探针：
+
+```powershell
+$env:TIANWEN_RUN_LIVE_MODEL_TESTS = '1'
+uv run pytest tests\live\test_deepseek_v4_pro.py -v
+Remove-Item Env:TIANWEN_RUN_LIVE_MODEL_TESTS
+```
+
+该命令使用自动生成的临时仓库，会发起一次付费 API 调用，且不会发布候选版本。
+
 ```powershell
 $env:TIANWEN_MODEL = 'openai:gpt-4.1-mini'
 $env:OPENAI_API_KEY = '...'
