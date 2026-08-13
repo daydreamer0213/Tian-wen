@@ -39,7 +39,21 @@ class ModelUsageUnavailable(StateConflict):
     """Raised when a completed provider request cannot be safely metered."""
 
 
-class _BudgetedModel(WrapperModel):
+def model_identity(
+    model: Model | KnownModelName,
+    *,
+    schema_version: str,
+) -> str:
+    if isinstance(model, str):
+        return model
+    if schema_version == "1":
+        return model.model_name
+    if schema_version == "2":
+        return model.model_id
+    raise StateConflict(f"unsupported run manifest schema {schema_version}")
+
+
+class BudgetedModel(WrapperModel):
     """Persistently reserve and settle every actual model request."""
 
     def __init__(self, wrapped: Model | KnownModelName, store: StateStore, run_id: str, loop_id: str) -> None:
@@ -245,7 +259,7 @@ class RepoTaskRuntime:
             loop_id=task.loop_id,
         )
         return Agent(
-            _BudgetedModel(self.model, self.store, run.run_id, task.loop_id),
+            BudgetedModel(self.model, self.store, run.run_id, task.loop_id),
             output_type=[str, DeferredToolRequests],
             capabilities=[
                 gateway,
@@ -319,7 +333,7 @@ class RepoTaskRuntime:
             raise StateConflict("pydantic-ai version does not match run manifest")
         if manifest.harness_version != version("pydantic-ai-harness"):
             raise StateConflict("harness version does not match run manifest")
-        if manifest.model_id != self._model_id():
+        if manifest.model_id != model_identity(self.model, schema_version=manifest.schema_version):
             raise StateConflict("model does not match run manifest")
         if prompt is not None and manifest.prompt_digest != content_digest(prompt):
             raise StateConflict("prompt does not match run manifest")
@@ -339,11 +353,6 @@ class RepoTaskRuntime:
             status.value,
             run.model_copy(update={"status": status, "status_reason": reason}),
         )
-
-    def _model_id(self) -> str:
-        if isinstance(self.model, str):
-            return self.model
-        return self.model.model_name
 
     def _classify(self, tool_name: str, args: dict[str, Any]) -> EffectClass:
         if not self._authorized(tool_name, args):

@@ -265,6 +265,22 @@ async def test_string_known_model_name_validates_without_a_provider_request(tmp_
 
 
 @pytest.mark.anyio
+async def test_v1_manifest_still_validates_an_instantiated_provider_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Break caught: replacing model_name with model_id globally corrupts v1 recovery."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "offline-contract-key")
+    from pydantic_ai.models import infer_model
+
+    model = infer_model("deepseek:deepseek-v4-pro")
+    runtime = _runtime(tmp_path, model=model)
+    run = _run("go", runtime, model_id=model.model_name)
+
+    runtime._validate_manifest(run, "go")
+
+
+@pytest.mark.anyio
 async def test_resume_rejects_a_policy_change_after_the_approval_pause(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path, _ShellModel("python --version"))
     run = _run("run the command", runtime)

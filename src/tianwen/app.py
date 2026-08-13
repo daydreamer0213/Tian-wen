@@ -63,7 +63,7 @@ from tianwen.exploration import (
 )
 from tianwen.learning import AttributionRecord, LearningEngine, LearningSignal
 from tianwen.memory import CapabilityLedger, CapabilityObservation
-from tianwen.runtime import RepoTaskRuntime, RuntimeConfig, runtime_manifest_digests
+from tianwen.runtime import RepoTaskRuntime, RuntimeConfig, model_identity, runtime_manifest_digests
 from tianwen.store import GovernanceStore, StateConflict, StateStore
 
 
@@ -258,7 +258,7 @@ class TianwenApp:
             schema_version="1",
             pydantic_ai_version=version("pydantic-ai-slim"),
             harness_version=version("pydantic-ai-harness"),
-            model_id=self._model_id(),
+            model_id=model_identity(self.config.model, schema_version="1"),
             prompt_digest=content_digest(prompt),
             skill_versions={"repo_task": skill_version},
             skill_digests={"repo_task": skill_digest},
@@ -267,9 +267,6 @@ class TianwenApp:
             goal_contract_digest=content_digest(goal),
             workspace_digest=digests["workspace_digest"],
         )
-
-    def _model_id(self) -> str:
-        return self.config.model if isinstance(self.config.model, str) else self.config.model.model_name
 
     def _materialize(self, version_id: str) -> Path:
         artifact = self.artifact(version_id)
