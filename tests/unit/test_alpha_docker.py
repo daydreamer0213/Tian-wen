@@ -13,7 +13,6 @@ from tianwen.alpha_docker import (
     DockerCheckExecutor,
     DockerExecutionError,
     VerifierResult,
-    _StreamResult,
 )
 from tianwen.alpha_tasks import freeze_task_bundle
 from tianwen.alpha_workspace import _create_trial_workspace
@@ -21,6 +20,26 @@ from tianwen.domain import content_digest
 from tianwen.store import StateStore
 
 _CONTAINER_ID = "a" * 64
+
+
+class _Reader:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = iter(chunks)
+
+    async def read(self, _size: int) -> bytes:
+        return next(self.chunks, b"")
+
+
+class _Attached:
+    def __init__(self, stdout: list[bytes], stderr: list[bytes], code: int) -> None:
+        self.stdout = _Reader(stdout)
+        self.stderr = _Reader(stderr)
+        self.code = code
+        self.wait_calls = 0
+
+    async def wait(self) -> int:
+        self.wait_calls += 1
+        return self.code
 
 
 def _write(path: Path, content: str) -> None:
@@ -163,6 +182,26 @@ def _record(executor: DockerCheckExecutor, action_id: str, *, final: bool = Fals
     )
 
 
+def _make_final_inspect(executor: DockerCheckExecutor, observed: dict[str, Any], action_id: str) -> None:
+    verifier, _spec = executor._selected_script("final", final=True)
+    observed["Name"] = f"/{executor._container_name(action_id)}"
+    observed["Config"]["Labels"]["tianwen.alpha.action_id"] = action_id
+    observed["Config"]["Labels"]["tianwen.alpha.config_digest"] = executor._normalized_config_digest(
+        "final", final=True
+    )
+    observed["Config"]["Cmd"] = ["python", "-I", "/checks/verify.py", "/workspace"]
+    observed["HostConfig"]["LogConfig"] = {
+        "Type": "local",
+        "Config": {"max-size": str(executor.bundle.task.final_verifier.output_limit_bytes), "max-file": "1"},
+    }
+    observed["Mounts"][1] = {
+        "Type": "bind",
+        "Source": str(verifier),
+        "Destination": "/checks/verify.py",
+        "RW": False,
+    }
+
+
 def test_create_argv_has_every_required_boundary_and_only_two_mounts(executor: DockerCheckExecutor) -> None:
     argv, sanitized, environment = executor._create_command(action_id="action:one", check_id="public")
     joined = "\n".join(argv)
@@ -196,14 +235,14 @@ async def test_create_start_stream_inspect_persists_observed_nonzero_including_1
         assert "docker.sock" not in " ".join(argv)
         return ((_CONTAINER_ID + "\n").encode(), b"") if kind == "create" else (b"", b"")
 
-    async def stream(*_args: object, **_kwargs: object) -> _StreamResult:
-        return _StreamResult(125, b"assertion failed\n", b"", False)
-
     async def inspected(_container_id: str) -> dict[str, Any]:
         return _inspect(executor, "action:one", code=125)
 
+    async def spawn(_id: str) -> _Attached:
+        return _Attached([b"failed\n", b""], [b""], 125)
+
     monkeypatch.setattr(executor, "_checked_cli", checked)
-    monkeypatch.setattr(executor, "_start_stream", stream)
+    monkeypatch.setattr(executor, "_spawn_attached", spawn)
     monkeypatch.setattr(executor, "_inspect", inspected)
 
     result = await executor.run("action:one", "public")
@@ -223,14 +262,20 @@ async def test_output_limit_stops_waits_inspects_and_persists_captured_timeout(
         calls.append(kind)
         return ((_CONTAINER_ID + "\n").encode(), b"") if kind == "create" else (b"", b"")
 
-    async def stream(*_args: object, **_kwargs: object) -> _StreamResult:
-        return _StreamResult(None, b"12345678", b"abcdef", True)
-
     async def inspected(_container_id: str) -> dict[str, Any]:
         return _inspect(executor, "action:timeout", code=137)
 
+    async def spawn(_id: str) -> _Attached:
+        return _Attached([b"12345678901234567"], [b""], 137)
+
+    async def cli(argv: list[str], *, timeout: float) -> tuple[int, bytes, bytes]:
+        kind = argv[-2]
+        calls.append(kind)
+        return 0, b"", b""
+
     monkeypatch.setattr(executor, "_checked_cli", checked)
-    monkeypatch.setattr(executor, "_start_stream", stream)
+    monkeypatch.setattr(executor, "_spawn_attached", spawn)
+    monkeypatch.setattr(executor, "_cli", cli)
     monkeypatch.setattr(executor, "_inspect", inspected)
 
     with pytest.raises(TimeoutError, match="docker_check_timeout"):
@@ -239,8 +284,121 @@ async def test_output_limit_stops_waits_inspects_and_persists_captured_timeout(
     record = executor._record("action:timeout")
     result = CheckResult.model_validate_json(record.result_json)
     assert calls == ["create", "stop", "wait"]
-    assert result.timed_out and result.stdout_digest == content_digest(b"12345678")
-    assert result.stderr_digest == content_digest(b"abcdef")
+    assert result.timed_out and result.stdout_digest == content_digest(b"1234567890123456")
+    assert result.stderr_digest == content_digest(b"")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failed_kind", ("stop", "wait"))
+async def test_timeout_control_failure_still_inspects_and_persists_terminal_result(
+    executor: DockerCheckExecutor, monkeypatch: pytest.MonkeyPatch, failed_kind: str
+) -> None:
+    calls: list[str] = []
+
+    async def checked(_argv: list[str], *, kind: str, timeout: float = 10) -> tuple[bytes, bytes]:
+        return ((_CONTAINER_ID + "\n").encode(), b"") if kind == "create" else (b"", b"")
+
+    async def spawn(_id: str) -> _Attached:
+        return _Attached([b"x" * 17], [b""], 137)
+
+    async def cli(argv: list[str], *, timeout: float) -> tuple[int, bytes, bytes]:
+        kind = argv[-2]
+        calls.append(kind)
+        return (1 if kind == failed_kind else 0), b"raw-out", b"raw-err"
+
+    async def inspected(_id: str) -> dict[str, Any]:
+        return _inspect(executor, "action:control", code=137)
+
+    monkeypatch.setattr(executor, "_checked_cli", checked)
+    monkeypatch.setattr(executor, "_spawn_attached", spawn)
+    monkeypatch.setattr(executor, "_cli", cli)
+    monkeypatch.setattr(executor, "_inspect", inspected)
+
+    with pytest.raises(TimeoutError, match="docker_check_timeout"):
+        await executor.run("action:control", "public")
+
+    assert calls == ["stop", "wait"]
+    assert executor._record("action:control").status == "failed"
+
+
+@pytest.mark.anyio
+async def test_timeout_control_running_inspect_keeps_durable_running_record(
+    executor: DockerCheckExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def checked(_argv: list[str], *, kind: str, timeout: float = 10) -> tuple[bytes, bytes]:
+        return ((_CONTAINER_ID + "\n").encode(), b"") if kind == "create" else (b"", b"")
+
+    async def spawn(_id: str) -> _Attached:
+        return _Attached([b"x" * 17], [b""], 1)
+
+    async def cli(_argv: list[str], *, timeout: float) -> tuple[int, bytes, bytes]:
+        return 1, b"raw-out", b"raw-err"
+
+    async def inspected(_id: str) -> dict[str, Any]:
+        return _inspect(executor, "action:running", code=0, running=True)
+
+    monkeypatch.setattr(executor, "_checked_cli", checked)
+    monkeypatch.setattr(executor, "_spawn_attached", spawn)
+    monkeypatch.setattr(executor, "_cli", cli)
+    monkeypatch.setattr(executor, "_inspect", inspected)
+
+    with pytest.raises(DockerExecutionError, match="docker_timeout_control_unverified"):
+        await executor.run("action:running", "public")
+
+    assert executor._record("action:running").status == "running"
+
+
+@pytest.mark.anyio
+async def test_start_spawn_failure_leaves_created_record_for_never_started_recovery(
+    executor: DockerCheckExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def checked(_argv: list[str], *, kind: str, timeout: float = 10) -> tuple[bytes, bytes]:
+        return ((_CONTAINER_ID + "\n").encode(), b"") if kind == "create" else (b"", b"")
+
+    async def failed_spawn(_id: str) -> _Attached:
+        raise DockerExecutionError("docker_start_spawn_failed")
+
+    monkeypatch.setattr(executor, "_checked_cli", checked)
+    monkeypatch.setattr(executor, "_spawn_attached", failed_spawn)
+
+    with pytest.raises(DockerExecutionError, match="docker_start_spawn_failed"):
+        await executor.run("action:never", "public")
+
+    record = executor._record("action:never")
+    assert record.status == "created" and record.started_at is None
+
+
+@pytest.mark.anyio
+async def test_final_timeout_persists_inconclusive_verifier_and_replays(
+    executor: DockerCheckExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def checked(_argv: list[str], *, kind: str, timeout: float = 10) -> tuple[bytes, bytes]:
+        return ((_CONTAINER_ID + "\n").encode(), b"") if kind == "create" else (b"", b"")
+
+    async def spawn(_id: str) -> _Attached:
+        return _Attached([b"x" * 1025], [b""], 137)
+
+    async def cli(_argv: list[str], *, timeout: float) -> tuple[int, bytes, bytes]:
+        return 0, b"", b""
+
+    inspected = _inspect(executor, "action:final-timeout", code=137)
+    _make_final_inspect(executor, inspected, "action:final-timeout")
+
+    async def inspect(_id: str) -> dict[str, Any]:
+        return inspected
+
+    monkeypatch.setattr(executor, "_checked_cli", checked)
+    monkeypatch.setattr(executor, "_spawn_attached", spawn)
+    monkeypatch.setattr(executor, "_cli", cli)
+    monkeypatch.setattr(executor, "_inspect", inspect)
+
+    with pytest.raises(TimeoutError, match="docker_check_timeout"):
+        await executor.run_final("action:final-timeout")
+
+    record = executor._record("action:final-timeout")
+    result = VerifierResult.model_validate_json(record.result_json)
+    assert result.verdict == "inconclusive" and result.failure_categories == ("timeout",)
+    assert await executor.reconcile("action:final-timeout") == result
 
 
 @pytest.mark.anyio

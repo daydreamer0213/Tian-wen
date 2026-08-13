@@ -63,3 +63,29 @@ Implemented the single `DockerCheckExecutor` boundary and the narrow StateStore 
 ### Remaining risk
 
 - `cleanup_terminal()` remains a synchronous best-effort method because its public interface is synchronous; it invokes only the fixed private Docker CLI configuration and removes only after linked Action terminal state.
+
+## Fix round 2
+
+### RED / GREEN
+
+- RED: the prior executor advanced `created` to `running` before attached Docker start could spawn; timeout tests also replaced `_start_stream`, bypassing real process ownership.
+- RED: stop or wait failures short-circuited inspect; final timeout stored a public `CheckResult` shape instead of a verifier result.
+- GREEN: tests now fake only the CLI/spawn boundary and attached streams. They cover created → spawn → running, output-limit timeout, stop failure, wait failure, still-running inspect, start spawn failure, and final timeout terminal replay.
+
+### Fixes
+
+- `_begin()` persists only `created`; `_start_stream()` advances to `running` immediately after successful attached-process spawn.
+- Attached stdout/stderr remain concurrently and aggregate-bounded read. Timeout cancels readers, then always attempts stop, wait, exact inspect, and bounded attached-process reap.
+- Stop/wait result codes and bounded stdout/stderr digests are collected without raw text. They do not prevent exact inspect.
+- Exact terminal inspect persists a public timeout `CheckResult` or final/seed `VerifierResult(verdict="inconclusive", failure_categories=("timeout",))`; unverified/running control failure retains the running record with a durable `check_timeout_control_failed` audit.
+- Live and recovery timeout settlement share one result helper, so final/seed replay remains type-correct.
+
+### Verification
+
+- `uv run pytest tests\unit\test_alpha_docker.py tests\unit\test_store.py -q` — 48 passed.
+- `uv run ruff check src\tianwen\alpha_docker.py src\tianwen\store.py tests\unit\test_alpha_docker.py tests\unit\test_store.py` — passed.
+- `git diff --check` — passed.
+
+### Remaining risk
+
+- Docker Desktop behavior is not integration-tested here by design; the private process/CLI fakes enforce the serialized arguments and recovery semantics without contacting a real Engine.

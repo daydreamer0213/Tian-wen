@@ -84,7 +84,9 @@ class DockerPreflight(FrozenModel):
 
 class CheckExecutionAudit(FrozenModel):
     action_id: str
-    classification: Literal["check_identity_unverified", "check_never_started", "check_reconciled"]
+    classification: Literal[
+        "check_identity_unverified", "check_never_started", "check_reconciled", "check_timeout_control_failed"
+    ]
     detail_digest: str
     created_at: datetime
 
@@ -95,6 +97,7 @@ class _StreamResult:
     stdout: bytes
     stderr: bytes
     timed_out: bool
+    process: Any
 
 
 class DockerCheckExecutor:
@@ -342,10 +345,9 @@ class DockerCheckExecutor:
             raise DockerExecutionError(f"docker_{kind}_failed:exit={code}")
         return stdout, stderr
 
-    async def _start_stream(self, container_id: str, *, limit: int, deadline: datetime) -> _StreamResult:
-        """Read both attached streams incrementally, retaining at most the declared aggregate limit."""
+    async def _spawn_attached(self, container_id: str) -> Any:
         try:
-            process = await asyncio.create_subprocess_exec(
+            return await asyncio.create_subprocess_exec(
                 *self._prefix(),
                 "start",
                 "--attach",
@@ -356,7 +358,15 @@ class DockerCheckExecutor:
                 env=self._docker_environment(),
             )
         except OSError as error:
-            raise DockerExecutionError("docker_start_unavailable") from error
+            raise DockerExecutionError("docker_start_spawn_failed") from error
+
+    async def _start_stream(
+        self, record: CheckExecutionRecord, *, limit: int, deadline: datetime
+    ) -> _StreamResult:
+        """Read both attached streams incrementally, retaining at most the declared aggregate limit."""
+        process = await self._spawn_attached(record.container_id)
+        record = record.model_copy(update={"status": "running", "started_at": utc_now()})
+        self._save_record(record)
         assert process.stdout is not None and process.stderr is not None
         pending = {
             asyncio.create_task(process.stdout.read(8192)): "stdout",
@@ -393,8 +403,8 @@ class DockerCheckExecutor:
             for task in pending:
                 task.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
-            return _StreamResult(None, bytes(output["stdout"]), bytes(output["stderr"]), True)
-        return _StreamResult(await process.wait(), bytes(output["stdout"]), bytes(output["stderr"]), False)
+            return _StreamResult(None, bytes(output["stdout"]), bytes(output["stderr"]), True, process)
+        return _StreamResult(await process.wait(), bytes(output["stdout"]), bytes(output["stderr"]), False, process)
 
     async def _inspect(self, container_id: str) -> dict[str, Any] | None:
         code, stdout, _stderr = await self._cli([*self._prefix(), "inspect", container_id], timeout=10)
@@ -406,10 +416,21 @@ class DockerCheckExecutor:
             return None
         return value[0] if isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict) else None
 
-    async def _stop_wait_inspect(self, record: CheckExecutionRecord) -> dict[str, Any] | None:
-        await self._checked_cli([*self._prefix(), "stop", record.container_id], kind="stop")
-        await self._checked_cli([*self._prefix(), "wait", record.container_id], kind="wait")
-        return await self._inspect(record.container_id)
+    async def _reap_attached(self, process: Any | None) -> None:
+        if process is None:
+            return
+        try:
+            await asyncio.wait_for(process.wait(), timeout=10)
+        except TimeoutError:
+            raise DockerExecutionError("docker_attached_reap_timeout") from None
+
+    async def _stop_wait_inspect(self, record: CheckExecutionRecord) -> tuple[dict[str, Any] | None, str]:
+        details: list[str] = []
+        for kind in ("stop", "wait"):
+            code, stdout, stderr = await self._cli([*self._prefix(), kind, record.container_id], timeout=10)
+            details.append(f"{kind}:exit={code}:stdout={content_digest(stdout)}:stderr={content_digest(stderr)}")
+        observed = await self._inspect(record.container_id)
+        return observed, ";".join(details)
 
     async def _logs(self, container_id: str, limit: int) -> tuple[bytes, bytes]:
         stdout, stderr = await self._checked_cli([*self._prefix(), "logs", container_id], kind="logs")
@@ -434,7 +455,9 @@ class DockerCheckExecutor:
     def _audit(
         self,
         action_id: str,
-        classification: Literal["check_identity_unverified", "check_never_started", "check_reconciled"],
+        classification: Literal[
+            "check_identity_unverified", "check_never_started", "check_reconciled", "check_timeout_control_failed"
+        ],
         detail: str,
     ) -> None:
         object_id = f"{action_id}:{classification}"
@@ -469,12 +492,15 @@ class DockerCheckExecutor:
         if result_type is not None:
             record = record.model_copy(update={"result_type": result_type})
         self._save_record(record)
-        running = record.model_copy(update={"status": "running", "started_at": utc_now()})
-        self._save_record(running)
-        return running
+        return record
 
     def _save_terminal(
-        self, record: CheckExecutionRecord, result: CheckResult | VerifierResult, *, code: int | None
+        self,
+        record: CheckExecutionRecord,
+        result: CheckResult | VerifierResult,
+        *,
+        code: int | None,
+        output_evidence: str | None = None,
     ) -> None:
         self._save_record(
             record.model_copy(
@@ -482,7 +508,7 @@ class DockerCheckExecutor:
                     "status": "failed" if isinstance(result, CheckResult) and result.timed_out else "finished",
                     "exit_code": code,
                     "result_json": result.model_dump_json(),
-                    "output_digest": (
+                    "output_digest": output_evidence or (
                         result.output_digest
                         if isinstance(result, CheckResult)
                         else content_digest(result.model_dump_json())
@@ -496,16 +522,10 @@ class DockerCheckExecutor:
         spec = self.bundle.task.final_verifier if final else self._check(record.check_id)
         if record.deadline_at is None:
             raise DockerExecutionError("docker_deadline_missing")
-        stream = await self._start_stream(
-            record.container_id, limit=spec.output_limit_bytes, deadline=record.deadline_at
-        )
+        stream = await self._start_stream(record, limit=spec.output_limit_bytes, deadline=record.deadline_at)
+        record = self._record(record.action_id) or record
         if stream.timed_out:
-            observed = await self._stop_wait_inspect(record)
-            if observed is None or not self._inspect_matches(record, observed):
-                raise DockerExecutionError("docker_terminal_identity_unverified")
-            timeout_result = self._result(record.check_id, 0, stream.stdout, stream.stderr, timed_out=True)
-            self._save_terminal(record, timeout_result, code=observed.get("State", {}).get("ExitCode"))
-            raise TimeoutError("docker_check_timeout")
+            return await self._settle_timeout(record, stream)
         observed = await self._inspect(record.container_id)
         if observed is None or not self._inspect_matches(record, observed):
             raise DockerExecutionError("docker_terminal_identity_unverified")
@@ -521,6 +541,42 @@ class DockerCheckExecutor:
         result = self._parse_verifier(stream.stdout)
         self._save_terminal(record, result, code=code)
         return result
+
+    async def _settle_timeout(
+        self, record: CheckExecutionRecord, stream: _StreamResult
+    ) -> CheckResult | VerifierResult:
+        observed, control_detail = await self._stop_wait_inspect(record)
+        try:
+            await self._reap_attached(stream.process)
+        except DockerExecutionError:
+            self._audit(record.action_id, "check_timeout_control_failed", control_detail + ";reap")
+            raise
+        if observed is None or not self._inspect_matches(record, observed) or observed.get("State", {}).get("Running"):
+            self._audit(record.action_id, "check_timeout_control_failed", control_detail)
+            raise DockerExecutionError("docker_timeout_control_unverified")
+        code = observed.get("State", {}).get("ExitCode")
+        if not isinstance(code, int):
+            self._audit(record.action_id, "check_timeout_control_failed", control_detail + ";exit")
+            raise DockerExecutionError("docker_timeout_control_unverified")
+        stdout, stderr = stream.stdout, stream.stderr
+        if not stdout and not stderr:
+            stdout, stderr = await self._logs(record.container_id, self._output_limit(record))
+        result = self._timeout_result(record, code, stdout, stderr)
+        self._save_terminal(record, result, code=code, output_evidence=content_digest(stdout + stderr))
+        raise TimeoutError("docker_check_timeout")
+
+    def _timeout_result(
+        self, record: CheckExecutionRecord, code: int, stdout: bytes, stderr: bytes
+    ) -> CheckResult | VerifierResult:
+        if record.result_type == "public":
+            return self._result(record.check_id, code, stdout, stderr, timed_out=True)
+        return VerifierResult(
+            verdict="inconclusive",
+            passed_checks=(),
+            failed_checks=(),
+            failure_categories=("timeout",),
+            summary="verifier_timeout",
+        )
 
     def _parse_verifier(self, stdout: bytes) -> VerifierResult:
         try:
@@ -625,13 +681,25 @@ class DockerCheckExecutor:
             if record.deadline_at is not None and record.deadline_at > utc_now():
                 await asyncio.sleep((record.deadline_at - utc_now()).total_seconds())
                 return await self.reconcile(action_id)
-            observed = await self._stop_wait_inspect(record)
-            if observed is None or not self._inspect_matches(record, observed):
-                self._audit(action_id, "check_identity_unverified", "timeout_identity")
+            observed, control_detail = await self._stop_wait_inspect(record)
+            if (
+                observed is None
+                or not self._inspect_matches(record, observed)
+                or observed.get("State", {}).get("Running")
+            ):
+                self._audit(action_id, "check_timeout_control_failed", control_detail)
                 return None
-            stdout, stderr = await self._logs(record.container_id, self._output_limit(record))
-            timeout_result = self._result(record.check_id, 0, stdout, stderr, timed_out=True)
-            self._save_terminal(record, timeout_result, code=observed.get("State", {}).get("ExitCode"))
+            code = observed.get("State", {}).get("ExitCode")
+            if not isinstance(code, int):
+                self._audit(action_id, "check_timeout_control_failed", control_detail + ";exit")
+                return None
+            try:
+                stdout, stderr = await self._logs(record.container_id, self._output_limit(record))
+            except DockerExecutionError:
+                self._audit(action_id, "check_timeout_control_failed", control_detail + ";logs")
+                return None
+            timeout_result = self._timeout_result(record, code, stdout, stderr)
+            self._save_terminal(record, timeout_result, code=code, output_evidence=content_digest(stdout + stderr))
             self._audit(action_id, "check_reconciled", "timeout")
             return timeout_result
         if record.status in _TERMINAL and record.result_json:
