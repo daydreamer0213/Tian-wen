@@ -453,14 +453,21 @@ class DockerCheckExecutor:
         self.store.put_immutable_object("check_execution_audit", object_id, action_id, classification, audit)
 
     async def _begin(
-        self, action_id: str, check_id: str, *, final: bool, result_type: Literal["final", "seed_preflight"] = "final"
+        self,
+        action_id: str,
+        check_id: str,
+        *,
+        final: bool,
+        result_type: Literal["public", "final", "seed_preflight"] | None = None,
     ) -> CheckExecutionRecord:
         argv, _sanitized, _environment = self._create_command(action_id, check_id, final=final)
         created_out, _created_err = await self._checked_cli(argv, kind="create")
         text = created_out.decode("ascii", errors="ignore")
         if not re.fullmatch(r"[0-9a-f]{64}\n", text):
             raise DockerExecutionError("docker_create_full_container_id_required")
-        record = self._new_record(action_id, check_id, text[:-1], final=final).model_copy(update={"result_type": result_type})
+        record = self._new_record(action_id, check_id, text[:-1], final=final)
+        if result_type is not None:
+            record = record.model_copy(update={"result_type": result_type})
         self._save_record(record)
         running = record.model_copy(update={"status": "running", "started_at": utc_now()})
         self._save_record(running)
