@@ -1,140 +1,122 @@
 # Alpha-A Tasks 5–6 Handoff
 
-Date: 2026-08-13
+Date: 2026-08-14
 
 ## Status
 
-- Task 5 is complete and independently reviewed.
-- Task 6 has a substantial tested implementation, but the Tasks 5–6 stage is
-  **blocked** and is not approved for Task 7.
-- Do not start Task 7 until the main controller explicitly accepts a new
-  repair plan for the remaining manifest-recovery authority gap.
+- Tasks 5 and 6 are complete.
+- The approved narrow TrialManifest recovery-authority repair **passed**.
+- The prior blocking Important is closed; no Critical or Important finding
+  remains in the scoped re-review.
+- This handoff recommends that the main controller may start Task 7 after it
+  independently accepts the evidence below.
 
-## Starting point and branch
+## Branch and commits
 
-- Original handoff commit: `5170ad5`
 - Intended branch: `codex/alpha-a-real-task`
-- Implementation head before the handoff-document commit: `987a8f8`
-- The handoff-document commit itself is the next commit after `987a8f8`.
-- This worktree is detached because it is managed by the Codex app.
+- Repair starting point: `a371623caa0ef05829d2ade4db756ef1f9357b56`
+- Repair implementation commits:
+  - `9c5854d` — `fix: bind alpha trial manifest recovery`
+  - `ab29dd3` — `fix: fail closed before alpha recovery effects`
+- This Codex-managed worktree is detached. The handoff-document commit follows
+  `ab29dd3`.
 
-## Task 5: complete
+Earlier Task 5 and Task 6 commits remain:
 
-Commits:
+- `938111a`, `12e1046`, `1e9863c`
+- `edfc5de`, `7a20e3d`, `d78fa64`, `987a8f8`
 
-- `938111a` — `feat: add shell-free alpha runtime`
-- `12e1046` — `fix: bind alpha runtime recovery`
-- `1e9863c` — `fix: require sole unknown alpha check`
+## Repair outcome
 
-Implemented:
+The repair closes the complete authority chain:
 
-- schema-v2 Alpha bindings on `RunManifest` with schema-v1 compatibility;
-- a shell-free `AlphaRuntime` exposing bounded file tools, frozen
-  `repo-task`, and controller-selected `run_check`;
-- Goal authorization and pre-effect workspace projection;
-- immutable TrialManifest, Skill, model, prompt, policy, tool, and workspace
-  validation;
-- stable initial checkpoints and exact named-check reconciliation;
-- truthful Runtime failure settlement without persisting exception text.
-
-Task-level review:
-
-- Initial review found manifest binding, repeated UNKNOWN recovery, and
-  timeout-classification defects.
-- Two fix/re-review rounds closed every Critical and Important finding.
-- Task 5 scoped re-review passed.
-
-## Task 6: implemented but stage-blocked
-
-Commits:
-
-- `edfc5de` — `feat: orchestrate auditable alpha trials`
-- `7a20e3d` — `fix: complete alpha trial settlement`
-- `d78fa64` — `fix: close alpha trial recovery gaps`
-- `987a8f8` — `fix: close alpha runtime trial integration`
+```text
+AlphaTrialState.trial_manifest_digest
+= canonical SQLite alpha_trial_manifest digest
+= canonical trial-manifest.json digest
+= internally recomputed complete snapshot digests
+```
 
 Implemented:
 
-- preview and exact confirmation before Goal creation or model execution;
-- immutable TrialManifest, AlphaTrialState, and TrialResult authority;
-- A3 governed recorded exploration before execution;
-- A5 one Goal/workspace/root budget with two separate Runs and no round-2
-  feedback in round 1;
-- always-settle behavior for Provider failure, budget/deadline stop, and
-  cancellation;
-- Git evidence, durable final verification Action/Evidence, sanitized audit
-  artifacts, credential scanning, and truthful boundary status;
-- durable-stage recovery for prepared, running, settling, and finished
-  trials;
-- recovery of a `WAITING/unknown_action` Run now stops without another model
-  request, Action, check, container, or final-verifier effect;
-- initial A5 TrialManifest creation now includes per-round prompt, policy,
-  and tool authority.
+- schema-v1 TrialManifest round policy/tool authorities must be non-empty;
+- policy and tool round sets and order must match the frozen task bundle
+  exactly;
+- every round freezes round ID, complete prompt snapshot/digest, policy
+  snapshot/digest, tool contract snapshot/digest, and allowed named check
+  IDs;
+- A5 freezes both rounds, while round 1 still contains no round-2 feedback or
+  feedback-derived acceptance;
+- construction/model loading validates aggregate policy and tool digests;
+- AlphaRuntime has no empty-snapshot bypass and validates the current Run's
+  prompt, policy, and tool authority against RunManifest and live config;
+- every non-prepared resume validates State/SQLite/JSON/internal authority
+  before Docker preflight, Run recovery/creation, model requests, Actions,
+  checks, containers, or final verification;
+- a confirmed prepared trial without a manifest now fails closed before
+  effects;
+- ordinary `StateStore.put_object()` cannot write or replace
+  `alpha_trial_manifest`; `put_immutable_object()` exact replay remains valid;
+- matching direct-DB and JSON forgeries with empty snapshots, or with a
+  removed A5 round and all internal digests recomputed, fail before effects;
+- `WAITING/unknown_action` recovery remains non-repeating: no new model
+  request, Action, check/container call, or final-verifier effect.
 
-Task-level review:
+No dependency, table, permission system, product scope, or unrelated
+refactor was added.
 
-- Two fix/re-review rounds closed all Task 6 scoped Critical and Important
-  findings.
+## TDD and independent review
 
-## Remaining blocking finding
+Strict RED evidence was recorded before production changes for:
 
-The final Tasks 5–6 re-review still found one Important manifest-recovery
-authority gap:
+- mutable `alpha_trial_manifest` replacement;
+- empty round authority bypass;
+- matching SQLite/JSON empty-authority recovery;
+- frozen-bundle round removal with all internal digests recomputed;
+- confirmed prepared recovery without a manifest.
 
-1. `AlphaRuntime` conditionally skips per-round TrialManifest validation when
-   both policy and tool snapshots are empty.
-2. The persisted `alpha_trial_manifest` can be replaced through the ordinary
-   `StateStore.put_object()` path even though it was first written with
-   `put_immutable_object()`.
-3. `AlphaTrialRunner.resume()` does not bind the recovered manifest digest to
-   `AlphaTrialState.trial_manifest_digest` before creating a new Run.
-4. A replaced SQLite object plus matching JSON mirror with empty snapshots
-   and matching aggregate values can therefore reach a model request.
+The first scoped review found three Important items:
 
-The one permitted cross-task repair wave fixed the prior Critical UNKNOWN
-Action restart, but this Important finding remained in its single scoped
-re-review. Per controller instruction, work stopped here instead of opening
-another repair wave.
+1. bundle-level round binding was too late;
+2. prepared no-manifest recovery still reached Docker preflight;
+3. original RED evidence was missing from the report.
 
-## Verification evidence
+Fix round 1 closed all three. Scoped re-review verdict:
 
-Fresh controller verification at `d78fa64`:
+- all findings addressed;
+- no new Critical, Important, or Minor finding;
+- independent focused recheck: `5 passed in 3.55s`;
+- fix-range whitespace check: passed.
+
+## Final verification evidence
+
+Environment:
 
 ```powershell
 $env:UV_CACHE_DIR = 'D:\DevData\uv-cache'
-uv run pytest -q
-uv run ruff check .
-git diff --check
+$env:UV_PROJECT_ENVIRONMENT = 'D:\DevData\uv-envs\tianwen-alpha-repair-f6f2'
 ```
 
-Results:
+Fresh controller results on implementation HEAD `ab29dd3`:
 
-- `406 passed, 4 skipped in 110.86s`
-- Ruff: `All checks passed!`
-- whitespace check: passed
-- worktree: clean
-
-Cross-task repair commit `987a8f8` verification:
-
-- focused recovery/manifest tests: `3 passed`
-- Alpha Runtime + Trial integrations: `41 passed`
-- Task 6 combination: `87 passed`
-- Alpha boundary tests: `42 passed`
-- Ruff and `git diff --check`: passed
-- pytest printed `409 passed, 4 skipped in 118.09s`; the outer command
-  wrapper returned timeout only after the complete pytest summary.
-
-No network, paid model, or real Docker execution was used.
+- focused store/runtime/trial: `77 passed in 45.58s`;
+- Task 6 combination: `89 passed in 78.69s`;
+- Alpha boundary: `43 passed in 13.94s`;
+- full offline suite: `413 passed, 4 skipped in 123.47s`;
+- `uv run ruff check .`: `All checks passed!`;
+- `git diff --check a371623..HEAD`: passed.
 
 Expected skips:
 
 - paid DeepSeek live probe;
-- two symlink tests because this Windows account lacks symlink privilege;
+- two Windows symlink tests because this account lacks symlink privilege;
 - the Windows ACL case tested separately.
+
+No network, paid model, or real Docker execution was used.
 
 ## Deferred Minor findings
 
-These were explicitly triaged as Minor by the stage review:
+The two previously triaged Minor findings remain unchanged:
 
 - an invalid Alpha round configuration fails generically instead of being
   rejected explicitly;
@@ -142,43 +124,26 @@ These were explicitly triaged as Minor by the stage review:
   caller-provided failure category, although the real settlement path scans
   persisted Actions independently.
 
-## Recovery artifacts
+They are not part of this repair and do not block Task 7.
 
-The SDD workspace is git-ignored and contains the detailed implementation,
-review, and repair evidence:
+## Detailed repair artifacts
+
+The git-ignored repair workspace is:
 
 ```text
-.superpowers/sdd/2026-08-13-real-task-alpha-a-execution/
+.superpowers/sdd/2026-08-13-alpha-a-trial-manifest-repair/
 ```
 
-Important files:
+It contains:
 
+- `repair-brief.md`
+- `repair-report.md`
 - `progress.md`
-- `task-5-report.md`
-- `task-6-report.md`
-- `final-fix-report.md`
-- `review-5170ad5..d78fa64.diff`
-- `review-d78fa64..987a8f8.diff`
-
-`task-6-report.md` contains an inaccurate Fix Round 1 description from a
-formatting-only takeover agent. `final-fix-report.md` explicitly corrects
-that history; this handoff document is the canonical stage summary.
+- `review-a371623..9c5854d.diff`
+- `review-fix-9c5854d..ab29dd3.diff`
 
 ## Recommended next entry
 
-Do not start Task 7.
-
-The main controller should first decide and approve a narrowly scoped repair
-for immutable TrialManifest recovery authority. The repair needs, at minimum:
-
-1. mandatory non-empty per-round policy/tool snapshots for schema-v1 Alpha
-   TrialManifests;
-2. aggregate digest validation plus exact current-round validation;
-3. `AlphaTrialState.trial_manifest_digest` binding on every resume;
-4. a storage rule preventing ordinary mutable replacement of an existing
-   immutable `alpha_trial_manifest`;
-5. tests for replacing both SQLite authority and JSON mirror with empty or
-   self-consistent forged snapshots before a new model request.
-
-After that repair, rerun the focused integrations, the full offline gate,
-Ruff, whitespace check, and one independent scoped re-review before Task 7.
+The main controller should independently verify the pushed SHA and this
+handoff. If accepted, Task 7 may start in a new independent implementation
+task. This repair session must not start Task 7 itself.
