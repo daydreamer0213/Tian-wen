@@ -1,5 +1,9 @@
 # Tian-wen：本地、可审计的持续学习竖切
 
+> 主控架构会话在恢复讨论前，应先阅读
+> [`docs/architecture-master-session-memory.md`](docs/architecture-master-session-memory.md)。
+> 该文档记录长期架构共识、会话职责和实施监督入口，不替代具体实施计划。
+
 ## 1. Tian-wen 是什么，不是什么
 
 Tian-wen 是一个独立的 Python Agent 控制面，不是 Codex Skill、不是 Codex 插件，也不依赖 Codex 才能运行。它把一个明确目标、受限探索、仓库任务、学习候选、外部评估和人工发布串成可追溯记录。它不是自主后台服务、网页产品、插件平台、第二套 Agent 框架、向量数据库，也不会训练模型。持续学习是通用过程（先在仓库任务上验证），v1 只发布 `repo_task` Skill；路由、策略等其他对象只能形成研究建议。
