@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from pydantic_ai.messages import UserPromptPart
 from pydantic_ai.models.test import TestModel
 
 from tianwen.alpha_docker import DockerExecutionError, DockerPreflight, VerifierResult
@@ -23,11 +24,22 @@ class _Model(TestModel):
         super().__init__(custom_output_text=output, call_tools=[])
         self.request_count = 0
         self.prompts: list[str] = []
+        self.request_payloads: list[dict[str, Any]] = []
         self.fail = fail
 
     async def request(self, messages: list[Any], *args: Any, **kwargs: Any) -> Any:
         self.request_count += 1
         self.prompts.append(str(messages))
+        self.request_payloads.append(
+            json.loads(
+                next(
+                    part.content
+                    for message in messages
+                    for part in message.parts
+                    if isinstance(part, UserPromptPart) and isinstance(part.content, str)
+                )
+            )
+        )
         if self.fail:
             raise RuntimeError("provider unavailable")
         return await super().request(messages, *args, **kwargs)
@@ -338,13 +350,13 @@ async def test_confirmation_must_match_exact_preview_digest(runner: Any) -> None
 
 @pytest.mark.anyio
 async def test_a5_uses_one_goal_two_runs_one_workspace_and_shared_budget(tmp_path: Path) -> None:
-    from tianwen.alpha import AlphaTrialRunner
+    from tianwen.alpha import AlphaTrialRunner, TrialManifest
 
-    root = _bundle(tmp_path / "tasks", "A5")
+    root = Path(__file__).parents[2] / "alpha"
     model, docker = _Model(), _Docker()
     runner = AlphaTrialRunner(
-        task_root=root,
-        image_lock_path=root / "image.lock",
+        task_root=root / "tasks",
+        image_lock_path=root / "environment" / "image.lock",
         data_root=_data_root(),
         model=model,
         public_evaluator_key=Ed25519PrivateKey.generate().public_key(),
@@ -369,12 +381,35 @@ async def test_a5_uses_one_goal_two_runs_one_workspace_and_shared_budget(tmp_pat
     assert all(run.manifest.trial_id == result.trial_id for run in runs)
     assert result.workspace_path == str(prepared.paths.workspace)
     assert result.usage.model_requests == 2
-    assert "casefold" not in model.prompts[0]
-    assert "(none)" not in model.prompts[0]
-    assert (
-        content_digest("Use casefold and preserve satisfied round-1 behavior; (none) may regress.")
-        not in model.prompts[0]
-    )
+    goal = runner.store.get_object("goal", result.goal_id, GoalContract)
+    manifest = runner.store.get_object("alpha_trial_manifest", result.trial_id, TrialManifest)
+    assert goal.budget == prepared.preview.budget == manifest.budget
+    assert all(run.manifest.goal_contract_digest == content_digest(goal) for run in runs)
+    assert all(run.manifest.workspace_digest == content_digest(str(prepared.paths.workspace.resolve())) for run in runs)
+    assert all(run.manifest.skill_versions["repo_task"] == manifest.champion_version_id for run in runs)
+    assert all(run.manifest.skill_digests["repo_task"] == manifest.champion_digest for run in runs)
+    assert all(run.manifest.trial_manifest_digest == content_digest(manifest) for run in runs)
+    authorities = manifest.runtime_policy_snapshot["rounds"]
+    assert authorities["round-1"]["policy"]["public_check_ids"] == ["round-1"]
+    assert authorities["round-2"]["policy"]["public_check_ids"] == ["round-2"]
+    assert model.request_payloads[0]["instruction"] == prepared.preview.rounds[0].instruction
+    assert prepared.preview.rounds[1].feedback is not None
+    feedback = prepared.preview.rounds[1].feedback
+    assert model.request_payloads[1]["feedback"] == feedback
+    for value in (feedback, "casefold", "(none)"):
+        assert value not in json.dumps(
+            {
+                "prompt": model.request_payloads[0],
+                "policy": authorities["round-1"],
+                "tools": manifest.tool_contract_snapshot["rounds"]["round-1"],
+                "evidence": runner.app.goal_evidence_packet(goal.goal_id),
+                "errors": [run.status_reason for run in runs],
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+    assert "casefold" in model.request_payloads[1]["feedback"]
+    assert "(none)" in model.request_payloads[1]["feedback"]
 
 
 @pytest.mark.anyio
