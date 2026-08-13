@@ -161,6 +161,10 @@ class RepoTaskRuntime:
             except BudgetExceeded:
                 self._set_run_status(run, RunStatus.WAITING, "model_budget_exhausted")
                 raise
+            except Exception as error:
+                self._set_run_status(run, RunStatus.FAILED, type(error).__name__)
+                self.store.append_event(run.run_id, "run_failed", {"error_class": type(error).__name__})
+                raise
             return self._persist_result(run, result)
         finally:
             self.store.renew_lease(run.run_id, owner_id, generation, ttl_seconds=0)
@@ -207,6 +211,10 @@ class RepoTaskRuntime:
             except BudgetExceeded:
                 self._set_run_status(run, RunStatus.WAITING, "model_budget_exhausted")
                 raise
+            except Exception as error:
+                self._set_run_status(run, RunStatus.FAILED, type(error).__name__)
+                self.store.append_event(run.run_id, "run_failed", {"error_class": type(error).__name__})
+                raise
             return self._persist_result(run, result)
         finally:
             self.store.renew_lease(run.run_id, owner_id, generation, ttl_seconds=0)
@@ -243,6 +251,10 @@ class RepoTaskRuntime:
                 raise
             except BudgetExceeded:
                 self._set_run_status(run, RunStatus.WAITING, "model_budget_exhausted")
+                raise
+            except Exception as error:
+                self._set_run_status(run, RunStatus.FAILED, type(error).__name__)
+                self.store.append_event(run.run_id, "run_failed", {"error_class": type(error).__name__})
                 raise
             return self._persist_result(run, result)
         finally:

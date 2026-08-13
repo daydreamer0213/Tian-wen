@@ -139,6 +139,22 @@ class RunManifest(FrozenModel):
     tool_contract_digest: str
     goal_contract_digest: str
     workspace_digest: str
+    trial_id: str | None = None
+    round_id: str | None = None
+    trial_manifest_digest: str | None = None
+
+    @model_validator(mode="after")
+    def validate_schema_bindings(self) -> RunManifest:
+        bindings = (self.trial_id, self.round_id, self.trial_manifest_digest)
+        if self.schema_version == "1" and any(value is not None for value in bindings):
+            raise ValueError("v1 run manifest cannot contain alpha bindings")
+        if self.schema_version == "2" and any(value is None for value in bindings):
+            raise ValueError("v2 run manifest requires alpha trial bindings")
+        if self.schema_version == "2" and not self.prompt_digest.strip():
+            raise ValueError("v2 run manifest requires a prompt digest")
+        if self.schema_version not in {"1", "2"}:
+            raise ValueError("unsupported run manifest schema")
+        return self
 
 
 class RunRecord(FrozenModel):

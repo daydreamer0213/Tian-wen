@@ -54,6 +54,11 @@ class _UnmeteredModel(TestModel):
         return response
 
 
+class _ProviderFailureModel(TestModel):
+    async def request(self, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("provider detail")
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -225,6 +230,22 @@ async def test_missing_provider_usage_keeps_the_full_token_reservation_and_waits
     }
     persisted = runtime.store.get_object("run", run.run_id, RunRecord)
     assert (persisted.status, persisted.status_reason) == (RunStatus.WAITING, "unmetered_model_usage")
+
+
+@pytest.mark.anyio
+async def test_provider_failure_settles_run_without_persisting_provider_detail(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path, _ProviderFailureModel(call_tools=[]))
+    run = _run("provider failure", runtime)
+    _persist_run(runtime, run)
+
+    with pytest.raises(RuntimeError, match="provider detail"):
+        await runtime.run(run, "provider failure")
+
+    persisted = runtime.store.get_object("run", run.run_id, RunRecord)
+    events = runtime.store.list_events(run.run_id)
+    assert (persisted.status, persisted.status_reason) == (RunStatus.FAILED, "RuntimeError")
+    assert events[-1].kind == "run_failed"
+    assert "provider detail" not in "\n".join(event.model_dump_json() for event in events)
 
 
 @pytest.mark.anyio
