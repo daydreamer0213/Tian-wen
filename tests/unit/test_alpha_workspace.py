@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -170,7 +171,14 @@ def test_git_diff_does_not_execute_model_controlled_attributes(alpha_data_root: 
     bundle = _bundle(tmp_path, allowed_write_patterns=("module.py",))
     paths, _ = _create_for_test(alpha_data_root, "trial-1", bundle)
     marker = paths.trial_dir / "external-diff-ran"
+    driver = paths.trial_dir / "untrusted-diff.cmd"
+    driver.write_text(f'@echo off\necho ran > "{marker}"\n', encoding="utf-8")
     (paths.workspace / ".gitattributes").write_text("*.py diff=hostcommand\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "config", "diff.hostcommand.command", driver.as_posix()],
+        cwd=paths.workspace,
+        check=True,
+    )
     (paths.workspace / "module.py").write_text("changed\n", encoding="utf-8")
 
     evidence = capture_git_evidence(paths)
@@ -211,3 +219,43 @@ def test_artifact_entries_and_credential_scan_are_bounded_and_secret_safe(
         artifact_entries(paths, ("trial-result.json",))
     with pytest.raises(AlphaWorkspaceError, match="relative"):
         artifact_entries(paths, (str(paths.logs / "model.log"),))
+
+
+def test_authority_snapshot_survives_registry_reset_and_rejects_tampering(
+    alpha_data_root: Path, tmp_path: Path
+) -> None:
+    bundle = _bundle(tmp_path)
+    paths, _ = _create_for_test(alpha_data_root, "trial-1", bundle)
+    (paths.workspace / "module.py").write_text("changed\n", encoding="utf-8")
+
+    alpha_workspace._TASK_BY_TRIAL_DIR.clear()
+
+    evidence = capture_git_evidence(paths)
+    assert evidence.changed_files == ("module.py",)
+    assert artifact_entries(paths, ("diff.patch",))[0].path == "diff.patch"
+
+    authority = paths.state / "authority.json"
+    raw = json.loads(authority.read_text(encoding="utf-8"))
+    raw["task"]["limits"]["max_trial_bytes"] = 1
+    authority.write_text(json.dumps(raw), encoding="utf-8")
+    alpha_workspace._TASK_BY_TRIAL_DIR.clear()
+
+    with pytest.raises(AlphaWorkspaceError, match="authority"):
+        artifact_entries(paths, ("diff.patch",))
+
+
+def test_credential_scan_covers_nested_controller_artifacts_not_workspace(
+    alpha_data_root: Path, tmp_path: Path
+) -> None:
+    bundle = _bundle(tmp_path)
+    paths, _ = _create_for_test(alpha_data_root, "trial-1", bundle)
+    sentinel = "nested-secret-sentinel"
+    for relative in ("outputs/model/round-1.json", "actions/round-1/action.json", "events/round-1/event.json"):
+        write_bounded_artifact(paths, bundle.task, relative, sentinel.encode())
+    (paths.workspace / "module.py").write_text(sentinel, encoding="utf-8")
+
+    assert scan_for_credential_value(paths, sentinel) == (
+        "actions/round-1/action.json",
+        "events/round-1/event.json",
+        "outputs/model/round-1.json",
+    )

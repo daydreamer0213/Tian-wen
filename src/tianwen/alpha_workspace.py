@@ -19,6 +19,7 @@ from tianwen.domain import FrozenModel, content_digest
 _PUBLIC_DRIVE = "D:"
 _RESULT_RESERVE_BYTES = 1024 * 1024
 _TASK_BY_TRIAL_DIR: dict[Path, AlphaTask] = {}
+_AUTHORITY_RELATIVE_PATH = "state/authority.json"
 
 
 class AlphaWorkspaceError(ValueError):
@@ -100,6 +101,40 @@ def _git_environment(paths: AlphaTrialPaths) -> dict[str, str]:
     }
 
 
+def _authority_snapshot(task: AlphaTask) -> bytes:
+    task_json = task.model_dump(mode="json")
+    payload = {
+        "task": task_json,
+        "task_digest": content_digest(task_json),
+    }
+    return (json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def _write_authority_snapshot(paths: AlphaTrialPaths, task: AlphaTask) -> None:
+    raw = _authority_snapshot(task)
+    write_bounded_artifact(paths, task, _AUTHORITY_RELATIVE_PATH, raw)
+
+
+def _load_authority_snapshot(paths: AlphaTrialPaths) -> AlphaTask:
+    _, target = _artifact_relative(paths, _AUTHORITY_RELATIVE_PATH)
+    try:
+        raw = target.read_bytes()
+        payload = json.loads(raw.decode("utf-8"))
+        task_data = payload["task"]
+        task_digest = payload["task_digest"]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise AlphaWorkspaceError("invalid authority snapshot") from error
+    if not isinstance(task_digest, str) or content_digest(task_data) != task_digest:
+        _error("invalid authority snapshot digest")
+    try:
+        task = AlphaTask.model_validate(task_data)
+    except ValueError as error:
+        raise AlphaWorkspaceError("invalid authority snapshot") from error
+    if _authority_snapshot(task) != raw:
+        _error("invalid authority snapshot canonical encoding")
+    return task
+
+
 def _run_git(paths: AlphaTrialPaths, argv: list[str]) -> bytes:
     try:
         completed = subprocess.run(
@@ -115,7 +150,9 @@ def _run_git(paths: AlphaTrialPaths, argv: list[str]) -> bytes:
     return completed.stdout
 
 
-def _walk_files(root: Path, *, exclude_git: bool = False) -> list[tuple[str, bytes]]:
+def _walk_files(
+    root: Path, *, exclude_git: bool = False, excluded_top_level: frozenset[str] = frozenset()
+) -> list[tuple[str, bytes]]:
     try:
         root_info = root.lstat()
     except OSError as error:
@@ -131,7 +168,7 @@ def _walk_files(root: Path, *, exclude_git: bool = False) -> list[tuple[str, byt
             if stat.S_ISLNK(info.st_mode) or _is_reparse(child):
                 _error(f"symbolic link or reparse point is forbidden: {relative}")
             if stat.S_ISDIR(info.st_mode):
-                if exclude_git and relative == ".git":
+                if (exclude_git and child.name == ".git") or relative in excluded_top_level:
                     continue
                 visit(child)
             elif stat.S_ISREG(info.st_mode):
@@ -241,6 +278,7 @@ def _create_trial_workspace(
             "alpha baseline",
         ],
     )
+    _write_authority_snapshot(paths, bundle.task)
     _TASK_BY_TRIAL_DIR[paths.trial_dir.resolve()] = bundle.task
     return paths, snapshot_tree(paths.workspace)
 
@@ -351,7 +389,9 @@ def _task_for_artifact_limit(paths: AlphaTrialPaths) -> AlphaTask:
     try:
         return _TASK_BY_TRIAL_DIR[paths.trial_dir.resolve(strict=True)]
     except KeyError:
-        _error("trial task authority is unavailable")
+        task = _load_authority_snapshot(paths)
+        _TASK_BY_TRIAL_DIR[paths.trial_dir.resolve(strict=True)] = task
+        return task
 
 
 def _artifact_relative(paths: AlphaTrialPaths, relative_path: str) -> tuple[str, Path]:
@@ -430,12 +470,9 @@ def scan_for_credential_value(paths: AlphaTrialPaths, sentinel: str) -> tuple[st
         return ()
     needle = sentinel.encode("utf-8")
     locations: list[str] = []
-    for base in (paths.logs, paths.state):
-        if base.exists():
-            for relative, raw in _walk_files(base):
-                if needle in raw:
-                    locations.append(f"{base.relative_to(paths.trial_dir).as_posix()}/{relative}")
-    for path in (paths.trial_manifest_json, paths.trial_result_json, paths.diff_patch):
-        if path.is_file() and needle in path.read_bytes():
-            locations.append(path.relative_to(paths.trial_dir).as_posix())
+    for relative, raw in _walk_files(
+        paths.trial_dir, exclude_git=True, excluded_top_level=frozenset({"workspace"})
+    ):
+        if needle in raw:
+            locations.append(relative)
     return tuple(sorted(set(locations)))
