@@ -23,9 +23,15 @@ Date: 2026-08-14
 - Task 8 implementation commit:
   `43eebed610e604edf7d7154f31ca89df6bd398a3`
   (`test: add source-grounded alpha compatibility task`)
+- First handoff-document commit:
+  `cc4d1ff86dc803620334500d598cc856c728bc11`
+  (`docs: hand off alpha task eight`)
+- A docs-only correction commit may follow the first handoff-document commit.
+  Its final pushed SHA is supplied post-push.
 - Intended remote branch: `codex/alpha-a-real-task`
-- This Codex-managed worktree is detached. The final handoff records the
-  handoff-document commit, pushed HEAD, and `ls-remote` result.
+- This Codex-managed worktree is detached. This canonical document records
+  all pre-push evidence. The post-push structured controller handoff records
+  the final commit, pushed HEAD, and `ls-remote` result.
 
 ## Exact scope
 
@@ -303,7 +309,9 @@ implementation commit. Verdict:
 - Important: none;
 - Minor: none.
 
-No fix round was required.
+Fix Round 1 was limited to clarifying where pre-push evidence and post-push
+commit/remote evidence are recorded. It made no production or test behavior
+change.
 
 ## Product-boundary note
 
