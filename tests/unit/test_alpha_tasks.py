@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,7 @@ import pytest
 
 from tianwen.alpha_tasks import (
     AlphaTaskError,
+    content_digest,
     directory_digest,
     freeze_task_bundle,
     load_task_bundle,
@@ -102,6 +104,109 @@ def _raw(task_dir: Path) -> dict[str, Any]:
 
 def _save(task_dir: Path, raw: dict[str, Any]) -> None:
     (task_dir / "task.json").write_text(json.dumps(raw), encoding="utf-8")
+
+
+def _git_blob_digest(raw: bytes) -> str:
+    return hashlib.sha1(f"blob {len(raw)}\0".encode("ascii") + raw).hexdigest()
+
+
+def _canonical_lf_frozen_bundle(tmp_path: Path) -> tuple[Path, Path]:
+    task_dir, lock = _minimal_bundle_contents(tmp_path)
+    raw: dict[str, Any] = {
+        "schema_version": "tianwen.alpha_task.v1",
+        "task_id": "A1",
+        "task_version": "1.0.0",
+        "title": "Minimal task",
+        "instruction_digest": content_digest((task_dir / "instruction.md").read_bytes()),
+        "rounds": [
+            {
+                "round_id": "round-1",
+                "instruction_digest": content_digest((task_dir / "instruction.md").read_bytes()),
+                "public_check_ids": ["public"],
+            }
+        ],
+        "public_acceptance": ["public check passes"],
+        "baseline_tree_digest": directory_digest(task_dir / "seed", logical_prefix="seed/"),
+        "container_image_digest": "sha256:manifest",
+        "named_checks": [
+            {
+                "check_id": "public",
+                "script": "public.py",
+                "script_digest": content_digest((task_dir / "checks" / "public.py").read_bytes()),
+                "argv": ["python", "-I", "/checks/public.py", "/workspace"],
+                "timeout_seconds": 15,
+                "output_limit_bytes": 65536,
+            }
+        ],
+        "final_verifier": {
+            "verifier_id": "final",
+            "digest": content_digest((task_dir / "verifier" / "verify.py").read_bytes()),
+            "argv": ["python", "-I", "/checks/verify.py", "/workspace"],
+            "timeout_seconds": 15,
+            "output_limit_bytes": 65536,
+        },
+        "limits": {
+            "max_seed_bytes": 4096,
+            "max_changed_files": 1,
+            "max_changed_bytes": 4096,
+            "max_trial_bytes": 8192,
+            "min_free_bytes": 0,
+            "memory_bytes": 1024 * 1024,
+            "cpus": 1.0,
+            "pids": 16,
+            "tmpfs_bytes": 1024 * 1024,
+        },
+        "allowed_write_patterns": ["module.py"],
+        "protected_patterns": [".git/**"],
+    }
+    (task_dir / "task.json").write_bytes(
+        json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+    )
+    return task_dir, lock
+
+
+def _minimal_bundle_contents(tmp_path: Path) -> tuple[Path, Path]:
+    task_dir = tmp_path / "A1"
+    _write(task_dir / "seed" / "module.py", "VALUE = 1\n")
+    _write(task_dir / "instruction.md", "Change the module.")
+    _write(task_dir / "checks" / "public.py", "print('public')\n")
+    _write(task_dir / "verifier" / "verify.py", "print('verify')\n")
+    _write(task_dir / "reference" / "solution.patch", "diff --git a/module.py b/module.py\n")
+    lock = tmp_path / "image.lock"
+    lock.write_text(
+        json.dumps(
+            {
+                "schema_version": "tianwen.alpha_image.v1",
+                "reference": "python:3.12.11-slim-bookworm",
+                "immutable_reference": "python@sha256:manifest",
+                "platform": "linux/amd64",
+                "manifest_digest": "sha256:manifest",
+                "platform_digest": "sha256:platform",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return task_dir, lock
+
+
+def test_freeze_preserves_canonical_lf_bytes_and_bound_digests_on_first_and_second_freeze(tmp_path: Path) -> None:
+    task_dir, lock = _canonical_lf_frozen_bundle(tmp_path)
+    before = (task_dir / "task.json").read_bytes()
+    before_bundle = load_task_bundle(task_dir, lock)
+
+    first_bundle = freeze_task_bundle(task_dir, lock)
+    first = (task_dir / "task.json").read_bytes()
+    second_bundle = freeze_task_bundle(task_dir, lock)
+    second = (task_dir / "task.json").read_bytes()
+
+    assert before == first == second
+    assert b"\r" not in before
+    assert before.endswith(b"\n")
+    assert not before.endswith(b"\n\n")
+    assert hashlib.sha256(before).hexdigest() == hashlib.sha256(first).hexdigest() == hashlib.sha256(second).hexdigest()
+    assert _git_blob_digest(before) == _git_blob_digest(first) == _git_blob_digest(second)
+    assert before_bundle.task_bundle_digest == first_bundle.task_bundle_digest == second_bundle.task_bundle_digest
+    assert before_bundle.model_input_digest == first_bundle.model_input_digest == second_bundle.model_input_digest
 
 
 def test_freeze_writes_derived_fields_and_runtime_load_is_read_only(tmp_path: Path) -> None:

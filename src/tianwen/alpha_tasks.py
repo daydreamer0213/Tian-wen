@@ -538,5 +538,5 @@ def freeze_task_bundle(task_dir: Path, image_lock_path: Path) -> AlphaTaskBundle
     except ValidationError as error:
         raise AlphaTaskError(f"invalid frozen authority: {error}") from error
     serialized = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
-    (root / "task.json").write_text(serialized, encoding="utf-8")
+    (root / "task.json").write_bytes(serialized.encode("utf-8"))
     return load_task_bundle(root, lock_path)

@@ -4,8 +4,9 @@ Date: 2026-08-14
 
 ## Status
 
-- Task 8 is complete.
-- A3 is authored as a frozen, source-grounded compatibility task.
+- Task 8 is controller-acceptance-pending the canonical-freeze newline repair.
+- A3 remains authored as a source-grounded compatibility task; its existing
+  package bytes are not changed by this repair.
 - Its one official Python API fact is consumed through the existing recorded
   exploration path and reaches the execution model only as governed,
   escaped untrusted Evidence.
@@ -13,7 +14,7 @@ Date: 2026-08-14
   repeatability.
 - Independent task-scoped review approved both specification compliance and
   code quality with no Critical, Important, or Minor findings.
-- Task 9 was not started.
+- Task 9 remains frozen and was not started.
 
 ## Branch and commits
 
@@ -204,7 +205,7 @@ The six final checks cover list order, tuple order, string scalar behavior,
 mixed mapping and sequence order, normal space/ampersand escaping, and input
 container preservation.
 
-## Canonical re-freeze and Windows newline note
+## Historical canonical re-freeze and Windows newline note
 
 Two consecutive `freeze_task_bundle()` calls in the current Windows checkout
 produced identical:
@@ -221,13 +222,19 @@ Task JSON Git object:
 ```
 
 The checked-out repository inherits system `core.autocrlf=true`.
-`freeze_task_bundle()` rewrites `task.json` through Python text I/O, so a clean
-LF-only temporary checkout changes its final newline to CRLF on the first
-freeze. The JSON fields are unchanged, `git diff` is empty after Git newline
-normalization, and `git hash-object` remains exactly the committed object
-`7739f4b...`. The second freeze is byte-for-byte stable. This is the same
-committed-object hash-stability criterion recorded by Task 7; it is not an
-authority-field change.
+Historically, `freeze_task_bundle()` rewrote `task.json` through Python text
+I/O, so a clean LF-only temporary checkout changed its final newline to CRLF
+on the first freeze. The JSON fields were unchanged, `git diff` was empty
+after Git newline normalization, and `git hash-object` remained exactly the
+committed object `7739f4b...`. The second freeze was byte-for-byte stable in
+that already-converted state.
+
+That historical result is not a passing canonical re-freeze result: the first
+freeze changed the actual task bytes and therefore the load-bearing
+`task_bundle_digest`, even though Git's normalized object identity was stable.
+The Task 8 infrastructure repair must preserve LF-only bytes, digest, and
+bundle binding from the first freeze onward. Historical test and push evidence
+above is preserved; repair-specific evidence is recorded separately.
 
 For tests that load frozen A1/A2 bytes, final verification used the
 LF-only worktree `D:\DevData\tianwen-alpha-task8-final` created with
