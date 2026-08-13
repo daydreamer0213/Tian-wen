@@ -41,6 +41,7 @@ class _Docker:
         self.final_calls: list[str] = []
         self.check_calls: list[tuple[str, str]] = []
         self.preflight_calls = 0
+        self.seed_preflight_calls = 0
 
     def preflight(self) -> DockerPreflight:
         self.preflight_calls += 1
@@ -57,6 +58,7 @@ class _Docker:
         )
 
     async def run_seed_preflight(self) -> VerifierResult:
+        self.seed_preflight_calls += 1
         return VerifierResult(
             verdict="not_met",
             passed_checks=(),
@@ -72,6 +74,10 @@ class _Docker:
     async def run(self, action_id: str, check_id: str) -> dict[str, str]:
         self.check_calls.append((action_id, check_id))
         return {"action_id": action_id, "check_id": check_id}
+
+
+def _effect_counts(docker: _Docker) -> tuple[int, int, int, int]:
+    return docker.preflight_calls, docker.seed_preflight_calls, len(docker.check_calls), len(docker.final_calls)
 
 
 def _budget(model_requests: int = 4) -> BudgetLimit:
@@ -482,6 +488,63 @@ async def test_a5_recovery_revalidates_tampered_round_two_authority_before_model
 
 
 @pytest.mark.anyio
+async def test_a5_recovery_rejects_self_consistent_manifest_missing_bundle_round_before_effects(tmp_path: Path) -> None:
+    """Break caught: matching forged stores cannot drop a frozen bundle round."""
+    from tianwen.alpha import AlphaTrialError, AlphaTrialState
+
+    root, docker = _bundle(tmp_path / "tasks", "A5"), _Docker()
+    runner = _runner(root, _Model(), docker)
+    prepared = runner.prepare("A5", budget=_budget())
+    _goal, manifest, first = _persist_running_trial(runner, prepared)
+    kept_round = "round-1"
+    forged_policy = {
+        **manifest.runtime_policy_snapshot,
+        "rounds": {kept_round: manifest.runtime_policy_snapshot["rounds"][kept_round]},
+    }
+    forged_tools = {
+        **manifest.tool_contract_snapshot,
+        "rounds": {kept_round: manifest.tool_contract_snapshot["rounds"][kept_round]},
+    }
+    forged = manifest.model_copy(
+        update={
+            "runtime_policy_snapshot": forged_policy,
+            "runtime_policy_digest": content_digest(forged_policy),
+            "tool_contract_snapshot": forged_tools,
+            "tool_contract_digest": content_digest(forged_tools),
+            "round_order_digest": content_digest(json.dumps([kept_round])),
+        }
+    )
+    forged_json = forged.model_dump_json()
+    with sqlite3.connect(runner.store.database) as connection:
+        connection.execute(
+            "UPDATE tw_objects SET body_json = ? WHERE kind = ? AND object_id = ?",
+            (forged_json, "alpha_trial_manifest", prepared.preview.trial_id),
+        )
+    prepared.paths.trial_manifest_json.write_text(forged_json, encoding="utf-8")
+    state = runner.store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
+    runner.store.put_object(
+        "alpha_trial_state",
+        state.trial_id,
+        None,
+        "running",
+        state.model_copy(update={"trial_manifest_digest": content_digest(forged)}),
+    )
+    recovered_model = _Model()
+    recovered = _runner(root, recovered_model, docker, prepared.paths.data_root)
+    before_actions = len(runner.store.list_actions(first.run_id))
+    before_runs = runner.store.list_objects("run", RunRecord)
+    before_effects = _effect_counts(docker)
+
+    with pytest.raises(AlphaTrialError, match="trial manifest"):
+        await recovered.resume(prepared.preview.trial_id)
+
+    assert recovered_model.request_count == 0
+    assert len(recovered.store.list_actions(first.run_id)) == before_actions
+    assert recovered.store.list_objects("run", RunRecord) == before_runs
+    assert _effect_counts(docker) == before_effects
+
+
+@pytest.mark.anyio
 async def test_a3_records_frozen_source_before_execution_model_request(tmp_path: Path) -> None:
     from tianwen.alpha import AlphaTrialRunner
 
@@ -717,8 +780,8 @@ async def test_execute_revalidates_seed_preflight_and_manifest_authority(tmp_pat
 
 
 @pytest.mark.anyio
-async def test_resume_prepared_waits_without_goal_and_confirmed_stage_continues(tmp_path: Path) -> None:
-    """Break caught: durable prepared/confirmed stages must not be terminal-only errors."""
+async def test_resume_confirmed_prepared_trial_fails_closed_before_effects(tmp_path: Path) -> None:
+    """Break caught: a confirmed trial without a manifest cannot resume into Docker effects."""
     from tianwen.alpha import AlphaTrialError, AlphaTrialRunner
 
     root, docker = _bundle(tmp_path / "tasks", "A1"), _Docker()
@@ -743,8 +806,16 @@ async def test_resume_prepared_waits_without_goal_and_confirmed_stage_continues(
         "confirmed",
         _confirmation(prepared),
     )
-    result = await recovered.resume(prepared.preview.trial_id)
-    assert result.trial_id == prepared.preview.trial_id
+    before_effects = _effect_counts(docker)
+    with pytest.raises(AlphaTrialError, match="manifest"):
+        await recovered.resume(prepared.preview.trial_id)
+
+    assert recovered.model.request_count == 0
+    assert recovered.store.list_objects("goal", GoalContract) == []
+    assert recovered.store.list_objects("run", RunRecord) == []
+    with sqlite3.connect(recovered.store.database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM tw_actions").fetchone() == (0,)
+    assert _effect_counts(docker) == before_effects
 
 
 @pytest.mark.anyio
@@ -1241,9 +1312,9 @@ async def test_resume_unknown_action_never_restarts_the_same_round_effect(tmp_pa
 
 
 @pytest.mark.anyio
-async def test_confirmed_pre_manifest_resume_reuses_its_exact_goal(tmp_path: Path) -> None:
-    """Break caught: resume after Goal creation must discover that exact Goal, never make a second one."""
-    from tianwen.alpha import AlphaTrialRunner
+async def test_confirmed_pre_manifest_resume_with_existing_goal_fails_closed(tmp_path: Path) -> None:
+    """Break caught: an existing Goal cannot authorize no-manifest recovery effects."""
+    from tianwen.alpha import AlphaTrialError, AlphaTrialRunner
 
     root, docker = _bundle(tmp_path / "tasks", "A1"), _Docker()
     runner = _runner(root, _Model(), docker)
@@ -1268,7 +1339,11 @@ async def test_confirmed_pre_manifest_resume_reuses_its_exact_goal(tmp_path: Pat
         allowed_drive="D:",
     )
 
-    result = await recovered.resume(prepared.preview.trial_id)
+    before_effects = _effect_counts(docker)
+    with pytest.raises(AlphaTrialError, match="manifest"):
+        await recovered.resume(prepared.preview.trial_id)
 
-    assert result.goal_id == goal.goal_id
-    assert len(recovered.store.list_objects("goal", GoalContract)) == 1
+    assert recovered.model.request_count == 0
+    assert recovered.store.list_objects("goal", GoalContract) == [goal]
+    assert recovered.store.list_objects("run", RunRecord) == []
+    assert _effect_counts(docker) == before_effects

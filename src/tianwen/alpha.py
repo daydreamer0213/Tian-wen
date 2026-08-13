@@ -559,36 +559,10 @@ class AlphaTrialRunner:
         self.app, self.store = app, app.store
         if state.stage == "prepared":
             try:
-                confirmation = app.store.get_object("alpha_trial_confirmation", trial_id, TrialConfirmation)
+                app.store.get_object("alpha_trial_confirmation", trial_id, TrialConfirmation)
             except StateConflict as error:
                 raise AlphaTrialError("confirmation is required before resuming a prepared trial") from error
-            matches = [
-                item
-                for item in app.store.list_objects("goal", GoalContract)
-                if (
-                    item.objective == preview.objective
-                    and item.success_criteria == preview.acceptance
-                    and item.authorization == preview.authorizations
-                    and item.budget == preview.budget
-                )
-            ]
-            if len(matches) > 1:
-                raise AlphaTrialError("more than one Goal matches confirmed pre-manifest trial")
-            if matches:
-                state = state.model_copy(update={"goal_id": matches[0].goal_id})
-                self._put_state(app.store, state)
-            prepared = PreparedTrial(
-                bundle,
-                paths,
-                snapshot_tree(paths.workspace),
-                self.docker_factory(paths, bundle, app.store).preflight(),
-                self._run(self.docker_factory(paths, bundle, app.store).run_seed_preflight()),
-                preview.champion_version_id,
-                preview.champion_digest,
-                preview,
-                app,
-            )
-            return await self.execute(prepared, confirmation)
+            raise AlphaTrialError("trial manifest is required before resuming a confirmed prepared trial")
         try:
             manifest = app.store.get_object("alpha_trial_manifest", trial_id, TrialManifest)
             mirrored_manifest = TrialManifest.model_validate_json(paths.trial_manifest_json.read_bytes())
@@ -602,6 +576,7 @@ class AlphaTrialRunner:
             or state.trial_manifest_digest != mirrored_manifest_digest
         ):
             raise AlphaTrialError("trial manifest authority does not match canonical mirror")
+        self._validate_manifest_bundle(manifest, bundle)
         goal = app.store.get_object("goal", state.goal_id or "", GoalContract)
         baseline = snapshot_tree(bundle.root / "seed")
         if baseline.digest != manifest.baseline_tree_digest or baseline.digest != bundle.task.baseline_tree_digest:
@@ -1071,6 +1046,22 @@ class AlphaTrialRunner:
             != prepared.seed_verifier
         ):
             raise AlphaTrialError("prepared seed verifier no longer matches frozen authority")
+
+    @staticmethod
+    def _validate_manifest_bundle(manifest: TrialManifest, bundle: AlphaTaskBundle) -> None:
+        expected_round_ids = [round_spec.round_id for round_spec in bundle.task.rounds]
+        policy_rounds = manifest.runtime_policy_snapshot.get("rounds")
+        tool_rounds = manifest.tool_contract_snapshot.get("rounds")
+        if (
+            not isinstance(policy_rounds, dict)
+            or not isinstance(tool_rounds, dict)
+            or list(policy_rounds) != expected_round_ids
+            or list(tool_rounds) != expected_round_ids
+            or set(policy_rounds) != set(expected_round_ids)
+            or set(tool_rounds) != set(expected_round_ids)
+            or manifest.round_order_digest != content_digest(json.dumps(expected_round_ids))
+        ):
+            raise AlphaTrialError("trial manifest round authority does not match frozen task bundle")
 
     def _paths(self, trial_id: str) -> AlphaTrialPaths:
         root = self.data_root / "runs" / trial_id
