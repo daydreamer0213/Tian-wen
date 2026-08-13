@@ -89,3 +89,27 @@ Implemented the single `DockerCheckExecutor` boundary and the narrow StateStore 
 ### Remaining risk
 
 - Docker Desktop behavior is not integration-tested here by design; the private process/CLI fakes enforce the serialized arguments and recovery semantics without contacting a real Engine.
+
+## Fix round 3
+
+### RED / GREEN
+
+- RED: an inspect failure during timeout control escaped before the attached Docker CLI was reaped; exact-limit output was treated as overflow; reconcile timeout returned no terminal verifier result when logs failed.
+- GREEN: attached-process reap is now in the timeout control `finally` path, exact-limit EOF is accepted, and exact terminal reconcile persists an inconclusive verifier timeout even when bounded logs are unavailable.
+
+### Fixes
+
+- Any timeout control branch that has an attached process now attempts one bounded reap. Control/inspect failures remain fixed-code recoverable failures with a digested audit detail.
+- Live timeout saves the actually captured bounded stream bytes directly, including an empty capture; it does not depend on a later `docker logs` call.
+- Reconcile timeout treats logs as best effort after exact terminal identity verification. A logs failure records only a fixed/digested `logs_unavailable` audit detail and persists the correctly typed timeout result.
+- Output reaches timeout only after bytes beyond the limit are observed; exactly `limit` bytes followed by EOF pass normally.
+
+### Verification
+
+- `uv run pytest tests\unit\test_alpha_docker.py tests\unit\test_store.py -q` — 52 passed.
+- `uv run ruff check src\tianwen\alpha_docker.py src\tianwen\store.py tests\unit\test_alpha_docker.py tests\unit\test_store.py` — passed.
+- `git diff --check` — passed.
+
+### Remaining risk
+
+- Docker Engine integration remains intentionally out of scope; all tests use fake CLI/spawn/stream boundaries and do not invoke Docker, network, or models.

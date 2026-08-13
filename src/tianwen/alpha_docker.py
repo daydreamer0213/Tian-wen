@@ -392,7 +392,7 @@ class DockerCheckExecutor:
                 take = min(len(chunk), max(0, limit - used))
                 output[stream].extend(chunk[:take])
                 used += take
-                if take != len(chunk) or used >= limit:
+                if take != len(chunk):
                     timed_out = True
                     break
                 reader = process.stdout if stream == "stdout" else process.stderr
@@ -548,12 +548,25 @@ class DockerCheckExecutor:
     async def _settle_timeout(
         self, record: CheckExecutionRecord, stream: _StreamResult
     ) -> CheckResult | VerifierResult:
-        observed, control_detail = await self._stop_wait_inspect(record)
+        observed: dict[str, Any] | None = None
+        control_detail = "control"
+        control_error = False
         try:
-            await self._reap_attached(stream.process)
-        except DockerExecutionError:
-            self._audit(record.action_id, "check_timeout_control_failed", control_detail + ";reap")
-            raise
+            observed, control_detail = await self._stop_wait_inspect(record)
+        except (DockerExecutionError, TimeoutError) as error:
+            control_detail = f"control_error={content_digest(str(error))}"
+            control_error = True
+        finally:
+            try:
+                await self._reap_attached(stream.process)
+            except DockerExecutionError:
+                self._audit(record.action_id, "check_timeout_control_failed", control_detail + ";reap")
+                if control_error:
+                    raise DockerExecutionError("docker_timeout_control_unverified") from None
+                raise
+        if control_error:
+            self._audit(record.action_id, "check_timeout_control_failed", control_detail)
+            raise DockerExecutionError("docker_timeout_control_unverified")
         if observed is None or not self._inspect_matches(record, observed) or observed.get("State", {}).get("Running"):
             self._audit(record.action_id, "check_timeout_control_failed", control_detail)
             raise DockerExecutionError("docker_timeout_control_unverified")
@@ -562,8 +575,6 @@ class DockerCheckExecutor:
             self._audit(record.action_id, "check_timeout_control_failed", control_detail + ";exit")
             raise DockerExecutionError("docker_timeout_control_unverified")
         stdout, stderr = stream.stdout, stream.stderr
-        if not stdout and not stderr:
-            stdout, stderr = await self._logs(record.container_id, self._output_limit(record))
         result = self._timeout_result(record, code, stdout, stderr)
         self._save_terminal(record, result, code=code, output_evidence=content_digest(stdout + stderr))
         raise TimeoutError("docker_check_timeout")
@@ -699,8 +710,8 @@ class DockerCheckExecutor:
             try:
                 stdout, stderr = await self._logs(record.container_id, self._output_limit(record))
             except DockerExecutionError:
-                self._audit(action_id, "check_timeout_control_failed", control_detail + ";logs")
-                return None
+                stdout, stderr = b"", b""
+                self._audit(action_id, "check_timeout_control_failed", control_detail + ";logs_unavailable")
             timeout_result = self._timeout_result(record, code, stdout, stderr)
             self._save_terminal(record, timeout_result, code=code, output_evidence=content_digest(stdout + stderr))
             self._audit(action_id, "check_reconciled", "timeout")

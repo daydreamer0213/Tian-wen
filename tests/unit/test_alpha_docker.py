@@ -378,6 +378,92 @@ async def test_timeout_control_running_inspect_keeps_durable_running_record(
 
 
 @pytest.mark.anyio
+async def test_timeout_inspect_error_always_reaps_attached_process(
+    executor: DockerCheckExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attached = _Attached([b"x" * 17], [b""], 137)
+
+    async def checked(_argv: list[str], *, kind: str, timeout: float = 10) -> tuple[bytes, bytes]:
+        return ((_CONTAINER_ID + "\n").encode(), b"") if kind == "create" else (b"", b"")
+
+    async def spawn(_id: str) -> _Attached:
+        return attached
+
+    async def cli(_argv: list[str], *, timeout: float) -> tuple[int, bytes, bytes]:
+        return 0, b"", b""
+
+    async def inspect(_id: str) -> dict[str, Any]:
+        raise DockerExecutionError("docker_inspect_failed")
+
+    monkeypatch.setattr(executor, "_checked_cli", checked)
+    monkeypatch.setattr(executor, "_spawn_attached", spawn)
+    monkeypatch.setattr(executor, "_cli", cli)
+    monkeypatch.setattr(executor, "_inspect", inspect)
+
+    with pytest.raises(DockerExecutionError, match="docker_timeout_control_unverified"):
+        await executor.run("action:inspect-error", "public")
+
+    assert attached.wait_calls == 1
+    assert executor._record("action:inspect-error").status == "running"
+
+
+@pytest.mark.anyio
+async def test_exact_output_limit_with_eof_is_not_timeout(
+    executor: DockerCheckExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def checked(_argv: list[str], *, kind: str, timeout: float = 10) -> tuple[bytes, bytes]:
+        return ((_CONTAINER_ID + "\n").encode(), b"") if kind == "create" else (b"", b"")
+
+    async def spawn(_id: str) -> _Attached:
+        return _Attached([b"1234567890123456", b""], [b""], 0)
+
+    async def inspect(_id: str) -> dict[str, Any]:
+        return _inspect(executor, "action:limit", code=0)
+
+    monkeypatch.setattr(executor, "_checked_cli", checked)
+    monkeypatch.setattr(executor, "_spawn_attached", spawn)
+    monkeypatch.setattr(executor, "_inspect", inspect)
+
+    result = await executor.run("action:limit", "public")
+
+    assert result.check_passed and not result.timed_out
+
+
+@pytest.mark.anyio
+async def test_reconcile_final_timeout_logs_failure_still_persists_replayable_verdict(
+    executor: DockerCheckExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = _record(executor, "action:reconcile-final", final=True).model_copy(
+        update={"deadline_at": datetime.now(UTC) - timedelta(seconds=1)}
+    )
+    executor._save_record(record)
+    running = _inspect(executor, "action:reconcile-final", code=0, running=True)
+    terminal = _inspect(executor, "action:reconcile-final", code=137)
+    _make_final_inspect(executor, running, "action:reconcile-final")
+    _make_final_inspect(executor, terminal, "action:reconcile-final")
+    inspections = iter((running, terminal, terminal))
+
+    async def inspect(_id: str) -> dict[str, Any]:
+        return next(inspections)
+
+    async def cli(_argv: list[str], *, timeout: float) -> tuple[int, bytes, bytes]:
+        return 0, b"", b""
+
+    async def logs(_id: str, _limit: int) -> tuple[bytes, bytes]:
+        raise DockerExecutionError("docker_logs_failed:exit=1")
+
+    monkeypatch.setattr(executor, "_inspect", inspect)
+    monkeypatch.setattr(executor, "_cli", cli)
+    monkeypatch.setattr(executor, "_logs", logs)
+
+    result = await executor.reconcile("action:reconcile-final")
+
+    assert isinstance(result, VerifierResult)
+    assert result.verdict == "inconclusive" and result.failure_categories == ("timeout",)
+    assert await executor.reconcile("action:reconcile-final") == result
+
+
+@pytest.mark.anyio
 async def test_start_spawn_failure_leaves_created_record_for_never_started_recovery(
     executor: DockerCheckExecutor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
