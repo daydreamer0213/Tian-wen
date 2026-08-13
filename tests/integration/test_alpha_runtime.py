@@ -412,6 +412,36 @@ async def test_non_check_timeout_fails_run_truthfully(alpha_runtime: Any, alpha_
 
 
 @pytest.mark.anyio
+async def test_timeout_with_unknown_check_and_write_fails_truthfully(alpha_runtime: Any, alpha_run: RunRecord) -> None:
+    alpha_runtime.model = _TimeoutModel(call_tools=[])
+    check = freeze_action(
+        alpha_runtime.store,
+        alpha_run.run_id,
+        "call-check",
+        "run_check",
+        {"check_id": "public"},
+        EffectClass.EXTERNAL_READ_ONLY,
+    )
+    write = freeze_action(
+        alpha_runtime.store,
+        alpha_run.run_id,
+        "call-write",
+        "write_file",
+        {"path": "module.py", "content": "changed"},
+        EffectClass.REVERSIBLE_WORKSPACE_WRITE,
+    )
+    for action in (check, write):
+        alpha_runtime.store.transition_action(action.action_id, {ActionStatus.PROPOSED}, ActionStatus.RUNNING)
+    alpha_runtime.store.mark_inflight_actions_unknown(alpha_run.run_id)
+
+    with pytest.raises(TimeoutError, match="provider timeout"):
+        await alpha_runtime.run(alpha_run, _prompt(alpha_run))
+
+    persisted = alpha_runtime.store.get_object("run", alpha_run.run_id, RunRecord)
+    assert (persisted.status, persisted.status_reason) == (RunStatus.FAILED, "TimeoutError")
+
+
+@pytest.mark.anyio
 async def test_unknown_check_is_denied_before_executor(alpha_runtime: Any, alpha_run: RunRecord) -> None:
     alpha_runtime.model = _ToolModel("run_check", {"check_id": "not-registered"})
     await alpha_runtime.run(alpha_run, _prompt(alpha_run))

@@ -17,6 +17,7 @@ from tianwen.alpha_docker import DockerCheckExecutor
 from tianwen.alpha_tasks import AlphaTaskBundle
 from tianwen.alpha_workspace import AlphaTrialPaths, TreeSnapshot, project_file_action, snapshot_tree
 from tianwen.domain import (
+    ActionRecord,
     ActionStatus,
     CheckpointRecord,
     GoalContract,
@@ -133,11 +134,11 @@ class AlphaRuntime(RepoTaskRuntime):
                 self._set_run_status(run, RunStatus.WAITING, "model_budget_exhausted")
                 raise
             except TimeoutError:
-                action_ids = self._unknown_check_actions(run.run_id)
-                if len(action_ids) == 1:
+                action_ids = self._unknown_actions(run.run_id)
+                if len(action_ids) == 1 and action_ids[0].tool_name == "run_check":
                     self._set_run_status(run, RunStatus.WAITING, "unknown_action")
-                    self.store.append_event(run.run_id, "run_check_timeout", {"action_id": action_ids[0]})
-                    return RuntimeOutcome(None, action_ids)
+                    self.store.append_event(run.run_id, "run_check_timeout", {"action_id": action_ids[0].action_id})
+                    return RuntimeOutcome(None, (action_ids[0].action_id,))
                 self._set_run_status(run, RunStatus.FAILED, "TimeoutError")
                 self.store.append_event(run.run_id, "run_failed", {"error_class": "TimeoutError"})
                 raise
@@ -326,12 +327,8 @@ class AlphaRuntime(RepoTaskRuntime):
             args,
         )
 
-    def _unknown_check_actions(self, run_id: str) -> tuple[str, ...]:
-        return tuple(
-            action.action_id
-            for action in self.store.list_actions(run_id)
-            if action.tool_name == "run_check" and action.status is ActionStatus.UNKNOWN
-        )
+    def _unknown_actions(self, run_id: str) -> tuple[ActionRecord, ...]:
+        return tuple(action for action in self.store.list_actions(run_id) if action.status is ActionStatus.UNKNOWN)
 
     def _validate_manifest(self, run: RunRecord, prompt: str | None = None) -> None:
         manifest = run.manifest
