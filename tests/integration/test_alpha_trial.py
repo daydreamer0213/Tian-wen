@@ -392,9 +392,12 @@ async def test_a5_uses_one_goal_two_runs_one_workspace_and_shared_budget(tmp_pat
     authorities = manifest.runtime_policy_snapshot["rounds"]
     assert authorities["round-1"]["policy"]["public_check_ids"] == ["round-1"]
     assert authorities["round-2"]["policy"]["public_check_ids"] == ["round-2"]
-    assert model.request_payloads[0]["instruction"] == prepared.preview.rounds[0].instruction
-    assert prepared.preview.rounds[1].feedback is not None
-    feedback = prepared.preview.rounds[1].feedback
+    task_dir = root / "tasks" / "A5"
+    instruction = (task_dir / "instruction.md").read_text(encoding="utf-8")
+    feedback = (task_dir / "feedback" / "round-2.md").read_text(encoding="utf-8")
+    assert model.request_payloads[0]["instruction"] == instruction
+    assert model.request_payloads[0]["feedback"] is None
+    assert model.request_payloads[1]["instruction"] == instruction
     assert model.request_payloads[1]["feedback"] == feedback
     for value in (feedback, "casefold", "(none)"):
         assert value not in json.dumps(

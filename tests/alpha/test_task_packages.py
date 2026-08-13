@@ -43,15 +43,13 @@ def _workspace(tmp_path: Path, task_dir: Path) -> Path:
     return workspace
 
 
-def _run_check(task_dir: Path, check: str, workspace: Path) -> str:
-    completed = subprocess.run(
+def _run_check(task_dir: Path, check: str, workspace: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         [sys.executable, "-I", str(task_dir / "checks" / check), str(workspace)],
-        check=True,
         capture_output=True,
         text=True,
         timeout=15,
     )
-    return completed.stdout
 
 
 def test_run_verifier_retains_raw_stdout(tmp_path: Path) -> None:
@@ -83,6 +81,26 @@ def test_a5_has_exactly_two_frozen_rounds_and_preregistered_feedback() -> None:
     assert bundle.feedback_by_round["round-2"].startswith("# 第二轮反馈")
 
 
+def test_a4_public_check_is_repeatable_before_and_after_reference_patch(tmp_path: Path) -> None:
+    task_dir = ROOT / "alpha" / "tasks" / "A4"
+    workspace = _workspace(tmp_path, task_dir)
+
+    nop_results = [_run_check(task_dir, "public.py", workspace) for _ in range(2)]
+    assert all(result.returncode != 0 for result in nop_results)
+    assert nop_results[0].stdout == nop_results[1].stdout
+
+    subprocess.run(
+        ["git", "apply", "--whitespace=nowarn", str(task_dir / "reference" / "solution.patch")],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        timeout=15,
+    )
+    oracle_results = [_run_check(task_dir, "public.py", workspace) for _ in range(2)]
+    assert all(result.returncode == 0 for result in oracle_results)
+    assert oracle_results[0].stdout == oracle_results[1].stdout
+
+
 def test_a5_round_one_fixture_and_final_oracle_are_repeatable(tmp_path: Path) -> None:
     task_dir = ROOT / "alpha" / "tasks" / "A5"
     fixture = '''from __future__ import annotations
@@ -106,7 +124,9 @@ def render_report(
 
     first = _workspace(tmp_path, task_dir)
     first.joinpath("reports.py").write_text(fixture, encoding="utf-8")
-    assert _run_check(task_dir, "round_1.py", first) == _run_check(task_dir, "round_1.py", first)
+    first_checks = [_run_check(task_dir, "round_1.py", first) for _ in range(2)]
+    assert all(result.returncode == 0 for result in first_checks)
+    assert first_checks[0].stdout == first_checks[1].stdout
     first_raw = _run_verifier(task_dir, first)
     assert first_raw == _run_verifier(task_dir, first)
     assert json.loads(first_raw)["verdict"] == "not_met"
@@ -131,7 +151,9 @@ def render_report(
     assert all(result.returncode != 0 for result in round_one_results)
     assert round_one_results[0].stdout == round_one_results[1].stdout
     assert round_one_results[0].stderr == round_one_results[1].stderr
-    assert _run_check(task_dir, "round_2.py", final) == _run_check(task_dir, "round_2.py", final)
+    final_checks = [_run_check(task_dir, "round_2.py", final) for _ in range(2)]
+    assert all(result.returncode == 0 for result in final_checks)
+    assert final_checks[0].stdout == final_checks[1].stdout
     final_raw = _run_verifier(task_dir, final)
     assert final_raw == _run_verifier(task_dir, final)
     assert json.loads(final_raw)["verdict"] == "met"
