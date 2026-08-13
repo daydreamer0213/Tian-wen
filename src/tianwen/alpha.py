@@ -571,21 +571,11 @@ class AlphaTrialRunner:
                 raise AlphaTrialError("more than one incomplete Alpha Run cannot be resumed")
             if incomplete:
                 run = incomplete[0]
-                runtime = AlphaRuntime(
-                    app.store,
-                    SqliteStepStore(database=app.store.database),
-                    self.model,
-                    AlphaRuntimeConfig(
-                        paths.workspace,
-                        app.materialize_skill(manifest.champion_version_id),
-                        bundle,
-                        paths,
-                        run.manifest.round_id or "",
-                        content_digest(manifest),
-                    ),
-                    self.docker_factory(paths, bundle, app.store),
-                )
-                await runtime.recover(run)
+                outcome = await self._runtime(
+                    prepared, self._runtime_config(prepared, manifest, run.manifest.round_id or "")
+                ).recover(run)
+                if outcome is not None and outcome.waiting_action_ids:
+                    return await self._settle(prepared, goal, manifest, tuple(state.run_ids), (), ["unknown_action"])
             state = app.store.get_object("alpha_trial_state", trial_id, AlphaTrialState)
             run_ids = list(state.run_ids)
             completed_round_ids = {
@@ -626,15 +616,7 @@ class AlphaTrialRunner:
         settings = sanitize_model_settings(self.model)
         provider_name, provider_url, model_id = sanitize_provider(self.model)
         packet = app.goal_evidence_packet(goal.goal_id)
-        runtime_config = AlphaRuntimeConfig(
-            prepared.paths.workspace,
-            app.materialize_skill(prepared.champion_version_id),
-            bundle,
-            prepared.paths,
-            bundle.task.rounds[0].round_id,
-            "sha256:pending",
-        )
-        runtime_digests = alpha_runtime_manifest_digests(runtime_config)
+        policy_snapshot, tool_snapshot = self._round_authority(prepared, goal)
         named_checks = {item.check_id: item.model_dump(mode="json") for item in bundle.task.named_checks}
         verifier = bundle.task.final_verifier.model_dump(mode="json")
         container = {
@@ -664,10 +646,10 @@ class AlphaTrialRunner:
             harness_version=version("pydantic-ai-harness"),
             champion_version_id=prepared.champion_version_id,
             champion_digest=prepared.champion_digest,
-            runtime_policy_snapshot={},
-            runtime_policy_digest=runtime_digests["policy_digest"],
-            tool_contract_snapshot={},
-            tool_contract_digest=runtime_digests["tool_contract_digest"],
+            runtime_policy_snapshot=policy_snapshot,
+            runtime_policy_digest=content_digest(policy_snapshot),
+            tool_contract_snapshot=tool_snapshot,
+            tool_contract_digest=content_digest(tool_snapshot),
             image_manifest_digest=bundle.image_lock.manifest_digest,
             image_platform_digest=bundle.image_lock.platform_digest,
             container_config_snapshot=container,
@@ -681,12 +663,10 @@ class AlphaTrialRunner:
             workspace_identity=content_digest(str(prepared.paths.workspace.resolve())),
         )
 
-    async def _run_round(
-        self, prepared: PreparedTrial, goal: GoalContract, manifest_digest: str, round_id: str
-    ) -> RunRecord:
-        app, bundle, store = prepared._app, prepared._bundle, prepared._app.store
+    def _round_prompt(self, prepared: PreparedTrial, goal: GoalContract, round_id: str) -> str:
+        bundle = prepared._bundle
         round_spec = next(item for item in bundle.task.rounds if item.round_id == round_id)
-        prompt = json.dumps(
+        return json.dumps(
             {
                 "goal_id": goal.goal_id,
                 "goal_contract_digest": content_digest(goal),
@@ -694,20 +674,70 @@ class AlphaTrialRunner:
                 "instruction": bundle.instruction,
                 "public_check_ids": round_spec.public_check_ids,
                 "feedback": bundle.feedback_by_round.get(round_id),
-                "evidence_packet": app.goal_evidence_packet(goal.goal_id),
+                "evidence_packet": prepared._app.goal_evidence_packet(goal.goal_id),
                 "boundaries": "workspace only; no shell",
             },
             ensure_ascii=False,
             sort_keys=True,
         )
-        config = AlphaRuntimeConfig(
+
+    def _round_authority(
+        self, prepared: PreparedTrial, goal: GoalContract
+    ) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
+        policies: dict[str, JsonValue] = {}
+        tools: dict[str, JsonValue] = {}
+        for round_spec in prepared._bundle.task.rounds:
+            prompt = self._round_prompt(prepared, goal, round_spec.round_id)
+            digests = alpha_runtime_manifest_digests(
+                self._runtime_config(prepared, None, round_spec.round_id, "sha256:pending")
+            )
+            policies[round_spec.round_id] = {
+                "prompt": json.loads(prompt),
+                "prompt_digest": content_digest(prompt),
+                "policy": digests["policy_snapshot"],
+                "policy_digest": digests["policy_digest"],
+            }
+            tools[round_spec.round_id] = {
+                "prompt_digest": content_digest(prompt),
+                "tool_contract": digests["tool_contract_snapshot"],
+                "tool_contract_digest": digests["tool_contract_digest"],
+            }
+        return (
+            {"schema": "tianwen.alpha_trial_round_policy.v1", "rounds": policies},
+            {"schema": "tianwen.alpha_trial_round_tools.v1", "rounds": tools},
+        )
+
+    def _runtime_config(
+        self,
+        prepared: PreparedTrial,
+        manifest: TrialManifest | None,
+        round_id: str,
+        manifest_digest: str | None = None,
+    ) -> AlphaRuntimeConfig:
+        return AlphaRuntimeConfig(
             prepared.paths.workspace,
-            app.materialize_skill(prepared.champion_version_id),
-            bundle,
+            prepared._app.materialize_skill(prepared.champion_version_id),
+            prepared._bundle,
             prepared.paths,
             round_id,
-            manifest_digest,
+            manifest_digest or (content_digest(manifest) if manifest is not None else "sha256:pending"),
         )
+
+    def _runtime(self, prepared: PreparedTrial, config: AlphaRuntimeConfig) -> AlphaRuntime:
+        return AlphaRuntime(
+            prepared._app.store,
+            SqliteStepStore(database=prepared._app.store.database),
+            self.model,
+            config,
+            self.docker_factory(prepared.paths, prepared._bundle, prepared._app.store),
+        )
+
+    async def _run_round(
+        self, prepared: PreparedTrial, goal: GoalContract, manifest_digest: str, round_id: str
+    ) -> RunRecord:
+        app, bundle, store = prepared._app, prepared._bundle, prepared._app.store
+        prompt = self._round_prompt(prepared, goal, round_id)
+        config = self._runtime_config(prepared, None, round_id, manifest_digest)
         digests = alpha_runtime_manifest_digests(config)
         run = RunRecord(
             run_id=f"alpha:{prepared.preview.trial_id}:{round_id}",
@@ -735,13 +765,7 @@ class AlphaTrialRunner:
         state = store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
         if run.run_id not in state.run_ids:
             self._put_state(store, state.model_copy(update={"run_ids": (*state.run_ids, run.run_id)}))
-        runtime = AlphaRuntime(
-            store,
-            SqliteStepStore(database=store.database),
-            self.model,
-            config,
-            self.docker_factory(prepared.paths, bundle, store),
-        )
+        runtime = self._runtime(prepared, config)
         try:
             outcome = await runtime.run(run, prompt)
             if outcome.output is not None:
@@ -773,6 +797,10 @@ class AlphaTrialRunner:
         state = store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
         self._put_state(store, state.model_copy(update={"stage": "settling", "run_ids": run_ids}))
         evidence = capture_git_evidence(prepared.paths)
+        unresolved = any(
+            any(action.tool_name != "final_verify" for action in store.unresolved_actions(run_id))
+            for run_id in (*run_ids, *exploration_run_ids)
+        )
         final_run_id = (
             run_ids[-1]
             if run_ids
@@ -781,9 +809,13 @@ class AlphaTrialRunner:
             else self._settlement_run(prepared, goal, manifest)
         )
         result: VerifierResult | None = None
-        verification_status: Literal["completed", "unavailable", "invalid"] = "completed"
+        verification_status: Literal["completed", "unavailable", "invalid"] = (
+            "unavailable" if unresolved else "completed"
+        )
         final_action_id = ""
         try:
+            if unresolved:
+                raise DockerExecutionError("unresolved action")
             args = {"verifier_id": "final", "verifier_digest": bundle.task.final_verifier.digest}
             action_id = proposal_action_id(
                 final_run_id, f"alpha-final-{prepared.preview.trial_id}", "final_verify", args
@@ -870,7 +902,7 @@ class AlphaTrialRunner:
         )
         if stop_reasons:
             execution_status = "stopped" if execution_status != "failed" else execution_status
-        unresolved = any(
+        unresolved = unresolved or any(
             store.unresolved_actions(run_id) for run_id in (*run_ids, *exploration_run_ids, final_run_id)
         )
         credentials = tuple(

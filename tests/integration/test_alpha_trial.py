@@ -38,6 +38,7 @@ class _Docker:
             verdict="met", passed_checks=("final",), failed_checks=(), failure_categories=(), summary="ok"
         )
         self.final_calls: list[str] = []
+        self.check_calls: list[tuple[str, str]] = []
         self.preflight_calls = 0
 
     def preflight(self) -> DockerPreflight:
@@ -68,6 +69,7 @@ class _Docker:
         return self.final
 
     async def run(self, action_id: str, check_id: str) -> dict[str, str]:
+        self.check_calls.append((action_id, check_id))
         return {"action_id": action_id, "check_id": check_id}
 
 
@@ -94,6 +96,15 @@ def _bundle(root: Path, task_id: str) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     rounds: list[dict[str, Any]] = [{"round_id": "round-1", "public_check_ids": ["public"]}]
+    named_checks: list[dict[str, Any]] = [
+        {
+            "check_id": "public",
+            "script": "public.py",
+            "argv": ["python", "-I", "/checks/public.py", "/workspace"],
+            "timeout_seconds": 15,
+            "output_limit_bytes": 1024,
+        }
+    ]
     sources: list[dict[str, Any]] = []
     if task_id == "A5":
         feedback = "Use casefold and preserve satisfied round-1 behavior; (none) may regress."
@@ -102,8 +113,18 @@ def _bundle(root: Path, task_id: str) -> Path:
         rounds.append(
             {
                 "round_id": "round-2",
-                "public_check_ids": ["public"],
+                "public_check_ids": ["round-2-public"],
                 "follow_up_feedback_digest": content_digest(feedback.encode()),
+            }
+        )
+        (task / "checks" / "round-2.py").write_text("print('ok')\n", encoding="utf-8")
+        named_checks.append(
+            {
+                "check_id": "round-2-public",
+                "script": "round-2.py",
+                "argv": ["python", "-I", "/checks/round-2.py", "/workspace"],
+                "timeout_seconds": 15,
+                "output_limit_bytes": 1024,
             }
         )
     if task_id == "A3":
@@ -145,15 +166,7 @@ def _bundle(root: Path, task_id: str) -> Path:
         "title": f"Alpha {task_id}",
         "rounds": rounds,
         "public_acceptance": ["public behavior passes"],
-        "named_checks": [
-            {
-                "check_id": "public",
-                "script": "public.py",
-                "argv": ["python", "-I", "/checks/public.py", "/workspace"],
-                "timeout_seconds": 15,
-                "output_limit_bytes": 1024,
-            }
-        ],
+        "named_checks": named_checks,
         "final_verifier": {
             "verifier_id": "final",
             "argv": ["python", "-I", "/checks/verify.py", "/workspace"],
@@ -246,6 +259,8 @@ def _persist_running_trial(runner: Any, prepared: Any, *, round_id: str = "round
     )
     prepared.paths.trial_manifest_json.write_bytes(manifest.model_dump_json().encode("utf-8"))
     run_id = f"alpha:{prepared.preview.trial_id}:{round_id}"
+    round_authority = manifest.runtime_policy_snapshot["rounds"][round_id]
+    round_tools = manifest.tool_contract_snapshot["rounds"][round_id]
     run = RunRecord(
         run_id=run_id,
         task_id=runner.app.goal_task(goal.goal_id).task_id,
@@ -256,11 +271,11 @@ def _persist_running_trial(runner: Any, prepared: Any, *, round_id: str = "round
             pydantic_ai_version="2.18.0",
             harness_version="0.13.0",
             model_id=prepared.preview.model_id,
-            prompt_digest=content_digest("interrupted"),
+            prompt_digest=round_authority["prompt_digest"],
             skill_versions={"repo_task": manifest.champion_version_id},
             skill_digests={"repo_task": manifest.champion_digest},
-            policy_digest=manifest.runtime_policy_digest,
-            tool_contract_digest=manifest.tool_contract_digest,
+            policy_digest=round_authority["policy_digest"],
+            tool_contract_digest=round_tools["tool_contract_digest"],
             goal_contract_digest=manifest.goal_contract_digest,
             workspace_digest=content_digest(str(prepared.paths.workspace.resolve())),
             trial_id=prepared.preview.trial_id,
@@ -352,6 +367,92 @@ async def test_a5_uses_one_goal_two_runs_one_workspace_and_shared_budget(tmp_pat
         content_digest("Use casefold and preserve satisfied round-1 behavior; (none) may regress.")
         not in model.prompts[0]
     )
+
+
+@pytest.mark.anyio
+async def test_a5_manifest_freezes_each_round_prompt_policy_and_tool_authority(tmp_path: Path) -> None:
+    """Break caught: round-2 authority must be frozen separately without leaking feedback into round 1."""
+    from tianwen.alpha import TrialManifest
+    from tianwen.alpha_runtime import alpha_runtime_manifest_digests
+
+    root, docker = _bundle(tmp_path / "tasks", "A5"), _Docker()
+    runner = _runner(root, _Model(), docker)
+    prepared = runner.prepare("A5", budget=_budget())
+    result = await runner.execute(prepared, _confirmation(prepared))
+
+    manifest = runner.store.get_object("alpha_trial_manifest", result.trial_id, TrialManifest)
+    authorities = manifest.runtime_policy_snapshot["rounds"]
+    tools = manifest.tool_contract_snapshot["rounds"]
+    assert set(authorities) == {"round-1", "round-2"}
+    assert set(tools) == {"round-1", "round-2"}
+    assert authorities["round-1"]["prompt"]["feedback"] is None
+    assert authorities["round-2"]["prompt"]["feedback"] == (
+        "Use casefold and preserve satisfied round-1 behavior; (none) may regress."
+    )
+    assert authorities["round-1"]["policy"]["public_check_ids"] == ["public"]
+    assert authorities["round-2"]["policy"]["public_check_ids"] == ["round-2-public"]
+    assert authorities["round-1"]["policy_digest"] != authorities["round-2"]["policy_digest"]
+    assert authorities["round-1"]["prompt_digest"] != authorities["round-2"]["prompt_digest"]
+    assert manifest.runtime_policy_digest == content_digest(manifest.runtime_policy_snapshot)
+    assert manifest.tool_contract_digest == content_digest(manifest.tool_contract_snapshot)
+    runs = {
+        run.manifest.round_id: run
+        for run in (runner.store.get_object("run", run_id, RunRecord) for run_id in result.run_ids)
+    }
+    assert runs["round-1"].manifest.policy_digest == authorities["round-1"]["policy_digest"]
+    assert runs["round-2"].manifest.tool_contract_digest == tools["round-2"]["tool_contract_digest"]
+
+    tampered = manifest.model_copy(
+        update={
+            "runtime_policy_snapshot": {
+                **manifest.runtime_policy_snapshot,
+                "rounds": {
+                    **authorities,
+                    "round-2": {**authorities["round-2"], "policy_digest": "sha256:tampered"},
+                },
+            }
+        }
+    )
+    runner.store.put_object("alpha_trial_manifest", result.trial_id, result.goal_id, "active", tampered)
+    prepared.paths.trial_manifest_json.write_bytes(tampered.model_dump_json().encode("utf-8"))
+    config = runner._runtime_config(prepared, tampered, "round-2", runs["round-2"].manifest.trial_manifest_digest)
+    with pytest.raises(Exception, match="trial manifest"):
+        runner._runtime(prepared, config)._validate_manifest(runs["round-2"])
+    assert alpha_runtime_manifest_digests(config)["policy_digest"] != "sha256:tampered"
+
+
+@pytest.mark.anyio
+async def test_a5_recovery_revalidates_tampered_round_two_authority_before_model(tmp_path: Path) -> None:
+    """Break caught: recovery must revalidate round-2 authority before any replacement model request."""
+    root, docker = _bundle(tmp_path / "tasks", "A5"), _Docker()
+    runner = _runner(root, _Model(), docker)
+    prepared = runner.prepare("A5", budget=_budget())
+    goal, manifest, _first = _persist_running_trial(runner, prepared)
+    authorities = manifest.runtime_policy_snapshot["rounds"]
+    tampered = manifest.model_copy(
+        update={
+            "runtime_policy_snapshot": {
+                **manifest.runtime_policy_snapshot,
+                "rounds": {
+                    **authorities,
+                    "round-2": {**authorities["round-2"], "policy_digest": "sha256:tampered"},
+                },
+            }
+        }
+    )
+    runner.store.put_object("alpha_trial_manifest", prepared.preview.trial_id, goal.goal_id, "active", tampered)
+    prepared.paths.trial_manifest_json.write_bytes(tampered.model_dump_json().encode("utf-8"))
+    recovered_model = _Model()
+    recovered = _runner(root, recovered_model, docker, prepared.paths.data_root)
+
+    result = await recovered.resume(prepared.preview.trial_id)
+
+    round_two = recovered.store.get_object(
+        "run", f"alpha:{prepared.preview.trial_id}:round-2", RunRecord
+    )
+    assert recovered_model.request_count == 0
+    assert round_two.status is RunStatus.QUEUED
+    assert result.execution_status == "stopped"
 
 
 @pytest.mark.anyio
@@ -1013,6 +1114,52 @@ async def test_resume_running_recovers_the_persisted_incomplete_run(
 
     assert recovered_runs == [run_id]
     assert result.run_ids == (run_id,)
+
+
+@pytest.mark.anyio
+async def test_resume_unknown_action_never_restarts_the_same_round_effect(tmp_path: Path) -> None:
+    """Break caught: an unreconciled effect must stop truthfully, never make a replacement model/check Action."""
+
+    class _UnknownDocker(_Docker):
+        async def reconcile(self, _action_id: str) -> None:
+            return None
+
+    from tianwen.alpha import AlphaTrialState
+
+    root, docker = _bundle(tmp_path / "tasks", "A1"), _UnknownDocker()
+    runner = _runner(root, _Model(), docker)
+    prepared = runner.prepare("A1", budget=_budget())
+    goal, manifest, persisted = _persist_running_trial(runner, prepared)
+    unknown = freeze_action(
+        runner.store,
+        persisted.run_id,
+        "interrupted-check",
+        "run_check",
+        {"check_id": "public"},
+        EffectClass.EXTERNAL_READ_ONLY,
+    )
+    runner.store.transition_action(unknown.action_id, {ActionStatus.PROPOSED}, ActionStatus.UNKNOWN)
+    waiting = persisted.model_copy(update={"status": RunStatus.WAITING, "status_reason": "unknown_action"})
+    runner.store.put_object("run", waiting.run_id, waiting.task_id, "waiting", waiting)
+    state = runner.store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
+    runner.store.put_object(
+        "alpha_trial_state", state.trial_id, None, "running", state.model_copy(update={"stage": "running"})
+    )
+    recovered_model = _Model()
+    recovered = _runner(root, recovered_model, docker, prepared.paths.data_root)
+    before_actions = len(runner.store.list_actions(persisted.run_id))
+    before_checks = len(docker.check_calls)
+
+    result = await recovered.resume(prepared.preview.trial_id)
+
+    assert recovered_model.request_count == 0
+    assert len(recovered.store.list_actions(persisted.run_id)) == before_actions
+    assert len(docker.check_calls) == before_checks
+    assert docker.final_calls == []
+    assert result.execution_status == "stopped"
+    assert result.boundary_status == "unknown"
+    assert result.run_ids == (persisted.run_id,)
+    assert recovered.store.get_object("run", persisted.run_id, RunRecord).status is RunStatus.WAITING
 
 
 @pytest.mark.anyio
