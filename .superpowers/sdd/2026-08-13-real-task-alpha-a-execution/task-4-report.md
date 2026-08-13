@@ -113,3 +113,22 @@ Implemented the single `DockerCheckExecutor` boundary and the narrow StateStore 
 ### Remaining risk
 
 - Docker Engine integration remains intentionally out of scope; all tests use fake CLI/spawn/stream boundaries and do not invoke Docker, network, or models.
+
+## Fix round 4
+
+### RED / GREEN
+
+- RED: reconcile timeout allowed a fixed `TimeoutError` from best-effort logs to escape instead of preserving an exact-terminal verifier timeout record.
+- GREEN: logs `DockerExecutionError` and fixed `TimeoutError` both use empty bounded evidence, a digested `logs_unavailable` audit detail, and persist the correctly typed public/final timeout record.
+
+### Fixes
+
+- The exact-terminal timeout logs fallback now catches only `DockerExecutionError` and `TimeoutError`; it does not broadly catch exceptions.
+- The attached-process reaping regression now drives real `_inspect` via an exact `inspect` CLI argv timeout, confirming one reap, a recoverable running record, and only fixed/digested audit/error details.
+- Added final reconcile timeout coverage for a logs `TimeoutError` and replay of the terminal `VerifierResult`.
+
+### Verification
+
+- `uv run pytest tests\unit\test_alpha_docker.py tests\unit\test_store.py -q` — 53 passed.
+- `uv run ruff check src\tianwen\alpha_docker.py src\tianwen\store.py tests\unit\test_alpha_docker.py tests\unit\test_store.py` — passed.
+- `git diff --check` — passed.

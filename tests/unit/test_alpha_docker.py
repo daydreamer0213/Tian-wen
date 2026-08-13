@@ -389,22 +389,29 @@ async def test_timeout_inspect_error_always_reaps_attached_process(
     async def spawn(_id: str) -> _Attached:
         return attached
 
-    async def cli(_argv: list[str], *, timeout: float) -> tuple[int, bytes, bytes]:
-        return 0, b"", b""
+    secret = f"{executor.paths.workspace} DEEPSEEK_API_KEY secret-value raw-stderr"
 
-    async def inspect(_id: str) -> dict[str, Any]:
-        raise DockerExecutionError("docker_inspect_failed")
+    async def cli(argv: list[str], *, timeout: float) -> tuple[int, bytes, bytes]:
+        if argv[-2] == "inspect":
+            raise TimeoutError(secret)
+        return 0, b"", b""
 
     monkeypatch.setattr(executor, "_checked_cli", checked)
     monkeypatch.setattr(executor, "_spawn_attached", spawn)
     monkeypatch.setattr(executor, "_cli", cli)
-    monkeypatch.setattr(executor, "_inspect", inspect)
 
-    with pytest.raises(DockerExecutionError, match="docker_timeout_control_unverified"):
+    with pytest.raises(DockerExecutionError, match="docker_timeout_control_unverified") as raised:
         await executor.run("action:inspect-error", "public")
 
     assert attached.wait_calls == 1
     assert executor._record("action:inspect-error").status == "running"
+    assert secret not in str(raised.value)
+    from tianwen.alpha_docker import CheckExecutionAudit
+
+    audit = executor.store.get_object(
+        "check_execution_audit", "action:inspect-error:check_timeout_control_failed", CheckExecutionAudit
+    )
+    assert secret not in audit.detail_digest
 
 
 @pytest.mark.anyio
@@ -461,6 +468,40 @@ async def test_reconcile_final_timeout_logs_failure_still_persists_replayable_ve
     assert isinstance(result, VerifierResult)
     assert result.verdict == "inconclusive" and result.failure_categories == ("timeout",)
     assert await executor.reconcile("action:reconcile-final") == result
+
+
+@pytest.mark.anyio
+async def test_reconcile_final_timeout_logs_timeout_still_persists_replayable_verdict(
+    executor: DockerCheckExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = _record(executor, "action:reconcile-final-timeout", final=True).model_copy(
+        update={"deadline_at": datetime.now(UTC) - timedelta(seconds=1)}
+    )
+    executor._save_record(record)
+    running = _inspect(executor, "action:reconcile-final-timeout", code=0, running=True)
+    terminal = _inspect(executor, "action:reconcile-final-timeout", code=137)
+    _make_final_inspect(executor, running, "action:reconcile-final-timeout")
+    _make_final_inspect(executor, terminal, "action:reconcile-final-timeout")
+    inspections = iter((running, terminal, terminal))
+
+    async def inspect(_id: str) -> dict[str, Any]:
+        return next(inspections)
+
+    async def cli(_argv: list[str], *, timeout: float) -> tuple[int, bytes, bytes]:
+        return 0, b"", b""
+
+    async def logs(_id: str, _limit: int) -> tuple[bytes, bytes]:
+        raise TimeoutError("docker_command_timeout")
+
+    monkeypatch.setattr(executor, "_inspect", inspect)
+    monkeypatch.setattr(executor, "_cli", cli)
+    monkeypatch.setattr(executor, "_logs", logs)
+
+    result = await executor.reconcile("action:reconcile-final-timeout")
+
+    assert isinstance(result, VerifierResult)
+    assert result.verdict == "inconclusive" and result.failure_categories == ("timeout",)
+    assert await executor.reconcile("action:reconcile-final-timeout") == result
 
 
 @pytest.mark.anyio

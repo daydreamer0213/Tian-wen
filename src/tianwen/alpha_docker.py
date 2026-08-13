@@ -709,7 +709,7 @@ class DockerCheckExecutor:
                 return None
             try:
                 stdout, stderr = await self._logs(record.container_id, self._output_limit(record))
-            except DockerExecutionError:
+            except (DockerExecutionError, TimeoutError):
                 stdout, stderr = b"", b""
                 self._audit(action_id, "check_timeout_control_failed", control_detail + ";logs_unavailable")
             timeout_result = self._timeout_result(record, code, stdout, stderr)
