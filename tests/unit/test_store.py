@@ -398,6 +398,29 @@ def test_recovery_persists_running_action_as_unknown(tmp_path: Path) -> None:
     assert events[-1].kind == "action_unknown_after_recovery"
 
 
+def test_settle_unknown_action_is_a_narrow_compare_and_swap(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    action = make_action(status=ActionStatus.UNKNOWN)
+    store.prepare_action(action)
+
+    settled = store.settle_unknown_action(action.action_id, ActionStatus.SUCCEEDED, "sha256:result")
+
+    assert settled.status is ActionStatus.SUCCEEDED
+    assert settled.result_digest == "sha256:result"
+    with pytest.raises(StateConflict, match="unknown"):
+        store.settle_unknown_action(action.action_id, ActionStatus.FAILED, "sha256:other")
+
+
+@pytest.mark.parametrize("target", (ActionStatus.RUNNING, ActionStatus.UNKNOWN, ActionStatus.CANCELLED))
+def test_settle_unknown_action_rejects_non_terminal_targets(tmp_path: Path, target: ActionStatus) -> None:
+    store = store_at(tmp_path / "state.db")
+    action = make_action(status=ActionStatus.UNKNOWN)
+    store.prepare_action(action)
+
+    with pytest.raises(StateConflict, match="terminal"):
+        store.settle_unknown_action(action.action_id, target, "sha256:result")
+
+
 def test_child_loop_must_keep_persisted_parent_goal(tmp_path: Path) -> None:
     store = store_at(tmp_path / "state.db")
     store.put_object(
