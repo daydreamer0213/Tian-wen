@@ -322,6 +322,35 @@ async def test_timeout_control_failure_still_inspects_and_persists_terminal_resu
 
 
 @pytest.mark.anyio
+async def test_timeout_stop_cli_exception_still_inspects_exact_terminal_container(
+    executor: DockerCheckExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def checked(_argv: list[str], *, kind: str, timeout: float = 10) -> tuple[bytes, bytes]:
+        return ((_CONTAINER_ID + "\n").encode(), b"") if kind == "create" else (b"", b"")
+
+    async def spawn(_id: str) -> _Attached:
+        return _Attached([b"x" * 17], [b""], 137)
+
+    async def cli(argv: list[str], *, timeout: float) -> tuple[int, bytes, bytes]:
+        if argv[-2] == "stop":
+            raise DockerExecutionError("docker_command_unavailable")
+        return 0, b"", b""
+
+    async def inspected(_id: str) -> dict[str, Any]:
+        return _inspect(executor, "action:stop-exception", code=137)
+
+    monkeypatch.setattr(executor, "_checked_cli", checked)
+    monkeypatch.setattr(executor, "_spawn_attached", spawn)
+    monkeypatch.setattr(executor, "_cli", cli)
+    monkeypatch.setattr(executor, "_inspect", inspected)
+
+    with pytest.raises(TimeoutError, match="docker_check_timeout"):
+        await executor.run("action:stop-exception", "public")
+
+    assert executor._record("action:stop-exception").status == "failed"
+
+
+@pytest.mark.anyio
 async def test_timeout_control_running_inspect_keeps_durable_running_record(
     executor: DockerCheckExecutor, monkeypatch: pytest.MonkeyPatch
 ) -> None:

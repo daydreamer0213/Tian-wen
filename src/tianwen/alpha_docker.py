@@ -427,8 +427,11 @@ class DockerCheckExecutor:
     async def _stop_wait_inspect(self, record: CheckExecutionRecord) -> tuple[dict[str, Any] | None, str]:
         details: list[str] = []
         for kind in ("stop", "wait"):
-            code, stdout, stderr = await self._cli([*self._prefix(), kind, record.container_id], timeout=10)
-            details.append(f"{kind}:exit={code}:stdout={content_digest(stdout)}:stderr={content_digest(stderr)}")
+            try:
+                code, stdout, stderr = await self._cli([*self._prefix(), kind, record.container_id], timeout=10)
+                details.append(f"{kind}:exit={code}:stdout={content_digest(stdout)}:stderr={content_digest(stderr)}")
+            except (DockerExecutionError, TimeoutError) as error:
+                details.append(f"{kind}:error={content_digest(str(error))}")
         observed = await self._inspect(record.container_id)
         return observed, ";".join(details)
 
