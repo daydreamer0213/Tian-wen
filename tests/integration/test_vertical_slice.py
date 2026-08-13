@@ -212,7 +212,10 @@ def test_app_runs_the_governed_local_vertical_slice(tmp_path: Path, monkeypatch:
     assert report.stop_reason is ExplorationStopReason.SUFFICIENT
     assert report.answered_unknowns == ("parser version",)
     assert report.remaining_unknowns == ()
-    assert fetched.read_text(encoding="utf-8") not in json.dumps(app.goal_evidence_packet(goal_a.goal_id))
+    packet = app.goal_evidence_packet(goal_a.goal_id)
+    envelope = next(item["untrusted_data"] for item in packet["evidence"] if "untrusted_data" in item)
+    assert fetched.read_text(encoding="utf-8") in envelope
+    assert "UNTRUSTED_SOURCE_DATA" in envelope
     sources = app.store.list_objects("source", SourceRecord)
     evidence = app.store.list_objects("evidence", EvidenceRecord)
     assert len(sources) >= 2
@@ -246,7 +249,7 @@ def test_app_runs_the_governed_local_vertical_slice(tmp_path: Path, monkeypatch:
     assert global_usage.tool_calls >= run_usage.tool_calls
     assert global_usage.action_effects >= run_usage.action_effects
     evidence_ids = {item.evidence_id for item in execution_evidence}
-    app._project_run_outcomes(goal_a.goal_id, run_a.run_id)
+    app.project_run_outcomes(goal_a.goal_id, run_a.run_id)
     assert {item.evidence_id for item in app.execution_evidence(run_a.run_id)} == evidence_ids
     assert app.store.get_run_budget_usage(run_a.run_id) == run_usage
     telemetry = app.meta_telemetry(goal_a.goal_id)
