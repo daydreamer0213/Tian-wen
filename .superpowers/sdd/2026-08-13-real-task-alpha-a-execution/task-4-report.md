@@ -35,3 +35,31 @@ Implemented the single `DockerCheckExecutor` boundary and the narrow StateStore 
 
 - This task supplies the executor and Store CAS only. The later Alpha runtime integration must call `preflight()` before model work, catch the fixed timeout as a recoverable unknown outcome, and use `settle_unknown_action()` during recovery.
 - Commit SHA: recorded in the final task handoff; it is intentionally not embedded here because changing this report changes the commit SHA.
+
+## Fix round 1
+
+### RED / GREEN
+
+- RED: full Docker-ID validation and container exit 125 behavior failed; the prior code accepted short IDs and treated exit 125 as Docker infrastructure failure.
+- RED: recovery could not rebuild a final verifier result or persist an identity-unverified classification.
+- RED: strict container configuration tests showed recovery did not validate network and accepted extra non-bind mounts.
+- RED: preflight lacked a fakeable private CLI boundary and checked missing `APPDATA` after attempting Docker.
+- GREEN: replaced the production-wide lifecycle test seam with private CLI/stream/inspect/log fakes that exercise create → durable record → stream → stop/wait/inspect and recovery paths.
+
+### Fixes
+
+- Added concurrent, bounded stdout/stderr reading. Wall and output limits stop the exact container, wait, inspect, persist the actual bounded digests in a terminal timeout result, then raise the fixed timeout.
+- Create accepts exactly one 64-hex container ID. Docker CLI failures are fixed-code errors; all container exits, including 125, are observed public check results.
+- Recovery validates the complete locked configuration and exactly two bind mounts, waits only until its persisted deadline, then stops/waits/inspects and reconstructs public or verifier results from bounded logs.
+- Added immutable controller audit objects for `check_identity_unverified`, `check_never_started`, and `check_reconciled`.
+- Removed fabricated production record helpers and the unused synchronous inspect path. Preflight now checks `APPDATA` first and exposes a fakeable JSON CLI boundary.
+
+### Verification
+
+- `uv run pytest tests\unit\test_alpha_docker.py tests\unit\test_store.py -q` — 43 passed.
+- `uv run ruff check src\tianwen\alpha_docker.py src\tianwen\store.py tests\unit\test_alpha_docker.py tests\unit\test_store.py` — passed.
+- `git diff --check` — passed.
+
+### Remaining risk
+
+- `cleanup_terminal()` remains a synchronous best-effort method because its public interface is synchronous; it invokes only the fixed private Docker CLI configuration and removes only after linked Action terminal state.
