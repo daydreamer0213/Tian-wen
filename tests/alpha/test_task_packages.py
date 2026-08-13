@@ -13,7 +13,7 @@ from tianwen.alpha_tasks import load_task_bundle
 
 ROOT = Path(__file__).parents[2]
 IMAGE_LOCK = ROOT / "alpha" / "environment" / "image.lock"
-TASK_IDS = ("A1", "A2")
+TASK_IDS = ("A1", "A2", "A3")
 
 
 def _run_verifier(task_dir: Path, workspace: Path) -> str:
@@ -47,6 +47,18 @@ def test_run_verifier_retains_raw_stdout(tmp_path: Path) -> None:
     task_dir = ROOT / "alpha" / "tasks" / "A1"
 
     assert isinstance(_run_verifier(task_dir, _workspace(tmp_path, task_dir)), str)
+
+
+def test_a3_freezes_one_official_source_and_excludes_checks_from_model_input() -> None:
+    task_dir = ROOT / "alpha" / "tasks" / "A3"
+    bundle = load_task_bundle(task_dir, IMAGE_LOCK)
+
+    assert [source.url for source in bundle.task.sources] == [
+        "https://docs.python.org/3/library/urllib.parse.html"
+    ]
+    assert bundle.task.sources[0].retrieved_date.isoformat() == "2026-08-13"
+    assert bundle.task_bundle_digest != bundle.model_input_digest
+    assert bundle.task.allowed_write_patterns == ("query.py",)
 
 
 @pytest.mark.parametrize("task_id", TASK_IDS)

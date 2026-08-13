@@ -546,13 +546,14 @@ async def test_a5_recovery_rejects_self_consistent_manifest_missing_bundle_round
 
 @pytest.mark.anyio
 async def test_a3_records_frozen_source_before_execution_model_request(tmp_path: Path) -> None:
-    from tianwen.alpha import AlphaTrialRunner
+    from tianwen.alpha import AlphaTrialRunner, TrialManifest
+    from tianwen.domain import EvidenceRecord, SourceRecord
 
-    root = _bundle(tmp_path / "tasks", "A3")
+    root = Path(__file__).parents[2] / "alpha" / "tasks"
     model, docker = _Model(), _Docker()
     runner = AlphaTrialRunner(
         task_root=root,
-        image_lock_path=root / "image.lock",
+        image_lock_path=root.parent / "environment" / "image.lock",
         data_root=_data_root(),
         model=model,
         public_evaluator_key=Ed25519PrivateKey.generate().public_key(),
@@ -563,9 +564,32 @@ async def test_a3_records_frozen_source_before_execution_model_request(tmp_path:
     result = await runner.execute(prepared, _confirmation(prepared))
 
     assert result.exploration_run_ids
+    exploration_run_id = result.exploration_run_ids[0]
+    source = next(
+        item for item in runner.store.list_objects("source", SourceRecord) if item.run_id == exploration_run_id
+    )
+    evidence = next(
+        item for item in runner.store.list_objects("evidence", EvidenceRecord) if item.run_id == exploration_run_id
+    )
+    assert source.locator == "https://docs.python.org/3/library/urllib.parse.html"
+    assert evidence.action_id == source.action_id
+    assert evidence.provenance_ids == (source.source_id,)
     packet = runner.app.goal_evidence_packet(result.goal_id)
     assert packet["sources"][0]["locator"].startswith("https://docs.python.org/")
     assert "UNTRUSTED_SOURCE_DATA" in packet["evidence"][0]["untrusted_data"]
+    prompt = model.prompts[0]
+    escaped_envelope = repr(json.dumps(packet["evidence"][0]["untrusted_data"])[1:-1])[1:-1]
+    assert escaped_envelope in prompt
+    assert "https://docs.python.org/3/library/urllib.parse.html" in prompt
+    assert "<UNTRUSTED_SOURCE_DATA source_id=" in prompt
+    assert "</UNTRUSTED_SOURCE_DATA>" in prompt
+    assert "doseq=True emits a separate key=value pair for every item" in prompt
+    for relative in ("checks/public.py", "verifier/verify.py", "reference/solution.patch"):
+        assert (root / "A3" / relative).read_text(encoding="utf-8") not in prompt
+    manifest = runner.store.get_object("alpha_trial_manifest", result.trial_id, TrialManifest)
+    tools = manifest.tool_contract_snapshot["rounds"]["round-1"]["tool_contract"]["tools"]
+    assert "web_search" not in tools
+    assert "web_fetch" not in tools
     first_model_event = next(
         event for event in runner.store.list_events(result.run_ids[0]) if event.kind == "run_started"
     )
