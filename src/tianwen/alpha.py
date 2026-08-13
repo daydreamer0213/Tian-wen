@@ -4,6 +4,7 @@ import asyncio
 import json
 import math
 import os
+import re
 import secrets
 import threading
 from collections.abc import Callable
@@ -18,22 +19,32 @@ from pydantic import Field, JsonValue, model_validator
 from pydantic_ai.models import KnownModelName, Model
 from pydantic_ai_harness.step_persistence import SqliteStepStore
 
-from tianwen.alpha_docker import DockerCheckExecutor, DockerExecutionError, DockerPreflight, VerifierResult
+from tianwen.alpha_docker import (
+    CheckExecutionRecord,
+    DockerCheckExecutor,
+    DockerExecutionError,
+    DockerPreflight,
+    VerifierResult,
+)
 from tianwen.alpha_public_key import alpha_public_evaluator_key
 from tianwen.alpha_runtime import AlphaRuntime, AlphaRuntimeConfig, alpha_runtime_manifest_digests
 from tianwen.alpha_tasks import AlphaTaskBundle, load_task_bundle
 from tianwen.alpha_workspace import (
     AlphaTrialPaths,
+    AlphaWorkspaceError,
     ArtifactEntry,
     TreeSnapshot,
     _create_trial_workspace,
+    _matches,
     artifact_entries,
     capture_git_evidence,
     scan_for_credential_value,
+    snapshot_tree,
     write_bounded_artifact,
 )
 from tianwen.app import TianwenApp, TianwenConfig, default_eval_protocol
 from tianwen.domain import (
+    ActionStatus,
     BudgetLimit,
     EvidenceRecord,
     ExplorationBrief,
@@ -379,19 +390,24 @@ class AlphaTrialRunner:
         state = store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
         if state.stage == "finished":
             return store.get_object("alpha_trial_result", state.trial_id, TrialResult)
+        self._revalidate_prepared(prepared)
         store.put_immutable_object("alpha_trial_confirmation", state.trial_id, None, "confirmed", confirmation)
-        if utc_now() > state.wall_deadline:
-            raise AlphaTrialError("trial budget deadline elapsed before execution")
-        goal = app.create_goal(
-            objective=prepared.preview.objective,
-            criteria=prepared.preview.acceptance,
-            workspace=prepared.paths.workspace,
-            authorization=prepared.preview.authorizations,
-            budget=prepared.preview.budget,
+        goal = (
+            store.get_object("goal", state.goal_id, GoalContract)
+            if state.goal_id
+            else app.create_goal(
+                objective=prepared.preview.objective,
+                criteria=prepared.preview.acceptance,
+                workspace=prepared.paths.workspace,
+                authorization=prepared.preview.authorizations,
+                budget=prepared.preview.budget,
+            )
         )
         exploration_run_ids: tuple[str, ...] = ()
         stop_reasons: list[str] = []
-        if bundle.task.task_id == "A3":
+        if utc_now() > state.wall_deadline:
+            stop_reasons.append("wall_deadline")
+        elif bundle.task.task_id == "A3":
             report = await asyncio.to_thread(
                 app.explore, goal.goal_id, self._a3_brief(state.trial_id, app.goal_task(goal.goal_id).task_id)
             )
@@ -407,7 +423,10 @@ class AlphaTrialRunner:
         manifest_digest = content_digest(manifest)
         store.put_immutable_object("alpha_trial_manifest", state.trial_id, goal.goal_id, "active", manifest)
         raw_manifest = manifest.model_dump_json().encode("utf-8")
-        write_bounded_artifact(prepared.paths, bundle.task, "trial-manifest.json", raw_manifest)
+        try:
+            write_bounded_artifact(prepared.paths, bundle.task, "trial-manifest.json", raw_manifest)
+        except AlphaWorkspaceError as error:
+            raise AlphaTrialError("trial manifest authority does not match canonical mirror") from error
         if (
             content_digest(TrialManifest.model_validate_json(prepared.paths.trial_manifest_json.read_bytes()))
             != manifest_digest
@@ -419,13 +438,29 @@ class AlphaTrialRunner:
                 update={"stage": "running", "trial_manifest_digest": manifest_digest, "goal_id": goal.goal_id}
             ),
         )
+        persisted_manifest = store.get_object("alpha_trial_manifest", state.trial_id, TrialManifest)
+        mirrored_manifest = TrialManifest.model_validate_json(prepared.paths.trial_manifest_json.read_bytes())
+        if persisted_manifest != manifest or mirrored_manifest != manifest:
+            raise AlphaTrialError("trial manifest authority does not match canonical mirror")
         run_ids: list[str] = []
+        cancelled: asyncio.CancelledError | None = None
         if not stop_reasons:
             for round_spec in bundle.task.rounds:
                 if utc_now() > state.wall_deadline:
                     stop_reasons.append("wall_deadline")
                     break
-                run = await self._run_round(prepared, goal, manifest_digest, round_spec.round_id)
+                try:
+                    run = await self._run_round(prepared, goal, manifest_digest, round_spec.round_id)
+                except asyncio.CancelledError as error:
+                    cancelled = error
+                    stop_reasons.append("cancelled")
+                    run_ids = list(
+                        store.get_object("alpha_trial_state", state.trial_id, AlphaTrialState).run_ids
+                    )
+                    break
+                except BudgetExceeded:
+                    stop_reasons.append("budget_exhausted")
+                    break
                 run_ids.append(run.run_id)
                 current = store.get_object("alpha_trial_state", state.trial_id, AlphaTrialState)
                 self._put_state(
@@ -441,7 +476,10 @@ class AlphaTrialRunner:
                 if run.status is not RunStatus.COMPLETED:
                     stop_reasons.append(run.status_reason or run.status.value)
                     break
-        return await self._settle(prepared, goal, manifest, tuple(run_ids), exploration_run_ids, stop_reasons)
+        result = await self._settle(prepared, goal, manifest, tuple(run_ids), exploration_run_ids, stop_reasons)
+        if cancelled is not None:
+            raise cancelled
+        return result
 
     async def resume(self, trial_id: str) -> TrialResult:
         if self.store is None:
@@ -449,9 +487,104 @@ class AlphaTrialRunner:
             self.store = StateStore(database)
             self.store.initialize()
         state = self.store.get_object("alpha_trial_state", trial_id, AlphaTrialState)
-        if state.stage != "finished":
-            raise AlphaTrialError("resume requires recovery of the exact unfinished durable stage")
-        return self.store.get_object("alpha_trial_result", trial_id, TrialResult)
+        if state.stage == "finished":
+            return self.store.get_object("alpha_trial_result", trial_id, TrialResult)
+        preview = self.store.get_object("alpha_trial_preview", trial_id, TrialPreview)
+        paths = self._paths(trial_id)
+        bundle = load_task_bundle(self.task_root / preview.task_id, self.image_lock_path)
+        app = TianwenApp(
+            TianwenConfig(
+                data_dir=paths.state,
+                workspace=paths.workspace,
+                model=self.model,
+                public_evaluator_key=self.public_evaluator_key,
+                approved_protocol=default_eval_protocol(),
+                recorded_search_path=(bundle.root / bundle.task.sources[0].search_results_path)
+                if bundle.task.sources
+                else None,
+                recorded_fetch_path=(bundle.root / bundle.task.sources[0].fetched_content_path)
+                if bundle.task.sources
+                else None,
+                allowed_commands=(),
+            )
+        )
+        self.app, self.store = app, app.store
+        if state.stage == "prepared":
+            try:
+                confirmation = app.store.get_object("alpha_trial_confirmation", trial_id, TrialConfirmation)
+            except StateConflict as error:
+                raise AlphaTrialError("confirmation is required before resuming a prepared trial") from error
+            matches = [
+                item
+                for item in app.store.list_objects("goal", GoalContract)
+                if (
+                    item.objective == preview.objective
+                    and item.success_criteria == preview.acceptance
+                    and item.authorization == preview.authorizations
+                    and item.budget == preview.budget
+                )
+            ]
+            if len(matches) > 1:
+                raise AlphaTrialError("more than one Goal matches confirmed pre-manifest trial")
+            if matches:
+                state = state.model_copy(update={"goal_id": matches[0].goal_id})
+                self._put_state(app.store, state)
+            prepared = PreparedTrial(
+                bundle,
+                paths,
+                snapshot_tree(paths.workspace),
+                self.docker_factory(paths, bundle, app.store).preflight(),
+                self._run(self.docker_factory(paths, bundle, app.store).run_seed_preflight()),
+                preview.champion_version_id,
+                preview.champion_digest,
+                preview,
+                app,
+            )
+            return await self.execute(prepared, confirmation)
+        manifest = app.store.get_object("alpha_trial_manifest", trial_id, TrialManifest)
+        if TrialManifest.model_validate_json(paths.trial_manifest_json.read_bytes()) != manifest:
+            raise AlphaTrialError("trial manifest authority does not match canonical mirror")
+        goal = app.store.get_object("goal", state.goal_id or "", GoalContract)
+        prepared = PreparedTrial(
+            bundle,
+            paths,
+            snapshot_tree(paths.workspace),
+            self.docker_factory(paths, bundle, app.store).preflight(),
+            self._run(self.docker_factory(paths, bundle, app.store).run_seed_preflight()),
+            manifest.champion_version_id,
+            manifest.champion_digest,
+            preview,
+            app,
+        )
+        if state.stage == "running":
+            incomplete = [
+                app.store.get_object("run", run_id, RunRecord)
+                for run_id in state.run_ids
+                if app.store.get_object("run", run_id, RunRecord).status is not RunStatus.COMPLETED
+            ]
+            if len(incomplete) > 1:
+                raise AlphaTrialError("more than one incomplete Alpha Run cannot be resumed")
+            if incomplete:
+                run = incomplete[0]
+                runtime = AlphaRuntime(
+                    app.store,
+                    SqliteStepStore(database=app.store.database),
+                    self.model,
+                    AlphaRuntimeConfig(
+                        paths.workspace,
+                        app.materialize_skill(manifest.champion_version_id),
+                        bundle,
+                        paths,
+                        run.manifest.round_id or "",
+                        content_digest(manifest),
+                    ),
+                    self.docker_factory(paths, bundle, app.store),
+                )
+                await runtime.recover(run)
+            return await self._settle(prepared, goal, manifest, state.run_ids, (), ["recovered"])
+        if state.stage == "settling":
+            return await self._settle(prepared, goal, manifest, state.run_ids, (), ["recovered"])
+        raise AlphaTrialError("unknown Alpha trial stage")
 
     def _manifest(self, prepared: PreparedTrial, goal: GoalContract, confirmation: TrialConfirmation) -> TrialManifest:
         app, bundle = prepared._app, prepared._bundle
@@ -564,6 +697,9 @@ class AlphaTrialRunner:
             ),
         )
         store.put_object("run", run.run_id, run.task_id, run.status.value, run)
+        state = store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
+        if run.run_id not in state.run_ids:
+            self._put_state(store, state.model_copy(update={"run_ids": (*state.run_ids, run.run_id)}))
         runtime = AlphaRuntime(
             store,
             SqliteStepStore(database=store.database),
@@ -578,7 +714,7 @@ class AlphaTrialRunner:
                     prepared.paths,
                     bundle.task,
                     f"outputs/{run.run_id.replace(':', '-')}.txt",
-                    outcome.output.encode("utf-8"),
+                    self._sanitize_audit_value(prepared, outcome.output).encode("utf-8"),
                 )
             app.project_run_outcomes(goal.goal_id, run.run_id)
         except (BudgetExceeded, TimeoutError, Exception):
@@ -595,10 +731,20 @@ class AlphaTrialRunner:
         stop_reasons: list[str],
     ) -> TrialResult:
         store, bundle = prepared._app.store, prepared._bundle
+        try:
+            return store.get_object("alpha_trial_result", prepared.preview.trial_id, TrialResult)
+        except StateConflict:
+            pass
         state = store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
         self._put_state(store, state.model_copy(update={"stage": "settling", "run_ids": run_ids}))
         evidence = capture_git_evidence(prepared.paths)
-        final_run_id = run_ids[-1] if run_ids else exploration_run_ids[-1]
+        final_run_id = (
+            run_ids[-1]
+            if run_ids
+            else exploration_run_ids[-1]
+            if exploration_run_ids
+            else self._settlement_run(prepared, goal, manifest)
+        )
         result: VerifierResult | None = None
         verification_status: Literal["completed", "unavailable", "invalid"] = "completed"
         final_action_id = ""
@@ -607,23 +753,53 @@ class AlphaTrialRunner:
             action_id = proposal_action_id(
                 final_run_id, f"alpha-final-{prepared.preview.trial_id}", "final_verify", args
             )
-            action, result = await execute_action(
-                store,
-                final_run_id,
-                f"alpha-final-{prepared.preview.trial_id}",
-                "final_verify",
-                args,
-                EffectClass.EXTERNAL_READ_ONLY,
-                "isolated_check_execution" in goal.authorization,
-                lambda _args: self.docker_factory(prepared.paths, bundle, store).run_final(action_id),
-            )
-            final_action_id = action.action_id
+            final_action_id = action_id
+            try:
+                action = store.get_action(action_id)
+            except StateConflict:
+                action = None
+            docker = self.docker_factory(prepared.paths, bundle, store)
+            if action is not None and action.status in {
+                ActionStatus.RUNNING,
+                ActionStatus.UNKNOWN,
+                ActionStatus.SUCCEEDED,
+            }:
+                reconciled = await docker.reconcile(action_id)
+                if reconciled is not None:
+                    result = VerifierResult.model_validate(reconciled)
+                    if action.status is ActionStatus.UNKNOWN:
+                        store.settle_unknown_action(
+                            action_id,
+                            ActionStatus.SUCCEEDED,
+                            content_digest(
+                                json.dumps(result.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
+                            ),
+                        )
+                elif action.status is not ActionStatus.SUCCEEDED:
+                    verification_status = "unavailable"
+            elif action is None or action.status is ActionStatus.PROPOSED:
+                action, result = await execute_action(
+                    store,
+                    final_run_id,
+                    f"alpha-final-{prepared.preview.trial_id}",
+                    "final_verify",
+                    args,
+                    EffectClass.EXTERNAL_READ_ONLY,
+                    "isolated_check_execution" in goal.authorization,
+                    lambda _args: docker.run_final(action_id),
+                )
+                final_action_id = action.action_id
             if result is None:
-                raise AlphaTrialError("final verifier has no result")
+                if verification_status == "completed":
+                    raise AlphaTrialError("final verifier has no result")
+            else:
+                result = VerifierResult.model_validate(result)
         except DockerExecutionError:
             verification_status = "unavailable"
+            result = None
         except (ValueError, AlphaTrialError):
             verification_status = "invalid"
+            result = None
         if result is not None and final_action_id:
             record = EvidenceRecord(
                 evidence_id=content_digest({"action": final_action_id, "result": result.model_dump(mode="json")}),
@@ -645,6 +821,8 @@ class AlphaTrialRunner:
                 provenance_ids=(final_action_id,),
             )
             store.put_immutable_object("evidence", record.evidence_id, final_run_id, "recorded", record)
+        boundary_violation = self._workspace_boundary_violation(prepared, evidence)
+        exports = self._export_audit_artifacts(prepared, (*run_ids, *exploration_run_ids, final_run_id), result)
         runs = [store.get_object("run", run_id, RunRecord) for run_id in run_ids]
         execution_status: Literal["completed", "stopped", "failed"] = (
             "completed"
@@ -654,19 +832,19 @@ class AlphaTrialRunner:
             else "stopped"
         )
         if stop_reasons:
-            execution_status = "stopped" if stop_reasons == ["exploration_insufficient"] else execution_status
+            execution_status = "stopped" if execution_status != "failed" else execution_status
         unresolved = any(store.unresolved_actions(run_id) for run_id in (*run_ids, *exploration_run_ids))
         credentials = tuple(
             value for name, value in os.environ.items() if name.endswith(("_API_KEY", "_TOKEN", "_SECRET")) and value
         )
         credential_hit = any(scan_for_credential_value(prepared.paths, value) for value in credentials)
         boundary_status: Literal["passed", "violated", "unknown"] = (
-            "violated" if credential_hit else "unknown" if unresolved else "passed"
+            "violated" if credential_hit or boundary_violation else "unknown" if unresolved else "passed"
         )
         verdict: Literal["met", "not_met", "inconclusive"] = (
             result.verdict if result is not None and verification_status == "completed" else "inconclusive"
         )
-        paths = ["trial-preview.json", "trial-manifest.json", "diff.patch"]
+        paths = ["trial-preview.json", "trial-manifest.json", "diff.patch", *exports]
         paths.extend(
             f"outputs/{run_id.replace(':', '-')}.txt"
             for run_id in run_ids
@@ -702,14 +880,24 @@ class AlphaTrialRunner:
             diff_digest=evidence.patch_digest,
             verifier_digest=bundle.task.final_verifier.digest,
             verdict=verdict,
-            failure_categories=("unresolved_action",)
-            if unresolved
-            else (() if result is None else result.failure_categories),
+            failure_categories=(("workspace_boundary",) if boundary_violation else ())
+            + (("credential_leak",) if credential_hit else ())
+            + (("unresolved_action",) if unresolved else ())
+            + (() if result is None else result.failure_categories),
             execution_status=execution_status,
             verification_status=verification_status,
             boundary_status=boundary_status,
             action_ids=tuple(
-                action.action_id for run_id in (*run_ids, *exploration_run_ids) for action in store.list_actions(run_id)
+                dict.fromkeys(
+                    [
+                        *(
+                            action.action_id
+                            for run_id in (*run_ids, *exploration_run_ids)
+                            for action in store.list_actions(run_id)
+                        ),
+                        *((final_action_id,) if final_action_id else ()),
+                    ]
+                )
             ),
             evidence_ids=tuple(
                 record.evidence_id
@@ -745,6 +933,142 @@ class AlphaTrialRunner:
             ),
         )
         return result_model
+
+    def _revalidate_prepared(self, prepared: PreparedTrial) -> None:
+        if self.docker_factory(prepared.paths, prepared._bundle, prepared._app.store).preflight() != prepared.preflight:
+            raise AlphaTrialError("prepared Docker preflight no longer matches frozen authority")
+        if snapshot_tree(prepared.paths.workspace) != prepared.baseline:
+            raise AlphaTrialError("prepared seed workspace no longer matches its frozen baseline")
+        if (
+            self._run(self.docker_factory(prepared.paths, prepared._bundle, prepared._app.store).run_seed_preflight())
+            != prepared.seed_verifier
+        ):
+            raise AlphaTrialError("prepared seed verifier no longer matches frozen authority")
+
+    def _paths(self, trial_id: str) -> AlphaTrialPaths:
+        root = self.data_root / "runs" / trial_id
+        return AlphaTrialPaths(
+            trial_id=trial_id,
+            data_root=self.data_root,
+            trial_dir=root,
+            workspace=root / "workspace",
+            state=root / "state",
+            logs=root / "logs",
+            diff_patch=root / "diff.patch",
+            trial_manifest_json=root / "trial-manifest.json",
+            trial_result_json=root / "trial-result.json",
+        )
+
+    def _settlement_run(self, prepared: PreparedTrial, goal: GoalContract, manifest: TrialManifest) -> str:
+        task = prepared._app.goal_task(goal.goal_id)
+        run = RunRecord(
+            run_id=f"alpha:{prepared.preview.trial_id}:settlement",
+            task_id=task.task_id,
+            status=RunStatus.COMPLETED,
+            manifest=RunManifest(
+                workflow_version="tianwen-alpha-v1",
+                schema_version="2",
+                pydantic_ai_version=version("pydantic-ai-slim"),
+                harness_version=version("pydantic-ai-harness"),
+                model_id=prepared.preview.model_id,
+                prompt_digest=content_digest("controller settlement"),
+                skill_versions={"repo_task": manifest.champion_version_id},
+                skill_digests={"repo_task": manifest.champion_digest},
+                policy_digest=manifest.runtime_policy_digest,
+                tool_contract_digest=manifest.tool_contract_digest,
+                goal_contract_digest=manifest.goal_contract_digest,
+                workspace_digest=content_digest(str(prepared.paths.workspace.resolve())),
+                trial_id=prepared.preview.trial_id,
+                round_id="settlement",
+                trial_manifest_digest=content_digest(manifest),
+            ),
+        )
+        prepared._app.store.put_object("run", run.run_id, run.task_id, run.status.value, run)
+        return run.run_id
+
+    @staticmethod
+    def _workspace_boundary_violation(prepared: PreparedTrial, evidence: Any) -> bool:
+        del evidence
+        baseline = {item.path for item in prepared.baseline.files}
+        current = snapshot_tree(prepared.paths.workspace)
+        changed = {
+            item.path
+            for item in current.files
+            if next((old for old in prepared.baseline.files if old.path == item.path), None) != item
+        } | (baseline - {item.path for item in current.files})
+        return any(
+            _matches(path, prepared._bundle.task.protected_patterns)
+            or not _matches(path, prepared._bundle.task.allowed_write_patterns)
+            for path in changed
+        )
+
+    @staticmethod
+    def _sanitize_audit_value(prepared: PreparedTrial, value: Any) -> Any:
+        secrets_in_memory = tuple(
+            item for name, item in os.environ.items() if name.endswith(("_API_KEY", "_TOKEN", "_SECRET")) and item
+        )
+        if isinstance(value, str):
+            sanitized = value
+            for secret in secrets_in_memory:
+                sanitized = sanitized.replace(secret, "<redacted>")
+            sanitized = sanitized.replace(str(prepared.paths.workspace), "<workspace>")
+            return re.sub(r"(?i)\b[a-z]:[\\/][^\s\"']*", "<host-path>", sanitized)
+        if isinstance(value, list):
+            return [AlphaTrialRunner._sanitize_audit_value(prepared, item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(AlphaTrialRunner._sanitize_audit_value(prepared, item) for item in value)
+        if isinstance(value, dict):
+            return {key: AlphaTrialRunner._sanitize_audit_value(prepared, item) for key, item in value.items()}
+        return value
+
+    @classmethod
+    def _export_audit_artifacts(
+        cls, prepared: PreparedTrial, run_ids: tuple[str, ...], final: VerifierResult | None
+    ) -> tuple[str, ...]:
+        artifacts: list[str] = []
+        for run_id in sorted(set(run_ids)):
+            actions = cls._sanitize_audit_value(
+                prepared, [item.model_dump(mode="json") for item in prepared._app.store.list_actions(run_id)]
+            )
+            events = cls._sanitize_audit_value(
+                prepared, [item.model_dump(mode="json") for item in prepared._app.store.list_events(run_id)]
+            )
+            action_path = f"exports/actions-{content_digest(run_id)[7:]}.json"
+            event_path = f"exports/events-{content_digest(run_id)[7:]}.json"
+            write_bounded_artifact(
+                prepared.paths, prepared._bundle.task, action_path, json.dumps(actions, sort_keys=True).encode("utf-8")
+            )
+            write_bounded_artifact(
+                prepared.paths, prepared._bundle.task, event_path, json.dumps(events, sort_keys=True).encode("utf-8")
+            )
+            artifacts.extend((action_path, event_path))
+        if final is not None:
+            path = "logs/final-verify.json"
+            write_bounded_artifact(
+                prepared.paths,
+                prepared._bundle.task,
+                path,
+                json.dumps(
+                    cls._sanitize_audit_value(prepared, final.model_dump(mode="json")), sort_keys=True
+                ).encode("utf-8"),
+            )
+            artifacts.append(path)
+        public_path = "logs/public-checks.json"
+        public_checks = cls._sanitize_audit_value(prepared, [
+            item.model_dump(mode="json")
+            for run_id in sorted(set(run_ids))
+            for item in prepared._app.store.list_objects("check_execution", CheckExecutionRecord)
+            if item.action_id in {action.action_id for action in prepared._app.store.list_actions(run_id)}
+            and item.result_type == "public"
+        ])
+        write_bounded_artifact(
+            prepared.paths,
+            prepared._bundle.task,
+            public_path,
+            json.dumps(public_checks, sort_keys=True).encode("utf-8"),
+        )
+        artifacts.append(public_path)
+        return tuple(artifacts)
 
     @staticmethod
     def _a3_brief(trial_id: str, task_id: str) -> ExplorationBrief:
