@@ -391,6 +391,8 @@ class AlphaTrialRunner:
         if state.stage == "finished":
             return store.get_object("alpha_trial_result", state.trial_id, TrialResult)
         self._revalidate_prepared(prepared)
+        if utc_now() > state.wall_deadline:
+            raise AlphaTrialError("trial wall deadline expired before Goal creation")
         store.put_immutable_object("alpha_trial_confirmation", state.trial_id, None, "confirmed", confirmation)
         goal = (
             store.get_object("goal", state.goal_id, GoalContract)
@@ -545,10 +547,13 @@ class AlphaTrialRunner:
         if TrialManifest.model_validate_json(paths.trial_manifest_json.read_bytes()) != manifest:
             raise AlphaTrialError("trial manifest authority does not match canonical mirror")
         goal = app.store.get_object("goal", state.goal_id or "", GoalContract)
+        baseline = snapshot_tree(bundle.root / "seed")
+        if baseline.digest != manifest.baseline_tree_digest or baseline.digest != bundle.task.baseline_tree_digest:
+            raise AlphaTrialError("recovered baseline does not match immutable trial authority")
         prepared = PreparedTrial(
             bundle,
             paths,
-            snapshot_tree(paths.workspace),
+            baseline,
             self.docker_factory(paths, bundle, app.store).preflight(),
             self._run(self.docker_factory(paths, bundle, app.store).run_seed_preflight()),
             manifest.champion_version_id,
@@ -581,7 +586,37 @@ class AlphaTrialRunner:
                     self.docker_factory(paths, bundle, app.store),
                 )
                 await runtime.recover(run)
-            return await self._settle(prepared, goal, manifest, state.run_ids, (), ["recovered"])
+            state = app.store.get_object("alpha_trial_state", trial_id, AlphaTrialState)
+            run_ids = list(state.run_ids)
+            completed_round_ids = {
+                app.store.get_object("run", run_id, RunRecord).manifest.round_id
+                for run_id in run_ids
+                if app.store.get_object("run", run_id, RunRecord).status is RunStatus.COMPLETED
+            }
+            stop_reasons: list[str] = []
+            for round_spec in bundle.task.rounds:
+                if round_spec.round_id in completed_round_ids:
+                    continue
+                if utc_now() > state.wall_deadline:
+                    stop_reasons.append("wall_deadline")
+                    break
+                run = await self._run_round(prepared, goal, content_digest(manifest), round_spec.round_id)
+                if run.run_id not in run_ids:
+                    run_ids.append(run.run_id)
+                if run.status is RunStatus.COMPLETED:
+                    completed_round_ids.add(round_spec.round_id)
+                    current = app.store.get_object("alpha_trial_state", trial_id, AlphaTrialState)
+                    completed_round_order = tuple(
+                        item.round_id for item in bundle.task.rounds if item.round_id in completed_round_ids
+                    )
+                    self._put_state(
+                        app.store,
+                        current.model_copy(update={"completed_round_ids": completed_round_order}),
+                    )
+                    continue
+                stop_reasons.append(run.status_reason or run.status.value)
+                break
+            return await self._settle(prepared, goal, manifest, tuple(run_ids), (), stop_reasons)
         if state.stage == "settling":
             return await self._settle(prepared, goal, manifest, state.run_ids, (), ["recovered"])
         raise AlphaTrialError("unknown Alpha trial stage")
@@ -822,7 +857,9 @@ class AlphaTrialRunner:
             )
             store.put_immutable_object("evidence", record.evidence_id, final_run_id, "recorded", record)
         boundary_violation = self._workspace_boundary_violation(prepared, evidence)
-        exports = self._export_audit_artifacts(prepared, (*run_ids, *exploration_run_ids, final_run_id), result)
+        exports = self._export_audit_artifacts(
+            prepared, (*run_ids, *exploration_run_ids, final_run_id), result, verification_status
+        )
         runs = [store.get_object("run", run_id, RunRecord) for run_id in run_ids]
         execution_status: Literal["completed", "stopped", "failed"] = (
             "completed"
@@ -833,7 +870,9 @@ class AlphaTrialRunner:
         )
         if stop_reasons:
             execution_status = "stopped" if execution_status != "failed" else execution_status
-        unresolved = any(store.unresolved_actions(run_id) for run_id in (*run_ids, *exploration_run_ids))
+        unresolved = any(
+            store.unresolved_actions(run_id) for run_id in (*run_ids, *exploration_run_ids, final_run_id)
+        )
         credentials = tuple(
             value for name, value in os.environ.items() if name.endswith(("_API_KEY", "_TOKEN", "_SECRET")) and value
         )
@@ -1023,7 +1062,11 @@ class AlphaTrialRunner:
 
     @classmethod
     def _export_audit_artifacts(
-        cls, prepared: PreparedTrial, run_ids: tuple[str, ...], final: VerifierResult | None
+        cls,
+        prepared: PreparedTrial,
+        run_ids: tuple[str, ...],
+        final: VerifierResult | None,
+        verification_status: Literal["completed", "unavailable", "invalid"],
     ) -> tuple[str, ...]:
         artifacts: list[str] = []
         for run_id in sorted(set(run_ids)):
@@ -1042,17 +1085,18 @@ class AlphaTrialRunner:
                 prepared.paths, prepared._bundle.task, event_path, json.dumps(events, sort_keys=True).encode("utf-8")
             )
             artifacts.extend((action_path, event_path))
-        if final is not None:
-            path = "logs/final-verify.json"
-            write_bounded_artifact(
-                prepared.paths,
-                prepared._bundle.task,
-                path,
-                json.dumps(
-                    cls._sanitize_audit_value(prepared, final.model_dump(mode="json")), sort_keys=True
-                ).encode("utf-8"),
-            )
-            artifacts.append(path)
+        path = "logs/final-verify.json"
+        final_audit = {
+            "status": verification_status,
+            "evidence": final.model_dump(mode="json") if final else None,
+        }
+        write_bounded_artifact(
+            prepared.paths,
+            prepared._bundle.task,
+            path,
+            json.dumps(cls._sanitize_audit_value(prepared, final_audit), sort_keys=True).encode("utf-8"),
+        )
+        artifacts.append(path)
         public_path = "logs/public-checks.json"
         public_checks = cls._sanitize_audit_value(prepared, [
             item.model_dump(mode="json")

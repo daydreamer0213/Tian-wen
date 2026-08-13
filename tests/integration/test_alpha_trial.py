@@ -10,10 +10,10 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic_ai.models.test import TestModel
 
-from tianwen.alpha_docker import DockerPreflight, VerifierResult
+from tianwen.alpha_docker import DockerExecutionError, DockerPreflight, VerifierResult
 from tianwen.alpha_tasks import freeze_task_bundle
 from tianwen.domain import ActionStatus, BudgetLimit, GoalContract, RunRecord, RunStatus, content_digest
-from tianwen.gateway import EffectClass, freeze_action
+from tianwen.gateway import EffectClass, freeze_action, proposal_action_id
 from tianwen.store import StateConflict
 
 
@@ -224,6 +224,69 @@ def _runner(root: Path, model: _Model, docker: _Docker, data_root: Path | None =
     )
 
 
+def _persist_running_trial(runner: Any, prepared: Any, *, round_id: str = "round-1") -> tuple[Any, Any, Any]:
+    """Persist a completed first round exactly as recovery would observe it."""
+    from tianwen.alpha import AlphaTrialState
+    from tianwen.domain import RunManifest
+
+    confirmation = _confirmation(prepared)
+    runner.store.put_immutable_object(
+        "alpha_trial_confirmation", prepared.preview.trial_id, None, "confirmed", confirmation
+    )
+    goal = runner.app.create_goal(
+        objective=prepared.preview.objective,
+        criteria=prepared.preview.acceptance,
+        workspace=prepared.paths.workspace,
+        authorization=prepared.preview.authorizations,
+        budget=prepared.preview.budget,
+    )
+    manifest = runner._manifest(prepared, goal, confirmation)
+    runner.store.put_immutable_object(
+        "alpha_trial_manifest", prepared.preview.trial_id, goal.goal_id, "active", manifest
+    )
+    prepared.paths.trial_manifest_json.write_bytes(manifest.model_dump_json().encode("utf-8"))
+    run_id = f"alpha:{prepared.preview.trial_id}:{round_id}"
+    run = RunRecord(
+        run_id=run_id,
+        task_id=runner.app.goal_task(goal.goal_id).task_id,
+        status=RunStatus.COMPLETED,
+        manifest=RunManifest(
+            workflow_version="tianwen-alpha-v1",
+            schema_version="2",
+            pydantic_ai_version="2.18.0",
+            harness_version="0.13.0",
+            model_id=prepared.preview.model_id,
+            prompt_digest=content_digest("interrupted"),
+            skill_versions={"repo_task": manifest.champion_version_id},
+            skill_digests={"repo_task": manifest.champion_digest},
+            policy_digest=manifest.runtime_policy_digest,
+            tool_contract_digest=manifest.tool_contract_digest,
+            goal_contract_digest=manifest.goal_contract_digest,
+            workspace_digest=content_digest(str(prepared.paths.workspace.resolve())),
+            trial_id=prepared.preview.trial_id,
+            round_id=round_id,
+            trial_manifest_digest=content_digest(manifest),
+        ),
+    )
+    runner.store.put_object("run", run_id, run.task_id, "completed", run)
+    state = runner.store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
+    runner.store.put_object(
+        "alpha_trial_state",
+        state.trial_id,
+        None,
+        "running",
+        state.model_copy(
+            update={
+                "stage": "running",
+                "goal_id": goal.goal_id,
+                "run_ids": (run_id,),
+                "completed_round_ids": (round_id,),
+            }
+        ),
+    )
+    return goal, manifest, run
+
+
 def test_prepare_does_not_create_goal_or_call_model(runner: Any) -> None:
     """Break caught: moving Goal/model work before confirmation spends authority or money."""
     prepared = runner.prepare("A1", budget=_budget())
@@ -392,9 +455,9 @@ async def test_cancellation_settles_before_reraising(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_deadline_before_first_run_still_settles_without_run(tmp_path: Path) -> None:
-    """Break caught: a pre-run stop must not index a missing run while settling."""
-    from tianwen.alpha import AlphaTrialState, TrialResult
+async def test_deadline_before_goal_creation_has_no_side_effect(tmp_path: Path) -> None:
+    """Break caught: a prepared trial must reject expiry before creating a Goal."""
+    from tianwen.alpha import AlphaTrialError, AlphaTrialState
 
     root, docker = _bundle(tmp_path / "tasks", "A1"), _Docker()
     runner = _runner(root, _Model(), docker)
@@ -408,13 +471,12 @@ async def test_deadline_before_first_run_still_settles_without_run(tmp_path: Pat
         state.model_copy(update={"wall_deadline": state.started_at}),
     )
 
-    result = await runner.execute(prepared, _confirmation(prepared))
+    with pytest.raises(AlphaTrialError, match="deadline"):
+        await runner.execute(prepared, _confirmation(prepared))
 
-    assert result.execution_status == "stopped"
-    assert result.run_ids == ()
-    assert docker.final_calls
-    assert docker.final_calls[0] in result.action_ids
-    assert runner.store.get_object("alpha_trial_result", result.trial_id, TrialResult) == result
+    assert runner.store.list_objects("goal", GoalContract) == []
+    assert runner.model.request_count == 0
+    assert docker.final_calls == []
 
 
 @pytest.mark.anyio
@@ -639,6 +701,156 @@ async def test_invalid_verifier_and_repeated_settlement_are_durable(tmp_path: Pa
     assert runner.store.get_object("alpha_trial_result", result.trial_id, TrialResult) == result
     assert await runner.resume(result.trial_id) == result
     assert len(docker.final_calls) == 1
+
+
+@pytest.mark.anyio
+async def test_resume_running_completed_a5_round_one_executes_frozen_round_two(tmp_path: Path) -> None:
+    """Break caught: a completed first round must not settle an unfinished A5 trial."""
+    from tianwen.alpha import AlphaTrialRunner
+
+    root, docker = _bundle(tmp_path / "tasks", "A5"), _Docker()
+    runner = _runner(root, _Model(), docker)
+    prepared = runner.prepare("A5", budget=_budget())
+    goal, _manifest, first = _persist_running_trial(runner, prepared)
+    recovered_model = _Model()
+    recovered = AlphaTrialRunner(
+        task_root=root,
+        image_lock_path=root / "image.lock",
+        data_root=prepared.paths.data_root,
+        model=recovered_model,
+        docker_factory=lambda *_args: docker,
+        allowed_drive="D:",
+    )
+
+    result = await recovered.resume(prepared.preview.trial_id)
+
+    runs = [recovered.store.get_object("run", run_id, RunRecord) for run_id in result.run_ids]
+    assert [run.manifest.round_id for run in runs] == ["round-1", "round-2"]
+    assert result.goal_id == goal.goal_id
+    assert first.task_id == runs[1].task_id
+    assert recovered_model.request_count == 1
+
+
+@pytest.mark.anyio
+async def test_resume_boundary_uses_original_baseline_not_modified_workspace(tmp_path: Path) -> None:
+    """Break caught: recovery must retain the pre-interruption baseline for settlement checks."""
+    from tianwen.alpha import AlphaTrialRunner
+
+    root, docker = _bundle(tmp_path / "tasks", "A1"), _Docker()
+    runner = _runner(root, _Model(), docker)
+    prepared = runner.prepare("A1", budget=_budget())
+    _persist_running_trial(runner, prepared)
+    (prepared.paths.workspace / "outside.txt").write_text("interrupted write", encoding="utf-8")
+    recovered = AlphaTrialRunner(
+        task_root=root,
+        image_lock_path=root / "image.lock",
+        data_root=prepared.paths.data_root,
+        model=_Model(),
+        docker_factory=lambda *_args: docker,
+        allowed_drive="D:",
+    )
+
+    result = await recovered.resume(prepared.preview.trial_id)
+
+    assert result.boundary_status == "violated"
+    assert "workspace_boundary" in result.failure_categories
+
+
+@pytest.mark.anyio
+async def test_final_verify_audit_artifact_exists_for_invalid_and_unavailable_results(tmp_path: Path) -> None:
+    """Break caught: every final verification outcome needs a sanitized bounded audit record."""
+
+    class _InvalidDocker(_Docker):
+        async def run_final(self, action_id: str) -> Any:
+            self.final_calls.append(action_id)
+            return {"invalid": "result"}
+
+    class _UnavailableDocker(_Docker):
+        async def run_final(self, action_id: str) -> VerifierResult:
+            self.final_calls.append(action_id)
+            raise DockerExecutionError("D:/private-host-path secret")
+
+    for docker, expected in ((_InvalidDocker(), "invalid"), (_UnavailableDocker(), "unavailable")):
+        root = _bundle(tmp_path / expected / "tasks", "A1")
+        runner = _runner(root, _Model(), docker)
+        prepared = runner.prepare("A1", budget=_budget())
+
+        result = await runner.execute(prepared, _confirmation(prepared))
+
+        raw = (prepared.paths.trial_dir / "logs" / "final-verify.json").read_text(encoding="utf-8")
+        assert result.verification_status == expected
+        assert "logs/final-verify.json" in {artifact.path for artifact in result.artifacts}
+        assert expected in raw
+        assert "private-host-path" not in raw
+
+
+@pytest.mark.anyio
+async def test_resume_settling_with_unreconciled_final_action_is_boundary_unknown(tmp_path: Path) -> None:
+    """Break caught: an unreconciled final verifier is an unknown boundary effect."""
+    from tianwen.alpha import AlphaTrialRunner, AlphaTrialState
+
+    class _UnreconciledDocker(_Docker):
+        async def reconcile(self, _action_id: str) -> None:
+            return None
+
+    root, docker = _bundle(tmp_path / "tasks", "A1"), _UnreconciledDocker()
+    runner = _runner(root, _Model(), docker)
+    prepared = runner.prepare("A1", budget=_budget())
+    confirmation = _confirmation(prepared)
+    runner.store.put_immutable_object(
+        "alpha_trial_confirmation", prepared.preview.trial_id, None, "confirmed", confirmation
+    )
+    goal = runner.app.create_goal(
+        objective=prepared.preview.objective,
+        criteria=prepared.preview.acceptance,
+        workspace=prepared.paths.workspace,
+        authorization=prepared.preview.authorizations,
+        budget=prepared.preview.budget,
+    )
+    manifest = runner._manifest(prepared, goal, confirmation)
+    runner.store.put_immutable_object(
+        "alpha_trial_manifest", prepared.preview.trial_id, goal.goal_id, "active", manifest
+    )
+    prepared.paths.trial_manifest_json.write_bytes(manifest.model_dump_json().encode("utf-8"))
+    final_run_id = f"alpha:{prepared.preview.trial_id}:settlement"
+    action_id = proposal_action_id(
+        final_run_id,
+        f"alpha-final-{prepared.preview.trial_id}",
+        "final_verify",
+        {"verifier_id": "final", "verifier_digest": prepared._bundle.task.final_verifier.digest},
+    )
+    action = freeze_action(
+        runner.store,
+        final_run_id,
+        f"alpha-final-{prepared.preview.trial_id}",
+        "final_verify",
+        {"verifier_id": "final", "verifier_digest": prepared._bundle.task.final_verifier.digest},
+        EffectClass.EXTERNAL_READ_ONLY,
+    )
+    assert action.action_id == action_id
+    runner.store.transition_action(action_id, {ActionStatus.PROPOSED}, ActionStatus.UNKNOWN)
+    state = runner.store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
+    runner.store.put_object(
+        "alpha_trial_state",
+        state.trial_id,
+        None,
+        "settling",
+        state.model_copy(update={"stage": "settling", "goal_id": goal.goal_id}),
+    )
+    recovered = AlphaTrialRunner(
+        task_root=root,
+        image_lock_path=root / "image.lock",
+        data_root=prepared.paths.data_root,
+        model=_Model(),
+        docker_factory=lambda *_args: docker,
+        allowed_drive="D:",
+    )
+
+    result = await recovered.resume(prepared.preview.trial_id)
+
+    assert result.boundary_status == "unknown"
+    assert "unresolved_action" in result.failure_categories
+    assert result.trial_manifest_digest == content_digest(manifest)
 
 
 @pytest.mark.anyio
