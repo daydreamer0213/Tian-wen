@@ -322,6 +322,30 @@ Tianwen Plugins  = 持续学习控制系统
 `shell: false` / 可注入绝对 pnpm executable 的公开接口，或重新设计
 独立且可审计的安装器。
 
+### 10.2 Windows 本地沙盒的拒绝证据
+
+`ConfinedArgv.denialSignatures` 是 DSH 选中后端公开的错误文本提示，但
+它不是唯一可接受的拒绝证据。实际探针发现：Windows ACL 已阻止 Node
+22 写入，目标文件未生成，子进程返回 `EPERM`，但 `rc.6` 的
+`windows-acl` 提示未包含 Node 包装后的 `operation not permitted`。
+
+为避免把“提示词典不完整”误判为“沙盒失效”，固定写入探针允许两种
+拒绝证明：
+
+1. 排除 runner failure 后，stderr 命中当前后端自己的
+   `denialSignatures`；
+2. 固定子进程已真实启动，并输出机器可读的文件系统错误；错误码只能是
+   `EPERM`、`EACCES` 或 `EROFS`，`syscall` 和 `path` 必须精确绑定本次
+   固定写入目标，进程必须非零退出且目标文件不存在。
+
+第二种证明不是“任意非零退出都算拒绝”。缺少结构化记录、错误码未知、
+路径不一致、runner failure、进程未启动或目标文件存在时都必须失败。
+测试报告还要记录是否命中上游提示词典，把词典缺口保留为兼容性债务。
+
+Windows `partial` enforcement 只满足普通本地任务的只读和工作区写入
+边界，不证明工作区外强隔离。高风险候选评测继续使用
+container、remote runner 或 microVM；当前探针不提前实现这些提供方。
+
 ## 11. 迁移策略
 
 ### 阶段 0：封存基线
@@ -391,6 +415,11 @@ Tianwen Plugins  = 持续学习控制系统
 第 10 项允许上述唯一的 Windows Profile 安装期限制，但最终选型必须把
 它标记为兼容性债务；如果该限制扩散到 Agent 运行期或动态学习资产安装，
 则不视为完成门通过。
+
+第 9 项按 10.2 的两类拒绝证据验收。只要固定写入探针得到结构化的目标
+文件权限错误、runner 正常且文件未生成，就不因上游
+`denialSignatures` 漏项单独判定普通沙盒失败；该漏项仍需记录为升级
+兼容性债务。
 
 ## 13. 失败条件
 

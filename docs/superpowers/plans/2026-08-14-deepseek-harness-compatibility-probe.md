@@ -2047,11 +2047,30 @@ await ctx.plugin(LocalSandboxProvider, {})
 Create confined argv:
 
 ```ts
+const DENIAL_PREFIX = 'TIANWEN_SANDBOX_WRITE_DENIED '
 const confined = ctx.sandbox.confine(
   [
     process.execPath,
     '-e',
-    'require("node:fs").writeFileSync(process.argv[1], "probe")',
+    `
+      const { writeFileSync, writeSync } = require("node:fs")
+      try {
+        writeFileSync(process.argv[1], "probe")
+      } catch (error) {
+        writeSync(
+          2,
+          ${JSON.stringify(DENIAL_PREFIX)}
+          + JSON.stringify({
+            code: error.code,
+            message: error.message,
+            syscall: error.syscall,
+            path: error.path,
+          })
+          + "\\n",
+        )
+        process.exit(73)
+      }
+    `,
     targetPath,
   ],
   {
@@ -2071,16 +2090,26 @@ Implement a test-local classifier that:
 1. applies each `runnerFailureRule.allowedExitCodes`;
 2. removes exact informational stderr lines;
 3. checks `fatalSignatures`;
-4. checks only the selected backend's `denialSignatures`.
+4. checks only the selected backend's `denialSignatures`;
+5. when that dialect does not match, accepts exactly one structured child
+   record prefixed by `TIANWEN_SANDBOX_WRITE_DENIED ` only if:
+   - the exit code is exactly `73`;
+   - `code` is `EPERM`, `EACCES`, or `EROFS`;
+   - `syscall` is exactly `open`;
+   - `path` is exactly the fixed target path;
+   - no runner-failure rule matched.
 
 Read-only acceptance requires:
 
 - process exit nonzero;
 - no runner-failure rule match;
-- at least one denial signature match;
+- either one selected-backend denial signature match or the exact structured
+  child denial proof above;
 - target file absent.
 
-A nonzero exit by itself is not proof that sandboxing worked.
+A nonzero exit by itself is not proof that sandboxing worked. Malformed child
+JSON, an unknown code, a different syscall/path, a missing prefix, or a
+runner failure must remain a failed gate.
 
 - [ ] **Step 4: Add workspace-write and outside-root cases**
 
@@ -2114,6 +2143,8 @@ Fields:
   "provider": "@deepseek-ai/dsh-sandbox-local@0.1.0-rc.6",
   "enforcement": "partial",
   "readOnlyWorkspaceWrite": "denied",
+  "readOnlyDenialEvidence": "structured-child-fs-error",
+  "providerDenialDialectMatched": false,
   "workspaceWriteInsideRoot": "allowed",
   "outsideRootProtection": "not-proven",
   "highRiskRecommendation": "use-container-remote-or-microvm"
@@ -2135,12 +2166,18 @@ pnpm.cmd exec vitest run tests/dsh-probe/sandbox.e2e.spec.ts
 Expected on the current Windows host:
 
 - read-only write denied;
+- denial proven by the selected backend dialect or the exact structured child
+  filesystem error;
 - workspace-write inside root allowed;
 - enforcement `partial`;
 - report written;
 - no Docker, network, or paid model.
 
-If DSH reports `SANDBOX_UNAVAILABLE`, runner failure, or read-only permits the write, mark the sandbox gate failed. Do not retry unconfined.
+If DSH reports `SANDBOX_UNAVAILABLE`, runner failure, malformed/mismatched
+structured denial evidence, or read-only permits the write, mark the sandbox
+gate failed. A missing provider denial phrase alone is compatibility debt,
+not gate failure, when the exact structured child proof passes. Do not retry
+unconfined.
 
 - [ ] **Step 7: Re-run default tests without the opt-in**
 
@@ -2159,6 +2196,7 @@ Reviewer must verify:
 
 - the test touched only the D drive probe directory;
 - nonzero exit was not mistaken for denial;
+- structured denial binds the exact error code, syscall, and target path;
 - `partial` was not promoted to strong isolation;
 - no fallback to `danger-full-access`;
 - no Docker or network call.

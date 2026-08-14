@@ -386,7 +386,7 @@ npm tarball integrity、实际公开导出和 TypeScript 签名，不能把 `rc.
 
 稳定主分支在本次更新前为：
 
-- `main`: `33a7fb164ab39d38438ad13acafa5f04fc547d23`
+- `main`: `e303fa7439f189b397eda39fbd2f5697fe21b80d`
 
 Alpha-A 独立实施分支为：
 
@@ -458,6 +458,26 @@ Alpha-A 独立实施分支为：
   进程隔离，不在当前探针提前建设；
 - Task 4 继续修复真实的恢复时序证据缺口：必须用 durable Session event
   sequence 证明显式 resume 之前没有重新 armed、推进 Goal 或请求模型；
+- Tasks 4–7 已完成、普通推送并通过独立复审与主控独立验收；Task 7 后
+  探针分支远端精确 HEAD 为
+  `a3706515b72f7875ed7bd053f98ea78a6b97858b`；
+- Task 5 已证明 DSH Session Event 可以形成最小、可重放且不复制原始
+  对话/工具内容的 Tianwen Evidence；
+- Task 6 已证明现有 Python A1 评测可通过固定 typed bridge 直接复用，
+  Nop/Oracle、原始 stdout 和冻结摘要保持一致；
+- Task 7 已证明正式 Artifact、Evaluation、Approval、Champion、失败恢复、
+  回滚和重启重绑定由 Tianwen append-only Ledger 掌握，DSH Dynamic ID
+  只作为进程内临时绑定；
+- Task 8 的首次真实 Windows 本地沙盒探针观察到：read-only 写入实际被
+  ACL 阻止、目标文件未生成、workspace-write 正常，但 DSH `rc.6`
+  `windows-acl` 公布的 denial phrases 未包含 Node 22 返回的
+  `EPERM: operation not permitted`；
+- 用户批准把 Task 8 验收改为固定子进程机器可读错误证明：只有
+  `EPERM/EACCES/EROFS`、精确 `syscall/path`、runner 正常、非零退出且
+  文件不存在时才确认拒绝；不接受任意非零退出，也不因上游词典漏项单独
+  阻塞项目；
+- Windows 本地沙盒仍按 `partial` 分类：普通任务可复用；高风险候选评测
+  后续使用 container、remote runner 或 microVM，当前不提前建设；
 - 主控会话只负责验收、解释和调度，不亲自实现探针。
 
 当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
