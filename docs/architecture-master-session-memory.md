@@ -335,7 +335,10 @@ Run 结束不等于 Task 验收，Task 验收也不自动等于 Goal 完成。
 - 保留现有 Python 实现，不在探针通过前删除、废弃或大规模重构；
 - 模型参数训练继续暂缓，先验证 Harness 层持续学习能实现多少目标。
 
-这一新路线尚未完成兼容性探针，因此不能被描述为已经落地。详细依据：
+这一新路线已经通过兼容性探针的 Tasks 0–2，证明精确锁定的 DSH
+`0.1.0-rc.6` 可以通过公开包根导出接入，并建立最小
+`tianwen-dsh-compat` 兼容层；但完整探针尚未完成，因此仍不能被描述为
+已经正式落地。详细依据：
 
 - `docs/research/2026-08-14-deepseek-harness-source-audit.md`
 - `docs/superpowers/specs/2026-08-14-deepseek-harness-runtime-selection-design.md`
@@ -383,7 +386,7 @@ npm tarball integrity、实际公开导出和 TypeScript 签名，不能把 `rc.
 
 稳定主分支在本次更新前为：
 
-- `main`: `575fb3a`
+- `main`: `33a7fb164ab39d38438ad13acafa5f04fc547d23`
 
 Alpha-A 独立实施分支为：
 
@@ -398,25 +401,28 @@ Alpha-A 独立实施分支为：
 - 调研、规格、计划和本文档已由 `main`
   `de8e33365c402da9341672b8ada564e5bfb48880` 推送；
 - 用户已经批准开始兼容性探针；
-- 当前独立实施任务：
+- 探针 Tasks 0–2 的独立实施任务：
   `019ffe1f-bda0-7a71-9628-b9b38e944801`；
-- 当前实施范围只包括探针 Task 0–2：封存 Alpha 基线、锁定
-  DeepSeek Harness `0.1.0-rc.6` npm 依赖闭包、建立
-  `tianwen-dsh-compat` 公开兼容层；
-- 当前目标分支：`codex/deepseek-harness-probe`；
-- Task 0 已完成；Task 1 首次执行在本地提交
-  `96a60f643949afa3c3eda5996b6345d2bb641a18` 交接为 blocked，原因是
-  原计划错误地要求 CLI 包 `@deepseek-ai/dsh` 提供根库 export；
-- 主控只读核对确认：官方 `rc.5` 源码与 npm `rc.6` 均把
-  `@deepseek-ai/dsh` 定义为只有 `bin.dsh` 的 CLI 包；compat 将直接
-  import 的 14 个专用 Runtime 包则全部具有根 `"."` export、`types`
-  和默认实现；
-- 该 blocker 被判定为计划谓词过宽，不是 DSH 架构失败，也不需要用户
-  价值判断；计划已修正为“CLI 验证 `bin.dsh`，Runtime 库验证根导出”；
-- 原实施任务获准从现有证据提交继续完成 Task 1–2；在重新 GREEN、
-  独立复审和普通 push 前，远端 probe 分支仍不视为阶段通过；
-- Task 3 及后续任务必须等待 Task 0–2 的结构化交接、远端 SHA、
-  测试、类型检查和独立复审通过后再由主控创建；
+- 探针目标分支：`codex/deepseek-harness-probe`；
+- Tasks 0–2 已完成并普通推送，远端精确 HEAD：
+  `435ccad9e84809b417ca435f89450d7e6df98d8b`；
+- `@deepseek-ai/dsh` 已按 CLI 包验证 `bin.dsh`；兼容层直接 import 的
+  14 个 Runtime 包均具有公开根导出、类型声明和默认实现；
+- 187 个已安装 DSH 包均解析为精确 `0.1.0-rc.6`；锁文件、目标文件、
+  路径边界和禁止私有源码导入检查均通过；
+- `tianwen-dsh-compat` 已能通过公开 API 驱动一个真实但使用脚本化
+  Adapter 的 AgentLoop 回合，并挂载 JSONL Session 持久化；
+- 主控在最终远端 SHA 上独立复跑：离线 frozen install、闭包检查、
+  私有导入检查、TypeScript 类型检查和 8 个聚焦测试全部通过；
+  Python A1 聚焦测试通过，全量为 `424 passed, 4 skipped`，Ruff、
+  `git diff --check` 和工作树状态均干净；
+- 最终独立复审为 0 Critical、0 Important、3 Minor。三个 Minor
+  都只影响未来私有导入扫描器对构造字符串的误报或更深层规避分析，
+  当前提交的公开导入边界和扫描结果不受影响，暂不阻塞 Task 3；
+- Tasks 0–2 canonical 交接：
+  `docs/operations/deepseek-harness-probe-task-0-2-handoff.md`；
+- 下一实施入口只允许探针 Task 3：建立可安装的 Tianwen
+  Bundle/Profile；Task 4 及后续任务必须等待 Task 3 单独验收；
 - 主控会话只负责验收、解释和调度，不亲自实现探针。
 
 当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
