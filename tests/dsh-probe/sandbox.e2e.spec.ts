@@ -1,10 +1,14 @@
 import { spawn } from 'node:child_process'
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -157,11 +161,50 @@ function restoreEnvironment(
   else process.env[name] = previous
 }
 
+function assertCanonicalDirectory(path: string): void {
+  const entry = lstatSync(path)
+  const expected = resolve(path).toLowerCase()
+  const actual = resolve(realpathSync.native(path)).toLowerCase()
+  if (!entry.isDirectory() || actual !== expected) {
+    throw new Error(`${path} must be a canonical directory`)
+  }
+}
+
+function ensureSandboxRoot(): void {
+  assertCanonicalDirectory(PROBE_ROOT)
+  if (existsSync(SANDBOX_ROOT)) assertCanonicalDirectory(SANDBOX_ROOT)
+  else mkdirSync(SANDBOX_ROOT)
+  assertCanonicalDirectory(SANDBOX_ROOT)
+}
+
 describeSandbox('real DSH local sandbox', () => {
+  it('rejects a reparse-point sandbox directory', () => {
+    if (process.platform !== 'win32') {
+      throw new Error('Task 8 is restricted to the controlled Windows D drive')
+    }
+    ensureSandboxRoot()
+
+    const disposableRoot = mkdtempSync(join(SANDBOX_ROOT, 'path-check-'))
+    const target = join(disposableRoot, 'target')
+    const junction = join(disposableRoot, 'junction')
+    try {
+      mkdirSync(target)
+      symlinkSync(target, junction, 'junction')
+      expect(() => assertCanonicalDirectory(junction))
+        .toThrow(/canonical directory/u)
+    } finally {
+      if (existsSync(junction)) unlinkSync(junction)
+      rmSync(disposableRoot, { recursive: true, force: true })
+    }
+  })
+
   it('enforces workspace modes and reports the outside-root boundary honestly', async () => {
     if (process.platform !== 'win32') {
       throw new Error('Task 8 is restricted to the controlled Windows D drive')
     }
+    ensureSandboxRoot()
+    rmSync(REPORT_PATH, { force: true })
+
     const configuredRoot = process.env.TIANWEN_DSH_PROBE_ROOT
     if (
       configuredRoot === undefined
@@ -170,24 +213,25 @@ describeSandbox('real DSH local sandbox', () => {
       throw new Error(`TIANWEN_DSH_PROBE_ROOT must be exactly ${PROBE_ROOT}`)
     }
 
-    mkdirSync(SANDBOX_ROOT, { recursive: true })
-    const disposableRoot = mkdtempSync(join(SANDBOX_ROOT, 'task-8-'))
-    const workspaceRoot = join(disposableRoot, 'workspace')
-    const privateTempRoot = join(disposableRoot, 'temp')
-    const readOnlyTarget = join(workspaceRoot, 'read-only.txt')
-    const workspaceWriteTarget = join(workspaceRoot, 'workspace-write.txt')
-    const siblingTarget = join(disposableRoot, 'sibling-write.txt')
-    mkdirSync(workspaceRoot)
-    mkdirSync(privateTempRoot)
-    rmSync(REPORT_PATH, { force: true })
-
     const previousTemp = process.env.TEMP
     const previousTmp = process.env.TMP
-    process.env.TEMP = privateTempRoot
-    process.env.TMP = privateTempRoot
-    const ctx = new Context()
+    let ctx: Context | undefined
+    let disposableRoot: string | undefined
+    let primaryError: unknown
+    const cleanupErrors: unknown[] = []
 
     try {
+      disposableRoot = mkdtempSync(join(SANDBOX_ROOT, 'task-8-'))
+      const workspaceRoot = join(disposableRoot, 'workspace')
+      const privateTempRoot = join(disposableRoot, 'temp')
+      const readOnlyTarget = join(workspaceRoot, 'read-only.txt')
+      const workspaceWriteTarget = join(workspaceRoot, 'workspace-write.txt')
+      const siblingTarget = join(disposableRoot, 'sibling-write.txt')
+      mkdirSync(workspaceRoot)
+      mkdirSync(privateTempRoot)
+      process.env.TEMP = privateTempRoot
+      process.env.TMP = privateTempRoot
+      ctx = new Context()
       await ctx.plugin(LocalSandboxProvider, {})
       const env = minimalEnvironment(privateTempRoot)
       const readOnly = ctx.sandbox.confine(
@@ -280,11 +324,34 @@ describeSandbox('real DSH local sandbox', () => {
       expect(readOnlyFailure.runnerFailure).toBe(false)
       expect(readOnlyFailure.denial, readOnlyEvidence).toBe(true)
       expect(existsSync(readOnlyTarget)).toBe(false)
+    } catch (error) {
+      primaryError = error
     } finally {
-      await ctx.fiber.dispose()
-      restoreEnvironment('TEMP', previousTemp)
-      restoreEnvironment('TMP', previousTmp)
-      rmSync(disposableRoot, { recursive: true, force: true })
+      if (ctx !== undefined) {
+        try {
+          await ctx.fiber.dispose()
+        } catch (error) {
+          cleanupErrors.push(error)
+        }
+      }
+      try {
+        restoreEnvironment('TEMP', previousTemp)
+        restoreEnvironment('TMP', previousTmp)
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+      if (disposableRoot !== undefined) {
+        try {
+          rmSync(disposableRoot, { recursive: true, force: true })
+        } catch (error) {
+          cleanupErrors.push(error)
+        }
+      }
+    }
+
+    if (primaryError !== undefined) throw primaryError
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(cleanupErrors, 'sandbox cleanup failed')
     }
   }, 60_000)
 })
