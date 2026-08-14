@@ -35,6 +35,10 @@
 - DSH Turn 不等于 Tianwen Run，DSH Todo 不等于 Tianwen Task，Dynamic Cordis Package 不等于持久 `ArtifactVersion`，Agent Preset generation 不等于 Promotion。
 - Dynamic Cordis 版本只作为“当前进程里的运行挂载”。正式版本身份、评测、授权、Champion 指针和历史必须由 Tianwen 自己的持久账本保存。
 - 顶层 Goal 的创建/编辑/暂停/恢复权限仍由用户掌握。任何后台插件如果能够直接调用低层 GoalService，必须在组合层显式列入高权限清单；普通 evidence/evolution 插件不得获得 Goal 变更能力。
+- 正式装入同一 JavaScript 进程的已审核插件视为可信代码；消息
+  `source` 是来源约定，不是恶意代码沙盒。Task 4 不测试已取得完整
+  `Agent` / `Context` 的恶意插件。未晋升或第三方未知插件不得进入
+  主进程；需要时再单独设计隔离。
 - 每项任务先写失败测试，再写最小实现；每项任务完成后单独提交。提交前运行该任务聚焦测试、TypeScript typecheck、必要的 Python 测试和 `git diff --check`。
 - 每项任务由 fresh scoped reviewer 复审。发现 Critical/Important 后最多允许两轮窄修复；仍有承重问题则停止并向主控交接，不得用后续任务掩盖。
 - 探针结果只能由最终证据决定。不能因为已经投入代码就默认迁移，也不能因为某个非承重细节不理想就推翻可工作的公开接口方案。
@@ -1136,10 +1140,12 @@ git commit -m "feat: add installable tianwen harness profile"
 **Interfaces:**
 
 - Human accepted turn may create a top-level DSH Goal through model-facing tools.
-- Plugin-sourced turn cannot create/edit the Goal.
+- Honestly labelled plugin-sourced turn cannot create/edit the Goal.
 - Goal state survives JSONL persistence and process restart.
 - Recovered Goal is disarmed and sends zero model requests until explicit resume.
 - Explicit resume admits exactly the configured number of Goal rounds.
+- Same-process reviewed plugins are trusted. The known forged-`user` path from
+  code holding the full root `Agent` is documented, not a Task 4 gate.
 
 - [ ] **Step 1: Add the human-versus-plugin authority contract**
 
@@ -1189,8 +1195,16 @@ In `goal-recovery.spec.ts`:
 6. Resume through `ctx.agents.resume({ resumeSessionId, agentOptions: { provider: "tianwen-probe", model: "scripted" } })`.
 7. Assert recovered Goal fields match and `activation === "disarmed"`.
 8. Assert the second adapter has zero requests.
-9. Call `ctx.goals.resume(resumed.agent, recoveredGoal)`.
-10. Wait until the Goal reaches the one-round cap; assert exactly one request and final phase `blocked` with code `round-limit`.
+9. Read the recovered public Session events and record the durable event
+   sequence before resume. Prove no event after restart has armed or advanced
+   the Goal and no model request exists.
+10. Call `ctx.goals.resume(resumed.agent, recoveredGoal)`.
+11. Require the first durable Goal-resume/round event sequence to occur only
+    after the explicit call above; bind it to the recovered Goal id and
+    revision.
+12. Wait until the Goal reaches the one-round cap; assert exactly one request,
+    exactly one admitted goal-round message and final phase `blocked` with
+    code `round-limit`.
 
 - [ ] **Step 3: Run RED against missing probe helpers or incompatible public behavior**
 
@@ -1227,7 +1241,9 @@ export async function executeRegisteredTool(
 ): Promise<ToolExecutionResult>
 ```
 
-`mountGoalHarness()` may mount only public package roots. It must not expose raw GoalService mutation to ordinary Tianwen plugins; it exists under the test/compat package for this probe.
+`mountGoalHarness()` may mount only public package roots and may return its
+test Context. Product evidence/evolution packages must not add Goal mutation
+dependencies.
 
 Provide an explicit `goalRoundDriver: boolean` option. Context 1 uses `false`
 so Goal creation cannot start an autonomous round; Context 2 uses `true` and
@@ -1249,10 +1265,12 @@ Expected: all pass, no model request before explicit resume.
 
 Reviewer must specifically inspect:
 
-- whether a plugin-sourced or child-sourced turn can forge human authority;
-- whether direct low-level GoalService access leaked into evidence/evolution packages;
+- whether an honestly plugin-sourced turn and a child-sourced turn are rejected;
+- whether evidence/evolution product packages gained GoalService dependencies;
 - whether restart uses a fresh Context and real JSONL backend;
-- whether any hidden model request occurs before explicit resume.
+- whether durable event sequence proves resume occurs after the explicit call;
+- whether any hidden model request occurs before explicit resume;
+- whether the handoff records the known same-process forged-`user` limitation.
 
 Commit:
 

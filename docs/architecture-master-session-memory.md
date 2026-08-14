@@ -450,6 +450,14 @@ Alpha-A 独立实施分支为：
 - Task 4 唯一范围是验证顶层 Goal 的人类主权、真实 JSONL 跨 Context
   恢复、恢复后 disarmed、显式 resume 前零模型请求，以及一次 Goal
   round 上限；Task 5 必须等待 Task 4 单独验收；
+- Task 4 发现持有完整 root `Agent` 的同进程代码可自报
+  `source.kind: user`。用户提醒后，主控修正过宽威胁模型：第一版把
+  已审核并正式安装的同进程插件视为可信代码，只验证诚实 provenance、
+  child ownership 和产品包依赖边界；该伪造路径记录但不阻塞；
+- 未晋升或第三方未知插件不得进入主进程。需要运行不可信插件时再设计
+  进程隔离，不在当前探针提前建设；
+- Task 4 继续修复真实的恢复时序证据缺口：必须用 durable Session event
+  sequence 证明显式 resume 之前没有重新 armed、推进 Goal 或请求模型；
 - 主控会话只负责验收、解释和调度，不亲自实现探针。
 
 当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
