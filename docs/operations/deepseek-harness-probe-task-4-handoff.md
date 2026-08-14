@@ -2,113 +2,148 @@
 
 **Date:** 2026-08-14
 
-**Status:** blocked
+**Status:** complete for Task 4 under the approved trusted-plugin model
 
 **Branch target:** `codex/deepseek-harness-probe`
 
 **Starting local and remote SHA:**
 `da44d1ac152d31e97596c419e4b8952e92cb3ef3`
 
-**Local positive-probe implementation commit:**
-`02a4b127d9e6d8836b7ca42f8d27c3a609b86c02`
+The controlling handoff carries the exact final local and remote SHA because
+this document cannot identify the commit that contains itself.
 
-**Push status:** not pushed. The remote branch remains at the reviewed Task 3
-starting SHA. The controlling handoff supplies the exact local commit that
-contains this document because a document cannot identify its own commit.
+This result proves only Task 4. It does not make Tianwen production-ready,
+authorize full migration, start Task 5, or start Alpha Task 10.
 
-Task 4 is blocked because a normal same-process Cordis plugin can use public
-rc.6 APIs to forge a top-level human-looking turn and create an armed Goal.
-This violates Tianwen's load-bearing rule that only authenticated human
-authority may create or change a top-level Goal.
+## Final threat model
 
-This result does not authorize Task 5, Alpha Task 10, full migration, or any
-relaxation of Goal authority.
+Authority commit
+`e303fa7439f189b397eda39fbd2f5697fe21b80d` defines the first-version
+boundary:
 
-## Authority and decision
+- reviewed, versioned, approved plugins installed in the same JavaScript
+  process are trusted code;
+- Cordis `inject` and message `source` are provenance/composition contracts,
+  not a sandbox against malicious code already holding a root
+  `Agent`/`Context`;
+- unknown, third-party, or unpromoted plugins do not enter the main process;
+- process isolation is deferred until an actual untrusted-plugin requirement
+  exists.
 
-The implementation session first read the approved controller memory, runtime
-selection design, and full compatibility plan from shared Git objects at:
+Task 4 therefore gates:
 
-```text
-447506354bf328a0a87901e9c63b0d2d747653e6
-```
+- direct human-source root Goal creation;
+- rejection of honestly plugin-sourced create/edit;
+- rejection of a user-looking child attempt to mutate the root Goal;
+- absence of Goal dependencies in ordinary Tianwen product packages;
+- durable disarmed recovery and explicit one-round resume.
 
-It did not merge, rebase, or move the Task 3 baseline.
+## Historical blocked finding
 
-After the initial positive tests passed, fresh scoped reviewer
-`019fff06-9c74-76a3-8ec3-64f9ef6c6675` identified that those tests trusted a
-caller-authored `MessageSource`. A new adversarial RED then used a real Cordis
-plugin and real AgentLoop to verify the concern.
+Fresh review initially asked whether malicious same-process code could forge
+`source.kind: "user"`. A real Cordis plugin with `inject: ["agents"]` proved
+that it could call public `agent.followup()`, forge that source, and cause a
+scripted model to create an armed Goal.
 
-The architecture controller
-`019feea9-f878-7c53-bb44-06a91a77c159` independently reproduced the failure
-and selected the blocked interpretation:
+The architecture controller first blocked Task 4, then the user rejected that
+threat model as over-defensive and approved the narrower boundary above. The
+forgery remains a known limitation, but is no longer a Task 4 gate. The
+deliberately failing adversarial test was removed from the final suite; no
+wrapper, token, capability framework, or process isolation was added.
 
-- do not treat DSH Goal as Tianwen's top-level Goal authority;
-- do not weaken the human-sovereignty acceptance rule;
-- do not manufacture a GREEN by trusting every same-process plugin;
-- do not attempt a wrapper-only repair inside Task 4;
-- do not start Task 5.
-
-DSH Loop, Session, tools, Profile, and later sandbox candidates may still be
-useful. The failed seam is specifically top-level Goal authority.
-
-## Implemented and retained scope
+## Implemented scope
 
 Task 4 changed only:
 
+- `packages/tianwen-dsh-compat/src/test-harness.ts`;
 - `tests/dsh-probe/goal-authority.spec.ts`;
 - `tests/dsh-probe/goal-recovery.spec.ts`;
-- `packages/tianwen-dsh-compat/src/test-harness.ts`;
 - this handoff.
 
-The minimal compat addition is:
+The compat helper is:
 
 ```ts
-mountGoalHarness(
-  root,
-  script,
-  { goalRoundDriver: boolean },
-)
+mountGoalHarness(root, script, { goalRoundDriver: boolean })
 ```
 
-The boolean is mandatory. Both modes mount JSONL persistence and GoalService
-before AgentLoop. The `true` mode additionally mounts the public
-goal-round-driver before AgentLoop. The helper imports only published package
-roots.
+The boolean is mandatory. Both modes mount compression-none JSONL persistence
+and GoalService before AgentLoop. The `true` mode additionally mounts the
+public goal-round-driver before AgentLoop. Only public package-root imports are
+used.
 
-The implementation did not modify:
+No Task 3 Bundle/Profile file, dependency version, lockfile, Python Alpha
+runtime, Goal product policy, Evidence/Evolution/Champion package, Sandbox, or
+UI was modified.
 
-- Task 3 Bundle, Profile, verifier, or report;
-- dependency versions or `pnpm-lock.yaml`;
-- Python Alpha runtime or A1–A5;
-- Goal product policy;
-- Evidence, Evolution, Champion, or Candidate governance;
-- Sandbox or UI;
-- Task 5 or Alpha Task 10.
+## Authority matrix
 
-## TDD evidence
+| Caller and durable source | Operation | Result |
+|---|---|---|
+| top-level root, direct `{ kind: "user" }` turn | create | accepted |
+| top-level root, `{ kind: "plugin", plugin: "tianwen-evidence" }` turn | create | `GOAL_TOOL_AUTHORITY_REQUIRED` |
+| top-level root, honestly plugin-sourced turn | edit | `GOAL_TOOL_AUTHORITY_REQUIRED`; objective unchanged |
+| registered child owned by root, user-looking turn | edit root Goal | `GOAL_TOOL_AUTHORITY_REQUIRED`; root unchanged |
 
-The first clean-worktree run failed because ignored `dist/` output did not
-exist. That setup error was not accepted as RED. The unchanged compat baseline
-was built before retrying.
+The authority test uses a real Session and Inbox, a registry-compatible
+running Agent, `withInitiator(agent, ...)`, real ToolRuntime execution, and
+model-facing `create_goal`/`update_goal` tools.
 
-The first behavioral run exposed two test-driver facts:
+No evidence or evolution product package exists in Tasks 0–4, and Task 4 adds
+no GoalService dependency outside the compat test harness.
 
-```text
-goal-authority.spec.ts
-4 failed with GOAL_TOOL_DRIVER_REQUIRED
+## Durable recovery and explicit resume
 
-goal-recovery.spec.ts
-1 failed because mountGoalHarness was absent
-```
+Context 1:
 
-Public rc.6 AgentRegistry types require a custom driver to:
+1. creates a UUID directory below
+   `D:\DevData\tianwen-dsh-probe\sessions`;
+2. mounts JSONL persistence with `compression: "none"` and GoalService;
+3. explicitly sets `goalRoundDriver: false`;
+4. creates Goal `resume safely` with `maxGoalRounds: 1`;
+5. observes zero adapter requests;
+6. flushes the Session and confirms the JSONL contains the exact session id
+   and `goal/change`;
+7. disposes the whole Context.
 
-- set the Agent state to `running`;
-- wrap the foreground tool execution in `withInitiator(agent, ...)`.
+Context 2:
 
-After correcting that test driver, the true implementation RED was:
+1. creates a fresh Context over the same JSONL root;
+2. mounts GoalService and goal-round-driver before AgentLoop;
+3. resumes through `ctx.agents.resume()`;
+4. preserves Goal id, revision, objective, phase, cap, round count, and
+   timestamps;
+5. recovers with `activation: "disarmed"`;
+6. drains two event-loop turns and two idle checkpoints;
+7. observes zero adapter requests.
+
+The final test now records `session.firstLiveSeq` and the next durable sequence
+before explicit resume. Before `ctx.goals.resume()` it requires:
+
+- no new `goal/change`;
+- no goal-sourced `user/message`;
+- no `request/header`;
+- zero adapter requests.
+
+The explicit call must append the first new `goal/change` at the recorded
+boundary with:
+
+- `operation: "resume"`;
+- the recovered Goal id;
+- revision exactly `recovered.revision + 1`.
+
+After that event:
+
+- exactly one goal-sourced message appears;
+- its source binds the same Goal id and resume revision;
+- its sequence is greater than the resume event;
+- exactly one `request/header` follows the goal message;
+- exactly one ScriptedAdapter request occurs;
+- final Goal state is `blocked`, `activation: "disarmed"`,
+  `roundsStarted: 1`, with `blockedReason.code: "round-limit"`.
+
+## TDD and mutation evidence
+
+The original implementation RED was:
 
 ```text
 goal-authority.spec.ts
@@ -118,195 +153,29 @@ goal-recovery.spec.ts
 1 failed: mountGoalHarness is not a function
 ```
 
-The minimal helper produced the first positive GREEN:
+The minimal helper produced:
 
 ```text
 2 files passed
 5 tests passed
 ```
 
-The fresh review then caused a second, security-focused RED:
+The new durable-order assertions passed immediately because rc.6 already
+behaved correctly. A temporary mutation inserted a hidden
+`ctx.goals.resume()` before the explicit boundary. The test then failed
+exactly at:
 
 ```text
-goal-authority.spec.ts
-4 passed
-1 failed
+expected pre-resume goal/change events: 0
+received: 1
 ```
 
-The failing expectation required that the forged-human plugin leave the Goal
-undefined. The actual public rc.6 result was:
+Removing that mutation restored the focused 5/5 GREEN. The mutation was not
+committed.
 
-```text
-objective = forged plugin goal
-phase = active
-revision = 1
-activation = armed
-maxGoalRounds = 1
-roundsStarted = 0
-```
+## Review history
 
-That RED is intentionally retained. No production change was made to turn it
-green.
-
-## Goal authority matrix
-
-| Caller and durable source | Operation | Observed result |
-|---|---|---|
-| top-level root, direct `{ kind: "user" }` turn | create | accepted |
-| top-level root, `{ kind: "plugin", plugin: "tianwen-evidence" }` turn | create | rejected with `GOAL_TOOL_AUTHORITY_REQUIRED` |
-| top-level root, plugin-sourced turn | edit existing root Goal | rejected with `GOAL_TOOL_AUTHORITY_REQUIRED`; objective unchanged |
-| registered child owned by the root, user-looking turn | edit root Goal | rejected with `GOAL_TOOL_AUTHORITY_REQUIRED`; root unchanged |
-| ordinary Cordis plugin with only `inject: ["agents"]`, forged `{ kind: "user" }` message | create through real AgentLoop | **accepted; blocker** |
-
-The first four rows prove that rc.6 checks honest source labels and
-AgentRegistry parent ownership. The fifth row proves that the human label is
-not host-attested and can be authored by an ordinary same-process plugin.
-
-## Forgery path
-
-The adversarial test uses only public package-root behavior:
-
-1. mount the real core harness and AgentLoop;
-2. mount public GoalService and `toolGoal`;
-3. mount a Cordis plugin declaring only `inject: ["agents"]`;
-4. after `agent/session-start`, call public `agent.followup()` with a
-   `createUserMessage()` whose source is `{ kind: "user" }`;
-5. let the local ScriptedAdapter request `create_goal`;
-6. wait for the real AgentLoop and ToolRuntime to complete.
-
-The test does not:
-
-- call `ctx.goals.create()` from the attacker;
-- append a forged event directly;
-- use a child Agent;
-- import private source;
-- invoke a paid or network model;
-- use shell, Docker, or sandbox.
-
-Therefore hiding `mountGoalHarness` or changing a test-only helper would not
-repair the demonstrated path. The ordinary plugin can drive a live root Agent
-through an already-public method.
-
-## Positive recovery evidence
-
-The recovery test separately established these rc.6 facts:
-
-1. Context 1 uses a UUID-named directory below
-   `D:\DevData\tianwen-dsh-probe\sessions`;
-2. it mounts compression-none JSONL persistence and GoalService without
-   goal-round-driver;
-3. Goal creation sends zero ScriptedAdapter requests;
-4. `ctx.sessions.flush()` participates and the JSONL file contains the exact
-   session id and a `goal/change` event;
-5. the whole first Context is disposed;
-6. Context 2 is a new Context over the same JSONL root;
-7. Context 2 mounts GoalService and goal-round-driver before AgentLoop;
-8. `ctx.agents.resume()` reconstructs a new live Agent and Session;
-9. id, revision, objective, phase, cap, round count, and timestamps survive;
-10. recovered activation is `disarmed`;
-11. after two event-loop turns and idle checkpoints, the second adapter request
-    count remains exactly zero;
-12. explicit `ctx.goals.resume()` rearms the Goal;
-13. exactly one local scripted model request is admitted;
-14. exactly one goal-sourced user message records round 1;
-15. final Goal state is `blocked`, `activation = disarmed`, with
-    `blockedReason.code = "round-limit"`.
-
-These are useful compatibility facts, but they do not overcome the authority
-failure.
-
-The reviewer left one Important recovery concern open: the test samples
-pre-resume quiescence rather than proving through durable event sequence
-ordering that no delayed pre-resume job can release after the explicit resume
-edge. This was not repaired after the controller blocked the Goal seam.
-
-The reviewer also left one Minor diagnostic concern open: the successful test
-removes its UUID JSONL directory, and failure cleanup currently also removes
-the artifact. Retaining failed JSONL fixtures would improve diagnosis but
-cannot change the authority result.
-
-## Low-level GoalService finding
-
-The reviewer also classified raw GoalService access as Critical.
-
-The new helper creates and returns a dedicated test Context; it does not inject
-GoalService into an existing ordinary Tianwen plugin. In addition, before Task
-4 the compat root already re-exported GoalService and existing MountedHarness
-values already returned a complete Context. The new helper therefore did not
-create the underlying same-process trust model.
-
-However, the broader concern remains valid at architecture level: same-process
-plugins are trusted code with broad Agent/Context access, and ordinary package
-composition is not a security boundary. The confirmed `agent.followup()`
-forgery is sufficient to block top-level Goal authority even without direct
-GoalService mutation.
-
-Removing the existing GoalService export or redesigning capability
-distribution would modify files and policy outside Task 4's approved scope
-and would still not authenticate human ingress by itself.
-
-## Verification evidence before the blocking RED
-
-The positive implementation commit passed:
-
-```text
-Task 4 focused
-2 files, 5 tests passed
-
-Tasks 0–4 Node regression
-5 files, 21 tests passed
-
-Published DSH closure
-187 installed rc.6 packages
-15 public package surfaces
-
-Private DSH source imports
-0 violations
-
-TypeScript workspace typecheck
-exit 0
-
-Offline frozen pnpm replay
-exit 0, already up to date
-
-Python A1
-1 passed, 9 deselected
-
-Full Python pytest
-424 passed, 4 skipped
-
-Ruff
-All checks passed
-
-git diff --check
-exit 0
-```
-
-The offline pnpm replay used the already reviewed lockfile with:
-
-```text
-pnpm 11.20.0
---offline
---frozen-lockfile
---trust-lockfile
-store = D:\DevData\pnpm-store
-virtual store = D:\DevData\tianwen-dsh-probe\virtual-store-task-4-d296
-```
-
-The current authoritative Task 4 result is the later adversarial RED:
-
-```text
-goal-authority.spec.ts
-4 passed
-1 failed
-```
-
-Because the load-bearing test fails, the earlier broad GREEN is not a Task 4
-acceptance result.
-
-## Independent review
-
-Fresh scoped reviewer:
+Initial scoped reviewer:
 
 ```text
 019fff06-9c74-76a3-8ec3-64f9ef6c6675
@@ -316,28 +185,49 @@ Minor: 1
 Ready: no
 ```
 
-Disposition:
+Disposition under `e303fa7`:
 
-- Critical, forged human authority: confirmed by real-plugin RED; open and
-  blocking;
-- Critical, raw GoalService capability: not newly introduced by the Task 4
-  helper, but the wider same-process capability model is an architecture risk;
-- Important, durable ordering around pre-resume zero requests: open;
-- Minor, retain JSONL on failure: open.
+- malicious same-process source forgery: documented known limitation, outside
+  the approved gate;
+- compat helper returning a test Context: explicitly allowed, not a product
+  security boundary;
+- durable pre-resume event ordering: fixed with public Session event seq;
+- retaining JSONL on test failure: Minor, deferred without a cleanup framework.
 
-No Critical or Important was hidden or downgraded to pass the probe.
+Fresh post-correction reviewer:
+
+```text
+019fff24-00cf-7533-9a02-6fbbe32043c6
+Critical: 0
+Important: 0
+Minor: 1
+Ready: yes
+```
+
+The sole Minor is the already recorded failure-time JSONL cleanup. It remains
+non-blocking diagnostic debt. The reviewer explicitly recommended against
+adding wrappers, tokens, or process isolation to Task 4.
+
+## Verification
+
+The final controlling handoff records fresh command counts. Required gates are:
+
+- Task 4 focused tests;
+- Tasks 0–4 Node regression;
+- exact rc.6 dependency closure;
+- zero private DSH source imports;
+- TypeScript typecheck;
+- offline frozen pnpm replay;
+- Python A1 and full pytest baseline;
+- Ruff;
+- `git diff --check`;
+- clean worktree;
+- fast-forward push and exact remote SHA.
 
 ## Forbidden effects and storage
 
-Task 4 used:
-
-- local ScriptedAdapter responses only;
-- real in-process DSH services;
-- real JSONL persistence under the dedicated D drive probe root;
-- offline frozen pnpm replay;
-- offline Python baseline and Ruff.
-
-Large/generated state was kept under:
+Task 4 uses local ScriptedAdapter responses and real in-process DSH services.
+Generated state stays under:
 
 ```text
 D:\DevData\pnpm-store
@@ -347,41 +237,15 @@ D:\DevData\tianwen-dsh-probe\venv-task-4-d296
 D:\DevData\tianwen-dsh-probe\sessions
 ```
 
-Task 4 did not use:
+Task 4 does not use:
 
-- a paid model, model API key, or provider request;
+- paid models, model API keys, or provider traffic;
 - live web/search/fetch;
 - Docker or a real sandbox;
 - interactive DSH;
 - private `@deepseek-ai/*/src/*` imports;
-- shell-based Agent execution;
-- the Task 3 Windows Profile-install `shell: true` exception;
+- the Task 3 Profile-install `shell: true` exception;
 - a DSH fork or copied upstream source;
 - force-push, merge, rebase, or `main` mutation.
-
-## Risk and next plan
-
-The current public rc.6 seam can enforce Goal authority only when every
-same-process producer reports provenance honestly. That is insufficient for a
-continual-learning product whose future plugins or promoted capabilities may
-be generated or changed over time.
-
-The recommended next design is:
-
-```text
-DSH Runtime + Tianwen Goal Governance
-```
-
-Its minimum questions are:
-
-1. keep authenticated top-level Goal state in a Tianwen-owned trusted boundary;
-2. treat DSH Goal, if reused, as a run-local or task-local continuation aid;
-3. keep ordinary plugins unable to author authenticated human ingress;
-4. decide whether the trusted boundary must be a separate process;
-5. retain DSH Loop, Session, Profile, tools, and sandbox candidates where their
-   own compatibility gates pass.
-
-That redesign requires a new approved specification and plan. It must not be
-implemented as a repair wave inside Task 4.
 
 Task 5 and Alpha Task 10 remain frozen.

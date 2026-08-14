@@ -108,9 +108,42 @@ describe('DSH goal recovery', () => {
         activation: 'disarmed',
       })
       expect(second.adapter.requests).toHaveLength(0)
+      const preResumeEvents = resumed.agent.session.events.filter(
+        event => event.seq >= resumed.agent.session.firstLiveSeq,
+      )
+      expect(preResumeEvents.filter(
+        event => event.type === 'goal/change',
+      )).toHaveLength(0)
+      expect(preResumeEvents.filter(
+        event => event.type === 'user/message'
+          && event.data.source.kind === 'goal',
+      )).toHaveLength(0)
+      expect(preResumeEvents.filter(
+        event => event.type === 'request/header',
+      )).toHaveLength(0)
+      const explicitResumeBoundary = resumed.agent.session.seq
 
       const rearmed = second.ctx.goals.resume(resumed.agent, recovered!)
       expect(rearmed.activation).toBe('armed')
+      expect(rearmed).toMatchObject({
+        id: recovered!.id,
+        revision: recovered!.revision + 1,
+      })
+      const resumeEvent = resumed.agent.session.events.find(
+        event => event.seq >= explicitResumeBoundary
+          && event.type === 'goal/change'
+          && event.data.operation === 'resume',
+      )
+      expect(resumeEvent).toMatchObject({
+        seq: explicitResumeBoundary,
+        data: {
+          operation: 'resume',
+          goal: {
+            id: recovered!.id,
+            revision: rearmed.revision,
+          },
+        },
+      })
       await vi.waitFor(
         () => expect(second!.adapter.requests).toHaveLength(1),
         { timeout: 2_000 },
@@ -134,9 +167,18 @@ describe('DSH goal recovery', () => {
       )
       expect(goalRoundMessages).toHaveLength(1)
       expect(goalRoundMessages[0]!.data.source).toMatchObject({
-        goalId: created.id,
+        goalId: recovered!.id,
+        revision: rearmed.revision,
         round: 1,
       })
+      expect(goalRoundMessages[0]!.seq).toBeGreaterThan(resumeEvent!.seq)
+      const requestHeaders = resumed.agent.session.events.filter(
+        event => event.type === 'request/header'
+          && event.seq > resumeEvent!.seq,
+      )
+      expect(requestHeaders).toHaveLength(1)
+      expect(requestHeaders[0]!.seq)
+        .toBeGreaterThan(goalRoundMessages[0]!.seq)
       expect(second.adapter.requests).toHaveLength(1)
     } finally {
       if (second !== undefined) {
