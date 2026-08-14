@@ -169,11 +169,35 @@ Machine-readable evidence:
 D:\DevData\tianwen-dsh-probe\profile-report.json
 ```
 
-Report SHA-256:
+Implementation-session full run-receipt SHA-256:
 
 ```text
 5f82a56b86dde86761cac596114757968953186d945be89de9932428d973356e
 ```
+
+This exact receipt was produced, and later reproduced fresh, with:
+
+```text
+COREPACK_HOME=D:\DevData\corepack-home
+PNPM_CONFIG_VIRTUAL_STORE_DIR=D:\DevData\tianwen-dsh-probe\virtual-store-task-3-ef68
+process.execPath=D:\hermes\node\node.exe
+```
+
+It is not a cross-environment canonical semantic hash. The parent
+`COREPACK_HOME` absolute path is recorded in each of the four
+`commands[*].argv[1]` values, so changing that path changes the whole-file
+SHA-256 even when the pnpm version, behavior, and all probe results are
+identical.
+
+The controller's fresh receipts `3426b709...` and `e211bdea...` differed from
+the implementation-session receipt only in those four pnpm executable paths.
+After normalizing the four `commands[*].argv[1]` values, the JSON structures
+were strictly identical.
+
+Task 3 acceptance therefore rests on the tarball SHA-256, dump/config
+evidence, normalized assertions, execution and permission boundaries, and
+fixed-input checks. It does not require the complete `profile-report.json`
+SHA-256 to remain equal across environments.
 
 The report records each outer argv array, exit code, and `shell: false`;
 tarball path and SHA-256; normalized composition assertions; public export
