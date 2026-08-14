@@ -1,9 +1,35 @@
-import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { execFileSync, spawnSync } from 'node:child_process'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { basename, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
+import { targetExistsInsidePackage } from '../../scripts/check-dsh-install.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
+const expectedLibraries = [
+  '@deepseek-ai/dsh-agent',
+  '@deepseek-ai/dsh-agent-loop',
+  '@deepseek-ai/dsh-agent-loop-testkit',
+  '@deepseek-ai/dsh-cordis-host-runner',
+  '@deepseek-ai/dsh-goal',
+  '@deepseek-ai/dsh-goal-round-driver',
+  '@deepseek-ai/dsh-llm',
+  '@deepseek-ai/dsh-sandbox',
+  '@deepseek-ai/dsh-sandbox-local',
+  '@deepseek-ai/dsh-session',
+  '@deepseek-ai/dsh-session-persistence-jsonl',
+  '@deepseek-ai/dsh-system-prompt',
+  '@deepseek-ai/dsh-tool-goal',
+  '@deepseek-ai/dsh-tools',
+] as const
 
 function pnpmVersionCommand(): { executable: string; args: string[] } {
   if (process.platform !== 'win32') {
@@ -60,7 +86,11 @@ describe('published DeepSeek Harness closure', () => {
     const libraries = report.packageSurfaces.filter(
       item => item.kind === 'library',
     )
-    expect(libraries.length).toBeGreaterThan(10)
+    expect(report.packageSurfaces.map(item => item.name)).toEqual([
+      '@deepseek-ai/dsh',
+      ...expectedLibraries,
+    ])
+    expect(libraries.map(item => item.name)).toEqual(expectedLibraries)
     expect(libraries.every(
       item => item.rootExport && item.typesTarget && item.defaultTarget,
     )).toBe(true)
@@ -79,5 +109,72 @@ describe('published DeepSeek Harness closure', () => {
     const command = pnpmVersionCommand()
     expect(() => execFileSync(command.executable, command.args, { cwd: root, shell: false }))
       .not.toThrow()
+  })
+
+  it('rejects commented dynamic imports from private DSH source paths', () => {
+    const fixtureRoot = mkdtempSync(resolve(
+      root,
+      'tests/dsh-probe/.private-import-',
+    ))
+    const privateSpecifier = [
+      '@deepseek-ai/dsh-agent',
+      'src',
+      'private.js',
+    ].join('/')
+    writeFileSync(
+      resolve(fixtureRoot, 'commented-dynamic-import.ts'),
+      `void import /* private seam */ (${JSON.stringify(privateSpecifier)})\n`,
+      'utf8',
+    )
+
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [resolve(root, 'scripts/check-dsh-install.mjs'), '--imports'],
+        { cwd: root, encoding: 'utf8', shell: false },
+      )
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('private DSH import')
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('accepts only real files physically contained by the package root', () => {
+    const fixtureBase = process.platform === 'win32'
+      ? 'D:/DevData/tianwen-dsh-probe'
+      : tmpdir()
+    mkdirSync(fixtureBase, { recursive: true })
+    const packageRoot = mkdtempSync(resolve(fixtureBase, 'package-surface-'))
+    const outsideFile = `${packageRoot}-outside.mjs`
+    const outsideDirectory = `${packageRoot}-outside-directory`
+
+    mkdirSync(resolve(packageRoot, 'lib', 'directory.js'), { recursive: true })
+    mkdirSync(outsideDirectory)
+    writeFileSync(resolve(packageRoot, 'lib', 'valid.js'), 'export {}\n', 'utf8')
+    writeFileSync(outsideFile, 'export {}\n', 'utf8')
+    writeFileSync(resolve(outsideDirectory, 'escaped.js'), 'export {}\n', 'utf8')
+    symlinkSync(
+      outsideDirectory,
+      resolve(packageRoot, 'lib', 'escape'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
+
+    try {
+      expect(targetExistsInsidePackage(packageRoot, './lib/valid.js')).toBe(true)
+      expect(targetExistsInsidePackage(packageRoot, './lib/directory.js')).toBe(false)
+      expect(targetExistsInsidePackage(
+        packageRoot,
+        `../${basename(outsideFile)}`,
+      )).toBe(false)
+      expect(targetExistsInsidePackage(
+        packageRoot,
+        './lib/escape/escaped.js',
+      )).toBe(false)
+    } finally {
+      rmSync(packageRoot, { recursive: true, force: true })
+      rmSync(outsideFile, { force: true })
+      rmSync(outsideDirectory, { recursive: true, force: true })
+    }
   })
 })

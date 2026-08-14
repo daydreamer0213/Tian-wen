@@ -1,9 +1,38 @@
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+} from 'node:fs'
 import { dirname, extname, isAbsolute, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 
 const EXPECTED_DSH_VERSION = '0.1.0-rc.6'
+const DSH_CLI_PACKAGE = '@deepseek-ai/dsh'
+const DSH_LIBRARY_PACKAGES = [
+  '@deepseek-ai/dsh-agent',
+  '@deepseek-ai/dsh-agent-loop',
+  '@deepseek-ai/dsh-agent-loop-testkit',
+  '@deepseek-ai/dsh-cordis-host-runner',
+  '@deepseek-ai/dsh-goal',
+  '@deepseek-ai/dsh-goal-round-driver',
+  '@deepseek-ai/dsh-llm',
+  '@deepseek-ai/dsh-sandbox',
+  '@deepseek-ai/dsh-sandbox-local',
+  '@deepseek-ai/dsh-session',
+  '@deepseek-ai/dsh-session-persistence-jsonl',
+  '@deepseek-ai/dsh-system-prompt',
+  '@deepseek-ai/dsh-tool-goal',
+  '@deepseek-ai/dsh-tools',
+]
+const EXPECTED_DIRECT_DSH_PACKAGES = [
+  DSH_CLI_PACKAGE,
+  ...DSH_LIBRARY_PACKAGES,
+]
 const root = resolve(import.meta.dirname, '..')
 const requireFromRoot = createRequire(resolve(root, 'package.json'))
 const scanExtensions = new Set(['.ts', '.mts', '.cts', '.js', '.mjs'])
@@ -50,34 +79,53 @@ function visitDependencyTree(node, installedPackages, failures) {
   }
 }
 
-function targetExistsInsidePackage(packageRoot, target) {
+export function targetExistsInsidePackage(packageRoot, target) {
   if (typeof target !== 'string' || target.length === 0) {
     return false
   }
   const targetPath = resolve(packageRoot, target)
   const relativeTarget = relative(packageRoot, targetPath)
-  return relativeTarget !== ''
-    && !relativeTarget.startsWith('..')
-    && !isAbsolute(relativeTarget)
-    && existsSync(targetPath)
+  if (
+    relativeTarget === ''
+    || relativeTarget.startsWith('..')
+    || isAbsolute(relativeTarget)
+  ) {
+    return false
+  }
+  try {
+    const realPackageRoot = realpathSync(packageRoot)
+    const realTarget = realpathSync(targetPath)
+    const realRelativeTarget = relative(realPackageRoot, realTarget)
+    return realRelativeTarget !== ''
+      && !realRelativeTarget.startsWith('..')
+      && !isAbsolute(realRelativeTarget)
+      && statSync(realTarget).isFile()
+  } catch {
+    return false
+  }
 }
 
 function inspectPublishedPackageSurfaces(failures) {
   const rootManifest = JSON.parse(
     readFileSync(resolve(root, 'package.json'), 'utf8'),
   )
-  const requiredNames = Object.keys(rootManifest.devDependencies)
+  const actualNames = Object.keys(rootManifest.devDependencies)
     .filter(isDshPackage)
     .sort()
+  if (JSON.stringify(actualNames) !== JSON.stringify(EXPECTED_DIRECT_DSH_PACKAGES)) {
+    failures.push(
+      `direct DSH dependencies differ from the probe contract: ${JSON.stringify(actualNames)}`,
+    )
+  }
   const packageSurfaces = []
 
-  for (const name of requiredNames) {
+  for (const name of EXPECTED_DIRECT_DSH_PACKAGES) {
     try {
       const manifestPath = requireFromRoot.resolve(`${name}/package.json`)
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
       const packageRoot = dirname(manifestPath)
 
-      if (name === '@deepseek-ai/dsh') {
+      if (name === DSH_CLI_PACKAGE) {
         const cliTarget = targetExistsInsidePackage(packageRoot, manifest.bin?.dsh)
         packageSurfaces.push({
           name,
@@ -145,72 +193,104 @@ function sourceFiles(directory) {
   })
 }
 
-function scanPrivateImports() {
-  const violations = []
-  const patterns = [
-    /\b(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]/g,
-    /\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-  ]
+function literalText(node) {
+  return node !== undefined && ts.isStringLiteralLike(node)
+    ? node.text
+    : undefined
+}
 
+function scanPrivateImports() {
+  const violations = new Map()
   for (const file of scanRoots.flatMap(sourceFiles).sort()) {
     const source = readFileSync(file, 'utf8')
-    for (const pattern of patterns) {
-      pattern.lastIndex = 0
-      for (const match of source.matchAll(pattern)) {
-        const specifier = match[1]
-        if (specifier?.startsWith('@deepseek-ai/') && specifier.includes('/src/')) {
-          violations.push({
-            file: relative(root, file).replaceAll('\\', '/'),
-            specifier,
-          })
-        }
+    const sourceFile = ts.createSourceFile(
+      file,
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.getScriptKindFromFileName(file),
+    )
+    const addViolation = specifier => {
+      if (specifier?.startsWith('@deepseek-ai/') && specifier.includes('/src/')) {
+        const fileName = relative(root, file).replaceAll('\\', '/')
+        violations.set(`${fileName}\0${specifier}`, { file: fileName, specifier })
       }
     }
+    const visit = node => {
+      if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+        addViolation(literalText(node.moduleSpecifier))
+      } else if (ts.isCallExpression(node)) {
+        const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword
+        const isRequire = ts.isIdentifier(node.expression)
+          && node.expression.text === 'require'
+        if (isDynamicImport || isRequire) {
+          addViolation(literalText(node.arguments[0]))
+        }
+      } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+        addViolation(literalText(node.argument.literal))
+      } else if (
+        ts.isImportEqualsDeclaration(node)
+        && ts.isExternalModuleReference(node.moduleReference)
+      ) {
+        addViolation(literalText(node.moduleReference.expression))
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(sourceFile)
   }
 
-  return violations.sort((left, right) =>
+  return [...violations.values()].sort((left, right) =>
     left.file.localeCompare(right.file) || left.specifier.localeCompare(right.specifier),
   )
 }
 
-const failures = []
-const listCommand = pnpmCommand(['list', '--json', '--depth', 'Infinity'])
-const listOutput = execFileSync(
-  listCommand.executable,
-  listCommand.args,
-  {
-    cwd: root,
-    encoding: 'utf8',
-    maxBuffer: 16 * 1024 * 1024,
-    shell: false,
-  },
-)
-const dependencyTrees = JSON.parse(listOutput)
-const installedPackages = new Map()
+function main(args) {
+  const failures = []
+  const listCommand = pnpmCommand(['list', '--json', '--depth', 'Infinity'])
+  const listOutput = execFileSync(
+    listCommand.executable,
+    listCommand.args,
+    {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 16 * 1024 * 1024,
+      shell: false,
+    },
+  )
+  const dependencyTrees = JSON.parse(listOutput)
+  const installedPackages = new Map()
 
-for (const tree of dependencyTrees) {
-  visitDependencyTree(tree, installedPackages, failures)
+  for (const tree of dependencyTrees) {
+    visitDependencyTree(tree, installedPackages, failures)
+  }
+  const packageSurfaces = inspectPublishedPackageSurfaces(failures)
+
+  const privateImportViolations = args.includes('--imports')
+    ? scanPrivateImports()
+    : []
+  for (const violation of privateImportViolations) {
+    failures.push(`${violation.file}: private DSH import ${violation.specifier}`)
+  }
+
+  const report = {
+    expectedDshVersion: EXPECTED_DSH_VERSION,
+    installedPackages: [...installedPackages.values()].sort((left, right) =>
+      left.name.localeCompare(right.name) || left.version.localeCompare(right.version),
+    ),
+    packageSurfaces,
+    privateImportViolations,
+  }
+
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
+  if (failures.length > 0) {
+    process.stderr.write(`${failures.sort().join('\n')}\n`)
+    process.exitCode = 1
+  }
 }
-const packageSurfaces = inspectPublishedPackageSurfaces(failures)
 
-const privateImportViolations = process.argv.includes('--imports')
-  ? scanPrivateImports()
-  : []
-for (const violation of privateImportViolations) {
-  failures.push(`${violation.file}: private DSH import ${violation.specifier}`)
-}
-
-const report = {
-  expectedDshVersion: EXPECTED_DSH_VERSION,
-  installedPackages: [...installedPackages.values()].sort((left, right) =>
-    left.name.localeCompare(right.name) || left.version.localeCompare(right.version),
-  ),
-  packageSurfaces,
-  privateImportViolations,
-}
-
-process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
-if (failures.length > 0) {
-  process.stderr.write(`${failures.sort().join('\n')}\n`)
-  process.exitCode = 1
+if (
+  process.argv[1] !== undefined
+  && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  main(process.argv.slice(2))
 }
