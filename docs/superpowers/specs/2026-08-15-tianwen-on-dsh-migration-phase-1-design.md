@@ -13,17 +13,22 @@
 Python Evaluator 和 Evolution Governance 连接成第一条正式产品纵切片。
 
 Phase 1 完成时，应能在无付费模型、无网络业务调用、无真实 Docker 的
-离线环境中证明：
+离线环境中证明两条同环境、但不伪造评测关系的链：
 
 ```text
 DSH Session / Goal / Tool
 → Tianwen Evidence
-→ Python A1 EvalReceipt
-→ Tianwen Artifact / Approval / Champion
+→ Cordis Plugin Artifact / Approval / Champion
 → 进程重启后恢复正式 Champion
+
+Python A1 task bundle
+→ typed EvalRequest / EvalReceipt
+→ 保持 Nop / Oracle / raw stdout 迁移合同
 ```
 
-这条链路是正式迁移的基础，不表示完整持续学习、生产可用或 UI 已完成。
+这些链路是正式迁移的基础，不表示完整持续学习、生产可用或 UI 已完成。
+Python A1 评测的是仓库补丁，当前 Evolution 激活的是 Cordis 插件源码；
+Phase 1 禁止把二者伪装成同一个候选。
 
 ## 2. 方案选择
 
@@ -156,7 +161,7 @@ Phase 1 应停止在“workspace 可加载的正式 Bundle”并记录发布打�
 4. Tianwen Evidence 只保存 event 定位、工具名和参数/结果摘要；
 5. Evidence 不复制原始用户消息、参数或结果。
 
-### 5.3 独立评测
+### 5.3 Python A1 独立评测合同
 
 1. TypeScript 只选择冻结候选 `nop` 或 `oracle`；
 2. Python worker 使用现有 A1 task bundle 和 verifier；
@@ -164,7 +169,11 @@ Phase 1 应停止在“workspace 可加载的正式 Bundle”并记录发布打�
    digests；
 4. Nop 保持 `not_met`，Oracle 保持 `met` 和精确 `7/7`。
 
-### 5.4 晋升与恢复
+Python A1 receipt 在 Phase 1 只作为独立迁移合同，不写入无关的 Cordis
+Plugin Artifact。等项目决定第一种统一学习对象后，再设计 receipt 到
+ArtifactVersion 的正式绑定。
+
+### 5.4 Cordis Plugin 晋升与恢复
 
 1. 记录 Artifact；
 2. 写入独立 Evaluation；
@@ -223,14 +232,14 @@ Phase 1 新增四层验证。
 - 一个真实工具 call/result 形成一条稳定 Evidence；
 - Context 重启后 Evidence canonical bytes 不变。
 
-### 7.3 Evaluator / Evolution 集成测试
+### 7.3 Evaluator / Evolution 同环境测试
 
 证明：
 
-- Nop 不能晋升；
-- Oracle 的冻结 A1 receipt 可以进入正式治理；
-- 未批准 Oracle 在 Dynamic define/run 前拒绝；
-- 批准后可以成为 Champion；
+- Python A1 Nop / Oracle 和 raw stdout 合同保持不变；
+- 测试和产品代码都不会把 A1 receipt 绑定到无关的 Cordis Plugin；
+- 未评测或未批准 Cordis Plugin 在 Dynamic define/run 前拒绝；
+- 经过其自身 Evaluation 和 Approval 后可以成为 Champion；
 - BROKEN candidate 不改变正式 Champion；
 - 重启后使用新的临时 ID rehydrate 同一正式 Champion。
 
@@ -268,6 +277,8 @@ Phase 1 不做：
 - 用户目标与元目标的完整嵌套循环；
 - LearningSignal 生成；
 - A2–A5 evaluator 迁移；
+- 把 Python `repo_task` receipt 绑定到 Cordis Plugin Artifact；
+- 通用多类型 Artifact activation strategy；
 - 真实 DeepSeek 模型调用；
 - Web Search / Fetch；
 - Docker、remote runner 或 microVM 实现；
@@ -285,7 +296,7 @@ Phase 1 只有同时满足以下条件才完成：
 
 1. 正式 `@tianwen/runtime` 只通过公开 rc.6 接口组合现有服务；
 2. Runtime、Profile、Session、Goal、Evidence、Evaluator、Evolution
-   形成一条离线纵切片；
+   在同一离线产品组合中通过各自真实合同；
 3. 未评测或未批准候选不能触达 Dynamic 激活；
 4. 失败候选不改变正式或活跃 Champion；
 5. 重启不信任旧 Dynamic ID；
@@ -297,3 +308,14 @@ Phase 1 只有同时满足以下条件才完成：
 
 Phase 1 通过后，主控再决定是否把迁移分支合并进 main，以及下一阶段先做
 Goal Graph、A2–A5 还是用户进度控制面。
+
+## 11. 延后但必须显式决定的问题
+
+第一个统一进入“评测 → 晋升 → Champion”的学习对象尚未决定：
+
+- `repo_task`：与现有 A1–A5 和 Python verifier 最接近；
+- `cordis_plugin`：与当前 Dynamic Runtime 激活最接近。
+
+推荐优先 `repo_task`，因为它已有更完整的真实任务评测证据；但这会要求
+Evolution 支持“不在主进程动态激活”的正式 Champion。该扩展不属于
+Phase 1，不能为了做出一条好看的测试链而提前实现。
