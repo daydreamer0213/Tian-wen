@@ -6,6 +6,7 @@ import type {
 
 import {
   EvolutionLedger,
+  LedgerCommitUnknownError,
 } from './ledger.js'
 import type {
   ApprovalRecord,
@@ -115,18 +116,16 @@ export class TianwenEvolutionService extends Service {
     source: string,
     parentArtifactId?: ArtifactId,
   ): ArtifactVersion {
-    this.requireNoTransition()
-    return this.state().ledger.recordArtifact(source, parentArtifactId)
+    return this.formalWrite(() =>
+      this.state().ledger.recordArtifact(source, parentArtifactId))
   }
 
   recordEvaluation(record: EvaluationRecord): void {
-    this.requireNoTransition()
-    this.state().ledger.recordEvaluation(record)
+    this.formalWrite(() => this.state().ledger.recordEvaluation(record))
   }
 
   recordApproval(record: ApprovalRecord): void {
-    this.requireNoTransition()
-    this.state().ledger.recordApproval(record)
+    this.formalWrite(() => this.state().ledger.recordApproval(record))
   }
 
   getChampion(): ChampionPointer | undefined {
@@ -278,6 +277,16 @@ export class TianwenEvolutionService extends Service {
         state.ledger.rollback(artifactId)
       }
     } catch (error) {
+      if (error instanceof LedgerCommitUnknownError) {
+        state.bindings.set(artifactId, binding)
+        state.blocked = true
+        throw new EvolutionRecoveryError(
+          artifactId,
+          previous?.artifactId ?? artifactId,
+          'formal transition commit is unknown; fresh replay is required',
+          { cause: error },
+        )
+      }
       const committed = state.ledger.getChampion()
       if (
         committed?.artifactId === artifactId &&
@@ -554,6 +563,19 @@ export class TianwenEvolutionService extends Service {
       throw new Error(
         'formal records cannot change during a Champion transition',
       )
+    }
+  }
+
+  private formalWrite<T>(operation: () => T): T {
+    this.requireReady()
+    this.requireNoTransition()
+    try {
+      return operation()
+    } catch (error) {
+      if (error instanceof LedgerCommitUnknownError) {
+        this.state().blocked = true
+      }
+      throw error
     }
   }
 

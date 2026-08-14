@@ -1,5 +1,6 @@
 export {
   EvolutionGovernanceError,
+  LedgerCommitUnknownError,
   LedgerIntegrityError,
 } from './ledger.js'
 export type {

@@ -121,6 +121,13 @@ export class LedgerIntegrityError extends Error {
   }
 }
 
+export class LedgerCommitUnknownError extends LedgerIntegrityError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'LedgerCommitUnknownError'
+  }
+}
+
 export class EvolutionGovernanceError extends Error {
   constructor(
     readonly code: GovernanceErrorCode,
@@ -758,11 +765,23 @@ export class EvolutionLedger {
     this.#validateAgainstState(parsed)
     const line = canonicalLine(parsed)
     const descriptor = openSync(this.#ledgerPath, 'a')
+    let commitError: unknown
     try {
       writeSync(descriptor, line, undefined, 'utf8')
       fsyncSync(descriptor)
-    } finally {
+    } catch (error) {
+      commitError = error
+    }
+    try {
       closeSync(descriptor)
+    } catch (error) {
+      commitError ??= error
+    }
+    if (commitError !== undefined) {
+      throw new LedgerCommitUnknownError(
+        'ledger append started but its durable commit is unknown',
+        { cause: commitError },
+      )
     }
     this.#apply(parsed)
   }

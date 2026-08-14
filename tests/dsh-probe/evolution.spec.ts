@@ -15,6 +15,7 @@ const syncAudit = vi.hoisted(() => ({
   enabled: false,
   paths: [] as string[],
   failChampionRenames: 0,
+  failLedgerFsyncAfterReal: 0,
 }))
 
 vi.mock('node:fs', async importOriginal => {
@@ -37,6 +38,16 @@ vi.mock('node:fs', async importOriginal => {
         }
       }
       actual.fsyncSync(descriptor)
+      const path = paths.get(descriptor)
+      if (
+        syncAudit.failLedgerFsyncAfterReal > 0 &&
+        path?.endsWith('ledger.jsonl') === true
+      ) {
+        syncAudit.failLedgerFsyncAfterReal -= 1
+        throw Object.assign(new Error('forced ledger fsync uncertainty'), {
+          code: 'EIO',
+        })
+      }
     },
     renameSync(oldPath: string, newPath: string) {
       if (
@@ -212,6 +223,7 @@ afterEach(() => {
   syncAudit.enabled = false
   syncAudit.paths = []
   syncAudit.failChampionRenames = 0
+  syncAudit.failLedgerFsyncAfterReal = 0
   for (const root of fixtureRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true })
   }
@@ -847,6 +859,46 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
         currentPackageId: expect.any(String),
       }])
       expect(() => new EvolutionLedger(root)).not.toThrow()
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('blocks without recovery when transition fsync reports an unknown commit', async () => {
+    const root = ledgerRoot('transition-commit-unknown')
+    const mounted = await mountEvolution(root)
+    const evolution = mounted.ctx.tianwenEvolution
+
+    try {
+      const v1 = prepareMetArtifact(
+        evolution,
+        V1,
+        'human-v1',
+        RECEIPT_A,
+      )
+      syncAudit.enabled = true
+      syncAudit.failLedgerFsyncAfterReal = 1
+
+      await expect(
+        evolution.promote(mounted.agent, v1.artifactId),
+      ).rejects.toBeInstanceOf(EvolutionRecoveryError)
+      expect(evolution.blocked).toBe(true)
+      expect(mounted.ctx.dynamicCordisRunner.inventory()).toMatchObject([{
+        activeRun: {},
+        currentPackageId: expect.any(String),
+      }])
+      const durableEvents = readFileSync(
+        join(root, 'ledger.jsonl'),
+        'utf8',
+      ).trimEnd().split('\n').map(line => JSON.parse(line) as LedgerEvent)
+      expect(eventTypes(durableEvents).at(-1)).toBe('promoted')
+      expect(eventTypes(durableEvents)).not.toContain('activation-failed')
+
+      const replayed = new EvolutionLedger(root)
+      expect(replayed.getChampion()).toEqual({
+        artifactId: v1.artifactId,
+        revision: 1,
+      })
     } finally {
       await mounted.ctx.fiber.dispose()
     }
