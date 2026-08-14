@@ -1,2 +1,18 @@
-export * from './ledger.js'
+export {
+  EvolutionGovernanceError,
+  LedgerIntegrityError,
+} from './ledger.js'
+export type {
+  ActivationFailedEvent,
+  ApprovalRecord,
+  ArtifactId,
+  ArtifactVersion,
+  ChampionPointer,
+  EvaluationRecord,
+  GovernanceErrorCode,
+  LedgerEvent,
+  RecoveryFailedEvent,
+  RuntimeBoundEvent,
+  Sha256Digest,
+} from './ledger.js'
 export * from './runtime-binding.js'

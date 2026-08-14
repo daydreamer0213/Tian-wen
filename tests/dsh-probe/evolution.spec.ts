@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const syncAudit = vi.hoisted(() => ({
   enabled: false,
   paths: [] as string[],
+  failChampionRenames: 0,
 }))
 
 vi.mock('node:fs', async importOriginal => {
@@ -37,6 +38,18 @@ vi.mock('node:fs', async importOriginal => {
       }
       actual.fsyncSync(descriptor)
     },
+    renameSync(oldPath: string, newPath: string) {
+      if (
+        syncAudit.failChampionRenames > 0 &&
+        String(newPath).endsWith('champion.json')
+      ) {
+        syncAudit.failChampionRenames -= 1
+        throw Object.assign(new Error('forced champion rename failure'), {
+          code: 'EACCES',
+        })
+      }
+      actual.renameSync(oldPath, newPath)
+    },
   }
 })
 
@@ -53,7 +66,6 @@ import type { Agent } from '@tianwen/dsh-compat'
 import {
   EvolutionActivationError,
   EvolutionGovernanceError,
-  EvolutionLedger,
   EvolutionRecoveryError,
   LedgerIntegrityError,
   TianwenEvolutionService,
@@ -65,6 +77,9 @@ import type {
   EvaluationRecord,
   LedgerEvent,
 } from '../../packages/tianwen-evolution/src/index.js'
+import {
+  EvolutionLedger,
+} from '../../packages/tianwen-evolution/src/ledger.js'
 
 const V1 = 'return { name: "v1", apply() {} }'
 const V2 = 'return { name: "v2", apply() {} }'
@@ -196,12 +211,21 @@ afterEach(() => {
   vi.restoreAllMocks()
   syncAudit.enabled = false
   syncAudit.paths = []
+  syncAudit.failChampionRenames = 0
   for (const root of fixtureRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true })
   }
 })
 
 describe('Tianwen append-only evolution ledger', () => {
+  it('keeps executable ledger transitions off the public package surface', async () => {
+    const publicApi = await import(
+      '../../packages/tianwen-evolution/src/index.js'
+    )
+
+    expect(publicApi).not.toHaveProperty('EvolutionLedger')
+  })
+
   it('fsyncs immutable source before accepting its ledger event', () => {
     const root = ledgerRoot('source-fsync')
     const ledger = new EvolutionLedger(root, {
@@ -717,6 +741,112 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
         currentPackageId: v1Binding.packageId,
         activeRun: { packageId: v1Binding.packageId },
       }])
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('blocks with EvolutionRecoveryError when failed rehydrate audit cannot append', async () => {
+    const root = ledgerRoot('rehydrate-failure-audit')
+    const agentId = `rehydrate-failure-${randomUUID()}`
+    const first = await mountEvolution(root, agentId)
+    const v1 = prepareMetArtifact(
+      first.ctx.tianwenEvolution,
+      V1,
+      'human-v1',
+      RECEIPT_A,
+    )
+    await first.ctx.tianwenEvolution.promote(first.agent, v1.artifactId)
+    await first.ctx.fiber.dispose()
+
+    const second = await mountEvolution(root, agentId)
+    try {
+      const ledgerPath = join(root, 'ledger.jsonl')
+      rmSync(ledgerPath)
+      mkdirSync(ledgerPath)
+      vi.spyOn(second.ctx.dynamicCordisRunner, 'run').mockResolvedValue({
+        ok: false,
+        reason: 'host-half-failed',
+        message: 'forced rehydrate failure',
+      })
+
+      await expect(
+        second.ctx.tianwenEvolution.rehydrateChampion(second.agent),
+      ).rejects.toBeInstanceOf(EvolutionRecoveryError)
+      expect(second.ctx.tianwenEvolution.blocked).toBe(true)
+      expect(second.ctx.tianwenEvolution.getChampion()).toEqual({
+        artifactId: v1.artifactId,
+        revision: 1,
+      })
+    } finally {
+      await second.ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps rehydrated Champion active but blocks when runtime-bound audit cannot append', async () => {
+    const root = ledgerRoot('rehydrate-binding-audit')
+    const agentId = `rehydrate-binding-${randomUUID()}`
+    const first = await mountEvolution(root, agentId)
+    const v1 = prepareMetArtifact(
+      first.ctx.tianwenEvolution,
+      V1,
+      'human-v1',
+      RECEIPT_A,
+    )
+    await first.ctx.tianwenEvolution.promote(first.agent, v1.artifactId)
+    await first.ctx.fiber.dispose()
+
+    const second = await mountEvolution(root, agentId)
+    try {
+      const ledgerPath = join(root, 'ledger.jsonl')
+      rmSync(ledgerPath)
+      mkdirSync(ledgerPath)
+
+      await expect(
+        second.ctx.tianwenEvolution.rehydrateChampion(second.agent),
+      ).rejects.toBeInstanceOf(EvolutionRecoveryError)
+      expect(second.ctx.tianwenEvolution.blocked).toBe(true)
+      expect(second.ctx.tianwenEvolution.getChampion()).toEqual({
+        artifactId: v1.artifactId,
+        revision: 1,
+      })
+      expect(second.ctx.dynamicCordisRunner.inventory()).toMatchObject([{
+        activeRun: {},
+        currentPackageId: expect.any(String),
+      }])
+    } finally {
+      await second.ctx.fiber.dispose()
+    }
+  })
+
+  it('blocks with the committed Champion active when atomic pointer replace fails', async () => {
+    const root = ledgerRoot('pointer-commit-error')
+    const agentId = `pointer-commit-${randomUUID()}`
+    const mounted = await mountEvolution(root, agentId)
+    const evolution = mounted.ctx.tianwenEvolution
+
+    try {
+      const v1 = prepareMetArtifact(
+        evolution,
+        V1,
+        'human-v1',
+        RECEIPT_A,
+      )
+      syncAudit.failChampionRenames = 1
+
+      await expect(
+        evolution.promote(mounted.agent, v1.artifactId),
+      ).rejects.toBeInstanceOf(EvolutionRecoveryError)
+      expect(evolution.blocked).toBe(true)
+      expect(evolution.getChampion()).toEqual({
+        artifactId: v1.artifactId,
+        revision: 1,
+      })
+      expect(mounted.ctx.dynamicCordisRunner.inventory()).toMatchObject([{
+        activeRun: {},
+        currentPackageId: expect.any(String),
+      }])
+      expect(() => new EvolutionLedger(root)).not.toThrow()
     } finally {
       await mounted.ctx.fiber.dispose()
     }

@@ -165,6 +165,8 @@ export class TianwenEvolutionService extends Service {
     if (existing !== undefined && this.isActive(existing)) {
       return publicBinding(existing)
     }
+    const state = this.state()
+    state.blocked = true
     const source = this.state().ledger.readSource(champion.artifactId)
     let binding: BoundRuntime | undefined
     try {
@@ -172,31 +174,51 @@ export class TianwenEvolutionService extends Service {
       await this.run(agent, binding, 'run')
     } catch (error) {
       const message = errorMessage(error)
-      this.state().ledger.recordActivationFailed({
-        artifactId: champion.artifactId,
-        phase: 'rehydrate',
-        message,
-        ...(binding === undefined ? {} : { binding }),
-      })
-      this.state().ledger.recordRecoveryFailed(
-        champion.artifactId,
-        champion.artifactId,
-        message,
-      )
-      this.state().blocked = true
+      let auditError: unknown
+      try {
+        state.ledger.recordActivationFailed({
+          artifactId: champion.artifactId,
+          phase: 'rehydrate',
+          message,
+          ...(binding === undefined ? {} : { binding }),
+        })
+        state.ledger.recordRecoveryFailed(
+          champion.artifactId,
+          champion.artifactId,
+          message,
+        )
+      } catch (auditFailure) {
+        auditError = auditFailure
+      }
       throw new EvolutionRecoveryError(
         champion.artifactId,
         champion.artifactId,
-        `failed to rehydrate Champion: ${message}`,
+        `failed to rehydrate Champion: ${message}${
+          auditError === undefined
+            ? ''
+            : `; audit failed: ${errorMessage(auditError)}`
+        }`,
         { cause: error },
       )
     }
-    this.state().bindings.set(champion.artifactId, binding)
-    this.state().ledger.recordRuntimeBinding(
-      binding.artifactId,
-      binding.pluginId,
-      binding.packageId,
-    )
+    state.bindings.set(champion.artifactId, binding)
+    try {
+      state.ledger.recordRuntimeBinding(
+        binding.artifactId,
+        binding.pluginId,
+        binding.packageId,
+      )
+    } catch (error) {
+      throw new EvolutionRecoveryError(
+        champion.artifactId,
+        champion.artifactId,
+        `Champion is active but runtime binding audit failed: ${
+          errorMessage(error)
+        }`,
+        { cause: error },
+      )
+    }
+    state.blocked = false
     return publicBinding(binding)
   }
 
@@ -247,18 +269,123 @@ export class TianwenEvolutionService extends Service {
     if (binding === undefined) {
       throw new Error('unreachable: successful activation has no binding')
     }
-    if (kind === 'promotion') {
-      this.state().ledger.promote(artifactId)
-    } else {
-      this.state().ledger.rollback(artifactId)
+    const state = this.state()
+    const expectedRevision = (previous?.revision ?? 0) + 1
+    try {
+      if (kind === 'promotion') {
+        state.ledger.promote(artifactId)
+      } else {
+        state.ledger.rollback(artifactId)
+      }
+    } catch (error) {
+      const committed = state.ledger.getChampion()
+      if (
+        committed?.artifactId === artifactId &&
+        committed.revision === expectedRevision
+      ) {
+        state.bindings.set(artifactId, binding)
+        state.blocked = true
+        throw new EvolutionRecoveryError(
+          artifactId,
+          previous?.artifactId ?? artifactId,
+          `formal transition committed but derived Champion pointer failed: ${
+            errorMessage(error)
+          }`,
+          { cause: error },
+        )
+      }
+      if (previousBinding !== undefined) {
+        await this.activationFailed(
+          agent,
+          artifactId,
+          kind,
+          authority,
+          previousBinding,
+          binding,
+          error,
+        )
+      }
+      await this.stopUncommittedFirstChampion(
+        agent,
+        binding,
+        kind,
+        authority,
+        error,
+      )
     }
-    this.state().bindings.set(artifactId, binding)
-    this.state().ledger.recordRuntimeBinding(
-      binding.artifactId,
-      binding.pluginId,
-      binding.packageId,
-    )
+    state.bindings.set(artifactId, binding)
+    try {
+      state.ledger.recordRuntimeBinding(
+        binding.artifactId,
+        binding.pluginId,
+        binding.packageId,
+      )
+    } catch (error) {
+      state.blocked = true
+      throw new EvolutionRecoveryError(
+        artifactId,
+        previous?.artifactId ?? artifactId,
+        `Champion is active but runtime binding audit failed: ${
+          errorMessage(error)
+        }`,
+        { cause: error },
+      )
+    }
     return publicBinding(binding)
+  }
+
+  private async stopUncommittedFirstChampion(
+    agent: Agent,
+    binding: BoundRuntime,
+    kind: 'promotion' | 'rollback',
+    authority: TransitionAuthority,
+    commitError: unknown,
+  ): Promise<never> {
+    const state = this.state()
+    state.blocked = true
+    let stopError: unknown
+    try {
+      const stopped = await this.ctx.dynamicCordisRunner.stop(
+        agent,
+        binding.pluginId,
+      )
+      if (!stopped.ok) {
+        stopError = new Error(stopped.message)
+      }
+    } catch (error) {
+      stopError = error
+    }
+    let auditError: unknown
+    try {
+      state.ledger.recordActivationFailed({
+        artifactId: binding.artifactId,
+        phase: kind,
+        message: `formal transition commit failed: ${errorMessage(commitError)}`,
+        authority,
+        binding,
+      })
+    } catch (error) {
+      auditError = error
+    }
+    if (stopError !== undefined || auditError !== undefined) {
+      const failure = stopError ?? auditError
+      throw new EvolutionRecoveryError(
+        binding.artifactId,
+        binding.artifactId,
+        `uncommitted first Champion could not be safely stopped/audited: ${
+          errorMessage(failure)
+        }`,
+        { cause: failure },
+      )
+    }
+    state.blocked = false
+    throw new EvolutionActivationError(
+      binding.artifactId,
+      `Dynamic activation was stopped because formal commit failed: ${
+        errorMessage(commitError)
+      }`,
+      { cause: commitError },
+    )
   }
 
   private define(
