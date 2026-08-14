@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { extname, relative, resolve } from 'node:path'
+import { dirname, extname, isAbsolute, relative, resolve } from 'node:path'
 
 const EXPECTED_DSH_VERSION = '0.1.0-rc.6'
 const root = resolve(import.meta.dirname, '..')
@@ -50,32 +50,76 @@ function visitDependencyTree(node, installedPackages, failures) {
   }
 }
 
-function requirePublishedPackageSurfaces(failures) {
+function targetExistsInsidePackage(packageRoot, target) {
+  if (typeof target !== 'string' || target.length === 0) {
+    return false
+  }
+  const targetPath = resolve(packageRoot, target)
+  const relativeTarget = relative(packageRoot, targetPath)
+  return relativeTarget !== ''
+    && !relativeTarget.startsWith('..')
+    && !isAbsolute(relativeTarget)
+    && existsSync(targetPath)
+}
+
+function inspectPublishedPackageSurfaces(failures) {
   const rootManifest = JSON.parse(
     readFileSync(resolve(root, 'package.json'), 'utf8'),
   )
   const requiredNames = Object.keys(rootManifest.devDependencies)
     .filter(isDshPackage)
     .sort()
+  const packageSurfaces = []
 
   for (const name of requiredNames) {
     try {
       const manifestPath = requireFromRoot.resolve(`${name}/package.json`)
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-      const exportsField = manifest.exports
-      const hasRootExport = typeof exportsField === 'string'
-        || (
-          exportsField !== null
-          && typeof exportsField === 'object'
-          && Object.hasOwn(exportsField, '.')
-        )
-      if (!hasRootExport) {
-        failures.push(`${name}: published package has no root "." export`)
+      const packageRoot = dirname(manifestPath)
+
+      if (name === '@deepseek-ai/dsh') {
+        const cliTarget = targetExistsInsidePackage(packageRoot, manifest.bin?.dsh)
+        packageSurfaces.push({
+          name,
+          kind: 'cli',
+          rootExport: false,
+          typesTarget: false,
+          defaultTarget: false,
+          cliTarget,
+        })
+        if (!cliTarget) {
+          failures.push(`${name}: published CLI target bin.dsh is unavailable`)
+        }
+        continue
+      }
+
+      const rootEntry = manifest.exports?.['.']
+      const rootExport = rootEntry !== undefined
+      const typesTarget = targetExistsInsidePackage(packageRoot, rootEntry?.types)
+      const defaultTarget = targetExistsInsidePackage(packageRoot, rootEntry?.default)
+      packageSurfaces.push({
+        name,
+        kind: 'library',
+        rootExport,
+        typesTarget,
+        defaultTarget,
+        cliTarget: false,
+      })
+      if (!rootExport) {
+        failures.push(`${name}: published library has no root "." export`)
+      }
+      if (!typesTarget) {
+        failures.push(`${name}: published library root types target is unavailable`)
+      }
+      if (!defaultTarget) {
+        failures.push(`${name}: published library root default target is unavailable`)
       }
     } catch (error) {
       failures.push(`${name}: public package.json export unavailable (${error.message})`)
     }
   }
+
+  return packageSurfaces
 }
 
 function sourceFiles(directory) {
@@ -147,7 +191,7 @@ const installedPackages = new Map()
 for (const tree of dependencyTrees) {
   visitDependencyTree(tree, installedPackages, failures)
 }
-requirePublishedPackageSurfaces(failures)
+const packageSurfaces = inspectPublishedPackageSurfaces(failures)
 
 const privateImportViolations = process.argv.includes('--imports')
   ? scanPrivateImports()
@@ -161,6 +205,7 @@ const report = {
   installedPackages: [...installedPackages.values()].sort((left, right) =>
     left.name.localeCompare(right.name) || left.version.localeCompare(right.version),
   ),
+  packageSurfaces,
   privateImportViolations,
 }
 

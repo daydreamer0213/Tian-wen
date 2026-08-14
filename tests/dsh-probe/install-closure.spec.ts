@@ -34,11 +34,36 @@ describe('published DeepSeek Harness closure', () => {
     const report = JSON.parse(output) as {
       expectedDshVersion: string
       installedPackages: Array<{ name: string; version: string }>
+      packageSurfaces: Array<{
+        name: string
+        kind: 'cli' | 'library'
+        rootExport: boolean
+        typesTarget: boolean
+        defaultTarget: boolean
+        cliTarget: boolean
+      }>
     }
     expect(report.expectedDshVersion).toBe('0.1.0-rc.6')
     expect(report.installedPackages.length).toBeGreaterThan(10)
     expect(new Set(report.installedPackages.map(item => item.version)))
       .toEqual(new Set(['0.1.0-rc.6']))
+
+    const cli = report.packageSurfaces.find(
+      item => item.name === '@deepseek-ai/dsh',
+    )
+    expect(cli).toMatchObject({
+      kind: 'cli',
+      rootExport: false,
+      cliTarget: true,
+    })
+
+    const libraries = report.packageSurfaces.filter(
+      item => item.kind === 'library',
+    )
+    expect(libraries.length).toBeGreaterThan(10)
+    expect(libraries.every(
+      item => item.rootExport && item.typesTarget && item.defaultTarget,
+    )).toBe(true)
   })
 
   it('commits a lockfile and uses no floating DSH ranges', () => {
