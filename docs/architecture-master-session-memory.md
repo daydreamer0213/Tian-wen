@@ -1,6 +1,6 @@
 # 天问主控架构会话记忆
 
-更新日期：2026-08-13
+更新日期：2026-08-14
 
 ## 1. 文档用途
 
@@ -320,17 +320,33 @@ Run 结束不等于 Task 验收，Task 验收也不自动等于 Goal 完成。
 
 “独立”不表示所有底层轮子都自己开发。
 
-已经确认的技术策略是：
+原先确认的第一阶段技术策略是 Python + PydanticAI Harness。该路线已经形成可运行参考实现，并完成 Alpha-A Tasks 1–9；这些成果继续作为迁移基线和验收合同。
 
-- 第一版使用 Python；
-- 使用 PydanticAI + Harness 加速模型调用、文件工具、Skill 和步骤持久化；
-- 天问自己实现差异化的持续学习控制面；
-- 非核心能力优先复用成熟组件；
-- 公开接口不够时，再选择性移植代码或补写最小实现；
-- 当前不 Fork Hermes，主要原因是重新搭建 Goal、证据、学习和版本治理控制面的改造成本可能更高；
-- 如果现路线通过实际开发证明效果差，再重新评估 Fork Hermes 或其他底座；
-- 未来可以增加外部 Agent Adapter，让天问调度 Codex、Claude Code、Hermes 或其他 Worker，但这不是天问独立性的前提；
-- 模型参数训练暂缓，先验证 Harness 层持续学习能实现多少目标。
+2026-08-14 对 DeepSeek Harness 官方源码完成只读调研后，Runtime 选型重新打开。当前推荐的候选目标架构是：
+
+- 精确锁定 DeepSeek Harness 版本，把它作为通用 Agent 运行内核；
+- 天问作为独立产品 Profile/Bundle，而不是类似 Superpowers 的单个插件；
+- TypeScript 插件负责 Runtime 控制、事件投影、版本治理和 UI；
+- Python 继续承担评测、研究、数据分析和迁移期 Worker；
+- DSH 负责模型、Agent Loop、Session、工具、Goal Round、普通沙盒和恢复；
+- 天问掌握跨会话 Goal Graph、学习循环、Evidence、候选、独立评测、晋升和回滚；
+- 普通任务优先使用 DSH 本地沙盒，Docker/远程沙盒降为高风险评测的可选提供方；
+- 当前不 Fork DSH；先验证外部插件和 Profile 是否足够；
+- 保留现有 Python 实现，不在探针通过前删除、废弃或大规模重构；
+- 模型参数训练继续暂缓，先验证 Harness 层持续学习能实现多少目标。
+
+这一新路线尚未完成兼容性探针，因此不能被描述为已经落地。详细依据：
+
+- `docs/research/2026-08-14-deepseek-harness-source-audit.md`
+- `docs/superpowers/specs/2026-08-14-deepseek-harness-runtime-selection-design.md`
+- `docs/superpowers/plans/2026-08-14-deepseek-harness-compatibility-probe.md`
+
+版本证据要区分两层：已逐源码审计的 GitHub `master`
+`47f943859bef60e4160492346772ded9b24f765a` 仍是 `0.1.0-rc.5`
+manifest；拟用于探针的最新 npm 发布包是精确 `0.1.0-rc.6`。由于
+`rc.6` 没有公开 Git tag / `gitHead` 可直接映射，实施第一门必须核对
+npm tarball integrity、实际公开导出和 TypeScript 签名，不能把 `rc.5`
+源码结论直接冒充 `rc.6` 证明。
 
 核心原则是：
 
@@ -338,37 +354,52 @@ Run 结束不等于 Task 验收，Task 验收也不自动等于 Goal 完成。
 
 ## 12. 当前验证路线
 
-第一阶段先用本地 Git 仓库任务验证最小但真实的持续学习链路。
+第一阶段仍使用本地 Git 仓库任务验证最小但真实的持续学习链路。Alpha-A A1–A5 任务包和 Tasks 1–9 的实现证据继续有效，不因 Runtime 重新选型作废。
 
-当前 Alpha 路线分阶段证明：
+在继续 Alpha-B 或 Task 10 前，新增一个更窄的 DeepSeek Harness 兼容性探针阶段：
 
-- Alpha-A：真实用户目标任务执行、冻结任务包、一次性工作区、受限检查和可恢复证据；
-- 后续阶段：学习候选、保护评测、版本晋升、真实后续任务和元循环；
-- 更晚阶段：灰度、影子运行、路由、外部 Agent、完整通用项目生成和更高风险场景。
+- 启动精确锁定的 DSH 和最小 Tianwen Profile；
+- 验证 DSH Goal 的人类主权、恢复和连续运行边界；
+- 从 DSH Session Event 生成 Tianwen Evidence；
+- 复用现有 Python A1 评测；
+- 证明候选失败不影响 Champion，并能保留历史和回滚；
+- 验证普通本地执行可以使用 DSH 沙盒；
+- 只使用公开插件接口，变化集中在薄兼容层。
+
+探针完成前：
+
+- Task 10 冻结；
+- 不调用真实 Docker；
+- 不调用付费模型；
+- 不开始完整 TypeScript 迁移；
+- 不删除当前 Python Runtime；
+- 不把 DSH Dynamic Package 当作正式持久学习资产。
+
+探针通过后，再决定是否正式进入 Tianwen-on-DSH 迁移；部分通过时可以采用 DSH Runtime + Python 治理的混合路线；关键边界失败时继续当前 Python 路线或只选择性复用 DSH。
 
 不能因为 Alpha-A 当前集中在编程任务，就把天问重新定义为编程 Agent；也不能在 Alpha-A 尚未证明基础执行链时，提前宣称完整持续学习已经实现。
 
 ## 13. 当前实施状态
 
-稳定主分支在记录本文档前为：
+稳定主分支在本次更新前为：
 
-- `main`: `8ca70d3`
+- `main`: `566a027`
 
 Alpha-A 独立实施分支为：
 
 - `codex/alpha-a-real-task`
-- 已推送交接提交：`5170ad5`
-- Tasks 1–4 已完成；
-- 全套回归：`367 passed, 4 skipped`；
-- 下一实施入口：Task 5，Shell-free Alpha Runtime；
-- 交接文档：`docs/operations/alpha-a-task-1-4-handoff.md`。
+- 远端精确 HEAD：`67ef50f673c7786872cf5729a808dd3fe85afcfb`
+- Tasks 1–9 已完成、推送并经过独立复审和主控验收；
+- A1–A5 任务包、两轮反馈、TrialManifest 和 canonical freeze 已具备离线证据；
+- Task 9 最终全量离线结果：`424 passed, 4 skipped`；
+- Task 10 未启动；
+- 原 Task 10 真实 Docker 发布门不再是自动下一入口；
+- DSH 调研、候选架构规格和兼容性探针实施计划已经固化；
+- 当前下一入口是在用户阅读并批准计划后，由新的独立实施会话执行
+  `docs/superpowers/plans/2026-08-14-deepseek-harness-compatibility-probe.md`；
+- 主控会话只负责验收、解释和调度，不亲自实现探针。
 
-Task 5–6 已交给独立实施会话。主控会话不接管其日常编码，只在以下情况介入：
-
-- 实施发现设计矛盾；
-- 需要用户决定新权限、重大取舍或范围变化；
-- 独立复审发现可能推翻架构的缺陷；
-- 阶段完成，需要验收、合并或规划下一阶段。
+当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
 
 本节是动态状态。以后实施进度变化时可以更新本节，但不得借此修改前面的稳定共识。
 
@@ -376,7 +407,14 @@ Task 5–6 已交给独立实施会话。主控会话不接管其日常编码，
 
 以下问题尚未最终决定，应继续在主控架构会话讨论，而不是由实施会话自行拍板：
 
-- Alpha-A 完成后，进入学习候选还是先补真实用户任务体验；
+- DeepSeek Harness 兼容性探针是否能仅通过公开插件接口完成；
+- DSH Goal 与 Tianwen 跨会话 Goal Graph 如何保持单一权威；
+- Dynamic Cordis Package 如何安全转为正式 ArtifactVersion；
+- Windows 上 Python 评测桥如何启动、取消、恢复和绑定 Run；
+- DSH 本地沙盒的真实 enforcement 是否满足普通任务；
+- 何时需要 Docker、远程沙盒或 microVM 作为强隔离评测器；
+- DSH 升级如何由 `tianwen-dsh-compat` 和 A1–A5 合同约束；
+- 兼容性探针后，进入完整迁移还是采用 DSH Runtime + Python 治理混合路线；
 - 第一个真正可晋升的学习对象是否仍只限 `repo_task` Skill；
 - 何时引入 Champion/Challenger 的影子或灰度真实运行；
 - 如何根据能力证据逐级扩大自主范围；
