@@ -2,9 +2,9 @@
 
 **Date:** 2026-08-14
 
-**Status:** blocked — the Task 8 implementation and controlled observations
-are complete, but the real sandbox gate failed its load-bearing read-only
-classification contract
+**Status:** complete — the repaired real sandbox gate passed with exact
+structured child filesystem-denial evidence; Windows enforcement remains
+`partial`
 
 **Branch target:** `codex/deepseek-harness-probe`
 
@@ -17,6 +17,12 @@ classification contract
   `test: probe local harness sandbox boundary`
 - `5582010db669caf170169acd8489ebb1e73522db`
   `fix: harden sandbox probe path cleanup`
+
+**Structured-denial repair starting SHA:**
+`8a85b125e7992b107bb48e505bae9b0e050b4f80`
+
+The structured-denial repair commit is identified by the controlling handoff
+because this document cannot identify the commit that contains itself.
 
 The controlling handoff carries the final local and remote SHA because this
 document cannot identify the commit that contains itself.
@@ -50,6 +56,15 @@ repository checkout at `D:\Guo\zuochong\AGi`:
 The baseline-local
 `docs/operations/deepseek-harness-probe-task-7-handoff.md` was read in full.
 
+Before the structured-denial repair, the main controller provided a fresh
+`ls-remote` receipt proving that both the real remote branch and this
+worktree started exactly at
+`8a85b125e7992b107bb48e505bae9b0e050b4f80`. The repair read the approved
+design, revised Task 8, narrow repair plan, and controller memory directly
+from shared Git object
+`1bb77c4abdf4f7ca035cb44c1621b949ba495676` with `git show`; no merge,
+rebase, or baseline change was performed.
+
 ## Implemented scope
 
 Task 8 changes only:
@@ -72,6 +87,9 @@ No sandbox abstraction, provider wrapper, policy framework, fallback runner,
 Docker integration, network call, model call, dependency, or production code
 was added.
 
+The structured-denial repair modifies only the existing sandbox test and this
+handoff. It does not modify `vitest.config.ts`.
+
 ## Real provider and process boundary
 
 The test imports only public package roots and mounts:
@@ -88,7 +106,7 @@ Every confined command uses:
 ```text
 process.execPath
 -e
-require("node:fs").writeFileSync(process.argv[1], "probe")
+fixed writeFileSync/writeSync structured-denial script
 <fixed target path>
 ```
 
@@ -147,12 +165,112 @@ The classifier follows the published `ConfinedArgv` contract:
    equality;
 4. match `fatalSignatures` only on the remaining lines;
 5. only if no runner failure matched, compare stderr with the selected
-   backend's own `denialSignatures`.
+   backend's own `denialSignatures`;
+6. when that dialect does not match, parse exactly one line prefixed by
+   `TIANWEN_SANDBOX_WRITE_DENIED `;
+7. accept the structured record only when exit is exactly `73`, `code` is
+   `EPERM`, `EACCES`, or `EROFS`, `syscall` is exactly `open`, `path` equals
+   the fixed target, and the target file is absent.
 
 It does not use a cross-backend signature union. A nonzero exit alone is
 never classified as a sandbox denial.
 
-## Actual controlled observations
+The fixed child catches only its own `writeFileSync()` error, emits prefix
+plus JSON with synchronous `writeSync(2, ...)`, and exits `73`. Missing or
+duplicated prefixes, malformed JSON, unknown codes, wrong syscall/path,
+runner failure, another exit code, or an existing target all remain rejected.
+
+## Final structured-denial gate
+
+The main controller ran the repaired test once in the stable D-drive
+environment against the current worktree diff:
+
+```text
+node_modules\.bin\vitest.cmd run tests\dsh-probe\sandbox.e2e.spec.ts
+exit 0
+1 file passed
+3 tests passed
+duration 900 ms
+```
+
+The real provider observation is:
+
+```text
+provider: @deepseek-ai/dsh-sandbox-local@0.1.0-rc.6
+platform: win32
+enforcement: partial
+read-only: denied
+read-only evidence: structured-child-fs-error
+provider denial dialect matched: false
+workspace-write inside root: allowed
+outside-root protection: not-proven
+```
+
+The ACL denial is accepted because the fixed child emitted one exact
+machine-readable `EPERM` record bound to `syscall=open` and the precise
+read-only target, exited `73`, the runner was not classified as failed, and
+the target did not exist. The missing rc.6 provider phrase remains explicit
+compatibility debt rather than being hidden or locally added to its dialect.
+
+Final report:
+
+```text
+D:\DevData\tianwen-dsh-probe\sandbox-report.json
+SHA-256 ddcc714a9b30896f380cba20a29530cc633cfa874ec4dea890c4a7c3ef498ef1
+```
+
+```json
+{
+  "schemaVersion": "tianwen.dsh_sandbox_probe.v1",
+  "platform": "win32",
+  "provider": "@deepseek-ai/dsh-sandbox-local@0.1.0-rc.6",
+  "enforcement": "partial",
+  "readOnlyWorkspaceWrite": "denied",
+  "readOnlyDenialEvidence": "structured-child-fs-error",
+  "providerDenialDialectMatched": false,
+  "workspaceWriteInsideRoot": "allowed",
+  "outsideRootProtection": "not-proven",
+  "highRiskRecommendation": "use-container-remote-or-microvm"
+}
+```
+
+## Structured-denial repair TDD and review
+
+Focused classifier RED, before the structured child record was accepted:
+
+```text
+the valid exit-73 EPERM/open/exact-target/target-absent case classified as
+denial: false
+```
+
+After the minimal parser and classifier integration, the same focused command
+passed without running the real sandbox tests:
+
+```text
+exit 0
+1 passed, 2 skipped
+```
+
+The real three-test result in the preceding section is the integration GREEN.
+The first repair reviewer found no code issue. A fresh final scoped reviewer
+then reported:
+
+```text
+Critical: 0
+Important: 1
+Minor: 0
+```
+
+Its sole Important was this handoff's stale current-sounding blocker section.
+That documentation contradiction is closed below by retaining the old failed
+gate only in explicitly historical sections and stating the current boundary
+from the final passing evidence. No implementation finding remained open.
+
+## Historical initial controlled observations (superseded)
+
+The following observation is retained as the original blocked evidence. Its
+old classification was superseded by the approved structured-denial contract;
+it was not deleted or rewritten as if it had passed at the time.
 
 Actual provider:
 
@@ -234,7 +352,7 @@ highRiskRecommendation: use-container-remote-or-microvm
 An unexpected Windows `full` result is rejected for compatibility review
 instead of being silently accepted.
 
-## Machine-readable report
+## Historical initial machine-readable report (superseded)
 
 Path:
 
@@ -263,7 +381,7 @@ Content:
 }
 ```
 
-## TDD evidence
+## Initial Task 8 TDD evidence (historical)
 
 Initial Task 8 RED, before changing `vitest.config.ts`:
 
@@ -300,7 +418,7 @@ failed assertion: expected the selected backend denial signature to match
 There is no accepted Task 8 GREEN because the compatibility gate itself did
 not pass.
 
-## Independent review
+## Initial Task 8 independent review (historical)
 
 Initial fresh scoped reviewer:
 
@@ -338,7 +456,7 @@ and is explicitly forbidden here.
 No implementation Critical or Important remains. The Task 8 gate Important
 remains open, so the task is blocked rather than accepted.
 
-## Verification evidence
+## Initial Task 8 verification evidence (historical)
 
 Explicit real sandbox focused gate:
 
@@ -444,24 +562,17 @@ writes outside the repository and D:\DevData\tianwen-dsh-probe: 0
 
 The repository itself was only changed in the three allowed Task 8 files.
 
-## Blocker and next boundary
+## Current boundary
 
-Task 8 cannot be accepted on the current exact
-`@deepseek-ai/dsh-sandbox-local@0.1.0-rc.6` and Node `22.23.1` Windows
-combination because the required backend-owned denial proof is absent.
+The approved structured child filesystem-error contract resolves the original
+Task 8 classification blocker without changing DSH, broadening its denial
+dialect, or treating an arbitrary nonzero exit as a denial. Task 8 is accepted
+for this exact local compatibility gate.
 
-Do not repair this by:
+Windows enforcement is still `partial`, sibling protection is still
+`not-proven`, and high-risk execution still requires a container, remote
+sandbox, or microVM provider. This probe does not establish strong isolation,
+make Tianwen production-ready, or authorize full migration.
 
-- accepting any nonzero exit;
-- adding a local cross-backend or Node-specific denial signature;
-- falling back to an unconfined process;
-- using `danger-full-access`;
-- changing the locked DSH dependency in this task;
-- starting Docker, network, a model, Task 9, migration, or Alpha Task 10.
-
-The architecture controller must decide whether to wait for/review an upstream
-DSH release or authorize a separate compatibility plan for a supported
-runner. Task 9 remains frozen.
-
-This probe does not make Tianwen production-ready and does not authorize full
-migration.
+Task 9 remains frozen and was not started. Only the architecture controller
+may authorize the next task.
