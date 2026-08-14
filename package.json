@@ -34,6 +34,7 @@
     "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.6",
     "@deepseek-ai/dsh-tool-goal": "0.1.0-rc.6",
     "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@tianwen/dsh-compat": "workspace:*",
     "@types/node": "22.20.0",
     "tsx": "4.22.4",
     "typescript": "6.0.3",
