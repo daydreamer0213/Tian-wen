@@ -193,10 +193,30 @@ function sourceFiles(directory) {
   })
 }
 
-function literalText(node) {
-  return node !== undefined && ts.isStringLiteralLike(node)
-    ? node.text
-    : undefined
+function modulePattern(node) {
+  if (node === undefined) {
+    return undefined
+  }
+  if (ts.isStringLiteralLike(node)) {
+    return node.text
+  }
+  if (ts.isParenthesizedExpression(node)) {
+    return modulePattern(node.expression)
+  }
+  if (ts.isTemplateExpression(node)) {
+    return node.head.text + node.templateSpans
+      .map(span => `<dynamic>${span.literal.text}`)
+      .join('')
+  }
+  if (
+    ts.isBinaryExpression(node)
+    && node.operatorToken.kind === ts.SyntaxKind.PlusToken
+  ) {
+    return `${modulePattern(node.left) ?? '<dynamic>'}${
+      modulePattern(node.right) ?? '<dynamic>'
+    }`
+  }
+  return undefined
 }
 
 function scanPrivateImports() {
@@ -210,29 +230,69 @@ function scanPrivateImports() {
       true,
       ts.getScriptKindFromFileName(file),
     )
+    const createRequireFactories = new Set(['createRequire'])
+    const requireFunctions = new Set(['require'])
+    const collectRequireFunctions = node => {
+      if (
+        ts.isImportDeclaration(node)
+        && literalText(node.moduleSpecifier) === 'node:module'
+        && node.importClause?.namedBindings !== undefined
+        && ts.isNamedImports(node.importClause.namedBindings)
+      ) {
+        for (const element of node.importClause.namedBindings.elements) {
+          if ((element.propertyName ?? element.name).text === 'createRequire') {
+            createRequireFactories.add(element.name.text)
+          }
+        }
+      }
+      if (
+        ts.isVariableDeclaration(node)
+        && ts.isIdentifier(node.name)
+        && node.initializer !== undefined
+        && ts.isCallExpression(node.initializer)
+        && isCreateRequireCall(node.initializer, createRequireFactories)
+      ) {
+        requireFunctions.add(node.name.text)
+      }
+      ts.forEachChild(node, collectRequireFunctions)
+    }
+    collectRequireFunctions(sourceFile)
+
     const addViolation = specifier => {
-      if (specifier?.startsWith('@deepseek-ai/') && specifier.includes('/src/')) {
+      const normalized = specifier?.replaceAll('\\', '/')
+      const scopeIndex = normalized?.indexOf('@deepseek-ai/') ?? -1
+      if (
+        normalized !== undefined
+        && scopeIndex >= 0
+        && normalized.indexOf('/src/', scopeIndex) >= 0
+      ) {
         const fileName = relative(root, file).replaceAll('\\', '/')
-        violations.set(`${fileName}\0${specifier}`, { file: fileName, specifier })
+        violations.set(
+          `${fileName}\0${normalized}`,
+          { file: fileName, specifier: normalized },
+        )
       }
     }
     const visit = node => {
       if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-        addViolation(literalText(node.moduleSpecifier))
+        addViolation(modulePattern(node.moduleSpecifier))
       } else if (ts.isCallExpression(node)) {
         const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword
-        const isRequire = ts.isIdentifier(node.expression)
-          && node.expression.text === 'require'
+        const isRequire = isRequireCall(
+          node.expression,
+          requireFunctions,
+          createRequireFactories,
+        )
         if (isDynamicImport || isRequire) {
-          addViolation(literalText(node.arguments[0]))
+          addViolation(modulePattern(node.arguments[0]))
         }
       } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
-        addViolation(literalText(node.argument.literal))
+        addViolation(modulePattern(node.argument.literal))
       } else if (
         ts.isImportEqualsDeclaration(node)
         && ts.isExternalModuleReference(node.moduleReference)
       ) {
-        addViolation(literalText(node.moduleReference.expression))
+        addViolation(modulePattern(node.moduleReference.expression))
       }
       ts.forEachChild(node, visit)
     }
@@ -242,6 +302,44 @@ function scanPrivateImports() {
   return [...violations.values()].sort((left, right) =>
     left.file.localeCompare(right.file) || left.specifier.localeCompare(right.specifier),
   )
+}
+
+function literalText(node) {
+  return node !== undefined && ts.isStringLiteralLike(node)
+    ? node.text
+    : undefined
+}
+
+function isCreateRequireCall(node, factories) {
+  return ts.isCallExpression(node)
+    && (
+      (ts.isIdentifier(node.expression) && factories.has(node.expression.text))
+      || (
+        ts.isPropertyAccessExpression(node.expression)
+        && node.expression.name.text === 'createRequire'
+      )
+    )
+}
+
+function isRequireCall(expression, requireFunctions, createRequireFactories) {
+  if (ts.isIdentifier(expression)) {
+    return requireFunctions.has(expression.text)
+  }
+  if (ts.isCallExpression(expression)) {
+    return isCreateRequireCall(expression, createRequireFactories)
+  }
+  return ts.isPropertyAccessExpression(expression)
+    && expression.name.text === 'resolve'
+    && (
+      (
+        ts.isIdentifier(expression.expression)
+        && requireFunctions.has(expression.expression.text)
+      )
+      || (
+        ts.isCallExpression(expression.expression)
+        && isCreateRequireCall(expression.expression, createRequireFactories)
+      )
+    )
 }
 
 function main(args) {

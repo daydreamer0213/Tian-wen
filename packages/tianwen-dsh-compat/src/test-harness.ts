@@ -45,7 +45,7 @@ export function waitForIdle(
   ctx: Context,
   agent: Agent,
 ): Promise<void> {
-  if (agent.ctx !== ctx) {
+  if (ctx.agents.get(agent.id) === undefined) {
     return Promise.reject(new Error('waitForIdle: agent belongs to a different context'))
   }
   return agent.whenIdle()

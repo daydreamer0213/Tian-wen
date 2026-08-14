@@ -106,12 +106,21 @@ describe('published DeepSeek Harness closure', () => {
         expect(version).toBe('0.1.0-rc.6')
       }
     }
+    const compatManifest = JSON.parse(readFileSync(
+      resolve(root, 'packages/tianwen-dsh-compat/package.json'),
+      'utf8',
+    )) as { dependencies: Record<string, string> }
+    for (const [name, version] of Object.entries(compatManifest.dependencies)) {
+      if (name.startsWith('@deepseek-ai/dsh-')) {
+        expect(version).toBe('0.1.0-rc.6')
+      }
+    }
     const command = pnpmVersionCommand()
     expect(() => execFileSync(command.executable, command.args, { cwd: root, shell: false }))
       .not.toThrow()
   })
 
-  it('rejects commented dynamic imports from private DSH source paths', () => {
+  it('rejects private DSH source imports across supported module forms', () => {
     const fixtureRoot = mkdtempSync(resolve(
       root,
       'tests/dsh-probe/.private-import-',
@@ -121,11 +130,29 @@ describe('published DeepSeek Harness closure', () => {
       'src',
       'private.js',
     ].join('/')
-    writeFileSync(
-      resolve(fixtureRoot, 'commented-dynamic-import.ts'),
-      `void import /* private seam */ (${JSON.stringify(privateSpecifier)})\n`,
-      'utf8',
-    )
+    const fixtures = {
+      'relative-import.ts':
+        "import '../../../node_modules/@deepseek-ai/dsh-agent/src/private.js'\n",
+      'template-import.ts': [
+        "const packageName = 'dsh-agent'",
+        'void import /* private seam */ (`@deepseek-ai/${packageName}/src/private.js`)',
+        '',
+      ].join('\n'),
+      'concatenated-import.ts': [
+        "const packageName = 'dsh-agent'",
+        "void import('@deepseek-ai/' + packageName + '/src/private.js')",
+        '',
+      ].join('\n'),
+      'create-require.ts': [
+        "import { createRequire } from 'node:module'",
+        'const privateRequire = createRequire(import.meta.url)',
+        `privateRequire(${JSON.stringify(privateSpecifier)})`,
+        '',
+      ].join('\n'),
+    }
+    for (const [name, source] of Object.entries(fixtures)) {
+      writeFileSync(resolve(fixtureRoot, name), source, 'utf8')
+    }
 
     try {
       const result = spawnSync(
@@ -135,6 +162,9 @@ describe('published DeepSeek Harness closure', () => {
       )
       expect(result.status).toBe(1)
       expect(result.stderr).toContain('private DSH import')
+      for (const name of Object.keys(fixtures)) {
+        expect(result.stderr).toContain(name)
+      }
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true })
     }
