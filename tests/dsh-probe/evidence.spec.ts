@@ -140,6 +140,35 @@ describe('Tianwen evidence projection', () => {
       .toBe(second[0]!.action.argumentsDigest)
   })
 
+  it('keeps each result paired to its call when completions arrive in reverse order', () => {
+    const evidence = projectEvidence(SessionId('reverse-results'), [
+      toolCall(1, 'call-A', '{"text":"A"}'),
+      toolCall(2, 'call-B', '{"text":"B"}'),
+      toolResult(3, 'call-B', 'result-B'),
+      toolResult(4, 'call-A', 'result-A'),
+    ])
+
+    expect(evidence.map(record => record.action.callId))
+      .toEqual(['call-A', 'call-B'])
+    expect(evidence.map(record => record.source.resultSeq)).toEqual([4, 3])
+    expect(evidence).toMatchObject([
+      {
+        action: { callId: 'call-A' },
+        outcome: {
+          status: 'complete',
+          resultDigest: 'sha256:c2694116933d7916164baa0756cb721cf4aabb246bf1656d79571f5b974fcaff',
+        },
+      },
+      {
+        action: { callId: 'call-B' },
+        outcome: {
+          status: 'complete',
+          resultDigest: 'sha256:123db8d2e14d0004e78e5adb4d56c80bd7b1fc3553cabc8aa1ee270f206e68dc',
+        },
+      },
+    ])
+  })
+
   it('fails closed for duplicate calls, duplicate results, orphan results, and out-of-order results', () => {
     expect(() => projectEvidence(SessionId('duplicate-call'), [
       toolCall(1, 'duplicate', '{"text":"one"}'),
