@@ -1,6 +1,6 @@
 # 天问 Runtime 重新选型：DeepSeek Harness 候选底座
 
-**状态：** 架构讨论已形成推荐方向；兼容性探针正在实施，因此本文仍不授权正式迁移
+**状态：** 兼容性探针已通过；已选择 DSH 作为迁移候选 Runtime，Migration Phase 1 已获批准
 
 **日期：** 2026-08-14
 
@@ -10,11 +10,14 @@
 
 推荐采用：
 
-> 精确锁定 DeepSeek Harness 版本，以 Tianwen Profile、Bundle 和外部插件构建独立天问产品；保留 Python 作为评测、研究和迁移期治理 Worker；兼容性探针通过后才正式迁移。
+> 精确锁定 DeepSeek Harness 版本，以 Tianwen Profile、Bundle 和外部插件构建独立天问产品；保留 Python 作为评测、研究和迁移期治理 Worker；先通过独立 Migration Phase 1 纵切片，再决定是否并入 main。
 
-当前 Python 实现保留为参考实现和验收基线。Task 10 冻结，不再按旧计划自动执行真实 Docker 发布门。
+兼容性探针 Tasks 0–9 已完成，最终标签为
+`ADOPT_DSH_RUNTIME_CANDIDATE`，fresh whole-probe review 为
+0 Critical、0 Important、0 Minor。当前 Python 实现继续保留为参考实现
+和验收基线。Task 10 冻结，不再按旧计划自动执行真实 Docker 发布门。
 
-这是一项“候选目标架构”决策，不是已经完成的实现事实。
+这表示 DSH 已被批准进入迁移实现，不表示迁移已经完成或天问已经生产可用。
 
 ## 2. 为什么重新打开选型
 
@@ -443,9 +446,11 @@ container、remote runner 或 microVM；当前探针不提前实现这些提供�
 - 重新评估窄 Fork；
 - 等待上游接口成熟。
 
-## 14. 当前暂停边界
+## 14. 当前迁移边界
 
-在兼容性探针设计再次经用户阅读前：
+用户已批准持续推进
+`Tianwen-on-DSH Migration Phase 1: Runtime/Profile foundation and governance seam`。
+该阶段仍必须遵守：
 
 - 不启动 Task 10；
 - 不调用真实 Docker；
@@ -453,8 +458,8 @@ container、remote runner 或 microVM；当前探针不提前实现这些提供�
 - 不删除、废弃或大规模重构现有 Python；
 - 不 Fork DSH；
 - 不把 DSH 源码复制进天问仓库；
-- 不开始完整 TypeScript 迁移；
-- 不将本文标记为已实施架构。
+- 不开始 UI、真实模型、A2–A5 或完整 Goal Graph 迁移；
+- 不在独立 Phase 1 通过前把 probe / migration 分支整体并入 main。
 
 ## 15. 被重新评估但不改写的历史文档
 
