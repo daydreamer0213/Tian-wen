@@ -19,7 +19,16 @@
 - 只允许第一次精确依赖安装访问 npm registry，以及 Git push 访问 GitHub。此后所有测试必须使用 `pnpm --offline --frozen-lockfile`、`UV_OFFLINE=1`，不得调用 live web。
 - Node/pnpm 大缓存统一放在 `D:\DevData\pnpm-store`；探针运行数据统一放在 `D:\DevData\tianwen-dsh-probe`；项目自身 `node_modules` 留在 D 盘 worktree。不得把大缓存和运行数据写入 C 盘。
 - PowerShell 中使用 `npm.cmd`、`pnpm.cmd`，避免执行策略拦截 `npm.ps1` / `pnpm.ps1`。
-- 所有子进程使用程序名加 argv 数组，`shell: false`；禁止拼接 shell 命令字符串，禁止继承模型密钥。
+- 所有由天问、探针脚本、评测 Worker、Agent 工具直接创建的子进程都使用程序名加 argv 数组和 `shell: false`；禁止拼接 shell 命令字符串，禁止继承模型密钥。
+- 唯一例外是精确 `@deepseek-ai/dsh@0.1.0-rc.6` 的公开
+  `dsh plugin --profile tianwen-probe add --offline <fixed-tarball>`
+  在 Windows 内部调用 pnpm 时使用上游实现的 `shell: true`。该例外只
+  允许 Task 3 一次性 Profile 安装控制面；Windows 根目录必须精确为
+  `D:\DevData\tianwen-dsh-probe`，profile、tarball 和 argv 必须由代码
+  固定，传给上游 shell 的字符串不得含 shell 元字符，也不得包含用户、
+  模型或外部来源数据。外层仍必须 `shell: false`，报告必须分别
+  披露两层边界。该例外不得复用于 Agent 运行期、动态插件、学习资产或
+  用户指定 package spec。
 - 默认测试不得联网、不得调用付费模型、不得要求 Docker Engine。真实 DSH 本地沙盒只在 Task 8 的显式开关下运行，并且只能操作 D 盘专用一次性目录。
 - Windows 上 DSH 沙盒报告 `partial` 是上游公开语义：它可以支持普通本地任务，但不能被描述为高风险代码的强隔离。探针不得把 `partial` 伪装成 `full`。
 - DSH Session Log 是单 Session 执行事实；Tianwen Ledger 是跨 Session 治理事实。探针不得把整段会话复制进 Tianwen Ledger。
@@ -870,6 +879,10 @@ git commit -m "feat: add deepseek harness compatibility seam"
 - Creates a disposable Profile under `D:\DevData\tianwen-dsh-probe\home`.
 - Overrides only the default model route and inserts one keyless scripted adapter.
 - Proves `dsh --profile tianwen-probe --dump-config` without booting a paid provider.
+- Accepts the one documented rc.6 Windows installation limitation: Tianwen's
+  outer process is `shell: false`, while the published DSH CLI internally
+  invokes pnpm with `shell: true` only for the fixed offline plugin-add argv.
+- Does not authorize any runtime or user/model-directed package installation.
 
 - [ ] **Step 1: Add the package and profile contract test**
 
@@ -1028,15 +1041,48 @@ Do not override Goal, Session, Sandbox, Tools, UI, or other base rows in the com
 
 `scripts/verify-dsh-profile.mjs` must:
 
-1. Require `TIANWEN_DSH_PROBE_ROOT` and reject paths outside `D:\DevData\tianwen-dsh-probe` on Windows.
+1. Require `TIANWEN_DSH_PROBE_ROOT`; on Windows require its resolved and real
+   path to equal exactly `D:\DevData\tianwen-dsh-probe`. Do not accept
+   user-selected child directories for the shell exception.
 2. Build and pack `@tianwen/dsh-probe-bundle` into `D:\DevData\tianwen-dsh-probe\packs`.
 3. Set `DSH_HOME=D:\DevData\tianwen-dsh-probe\home` and `PNPM_STORE_DIR=D:\DevData\pnpm-store`.
-4. Run `pnpm.cmd exec dsh plugin --profile tianwen-probe add --offline D:\DevData\tianwen-dsh-probe\packs\tianwen-dsh-probe-bundle-0.0.0.tgz` with `shell: false`.
+4. Run `pnpm.cmd exec dsh plugin --profile tianwen-probe add --offline D:\DevData\tianwen-dsh-probe\packs\tianwen-dsh-probe-bundle-0.0.0.tgz` from the Tianwen-owned outer process with `shell: false`. Before invocation, require the exact profile name, exact tarball basename, lexical and real containment under the exact probe root, a tarball produced by the current run, and no shell metacharacters in any value forwarded to the upstream shell. On Windows, record that the published rc.6 DSH CLI internally invokes pnpm with `shell: true`; do not describe the whole chain as `shell: false`.
 5. Run `pnpm.cmd exec dsh --profile tianwen-probe --dump-config`.
-6. Require the dump to contain the Bundle layer, `tianwen-probe-adapter`, and `provider: tianwen-probe`.
-7. Require the generated profile manifest to list `@deepseek-ai/dsh-base` before `@tianwen/dsh-probe-bundle`.
-8. Require the generated profile to resolve `@deepseek-ai/dsh-base` to `0.1.0-rc.6`.
-9. Write `profile-report.json` under the probe root with command argv, exit codes, SHA-256 of the tarball and normalized config assertions.
+6. Parse the authored patch as exactly two top-level operations: one update of
+   `id: agent-default-model` whose config is exactly
+   `provider: tianwen-probe` and `model: scripted`, and one insertion of
+   `id: tianwen-probe-adapter` using
+   `@tianwen/dsh-probe-bundle/adapter`. Reject extra Goal, Session, Sandbox,
+   Tools, UI or other base-row changes.
+7. Parse the bounded `agent-default-model` row in the dumped config and bind
+   `provider: tianwen-probe` plus `model: scripted` to that row; a matching
+   value elsewhere in the dump is not sufficient.
+8. Require the dump to contain the Bundle layer and
+   `tianwen-probe-adapter`.
+9. Require the generated profile manifest to list `@deepseek-ai/dsh-base` before `@tianwen/dsh-probe-bundle`.
+10. Require the generated profile to resolve `@deepseek-ai/dsh-base` to `0.1.0-rc.6`.
+11. Use the generated Profile `package.json` as the module-resolution anchor;
+    actually resolve and import both public exports
+    `@tianwen/dsh-probe-bundle` and
+    `@tianwen/dsh-probe-bundle/adapter`. Require the root identity export and
+    adapter Cordis plugin fields to match the frozen Bundle.
+12. Write `profile-report.json` under the probe root with command argv, exit
+    codes, SHA-256 of the tarball, normalized config assertions, public-export
+    resolution/import evidence, and this explicit boundary:
+
+    ```json
+    {
+      "executionBoundary": {
+        "tianwenOuterShell": false,
+        "upstreamDshWindowsPluginInstallShell": true,
+        "scope": "fixed-offline-profile-install-only",
+        "userOrModelControlledArguments": false
+      }
+    }
+    ```
+
+    On non-Windows hosts, record the observed upstream value instead of
+    claiming `true`.
 
 Do not start the interactive DSH app in this task.
 

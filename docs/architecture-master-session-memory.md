@@ -421,8 +421,19 @@ Alpha-A 独立实施分支为：
   当前提交的公开导入边界和扫描结果不受影响，暂不阻塞 Task 3；
 - Tasks 0–2 canonical 交接：
   `docs/operations/deepseek-harness-probe-task-0-2-handoff.md`；
-- 下一实施入口只允许探针 Task 3：建立可安装的 Tianwen
-  Bundle/Profile；Task 4 及后续任务必须等待 Task 3 单独验收；
+- 探针 Task 3 独立实施任务：
+  `019ffe9a-5e6c-70d0-b508-1d39fd146154`；
+- Task 3 已证明 Bundle pack、离线 Profile 安装和 `--dump-config`
+  功能链可以工作，但独立复审发现：npm `rc.6` 的公开 DSH CLI 在
+  Windows 执行 `plugin add` 时内部使用 `shell: true`；
+- 用户已批准严格限定的安装期例外：只允许精确 D 盘根目录、固定
+  profile、固定 tarball、离线、无密钥、无 shell 元字符且无用户/模型
+  输入的 Task 3 一次性安装；天问外层仍为 `shell: false`，报告必须
+  诚实区分两层；
+- 该例外不允许扩散到 Agent 运行期、动态插件、学习资产或用户指定包；
+  正式开放动态安装前仍需要上游安全接口或新的可审计安装器；
+- Task 3 获准在更新后的计划下关闭本轮 1 个 Critical 和 2 个
+  Important 后重新复审；Task 4 及后续任务必须等待 Task 3 单独验收；
 - 主控会话只负责验收、解释和调度，不亲自实现探针。
 
 当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。

@@ -1,6 +1,6 @@
 # 天问 Runtime 重新选型：DeepSeek Harness 候选底座
 
-**状态：** 架构讨论已形成推荐方向；兼容性探针尚未实施，因此本文不授权正式迁移
+**状态：** 架构讨论已形成推荐方向；兼容性探针正在实施，因此本文仍不授权正式迁移
 
 **日期：** 2026-08-14
 
@@ -279,6 +279,35 @@ Tianwen Plugins  = 持续学习控制系统
 
 它不能重新抽象整个 DSH。
 
+### 10.1 Windows Profile 安装期的窄例外
+
+主控进程、天问插件、评测 Worker、Agent 工具和运行期子进程继续统一使用
+“程序名 + argv 数组 + `shell: false`”。这个规则没有被普遍放宽。
+
+已核对的 npm 发布包 `@deepseek-ai/dsh@0.1.0-rc.6` 在 Windows 执行公开
+`dsh plugin ... add` 时，会在其 CLI 内部使用
+`spawnSync("pnpm", argv, { shell: true })`。为了继续验证公开 Profile
+安装接口，兼容性探针允许这一个上游内部调用，但必须同时满足：
+
+- 只发生在一次性 Profile 安装控制面，不发生在 Agent 执行或学习循环中；
+- DSH 版本、lockfile 和 tarball integrity 精确锁定；
+- profile 固定为 `tianwen-probe`；
+- Windows 探针根目录固定为 `D:\DevData\tianwen-dsh-probe`，不接受
+  由用户或模型选择的子目录；
+- tarball 由本地构建生成，绝对路径、固定文件名和真实路径均限制在
+  该根目录，传给上游 shell 的字符串不得含 shell 元字符；
+- 传入参数不包含用户、模型、网页或其他外部不可信内容；
+- 使用离线 pnpm、最小环境且不传递模型密钥；
+- 天问外层调用仍为 `shell: false`；
+- 验证报告分别记录“外层 `shell: false`”和
+  “DSH Windows 内部插件安装 `shell: true`”，不得声称整条链路都是
+  `shell: false`。
+
+这个例外不授权运行期动态安装、学习资产安装、用户指定 package spec
+或模型发起的插件安装。正式产品若要开放这些能力，必须先获得上游
+`shell: false` / 可注入绝对 pnpm executable 的公开接口，或重新设计
+独立且可审计的安装器。
+
 ## 11. 迁移策略
 
 ### 阶段 0：封存基线
@@ -342,6 +371,10 @@ Tianwen Plugins  = 持续学习控制系统
 9. 普通任务使用 DSH 沙盒；
 10. 使用公开插件接口即可完成，变化集中在薄兼容层。
 
+第 10 项允许上述唯一的 Windows Profile 安装期限制，但最终选型必须把
+它标记为兼容性债务；如果该限制扩散到 Agent 运行期或动态学习资产安装，
+则不视为完成门通过。
+
 ## 13. 失败条件
 
 出现任一承重问题时，不正式迁移：
@@ -354,6 +387,8 @@ Tianwen Plugins  = 持续学习控制系统
 - Windows 普通沙盒边界不可接受；
 - 为接入 DSH 需要重写大部分持续学习治理；
 - DSH 升级无法由兼容层和合同测试约束。
+- Windows `shell: true` 成为 Agent 运行、工具执行、用户输入或学习资产
+  安装的必要条件。
 
 失败后可选择：
 
