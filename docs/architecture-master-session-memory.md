@@ -383,7 +383,7 @@ npm tarball integrity、实际公开导出和 TypeScript 签名，不能把 `rc.
 
 稳定主分支在本次更新前为：
 
-- `main`: `566a027`
+- `main`: `575fb3a`
 
 Alpha-A 独立实施分支为：
 
@@ -404,6 +404,17 @@ Alpha-A 独立实施分支为：
   DeepSeek Harness `0.1.0-rc.6` npm 依赖闭包、建立
   `tianwen-dsh-compat` 公开兼容层；
 - 当前目标分支：`codex/deepseek-harness-probe`；
+- Task 0 已完成；Task 1 首次执行在本地提交
+  `96a60f643949afa3c3eda5996b6345d2bb641a18` 交接为 blocked，原因是
+  原计划错误地要求 CLI 包 `@deepseek-ai/dsh` 提供根库 export；
+- 主控只读核对确认：官方 `rc.5` 源码与 npm `rc.6` 均把
+  `@deepseek-ai/dsh` 定义为只有 `bin.dsh` 的 CLI 包；compat 将直接
+  import 的 14 个专用 Runtime 包则全部具有根 `"."` export、`types`
+  和默认实现；
+- 该 blocker 被判定为计划谓词过宽，不是 DSH 架构失败，也不需要用户
+  价值判断；计划已修正为“CLI 验证 `bin.dsh`，Runtime 库验证根导出”；
+- 原实施任务获准从现有证据提交继续完成 Task 1–2；在重新 GREEN、
+  独立复审和普通 push 前，远端 probe 分支仍不视为阶段通过；
 - Task 3 及后续任务必须等待 Task 0–2 的结构化交接、远端 SHA、
   测试、类型检查和独立复审通过后再由主控创建；
 - 主控会话只负责验收、解释和调度，不亲自实现探针。

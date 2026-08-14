@@ -30,6 +30,16 @@ Git tag 或 `gitHead`。因此本文后面的源码判断直接证明的是 `rc.
 TypeScript 声明和完整锁文件；如果与本文审计的公共接口不同，必须先
 报告兼容性差异，不能改用私有源码路径绕过。
 
+兼容性探针 Task 1 进一步确认了发布形态的分类差异：
+
+- `@deepseek-ai/dsh` 是 CLI 包，公开权威是 `bin.dsh`；官方 `rc.5`
+  源码和 npm `rc.6` 都没有把它声明为可 import 的根库；
+- `tianwen-dsh-compat` 计划直接 import 的专用 `@deepseek-ai/dsh-*`
+  Runtime 包，在 `rc.6` 均提供根 `"."` export、`types` 和默认实现。
+
+因此“CLI 包没有根库导出”本身不是兼容性失败。正确检查是分别验证
+CLI 可执行入口和 Runtime 库导出，不能用同一谓词要求两类包。
+
 ## 2. 总结判断
 
 DeepSeek Harness 比当前 Python + PydanticAI Harness 更接近天问需要的“通用 Agent Runtime”。它已经提供：

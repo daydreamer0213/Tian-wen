@@ -206,7 +206,9 @@ Record base SHA, worktree path, Python baseline, Node version, pnpm version, and
   - frozen `pnpm-lock.yaml`;
   - a machine-readable installed-version report;
   - a hard failure if any installed `@deepseek-ai/dsh` or `@deepseek-ai/dsh-*` package is not `0.1.0-rc.6`;
-  - a hard failure if required public exports are absent.
+  - a hard failure if the CLI package lacks its published `dsh` executable;
+  - a hard failure if a Runtime library imported by
+    `tianwen-dsh-compat` lacks its public root export or root types.
 
 - [ ] **Step 1: Add the root Node workspace manifest**
 
@@ -326,9 +328,34 @@ Required behavior:
 1. Run `pnpm.cmd list --json --depth Infinity` on Windows or `pnpm list --json --depth Infinity` elsewhere, with `shell: false`.
 2. Recursively inspect the returned dependency tree.
 3. Every package named exactly `@deepseek-ai/dsh` or beginning `@deepseek-ai/dsh-` must have version exactly `0.1.0-rc.6`.
-4. Read each required package's `package.json` through its public `package.json` export and require the root `"."` export.
-5. In `--imports` mode, recursively scan committed `.ts`, `.mts`, `.cts`, `.js`, `.mjs` files under `packages`, `tests/dsh-probe`, and `scripts`; fail on an import containing `@deepseek-ai/` followed later by `/src/`.
-6. Emit sorted JSON with `expectedDshVersion`, `installedPackages`, and `privateImportViolations`.
+4. Read each direct DSH dependency's published `package.json`.
+5. Treat `@deepseek-ai/dsh` as the CLI package documented by upstream:
+   require a non-empty `bin.dsh`, require its target file to exist inside the
+   installed package, and do not require `main`, `types`, or a root `"."`
+   library export.
+6. Treat every direct `@deepseek-ai/dsh-*` package imported by the planned
+   `tianwen-dsh-compat` seam as a Runtime library: require a root `"."`
+   export with both `types` and `default` targets, and require both target
+   files to exist inside the installed package.
+7. In `--imports` mode, recursively scan committed `.ts`, `.mts`, `.cts`, `.js`, `.mjs` files under `packages`, `tests/dsh-probe`, and `scripts`; fail on an import containing `@deepseek-ai/` followed later by `/src/`.
+8. Emit sorted JSON with `expectedDshVersion`, `installedPackages`,
+   `packageSurfaces`, and `privateImportViolations`.
+
+The surface classes are intentionally different:
+
+```text
+@deepseek-ai/dsh
+  kind = cli
+  authority = bin.dsh
+
+@deepseek-ai/dsh-agent and the other directly imported dsh-* packages
+  kind = library
+  authority = exports["."].types + exports["."].default
+```
+
+The absence of a root library export on the CLI package is not a
+compatibility failure. Conversely, a library package cannot satisfy this gate
+merely by exposing a CLI binary.
 
 Use this exact version predicate:
 
@@ -378,11 +405,36 @@ describe('published DeepSeek Harness closure', () => {
     const report = JSON.parse(output) as {
       expectedDshVersion: string
       installedPackages: Array<{ name: string; version: string }>
+      packageSurfaces: Array<{
+        name: string
+        kind: 'cli' | 'library'
+        rootExport: boolean
+        typesTarget: boolean
+        defaultTarget: boolean
+        cliTarget: boolean
+      }>
     }
     expect(report.expectedDshVersion).toBe('0.1.0-rc.6')
     expect(report.installedPackages.length).toBeGreaterThan(10)
     expect(new Set(report.installedPackages.map(item => item.version)))
       .toEqual(new Set(['0.1.0-rc.6']))
+
+    const cli = report.packageSurfaces.find(
+      item => item.name === '@deepseek-ai/dsh',
+    )
+    expect(cli).toMatchObject({
+      kind: 'cli',
+      rootExport: false,
+      cliTarget: true,
+    })
+
+    const libraries = report.packageSurfaces.filter(
+      item => item.kind === 'library',
+    )
+    expect(libraries.length).toBeGreaterThan(10)
+    expect(libraries.every(
+      item => item.rootExport && item.typesTarget && item.defaultTarget,
+    )).toBe(true)
   })
 
   it('commits a lockfile and uses no floating DSH ranges', () => {
