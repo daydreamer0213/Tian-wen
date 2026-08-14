@@ -432,8 +432,24 @@ Alpha-A 独立实施分支为：
   诚实区分两层；
 - 该例外不允许扩散到 Agent 运行期、动态插件、学习资产或用户指定包；
   正式开放动态安装前仍需要上游安全接口或新的可审计安装器；
-- Task 3 获准在更新后的计划下关闭本轮 1 个 Critical 和 2 个
-  Important 后重新复审；Task 4 及后续任务必须等待 Task 3 单独验收；
+- Task 3 已完成、普通推送并通过独立复审与主控独立验收；探针分支
+  远端精确 HEAD：`da44d1ac152d31e97596c419e4b8952e92cb3ef3`；
+- 主控在最终代码上独立重跑：离线 frozen install、依赖闭包与私有导入
+  检查、TypeScript typecheck、Tasks 0–3 的 16 个 Node 测试、
+  Profile pack/install/dump、Python A1、全量 `424 passed, 4 skipped`、
+  Ruff 和 `git diff --check` 全部通过；
+- Task 3 tarball SHA-256 稳定为
+  `29018a0f57b4b8dc529162f35f0c5d79a092ab2f92b36588505a0c99b7936012`；
+  `profile-report.json` 的整文件 SHA 是包含实际 Corepack 绝对路径的
+  单次运行回执，不是跨环境 canonical 身份；验收使用 tarball、配置、
+  normalized assertions、固定输入和执行/权限边界；
+- Task 3 canonical 交接：
+  `docs/operations/deepseek-harness-probe-task-3-handoff.md`；
+- 探针 Task 4 独立实施任务：
+  `019ffeef-15a1-7f93-8356-aa65eb20172e`；
+- Task 4 唯一范围是验证顶层 Goal 的人类主权、真实 JSONL 跨 Context
+  恢复、恢复后 disarmed、显式 resume 前零模型请求，以及一次 Goal
+  round 上限；Task 5 必须等待 Task 4 单独验收；
 - 主控会话只负责验收、解释和调度，不亲自实现探针。
 
 当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
