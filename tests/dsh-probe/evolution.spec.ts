@@ -11,6 +11,35 @@ import { join, resolve } from 'node:path'
 import TimerService from '@deepseek-ai/cordis-plugin-timer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+const syncAudit = vi.hoisted(() => ({
+  enabled: false,
+  paths: [] as string[],
+}))
+
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  const paths = new Map<number, string>()
+  return {
+    ...actual,
+    openSync(path: string, flags: string, mode?: number) {
+      const descriptor = actual.openSync(path, flags, mode)
+      if (syncAudit.enabled) {
+        paths.set(descriptor, String(path))
+      }
+      return descriptor
+    },
+    fsyncSync(descriptor: number) {
+      if (syncAudit.enabled) {
+        const path = paths.get(descriptor)
+        if (path !== undefined) {
+          syncAudit.paths.push(path)
+        }
+      }
+      actual.fsyncSync(descriptor)
+    },
+  }
+})
+
 import {
   Context,
   DynamicCordisRunnerService,
@@ -87,8 +116,17 @@ function approval(
   return { artifactId, authority: 'human', approvalId }
 }
 
+interface FormalRecordStore {
+  recordArtifact(
+    source: string,
+    parentArtifactId?: ArtifactId,
+  ): ArtifactVersion
+  recordEvaluation(record: EvaluationRecord): void
+  recordApproval(record: ApprovalRecord): void
+}
+
 function prepareMetArtifact(
-  ledger: EvolutionLedger,
+  ledger: FormalRecordStore,
   source: string,
   approvalId: string,
   receiptDigest: EvaluationRecord['receiptDigest'],
@@ -156,12 +194,29 @@ function eventTypes(events: readonly LedgerEvent[]): string[] {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  syncAudit.enabled = false
+  syncAudit.paths = []
   for (const root of fixtureRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true })
   }
 })
 
 describe('Tianwen append-only evolution ledger', () => {
+  it('fsyncs immutable source before accepting its ledger event', () => {
+    const root = ledgerRoot('source-fsync')
+    const ledger = new EvolutionLedger(root, {
+      clock: deterministicClock(),
+    })
+    syncAudit.enabled = true
+
+    ledger.recordArtifact(V1)
+
+    expect(syncAudit.paths).toEqual([
+      join(root, 'artifacts', `sha256-${V1_DIGEST}.mjs`),
+      join(root, 'ledger.jsonl'),
+    ])
+  })
+
   it('uses source bytes as identity and rejects replacement at that digest', () => {
     const root = ledgerRoot('identity')
     const ledger = new EvolutionLedger(root, {
@@ -325,9 +380,85 @@ describe('Tianwen append-only evolution ledger', () => {
 
     expect(() => new EvolutionLedger(root)).toThrow(LedgerIntegrityError)
   })
+
+  it('repairs a pointer exactly one committed transition behind ledger replay', () => {
+    const root = ledgerRoot('stale-pointer')
+    const ledger = new EvolutionLedger(root, {
+      clock: deterministicClock(),
+    })
+    const v1 = prepareMetArtifact(
+      ledger,
+      V1,
+      'human-v1',
+      RECEIPT_A,
+    )
+    const v1Pointer = ledger.promote(v1.artifactId)
+    const v2 = prepareMetArtifact(
+      ledger,
+      V2,
+      'human-v2',
+      RECEIPT_B,
+      v1.artifactId,
+    )
+    const v2Pointer = ledger.promote(v2.artifactId)
+    writeFileSync(
+      join(root, 'champion.json'),
+      `${JSON.stringify(v1Pointer)}\n`,
+      'utf8',
+    )
+
+    const reloaded = new EvolutionLedger(root)
+
+    expect(reloaded.getChampion()).toEqual(v2Pointer)
+    expect(
+      JSON.parse(readFileSync(join(root, 'champion.json'), 'utf8')),
+    ).toEqual(v2Pointer)
+  })
 })
 
 describe('formal governance over process-local Dynamic Cordis versions', () => {
+  it('serializes concurrent transitions before a second define/run can reuse approval', async () => {
+    const root = ledgerRoot('concurrent')
+    const mounted = await mountEvolution(root)
+    const evolution = mounted.ctx.tianwenEvolution
+
+    try {
+      const v1 = prepareMetArtifact(
+        evolution,
+        V1,
+        'human-v1-once',
+        RECEIPT_A,
+      )
+      const results = await Promise.allSettled([
+        evolution.promote(mounted.agent, v1.artifactId),
+        evolution.promote(mounted.agent, v1.artifactId),
+      ])
+
+      expect(results.filter(result => result.status === 'fulfilled'))
+        .toHaveLength(1)
+      expect(results.filter(result => result.status === 'rejected'))
+        .toHaveLength(1)
+      expect(
+        results.find(result => result.status === 'rejected'),
+      ).toMatchObject({
+        reason: expect.any(EvolutionGovernanceError),
+      })
+      expect(mounted.ctx.dynamicCordisRunner.inventory()).toMatchObject([{
+        packages: [{}],
+        activeRun: {},
+      }])
+      expect(
+        evolution.listEvents().filter(event => event.type === 'promoted'),
+      ).toHaveLength(1)
+      expect(evolution.getChampion()).toEqual({
+        artifactId: v1.artifactId,
+        revision: 1,
+      })
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
   it('runs V1, V2, approved rollback, BROKEN recovery, refusal, and restart rehydration', async () => {
     const root = ledgerRoot('dynamic')
     const agentId = `evolution-sequence-${randomUUID()}`
@@ -337,13 +468,14 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
 
     try {
       const v1 = prepareMetArtifact(
-        evolution.ledger,
+        evolution,
         V1,
         'human-v1-promote',
         RECEIPT_A,
       )
+      expect('ledger' in evolution).toBe(false)
       const v1Binding = await evolution.promote(first.agent, v1.artifactId)
-      expect(evolution.ledger.getChampion()).toEqual({
+      expect(evolution.getChampion()).toEqual({
         artifactId: v1.artifactId,
         revision: 1,
       })
@@ -355,14 +487,14 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
       }])
 
       const v2 = prepareMetArtifact(
-        evolution.ledger,
+        evolution,
         V2,
         'human-v2-promote',
         RECEIPT_B,
         v1.artifactId,
       )
       const v2Binding = await evolution.promote(first.agent, v2.artifactId)
-      expect(evolution.ledger.getChampion()).toEqual({
+      expect(evolution.getChampion()).toEqual({
         artifactId: v2.artifactId,
         revision: 2,
       })
@@ -384,7 +516,7 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
       })
       expect(first.ctx.dynamicCordisRunner.inventory()).toEqual(beforeRollback)
 
-      evolution.ledger.recordApproval(
+      evolution.recordApproval(
         approval(v1.artifactId, 'human-v1-rollback'),
       )
       const rollbackBinding = await evolution.rollback(
@@ -396,7 +528,7 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
         pluginId: v1Binding.pluginId,
       })
       expect(rollbackBinding.packageId).not.toBe(v1Binding.packageId)
-      expect(evolution.ledger.getChampion()).toEqual({
+      expect(evolution.getChampion()).toEqual({
         artifactId: v1.artifactId,
         revision: 3,
       })
@@ -411,7 +543,7 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
       }])
 
       const broken = prepareMetArtifact(
-        evolution.ledger,
+        evolution,
         BROKEN,
         'human-broken-promote',
         RECEIPT_C,
@@ -420,7 +552,7 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
       await expect(
         evolution.promote(first.agent, broken.artifactId),
       ).rejects.toBeInstanceOf(EvolutionActivationError)
-      expect(evolution.ledger.getChampion()).toEqual({
+      expect(evolution.getChampion()).toEqual({
         artifactId: v1.artifactId,
         revision: 3,
       })
@@ -434,14 +566,14 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
           {},
         ],
       }])
-      expect(eventTypes(evolution.ledger.listEvents()))
+      expect(eventTypes(evolution.listEvents()))
         .toContain('activation-failed')
 
-      const unapproved = evolution.ledger.recordArtifact(
+      const unapproved = evolution.recordArtifact(
         UNAPPROVED,
         v1.artifactId,
       )
-      evolution.ledger.recordEvaluation(
+      evolution.recordEvaluation(
         evaluation(unapproved.artifactId, 'met', RECEIPT_A),
       )
       const beforeRefusal = first.ctx.dynamicCordisRunner.inventory()
@@ -450,14 +582,14 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
       ).rejects.toBeInstanceOf(EvolutionGovernanceError)
       expect(first.ctx.dynamicCordisRunner.inventory()).toEqual(beforeRefusal)
 
-      const championBeforeRestart = evolution.ledger.getChampion()
-      const runtimeEventsBefore = evolution.ledger.listEvents()
+      const championBeforeRestart = evolution.getChampion()
+      const runtimeEventsBefore = evolution.listEvents()
         .filter(event => event.type === 'runtime-bound').length
       await first.ctx.fiber.dispose()
 
       second = await mountEvolution(root, agentId)
       expect(second.ctx.dynamicCordisRunner.inventory()).toEqual([])
-      expect(second.ctx.tianwenEvolution.ledger.getChampion())
+      expect(second.ctx.tianwenEvolution.getChampion())
         .toEqual(championBeforeRestart)
 
       const rebound = await second.ctx.tianwenEvolution
@@ -468,9 +600,9 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
         currentPackageId: rebound?.packageId,
         activeRun: { packageId: rebound?.packageId },
       }])
-      expect(second.ctx.tianwenEvolution.ledger.getChampion())
+      expect(second.ctx.tianwenEvolution.getChampion())
         .toEqual(championBeforeRestart)
-      const runtimeEventsAfter = second.ctx.tianwenEvolution.ledger
+      const runtimeEventsAfter = second.ctx.tianwenEvolution
         .listEvents()
         .filter(event => event.type === 'runtime-bound')
       expect(runtimeEventsAfter).toHaveLength(runtimeEventsBefore + 1)
@@ -496,7 +628,7 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
 
     try {
       const v1 = prepareMetArtifact(
-        evolution.ledger,
+        evolution,
         V1,
         'human-v1',
         RECEIPT_A,
@@ -506,7 +638,7 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
         v1.artifactId,
       )
       const broken = prepareMetArtifact(
-        evolution.ledger,
+        evolution,
         BROKEN,
         'human-broken',
         RECEIPT_B,
@@ -531,16 +663,60 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
         evolution.promote(mounted.agent, broken.artifactId),
       ).rejects.toBeInstanceOf(EvolutionRecoveryError)
       expect(evolution.blocked).toBe(true)
-      expect(evolution.ledger.getChampion()).toEqual({
+      expect(evolution.getChampion()).toEqual({
         artifactId: v1.artifactId,
         revision: 1,
       })
-      expect(eventTypes(evolution.ledger.listEvents())).toEqual(
+      expect(eventTypes(evolution.listEvents())).toEqual(
         expect.arrayContaining([
           'activation-failed',
           'recovery-failed',
         ]),
       )
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('restores the active Champion and blocks when activation failure audit cannot append', async () => {
+    const root = ledgerRoot('audit-write-error')
+    const mounted = await mountEvolution(root)
+    const evolution = mounted.ctx.tianwenEvolution
+
+    try {
+      const v1 = prepareMetArtifact(
+        evolution,
+        V1,
+        'human-v1',
+        RECEIPT_A,
+      )
+      const v1Binding = await evolution.promote(
+        mounted.agent,
+        v1.artifactId,
+      )
+      const broken = prepareMetArtifact(
+        evolution,
+        BROKEN,
+        'human-broken',
+        RECEIPT_B,
+        v1.artifactId,
+      )
+      const ledgerPath = join(root, 'ledger.jsonl')
+      rmSync(ledgerPath)
+      mkdirSync(ledgerPath)
+
+      await expect(
+        evolution.promote(mounted.agent, broken.artifactId),
+      ).rejects.toBeInstanceOf(EvolutionRecoveryError)
+      expect(evolution.blocked).toBe(true)
+      expect(evolution.getChampion()).toEqual({
+        artifactId: v1.artifactId,
+        revision: 1,
+      })
+      expect(mounted.ctx.dynamicCordisRunner.inventory()).toMatchObject([{
+        currentPackageId: v1Binding.packageId,
+        activeRun: { packageId: v1Binding.packageId },
+      }])
     } finally {
       await mounted.ctx.fiber.dispose()
     }

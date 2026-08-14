@@ -8,7 +8,12 @@ import {
   EvolutionLedger,
 } from './ledger.js'
 import type {
+  ApprovalRecord,
   ArtifactId,
+  ArtifactVersion,
+  ChampionPointer,
+  EvaluationRecord,
+  LedgerEvent,
   TransitionAuthority,
 } from './ledger.js'
 
@@ -28,6 +33,16 @@ interface BoundRuntime {
   readonly pluginId: DynamicPluginId
   readonly packageId: DynamicPackageId
 }
+
+interface EvolutionState {
+  readonly ledger: EvolutionLedger
+  readonly bindings: Map<ArtifactId, BoundRuntime>
+  blocked: boolean
+  operations: Promise<void>
+  pendingOperations: number
+}
+
+const STATES = new WeakMap<Context, EvolutionState>()
 
 export interface TianwenEvolutionConfig {
   readonly root: string
@@ -78,61 +93,97 @@ function publicBinding(binding: BoundRuntime): RuntimeBinding {
 export class TianwenEvolutionService extends Service {
   static inject = ['dynamicCordisRunner']
 
-  readonly ledger: EvolutionLedger
-  private readonly bindings = new Map<ArtifactId, BoundRuntime>()
-  private isBlocked: boolean
-
   constructor(ctx: Context, config: TianwenEvolutionConfig) {
     super(ctx, 'tianwenEvolution')
-    this.ledger = new EvolutionLedger(config.root, {
+    const ledger = new EvolutionLedger(config.root, {
       ...(config.clock === undefined ? {} : { clock: config.clock }),
     })
-    this.isBlocked = this.ledger.hasRecoveryFailure()
+    STATES.set(ctx.root, {
+      ledger,
+      bindings: new Map(),
+      blocked: ledger.hasRecoveryFailure(),
+      operations: Promise.resolve(),
+      pendingOperations: 0,
+    })
   }
 
   get blocked(): boolean {
-    return this.isBlocked
+    return this.state().blocked
+  }
+
+  recordArtifact(
+    source: string,
+    parentArtifactId?: ArtifactId,
+  ): ArtifactVersion {
+    this.requireNoTransition()
+    return this.state().ledger.recordArtifact(source, parentArtifactId)
+  }
+
+  recordEvaluation(record: EvaluationRecord): void {
+    this.requireNoTransition()
+    this.state().ledger.recordEvaluation(record)
+  }
+
+  recordApproval(record: ApprovalRecord): void {
+    this.requireNoTransition()
+    this.state().ledger.recordApproval(record)
+  }
+
+  getChampion(): ChampionPointer | undefined {
+    return this.state().ledger.getChampion()
+  }
+
+  listEvents(): readonly LedgerEvent[] {
+    return this.state().ledger.listEvents()
   }
 
   promote(agent: Agent, artifactId: ArtifactId): Promise<RuntimeBinding> {
-    return this.transition(agent, artifactId, 'promotion')
+    return this.serialize(() =>
+      this.transition(agent, artifactId, 'promotion'))
   }
 
   rollback(agent: Agent, artifactId: ArtifactId): Promise<RuntimeBinding> {
-    return this.transition(agent, artifactId, 'rollback')
+    return this.serialize(() =>
+      this.transition(agent, artifactId, 'rollback'))
   }
 
-  async rehydrateChampion(
+  rehydrateChampion(
+    agent: Agent,
+  ): Promise<RuntimeBinding | undefined> {
+    return this.serialize(() => this.rehydrate(agent))
+  }
+
+  private async rehydrate(
     agent: Agent,
   ): Promise<RuntimeBinding | undefined> {
     this.requireReady()
-    const champion = this.ledger.getChampion()
+    const champion = this.state().ledger.getChampion()
     if (champion === undefined) {
       return undefined
     }
-    const existing = this.bindings.get(champion.artifactId)
+    const existing = this.state().bindings.get(champion.artifactId)
     if (existing !== undefined && this.isActive(existing)) {
       return publicBinding(existing)
     }
-    const source = this.ledger.readSource(champion.artifactId)
+    const source = this.state().ledger.readSource(champion.artifactId)
     let binding: BoundRuntime | undefined
     try {
       binding = this.define(agent, champion.artifactId, source)
       await this.run(agent, binding, 'run')
     } catch (error) {
       const message = errorMessage(error)
-      this.ledger.recordActivationFailed({
+      this.state().ledger.recordActivationFailed({
         artifactId: champion.artifactId,
         phase: 'rehydrate',
         message,
         ...(binding === undefined ? {} : { binding }),
       })
-      this.ledger.recordRecoveryFailed(
+      this.state().ledger.recordRecoveryFailed(
         champion.artifactId,
         champion.artifactId,
         message,
       )
-      this.isBlocked = true
+      this.state().blocked = true
       throw new EvolutionRecoveryError(
         champion.artifactId,
         champion.artifactId,
@@ -140,8 +191,8 @@ export class TianwenEvolutionService extends Service {
         { cause: error },
       )
     }
-    this.bindings.set(champion.artifactId, binding)
-    this.ledger.recordRuntimeBinding(
+    this.state().bindings.set(champion.artifactId, binding)
+    this.state().ledger.recordRuntimeBinding(
       binding.artifactId,
       binding.pluginId,
       binding.packageId,
@@ -155,19 +206,19 @@ export class TianwenEvolutionService extends Service {
     kind: 'promotion' | 'rollback',
   ): Promise<RuntimeBinding> {
     this.requireReady()
-    const authority = this.ledger.prepareTransition(artifactId, kind)
-    const previous = this.ledger.getChampion()
+    const authority = this.state().ledger.prepareTransition(artifactId, kind)
+    const previous = this.state().ledger.getChampion()
     if (
       previous !== undefined &&
-      this.bindings.get(previous.artifactId) === undefined
+      this.state().bindings.get(previous.artifactId) === undefined
     ) {
-      await this.rehydrateChampion(agent)
+      await this.rehydrate(agent)
     }
     const previousBinding = previous === undefined
       ? undefined
-      : this.bindings.get(previous.artifactId)
+      : this.state().bindings.get(previous.artifactId)
 
-    const source = this.ledger.readSource(artifactId)
+    const source = this.state().ledger.readSource(artifactId)
     let binding: BoundRuntime | undefined
     try {
       binding = this.define(
@@ -197,12 +248,12 @@ export class TianwenEvolutionService extends Service {
       throw new Error('unreachable: successful activation has no binding')
     }
     if (kind === 'promotion') {
-      this.ledger.promote(artifactId)
+      this.state().ledger.promote(artifactId)
     } else {
-      this.ledger.rollback(artifactId)
+      this.state().ledger.rollback(artifactId)
     }
-    this.bindings.set(artifactId, binding)
-    this.ledger.recordRuntimeBinding(
+    this.state().bindings.set(artifactId, binding)
+    this.state().ledger.recordRuntimeBinding(
       binding.artifactId,
       binding.pluginId,
       binding.packageId,
@@ -264,17 +315,35 @@ export class TianwenEvolutionService extends Service {
     attemptedBinding: BoundRuntime | undefined,
     activationError: unknown,
   ): Promise<never> {
+    const state = this.state()
+    state.blocked = true
     const activationMessage = errorMessage(activationError)
-    this.ledger.recordActivationFailed({
-      artifactId,
-      phase: kind,
-      message: activationMessage,
-      authority,
-      ...(attemptedBinding === undefined
-        ? {}
-        : { binding: attemptedBinding }),
-    })
+    let activationAuditError: unknown
+    try {
+      state.ledger.recordActivationFailed({
+        artifactId,
+        phase: kind,
+        message: activationMessage,
+        authority,
+        ...(attemptedBinding === undefined
+          ? {}
+          : { binding: attemptedBinding }),
+      })
+    } catch (error) {
+      activationAuditError = error
+    }
     if (previousBinding === undefined) {
+      if (activationAuditError !== undefined) {
+        throw new EvolutionRecoveryError(
+          artifactId,
+          artifactId,
+          `activation failed and its audit could not be persisted: ${
+            errorMessage(activationAuditError)
+          }`,
+          { cause: activationAuditError },
+        )
+      }
+      state.blocked = false
       throw new EvolutionActivationError(
         artifactId,
         `Dynamic activation failed: ${activationMessage}`,
@@ -289,19 +358,17 @@ export class TianwenEvolutionService extends Service {
         ? 'run'
         : 'update'
       await this.run(agent, previousBinding, mode)
-      this.ledger.recordRuntimeBinding(
-        previousBinding.artifactId,
-        previousBinding.pluginId,
-        previousBinding.packageId,
-      )
     } catch (recoveryError) {
       const recoveryMessage = errorMessage(recoveryError)
-      this.ledger.recordRecoveryFailed(
-        artifactId,
-        previousBinding.artifactId,
-        recoveryMessage,
-      )
-      this.isBlocked = true
+      try {
+        state.ledger.recordRecoveryFailed(
+          artifactId,
+          previousBinding.artifactId,
+          recoveryMessage,
+        )
+      } catch {
+        // The process-local blocked state is authoritative for this failed run.
+      }
       throw new EvolutionRecoveryError(
         artifactId,
         previousBinding.artifactId,
@@ -309,6 +376,28 @@ export class TianwenEvolutionService extends Service {
         { cause: recoveryError },
       )
     }
+    let recoveryAuditError: unknown
+    try {
+      state.ledger.recordRuntimeBinding(
+        previousBinding.artifactId,
+        previousBinding.pluginId,
+        previousBinding.packageId,
+      )
+    } catch (error) {
+      recoveryAuditError = error
+    }
+    const auditError = activationAuditError ?? recoveryAuditError
+    if (auditError !== undefined) {
+      throw new EvolutionRecoveryError(
+        artifactId,
+        previousBinding.artifactId,
+        `previous Champion restored but recovery audit failed: ${
+          errorMessage(auditError)
+        }`,
+        { cause: auditError },
+      )
+    }
+    state.blocked = false
     throw new EvolutionActivationError(
       artifactId,
       `Dynamic activation failed; previous Champion restored: ${activationMessage}`,
@@ -326,10 +415,41 @@ export class TianwenEvolutionService extends Service {
   }
 
   private requireReady(): void {
-    if (this.isBlocked) {
+    if (this.state().blocked) {
       throw new Error(
         'Tianwen evolution is blocked after Champion recovery failure',
       )
     }
+  }
+
+  private requireNoTransition(): void {
+    if (this.state().pendingOperations > 0) {
+      throw new Error(
+        'formal records cannot change during a Champion transition',
+      )
+    }
+  }
+
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const state = this.state()
+    state.pendingOperations += 1
+    const result = state.operations.then(operation)
+    state.operations = result.then(
+      () => {
+        state.pendingOperations -= 1
+      },
+      () => {
+        state.pendingOperations -= 1
+      },
+    )
+    return result
+  }
+
+  private state(): EvolutionState {
+    const state = STATES.get(this.ctx.root)
+    if (state === undefined) {
+      throw new Error('Tianwen evolution state is unavailable')
+    }
+    return state
   }
 }

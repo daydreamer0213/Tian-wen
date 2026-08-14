@@ -460,9 +460,26 @@ export class EvolutionLedger {
     }
 
     const sourcePath = this.#sourcePath(sourceDigest)
+    let descriptor: number | undefined
+    let created = false
     try {
-      writeFileSync(sourcePath, bytes, { flag: 'wx' })
+      descriptor = openSync(sourcePath, 'wx')
+      created = true
+      writeFileSync(descriptor, bytes)
+      fsyncSync(descriptor)
+      closeSync(descriptor)
+      descriptor = undefined
     } catch (error) {
+      if (descriptor !== undefined) {
+        closeSync(descriptor)
+        descriptor = undefined
+      }
+      if (created) {
+        if (existsSync(sourcePath)) {
+          unlinkSync(sourcePath)
+        }
+        throw error
+      }
       if (
         !isRecord(error) ||
         error.code !== 'EEXIST'
@@ -946,6 +963,10 @@ export class EvolutionLedger {
       return
     }
     if (!existsSync(this.#pointerPath)) {
+      if (this.#champion.revision === 1) {
+        this.#writePointer(this.#champion)
+        return
+      }
       throw new LedgerIntegrityError(
         'champion.json is missing for the ledger Champion',
       )
@@ -972,9 +993,34 @@ export class EvolutionLedger {
       pointer.artifactId !== this.#champion.artifactId ||
       pointer.revision !== this.#champion.revision
     ) {
+      const previous = this.#previousChampion()
+      if (
+        previous !== undefined &&
+        pointer.artifactId === previous.artifactId &&
+        pointer.revision === previous.revision &&
+        this.#champion.revision === previous.revision + 1
+      ) {
+        this.#writePointer(this.#champion)
+        return
+      }
       throw new LedgerIntegrityError(
         'champion.json disagrees with ledger replay',
       )
+    }
+  }
+
+  #previousChampion(): ChampionPointer | undefined {
+    const transitions = this.#events.filter(
+      (event): event is TransitionEvent =>
+        event.type === 'promoted' || event.type === 'rolled-back',
+    )
+    const previous = transitions.at(-2)
+    if (previous === undefined) {
+      return undefined
+    }
+    return {
+      artifactId: previous.artifactId,
+      revision: previous.revision,
     }
   }
 
