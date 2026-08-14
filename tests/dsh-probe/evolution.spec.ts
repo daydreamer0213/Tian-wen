@@ -16,6 +16,8 @@ const syncAudit = vi.hoisted(() => ({
   paths: [] as string[],
   failChampionRenames: 0,
   failLedgerFsyncAfterReal: 0,
+  shortLedgerWrites: 0,
+  shortPointerWrites: 0,
 }))
 
 vi.mock('node:fs', async importOriginal => {
@@ -48,6 +50,61 @@ vi.mock('node:fs', async importOriginal => {
           code: 'EIO',
         })
       }
+    },
+    writeSync(
+      descriptor: number,
+      buffer: string | Uint8Array,
+      offset?: number,
+      length?: number | BufferEncoding,
+      position?: number,
+    ) {
+      const path = paths.get(descriptor)
+      const shouldShortWrite =
+        (
+          syncAudit.shortLedgerWrites > 0 &&
+          path?.endsWith('ledger.jsonl') === true
+        ) ||
+        (
+          syncAudit.shortPointerWrites > 0 &&
+          path?.includes('.champion-') === true
+        )
+      if (!shouldShortWrite) {
+        if (typeof buffer === 'string') {
+          return actual.writeSync(
+            descriptor,
+            buffer,
+            offset,
+            length as BufferEncoding | undefined,
+          )
+        }
+        return actual.writeSync(
+          descriptor,
+          buffer,
+          offset ?? 0,
+          length as number,
+          position,
+        )
+      }
+      if (path?.endsWith('ledger.jsonl') === true) {
+        syncAudit.shortLedgerWrites -= 1
+      } else {
+        syncAudit.shortPointerWrites -= 1
+      }
+      if (typeof buffer === 'string') {
+        return actual.writeSync(
+          descriptor,
+          buffer.slice(0, Math.max(1, Math.floor(buffer.length / 2))),
+          offset,
+          length as BufferEncoding | undefined,
+        )
+      }
+      return actual.writeSync(
+        descriptor,
+        buffer,
+        offset ?? 0,
+        Math.max(1, Math.floor((length as number) / 2)),
+        position,
+      )
     },
     renameSync(oldPath: string, newPath: string) {
       if (
@@ -224,6 +281,8 @@ afterEach(() => {
   syncAudit.paths = []
   syncAudit.failChampionRenames = 0
   syncAudit.failLedgerFsyncAfterReal = 0
+  syncAudit.shortLedgerWrites = 0
+  syncAudit.shortPointerWrites = 0
   for (const root of fixtureRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true })
   }
@@ -893,6 +952,60 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
       ).trimEnd().split('\n').map(line => JSON.parse(line) as LedgerEvent)
       expect(eventTypes(durableEvents).at(-1)).toBe('promoted')
       expect(eventTypes(durableEvents)).not.toContain('activation-failed')
+
+      const replayed = new EvolutionLedger(root)
+      expect(replayed.getChampion()).toEqual({
+        artifactId: v1.artifactId,
+        revision: 1,
+      })
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('completes a short ledger write before fsync and formal apply', async () => {
+    const root = ledgerRoot('short-ledger-write')
+    const mounted = await mountEvolution(root)
+    const evolution = mounted.ctx.tianwenEvolution
+
+    try {
+      const v1 = prepareMetArtifact(
+        evolution,
+        V1,
+        'human-v1',
+        RECEIPT_A,
+      )
+      syncAudit.enabled = true
+      syncAudit.shortLedgerWrites = 1
+
+      await evolution.promote(mounted.agent, v1.artifactId)
+
+      const replayed = new EvolutionLedger(root)
+      expect(replayed.getChampion()).toEqual({
+        artifactId: v1.artifactId,
+        revision: 1,
+      })
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('completes a short pointer write before atomic replace', async () => {
+    const root = ledgerRoot('short-pointer-write')
+    const mounted = await mountEvolution(root)
+    const evolution = mounted.ctx.tianwenEvolution
+
+    try {
+      const v1 = prepareMetArtifact(
+        evolution,
+        V1,
+        'human-v1',
+        RECEIPT_A,
+      )
+      syncAudit.enabled = true
+      syncAudit.shortPointerWrites = 1
+
+      await evolution.promote(mounted.agent, v1.artifactId)
 
       const replayed = new EvolutionLedger(root)
       expect(replayed.getChampion()).toEqual({

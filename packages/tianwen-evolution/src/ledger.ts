@@ -407,6 +407,23 @@ function canonicalLine(value: unknown): string {
   return `${JSON.stringify(value)}\n`
 }
 
+function writeAllSync(descriptor: number, value: string): void {
+  const bytes = Buffer.from(value, 'utf8')
+  let offset = 0
+  while (offset < bytes.length) {
+    const written = writeSync(
+      descriptor,
+      bytes,
+      offset,
+      bytes.length - offset,
+    )
+    if (written <= 0) {
+      throw new Error('file write made no progress')
+    }
+    offset += written
+  }
+}
+
 function clone<T>(value: T): T {
   return structuredClone(value)
 }
@@ -767,7 +784,7 @@ export class EvolutionLedger {
     const descriptor = openSync(this.#ledgerPath, 'a')
     let commitError: unknown
     try {
-      writeSync(descriptor, line, undefined, 'utf8')
+      writeAllSync(descriptor, line)
       fsyncSync(descriptor)
     } catch (error) {
       commitError = error
@@ -1051,7 +1068,7 @@ export class EvolutionLedger {
     let descriptor: number | undefined
     try {
       descriptor = openSync(temporary, 'wx')
-      writeSync(descriptor, canonicalLine(pointer), undefined, 'utf8')
+      writeAllSync(descriptor, canonicalLine(pointer))
       fsyncSync(descriptor)
       closeSync(descriptor)
       descriptor = undefined
