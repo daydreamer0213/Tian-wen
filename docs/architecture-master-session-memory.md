@@ -395,8 +395,17 @@ Alpha-A 独立实施分支为：
 - Task 10 未启动；
 - 原 Task 10 真实 Docker 发布门不再是自动下一入口；
 - DSH 调研、候选架构规格和兼容性探针实施计划已经固化；
-- 当前下一入口是在用户阅读并批准计划后，由新的独立实施会话执行
-  `docs/superpowers/plans/2026-08-14-deepseek-harness-compatibility-probe.md`；
+- 调研、规格、计划和本文档已由 `main`
+  `de8e33365c402da9341672b8ada564e5bfb48880` 推送；
+- 用户已经批准开始兼容性探针；
+- 当前独立实施任务：
+  `019ffe1f-bda0-7a71-9628-b9b38e944801`；
+- 当前实施范围只包括探针 Task 0–2：封存 Alpha 基线、锁定
+  DeepSeek Harness `0.1.0-rc.6` npm 依赖闭包、建立
+  `tianwen-dsh-compat` 公开兼容层；
+- 当前目标分支：`codex/deepseek-harness-probe`；
+- Task 3 及后续任务必须等待 Task 0–2 的结构化交接、远端 SHA、
+  测试、类型检查和独立复审通过后再由主控创建；
 - 主控会话只负责验收、解释和调度，不亲自实现探针。
 
 当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
