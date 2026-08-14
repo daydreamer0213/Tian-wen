@@ -149,6 +149,32 @@ describe('published DeepSeek Harness closure', () => {
         `privateRequire(${JSON.stringify(privateSpecifier)})`,
         '',
       ].join('\n'),
+      'commonjs-create-require.cts': [
+        "const { createRequire: makeRequire } = require('node:module')",
+        'const privateRequire = makeRequire(__filename)',
+        `privateRequire(${JSON.stringify(privateSpecifier)})`,
+        '',
+      ].join('\n'),
+      'await-create-require.ts': [
+        "const { createRequire: makeRequire } = await import('node:module')",
+        'const privateRequire = makeRequire(import.meta.url)',
+        `privateRequire(${JSON.stringify(privateSpecifier)})`,
+        '',
+      ].join('\n'),
+      'split-scope-template.ts':
+        "void import(`@deepseek-${'ai'}/dsh-agent/src/private.js`)\n",
+      'dynamic-src-token.ts': [
+        "const srcPart = 'src'",
+        "void import('@deepseek-ai/dsh-agent/' + srcPart + '/private.js')",
+        '',
+      ].join('\n'),
+      'aliased-inline-create-require.ts': [
+        "import { createRequire as makeRequire } from 'node:module'",
+        `makeRequire(import.meta.url)(${JSON.stringify(privateSpecifier)})`,
+        '',
+      ].join('\n'),
+      'require-resolve.cts':
+        `require.resolve(${JSON.stringify(privateSpecifier)})\n`,
     }
     for (const [name, source] of Object.entries(fixtures)) {
       writeFileSync(resolve(fixtureRoot, name), source, 'utf8')

@@ -205,7 +205,9 @@ function modulePattern(node) {
   }
   if (ts.isTemplateExpression(node)) {
     return node.head.text + node.templateSpans
-      .map(span => `<dynamic>${span.literal.text}`)
+      .map(span => `${
+        modulePattern(span.expression) ?? '<dynamic>'
+      }${span.literal.text}`)
       .join('')
   }
   if (
@@ -230,41 +232,20 @@ function scanPrivateImports() {
       true,
       ts.getScriptKindFromFileName(file),
     )
-    const createRequireFactories = new Set(['createRequire'])
-    const requireFunctions = new Set(['require'])
-    const collectRequireFunctions = node => {
-      if (
-        ts.isImportDeclaration(node)
-        && literalText(node.moduleSpecifier) === 'node:module'
-        && node.importClause?.namedBindings !== undefined
-        && ts.isNamedImports(node.importClause.namedBindings)
-      ) {
-        for (const element of node.importClause.namedBindings.elements) {
-          if ((element.propertyName ?? element.name).text === 'createRequire') {
-            createRequireFactories.add(element.name.text)
-          }
-        }
-      }
-      if (
-        ts.isVariableDeclaration(node)
-        && ts.isIdentifier(node.name)
-        && node.initializer !== undefined
-        && ts.isCallExpression(node.initializer)
-        && isCreateRequireCall(node.initializer, createRequireFactories)
-      ) {
-        requireFunctions.add(node.name.text)
-      }
-      ts.forEachChild(node, collectRequireFunctions)
-    }
-    collectRequireFunctions(sourceFile)
-
     const addViolation = specifier => {
       const normalized = specifier?.replaceAll('\\', '/')
       const scopeIndex = normalized?.indexOf('@deepseek-ai/') ?? -1
+      const constructedDeepSeekPath = normalized?.includes('<dynamic>')
+        && normalized.includes('@deepseek')
       if (
         normalized !== undefined
-        && scopeIndex >= 0
-        && normalized.indexOf('/src/', scopeIndex) >= 0
+        && (
+          (
+            scopeIndex >= 0
+            && normalized.indexOf('/src/', scopeIndex) >= 0
+          )
+          || constructedDeepSeekPath
+        )
       ) {
         const fileName = relative(root, file).replaceAll('\\', '/')
         violations.set(
@@ -276,16 +257,8 @@ function scanPrivateImports() {
     const visit = node => {
       if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
         addViolation(modulePattern(node.moduleSpecifier))
-      } else if (ts.isCallExpression(node)) {
-        const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword
-        const isRequire = isRequireCall(
-          node.expression,
-          requireFunctions,
-          createRequireFactories,
-        )
-        if (isDynamicImport || isRequire) {
-          addViolation(modulePattern(node.arguments[0]))
-        }
+      } else if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+        addViolation(modulePattern(node.arguments?.[0]))
       } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
         addViolation(modulePattern(node.argument.literal))
       } else if (
@@ -302,44 +275,6 @@ function scanPrivateImports() {
   return [...violations.values()].sort((left, right) =>
     left.file.localeCompare(right.file) || left.specifier.localeCompare(right.specifier),
   )
-}
-
-function literalText(node) {
-  return node !== undefined && ts.isStringLiteralLike(node)
-    ? node.text
-    : undefined
-}
-
-function isCreateRequireCall(node, factories) {
-  return ts.isCallExpression(node)
-    && (
-      (ts.isIdentifier(node.expression) && factories.has(node.expression.text))
-      || (
-        ts.isPropertyAccessExpression(node.expression)
-        && node.expression.name.text === 'createRequire'
-      )
-    )
-}
-
-function isRequireCall(expression, requireFunctions, createRequireFactories) {
-  if (ts.isIdentifier(expression)) {
-    return requireFunctions.has(expression.text)
-  }
-  if (ts.isCallExpression(expression)) {
-    return isCreateRequireCall(expression, createRequireFactories)
-  }
-  return ts.isPropertyAccessExpression(expression)
-    && expression.name.text === 'resolve'
-    && (
-      (
-        ts.isIdentifier(expression.expression)
-        && requireFunctions.has(expression.expression.text)
-      )
-      || (
-        ts.isCallExpression(expression.expression)
-        && isCreateRequireCall(expression.expression, createRequireFactories)
-      )
-    )
 }
 
 function main(args) {
