@@ -20,7 +20,7 @@
 - 已审核并正式装入同一 JavaScript 进程的插件视为可信代码；不新增 ingress token、插件沙盒、capability framework 或恶意同进程插件防护。
 - Windows 本地沙盒继续诚实标记为 `partial`；高风险执行仍建议 container/remote/microVM，本阶段不实现这些 provider。
 - 不开发 UI，不调用付费模型，不使用模型密钥，不执行 live web/search/fetch，不运行真实 Docker，不启动 Alpha Task 10。
-- 缓存、store、virtual store、temp、Session 和 Evolution 数据放在 `D:\DevData\tianwen-dsh-migration-phase-1` 的子目录。现有 Python A1 bridge 继续写入 `D:\DevData\tianwen-dsh-probe\migration-phase-1-a1`；固定 DSH Windows Profile 安装也继续使用已审计的 `D:\DevData\tianwen-dsh-probe` 根。所有生成数据都留在 D 盘。
+- 缓存、store、virtual store、temp、Session 和 Evolution 数据放在 `D:\DevData\tianwen-dsh-migration-phase-1` 的子目录。现有 Python A1 bridge 继续写入 `D:\DevData\tianwen-dsh-probe\migration-phase-1-a1`；固定 DSH Windows Profile 安装也继续使用已审计的 `D:\DevData\tianwen-dsh-probe` 根。所有生成数据都留在 D 盘。这是本阶段的执行/存储约定；Runtime 公开配置缝只验证 `evolutionRoot` 为来自已审核部署配置的绝对路径，不把它当作文件系统沙盒，也不增加 junction/reparse 防护。
 - 所有 Tianwen 自建子进程使用程序加 argv、`shell: false`。探针 Task 3 已接受的上游 Windows Profile 安装内部 `shell: true` 例外只能用于固定离线 tarball 安装，不得扩散。
 - 每项任务先取得有效 RED，再做最小 GREEN；每项任务独立提交并由 fresh scoped reviewer 复审。
 - 每项任务最多两轮窄修复；Phase 1 最终 whole-review 最多一个跨任务修复波次。仍有 Critical/Important 时停止并结构化交接。

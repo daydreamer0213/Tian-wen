@@ -120,7 +120,10 @@ export async function apply(
 5. 不接受模型、命令、包名、权限或任意路径作为动态配置。
 
 `evolutionRoot` 是唯一新增配置，因为正式 Ledger 必须有明确的持久位置。
-Session persistence、模型和沙盒继续由 DSH Profile 决定。
+Runtime 只接受已审核部署配置提供的绝对路径；它不是用户或模型输入，也不
+是文件系统沙盒，因此不增加 junction/reparse 防护。Phase 1 的 tests 和
+Profile 仍使用 `D:\DevData\tianwen-dsh-migration-phase-1` 的子目录。Session
+persistence、模型和沙盒继续由 DSH Profile 决定。
 
 ### 4.2 `@tianwen/runtime-bundle`
 
@@ -227,7 +230,9 @@ Phase 1 新增四层验证。
 - 精确 rc.6 版本门；
 - Evidence 与 Evolution 服务只挂载一次；
 - 不创建第二套 Goal、Session 或 Agent Loop；
-- Evolution 状态只能写入固定迁移根目录的子目录。
+- Runtime 只接受已审核部署配置提供的绝对 `evolutionRoot`；Phase 1 tests 和
+  Profile 仍使用 `D:\DevData\tianwen-dsh-migration-phase-1` 的子目录。该配置
+  不是用户或模型输入，也不是文件系统沙盒，不增加 junction/reparse 防护。
 
 ### 7.2 Session / Goal / Evidence 集成测试
 
