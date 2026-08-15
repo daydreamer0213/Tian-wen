@@ -1,6 +1,6 @@
 # 天问主控架构会话记忆
 
-更新日期：2026-08-14
+更新日期：2026-08-15
 
 ## 1. 文档用途
 
@@ -393,7 +393,7 @@ Evolution governance，不做 UI、真实模型、Docker、A2–A5 或完整 Goa
 
 稳定主分支在本次更新前为：
 
-- `main`: `ac73d37`（已包含兼容性探针结果文档和 Phase 1 设计规格）
+- `main`: `0b993144fa7658d691b2b8455bdc1b31b32ebff3`（已包含自包含 Runtime Bundle 设计、计划和主控记忆）
 
 Alpha-A 独立实施分支为：
 
@@ -518,8 +518,37 @@ Alpha-A 独立实施分支为：
 - main 规格已裁决 trusted absolute evolutionRoot：是已审核部署配置、非用户/模型
   输入；Phase 1 实例仍使用 D 盘约定，不建设虚假 path sandbox。规格 commit
   `4b72814`；
-- final whole-review narrow re-review 结论 READY_AS_BLOCKED_HANDOFF；不可 merge
-  as complete。
+- 之前“私有 workspace 多包无法形成一个离线 DSH plugin tarball”的
+  `READY_AS_BLOCKED_HANDOFF` 已由用户批准的方案 B 解决，不再是当前阻塞；
+- 自包含 Runtime Bundle 计划 Tasks 1–3 已完成。迁移分支
+  `codex/tianwen-dsh-migration-phase-1` 已普通 fast-forward 推送，远端精确
+  HEAD 为 `cffc8e51ad829adf016967491830402b0ed91bd5`；
+- 当前部署产物是一个 `@tianwen/runtime-bundle` tarball；Runtime、Evidence、
+  Evolution 和窄 compat seam 已打入产物，DSH/Cordis 保持外部依赖。非 Node
+  external 精确且仅为 `@deepseek-ai/cordis@4.0.1`；
+- 最终 tarball SHA-256 为
+  `200733DD937A4FB518A1F625CFC824DBF0AA93ABD64F25194E97ABC2036409F8`；
+  migration Profile report SHA-256 为
+  `856C009C90CC6CCE153E776C82FBDFD9B9E3F32E06DC939A80EDEDEAFCB5045C`；
+  `dist/runtime.js` SHA-256 为
+  `3C680ED36CE09F49090FC242150ADCDEA55C388F4F4523FD3E7073D5E29B7016`；
+- 最终 release gates：默认 Node `79 passed, 6 skipped`，显式 migration
+  Profile `5 passed, 1 skipped`，Windows local sandbox `3 passed`，Python
+  A1–A5 author proof `10 passed`，全量 Python `424 passed, 4 skipped`，
+  Ruff、依赖闭包、私有导入、typecheck、diff 和工作树状态均干净；
+- 打包后 Runtime 的 `apply` 已被真实执行并证明会挂载 Evidence 与 Evolution；
+  esbuild metafile inputs 已限制为批准的 Runtime、Evidence、Evolution 和窄
+  compat 输入，额外 workspace、`node_modules`、native addon 和 test helper
+  均被回归测试拒绝；
+- 最终整分支初审发现 2 个 Important 测试缺口和 1 个 ledger Minor；唯一
+  test-only 修复后 scoped re-review 为 0 Critical、0 Important、0 Minor，
+  Ready Yes；canonical handoff 位于 migration 分支的
+  `docs/operations/tianwen-self-contained-runtime-bundle-handoff.md`；
+- 现有 Python Runtime、Alpha-A Tasks 1–9 和 A1–A5 冻结任务包全部保留；本阶段
+  没有 migration cutover、没有真实模型调用、没有真实 Docker，也没有开始 UI；
+- 下一未阻塞入口是先设计 Tianwen-on-DSH Migration Phase 2：以已验证的单一
+  Runtime Bundle 为正式部署基础，连接产品 Profile/入口和后续用户控制面；
+  在新规格批准前不自动切换稳定 Runtime，也不删除 Python 基线。
 
 当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
 
