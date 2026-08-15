@@ -410,17 +410,18 @@ Use exact pnpm mjs through `process.execPath` and `shell: false` to build/pack T
   dshBin,
   'plugin', '--profile', 'tianwen',
   'add', '--offline',
+  '@deepseek-ai/dsh-base@0.1.0-rc.6',
   '@deepseek-ai/dsh-headless@0.1.0-rc.6',
   archive,
 ]
 ```
 
-This is the sole accepted upstream Windows plugin-install exception. After exit 0:
+This is the sole accepted upstream Windows plugin-install exception. The exact base package must be listed explicitly: rc.6 seeds the base layer name in a new Profile but does not otherwise persist the base package and its runtime dependency closure in that Profile. Do not install the base package's individual dependencies one by one. After exit 0:
 
 1. copy the committed Profile patch to `${profileRoot}/cordis.patch.yml` using exact UTF-8+LF bytes;
 2. parse `${profileRoot}/package.json`;
 3. require Bundle order exactly `[@deepseek-ai/dsh-base, @deepseek-ai/dsh-headless, @tianwen/runtime-bundle]`;
-4. require the installed Runtime dependency to refer to the current-run archive and the headless dependency to be exact rc.6;
+4. require the installed Runtime dependency to refer to the current-run archive and both base/headless dependencies to be exact rc.6;
 5. run exact DSH `--profile tianwen --dump-config` and require the default route, plain JSONL config, Runtime evolution root, and smoke export at their exact row IDs;
 6. resolve/import `@tianwen/runtime-bundle/runtime`, `@tianwen/runtime-bundle/smoke`, and every Runtime Bundle manifest external from the installed Runtime Bundle package anchor.
 
