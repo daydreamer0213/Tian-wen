@@ -9,11 +9,13 @@ import {
   ToolRuntime,
 } from '@tianwen/dsh-compat'
 import { default as TimerService } from '@deepseek-ai/cordis-plugin-timer'
+import { CallId } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { apply as applyBundledRuntime } from '../../packages/tianwen-runtime-bundle/dist/runtime.js'
 
 const root = resolve(import.meta.dirname, '../..')
 const packageRoot = resolve(root, 'packages/tianwen-runtime-bundle')
-const packRoot = 'D:/DevData/tianwen-dsh-migration-phase-1/packs'
+const packRoot = 'D:/DevData/tianwen/packs'
 const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.0.0.tgz')
 const tar = process.platform === 'win32'
   ? resolve(process.env.SystemRoot!, 'System32', 'tar.exe')
@@ -21,6 +23,12 @@ const tar = process.platform === 'win32'
 
 function json(path: string): unknown {
   return JSON.parse(readFileSync(path, 'utf8'))
+}
+
+async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[]> {
+  const chunks: StreamChunk[] = []
+  for await (const chunk of stream) chunks.push(chunk)
+  return chunks
 }
 
 function isAllowedRuntimeInput(input: string): boolean {
@@ -32,6 +40,10 @@ function isAllowedRuntimeInput(input: string): boolean {
       '../tianwen-evidence/dist/',
       '../tianwen-evolution/dist/',
     ].some(root => path.startsWith(root))
+}
+
+function isAllowedSmokeInput(input: string): boolean {
+  return posix.normalize(input.replaceAll('\\', '/')) === 'src/smoke.ts'
 }
 
 describe('runtime metafile input allowlist', () => {
@@ -74,7 +86,11 @@ describe('@tianwen/runtime-bundle', () => {
       exports: Record<string, unknown>
     }
     expect(manifest.name).toBe('@tianwen/runtime-bundle')
-    expect(manifest.dependencies).toEqual({ '@deepseek-ai/cordis': '4.0.1' })
+    expect(manifest.dependencies).toEqual({
+      '@deepseek-ai/cordis': '4.0.1',
+      '@deepseek-ai/dsh-llm': '0.1.0-rc.6',
+      '@deepseek-ai/dsh-tools': '0.1.0-rc.6',
+    })
     expect(Object.keys(manifest.dependencies)).not.toContainEqual(
       expect.stringMatching(/^@tianwen\//u),
     )
@@ -83,12 +99,140 @@ describe('@tianwen/runtime-bundle', () => {
       esbuild: '0.28.2',
     })
     expect(manifest.exports).toHaveProperty('./runtime')
+    expect(manifest.exports).toHaveProperty('./smoke')
     expect(manifest.files).toEqual([
       'dist/index.js',
       'dist/index.d.ts',
       'dist/runtime.js',
+      'dist/smoke.js',
       'cordis.patch.yml',
     ])
+  })
+
+  it('ships one fixed offline smoke entry', async () => {
+    const manifest = json(resolve(packageRoot, 'package.json')) as {
+      exports: Record<string, unknown>
+      files: string[]
+      dependencies: Record<string, string>
+    }
+    expect(manifest.exports).toHaveProperty('./smoke')
+    expect(manifest.files).toContain('dist/smoke.js')
+    expect(manifest.dependencies).toEqual({
+      '@deepseek-ai/cordis': '4.0.1',
+      '@deepseek-ai/dsh-llm': '0.1.0-rc.6',
+      '@deepseek-ai/dsh-tools': '0.1.0-rc.6',
+    })
+
+    const smoke = await import(
+      '../../packages/tianwen-runtime-bundle/dist/smoke.js'
+    )
+    expect(smoke).toMatchObject({
+      SMOKE_PROVIDER: 'tianwen-offline',
+      SMOKE_MODEL: 'phase2-smoke',
+      SMOKE_ACTION: 'tianwen_smoke_action',
+      SMOKE_FINAL_TEXT: 'TIANWEN_PHASE2_OK',
+      name: 'tianwen-phase2-smoke',
+      inject: ['llm', 'tools'],
+    })
+    expect(smoke.apply).toBeTypeOf('function')
+  })
+
+  it('runs exactly one fixed smoke session script', async () => {
+    const smoke = await import(
+      '../../packages/tianwen-runtime-bundle/dist/smoke.js'
+    )
+    const adapter = new smoke.Phase2SmokeAdapter()
+    const tools = [
+      { name: 'create_goal', description: 'Create a goal', parameters: {} },
+      { name: 'tianwen_smoke_action', description: 'Run smoke action', parameters: {} },
+    ]
+    const requests = [
+      {
+        provider: 'tianwen-offline',
+        model: 'phase2-smoke',
+        sessionId: 'tianwen-phase2-session',
+        tools,
+        messages: [{ role: 'user', source: { kind: 'user' }, content: [] }],
+      },
+      {
+        provider: 'tianwen-offline',
+        model: 'phase2-smoke',
+        sessionId: 'tianwen-phase2-session',
+        tools,
+        messages: [{
+          role: 'user',
+          source: { kind: 'tool', callId: CallId('tianwen-phase2-goal') },
+          content: [{
+            type: 'tool-result',
+            toolCallId: CallId('tianwen-phase2-goal'),
+            content: [{ type: 'text', text: 'goal created' }],
+          }],
+        }],
+      },
+      {
+        provider: 'tianwen-offline',
+        model: 'phase2-smoke',
+        sessionId: 'tianwen-phase2-session',
+        tools,
+        messages: [{
+          role: 'user',
+          source: { kind: 'goal' },
+          content: [{ type: 'text', text: 'run the only goal round' }],
+        }],
+      },
+      {
+        provider: 'tianwen-offline',
+        model: 'phase2-smoke',
+        sessionId: 'tianwen-phase2-session',
+        tools,
+        messages: [{
+          role: 'user',
+          source: { kind: 'tool', callId: CallId('tianwen-phase2-action') },
+          content: [{
+            type: 'tool-result',
+            toolCallId: CallId('tianwen-phase2-action'),
+            content: [{ type: 'text', text: 'phase2-smoke-action-ok' }],
+          }],
+        }],
+      },
+    ] as GenerateOptions[]
+
+    const createGoal = await collect(adapter.stream(requests[0]!))
+    expect(createGoal[1]).toMatchObject({
+      block: {
+        type: 'tool-call',
+        id: 'tianwen-phase2-goal',
+        name: 'create_goal',
+        arguments: JSON.stringify({
+          objective: 'prove the Tianwen phase 2 startup path',
+          max_goal_rounds: 1,
+        }),
+      },
+    })
+
+    const goalCreated = await collect(adapter.stream(requests[1]!))
+    expect(goalCreated[1]).toMatchObject({
+      block: { type: 'text', text: 'goal created' },
+    })
+
+    const action = await collect(adapter.stream(requests[2]!))
+    expect(action[1]).toMatchObject({
+      block: {
+        type: 'tool-call',
+        id: 'tianwen-phase2-action',
+        name: 'tianwen_smoke_action',
+        arguments: '{}',
+      },
+    })
+
+    const finished = await collect(adapter.stream(requests[3]!))
+    expect(finished[1]).toMatchObject({
+      block: { type: 'text', text: 'TIANWEN_PHASE2_OK' },
+    })
+
+    await expect(collect(adapter.stream(requests[3]!))).rejects.toThrow(
+      'phase 2 smoke script exhausted',
+    )
   })
 
   it('bundles Tianwen code and leaves only Cordis as a package external', () => {
@@ -117,6 +261,36 @@ describe('@tianwen/runtime-bundle', () => {
     expect(source).not.toContain('@tianwen/dsh-probe-bundle')
   })
 
+  it('bundles the smoke entry with only its two public DSH externals', () => {
+    const source = readFileSync(resolve(packageRoot, 'dist/smoke.js'), 'utf8')
+    const metafile = json(resolve(packageRoot, 'dist/smoke.meta.json')) as {
+      inputs: Record<string, unknown>
+      outputs: Record<string, { imports: { path: string; external?: boolean }[] }>
+    }
+    const output = Object.entries(metafile.outputs).find(([path]) =>
+      path.replaceAll('\\', '/').endsWith('/dist/smoke.js')
+      || path.replaceAll('\\', '/').endsWith('dist/smoke.js'))?.[1]
+    expect(output).toBeDefined()
+    const packageExternals = output!.imports
+      .filter(item => item.external === true && !item.path.startsWith('node:'))
+      .map(item => item.path)
+      .sort()
+    expect(packageExternals).toEqual([
+      '@deepseek-ai/dsh-llm',
+      '@deepseek-ai/dsh-tools',
+    ])
+    expect(Object.keys(metafile.inputs).filter(input =>
+      !isAllowedSmokeInput(input))).toEqual([])
+    expect(Object.keys(metafile.inputs)).toHaveLength(1)
+    expect(Object.keys(metafile.inputs).some(path =>
+      /node_modules[\\/]@deepseek-ai/u.test(path))).toBe(false)
+    expect(Object.keys(metafile.inputs).some(path =>
+      /scripted-adapter|test-harness|dsh-probe-bundle|native-addon/u.test(path))).toBe(false)
+    expect(source).not.toMatch(/from\s+["']@tianwen\//u)
+    expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
+    expect(source).not.toMatch(/scripted-adapter|test-harness|dsh-probe-bundle|native-addon/u)
+  })
+
   it('packs only the deployable runtime bundle files', () => {
     expect(existsSync(archive)).toBe(true)
     const entries = execFileSync(tar, ['-tzf', archive], {
@@ -131,6 +305,7 @@ describe('@tianwen/runtime-bundle', () => {
       'package/dist/index.d.ts',
       'package/dist/index.js',
       'package/dist/runtime.js',
+      'package/dist/smoke.js',
       'package/package.json',
     ])
     expect(entries.some(entry => /(^|\/)src\//u.test(entry))).toBe(false)
