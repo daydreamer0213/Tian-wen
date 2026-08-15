@@ -383,8 +383,8 @@ The test must use three fresh Contexts:
 3. Context 2 mounts the round driver, resumes the JSONL Session with the Goal
    disarmed, proves zero model requests, then explicitly resumes the Goal and
    executes one fixed `echo` call;
-4. Context 2 projects exactly one complete Evidence record and verifies private
-   input/result text is absent;
+4. Context 2 projects exactly two complete Evidence records—`create_goal` and
+   `echo`—and verifies private input/result text is absent;
 5. Context 3 resumes the same JSONL Session without a model request and compares
    canonical Evidence bytes with Context 2.
 
@@ -472,11 +472,24 @@ Core assertions:
 ```ts
 const before = second.ctx.tianwenEvidence.project(resumed.agent.session)
 const beforeBytes = JSON.stringify(before)
-expect(before).toHaveLength(1)
-expect(before[0]).toMatchObject({
+expect(before).toHaveLength(2)
+expect(before.map(record => record.action.toolName)).toEqual([
+  'create_goal',
+  'echo',
+])
+expect(before.map(record => record.outcome.status)).toEqual([
+  'complete',
+  'complete',
+])
+const echoEvidence = before.find(
+  record => record.action.callId === 'phase1-call',
+)
+expect(echoEvidence).toMatchObject({
   action: { callId: 'phase1-call', toolName: 'echo' },
   outcome: { status: 'complete' },
 })
+expect(beforeBytes).not.toContain('prove the Phase 1 runtime slice')
+expect(beforeBytes).not.toContain('create the migration goal')
 expect(beforeBytes).not.toContain('private argument')
 expect(beforeBytes).not.toContain('private result')
 

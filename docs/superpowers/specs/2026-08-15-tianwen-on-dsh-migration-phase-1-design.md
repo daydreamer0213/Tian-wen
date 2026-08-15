@@ -161,10 +161,11 @@ Phase 1 应停止在“workspace 可加载的正式 Bundle”并记录发布打�
 
 ### 5.2 执行与证据
 
-1. 直接人类来源创建顶层 Goal；
-2. Agent 执行一个确定性工具调用；
-3. DSH Session 保存原始 call/result；
-4. Tianwen Evidence 只保存 event 定位、工具名和参数/结果摘要；
+1. 直接人类来源通过公开 `create_goal` 工具创建顶层 Goal；
+2. Agent 再执行一个确定性的 `echo` 工具调用；
+3. DSH Session 保存两次正式工具调用的原始 call/result；
+4. Tianwen Evidence 为 `create_goal` 和 `echo` 各保留一条 event 定位、
+   工具名和参数/结果摘要，不能为了只看业务工具而丢掉 Goal 创建事实；
 5. Evidence 不复制原始用户消息、参数或结果。
 
 ### 5.3 Python A1 独立评测合同
@@ -235,7 +236,7 @@ Phase 1 新增四层验证。
 - 直接人类来源 Goal 可执行；
 - 恢复后 Goal `disarmed`；
 - 显式 resume 前模型请求为 0；
-- 一个真实工具 call/result 形成一条稳定 Evidence；
+- `create_goal` 与后续真实工具 call/result 各形成一条稳定 Evidence；
 - Context 重启后 Evidence canonical bytes 不变。
 
 ### 7.3 Evaluator / Evolution 同环境测试
