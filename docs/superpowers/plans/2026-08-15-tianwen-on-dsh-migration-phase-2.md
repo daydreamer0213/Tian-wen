@@ -326,11 +326,14 @@ Create `profiles/tianwen/cordis.patch.yml` with exactly these four operations:
     evolutionRoot: 'D:/DevData/tianwen/state/evolution'
 
 - insert:
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+
     - id: tianwen-phase2-smoke
       name: '@tianwen/runtime-bundle/smoke'
 ```
 
-Do not add model credentials, permissions, sandbox overrides, Goal objective, extra Tools, UI, Web/TUI, telemetry, or Dynamic/Evolution actions. Correctness is proven through the installed manifest and public DSH `--dump-config`, not by comparing this file's formatting.
+The public runner row satisfies the existing Runtime/Evolution `dynamicCordisRunner` inject; it is part of the same fourth `insert` operation and does not add a fourth Bundle layer. Do not add model credentials, permissions, sandbox overrides, Goal objective, extra Tools, UI, Web/TUI, telemetry, or Dynamic/Evolution actions. Correctness is proven through the installed manifest and public DSH `--dump-config`, not by comparing this file's formatting.
 
 - [ ] **Step 4: Keep the opt-in process helpers minimal and file-local**
 
@@ -443,7 +446,7 @@ This is the sole accepted upstream Windows plugin-install exception. The exact b
 3. require Bundle order exactly `[@deepseek-ai/dsh-base, @deepseek-ai/dsh-headless, @tianwen/runtime-bundle]`;
 4. require the installed Runtime dependency to refer to the current-run archive and both base/headless dependencies to be exact rc.6;
 5. require the installed `pnpm-workspace.yaml` still holds the exact `koffi: 3.1.4` override and five `allowBuilds: false` decisions above;
-6. run exact DSH `--profile tianwen --dump-config` and require the default route, plain JSONL config, Runtime evolution root, and smoke export at their exact row IDs;
+6. run exact DSH `--profile tianwen --dump-config` and require the default route, plain JSONL config, public Cordis host runner, Runtime evolution root, and smoke export at their exact row IDs;
 7. resolve/import `@tianwen/runtime-bundle/runtime`, `@tianwen/runtime-bundle/smoke`, and every Runtime Bundle manifest external from the installed Runtime Bundle package anchor.
 
 Do not reuse the `tianwen-probe` Profile, `verify-dsh-profile.mjs`, or `@tianwen/dsh-probe-bundle`.
@@ -567,7 +570,7 @@ git diff --check
 
 - [ ] **Step 8: Request fresh scoped review and commit Task 2**
 
-Reviewer must confirm the public CLI path is real, default gate is side-effect free, Profile has exact layers, probe dependencies are absent, only the fixed upstream install exception uses shell, Session/Goal/Evidence come from durable events, receipt is not stale, Evolution remains unchanged, and no generic framework was added.
+Reviewer must confirm the public CLI path is real, default gate is side-effect free, Profile has exact layers, the public Cordis host runner satisfies Runtime/Evolution without another layer, probe dependencies are absent, only the fixed upstream install exception uses shell, Session/Goal/Evidence come from durable events, receipt is not stale, Evolution remains unchanged, and no generic framework was added.
 
 After C0/I0:
 

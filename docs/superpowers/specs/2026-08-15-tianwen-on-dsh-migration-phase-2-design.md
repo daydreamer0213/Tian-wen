@@ -175,6 +175,7 @@ Runtime Bundle 的默认产品补丁继续只挂载 Runtime。`tianwen` Profile 
 受信任 patch 才负责：
 
 - 把 `agent-default-model` 指向 `tianwen-offline/phase2-smoke`；
+- 挂载 Runtime/Evolution 已依赖的 DSH 公共 `dsh-cordis-host-runner` 服务；
 - 插入 Runtime Bundle 的 smoke 子入口；
 - 把 Runtime 的 `evolutionRoot` 覆盖为正式 D 盘状态根。
 
