@@ -46,6 +46,17 @@ function isAllowedSmokeInput(input: string): boolean {
   return posix.normalize(input.replaceAll('\\', '/')) === 'src/smoke.ts'
 }
 
+function isAllowedStatusInput(input: string): boolean {
+  const path = posix.normalize(input.replaceAll('\\', '/'))
+  return path === 'src/status.ts'
+    || path === '../tianwen-evidence/dist/projector.js'
+}
+
+function isAllowedCliInput(input: string): boolean {
+  const path = posix.normalize(input.replaceAll('\\', '/'))
+  return path === 'src/cli.ts' || isAllowedStatusInput(path)
+}
+
 describe('runtime metafile input allowlist', () => {
   it.each([
     '../unrelated-workspace/dist/index.js',
@@ -84,27 +95,37 @@ describe('@tianwen/runtime-bundle', () => {
       dependencies: Record<string, string>
       devDependencies: Record<string, string>
       exports: Record<string, unknown>
+      bin: Record<string, string>
     }
     expect(manifest.name).toBe('@tianwen/runtime-bundle')
+    expect(manifest.bin).toEqual({ tianwen: 'dist/cli.js' })
     expect(manifest.dependencies).toEqual({
       '@deepseek-ai/cordis': '4.0.1',
+      '@deepseek-ai/dsh-goal': '0.1.0-rc.6',
       '@deepseek-ai/dsh-llm': '0.1.0-rc.6',
+      '@deepseek-ai/dsh-session': '0.1.0-rc.6',
+      '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.0-rc.6',
       '@deepseek-ai/dsh-tools': '0.1.0-rc.6',
     })
     expect(Object.keys(manifest.dependencies)).not.toContainEqual(
       expect.stringMatching(/^@tianwen\//u),
     )
     expect(manifest.devDependencies).toMatchObject({
+      '@tianwen/evidence': 'workspace:*',
       '@tianwen/runtime': 'workspace:*',
       esbuild: '0.28.2',
     })
     expect(manifest.exports).toHaveProperty('./runtime')
     expect(manifest.exports).toHaveProperty('./smoke')
+    expect(manifest.exports).toHaveProperty('./status')
     expect(manifest.files).toEqual([
       'dist/index.js',
       'dist/index.d.ts',
       'dist/runtime.js',
       'dist/smoke.js',
+      'dist/status.js',
+      'dist/status.d.ts',
+      'dist/cli.js',
       'cordis.patch.yml',
     ])
   })
@@ -119,7 +140,10 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.files).toContain('dist/smoke.js')
     expect(manifest.dependencies).toEqual({
       '@deepseek-ai/cordis': '4.0.1',
+      '@deepseek-ai/dsh-goal': '0.1.0-rc.6',
       '@deepseek-ai/dsh-llm': '0.1.0-rc.6',
+      '@deepseek-ai/dsh-session': '0.1.0-rc.6',
+      '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.0-rc.6',
       '@deepseek-ai/dsh-tools': '0.1.0-rc.6',
     })
 
@@ -347,6 +371,34 @@ describe('@tianwen/runtime-bundle', () => {
     expect(source).not.toMatch(/scripted-adapter|test-harness|dsh-probe-bundle|native-addon/u)
   })
 
+  it.each([
+    ['status', isAllowedStatusInput],
+    ['cli', isAllowedCliInput],
+  ] as const)('bundles the %s entry through public DSH roots', (entry, allowed) => {
+    const source = readFileSync(resolve(packageRoot, `dist/${entry}.js`), 'utf8')
+    const metafile = json(resolve(packageRoot, `dist/${entry}.meta.json`)) as {
+      inputs: Record<string, unknown>
+      outputs: Record<string, { imports: { path: string; external?: boolean }[] }>
+    }
+    const output = Object.entries(metafile.outputs).find(([path]) =>
+      path.replaceAll('\\', '/').endsWith(`dist/${entry}.js`))?.[1]
+    expect(output).toBeDefined()
+    expect(output!.imports
+      .filter(item => item.external === true && !item.path.startsWith('node:'))
+      .map(item => item.path)
+      .sort()).toEqual([
+      '@deepseek-ai/cordis',
+      '@deepseek-ai/dsh-goal',
+      '@deepseek-ai/dsh-session',
+      '@deepseek-ai/dsh-session-persistence-jsonl',
+    ])
+    expect(Object.keys(metafile.inputs).filter(input => !allowed(input)))
+      .toEqual([])
+    expect(source).not.toMatch(/from\s+["']@tianwen\//u)
+    expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
+    expect(source).not.toMatch(/scripted-adapter|test-harness|dsh-probe-bundle/u)
+  })
+
   it('packs only the deployable runtime bundle files', () => {
     expect(existsSync(archive)).toBe(true)
     const entries = execFileSync(tar, ['-tzf', archive], {
@@ -358,10 +410,13 @@ describe('@tianwen/runtime-bundle', () => {
       .sort()
     expect(entries).toEqual([
       'package/cordis.patch.yml',
+      'package/dist/cli.js',
       'package/dist/index.d.ts',
       'package/dist/index.js',
       'package/dist/runtime.js',
       'package/dist/smoke.js',
+      'package/dist/status.d.ts',
+      'package/dist/status.js',
       'package/package.json',
     ])
     expect(entries.some(entry => /(^|\/)src\//u.test(entry))).toBe(false)

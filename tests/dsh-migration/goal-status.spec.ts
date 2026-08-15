@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { execFileSync, spawnSync } from 'node:child_process'
 import {
   mkdirSync,
   mkdtempSync,
@@ -29,6 +30,7 @@ import {
 } from '../../packages/tianwen-runtime-bundle/src/status.js'
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-goal-status-tests')
+const CLI = resolve('packages/tianwen-runtime-bundle/dist/cli.js')
 
 interface Fixture {
   readonly dataDir: string
@@ -160,6 +162,60 @@ function addChampion(evolutionRoot: string): {
 }
 
 describe('Tianwen read-only Goal status', () => {
+  it('prints deterministic text and JSON through the status CLI', async () => {
+    const fixture = await createFixture({ withEvidence: false })
+    try {
+      const text = execFileSync(process.execPath, [
+        CLI, 'status', '--goal', fixture.goalId, '--data-dir', fixture.dataDir,
+      ], { encoding: 'utf8' })
+      expect(text).toBe([
+        `Goal ${fixture.goalId} [active]`,
+        'Objective: Show durable Tianwen progress',
+        'Progress: 0/3 rounds',
+        `Session: ${fixture.sessionId} (1 event)`,
+        'Evidence: 0 total (0 complete, 0 missing-result)',
+        'Champion: none',
+        'Runtime: not-loaded; read-only; 0 model requests',
+        '',
+      ].join('\n'))
+      const json = execFileSync(process.execPath, [
+        CLI, 'status', '--goal', fixture.goalId, '--data-dir', fixture.dataDir, '--json',
+      ], { encoding: 'utf8' })
+      expect(JSON.parse(json)).toEqual(expect.objectContaining({
+        schemaVersion: 'tianwen.goal-status.v1',
+        goal: expect.objectContaining({ id: fixture.goalId }),
+      }))
+      expect(execFileSync(process.execPath, [
+        CLI, 'status', '--goal', fixture.goalId, '--data-dir', fixture.dataDir, '--json',
+      ], { encoding: 'utf8' })).toBe(json)
+      expect(json.endsWith('\n')).toBe(true)
+      expect(json).not.toContain(fixture.dataDir)
+    } finally {
+      rmSync(fixture.dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('uses stable nonzero exits for usage and not-found CLI errors', () => {
+    for (const [args, exit, stderr] of [
+      [['status'], 2, 'Usage:'],
+      [[
+        'status', '--goal', 'missing', '--data-dir', FIXTURE_BASE,
+      ], 3, 'Goal not found: missing'],
+      [[
+        'status', '--goal', 'a', '--data-dir', FIXTURE_BASE, '--json', 'extra',
+      ], 2, 'Usage:'],
+    ] as const) {
+      const result = spawnSync(process.execPath, [CLI, ...args], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      expect(result.status).toBe(exit)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toContain(stderr)
+      expect(result.stderr).not.toContain(FIXTURE_BASE)
+    }
+  })
+
   it('projects durable Goal, Evidence and Champion without changing one byte', async () => {
     const fixture = await createFixture()
     try {

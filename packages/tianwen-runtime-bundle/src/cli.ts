@@ -1,0 +1,103 @@
+#!/usr/bin/env node
+
+import { isAbsolute, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { parseArgs } from 'node:util'
+
+import {
+  GoalStatusAmbiguousError,
+  GoalStatusIntegrityError,
+  GoalStatusNotFoundError,
+  readGoalStatus,
+} from './status.js'
+import type { GoalStatusProjection } from './status.js'
+
+const USAGE = 'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]\n'
+
+function formatText(status: GoalStatusProjection): string {
+  const eventLabel = status.session.eventCount === 1 ? 'event' : 'events'
+  const lines = [
+    `Goal ${status.goal.id} [${status.goal.phase}]`,
+    `Objective: ${status.goal.objective}`,
+    `Progress: ${status.goal.roundsStarted}/${status.goal.maxGoalRounds} rounds`,
+    `Session: ${status.session.id} (${status.session.eventCount} ${eventLabel})`,
+    `Evidence: ${status.evidence.total} total (${status.evidence.counts.complete} complete, ${status.evidence.counts['missing-result']} missing-result)`,
+    ...status.evidence.items.map(
+      item => `  - ${item.toolName}: ${item.status}`,
+    ),
+    status.champion === null
+      ? 'Champion: none'
+      : `Champion: ${status.champion.artifactId} revision ${status.champion.revision}`,
+    'Runtime: not-loaded; read-only; 0 model requests',
+  ]
+  return `${lines.join('\n')}\n`
+}
+
+export async function main(args = process.argv.slice(2)): Promise<number> {
+  let values: {
+    readonly goal?: string
+    readonly 'data-dir'?: string
+    readonly json?: boolean
+  }
+  let positionals: string[]
+  try {
+    const parsed = parseArgs({
+      args,
+      allowPositionals: true,
+      strict: true,
+      options: {
+        goal: { type: 'string' },
+        'data-dir': { type: 'string' },
+        json: { type: 'boolean', default: false },
+      },
+    })
+    values = parsed.values
+    positionals = parsed.positionals
+  } catch {
+    process.stderr.write(USAGE)
+    return 2
+  }
+  if (
+    positionals.length !== 1 ||
+    positionals[0] !== 'status' ||
+    values.goal === undefined ||
+    values.goal.length === 0 ||
+    values['data-dir'] === undefined ||
+    !isAbsolute(values['data-dir'])
+  ) {
+    process.stderr.write(USAGE)
+    return 2
+  }
+
+  try {
+    const status = await readGoalStatus({
+      goalId: values.goal,
+      dataDir: values['data-dir'],
+    })
+    process.stdout.write(values.json
+      ? `${JSON.stringify(status)}\n`
+      : formatText(status))
+    return 0
+  } catch (error) {
+    if (error instanceof GoalStatusNotFoundError) {
+      process.stderr.write(`${error.message}\n`)
+      return 3
+    }
+    if (
+      error instanceof GoalStatusAmbiguousError ||
+      error instanceof GoalStatusIntegrityError
+    ) {
+      process.stderr.write(`Error: ${error.message}\n`)
+      return 1
+    }
+    process.stderr.write('Error: unable to read Goal status\n')
+    return 1
+  }
+}
+
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+) {
+  process.exitCode = await main()
+}

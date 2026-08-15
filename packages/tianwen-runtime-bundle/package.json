@@ -5,6 +5,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "tianwen": "dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -15,6 +18,10 @@
     },
     "./smoke": {
       "default": "./dist/smoke.js"
+    },
+    "./status": {
+      "types": "./dist/status.d.ts",
+      "default": "./dist/status.js"
     }
   },
   "files": [
@@ -22,6 +29,9 @@
     "dist/index.d.ts",
     "dist/runtime.js",
     "dist/smoke.js",
+    "dist/status.js",
+    "dist/status.d.ts",
+    "dist/cli.js",
     "cordis.patch.yml"
   ],
   "dsh": {
@@ -43,7 +53,7 @@
     "esbuild": "0.28.2"
   },
   "scripts": {
-    "build": "tsc -b && esbuild src/runtime.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/runtime --metafile=dist/runtime.meta.json --outfile=dist/runtime.js && esbuild src/smoke.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/smoke.meta.json --outfile=dist/smoke.js",
+    "build": "tsc -b && esbuild src/runtime.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/runtime --metafile=dist/runtime.meta.json --outfile=dist/runtime.js && esbuild src/smoke.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/smoke.meta.json --outfile=dist/smoke.js && esbuild src/status.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/status.meta.json --outfile=dist/status.js && esbuild src/cli.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/cli.meta.json --outfile=dist/cli.js",
     "typecheck": "tsc -b --pretty false"
   }
 }

@@ -6,7 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { foldGoal } from '@deepseek-ai/dsh-goal'
 import SessionStore from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import { projectEvidence } from '@tianwen/evidence'
+import { projectEvidence } from '@tianwen/evidence/projector'
 
 const UTF8 = new TextDecoder('utf-8', { fatal: true })
 const ARTIFACT_ID = /^artifact:[0-9a-f]{64}$/u
