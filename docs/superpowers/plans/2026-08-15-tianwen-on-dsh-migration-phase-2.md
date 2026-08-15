@@ -285,11 +285,29 @@ git commit -m 'feat: add fixed tianwen startup smoke entry'
 - Produces: installed formal Profile at `D:\DevData\tianwen\dsh-home\profiles\tianwen` and atomic run receipt `D:\DevData\tianwen\receipts\phase2-startup-receipt.json`.
 - Real gate: `TIANWEN_DSH_PHASE2_STARTUP=1 pnpm exec vitest run tests/dsh-migration/tianwen-startup.e2e.spec.ts`.
 
-- [ ] **Step 1: Write the failing formal Profile tests**
+- [ ] **Step 1: Write the complete opt-in E2E test before the Profile exists**
 
-Create `tests/dsh-migration/tianwen-startup.e2e.spec.ts` with one always-on authored-contract test and two opt-in tests.
+Create `tests/dsh-migration/tianwen-startup.e2e.spec.ts` with exactly two opt-in behavior tests. Both use `it.runIf(enabled)` so the default suite discovers the file without installing a Profile or starting DSH.
 
-The always-on test reads `profiles/tianwen/cordis.patch.yml` and requires exact text equivalent to:
+The first test writes a stale receipt, calls the startup helper with a deliberately missing exact Corepack path, and requires nonzero failure before DSH plus `receipt absent`.
+
+The second test performs the real install/run and asserts the installed Profile manifest, public DSH `--dump-config`, headless exit, durable Session events, Goal, Evidence, unchanged Evolution state, and receipt contract described in Steps 4–6. Write the complete test and its small file-local helpers now; do not create the production Profile patch yet. The test must not compare YAML source text or use a source-grep/change-detector assertion.
+
+- [ ] **Step 2: Run the explicit gate and record a behavior-level RED**
+
+```powershell
+$env:TIANWEN_DSH_PHASE2_STARTUP='1'
+$env:PNPM_CONFIG_STORE_DIR='D:\DevData\pnpm-store'
+$env:PNPM_CONFIG_VIRTUAL_STORE_DIR='D:\DevData\tianwen-phase2\workspace-virtual-store'
+pnpm exec vitest run tests/dsh-migration/tianwen-startup.e2e.spec.ts
+Remove-Item Env:TIANWEN_DSH_PHASE2_STARTUP -ErrorAction SilentlyContinue
+```
+
+Expected: the stale-receipt fail-closed test passes and the real behavior test fails only because `profiles/tianwen/cordis.patch.yml` is absent. The failure must occur before Profile installation, DSH boot, model request, or network call. A TypeScript/import/setup failure is not a valid RED.
+
+- [ ] **Step 3: Add the exact authored Profile patch**
+
+Create `profiles/tianwen/cordis.patch.yml` with exactly these four operations:
 
 ```yaml
 - id: agent-default-model
@@ -311,26 +329,9 @@ The always-on test reads `profiles/tianwen/cordis.patch.yml` and requires exact 
       name: '@tianwen/runtime-bundle/smoke'
 ```
 
-The first opt-in test writes a stale receipt, calls the startup helper with a deliberately missing exact Corepack path, and requires nonzero failure before DSH plus `receipt absent`.
+Do not add model credentials, permissions, sandbox overrides, Goal objective, extra Tools, UI, Web/TUI, telemetry, or Dynamic/Evolution actions. Correctness is proven through the installed manifest and public DSH `--dump-config`, not by comparing this file's formatting.
 
-The second opt-in test performs the real install/run and asserts the receipt contract below. With Task 1 committed but no Profile patch/helper, the always-on test must fail because the Profile file is missing; this is the valid RED.
-
-- [ ] **Step 2: Run the focused default test and record RED**
-
-```powershell
-Remove-Item Env:TIANWEN_DSH_PHASE2_STARTUP -ErrorAction SilentlyContinue
-pnpm exec vitest run tests/dsh-migration/tianwen-startup.e2e.spec.ts
-```
-
-Expected: FAIL only because `profiles/tianwen/cordis.patch.yml` is absent. No Profile installation, DSH boot, model request, or network call occurs.
-
-- [ ] **Step 3: Add the exact authored Profile patch**
-
-Create `profiles/tianwen/cordis.patch.yml` with the exact four operations shown in Step 1. Do not add model credentials, permissions, sandbox overrides, Goal objective, extra Tools, UI, Web/TUI, telemetry, or Dynamic/Evolution actions.
-
-Run the default focused test again. Expected: authored-contract test passes; real tests are planned skips.
-
-- [ ] **Step 4: Implement the minimal opt-in process helpers in the E2E test**
+- [ ] **Step 4: Keep the opt-in process helpers minimal and file-local**
 
 Keep all acceptance-only process code inside `tests/dsh-migration/tianwen-startup.e2e.spec.ts`; do not create an installer framework.
 
@@ -400,7 +401,7 @@ Before any child process:
 
 No path, executable, package spec, Profile name, task, provider, model, or argv is accepted from caller input.
 
-- [ ] **Step 5: Implement one fixed offline Profile installation**
+- [ ] **Step 5: Use one fixed offline Profile installation path**
 
 Use exact pnpm mjs through `process.execPath` and `shell: false` to build/pack Task 1. Then invoke exact DSH `lib/bin.js` through `process.execPath` with:
 
@@ -425,7 +426,7 @@ This is the sole accepted upstream Windows plugin-install exception. After exit 
 
 Do not reuse the `tianwen-probe` Profile, `verify-dsh-profile.mjs`, or `@tianwen/dsh-probe-bundle`.
 
-- [ ] **Step 6: Run the real public headless task and validate durable authority**
+- [ ] **Step 6: Validate the real public headless task and durable authority**
 
 Record the set of `session.jsonl` files, then run:
 
@@ -519,7 +520,7 @@ Remove-Item Env:TIANWEN_DSH_PHASE2_STARTUP -ErrorAction SilentlyContinue
 pnpm exec vitest run tests/dsh-migration/tianwen-startup.e2e.spec.ts
 ```
 
-Expected: authored contract passes; two real tests are planned skips.
+Expected: the two real tests are planned skips and no Profile, Session, or receipt is changed.
 
 Explicit, strictly once after the implementation is ready:
 
