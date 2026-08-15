@@ -9,7 +9,7 @@ This handoff does **not** perform a migration cutover. It does not push the bran
 ## Exact Git receipt
 
 - Exact starting SHA: `3daf3f05ba36b4db0d15020afa1978465181e5da`.
-- Reviewed final-code SHA: `7d7a03559618506887c48fc061c685ec726a9a58`.
+- Reviewed final-code SHA: `985edea6a94f6d8026310bcf078deaef3efe5ab6`.
 - Branch: `codex/tianwen-dsh-migration-phase-1`.
 - The documentation commit containing this file is the direct successor of the final-code SHA. Because a commit cannot contain its own SHA, obtain that value from `git log -1 --format=%H` or the controller's final receipt.
 
@@ -23,6 +23,7 @@ Task commits, in order:
 | Task 2 repair 2 | `0ee7c5e336da7b2ac9b38e9e37bdc56e69e421e5` | `test: complete the runtime profile proof` — closes remaining report retention and forbidden-reference authority gaps. |
 | Task 2 repair 3 | `1d4100e946c01405c417ccb9675f155ae6b5134e` | `test: lock runtime bundle shipment evidence` — locks the complete shipped-text scan and fixed System32 tar boundary. |
 | Final Task 3 repair | `7d7a03559618506887c48fc061c685ec726a9a58` | `fix: clear stale profile reports before preflight` — fail-closes canonical Profile reports before probe-root validation. |
+| Whole-branch shipment proof repair | `985edea6a94f6d8026310bcf078deaef3efe5ab6` | `test: prove bundled runtime composition` — executes bundled `apply` composition and fail-closes the exact metafile input allowlist. |
 
 ## RED/GREEN evidence
 
@@ -46,9 +47,15 @@ Final repair:
 - RED: after a prior success, a migration invocation with empty `TIANWEN_DSH_PROBE_ROOT` exited 1 but left the stale success report; focused result was 1 failed, 4 passed, 1 skipped.
 - GREEN: Windows clears only the mode-specific canonical report before `requireProbeRoot()`; validated-root cleanup and atomic successful publication remain. Focused migration result was 5 passed, 1 skipped; default/Profile regression was 11 passed, 3 skipped.
 
-## Fresh final-code gates at `7d7a035`
+Final whole-branch shipment proof:
 
-Every gate ran once, strictly serially, after the final repair. The fixed Python evaluator was `D:\DevData\tianwen-dsh-probe\venv-task-6\Scripts\python.exe`; pnpm stores, virtual store, caches, TEMP/TMP, uv cache, project environment, and probe root were explicitly on `D:\DevData`.
+- Metafile allowlist RED: four negative cases—an unrelated workspace input, `node_modules` input, native-addon input, and test-helper input—failed before the exact helper existed; result was 4 failed, 3 skipped. GREEN: the complete Runtime Bundle file passed all 7 allowlist cases.
+- Bundled-composition mutation RED: a temporary uncommitted no-op mutation in generated `dist/runtime.js` failed the first service assertion because `ctx.tianwenEvidence` was undefined; result was 1 failed, 7 skipped. The generated file was restored immediately with no remaining diff. Restored GREEN: the complete Runtime Bundle file passed 8 tests.
+- Focused serial GREEN after restoration: Runtime Bundle 8 passed; default Profile 3 passed and 3 planned skips; runtime composition 2 passed; aggregate 13 passed and 3 planned skips.
+
+## Fresh final-code gates at `985edea`
+
+Every gate ran once, strictly serially, after the whole-branch shipment proof repair. The fixed Python evaluator was `D:\DevData\tianwen-dsh-probe\venv-task-6\Scripts\python.exe`; pnpm stores, virtual store, caches, TEMP/TMP, uv cache, project environment, and probe root were explicitly on `D:\DevData`.
 
 | Gate | Final result |
 | --- | --- |
@@ -56,16 +63,16 @@ Every gate ran once, strictly serially, after the final repair. The fixed Python
 | DSH closure | exit 0; 187 packages exactly `0.1.0-rc.6`; 15 public surfaces |
 | Private imports | exit 0; 0 violations |
 | Typecheck | exit 0; clean |
-| Default Node suite | 13 files passed, 1 skipped; 74 tests passed, 6 planned skips |
+| Default Node suite | 13 files passed, 1 skipped; 79 tests passed, 6 planned skips |
 | Explicit migration Profile | 1 file passed; 5 tests passed, 1 planned skip; fresh report published |
 | Windows local sandbox | 1 file; 3 tests passed; enforcement remains `partial` |
 | Python A1–A5 author proof | 10 passed |
-| Foreground full Python | 424 passed, 4 planned skips in 210.63 s |
+| Foreground full Python | 424 passed, 4 planned skips in 208.81 s |
 | Ruff | exit 0; all checks passed |
 | `git diff --check 3daf3f0..HEAD` | exit 0; clean |
 | Pre-handoff `git status --short` | exit 0; empty |
 
-The four full-Python skips were the disabled paid live probe, two unsupported Windows symlink cases, and the separately tested Windows ACL case. No paid/live gate was enabled. Full logs are under `D:\DevData\tianwen-task3-final-gate-logs\phase-b-7d7a035596185068`.
+The four full-Python skips were the disabled paid live probe, two unsupported Windows symlink cases, and the separately tested Windows ACL case. No paid/live gate was enabled. Full logs are under `D:\DevData\tianwen-task3-final-gate-logs\final-release-985edea6a94f6d80`.
 
 ## Final artifacts and installed closure
 
@@ -112,8 +119,11 @@ The fresh report records zero interactive app starts, model requests, paid-model
 - Quality reviewer `01a005b1-89c0-7870-8ce3-19fe321d1f11`: initial **C0/I1/M0**, not approved. The sole Important issue was a stale success report surviving failure before `requireProbeRoot()` completed.
 - Final repair: `7d7a03559618506887c48fc061c685ec726a9a58`.
 - Same quality reviewer scoped re-review: **ADDRESSED**, C0/I0/M0, Ready yes. No new path broadening, mutable install input, shell change, cross-mode report deletion, or framework duplication was found.
+- Final whole-branch reviewer `01a005cd-f8f9-74c3-96c0-4d04eba8b076`: initial **C0/I2/M1**, Not ready. The two Important findings were missing bundled-`apply` execution proof and a non-exact metafile input allowlist; the Minor finding was a stale progress ledger.
+- Sole fix: `985edea6a94f6d8026310bcf078deaef3efe5ab6`, changing only `tests/dsh-migration/runtime-bundle.spec.ts`.
+- Same reviewer scoped re-review: both Important findings and the ledger Minor were **ADDRESSED**; **C0/I0/M0**, Ready Yes.
 
-Review source reports are git-ignored under `.superpowers/sdd/2026-08-15-tianwen-self-contained-runtime-bundle/`: `task-3-spec-review.md`, `task-3-quality-review.md`, `final-repair-report.md`, and `final-repair-rereview.md`.
+Review source reports are git-ignored under `.superpowers/sdd/2026-08-15-tianwen-self-contained-runtime-bundle/`: `task-3-spec-review.md`, `task-3-quality-review.md`, `final-repair-report.md`, `final-repair-rereview.md`, `final-whole-branch-review.md`, `final-whole-fix-report.md`, and `final-whole-rereview.md`.
 
 ## Remaining risks
 
