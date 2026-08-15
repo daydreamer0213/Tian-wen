@@ -494,6 +494,27 @@ Alpha-A 独立实施分支为：
 - 用户已开启目标模式，批准持续推进 Migration Phase 1；主控负责设计、
   计划、独立实施任务调度和验收，不亲自承担连续编码。
 
+- 因 Codex 派生任务权限继承不稳定，后续实施改为本回合 multi-agent 子代理；
+  主控只做架构、调度、验收；
+- Tianwen-on-DSH Migration Phase 1 Tasks 1–3 完成：薄 runtime、三 Context
+  Session/Goal/Tool/Evidence、Python A1 和 Cordis Plugin 独立治理；
+- migration 分支最终远端为 `3daf3f05ba36b4db0d15020afa1978465181e5da`；
+  canonical handoff 路径为
+  `docs/operations/tianwen-on-dsh-migration-phase-1-handoff.md`（在 migration 分支）；
+- final gates：Node 68/3、sandbox 3/3、Python A1 10、pytest 424/4、
+  Ruff/closure/private/typecheck/diff clean；settlement race test-only fix
+  `855cce4`，review C0/I0/M0；
+- Task 4 BLOCKED：私有 workspace 多包无法作为一个离线 DSH plugin tarball
+  闭合；所有实验 tracked 变化已清理、无 Task 4 产品 diff、Migration Profile
+  gate 未运行；
+- 待用户主权决策：A 发布/安装多包；B（推荐）构建一个自包含且 externalize
+  DSH 依赖的部署 Bundle。未批准前不实现、不把 Phase 1 称为完成；
+- main 规格已裁决 trusted absolute evolutionRoot：是已审核部署配置、非用户/模型
+  输入；Phase 1 实例仍使用 D 盘约定，不建设虚假 path sandbox。规格 commit
+  `4b72814`；
+- final whole-review narrow re-review 结论 READY_AS_BLOCKED_HANDOFF；不可 merge
+  as complete。
+
 当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
 
 本节是动态状态。以后实施进度变化时可以更新本节，但不得借此修改前面的稳定共识。
@@ -515,6 +536,7 @@ Alpha-A 独立实施分支为：
 - 最终用户界面采用 CLI、Codex 式任务面板、桌面应用还是渐进组合；
 - 如何把执行证据转为元循环可用、同时保护隐私的最小投影；
 - 何时证明底层组件选择已经成为限制，需要移植或替换。
+- Phase 1 分发采用多包发布还是单体部署 Bundle（当前推荐后者）。
 
 讨论这些问题时，主控会话应先调研、解释和给出推荐，再邀请用户参与真正需要主权判断的部分。
 
