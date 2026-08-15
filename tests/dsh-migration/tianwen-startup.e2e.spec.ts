@@ -418,7 +418,14 @@ async function start(missingCorepack = false): Promise<void> {
     },
   })
   expect(snapshotState()).toEqual(stateBeforeStatus)
-  expect(readFileSync(created[0]!)).toEqual(sessionBeforeStatus)
+  const sessionAfterStatus = readFileSync(created[0]!)
+  expect(sessionAfterStatus).toEqual(sessionBeforeStatus)
+  const [, ...eventLinesAfterStatus] = sessionAfterStatus
+    .toString('utf8')
+    .trimEnd()
+    .split(/\r?\n/u)
+  const eventsAfterStatus = eventLinesAfterStatus
+    .map(line => JSON.parse(line) as SessionEvent)
   for (const secret of [taskText, 'phase2-smoke-action-ok', completeCallId]) {
     expect(statusRun.stdout).not.toContain(secret)
   }
@@ -464,7 +471,8 @@ async function start(missingCorepack = false): Promise<void> {
     goalId: finalGoal.id,
     sessionId: header.id,
     modelStepsBefore: 4,
-    modelStepsAfter: events.filter(event => event.type === 'step/start').length,
+    modelStepsAfter: eventsAfterStatus
+      .filter(event => event.type === 'step/start').length,
     stateUnchanged: true,
     evidence: status.evidence.items,
     champion: status.champion,

@@ -130,7 +130,7 @@ function canonicalLines(path: string): readonly Record<string, unknown>[] {
     if (
       typeof value.type !== 'string' ||
       !LEDGER_TYPES.has(value.type) ||
-      typeof value.at !== 'string'
+      !isCanonicalTimestamp(value.at)
     ) {
       throw new GoalStatusIntegrityError('ledger.jsonl contains an invalid event')
     }
@@ -140,12 +140,23 @@ function canonicalLines(path: string): readonly Record<string, unknown>[] {
 
 function exactKeys(
   value: Record<string, unknown>,
-  expected: readonly string[],
+  required: readonly string[],
+  optional: readonly string[] = [],
 ): boolean {
-  const keys = Object.keys(value).sort()
-  const sortedExpected = [...expected].sort()
-  return keys.length === expected.length &&
-    keys.every((key, index) => key === sortedExpected[index])
+  const allowed = new Set([...required, ...optional])
+  const keys = Object.keys(value)
+  return required.every(key => key in value) &&
+    keys.every(key => allowed.has(key))
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0
+}
+
+function isCanonicalTimestamp(value: unknown): value is string {
+  return typeof value === 'string' &&
+    !Number.isNaN(Date.parse(value)) &&
+    new Date(value).toISOString() === value
 }
 
 function readChampion(evolutionRoot: string): GoalStatusProjection['champion'] {
@@ -161,11 +172,15 @@ function readChampion(evolutionRoot: string): GoalStatusProjection['champion'] {
   }
 
   const artifacts = new Set<string>()
-  const metEvaluations = new Set<string>()
+  const evaluations = new Map<string, {
+    readonly receiptDigest: string
+    readonly verdict: string
+  }>()
   const approvals = new Map<string, string>()
   const usedApprovals = new Set<string>()
   const promoted = new Set<string>()
-  let last: GoalStatusProjection['champion'] = null
+  let lastArtifactId: string | undefined
+  let lastRevision = 0
   for (const event of canonicalLines(ledgerPath)) {
     if (event.type === 'artifact-recorded') {
       if (!exactKeys(event, ['type', 'at', 'artifact'])) {
@@ -220,11 +235,10 @@ function readChampion(evolutionRoot: string): GoalStatusProjection['champion'] {
       ) {
         throw new GoalStatusIntegrityError('ledger Evaluation record is invalid')
       }
-      if (evaluation.verdict === 'met') {
-        metEvaluations.add(
-          `${evaluation.artifactId}\0${evaluation.receiptDigest}`,
-        )
-      }
+      evaluations.set(evaluation.artifactId, {
+        receiptDigest: evaluation.receiptDigest,
+        verdict: String(evaluation.verdict),
+      })
       continue
     }
     if (event.type === 'approval-recorded') {
@@ -245,7 +259,87 @@ function readChampion(evolutionRoot: string): GoalStatusProjection['champion'] {
       approvals.set(approval.approvalId, approval.artifactId)
       continue
     }
-    if (event.type !== 'promoted' && event.type !== 'rolled-back') continue
+    if (event.type === 'runtime-bound') {
+      if (
+        !exactKeys(event, [
+          'type',
+          'at',
+          'artifactId',
+          'pluginId',
+          'packageId',
+        ]) ||
+        typeof event.artifactId !== 'string' ||
+        !ARTIFACT_ID.test(event.artifactId) ||
+        !artifacts.has(event.artifactId) ||
+        !isNonEmptyString(event.pluginId) ||
+        !isNonEmptyString(event.packageId)
+      ) {
+        throw new GoalStatusIntegrityError('ledger Runtime binding is invalid')
+      }
+      continue
+    }
+    if (event.type === 'activation-failed') {
+      if (
+        !exactKeys(
+          event,
+          ['type', 'at', 'artifactId', 'phase', 'message'],
+          ['receiptDigest', 'approvalId', 'pluginId', 'packageId'],
+        ) ||
+        typeof event.artifactId !== 'string' ||
+        !ARTIFACT_ID.test(event.artifactId) ||
+        !artifacts.has(event.artifactId) ||
+        !['promotion', 'rollback', 'rehydrate'].includes(String(event.phase)) ||
+        !isNonEmptyString(event.message) ||
+        (event.receiptDigest !== undefined &&
+          (typeof event.receiptDigest !== 'string' ||
+            !DIGEST.test(event.receiptDigest))) ||
+        (event.approvalId !== undefined &&
+          !isNonEmptyString(event.approvalId)) ||
+        ((event.receiptDigest === undefined) !==
+          (event.approvalId === undefined)) ||
+        (event.pluginId !== undefined && !isNonEmptyString(event.pluginId)) ||
+        (event.packageId !== undefined && !isNonEmptyString(event.packageId)) ||
+        ((event.pluginId === undefined) !== (event.packageId === undefined))
+      ) {
+        throw new GoalStatusIntegrityError('ledger activation failure is invalid')
+      }
+      if (event.receiptDigest !== undefined && event.approvalId !== undefined) {
+        const evaluation = evaluations.get(event.artifactId)
+        if (
+          evaluation?.verdict !== 'met' ||
+          evaluation.receiptDigest !== event.receiptDigest ||
+          approvals.get(event.approvalId) !== event.artifactId ||
+          usedApprovals.has(event.approvalId)
+        ) {
+          throw new GoalStatusIntegrityError(
+            'ledger activation failure authority is invalid',
+          )
+        }
+        usedApprovals.add(event.approvalId)
+      }
+      continue
+    }
+    if (event.type === 'recovery-failed') {
+      if (
+        !exactKeys(event, [
+          'type',
+          'at',
+          'artifactId',
+          'previousArtifactId',
+          'message',
+        ]) ||
+        typeof event.artifactId !== 'string' ||
+        !ARTIFACT_ID.test(event.artifactId) ||
+        !artifacts.has(event.artifactId) ||
+        typeof event.previousArtifactId !== 'string' ||
+        !ARTIFACT_ID.test(event.previousArtifactId) ||
+        !artifacts.has(event.previousArtifactId) ||
+        !isNonEmptyString(event.message)
+      ) {
+        throw new GoalStatusIntegrityError('ledger recovery failure is invalid')
+      }
+      continue
+    }
     if (!exactKeys(event, [
       'type',
       'at',
@@ -256,34 +350,38 @@ function readChampion(evolutionRoot: string): GoalStatusProjection['champion'] {
     ])) {
       throw new GoalStatusIntegrityError('ledger Champion transition is invalid')
     }
+    const evaluation = typeof event.artifactId === 'string'
+      ? evaluations.get(event.artifactId)
+      : undefined
     if (
       typeof event.artifactId !== 'string' ||
       !ARTIFACT_ID.test(event.artifactId) ||
       !Number.isSafeInteger(event.revision) ||
-      (event.revision as number) !== (last?.revision ?? 0) + 1 ||
+      (event.revision as number) !== lastRevision + 1 ||
+      lastArtifactId === event.artifactId ||
       typeof event.receiptDigest !== 'string' ||
       !DIGEST.test(event.receiptDigest) ||
       typeof event.approvalId !== 'string' ||
       event.approvalId.length === 0 ||
       !artifacts.has(event.artifactId) ||
-      !metEvaluations.has(`${event.artifactId}\0${event.receiptDigest}`) ||
+      evaluation?.verdict !== 'met' ||
+      evaluation.receiptDigest !== event.receiptDigest ||
       approvals.get(event.approvalId) !== event.artifactId ||
       usedApprovals.has(event.approvalId) ||
+      (event.type === 'promoted' && promoted.has(event.artifactId)) ||
       (
         event.type === 'rolled-back' &&
-        (!promoted.has(event.artifactId) || last === null)
+        (!promoted.has(event.artifactId) || lastArtifactId === undefined)
       )
     ) {
       throw new GoalStatusIntegrityError('ledger Champion transition is invalid')
     }
     usedApprovals.add(event.approvalId)
-    if (event.type === 'promoted') promoted.add(event.artifactId)
-    last = {
-      artifactId: event.artifactId,
-      revision: event.revision as number,
-    }
+    promoted.add(event.artifactId)
+    lastArtifactId = event.artifactId
+    lastRevision = event.revision as number
   }
-  if (last === null) {
+  if (lastArtifactId === undefined) {
     if (hasPointer) {
       throw new GoalStatusIntegrityError(
         'champion.json exists without a ledger Champion',
@@ -310,14 +408,14 @@ function readChampion(evolutionRoot: string): GoalStatusProjection['champion'] {
     !isRecord(value) ||
     serialized !== `${JSON.stringify(value)}\n` ||
     !exactKeys(value, ['artifactId', 'revision']) ||
-    value.artifactId !== last.artifactId ||
-    value.revision !== last.revision
+    value.artifactId !== lastArtifactId ||
+    value.revision !== lastRevision
   ) {
     throw new GoalStatusIntegrityError(
       'champion.json disagrees with ledger replay',
     )
   }
-  return last
+  return { artifactId: lastArtifactId, revision: lastRevision }
 }
 
 export async function readGoalStatus(

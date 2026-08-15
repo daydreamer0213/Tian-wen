@@ -434,4 +434,97 @@ describe('Tianwen read-only Goal status', () => {
       rmSync(fixture.dataDir, { recursive: true, force: true })
     }
   })
+
+  it('rejects semantically invalid Champion ledger history', async () => {
+    const fixture = await createFixture({ withEvidence: false })
+    try {
+      const at = '2026-08-16T00:00:00.000Z'
+      const artifactId = `artifact:${'f'.repeat(64)}`
+      const metReceipt = `sha256:${'a'.repeat(64)}`
+      const laterReceipt = `sha256:${'b'.repeat(64)}`
+      const ledgerPath = join(fixture.evolutionRoot, 'ledger.jsonl')
+      const pointerPath = join(fixture.evolutionRoot, 'champion.json')
+      const staleEvaluationEvents = [
+        {
+          type: 'artifact-recorded',
+          at,
+          artifact: {
+            artifactId,
+            sourceDigest: `sha256:${'f'.repeat(64)}`,
+            createdAt: at,
+          },
+        },
+        {
+          type: 'evaluation-recorded',
+          at,
+          evaluation: {
+            artifactId,
+            receiptDigest: metReceipt,
+            verdict: 'met',
+          },
+        },
+        {
+          type: 'evaluation-recorded',
+          at,
+          evaluation: {
+            artifactId,
+            receiptDigest: laterReceipt,
+            verdict: 'not_met',
+          },
+        },
+        {
+          type: 'approval-recorded',
+          at,
+          approval: {
+            artifactId,
+            authority: 'human',
+            approvalId: 'stale-evaluation-approval',
+          },
+        },
+        {
+          type: 'promoted',
+          at,
+          artifactId,
+          revision: 1,
+          receiptDigest: metReceipt,
+          approvalId: 'stale-evaluation-approval',
+        },
+      ]
+      writeFileSync(
+        ledgerPath,
+        `${staleEvaluationEvents.map(event => JSON.stringify(event)).join('\n')}\n`,
+        'utf8',
+      )
+      writeFileSync(
+        pointerPath,
+        `${JSON.stringify({ artifactId, revision: 1 })}\n`,
+        'utf8',
+      )
+      await expect(readGoalStatus({
+        goalId: fixture.goalId,
+        dataDir: fixture.dataDir,
+      })).rejects.toBeInstanceOf(GoalStatusIntegrityError)
+
+      rmSync(fixture.evolutionRoot, { recursive: true, force: true })
+      mkdirSync(fixture.evolutionRoot, { recursive: true })
+      const champion = addChampion(fixture.evolutionRoot)
+      writeFileSync(
+        ledgerPath,
+        `${JSON.stringify({
+          type: 'runtime-bound',
+          at,
+          artifactId: champion.artifactId,
+          pluginId: '',
+          packageId: 'runtime-package',
+        })}\n`,
+        { encoding: 'utf8', flag: 'a' },
+      )
+      await expect(readGoalStatus({
+        goalId: fixture.goalId,
+        dataDir: fixture.dataDir,
+      })).rejects.toBeInstanceOf(GoalStatusIntegrityError)
+    } finally {
+      rmSync(fixture.dataDir, { recursive: true, force: true })
+    }
+  })
 })
