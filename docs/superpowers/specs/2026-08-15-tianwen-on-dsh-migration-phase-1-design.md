@@ -150,8 +150,14 @@ Phase 1 应停止在“workspace 可加载的正式 Bundle”并记录发布打�
 1. DSH base 创建 `Context`、Agent、Session、Goal 和工具能力；
 2. `@tianwen/runtime` 挂载 Evidence 与 Evolution；
 3. ScriptedAdapter 仅在测试 Profile 中提供确定性模型输出；
-4. 所有状态写入
-   `D:\DevData\tianwen-dsh-migration-phase-1` 的一次性子目录。
+4. Session、Evolution、缓存和临时状态写入
+   `D:\DevData\tianwen-dsh-migration-phase-1` 的一次性子目录；
+5. 现有 Python A1 bridge 的审计数据继续写入它已经冻结的
+   `D:\DevData\tianwen-dsh-probe` 权威根目录下的 Phase 1 子目录，
+   不为统一目录而修改已通过的 bridge 边界；
+6. 固定离线 Profile 安装继续使用已经审计的
+   `D:\DevData\tianwen-dsh-probe` Windows 控制面根目录，避免扩大唯一
+   上游 `shell: true` 例外；普通迁移状态不写入该目录。
 
 ### 5.2 执行与证据
 
