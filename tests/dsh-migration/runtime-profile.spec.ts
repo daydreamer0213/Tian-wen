@@ -60,7 +60,7 @@ describe('Tianwen Runtime Bundle Profile', () => {
       dockerInvocations: 0,
     })
     expect(report.composition.runtimeInstall).toMatchObject({
-      tarball: expect.objectContaining({ path: expect.stringContaining('tianwen-runtime-bundle-0.0.0.tgz'), sha256: expect.any(String) }),
+      tarball: expect.objectContaining({ path: expect.stringContaining('tianwen-runtime-bundle-0.0.0.tgz'), sha256: expect.any(String), executable: expect.stringMatching(/System32\\tar\.exe$/iu), argv: expect.any(Array) }),
       files: ['cordis.patch.yml', 'dist/index.d.ts', 'dist/index.js', 'dist/runtime.js', 'package.json'],
       forbiddenReferences: { passed: true },
     })

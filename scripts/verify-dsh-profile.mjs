@@ -521,9 +521,15 @@ export function assertNoRuntimeForbiddenReferences(sources) {
 }
 
 function tarballFiles(path) {
-  const result = spawnSync('tar', ['-tzf', path], { encoding: 'utf8', shell: false })
+  const candidate = process.platform === 'win32'
+    ? resolve(process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows', 'System32', 'tar.exe')
+    : (existsSync('/usr/bin/tar') ? '/usr/bin/tar' : '/bin/tar')
+  const executable = realpathSync(candidate)
+  requireAssertion(statSync(executable).isFile(), 'fixed tar executable is not a file')
+  const argv = ['-tzf', path]
+  const result = spawnSync(executable, argv, { encoding: 'utf8', shell: false })
   requireAssertion(result.status === 0, 'Runtime tarball cannot be listed')
-  return result.stdout.replaceAll('\r\n', '\n').split('\n').filter(Boolean).map(name => name.replace(/^package\//u, '')).sort()
+  return { executable, argv, files: result.stdout.replaceAll('\r\n', '\n').split('\n').filter(Boolean).map(name => name.replace(/^package\//u, '')).sort() }
 }
 
 async function main() {
@@ -673,8 +679,10 @@ async function main() {
     requireAssertion(JSON.stringify(runtimeFiles) === JSON.stringify(allowedRuntimeFiles), 'installed Runtime Bundle file set is not exact')
     const runtimePatchPath = resolve(runtimeRoot, 'cordis.patch.yml')
     const metaPath = resolve(repoRoot, 'packages/tianwen-runtime-bundle/dist/runtime.meta.json')
-    assertNoRuntimeForbiddenReferences([readFileSync(resolve(runtimeRoot, 'package.json')), readFileSync(metaPath), readFileSync(resolve(runtimeRoot, 'dist/runtime.js')), readFileSync(runtimePatchPath)])
-    const packedFiles = tarballFiles(runtimeTarball)
+    const runtimeTextFiles = allowedRuntimeFiles.map(file => readFileSync(resolve(runtimeRoot, file)))
+    assertNoRuntimeForbiddenReferences([readFileSync(metaPath), ...runtimeTextFiles])
+    const tarball = tarballFiles(runtimeTarball)
+    const packedFiles = tarball.files
     requireAssertion(JSON.stringify(packedFiles) === JSON.stringify(allowedRuntimeFiles), 'Runtime tarball file set is not exact')
     const authoredRuntimePatch = parseRuntimePatch(readFileSync(resolve(repoRoot, 'packages/tianwen-runtime-bundle/cordis.patch.yml'), 'utf8'))
     const installedRuntimePatch = parseRuntimePatch(readFileSync(resolve(runtimeRoot, 'cordis.patch.yml'), 'utf8'))
@@ -684,7 +692,7 @@ async function main() {
     const meta = JSON.parse(readFileSync(metaPath, 'utf8'))
     const external = [...new Set(meta.outputs['dist/runtime.js'].imports.filter(item => item.external && !item.path.startsWith('node:')).map(item => item.path))].sort()
     requireAssertion(JSON.stringify(external) === JSON.stringify(runtimeBundle.externalSpecifiers), 'Runtime metafile external closure differs from installed manifest')
-    runtimeBundle.install = { tarball: { path: runtimeTarball, sha256: sha256(readFileSync(runtimeTarball)), files: packedFiles }, files: runtimeFiles, forbiddenReferences: { passed: true }, external }
+    runtimeBundle.install = { tarball: { path: runtimeTarball, sha256: sha256(readFileSync(runtimeTarball)), files: packedFiles, executable: tarball.executable, argv: tarball.argv }, files: runtimeFiles, forbiddenReferences: { passed: true }, external }
   }
 
   const requireFromDsh = createRequire(realpathSync(resolve(
