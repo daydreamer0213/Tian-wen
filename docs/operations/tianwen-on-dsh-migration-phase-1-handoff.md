@@ -9,9 +9,9 @@ Task 4 is blocked at the distribution boundary: a private workspace multi-packag
 ## Exact baseline and branch receipt
 
 - Base: `1eef994a82c4ff39de311d5c2b61dff92bf94162`.
-- Pre-finalization local and remote HEAD: `855cce4384b153c1ced24a52ef375775139c47ad`.
+- Reviewed code-and-evidence snapshot: `4618deaa02780d2dd6aba4384431731681aefd51`; at review time local and remote matched this exact SHA and the worktree was clean.
 - Branch: `codex/tianwen-dsh-migration-phase-1`.
-- The finalization documentation commit and post-push remote SHA are recorded in the ignored Task 5 receipt after commit; this document is not amended to fabricate a self-reference.
+- This docs-only successor cannot write its own future commit SHA into itself. Verify the final branch tip after push with a fresh `git ls-remote` and Git history; the reviewed snapshot above is the direct audit record, not an ignored-report-only reference.
 
 Main-branch specification rulings are `fb497f316f9cadc9f65f4664005415bad0493428` (the in-repo evaluator source import governs; no root dependency is added for the test) and `81dbf36ec52663fd3dde464f27c38082750dec7b` (fresh Context bindings are authoritative; opaque rc.6 dynamic IDs may repeat across Contexts).
 
