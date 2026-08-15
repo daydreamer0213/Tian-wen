@@ -533,8 +533,14 @@ function tarballFiles(path) {
 }
 
 async function main() {
+  const reportBasename = migrationMode
+    ? 'migration-profile-report.json'
+    : 'profile-report.json'
+  if (process.platform === 'win32') {
+    rmSync(resolve(windowsProbeRoot, reportBasename), { force: true })
+  }
   const probeRoot = requireProbeRoot()
-  const reportPath = childPath(probeRoot, migrationMode ? 'migration-profile-report.json' : 'profile-report.json')
+  const reportPath = childPath(probeRoot, reportBasename)
   rmSync(reportPath, { force: true })
   const packsRoot = childPath(probeRoot, 'packs')
   const dshHome = childPath(probeRoot, 'home')

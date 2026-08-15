@@ -26,6 +26,16 @@ describe('Tianwen Runtime Bundle Profile', () => {
     expect(() => assertNoRuntimeForbiddenReferences(['{"inputs":{"probe/adapter.ts":{}}}'])).toThrow()
   })
 
+  it.runIf(enabled)('invalidates a stale migration report before root validation', () => {
+    writeFileSync(migrationReport, '{"stale":true}\n')
+    const result = verify({
+      TIANWEN_DSH_MIGRATION_PROFILE: '1',
+      TIANWEN_DSH_PROBE_ROOT: '',
+    })
+    expect(result.status).toBe(1)
+    expect(existsSync(migrationReport)).toBe(false)
+  })
+
   it.runIf(enabled)('invalidates a stale migration report before early setup failure', () => {
     writeFileSync(migrationReport, '{"stale":true}\n')
     const result = verify({ TIANWEN_DSH_MIGRATION_PROFILE: '1', COREPACK_HOME: 'D:/DevData/missing-corepack' })
