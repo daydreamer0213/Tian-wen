@@ -211,7 +211,8 @@ dsh --profile tianwen "run the Tianwen phase 2 smoke task"
 - 只有一个新 Session；
 - 顶层 Goal 来自 headless 创建的真实 user source；
 - Goal objective 和 `maxGoalRounds=1` 精确；
-- 最终 Goal 未启动自主 round，处于 `complete` 且 `disarmed`；
+- 最终持久 Goal 未启动自主 round，`goal/change` 记录为 `roundsStarted=0`、
+  `phase=complete`；对应 `update_goal` 的公开结果报告 `activation=disarmed`；
 - Session 中 `create_goal`、`tianwen_smoke_action` 和完成 Goal 的 `update_goal`
   都有完整 call/result；
 - Tianwen Evidence 对三者各产生一条 `complete` 记录；

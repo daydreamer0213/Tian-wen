@@ -477,14 +477,13 @@ expect(results).toHaveLength(3)
 expect(events.filter(event => event.type === 'step/start')).toHaveLength(4)
 
 const goalChanges = events.filter(event => event.type === 'goal/change')
-const finalGoal = goalChanges.at(-1)!.data.goal
-expect(finalGoal).toMatchObject({
+const finalGoalChange = goalChanges.at(-1)!.data
+expect(finalGoalChange.goal).toMatchObject({
   objective: 'prove the Tianwen phase 2 startup path',
   maxGoalRounds: 1,
-  roundsStarted: 0,
   phase: 'complete',
-  activation: 'disarmed',
 })
+expect(finalGoalChange.roundsStarted).toBe(0)
 
 const evidence = projectEvidence(SessionId(header.id), events)
 expect(evidence.map(record => ({
@@ -496,6 +495,12 @@ expect(evidence.map(record => ({
   { toolName: 'update_goal', status: 'complete' },
 ])
 ```
+
+Parse the public canonical JSON text from the `update_goal` tool result and require its
+Goal id/revision/phase to match `finalGoalChange.goal`, `roundsStarted` to equal `0`, and
+`activation` to equal `disarmed`. Do not read `roundsStarted` or process-local activation
+from the nested durable Goal entity: rc.6 stores the former on `goal/change.data` and
+reports the latter only in the tool result.
 
 Require serialized Evidence not to contain the task text, Goal objective, `phase2-smoke-action-ok`, or raw tool arguments. Require `ledger.jsonl` and `champion.json` snapshots unchanged; creation of an empty `artifacts` directory is allowed because Runtime mount initializes its state root.
 
