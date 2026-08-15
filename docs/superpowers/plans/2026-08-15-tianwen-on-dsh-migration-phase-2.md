@@ -631,6 +631,8 @@ pnpm run typecheck
 
 ```powershell
 Remove-Item Env:TIANWEN_DSH_PHASE2_STARTUP -ErrorAction SilentlyContinue
+$env:TIANWEN_DSH_PROBE_ROOT='D:\DevData\tianwen-dsh-probe'
+$env:TIANWEN_DSH_PROBE_PYTHON='D:\DevData\tianwen-dsh-probe\venv-task-6\Scripts\python.exe'
 pnpm run test:dsh
 ```
 
@@ -644,6 +646,8 @@ Remove-Item Env:TIANWEN_DSH_PHASE2_STARTUP
 $env:TIANWEN_RUN_DSH_SANDBOX='1'
 pnpm run test:dsh:sandbox
 Remove-Item Env:TIANWEN_RUN_DSH_SANDBOX
+Remove-Item Env:TIANWEN_DSH_PROBE_ROOT
+Remove-Item Env:TIANWEN_DSH_PROBE_PYTHON
 ```
 
 ```powershell
