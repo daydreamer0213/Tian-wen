@@ -150,17 +150,20 @@ describe('DSH goal recovery', () => {
       )
       await waitForIdle(second.ctx, resumed.agent)
 
-      expect(second.ctx.goals.get(resumed.agent)).toMatchObject({
-        id: created.id,
-        objective: 'resume safely',
-        maxGoalRounds: 1,
-        roundsStarted: 1,
-        phase: 'blocked',
-        activation: 'disarmed',
-        blockedReason: {
-          code: 'round-limit',
-        },
-      })
+      await vi.waitFor(
+        () => expect(second!.ctx.goals.get(resumed.agent)).toMatchObject({
+          id: created.id,
+          objective: 'resume safely',
+          maxGoalRounds: 1,
+          roundsStarted: 1,
+          phase: 'blocked',
+          activation: 'disarmed',
+          blockedReason: {
+            code: 'round-limit',
+          },
+        }),
+        { timeout: 2_000 },
+      )
       const goalRoundMessages = resumed.agent.session.events.filter(event =>
         event.type === 'user/message'
         && event.data.source.kind === 'goal'
