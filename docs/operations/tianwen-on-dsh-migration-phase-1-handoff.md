@@ -13,7 +13,7 @@ Task 4 is blocked at the distribution boundary: a private workspace multi-packag
 - Branch: `codex/tianwen-dsh-migration-phase-1`.
 - This docs-only successor cannot write its own future commit SHA into itself. Verify the final branch tip after push with a fresh `git ls-remote` and Git history; the reviewed snapshot above is the direct audit record, not an ignored-report-only reference.
 
-Main-branch specification rulings are `fb497f316f9cadc9f65f4664005415bad0493428` (the in-repo evaluator source import governs; no root dependency is added for the test) and `81dbf36ec52663fd3dde464f27c38082750dec7b` (fresh Context bindings are authoritative; opaque rc.6 dynamic IDs may repeat across Contexts).
+Main-branch specification rulings are `fb497f316f9cadc9f65f4664005415bad0493428` (the in-repo evaluator source import governs; no root dependency is added for the test), `81dbf36ec52663fd3dde464f27c38082750dec7b` (fresh Context bindings are authoritative; opaque rc.6 dynamic IDs may repeat across Contexts), and `4b72814bc69c0b5ab037d975c6d065eb20fdabce` (the Runtime accepts a trusted absolute deployment configuration; Phase 1 keeps its D-drive root convention; this is not a path sandbox).
 
 Task 1–3 commits:
 
@@ -32,7 +32,7 @@ The only cross-task repair is `855cce4384b153c1ced24a52ef375775139c47ad` — `te
 
 ## Task 4 failure evidence — not a product change
 
-Both permitted standard-pnpm experiments were uncommitted and cleaned. First, `bundledDependencies` recursively carried workspace source and unrelated DSH-native closure. Closing source with `files` packlists then left the runtime nested below the Profile root, where the required Profile-anchor import could not resolve it. The public Bundle-subpath continuation reached its nested closure but failed loading the missing Landlock native dependency `@deepseek-ai/node-addon-landlock-run`.
+Both permitted standard-pnpm experiments had their tracked Task 4 changes cleaned. This development worktree may retain ignored build/node_modules residue; it enters neither Git nor a fresh checkout. First, `bundledDependencies` recursively carried workspace source and unrelated DSH-native closure. Closing source with `files` packlists then left the runtime nested below the Profile root, where the required Profile-anchor import could not resolve it. The public Bundle-subpath continuation reached its nested closure but failed loading the missing Landlock native dependency `@deepseek-ai/node-addon-landlock-run`.
 
 No stale Profile report is three-layer migration proof: the verifier failed before it could write a current report. No registry install, absolute `file:` path, private DSH import, copied runtime source, model call, live web request, real Docker operation, or Task 4 commit was used.
 
