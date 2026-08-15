@@ -507,8 +507,14 @@ Alpha-A 独立实施分支为：
 - Task 4 BLOCKED：私有 workspace 多包无法作为一个离线 DSH plugin tarball
   闭合；所有实验 tracked 变化已清理、无 Task 4 产品 diff、Migration Profile
   gate 未运行；
-- 待用户主权决策：A 发布/安装多包；B（推荐）构建一个自包含且 externalize
-  DSH 依赖的部署 Bundle。未批准前不实现、不把 Phase 1 称为完成；
+- 用户已于 2026-08-15 批准方案 B：构建一个自包含 Tianwen
+  Runtime/Evidence/Evolution 产品代码、并将 DSH/Cordis 保持为外部依赖的
+  单体部署 Bundle；多个 `@tianwen/*` workspace package 只作为构建期输入；
+- canonical 设计为
+  `docs/superpowers/specs/2026-08-15-tianwen-self-contained-runtime-bundle-design.md`；
+  canonical 实施计划为
+  `docs/superpowers/plans/2026-08-15-tianwen-self-contained-runtime-bundle.md`；
+  实施继续使用当前回合 multi-agent 子代理，不新建派生会话；
 - main 规格已裁决 trusted absolute evolutionRoot：是已审核部署配置、非用户/模型
   输入；Phase 1 实例仍使用 D 盘约定，不建设虚假 path sandbox。规格 commit
   `4b72814`；
@@ -536,7 +542,6 @@ Alpha-A 独立实施分支为：
 - 最终用户界面采用 CLI、Codex 式任务面板、桌面应用还是渐进组合；
 - 如何把执行证据转为元循环可用、同时保护隐私的最小投影；
 - 何时证明底层组件选择已经成为限制，需要移植或替换。
-- Phase 1 分发采用多包发布还是单体部署 Bundle（当前推荐后者）。
 
 讨论这些问题时，主控会话应先调研、解释和给出推荐，再邀请用户参与真正需要主权判断的部分。
 

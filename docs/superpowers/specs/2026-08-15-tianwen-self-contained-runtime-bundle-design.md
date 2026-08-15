@@ -2,7 +2,7 @@
 
 日期：2026-08-15
 
-状态：待用户复核书面规格
+状态：用户已批准
 
 前置决策：采用方案 B——一个可安装的 Tianwen Runtime Bundle，DSH/Cordis 继续作为外部依赖。
 
@@ -103,8 +103,8 @@ Bundle 的 `package.json` 只声明 `dist/runtime.js` 最终真实 import 的外
 - `node_modules/@deepseek-ai/**`、Cordis 和原生扩展不能成为 bundled input；
 - 每一个非 Node 内置 external specifier 必须是公开 package-root export；
 - external specifier 集合必须与 Runtime Bundle manifest 的运行时依赖完全一致；
-- 在一个全新的隔离 Profile 中，必须以该 Profile 的 `package.json` 为解析锚点，逐一 `resolve` 并 `import` 所有 external；
-- 任一 external 无法从 Profile 根解析，或加载时继续缺少传递依赖，都视为 Bundle 失败，不能用嵌套 Tianwen package、私有路径或源码复制补洞。
+- 在一个全新的隔离 Profile 中，先以 Profile 的 `package.json` 为锚点加载 Runtime Bundle，再以已安装 Runtime Bundle 的 `package.json` 为锚点逐一 `resolve` 并 `import` 所有 external；
+- 任一 external 无法从 Runtime Bundle 的真实安装位置解析，或加载 Runtime 时继续缺少传递依赖，都视为 Bundle 失败，不能用嵌套 Tianwen package、私有路径或源码复制补洞。
 
 这条验收专门防止再次出现 `@deepseek-ai/node-addon-landlock-run` 一类“打包时没暴露、Profile 加载时才缺失”的问题。
 
@@ -126,7 +126,7 @@ Bundle 的 `package.json` 只声明 `dist/runtime.js` 最终真实 import 的外
 
 1. 使用公开 DSH plugin/Profile 接口离线安装 tarball；
 2. Profile 根可以 resolve 和 import `@tianwen/runtime-bundle/runtime`；
-3. Profile 根可以逐一 resolve 和 import Bundle 声明的所有 external；
+3. 已安装 Bundle 的真实位置可以逐一 resolve 和 import 其声明的所有 external；
 4. dump-config 中存在 Tianwen Runtime，并且配置没有扩大；
 5. Runtime 能挂载 Evidence 与 Evolution；
 6. Runtime Bundle 不依赖测试 scripted adapter；测试 Profile 可以另外装入现有 probe fixture；
@@ -165,7 +165,7 @@ Bundle 的 `package.json` 只声明 `dist/runtime.js` 最终真实 import 的外
 - 安装时不存在 `@tianwen/*` 内部包依赖；
 - DSH/Cordis 保持外部且只走公开 package-root API；
 - Bundle metafile、manifest 和隔离 Profile 对同一 external 闭包达成一致；
-- 所有 external 都能从干净 Profile 根 resolve 和 import；
+- 所有 external 都能从干净 Profile 中已安装的 Runtime Bundle 位置 resolve 和 import；
 - 公共离线 Profile 安装、加载和 dump-config 成功；
 - Runtime/Evidence/Evolution 行为测试通过；
 - archive 没有源码、私有路径或多余依赖；
