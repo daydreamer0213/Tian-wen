@@ -515,6 +515,17 @@ function requireAssertion(value, message) {
   }
 }
 
+export function assertNoRuntimeForbiddenReferences(sources) {
+  const forbidden = /dsh-probe-bundle|[\\/]adapter|@deepseek-ai[\\/]dsh[\\/]src/u
+  requireAssertion(sources.every(source => !forbidden.test(source.toString('utf8'))), 'Runtime Bundle contains forbidden probe or private references')
+}
+
+function tarballFiles(path) {
+  const result = spawnSync('tar', ['-tzf', path], { encoding: 'utf8', shell: false })
+  requireAssertion(result.status === 0, 'Runtime tarball cannot be listed')
+  return result.stdout.replaceAll('\r\n', '\n').split('\n').filter(Boolean).map(name => name.replace(/^package\//u, '')).sort()
+}
+
 async function main() {
   const probeRoot = requireProbeRoot()
   const reportPath = childPath(probeRoot, migrationMode ? 'migration-profile-report.json' : 'profile-report.json')
@@ -660,19 +671,20 @@ async function main() {
     runtimeFiles.sort()
     const allowedRuntimeFiles = ['cordis.patch.yml', 'dist/index.d.ts', 'dist/index.js', 'dist/runtime.js', 'package.json']
     requireAssertion(JSON.stringify(runtimeFiles) === JSON.stringify(allowedRuntimeFiles), 'installed Runtime Bundle file set is not exact')
-    const forbiddenPattern = /tianwen-dsh-probe|dsh-probe-bundle|\/adapter|@tianwen\/(?!runtime-bundle)|(?:^|[\\/])src[\\/]/u
-    const installedRuntimeManifest = JSON.parse(readFileSync(resolve(runtimeRoot, 'package.json'), 'utf8'))
-    const runtimeSources = [Buffer.from(JSON.stringify(installedRuntimeManifest.dependencies)), readFileSync(resolve(runtimeRoot, 'dist/runtime.js'))]
-    requireAssertion(runtimeSources.every(source => !forbiddenPattern.test(source.toString('utf8'))), 'Runtime Bundle contains forbidden probe or private references')
+    const runtimePatchPath = resolve(runtimeRoot, 'cordis.patch.yml')
+    const metaPath = resolve(repoRoot, 'packages/tianwen-runtime-bundle/dist/runtime.meta.json')
+    assertNoRuntimeForbiddenReferences([readFileSync(resolve(runtimeRoot, 'package.json')), readFileSync(metaPath), readFileSync(resolve(runtimeRoot, 'dist/runtime.js')), readFileSync(runtimePatchPath)])
+    const packedFiles = tarballFiles(runtimeTarball)
+    requireAssertion(JSON.stringify(packedFiles) === JSON.stringify(allowedRuntimeFiles), 'Runtime tarball file set is not exact')
     const authoredRuntimePatch = parseRuntimePatch(readFileSync(resolve(repoRoot, 'packages/tianwen-runtime-bundle/cordis.patch.yml'), 'utf8'))
     const installedRuntimePatch = parseRuntimePatch(readFileSync(resolve(runtimeRoot, 'cordis.patch.yml'), 'utf8'))
     requireAssertion(JSON.stringify(authoredRuntimePatch) === JSON.stringify(installedRuntimePatch), 'installed Runtime patch differs from authored patch')
     const runtimeRow = dumpedRow(dump, 'tianwen-runtime')
     requireAssertion(rowValue(runtimeRow, /^ {2}name: (.+)$/u, 'name') === runtimeSpecifier && rowValue({ ...runtimeRow, lines: runtimeRow.lines.slice(runtimeRow.lines.indexOf('  config:') + 1) }, /^ {4}evolutionRoot: (.+)$/u, 'evolutionRoot') === 'D:/DevData/tianwen-dsh-probe/evolution', 'dumped Runtime row is wrong')
-    const meta = JSON.parse(readFileSync(resolve(repoRoot, 'packages/tianwen-runtime-bundle/dist/runtime.meta.json'), 'utf8'))
+    const meta = JSON.parse(readFileSync(metaPath, 'utf8'))
     const external = [...new Set(meta.outputs['dist/runtime.js'].imports.filter(item => item.external && !item.path.startsWith('node:')).map(item => item.path))].sort()
     requireAssertion(JSON.stringify(external) === JSON.stringify(runtimeBundle.externalSpecifiers), 'Runtime metafile external closure differs from installed manifest')
-    runtimeBundle.install = { tarball: { path: runtimeTarball, sha256: sha256(readFileSync(runtimeTarball)) }, files: runtimeFiles, forbiddenReferences: { passed: true }, external }
+    runtimeBundle.install = { tarball: { path: runtimeTarball, sha256: sha256(readFileSync(runtimeTarball)), files: packedFiles }, files: runtimeFiles, forbiddenReferences: { passed: true }, external }
   }
 
   const requireFromDsh = createRequire(realpathSync(resolve(

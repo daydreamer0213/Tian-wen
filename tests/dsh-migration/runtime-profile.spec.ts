@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { assertNoRuntimeForbiddenReferences } from '../../scripts/verify-dsh-profile.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const enabled = process.env.TIANWEN_DSH_MIGRATION_PROFILE === '1'
@@ -18,6 +19,18 @@ function verify(env: NodeJS.ProcessEnv) {
 describe('Tianwen Runtime Bundle Profile', () => {
   it('keeps the real migration Profile gate opt-in', () => {
     expect(existsSync(resolve(root, 'scripts/verify-dsh-profile.mjs'))).toBe(true)
+  })
+
+  it('rejects forbidden references in full Runtime manifest and metafile', () => {
+    expect(() => assertNoRuntimeForbiddenReferences(['{"optionalDependencies":{"probe":"@tianwen/dsh-probe-bundle/adapter"}}'])).toThrow()
+    expect(() => assertNoRuntimeForbiddenReferences(['{"inputs":{"probe/adapter.ts":{}}}'])).toThrow()
+  })
+
+  it.runIf(enabled)('invalidates a stale migration report before early setup failure', () => {
+    writeFileSync(migrationReport, '{"stale":true}\n')
+    const result = verify({ TIANWEN_DSH_MIGRATION_PROFILE: '1', COREPACK_HOME: 'D:/DevData/missing-corepack' })
+    expect(result.status).not.toBe(0)
+    expect(existsSync(migrationReport)).toBe(false)
   })
 
   it.runIf(enabled)('installs and imports the Runtime Bundle through public DSH', () => {
@@ -54,7 +67,7 @@ describe('Tianwen Runtime Bundle Profile', () => {
     expect(report.commands.find(command => command.label === 'build-runtime-bundle')?.argv).toContain('@tianwen/runtime-bundle...')
   }, 120_000)
 
-  it('keeps default Profile installation free of the Runtime layer', () => {
+  it.runIf(!enabled)('keeps default Profile installation free of the Runtime layer', () => {
     rmSync(migrationReport, { force: true })
     const result = verify({ TIANWEN_DSH_MIGRATION_PROFILE: undefined })
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
@@ -65,10 +78,4 @@ describe('Tianwen Runtime Bundle Profile', () => {
     expect(report.commands.some(command => command.label.includes('runtime'))).toBe(false)
   }, 120_000)
 
-  it.runIf(enabled)('invalidates a stale migration report before early setup failure', () => {
-    writeFileSync(migrationReport, '{"stale":true}\n')
-    const result = verify({ TIANWEN_DSH_MIGRATION_PROFILE: '1', COREPACK_HOME: 'D:/DevData/missing-corepack' })
-    expect(result.status).not.toBe(0)
-    expect(existsSync(migrationReport)).toBe(false)
-  })
 })
