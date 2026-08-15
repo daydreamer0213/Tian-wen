@@ -130,6 +130,12 @@ Windows 上游 rc.6 plugin CLI 内部的窄 `shell: true` 例外保持原边界�
 进程全部使用固定 executable + argv、`shell: false`。该例外不得扩散到
 Runtime、Tool、学习资产或用户指定 package spec。
 
+rc.6 的 `dsh-base` Bundle 通过 published peer dependencies 表达其公共组合闭包。
+因此隔离 Profile 保持 pnpm 的 `autoInstallPeers: true`，但顶层 package spec 仍只允许
+固定 base/headless/runtime 三项，版本与 lock/closure 检查仍是精确权威。生命周期
+脚本由 `allowBuilds: false` 单独禁止；不得把自动 peer 关闭后再逐个手写 DSH 内部
+依赖来重建上游 Bundle。
+
 ## 5. 无密钥确定性任务
 
 ### 5.1 为什么需要一个 smoke adapter

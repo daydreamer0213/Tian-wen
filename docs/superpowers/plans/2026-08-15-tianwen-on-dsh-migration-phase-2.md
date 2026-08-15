@@ -408,7 +408,7 @@ packages:
   - .
 
 nodeLinker: hoisted
-autoInstallPeers: false
+autoInstallPeers: true
 overrides:
   koffi: 3.1.4
 allowBuilds:
@@ -419,7 +419,7 @@ allowBuilds:
   protobufjs: false
 ```
 
-This is the existing repository policy made explicit for the isolated Profile: no lifecycle script is approved or executed. The `koffi` override reuses the exact prebuilt version already frozen and exercised by the repository instead of resolving a newer uncached native release. Do not set blanket `ignoreScripts`; pnpm must still install the published optional Windows prebuilt packages while `allowBuilds: false` prevents lifecycle execution. Public rc.6 `initProfile()` preserves an existing workspace file while creating the Profile manifest and patch.
+The rc.6 base Bundle publishes part of its public composition closure as peer dependencies, so `autoInstallPeers: true` is required for the fixed exact base/headless install; disabling it leaves public packages such as `@deepseek-ai/dsh-sandbox` absent. This does not accept caller package specs: the install argv remains the exact three approved layers, while the lock/closure gate verifies the resolved published graph. No lifecycle script is approved or executed. The `koffi` override reuses the exact prebuilt version already frozen and exercised by the repository instead of resolving a newer uncached native release. Do not set blanket `ignoreScripts`; pnpm must still install the published optional Windows prebuilt packages while `allowBuilds: false` prevents lifecycle execution. Public rc.6 `initProfile()` preserves an existing workspace file while creating the Profile manifest and patch.
 7. remove the exact old Runtime Bundle archive so the next pack must create the accepted tarball;
 8. snapshot `ledger.jsonl` and `champion.json` bytes if present.
 
@@ -446,7 +446,7 @@ This is the sole accepted upstream Windows plugin-install exception. The exact b
 2. parse `${profileRoot}/package.json`;
 3. require Bundle order exactly `[@deepseek-ai/dsh-base, @deepseek-ai/dsh-headless, @tianwen/runtime-bundle]`;
 4. require the installed Runtime dependency to refer to the current-run archive and both base/headless dependencies to be exact rc.6;
-5. require the installed `pnpm-workspace.yaml` still holds the exact `koffi: 3.1.4` override and five `allowBuilds: false` decisions above;
+5. require the installed `pnpm-workspace.yaml` still holds `autoInstallPeers: true`, the exact `koffi: 3.1.4` override, and the five `allowBuilds: false` decisions above;
 6. run exact DSH `--profile tianwen --dump-config` and require the default route, plain JSONL config, public Cordis host runner, Runtime evolution root, and smoke export at their exact row IDs;
 7. resolve/import `@tianwen/runtime-bundle/runtime`, `@tianwen/runtime-bundle/smoke`, and every Runtime Bundle manifest external from the installed Runtime Bundle package anchor.
 
