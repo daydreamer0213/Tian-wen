@@ -149,6 +149,18 @@ importers:
         specifier: workspace:*
         version: link:../tianwen-dsh-compat
 
+  packages/tianwen-runtime:
+    dependencies:
+      '@tianwen/dsh-compat':
+        specifier: workspace:*
+        version: link:../tianwen-dsh-compat
+      '@tianwen/evidence':
+        specifier: workspace:*
+        version: link:../tianwen-evidence
+      '@tianwen/evolution':
+        specifier: workspace:*
+        version: link:../tianwen-evolution
+
 packages:
 
   '@anthropic-ai/sdk@0.91.1':
