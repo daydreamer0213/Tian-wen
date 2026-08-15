@@ -581,12 +581,14 @@ git commit -m "test: prove dsh session evidence recovery"
 
 - [ ] **Step 1: Write the Python A1 contract test**
 
-Use the existing evaluator directly:
+Use the existing evaluator directly. Follow the current in-repo test convention:
+import its source entry and do not add a root workspace dependency only to make
+this test resolve a bare package name.
 
 ```ts
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { PythonA1Evaluator } from '@tianwen/evaluator-python'
+import { PythonA1Evaluator } from '../../packages/tianwen-evaluator-python/src/index.js'
 
 const repoRoot = resolve(import.meta.dirname, '../..')
 
