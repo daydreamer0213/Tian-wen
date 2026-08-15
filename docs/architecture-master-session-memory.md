@@ -1,6 +1,6 @@
 # 天问主控架构会话记忆
 
-更新日期：2026-08-15
+更新日期：2026-08-16
 
 ## 1. 文档用途
 
@@ -549,6 +549,36 @@ Alpha-A 独立实施分支为：
 - 下一未阻塞入口是先设计 Tianwen-on-DSH Migration Phase 2：以已验证的单一
   Runtime Bundle 为正式部署基础，连接产品 Profile/入口和后续用户控制面；
   在新规格批准前不自动切换稳定 Runtime，也不删除 Python 基线。
+
+- Tianwen-on-DSH Migration Phase 2 已完成并独立推送，不再是待设计入口；
+  实施分支为 `codex/tianwen-dsh-migration-phase-2`，远端精确 HEAD 为
+  `327327108f2f4666a99824e5aeaaaccace5afdc6`；canonical handoff 位于该分支的
+  `docs/operations/tianwen-on-dsh-migration-phase-2-handoff.md`；
+- Phase 2 正式证明了精确三层 Profile：`@deepseek-ai/dsh-base@0.1.0-rc.6`、
+  `@deepseek-ai/dsh-headless@0.1.0-rc.6`、当前
+  `@tianwen/runtime-bundle`；公开 headless 入口在严格离线环境中完成一次真实
+  Goal/Tool/Session/Evidence 链路，并输出 `TIANWEN_PHASE2_OK`；
+- 最终 startup receipt SHA-256 为
+  `4B54B087D6059D58F32DCCB29B8D5EDC4533AFB1764AC216D00F0014565279DD`；
+  Goal 为 `complete`、`activation=disarmed`、`roundsStarted=0`，三条 Evidence
+  分别对应 `create_goal`、`tianwen_smoke_action`、`update_goal`；付费模型、
+  live web、Docker 和凭据注入计数均为 0；
+- Phase 2 最终门禁：默认 Node `82 passed, 8 skipped`；正式离线启动 E2E
+  `2 passed`；Windows 本地沙盒 `3 passed`；Python A1–A5 `10 passed`；
+  全量 Python `424 passed, 4 skipped`；Ruff、依赖闭包、私有导入、类型检查、
+  diff 和工作树状态均干净；whole-phase review 为 0 Critical、0 Important、
+  0 Minor；
+- 阶段中出现的 AWS SDK 缺包是 D 盘 pnpm store 的环境准备问题，不是产品逻辑
+  回归。最终通过一个精确三层 Profile 临时 workspace 完整预取依赖闭包，随后在
+  不可达 registry 下重新完成 frozen install 和正式 E2E；最终验收本身仍是
+  0 下载、0 网络；
+- 本阶段仍没有 migration cutover、没有删除 Python、没有真实模型、没有真实
+  Docker，也没有开始 UI。DSH Developer Preview、Windows 安装期窄
+  `shell:true` 例外、可信同进程插件模型、Windows partial sandbox、A1-only
+  Python bridge 和 JSONL 非多进程数据库等风险继续保留；
+- 下一推荐入口是一个窄且只读的 `tianwen status --goal` 控制投影：先把现有
+  Goal、Session、Evidence 和 Champion 状态以用户可读形式展示出来，不新增
+  自动晋升、写操作、完整 UI 或 Runtime cutover。
 
 当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
 
