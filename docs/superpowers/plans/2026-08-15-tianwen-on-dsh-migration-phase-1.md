@@ -130,7 +130,10 @@ import {
   ToolRuntime,
 } from '@tianwen/dsh-compat'
 import { default as TimerService } from '@deepseek-ai/cordis-plugin-timer'
-import { apply, SUPPORTED_DSH_VERSION } from '@tianwen/runtime'
+import {
+  apply,
+  SUPPORTED_DSH_VERSION,
+} from '../../packages/tianwen-runtime/src/index.js'
 
 const roots: string[] = []
 
@@ -400,7 +403,7 @@ import {
   toolCallResponse,
   waitForIdle,
 } from '@tianwen/dsh-compat'
-import { apply } from '@tianwen/runtime'
+import { apply } from '../../packages/tianwen-runtime/src/index.js'
 
 const first = await mountGoalHarness(sessionRoot, [
   toolCallResponse('phase1-goal', 'create_goal', {
@@ -624,7 +627,7 @@ import {
 } from '@tianwen/dsh-compat'
 import type { Agent } from '@tianwen/dsh-compat'
 import { default as TimerService } from '@deepseek-ai/cordis-plugin-timer'
-import { apply } from '@tianwen/runtime'
+import { apply } from '../../packages/tianwen-runtime/src/index.js'
 
 function createStubAgent(ctx: Context, id: string): Agent {
   const session = Session.create(SessionId(id))
