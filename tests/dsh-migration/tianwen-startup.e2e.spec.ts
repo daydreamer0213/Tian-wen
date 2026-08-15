@@ -37,7 +37,7 @@ const workspacePolicy = `packages:
   - .
 
 nodeLinker: hoisted
-autoInstallPeers: false
+autoInstallPeers: true
 overrides:
   koffi: 3.1.4
 allowBuilds:
@@ -101,6 +101,7 @@ function childEnvironment(): NodeJS.ProcessEnv {
   paths.forEach(requireWithinRoot)
   ;[temp, virtualStore].forEach(path => mkdirSync(path, { recursive: true }))
   return {
+    CI: 'true',
     COREPACK_HOME: 'D:/DevData/corepack-home',
     COREPACK_ENABLE_NETWORK: '0',
     DSH_HOME: dshHome,
@@ -113,6 +114,7 @@ function childEnvironment(): NodeJS.ProcessEnv {
     PNPM_CONFIG_AUTO_INSTALL_PEERS: 'true',
     PNPM_CONFIG_OFFLINE: 'true',
     PNPM_CONFIG_STORE_DIR: store,
+    PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: 'false',
     PNPM_CONFIG_VIRTUAL_STORE_DIR: virtualStore,
     SystemRoot: systemRoot,
     TEMP: temp,
