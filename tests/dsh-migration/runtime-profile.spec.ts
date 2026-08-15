@@ -1,10 +1,19 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const root = resolve(import.meta.dirname, '../..')
 const enabled = process.env.TIANWEN_DSH_MIGRATION_PROFILE === '1'
+const probeRoot = 'D:/DevData/tianwen-dsh-probe'
+const migrationReport = `${probeRoot}/migration-profile-report.json`
+const profileReport = `${probeRoot}/profile-report.json`
+
+function verify(env: NodeJS.ProcessEnv) {
+  return spawnSync(process.execPath, [resolve(root, 'scripts/verify-dsh-profile.mjs')], {
+    cwd: root, encoding: 'utf8', env: { ...process.env, TIANWEN_DSH_PROBE_ROOT: probeRoot, ...env }, shell: false, timeout: 120_000,
+  })
+}
 
 describe('Tianwen Runtime Bundle Profile', () => {
   it('keeps the real migration Profile gate opt-in', () => {
@@ -12,18 +21,10 @@ describe('Tianwen Runtime Bundle Profile', () => {
   })
 
   it.runIf(enabled)('installs and imports the Runtime Bundle through public DSH', () => {
-    const result = spawnSync(process.execPath, [
-      resolve(root, 'scripts/verify-dsh-profile.mjs'),
-    ], {
-      cwd: root,
-      encoding: 'utf8',
-      env: { ...process.env, TIANWEN_DSH_MIGRATION_PROFILE: '1' },
-      shell: false,
-      timeout: 120_000,
-    })
+    const result = verify({ TIANWEN_DSH_MIGRATION_PROFILE: '1' })
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
     const report = JSON.parse(readFileSync(
-      'D:/DevData/tianwen-dsh-probe/migration-profile-report.json',
+      migrationReport,
       'utf8',
     ))
     expect(report.composition.layerOrder).toEqual([
@@ -45,5 +46,29 @@ describe('Tianwen Runtime Bundle Profile', () => {
       liveWebRequests: 0,
       dockerInvocations: 0,
     })
+    expect(report.composition.runtimeInstall).toMatchObject({
+      tarball: expect.objectContaining({ path: expect.stringContaining('tianwen-runtime-bundle-0.0.0.tgz'), sha256: expect.any(String) }),
+      files: ['cordis.patch.yml', 'dist/index.d.ts', 'dist/index.js', 'dist/runtime.js', 'package.json'],
+      forbiddenReferences: { passed: true },
+    })
+    expect(report.commands.find(command => command.label === 'build-runtime-bundle')?.argv).toContain('@tianwen/runtime-bundle...')
   }, 120_000)
+
+  it('keeps default Profile installation free of the Runtime layer', () => {
+    rmSync(migrationReport, { force: true })
+    const result = verify({ TIANWEN_DSH_MIGRATION_PROFILE: undefined })
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+    expect(existsSync(profileReport)).toBe(true)
+    expect(existsSync(migrationReport)).toBe(false)
+    const report = JSON.parse(readFileSync(profileReport, 'utf8'))
+    expect(report.composition.layerOrder).toEqual(['@deepseek-ai/dsh-base', '@tianwen/dsh-probe-bundle'])
+    expect(report.commands.some(command => command.label.includes('runtime'))).toBe(false)
+  }, 120_000)
+
+  it.runIf(enabled)('invalidates a stale migration report before early setup failure', () => {
+    writeFileSync(migrationReport, '{"stale":true}\n')
+    const result = verify({ TIANWEN_DSH_MIGRATION_PROFILE: '1', COREPACK_HOME: 'D:/DevData/missing-corepack' })
+    expect(result.status).not.toBe(0)
+    expect(existsSync(migrationReport)).toBe(false)
+  })
 })

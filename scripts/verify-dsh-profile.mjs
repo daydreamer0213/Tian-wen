@@ -5,9 +5,11 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  renameSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
@@ -515,6 +517,8 @@ function requireAssertion(value, message) {
 
 async function main() {
   const probeRoot = requireProbeRoot()
+  const reportPath = childPath(probeRoot, migrationMode ? 'migration-profile-report.json' : 'profile-report.json')
+  rmSync(reportPath, { force: true })
   const packsRoot = childPath(probeRoot, 'packs')
   const dshHome = childPath(probeRoot, 'home')
   const workspaceVirtualStore = process.env.PNPM_CONFIG_VIRTUAL_STORE_DIR
@@ -530,7 +534,6 @@ async function main() {
     tarballBasename,
   )
   const runtimeTarball = childPath(packsRoot, runtimeTarballBasename)
-  const reportPath = childPath(probeRoot, migrationMode ? 'migration-profile-report.json' : 'profile-report.json')
   const profileRoot = childPath(dshHome, 'profiles', profileName)
   const commands = []
 
@@ -563,7 +566,7 @@ async function main() {
     commands,
   )
   if (migrationMode) {
-    runPnpm('build-runtime-bundle', ['--filter', runtimeBundlePackage, 'build'], workspaceEnv, commands)
+    runPnpm('build-runtime-bundle', ['--filter', `${runtimeBundlePackage}...`, 'build'], workspaceEnv, commands)
     runPnpm('pack-runtime-bundle', ['--filter', runtimeBundlePackage, 'pack', '--pack-destination', packsRoot], workspaceEnv, commands)
     requireAssertion(existsSync(runtimeTarball), `runtime tarball is missing: ${runtimeTarball}`)
   }
@@ -645,6 +648,22 @@ async function main() {
   if (migrationMode) {
     requireAssertion(JSON.stringify(bundleNames) === JSON.stringify([basePackage, bundlePackage, runtimeBundlePackage]), 'Profile bundle order is wrong')
     const runtimeRoot = childPath(profileRoot, 'node_modules', '@tianwen', 'runtime-bundle')
+    const runtimeFiles = []
+    const collect = (path, prefix = '') => {
+      for (const entry of readdirSync(path, { withFileTypes: true })) {
+        const name = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+        if (entry.isDirectory()) collect(resolve(path, entry.name), name)
+        else runtimeFiles.push(name)
+      }
+    }
+    collect(runtimeRoot)
+    runtimeFiles.sort()
+    const allowedRuntimeFiles = ['cordis.patch.yml', 'dist/index.d.ts', 'dist/index.js', 'dist/runtime.js', 'package.json']
+    requireAssertion(JSON.stringify(runtimeFiles) === JSON.stringify(allowedRuntimeFiles), 'installed Runtime Bundle file set is not exact')
+    const forbiddenPattern = /tianwen-dsh-probe|dsh-probe-bundle|\/adapter|@tianwen\/(?!runtime-bundle)|(?:^|[\\/])src[\\/]/u
+    const installedRuntimeManifest = JSON.parse(readFileSync(resolve(runtimeRoot, 'package.json'), 'utf8'))
+    const runtimeSources = [Buffer.from(JSON.stringify(installedRuntimeManifest.dependencies)), readFileSync(resolve(runtimeRoot, 'dist/runtime.js'))]
+    requireAssertion(runtimeSources.every(source => !forbiddenPattern.test(source.toString('utf8'))), 'Runtime Bundle contains forbidden probe or private references')
     const authoredRuntimePatch = parseRuntimePatch(readFileSync(resolve(repoRoot, 'packages/tianwen-runtime-bundle/cordis.patch.yml'), 'utf8'))
     const installedRuntimePatch = parseRuntimePatch(readFileSync(resolve(runtimeRoot, 'cordis.patch.yml'), 'utf8'))
     requireAssertion(JSON.stringify(authoredRuntimePatch) === JSON.stringify(installedRuntimePatch), 'installed Runtime patch differs from authored patch')
@@ -653,6 +672,7 @@ async function main() {
     const meta = JSON.parse(readFileSync(resolve(repoRoot, 'packages/tianwen-runtime-bundle/dist/runtime.meta.json'), 'utf8'))
     const external = [...new Set(meta.outputs['dist/runtime.js'].imports.filter(item => item.external && !item.path.startsWith('node:')).map(item => item.path))].sort()
     requireAssertion(JSON.stringify(external) === JSON.stringify(runtimeBundle.externalSpecifiers), 'Runtime metafile external closure differs from installed manifest')
+    runtimeBundle.install = { tarball: { path: runtimeTarball, sha256: sha256(readFileSync(runtimeTarball)) }, files: runtimeFiles, forbiddenReferences: { passed: true }, external }
   }
 
   const requireFromDsh = createRequire(realpathSync(resolve(
@@ -783,7 +803,7 @@ async function main() {
       publicExports: publicExportEvidence,
       dumpConfigSha256: sha256(Buffer.from(dump, 'utf8')),
       assertions,
-      ...(migrationMode ? { runtimeBundle } : {}),
+      ...(migrationMode ? { runtimeBundle, runtimeInstall: runtimeBundle.install } : {}),
     },
     forbiddenEffects: {
       interactiveAppStarts: 0,
@@ -805,7 +825,9 @@ async function main() {
       tarballProducedByCurrentRun: producedByCurrentRun,
     },
   }
-  writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
+  const temporaryReportPath = `${reportPath}.tmp`
+  writeFileSync(temporaryReportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
+  renameSync(temporaryReportPath, reportPath)
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
 }
 
