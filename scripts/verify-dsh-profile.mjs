@@ -29,6 +29,10 @@ const bundleAdapterPackage = `${bundlePackage}/adapter`
 const defaultModelPackage = '@deepseek-ai/dsh-agent-default-model'
 const expectedDshVersion = '0.1.0-rc.6'
 const tarballBasename = 'tianwen-dsh-probe-bundle-0.0.0.tgz'
+const runtimeBundlePackage = '@tianwen/runtime-bundle'
+const runtimeSpecifier = `${runtimeBundlePackage}/runtime`
+const runtimeTarballBasename = 'tianwen-runtime-bundle-0.0.0.tgz'
+const migrationMode = process.env.TIANWEN_DSH_MIGRATION_PROFILE === '1'
 const windowsProbeRoot = 'D:\\DevData\\tianwen-dsh-probe'
 
 function isWithin(base, candidate) {
@@ -98,10 +102,11 @@ function samePath(platform, left, right) {
 }
 
 export function validateFixedInstallBoundary(values) {
+  const fixedTarballBasename = values.tarballBasename ?? tarballBasename
   const expectedTarball = resolve(
     values.platform === 'win32' ? windowsProbeRoot : values.probeRoot,
     'packs',
-    tarballBasename,
+    fixedTarballBasename,
   )
   requireAssertion(
     values.profileName === profileName,
@@ -120,7 +125,7 @@ export function validateFixedInstallBoundary(values) {
     )
   }
   requireAssertion(
-    basename(values.tarballPath) === tarballBasename
+    basename(values.tarballPath) === fixedTarballBasename
     && samePath(values.platform, values.tarballPath, expectedTarball)
     && samePath(values.platform, values.realTarballPath, expectedTarball),
     `tarball path and real path must equal ${expectedTarball}`,
@@ -184,6 +189,19 @@ export function parseAuthoredPatch(source) {
       name: scalar(adapterName),
     },
   }
+}
+
+export function parseRuntimePatch(source) {
+  const lines = source.replaceAll('\r\n', '\n').split('\n').filter(line => line !== '')
+  requireAssertion(
+    JSON.stringify(lines) === JSON.stringify([
+      '- insert:', '    - id: tianwen-runtime',
+      "      name: '@tianwen/runtime-bundle/runtime'", '      config:',
+      "        evolutionRoot: 'D:/DevData/tianwen-dsh-probe/evolution'",
+    ]),
+    'Runtime patch differs from the single authorized operation',
+  )
+  return { insertedRuntime: { id: 'tianwen-runtime', name: runtimeSpecifier, evolutionRoot: 'D:/DevData/tianwen-dsh-probe/evolution' } }
 }
 
 function dumpedRows(source) {
@@ -281,6 +299,24 @@ export async function resolveAndImportBundleExports(packageManifestPath) {
     adapterInject: adapterModule.inject,
     adapterApply: typeof adapterModule.apply,
   }
+}
+
+export async function resolveAndImportRuntimeBundle(profileManifestPath) {
+  const requireFromProfile = createRequire(realpathSync(profileManifestPath))
+  const runtimeResolved = requireFromProfile.resolve(runtimeSpecifier)
+  const runtimeRoot = realpathSync(resolve(dirname(runtimeResolved), '..'))
+  const runtimeManifestPath = resolve(runtimeRoot, 'package.json')
+  const manifest = JSON.parse(readFileSync(runtimeManifestPath, 'utf8'))
+  requireAssertion(JSON.stringify(manifest.dependencies) === JSON.stringify({ '@deepseek-ai/cordis': '4.0.1' }), 'Runtime Bundle external manifest differs from the build contract')
+  const requireFromRuntime = createRequire(runtimeManifestPath)
+  const cordisResolved = requireFromRuntime.resolve('@deepseek-ai/cordis')
+  await import(pathToFileURL(cordisResolved).href)
+  const module = await import(pathToFileURL(runtimeResolved).href)
+  requireAssertion(module.name === 'tianwen-runtime', 'wrong Runtime identity')
+  requireAssertion(module.SUPPORTED_DSH_VERSION === '0.1.0-rc.6', 'wrong DSH version')
+  requireAssertion(JSON.stringify(module.inject) === JSON.stringify(['dynamicCordisRunner']), 'wrong inject')
+  requireAssertion(typeof module.apply === 'function', 'Runtime apply is unavailable')
+  return { specifier: runtimeSpecifier, resolved: runtimeResolved, name: 'tianwen-runtime', inject: module.inject, supportedDshVersion: module.SUPPORTED_DSH_VERSION, externalSpecifiers: Object.keys(manifest.dependencies).sort(), externalResolved: { '@deepseek-ai/cordis': cordisResolved } }
 }
 
 function pnpmCommand(args) {
@@ -493,7 +529,8 @@ async function main() {
     packsRoot,
     tarballBasename,
   )
-  const reportPath = childPath(probeRoot, 'profile-report.json')
+  const runtimeTarball = childPath(packsRoot, runtimeTarballBasename)
+  const reportPath = childPath(probeRoot, migrationMode ? 'migration-profile-report.json' : 'profile-report.json')
   const profileRoot = childPath(dshHome, 'profiles', profileName)
   const commands = []
 
@@ -525,6 +562,11 @@ async function main() {
     workspaceEnv,
     commands,
   )
+  if (migrationMode) {
+    runPnpm('build-runtime-bundle', ['--filter', runtimeBundlePackage, 'build'], workspaceEnv, commands)
+    runPnpm('pack-runtime-bundle', ['--filter', runtimeBundlePackage, 'pack', '--pack-destination', packsRoot], workspaceEnv, commands)
+    requireAssertion(existsSync(runtimeTarball), `runtime tarball is missing: ${runtimeTarball}`)
+  }
   runPnpm(
     'pack-bundle',
     [
@@ -573,6 +615,11 @@ async function main() {
     profileEnv,
     commands,
   )
+  if (migrationMode) {
+    const runtimeArgs = ['add', '--offline', runtimeTarball]
+    validateFixedInstallBoundary({ platform: process.platform, probeRoot, realProbeRoot: realpathSync(probeRoot), profileName, tarballBasename: runtimeTarballBasename, tarballPath: runtimeTarball, realTarballPath: realpathSync(runtimeTarball), producedByCurrentRun: true, upstreamArgs: runtimeArgs })
+    runPnpm('plugin-add-runtime', ['exec', 'dsh', 'plugin', '--profile', profileName, ...runtimeArgs], profileEnv, commands)
+  }
   const dump = runPnpm(
     'dump-config',
     ['exec', 'dsh', '--profile', profileName, '--dump-config'],
@@ -591,9 +638,22 @@ async function main() {
   const publicExportEvidence = await resolveAndImportBundleExports(
     profileManifestPath,
   )
+  const runtimeBundle = migrationMode ? await resolveAndImportRuntimeBundle(profileManifestPath) : undefined
   const bundleNames = profileManifest.dsh?.profile?.bundles ?? []
   const baseIndex = bundleNames.indexOf(basePackage)
   const bundleIndex = bundleNames.indexOf(bundlePackage)
+  if (migrationMode) {
+    requireAssertion(JSON.stringify(bundleNames) === JSON.stringify([basePackage, bundlePackage, runtimeBundlePackage]), 'Profile bundle order is wrong')
+    const runtimeRoot = childPath(profileRoot, 'node_modules', '@tianwen', 'runtime-bundle')
+    const authoredRuntimePatch = parseRuntimePatch(readFileSync(resolve(repoRoot, 'packages/tianwen-runtime-bundle/cordis.patch.yml'), 'utf8'))
+    const installedRuntimePatch = parseRuntimePatch(readFileSync(resolve(runtimeRoot, 'cordis.patch.yml'), 'utf8'))
+    requireAssertion(JSON.stringify(authoredRuntimePatch) === JSON.stringify(installedRuntimePatch), 'installed Runtime patch differs from authored patch')
+    const runtimeRow = dumpedRow(dump, 'tianwen-runtime')
+    requireAssertion(rowValue(runtimeRow, /^ {2}name: (.+)$/u, 'name') === runtimeSpecifier && rowValue({ ...runtimeRow, lines: runtimeRow.lines.slice(runtimeRow.lines.indexOf('  config:') + 1) }, /^ {4}evolutionRoot: (.+)$/u, 'evolutionRoot') === 'D:/DevData/tianwen-dsh-probe/evolution', 'dumped Runtime row is wrong')
+    const meta = JSON.parse(readFileSync(resolve(repoRoot, 'packages/tianwen-runtime-bundle/dist/runtime.meta.json'), 'utf8'))
+    const external = [...new Set(meta.outputs['dist/runtime.js'].imports.filter(item => item.external && !item.path.startsWith('node:')).map(item => item.path))].sort()
+    requireAssertion(JSON.stringify(external) === JSON.stringify(runtimeBundle.externalSpecifiers), 'Runtime metafile external closure differs from installed manifest')
+  }
 
   const requireFromDsh = createRequire(realpathSync(resolve(
     repoRoot,
@@ -723,6 +783,7 @@ async function main() {
       publicExports: publicExportEvidence,
       dumpConfigSha256: sha256(Buffer.from(dump, 'utf8')),
       assertions,
+      ...(migrationMode ? { runtimeBundle } : {}),
     },
     forbiddenEffects: {
       interactiveAppStarts: 0,
