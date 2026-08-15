@@ -154,9 +154,16 @@ model = phase2-smoke
 它按真实 Agent 请求顺序只产生四个固定响应：
 
 1. 调用 `create_goal`，objective 固定，`max_goal_rounds = 1`；
-2. 在 Goal 创建结果后结束人类发起的 turn；
-3. 在唯一 Goal round 中调用 `tianwen_smoke_action`；
-4. 在 action 结果后输出固定文本 `TIANWEN_PHASE2_OK` 并结束。
+2. 在 Goal 创建结果后、仍处于同一个直接人类 turn 时调用
+   `tianwen_smoke_action`；
+3. 在 action 结果后使用创建结果中的精确 Goal id/revision 调用
+   `update_goal(action = complete)`；
+4. 在 Goal 完成结果后输出固定文本 `TIANWEN_PHASE2_OK` 并结束。
+
+公开 rc.6 headless 是一次性入口：它等待这次直接用户任务回到 idle 后退出，不等待
+Goal driver 随后排队的另一个自主 round。因此本阶段把完整 smoke 收口在同一个真实
+AgentLoop turn 内；自动 Goal round、重启恢复和显式 resume 已由前一阶段的专门合同
+测试覆盖，本阶段不复制 headless runner 来制造第二轮。
 
 请求次数、当前工具结果或工具名与预期不符时立即失败，不回退为普通文本回答，
 也不继续猜测。
@@ -204,9 +211,10 @@ dsh --profile tianwen "run the Tianwen phase 2 smoke task"
 - 只有一个新 Session；
 - 顶层 Goal 来自 headless 创建的真实 user source；
 - Goal objective 和 `maxGoalRounds=1` 精确；
-- 最终 Goal 已完成唯一 round，处于 `blocked`/`round-limit` 且 `disarmed`；
-- Session 中 `create_goal` 和 `tianwen_smoke_action` 都有完整 call/result；
-- Tianwen Evidence 对两者各产生一条 `complete` 记录；
+- 最终 Goal 未启动自主 round，处于 `complete` 且 `disarmed`；
+- Session 中 `create_goal`、`tianwen_smoke_action` 和完成 Goal 的 `update_goal`
+  都有完整 call/result；
+- Tianwen Evidence 对三者各产生一条 `complete` 记录；
 - Evidence 不复制原始任务文本、Goal objective、工具参数或结果；
 - Evolution Ledger 没有新增治理 transition，Champion 指针没有变化。
 
@@ -252,9 +260,9 @@ smoke adapter 只提供确定性离线输入，也不能直接写这些权威。
 采用最小 TDD，测试集中在一条真实启动链和少量静态边界：
 
 1. **Profile 合同测试**：精确三层、正式名称、无 probe/private/workspace 依赖；
-2. **smoke adapter 单元测试**：四步固定响应，顺序偏差 fail closed；
+2. **smoke adapter 单元测试**：同一用户 turn 内四步固定响应，顺序偏差 fail closed；
 3. **真实 headless E2E**：公开 DSH CLI 启动、exit 0、固定 stdout；
-4. **Session/Goal/Evidence 验收**：检查唯一 Session、Goal round 和两条 Evidence；
+4. **Session/Goal/Evidence 验收**：检查唯一 Session、完成的 Goal 和三条 Evidence；
 5. **无 Evolution 变更**：运行前后没有新增 Ledger transition，Champion 不变；
 6. **失败回执测试**：前置失败不会留下旧成功回执；
 7. **全量回归**：Node、closure、private import、typecheck、普通沙盒、Python

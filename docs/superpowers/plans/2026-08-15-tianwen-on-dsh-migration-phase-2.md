@@ -65,7 +65,7 @@ export const inject = ['llm', 'tools'] as const
 export function apply(ctx: Context): void
 ```
 
-- The adapter emits exactly four validated responses for one Session: fixed `create_goal`, fixed text ending the human turn, fixed `tianwen_smoke_action` in the Goal round, and fixed final text. A fifth request or an out-of-order tool result throws.
+- The adapter emits exactly four validated responses for one Session and one direct-human turn: fixed `create_goal`, fixed `tianwen_smoke_action`, fixed `update_goal(action = complete)` using the exact returned Goal ref, and fixed final text. A fifth request or an out-of-order tool result throws. Public rc.6 headless exits after that submitted turn reaches idle, so this stage must not depend on a separately queued Goal round or replace the upstream headless runner.
 
 - [ ] **Step 1: Write the failing Runtime Bundle smoke tests**
 
@@ -110,7 +110,7 @@ it('ships one fixed offline smoke entry', async () => {
 })
 ```
 
-Add one sequence test that constructs four minimal `GenerateOptions` values, uses fixed call IDs `tianwen-phase2-goal` and `tianwen-phase2-action`, verifies the two tool-call blocks and final text, then expects the fifth `collect(adapter.stream(...))` to reject with `phase 2 smoke script exhausted`. Cast only the test messages to `GenerateOptions`; production code must keep full types.
+Add one sequence test that constructs four minimal `GenerateOptions` values, uses fixed call IDs `tianwen-phase2-goal`, `tianwen-phase2-action`, and `tianwen-phase2-goal-complete`, verifies the three tool-call blocks and final text, then expects the fifth `collect(adapter.stream(...))` to reject with `phase 2 smoke script exhausted`. The create result fixture must expose the exact Goal id/revision later passed to `update_goal`; malformed or mismatched result content must fail before cursor advancement. Cast only the test messages to `GenerateOptions`; production code must keep full types.
 
 Update the existing archive expectation to require exactly:
 
@@ -161,6 +161,7 @@ export const SMOKE_FINAL_TEXT = 'TIANWEN_PHASE2_OK' as const
 
 const GOAL_CALL_ID = CallId('tianwen-phase2-goal')
 const ACTION_CALL_ID = CallId('tianwen-phase2-action')
+const COMPLETE_CALL_ID = CallId('tianwen-phase2-goal-complete')
 
 function textResponse(text: string): readonly StreamChunk[] {
   return [
@@ -194,11 +195,11 @@ function toolResponse(
 
 1. require exact provider/model;
 2. capture the first `sessionId` and require every later request to match it;
-3. require both `create_goal` and `tianwen_smoke_action` in `options.tools`;
+3. require `create_goal`, `tianwen_smoke_action`, and `update_goal` in `options.tools`;
 4. on step 0 emit `create_goal` with exact `{ objective: SMOKE_GOAL_OBJECTIVE, max_goal_rounds: 1 }`;
-5. on step 1 require the last tool-result call ID to be `GOAL_CALL_ID`, then emit `textResponse('goal created')`;
-6. on step 2 require at least one user message whose source kind is `goal`, then emit `tianwen_smoke_action` with `{}`;
-7. on step 3 require the last tool-result call ID to be `ACTION_CALL_ID`, then emit `textResponse(SMOKE_FINAL_TEXT)`;
+5. on step 1 require the last tool-result call ID to be `GOAL_CALL_ID`, validate and retain the returned Goal id/revision, then emit `tianwen_smoke_action` with `{}`;
+6. on step 2 require the last tool-result call ID to be `ACTION_CALL_ID`, then emit `update_goal` with the retained exact ref and `{ action: 'complete' }`;
+7. on step 3 require the last tool-result call ID to be `COMPLETE_CALL_ID`, then emit `textResponse(SMOKE_FINAL_TEXT)`;
 8. increment its cursor only after validation succeeds; otherwise throw without advancing.
 
 Register exactly one adapter route and one Tool:
@@ -468,10 +469,11 @@ const calls = events.filter(event => event.type === 'tool/call')
 expect(calls.map(event => event.data.name)).toEqual([
   'create_goal',
   'tianwen_smoke_action',
+  'update_goal',
 ])
 
 const results = events.filter(event => event.type === 'tool/result')
-expect(results).toHaveLength(2)
+expect(results).toHaveLength(3)
 expect(events.filter(event => event.type === 'step/start')).toHaveLength(4)
 
 const goalChanges = events.filter(event => event.type === 'goal/change')
@@ -479,10 +481,9 @@ const finalGoal = goalChanges.at(-1)!.data.goal
 expect(finalGoal).toMatchObject({
   objective: 'prove the Tianwen phase 2 startup path',
   maxGoalRounds: 1,
-  roundsStarted: 1,
-  phase: 'blocked',
+  roundsStarted: 0,
+  phase: 'complete',
   activation: 'disarmed',
-  blockedReason: { code: 'round-limit' },
 })
 
 const evidence = projectEvidence(SessionId(header.id), events)
@@ -492,6 +493,7 @@ expect(evidence.map(record => ({
 }))).toEqual([
   { toolName: 'create_goal', status: 'complete' },
   { toolName: 'tianwen_smoke_action', status: 'complete' },
+  { toolName: 'update_goal', status: 'complete' },
 ])
 ```
 
@@ -515,14 +517,14 @@ Publish exact schema `tianwen.phase2-startup.v1` with:
   goal: {
     objective: 'prove the Tianwen phase 2 startup path',
     maxGoalRounds: 1,
-    roundsStarted: 1,
-    phase: 'blocked',
+    roundsStarted: 0,
+    phase: 'complete',
     activation: 'disarmed',
-    blockedReason: 'round-limit',
   },
   evidence: [
     { toolName: 'create_goal', status: 'complete' },
     { toolName: 'tianwen_smoke_action', status: 'complete' },
+    { toolName: 'update_goal', status: 'complete' },
   ],
   evolution: { transitionCountDelta: 0, championChanged: false },
   forbiddenEffects: {
