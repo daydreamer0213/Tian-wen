@@ -11,6 +11,7 @@ export const SMOKE_FINAL_TEXT = 'TIANWEN_PHASE2_OK' as const
 
 const GOAL_CALL_ID = CallId('tianwen-phase2-goal')
 const ACTION_CALL_ID = CallId('tianwen-phase2-action')
+const COMPLETE_CALL_ID = CallId('tianwen-phase2-goal-complete')
 
 function textResponse(text: string): readonly StreamChunk[] {
   return [
@@ -43,18 +44,52 @@ function hasTool(options: GenerateOptions, name: string): boolean {
   return options.tools?.some(tool => tool.name === name) ?? false
 }
 
-function lastToolResultCallId(options: GenerateOptions): typeof GOAL_CALL_ID | undefined {
-  for (const message of options.messages.toReversed()) {
-    for (const block of message.content.toReversed()) {
-      if (block.type === 'tool-result') return block.toolCallId
-    }
+function currentToolResult(options: GenerateOptions, callId: typeof GOAL_CALL_ID) {
+  const message = options.messages.at(-1)
+  const block = message?.content[0]
+  if (message?.role !== 'user'
+    || message.source.kind !== 'tool'
+    || message.source.callId !== callId
+    || message.content.length !== 1
+    || block?.type !== 'tool-result'
+    || block.toolCallId !== callId
+    || block.isError === true) {
+    return undefined
   }
+  return block
+}
+
+function createdGoalRef(options: GenerateOptions): {
+  goal_id: string
+  revision: number
+} | undefined {
+  const result = currentToolResult(options, GOAL_CALL_ID)
+  const content = result?.content
+  if (content?.length !== 1 || content[0]?.type !== 'text') return undefined
+
+  let value: unknown
+  try {
+    value = JSON.parse(content[0].text)
+  } catch {
+    return undefined
+  }
+  if (typeof value !== 'object' || value === null || !('goal' in value)
+    || typeof value.goal !== 'object' || value.goal === null
+    || !('id' in value.goal) || !('revision' in value.goal)) {
+    return undefined
+  }
+  const { id, revision } = value.goal
+  if (typeof id !== 'string' || id.length === 0 || id !== id.trim()
+    || typeof revision !== 'number' || !Number.isSafeInteger(revision)
+    || revision < 1) return undefined
+  return { goal_id: id, revision }
 }
 
 export class Phase2SmokeAdapter extends LlmAdapter {
   private cursor = 0
   private sessionId: GenerateOptions['sessionId']
   private hasSessionId = false
+  private goalRef: ReturnType<typeof createdGoalRef>
 
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     if (options.provider !== SMOKE_PROVIDER || options.model !== SMOKE_MODEL) {
@@ -66,7 +101,8 @@ export class Phase2SmokeAdapter extends LlmAdapter {
     } else if (options.sessionId !== this.sessionId) {
       throw new Error('phase 2 smoke adapter requires one session')
     }
-    if (!hasTool(options, 'create_goal') || !hasTool(options, SMOKE_ACTION)) {
+    if (!hasTool(options, 'create_goal') || !hasTool(options, SMOKE_ACTION)
+      || !hasTool(options, 'update_goal')) {
       throw new Error('phase 2 smoke adapter requires its fixed tools')
     }
 
@@ -79,21 +115,25 @@ export class Phase2SmokeAdapter extends LlmAdapter {
         })
         break
       case 1:
-        if (lastToolResultCallId(options) !== GOAL_CALL_ID) {
-          throw new Error('phase 2 smoke expected the goal result')
-        }
-        response = textResponse('goal created')
-        break
-      case 2:
-        if (!options.messages.some(message => message.role === 'user'
-          && message.source.kind === 'goal')) {
-          throw new Error('phase 2 smoke expected a goal round')
+        this.goalRef = createdGoalRef(options)
+        if (this.goalRef === undefined) {
+          throw new Error('phase 2 smoke expected a valid goal result')
         }
         response = toolResponse(ACTION_CALL_ID, SMOKE_ACTION, {})
         break
-      case 3:
-        if (lastToolResultCallId(options) !== ACTION_CALL_ID) {
+      case 2:
+        if (currentToolResult(options, ACTION_CALL_ID) === undefined
+          || this.goalRef === undefined) {
           throw new Error('phase 2 smoke expected the action result')
+        }
+        response = toolResponse(COMPLETE_CALL_ID, 'update_goal', {
+          ...this.goalRef,
+          action: 'complete',
+        })
+        break
+      case 3:
+        if (currentToolResult(options, COMPLETE_CALL_ID) === undefined) {
+          throw new Error('phase 2 smoke expected the goal completion result')
         }
         response = textResponse(SMOKE_FINAL_TEXT)
         break

@@ -145,7 +145,19 @@ describe('@tianwen/runtime-bundle', () => {
     const tools = [
       { name: 'create_goal', description: 'Create a goal', parameters: {} },
       { name: 'tianwen_smoke_action', description: 'Run smoke action', parameters: {} },
+      { name: 'update_goal', description: 'Update a goal', parameters: {} },
     ]
+    const goalResult = JSON.stringify({
+      goal: {
+        id: 'tianwen-phase2-goal-id',
+        revision: 1,
+        objective: 'prove the Tianwen phase 2 startup path',
+        phase: 'active',
+        roundsStarted: 0,
+        maxGoalRounds: 1,
+      },
+      activation: 'armed',
+    })
     const requests = [
       {
         provider: 'tianwen-offline',
@@ -165,19 +177,8 @@ describe('@tianwen/runtime-bundle', () => {
           content: [{
             type: 'tool-result',
             toolCallId: CallId('tianwen-phase2-goal'),
-            content: [{ type: 'text', text: 'goal created' }],
+            content: [{ type: 'text', text: goalResult }],
           }],
-        }],
-      },
-      {
-        provider: 'tianwen-offline',
-        model: 'phase2-smoke',
-        sessionId: 'tianwen-phase2-session',
-        tools,
-        messages: [{
-          role: 'user',
-          source: { kind: 'goal' },
-          content: [{ type: 'text', text: 'run the only goal round' }],
         }],
       },
       {
@@ -195,7 +196,49 @@ describe('@tianwen/runtime-bundle', () => {
           }],
         }],
       },
+      {
+        provider: 'tianwen-offline',
+        model: 'phase2-smoke',
+        sessionId: 'tianwen-phase2-session',
+        tools,
+        messages: [{
+          role: 'user',
+          source: {
+            kind: 'tool',
+            callId: CallId('tianwen-phase2-goal-complete'),
+          },
+          content: [{
+            type: 'tool-result',
+            toolCallId: CallId('tianwen-phase2-goal-complete'),
+            content: [{ type: 'text', text: JSON.stringify({
+              goal: {
+                id: 'tianwen-phase2-goal-id',
+                revision: 2,
+                objective: 'prove the Tianwen phase 2 startup path',
+                phase: 'complete',
+                roundsStarted: 0,
+                maxGoalRounds: 1,
+              },
+              activation: 'disarmed',
+            }) }],
+          }],
+        }],
+      },
     ] as GenerateOptions[]
+    const malformedCreateResult = {
+      ...requests[1],
+      messages: [{
+        role: 'user',
+        source: { kind: 'tool', callId: CallId('tianwen-phase2-goal') },
+        content: [{
+          type: 'tool-result',
+          toolCallId: CallId('tianwen-phase2-goal'),
+          content: [{ type: 'text', text: JSON.stringify({
+            goal: { id: 'tianwen-phase2-goal-id', revision: 0 },
+          }) }],
+        }],
+      }],
+    } as GenerateOptions
 
     const createGoal = await collect(adapter.stream(requests[0]!))
     expect(createGoal[1]).toMatchObject({
@@ -210,18 +253,31 @@ describe('@tianwen/runtime-bundle', () => {
       },
     })
 
-    const goalCreated = await collect(adapter.stream(requests[1]!))
-    expect(goalCreated[1]).toMatchObject({
-      block: { type: 'text', text: 'goal created' },
-    })
+    await expect(collect(adapter.stream(malformedCreateResult))).rejects.toThrow(
+      'phase 2 smoke expected a valid goal result',
+    )
 
-    const action = await collect(adapter.stream(requests[2]!))
+    const action = await collect(adapter.stream(requests[1]!))
     expect(action[1]).toMatchObject({
       block: {
         type: 'tool-call',
         id: 'tianwen-phase2-action',
         name: 'tianwen_smoke_action',
         arguments: '{}',
+      },
+    })
+
+    const completeGoal = await collect(adapter.stream(requests[2]!))
+    expect(completeGoal[1]).toMatchObject({
+      block: {
+        type: 'tool-call',
+        id: 'tianwen-phase2-goal-complete',
+        name: 'update_goal',
+        arguments: JSON.stringify({
+          goal_id: 'tianwen-phase2-goal-id',
+          revision: 1,
+          action: 'complete',
+        }),
       },
     })
 
