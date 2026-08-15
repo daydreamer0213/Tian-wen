@@ -248,7 +248,9 @@ Phase 1 新增四层验证。
 - 未评测或未批准 Cordis Plugin 在 Dynamic define/run 前拒绝；
 - 经过其自身 Evaluation 和 Approval 后可以成为 Champion；
 - BROKEN candidate 不改变正式 Champion；
-- 重启后使用新的临时 ID rehydrate 同一正式 Champion。
+- 重启后在新的空 Dynamic registry 中重新 mint 一次临时绑定并
+  rehydrate 同一正式 Champion；`pluginId` / `packageId` 的字符串值可能
+  因上游进程内计数器重置而重复，不能用跨 Context 字符串不等判断新旧。
 
 ### 7.4 全量回归
 

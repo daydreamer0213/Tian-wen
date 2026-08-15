@@ -767,6 +767,12 @@ expect(second.ctx.tianwenEvolution.listEvents().at(-1)).toMatchObject({
 })
 ```
 
+The fresh Context starts with an empty Dynamic registry and must append a new
+`runtime-bound` event from the formal Artifact source. Do not assert that the
+opaque `pluginId` / `packageId` strings differ across Contexts: rc.6 process-local
+counters may reuse the same string values, and those values are never restart
+authority.
+
 The test must not pass `nop1`, `oracle1`, or their receipt digest into
 `recordEvaluation`. The Cordis evaluation constants above are deliberately
 separate.
@@ -803,7 +809,9 @@ git diff --check
 ```
 
 Expected: Python Nop/Oracle repeatability passes; unapproved Dynamic inventory
-does not change; BROKEN leaves V1 Champion active; restart uses new opaque IDs.
+does not change; BROKEN leaves V1 Champion active; restart creates a fresh
+runtime binding from the formal source without treating opaque ID strings as
+cross-Context authority.
 
 - [ ] **Step 6: Fresh scoped review and commit**
 
