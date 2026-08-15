@@ -1,0 +1,39 @@
+{
+  "name": "@tianwen/runtime-bundle",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./runtime": {
+      "default": "./dist/runtime.js"
+    }
+  },
+  "files": [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/runtime.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.1"
+  },
+  "devDependencies": {
+    "@tianwen/runtime": "workspace:*",
+    "esbuild": "0.28.2"
+  },
+  "scripts": {
+    "build": "tsc -b && esbuild src/runtime.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/runtime --metafile=dist/runtime.meta.json --outfile=dist/runtime.js",
+    "typecheck": "tsc -b --pretty false"
+  }
+}

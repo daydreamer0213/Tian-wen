@@ -161,6 +161,19 @@ importers:
         specifier: workspace:*
         version: link:../tianwen-evolution
 
+  packages/tianwen-runtime-bundle:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: 4.0.1
+        version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+    devDependencies:
+      '@tianwen/runtime':
+        specifier: workspace:*
+        version: link:../tianwen-runtime
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+
 packages:
 
   '@anthropic-ai/sdk@0.91.1':
