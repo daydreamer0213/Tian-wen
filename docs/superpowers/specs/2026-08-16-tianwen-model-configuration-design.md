@@ -12,6 +12,7 @@ Add two installed commands:
 ```powershell
 tianwen model status --data-dir D:\DevData\tianwen
 tianwen model use --model deepseek-v4-pro --data-dir D:\DevData\tianwen
+tianwen model use --model offline --data-dir D:\DevData\tianwen
 ```
 
 `status` reports the current default model and whether its credential reference
@@ -37,8 +38,9 @@ It reuses the public `0.1.0-rc.6` services already mounted by
 
 The DeepSeek adapter already owns provider route `deepseek-official` and
 publishes `deepseek-v4-flash` and `deepseek-v4-pro`. Tianwen accepts only those
-two first-version model ids. Supporting arbitrary providers or catalog ids is
-not needed yet.
+two first-version model ids plus `offline`, a fixed alias for restoring the
+installed `tianwen-offline/phase2-smoke` selection. Supporting arbitrary
+providers or catalog ids is not needed yet.
 
 ## 3. Credential contract
 
@@ -63,7 +65,7 @@ repository or persisted Goal/Session data.
 
 ```text
 tianwen model status --data-dir ABSOLUTE_PATH [--json]
-tianwen model use --model deepseek-v4-flash|deepseek-v4-pro
+tianwen model use --model offline|deepseek-v4-flash|deepseek-v4-pro
                   --data-dir ABSOLUTE_PATH [--json]
 ```
 
@@ -71,7 +73,7 @@ tianwen model use --model deepseek-v4-flash|deepseek-v4-pro
 - `--data-dir` must be absolute;
 - `status` rejects `--model`;
 - `use` requires one supported model id;
-- provider and credential reference are fixed by Tianwen;
+- provider, offline mapping and credential reference are fixed by Tianwen;
 - unknown flags and unrelated Goal/create flags are usage errors.
 
 Usage errors return 2. Missing/incompatible installation, Profile launch,
@@ -84,9 +86,9 @@ resolver used by create/resume. A model-only patch disables ordinary headless
 startup and the Goal round driver, then inserts one Tianwen model runner.
 
 For `status`, the runner only reads the current selection, catalog and safe
-credential description. For `use`, it first proves the requested model exists
-in the current `deepseek-official` catalog, calls `saveSelection()`, and reads
-the resulting selection back. DSH owns the atomic `settings.yaml` write.
+credential description. For `use`, it first proves the mapped model exists in
+its current provider catalog, calls `saveSelection()`, and reads the resulting
+selection back. DSH owns the atomic `settings.yaml` write.
 
 No Agent or Session is created. No Goal, Evidence, Evolution or Champion state
 is read or changed. The receipt always records `modelRequestsDelta: 0`.
@@ -115,11 +117,13 @@ contents or environment contents.
 2. `model use --model deepseek-v4-pro` persists the selection in DSH settings.
 3. A fresh process reports the saved V4 Pro selection.
 4. `model use --model deepseek-v4-flash` can replace it through the same seam.
-5. Unsupported provider/model input fails before any settings write.
-6. Receipts and stderr never contain a fake-key sentinel used by tests.
-7. Goal, Session, Evidence, Evolution and Champion authority bytes remain
+5. `model use --model offline` restores `tianwen-offline/phase2-smoke` without
+   sending a model request.
+6. Unsupported provider/model input fails before any settings write.
+7. Receipts and stderr never contain a fake-key sentinel used by tests.
+8. Goal, Session, Evidence, Evolution and Champion authority bytes remain
    unchanged.
-8. Existing install/create/list/status/resume behavior remains unchanged.
+9. Existing install/create/list/status/resume behavior remains unchanged.
 
 ## 8. Non-goals
 
