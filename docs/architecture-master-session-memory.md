@@ -760,6 +760,37 @@ Alpha-A 独立实施分支为：
   有硬预算上限和清晰回执的真实模型 smoke/Goal round；由于它会产生外部 API 调用和
   费用，必须获得用户明确授权后才执行。在授权前不应继续堆 dry-run、凭据框架或 UI。
 
+- 单次真实 DeepSeek V4 Pro smoke 阶段已完成并独立推送；实施分支为
+  `codex/tianwen-live-model-smoke`，远端精确 HEAD 为
+  `53ae351509ab1209a1f0f396e135703580b3e39b`；canonical handoff 位于该分支的
+  `docs/operations/tianwen-deepseek-v4-pro-live-smoke-handoff.md`；
+- smoke 只通过已安装 DSH 公开 `llm.stream` 路由
+  `deepseek-official/deepseek-v4-pro`，固定提示要求精确返回
+  `TIANWEN_SMOKE_OK`，不使用 AgentLoop、Goal、Session 或工具；
+- 用户批准的唯一付费尝试已经消耗且成功：恰好 1 个请求、29 tokens、marker 匹配，
+  按 2026-08-16 官方价格本地估算 CNY `0.000114`；硬上限为 64 输出 tokens、512
+  总 tokens、CNY `0.01`、90 秒、无自动重试；
+- 脱敏回执保存在
+  `D:\DevData\tianwen-live-model-smoke\receipts\deepseek-v4-pro-smoke.json`，
+  SHA-256 为
+  `1924ce779d00eecc4ea8b7f586d0d1779baa0ef2ef5410a3667ab4ea2b8bc66c`；
+  回执不保存原始模型文本或密钥；smoke 后立即切回
+  `tianwen-offline/phase2-smoke`，fresh status 的模型请求增量为 0；
+- 最终 Runtime Bundle archive SHA-256 为
+  `044d3e1d6030cf4be893e1fc9025c9a259eca35b06692f0dbe9d2ebfb39d0c08`；
+  最终窄门为 70 项测试、Runtime Bundle build、workspace typecheck 和 diff clean，
+  且修复过程没有再次调用模型；
+- 当前真实付费授权已经用完。下一推荐入口是先设计并离线证明一个固定工具、单轮预算、
+  无副作用的真实 Goal round 合同；真正再次调用外部模型前必须获得新的明确 token/费用
+  预算，不能复用本次授权；
+- 用户再次明确要求遵守 ponytail 和不过度防御：安全门必须对应真实权限边界和实际损失，
+  不能把同用户恶意进程、已被攻陷宿主机或已审核同进程插件突然恶意化等假设自动升级为
+  普通开发阻塞。复审意见必须结合当前威胁模型核实，不建设不能形成真实隔离的安全框架；
+- 当前超长主控会话在本阶段后交接。新主控会话先读
+  `docs/architecture-master-session-memory.md` 和
+  `docs/operations/tianwen-master-controller-session-handoff-2026-08-16.md`，旧会话只保留为
+  历史，不再承担后续实现上下文。
+
 当前主控会话维持架构主权与阶段监督，同时按用户最新授权使用“本回合子代理”模式
 完成独立复审；不再依赖权限不稳定的派生任务会话。原 Task 10 心跳和旧 Alpha 推进
 保持暂停，每个新阶段仍使用独立分支、canonical handoff 和 GitHub 存档。
