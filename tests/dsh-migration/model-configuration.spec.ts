@@ -88,6 +88,13 @@ describe('tianwen model', () => {
     ['unsupported model', ['model', 'use', '--model', 'other', '--data-dir', 'D:/DevData/tianwen']],
     ['model on status', ['model', 'status', '--model', 'offline', '--data-dir', 'D:/DevData/tianwen']],
     ['missing model on use', ['model', 'use', '--data-dir', 'D:/DevData/tianwen']],
+    ['missing model on smoke', ['model', 'smoke', '--data-dir', 'D:/DevData/tianwen']],
+    ['Flash model on smoke', ['model', 'smoke', '--model', 'deepseek-v4-flash', '--data-dir', 'D:/DevData/tianwen']],
+    ['offline model on smoke', ['model', 'smoke', '--model', 'offline', '--data-dir', 'D:/DevData/tianwen']],
+    ['arbitrary prompt on smoke', ['model', 'smoke', '--model', 'deepseek-v4-pro', '--objective', 'forbidden', '--data-dir', 'D:/DevData/tianwen']],
+    ['Goal flag on smoke', ['model', 'smoke', '--model', 'deepseek-v4-pro', '--goal', 'goal-1', '--data-dir', 'D:/DevData/tianwen']],
+    ['round flag on smoke', ['model', 'smoke', '--model', 'deepseek-v4-pro', '--max-rounds', '1', '--data-dir', 'D:/DevData/tianwen']],
+    ['smoke outside D DevData', ['model', 'smoke', '--model', 'deepseek-v4-pro', '--data-dir', 'D:/outside-devdata']],
     ['relative data dir', ['model', 'status', '--data-dir', 'relative']],
     ['Goal flag', ['model', 'status', '--goal', 'goal-1', '--data-dir', 'D:/DevData/tianwen']],
     ['create flag', ['model', 'status', '--objective', 'forbidden', '--data-dir', 'D:/DevData/tianwen']],
@@ -114,6 +121,9 @@ describe('tianwen model', () => {
         .resolves.toBe(0)
       await expect(main([
         'model', 'use', '--model', 'deepseek-v4-pro', '--data-dir', dataDir, '--json',
+      ])).resolves.toBe(0)
+      await expect(main([
+        'model', 'smoke', '--model', 'deepseek-v4-pro', '--data-dir', dataDir, '--json',
       ])).resolves.toBe(0)
     } finally {
       rmSync(dataDir, { recursive: true, force: true })
@@ -144,6 +154,17 @@ describe('tianwen model', () => {
     expect(Object.keys(invocation.options.env!).filter(key => !before.has(key))).toEqual([
       'DSH_HOME', 'TIANWEN_MODEL_JSON', 'TIANWEN_MODEL_MODEL', 'TIANWEN_MODEL_OPERATION',
     ])
+  })
+
+  it('accepts smoke only for DeepSeek V4 Pro below D:\\DevData', () => {
+    expect(preflightModelCommand(
+      'smoke', 'deepseek-v4-pro', 'D:\\DevData\\tianwen',
+    )).toMatchObject({
+      operation: 'smoke', model: 'deepseek-v4-pro', dataDir: 'D:\\DevData\\tianwen',
+    })
+    expect(() => preflightModelCommand(
+      'smoke', 'deepseek-v4-pro', 'D:\\not-devdata',
+    )).toThrow('dataDir must be under D:\\DevData')
   })
 
   it('reports the fixed offline status without catalog discovery', async () => {

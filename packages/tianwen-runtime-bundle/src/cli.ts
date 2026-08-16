@@ -43,6 +43,7 @@ const CREATE_USAGE = [
 const MODEL_USAGE = [
   'Usage: tianwen model status --data-dir ABSOLUTE_PATH [--json]',
   'Usage: tianwen model use --model offline|deepseek-v4-flash|deepseek-v4-pro --data-dir ABSOLUTE_PATH [--json]',
+  'Usage: tianwen model smoke --model deepseek-v4-pro --data-dir D:\\DevData\\ABSOLUTE_PATH [--json]',
   '',
 ].join('\n')
 
@@ -57,6 +58,12 @@ function positiveInteger(value: string | undefined): number | undefined {
   if (!/^[1-9][0-9]*$/u.test(value)) return undefined
   const parsed = Number(value)
   return Number.isSafeInteger(parsed) ? parsed : undefined
+}
+
+function isSmokeDataDir(dataDir: string): boolean {
+  const devDataDir = resolve('D:\\DevData')
+  const resolved = resolve(dataDir)
+  return resolved === devDataDir || resolved.startsWith(`${devDataDir}\\`)
 }
 
 function formatText(status: GoalStatusProjection): string {
@@ -143,6 +150,8 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
                 (modelOperation === 'status' ? values.model !== undefined :
                   modelOperation === 'use'
                     ? modelChoice === undefined || !['offline', 'deepseek-v4-flash', 'deepseek-v4-pro'].includes(modelChoice)
+                    : modelOperation === 'smoke'
+                      ? modelChoice !== 'deepseek-v4-pro' || !isSmokeDataDir(values['data-dir'])
                     : true)
             : true
     )
@@ -154,7 +163,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   try {
     if (command === 'model') {
       return await launchModelCommand(preflightModelCommand(
-        modelOperation as 'status' | 'use', modelChoice, values['data-dir'],
+        modelOperation as 'status' | 'use' | 'smoke', modelChoice, values['data-dir'],
       ), values.json === true)
     }
     if (command === 'create') {

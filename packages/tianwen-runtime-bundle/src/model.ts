@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { resolveInstalledDshBin } from './resume.js'
 
 export type ModelChoice = 'offline' | 'deepseek-v4-flash' | 'deepseek-v4-pro'
-export type ModelOperation = 'status' | 'use'
+export type ModelOperation = 'status' | 'use' | 'smoke'
 
 export const MODEL_SELECTIONS = {
   offline: { provider: 'tianwen-offline', model: 'phase2-smoke' },
@@ -37,11 +37,21 @@ export function preflightModelCommand(
   dataDirInput: string,
 ): ModelCommandPreflight {
   if (!isAbsolute(dataDirInput)) throw new TypeError('dataDir must be an absolute path')
-  if (operation !== 'status' && operation !== 'use') throw new TypeError('invalid model operation')
-  if ((operation === 'status' && model !== undefined) || (operation === 'use' && model === undefined)) {
+  if (operation !== 'status' && operation !== 'use' && operation !== 'smoke') {
+    throw new TypeError('invalid model operation')
+  }
+  if (
+    (operation === 'status' && model !== undefined) ||
+    (operation === 'use' && model === undefined) ||
+    (operation === 'smoke' && model !== 'deepseek-v4-pro')
+  ) {
     throw new TypeError('invalid model command')
   }
   const dataDir = resolve(dataDirInput)
+  const devDataDir = resolve('D:\\DevData')
+  if (operation === 'smoke' && dataDir !== devDataDir && !dataDir.startsWith(`${devDataDir}\\`)) {
+    throw new TypeError('dataDir must be under D:\\DevData')
+  }
   return {
     dataDir,
     dshBin: resolveInstalledDshBin(dataDir),

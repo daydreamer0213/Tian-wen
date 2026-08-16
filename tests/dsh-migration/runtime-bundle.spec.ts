@@ -490,6 +490,7 @@ describe('@tianwen/runtime-bundle', () => {
       .map(item => item.path)
       .sort()).toEqual([
       '@deepseek-ai/dsh-credentials',
+      '@deepseek-ai/dsh-llm',
     ])
     expect(Object.keys(metafile.inputs).map(input =>
       posix.normalize(input.replaceAll('\\', '/')))).toEqual(['src/model-runner.ts'])
