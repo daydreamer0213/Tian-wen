@@ -84,6 +84,7 @@ interface ModelSmokeReceiptBase {
   readonly provider: typeof SMOKE_PROVIDER
   readonly requestCount: 0 | 1
   readonly schemaVersion: 'tianwen.model-smoke.v1'
+  readonly timestamp: string
 }
 
 export type ModelSmokeReceipt =
@@ -91,8 +92,14 @@ export type ModelSmokeReceipt =
     readonly status: 'passed'
     readonly markerMatched: true
     readonly requestCount: 1
+    readonly finishKind: 'stop'
     readonly usage: {
+      readonly cacheReadTokens?: number
+      readonly cacheWriteTokens?: number
       readonly estimatedCostCny: number
+      readonly inputTokens: number
+      readonly outputTokens: number
+      readonly reasoningTokens?: number
       readonly totalTokens: number
     }
   })
@@ -135,6 +142,7 @@ function services(ctx: Context) {
 function smokeFailure(
   failureCode: ModelSmokeFailureCode,
   requestCount: 0 | 1,
+  timestamp: string,
 ): ModelSmokeReceipt {
   return {
     schemaVersion: 'tianwen.model-smoke.v1',
@@ -145,6 +153,7 @@ function smokeFailure(
     requestCount,
     markerMatched: false,
     limits: SMOKE_LIMITS,
+    timestamp,
   }
 }
 
@@ -164,13 +173,17 @@ export async function runModelSmoke(
   now: () => number = Date.now,
   timer: SmokeTimer = DEFAULT_SMOKE_TIMER,
 ): Promise<ModelSmokeReceipt> {
+  const startedAt = now()
+  const timestamp = new Date(startedAt).toISOString()
+  const failure = (failureCode: ModelSmokeFailureCode, requestCount: 0 | 1) =>
+    smokeFailure(failureCode, requestCount, timestamp)
   const { agentDefaultModel, credentials, llm } = services(ctx)
   const selection = agentDefaultModel.currentSelection()
   if (selection.provider !== SMOKE_PROVIDER || selection.model !== SMOKE_MODEL) {
-    return smokeFailure('selection-mismatch', 0)
+    return failure('selection-mismatch', 0)
   }
   if (!(await credentials.describe(credentialRef('DEEPSEEK_API_KEY'))).configured) {
-    return smokeFailure('credential-missing', 0)
+    return failure('credential-missing', 0)
   }
 
   const deadline = new AbortController()
@@ -195,53 +208,52 @@ export async function runModelSmoke(
   let text = ''
   let usage: TokenUsage | undefined
   let finished = false
-  const startedAt = now()
   try {
     const stream = llm.stream(options)
-    if (deadline.signal.aborted) return smokeFailure('timeout', 1)
+    if (deadline.signal.aborted) return failure('timeout', 1)
     for await (const chunk of stream) {
-      if (deadline.signal.aborted || now() - startedAt > SMOKE_LIMITS.timeoutMs) {
-        return smokeFailure('timeout', 1)
+      if (deadline.signal.aborted) {
+        return failure('timeout', 1)
       }
-      if (finished) return smokeFailure('duplicate-finish', 1)
+      if (finished) return failure('duplicate-finish', 1)
       if (chunk.type === 'text-delta') {
         text += chunk.text
       } else if (chunk.type === 'usage') {
-        if (usage !== undefined) return smokeFailure('duplicate-usage', 1)
-        if (!validUsage(chunk.usage)) return smokeFailure('provider-error', 1)
+        if (usage !== undefined) return failure('duplicate-usage', 1)
+        if (!validUsage(chunk.usage)) return failure('provider-error', 1)
         usage = chunk.usage
       } else if (chunk.type === 'finish') {
         finished = true
-        if (chunk.reason.kind === 'error') return smokeFailure('provider-error', 1)
-        if (chunk.reason.kind === 'aborted') return smokeFailure('timeout', 1)
-        if (chunk.reason.kind !== 'stop') return smokeFailure('unexpected-response', 1)
+        if (chunk.reason.kind === 'error') return failure('provider-error', 1)
+        if (chunk.reason.kind === 'aborted') return failure('timeout', 1)
+        if (chunk.reason.kind !== 'stop') return failure('unexpected-response', 1)
       } else if (chunk.type === 'reasoning-delta' ||
         (chunk.type === 'block-end' && chunk.block.type === 'reasoning')) {
-        return smokeFailure('unexpected-reasoning', 1)
+        return failure('unexpected-reasoning', 1)
       } else if (chunk.type === 'tool-call-delta' ||
         (chunk.type === 'block-end' && chunk.block.type === 'tool-call')) {
-        return smokeFailure('unexpected-tool-call', 1)
+        return failure('unexpected-tool-call', 1)
       } else if (chunk.type === 'block-start' && chunk.blockType !== 'text') {
-        return smokeFailure('unexpected-response', 1)
+        return failure('unexpected-response', 1)
       } else if (chunk.type === 'block-end' && chunk.block.type !== 'text') {
-        return smokeFailure('unexpected-response', 1)
+        return failure('unexpected-response', 1)
       }
     }
-    if (deadline.signal.aborted) return smokeFailure('timeout', 1)
+    if (deadline.signal.aborted) return failure('timeout', 1)
   } catch {
-    return smokeFailure(deadline.signal.aborted ? 'timeout' : 'provider-error', 1)
+    return failure(deadline.signal.aborted ? 'timeout' : 'provider-error', 1)
   } finally {
     timer.clearTimeout(timeout)
     signal?.removeEventListener('abort', abort)
   }
 
-  if (!finished) return smokeFailure('missing-finish', 1)
-  if (usage === undefined) return smokeFailure('missing-usage', 1)
-  if (text !== SMOKE_MARKER) return smokeFailure('unexpected-response', 1)
+  if (!finished) return failure('missing-finish', 1)
+  if (usage === undefined) return failure('missing-usage', 1)
+  if (text !== SMOKE_MARKER) return failure('unexpected-response', 1)
   const totalTokens = usage.inputTokens + usage.outputTokens +
     (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
   if (totalTokens > SMOKE_LIMITS.maxTotalTokens) {
-    return smokeFailure('token-budget-exceeded', 1)
+    return failure('token-budget-exceeded', 1)
   }
   const estimatedCostCny = (
     usage.inputTokens * 3 +
@@ -256,8 +268,18 @@ export async function runModelSmoke(
     model: SMOKE_MODEL,
     requestCount: 1,
     markerMatched: true,
+    timestamp,
+    finishKind: 'stop',
     limits: SMOKE_LIMITS,
-    usage: { totalTokens, estimatedCostCny },
+    usage: {
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      ...usage.cacheReadTokens === undefined ? {} : { cacheReadTokens: usage.cacheReadTokens },
+      ...usage.cacheWriteTokens === undefined ? {} : { cacheWriteTokens: usage.cacheWriteTokens },
+      ...usage.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens },
+      totalTokens,
+      estimatedCostCny,
+    },
   }
 }
 

@@ -63,8 +63,9 @@ describe('DeepSeek V4 Pro live smoke contract', () => {
   it('sends one bounded DeepSeek request and returns a sanitized marker receipt', async () => {
     const credentialSentinel = randomUUID()
     const services = context({ credentialSentinel })
+    const now = vi.fn(() => Date.parse('2026-08-16T12:34:56.789Z'))
 
-    const receipt = await runModelSmoke(services as never)
+    const receipt = await runModelSmoke(services as never, undefined, now)
 
     expect(services.llm.stream).toHaveBeenCalledTimes(1)
     expect(services.llm.stream).toHaveBeenCalledWith(expect.objectContaining({
@@ -87,11 +88,39 @@ describe('DeepSeek V4 Pro live smoke contract', () => {
       model: 'deepseek-v4-pro',
       requestCount: 1,
       markerMatched: true,
+      timestamp: '2026-08-16T12:34:56.789Z',
+      finishKind: 'stop',
       limits: { maxOutputTokens: 64, maxTotalTokens: 512, maxCostCny: 0.01, timeoutMs: 90000 },
-      usage: { totalTokens: 33, estimatedCostCny: 0.000108125 },
+      usage: {
+        inputTokens: 20,
+        outputTokens: 8,
+        cacheReadTokens: 5,
+        totalTokens: 33,
+        estimatedCostCny: 0.000108125,
+      },
     })
+    if (receipt.status !== 'passed') throw new Error('expected successful smoke receipt')
+    expect(receipt.usage).not.toHaveProperty('cacheWriteTokens')
+    expect(receipt.usage).not.toHaveProperty('reasoningTokens')
+    expect(now).toHaveBeenCalledTimes(1)
     expect(JSON.stringify(receipt)).not.toContain(MARKER)
     expectSanitized(receipt, credentialSentinel, randomUUID())
+  })
+
+  it('records the same derived timestamp in a preflight failure receipt', async () => {
+    const services = context({
+      selection: { provider: 'tianwen-offline', model: 'phase2-smoke' },
+    })
+    const now = vi.fn(() => Date.parse('2026-08-16T12:34:56.789Z'))
+
+    const receipt = await runModelSmoke(services as never, undefined, now)
+
+    expect(receipt).toMatchObject({
+      status: 'failed',
+      failureCode: 'selection-mismatch',
+      timestamp: '2026-08-16T12:34:56.789Z',
+    })
+    expect(now).toHaveBeenCalledTimes(1)
   })
 
   it.each([
