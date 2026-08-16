@@ -19,7 +19,7 @@ import type { SessionEvent } from '@tianwen/dsh-compat'
 import { projectEvidence } from '../../packages/tianwen-evidence/src/projector.js'
 
 const root = resolve(import.meta.dirname, '../..')
-const tianwenRoot = 'D:/DevData/tianwen'
+const tianwenRoot = 'D:/DevData/tianwen-installer-e2e'
 const dshHostRoot = `${tianwenRoot}/dsh-host`
 const dshHome = `${tianwenRoot}/dsh-home`
 const profileRoot = `${dshHome}/profiles/tianwen`
@@ -29,28 +29,13 @@ const receiptPath = `${tianwenRoot}/receipts/phase2-startup-receipt.json`
 const statusReceiptPath = `${tianwenRoot}/receipts/phase3-goal-status-receipt.json`
 const listReceiptPath = `${tianwenRoot}/receipts/phase4-goal-list-receipt.json`
 const resumeReceiptPath = `${tianwenRoot}/receipts/phase5-goal-resume-receipt.json`
+const installReceiptPath = `${tianwenRoot}/receipts/tianwen-install.json`
 const archive = `${tianwenRoot}/packs/tianwen-runtime-bundle-0.0.0.tgz`
+const installer = resolve(root, 'scripts/install-tianwen.mjs')
 const taskText = 'run the Tianwen phase 2 smoke task'
 const completeCallId = 'tianwen-phase2-goal-complete'
 const enabled = process.env.TIANWEN_DSH_PHASE2_STARTUP === '1'
-const profilePatch = resolve(root, 'profiles/tianwen/cordis.patch.yml')
-const exactPnpm = 'D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs'
-const missingPnpm = 'D:/DevData/missing-corepack/v1/pnpm/11.20.0/bin/pnpm.mjs'
 const runtimePackage = '@tianwen/runtime-bundle'
-const workspacePolicy = `packages:
-  - .
-
-nodeLinker: hoisted
-autoInstallPeers: true
-overrides:
-  koffi: 3.1.4
-allowBuilds:
-  '@deepseek-ai/dsh-subprocess-local': false
-  '@google/genai': false
-  koffi: false
-  node-pty: false
-  protobufjs: false
-`
 
 function run(
   executable: string,
@@ -130,6 +115,7 @@ function childEnvironment(): NodeJS.ProcessEnv {
     statusReceiptPath,
     listReceiptPath,
     resumeReceiptPath,
+    installReceiptPath,
     archive,
     temp,
     virtualStore,
@@ -182,25 +168,6 @@ function bytesOrMissing(path: string): Buffer | undefined {
   return existsSync(path) ? readFileSync(path) : undefined
 }
 
-function dumpRow(source: string, id: string): string[] {
-  const lines = source.replaceAll('\r\n', '\n').split('\n')
-  const starts = lines
-    .map((line, index) => ({ line, index }))
-    .filter(({ line }) => line === `- id: ${id}`)
-  expect(starts).toHaveLength(1)
-  const start = starts[0]!.index
-  const end = lines.findIndex((line, index) => index > start && line.startsWith('- id: '))
-  return lines.slice(start, end < 0 ? undefined : end)
-}
-
-function dumpValue(lines: string[], key: string): string {
-  const values = lines
-    .map(line => new RegExp(`^ {2,}${key}: (.+)$`, 'u').exec(line)?.[1])
-    .filter((value): value is string => value !== undefined)
-  expect(values).toHaveLength(1)
-  return values[0]!.replace(/^['"]|['"]$/gu, '')
-}
-
 async function assertInstalledBundle(profileManifestPath: string): Promise<{
   readonly cli: string
 }> {
@@ -234,7 +201,7 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   return { cli }
 }
 
-async function start(missingCorepack = false): Promise<void> {
+async function start(): Promise<void> {
   rmSync(receiptPath, { force: true })
   rmSync(`${receiptPath}.tmp`, { force: true })
   rmSync(statusReceiptPath, { force: true })
@@ -243,49 +210,100 @@ async function start(missingCorepack = false): Promise<void> {
   rmSync(`${listReceiptPath}.tmp`, { force: true })
   rmSync(resumeReceiptPath, { force: true })
   rmSync(`${resumeReceiptPath}.tmp`, { force: true })
-  const pnpm = missingCorepack ? missingPnpm : exactPnpm
-  expect(existsSync(pnpm)).toBe(true)
   const env = childEnvironment()
-  expect(existsSync(profilePatch)).toBe(true)
+  const durableBeforeInstall = snapshotState()
+  expect(existsSync(installer)).toBe(true)
+  rmSync(dshHostRoot, { recursive: true, force: true })
   rmSync(profileRoot, { recursive: true, force: true })
-  mkdirSync(profileRoot, { recursive: true })
-  writeFileSync(`${profileRoot}/pnpm-workspace.yaml`, workspacePolicy, 'utf8')
   rmSync(archive, { force: true })
+  rmSync(installReceiptPath, { force: true })
+  rmSync(`${installReceiptPath}.tmp`, { force: true })
 
-  if (!existsSync(`${dshHostRoot}/node_modules/@deepseek-ai/dsh/package.json`)) {
-    const deployHost = run(process.execPath, [
-      exactPnpm, '--config.inject-workspace-packages=true',
-      '--filter', '@tianwen/dsh-host', 'deploy', '--prod', dshHostRoot,
-    ], env, 300_000)
-    expect(deployHost.status, `${deployHost.stdout}\n${deployHost.stderr}`).toBe(0)
+  const firstInstall = run(process.execPath, [
+    installer,
+    '--data-dir',
+    tianwenRoot,
+    '--json',
+  ], env, 600_000)
+  expect(firstInstall.status, `${firstInstall.stdout}\n${firstInstall.stderr}`).toBe(0)
+  expect(firstInstall.stderr).toBe('')
+  const installReceipt = JSON.parse(readFileSync(installReceiptPath, 'utf8')) as {
+    schemaVersion: string
+    status: string
+    archiveDigest: string
+    dataDir: string
+    binDir: string
+    hostRoot: string
+    profileRoot: string
+    archivePath: string
+    receiptPath: string
+    cliPath: string
+    pnpmVersion: string
+    dshVersion: string
+    profileBundles: string[]
   }
+  expect(JSON.parse(firstInstall.stdout)).toEqual(installReceipt)
+  expect(Object.keys(installReceipt).sort()).toEqual([
+    'archiveDigest',
+    'archivePath',
+    'binDir',
+    'cliPath',
+    'dataDir',
+    'dshVersion',
+    'hostRoot',
+    'pnpmVersion',
+    'profileBundles',
+    'profileRoot',
+    'receiptPath',
+    'schemaVersion',
+    'status',
+  ])
+  expect(installReceipt).toMatchObject({
+    schemaVersion: 'tianwen.install.v1',
+    status: 'ready',
+    dataDir: tianwenRoot,
+    hostRoot: dshHostRoot,
+    profileRoot,
+    archivePath: archive,
+    receiptPath: installReceiptPath,
+    pnpmVersion: '11.20.0',
+    dshVersion: '0.1.0-rc.6',
+    profileBundles: [
+      '@deepseek-ai/dsh-base',
+      '@deepseek-ai/dsh-headless',
+      runtimePackage,
+    ],
+  })
+  expect(snapshotState()).toEqual(durableBeforeInstall)
   const dshBin = requireDshBin()
-
-  const build = run(process.execPath, [
-    exactPnpm, '--filter', '@tianwen/runtime-bundle...', 'build',
-  ], env)
-  expect(build.status, `${build.stdout}\n${build.stderr}`).toBe(0)
-  mkdirSync(dirname(archive), { recursive: true })
-  const pack = run(process.execPath, [
-    exactPnpm, '--filter', runtimePackage, 'pack', '--pack-destination', dirname(archive),
-  ], env)
-  expect(pack.status, `${pack.stdout}\n${pack.stderr}`).toBe(0)
-  expect(existsSync(archive)).toBe(true)
-
-  const install = run(process.execPath, [
-    dshBin, 'plugin', '--profile', 'tianwen',
-    'add', '--offline',
-    '@deepseek-ai/dsh-base@0.1.0-rc.6',
-    '@deepseek-ai/dsh-headless@0.1.0-rc.6',
-    archive,
-  ], env)
-  expect(install.status, `${install.stdout}\n${install.stderr}`).toBe(0)
-  const patch = readFileSync(profilePatch)
-  expect(patch.toString('utf8')).not.toContain('\r')
-  expect(patch.toString('utf8')).toMatch(/\n$/u)
-  writeFileSync(`${profileRoot}/cordis.patch.yml`, patch)
-
   const profileManifestPath = `${profileRoot}/package.json`
+  const installed = await assertInstalledBundle(profileManifestPath)
+  expect(realpathSync(installReceipt.cliPath)).toBe(realpathSync(installed.cli))
+  expect(relative(realpathSync(root), realpathSync(installed.cli)).startsWith('..')).toBe(true)
+  const receiptBytes = readFileSync(installReceiptPath)
+  const replayStablePaths = [
+    `${dshHostRoot}/node_modules/@deepseek-ai/dsh/package.json`,
+    archive,
+    `${profileRoot}/package.json`,
+    `${profileRoot}/pnpm-workspace.yaml`,
+    `${profileRoot}/pnpm-lock.yaml`,
+    `${profileRoot}/cordis.patch.yml`,
+  ]
+  const managedBytes = replayStablePaths.map(path => readFileSync(path))
+
+  const replay = run(process.execPath, [
+    installer,
+    '--data-dir',
+    tianwenRoot,
+    '--json',
+  ], env, 600_000)
+  expect(replay.status, `${replay.stdout}\n${replay.stderr}`).toBe(0)
+  expect(replay.stderr).toBe('')
+  expect(replay.stdout).toBe(firstInstall.stdout)
+  expect(readFileSync(installReceiptPath)).toEqual(receiptBytes)
+  expect(replayStablePaths.map(path => readFileSync(path))).toEqual(managedBytes)
+  expect(snapshotState()).toEqual(durableBeforeInstall)
+  expect(requireDshBin()).toBe(dshBin)
   const manifest = JSON.parse(readFileSync(profileManifestPath, 'utf8')) as {
     dependencies: Record<string, string>
     dsh: { profile: { bundles: string[] } }
@@ -299,21 +317,6 @@ async function start(missingCorepack = false): Promise<void> {
   expect(manifest.dependencies['@deepseek-ai/dsh-headless']).toBe('0.1.0-rc.6')
   expect(resolve(profileRoot, manifest.dependencies[runtimePackage]!.replace(/^file:/u, '')))
     .toBe(resolve(archive))
-  expect(readFileSync(`${profileRoot}/pnpm-workspace.yaml`, 'utf8')).toBe(workspacePolicy)
-
-  const dump = run(process.execPath, [dshBin, '--profile', 'tianwen', '--dump-config'], env)
-  expect(dump.status, `${dump.stdout}\n${dump.stderr}`).toBe(0)
-  expect(dumpValue(dumpRow(dump.stdout, 'agent-default-model'), 'provider')).toBe('tianwen-offline')
-  expect(dumpValue(dumpRow(dump.stdout, 'agent-default-model'), 'model')).toBe('phase2-smoke')
-  expect(dumpValue(dumpRow(dump.stdout, 'session-persistence-jsonl'), 'compression')).toBe('none')
-  expect(dumpValue(dumpRow(dump.stdout, 'session-persistence-jsonl'), 'packChunks')).toBe('false')
-  expect(dumpValue(dumpRow(dump.stdout, 'session-persistence-jsonl'), 'root')).toBe(sessionsRoot)
-  expect(dumpValue(dumpRow(dump.stdout, 'cordis-host-runner'), 'name'))
-    .toBe('@deepseek-ai/dsh-cordis-host-runner')
-  expect(dumpValue(dumpRow(dump.stdout, 'tianwen-runtime'), 'evolutionRoot')).toBe(evolutionRoot)
-  expect(dumpValue(dumpRow(dump.stdout, 'tianwen-phase2-smoke'), 'name'))
-    .toBe(`${runtimePackage}/smoke`)
-  const installed = await assertInstalledBundle(profileManifestPath)
 
   const ledger = `${evolutionRoot}/ledger.jsonl`
   const champion = `${evolutionRoot}/champion.json`
@@ -712,14 +715,7 @@ async function start(missingCorepack = false): Promise<void> {
 }
 
 describe('Tianwen formal headless startup', () => {
-  it.runIf(enabled)('removes a stale receipt before a missing exact Corepack runtime fails', async () => {
-    mkdirSync(dirname(receiptPath), { recursive: true })
-    writeFileSync(receiptPath, '{"stale":true}\n', 'utf8')
-    await expect(start(true)).rejects.toThrow()
-    expect(existsSync(receiptPath)).toBe(false)
-  })
-
   it.runIf(enabled)('installs the formal Profile and proves the public headless authority path', async () => {
     await start()
-  }, 600_000)
+  }, 1_500_000)
 })

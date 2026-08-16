@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "node scripts/typecheck-packages.mjs",
+    "install:tianwen": "node scripts/install-tianwen.mjs",
     "typecheck": "node scripts/typecheck-packages.mjs",
     "test:dsh": "vitest run",
     "test:dsh:sandbox": "vitest run tests/dsh-probe/sandbox.e2e.spec.ts",
