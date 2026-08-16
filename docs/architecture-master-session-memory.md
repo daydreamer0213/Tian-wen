@@ -700,7 +700,37 @@ Alpha-A 独立实施分支为：
   受控预算，复用现有安装器、Profile、Goal 权威和可见回执，不提前建设桌面端或
   宽泛任务 API。
 
-当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
+- `tianwen create` 最小显式新建 Goal 阶段已完成并独立推送；实施分支为
+  `codex/tianwen-goal-create`，远端精确 HEAD 为
+  `2d2777524a9feef0cb314ce46160ae40bd435e32`；canonical handoff 位于该分支的
+  `docs/operations/tianwen-explicit-goal-create-handoff.md`；
+- 正式命令为
+  `tianwen create --objective TEXT --data-dir ABS [--max-rounds N] [--json]`。
+  默认预算为 3 轮；命令只创建并 flush 一个顶层 Goal 和 JSONL Session，不自动运行
+  Goal round，模型请求增量必须为 0。用户随后复用 `list/status` 查看，再显式调用
+  `resume` 花费一轮；
+- create 复用安装器固定的 DSH host/Profile 和公开 Goal/Session/Agent 服务，只增加
+  一个固定 `shell:false` launcher、一个 runner 与一个 patch。patch 禁用
+  `headless-startup`、`headless-runner` 和 `goal-round-driver`；Session 记录命令调用时
+  的 `cwd`，确保后续 DSH prompt 组装和 workspace 权威完整；
+- runner 只有在 `ctx.sessions.flush()` 确认持久化监听器接受后才返回
+  `tianwen.goal-create.v1`。非 JSON 回执给出可复制的 PowerShell resume 命令，数据
+  目录使用单引号字面量并正确处理路径中的 `$()` 与单引号；
+- 正式安装 E2E 已改为真实 `create -> list/status -> resume`，不再由测试代码私下创建
+  resume Goal；create receipt 证明 Goal revision 1/active/rounds 0、Session event 1、
+  model request delta 0，随后 resume 正常完成一轮，第二次 resume 不改变状态；
+- 最终门禁：聚焦 create/Runtime Bundle `25 passed`；默认 Node `143 passed,
+  7 skipped`；正式 installed E2E `1 passed`；Windows 本地沙盒 `3 passed`；
+  Python A1–A5 `10 passed`；全量 Python `424 passed, 4 skipped`；离线 frozen
+  install、187 包/15 公开入口闭包、0 私有导入、类型检查、Ruff、diff 和工作树均
+  干净；正确性复审最终 0 Critical、0 Important，ponytail 复审无中高复杂度问题；
+- 本阶段仍没有自动 resume、daemon、scheduler、UI、数据库、真实付费模型、真实
+  Docker、自动晋升或 Runtime cutover。下一推荐入口是最小模型/凭据配置和一个真实
+  但预算受控的 Goal round 验收；在这之前不建设桌面面板或自主后台循环。
+
+当前主控会话维持架构主权与阶段监督，同时按用户最新授权使用“本回合子代理”模式
+完成独立复审；不再依赖权限不稳定的派生任务会话。原 Task 10 心跳和旧 Alpha 推进
+保持暂停，每个新阶段仍使用独立分支、canonical handoff 和 GitHub 存档。
 
 本节是动态状态。以后实施进度变化时可以更新本节，但不得借此修改前面的稳定共识。
 
