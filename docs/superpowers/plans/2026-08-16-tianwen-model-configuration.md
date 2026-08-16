@@ -161,6 +161,7 @@ git commit -m "feat: configure tianwen model selection"
 **Files:**
 
 - Modify: `packages/tianwen-runtime-bundle/package.json`
+- Modify: `pnpm-lock.yaml` only for the mechanical Runtime Bundle importer
 - Modify: `tests/dsh-migration/runtime-bundle.spec.ts`
 - Modify: `tests/dsh-migration/tianwen-startup.e2e.spec.ts`
 
@@ -199,9 +200,10 @@ has not been added to the manifest/build yet.
 
 - [ ] **Step 3: Add the minimal build and package entries**
 
-Add exact dependency `@deepseek-ai/dsh-credentials: 0.1.0-rc.6`; add one esbuild
-entry for `src/model-runner.ts`; publish the runner and patch. Do not add a new
-workspace package, bin, dependency version or generic command framework.
+Add exact dependency `@deepseek-ai/dsh-credentials: 0.1.0-rc.6`; update only
+the matching lockfile importer using the already locked rc.6 package; add one
+esbuild entry for `src/model-runner.ts`; publish the runner and patch. Do not add
+a new workspace package, bin, dependency version or generic command framework.
 
 - [ ] **Step 4: Add installed Profile persistence tests**
 
@@ -225,6 +227,7 @@ E2E serially. Then:
 
 ```powershell
 git add -- packages/tianwen-runtime-bundle/package.json `
+  pnpm-lock.yaml `
   tests/dsh-migration/runtime-bundle.spec.ts `
   tests/dsh-migration/tianwen-startup.e2e.spec.ts
 git commit -m "test: prove installed model configuration"
