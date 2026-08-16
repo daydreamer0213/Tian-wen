@@ -669,6 +669,37 @@ Alpha-A 独立实施分支为：
   Goal/启动任务”合同或安装器收口；在二者之间应优先补齐可重复的一键安装/升级入口，
   让现有 `list/status/resume` 不再依赖测试脚本准备 Profile 和 DSH host。
 
+- 可重复 Tianwen-on-DSH 安装器阶段已完成并独立推送；实施分支为
+  `codex/tianwen-installer`，远端精确 HEAD 为
+  `95701d5838ee0a062f579788c8701326f0e5ef37`；canonical handoff 位于该分支的
+  `docs/operations/tianwen-installer-handoff.md`；
+- 正式入口为
+  `node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen [--json]`。
+  用户只选择 D 盘数据目录；DSH `0.1.0-rc.6`、Profile 名、Runtime Bundle、
+  子进程程序和 argv 均固定，安装器不修改全局 PATH，而是在回执中返回已安装
+  `tianwen` 命令目录；
+- 正式安装不再使用 rc.6 的 `dsh plugin add`。真实 fresh Profile 证明它会重新解析
+  transitive semver 并可能选择离线 store 中不存在的新 tarball；最终方案只增加一个
+  极小的私有 `@tianwen/profile-host` workspace，由仓库 frozen lock 驱动
+  `pnpm deploy`，576 个依赖全部从 D 盘复用、0 下载，并包含 Windows 所需的 native
+  optional packages；Tianwen-owned 安装链路现在全部保持 `shell:false`；
+- Windows pnpm junction 必须在最终 Profile 路径创建。升级时安装器保留旧 Profile
+  和旧 Runtime archive 备份，新 Profile、dump-config、CLI、archive 与 receipt
+  全部验证/提交成功后才清理；任何 receipt commit 前失败会恢复旧 archive/Profile，
+  首装失败不留下 archive、Profile 或成功回执。Session 和 Evolution 不属于安装器
+  替换范围，并由 E2E 做安装前后字节比较；
+- 最终 fresh 安装/headless/list/status/resume E2E `1 passed`（510.28 秒）；精确最终
+  HEAD 的重放 E2E `1 passed`（18.48 秒）；串行默认 Node `132 passed, 7 skipped`；
+  Windows 本地沙盒 `3 passed`；Python A1–A5 `10 passed`；全量 Python
+  `424 passed, 4 skipped`；Ruff、依赖闭包、私有导入、类型检查、diff 和工作树均
+  干净；两次复审发现的 Profile/receipt 与 archive/receipt 失败窗口均已补测试修复，
+  最终为 0 Critical、0 Important、Ready；
+- 本阶段没有新增 UI、daemon、自动 resume、真实付费模型、真实 Docker、数据库或
+  Runtime cutover。现有 `list/status/resume` 已不再依赖测试脚本准备 host/Profile；
+  下一推荐入口回到“最小新建 Goal/启动任务”合同，只让用户显式提交 objective 和
+  受控预算，复用现有安装器、Profile、Goal 权威和可见回执，不提前建设桌面端或
+  宽泛任务 API。
+
 当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
 
 本节是动态状态。以后实施进度变化时可以更新本节，但不得借此修改前面的稳定共识。
