@@ -360,6 +360,7 @@ describe('Tianwen installer contract', () => {
     const root = testRoot('failed-profile-upgrade')
     const paths = deriveInstallPaths(root, 'win32')
     installTianwen({ dataDir: root, runner: scriptedInstaller(paths, undefined, 'runtime v1\n').runner })
+    const archiveBefore = readFileSync(paths.archivePath)
     const profileBefore = readFileSync(join(paths.profileRoot, 'package.json'))
     const receiptBefore = readFileSync(paths.receiptPath)
 
@@ -367,6 +368,7 @@ describe('Tianwen installer contract', () => {
       dataDir: root,
       runner: scriptedInstaller(paths, '@tianwen/profile-host', 'runtime v2\n').runner,
     })).toThrow(/scripted failure/u)
+    expect(readFileSync(paths.archivePath)).toEqual(archiveBefore)
     expect(readFileSync(join(paths.profileRoot, 'package.json'))).toEqual(profileBefore)
     expect(readFileSync(paths.receiptPath)).toEqual(receiptBefore)
   })
@@ -381,6 +383,7 @@ describe('Tianwen installer contract', () => {
     writeFileSync(session, 'session bytes\n', 'utf8')
     writeFileSync(ledger, 'ledger bytes\n', 'utf8')
     installTianwen({ dataDir: root, runner: scriptedInstaller(paths, undefined, 'runtime v1\n').runner })
+    const archiveBefore = readFileSync(paths.archivePath)
     const profileBefore = readFileSync(join(paths.profileRoot, 'package.json'))
     const receiptBefore = readFileSync(paths.receiptPath)
 
@@ -388,6 +391,7 @@ describe('Tianwen installer contract', () => {
       dataDir: root,
       runner: scriptedInstaller(paths, '--dump-config', 'runtime v2\n').runner,
     })).toThrow(/scripted failure/u)
+    expect(readFileSync(paths.archivePath)).toEqual(archiveBefore)
     expect(readFileSync(join(paths.profileRoot, 'package.json'))).toEqual(profileBefore)
     expect(readFileSync(paths.receiptPath)).toEqual(receiptBefore)
     expect(readFileSync(session, 'utf8')).toBe('session bytes\n')
@@ -402,6 +406,7 @@ describe('Tianwen installer contract', () => {
       dataDir: root,
       runner: scriptedInstaller(paths, '--dump-config').runner,
     })).toThrow(/scripted failure/u)
+    expect(existsSync(paths.archivePath)).toBe(false)
     expect(existsSync(paths.profileRoot)).toBe(false)
     expect(existsSync(paths.receiptPath)).toBe(false)
   })

@@ -449,19 +449,16 @@ export function installTianwen({
   const archiveStage = resolve(packsRoot, `.install-${process.pid}-${randomUUID()}`)
   const stagedArchive = resolve(archiveStage, basename(paths.archivePath))
   let archiveDigest
+  let archiveBackup
+  let archivePublished = false
+  let profileBackup
+  let profileChanged = false
   mkdirSync(archiveStage, { recursive: true })
   try {
     invokePnpm(['--filter', RUNTIME_PACKAGE, 'pack', '--pack-destination', archiveStage], 300_000)
     if (!statSync(stagedArchive).isFile()) throw new Error('Runtime Bundle archive was not created')
     archiveDigest = sha256File(stagedArchive)
-    renameSync(stagedArchive, paths.archivePath)
-  } finally {
-    rmSync(archiveStage, { force: true, recursive: true })
-  }
-
-  const profileChanged = !profileExists || installedArchiveDigest !== archiveDigest
-  let profileBackup
-  try {
+    profileChanged = !profileExists || installedArchiveDigest !== archiveDigest
     if (profileChanged) {
       const profilesRoot = dirname(paths.profileRoot)
       const id = `${process.pid}-${randomUUID()}`
@@ -492,6 +489,12 @@ export function installTianwen({
       archiveDigest,
       cliPath,
     })
+    if (existsSync(paths.archivePath)) {
+      archiveBackup = resolve(packsRoot, `.tianwen-backup-${process.pid}-${randomUUID()}.tgz`)
+      renameSync(paths.archivePath, archiveBackup)
+    }
+    renameSync(stagedArchive, paths.archivePath)
+    archivePublished = true
     const receiptStage = `${paths.receiptPath}.tmp-${process.pid}-${randomUUID()}`
     try {
       writeFileSync(receiptStage, canonicalJson(receipt), { encoding: 'utf8', flag: 'wx' })
@@ -506,8 +509,19 @@ export function installTianwen({
         // A stale backup is harmless after the Profile and receipt are committed.
       }
     }
+    if (archiveBackup !== undefined) {
+      try {
+        rmSync(archiveBackup, { force: true })
+      } catch {
+        // A stale backup is harmless after the archive and receipt are committed.
+      }
+    }
     return receipt
   } catch (error) {
+    if (archivePublished) rmSync(paths.archivePath, { force: true })
+    if (archiveBackup !== undefined && existsSync(archiveBackup)) {
+      renameSync(archiveBackup, paths.archivePath)
+    }
     if (profileChanged) {
       rmSync(paths.profileRoot, { force: true, recursive: true })
       if (profileBackup !== undefined && existsSync(profileBackup)) {
@@ -515,6 +529,8 @@ export function installTianwen({
       }
     }
     throw error
+  } finally {
+    rmSync(archiveStage, { force: true, recursive: true })
   }
 }
 
