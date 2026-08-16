@@ -56,7 +56,14 @@ function isAllowedStatusInput(input: string): boolean {
 function isAllowedCliInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return path === 'src/cli.ts' || path === 'src/create.ts' ||
-    path === 'src/resume.ts' || isAllowedStatusInput(path)
+    path === 'src/model.ts' || path === 'src/resume.ts' || isAllowedStatusInput(path)
+}
+
+function isAllowedModelRunnerInput(input: string): boolean {
+  const path = posix.normalize(input.replaceAll('\\', '/'))
+  return path === 'src/model-runner.ts' || path === 'src/model.ts' ||
+    path === 'src/resume.ts' || path === 'src/status.ts' ||
+    path === '../tianwen-evidence/dist/projector.js'
 }
 
 function isAllowedResumeRunnerInput(input: string): boolean {
@@ -112,6 +119,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.dependencies).toEqual({
       '@deepseek-ai/cordis': '4.0.1',
       '@deepseek-ai/dsh-agent': '0.1.0-rc.6',
+      '@deepseek-ai/dsh-credentials': '0.1.0-rc.6',
       '@deepseek-ai/dsh-goal': '0.1.0-rc.6',
       '@deepseek-ai/dsh-llm': '0.1.0-rc.6',
       '@deepseek-ai/dsh-session': '0.1.0-rc.6',
@@ -140,6 +148,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.exports).toHaveProperty('./status')
     expect(manifest.exports).toHaveProperty('./resume-runner')
     expect(manifest.exports).toHaveProperty('./create-runner')
+    expect(manifest.exports).toHaveProperty('./model-runner')
     expect(manifest.files).toEqual([
       'dist/index.js',
       'dist/index.d.ts',
@@ -148,10 +157,12 @@ describe('@tianwen/runtime-bundle', () => {
       'dist/status.js',
       'dist/status.d.ts',
       'dist/cli.js',
+      'dist/model-runner.js',
       'dist/create-runner.js',
       'dist/resume-runner.js',
       'cordis.patch.yml',
       'create.patch.yml',
+      'model.patch.yml',
       'resume.patch.yml',
     ])
   })
@@ -167,6 +178,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.dependencies).toEqual({
       '@deepseek-ai/cordis': '4.0.1',
       '@deepseek-ai/dsh-agent': '0.1.0-rc.6',
+      '@deepseek-ai/dsh-credentials': '0.1.0-rc.6',
       '@deepseek-ai/dsh-goal': '0.1.0-rc.6',
       '@deepseek-ai/dsh-llm': '0.1.0-rc.6',
       '@deepseek-ai/dsh-session': '0.1.0-rc.6',
@@ -471,6 +483,31 @@ describe('@tianwen/runtime-bundle', () => {
     expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
   })
 
+  it('bundles the model runner through its public DSH roots', () => {
+    const source = readFileSync(resolve(packageRoot, 'dist/model-runner.js'), 'utf8')
+    const metafile = json(resolve(packageRoot, 'dist/model-runner.meta.json')) as {
+      inputs: Record<string, unknown>
+      outputs: Record<string, { imports: { path: string; external?: boolean }[] }>
+    }
+    const output = Object.entries(metafile.outputs).find(([path]) =>
+      path.replaceAll('\\', '/').endsWith('dist/model-runner.js'))?.[1]
+    expect(output).toBeDefined()
+    expect(output!.imports
+      .filter(item => item.external === true && !item.path.startsWith('node:'))
+      .map(item => item.path)
+      .sort()).toEqual([
+      '@deepseek-ai/cordis',
+      '@deepseek-ai/dsh-credentials',
+      '@deepseek-ai/dsh-goal',
+      '@deepseek-ai/dsh-session',
+      '@deepseek-ai/dsh-session-persistence-jsonl',
+    ])
+    expect(Object.keys(metafile.inputs).filter(input =>
+      !isAllowedModelRunnerInput(input))).toEqual([])
+    expect(source).not.toMatch(/from\s+["']@tianwen\//u)
+    expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
+  })
+
   it('packs only the deployable runtime bundle files', () => {
     expect(existsSync(archive)).toBe(true)
     const entries = execFileSync(tar, ['-tzf', archive], {
@@ -487,11 +524,13 @@ describe('@tianwen/runtime-bundle', () => {
       'package/dist/create-runner.js',
       'package/dist/index.d.ts',
       'package/dist/index.js',
+      'package/dist/model-runner.js',
       'package/dist/resume-runner.js',
       'package/dist/runtime.js',
       'package/dist/smoke.js',
       'package/dist/status.d.ts',
       'package/dist/status.js',
+      'package/model.patch.yml',
       'package/package.json',
       'package/resume.patch.yml',
     ])

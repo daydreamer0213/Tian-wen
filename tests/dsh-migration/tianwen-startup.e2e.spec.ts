@@ -35,6 +35,7 @@ const archive = `${tianwenRoot}/packs/tianwen-runtime-bundle-0.0.0.tgz`
 const installer = resolve(root, 'scripts/install-tianwen.mjs')
 const taskText = 'run the Tianwen phase 2 smoke task'
 const completeCallId = 'tianwen-phase2-goal-complete'
+const modelSentinel = 'deepseek-key-must-not-appear'
 const enabled = process.env.TIANWEN_DSH_PHASE2_STARTUP === '1'
 const runtimePackage = '@tianwen/runtime-bundle'
 
@@ -178,6 +179,7 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   const smokeResolved = requireFromProfile.resolve(`${runtimePackage}/smoke`)
   const statusResolved = requireFromProfile.resolve(`${runtimePackage}/status`)
   const createRunnerResolved = requireFromProfile.resolve(`${runtimePackage}/create-runner`)
+  const modelRunnerResolved = requireFromProfile.resolve(`${runtimePackage}/model-runner`)
   const runtimeRoot = resolve(dirname(runtimeResolved), '..')
   const runtimeManifest = JSON.parse(readFileSync(
     resolve(runtimeRoot, 'package.json'),
@@ -190,17 +192,19 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   for (const external of Object.keys(runtimeManifest.dependencies).sort()) {
     await import(pathToFileURL(requireFromRuntime.resolve(external)).href)
   }
-  const [runtime, smoke, status, createRunner] = await Promise.all([
+  const [runtime, smoke, status, createRunner, modelRunner] = await Promise.all([
     import(pathToFileURL(runtimeResolved).href),
     import(pathToFileURL(smokeResolved).href),
     import(pathToFileURL(statusResolved).href),
     import(pathToFileURL(createRunnerResolved).href),
+    import(pathToFileURL(modelRunnerResolved).href),
   ])
   expect(runtime).toMatchObject({ name: 'tianwen-runtime', inject: ['dynamicCordisRunner'] })
   expect(smoke).toMatchObject({ name: 'tianwen-phase2-smoke', inject: ['llm', 'tools'] })
   expect(status.readGoalStatus).toBeTypeOf('function')
   expect(status.listGoals).toBeTypeOf('function')
   expect(createRunner.apply).toBeTypeOf('function')
+  expect(modelRunner.apply).toBeTypeOf('function')
   const cli = resolve(runtimeRoot, runtimeManifest.bin.tianwen)
   expect(statSync(cli).isFile()).toBe(true)
   return { cli }
@@ -762,6 +766,125 @@ async function start(): Promise<void> {
   expect(secondResume.stdout).toBe('')
   expect(secondResume.stderr).toBe('Error: Goal is complete\n')
   expect(snapshotState()).toEqual(stateAfterResume)
+
+  const modelEnv = { ...env, DEEPSEEK_API_KEY: modelSentinel }
+  const modelAuthorityBefore = {
+    goal: readFileSync(resumeLog!),
+    session: new Map(listSessionLogs().map(path => [path, readFileSync(path)] as const)),
+    evolution: snapshotState(),
+    champion: bytesOrMissing(champion),
+  }
+  const modelStatus = run(process.execPath, [
+    installed.cli,
+    'model',
+    'status',
+    '--data-dir',
+    tianwenRoot,
+    '--json',
+  ], modelEnv)
+  expect(modelStatus.status, `${modelStatus.stdout}\n${modelStatus.stderr}`).toBe(0)
+  expect(modelStatus.stderr).toBe('')
+  const offlineModelStatus = JSON.parse(modelStatus.stdout) as {
+    operation: string
+    selection: { provider: string, model: string }
+    credential: { configured: boolean, source?: string }
+    modelRequestsDelta: number
+  }
+  expect(offlineModelStatus).toMatchObject({
+    operation: 'status',
+    selection: { provider: 'tianwen-offline', model: 'phase2-smoke' },
+    credential: { configured: true, source: 'env' },
+    modelRequestsDelta: 0,
+  })
+
+  const useV4Pro = run(process.execPath, [
+    installed.cli,
+    'model',
+    'use',
+    '--model',
+    'deepseek-v4-pro',
+    '--data-dir',
+    tianwenRoot,
+    '--json',
+  ], modelEnv)
+  expect(useV4Pro.status, `${useV4Pro.stdout}\n${useV4Pro.stderr}`).toBe(0)
+  expect(useV4Pro.stderr).toBe('')
+  expect(JSON.parse(useV4Pro.stdout)).toMatchObject({
+    operation: 'use',
+    selection: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    modelRequestsDelta: 0,
+  })
+
+  const freshV4ProStatus = run(process.execPath, [
+    installed.cli,
+    'model',
+    'status',
+    '--data-dir',
+    tianwenRoot,
+    '--json',
+  ], modelEnv)
+  expect(freshV4ProStatus.status, `${freshV4ProStatus.stdout}\n${freshV4ProStatus.stderr}`).toBe(0)
+  expect(freshV4ProStatus.stderr).toBe('')
+  expect(JSON.parse(freshV4ProStatus.stdout)).toMatchObject({
+    operation: 'status',
+    selection: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    credential: { configured: true, source: 'env' },
+    modelRequestsDelta: 0,
+  })
+
+  const useOffline = run(process.execPath, [
+    installed.cli,
+    'model',
+    'use',
+    '--model',
+    'offline',
+    '--data-dir',
+    tianwenRoot,
+    '--json',
+  ], modelEnv)
+  expect(useOffline.status, `${useOffline.stdout}\n${useOffline.stderr}`).toBe(0)
+  expect(useOffline.stderr).toBe('')
+  expect(JSON.parse(useOffline.stdout)).toMatchObject({
+    operation: 'use',
+    selection: { provider: 'tianwen-offline', model: 'phase2-smoke' },
+    modelRequestsDelta: 0,
+  })
+
+  const freshOfflineStatus = run(process.execPath, [
+    installed.cli,
+    'model',
+    'status',
+    '--data-dir',
+    tianwenRoot,
+    '--json',
+  ], modelEnv)
+  expect(freshOfflineStatus.status, `${freshOfflineStatus.stdout}\n${freshOfflineStatus.stderr}`).toBe(0)
+  expect(freshOfflineStatus.stderr).toBe('')
+  expect(JSON.parse(freshOfflineStatus.stdout)).toMatchObject({
+    operation: 'status',
+    selection: { provider: 'tianwen-offline', model: 'phase2-smoke' },
+    credential: { configured: true, source: 'env' },
+    modelRequestsDelta: 0,
+  })
+
+  for (const child of [modelStatus, useV4Pro, freshV4ProStatus, useOffline, freshOfflineStatus]) {
+    expect(`${child.stdout}\n${child.stderr}`).not.toContain(modelSentinel)
+  }
+  const receiptFiles = globSync('receipts/**/*', {
+    cwd: tianwenRoot,
+    withFileTypes: true,
+  })
+    .filter(entry => entry.isFile())
+    .map(entry => resolve(entry.parentPath, entry.name))
+  for (const receipt of receiptFiles) {
+    expect(readFileSync(receipt, 'utf8')).not.toContain(modelSentinel)
+  }
+  expect({
+    goal: readFileSync(resumeLog!),
+    session: new Map(listSessionLogs().map(path => [path, readFileSync(path)] as const)),
+    evolution: snapshotState(),
+    champion: bytesOrMissing(champion),
+  }).toEqual(modelAuthorityBefore)
 
   const resumeReceipt = {
     schemaVersion: 'tianwen.goal-resume-e2e.v1',
