@@ -728,6 +728,38 @@ Alpha-A 独立实施分支为：
   Docker、自动晋升或 Runtime cutover。下一推荐入口是最小模型/凭据配置和一个真实
   但预算受控的 Goal round 验收；在这之前不建设桌面面板或自主后台循环。
 
+- Tianwen 最小模型/凭据配置阶段已完成并独立推送；实施分支为
+  `codex/tianwen-model-config`，远端精确 HEAD 为
+  `4567eca10f88cc264d006bc8537d0a870db3999c`；canonical handoff 位于该分支的
+  `docs/operations/tianwen-model-configuration-handoff.md`；
+- 正式命令为
+  `tianwen model status --data-dir ABS [--json]` 和
+  `tianwen model use --model offline|deepseek-v4-flash|deepseek-v4-pro --data-dir ABS [--json]`。
+  `offline` 固定映射 `tianwen-offline/phase2-smoke`，两个 DeepSeek 选项固定映射
+  `deepseek-official` 的对应 V4 模型；选择由 DSH 现有 settings/default-model 服务
+  持久化，fresh process 能读取，且可显式切回 offline；
+- 凭据只复用 DSH 的 `DEEPSEEK_API_KEY` reference、credentials-local 和环境优先级。
+  status 只报告 configured/source/writable 等安全事实，不输出值；本阶段没有 key argv、
+  stdin 密钥协议、自建 vault、Session/Goal/receipt 密钥字段、桌面表单或通用凭据框架；
+- 模型命令只配置，不创建 Agent/Session，不恢复 Goal，不发模型请求。安装态 E2E 用
+  runtime-generated child-only fake key、真实 fetch 失败标记和 Session/Goal/Evolution/
+  Champion 字节快照独立证明 0 request 和 0 authority mutation；V4 Pro 持久化与 offline
+  rollback 均通过 fresh process；
+- rc.6 快速 one-shot runner 曾在 DSH Profile loader/watch setup 完成前调用 `appExit`，
+  导致有效回执后退出 13。`setImmediate` 假设被真实 E2E 否定；最终直接复用已发布
+  `dsh-headless` 的公开模式 `await ctx.get('loader')?.await()`，direct installed command
+  退出 0，完整 installed E2E `1 passed`；
+- 最终门禁：聚焦 model/Runtime Bundle `37 passed`；默认 Node `165 passed,
+  7 skipped`；正式 installed E2E `1 passed`；Windows 本地沙盒 `3 passed`；
+  Python A1–A5 `10 passed`；全量 Python `424 passed, 4 skipped`；离线 frozen install、
+  187 包/15 公开入口闭包、0 私有导入、类型检查、Ruff、diff 和工作树均干净；
+  Task 2 窄复审和最终 release-record 复审均为 0 Critical、0 Important、0 Minor，
+  ponytail 复审结论为 `Lean already. Ship.`；
+- 本阶段仍没有真实 DeepSeek 请求、付费调用、自动 resume、daemon、scheduler、UI、
+  数据库、真实 Docker、自动晋升或 Runtime cutover。下一推荐入口是一个用户显式触发、
+  有硬预算上限和清晰回执的真实模型 smoke/Goal round；由于它会产生外部 API 调用和
+  费用，必须获得用户明确授权后才执行。在授权前不应继续堆 dry-run、凭据框架或 UI。
+
 当前主控会话维持架构主权与阶段监督，同时按用户最新授权使用“本回合子代理”模式
 完成独立复审；不再依赖权限不稳定的派生任务会话。原 Task 10 心跳和旧 Alpha 推进
 保持暂停，每个新阶段仍使用独立分支、canonical handoff 和 GitHub 存档。
