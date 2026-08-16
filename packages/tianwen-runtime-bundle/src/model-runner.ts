@@ -80,10 +80,16 @@ async function catalogForSelection(
       selectedModelAvailable: true,
     }
   }
-  const availableModels = (await llm.listModels(selection.provider))
-    .map(model => model.id)
+  if (
+    selection.provider !== MODEL_SELECTIONS['deepseek-v4-flash'].provider ||
+    (
+      selection.model !== MODEL_SELECTIONS['deepseek-v4-flash'].model &&
+      selection.model !== MODEL_SELECTIONS['deepseek-v4-pro'].model
+    )
+  ) throw new Error('unsupported saved model selection')
+  const availableModels = await deepseekCatalog(llm)
   return {
-    provider: selection.provider,
+    provider: MODEL_SELECTIONS['deepseek-v4-flash'].provider,
     availableModels,
     selectedModelAvailable: availableModels.includes(selection.model),
   }
@@ -150,6 +156,7 @@ function formatModelConfigText(receipt: ModelConfigReceipt): string {
 
 export const name = 'tianwen-model-runner'
 export const inject = ['agentDefaultModel', 'credentials', 'llm'] as const
+const SAFE_MODEL_ERROR = 'model configuration failed'
 
 export function apply(ctx: Context, config: ModelRunnerConfig): void {
   const exit = ctx.get('appExit') as ((code: number) => void) | undefined
@@ -160,7 +167,7 @@ export function apply(ctx: Context, config: ModelRunnerConfig): void {
       : formatModelConfigText(receipt))
     exit(0)
   }, error => {
-    process.stderr.write(`tianwen model: ${error instanceof Error ? error.message : 'failed'}\n`)
+    process.stderr.write(`tianwen model: ${SAFE_MODEL_ERROR}\n`)
     exit(1)
   })
 }

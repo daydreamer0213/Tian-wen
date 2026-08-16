@@ -218,6 +218,19 @@ describe('tianwen model', () => {
     expect(services.agentDefaultModel.saveSelection).not.toHaveBeenCalled()
   })
 
+  it('rejects an unsupported saved selection before catalog discovery', async () => {
+    const services = context({
+      selection: { provider: 'other-provider', model: 'other-model' },
+    })
+
+    await expect(runModelCommand(services as never, {
+      operation: 'status', model: undefined, json: true,
+    })).rejects.toThrow('unsupported saved model selection')
+
+    expect(services.llm.listModels).not.toHaveBeenCalled()
+    expect(services.credentials.describe).not.toHaveBeenCalled()
+  })
+
   it('prints one safe receipt and exits through appExit', async () => {
     const services = context({})
     const exit = vi.fn()
@@ -232,4 +245,33 @@ describe('tianwen model', () => {
     expect(stdout).toHaveBeenCalledTimes(1)
     expect(String(stdout.mock.calls[0]?.[0])).not.toContain(SENTINEL_KEY)
   })
+
+  it.each(['catalog', 'credential'] as const)(
+    'does not print untrusted %s errors at the process boundary',
+    async service => {
+      const services = context({
+        selection: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      })
+      const rejection = new Error(SENTINEL_KEY)
+      if (service === 'catalog') {
+        services.llm.listModels.mockRejectedValue(rejection)
+      } else {
+        services.credentials.describe.mockRejectedValue(rejection)
+      }
+      const exit = vi.fn()
+      const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+      const runnerContext = {
+        get: (serviceName: string) => serviceName === 'appExit'
+          ? exit : services.get(serviceName),
+      }
+
+      apply(runnerContext as never, { operation: 'status', model: undefined, json: true })
+      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
+
+      expect(stdout).not.toHaveBeenCalled()
+      expect(String(stderr.mock.calls)).not.toContain(SENTINEL_KEY)
+      expect(stderr).toHaveBeenCalledWith('tianwen model: model configuration failed\n')
+    },
+  )
 })
