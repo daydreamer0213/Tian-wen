@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import {
   existsSync,
@@ -35,7 +36,6 @@ const archive = `${tianwenRoot}/packs/tianwen-runtime-bundle-0.0.0.tgz`
 const installer = resolve(root, 'scripts/install-tianwen.mjs')
 const taskText = 'run the Tianwen phase 2 smoke task'
 const completeCallId = 'tianwen-phase2-goal-complete'
-const modelSentinel = 'deepseek-key-must-not-appear'
 const enabled = process.env.TIANWEN_DSH_PHASE2_STARTUP === '1'
 const runtimePackage = '@tianwen/runtime-bundle'
 
@@ -767,7 +767,40 @@ async function start(): Promise<void> {
   expect(secondResume.stderr).toBe('Error: Goal is complete\n')
   expect(snapshotState()).toEqual(stateAfterResume)
 
-  const modelEnv = { ...env, DEEPSEEK_API_KEY: modelSentinel }
+  const modelSentinel = randomUUID()
+  const modelRequestGuard = `${tianwenRoot}/temp/model-request-guard-${randomUUID()}.cjs`
+  const modelRequestMarker = `${tianwenRoot}/temp/model-request-${randomUUID()}.txt`
+  rmSync(modelRequestMarker, { force: true })
+  writeFileSync(modelRequestGuard, [
+    "const { writeFileSync } = require('node:fs')",
+    'const marker = process.env.TIANWEN_MODEL_REQUEST_MARKER',
+    "if (marker === undefined) throw new Error('missing model request marker')",
+    'globalThis.fetch = () => {',
+    "  writeFileSync(marker, 'attempted\\n', 'utf8')",
+    "  throw new Error('unexpected model request')",
+    '}',
+    '',
+  ].join('\n'), 'utf8')
+  const modelEnv = {
+    ...env,
+    DEEPSEEK_API_KEY: modelSentinel,
+    NODE_OPTIONS: `--require=${modelRequestGuard}`,
+    TIANWEN_MODEL_REQUEST_MARKER: modelRequestMarker,
+  }
+  expect(modelEnv).toMatchObject({
+    NODE_OPTIONS: `--require=${modelRequestGuard}`,
+    TIANWEN_MODEL_REQUEST_MARKER: modelRequestMarker,
+  })
+  expect(existsSync(modelRequestGuard)).toBe(true)
+  const guardProbe = run(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    "await fetch('http://127.0.0.1:9/')",
+  ], modelEnv)
+  expect(guardProbe.status).not.toBe(0)
+  expect(existsSync(modelRequestMarker)).toBe(true)
+  rmSync(modelRequestMarker, { force: true })
+  const modelSessionsBefore = listSessionLogs()
   const modelAuthorityBefore = {
     goal: readFileSync(resumeLog!),
     session: new Map(listSessionLogs().map(path => [path, readFileSync(path)] as const)),
@@ -879,12 +912,15 @@ async function start(): Promise<void> {
   for (const receipt of receiptFiles) {
     expect(readFileSync(receipt, 'utf8')).not.toContain(modelSentinel)
   }
+  expect(existsSync(modelRequestMarker)).toBe(false)
+  expect(listSessionLogs()).toEqual(modelSessionsBefore)
   expect({
     goal: readFileSync(resumeLog!),
     session: new Map(listSessionLogs().map(path => [path, readFileSync(path)] as const)),
     evolution: snapshotState(),
     champion: bytesOrMissing(champion),
   }).toEqual(modelAuthorityBefore)
+  rmSync(modelRequestGuard, { force: true })
 
   const resumeReceipt = {
     schemaVersion: 'tianwen.goal-resume-e2e.v1',

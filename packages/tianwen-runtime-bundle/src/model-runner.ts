@@ -1,8 +1,18 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 
-import { MODEL_SELECTIONS } from './model.js'
-import type { ModelChoice, ModelOperation } from './model.js'
+type ModelChoice = 'offline' | 'deepseek-v4-flash' | 'deepseek-v4-pro'
+type ModelOperation = 'status' | 'use'
+
+const MODEL_SELECTIONS = {
+  offline: { provider: 'tianwen-offline', model: 'phase2-smoke' },
+  'deepseek-v4-flash': {
+    provider: 'deepseek-official', model: 'deepseek-v4-flash',
+  },
+  'deepseek-v4-pro': {
+    provider: 'deepseek-official', model: 'deepseek-v4-pro',
+  },
+} as const
 
 interface Selection {
   readonly model: string

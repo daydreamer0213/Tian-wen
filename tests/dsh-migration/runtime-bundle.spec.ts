@@ -59,13 +59,6 @@ function isAllowedCliInput(input: string): boolean {
     path === 'src/model.ts' || path === 'src/resume.ts' || isAllowedStatusInput(path)
 }
 
-function isAllowedModelRunnerInput(input: string): boolean {
-  const path = posix.normalize(input.replaceAll('\\', '/'))
-  return path === 'src/model-runner.ts' || path === 'src/model.ts' ||
-    path === 'src/resume.ts' || path === 'src/status.ts' ||
-    path === '../tianwen-evidence/dist/projector.js'
-}
-
 function isAllowedResumeRunnerInput(input: string): boolean {
   return posix.normalize(input.replaceAll('\\', '/')) === 'src/resume-runner.ts'
 }
@@ -496,14 +489,10 @@ describe('@tianwen/runtime-bundle', () => {
       .filter(item => item.external === true && !item.path.startsWith('node:'))
       .map(item => item.path)
       .sort()).toEqual([
-      '@deepseek-ai/cordis',
       '@deepseek-ai/dsh-credentials',
-      '@deepseek-ai/dsh-goal',
-      '@deepseek-ai/dsh-session',
-      '@deepseek-ai/dsh-session-persistence-jsonl',
     ])
-    expect(Object.keys(metafile.inputs).filter(input =>
-      !isAllowedModelRunnerInput(input))).toEqual([])
+    expect(Object.keys(metafile.inputs).map(input =>
+      posix.normalize(input.replaceAll('\\', '/')))).toEqual(['src/model-runner.ts'])
     expect(source).not.toMatch(/from\s+["']@tianwen\//u)
     expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
   })

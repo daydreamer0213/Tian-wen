@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -26,7 +27,6 @@ import {
 import { main } from '../../packages/tianwen-runtime-bundle/src/cli.js'
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-model-configuration-tests')
-const SENTINEL_KEY = 'deepseek-key-must-not-appear'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -73,6 +73,16 @@ function context(options: {
 }
 
 describe('tianwen model', () => {
+  it('keeps credential fixture values runtime-generated', () => {
+    for (const path of [
+      resolve(import.meta.dirname, 'model-configuration.spec.ts'),
+      resolve(import.meta.dirname, 'tianwen-startup.e2e.spec.ts'),
+    ]) {
+      expect(readFileSync(path, 'utf8'))
+        .not.toMatch(/const (?:SENTINEL_KEY|modelSentinel)\s*=\s*['"]/u)
+    }
+  })
+
   it.each([
     ['missing subcommand', ['model', '--data-dir', 'D:/DevData/tianwen']],
     ['unsupported model', ['model', 'use', '--model', 'other', '--data-dir', 'D:/DevData/tianwen']],
@@ -111,7 +121,8 @@ describe('tianwen model', () => {
   })
 
   it('builds one fixed shell-free model Profile invocation without adding secrets', () => {
-    process.env.DEEPSEEK_API_KEY = SENTINEL_KEY
+    const sentinelKey = randomUUID()
+    process.env.DEEPSEEK_API_KEY = sentinelKey
     const before = new Set(Object.keys(process.env))
     const invocation = buildModelInvocation(preflightModelCommand(
       'use', 'deepseek-v4-pro', 'D:\\DevData\\tianwen',
@@ -129,7 +140,7 @@ describe('tianwen model', () => {
       TIANWEN_MODEL_OPERATION: 'use',
       TIANWEN_MODEL_MODEL: 'deepseek-v4-pro',
     })
-    expect(invocation.options.env?.DEEPSEEK_API_KEY).toBe(SENTINEL_KEY)
+    expect(invocation.options.env?.DEEPSEEK_API_KEY).toBe(sentinelKey)
     expect(Object.keys(invocation.options.env!).filter(key => !before.has(key))).toEqual([
       'DSH_HOME', 'TIANWEN_MODEL_JSON', 'TIANWEN_MODEL_MODEL', 'TIANWEN_MODEL_OPERATION',
     ])
@@ -153,7 +164,8 @@ describe('tianwen model', () => {
   })
 
   it('reports status without saving and copies only safe credential facts', async () => {
-    process.env.DEEPSEEK_API_KEY = SENTINEL_KEY
+    const sentinelKey = randomUUID()
+    process.env.DEEPSEEK_API_KEY = sentinelKey
     const services = context({
       selection: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       credential: { configured: true, source: 'env', writable: false },
@@ -178,7 +190,7 @@ describe('tianwen model', () => {
     })
     expect(services.agentDefaultModel.saveSelection).not.toHaveBeenCalled()
     expect(services.llm.listModels).toHaveBeenCalledWith('deepseek-official')
-    expect(JSON.stringify(receipt)).not.toContain(SENTINEL_KEY)
+    expect(JSON.stringify(receipt)).not.toContain(sentinelKey)
     expect(stderr).not.toHaveBeenCalled()
   })
 
@@ -232,6 +244,7 @@ describe('tianwen model', () => {
   })
 
   it('prints one safe receipt and exits through appExit', async () => {
+    const sentinelKey = randomUUID()
     const services = context({})
     const exit = vi.fn()
     const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
@@ -243,16 +256,17 @@ describe('tianwen model', () => {
     await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
 
     expect(stdout).toHaveBeenCalledTimes(1)
-    expect(String(stdout.mock.calls[0]?.[0])).not.toContain(SENTINEL_KEY)
+    expect(String(stdout.mock.calls[0]?.[0])).not.toContain(sentinelKey)
   })
 
   it.each(['catalog', 'credential'] as const)(
     'does not print untrusted %s errors at the process boundary',
     async service => {
+      const sentinelKey = randomUUID()
       const services = context({
         selection: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       })
-      const rejection = new Error(SENTINEL_KEY)
+      const rejection = new Error(sentinelKey)
       if (service === 'catalog') {
         services.llm.listModels.mockRejectedValue(rejection)
       } else {
@@ -270,7 +284,7 @@ describe('tianwen model', () => {
       await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
 
       expect(stdout).not.toHaveBeenCalled()
-      expect(String(stderr.mock.calls)).not.toContain(SENTINEL_KEY)
+      expect(String(stderr.mock.calls)).not.toContain(sentinelKey)
       expect(stderr).toHaveBeenCalledWith('tianwen model: model configuration failed\n')
     },
   )
