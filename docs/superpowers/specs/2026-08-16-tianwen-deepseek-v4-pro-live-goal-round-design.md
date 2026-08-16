@@ -117,8 +117,9 @@ live-smoke preflight 只接受：
 DSH 的 Goal id/revision 在 Session 中是带类型的内部消息元数据，
 真实 provider 不会看到这些字段；而 `update_goal` 又必须提交当前
 Goal id/revision。严格模式因此通过 DSH 公开的 agent-scoped
-`systemPrompt.section()` 注入一条固定指令，只向模型暴露本次 resume
-返回的当前 Goal id 和 revision，并重申固定工具顺序与结束标记。
+`systemPrompt.section()` 注入一条固定指令，只向模型暴露本次
+`ctx.goals.resume()` 返回的新 Goal id/revision（不是 preflight 的旧 revision），
+并重申固定工具顺序与结束标记。
 该 section 不包含凭据、用户文件、费用信息或任意新 prompt，并在 Agent
 销毁时一起卸载。这是使现有两工具合同可实际调用的最小权威桥接，
 不新增 `get_goal` 第三个工具，也不修改通用 Goal round prompt。
@@ -127,7 +128,10 @@ Goal id/revision。严格模式因此通过 DSH 公开的 agent-scoped
 
 ### 5.1 工具面
 
-通过 DSH 公开的 agent-scoped `ctx.tools.restrict()`，模型可见且可执行的工具精确为：
+严格模式先通过 DSH 公开的 agent-scoped `ctx.tools.presentAs('native')`
+固定原生工具展示，再用 `ctx.tools.restrict()` 限制可见面，并用
+单调 `ctx.tools.guard()` 在执行边界拒绝两个允许名称之外的调用。
+模型可见且可执行的工具精确为：
 
 1. `tianwen_smoke_action`：唯一业务工具，无参数、无网络、无文件写入，只返回固定值；
 2. `update_goal`：Goal 控制工具，只允许模型完成当前 Goal。
@@ -144,6 +148,10 @@ Goal id/revision。严格模式因此通过 DSH 公开的 agent-scoped
 - `update_goal` 精确一次，目标是当前 Goal 的当前 revision，action 为 `complete`；
 - 没有其他 tool call/result。
 
+执行 guard 同时在工具 body 之前核对次数、顺序和参数：固定 action
+只允许空参数一次，它的成功 result 到达后才放行一次当前 Goal ref 的
+`update_goal(action=complete)`。Session 事后验收仍是最终权威，guard 不代替回放。
+
 ### 5.2 模型请求与时间
 
 严格模式通过 DSH 公开 agent/request 和 agent/request-error 扩展点约束：
@@ -154,7 +162,8 @@ Goal id/revision。严格模式因此通过 DSH 公开的 agent-scoped
 - 精确允许 3 个模型请求：业务工具调用、Goal 完成调用、固定最终文本；
 - 第 4 个请求在进入 provider 前拒绝；
 - provider 或流式错误不自动重试，不 fallback；
-- 整个 resume 的墙钟上限为 90 秒，超时后取消当前 Agent 活动并失败；
+- 整个 resume 在 90 秒时通过公开 `Agent.cancel()` 触发协作式取消，
+  经已审核且会遵守 abort signal 的 DeepSeek adapter/tool 收敛后记为超时失败；
 - Goal round 上限仍为 1。
 
 如果模型把两个工具合并、顺序颠倒、跳过工具、返回其他最终文本或需要第 4 个请求，
@@ -215,7 +224,13 @@ live-smoke receipt 只是本次验收记录。
 - Session id、事件增量；
 - 两个预期 Evidence 的 id、tool name 和 outcome；
 - markerMatched；
-- Evolution/Champion unchanged 断言。
+- Evolution/Champion unchanged 断言；其中 Evolution 对比覆盖整个目录树，
+  包括 Artifact 路径和字节。
+
+如果失败发生在 durable Goal/Session 被唯一匹配并验证之前，失败回执不复制
+未信任的 CLI `goalId` 输入，而是省略 Goal/Session 字段。
+如果子进程在产生合法回执前异常退出，父进程对无法从 durable Session 重建的
+请求或 usage 字段记为 `null`，不伪造为零；该情形仍消耗唯一请求链授权。
 
 回执不得包含：API key、环境变量值、header、原始 provider body、reasoning、
 模型原文、完整 system prompt、Goal objective、工具原始参数/结果或任意用户文件。
