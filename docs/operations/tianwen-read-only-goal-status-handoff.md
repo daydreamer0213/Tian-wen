@@ -174,9 +174,10 @@ this document changes no product or test code.
 | base-to-HEAD `git diff --check` | passed |
 | independent final review | Critical 0, Important 0, Minor 0; Ready |
 
-The unusually long Python duration was host I/O/subprocess latency. The run
-remained a single foreground pytest process, completed normally, and reported
-no failed tests.
+The unusually long Python duration was caused by 360 security protection
+intercepting/scanning Python subprocesses on this host. The run remained a
+single foreground pytest process, completed normally, and reported no failed
+tests. This was an environment event, not a product failure.
 
 No paid model, API key, live web/search, real Docker, private DSH source import,
 automatic promotion, Runtime cutover or interactive DSH UI was used.
