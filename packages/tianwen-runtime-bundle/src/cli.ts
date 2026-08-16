@@ -8,11 +8,16 @@ import {
   GoalStatusAmbiguousError,
   GoalStatusIntegrityError,
   GoalStatusNotFoundError,
+  listGoals,
   readGoalStatus,
 } from './status.js'
-import type { GoalStatusProjection } from './status.js'
+import type { GoalListProjection, GoalStatusProjection } from './status.js'
 
-const USAGE = 'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]\n'
+const USAGE = [
+  'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
+  'Usage: tianwen list --data-dir ABSOLUTE_PATH [--json]',
+  '',
+].join('\n')
 
 function formatText(status: GoalStatusProjection): string {
   const eventLabel = status.session.eventCount === 1 ? 'event' : 'events'
@@ -31,6 +36,17 @@ function formatText(status: GoalStatusProjection): string {
     'Runtime: not-loaded; read-only; 0 model requests',
   ]
   return `${lines.join('\n')}\n`
+}
+
+function formatListText(list: GoalListProjection): string {
+  if (list.goals.length === 0) return 'No Goals.\n'
+  return `${[
+    `Goals: ${list.goals.length}`,
+    ...list.goals.map(goal =>
+      `[${goal.phase}] ${goal.id} ${goal.roundsStarted}/${goal.maxGoalRounds} rounds - ${goal.objective.replace(/\s+/gu, ' ').trim()} (session ${goal.session.id})`
+    ),
+    'Runtime: not-loaded; read-only; 0 model requests',
+  ].join('\n')}\n`
 }
 
 export async function main(args = process.argv.slice(2)): Promise<number> {
@@ -57,21 +73,31 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     process.stderr.write(USAGE)
     return 2
   }
+  const command = positionals[0]
   if (
     positionals.length !== 1 ||
-    positionals[0] !== 'status' ||
-    values.goal === undefined ||
-    values.goal.length === 0 ||
     values['data-dir'] === undefined ||
-    !isAbsolute(values['data-dir'])
+    !isAbsolute(values['data-dir']) ||
+    (
+      command === 'status'
+        ? values.goal === undefined || values.goal.length === 0
+        : command === 'list' ? values.goal !== undefined : true
+    )
   ) {
     process.stderr.write(USAGE)
     return 2
   }
 
   try {
+    if (command === 'list') {
+      const list = await listGoals({ dataDir: values['data-dir'] })
+      process.stdout.write(values.json
+        ? `${JSON.stringify(list)}\n`
+        : formatListText(list))
+      return 0
+    }
     const status = await readGoalStatus({
-      goalId: values.goal,
+      goalId: values.goal!,
       dataDir: values['data-dir'],
     })
     process.stdout.write(values.json

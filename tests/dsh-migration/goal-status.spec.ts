@@ -400,6 +400,155 @@ describe('Tianwen read-only Goal status', () => {
     }
   })
 
+  it('prints deterministic Goal list text and exact JSON through the CLI', async () => {
+    const first = await createFixture({
+      objective: 'First \n\t  Goal',
+      withEvidence: false,
+    })
+    try {
+      const second = await createFixture({
+        root: first.dataDir,
+        objective: 'Second\tGoal',
+        withEvidence: false,
+      })
+      mutateGoalChange(first, data => {
+        data.createdAt = 200
+        data.updatedAt = 200
+      })
+      mutateGoalChange(second, data => {
+        data.createdAt = 100
+        data.updatedAt = 100
+      })
+      const expected = {
+        schemaVersion: 'tianwen.goal-list.v1',
+        goals: [
+          {
+            id: first.goalId,
+            objective: 'First \n\t  Goal',
+            phase: 'active',
+            maxGoalRounds: 3,
+            roundsStarted: 0,
+            updatedAt: 200,
+            session: {
+              id: first.sessionId,
+              eventCount: sessionEventCount(first.dataDir, first.sessionId),
+            },
+          },
+          {
+            id: second.goalId,
+            objective: 'Second\tGoal',
+            phase: 'active',
+            maxGoalRounds: 3,
+            roundsStarted: 0,
+            updatedAt: 100,
+            session: {
+              id: second.sessionId,
+              eventCount: sessionEventCount(second.dataDir, second.sessionId),
+            },
+          },
+        ],
+        runtime: {
+          activation: 'not-loaded',
+          modelRequests: 0,
+          readOnly: true,
+        },
+      }
+      const json = execFileSync(process.execPath, [
+        CLI, 'list', '--data-dir', first.dataDir, '--json',
+      ], { encoding: 'utf8' })
+      expect(json).toBe(`${JSON.stringify(expected)}\n`)
+      expect(execFileSync(process.execPath, [
+        CLI, 'list', '--data-dir', first.dataDir, '--json',
+      ], { encoding: 'utf8' })).toBe(json)
+
+      expect(execFileSync(process.execPath, [
+        CLI, 'list', '--data-dir', first.dataDir,
+      ], { encoding: 'utf8' })).toBe([
+        'Goals: 2',
+        `[active] ${first.goalId} 0/3 rounds - First Goal (session ${first.sessionId})`,
+        `[active] ${second.goalId} 0/3 rounds - Second Goal (session ${second.sessionId})`,
+        'Runtime: not-loaded; read-only; 0 model requests',
+        '',
+      ].join('\n'))
+    } finally {
+      rmSync(first.dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('prints one fixed line for an empty Goal list', () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const dataDir = mkdtempSync(join(FIXTURE_BASE, 'empty-cli-list-'))
+    try {
+      expect(execFileSync(process.execPath, [
+        CLI, 'list', '--data-dir', dataDir,
+      ], { encoding: 'utf8' })).toBe('No Goals.\n')
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects invalid list grammar with the two-line usage', () => {
+    const usage = [
+      'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
+      'Usage: tianwen list --data-dir ABSOLUTE_PATH [--json]',
+      '',
+    ].join('\n')
+    for (const args of [
+      ['list', '--goal', 'forbidden', '--data-dir', FIXTURE_BASE],
+      ['list'],
+      ['list', '--data-dir', 'relative'],
+      ['list', '--data-dir', FIXTURE_BASE, 'extra'],
+    ]) {
+      const result = spawnSync(process.execPath, [CLI, ...args], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      expect(result.status).toBe(2)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toBe(usage)
+    }
+  })
+
+  it('fails list ambiguity and integrity errors without stdout', async () => {
+    const duplicate = await createFixture({ withEvidence: false })
+    try {
+      const second = await createFixture({
+        root: duplicate.dataDir,
+        withEvidence: false,
+      })
+      const path = sessionLog(duplicate.dataDir, second.sessionId)
+      writeFileSync(
+        path,
+        readFileSync(path, 'utf8').replaceAll(second.goalId, duplicate.goalId),
+      )
+      const result = spawnSync(process.execPath, [
+        CLI, 'list', '--data-dir', duplicate.dataDir,
+      ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+      expect(result.status).toBe(1)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toContain('Goal is present in more than one Session')
+      expect(result.stderr).not.toContain(duplicate.dataDir)
+    } finally {
+      rmSync(duplicate.dataDir, { recursive: true, force: true })
+    }
+
+    const corrupt = await createFixture({ withEvidence: false })
+    try {
+      mutateGoalChange(corrupt, data => {
+        delete data.updatedAt
+      })
+      const result = spawnSync(process.execPath, [
+        CLI, 'list', '--data-dir', corrupt.dataDir,
+      ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+      expect(result.status).toBe(1)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toContain('Error:')
+      expect(result.stderr).not.toContain(corrupt.dataDir)
+    } finally {
+      rmSync(corrupt.dataDir, { recursive: true, force: true })
+    }
+  })
+
   it('prints deterministic text and JSON through the status CLI', async () => {
     const fixture = await createFixture({ withEvidence: false })
     try {
