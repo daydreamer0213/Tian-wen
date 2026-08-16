@@ -8,6 +8,7 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import type { Session } from '@deepseek-ai/dsh-session'
 
 import {
   LIVE_GOAL_LIMITS,
@@ -32,6 +33,10 @@ export interface LiveSmokeResumeConfig extends ResumeConfig {
   readonly liveSmoke: true
   readonly evolutionRoot: string
   readonly startedAtMs: number
+}
+
+export interface LiveGoalResumeDependencies {
+  readonly flush?: (session: Session) => Promise<boolean>
 }
 
 interface Receipt {
@@ -96,7 +101,10 @@ function snapshotTree(root: string): Map<string, string> {
     try { entries = readdirSync(directory, { withFileTypes: true, encoding: 'utf8' }) } catch { return }
     for (const entry of entries) {
       const path = join(directory, entry.name)
-      if (entry.isDirectory()) visit(path)
+      if (entry.isDirectory()) {
+        snapshot.set(`${relative(root, path).replaceAll('\\', '/')}/`, '')
+        visit(path)
+      }
       else if (entry.isFile()) snapshot.set(relative(root, path).replaceAll('\\', '/'), readFileSync(path).toString('base64'))
     }
   }
@@ -165,7 +173,8 @@ function liveServices(ctx: Context) {
   return defaultModel === undefined || credentials === undefined ? undefined : { defaultModel, credentials }
 }
 
-async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig): Promise<GoalLiveSmokeReceipt> {
+async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig,
+  dependencies: LiveGoalResumeDependencies = {}): Promise<GoalLiveSmokeReceipt> {
   const fail = (failureCode: Parameters<typeof createGoalLiveSmokeFailure>[0], requestCountValue = 0) =>
     createGoalLiveSmokeFailure(failureCode, { now: new Date(config.startedAtMs), requestCount: requestCountValue, retryCount: 0 })
   if (!Number.isSafeInteger(config.startedAtMs) || config.startedAtMs < 0) return fail('preflight-rejected')
@@ -187,6 +196,7 @@ async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig): P
 
   const evolutionBefore = snapshotTree(config.evolutionRoot)
   const championBefore = fileBytes(join(config.evolutionRoot, 'champion.json'))
+  const flush = dependencies.flush ?? (session => ctx.sessions.flush(session))
   let requestCountValue = 0
   let requestLimitExceeded = false
   let timedOut = false
@@ -235,7 +245,11 @@ async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig): P
     }, Math.max(0, config.startedAtMs + LIVE_GOAL_LIMITS.timeoutMs - Date.now()))
     const resumed = ctx.goals.resume(activeHandle.agent, { id: GoalId(String(current.id)), revision: current.revision })
     const settled = await waitForDisarmed(ctx, activeHandle.agent)
-    if (!await ctx.sessions.flush(activeHandle.agent.session)) return fail('persistence-unavailable', requestCountValue)
+    let flushed: boolean
+    try { flushed = await flush(activeHandle.agent.session) } catch {
+      return fail('persistence-unavailable', requestCountValue)
+    }
+    if (!flushed) return fail('persistence-unavailable', requestCountValue)
     if (timedOut) return fail('timeout', requestCountValue)
     const assessed = assessLiveGoalEvents(String(activeHandle.agent.id), activeHandle.agent.session.events.slice(before), resumed)
     if (!assessed.ok) return fail(assessed.failureCode, requestCountValue)
@@ -265,17 +279,20 @@ async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig): P
   } finally {
     if (timer !== undefined) clearTimeout(timer)
     if (handle !== undefined) {
-      if (ctx.goals.get(handle.agent)?.activation === 'armed') ctx.goals.disarm(handle.agent)
-      await handle.agent.whenIdle()
-      await ctx.sessions.flush(handle.agent.session)
-      await handle.dispose()
+      try {
+        if (ctx.goals.get(handle.agent)?.activation === 'armed') ctx.goals.disarm(handle.agent)
+      } catch {}
+      try { await handle.agent.whenIdle() } catch {}
+      try { await flush(handle.agent.session) } catch {}
+      try { await handle.dispose() } catch {}
     }
   }
 }
 
-export async function runGoalResume(ctx: Context, config: ResumeConfig | LiveSmokeResumeConfig): Promise<ResumeReceipt> {
+export async function runGoalResume(ctx: Context, config: ResumeConfig | LiveSmokeResumeConfig,
+  dependencies?: LiveGoalResumeDependencies): Promise<ResumeReceipt> {
   requireConfig(config)
-  if ('liveSmoke' in config && config.liveSmoke) return runLiveGoalResume(ctx, config)
+  if ('liveSmoke' in config && config.liveSmoke) return runLiveGoalResume(ctx, config, dependencies)
   const defaultModel = ctx.get('agentDefaultModel') as { currentSelection(): ModelSelection } | undefined
   if (defaultModel === undefined) throw new Error('Tianwen Profile has no default model')
   const selection = defaultModel.currentSelection()

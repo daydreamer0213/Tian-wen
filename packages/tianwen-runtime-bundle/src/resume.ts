@@ -225,6 +225,7 @@ export async function launchGoalResume(
           ? parseGoalLiveSmokeChildReceipt('', '')
           : parseGoalLiveSmokeChildReceipt(
             Buffer.concat(stdout).toString('utf8'), Buffer.concat(stderr).toString('utf8'),
+            { goalId: preflight.goalId, sessionId: preflight.sessionId },
           )
         process.stdout.write(`${JSON.stringify(receipt)}\n`)
         resolveExit(receipt.status === 'passed' ? 0 : 1)

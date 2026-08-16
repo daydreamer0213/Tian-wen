@@ -113,6 +113,23 @@ describe('tianwen live Goal smoke', () => {
   })
 
   it.each([
+    ['a different Goal', { goal: { ...passedChildReceipt().goal, id: 'other-goal' } }],
+    ['a different Session', { session: { ...passedChildReceipt().session, id: 'other-session' } }],
+  ])('rejects a child success receipt for %s', (_name, patch) => {
+    const receipt = { ...passedChildReceipt(), ...patch }
+    expect(parseGoalLiveSmokeChildReceipt(`${JSON.stringify(receipt)}\n`, '', {
+      goalId: 'goal-receipt', sessionId: 'session-receipt',
+    })).toMatchObject({ status: 'failed', failureCode: 'internal-error' })
+  })
+
+  it('accepts the exact child Goal and Session binding', () => {
+    const child = passedChildReceipt()
+    expect(parseGoalLiveSmokeChildReceipt(`${JSON.stringify(child)}\n`, '', {
+      goalId: child.goal.id, sessionId: child.session.id,
+    })).toMatchObject({ status: 'passed' })
+  })
+
+  it.each([
     ['missing usage', [undefined, undefined, undefined], 'usage-invalid'],
     ['unsafe usage', [{ inputTokens: Number.MAX_SAFE_INTEGER + 1, outputTokens: 0 }, { inputTokens: 0, outputTokens: 0 }, { inputTokens: 0, outputTokens: 0 }], 'usage-invalid'],
     ['token total above the fixed cap', [{ inputTokens: 32769, outputTokens: 0 }, { inputTokens: 0, outputTokens: 0 }, { inputTokens: 0, outputTokens: 0 }], 'token-budget-exceeded'],
@@ -167,7 +184,12 @@ describe('tianwen live Goal smoke', () => {
     }
   })
 
-  it('runs exactly the fixed three-request Goal round with the two allowed tools', async () => {
+  it.each([
+    ['runs exactly the fixed three-request Goal round with the two allowed tools', 'pass', false],
+    ['maps a false business flush to persistence-unavailable and still releases the runner', 'false', false],
+    ['maps a rejected business flush to persistence-unavailable and still releases the runner', 'reject', false],
+    ['rejects removal of an empty evolution directory', 'pass', true],
+  ] as const)('%s', async (_name, flushMode, mutateEvolution) => {
     mkdirSync(FIXTURE_BASE, { recursive: true })
     const dataDir = mkdtempSync(join(FIXTURE_BASE, 'round-'))
     const sessionsRoot = join(dataDir, 'dsh-home', 'sessions')
@@ -185,10 +207,12 @@ describe('tianwen live Goal smoke', () => {
       await first.ctx.sessions.flush(initial.agent.session)
       await initial.dispose()
 
+      const removedDirectory = join(dataDir, 'state', 'evolution', 'empty-artifact-directory')
+      if (mutateEvolution) mkdirSync(removedDirectory, { recursive: true })
       const second = await mountGoalHarness(sessionsRoot, [
         withUsage(toolCallResponse('live-action', 'tianwen_smoke_action', {}), 100),
         withUsage(toolCallResponse('live-complete', 'update_goal', {
-          goal_id: String(goal.id), revision: 2, action: 'complete',
+          action: 'complete', revision: 2, goal_id: String(goal.id),
         }), 101),
         withUsage(textResponse('TIANWEN_GOAL_ROUND_OK'), 102),
       ], { goalRoundDriver: true })
@@ -210,7 +234,10 @@ describe('tianwen live Goal smoke', () => {
             schema: { type: 'string' },
             render: (_args, value) => [{ type: 'text', text: value }],
           },
-          async execute() { return 'live-goal-action-ok' },
+          async execute() {
+            if (mutateEvolution) rmSync(removedDirectory, { recursive: true, force: true })
+            return 'live-goal-action-ok'
+          },
         }))
         second.ctx.provide('agentDefaultModel', {
           currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4-pro' }),
@@ -222,11 +249,34 @@ describe('tianwen live Goal smoke', () => {
         const { runGoalResume } = await import(
           '../../packages/tianwen-runtime-bundle/src/resume-runner.js'
         )
+        let flushCalls = 0
         const receipt = await runGoalResume(second.ctx, {
           goalId: String(goal.id), json: true, nonce: 'test-nonce', revision: 1,
           sessionId: String(sessionId), liveSmoke: true, evolutionRoot: join(dataDir, 'state', 'evolution'),
           startedAtMs: Date.now(),
-        } as never)
+        } as never, {
+          flush: async session => {
+            flushCalls += 1
+            if (flushMode === 'false') return false
+            if (flushMode === 'reject') throw new Error('flush sentinel')
+            return second.ctx.sessions.flush(session)
+          },
+        })
+
+        if (flushMode !== 'pass' || mutateEvolution) {
+          expect(receipt).toMatchObject({
+            status: 'failed', failureCode: mutateEvolution ? 'internal-error' : 'persistence-unavailable',
+            requestCount: 3, retryCount: 0,
+          })
+          expect(second.adapter.requests).toHaveLength(3)
+          expect(flushCalls).toBeGreaterThanOrEqual(2)
+          const released = await second.ctx.agents.resume({
+            resumeSessionId: sessionId,
+            agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+          })
+          await released.dispose()
+          return
+        }
 
         expect(receipt).toMatchObject({
           schemaVersion: 'tianwen.goal-live-smoke.v1',

@@ -113,8 +113,9 @@ function usageIsValid(value: unknown): value is Record<string, number | undefine
     (value as Record<string, unknown>)[key] !== undefined)
 }
 
-function equalJson(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
+function hasExpectedUpdateArguments(value: unknown, expectedGoal: LiveGoalExpectedRef): boolean {
+  return isRecord(value) && hasExactKeys(value, ['goal_id', 'revision', 'action']) &&
+    value.goal_id === expectedGoal.id && value.revision === expectedGoal.revision && value.action === 'complete'
 }
 
 /** Assess only the bounded Session delta; it never returns model text or tool payloads. */
@@ -155,11 +156,9 @@ export function assessLiveGoalEvents(
   } catch {
     return { ok: false, failureCode: 'tool-contract-violated' }
   }
-  if (calls[0]!.data.arguments !== '{}' || !equalJson(updateArguments, {
-    goal_id: expectedGoal.id,
-    revision: expectedGoal.revision,
-    action: 'complete',
-  })) return { ok: false, failureCode: 'tool-contract-violated' }
+  if (calls[0]!.data.arguments !== '{}' || !hasExpectedUpdateArguments(updateArguments, expectedGoal)) {
+    return { ok: false, failureCode: 'tool-contract-violated' }
+  }
   const actionResult = results.find(item => String(item.data.message.source.callId) === String(calls[0]!.data.callId))
   const updateResult = results.find(item => String(item.data.message.source.callId) === String(calls[1]!.data.callId))
   if (actionResult === undefined || updateResult === undefined || actionResult.data.error !== undefined ||
@@ -241,15 +240,16 @@ function sameNumber(left: number, right: number): boolean {
   return Math.abs(left - right) <= Number.EPSILON * Math.max(1, Math.abs(left), Math.abs(right)) * 4
 }
 
-function hasFixedSuccessGoal(value: unknown): boolean {
+function hasFixedSuccessGoal(value: unknown, expectedGoalId?: string): boolean {
   return isRecord(value) && hasExactKeys(value, ['id', 'revision', 'phase', 'roundsStarted']) &&
-    typeof value.id === 'string' && value.id.length > 0 &&
-    isCount(value.revision) && value.revision >= 1 && value.phase === 'complete' && value.roundsStarted === 1
+    typeof value.id === 'string' && value.id.length > 0 && (expectedGoalId === undefined || value.id === expectedGoalId) &&
+    isCount(value.revision) && value.revision >= 2 && value.phase === 'complete' && value.roundsStarted === 1
 }
 
-function hasFixedSuccessSession(value: unknown): boolean {
+function hasFixedSuccessSession(value: unknown, expectedSessionId?: string): boolean {
   return isRecord(value) && hasExactKeys(value, ['id', 'eventCountDelta']) &&
-    typeof value.id === 'string' && value.id.length > 0 && isCount(value.eventCountDelta)
+    typeof value.id === 'string' && value.id.length > 0 &&
+    (expectedSessionId === undefined || value.id === expectedSessionId) && isCount(value.eventCountDelta)
 }
 
 function hasFixedSuccessUsage(value: unknown): boolean {
@@ -303,7 +303,7 @@ function isGoalLiveSmokeFailureReceipt(value: unknown): value is GoalLiveSmokeFa
     receipt.markerMatched === false
 }
 
-function isGoalLiveSmokeSuccessReceipt(value: unknown): value is GoalLiveSmokeSuccessReceipt {
+function isGoalLiveSmokeSuccessReceipt(value: unknown, expected?: { readonly goalId: string, readonly sessionId: string }): value is GoalLiveSmokeSuccessReceipt {
   if (!isRecord(value)) return false
   const receipt = value
   return hasExactKeys(receipt, [
@@ -318,7 +318,8 @@ function isGoalLiveSmokeSuccessReceipt(value: unknown): value is GoalLiveSmokeSu
     receipt.model === LIVE_GOAL_MODEL &&
     hasFixedLimits(receipt.limits) &&
     receipt.requestCount === LIVE_GOAL_LIMITS.maxRequests && receipt.retryCount === LIVE_GOAL_LIMITS.maxRetries &&
-    receipt.markerMatched === true && hasFixedSuccessGoal(receipt.goal) && hasFixedSuccessSession(receipt.session) &&
+    receipt.markerMatched === true && hasFixedSuccessGoal(receipt.goal, expected?.goalId) &&
+    hasFixedSuccessSession(receipt.session, expected?.sessionId) &&
     hasFixedSuccessUsage(receipt.usage) && hasFixedSuccessEvidence(receipt.evidence) && hasFixedSuccessGovernance(receipt.governance)
 }
 
@@ -326,6 +327,7 @@ function isGoalLiveSmokeSuccessReceipt(value: unknown): value is GoalLiveSmokeSu
 export function parseGoalLiveSmokeChildReceipt(
   stdout: string,
   _stderr: string,
+  expected?: { readonly goalId: string, readonly sessionId: string },
 ): GoalLiveSmokeReceipt {
   if (Buffer.byteLength(stdout) > 65_536) {
     return createGoalLiveSmokeFailure('internal-error', {
@@ -342,7 +344,7 @@ export function parseGoalLiveSmokeChildReceipt(
   }
   try {
     const receipt: unknown = JSON.parse(lines[0])
-    return isGoalLiveSmokeFailureReceipt(receipt) || isGoalLiveSmokeSuccessReceipt(receipt)
+    return isGoalLiveSmokeFailureReceipt(receipt) || isGoalLiveSmokeSuccessReceipt(receipt, expected)
       ? receipt
       : createGoalLiveSmokeFailure('internal-error', {
         requestCount: null, retryCount: null,
