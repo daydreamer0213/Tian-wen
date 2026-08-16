@@ -61,6 +61,7 @@ export function buildGoalCreateInvocation(
       env: {
         ...process.env,
         DSH_HOME: join(preflight.dataDir, 'dsh-home'),
+        TIANWEN_CREATE_DATA_DIR: preflight.dataDir,
         TIANWEN_CREATE_EVOLUTION_ROOT: preflight.evolutionRoot,
         TIANWEN_CREATE_JSON: String(json),
         TIANWEN_CREATE_MAX_ROUNDS: String(preflight.maxGoalRounds),

@@ -31,9 +31,7 @@ different authority decisions:
 - `resume` spends exactly one round because the user explicitly asked it to.
 
 This keeps first-version behavior visible and controllable without introducing
-a daemon, scheduler, automatic loop or paid-model requirement. A future
-`start` convenience command may compose create + resume only after the two
-separate contracts are proven useful.
+a daemon, scheduler, automatic loop or paid-model requirement.
 
 ## 3. Command contract
 
@@ -42,7 +40,7 @@ tianwen create --objective TEXT --data-dir ABSOLUTE_PATH
                [--max-rounds POSITIVE_INTEGER] [--json]
 ```
 
-- `--objective` and `--data-dir` are required exactly once;
+- `--objective` and `--data-dir` are required;
 - objective text is trimmed and must remain non-empty;
 - `--max-rounds` defaults to 3 and must be a positive safe integer;
 - package names, Profile name, runner, patch and executable remain fixed;
@@ -129,4 +127,3 @@ or environment-specific executable paths.
   durable authority; `list` is the recovery/discovery path.
 - Round budget limits admission count, not token/cost per round. Model-level
   token budgets remain a later product contract.
-

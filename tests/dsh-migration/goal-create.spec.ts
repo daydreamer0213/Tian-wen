@@ -8,7 +8,10 @@ import {
   buildGoalCreateInvocation,
   preflightGoalCreate,
 } from '../../packages/tianwen-runtime-bundle/src/create.js'
-import { runGoalCreate } from '../../packages/tianwen-runtime-bundle/src/create-runner.js'
+import {
+  formatGoalCreateText,
+  runGoalCreate,
+} from '../../packages/tianwen-runtime-bundle/src/create-runner.js'
 import { main } from '../../packages/tianwen-runtime-bundle/src/cli.js'
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-goal-create-tests')
@@ -72,12 +75,51 @@ describe('tianwen create', () => {
     expect(invocation.options.env).toMatchObject({
       DSH_HOME: 'D:\\DevData\\tianwen\\dsh-home',
       TIANWEN_CREATE_EVOLUTION_ROOT: 'D:\\DevData\\tianwen\\state\\evolution',
+      TIANWEN_CREATE_DATA_DIR: 'D:\\DevData\\tianwen',
       TIANWEN_CREATE_JSON: 'true',
       TIANWEN_CREATE_MAX_ROUNDS: '3',
       TIANWEN_CREATE_NONCE: 'b1ec15fd-8d57-4ef4-8ebd-628035a8b825',
       TIANWEN_CREATE_OBJECTIVE: 'build a project',
       TIANWEN_CREATE_SESSIONS_ROOT: 'D:\\DevData\\tianwen\\dsh-home\\sessions',
     })
+  })
+
+  it('prints a directly usable next resume command', () => {
+    expect(formatGoalCreateText({
+      schemaVersion: 'tianwen.goal-create.v1',
+      goal: {
+        id: 'goal-1', maxGoalRounds: 3, objective: 'build',
+        phase: 'active', revision: 1, roundsStarted: 0,
+      },
+      session: { eventCount: 1, id: 'session-1', modelRequestsDelta: 0 },
+    }, 'D:\\DevData\\tianwen')).toContain(
+      'tianwen resume --goal goal-1 --data-dir "D:\\DevData\\tianwen"',
+    )
+  })
+
+  it('does not claim success when Session persistence did not flush', async () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const dataDir = mkdtempSync(join(FIXTURE_BASE, 'no-flush-'))
+    const harness = await mountGoalHarness(
+      join(dataDir, 'sessions'), [], { goalRoundDriver: false },
+    )
+    harness.ctx.provide('agentDefaultModel', {
+      currentSelection: () => ({ provider: 'tianwen-probe', model: 'scripted' }),
+    })
+    vi.spyOn(harness.ctx.sessions, 'flush').mockResolvedValue(false)
+    try {
+      await expect(runGoalCreate(harness.ctx, {
+        dataDir,
+        json: true,
+        maxGoalRounds: 3,
+        nonce: 'no-flush',
+        objective: 'do not claim success',
+      })).rejects.toThrow('Session persistence is unavailable')
+      expect(harness.adapter.requests).toHaveLength(0)
+    } finally {
+      await harness.ctx.fiber.dispose()
+      rmSync(dataDir, { recursive: true, force: true })
+    }
   })
 
   it('persists one recoverable Goal without requesting a model', async () => {
@@ -90,6 +132,7 @@ describe('tianwen create', () => {
     })
     try {
       const receipt = await runGoalCreate(first.ctx, {
+        dataDir,
         json: true,
         maxGoalRounds: 3,
         nonce: 'b1ec15fd-8d57-4ef4-8ebd-628035a8b825',
