@@ -154,6 +154,25 @@ offline tests without changing the request path or making another paid call.
 The narrow re-review marked the finding addressed with no new Critical or
 Important issue.
 
+The whole-branch review then found two implementation-boundary gaps. The
+configuration helper still accepted a forged `smoke` operation, and the smoke
+data directory check accepted `D:\DevData` itself and did not reject a junction
+that already resolved outside that root. Commit `11d5b93` split configuration
+operations from the top-level smoke dispatch and added strict-child plus
+pre-spawn realpath checks. The final offline verification passed 70 focused
+tests, the Runtime Bundle build, workspace typecheck, and diff check.
+
+The final reviewer also considered a hostile same-user process replacing the
+directory in the very small interval after realpath validation and before
+`spawn()`. The controller records that as a host-compromise limitation, not a
+release blocker: such a process can already replace the installed DSH files or
+inspect the same user's environment, and canonicalizing the path again does
+not provide an operating-system isolation boundary. Tianwen's current contract
+trusts the user-owned local runtime and reviewed in-process code. Strong
+protection from a hostile local process would require a separate OS account,
+container, remote sandbox, or microVM and is deliberately outside this small
+smoke command.
+
 The external receipt above intentionally preserves the exact bytes produced by
 the one real attempt. It predates the receipt-schema/clock refactor; request
 construction and call count remained unchanged, and it is not rewritten to
