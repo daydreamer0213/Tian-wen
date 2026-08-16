@@ -1,7 +1,7 @@
 # Tianwen DeepSeek V4 Pro live smoke design
 
 **Date:** 2026-08-16
-**Status:** approved in conversation; written review pending
+**Status:** approved
 **Base:** `codex/tianwen-model-config` at `4567eca10f88cc264d006bc8537d0a870db3999c`
 
 ## Purpose
@@ -110,14 +110,14 @@ to prove:
 - receipts are canonical and contain no credential sentinel;
 - existing status/use commands still report `modelRequestsDelta: 0`.
 
-The paid test is opt-in and runs only when both
-`TIANWEN_RUN_LIVE_MODEL_TESTS=1` and `DEEPSEEK_API_KEY` are present. Before the
-single live run, all focused offline tests, typecheck, private-import checks,
-and the installed Profile smoke must pass. The isolated Profile is selected to
-V4 Pro with the existing zero-request `model use` command, the live command is
-executed once, and the Profile is returned to `offline` afterward without a
-model request. Regardless of success or failure, the paid command is not
-executed again in the same phase without new user authorization.
+The paid execution is deliberately not part of an automated test suite. Only
+the controller may run the explicit command after all focused offline tests,
+typecheck, private-import checks, and the installed Profile smoke pass. The
+isolated Profile is selected to V4 Pro with the existing zero-request `model
+use` command, the live command is executed once, and the Profile is returned to
+`offline` afterward without a model request. Regardless of success or failure,
+the paid command is not executed again in the same phase without new user
+authorization.
 
 ## Non-goals
 
