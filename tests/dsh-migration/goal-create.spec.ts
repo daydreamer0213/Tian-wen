@@ -92,8 +92,8 @@ describe('tianwen create', () => {
         phase: 'active', revision: 1, roundsStarted: 0,
       },
       session: { eventCount: 1, id: 'session-1', modelRequestsDelta: 0 },
-    }, 'D:\\DevData\\tianwen')).toContain(
-      'tianwen resume --goal goal-1 --data-dir "D:\\DevData\\tianwen"',
+    }, "D:\\DevData\\$(40+2)\\O'Brien")).toContain(
+      "tianwen resume --goal goal-1 --data-dir 'D:\\DevData\\$(40+2)\\O''Brien'",
     )
   })
 

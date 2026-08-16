@@ -99,7 +99,7 @@ export function formatGoalCreateText(
 ): string {
   return [
     `Created Goal ${receipt.goal.id}: ${receipt.goal.objective}`,
-    `Next: tianwen resume --goal ${receipt.goal.id} --data-dir "${dataDir}"`,
+    `Next: tianwen resume --goal ${receipt.goal.id} --data-dir '${dataDir.replaceAll("'", "''")}'`,
     '',
   ].join('\n')
 }
