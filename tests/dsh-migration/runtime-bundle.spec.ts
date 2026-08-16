@@ -56,11 +56,15 @@ function isAllowedStatusInput(input: string): boolean {
 function isAllowedCliInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return path === 'src/cli.ts' || path === 'src/create.ts' ||
-    path === 'src/model.ts' || path === 'src/resume.ts' || isAllowedStatusInput(path)
+    path === 'src/model.ts' || path === 'src/resume.ts' ||
+    path === 'src/goal-live-smoke.ts' || isAllowedStatusInput(path)
 }
 
 function isAllowedResumeRunnerInput(input: string): boolean {
-  return posix.normalize(input.replaceAll('\\', '/')) === 'src/resume-runner.ts'
+  return [
+    'src/resume-runner.ts',
+    'src/goal-live-smoke.ts',
+  ].includes(posix.normalize(input.replaceAll('\\', '/')))
 }
 
 function isAllowedCreateRunnerInput(input: string): boolean {
@@ -117,6 +121,7 @@ describe('@tianwen/runtime-bundle', () => {
       '@deepseek-ai/dsh-llm': '0.1.0-rc.6',
       '@deepseek-ai/dsh-session': '0.1.0-rc.6',
       '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.0-rc.6',
+      '@deepseek-ai/dsh-system-prompt': '0.1.0-rc.6',
       '@deepseek-ai/dsh-tools': '0.1.0-rc.6',
     })
     expect(Object.keys(manifest.dependencies)).not.toContainEqual(
@@ -176,6 +181,7 @@ describe('@tianwen/runtime-bundle', () => {
       '@deepseek-ai/dsh-llm': '0.1.0-rc.6',
       '@deepseek-ai/dsh-session': '0.1.0-rc.6',
       '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.0-rc.6',
+      '@deepseek-ai/dsh-system-prompt': '0.1.0-rc.6',
       '@deepseek-ai/dsh-tools': '0.1.0-rc.6',
     })
 
@@ -445,7 +451,9 @@ describe('@tianwen/runtime-bundle', () => {
       .map(item => item.path)
       .sort()).toEqual([
       '@deepseek-ai/dsh-agent',
+      '@deepseek-ai/dsh-credentials',
       '@deepseek-ai/dsh-goal',
+      '@deepseek-ai/dsh-llm',
       '@deepseek-ai/dsh-session',
     ])
     expect(Object.keys(metafile.inputs).filter(input =>
@@ -531,5 +539,11 @@ describe('@tianwen/runtime-bundle', () => {
     expect(entries.some(entry => entry.includes('@tianwen'))).toBe(false)
     expect(entries.some(entry => /scripted-adapter|dsh-probe-bundle/u.test(entry))).toBe(false)
     expect(entries.some(entry => /@deepseek-ai\/[^/]+\/src\//u.test(entry))).toBe(false)
+    expect(entries.some(entry => /fixtures\/deepseek-goal-round-fetch|\.map$/u.test(entry))).toBe(false)
+    const archiveText = execFileSync(tar, ['-xOf', archive, 'package/dist/resume-runner.js'], {
+      encoding: 'utf8',
+      shell: false,
+    })
+    expect(archiveText).not.toMatch(/C:[\\/]Users[\\/]|DEEPSEEK_API_KEY|Bearer\s+/u)
   })
 })

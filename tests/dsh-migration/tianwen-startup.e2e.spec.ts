@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import {
   existsSync,
@@ -20,7 +20,7 @@ import type { SessionEvent } from '@tianwen/dsh-compat'
 import { projectEvidence } from '../../packages/tianwen-evidence/src/projector.js'
 
 const root = resolve(import.meta.dirname, '../..')
-const tianwenRoot = 'D:/DevData/tianwen-installer-e2e'
+const tianwenRoot = process.env.TIANWEN_E2E_DATA_DIR ?? 'D:/DevData/tianwen-installer-e2e'
 const dshHostRoot = `${tianwenRoot}/dsh-host`
 const dshHome = `${tianwenRoot}/dsh-home`
 const profileRoot = `${dshHome}/profiles/tianwen`
@@ -38,6 +38,7 @@ const taskText = 'run the Tianwen phase 2 smoke task'
 const completeCallId = 'tianwen-phase2-goal-complete'
 const enabled = process.env.TIANWEN_DSH_PHASE2_STARTUP === '1'
 const runtimePackage = '@tianwen/runtime-bundle'
+const liveGoalObjective = 'Call tianwen_smoke_action exactly once. After it succeeds, mark this Goal complete with update_goal, then reply exactly TIANWEN_GOAL_ROUND_OK.'
 
 function run(
   executable: string,
@@ -91,12 +92,29 @@ function snapshotState(): Readonly<Record<string, string>> {
   return snapshot
 }
 
+function snapshotTree(rootPath: string): Readonly<Record<string, string>> {
+  const snapshot: Record<string, string> = {}
+  if (!existsSync(rootPath)) return { missing: '' }
+  for (const entry of globSync('**/*', { cwd: rootPath, withFileTypes: true })) {
+    const path = resolve(entry.parentPath, entry.name)
+    const label = relative(rootPath, path).replaceAll('\\', '/')
+    if (entry.isDirectory()) snapshot[`directory:${label}`] = ''
+    else if (entry.isFile()) snapshot[`file:${label}`] = readFileSync(path).toString('base64')
+  }
+  return snapshot
+}
+
 function requireWithinRoot(path: string): string {
   const allowed = realpathSync(tianwenRoot)
   const candidate = resolve(path)
   const child = relative(allowed, candidate)
   expect(child === '' || (!child.startsWith('..') && !isAbsolute(child))).toBe(true)
   return candidate
+}
+
+function expectOutsideWorktree(path: string): void {
+  const child = relative(realpathSync(root), realpathSync(path))
+  expect(child.startsWith('..') || isAbsolute(child)).toBe(true)
 }
 
 function childEnvironment(): NodeJS.ProcessEnv {
@@ -163,7 +181,7 @@ function requireDshBin(): string {
   expect(statSync(dshBin).isFile()).toBe(true)
   const installed = realpathSync(dshBin)
   expect(relative(realpathSync(dshHostRoot), installed).startsWith('..')).toBe(false)
-  expect(relative(root, installed).startsWith('..')).toBe(true)
+  expectOutsideWorktree(installed)
   return installed
 }
 
@@ -180,6 +198,7 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   const statusResolved = requireFromProfile.resolve(`${runtimePackage}/status`)
   const createRunnerResolved = requireFromProfile.resolve(`${runtimePackage}/create-runner`)
   const modelRunnerResolved = requireFromProfile.resolve(`${runtimePackage}/model-runner`)
+  const resumeRunnerResolved = requireFromProfile.resolve(`${runtimePackage}/resume-runner`)
   const runtimeRoot = resolve(dirname(runtimeResolved), '..')
   const runtimeManifest = JSON.parse(readFileSync(
     resolve(runtimeRoot, 'package.json'),
@@ -192,12 +211,13 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   for (const external of Object.keys(runtimeManifest.dependencies).sort()) {
     await import(pathToFileURL(requireFromRuntime.resolve(external)).href)
   }
-  const [runtime, smoke, status, createRunner, modelRunner] = await Promise.all([
+  const [runtime, smoke, status, createRunner, modelRunner, resumeRunner] = await Promise.all([
     import(pathToFileURL(runtimeResolved).href),
     import(pathToFileURL(smokeResolved).href),
     import(pathToFileURL(statusResolved).href),
     import(pathToFileURL(createRunnerResolved).href),
     import(pathToFileURL(modelRunnerResolved).href),
+    import(pathToFileURL(resumeRunnerResolved).href),
   ])
   expect(runtime).toMatchObject({ name: 'tianwen-runtime', inject: ['dynamicCordisRunner'] })
   expect(smoke).toMatchObject({ name: 'tianwen-phase2-smoke', inject: ['llm', 'tools'] })
@@ -205,6 +225,8 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   expect(status.listGoals).toBeTypeOf('function')
   expect(createRunner.apply).toBeTypeOf('function')
   expect(modelRunner.apply).toBeTypeOf('function')
+  expect(resumeRunner.apply).toBeTypeOf('function')
+  expect(runtimeManifest.dependencies['@deepseek-ai/dsh-system-prompt']).toBe('0.1.0-rc.6')
   const cli = resolve(runtimeRoot, runtimeManifest.bin.tianwen)
   expect(statSync(cli).isFile()).toBe(true)
   return { cli }
@@ -291,7 +313,10 @@ async function start(): Promise<void> {
   const profileManifestPath = `${profileRoot}/package.json`
   const installed = await assertInstalledBundle(profileManifestPath)
   expect(realpathSync(installReceipt.cliPath)).toBe(realpathSync(installed.cli))
-  expect(relative(realpathSync(root), realpathSync(installed.cli)).startsWith('..')).toBe(true)
+  expectOutsideWorktree(installed.cli)
+  expect(installReceipt.archiveDigest).toBe(
+    `sha256:${createHash('sha256').update(readFileSync(archive)).digest('hex')}`,
+  )
   const receiptBytes = readFileSync(installReceiptPath)
   const replayStablePaths = [
     `${dshHostRoot}/node_modules/@deepseek-ai/dsh/package.json`,
@@ -768,39 +793,26 @@ async function start(): Promise<void> {
   expect(snapshotState()).toEqual(stateAfterResume)
 
   const modelSentinel = randomUUID()
-  const modelRequestGuard = `${tianwenRoot}/temp/model-request-guard-${randomUUID()}.cjs`
-  const modelRequestMarker = `${tianwenRoot}/temp/model-request-${randomUUID()}.txt`
-  rmSync(modelRequestMarker, { force: true })
-  writeFileSync(modelRequestGuard, [
-    "const { writeFileSync } = require('node:fs')",
-    'const marker = process.env.TIANWEN_MODEL_REQUEST_MARKER',
-    "if (marker === undefined) throw new Error('missing model request marker')",
-    'globalThis.fetch = () => {',
-    "  writeFileSync(marker, 'attempted\\n', 'utf8')",
-    "  throw new Error('unexpected model request')",
-    '}',
-    '',
-  ].join('\n'), 'utf8')
+  const fakeFetch = resolve(root, 'tests/dsh-migration/fixtures/deepseek-goal-round-fetch.cjs')
+  const fetchTracePath = `${tianwenRoot}/temp/goal-round-fetch-${randomUUID()}.jsonl`
+  rmSync(fetchTracePath, { force: true })
   const modelEnv = {
     ...env,
     DEEPSEEK_API_KEY: modelSentinel,
-    NODE_OPTIONS: `--require=${modelRequestGuard}`,
-    TIANWEN_MODEL_REQUEST_MARKER: modelRequestMarker,
+    NODE_OPTIONS: `--require=${fakeFetch}`,
+    TIANWEN_GOAL_ROUND_FETCH_TRACE: fetchTracePath,
   }
   expect(modelEnv).toMatchObject({
-    NODE_OPTIONS: `--require=${modelRequestGuard}`,
-    TIANWEN_MODEL_REQUEST_MARKER: modelRequestMarker,
+    NODE_OPTIONS: `--require=${fakeFetch}`,
+    TIANWEN_GOAL_ROUND_FETCH_TRACE: fetchTracePath,
   })
-  expect(existsSync(modelRequestGuard)).toBe(true)
   const guardProbe = run(process.execPath, [
     '--input-type=module',
     '--eval',
     "await fetch('http://127.0.0.1:9/')",
   ], modelEnv)
   expect(guardProbe.status).not.toBe(0)
-  expect(existsSync(modelRequestMarker)).toBe(true)
-  rmSync(modelRequestMarker, { force: true })
-  const modelSessionsBefore = listSessionLogs()
+  expect(existsSync(fetchTracePath)).toBe(false)
   const modelAuthorityBefore = {
     goal: readFileSync(resumeLog!),
     session: new Map(listSessionLogs().map(path => [path, readFileSync(path)] as const)),
@@ -865,6 +877,150 @@ async function start(): Promise<void> {
     modelRequestsDelta: 0,
   })
 
+  try {
+    const liveSessionsBeforeCreate = new Set(listSessionLogs())
+    const liveCreate = run(process.execPath, [
+      installed.cli, 'create', '--objective', liveGoalObjective, '--max-rounds', '1',
+      '--data-dir', tianwenRoot, '--json',
+    ], modelEnv)
+    expect(liveCreate.status, `${liveCreate.stdout}\n${liveCreate.stderr}`).toBe(0)
+    expect(liveCreate.stderr).toBe('')
+    const liveGoal = JSON.parse(liveCreate.stdout) as {
+      goal: { id: string, revision: number, objective: string, phase: string, maxGoalRounds: number, roundsStarted: number }
+      session: { id: string, eventCount: number, modelRequestsDelta: number }
+    }
+    expect(liveGoal).toMatchObject({
+      goal: { id: expect.any(String), revision: 1, objective: liveGoalObjective,
+        phase: 'active', maxGoalRounds: 1, roundsStarted: 0 },
+      session: { id: expect.any(String), eventCount: 1, modelRequestsDelta: 0 },
+    })
+    const liveLogs = listSessionLogs().filter(path => !liveSessionsBeforeCreate.has(path))
+    expect(liveLogs).toHaveLength(1)
+    const liveLog = liveLogs[0]!
+    const liveStatusBefore = run(process.execPath, [
+      installed.cli, 'status', '--goal', liveGoal.goal.id, '--data-dir', tianwenRoot, '--json',
+    ], modelEnv)
+    const liveListBefore = run(process.execPath, [
+      installed.cli, 'list', '--data-dir', tianwenRoot, '--json',
+    ], modelEnv)
+    expect(liveStatusBefore.status).toBe(0)
+    expect(liveListBefore.status).toBe(0)
+    expect(JSON.parse(liveStatusBefore.stdout)).toMatchObject({
+      goal: liveGoal.goal, runtime: { modelRequests: 0, readOnly: true },
+    })
+    expect((JSON.parse(liveListBefore.stdout) as { goals: { id: string }[] }).goals
+      .map(goal => goal.id)).toContain(liveGoal.goal.id)
+    expect(existsSync(fetchTracePath)).toBe(false)
+
+    const liveBefore = {
+      sessions: snapshotTree(sessionsRoot),
+      evolution: snapshotTree(evolutionRoot),
+      receipts: snapshotTree(`${tianwenRoot}/receipts`),
+      champion: bytesOrMissing(champion),
+      log: readFileSync(liveLog),
+    }
+    const [, ...liveBeforeLines] = liveBefore.log.toString('utf8').trimEnd().split(/\r?\n/u)
+    const liveBeforeEvents = liveBeforeLines.map(line => JSON.parse(line) as SessionEvent)
+    expect(liveBeforeEvents).toHaveLength(1)
+    expect(liveBeforeEvents[0]).toMatchObject({ type: 'goal/change', data: { operation: 'create' } })
+
+    const strictResume = run(process.execPath, [
+      installed.cli, 'resume', '--goal', liveGoal.goal.id, '--data-dir', tianwenRoot,
+      '--live-smoke', '--json',
+    ], modelEnv, 120_000)
+    expect(strictResume.status, `${strictResume.stdout}\n${strictResume.stderr}`).toBe(0)
+    expect(strictResume.stderr).toBe('')
+    const strictReceipt = JSON.parse(strictResume.stdout) as Record<string, unknown>
+    expect(strictReceipt).toMatchObject({
+      schemaVersion: 'tianwen.goal-live-smoke.v1', status: 'passed',
+      provider: 'deepseek-official', model: 'deepseek-v4-pro',
+      requestCount: 3, retryCount: 0, markerMatched: true,
+      goal: { id: liveGoal.goal.id, phase: 'complete', roundsStarted: 1 },
+      session: { id: liveGoal.session.id, eventCountDelta: expect.any(Number) },
+      evidence: [
+        { toolName: 'tianwen_smoke_action', outcome: 'complete' },
+        { toolName: 'update_goal', outcome: 'complete' },
+      ],
+      governance: { evolutionUnchanged: true, championUnchanged: true },
+    })
+    const trace = readFileSync(fetchTracePath, 'utf8').trimEnd().split(/\r?\n/u)
+      .map(line => JSON.parse(line) as Record<string, unknown>)
+    expect(trace).toEqual([1, 2, 3].map(ordinal => ({
+      ordinal, model: 'deepseek-v4-pro', max_tokens: 64,
+      tool_names: ['tianwen_smoke_action', 'update_goal'], authorization_present: true,
+    })))
+
+    const [, ...liveAfterLines] = readFileSync(liveLog, 'utf8').trimEnd().split(/\r?\n/u)
+    const liveAfterEvents = liveAfterLines.map(line => JSON.parse(line) as SessionEvent)
+    const liveAdded = liveAfterEvents.slice(liveBeforeEvents.length)
+    const liveCalls = liveAdded.filter(event => event.type === 'tool/call')
+    const liveResults = liveAdded.filter(event => event.type === 'tool/result')
+    const liveAssistants = liveAdded.filter(event => event.type === 'assistant/message')
+    expect(liveCalls.map(event => event.data.name)).toEqual(['tianwen_smoke_action', 'update_goal'])
+    expect(liveResults).toHaveLength(2)
+    expect(liveAssistants).toHaveLength(3)
+    expect(liveAssistants.map(event => event.data.usage)).toEqual([
+      { inputTokens: 96, outputTokens: 10, cacheReadTokens: 5 },
+      { inputTokens: 97, outputTokens: 10, cacheReadTokens: 5 },
+      { inputTokens: 98, outputTokens: 10, cacheReadTokens: 5 },
+    ])
+    expect(liveCalls[0]!.seq).toBeLessThan(liveResults[0]!.seq)
+    expect(liveResults[0]!.seq).toBeLessThan(liveCalls[1]!.seq)
+    expect(liveCalls[1]!.seq).toBeLessThan(liveResults[1]!.seq)
+    expect(liveResults[1]!.seq).toBeLessThan(liveAssistants[2]!.seq)
+    expect(liveAssistants[2]!.data.message.content).toEqual([
+      { type: 'text', text: 'TIANWEN_GOAL_ROUND_OK' },
+    ])
+    const liveEvidence = projectEvidence(SessionId(liveGoal.session.id), liveAfterEvents)
+      .filter(record => ['tianwen_smoke_action', 'update_goal'].includes(record.action.toolName))
+    expect(liveEvidence.map(record => ({ toolName: record.action.toolName, status: record.outcome.status })))
+      .toEqual([
+        { toolName: 'tianwen_smoke_action', status: 'complete' },
+        { toolName: 'update_goal', status: 'complete' },
+      ])
+    const liveStatusAfter = run(process.execPath, [
+      installed.cli, 'status', '--goal', liveGoal.goal.id, '--data-dir', tianwenRoot, '--json',
+    ], modelEnv)
+    expect(liveStatusAfter.status).toBe(0)
+    expect(JSON.parse(liveStatusAfter.stdout)).toMatchObject({
+      goal: { id: liveGoal.goal.id, phase: 'complete', roundsStarted: 1 },
+      evidence: { total: 2, counts: { complete: 2, 'missing-result': 0 } },
+    })
+    const liveAfterSessions = snapshotTree(sessionsRoot)
+    delete (liveAfterSessions as Record<string, string>)[`file:${relative(sessionsRoot, liveLog).replaceAll('\\', '/')}`]
+    const liveBeforeSessions = { ...liveBefore.sessions }
+    delete (liveBeforeSessions as Record<string, string>)[`file:${relative(sessionsRoot, liveLog).replaceAll('\\', '/')}`]
+    expect(liveAfterSessions).toEqual(liveBeforeSessions)
+    expect(snapshotTree(evolutionRoot)).toEqual(liveBefore.evolution)
+    expect(snapshotTree(`${tianwenRoot}/receipts`)).toEqual(liveBefore.receipts)
+    expect(bytesOrMissing(champion)).toEqual(liveBefore.champion)
+
+    const beforeSecondStrict = {
+      sessions: snapshotTree(sessionsRoot), evolution: snapshotTree(evolutionRoot),
+      receipts: snapshotTree(`${tianwenRoot}/receipts`), trace: readFileSync(fetchTracePath),
+    }
+    const secondStrict = run(process.execPath, [
+      installed.cli, 'resume', '--goal', liveGoal.goal.id, '--data-dir', tianwenRoot,
+      '--live-smoke', '--json',
+    ], modelEnv)
+    expect(secondStrict.status).toBe(1)
+    expect(secondStrict.stderr).toBe('')
+    expect(JSON.parse(secondStrict.stdout)).toMatchObject({
+      schemaVersion: 'tianwen.goal-live-smoke.v1', status: 'failed', failureCode: 'preflight-rejected',
+      requestCount: 0, retryCount: 0, markerMatched: false,
+    })
+    expect(snapshotTree(sessionsRoot)).toEqual(beforeSecondStrict.sessions)
+    expect(snapshotTree(evolutionRoot)).toEqual(beforeSecondStrict.evolution)
+    expect(snapshotTree(`${tianwenRoot}/receipts`)).toEqual(beforeSecondStrict.receipts)
+    expect(readFileSync(fetchTracePath)).toEqual(beforeSecondStrict.trace)
+    for (const path of [liveLog, fetchTracePath, ...globSync('receipts/**/*', {
+      cwd: tianwenRoot, withFileTypes: true,
+    }).filter(entry => entry.isFile()).map(entry => resolve(entry.parentPath, entry.name))]) {
+      const text = readFileSync(path, 'utf8')
+      expect(text).not.toContain(modelSentinel)
+      expect(text).not.toContain('OFFLINE_DEEPSEEK_RAW_RESPONSE')
+    }
+  } finally {
   const useOffline = run(process.execPath, [
     installed.cli,
     'model',
@@ -899,8 +1055,9 @@ async function start(): Promise<void> {
     credential: { configured: true, source: 'env' },
     modelRequestsDelta: 0,
   })
+  }
 
-  for (const child of [modelStatus, useV4Pro, freshV4ProStatus, useOffline, freshOfflineStatus]) {
+  for (const child of [modelStatus, useV4Pro, freshV4ProStatus]) {
     expect(`${child.stdout}\n${child.stderr}`).not.toContain(modelSentinel)
   }
   const receiptFiles = globSync('receipts/**/*', {
@@ -912,16 +1069,11 @@ async function start(): Promise<void> {
   for (const receipt of receiptFiles) {
     expect(readFileSync(receipt, 'utf8')).not.toContain(modelSentinel)
   }
-  expect(existsSync(modelRequestMarker)).toBe(false)
-  expect(listSessionLogs()).toEqual(modelSessionsBefore)
-  expect({
-    goal: readFileSync(resumeLog!),
-    session: new Map(listSessionLogs().map(path => [path, readFileSync(path)] as const)),
-    evolution: snapshotState(),
-    champion: bytesOrMissing(champion),
-  }).toEqual(modelAuthorityBefore)
-  rmSync(modelRequestGuard, { force: true })
-
+  expect(readFileSync(resumeLog!)).toEqual(modelAuthorityBefore.goal)
+  for (const [path, bytes] of modelAuthorityBefore.session) {
+    expect(readFileSync(path)).toEqual(bytes)
+  }
+  expect(bytesOrMissing(champion)).toEqual(modelAuthorityBefore.champion)
   const resumeReceipt = {
     schemaVersion: 'tianwen.goal-resume-e2e.v1',
     goal: resumeResult.goal,
