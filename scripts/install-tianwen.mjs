@@ -228,13 +228,19 @@ function dumpRow(source, id) {
 
 function dumpValue(lines, key) {
   const values = lines
-    .map(line => new RegExp(`^ {2,}${key}: (.+)$`, 'u').exec(line)?.[1])
+    .map((line, index) => {
+      const match = new RegExp(`^( {2,})${key}: (.+)$`, 'u').exec(line)
+      if (match === null) return undefined
+      if (match[2] !== '>-') return match[2]
+      return new RegExp(`^ {${match[1].length + 2},}(\\S.*)$`, 'u')
+        .exec(lines[index + 1] ?? '')?.[1] ?? match[2]
+    })
     .filter(value => value !== undefined)
   if (values.length !== 1) throw new Error(`dump-config must contain exactly one ${key}`)
   return values[0].replace(/^['"]|['"]$/gu, '')
 }
 
-function validateDump(source, paths) {
+export function validateDump(source, paths) {
   const expected = [
     ['agent-default-model', 'provider', 'tianwen-offline'],
     ['agent-default-model', 'model', 'phase2-smoke'],

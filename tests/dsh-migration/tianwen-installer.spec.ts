@@ -8,6 +8,7 @@ import {
   installTianwen,
   parseInstallerArgs,
   renderProfilePatch,
+  validateDump,
   validateInstalledHost,
 } from '../../scripts/install-tianwen.mjs'
 
@@ -28,6 +29,7 @@ function scriptedInstaller(
   paths: ReturnType<typeof deriveInstallPaths>,
   failOn?: string,
   archiveBytes = 'fixed runtime archive\n',
+  dumpOptions: { foldedSessionsRoot?: boolean, sessionsRoot?: string } = {},
 ) {
   const calls: string[][] = []
   const childEnvironments: NodeJS.ProcessEnv[] = []
@@ -94,6 +96,8 @@ function scriptedInstaller(
       })
     }
     if (argv.includes('--dump-config')) {
+      const sessionsRoot = dumpOptions.sessionsRoot ?? paths.sessionsRoot
+      const renderedSessionsRoot = sessionsRoot.replaceAll('\\', '/')
       return {
         status: 0,
         stderr: '',
@@ -103,7 +107,7 @@ function scriptedInstaller(
     model: phase2-smoke
 - id: session-persistence-jsonl
   config:
-    root: ${paths.sessionsRoot.replaceAll('\\', '/')}
+    root: ${dumpOptions.foldedSessionsRoot ? `>-\n      ${renderedSessionsRoot}` : renderedSessionsRoot}
     compression: none
     packChunks: false
 - id: cordis-host-runner
@@ -274,6 +278,52 @@ describe('Tianwen installer contract', () => {
     ])
     expect(scripted.executables.every(executable => executable === process.execPath)).toBe(true)
     expect(scripted.calls.every(argv => !argv.includes(session) && !argv.includes(ledger))).toBe(true)
+  })
+
+  it('accepts a folded DSH sessions root and rejects a different folded root', () => {
+    const root = testRoot('long-folded-root')
+    const paths = deriveInstallPaths(root, 'win32')
+    const accepted = scriptedInstaller(paths, undefined, undefined, { foldedSessionsRoot: true })
+
+    installTianwen({ dataDir: root, runner: accepted.runner })
+
+    expect(() => installTianwen({
+      dataDir: root,
+      runner: scriptedInstaller(paths, undefined, undefined, {
+        foldedSessionsRoot: true,
+        sessionsRoot: `${paths.sessionsRoot}\\unexpected`,
+      }).runner,
+    })).toThrow(/session-persistence-jsonl\.root differs from Tianwen v1/u)
+  })
+
+  it('validates DSH\'s exact folded long sessions root and rejects a different value', () => {
+    const paths = deriveInstallPaths(
+      'D:\\DevData\\tianwen-live-goal-round\\test-data\\installed-e2e',
+      'win32',
+    )
+    const dump = `- id: agent-default-model
+  config:
+    provider: tianwen-offline
+    model: phase2-smoke
+- id: session-persistence-jsonl
+  config:
+    root: >-
+      D:/DevData/tianwen-live-goal-round/test-data/installed-e2e/dsh-home/sessions
+    compression: none
+    packChunks: false
+- id: cordis-host-runner
+  name: '@deepseek-ai/dsh-cordis-host-runner'
+- id: tianwen-runtime
+  evolutionRoot: D:/DevData/tianwen-live-goal-round/test-data/installed-e2e/state/evolution
+- id: tianwen-phase2-smoke
+  name: '@tianwen/runtime-bundle/smoke'
+`
+
+    expect(() => validateDump(dump, paths)).not.toThrow()
+    expect(() => validateDump(
+      dump.replace('/sessions\n', '/sessions-unexpected\n'),
+      paths,
+    )).toThrow(/session-persistence-jsonl\.root differs from Tianwen v1/u)
   })
 
   it('fails closed on an incompatible managed host before any child process', () => {
