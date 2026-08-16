@@ -580,6 +580,38 @@ Alpha-A 独立实施分支为：
   Goal、Session、Evidence 和 Champion 状态以用户可读形式展示出来，不新增
   自动晋升、写操作、完整 UI 或 Runtime cutover。
 
+- `tianwen status --goal` 只读控制投影阶段已完成并独立推送；实施分支为
+  `codex/tianwen-read-only-goal-status`，远端精确 HEAD 为
+  `c3ece065f246faaec31222593a8a5a8dc1ed5ec0`；canonical handoff 位于该分支的
+  `docs/operations/tianwen-read-only-goal-status-handoff.md`；
+- 设计和计划已经在 main 的 `1bd44cc` 固化。正式包现在发布 `./status` 和
+  `tianwen` bin，命令为
+  `tianwen status --goal <goal-id> --data-dir <absolute-data-dir> [--json]`；
+- 状态命令只读使用公开 DSH Session/Goal API、现有 Evidence projector 和
+  canonical Evolution ledger/pointer，展示 Goal、进度、Session、最小 Evidence、
+  Champion 与明确的 `not-loaded/read-only/0 model requests` Runtime 标记；它不创建
+  Agent、不恢复 Goal、不调用模型、不晋升 Artifact，也不修复治理状态；
+- Champion 窄重放在独立复审后补齐了最新评测、审批消费、promote/rollback、
+  runtime binding 和失败事件语义；仍按设计不读取 Artifact source bytes，源文件
+  校验和修复继续属于 Evolution mutation path；
+- 正式离线 Profile E2E 从已安装 tarball 的 `bin.tianwen` 执行状态命令，命令前后
+  Session/Evolution 目录和文件字节完全一致；模型 step 从命令前的 4 保持为命令后
+  重新读取 Session 得到的 4；三条 Evidence 为 `create_goal`、
+  `tianwen_smoke_action`、`update_goal`；
+- 最终 Runtime Bundle tarball SHA-256 为
+  `CFD046663C0E92D9DA320B67455BA1D712DB19500A627318E71D50243F6F6EF7`；
+  Phase 3 状态回执 SHA-256 为
+  `41909501165C512914688AB1C92265FFF6C843A16E7DF0EDD7915C3993B7BE8F`；
+- 最终门禁：默认 Node `91 passed, 8 skipped`；正式离线 Profile E2E `2 passed`；
+  Windows 本地沙盒 `3 passed`；Python A1–A5 `10 passed`；全量 Python
+  `424 passed, 4 skipped`；Ruff、依赖闭包、私有导入、类型检查、diff 和工作树
+  状态均干净；final review 为 0 Critical、0 Important、0 Minor；
+- 全量 Python 本轮耗时 `8060.00s`，用户确认根因是 360 安全防护拦截/扫描 Python
+  子进程；测试保持单前台进程并最终全绿，这是环境事件，不是产品失败；
+- 本阶段仍未新增完整任务面板、桌面 UI、状态写操作、自动晋升、真实模型、真实
+  Docker 或 Runtime cutover。下一推荐入口是复用同一投影做最小只读 Goal/Session
+  列表，让用户先发现 Goal id；暂不建设完整桌面任务面板。
+
 当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
 
 本节是动态状态。以后实施进度变化时可以更新本节，但不得借此修改前面的稳定共识。
