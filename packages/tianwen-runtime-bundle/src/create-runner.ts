@@ -53,6 +53,7 @@ export async function runGoalCreate(
   const sessionId = SessionId(`tianwen-goal-${config.nonce}`)
   const handle = await ctx.agents.create({
     sessionId,
+    meta: { cwd: process.cwd() },
     agentOptions: { provider: selection.provider, model: selection.model },
     setup: agentCtx => {
       installModelSelection(agentCtx, { current: selection, assembled: undefined })

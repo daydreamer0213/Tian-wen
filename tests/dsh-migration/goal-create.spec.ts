@@ -121,6 +121,7 @@ describe('tianwen create', () => {
           agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
         })
         try {
+          expect(handle.agent.session.header.cwd).toBe(process.cwd())
           expect(second.ctx.goals.get(handle.agent)).toMatchObject({
             id: receipt.goal.id,
             activation: 'disarmed',

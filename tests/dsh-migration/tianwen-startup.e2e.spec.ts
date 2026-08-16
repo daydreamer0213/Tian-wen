@@ -14,7 +14,7 @@ import {
 import { delimiter, dirname, isAbsolute, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { SessionId, mountGoalHarness } from '@tianwen/dsh-compat'
+import { SessionId } from '@tianwen/dsh-compat'
 import type { SessionEvent } from '@tianwen/dsh-compat'
 import { projectEvidence } from '../../packages/tianwen-evidence/src/projector.js'
 
@@ -28,6 +28,7 @@ const evolutionRoot = `${tianwenRoot}/state/evolution`
 const receiptPath = `${tianwenRoot}/receipts/phase2-startup-receipt.json`
 const statusReceiptPath = `${tianwenRoot}/receipts/phase3-goal-status-receipt.json`
 const listReceiptPath = `${tianwenRoot}/receipts/phase4-goal-list-receipt.json`
+const createReceiptPath = `${tianwenRoot}/receipts/goal-create-receipt.json`
 const resumeReceiptPath = `${tianwenRoot}/receipts/phase5-goal-resume-receipt.json`
 const installReceiptPath = `${tianwenRoot}/receipts/tianwen-install.json`
 const archive = `${tianwenRoot}/packs/tianwen-runtime-bundle-0.0.0.tgz`
@@ -114,6 +115,7 @@ function childEnvironment(): NodeJS.ProcessEnv {
     receiptPath,
     statusReceiptPath,
     listReceiptPath,
+    createReceiptPath,
     resumeReceiptPath,
     installReceiptPath,
     archive,
@@ -175,6 +177,7 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   const runtimeResolved = requireFromProfile.resolve(`${runtimePackage}/runtime`)
   const smokeResolved = requireFromProfile.resolve(`${runtimePackage}/smoke`)
   const statusResolved = requireFromProfile.resolve(`${runtimePackage}/status`)
+  const createRunnerResolved = requireFromProfile.resolve(`${runtimePackage}/create-runner`)
   const runtimeRoot = resolve(dirname(runtimeResolved), '..')
   const runtimeManifest = JSON.parse(readFileSync(
     resolve(runtimeRoot, 'package.json'),
@@ -187,15 +190,17 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   for (const external of Object.keys(runtimeManifest.dependencies).sort()) {
     await import(pathToFileURL(requireFromRuntime.resolve(external)).href)
   }
-  const [runtime, smoke, status] = await Promise.all([
+  const [runtime, smoke, status, createRunner] = await Promise.all([
     import(pathToFileURL(runtimeResolved).href),
     import(pathToFileURL(smokeResolved).href),
     import(pathToFileURL(statusResolved).href),
+    import(pathToFileURL(createRunnerResolved).href),
   ])
   expect(runtime).toMatchObject({ name: 'tianwen-runtime', inject: ['dynamicCordisRunner'] })
   expect(smoke).toMatchObject({ name: 'tianwen-phase2-smoke', inject: ['llm', 'tools'] })
   expect(status.readGoalStatus).toBeTypeOf('function')
   expect(status.listGoals).toBeTypeOf('function')
+  expect(createRunner.apply).toBeTypeOf('function')
   const cli = resolve(runtimeRoot, runtimeManifest.bin.tianwen)
   expect(statSync(cli).isFile()).toBe(true)
   return { cli }
@@ -208,6 +213,8 @@ async function start(): Promise<void> {
   rmSync(`${statusReceiptPath}.tmp`, { force: true })
   rmSync(listReceiptPath, { force: true })
   rmSync(`${listReceiptPath}.tmp`, { force: true })
+  rmSync(createReceiptPath, { force: true })
+  rmSync(`${createReceiptPath}.tmp`, { force: true })
   rmSync(resumeReceiptPath, { force: true })
   rmSync(`${resumeReceiptPath}.tmp`, { force: true })
   const env = childEnvironment()
@@ -599,32 +606,85 @@ async function start(): Promise<void> {
   expect(JSON.parse(readFileSync(listReceiptPath, 'utf8')))
     .toEqual(listReceipt)
 
-  const resumeSessionId = SessionId(`tianwen-resume-${Date.now()}`)
-  const seed = await mountGoalHarness(sessionsRoot, [], { goalRoundDriver: false })
-  const seedHandle = await seed.ctx.agents.create({
-    sessionId: resumeSessionId,
-    meta: { cwd: root },
-    agentOptions: { provider: 'tianwen-offline', model: 'phase2-smoke' },
-  })
-  let resumeGoal: ReturnType<typeof seed.ctx.goals.create>
-  try {
-    resumeGoal = seed.ctx.goals.create(seedHandle.agent, {
-      objective: 'prove explicit Tianwen Goal resume',
-      maxGoalRounds: 1,
-    })
-    await seed.ctx.sessions.flush(seedHandle.agent.session)
-  } finally {
-    await seedHandle.dispose()
-    await seed.ctx.fiber.dispose()
+  const sessionsBeforeCreate = new Set(listSessionLogs())
+  const championBeforeCreate = bytesOrMissing(champion)
+  const ledgerBeforeCreate = bytesOrMissing(ledger)
+  const createRun = run(process.execPath, [
+    installed.cli,
+    'create',
+    '--objective',
+    'prove explicit Tianwen Goal resume',
+    '--max-rounds',
+    '1',
+    '--data-dir',
+    tianwenRoot,
+    '--json',
+  ], env)
+  expect(createRun.status, `${createRun.stdout}\n${createRun.stderr}`).toBe(0)
+  expect(createRun.stderr).toBe('')
+  const createdGoal = JSON.parse(createRun.stdout) as {
+    schemaVersion: string
+    goal: {
+      id: string
+      maxGoalRounds: number
+      objective: string
+      phase: string
+      revision: number
+      roundsStarted: number
+    }
+    session: { eventCount: number, id: string, modelRequestsDelta: number }
   }
-
-  const resumeLog = listSessionLogs().find(path =>
-    readFileSync(path, 'utf8').includes(String(resumeSessionId)))
+  expect(createdGoal).toEqual({
+    schemaVersion: 'tianwen.goal-create.v1',
+    goal: {
+      id: expect.any(String),
+      maxGoalRounds: 1,
+      objective: 'prove explicit Tianwen Goal resume',
+      phase: 'active',
+      revision: 1,
+      roundsStarted: 0,
+    },
+    session: {
+      eventCount: expect.any(Number),
+      id: expect.stringMatching(/^tianwen-goal-/u),
+      modelRequestsDelta: 0,
+    },
+  })
+  const createdLogs = listSessionLogs().filter(path => !sessionsBeforeCreate.has(path))
+  expect(createdLogs).toHaveLength(1)
+  const resumeLog = createdLogs[0]
   expect(resumeLog).toBeDefined()
   const [, ...resumeBeforeLines] = readFileSync(resumeLog!, 'utf8')
     .trimEnd()
     .split(/\r?\n/u)
   const resumeBeforeEvents = resumeBeforeLines.map(line => JSON.parse(line) as SessionEvent)
+  expect(resumeBeforeEvents.filter(event => event.type === 'step/start')).toHaveLength(0)
+  expect(resumeBeforeEvents.filter(event => event.type === 'request/header')).toHaveLength(0)
+  expect(resumeBeforeEvents.filter(event => event.type === 'goal/change')).toHaveLength(1)
+  expect(createdGoal.session.eventCount).toBe(resumeBeforeEvents.length)
+  expect(bytesOrMissing(champion)).toEqual(championBeforeCreate)
+  expect(bytesOrMissing(ledger)).toEqual(ledgerBeforeCreate)
+
+  const createdStatusRun = run(process.execPath, [
+    installed.cli, 'status', '--goal', createdGoal.goal.id,
+    '--data-dir', tianwenRoot, '--json',
+  ], env)
+  expect(createdStatusRun.status).toBe(0)
+  expect(JSON.parse(createdStatusRun.stdout)).toMatchObject({
+    goal: createdGoal.goal,
+    session: { id: createdGoal.session.id },
+    runtime: { modelRequests: 0, readOnly: true },
+  })
+  const createdListRun = run(process.execPath, [
+    installed.cli, 'list', '--data-dir', tianwenRoot, '--json',
+  ], env)
+  expect(createdListRun.status).toBe(0)
+  expect((JSON.parse(createdListRun.stdout) as {
+    goals: { id: string }[]
+  }).goals.map(goal => goal.id)).toContain(createdGoal.goal.id)
+  publishReceipt(createReceiptPath, createdGoal)
+  expect(JSON.parse(readFileSync(createReceiptPath, 'utf8'))).toEqual(createdGoal)
+
   const championBeforeResume = bytesOrMissing(champion)
   const ledgerBeforeResume = bytesOrMissing(ledger)
 
@@ -632,7 +692,7 @@ async function start(): Promise<void> {
     installed.cli,
     'resume',
     '--goal',
-    String(resumeGoal.id),
+    createdGoal.goal.id,
     '--data-dir',
     tianwenRoot,
     '--json',
@@ -653,13 +713,13 @@ async function start(): Promise<void> {
   expect(resumeResult).toEqual({
     schemaVersion: 'tianwen.goal-resume.v1',
     goal: {
-      id: String(resumeGoal.id),
-      revision: resumeGoal.revision + 2,
+      id: createdGoal.goal.id,
+      revision: createdGoal.goal.revision + 2,
       phase: 'complete',
       roundsStarted: 1,
     },
     session: {
-      id: String(resumeSessionId),
+      id: createdGoal.session.id,
       eventCountBefore: expect.any(Number),
       eventCountAfter: expect.any(Number),
       eventCountDelta: expect.any(Number),
@@ -693,7 +753,7 @@ async function start(): Promise<void> {
     installed.cli,
     'resume',
     '--goal',
-    String(resumeGoal.id),
+    createdGoal.goal.id,
     '--data-dir',
     tianwenRoot,
     '--json',
