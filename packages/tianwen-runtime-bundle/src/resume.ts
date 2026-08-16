@@ -227,7 +227,7 @@ export async function launchGoalResume(
             Buffer.concat(stdout).toString('utf8'), Buffer.concat(stderr).toString('utf8'),
           )
         process.stdout.write(`${JSON.stringify(receipt)}\n`)
-        resolveExit(receipt.status === 'succeeded' ? 0 : 1)
+        resolveExit(receipt.status === 'passed' ? 0 : 1)
       })
     })
   }

@@ -45,7 +45,7 @@ export interface GoalLiveSmokeFailureReceipt {
 
 export interface GoalLiveSmokeSuccessReceipt {
   readonly schemaVersion: 'tianwen.goal-live-smoke.v1'
-  readonly status: 'succeeded'
+  readonly status: 'passed'
   readonly timestamp: string
   readonly provider: typeof LIVE_GOAL_PROVIDER
   readonly model: typeof LIVE_GOAL_MODEL
@@ -53,11 +53,138 @@ export interface GoalLiveSmokeSuccessReceipt {
   readonly requestCount: number
   readonly retryCount: number
   readonly markerMatched: true
+  readonly goal: {
+    readonly id: string
+    readonly revision: number
+    readonly phase: 'complete'
+    readonly roundsStarted: number
+  }
+  readonly session: {
+    readonly id: string
+    readonly eventCountDelta: number
+  }
+  readonly usage: {
+    readonly inputTokens: number
+    readonly outputTokens: number
+    readonly cacheReadTokens: number
+    readonly cacheWriteTokens: number
+    readonly totalTokens: number
+    readonly estimatedCostCny: number
+  }
+  readonly evidence: readonly {
+    readonly evidenceId: string
+    readonly toolName: typeof LIVE_GOAL_TOOLS[number]
+    readonly outcome: 'complete'
+  }[]
+  readonly governance: {
+    readonly evolutionUnchanged: true
+    readonly championUnchanged: true
+  }
 }
 
 export type GoalLiveSmokeReceipt =
   | GoalLiveSmokeFailureReceipt
   | GoalLiveSmokeSuccessReceipt
+
+export interface LiveGoalExpectedRef {
+  readonly id: string
+  readonly revision: number
+}
+
+export type LiveGoalEventAssessment =
+  | {
+    readonly ok: true
+    readonly usage: GoalLiveSmokeSuccessReceipt['usage']
+  }
+  | {
+    readonly ok: false
+    readonly failureCode: Extract<GoalLiveSmokeFailureCode,
+      'usage-invalid' | 'token-budget-exceeded' | 'tool-contract-violated' | 'marker-mismatch'>
+  }
+
+function usageIsValid(value: unknown): value is Record<string, number | undefined> {
+  if (value === null || typeof value !== 'object') return false
+  return ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'].every(key => {
+    const count = (value as Record<string, unknown>)[key]
+    return count === undefined || (typeof count === 'number' && Number.isSafeInteger(count) && count >= 0)
+  }) && ['inputTokens', 'outputTokens'].every(key =>
+    (value as Record<string, unknown>)[key] !== undefined)
+}
+
+function equalJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+/** Assess only the bounded Session delta; it never returns model text or tool payloads. */
+export function assessLiveGoalEvents(
+  _sessionId: string,
+  addedEvents: readonly SessionEvent[],
+  expectedGoal: LiveGoalExpectedRef,
+): LiveGoalEventAssessment {
+  const assistants = addedEvents.filter(event => event.type === 'assistant/message')
+  if (assistants.length !== LIVE_GOAL_LIMITS.maxRequests) {
+    return { ok: false, failureCode: 'usage-invalid' }
+  }
+  let inputTokens = 0
+  let outputTokens = 0
+  let cacheReadTokens = 0
+  let cacheWriteTokens = 0
+  for (const assistant of assistants) {
+    if (!usageIsValid(assistant.data.usage)) return { ok: false, failureCode: 'usage-invalid' }
+    inputTokens += assistant.data.usage.inputTokens!
+    outputTokens += assistant.data.usage.outputTokens!
+    cacheReadTokens += assistant.data.usage.cacheReadTokens ?? 0
+    cacheWriteTokens += assistant.data.usage.cacheWriteTokens ?? 0
+  }
+  const totalTokens = inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens
+  if (totalTokens > LIVE_GOAL_LIMITS.maxTotalTokens) {
+    return { ok: false, failureCode: 'token-budget-exceeded' }
+  }
+
+  const calls = addedEvents.filter(event => event.type === 'tool/call')
+  const results = addedEvents.filter(event => event.type === 'tool/result')
+  if (calls.length !== 2 || results.length !== 2 ||
+    calls.map(event => event.data.name).join(',') !== LIVE_GOAL_TOOLS.join(',')) {
+    return { ok: false, failureCode: 'tool-contract-violated' }
+  }
+  let updateArguments: unknown
+  try {
+    updateArguments = JSON.parse(calls[1]!.data.arguments)
+  } catch {
+    return { ok: false, failureCode: 'tool-contract-violated' }
+  }
+  if (calls[0]!.data.arguments !== '{}' || !equalJson(updateArguments, {
+    goal_id: expectedGoal.id,
+    revision: expectedGoal.revision,
+    action: 'complete',
+  })) return { ok: false, failureCode: 'tool-contract-violated' }
+  for (const [index, call] of calls.entries()) {
+    const result = results.find(item =>
+      String(item.data.message.source.callId) === String(call.data.callId))
+    if (result === undefined || result.seq <= call.seq || result.data.error !== undefined ||
+      (index === 1 && result.seq <= results[0]!.seq)) {
+      return { ok: false, failureCode: 'tool-contract-violated' }
+    }
+  }
+  const finalContent = assistants.at(-1)!.data.message.content
+  if (finalContent.length !== 1 || finalContent[0]?.type !== 'text' ||
+    finalContent[0].text !== LIVE_GOAL_MARKER) {
+    return { ok: false, failureCode: 'marker-mismatch' }
+  }
+  return {
+    ok: true,
+    usage: {
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
+      totalTokens,
+      estimatedCostCny: (
+        inputTokens * 3 + cacheReadTokens * 0.025 + cacheWriteTokens * 3 + outputTokens * 6
+      ) / 1_000_000,
+    },
+  }
+}
 
 export interface GoalLiveSmokeFailureOptions {
   readonly now?: Date
@@ -124,16 +251,36 @@ function isGoalLiveSmokeSuccessReceipt(value: unknown): value is GoalLiveSmokeSu
   const receipt = value as Record<string, unknown>
   return hasExactKeys(receipt, [
     'schemaVersion', 'status', 'timestamp', 'provider', 'model', 'limits',
-    'requestCount', 'retryCount', 'markerMatched',
+    'requestCount', 'retryCount', 'markerMatched', 'goal', 'session', 'usage',
+    'evidence', 'governance',
   ]) && receipt.schemaVersion === 'tianwen.goal-live-smoke.v1' &&
-    receipt.status === 'succeeded' &&
+    receipt.status === 'passed' &&
     typeof receipt.timestamp === 'string' &&
     !Number.isNaN(Date.parse(receipt.timestamp)) &&
     receipt.provider === LIVE_GOAL_PROVIDER &&
     receipt.model === LIVE_GOAL_MODEL &&
     hasFixedLimits(receipt.limits) &&
     typeof receipt.requestCount === 'number' &&
-    typeof receipt.retryCount === 'number' && receipt.markerMatched === true
+    typeof receipt.retryCount === 'number' && receipt.markerMatched === true &&
+    receipt.goal !== null && typeof receipt.goal === 'object' &&
+    typeof (receipt.goal as Record<string, unknown>).id === 'string' &&
+    Number.isSafeInteger((receipt.goal as Record<string, unknown>).revision) &&
+    (receipt.goal as Record<string, unknown>).phase === 'complete' &&
+    Number.isSafeInteger((receipt.goal as Record<string, unknown>).roundsStarted) &&
+    receipt.session !== null && typeof receipt.session === 'object' &&
+    typeof (receipt.session as Record<string, unknown>).id === 'string' &&
+    Number.isSafeInteger((receipt.session as Record<string, unknown>).eventCountDelta) &&
+    receipt.usage !== null && typeof receipt.usage === 'object' &&
+    ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'totalTokens', 'estimatedCostCny']
+      .every(key => typeof (receipt.usage as Record<string, unknown>)[key] === 'number') &&
+    Array.isArray(receipt.evidence) && receipt.evidence.length === 2 &&
+    receipt.evidence.every(item => item !== null && typeof item === 'object' &&
+      typeof (item as Record<string, unknown>).evidenceId === 'string' &&
+      LIVE_GOAL_TOOLS.includes((item as Record<string, unknown>).toolName as typeof LIVE_GOAL_TOOLS[number]) &&
+      (item as Record<string, unknown>).outcome === 'complete') &&
+    receipt.governance !== null && typeof receipt.governance === 'object' &&
+    (receipt.governance as Record<string, unknown>).evolutionUnchanged === true &&
+    (receipt.governance as Record<string, unknown>).championUnchanged === true
 }
 
 /** Accepts a single bounded, sanitized receipt line; raw child stderr is never retained. */
@@ -167,3 +314,4 @@ export function parseGoalLiveSmokeChildReceipt(
     })
   }
 }
+import type { SessionEvent } from '@deepseek-ai/dsh-session'

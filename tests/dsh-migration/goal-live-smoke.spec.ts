@@ -3,15 +3,32 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
-import { SessionId, mountGoalHarness } from '@tianwen/dsh-compat'
+import {
+  SessionId,
+  defineTool,
+  mountGoalHarness,
+  textResponse,
+  toolCallResponse,
+  toolGoal,
+} from '@tianwen/dsh-compat'
 import { describe, expect, it } from 'vitest'
+import { TianwenEvidenceService } from '../../packages/tianwen-evidence/src/index.js'
 
 import {
   LIVE_GOAL_OBJECTIVE,
+  assessLiveGoalEvents,
   createGoalLiveSmokeFailure,
   parseGoalLiveSmokeChildReceipt,
 } from '../../packages/tianwen-runtime-bundle/src/goal-live-smoke.js'
 import { preflightGoalResume } from '../../packages/tianwen-runtime-bundle/src/resume.js'
+
+function withUsage(chunks: readonly unknown[], inputTokens: number) {
+  return [
+    ...chunks.slice(0, -1),
+    { type: 'usage' as const, usage: { inputTokens, outputTokens: 10, cacheReadTokens: 5 } },
+    chunks.at(-1)!,
+  ]
+}
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-live-goal-smoke-tests')
 const CLI = resolve('packages/tianwen-runtime-bundle/dist/cli.js')
@@ -63,6 +80,138 @@ async function persistLiveGoal(dataDir: string, options: {
 }
 
 describe('tianwen live Goal smoke', () => {
+  it.each([
+    ['missing usage', [undefined, undefined, undefined], 'usage-invalid'],
+    ['unsafe usage', [{ inputTokens: Number.MAX_SAFE_INTEGER + 1, outputTokens: 0 }, { inputTokens: 0, outputTokens: 0 }, { inputTokens: 0, outputTokens: 0 }], 'usage-invalid'],
+    ['token total above the fixed cap', [{ inputTokens: 32769, outputTokens: 0 }, { inputTokens: 0, outputTokens: 0 }, { inputTokens: 0, outputTokens: 0 }], 'token-budget-exceeded'],
+  ])('rejects %s from durable assistant events', (_name, usages, failureCode) => {
+    const events = usages.map((usage, index) => ({
+      type: 'assistant/message', seq: index, time: index,
+      data: { turn: 1, step: index + 1, message: { content: [] }, usage },
+    }))
+    expect(assessLiveGoalEvents('goal-session', events as never, { id: 'goal-id', revision: 2 }))
+      .toEqual({ ok: false, failureCode })
+  })
+
+  it('runs exactly the fixed three-request Goal round with the two allowed tools', async () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const dataDir = mkdtempSync(join(FIXTURE_BASE, 'round-'))
+    const sessionsRoot = join(dataDir, 'dsh-home', 'sessions')
+    const sessionId = SessionId(`tianwen-goal-${randomUUID()}`)
+    const first = await mountGoalHarness(sessionsRoot, [], { goalRoundDriver: false })
+    try {
+      const initial = await first.ctx.agents.create({
+        sessionId,
+        agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+      })
+      const goal = first.ctx.goals.create(initial.agent, {
+        objective: LIVE_GOAL_OBJECTIVE,
+        maxGoalRounds: 1,
+      })
+      await first.ctx.sessions.flush(initial.agent.session)
+      await initial.dispose()
+
+      const second = await mountGoalHarness(sessionsRoot, [
+        withUsage(toolCallResponse('live-action', 'tianwen_smoke_action', {}), 100),
+        withUsage(toolCallResponse('live-complete', 'update_goal', {
+          goal_id: String(goal.id), revision: 2, action: 'complete',
+        }), 101),
+        withUsage(textResponse('TIANWEN_GOAL_ROUND_OK'), 102),
+      ], { goalRoundDriver: true })
+      try {
+        second.adapter.resolveModel = async (provider, model) => ({
+          provider,
+          id: model,
+          name: model,
+          reasoning: { efforts: [{ id: 'off', name: 'off' }] },
+        })
+        second.ctx.llm.registerAdapter(['deepseek-official'], second.adapter)
+        await second.ctx.plugin(toolGoal, {})
+        await second.ctx.plugin(TianwenEvidenceService)
+        second.ctx.tools.register(defineTool({
+          name: 'tianwen_smoke_action',
+          description: 'Return the fixed live Goal smoke value.',
+          parameters: {},
+          output: {
+            schema: { type: 'string' },
+            render: (_args, value) => [{ type: 'text', text: value }],
+          },
+          async execute() { return 'live-goal-action-ok' },
+        }))
+        second.ctx.provide('agentDefaultModel', {
+          currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4-pro' }),
+        })
+        second.ctx.provide('credentials', {
+          describe: async () => ({ configured: true, writable: false }),
+        })
+
+        const { runGoalResume } = await import(
+          '../../packages/tianwen-runtime-bundle/src/resume-runner.js'
+        )
+        const receipt = await runGoalResume(second.ctx, {
+          goalId: String(goal.id), json: true, nonce: 'test-nonce', revision: 1,
+          sessionId: String(sessionId), liveSmoke: true, evolutionRoot: join(dataDir, 'state', 'evolution'),
+          startedAtMs: Date.now(),
+        } as never)
+
+        expect(receipt).toMatchObject({
+          schemaVersion: 'tianwen.goal-live-smoke.v1',
+          status: 'passed',
+          provider: 'deepseek-official',
+          model: 'deepseek-v4-pro',
+          requestCount: 3,
+          retryCount: 0,
+          markerMatched: true,
+          goal: { id: String(goal.id), phase: 'complete', roundsStarted: 1 },
+          session: { id: String(sessionId), eventCountDelta: expect.any(Number) },
+          evidence: [
+            { toolName: 'tianwen_smoke_action', outcome: 'complete' },
+            { toolName: 'update_goal', outcome: 'complete' },
+          ],
+          governance: { evolutionUnchanged: true, championUnchanged: true },
+        })
+        expect(second.adapter.requests).toHaveLength(3)
+        expect(second.adapter.requests[0]!.system).toContain(`${String(goal.id)} revision 2`)
+        for (const request of second.adapter.requests) {
+          expect(request.provider).toBe('deepseek-official')
+          expect(request.model).toBe('deepseek-v4-pro')
+          expect(request.reasoningEffort).toBe('off')
+          expect(request.maxTokens).toBe(64)
+          expect(request.tools?.map(tool => tool.name).toSorted())
+            .toEqual(['tianwen_smoke_action', 'update_goal'])
+        }
+        const events = second.adapter.requests.length === 3
+          ? (await second.ctx.sessionPersistence.inspect(sessionId)).events
+          : []
+        const calls = events.filter(event => event.type === 'tool/call')
+        const results = events.filter(event => event.type === 'tool/result')
+        expect(calls.map(event => event.data.name)).toEqual(['tianwen_smoke_action', 'update_goal'])
+        expect(results.map(event => String(event.data.message.source.callId)))
+          .toEqual(calls.map(event => String(event.data.callId)))
+        expect(events.filter(event => event.type === 'assistant/message').map(event => event.data.usage))
+          .toHaveLength(3)
+        const checked = await second.ctx.agents.resume({
+          resumeSessionId: sessionId,
+          agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+        })
+        try {
+          expect(second.ctx.goals.get(checked.agent)).toMatchObject({ phase: 'complete', activation: 'disarmed' })
+        } finally {
+          await checked.dispose()
+        }
+        const serialized = JSON.stringify(receipt)
+        for (const secret of [LIVE_GOAL_OBJECTIVE, 'TIANWEN_GOAL_ROUND_OK', '{}', 'live-goal-action-ok']) {
+          expect(serialized).not.toContain(secret)
+        }
+      } finally {
+        await second.ctx.fiber.dispose()
+      }
+    } finally {
+      await first.ctx.fiber.dispose()
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
   it('accepts only the immutable, pristine Goal in a strict D:\\DevData child', async () => {
     mkdirSync(FIXTURE_BASE, { recursive: true })
     const dataDir = mkdtempSync(join(FIXTURE_BASE, 'valid-'))
