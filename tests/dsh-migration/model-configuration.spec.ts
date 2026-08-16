@@ -259,21 +259,34 @@ describe('tianwen model', () => {
     expect(String(stdout.mock.calls[0]?.[0])).not.toContain(sentinelKey)
   })
 
-  it('defers model execution until the next event-loop turn', async () => {
+  it('waits for the loader before touching model services or exiting', async () => {
     const services = context({})
     const exit = vi.fn()
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    let releaseLoader: () => void
+    const loader = {
+      await: vi.fn(() => new Promise<void>(resolve => {
+        releaseLoader = resolve
+      })),
+    }
     const runnerContext = {
-      get: (service: string) => service === 'appExit' ? exit : services.get(service),
+      get: (service: string) => service === 'appExit'
+        ? exit
+        : service === 'loader'
+          ? loader
+          : services.get(service),
     }
 
     apply(runnerContext as never, { operation: 'use', model: 'offline', json: true })
     await Promise.resolve()
 
+    expect(loader.await).toHaveBeenCalledTimes(1)
     expect(services.agentDefaultModel.currentSelection).not.toHaveBeenCalled()
     expect(exit).not.toHaveBeenCalled()
 
-    await new Promise<void>(resolve => setImmediate(resolve))
+    releaseLoader!()
     await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
+    expect(services.agentDefaultModel.currentSelection).toHaveBeenCalledTimes(2)
   })
 
   it.each(['catalog', 'credential'] as const)(

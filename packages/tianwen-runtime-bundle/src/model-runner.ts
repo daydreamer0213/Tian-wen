@@ -171,15 +171,16 @@ const SAFE_MODEL_ERROR = 'model configuration failed'
 export function apply(ctx: Context, config: ModelRunnerConfig): void {
   const exit = ctx.get('appExit') as ((code: number) => void) | undefined
   if (exit === undefined) throw new Error('tianwen-model-runner: appExit is unavailable')
-  setImmediate(() => {
-    runModelCommand(ctx, config).then(receipt => {
-      process.stdout.write(config.json
-        ? `${JSON.stringify(receipt)}\n`
-        : formatModelConfigText(receipt))
-      exit(0)
-    }, error => {
-      process.stderr.write(`tianwen model: ${SAFE_MODEL_ERROR}\n`)
-      exit(1)
-    })
+  void (async () => {
+    await ctx.get('loader')?.await()
+    return runModelCommand(ctx, config)
+  })().then(receipt => {
+    process.stdout.write(config.json
+      ? `${JSON.stringify(receipt)}\n`
+      : formatModelConfigText(receipt))
+    exit(0)
+  }, error => {
+    process.stderr.write(`tianwen model: ${SAFE_MODEL_ERROR}\n`)
+    exit(1)
   })
 }
