@@ -18,6 +18,11 @@ import {
   preflightGoalResume,
 } from './resume.js'
 import { launchGoalCreate, preflightGoalCreate } from './create.js'
+import {
+  launchModelCommand,
+  preflightModelCommand,
+} from './model.js'
+import type { ModelChoice } from './model.js'
 
 const READ_ONLY_USAGE = [
   'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
@@ -35,7 +40,14 @@ const CREATE_USAGE = [
   '',
 ].join('\n')
 
+const MODEL_USAGE = [
+  'Usage: tianwen model status --data-dir ABSOLUTE_PATH [--json]',
+  'Usage: tianwen model use --model offline|deepseek-v4-flash|deepseek-v4-pro --data-dir ABSOLUTE_PATH [--json]',
+  '',
+].join('\n')
+
 function usage(command: string | undefined): string {
+  if (command === 'model') return MODEL_USAGE
   if (command === 'resume') return RESUME_USAGE
   return command === 'create' ? CREATE_USAGE : READ_ONLY_USAGE
 }
@@ -82,6 +94,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     readonly goal?: string
     readonly 'data-dir'?: string
     readonly json?: boolean
+    readonly model?: string
     readonly objective?: string
     readonly 'max-rounds'?: string
   }
@@ -95,6 +108,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
         goal: { type: 'string' },
         'data-dir': { type: 'string' },
         json: { type: 'boolean', default: false },
+        model: { type: 'string' },
         objective: { type: 'string' },
         'max-rounds': { type: 'string' },
       },
@@ -106,21 +120,30 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     return 2
   }
   const command = positionals[0]
+  const modelOperation = positionals[1]
   const maxGoalRounds = positiveInteger(values['max-rounds'])
+  const modelChoice = values.model as ModelChoice | undefined
   if (
-    positionals.length !== 1 ||
+    (command === 'model' ? positionals.length !== 2 : positionals.length !== 1) ||
     values['data-dir'] === undefined ||
     !isAbsolute(values['data-dir']) ||
     (
       command === 'status' || command === 'resume'
         ? values.goal === undefined || values.goal.length === 0 ||
-          values.objective !== undefined || values['max-rounds'] !== undefined
+          values.objective !== undefined || values['max-rounds'] !== undefined || values.model !== undefined
         : command === 'list'
           ? values.goal !== undefined || values.objective !== undefined ||
-            values['max-rounds'] !== undefined
+            values['max-rounds'] !== undefined || values.model !== undefined
           : command === 'create'
             ? values.goal !== undefined || values.objective?.trim().length === 0 ||
-              values.objective === undefined || maxGoalRounds === undefined
+              values.objective === undefined || maxGoalRounds === undefined || values.model !== undefined
+            : command === 'model'
+              ? values.goal !== undefined || values.objective !== undefined ||
+                values['max-rounds'] !== undefined ||
+                (modelOperation === 'status' ? values.model !== undefined :
+                  modelOperation === 'use'
+                    ? modelChoice === undefined || !['offline', 'deepseek-v4-flash', 'deepseek-v4-pro'].includes(modelChoice)
+                    : true)
             : true
     )
   ) {
@@ -129,6 +152,11 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   }
 
   try {
+    if (command === 'model') {
+      return await launchModelCommand(preflightModelCommand(
+        modelOperation as 'status' | 'use', modelChoice, values['data-dir'],
+      ), values.json === true)
+    }
     if (command === 'create') {
       return await launchGoalCreate(preflightGoalCreate(
         values.objective!, maxGoalRounds!, values['data-dir'],
@@ -171,6 +199,8 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       ? 'Error: unable to resume Goal\n'
       : command === 'create'
         ? 'Error: unable to create Goal\n'
+        : command === 'model'
+          ? 'Error: unable to configure model\n'
         : 'Error: unable to read Goal status\n')
     return 1
   }
