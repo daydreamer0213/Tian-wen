@@ -178,6 +178,7 @@ async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig,
   const fail = (failureCode: Parameters<typeof createGoalLiveSmokeFailure>[0], requestCountValue = 0) =>
     createGoalLiveSmokeFailure(failureCode, { now: new Date(config.startedAtMs), requestCount: requestCountValue, retryCount: 0 })
   if (!Number.isSafeInteger(config.startedAtMs) || config.startedAtMs < 0) return fail('preflight-rejected')
+  const deadlineMs = config.startedAtMs + LIVE_GOAL_LIMITS.timeoutMs
   const services = liveServices(ctx)
   if (services === undefined) return fail('preflight-rejected')
   const selection = services.defaultModel.currentSelection()
@@ -220,6 +221,10 @@ async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig,
         agentCtx.systemPrompt.section({ name: 'tianwen:live-goal-authority', order: 99,
           text: context => renderLiveGoalAuthority(context.agent === undefined ? undefined : ctx.goals.get(context.agent)) })
         agentCtx.on('agent/request', async (_payload, next) => {
+          if (Date.now() >= deadlineMs) {
+            timedOut = true
+            throw new Error('live Goal deadline elapsed')
+          }
           if (requestCountValue >= LIVE_GOAL_LIMITS.maxRequests) {
             requestLimitExceeded = true
             throw new Error('live Goal request limit')
@@ -239,13 +244,17 @@ async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig,
     if (!expectedToolNames(activeHandle.agent.ctx.tools.schemas(activeHandle.agent).map(tool => tool.name).toSorted())) {
       return fail('tool-contract-violated', requestCountValue)
     }
+    if (Date.now() >= deadlineMs) {
+      timedOut = true
+      return fail('timeout', requestCountValue)
+    }
     const before = activeHandle.agent.session.events.length
     const current = validateGoal(config, ctx.goals.get(activeHandle.agent))
-    const resumed = ctx.goals.resume(activeHandle.agent, { id: GoalId(String(current.id)), revision: current.revision })
     timer = setTimeout(() => {
       timedOut = true
       handle?.agent.cancel({ kind: 'hook', reason: 'tianwen-live-goal-timeout' })
-    }, Math.max(0, config.startedAtMs + LIVE_GOAL_LIMITS.timeoutMs - Date.now()))
+    }, Math.max(0, deadlineMs - Date.now()))
+    const resumed = ctx.goals.resume(activeHandle.agent, { id: GoalId(String(current.id)), revision: current.revision })
     const settled = await waitForDisarmed(ctx, activeHandle.agent)
     let flushed: boolean
     try { flushed = await flush(activeHandle.agent.session) } catch {

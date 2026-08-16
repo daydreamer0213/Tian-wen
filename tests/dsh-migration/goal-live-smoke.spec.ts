@@ -315,17 +315,17 @@ describe('tianwen live Goal smoke', () => {
             status: 'failed', failureCode: scenario === 'success'
               ? mutateEvolution ? 'internal-error' : 'persistence-unavailable'
               : scenario,
-            requestCount: scenario === 'provider-error' ? 1 : 3, retryCount: 0,
+            requestCount: scenario === 'provider-error' ? 1 : scenario === 'timeout' ? 0 : 3, retryCount: 0,
           })
-          expect(second.adapter.requests).toHaveLength(scenario === 'provider-error' ? 1 : 3)
-          expect(flushCalls).toBeGreaterThanOrEqual(2)
+          expect(second.adapter.requests).toHaveLength(scenario === 'provider-error' ? 1 : scenario === 'timeout' ? 0 : 3)
+          expect(flushCalls).toBeGreaterThanOrEqual(scenario === 'timeout' ? 1 : 2)
           expect(globalRetryCalls).toBe(0)
           expect(JSON.stringify(receipt)).not.toContain('provider-secret-sentinel')
           const released = await second.ctx.agents.resume({
             resumeSessionId: sessionId,
             agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
           })
-          if (scenario === 'provider-error') {
+          if (scenario === 'provider-error' || scenario === 'timeout') {
             expect(second.ctx.goals.get(released.agent)).toMatchObject({ phase: 'active', activation: 'disarmed' })
           }
           await released.dispose()
