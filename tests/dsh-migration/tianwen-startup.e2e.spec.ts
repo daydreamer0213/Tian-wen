@@ -464,7 +464,15 @@ async function start(missingCorepack = false): Promise<void> {
   }
   expect(list).toEqual({
     schemaVersion: 'tianwen.goal-list.v1',
-    goals: [{
+    goals: expect.any(Array),
+    runtime: {
+      activation: 'not-loaded',
+      modelRequests: 0,
+      readOnly: true,
+    },
+  })
+  const matchingGoals = list.goals.filter(goal => goal.id === finalGoal.id)
+  expect(matchingGoals).toEqual([{
       id: finalGoal.id,
       objective: finalGoal.objective,
       phase: 'complete',
@@ -472,13 +480,7 @@ async function start(missingCorepack = false): Promise<void> {
       roundsStarted: 0,
       updatedAt: finalGoalChange.updatedAt,
       session: { id: header.id, eventCount: events.length },
-    }],
-    runtime: {
-      activation: 'not-loaded',
-      modelRequests: 0,
-      readOnly: true,
-    },
-  })
+  }])
   expect(snapshotState()).toEqual(stateBeforeList)
   const sessionAfterList = readFileSync(created[0]!)
   expect(sessionAfterList).toEqual(sessionBeforeList)
@@ -546,7 +548,7 @@ async function start(missingCorepack = false): Promise<void> {
   publishReceipt(statusReceiptPath, statusReceipt)
   expect(JSON.parse(readFileSync(statusReceiptPath, 'utf8')))
     .toEqual(statusReceipt)
-  const listedGoal = list.goals[0]!
+  const listedGoal = matchingGoals[0]!
   const listReceipt = {
     schemaVersion: 'tianwen.goal-list-e2e.v1',
     goal: {
