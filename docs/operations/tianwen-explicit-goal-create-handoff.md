@@ -189,4 +189,3 @@ Two current-turn subagents reviewed the phase without editing it:
 - the round budget limits Goal rounds, not model tokens or provider cost.
 - Windows local sandbox remains partial; high-risk workloads still need a
   container, remote sandbox or microVM.
-
