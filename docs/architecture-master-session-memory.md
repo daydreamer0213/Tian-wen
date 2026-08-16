@@ -645,6 +645,30 @@ Alpha-A 独立实施分支为：
   Goal 权威、恢复前检查、失败语义和可见回执，不提前建设 dashboard、watcher、
   数据库或宽泛控制 API。
 
+- `tianwen resume --goal GOAL_ID --data-dir ABS [--json]` 最小显式写操作阶段已完成
+  并独立推送；实施分支为 `codex/tianwen-explicit-goal-resume`，远端精确 HEAD 为
+  `992f71900f43a7b15c7381740c7cf03717619348`；canonical handoff 位于该分支的
+  `docs/operations/tianwen-explicit-goal-resume-handoff.md`；
+- resume 只由用户显式命令触发。它先复用 durable Goal 扫描器，缺失、重复、损坏、
+  已完成或轮次耗尽均在 Profile/模型/写入前失败；随后用公开 DSH Session/Goal/Agent
+  服务恢复精确 Session 和 Goal revision，只执行一个 Goal round，flush 后等待
+  disarmed settlement，并输出 `tianwen.goal-resume.v1` 回执；
+- 为避免已安装 CLI 回落到源码工作树，精确 `@deepseek-ai/dsh@0.1.0-rc.6` 作为独立
+  host 部署在 `<data-dir>/dsh-host`，不重复装进 Profile。launcher 只接受该目录内
+  version/bin/realpath 均有效的 DSH CLI，并以固定 argv、`shell:false` 启动；
+- 正式安装 E2E 证明一次 resume 产生一个 resume transition、一个 Goal round、两个
+  模型 step，最终 Goal complete/revision 3/roundsStarted 1，Champion 与 evolution
+  不变；同一命令第二次因 Goal 已完成返回 1，Session/Evolution 字节不变；
+- 最终门禁：聚焦 resume `44 passed, 2 skipped`；默认 Node `115 passed, 8 skipped`；
+  正式安装 Profile E2E `2 passed`；Windows 本地沙盒 `3 passed`；Python A1–A5
+  `10 passed`；全量 Python `424 passed, 4 skipped`；build、依赖闭包、私有导入、
+  类型检查、Ruff、diff 和工作树均干净；两轮独立最终复审均为 0 Critical、
+  0 Important、0 Minor；
+- 新阶段仍未加入自动 resume、daemon、scheduler、完整任务面板、数据库、真实付费
+  模型、真实 Docker、自动晋升或 Runtime cutover。下一推荐入口是先设计“最小新建
+  Goal/启动任务”合同或安装器收口；在二者之间应优先补齐可重复的一键安装/升级入口，
+  让现有 `list/status/resume` 不再依赖测试脚本准备 Profile 和 DSH host。
+
 当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
 
 本节是动态状态。以后实施进度变化时可以更新本节，但不得借此修改前面的稳定共识。
