@@ -16,7 +16,9 @@ import { apply as applyBundledRuntime } from '../../packages/tianwen-runtime-bun
 const root = resolve(import.meta.dirname, '../..')
 const packageRoot = resolve(root, 'packages/tianwen-runtime-bundle')
 const hostPackageRoot = resolve(root, 'packages/tianwen-dsh-host')
-const packRoot = 'D:/DevData/tianwen/packs'
+const packRoot = process.env.TIANWEN_E2E_DATA_DIR === undefined
+  ? 'D:/DevData/tianwen/packs'
+  : resolve(process.env.TIANWEN_E2E_DATA_DIR, 'packs')
 const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.0.0.tgz')
 const tar = process.platform === 'win32'
   ? resolve(process.env.SystemRoot!, 'System32', 'tar.exe')
@@ -540,10 +542,15 @@ describe('@tianwen/runtime-bundle', () => {
     expect(entries.some(entry => /scripted-adapter|dsh-probe-bundle/u.test(entry))).toBe(false)
     expect(entries.some(entry => /@deepseek-ai\/[^/]+\/src\//u.test(entry))).toBe(false)
     expect(entries.some(entry => /fixtures\/deepseek-goal-round-fetch|\.map$/u.test(entry))).toBe(false)
-    const archiveText = execFileSync(tar, ['-xOf', archive, 'package/dist/resume-runner.js'], {
-      encoding: 'utf8',
-      shell: false,
-    })
-    expect(archiveText).not.toMatch(/C:[\\/]Users[\\/]|DEEPSEEK_API_KEY|Bearer\s+/u)
+    for (const entry of entries.filter(entry => !entry.endsWith('/'))) {
+      const archiveText = execFileSync(tar, ['-xOf', archive, entry], {
+        encoding: 'utf8',
+        shell: false,
+      })
+      expect(archiveText).not.toContain(root)
+      expect(archiveText).not.toContain(root.replaceAll('\\', '/'))
+      expect(archiveText).not.toMatch(/C:[\\/]Users[\\/]|fixtures[\\/]deepseek-goal-round-fetch|@deepseek-ai[\\/][^\\/]+[\\/]src[\\/]/u)
+      expect(archiveText).not.toMatch(/\bsk-[A-Za-z0-9_-]{16,}\b|\bBearer\s+[A-Za-z0-9._~+\/=-]{16,}\b|(?:authorization|x-api-key)\s*[:=]\s*['"`]?\S{16,}/iu)
+    }
   })
 })

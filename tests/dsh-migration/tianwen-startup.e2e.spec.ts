@@ -931,18 +931,6 @@ async function start(): Promise<void> {
     expect(strictResume.status, `${strictResume.stdout}\n${strictResume.stderr}`).toBe(0)
     expect(strictResume.stderr).toBe('')
     const strictReceipt = JSON.parse(strictResume.stdout) as Record<string, unknown>
-    expect(strictReceipt).toMatchObject({
-      schemaVersion: 'tianwen.goal-live-smoke.v1', status: 'passed',
-      provider: 'deepseek-official', model: 'deepseek-v4-pro',
-      requestCount: 3, retryCount: 0, markerMatched: true,
-      goal: { id: liveGoal.goal.id, phase: 'complete', roundsStarted: 1 },
-      session: { id: liveGoal.session.id, eventCountDelta: expect.any(Number) },
-      evidence: [
-        { toolName: 'tianwen_smoke_action', outcome: 'complete' },
-        { toolName: 'update_goal', outcome: 'complete' },
-      ],
-      governance: { evolutionUnchanged: true, championUnchanged: true },
-    })
     const trace = readFileSync(fetchTracePath, 'utf8').trimEnd().split(/\r?\n/u)
       .map(line => JSON.parse(line) as Record<string, unknown>)
     expect(trace).toEqual([1, 2, 3].map(ordinal => ({
@@ -953,12 +941,59 @@ async function start(): Promise<void> {
     const [, ...liveAfterLines] = readFileSync(liveLog, 'utf8').trimEnd().split(/\r?\n/u)
     const liveAfterEvents = liveAfterLines.map(line => JSON.parse(line) as SessionEvent)
     const liveAdded = liveAfterEvents.slice(liveBeforeEvents.length)
+    expect(liveAdded[0]).toMatchObject({ seq: 1, type: 'session/end-seed' })
+    const resumeChange = (event: SessionEvent) =>
+      event.type === 'goal/change' && event.data.operation === 'resume'
+    expect(liveAdded.filter(resumeChange)).toHaveLength(1)
+    const resumeIndex = liveAdded.findIndex(resumeChange)
+    expect(resumeIndex).toBe(1)
+    const runnerAdded = liveAdded.slice(resumeIndex)
     const liveCalls = liveAdded.filter(event => event.type === 'tool/call')
     const liveResults = liveAdded.filter(event => event.type === 'tool/result')
     const liveAssistants = liveAdded.filter(event => event.type === 'assistant/message')
     expect(liveCalls.map(event => event.data.name)).toEqual(['tianwen_smoke_action', 'update_goal'])
     expect(liveResults).toHaveLength(2)
     expect(liveAssistants).toHaveLength(3)
+    const [actionCall, updateCall] = liveCalls
+    expect(actionCall!.data.arguments).toBe('{}')
+    expect(JSON.parse(updateCall!.data.arguments)).toEqual({
+      goal_id: liveGoal.goal.id,
+      revision: 2,
+      action: 'complete',
+    })
+    const resultFor = (call: typeof liveCalls[number]) => {
+      const matches = liveResults.filter(result =>
+        String(result.data.message.source.callId) === String(call.data.callId))
+      expect(matches).toHaveLength(1)
+      return matches[0]!
+    }
+    const actionResult = resultFor(actionCall!)
+    const updateResult = resultFor(updateCall!)
+    for (const [call, result] of [[actionCall!, actionResult], [updateCall!, updateResult]] as const) {
+      expect(result.data.error).toBeUndefined()
+      expect(result.data.message).toMatchObject({
+        role: 'user',
+        source: { kind: 'tool', callId: call.data.callId },
+      })
+      expect(result.data.message.content).toHaveLength(1)
+      expect(result.data.message.content[0]).toMatchObject({
+        type: 'tool-result', toolCallId: call.data.callId, isError: false,
+      })
+    }
+    const updateBlock = updateResult.data.message.content[0]
+    expect(updateBlock!.content).toHaveLength(1)
+    const updateText = updateBlock!.content[0]
+    expect(updateText).toMatchObject({ type: 'text' })
+    expect(JSON.parse((updateText as { text: string }).text)).toMatchObject({
+      goal: {
+        id: liveGoal.goal.id,
+        revision: 3,
+        phase: 'complete',
+        roundsStarted: 1,
+        maxGoalRounds: 1,
+      },
+      activation: 'disarmed',
+    })
     expect(liveAssistants.map(event => event.data.usage)).toEqual([
       { inputTokens: 96, outputTokens: 10, cacheReadTokens: 5 },
       { inputTokens: 97, outputTokens: 10, cacheReadTokens: 5 },
@@ -978,13 +1013,50 @@ async function start(): Promise<void> {
         { toolName: 'tianwen_smoke_action', status: 'complete' },
         { toolName: 'update_goal', status: 'complete' },
       ])
+    const strictUsage = {
+      inputTokens: 291,
+      outputTokens: 30,
+      cacheReadTokens: 15,
+      cacheWriteTokens: 0,
+      totalTokens: 336,
+      estimatedCostCny: (291 * 3 + 15 * 0.025 + 0 * 3 + 30 * 6) / 1_000_000,
+    }
+    expect(strictReceipt).toEqual({
+      schemaVersion: 'tianwen.goal-live-smoke.v1',
+      status: 'passed',
+      timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u),
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-pro',
+      limits: {
+        maxRequests: 3,
+        maxOutputTokensPerRequest: 64,
+        maxTotalTokens: 32768,
+        maxCostCny: 0.25,
+        timeoutMs: 90000,
+        maxRetries: 0,
+      },
+      requestCount: 3,
+      retryCount: 0,
+      markerMatched: true,
+      goal: { id: liveGoal.goal.id, revision: 3, phase: 'complete', roundsStarted: 1 },
+      session: { id: liveGoal.session.id, eventCountDelta: runnerAdded.length },
+      usage: strictUsage,
+      evidence: liveEvidence.map(record => ({
+        evidenceId: record.evidenceId,
+        toolName: record.action.toolName,
+        outcome: 'complete',
+      })),
+      governance: { evolutionUnchanged: true, championUnchanged: true },
+    })
+    expect(Number.isNaN(Date.parse(String(strictReceipt.timestamp)))).toBe(false)
     const liveStatusAfter = run(process.execPath, [
       installed.cli, 'status', '--goal', liveGoal.goal.id, '--data-dir', tianwenRoot, '--json',
     ], modelEnv)
     expect(liveStatusAfter.status).toBe(0)
     expect(JSON.parse(liveStatusAfter.stdout)).toMatchObject({
-      goal: { id: liveGoal.goal.id, phase: 'complete', roundsStarted: 1 },
+      goal: { id: liveGoal.goal.id, revision: 3, phase: 'complete', roundsStarted: 1 },
       evidence: { total: 2, counts: { complete: 2, 'missing-result': 0 } },
+      runtime: { activation: 'not-loaded', modelRequests: 0, readOnly: true },
     })
     const liveAfterSessions = snapshotTree(sessionsRoot)
     delete (liveAfterSessions as Record<string, string>)[`file:${relative(sessionsRoot, liveLog).replaceAll('\\', '/')}`]
