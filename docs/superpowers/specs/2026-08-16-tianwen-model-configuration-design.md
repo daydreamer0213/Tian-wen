@@ -85,10 +85,12 @@ The CLI launches the installed DSH Profile through the same fixed executable
 resolver used by create/resume. A model-only patch disables ordinary headless
 startup and the Goal round driver, then inserts one Tianwen model runner.
 
-For `status`, the runner only reads the current selection, catalog and safe
-credential description. For `use`, it first proves the mapped model exists in
-its current provider catalog, calls `saveSelection()`, and reads the resulting
-selection back. DSH owns the atomic `settings.yaml` write.
+For `status`, the runner only reads the current selection, DeepSeek catalog and
+safe credential description. For `use`, it proves a requested DeepSeek model
+exists in the current `deepseek-official` catalog; `offline` is the fixed
+Tianwen-owned smoke mapping and needs no provider discovery. It then calls
+`saveSelection()` and reads the resulting selection back. DSH owns the atomic
+`settings.yaml` write.
 
 No Agent or Session is created. No Goal, Evidence, Evolution or Champion state
 is read or changed. The receipt always records `modelRequestsDelta: 0`.
