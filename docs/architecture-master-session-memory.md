@@ -612,6 +612,39 @@ Alpha-A 独立实施分支为：
   Docker 或 Runtime cutover。下一推荐入口是复用同一投影做最小只读 Goal/Session
   列表，让用户先发现 Goal id；暂不建设完整桌面任务面板。
 
+- `tianwen list` 最小只读 Goal 发现阶段已完成并独立推送；实施分支为
+  `codex/tianwen-read-only-goal-list`，远端精确 HEAD 为
+  `62020d2b94eec1b12e8dfa31dcd1e8682662d1d0`；canonical handoff 位于该分支的
+  `docs/operations/tianwen-read-only-goal-list-handoff.md`；
+- 设计和实施计划已在 main 的 `7c44e8c` 固化。命令为
+  `tianwen list --data-dir <absolute-data-dir> [--json]`；它复用 status 的公开 DSH
+  Session `list/inspect` 和严格 `foldGoal`，只输出当前 Goal 摘要、进度、更新时间、
+  Session 定位和 `not-loaded/read-only/0 model requests` 标记；
+- 列表按最近更新时间倒序稳定排列；空状态成功且不创建 Session 目录；无 Goal 的
+  Session 被忽略；重复 Goal id 或结构损坏整体失败。旧 `tianwen status --goal`
+  合同保持不变，没有新增数据库、索引、watcher、CLI 框架、依赖或 UI；
+- 正式离线 Profile E2E 使用同一个已安装 `tianwen` bin，在一次既有 smoke 后依次
+  验证 status 和 list，不启动第二次 Runtime；测试保留历史 Sessions，并按本轮精确
+  Goal id 唯一匹配。list 前后 Session/Evolution 字节不变，模型 step 为 `4 -> 4`；
+- 最终 Runtime Bundle tarball SHA-256 为
+  `E885E9DFEA2AF4E6ACB194328A83EB8D174E2E54EC408C38A1F2686C934B321D`；
+  Phase 4 list 回执 SHA-256 为
+  `F9373DE1D63EE9FEFFD2D5160F3CBF7612D4331FBA8CBAF88CFFE6589E9A9282`；
+- 最终门禁：默认 Node `101 passed, 8 skipped`；正式离线 Profile E2E `2 passed`；
+  Windows 本地沙盒 `3 passed`；Python A1–A5 `10 passed`；全量 Python
+  `424 passed, 4 skipped`；Ruff、依赖闭包、私有导入、类型检查、diff 和工作树
+  状态均干净；whole-phase review 为 0 Critical、0 Important，handoff 复审为
+  0 Critical、0 Important、0 Minor；
+- 第一次默认 Node 最终门因主控漏设既有 `TIANWEN_DSH_PROBE_ROOT` 和
+  `TIANWEN_DSH_PROBE_PYTHON` 在 setup 阶段失败，不属于产品验收；补回已审计的固定
+  D 盘环境后单次有效门全绿。360 开发者白名单已生效，A1–A5 从约 291 秒降至
+  4.13 秒，全量 Python 从 8060 秒降至 158.55 秒；
+- 本阶段仍未新增写操作、完整任务面板、自动晋升、真实模型、真实 Docker 或 Runtime
+  cutover。下一推荐入口是先设计一个最小且显式的
+  `tianwen resume --goal <id>` 写操作合同；必须由用户明确调用，并在编码前先固化
+  Goal 权威、恢复前检查、失败语义和可见回执，不提前建设 dashboard、watcher、
+  数据库或宽泛控制 API。
+
 当前主控会话已恢复为架构和监督会话，不亲自承担连续编码。原 Task 10 心跳和实施推进保持暂停。
 
 本节是动态状态。以后实施进度变化时可以更新本节，但不得借此修改前面的稳定共识。
