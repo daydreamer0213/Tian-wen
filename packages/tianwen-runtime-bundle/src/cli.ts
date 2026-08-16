@@ -17,6 +17,7 @@ import {
   launchGoalResume,
   preflightGoalResume,
 } from './resume.js'
+import { createGoalLiveSmokeFailure } from './goal-live-smoke.js'
 import { launchGoalCreate, preflightGoalCreate } from './create.js'
 import {
   launchModelCommand,
@@ -32,6 +33,7 @@ const READ_ONLY_USAGE = [
 
 const RESUME_USAGE = [
   'Usage: tianwen resume --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
+  'Usage: tianwen resume --goal GOAL_ID --data-dir ABSOLUTE_PATH --live-smoke --json',
   '',
 ].join('\n')
 
@@ -104,6 +106,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     readonly model?: string
     readonly objective?: string
     readonly 'max-rounds'?: string
+    readonly 'live-smoke'?: boolean
   }
   let positionals: string[]
   try {
@@ -118,6 +121,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
         model: { type: 'string' },
         objective: { type: 'string' },
         'max-rounds': { type: 'string' },
+        'live-smoke': { type: 'boolean', default: false },
       },
     })
     values = parsed.values
@@ -130,6 +134,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   const modelOperation = positionals[1]
   const maxGoalRounds = positiveInteger(values['max-rounds'])
   const modelChoice = values.model as ModelChoice | undefined
+  const liveSmoke = values['live-smoke'] === true
   if (
     (command === 'model' ? positionals.length !== 2 : positionals.length !== 1) ||
     values['data-dir'] === undefined ||
@@ -137,16 +142,18 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     (
       command === 'status' || command === 'resume'
         ? values.goal === undefined || values.goal.length === 0 ||
-          values.objective !== undefined || values['max-rounds'] !== undefined || values.model !== undefined
+          values.objective !== undefined || values['max-rounds'] !== undefined || values.model !== undefined ||
+          (command !== 'resume' && liveSmoke) || (liveSmoke && values.json !== true)
         : command === 'list'
           ? values.goal !== undefined || values.objective !== undefined ||
-            values['max-rounds'] !== undefined || values.model !== undefined
+            values['max-rounds'] !== undefined || values.model !== undefined || liveSmoke
           : command === 'create'
             ? values.goal !== undefined || values.objective?.trim().length === 0 ||
-              values.objective === undefined || maxGoalRounds === undefined || values.model !== undefined
+              values.objective === undefined || maxGoalRounds === undefined || values.model !== undefined || liveSmoke
             : command === 'model'
               ? values.goal !== undefined || values.objective !== undefined ||
                 values['max-rounds'] !== undefined ||
+                liveSmoke ||
                 (modelOperation === 'status' ? values.model !== undefined :
                   modelOperation === 'use'
                     ? modelChoice === undefined || !['offline', 'deepseek-v4-flash', 'deepseek-v4-pro'].includes(modelChoice)
@@ -173,7 +180,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     }
     if (command === 'resume') {
       return await launchGoalResume(await preflightGoalResume(
-        values.goal!, values['data-dir'],
+        values.goal!, values['data-dir'], liveSmoke,
       ), values.json === true)
     }
     if (command === 'list') {
@@ -192,6 +199,10 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       : formatText(status))
     return 0
   } catch (error) {
+    if (command === 'resume' && liveSmoke) {
+      process.stdout.write(`${JSON.stringify(createGoalLiveSmokeFailure('preflight-rejected'))}\n`)
+      return 1
+    }
     if (error instanceof GoalStatusNotFoundError) {
       process.stderr.write(`${error.message}\n`)
       return 3
