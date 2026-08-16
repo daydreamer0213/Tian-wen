@@ -56,6 +56,13 @@ const SMOKE_LIMITS = {
   timeoutMs: 90000,
 } as const
 
+interface SmokeTimer {
+  readonly clearTimeout: (timeout: ReturnType<typeof setTimeout>) => void
+  readonly setTimeout: (callback: () => void, timeoutMs: number) => ReturnType<typeof setTimeout>
+}
+
+const DEFAULT_SMOKE_TIMER: SmokeTimer = { clearTimeout, setTimeout }
+
 type ModelSmokeFailureCode =
   | 'credential-missing'
   | 'duplicate-finish'
@@ -142,9 +149,9 @@ function smokeFailure(
 }
 
 function validUsage(usage: TokenUsage): boolean {
-  return [
-    usage.inputTokens,
-    usage.outputTokens,
+  return [usage.inputTokens, usage.outputTokens].every(value =>
+    Number.isSafeInteger(value) && value >= 0,
+  ) && [
     usage.cacheReadTokens,
     usage.cacheWriteTokens,
     usage.reasoningTokens,
@@ -155,6 +162,7 @@ export async function runModelSmoke(
   ctx: Context,
   signal?: AbortSignal,
   now: () => number = Date.now,
+  timer: SmokeTimer = DEFAULT_SMOKE_TIMER,
 ): Promise<ModelSmokeReceipt> {
   const { agentDefaultModel, credentials, llm } = services(ctx)
   const selection = agentDefaultModel.currentSelection()
@@ -165,6 +173,12 @@ export async function runModelSmoke(
     return smokeFailure('credential-missing', 0)
   }
 
+  const deadline = new AbortController()
+  const abort = () => deadline.abort()
+  const timeout = timer.setTimeout(abort, SMOKE_LIMITS.timeoutMs)
+  if (signal?.aborted) abort()
+  else signal?.addEventListener('abort', abort, { once: true })
+
   const options: GenerateOptions = {
     provider: SMOKE_PROVIDER,
     model: SMOKE_MODEL,
@@ -174,19 +188,19 @@ export async function runModelSmoke(
       source: { kind: 'user' },
       content: [{ type: 'text', text: SMOKE_PROMPT }],
     })],
-    ...signal === undefined ? {} : { signal },
+    signal: deadline.signal,
   }
   Object.assign(options, { tools: undefined, system: undefined })
-  const stream = llm.stream(options)
-  if (signal?.aborted) return smokeFailure('timeout', 1)
 
   let text = ''
   let usage: TokenUsage | undefined
   let finished = false
   const startedAt = now()
   try {
+    const stream = llm.stream(options)
+    if (deadline.signal.aborted) return smokeFailure('timeout', 1)
     for await (const chunk of stream) {
-      if (signal?.aborted || now() - startedAt > SMOKE_LIMITS.timeoutMs) {
+      if (deadline.signal.aborted || now() - startedAt > SMOKE_LIMITS.timeoutMs) {
         return smokeFailure('timeout', 1)
       }
       if (finished) return smokeFailure('duplicate-finish', 1)
@@ -213,8 +227,12 @@ export async function runModelSmoke(
         return smokeFailure('unexpected-response', 1)
       }
     }
+    if (deadline.signal.aborted) return smokeFailure('timeout', 1)
   } catch {
-    return smokeFailure('provider-error', 1)
+    return smokeFailure(deadline.signal.aborted ? 'timeout' : 'provider-error', 1)
+  } finally {
+    timer.clearTimeout(timeout)
+    signal?.removeEventListener('abort', abort)
   }
 
   if (!finished) return smokeFailure('missing-finish', 1)

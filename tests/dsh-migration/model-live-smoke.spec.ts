@@ -40,7 +40,7 @@ function context(options: {
     })),
   }
   const llm = {
-    stream: vi.fn(async function* () {
+    stream: vi.fn(async function* (_options: { readonly signal?: AbortSignal }) {
       if (options.streamError !== undefined) throw options.streamError
       yield* options.stream ?? successfulStream()
     }),
@@ -162,6 +162,69 @@ describe('DeepSeek V4 Pro live smoke contract', () => {
     expect(receipt).toMatchObject({ status: 'failed', failureCode: 'provider-error', requestCount: 1 })
     expect(services.llm.stream).toHaveBeenCalledTimes(1)
     expectSanitized(receipt, credentialSentinel, providerSentinel)
+  })
+
+  it('converts a synchronous stream failure to provider-error without exposing it', async () => {
+    const credentialSentinel = randomUUID()
+    const providerSentinel = randomUUID()
+    const services = context({ credentialSentinel })
+    services.llm.stream.mockImplementation(() => {
+      throw new Error(providerSentinel)
+    })
+
+    const receipt = await runModelSmoke(services as never)
+
+    expect(receipt).toMatchObject({ status: 'failed', failureCode: 'provider-error', requestCount: 1 })
+    expect(services.llm.stream).toHaveBeenCalledTimes(1)
+    expectSanitized(receipt, credentialSentinel, providerSentinel)
+  })
+
+  it.each([
+    ['missing inputTokens', { outputTokens: 8 }],
+    ['missing outputTokens', { inputTokens: 20 }],
+    ['unsafe inputTokens', { inputTokens: Number.MAX_SAFE_INTEGER + 1, outputTokens: 8 }],
+    ['unsafe outputTokens', { inputTokens: 20, outputTokens: Number.MAX_SAFE_INTEGER + 1 }],
+  ] as const)('fails closed for %s', async (_label, invalidUsage) => {
+    const services = context({ stream: successfulStream(invalidUsage as TokenUsage) })
+
+    const receipt = await runModelSmoke(services as never)
+
+    expect(receipt).toMatchObject({ status: 'failed', failureCode: 'provider-error', requestCount: 1 })
+    expect(services.llm.stream).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts a stalled stream at the deadline after one request', async () => {
+    const services = context({})
+    services.llm.stream.mockImplementation(options => ({
+      async *[Symbol.asyncIterator]() {
+        await new Promise<void>(resolve => options.signal?.addEventListener('abort', resolve, { once: true }))
+      },
+    }))
+    let expire: (() => void) | undefined
+    const timer = {
+      setTimeout: vi.fn((callback: () => void) => {
+        expire = callback
+        return 0 as never
+      }),
+      clearTimeout: vi.fn(),
+    }
+    const smokeWithTimer = runModelSmoke as unknown as (
+      ctx: never,
+      signal?: AbortSignal,
+      now?: () => number,
+      timer?: typeof timer,
+    ) => Promise<unknown>
+
+    const pending = smokeWithTimer(services as never, undefined, Date.now, timer)
+
+    await vi.waitFor(() => expect(services.llm.stream).toHaveBeenCalledTimes(1))
+    expect(timer.setTimeout).toHaveBeenCalledWith(expect.any(Function), 90000)
+    expire!()
+    await expect(pending).resolves.toMatchObject({
+      status: 'failed', failureCode: 'timeout', requestCount: 1,
+    })
+    expect(services.llm.stream).toHaveBeenCalledTimes(1)
+    expect(timer.clearTimeout).toHaveBeenCalledTimes(1)
   })
 
   it('waits for DSH, writes one sanitized JSON line, and maps smoke status to appExit', async () => {
