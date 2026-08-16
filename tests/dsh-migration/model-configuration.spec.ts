@@ -259,6 +259,23 @@ describe('tianwen model', () => {
     expect(String(stdout.mock.calls[0]?.[0])).not.toContain(sentinelKey)
   })
 
+  it('defers model execution until the next event-loop turn', async () => {
+    const services = context({})
+    const exit = vi.fn()
+    const runnerContext = {
+      get: (service: string) => service === 'appExit' ? exit : services.get(service),
+    }
+
+    apply(runnerContext as never, { operation: 'use', model: 'offline', json: true })
+    await Promise.resolve()
+
+    expect(services.agentDefaultModel.currentSelection).not.toHaveBeenCalled()
+    expect(exit).not.toHaveBeenCalled()
+
+    await new Promise<void>(resolve => setImmediate(resolve))
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
+  })
+
   it.each(['catalog', 'credential'] as const)(
     'does not print untrusted %s errors at the process boundary',
     async service => {
