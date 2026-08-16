@@ -1,0 +1,27 @@
+- id: session-persistence-jsonl
+  config:
+    root: !!js process.env.TIANWEN_CREATE_SESSIONS_ROOT
+    compression: none
+    packChunks: false
+
+- id: tianwen-runtime
+  config:
+    evolutionRoot: !!js process.env.TIANWEN_CREATE_EVOLUTION_ROOT
+
+- id: headless-startup
+  disabled: true
+
+- id: headless-runner
+  disabled: true
+
+- id: goal-round-driver
+  disabled: true
+
+- insert:
+    - id: tianwen-create-runner
+      name: '@tianwen/runtime-bundle/create-runner'
+      config:
+        objective: !!js process.env.TIANWEN_CREATE_OBJECTIVE
+        maxGoalRounds: !!js Number(process.env.TIANWEN_CREATE_MAX_ROUNDS)
+        nonce: !!js process.env.TIANWEN_CREATE_NONCE
+        json: !!js process.env.TIANWEN_CREATE_JSON === 'true'

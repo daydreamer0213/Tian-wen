@@ -55,11 +55,16 @@ function isAllowedStatusInput(input: string): boolean {
 
 function isAllowedCliInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
-  return path === 'src/cli.ts' || path === 'src/resume.ts' || isAllowedStatusInput(path)
+  return path === 'src/cli.ts' || path === 'src/create.ts' ||
+    path === 'src/resume.ts' || isAllowedStatusInput(path)
 }
 
 function isAllowedResumeRunnerInput(input: string): boolean {
   return posix.normalize(input.replaceAll('\\', '/')) === 'src/resume-runner.ts'
+}
+
+function isAllowedCreateRunnerInput(input: string): boolean {
+  return posix.normalize(input.replaceAll('\\', '/')) === 'src/create-runner.ts'
 }
 
 describe('runtime metafile input allowlist', () => {
@@ -134,6 +139,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.exports).toHaveProperty('./smoke')
     expect(manifest.exports).toHaveProperty('./status')
     expect(manifest.exports).toHaveProperty('./resume-runner')
+    expect(manifest.exports).toHaveProperty('./create-runner')
     expect(manifest.files).toEqual([
       'dist/index.js',
       'dist/index.d.ts',
@@ -142,8 +148,10 @@ describe('@tianwen/runtime-bundle', () => {
       'dist/status.js',
       'dist/status.d.ts',
       'dist/cli.js',
+      'dist/create-runner.js',
       'dist/resume-runner.js',
       'cordis.patch.yml',
+      'create.patch.yml',
       'resume.patch.yml',
     ])
   })
@@ -441,6 +449,28 @@ describe('@tianwen/runtime-bundle', () => {
     expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
   })
 
+  it('bundles the create runner through its public DSH roots', () => {
+    const source = readFileSync(resolve(packageRoot, 'dist/create-runner.js'), 'utf8')
+    const metafile = json(resolve(packageRoot, 'dist/create-runner.meta.json')) as {
+      inputs: Record<string, unknown>
+      outputs: Record<string, { imports: { path: string; external?: boolean }[] }>
+    }
+    const output = Object.entries(metafile.outputs).find(([path]) =>
+      path.replaceAll('\\', '/').endsWith('dist/create-runner.js'))?.[1]
+    expect(output).toBeDefined()
+    expect(output!.imports
+      .filter(item => item.external === true && !item.path.startsWith('node:'))
+      .map(item => item.path)
+      .sort()).toEqual([
+      '@deepseek-ai/dsh-agent',
+      '@deepseek-ai/dsh-session',
+    ])
+    expect(Object.keys(metafile.inputs).filter(input =>
+      !isAllowedCreateRunnerInput(input))).toEqual([])
+    expect(source).not.toMatch(/from\s+["']@tianwen\//u)
+    expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
+  })
+
   it('packs only the deployable runtime bundle files', () => {
     expect(existsSync(archive)).toBe(true)
     const entries = execFileSync(tar, ['-tzf', archive], {
@@ -452,7 +482,9 @@ describe('@tianwen/runtime-bundle', () => {
       .sort()
     expect(entries).toEqual([
       'package/cordis.patch.yml',
+      'package/create.patch.yml',
       'package/dist/cli.js',
+      'package/dist/create-runner.js',
       'package/dist/index.d.ts',
       'package/dist/index.js',
       'package/dist/resume-runner.js',

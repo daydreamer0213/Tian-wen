@@ -17,6 +17,7 @@ import {
   launchGoalResume,
   preflightGoalResume,
 } from './resume.js'
+import { launchGoalCreate, preflightGoalCreate } from './create.js'
 
 const READ_ONLY_USAGE = [
   'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
@@ -29,8 +30,21 @@ const RESUME_USAGE = [
   '',
 ].join('\n')
 
+const CREATE_USAGE = [
+  'Usage: tianwen create --objective TEXT --data-dir ABSOLUTE_PATH [--max-rounds N] [--json]',
+  '',
+].join('\n')
+
 function usage(command: string | undefined): string {
-  return command === 'resume' ? RESUME_USAGE : READ_ONLY_USAGE
+  if (command === 'resume') return RESUME_USAGE
+  return command === 'create' ? CREATE_USAGE : READ_ONLY_USAGE
+}
+
+function positiveInteger(value: string | undefined): number | undefined {
+  if (value === undefined) return 3
+  if (!/^[1-9][0-9]*$/u.test(value)) return undefined
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) ? parsed : undefined
 }
 
 function formatText(status: GoalStatusProjection): string {
@@ -68,6 +82,8 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     readonly goal?: string
     readonly 'data-dir'?: string
     readonly json?: boolean
+    readonly objective?: string
+    readonly 'max-rounds'?: string
   }
   let positionals: string[]
   try {
@@ -79,6 +95,8 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
         goal: { type: 'string' },
         'data-dir': { type: 'string' },
         json: { type: 'boolean', default: false },
+        objective: { type: 'string' },
+        'max-rounds': { type: 'string' },
       },
     })
     values = parsed.values
@@ -88,14 +106,22 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     return 2
   }
   const command = positionals[0]
+  const maxGoalRounds = positiveInteger(values['max-rounds'])
   if (
     positionals.length !== 1 ||
     values['data-dir'] === undefined ||
     !isAbsolute(values['data-dir']) ||
     (
       command === 'status' || command === 'resume'
-        ? values.goal === undefined || values.goal.length === 0
-        : command === 'list' ? values.goal !== undefined : true
+        ? values.goal === undefined || values.goal.length === 0 ||
+          values.objective !== undefined || values['max-rounds'] !== undefined
+        : command === 'list'
+          ? values.goal !== undefined || values.objective !== undefined ||
+            values['max-rounds'] !== undefined
+          : command === 'create'
+            ? values.goal !== undefined || values.objective?.trim().length === 0 ||
+              values.objective === undefined || maxGoalRounds === undefined
+            : true
     )
   ) {
     process.stderr.write(usage(command))
@@ -103,6 +129,11 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   }
 
   try {
+    if (command === 'create') {
+      return await launchGoalCreate(preflightGoalCreate(
+        values.objective!, maxGoalRounds!, values['data-dir'],
+      ), values.json === true)
+    }
     if (command === 'resume') {
       return await launchGoalResume(await preflightGoalResume(
         values.goal!, values['data-dir'],
@@ -138,7 +169,9 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     }
     process.stderr.write(command === 'resume'
       ? 'Error: unable to resume Goal\n'
-      : 'Error: unable to read Goal status\n')
+      : command === 'create'
+        ? 'Error: unable to create Goal\n'
+        : 'Error: unable to read Goal status\n')
     return 1
   }
 }
