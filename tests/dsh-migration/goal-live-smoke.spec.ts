@@ -21,6 +21,7 @@ import {
   parseGoalLiveSmokeChildReceipt,
 } from '../../packages/tianwen-runtime-bundle/src/goal-live-smoke.js'
 import { preflightGoalResume } from '../../packages/tianwen-runtime-bundle/src/resume.js'
+import { inject as resumeRunnerInject } from '../../packages/tianwen-runtime-bundle/src/resume-runner.js'
 
 function withUsage(chunks: readonly unknown[], inputTokens: number) {
   return [
@@ -97,6 +98,12 @@ async function persistLiveGoal(dataDir: string, options: {
 }
 
 describe('tianwen live Goal smoke', () => {
+  it('declares every Cordis service consumed by ordinary and live Goal resumes', () => {
+    expect(resumeRunnerInject).toEqual([
+      'agentDefaultModel', 'agents', 'credentials', 'goals', 'llm', 'sessions', 'tianwenEvidence',
+    ])
+  })
+
   it.each([
     ['four requests', { requestCount: 4 }],
     ['a retry', { retryCount: 1 }],
