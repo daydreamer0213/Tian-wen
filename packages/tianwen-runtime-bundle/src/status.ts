@@ -27,6 +27,10 @@ export interface GoalStatusInput {
   readonly dataDir: string
 }
 
+export interface GoalListInput {
+  readonly dataDir: string
+}
+
 export interface GoalStatusProjection {
   readonly schemaVersion: 'tianwen.goal-status.v1'
   readonly goal: {
@@ -69,6 +73,27 @@ export interface GoalStatusProjection {
   }
 }
 
+export interface GoalListProjection {
+  readonly schemaVersion: 'tianwen.goal-list.v1'
+  readonly goals: readonly {
+    readonly id: string
+    readonly objective: string
+    readonly phase: 'active' | 'paused' | 'blocked' | 'complete'
+    readonly maxGoalRounds: number
+    readonly roundsStarted: number
+    readonly updatedAt: number
+    readonly session: {
+      readonly id: string
+      readonly eventCount: number
+    }
+  }[]
+  readonly runtime: {
+    readonly activation: 'not-loaded'
+    readonly modelRequests: 0
+    readonly readOnly: true
+  }
+}
+
 export class GoalStatusNotFoundError extends Error {
   constructor(readonly goalId: string) {
     super(`Goal not found: ${goalId}`)
@@ -88,6 +113,13 @@ export class GoalStatusIntegrityError extends Error {
     super(message, options)
     this.name = 'GoalStatusIntegrityError'
   }
+}
+
+interface DurableGoalSnapshot {
+  readonly inspection: Awaited<
+    ReturnType<JsonlSessionPersistence['inspect']>
+  >
+  readonly folded: ReturnType<typeof foldGoal>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -418,20 +450,11 @@ function readChampion(evolutionRoot: string): GoalStatusProjection['champion'] {
   return { artifactId: lastArtifactId, revision: lastRevision }
 }
 
-export async function readGoalStatus(
-  input: GoalStatusInput,
-): Promise<GoalStatusProjection> {
-  if (!isAbsolute(input.dataDir)) {
-    throw new TypeError('dataDir must be an absolute path')
-  }
-  if (input.goalId.length === 0) {
-    throw new TypeError('goalId must not be empty')
-  }
-  const dataDir = resolve(input.dataDir)
+async function scanDurableGoals(
+  dataDir: string,
+): Promise<readonly DurableGoalSnapshot[]> {
   const sessionsRoot = join(dataDir, 'dsh-home', 'sessions')
-  if (!existsSync(sessionsRoot)) {
-    throw new GoalStatusNotFoundError(input.goalId)
-  }
+  if (!existsSync(sessionsRoot)) return []
 
   const ctx = new Context()
   try {
@@ -442,21 +465,97 @@ export async function readGoalStatus(
     })
     const headers = (await persistence.list())
       .toSorted((left, right) => String(left.id).localeCompare(String(right.id)))
-    const matches: Awaited<ReturnType<typeof persistence.inspect>>[] = []
+    const snapshots: DurableGoalSnapshot[] = []
     for (const header of headers) {
       const inspection = await persistence.inspect(header.id)
-      if (String(foldGoal(inspection.events).goal?.id) === input.goalId) {
-        matches.push(inspection)
-      }
+      snapshots.push({ inspection, folded: foldGoal(inspection.events) })
     }
+    return snapshots
+  } catch (error) {
+    if (error instanceof GoalStatusIntegrityError) {
+      throw error
+    }
+    throw new GoalStatusIntegrityError('durable Goal status is invalid', {
+      cause: error,
+    })
+  } finally {
+    await ctx.fiber.dispose()
+  }
+}
+
+export async function listGoals(
+  input: GoalListInput,
+): Promise<GoalListProjection> {
+  if (!isAbsolute(input.dataDir)) {
+    throw new TypeError('dataDir must be an absolute path')
+  }
+  const goalIds = new Set<string>()
+  const goals: GoalListProjection['goals'][number][] = []
+  for (const snapshot of await scanDurableGoals(resolve(input.dataDir))) {
+    const folded = snapshot.folded
+    const goal = folded.goal
+    if (goal === undefined) continue
+    if (folded.createdAt === undefined || folded.updatedAt === undefined) {
+      throw new GoalStatusIntegrityError('Goal replay is incomplete')
+    }
+    const goalId = String(goal.id)
+    if (goalIds.has(goalId)) {
+      throw new GoalStatusAmbiguousError(goalId)
+    }
+    goalIds.add(goalId)
+    goals.push({
+      id: goalId,
+      objective: goal.objective,
+      phase: goal.phase,
+      maxGoalRounds: goal.maxGoalRounds,
+      roundsStarted: folded.roundsStarted,
+      updatedAt: folded.updatedAt,
+      session: {
+        id: String(snapshot.inspection.meta.id),
+        eventCount: snapshot.inspection.events.length,
+      },
+    })
+  }
+  goals.sort((left, right) => {
+    if (left.updatedAt !== right.updatedAt) {
+      return right.updatedAt - left.updatedAt
+    }
+    if (left.id !== right.id) return left.id < right.id ? -1 : 1
+    if (left.session.id === right.session.id) return 0
+    return left.session.id < right.session.id ? -1 : 1
+  })
+  return {
+    schemaVersion: 'tianwen.goal-list.v1',
+    goals,
+    runtime: {
+      activation: 'not-loaded',
+      modelRequests: 0,
+      readOnly: true,
+    },
+  }
+}
+
+export async function readGoalStatus(
+  input: GoalStatusInput,
+): Promise<GoalStatusProjection> {
+  if (!isAbsolute(input.dataDir)) {
+    throw new TypeError('dataDir must be an absolute path')
+  }
+  if (input.goalId.length === 0) {
+    throw new TypeError('goalId must not be empty')
+  }
+  const dataDir = resolve(input.dataDir)
+  try {
+    const matches = (await scanDurableGoals(dataDir))
+      .filter(snapshot => String(snapshot.folded.goal?.id) === input.goalId)
     if (matches.length === 0) {
       throw new GoalStatusNotFoundError(input.goalId)
     }
     if (matches.length > 1) {
       throw new GoalStatusAmbiguousError(input.goalId)
     }
-    const inspection = matches[0]!
-    const folded = foldGoal(inspection.events)
+    const snapshot = matches[0]!
+    const folded = snapshot.folded
     const goal = folded.goal
     if (
       goal === undefined ||
@@ -465,6 +564,7 @@ export async function readGoalStatus(
     ) {
       throw new GoalStatusIntegrityError('Goal replay is incomplete')
     }
+    const { inspection } = snapshot
     const evidence = projectEvidence(inspection.meta.id, inspection.events)
     const complete = evidence.filter(
       record => record.outcome.status === 'complete',
@@ -521,7 +621,5 @@ export async function readGoalStatus(
     throw new GoalStatusIntegrityError('durable Goal status is invalid', {
       cause: error,
     })
-  } finally {
-    await ctx.fiber.dispose()
   }
 }

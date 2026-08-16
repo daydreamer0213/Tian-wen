@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -26,6 +27,7 @@ import {
   GoalStatusAmbiguousError,
   GoalStatusIntegrityError,
   GoalStatusNotFoundError,
+  listGoals,
   readGoalStatus,
 } from '../../packages/tianwen-runtime-bundle/src/status.js'
 
@@ -69,6 +71,36 @@ function jsonlFiles(root: string): string[] {
   }
   visit(root)
   return files
+}
+
+function sessionLog(dataDir: string, sessionId: string): string {
+  const sessionsRoot = join(dataDir, 'dsh-home', 'sessions')
+  const path = jsonlFiles(sessionsRoot).find(candidate => {
+    const [header] = readFileSync(candidate, 'utf8').trimEnd().split('\n')
+    return (JSON.parse(header!) as { id?: unknown }).id === sessionId
+  })
+  expect(path).toBeDefined()
+  return path!
+}
+
+function sessionEventCount(dataDir: string, sessionId: string): number {
+  return readFileSync(sessionLog(dataDir, sessionId), 'utf8')
+    .trimEnd().split('\n').length - 1
+}
+
+function mutateGoalChange(
+  fixture: Pick<Fixture, 'dataDir' | 'sessionId'>,
+  mutate: (data: Record<string, unknown>) => void,
+): void {
+  const path = sessionLog(fixture.dataDir, fixture.sessionId)
+  const records = readFileSync(path, 'utf8').trimEnd().split('\n')
+    .map(line => JSON.parse(line) as Record<string, unknown>)
+  const event = records.find(record => record.type === 'goal/change') as
+    | { data?: unknown }
+    | undefined
+  expect(event?.data).toEqual(expect.any(Object))
+  mutate(event!.data as Record<string, unknown>)
+  writeFileSync(path, `${records.map(record => JSON.stringify(record)).join('\n')}\n`)
 }
 
 async function createFixture(options: {
@@ -140,6 +172,33 @@ async function createFixture(options: {
   }
 }
 
+async function addGoalLessSession(dataDir: string): Promise<string> {
+  const sessionsRoot = join(dataDir, 'dsh-home', 'sessions')
+  mkdirSync(sessionsRoot, { recursive: true })
+  const harness = await mountGoalHarness(
+    sessionsRoot,
+    [textResponse('goal-less session complete')],
+    { goalRoundDriver: false },
+  )
+  const sessionId = SessionId(`goal-less-${randomUUID()}`)
+  const handle = await harness.ctx.agents.create({
+    sessionId,
+    agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+  })
+  try {
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'GOAL_LESS_PRIVATE_MESSAGE' }],
+      source: { kind: 'user' },
+    }))
+    await waitForIdle(harness.ctx, handle.agent)
+    expect(await harness.ctx.sessions.flush(handle.agent.session)).toBe(true)
+    return String(sessionId)
+  } finally {
+    await handle.dispose()
+    await harness.ctx.fiber.dispose()
+  }
+}
+
 function addChampion(evolutionRoot: string): {
   readonly artifactId: string
   readonly revision: number
@@ -162,6 +221,185 @@ function addChampion(evolutionRoot: string): {
 }
 
 describe('Tianwen read-only Goal status', () => {
+  it('lists only current Goal summaries in deterministic recent-first order', async () => {
+    const recent = await createFixture({ objective: 'Recent\nGoal' })
+    try {
+      const tiedA = await createFixture({
+        root: recent.dataDir,
+        objective: 'Tied A',
+        withEvidence: false,
+      })
+      const tiedB = await createFixture({
+        root: recent.dataDir,
+        objective: 'Tied B',
+        withEvidence: false,
+      })
+      mutateGoalChange(recent, data => {
+        data.createdAt = 300
+        data.updatedAt = 300
+      })
+      for (const fixture of [tiedA, tiedB]) {
+        mutateGoalChange(fixture, data => {
+          data.createdAt = 200
+          data.updatedAt = 200
+        })
+      }
+      const before = snapshotTree(recent.dataDir)
+      const first = await listGoals({ dataDir: recent.dataDir })
+      const second = await listGoals({ dataDir: recent.dataDir })
+      const tied = [tiedA, tiedB].toSorted((left, right) =>
+        left.goalId < right.goalId ? -1 : 1
+      )
+      const expected = [recent, ...tied].map((fixture, index) => ({
+        id: fixture.goalId,
+        objective: index === 0
+          ? 'Recent\nGoal'
+          : fixture === tiedA ? 'Tied A' : 'Tied B',
+        phase: 'active' as const,
+        maxGoalRounds: 3,
+        roundsStarted: 0,
+        updatedAt: index === 0 ? 300 : 200,
+        session: {
+          id: fixture.sessionId,
+          eventCount: sessionEventCount(fixture.dataDir, fixture.sessionId),
+        },
+      }))
+
+      expect(first).toEqual({
+        schemaVersion: 'tianwen.goal-list.v1',
+        goals: expected,
+        runtime: {
+          activation: 'not-loaded',
+          modelRequests: 0,
+          readOnly: true,
+        },
+      })
+      expect(second).toEqual(first)
+      expect(JSON.stringify(first)).not.toContain('PRIVATE_USER_MESSAGE')
+      expect(JSON.stringify(first)).not.toContain('PRIVATE_TOOL_ARGUMENT')
+      expect(JSON.stringify(first)).not.toContain('PRIVATE_TOOL_RESULT')
+      expect(JSON.stringify(first)).not.toContain(recent.dataDir)
+      expect(snapshotTree(recent.dataDir)).toEqual(before)
+    } finally {
+      rmSync(recent.dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('returns an empty list without creating a missing Session root', async () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const dataDir = mkdtempSync(join(FIXTURE_BASE, 'empty-list-'))
+    try {
+      const before = snapshotTree(dataDir)
+      const expected = {
+        schemaVersion: 'tianwen.goal-list.v1' as const,
+        goals: [],
+        runtime: {
+          activation: 'not-loaded' as const,
+          modelRequests: 0 as const,
+          readOnly: true as const,
+        },
+      }
+      expect(await listGoals({ dataDir })).toEqual(expected)
+      expect(await listGoals({ dataDir })).toEqual(expected)
+      expect(existsSync(join(dataDir, 'dsh-home', 'sessions'))).toBe(false)
+      expect(snapshotTree(dataDir)).toEqual(before)
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('ignores a durable Session without a current Goal', async () => {
+    const fixture = await createFixture({ withEvidence: false })
+    try {
+      const goalLessSessionId = await addGoalLessSession(fixture.dataDir)
+      const before = snapshotTree(fixture.dataDir)
+      const projection = await listGoals({ dataDir: fixture.dataDir })
+
+      expect(projection.goals.map(goal => goal.id)).toEqual([fixture.goalId])
+      expect(JSON.stringify(projection)).not.toContain(goalLessSessionId)
+      expect(JSON.stringify(projection)).not.toContain('GOAL_LESS_PRIVATE_MESSAGE')
+      expect(snapshotTree(fixture.dataDir)).toEqual(before)
+    } finally {
+      rmSync(fixture.dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('fails closed when a current Goal replay is incomplete', async () => {
+    const fixture = await createFixture({ withEvidence: false })
+    try {
+      mutateGoalChange(fixture, data => {
+        delete data.updatedAt
+      })
+      const before = snapshotTree(fixture.dataDir)
+      await expect(listGoals({ dataDir: fixture.dataDir }))
+        .rejects.toBeInstanceOf(GoalStatusIntegrityError)
+      expect(snapshotTree(fixture.dataDir)).toEqual(before)
+    } finally {
+      rmSync(fixture.dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps Goal A status when an unrelated Goal B id is duplicated', async () => {
+    const goalA = await createFixture({
+      objective: 'Goal A remains readable',
+      withEvidence: false,
+    })
+    try {
+      const goalB = await createFixture({
+        root: goalA.dataDir,
+        objective: 'Goal B',
+        withEvidence: false,
+      })
+      const duplicateB = await createFixture({
+        root: goalA.dataDir,
+        objective: 'Duplicate Goal B',
+        withEvidence: false,
+      })
+      const duplicateLog = sessionLog(goalA.dataDir, duplicateB.sessionId)
+      const original = readFileSync(duplicateLog, 'utf8')
+      writeFileSync(
+        duplicateLog,
+        original.replaceAll(duplicateB.goalId, goalB.goalId),
+      )
+
+      const status = await readGoalStatus({
+        goalId: goalA.goalId,
+        dataDir: goalA.dataDir,
+      })
+      expect(status.schemaVersion).toBe('tianwen.goal-status.v1')
+      expect(status.goal).toEqual(expect.objectContaining({
+        id: goalA.goalId,
+        objective: 'Goal A remains readable',
+      }))
+    } finally {
+      rmSync(goalA.dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('fails Goal A status when an unrelated Goal B replay is structurally invalid', async () => {
+    const goalA = await createFixture({
+      objective: 'Goal A remains readable',
+      withEvidence: false,
+    })
+    try {
+      const goalB = await createFixture({
+        root: goalA.dataDir,
+        objective: 'Incomplete Goal B',
+        withEvidence: false,
+      })
+      mutateGoalChange(goalB, data => {
+        delete data.updatedAt
+      })
+
+      await expect(readGoalStatus({
+        goalId: goalA.goalId,
+        dataDir: goalA.dataDir,
+      })).rejects.toBeInstanceOf(GoalStatusIntegrityError)
+    } finally {
+      rmSync(goalA.dataDir, { recursive: true, force: true })
+    }
+  })
+
   it('prints deterministic text and JSON through the status CLI', async () => {
     const fixture = await createFixture({ withEvidence: false })
     try {
@@ -306,6 +544,8 @@ describe('Tianwen read-only Goal status', () => {
       writeFileSync(secondLog!, original.replaceAll(second.goalId, first.goalId))
       const before = snapshotTree(first.dataDir)
 
+      await expect(listGoals({ dataDir: first.dataDir }))
+        .rejects.toBeInstanceOf(GoalStatusAmbiguousError)
       await expect(readGoalStatus({
         goalId: first.goalId,
         dataDir: first.dataDir,
