@@ -15,6 +15,7 @@ import { apply as applyBundledRuntime } from '../../packages/tianwen-runtime-bun
 
 const root = resolve(import.meta.dirname, '../..')
 const packageRoot = resolve(root, 'packages/tianwen-runtime-bundle')
+const hostPackageRoot = resolve(root, 'packages/tianwen-dsh-host')
 const packRoot = 'D:/DevData/tianwen/packs'
 const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.0.0.tgz')
 const tar = process.platform === 'win32'
@@ -54,7 +55,11 @@ function isAllowedStatusInput(input: string): boolean {
 
 function isAllowedCliInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
-  return path === 'src/cli.ts' || isAllowedStatusInput(path)
+  return path === 'src/cli.ts' || path === 'src/resume.ts' || isAllowedStatusInput(path)
+}
+
+function isAllowedResumeRunnerInput(input: string): boolean {
+  return posix.normalize(input.replaceAll('\\', '/')) === 'src/resume-runner.ts'
 }
 
 describe('runtime metafile input allowlist', () => {
@@ -88,7 +93,7 @@ describe('@tianwen/runtime-bundle', () => {
     }
   })
 
-  it('declares one deployable product package and no Tianwen runtime dependency', () => {
+  it('separates the deployable DSH host from the Profile runtime package', () => {
     const manifest = json(resolve(packageRoot, 'package.json')) as {
       name: string
       files: string[]
@@ -101,6 +106,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.bin).toEqual({ tianwen: 'dist/cli.js' })
     expect(manifest.dependencies).toEqual({
       '@deepseek-ai/cordis': '4.0.1',
+      '@deepseek-ai/dsh-agent': '0.1.0-rc.6',
       '@deepseek-ai/dsh-goal': '0.1.0-rc.6',
       '@deepseek-ai/dsh-llm': '0.1.0-rc.6',
       '@deepseek-ai/dsh-session': '0.1.0-rc.6',
@@ -110,6 +116,15 @@ describe('@tianwen/runtime-bundle', () => {
     expect(Object.keys(manifest.dependencies)).not.toContainEqual(
       expect.stringMatching(/^@tianwen\//u),
     )
+    expect(manifest).not.toHaveProperty('peerDependencies')
+    expect(manifest).not.toHaveProperty('peerDependenciesMeta')
+    expect(json(resolve(hostPackageRoot, 'package.json'))).toMatchObject({
+      name: '@tianwen/dsh-host',
+      private: true,
+      dependencies: {
+      '@deepseek-ai/dsh': '0.1.0-rc.6',
+      },
+    })
     expect(manifest.devDependencies).toMatchObject({
       '@tianwen/evidence': 'workspace:*',
       '@tianwen/runtime': 'workspace:*',
@@ -118,6 +133,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.exports).toHaveProperty('./runtime')
     expect(manifest.exports).toHaveProperty('./smoke')
     expect(manifest.exports).toHaveProperty('./status')
+    expect(manifest.exports).toHaveProperty('./resume-runner')
     expect(manifest.files).toEqual([
       'dist/index.js',
       'dist/index.d.ts',
@@ -126,7 +142,9 @@ describe('@tianwen/runtime-bundle', () => {
       'dist/status.js',
       'dist/status.d.ts',
       'dist/cli.js',
+      'dist/resume-runner.js',
       'cordis.patch.yml',
+      'resume.patch.yml',
     ])
   })
 
@@ -140,6 +158,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.files).toContain('dist/smoke.js')
     expect(manifest.dependencies).toEqual({
       '@deepseek-ai/cordis': '4.0.1',
+      '@deepseek-ai/dsh-agent': '0.1.0-rc.6',
       '@deepseek-ai/dsh-goal': '0.1.0-rc.6',
       '@deepseek-ai/dsh-llm': '0.1.0-rc.6',
       '@deepseek-ai/dsh-session': '0.1.0-rc.6',
@@ -399,6 +418,29 @@ describe('@tianwen/runtime-bundle', () => {
     expect(source).not.toMatch(/scripted-adapter|test-harness|dsh-probe-bundle/u)
   })
 
+  it('bundles the resume runner through its public DSH roots', () => {
+    const source = readFileSync(resolve(packageRoot, 'dist/resume-runner.js'), 'utf8')
+    const metafile = json(resolve(packageRoot, 'dist/resume-runner.meta.json')) as {
+      inputs: Record<string, unknown>
+      outputs: Record<string, { imports: { path: string; external?: boolean }[] }>
+    }
+    const output = Object.entries(metafile.outputs).find(([path]) =>
+      path.replaceAll('\\', '/').endsWith('dist/resume-runner.js'))?.[1]
+    expect(output).toBeDefined()
+    expect(output!.imports
+      .filter(item => item.external === true && !item.path.startsWith('node:'))
+      .map(item => item.path)
+      .sort()).toEqual([
+      '@deepseek-ai/dsh-agent',
+      '@deepseek-ai/dsh-goal',
+      '@deepseek-ai/dsh-session',
+    ])
+    expect(Object.keys(metafile.inputs).filter(input =>
+      !isAllowedResumeRunnerInput(input))).toEqual([])
+    expect(source).not.toMatch(/from\s+["']@tianwen\//u)
+    expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
+  })
+
   it('packs only the deployable runtime bundle files', () => {
     expect(existsSync(archive)).toBe(true)
     const entries = execFileSync(tar, ['-tzf', archive], {
@@ -413,11 +455,13 @@ describe('@tianwen/runtime-bundle', () => {
       'package/dist/cli.js',
       'package/dist/index.d.ts',
       'package/dist/index.js',
+      'package/dist/resume-runner.js',
       'package/dist/runtime.js',
       'package/dist/smoke.js',
       'package/dist/status.d.ts',
       'package/dist/status.js',
       'package/package.json',
+      'package/resume.patch.yml',
     ])
     expect(entries.some(entry => /(^|\/)src\//u.test(entry))).toBe(false)
     expect(entries.some(entry => /(^|\/)node_modules\//u.test(entry))).toBe(false)

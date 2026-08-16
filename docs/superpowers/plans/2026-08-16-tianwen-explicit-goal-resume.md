@@ -16,12 +16,12 @@ because the user explicitly invoked the command.
 
 ## Design decision
 
-Use the exact public `@deepseek-ai/dsh@0.1.0-rc.6` CLI as a direct Runtime
-Bundle dependency. The installed `tianwen` package resolves that dependency's
-declared `bin.dsh` from its own package graph, validates it, and invokes it with
-fixed Node + argv and `shell:false`. Do not borrow the Profile fallback (it may
-point at a launcher worktree), search `PATH`, accept a caller-supplied
-executable, copy Profile boot code, or build another runtime.
+Use the exact public `@deepseek-ai/dsh@0.1.0-rc.6` CLI from one standalone host
+deployed under the Tianwen data directory, outside the Profile dependency
+tree. The installed `tianwen` package resolves that host's declared `bin.dsh`, validates
+it, and invokes it with fixed Node + argv and `shell:false`. Do not hardcode a
+source-worktree or Profile-fallback path, search `PATH`, accept a caller-supplied executable, copy
+Profile boot code, or build another runtime.
 
 The command performs this exact sequence:
 
@@ -92,9 +92,11 @@ Confirm RED is the missing resume API/CLI branch, not environment setup.
 
 ### Step 2: Implement the smallest public Profile launcher
 
-Add only the exact public DSH CLI and agent setup packages actually imported.
-Resolve the DSH CLI through the Runtime Bundle's own package graph and require
-exact version/bin shape, lexical/real containment and a regular file.
+Add only the exact public agent setup package actually imported. Add a tiny
+`@tianwen/dsh-host` deployment recipe whose only dependency is the exact DSH
+CLI; deploy it to `<data-dir>/dsh-host` and require exact version/bin shape,
+lexical/real containment and a regular file. This avoids reinstalling the
+complete DSH CLI inside its own Profile and prevents a source-worktree fallback.
 Invoke `process.execPath` + that fixed JS bin with `shell:false`, the installed
 Profile name `tianwen`, and a child environment that inherits normal DSH
 settings/credentials while overriding only `DSH_HOME` and Tianwen's fixed

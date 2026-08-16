@@ -14,12 +14,13 @@ import {
 import { delimiter, dirname, isAbsolute, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { SessionId } from '@tianwen/dsh-compat'
+import { SessionId, mountGoalHarness } from '@tianwen/dsh-compat'
 import type { SessionEvent } from '@tianwen/dsh-compat'
 import { projectEvidence } from '../../packages/tianwen-evidence/src/projector.js'
 
 const root = resolve(import.meta.dirname, '../..')
 const tianwenRoot = 'D:/DevData/tianwen'
+const dshHostRoot = `${tianwenRoot}/dsh-host`
 const dshHome = `${tianwenRoot}/dsh-home`
 const profileRoot = `${dshHome}/profiles/tianwen`
 const sessionsRoot = `${dshHome}/sessions`
@@ -27,6 +28,7 @@ const evolutionRoot = `${tianwenRoot}/state/evolution`
 const receiptPath = `${tianwenRoot}/receipts/phase2-startup-receipt.json`
 const statusReceiptPath = `${tianwenRoot}/receipts/phase3-goal-status-receipt.json`
 const listReceiptPath = `${tianwenRoot}/receipts/phase4-goal-list-receipt.json`
+const resumeReceiptPath = `${tianwenRoot}/receipts/phase5-goal-resume-receipt.json`
 const archive = `${tianwenRoot}/packs/tianwen-runtime-bundle-0.0.0.tgz`
 const taskText = 'run the Tianwen phase 2 smoke task'
 const completeCallId = 'tianwen-phase2-goal-complete'
@@ -50,13 +52,18 @@ allowBuilds:
   protobufjs: false
 `
 
-function run(executable: string, argv: string[], env: NodeJS.ProcessEnv) {
+function run(
+  executable: string,
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  timeout = 120_000,
+) {
   return spawnSync(executable, argv, {
     cwd: root,
     encoding: 'utf8',
     env,
     shell: false,
-    timeout: 120_000,
+    timeout,
   })
 }
 
@@ -115,12 +122,14 @@ function childEnvironment(): NodeJS.ProcessEnv {
   const system32 = resolve(systemRoot!, 'System32')
   const paths = [
     dshHome,
+    dshHostRoot,
     profileRoot,
     sessionsRoot,
     evolutionRoot,
     receiptPath,
     statusReceiptPath,
     listReceiptPath,
+    resumeReceiptPath,
     archive,
     temp,
     virtualStore,
@@ -153,8 +162,7 @@ function childEnvironment(): NodeJS.ProcessEnv {
 }
 
 function requireDshBin(): string {
-  const requireFromRoot = createRequire(resolve(root, 'package.json'))
-  const manifestPath = requireFromRoot.resolve('@deepseek-ai/dsh/package.json')
+  const manifestPath = `${dshHostRoot}/node_modules/@deepseek-ai/dsh/package.json`
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
     version?: string
     bin?: { dsh?: string }
@@ -164,7 +172,10 @@ function requireDshBin(): string {
   expect(typeof bin).toBe('string')
   const dshBin = resolve(dirname(manifestPath), bin!)
   expect(statSync(dshBin).isFile()).toBe(true)
-  return dshBin
+  const installed = realpathSync(dshBin)
+  expect(relative(realpathSync(dshHostRoot), installed).startsWith('..')).toBe(false)
+  expect(relative(root, installed).startsWith('..')).toBe(true)
+  return installed
 }
 
 function bytesOrMissing(path: string): Buffer | undefined {
@@ -230,15 +241,25 @@ async function start(missingCorepack = false): Promise<void> {
   rmSync(`${statusReceiptPath}.tmp`, { force: true })
   rmSync(listReceiptPath, { force: true })
   rmSync(`${listReceiptPath}.tmp`, { force: true })
+  rmSync(resumeReceiptPath, { force: true })
+  rmSync(`${resumeReceiptPath}.tmp`, { force: true })
   const pnpm = missingCorepack ? missingPnpm : exactPnpm
   expect(existsSync(pnpm)).toBe(true)
-  const dshBin = requireDshBin()
   const env = childEnvironment()
   expect(existsSync(profilePatch)).toBe(true)
   rmSync(profileRoot, { recursive: true, force: true })
   mkdirSync(profileRoot, { recursive: true })
   writeFileSync(`${profileRoot}/pnpm-workspace.yaml`, workspacePolicy, 'utf8')
   rmSync(archive, { force: true })
+
+  if (!existsSync(`${dshHostRoot}/node_modules/@deepseek-ai/dsh/package.json`)) {
+    const deployHost = run(process.execPath, [
+      exactPnpm, '--config.inject-workspace-packages=true',
+      '--filter', '@tianwen/dsh-host', 'deploy', '--prod', dshHostRoot,
+    ], env, 300_000)
+    expect(deployHost.status, `${deployHost.stdout}\n${deployHost.stderr}`).toBe(0)
+  }
+  const dshBin = requireDshBin()
 
   const build = run(process.execPath, [
     exactPnpm, '--filter', '@tianwen/runtime-bundle...', 'build',
@@ -571,6 +592,123 @@ async function start(missingCorepack = false): Promise<void> {
   publishReceipt(listReceiptPath, listReceipt)
   expect(JSON.parse(readFileSync(listReceiptPath, 'utf8')))
     .toEqual(listReceipt)
+
+  const resumeSessionId = SessionId(`tianwen-resume-${Date.now()}`)
+  const seed = await mountGoalHarness(sessionsRoot, [], { goalRoundDriver: false })
+  const seedHandle = await seed.ctx.agents.create({
+    sessionId: resumeSessionId,
+    meta: { cwd: root },
+    agentOptions: { provider: 'tianwen-offline', model: 'phase2-smoke' },
+  })
+  let resumeGoal: ReturnType<typeof seed.ctx.goals.create>
+  try {
+    resumeGoal = seed.ctx.goals.create(seedHandle.agent, {
+      objective: 'prove explicit Tianwen Goal resume',
+      maxGoalRounds: 1,
+    })
+    await seed.ctx.sessions.flush(seedHandle.agent.session)
+  } finally {
+    await seedHandle.dispose()
+    await seed.ctx.fiber.dispose()
+  }
+
+  const resumeLog = listSessionLogs().find(path =>
+    readFileSync(path, 'utf8').includes(String(resumeSessionId)))
+  expect(resumeLog).toBeDefined()
+  const [, ...resumeBeforeLines] = readFileSync(resumeLog!, 'utf8')
+    .trimEnd()
+    .split(/\r?\n/u)
+  const resumeBeforeEvents = resumeBeforeLines.map(line => JSON.parse(line) as SessionEvent)
+  const championBeforeResume = bytesOrMissing(champion)
+  const ledgerBeforeResume = bytesOrMissing(ledger)
+
+  const resumeRun = run(process.execPath, [
+    installed.cli,
+    'resume',
+    '--goal',
+    String(resumeGoal.id),
+    '--data-dir',
+    tianwenRoot,
+    '--json',
+  ], env)
+  expect(resumeRun.status, `${resumeRun.stdout}\n${resumeRun.stderr}`).toBe(0)
+  expect(resumeRun.stderr).toBe('')
+  const resumeResult = JSON.parse(resumeRun.stdout) as {
+    schemaVersion: string
+    goal: { id: string, revision: number, phase: string, roundsStarted: number }
+    session: {
+      id: string
+      eventCountBefore: number
+      eventCountAfter: number
+      eventCountDelta: number
+      modelRequestsDelta: number
+    }
+  }
+  expect(resumeResult).toEqual({
+    schemaVersion: 'tianwen.goal-resume.v1',
+    goal: {
+      id: String(resumeGoal.id),
+      revision: resumeGoal.revision + 2,
+      phase: 'complete',
+      roundsStarted: 1,
+    },
+    session: {
+      id: String(resumeSessionId),
+      eventCountBefore: expect.any(Number),
+      eventCountAfter: expect.any(Number),
+      eventCountDelta: expect.any(Number),
+      modelRequestsDelta: 2,
+    },
+  })
+  expect(resumeResult.session.eventCountAfter - resumeResult.session.eventCountBefore)
+    .toBe(resumeResult.session.eventCountDelta)
+  expect(resumeResult.session.eventCountBefore).toBeGreaterThanOrEqual(
+    resumeBeforeEvents.length,
+  )
+
+  const [, ...resumeAfterLines] = readFileSync(resumeLog!, 'utf8')
+    .trimEnd()
+    .split(/\r?\n/u)
+  const resumeAfterEvents = resumeAfterLines.map(line => JSON.parse(line) as SessionEvent)
+  const added = resumeAfterEvents.slice(resumeResult.session.eventCountBefore)
+  const resumeChanges = added.filter(event =>
+    event.type === 'goal/change' && event.data.operation === 'resume')
+  expect(resumeChanges).toHaveLength(1)
+  expect(added.filter(event => event.type === 'request/header')).toHaveLength(1)
+  expect(added.filter(event => event.type === 'step/start')).toHaveLength(2)
+  expect(added.filter(event =>
+    event.type === 'user/message' && event.data.source.kind === 'goal'))
+    .toHaveLength(1)
+  expect(bytesOrMissing(champion)).toEqual(championBeforeResume)
+  expect(bytesOrMissing(ledger)).toEqual(ledgerBeforeResume)
+
+  const stateAfterResume = snapshotState()
+  const secondResume = run(process.execPath, [
+    installed.cli,
+    'resume',
+    '--goal',
+    String(resumeGoal.id),
+    '--data-dir',
+    tianwenRoot,
+    '--json',
+  ], env)
+  expect(secondResume.status).toBe(1)
+  expect(secondResume.stdout).toBe('')
+  expect(secondResume.stderr).toBe('Error: Goal is complete\n')
+  expect(snapshotState()).toEqual(stateAfterResume)
+
+  const resumeReceipt = {
+    schemaVersion: 'tianwen.goal-resume-e2e.v1',
+    goal: resumeResult.goal,
+    session: resumeResult.session,
+    resumeTransitions: resumeChanges.length,
+    modelRequests: added.filter(event => event.type === 'step/start').length,
+    secondAttempt: { exitCode: secondResume.status, stateUnchanged: true },
+    evolution: { transitionCountDelta: 0, championChanged: false },
+  }
+  publishReceipt(resumeReceiptPath, resumeReceipt)
+  expect(JSON.parse(readFileSync(resumeReceiptPath, 'utf8')))
+    .toEqual(resumeReceipt)
 }
 
 describe('Tianwen formal headless startup', () => {
@@ -583,5 +721,5 @@ describe('Tianwen formal headless startup', () => {
 
   it.runIf(enabled)('installs the formal Profile and proves the public headless authority path', async () => {
     await start()
-  }, 120_000)
+  }, 600_000)
 })

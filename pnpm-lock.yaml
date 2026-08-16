@@ -123,6 +123,12 @@ importers:
         specifier: 0.1.0-rc.6
         version: 0.1.0-rc.6(f8724372086ccc1457fc84e7becee2e0)
 
+  packages/tianwen-dsh-host:
+    dependencies:
+      '@deepseek-ai/dsh':
+        specifier: 0.1.0-rc.6
+        version: 0.1.0-rc.6(c195158e0dbfcd5dd026bd43e3679360)
+
   packages/tianwen-dsh-probe-bundle:
     dependencies:
       '@deepseek-ai/cordis':
@@ -166,6 +172,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: 4.0.1
         version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-agent':
+        specifier: 0.1.0-rc.6
+        version: 0.1.0-rc.6(b0514d7a320728b6d8f5a31eb3960e10)
       '@deepseek-ai/dsh-goal':
         specifier: 0.1.0-rc.6
         version: 0.1.0-rc.6(3f17eb6754612fc564ecc2cacddc7a21)

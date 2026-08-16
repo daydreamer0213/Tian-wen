@@ -115,7 +115,7 @@ export class GoalStatusIntegrityError extends Error {
   }
 }
 
-interface DurableGoalSnapshot {
+export interface DurableGoalSnapshot {
   readonly inspection: Awaited<
     ReturnType<JsonlSessionPersistence['inspect']>
   >
@@ -450,7 +450,7 @@ function readChampion(evolutionRoot: string): GoalStatusProjection['champion'] {
   return { artifactId: lastArtifactId, revision: lastRevision }
 }
 
-async function scanDurableGoals(
+export async function scanDurableGoals(
   dataDir: string,
 ): Promise<readonly DurableGoalSnapshot[]> {
   const sessionsRoot = join(dataDir, 'dsh-home', 'sessions')

@@ -45,7 +45,8 @@ function hasTool(options: GenerateOptions, name: string): boolean {
 }
 
 function currentToolResult(options: GenerateOptions, callId: typeof GOAL_CALL_ID) {
-  const message = options.messages.at(-1)
+  const message = options.messages.findLast(item =>
+    item.source.kind === 'tool' && item.source.callId === callId)
   const block = message?.content[0]
   if (message?.role !== 'user'
     || message.source.kind !== 'tool'
@@ -85,8 +86,33 @@ function createdGoalRef(options: GenerateOptions): {
   return { goal_id: id, revision }
 }
 
+function goalRoundRef(options: GenerateOptions): {
+  goal_id: string
+  revision: number
+} | undefined {
+  const message = options.messages.findLast(item => item.source.kind === 'goal')
+  const source = message?.source
+  const block = message?.content[0]
+  if (message?.role !== 'user' || source?.kind !== 'goal'
+    || message.content.length !== 1 || block?.type !== 'text'
+    || !block.text.startsWith('<goal_round>')
+    || !block.text.endsWith('</goal_round>')
+    || typeof source.goalId !== 'string' || source.goalId.length === 0
+    || source.goalId !== source.goalId.trim()
+    || !Number.isSafeInteger(source.revision) || source.revision < 1
+    || !Number.isSafeInteger(source.round) || source.round < 1) {
+    return undefined
+  }
+  return { goal_id: source.goalId, revision: source.revision }
+}
+
+function hasGoalSource(options: GenerateOptions): boolean {
+  return options.messages.some(message => message.source.kind === 'goal')
+}
+
 export class Phase2SmokeAdapter extends LlmAdapter {
   private cursor = 0
+  private mode: 'fresh' | 'resume' | undefined
   private sessionId: GenerateOptions['sessionId']
   private hasSessionId = false
   private goalRef: ReturnType<typeof createdGoalRef>
@@ -101,12 +127,55 @@ export class Phase2SmokeAdapter extends LlmAdapter {
     } else if (options.sessionId !== this.sessionId) {
       throw new Error('phase 2 smoke adapter requires one session')
     }
-    if (!hasTool(options, 'create_goal') || !hasTool(options, SMOKE_ACTION)
-      || !hasTool(options, 'update_goal')) {
+    const goalRef = goalRoundRef(options)
+    const requestedMode = goalRef === undefined
+      ? (hasGoalSource(options) ? 'invalid' : undefined)
+      : 'resume'
+    if (requestedMode === 'invalid') {
+      throw new Error('phase 2 smoke resume requires a valid goal-round message')
+    }
+    if (this.mode !== undefined && requestedMode !== undefined
+      && this.mode !== requestedMode) {
+      throw new Error('phase 2 smoke adapter cannot mix fresh and resume modes')
+    }
+    const mode = this.mode ?? requestedMode ?? 'fresh'
+    if (this.mode === undefined) {
+      this.mode = mode
+    } else if (this.mode !== mode) {
+      throw new Error('phase 2 smoke adapter cannot mix fresh and resume modes')
+    }
+    if (mode === 'fresh'
+      && (!hasTool(options, 'create_goal') || !hasTool(options, SMOKE_ACTION)
+        || !hasTool(options, 'update_goal'))) {
       throw new Error('phase 2 smoke adapter requires its fixed tools')
+    }
+    if (mode === 'resume' && !hasTool(options, 'update_goal')) {
+      throw new Error('phase 2 smoke resume requires the update_goal tool')
     }
 
     let response: readonly StreamChunk[]
+    if (mode === 'resume') {
+      switch (this.cursor) {
+        case 0:
+          response = toolResponse(COMPLETE_CALL_ID, 'update_goal', {
+            ...goalRef,
+            action: 'complete',
+          })
+          break
+        case 1:
+          if (currentToolResult(options, COMPLETE_CALL_ID) === undefined) {
+            throw new Error('phase 2 smoke resume expected the goal completion result')
+          }
+          response = textResponse('TIANWEN_RESUME_OK')
+          break
+        default:
+          throw new Error('phase 2 smoke resume script exhausted')
+      }
+      this.cursor += 1
+      yield* response
+      return
+    }
+
     switch (this.cursor) {
       case 0:
         response = toolResponse(GOAL_CALL_ID, 'create_goal', {

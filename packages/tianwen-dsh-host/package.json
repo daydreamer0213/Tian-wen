@@ -1,0 +1,9 @@
+{
+  "name": "@tianwen/dsh-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.1.0-rc.6"
+  }
+}

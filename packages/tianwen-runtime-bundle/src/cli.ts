@@ -12,12 +12,26 @@ import {
   readGoalStatus,
 } from './status.js'
 import type { GoalListProjection, GoalStatusProjection } from './status.js'
+import {
+  GoalResumeUnavailableError,
+  launchGoalResume,
+  preflightGoalResume,
+} from './resume.js'
 
-const USAGE = [
+const READ_ONLY_USAGE = [
   'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
   'Usage: tianwen list --data-dir ABSOLUTE_PATH [--json]',
   '',
 ].join('\n')
+
+const RESUME_USAGE = [
+  'Usage: tianwen resume --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
+  '',
+].join('\n')
+
+function usage(command: string | undefined): string {
+  return command === 'resume' ? RESUME_USAGE : READ_ONLY_USAGE
+}
 
 function formatText(status: GoalStatusProjection): string {
   const eventLabel = status.session.eventCount === 1 ? 'event' : 'events'
@@ -70,7 +84,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     values = parsed.values
     positionals = parsed.positionals
   } catch {
-    process.stderr.write(USAGE)
+    process.stderr.write(usage(args[0]))
     return 2
   }
   const command = positionals[0]
@@ -79,16 +93,21 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     values['data-dir'] === undefined ||
     !isAbsolute(values['data-dir']) ||
     (
-      command === 'status'
+      command === 'status' || command === 'resume'
         ? values.goal === undefined || values.goal.length === 0
         : command === 'list' ? values.goal !== undefined : true
     )
   ) {
-    process.stderr.write(USAGE)
+    process.stderr.write(usage(command))
     return 2
   }
 
   try {
+    if (command === 'resume') {
+      return await launchGoalResume(await preflightGoalResume(
+        values.goal!, values['data-dir'],
+      ), values.json === true)
+    }
     if (command === 'list') {
       const list = await listGoals({ dataDir: values['data-dir'] })
       process.stdout.write(values.json
@@ -111,12 +130,15 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     }
     if (
       error instanceof GoalStatusAmbiguousError ||
-      error instanceof GoalStatusIntegrityError
+      error instanceof GoalStatusIntegrityError ||
+      error instanceof GoalResumeUnavailableError
     ) {
       process.stderr.write(`Error: ${error.message}\n`)
       return 1
     }
-    process.stderr.write('Error: unable to read Goal status\n')
+    process.stderr.write(command === 'resume'
+      ? 'Error: unable to resume Goal\n'
+      : 'Error: unable to read Goal status\n')
     return 1
   }
 }
