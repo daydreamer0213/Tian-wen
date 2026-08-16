@@ -114,6 +114,15 @@ live-smoke preflight 只接受：
 
 任一条件不满足，都必须在 Goal resume、模型请求和新持久化写入前失败。
 
+DSH 的 Goal id/revision 在 Session 中是带类型的内部消息元数据，
+真实 provider 不会看到这些字段；而 `update_goal` 又必须提交当前
+Goal id/revision。严格模式因此通过 DSH 公开的 agent-scoped
+`systemPrompt.section()` 注入一条固定指令，只向模型暴露本次 resume
+返回的当前 Goal id 和 revision，并重申固定工具顺序与结束标记。
+该 section 不包含凭据、用户文件、费用信息或任意新 prompt，并在 Agent
+销毁时一起卸载。这是使现有两工具合同可实际调用的最小权威桥接，
+不新增 `get_goal` 第三个工具，也不修改通用 Goal round prompt。
+
 ## 5. 一轮运行策略
 
 ### 5.1 工具面
@@ -125,6 +134,8 @@ live-smoke preflight 只接受：
 
 `create_goal` 和其他文件、Shell、Web、子代理、计划、Skill、任务等工具都不可见、
 不可执行。`update_goal` 是 Goal 生命周期控制，不算第二个业务 action。
+模型从上述固定 agent-scoped section 获得完成所需的当前 Goal ref；
+不为此放开 `get_goal`。
 
 验收要求 Session 中：
 
@@ -233,7 +244,8 @@ D:\DevData\tianwen-live-goal-round\receipts\deepseek-v4-pro-goal-round.json
 
 1. 给 CLI/runner 增加 opt-in live-smoke 模式，不改变普通 resume；
 2. 用 recording/scripted adapter 取得真实 RED→GREEN，证明严格三请求顺序；
-3. 证明 agent-scoped 工具面精确为两个公开工具；
+3. 证明 agent-scoped 工具面精确为两个公开工具，且模型只通过
+   固定 section 获得当前 Goal id/revision；
 4. 证明 maxTokens、reasoning off、请求上限、无 retry 和 90 秒取消；
 5. 证明缺模型、缺凭据、错误 Goal、旧 Session、异常 usage、第四请求、工具偏差和
    timeout 都安全失败；
