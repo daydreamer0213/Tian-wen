@@ -26,6 +26,7 @@ const sessionsRoot = `${dshHome}/sessions`
 const evolutionRoot = `${tianwenRoot}/state/evolution`
 const receiptPath = `${tianwenRoot}/receipts/phase2-startup-receipt.json`
 const statusReceiptPath = `${tianwenRoot}/receipts/phase3-goal-status-receipt.json`
+const listReceiptPath = `${tianwenRoot}/receipts/phase4-goal-list-receipt.json`
 const archive = `${tianwenRoot}/packs/tianwen-runtime-bundle-0.0.0.tgz`
 const taskText = 'run the Tianwen phase 2 smoke task'
 const completeCallId = 'tianwen-phase2-goal-complete'
@@ -119,6 +120,7 @@ function childEnvironment(): NodeJS.ProcessEnv {
     evolutionRoot,
     receiptPath,
     statusReceiptPath,
+    listReceiptPath,
     archive,
     temp,
     virtualStore,
@@ -215,6 +217,7 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   expect(runtime).toMatchObject({ name: 'tianwen-runtime', inject: ['dynamicCordisRunner'] })
   expect(smoke).toMatchObject({ name: 'tianwen-phase2-smoke', inject: ['llm', 'tools'] })
   expect(status.readGoalStatus).toBeTypeOf('function')
+  expect(status.listGoals).toBeTypeOf('function')
   const cli = resolve(runtimeRoot, runtimeManifest.bin.tianwen)
   expect(statSync(cli).isFile()).toBe(true)
   return { cli }
@@ -225,6 +228,8 @@ async function start(missingCorepack = false): Promise<void> {
   rmSync(`${receiptPath}.tmp`, { force: true })
   rmSync(statusReceiptPath, { force: true })
   rmSync(`${statusReceiptPath}.tmp`, { force: true })
+  rmSync(listReceiptPath, { force: true })
+  rmSync(`${listReceiptPath}.tmp`, { force: true })
   const pnpm = missingCorepack ? missingPnpm : exactPnpm
   expect(existsSync(pnpm)).toBe(true)
   const dshBin = requireDshBin()
@@ -316,6 +321,7 @@ async function start(missingCorepack = false): Promise<void> {
   const finalGoalChange = goalChanges.at(-1)!.data as {
     goal: { id: string, revision: number, objective: string, maxGoalRounds: number, phase: string }
     roundsStarted: unknown
+    updatedAt: number
   }
   const finalGoal = finalGoalChange.goal
   expect(finalGoal).toMatchObject({
@@ -430,6 +436,64 @@ async function start(missingCorepack = false): Promise<void> {
     expect(statusRun.stdout).not.toContain(secret)
   }
 
+  const stateBeforeList = snapshotState()
+  const sessionBeforeList = sessionAfterStatus
+  const modelStepsBeforeList = eventsAfterStatus
+    .filter(event => event.type === 'step/start').length
+  const listRun = run(process.execPath, [
+    installed.cli,
+    'list',
+    '--data-dir',
+    tianwenRoot,
+    '--json',
+  ], env)
+  expect(listRun.status, `${listRun.stdout}\n${listRun.stderr}`).toBe(0)
+  expect(listRun.stderr).toBe('')
+  const list = JSON.parse(listRun.stdout) as {
+    schemaVersion: string
+    goals: {
+      id: string
+      objective: string
+      phase: string
+      maxGoalRounds: number
+      roundsStarted: number
+      updatedAt: number
+      session: { id: string, eventCount: number }
+    }[]
+    runtime: Record<string, unknown>
+  }
+  expect(list).toEqual({
+    schemaVersion: 'tianwen.goal-list.v1',
+    goals: [{
+      id: finalGoal.id,
+      objective: finalGoal.objective,
+      phase: 'complete',
+      maxGoalRounds: 1,
+      roundsStarted: 0,
+      updatedAt: finalGoalChange.updatedAt,
+      session: { id: header.id, eventCount: events.length },
+    }],
+    runtime: {
+      activation: 'not-loaded',
+      modelRequests: 0,
+      readOnly: true,
+    },
+  })
+  expect(snapshotState()).toEqual(stateBeforeList)
+  const sessionAfterList = readFileSync(created[0]!)
+  expect(sessionAfterList).toEqual(sessionBeforeList)
+  const [, ...eventLinesAfterList] = sessionAfterList
+    .toString('utf8')
+    .trimEnd()
+    .split(/\r?\n/u)
+  const eventsAfterList = eventLinesAfterList
+    .map(line => JSON.parse(line) as SessionEvent)
+  expect(eventsAfterList.filter(event => event.type === 'step/start'))
+    .toHaveLength(4)
+  for (const secret of [taskText, 'phase2-smoke-action-ok', completeCallId]) {
+    expect(listRun.stdout).not.toContain(secret)
+  }
+
   const receipt = {
     schemaVersion: 'tianwen.phase2-startup.v1',
     profile: {
@@ -482,6 +546,29 @@ async function start(missingCorepack = false): Promise<void> {
   publishReceipt(statusReceiptPath, statusReceipt)
   expect(JSON.parse(readFileSync(statusReceiptPath, 'utf8')))
     .toEqual(statusReceipt)
+  const listedGoal = list.goals[0]!
+  const listReceipt = {
+    schemaVersion: 'tianwen.goal-list-e2e.v1',
+    goal: {
+      id: listedGoal.id,
+      objective: listedGoal.objective,
+      phase: listedGoal.phase,
+      maxGoalRounds: listedGoal.maxGoalRounds,
+      roundsStarted: listedGoal.roundsStarted,
+      updatedAt: listedGoal.updatedAt,
+    },
+    session: listedGoal.session,
+    modelStepsBefore: modelStepsBeforeList,
+    modelStepsAfter: eventsAfterList
+      .filter(event => event.type === 'step/start').length,
+    stateUnchanged: true,
+    runtime: list.runtime,
+  }
+  expect(listReceipt.modelStepsBefore).toBe(4)
+  expect(listReceipt.modelStepsAfter).toBe(listReceipt.modelStepsBefore)
+  publishReceipt(listReceiptPath, listReceipt)
+  expect(JSON.parse(readFileSync(listReceiptPath, 'utf8')))
+    .toEqual(listReceipt)
 }
 
 describe('Tianwen formal headless startup', () => {
