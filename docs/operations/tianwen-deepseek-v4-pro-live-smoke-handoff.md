@@ -42,7 +42,7 @@ Evolution record, or Champion transition.
 - Limits: 64 output tokens, 512 reported total tokens, CNY `0.01`, 90 seconds.
 - The command exited `0` in about five seconds.
 - No second paid command was issued after success or after the later
-  output-only receipt-schema fix.
+  receipt-schema/clock refactor; request construction and call count remained unchanged.
 
 The sanitized run receipt is outside Git at:
 
@@ -155,8 +155,9 @@ The narrow re-review marked the finding addressed with no new Critical or
 Important issue.
 
 The external receipt above intentionally preserves the exact bytes produced by
-the one real attempt. It predates the output-only schema enrichment and is not
-rewritten to pretend the later fields were observed live.
+the one real attempt. It predates the receipt-schema/clock refactor; request
+construction and call count remained unchanged, and it is not rewritten to
+pretend the later fields were observed live.
 
 ## Retained boundaries and next step
 

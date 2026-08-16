@@ -5,6 +5,7 @@ import type { GenerateOptions, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-
 
 type ModelChoice = 'offline' | 'deepseek-v4-flash' | 'deepseek-v4-pro'
 export type ModelOperation = 'status' | 'use' | 'smoke'
+type ModelConfigOperation = Exclude<ModelOperation, 'smoke'>
 
 const MODEL_SELECTIONS = {
   offline: { provider: 'tianwen-offline', model: 'phase2-smoke' },
@@ -21,11 +22,19 @@ interface Selection {
   readonly provider: string
 }
 
-export interface ModelRunnerConfig {
+interface ModelConfigRunnerConfig {
   readonly json: boolean
   readonly model?: ModelChoice | undefined
-  readonly operation: ModelOperation
+  readonly operation: ModelConfigOperation
 }
+
+interface ModelSmokeRunnerConfig {
+  readonly json: boolean
+  readonly model?: ModelChoice | undefined
+  readonly operation: 'smoke'
+}
+
+export type ModelRunnerConfig = ModelConfigRunnerConfig | ModelSmokeRunnerConfig
 
 export interface ModelConfigReceipt {
   readonly catalog: {
@@ -40,7 +49,7 @@ export interface ModelConfigReceipt {
     readonly writable: boolean
   }
   readonly modelRequestsDelta: 0
-  readonly operation: ModelOperation
+  readonly operation: ModelConfigOperation
   readonly schemaVersion: 'tianwen.model-config.v1'
   readonly selection: Selection
 }
@@ -108,12 +117,11 @@ export type ModelSmokeReceipt =
     readonly status: 'failed'
   })
 
-function requireConfig(config: ModelRunnerConfig): void {
+function requireConfig(config: ModelConfigRunnerConfig): void {
   if (
-    (config.operation !== 'status' && config.operation !== 'use' && config.operation !== 'smoke') ||
+    (config.operation !== 'status' && config.operation !== 'use') ||
     (config.operation === 'status' && config.model !== undefined) ||
-    (config.operation === 'use' && config.model === undefined) ||
-    (config.operation === 'smoke' && config.model !== 'deepseek-v4-pro')
+    (config.operation === 'use' && config.model === undefined)
   ) throw new Error('invalid Tianwen model invocation')
 }
 
@@ -318,7 +326,7 @@ async function catalogForSelection(
 
 export async function runModelCommand(
   ctx: Context,
-  config: ModelRunnerConfig,
+  config: ModelConfigRunnerConfig,
 ): Promise<ModelConfigReceipt> {
   requireConfig(config)
   const { agentDefaultModel, credentials, llm } = services(ctx)

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import type { SpawnOptions } from 'node:child_process'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { realpathSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { resolveInstalledDshBin } from './resume.js'
@@ -31,6 +32,23 @@ export interface ModelInvocation {
   readonly program: string
 }
 
+function strictChild(parent: string, child: string): boolean {
+  const path = relative(parent, child)
+  return path !== '' && path !== '..' && !path.startsWith(`..\\`) && !isAbsolute(path)
+}
+
+function requireSmokeDataDir(dataDir: string): void {
+  if (!strictChild(resolve('D:\\DevData'), dataDir)) {
+    throw new TypeError('dataDir must be a strict child of D:\\DevData')
+  }
+}
+
+function requireResolvedSmokeDataDir(dataDir: string): void {
+  if (!strictChild(realpathSync(resolve('D:\\DevData')), realpathSync(dataDir))) {
+    throw new TypeError('dataDir must resolve under D:\\DevData')
+  }
+}
+
 export function preflightModelCommand(
   operation: ModelOperation,
   model: ModelChoice | undefined,
@@ -48,10 +66,7 @@ export function preflightModelCommand(
     throw new TypeError('invalid model command')
   }
   const dataDir = resolve(dataDirInput)
-  const devDataDir = resolve('D:\\DevData')
-  if (operation === 'smoke' && dataDir !== devDataDir && !dataDir.startsWith(`${devDataDir}\\`)) {
-    throw new TypeError('dataDir must be under D:\\DevData')
-  }
+  if (operation === 'smoke') requireSmokeDataDir(dataDir)
   return {
     dataDir,
     dshBin: resolveInstalledDshBin(dataDir),
@@ -91,6 +106,7 @@ export async function launchModelCommand(
   preflight: ModelCommandPreflight,
   json: boolean,
 ): Promise<number> {
+  if (preflight.operation === 'smoke') requireResolvedSmokeDataDir(preflight.dataDir)
   const invocation = buildModelInvocation(preflight, json)
   const child = spawn(invocation.program, invocation.args, invocation.options)
   return await new Promise((resolveExit, reject) => {

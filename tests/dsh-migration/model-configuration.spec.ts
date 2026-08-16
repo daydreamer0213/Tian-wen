@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, rmdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -18,6 +18,7 @@ vi.mock('@deepseek-ai/dsh-credentials', () => ({
 
 import {
   buildModelInvocation,
+  launchModelCommand,
   preflightModelCommand,
 } from '../../packages/tianwen-runtime-bundle/src/model.js'
 import {
@@ -164,7 +165,29 @@ describe('tianwen model', () => {
     })
     expect(() => preflightModelCommand(
       'smoke', 'deepseek-v4-pro', 'D:\\not-devdata',
-    )).toThrow('dataDir must be under D:\\DevData')
+    )).toThrow('dataDir must be a strict child of D:\\DevData')
+    expect(() => preflightModelCommand(
+      'smoke', 'deepseek-v4-pro', 'D:\\DevData',
+    )).toThrow('dataDir must be a strict child of D:\\DevData')
+  })
+
+  it('rejects a smoke junction that resolves outside D:\\DevData before spawn', async () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const inside = mkdtempSync(join(FIXTURE_BASE, 'junction-'))
+    const outside = mkdtempSync('D:/tianwen-smoke-escape-')
+    const escape = join(inside, 'escape')
+    try {
+      installedDsh(outside)
+      symlinkSync(outside, escape, 'junction')
+      const preflight = preflightModelCommand('smoke', 'deepseek-v4-pro', escape)
+
+      await expect(launchModelCommand(preflight, true))
+        .rejects.toThrow('dataDir must resolve under D:\\DevData')
+    } finally {
+      rmdirSync(escape)
+      rmSync(inside, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
   })
 
   it('reports the fixed offline status without catalog discovery', async () => {
@@ -182,6 +205,17 @@ describe('tianwen model', () => {
       availableModels: ['phase2-smoke'],
       selectedModelAvailable: true,
     })
+  })
+
+  it('rejects smoke from the zero-request configuration helper', async () => {
+    const services = context({})
+
+    await expect(runModelCommand(services as never, {
+      operation: 'smoke', model: 'deepseek-v4-pro', json: true,
+    } as never)).rejects.toThrow('invalid Tianwen model invocation')
+
+    expect(services.llm.listModels).not.toHaveBeenCalled()
+    expect(services.credentials.describe).not.toHaveBeenCalled()
   })
 
   it('reports status without saving and copies only safe credential facts', async () => {
