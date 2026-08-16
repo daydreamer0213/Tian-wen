@@ -68,6 +68,14 @@ function isSmokeDataDir(dataDir: string): boolean {
   return resolved === devDataDir || resolved.startsWith(`${devDataDir}\\`)
 }
 
+function hasRepeatedStrictOption(args: readonly string[]): boolean {
+  const optionCount = (name: string): number => args.filter(argument =>
+    argument === `--${name}` || argument.startsWith(`--${name}=`)
+  ).length
+  return optionCount('live-smoke') > 0 &&
+    ['goal', 'data-dir', 'live-smoke', 'json'].some(name => optionCount(name) > 1)
+}
+
 function formatText(status: GoalStatusProjection): string {
   const eventLabel = status.session.eventCount === 1 ? 'event' : 'events'
   const lines = [
@@ -136,6 +144,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   const modelChoice = values.model as ModelChoice | undefined
   const liveSmoke = values['live-smoke'] === true
   if (
+    hasRepeatedStrictOption(args) ||
     (command === 'model' ? positionals.length !== 2 : positionals.length !== 1) ||
     values['data-dir'] === undefined ||
     !isAbsolute(values['data-dir']) ||

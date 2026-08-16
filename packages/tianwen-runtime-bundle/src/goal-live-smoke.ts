@@ -82,22 +82,31 @@ export function createGoalLiveSmokeFailure(
     provider: LIVE_GOAL_PROVIDER,
     model: LIVE_GOAL_MODEL,
     limits: LIVE_GOAL_LIMITS,
-    requestCount: options.requestCount ?? 0,
-    retryCount: options.retryCount ?? 0,
+    requestCount: options.requestCount === undefined ? 0 : options.requestCount,
+    retryCount: options.retryCount === undefined ? 0 : options.retryCount,
     markerMatched: false,
   }
 }
 
 function hasFixedLimits(value: unknown): boolean {
   return value !== null && typeof value === 'object' &&
+    Object.keys(value).length === Object.keys(LIVE_GOAL_LIMITS).length &&
     Object.entries(LIVE_GOAL_LIMITS).every(([key, expected]) =>
       (value as Record<string, unknown>)[key] === expected)
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).length === keys.length &&
+    keys.every(key => key in value)
 }
 
 function isGoalLiveSmokeFailureReceipt(value: unknown): value is GoalLiveSmokeFailureReceipt {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const receipt = value as Record<string, unknown>
-  return receipt.schemaVersion === 'tianwen.goal-live-smoke.v1' &&
+  return hasExactKeys(receipt, [
+    'schemaVersion', 'status', 'failureCode', 'timestamp', 'provider', 'model',
+    'limits', 'requestCount', 'retryCount', 'markerMatched',
+  ]) && receipt.schemaVersion === 'tianwen.goal-live-smoke.v1' &&
     receipt.status === 'failed' &&
     typeof receipt.timestamp === 'string' &&
     !Number.isNaN(Date.parse(receipt.timestamp)) &&
@@ -113,7 +122,10 @@ function isGoalLiveSmokeFailureReceipt(value: unknown): value is GoalLiveSmokeFa
 function isGoalLiveSmokeSuccessReceipt(value: unknown): value is GoalLiveSmokeSuccessReceipt {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const receipt = value as Record<string, unknown>
-  return receipt.schemaVersion === 'tianwen.goal-live-smoke.v1' &&
+  return hasExactKeys(receipt, [
+    'schemaVersion', 'status', 'timestamp', 'provider', 'model', 'limits',
+    'requestCount', 'retryCount', 'markerMatched',
+  ]) && receipt.schemaVersion === 'tianwen.goal-live-smoke.v1' &&
     receipt.status === 'succeeded' &&
     typeof receipt.timestamp === 'string' &&
     !Number.isNaN(Date.parse(receipt.timestamp)) &&

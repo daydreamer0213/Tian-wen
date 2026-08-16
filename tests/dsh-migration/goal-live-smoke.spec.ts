@@ -133,21 +133,49 @@ describe('tianwen live Goal smoke', () => {
     expect(JSON.stringify(receipt)).not.toContain(secret)
   })
 
+  it('preserves unknown child request counts as null', () => {
+    const receipt = createGoalLiveSmokeFailure('internal-error', {
+      requestCount: null,
+      retryCount: null,
+    })
+    expect(receipt.requestCount).toBeNull()
+    expect(receipt.retryCount).toBeNull()
+  })
+
   it('accepts exactly one canonical child receipt and sanitizes every malformed child output', () => {
     const canonical = `${JSON.stringify(createGoalLiveSmokeFailure('provider-error', {
       now: new Date('2026-08-16T12:34:56.789Z'),
     }))}\n`
+    const successWithSecret = `${JSON.stringify({
+      schemaVersion: 'tianwen.goal-live-smoke.v1',
+      status: 'succeeded',
+      timestamp: '2026-08-16T12:34:56.789Z',
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-pro',
+      limits: JSON.parse(canonical).limits,
+      requestCount: 3,
+      retryCount: 0,
+      markerMatched: true,
+      providerError: 'provider-error-SENTINEL',
+    })}\n`
     expect(parseGoalLiveSmokeChildReceipt(canonical, 'child stderr sentinel')).toEqual(JSON.parse(canonical))
+    const secret = `provider-error-${randomUUID()}-DO-NOT-LEAK`
     for (const stdout of [
       `${canonical}${canonical}`,
       '{not-json}\n',
       `${JSON.stringify({ schemaVersion: 'wrong' })}\n`,
       `${'x'.repeat(65_537)}\n`,
       '',
+      `${JSON.stringify({ ...JSON.parse(canonical), objective: secret })}\n`,
+      successWithSecret,
     ]) {
       const receipt = parseGoalLiveSmokeChildReceipt(stdout, 'child stderr sentinel')
       expect(receipt.failureCode).toBe('internal-error')
+      expect(receipt.requestCount).toBeNull()
+      expect(receipt.retryCount).toBeNull()
       expect(JSON.stringify(receipt)).not.toContain('child stderr sentinel')
+      expect(JSON.stringify(receipt)).not.toContain(secret)
+      expect(JSON.stringify(receipt)).not.toContain('provider-error-SENTINEL')
     }
   })
 
@@ -168,6 +196,10 @@ describe('tianwen live Goal smoke', () => {
         ['resume', '--goal', fixture.goalId, '--data-dir', dataDir, '--objective', 'untrusted', '--live-smoke', '--json'],
         ['resume', '--goal', fixture.goalId, '--data-dir', dataDir, '--max-rounds', '2', '--live-smoke', '--json'],
         ['resume', '--goal', fixture.goalId, '--data-dir', dataDir, '--live-smoke', '--json', 'extra'],
+        ['resume', '--goal', fixture.goalId, '--goal', fixture.goalId, '--data-dir', dataDir, '--live-smoke', '--json'],
+        ['resume', '--goal', fixture.goalId, '--data-dir', dataDir, '--data-dir', dataDir, '--live-smoke', '--json'],
+        ['resume', '--goal', fixture.goalId, '--data-dir', dataDir, '--live-smoke', '--live-smoke', '--json'],
+        ['resume', '--goal', fixture.goalId, '--data-dir', dataDir, '--live-smoke', '--json', '--json'],
       ]) {
         const result = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8' })
         expect(result.status).toBe(2)
