@@ -1,3 +1,5 @@
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
+
 export const LIVE_GOAL_OBJECTIVE = 'Call tianwen_smoke_action exactly once. After it succeeds, mark this Goal complete with update_goal, then reply exactly TIANWEN_GOAL_ROUND_OK.' as const
 export const LIVE_GOAL_MARKER = 'TIANWEN_GOAL_ROUND_OK' as const
 export const LIVE_GOAL_PROVIDER = 'deepseek-official' as const
@@ -158,17 +160,17 @@ export function assessLiveGoalEvents(
     revision: expectedGoal.revision,
     action: 'complete',
   })) return { ok: false, failureCode: 'tool-contract-violated' }
-  for (const [index, call] of calls.entries()) {
-    const result = results.find(item =>
-      String(item.data.message.source.callId) === String(call.data.callId))
-    if (result === undefined || result.seq <= call.seq || result.data.error !== undefined ||
-      (index === 1 && result.seq <= results[0]!.seq)) {
-      return { ok: false, failureCode: 'tool-contract-violated' }
-    }
+  const actionResult = results.find(item => String(item.data.message.source.callId) === String(calls[0]!.data.callId))
+  const updateResult = results.find(item => String(item.data.message.source.callId) === String(calls[1]!.data.callId))
+  if (actionResult === undefined || updateResult === undefined || actionResult.data.error !== undefined ||
+    updateResult.data.error !== undefined || !(calls[0]!.seq < actionResult.seq &&
+      actionResult.seq < calls[1]!.seq && calls[1]!.seq < updateResult.seq)) {
+    return { ok: false, failureCode: 'tool-contract-violated' }
   }
-  const finalContent = assistants.at(-1)!.data.message.content
+  const finalAssistant = assistants.at(-1)!
+  const finalContent = finalAssistant.data.message.content
   if (finalContent.length !== 1 || finalContent[0]?.type !== 'text' ||
-    finalContent[0].text !== LIVE_GOAL_MARKER) {
+    finalContent[0].text !== LIVE_GOAL_MARKER || finalAssistant.seq <= updateResult.seq) {
     return { ok: false, failureCode: 'marker-mismatch' }
   }
   return {
@@ -227,6 +229,61 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
     keys.every(key => key in value)
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function sameNumber(left: number, right: number): boolean {
+  return Math.abs(left - right) <= Number.EPSILON * Math.max(1, Math.abs(left), Math.abs(right)) * 4
+}
+
+function hasFixedSuccessGoal(value: unknown): boolean {
+  return isRecord(value) && hasExactKeys(value, ['id', 'revision', 'phase', 'roundsStarted']) &&
+    typeof value.id === 'string' && value.id.length > 0 &&
+    isCount(value.revision) && value.revision >= 1 && value.phase === 'complete' && value.roundsStarted === 1
+}
+
+function hasFixedSuccessSession(value: unknown): boolean {
+  return isRecord(value) && hasExactKeys(value, ['id', 'eventCountDelta']) &&
+    typeof value.id === 'string' && value.id.length > 0 && isCount(value.eventCountDelta)
+}
+
+function hasFixedSuccessUsage(value: unknown): boolean {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'totalTokens', 'estimatedCostCny',
+  ]) || !isCount(value.inputTokens) || !isCount(value.outputTokens) ||
+    !isCount(value.cacheReadTokens) || !isCount(value.cacheWriteTokens) || !isCount(value.totalTokens) ||
+    typeof value.estimatedCostCny !== 'number' || !Number.isFinite(value.estimatedCostCny) || value.estimatedCostCny < 0) {
+    return false
+  }
+  const total = value.inputTokens + value.outputTokens + value.cacheReadTokens + value.cacheWriteTokens
+  const cost = (value.inputTokens * 3 + value.cacheReadTokens * 0.025 +
+    value.cacheWriteTokens * 3 + value.outputTokens * 6) / 1_000_000
+  return value.totalTokens === total && total <= LIVE_GOAL_LIMITS.maxTotalTokens &&
+    value.estimatedCostCny <= LIVE_GOAL_LIMITS.maxCostCny && sameNumber(value.estimatedCostCny, cost)
+}
+
+function hasFixedSuccessEvidence(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length !== LIVE_GOAL_TOOLS.length) return false
+  const names = new Set<string>()
+  for (const item of value) {
+    if (!isRecord(item) || !hasExactKeys(item, ['evidenceId', 'toolName', 'outcome']) ||
+      typeof item.evidenceId !== 'string' || item.evidenceId.length === 0 ||
+      !LIVE_GOAL_TOOLS.includes(item.toolName as typeof LIVE_GOAL_TOOLS[number]) || item.outcome !== 'complete') return false
+    names.add(item.toolName as string)
+  }
+  return names.size === LIVE_GOAL_TOOLS.length && LIVE_GOAL_TOOLS.every(name => names.has(name))
+}
+
+function hasFixedSuccessGovernance(value: unknown): boolean {
+  return isRecord(value) && hasExactKeys(value, ['evolutionUnchanged', 'championUnchanged']) &&
+    value.evolutionUnchanged === true && value.championUnchanged === true
+}
+
 function isGoalLiveSmokeFailureReceipt(value: unknown): value is GoalLiveSmokeFailureReceipt {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const receipt = value as Record<string, unknown>
@@ -247,8 +304,8 @@ function isGoalLiveSmokeFailureReceipt(value: unknown): value is GoalLiveSmokeFa
 }
 
 function isGoalLiveSmokeSuccessReceipt(value: unknown): value is GoalLiveSmokeSuccessReceipt {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
-  const receipt = value as Record<string, unknown>
+  if (!isRecord(value)) return false
+  const receipt = value
   return hasExactKeys(receipt, [
     'schemaVersion', 'status', 'timestamp', 'provider', 'model', 'limits',
     'requestCount', 'retryCount', 'markerMatched', 'goal', 'session', 'usage',
@@ -260,27 +317,9 @@ function isGoalLiveSmokeSuccessReceipt(value: unknown): value is GoalLiveSmokeSu
     receipt.provider === LIVE_GOAL_PROVIDER &&
     receipt.model === LIVE_GOAL_MODEL &&
     hasFixedLimits(receipt.limits) &&
-    typeof receipt.requestCount === 'number' &&
-    typeof receipt.retryCount === 'number' && receipt.markerMatched === true &&
-    receipt.goal !== null && typeof receipt.goal === 'object' &&
-    typeof (receipt.goal as Record<string, unknown>).id === 'string' &&
-    Number.isSafeInteger((receipt.goal as Record<string, unknown>).revision) &&
-    (receipt.goal as Record<string, unknown>).phase === 'complete' &&
-    Number.isSafeInteger((receipt.goal as Record<string, unknown>).roundsStarted) &&
-    receipt.session !== null && typeof receipt.session === 'object' &&
-    typeof (receipt.session as Record<string, unknown>).id === 'string' &&
-    Number.isSafeInteger((receipt.session as Record<string, unknown>).eventCountDelta) &&
-    receipt.usage !== null && typeof receipt.usage === 'object' &&
-    ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'totalTokens', 'estimatedCostCny']
-      .every(key => typeof (receipt.usage as Record<string, unknown>)[key] === 'number') &&
-    Array.isArray(receipt.evidence) && receipt.evidence.length === 2 &&
-    receipt.evidence.every(item => item !== null && typeof item === 'object' &&
-      typeof (item as Record<string, unknown>).evidenceId === 'string' &&
-      LIVE_GOAL_TOOLS.includes((item as Record<string, unknown>).toolName as typeof LIVE_GOAL_TOOLS[number]) &&
-      (item as Record<string, unknown>).outcome === 'complete') &&
-    receipt.governance !== null && typeof receipt.governance === 'object' &&
-    (receipt.governance as Record<string, unknown>).evolutionUnchanged === true &&
-    (receipt.governance as Record<string, unknown>).championUnchanged === true
+    receipt.requestCount === LIVE_GOAL_LIMITS.maxRequests && receipt.retryCount === LIVE_GOAL_LIMITS.maxRetries &&
+    receipt.markerMatched === true && hasFixedSuccessGoal(receipt.goal) && hasFixedSuccessSession(receipt.session) &&
+    hasFixedSuccessUsage(receipt.usage) && hasFixedSuccessEvidence(receipt.evidence) && hasFixedSuccessGovernance(receipt.governance)
 }
 
 /** Accepts a single bounded, sanitized receipt line; raw child stderr is never retained. */
@@ -314,4 +353,3 @@ export function parseGoalLiveSmokeChildReceipt(
     })
   }
 }
-import type { SessionEvent } from '@deepseek-ai/dsh-session'

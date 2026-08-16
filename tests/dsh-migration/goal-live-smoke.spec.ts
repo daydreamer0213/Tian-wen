@@ -30,6 +30,23 @@ function withUsage(chunks: readonly unknown[], inputTokens: number) {
   ]
 }
 
+function passedChildReceipt() {
+  return {
+    schemaVersion: 'tianwen.goal-live-smoke.v1', status: 'passed',
+    timestamp: '2026-08-16T12:34:56.789Z', provider: 'deepseek-official', model: 'deepseek-v4-pro',
+    limits: { maxRequests: 3, maxOutputTokensPerRequest: 64, maxTotalTokens: 32768, maxCostCny: 0.25, timeoutMs: 90000, maxRetries: 0 },
+    requestCount: 3, retryCount: 0, markerMatched: true,
+    goal: { id: 'goal-receipt', revision: 3, phase: 'complete', roundsStarted: 1 },
+    session: { id: 'session-receipt', eventCountDelta: 12 },
+    usage: { inputTokens: 300, outputTokens: 30, cacheReadTokens: 15, cacheWriteTokens: 0, totalTokens: 345, estimatedCostCny: 0.001080375 },
+    evidence: [
+      { evidenceId: 'sha256:action', toolName: 'tianwen_smoke_action', outcome: 'complete' },
+      { evidenceId: 'sha256:update', toolName: 'update_goal', outcome: 'complete' },
+    ],
+    governance: { evolutionUnchanged: true, championUnchanged: true },
+  }
+}
+
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-live-goal-smoke-tests')
 const CLI = resolve('packages/tianwen-runtime-bundle/dist/cli.js')
 
@@ -81,6 +98,21 @@ async function persistLiveGoal(dataDir: string, options: {
 
 describe('tianwen live Goal smoke', () => {
   it.each([
+    ['four requests', { requestCount: 4 }],
+    ['a retry', { retryCount: 1 }],
+    ['wrong rounds', { goal: { ...passedChildReceipt().goal, roundsStarted: 2 } }],
+    ['invalid total', { usage: { ...passedChildReceipt().usage, totalTokens: 344 } }],
+    ['over-budget total', { usage: { ...passedChildReceipt().usage, inputTokens: 32769, totalTokens: 32814 } }],
+    ['duplicate evidence', { evidence: [passedChildReceipt().evidence[0], passedChildReceipt().evidence[0]] }],
+    ['extra nested key', { governance: { ...passedChildReceipt().governance, extra: true } }],
+  ])('rejects a forged child success receipt with %s', (_name, patch) => {
+    const receipt = { ...passedChildReceipt(), ...patch }
+    expect(parseGoalLiveSmokeChildReceipt(`${JSON.stringify(receipt)}\n`, '')).toMatchObject({
+      status: 'failed', failureCode: 'internal-error', requestCount: null, retryCount: null,
+    })
+  })
+
+  it.each([
     ['missing usage', [undefined, undefined, undefined], 'usage-invalid'],
     ['unsafe usage', [{ inputTokens: Number.MAX_SAFE_INTEGER + 1, outputTokens: 0 }, { inputTokens: 0, outputTokens: 0 }, { inputTokens: 0, outputTokens: 0 }], 'usage-invalid'],
     ['token total above the fixed cap', [{ inputTokens: 32769, outputTokens: 0 }, { inputTokens: 0, outputTokens: 0 }, { inputTokens: 0, outputTokens: 0 }], 'token-budget-exceeded'],
@@ -91,6 +123,48 @@ describe('tianwen live Goal smoke', () => {
     }))
     expect(assessLiveGoalEvents('goal-session', events as never, { id: 'goal-id', revision: 2 }))
       .toEqual({ ok: false, failureCode })
+  })
+
+  it('rejects an update call that precedes the action result in durable event order', () => {
+    const assistant = (seq: number, text = '') => ({
+      type: 'assistant/message', seq, time: seq,
+      data: { turn: 1, step: seq, usage: { inputTokens: 1, outputTokens: 1 }, message: {
+        content: text === '' ? [] : [{ type: 'text', text }],
+      } },
+    })
+    const events = [
+      assistant(1),
+      { type: 'tool/call', seq: 2, time: 2, data: { callId: 'action', name: 'tianwen_smoke_action', arguments: '{}' } },
+      { type: 'tool/call', seq: 3, time: 3, data: { callId: 'update', name: 'update_goal', arguments: '{"goal_id":"goal-id","revision":2,"action":"complete"}' } },
+      { type: 'tool/result', seq: 4, time: 4, data: { message: { source: { callId: 'action' } } } },
+      { type: 'tool/result', seq: 5, time: 5, data: { message: { source: { callId: 'update' } } } },
+      assistant(6),
+      assistant(7, 'TIANWEN_GOAL_ROUND_OK'),
+    ]
+    expect(assessLiveGoalEvents('goal-session', events as never, { id: 'goal-id', revision: 2 }))
+      .toEqual({ ok: false, failureCode: 'tool-contract-violated' })
+  })
+
+  it.each([
+    ['an offline selection', { provider: 'tianwen-probe', model: 'scripted' }, true, 'selection-mismatch'],
+    ['a missing credential', { provider: 'deepseek-official', model: 'deepseek-v4-pro' }, false, 'credential-missing'],
+    ['an unresolved exact route', { provider: 'deepseek-official', model: 'deepseek-v4-pro' }, true, 'selection-mismatch'],
+  ])('fails closed before a provider call for %s', async (_name, selection, configured, failureCode) => {
+    const harness = await mountGoalHarness(join(FIXTURE_BASE, `preflight-${randomUUID()}`), [], { goalRoundDriver: false })
+    try {
+      harness.ctx.provide('agentDefaultModel', { currentSelection: () => selection })
+      harness.ctx.provide('credentials', { describe: async () => ({ configured, writable: false }) })
+      const { runGoalResume } = await import('../../packages/tianwen-runtime-bundle/src/resume-runner.js')
+      const receipt = await runGoalResume(harness.ctx, {
+        goalId: 'goal-preflight', json: true, nonce: 'test-nonce', revision: 1, sessionId: 'session-preflight',
+        liveSmoke: true, evolutionRoot: join(FIXTURE_BASE, 'evolution-preflight'), startedAtMs: Date.now(),
+      } as never)
+      expect(receipt).toMatchObject({ status: 'failed', failureCode, requestCount: 0, retryCount: 0 })
+      expect(harness.adapter.requests).toHaveLength(0)
+      expect(JSON.stringify(receipt)).not.toContain('goal-preflight')
+    } finally {
+      await harness.ctx.fiber.dispose()
+    }
   })
 
   it('runs exactly the fixed three-request Goal round with the two allowed tools', async () => {
