@@ -200,6 +200,7 @@ async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig,
   let requestCountValue = 0
   let requestLimitExceeded = false
   let timedOut = false
+  let providerFailed = false
   const state: StrictState = { actionStarted: false, actionSucceeded: false, updateStarted: false }
   let handle: Awaited<ReturnType<Context['agents']['resume']>> | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -229,6 +230,7 @@ async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig,
             reasoningEffort: ReasoningEffortId('off'), maxTokens: LIVE_GOAL_LIMITS.maxOutputTokensPerRequest }
         }, { prepend: true })
         agentCtx.on('agent/request-error', async () => undefined, { prepend: true })
+        agentCtx.on('agent/error', () => { providerFailed = true })
       },
     })
     const activeHandle = handle
@@ -239,11 +241,11 @@ async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig,
     }
     const before = activeHandle.agent.session.events.length
     const current = validateGoal(config, ctx.goals.get(activeHandle.agent))
+    const resumed = ctx.goals.resume(activeHandle.agent, { id: GoalId(String(current.id)), revision: current.revision })
     timer = setTimeout(() => {
       timedOut = true
       handle?.agent.cancel({ kind: 'hook', reason: 'tianwen-live-goal-timeout' })
     }, Math.max(0, config.startedAtMs + LIVE_GOAL_LIMITS.timeoutMs - Date.now()))
-    const resumed = ctx.goals.resume(activeHandle.agent, { id: GoalId(String(current.id)), revision: current.revision })
     const settled = await waitForDisarmed(ctx, activeHandle.agent)
     let flushed: boolean
     try { flushed = await flush(activeHandle.agent.session) } catch {
@@ -251,6 +253,8 @@ async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig,
     }
     if (!flushed) return fail('persistence-unavailable', requestCountValue)
     if (timedOut) return fail('timeout', requestCountValue)
+    if (requestLimitExceeded) return fail('request-limit-exceeded', requestCountValue)
+    if (providerFailed) return fail('provider-error', requestCountValue)
     const assessed = assessLiveGoalEvents(String(activeHandle.agent.id), activeHandle.agent.session.events.slice(before), resumed)
     if (!assessed.ok) return fail(assessed.failureCode, requestCountValue)
     if (settled.phase !== 'complete') return fail('goal-not-complete', requestCountValue)

@@ -211,11 +211,14 @@ describe('tianwen live Goal smoke', () => {
   })
 
   it.each([
-    ['runs exactly the fixed three-request Goal round with the two allowed tools', 'pass', false],
-    ['maps a false business flush to persistence-unavailable and still releases the runner', 'false', false],
-    ['maps a rejected business flush to persistence-unavailable and still releases the runner', 'reject', false],
-    ['rejects removal of an empty evolution directory', 'pass', true],
-  ] as const)('%s', async (_name, flushMode, mutateEvolution) => {
+    ['runs exactly the fixed three-request Goal round with the two allowed tools', 'success', 'pass', false],
+    ['maps a false business flush to persistence-unavailable and still releases the runner', 'success', 'false', false],
+    ['maps a rejected business flush to persistence-unavailable and still releases the runner', 'success', 'reject', false],
+    ['rejects removal of an empty evolution directory', 'success', 'pass', true],
+    ['stops a provider failure before a global retry listener', 'provider-error', 'pass', false],
+    ['rejects the fourth AgentLoop request before the provider', 'request-limit-exceeded', 'pass', false],
+    ['cancels an already-expired provider request without waiting ninety seconds', 'timeout', 'pass', false],
+  ] as const)('%s', async (_name, scenario, flushMode, mutateEvolution) => {
     mkdirSync(FIXTURE_BASE, { recursive: true })
     const dataDir = mkdtempSync(join(FIXTURE_BASE, 'round-'))
     const sessionsRoot = join(dataDir, 'dsh-home', 'sessions')
@@ -235,13 +238,22 @@ describe('tianwen live Goal smoke', () => {
 
       const removedDirectory = join(dataDir, 'state', 'evolution', 'empty-artifact-directory')
       if (mutateEvolution) mkdirSync(removedDirectory, { recursive: true })
-      const second = await mountGoalHarness(sessionsRoot, [
-        withUsage(toolCallResponse('live-action', 'tianwen_smoke_action', {}), 100),
-        withUsage(toolCallResponse('live-complete', 'update_goal', {
-          action: 'complete', revision: 2, goal_id: String(goal.id),
-        }), 101),
-        withUsage(textResponse('TIANWEN_GOAL_ROUND_OK'), 102),
-      ], { goalRoundDriver: true })
+      const script = scenario === 'provider-error'
+        ? [new Error('provider-secret-sentinel')]
+        : scenario === 'request-limit-exceeded'
+          ? [
+            withUsage(toolCallResponse('limit-action-1', 'tianwen_smoke_action', {}), 100),
+            withUsage(toolCallResponse('limit-action-2', 'tianwen_smoke_action', {}), 101),
+            withUsage(toolCallResponse('limit-action-3', 'tianwen_smoke_action', {}), 102),
+          ]
+          : [
+            withUsage(toolCallResponse('live-action', 'tianwen_smoke_action', {}), 100),
+            withUsage(toolCallResponse('live-complete', 'update_goal', {
+              action: 'complete', revision: 2, goal_id: String(goal.id),
+            }), 101),
+            withUsage(textResponse('TIANWEN_GOAL_ROUND_OK'), 102),
+          ]
+      const second = await mountGoalHarness(sessionsRoot, script, { goalRoundDriver: true })
       try {
         second.adapter.resolveModel = async (provider, model) => ({
           provider,
@@ -271,6 +283,8 @@ describe('tianwen live Goal smoke', () => {
         second.ctx.provide('credentials', {
           describe: async () => ({ configured: true, writable: false }),
         })
+        let globalRetryCalls = 0
+        second.ctx.on('agent/request-error', async () => { globalRetryCalls += 1 })
 
         const { runGoalResume } = await import(
           '../../packages/tianwen-runtime-bundle/src/resume-runner.js'
@@ -279,7 +293,7 @@ describe('tianwen live Goal smoke', () => {
         const receipt = await runGoalResume(second.ctx, {
           goalId: String(goal.id), json: true, nonce: 'test-nonce', revision: 1,
           sessionId: String(sessionId), liveSmoke: true, evolutionRoot: join(dataDir, 'state', 'evolution'),
-          startedAtMs: Date.now(),
+          startedAtMs: scenario === 'timeout' ? Date.now() - 90_000 : Date.now(),
         } as never, {
           flush: async session => {
             flushCalls += 1
@@ -289,17 +303,24 @@ describe('tianwen live Goal smoke', () => {
           },
         })
 
-        if (flushMode !== 'pass' || mutateEvolution) {
+        if (flushMode !== 'pass' || mutateEvolution || scenario !== 'success') {
           expect(receipt).toMatchObject({
-            status: 'failed', failureCode: mutateEvolution ? 'internal-error' : 'persistence-unavailable',
-            requestCount: 3, retryCount: 0,
+            status: 'failed', failureCode: scenario === 'success'
+              ? mutateEvolution ? 'internal-error' : 'persistence-unavailable'
+              : scenario,
+            requestCount: scenario === 'provider-error' ? 1 : 3, retryCount: 0,
           })
-          expect(second.adapter.requests).toHaveLength(3)
+          expect(second.adapter.requests).toHaveLength(scenario === 'provider-error' ? 1 : 3)
           expect(flushCalls).toBeGreaterThanOrEqual(2)
+          expect(globalRetryCalls).toBe(0)
+          expect(JSON.stringify(receipt)).not.toContain('provider-secret-sentinel')
           const released = await second.ctx.agents.resume({
             resumeSessionId: sessionId,
             agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
           })
+          if (scenario === 'provider-error') {
+            expect(second.ctx.goals.get(released.agent)).toMatchObject({ phase: 'active', activation: 'disarmed' })
+          }
           await released.dispose()
           return
         }
