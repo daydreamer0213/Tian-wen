@@ -163,6 +163,32 @@ describe('tianwen live Goal smoke', () => {
   })
 
   it.each([
+    ['a duplicate action', (events: any[]) => { events.splice(3, 0, { ...events[1], seq: 25 }) }, 'tool-contract-violated'],
+    ['wrong update arguments', (events: any[]) => { events[3].data.arguments = '{"goal_id":"goal-id","revision":2,"action":"pause"}' }, 'tool-contract-violated'],
+    ['an action result error', (events: any[]) => { events[2].data.error = { message: 'failed' } }, 'tool-contract-violated'],
+    ['a missing update', (events: any[]) => { events.splice(3, 2) }, 'tool-contract-violated'],
+    ['a wrong final marker', (events: any[]) => { events[6].data.message.content[0].text = 'wrong marker' }, 'marker-mismatch'],
+  ])('rejects durable live events with %s', (_name, mutate, failureCode) => {
+    const assistant = (seq: number, text = '') => ({
+      type: 'assistant/message', seq, time: seq,
+      data: { turn: 1, step: seq, usage: { inputTokens: 1, outputTokens: 1 }, message: {
+        content: text === '' ? [] : [{ type: 'text', text }],
+      } },
+    })
+    const events: any[] = [
+      assistant(1),
+      { type: 'tool/call', seq: 2, time: 2, data: { callId: 'action', name: 'tianwen_smoke_action', arguments: '{}' } },
+      { type: 'tool/result', seq: 3, time: 3, data: { message: { source: { callId: 'action' } } } },
+      { type: 'tool/call', seq: 4, time: 4, data: { callId: 'update', name: 'update_goal', arguments: '{"goal_id":"goal-id","revision":2,"action":"complete"}' } },
+      { type: 'tool/result', seq: 5, time: 5, data: { message: { source: { callId: 'update' } } } },
+      assistant(6), assistant(7, 'TIANWEN_GOAL_ROUND_OK'),
+    ]
+    mutate(events)
+    expect(assessLiveGoalEvents('goal-session', events as never, { id: 'goal-id', revision: 2 }))
+      .toEqual({ ok: false, failureCode })
+  })
+
+  it.each([
     ['an offline selection', { provider: 'tianwen-probe', model: 'scripted' }, true, 'selection-mismatch'],
     ['a missing credential', { provider: 'deepseek-official', model: 'deepseek-v4-pro' }, false, 'credential-missing'],
     ['an unresolved exact route', { provider: 'deepseek-official', model: 'deepseek-v4-pro' }, true, 'selection-mismatch'],
