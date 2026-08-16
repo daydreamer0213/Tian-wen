@@ -24,7 +24,11 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value)}\n`, 'utf8')
 }
 
-function scriptedInstaller(paths: ReturnType<typeof deriveInstallPaths>, failOn?: string) {
+function scriptedInstaller(
+  paths: ReturnType<typeof deriveInstallPaths>,
+  failOn?: string,
+  archiveBytes = 'fixed runtime archive\n',
+) {
   const calls: string[][] = []
   const childEnvironments: NodeJS.ProcessEnv[] = []
   const executables: string[] = []
@@ -40,8 +44,9 @@ function scriptedInstaller(paths: ReturnType<typeof deriveInstallPaths>, failOn?
       return { status: 12, stderr: 'scripted failure', stdout: '' }
     }
     if (argv[1] === '--version') return { status: 0, stderr: '', stdout: '11.20.0\n' }
-    if (argv.includes('deploy')) {
-      const packageRoot = join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh')
+    if (argv.includes('deploy') && argv.includes('@tianwen/dsh-host')) {
+      const destination = argv.at(-1)!
+      const packageRoot = join(destination, 'node_modules', '@deepseek-ai', 'dsh')
       mkdirSync(join(packageRoot, 'lib'), { recursive: true })
       writeFileSync(join(packageRoot, 'lib', 'bin.js'), 'export {}\n', 'utf8')
       writeJson(join(packageRoot, 'package.json'), {
@@ -53,14 +58,15 @@ function scriptedInstaller(paths: ReturnType<typeof deriveInstallPaths>, failOn?
       const destination = argv.at(argv.indexOf('--pack-destination') + 1)
       expect(destination).toBeTypeOf('string')
       mkdirSync(destination!, { recursive: true })
-      writeFileSync(join(destination!, 'tianwen-runtime-bundle-0.0.0.tgz'), 'fixed runtime archive\n', 'utf8')
+      writeFileSync(join(destination!, 'tianwen-runtime-bundle-0.0.0.tgz'), archiveBytes, 'utf8')
     }
-    if (argv.includes('plugin')) {
-      writeJson(join(paths.profileRoot, 'package.json'), {
+    if (argv.includes('deploy') && argv.includes('@tianwen/profile-host')) {
+      const destination = argv.at(-1)!
+      writeJson(join(destination, 'package.json'), {
         dependencies: {
           '@deepseek-ai/dsh-base': '0.1.0-rc.6',
           '@deepseek-ai/dsh-headless': '0.1.0-rc.6',
-          '@tianwen/runtime-bundle': `file:${paths.archivePath.replaceAll('\\', '/')}`,
+          '@tianwen/runtime-bundle': '0.0.0',
         },
         dsh: {
           profile: {
@@ -72,12 +78,13 @@ function scriptedInstaller(paths: ReturnType<typeof deriveInstallPaths>, failOn?
           },
         },
       })
-      const runtimeRoot = join(paths.profileRoot, 'node_modules', '@tianwen', 'runtime-bundle')
+      const runtimeRoot = join(destination, 'node_modules', '@tianwen', 'runtime-bundle')
       mkdirSync(join(runtimeRoot, 'dist'), { recursive: true })
       writeFileSync(join(runtimeRoot, 'dist', 'runtime.js'), 'export default {}\n', 'utf8')
       writeFileSync(join(runtimeRoot, 'dist', 'cli.js'), 'export {}\n', 'utf8')
-      mkdirSync(paths.binDir, { recursive: true })
-      writeFileSync(join(paths.binDir, 'tianwen.CMD'), '@echo off\r\n', 'utf8')
+      const binDir = join(destination, 'node_modules', '.bin')
+      mkdirSync(binDir, { recursive: true })
+      writeFileSync(join(binDir, 'tianwen.CMD'), '@echo off\r\n', 'utf8')
       writeJson(join(runtimeRoot, 'package.json'), {
         bin: { tianwen: 'dist/cli.js' },
         exports: { './runtime': './dist/runtime.js' },
@@ -173,6 +180,11 @@ describe('Tianwen installer contract', () => {
     expect(patch).toMatch(/\n$/u)
     expect(patch).toContain("root: 'D:/DevData/custom-tianwen/dsh-home/sessions'")
     expect(patch).toContain("evolutionRoot: 'D:/DevData/custom-tianwen/state/evolution'")
+    expect(patch).toContain('- id: attachment-local\n  disabled: true')
+    expect(patch).toContain('- id: sandbox\n  disabled: true')
+    expect(patch).toContain('- id: pwsh-sandbox\n  disabled: true')
+    expect(patch).toContain('- id: permission\n  disabled: true')
+    expect(patch).toContain('- id: tool-pwsh\n  disabled: true')
     expect(patch).toContain("name: '@deepseek-ai/dsh-cordis-host-runner'")
     expect(patch).toContain("name: '@tianwen/runtime-bundle/smoke'")
   })
@@ -252,28 +264,12 @@ describe('Tianwen installer contract', () => {
       join(paths.profileRoot, 'cordis.patch.yml'),
     ].map(path => readFileSync(path))).toEqual(managedBytes)
     expect([readFileSync(session), readFileSync(ledger)]).toEqual(before)
-    expect(scripted.calls.filter(argv => argv.includes('deploy'))).toHaveLength(1)
-    expect(scripted.calls.filter(argv => argv.includes('plugin'))).toHaveLength(2)
+    expect(scripted.calls.filter(argv => argv.includes('deploy'))).toHaveLength(2)
+    expect(scripted.calls.filter(argv => argv.includes('plugin'))).toHaveLength(0)
     expect(scripted.calls.filter(argv => argv.includes('--dump-config'))).toHaveLength(2)
     const dshBin = join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
     expect(scripted.calls.filter(argv => argv[0]?.endsWith('bin.js'))).toEqual([
-      [
-        dshBin,
-        'plugin', '--profile', 'tianwen',
-        'add', '--offline',
-        '@deepseek-ai/dsh-base@0.1.0-rc.6',
-        '@deepseek-ai/dsh-headless@0.1.0-rc.6',
-        paths.archivePath,
-      ],
       [dshBin, '--profile', 'tianwen', '--dump-config'],
-      [
-        dshBin,
-        'plugin', '--profile', 'tianwen',
-        'add', '--offline',
-        '@deepseek-ai/dsh-base@0.1.0-rc.6',
-        '@deepseek-ai/dsh-headless@0.1.0-rc.6',
-        paths.archivePath,
-      ],
       [dshBin, '--profile', 'tianwen', '--dump-config'],
     ])
     expect(scripted.executables.every(executable => executable === process.execPath)).toBe(true)
@@ -342,7 +338,72 @@ describe('Tianwen installer contract', () => {
 
     expect(scripted.childEnvironments.every(env =>
       env.NPM_CONFIG_CACHE === 'D:\\DevData\\custom-npm-cache'
+      && env.PNPM_CONFIG_CACHE_DIR === 'D:\\DevData\\custom-npm-cache'
+      && env.PNPM_CONFIG_MINIMUM_RELEASE_AGE === undefined
       && env.PNPM_CONFIG_STORE_DIR === 'D:\\DevData\\custom-pnpm-store')).toBe(true)
+  })
+
+  it('reinstalls the fixed Profile when the Runtime archive changes', () => {
+    const root = testRoot('upgrade')
+    const paths = deriveInstallPaths(root, 'win32')
+    const first = scriptedInstaller(paths, undefined, 'runtime v1\n')
+    const receiptV1 = installTianwen({ dataDir: root, runner: first.runner })
+    const second = scriptedInstaller(paths, undefined, 'runtime v2\n')
+    const receiptV2 = installTianwen({ dataDir: root, runner: second.runner })
+
+    expect(receiptV2.archiveDigest).not.toBe(receiptV1.archiveDigest)
+    expect(second.calls.filter(argv => argv.includes('@tianwen/profile-host'))).toHaveLength(1)
+    expect(second.calls.filter(argv => argv.includes('plugin'))).toHaveLength(0)
+  })
+
+  it('keeps the previous Profile and receipt when a Profile upgrade fails', () => {
+    const root = testRoot('failed-profile-upgrade')
+    const paths = deriveInstallPaths(root, 'win32')
+    installTianwen({ dataDir: root, runner: scriptedInstaller(paths, undefined, 'runtime v1\n').runner })
+    const profileBefore = readFileSync(join(paths.profileRoot, 'package.json'))
+    const receiptBefore = readFileSync(paths.receiptPath)
+
+    expect(() => installTianwen({
+      dataDir: root,
+      runner: scriptedInstaller(paths, '@tianwen/profile-host', 'runtime v2\n').runner,
+    })).toThrow(/scripted failure/u)
+    expect(readFileSync(join(paths.profileRoot, 'package.json'))).toEqual(profileBefore)
+    expect(readFileSync(paths.receiptPath)).toEqual(receiptBefore)
+  })
+
+  it('restores the previous Profile when post-deploy validation fails', () => {
+    const root = testRoot('failed-profile-validation')
+    const paths = deriveInstallPaths(root, 'win32')
+    const session = join(paths.sessionsRoot, 'kept.jsonl')
+    const ledger = join(paths.evolutionRoot, 'ledger.jsonl')
+    mkdirSync(paths.sessionsRoot, { recursive: true })
+    mkdirSync(paths.evolutionRoot, { recursive: true })
+    writeFileSync(session, 'session bytes\n', 'utf8')
+    writeFileSync(ledger, 'ledger bytes\n', 'utf8')
+    installTianwen({ dataDir: root, runner: scriptedInstaller(paths, undefined, 'runtime v1\n').runner })
+    const profileBefore = readFileSync(join(paths.profileRoot, 'package.json'))
+    const receiptBefore = readFileSync(paths.receiptPath)
+
+    expect(() => installTianwen({
+      dataDir: root,
+      runner: scriptedInstaller(paths, '--dump-config', 'runtime v2\n').runner,
+    })).toThrow(/scripted failure/u)
+    expect(readFileSync(join(paths.profileRoot, 'package.json'))).toEqual(profileBefore)
+    expect(readFileSync(paths.receiptPath)).toEqual(receiptBefore)
+    expect(readFileSync(session, 'utf8')).toBe('session bytes\n')
+    expect(readFileSync(ledger, 'utf8')).toBe('ledger bytes\n')
+  })
+
+  it('removes a first-install Profile when post-deploy validation fails', () => {
+    const root = testRoot('failed-first-profile-validation')
+    const paths = deriveInstallPaths(root, 'win32')
+
+    expect(() => installTianwen({
+      dataDir: root,
+      runner: scriptedInstaller(paths, '--dump-config').runner,
+    })).toThrow(/scripted failure/u)
+    expect(existsSync(paths.profileRoot)).toBe(false)
+    expect(existsSync(paths.receiptPath)).toBe(false)
   })
 
   it.each(['pnpm-workspace.yaml', 'cordis.patch.yml']) (

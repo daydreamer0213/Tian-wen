@@ -131,6 +131,21 @@ export function renderProfilePatch(paths) {
   config:
     evolutionRoot: '${portable(paths.evolutionRoot)}'
 
+- id: attachment-local
+  disabled: true
+
+- id: sandbox
+  disabled: true
+
+- id: pwsh-sandbox
+  disabled: true
+
+- id: permission
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true
+
 - insert:
     - id: cordis-host-runner
       name: '@deepseek-ai/dsh-cordis-host-runner'
@@ -160,10 +175,10 @@ export function validateInstalledHost(hostRoot) {
   return executable
 }
 
-function validateProfile(paths) {
-  const manifestPath = resolve(paths.profileRoot, 'package.json')
-  const policyPath = resolve(paths.profileRoot, 'pnpm-workspace.yaml')
-  const patchPath = resolve(paths.profileRoot, 'cordis.patch.yml')
+function validateProfile(paths, profileRoot = paths.profileRoot) {
+  const manifestPath = resolve(profileRoot, 'package.json')
+  const policyPath = resolve(profileRoot, 'pnpm-workspace.yaml')
+  const patchPath = resolve(profileRoot, 'cordis.patch.yml')
   if (readFileSync(policyPath, 'utf8') !== WORKSPACE_POLICY) {
     throw new Error('managed Profile workspace policy differs from Tianwen v1')
   }
@@ -181,12 +196,25 @@ function validateProfile(paths) {
     || dependencies['@deepseek-ai/dsh-headless'] !== DSH_VERSION) {
     throw new Error(`managed Profile must use DSH ${DSH_VERSION}`)
   }
-  const runtime = dependencies[RUNTIME_PACKAGE]
-  if (typeof runtime !== 'string' || !runtime.startsWith('file:')
-    || resolve(paths.profileRoot, runtime.slice(5)) !== resolve(paths.archivePath)) {
-    throw new Error('managed Profile must use the fixed Tianwen Runtime archive')
+  if (dependencies[RUNTIME_PACKAGE] !== '0.0.0') {
+    throw new Error('managed Profile must use Tianwen Runtime 0.0.0')
   }
   return manifestPath
+}
+
+function normalizeDeployedProfile(paths, profileRoot) {
+  const manifestPath = resolve(profileRoot, 'package.json')
+  const manifest = assertPlainObject(JSON.parse(readFileSync(manifestPath, 'utf8')), 'Profile manifest')
+  manifest.dependencies = {
+    '@deepseek-ai/dsh-base': DSH_VERSION,
+    '@deepseek-ai/dsh-headless': DSH_VERSION,
+    [RUNTIME_PACKAGE]: '0.0.0',
+  }
+  manifest.dsh = { profile: { bundles: [...PROFILE_BUNDLES] } }
+  writeFileSync(manifestPath, canonicalJson(manifest), 'utf8')
+  rmSync(resolve(profileRoot, 'pnpm-lock.yaml'), { force: true })
+  writeFileSync(resolve(profileRoot, 'pnpm-workspace.yaml'), WORKSPACE_POLICY, 'utf8')
+  writeFileSync(resolve(profileRoot, 'cordis.patch.yml'), renderProfilePatch(paths), 'utf8')
 }
 
 function dumpRow(source, id) {
@@ -255,6 +283,26 @@ function sha256File(path) {
   return `sha256:${createHash('sha256').update(readFileSync(path)).digest('hex')}`
 }
 
+function previousArchiveDigest(paths) {
+  if (!existsSync(paths.receiptPath)) return undefined
+  try {
+    const receipt = assertPlainObject(
+      JSON.parse(readFileSync(paths.receiptPath, 'utf8')),
+      'install receipt',
+    )
+    if (receipt.schemaVersion !== 'tianwen.install.v1'
+      || receipt.status !== 'ready'
+      || receipt.dataDir !== paths.dataDir
+      || receipt.profileRoot !== paths.profileRoot
+      || receipt.archivePath !== paths.archivePath
+      || typeof receipt.archiveDigest !== 'string'
+      || !/^sha256:[0-9a-f]{64}$/u.test(receipt.archiveDigest)) return undefined
+    return receipt.archiveDigest
+  } catch {
+    return undefined
+  }
+}
+
 export function createInstallReceipt(paths, { archiveDigest, cliPath }) {
   return {
     archiveDigest,
@@ -289,6 +337,11 @@ function childEnvironment(paths, source) {
     }
     return normalized
   }
+  const packageCache = configuredDPath(
+    source.PNPM_CONFIG_CACHE_DIR ?? source.NPM_CONFIG_CACHE,
+    'D:\\DevData\\npm-cache',
+    'package cache',
+  )
   return {
     CI: 'true',
     COREPACK_ENABLE_NETWORK: '0',
@@ -296,17 +349,14 @@ function childEnvironment(paths, source) {
     ComSpec: source.ComSpec,
     DSH_HOME: paths.dshHome,
     DSH_TELEMETRY_DISABLED: '1',
-    NPM_CONFIG_CACHE: configuredDPath(
-      source.NPM_CONFIG_CACHE,
-      'D:\\DevData\\npm-cache',
-      'NPM_CONFIG_CACHE',
-    ),
+    NPM_CONFIG_CACHE: packageCache,
     NPM_CONFIG_OFFLINE: 'true',
     PATH: process.platform === 'win32'
       ? [dirname(process.execPath), resolve(systemRoot, 'System32')].join(delimiter)
       : source.PATH,
     PATHEXT: source.PATHEXT,
     PNPM_CONFIG_OFFLINE: 'true',
+    PNPM_CONFIG_CACHE_DIR: packageCache,
     PNPM_CONFIG_STORE_DIR: configuredDPath(
       source.PNPM_CONFIG_STORE_DIR,
       'D:\\DevData\\pnpm-store',
@@ -367,6 +417,7 @@ export function installTianwen({
 
   const hostExists = existsSync(paths.hostRoot)
   const profileExists = existsSync(paths.profileRoot)
+  const installedArchiveDigest = previousArchiveDigest(paths)
   let dshBin
   if (hostExists) dshBin = validateInstalledHost(paths.hostRoot)
   if (profileExists) validateProfile(paths)
@@ -397,49 +448,74 @@ export function installTianwen({
   const packsRoot = dirname(paths.archivePath)
   const archiveStage = resolve(packsRoot, `.install-${process.pid}-${randomUUID()}`)
   const stagedArchive = resolve(archiveStage, basename(paths.archivePath))
+  let archiveDigest
   mkdirSync(archiveStage, { recursive: true })
   try {
     invokePnpm(['--filter', RUNTIME_PACKAGE, 'pack', '--pack-destination', archiveStage], 300_000)
     if (!statSync(stagedArchive).isFile()) throw new Error('Runtime Bundle archive was not created')
+    archiveDigest = sha256File(stagedArchive)
     renameSync(stagedArchive, paths.archivePath)
   } finally {
     rmSync(archiveStage, { force: true, recursive: true })
   }
 
-  if (!profileExists) {
-    mkdirSync(paths.profileRoot, { recursive: true })
-    writeFileSync(resolve(paths.profileRoot, 'pnpm-workspace.yaml'), WORKSPACE_POLICY, 'utf8')
-  }
-  runFixed(process.execPath, [
-    dshBin,
-    'plugin', '--profile', PROFILE,
-    'add', '--offline',
-    `@deepseek-ai/dsh-base@${DSH_VERSION}`,
-    `@deepseek-ai/dsh-headless@${DSH_VERSION}`,
-    paths.archivePath,
-  ], { cwd: repoRoot, env, runner, timeout: 600_000 })
-  writeFileSync(resolve(paths.profileRoot, 'cordis.patch.yml'), renderProfilePatch(paths), 'utf8')
-
-  const profileManifestPath = validateProfile(paths)
-  const dump = runFixed(process.execPath, [dshBin, '--profile', PROFILE, '--dump-config'], {
-    cwd: repoRoot,
-    env,
-    runner,
-  })
-  validateDump(dump.stdout, paths)
-  const cliPath = resolveInstalledCli(profileManifestPath, repoRoot)
-  const receipt = createInstallReceipt(paths, {
-    archiveDigest: sha256File(paths.archivePath),
-    cliPath,
-  })
-  const receiptStage = `${paths.receiptPath}.tmp-${process.pid}-${randomUUID()}`
+  const profileChanged = !profileExists || installedArchiveDigest !== archiveDigest
+  let profileBackup
   try {
-    writeFileSync(receiptStage, canonicalJson(receipt), { encoding: 'utf8', flag: 'wx' })
-    renameSync(receiptStage, paths.receiptPath)
-  } finally {
-    rmSync(receiptStage, { force: true })
+    if (profileChanged) {
+      const profilesRoot = dirname(paths.profileRoot)
+      const id = `${process.pid}-${randomUUID()}`
+      profileBackup = profileExists
+        ? resolve(profilesRoot, `.tianwen-backup-${id}`)
+        : undefined
+      mkdirSync(profilesRoot, { recursive: true })
+      if (profileBackup !== undefined) renameSync(paths.profileRoot, profileBackup)
+      invokePnpm([
+        '--config.inject-workspace-packages=true',
+        '--filter', '@tianwen/profile-host',
+        'deploy', '--prod', paths.profileRoot,
+      ], 600_000)
+      normalizeDeployedProfile(paths, paths.profileRoot)
+      const deployedManifest = validateProfile(paths)
+      resolveInstalledCli(deployedManifest, repoRoot)
+    }
+
+    const profileManifestPath = validateProfile(paths)
+    const dump = runFixed(process.execPath, [dshBin, '--profile', PROFILE, '--dump-config'], {
+      cwd: repoRoot,
+      env,
+      runner,
+    })
+    validateDump(dump.stdout, paths)
+    const cliPath = resolveInstalledCli(profileManifestPath, repoRoot)
+    const receipt = createInstallReceipt(paths, {
+      archiveDigest,
+      cliPath,
+    })
+    const receiptStage = `${paths.receiptPath}.tmp-${process.pid}-${randomUUID()}`
+    try {
+      writeFileSync(receiptStage, canonicalJson(receipt), { encoding: 'utf8', flag: 'wx' })
+      renameSync(receiptStage, paths.receiptPath)
+    } finally {
+      rmSync(receiptStage, { force: true })
+    }
+    if (profileBackup !== undefined) {
+      try {
+        rmSync(profileBackup, { force: true, recursive: true })
+      } catch {
+        // A stale backup is harmless after the Profile and receipt are committed.
+      }
+    }
+    return receipt
+  } catch (error) {
+    if (profileChanged) {
+      rmSync(paths.profileRoot, { force: true, recursive: true })
+      if (profileBackup !== undefined && existsSync(profileBackup)) {
+        renameSync(profileBackup, paths.profileRoot)
+      }
+    }
+    throw error
   }
-  return receipt
 }
 
 async function main() {

@@ -38,10 +38,18 @@ fails before replacement; v1 does not invent a migration or repair framework.
 
 On Windows the data directory must be an absolute safe path under `D:\DevData`.
 Package names, Profile name and archive basename are fixed. Tianwen-owned child
-processes use `process.execPath` + fixed argv and `shell:false`. The known rc.6
-Windows `dsh plugin` internal `shell:true` remains limited to this fixed,
-offline Profile install; shell metacharacters and caller-selected package specs
-are not accepted.
+processes use `process.execPath` + fixed argv and `shell:false`. Shell
+metacharacters and caller-selected package specs are not accepted.
+
+The Profile is deployed from the repository's frozen lockfile through the tiny
+private `@tianwen/profile-host` workspace. Do not use `dsh plugin add`: on a
+fresh rc.6 Profile that command re-resolves transitive semver ranges against
+registry metadata, so an offline store can contain the reviewed lock closure
+yet still miss a newly selected tarball. `pnpm deploy` reuses the exact lock,
+keeps all Tianwen-owned subprocesses at `shell:false`, and includes the required
+Windows native optional packages. Its generated source-path metadata is not
+runtime authority: the installer removes the generated lockfile and rewrites
+the installed manifest to the three fixed package versions before validation.
 
 The installed command already lives in the Profile's package-manager bin
 directory. The installer reports that directory instead of mutating the user's
@@ -96,9 +104,13 @@ reuse the caller's configured store/cache.
 3. validate exact `@deepseek-ai/dsh@0.1.0-rc.6` host/bin;
 4. build the Runtime Bundle dependency closure;
 5. pack the fixed Runtime Bundle archive;
-6. initialize or validate the managed `tianwen` Profile policy/patch;
-7. invoke the fixed offline DSH Profile add for exact base, headless and archive;
-8. validate manifest bundle order and run `--dump-config`;
+6. retain the old managed Profile as a same-volume backup, then deploy the
+   fixed private `@tianwen/profile-host` from the frozen workspace lock at its
+   final path (pnpm's Windows junctions bind to that path);
+7. normalize and validate its exact base/headless/Runtime manifest plus managed
+   policy/patch, deleting the backup only after success and restoring it after
+   any failure;
+8. validate manifest bundle order and run DSH `--dump-config`;
 9. validate the installed `tianwen` bin;
 10. atomically write the canonical install receipt and print human or JSON
     output.

@@ -213,11 +213,12 @@ async function start(): Promise<void> {
   const env = childEnvironment()
   const durableBeforeInstall = snapshotState()
   expect(existsSync(installer)).toBe(true)
-  rmSync(dshHostRoot, { recursive: true, force: true })
-  rmSync(profileRoot, { recursive: true, force: true })
-  rmSync(archive, { force: true })
-  rmSync(installReceiptPath, { force: true })
-  rmSync(`${installReceiptPath}.tmp`, { force: true })
+  if (process.env.TIANWEN_DSH_INSTALLER_REUSE !== '1') {
+    rmSync(dshHostRoot, { recursive: true, force: true })
+    rmSync(profileRoot, { recursive: true, force: true })
+    rmSync(archive, { force: true })
+    rmSync(installReceiptPath, { force: true })
+  }
 
   const firstInstall = run(process.execPath, [
     installer,
@@ -261,11 +262,11 @@ async function start(): Promise<void> {
   expect(installReceipt).toMatchObject({
     schemaVersion: 'tianwen.install.v1',
     status: 'ready',
-    dataDir: tianwenRoot,
-    hostRoot: dshHostRoot,
-    profileRoot,
-    archivePath: archive,
-    receiptPath: installReceiptPath,
+    dataDir: resolve(tianwenRoot),
+    hostRoot: resolve(dshHostRoot),
+    profileRoot: resolve(profileRoot),
+    archivePath: resolve(archive),
+    receiptPath: resolve(installReceiptPath),
     pnpmVersion: '11.20.0',
     dshVersion: '0.1.0-rc.6',
     profileBundles: [
@@ -286,7 +287,6 @@ async function start(): Promise<void> {
     archive,
     `${profileRoot}/package.json`,
     `${profileRoot}/pnpm-workspace.yaml`,
-    `${profileRoot}/pnpm-lock.yaml`,
     `${profileRoot}/cordis.patch.yml`,
   ]
   const managedBytes = replayStablePaths.map(path => readFileSync(path))
@@ -315,8 +315,11 @@ async function start(): Promise<void> {
   ])
   expect(manifest.dependencies['@deepseek-ai/dsh-base']).toBe('0.1.0-rc.6')
   expect(manifest.dependencies['@deepseek-ai/dsh-headless']).toBe('0.1.0-rc.6')
-  expect(resolve(profileRoot, manifest.dependencies[runtimePackage]!.replace(/^file:/u, '')))
-    .toBe(resolve(archive))
+  expect(manifest.dependencies[runtimePackage]).toBe('0.0.0')
+  for (const packageName of manifest.dsh.profile.bundles) {
+    const bundleRoot = realpathSync(resolve(profileRoot, 'node_modules', ...packageName.split('/')))
+    expect(relative(realpathSync(profileRoot), bundleRoot).startsWith('..')).toBe(false)
+  }
 
   const ledger = `${evolutionRoot}/ledger.jsonl`
   const champion = `${evolutionRoot}/champion.json`

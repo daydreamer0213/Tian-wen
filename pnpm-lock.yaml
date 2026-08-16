@@ -129,6 +129,18 @@ importers:
         specifier: 0.1.0-rc.6
         version: 0.1.0-rc.6(c195158e0dbfcd5dd026bd43e3679360)
 
+  packages/tianwen-profile-host:
+    dependencies:
+      '@deepseek-ai/dsh-base':
+        specifier: 0.1.0-rc.6
+        version: 0.1.0-rc.6(0e479039ac5f9eb3081256caa609b07f)
+      '@deepseek-ai/dsh-headless':
+        specifier: 0.1.0-rc.6
+        version: 0.1.0-rc.6(7473e7fbfdbeb50a75575c281a783b28)
+      '@tianwen/runtime-bundle':
+        specifier: workspace:*
+        version: link:../tianwen-runtime-bundle
+
   packages/tianwen-dsh-probe-bundle:
     dependencies:
       '@deepseek-ai/cordis':
