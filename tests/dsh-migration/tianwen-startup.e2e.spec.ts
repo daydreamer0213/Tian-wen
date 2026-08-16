@@ -948,6 +948,7 @@ async function start(): Promise<void> {
     const resumeIndex = liveAdded.findIndex(resumeChange)
     expect(resumeIndex).toBe(1)
     const runnerAdded = liveAdded.slice(resumeIndex)
+    expect(runnerAdded).toHaveLength(42)
     const liveCalls = liveAdded.filter(event => event.type === 'tool/call')
     const liveResults = liveAdded.filter(event => event.type === 'tool/result')
     const liveAssistants = liveAdded.filter(event => event.type === 'assistant/message')

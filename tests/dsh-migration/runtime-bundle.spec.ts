@@ -73,6 +73,10 @@ function isAllowedCreateRunnerInput(input: string): boolean {
   return posix.normalize(input.replaceAll('\\', '/')) === 'src/create-runner.ts'
 }
 
+function containsCredentialLiteral(text: string): boolean {
+  return /\b(?:const|let|var)\s+(?:DEEPSEEK_API_KEY|API_KEY|TOKEN|[A-Z][A-Z0-9_]*_(?:API_KEY|TOKEN))\s*=\s*(['"])[A-Za-z0-9._~+\/=\-]{16,}\1/u.test(text)
+}
+
 describe('runtime metafile input allowlist', () => {
   it.each([
     '../unrelated-workspace/dist/index.js',
@@ -81,6 +85,22 @@ describe('runtime metafile input allowlist', () => {
     '../test/helper.js',
   ])('rejects %s', input => {
     expect(isAllowedRuntimeInput(input)).toBe(false)
+  })
+})
+
+describe('archive credential literal detection', () => {
+  it('permits public references but rejects sufficiently long static credential assignments', () => {
+    for (const text of [
+      'process.env.DEEPSEEK_API_KEY',
+      "credentialRef('DEEPSEEK_API_KEY')",
+      "{ source: 'env', reference: 'DEEPSEEK_API_KEY' }",
+      "const API_KEY = 'short'",
+    ]) expect(containsCredentialLiteral(text)).toBe(false)
+    for (const text of [
+      'const DEEPSEEK_API_KEY = "abcdefghijklmnop"',
+      "const API_KEY = 'abcdefghijklmnop'",
+      'const ACCESS_TOKEN = "abcdefghijklmnop"',
+    ]) expect(containsCredentialLiteral(text)).toBe(true)
   })
 })
 
@@ -550,6 +570,7 @@ describe('@tianwen/runtime-bundle', () => {
       expect(archiveText).not.toContain(root)
       expect(archiveText).not.toContain(root.replaceAll('\\', '/'))
       expect(archiveText).not.toMatch(/C:[\\/]Users[\\/]|fixtures[\\/]deepseek-goal-round-fetch|@deepseek-ai[\\/][^\\/]+[\\/]src[\\/]/u)
+      expect(containsCredentialLiteral(archiveText)).toBe(false)
       expect(archiveText).not.toMatch(/\bsk-[A-Za-z0-9_-]{16,}\b|\bBearer\s+[A-Za-z0-9._~+\/=-]{16,}\b|(?:authorization|x-api-key)\s*[:=]\s*['"`]?\S{16,}/iu)
     }
   })
