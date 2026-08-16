@@ -96,4 +96,3 @@ Goal that the existing E2E later resumes. Prove:
 Run expensive gates serially. No paid model, live web/search, dependency
 download, real Docker, automatic resume, UI, daemon, scheduler, database,
 automatic promotion or Runtime cutover belongs in this phase.
-
