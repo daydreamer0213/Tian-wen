@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   canonicalJson,
@@ -28,13 +28,14 @@ function writeJson(path: string, value: unknown): void {
 function scriptedInstaller(
   paths: ReturnType<typeof deriveInstallPaths>,
   failOn?: string,
-  archiveBytes = 'fixed runtime archive\n',
+  archiveBytes: string | readonly string[] = 'fixed runtime archive\n',
   dumpOptions: { foldedSessionsRoot?: boolean, sessionsRoot?: string } = {},
 ) {
   const calls: string[][] = []
   const childEnvironments: NodeJS.ProcessEnv[] = []
   const executables: string[] = []
   const spawnOptions: { shell: boolean, timeout: number }[] = []
+  let packOrdinal = 0
   const runner = (executable: string, argv: string[], options: {
     env: NodeJS.ProcessEnv
     shell: boolean
@@ -63,9 +64,12 @@ function scriptedInstaller(
     }
     if (argv.includes('pack')) {
       const destination = argv.at(argv.indexOf('--pack-destination') + 1)
+      const bytes = typeof archiveBytes === 'string' ? archiveBytes : archiveBytes[packOrdinal]
+      packOrdinal += 1
       expect(destination).toBeTypeOf('string')
+      expect(bytes).toBeTypeOf('string')
       mkdirSync(destination!, { recursive: true })
-      writeFileSync(join(destination!, 'tianwen-runtime-bundle-0.0.0.tgz'), archiveBytes, 'utf8')
+      writeFileSync(join(destination!, 'tianwen-runtime-bundle-0.0.0.tgz'), bytes!, 'utf8')
     }
     if (argv.includes('deploy') && argv.includes('@tianwen/profile-host')) {
       const destination = argv.at(-1)!
@@ -275,8 +279,15 @@ describe('Tianwen installer contract', () => {
     ].map(path => readFileSync(path))).toEqual(managedBytes)
     expect([readFileSync(session), readFileSync(ledger)]).toEqual(before)
     expect(scripted.calls.filter(argv => argv.includes('deploy'))).toHaveLength(2)
-    expect(scripted.calls.filter(argv => argv.includes('pack')).map(argv =>
-      argv.filter(value => value === '--skip-manifest-obfuscation').length)).toEqual([1, 1])
+    const packCalls = scripted.calls.filter(argv => argv.includes('pack'))
+    expect(packCalls.map(argv =>
+      argv.filter(value => value === '--skip-manifest-obfuscation').length)).toEqual([1, 1, 1, 1])
+    expect(new Set(packCalls.map(argv =>
+      argv.at(argv.indexOf('--pack-destination') + 1))).size).toBe(4)
+    expect(scripted.calls.filter(argv => argv.includes('build') || argv.includes('pack')).map(argv =>
+      argv.includes('build') ? 'build' : 'pack')).toEqual([
+      'build', 'pack', 'build', 'pack', 'build', 'pack', 'build', 'pack',
+    ])
     expect(scripted.calls.filter(argv => argv.includes('plugin'))).toHaveLength(0)
     expect(scripted.calls.filter(argv => argv.includes('--dump-config'))).toHaveLength(2)
     const dshBin = join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
@@ -405,6 +416,48 @@ describe('Tianwen installer contract', () => {
     })).toThrow(/scripted failure/u)
     expect(readFileSync(paths.archivePath)).toEqual(archiveBefore)
     expect(readFileSync(paths.receiptPath)).toEqual(receiptBefore)
+  })
+
+  it('rejects consecutive Runtime archives that differ before changing published state', () => {
+    const root = testRoot('unstable-runtime-archive')
+    const paths = deriveInstallPaths(root, 'win32')
+    const session = join(paths.sessionsRoot, 'kept.jsonl')
+    const ledger = join(paths.evolutionRoot, 'ledger.jsonl')
+    mkdirSync(paths.sessionsRoot, { recursive: true })
+    mkdirSync(paths.evolutionRoot, { recursive: true })
+    writeFileSync(session, 'session bytes\n', 'utf8')
+    writeFileSync(ledger, 'ledger bytes\n', 'utf8')
+    installTianwen({
+      dataDir: root,
+      runner: scriptedInstaller(paths, undefined, 'published runtime\n').runner,
+    })
+    const publishedPaths = [
+      join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
+      join(paths.profileRoot, 'package.json'),
+      join(paths.profileRoot, 'pnpm-workspace.yaml'),
+      join(paths.profileRoot, 'cordis.patch.yml'),
+      paths.archivePath,
+      paths.receiptPath,
+      session,
+      ledger,
+    ]
+    const publishedBefore = publishedPaths.map(path => readFileSync(path))
+    const unstable = scriptedInstaller(paths, undefined, [
+      'unstable runtime one\n',
+      'unstable runtime two\n',
+    ])
+
+    expect(() => installTianwen({ dataDir: root, runner: unstable.runner }))
+      .toThrow('Runtime Bundle archive is not stable across consecutive builds')
+    expect(unstable.calls.filter(argv => argv.includes('build') || argv.includes('pack')).map(argv =>
+      argv.includes('build') ? 'build' : 'pack')).toEqual(['build', 'pack', 'build', 'pack'])
+    expect(unstable.calls.filter(argv => argv.includes('pack')).map(argv =>
+      argv.filter(value => value === '--skip-manifest-obfuscation').length)).toEqual([1, 1])
+    expect(unstable.calls.filter(argv => argv.includes('@tianwen/profile-host'))).toHaveLength(0)
+    expect(unstable.calls.filter(argv => argv.includes('--dump-config'))).toHaveLength(0)
+    expect(publishedPaths.map(path => readFileSync(path))).toEqual(publishedBefore)
+    expect(readdirSync(dirname(paths.archivePath)).filter(name => name.startsWith('.install-')))
+      .toEqual([])
   })
 
   it('reuses caller-configured D-drive package stores', () => {

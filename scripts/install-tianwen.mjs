@@ -455,23 +455,33 @@ export function installTianwen({
     }
   }
 
-  invokePnpm(['--filter', `${RUNTIME_PACKAGE}...`, 'build'], 300_000)
   const packsRoot = dirname(paths.archivePath)
-  const archiveStage = resolve(packsRoot, `.install-${process.pid}-${randomUUID()}`)
-  const stagedArchive = resolve(archiveStage, basename(paths.archivePath))
+  const archiveStages = [randomUUID(), randomUUID()]
+    .map(id => resolve(packsRoot, `.install-${process.pid}-${id}`))
+  const stagedArchives = archiveStages.map(stage => resolve(stage, basename(paths.archivePath)))
+  const stagedArchive = stagedArchives[0]
   let archiveDigest
   let archiveBackup
   let archivePublished = false
   let profileBackup
   let profileChanged = false
-  mkdirSync(archiveStage, { recursive: true })
   try {
-    invokePnpm([
-      '--filter', RUNTIME_PACKAGE, 'pack', '--skip-manifest-obfuscation',
-      '--pack-destination', archiveStage,
-    ], 300_000)
-    if (!statSync(stagedArchive).isFile()) throw new Error('Runtime Bundle archive was not created')
-    archiveDigest = sha256File(stagedArchive)
+    for (const [index, archiveStage] of archiveStages.entries()) {
+      mkdirSync(archiveStage, { recursive: true })
+      invokePnpm(['--filter', `${RUNTIME_PACKAGE}...`, 'build'], 300_000)
+      invokePnpm([
+        '--filter', RUNTIME_PACKAGE, 'pack', '--skip-manifest-obfuscation',
+        '--pack-destination', archiveStage,
+      ], 300_000)
+      if (!existsSync(stagedArchives[index]) || !statSync(stagedArchives[index]).isFile()) {
+        throw new Error('Runtime Bundle archive was not created')
+      }
+    }
+    const archiveDigests = stagedArchives.map(sha256File)
+    if (archiveDigests[0] !== archiveDigests[1]) {
+      throw new Error('Runtime Bundle archive is not stable across consecutive builds')
+    }
+    archiveDigest = archiveDigests[0]
     profileChanged = !profileExists || installedArchiveDigest !== archiveDigest
     if (profileChanged) {
       const profilesRoot = dirname(paths.profileRoot)
@@ -544,7 +554,9 @@ export function installTianwen({
     }
     throw error
   } finally {
-    rmSync(archiveStage, { force: true, recursive: true })
+    for (const archiveStage of archiveStages) {
+      rmSync(archiveStage, { force: true, recursive: true })
+    }
   }
 }
 
