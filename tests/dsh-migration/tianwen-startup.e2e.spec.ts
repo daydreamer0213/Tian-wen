@@ -258,8 +258,11 @@ async function start(): Promise<void> {
     '--data-dir',
     tianwenRoot,
     '--json',
-  ], env, 600_000)
-  expect(firstInstall.status, `${firstInstall.stdout}\n${firstInstall.stderr}`).toBe(0)
+  ], env, 1_200_000)
+  expect(
+    firstInstall.status,
+    `${firstInstall.stdout}\n${firstInstall.stderr}\n${firstInstall.error?.message ?? ''}`,
+  ).toBe(0)
   expect(firstInstall.stderr).toBe('')
   const installReceipt = JSON.parse(readFileSync(installReceiptPath, 'utf8')) as {
     schemaVersion: string
@@ -1164,5 +1167,5 @@ async function start(): Promise<void> {
 describe('Tianwen formal headless startup', () => {
   it.runIf(enabled)('installs the formal Profile and proves the public headless authority path', async () => {
     await start()
-  }, 1_500_000)
+  }, 2_100_000)
 })

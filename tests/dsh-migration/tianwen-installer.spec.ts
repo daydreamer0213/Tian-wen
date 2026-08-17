@@ -34,22 +34,27 @@ function scriptedInstaller(
   const calls: string[][] = []
   const childEnvironments: NodeJS.ProcessEnv[] = []
   const executables: string[] = []
+  const spawnOptions: { shell: boolean, timeout: number }[] = []
   const runner = (executable: string, argv: string[], options: {
     env: NodeJS.ProcessEnv
     shell: boolean
+    timeout: number
   }) => {
     expect(options.shell).toBe(false)
     childEnvironments.push(options.env)
     executables.push(executable)
     calls.push([...argv])
-    if (failOn !== undefined && argv.includes(failOn)) {
-      return { status: 12, stderr: 'scripted failure', stdout: '' }
-    }
+    const failed = failOn !== undefined && argv.includes(failOn)
+    spawnOptions.push({ shell: options.shell, timeout: options.timeout })
     if (argv[1] === '--version') return { status: 0, stderr: '', stdout: '11.20.0\n' }
     if (argv.includes('deploy') && argv.includes('@tianwen/dsh-host')) {
       const destination = argv.at(-1)!
       const packageRoot = join(destination, 'node_modules', '@deepseek-ai', 'dsh')
       mkdirSync(join(packageRoot, 'lib'), { recursive: true })
+      if (failed) {
+        writeFileSync(join(packageRoot, 'partial-deploy'), 'partial\n', 'utf8')
+        return { status: 12, stderr: 'scripted failure', stdout: '' }
+      }
       writeFileSync(join(packageRoot, 'lib', 'bin.js'), 'export {}\n', 'utf8')
       writeJson(join(packageRoot, 'package.json'), {
         bin: { dsh: 'lib/bin.js' },
@@ -95,6 +100,7 @@ function scriptedInstaller(
         version: '0.0.0',
       })
     }
+    if (failed) return { status: 12, stderr: 'scripted failure', stdout: '' }
     if (argv.includes('--dump-config')) {
       const sessionsRoot = dumpOptions.sessionsRoot ?? paths.sessionsRoot
       const renderedSessionsRoot = sessionsRoot.replaceAll('\\', '/')
@@ -121,7 +127,7 @@ function scriptedInstaller(
     }
     return { status: 0, stderr: '', stdout: '' }
   }
-  return { calls, childEnvironments, executables, runner }
+  return { calls, childEnvironments, executables, spawnOptions, runner }
 }
 
 afterEach(() => {
@@ -277,6 +283,11 @@ describe('Tianwen installer contract', () => {
       [dshBin, '--profile', 'tianwen', '--dump-config'],
     ])
     expect(scripted.executables.every(executable => executable === process.execPath)).toBe(true)
+    expect(scripted.spawnOptions.every(options => options.shell === false)).toBe(true)
+    expect(scripted.spawnOptions[scripted.calls.findIndex(argv =>
+      argv.includes('deploy') && argv.includes('@tianwen/dsh-host'))]?.timeout).toBe(900_000)
+    expect(scripted.spawnOptions[scripted.calls.findIndex(argv =>
+      argv.includes('deploy') && argv.includes('@tianwen/profile-host'))]?.timeout).toBe(600_000)
     expect(scripted.calls.every(argv => !argv.includes(session) && !argv.includes(ledger))).toBe(true)
   })
 
@@ -357,6 +368,28 @@ describe('Tianwen installer contract', () => {
     expect(readFileSync(ledger, 'utf8')).toBe('ledger bytes\n')
   })
 
+  it('removes a partial first host deploy without touching durable state', () => {
+    const root = testRoot('failed-host-deploy')
+    const paths = deriveInstallPaths(root, 'win32')
+    const session = join(paths.sessionsRoot, 'kept.jsonl')
+    const ledger = join(paths.evolutionRoot, 'ledger.jsonl')
+    mkdirSync(paths.sessionsRoot, { recursive: true })
+    mkdirSync(paths.evolutionRoot, { recursive: true })
+    writeFileSync(session, 'session bytes\n', { encoding: 'utf8', flag: 'wx' })
+    writeFileSync(ledger, 'ledger bytes\n', { encoding: 'utf8', flag: 'wx' })
+
+    expect(() => installTianwen({
+      dataDir: root,
+      runner: scriptedInstaller(paths, '@tianwen/dsh-host').runner,
+    })).toThrow(/scripted failure/u)
+    expect(existsSync(paths.hostRoot)).toBe(false)
+    expect(existsSync(paths.profileRoot)).toBe(false)
+    expect(existsSync(paths.archivePath)).toBe(false)
+    expect(existsSync(paths.receiptPath)).toBe(false)
+    expect(readFileSync(session, 'utf8')).toBe('session bytes\n')
+    expect(readFileSync(ledger, 'utf8')).toBe('ledger bytes\n')
+  })
+
   it('preserves the last archive and receipt when an upgrade pack fails', () => {
     const root = testRoot('failed-upgrade')
     const paths = deriveInstallPaths(root, 'win32')
@@ -381,6 +414,7 @@ describe('Tianwen installer contract', () => {
       env: {
         ...process.env,
         NPM_CONFIG_CACHE: 'D:\\DevData\\custom-npm-cache',
+        PNPM_CONFIG_CACHE_DIR: 'D:\\DevData\\custom-npm-cache',
         PNPM_CONFIG_STORE_DIR: 'D:\\DevData\\custom-pnpm-store',
       },
       runner: scripted.runner,

@@ -442,12 +442,17 @@ export function installTianwen({
   invokePnpm(['install', '--offline', '--frozen-lockfile', '--ignore-scripts', '--trust-lockfile'], 300_000)
   if (!hostExists) {
     mkdirSync(dirname(paths.hostRoot), { recursive: true })
-    invokePnpm([
-      '--config.inject-workspace-packages=true',
-      '--filter', '@tianwen/dsh-host',
-      'deploy', '--prod', paths.hostRoot,
-    ], 600_000)
-    dshBin = validateInstalledHost(paths.hostRoot)
+    try {
+      invokePnpm([
+        '--config.inject-workspace-packages=true',
+        '--filter', '@tianwen/dsh-host',
+        'deploy', '--prod', paths.hostRoot,
+      ], 900_000)
+      dshBin = validateInstalledHost(paths.hostRoot)
+    } catch (error) {
+      rmSync(paths.hostRoot, { force: true, recursive: true })
+      throw error
+    }
   }
 
   invokePnpm(['--filter', `${RUNTIME_PACKAGE}...`, 'build'], 300_000)
