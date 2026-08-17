@@ -274,6 +274,23 @@ class LearningIntake:
         )
 
     @staticmethod
+    def _validated_gap_outcomes(
+        store: StateStore, triage: LearningTriageReceipt, gap: ObservedGap
+    ) -> tuple[OutcomeObservation, ...]:
+        if triage.outcome_ids != gap.outcome_ids:
+            raise StateConflict("triage outcomes must exactly bind the persisted gap")
+        outcomes = tuple(
+            store.get_object("outcome_observation", outcome_id, OutcomeObservation) for outcome_id in gap.outcome_ids
+        )
+        for outcome in outcomes:
+            if outcome.authority_id is None:
+                raise StateConflict("governed outcomes require source authority")
+            authority = store.get_object("outcome_source_authority", outcome.authority_id, OutcomeSourceAuthority)
+            if not LearningIntake._matches_authority(outcome, authority):
+                raise StateConflict("governed outcome does not match its source authority")
+        return outcomes
+
+    @staticmethod
     def _fingerprint(result: TrialResult, manifest: TrialManifest, scope: str) -> str:
         return content_digest(
             {
@@ -721,12 +738,14 @@ class LearningIntake:
             or ticket.capability_scope != gap.capability_scope
             or case.capability_scope != gap.capability_scope
             or attribution.case_id != case.case_id
+            or attribution.triage_id != triage.triage_id
             or attribution.ticket_id != ticket.ticket_id
             or attribution.observed_gap_id != gap.gap_id
             or attribution.capability_scope != gap.capability_scope
             or attribution.observed_outcome != case.outcome
         ):
             raise StateConflict("conclusion chain bindings do not match")
+        self._validated_gap_outcomes(self.store, triage, gap)
         chain_evidence = self._evidence_ids_exist(gap.evidence_ids, label="chain evidence id")
         attribution_evidence = self._evidence_ids_exist(
             attribution.supporting_evidence_ids + attribution.counterevidence_ids,

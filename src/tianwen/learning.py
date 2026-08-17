@@ -10,6 +10,7 @@ from tianwen.domain import (
     ArtifactVersion,
     BudgetLimit,
     CaseRecord,
+    EvidenceRecord,
     FrozenModel,
     LessonRecord,
     LoopKind,
@@ -75,6 +76,7 @@ class AttributionRecord(FrozenModel):
     other_layers_reason: str
     recommendation_only: bool
     status: Literal["resolved", "unknown"] = "resolved"
+    triage_id: str | None = None
     ticket_id: str | None = None
     observed_gap_id: str | None = None
     capability_scope: str | None = None
@@ -230,25 +232,37 @@ class LearningEngine:
         mutation_target: str,
         rejected_targets: tuple[str, ...],
         status: Literal["resolved", "unknown"],
+        triage_id: str,
         ticket_id: str,
         observed_gap_id: str,
         capability_scope: str,
         supporting_evidence_ids: tuple[str, ...] = (),
         counterevidence_ids: tuple[str, ...] = (),
     ) -> AttributionRecord:
-        from tianwen.learning_intake import ObservedGap
+        from tianwen.learning_intake import LearningIntake, LearningTriageReceipt, ObservedGap
 
         persisted_case = self.store.get_object("case", case.case_id, CaseRecord)
         ticket = self.get_ticket(ticket_id)
         gap = self.store.get_object("observed_gap", observed_gap_id, ObservedGap)
+        triage = self.store.get_object("learning_triage", triage_id, LearningTriageReceipt)
         if (
             persisted_case != case
+            or triage.disposition != "learning_case"
+            or triage.gap_id != gap.gap_id
+            or triage.ticket_id != ticket.ticket_id
+            or triage.case_id != case.case_id
             or case.ticket_id != ticket.ticket_id
             or case.observed_gap_id != gap.gap_id
             or case.capability_scope != capability_scope
             or ticket.capability_scope != capability_scope
         ):
             raise StateConflict("governed attribution bindings do not match")
+        LearningIntake._validated_gap_outcomes(self.store, triage, gap)
+        attribution_evidence = supporting_evidence_ids + counterevidence_ids
+        for evidence_id in attribution_evidence:
+            self.store.get_object("evidence", evidence_id, EvidenceRecord)
+        if not set(attribution_evidence).issubset(set(gap.evidence_ids)):
+            raise StateConflict("governed attribution evidence must bind the persisted gap")
         return self._record_attribution(
             case,
             hypotheses=hypotheses,
@@ -256,6 +270,7 @@ class LearningEngine:
             mutation_target=mutation_target,
             rejected_targets=rejected_targets,
             status=status,
+            triage_id=triage_id,
             ticket_id=ticket_id,
             observed_gap_id=observed_gap_id,
             capability_scope=capability_scope,
@@ -273,6 +288,7 @@ class LearningEngine:
         mutation_target: str,
         rejected_targets: tuple[str, ...],
         status: Literal["resolved", "unknown"] = "resolved",
+        triage_id: str | None = None,
         ticket_id: str | None = None,
         observed_gap_id: str | None = None,
         capability_scope: str | None = None,
@@ -295,6 +311,7 @@ class LearningEngine:
         if governed:
             identity["governed"] = {
                 "status": status,
+                "triage_id": triage_id,
                 "ticket_id": ticket_id,
                 "observed_gap_id": observed_gap_id,
                 "capability_scope": capability_scope,
@@ -316,6 +333,7 @@ class LearningEngine:
             other_layers_reason="Only repo_task_skill is in the first-slice mutation scope.",
             recommendation_only=mutation_target != "repo_task_skill",
             status=status,
+            triage_id=triage_id,
             ticket_id=ticket_id,
             observed_gap_id=observed_gap_id,
             capability_scope=capability_scope,

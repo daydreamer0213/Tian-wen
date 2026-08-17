@@ -264,6 +264,7 @@ def _attribution(
         mutation_target=mutation_target,
         rejected_targets=("runtime",),
         status=status,
+        triage_id=triage.triage_id,
         ticket_id=triage.ticket_id,
         observed_gap_id=triage.gap_id,
         capability_scope=gap.capability_scope,
@@ -432,6 +433,84 @@ def test_conclude_rejects_persisted_case_with_cross_ticket_or_gap_binding(tmp_pa
     assert store.list_objects("lesson", LessonRecord) == []
     assert store.list_objects("learning_conclusion", LearningConclusionReceipt) == []
     assert _artifact_pointer_snapshot(store) == before
+
+
+def test_conclude_rejects_persisted_triage_with_missing_or_foreign_gap_outcome_binding(tmp_path: Path) -> None:
+    intake, store, triage = _governed_chain(tmp_path, "primary")
+    gap = store.get_object("observed_gap", triage.gap_id, ObservedGap)
+    foreign_store, foreign_result, _ = _source(tmp_path, "foreign-trial")
+    foreign_outcome = intake.record_trial_outcome(foreign_result, trial_store=foreign_store)
+    valid_attribution = _attribution(intake, store, triage)
+    lesson = _lesson(store, triage)
+    before = _artifact_pointer_snapshot(store)
+
+    for suffix, outcome_ids in (
+        ("missing", (gap.outcome_ids[0], "missing-outcome")),
+        ("foreign", (gap.outcome_ids[0], foreign_outcome.outcome_id)),
+    ):
+        forged_triage = LearningTriageReceipt(
+            triage_id=f"forged-triage-{suffix}",
+            gap_id=triage.gap_id,
+            outcome_ids=outcome_ids,
+            disposition="learning_case",
+            reason="schema-valid but outcome-mismatched receipt",
+            signal_id=triage.signal_id,
+            ticket_id=triage.ticket_id,
+            case_id=triage.case_id,
+        )
+        store.put_immutable_object(
+            "learning_triage", forged_triage.triage_id, forged_triage.gap_id, "recorded", forged_triage
+        )
+        forged_attribution = valid_attribution.model_copy(
+            update={
+                "attribution_id": f"forged-attribution-{suffix}",
+                "triage_id": forged_triage.triage_id,
+            }
+        )
+        store.put_immutable_object(
+            "attribution", forged_attribution.attribution_id, forged_attribution.case_id, "recorded", forged_attribution
+        )
+
+        with pytest.raises(StateConflict):
+            intake.conclude(forged_triage, forged_attribution, lesson=lesson)
+
+    assert store.list_objects("lesson", LessonRecord) == []
+    assert store.list_objects("learning_conclusion", LearningConclusionReceipt) == []
+    assert _artifact_pointer_snapshot(store) == before
+
+
+def test_governed_attribution_rejects_missing_or_out_of_gap_evidence_before_persistence(tmp_path: Path) -> None:
+    intake, store, triage = _governed_chain(tmp_path)
+    gap = store.get_object("observed_gap", triage.gap_id, ObservedGap)
+    case = store.get_object("case", triage.case_id, CaseRecord)
+    foreign_store, _foreign_result, foreign_evidence = _source(tmp_path, "foreign-evidence")
+    store.put_immutable_object(
+        "evidence", foreign_evidence.evidence_id, foreign_evidence.run_id, "recorded", foreign_evidence
+    )
+    before = _object_count(store, "attribution")
+    common = {
+        "hypotheses": ("prompt ordering", "tool selection"),
+        "earliest_divergence": "first verifier-visible action",
+        "mutation_target": "repo_task_skill",
+        "rejected_targets": ("runtime",),
+        "status": "resolved",
+        "triage_id": triage.triage_id,
+        "ticket_id": triage.ticket_id,
+        "observed_gap_id": triage.gap_id,
+        "capability_scope": gap.capability_scope,
+        "counterevidence_ids": (gap.evidence_ids[1],),
+    }
+
+    with pytest.raises(StateConflict):
+        intake.engine.record_governed_attribution(
+            case, supporting_evidence_ids=("missing-evidence",), **common
+        )
+    with pytest.raises(StateConflict):
+        intake.engine.record_governed_attribution(
+            case, supporting_evidence_ids=(foreign_evidence.evidence_id,), **common
+        )
+
+    assert _object_count(store, "attribution") == before
 
 
 def test_one_verified_failure_is_observed_without_learning_objects(tmp_path: Path) -> None:
