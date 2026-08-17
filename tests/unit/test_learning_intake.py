@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import timedelta
 from pathlib import Path
 
@@ -109,7 +110,13 @@ def _manifest(trial_id: str, task_id: str, champion: str) -> TrialManifest:
 
 
 def _source(
-    tmp_path: Path, trial_id: str, *, task_id: str = "task-1", champion: str = "champion-1", user: bool = False
+    tmp_path: Path,
+    trial_id: str,
+    *,
+    task_id: str = "task-1",
+    champion: str = "champion-1",
+    user: bool = False,
+    foreign_final: bool = False,
 ) -> tuple[StateStore, TrialResult, EvidenceRecord]:
     store, manifest = _new_store(tmp_path / f"{trial_id}.db"), _manifest(trial_id, task_id, champion)
     final = EvidenceRecord(
@@ -149,7 +156,17 @@ def _source(
         sensitivity="internal",
         provenance_ids=(f"feedback-{trial_id}",),
     )
-    evidence = (final, feedback) if user else (final,)
+    foreign = final.model_copy(
+        update={
+            "evidence_id": f"e-final-foreign-{trial_id}",
+            "run_id": "alpha:other-trial:settlement",
+            "scope": "trial:other-trial",
+        }
+    )
+    if foreign_final:
+        evidence = (final, foreign, feedback) if user else (final, foreign)
+    else:
+        evidence = (final, feedback) if user else (final,)
     result = TrialResult(
         trial_id=trial_id,
         previous_trial_id=None,
@@ -189,6 +206,11 @@ def _source(
     return store, result, feedback if user else final
 
 
+def _object_count(store: StateStore, kind: str) -> int:
+    with store._connect() as connection:
+        return int(connection.execute("SELECT count(*) FROM tw_objects WHERE kind = ?", (kind,)).fetchone()[0])
+
+
 def test_one_verified_failure_is_observed_without_learning_objects(tmp_path: Path) -> None:
     intake, store = _intake(tmp_path)
     source, result, _ = _source(tmp_path, "trial-1")
@@ -222,7 +244,8 @@ def test_two_independent_verified_failures_create_bound_gap_signal_ticket_case(t
         f"gap:{gap.gap_id}",
         gap.gap_id,
     )
-    assert receipt.candidate_version_id is None and store.list_objects("artifact", CaseRecord) == []
+    assert receipt.candidate_version_id is None
+    assert _object_count(store, "artifact") == _object_count(store, "active_pointer") == 0
 
 
 def test_explicit_user_correction_qualifies_once(tmp_path: Path) -> None:
@@ -366,3 +389,92 @@ def test_user_feedback_rejects_cross_trial_task_or_champion_binding_before_obser
             evidence_ids=(first_user.evidence_id,),
         )
     assert store.list_objects("outcome_observation", OutcomeObservation) == []
+
+
+def test_operational_verified_failure_receipts_never_qualify_for_learning(tmp_path: Path) -> None:
+    """Break caught: operational receipts can masquerade as verifier failures."""
+    intake, store = _intake(tmp_path)
+    _source_store, _result, evidence = _source(tmp_path, "trial-1")
+    store.put_immutable_object("evidence", evidence.evidence_id, evidence.run_id, "recorded", evidence)
+    outcomes = tuple(
+        OutcomeObservation(
+            outcome_id=f"operational-{number}",
+            source_kind="operational",
+            source_id=f"operational-source-{number}",
+            source_digest=f"sha256:operational-{number}",
+            outcome_kind="verified_failure",
+            capability_scope="repo_task_skill/champion-1/task/task-1@1",
+            goal_id="goal-1",
+            problem_fingerprint="sha256:shared-problem",
+            evidence_ids=(evidence.evidence_id,),
+        )
+        for number in (1, 2)
+    )
+    for outcome in outcomes:
+        store.put_immutable_object("outcome_observation", outcome.outcome_id, outcome.source_id, "recorded", outcome)
+
+    with pytest.raises(StateConflict):
+        intake.triage(outcomes)
+
+    assert _object_count(store, "learning_signal") == _object_count(store, "learning_ticket") == 0
+    assert _object_count(store, "case") == 0
+    assert _object_count(store, "artifact") == _object_count(store, "active_pointer") == 0
+
+
+def test_trial_projection_rejects_foreign_final_evidence_before_learning_objects(tmp_path: Path) -> None:
+    """Break caught: a foreign final verifier receipt can be smuggled into one TrialResult."""
+    intake, store = _intake(tmp_path)
+    source, result, _ = _source(tmp_path, "trial-1", foreign_final=True)
+
+    with pytest.raises(StateConflict):
+        intake.record_trial_outcome(result, trial_store=source)
+
+    assert _object_count(store, "outcome_observation") == _object_count(store, "observed_gap") == 0
+    assert _object_count(store, "learning_signal") == _object_count(store, "learning_ticket") == 0
+    assert _object_count(store, "case") == 0
+    assert _object_count(store, "artifact") == _object_count(store, "active_pointer") == 0
+
+
+def test_trial_projection_rejects_tampered_manifest_digest_before_observation(tmp_path: Path) -> None:
+    """Break caught: a stored Manifest can change while the durable Result stays unchanged."""
+    intake, store = _intake(tmp_path)
+    source, result, _ = _source(tmp_path, "trial-1")
+    manifest = source.get_object("alpha_trial_manifest", result.trial_id, TrialManifest)
+    tampered = manifest.model_copy(update={"task_bundle_digest": "sha256:tampered"})
+    with sqlite3.connect(source.database) as connection:
+        connection.execute(
+            "UPDATE tw_objects SET body_json = ? WHERE kind = ? AND object_id = ?",
+            (tampered.model_dump_json(), "alpha_trial_manifest", result.trial_id),
+        )
+
+    with pytest.raises(StateConflict):
+        intake.record_trial_outcome(result, trial_store=source)
+
+    assert _object_count(store, "outcome_observation") == _object_count(store, "observed_gap") == 0
+    assert _object_count(store, "learning_signal") == _object_count(store, "learning_ticket") == 0
+    assert _object_count(store, "case") == 0
+    assert _object_count(store, "artifact") == _object_count(store, "active_pointer") == 0
+
+
+def test_legacy_create_case_preserves_its_original_id_and_replays_once(tmp_path: Path) -> None:
+    """Break caught: governed Case fields change the legacy case identity."""
+    intake, store = _intake(tmp_path)
+    signal = LearningSignal(
+        signal_id="legacy-signal",
+        loop_id="meta",
+        category="legacy",
+        severity=1,
+        recurrence=2,
+        blocks_goal=False,
+        user_corrected=False,
+        evidence_ids=("legacy-evidence",),
+    )
+    ticket_id = intake.engine.enqueue(signal)
+    assert ticket_id is not None
+
+    first = intake.engine.create_case(ticket_id)
+    second = intake.engine.create_case(ticket_id)
+
+    assert first == second
+    assert first.case_id == content_digest({"learning_ticket": ticket_id, "case": "observed"})
+    assert _object_count(store, "case") == 1

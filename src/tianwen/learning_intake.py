@@ -222,16 +222,24 @@ class LearningIntake:
             or durable.verifier_digest != manifest.verifier_digest
         ):
             raise StateConflict("trial result and manifest bindings do not match")
-        evidence = self._copy_evidence(source, durable.evidence_ids)
-        if not any(
-            item.evidence_type == "alpha_final_verification"
+        evidence = tuple(
+            source.get_object("evidence", item, EvidenceRecord) for item in _ids(durable.evidence_ids, "evidence id")
+        )
+        final_verifier_records = tuple(
+            item
+            for item in evidence
+            if item.evidence_type == "alpha_final_verification"
             and item.purpose == "alpha_final_verification"
             and item.source_class == "docker_verifier"
-            and item.scope == f"trial:{durable.trial_id}"
-            and item.run_id == f"alpha:{durable.trial_id}:settlement"
-            for item in evidence
+        )
+        if not final_verifier_records or any(
+            item.scope != f"trial:{durable.trial_id}"
+            or item.run_id != f"alpha:{durable.trial_id}:settlement"
+            for item in final_verifier_records
         ):
             raise StateConflict("trial outcome requires final-verifier evidence bound to its trial and run")
+        for item in evidence:
+            self.store.put_immutable_object("evidence", item.evidence_id, item.run_id, "recorded", item)
         return durable, manifest, evidence
 
     def record_trial_outcome(self, result: TrialResult, *, trial_store: StateStore) -> OutcomeObservation:
@@ -440,6 +448,10 @@ class LearningIntake:
         if len(kinds) != 1:
             raise StateConflict("mixed outcome kinds fail closed")
         kind = durable[0].outcome_kind
+        if kind == "verified_failure" and any(
+            item.source_kind != "trial_verifier" or item.trial_id is None for item in durable
+        ):
+            raise StateConflict("verified failures must be durable trial-verifier observations")
         if len(durable) > 1 and (
             len({item.capability_scope for item in durable}) != 1
             or len({item.problem_fingerprint for item in durable}) != 1

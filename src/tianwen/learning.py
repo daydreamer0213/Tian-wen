@@ -173,8 +173,10 @@ class LearningEngine:
         ticket = self.get_ticket(ticket_id)
         governed = gap_id is not None
         case = CaseRecord(
-            case_id=content_digest(
-                {"learning_ticket": ticket_id, "case": "gap" if governed else "observed", "gap": gap_id}
+            case_id=(
+                content_digest({"learning_ticket": ticket_id, "case": "gap", "gap": gap_id})
+                if governed
+                else content_digest({"learning_ticket": ticket_id, "case": "observed"})
             ),
             loop_id=ticket.loop_id,
             problem=problem_statement or ticket.problem_statement,
