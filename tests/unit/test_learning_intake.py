@@ -555,6 +555,53 @@ def test_governed_attribution_rejects_triage_with_missing_or_foreign_signal_befo
     assert _object_count(store, "attribution") == before
 
 
+def test_governed_attribution_rejects_ticket_case_and_caller_scope_outside_gap_before_persistence(
+    tmp_path: Path,
+) -> None:
+    intake, store, triage = _governed_chain(tmp_path)
+    gap = store.get_object("observed_gap", triage.gap_id, ObservedGap)
+    ticket = store.get_object("learning_ticket", triage.ticket_id, LearningTicket)
+    case = store.get_object("case", triage.case_id, CaseRecord)
+    other_scope = "repo_task_skill/other/task/task-2@1"
+    forged_ticket = ticket.model_copy(update={"ticket_id": "scope-forged-ticket", "capability_scope": other_scope})
+    forged_case = case.model_copy(
+        update={"case_id": "scope-forged-case", "ticket_id": forged_ticket.ticket_id, "capability_scope": other_scope}
+    )
+    forged_triage = triage.model_copy(
+        update={
+            "triage_id": "scope-forged-triage",
+            "ticket_id": forged_ticket.ticket_id,
+            "case_id": forged_case.case_id,
+        }
+    )
+    store.put_immutable_object(
+        "learning_ticket", forged_ticket.ticket_id, forged_ticket.parent_loop_id, "recorded", forged_ticket
+    )
+    store.put_immutable_object("case", forged_case.case_id, forged_ticket.ticket_id, "recorded", forged_case)
+    store.put_immutable_object(
+        "learning_triage", forged_triage.triage_id, forged_triage.gap_id, "recorded", forged_triage
+    )
+    before = _object_count(store, "attribution")
+
+    with pytest.raises(StateConflict):
+        intake.engine.record_governed_attribution(
+            forged_case,
+            hypotheses=("prompt ordering", "tool selection"),
+            earliest_divergence="first verifier-visible action",
+            mutation_target="repo_task_skill",
+            rejected_targets=("runtime",),
+            status="resolved",
+            triage_id=forged_triage.triage_id,
+            ticket_id=forged_ticket.ticket_id,
+            observed_gap_id=gap.gap_id,
+            capability_scope=other_scope,
+            supporting_evidence_ids=(gap.evidence_ids[0],),
+            counterevidence_ids=(gap.evidence_ids[1],),
+        )
+
+    assert _object_count(store, "attribution") == before
+
+
 def test_one_verified_failure_is_observed_without_learning_objects(tmp_path: Path) -> None:
     intake, store = _intake(tmp_path)
     source, result, _ = _source(tmp_path, "trial-1")

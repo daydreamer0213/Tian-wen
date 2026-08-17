@@ -260,9 +260,15 @@ class LearningEngine:
             or signal.problem_fingerprint != gap.problem_fingerprint
             or ticket.problem_fingerprint != gap.problem_fingerprint
             or case.problem_fingerprint != gap.problem_fingerprint
+            or capability_scope != gap.capability_scope
             or signal.capability_scope != gap.capability_scope
+            or ticket.capability_scope != gap.capability_scope
+            or case.capability_scope != gap.capability_scope
             or case.ticket_id != ticket.ticket_id
             or case.observed_gap_id != gap.gap_id
+            or case.loop_id != ticket.loop_id
+            or ticket.parent_loop_id != signal.loop_id
+            or case.outcome != f"gap:{gap.gap_id}"
             or case.capability_scope != capability_scope
             or ticket.capability_scope != capability_scope
             or signal.evidence_ids != gap.evidence_ids
