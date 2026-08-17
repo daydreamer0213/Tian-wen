@@ -353,3 +353,39 @@ real completed Goal, in which case Alpha-B remains gated, or explicitly change
 that requirement and accept this documented Runtime limitation before
 freezing Runtime and entering Alpha-B. That Goal/value tradeoff is outside the
 controller's authority to infer from the budget approval alone.
+
+## 11. Architecture resolution and Git closure
+
+The architecture owner subsequently made the required explicit decision. It
+does not change or retroactively satisfy the Stage-A success gate:
+
+- the live proof remains failed with `request-limit-exceeded`;
+- the Goal remains active at revision 2 with its only round consumed;
+- the Goal must not be replayed or extended in place;
+- Stage A is **not passed**, but is boundedly closed under its original
+  evidence-backed stop condition;
+- the independently proven `maxOutputTokensPerRequest: 64 -> 128` fix remains;
+- Runtime is frozen as the current execution substrate with known capability
+  and known limitations. It may be reopened only if a later learning stage
+  provides repeatable evidence that it is a real blocker.
+
+No prompt addition, tool shim, scheduler, DSH fork, private-source import,
+receipt relaxation, budget relaxation, or general Runtime framework was added.
+
+Git closure preserved the stage history without rebase, squash, force-push, or
+branch deletion:
+
+```text
+approved main baseline: 08d4c6b208bdd67b35d8276c13781ec5ca62f0b2
+stage branch: codex/tianwen-real-goal-minimal-fix
+stage branch remote HEAD: a518048e5274afab87ecd58b5640b0eac7d5105d
+normal merge commit: 3896aa420cfca95e51c230de4de7063b55cf79db
+```
+
+The next entry is Alpha-B comparison infrastructure only: prove fair paired
+Champion/Challenger comparison with the same model, budget, tools, baseline,
+and verifier in independent workspaces. Entering Alpha-B does not claim Stage-A
+success and does not authorize candidate generation, promotion, or Shadow. The
+separate cumulative Alpha-B model budget is CNY 20 and remains unused at this
+handoff; all design, implementation, tests, and independent reviews must be
+completed offline before any paid call.
