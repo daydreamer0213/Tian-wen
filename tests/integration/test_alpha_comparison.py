@@ -14,6 +14,7 @@ from pydantic_ai.models.test import TestModel
 from tianwen.alpha import (
     AlphaTrialError,
     AlphaTrialRunner,
+    AlphaTrialState,
     TrialConfirmation,
     TrialManifest,
     TrialResult,
@@ -67,10 +68,18 @@ class _ProviderOne:
     name = "test"
     base_url = "https://provider.invalid/v1"
 
+    def model_profile(self, model_name: str) -> dict[str, Any]:
+        del model_name
+        return {}
+
 
 class _ProviderTwo:
     name = "test"
     base_url = "https://provider.invalid/v1"
+
+    def model_profile(self, model_name: str) -> dict[str, Any]:
+        del model_name
+        return {}
 
 
 class _ConfiguredProviderModel(_Model):
@@ -204,6 +213,7 @@ def _candidate(
 
 def _prepared_pair(
     *,
+    task_id: str = "A1",
     champion_model: _Model | None = None,
     challenger_model: _Model | None = None,
     champion_docker: _Docker | None = None,
@@ -213,12 +223,12 @@ def _prepared_pair(
     champion_runner, champion_model, champion_docker = _runner(
         "champion", request_order, model=champion_model, docker=champion_docker
     )
-    champion = champion_runner.prepare("A1", budget=_budget())
+    champion = champion_runner.prepare(task_id, budget=_budget())
     challenger_runner, challenger_model, challenger_docker = _runner(
         "challenger", request_order, model=challenger_model, docker=challenger_docker
     )
     challenger = challenger_runner.prepare(
-        "A1",
+        task_id,
         budget=_budget(),
         artifact_version=_candidate(
             champion.champion_version_id,
@@ -235,6 +245,39 @@ def _prepared_pair(
         challenger_docker,
         challenger,
     )
+
+
+async def _persist_completed_first_a5_round(runner: AlphaTrialRunner, prepared: Any) -> None:
+    """Run and persist round 1 as an interrupted A5 trial would leave it."""
+    store = prepared._app.store
+    confirmation = _confirmation(prepared)
+    store.put_immutable_object(
+        "alpha_trial_confirmation", prepared.preview.trial_id, None, "confirmed", confirmation
+    )
+    goal = prepared._app.create_goal(
+        objective=prepared.preview.objective,
+        criteria=prepared.preview.acceptance,
+        workspace=prepared.paths.workspace,
+        authorization=prepared.preview.authorizations,
+        budget=prepared.preview.budget,
+    )
+    manifest = runner._manifest(prepared, goal, confirmation)
+    manifest_digest = content_digest(manifest)
+    store.put_immutable_object(
+        "alpha_trial_manifest", prepared.preview.trial_id, goal.goal_id, "active", manifest
+    )
+    prepared.paths.trial_manifest_json.write_bytes(manifest.model_dump_json().encode("utf-8"))
+    state = store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
+    runner._put_state(
+        store,
+        state.model_copy(
+            update={"stage": "running", "trial_manifest_digest": manifest_digest, "goal_id": goal.goal_id}
+        ),
+    )
+    first = await runner._run_round(prepared, goal, manifest_digest, "round-1")
+    state = store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
+    runner._put_state(store, state.model_copy(update={"completed_round_ids": ("round-1",)}))
+    assert first.status.value == "completed"
 
 
 def _confirmation(prepared: Any) -> TrialConfirmation:
@@ -520,6 +563,52 @@ async def test_execute_rejects_post_authority_runner_identity_drift_before_reque
         await challenger_runner.execute(challenger, _confirmation(challenger))
 
     assert champion_model.request_count == challenger_model.request_count == changed_model.request_count == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("different", ("model", "provider"))
+async def test_paired_a5_resume_rejects_replacement_runner_identity_before_round_two_request(
+    different: str,
+) -> None:
+    """Break caught: a paired recovery must retain the original runner identity for round 2."""
+    if different == "provider":
+        champion_model: _Model = _ConfiguredProviderModel("champion", [], _ProviderOne())
+        challenger_model: _Model = _ConfiguredProviderModel("challenger", [], _ProviderOne())
+    else:
+        champion_model = _Model("champion", [])
+        challenger_model = _Model("challenger", [])
+    pair = _prepared_pair(
+        task_id="A5", champion_model=champion_model, challenger_model=challenger_model
+    )
+    champion_runner, champion, challenger_runner, challenger = pair[0], pair[3], pair[4], pair[7]
+    prepare_pair_authority(
+        champion_runner,
+        champion,
+        challenger_runner,
+        challenger,
+        repeat_index=1,
+        execution_order=("champion", "challenger"),
+    )
+    await _persist_completed_first_a5_round(champion_runner, champion)
+    replacement: _Model = (
+        _OtherModel("replacement", [])
+        if different == "model"
+        else _ConfiguredProviderModel("replacement", [], _ProviderTwo())
+    )
+    recovered = AlphaTrialRunner(
+        task_root=champion_runner.task_root,
+        image_lock_path=champion_runner.image_lock_path,
+        data_root=champion.paths.data_root,
+        model=replacement,
+        docker_factory=champion_runner.docker_factory,
+        allowed_drive="D:",
+    )
+
+    with pytest.raises(AlphaTrialError, match="pair|identity|model|provider"):
+        await recovered.resume(champion.preview.trial_id)
+
+    assert champion_model.request_count > 0
+    assert replacement.request_count == 0
 
 
 @pytest.mark.parametrize(

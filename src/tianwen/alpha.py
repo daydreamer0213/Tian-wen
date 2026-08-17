@@ -817,6 +817,7 @@ class AlphaTrialRunner:
             _container_config_snapshot(docker, bundle, preflight),
             app,
         )
+        self._revalidate_paired_resume_authority(prepared)
         if state.stage == "running":
             incomplete = [
                 app.store.get_object("run", run_id, RunRecord)
@@ -1283,6 +1284,20 @@ class AlphaTrialRunner:
             raise AlphaTrialError("prepared seed workspace no longer matches its frozen baseline")
         if self._run(docker.run_seed_preflight()) != prepared.seed_verifier:
             raise AlphaTrialError("prepared seed verifier no longer matches frozen authority")
+
+    def _revalidate_paired_resume_authority(self, prepared: PreparedTrial) -> None:
+        from tianwen.alpha_comparison import PairedComparisonManifest
+
+        try:
+            authority = prepared._app.store.get_object(
+                "alpha_pair_authority", prepared.preview.trial_id, PairedComparisonManifest
+            )
+        except StateConflict:
+            return
+        except (TypeError, ValueError) as error:
+            raise AlphaTrialError("paired trial authority is invalid") from error
+        if self.condition_snapshot(prepared) != authority.common_condition:
+            raise AlphaTrialError("paired trial runner identity does not match frozen pair authority")
 
     @staticmethod
     def _validate_manifest_bundle(manifest: TrialManifest, bundle: AlphaTaskBundle) -> None:
