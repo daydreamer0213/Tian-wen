@@ -248,7 +248,7 @@ async function start(): Promise<void> {
   expect(existsSync(installer)).toBe(true)
   if (process.env.TIANWEN_DSH_INSTALLER_REUSE !== '1') {
     rmSync(dshHostRoot, { recursive: true, force: true })
-    rmSync(profileRoot, { recursive: true, force: true })
+    rmSync(dirname(profileRoot), { recursive: true, force: true })
     rmSync(archive, { force: true })
     rmSync(installReceiptPath, { force: true })
   }
