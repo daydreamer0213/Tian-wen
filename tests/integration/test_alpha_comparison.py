@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import secrets
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,7 @@ from pydantic_ai.messages import UserPromptPart
 from pydantic_ai.models.test import TestModel
 
 from tianwen.alpha import (
+    AlphaTrialError,
     AlphaTrialRunner,
     TrialConfirmation,
     TrialManifest,
@@ -19,6 +22,8 @@ from tianwen.alpha import (
 from tianwen.alpha_comparison import (
     AlphaComparisonError,
     PairedArmProjection,
+    PairedComparisonAggregate,
+    PairedComparisonManifest,
     PairedComparisonResult,
     PairRole,
     aggregate_pair_results,
@@ -58,8 +63,33 @@ class _Model(TestModel):
         return await super().request(messages, *args, **kwargs)
 
 
+class _ProviderOne:
+    name = "test"
+    base_url = "https://provider.invalid/v1"
+
+
+class _ProviderTwo:
+    name = "test"
+    base_url = "https://provider.invalid/v1"
+
+
+class _ConfiguredProviderModel(_Model):
+    def __init__(self, role: str, request_order: list[str], provider: Any) -> None:
+        super().__init__(role, request_order)
+        self._configured_provider = provider
+
+    @property
+    def provider(self) -> Any:
+        return self._configured_provider
+
+
+class _OtherModel(_Model):
+    pass
+
+
 class _Docker:
-    def __init__(self) -> None:
+    def __init__(self, config_marker: str = "default") -> None:
+        self.config_marker = config_marker
         self.final_calls: list[str] = []
 
     def preflight(self) -> DockerPreflight:
@@ -72,8 +102,32 @@ class _Docker:
             image_digest="sha256:manifest",
             data_location="D:/DevData/fake-docker",
             free_bytes=1_000_000,
-            normalized_config_digest="sha256:config",
+            normalized_config_digest=content_digest(self._normalized_config("public")),
         )
+
+    def _normalized_config(self, check_id: str, *, final: bool = False) -> dict[str, Any]:
+        script = "verify.py" if final else f"{check_id}.py"
+        return {
+            "image_manifest_digest": "sha256:manifest",
+            "image_platform_digest": "sha256:platform",
+            "platform": "linux/amd64",
+            "network": "none",
+            "read_only": True,
+            "user": "65532:65532",
+            "cap_drop": ("ALL",),
+            "security_opt": ("no-new-privileges",),
+            "cpus": 1,
+            "memory_bytes": 268_435_456,
+            "pids": 64,
+            "tmpfs_bytes": 67_108_864,
+            "output_limit_bytes": 32_768,
+            "log_driver": "local",
+            "log_options": ("max-size=32768", "max-file=1"),
+            "mounts": ("/workspace", f"/checks/{script}"),
+            "working_dir": "/workspace",
+            "environment": ("HOME=/tmp", "TMPDIR=/tmp", "PYTHONDONTWRITEBYTECODE=1"),
+            "argv": ("python", "-I", f"/checks/{script}", "/workspace", self.config_marker),
+        }
 
     async def run_seed_preflight(self) -> VerifierResult:
         return VerifierResult(
@@ -111,9 +165,13 @@ def _data_root(role: str) -> Path:
 def _runner(
     role: str,
     request_order: list[str] | None = None,
+    *,
+    model: _Model | None = None,
+    docker: _Docker | None = None,
 ) -> tuple[AlphaTrialRunner, _Model, _Docker]:
     root = Path(__file__).parents[2] / "alpha"
-    model, docker = _Model(role, request_order if request_order is not None else []), _Docker()
+    model = model or _Model(role, request_order if request_order is not None else [])
+    docker = docker or _Docker()
     runner = AlphaTrialRunner(
         task_root=root / "tasks",
         image_lock_path=root / "environment" / "image.lock",
@@ -125,8 +183,12 @@ def _runner(
     return runner, model, docker
 
 
-def _candidate(parent_version_id: str, active_content: str) -> ArtifactVersion:
-    content = active_content + "\n\nAlpha-B Candidate behavior marker.\n"
+def _candidate(
+    parent_version_id: str,
+    active_content: str,
+    marker: str = "Alpha-B Candidate behavior marker.",
+) -> ArtifactVersion:
+    content = active_content + f"\n\n{marker}\n"
     digest = content_digest(content)
     return ArtifactVersion(
         artifact_id="repo-task",
@@ -140,11 +202,21 @@ def _candidate(parent_version_id: str, active_content: str) -> ArtifactVersion:
     )
 
 
-def _prepared_pair() -> tuple[Any, ...]:
+def _prepared_pair(
+    *,
+    champion_model: _Model | None = None,
+    challenger_model: _Model | None = None,
+    champion_docker: _Docker | None = None,
+    challenger_docker: _Docker | None = None,
+) -> tuple[Any, ...]:
     request_order: list[str] = []
-    champion_runner, champion_model, champion_docker = _runner("champion", request_order)
+    champion_runner, champion_model, champion_docker = _runner(
+        "champion", request_order, model=champion_model, docker=champion_docker
+    )
     champion = champion_runner.prepare("A1", budget=_budget())
-    challenger_runner, challenger_model, challenger_docker = _runner("challenger", request_order)
+    challenger_runner, challenger_model, challenger_docker = _runner(
+        "challenger", request_order, model=challenger_model, docker=challenger_docker
+    )
     challenger = challenger_runner.prepare(
         "A1",
         budget=_budget(),
@@ -173,6 +245,29 @@ def _confirmation(prepared: Any) -> TrialConfirmation:
     )
 
 
+def _delete_store_object(database: Path, kind: str, object_id: str) -> None:
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "DELETE FROM tw_objects WHERE kind = ? AND object_id = ?",
+            (kind, object_id),
+        )
+
+
+def _stale_active_pointer(database: Path, artifact_id: str, version_id: str) -> None:
+    with sqlite3.connect(database) as connection:
+        row = connection.execute(
+            "SELECT body_json FROM tw_objects WHERE kind = 'active_pointer' AND object_id = ?",
+            (artifact_id,),
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row[0])
+        payload["current_version_id"] = version_id
+        connection.execute(
+            "UPDATE tw_objects SET body_json = ? WHERE kind = 'active_pointer' AND object_id = ?",
+            (json.dumps(payload, separators=(",", ":")), artifact_id),
+        )
+
+
 def test_prepare_pair_authority_binds_equal_conditions_isolation_roles_and_order() -> None:
     champion_runner, champion_model, _, champion, challenger_runner, challenger_model, _, challenger = (
         _prepared_pair()
@@ -186,16 +281,35 @@ def test_prepare_pair_authority_binds_equal_conditions_isolation_roles_and_order
         repeat_index=1,
         execution_order=("champion", "challenger"),
     )
-    reverse = prepare_pair_authority(
+    replay = prepare_pair_authority(
         champion_runner,
         champion,
         challenger_runner,
         challenger,
+        repeat_index=1,
+        execution_order=("champion", "challenger"),
+    )
+    with pytest.raises(AlphaComparisonError, match="conflict"):
+        prepare_pair_authority(
+            champion_runner,
+            champion,
+            challenger_runner,
+            challenger,
+            repeat_index=2,
+            execution_order=("challenger", "champion"),
+        )
+    reverse_pair = _prepared_pair()
+    reverse = prepare_pair_authority(
+        reverse_pair[0],
+        reverse_pair[3],
+        reverse_pair[4],
+        reverse_pair[7],
         repeat_index=2,
         execution_order=("challenger", "champion"),
     )
 
     assert authority.pair_id != reverse.pair_id
+    assert replay == authority
     assert authority.common_condition_digest == content_digest(authority.common_condition)
     assert authority.execution_order == ("champion", "challenger")
     assert authority.champion.role == "champion"
@@ -210,7 +324,202 @@ def test_prepare_pair_authority_binds_equal_conditions_isolation_roles_and_order
         str(challenger._app.store.database.resolve())
     )
     assert authority.champion.skill_digest != authority.challenger.skill_digest
+    assert champion._app.store.list_objects("alpha_pair_authority", PairedComparisonManifest) == [
+        authority
+    ]
+    assert challenger._app.store.list_objects("alpha_pair_authority", PairedComparisonManifest) == [
+        authority
+    ]
     assert champion_model.request_count == challenger_model.request_count == 0
+
+
+@pytest.mark.anyio
+async def test_prepare_pair_authority_requires_fresh_trial_state_and_rejects_post_execution_creation() -> None:
+    (
+        champion_runner,
+        champion_model,
+        _,
+        champion,
+        challenger_runner,
+        challenger_model,
+        _,
+        challenger,
+    ) = _prepared_pair()
+    result = await champion_runner.execute(champion, _confirmation(champion))
+    request_count = champion_model.request_count
+
+    with pytest.raises(AlphaComparisonError, match="prepared"):
+        prepare_pair_authority(
+            champion_runner,
+            champion,
+            challenger_runner,
+            challenger,
+            repeat_index=1,
+            execution_order=("champion", "challenger"),
+        )
+
+    assert result.trial_id == champion.preview.trial_id
+    assert champion_model.request_count == request_count
+    assert challenger_model.request_count == 0
+
+
+def test_prepare_pair_rejects_invalid_roles_and_stale_active_pointer_before_requests() -> None:
+    (
+        champion_runner,
+        champion_model,
+        _,
+        champion,
+        challenger_runner,
+        challenger_model,
+        _,
+        challenger,
+    ) = _prepared_pair()
+
+    with pytest.raises(AlphaComparisonError, match="Champion|ACTIVE|role"):
+        prepare_pair_authority(
+            challenger_runner,
+            challenger,
+            champion_runner,
+            champion,
+            repeat_index=1,
+            execution_order=("champion", "challenger"),
+        )
+
+    first_runner, first_model, _ = _runner("candidate-one")
+    first_active = first_runner.prepare("A1", budget=_budget())
+    first_candidate = first_runner.prepare(
+        "A1",
+        budget=_budget(),
+        artifact_version=_candidate(
+            first_active.champion_version_id,
+            first_active._app.artifact(first_active.champion_version_id).content,
+            "candidate one",
+        ),
+    )
+    second_runner, second_model, _ = _runner("candidate-two")
+    second_active = second_runner.prepare("A1", budget=_budget())
+    second_candidate = second_runner.prepare(
+        "A1",
+        budget=_budget(),
+        artifact_version=_candidate(
+            second_active.champion_version_id,
+            second_active._app.artifact(second_active.champion_version_id).content,
+            "candidate two",
+        ),
+    )
+    with pytest.raises(AlphaComparisonError, match="Champion|ACTIVE|role"):
+        prepare_pair_authority(
+            first_runner,
+            first_candidate,
+            second_runner,
+            second_candidate,
+            repeat_index=1,
+            execution_order=("champion", "challenger"),
+        )
+
+    unrelated = _candidate(
+        "sha256:unrelated",
+        first_active._app.artifact(first_active.champion_version_id).content,
+        "unrelated candidate",
+    )
+    with pytest.raises(AlphaTrialError, match="parent"):
+        first_runner.prepare("A1", budget=_budget(), artifact_version=unrelated)
+
+    _stale_active_pointer(
+        champion._app.store.database,
+        "repo-task",
+        challenger.champion_version_id,
+    )
+    with pytest.raises(AlphaComparisonError, match="active|ACTIVE|pointer"):
+        prepare_pair_authority(
+            champion_runner,
+            champion,
+            challenger_runner,
+            challenger,
+            repeat_index=1,
+            execution_order=("champion", "challenger"),
+        )
+
+    assert champion_model.request_count == challenger_model.request_count == 0
+    assert first_model.request_count == second_model.request_count == 0
+
+
+@pytest.mark.parametrize("different", ("model", "provider", "docker"))
+def test_prepare_pair_rejects_real_runner_or_executor_identity_changes_before_requests(
+    different: str,
+) -> None:
+    champion_model = _Model("champion", [])
+    challenger_model = _Model("challenger", [])
+    champion_docker = _Docker("same")
+    challenger_docker = _Docker("same")
+    if different == "model":
+        challenger_model = _OtherModel("challenger", [])
+    elif different == "provider":
+        champion_model = _ConfiguredProviderModel("champion", [], _ProviderOne())
+        challenger_model = _ConfiguredProviderModel("challenger", [], _ProviderTwo())
+    else:
+        challenger_docker = _Docker("different")
+    (
+        champion_runner,
+        champion_model,
+        _,
+        champion,
+        challenger_runner,
+        challenger_model,
+        _,
+        challenger,
+    ) = _prepared_pair(
+        champion_model=champion_model,
+        challenger_model=challenger_model,
+        champion_docker=champion_docker,
+        challenger_docker=challenger_docker,
+    )
+
+    with pytest.raises(AlphaComparisonError, match="common conditions"):
+        prepare_pair_authority(
+            champion_runner,
+            champion,
+            challenger_runner,
+            challenger,
+            repeat_index=1,
+            execution_order=("champion", "challenger"),
+        )
+
+    assert champion_model.request_count == challenger_model.request_count == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("different", ("model", "provider"))
+async def test_execute_rejects_post_authority_runner_identity_drift_before_requests(
+    different: str,
+) -> None:
+    if different == "provider":
+        champion_model: _Model = _ConfiguredProviderModel("champion", [], _ProviderOne())
+        challenger_model: _Model = _ConfiguredProviderModel("challenger", [], _ProviderOne())
+    else:
+        champion_model = _Model("champion", [])
+        challenger_model = _Model("challenger", [])
+    pair = _prepared_pair(champion_model=champion_model, challenger_model=challenger_model)
+    champion_runner, champion, challenger_runner, challenger = pair[0], pair[3], pair[4], pair[7]
+    prepare_pair_authority(
+        champion_runner,
+        champion,
+        challenger_runner,
+        challenger,
+        repeat_index=1,
+        execution_order=("champion", "challenger"),
+    )
+    changed_model: _Model = (
+        _OtherModel("challenger", [])
+        if different == "model"
+        else _ConfiguredProviderModel("challenger", [], _ProviderTwo())
+    )
+    challenger_runner.model = changed_model
+
+    with pytest.raises(AlphaTrialError, match="model|provider"):
+        await challenger_runner.execute(challenger, _confirmation(challenger))
+
+    assert champion_model.request_count == challenger_model.request_count == changed_model.request_count == 0
 
 
 @pytest.mark.parametrize(
@@ -270,7 +579,7 @@ def test_prepare_pair_rejects_same_workspace_same_behavior_and_invalid_order_bef
 
     same_runner, same_model, _ = _runner("same-behavior")
     same = same_runner.prepare("A1", budget=_budget())
-    with pytest.raises(AlphaComparisonError, match="Skill"):
+    with pytest.raises(AlphaComparisonError, match="Candidate"):
         prepare_pair_authority(
             champion_runner,
             champion,
@@ -429,6 +738,61 @@ async def test_compare_pair_passes_only_complete_bound_arms_with_independent_exe
 
 
 @pytest.mark.anyio
+async def test_compare_pair_rejects_syntactically_valid_result_content_tampering() -> None:
+    authority, _, _, _, _, _, _, manifests, results = await _execute_pair()
+    cases = (
+        results["champion"].model_copy(update={"verdict": "not_met"}),
+        results["champion"].model_copy(update={"boundary_status": "violated"}),
+        results["champion"].model_copy(
+            update={
+                "usage": results["champion"].usage.model_copy(
+                    update={"tokens": results["champion"].usage.tokens + 1}
+                )
+            }
+        ),
+        results["champion"].model_copy(update={"failure_categories": ("tampered",)}),
+    )
+
+    for tampered in cases:
+        comparison = compare_pair(
+            authority,
+            champion_manifest=manifests["champion"],
+            champion_result=tampered,
+            challenger_manifest=manifests["challenger"],
+            challenger_result=results["challenger"],
+        )
+        assert comparison.status == "FAIL"
+        assert comparison.comparison is None
+        assert comparison.champion is None
+        assert comparison.challenger is not None
+
+
+@pytest.mark.anyio
+async def test_compare_pair_requires_durable_state_and_receipts_but_preserves_valid_other_arm() -> None:
+    authority, champion_runner, _, _, challenger_runner, _, _, manifests, results = await _execute_pair()
+    _delete_store_object(
+        challenger_runner.store.database,
+        "alpha_trial_result",
+        authority.challenger.trial_id,
+    )
+
+    comparison = compare_pair(
+        authority,
+        champion_manifest=manifests["champion"],
+        champion_result=results["champion"],
+        challenger_manifest=manifests["challenger"],
+        challenger_result=results["challenger"],
+    )
+
+    assert comparison.status == "INCONCLUSIVE"
+    assert comparison.comparison is None
+    assert comparison.champion is not None
+    assert comparison.challenger is None
+    assert "challenger_durable_result_missing" in comparison.reason_codes
+    assert champion_runner.store.database != challenger_runner.store.database
+
+
+@pytest.mark.anyio
 async def test_compare_pair_fails_known_binding_or_isolation_tampering_without_comparison() -> None:
     authority, _, _, _, _, _, _, manifests, results = await _execute_pair()
     cases = (
@@ -535,18 +899,44 @@ async def test_compare_pair_keeps_malformed_result_inconclusive_without_raising(
         challenger_manifest=manifests["challenger"],
         challenger_result=malformed,  # type: ignore[arg-type]
     )
-    assert precedence.status == "INCONCLUSIVE"
+    assert precedence.status == "FAIL"
     assert precedence.comparison is None
-    assert precedence.reason_codes == ("challenger_result_malformed",)
+    assert precedence.reason_codes == ("pair_authority_invalid",)
 
 
 @pytest.mark.anyio
-async def test_compare_pair_keeps_missing_or_uncertain_evidence_inconclusive() -> None:
+async def test_compare_pair_preserves_only_the_independently_valid_arm_for_partial_receipts() -> None:
     authority, _, _, _, _, _, _, manifests, results = await _execute_pair()
+    malformed_manifest = manifests["challenger"].model_dump(mode="json")
+    del malformed_manifest["task_id"]
+    malformed_result = results["challenger"].model_dump(mode="json")
+    malformed_result["verification_status"] = "corrupt"
     cases = (
         {"challenger_manifest": None},
         {"challenger_result": None},
-        {"challenger_result": results["challenger"].model_copy(update={"execution_status": "stopped"})},
+        {"challenger_manifest": malformed_manifest},
+        {"challenger_result": malformed_result},
+    )
+
+    for updates in cases:
+        arguments = {
+            "champion_manifest": manifests["champion"],
+            "champion_result": results["champion"],
+            "challenger_manifest": manifests["challenger"],
+            "challenger_result": results["challenger"],
+            **updates,
+        }
+        comparison = compare_pair(authority, **arguments)
+        assert comparison.status == "INCONCLUSIVE"
+        assert comparison.comparison is None
+        assert comparison.champion is not None
+        assert comparison.challenger is None
+
+
+@pytest.mark.anyio
+async def test_compare_pair_rejects_valid_but_non_durable_uncertain_result_copies() -> None:
+    authority, _, _, _, _, _, _, manifests, results = await _execute_pair()
+    cases = (
         {"challenger_result": results["challenger"].model_copy(update={"execution_status": "failed"})},
         {
             "challenger_result": results["challenger"].model_copy(
@@ -570,8 +960,9 @@ async def test_compare_pair_keeps_missing_or_uncertain_evidence_inconclusive() -
             **updates,
         }
         comparison = compare_pair(authority, **arguments)
-        assert comparison.status == "INCONCLUSIVE", comparison.reason_codes
+        assert comparison.status == "FAIL", comparison.reason_codes
         assert comparison.comparison is None
+        assert comparison.challenger is None
 
 
 def _arm(
@@ -629,6 +1020,10 @@ def _pair_result(
             wall_seconds=5,
         ),
     )
+    if status == "PASS" and comparison == "champion_better":
+        challenger = challenger.model_copy(update={"verdict": "not_met"})
+    elif status == "PASS" and comparison == "challenger_better":
+        champion = champion.model_copy(update={"verdict": "not_met"})
     return PairedComparisonResult(
         pair_id=pair_id,
         repeat_index=repeat_index,
@@ -690,6 +1085,31 @@ def test_aggregate_repeated_ab_ba_pairs_preserves_order_totals_and_exact_replay(
     )
     assert aggregate.champion_user_interruptions == 0
     assert aggregate.challenger_user_interruptions == 0
+
+
+def test_aggregate_deserialization_recomputes_nested_results_and_every_derived_field() -> None:
+    aggregate = aggregate_pair_results((_pair_result("pair-1", 1), _pair_result("pair-2", 2)))
+    payloads: list[dict[str, Any]] = []
+    for mutation in (
+        ("status", "FAIL"),
+        ("pair_ids", ["pair-2", "pair-1"]),
+        ("comparison_counts", {"champion_better": 2, "challenger_better": 0, "tie": 0}),
+        ("champion_usage", {**aggregate.champion_usage.model_dump(mode="json"), "tokens": 999}),
+        ("champion_user_interruptions", 1),
+        ("aggregate_id", "sha256:tampered"),
+    ):
+        payload = aggregate.model_dump(mode="json")
+        payload[mutation[0]] = mutation[1]
+        payloads.append(payload)
+    changed_result = aggregate.model_dump(mode="json")
+    changed_result["pair_results"][0]["status"] = "FAIL"
+    changed_result["pair_results"][0]["reason_codes"] = ["tampered"]
+    changed_result["pair_results"][0]["comparison"] = None
+    payloads.append(changed_result)
+
+    for payload in payloads:
+        with pytest.raises(ValueError):
+            PairedComparisonAggregate.model_validate(payload)
 
 
 def test_aggregate_marks_role_totals_unknown_when_any_repeat_is_missing_that_arm() -> None:

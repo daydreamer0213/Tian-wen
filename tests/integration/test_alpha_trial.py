@@ -46,10 +46,11 @@ class _Model(TestModel):
 
 
 class _Docker:
-    def __init__(self, *, final: VerifierResult | None = None) -> None:
+    def __init__(self, *, final: VerifierResult | None = None, config_marker: str = "default") -> None:
         self.final = final or VerifierResult(
             verdict="met", passed_checks=("final",), failed_checks=(), failure_categories=(), summary="ok"
         )
+        self.config_marker = config_marker
         self.final_calls: list[str] = []
         self.check_calls: list[tuple[str, str]] = []
         self.preflight_calls = 0
@@ -66,8 +67,32 @@ class _Docker:
             image_digest="sha256:manifest",
             data_location="D:/docker",
             free_bytes=1_000_000,
-            normalized_config_digest="sha256:config",
+            normalized_config_digest=content_digest(self._normalized_config("public")),
         )
+
+    def _normalized_config(self, check_id: str, *, final: bool = False) -> dict[str, Any]:
+        script = "verify.py" if final else f"{check_id}.py"
+        return {
+            "image_manifest_digest": "sha256:manifest",
+            "image_platform_digest": "sha256:platform",
+            "platform": "linux/amd64",
+            "network": "none",
+            "read_only": True,
+            "user": "65532:65532",
+            "cap_drop": ("ALL",),
+            "security_opt": ("no-new-privileges",),
+            "cpus": 1,
+            "memory_bytes": 268_435_456,
+            "pids": 64,
+            "tmpfs_bytes": 67_108_864,
+            "output_limit_bytes": 1024,
+            "log_driver": "local",
+            "log_options": ("max-size=1024", "max-file=1"),
+            "mounts": ("/workspace", f"/checks/{script}"),
+            "working_dir": "/workspace",
+            "environment": ("HOME=/tmp", "TMPDIR=/tmp", "PYTHONDONTWRITEBYTECODE=1"),
+            "argv": ("python", "-I", f"/checks/{script}", "/workspace", self.config_marker),
+        }
 
     async def run_seed_preflight(self) -> VerifierResult:
         self.seed_preflight_calls += 1
