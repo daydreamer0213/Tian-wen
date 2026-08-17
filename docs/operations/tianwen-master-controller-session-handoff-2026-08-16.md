@@ -1,4 +1,4 @@
-# 天问架构主控会话交接（2026-08-16）
+# 天问架构主控会话交接（2026-08-16，更新至 2026-08-17）
 
 ## 1. 用途与读取顺序
 
@@ -7,9 +7,11 @@
 
 1. 完整阅读 `docs/architecture-master-session-memory.md`；
 2. 完整阅读本文档；
-3. 从已推送的 smoke 分支读取最近阶段 canonical handoff：
-   `git show origin/codex/tianwen-live-model-smoke:docs/operations/tianwen-deepseek-v4-pro-live-smoke-handoff.md`；
-4. 只在准备具体下一阶段时，再读取对应设计、计划和代码。
+3. 先读本文第 10 节的 2026-08-17 发布收口；第 4、7、8、9 节保留的是 2026-08-16
+   时的历史动态，与第 10 节冲突时以新节为准；
+4. 读取已合入 `main` 的最近阶段 canonical handoff：
+   `docs/operations/tianwen-deepseek-v4-pro-live-goal-round-handoff.md`；
+5. 只在准备具体下一阶段时，再读取对应设计、计划和代码。
 
 长期产品共识以主控记忆为准；本文档只保存当前执行位置、工作方法和准确 Git 入口。
 
@@ -156,3 +158,60 @@ diff check 全部通过。此前全量阶段门为 Node 195 passed/7 planned ski
 后者的默认推荐是先做核心闭环和可读进度投影，桌面面板后置；DSH 可以省掉大量
 Runtime、Session、Profile、模型和普通沙盒工作，但不会自动提供天问差异化的持续学习
 控制面和最终产品体验。
+
+## 10. 2026-08-17 发布收口（当前权威动态）
+
+### 10.1 Git 与阶段状态
+
+- 持续学习治理补充设计在本地 `main` 的
+  `36bcdb55e671d21053b4656448b478b2943a65d4` 提交中，已在最终合并时保留。其状态是
+  **architecture approved / implementation unscheduled**，不是已实现产品功能；
+- live Goal 阶段分支 `codex/tianwen-live-goal-round` 已普通推送，远端精确 HEAD 为
+  `165d6307ac8e586778979ebd4efb1939a1e0f77a`；
+- 收拢分支 `codex/tianwen-integration` 已普通推送，远端精确 HEAD 为
+  `d519879d65f32f1747221f90597f729f43cf27aa`；
+- 本地 `main` 以普通 `--no-ff` 合并保留上述两条线，发布合并提交为
+  `0d88f3ef1b6a80fb332d6c1bb92c4884291f3c0c`，两个父提交依次为 `36bcdb55...` 和
+  `d519879d...`。本文档更新后的最终远端 `main` SHA 必须以当次 `git ls-remote`
+  结果为准；
+- 历史 `codex/` 分支全部继续保留为研发和验收档案。本次未 squash、未 rebase、
+  未重写历史，也未 force-push。
+
+### 10.2 真实 Goal 验收结果
+
+- 已完成用户批准的本阶段唯一真实 DeepSeek V4 Pro Goal 尝试，且没有重放。
+  它是一次受控失败，不是 Goal 成功：`failureCode=usage-invalid`、request 2、
+  retry 0、marker 未匹配；
+- 脱敏回执为
+  `D:\DevData\tianwen-live-goal-round\receipts\deepseek-v4-pro-goal-round.json`，377 bytes，
+  SHA-256
+  `9ab423f5c38c07ac328398a91a8cd6e8693c4f0f6a6e924913d92c38dcc8ee5b`；
+- 持久状态为 Goal revision 2、active、rounds 1/1；Session 66 events；Evidence 1，对应
+  `tianwen_smoke_action`；没有 `update_goal`，Champion 为 none。该 Goal 已耗尽，不得复用；
+- 持久用量事实投影为 3,369 tokens，按尝试当时官方价格表估算 CNY 0.0058254。
+  这是运维估算，不是 provider 账单或成功回执；
+- `finally` 已切回 `tianwen-offline/phase2-smoke`，fresh read-only status 的模型请求
+  增量为 0，且没有活跃 child/capture 残留。
+
+### 10.3 验收、复审与现实边界
+
+- 最终集成候选已通过 Runtime build、workspace typecheck、依赖闭包、私有导入、
+  242 passed / 7 expected skipped 的默认 Vitest、安装态 E2E、Windows LocalSandbox 3/3、
+  Python A1–A5 10/10、全量 pytest 424 passed / 4 expected skipped、Ruff 和 diff/clean 门；
+- handoff 编辑后又独立跑过 4 个聚焦 Node 文件 90/90、typecheck、Ruff 和 diff check；
+- 整体正确性复审、handoff 正确性复审和 Ponytail/YAGNI 复审都以
+  0 Critical、0 Important、0 Minor 收口；
+- 没有调用真实 Docker。同用户宿主机、已审核同进程插件和 Windows partial sandbox 的
+  现实威胁模型保持不变，不为虚假 OS 隔离增加框架。
+
+### 10.4 授权新规则与下一入口
+
+- 以后每个大阶段在开始时申请一次累计 token/CNY 上限。在同一 Goal、已批范围
+  和累计预算内，后续必要的真实模型请求不再按次询问；
+- 只有 Goal 变化、权限扩大、累计预算扩大、新的真实费用、重大不可逆风险或价值
+  取舍才再请求用户。这个新规则不追溯允许重放当前已消耗的 Goal；
+- 当前没有需要立即实现的新架构决策。下一推荐入口是狭窄离线设计/复现阶段：使用
+  已脱敏的 durable facts，查明为何第二轮没有紧接 `update_goal`，先在公开 DSH API
+  和离线 scripted trace 上证明最小修复；
+- 持续学习治理设计继续保持 **architecture approved / implementation unscheduled**。除非后续新
+  阶段明确排期，不从本次失败自动跳到完整学习闭环、Shadow/Promotion 或桌面 UI 实现。

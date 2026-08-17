@@ -1,6 +1,6 @@
 # 天问主控架构会话记忆
 
-更新日期：2026-08-16
+更新日期：2026-08-17
 
 ## 1. 文档用途
 
@@ -790,6 +790,41 @@ Alpha-A 独立实施分支为：
   `docs/architecture-master-session-memory.md` 和
   `docs/operations/tianwen-master-controller-session-handoff-2026-08-16.md`，旧会话只保留为
   历史，不再承担后续实现上下文。
+
+- DeepSeek V4 Pro 真实 Goal round 阶段已按冻结合同完成并独立存档。阶段分支
+  `codex/tianwen-live-goal-round` 远端精确 HEAD 为
+  `165d6307ac8e586778979ebd4efb1939a1e0f77a`；canonical handoff 为
+  `docs/operations/tianwen-deepseek-v4-pro-live-goal-round-handoff.md`；
+  最终集成分支 `codex/tianwen-integration` 远端精确 HEAD 为
+  `d519879d65f32f1747221f90597f729f43cf27aa`。历史 `codex/` 阶段分支继续保留，
+  未重写历史，未 force-push；
+- 该阶段的实现、离线安装态证明、Windows LocalSandbox、Python A1–A5、全量
+  Python、Ruff、类型、依赖闭包和私有导入门禁全部通过；最终正确性与
+  Ponytail/YAGNI 复审均为 0 Critical、0 Important、0 Minor。本轮没有调用
+  真实 Docker；
+- 用户批准的本阶段唯一真实 Goal 尝试已消耗，且没有重放。真实结果为
+  安全失败：`failureCode=usage-invalid`、2 次 request、0 retry、完成一次
+  `tianwen_smoke_action`，但没有 `update_goal`。Goal 保留真实持久状态：
+  revision 2、active、rounds 1/1；Session 为 66 events，Evidence 为 1，Champion 仍为 none。
+  不得把这个失败写成 Goal 成功，也不得重用该已耗尽 Goal；
+- 本次脱敏回执保存在
+  `D:\DevData\tianwen-live-goal-round\receipts\deepseek-v4-pro-goal-round.json`，
+  SHA-256 为
+  `9ab423f5c38c07ac328398a91a8cd6e8693c4f0f6a6e924913d92c38dcc8ee5b`。持久数字事实投影为
+  3,369 tokens，按当时官方价格表估算 CNY 0.0058254；该数字不是 provider
+  账单，也不是成功回执。真实尝试后已切回 `tianwen-offline/phase2-smoke`，
+  fresh read-only status 的模型请求增量为 0；
+- 用户更新了真实模型授权方式：以后每个大阶段开始时只申请一次累计
+  token/CNY 上限；在已批准的 Goal、范围和累计预算内，不再按请求次数反复
+  打断用户。只有 Goal 变化、权限扩大、累计预算扩大、新的真实费用、重大
+  不可逆风险或价值取舍才重新请求决定。此规则不追溯授权当前已消耗的 Goal；
+- 用户已批准持续学习治理补充设计：
+  `docs/superpowers/specs/2026-08-17-tianwen-continuous-learning-governance-design.md`。
+  它的状态是 **architecture approved / implementation unscheduled**；这次主分支收拢只保留
+  设计，不据此启动 Signal/Ticket、Candidate/Evaluation、Shadow/Promotion 或自动学习实现；
+- 下一推荐入口是狭窄离线设计/复现阶段：只用脱敏 Session 事实解释为何第二轮未紧接
+  调用 `update_goal`，先验证公开 DSH authority/tool-choice/output-cap 边界，再决定最小修复。
+  不在原 Goal 上提高 rounds、不放宽回执合同、不提前实现完整持续学习闭环或 UI。
 
 当前主控会话维持架构主权与阶段监督，同时按用户最新授权使用“本回合子代理”模式
 完成独立复审；不再依赖权限不稳定的派生任务会话。原 Task 10 心跳和旧 Alpha 推进
