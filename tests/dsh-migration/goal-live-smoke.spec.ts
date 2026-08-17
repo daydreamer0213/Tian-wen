@@ -6,6 +6,7 @@ import { join, relative, resolve } from 'node:path'
 import { PassThrough } from 'node:stream'
 
 import {
+  CallId,
   SessionId,
   defineTool,
   mountGoalHarness,
@@ -13,6 +14,7 @@ import {
   toolCallResponse,
   toolGoal,
 } from '@tianwen/dsh-compat'
+import type { StreamChunk } from '@tianwen/dsh-compat'
 import { describe, expect, it } from 'vitest'
 import { TianwenEvidenceService } from '../../packages/tianwen-evidence/src/index.js'
 
@@ -33,11 +35,26 @@ function withUsage(chunks: readonly unknown[], inputTokens: number) {
   ]
 }
 
+function truncatedUpdateGoalResponse(): readonly StreamChunk[] {
+  return [
+    { type: 'block-start', index: 0, blockType: 'tool-call' },
+    {
+      type: 'tool-call-delta',
+      index: 0,
+      id: CallId('live-complete-truncated'),
+      name: 'update_goal',
+      argumentsDelta: '{"partial":"' + 'x'.repeat(48),
+    },
+    { type: 'usage', usage: { inputTokens: 126, outputTokens: 64, cacheReadTokens: 1536 } },
+    { type: 'finish', reason: { kind: 'max-tokens' } },
+  ]
+}
+
 function passedChildReceipt() {
   return {
     schemaVersion: 'tianwen.goal-live-smoke.v1', status: 'passed',
     timestamp: '2026-08-16T12:34:56.789Z', provider: 'deepseek-official', model: 'deepseek-v4-pro',
-    limits: { maxRequests: 3, maxOutputTokensPerRequest: 64, maxTotalTokens: 32768, maxCostCny: 0.25, timeoutMs: 90000, maxRetries: 0 },
+    limits: { maxRequests: 3, maxOutputTokensPerRequest: 128, maxTotalTokens: 32768, maxCostCny: 0.25, timeoutMs: 90000, maxRetries: 0 },
     requestCount: 3, retryCount: 0, markerMatched: true,
     goal: { id: 'goal-receipt', revision: 3, phase: 'complete', roundsStarted: 1 },
     session: { id: 'session-receipt', eventCountDelta: 12 },
@@ -271,6 +288,8 @@ describe('tianwen live Goal smoke', () => {
     ['stops a provider failure before a global retry listener', 'provider-error', 'pass', false],
     ['rejects the fourth AgentLoop request before the provider', 'request-limit-exceeded', 'pass', false],
     ['cancels an already-expired provider request without waiting ninety seconds', 'timeout', 'pass', false],
+    ['does not fabricate an update call from an unfinished tool-call delta', 'truncated', 'pass', false],
+    ['completes the cap-sensitive update call at the fixed output ceiling', 'cap-sensitive', 'pass', false],
   ] as const)('%s', async (_name, scenario, flushMode, mutateEvolution) => {
     mkdirSync(FIXTURE_BASE, { recursive: true })
     const dataDir = mkdtempSync(join(FIXTURE_BASE, 'round-'))
@@ -299,13 +318,24 @@ describe('tianwen live Goal smoke', () => {
             withUsage(toolCallResponse('limit-action-2', 'tianwen_smoke_action', {}), 101),
             withUsage(toolCallResponse('limit-action-3', 'tianwen_smoke_action', {}), 102),
           ]
-          : [
-            withUsage(toolCallResponse('live-action', 'tianwen_smoke_action', {}), 100),
-            withUsage(toolCallResponse('live-complete', 'update_goal', {
-              action: 'complete', revision: 2, goal_id: String(goal.id),
-            }), 101),
-            withUsage(textResponse('TIANWEN_GOAL_ROUND_OK'), 102),
-          ]
+          : scenario === 'truncated'
+            ? [
+              withUsage(toolCallResponse('live-action', 'tianwen_smoke_action', {}), 100),
+              truncatedUpdateGoalResponse(),
+            ]
+            : [
+              withUsage(toolCallResponse('live-action', 'tianwen_smoke_action', {}), 100),
+              scenario === 'cap-sensitive'
+                ? request => request.maxTokens === 128
+                  ? withUsage(toolCallResponse('live-complete', 'update_goal', {
+                    goal_id: String(goal.id), revision: 2, action: 'complete',
+                  }), 126)
+                  : truncatedUpdateGoalResponse()
+                : withUsage(toolCallResponse('live-complete', 'update_goal', {
+                  action: 'complete', revision: 2, goal_id: String(goal.id),
+                }), 101),
+              withUsage(textResponse('TIANWEN_GOAL_ROUND_OK'), 102),
+            ]
       const second = await mountGoalHarness(sessionsRoot, script, { goalRoundDriver: true })
       try {
         second.adapter.resolveModel = async (provider, model) => ({
@@ -356,22 +386,38 @@ describe('tianwen live Goal smoke', () => {
           },
         })
 
-        if (flushMode !== 'pass' || mutateEvolution || scenario !== 'success') {
+        if (flushMode !== 'pass' || mutateEvolution || !['success', 'cap-sensitive'].includes(scenario)) {
           expect(receipt).toMatchObject({
             status: 'failed', failureCode: scenario === 'success'
               ? mutateEvolution ? 'internal-error' : 'persistence-unavailable'
+              : scenario === 'truncated' ? 'usage-invalid'
               : scenario,
-            requestCount: scenario === 'provider-error' ? 1 : scenario === 'timeout' ? 0 : 3, retryCount: 0,
+            requestCount: scenario === 'provider-error' ? 1 : scenario === 'timeout' ? 0 : scenario === 'truncated' ? 2 : 3,
+            retryCount: 0,
           })
-          expect(second.adapter.requests).toHaveLength(scenario === 'provider-error' ? 1 : scenario === 'timeout' ? 0 : 3)
+          expect(second.adapter.requests).toHaveLength(
+            scenario === 'provider-error' ? 1 : scenario === 'timeout' ? 0 : scenario === 'truncated' ? 2 : 3,
+          )
           expect(flushCalls).toBeGreaterThanOrEqual(scenario === 'timeout' ? 1 : 2)
           expect(globalRetryCalls).toBe(0)
           expect(JSON.stringify(receipt)).not.toContain('provider-secret-sentinel')
+          if (scenario === 'truncated') {
+            const events = (await second.ctx.sessionPersistence.inspect(sessionId)).events
+            const calls = events.filter(event => event.type === 'tool/call')
+            const results = events.filter(event => event.type === 'tool/result')
+            expect(calls.map(event => event.data.name)).toEqual(['tianwen_smoke_action'])
+            expect(results.map(event => String(event.data.message.source.callId)))
+              .toEqual(calls.map(event => String(event.data.callId)))
+          }
           const released = await second.ctx.agents.resume({
             resumeSessionId: sessionId,
             agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
           })
-          if (scenario === 'provider-error' || scenario === 'timeout') {
+          if (scenario === 'truncated') {
+            expect(second.ctx.goals.get(released.agent)).toMatchObject({
+              phase: 'active', activation: 'disarmed', roundsStarted: 1,
+            })
+          } else if (scenario === 'provider-error' || scenario === 'timeout') {
             expect(second.ctx.goals.get(released.agent)).toMatchObject({ phase: 'active', activation: 'disarmed' })
           }
           await released.dispose()
@@ -400,7 +446,7 @@ describe('tianwen live Goal smoke', () => {
           expect(request.provider).toBe('deepseek-official')
           expect(request.model).toBe('deepseek-v4-pro')
           expect(request.reasoningEffort).toBe('off')
-          expect(request.maxTokens).toBe(64)
+          expect(request.maxTokens).toBe(128)
           expect(request.tools?.map(tool => tool.name).toSorted())
             .toEqual(['tianwen_smoke_action', 'update_goal'])
         }
@@ -493,7 +539,7 @@ describe('tianwen live Goal smoke', () => {
       model: 'deepseek-v4-pro',
       limits: {
         maxRequests: 3,
-        maxOutputTokensPerRequest: 64,
+        maxOutputTokensPerRequest: 128,
         maxTotalTokens: 32768,
         maxCostCny: 0.25,
         timeoutMs: 90000,
