@@ -820,15 +820,39 @@ Alpha-A 独立实施分支为：
   不可逆风险或价值取舍才重新请求决定。此规则不追溯授权当前已消耗的 Goal；
 - 用户已批准持续学习治理补充设计：
   `docs/superpowers/specs/2026-08-17-tianwen-continuous-learning-governance-design.md`。
-  它的状态是 **architecture approved / implementation unscheduled**；这次主分支收拢只保留
-  设计，不据此启动 Signal/Ticket、Candidate/Evaluation、Shadow/Promotion 或自动学习实现；
-- 下一推荐入口是狭窄离线设计/复现阶段：只用脱敏 Session 事实解释为何第二轮未紧接
-  调用 `update_goal`，先验证公开 DSH authority/tool-choice/output-cap 边界，再决定最小修复。
-  不在原 Goal 上提高 rounds、不放宽回执合同、不提前实现完整持续学习闭环或 UI。
+  它的状态是 **architecture approved / staged implementation**；当前只按 Alpha-B、Alpha-C、
+  Alpha-D 的顺序逐段验证，不据此一次性启动 Signal/Ticket、Candidate/Evaluation、
+  Shadow/Promotion 或自动学习实现；
+- 主分支收拢后曾将下一入口锁定为狭窄离线设计/复现阶段：只用脱敏 Session 事实解释为何
+  第二轮未紧接调用 `update_goal`，先验证公开 DSH authority/tool-choice/output-cap 边界，再
+  决定最小修复；不在原 Goal 上提高 rounds、不放宽回执合同、不提前实现完整持续学习闭环或 UI；
 
-当前主控会话维持架构主权与阶段监督，同时按用户最新授权使用“本回合子代理”模式
-完成独立复审；不再依赖权限不稳定的派生任务会话。原 Task 10 心跳和旧 Alpha 推进
-保持暂停，每个新阶段仍使用独立分支、canonical handoff 和 GitHub 存档。
+- 主控（三）的“真实 Goal 最小修复”阶段已经有界结束。唯一生产修改为单请求输出上限
+  `64 -> 128`；离线门禁和独立复审均通过，新的真实链也证明完整 `update_goal` 调用不再
+  被截断。但模型提交了错误 Goal id，随后又调用未公开的 `get_goal`；严格 guard 正确拒绝，
+  三请求硬门在第四次 provider 调用前停止。结果必须保持为
+  `request-limit-exceeded`，不能写成 Goal 成功，也不能重放已耗尽的 1/1 Goal；
+- 该阶段形成的是受控的负面 Runtime 证据：已证明的最小截断修复保留，但不存在能够保证
+  模型复制正确 Goal id 或强制下一工具的已审计 DSH 公开机制。架构决定不是修改成功标准，
+  而是承认原成功门未通过，同时按原停止条件关闭 Stage A。不得继续叠加提示词、shim、
+  scheduler、DSH fork 或新的通用 Runtime 框架来追逐一次偶然成功；
+- Runtime 从这里冻结为当前已知能力与限制的执行底座。`DSH` 继续负责模型、Agent Loop、
+  工具、Session、Goal Round 和恢复；天问后续集中在 Evidence、LearningSignal、候选、评测、
+  Champion/Challenger、晋升和回滚。只有后续学习切片用可重复证据证明 Runtime 是真实阻塞时，
+  才允许重新打开该边界；
+- 进入 Alpha-B 不代表 Stage A 被追认成功。Alpha-B 的目标是证明同模型、同预算、同工具、
+  同基线、独立工作区下的 Champion/Challenger 公平成对比较，它不依赖一次真实模型恰好正确
+  调用 `update_goal`。因此在最小修复分支、handoff 和本架构决定收拢到 main 后，可以使用
+  用户已单独批准且尚未消耗的 CNY 20 Alpha-B 累计预算推进；范围内不逐次询问，越过 Goal、
+  权限或累计预算边界时再请求用户；
+- 持续学习治理补充设计已进一步确认并写入：能力发现和任务绑定不算学习；业务结果先成为
+  Observed Gap 并分诊；经验总结与假设探索是同一 Case 中的互补小循环；假设可以先通过
+  受控 Experimental Run 取证，优先使用临时 Run 绑定，只有结构性修改才创建受限
+  Experimental Challenger；实验改善不能绕过正式候选评测、Shadow 和晋升。
+
+主控（三）继续维持阶段监督、独立验收和 Git 收口。原 Task 10 心跳保持暂停；旧的宽泛
+Alpha 推进方式不恢复，改为按 Alpha-B、Alpha-C、Alpha-D 的窄切片顺序推进。每个阶段仍
+使用独立分支、canonical handoff 和 GitHub 存档。
 
 本节是动态状态。以后实施进度变化时可以更新本节，但不得借此修改前面的稳定共识。
 
