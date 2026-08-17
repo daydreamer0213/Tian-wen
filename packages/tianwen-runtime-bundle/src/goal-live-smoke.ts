@@ -7,7 +7,7 @@ export const LIVE_GOAL_MODEL = 'deepseek-v4-pro' as const
 export const LIVE_GOAL_TOOLS = ['tianwen_smoke_action', 'update_goal'] as const
 export const LIVE_GOAL_LIMITS = {
   maxRequests: 3,
-  maxOutputTokensPerRequest: 64,
+  maxOutputTokensPerRequest: 128,
   maxTotalTokens: 32768,
   maxCostCny: 0.25,
   timeoutMs: 90000,

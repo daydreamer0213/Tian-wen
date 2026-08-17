@@ -51,6 +51,7 @@ globalThis.fetch = async (url, init = {}) => {
   } catch {
     fail('invalid JSON request')
   }
+  if (body.max_tokens !== 128) fail('unexpected max_tokens')
   requestOrdinal += 1
   if (requestOrdinal > 3) fail('fourth request')
   const toolNames = Array.isArray(body.tools)

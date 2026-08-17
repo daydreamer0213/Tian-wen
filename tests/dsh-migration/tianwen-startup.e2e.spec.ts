@@ -937,7 +937,7 @@ async function start(): Promise<void> {
     const trace = readFileSync(fetchTracePath, 'utf8').trimEnd().split(/\r?\n/u)
       .map(line => JSON.parse(line) as Record<string, unknown>)
     expect(trace).toEqual([1, 2, 3].map(ordinal => ({
-      ordinal, model: 'deepseek-v4-pro', max_tokens: 64,
+      ordinal, model: 'deepseek-v4-pro', max_tokens: 128,
       tool_names: ['tianwen_smoke_action', 'update_goal'], authorization_present: true,
     })))
 
@@ -1033,7 +1033,7 @@ async function start(): Promise<void> {
       model: 'deepseek-v4-pro',
       limits: {
         maxRequests: 3,
-        maxOutputTokensPerRequest: 64,
+        maxOutputTokensPerRequest: 128,
         maxTotalTokens: 32768,
         maxCostCny: 0.25,
         timeoutMs: 90000,
