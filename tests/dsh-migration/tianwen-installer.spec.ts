@@ -275,6 +275,8 @@ describe('Tianwen installer contract', () => {
     ].map(path => readFileSync(path))).toEqual(managedBytes)
     expect([readFileSync(session), readFileSync(ledger)]).toEqual(before)
     expect(scripted.calls.filter(argv => argv.includes('deploy'))).toHaveLength(2)
+    expect(scripted.calls.filter(argv => argv.includes('pack')).map(argv =>
+      argv.filter(value => value === '--skip-manifest-obfuscation').length)).toEqual([1, 1])
     expect(scripted.calls.filter(argv => argv.includes('plugin'))).toHaveLength(0)
     expect(scripted.calls.filter(argv => argv.includes('--dump-config'))).toHaveLength(2)
     const dshBin = join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')

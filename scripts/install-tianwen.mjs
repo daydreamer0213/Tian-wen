@@ -466,7 +466,10 @@ export function installTianwen({
   let profileChanged = false
   mkdirSync(archiveStage, { recursive: true })
   try {
-    invokePnpm(['--filter', RUNTIME_PACKAGE, 'pack', '--pack-destination', archiveStage], 300_000)
+    invokePnpm([
+      '--filter', RUNTIME_PACKAGE, 'pack', '--skip-manifest-obfuscation',
+      '--pack-destination', archiveStage,
+    ], 300_000)
     if (!statSync(stagedArchive).isFile()) throw new Error('Runtime Bundle archive was not created')
     archiveDigest = sha256File(stagedArchive)
     profileChanged = !profileExists || installedArchiveDigest !== archiveDigest
