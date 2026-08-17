@@ -245,16 +245,29 @@ class LearningEngine:
         ticket = self.get_ticket(ticket_id)
         gap = self.store.get_object("observed_gap", observed_gap_id, ObservedGap)
         triage = self.store.get_object("learning_triage", triage_id, LearningTriageReceipt)
+        if triage.signal_id is None:
+            raise StateConflict("governed attribution requires a triage signal")
+        signal = self.store.get_object("learning_signal", triage.signal_id, LearningSignal)
         if (
             persisted_case != case
             or triage.disposition != "learning_case"
             or triage.gap_id != gap.gap_id
+            or triage.signal_id != ticket.signal_id
             or triage.ticket_id != ticket.ticket_id
             or triage.case_id != case.case_id
+            or ticket.signal_id != signal.signal_id
+            or signal.observed_gap_id != gap.gap_id
+            or signal.problem_fingerprint != gap.problem_fingerprint
+            or ticket.problem_fingerprint != gap.problem_fingerprint
+            or case.problem_fingerprint != gap.problem_fingerprint
+            or signal.capability_scope != gap.capability_scope
             or case.ticket_id != ticket.ticket_id
             or case.observed_gap_id != gap.gap_id
             or case.capability_scope != capability_scope
             or ticket.capability_scope != capability_scope
+            or signal.evidence_ids != gap.evidence_ids
+            or ticket.evidence_ids != gap.evidence_ids
+            or case.evidence_ids != gap.evidence_ids
         ):
             raise StateConflict("governed attribution bindings do not match")
         LearningIntake._validated_gap_outcomes(self.store, triage, gap)

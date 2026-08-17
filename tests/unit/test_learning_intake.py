@@ -513,6 +513,48 @@ def test_governed_attribution_rejects_missing_or_out_of_gap_evidence_before_pers
     assert _object_count(store, "attribution") == before
 
 
+def test_governed_attribution_rejects_triage_with_missing_or_foreign_signal_before_persistence(
+    tmp_path: Path,
+) -> None:
+    intake, store, triage = _governed_chain(tmp_path, "primary")
+    second_first_store, second_first, _ = _source(tmp_path, "secondary-trial-1")
+    second_second_store, second_second, _ = _source(tmp_path, "secondary-trial-2")
+    secondary = intake.triage(
+        (
+            intake.record_trial_outcome(second_first, trial_store=second_first_store),
+            intake.record_trial_outcome(second_second, trial_store=second_second_store),
+        )
+    )
+    gap = store.get_object("observed_gap", triage.gap_id, ObservedGap)
+    case = store.get_object("case", triage.case_id, CaseRecord)
+    before = _object_count(store, "attribution")
+    common = {
+        "hypotheses": ("prompt ordering", "tool selection"),
+        "earliest_divergence": "first verifier-visible action",
+        "mutation_target": "repo_task_skill",
+        "rejected_targets": ("runtime",),
+        "status": "resolved",
+        "ticket_id": triage.ticket_id,
+        "observed_gap_id": triage.gap_id,
+        "capability_scope": gap.capability_scope,
+        "supporting_evidence_ids": (gap.evidence_ids[0],),
+        "counterevidence_ids": (gap.evidence_ids[1],),
+    }
+
+    for suffix, signal_id in (("missing", "missing-signal"), ("foreign", secondary.signal_id)):
+        forged_triage = triage.model_copy(
+            update={"triage_id": f"signal-forged-triage-{suffix}", "signal_id": signal_id}
+        )
+        store.put_immutable_object(
+            "learning_triage", forged_triage.triage_id, forged_triage.gap_id, "recorded", forged_triage
+        )
+
+        with pytest.raises(StateConflict):
+            intake.engine.record_governed_attribution(case, triage_id=forged_triage.triage_id, **common)
+
+    assert _object_count(store, "attribution") == before
+
+
 def test_one_verified_failure_is_observed_without_learning_objects(tmp_path: Path) -> None:
     intake, store = _intake(tmp_path)
     source, result, _ = _source(tmp_path, "trial-1")
