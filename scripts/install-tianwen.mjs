@@ -482,7 +482,7 @@ export function installTianwen({
         '--config.inject-workspace-packages=true',
         '--filter', '@tianwen/profile-host',
         'deploy', '--prod', paths.profileRoot,
-      ], 600_000)
+      ], 900_000)
       normalizeDeployedProfile(paths, paths.profileRoot)
       const deployedManifest = validateProfile(paths)
       resolveInstalledCli(deployedManifest, repoRoot)

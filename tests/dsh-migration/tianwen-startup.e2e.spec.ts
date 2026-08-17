@@ -258,7 +258,7 @@ async function start(): Promise<void> {
     '--data-dir',
     tianwenRoot,
     '--json',
-  ], env, 1_500_000)
+  ], env, 2_100_000)
   expect(
     firstInstall.status,
     `${firstInstall.stdout}\n${firstInstall.stderr}\n${firstInstall.error?.message ?? ''}`,
@@ -1167,5 +1167,5 @@ async function start(): Promise<void> {
 describe('Tianwen formal headless startup', () => {
   it.runIf(enabled)('installs the formal Profile and proves the public headless authority path', async () => {
     await start()
-  }, 2_100_000)
+  }, 2_700_000)
 })

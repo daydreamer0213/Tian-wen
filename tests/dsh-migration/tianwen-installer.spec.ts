@@ -287,7 +287,7 @@ describe('Tianwen installer contract', () => {
     expect(scripted.spawnOptions[scripted.calls.findIndex(argv =>
       argv.includes('deploy') && argv.includes('@tianwen/dsh-host'))]?.timeout).toBe(900_000)
     expect(scripted.spawnOptions[scripted.calls.findIndex(argv =>
-      argv.includes('deploy') && argv.includes('@tianwen/profile-host'))]?.timeout).toBe(600_000)
+      argv.includes('deploy') && argv.includes('@tianwen/profile-host'))]?.timeout).toBe(900_000)
     expect(scripted.calls.every(argv => !argv.includes(session) && !argv.includes(ledger))).toBe(true)
   })
 
