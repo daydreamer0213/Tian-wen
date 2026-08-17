@@ -20,6 +20,7 @@ from tianwen.alpha_comparison import (
     AlphaComparisonError,
     PairedArmProjection,
     PairedComparisonResult,
+    PairRole,
     aggregate_pair_results,
     compare_pair,
     prepare_pair_authority,
@@ -36,12 +37,15 @@ from tianwen.domain import (
 
 
 class _Model(TestModel):
-    def __init__(self) -> None:
+    def __init__(self, role: str, request_order: list[str]) -> None:
         super().__init__(custom_output_text="completed", call_tools=[])
+        self.role = role
+        self.request_order = request_order
         self.request_count = 0
         self.prompts: list[str] = []
 
     async def request(self, messages: list[Any], *args: Any, **kwargs: Any) -> Any:
+        self.request_order.append(self.role)
         self.request_count += 1
         self.prompts.append(
             next(
@@ -104,9 +108,12 @@ def _data_root(role: str) -> Path:
     return root
 
 
-def _runner(role: str) -> tuple[AlphaTrialRunner, _Model, _Docker]:
+def _runner(
+    role: str,
+    request_order: list[str] | None = None,
+) -> tuple[AlphaTrialRunner, _Model, _Docker]:
     root = Path(__file__).parents[2] / "alpha"
-    model, docker = _Model(), _Docker()
+    model, docker = _Model(role, request_order if request_order is not None else []), _Docker()
     runner = AlphaTrialRunner(
         task_root=root / "tasks",
         image_lock_path=root / "environment" / "image.lock",
@@ -134,9 +141,10 @@ def _candidate(parent_version_id: str, active_content: str) -> ArtifactVersion:
 
 
 def _prepared_pair() -> tuple[Any, ...]:
-    champion_runner, champion_model, champion_docker = _runner("champion")
+    request_order: list[str] = []
+    champion_runner, champion_model, champion_docker = _runner("champion", request_order)
     champion = champion_runner.prepare("A1", budget=_budget())
-    challenger_runner, challenger_model, challenger_docker = _runner("challenger")
+    challenger_runner, challenger_model, challenger_docker = _runner("challenger", request_order)
     challenger = challenger_runner.prepare(
         "A1",
         budget=_budget(),
@@ -305,7 +313,11 @@ def test_prepare_pair_rejects_shared_durable_store_before_requests() -> None:
     assert champion_model.request_count == challenger_model.request_count == 0
 
 
-async def _execute_pair() -> tuple[Any, ...]:
+async def _execute_pair(
+    *,
+    repeat_index: int = 1,
+    execution_order: tuple[PairRole, PairRole] = ("champion", "challenger"),
+) -> tuple[Any, ...]:
     (
         champion_runner,
         champion_model,
@@ -321,8 +333,8 @@ async def _execute_pair() -> tuple[Any, ...]:
         champion,
         challenger_runner,
         challenger,
-        repeat_index=1,
-        execution_order=("champion", "challenger"),
+        repeat_index=repeat_index,
+        execution_order=execution_order,
     )
     prepared = {"champion": champion, "challenger": challenger}
     runners = {"champion": champion_runner, "challenger": challenger_runner}
@@ -678,6 +690,103 @@ def test_aggregate_repeated_ab_ba_pairs_preserves_order_totals_and_exact_replay(
     )
     assert aggregate.champion_user_interruptions == 0
     assert aggregate.challenger_user_interruptions == 0
+
+
+def test_aggregate_marks_role_totals_unknown_when_any_repeat_is_missing_that_arm() -> None:
+    complete = _pair_result("pair-1", 1)
+    missing_challenger = _pair_result("pair-2", 2).model_copy(
+        update={
+            "status": "INCONCLUSIVE",
+            "reason_codes": ("challenger_result_missing",),
+            "comparison": None,
+            "challenger": None,
+        }
+    )
+
+    aggregate = aggregate_pair_results((complete, missing_challenger))
+
+    assert aggregate.status == "INCONCLUSIVE"
+    assert aggregate.champion_usage == TrialUsage(
+        model_requests=2,
+        tokens=20,
+        tool_calls=4,
+        action_effects=6,
+        wall_seconds=8,
+    )
+    assert aggregate.champion_user_interruptions == 0
+    assert aggregate.challenger_usage is None
+    assert aggregate.challenger_user_interruptions is None
+
+
+@pytest.mark.anyio
+async def test_aggregate_executes_two_complete_fake_pairs_in_frozen_ab_ba_order() -> None:
+    ab = await _execute_pair(
+        repeat_index=1,
+        execution_order=("champion", "challenger"),
+    )
+    ba = await _execute_pair(
+        repeat_index=2,
+        execution_order=("challenger", "champion"),
+    )
+    executions = (ab, ba)
+    comparisons = tuple(
+        compare_pair(
+            executed[0],
+            champion_manifest=executed[7]["champion"],
+            champion_result=executed[8]["champion"],
+            challenger_manifest=executed[7]["challenger"],
+            challenger_result=executed[8]["challenger"],
+        )
+        for executed in executions
+    )
+
+    aggregate = aggregate_pair_results(comparisons)
+
+    assert tuple(executed[0].execution_order for executed in executions) == (
+        ("champion", "challenger"),
+        ("challenger", "champion"),
+    )
+    assert ab[2].request_order == ["champion", "challenger"]
+    assert ba[2].request_order == ["challenger", "champion"]
+    assert tuple(result.status for result in comparisons) == ("PASS", "PASS")
+    assert aggregate == aggregate_pair_results(comparisons)
+    assert aggregate.pair_ids == tuple(result.pair_id for result in comparisons)
+    assert len(
+        {
+            leg.trial_id
+            for executed in executions
+            for leg in (executed[0].champion, executed[0].challenger)
+        }
+    ) == 4
+    assert len(
+        {
+            leg.workspace_identity
+            for executed in executions
+            for leg in (executed[0].champion, executed[0].challenger)
+        }
+    ) == 4
+    assert len(
+        {
+            leg.store_identity
+            for executed in executions
+            for leg in (executed[0].champion, executed[0].challenger)
+        }
+    ) == 4
+    assert len(
+        {
+            result.goal_id
+            for executed in executions
+            for result in executed[8].values()
+        }
+    ) == 4
+    assert len(
+        {
+            prompt
+            for executed in executions
+            for model in (executed[2], executed[5])
+            for prompt in model.prompts
+        }
+    ) == 4
 
 
 @pytest.mark.parametrize(

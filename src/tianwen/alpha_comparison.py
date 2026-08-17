@@ -123,10 +123,10 @@ class PairedComparisonAggregate(FrozenModel):
     pair_ids: tuple[str, ...]
     pair_results: tuple[PairedComparisonResult, ...]
     comparison_counts: dict[str, int]
-    champion_usage: TrialUsage
-    challenger_usage: TrialUsage
-    champion_user_interruptions: int = Field(ge=0)
-    challenger_user_interruptions: int = Field(ge=0)
+    champion_usage: TrialUsage | None
+    challenger_usage: TrialUsage | None
+    champion_user_interruptions: int | None = Field(ge=0)
+    challenger_user_interruptions: int | None = Field(ge=0)
 
 
 def _pair_id(
@@ -479,21 +479,23 @@ def compare_pair(
     )
 
 
-def _total_usage(
+def _role_totals(
     results: tuple[PairedComparisonResult, ...],
     role: PairRole,
-) -> TrialUsage:
-    usages = tuple(
-        arm.usage
-        for result in results
-        if (arm := getattr(result, role)) is not None
-    )
-    return TrialUsage(
-        model_requests=sum(usage.model_requests for usage in usages),
-        tokens=sum(usage.tokens for usage in usages),
-        tool_calls=sum(usage.tool_calls for usage in usages),
-        action_effects=sum(usage.action_effects for usage in usages),
-        wall_seconds=sum(usage.wall_seconds for usage in usages),
+) -> tuple[TrialUsage | None, int | None]:
+    arms = tuple(getattr(result, role) for result in results)
+    if any(arm is None for arm in arms):
+        return None, None
+    complete_arms = tuple(arm for arm in arms if arm is not None)
+    return (
+        TrialUsage(
+            model_requests=sum(arm.usage.model_requests for arm in complete_arms),
+            tokens=sum(arm.usage.tokens for arm in complete_arms),
+            tool_calls=sum(arm.usage.tool_calls for arm in complete_arms),
+            action_effects=sum(arm.usage.action_effects for arm in complete_arms),
+            wall_seconds=sum(arm.usage.wall_seconds for arm in complete_arms),
+        ),
+        sum(arm.user_interruptions for arm in complete_arms),
     )
 
 
@@ -523,26 +525,16 @@ def aggregate_pair_results(
         comparison: sum(result.comparison == comparison for result in pair_results)
         for comparison in ("champion_better", "challenger_better", "tie")
     }
-    champion_usage = _total_usage(pair_results, "champion")
-    challenger_usage = _total_usage(pair_results, "challenger")
-    champion_user_interruptions = sum(
-        result.champion.user_interruptions
-        for result in pair_results
-        if result.champion is not None
-    )
-    challenger_user_interruptions = sum(
-        result.challenger.user_interruptions
-        for result in pair_results
-        if result.challenger is not None
-    )
+    champion_usage, champion_user_interruptions = _role_totals(pair_results, "champion")
+    challenger_usage, challenger_user_interruptions = _role_totals(pair_results, "challenger")
     payload = {
         "schema_version": "tianwen.alpha_b_pair_aggregate.v1",
         "status": status,
         "pair_ids": pair_ids,
         "pair_results": [result.model_dump(mode="json") for result in pair_results],
         "comparison_counts": comparison_counts,
-        "champion_usage": champion_usage.model_dump(mode="json"),
-        "challenger_usage": challenger_usage.model_dump(mode="json"),
+        "champion_usage": champion_usage.model_dump(mode="json") if champion_usage else None,
+        "challenger_usage": challenger_usage.model_dump(mode="json") if challenger_usage else None,
         "champion_user_interruptions": champion_user_interruptions,
         "challenger_user_interruptions": challenger_user_interruptions,
     }
