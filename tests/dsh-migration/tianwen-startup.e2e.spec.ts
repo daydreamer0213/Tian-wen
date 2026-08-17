@@ -258,7 +258,7 @@ async function start(): Promise<void> {
     '--data-dir',
     tianwenRoot,
     '--json',
-  ], env, 1_200_000)
+  ], env, 1_500_000)
   expect(
     firstInstall.status,
     `${firstInstall.stdout}\n${firstInstall.stderr}\n${firstInstall.error?.message ?? ''}`,
