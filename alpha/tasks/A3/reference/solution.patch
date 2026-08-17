@@ -1,0 +1,6 @@
+diff --git a/query.py b/query.py
+--- a/query.py
++++ b/query.py
+@@ -9 +9 @@
+-    return urlencode(parameters)
++    return urlencode(parameters, doseq=True)

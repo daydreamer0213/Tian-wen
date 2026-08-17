@@ -1,0 +1,47 @@
+diff --git a/records.py b/records.py
+--- a/records.py
++++ b/records.py
+@@ -1,6 +1,40 @@
+ from __future__ import annotations
+-
+-
++import csv
++def _normalize_delimiters(line: str) -> str:
++    result: list[str] = []
++    quoted = False
++    index = 0
++    while index < len(line):
++        char = line[index]
++        result.append(char)
++        if char == '"':
++            if quoted and index + 1 < len(line) and line[index + 1] == '"':
++                result.append('"')
++                index += 2
++                continue
++            quoted = not quoted
++            if not quoted:
++                next_index = index + 1
++                while next_index < len(line) and line[next_index].isspace():
++                    next_index += 1
++                if next_index == len(line) or line[next_index] == "|":
++                    index = next_index
++                    continue
++        index += 1
++    return "".join(result)
+ def parse_record(line: str) -> tuple[str, ...]:
+     """Parse one pipe-separated record."""
+-    return tuple(part.strip() for part in line.split("|"))
++    try:
++        fields = next(
++            csv.reader(
++                [_normalize_delimiters(line)],
++                delimiter="|",
++                quotechar='"',
++                doublequote=True,
++                skipinitialspace=True,
++                strict=True,
++            )
++        )
++    except csv.Error as error:
++        raise ValueError("malformed record") from error
++    return tuple(field.strip() for field in fields)

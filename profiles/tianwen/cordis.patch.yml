@@ -1,0 +1,21 @@
+- id: agent-default-model
+  config:
+    provider: tianwen-offline
+    model: phase2-smoke
+
+- id: session-persistence-jsonl
+  config:
+    root: 'D:/DevData/tianwen/dsh-home/sessions'
+    compression: none
+    packChunks: false
+
+- id: tianwen-runtime
+  config:
+    evolutionRoot: 'D:/DevData/tianwen/state/evolution'
+
+- insert:
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+
+    - id: tianwen-phase2-smoke
+      name: '@tianwen/runtime-bundle/smoke'

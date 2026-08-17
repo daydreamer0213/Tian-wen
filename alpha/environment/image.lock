@@ -1,0 +1,8 @@
+{
+  "immutable_reference": "python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7",
+  "manifest_digest": "sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7",
+  "platform": "linux/amd64",
+  "platform_digest": "sha256:c00fc7b44d844b6da22861ec24af43968a5200eac4ec607b4725d585165d6b49",
+  "reference": "python:3.12.11-slim-bookworm",
+  "schema_version": "tianwen.alpha_image.v1"
+}

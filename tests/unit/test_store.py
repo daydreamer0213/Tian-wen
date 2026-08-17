@@ -196,6 +196,18 @@ def test_existing_run_cannot_replace_its_frozen_manifest(tmp_path: Path) -> None
     assert store.get_object("run", run.run_id, RunRecord).manifest.model_id == "model-a"
 
 
+def test_trial_manifest_requires_immutable_write_api(tmp_path: Path) -> None:
+    """Break caught: mutable writes could replace the recovered trial authority."""
+    store = store_at(tmp_path / "state.db")
+    manifest = make_run()
+
+    with pytest.raises(StateConflict, match="immutable governance alpha_trial_manifest"):
+        store.put_object("alpha_trial_manifest", "trial", None, "active", manifest)
+
+    store.put_immutable_object("alpha_trial_manifest", "trial", None, "active", manifest)
+    store.put_immutable_object("alpha_trial_manifest", "trial", None, "active", manifest)
+
+
 def test_existing_run_cannot_replace_its_persisted_parent_id(tmp_path: Path) -> None:
     store = store_at(tmp_path / "state.db")
     run = make_run()
@@ -396,6 +408,29 @@ def test_recovery_persists_running_action_as_unknown(tmp_path: Path) -> None:
     assert changed[0].status is ActionStatus.UNKNOWN
     events = store.list_events("run")
     assert events[-1].kind == "action_unknown_after_recovery"
+
+
+def test_settle_unknown_action_is_a_narrow_compare_and_swap(tmp_path: Path) -> None:
+    store = store_at(tmp_path / "state.db")
+    action = make_action(status=ActionStatus.UNKNOWN)
+    store.prepare_action(action)
+
+    settled = store.settle_unknown_action(action.action_id, ActionStatus.SUCCEEDED, "sha256:result")
+
+    assert settled.status is ActionStatus.SUCCEEDED
+    assert settled.result_digest == "sha256:result"
+    with pytest.raises(StateConflict, match="unknown"):
+        store.settle_unknown_action(action.action_id, ActionStatus.FAILED, "sha256:other")
+
+
+@pytest.mark.parametrize("target", (ActionStatus.RUNNING, ActionStatus.UNKNOWN, ActionStatus.CANCELLED))
+def test_settle_unknown_action_rejects_non_terminal_targets(tmp_path: Path, target: ActionStatus) -> None:
+    store = store_at(tmp_path / "state.db")
+    action = make_action(status=ActionStatus.UNKNOWN)
+    store.prepare_action(action)
+
+    with pytest.raises(StateConflict, match="terminal"):
+        store.settle_unknown_action(action.action_id, target, "sha256:result")
 
 
 def test_child_loop_must_keep_persisted_parent_goal(tmp_path: Path) -> None:

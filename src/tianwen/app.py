@@ -58,12 +58,13 @@ from tianwen.exploration import (
     ExplorationEngine,
     build_live_fetch_tool,
     build_live_search_tool,
+    format_untrusted_evidence,
     recorded_fetch_tool,
     recorded_search_tool,
 )
 from tianwen.learning import AttributionRecord, LearningEngine, LearningSignal
 from tianwen.memory import CapabilityLedger, CapabilityObservation
-from tianwen.runtime import RepoTaskRuntime, RuntimeConfig, runtime_manifest_digests
+from tianwen.runtime import RepoTaskRuntime, RuntimeConfig, model_identity, runtime_manifest_digests
 from tianwen.store import GovernanceStore, StateConflict, StateStore
 
 
@@ -249,7 +250,7 @@ class TianwenApp:
     def _manifest(self, *, prompt: str, skill_version: str, skill_digest: str, goal: GoalContract) -> RunManifest:
         runtime_config = RuntimeConfig(
             workspace=self.config.workspace.resolve(),
-            skill_dir=self._materialize(skill_version),
+            skill_dir=self.materialize_skill(skill_version),
             allowed_commands=self.config.allowed_commands,
         )
         digests = runtime_manifest_digests(runtime_config)
@@ -258,7 +259,7 @@ class TianwenApp:
             schema_version="1",
             pydantic_ai_version=version("pydantic-ai-slim"),
             harness_version=version("pydantic-ai-harness"),
-            model_id=self._model_id(),
+            model_id=model_identity(self.config.model, schema_version="1"),
             prompt_digest=content_digest(prompt),
             skill_versions={"repo_task": skill_version},
             skill_digests={"repo_task": skill_digest},
@@ -268,10 +269,7 @@ class TianwenApp:
             workspace_digest=digests["workspace_digest"],
         )
 
-    def _model_id(self) -> str:
-        return self.config.model if isinstance(self.config.model, str) else self.config.model.model_name
-
-    def _materialize(self, version_id: str) -> Path:
+    def materialize_skill(self, version_id: str) -> Path:
         artifact = self.artifact(version_id)
         root = self.data_dir / "materialized" / version_id.removeprefix("sha256:") / "repo-task"
         root.mkdir(parents=True, exist_ok=True)
@@ -371,7 +369,11 @@ class TianwenApp:
         required = self._coverage_tokens(subject)
         if not required or not any(len(token) >= 4 or token.isdigit() for token in required):
             return False
-        governed_text = " ".join(item.summary for item in evidence)
+        governed_text = " ".join(
+            part
+            for item in evidence
+            for part in (item.summary, item.untrusted_excerpt.text if item.untrusted_excerpt is not None else "")
+        )
         return required <= self._coverage_tokens(governed_text)
 
     def _explorer(self, live: bool, brief: ExplorationBrief) -> ExplorationEngine:
@@ -441,10 +443,10 @@ class TianwenApp:
             ),
         )
         runtime = self._runtime(
-            RuntimeConfig(repo.resolve(), self._materialize(champion.version_id), self.config.allowed_commands)
+            RuntimeConfig(repo.resolve(), self.materialize_skill(champion.version_id), self.config.allowed_commands)
         )
         outcome = asyncio.run(runtime.run(run, prompt))
-        self._project_run_outcomes(goal_id, run.run_id)
+        self.project_run_outcomes(goal_id, run.run_id)
         if outcome.waiting_action_ids:
             return f"waiting_approval:{outcome.checkpoint_id}"
         return outcome.output or ""
@@ -474,12 +476,12 @@ class TianwenApp:
             self._runtime(
                 RuntimeConfig(
                     Path(control.workspace),
-                    self._materialize(skill_version),
+                    self.materialize_skill(skill_version),
                     control.allowed_commands,
                 )
             ).resume_approval(run, checkpoint_id, approvals)
         )
-        self._project_run_outcomes(control.goal_id, run.run_id)
+        self.project_run_outcomes(control.goal_id, run.run_id)
         if outcome.waiting_action_ids:
             return f"waiting_approval:{outcome.checkpoint_id}"
         return outcome.output or ""
@@ -501,12 +503,12 @@ class TianwenApp:
             self._runtime(
                 RuntimeConfig(
                     Path(control.workspace),
-                    self._materialize(skill_version),
+                    self.materialize_skill(skill_version),
                     control.allowed_commands,
                 )
             ).recover(run)
         )
-        self._project_run_outcomes(control.goal_id, run.run_id)
+        self.project_run_outcomes(control.goal_id, run.run_id)
         recovered = self.store.get_object("run", run_id, RunRecord)
         if recovered.status_reason == "unknown_action":
             return f"waiting_unknown:{','.join(outcome.waiting_action_ids)}"
@@ -599,6 +601,9 @@ class TianwenApp:
                 "source_class": source.source_class,
                 "locator": source.locator,
                 "title": source.title,
+                "content_digest": source.content_digest,
+                "retrieved_at": source.retrieved_at.isoformat(),
+                "trust_status": source.trust_status,
             }
             for source in sorted(source_records.values(), key=lambda item: item.source_id)[:8]
         )
@@ -607,6 +612,7 @@ class TianwenApp:
                 "evidence_id": record.evidence_id,
                 "source_ids": ",".join(sorted(record.provenance_ids)),
                 "summary": record.summary,
+                **({"untrusted_data": format_untrusted_evidence(record)} if record.untrusted_excerpt else {}),
             }
             for record in sorted(evidence_records.values(), key=lambda item: item.evidence_id)[:8]
         )
@@ -615,7 +621,7 @@ class TianwenApp:
     def _brief_task(self, report: ExplorationReport) -> str:
         return self.store.get_object("exploration_brief", report.brief_id, ExplorationBrief).task_id
 
-    def _project_run_outcomes(self, goal_id: str, run_id: str) -> None:
+    def project_run_outcomes(self, goal_id: str, run_id: str) -> None:
         meta = self.meta_loop(goal_id)
         scope = f"goal:{goal_id}:execution"
         actions = [
