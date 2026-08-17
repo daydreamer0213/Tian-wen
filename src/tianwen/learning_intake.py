@@ -7,8 +7,8 @@ from typing import Literal, cast
 from pydantic import model_validator
 
 from tianwen.alpha import TrialManifest, TrialResult
-from tianwen.domain import EvidenceRecord, FrozenModel, LoopKind, LoopRecord, content_digest
-from tianwen.learning import LearningEngine, LearningSignal
+from tianwen.domain import CaseRecord, EvidenceRecord, FrozenModel, LessonRecord, LoopKind, LoopRecord, content_digest
+from tianwen.learning import AttributionRecord, LearningEngine, LearningSignal, LearningTicket
 from tianwen.memory import MemoryFirewall, MemoryProposal, MemoryStore
 from tianwen.store import StateConflict, StateStore
 
@@ -162,6 +162,35 @@ class LearningTriageReceipt(FrozenModel):
         elif self.memory_id is not None:
             raise ValueError("only preference binding may include memory")
         object.__setattr__(self, "outcome_ids", outcome_ids)
+        return self
+
+
+class LearningConclusionReceipt(FrozenModel):
+    conclusion_id: str
+    triage_id: str
+    ticket_id: str
+    case_id: str
+    attribution_id: str
+    outcome: Literal["no_lesson", "conditional_lesson"]
+    stop_reason: str | None = None
+    lesson_id: str | None = None
+    candidate_version_id: None = None
+
+    @model_validator(mode="after")
+    def validate_conclusion(self) -> LearningConclusionReceipt:
+        for value, label in (
+            (self.conclusion_id, "conclusion id"),
+            (self.triage_id, "triage id"),
+            (self.ticket_id, "ticket id"),
+            (self.case_id, "case id"),
+            (self.attribution_id, "attribution id"),
+        ):
+            _nonempty(value, label)
+        if self.outcome == "no_lesson":
+            if self.stop_reason is None or not self.stop_reason.strip() or self.lesson_id is not None:
+                raise ValueError("no-lesson conclusions require a stop reason and no lesson")
+        elif self.lesson_id is None or not self.lesson_id.strip() or self.stop_reason is not None:
+            raise ValueError("conditional lessons require a lesson and no stop reason")
         return self
 
 
@@ -642,3 +671,110 @@ class LearningIntake:
             disposition=disposition,
             reason=f"{kind} does not qualify for learning",
         )
+
+    def _conclusion(self, **values: object) -> LearningConclusionReceipt:
+        values["conclusion_id"] = content_digest({"learning_conclusion": values})
+        receipt = LearningConclusionReceipt(**values)
+        self.store.put_immutable_object(
+            "learning_conclusion", receipt.conclusion_id, receipt.triage_id, "recorded", receipt
+        )
+        return receipt
+
+    def _evidence_ids_exist(
+        self, evidence_ids: tuple[str, ...], *, label: str, required: bool = True
+    ) -> tuple[str, ...]:
+        normalized = _ids(evidence_ids, label)
+        if required and not normalized:
+            raise StateConflict(f"{label}s are required")
+        for evidence_id in normalized:
+            self.store.get_object("evidence", evidence_id, EvidenceRecord)
+        return normalized
+
+    def _conclusion_chain(
+        self, triage: LearningTriageReceipt, attribution: AttributionRecord
+    ) -> tuple[ObservedGap, CaseRecord]:
+        persisted_triage = self.store.get_object("learning_triage", triage.triage_id, LearningTriageReceipt)
+        persisted_attribution = self.store.get_object("attribution", attribution.attribution_id, AttributionRecord)
+        if persisted_triage != triage or persisted_attribution != attribution:
+            raise StateConflict("conclusion requires exact persisted triage and attribution")
+        if (
+            triage.disposition != "learning_case"
+            or triage.gap_id is None
+            or triage.signal_id is None
+            or triage.ticket_id is None
+            or triage.case_id is None
+        ):
+            raise StateConflict("conclusion requires a persisted learning case")
+        gap = self.store.get_object("observed_gap", triage.gap_id, ObservedGap)
+        signal = self.store.get_object("learning_signal", triage.signal_id, LearningSignal)
+        ticket = self.store.get_object("learning_ticket", triage.ticket_id, LearningTicket)
+        case = self.store.get_object("case", triage.case_id, CaseRecord)
+        if (
+            ticket.signal_id != signal.signal_id
+            or case.ticket_id != ticket.ticket_id
+            or case.observed_gap_id != gap.gap_id
+            or signal.observed_gap_id != gap.gap_id
+            or signal.problem_fingerprint != gap.problem_fingerprint
+            or ticket.problem_fingerprint != gap.problem_fingerprint
+            or case.problem_fingerprint != gap.problem_fingerprint
+            or signal.capability_scope != gap.capability_scope
+            or ticket.capability_scope != gap.capability_scope
+            or case.capability_scope != gap.capability_scope
+            or attribution.case_id != case.case_id
+            or attribution.ticket_id != ticket.ticket_id
+            or attribution.observed_gap_id != gap.gap_id
+            or attribution.capability_scope != gap.capability_scope
+            or attribution.observed_outcome != case.outcome
+        ):
+            raise StateConflict("conclusion chain bindings do not match")
+        chain_evidence = self._evidence_ids_exist(gap.evidence_ids, label="chain evidence id")
+        attribution_evidence = self._evidence_ids_exist(
+            attribution.supporting_evidence_ids + attribution.counterevidence_ids,
+            label="attribution evidence id",
+            required=False,
+        )
+        if not set(attribution_evidence).issubset(chain_evidence):
+            raise StateConflict("attribution evidence must bind the persisted gap")
+        return gap, case
+
+    def _validate_lesson(self, lesson: LessonRecord, case: CaseRecord, gap: ObservedGap) -> None:
+        if (
+            lesson.status != "accepted"
+            or lesson.case_ids != (case.case_id,)
+            or not lesson.when
+            or not lesson.not_when
+            or not lesson.evidence_ids
+            or not lesson.counterevidence_ids
+            or lesson.target_scope != "repo_task_skill"
+            or lesson.capability_scope != gap.capability_scope
+        ):
+            raise StateConflict("conditional lesson does not satisfy the governed gate")
+        lesson_evidence = self._evidence_ids_exist(
+            lesson.evidence_ids + lesson.counterevidence_ids, label="lesson evidence id"
+        )
+        if not set(lesson_evidence).issubset(set(gap.evidence_ids)):
+            raise StateConflict("lesson evidence must bind the persisted gap")
+
+    def conclude(
+        self,
+        triage: LearningTriageReceipt,
+        attribution: AttributionRecord,
+        *,
+        lesson: LessonRecord | None = None,
+    ) -> LearningConclusionReceipt:
+        gap, case = self._conclusion_chain(triage, attribution)
+        common = {
+            "triage_id": triage.triage_id,
+            "ticket_id": triage.ticket_id,
+            "case_id": case.case_id,
+            "attribution_id": attribution.attribution_id,
+        }
+        if attribution.status == "unknown":
+            return self._conclusion(**common, outcome="no_lesson", stop_reason="attribution_unknown")
+        if attribution.mutation_target != "repo_task_skill" or attribution.recommendation_only:
+            return self._conclusion(**common, outcome="no_lesson", stop_reason="causal_layer_out_of_scope")
+        if lesson is None:
+            return self._conclusion(**common, outcome="no_lesson", stop_reason="insufficient_evidence")
+        self._validate_lesson(lesson, case, gap)
+        self.engine.accept_lesson(lesson)
+        return self._conclusion(**common, outcome="conditional_lesson", lesson_id=lesson.lesson_id)

@@ -318,6 +318,7 @@ class LessonRecord(FrozenModel):
     counterevidence_ids: tuple[str, ...]
     confidence_basis: str
     target_scope: str
+    capability_scope: str | None = None
     status: str = "candidate"
 
 

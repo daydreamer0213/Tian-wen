@@ -74,6 +74,12 @@ class AttributionRecord(FrozenModel):
     rejected_targets: tuple[str, ...]
     other_layers_reason: str
     recommendation_only: bool
+    status: Literal["resolved", "unknown"] = "resolved"
+    ticket_id: str | None = None
+    observed_gap_id: str | None = None
+    capability_scope: str | None = None
+    supporting_evidence_ids: tuple[str, ...] = ()
+    counterevidence_ids: tuple[str, ...] = ()
 
 
 def _problem(signal: LearningSignal) -> str:
@@ -204,15 +210,100 @@ class LearningEngine:
             raise StateConflict("attribution requires at least two hypotheses")
         if not hypotheses or not earliest_divergence.strip():
             raise StateConflict("attribution requires hypotheses and earliest divergence")
+        record = self._record_attribution(
+            case,
+            hypotheses=hypotheses,
+            earliest_divergence=earliest_divergence,
+            mutation_target=mutation_target,
+            rejected_targets=rejected_targets,
+        )
+        if record.recommendation_only:
+            raise MutationNotAllowed(f"mutation target is not allowed: {mutation_target}")
+        return record
+
+    def record_governed_attribution(
+        self,
+        case: CaseRecord,
+        *,
+        hypotheses: tuple[str, ...],
+        earliest_divergence: str,
+        mutation_target: str,
+        rejected_targets: tuple[str, ...],
+        status: Literal["resolved", "unknown"],
+        ticket_id: str,
+        observed_gap_id: str,
+        capability_scope: str,
+        supporting_evidence_ids: tuple[str, ...] = (),
+        counterevidence_ids: tuple[str, ...] = (),
+    ) -> AttributionRecord:
+        from tianwen.learning_intake import ObservedGap
+
+        persisted_case = self.store.get_object("case", case.case_id, CaseRecord)
+        ticket = self.get_ticket(ticket_id)
+        gap = self.store.get_object("observed_gap", observed_gap_id, ObservedGap)
+        if (
+            persisted_case != case
+            or case.ticket_id != ticket.ticket_id
+            or case.observed_gap_id != gap.gap_id
+            or case.capability_scope != capability_scope
+            or ticket.capability_scope != capability_scope
+        ):
+            raise StateConflict("governed attribution bindings do not match")
+        return self._record_attribution(
+            case,
+            hypotheses=hypotheses,
+            earliest_divergence=earliest_divergence,
+            mutation_target=mutation_target,
+            rejected_targets=rejected_targets,
+            status=status,
+            ticket_id=ticket_id,
+            observed_gap_id=observed_gap_id,
+            capability_scope=capability_scope,
+            supporting_evidence_ids=supporting_evidence_ids,
+            counterevidence_ids=counterevidence_ids,
+            governed=True,
+        )
+
+    def _record_attribution(
+        self,
+        case: CaseRecord,
+        *,
+        hypotheses: tuple[str, ...],
+        earliest_divergence: str,
+        mutation_target: str,
+        rejected_targets: tuple[str, ...],
+        status: Literal["resolved", "unknown"] = "resolved",
+        ticket_id: str | None = None,
+        observed_gap_id: str | None = None,
+        capability_scope: str | None = None,
+        supporting_evidence_ids: tuple[str, ...] = (),
+        counterevidence_ids: tuple[str, ...] = (),
+        governed: bool = False,
+    ) -> AttributionRecord:
+        deterministic = case.outcome.startswith("deterministic_verifier_failure:")
+        if len(hypotheses) < 2 and not deterministic:
+            raise StateConflict("attribution requires at least two hypotheses")
+        if not hypotheses or not earliest_divergence.strip():
+            raise StateConflict("attribution requires hypotheses and earliest divergence")
+        identity = {
+            "case": case.case_id,
+            "hypotheses": hypotheses,
+            "earliest_divergence": earliest_divergence,
+            "mutation_target": mutation_target,
+            "rejected_targets": rejected_targets,
+        }
+        if governed:
+            identity["governed"] = {
+                "status": status,
+                "ticket_id": ticket_id,
+                "observed_gap_id": observed_gap_id,
+                "capability_scope": capability_scope,
+                "supporting_evidence_ids": supporting_evidence_ids,
+                "counterevidence_ids": counterevidence_ids,
+            }
         record = AttributionRecord(
             attribution_id=content_digest(
-                {
-                    "case": case.case_id,
-                    "hypotheses": hypotheses,
-                    "earliest_divergence": earliest_divergence,
-                    "mutation_target": mutation_target,
-                    "rejected_targets": rejected_targets,
-                }
+                identity
             ),
             case_id=case.case_id,
             observed_outcome=case.outcome,
@@ -224,10 +315,14 @@ class LearningEngine:
             rejected_targets=rejected_targets,
             other_layers_reason="Only repo_task_skill is in the first-slice mutation scope.",
             recommendation_only=mutation_target != "repo_task_skill",
+            status=status,
+            ticket_id=ticket_id,
+            observed_gap_id=observed_gap_id,
+            capability_scope=capability_scope,
+            supporting_evidence_ids=supporting_evidence_ids,
+            counterevidence_ids=counterevidence_ids,
         )
         self.store.put_immutable_object("attribution", record.attribution_id, case.case_id, "recorded", record)
-        if record.recommendation_only:
-            raise MutationNotAllowed(f"mutation target is not allowed: {mutation_target}")
         return record
 
     def accept_lesson(self, lesson: LessonRecord) -> None:

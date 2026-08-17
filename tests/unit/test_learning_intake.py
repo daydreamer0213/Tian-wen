@@ -13,13 +13,20 @@ from tianwen.domain import (
     CaseRecord,
     EvidenceRecord,
     GoalContract,
+    LessonRecord,
     LoopKind,
     LoopRecord,
     content_digest,
     utc_now,
 )
-from tianwen.learning import LearningEngine, LearningSignal, LearningTicket
-from tianwen.learning_intake import LearningIntake, ObservedGap, OutcomeObservation
+from tianwen.learning import AttributionRecord, LearningEngine, LearningSignal, LearningTicket
+from tianwen.learning_intake import (
+    LearningConclusionReceipt,
+    LearningIntake,
+    LearningTriageReceipt,
+    ObservedGap,
+    OutcomeObservation,
+)
 from tianwen.memory import MemoryProposal
 from tianwen.store import StateConflict, StateStore
 
@@ -31,7 +38,9 @@ def _new_store(path: Path) -> StateStore:
 
 
 def _intake(tmp_path: Path) -> tuple[LearningIntake, StateStore]:
-    store, budget = _new_store(tmp_path / "governance.db"), BudgetLimit(model_requests=4, tool_calls=12, tokens=1200)
+    store, budget = _new_store(tmp_path / "governance.db"), BudgetLimit(
+        model_requests=4, tool_calls=12, tokens=1200, wall_seconds=7200, child_loops=6, action_effects=40
+    )
     goal = GoalContract(
         goal_id="goal-1",
         objective="safe",
@@ -209,6 +218,220 @@ def _source(
 def _object_count(store: StateStore, kind: str) -> int:
     with store._connect() as connection:
         return int(connection.execute("SELECT count(*) FROM tw_objects WHERE kind = ?", (kind,)).fetchone()[0])
+
+
+def _governed_chain(tmp_path: Path, name: str = "primary") -> tuple[LearningIntake, StateStore, LearningTriageReceipt]:
+    intake, store = _intake(tmp_path)
+    first_store, first, _ = _source(tmp_path, f"{name}-trial-1")
+    second_store, second, _ = _source(tmp_path, f"{name}-trial-2")
+    return (
+        intake,
+        store,
+        intake.triage(
+            (
+                intake.record_trial_outcome(first, trial_store=first_store),
+                intake.record_trial_outcome(second, trial_store=second_store),
+            )
+        ),
+    )
+
+
+def _artifact_pointer_snapshot(store: StateStore) -> tuple[tuple[str, str, str | None, str, str], ...]:
+    with store._connect() as connection:
+        rows = connection.execute(
+            "SELECT kind, object_id, parent_id, status, body_json FROM tw_objects "
+            "WHERE kind IN ('artifact', 'active_pointer') ORDER BY kind, object_id"
+        ).fetchall()
+    return tuple((row["kind"], row["object_id"], row["parent_id"], row["status"], row["body_json"]) for row in rows)
+
+
+def _attribution(
+    intake: LearningIntake,
+    store: StateStore,
+    triage: LearningTriageReceipt,
+    *,
+    status: str = "resolved",
+    mutation_target: str = "repo_task_skill",
+    counterevidence_ids: tuple[str, ...] | None = None,
+) -> AttributionRecord:
+    gap = store.get_object("observed_gap", triage.gap_id, ObservedGap)
+    case = store.get_object("case", triage.case_id, CaseRecord)
+    evidence_ids = gap.evidence_ids
+    return intake.engine.record_governed_attribution(
+        case,
+        hypotheses=("prompt ordering", "tool selection"),
+        earliest_divergence="first verifier-visible action",
+        mutation_target=mutation_target,
+        rejected_targets=("runtime",),
+        status=status,
+        ticket_id=triage.ticket_id,
+        observed_gap_id=triage.gap_id,
+        capability_scope=gap.capability_scope,
+        supporting_evidence_ids=(evidence_ids[0],),
+        counterevidence_ids=counterevidence_ids if counterevidence_ids is not None else (evidence_ids[1],),
+    )
+
+
+def _lesson(store: StateStore, triage: LearningTriageReceipt, *, capability_scope: str | None = None) -> LessonRecord:
+    gap = store.get_object("observed_gap", triage.gap_id, ObservedGap)
+    return LessonRecord(
+        lesson_id=content_digest({"lesson": triage.case_id, "scope": capability_scope or gap.capability_scope}),
+        case_ids=(triage.case_id,),
+        claim="Use the verified ordering only in the observed task scope.",
+        when=("the frozen verifier reports the same gap",),
+        not_when=("the task or artifact scope differs",),
+        evidence_ids=(gap.evidence_ids[0],),
+        counterevidence_ids=(gap.evidence_ids[1],),
+        confidence_basis="two persisted verifier outcomes",
+        target_scope="repo_task_skill",
+        capability_scope=capability_scope or gap.capability_scope,
+        status="accepted",
+    )
+
+
+def test_unknown_attribution_stops_with_no_lesson_or_candidate(tmp_path: Path) -> None:
+    intake, store, triage = _governed_chain(tmp_path)
+    before = _artifact_pointer_snapshot(store)
+
+    conclusion = intake.conclude(triage, _attribution(intake, store, triage, status="unknown"))
+
+    assert (conclusion.outcome, conclusion.stop_reason, conclusion.lesson_id, conclusion.candidate_version_id) == (
+        "no_lesson",
+        "attribution_unknown",
+        None,
+        None,
+    )
+    assert store.list_objects("lesson", LessonRecord) == []
+    assert _artifact_pointer_snapshot(store) == before
+
+
+def test_out_of_scope_attribution_is_recommendation_only_and_stops(tmp_path: Path) -> None:
+    intake, store, triage = _governed_chain(tmp_path)
+    before = _artifact_pointer_snapshot(store)
+
+    attribution = _attribution(intake, store, triage, mutation_target="runtime")
+    conclusion = intake.conclude(triage, attribution)
+
+    assert attribution.recommendation_only is True
+    assert (conclusion.outcome, conclusion.stop_reason, conclusion.lesson_id, conclusion.candidate_version_id) == (
+        "no_lesson",
+        "causal_layer_out_of_scope",
+        None,
+        None,
+    )
+    assert store.list_objects("lesson", LessonRecord) == []
+    assert _artifact_pointer_snapshot(store) == before
+
+
+def test_resolved_chain_accepts_scope_bound_conditional_lesson(tmp_path: Path) -> None:
+    intake, store, triage = _governed_chain(tmp_path)
+    before = _artifact_pointer_snapshot(store)
+    lesson = _lesson(store, triage)
+
+    conclusion = intake.conclude(triage, _attribution(intake, store, triage), lesson=lesson)
+
+    assert (conclusion.outcome, conclusion.lesson_id, conclusion.stop_reason, conclusion.candidate_version_id) == (
+        "conditional_lesson",
+        lesson.lesson_id,
+        None,
+        None,
+    )
+    assert store.get_object("lesson", lesson.lesson_id, LessonRecord) == lesson
+    assert _artifact_pointer_snapshot(store) == before
+
+
+def test_lesson_requires_persisted_chain_counterevidence_and_matching_scope(tmp_path: Path) -> None:
+    intake, store, triage = _governed_chain(tmp_path)
+    attribution = _attribution(intake, store, triage)
+    missing_counterevidence = _lesson(store, triage).model_copy(update={"counterevidence_ids": ()})
+    wrong_scope = _lesson(store, triage, capability_scope="repo_task_skill/other/task/task-2@1")
+    before = _artifact_pointer_snapshot(store)
+
+    insufficient = intake.conclude(triage, attribution)
+
+    with pytest.raises(StateConflict):
+        intake.conclude(triage, attribution, lesson=missing_counterevidence)
+    with pytest.raises(StateConflict):
+        intake.conclude(triage, attribution, lesson=wrong_scope)
+
+    assert (insufficient.outcome, insufficient.stop_reason, insufficient.candidate_version_id) == (
+        "no_lesson",
+        "insufficient_evidence",
+        None,
+    )
+    assert store.list_objects("lesson", LessonRecord) == []
+    assert store.list_objects("learning_conclusion", LearningConclusionReceipt) == [insufficient]
+    assert _artifact_pointer_snapshot(store) == before
+
+
+def test_conclusion_replay_is_exact_and_candidate_is_always_none(tmp_path: Path) -> None:
+    intake, store, triage = _governed_chain(tmp_path)
+    attribution, lesson = _attribution(intake, store, triage), _lesson(store, triage)
+    before = _artifact_pointer_snapshot(store)
+
+    first = intake.conclude(triage, attribution, lesson=lesson)
+    second = intake.conclude(triage, attribution, lesson=lesson)
+
+    assert first == second
+    assert store.get_object("learning_conclusion", first.conclusion_id, LearningConclusionReceipt) == first
+    assert first.candidate_version_id is None
+    assert _artifact_pointer_snapshot(store) == before
+
+
+def test_conclude_rejects_persisted_case_with_cross_ticket_or_gap_binding(tmp_path: Path) -> None:
+    intake, store, first = _governed_chain(tmp_path, "first")
+    second_first_store, second_first, _ = _source(tmp_path, "second-trial-1")
+    second_second_store, second_second, _ = _source(tmp_path, "second-trial-2")
+    second = intake.triage(
+        (
+            intake.record_trial_outcome(second_first, trial_store=second_first_store),
+            intake.record_trial_outcome(second_second, trial_store=second_second_store),
+        )
+    )
+    second_case = store.get_object("case", second.case_id, CaseRecord)
+    cross_case = second_case.model_copy(update={"case_id": "cross-ticket-case", "ticket_id": first.ticket_id})
+    store.put_immutable_object("case", cross_case.case_id, first.ticket_id, "recorded", cross_case)
+    cross_triage = LearningTriageReceipt(
+        triage_id="cross-ticket-triage",
+        gap_id=second.gap_id,
+        outcome_ids=second.outcome_ids,
+        disposition="learning_case",
+        reason="schema-valid cross ticket receipt",
+        signal_id=second.signal_id,
+        ticket_id=second.ticket_id,
+        case_id=cross_case.case_id,
+    )
+    store.put_immutable_object("learning_triage", cross_triage.triage_id, cross_triage.gap_id, "recorded", cross_triage)
+    cross_attribution = AttributionRecord(
+        attribution_id="cross-ticket-attribution",
+        case_id=cross_case.case_id,
+        observed_outcome=cross_case.outcome,
+        reproduction_scope="persisted schema-valid cross ticket case",
+        earliest_divergence="first verifier-visible action",
+        hypotheses=("prompt ordering", "tool selection"),
+        distinguishing_experiment="bounded comparison",
+        mutation_target="repo_task_skill",
+        rejected_targets=("runtime",),
+        other_layers_reason="first slice",
+        recommendation_only=False,
+        status="resolved",
+        ticket_id=second.ticket_id,
+        observed_gap_id=second.gap_id,
+        capability_scope=second_case.capability_scope,
+        supporting_evidence_ids=(second_case.evidence_ids[0],),
+        counterevidence_ids=(second_case.evidence_ids[1],),
+    )
+    store.put_immutable_object(
+        "attribution", cross_attribution.attribution_id, cross_case.case_id, "recorded", cross_attribution
+    )
+    before = _artifact_pointer_snapshot(store)
+
+    with pytest.raises(StateConflict):
+        intake.conclude(cross_triage, cross_attribution, lesson=_lesson(store, second))
+
+    assert store.list_objects("lesson", LessonRecord) == []
+    assert store.list_objects("learning_conclusion", LearningConclusionReceipt) == []
+    assert _artifact_pointer_snapshot(store) == before
 
 
 def test_one_verified_failure_is_observed_without_learning_objects(tmp_path: Path) -> None:
