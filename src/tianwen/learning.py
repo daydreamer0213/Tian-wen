@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 from pydantic import Field
 
@@ -33,6 +34,10 @@ class LearningSignal(FrozenModel):
     blocks_goal: bool
     user_corrected: bool
     evidence_ids: tuple[str, ...]
+    source: Literal["legacy", "repeated_attributable_issue", "explicit_user_correction"] = "legacy"
+    observed_gap_id: str | None = None
+    problem_fingerprint: str | None = None
+    capability_scope: str | None = None
 
 
 class LearningTicket(FrozenModel):
@@ -53,6 +58,8 @@ class LearningTicket(FrozenModel):
         "safety_boundary",
     )
     investigation_mode: bool = False
+    problem_fingerprint: str | None = None
+    capability_scope: str | None = None
 
 
 class AttributionRecord(FrozenModel):
@@ -82,9 +89,7 @@ def _ticket_id(signal: LearningSignal) -> str:
 
 
 def _section(markdown: str, name: str) -> str | None:
-    match = re.search(
-        rf"(?ms)^##\s+{re.escape(name)}\s*\n(.*?)(?=^##\s|\Z)", markdown
-    )
+    match = re.search(rf"(?ms)^##\s+{re.escape(name)}\s*\n(.*?)(?=^##\s|\Z)", markdown)
     return None if match is None else match.group(1).strip()
 
 
@@ -99,15 +104,8 @@ class LearningEngine:
         self.learning_budget = learning_budget
 
     def enqueue(self, signal: LearningSignal) -> str | None:
-        self.store.put_immutable_object(
-            "learning_signal", signal.signal_id, signal.loop_id, "recorded", signal
-        )
-        high_value = (
-            signal.user_corrected
-            or signal.blocks_goal
-            or signal.severity >= 4
-            or signal.recurrence >= 2
-        )
+        self.store.put_immutable_object("learning_signal", signal.signal_id, signal.loop_id, "recorded", signal)
+        high_value = signal.user_corrected or signal.blocks_goal or signal.severity >= 4 or signal.recurrence >= 2
         if not high_value:
             return None
         ticket_id = _ticket_id(signal)
@@ -134,6 +132,8 @@ class LearningEngine:
                 signal.severity >= 4
                 and any(word in signal.category.casefold() for word in ("safety", "security", "unsafe"))
             ),
+            problem_fingerprint=signal.problem_fingerprint,
+            capability_scope=signal.capability_scope,
         )
         parent = self.store.get_object("loop", signal.loop_id, LoopRecord)
         child = LoopRecord(
@@ -160,15 +160,31 @@ class LearningEngine:
     def get_learning_task(self, ticket_id: str) -> TaskRecord:
         return self.store.get_object("task", self.get_ticket(ticket_id).task_id, TaskRecord)
 
-    def create_case(self, ticket_id: str) -> CaseRecord:
+    def create_case(
+        self,
+        ticket_id: str,
+        *,
+        gap_id: str | None = None,
+        problem_statement: str | None = None,
+        evidence_ids: tuple[str, ...] | None = None,
+        problem_fingerprint: str | None = None,
+        capability_scope: str | None = None,
+    ) -> CaseRecord:
         ticket = self.get_ticket(ticket_id)
+        governed = gap_id is not None
         case = CaseRecord(
-            case_id=content_digest({"learning_ticket": ticket_id, "case": "observed"}),
+            case_id=content_digest(
+                {"learning_ticket": ticket_id, "case": "gap" if governed else "observed", "gap": gap_id}
+            ),
             loop_id=ticket.loop_id,
-            problem=ticket.problem_statement,
-            outcome=f"signal:{ticket.signal_id}",
-            evidence_ids=ticket.evidence_ids,
+            problem=problem_statement or ticket.problem_statement,
+            outcome=f"gap:{gap_id}" if governed else f"signal:{ticket.signal_id}",
+            evidence_ids=evidence_ids if evidence_ids is not None else ticket.evidence_ids,
             hypotheses=(),
+            ticket_id=ticket_id if governed else None,
+            observed_gap_id=gap_id,
+            problem_fingerprint=problem_fingerprint,
+            capability_scope=capability_scope,
         )
         self.store.put_immutable_object("case", case.case_id, ticket_id, "recorded", case)
         return case
@@ -198,22 +214,16 @@ class LearningEngine:
             ),
             case_id=case.case_id,
             observed_outcome=case.outcome,
-            reproduction_scope=(
-                f"loop={case.loop_id}; problem={case.problem}; evidence={','.join(case.evidence_ids)}"
-            ),
+            reproduction_scope=(f"loop={case.loop_id}; problem={case.problem}; evidence={','.join(case.evidence_ids)}"),
             earliest_divergence=earliest_divergence,
             hypotheses=hypotheses,
-            distinguishing_experiment=(
-                "Run a bounded comparison that changes one stated hypothesis at a time."
-            ),
+            distinguishing_experiment=("Run a bounded comparison that changes one stated hypothesis at a time."),
             mutation_target=mutation_target,
             rejected_targets=rejected_targets,
             other_layers_reason="Only repo_task_skill is in the first-slice mutation scope.",
             recommendation_only=mutation_target != "repo_task_skill",
         )
-        self.store.put_immutable_object(
-            "attribution", record.attribution_id, case.case_id, "recorded", record
-        )
+        self.store.put_immutable_object("attribution", record.attribution_id, case.case_id, "recorded", record)
         if record.recommendation_only:
             raise MutationNotAllowed(f"mutation target is not allowed: {mutation_target}")
         return record

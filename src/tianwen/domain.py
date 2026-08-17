@@ -302,6 +302,10 @@ class CaseRecord(FrozenModel):
     outcome: str
     evidence_ids: tuple[str, ...]
     hypotheses: tuple[str, ...]
+    ticket_id: str | None = None
+    observed_gap_id: str | None = None
+    problem_fingerprint: str | None = None
+    capability_scope: str | None = None
 
 
 class LessonRecord(FrozenModel):

@@ -46,7 +46,11 @@ _IMMUTABLE_GOVERNANCE_KINDS = frozenset(
         "eval_run",
         "learning_signal",
         "learning_ticket",
+        "learning_conclusion",
+        "learning_triage",
         "lesson",
+        "observed_gap",
+        "outcome_observation",
         "promotion",
         "alpha_trial_manifest",
     }
@@ -370,9 +374,7 @@ class StateStore:
         }:
             raise StateConflict(f"governance {kind} must be written by GovernanceStore")
         if kind == "artifact" and (
-            not isinstance(value, ArtifactVersion)
-            or value.status.value != "candidate"
-            or status != "candidate"
+            not isinstance(value, ArtifactVersion) or value.status.value != "candidate" or status != "candidate"
         ):
             raise StateConflict("StateStore may only persist candidate artifacts")
         with self._connect() as connection:
@@ -418,7 +420,6 @@ class StateStore:
 
     def get_promotion_request(self, request_id: str) -> tuple[PromotionRequest, str | None]:
         return self._get_request("tw_promotion_requests", request_id, PromotionRequest)
-
 
     def get_approval_receipt(self, receipt_id: str) -> tuple[ApprovalReceipt, str | None]:
         with self._connect() as connection:
@@ -703,9 +704,7 @@ class StateStore:
             if budget is None:
                 raise StateConflict(f"missing budget {row['loop_id']}")
             usage = BudgetUsage.model_validate_json(budget["usage_json"])
-            next_usage = usage.model_copy(
-                update={"tokens": usage.tokens - (reserved_tokens - observed_tokens)}
-            )
+            next_usage = usage.model_copy(update={"tokens": usage.tokens - (reserved_tokens - observed_tokens)})
             connection.execute(
                 "UPDATE tw_budgets SET usage_json = ? WHERE loop_id = ?",
                 (next_usage.model_dump_json(), row["loop_id"]),
@@ -723,8 +722,7 @@ class StateStore:
                 "SELECT delta_json FROM tw_action_budget_reservations WHERE run_id = ?", (run_id,)
             ).fetchall()
             model_rows = connection.execute(
-                "SELECT reserved_tokens, observed_tokens, status "
-                "FROM tw_model_request_reservations WHERE run_id = ?",
+                "SELECT reserved_tokens, observed_tokens, status FROM tw_model_request_reservations WHERE run_id = ?",
                 (run_id,),
             ).fetchall()
         usage = _zero_usage()
@@ -1189,8 +1187,7 @@ class GovernanceStore:
             if any(row is None for row in rows):
                 raise StateConflict("partial bootstrap authority chain")
             if any(
-                (row["parent_id"], row["status"], row["body_json"])
-                != (parent_id, status, value.model_dump_json())
+                (row["parent_id"], row["status"], row["body_json"]) != (parent_id, status, value.model_dump_json())
                 for row, (_, _, parent_id, status, value) in zip(rows, expected, strict=True)
             ):
                 raise StateConflict("conflicting bootstrap authority chain")
@@ -1209,8 +1206,7 @@ class GovernanceStore:
                 raise StateConflict("evaluation request protocol binding does not match")
 
             artifact_rows = connection.execute(
-                "SELECT object_id, status, body_json FROM tw_objects "
-                "WHERE kind = 'artifact' AND object_id IN (?, ?)",
+                "SELECT object_id, status, body_json FROM tw_objects WHERE kind = 'artifact' AND object_id IN (?, ?)",
                 (request.champion_version_id, request.challenger_version_id),
             ).fetchall()
             artifacts = {row["object_id"]: row for row in artifact_rows}
