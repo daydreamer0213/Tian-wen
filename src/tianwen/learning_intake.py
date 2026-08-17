@@ -53,6 +53,7 @@ class OutcomeObservation(FrozenModel):
     trial_id: str | None = None
     problem_fingerprint: str | None = None
     evidence_ids: tuple[str, ...] = ()
+    authority_id: str | None = None
 
     @model_validator(mode="after")
     def validate_observation(self) -> OutcomeObservation:
@@ -70,6 +71,38 @@ class OutcomeObservation(FrozenModel):
         if self.outcome_kind == "verified_failure" and not self.problem_fingerprint:
             raise ValueError("verified failures require a problem fingerprint")
         for field, value in updates.items():
+            object.__setattr__(self, field, value)
+        return self
+
+
+class OutcomeSourceAuthority(FrozenModel):
+    """Append-only proof that an observation passed a trusted source projector."""
+
+    authority_id: str
+    source_kind: Literal["trial_verifier", "user_feedback", "operational"]
+    source_id: str
+    source_digest: str
+    outcome_kind: OutcomeKind
+    capability_scope: str
+    task_id: str | None = None
+    goal_id: str | None = None
+    run_id: str | None = None
+    trial_id: str | None = None
+    problem_fingerprint: str | None = None
+    evidence_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_authority(self) -> OutcomeSourceAuthority:
+        values: dict[str, object] = {
+            "authority_id": _nonempty(self.authority_id, "authority id"),
+            "source_id": _nonempty(self.source_id, "source id"),
+            "source_digest": _nonempty(self.source_digest, "source digest"),
+            "capability_scope": _nonempty(self.capability_scope, "capability scope"),
+            "evidence_ids": _ids(self.evidence_ids, "evidence id"),
+        }
+        if self.problem_fingerprint is not None:
+            values["problem_fingerprint"] = _nonempty(self.problem_fingerprint, "problem fingerprint")
+        for field, value in values.items():
             object.__setattr__(self, field, value)
         return self
 
@@ -146,6 +179,70 @@ class LearningIntake:
     @staticmethod
     def _scope(result: TrialResult) -> str:
         return f"repo_task_skill/{result.champion_version_id}/task/{result.task_id}@{result.task_version}"
+
+    def _record_authority(
+        self,
+        *,
+        source_kind: Literal["trial_verifier", "user_feedback", "operational"],
+        source_id: str,
+        source_digest: str,
+        outcome_kind: OutcomeKind,
+        capability_scope: str,
+        task_id: str | None = None,
+        goal_id: str | None = None,
+        run_id: str | None = None,
+        trial_id: str | None = None,
+        problem_fingerprint: str | None = None,
+        evidence_ids: tuple[str, ...] = (),
+    ) -> OutcomeSourceAuthority:
+        values = {
+            "source_kind": source_kind,
+            "source_id": source_id,
+            "source_digest": source_digest,
+            "outcome_kind": outcome_kind,
+            "capability_scope": capability_scope,
+            "task_id": task_id,
+            "goal_id": goal_id,
+            "run_id": run_id,
+            "trial_id": trial_id,
+            "problem_fingerprint": problem_fingerprint,
+            "evidence_ids": _ids(evidence_ids, "evidence id"),
+        }
+        authority = OutcomeSourceAuthority(
+            authority_id=content_digest({"outcome_source_authority": values}), **values
+        )
+        self.store.put_immutable_object(
+            "outcome_source_authority", authority.authority_id, authority.trial_id, "recorded", authority
+        )
+        return authority
+
+    @staticmethod
+    def _matches_authority(outcome: OutcomeObservation, authority: OutcomeSourceAuthority) -> bool:
+        return (
+            authority.source_kind,
+            authority.source_id,
+            authority.source_digest,
+            authority.outcome_kind,
+            authority.capability_scope,
+            authority.task_id,
+            authority.goal_id,
+            authority.run_id,
+            authority.trial_id,
+            authority.problem_fingerprint,
+            authority.evidence_ids,
+        ) == (
+            outcome.source_kind,
+            outcome.source_id,
+            outcome.source_digest,
+            outcome.outcome_kind,
+            outcome.capability_scope,
+            outcome.task_id,
+            outcome.goal_id,
+            outcome.run_id,
+            outcome.trial_id,
+            outcome.problem_fingerprint,
+            outcome.evidence_ids,
+        )
 
     @staticmethod
     def _fingerprint(result: TrialResult, manifest: TrialManifest, scope: str) -> str:
@@ -255,6 +352,19 @@ class LearningIntake:
         )
         kind = cast(OutcomeKind, "verified_failure" if qualifying else "verified_success")
         digest = self._source_digest(durable)
+        authority = self._record_authority(
+            source_kind="trial_verifier",
+            source_id=durable.trial_id,
+            source_digest=digest,
+            outcome_kind=kind,
+            capability_scope=scope,
+            task_id=durable.task_id,
+            goal_id=durable.goal_id,
+            run_id=next(item.run_id for item in evidence if item.evidence_type == "alpha_final_verification"),
+            trial_id=durable.trial_id,
+            problem_fingerprint=fingerprint,
+            evidence_ids=tuple(item.evidence_id for item in evidence),
+        )
         observation = OutcomeObservation(
             outcome_id=content_digest({"trial_outcome": digest, "kind": kind}),
             source_kind="trial_verifier",
@@ -264,10 +374,11 @@ class LearningIntake:
             capability_scope=scope,
             task_id=durable.task_id,
             goal_id=durable.goal_id,
-            run_id=evidence[0].run_id,
+            run_id=authority.run_id,
             trial_id=durable.trial_id,
             problem_fingerprint=fingerprint,
             evidence_ids=tuple(item.evidence_id for item in evidence),
+            authority_id=authority.authority_id,
         )
         self.store.put_immutable_object(
             "outcome_observation", observation.outcome_id, durable.trial_id, "recorded", observation
@@ -297,6 +408,18 @@ class LearningIntake:
             _nonempty(feedback_id, "feedback id"),
             _nonempty(feedback_digest, "feedback digest"),
         )
+        authority = self._record_authority(
+            source_kind="user_feedback",
+            source_id=feedback_id,
+            source_digest=feedback_digest,
+            outcome_kind=kind,
+            capability_scope=scope,
+            task_id=durable.task_id,
+            goal_id=durable.goal_id,
+            trial_id=trial_id,
+            problem_fingerprint=content_digest({"feedback_digest": feedback_digest, "capability_scope": scope}),
+            evidence_ids=tuple(item.evidence_id for item in evidence),
+        )
         observation = OutcomeObservation(
             outcome_id=content_digest(
                 {"feedback": feedback_id, "digest": feedback_digest, "kind": kind, "scope": scope}
@@ -309,8 +432,9 @@ class LearningIntake:
             task_id=durable.task_id,
             goal_id=durable.goal_id,
             trial_id=trial_id,
-            problem_fingerprint=content_digest({"feedback_digest": feedback_digest, "capability_scope": scope}),
+            problem_fingerprint=authority.problem_fingerprint,
             evidence_ids=tuple(item.evidence_id for item in evidence),
+            authority_id=authority.authority_id,
         )
         self.store.put_immutable_object(
             "outcome_observation", observation.outcome_id, trial_id, "recorded", observation
@@ -329,6 +453,14 @@ class LearningIntake:
         evidence_ids = _ids(evidence_ids, "evidence id")
         for evidence_id in evidence_ids:
             self.store.get_object("evidence", evidence_id, EvidenceRecord)
+        authority = self._record_authority(
+            source_kind="operational",
+            source_id=source_id,
+            source_digest=source_digest,
+            outcome_kind=kind,
+            capability_scope=capability_scope,
+            evidence_ids=evidence_ids,
+        )
         observation = OutcomeObservation(
             outcome_id=content_digest(
                 {"source": source_id, "digest": source_digest, "kind": kind, "scope": capability_scope}
@@ -339,6 +471,7 @@ class LearningIntake:
             outcome_kind=kind,
             capability_scope=_nonempty(capability_scope, "capability scope"),
             evidence_ids=evidence_ids,
+            authority_id=authority.authority_id,
         )
         self.store.put_immutable_object(
             "outcome_observation", observation.outcome_id, source_id, "recorded", observation
@@ -444,6 +577,12 @@ class LearningIntake:
         )
         if durable != outcomes or len({item.outcome_id for item in durable}) != len(durable):
             raise StateConflict("triage observations must be distinct persisted receipts")
+        for item in durable:
+            if item.authority_id is None:
+                raise StateConflict("triage observations require source authority")
+            authority = self.store.get_object("outcome_source_authority", item.authority_id, OutcomeSourceAuthority)
+            if not self._matches_authority(item, authority):
+                raise StateConflict("triage observation does not match its source authority")
         kinds = {item.outcome_kind for item in durable}
         if len(kinds) != 1:
             raise StateConflict("mixed outcome kinds fail closed")

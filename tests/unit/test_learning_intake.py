@@ -478,3 +478,62 @@ def test_legacy_create_case_preserves_its_original_id_and_replays_once(tmp_path:
     assert first == second
     assert first.case_id == content_digest({"learning_ticket": ticket_id, "case": "observed"})
     assert _object_count(store, "case") == 1
+
+
+def test_manual_trial_verifier_observations_without_source_authority_never_learn(tmp_path: Path) -> None:
+    """Break caught: callers can bypass Trial projector validation with direct immutable writes."""
+    intake, store = _intake(tmp_path)
+    _source_store, _result, evidence = _source(tmp_path, "trial-1")
+    store.put_immutable_object("evidence", evidence.evidence_id, evidence.run_id, "recorded", evidence)
+    outcomes = tuple(
+        OutcomeObservation(
+            outcome_id=f"manual-trial-{number}",
+            source_kind="trial_verifier",
+            source_id=f"manual-source-{number}",
+            source_digest=f"sha256:manual-{number}",
+            outcome_kind="verified_failure",
+            capability_scope="repo_task_skill/champion-1/task/task-1@1",
+            goal_id="goal-1",
+            run_id=f"manual-run-{number}",
+            trial_id=f"manual-trial-{number}",
+            problem_fingerprint="sha256:manual-problem",
+            evidence_ids=(evidence.evidence_id,),
+        )
+        for number in (1, 2)
+    )
+    for outcome in outcomes:
+        store.put_immutable_object("outcome_observation", outcome.outcome_id, outcome.source_id, "recorded", outcome)
+
+    with pytest.raises(StateConflict):
+        intake.triage(outcomes)
+
+    assert _object_count(store, "learning_signal") == _object_count(store, "learning_ticket") == 0
+    assert _object_count(store, "case") == 0
+    assert _object_count(store, "artifact") == _object_count(store, "active_pointer") == 0
+
+
+def test_manual_user_feedback_without_source_authority_never_learns(tmp_path: Path) -> None:
+    """Break caught: direct user-feedback observations can bypass feedback projector evidence checks."""
+    intake, store = _intake(tmp_path)
+    _source_store, _result, evidence = _source(tmp_path, "trial-1")
+    store.put_immutable_object("evidence", evidence.evidence_id, evidence.run_id, "recorded", evidence)
+    outcome = OutcomeObservation(
+        outcome_id="manual-feedback",
+        source_kind="user_feedback",
+        source_id="manual-feedback-source",
+        source_digest="sha256:manual-feedback",
+        outcome_kind="explicit_user_correction",
+        capability_scope="repo_task_skill/champion-1/task/task-1@1",
+        goal_id="goal-1",
+        trial_id="manual-trial",
+        problem_fingerprint="sha256:manual-feedback-problem",
+        evidence_ids=(evidence.evidence_id,),
+    )
+    store.put_immutable_object("outcome_observation", outcome.outcome_id, outcome.source_id, "recorded", outcome)
+
+    with pytest.raises(StateConflict):
+        intake.triage((outcome,))
+
+    assert _object_count(store, "learning_signal") == _object_count(store, "learning_ticket") == 0
+    assert _object_count(store, "case") == 0
+    assert _object_count(store, "artifact") == _object_count(store, "active_pointer") == 0

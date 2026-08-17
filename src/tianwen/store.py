@@ -51,6 +51,7 @@ _IMMUTABLE_GOVERNANCE_KINDS = frozenset(
         "lesson",
         "observed_gap",
         "outcome_observation",
+        "outcome_source_authority",
         "promotion",
         "alpha_trial_manifest",
     }
