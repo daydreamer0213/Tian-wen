@@ -144,3 +144,16 @@ Alpha-C 的第一个窄切片：只设计并离线证明 `LearningSignal → Tic
 无。
 
 Alpha-B 范围内没有尚待用户决定的 Goal/成功标准变化、授权扩大、预算扩大、重大不可逆风险或产品价值取舍。
+
+## 10. Git 收口附录
+
+2026-08-18 已按本 handoff 的规则完成正常收口：
+
+- stage branch remote：`d216843466b653b510db2b3bbfcb860102d5a192`；
+- 普通 merge commit：`f89584d6535996d6926c6d887a631524fa59ae7d`；
+- merge parents：`9208f3117230f0dab1001423231716ddbee2abe8` 与 `d216843466b653b510db2b3bbfcb860102d5a192`；
+- merge 无冲突；
+- `main` 上的持续学习治理设计、Alpha roadmap 与架构主控记忆相对 merge 前 `9208f311...` 没有变化；
+- 未 rebase、未 squash、未 force-push、未改写历史。
+
+最终 `main` remote 精确 SHA 是包含本附录的收口提交；由于 Git 跟踪文件不能诚实记录自身尚未生成的 commit SHA，该 SHA 由主控在 push 后通过本地 `main`、`origin/main` 与 GitHub `refs/heads/main` 三方核对，并写入阶段结构化完成报告。
