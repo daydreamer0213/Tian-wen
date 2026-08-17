@@ -101,12 +101,12 @@ class OutcomeObservation(FrozenModel):
         "model_self_assessment",
         "ordinary_low_score",
     ]
-    target_scope: str
+    capability_scope: str
     task_id: str | None = None
     goal_id: str | None = None
     run_id: str | None = None
     trial_id: str | None = None
-    failure_fingerprint: str | None = None
+    problem_fingerprint: str | None = None
     evidence_ids: tuple[str, ...] = ()
 ```
 
@@ -114,11 +114,41 @@ class OutcomeObservation(FrozenModel):
 minimum fields needed for triage. It must never contain a raw workspace path, diff,
 prompt, free-form user text, credential, or model self-analysis.
 
-For a Trial source, the projector validates the `TrialResult`, reloads every referenced
-`EvidenceRecord`, and requires the final-verifier evidence to bind the same trial/run.
-For user feedback, the caller supplies a stable feedback ID and digest plus one of the
-three structured user-feedback kinds. Original feedback text is not copied into the
-observation.
+For a Trial source, the projector takes the Trial's own `StateStore`, reloads and exactly
+matches the durable `TrialResult`, `TrialManifest` and every referenced `EvidenceRecord`,
+and requires final-verifier Evidence to bind the same trial/run. Callers do not supply a
+fingerprint or capability scope. The projector derives them from the frozen receipt:
+
+```text
+capability_scope =
+  repo_task_skill/<champion_version_id>/task/<task_id>@<task_version>
+
+problem_fingerprint = digest(
+  schema + capability_scope + model_id + task_bundle_digest + model_input_digest
+  + baseline_tree_digest + verifier_digest + verdict
+  + sorted(failure_categories) + execution_status + verification_status + boundary_status
+)
+```
+
+Only a completed verifier result with `verdict="not_met"`, `boundary_status="passed"`
+and non-empty failure categories is a qualifying verified failure. Other Trial results can
+be observed but do not contribute to recurrence.
+
+After source-store validation and before the Outcome is written, the projector copies the
+exact validated `EvidenceRecord` objects into the governance store through immutable
+replay. A same-ID/different-payload collision fails closed. This lets later Case,
+Attribution and Lesson checks reload Evidence without persisting an absolute Trial-store
+path or trusting the caller again.
+
+For user feedback, the caller supplies a stable feedback ID and digest, one of the three
+structured kinds, a Trial store and a durable Trial ID. The projector reloads the Trial
+Result and Manifest and derives the capability scope from their task/artifact identity;
+the caller cannot name a different task or Champion. An explicit correction additionally
+requires Evidence whose `source_class` is `user`, whose scope is `trial:<trial_id>`, and
+whose provenance contains that feedback ID. Original feedback text is not copied into the
+observation. Its problem fingerprint is the digest of the feedback digest plus the
+derived capability scope, so neither free-form text nor caller-selected identity enters
+the qualification key.
 
 ### 5.2 `ObservedGap`
 
@@ -126,14 +156,14 @@ observation.
 class ObservedGap(FrozenModel):
     gap_id: str
     problem_fingerprint: str
-    target_scope: str
+    capability_scope: str
     outcome_ids: tuple[str, ...]
     evidence_ids: tuple[str, ...]
     recurrence: int
 ```
 
 The intake service sorts and de-duplicates IDs before hashing. Every observation must
-have the same non-empty target scope and problem fingerprint. `recurrence` counts distinct
+have the same non-empty capability scope and problem fingerprint. `recurrence` counts distinct
 source IDs, not repeated reads or retries of one receipt.
 
 An explicit correction may form a one-observation gap. A real-problem gap must contain
@@ -150,7 +180,7 @@ source: Literal[
 ] = "legacy"
 observed_gap_id: str | None = None
 problem_fingerprint: str | None = None
-target_scope: str | None = None
+capability_scope: str | None = None
 ```
 
 The existing legacy API keeps its current behavior. The new intake path accepts only the
@@ -158,10 +188,19 @@ two governed sources, requires an existing matching Gap, non-empty Evidence, and
 the Signal ID from the frozen Gap. Severity and `blocks_goal` remain descriptive; neither
 can independently qualify an Alpha-C Signal in this slice.
 
-`LearningTicket` gains optional `problem_fingerprint` and `target_scope` fields with
-`None` defaults. For the governed path, they are copied from the Signal. `create_case`
-accepts an optional Gap and uses `outcome="gap:<gap_id>"` plus the Gap evidence. Its legacy
-default remains unchanged.
+`LearningTicket` gains optional `problem_fingerprint` and `capability_scope` fields with
+`None` defaults. For the governed path, they are copied from the Signal.
+
+`CaseRecord` gains defaulted `ticket_id`, `observed_gap_id`, `problem_fingerprint` and
+`capability_scope` fields. The governed `create_case` path populates them and also uses
+`outcome="gap:<gap_id>"` plus Gap Evidence. Its legacy default remains unchanged. This
+keeps structural governance relationships out of free-form text.
+
+`capability_scope` means the exact task/artifact applicability boundary. It is distinct
+from `mutation_target` and the existing `LessonRecord.target_scope`, which name the layer
+that may change. In this slice the only mutable target value is `repo_task_skill`.
+`LessonRecord` gains an optional `capability_scope` field so a governed Lesson binds both
+concepts without changing legacy receipts.
 
 ### 5.4 `LearningTriageReceipt`
 
@@ -196,7 +235,7 @@ memory ID. No disposition may contain a Candidate ID.
 status: Literal["resolved", "unknown"] = "resolved"
 ticket_id: str | None = None
 observed_gap_id: str | None = None
-target_scope: str | None = None
+capability_scope: str | None = None
 supporting_evidence_ids: tuple[str, ...] = ()
 counterevidence_ids: tuple[str, ...] = ()
 ```
@@ -205,6 +244,11 @@ The governed path reloads Ticket, Case, Gap, Triage and Evidence records. It rej
 mismatched chain. `unknown` is a valid terminal attribution and never creates a Lesson.
 An attribution to a layer other than `repo_task_skill` remains recommendation-only and
 also stops without a Lesson in this slice.
+
+`LearningEngine.record_governed_attribution(...)` is a new narrow API that always returns
+the persisted record, including recommendation-only records. The existing
+`record_attribution(...)` retains its current contract and still raises
+`MutationNotAllowed` for an out-of-scope target, preserving legacy callers.
 
 ### 5.6 `LearningConclusionReceipt`
 
@@ -251,12 +295,14 @@ provenance and expiry. It never creates a Signal, Ticket, Case or Lesson.
 A conditional Lesson is accepted only when all of these checks pass:
 
 1. Triage disposition is `learning_case`.
-2. Signal, Ticket, Case, Gap and Attribution exist and bind one another.
-3. Attribution is `resolved`, targets `repo_task_skill`, and binds the same target scope.
+2. Signal, Ticket, Case, Gap and Attribution exist and bind one another structurally.
+3. Attribution is `resolved`, has `mutation_target="repo_task_skill"`, and binds the same
+   capability scope.
 4. All supporting and counterevidence IDs exist.
 5. The Lesson is `accepted`, references the Case, and has non-empty `when`, `not_when`,
-   Evidence, counterevidence and `target_scope`.
-6. Lesson Evidence is a subset of persisted chain Evidence, and its target scope matches.
+   Evidence, counterevidence, `target_scope="repo_task_skill"` and capability scope.
+6. Lesson Evidence is a subset of persisted chain Evidence, and both scopes match their
+   respective structural and mutation meanings.
 
 If attribution is unknown, evidence is insufficient, the causal layer is out of scope, or
 the Lesson is absent, the service writes `no_lesson` with a specific stop reason. A
@@ -302,7 +348,7 @@ Focused unit tests will prove:
 - one-off choice and Stage A `usage-invalid` do not create a Signal;
 - model self-assessment, ordinary low score and capability discovery do not qualify;
 - persistent preference writes only scoped Memory;
-- mixed scope/fingerprint and missing Evidence fail closed;
+- derived-scope/fingerprint mismatch and missing Evidence fail closed;
 - the qualified chain binds Gap, Signal, Ticket and Case;
 - unknown/out-of-scope attribution yields `no_lesson`;
 - a valid resolved attribution yields a conditional Lesson;
