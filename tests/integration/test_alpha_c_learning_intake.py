@@ -6,8 +6,11 @@ from pathlib import Path
 
 from tianwen.alpha import TrialManifest, TrialResult, TrialUsage
 from tianwen.domain import (
+    ArtifactStatus,
+    ArtifactVersion,
     BudgetLimit,
     CaseRecord,
+    EvalProtocol,
     EvidenceRecord,
     GoalContract,
     LessonRecord,
@@ -16,6 +19,7 @@ from tianwen.domain import (
     content_digest,
     utc_now,
 )
+from tianwen.evaluation import ActivePointer
 from tianwen.learning import AttributionRecord, LearningEngine, LearningSignal, LearningTicket
 from tianwen.learning_intake import (
     LearningConclusionReceipt,
@@ -26,13 +30,41 @@ from tianwen.learning_intake import (
     OutcomeSourceAuthority,
 )
 from tianwen.memory import MemoryNeed, MemoryProposal, MemoryStore
-from tianwen.store import StateStore
+from tianwen.store import GovernanceStore, StateStore
 
 
 def _store(path: Path) -> StateStore:
     store = StateStore(path)
     store.initialize()
     return store
+
+
+def _bootstrap_active_repo_task(store: StateStore) -> None:
+    champion = ArtifactVersion(
+        artifact_id="repo-task",
+        artifact_type="repo_task_skill",
+        version_id="offline-champion",
+        parent_version_id=None,
+        content_digest="sha256:offline-champion",
+        content="---\nname: repo-task\n---\n# Offline champion\n",
+        evidence_ids=("offline-bootstrap-evidence",),
+        status=ArtifactStatus.ACTIVE,
+    )
+    pointer = ActivePointer(artifact_id=champion.artifact_id, current_version_id=champion.version_id, generation=1)
+    GovernanceStore(store.database).bootstrap_repo_task(
+        champion,
+        EvalProtocol(
+            protocol_id="offline-learning-intake",
+            task_set_digest="sha256:tasks",
+            evaluator_digest="sha256:evaluator",
+            harness_digest="sha256:harness",
+            tool_digest="sha256:tools",
+            budget_digest="sha256:budget",
+            environment_digest="sha256:environment",
+            model_digest="sha256:model",
+        ),
+        pointer,
+    )
 
 
 def _intake(tmp_path: Path) -> tuple[LearningIntake, StateStore]:
@@ -54,6 +86,7 @@ def _intake(tmp_path: Path) -> tuple[LearningIntake, StateStore]:
     store.put_object("goal", goal.goal_id, None, "active", goal)
     store.put_object("loop", loop.loop_id, goal.goal_id, "active", loop)
     store.create_budget(loop.loop_id, None, budget)
+    _bootstrap_active_repo_task(store)
     return LearningIntake(LearningEngine(store, BudgetLimit(model_requests=1, tool_calls=3, tokens=300))), store
 
 
@@ -210,6 +243,30 @@ def _artifact_pointer_rows(store: StateStore) -> tuple[tuple[str, str, str | Non
     return tuple((row["kind"], row["object_id"], row["parent_id"], row["status"], row["body_json"]) for row in rows)
 
 
+def _authority_snapshot(
+    store: StateStore,
+) -> tuple[tuple[ArtifactVersion, ...], tuple[ActivePointer, ...], tuple[tuple[str, str, str | None, str, str], ...]]:
+    return (
+        tuple(store.list_objects("artifact", ArtifactVersion)),
+        tuple(store.list_objects("active_pointer", ActivePointer)),
+        _artifact_pointer_rows(store),
+    )
+
+
+def _assert_authority_unchanged(
+    store: StateStore,
+    baseline: tuple[
+        tuple[ArtifactVersion, ...], tuple[ActivePointer, ...], tuple[tuple[str, str, str | None, str, str], ...]
+    ],
+) -> None:
+    current = _authority_snapshot(store)
+    assert current[0] == baseline[0]
+    assert current[1] == baseline[1]
+    assert current[2] == baseline[2]
+    assert len(current[0]) == len(baseline[0])
+    assert len(current[1]) == len(baseline[1])
+
+
 def _count(store: StateStore, kind: str) -> int:
     with store._connect() as connection:
         return int(connection.execute("SELECT count(*) FROM tw_objects WHERE kind = ?", (kind,)).fetchone()[0])
@@ -238,7 +295,8 @@ def _attribution(
 
 def test_repeated_real_failures_reach_conditional_lesson_without_candidate(tmp_path: Path) -> None:
     intake, store = _intake(tmp_path)
-    baseline = _artifact_pointer_rows(store)
+    baseline = _authority_snapshot(store)
+    assert len(baseline[0]) == len(baseline[1]) == 1
     first_store, first, _ = _failed_trial(tmp_path, "trial-a")
     second_store, second, _ = _failed_trial(tmp_path, "trial-b")
 
@@ -294,13 +352,15 @@ def test_repeated_real_failures_reach_conditional_lesson_without_candidate(tmp_p
     assert store.get_object("lesson", lesson.lesson_id, LessonRecord) == lesson
     assert store.get_object("learning_conclusion", concluded.conclusion_id, LearningConclusionReceipt) == concluded
     assert all(receipt.candidate_version_id is None for receipt in (triage, stopped, concluded))
-    assert _artifact_pointer_rows(store) == baseline
-    assert _count(store, "artifact") == 0
+    _assert_authority_unchanged(store, baseline)
+    assert _count(store, "artifact") == len(baseline[0])
+    assert _count(store, "active_pointer") == len(baseline[1])
 
 
 def test_insufficient_and_non_learning_inputs_finish_without_candidate(tmp_path: Path) -> None:
     intake, store = _intake(tmp_path)
-    baseline = _artifact_pointer_rows(store)
+    baseline = _authority_snapshot(store)
+    assert len(baseline[0]) == len(baseline[1]) == 1
     trial_store, result, _ = _failed_trial(tmp_path, "single-failure")
     insufficient = intake.triage((intake.record_trial_outcome(result, trial_store=trial_store),))
     usage_invalid = intake.triage(
@@ -335,13 +395,15 @@ def test_insufficient_and_non_learning_inputs_finish_without_candidate(tmp_path:
     assert _count(store, "case") == 0
     assert _count(store, "lesson") == 0
     assert _count(store, "learning_conclusion") == 0
-    assert _artifact_pointer_rows(store) == baseline
-    assert _count(store, "artifact") == 0
+    _assert_authority_unchanged(store, baseline)
+    assert _count(store, "artifact") == len(baseline[0])
+    assert _count(store, "active_pointer") == len(baseline[1])
 
 
 def test_user_correction_and_scoped_preference_take_separate_governed_paths(tmp_path: Path) -> None:
     intake, store = _intake(tmp_path)
-    baseline = _artifact_pointer_rows(store)
+    baseline = _authority_snapshot(store)
+    assert len(baseline[0]) == len(baseline[1]) == 1
     correction_store, _correction_result, correction_evidence = _failed_trial(
         tmp_path, "correction", user_feedback=True
     )
@@ -426,5 +488,6 @@ def test_user_correction_and_scoped_preference_take_separate_governed_paths(tmp_
     assert _count(store, "learning_ticket") == 1
     assert _count(store, "case") == 1
     assert _count(store, "lesson") == 0
-    assert _artifact_pointer_rows(store) == baseline
-    assert _count(store, "artifact") == 0
+    _assert_authority_unchanged(store, baseline)
+    assert _count(store, "artifact") == len(baseline[0])
+    assert _count(store, "active_pointer") == len(baseline[1])
