@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,11 +12,16 @@ import {
   scanDurableGoals,
 } from './status.js'
 import {
+  LIVE_GOAL_LIMITS,
   LIVE_GOAL_OBJECTIVE,
+  createGoalLiveSmokeFailure,
   parseGoalLiveSmokeChildReceipt,
 } from './goal-live-smoke.js'
+import type { GoalLiveSmokeReceipt } from './goal-live-smoke.js'
 
 const DSH_VERSION = '0.1.0-rc.6'
+const LIVE_SMOKE_CHILD_OUTPUT_LIMIT_BYTES = 65_536
+const LIVE_SMOKE_PARENT_GRACE_MS = 5_000
 
 export interface ResumePreflight {
   readonly dataDir: string
@@ -28,6 +34,19 @@ export interface ResumePreflight {
 
 export interface LiveSmokeResumePreflight extends ResumePreflight {
   readonly liveSmoke: true
+}
+
+export interface LiveSmokeChildDependencies {
+  readonly now?: () => number
+  readonly setTimeout?: (callback: () => void, delay: number) => unknown
+  readonly clearTimeout?: (timer: unknown) => void
+  readonly write?: (line: string) => void
+}
+
+export interface LaunchGoalResumeDependencies {
+  readonly now?: () => number
+  readonly spawnChild?: (program: string, args: readonly string[], options: SpawnOptions) => ChildProcess
+  readonly liveSmokeChild?: LiveSmokeChildDependencies
 }
 
 export class GoalResumeUnavailableError extends Error {
@@ -177,14 +196,111 @@ export async function preflightGoalResume(
   return preflight
 }
 
+export async function monitorLiveSmokeChild(
+  child: ChildProcess,
+  preflight: LiveSmokeResumePreflight,
+  startedAtMs: number,
+  dependencies: LiveSmokeChildDependencies = {},
+): Promise<number> {
+  const now = dependencies.now ?? Date.now
+  const schedule = dependencies.setTimeout ?? ((callback, delay) => setTimeout(callback, delay))
+  const cancelTimer = dependencies.clearTimeout ?? (timer => clearTimeout(timer as ReturnType<typeof setTimeout>))
+  const write = dependencies.write ?? (line => { process.stdout.write(line) })
+  const stdout: Buffer[] = []
+  const stderr: Buffer[] = []
+  let stdoutBytes = 0
+  let stderrBytes = 0
+  let finished = false
+  let terminated = false
+  let deadlineTimer: unknown
+  let graceTimer: unknown
+  let forcedFailure: ReturnType<typeof createGoalLiveSmokeFailure> | undefined
+  const internalFailure = () => createGoalLiveSmokeFailure('internal-error', {
+    now: new Date(startedAtMs), requestCount: null, retryCount: null,
+  })
+  const timeoutFailure = () => createGoalLiveSmokeFailure('timeout', {
+    now: new Date(startedAtMs), requestCount: null, retryCount: null,
+  })
+  const terminate = (): void => {
+    if (terminated) return
+    terminated = true
+    try { child.kill() } catch {}
+  }
+  return await new Promise(resolveExit => {
+    const finish = (receipt: GoalLiveSmokeReceipt) => {
+      if (finished) return
+      finished = true
+      if (deadlineTimer !== undefined) cancelTimer(deadlineTimer)
+      if (graceTimer !== undefined) cancelTimer(graceTimer)
+      write(`${JSON.stringify(receipt)}\n`)
+      resolveExit(receipt.status === 'passed' ? 0 : 1)
+    }
+    const finishFromChild = () => {
+      if (forcedFailure !== undefined) {
+        finish(forcedFailure)
+        return
+      }
+      let receipt
+      try {
+        receipt = parseGoalLiveSmokeChildReceipt(
+          Buffer.concat(stdout).toString('utf8'), Buffer.concat(stderr).toString('utf8'),
+          { goalId: preflight.goalId, sessionId: preflight.sessionId },
+        )
+      } catch {
+        finish(internalFailure())
+        return
+      }
+      finish(receipt)
+    }
+    const overflow = () => {
+      forcedFailure = internalFailure()
+      terminate()
+      finish(forcedFailure)
+    }
+    const collect = (chunks: Buffer[], chunk: Buffer, bytes: number): number => {
+      if (finished) return bytes
+      const nextBytes = bytes + chunk.byteLength
+      if (nextBytes > LIVE_SMOKE_CHILD_OUTPUT_LIMIT_BYTES) {
+        overflow()
+        return bytes
+      }
+      chunks.push(chunk)
+      return nextBytes
+    }
+    const beginDeadline = () => {
+      if (finished) return
+      graceTimer = schedule(() => {
+        if (finished) return
+        forcedFailure = timeoutFailure()
+        terminate()
+        finish(forcedFailure)
+      }, LIVE_SMOKE_PARENT_GRACE_MS)
+    }
+    child.once('error', () => finish(internalFailure()))
+    child.once('close', finishFromChild)
+    if (child.stdout === null || child.stderr === null) {
+      overflow()
+      return
+    }
+    child.stdout.on('data', (chunk: Buffer) => { stdoutBytes = collect(stdout, chunk, stdoutBytes) })
+    child.stderr.on('data', (chunk: Buffer) => { stderrBytes = collect(stderr, chunk, stderrBytes) })
+    child.stdout.once('error', overflow)
+    child.stderr.once('error', overflow)
+    deadlineTimer = schedule(beginDeadline, Math.max(0, startedAtMs + LIVE_GOAL_LIMITS.timeoutMs - now()))
+  })
+}
+
 export async function launchGoalResume(
   preflight: ResumePreflight | LiveSmokeResumePreflight,
   json: boolean,
+  dependencies: LaunchGoalResumeDependencies = {},
 ): Promise<number> {
   const liveSmoke = 'liveSmoke' in preflight
   if (liveSmoke) verifyInstalledRuntimeBundle(preflight.dataDir)
+  const now = dependencies.now ?? Date.now
+  const startedAtMs = now()
   const dshHome = join(preflight.dataDir, 'dsh-home')
-  const child = spawn(process.execPath, [
+  const child = (dependencies.spawnChild ?? spawn)(process.execPath, [
     resolveInstalledDshBin(preflight.dataDir), '--profile', 'tianwen', '--patch',
     resolve(dirname(fileURLToPath(import.meta.url)), '../resume.patch.yml'),
   ], {
@@ -199,39 +315,15 @@ export async function launchGoalResume(
       TIANWEN_RESUME_REVISION: String(preflight.revision),
       TIANWEN_RESUME_SESSION_ID: preflight.sessionId,
       TIANWEN_RESUME_SESSIONS_ROOT: preflight.sessionsRoot,
-      TIANWEN_RESUME_STARTED_AT_MS: String(Date.now()),
+      TIANWEN_RESUME_STARTED_AT_MS: String(startedAtMs),
     },
     shell: false,
     stdio: liveSmoke ? ['ignore', 'pipe', 'pipe'] : 'inherit',
   })
-  if (liveSmoke) {
-    const stdout: Buffer[] = []
-    const stderr: Buffer[] = []
-    let overflow = false
-    const collect = (chunks: Buffer[], chunk: Buffer): void => {
-      if (overflow) return
-      chunks.push(chunk)
-      if (Buffer.concat(chunks).byteLength > 65_536) {
-        overflow = true
-        child.kill()
-      }
-    }
-    child.stdout!.on('data', (chunk: Buffer) => collect(stdout, chunk))
-    child.stderr!.on('data', (chunk: Buffer) => collect(stderr, chunk))
-    return await new Promise((resolveExit, reject) => {
-      child.once('error', reject)
-      child.once('close', () => {
-        const receipt = overflow
-          ? parseGoalLiveSmokeChildReceipt('', '')
-          : parseGoalLiveSmokeChildReceipt(
-            Buffer.concat(stdout).toString('utf8'), Buffer.concat(stderr).toString('utf8'),
-            { goalId: preflight.goalId, sessionId: preflight.sessionId },
-          )
-        process.stdout.write(`${JSON.stringify(receipt)}\n`)
-        resolveExit(receipt.status === 'passed' ? 0 : 1)
-      })
-    })
-  }
+  if (liveSmoke) return monitorLiveSmokeChild(child, preflight, startedAtMs, {
+    ...dependencies.liveSmokeChild,
+    now: dependencies.liveSmokeChild?.now ?? now,
+  })
   return await new Promise((resolveExit, reject) => {
     child.once('error', reject)
     child.once('exit', (code, signal) => resolveExit(code ?? (signal === null ? 1 : 1)))
