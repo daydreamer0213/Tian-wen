@@ -148,7 +148,7 @@
   $env:PNPM_HOME = 'D:\DevData\pnpm-home'
   $env:PNPM_STORE_DIR = 'D:\DevData\pnpm-store'
   $env:UV_CACHE_DIR = 'D:\DevData\uv-cache'
-  $env:UV_PROJECT_ENVIRONMENT = 'D:\DevData\tianwen-integration\python-env'
+  $env:UV_PROJECT_ENVIRONMENT = 'D:\DevData\tianwen-dsh-probe\integration-python-env'
   $env:TEMP = 'D:\DevData\tianwen-integration\temp'
   $env:TMP = $env:TEMP
   $env:TIANWEN_DSH_PROBE_ROOT = 'D:\DevData\tianwen-dsh-probe'
