@@ -1,0 +1,22 @@
+diff --git a/headers.py b/headers.py
+--- a/headers.py
++++ b/headers.py
+@@ -4,3 +4,17 @@
+ def normalize_header_names(message: str) -> str:
+     """Normalize header names in a header/body message."""
+-    return message.lower()
++    output: list[str] = []
++    in_headers = True
++    for line in message.splitlines(keepends=True):
++        content = line.rstrip("\r\n")
++        ending = line[len(content) :]
++        if in_headers and content == "":
++            in_headers = False
++            output.append(line)
++            continue
++        if in_headers:
++            name, separator, value = content.partition(":")
++            if separator:
++                line = f"{name.lower()}:{value}{ending}"
++        output.append(line)
++    return "".join(output)

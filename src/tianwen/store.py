@@ -48,6 +48,7 @@ _IMMUTABLE_GOVERNANCE_KINDS = frozenset(
         "learning_ticket",
         "lesson",
         "promotion",
+        "alpha_trial_manifest",
     }
 )
 
@@ -762,6 +763,20 @@ class StateStore:
             if result.rowcount != 1:
                 raise StateConflict(f"action {action_id} was not in an expected state")
         return transitioned
+
+    def settle_unknown_action(
+        self,
+        action_id: str,
+        target: ActionStatus,
+        result_digest: str,
+    ) -> ActionRecord:
+        """Settle a recovered action without broadening normal action transitions."""
+        if target not in {ActionStatus.SUCCEEDED, ActionStatus.FAILED}:
+            raise StateConflict("unknown actions may settle only to terminal succeeded or failed")
+        try:
+            return self.transition_action(action_id, {ActionStatus.UNKNOWN}, target, result_digest)
+        except StateConflict as error:
+            raise StateConflict(f"action {action_id} is not unknown") from error
 
     def unresolved_actions(self, run_id: str) -> list[ActionRecord]:
         terminal = (

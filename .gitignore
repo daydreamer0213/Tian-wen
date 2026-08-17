@@ -8,3 +8,7 @@ __pycache__/
 .tianwen/
 *.db-wal
 *.db-shm
+node_modules/
+dist/
+*.tsbuildinfo
+.dsh-probe/

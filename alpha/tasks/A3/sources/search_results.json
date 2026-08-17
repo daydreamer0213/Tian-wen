@@ -1,0 +1,7 @@
+[
+  {
+    "body": "urllib.parse.urlencode accepts mappings or two-element sequences; doseq controls sequence-valued elements.",
+    "href": "https://docs.python.org/3/library/urllib.parse.html",
+    "title": "urllib.parse – Parse URLs into components"
+  }
+]

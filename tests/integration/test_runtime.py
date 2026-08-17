@@ -54,6 +54,11 @@ class _UnmeteredModel(TestModel):
         return response
 
 
+class _ProviderFailureModel(TestModel):
+    async def request(self, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("provider detail")
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -228,6 +233,22 @@ async def test_missing_provider_usage_keeps_the_full_token_reservation_and_waits
 
 
 @pytest.mark.anyio
+async def test_provider_failure_settles_run_without_persisting_provider_detail(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path, _ProviderFailureModel(call_tools=[]))
+    run = _run("provider failure", runtime)
+    _persist_run(runtime, run)
+
+    with pytest.raises(RuntimeError, match="provider detail"):
+        await runtime.run(run, "provider failure")
+
+    persisted = runtime.store.get_object("run", run.run_id, RunRecord)
+    events = runtime.store.list_events(run.run_id)
+    assert (persisted.status, persisted.status_reason) == (RunStatus.FAILED, "RuntimeError")
+    assert events[-1].kind == "run_failed"
+    assert "provider detail" not in "\n".join(event.model_dump_json() for event in events)
+
+
+@pytest.mark.anyio
 async def test_recover_resumes_a_stable_checkpoint_but_not_an_unknown_action(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path, TestModel(custom_output_text="done", call_tools=[]))
     run = _run("stable recovery", runtime)
@@ -260,6 +281,22 @@ async def test_manifest_rejects_policy_tool_contract_and_workspace_mismatches(tm
 async def test_string_known_model_name_validates_without_a_provider_request(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path, "test")
     run = _run("go", runtime, model_id="test")
+
+    runtime._validate_manifest(run, "go")
+
+
+@pytest.mark.anyio
+async def test_v1_manifest_still_validates_an_instantiated_provider_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Break caught: replacing model_name with model_id globally corrupts v1 recovery."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "offline-contract-key")
+    from pydantic_ai.models import infer_model
+
+    model = infer_model("deepseek:deepseek-v4-pro")
+    runtime = _runtime(tmp_path, model=model)
+    run = _run("go", runtime, model_id=model.model_name)
 
     runtime._validate_manifest(run, "go")
 

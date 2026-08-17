@@ -1,0 +1,20 @@
+diff --git a/reports.py b/reports.py
+--- a/reports.py
++++ b/reports.py
+@@ -8,4 +8,15 @@ def render_report(
+     groups: Iterable[str] = (),
+ ) -> str:
+     """Render task titles grouped by team."""
+-    raise NotImplementedError
++    grouped: dict[str, list[str]] = {}
++    for group, title in rows:
++        grouped.setdefault(group, []).append(title)
++    for group in groups:
++        grouped.setdefault(group, [])
++
++    sections: list[str] = []
++    for group in sorted(grouped, key=lambda value: (value.casefold(), value)):
++        titles = grouped[group]
++        items = [f"- {title}" for title in titles] or ["- (none)"]
++        sections.append("\n".join((f"[{group}]", *items)))
++    return "\n\n".join(sections)
