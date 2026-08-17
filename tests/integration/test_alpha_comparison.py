@@ -14,9 +14,13 @@ from tianwen.alpha import (
     TrialConfirmation,
     TrialManifest,
     TrialResult,
+    TrialUsage,
 )
 from tianwen.alpha_comparison import (
     AlphaComparisonError,
+    PairedArmProjection,
+    PairedComparisonResult,
+    aggregate_pair_results,
     compare_pair,
     prepare_pair_authority,
 )
@@ -556,3 +560,168 @@ async def test_compare_pair_keeps_missing_or_uncertain_evidence_inconclusive() -
         comparison = compare_pair(authority, **arguments)
         assert comparison.status == "INCONCLUSIVE", comparison.reason_codes
         assert comparison.comparison is None
+
+
+def _arm(
+    role: str,
+    suffix: str,
+    usage: TrialUsage,
+) -> PairedArmProjection:
+    return PairedArmProjection(
+        role=role,
+        trial_id=f"trial-{role}-{suffix}",
+        manifest_digest=f"sha256:manifest-{role}-{suffix}",
+        result_digest=f"sha256:result-{role}-{suffix}",
+        goal_id=f"goal-{role}-{suffix}",
+        store_identity=f"sha256:store-{role}-{suffix}",
+        skill_version_id=f"skill-{role}",
+        skill_digest=f"sha256:skill-{role}",
+        verdict="met",
+        failure_categories=(),
+        execution_status="completed",
+        verification_status="completed",
+        boundary_status="passed",
+        usage=usage,
+        user_interruptions=0,
+    )
+
+
+def _pair_result(
+    pair_id: str,
+    repeat_index: int,
+    *,
+    status: str = "PASS",
+    comparison: str | None = "tie",
+    champion_usage: TrialUsage | None = None,
+    challenger_usage: TrialUsage | None = None,
+) -> PairedComparisonResult:
+    champion = _arm(
+        "champion",
+        str(repeat_index),
+        champion_usage or TrialUsage(
+            model_requests=1,
+            tokens=10,
+            tool_calls=2,
+            action_effects=3,
+            wall_seconds=4,
+        ),
+    )
+    challenger = _arm(
+        "challenger",
+        str(repeat_index),
+        challenger_usage or TrialUsage(
+            model_requests=2,
+            tokens=20,
+            tool_calls=3,
+            action_effects=4,
+            wall_seconds=5,
+        ),
+    )
+    return PairedComparisonResult(
+        pair_id=pair_id,
+        repeat_index=repeat_index,
+        status=status,
+        reason_codes=() if status == "PASS" else (status.lower(),),
+        comparison=comparison if status == "PASS" else None,
+        champion=champion,
+        challenger=challenger,
+    )
+
+
+def test_aggregate_repeated_ab_ba_pairs_preserves_order_totals_and_exact_replay() -> None:
+    ab = _pair_result("pair-ab", 1)
+    ba = _pair_result(
+        "pair-ba",
+        2,
+        comparison="challenger_better",
+        champion_usage=TrialUsage(
+            model_requests=3,
+            tokens=30,
+            tool_calls=4,
+            action_effects=5,
+            wall_seconds=6,
+        ),
+        challenger_usage=TrialUsage(
+            model_requests=4,
+            tokens=40,
+            tool_calls=5,
+            action_effects=6,
+            wall_seconds=7,
+        ),
+    )
+
+    aggregate = aggregate_pair_results((ab, ba))
+    replay = aggregate_pair_results((ab, ba))
+
+    assert aggregate == replay
+    assert aggregate.status == "PASS"
+    assert aggregate.pair_ids == ("pair-ab", "pair-ba")
+    assert aggregate.pair_results == (ab, ba)
+    assert aggregate.comparison_counts == {
+        "champion_better": 0,
+        "challenger_better": 1,
+        "tie": 1,
+    }
+    assert aggregate.champion_usage == TrialUsage(
+        model_requests=4,
+        tokens=40,
+        tool_calls=6,
+        action_effects=8,
+        wall_seconds=10,
+    )
+    assert aggregate.challenger_usage == TrialUsage(
+        model_requests=6,
+        tokens=60,
+        tool_calls=8,
+        action_effects=10,
+        wall_seconds=12,
+    )
+    assert aggregate.champion_user_interruptions == 0
+    assert aggregate.challenger_user_interruptions == 0
+
+
+@pytest.mark.parametrize(
+    "statuses,expected",
+    [
+        (("PASS", "PASS"), "PASS"),
+        (("PASS", "INCONCLUSIVE"), "INCONCLUSIVE"),
+        (("INCONCLUSIVE", "FAIL"), "FAIL"),
+    ],
+)
+def test_aggregate_status_precedence_is_fail_then_inconclusive_then_pass(
+    statuses: tuple[str, str], expected: str
+) -> None:
+    results = tuple(
+        _pair_result(f"pair-{index}", index, status=status)
+        for index, status in enumerate(statuses, start=1)
+    )
+
+    assert aggregate_pair_results(results).status == expected
+
+
+@pytest.mark.parametrize(
+    "results",
+    [
+        (),
+        (_pair_result("pair-2", 2),),
+        (_pair_result("pair-1", 1), _pair_result("pair-3", 3)),
+        (_pair_result("pair-1", 1), _pair_result("pair-2", 1)),
+        (_pair_result("pair-same", 1), _pair_result("pair-same", 2)),
+    ],
+)
+def test_aggregate_rejects_missing_noncontiguous_or_duplicate_repeats(
+    results: tuple[PairedComparisonResult, ...],
+) -> None:
+    with pytest.raises(AlphaComparisonError):
+        aggregate_pair_results(results)
+
+
+def test_aggregate_single_outcome_stays_descriptive_without_promotion_authority() -> None:
+    aggregate = aggregate_pair_results(
+        (_pair_result("pair-1", 1, comparison="challenger_better"),)
+    )
+
+    assert aggregate.comparison_counts["challenger_better"] == 1
+    assert aggregate.status == "PASS"
+    assert "stable_improvement" not in type(aggregate).model_fields
+    assert "promotion_authority" not in type(aggregate).model_fields

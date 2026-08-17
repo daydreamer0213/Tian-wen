@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
@@ -120,9 +121,12 @@ class PairedComparisonAggregate(FrozenModel):
     aggregate_id: str
     status: PairStatus
     pair_ids: tuple[str, ...]
+    pair_results: tuple[PairedComparisonResult, ...]
     comparison_counts: dict[str, int]
     champion_usage: TrialUsage
     challenger_usage: TrialUsage
+    champion_user_interruptions: int = Field(ge=0)
+    challenger_user_interruptions: int = Field(ge=0)
 
 
 def _pair_id(
@@ -472,4 +476,84 @@ def compare_pair(
         comparison=comparison,
         champion=champion,
         challenger=challenger,
+    )
+
+
+def _total_usage(
+    results: tuple[PairedComparisonResult, ...],
+    role: PairRole,
+) -> TrialUsage:
+    usages = tuple(
+        arm.usage
+        for result in results
+        if (arm := getattr(result, role)) is not None
+    )
+    return TrialUsage(
+        model_requests=sum(usage.model_requests for usage in usages),
+        tokens=sum(usage.tokens for usage in usages),
+        tool_calls=sum(usage.tool_calls for usage in usages),
+        action_effects=sum(usage.action_effects for usage in usages),
+        wall_seconds=sum(usage.wall_seconds for usage in usages),
+    )
+
+
+def aggregate_pair_results(
+    results: Sequence[PairedComparisonResult],
+) -> PairedComparisonAggregate:
+    """Aggregate ordered pair receipts without inferring improvement or promotion authority."""
+
+    pair_results = tuple(results)
+    if not pair_results:
+        raise AlphaComparisonError("at least one pair result is required")
+    pair_ids = tuple(result.pair_id for result in pair_results)
+    if len(set(pair_ids)) != len(pair_ids):
+        raise AlphaComparisonError("pair ids must be unique")
+    repeat_indexes = tuple(result.repeat_index for result in pair_results)
+    if repeat_indexes != tuple(range(1, len(pair_results) + 1)):
+        raise AlphaComparisonError("pair repeat indexes must be ordered and contiguous from 1")
+
+    status: PairStatus = (
+        "FAIL"
+        if any(result.status == "FAIL" for result in pair_results)
+        else "INCONCLUSIVE"
+        if any(result.status == "INCONCLUSIVE" for result in pair_results)
+        else "PASS"
+    )
+    comparison_counts = {
+        comparison: sum(result.comparison == comparison for result in pair_results)
+        for comparison in ("champion_better", "challenger_better", "tie")
+    }
+    champion_usage = _total_usage(pair_results, "champion")
+    challenger_usage = _total_usage(pair_results, "challenger")
+    champion_user_interruptions = sum(
+        result.champion.user_interruptions
+        for result in pair_results
+        if result.champion is not None
+    )
+    challenger_user_interruptions = sum(
+        result.challenger.user_interruptions
+        for result in pair_results
+        if result.challenger is not None
+    )
+    payload = {
+        "schema_version": "tianwen.alpha_b_pair_aggregate.v1",
+        "status": status,
+        "pair_ids": pair_ids,
+        "pair_results": [result.model_dump(mode="json") for result in pair_results],
+        "comparison_counts": comparison_counts,
+        "champion_usage": champion_usage.model_dump(mode="json"),
+        "challenger_usage": challenger_usage.model_dump(mode="json"),
+        "champion_user_interruptions": champion_user_interruptions,
+        "challenger_user_interruptions": challenger_user_interruptions,
+    }
+    return PairedComparisonAggregate(
+        aggregate_id=content_digest(payload),
+        status=status,
+        pair_ids=pair_ids,
+        pair_results=pair_results,
+        comparison_counts=comparison_counts,
+        champion_usage=champion_usage,
+        challenger_usage=challenger_usage,
+        champion_user_interruptions=champion_user_interruptions,
+        challenger_user_interruptions=challenger_user_interruptions,
     )
