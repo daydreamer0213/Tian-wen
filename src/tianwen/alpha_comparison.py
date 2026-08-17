@@ -29,6 +29,7 @@ class PairedComparisonLeg(FrozenModel):
     role: PairRole
     trial_id: str
     workspace_identity: str
+    store_identity: str
     skill_version_id: str
     skill_digest: str
 
@@ -56,6 +57,8 @@ class PairedComparisonManifest(FrozenModel):
             raise ValueError("pair trials must be distinct")
         if self.champion.workspace_identity == self.challenger.workspace_identity:
             raise ValueError("pair workspaces must be isolated")
+        if self.champion.store_identity == self.challenger.store_identity:
+            raise ValueError("pair durable stores must be isolated")
         if (
             self.champion.skill_version_id == self.challenger.skill_version_id
             or self.champion.skill_digest == self.challenger.skill_digest
@@ -80,6 +83,7 @@ class PairedArmProjection(FrozenModel):
     manifest_digest: str
     result_digest: str
     goal_id: str
+    store_identity: str
     skill_version_id: str
     skill_digest: str
     verdict: Literal["met", "not_met", "inconclusive"]
@@ -145,6 +149,7 @@ def _leg(role: PairRole, prepared: PreparedTrial) -> PairedComparisonLeg:
         role=role,
         trial_id=prepared.preview.trial_id,
         workspace_identity=content_digest(str(prepared.paths.workspace.resolve())),
+        store_identity=content_digest(str(prepared._app.store.database.resolve())),
         skill_version_id=prepared.champion_version_id,
         skill_digest=prepared.champion_digest,
     )
@@ -168,21 +173,23 @@ def prepare_pair_authority(
         ("challenger", "champion"),
     }:
         raise AlphaComparisonError("pair execution order must contain each role exactly once")
-    champion_condition = champion_runner.condition_snapshot(champion_prepared)
-    challenger_condition = challenger_runner.condition_snapshot(challenger_prepared)
-    if champion_condition != challenger_condition:
-        raise AlphaComparisonError("pair common conditions do not match")
     champion = _leg("champion", champion_prepared)
     challenger = _leg("challenger", challenger_prepared)
     if champion.trial_id == challenger.trial_id:
         raise AlphaComparisonError("pair trial ids must be distinct")
     if champion.workspace_identity == challenger.workspace_identity:
         raise AlphaComparisonError("pair workspace isolation is required")
+    if champion.store_identity == challenger.store_identity:
+        raise AlphaComparisonError("pair durable store isolation is required")
     if (
         champion.skill_version_id == challenger.skill_version_id
         or champion.skill_digest == challenger.skill_digest
     ):
         raise AlphaComparisonError("pair Skill bindings must be different")
+    champion_condition = champion_runner.condition_snapshot(champion_prepared)
+    challenger_condition = challenger_runner.condition_snapshot(challenger_prepared)
+    if champion_condition != challenger_condition:
+        raise AlphaComparisonError("pair common conditions do not match")
     common_condition_digest = content_digest(champion_condition)
     return PairedComparisonManifest(
         pair_id=_pair_id(
@@ -281,10 +288,6 @@ def _binding_errors(
     result: TrialResult,
 ) -> list[str]:
     errors: list[str] = []
-    try:
-        TrialManifest.model_validate(manifest.model_dump(mode="python"))
-    except ValidationError:
-        errors.append(f"{role}_manifest_invalid")
     errors.extend(f"{role}_{item}" for item in _manifest_condition_errors(manifest, condition))
     if manifest.trial_id != leg.trial_id:
         errors.append(f"{role}_trial_binding_mismatch")
@@ -309,11 +312,35 @@ def _binding_errors(
             errors.append(f"{role}_result_{field}_mismatch")
     if content_digest(str(Path(result.workspace_path).resolve())) != manifest.workspace_identity:
         errors.append(f"{role}_result_workspace_mismatch")
+    if _store_identity(result.workspace_path) != leg.store_identity:
+        errors.append(f"{role}_result_store_mismatch")
     return errors
+
+
+def _store_identity(workspace_path: str) -> str:
+    database = Path(workspace_path).resolve().parent / "state" / "tianwen.db"
+    return content_digest(str(database.resolve()))
+
+
+def _strict_manifest(value: object) -> TrialManifest | None:
+    try:
+        payload = value.model_dump(mode="python") if isinstance(value, TrialManifest) else value
+        return TrialManifest.model_validate(payload, strict=True)
+    except (TypeError, ValueError, ValidationError):
+        return None
+
+
+def _strict_result(value: object) -> TrialResult | None:
+    try:
+        payload = value.model_dump(mode="python") if isinstance(value, TrialResult) else value
+        return TrialResult.model_validate(payload, strict=True)
+    except (TypeError, ValueError, ValidationError):
+        return None
 
 
 def _projection(
     role: PairRole,
+    leg: PairedComparisonLeg,
     manifest: TrialManifest,
     result: TrialResult,
 ) -> PairedArmProjection:
@@ -323,6 +350,7 @@ def _projection(
         manifest_digest=content_digest(manifest),
         result_digest=content_digest(result),
         goal_id=result.goal_id,
+        store_identity=leg.store_identity,
         skill_version_id=result.champion_version_id,
         skill_digest=result.champion_digest,
         verdict=result.verdict,
@@ -365,10 +393,6 @@ def compare_pair(
 ) -> PairedComparisonResult:
     """Project two immutable Alpha Trial receipts without mutating governance state."""
 
-    try:
-        PairedComparisonManifest.model_validate(authority.model_dump(mode="python"))
-    except ValidationError:
-        return _result(authority, "FAIL", ("pair_authority_invalid",))
     missing = tuple(
         name
         for name, value in (
@@ -381,8 +405,25 @@ def compare_pair(
     )
     if missing:
         return _result(authority, "INCONCLUSIVE", missing)
-    assert champion_manifest is not None and champion_result is not None
-    assert challenger_manifest is not None and challenger_result is not None
+    validated = (
+        ("champion_manifest_malformed", _strict_manifest(champion_manifest)),
+        ("champion_result_malformed", _strict_result(champion_result)),
+        ("challenger_manifest_malformed", _strict_manifest(challenger_manifest)),
+        ("challenger_result_malformed", _strict_result(challenger_result)),
+    )
+    malformed = tuple(reason for reason, value in validated if value is None)
+    if malformed:
+        return _result(authority, "INCONCLUSIVE", malformed)
+    try:
+        PairedComparisonManifest.model_validate(authority.model_dump(mode="python"), strict=True)
+    except (TypeError, ValueError, ValidationError):
+        return _result(authority, "FAIL", ("pair_authority_invalid",))
+    champion_manifest = validated[0][1]
+    champion_result = validated[1][1]
+    challenger_manifest = validated[2][1]
+    challenger_result = validated[3][1]
+    assert isinstance(champion_manifest, TrialManifest) and isinstance(champion_result, TrialResult)
+    assert isinstance(challenger_manifest, TrialManifest) and isinstance(challenger_result, TrialResult)
     errors = _binding_errors(
         "champion", authority.champion, authority.common_condition, champion_manifest, champion_result
     )
@@ -397,6 +438,8 @@ def compare_pair(
     )
     if champion_manifest.workspace_identity == challenger_manifest.workspace_identity:
         errors.append("manifest_workspace_isolation_mismatch")
+    if _store_identity(champion_result.workspace_path) == _store_identity(challenger_result.workspace_path):
+        errors.append("result_store_isolation_mismatch")
     if errors:
         return _result(authority, "FAIL", tuple(dict.fromkeys(errors)))
     uncertain: list[str] = []
@@ -411,8 +454,8 @@ def compare_pair(
             uncertain.append(f"{role}_boundary_unknown")
     if uncertain:
         return _result(authority, "INCONCLUSIVE", tuple(uncertain))
-    champion = _projection("champion", champion_manifest, champion_result)
-    challenger = _projection("challenger", challenger_manifest, challenger_result)
+    champion = _projection("champion", authority.champion, champion_manifest, champion_result)
+    challenger = _projection("challenger", authority.challenger, challenger_manifest, challenger_result)
     champion_rank = (champion.boundary_status == "passed", champion.verdict == "met")
     challenger_rank = (challenger.boundary_status == "passed", challenger.verdict == "met")
     comparison: DescriptiveComparison = (

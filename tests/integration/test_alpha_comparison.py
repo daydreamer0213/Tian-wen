@@ -190,6 +190,13 @@ def test_prepare_pair_authority_binds_equal_conditions_isolation_roles_and_order
     assert authority.challenger.role == "challenger"
     assert authority.champion.trial_id != authority.challenger.trial_id
     assert authority.champion.workspace_identity != authority.challenger.workspace_identity
+    assert authority.champion.store_identity != authority.challenger.store_identity
+    assert authority.champion.store_identity == content_digest(
+        str(champion._app.store.database.resolve())
+    )
+    assert authority.challenger.store_identity == content_digest(
+        str(challenger._app.store.database.resolve())
+    )
     assert authority.champion.skill_digest != authority.challenger.skill_digest
     assert champion_model.request_count == challenger_model.request_count == 0
 
@@ -275,6 +282,25 @@ def test_prepare_pair_rejects_same_workspace_same_behavior_and_invalid_order_bef
     assert champion_model.request_count == challenger_model.request_count == same_model.request_count == 0
 
 
+def test_prepare_pair_rejects_shared_durable_store_before_requests() -> None:
+    champion_runner, champion_model, _, champion, challenger_runner, challenger_model, _, challenger = (
+        _prepared_pair()
+    )
+    shared_context = replace(challenger, _app=champion._app)
+
+    with pytest.raises(AlphaComparisonError, match="store"):
+        prepare_pair_authority(
+            champion_runner,
+            champion,
+            challenger_runner,
+            shared_context,
+            repeat_index=1,
+            execution_order=("champion", "challenger"),
+        )
+
+    assert champion_model.request_count == challenger_model.request_count == 0
+
+
 async def _execute_pair() -> tuple[Any, ...]:
     (
         champion_runner,
@@ -352,6 +378,8 @@ async def test_compare_pair_passes_only_complete_bound_arms_with_independent_exe
     assert comparison.challenger.usage == results["challenger"].usage
     assert results["champion"].goal_id != results["challenger"].goal_id
     assert champion_runner.store.database != challenger_runner.store.database
+    assert comparison.champion.store_identity == authority.champion.store_identity
+    assert comparison.challenger.store_identity == authority.challenger.store_identity
     assert results["champion"].workspace_path != results["challenger"].workspace_path
     assert champion_model.request_count == challenger_model.request_count == 1
     assert champion_model.prompts and challenger_model.prompts
@@ -403,6 +431,11 @@ async def test_compare_pair_fails_known_binding_or_isolation_tampering_without_c
                 update={"workspace_identity": manifests["champion"].workspace_identity}
             )
         },
+        {
+            "challenger_result": results["challenger"].model_copy(
+                update={"workspace_path": results["champion"].workspace_path}
+            )
+        },
     )
     for updates in cases:
         arguments = {
@@ -415,6 +448,80 @@ async def test_compare_pair_fails_known_binding_or_isolation_tampering_without_c
         comparison = compare_pair(authority, **arguments)
         assert comparison.status == "FAIL"
         assert comparison.comparison is None
+
+    tampered_authority = authority.model_copy(
+        update={
+            "challenger": authority.challenger.model_copy(
+                update={"store_identity": authority.champion.store_identity}
+            )
+        }
+    )
+    comparison = compare_pair(
+        tampered_authority,
+        champion_manifest=manifests["champion"],
+        champion_result=results["champion"],
+        challenger_manifest=manifests["challenger"],
+        challenger_result=results["challenger"],
+    )
+    assert comparison.status == "FAIL"
+    assert comparison.comparison is None
+    assert comparison.reason_codes == ("pair_authority_invalid",)
+
+
+@pytest.mark.anyio
+async def test_compare_pair_keeps_malformed_manifest_inconclusive_without_raising() -> None:
+    authority, _, _, _, _, _, _, manifests, results = await _execute_pair()
+    malformed = manifests["challenger"].model_dump(mode="json")
+    del malformed["task_id"]
+
+    comparison = compare_pair(
+        authority,
+        champion_manifest=manifests["champion"],
+        champion_result=results["champion"],
+        challenger_manifest=malformed,  # type: ignore[arg-type]
+        challenger_result=results["challenger"],
+    )
+
+    assert comparison.status == "INCONCLUSIVE"
+    assert comparison.comparison is None
+    assert comparison.reason_codes == ("challenger_manifest_malformed",)
+
+
+@pytest.mark.anyio
+async def test_compare_pair_keeps_malformed_result_inconclusive_without_raising() -> None:
+    authority, _, _, _, _, _, _, manifests, results = await _execute_pair()
+    malformed = results["challenger"].model_dump(mode="json")
+    malformed["verification_status"] = "corrupt"
+
+    comparison = compare_pair(
+        authority,
+        champion_manifest=manifests["champion"],
+        champion_result=results["champion"],
+        challenger_manifest=manifests["challenger"],
+        challenger_result=malformed,  # type: ignore[arg-type]
+    )
+
+    assert comparison.status == "INCONCLUSIVE"
+    assert comparison.comparison is None
+    assert comparison.reason_codes == ("challenger_result_malformed",)
+
+    tampered_authority = authority.model_copy(
+        update={
+            "challenger": authority.challenger.model_copy(
+                update={"store_identity": authority.champion.store_identity}
+            )
+        }
+    )
+    precedence = compare_pair(
+        tampered_authority,
+        champion_manifest=manifests["champion"],
+        champion_result=results["champion"],
+        challenger_manifest=manifests["challenger"],
+        challenger_result=malformed,  # type: ignore[arg-type]
+    )
+    assert precedence.status == "INCONCLUSIVE"
+    assert precedence.comparison is None
+    assert precedence.reason_codes == ("challenger_result_malformed",)
 
 
 @pytest.mark.anyio
