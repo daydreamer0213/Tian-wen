@@ -116,12 +116,22 @@ Alpha-B 的主要离线比较设施已经实现并通过聚焦、全量和多轮
 
 阶段分支：`codex/tianwen-alpha-b-paired-comparison`  
 实现/修复 head：`ff6baeff6b9163c41ab6e2336375de9fa6cf566a`
+首个 handoff 提交：`825e675980ed04fc86b4b46e1c0816e1095870e2`
 
-本交接提交与远端精确 SHA 在提交/推送后追加到本节。当前决策是：
+2026-08-18 收口 fetch/`ls-remote` 核对：
+
+- 本地 `main`：`9208f3117230f0dab1001423231716ddbee2abe8`；
+- `origin/main`：`9208f3117230f0dab1001423231716ddbee2abe8`；
+- GitHub `main`：`9208f3117230f0dab1001423231716ddbee2abe8`；
+- 三者一致，网络正常；
+- 该 main 新增的是持续学习架构决策收敛文档，Alpha-B 分支不得覆盖它们。
+
+Alpha-B 分支基于 `2b95b31b9927626c20808d39d018cbd47c0270c1` 开始；因为当前阶段被正确性证据阻塞，所以：
 
 - stage branch 将正常 push 保留；
-- `main` 保持 `2b95b31b9927626c20808d39d018cbd47c0270c1`；
+- `main` 保持上述最新 `9208f3117230f0dab1001423231716ddbee2abe8`，本阶段不写入；
 - 不 merge、不 rebase、不 squash、不 force-push；
+- 后续修复通过后，必须先把 stage branch 以正常 merge 方式收拢到当时最新 main，并保留 main 上的新架构文档；
 - GitHub/main 网络核对若失败，只报告网络不确定性。
 
 ## 9. Pending user decisions
