@@ -45,6 +45,8 @@ from tianwen.alpha_workspace import (
 from tianwen.app import TianwenApp, TianwenConfig, default_eval_protocol
 from tianwen.domain import (
     ActionStatus,
+    ArtifactStatus,
+    ArtifactVersion,
     BudgetLimit,
     EvidenceRecord,
     ExplorationBrief,
@@ -92,6 +94,46 @@ class TrialPreview(FrozenModel):
     image_digest: str
     data_root: str
     paid_request_warning: str
+
+
+class AlphaTrialConditionSnapshot(FrozenModel):
+    schema_version: Literal["tianwen.alpha_trial_condition_snapshot.v1"] = (
+        "tianwen.alpha_trial_condition_snapshot.v1"
+    )
+    task_id: str
+    task_version: str
+    task_bundle_digest: str
+    model_input_digest: str
+    round_order: tuple[str, ...]
+    objective: str
+    acceptance: tuple[str, ...]
+    rounds: tuple[PreviewRound, ...]
+    authorizations: tuple[str, ...]
+    budget: BudgetLimit
+    model_id: str
+    model_class: str
+    model_settings_snapshot: dict[str, JsonValue]
+    model_settings_digest: str
+    provider_class: str
+    provider_name: str
+    provider_base_url: str
+    provider_config_snapshot: dict[str, JsonValue]
+    provider_config_digest: str
+    pydantic_ai_version: str
+    harness_version: str
+    image_manifest_digest: str
+    image_platform_digest: str
+    container_config_snapshot: dict[str, JsonValue]
+    container_config_digest: str
+    named_checks_snapshot: dict[str, JsonValue]
+    named_checks_digest: str
+    verifier_snapshot: dict[str, JsonValue]
+    verifier_digest: str
+    baseline_tree_digest: str
+    runtime_policy_snapshot: dict[str, JsonValue]
+    runtime_policy_digest: str
+    tool_contract_snapshot: dict[str, JsonValue]
+    tool_contract_digest: str
 
 
 class TrialConfirmation(FrozenModel):
@@ -143,6 +185,23 @@ class TrialManifest(FrozenModel):
 
     @model_validator(mode="after")
     def validate_round_authority(self) -> TrialManifest:
+        digest_bindings = (
+            (self.model_settings_digest, self.model_settings_snapshot, "model settings"),
+            (self.container_config_digest, self.container_config_snapshot, "container config"),
+            (self.named_checks_digest, self.named_checks_snapshot, "named checks"),
+            (self.verifier_digest, self.verifier_snapshot, "verifier"),
+        )
+        for digest, snapshot, label in digest_bindings:
+            if digest != content_digest(snapshot):
+                raise ValueError(f"trial manifest {label} digest does not match snapshot")
+        if self.provider_config_digest != content_digest(
+            {
+                "provider_name": self.provider_name,
+                "provider_base_url": self.provider_base_url,
+                "model_id": self.model_id,
+            }
+        ):
+            raise ValueError("trial manifest provider config digest does not match identity")
         policy_rounds = self.runtime_policy_snapshot.get("rounds")
         tool_rounds = self.tool_contract_snapshot.get("rounds")
         if (
@@ -264,6 +323,9 @@ class PreparedTrial:
     champion_version_id: str
     champion_digest: str
     preview: TrialPreview
+    model_settings_snapshot: dict[str, JsonValue]
+    provider_config_snapshot: dict[str, JsonValue]
+    container_config_snapshot: dict[str, JsonValue]
     _app: TianwenApp
 
 
@@ -310,6 +372,49 @@ def sanitize_provider(model: Model | KnownModelName) -> tuple[str, str, str]:
     )
 
 
+def _class_identity(value: object) -> str:
+    cls = type(value)
+    return f"{cls.__module__}.{cls.__qualname__}"
+
+
+def _provider_config_snapshot(model: Model | KnownModelName) -> dict[str, JsonValue]:
+    provider_name, provider_url, model_id = sanitize_provider(model)
+    provider = None if isinstance(model, str) else getattr(model, "provider", None)
+    return {
+        "model_class": _class_identity(model),
+        "provider_class": "none" if provider is None else _class_identity(provider),
+        "provider_name": provider_name,
+        "provider_base_url": provider_url,
+        "model_id": model_id,
+    }
+
+
+def _container_config_snapshot(
+    docker: Any,
+    bundle: AlphaTaskBundle,
+    preflight: DockerPreflight,
+) -> dict[str, JsonValue]:
+    normalized_config = getattr(docker, "_normalized_config", None)
+    if not callable(normalized_config):
+        raise AlphaTrialError("Docker executor must expose its normalized configuration")
+    public_checks: dict[str, JsonValue] = {}
+    for check in bundle.task.named_checks:
+        config = _json_value(normalized_config(check.check_id, final=False))
+        if not isinstance(config, dict):
+            raise AlphaTrialError("Docker normalized public check configuration must be an object")
+        public_checks[check.check_id] = config
+    final_config = _json_value(normalized_config("final", final=True))
+    if not isinstance(final_config, dict):
+        raise AlphaTrialError("Docker normalized final verifier configuration must be an object")
+    stable_preflight = preflight.model_dump(mode="json", exclude={"free_bytes"})
+    return {
+        "executor_class": _class_identity(docker),
+        "preflight": stable_preflight,
+        "public_checks": public_checks,
+        "final_verifier": final_config,
+    }
+
+
 class AlphaTrialRunner:
     """One serial, durable coordinator for a single local Alpha trial."""
 
@@ -335,7 +440,14 @@ class AlphaTrialRunner:
         self.app: TianwenApp | None = None
         self.exploration_finished_at = utc_now()
 
-    def prepare(self, task_id: str, *, budget: BudgetLimit, previous_trial_id: str | None = None) -> PreparedTrial:
+    def prepare(
+        self,
+        task_id: str,
+        *,
+        budget: BudgetLimit,
+        previous_trial_id: str | None = None,
+        artifact_version: ArtifactVersion | None = None,
+    ) -> PreparedTrial:
         if budget.model_requests <= 0 or budget.tokens <= 0 or budget.wall_seconds <= 0:
             raise AlphaTrialError("trial requires a nonzero request, token, and wall budget")
         bundle = load_task_bundle(self.task_root / task_id, self.image_lock_path)
@@ -358,14 +470,17 @@ class AlphaTrialRunner:
             )
         )
         self.store, self.app = app.store, app
-        champion = app.artifact(app.active_version("repo-task"))
-        app.materialize_skill(champion.version_id)
+        active = app.artifact(app.active_version("repo-task"))
+        selected = self._select_artifact(app, active, artifact_version)
+        app.materialize_skill(selected.version_id)
         docker = self.docker_factory(paths, bundle, app.store)
         preflight = docker.preflight()
+        container_config = _container_config_snapshot(docker, bundle, preflight)
         seed = self._run(docker.run_seed_preflight())
         if seed.verdict != "not_met":
             raise AlphaTrialError("seed verifier must be valid not_met")
-        sanitize_model_settings(self.model)
+        model_settings = sanitize_model_settings(self.model)
+        provider_config = _provider_config_snapshot(self.model)
         provider_name, _provider_url, model_id = sanitize_provider(self.model)
         if not model_id or ":" not in model_id:
             raise AlphaTrialError("model identity must be fully qualified")
@@ -393,8 +508,8 @@ class AlphaTrialRunner:
             budget=budget,
             model_id=model_id,
             provider_name=provider_name,
-            champion_version_id=champion.version_id,
-            champion_digest=champion.content_digest,
+            champion_version_id=selected.version_id,
+            champion_digest=selected.content_digest,
             image_digest=bundle.image_lock.manifest_digest,
             data_root=str(paths.data_root),
             paid_request_warning="Real API fees may be incurred after confirmation.",
@@ -423,7 +538,112 @@ class AlphaTrialRunner:
             ),
         )
         return PreparedTrial(
-            bundle, paths, baseline, preflight, seed, champion.version_id, champion.content_digest, preview, app
+            bundle,
+            paths,
+            baseline,
+            preflight,
+            seed,
+            selected.version_id,
+            selected.content_digest,
+            preview,
+            model_settings,
+            provider_config,
+            container_config,
+            app,
+        )
+
+    @staticmethod
+    def _select_artifact(
+        app: TianwenApp, active: ArtifactVersion, artifact_version: ArtifactVersion | None
+    ) -> ArtifactVersion:
+        selected = artifact_version or active
+        if selected.artifact_id != "repo-task":
+            raise AlphaTrialError("explicit artifact id must be repo-task")
+        if selected.artifact_type != "repo_task_skill":
+            raise AlphaTrialError("explicit artifact type must be repo_task_skill")
+        if selected.content_digest != content_digest(selected.content):
+            raise AlphaTrialError("explicit artifact content digest does not match UTF-8 content")
+        if selected.status is ArtifactStatus.ACTIVE:
+            if selected != active:
+                raise AlphaTrialError("explicit active artifact must be the current Champion")
+            return selected
+        if selected.status is not ArtifactStatus.CANDIDATE:
+            raise AlphaTrialError("explicit artifact status must be active or candidate")
+        if selected.parent_version_id != active.version_id:
+            raise AlphaTrialError("explicit Candidate parent must be the current Champion")
+        app.store.put_immutable_object(
+            "artifact", selected.version_id, selected.parent_version_id, selected.status.value, selected
+        )
+        return selected
+
+    def condition_snapshot(self, prepared: PreparedTrial) -> AlphaTrialConditionSnapshot:
+        bundle = prepared._bundle
+        settings = prepared.model_settings_snapshot
+        provider_config = prepared.provider_config_snapshot
+        provider_name = str(provider_config["provider_name"])
+        provider_url = str(provider_config["provider_base_url"])
+        model_id = str(provider_config["model_id"])
+        policy_rounds: dict[str, JsonValue] = {}
+        tool_rounds: dict[str, JsonValue] = {}
+        for round_spec in bundle.task.rounds:
+            digests = alpha_runtime_manifest_digests(
+                self._runtime_config(prepared, None, round_spec.round_id, "sha256:pending")
+            )
+            policy_rounds[round_spec.round_id] = {
+                "policy": digests["policy_snapshot"],
+                "policy_digest": digests["policy_digest"],
+            }
+            tool_rounds[round_spec.round_id] = {
+                "tool_contract": digests["tool_contract_snapshot"],
+                "tool_contract_digest": digests["tool_contract_digest"],
+            }
+        policy_snapshot: dict[str, JsonValue] = {
+            "schema": "tianwen.alpha_trial_condition_policy.v1",
+            "rounds": policy_rounds,
+        }
+        tool_snapshot: dict[str, JsonValue] = {
+            "schema": "tianwen.alpha_trial_condition_tools.v1",
+            "rounds": tool_rounds,
+        }
+        named_checks: dict[str, JsonValue] = {
+            item.check_id: item.model_dump(mode="json") for item in bundle.task.named_checks
+        }
+        verifier: dict[str, JsonValue] = bundle.task.final_verifier.model_dump(mode="json")
+        return AlphaTrialConditionSnapshot(
+            task_id=bundle.task.task_id,
+            task_version=bundle.task.task_version,
+            task_bundle_digest=bundle.task_bundle_digest,
+            model_input_digest=bundle.model_input_digest,
+            round_order=tuple(item.round_id for item in bundle.task.rounds),
+            objective=prepared.preview.objective,
+            acceptance=prepared.preview.acceptance,
+            rounds=prepared.preview.rounds,
+            authorizations=prepared.preview.authorizations,
+            budget=prepared.preview.budget,
+            model_id=model_id,
+            model_class=str(provider_config["model_class"]),
+            model_settings_snapshot=settings,
+            model_settings_digest=content_digest(settings),
+            provider_class=str(provider_config["provider_class"]),
+            provider_name=provider_name,
+            provider_base_url=provider_url,
+            provider_config_snapshot=provider_config,
+            provider_config_digest=content_digest(provider_config),
+            pydantic_ai_version=version("pydantic-ai-slim"),
+            harness_version=version("pydantic-ai-harness"),
+            image_manifest_digest=bundle.image_lock.manifest_digest,
+            image_platform_digest=bundle.image_lock.platform_digest,
+            container_config_snapshot=prepared.container_config_snapshot,
+            container_config_digest=content_digest(prepared.container_config_snapshot),
+            named_checks_snapshot=named_checks,
+            named_checks_digest=content_digest(named_checks),
+            verifier_snapshot=verifier,
+            verifier_digest=content_digest(verifier),
+            baseline_tree_digest=prepared.baseline.digest,
+            runtime_policy_snapshot=policy_snapshot,
+            runtime_policy_digest=content_digest(policy_snapshot),
+            tool_contract_snapshot=tool_snapshot,
+            tool_contract_digest=content_digest(tool_snapshot),
         )
 
     async def execute(self, prepared: PreparedTrial, confirmation: TrialConfirmation) -> TrialResult:
@@ -581,17 +801,23 @@ class AlphaTrialRunner:
         baseline = snapshot_tree(bundle.root / "seed")
         if baseline.digest != manifest.baseline_tree_digest or baseline.digest != bundle.task.baseline_tree_digest:
             raise AlphaTrialError("recovered baseline does not match immutable trial authority")
+        docker = self.docker_factory(paths, bundle, app.store)
+        preflight = docker.preflight()
         prepared = PreparedTrial(
             bundle,
             paths,
             baseline,
-            self.docker_factory(paths, bundle, app.store).preflight(),
-            self._run(self.docker_factory(paths, bundle, app.store).run_seed_preflight()),
+            preflight,
+            self._run(docker.run_seed_preflight()),
             manifest.champion_version_id,
             manifest.champion_digest,
             preview,
+            sanitize_model_settings(self.model),
+            _provider_config_snapshot(self.model),
+            _container_config_snapshot(docker, bundle, preflight),
             app,
         )
+        self._revalidate_paired_resume_authority(prepared)
         if state.stage == "running":
             incomplete = [
                 app.store.get_object("run", run_id, RunRecord)
@@ -644,13 +870,16 @@ class AlphaTrialRunner:
 
     def _manifest(self, prepared: PreparedTrial, goal: GoalContract, confirmation: TrialConfirmation) -> TrialManifest:
         app, bundle = prepared._app, prepared._bundle
-        settings = sanitize_model_settings(self.model)
-        provider_name, provider_url, model_id = sanitize_provider(self.model)
+        settings = prepared.model_settings_snapshot
+        provider_config = prepared.provider_config_snapshot
+        provider_name = str(provider_config["provider_name"])
+        provider_url = str(provider_config["provider_base_url"])
+        model_id = str(provider_config["model_id"])
         packet = app.goal_evidence_packet(goal.goal_id)
         policy_snapshot, tool_snapshot = self._round_authority(prepared, goal)
         named_checks = {item.check_id: item.model_dump(mode="json") for item in bundle.task.named_checks}
         verifier = bundle.task.final_verifier.model_dump(mode="json")
-        container = {
+        runtime_container: dict[str, JsonValue] = {
             "image_manifest_digest": bundle.image_lock.manifest_digest,
             "image_platform_digest": bundle.image_lock.platform_digest,
         }
@@ -683,8 +912,8 @@ class AlphaTrialRunner:
             tool_contract_digest=content_digest(tool_snapshot),
             image_manifest_digest=bundle.image_lock.manifest_digest,
             image_platform_digest=bundle.image_lock.platform_digest,
-            container_config_snapshot=container,
-            container_config_digest=content_digest(container),
+            container_config_snapshot=runtime_container,
+            container_config_digest=content_digest(runtime_container),
             named_checks_snapshot=named_checks,
             named_checks_digest=content_digest(named_checks),
             verifier_snapshot=verifier,
@@ -1037,15 +1266,38 @@ class AlphaTrialRunner:
         return result_model
 
     def _revalidate_prepared(self, prepared: PreparedTrial) -> None:
-        if self.docker_factory(prepared.paths, prepared._bundle, prepared._app.store).preflight() != prepared.preflight:
+        if (
+            sanitize_model_settings(self.model) != prepared.model_settings_snapshot
+            or _provider_config_snapshot(self.model) != prepared.provider_config_snapshot
+        ):
+            raise AlphaTrialError("prepared model or provider configuration no longer matches frozen authority")
+        docker = self.docker_factory(prepared.paths, prepared._bundle, prepared._app.store)
+        preflight = docker.preflight()
+        if preflight != prepared.preflight:
             raise AlphaTrialError("prepared Docker preflight no longer matches frozen authority")
+        if (
+            _container_config_snapshot(docker, prepared._bundle, preflight)
+            != prepared.container_config_snapshot
+        ):
+            raise AlphaTrialError("prepared Docker configuration no longer matches frozen authority")
         if snapshot_tree(prepared.paths.workspace) != prepared.baseline:
             raise AlphaTrialError("prepared seed workspace no longer matches its frozen baseline")
-        if (
-            self._run(self.docker_factory(prepared.paths, prepared._bundle, prepared._app.store).run_seed_preflight())
-            != prepared.seed_verifier
-        ):
+        if self._run(docker.run_seed_preflight()) != prepared.seed_verifier:
             raise AlphaTrialError("prepared seed verifier no longer matches frozen authority")
+
+    def _revalidate_paired_resume_authority(self, prepared: PreparedTrial) -> None:
+        from tianwen.alpha_comparison import PairedComparisonManifest
+
+        try:
+            authority = prepared._app.store.get_object(
+                "alpha_pair_authority", prepared.preview.trial_id, PairedComparisonManifest
+            )
+        except StateConflict:
+            return
+        except (TypeError, ValueError) as error:
+            raise AlphaTrialError("paired trial authority is invalid") from error
+        if self.condition_snapshot(prepared) != authority.common_condition:
+            raise AlphaTrialError("paired trial runner identity does not match frozen pair authority")
 
     @staticmethod
     def _validate_manifest_bundle(manifest: TrialManifest, bundle: AlphaTaskBundle) -> None:
