@@ -45,6 +45,8 @@ from tianwen.alpha_workspace import (
 from tianwen.app import TianwenApp, TianwenConfig, default_eval_protocol
 from tianwen.domain import (
     ActionStatus,
+    ArtifactStatus,
+    ArtifactVersion,
     BudgetLimit,
     EvidenceRecord,
     ExplorationBrief,
@@ -92,6 +94,43 @@ class TrialPreview(FrozenModel):
     image_digest: str
     data_root: str
     paid_request_warning: str
+
+
+class AlphaTrialConditionSnapshot(FrozenModel):
+    schema_version: Literal["tianwen.alpha_trial_condition_snapshot.v1"] = (
+        "tianwen.alpha_trial_condition_snapshot.v1"
+    )
+    task_id: str
+    task_version: str
+    task_bundle_digest: str
+    model_input_digest: str
+    round_order: tuple[str, ...]
+    objective: str
+    acceptance: tuple[str, ...]
+    rounds: tuple[PreviewRound, ...]
+    authorizations: tuple[str, ...]
+    budget: BudgetLimit
+    model_id: str
+    model_settings_snapshot: dict[str, JsonValue]
+    model_settings_digest: str
+    provider_name: str
+    provider_base_url: str
+    provider_config_digest: str
+    pydantic_ai_version: str
+    harness_version: str
+    image_manifest_digest: str
+    image_platform_digest: str
+    container_config_snapshot: dict[str, JsonValue]
+    container_config_digest: str
+    named_checks_snapshot: dict[str, JsonValue]
+    named_checks_digest: str
+    verifier_snapshot: dict[str, JsonValue]
+    verifier_digest: str
+    baseline_tree_digest: str
+    runtime_policy_snapshot: dict[str, JsonValue]
+    runtime_policy_digest: str
+    tool_contract_snapshot: dict[str, JsonValue]
+    tool_contract_digest: str
 
 
 class TrialConfirmation(FrozenModel):
@@ -335,7 +374,14 @@ class AlphaTrialRunner:
         self.app: TianwenApp | None = None
         self.exploration_finished_at = utc_now()
 
-    def prepare(self, task_id: str, *, budget: BudgetLimit, previous_trial_id: str | None = None) -> PreparedTrial:
+    def prepare(
+        self,
+        task_id: str,
+        *,
+        budget: BudgetLimit,
+        previous_trial_id: str | None = None,
+        artifact_version: ArtifactVersion | None = None,
+    ) -> PreparedTrial:
         if budget.model_requests <= 0 or budget.tokens <= 0 or budget.wall_seconds <= 0:
             raise AlphaTrialError("trial requires a nonzero request, token, and wall budget")
         bundle = load_task_bundle(self.task_root / task_id, self.image_lock_path)
@@ -358,8 +404,9 @@ class AlphaTrialRunner:
             )
         )
         self.store, self.app = app.store, app
-        champion = app.artifact(app.active_version("repo-task"))
-        app.materialize_skill(champion.version_id)
+        active = app.artifact(app.active_version("repo-task"))
+        selected = self._select_artifact(app, active, artifact_version)
+        app.materialize_skill(selected.version_id)
         docker = self.docker_factory(paths, bundle, app.store)
         preflight = docker.preflight()
         seed = self._run(docker.run_seed_preflight())
@@ -393,8 +440,8 @@ class AlphaTrialRunner:
             budget=budget,
             model_id=model_id,
             provider_name=provider_name,
-            champion_version_id=champion.version_id,
-            champion_digest=champion.content_digest,
+            champion_version_id=selected.version_id,
+            champion_digest=selected.content_digest,
             image_digest=bundle.image_lock.manifest_digest,
             data_root=str(paths.data_root),
             paid_request_warning="Real API fees may be incurred after confirmation.",
@@ -423,7 +470,101 @@ class AlphaTrialRunner:
             ),
         )
         return PreparedTrial(
-            bundle, paths, baseline, preflight, seed, champion.version_id, champion.content_digest, preview, app
+            bundle, paths, baseline, preflight, seed, selected.version_id, selected.content_digest, preview, app
+        )
+
+    @staticmethod
+    def _select_artifact(
+        app: TianwenApp, active: ArtifactVersion, artifact_version: ArtifactVersion | None
+    ) -> ArtifactVersion:
+        selected = artifact_version or active
+        if selected.artifact_id != "repo-task":
+            raise AlphaTrialError("explicit artifact id must be repo-task")
+        if selected.artifact_type != "repo_task_skill":
+            raise AlphaTrialError("explicit artifact type must be repo_task_skill")
+        if selected.content_digest != content_digest(selected.content):
+            raise AlphaTrialError("explicit artifact content digest does not match UTF-8 content")
+        if selected.status is ArtifactStatus.ACTIVE:
+            if selected != active:
+                raise AlphaTrialError("explicit active artifact must be the current Champion")
+            return selected
+        if selected.status is not ArtifactStatus.CANDIDATE:
+            raise AlphaTrialError("explicit artifact status must be active or candidate")
+        if selected.parent_version_id != active.version_id:
+            raise AlphaTrialError("explicit Candidate parent must be the current Champion")
+        app.store.put_immutable_object(
+            "artifact", selected.version_id, selected.parent_version_id, selected.status.value, selected
+        )
+        return selected
+
+    def condition_snapshot(self, prepared: PreparedTrial) -> AlphaTrialConditionSnapshot:
+        bundle = prepared._bundle
+        settings = sanitize_model_settings(self.model)
+        provider_name, provider_url, model_id = sanitize_provider(self.model)
+        policy_rounds: dict[str, JsonValue] = {}
+        tool_rounds: dict[str, JsonValue] = {}
+        for round_spec in bundle.task.rounds:
+            digests = alpha_runtime_manifest_digests(
+                self._runtime_config(prepared, None, round_spec.round_id, "sha256:pending")
+            )
+            policy_rounds[round_spec.round_id] = {
+                "policy": digests["policy_snapshot"],
+                "policy_digest": digests["policy_digest"],
+            }
+            tool_rounds[round_spec.round_id] = {
+                "tool_contract": digests["tool_contract_snapshot"],
+                "tool_contract_digest": digests["tool_contract_digest"],
+            }
+        policy_snapshot: dict[str, JsonValue] = {
+            "schema": "tianwen.alpha_trial_condition_policy.v1",
+            "rounds": policy_rounds,
+        }
+        tool_snapshot: dict[str, JsonValue] = {
+            "schema": "tianwen.alpha_trial_condition_tools.v1",
+            "rounds": tool_rounds,
+        }
+        container: dict[str, JsonValue] = {
+            "image_manifest_digest": bundle.image_lock.manifest_digest,
+            "image_platform_digest": bundle.image_lock.platform_digest,
+        }
+        named_checks: dict[str, JsonValue] = {
+            item.check_id: item.model_dump(mode="json") for item in bundle.task.named_checks
+        }
+        verifier: dict[str, JsonValue] = bundle.task.final_verifier.model_dump(mode="json")
+        return AlphaTrialConditionSnapshot(
+            task_id=bundle.task.task_id,
+            task_version=bundle.task.task_version,
+            task_bundle_digest=bundle.task_bundle_digest,
+            model_input_digest=bundle.model_input_digest,
+            round_order=tuple(item.round_id for item in bundle.task.rounds),
+            objective=prepared.preview.objective,
+            acceptance=prepared.preview.acceptance,
+            rounds=prepared.preview.rounds,
+            authorizations=prepared.preview.authorizations,
+            budget=prepared.preview.budget,
+            model_id=model_id,
+            model_settings_snapshot=settings,
+            model_settings_digest=content_digest(settings),
+            provider_name=provider_name,
+            provider_base_url=provider_url,
+            provider_config_digest=content_digest(
+                {"provider_name": provider_name, "provider_base_url": provider_url, "model_id": model_id}
+            ),
+            pydantic_ai_version=version("pydantic-ai-slim"),
+            harness_version=version("pydantic-ai-harness"),
+            image_manifest_digest=bundle.image_lock.manifest_digest,
+            image_platform_digest=bundle.image_lock.platform_digest,
+            container_config_snapshot=container,
+            container_config_digest=content_digest(container),
+            named_checks_snapshot=named_checks,
+            named_checks_digest=content_digest(named_checks),
+            verifier_snapshot=verifier,
+            verifier_digest=content_digest(verifier),
+            baseline_tree_digest=prepared.baseline.digest,
+            runtime_policy_snapshot=policy_snapshot,
+            runtime_policy_digest=content_digest(policy_snapshot),
+            tool_contract_snapshot=tool_snapshot,
+            tool_contract_digest=content_digest(tool_snapshot),
         )
 
     async def execute(self, prepared: PreparedTrial, confirmation: TrialConfirmation) -> TrialResult:

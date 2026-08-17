@@ -256,6 +256,22 @@ def _runner(root: Path, model: _Model, docker: _Docker, data_root: Path | None =
     )
 
 
+def _repo_task_candidate(parent_version_id: str, content: str = "candidate repo-task behavior") -> Any:
+    from tianwen.domain import ArtifactStatus, ArtifactVersion
+
+    digest = content_digest(content)
+    return ArtifactVersion(
+        artifact_id="repo-task",
+        artifact_type="repo_task_skill",
+        version_id=digest,
+        parent_version_id=parent_version_id,
+        content_digest=digest,
+        content=content,
+        evidence_ids=(),
+        status=ArtifactStatus.CANDIDATE,
+    )
+
+
 def _persist_running_trial(runner: Any, prepared: Any, *, round_id: str = "round-1") -> tuple[Any, Any, Any]:
     """Persist a completed first round exactly as recovery would observe it."""
     from tianwen.alpha import AlphaTrialState
@@ -320,6 +336,143 @@ def _persist_running_trial(runner: Any, prepared: Any, *, round_id: str = "round
         ),
     )
     return goal, manifest, run
+
+
+def test_prepare_binds_explicit_artifact_without_changing_active_pointer(tmp_path: Path) -> None:
+    root, docker = _bundle(tmp_path / "tasks", "A1"), _Docker()
+    runner = _runner(root, _Model(), docker)
+    default = runner.prepare("A1", budget=_budget())
+    candidate = _repo_task_candidate(default.champion_version_id)
+
+    prepared = runner.prepare("A1", budget=_budget(), artifact_version=candidate)
+
+    assert prepared.champion_version_id == candidate.version_id
+    assert prepared.champion_digest == candidate.content_digest
+    assert prepared.preview.champion_version_id == candidate.version_id
+    assert prepared.preview.champion_digest == candidate.content_digest
+    assert prepared._app.artifact(candidate.version_id) == candidate
+    assert prepared._app.active_version("repo-task") == default.champion_version_id
+    skill = prepared._app.materialize_skill(candidate.version_id) / "repo-task" / "SKILL.md"
+    assert skill.read_text(encoding="utf-8") == candidate.content
+    assert runner.model.request_count == 0
+
+
+@pytest.mark.parametrize(
+    "updates,match",
+    [
+        ({"artifact_id": "other"}, "artifact id"),
+        ({"artifact_type": "other"}, "artifact type"),
+        ({"content_digest": "sha256:wrong"}, "content digest"),
+        ({"status": "shadow"}, "status"),
+        ({"parent_version_id": "sha256:wrong"}, "parent"),
+    ],
+)
+def test_prepare_rejects_invalid_explicit_artifact_before_model_request(
+    tmp_path: Path, updates: dict[str, Any], match: str
+) -> None:
+    from tianwen.alpha import AlphaTrialError
+
+    root, docker = _bundle(tmp_path / match.replace(" ", "-") / "tasks", "A1"), _Docker()
+    model = _Model()
+    runner = _runner(root, model, docker)
+    default = runner.prepare("A1", budget=_budget())
+    candidate = _repo_task_candidate(default.champion_version_id).model_copy(update=updates)
+
+    with pytest.raises(AlphaTrialError, match=match):
+        runner.prepare("A1", budget=_budget(), artifact_version=candidate)
+
+    assert model.request_count == 0
+
+
+def test_prepare_rejects_conflicting_explicit_artifact_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tianwen.store import StateStore
+
+    root, docker = _bundle(tmp_path / "tasks", "A1"), _Docker()
+    model = _Model()
+    runner = _runner(root, model, docker)
+    default = runner.prepare("A1", budget=_budget())
+    candidate = _repo_task_candidate(default.champion_version_id)
+    original = StateStore.put_immutable_object
+
+    def conflict_once(
+        store: StateStore, kind: str, object_id: str, parent_id: str | None, status: str, value: Any
+    ) -> None:
+        if kind == "artifact" and object_id == candidate.version_id:
+            monkeypatch.setattr(StateStore, "put_immutable_object", original)
+            conflicting = candidate.model_copy(update={"evidence_ids": ("different",)})
+            original(store, kind, object_id, parent_id, status, conflicting)
+        original(store, kind, object_id, parent_id, status, value)
+
+    monkeypatch.setattr(StateStore, "put_immutable_object", conflict_once)
+
+    with pytest.raises(StateConflict, match="conflicting immutable artifact replay"):
+        runner.prepare("A1", budget=_budget(), artifact_version=candidate)
+
+    assert model.request_count == 0
+
+
+def test_condition_snapshot_is_stable_across_explicit_artifacts_and_isolated_trials(tmp_path: Path) -> None:
+    root = _bundle(tmp_path / "tasks", "A1")
+    champion_runner = _runner(root, _Model(), _Docker())
+    champion = champion_runner.prepare("A1", budget=_budget())
+    candidate = _repo_task_candidate(champion.champion_version_id)
+    challenger_runner = _runner(root, _Model(), _Docker())
+    challenger = challenger_runner.prepare("A1", budget=_budget(), artifact_version=candidate)
+
+    champion_snapshot = champion_runner.condition_snapshot(champion)
+    challenger_snapshot = challenger_runner.condition_snapshot(challenger)
+
+    assert champion_snapshot == challenger_snapshot
+    assert champion.preview.trial_id != challenger.preview.trial_id
+    assert champion.paths.workspace.resolve() != challenger.paths.workspace.resolve()
+    assert champion.champion_digest != challenger.champion_digest
+    assert champion_snapshot.task_id == "A1"
+    assert champion_snapshot.task_version == champion.preview.task_version
+    assert champion_snapshot.task_bundle_digest == champion.preview.task_bundle_digest
+    assert champion_snapshot.model_input_digest == champion._bundle.model_input_digest
+    assert champion_snapshot.round_order == ("round-1",)
+    assert champion_snapshot.objective == champion.preview.objective
+    assert champion_snapshot.acceptance == champion.preview.acceptance
+    assert champion_snapshot.rounds == champion.preview.rounds
+    assert champion_snapshot.authorizations == champion.preview.authorizations
+    assert champion_snapshot.budget == _budget()
+    assert champion_snapshot.model_id == champion.preview.model_id
+    assert champion_snapshot.provider_name == champion.preview.provider_name
+    assert champion_snapshot.pydantic_ai_version
+    assert champion_snapshot.harness_version
+    assert champion_snapshot.image_manifest_digest == champion._bundle.image_lock.manifest_digest
+    assert champion_snapshot.image_platform_digest == champion._bundle.image_lock.platform_digest
+    assert champion_snapshot.container_config_snapshot
+    assert champion_snapshot.named_checks_snapshot
+    assert champion_snapshot.verifier_snapshot
+    assert champion_snapshot.baseline_tree_digest == champion.baseline.digest
+    assert set(champion_snapshot.runtime_policy_snapshot["rounds"]) == {"round-1"}
+    assert set(champion_snapshot.tool_contract_snapshot["rounds"]) == {"round-1"}
+
+    def keys(value: Any) -> set[str]:
+        if isinstance(value, dict):
+            return set(value) | set().union(*(keys(item) for item in value.values()))
+        if isinstance(value, (list, tuple)):
+            return set().union(*(keys(item) for item in value))
+        return set()
+
+    snapshot_keys = keys(champion_snapshot.model_dump(mode="json"))
+    assert not snapshot_keys & {
+        "trial_id",
+        "goal_id",
+        "goal_contract_digest",
+        "confirmation_digest",
+        "prompt",
+        "prompt_digest",
+        "workspace",
+        "workspace_digest",
+        "workspace_identity",
+        "skill_dir",
+        "champion_version_id",
+        "champion_digest",
+    }
 
 
 def test_prepare_does_not_create_goal_or_call_model(runner: Any) -> None:
