@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
 import { PassThrough } from 'node:stream'
 
 import {
@@ -22,7 +22,7 @@ import {
   createGoalLiveSmokeFailure,
   parseGoalLiveSmokeChildReceipt,
 } from '../../packages/tianwen-runtime-bundle/src/goal-live-smoke.js'
-import { launchGoalResume, preflightGoalResume } from '../../packages/tianwen-runtime-bundle/src/resume.js'
+import { monitorLiveSmokeChild, preflightGoalResume } from '../../packages/tianwen-runtime-bundle/src/resume.js'
 import { inject as resumeRunnerInject } from '../../packages/tianwen-runtime-bundle/src/resume-runner.js'
 
 function withUsage(chunks: readonly unknown[], inputTokens: number) {
@@ -101,12 +101,6 @@ async function persistLiveGoal(dataDir: string, options: {
 
 describe('tianwen live Goal smoke', () => {
   it('hard-stops one unclosed live child after the fixed deadline grace and emits one sanitized timeout', async () => {
-    mkdirSync(FIXTURE_BASE, { recursive: true })
-    const dataDir = mkdtempSync(join(FIXTURE_BASE, 'parent-deadline-'))
-    const profilePackage = join(
-      dataDir, 'dsh-home', 'profiles', 'tianwen', 'node_modules', '@tianwen', 'runtime-bundle',
-    )
-    const dshPackage = join(dataDir, 'dsh-host', 'node_modules', '@deepseek-ai', 'dsh')
     const child = Object.assign(new EventEmitter(), {
       stdout: new PassThrough(), stderr: new PassThrough(), killCalls: 0,
       kill() { this.killCalls += 1; this.emit('close', 1, null); return true },
@@ -114,58 +108,40 @@ describe('tianwen live Goal smoke', () => {
     const timers: { callback: () => void, delay: number }[] = []
     const cleared: number[] = []
     const output: string[] = []
-    let launches = 0
-    try {
-      mkdirSync(dirname(profilePackage), { recursive: true })
-      symlinkSync(resolve('packages/tianwen-runtime-bundle'), profilePackage, 'junction')
-      mkdirSync(dshPackage, { recursive: true })
-      writeFileSync(join(dshPackage, 'package.json'), JSON.stringify({
-        name: '@deepseek-ai/dsh', version: '0.1.0-rc.6', bin: { dsh: 'bin.js' },
-      }))
-      writeFileSync(join(dshPackage, 'bin.js'), '')
+    const exit = monitorLiveSmokeChild(child as never, {
+      dataDir: 'D:/DevData/test', evolutionRoot: 'D:/DevData/test/state/evolution', goalId: 'goal-safe',
+      revision: 1, sessionId: 'tianwen-goal-safe', sessionsRoot: 'D:/DevData/test/dsh-home/sessions',
+      liveSmoke: true,
+    }, 1_000, {
+      now: () => 1_000,
+      setTimeout: (callback, delay) => {
+        timers.push({ callback, delay })
+        return timers.length as never
+      },
+      clearTimeout: timer => { cleared.push(timer as never as number) },
+      write: line => { output.push(line) },
+    })
+    child.stdout.write(`child-secret-${randomUUID()}`)
+    child.stderr.write(`child-secret-${randomUUID()}`)
+    expect(timers.map(timer => timer.delay)).toEqual([90_000])
 
-      const exit = launchGoalResume({
-        dataDir, evolutionRoot: join(dataDir, 'state', 'evolution'), goalId: 'goal-safe',
-        revision: 1, sessionId: 'tianwen-goal-safe', sessionsRoot: join(dataDir, 'dsh-home', 'sessions'),
-        liveSmoke: true,
-      }, true, {
-        now: () => 1_000,
-        spawnChild: () => { launches += 1; return child as never },
-        liveSmokeChild: {
-          now: () => 1_000,
-          setTimeout: (callback, delay) => {
-            timers.push({ callback, delay })
-            return timers.length as never
-          },
-          clearTimeout: timer => { cleared.push(timer as never as number) },
-          write: line => { output.push(line) },
-        },
-      })
-      child.stdout.write(`child-secret-${randomUUID()}`)
-      child.stderr.write(`child-secret-${randomUUID()}`)
-      expect(launches).toBe(1)
-      expect(timers.map(timer => timer.delay)).toEqual([90_000])
+    timers[0]!.callback()
+    expect(child.killCalls).toBe(0)
+    expect(timers.map(timer => timer.delay)).toEqual([90_000, 5_000])
+    expect(timers.reduce((total, timer) => total + timer.delay, 0)).toBe(95_000)
+    timers[1]!.callback()
 
-      timers[0]!.callback()
-      expect(child.killCalls).toBe(0)
-      expect(timers.map(timer => timer.delay)).toEqual([90_000, 5_000])
-      timers[1]!.callback()
-
-      await expect(exit).resolves.toBe(1)
-      expect(child.killCalls).toBe(1)
-      expect(launches).toBe(1)
-      expect(cleared).toEqual([1, 2])
-      expect(output).toHaveLength(1)
-      expect(JSON.parse(output[0]!.trim())).toMatchObject({
-        schemaVersion: 'tianwen.goal-live-smoke.v1', status: 'failed', failureCode: 'timeout',
-        requestCount: null, retryCount: null,
-      })
-      expect(output[0]).not.toContain('child-secret-')
-      child.emit('close', 1, null)
-      expect(output).toHaveLength(1)
-    } finally {
-      rmSync(dataDir, { recursive: true, force: true })
-    }
+    await expect(exit).resolves.toBe(1)
+    expect(child.killCalls).toBe(1)
+    expect(cleared).toEqual([1, 2])
+    expect(output).toHaveLength(1)
+    expect(JSON.parse(output[0]!.trim())).toMatchObject({
+      schemaVersion: 'tianwen.goal-live-smoke.v1', status: 'failed', failureCode: 'timeout',
+      requestCount: null, retryCount: null,
+    })
+    expect(output[0]).not.toContain('child-secret-')
+    child.emit('close', 1, null)
+    expect(output).toHaveLength(1)
   })
 
   it('declares every Cordis service consumed by ordinary and live Goal resumes', () => {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import type { ChildProcess, SpawnOptions } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -41,12 +41,6 @@ export interface LiveSmokeChildDependencies {
   readonly setTimeout?: (callback: () => void, delay: number) => unknown
   readonly clearTimeout?: (timer: unknown) => void
   readonly write?: (line: string) => void
-}
-
-export interface LaunchGoalResumeDependencies {
-  readonly now?: () => number
-  readonly spawnChild?: (program: string, args: readonly string[], options: SpawnOptions) => ChildProcess
-  readonly liveSmokeChild?: LiveSmokeChildDependencies
 }
 
 export class GoalResumeUnavailableError extends Error {
@@ -293,14 +287,12 @@ export async function monitorLiveSmokeChild(
 export async function launchGoalResume(
   preflight: ResumePreflight | LiveSmokeResumePreflight,
   json: boolean,
-  dependencies: LaunchGoalResumeDependencies = {},
 ): Promise<number> {
   const liveSmoke = 'liveSmoke' in preflight
   if (liveSmoke) verifyInstalledRuntimeBundle(preflight.dataDir)
-  const now = dependencies.now ?? Date.now
-  const startedAtMs = now()
+  const startedAtMs = Date.now()
   const dshHome = join(preflight.dataDir, 'dsh-home')
-  const child = (dependencies.spawnChild ?? spawn)(process.execPath, [
+  const child = spawn(process.execPath, [
     resolveInstalledDshBin(preflight.dataDir), '--profile', 'tianwen', '--patch',
     resolve(dirname(fileURLToPath(import.meta.url)), '../resume.patch.yml'),
   ], {
@@ -320,10 +312,7 @@ export async function launchGoalResume(
     shell: false,
     stdio: liveSmoke ? ['ignore', 'pipe', 'pipe'] : 'inherit',
   })
-  if (liveSmoke) return monitorLiveSmokeChild(child, preflight, startedAtMs, {
-    ...dependencies.liveSmokeChild,
-    now: dependencies.liveSmokeChild?.now ?? now,
-  })
+  if (liveSmoke) return monitorLiveSmokeChild(child, preflight, startedAtMs)
   return await new Promise((resolveExit, reject) => {
     child.once('error', reject)
     child.once('exit', (code, signal) => resolveExit(code ?? (signal === null ? 1 : 1)))
