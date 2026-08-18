@@ -12,9 +12,10 @@
 **Canonical Docker CLI boundary correction:** `110873e6a1a0254ab2bcb650ca3f8e6f9376d157`
 **Docker log/recovery-3 implementation:** `b76131c67249fe2ee94a2854da7f8917acafe3df`
 **Formal container-Env identity correction:** `e1390794e4a74db2711a77f985e2c3c51b4ca497`
-**Canonical recovery-outcome revision:** the commit containing this document
+**Canonical retained-container evidence:** `50036cd6d834e60448758f512e165f7b9119ba8c`
+**Exact-container cleanup revision:** the commit containing this document
 **Status:** recovery-3 consumed; its zero-paid seed-verifier identity failure is fixed and proven
-read-only against the retained container; no real Trial
+read-only against the retained container, which was then removed by exact ID; no real Trial
 
 ## 1. Current conclusion
 
@@ -29,9 +30,9 @@ receipt records zero requests, tokens and CNY. This was not a real Trial or lear
 Commit `e1390794e4a74db2711a77f985e2c3c51b4ca497` corrects the formal identity boundary: the
 observed environment must be an unambiguous `key=value` list, all three explicitly controlled
 keys must be present with exact values, and additional variables inherited from the immutable
-locked image are allowed. A read-only check of the retained recovery-3 container now returns
-`_inspect_matches() == true`; it did not call `reconcile()` and every file in the Trial state tree
-had the same size and SHA-256 before and after the proof.
+locked image are allowed. Before exact-ID cleanup, a read-only check of the retained recovery-3
+container returned `_inspect_matches() == true`; it did not call `reconcile()` and every file in
+the Trial state tree had the same size and SHA-256 before and after the proof.
 
 The Alpha-C proportional-safety correction and its one-time recovery are implemented,
 independently reviewed and fully verified offline. The first authorized invocation had stopped
@@ -57,8 +58,9 @@ Current factual outcome:
 - paid model requests: `0`;
 - model tokens: `0`;
 - CNY charged: `0`;
-- Docker containers/verifier executions: recovery-3 has `1` exited-0 container and one verifier
-  output that was not settled into the Tianwen store;
+- Docker containers/verifier executions: recovery-3 ran one verifier; after its exited-0
+  container was bound in commit `50036cd`, that exact container was removed and Docker has zero
+  remaining containers; the verifier output was not settled into the Tianwen store;
 - qualified real Case: none;
 - conditional Lesson: none;
 - Candidate: none;
@@ -287,11 +289,11 @@ After the original launch and all three authorized recovery launches:
 - exact container `083295b0646365640780f0eacb26cfc1bde4a362342ce2ef53f4c1e95d262a3e`
   had Docker daemon state `created`, never running, with exit code `128` and the local-log
   compression error before its exact-ID removal;
-- that container's `Config.Image` is the exact canonical locked image, its `LogConfig` is
-  `local` with `max-size=65536` and `max-file=1`, and its only mounts are the recovery-2 A1
+- that container's `Config.Image` was the exact canonical locked image, its `LogConfig` was
+  `local` with `max-size=65536` and `max-file=1`, and its only mounts were the recovery-2 A1
   workspace and registered A1 verifier, both read-only;
-- the container ID is the durable `seed-preflight` execution for the recovery-2 Trial and is bound
-  here to `receipts/stop-preflight.json` with SHA-256
+- the container ID was the durable `seed-preflight` execution for the recovery-2 Trial and was
+  bound here to `receipts/stop-preflight.json` with SHA-256
   `78c2cd46d4ed03eca520c5ef8e555751872fe80bfa0def90198e5f990422e78e`;
 - after evidence commit `35742a8` and a fresh zero-ledger check, only this exact never-started
   container was removed without force; no other Docker object was targeted;
@@ -302,26 +304,31 @@ After the original launch and all three authorized recovery launches:
 - recovery-3 has zero budgets, model reservations, action reservations, Actions and Events; its
   only non-baseline object is the unsettled `seed-preflight` check execution;
 - exact container `bf1f7c200e84f9880fffeefc2dfbbbc41c0bcefbee50e5d960a48225470f63f2`
-  has Docker state `exited`, exit code `0`, the canonical locked image, the exact
-  `compress=false` log config and the two registered read-only mounts;
-- the locked image environment is exactly
+  had Docker state `exited`, exit code `0`, the canonical locked image, the exact
+  `compress=false` log config and the two registered read-only mounts before removal;
+- the locked image environment observed before cleanup was exactly
   `PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
   `LANG=C.UTF-8`, `GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305`,
   `PYTHON_VERSION=3.12.11` and
   `PYTHON_SHA256=c30bb24b7f1e9a19b11b55a546434f74e739bb4c271a3e3a80ff4380d49f7adb`;
-- the container environment is exactly `HOME=/tmp`, `TMPDIR=/tmp`,
-  `PYTHONDONTWRITEBYTECODE=1` followed by those five exact image values; it contains no Provider
+- the container environment observed before cleanup was exactly `HOME=/tmp`, `TMPDIR=/tmp`,
+  `PYTHONDONTWRITEBYTECODE=1` followed by those five exact image values; it contained no Provider
   credential;
-- its verifier log SHA-256 is
-  `94011985da972e00624174e3763bab8c7890893034a568063499a7137fd5f66d` and records
+- its verifier log SHA-256 was
+  `94011985da972e00624174e3763bab8c7890893034a568063499a7137fd5f66d` and recorded
   `verdict=not_met`, `ordinary_fields` passed, six failed checks with the sole failure category
   `behavior_mismatch`, and summary `1/7 checks passed`;
 - under the old code, a read-only in-memory check against the actual inspect payload returned
   `false`; replacing only `Config.Env` with the three explicit controlled values returned `true`,
   proving that environment equality was the sole identity mismatch;
-- under `e1390794`, the same retained record and unmodified inspect payload return `true`; the
+- under `e1390794`, the same retained record and unmodified inspect payload returned `true`; the
   proof read the SQLite database in read-only mode, did not call `reconcile()`, and left every
   state file byte-for-byte unchanged;
+- commit `50036cd6d834e60448758f512e165f7b9119ba8c` bound those retained-container facts before
+  cleanup; after one final exact receipt/zero-ledger check, only container
+  `bf1f7c200e84f9880fffeefc2dfbbbc41c0bcefbee50e5d960a48225470f63f2` was removed without
+  force, its subsequent inspect failed as expected, and Docker reported zero remaining
+  containers;
 - Provider request execution: not started;
 - credential value: never read into receipts, printed or persisted.
 
@@ -352,8 +359,8 @@ and authorize any future true live entrance. The branch must not create recovery
 
 ## 10. Only recommended next entrance
 
-Commit and report the independently approved formal Env-identity correction, the zero-paid
-recovery-3 receipt and the retained-container read-only proof to supervision. Do not replay
-recovery-3, create recovery-4, run a Provider or start another live root. Supervision decides the
-next true live entrance and how the shared Alpha Docker fix is integrated. Do not merge the stage
-or enter Candidate, Promotion, Shadow or Alpha-D.
+Commit this exact-container cleanup revision, then report the independently approved formal
+Env-identity correction, zero-paid recovery-3 receipt, retained-container read-only proof and
+cleanup to supervision. Do not replay recovery-3, create recovery-4, run a Provider or start
+another live root. Supervision decides the next true live entrance and how the shared Alpha Docker
+fix is integrated. Do not merge the stage or enter Candidate, Promotion, Shadow or Alpha-D.
