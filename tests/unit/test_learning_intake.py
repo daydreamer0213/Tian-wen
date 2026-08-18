@@ -77,6 +77,7 @@ def _manifest(trial_id: str, task_id: str, champion: str) -> TrialManifest:
             }
         }
     }
+    verifier = {"verifier_id": "final", "digest": "sha256:verifier-spec"}
     return TrialManifest(
         trial_id=trial_id,
         previous_trial_id=None,
@@ -110,8 +111,8 @@ def _manifest(trial_id: str, task_id: str, champion: str) -> TrialManifest:
         container_config_digest=content_digest({}),
         named_checks_snapshot={},
         named_checks_digest=content_digest({}),
-        verifier_snapshot={},
-        verifier_digest=content_digest({}),
+        verifier_snapshot=verifier,
+        verifier_digest=content_digest(verifier),
         baseline_tree_digest="sha256:baseline",
         budget=BudgetLimit(model_requests=1, tool_calls=1, tokens=1),
         workspace_identity="opaque",
@@ -126,11 +127,24 @@ def _source(
     champion: str = "champion-1",
     user: bool = False,
     foreign_final: bool = False,
+    run_ids: tuple[str, ...] | None = None,
+    exploration_run_ids: tuple[str, ...] | None = None,
+    final_run_id: str | None = None,
+    result_verifier_digest: str | None = None,
 ) -> tuple[StateStore, TrialResult, EvidenceRecord]:
     store, manifest = _new_store(tmp_path / f"{trial_id}.db"), _manifest(trial_id, task_id, champion)
+    run_ids = (f"alpha:{trial_id}:round-1",) if run_ids is None else run_ids
+    exploration_run_ids = () if exploration_run_ids is None else exploration_run_ids
+    final_run_id = final_run_id or (
+        run_ids[-1]
+        if run_ids
+        else exploration_run_ids[-1]
+        if exploration_run_ids
+        else f"alpha:{trial_id}:settlement"
+    )
     final = EvidenceRecord(
         evidence_id=f"e-final-{trial_id}",
-        run_id=f"alpha:{trial_id}:settlement",
+        run_id=final_run_id,
         action_id=f"action-{trial_id}",
         evidence_type="alpha_final_verification",
         result_class="not_met",
@@ -181,8 +195,8 @@ def _source(
         previous_trial_id=None,
         trial_manifest_digest=content_digest(manifest),
         goal_id="goal-1",
-        run_ids=(f"run-{trial_id}",),
-        exploration_run_ids=(),
+        run_ids=run_ids,
+        exploration_run_ids=exploration_run_ids,
         checkpoint_ids=(),
         task_id=task_id,
         task_version="1",
@@ -192,7 +206,7 @@ def _source(
         baseline_tree_digest="sha256:baseline",
         final_tree_digest="sha256:final",
         diff_digest="sha256:diff",
-        verifier_digest=manifest.verifier_digest,
+        verifier_digest=result_verifier_digest or str(manifest.verifier_snapshot["digest"]),
         verdict="not_met",
         failure_categories=("correctness",),
         execution_status="completed",
@@ -762,6 +776,57 @@ def test_trial_projection_rejects_forged_result_manifest_or_final_verifier_evide
             result.model_copy(update={field: "forged" if field != "failure_categories" else ()}), trial_store=source
         )
     assert store.list_objects("outcome_observation", OutcomeObservation) == []
+
+
+def test_trial_projection_binds_result_to_the_manifest_verifier_spec_digest(tmp_path: Path) -> None:
+    intake, store = _intake(tmp_path)
+    source, result, _ = _source(tmp_path, "trial-valid")
+
+    assert intake.record_trial_outcome(result, trial_store=source).trial_id == result.trial_id
+
+    invalid_source, invalid, _ = _source(
+        tmp_path, "trial-invalid", result_verifier_digest="sha256:wrong-verifier-spec"
+    )
+    with pytest.raises(StateConflict):
+        intake.record_trial_outcome(invalid, trial_store=invalid_source)
+    assert len(store.list_objects("outcome_observation", OutcomeObservation)) == 1
+
+
+@pytest.mark.parametrize(
+    ("run_ids", "exploration_run_ids"),
+    (
+        (("alpha:{trial_id}:round-1",), ()),
+        ((), ("alpha:{trial_id}:exploration-1",)),
+        ((), ()),
+    ),
+)
+def test_trial_projection_requires_final_evidence_on_the_selected_alpha_run(
+    tmp_path: Path, run_ids: tuple[str, ...], exploration_run_ids: tuple[str, ...]
+) -> None:
+    intake, store = _intake(tmp_path)
+    trial_id = f"trial-selected-{len(run_ids)}-{len(exploration_run_ids)}"
+    concrete_runs = tuple(item.format(trial_id=trial_id) for item in run_ids)
+    concrete_exploration = tuple(item.format(trial_id=trial_id) for item in exploration_run_ids)
+    source, result, _ = _source(
+        tmp_path,
+        trial_id,
+        run_ids=concrete_runs,
+        exploration_run_ids=concrete_exploration,
+    )
+    assert intake.record_trial_outcome(result, trial_store=source).trial_id == trial_id
+
+    wrong_source, wrong, _ = _source(
+        tmp_path,
+        f"{trial_id}-wrong",
+        run_ids=tuple(item.replace(trial_id, f"{trial_id}-wrong") for item in concrete_runs),
+        exploration_run_ids=tuple(
+            item.replace(trial_id, f"{trial_id}-wrong") for item in concrete_exploration
+        ),
+        final_run_id=f"alpha:{trial_id}-wrong:foreign",
+    )
+    with pytest.raises(StateConflict):
+        intake.record_trial_outcome(wrong, trial_store=wrong_source)
+    assert len(store.list_objects("outcome_observation", OutcomeObservation)) == 1
 
 
 def test_user_feedback_rejects_cross_trial_task_or_champion_binding_before_observation(tmp_path: Path) -> None:

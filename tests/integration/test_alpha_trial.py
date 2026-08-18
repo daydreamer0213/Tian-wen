@@ -279,6 +279,20 @@ def _confirmation(prepared: Any) -> Any:
     )
 
 
+def test_approved_goal_budget_confirmation_binds_the_exact_preview(runner: Any) -> None:
+    from tianwen.alpha import TrialConfirmation
+
+    prepared = runner.prepare("A1", budget=_budget())
+    confirmation = TrialConfirmation(
+        trial_id=prepared.preview.trial_id,
+        preview_digest=content_digest(prepared.preview),
+        confirmed_via="approved_goal_budget",
+    )
+
+    assert confirmation.trial_id == prepared.preview.trial_id
+    assert confirmation.preview_digest == content_digest(prepared.preview)
+
+
 def _runner(root: Path, model: _Model, docker: _Docker, data_root: Path | None = None) -> Any:
     from tianwen.alpha import AlphaTrialRunner
 
