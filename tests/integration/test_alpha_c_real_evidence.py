@@ -19,6 +19,8 @@ from tianwen.alpha import AlphaTrialConditionSnapshot, TrialManifest, TrialPrevi
 from tianwen.domain import ArtifactStatus, ArtifactVersion, BudgetLimit, BudgetUsage, content_digest
 from tianwen.evaluation import ActivePointer
 
+_OLD_TRIAL_ID = "trial-633752d776238190a9411a1cd8b7c71a"
+
 
 def test_real_evidence_runner_has_a_stage_local_entry() -> None:
     """Break caught: the approved real-evidence stage has no executable entry."""
@@ -218,6 +220,7 @@ def _dependencies(module: Any, runner: _Runner, intake: _Intake | None = None, *
     )
     return module.StageDependencies(
         stage_root=kwargs.pop("stage_root", _root()),
+        recovery_of_root=kwargs.pop("recovery_of_root", None),
         environment={"DEEPSEEK_API_KEY": "configured"},
         stdout=SimpleNamespace(write=lambda _text: None, flush=lambda: None),
         model_factory=lambda: model,
@@ -227,6 +230,235 @@ def _dependencies(module: Any, runner: _Runner, intake: _Intake | None = None, *
         checkout_audit=kwargs.pop("checkout_audit", lambda: audit),
         **kwargs,
     )
+
+
+def _old_zero_paid_root(
+    module: Any, *, nonzero: str | None = None, trial_id: str = _OLD_TRIAL_ID
+) -> Path:
+    root = _root() / "original"
+    authority_path = root / "receipts" / "stage-authority.json"
+    authority_path.parent.mkdir(parents=True)
+    authority_path.write_text(
+        json.dumps(
+            {
+                "schema": "tianwen.alpha_c.real_evidence.stage_authority.v1",
+                "task_id": module.TASK_ID,
+                "model_id": module.MODEL_ID,
+                "budget": module.BUDGET.model_dump(mode="json"),
+                "max_trials": 2,
+                "candidate_version_id": None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    database = root / "runs" / trial_id / "state" / "tianwen.db"
+    database.parent.mkdir(parents=True)
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE tw_objects (kind TEXT NOT NULL);
+            CREATE TABLE tw_budgets (usage_json TEXT NOT NULL, reserved_json TEXT NOT NULL);
+            CREATE TABLE tw_model_request_reservations (request_id TEXT NOT NULL);
+            CREATE TABLE tw_action_budget_reservations (action_id TEXT NOT NULL);
+            """
+        )
+        if nonzero in {"goal", "run", "alpha_trial_result"}:
+            connection.execute("INSERT INTO tw_objects VALUES (?)", (nonzero,))
+        if nonzero in {"budget_usage", "budget_reserved"}:
+            zero = BudgetUsage().model_dump_json()
+            used = BudgetUsage(tokens=1).model_dump_json()
+            connection.execute(
+                "INSERT INTO tw_budgets VALUES (?, ?)",
+                (used if nonzero == "budget_usage" else zero, used if nonzero == "budget_reserved" else zero),
+            )
+        if nonzero == "model_request":
+            connection.execute("INSERT INTO tw_model_request_reservations VALUES ('request-old')")
+        if nonzero == "action_reservation":
+            connection.execute("INSERT INTO tw_action_budget_reservations VALUES ('action-old')")
+    return root
+
+
+def _recovery_dependencies(module: Any, runner: _Runner, old_root: Path, recovery_root: Path) -> Any:
+    dependencies = _dependencies(module, runner, _Intake(), stage_root=recovery_root)
+    return replace(dependencies, recovery_of_root=old_root)
+
+
+def test_cli_defaults_to_the_one_fixed_recovery_root() -> None:
+    """Break caught: production could reuse the immutable first-launch evidence root."""
+    module = _module()
+
+    dependencies = module.StageDependencies()
+
+    assert dependencies.stage_root == Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-1")
+    assert dependencies.recovery_of_root == module.STAGE_ROOT
+
+
+def test_exact_zero_paid_old_stage_authorizes_only_the_fixed_recovery() -> None:
+    """Break caught: a proven zero-paid Docker stop could not authorize its one replacement batch."""
+    module = _module()
+    old_root = _old_zero_paid_root(module)
+    recovery_root = old_root.parent / "tianwen-alpha-c-real-evidence-recovery-1"
+    old_authority = (old_root / "receipts" / "stage-authority.json").read_bytes()
+    old_database = (old_root / "runs" / _OLD_TRIAL_ID / "state" / "tianwen.db").read_bytes()
+    runner = _Runner([_Result("trial-1", True, "met")])
+
+    result = asyncio.run(module.run_stage(_recovery_dependencies(module, runner, old_root, recovery_root)))
+
+    assert result["stop"] == "no_case_success"
+    authority = json.loads((recovery_root / "receipts" / "stage-authority.json").read_text(encoding="utf-8"))
+    assert authority["recovery_of"] == {
+        "authority_path": str((old_root / "receipts" / "stage-authority.json").resolve()),
+        "authority_digest": content_digest(old_authority),
+        "trial_id": _OLD_TRIAL_ID,
+    }
+    assert (old_root / "receipts" / "stage-authority.json").read_bytes() == old_authority
+    assert (old_root / "runs" / _OLD_TRIAL_ID / "state" / "tianwen.db").read_bytes() == old_database
+    assert runner.executed == ["trial-1"]
+
+
+@pytest.mark.parametrize(
+    "nonzero",
+    ["goal", "run", "budget_usage", "budget_reserved", "alpha_trial_result", "model_request", "action_reservation"],
+)
+def test_any_nonzero_old_stage_state_rejects_before_model_or_prepare(nonzero: str) -> None:
+    """Break caught: prior paid or formal Trial state could be replayed as a zero-paid recovery."""
+    module = _module()
+    old_root = _old_zero_paid_root(module, nonzero=nonzero)
+    recovery_root = old_root.parent / "tianwen-alpha-c-real-evidence-recovery-1"
+    runner = _Runner([_Result("trial-1", True, "met")])
+    model_constructed = False
+
+    def model_factory() -> Any:
+        nonlocal model_constructed
+        model_constructed = True
+        return _Model()
+
+    dependencies = replace(
+        _recovery_dependencies(module, runner, old_root, recovery_root),
+        model_factory=model_factory,
+    )
+    with pytest.raises(module.StageError, match="zero-paid"):
+        asyncio.run(module.run_stage(dependencies))
+
+    assert not recovery_root.exists()
+    assert model_constructed is False
+    assert runner.prepared == []
+
+
+def test_existing_fixed_recovery_root_rejects_before_model_or_prepare() -> None:
+    """Break caught: the fixed recovery root could be reused for another paid batch."""
+    module = _module()
+    old_root = _old_zero_paid_root(module)
+    recovery_root = old_root.parent / "tianwen-alpha-c-real-evidence-recovery-1"
+    recovery_root.mkdir()
+    runner = _Runner([])
+    model_constructed = False
+
+    def model_factory() -> Any:
+        nonlocal model_constructed
+        model_constructed = True
+        return _Model()
+
+    dependencies = replace(
+        _recovery_dependencies(module, runner, old_root, recovery_root),
+        model_factory=model_factory,
+    )
+    with pytest.raises(module.StageError, match="already initialized"):
+        asyncio.run(module.run_stage(dependencies))
+
+    assert model_constructed is False
+    assert runner.prepared == []
+
+
+def test_wrong_old_trial_id_rejects_before_recovery_root_or_model() -> None:
+    """Break caught: an unrelated empty Trial store could impersonate the one supervised Docker stop."""
+    module = _module()
+    old_root = _old_zero_paid_root(module, trial_id="trial-unrelated-zero-paid")
+    recovery_root = old_root.parent / "tianwen-alpha-c-real-evidence-recovery-1"
+    runner = _Runner([_Result("trial-1", True, "met")])
+    model_constructed = False
+
+    def model_factory() -> Any:
+        nonlocal model_constructed
+        model_constructed = True
+        return _Model()
+
+    dependencies = replace(
+        _recovery_dependencies(module, runner, old_root, recovery_root),
+        model_factory=model_factory,
+    )
+    with pytest.raises(module.StageError, match="zero-paid"):
+        asyncio.run(module.run_stage(dependencies))
+
+    assert not recovery_root.exists()
+    assert model_constructed is False
+    assert runner.prepared == []
+
+
+def test_even_zero_usage_old_budget_row_rejects_before_recovery_root_or_model() -> None:
+    """Break caught: a created old budget could be mistaken for the exact untouched zero-row store."""
+    module = _module()
+    old_root = _old_zero_paid_root(module)
+    database = old_root / "runs" / _OLD_TRIAL_ID / "state" / "tianwen.db"
+    with sqlite3.connect(database) as connection:
+        zero = BudgetUsage().model_dump_json()
+        connection.execute("INSERT INTO tw_budgets VALUES (?, ?)", (zero, zero))
+    recovery_root = old_root.parent / "tianwen-alpha-c-real-evidence-recovery-1"
+    runner = _Runner([_Result("trial-1", True, "met")])
+    model_constructed = False
+
+    def model_factory() -> Any:
+        nonlocal model_constructed
+        model_constructed = True
+        return _Model()
+
+    dependencies = replace(
+        _recovery_dependencies(module, runner, old_root, recovery_root),
+        model_factory=model_factory,
+    )
+    with pytest.raises(module.StageError, match="zero-paid"):
+        asyncio.run(module.run_stage(dependencies))
+
+    assert not recovery_root.exists()
+    assert model_constructed is False
+    assert runner.prepared == []
+
+
+def test_prepare_exception_writes_bounded_zero_paid_final_stop_receipt() -> None:
+    """Break caught: a Docker preflight failure could consume the root without a durable zero-paid stop."""
+    module = _module()
+    old_root = _old_zero_paid_root(module)
+    recovery_root = old_root.parent / "tianwen-alpha-c-real-evidence-recovery-1"
+
+    class PrepareFailureRunner(_Runner):
+        def prepare(self, task_id: str, *, budget: Any, previous_trial_id: str | None) -> _Prepared:
+            raise RuntimeError("PRIVATE docker failure detail")
+
+    runner = PrepareFailureRunner([])
+
+    result = asyncio.run(module.run_stage(_recovery_dependencies(module, runner, old_root, recovery_root)))
+
+    assert result == {
+        "schema": "tianwen.alpha_c.real_evidence.preflight_stop.v1",
+        "stop": "preflight_failure",
+        "phase": "prepare",
+        "failure_class": "RuntimeError",
+        "model_requests": 0,
+        "tokens": 0,
+        "conservative_charge_microunits": 0,
+        "remaining_cny_microunits": 20_000_000,
+        "case_id": None,
+        "lesson_id": None,
+        "candidate_version_id": None,
+    }
+    receipt = recovery_root / "receipts" / "stop-preflight.json"
+    assert json.loads(receipt.read_text(encoding="utf-8")) == result
+    assert "PRIVATE" not in receipt.read_text(encoding="utf-8")
+    assert not (old_root / "receipts" / "stop-preflight.json").exists()
+    assert runner.executed == []
 
 
 def test_missing_credential_stops_before_model_or_prepare() -> None:
@@ -240,7 +472,11 @@ def test_missing_credential_stops_before_model_or_prepare() -> None:
         return _Model()
 
     result = asyncio.run(
-        module.run_stage(module.StageDependencies(stage_root=_root(), environment={}, model_factory=model_factory))
+        module.run_stage(
+            module.StageDependencies(
+                stage_root=_root(), recovery_of_root=None, environment={}, model_factory=model_factory
+            )
+        )
     )
 
     assert result == {"stop": "missing_credential", "model_requests": 0, "candidate_version_id": None}
@@ -262,6 +498,7 @@ def test_budget_ceiling_stops_before_model_or_prepare() -> None:
             module.run_stage(
                 module.StageDependencies(
                     stage_root=_root(),
+                    recovery_of_root=None,
                     environment={"DEEPSEEK_API_KEY": "configured"},
                     model_factory=model_factory,
                     price_snapshot=module.PriceSnapshot(

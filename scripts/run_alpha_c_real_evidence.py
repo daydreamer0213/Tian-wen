@@ -39,6 +39,8 @@ ZERO_RESOURCE_LEARNING_BUDGET = BudgetLimit(
     model_requests=0, tool_calls=0, tokens=0, wall_seconds=0, child_loops=0, action_effects=0
 )
 STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence")
+RECOVERY_STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-1")
+RECOVERY_OF_TRIAL_ID = "trial-633752d776238190a9411a1cd8b7c71a"
 PRICE_SOURCE_URL = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
 BASE_SHA = "4638026f210c0de29262d307dd051934570d975e"
 STAGE_BRANCH = "codex/tianwen-alpha-c-real-evidence"
@@ -120,7 +122,8 @@ class _OutputLimitedModel(WrapperModel):
 class StageDependencies:
     """Small seam for offline tests; the CLI itself supplies no mutable choices."""
 
-    stage_root: Path = STAGE_ROOT
+    stage_root: Path = RECOVERY_STAGE_ROOT
+    recovery_of_root: Path | None = STAGE_ROOT
     environment: Mapping[str, str] | None = None
     stdout: TextIO = sys.stdout
     model_factory: Callable[[], Model] | None = None
@@ -267,6 +270,65 @@ def _initialize_stage_root(path: Path) -> Path:
     except FileExistsError as error:
         raise StageError("stage root is already initialized; a second batch is forbidden") from error
     return root
+
+
+def _validate_zero_paid_recovery(path: Path) -> dict[str, str]:
+    root = _under_devdata(path)
+    authority_path = root / "receipts" / "stage-authority.json"
+    connection: sqlite3.Connection | None = None
+    try:
+        raw_authority = authority_path.read_bytes()
+        if len(raw_authority) > 65_536:
+            raise ValueError
+        authority = json.loads(raw_authority)
+        trial_roots = [item for item in (root / "runs").iterdir() if item.is_dir()]
+        if (
+            not isinstance(authority, dict)
+            or authority.get("schema") != "tianwen.alpha_c.real_evidence.stage_authority.v1"
+            or authority.get("task_id") != TASK_ID
+            or authority.get("model_id") != MODEL_ID
+            or authority.get("budget") != BUDGET.model_dump(mode="json")
+            or authority.get("max_trials") != 2
+            or authority.get("candidate_version_id") is not None
+            or len(trial_roots) != 1
+            or trial_roots[0].name != RECOVERY_OF_TRIAL_ID
+        ):
+            raise ValueError
+        database = trial_roots[0] / "state" / "tianwen.db"
+        connection = sqlite3.connect(f"file:{database.resolve().as_posix()}?mode=ro", uri=True)
+        connection.execute("PRAGMA query_only=ON")
+        tables = {
+            row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        }
+        required = {
+            "tw_objects",
+            "tw_budgets",
+            "tw_model_request_reservations",
+            "tw_action_budget_reservations",
+        }
+        if not required.issubset(tables):
+            raise ValueError
+        baseline_kinds = {"active_pointer", "app_config", "artifact", "eval_protocol"}
+        if any(row[0] not in baseline_kinds for row in connection.execute("SELECT kind FROM tw_objects")):
+            raise ValueError
+        if connection.execute("SELECT COUNT(*) FROM tw_budgets").fetchone()[0]:
+            raise ValueError
+        counted_tables = {"tw_model_request_reservations", "tw_action_budget_reservations", "tw_actions", "tw_events"}
+        if any(
+            connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in counted_tables & tables
+        ):
+            raise ValueError
+    except (OSError, json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as error:
+        raise StageError("old stage is not an exact zero-paid recovery authority") from error
+    finally:
+        if connection is not None:
+            connection.close()
+    return {
+        "authority_path": str(authority_path.resolve()),
+        "authority_digest": content_digest(raw_authority),
+        "trial_id": trial_roots[0].name,
+    }
 
 
 def _micro_cny(tokens: int, price: PriceSnapshot) -> int:
@@ -449,22 +511,30 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
         return {"stop": "missing_credential", "model_requests": 0, "candidate_version_id": None}
     price = dependencies.price_snapshot or RECORDED_PRICE_SNAPSHOT
     _validate_price_snapshot(price)
+    recovery_of = (
+        None
+        if dependencies.recovery_of_root is None
+        else _validate_zero_paid_recovery(dependencies.recovery_of_root)
+    )
     audit = (dependencies.checkout_audit or audit_checkout_and_governance)()
     root = _initialize_stage_root(dependencies.stage_root)
     price_authority = price.authority()
+    stage_authority = {
+        "schema": "tianwen.alpha_c.real_evidence.stage_authority.v1",
+        "checkout": audit.authority(),
+        "price": {**price_authority, "digest": content_digest(price_authority)},
+        "task_id": TASK_ID,
+        "model_id": MODEL_ID,
+        "budget": BUDGET.model_dump(mode="json"),
+        "max_trials": 2,
+        "candidate_version_id": None,
+    }
+    if recovery_of is not None:
+        stage_authority["recovery_of"] = recovery_of
     _receipt(
         root,
         "stage-authority.json",
-        {
-            "schema": "tianwen.alpha_c.real_evidence.stage_authority.v1",
-            "checkout": audit.authority(),
-            "price": {**price_authority, "digest": content_digest(price_authority)},
-            "task_id": TASK_ID,
-            "model_id": MODEL_ID,
-            "budget": BUDGET.model_dump(mode="json"),
-            "max_trials": 2,
-            "candidate_version_id": None,
-        },
+        stage_authority,
     )
     reserve = _micro_cny(BUDGET.tokens, price)
     if reserve * 2 > MAX_STAGE_CNY_MICROUNITS:
@@ -472,7 +542,24 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
     model = (dependencies.model_factory or _native_model)()
     _validate_model(model)
     runner = (dependencies.runner_factory or _native_runner)(model, root)
-    first_prepared, first_authority = _prepare(runner, audit)
+    try:
+        first_prepared, first_authority = _prepare(runner, audit)
+    except Exception as error:
+        values = {
+            "schema": "tianwen.alpha_c.real_evidence.preflight_stop.v1",
+            "stop": "preflight_failure",
+            "phase": "prepare",
+            "failure_class": type(error).__name__,
+            "model_requests": 0,
+            "tokens": 0,
+            "conservative_charge_microunits": 0,
+            "remaining_cny_microunits": MAX_STAGE_CNY_MICROUNITS,
+            "case_id": None,
+            "lesson_id": None,
+            "candidate_version_id": None,
+        }
+        _receipt(root, "stop-preflight.json", values)
+        return values
     first_store, first_app = _runner_authority(runner)
     preflight_path = _receipt(
         root,
@@ -672,7 +759,7 @@ def main() -> int:
         print(f"Alpha-C real-evidence stop: {error}", file=sys.stderr)
         return 2
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 2 if result["stop"] == "missing_credential" else 0
+    return 2 if result["stop"] in {"missing_credential", "preflight_failure"} else 0
 
 
 if __name__ == "__main__":
