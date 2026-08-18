@@ -393,6 +393,26 @@ def _provider_config_snapshot(model: Model | KnownModelName) -> dict[str, JsonVa
     }
 
 
+def _qualifies_as_real_model_trial(
+    provider_config_snapshot: dict[str, JsonValue], *, model_requests: int, execution_status: str
+) -> bool:
+    provider_class = provider_config_snapshot.get("provider_class")
+    provider_name = provider_config_snapshot.get("provider_name")
+    model_id = provider_config_snapshot.get("model_id")
+    return (
+        model_requests > 0
+        and execution_status != "stopped"
+        and isinstance(provider_class, str)
+        and provider_class.casefold() not in {"", "none"}
+        and isinstance(provider_name, str)
+        and provider_name.casefold() not in {"", "test"}
+        and isinstance(model_id, str)
+        and bool(model_id)
+        and model_id.casefold() != "test"
+        and not model_id.casefold().startswith("test:")
+    )
+
+
 def _container_config_snapshot(
     docker: Any,
     bundle: AlphaTaskBundle,
@@ -1250,7 +1270,11 @@ class AlphaTrialRunner:
             run_stop_reasons=tuple(stop_reasons),
             workspace_path=str(prepared.paths.workspace),
             artifacts=artifacts,
-            qualifies_as_real_model_trial=usage.model_requests > 0 and execution_status != "stopped",
+            qualifies_as_real_model_trial=_qualifies_as_real_model_trial(
+                prepared.provider_config_snapshot,
+                model_requests=usage.model_requests,
+                execution_status=execution_status,
+            ),
             started_at=state.started_at,
             finished_at=finished,
         )

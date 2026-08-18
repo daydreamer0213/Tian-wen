@@ -131,6 +131,7 @@ def _source(
     exploration_run_ids: tuple[str, ...] | None = None,
     final_run_id: str | None = None,
     result_verifier_digest: str | None = None,
+    real: bool = True,
 ) -> tuple[StateStore, TrialResult, EvidenceRecord]:
     store, manifest = _new_store(tmp_path / f"{trial_id}.db"), _manifest(trial_id, task_id, champion)
     run_ids = (f"alpha:{trial_id}:round-1",) if run_ids is None else run_ids
@@ -214,11 +215,11 @@ def _source(
         boundary_status="passed",
         action_ids=(f"action-{trial_id}",),
         evidence_ids=tuple(item.evidence_id for item in evidence),
-        usage=TrialUsage(model_requests=0, tokens=0, tool_calls=0, action_effects=0, wall_seconds=0),
+        usage=TrialUsage(model_requests=1, tokens=100, tool_calls=0, action_effects=0, wall_seconds=0),
         run_stop_reasons=(),
         workspace_path="C:/private/workspace",
         artifacts=(),
-        qualifies_as_real_model_trial=False,
+        qualifies_as_real_model_trial=real,
         started_at=utc_now(),
         finished_at=utc_now(),
     )
@@ -624,6 +625,37 @@ def test_one_verified_failure_is_observed_without_learning_objects(tmp_path: Pat
     assert store.list_objects("learning_ticket", LearningTicket) == []
 
 
+def test_non_real_trial_is_rejected_before_any_learning_governance_write(tmp_path: Path) -> None:
+    intake, store = _intake(tmp_path)
+    source, result, _ = _source(tmp_path, "trial-dry", real=False)
+    governed_kinds = (
+        "evidence",
+        "outcome_source_authority",
+        "outcome_observation",
+        "observed_gap",
+        "learning_signal",
+        "learning_ticket",
+        "case",
+    )
+    before = {kind: _object_count(store, kind) for kind in governed_kinds}
+
+    with pytest.raises(StateConflict, match="real model trial"):
+        intake.record_trial_outcome(result, trial_store=source)
+
+    assert {kind: _object_count(store, kind) for kind in governed_kinds} == before
+
+
+def test_forged_real_flag_cannot_override_a_durable_non_real_trial(tmp_path: Path) -> None:
+    intake, store = _intake(tmp_path)
+    source, result, _ = _source(tmp_path, "trial-dry", real=False)
+    forged = result.model_copy(update={"qualifies_as_real_model_trial": True})
+
+    with pytest.raises(StateConflict, match="exactly match durable"):
+        intake.record_trial_outcome(forged, trial_store=source)
+
+    assert _object_count(store, "evidence") == _object_count(store, "outcome_observation") == 0
+
+
 def test_two_independent_verified_failures_create_bound_gap_signal_ticket_case(tmp_path: Path) -> None:
     intake, store = _intake(tmp_path)
     first_store, first, _ = _source(tmp_path, "trial-1")
@@ -655,7 +687,7 @@ def test_two_independent_verified_failures_create_bound_gap_signal_ticket_case(t
 
 def test_explicit_user_correction_qualifies_once(tmp_path: Path) -> None:
     intake, store = _intake(tmp_path)
-    source, result, user = _source(tmp_path, "trial-1", user=True)
+    source, result, user = _source(tmp_path, "trial-1", user=True, real=False)
     outcome = intake.record_user_feedback(
         feedback_id="feedback-trial-1",
         feedback_digest="sha256:feedback",
@@ -714,7 +746,7 @@ def test_one_off_choice_is_current_fix_only(tmp_path: Path) -> None:
 
 def test_persistent_preference_uses_scoped_memory_only(tmp_path: Path) -> None:
     intake, store = _intake(tmp_path)
-    source, result, user = _source(tmp_path, "trial-1", user=True)
+    source, result, user = _source(tmp_path, "trial-1", user=True, real=False)
     outcome = intake.record_user_feedback(
         feedback_id="feedback-trial-1",
         feedback_digest="sha256:feedback",

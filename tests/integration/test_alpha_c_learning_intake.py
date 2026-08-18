@@ -154,7 +154,7 @@ def _manifest(trial_id: str) -> TrialManifest:
 
 
 def _failed_trial(
-    tmp_path: Path, trial_id: str, *, user_feedback: bool = False
+    tmp_path: Path, trial_id: str, *, user_feedback: bool = False, real: bool = True
 ) -> tuple[StateStore, TrialResult, EvidenceRecord | None]:
     store, manifest = _store(tmp_path / f"{trial_id}.db"), _manifest(trial_id)
     run_id = f"alpha:{trial_id}:round-1"
@@ -220,11 +220,11 @@ def _failed_trial(
         boundary_status="passed",
         action_ids=(f"action-{trial_id}",),
         evidence_ids=tuple(item.evidence_id for item in evidence),
-        usage=TrialUsage(model_requests=0, tokens=0, tool_calls=0, action_effects=0, wall_seconds=0),
+        usage=TrialUsage(model_requests=1, tokens=100, tool_calls=0, action_effects=0, wall_seconds=0),
         run_stop_reasons=(),
         workspace_path="C:/not-persisted",
         artifacts=(),
-        qualifies_as_real_model_trial=False,
+        qualifies_as_real_model_trial=real,
         started_at=utc_now(),
         finished_at=utc_now(),
     )
@@ -406,7 +406,7 @@ def test_user_correction_and_scoped_preference_take_separate_governed_paths(tmp_
     baseline = _authority_snapshot(store)
     assert len(baseline[0]) == len(baseline[1]) == 1
     correction_store, _correction_result, correction_evidence = _failed_trial(
-        tmp_path, "correction", user_feedback=True
+        tmp_path, "correction", user_feedback=True, real=False
     )
     correction = intake.record_user_feedback(
         feedback_id="feedback-id-correction",
@@ -423,7 +423,7 @@ def test_user_correction_and_scoped_preference_take_separate_governed_paths(tmp_
     assert correction_triage.candidate_version_id is None
 
     preference_store, _preference_result, preference_evidence = _failed_trial(
-        tmp_path, "preference", user_feedback=True
+        tmp_path, "preference", user_feedback=True, real=False
     )
     preference = intake.record_user_feedback(
         feedback_id="feedback-id-preference",
