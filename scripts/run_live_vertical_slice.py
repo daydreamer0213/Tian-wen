@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from pydantic_ai.models import infer_model
 
 from tianwen.app import TianwenApp, TianwenConfig, default_eval_protocol
+from tianwen.deepseek import deepseek_chat_model
 from tianwen.domain import BudgetLimit, ExplorationBrief, ExplorationStopReason, PromotionRecord
 from tianwen.evaluation import CaseOutcome, EvalCase
 
@@ -88,11 +89,16 @@ def _validate_workspace(workspace: Path) -> None:
 
 
 def _make_app(args: argparse.Namespace, key: Ed25519PublicKey) -> TianwenApp:
+    model_name = os.environ["TIANWEN_MODEL"]
     return TianwenApp(
         TianwenConfig(
             data_dir=args.data_dir,
             workspace=args.workspace.resolve(),
-            model=infer_model(os.environ["TIANWEN_MODEL"]),
+            model=(
+                deepseek_chat_model(model_name.removeprefix("deepseek:"))
+                if model_name.startswith("deepseek:")
+                else infer_model(model_name)
+            ),
             public_evaluator_key=key,
             approved_protocol=default_eval_protocol(),
             learning_budget=BudgetLimit(model_requests=1, tool_calls=3, tokens=min(args.max_tokens, 300)),
