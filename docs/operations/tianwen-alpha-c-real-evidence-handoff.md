@@ -6,10 +6,21 @@
 **Proportional-safety design commit:** `774e5195b8ac3ef49dcd39b8f006a8b21b45cf49`
 **One-time recovery design/plan commit:** `e919a06`
 **One-time recovery implementation commit:** `d040692e5e2534ec887a34191f2492f11f712a44`
+**Final recovery design/plan commit:** `6ea99eeef40746dbfa2460f478a9e9f0d0af22bc`
+**Locked-image authority correction:** `a6de7c6`
+**Reviewed operator/test HEAD:** `ab715f1341f1582ba20f12998764e02eeff01cd2`
 **Canonical recovery-outcome revision:** the commit containing this document
-**Status:** recovery-1 consumed; stopped at zero-paid Docker image preflight; no real Trial
+**Status:** recovery-2 authorized but unconsumed; stopped at zero-paid Docker reference readiness;
+no real Trial
 
 ## 1. Current conclusion
+
+The fixed recovery-2 operator is implemented and reviewed, but its one-use root has not been
+created. Docker 29.6.1 can inspect the locked image by content digest ID and by the full canonical
+`docker.io/library/python@...` reference, and the returned exact RepoDigest is correct. The short
+`python@...` reference used by the operator currently returns `No such image`. Readiness therefore
+fails before root creation, model construction, Docker container execution or any paid request.
+This is an honest zero-paid launch stop, not learning evidence and not a completed recovery-2.
 
 The Alpha-C proportional-safety correction and its one-time recovery are implemented,
 independently reviewed and fully verified offline. The first authorized invocation had stopped
@@ -87,7 +98,7 @@ preview digest. The stage writes the truthful source `approved_goal_budget`. The
 `local_tty` source remains backward-compatible for older Alpha callers, but this operator neither
 requests nor simulates it.
 
-## 4. Authorized recovery execution sequence
+## 4. Historical recovery-1 execution sequence
 
 The reviewed recovery invocation of `scripts/run_alpha_c_real_evidence.py` performs these steps in
 order:
@@ -186,12 +197,25 @@ variables and failed in test setup (`223 passed, 21 failed, 7 skipped`). Re-runn
 suite with the audited fixed variables passed; this was an environment invocation error, not a
 product failure.
 
+Final recovery-2 and locked-image authority evidence at the current operator tree:
+
+- final retry-preflight fix focused: `57 passed`;
+- locked-image authority RED: `1 failed, 57 passed` for the obsolete `.Id` equality;
+- locked-image authority GREEN: `58 passed`;
+- real-evidence + Alpha Trial + Alpha-C Intake: `101 passed`;
+- full Python before the two-line image-authority deletion: `566 passed, 4 skipped`;
+- Runtime Bundle build, TypeScript typecheck, DSH `0.1.0-rc.6` public surface, zero private
+  imports and full Vitest `244 passed, 7 skipped`: passed;
+- locked-image scoped correctness: `C0 / I0`;
+- locked-image scoped Ponytail/YAGNI: `APPROVED`; the final test-only cleanup removed 14 duplicate
+  lines and changed no production behavior.
+
 ## 7. Current local state
 
 After the original launch and the single authorized recovery launch:
 
 - branch: `codex/tianwen-alpha-c-real-evidence`;
-- reviewed recovery code: `d040692e5e2534ec887a34191f2492f11f712a44`;
+- reviewed operator/test HEAD: `ab715f1341f1582ba20f12998764e02eeff01cd2`;
 - local `main`: `4638026f210c0de29262d307dd051934570d975e`;
 - local `origin/main`: `4638026f210c0de29262d307dd051934570d975e`;
 - pre-fix remote stage ref: `c26232094d4bf5638230fa01b8224c6a2910c1cb`;
@@ -206,6 +230,9 @@ After the original launch and the single authorized recovery launch:
 - both stores have zero budget, model-request reservation, Action and Event rows;
 - recovery stop receipt records `DockerExecutionError`, zero requests/tokens/CNY and no
   Case/Lesson/Candidate;
+- recovery-2 root `D:\DevData\tianwen-alpha-c-real-evidence-recovery-2`: absent and unconsumed;
+- the current short locked image reference fails readiness even though content-ID and full
+  canonical-reference inspection return the exact RepoDigest on Linux/amd64;
 - Provider/model execution: not started;
 - credential value: never read into receipts, printed or persisted.
 
@@ -214,8 +241,8 @@ after commit/push. The stage is not merged to `main`.
 
 ## 8. Residual risks and mandatory stops
 
-- The live Provider and verifier were not exercised because the locked immutable Docker image was
-  absent. Docker itself was running, but the daemon had zero images.
+- The live Provider and verifier remain unexercised. The immutable image is present, but its short
+  repository reference is not currently resolvable by `docker image inspect`.
 - The recovery operator correctly wrote the dedicated zero-paid final stop receipt; the earlier
   missing-receipt limitation is closed.
 - Both stage roots are intentionally non-restartable. Do not delete, move, overwrite or recreate
@@ -229,15 +256,15 @@ after commit/push. The stage is not merged to `main`.
 
 None.
 
-There is no pending user decision. Any additional replacement root is outside the currently
-approved one-time recovery authority and must first be reviewed by the supervising session. The
-current branch must not infer or create `recovery-2` by itself.
+There is no pending user decision. Recovery-2 is already authorized; the supervising session is
+handling the ordinary technical choice of restoring the short reference or explicitly selecting
+the stable full canonical inspect target. The branch must not create recovery-3.
 
 ## 10. Only recommended next entrance
 
-Report the zero-paid missing-image stop, both consumed roots, exact receipts and unchanged CNY 20
-ledger to the supervising session. Do not rerun, create another root, pull and retry implicitly, or
-merge the stage. The only technically narrow future entrance, if supervision explicitly approves
-it, is to install the already-locked immutable image first, verify its digest, and separately bind
-any one-time replacement to both zero-paid stops. That future choice is not authorized by this
-handoff. No Candidate, Promotion, Shadow or Alpha-D work may start from this environment failure.
+Keep recovery-2 unconsumed until the supervising session resolves the short-reference mismatch.
+The only two evidence-supported entrances are to restore that exact short reference or explicitly
+use the already-working full canonical `docker.io/library/python@digest` inspect target while
+keeping the exact RepoDigest and Linux/amd64 checks. Then rerun read-only readiness and execute the
+single authorized recovery-2. Do not add fallback logic, normalization, a new pull framework or
+recovery-3. Do not merge the stage or enter Candidate, Promotion, Shadow or Alpha-D.
