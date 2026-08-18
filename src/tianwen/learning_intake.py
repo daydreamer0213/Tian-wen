@@ -362,7 +362,7 @@ class LearningIntake:
             or durable.model_id != manifest.model_id
             or durable.champion_version_id != manifest.champion_version_id
             or durable.champion_digest != manifest.champion_digest
-            or durable.verifier_digest != manifest.verifier_digest
+            or durable.verifier_digest != manifest.verifier_snapshot.get("digest")
         ):
             raise StateConflict("trial result and manifest bindings do not match")
         evidence = tuple(
@@ -375,9 +375,16 @@ class LearningIntake:
             and item.purpose == "alpha_final_verification"
             and item.source_class == "docker_verifier"
         )
+        final_run_id = (
+            durable.run_ids[-1]
+            if durable.run_ids
+            else durable.exploration_run_ids[-1]
+            if durable.exploration_run_ids
+            else f"alpha:{durable.trial_id}:settlement"
+        )
         if not final_verifier_records or any(
             item.scope != f"trial:{durable.trial_id}"
-            or item.run_id != f"alpha:{durable.trial_id}:settlement"
+            or item.run_id != final_run_id
             for item in final_verifier_records
         ):
             raise StateConflict("trial outcome requires final-verifier evidence bound to its trial and run")
