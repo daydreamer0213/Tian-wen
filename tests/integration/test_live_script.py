@@ -33,9 +33,16 @@ def _public_key(path: Path) -> Path:
     return path
 
 
+@pytest.mark.parametrize(
+    ("thinking", "expected_thinking"),
+    [(None, {}), (False, {"thinking": {"type": "disabled"}})],
+)
 @pytest.mark.anyio
-async def test_live_deepseek_model_sends_the_official_max_tokens_field(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_live_deepseek_model_sends_the_official_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    thinking: bool | None,
+    expected_thinking: dict[str, object],
 ) -> None:
     script = _live_script()
     requests: list[dict[str, object]] = []
@@ -69,7 +76,11 @@ async def test_live_deepseek_model_sends_the_official_max_tokens_field(
     )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(send)) as client:
-        model = deepseek_chat_model(http_client=client)
+        model = (
+            deepseek_chat_model(http_client=client)
+            if thinking is None
+            else deepseek_chat_model(thinking=thinking, http_client=client)
+        )
         await model.request(
             [ModelRequest(parts=[UserPromptPart(content="hello")])],
             {"max_tokens": 4_096},
@@ -82,6 +93,7 @@ async def test_live_deepseek_model_sends_the_official_max_tokens_field(
             "model": "deepseek-v4-pro",
             "max_tokens": 4_096,
             "stream": False,
+            **expected_thinking,
         }
     ]
     assert model.model_id == "deepseek:deepseek-v4-pro"

@@ -357,12 +357,17 @@ def sanitize_model_settings(model: Model | KnownModelName) -> dict[str, JsonValu
         raise AlphaTrialError("model settings must be an object")
     if not value:
         return {}
-    if set(value) != {"max_tokens"}:
+    if set(value) not in ({"max_tokens"}, {"max_tokens", "extra_body"}):
         raise AlphaTrialError("model settings contain unsupported settings")
     max_tokens = value["max_tokens"]
     if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens <= 0:
         raise AlphaTrialError("model setting max_tokens must be a positive integer")
-    return {"max_tokens": max_tokens}
+    sanitized: dict[str, JsonValue] = {"max_tokens": max_tokens}
+    if "extra_body" in value:
+        if value["extra_body"] != {"thinking": {"type": "disabled"}}:
+            raise AlphaTrialError("model settings contain unsupported settings")
+        sanitized["extra_body"] = {"thinking": {"type": "disabled"}}
+    return sanitized
 
 
 def sanitize_provider(model: Model | KnownModelName) -> tuple[str, str, str]:
@@ -821,6 +826,9 @@ class AlphaTrialRunner:
         ):
             raise AlphaTrialError("trial manifest authority does not match canonical mirror")
         self._validate_manifest_bundle(manifest, bundle)
+        model_settings = sanitize_model_settings(self.model)
+        if model_settings != manifest.model_settings_snapshot:
+            raise AlphaTrialError("resumed model settings no longer match frozen manifest")
         goal = app.store.get_object("goal", state.goal_id or "", GoalContract)
         baseline = snapshot_tree(bundle.root / "seed")
         if baseline.digest != manifest.baseline_tree_digest or baseline.digest != bundle.task.baseline_tree_digest:
@@ -837,7 +845,7 @@ class AlphaTrialRunner:
             manifest.champion_version_id,
             manifest.champion_digest,
             preview,
-            sanitize_model_settings(self.model),
+            model_settings,
             _provider_config_snapshot(self.model),
             _container_config_snapshot(docker, bundle, preflight),
             app,
