@@ -14,7 +14,7 @@
 - TDD RED: `21 failed, 1 passed`; the A2 entry point did not exist. Focused GREEN: `22 passed`.
 - Related Alpha Docker / Trial / Intake / task-package tests: `212 passed`; full Python: `604 passed, 4 skipped`; Ruff, py_compile, and diff-check passed.
 - MockTransport proved the real model mapping sends `max_tokens=4096` and top-level `thinking.type=disabled`, with no `max_completion_tokens` or `reasoning_effort`.
-- A separate zero-request Docker contract used the real A2 producer/parser/settlement path: seed `not_met` 0/7, then the reference patch made public and final checks pass 7/7. Its SQLite SHA-256 is `02290cf8b0dcc06ee1e842912a87a92ee8740b9b4fbb0f81394304fd477b4e7d`; model requests, tokens, and CNY were all zero.
+- A separate zero-request Docker contract used the real A2 producer/parser/settlement path: seed `not_met` 0/7, then the reference patch made the public check pass and the final verifier `met` 7/7. Its SQLite SHA-256 is `02290cf8b0dcc06ee1e842912a87a92ee8740b9b4fbb0f81394304fd477b4e7d`; model requests, tokens, and CNY were all zero.
 - Independent correctness review: C0 / I0 / M0. Ponytail/YAGNI: P1=0 / P2=0.
 
 ## Unique live result
