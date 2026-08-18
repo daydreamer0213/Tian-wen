@@ -8,19 +8,19 @@
 **One-time recovery implementation commit:** `d040692e5e2534ec887a34191f2492f11f712a44`
 **Final recovery design/plan commit:** `6ea99eeef40746dbfa2460f478a9e9f0d0af22bc`
 **Locked-image authority correction:** `a6de7c6`
-**Reviewed operator/test HEAD:** `ab715f1341f1582ba20f12998764e02eeff01cd2`
+**Pre-canonical operator/test HEAD:** `ab715f1341f1582ba20f12998764e02eeff01cd2`
+**Canonical Docker CLI boundary correction:** `110873e6a1a0254ab2bcb650ca3f8e6f9376d157`
 **Canonical recovery-outcome revision:** the commit containing this document
-**Status:** recovery-2 authorized but unconsumed; stopped at zero-paid Docker reference readiness;
-no real Trial
+**Status:** recovery-2 consumed; stopped at zero-paid seed-verifier container start; no real Trial
 
 ## 1. Current conclusion
 
-The fixed recovery-2 operator is implemented and reviewed, but its one-use root has not been
-created. Docker 29.6.1 can inspect the locked image by content digest ID and by the full canonical
-`docker.io/library/python@...` reference, and the returned exact RepoDigest is correct. The short
-`python@...` reference used by the operator currently returns `No such image`. Readiness therefore
-fails before root creation, model construction, Docker container execution or any paid request.
-This is an honest zero-paid launch stop, not learning evidence and not a completed recovery-2.
+The fixed recovery-2 ran once and consumed its one-use root. Canonical image inspection and
+container creation succeeded, but Docker 29.6.1 refused to start the seed verifier because the
+fixed `local` logging configuration combines default compression with `max-file=1`. Docker reports
+`compression cannot be enabled when max file count is 1`. The container was created but never
+started, no paid model request was made, and the bounded stop receipt records zero requests,
+tokens and CNY. This is not a real Trial or learning evidence.
 
 The Alpha-C proportional-safety correction and its one-time recovery are implemented,
 independently reviewed and fully verified offline. The first authorized invocation had stopped
@@ -46,16 +46,15 @@ Current factual outcome:
 - paid model requests: `0`;
 - model tokens: `0`;
 - CNY charged: `0`;
-- Docker containers/verifier executions: `0`;
+- Docker containers/verifier executions: `1` created, `0` started, `0` verifier executions;
 - qualified real Case: none;
 - conditional Lesson: none;
 - Candidate: none;
 - Promotion or Shadow change: none.
 
-This third zero-paid readiness observation did not consume recovery-2 and is not a real Trial or
-learning evidence. Neither consumed one-use root was deleted, moved, overwritten or rerun. Stage A
-remains a failed live proof; its exhausted Goal must not be replayed, and its historical
-`usage-invalid` fact remains operational evidence only.
+No consumed one-use root was deleted, moved, overwritten or rerun. Recovery-2 must not be replayed
+and recovery-3 is not authorized. Stage A remains a failed live proof; its exhausted Goal must not
+be replayed, and its historical `usage-invalid` fact remains operational evidence only.
 
 ## 2. Fixed authority and scope
 
@@ -210,12 +209,23 @@ Final recovery-2 and locked-image authority evidence at the current operator tre
 - locked-image scoped Ponytail/YAGNI: `APPROVED`; the final test-only cleanup removed 14 duplicate
   lines and changed no production behavior.
 
+The final canonical Docker CLI boundary wave then proved and fixed all four short-reference uses:
+
+- RED: `4 failed, 76 passed` for preflight inspect, create argv, reconcile `Config.Image` and
+  operator readiness;
+- GREEN: direct Alpha Docker + real-evidence `80 passed`;
+- Alpha Docker + real-evidence + Alpha Trial + Alpha-C Intake: `123 passed`;
+- final full Python: `568 passed, 4 skipped`;
+- Ruff, py_compile and full-branch `git diff --check`: passed;
+- independent correctness: `C0 / I0`;
+- Ponytail/YAGNI: `APPROVED / lean`, no load-bearing removable production code.
+
 ## 7. Current local state
 
-After the original launch and the single authorized recovery launch:
+After the original launch and both authorized recovery launches:
 
 - branch: `codex/tianwen-alpha-c-real-evidence`;
-- reviewed operator/test HEAD: `ab715f1341f1582ba20f12998764e02eeff01cd2`;
+- reviewed operator/test HEAD: `110873e6a1a0254ab2bcb650ca3f8e6f9376d157`;
 - local `main`: `4638026f210c0de29262d307dd051934570d975e`;
 - local `origin/main`: `4638026f210c0de29262d307dd051934570d975e`;
 - pre-fix remote stage ref: `c26232094d4bf5638230fa01b8224c6a2910c1cb`;
@@ -230,9 +240,16 @@ After the original launch and the single authorized recovery launch:
 - both stores have zero budget, model-request reservation, Action and Event rows;
 - recovery stop receipt records `DockerExecutionError`, zero requests/tokens/CNY and no
   Case/Lesson/Candidate;
-- recovery-2 root `D:\DevData\tianwen-alpha-c-real-evidence-recovery-2`: absent and unconsumed;
-- the current short locked image reference fails readiness even though content-ID and full
-  canonical-reference inspection return the exact RepoDigest on Linux/amd64;
+- recovery-2 root `D:\DevData\tianwen-alpha-c-real-evidence-recovery-2`: present and consumed;
+- recovery-2 Trial: `trial-817225ebe2ff018604ee75a02094342c`;
+- recovery-2 authority SHA-256: `6709f2dc2612c807590e9b3e89c2b00f937148c095619e3befbcc08320ae8bce`;
+- recovery-2 stop receipt SHA-256: `78c2cd46d4ed03eca520c5ef8e555751872fe80bfa0def90198e5f990422e78e`;
+- recovery-2 has zero budgets, model reservations, action reservations, Actions and Events; its
+  only non-baseline object is the unsettled `seed-preflight` check execution, whose durable status
+  remains `running` with no exit code because container start was rejected before settlement;
+- exact container `083295b0646365640780f0eacb26cfc1bde4a362342ce2ef53f4c1e95d262a3e`
+  has Docker daemon state `created`, never running, with exit code `128` and the local-log
+  compression error;
 - Provider/model execution: not started;
 - credential value: never read into receipts, printed or persisted.
 
@@ -241,12 +258,12 @@ after commit/push. The stage is not merged to `main`.
 
 ## 8. Residual risks and mandatory stops
 
-- The live Provider and verifier remain unexercised. The immutable image is present, but its short
-  repository reference is not currently resolvable by `docker image inspect`.
+- The live Provider and verifier remain unexercised. Docker 29.6.1 rejects the current fixed local
+  log options before the seed verifier can start.
 - The recovery-1 operator correctly wrote the dedicated zero-paid final stop receipt; the earlier
   missing-receipt limitation is closed.
-- Both stage roots are intentionally non-restartable. Do not delete, move, overwrite or recreate
-  either root, and do not bypass them through a custom invocation.
+- All three stage roots are intentionally non-restartable. Do not delete, move, overwrite or
+  recreate them, and do not bypass them through a custom invocation.
 - Stop if checkout, Champion, provider/model, Docker, verifier, receipts, condition equality or
   cumulative cost fails validation.
 - Stop at CNY 20, any Goal/authority expansion, credential exposure or major irreversible risk.
@@ -256,15 +273,14 @@ after commit/push. The stage is not merged to `main`.
 
 None.
 
-There is no pending user decision. Recovery-2 is already authorized; the supervising session is
-handling the ordinary technical choice of restoring the short reference or explicitly selecting
-the stable full canonical inspect target. The branch must not create recovery-3.
+There is no pending user decision. The supervising session must decide whether the Alpha Docker
+fixed log options need a separate minimal compatibility change and how to validate it without
+replaying recovery-2. The branch must not create recovery-3.
 
 ## 10. Only recommended next entrance
 
-Keep recovery-2 unconsumed until the supervising session resolves the short-reference mismatch.
-The only two evidence-supported entrances are to restore that exact short reference or explicitly
-use the already-working full canonical `docker.io/library/python@digest` inspect target while
-keeping the exact RepoDigest and Linux/amd64 checks. Then rerun read-only readiness and execute the
-single authorized recovery-2. Do not add fallback logic, normalization, a new pull framework or
-recovery-3. Do not merge the stage or enter Candidate, Promotion, Shadow or Alpha-D.
+Report the zero-paid recovery-2 stop, exact receipt and never-started container to supervision.
+Do not replay recovery-2 or create recovery-3. The only evidence-supported engineering entrance
+is a separately reviewed, minimal Alpha Docker logging-compatibility change with an offline or
+single exact-container proof that does not manufacture learning evidence. Do not build a logging
+framework, merge the stage or enter Candidate, Promotion, Shadow or Alpha-D.
