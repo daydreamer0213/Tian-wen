@@ -601,8 +601,6 @@ class DockerCheckExecutor:
     def _parse_verifier(self, stdout: bytes) -> VerifierResult:
         try:
             decoded = stdout.decode("utf-8")
-            if decoded.strip() != decoded or decoded.count("\n") > 0:
-                raise ValueError
             return VerifierResult.model_validate(json.loads(decoded))
         except (UnicodeDecodeError, json.JSONDecodeError, ValidationError, ValueError) as error:
             raise DockerExecutionError("verifier output invalid") from error

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,9 @@ _CONTROLLED_ENV = {
     "TMPDIR": "/tmp",
     "PYTHONDONTWRITEBYTECODE": "1",
 }
+_VALID_VERIFIER_OUTPUT = (
+    b'{"verdict":"met","passed_checks":[],"failed_checks":[],"failure_categories":[],"summary":"ok"}'
+)
 
 
 class _Reader:
@@ -676,7 +681,13 @@ async def test_final_recovery_reads_logs_and_returns_only_verifier_result(
 ) -> None:
     record = _record(executor, "action:final", final=True)
     executor._save_record(record)
-    final = '{"verdict":"met","passed_checks":["public"],"failed_checks":[],"failure_categories":[],"summary":"ok"}'
+    task = Path(__file__).resolve().parents[2] / "alpha" / "tasks" / "A1"
+    producer = subprocess.run(
+        [sys.executable, "-B", str(task / "verifier" / "verify.py"), str(task / "seed")],
+        capture_output=True,
+        text=False,
+        check=True,
+    )
     inspected = _inspect(executor, "action:final", code=0)
     inspected["Config"]["Labels"]["tianwen.alpha.config_digest"] = executor._normalized_config_digest(
         "final", final=True
@@ -701,15 +712,65 @@ async def test_final_recovery_reads_logs_and_returns_only_verifier_result(
     monkeypatch.setattr(executor, "_inspect", inspect)
 
     async def logs(_id: str, _limit: int) -> tuple[bytes, bytes]:
-        return final.encode(), b""
+        return producer.stdout, producer.stderr
 
     monkeypatch.setattr(executor, "_logs", logs)
 
     result = await executor.reconcile("action:final")
 
     assert isinstance(result, VerifierResult)
-    assert result.verdict == "met"
-    assert executor._record("action:final").status == "finished"
+    assert result.verdict == "not_met"
+    settled = StateStore(executor.store.database).get_object(
+        "check_execution", "action:final", CheckExecutionRecord
+    )
+    assert settled.status == "finished"
+    assert settled.result_json is not None
+    assert VerifierResult.model_validate_json(settled.result_json) == result
+
+
+@pytest.mark.parametrize(
+    ("prefix", "suffix"),
+    (
+        (b"", b""),
+        (b"", b"\n"),
+        (b" \t", b"\r\n"),
+    ),
+    ids=("no-whitespace", "print-lf", "json-whitespace-crlf"),
+)
+def test_verifier_output_accepts_one_json_document_with_standard_json_whitespace(
+    executor: DockerCheckExecutor, prefix: bytes, suffix: bytes
+) -> None:
+    assert executor._parse_verifier(prefix + _VALID_VERIFIER_OUTPUT + suffix).verdict == "met"
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    (
+        _VALID_VERIFIER_OUTPUT + b"\n" + _VALID_VERIFIER_OUTPUT,
+        _VALID_VERIFIER_OUTPUT + b"x",
+        b"",
+        b" \r\n\t",
+        b"\xff",
+        b"not-json",
+        b"{}",
+        _VALID_VERIFIER_OUTPUT[:-1] + b',"extra":true}',
+    ),
+    ids=(
+        "two-documents",
+        "trailing-garbage",
+        "empty",
+        "whitespace-only",
+        "non-utf8",
+        "non-json",
+        "schema-invalid",
+        "extra-field",
+    ),
+)
+def test_verifier_output_rejects_invalid_json_or_schema(
+    executor: DockerCheckExecutor, stdout: bytes
+) -> None:
+    with pytest.raises(DockerExecutionError, match="^verifier output invalid$"):
+        executor._parse_verifier(stdout)
 
 
 @pytest.mark.anyio
