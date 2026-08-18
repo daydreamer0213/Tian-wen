@@ -42,7 +42,7 @@ ZERO_LEARNING_BUDGET = BudgetLimit(
     child_loops=0,
     action_effects=0,
 )
-STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-live-sample-mainline")
+STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-live-sample-real-source")
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -434,4 +434,3 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
 
 if __name__ == "__main__":
     print(json.dumps(asyncio.run(run_stage()), ensure_ascii=False, sort_keys=True))
-
