@@ -239,14 +239,15 @@ Steps:
 1. Preserve the original and recovery-1 roots byte-for-byte. Use only the fixed, previously absent
    `D:\DevData\tianwen-alpha-c-real-evidence-recovery-2`; never number or loop retries.
 2. Add tests-only RED proving a host readiness failure occurs before root creation and model/runner
-   construction, while exact Docker Linux/amd64 server plus locked image ID/RepoDigest permits the
+   construction, while exact Docker Linux/amd64 server plus locked RepoDigest permits the
    fixed recovery-2 path.
 3. Add tests-only RED proving recovery-2 reloads both prior authorities/stores, requires both exact
    Trial IDs and zero Goal/Run/budget/Result/model/Action/Event state, and binds both authorities
    plus the recovery-1 stop receipt in the new authority.
 4. Implement one small stage-local readiness function using the existing native `subprocess` Docker
-   invocation. Validate only server reachability, Linux/amd64, exact locked image ID and exact
-   RepoDigest. Do not pull, mutate Docker, or build a generic environment abstraction.
+   invocation. Validate only server reachability, Linux/amd64 and the exact locked RepoDigest;
+   Docker's local `.Id` representation is not an authority. Do not pull, mutate Docker, or build a
+   generic environment abstraction.
 5. Extend the existing fixed recovery validator only enough to return the two prior immutable
    bindings. Run readiness and both validations before `_initialize_stage_root()`.
 6. Keep the existing prepare-exception zero-paid stop receipt and all natural-sampling logic

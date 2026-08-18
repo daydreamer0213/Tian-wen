@@ -279,8 +279,8 @@ One final replacement may use only
 `D:\DevData\tianwen-alpha-c-real-evidence-recovery-2`, and only while that path does not exist.
 Before creating it, the operator performs a host-only readiness check through the existing native
 Docker CLI: the server must be reachable as Linux/amd64 and `docker image inspect` must return the
-exact locked image ID and RepoDigest. A readiness failure creates no root and no receipt because no
-new execution authority has been consumed.
+exact locked RepoDigest. Docker's local `.Id` representation is not an authority. A readiness
+failure creates no root and no receipt because no new execution authority has been consumed.
 
 The operator then reloads both prior stage authorities, both exact Trial stores, and the
 recovery-1 preflight-stop receipt. Both stores must still have zero Goal, Run, budget, Result,
