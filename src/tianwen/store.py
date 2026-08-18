@@ -691,31 +691,32 @@ class StateStore:
             ).fetchone()
             if row is None:
                 raise StateConflict(f"missing model request reservation {request_id}")
+            loop_id = str(row["loop_id"])
+            reserved_tokens = int(row["reserved_tokens"])
             if row["status"] == "settled":
                 if int(row["observed_tokens"]) != observed_tokens:
                     raise StateConflict("settled model request usage cannot change")
-                return BudgetUsage(model_requests=1, tokens=observed_tokens)
-            reserved_tokens = int(row["reserved_tokens"])
-            if observed_tokens > reserved_tokens:
-                raise BudgetExceeded(f"model request exceeded its reserved token budget for {row['loop_id']}")
-            budget = connection.execute(
-                "SELECT usage_json FROM tw_budgets WHERE loop_id = ?",
-                (row["loop_id"],),
-            ).fetchone()
-            if budget is None:
-                raise StateConflict(f"missing budget {row['loop_id']}")
-            usage = BudgetUsage.model_validate_json(budget["usage_json"])
-            next_usage = usage.model_copy(update={"tokens": usage.tokens - (reserved_tokens - observed_tokens)})
-            connection.execute(
-                "UPDATE tw_budgets SET usage_json = ? WHERE loop_id = ?",
-                (next_usage.model_dump_json(), row["loop_id"]),
-            )
-            connection.execute(
-                "UPDATE tw_model_request_reservations "
-                "SET observed_tokens = ?, status = 'settled' WHERE request_id = ? AND status = 'reserved'",
-                (observed_tokens, request_id),
-            )
-            return BudgetUsage(model_requests=1, tokens=observed_tokens)
+            else:
+                budget = connection.execute(
+                    "SELECT usage_json FROM tw_budgets WHERE loop_id = ?",
+                    (loop_id,),
+                ).fetchone()
+                if budget is None:
+                    raise StateConflict(f"missing budget {loop_id}")
+                usage = BudgetUsage.model_validate_json(budget["usage_json"])
+                next_usage = usage.model_copy(update={"tokens": usage.tokens - reserved_tokens + observed_tokens})
+                connection.execute(
+                    "UPDATE tw_budgets SET usage_json = ? WHERE loop_id = ?",
+                    (next_usage.model_dump_json(), loop_id),
+                )
+                connection.execute(
+                    "UPDATE tw_model_request_reservations "
+                    "SET observed_tokens = ?, status = 'settled' WHERE request_id = ? AND status = 'reserved'",
+                    (observed_tokens, request_id),
+                )
+        if observed_tokens > reserved_tokens:
+            raise BudgetExceeded(f"model request exceeded its reserved token budget for {loop_id}")
+        return BudgetUsage(model_requests=1, tokens=observed_tokens)
 
     def get_run_budget_usage(self, run_id: str) -> BudgetUsage:
         with self._connect() as connection:
