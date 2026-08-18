@@ -13,7 +13,8 @@
 **Docker log/recovery-3 implementation:** `b76131c67249fe2ee94a2854da7f8917acafe3df`
 **Formal container-Env identity correction:** `e1390794e4a74db2711a77f985e2c3c51b4ca497`
 **Canonical retained-container evidence:** `50036cd6d834e60448758f512e165f7b9119ba8c`
-**Exact-container cleanup revision:** the commit containing this document
+**Exact-container cleanup evidence:** `3d799a3e4548245e3de377b936cb64db4c1e1dd5`
+**Canonical stage-handoff revision:** the commit containing this document
 **Status:** recovery-3 consumed; its zero-paid seed-verifier identity failure is fixed and proven
 read-only against the retained container, which was then removed by exact ID; no real Trial
 
@@ -359,8 +360,8 @@ and authorize any future true live entrance. The branch must not create recovery
 
 ## 10. Only recommended next entrance
 
-Commit this exact-container cleanup revision, then report the independently approved formal
-Env-identity correction, zero-paid recovery-3 receipt, retained-container read-only proof and
-cleanup to supervision. Do not replay recovery-3, create recovery-4, run a Provider or start
-another live root. Supervision decides the next true live entrance and how the shared Alpha Docker
-fix is integrated. Do not merge the stage or enter Candidate, Promotion, Shadow or Alpha-D.
+Report the independently approved formal Env-identity correction, zero-paid recovery-3 receipt,
+retained-container read-only proof and exact cleanup to supervision. Do not replay recovery-3,
+create recovery-4, run a Provider or start another live root. Supervision decides the next true
+live entrance and how the shared Alpha Docker fix is integrated. Do not merge the stage or enter
+Candidate, Promotion, Shadow or Alpha-D.
