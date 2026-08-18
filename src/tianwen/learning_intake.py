@@ -346,12 +346,14 @@ class LearningIntake:
         return records
 
     def _validate_trial(
-        self, result: TrialResult, source: StateStore
+        self, result: TrialResult, source: StateStore, *, require_real_model: bool = False
     ) -> tuple[TrialResult, TrialManifest, tuple[EvidenceRecord, ...]]:
         supplied = TrialResult.model_validate(result)
         durable = source.get_object("alpha_trial_result", supplied.trial_id, TrialResult)
         if durable != supplied:
             raise StateConflict("trial result does not exactly match durable receipt")
+        if require_real_model and not durable.qualifies_as_real_model_trial:
+            raise StateConflict("trial outcome requires a real model trial")
         manifest = source.get_object("alpha_trial_manifest", durable.trial_id, TrialManifest)
         if durable.trial_manifest_digest != content_digest(manifest):
             raise StateConflict("trial result manifest binding does not match")
@@ -393,7 +395,7 @@ class LearningIntake:
         return durable, manifest, evidence
 
     def record_trial_outcome(self, result: TrialResult, *, trial_store: StateStore) -> OutcomeObservation:
-        durable, manifest, evidence = self._validate_trial(result, trial_store)
+        durable, manifest, evidence = self._validate_trial(result, trial_store, require_real_model=True)
         scope = self._scope(durable)
         fingerprint = self._fingerprint(durable, manifest, scope)
         qualifying = (

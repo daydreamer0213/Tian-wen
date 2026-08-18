@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic_ai.messages import UserPromptPart
+from pydantic_ai.models import infer_model
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.wrapper import WrapperModel
 
@@ -311,6 +312,7 @@ async def test_execute_consumes_the_single_durable_seed_preflight(tmp_path: Path
     result = await runner.execute(prepared, _confirmation(prepared))
 
     assert result.execution_status == "completed"
+    assert result.qualifies_as_real_model_trial is False
     assert docker.seed_preflight_calls == 1
     assert docker.reconcile_calls == ["seed-preflight"]
     assert model.request_count == 1
@@ -693,6 +695,26 @@ def test_output_limited_model_prepare_freezes_and_reloads_max_tokens(tmp_path: P
     assert durable == manifest
     assert durable.model_settings_snapshot == {"max_tokens": 4096}
     assert model.wrapped.request_count == 0
+
+
+def test_deepseek_wrapper_identity_can_qualify_after_a_settled_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tianwen.alpha import _qualifies_as_real_model_trial
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "offline-contract-key")
+    root, model, docker = _bundle(tmp_path / "tasks", "A1"), WrapperModel(
+        infer_model("deepseek:deepseek-v4-pro")
+    ), _Docker()
+    runner = _runner(root, model, docker)
+
+    prepared = runner.prepare("A1", budget=_budget())
+
+    assert _qualifies_as_real_model_trial(
+        prepared.provider_config_snapshot,
+        model_requests=1,
+        execution_status="completed",
+    )
 
 
 def test_empty_model_settings_are_supported() -> None:
