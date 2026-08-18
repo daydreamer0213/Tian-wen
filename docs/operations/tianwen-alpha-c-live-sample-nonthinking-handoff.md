@@ -48,7 +48,11 @@
 - Result digest: `sha256:1a677294efeb8da81c44f4eed91803db2a3db5b953e8902ea1a987a510b7ea9e`.
 - Manifest digest: `sha256:0995357809b44f4ebe0c9b9e8b4e29f3681ecc48b71ebbf26670241b93f2ec10`; its model settings snapshot exactly freezes non-thinking mode and 4096.
 - Final Evidence digest: `sha256:a229c308c1d3186481637e8acf726c381cb177c6839befcdea37264bee80b4fc`, bound to the final round Run and Docker verifier.
-- Four durable check records are `finished`; no container with this Trial label remained after execution.
+- Four durable check records are `finished` with `removed_at=null`; their exact terminal containers remain for audit:
+  - seed: `677ab3d023900ed674f6d285286298465975f55fa76b63d79f29829767120731`, exited 0;
+  - first public check: `59ea9ce63178eb2dac9f355aed5facffc071c8fb5bef832bd20a5b3fbcdfe5f9`, exited 1;
+  - second public check: `4b39f8dbe357e383abea1acc2e23cf1fec4ea174283e6403360049ade8884122`, exited 0;
+  - final verifier: `70dbeb092d27cc87aa4b71ee35aa8ad9b89b9137472a6f97584d1933b36b16ec`, exited 0.
 
 ## Stop boundary
 
