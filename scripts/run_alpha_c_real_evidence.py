@@ -298,8 +298,11 @@ def _host_readiness() -> None:
         )
         if version.returncode or image.returncode:
             raise ValueError
-        server = json.loads(version.stdout).get("Server", {})
+        version_payload = json.loads(version.stdout)
         observed = json.loads(image.stdout)
+        if not isinstance(version_payload, dict) or not isinstance(version_payload.get("Server"), dict):
+            raise ValueError
+        server = version_payload["Server"]
         if isinstance(observed, list) and len(observed) == 1:
             observed = observed[0]
         repo_digests = observed.get("RepoDigests") if isinstance(observed, dict) else None
@@ -581,32 +584,21 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
         return {"stop": "missing_credential", "model_requests": 0, "candidate_version_id": None}
     price = dependencies.price_snapshot or RECORDED_PRICE_SNAPSHOT
     _validate_price_snapshot(price)
-    recovery_of: dict[str, str | None] | list[dict[str, str | None]] | None
-    if dependencies.recovery_of_root is None:
-        recovery_of = None
-    elif dependencies.recovery_1_root is None:
-        old_recovery = _validate_zero_paid_recovery(
+    if dependencies.recovery_of_root is None or dependencies.recovery_1_root is None:
+        raise StageError("recovery-2 requires both prior authorities")
+    _host_readiness()
+    recovery_of = [
+        _validate_zero_paid_recovery(
             dependencies.recovery_of_root,
             expected_trial_id=RECOVERY_OF_TRIAL_ID,
             require_stop_receipt=False,
-        )
-        recovery_of = {
-            key: old_recovery[key] for key in ("authority_path", "authority_digest", "trial_id")
-        }
-    else:
-        _host_readiness()
-        recovery_of = [
-            _validate_zero_paid_recovery(
-                dependencies.recovery_of_root,
-                expected_trial_id=RECOVERY_OF_TRIAL_ID,
-                require_stop_receipt=False,
-            ),
-            _validate_zero_paid_recovery(
-                dependencies.recovery_1_root,
-                expected_trial_id=RECOVERY_1_TRIAL_ID,
-                require_stop_receipt=True,
-            ),
-        ]
+        ),
+        _validate_zero_paid_recovery(
+            dependencies.recovery_1_root,
+            expected_trial_id=RECOVERY_1_TRIAL_ID,
+            require_stop_receipt=True,
+        ),
+    ]
     audit = (dependencies.checkout_audit or audit_checkout_and_governance)()
     root = _initialize_stage_root(dependencies.stage_root)
     price_authority = price.authority()

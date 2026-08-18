@@ -221,7 +221,8 @@ def _dependencies(module: Any, runner: _Runner, intake: _Intake | None = None, *
     )
     return module.StageDependencies(
         stage_root=kwargs.pop("stage_root", _root()),
-        recovery_of_root=kwargs.pop("recovery_of_root", None),
+        recovery_of_root=kwargs.pop("recovery_of_root", _old_zero_paid_root(module)),
+        recovery_1_root=kwargs.pop("recovery_1_root", _recovery_1_zero_paid_root(module)),
         environment={"DEEPSEEK_API_KEY": "configured"},
         stdout=SimpleNamespace(write=lambda _text: None, flush=lambda: None),
         model_factory=lambda: model,
@@ -279,12 +280,15 @@ def _old_zero_paid_root(
             connection.execute("INSERT INTO tw_model_request_reservations VALUES ('request-old')")
         if nonzero == "action_reservation":
             connection.execute("INSERT INTO tw_action_budget_reservations VALUES ('action-old')")
+        if nonzero == "event":
+            connection.execute("CREATE TABLE tw_events (event_id TEXT NOT NULL)")
+            connection.execute("INSERT INTO tw_events VALUES ('event-old')")
     return root
 
 
 def _recovery_dependencies(module: Any, runner: _Runner, old_root: Path, recovery_root: Path) -> Any:
     dependencies = _dependencies(module, runner, _Intake(), stage_root=recovery_root)
-    return replace(dependencies, recovery_of_root=old_root, recovery_1_root=None)
+    return replace(dependencies, recovery_of_root=old_root, recovery_1_root=_recovery_1_zero_paid_root(module))
 
 
 def _recovery_1_zero_paid_root(module: Any, *, nonzero: str | None = None) -> Path:
@@ -324,6 +328,52 @@ def _docker_ready(module: Any, monkeypatch: pytest.MonkeyPatch) -> list[tuple[st
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
     return calls
+
+
+@pytest.fixture(autouse=True)
+def _offline_docker_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
+    _docker_ready(_module(), monkeypatch)
+
+
+def test_recovery_2_cannot_omit_either_prior_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Break caught: the final entry could evade its two consumed-stage authorities."""
+    module = _module()
+    root = _root() / "tianwen-alpha-c-real-evidence-recovery-2"
+    runner = _Runner([_Result("trial-1", True, "met")])
+    _docker_ready(module, monkeypatch)
+
+    with pytest.raises(module.StageError, match="both prior"):
+        asyncio.run(
+            module.run_stage(
+                replace(
+                    _dependencies(module, runner, _Intake(), stage_root=root),
+                    recovery_of_root=None,
+                    recovery_1_root=None,
+                )
+            )
+        )
+
+    assert not root.exists()
+    assert runner.prepared == []
+
+
+@pytest.mark.parametrize("version", [b'{"Server":null}', b'[]'])
+def test_host_readiness_rejects_malformed_success_json_as_stage_error(
+    monkeypatch: pytest.MonkeyPatch, version: bytes
+) -> None:
+    """Break caught: malformed successful Docker JSON could escape the stage's fail-closed boundary."""
+    module = _module()
+
+    def fake_run(argv: list[str], **_kwargs: Any) -> Any:
+        output = version if argv[1:2] == ["version"] else b'{"Id":"image","RepoDigests":[]}'
+        return SimpleNamespace(returncode=0, stdout=output, stderr=b"")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    with pytest.raises(module.StageError, match="Docker readiness"):
+        module._host_readiness()
 
 
 def test_cli_defaults_to_the_one_fixed_recovery_root() -> None:
@@ -428,7 +478,7 @@ def test_recovery_2_binds_both_zero_paid_prior_authorities_and_recovery_1_stop(
 
 
 @pytest.mark.parametrize(
-    "nonzero", ["goal", "budget_usage", "alpha_trial_result", "model_request", "action_reservation"]
+    "nonzero", ["goal", "run", "budget_usage", "alpha_trial_result", "model_request", "action_reservation", "event"]
 )
 def test_recovery_2_rejects_nonzero_recovery_1_store_before_root_or_model(
     monkeypatch: pytest.MonkeyPatch, nonzero: str
@@ -475,11 +525,14 @@ def test_exact_zero_paid_old_stage_authorizes_only_the_fixed_recovery() -> None:
 
     assert result["stop"] == "no_case_success"
     authority = json.loads((recovery_root / "receipts" / "stage-authority.json").read_text(encoding="utf-8"))
-    assert authority["recovery_of"] == {
+    assert authority["recovery_of"][0] == {
         "authority_path": str((old_root / "receipts" / "stage-authority.json").resolve()),
         "authority_digest": content_digest(old_authority),
         "trial_id": _OLD_TRIAL_ID,
+        "stop_receipt_path": None,
+        "stop_receipt_digest": None,
     }
+    assert authority["recovery_of"][1]["trial_id"] == _RECOVERY_1_TRIAL_ID
     assert (old_root / "receipts" / "stage-authority.json").read_bytes() == old_authority
     assert (old_root / "runs" / _OLD_TRIAL_ID / "state" / "tianwen.db").read_bytes() == old_database
     assert runner.executed == ["trial-1"]
@@ -487,7 +540,16 @@ def test_exact_zero_paid_old_stage_authorizes_only_the_fixed_recovery() -> None:
 
 @pytest.mark.parametrize(
     "nonzero",
-    ["goal", "run", "budget_usage", "budget_reserved", "alpha_trial_result", "model_request", "action_reservation"],
+    [
+        "goal",
+        "run",
+        "budget_usage",
+        "budget_reserved",
+        "alpha_trial_result",
+        "model_request",
+        "action_reservation",
+        "event",
+    ],
 )
 def test_any_nonzero_old_stage_state_rejects_before_model_or_prepare(nonzero: str) -> None:
     """Break caught: prior paid or formal Trial state could be replayed as a zero-paid recovery."""
@@ -662,10 +724,8 @@ def test_budget_ceiling_stops_before_model_or_prepare() -> None:
     with pytest.raises(module.StageError, match="exceeds Alpha-C budget"):
         asyncio.run(
             module.run_stage(
-                module.StageDependencies(
-                    stage_root=_root(),
-                    recovery_of_root=None,
-                    environment={"DEEPSEEK_API_KEY": "configured"},
+                replace(
+                    _dependencies(module, _Runner([]), stage_root=_root()),
                     model_factory=model_factory,
                     price_snapshot=module.PriceSnapshot(
                         source_url=module.PRICE_SOURCE_URL,
@@ -673,7 +733,6 @@ def test_budget_ceiling_stops_before_model_or_prepare() -> None:
                         observed_at=datetime.now(UTC),
                         rates_cny_per_million={"peak_output": 300},
                     ),
-                    checkout_audit=lambda: _dependencies(module, _Runner([])).checkout_audit(),
                 )
             )
         )
