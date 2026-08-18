@@ -223,6 +223,30 @@ def _make_final_inspect(executor: DockerCheckExecutor, observed: dict[str, Any],
     }
 
 
+def test_container_name_is_stable_within_one_trial_and_distinct_across_trials(
+    executor: DockerCheckExecutor, tmp_path: Path
+) -> None:
+    action_id = "seed-preflight"
+    first_name = executor._container_name(action_id)
+    other_root = tmp_path / "other-data"
+    other_root.mkdir()
+    other_paths, _ = _create_trial_workspace(
+        other_root, "trial-2", executor.bundle, allowed_drive=other_root.drive
+    )
+    other_store = StateStore(other_paths.state / "state.db")
+    other_store.initialize()
+    other = DockerCheckExecutor(
+        other_paths, executor.bundle, other_store, docker_executable=Path("D:/fake/docker.exe")
+    )
+
+    assert executor._container_name(action_id) == first_name
+    assert other._container_name(action_id) != first_name
+    record = _record(executor, action_id)
+    observed = _inspect(executor, action_id, code=0)
+    assert record.container_name == first_name
+    assert executor._inspect_matches(record, observed)
+
+
 def test_create_argv_has_every_required_boundary_and_only_two_mounts(executor: DockerCheckExecutor) -> None:
     argv, sanitized, environment = executor._create_command(action_id="action:one", check_id="public")
     joined = "\n".join(argv)
