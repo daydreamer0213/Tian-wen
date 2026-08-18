@@ -59,6 +59,19 @@ class _ProviderFailureModel(TestModel):
         raise RuntimeError("provider detail")
 
 
+class _ObservedUsageModel(TestModel):
+    def __init__(self, observed_tokens: int) -> None:
+        super().__init__(custom_output_text="done", call_tools=[])
+        self.observed_tokens = observed_tokens
+        self.request_count = 0
+
+    async def request(self, *args: Any, **kwargs: Any) -> Any:
+        self.request_count += 1
+        response = await super().request(*args, **kwargs)
+        response.usage = RequestUsage(input_tokens=self.observed_tokens)
+        return response
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -246,6 +259,43 @@ async def test_provider_failure_settles_run_without_persisting_provider_detail(t
     assert (persisted.status, persisted.status_reason) == (RunStatus.FAILED, "RuntimeError")
     assert events[-1].kind == "run_failed"
     assert "provider detail" not in "\n".join(event.model_dump_json() for event in events)
+
+
+@pytest.mark.anyio
+async def test_over_budget_provider_usage_is_persisted_before_runtime_waits_and_blocks_next_request(
+    tmp_path: Path,
+) -> None:
+    model = _ObservedUsageModel(11)
+    runtime = _runtime(tmp_path, model)
+    run = _run("overrun", runtime)
+    _persist_run(
+        runtime,
+        run,
+        BudgetLimit(model_requests=2, tool_calls=20, tokens=10, action_effects=20),
+    )
+
+    with pytest.raises(BudgetExceeded):
+        await runtime.run(run, "overrun")
+
+    reopened = StateStore(runtime.store.database)
+    reopened.initialize()
+    with sqlite3.connect(runtime.store.database) as connection:
+        row = connection.execute(
+            "SELECT reserved_tokens, observed_tokens, status "
+            "FROM tw_model_request_reservations WHERE run_id = ?",
+            (run.run_id,),
+        ).fetchone()
+    assert model.request_count == 1
+    assert row == (10, 11, "settled")
+    assert reopened.get_budget("loop-1")[1].tokens == 11
+    assert reopened.get_run_budget_usage(run.run_id).tokens == 11
+    persisted = reopened.get_object("run", run.run_id, RunRecord)
+    assert (persisted.status, persisted.status_reason) == (RunStatus.WAITING, "model_budget_exhausted")
+
+    runtime.store = reopened
+    with pytest.raises(BudgetExceeded):
+        await runtime.run(persisted, "overrun")
+    assert model.request_count == 1
 
 
 @pytest.mark.anyio

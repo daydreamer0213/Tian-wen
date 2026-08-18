@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import timedelta
 from pathlib import Path
 
@@ -275,6 +276,34 @@ def test_model_request_settlement_is_idempotent_but_cannot_change_observed_token
     assert store.settle_model_request("model-call", 3) == first
     with pytest.raises(StateConflict):
         store.settle_model_request("model-call", 4)
+
+
+def test_model_request_overrun_is_durable_and_replays_the_same_budget_failure(tmp_path: Path) -> None:
+    database = tmp_path / "state.db"
+    store = store_at(database)
+    store.create_budget(
+        "loop",
+        None,
+        BudgetLimit(model_requests=1, tool_calls=0, tokens=10),
+    )
+    store.reserve_model_request("run", "loop", "model-call")
+
+    with pytest.raises(BudgetExceeded):
+        store.settle_model_request("model-call", 11)
+
+    reopened = store_at(database)
+    with sqlite3.connect(database) as connection:
+        row = connection.execute(
+            "SELECT reserved_tokens, observed_tokens, status "
+            "FROM tw_model_request_reservations WHERE request_id = 'model-call'"
+        ).fetchone()
+    assert row == (10, 11, "settled")
+    assert reopened.get_budget("loop")[1] == BudgetUsage(model_requests=1, tokens=11)
+    assert reopened.get_run_budget_usage("run") == BudgetUsage(model_requests=1, tokens=11)
+    with pytest.raises(BudgetExceeded):
+        reopened.settle_model_request("model-call", 11)
+    with pytest.raises(StateConflict):
+        reopened.settle_model_request("model-call", 12)
 
 
 def test_started_action_without_terminal_result_is_unresolved(tmp_path: Path) -> None:
