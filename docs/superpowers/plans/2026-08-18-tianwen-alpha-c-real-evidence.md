@@ -197,3 +197,31 @@ Steps:
    serial release gates and independent reviews before any paid request.
 7. With the existing stage root still absent, run the fixed CLI once. Do not delete or recreate
    the one-use root to obtain another batch.
+
+## Task 11: One-time recovery from the zero-paid Docker preflight stop
+
+**Files:**
+
+- Modify `scripts/run_alpha_c_real_evidence.py`
+- Modify `tests/integration/test_alpha_c_real_evidence.py`
+- Modify this plan and the existing design/handoff only
+
+Steps:
+
+1. Preserve `D:\DevData\tianwen-alpha-c-real-evidence` byte-for-byte and use only the fixed,
+   previously absent `D:\DevData\tianwen-alpha-c-real-evidence-recovery-1` replacement root.
+2. Add tests-only RED proving: the exact old zero-paid store authorizes that replacement; any old
+   Goal/Run/budget/Result/model usage rejects it; an existing replacement root rejects it; and a
+   `prepare()` exception writes a new-only zero-request/zero-token/zero-CNY stop receipt.
+3. Add one stage-local recovery validator. Reload the old `stage-authority.json`, bind its content
+   digest and old Trial ID, and inspect the old SQLite state read-only before creating the new root.
+4. Put only that `recovery_of` binding in the new stage authority. Do not add numbering, retry
+   loops, a scheduler, registry, state machine, or a new approval gate.
+5. Catch only pre-Result `prepare()` exceptions, write the bounded failure/final receipt, and stop.
+   Do not classify the environment failure as learning evidence.
+6. Run focused and necessary regressions, then independent correctness and Ponytail/YAGNI review.
+7. If C0/I0 and all gates pass, verify Docker Linux/amd64 is ready and run this single replacement
+   batch under the existing CNY 20 and maximum-two-A1 boundaries. Never run a third Trial.
+8. Update the canonical handoff with exact durable evidence and budget, commit locally, attempt only
+   an ordinary bounded push, report the supervising session, and stop without merging main or
+   entering Candidate/Promotion/Shadow/Alpha-D.

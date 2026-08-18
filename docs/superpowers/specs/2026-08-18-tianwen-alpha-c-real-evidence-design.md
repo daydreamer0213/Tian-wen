@@ -247,3 +247,23 @@ The stage stops immediately on any of the following:
 
 Completion does not require a Candidate. It requires durable proof that the system advanced only
 when real evidence met every gate and otherwise stopped without inventing learning.
+
+## 12. One-time recovery after the zero-paid Docker stop
+
+The first live launch consumed `D:\DevData\tianwen-alpha-c-real-evidence` while Docker was
+unavailable, before any Goal, Run, budget reservation, Trial Result, model request, token usage,
+container execution, or CNY charge. That root remains immutable evidence and is never deleted,
+moved, overwritten, or replayed.
+
+One fixed replacement batch may use only
+`D:\DevData\tianwen-alpha-c-real-evidence-recovery-1`, and only while that path does not exist.
+Before creating it, the operator must reload the old stage authority and old Trial store and prove
+that Goal, Run, budget, Result, model-request, and token-usage state are all empty. The new stage
+authority binds the old authority path and content digest plus the old Trial ID as `recovery_of`.
+There is no automatic numbering, retry loop, scheduler, recovery registry, or additional approval.
+
+If `prepare()` fails before a formal Trial Result exists, the replacement root records one bounded
+preflight-failure/final-stop receipt with zero model requests, zero tokens, zero CNY, no Case, no
+Lesson, and no Candidate. A non-zero old store or an existing replacement root fails closed. All
+other natural-sampling, cumulative CNY 20, maximum-two-A1, Candidate, Promotion, Shadow, and
+Alpha-D boundaries remain unchanged.
