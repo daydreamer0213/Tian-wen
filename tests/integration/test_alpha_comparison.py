@@ -100,6 +100,13 @@ class _Docker:
     def __init__(self, config_marker: str = "default") -> None:
         self.config_marker = config_marker
         self.final_calls: list[str] = []
+        self.seed = VerifierResult(
+            verdict="not_met",
+            passed_checks=(),
+            failed_checks=("final",),
+            failure_categories=("correctness",),
+            summary="seed",
+        )
 
     def preflight(self) -> DockerPreflight:
         return DockerPreflight(
@@ -139,13 +146,10 @@ class _Docker:
         }
 
     async def run_seed_preflight(self) -> VerifierResult:
-        return VerifierResult(
-            verdict="not_met",
-            passed_checks=(),
-            failed_checks=("final",),
-            failure_categories=("correctness",),
-            summary="seed",
-        )
+        return self.seed
+
+    async def reconcile(self, action_id: str) -> VerifierResult | None:
+        return self.seed if action_id == "seed-preflight" else None
 
     async def run_final(self, action_id: str) -> VerifierResult:
         self.final_calls.append(action_id)

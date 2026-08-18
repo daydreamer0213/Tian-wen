@@ -58,14 +58,24 @@ class _ConfiguredModel(WrapperModel):
 
 class _Docker:
     def __init__(self, *, final: VerifierResult | None = None, config_marker: str = "default") -> None:
+        self.seed = VerifierResult(
+            verdict="not_met",
+            passed_checks=(),
+            failed_checks=("final",),
+            failure_categories=("correctness",),
+            summary="seed",
+        )
         self.final = final or VerifierResult(
             verdict="met", passed_checks=("final",), failed_checks=(), failure_categories=(), summary="ok"
         )
+        self.reconciled_seed: Any = self.seed
         self.config_marker = config_marker
         self.final_calls: list[str] = []
         self.check_calls: list[tuple[str, str]] = []
+        self.reconcile_calls: list[str] = []
         self.preflight_calls = 0
         self.seed_preflight_calls = 0
+        self.free_bytes = 1_000_000
 
     def preflight(self) -> DockerPreflight:
         self.preflight_calls += 1
@@ -77,7 +87,7 @@ class _Docker:
             image_reference="python@sha256:manifest",
             image_digest="sha256:manifest",
             data_location="D:/docker",
-            free_bytes=1_000_000,
+            free_bytes=self.free_bytes,
             normalized_config_digest=content_digest(self._normalized_config("public")),
         )
 
@@ -107,13 +117,11 @@ class _Docker:
 
     async def run_seed_preflight(self) -> VerifierResult:
         self.seed_preflight_calls += 1
-        return VerifierResult(
-            verdict="not_met",
-            passed_checks=(),
-            failed_checks=("final",),
-            failure_categories=("correctness",),
-            summary="seed",
-        )
+        return self.seed
+
+    async def reconcile(self, action_id: str) -> Any:
+        self.reconcile_calls.append(action_id)
+        return self.reconciled_seed if action_id == "seed-preflight" else self.final
 
     async def run_final(self, action_id: str) -> VerifierResult:
         self.final_calls.append(action_id)
@@ -291,6 +299,140 @@ def test_approved_goal_budget_confirmation_binds_the_exact_preview(runner: Any) 
 
     assert confirmation.trial_id == prepared.preview.trial_id
     assert confirmation.preview_digest == content_digest(prepared.preview)
+
+
+@pytest.mark.anyio
+async def test_execute_consumes_the_single_durable_seed_preflight(tmp_path: Path) -> None:
+    """Break caught: execute must not create a second same-name seed container."""
+    root, model, docker = _bundle(tmp_path / "tasks", "A1"), _Model(), _Docker()
+    runner = _runner(root, model, docker)
+    prepared = runner.prepare("A1", budget=_budget())
+
+    result = await runner.execute(prepared, _confirmation(prepared))
+
+    assert result.execution_status == "completed"
+    assert docker.seed_preflight_calls == 1
+    assert docker.reconcile_calls == ["seed-preflight"]
+    assert model.request_count == 1
+
+
+@pytest.mark.anyio
+async def test_execute_rejects_reconciled_seed_that_differs_from_prepared_authority(tmp_path: Path) -> None:
+    """Break caught: execute cannot replace the seed evidence frozen by prepare."""
+    from tianwen.alpha import AlphaTrialError
+
+    root, model, docker = _bundle(tmp_path / "tasks", "A1"), _Model(), _Docker()
+    runner = _runner(root, model, docker)
+    prepared = runner.prepare("A1", budget=_budget())
+    docker.reconciled_seed = docker.seed.model_copy(update={"summary": "different durable seed"})
+
+    with pytest.raises(AlphaTrialError, match="seed preflight"):
+        await runner.execute(prepared, _confirmation(prepared))
+
+    assert docker.seed_preflight_calls == 1
+    assert docker.reconcile_calls == ["seed-preflight"]
+    assert model.request_count == 0
+    assert runner.store.list_objects("goal", GoalContract) == []
+
+
+@pytest.mark.anyio
+async def test_execute_revalidates_current_free_space_without_freezing_its_exact_value(tmp_path: Path) -> None:
+    """Break caught: normal disk-usage drift cannot invalidate an otherwise identical preflight."""
+    root, model, docker = _bundle(tmp_path / "tasks", "A1"), _Model(), _Docker()
+    runner = _runner(root, model, docker)
+    prepared = runner.prepare("A1", budget=_budget())
+    docker.free_bytes -= 4096
+
+    result = await runner.execute(prepared, _confirmation(prepared))
+
+    assert result.execution_status == "completed"
+    assert model.request_count == 1
+
+
+@pytest.mark.anyio
+async def test_execute_still_rejects_nonvolatile_docker_preflight_drift(tmp_path: Path) -> None:
+    """Break caught: excluding free space cannot weaken stable Docker identity checks."""
+    from tianwen.alpha import AlphaTrialError
+
+    root, model, docker = _bundle(tmp_path / "tasks", "A1"), _Model(), _Docker()
+    runner = _runner(root, model, docker)
+    prepared = runner.prepare("A1", budget=_budget())
+    docker.config_marker = "changed after prepare"
+
+    with pytest.raises(AlphaTrialError, match="Docker preflight"):
+        await runner.execute(prepared, _confirmation(prepared))
+
+    assert model.request_count == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("stage", ["running", "settling"])
+async def test_resume_consumes_the_single_durable_seed_preflight(tmp_path: Path, stage: str) -> None:
+    """Break caught: running and settling resume must not rerun seed verification."""
+    from tianwen.alpha import AlphaTrialState
+
+    root, docker = _bundle(tmp_path / stage / "tasks", "A1"), _Docker()
+    runner = _runner(root, _Model(), docker)
+    prepared = runner.prepare("A1", budget=_budget())
+    _persist_running_trial(runner, prepared)
+    if stage == "settling":
+        state = runner.store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
+        runner.store.put_object(
+            "alpha_trial_state", state.trial_id, None, stage, state.model_copy(update={"stage": stage})
+        )
+    recovered = _runner(root, _Model(), docker, prepared.paths.data_root)
+
+    result = await recovered.resume(prepared.preview.trial_id)
+
+    assert result.trial_id == prepared.preview.trial_id
+    assert docker.seed_preflight_calls == 1
+    assert docker.reconcile_calls[0] == "seed-preflight"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("stage", ["running", "settling"])
+@pytest.mark.parametrize(
+    ("reconciled", "case_id"),
+    [
+        (None, "missing"),
+        (object(), "wrong-type"),
+        (
+            VerifierResult(
+                verdict="met",
+                passed_checks=("final",),
+                failed_checks=(),
+                failure_categories=(),
+                summary="not the immutable seed failure",
+            ),
+            "wrong-verdict",
+        ),
+    ],
+)
+async def test_resume_rejects_invalid_durable_seed_evidence(
+    tmp_path: Path, stage: str, reconciled: Any, case_id: str
+) -> None:
+    """Break caught: resume cannot proceed without one valid durable seed result."""
+    from tianwen.alpha import AlphaTrialError, AlphaTrialState
+
+    root, docker = _bundle(tmp_path / stage / case_id / "tasks", "A1"), _Docker()
+    runner = _runner(root, _Model(), docker)
+    prepared = runner.prepare("A1", budget=_budget())
+    _persist_running_trial(runner, prepared)
+    if stage == "settling":
+        state = runner.store.get_object("alpha_trial_state", prepared.preview.trial_id, AlphaTrialState)
+        runner.store.put_object(
+            "alpha_trial_state", state.trial_id, None, stage, state.model_copy(update={"stage": stage})
+        )
+    docker.reconciled_seed = reconciled
+    recovered_model = _Model()
+    recovered = _runner(root, recovered_model, docker, prepared.paths.data_root)
+
+    with pytest.raises(AlphaTrialError, match="seed preflight"):
+        await recovered.resume(prepared.preview.trial_id)
+
+    assert docker.seed_preflight_calls == 1
+    assert docker.reconcile_calls == ["seed-preflight"]
+    assert recovered_model.request_count == 0
 
 
 def _runner(root: Path, model: _Model, docker: _Docker, data_root: Path | None = None) -> Any:
@@ -1313,7 +1455,9 @@ async def test_resume_settling_with_unreconciled_final_action_is_boundary_unknow
     from tianwen.alpha import AlphaTrialRunner, AlphaTrialState
 
     class _UnreconciledDocker(_Docker):
-        async def reconcile(self, _action_id: str) -> None:
+        async def reconcile(self, action_id: str) -> Any:
+            if action_id == "seed-preflight":
+                return await super().reconcile(action_id)
             return None
 
     root, docker = _bundle(tmp_path / "tasks", "A1"), _UnreconciledDocker()
@@ -1393,7 +1537,7 @@ async def test_resume_settling_reconciles_unknown_final_action_without_rerun(tmp
 
         async def reconcile(self, action_id: str) -> VerifierResult:
             self.reconcile_calls.append(action_id)
-            return self.final
+            return self.seed if action_id == "seed-preflight" else self.final
 
     root, docker = _bundle(tmp_path / "tasks", "A1"), _InterruptedFinalDocker()
     runner = _runner(root, _Model(), docker)
@@ -1405,7 +1549,8 @@ async def test_resume_settling_reconciles_unknown_final_action_without_rerun(tmp
     result = await runner.resume(prepared.preview.trial_id)
 
     assert result.verification_status == "completed"
-    assert docker.reconcile_calls == docker.final_calls
+    assert [action_id for action_id in docker.reconcile_calls if action_id != "seed-preflight"] == docker.final_calls
+    assert docker.reconcile_calls.count("seed-preflight") == 2
     assert len(docker.final_calls) == 1
 
 
@@ -1595,7 +1740,9 @@ async def test_resume_unknown_action_never_restarts_the_same_round_effect(tmp_pa
     """Break caught: an unreconciled effect must stop truthfully, never make a replacement model/check Action."""
 
     class _UnknownDocker(_Docker):
-        async def reconcile(self, _action_id: str) -> None:
+        async def reconcile(self, action_id: str) -> Any:
+            if action_id == "seed-preflight":
+                return await super().reconcile(action_id)
             return None
 
     from tianwen.alpha import AlphaTrialState
