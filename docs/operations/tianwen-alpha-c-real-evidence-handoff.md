@@ -52,10 +52,10 @@ Current factual outcome:
 - Candidate: none;
 - Promotion or Shadow change: none.
 
-This is a second truthful zero-paid environment stop, not a real Trial and not learning evidence.
-Neither one-use root was deleted, moved, overwritten or rerun. Stage A remains a failed live
-proof; its exhausted Goal must not be replayed, and its historical `usage-invalid` fact remains
-operational evidence only.
+This third zero-paid readiness observation did not consume recovery-2 and is not a real Trial or
+learning evidence. Neither consumed one-use root was deleted, moved, overwritten or rerun. Stage A
+remains a failed live proof; its exhausted Goal must not be replayed, and its historical
+`usage-invalid` fact remains operational evidence only.
 
 ## 2. Fixed authority and scope
 
@@ -243,7 +243,7 @@ after commit/push. The stage is not merged to `main`.
 
 - The live Provider and verifier remain unexercised. The immutable image is present, but its short
   repository reference is not currently resolvable by `docker image inspect`.
-- The recovery operator correctly wrote the dedicated zero-paid final stop receipt; the earlier
+- The recovery-1 operator correctly wrote the dedicated zero-paid final stop receipt; the earlier
   missing-receipt limitation is closed.
 - Both stage roots are intentionally non-restartable. Do not delete, move, overwrite or recreate
   either root, and do not bypass them through a custom invocation.
