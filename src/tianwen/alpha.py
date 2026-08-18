@@ -807,12 +807,13 @@ class AlphaTrialRunner:
             raise AlphaTrialError("recovered baseline does not match immutable trial authority")
         docker = self.docker_factory(paths, bundle, app.store)
         preflight = docker.preflight()
+        seed = self._reconcile_seed_preflight(docker)
         prepared = PreparedTrial(
             bundle,
             paths,
             baseline,
             preflight,
-            self._run(docker.run_seed_preflight()),
+            seed,
             manifest.champion_version_id,
             manifest.champion_digest,
             preview,
@@ -1277,7 +1278,7 @@ class AlphaTrialRunner:
             raise AlphaTrialError("prepared model or provider configuration no longer matches frozen authority")
         docker = self.docker_factory(prepared.paths, prepared._bundle, prepared._app.store)
         preflight = docker.preflight()
-        if preflight != prepared.preflight:
+        if preflight.model_copy(update={"free_bytes": prepared.preflight.free_bytes}) != prepared.preflight:
             raise AlphaTrialError("prepared Docker preflight no longer matches frozen authority")
         if (
             _container_config_snapshot(docker, prepared._bundle, preflight)
@@ -1286,8 +1287,14 @@ class AlphaTrialRunner:
             raise AlphaTrialError("prepared Docker configuration no longer matches frozen authority")
         if snapshot_tree(prepared.paths.workspace) != prepared.baseline:
             raise AlphaTrialError("prepared seed workspace no longer matches its frozen baseline")
-        if self._run(docker.run_seed_preflight()) != prepared.seed_verifier:
-            raise AlphaTrialError("prepared seed verifier no longer matches frozen authority")
+        if self._reconcile_seed_preflight(docker) != prepared.seed_verifier:
+            raise AlphaTrialError("prepared seed preflight no longer matches frozen authority")
+
+    def _reconcile_seed_preflight(self, docker: Any) -> VerifierResult:
+        seed = self._run(docker.reconcile("seed-preflight"))
+        if not isinstance(seed, VerifierResult) or seed.verdict != "not_met":
+            raise AlphaTrialError("durable seed preflight is unavailable or invalid")
+        return seed
 
     def _revalidate_paired_resume_authority(self, prepared: PreparedTrial) -> None:
         from tianwen.alpha_comparison import PairedComparisonManifest
