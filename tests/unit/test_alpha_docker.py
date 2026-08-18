@@ -130,7 +130,7 @@ def _inspect(executor: DockerCheckExecutor, action_id: str, *, code: int, runnin
         "Id": _CONTAINER_ID,
         "Name": f"/{executor._container_name(action_id)}",
         "Config": {
-            "Image": executor.bundle.image_lock.immutable_reference,
+            "Image": f"docker.io/library/{executor.bundle.image_lock.immutable_reference}",
             "User": "65532:65532",
             "WorkingDir": "/workspace",
             "Cmd": ["python", "-I", "/checks/public.py", "/workspace"],
@@ -218,6 +218,8 @@ def test_create_argv_has_every_required_boundary_and_only_two_mounts(executor: D
     assert "--pull" in argv and "never" in argv
     assert sum(item.startswith("type=bind,") for item in argv) == 2
     assert "docker.sock" not in joined.casefold()
+    assert f"docker.io/library/{executor.bundle.image_lock.immutable_reference}" in argv
+    assert executor.bundle.image_lock.immutable_reference not in argv
     assert str(executor.paths.state) not in "\n".join(sanitized)
     assert str(executor.paths.workspace) not in "\n".join(sanitized)
     assert str(executor.bundle.root / "checks" / "public.py") not in "\n".join(sanitized)
@@ -664,6 +666,15 @@ def test_recovery_identity_rejects_extra_non_bind_mount(executor: DockerCheckExe
     assert not executor._inspect_matches(record, observed)
 
 
+def test_recovery_identity_requires_the_canonical_locked_image_reference(executor: DockerCheckExecutor) -> None:
+    record = _record(executor, "action:canonical-image")
+    observed = _inspect(executor, "action:canonical-image", code=0)
+
+    assert executor._inspect_matches(record, observed)
+    observed["Config"]["Image"] = executor.bundle.image_lock.immutable_reference
+    assert not executor._inspect_matches(record, observed)
+
+
 def test_preflight_uses_private_fakeable_cli_boundary(
     executor: DockerCheckExecutor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -692,7 +703,11 @@ def test_preflight_uses_private_fakeable_cli_boundary(
     preflight = executor.preflight()
 
     assert preflight.image_digest == executor.bundle.image_lock.manifest_digest
-    assert [command[0] for command in calls] == ["version", "info", "image"]
+    assert calls == [
+        ("version", "--format", "{{json .}}"),
+        ("info", "--format", "{{json .}}"),
+        ("image", "inspect", f"docker.io/library/{executor.bundle.image_lock.immutable_reference}"),
+    ]
 
 
 def test_credential_sentinel_never_crosses_durable_boundary(

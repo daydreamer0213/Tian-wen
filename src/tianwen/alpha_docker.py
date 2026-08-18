@@ -134,6 +134,10 @@ class DockerCheckExecutor:
     def _container_name(self, action_id: str) -> str:
         return f"tianwen-alpha-{content_digest(action_id)[7:31]}"
 
+    @property
+    def _canonical_cli_image_reference(self) -> str:
+        return f"docker.io/library/{self.bundle.image_lock.immutable_reference}"
+
     def _check(self, check_id: str) -> AlphaCheckSpec:
         for check in self.bundle.task.named_checks:
             if check.check_id == check_id:
@@ -248,7 +252,7 @@ class DockerCheckExecutor:
             "TMPDIR=/tmp",
             "--env",
             "PYTHONDONTWRITEBYTECODE=1",
-            self.bundle.image_lock.immutable_reference,
+            self._canonical_cli_image_reference,
             *spec.argv,
         ]
         substitutions = {
@@ -650,7 +654,7 @@ class DockerCheckExecutor:
         return (
             observed.get("Id") == record.container_id
             and observed.get("Name") == f"/{record.container_name}"
-            and observed.get("Config", {}).get("Image") == self.bundle.image_lock.immutable_reference
+            and observed.get("Config", {}).get("Image") == self._canonical_cli_image_reference
             and labels
             == {
                 "tianwen.alpha.action_id": record.action_id,
@@ -763,7 +767,7 @@ class DockerCheckExecutor:
 
         version = self._preflight_cli_json(("version", "--format", "{{json .}}"))
         info = self._preflight_cli_json(("info", "--format", "{{json .}}"))
-        image = self._preflight_cli_json(("image", "inspect", self.bundle.image_lock.immutable_reference))
+        image = self._preflight_cli_json(("image", "inspect", self._canonical_cli_image_reference))
         server = version.get("Server", {})
         architecture = server.get("Arch") or info.get("Architecture")
         if server.get("Os") != "linux" or architecture not in {"amd64", "x86_64"}:

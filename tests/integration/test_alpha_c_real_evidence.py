@@ -530,7 +530,7 @@ def test_recovery_2_binds_both_zero_paid_prior_authorities_and_recovery_1_stop(
     ]
     assert calls == [
         ("docker", "version", "--format", "{{json .}}"),
-        ("docker", "image", "inspect", module.LOCKED_IMAGE_REFERENCE),
+        ("docker", "image", "inspect", f"docker.io/library/{module.LOCKED_IMAGE_REFERENCE}"),
     ]
 
 
