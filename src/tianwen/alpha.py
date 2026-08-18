@@ -329,10 +329,7 @@ class PreparedTrial:
     _app: TianwenApp
 
 
-def _json_value(value: Any, *, key: str = "") -> JsonValue:
-    sensitive = ("key", "token", "secret", "password", "cookie", "authorization", "header", "account")
-    if any(token in key.casefold() for token in sensitive):
-        raise AlphaTrialError("model settings contain a credential-like key")
+def _json_value(value: Any) -> JsonValue:
     if value is None or isinstance(value, (str, int, bool)):
         return value
     if isinstance(value, float):
@@ -344,7 +341,7 @@ def _json_value(value: Any, *, key: str = "") -> JsonValue:
     if isinstance(value, dict):
         if not all(isinstance(item, str) for item in value):
             raise AlphaTrialError("model settings keys must be strings")
-        return {item: _json_value(value[item], key=item) for item in sorted(value)}
+        return {item: _json_value(value[item]) for item in sorted(value)}
     raise AlphaTrialError("model settings must be JSON values")
 
 
@@ -358,7 +355,14 @@ def sanitize_model_settings(model: Model | KnownModelName) -> dict[str, JsonValu
     value = _json_value(raw)
     if not isinstance(value, dict):
         raise AlphaTrialError("model settings must be an object")
-    return value
+    if not value:
+        return {}
+    if set(value) != {"max_tokens"}:
+        raise AlphaTrialError("model settings contain unsupported settings")
+    max_tokens = value["max_tokens"]
+    if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens <= 0:
+        raise AlphaTrialError("model setting max_tokens must be a positive integer")
+    return {"max_tokens": max_tokens}
 
 
 def sanitize_provider(model: Model | KnownModelName) -> tuple[str, str, str]:

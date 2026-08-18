@@ -11,6 +11,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic_ai.messages import UserPromptPart
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.models.wrapper import WrapperModel
 
 from tianwen.alpha_docker import DockerExecutionError, DockerPreflight, VerifierResult
 from tianwen.alpha_tasks import freeze_task_bundle
@@ -43,6 +44,16 @@ class _Model(TestModel):
         if self.fail:
             raise RuntimeError("provider unavailable")
         return await super().request(messages, *args, **kwargs)
+
+
+class _ConfiguredModel(WrapperModel):
+    def __init__(self, settings: dict[str, Any]) -> None:
+        super().__init__(_Model())
+        self._settings = settings
+
+    @property
+    def settings(self) -> dict[str, Any]:
+        return self._settings
 
 
 class _Docker:
@@ -508,6 +519,66 @@ def test_prepare_does_not_create_goal_or_call_model(runner: Any) -> None:
     assert prepared.seed_verifier.verdict == "not_met"
     assert runner.model.request_count == 0
     assert runner.store.list_objects("goal", GoalContract) == []
+
+
+def test_output_limited_model_prepare_freezes_and_reloads_max_tokens(tmp_path: Path) -> None:
+    """Break caught: a standard output limit must not be mistaken for a credential."""
+    from tianwen.alpha import TrialManifest
+
+    root, model, docker = _bundle(tmp_path / "tasks", "A1"), _ConfiguredModel({"max_tokens": 4096}), _Docker()
+    runner = _runner(root, model, docker)
+
+    prepared = runner.prepare("A1", budget=_budget())
+    _goal, manifest, _run = _persist_running_trial(runner, prepared)
+    durable = runner.store.get_object("alpha_trial_manifest", prepared.preview.trial_id, TrialManifest)
+
+    assert prepared.model_settings_snapshot == {"max_tokens": 4096}
+    assert runner.condition_snapshot(prepared).model_settings_snapshot == {"max_tokens": 4096}
+    assert durable == manifest
+    assert durable.model_settings_snapshot == {"max_tokens": 4096}
+    assert model.wrapped.request_count == 0
+
+
+def test_empty_model_settings_are_supported() -> None:
+    from tianwen.alpha import sanitize_model_settings
+
+    assert sanitize_model_settings(_ConfiguredModel({})) == {}
+
+
+@pytest.mark.parametrize("value", [True, 0, -1, "4096"])
+def test_max_tokens_must_be_a_positive_integer(value: object) -> None:
+    from tianwen.alpha import AlphaTrialError, sanitize_model_settings
+
+    with pytest.raises(AlphaTrialError, match="max_tokens"):
+        sanitize_model_settings(_ConfiguredModel({"max_tokens": value}))
+
+
+@pytest.mark.parametrize(
+    "setting",
+    ["api_key", "access_token", "extra_headers", "extra_body", "temperature", "openai_prompt_cache_key"],
+)
+def test_unknown_model_settings_are_rejected_without_values(setting: str) -> None:
+    from tianwen.alpha import AlphaTrialError, sanitize_model_settings
+
+    sentinel = "SENTINEL-MODEL-SETTING-VALUE"
+    with pytest.raises(AlphaTrialError) as raised:
+        sanitize_model_settings(_ConfiguredModel({setting: sentinel}))
+
+    assert sentinel not in str(raised.value)
+
+
+def test_rejected_model_setting_is_not_persisted(tmp_path: Path) -> None:
+    from tianwen.alpha import AlphaTrialError
+
+    sentinel = "SENTINEL-NOT-DURABLE"
+    root, docker, data_root = _bundle(tmp_path / "tasks", "A1"), _Docker(), _data_root()
+    runner = _runner(root, _ConfiguredModel({"api_key": sentinel}), docker, data_root)
+
+    with pytest.raises(AlphaTrialError) as raised:
+        runner.prepare("A1", budget=_budget())
+
+    assert sentinel not in str(raised.value)
+    assert all(sentinel.encode() not in path.read_bytes() for path in data_root.rglob("*") if path.is_file())
 
 
 @pytest.mark.anyio
