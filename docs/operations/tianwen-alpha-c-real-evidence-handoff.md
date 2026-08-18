@@ -2,229 +2,185 @@
 
 **Date:** 2026-08-18
 **Stage branch:** `codex/tianwen-alpha-c-real-evidence`
-**Base main:** `4638026f210c0de29262d307dd051934570d975e`
-**Reviewed implementation HEAD:** `babf37698d409d6941bd52d462b5612543ec605d`
-**Status:** offline-ready; live sampling not started; waiting at the truthful local-TTY gate
+**Base `main` and `origin/main`:** `4638026f210c0de29262d307dd051934570d975e`
+**Proportional-safety design commit:** `774e5195b8ac3ef49dcd39b8f006a8b21b45cf49`
+**Implementation parent before this final-fix commit:** `7b01aa7671cd06065c8be778121607e36ac2b306`
+**Canonical final-fix revision:** the commit containing this document
+**Status:** proportional-safety correction implemented and offline-regressed; live sampling not started
 
-## 1. Stage conclusion
+## 1. Current conclusion
 
-The bounded Alpha-C real-evidence operator is designed, implemented, independently
-reviewed and fully verified offline. It is ready to sample the existing A1 task with the
-current Champion under the existing Alpha Trial, Provider, Docker and verifier boundaries.
+The Alpha-C operator is ready for final review and then one bounded live invocation. The approved
+stage Goal, authority and cumulative CNY 20 budget authorize the fixed Trial. The preview, frozen
+conditions and receipts are audit records; they are not extra approval prompts.
 
-The real evidence stage is **not complete**. This controller has no interactive terminal
-input channel and therefore cannot truthfully enter the required exact
-`CONFIRM <trial-id>` local-TTY confirmation. Running the script non-interactively would
-create the one-use stage authority and then stop before the first paid request, preventing
-the intended live run. The script has therefore not been started.
+There is no local-TTY, stdin, pipe, environment-confirmation, price-file, network-refresh or
+price-freshness gate. After a legal zero-paid preflight, the script automatically executes the
+first fixed A1 Trial. It may automatically execute one independent repeat only after the first
+Trial is a qualifying verifier-backed failure and the repeat authorities match exactly.
 
-Current factual outcome:
+Live sampling has not been invoked. Current factual outcome remains:
 
 - real Trial count: `0`;
 - paid model requests: `0`;
 - model tokens: `0`;
-- CNY charged or conservatively reserved: `0`;
+- CNY charged or reserved by a live run: `0`;
 - real Docker invocations: `0`;
 - qualified real Case: none;
 - conditional Lesson: none;
 - Candidate: none;
 - Promotion or Shadow change: none.
 
-This is a truthful environment/interaction stop, not a product failure and not evidence
-that a learning Case exists. Stage A remains a failed live proof whose exhausted Goal must
-not be replayed; its historical `usage-invalid` remains operational evidence only.
+This is an offline-ready state, not real learning evidence. Stage A remains a failed live proof;
+its exhausted Goal must not be replayed, and its historical `usage-invalid` fact remains
+operational evidence only.
 
-## 2. Authority and fixed scope
-
-The stage follows:
-
-- `docs/architecture-master-session-memory.md`;
-- `docs/superpowers/specs/2026-08-17-tianwen-continuous-learning-governance-design.md`;
-- `docs/superpowers/specs/2026-08-13-real-task-alpha-roadmap-design.md`;
-- `docs/superpowers/specs/2026-08-18-tianwen-alpha-c-real-evidence-design.md`; and
-- `docs/superpowers/plans/2026-08-18-tianwen-alpha-c-real-evidence.md`.
+## 2. Fixed authority and scope
 
 The operator is deliberately fixed to:
 
 - registered task `A1`;
-- model `deepseek:deepseek-v4-pro` through the existing DeepSeek Provider;
-- current active `repo_task_skill` Champion from the production governance store;
-- per-Trial limits of 4 model requests, 8 tool calls, 40,000 total tokens, 300 seconds
-  and 8 action effects;
-- a 4,096-token provider-request output ceiling;
-- one natural Trial, with exactly one independent repeat only after a genuine
-  verifier-backed failure under identical frozen conditions and Champion;
-- cumulative Alpha-C paid-model limit CNY 20; and
-- no automatic Attribution, Lesson, Candidate, comparison, Promotion or Shadow step.
+- `deepseek:deepseek-v4-pro` through the existing PydanticAI DeepSeek Provider;
+- the current active `repo_task_skill` Champion from the production governance store;
+- per-Trial limits of 4 model requests, 8 tool calls, 40,000 tokens, 300 seconds and 8 action
+  effects;
+- a 4,096-token maximum output setting per provider request;
+- one natural Trial and at most one independent repeat;
+- the cumulative Alpha-C paid-model ceiling of CNY 20; and
+- the existing Alpha Trial runner, Docker verifier and LearningIntake APIs.
 
-The operator does not modify Runtime or DSH and adds no scheduler, prompt shim, generic
-controller, pricing framework or external Skill market.
+The stage does not modify Runtime or DSH, add a scheduler or prompt shim, replay Stage A, run an
+external Skill market, materialize a Candidate, change the ActivePointer, promote, enter Shadow or
+enter Alpha-D.
 
-## 3. Implemented safety and evidence gates
+## 3. Proportional price and execution safety
 
-`scripts/run_alpha_c_real_evidence.py` is a one-stage operations entry point, not a
-reusable runtime layer. Before any paid request it:
+The official DeepSeek Chinese pricing page is recorded as
+`https://api-docs.deepseek.com/zh-cn/quick_start/pricing/`. The recorded 2026-08-18 maximum for
+`deepseek:deepseek-v4-pro` is CNY 27 per million tokens. This estimate is persisted in receipts.
+The script still validates the exact source, model and a positive integer rate, but the age of the
+observation, network availability and local-file presence do not block a legal Trial.
 
-1. creates `D:\DevData\tianwen-alpha-c-real-evidence` atomically as a one-use stage
-   authority; a second process or later restart fails closed;
-2. requires the expected stage branch, exact base/main/origin-main SHA and a clean tracked
-   checkout;
-3. opens the production `.tianwen/tianwen.db` read-only, verifies immutable object body
-   digests, requires one matching active Champion and rejects an existing Alpha-C real
-   Case/Lesson/Conclusion/Candidate or Trial;
-4. requires a local price snapshot sourced from the official DeepSeek pricing page, for
-   the exact model, no more than 10 minutes old and not dated in the future;
-5. applies the highest observed price category to every observed token as a conservative
-   upper bound, never calling it an invoice or actual provider charge;
-6. prepares A1 and persists a zero-paid preflight receipt before showing the bounded
-   preview and exact local-TTY confirmation string; and
-7. revalidates persistent TrialResult, TrialManifest, final-verifier Evidence and budget
-   usage after execution.
+Before each possible Trial, the fixed 40,000-token ceiling is reserved at the recorded maximum:
 
-The maximum official rate observed during design on 2026-08-18 was CNY 27 per million
-output tokens. At the fixed 40,000-token Trial cap, each Trial reserves at most CNY 1.08;
-two Trials reserve at most CNY 2.16, below the approved CNY 20 stage limit. This observation
-is not reused as a live authority: the operator still requires a fresh on-disk snapshot
-immediately before execution.
+- one Trial: CNY 1.08 conservative upper bound;
+- two-Trial maximum: CNY 2.16 conservative upper bound;
+- cumulative hard stop: CNY 20.
 
-For learning intake, non-real, operational, environment, usage or otherwise non-qualifying
-results never enter `LearningIntake`. A first qualifying failure is observation only. A
-second Trial is permitted only after the first result, condition snapshot, Champion,
-workspace and store authority are durably bound and independently rechecked. Two matching
-real verifier failures may create a Case and then stop at `case_requires_attribution`.
-Success, a single failure, different fingerprints/scopes or insufficient evidence all
-stop without forcing a Case, Lesson or Candidate.
+For a qualified real result, the final conservative charge uses exact settled total tokens. If a
+result is non-real or usage is unsettled, the full 40,000-token reservation remains charged. It is
+never described as an invoice or exact provider bill.
 
-## 4. TDD and commit history
+`AlphaTrialRunner` still requires a `TrialConfirmation` audit object with the exact Trial ID and
+preview digest. The stage writes the truthful source `approved_goal_budget`. The earlier
+`local_tty` source remains backward-compatible for older Alpha callers, but this operator neither
+requests nor simulates it.
 
-- `5a0af57`: initial real-evidence design and plan;
-- `1d39254`: normal follow-up formatting fix; no history rewrite;
-- `452591d`: bounded A1 operator and first focused tests;
-- `d61e74b`: one-use root, fresh pricing, Git/governance audit, zero-resource Intake,
-  durable receipt and retry hardening;
-- `babf376`: ten-minute freshness bound and native JSON/Git/read-only-SQLite tests.
+## 4. Actual automatic execution sequence
 
-Recorded RED evidence:
+One invocation of `scripts/run_alpha_c_real_evidence.py` performs these steps in order:
 
-- initial focused collection failed with `ModuleNotFoundError` for the missing operator;
-- first review-fix RED failed because the zero-resource Learning budget did not exist;
-- second review-fix RED failed because the ten-minute price freshness constant did not
-  exist.
+1. Check only whether `DEEPSEEK_API_KEY` is configured; never print or persist its value.
+2. Validate the exact branch/base, clean tracked checkout, production Champion, provider/model,
+   fixed budget and CNY 20 ceiling.
+3. Atomically create `D:\DevData\tianwen-alpha-c-real-evidence` as the one-use stage root. An
+   existing root stops the process; it is never overwritten or reused.
+4. Prepare fixed A1, complete Docker/seed/baseline preflight, prove zero Goal/Run/model usage, and
+   persist the stage authority, bounded preview and zero-paid preflight receipt.
+5. Create the exact `approved_goal_budget` audit binding and automatically execute the first Trial.
+6. Reload and validate the durable TrialResult, TrialManifest, final-verifier Evidence and exact
+   budget usage, then write the honest stop/charge decision.
+7. Stop after any success, non-real result, operational result, incomplete verification, boundary
+   problem, non-verifier failure or other non-qualifying outcome.
+8. Only after a qualifying first failure, prepare one fresh A1 Trial with
+   `previous_trial_id=None`. Require distinct Trial/store/workspace identities, the same complete
+   condition snapshot, and the same Champion version and digest.
+9. Persist one retry receipt containing bounded first and second prepared bindings for Trial ID,
+   condition digest, Champion version/digest, workspace and store, plus the first Result digest.
+10. Automatically execute that one repeat. Never prepare or execute a third Trial.
+11. Form a Case only when both real verifier failures have identical capability scope and problem
+    fingerprint. Otherwise stop without manufacturing learning evidence.
 
-Final focused result on reviewed implementation HEAD: `28 passed`.
+## 5. Learning and product stop boundaries
 
-## 5. Independent reviews
+- A qualified success is projected and observed once, then stops with no Case.
+- A single qualified failure is observation only.
+- Non-real, operational, usage, environment, verification or boundary failures never enter real
+  learning intake.
+- Two matching qualified failures may create one Case, then stop at
+  `case_requires_attribution`.
+- Recurrence does not prove causality. Unknown, out-of-scope or insufficient Attribution produces
+  no Lesson.
+- No Candidate may exist without a persisted real Case, resolved `repo_task_skill` Attribution and
+  conditional Lesson.
+- Candidate creation, if separately authorized later, must not change the ActivePointer.
+- Promotion, Shadow, Runtime, DSH and Alpha-D remain outside this stage.
 
-Independent correctness review verdict at `babf376`: **C0 / I0 / M0**, approved for one
-truthful live preflight. The review specifically rechecked:
+## 6. Offline evidence and review state
 
-- cross-process sampling and CNY reset prevention;
-- production Champion and checkout binding;
-- zero-resource LearningIntake compatibility;
-- durable Result/Manifest/final-Evidence reload;
-- price source, model, freshness and future-time rejection;
-- exact TTY confirmation;
-- independent repeat identity; and
-- the absence of automatic Candidate, Promotion and Shadow effects.
+Historical comprehensive offline gates at `babf37698d409d6941bd52d462b5612543ec605d`
+passed, including the full Python suite (`537 passed, 4 skipped`), A1-A5 tests, Ruff, Runtime
+Bundle build, TypeScript typecheck, DSH public/private-surface checks, Vitest (`244 passed,
+7 skipped`) and `git diff --check`.
 
-Independent Ponytail/YAGNI review verdict: **approved / lean enough**. The one-use stage
-root, small price/audit data records and stage-local receipts are necessary gates for this
-one operation and have not become a general framework. No real API test or speculative
-Candidate layer was added.
+The proportional-safety implementation at `7b01aa7671cd06065c8be778121607e36ac2b306`
+removed the obsolete TTY and price freshness/file gates. Its focused runner, Alpha Trial and
+Alpha-C Intake regression set passed `67` tests.
 
-## 6. Fresh offline release gates
+The final correctness review then reported C1/I2/M0:
 
-All gates below were run serially on `babf376` with generated data and caches on `D:`:
+- C1: this handoff still described the removed gates;
+- I1: unsettled usage could erase the full reservation charge;
+- I2: the retry receipt omitted the complete bounded second prepared authority.
 
-- focused real-evidence integration: `28 passed`;
-- existing learning unit + vertical slice: `31 passed`;
-- learning-intake unit + integration: `35 passed`;
-- Alpha Trial integration: `40 passed`;
-- A1-A5 package suite: `10 passed`;
-- full Python: `537 passed, 4 skipped`;
-- Ruff: passed;
-- Runtime Bundle dependency-topology build: passed;
-- workspace TypeScript typecheck: passed;
-- installed DSH public surface: exact `0.1.0-rc.6`, passed;
-- private DSH imports: `0`;
-- full Vitest: `244 passed, 7 skipped`;
-- full branch `git diff --check`: passed.
-
-The four Python skips are the unchanged paid-live, Windows symlink and Windows ACL
-conditions. The seven Vitest skips are existing conditional tests. The first topology
-build attempt found a pnpm store-path mismatch; setting
-`PNPM_CONFIG_STORE_DIR=D:\DevData\pnpm-store` reused the existing store with no manual
-deletion or download and the fresh build passed.
+This final-fix revision corrects all three findings. Its focused RED failed for the two exact code
+gaps, focused GREEN passed, and the runner + Alpha Trial + Alpha-C Intake regression set passed
+`68` tests. A final whole-stage correctness/YAGNI review must confirm closure before the live
+invocation.
 
 ## 7. Current local state
 
-At handoff preparation:
+At this final-fix handoff update:
 
 - branch: `codex/tianwen-alpha-c-real-evidence`;
-- reviewed implementation HEAD: `babf37698d409d6941bd52d462b5612543ec605d`;
+- implementation parent: `7b01aa7671cd06065c8be778121607e36ac2b306`;
 - local `main`: `4638026f210c0de29262d307dd051934570d975e`;
 - local `origin/main`: `4638026f210c0de29262d307dd051934570d975e`;
-- tracked and untracked worktree status before adding this handoff: clean;
-- `D:\DevData\tianwen-alpha-c-real-evidence`: absent;
-- `D:\DevData\tianwen-alpha-c-real-evidence-price.json`: absent;
-- `DEEPSEEK_API_KEY`: presence checked only; its value was not printed or persisted.
+- pre-fix remote stage ref: `c26232094d4bf5638230fa01b8224c6a2910c1cb`;
+- fixed live root `D:\DevData\tianwen-alpha-c-real-evidence`: absent;
+- live Provider/Docker execution: not started;
+- credential value: never read into receipts, printed or persisted.
 
-The exact canonical-handoff commit and remote stage ref are reported to the supervising
-session after this document is committed and pushed. The stage is not merged to `main`.
+The final-fix commit SHA and updated remote stage ref must be recorded by the supervising session
+after commit/push. The stage is not merged to `main`.
 
-## 8. Residual risks and stop conditions
+## 8. Residual risks and mandatory stops
 
-- The live provider, Docker image and verifier have not yet been exercised in this stage;
-  offline readiness must not be described as real learning evidence.
-- Price data is time-sensitive. A human operator must inspect the current official page
-  and write a matching snapshot immediately before the run.
-- The stage root is intentionally non-restartable. Do not invoke the script merely to
-  inspect it, and do not delete/recreate the root after an error to obtain another batch.
-- Do not pipe confirmation, forge `confirmed_via`, add environment auto-confirmation or
-  weaken the TTY receipt. Changing that authority boundary requires a separate user
-  decision.
-- If checkout, production Champion, price, Docker, verifier, provider identity, durable
-  receipts or cumulative cost do not match, stop without a paid request where possible.
-- Reaching CNY 20, expanding the Goal or authority, or encountering a major irreversible
-  risk also stops the stage.
+- The live Provider, Docker image and verifier have not yet been exercised by this stage.
+- The stage root is intentionally non-restartable. Do not invoke the script merely to inspect it,
+  and do not delete or recreate the root after a stop to obtain another batch.
+- Stop if checkout, Champion, provider/model, Docker, verifier, receipts, condition equality or
+  cumulative cost fails validation.
+- Stop at CNY 20, any Goal/authority expansion, credential exposure or major irreversible risk.
+- Do not weaken the two-Trial maximum or the real-evidence learning gates.
 
-## 9. Pending user decisions
+## 9. Only recommended next entrance
 
-None.
+After the final correctness and YAGNI reviews accept this fix and the reviewed commit is pushed:
 
-The approved design already requires a real local-TTY operator. The present blocker is
-availability of that truthful interaction channel, not a choice between product
-directions. If someone proposes replacing the TTY authority with a different mechanism,
-that proposal would become a new authorization-boundary decision and is not approved by
-this handoff.
+1. Confirm the reviewed stage branch is checked out, the tracked worktree is clean, the fixed live
+   root is still absent, and `DEEPSEEK_API_KEY` is configured without printing it.
+2. Invoke the fixed script exactly once from the project root:
 
-## 10. Only recommended next entrance
-
-From this exact reviewed stage branch, a human/local operator should:
-
-1. confirm the stage root and price-snapshot path are still absent;
-2. inspect the official DeepSeek pricing page and write the fixed price JSON with the
-   current UTC observation time and the current conservative maximum rate for
-   `deepseek:deepseek-v4-pro`. The complete required shape is:
-
-   ```json
-   {
-     "source_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
-     "model_id": "deepseek:deepseek-v4-pro",
-     "observed_at": "<current UTC ISO-8601 timestamp with timezone>",
-     "rates_cny_per_million": {"peak_output": 27}
-   }
+   ```powershell
+   .\.venv\Scripts\python.exe scripts\run_alpha_c_real_evidence.py
    ```
 
-   `27` is only the 2026-08-18 observation; replace it if the fresh official maximum has
-   changed. Do not reuse the example timestamp or an older snapshot;
-3. run `uv run python scripts/run_alpha_c_real_evidence.py` in a genuine interactive local
-   terminal;
-4. inspect the printed bounded preview and only then type the exact displayed
-   `CONFIRM <trial-id>`; and
-5. stop at the script's final receipt and send the durable evidence and conservative CNY
-   accounting back to the supervising session.
+3. Do not type or pipe confirmation. After legal preflight the first Trial starts automatically;
+   the only possible repeat is also automatic and only after a qualifying first failure.
+4. Let the script reach its durable final receipt. Do not rerun it or delete/recreate the one-use
+   root.
+5. Return the receipts, Trial evidence and conservative CNY accounting to the supervising session.
 
-Do not start Candidate materialization or Alpha-D after the run. A real Case, if one is
-formed, still requires separate governed Attribution and conditional-Lesson evidence;
-without both, Candidate remains absent.
+Do not start Attribution by guesswork, Candidate materialization, Promotion, Shadow or Alpha-D
+after the run. Those require later evidence and separate governed decisions.

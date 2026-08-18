@@ -408,17 +408,36 @@ def test_first_real_success_projects_once_and_never_prepares_retry() -> None:
     assert result["case_id"] is None
 
 
-def test_non_real_result_never_enters_learning_intake() -> None:
-    """Break caught: an operational or unmetered result could be projected as learning evidence."""
+def test_non_real_unsettled_result_charges_full_token_reservation() -> None:
+    """Break caught: zero settled usage could erase the conservative charge after a provider failure."""
     module, runner, intake = (
         _module(),
-        _Runner([_Result("trial-1", False, "not_met", failure_categories=("usage",))]),
+        _Runner(
+            [
+                _Result(
+                    "trial-1",
+                    False,
+                    "not_met",
+                    failure_categories=("usage",),
+                    usage=TrialUsage(
+                        model_requests=0,
+                        tokens=0,
+                        tool_calls=0,
+                        action_effects=0,
+                        wall_seconds=0,
+                    ),
+                )
+            ]
+        ),
         _Intake(),
     )
 
     result = asyncio.run(module.run_stage(_dependencies(module, runner, intake)))
 
     assert result["stop"] == "non_real_or_operational"
+    assert result["tokens"] == 0
+    assert result["conservative_charge_microunits"] == 1_080_000
+    assert result["remaining_cny_microunits"] == 18_920_000
     assert intake.projected == []
     assert runner.executed == ["trial-1"]
 
@@ -471,6 +490,41 @@ def test_qualifying_first_failure_executes_at_most_one_independent_repeat_withou
     ]
     assert len(runner.prepared) == 2
     assert intake.triages == [("outcome-trial-1",), ("outcome-trial-1", "outcome-trial-2")]
+
+
+def test_retry_receipt_binds_both_prepared_trial_authorities() -> None:
+    """Break caught: retry audit could omit the second frozen workspace/store/condition authority."""
+    module, root = _module(), _root()
+    runner = _Runner(
+        [
+            _Result("trial-1", True, "not_met", failure_categories=("correctness",)),
+            _Result("trial-2", True, "met"),
+        ]
+    )
+
+    result = asyncio.run(module.run_stage(_dependencies(module, runner, _Intake(), stage_root=root)))
+
+    assert result["stop"] == "retry_success_observe"
+    [path] = (root / "receipts").glob("retry-*.json")
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    first, second = runner.prepared
+    expected_condition_digest = content_digest(runner.condition_snapshot(first))
+    assert receipt["first_prepared"] == {
+        "trial_id": "trial-1",
+        "condition_digest": expected_condition_digest,
+        "champion_version_id": "champion",
+        "champion_digest": "digest-champion",
+        "workspace": str(first.paths.workspace),
+        "store": str(first.paths.state),
+    }
+    assert receipt["second_prepared"] == {
+        "trial_id": "trial-2",
+        "condition_digest": expected_condition_digest,
+        "champion_version_id": "champion",
+        "champion_digest": "digest-champion",
+        "workspace": str(second.paths.workspace),
+        "store": str(second.paths.state),
+    }
 
 
 def test_second_success_is_observed_alone_not_mixed_with_first_failure() -> None:

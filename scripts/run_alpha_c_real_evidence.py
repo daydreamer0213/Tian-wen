@@ -354,7 +354,8 @@ def _qualifying_success(result: TrialResult) -> bool:
 
 
 def _result_charge(result: TrialResult, price: PriceSnapshot) -> int:
-    return _micro_cny(result.usage.tokens, price)
+    tokens = result.usage.tokens if result.qualifies_as_real_model_trial else BUDGET.tokens
+    return _micro_cny(tokens, price)
 
 
 def _load_result(store: Any, app: Any, result: TrialResult) -> tuple[TrialResult, dict[str, Any]]:
@@ -574,12 +575,23 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
         f"retry-{first.trial_id}-{second_authority['trial_id']}.json",
         {
             "schema": "tianwen.alpha_c.real_evidence.retry_authority.v1",
-            "first_trial_id": first.trial_id,
-            "second_trial_id": second_authority["trial_id"],
+            "first_prepared": {
+                "trial_id": first_authority["trial_id"],
+                "condition_digest": first_authority["condition_digest"],
+                "champion_version_id": first_authority["champion_version_id"],
+                "champion_digest": first_authority["champion_digest"],
+                "workspace": first_authority["workspace"],
+                "store": first_authority["store"],
+            },
+            "second_prepared": {
+                "trial_id": second_authority["trial_id"],
+                "condition_digest": second_authority["condition_digest"],
+                "champion_version_id": second_authority["champion_version_id"],
+                "champion_digest": second_authority["champion_digest"],
+                "workspace": second_authority["workspace"],
+                "store": second_authority["store"],
+            },
             "first_result_digest": first_durable["result_digest"],
-            "condition_digest": first_authority["condition_digest"],
-            "champion_version_id": first_authority["champion_version_id"],
-            "champion_digest": first_authority["champion_digest"],
             "reserved_cny_microunits": reserve,
         },
     )
