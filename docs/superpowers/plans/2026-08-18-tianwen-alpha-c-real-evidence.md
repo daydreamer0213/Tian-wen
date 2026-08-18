@@ -260,3 +260,36 @@ Steps:
 9. Update the canonical handoff, commit locally, attempt only a bounded ordinary push, report the
    supervising session, and stop without merging main or entering Candidate/Promotion/Shadow/
    Alpha-D.
+
+## Task 13: Docker 29.6 log compatibility and fixed recovery-3
+
+**Files:**
+
+- Modify `src/tianwen/alpha_docker.py`
+- Modify `tests/unit/test_alpha_docker.py`
+- Modify `scripts/run_alpha_c_real_evidence.py`
+- Modify `tests/integration/test_alpha_c_real_evidence.py`
+- Modify this plan, the existing design, and the canonical handoff only
+
+Steps:
+
+1. Preserve all three consumed roots. Bind the exact recovery-2 container state, log config,
+   image, read-only mounts, stop receipt and zero ledger in the handoff, then remove only that
+   exact never-started container ID.
+2. Add tests-only RED for the normalized log options, Docker create argv and exact reconciled
+   `LogConfig.Config` before changing production code.
+3. Add only fixed `compress=false`; keep `local`, `max-size`, `max-file=1`, the 64 KiB output
+   limit and every existing container boundary unchanged.
+4. Add tests-only RED proving the fixed recovery-3 root requires and binds original, recovery-1
+   and recovery-2. Recovery-2 must have the exact authority, stop, Trial and sole unsettled
+   seed-preflight record, with every paid/model/action/learning ledger still empty.
+5. Point the one-use operator only at
+   `D:\DevData\tianwen-alpha-c-real-evidence-recovery-3`. Do not add numbering, a retry loop,
+   recovery registry, generic state machine or recovery-4.
+6. Run Alpha Docker, real-evidence, Alpha Trial and Alpha-C Intake tests, full Python, Ruff,
+   py_compile and diff checks, followed by independent correctness and Ponytail/YAGNI review.
+7. If C0/I0 and read-only readiness passes while recovery-3 is absent, run that root exactly once
+   under the existing CNY 20 and maximum-two-A1 natural sampling boundaries.
+8. Record the exact durable result, model requests, tokens, conservative CNY, Docker/verifier
+   effects and learning artifacts. Update the handoff, ordinary-push the stage branch, report
+   supervision and stop without merging main or entering Candidate/Promotion/Shadow/Alpha-D.

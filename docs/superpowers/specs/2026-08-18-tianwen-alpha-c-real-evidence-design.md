@@ -292,3 +292,28 @@ additional approval is introduced.
 All existing cumulative CNY 20, maximum-two-A1 natural sampling, real-evidence, Candidate,
 Promotion, Shadow, Runtime, DSH, and Alpha-D boundaries remain unchanged. Any further basic host
 environment failure ends this recovery line; recovery-3 is not permitted.
+
+## 14. Proportional Docker log compatibility and fixed recovery-3
+
+Recovery-2 consumed its one-use root but stopped before any Goal, Run, budget reservation, model
+request, token or CNY charge. Docker 29.6.1 created the seed-verifier container but refused to
+start it because the fixed `local` log configuration combined default compression with
+`max-file=1`. An otherwise identical exact-container probe passed when `compress=false` was added.
+
+The Alpha Docker normalized config, create command and identity reconciliation therefore add the
+single fixed log option `compress=false`. The existing `local` driver, 64 KiB output limit,
+`max-file=1`, no-network/read-only/non-root/container limits and exact image authority do not
+change. There is no daemon change, configurable log policy or logging framework.
+
+The earlier recovery-3 prohibition was a stop pending root-cause review. This evidence replaces
+it with one fixed replacement at
+`D:\DevData\tianwen-alpha-c-real-evidence-recovery-3`. Before creating that root, the operator
+reloads and binds all three prior authorities and exact Trial IDs. Recovery-2 must additionally
+retain its exact stop receipt, zero Goal/Run/budget/model/action/event ledger, and sole unsettled
+`seed-preflight` check-execution record. The removed physical container is not required.
+
+This is not a general retry policy: a zero-request, zero-token, zero-CNY infrastructure preflight
+is not a learning batch and does not consume paid sampling authority. Recovery-3 remains new-only,
+inherits the CNY 20 and maximum-two-A1 bounds, and may execute once without a new approval. A new
+Provider-preflight infrastructure stop ends the line; recovery-4 is forbidden. Candidate,
+Promotion, Shadow, Runtime, DSH and Alpha-D boundaries remain unchanged.

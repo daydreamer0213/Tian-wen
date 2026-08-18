@@ -256,8 +256,8 @@ After the original launch and both authorized recovery launches:
 - the container ID is the durable `seed-preflight` execution for the recovery-2 Trial and is bound
   here to `receipts/stop-preflight.json` with SHA-256
   `78c2cd46d4ed03eca520c5ef8e555751872fe80bfa0def90198e5f990422e78e`;
-- this never-started forensic container remains present pending exact-ID cleanup after the binding
-  and zero Goal/Run/request/token/CNY facts are independently checked;
+- after evidence commit `35742a8` and a fresh zero-ledger check, only this exact never-started
+  container was removed without force; no other Docker object was targeted;
 - Provider/model execution: not started;
 - credential value: never read into receipts, printed or persisted.
 
