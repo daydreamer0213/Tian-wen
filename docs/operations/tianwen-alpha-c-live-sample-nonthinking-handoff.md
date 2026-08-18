@@ -44,7 +44,7 @@
 ## Durable evidence
 
 - Final receipt SHA-256: `55cc4e97115061f4d81c5c28de254962e577da8871f92f182475ebfc6a41e835`.
-- SQLite SHA-256: `ccb26569d3cb5a9fd5278fb3551b538eb92f44bdae3f981a70a00137cf994162`; no WAL file remained.
+- SQLite SHA-256: `ccb26569d3cb5a9fd5278fb3551b538eb92f44bdae3f981a70a00137cf994162`; a zero-byte WAL and a 32,768-byte SHM file remain after the read-only SQLite audit.
 - Result digest: `sha256:1a677294efeb8da81c44f4eed91803db2a3db5b953e8902ea1a987a510b7ea9e`.
 - Manifest digest: `sha256:0995357809b44f4ebe0c9b9e8b4e29f3681ecc48b71ebbf26670241b93f2ec10`; its model settings snapshot exactly freezes non-thinking mode and 4096.
 - Final Evidence digest: `sha256:a229c308c1d3186481637e8acf726c381cb177c6839befcdea37264bee80b4fc`, bound to the final round Run and Docker verifier.
