@@ -7,9 +7,12 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from pydantic_ai.messages import ModelRequest, UserPromptPart
+from pydantic_ai.models import ModelRequestParameters
 
 from tianwen.domain import ActionStatus, ExplorationStopReason, PromotionRecord
 
@@ -27,6 +30,70 @@ def _public_key(path: Path) -> Path:
     key = Ed25519PrivateKey.generate().public_key()
     path.write_bytes(key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo))
     return path
+
+
+@pytest.mark.anyio
+async def test_live_deepseek_model_sends_the_official_max_tokens_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = _live_script()
+    requests: list[dict[str, object]] = []
+
+    async def send(
+        client: httpx.AsyncClient, request: httpx.Request, *args: object, **kwargs: object
+    ) -> httpx.Response:
+        del client, args, kwargs
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": "offline-response",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "deepseek-v4-pro",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "done"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+        )
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "offline-contract-key")
+    monkeypatch.setenv("TIANWEN_MODEL", "deepseek:deepseek-v4-pro")
+    monkeypatch.setattr(httpx.AsyncClient, "send", send)
+    monkeypatch.setattr(script, "TianwenApp", lambda config: config)
+    config = script._make_app(
+        SimpleNamespace(data_dir=tmp_path / "data", workspace=tmp_path, max_tokens=4_096),
+        Ed25519PrivateKey.generate().public_key(),
+    )
+
+    model = config.model
+    await model.request(
+        [ModelRequest(parts=[UserPromptPart(content="hello")])],
+        {"max_tokens": 4_096},
+        ModelRequestParameters(),
+    )
+
+    assert requests == [
+        {
+            "messages": [{"role": "user", "content": "hello"}],
+            "model": "deepseek-v4-pro",
+            "max_tokens": 4_096,
+            "stream": False,
+        }
+    ]
+    assert model.model_id == "deepseek:deepseek-v4-pro"
+    assert model.provider.name == "deepseek"
+    assert str(model.provider.base_url).rstrip("/") == "https://api.deepseek.com"
+    assert model.profile["supports_thinking"] is True
+    assert model.profile["openai_chat_send_back_thinking_parts"] == "field"
+    assert model.profile["openai_supports_tool_choice_required"] is False
+    assert model.profile["openai_chat_supports_max_completion_tokens"] is False
 
 
 class _RecordingApp:
