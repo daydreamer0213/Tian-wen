@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 from pydantic import Field
 
@@ -9,6 +10,7 @@ from tianwen.domain import (
     ArtifactVersion,
     BudgetLimit,
     CaseRecord,
+    EvidenceRecord,
     FrozenModel,
     LessonRecord,
     LoopKind,
@@ -33,6 +35,10 @@ class LearningSignal(FrozenModel):
     blocks_goal: bool
     user_corrected: bool
     evidence_ids: tuple[str, ...]
+    source: Literal["legacy", "repeated_attributable_issue", "explicit_user_correction"] = "legacy"
+    observed_gap_id: str | None = None
+    problem_fingerprint: str | None = None
+    capability_scope: str | None = None
 
 
 class LearningTicket(FrozenModel):
@@ -53,6 +59,8 @@ class LearningTicket(FrozenModel):
         "safety_boundary",
     )
     investigation_mode: bool = False
+    problem_fingerprint: str | None = None
+    capability_scope: str | None = None
 
 
 class AttributionRecord(FrozenModel):
@@ -67,6 +75,13 @@ class AttributionRecord(FrozenModel):
     rejected_targets: tuple[str, ...]
     other_layers_reason: str
     recommendation_only: bool
+    status: Literal["resolved", "unknown"] = "resolved"
+    triage_id: str | None = None
+    ticket_id: str | None = None
+    observed_gap_id: str | None = None
+    capability_scope: str | None = None
+    supporting_evidence_ids: tuple[str, ...] = ()
+    counterevidence_ids: tuple[str, ...] = ()
 
 
 def _problem(signal: LearningSignal) -> str:
@@ -82,9 +97,7 @@ def _ticket_id(signal: LearningSignal) -> str:
 
 
 def _section(markdown: str, name: str) -> str | None:
-    match = re.search(
-        rf"(?ms)^##\s+{re.escape(name)}\s*\n(.*?)(?=^##\s|\Z)", markdown
-    )
+    match = re.search(rf"(?ms)^##\s+{re.escape(name)}\s*\n(.*?)(?=^##\s|\Z)", markdown)
     return None if match is None else match.group(1).strip()
 
 
@@ -99,15 +112,8 @@ class LearningEngine:
         self.learning_budget = learning_budget
 
     def enqueue(self, signal: LearningSignal) -> str | None:
-        self.store.put_immutable_object(
-            "learning_signal", signal.signal_id, signal.loop_id, "recorded", signal
-        )
-        high_value = (
-            signal.user_corrected
-            or signal.blocks_goal
-            or signal.severity >= 4
-            or signal.recurrence >= 2
-        )
+        self.store.put_immutable_object("learning_signal", signal.signal_id, signal.loop_id, "recorded", signal)
+        high_value = signal.user_corrected or signal.blocks_goal or signal.severity >= 4 or signal.recurrence >= 2
         if not high_value:
             return None
         ticket_id = _ticket_id(signal)
@@ -134,6 +140,8 @@ class LearningEngine:
                 signal.severity >= 4
                 and any(word in signal.category.casefold() for word in ("safety", "security", "unsafe"))
             ),
+            problem_fingerprint=signal.problem_fingerprint,
+            capability_scope=signal.capability_scope,
         )
         parent = self.store.get_object("loop", signal.loop_id, LoopRecord)
         child = LoopRecord(
@@ -160,15 +168,33 @@ class LearningEngine:
     def get_learning_task(self, ticket_id: str) -> TaskRecord:
         return self.store.get_object("task", self.get_ticket(ticket_id).task_id, TaskRecord)
 
-    def create_case(self, ticket_id: str) -> CaseRecord:
+    def create_case(
+        self,
+        ticket_id: str,
+        *,
+        gap_id: str | None = None,
+        problem_statement: str | None = None,
+        evidence_ids: tuple[str, ...] | None = None,
+        problem_fingerprint: str | None = None,
+        capability_scope: str | None = None,
+    ) -> CaseRecord:
         ticket = self.get_ticket(ticket_id)
+        governed = gap_id is not None
         case = CaseRecord(
-            case_id=content_digest({"learning_ticket": ticket_id, "case": "observed"}),
+            case_id=(
+                content_digest({"learning_ticket": ticket_id, "case": "gap", "gap": gap_id})
+                if governed
+                else content_digest({"learning_ticket": ticket_id, "case": "observed"})
+            ),
             loop_id=ticket.loop_id,
-            problem=ticket.problem_statement,
-            outcome=f"signal:{ticket.signal_id}",
-            evidence_ids=ticket.evidence_ids,
+            problem=problem_statement or ticket.problem_statement,
+            outcome=f"gap:{gap_id}" if governed else f"signal:{ticket.signal_id}",
+            evidence_ids=evidence_ids if evidence_ids is not None else ticket.evidence_ids,
             hypotheses=(),
+            ticket_id=ticket_id if governed else None,
+            observed_gap_id=gap_id,
+            problem_fingerprint=problem_fingerprint,
+            capability_scope=capability_scope,
         )
         self.store.put_immutable_object("case", case.case_id, ticket_id, "recorded", case)
         return case
@@ -186,36 +212,154 @@ class LearningEngine:
             raise StateConflict("attribution requires at least two hypotheses")
         if not hypotheses or not earliest_divergence.strip():
             raise StateConflict("attribution requires hypotheses and earliest divergence")
+        record = self._record_attribution(
+            case,
+            hypotheses=hypotheses,
+            earliest_divergence=earliest_divergence,
+            mutation_target=mutation_target,
+            rejected_targets=rejected_targets,
+        )
+        if record.recommendation_only:
+            raise MutationNotAllowed(f"mutation target is not allowed: {mutation_target}")
+        return record
+
+    def record_governed_attribution(
+        self,
+        case: CaseRecord,
+        *,
+        hypotheses: tuple[str, ...],
+        earliest_divergence: str,
+        mutation_target: str,
+        rejected_targets: tuple[str, ...],
+        status: Literal["resolved", "unknown"],
+        triage_id: str,
+        ticket_id: str,
+        observed_gap_id: str,
+        capability_scope: str,
+        supporting_evidence_ids: tuple[str, ...] = (),
+        counterevidence_ids: tuple[str, ...] = (),
+    ) -> AttributionRecord:
+        from tianwen.learning_intake import LearningIntake, LearningTriageReceipt, ObservedGap
+
+        persisted_case = self.store.get_object("case", case.case_id, CaseRecord)
+        ticket = self.get_ticket(ticket_id)
+        gap = self.store.get_object("observed_gap", observed_gap_id, ObservedGap)
+        triage = self.store.get_object("learning_triage", triage_id, LearningTriageReceipt)
+        if triage.signal_id is None:
+            raise StateConflict("governed attribution requires a triage signal")
+        signal = self.store.get_object("learning_signal", triage.signal_id, LearningSignal)
+        if (
+            persisted_case != case
+            or triage.disposition != "learning_case"
+            or triage.gap_id != gap.gap_id
+            or triage.signal_id != ticket.signal_id
+            or triage.ticket_id != ticket.ticket_id
+            or triage.case_id != case.case_id
+            or ticket.signal_id != signal.signal_id
+            or signal.observed_gap_id != gap.gap_id
+            or signal.problem_fingerprint != gap.problem_fingerprint
+            or ticket.problem_fingerprint != gap.problem_fingerprint
+            or case.problem_fingerprint != gap.problem_fingerprint
+            or capability_scope != gap.capability_scope
+            or signal.capability_scope != gap.capability_scope
+            or ticket.capability_scope != gap.capability_scope
+            or case.capability_scope != gap.capability_scope
+            or case.ticket_id != ticket.ticket_id
+            or case.observed_gap_id != gap.gap_id
+            or case.loop_id != ticket.loop_id
+            or ticket.parent_loop_id != signal.loop_id
+            or case.outcome != f"gap:{gap.gap_id}"
+            or case.capability_scope != capability_scope
+            or ticket.capability_scope != capability_scope
+            or signal.evidence_ids != gap.evidence_ids
+            or ticket.evidence_ids != gap.evidence_ids
+            or case.evidence_ids != gap.evidence_ids
+        ):
+            raise StateConflict("governed attribution bindings do not match")
+        LearningIntake._validated_gap_outcomes(self.store, triage, gap)
+        attribution_evidence = supporting_evidence_ids + counterevidence_ids
+        for evidence_id in attribution_evidence:
+            self.store.get_object("evidence", evidence_id, EvidenceRecord)
+        if not set(attribution_evidence).issubset(set(gap.evidence_ids)):
+            raise StateConflict("governed attribution evidence must bind the persisted gap")
+        return self._record_attribution(
+            case,
+            hypotheses=hypotheses,
+            earliest_divergence=earliest_divergence,
+            mutation_target=mutation_target,
+            rejected_targets=rejected_targets,
+            status=status,
+            triage_id=triage_id,
+            ticket_id=ticket_id,
+            observed_gap_id=observed_gap_id,
+            capability_scope=capability_scope,
+            supporting_evidence_ids=supporting_evidence_ids,
+            counterevidence_ids=counterevidence_ids,
+            governed=True,
+        )
+
+    def _record_attribution(
+        self,
+        case: CaseRecord,
+        *,
+        hypotheses: tuple[str, ...],
+        earliest_divergence: str,
+        mutation_target: str,
+        rejected_targets: tuple[str, ...],
+        status: Literal["resolved", "unknown"] = "resolved",
+        triage_id: str | None = None,
+        ticket_id: str | None = None,
+        observed_gap_id: str | None = None,
+        capability_scope: str | None = None,
+        supporting_evidence_ids: tuple[str, ...] = (),
+        counterevidence_ids: tuple[str, ...] = (),
+        governed: bool = False,
+    ) -> AttributionRecord:
+        deterministic = case.outcome.startswith("deterministic_verifier_failure:")
+        if len(hypotheses) < 2 and not deterministic:
+            raise StateConflict("attribution requires at least two hypotheses")
+        if not hypotheses or not earliest_divergence.strip():
+            raise StateConflict("attribution requires hypotheses and earliest divergence")
+        identity = {
+            "case": case.case_id,
+            "hypotheses": hypotheses,
+            "earliest_divergence": earliest_divergence,
+            "mutation_target": mutation_target,
+            "rejected_targets": rejected_targets,
+        }
+        if governed:
+            identity["governed"] = {
+                "status": status,
+                "triage_id": triage_id,
+                "ticket_id": ticket_id,
+                "observed_gap_id": observed_gap_id,
+                "capability_scope": capability_scope,
+                "supporting_evidence_ids": supporting_evidence_ids,
+                "counterevidence_ids": counterevidence_ids,
+            }
         record = AttributionRecord(
             attribution_id=content_digest(
-                {
-                    "case": case.case_id,
-                    "hypotheses": hypotheses,
-                    "earliest_divergence": earliest_divergence,
-                    "mutation_target": mutation_target,
-                    "rejected_targets": rejected_targets,
-                }
+                identity
             ),
             case_id=case.case_id,
             observed_outcome=case.outcome,
-            reproduction_scope=(
-                f"loop={case.loop_id}; problem={case.problem}; evidence={','.join(case.evidence_ids)}"
-            ),
+            reproduction_scope=(f"loop={case.loop_id}; problem={case.problem}; evidence={','.join(case.evidence_ids)}"),
             earliest_divergence=earliest_divergence,
             hypotheses=hypotheses,
-            distinguishing_experiment=(
-                "Run a bounded comparison that changes one stated hypothesis at a time."
-            ),
+            distinguishing_experiment=("Run a bounded comparison that changes one stated hypothesis at a time."),
             mutation_target=mutation_target,
             rejected_targets=rejected_targets,
             other_layers_reason="Only repo_task_skill is in the first-slice mutation scope.",
             recommendation_only=mutation_target != "repo_task_skill",
+            status=status,
+            triage_id=triage_id,
+            ticket_id=ticket_id,
+            observed_gap_id=observed_gap_id,
+            capability_scope=capability_scope,
+            supporting_evidence_ids=supporting_evidence_ids,
+            counterevidence_ids=counterevidence_ids,
         )
-        self.store.put_immutable_object(
-            "attribution", record.attribution_id, case.case_id, "recorded", record
-        )
-        if record.recommendation_only:
-            raise MutationNotAllowed(f"mutation target is not allowed: {mutation_target}")
+        self.store.put_immutable_object("attribution", record.attribution_id, case.case_id, "recorded", record)
         return record
 
     def accept_lesson(self, lesson: LessonRecord) -> None:
