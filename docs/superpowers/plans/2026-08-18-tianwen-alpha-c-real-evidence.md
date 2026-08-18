@@ -10,7 +10,7 @@ and feed only qualified real evidence into the existing Alpha-C gate.
 LearningIntake. It writes bounded JSON receipts under `D:\DevData`; it does not modify Runtime,
 DSH, Alpha-B, Promotion, Shadow, or the ActivePointer.
 
-**Base:** `4638026f210c0de29262d307dd051934570d975e`  
+**Base:** `4638026f210c0de29262d307dd051934570d975e`
 **Branch:** `codex/tianwen-alpha-c-real-evidence`
 
 ## Task 1: Freeze design and prove the missing entry
@@ -172,4 +172,3 @@ In a real local interactive terminal:
    exact remote SHA.
 7. Send the structured completion/blocker report to supervisor task
    `01a00d5a-8974-7c41-b660-127c15fcecb6` and wait. Do not merge main or enter Alpha-D.
-

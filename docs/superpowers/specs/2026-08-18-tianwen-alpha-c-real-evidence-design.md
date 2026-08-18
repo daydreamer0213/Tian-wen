@@ -1,7 +1,7 @@
 # Tianwen Alpha-C Real-Evidence Sampling Design
 
-**Date:** 2026-08-18  
-**Status:** Approved stage goal; implementation and live evidence pending  
+**Date:** 2026-08-18
+**Status:** Approved stage goal; implementation and live evidence pending
 **Base:** `4638026f210c0de29262d307dd051934570d975e`
 
 ## 1. Purpose
@@ -244,4 +244,3 @@ The stage stops immediately on any of the following:
 
 Completion does not require a Candidate. It requires durable proof that the system advanced only
 when real evidence met every gate and otherwise stopped without inventing learning.
-
