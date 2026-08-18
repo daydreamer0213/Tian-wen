@@ -10,17 +10,28 @@
 **Locked-image authority correction:** `a6de7c6`
 **Pre-canonical operator/test HEAD:** `ab715f1341f1582ba20f12998764e02eeff01cd2`
 **Canonical Docker CLI boundary correction:** `110873e6a1a0254ab2bcb650ca3f8e6f9376d157`
+**Docker log/recovery-3 implementation:** `b76131c67249fe2ee94a2854da7f8917acafe3df`
+**Formal container-Env identity correction:** `e1390794e4a74db2711a77f985e2c3c51b4ca497`
 **Canonical recovery-outcome revision:** the commit containing this document
-**Status:** recovery-2 consumed; stopped at zero-paid seed-verifier container start; no real Trial
+**Status:** recovery-3 consumed; its zero-paid seed-verifier identity failure is fixed and proven
+read-only against the retained container; no real Trial
 
 ## 1. Current conclusion
 
-The fixed recovery-2 ran once and consumed its one-use root. Canonical image inspection and
-container creation succeeded, but Docker 29.6.1 refused to start the seed verifier because the
-fixed `local` logging configuration combines default compression with `max-file=1`. Docker reports
-`compression cannot be enabled when max file count is 1`. The container was created but never
-started, no paid model request was made, and the bounded stop receipt records zero requests,
-tokens and CNY. This is not a real Trial or learning evidence.
+The fixed recovery-3 ran once and consumed its one-use root. Its seed-verifier container was
+created, started and exited `0`; the verifier returned the expected A1 seed verdict `not_met`
+with `1/7 checks passed`. Alpha Docker then rejected prepare/seed-preflight identity settlement
+because Docker inspect includes five locked base-image environment variables in addition to the
+three explicitly passed variables, while the old `_inspect_matches()` required the entire
+environment list to equal only those three. No paid model request was made, and the bounded stop
+receipt records zero requests, tokens and CNY. This was not a real Trial or learning evidence.
+
+Commit `e1390794e4a74db2711a77f985e2c3c51b4ca497` corrects the formal identity boundary: the
+observed environment must be an unambiguous `key=value` list, all three explicitly controlled
+keys must be present with exact values, and additional variables inherited from the immutable
+locked image are allowed. A read-only check of the retained recovery-3 container now returns
+`_inspect_matches() == true`; it did not call `reconcile()` and every file in the Trial state tree
+had the same size and SHA-256 before and after the proof.
 
 The Alpha-C proportional-safety correction and its one-time recovery are implemented,
 independently reviewed and fully verified offline. The first authorized invocation had stopped
@@ -46,14 +57,15 @@ Current factual outcome:
 - paid model requests: `0`;
 - model tokens: `0`;
 - CNY charged: `0`;
-- Docker containers/verifier executions: `1` created, `0` started, `0` verifier executions;
+- Docker containers/verifier executions: recovery-3 has `1` exited-0 container and one verifier
+  output that was not settled into the Tianwen store;
 - qualified real Case: none;
 - conditional Lesson: none;
 - Candidate: none;
 - Promotion or Shadow change: none.
 
-No consumed one-use root was deleted, moved, overwritten or rerun. Recovery-2 must not be replayed
-and recovery-3 is not authorized. Stage A remains a failed live proof; its exhausted Goal must not
+No consumed one-use root was deleted, moved, overwritten or rerun. Recovery-3 must not be replayed
+and recovery-4 is not authorized. Stage A remains a failed live proof; its exhausted Goal must not
 be replayed, and its historical `usage-invalid` fact remains operational evidence only.
 
 ## 2. Fixed authority and scope
@@ -220,12 +232,37 @@ The final canonical Docker CLI boundary wave then proved and fixed all four shor
 - independent correctness: `C0 / I0`;
 - Ponytail/YAGNI: `APPROVED / lean`, no load-bearing removable production code.
 
+The fixed Docker logging and recovery-3 wave then produced:
+
+- log compatibility RED: `3 failed`; recovery-3 interface RED: `7 failed`; recovery-3 behavior
+  RED: `6 failed, 1 passed`; actual recovery-2 schema RED: `2 failed`;
+- direct Alpha Docker + real-evidence: `89 passed`;
+- Alpha Docker + real-evidence + Alpha Trial + Alpha-C Intake: `132 passed`;
+- final full Python: `577 passed, 4 skipped`;
+- Ruff, py_compile and full-branch `git diff --check`: passed;
+- independent correctness: `C0 / I0` before the one authorized recovery-3 invocation;
+- Ponytail/YAGNI: `APPROVED / lean`, no log or recovery framework and no removable production
+  complexity.
+
+The formal container-Env identity correction then produced:
+
+- RED: the real inherited-image environment plus the three controlled variables was rejected,
+  `1 failed, 13 passed`;
+- GREEN: the focused identity slice was `14 passed` and the full Alpha Docker unit file was
+  `38 passed`;
+- fresh Alpha Docker + real-evidence + Alpha Trial + Alpha-C Intake: `146 passed`;
+- fresh full Python: `591 passed, 4 skipped`;
+- Ruff, py_compile and full-branch `git diff --check`: passed;
+- independent correctness: `C0 / I0 / M0`;
+- Ponytail/YAGNI: `APPROVED / lean`, with zero removable production lines and no environment
+  policy framework.
+
 ## 7. Current local state
 
-After the original launch and both authorized recovery launches:
+After the original launch and all three authorized recovery launches:
 
 - branch: `codex/tianwen-alpha-c-real-evidence`;
-- reviewed operator/test HEAD: `110873e6a1a0254ab2bcb650ca3f8e6f9376d157`;
+- reviewed operator/test HEAD: `e1390794e4a74db2711a77f985e2c3c51b4ca497`;
 - local `main`: `4638026f210c0de29262d307dd051934570d975e`;
 - local `origin/main`: `4638026f210c0de29262d307dd051934570d975e`;
 - pre-fix remote stage ref: `c26232094d4bf5638230fa01b8224c6a2910c1cb`;
@@ -248,8 +285,8 @@ After the original launch and both authorized recovery launches:
   only non-baseline object is the unsettled `seed-preflight` check execution, whose durable status
   remains `running` with no exit code because container start was rejected before settlement;
 - exact container `083295b0646365640780f0eacb26cfc1bde4a362342ce2ef53f4c1e95d262a3e`
-  has Docker daemon state `created`, never running, with exit code `128` and the local-log
-  compression error;
+  had Docker daemon state `created`, never running, with exit code `128` and the local-log
+  compression error before its exact-ID removal;
 - that container's `Config.Image` is the exact canonical locked image, its `LogConfig` is
   `local` with `max-size=65536` and `max-file=1`, and its only mounts are the recovery-2 A1
   workspace and registered A1 verifier, both read-only;
@@ -258,7 +295,34 @@ After the original launch and both authorized recovery launches:
   `78c2cd46d4ed03eca520c5ef8e555751872fe80bfa0def90198e5f990422e78e`;
 - after evidence commit `35742a8` and a fresh zero-ledger check, only this exact never-started
   container was removed without force; no other Docker object was targeted;
-- Provider/model execution: not started;
+- recovery-3 root `D:\DevData\tianwen-alpha-c-real-evidence-recovery-3`: present and consumed;
+- recovery-3 Trial: `trial-14381e4d2eacdab10efb2fb965c8478a`;
+- recovery-3 authority SHA-256: `18ef4e1edd2977f9a338a6166347aceed85809ad66b3b42c19901c50e17ec5dd`;
+- recovery-3 stop receipt SHA-256: `78c2cd46d4ed03eca520c5ef8e555751872fe80bfa0def90198e5f990422e78e`;
+- recovery-3 has zero budgets, model reservations, action reservations, Actions and Events; its
+  only non-baseline object is the unsettled `seed-preflight` check execution;
+- exact container `bf1f7c200e84f9880fffeefc2dfbbbc41c0bcefbee50e5d960a48225470f63f2`
+  has Docker state `exited`, exit code `0`, the canonical locked image, the exact
+  `compress=false` log config and the two registered read-only mounts;
+- the locked image environment is exactly
+  `PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+  `LANG=C.UTF-8`, `GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305`,
+  `PYTHON_VERSION=3.12.11` and
+  `PYTHON_SHA256=c30bb24b7f1e9a19b11b55a546434f74e739bb4c271a3e3a80ff4380d49f7adb`;
+- the container environment is exactly `HOME=/tmp`, `TMPDIR=/tmp`,
+  `PYTHONDONTWRITEBYTECODE=1` followed by those five exact image values; it contains no Provider
+  credential;
+- its verifier log SHA-256 is
+  `94011985da972e00624174e3763bab8c7890893034a568063499a7137fd5f66d` and records
+  `verdict=not_met`, `ordinary_fields` passed, six failed checks with the sole failure category
+  `behavior_mismatch`, and summary `1/7 checks passed`;
+- under the old code, a read-only in-memory check against the actual inspect payload returned
+  `false`; replacing only `Config.Env` with the three explicit controlled values returned `true`,
+  proving that environment equality was the sole identity mismatch;
+- under `e1390794`, the same retained record and unmodified inspect payload return `true`; the
+  proof read the SQLite database in read-only mode, did not call `reconcile()`, and left every
+  state file byte-for-byte unchanged;
+- Provider request execution: not started;
 - credential value: never read into receipts, printed or persisted.
 
 The final-fix commit SHA and updated remote stage ref must be recorded by the supervising session
@@ -266,11 +330,12 @@ after commit/push. The stage is not merged to `main`.
 
 ## 8. Residual risks and mandatory stops
 
-- The live Provider and verifier remain unexercised. Docker 29.6.1 rejects the current fixed local
-  log options before the seed verifier can start.
+- The live Provider remains unexercised. The seed verifier ran successfully but its historical
+  recovery-3 record remains intentionally unsettled; this review did not mutate that consumed
+  Trial store to manufacture a successful preflight.
 - The recovery-1 operator correctly wrote the dedicated zero-paid final stop receipt; the earlier
   missing-receipt limitation is closed.
-- All three stage roots are intentionally non-restartable. Do not delete, move, overwrite or
+- All four stage roots are intentionally non-restartable. Do not delete, move, overwrite or
   recreate them, and do not bypass them through a custom invocation.
 - Stop if checkout, Champion, provider/model, Docker, verifier, receipts, condition equality or
   cumulative cost fails validation.
@@ -281,14 +346,14 @@ after commit/push. The stage is not merged to `main`.
 
 None.
 
-There is no pending user decision. The supervising session must decide whether the Alpha Docker
-fixed log options need a separate minimal compatibility change and how to validate it without
-replaying recovery-2. The branch must not create recovery-3.
+There is no pending user decision. The formal Alpha Trial environment identity contract is fixed
+and independently approved. The supervising session must decide how to integrate the shared fix
+and authorize any future true live entrance. The branch must not create recovery-4.
 
 ## 10. Only recommended next entrance
 
-Report the zero-paid recovery-2 stop, exact receipt and never-started container to supervision.
-Do not replay recovery-2 or create recovery-3. The only evidence-supported engineering entrance
-is a separately reviewed, minimal Alpha Docker logging-compatibility change with an offline or
-single exact-container proof that does not manufacture learning evidence. Do not build a logging
-framework, merge the stage or enter Candidate, Promotion, Shadow or Alpha-D.
+Commit and report the independently approved formal Env-identity correction, the zero-paid
+recovery-3 receipt and the retained-container read-only proof to supervision. Do not replay
+recovery-3, create recovery-4, run a Provider or start another live root. Supervision decides the
+next true live entrance and how the shared Alpha Docker fix is integrated. Do not merge the stage
+or enter Candidate, Promotion, Shadow or Alpha-D.
