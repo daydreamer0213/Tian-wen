@@ -250,6 +250,14 @@ After the original launch and both authorized recovery launches:
 - exact container `083295b0646365640780f0eacb26cfc1bde4a362342ce2ef53f4c1e95d262a3e`
   has Docker daemon state `created`, never running, with exit code `128` and the local-log
   compression error;
+- that container's `Config.Image` is the exact canonical locked image, its `LogConfig` is
+  `local` with `max-size=65536` and `max-file=1`, and its only mounts are the recovery-2 A1
+  workspace and registered A1 verifier, both read-only;
+- the container ID is the durable `seed-preflight` execution for the recovery-2 Trial and is bound
+  here to `receipts/stop-preflight.json` with SHA-256
+  `78c2cd46d4ed03eca520c5ef8e555751872fe80bfa0def90198e5f990422e78e`;
+- this never-started forensic container remains present pending exact-ID cleanup after the binding
+  and zero Goal/Run/request/token/CNY facts are independently checked;
 - Provider/model execution: not started;
 - credential value: never read into receipts, printed or persisted.
 
