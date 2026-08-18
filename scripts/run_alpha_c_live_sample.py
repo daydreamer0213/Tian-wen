@@ -119,7 +119,6 @@ def _prior_authority(receipt_path: Path, database_path: Path) -> tuple[str, str]
     try:
         receipt = receipt_path.read_bytes()
         database = database_path.read_bytes()
-        json.loads(receipt)
     except Exception as error:
         raise StageError("prior Alpha-C audit authority is unavailable") from error
     receipt_digest = hashlib.sha256(receipt).hexdigest()
