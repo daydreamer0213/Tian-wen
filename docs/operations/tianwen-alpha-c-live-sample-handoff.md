@@ -7,7 +7,7 @@ Status: offline implementation complete; real A1 sample not yet started
 
 - Base: `48efe0b9626ebc5631270bc89008cfd2fc545975`.
 - Branch: `codex/tianwen-alpha-c-live-sample`.
-- Current implementation HEAD: `d34483568c4a1623ef19c51415eb4b192d857e6a`.
+- Implementation code commit: `d34483568c4a1623ef19c51415eb4b192d857e6a`; the following commit adds this handoff.
 - Commits preserve normal history; this branch is not merged to `main`.
 
 ## Fixed contract
