@@ -1,4 +1,4 @@
-"""Run the one-shot, bounded Alpha-C A1 live sample."""
+"""Run the one-shot, bounded Alpha-C A2 live sample."""
 
 from __future__ import annotations
 
@@ -201,7 +201,7 @@ def _receipt(
 
 
 def prepare_trial(runner: Any, *, previous_trial_id: str | None = None) -> Any:
-    """Run the free A1 Docker preflight and reload its durable settlement."""
+    """Run the free A2 Docker preflight and reload its durable settlement."""
     prepared = runner.prepare(TASK_ID, budget=BUDGET, previous_trial_id=previous_trial_id)
     try:
         record = runner.store.get_object("check_execution", "seed-preflight", CheckExecutionRecord)
