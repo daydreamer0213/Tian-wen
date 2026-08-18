@@ -1,8 +1,8 @@
 # Tianwen Alpha-C Learning Intake Canonical Handoff
 
-**Date:** 2026-08-18  
-**Stage branch:** `codex/tianwen-alpha-c-learning-signal`  
-**Base main:** `40bc8613d2eeea834bf1f34d43974490493f3864`  
+**Date:** 2026-08-18
+**Stage branch:** `codex/tianwen-alpha-c-learning-signal`
+**Base main:** `40bc8613d2eeea834bf1f34d43974490493f3864`
 **Implementation and integration HEAD before documentation closure:**
 `6366a5c593eb971703522970a884c08340a509cf`
 
