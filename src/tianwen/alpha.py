@@ -140,7 +140,7 @@ class TrialConfirmation(FrozenModel):
     schema_version: Literal["tianwen.alpha_trial_confirmation.v1"] = "tianwen.alpha_trial_confirmation.v1"
     trial_id: str
     preview_digest: str
-    confirmed_via: Literal["local_tty"]
+    confirmed_via: Literal["local_tty", "approved_goal_budget"]
     confirmed_at: datetime = Field(default_factory=utc_now)
 
 
@@ -512,7 +512,7 @@ class AlphaTrialRunner:
             champion_digest=selected.content_digest,
             image_digest=bundle.image_lock.manifest_digest,
             data_root=str(paths.data_root),
-            paid_request_warning="Real API fees may be incurred after confirmation.",
+            paid_request_warning="Real API fees may be incurred during this approved bounded Trial.",
         )
         app.store.put_immutable_object("alpha_trial_preview", trial_id, None, "prepared", preview)
         write_bounded_artifact(

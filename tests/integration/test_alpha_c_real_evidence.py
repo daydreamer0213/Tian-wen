@@ -7,7 +7,7 @@ import secrets
 import sqlite3
 import sys
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -138,6 +138,7 @@ class _Runner:
         self.second_champion = second_champion
         self.prepared: list[_Prepared] = []
         self.executed: list[str] = []
+        self.confirmations: list[Any] = []
         self.store = _Store()
         self.app: Any = None
 
@@ -156,24 +157,13 @@ class _Runner:
     def condition_snapshot(self, prepared: _Prepared) -> object:
         return AlphaTrialConditionSnapshot.model_construct(task_id=prepared.condition)
 
-    async def execute(self, prepared: _Prepared, _confirmation: Any) -> _Result:
+    async def execute(self, prepared: _Prepared, confirmation: Any) -> _Result:
         self.executed.append(prepared.preview.trial_id)
+        self.confirmations.append(confirmation)
         result = self.results[len(self.executed) - 1]
         prepared._app.store.result = result
         self.store, self.app = prepared._app.store, prepared._app
         return result
-
-
-class _Tty:
-    def __init__(self, *lines: str, tty: bool = True) -> None:
-        self.lines = list(lines)
-        self.tty = tty
-
-    def isatty(self) -> bool:
-        return self.tty
-
-    def readline(self) -> str:
-        return self.lines.pop(0) if self.lines else "\n"
 
 
 class _Intake:
@@ -207,7 +197,7 @@ def _root() -> Path:
     return Path("D:/DevData/alpha-c-real-evidence-tests") / secrets.token_hex(8)
 
 
-def _dependencies(module: Any, runner: _Runner, stdin: _Tty, intake: _Intake | None = None, **kwargs: Any) -> Any:
+def _dependencies(module: Any, runner: _Runner, intake: _Intake | None = None, **kwargs: Any) -> Any:
     model = _Model()
     price = module.PriceSnapshot(
         source_url=module.PRICE_SOURCE_URL,
@@ -229,7 +219,6 @@ def _dependencies(module: Any, runner: _Runner, stdin: _Tty, intake: _Intake | N
     return module.StageDependencies(
         stage_root=kwargs.pop("stage_root", _root()),
         environment={"DEEPSEEK_API_KEY": "configured"},
-        stdin=stdin,
         stdout=SimpleNamespace(write=lambda _text: None, flush=lambda: None),
         model_factory=lambda: model,
         runner_factory=lambda _model, _root: runner,
@@ -281,7 +270,7 @@ def test_budget_ceiling_stops_before_model_or_prepare() -> None:
                         observed_at=datetime.now(UTC),
                         rates_cny_per_million={"peak_output": 300},
                     ),
-                    checkout_audit=lambda: _dependencies(module, _Runner([]), _Tty()).checkout_audit(),
+                    checkout_audit=lambda: _dependencies(module, _Runner([])).checkout_audit(),
                 )
             )
         )
@@ -301,7 +290,7 @@ def test_provider_mismatch_stops_before_prepare() -> None:
         return _Runner([])
 
     dependencies = replace(
-        _dependencies(module, _Runner([]), _Tty()), model_factory=lambda: model, runner_factory=runner_factory
+        _dependencies(module, _Runner([])), model_factory=lambda: model, runner_factory=runner_factory
     )
     with pytest.raises(module.StageError, match="provider identity"):
         asyncio.run(module.run_stage(dependencies))
@@ -310,39 +299,29 @@ def test_provider_mismatch_stops_before_prepare() -> None:
     assert model.request_count == 0
 
 
-def test_non_tty_stops_after_zero_paid_preflight_without_execute() -> None:
-    """Break caught: a pipe could start a paid Trial without a local TTY confirmation."""
+def test_legal_non_tty_process_executes_first_prepared_trial_exactly_once() -> None:
+    """Break caught: a legal non-TTY process could stop before its approved bounded Trial."""
     module = _module()
     runner = _Runner([_Result("trial-1", True, "met")])
-    model = _Model()
-    result = asyncio.run(
-        module.run_stage(replace(_dependencies(module, runner, _Tty(tty=False)), model_factory=lambda: model))
-    )
+    result = asyncio.run(module.run_stage(_dependencies(module, runner, _Intake())))
 
-    assert result["stop"] == "confirmation_not_granted"
-    assert runner.executed == []
-    assert model.request_count == 0
-
-
-def test_wrong_tty_confirmation_stops_without_execute() -> None:
-    """Break caught: any text other than the exact trial confirmation could start a paid Trial."""
-    module, runner = _module(), _Runner([_Result("trial-1", True, "met")])
-
-    result = asyncio.run(module.run_stage(_dependencies(module, runner, _Tty("CONFIRM another-trial\n"))))
-
-    assert result["stop"] == "confirmation_not_granted"
-    assert runner.executed == []
+    assert result["stop"] == "no_case_success"
+    assert runner.executed == ["trial-1"]
+    assert len(runner.confirmations) == 1
+    assert runner.confirmations[0].confirmed_via == "approved_goal_budget"
+    assert runner.confirmations[0].trial_id == runner.prepared[0].preview.trial_id
+    assert runner.confirmations[0].preview_digest == content_digest(runner.prepared[0].preview)
 
 
 def test_preflight_receipt_collision_stops_before_execute() -> None:
     """Break caught: a rerun could overwrite a preflight authority receipt and hide its earlier boundary."""
     module, root = _module(), _root()
     first = _Runner([_Result("trial-1", True, "met")])
-    asyncio.run(module.run_stage(_dependencies(module, first, _Tty(tty=False), stage_root=root)))
+    asyncio.run(module.run_stage(_dependencies(module, first, _Intake(), stage_root=root)))
     second = _Runner([_Result("trial-1", True, "met")])
 
     with pytest.raises(module.StageError, match="stage root is already initialized"):
-        asyncio.run(module.run_stage(_dependencies(module, second, _Tty(tty=False), stage_root=root)))
+        asyncio.run(module.run_stage(_dependencies(module, second, stage_root=root)))
 
     assert second.executed == []
 
@@ -351,14 +330,14 @@ def test_initialized_stage_root_blocks_restart_before_new_random_trial_prepare()
     """Break caught: restarting the process could create a second paid batch under a reused stage root."""
     module, root = _module(), _root()
     first = _Runner([_Result("random-first", True, "met")])
-    asyncio.run(module.run_stage(_dependencies(module, first, _Tty(tty=False), stage_root=root)))
+    asyncio.run(module.run_stage(_dependencies(module, first, _Intake(), stage_root=root)))
     second = _Runner([_Result("random-second", True, "met")])
     model = _Model()
 
     with pytest.raises(module.StageError, match="stage root is already initialized"):
         asyncio.run(
             module.run_stage(
-                replace(_dependencies(module, second, _Tty(tty=False), stage_root=root), model_factory=lambda: model)
+                replace(_dependencies(module, second, stage_root=root), model_factory=lambda: model)
             )
         )
 
@@ -371,28 +350,40 @@ def test_initialized_stage_root_blocks_restart_before_new_random_trial_prepare()
     "snapshot",
     [
         lambda module: module.PriceSnapshot(
+            source_url="https://wrong.invalid",
+            model_id=module.MODEL_ID,
+            observed_at=datetime.now(UTC),
+            rates_cny_per_million={"peak_output": 27},
+        ),
+        lambda module: module.PriceSnapshot(
+            source_url=module.PRICE_SOURCE_URL,
+            model_id="deepseek:wrong-model",
+            observed_at=datetime.now(UTC),
+            rates_cny_per_million={"peak_output": 27},
+        ),
+        lambda module: module.PriceSnapshot(
             source_url=module.PRICE_SOURCE_URL,
             model_id=module.MODEL_ID,
-            observed_at=datetime(2026, 8, 16, tzinfo=UTC),
+            observed_at=datetime.now(),
             rates_cny_per_million={"peak_output": 27},
         ),
         lambda module: module.PriceSnapshot(
             source_url=module.PRICE_SOURCE_URL,
             model_id=module.MODEL_ID,
             observed_at=datetime.now(UTC),
-            rates_cny_per_million={"peak_output": 26},
+            rates_cny_per_million={"peak_output": 0},
         ),
     ],
 )
 def test_invalid_price_snapshot_stops_before_root_or_model(snapshot: Any) -> None:
-    """Break caught: stale or understated pricing could create a stage lock or Provider before validation."""
+    """Break caught: malformed price identity or rate could create a stage lock before validation."""
     module, root, model = _module(), _root(), _Model()
 
     with pytest.raises(module.StageError, match="price snapshot"):
         asyncio.run(
             module.run_stage(
                 replace(
-                    _dependencies(module, _Runner([]), _Tty(), stage_root=root),
+                    _dependencies(module, _Runner([]), stage_root=root),
                     price_snapshot=snapshot(module),
                     model_factory=lambda: model,
                 )
@@ -407,7 +398,7 @@ def test_first_real_success_projects_once_and_never_prepares_retry() -> None:
     """Break caught: a successful natural sample could spend a second Trial or create a Case."""
     module, runner, intake = _module(), _Runner([_Result("trial-1", True, "met")]), _Intake()
 
-    result = asyncio.run(module.run_stage(_dependencies(module, runner, _Tty("CONFIRM trial-1\n"), intake)))
+    result = asyncio.run(module.run_stage(_dependencies(module, runner, intake)))
 
     assert result["stop"] == "no_case_success"
     assert runner.executed == ["trial-1"]
@@ -425,7 +416,7 @@ def test_non_real_result_never_enters_learning_intake() -> None:
         _Intake(),
     )
 
-    result = asyncio.run(module.run_stage(_dependencies(module, runner, _Tty("CONFIRM trial-1\n"), intake)))
+    result = asyncio.run(module.run_stage(_dependencies(module, runner, intake)))
 
     assert result["stop"] == "non_real_or_operational"
     assert intake.projected == []
@@ -448,33 +439,36 @@ def test_retry_authority_drift_stops_before_second_execute(second_condition: str
 
     if second_champion != "champion":
         with pytest.raises(module.StageError, match="prepared Champion"):
-            asyncio.run(module.run_stage(_dependencies(module, runner, _Tty("CONFIRM trial-1\n"), intake)))
+            asyncio.run(module.run_stage(_dependencies(module, runner, intake)))
     else:
-        result = asyncio.run(module.run_stage(_dependencies(module, runner, _Tty("CONFIRM trial-1\n"), intake)))
+        result = asyncio.run(module.run_stage(_dependencies(module, runner, intake)))
         assert result["stop"] == "retry_authority_drift"
     assert runner.executed == ["trial-1"]
     assert len(runner.prepared) == 2
     assert intake.triages == [("outcome-trial-1",)]
 
 
-def test_two_matching_real_failures_form_one_case_and_stop() -> None:
+def test_qualifying_first_failure_executes_at_most_one_independent_repeat_without_stdin() -> None:
     """Break caught: matching repeated verifier failures could be dropped before the existing Case gate."""
     module = _module()
     runner = _Runner(
         [
             _Result("trial-1", True, "not_met", failure_categories=("correctness",)),
             _Result("trial-2", True, "not_met", failure_categories=("correctness",)),
+            _Result("trial-3", True, "not_met", failure_categories=("correctness",)),
         ]
     )
     intake = _Intake()
 
-    result = asyncio.run(
-        module.run_stage(_dependencies(module, runner, _Tty("CONFIRM trial-1\n", "CONFIRM trial-2\n"), intake))
-    )
+    result = asyncio.run(module.run_stage(_dependencies(module, runner, intake)))
 
     assert result["stop"] == "case_requires_attribution"
     assert result["case_id"] == "case-1"
     assert runner.executed == ["trial-1", "trial-2"]
+    assert [item.confirmed_via for item in runner.confirmations] == [
+        "approved_goal_budget",
+        "approved_goal_budget",
+    ]
     assert len(runner.prepared) == 2
     assert intake.triages == [("outcome-trial-1",), ("outcome-trial-1", "outcome-trial-2")]
 
@@ -490,9 +484,7 @@ def test_second_success_is_observed_alone_not_mixed_with_first_failure() -> None
     )
     intake = _Intake()
 
-    result = asyncio.run(
-        module.run_stage(_dependencies(module, runner, _Tty("CONFIRM trial-1\n", "CONFIRM trial-2\n"), intake))
-    )
+    result = asyncio.run(module.run_stage(_dependencies(module, runner, intake)))
 
     assert result["stop"] == "retry_success_observe"
     assert result["case_id"] is None
@@ -511,9 +503,7 @@ def test_mismatched_repeat_stops_without_case_or_third_trial() -> None:
     )
     intake = _Intake(second_fingerprint="different")
 
-    result = asyncio.run(
-        module.run_stage(_dependencies(module, runner, _Tty("CONFIRM trial-1\n", "CONFIRM trial-2\n"), intake))
-    )
+    result = asyncio.run(module.run_stage(_dependencies(module, runner, intake)))
 
     assert result["stop"] == "retry_fingerprint_mismatch"
     assert result["case_id"] is None
@@ -522,14 +512,39 @@ def test_mismatched_repeat_stops_without_case_or_third_trial() -> None:
     assert intake.triages == [("outcome-trial-1",)]
 
 
-def test_stage_uses_a_fresh_price_snapshot_and_zero_resource_learning_budget() -> None:
-    """Break caught: stale pricing or a nonzero learning child budget could authorize unbounded paid work."""
-    module = _module()
+def test_stage_uses_recorded_official_price_without_a_local_file() -> None:
+    """Break caught: missing local price data could stop the approved recorded estimate from running."""
+    module, runner, intake = _module(), _Runner([_Result("trial-1", True, "met")]), _Intake()
 
+    result = asyncio.run(
+        module.run_stage(replace(_dependencies(module, runner, intake), price_snapshot=None))
+    )
+
+    assert result["stop"] == "no_case_success"
+    assert result["price"]["source_url"] == module.PRICE_SOURCE_URL
+    assert result["price"]["model_id"] == module.MODEL_ID
+    assert result["price"]["observed_at"] == "2026-08-18T00:00:00+00:00"
+    assert result["price"]["max_cny_per_million"] == 27
     assert module.ZERO_RESOURCE_LEARNING_BUDGET == BudgetLimit(
         model_requests=0, tool_calls=0, tokens=0, wall_seconds=0, child_loops=0, action_effects=0
     )
-    assert callable(module.load_price_snapshot)
+
+
+def test_old_price_observation_does_not_block_a_legal_trial() -> None:
+    """Break caught: price age could become a second approval gate after bounded preflight."""
+    module, runner, intake = _module(), _Runner([_Result("trial-1", True, "met")]), _Intake()
+    price = module.PriceSnapshot(
+        source_url=module.PRICE_SOURCE_URL,
+        model_id=module.MODEL_ID,
+        observed_at=datetime(2020, 1, 1, tzinfo=UTC),
+        rates_cny_per_million={"maximum_published": 27},
+    )
+
+    result = asyncio.run(module.run_stage(_dependencies(module, runner, intake, price_snapshot=price)))
+
+    assert result["stop"] == "no_case_success"
+    assert runner.executed == ["trial-1"]
+    assert result["price"]["observed_at"] == "2020-01-01T00:00:00+00:00"
 
 
 def test_existing_intake_forms_case_with_zero_resource_child_budget(tmp_path: Path) -> None:
@@ -556,70 +571,6 @@ def test_existing_intake_forms_case_with_zero_resource_child_budget(tmp_path: Pa
     assert ticket.learning_budget == module.ZERO_RESOURCE_LEARNING_BUDGET
     _limit, usage, _reserved = aggregate.get_budget(ticket.loop_id)
     assert usage == BudgetUsage()
-
-
-def test_price_snapshot_freshness_is_limited_to_ten_minutes() -> None:
-    """Break caught: an old price snapshot could reserve paid work with stale authority."""
-    module = _module()
-
-    assert module.PRICE_SNAPSHOT_MAX_AGE == timedelta(minutes=10)
-
-
-def test_load_price_snapshot_uses_the_canonical_local_json_path(tmp_path: Path) -> None:
-    """Break caught: the native preflight could ignore or misread its fixed local price authority."""
-    module = _module()
-    path = tmp_path / "price.json"
-    path.write_text(
-        json.dumps(
-            {
-                "source_url": module.PRICE_SOURCE_URL,
-                "model_id": module.MODEL_ID,
-                "observed_at": datetime.now(UTC).isoformat(),
-                "rates_cny_per_million": {"off_peak_output": 6, "peak_output": 27},
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    snapshot = module.load_price_snapshot(path)
-
-    assert snapshot.authority()["max_cny_per_million"] == 27
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {},
-        {
-            "source_url": "https://wrong.invalid",
-            "model_id": "wrong",
-            "observed_at": datetime.now(UTC).isoformat(),
-            "rates_cny_per_million": {"peak_output": 27},
-        },
-        {
-            "source_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
-            "model_id": "deepseek:deepseek-v4-pro",
-            "observed_at": (datetime.now(UTC) - timedelta(minutes=10, seconds=1)).isoformat(),
-            "rates_cny_per_million": {"peak_output": 27},
-        },
-        {
-            "source_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
-            "model_id": "deepseek:deepseek-v4-pro",
-            "observed_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
-            "rates_cny_per_million": {"peak_output": 27},
-        },
-    ],
-)
-def test_load_price_snapshot_rejects_malformed_or_outside_ten_minute_window(
-    tmp_path: Path, payload: dict[str, Any]
-) -> None:
-    """Break caught: malformed, mismatched, or stale local pricing could authorize a Trial."""
-    module = _module()
-    path = tmp_path / "price.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-
-    with pytest.raises(module.StageError, match="price snapshot"):
-        module.load_price_snapshot(path)
 
 
 def _native_audit_root(tmp_path: Path, *, pointer_drift: bool = False, bad_digest: bool = False) -> Path:

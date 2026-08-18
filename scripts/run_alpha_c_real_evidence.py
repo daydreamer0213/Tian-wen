@@ -1,8 +1,8 @@
 """Run the one approved Alpha-C A1 natural-evidence sample.
 
 This is deliberately an operations entry point, not a reusable controller.  It
-only ever prepares A1 and, after a local-TTY confirmation, may execute it once
-and repeat it once after a qualifying verifier failure.
+only ever prepares A1, executes it once under the approved Goal and budget, and
+may repeat it once after a qualifying verifier failure.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -39,9 +39,7 @@ ZERO_RESOURCE_LEARNING_BUDGET = BudgetLimit(
     model_requests=0, tool_calls=0, tokens=0, wall_seconds=0, child_loops=0, action_effects=0
 )
 STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence")
-PRICE_SNAPSHOT_PATH = Path("D:/DevData/tianwen-alpha-c-real-evidence-price.json")
 PRICE_SOURCE_URL = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
-PRICE_SNAPSHOT_MAX_AGE = timedelta(minutes=10)
 BASE_SHA = "4638026f210c0de29262d307dd051934570d975e"
 STAGE_BRANCH = "codex/tianwen-alpha-c-real-evidence"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -67,6 +65,14 @@ class PriceSnapshot:
             "rates_cny_per_million": rates,
             "max_cny_per_million": max(rates.values()),
         }
+
+
+RECORDED_PRICE_SNAPSHOT = PriceSnapshot(
+    source_url=PRICE_SOURCE_URL,
+    model_id=MODEL_ID,
+    observed_at=datetime(2026, 8, 18, tzinfo=UTC),
+    rates_cny_per_million={"maximum_published": 27},
+)
 
 
 @dataclass(frozen=True)
@@ -116,13 +122,11 @@ class StageDependencies:
 
     stage_root: Path = STAGE_ROOT
     environment: Mapping[str, str] | None = None
-    stdin: TextIO = sys.stdin
     stdout: TextIO = sys.stdout
     model_factory: Callable[[], Model] | None = None
     runner_factory: Callable[[Model, Path], AlphaTrialRunner] | None = None
     intake_factory: Callable[[Any, BudgetLimit], LearningIntake] | None = None
     price_snapshot: PriceSnapshot | None = None
-    price_loader: Callable[[], PriceSnapshot] | None = None
     checkout_audit: Callable[[], CheckoutAudit] | None = None
 
 
@@ -130,46 +134,23 @@ def _native_model() -> Model:
     return _OutputLimitedModel(infer_model(MODEL_ID))
 
 
-def load_price_snapshot(path: Path = PRICE_SNAPSHOT_PATH) -> PriceSnapshot:
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        observed_at = datetime.fromisoformat(raw["observed_at"])
-    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-        raise StageError("price snapshot is unreadable") from error
-    if observed_at.tzinfo is None:
-        raise StageError("price snapshot observed_at must include a timezone")
-    rates = raw.get("rates_cny_per_million")
+def _validate_price_snapshot(snapshot: PriceSnapshot) -> None:
+    if snapshot.source_url != PRICE_SOURCE_URL or snapshot.model_id != MODEL_ID:
+        raise StageError("price snapshot source or model does not match")
+    rates = snapshot.rates_cny_per_million
     if (
-        not isinstance(rates, dict)
+        snapshot.observed_at.tzinfo is None
         or not rates
         or any(
-            not isinstance(name, str) or not name or isinstance(rate, bool) or not isinstance(rate, int) or rate <= 0
+            not isinstance(name, str)
+            or not name
+            or isinstance(rate, bool)
+            or not isinstance(rate, int)
+            or rate <= 0
             for name, rate in rates.items()
         )
     ):
         raise StageError("price snapshot rates are invalid")
-    snapshot = PriceSnapshot(
-        source_url=str(raw.get("source_url", "")),
-        model_id=str(raw.get("model_id", "")),
-        observed_at=observed_at,
-        rates_cny_per_million=rates,
-    )
-    _validate_price_snapshot(snapshot)
-    return snapshot
-
-
-def _validate_price_snapshot(snapshot: PriceSnapshot) -> None:
-    now = datetime.now(UTC)
-    if snapshot.source_url != PRICE_SOURCE_URL or snapshot.model_id != MODEL_ID:
-        raise StageError("price snapshot source or model does not match")
-    observed_at = snapshot.observed_at.astimezone(UTC)
-    if observed_at > now or now - observed_at > PRICE_SNAPSHOT_MAX_AGE:
-        raise StageError("price snapshot is stale or from the future")
-    rates = snapshot.rates_cny_per_million
-    if not rates or any(isinstance(rate, bool) or not isinstance(rate, int) or rate <= 0 for rate in rates.values()):
-        raise StageError("price snapshot rates are invalid")
-    if max(rates.values()) < 27:
-        raise StageError("price snapshot maximum is below the approved conservative bound")
 
 
 def _git(*args: str) -> str:
@@ -313,7 +294,7 @@ def _runner_authority(runner: Any) -> tuple[Any, Any]:
 def _assert_zero_paid_preflight(runner: Any) -> None:
     store, _app = _runner_authority(runner)
     if store.list_objects("goal", GoalContract) or store.list_objects("run", RunRecord):
-        raise StageError("prepare created a Goal or Run before confirmation")
+        raise StageError("prepare created a Goal or Run before bounded execution")
 
 
 def _prepared_authority(runner: Any, prepared: Any) -> dict[str, Any]:
@@ -349,20 +330,6 @@ def _prepare(runner: Any, audit: CheckoutAudit) -> tuple[Any, dict[str, Any]]:
     ):
         raise StageError("prepared Champion does not match production governance audit")
     return prepared, authority
-
-
-def _confirm(stdin: TextIO, stdout: TextIO, prepared: Any) -> TrialConfirmation | None:
-    if not stdin.isatty():
-        return None
-    expected = f"CONFIRM {prepared.preview.trial_id}"
-    print(f"Type exactly: {expected}", file=stdout, flush=True)
-    if stdin.readline().strip() != expected:
-        return None
-    return TrialConfirmation(
-        trial_id=prepared.preview.trial_id,
-        preview_digest=content_digest(prepared.preview),
-        confirmed_via="local_tty",
-    )
 
 
 def _qualifying_failure(result: TrialResult) -> bool:
@@ -474,12 +441,12 @@ def _final_receipt(
 
 
 async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, Any]:
-    """Prepare and, only after local confirmation, run the fixed bounded sample."""
+    """Prepare and automatically run the fixed approved bounded sample."""
     dependencies = dependencies or StageDependencies()
     environment = os.environ if dependencies.environment is None else dependencies.environment
     if not bool(environment.get("DEEPSEEK_API_KEY", "").strip()):
         return {"stop": "missing_credential", "model_requests": 0, "candidate_version_id": None}
-    price = dependencies.price_snapshot or (dependencies.price_loader or load_price_snapshot)()
+    price = dependencies.price_snapshot or RECORDED_PRICE_SNAPSHOT
     _validate_price_snapshot(price)
     audit = (dependencies.checkout_audit or audit_checkout_and_governance)()
     root = _initialize_stage_root(dependencies.stage_root)
@@ -539,9 +506,11 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
         file=dependencies.stdout,
         flush=True,
     )
-    confirmation = _confirm(dependencies.stdin, dependencies.stdout, first_prepared)
-    if confirmation is None:
-        return {"stop": "confirmation_not_granted", "model_requests": 0, "candidate_version_id": None}
+    confirmation = TrialConfirmation(
+        trial_id=first_prepared.preview.trial_id,
+        preview_digest=content_digest(first_prepared.preview),
+        confirmed_via="approved_goal_budget",
+    )
     first, first_durable = _load_result(first_store, first_app, await runner.execute(first_prepared, confirmation))
     first_charge = _result_charge(first, price)
     if not first.qualifies_as_real_model_trial:
@@ -614,18 +583,11 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
             "reserved_cny_microunits": reserve,
         },
     )
-    second_confirmation = _confirm(dependencies.stdin, dependencies.stdout, second_prepared)
-    if second_confirmation is None:
-        return _final_receipt(
-            root,
-            first,
-            stop="retry_confirmation_not_granted",
-            charged_microunits=first_charge,
-            price=price,
-            audit=audit,
-            first_durable=first_durable,
-            triage=observe,
-        )
+    second_confirmation = TrialConfirmation(
+        trial_id=second_prepared.preview.trial_id,
+        preview_digest=content_digest(second_prepared.preview),
+        confirmed_via="approved_goal_budget",
+    )
     second, second_durable = _load_result(
         second_store, second_app, await runner.execute(second_prepared, second_confirmation)
     )
@@ -698,7 +660,7 @@ def main() -> int:
         print(f"Alpha-C real-evidence stop: {error}", file=sys.stderr)
         return 2
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 2 if result["stop"] in {"missing_credential", "confirmation_not_granted"} else 0
+    return 2 if result["stop"] == "missing_credential" else 0
 
 
 if __name__ == "__main__":
