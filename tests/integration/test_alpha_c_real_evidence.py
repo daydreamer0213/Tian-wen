@@ -427,21 +427,7 @@ def test_host_readiness_accepts_the_locked_manifest_digest_image_id(
 ) -> None:
     """Break caught: Docker's manifest-digest image Id could be rejected despite the exact locked RepoDigest."""
     module = _module()
-
-    def fake_run(argv: list[str], **_kwargs: Any) -> Any:
-        if argv[1:2] == ["version"]:
-            value = {"Server": {"Os": "linux", "Arch": "amd64"}}
-        else:
-            value = {
-                "Id": "sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7",
-                "RepoDigests": [module.LOCKED_IMAGE_REFERENCE],
-                "Os": "linux",
-                "Architecture": "amd64",
-            }
-        return SimpleNamespace(returncode=0, stdout=json.dumps(value).encode("utf-8"), stderr=b"")
-
-    monkeypatch.setattr(module.subprocess, "run", fake_run)
-
+    _docker_ready(module, monkeypatch)
     module._host_readiness()
 
 
