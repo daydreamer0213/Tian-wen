@@ -20,6 +20,7 @@ from tianwen.domain import ArtifactStatus, ArtifactVersion, BudgetLimit, BudgetU
 from tianwen.evaluation import ActivePointer
 
 _OLD_TRIAL_ID = "trial-633752d776238190a9411a1cd8b7c71a"
+_RECOVERY_1_TRIAL_ID = "trial-81c53da1ea42cc4330854a9e4182c2e5"
 
 
 def test_real_evidence_runner_has_a_stage_local_entry() -> None:
@@ -283,7 +284,46 @@ def _old_zero_paid_root(
 
 def _recovery_dependencies(module: Any, runner: _Runner, old_root: Path, recovery_root: Path) -> Any:
     dependencies = _dependencies(module, runner, _Intake(), stage_root=recovery_root)
-    return replace(dependencies, recovery_of_root=old_root)
+    return replace(dependencies, recovery_of_root=old_root, recovery_1_root=None)
+
+
+def _recovery_1_zero_paid_root(module: Any, *, nonzero: str | None = None) -> Path:
+    root = _old_zero_paid_root(module, nonzero=nonzero, trial_id=_RECOVERY_1_TRIAL_ID)
+    receipt = {
+        "schema": "tianwen.alpha_c.real_evidence.preflight_stop.v1",
+        "stop": "preflight_failure",
+        "phase": "prepare",
+        "failure_class": "DockerExecutionError",
+        "model_requests": 0,
+        "tokens": 0,
+        "conservative_charge_microunits": 0,
+        "remaining_cny_microunits": 20_000_000,
+        "case_id": None,
+        "lesson_id": None,
+        "candidate_version_id": None,
+    }
+    (root / "receipts" / "stop-preflight.json").write_text(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+    return root
+
+
+def _docker_ready(module: Any, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(argv: list[str], **_kwargs: Any) -> Any:
+        calls.append(tuple(argv))
+        if argv[1:2] == ["version"]:
+            value = {"Server": {"Os": "linux", "Arch": "amd64"}}
+        else:
+            value = {
+                "Id": module.LOCKED_IMAGE_ID,
+                "RepoDigests": [module.LOCKED_IMAGE_REFERENCE],
+            }
+        return SimpleNamespace(returncode=0, stdout=json.dumps(value).encode("utf-8"), stderr=b"")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    return calls
 
 
 def test_cli_defaults_to_the_one_fixed_recovery_root() -> None:
@@ -292,8 +332,134 @@ def test_cli_defaults_to_the_one_fixed_recovery_root() -> None:
 
     dependencies = module.StageDependencies()
 
-    assert dependencies.stage_root == Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-1")
+    assert dependencies.stage_root == Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-2")
     assert dependencies.recovery_of_root == module.STAGE_ROOT
+    assert getattr(dependencies, "recovery_1_root", None) == module.RECOVERY_1_STAGE_ROOT
+
+
+def test_recovery_2_readiness_failure_stops_before_root_model_or_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Break caught: a missing locked Docker image could consume the final recovery root."""
+    module = _module()
+    original = _old_zero_paid_root(module)
+    recovery_1 = _recovery_1_zero_paid_root(module)
+    recovery_2 = _root() / "tianwen-alpha-c-real-evidence-recovery-2"
+    runner = _Runner([_Result("trial-1", True, "met")])
+    model_constructed = runner_constructed = False
+
+    def model_factory() -> Any:
+        nonlocal model_constructed
+        model_constructed = True
+        return _Model()
+
+    def runner_factory(_model: Any, _root: Path) -> Any:
+        nonlocal runner_constructed
+        runner_constructed = True
+        return runner
+
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=1, stdout=b"", stderr=b"missing"),
+    )
+    dependencies = replace(
+        _dependencies(module, runner, _Intake(), stage_root=recovery_2),
+        recovery_of_root=original,
+        recovery_1_root=recovery_1,
+        model_factory=model_factory,
+        runner_factory=runner_factory,
+    )
+
+    with pytest.raises(module.StageError, match="Docker readiness"):
+        asyncio.run(module.run_stage(dependencies))
+
+    assert not recovery_2.exists()
+    assert model_constructed is False
+    assert runner_constructed is False
+
+
+def test_recovery_2_binds_both_zero_paid_prior_authorities_and_recovery_1_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Break caught: final recovery could omit either consumed stage or its durable stop boundary."""
+    module = _module()
+    original = _old_zero_paid_root(module)
+    recovery_1 = _recovery_1_zero_paid_root(module)
+    recovery_2 = _root() / "tianwen-alpha-c-real-evidence-recovery-2"
+    calls = _docker_ready(module, monkeypatch)
+    runner = _Runner([_Result("trial-1", True, "met")])
+
+    result = asyncio.run(
+        module.run_stage(
+            replace(
+                _dependencies(module, runner, _Intake(), stage_root=recovery_2),
+                recovery_of_root=original,
+                recovery_1_root=recovery_1,
+            )
+        )
+    )
+
+    assert result["stop"] == "no_case_success"
+    authority = json.loads((recovery_2 / "receipts" / "stage-authority.json").read_text(encoding="utf-8"))
+    original_authority = (original / "receipts" / "stage-authority.json").read_bytes()
+    recovery_1_authority = (recovery_1 / "receipts" / "stage-authority.json").read_bytes()
+    recovery_1_stop = (recovery_1 / "receipts" / "stop-preflight.json").read_bytes()
+    assert authority["recovery_of"] == [
+        {
+            "authority_path": str((original / "receipts" / "stage-authority.json").resolve()),
+            "authority_digest": content_digest(original_authority),
+            "trial_id": _OLD_TRIAL_ID,
+            "stop_receipt_path": None,
+            "stop_receipt_digest": None,
+        },
+        {
+            "authority_path": str((recovery_1 / "receipts" / "stage-authority.json").resolve()),
+            "authority_digest": content_digest(recovery_1_authority),
+            "trial_id": _RECOVERY_1_TRIAL_ID,
+            "stop_receipt_path": str((recovery_1 / "receipts" / "stop-preflight.json").resolve()),
+            "stop_receipt_digest": content_digest(recovery_1_stop),
+        },
+    ]
+    assert calls == [
+        ("docker", "version", "--format", "{{json .}}"),
+        ("docker", "image", "inspect", module.LOCKED_IMAGE_REFERENCE),
+    ]
+
+
+@pytest.mark.parametrize(
+    "nonzero", ["goal", "budget_usage", "alpha_trial_result", "model_request", "action_reservation"]
+)
+def test_recovery_2_rejects_nonzero_recovery_1_store_before_root_or_model(
+    monkeypatch: pytest.MonkeyPatch, nonzero: str
+) -> None:
+    """Break caught: final recovery could treat the second consumed store as zero-paid without reading it."""
+    module = _module()
+    original = _old_zero_paid_root(module)
+    recovery_1 = _recovery_1_zero_paid_root(module, nonzero=nonzero)
+    recovery_2 = _root() / "tianwen-alpha-c-real-evidence-recovery-2"
+    _docker_ready(module, monkeypatch)
+    model_constructed = False
+
+    def model_factory() -> Any:
+        nonlocal model_constructed
+        model_constructed = True
+        return _Model()
+
+    with pytest.raises(module.StageError, match="zero-paid"):
+        asyncio.run(
+            module.run_stage(
+                replace(
+                    _dependencies(module, _Runner([]), stage_root=recovery_2),
+                    recovery_of_root=original,
+                    recovery_1_root=recovery_1,
+                    model_factory=model_factory,
+                )
+            )
+        )
+
+    assert not recovery_2.exists()
+    assert model_constructed is False
 
 
 def test_exact_zero_paid_old_stage_authorizes_only_the_fixed_recovery() -> None:

@@ -39,8 +39,12 @@ ZERO_RESOURCE_LEARNING_BUDGET = BudgetLimit(
     model_requests=0, tool_calls=0, tokens=0, wall_seconds=0, child_loops=0, action_effects=0
 )
 STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence")
-RECOVERY_STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-1")
+RECOVERY_1_STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-1")
+RECOVERY_STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-2")
 RECOVERY_OF_TRIAL_ID = "trial-633752d776238190a9411a1cd8b7c71a"
+RECOVERY_1_TRIAL_ID = "trial-81c53da1ea42cc4330854a9e4182c2e5"
+LOCKED_IMAGE_ID = "sha256:c00fc7b44d844b6da22861ec24af43968a5200eac4ec607b4725d585165d6b49"
+LOCKED_IMAGE_REFERENCE = "python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7"
 PRICE_SOURCE_URL = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
 BASE_SHA = "4638026f210c0de29262d307dd051934570d975e"
 STAGE_BRANCH = "codex/tianwen-alpha-c-real-evidence"
@@ -124,6 +128,7 @@ class StageDependencies:
 
     stage_root: Path = RECOVERY_STAGE_ROOT
     recovery_of_root: Path | None = STAGE_ROOT
+    recovery_1_root: Path | None = RECOVERY_1_STAGE_ROOT
     environment: Mapping[str, str] | None = None
     stdout: TextIO = sys.stdout
     model_factory: Callable[[], Model] | None = None
@@ -272,9 +277,51 @@ def _initialize_stage_root(path: Path) -> Path:
     return root
 
 
-def _validate_zero_paid_recovery(path: Path) -> dict[str, str]:
+def _host_readiness() -> None:
+    """Prove the fixed Docker host facts before consuming recovery-2."""
+    try:
+        version = subprocess.run(
+            ["docker", "version", "--format", "{{json .}}"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=False,
+            shell=False,
+            timeout=10,
+        )
+        image = subprocess.run(
+            ["docker", "image", "inspect", LOCKED_IMAGE_REFERENCE],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=False,
+            shell=False,
+            timeout=10,
+        )
+        if version.returncode or image.returncode:
+            raise ValueError
+        server = json.loads(version.stdout).get("Server", {})
+        observed = json.loads(image.stdout)
+        if isinstance(observed, list) and len(observed) == 1:
+            observed = observed[0]
+        repo_digests = observed.get("RepoDigests") if isinstance(observed, dict) else None
+        if (
+            server.get("Os") != "linux"
+            or server.get("Arch") != "amd64"
+            or not isinstance(observed, dict)
+            or observed.get("Id") != LOCKED_IMAGE_ID
+            or not isinstance(repo_digests, list)
+            or LOCKED_IMAGE_REFERENCE not in repo_digests
+        ):
+            raise ValueError
+    except (OSError, subprocess.TimeoutExpired, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise StageError("Docker readiness does not match the locked Linux/amd64 image") from error
+
+
+def _validate_zero_paid_recovery(
+    path: Path, *, expected_trial_id: str, require_stop_receipt: bool
+) -> dict[str, str | None]:
     root = _under_devdata(path)
     authority_path = root / "receipts" / "stage-authority.json"
+    stop_receipt_path = root / "receipts" / "stop-preflight.json"
     connection: sqlite3.Connection | None = None
     try:
         raw_authority = authority_path.read_bytes()
@@ -291,7 +338,7 @@ def _validate_zero_paid_recovery(path: Path) -> dict[str, str]:
             or authority.get("max_trials") != 2
             or authority.get("candidate_version_id") is not None
             or len(trial_roots) != 1
-            or trial_roots[0].name != RECOVERY_OF_TRIAL_ID
+            or trial_roots[0].name != expected_trial_id
         ):
             raise ValueError
         database = trial_roots[0] / "state" / "tianwen.db"
@@ -319,6 +366,27 @@ def _validate_zero_paid_recovery(path: Path) -> dict[str, str]:
             for table in counted_tables & tables
         ):
             raise ValueError
+        if require_stop_receipt:
+            raw_stop = stop_receipt_path.read_bytes()
+            if len(raw_stop) > 65_536:
+                raise ValueError
+            stop = json.loads(raw_stop)
+            if stop != {
+                "schema": "tianwen.alpha_c.real_evidence.preflight_stop.v1",
+                "stop": "preflight_failure",
+                "phase": "prepare",
+                "failure_class": "DockerExecutionError",
+                "model_requests": 0,
+                "tokens": 0,
+                "conservative_charge_microunits": 0,
+                "remaining_cny_microunits": MAX_STAGE_CNY_MICROUNITS,
+                "case_id": None,
+                "lesson_id": None,
+                "candidate_version_id": None,
+            }:
+                raise ValueError
+        elif stop_receipt_path.exists():
+            raise ValueError
     except (OSError, json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as error:
         raise StageError("old stage is not an exact zero-paid recovery authority") from error
     finally:
@@ -328,6 +396,8 @@ def _validate_zero_paid_recovery(path: Path) -> dict[str, str]:
         "authority_path": str(authority_path.resolve()),
         "authority_digest": content_digest(raw_authority),
         "trial_id": trial_roots[0].name,
+        "stop_receipt_path": str(stop_receipt_path.resolve()) if require_stop_receipt else None,
+        "stop_receipt_digest": content_digest(raw_stop) if require_stop_receipt else None,
     }
 
 
@@ -511,11 +581,32 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
         return {"stop": "missing_credential", "model_requests": 0, "candidate_version_id": None}
     price = dependencies.price_snapshot or RECORDED_PRICE_SNAPSHOT
     _validate_price_snapshot(price)
-    recovery_of = (
-        None
-        if dependencies.recovery_of_root is None
-        else _validate_zero_paid_recovery(dependencies.recovery_of_root)
-    )
+    recovery_of: dict[str, str | None] | list[dict[str, str | None]] | None
+    if dependencies.recovery_of_root is None:
+        recovery_of = None
+    elif dependencies.recovery_1_root is None:
+        old_recovery = _validate_zero_paid_recovery(
+            dependencies.recovery_of_root,
+            expected_trial_id=RECOVERY_OF_TRIAL_ID,
+            require_stop_receipt=False,
+        )
+        recovery_of = {
+            key: old_recovery[key] for key in ("authority_path", "authority_digest", "trial_id")
+        }
+    else:
+        _host_readiness()
+        recovery_of = [
+            _validate_zero_paid_recovery(
+                dependencies.recovery_of_root,
+                expected_trial_id=RECOVERY_OF_TRIAL_ID,
+                require_stop_receipt=False,
+            ),
+            _validate_zero_paid_recovery(
+                dependencies.recovery_1_root,
+                expected_trial_id=RECOVERY_1_TRIAL_ID,
+                require_stop_receipt=True,
+            ),
+        ]
     audit = (dependencies.checkout_audit or audit_checkout_and_governance)()
     root = _initialize_stage_root(dependencies.stage_root)
     price_authority = price.authority()
