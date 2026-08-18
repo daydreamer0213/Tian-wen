@@ -267,3 +267,28 @@ preflight-failure/final-stop receipt with zero model requests, zero tokens, zero
 Lesson, and no Candidate. A non-zero old store or an existing replacement root fails closed. All
 other natural-sampling, cumulative CNY 20, maximum-two-A1, Candidate, Promotion, Shadow, and
 Alpha-D boundaries remain unchanged.
+
+## 13. Final fixed recovery after the missing-image stop
+
+Recovery-1 also stopped before any Goal, Run, budget, Result, model request, token, container,
+Action, Event, or CNY charge because the locked immutable Docker image was absent. The original
+root and recovery-1 root remain immutable evidence and are never deleted, moved, overwritten, or
+replayed.
+
+One final replacement may use only
+`D:\DevData\tianwen-alpha-c-real-evidence-recovery-2`, and only while that path does not exist.
+Before creating it, the operator performs a host-only readiness check through the existing native
+Docker CLI: the server must be reachable as Linux/amd64 and `docker image inspect` must return the
+exact locked image ID and RepoDigest. A readiness failure creates no root and no receipt because no
+new execution authority has been consumed.
+
+The operator then reloads both prior stage authorities, both exact Trial stores, and the
+recovery-1 preflight-stop receipt. Both stores must still have zero Goal, Run, budget, Result,
+model-request, Action, and Event state. The recovery-2 authority binds each prior authority path
+and content digest, each prior stop-receipt path and digest when present, and both exact Trial IDs.
+No automatic numbering, loop, scheduler, registry, generalized recovery API, image manager, or
+additional approval is introduced.
+
+All existing cumulative CNY 20, maximum-two-A1 natural sampling, real-evidence, Candidate,
+Promotion, Shadow, Runtime, DSH, and Alpha-D boundaries remain unchanged. Any further basic host
+environment failure ends this recovery line; recovery-3 is not permitted.
