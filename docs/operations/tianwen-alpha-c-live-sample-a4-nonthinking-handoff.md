@@ -40,7 +40,7 @@
 ## Durable evidence
 
 - Final receipt SHA-256: `88411442d38aea2b1d9fbe4796dfd5d6e35c10d376874ea6906212804cb0af30`.
-- SQLite SHA-256: `d367e62116eab5063598773341ef16a51327ac41905ea201466df07999085047`; no WAL or SHM sidecar remained after the read-only audit.
+- SQLite SHA-256: `d367e62116eab5063598773341ef16a51327ac41905ea201466df07999085047`; the read-only audit left a zero-byte WAL and a 32,768-byte SHM sidecar.
 - Result digest: `sha256:0e6da76d99ecb79ad47a597e3241c2b6cc0e80651317bfe48bc197f37d490ea6`.
 - Manifest digest: `sha256:4bf330adbdb82e17ec3f5301cad6984bf2a653c3d27e1728e8fce73f6aebea4d`; it freezes A4, the 40k budget, non-thinking mode, 4096, and evidence packet digest `sha256:d653bfa8b373c72f3c3893bec3b25f4c40d79acf8bed27ce99308c126c86ff28`.
 - Final Evidence digest: `sha256:7d973514436b1808571803bd8de7e80151376636c477c0d1a3f2615fcdeeae4d`, bound to the final round Run and Docker verifier.
