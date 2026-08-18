@@ -20,6 +20,18 @@ from tianwen.domain import content_digest
 from tianwen.store import StateStore
 
 _CONTAINER_ID = "a" * 64
+_INHERITED_IMAGE_ENV = (
+    "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "LANG=C.UTF-8",
+    "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+    "PYTHON_VERSION=3.12.11",
+    "PYTHON_SHA256=c30bb24b7f1e9a19b11b55a546434f74e739bb4c271a3e3a80ff4380d49f7adb",
+)
+_CONTROLLED_ENV = {
+    "HOME": "/tmp",
+    "TMPDIR": "/tmp",
+    "PYTHONDONTWRITEBYTECODE": "1",
+}
 
 
 class _Reader:
@@ -254,6 +266,57 @@ def test_recovery_identity_accepts_local_log_configuration_with_compression_disa
         "compress": "false",
     }
     assert executor._inspect_matches(record, observed)
+
+
+def test_recovery_identity_accepts_image_inherited_environment(executor: DockerCheckExecutor) -> None:
+    record = _record(executor, "action:inherited-env")
+    observed = _inspect(executor, "action:inherited-env", code=0)
+    observed["Config"]["Env"] = [
+        *_INHERITED_IMAGE_ENV,
+        *(f"{key}={value}" for key, value in _CONTROLLED_ENV.items()),
+    ]
+
+    assert executor._inspect_matches(record, observed)
+
+
+@pytest.mark.parametrize("controlled", tuple(_CONTROLLED_ENV))
+@pytest.mark.parametrize("mutation", ("missing", "changed", "duplicate"))
+def test_recovery_identity_rejects_missing_changed_or_duplicate_controlled_environment(
+    executor: DockerCheckExecutor, controlled: str, mutation: str
+) -> None:
+    record = _record(executor, f"action:controlled-env-{controlled}-{mutation}")
+    observed = _inspect(executor, f"action:controlled-env-{controlled}-{mutation}", code=0)
+    environment = [*_INHERITED_IMAGE_ENV, *(f"{key}={value}" for key, value in _CONTROLLED_ENV.items())]
+    if mutation == "missing":
+        environment = [item for item in environment if not item.startswith(f"{controlled}=")]
+    elif mutation == "changed":
+        environment = [
+            f"{controlled}=changed" if item.startswith(f"{controlled}=") else item for item in environment
+        ]
+    else:
+        environment.append(f"{controlled}={_CONTROLLED_ENV[controlled]}")
+    observed["Config"]["Env"] = environment
+
+    assert not executor._inspect_matches(record, observed)
+
+
+@pytest.mark.parametrize(
+    "environment",
+    (
+        {"HOME": "/tmp"},
+        [*_INHERITED_IMAGE_ENV, *(f"{key}={value}" for key, value in _CONTROLLED_ENV.items()), 1],
+        [*_INHERITED_IMAGE_ENV, *(f"{key}={value}" for key, value in _CONTROLLED_ENV.items()), "missing-equals"],
+        [*_INHERITED_IMAGE_ENV, *(f"{key}={value}" for key, value in _CONTROLLED_ENV.items()), "=empty-key"],
+    ),
+)
+def test_recovery_identity_rejects_malformed_observed_environment(
+    executor: DockerCheckExecutor, environment: Any
+) -> None:
+    record = _record(executor, "action:malformed-env")
+    observed = _inspect(executor, "action:malformed-env", code=0)
+    observed["Config"]["Env"] = environment
+
+    assert not executor._inspect_matches(record, observed)
 
 
 @pytest.mark.anyio

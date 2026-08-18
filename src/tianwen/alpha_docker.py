@@ -625,6 +625,20 @@ class DockerCheckExecutor:
     async def run_seed_preflight(self) -> VerifierResult:
         return await self._run_verifier("seed-preflight", result_type="seed_preflight")
 
+    @staticmethod
+    def _observed_environment_matches(observed: Any, expected: tuple[str, ...]) -> bool:
+        if not isinstance(observed, list):
+            return False
+        parsed: dict[str, str] = {}
+        for item in observed:
+            if not isinstance(item, str) or "=" not in item:
+                return False
+            key, value = item.split("=", 1)
+            if not key or key in parsed:
+                return False
+            parsed[key] = value
+        return all(parsed.get(key) == value for key, value in (item.split("=", 1) for item in expected))
+
     def _inspect_matches(self, record: CheckExecutionRecord, observed: dict[str, Any]) -> bool:
         labels = observed.get("Config", {}).get("Labels", {})
         try:
@@ -682,7 +696,7 @@ class DockerCheckExecutor:
             }
             and observed_config.get("WorkingDir") == config["working_dir"]
             and observed_config.get("Cmd") == list(config["argv"])
-            and observed_config.get("Env") == list(config["environment"])
+            and self._observed_environment_matches(observed_config.get("Env"), config["environment"])
         )
 
     async def reconcile(self, action_id: str) -> CheckResult | VerifierResult | None:
