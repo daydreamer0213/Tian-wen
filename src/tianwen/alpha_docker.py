@@ -132,7 +132,7 @@ class DockerCheckExecutor:
         ]
 
     def _container_name(self, action_id: str) -> str:
-        return f"tianwen-alpha-{content_digest(action_id)[7:31]}"
+        return f"tianwen-alpha-{content_digest({'trial_id': self.paths.trial_id, 'action_id': action_id})[7:31]}"
 
     @property
     def _canonical_cli_image_reference(self) -> str:

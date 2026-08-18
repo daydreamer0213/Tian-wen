@@ -111,6 +111,7 @@ def _manifest(trial_id: str) -> TrialManifest:
             }
         }
     }
+    verifier = {"verifier_id": "final", "digest": "sha256:verifier-spec"}
     return TrialManifest(
         trial_id=trial_id,
         previous_trial_id=None,
@@ -144,8 +145,8 @@ def _manifest(trial_id: str) -> TrialManifest:
         container_config_digest=content_digest({}),
         named_checks_snapshot={},
         named_checks_digest=content_digest({}),
-        verifier_snapshot={},
-        verifier_digest=content_digest({}),
+        verifier_snapshot=verifier,
+        verifier_digest=content_digest(verifier),
         baseline_tree_digest="sha256:baseline",
         budget=BudgetLimit(model_requests=1, tool_calls=1, tokens=1),
         workspace_identity="opaque-workspace",
@@ -156,7 +157,7 @@ def _failed_trial(
     tmp_path: Path, trial_id: str, *, user_feedback: bool = False
 ) -> tuple[StateStore, TrialResult, EvidenceRecord | None]:
     store, manifest = _store(tmp_path / f"{trial_id}.db"), _manifest(trial_id)
-    run_id = f"alpha:{trial_id}:settlement"
+    run_id = f"alpha:{trial_id}:round-1"
     final = EvidenceRecord(
         evidence_id=f"final-{trial_id}",
         run_id=run_id,
@@ -200,7 +201,7 @@ def _failed_trial(
         previous_trial_id=None,
         trial_manifest_digest=content_digest(manifest),
         goal_id="goal-integration",
-        run_ids=(f"run-{trial_id}",),
+        run_ids=(run_id,),
         exploration_run_ids=(),
         checkpoint_ids=(),
         task_id=manifest.task_id,
@@ -211,7 +212,7 @@ def _failed_trial(
         baseline_tree_digest=manifest.baseline_tree_digest,
         final_tree_digest=f"sha256:final-tree-{trial_id}",
         diff_digest=f"sha256:diff-{trial_id}",
-        verifier_digest=manifest.verifier_digest,
+        verifier_digest=str(manifest.verifier_snapshot["digest"]),
         verdict="not_met",
         failure_categories=("correctness",),
         execution_status="completed",
