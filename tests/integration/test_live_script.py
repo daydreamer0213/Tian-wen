@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 from pydantic_ai.models import ModelRequestParameters
 
+from tianwen.deepseek import deepseek_chat_model
 from tianwen.domain import ActionStatus, ExplorationStopReason, PromotionRecord
 
 
@@ -39,10 +40,7 @@ async def test_live_deepseek_model_sends_the_official_max_tokens_field(
     script = _live_script()
     requests: list[dict[str, object]] = []
 
-    async def send(
-        client: httpx.AsyncClient, request: httpx.Request, *args: object, **kwargs: object
-    ) -> httpx.Response:
-        del client, args, kwargs
+    async def send(request: httpx.Request) -> httpx.Response:
         requests.append(json.loads(request.content))
         return httpx.Response(
             200,
@@ -65,19 +63,18 @@ async def test_live_deepseek_model_sends_the_official_max_tokens_field(
 
     monkeypatch.setenv("DEEPSEEK_API_KEY", "offline-contract-key")
     monkeypatch.setenv("TIANWEN_MODEL", "deepseek:deepseek-v4-pro")
-    monkeypatch.setattr(httpx.AsyncClient, "send", send)
-    monkeypatch.setattr(script, "TianwenApp", lambda config: config)
-    config = script._make_app(
+    app = script._make_app(
         SimpleNamespace(data_dir=tmp_path / "data", workspace=tmp_path, max_tokens=4_096),
         Ed25519PrivateKey.generate().public_key(),
     )
 
-    model = config.model
-    await model.request(
-        [ModelRequest(parts=[UserPromptPart(content="hello")])],
-        {"max_tokens": 4_096},
-        ModelRequestParameters(),
-    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(send)) as client:
+        model = deepseek_chat_model(http_client=client)
+        await model.request(
+            [ModelRequest(parts=[UserPromptPart(content="hello")])],
+            {"max_tokens": 4_096},
+            ModelRequestParameters(),
+        )
 
     assert requests == [
         {
@@ -94,6 +91,7 @@ async def test_live_deepseek_model_sends_the_official_max_tokens_field(
     assert model.profile["openai_chat_send_back_thinking_parts"] == "field"
     assert model.profile["openai_supports_tool_choice_required"] is False
     assert model.profile["openai_chat_supports_max_completion_tokens"] is False
+    assert app.config.model.profile == model.profile
 
 
 class _RecordingApp:
