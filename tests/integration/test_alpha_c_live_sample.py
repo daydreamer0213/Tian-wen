@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from tianwen.alpha import TrialManifest, TrialPreview, TrialResult, TrialUsage
+from tianwen.alpha import TrialConfirmation, TrialManifest, TrialPreview, TrialResult, TrialUsage
 from tianwen.alpha_docker import VerifierResult
 from tianwen.domain import BudgetLimit, BudgetUsage, EvidenceRecord, content_digest, utc_now
 from tianwen.learning_intake import LearningTriageReceipt, OutcomeObservation
@@ -39,13 +39,19 @@ class _Store:
         self.database = database
         self.objects: dict[tuple[str, str], object] = {}
         self.usage = BudgetUsage()
+        self.reserved = BudgetUsage()
 
     def get_object(self, kind: str, object_id: str, _model: type[Any]) -> Any:
         return self.objects[(kind, object_id)]
 
     def get_budget(self, loop_id: str) -> tuple[BudgetLimit, BudgetUsage, BudgetUsage]:
         assert loop_id.startswith("loop-")
-        return BUDGET, self.usage, BudgetUsage()
+        return BUDGET, self.usage, self.reserved
+
+    def list_objects(self, kind: str, _model: type[Any]) -> list[Any]:
+        if kind != "goal" or not self.usage.model_requests:
+            return []
+        return [SimpleNamespace(goal_id=self.database.stem.replace("trial", "goal"))]
 
 
 class _Runner:
@@ -80,10 +86,11 @@ class _Runner:
             data_root=str(self.store.database.parent),
             paid_request_warning="approved bounded Trial may incur real API fees",
         )
+        seed_verdict = "met" if self.kind == "seed_invalid" else "not_met"
         self.prepared = SimpleNamespace(
             preview=preview,
             seed_verifier=VerifierResult(
-                verdict="not_met",
+                verdict=seed_verdict,
                 passed_checks=(),
                 failed_checks=("final",),
                 failure_categories=("correctness",),
@@ -118,7 +125,7 @@ class _Runner:
         )
         run_id = f"alpha:{trial_id}:round-1"
         verdict = "met" if self.kind == "success" else "not_met"
-        completed = self.kind in {"success", "failure"}
+        completed = self.kind in {"success", "failure", "early_final"}
         real = self.kind != "operational"
         categories = ("correctness",) if self.kind == "failure" else ()
         evidence = EvidenceRecord(
@@ -147,12 +154,13 @@ class _Runner:
             action_effects=1 if real else 0,
             wall_seconds=1,
         )
+        run_ids = (run_id, f"alpha:{trial_id}:round-2") if self.kind == "early_final" else (run_id,)
         result = TrialResult(
             trial_id=trial_id,
             previous_trial_id=prepared.preview.previous_trial_id,
             trial_manifest_digest=content_digest(manifest),
             goal_id=goal_id,
-            run_ids=(run_id,),
+            run_ids=run_ids,
             exploration_run_ids=(),
             checkpoint_ids=(),
             task_id="A1",
@@ -193,6 +201,7 @@ class _Runner:
             action_effects=usage.action_effects,
         )
         if self.kind == "interrupt":
+            self.store.reserved = BudgetUsage(model_requests=1, tokens=500)
             raise RuntimeError("simulated interruption after paid usage")
         return result
 
@@ -250,16 +259,6 @@ def _dependencies(tmp_path: Path, kinds: list[str], fingerprints: list[str] | No
         intake_factory=lambda _store, _budget: _Intake(),
     )
     return dependencies, runners
-
-
-def test_approved_goal_budget_confirmation_binds_exact_preview() -> None:
-    from tianwen.alpha import TrialConfirmation
-
-    confirmation = TrialConfirmation(
-        trial_id="trial-1", preview_digest="sha256:preview", confirmed_via="approved_goal_budget"
-    )
-
-    assert confirmation.confirmed_via == "approved_goal_budget"
 
 
 def test_verified_success_projects_once_and_does_not_repeat(tmp_path: Path) -> None:
@@ -363,13 +362,19 @@ def test_invalid_provider_identity_writes_zero_paid_stop_receipt(tmp_path: Path)
     assert runners == []
 
 
-def test_paid_interruption_reports_durable_trial_id_instead_of_zero_receipt(tmp_path: Path) -> None:
+def test_paid_interruption_writes_conservative_durable_receipt(tmp_path: Path) -> None:
     module = _module()
     dependencies, runners = _dependencies(tmp_path, ["interrupt"])
 
-    with pytest.raises(module.StageError, match="trial-1"):
-        asyncio.run(module.run_stage(dependencies))
+    receipt = asyncio.run(module.run_stage(dependencies))
 
+    assert receipt["stop"] == "trial_execution_interrupted"
+    assert receipt["trial_ids"] == ["trial-1"]
+    assert receipt["request_usage"] == receipt["reserved_request_usage"] == 1
+    assert receipt["token_usage"] == 1000
+    assert receipt["reserved_tokens"] == 500
+    assert receipt["estimated_cny"] == pytest.approx(0.0405)
+    assert receipt["candidate_version_id"] is None
     assert runners[0].store.usage.model_requests == 1
 
 
@@ -383,3 +388,35 @@ def test_second_zero_paid_preflight_failure_stops_with_first_trial_receipt(tmp_p
     assert receipt["trial_ids"] == ["trial-1"]
     assert receipt["request_usage"] == 1
     assert [item.executions for item in runners] == [1, 0]
+
+
+def test_first_seed_preflight_failure_writes_zero_paid_receipt(tmp_path: Path) -> None:
+    module = _module()
+    dependencies, runners = _dependencies(tmp_path, ["seed_invalid"])
+
+    receipt = asyncio.run(module.run_stage(dependencies))
+
+    assert receipt["stop"] == "seed_preflight_failed"
+    assert receipt["trial_ids"] == []
+    assert receipt["request_usage"] == receipt["token_usage"] == 0
+    assert receipt["candidate_version_id"] is None
+    assert [item.executions for item in runners] == [0]
+
+
+def test_final_evidence_must_bind_the_last_completed_round(tmp_path: Path) -> None:
+    module = _module()
+    runner = _Runner(tmp_path, 1, "early_final")
+    prepared = runner.prepare("A1", budget=BUDGET)
+    supplied = asyncio.run(
+        runner.execute(
+            prepared,
+            TrialConfirmation(
+                trial_id=prepared.preview.trial_id,
+                preview_digest=content_digest(prepared.preview),
+                confirmed_via="approved_goal_budget",
+            ),
+        )
+    )
+
+    with pytest.raises(module.StageError, match="final verifier Evidence"):
+        module._durable_trial(runner, supplied)

@@ -14,7 +14,7 @@ from pydantic_ai.models import Model, infer_model
 from pydantic_ai.models.wrapper import WrapperModel
 
 from tianwen.alpha import AlphaTrialRunner, PreparedTrial, TrialConfirmation, TrialManifest, TrialResult
-from tianwen.domain import BudgetLimit, EvidenceRecord, content_digest
+from tianwen.domain import BudgetLimit, EvidenceRecord, GoalContract, content_digest
 from tianwen.learning import LearningEngine
 from tianwen.learning_intake import LearningIntake, LearningTriageReceipt, OutcomeObservation
 
@@ -94,14 +94,20 @@ def _receipt(
     outcomes: list[OutcomeObservation] | None = None,
     triages: list[LearningTriageReceipt] | None = None,
     case_id: str | None = None,
+    interrupted_trial_id: str | None = None,
+    interrupted_budget: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     trials, outcomes, triages = trials or [], outcomes or [], triages or []
-    requests = sum(item["result"].usage.model_requests for item in trials)
-    tokens = sum(item["result"].usage.tokens for item in trials)
-    estimated = _estimate_cny(tokens)
+    interrupted_budget = interrupted_budget or {}
+    requests = sum(item["result"].usage.model_requests for item in trials) + interrupted_budget.get("model_requests", 0)
+    tokens = sum(item["result"].usage.tokens for item in trials) + interrupted_budget.get("tokens", 0)
+    reserved_requests = interrupted_budget.get("reserved_model_requests", 0)
+    reserved_tokens = interrupted_budget.get("reserved_tokens", 0)
+    estimated = _estimate_cny(tokens + reserved_tokens)
     value = {
         "stop": stop,
-        "trial_ids": [item["result"].trial_id for item in trials],
+        "trial_ids": [item["result"].trial_id for item in trials]
+        + ([interrupted_trial_id] if interrupted_trial_id else []),
         "request_usage": requests,
         "token_usage": tokens,
         "estimated_cny": estimated,
@@ -118,8 +124,25 @@ def _receipt(
                 "final_evidence_digest": (content_digest(item["evidence"]) if item["evidence"] is not None else None),
             }
             for item in trials
-        ],
+        ]
+        + (
+            [
+                {
+                    "trial_id": interrupted_trial_id,
+                    "result_digest": None,
+                    "manifest_digest": None,
+                    "final_evidence_digest": None,
+                }
+            ]
+            if interrupted_trial_id
+            else []
+        ),
     }
+    if interrupted_trial_id:
+        value.update(
+            reserved_request_usage=reserved_requests,
+            reserved_tokens=reserved_tokens,
+        )
     (root / "final-receipt.json").write_text(
         json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2), encoding="utf-8"
     )
@@ -153,13 +176,17 @@ def _durable_trial(runner: Any, supplied: TrialResult) -> dict[str, Any]:
         and item.purpose == "alpha_final_verification"
         and item.source_class == "docker_verifier"
     )
-    expected_runs = {*result.run_ids, *result.exploration_run_ids}
-    if not expected_runs:
-        expected_runs.add(f"alpha:{result.trial_id}:settlement")
+    expected_final_run = (
+        result.run_ids[-1]
+        if result.run_ids
+        else result.exploration_run_ids[-1]
+        if result.exploration_run_ids
+        else f"alpha:{result.trial_id}:settlement"
+    )
     completed_final = (
         len(finals) == 1
         and finals[0].scope == f"trial:{result.trial_id}"
-        and finals[0].run_id in expected_runs
+        and finals[0].run_id == expected_final_run
         and finals[0].result_class == result.verdict
         and finals[0].action_id in result.action_ids
     )
@@ -211,26 +238,37 @@ def _intake(store: Any, factory: Callable[[Any, BudgetLimit], LearningIntake] | 
     )
 
 
+def _audited_budget(runner: Any) -> dict[str, int]:
+    store, app = getattr(runner, "store", None), getattr(runner, "app", None)
+    if store is None or app is None:
+        raise StageError("interrupted Trial has no durable budget authority")
+    totals = {
+        "model_requests": 0,
+        "tokens": 0,
+        "reserved_model_requests": 0,
+        "reserved_tokens": 0,
+    }
+    try:
+        loop_ids = {app.goal_task(goal.goal_id).loop_id for goal in store.list_objects("goal", GoalContract)}
+        for loop_id in loop_ids:
+            _limit, usage, reserved = store.get_budget(loop_id)
+            totals["model_requests"] += usage.model_requests
+            totals["tokens"] += usage.tokens
+            totals["reserved_model_requests"] += reserved.model_requests
+            totals["reserved_tokens"] += reserved.tokens
+    except Exception as error:
+        raise StageError("interrupted Trial budget cannot be audited") from error
+    return totals
+
+
 async def _execute_prepared(runner: Any, prepared: PreparedTrial) -> dict[str, Any]:
     confirmation = TrialConfirmation(
         trial_id=prepared.preview.trial_id,
         preview_digest=content_digest(prepared.preview),
         confirmed_via="approved_goal_budget",
     )
-    try:
-        supplied = await runner.execute(prepared, confirmation)
-    except (asyncio.CancelledError, Exception) as error:
-        raise StageError(
-            f"Trial {prepared.preview.trial_id} execution interrupted; inspect its durable store"
-        ) from error
+    supplied = await runner.execute(prepared, confirmation)
     return _durable_trial(runner, supplied)
-
-
-async def _execute(runner: Any, previous_trial_id: str | None = None) -> tuple[PreparedTrial, dict[str, Any]]:
-    prepared = runner.prepare(TASK_ID, budget=BUDGET, previous_trial_id=previous_trial_id)
-    if prepared.seed_verifier.verdict != "not_met":
-        raise StageError("A1 seed verifier must be not_met")
-    return prepared, await _execute_prepared(runner, prepared)
 
 
 def _independent(first: tuple[Any, dict[str, Any]], second: tuple[Any, dict[str, Any]]) -> bool:
@@ -265,11 +303,20 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
     try:
         runner_factory = dependencies.runner_factory or _native_runner
         first_runner = runner_factory(model, root / "trial-1")
-        first = await _execute(first_runner)
-    except Exception as error:
-        if isinstance(error, StageError):
-            raise
+        first_prepared = first_runner.prepare(TASK_ID, budget=BUDGET)
+    except Exception:
         return _receipt(root, stop="infrastructure_preflight_failed")
+    if first_prepared.seed_verifier.verdict != "not_met":
+        return _receipt(root, stop="seed_preflight_failed")
+    try:
+        first = (first_prepared, await _execute_prepared(first_runner, first_prepared))
+    except (asyncio.CancelledError, Exception):
+        return _receipt(
+            root,
+            stop="trial_execution_interrupted",
+            interrupted_trial_id=first_prepared.preview.trial_id,
+            interrupted_budget=_audited_budget(first_runner),
+        )
     trials = [first[1]]
     first_kind = _classification(first[1]["result"])
     if first_kind is None:
@@ -301,10 +348,18 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
         or first[0].champion_digest != second_prepared.champion_digest
     ):
         return _receipt(root, stop="condition_drift", trials=trials, outcomes=outcomes, triages=triages)
-    second = (
-        second_prepared,
-        await _execute_prepared(second_runner, second_prepared),
-    )
+    try:
+        second = (second_prepared, await _execute_prepared(second_runner, second_prepared))
+    except (asyncio.CancelledError, Exception):
+        return _receipt(
+            root,
+            stop="trial_execution_interrupted",
+            trials=trials,
+            outcomes=outcomes,
+            triages=triages,
+            interrupted_trial_id=second_prepared.preview.trial_id,
+            interrupted_budget=_audited_budget(second_runner),
+        )
     trials.append(second[1])
     if not _independent(first, second):
         raise StageError("repeated Trials are not independent")
