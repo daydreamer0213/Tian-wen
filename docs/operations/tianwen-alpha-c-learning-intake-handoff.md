@@ -170,6 +170,16 @@ Task 3 (offline vertical evidence):
 - deferred Minor: the offline Trial fixture duplicates some unit fixture construction;
   it is intentionally not promoted into a new shared test framework in this slice.
 
+Whole-stage final reviews:
+
+- independent correctness review on reviewed content HEAD `61cf50bc06245ee60f3e1f0cdc39c571ee357fc4`:
+  C0/I0/M0, approved;
+- independent Ponytail/YAGNI review: Lean enough, C0/I0, net deletable scope `0` lines;
+- the only initial closure finding was trailing Markdown whitespace in the new design;
+  commits `4aeb25a00c01edb8c88b204f05ffd9806f28d79c` and
+  `61cf50bc06245ee60f3e1f0cdc39c571ee357fc4` removed it, after which full-branch
+  `git diff --check` passed.
+
 ## 7. Fresh release verification
 
 All final gates were run serially on implementation HEAD `6366a5c`:
