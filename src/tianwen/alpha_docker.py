@@ -184,7 +184,7 @@ class DockerCheckExecutor:
             "tmpfs_bytes": self.bundle.task.limits.tmpfs_bytes,
             "output_limit_bytes": spec.output_limit_bytes,
             "log_driver": "local",
-            "log_options": (f"max-size={spec.output_limit_bytes}", "max-file=1"),
+            "log_options": (f"max-size={spec.output_limit_bytes}", "max-file=1", "compress=false"),
             "mounts": ("/workspace", f"/checks/{script_name}"),
             "working_dir": "/workspace",
             "environment": ("HOME=/tmp", "TMPDIR=/tmp", "PYTHONDONTWRITEBYTECODE=1"),
@@ -240,6 +240,8 @@ class DockerCheckExecutor:
             f"max-size={spec.output_limit_bytes}",
             "--log-opt",
             "max-file=1",
+            "--log-opt",
+            "compress=false",
             "--mount",
             f"type=bind,src={self.paths.workspace},dst=/workspace,readonly",
             "--mount",
@@ -676,7 +678,7 @@ class DockerCheckExecutor:
             and log_config
             == {
                 "Type": config["log_driver"],
-                "Config": {"max-size": str(config["output_limit_bytes"]), "max-file": "1"},
+                "Config": {"max-size": str(config["output_limit_bytes"]), "max-file": "1", "compress": "false"},
             }
             and observed_config.get("WorkingDir") == config["working_dir"]
             and observed_config.get("Cmd") == list(config["argv"])

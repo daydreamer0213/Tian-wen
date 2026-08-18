@@ -40,14 +40,19 @@ ZERO_RESOURCE_LEARNING_BUDGET = BudgetLimit(
 )
 STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence")
 RECOVERY_1_STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-1")
-RECOVERY_STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-2")
+RECOVERY_2_STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-2")
+RECOVERY_STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-3")
 RECOVERY_OF_TRIAL_ID = "trial-633752d776238190a9411a1cd8b7c71a"
 RECOVERY_1_TRIAL_ID = "trial-81c53da1ea42cc4330854a9e4182c2e5"
+RECOVERY_2_TRIAL_ID = "trial-817225ebe2ff018604ee75a02094342c"
+RECOVERY_2_CONTAINER_ID = "083295b0646365640780f0eacb26cfc1bde4a362342ce2ef53f4c1e95d262a3e"
 LOCKED_IMAGE_REFERENCE = "python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7"
 _CANONICAL_LOCKED_IMAGE_REFERENCE = f"docker.io/library/{LOCKED_IMAGE_REFERENCE}"
 ORIGINAL_AUTHORITY_DIGEST = "sha256:66af629ca1e8b9ae7e1998ae0b1883952bcea9ee3afc9f7188568558f8d84192"
 RECOVERY_1_AUTHORITY_DIGEST = "sha256:f7651000fb2fda294e4b45bcd23cca78bb9327df0121a1db1cf112d0bf5e13a4"
 RECOVERY_1_STOP_DIGEST = "sha256:78c2cd46d4ed03eca520c5ef8e555751872fe80bfa0def90198e5f990422e78e"
+RECOVERY_2_AUTHORITY_DIGEST = "sha256:6709f2dc2612c807590e9b3e89c2b00f937148c095619e3befbcc08320ae8bce"
+RECOVERY_2_STOP_DIGEST = "sha256:78c2cd46d4ed03eca520c5ef8e555751872fe80bfa0def90198e5f990422e78e"
 PRICE_SOURCE_URL = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
 BASE_SHA = "4638026f210c0de29262d307dd051934570d975e"
 STAGE_BRANCH = "codex/tianwen-alpha-c-real-evidence"
@@ -132,6 +137,7 @@ class StageDependencies:
     stage_root: Path = RECOVERY_STAGE_ROOT
     recovery_of_root: Path | None = STAGE_ROOT
     recovery_1_root: Path | None = RECOVERY_1_STAGE_ROOT
+    recovery_2_root: Path | None = RECOVERY_2_STAGE_ROOT
     environment: Mapping[str, str] | None = None
     stdout: TextIO = sys.stdout
     model_factory: Callable[[], Model] | None = None
@@ -281,7 +287,7 @@ def _initialize_stage_root(path: Path) -> Path:
 
 
 def _host_readiness() -> None:
-    """Prove the fixed Docker host facts before consuming recovery-2."""
+    """Prove the fixed Docker host facts before consuming recovery-3."""
     try:
         version = subprocess.run(
             ["docker", "version", "--format", "{{json .}}"],
@@ -370,7 +376,33 @@ def _validate_zero_paid_recovery(
         if not required.issubset(tables):
             raise ValueError
         baseline_kinds = {"active_pointer", "app_config", "artifact", "eval_protocol"}
-        if any(row[0] not in baseline_kinds for row in connection.execute("SELECT kind FROM tw_objects")):
+        kinds = [row[0] for row in connection.execute("SELECT kind FROM tw_objects")]
+        if expected_trial_id == RECOVERY_2_TRIAL_ID:
+            seed_rows = connection.execute(
+                "SELECT object_id, status, body_json, body_digest FROM tw_objects WHERE kind = 'check_execution'"
+            ).fetchall()
+            if len(seed_rows) != 1:
+                raise ValueError
+            object_id, status, body_json, body_digest = seed_rows[0]
+            seed = json.loads(body_json)
+            if (
+                any(kind not in baseline_kinds | {"check_execution"} for kind in kinds)
+                or object_id != "seed-preflight"
+                or status != "running"
+                or content_digest(seed) != body_digest
+                or seed.get("action_id") != "seed-preflight"
+                or seed.get("container_id") != RECOVERY_2_CONTAINER_ID
+                or seed.get("trial_id") != RECOVERY_2_TRIAL_ID
+                or seed.get("check_id") != "seed-preflight"
+                or seed.get("result_type") != "seed_preflight"
+                or seed.get("status") != "running"
+                or seed.get("exit_code") is not None
+                or seed.get("result_json") is not None
+                or seed.get("output_digest") is not None
+                or seed.get("finished_at") is not None
+            ):
+                raise ValueError
+        elif any(kind not in baseline_kinds for kind in kinds):
             raise ValueError
         if connection.execute("SELECT COUNT(*) FROM tw_budgets").fetchone()[0]:
             raise ValueError
@@ -595,8 +627,12 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
         return {"stop": "missing_credential", "model_requests": 0, "candidate_version_id": None}
     price = dependencies.price_snapshot or RECORDED_PRICE_SNAPSHOT
     _validate_price_snapshot(price)
-    if dependencies.recovery_of_root is None or dependencies.recovery_1_root is None:
-        raise StageError("recovery-2 requires both prior authorities")
+    if (
+        dependencies.recovery_of_root is None
+        or dependencies.recovery_1_root is None
+        or dependencies.recovery_2_root is None
+    ):
+        raise StageError("recovery-3 requires all three prior authorities")
     _host_readiness()
     recovery_of = [
         _validate_zero_paid_recovery(
@@ -618,6 +654,15 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
                 "authority_digest": recovery_of[0]["authority_digest"],
                 "trial_id": RECOVERY_OF_TRIAL_ID,
             },
+        )
+    )
+    recovery_of.append(
+        _validate_zero_paid_recovery(
+            dependencies.recovery_2_root,
+            expected_trial_id=RECOVERY_2_TRIAL_ID,
+            expected_authority_digest=RECOVERY_2_AUTHORITY_DIGEST,
+            require_stop_receipt=True,
+            expected_stop_digest=RECOVERY_2_STOP_DIGEST,
         )
     )
     audit = (dependencies.checkout_audit or audit_checkout_and_governance)()

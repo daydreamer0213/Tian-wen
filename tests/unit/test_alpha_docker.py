@@ -150,7 +150,7 @@ def _inspect(executor: DockerCheckExecutor, action_id: str, *, code: int, runnin
             "Memory": limits.memory_bytes,
             "NanoCpus": int(limits.cpus * 1_000_000_000),
             "Tmpfs": {"/tmp": f"rw,nosuid,nodev,noexec,size={limits.tmpfs_bytes}"},
-            "LogConfig": {"Type": "local", "Config": {"max-size": "16", "max-file": "1"}},
+            "LogConfig": {"Type": "local", "Config": {"max-size": "16", "max-file": "1", "compress": "false"}},
         },
         "Mounts": [
             {"Type": "bind", "Source": str(executor.paths.workspace), "Destination": "/workspace", "RW": False},
@@ -192,7 +192,11 @@ def _make_final_inspect(executor: DockerCheckExecutor, observed: dict[str, Any],
     observed["Config"]["Cmd"] = ["python", "-I", "/checks/verify.py", "/workspace"]
     observed["HostConfig"]["LogConfig"] = {
         "Type": "local",
-        "Config": {"max-size": str(executor.bundle.task.final_verifier.output_limit_bytes), "max-file": "1"},
+        "Config": {
+            "max-size": str(executor.bundle.task.final_verifier.output_limit_bytes),
+            "max-file": "1",
+            "compress": "false",
+        },
     }
     observed["Mounts"][1] = {
         "Type": "bind",
@@ -216,6 +220,11 @@ def test_create_argv_has_every_required_boundary_and_only_two_mounts(executor: D
     assert "--memory" in argv and "268435456" in argv
     assert "--cpus" in argv and "1.0" in argv
     assert "--pull" in argv and "never" in argv
+    assert tuple(argv[index + 1] for index, value in enumerate(argv) if value == "--log-opt") == (
+        "max-size=16",
+        "max-file=1",
+        "compress=false",
+    )
     assert sum(item.startswith("type=bind,") for item in argv) == 2
     assert "docker.sock" not in joined.casefold()
     assert f"docker.io/library/{executor.bundle.image_lock.immutable_reference}" in argv
@@ -224,6 +233,27 @@ def test_create_argv_has_every_required_boundary_and_only_two_mounts(executor: D
     assert str(executor.paths.workspace) not in "\n".join(sanitized)
     assert str(executor.bundle.root / "checks" / "public.py") not in "\n".join(sanitized)
     assert "DEEPSEEK_API_KEY" not in environment
+
+
+def test_normalized_local_log_configuration_disables_compression(executor: DockerCheckExecutor) -> None:
+    config = executor._normalized_config("public")
+
+    assert config["log_driver"] == "local"
+    assert config["log_options"] == ("max-size=16", "max-file=1", "compress=false")
+
+
+def test_recovery_identity_accepts_local_log_configuration_with_compression_disabled(
+    executor: DockerCheckExecutor,
+) -> None:
+    record = _record(executor, "action:log-compression")
+    observed = _inspect(executor, "action:log-compression", code=0)
+
+    assert observed["HostConfig"]["LogConfig"]["Config"] == {
+        "max-size": "16",
+        "max-file": "1",
+        "compress": "false",
+    }
+    assert executor._inspect_matches(record, observed)
 
 
 @pytest.mark.anyio
@@ -600,7 +630,7 @@ async def test_final_recovery_reads_logs_and_returns_only_verifier_result(
     inspected["Config"]["Cmd"] = ["python", "-I", "/checks/verify.py", "/workspace"]
     inspected["HostConfig"]["LogConfig"] = {
         "Type": "local",
-        "Config": {"max-size": str(final_limit), "max-file": "1"},
+        "Config": {"max-size": str(final_limit), "max-file": "1", "compress": "false"},
     }
     async def inspect(_id: str) -> dict[str, Any]:
         return inspected

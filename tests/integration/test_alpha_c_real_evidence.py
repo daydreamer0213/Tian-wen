@@ -21,6 +21,8 @@ from tianwen.evaluation import ActivePointer
 
 _OLD_TRIAL_ID = "trial-633752d776238190a9411a1cd8b7c71a"
 _RECOVERY_1_TRIAL_ID = "trial-81c53da1ea42cc4330854a9e4182c2e5"
+_RECOVERY_2_TRIAL_ID = "trial-817225ebe2ff018604ee75a02094342c"
+_RECOVERY_2_CONTAINER_ID = "083295b0646365640780f0eacb26cfc1bde4a362342ce2ef53f4c1e95d262a3e"
 
 
 def test_real_evidence_runner_has_a_stage_local_entry() -> None:
@@ -223,10 +225,13 @@ def _dependencies(module: Any, runner: _Runner, intake: _Intake | None = None, *
     original = kwargs.pop("recovery_of_root", _old_zero_paid_root(module))
     recovery_1 = kwargs.pop("recovery_1_root", _recovery_1_zero_paid_root(module))
     _bind_test_prior_digests(module, original, recovery_1)
+    recovery_2 = kwargs.pop("recovery_2_root", _recovery_2_zero_paid_root(module))
+    _bind_test_recovery_2_digests(module, recovery_2)
     return module.StageDependencies(
         stage_root=kwargs.pop("stage_root", _root()),
         recovery_of_root=original,
         recovery_1_root=recovery_1,
+        recovery_2_root=recovery_2,
         environment={"DEEPSEEK_API_KEY": "configured"},
         stdout=SimpleNamespace(write=lambda _text: None, flush=lambda: None),
         model_factory=lambda: model,
@@ -318,6 +323,106 @@ def _recovery_1_zero_paid_root(module: Any, *, nonzero: str | None = None) -> Pa
     return root
 
 
+def _recovery_2_zero_paid_root(module: Any, *, corrupt: str | None = None) -> Path:
+    root = _root() / "recovery-2"
+    authority_path = root / "receipts" / "stage-authority.json"
+    authority_path.parent.mkdir(parents=True)
+    authority_path.write_text(
+        json.dumps(
+            {
+                "schema": "tianwen.alpha_c.real_evidence.stage_authority.v1",
+                "task_id": module.TASK_ID,
+                "model_id": module.MODEL_ID,
+                "budget": module.BUDGET.model_dump(mode="json"),
+                "max_trials": 2,
+                "candidate_version_id": None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    stop = {
+        "schema": "tianwen.alpha_c.real_evidence.preflight_stop.v1",
+        "stop": "preflight_failure",
+        "phase": "prepare",
+        "failure_class": "DockerExecutionError",
+        "model_requests": 0,
+        "tokens": 0,
+        "conservative_charge_microunits": 0,
+        "remaining_cny_microunits": 20_000_000,
+        "case_id": None,
+        "lesson_id": None,
+        "candidate_version_id": None,
+    }
+    stop_path = root / "receipts" / "stop-preflight.json"
+    stop_path.write_text(json.dumps(stop, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+    database = root / "runs" / _RECOVERY_2_TRIAL_ID / "state" / "tianwen.db"
+    database.parent.mkdir(parents=True)
+    record = {
+        "action_id": "seed-preflight",
+        "container_id": _RECOVERY_2_CONTAINER_ID,
+        "trial_id": _RECOVERY_2_TRIAL_ID,
+        "check_id": "seed-preflight",
+        "result_type": "seed_preflight",
+        "status": "running",
+        "exit_code": None,
+        "result_json": None,
+        "output_digest": None,
+        "finished_at": None,
+    }
+    if corrupt == "check_execution":
+        record["container_id"] = "not-the-recorded-container"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE tw_objects (
+                kind TEXT NOT NULL,
+                object_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                body_json TEXT NOT NULL,
+                body_digest TEXT NOT NULL
+            );
+            CREATE TABLE tw_budgets (usage_json TEXT NOT NULL, reserved_json TEXT NOT NULL);
+            CREATE TABLE tw_model_request_reservations (request_id TEXT NOT NULL);
+            CREATE TABLE tw_action_budget_reservations (action_id TEXT NOT NULL);
+            """
+        )
+        for kind in ("active_pointer", "app_config", "artifact", "eval_protocol"):
+            connection.execute(
+                "INSERT INTO tw_objects VALUES (?, ?, ?, ?, ?)",
+                (kind, f"{kind}-baseline", "active", "{}", content_digest({})),
+            )
+        connection.execute(
+            "INSERT INTO tw_objects VALUES (?, ?, ?, ?, ?)",
+            (
+                "check_execution",
+                "seed-preflight",
+                "running",
+                json.dumps(record, sort_keys=True, separators=(",", ":")),
+                content_digest(record),
+            ),
+        )
+        if corrupt == "ledger":
+            connection.execute("INSERT INTO tw_budgets VALUES (?, ?)", (BudgetUsage().model_dump_json(), "{}"))
+    return root
+
+
+def _bind_test_recovery_2_digests(
+    module: Any, root: Path, monkeypatch: pytest.MonkeyPatch | None = None
+) -> None:
+    values = {
+        "RECOVERY_2_AUTHORITY_DIGEST": content_digest((root / "receipts" / "stage-authority.json").read_bytes()),
+        "RECOVERY_2_STOP_DIGEST": content_digest((root / "receipts" / "stop-preflight.json").read_bytes()),
+    }
+    for name, value in values.items():
+        if monkeypatch is None:
+            setattr(module, name, value)
+        else:
+            monkeypatch.setattr(module, name, value, raising=False)
+
+
 def _bind_test_prior_digests(module: Any, original: Path, recovery_1: Path) -> None:
     original_authority = original / "receipts" / "stage-authority.json"
     recovery_1_authority = recovery_1 / "receipts" / "stage-authority.json"
@@ -381,27 +486,36 @@ def _offline_docker_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
     _docker_ready(_module(), monkeypatch)
 
 
-def test_recovery_2_cannot_omit_either_prior_authority(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("missing", ["recovery_of_root", "recovery_1_root", "recovery_2_root"])
+def test_recovery_3_cannot_omit_any_consumed_prior_authority(
+    monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
-    """Break caught: the final entry could evade its two consumed-stage authorities."""
+    """Break caught: recovery-3 could evade any consumed prior authority."""
     module = _module()
-    root = _root() / "tianwen-alpha-c-real-evidence-recovery-2"
+    root = _root() / "tianwen-alpha-c-real-evidence-recovery-3"
     runner = _Runner([_Result("trial-1", True, "met")])
+    model_constructed = False
+
+    def model_factory() -> Any:
+        nonlocal model_constructed
+        model_constructed = True
+        return _Model()
+
     _docker_ready(module, monkeypatch)
 
-    with pytest.raises(module.StageError, match="both prior"):
+    with pytest.raises(module.StageError, match="three prior"):
         asyncio.run(
             module.run_stage(
                 replace(
                     _dependencies(module, runner, _Intake(), stage_root=root),
-                    recovery_of_root=None,
-                    recovery_1_root=None,
+                    model_factory=model_factory,
+                    **{missing: None},
                 )
             )
         )
 
     assert not root.exists()
+    assert model_constructed is False
     assert runner.prepared == []
 
 
@@ -432,14 +546,15 @@ def test_host_readiness_accepts_the_locked_manifest_digest_image_id(
 
 
 def test_cli_defaults_to_the_one_fixed_recovery_root() -> None:
-    """Break caught: production could reuse the immutable first-launch evidence root."""
+    """Break caught: production could reuse a consumed recovery root."""
     module = _module()
 
     dependencies = module.StageDependencies()
 
-    assert dependencies.stage_root == Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-2")
+    assert dependencies.stage_root == Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-3")
     assert dependencies.recovery_of_root == module.STAGE_ROOT
     assert getattr(dependencies, "recovery_1_root", None) == module.RECOVERY_1_STAGE_ROOT
+    assert getattr(dependencies, "recovery_2_root", None) == Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-2")
 
 
 def test_recovery_2_readiness_failure_stops_before_root_model_or_runner(
@@ -484,18 +599,27 @@ def test_recovery_2_readiness_failure_stops_before_root_model_or_runner(
     assert runner_constructed is False
 
 
-def test_recovery_2_binds_both_zero_paid_prior_authorities_and_recovery_1_stop(
+def test_recovery_3_binds_all_three_zero_paid_prior_authorities(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Break caught: final recovery could omit either consumed stage or its durable stop boundary."""
+    """Break caught: recovery-3 could omit one consumed stage or its durable stop boundary."""
     module = _module()
     original = _old_zero_paid_root(module)
     recovery_1 = _recovery_1_zero_paid_root(module)
-    recovery_2 = _root() / "tianwen-alpha-c-real-evidence-recovery-2"
+    _bind_test_prior_digests(module, original, recovery_1)
+    recovery_2 = _recovery_2_zero_paid_root(module)
+    _bind_test_recovery_2_digests(module, recovery_2, monkeypatch)
+    recovery_3 = _root() / "tianwen-alpha-c-real-evidence-recovery-3"
     calls = _docker_ready(module, monkeypatch)
     runner = _Runner([_Result("trial-1", True, "met")])
-    dependencies = _dependencies(module, runner, _Intake(), stage_root=recovery_2)
-    _bind_test_prior_digests(module, original, recovery_1)
+    dependencies = _dependencies(
+        module,
+        runner,
+        _Intake(),
+        stage_root=recovery_3,
+        recovery_of_root=original,
+        recovery_1_root=recovery_1,
+    )
 
     result = asyncio.run(
         module.run_stage(
@@ -503,15 +627,18 @@ def test_recovery_2_binds_both_zero_paid_prior_authorities_and_recovery_1_stop(
                 dependencies,
                 recovery_of_root=original,
                 recovery_1_root=recovery_1,
+                recovery_2_root=recovery_2,
             )
         )
     )
 
     assert result["stop"] == "no_case_success"
-    authority = json.loads((recovery_2 / "receipts" / "stage-authority.json").read_text(encoding="utf-8"))
+    authority = json.loads((recovery_3 / "receipts" / "stage-authority.json").read_text(encoding="utf-8"))
     original_authority = (original / "receipts" / "stage-authority.json").read_bytes()
     recovery_1_authority = (recovery_1 / "receipts" / "stage-authority.json").read_bytes()
     recovery_1_stop = (recovery_1 / "receipts" / "stop-preflight.json").read_bytes()
+    recovery_2_authority = (recovery_2 / "receipts" / "stage-authority.json").read_bytes()
+    recovery_2_stop = (recovery_2 / "receipts" / "stop-preflight.json").read_bytes()
     assert authority["recovery_of"] == [
         {
             "authority_path": str((original / "receipts" / "stage-authority.json").resolve()),
@@ -527,11 +654,66 @@ def test_recovery_2_binds_both_zero_paid_prior_authorities_and_recovery_1_stop(
             "stop_receipt_path": str((recovery_1 / "receipts" / "stop-preflight.json").resolve()),
             "stop_receipt_digest": content_digest(recovery_1_stop),
         },
+        {
+            "authority_path": str((recovery_2 / "receipts" / "stage-authority.json").resolve()),
+            "authority_digest": content_digest(recovery_2_authority),
+            "trial_id": _RECOVERY_2_TRIAL_ID,
+            "stop_receipt_path": str((recovery_2 / "receipts" / "stop-preflight.json").resolve()),
+            "stop_receipt_digest": content_digest(recovery_2_stop),
+        },
     ]
     assert calls == [
         ("docker", "version", "--format", "{{json .}}"),
         ("docker", "image", "inspect", f"docker.io/library/{module.LOCKED_IMAGE_REFERENCE}"),
     ]
+
+
+@pytest.mark.parametrize("corrupt", ["authority", "stop", "ledger", "check_execution"])
+def test_recovery_3_rejects_changed_recovery_2_evidence_before_root_or_model(
+    monkeypatch: pytest.MonkeyPatch, corrupt: str
+) -> None:
+    """Break caught: recovery-3 could treat changed recovery-2 evidence as unused authority."""
+    module = _module()
+    original = _old_zero_paid_root(module)
+    recovery_1 = _recovery_1_zero_paid_root(module)
+    _bind_test_prior_digests(module, original, recovery_1)
+    recovery_2 = _recovery_2_zero_paid_root(
+        module, corrupt=corrupt if corrupt in {"ledger", "check_execution"} else None
+    )
+    _bind_test_recovery_2_digests(module, recovery_2, monkeypatch)
+    if corrupt == "authority":
+        path = recovery_2 / "receipts" / "stage-authority.json"
+        path.write_bytes(path.read_bytes() + b" ")
+    if corrupt == "stop":
+        path = recovery_2 / "receipts" / "stop-preflight.json"
+        path.write_bytes(path.read_bytes() + b" ")
+    root = _root() / "tianwen-alpha-c-real-evidence-recovery-3"
+    runner = _Runner([_Result("trial-1", True, "met")])
+    model_constructed = False
+
+    def model_factory() -> Any:
+        nonlocal model_constructed
+        model_constructed = True
+        return _Model()
+
+    dependencies = _dependencies(
+        module,
+        runner,
+        _Intake(),
+        stage_root=root,
+        recovery_of_root=original,
+        recovery_1_root=recovery_1,
+    )
+    with pytest.raises(module.StageError, match="zero-paid"):
+        asyncio.run(
+            module.run_stage(
+                replace(dependencies, recovery_2_root=recovery_2, model_factory=model_factory)
+            )
+        )
+
+    assert not root.exists()
+    assert model_constructed is False
+    assert runner.prepared == []
 
 
 def test_recovery_2_rejects_rewritten_prior_authority_even_when_its_shape_is_valid(
