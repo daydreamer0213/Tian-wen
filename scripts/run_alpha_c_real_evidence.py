@@ -45,6 +45,9 @@ RECOVERY_OF_TRIAL_ID = "trial-633752d776238190a9411a1cd8b7c71a"
 RECOVERY_1_TRIAL_ID = "trial-81c53da1ea42cc4330854a9e4182c2e5"
 LOCKED_IMAGE_ID = "sha256:c00fc7b44d844b6da22861ec24af43968a5200eac4ec607b4725d585165d6b49"
 LOCKED_IMAGE_REFERENCE = "python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7"
+ORIGINAL_AUTHORITY_DIGEST = "sha256:66af629ca1e8b9ae7e1998ae0b1883952bcea9ee3afc9f7188568558f8d84192"
+RECOVERY_1_AUTHORITY_DIGEST = "sha256:f7651000fb2fda294e4b45bcd23cca78bb9327df0121a1db1cf112d0bf5e13a4"
+RECOVERY_1_STOP_DIGEST = "sha256:78c2cd46d4ed03eca520c5ef8e555751872fe80bfa0def90198e5f990422e78e"
 PRICE_SOURCE_URL = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
 BASE_SHA = "4638026f210c0de29262d307dd051934570d975e"
 STAGE_BRANCH = "codex/tianwen-alpha-c-real-evidence"
@@ -320,7 +323,13 @@ def _host_readiness() -> None:
 
 
 def _validate_zero_paid_recovery(
-    path: Path, *, expected_trial_id: str, require_stop_receipt: bool
+    path: Path,
+    *,
+    expected_trial_id: str,
+    expected_authority_digest: str,
+    require_stop_receipt: bool,
+    expected_stop_digest: str | None = None,
+    expected_recovery_of: Mapping[str, str] | None = None,
 ) -> dict[str, str | None]:
     root = _under_devdata(path)
     authority_path = root / "receipts" / "stage-authority.json"
@@ -329,6 +338,8 @@ def _validate_zero_paid_recovery(
     try:
         raw_authority = authority_path.read_bytes()
         if len(raw_authority) > 65_536:
+            raise ValueError
+        if content_digest(raw_authority) != expected_authority_digest:
             raise ValueError
         authority = json.loads(raw_authority)
         trial_roots = [item for item in (root / "runs").iterdir() if item.is_dir()]
@@ -342,6 +353,7 @@ def _validate_zero_paid_recovery(
             or authority.get("candidate_version_id") is not None
             or len(trial_roots) != 1
             or trial_roots[0].name != expected_trial_id
+            or (expected_recovery_of is not None and authority.get("recovery_of") != dict(expected_recovery_of))
         ):
             raise ValueError
         database = trial_roots[0] / "state" / "tianwen.db"
@@ -371,7 +383,7 @@ def _validate_zero_paid_recovery(
             raise ValueError
         if require_stop_receipt:
             raw_stop = stop_receipt_path.read_bytes()
-            if len(raw_stop) > 65_536:
+            if len(raw_stop) > 65_536 or content_digest(raw_stop) != expected_stop_digest:
                 raise ValueError
             stop = json.loads(raw_stop)
             if stop != {
@@ -510,7 +522,7 @@ def _load_result(store: Any, app: Any, result: TrialResult) -> tuple[TrialResult
         and item.scope == f"trial:{result.trial_id}"
         and item.run_id == f"alpha:{result.trial_id}:settlement"
     )
-    if not final:
+    if (_qualifying_success(durable) or _qualifying_failure(durable)) and not final:
         raise StageError("trial result lacks exact final verifier evidence")
     task = app.goal_task(result.goal_id)
     _limit, usage, _reserved = store.get_budget(task.loop_id)
@@ -591,14 +603,24 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
         _validate_zero_paid_recovery(
             dependencies.recovery_of_root,
             expected_trial_id=RECOVERY_OF_TRIAL_ID,
+            expected_authority_digest=ORIGINAL_AUTHORITY_DIGEST,
             require_stop_receipt=False,
         ),
+    ]
+    recovery_of.append(
         _validate_zero_paid_recovery(
             dependencies.recovery_1_root,
             expected_trial_id=RECOVERY_1_TRIAL_ID,
+            expected_authority_digest=RECOVERY_1_AUTHORITY_DIGEST,
             require_stop_receipt=True,
-        ),
-    ]
+            expected_stop_digest=RECOVERY_1_STOP_DIGEST,
+            expected_recovery_of={
+                "authority_path": recovery_of[0]["authority_path"],
+                "authority_digest": recovery_of[0]["authority_digest"],
+                "trial_id": RECOVERY_OF_TRIAL_ID,
+            },
+        )
+    )
     audit = (dependencies.checkout_audit or audit_checkout_and_governance)()
     root = _initialize_stage_root(dependencies.stage_root)
     price_authority = price.authority()
@@ -612,8 +634,7 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
         "max_trials": 2,
         "candidate_version_id": None,
     }
-    if recovery_of is not None:
-        stage_authority["recovery_of"] = recovery_of
+    stage_authority["recovery_of"] = recovery_of
     _receipt(
         root,
         "stage-authority.json",
@@ -719,7 +740,21 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
         )
     first_outcome = _project(intake, first, first_store)
     observe = intake.triage((first_outcome,))
-    second_prepared, second_authority = _prepare(runner, audit)
+    try:
+        second_prepared, second_authority = _prepare(runner, audit)
+    except StageError:
+        raise
+    except Exception:
+        return _final_receipt(
+            root,
+            first,
+            stop="retry_preflight_failure",
+            charged_microunits=first_charge,
+            price=price,
+            audit=audit,
+            first_durable=first_durable,
+            triage=observe,
+        )
     second_store, second_app = _runner_authority(runner)
     comparable = (
         first_authority["condition"] == second_authority["condition"]

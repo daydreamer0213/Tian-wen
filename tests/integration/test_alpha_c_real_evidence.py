@@ -45,6 +45,7 @@ class _Result(BaseModel):
     goal_id: str | None = None
     run_ids: tuple[str, ...] = ()
     evidence_ids: tuple[str, ...] = ()
+    omit_final_evidence: bool = False
     trial_manifest_digest: str | None = None
     manifest: TrialManifest | None = None
 
@@ -59,7 +60,7 @@ class _Result(BaseModel):
     def model_post_init(self, _context: Any) -> None:
         self.goal_id = self.goal_id or f"goal-{self.trial_id}"
         self.run_ids = self.run_ids or (f"run-{self.trial_id}",)
-        self.evidence_ids = self.evidence_ids or (f"evidence-{self.trial_id}",)
+        self.evidence_ids = () if self.omit_final_evidence else self.evidence_ids or (f"evidence-{self.trial_id}",)
         self.manifest = self.manifest or TrialManifest.model_construct(trial_id=self.trial_id)
         self.trial_manifest_digest = self.trial_manifest_digest or content_digest(self.manifest)
 
@@ -219,10 +220,13 @@ def _dependencies(module: Any, runner: _Runner, intake: _Intake | None = None, *
         skill_digest="digest-champion",
         object_counts={},
     )
+    original = kwargs.pop("recovery_of_root", _old_zero_paid_root(module))
+    recovery_1 = kwargs.pop("recovery_1_root", _recovery_1_zero_paid_root(module))
+    _bind_test_prior_digests(module, original, recovery_1)
     return module.StageDependencies(
         stage_root=kwargs.pop("stage_root", _root()),
-        recovery_of_root=kwargs.pop("recovery_of_root", _old_zero_paid_root(module)),
-        recovery_1_root=kwargs.pop("recovery_1_root", _recovery_1_zero_paid_root(module)),
+        recovery_of_root=original,
+        recovery_1_root=recovery_1,
         environment={"DEEPSEEK_API_KEY": "configured"},
         stdout=SimpleNamespace(write=lambda _text: None, flush=lambda: None),
         model_factory=lambda: model,
@@ -288,7 +292,9 @@ def _old_zero_paid_root(
 
 def _recovery_dependencies(module: Any, runner: _Runner, old_root: Path, recovery_root: Path) -> Any:
     dependencies = _dependencies(module, runner, _Intake(), stage_root=recovery_root)
-    return replace(dependencies, recovery_of_root=old_root, recovery_1_root=_recovery_1_zero_paid_root(module))
+    recovery_1 = _recovery_1_zero_paid_root(module)
+    _bind_test_prior_digests(module, old_root, recovery_1)
+    return replace(dependencies, recovery_of_root=old_root, recovery_1_root=recovery_1)
 
 
 def _recovery_1_zero_paid_root(module: Any, *, nonzero: str | None = None) -> Path:
@@ -310,6 +316,44 @@ def _recovery_1_zero_paid_root(module: Any, *, nonzero: str | None = None) -> Pa
         json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
     )
     return root
+
+
+def _bind_test_prior_digests(module: Any, original: Path, recovery_1: Path) -> None:
+    original_authority = original / "receipts" / "stage-authority.json"
+    recovery_1_authority = recovery_1 / "receipts" / "stage-authority.json"
+    raw_original = original_authority.read_bytes()
+    authority = json.loads(recovery_1_authority.read_text(encoding="utf-8"))
+    authority["recovery_of"] = {
+        "authority_path": str(original_authority.resolve()),
+        "authority_digest": content_digest(raw_original),
+        "trial_id": _OLD_TRIAL_ID,
+    }
+    recovery_1_authority.write_text(
+        json.dumps(authority, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+    module.ORIGINAL_AUTHORITY_DIGEST = content_digest(raw_original)
+    module.RECOVERY_1_AUTHORITY_DIGEST = content_digest(recovery_1_authority.read_bytes())
+    module.RECOVERY_1_STOP_DIGEST = content_digest((recovery_1 / "receipts" / "stop-preflight.json").read_bytes())
+
+
+def _canonical_prior_roots(module: Any, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    original = _old_zero_paid_root(module)
+    recovery_1 = _recovery_1_zero_paid_root(module)
+    original_authority = original / "receipts" / "stage-authority.json"
+    recovery_1_authority = recovery_1 / "receipts" / "stage-authority.json"
+    _bind_test_prior_digests(module, original, recovery_1)
+    raw_original = original_authority.read_bytes()
+    monkeypatch.setattr(module, "ORIGINAL_AUTHORITY_DIGEST", content_digest(raw_original), raising=False)
+    monkeypatch.setattr(
+        module, "RECOVERY_1_AUTHORITY_DIGEST", content_digest(recovery_1_authority.read_bytes()), raising=False
+    )
+    monkeypatch.setattr(
+        module,
+        "RECOVERY_1_STOP_DIGEST",
+        content_digest((recovery_1 / "receipts" / "stop-preflight.json").read_bytes()),
+        raising=False,
+    )
+    return original, recovery_1
 
 
 def _docker_ready(module: Any, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
@@ -439,11 +483,13 @@ def test_recovery_2_binds_both_zero_paid_prior_authorities_and_recovery_1_stop(
     recovery_2 = _root() / "tianwen-alpha-c-real-evidence-recovery-2"
     calls = _docker_ready(module, monkeypatch)
     runner = _Runner([_Result("trial-1", True, "met")])
+    dependencies = _dependencies(module, runner, _Intake(), stage_root=recovery_2)
+    _bind_test_prior_digests(module, original, recovery_1)
 
     result = asyncio.run(
         module.run_stage(
             replace(
-                _dependencies(module, runner, _Intake(), stage_root=recovery_2),
+                dependencies,
                 recovery_of_root=original,
                 recovery_1_root=recovery_1,
             )
@@ -475,6 +521,129 @@ def test_recovery_2_binds_both_zero_paid_prior_authorities_and_recovery_1_stop(
         ("docker", "version", "--format", "{{json .}}"),
         ("docker", "image", "inspect", module.LOCKED_IMAGE_REFERENCE),
     ]
+
+
+def test_recovery_2_rejects_rewritten_prior_authority_even_when_its_shape_is_valid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Break caught: a replaced prior receipt could be re-authorized merely by hashing its new bytes."""
+    module = _module()
+    original, recovery_1 = _canonical_prior_roots(module, monkeypatch)
+    recovery_2 = _root() / "tianwen-alpha-c-real-evidence-recovery-2"
+    _docker_ready(module, monkeypatch)
+    authority_path = original / "receipts" / "stage-authority.json"
+    dependencies = _dependencies(module, _Runner([]), stage_root=recovery_2)
+    _bind_test_prior_digests(module, original, recovery_1)
+    authority_path.write_bytes(authority_path.read_bytes() + b" ")
+    runner = _Runner([_Result("trial-1", True, "met")])
+
+    with pytest.raises(module.StageError, match="zero-paid"):
+        asyncio.run(
+            module.run_stage(
+                replace(
+                    dependencies,
+                    runner_factory=lambda _model, _root: runner,
+                    intake_factory=lambda _store, _budget: _Intake(),
+                    recovery_of_root=original,
+                    recovery_1_root=recovery_1,
+                )
+            )
+        )
+
+    assert not recovery_2.exists()
+
+
+def test_recovery_2_rechecks_recovery_1_inner_original_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Break caught: a recovery-1 receipt could point at another original root while retaining a valid digest."""
+    module = _module()
+    original, recovery_1 = _canonical_prior_roots(module, monkeypatch)
+    recovery_2 = _root() / "tianwen-alpha-c-real-evidence-recovery-2"
+    _docker_ready(module, monkeypatch)
+    authority_path = recovery_1 / "receipts" / "stage-authority.json"
+    authority = json.loads(authority_path.read_text(encoding="utf-8"))
+    dependencies = _dependencies(module, _Runner([]), stage_root=recovery_2)
+    _bind_test_prior_digests(module, original, recovery_1)
+    authority["recovery_of"]["authority_path"] = "D:/DevData/not-the-original/receipts/stage-authority.json"
+    authority_path.write_text(json.dumps(authority, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+    monkeypatch.setattr(module, "RECOVERY_1_AUTHORITY_DIGEST", content_digest(authority_path.read_bytes()))
+    runner = _Runner([_Result("trial-1", True, "met")])
+
+    with pytest.raises(module.StageError, match="zero-paid"):
+        asyncio.run(
+            module.run_stage(
+                replace(
+                    dependencies,
+                    runner_factory=lambda _model, _root: runner,
+                    intake_factory=lambda _store, _budget: _Intake(),
+                    recovery_of_root=original,
+                    recovery_1_root=recovery_1,
+                )
+            )
+        )
+
+    assert not recovery_2.exists()
+
+
+def test_non_real_durable_result_without_final_evidence_still_writes_full_charge_stop() -> None:
+    """Break caught: a non-real provider/verifier result could lose its conservative paid reservation."""
+    module = _module()
+    result = _Result("trial-1", False, "not_met", omit_final_evidence=True)
+    root = _root()
+    runner = _Runner([result])
+
+    receipt = asyncio.run(module.run_stage(_dependencies(module, runner, _Intake(), stage_root=root)))
+
+    assert receipt["stop"] == "non_real_or_operational"
+    assert receipt["conservative_charge_microunits"] == 1_080_000
+    assert receipt["case_id"] is None
+    assert receipt["lesson_id"] is None
+    assert receipt["candidate_version_id"] is None
+    stored = json.loads((root / "receipts" / "stop-trial-1.json").read_text(encoding="utf-8"))
+    assert stored["stop"] == receipt["stop"]
+    assert stored["durable"]["first"]["result_digest"] == receipt["durable"]["first"]["result_digest"]
+
+
+def test_qualified_real_result_without_final_evidence_still_rejects_before_receipt() -> None:
+    """Break caught: a qualified result could be accepted without exact final verifier evidence."""
+    module = _module()
+    root = _root()
+    runner = _Runner([_Result("trial-1", True, "met", omit_final_evidence=True)])
+
+    with pytest.raises(module.StageError, match="final verifier evidence"):
+        asyncio.run(module.run_stage(_dependencies(module, runner, _Intake(), stage_root=root)))
+
+    assert not (root / "receipts" / "stop-trial-1.json").exists()
+
+
+def test_second_prepare_failure_persists_first_paid_observation_stop() -> None:
+    """Break caught: a retry preflight exception could discard the first paid Result and its observe receipt."""
+    module = _module()
+    root = _root()
+
+    class SecondPrepareFailureRunner(_Runner):
+        def prepare(self, task_id: str, *, budget: Any, previous_trial_id: str | None) -> _Prepared:
+            if self.prepared:
+                raise RuntimeError("second prepare failed")
+            return super().prepare(task_id, budget=budget, previous_trial_id=previous_trial_id)
+
+    runner = SecondPrepareFailureRunner([_Result("trial-1", True, "not_met", failure_categories=("correctness",))])
+    intake = _Intake()
+
+    receipt = asyncio.run(module.run_stage(_dependencies(module, runner, intake, stage_root=root)))
+
+    assert receipt["stop"] == "retry_preflight_failure"
+    assert receipt["trial_ids"] == ["trial-1"]
+    assert receipt["conservative_charge_microunits"] == 2700
+    assert receipt["case_id"] is None
+    assert receipt["lesson_id"] is None
+    assert receipt["candidate_version_id"] is None
+    assert receipt["triage"] == "observe"
+    assert receipt["durable"]["first"]["result_digest"] == content_digest(runner.results[0])
+    assert receipt["durable"]["first"]["usage"]["tokens"] == 100
+    assert runner.executed == ["trial-1"]
+    assert intake.triages == [("outcome-trial-1",)]
 
 
 @pytest.mark.parametrize(
