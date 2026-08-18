@@ -6,34 +6,37 @@
 **Proportional-safety design commit:** `774e5195b8ac3ef49dcd39b8f006a8b21b45cf49`
 **Implementation parent before this final-fix commit:** `7b01aa7671cd06065c8be778121607e36ac2b306`
 **Canonical final-fix revision:** the commit containing this document
-**Status:** proportional-safety correction implemented and offline-regressed; live sampling not started
+**Status:** proportional-safety correction complete; one live launch stopped at zero-paid Docker preflight
 
 ## 1. Current conclusion
 
-The Alpha-C operator is ready for final review and then one bounded live invocation. The approved
-stage Goal, authority and cumulative CNY 20 budget authorize the fixed Trial. The preview, frozen
-conditions and receipts are audit records; they are not extra approval prompts.
+The Alpha-C proportional-safety correction is implemented, independently reviewed and fully
+verified offline. One authorized invocation of the fixed operator was then made. It stopped during
+`AlphaTrialRunner.prepare()` because Docker Desktop's Linux engine was not running. Docker CLI
+reported that `dockerDesktopLinuxEngine` did not exist, so no container, verifier or model request
+started.
 
 There is no local-TTY, stdin, pipe, environment-confirmation, price-file, network-refresh or
 price-freshness gate. After a legal zero-paid preflight, the script automatically executes the
 first fixed A1 Trial. It may automatically execute one independent repeat only after the first
 Trial is a qualifying verifier-backed failure and the repeat authorities match exactly.
 
-Live sampling has not been invoked. Current factual outcome remains:
+Current factual outcome:
 
 - real Trial count: `0`;
 - paid model requests: `0`;
 - model tokens: `0`;
-- CNY charged or reserved by a live run: `0`;
-- real Docker invocations: `0`;
+- CNY charged: `0`;
+- Docker engine/container executions: `0` (the CLI preflight failed before engine access);
 - qualified real Case: none;
 - conditional Lesson: none;
 - Candidate: none;
 - Promotion or Shadow change: none.
 
-This is an offline-ready state, not real learning evidence. Stage A remains a failed live proof;
-its exhausted Goal must not be replayed, and its historical `usage-invalid` fact remains
-operational evidence only.
+This is a truthful zero-paid environment stop, not a real Trial and not learning evidence. The
+one-use root was not deleted, moved or recreated, and the script was not rerun. Stage A remains a
+failed live proof; its exhausted Goal must not be replayed, and its historical `usage-invalid`
+fact remains operational evidence only.
 
 ## 2. Fixed authority and scope
 
@@ -118,11 +121,6 @@ One invocation of `scripts/run_alpha_c_real_evidence.py` performs these steps in
 
 ## 6. Offline evidence and review state
 
-Historical comprehensive offline gates at `babf37698d409d6941bd52d462b5612543ec605d`
-passed, including the full Python suite (`537 passed, 4 skipped`), A1-A5 tests, Ruff, Runtime
-Bundle build, TypeScript typecheck, DSH public/private-surface checks, Vitest (`244 passed,
-7 skipped`) and `git diff --check`.
-
 The proportional-safety implementation at `7b01aa7671cd06065c8be778121607e36ac2b306`
 removed the obsolete TTY and price freshness/file gates. Its focused runner, Alpha Trial and
 Alpha-C Intake regression set passed `67` tests.
@@ -133,22 +131,40 @@ The final correctness review then reported C1/I2/M0:
 - I1: unsettled usage could erase the full reservation charge;
 - I2: the retry receipt omitted the complete bounded second prepared authority.
 
-This final-fix revision corrects all three findings. Its focused RED failed for the two exact code
-gaps, focused GREEN passed, and the runner + Alpha Trial + Alpha-C Intake regression set passed
-`68` tests. A final whole-stage correctness/YAGNI review must confirm closure before the live
-invocation.
+Commit `325a36a94fc7b1186e8d00a36494392985fcf68f` corrected all three findings. Its
+focused RED failed for the two exact code gaps, focused GREEN passed, and the runner + Alpha Trial
++ Alpha-C Intake regression set passed `68` tests. Scoped correctness re-review returned C0/I0;
+Ponytail/YAGNI returned `Lean already. Ship.` and `net: -0 lines possible`.
+
+Fresh final gates after that fix:
+
+- real-evidence + Alpha Trial + Alpha-C Intake: `68 passed`;
+- learning, vertical slice and learning-intake regressions: `63 passed`;
+- A1-A5: `10 passed`;
+- full Python: `534 passed, 4 skipped`;
+- Ruff, py_compile and full-branch `git diff --check`: passed;
+- Runtime Bundle dependency-topology build: passed;
+- workspace TypeScript typecheck: passed;
+- DSH public surface: exact `0.1.0-rc.6`, passed;
+- private DSH imports: `0`;
+- full Vitest: `244 passed, 7 skipped`.
 
 ## 7. Current local state
 
-At this final-fix handoff update:
+After the single live launch:
 
 - branch: `codex/tianwen-alpha-c-real-evidence`;
-- implementation parent: `7b01aa7671cd06065c8be778121607e36ac2b306`;
+- reviewed live-launch code: `325a36a94fc7b1186e8d00a36494392985fcf68f`;
 - local `main`: `4638026f210c0de29262d307dd051934570d975e`;
 - local `origin/main`: `4638026f210c0de29262d307dd051934570d975e`;
 - pre-fix remote stage ref: `c26232094d4bf5638230fa01b8224c6a2910c1cb`;
-- fixed live root `D:\DevData\tianwen-alpha-c-real-evidence`: absent;
-- live Provider/Docker execution: not started;
+- fixed live root `D:\DevData\tianwen-alpha-c-real-evidence`: present and consumed;
+- attempted prepared identity: `trial-633752d776238190a9411a1cd8b7c71a`;
+- durable stage receipt: `receipts/stage-authority.json`;
+- Trial store objects: one existing Artifact, ActivePointer, AppConfig and EvalProtocol only;
+- Trial store Goal/Run/budget rows: `0 / 0 / 0`;
+- preflight/final Trial receipt: absent because Docker preflight raised before `prepare()` returned;
+- Provider/model execution: not started;
 - credential value: never read into receipts, printed or persisted.
 
 The final-fix commit SHA and updated remote stage ref must be recorded by the supervising session
@@ -156,31 +172,39 @@ after commit/push. The stage is not merged to `main`.
 
 ## 8. Residual risks and mandatory stops
 
-- The live Provider, Docker image and verifier have not yet been exercised by this stage.
-- The stage root is intentionally non-restartable. Do not invoke the script merely to inspect it,
-  and do not delete or recreate the root after a stop to obtain another batch.
+- The live Provider, Docker image and verifier were not exercised because Docker Desktop's Linux
+  engine was unavailable.
+- The operator does not yet turn an exception raised inside Docker preflight into a dedicated
+  final stop receipt. The stage authority plus read-only database counts prove zero paid work, but
+  this is weaker operational packaging than the intended final receipt.
+- The stage root is intentionally non-restartable. Do not delete, move, overwrite or recreate it
+  to obtain another batch, and do not bypass the fixed root through a custom invocation.
 - Stop if checkout, Champion, provider/model, Docker, verifier, receipts, condition equality or
   cumulative cost fails validation.
 - Stop at CNY 20, any Goal/authority expansion, credential exposure or major irreversible risk.
 - Do not weaken the two-Trial maximum or the real-evidence learning gates.
 
-## 9. Only recommended next entrance
+## 9. Pending user decisions
 
-After the final correctness and YAGNI reviews accept this fix and the reviewed commit is pushed:
+None.
 
-1. Confirm the reviewed stage branch is checked out, the tracked worktree is clean, the fixed live
-   root is still absent, and `DEEPSEEK_API_KEY` is configured without printing it.
-2. Invoke the fixed script exactly once from the project root:
+This is an engineering recovery question inside the existing Goal, authority and CNY 20 ceiling,
+not a new product-value or authorization decision. The supervising session must still review the
+evidence before authorizing a recovery implementation because the existing one-use root has been
+consumed.
 
-   ```powershell
-   .\.venv\Scripts\python.exe scripts\run_alpha_c_real_evidence.py
-   ```
+## 10. Only recommended next entrance
 
-3. Do not type or pipe confirmation. After legal preflight the first Trial starts automatically;
-   the only possible repeat is also automatic and only after a qualifying first failure.
-4. Let the script reach its durable final receipt. Do not rerun it or delete/recreate the one-use
-   root.
-5. Return the receipts, Trial evidence and conservative CNY accounting to the supervising session.
+First report this zero-paid Docker-preflight stop and the consumed root to the supervising session.
+Do not rerun or merge the stage. If supervision approves recovery, the only recommended narrow
+follow-up is:
 
-Do not start Attribution by guesswork, Candidate materialization, Promotion, Shadow or Alpha-D
-after the run. Those require later evidence and separate governed decisions.
+1. start and verify Docker Desktop's Linux engine before creating any new execution authority;
+2. add one bounded recovery authority tied to the existing failed stage receipt and exact zero
+   Goal/Run/budget proof;
+3. allow at most one replacement one-use root without deleting or changing the failed root;
+4. write a dedicated preflight-failure/final receipt for any repeated environment stop; and
+5. re-review and run only after confirming cumulative paid usage remains zero and the CNY 20
+   ceiling is unchanged.
+
+No Candidate, Promotion, Shadow or Alpha-D work may start from this environment failure.
