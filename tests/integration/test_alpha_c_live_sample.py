@@ -381,4 +381,3 @@ def test_budget_and_interruption_bounds_always_write_a_final_receipt(
         assert runners == []
     else:
         assert [runner.executions for runner in runners] == [1]
-

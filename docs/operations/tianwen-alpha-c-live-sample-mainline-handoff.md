@@ -1,6 +1,6 @@
 # Alpha-C mainline clean live sample handoff
 
-Date: 2026-08-19  
+Date: 2026-08-19
 Status: stopped before Provider; shared Alpha Trial lifecycle blocker confirmed
 
 ## Git and scope
