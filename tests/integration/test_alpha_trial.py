@@ -48,13 +48,13 @@ class _Model(TestModel):
 
 
 class _ConfiguredModel(WrapperModel):
-    def __init__(self, settings: dict[str, Any]) -> None:
-        super().__init__(_Model())
+    def __init__(self, settings: dict[str, Any], wrapped: Any | None = None) -> None:
+        super().__init__(wrapped or _Model())
         self._settings = settings
 
     @property
     def settings(self) -> dict[str, Any]:
-        return self._settings
+        return {**dict(self.wrapped.settings or {}), **self._settings}
 
 
 class _Docker:
@@ -695,6 +695,102 @@ def test_output_limited_model_prepare_freezes_and_reloads_max_tokens(tmp_path: P
     assert durable == manifest
     assert durable.model_settings_snapshot == {"max_tokens": 4096}
     assert model.wrapped.request_count == 0
+
+
+def test_disabled_deepseek_thinking_prepare_freezes_and_reloads_exact_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Break caught: a provider-native execution mode could be omitted from Alpha authority."""
+    from tianwen.alpha import TrialManifest
+    from tianwen.deepseek import deepseek_chat_model
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "offline-contract-key")
+    root, docker = _bundle(tmp_path / "tasks", "A1"), _Docker()
+    model = _ConfiguredModel({"max_tokens": 4096}, deepseek_chat_model(thinking=False))
+    runner = _runner(root, model, docker)
+
+    prepared = runner.prepare("A1", budget=_budget())
+    assert runner.store.list_objects("goal", GoalContract) == []
+    _goal, manifest, _run = _persist_running_trial(runner, prepared)
+    durable = runner.store.get_object("alpha_trial_manifest", prepared.preview.trial_id, TrialManifest)
+    expected = {"extra_body": {"thinking": {"type": "disabled"}}, "max_tokens": 4096}
+
+    assert prepared.model_settings_snapshot == expected
+    assert runner.condition_snapshot(prepared).model_settings_snapshot == expected
+    assert durable == manifest
+    assert durable.model_settings_snapshot == expected
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"extra_body": {"thinking": {"type": "disabled"}}},
+        {"max_tokens": 4096, "extra_body": {"thinking": {"type": "enabled"}}},
+        {"max_tokens": 4096, "extra_body": {"thinking": "disabled"}},
+        {"max_tokens": 4096, "extra_body": {"thinking": {"type": "disabled", "other": True}}},
+    ],
+)
+def test_disabled_thinking_setting_must_have_the_exact_supported_shape(settings: dict[str, Any]) -> None:
+    """Break caught: arbitrary provider-native request bodies could enter durable Alpha authority."""
+    from tianwen.alpha import AlphaTrialError, sanitize_model_settings
+
+    with pytest.raises(AlphaTrialError, match="unsupported"):
+        sanitize_model_settings(_ConfiguredModel(settings))
+
+
+@pytest.mark.anyio
+async def test_execute_rejects_disabled_thinking_drift_before_goal_or_model(tmp_path: Path) -> None:
+    """Break caught: execute could silently change a prepared non-thinking Trial back to provider default."""
+    from tianwen.alpha import AlphaTrialError
+
+    root, docker = _bundle(tmp_path / "tasks", "A1"), _Docker()
+    runner = _runner(
+        root,
+        _ConfiguredModel(
+            {"max_tokens": 4096, "extra_body": {"thinking": {"type": "disabled"}}}
+        ),
+        docker,
+    )
+    prepared = runner.prepare("A1", budget=_budget())
+    replacement = _ConfiguredModel({"max_tokens": 4096})
+    runner.model = replacement
+
+    with pytest.raises(AlphaTrialError, match="configuration"):
+        await runner.execute(prepared, _confirmation(prepared))
+
+    assert replacement.wrapped.request_count == 0
+    assert runner.store.list_objects("goal", GoalContract) == []
+
+
+@pytest.mark.anyio
+async def test_resume_rejects_disabled_thinking_drift_before_model(tmp_path: Path) -> None:
+    """Break caught: resume could rebuild a frozen non-thinking Trial with provider-default thinking."""
+    from tianwen.alpha import AlphaTrialError, AlphaTrialRunner
+
+    root, docker = _bundle(tmp_path / "tasks", "A1"), _Docker()
+    runner = _runner(
+        root,
+        _ConfiguredModel(
+            {"max_tokens": 4096, "extra_body": {"thinking": {"type": "disabled"}}}
+        ),
+        docker,
+    )
+    prepared = runner.prepare("A1", budget=_budget())
+    _persist_running_trial(runner, prepared)
+    replacement = _ConfiguredModel({"max_tokens": 4096})
+    recovered = AlphaTrialRunner(
+        task_root=root,
+        image_lock_path=root / "image.lock",
+        data_root=prepared.paths.data_root,
+        model=replacement,
+        docker_factory=lambda *_args: docker,
+        allowed_drive="D:",
+    )
+
+    with pytest.raises(AlphaTrialError, match="model settings"):
+        await recovered.resume(prepared.preview.trial_id)
+
+    assert replacement.wrapped.request_count == 0
 
 
 def test_deepseek_wrapper_identity_can_qualify_after_a_settled_request(
