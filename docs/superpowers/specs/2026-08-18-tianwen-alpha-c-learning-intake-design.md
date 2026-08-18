@@ -1,7 +1,7 @@
 # Tianwen Alpha-C Learning Intake Design
 
 **Status:** Implemented on the Alpha-C stage branch; pending final merge
-**Date:** 2026-08-18  
+**Date:** 2026-08-18
 **Scope:** Alpha-C first narrow slice only
 
 ## 1. Decision
