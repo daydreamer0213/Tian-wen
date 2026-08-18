@@ -742,8 +742,6 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
     observe = intake.triage((first_outcome,))
     try:
         second_prepared, second_authority = _prepare(runner, audit)
-    except StageError:
-        raise
     except Exception:
         return _final_receipt(
             root,

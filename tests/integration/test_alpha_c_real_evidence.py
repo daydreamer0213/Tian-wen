@@ -646,6 +646,38 @@ def test_second_prepare_failure_persists_first_paid_observation_stop() -> None:
     assert intake.triages == [("outcome-trial-1",)]
 
 
+def test_second_prepare_stage_error_persists_first_paid_observation_stop() -> None:
+    """Break caught: a retry authority StageError could discard an already paid first Result."""
+    module = _module()
+    root = _root()
+
+    class SecondPrepareStageErrorRunner(_Runner):
+        def prepare(self, task_id: str, *, budget: Any, previous_trial_id: str | None) -> _Prepared:
+            if self.prepared:
+                raise module.StageError("prepared Champion does not match production governance audit")
+            return super().prepare(task_id, budget=budget, previous_trial_id=previous_trial_id)
+
+    runner = SecondPrepareStageErrorRunner(
+        [_Result("trial-1", True, "not_met", failure_categories=("correctness",))]
+    )
+    intake = _Intake()
+
+    receipt = asyncio.run(module.run_stage(_dependencies(module, runner, intake, stage_root=root)))
+
+    assert receipt["stop"] == "retry_preflight_failure"
+    assert receipt["trial_ids"] == ["trial-1"]
+    assert receipt["model_requests"] == 1
+    assert receipt["tokens"] == 100
+    assert receipt["conservative_charge_microunits"] == 2700
+    assert receipt["case_id"] is None
+    assert receipt["lesson_id"] is None
+    assert receipt["candidate_version_id"] is None
+    assert receipt["triage"] == "observe"
+    assert receipt["durable"]["first"]["result_digest"] == content_digest(runner.results[0])
+    assert runner.executed == ["trial-1"]
+    assert intake.triages == [("outcome-trial-1",)]
+
+
 @pytest.mark.parametrize(
     "nonzero", ["goal", "run", "budget_usage", "alpha_trial_result", "model_request", "action_reservation", "event"]
 )
@@ -1088,8 +1120,8 @@ def test_retry_authority_drift_stops_before_second_execute(second_condition: str
     intake = _Intake()
 
     if second_champion != "champion":
-        with pytest.raises(module.StageError, match="prepared Champion"):
-            asyncio.run(module.run_stage(_dependencies(module, runner, intake)))
+        result = asyncio.run(module.run_stage(_dependencies(module, runner, intake)))
+        assert result["stop"] == "retry_preflight_failure"
     else:
         result = asyncio.run(module.run_stage(_dependencies(module, runner, intake)))
         assert result["stop"] == "retry_authority_drift"
