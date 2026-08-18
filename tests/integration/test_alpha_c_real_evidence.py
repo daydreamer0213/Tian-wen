@@ -364,7 +364,7 @@ def _recovery_2_zero_paid_root(module: Any, *, corrupt: str | None = None) -> Pa
         "action_id": "seed-preflight",
         "container_id": _RECOVERY_2_CONTAINER_ID,
         "trial_id": _RECOVERY_2_TRIAL_ID,
-        "check_id": "seed-preflight",
+        "check_id": "final",
         "result_type": "seed_preflight",
         "status": "running",
         "exit_code": None,
@@ -421,6 +421,24 @@ def _bind_test_recovery_2_digests(
             setattr(module, name, value)
         else:
             monkeypatch.setattr(module, name, value, raising=False)
+
+
+def test_recovery_2_validator_accepts_the_durable_seed_preflight_final_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    root = _recovery_2_zero_paid_root(module)
+    _bind_test_recovery_2_digests(module, root, monkeypatch)
+
+    binding = module._validate_zero_paid_recovery(
+        root,
+        expected_trial_id=_RECOVERY_2_TRIAL_ID,
+        expected_authority_digest=module.RECOVERY_2_AUTHORITY_DIGEST,
+        require_stop_receipt=True,
+        expected_stop_digest=module.RECOVERY_2_STOP_DIGEST,
+    )
+
+    assert binding["trial_id"] == _RECOVERY_2_TRIAL_ID
 
 
 def _bind_test_prior_digests(module: Any, original: Path, recovery_1: Path) -> None:

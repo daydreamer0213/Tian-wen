@@ -393,7 +393,7 @@ def _validate_zero_paid_recovery(
                 or seed.get("action_id") != "seed-preflight"
                 or seed.get("container_id") != RECOVERY_2_CONTAINER_ID
                 or seed.get("trial_id") != RECOVERY_2_TRIAL_ID
-                or seed.get("check_id") != "seed-preflight"
+                or seed.get("check_id") != "final"
                 or seed.get("result_type") != "seed_preflight"
                 or seed.get("status") != "running"
                 or seed.get("exit_code") is not None
