@@ -382,3 +382,16 @@ def test_budget_and_interruption_bounds_always_write_a_final_receipt(
     else:
         assert [runner.executions for runner in runners] == [1]
 
+
+def test_second_trial_interruption_accounts_for_settled_and_reserved_usage(tmp_path: Path) -> None:
+    module = _module()
+    dependencies, runners = _dependencies(tmp_path, ["failure", "interrupt"])
+
+    receipt = asyncio.run(module.run_stage(dependencies))
+
+    assert receipt["stop"] == "trial_execution_interrupted"
+    assert receipt["trial_ids"] == ["trial-1", "trial-2"]
+    assert (receipt["request_usage"], receipt["token_usage"]) == (2, 2000)
+    assert (receipt["reserved_request_usage"], receipt["reserved_tokens"]) == (1, 500)
+    assert receipt["candidate_version_id"] is None
+    assert [runner.executions for runner in runners] == [1, 1]
