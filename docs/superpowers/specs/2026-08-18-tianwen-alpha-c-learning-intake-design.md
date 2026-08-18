@@ -1,6 +1,6 @@
 # Tianwen Alpha-C Learning Intake Design
 
-**Status:** Approved architecture, implementation pending  
+**Status:** Implemented on the Alpha-C stage branch; pending final merge
 **Date:** 2026-08-18  
 **Scope:** Alpha-C first narrow slice only
 
@@ -108,6 +108,7 @@ class OutcomeObservation(FrozenModel):
     trial_id: str | None = None
     problem_fingerprint: str | None = None
     evidence_ids: tuple[str, ...] = ()
+    authority_id: str | None = None
 ```
 
 `source_digest` binds the complete source receipt while the observation stores only the
@@ -149,6 +150,35 @@ whose provenance contains that feedback ID. Original feedback text is not copied
 observation. Its problem fingerprint is the digest of the feedback digest plus the
 derived capability scope, so neither free-form text nor caller-selected identity enters
 the qualification key.
+
+### 5.1a `OutcomeSourceAuthority`
+
+Task review exposed that an otherwise valid-looking Observation could be inserted directly
+through the generic object store. The implemented narrow fix is an append-only,
+privacy-safe projector receipt:
+
+```python
+class OutcomeSourceAuthority(FrozenModel):
+    authority_id: str
+    source_kind: Literal["trial_verifier", "user_feedback", "operational"]
+    source_id: str
+    source_digest: str
+    outcome_kind: OutcomeKind
+    capability_scope: str
+    task_id: str | None = None
+    goal_id: str | None = None
+    run_id: str | None = None
+    trial_id: str | None = None
+    problem_fingerprint: str | None = None
+    evidence_ids: tuple[str, ...] = ()
+```
+
+Every public projector writes this receipt after validating its durable source and binds
+the returned Observation through `authority_id`. Triage reloads the exact Authority and
+compares every projected field before deciding. A bare caller-created Observation cannot
+enter the learning chain. This is an integrity guard against accidental internal bypass;
+it is not a cryptographic defense against a malicious same-host process that deliberately
+forges both bottom-store objects, which remains outside the approved threat model.
 
 ### 5.2 `ObservedGap`
 
@@ -233,6 +263,7 @@ memory ID. No disposition may contain a Candidate ID.
 
 ```python
 status: Literal["resolved", "unknown"] = "resolved"
+triage_id: str | None = None
 ticket_id: str | None = None
 observed_gap_id: str | None = None
 capability_scope: str | None = None
@@ -249,6 +280,12 @@ also stops without a Lesson in this slice.
 the persisted record, including recommendation-only records. The existing
 `record_attribution(...)` retains its current contract and still raises
 `MutationNotAllowed` for an out-of-scope target, preserving legacy callers.
+
+Before a governed Attribution is persisted, the implementation also reloads Signal and
+every Gap Outcome/Authority, then requires the Triage, Signal, Ticket, Case and Gap IDs,
+loop relationships, fingerprints, capability scopes and Evidence sets to agree exactly.
+Conclusion repeats the durable Outcome/Authority check before writing a Lesson or terminal
+receipt.
 
 ### 5.6 `LearningConclusionReceipt`
 
@@ -322,6 +359,8 @@ called by `learning_intake.py`.
   downstream immutable records.
 - Evidence, provenance or scope mismatch fails closed; it is never converted to a low
   score or zero-valued metric.
+- `outcome_source_authority`, `outcome_observation`, `observed_gap`, `learning_triage`
+  and `learning_conclusion` are immutable governance object kinds.
 
 This slice does not add a generic transaction coordinator. The bounded chain uses existing
 immutable replay plus the Ticket transaction.
