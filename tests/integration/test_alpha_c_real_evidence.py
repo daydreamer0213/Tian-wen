@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import secrets
+import sqlite3
 import sys
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -14,7 +16,8 @@ import pytest
 from pydantic import BaseModel, Field
 
 from tianwen.alpha import AlphaTrialConditionSnapshot, TrialManifest, TrialPreview, TrialUsage
-from tianwen.domain import BudgetLimit, BudgetUsage, content_digest
+from tianwen.domain import ArtifactStatus, ArtifactVersion, BudgetLimit, BudgetUsage, content_digest
+from tianwen.evaluation import ActivePointer
 
 
 def test_real_evidence_runner_has_a_stage_local_entry() -> None:
@@ -553,3 +556,155 @@ def test_existing_intake_forms_case_with_zero_resource_child_budget(tmp_path: Pa
     assert ticket.learning_budget == module.ZERO_RESOURCE_LEARNING_BUDGET
     _limit, usage, _reserved = aggregate.get_budget(ticket.loop_id)
     assert usage == BudgetUsage()
+
+
+def test_price_snapshot_freshness_is_limited_to_ten_minutes() -> None:
+    """Break caught: an old price snapshot could reserve paid work with stale authority."""
+    module = _module()
+
+    assert module.PRICE_SNAPSHOT_MAX_AGE == timedelta(minutes=10)
+
+
+def test_load_price_snapshot_uses_the_canonical_local_json_path(tmp_path: Path) -> None:
+    """Break caught: the native preflight could ignore or misread its fixed local price authority."""
+    module = _module()
+    path = tmp_path / "price.json"
+    path.write_text(
+        json.dumps(
+            {
+                "source_url": module.PRICE_SOURCE_URL,
+                "model_id": module.MODEL_ID,
+                "observed_at": datetime.now(UTC).isoformat(),
+                "rates_cny_per_million": {"off_peak_output": 6, "peak_output": 27},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    snapshot = module.load_price_snapshot(path)
+
+    assert snapshot.authority()["max_cny_per_million"] == 27
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {
+            "source_url": "https://wrong.invalid",
+            "model_id": "wrong",
+            "observed_at": datetime.now(UTC).isoformat(),
+            "rates_cny_per_million": {"peak_output": 27},
+        },
+        {
+            "source_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+            "model_id": "deepseek:deepseek-v4-pro",
+            "observed_at": (datetime.now(UTC) - timedelta(minutes=10, seconds=1)).isoformat(),
+            "rates_cny_per_million": {"peak_output": 27},
+        },
+        {
+            "source_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+            "model_id": "deepseek:deepseek-v4-pro",
+            "observed_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            "rates_cny_per_million": {"peak_output": 27},
+        },
+    ],
+)
+def test_load_price_snapshot_rejects_malformed_or_outside_ten_minute_window(
+    tmp_path: Path, payload: dict[str, Any]
+) -> None:
+    """Break caught: malformed, mismatched, or stale local pricing could authorize a Trial."""
+    module = _module()
+    path = tmp_path / "price.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(module.StageError, match="price snapshot"):
+        module.load_price_snapshot(path)
+
+
+def _native_audit_root(tmp_path: Path, *, pointer_drift: bool = False, bad_digest: bool = False) -> Path:
+    root = tmp_path / "repo"
+    skill = "---\nname: repo-task\n---\n# Offline champion\n"
+    skill_path = root / "skills" / "repo-task" / "SKILL.md"
+    skill_path.parent.mkdir(parents=True)
+    skill_path.write_text(skill, encoding="utf-8")
+    database = root / ".tianwen" / "tianwen.db"
+    database.parent.mkdir()
+    champion = ArtifactVersion(
+        artifact_id="repo-task",
+        artifact_type="repo_task_skill",
+        version_id=content_digest(skill),
+        parent_version_id=None,
+        content_digest=content_digest(skill),
+        content=skill,
+        evidence_ids=(),
+        status=ArtifactStatus.ACTIVE,
+    )
+    pointer = ActivePointer(
+        artifact_id="repo-task",
+        current_version_id="sha256:pointer-drift" if pointer_drift else champion.version_id,
+        generation=1,
+    )
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE tw_objects (kind TEXT, object_id TEXT, status TEXT, body_json TEXT, body_digest TEXT)"
+        )
+        for kind, object_id, status, model in (
+            ("artifact", champion.version_id, "active", champion),
+            ("active_pointer", "repo-task", "active", pointer),
+        ):
+            body = model.model_dump(mode="json")
+            connection.execute(
+                "INSERT INTO tw_objects VALUES (?, ?, ?, ?, ?)",
+                (
+                    kind,
+                    object_id,
+                    status,
+                    json.dumps(body),
+                    "sha256:bad" if bad_digest and kind == "artifact" else content_digest(body),
+                ),
+            )
+    return root
+
+
+def _native_git(module: Any) -> Any:
+    return lambda *args: {
+        ("branch", "--show-current"): module.STAGE_BRANCH,
+        ("rev-parse", "HEAD"): "head",
+        ("rev-parse", "main"): module.BASE_SHA,
+        ("rev-parse", "origin/main"): module.BASE_SHA,
+        ("merge-base", "HEAD", module.BASE_SHA): module.BASE_SHA,
+        ("status", "--porcelain"): "",
+    }[args]
+
+
+def test_native_checkout_and_governance_audit_accepts_minimal_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Break caught: the native SQLite audit could reject the approved empty Champion baseline."""
+    module = _module()
+    monkeypatch.setattr(module, "PROJECT_ROOT", _native_audit_root(tmp_path))
+    monkeypatch.setattr(module, "_git", _native_git(module))
+
+    audit = module.audit_checkout_and_governance()
+
+    assert audit.champion_version_id == audit.champion_digest
+    assert audit.object_counts == {"active_pointer": 1, "artifact": 1}
+
+
+@pytest.mark.parametrize(
+    ("pointer_drift", "bad_digest", "match"),
+    [(True, False, "baseline"), (False, True, "digest")],
+)
+def test_native_checkout_and_governance_audit_rejects_drift_or_digest_tamper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pointer_drift: bool, bad_digest: bool, match: str
+) -> None:
+    """Break caught: native preflight could trust a split Champion pointer or tampered governance row."""
+    module = _module()
+    monkeypatch.setattr(
+        module, "PROJECT_ROOT", _native_audit_root(tmp_path, pointer_drift=pointer_drift, bad_digest=bad_digest)
+    )
+    monkeypatch.setattr(module, "_git", _native_git(module))
+
+    with pytest.raises(module.StageError, match=match):
+        module.audit_checkout_and_governance()

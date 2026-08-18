@@ -41,6 +41,7 @@ ZERO_RESOURCE_LEARNING_BUDGET = BudgetLimit(
 STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence")
 PRICE_SNAPSHOT_PATH = Path("D:/DevData/tianwen-alpha-c-real-evidence-price.json")
 PRICE_SOURCE_URL = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+PRICE_SNAPSHOT_MAX_AGE = timedelta(minutes=10)
 BASE_SHA = "4638026f210c0de29262d307dd051934570d975e"
 STAGE_BRANCH = "codex/tianwen-alpha-c-real-evidence"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -162,7 +163,7 @@ def _validate_price_snapshot(snapshot: PriceSnapshot) -> None:
     if snapshot.source_url != PRICE_SOURCE_URL or snapshot.model_id != MODEL_ID:
         raise StageError("price snapshot source or model does not match")
     observed_at = snapshot.observed_at.astimezone(UTC)
-    if observed_at > now or now - observed_at > timedelta(hours=24):
+    if observed_at > now or now - observed_at > PRICE_SNAPSHOT_MAX_AGE:
         raise StageError("price snapshot is stale or from the future")
     rates = snapshot.rates_cny_per_million
     if not rates or any(isinstance(rate, bool) or not isinstance(rate, int) or rate <= 0 for rate in rates.values()):
