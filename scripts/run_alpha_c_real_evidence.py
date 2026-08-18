@@ -10,17 +10,21 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sqlite3
+import subprocess
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, TextIO
 
 from pydantic_ai.models import Model, infer_model
 from pydantic_ai.models.wrapper import WrapperModel
 
-from tianwen.alpha import AlphaTrialConditionSnapshot, AlphaTrialRunner, TrialConfirmation, TrialResult
-from tianwen.domain import BudgetLimit, GoalContract, RunRecord, content_digest
+from tianwen.alpha import AlphaTrialConditionSnapshot, AlphaTrialRunner, TrialConfirmation, TrialManifest, TrialResult
+from tianwen.domain import ArtifactVersion, BudgetLimit, EvidenceRecord, GoalContract, RunRecord, content_digest
+from tianwen.evaluation import ActivePointer
 from tianwen.learning import LearningEngine
 from tianwen.learning_intake import LearningIntake, LearningTriageReceipt, OutcomeObservation
 
@@ -29,15 +33,65 @@ MODEL_ID = "deepseek:deepseek-v4-pro"
 PROVIDER_NAME = "deepseek"
 PROVIDER_BASE_URL = "https://api.deepseek.com"
 MAX_OUTPUT_TOKENS = 4096
-MAX_PRICE_CNY_PER_MILLION_TOKENS = 27
 MAX_STAGE_CNY_MICROUNITS = 20_000_000
 BUDGET = BudgetLimit(model_requests=4, tool_calls=8, tokens=40_000, wall_seconds=300, action_effects=8)
+ZERO_RESOURCE_LEARNING_BUDGET = BudgetLimit(
+    model_requests=0, tool_calls=0, tokens=0, wall_seconds=0, child_loops=0, action_effects=0
+)
 STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence")
+PRICE_SNAPSHOT_PATH = Path("D:/DevData/tianwen-alpha-c-real-evidence-price.json")
+PRICE_SOURCE_URL = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+BASE_SHA = "4638026f210c0de29262d307dd051934570d975e"
+STAGE_BRANCH = "codex/tianwen-alpha-c-real-evidence"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class StageError(RuntimeError):
     """The bounded sampling stage cannot safely advance."""
+
+
+@dataclass(frozen=True)
+class PriceSnapshot:
+    source_url: str
+    model_id: str
+    observed_at: datetime
+    rates_cny_per_million: Mapping[str, int]
+
+    def authority(self) -> dict[str, Any]:
+        rates = dict(sorted(self.rates_cny_per_million.items()))
+        return {
+            "source_url": self.source_url,
+            "model_id": self.model_id,
+            "observed_at": self.observed_at.astimezone(UTC).isoformat(),
+            "rates_cny_per_million": rates,
+            "max_cny_per_million": max(rates.values()),
+        }
+
+
+@dataclass(frozen=True)
+class CheckoutAudit:
+    branch: str
+    head: str
+    main: str
+    origin_main: str
+    base: str
+    champion_version_id: str
+    champion_digest: str
+    skill_digest: str
+    object_counts: Mapping[str, int]
+
+    def authority(self) -> dict[str, Any]:
+        return {
+            "branch": self.branch,
+            "head": self.head,
+            "main": self.main,
+            "origin_main": self.origin_main,
+            "base": self.base,
+            "champion_version_id": self.champion_version_id,
+            "champion_digest": self.champion_digest,
+            "skill_digest": self.skill_digest,
+            "object_counts": dict(sorted(self.object_counts.items())),
+        }
 
 
 class _OutputLimitedModel(WrapperModel):
@@ -66,11 +120,131 @@ class StageDependencies:
     model_factory: Callable[[], Model] | None = None
     runner_factory: Callable[[Model, Path], AlphaTrialRunner] | None = None
     intake_factory: Callable[[Any, BudgetLimit], LearningIntake] | None = None
-    prior_charge_microunits: int = 0
+    price_snapshot: PriceSnapshot | None = None
+    price_loader: Callable[[], PriceSnapshot] | None = None
+    checkout_audit: Callable[[], CheckoutAudit] | None = None
 
 
 def _native_model() -> Model:
     return _OutputLimitedModel(infer_model(MODEL_ID))
+
+
+def load_price_snapshot(path: Path = PRICE_SNAPSHOT_PATH) -> PriceSnapshot:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        observed_at = datetime.fromisoformat(raw["observed_at"])
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise StageError("price snapshot is unreadable") from error
+    if observed_at.tzinfo is None:
+        raise StageError("price snapshot observed_at must include a timezone")
+    rates = raw.get("rates_cny_per_million")
+    if (
+        not isinstance(rates, dict)
+        or not rates
+        or any(
+            not isinstance(name, str) or not name or isinstance(rate, bool) or not isinstance(rate, int) or rate <= 0
+            for name, rate in rates.items()
+        )
+    ):
+        raise StageError("price snapshot rates are invalid")
+    snapshot = PriceSnapshot(
+        source_url=str(raw.get("source_url", "")),
+        model_id=str(raw.get("model_id", "")),
+        observed_at=observed_at,
+        rates_cny_per_million=rates,
+    )
+    _validate_price_snapshot(snapshot)
+    return snapshot
+
+
+def _validate_price_snapshot(snapshot: PriceSnapshot) -> None:
+    now = datetime.now(UTC)
+    if snapshot.source_url != PRICE_SOURCE_URL or snapshot.model_id != MODEL_ID:
+        raise StageError("price snapshot source or model does not match")
+    observed_at = snapshot.observed_at.astimezone(UTC)
+    if observed_at > now or now - observed_at > timedelta(hours=24):
+        raise StageError("price snapshot is stale or from the future")
+    rates = snapshot.rates_cny_per_million
+    if not rates or any(isinstance(rate, bool) or not isinstance(rate, int) or rate <= 0 for rate in rates.values()):
+        raise StageError("price snapshot rates are invalid")
+    if max(rates.values()) < 27:
+        raise StageError("price snapshot maximum is below the approved conservative bound")
+
+
+def _git(*args: str) -> str:
+    completed = subprocess.run(
+        ["git", *args], cwd=PROJECT_ROOT, text=True, capture_output=True, check=False, shell=False
+    )
+    if completed.returncode:
+        raise StageError(f"git audit failed: {' '.join(args)}")
+    return completed.stdout.strip()
+
+
+def audit_checkout_and_governance() -> CheckoutAudit:
+    branch, head = _git("branch", "--show-current"), _git("rev-parse", "HEAD")
+    main, origin_main = _git("rev-parse", "main"), _git("rev-parse", "origin/main")
+    if (
+        branch != STAGE_BRANCH
+        or main != BASE_SHA
+        or origin_main != BASE_SHA
+        or _git("merge-base", "HEAD", BASE_SHA) != BASE_SHA
+    ):
+        raise StageError("checkout branch or base authority does not match")
+    if _git("status", "--porcelain"):
+        raise StageError("tracked checkout must be clean before preflight")
+    database = PROJECT_ROOT / ".tianwen" / "tianwen.db"
+    if not database.is_file():
+        raise StageError("production governance database is unavailable")
+    try:
+        connection = sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True)
+        rows = connection.execute("SELECT kind, object_id, status, body_json, body_digest FROM tw_objects").fetchall()
+    except sqlite3.Error as error:
+        raise StageError("production governance audit cannot open SQLite read-only") from error
+    finally:
+        try:
+            connection.close()
+        except UnboundLocalError:
+            pass
+    counts: dict[str, int] = {}
+    decoded: list[tuple[str, str, str, dict[str, Any]]] = []
+    for kind, object_id, status, body_json, body_digest in rows:
+        body = json.loads(body_json)
+        if content_digest(body) != body_digest:
+            raise StageError("production governance object digest does not match")
+        counts[kind] = counts.get(kind, 0) + 1
+        decoded.append((kind, object_id, status, body))
+    active = [
+        (object_id, body) for kind, object_id, status, body in decoded if kind == "artifact" and status == "active"
+    ]
+    pointers = [(object_id, body) for kind, object_id, _status, body in decoded if kind == "active_pointer"]
+    if len(active) != 1 or len(pointers) != 1:
+        raise StageError("production governance Champion authority is not singular")
+    champion = ArtifactVersion.model_validate(active[0][1])
+    pointer = ActivePointer.model_validate(pointers[0][1])
+    skill = (PROJECT_ROOT / "skills" / "repo-task" / "SKILL.md").read_text(encoding="utf-8")
+    if (
+        champion.artifact_id != "repo-task"
+        or champion.version_id != pointer.current_version_id
+        or champion.content != skill
+        or champion.content_digest != content_digest(skill)
+        or any(kind == "artifact" and status == "candidate" for kind, _id, status, _body in decoded)
+        or any(
+            kind in {"case", "lesson", "learning_conclusion", "alpha_trial_manifest", "alpha_trial_result"}
+            for kind, *_ in decoded
+        )
+    ):
+        raise StageError("production governance state is not the approved empty Alpha-C baseline")
+    return CheckoutAudit(
+        branch=branch,
+        head=head,
+        main=main,
+        origin_main=origin_main,
+        base=BASE_SHA,
+        champion_version_id=champion.version_id,
+        champion_digest=champion.content_digest,
+        skill_digest=content_digest(skill),
+        object_counts=counts,
+    )
 
 
 def _native_runner(model: Model, stage_root: Path) -> AlphaTrialRunner:
@@ -103,8 +277,18 @@ def _under_devdata(path: Path) -> Path:
     return value
 
 
-def _micro_cny(tokens: int) -> int:
-    return tokens * MAX_PRICE_CNY_PER_MILLION_TOKENS
+def _initialize_stage_root(path: Path) -> Path:
+    root = _under_devdata(path)
+    root.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        root.mkdir()
+    except FileExistsError as error:
+        raise StageError("stage root is already initialized; a second batch is forbidden") from error
+    return root
+
+
+def _micro_cny(tokens: int, price: PriceSnapshot) -> int:
+    return tokens * max(price.rates_cny_per_million.values())
 
 
 def _validate_model(model: Model) -> None:
@@ -119,8 +303,14 @@ def _validate_model(model: Model) -> None:
         raise StageError("fixed provider max_tokens does not match")
 
 
-def _assert_zero_paid_preflight(prepared: Any) -> None:
-    store = prepared._app.store
+def _runner_authority(runner: Any) -> tuple[Any, Any]:
+    if getattr(runner, "store", None) is None or getattr(runner, "app", None) is None:
+        raise StageError("runner did not expose public store and app after prepare")
+    return runner.store, runner.app
+
+
+def _assert_zero_paid_preflight(runner: Any) -> None:
+    store, _app = _runner_authority(runner)
     if store.list_objects("goal", GoalContract) or store.list_objects("run", RunRecord):
         raise StageError("prepare created a Goal or Run before confirmation")
 
@@ -140,7 +330,7 @@ def _prepared_authority(runner: Any, prepared: Any) -> dict[str, Any]:
     }
 
 
-def _prepare(runner: Any) -> tuple[Any, dict[str, Any]]:
+def _prepare(runner: Any, audit: CheckoutAudit) -> tuple[Any, dict[str, Any]]:
     prepared = runner.prepare(TASK_ID, budget=BUDGET, previous_trial_id=None)
     preview = prepared.preview
     if (
@@ -150,15 +340,21 @@ def _prepare(runner: Any) -> tuple[Any, dict[str, Any]]:
         or preview.budget != BUDGET
     ):
         raise StageError("prepared trial diverges from the fixed stage authority")
-    _assert_zero_paid_preflight(prepared)
-    return prepared, _prepared_authority(runner, prepared)
+    _assert_zero_paid_preflight(runner)
+    authority = _prepared_authority(runner, prepared)
+    if (authority["champion_version_id"], authority["champion_digest"]) != (
+        audit.champion_version_id,
+        audit.champion_digest,
+    ):
+        raise StageError("prepared Champion does not match production governance audit")
+    return prepared, authority
 
 
 def _confirm(stdin: TextIO, stdout: TextIO, prepared: Any) -> TrialConfirmation | None:
     if not stdin.isatty():
         return None
     expected = f"CONFIRM {prepared.preview.trial_id}"
-    print(f"Type exactly: {expected}", file=stdout)
+    print(f"Type exactly: {expected}", file=stdout, flush=True)
     if stdin.readline().strip() != expected:
         return None
     return TrialConfirmation(
@@ -189,21 +385,52 @@ def _qualifying_success(result: TrialResult) -> bool:
     )
 
 
-def _result_charge(result: TrialResult) -> int:
-    return _micro_cny(result.usage.tokens)
+def _result_charge(result: TrialResult, price: PriceSnapshot) -> int:
+    return _micro_cny(result.usage.tokens, price)
 
 
-def _load_result(runner: Any, result: TrialResult) -> TrialResult:
-    durable = runner.store.get_object("alpha_trial_result", result.trial_id, TrialResult)
+def _load_result(store: Any, app: Any, result: TrialResult) -> tuple[TrialResult, dict[str, Any]]:
+    durable = store.get_object("alpha_trial_result", result.trial_id, TrialResult)
     if durable != result:
         raise StageError("executed trial result does not match its durable receipt")
-    return durable
+    manifest = store.get_object("alpha_trial_manifest", result.trial_id, TrialManifest)
+    if content_digest(manifest) != result.trial_manifest_digest:
+        raise StageError("trial result manifest binding does not match")
+    evidence = tuple(store.get_object("evidence", evidence_id, EvidenceRecord) for evidence_id in result.evidence_ids)
+    final = tuple(
+        item
+        for item in evidence
+        if item.evidence_type == "alpha_final_verification"
+        and item.purpose == "alpha_final_verification"
+        and item.source_class == "docker_verifier"
+        and item.scope == f"trial:{result.trial_id}"
+        and item.run_id == f"alpha:{result.trial_id}:settlement"
+    )
+    if not final:
+        raise StageError("trial result lacks exact final verifier evidence")
+    task = app.goal_task(result.goal_id)
+    _limit, usage, _reserved = store.get_budget(task.loop_id)
+    if (
+        usage.model_requests != result.usage.model_requests
+        or usage.tokens != result.usage.tokens
+        or usage.tool_calls != result.usage.tool_calls
+        or usage.action_effects != result.usage.action_effects
+    ):
+        raise StageError("trial result usage does not match durable budget usage")
+    return durable, {
+        "result_digest": content_digest(durable),
+        "manifest_digest": content_digest(manifest),
+        "evidence_ids": tuple(item.evidence_id for item in evidence),
+        "evidence_digest": content_digest({"evidence_ids": tuple(item.evidence_id for item in evidence)}),
+        "usage": usage.model_dump(mode="json"),
+        "usage_digest": content_digest(usage),
+    }
 
 
-def _intake(prepared: Any, factory: Callable[[Any, BudgetLimit], LearningIntake] | None) -> LearningIntake:
+def _intake(store: Any, factory: Callable[[Any, BudgetLimit], LearningIntake] | None) -> LearningIntake:
     if factory is not None:
-        return factory(prepared._app.store, prepared._app.config.learning_budget)
-    return LearningIntake(LearningEngine(prepared._app.store, prepared._app.config.learning_budget))
+        return factory(store, ZERO_RESOURCE_LEARNING_BUDGET)
+    return LearningIntake(LearningEngine(store, ZERO_RESOURCE_LEARNING_BUDGET))
 
 
 def _project(intake: LearningIntake, result: TrialResult, trial_store: Any) -> OutcomeObservation:
@@ -216,9 +443,15 @@ def _final_receipt(
     *,
     stop: str,
     charged_microunits: int,
+    price: PriceSnapshot,
+    audit: CheckoutAudit,
+    first_durable: Mapping[str, Any],
     second: TrialResult | None = None,
+    second_durable: Mapping[str, Any] | None = None,
     triage: LearningTriageReceipt | None = None,
 ) -> dict[str, Any]:
+    price_authority = price.authority()
+    remaining = MAX_STAGE_CNY_MICROUNITS - charged_microunits
     values: dict[str, Any] = {
         "schema": "tianwen.alpha_c.real_evidence.stop.v1",
         "stop": stop,
@@ -226,9 +459,14 @@ def _final_receipt(
         "model_requests": first.usage.model_requests + (0 if second is None else second.usage.model_requests),
         "tokens": first.usage.tokens + (0 if second is None else second.usage.tokens),
         "conservative_charge_microunits": charged_microunits,
+        "remaining_cny_microunits": remaining,
+        "price": {**price_authority, "digest": content_digest(price_authority)},
+        "checkout": audit.authority(),
+        "durable": {"first": dict(first_durable), "second": None if second_durable is None else dict(second_durable)},
         "candidate_version_id": None,
         "case_id": None if triage is None else triage.case_id,
         "triage": None if triage is None else triage.disposition,
+        "lesson_id": None,
     }
     _receipt(root, f"stop-{first.trial_id}.json", values)
     return values
@@ -237,54 +475,111 @@ def _final_receipt(
 async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, Any]:
     """Prepare and, only after local confirmation, run the fixed bounded sample."""
     dependencies = dependencies or StageDependencies()
-    root = _under_devdata(dependencies.stage_root)
     environment = os.environ if dependencies.environment is None else dependencies.environment
     if not bool(environment.get("DEEPSEEK_API_KEY", "").strip()):
         return {"stop": "missing_credential", "model_requests": 0, "candidate_version_id": None}
-    if dependencies.prior_charge_microunits < 0:
-        raise StageError("prior charge must be non-negative")
-    reserve = _micro_cny(BUDGET.tokens)
-    if dependencies.prior_charge_microunits + reserve > MAX_STAGE_CNY_MICROUNITS:
-        return {"stop": "budget_exhausted", "model_requests": 0, "candidate_version_id": None}
+    price = dependencies.price_snapshot or (dependencies.price_loader or load_price_snapshot)()
+    _validate_price_snapshot(price)
+    audit = (dependencies.checkout_audit or audit_checkout_and_governance)()
+    root = _initialize_stage_root(dependencies.stage_root)
+    price_authority = price.authority()
+    _receipt(
+        root,
+        "stage-authority.json",
+        {
+            "schema": "tianwen.alpha_c.real_evidence.stage_authority.v1",
+            "checkout": audit.authority(),
+            "price": {**price_authority, "digest": content_digest(price_authority)},
+            "task_id": TASK_ID,
+            "model_id": MODEL_ID,
+            "budget": BUDGET.model_dump(mode="json"),
+            "max_trials": 2,
+            "candidate_version_id": None,
+        },
+    )
+    reserve = _micro_cny(BUDGET.tokens, price)
+    if reserve * 2 > MAX_STAGE_CNY_MICROUNITS:
+        raise StageError("fixed two-trial conservative charge exceeds Alpha-C budget")
     model = (dependencies.model_factory or _native_model)()
     _validate_model(model)
     runner = (dependencies.runner_factory or _native_runner)(model, root)
-    first_prepared, first_authority = _prepare(runner)
-    _receipt(
+    first_prepared, first_authority = _prepare(runner, audit)
+    first_store, first_app = _runner_authority(runner)
+    preflight_path = _receipt(
         root,
         f"preflight-{first_authority['trial_id']}.json",
         {
-            "schema": "tianwen.alpha_c.real_evidence.preflight.v1",
+            "schema": "tianwen.alpha_c.real_evidence.preflight.v2",
             "trial_id": first_authority["trial_id"],
             "task_id": TASK_ID,
             "model_id": MODEL_ID,
             "condition_digest": first_authority["condition_digest"],
             "champion_version_id": first_authority["champion_version_id"],
             "champion_digest": first_authority["champion_digest"],
+            "checkout": audit.authority(),
+            "price": {**price.authority(), "digest": content_digest(price.authority())},
             "reserved_cny_microunits": reserve,
             "paid_execution_not_started": True,
         },
     )
+    print(
+        json.dumps(
+            {
+                "trial_id": first_authority["trial_id"],
+                "task_id": TASK_ID,
+                "model_id": MODEL_ID,
+                "condition_digest": first_authority["condition_digest"],
+                "champion_digest": first_authority["champion_digest"],
+                "conservative_upper_bound_microunits": reserve,
+                "preflight_receipt": str(preflight_path),
+            },
+            sort_keys=True,
+        ),
+        file=dependencies.stdout,
+        flush=True,
+    )
     confirmation = _confirm(dependencies.stdin, dependencies.stdout, first_prepared)
     if confirmation is None:
         return {"stop": "confirmation_not_granted", "model_requests": 0, "candidate_version_id": None}
-    first = _load_result(runner, await runner.execute(first_prepared, confirmation))
-    first_charge = _result_charge(first)
+    first, first_durable = _load_result(first_store, first_app, await runner.execute(first_prepared, confirmation))
+    first_charge = _result_charge(first, price)
     if not first.qualifies_as_real_model_trial:
-        return _final_receipt(root, first, stop="non_real_or_operational", charged_microunits=first_charge)
-    intake = _intake(first_prepared, dependencies.intake_factory)
-    if _qualifying_success(first):
-        receipt = intake.triage((_project(intake, first, runner.store),))
-        return _final_receipt(root, first, stop="no_case_success", charged_microunits=first_charge, triage=receipt)
-    if not _qualifying_failure(first):
-        return _final_receipt(root, first, stop="non_qualifying_result", charged_microunits=first_charge)
-    first_outcome = _project(intake, first, runner.store)
-    observe = intake.triage((first_outcome,))
-    if dependencies.prior_charge_microunits + first_charge + reserve > MAX_STAGE_CNY_MICROUNITS:
         return _final_receipt(
-            root, first, stop="retry_budget_exhausted", charged_microunits=first_charge, triage=observe
+            root,
+            first,
+            stop="non_real_or_operational",
+            charged_microunits=first_charge,
+            price=price,
+            audit=audit,
+            first_durable=first_durable,
         )
-    second_prepared, second_authority = _prepare(runner)
+    intake = _intake(first_store, dependencies.intake_factory)
+    if _qualifying_success(first):
+        receipt = intake.triage((_project(intake, first, first_store),))
+        return _final_receipt(
+            root,
+            first,
+            stop="no_case_success",
+            charged_microunits=first_charge,
+            price=price,
+            audit=audit,
+            first_durable=first_durable,
+            triage=receipt,
+        )
+    if not _qualifying_failure(first):
+        return _final_receipt(
+            root,
+            first,
+            stop="non_qualifying_result",
+            charged_microunits=first_charge,
+            price=price,
+            audit=audit,
+            first_durable=first_durable,
+        )
+    first_outcome = _project(intake, first, first_store)
+    observe = intake.triage((first_outcome,))
+    second_prepared, second_authority = _prepare(runner, audit)
+    second_store, second_app = _runner_authority(runner)
     comparable = (
         first_authority["condition"] == second_authority["condition"]
         and first_authority["champion_version_id"] == second_authority["champion_version_id"]
@@ -295,7 +590,14 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
     )
     if not comparable:
         return _final_receipt(
-            root, first, stop="retry_authority_drift", charged_microunits=first_charge, triage=observe
+            root,
+            first,
+            stop="retry_authority_drift",
+            charged_microunits=first_charge,
+            price=price,
+            audit=audit,
+            first_durable=first_durable,
+            triage=observe,
         )
     _receipt(
         root,
@@ -304,6 +606,7 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
             "schema": "tianwen.alpha_c.real_evidence.retry_authority.v1",
             "first_trial_id": first.trial_id,
             "second_trial_id": second_authority["trial_id"],
+            "first_result_digest": first_durable["result_digest"],
             "condition_digest": first_authority["condition_digest"],
             "champion_version_id": first_authority["champion_version_id"],
             "champion_digest": first_authority["champion_digest"],
@@ -313,15 +616,49 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
     second_confirmation = _confirm(dependencies.stdin, dependencies.stdout, second_prepared)
     if second_confirmation is None:
         return _final_receipt(
-            root, first, stop="retry_confirmation_not_granted", charged_microunits=first_charge, triage=observe
+            root,
+            first,
+            stop="retry_confirmation_not_granted",
+            charged_microunits=first_charge,
+            price=price,
+            audit=audit,
+            first_durable=first_durable,
+            triage=observe,
         )
-    second = _load_result(runner, await runner.execute(second_prepared, second_confirmation))
-    charged = first_charge + _result_charge(second)
+    second, second_durable = _load_result(
+        second_store, second_app, await runner.execute(second_prepared, second_confirmation)
+    )
+    if second.goal_id == first.goal_id or set(second.run_ids) & set(first.run_ids):
+        raise StageError("repeat Goal or Run identity is not independent")
+    charged = first_charge + _result_charge(second, price)
+    if _qualifying_success(second):
+        receipt = intake.triage((_project(intake, second, second_store),))
+        return _final_receipt(
+            root,
+            first,
+            second=second,
+            stop="retry_success_observe",
+            charged_microunits=charged,
+            price=price,
+            audit=audit,
+            first_durable=first_durable,
+            second_durable=second_durable,
+            triage=receipt,
+        )
     if not _qualifying_failure(second):
         return _final_receipt(
-            root, first, second=second, stop="retry_non_qualifying", charged_microunits=charged, triage=observe
+            root,
+            first,
+            second=second,
+            stop="retry_non_qualifying",
+            charged_microunits=charged,
+            price=price,
+            audit=audit,
+            first_durable=first_durable,
+            second_durable=second_durable,
+            triage=observe,
         )
-    second_outcome = _project(intake, second, runner.store)
+    second_outcome = _project(intake, second, second_store)
     if (
         second_outcome.capability_scope != first_outcome.capability_scope
         or second_outcome.problem_fingerprint != first_outcome.problem_fingerprint
@@ -332,11 +669,24 @@ async def run_stage(dependencies: StageDependencies | None = None) -> dict[str, 
             second=second,
             stop="retry_fingerprint_mismatch",
             charged_microunits=charged,
+            price=price,
+            audit=audit,
+            first_durable=first_durable,
+            second_durable=second_durable,
             triage=observe,
         )
     case = intake.triage((first_outcome, second_outcome))
     return _final_receipt(
-        root, first, second=second, stop="case_requires_attribution", charged_microunits=charged, triage=case
+        root,
+        first,
+        second=second,
+        stop="case_requires_attribution",
+        charged_microunits=charged,
+        price=price,
+        audit=audit,
+        first_durable=first_durable,
+        second_durable=second_durable,
+        triage=case,
     )
 
 
@@ -347,7 +697,7 @@ def main() -> int:
         print(f"Alpha-C real-evidence stop: {error}", file=sys.stderr)
         return 2
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0
+    return 2 if result["stop"] in {"missing_credential", "confirmation_not_granted"} else 0
 
 
 if __name__ == "__main__":

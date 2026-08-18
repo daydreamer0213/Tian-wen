@@ -4,15 +4,17 @@ import asyncio
 import importlib
 import secrets
 import sys
-from dataclasses import dataclass, field
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import BaseModel, Field
 
-from tianwen.alpha import AlphaTrialConditionSnapshot, TrialPreview
-from tianwen.domain import BudgetLimit
+from tianwen.alpha import AlphaTrialConditionSnapshot, TrialManifest, TrialPreview, TrialUsage
+from tianwen.domain import BudgetLimit, BudgetUsage, content_digest
 
 
 def test_real_evidence_runner_has_a_stage_local_entry() -> None:
@@ -23,8 +25,7 @@ def test_real_evidence_runner_has_a_stage_local_entry() -> None:
     assert callable(module.main)
 
 
-@dataclass
-class _Result:
+class _Result(BaseModel):
     trial_id: str
     qualifies_as_real_model_trial: bool
     verdict: str
@@ -32,7 +33,29 @@ class _Result:
     verification_status: str = "completed"
     boundary_status: str = "passed"
     failure_categories: tuple[str, ...] = ()
-    usage: Any = field(default_factory=lambda: SimpleNamespace(model_requests=1, tokens=100))
+    usage: Any = Field(
+        default_factory=lambda: TrialUsage(model_requests=1, tokens=100, tool_calls=0, action_effects=0, wall_seconds=0)
+    )
+    goal_id: str | None = None
+    run_ids: tuple[str, ...] = ()
+    evidence_ids: tuple[str, ...] = ()
+    trial_manifest_digest: str | None = None
+    manifest: TrialManifest | None = None
+
+    def __init__(self, trial_id: str, qualifies_as_real_model_trial: bool, verdict: str, **values: Any) -> None:
+        super().__init__(
+            trial_id=trial_id,
+            qualifies_as_real_model_trial=qualifies_as_real_model_trial,
+            verdict=verdict,
+            **values,
+        )
+
+    def model_post_init(self, _context: Any) -> None:
+        self.goal_id = self.goal_id or f"goal-{self.trial_id}"
+        self.run_ids = self.run_ids or (f"run-{self.trial_id}",)
+        self.evidence_ids = self.evidence_ids or (f"evidence-{self.trial_id}",)
+        self.manifest = self.manifest or TrialManifest.model_construct(trial_id=self.trial_id)
+        self.trial_manifest_digest = self.trial_manifest_digest or content_digest(self.manifest)
 
 
 class _Store:
@@ -42,9 +65,35 @@ class _Store:
     def list_objects(self, _kind: str, _model: Any) -> list[Any]:
         return []
 
-    def get_object(self, _kind: str, _object_id: str, _model: Any) -> _Result:
+    def get_object(self, kind: str, _object_id: str, _model: Any) -> Any:
         assert self.result is not None
-        return self.result
+        if kind == "alpha_trial_result":
+            return self.result
+        if kind == "alpha_trial_manifest":
+            return self.result.manifest
+        if kind == "evidence":
+            return SimpleNamespace(
+                evidence_id=self.result.evidence_ids[0],
+                evidence_type="alpha_final_verification",
+                purpose="alpha_final_verification",
+                source_class="docker_verifier",
+                scope=f"trial:{self.result.trial_id}",
+                run_id=f"alpha:{self.result.trial_id}:settlement",
+            )
+        raise AssertionError(kind)
+
+    def get_budget(self, _loop_id: str) -> tuple[Any, BudgetUsage, Any]:
+        assert self.result is not None
+        return (
+            None,
+            BudgetUsage(
+                model_requests=self.result.usage.model_requests,
+                tokens=self.result.usage.tokens,
+                tool_calls=self.result.usage.tool_calls,
+                action_effects=self.result.usage.action_effects,
+            ),
+            None,
+        )
 
 
 class _Model:
@@ -72,7 +121,7 @@ class _Prepared:
         )
         self._app = SimpleNamespace(
             store=_Store(),
-            config=SimpleNamespace(learning_budget=SimpleNamespace()),
+            goal_task=lambda _goal_id: SimpleNamespace(loop_id="loop"),
         )
         self.condition = condition
 
@@ -87,6 +136,7 @@ class _Runner:
         self.prepared: list[_Prepared] = []
         self.executed: list[str] = []
         self.store = _Store()
+        self.app: Any = None
 
     def prepare(self, task_id: str, *, budget: Any, previous_trial_id: str | None) -> _Prepared:
         assert task_id == "A1"
@@ -97,6 +147,7 @@ class _Runner:
         item = _Prepared(f"trial-{index + 1}", condition, champion)
         assert item.preview.budget == budget
         self.prepared.append(item)
+        self.store, self.app = item._app.store, item._app
         return item
 
     def condition_snapshot(self, prepared: _Prepared) -> object:
@@ -106,7 +157,7 @@ class _Runner:
         self.executed.append(prepared.preview.trial_id)
         result = self.results[len(self.executed) - 1]
         prepared._app.store.result = result
-        self.store = prepared._app.store
+        self.store, self.app = prepared._app.store, prepared._app
         return result
 
 
@@ -155,6 +206,23 @@ def _root() -> Path:
 
 def _dependencies(module: Any, runner: _Runner, stdin: _Tty, intake: _Intake | None = None, **kwargs: Any) -> Any:
     model = _Model()
+    price = module.PriceSnapshot(
+        source_url=module.PRICE_SOURCE_URL,
+        model_id=module.MODEL_ID,
+        observed_at=datetime.now(UTC),
+        rates_cny_per_million={"peak_output": 27},
+    )
+    audit = module.CheckoutAudit(
+        branch=module.STAGE_BRANCH,
+        head="head",
+        main=module.BASE_SHA,
+        origin_main=module.BASE_SHA,
+        base=module.BASE_SHA,
+        champion_version_id="champion",
+        champion_digest="digest-champion",
+        skill_digest="digest-champion",
+        object_counts={},
+    )
     return module.StageDependencies(
         stage_root=kwargs.pop("stage_root", _root()),
         environment={"DEEPSEEK_API_KEY": "configured"},
@@ -163,6 +231,8 @@ def _dependencies(module: Any, runner: _Runner, stdin: _Tty, intake: _Intake | N
         model_factory=lambda: model,
         runner_factory=lambda _model, _root: runner,
         intake_factory=None if intake is None else lambda _store, _budget: intake,
+        price_snapshot=kwargs.pop("price_snapshot", price),
+        checkout_audit=kwargs.pop("checkout_audit", lambda: audit),
         **kwargs,
     )
 
@@ -195,18 +265,23 @@ def test_budget_ceiling_stops_before_model_or_prepare() -> None:
         called = True
         return _Model()
 
-    result = asyncio.run(
-        module.run_stage(
-            module.StageDependencies(
-                stage_root=_root(),
-                environment={"DEEPSEEK_API_KEY": "configured"},
-                model_factory=model_factory,
-                prior_charge_microunits=module.MAX_STAGE_CNY_MICROUNITS,
+    with pytest.raises(module.StageError, match="exceeds Alpha-C budget"):
+        asyncio.run(
+            module.run_stage(
+                module.StageDependencies(
+                    stage_root=_root(),
+                    environment={"DEEPSEEK_API_KEY": "configured"},
+                    model_factory=model_factory,
+                    price_snapshot=module.PriceSnapshot(
+                        source_url=module.PRICE_SOURCE_URL,
+                        model_id=module.MODEL_ID,
+                        observed_at=datetime.now(UTC),
+                        rates_cny_per_million={"peak_output": 300},
+                    ),
+                    checkout_audit=lambda: _dependencies(module, _Runner([]), _Tty()).checkout_audit(),
+                )
             )
         )
-    )
-
-    assert result == {"stop": "budget_exhausted", "model_requests": 0, "candidate_version_id": None}
     assert called is False
 
 
@@ -222,17 +297,11 @@ def test_provider_mismatch_stops_before_prepare() -> None:
         runner_called = True
         return _Runner([])
 
+    dependencies = replace(
+        _dependencies(module, _Runner([]), _Tty()), model_factory=lambda: model, runner_factory=runner_factory
+    )
     with pytest.raises(module.StageError, match="provider identity"):
-        asyncio.run(
-            module.run_stage(
-                module.StageDependencies(
-                    stage_root=_root(),
-                    environment={"DEEPSEEK_API_KEY": "configured"},
-                    model_factory=lambda: model,
-                    runner_factory=runner_factory,
-                )
-            )
-        )
+        asyncio.run(module.run_stage(dependencies))
 
     assert runner_called is False
     assert model.request_count == 0
@@ -244,16 +313,7 @@ def test_non_tty_stops_after_zero_paid_preflight_without_execute() -> None:
     runner = _Runner([_Result("trial-1", True, "met")])
     model = _Model()
     result = asyncio.run(
-        module.run_stage(
-            module.StageDependencies(
-                stage_root=_root(),
-                environment={"DEEPSEEK_API_KEY": "configured"},
-                stdin=_Tty(tty=False),
-                stdout=SimpleNamespace(write=lambda _text: None, flush=lambda: None),
-                model_factory=lambda: model,
-                runner_factory=lambda _model, _root: runner,
-            )
-        )
+        module.run_stage(replace(_dependencies(module, runner, _Tty(tty=False)), model_factory=lambda: model))
     )
 
     assert result["stop"] == "confirmation_not_granted"
@@ -278,10 +338,66 @@ def test_preflight_receipt_collision_stops_before_execute() -> None:
     asyncio.run(module.run_stage(_dependencies(module, first, _Tty(tty=False), stage_root=root)))
     second = _Runner([_Result("trial-1", True, "met")])
 
-    with pytest.raises(module.StageError, match="receipt already exists"):
+    with pytest.raises(module.StageError, match="stage root is already initialized"):
         asyncio.run(module.run_stage(_dependencies(module, second, _Tty(tty=False), stage_root=root)))
 
     assert second.executed == []
+
+
+def test_initialized_stage_root_blocks_restart_before_new_random_trial_prepare() -> None:
+    """Break caught: restarting the process could create a second paid batch under a reused stage root."""
+    module, root = _module(), _root()
+    first = _Runner([_Result("random-first", True, "met")])
+    asyncio.run(module.run_stage(_dependencies(module, first, _Tty(tty=False), stage_root=root)))
+    second = _Runner([_Result("random-second", True, "met")])
+    model = _Model()
+
+    with pytest.raises(module.StageError, match="stage root is already initialized"):
+        asyncio.run(
+            module.run_stage(
+                replace(_dependencies(module, second, _Tty(tty=False), stage_root=root), model_factory=lambda: model)
+            )
+        )
+
+    assert second.prepared == []
+    assert second.executed == []
+    assert model.request_count == 0
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        lambda module: module.PriceSnapshot(
+            source_url=module.PRICE_SOURCE_URL,
+            model_id=module.MODEL_ID,
+            observed_at=datetime(2026, 8, 16, tzinfo=UTC),
+            rates_cny_per_million={"peak_output": 27},
+        ),
+        lambda module: module.PriceSnapshot(
+            source_url=module.PRICE_SOURCE_URL,
+            model_id=module.MODEL_ID,
+            observed_at=datetime.now(UTC),
+            rates_cny_per_million={"peak_output": 26},
+        ),
+    ],
+)
+def test_invalid_price_snapshot_stops_before_root_or_model(snapshot: Any) -> None:
+    """Break caught: stale or understated pricing could create a stage lock or Provider before validation."""
+    module, root, model = _module(), _root(), _Model()
+
+    with pytest.raises(module.StageError, match="price snapshot"):
+        asyncio.run(
+            module.run_stage(
+                replace(
+                    _dependencies(module, _Runner([]), _Tty(), stage_root=root),
+                    price_snapshot=snapshot(module),
+                    model_factory=lambda: model,
+                )
+            )
+        )
+
+    assert not root.exists()
+    assert model.request_count == 0
 
 
 def test_first_real_success_projects_once_and_never_prepares_retry() -> None:
@@ -327,9 +443,12 @@ def test_retry_authority_drift_stops_before_second_execute(second_condition: str
     )
     intake = _Intake()
 
-    result = asyncio.run(module.run_stage(_dependencies(module, runner, _Tty("CONFIRM trial-1\n"), intake)))
-
-    assert result["stop"] == "retry_authority_drift"
+    if second_champion != "champion":
+        with pytest.raises(module.StageError, match="prepared Champion"):
+            asyncio.run(module.run_stage(_dependencies(module, runner, _Tty("CONFIRM trial-1\n"), intake)))
+    else:
+        result = asyncio.run(module.run_stage(_dependencies(module, runner, _Tty("CONFIRM trial-1\n"), intake)))
+        assert result["stop"] == "retry_authority_drift"
     assert runner.executed == ["trial-1"]
     assert len(runner.prepared) == 2
     assert intake.triages == [("outcome-trial-1",)]
@@ -357,6 +476,26 @@ def test_two_matching_real_failures_form_one_case_and_stop() -> None:
     assert intake.triages == [("outcome-trial-1",), ("outcome-trial-1", "outcome-trial-2")]
 
 
+def test_second_success_is_observed_alone_not_mixed_with_first_failure() -> None:
+    """Break caught: a successful repeat could be mixed with the first failure to manufacture a Case."""
+    module = _module()
+    runner = _Runner(
+        [
+            _Result("trial-1", True, "not_met", failure_categories=("correctness",)),
+            _Result("trial-2", True, "met"),
+        ]
+    )
+    intake = _Intake()
+
+    result = asyncio.run(
+        module.run_stage(_dependencies(module, runner, _Tty("CONFIRM trial-1\n", "CONFIRM trial-2\n"), intake))
+    )
+
+    assert result["stop"] == "retry_success_observe"
+    assert result["case_id"] is None
+    assert intake.triages == [("outcome-trial-1",), ("outcome-trial-2",)]
+
+
 def test_mismatched_repeat_stops_without_case_or_third_trial() -> None:
     """Break caught: unrelated failures could be mixed into a Case or trigger an unbounded third Trial."""
     module = _module()
@@ -378,3 +517,39 @@ def test_mismatched_repeat_stops_without_case_or_third_trial() -> None:
     assert runner.executed == ["trial-1", "trial-2"]
     assert len(runner.prepared) == 2
     assert intake.triages == [("outcome-trial-1",)]
+
+
+def test_stage_uses_a_fresh_price_snapshot_and_zero_resource_learning_budget() -> None:
+    """Break caught: stale pricing or a nonzero learning child budget could authorize unbounded paid work."""
+    module = _module()
+
+    assert module.ZERO_RESOURCE_LEARNING_BUDGET == BudgetLimit(
+        model_requests=0, tool_calls=0, tokens=0, wall_seconds=0, child_loops=0, action_effects=0
+    )
+    assert callable(module.load_price_snapshot)
+
+
+def test_existing_intake_forms_case_with_zero_resource_child_budget(tmp_path: Path) -> None:
+    """Break caught: a real repeated Case could exceed the Alpha parent budget while being persisted."""
+    sys.path.insert(0, str(Path(__file__).parent))
+    import test_alpha_c_learning_intake as fixtures
+
+    module = _module()
+    _unused_intake, aggregate = fixtures._intake(tmp_path)
+    intake = module._intake(aggregate, None)
+    first_store, first, _ = fixtures._failed_trial(tmp_path, "first")
+    second_store, second, _ = fixtures._failed_trial(tmp_path, "second")
+
+    receipt = intake.triage(
+        (
+            intake.record_trial_outcome(first, trial_store=first_store),
+            intake.record_trial_outcome(second, trial_store=second_store),
+        )
+    )
+
+    assert receipt.disposition == "learning_case"
+    assert receipt.case_id is not None
+    ticket = intake.engine.get_ticket(receipt.ticket_id)
+    assert ticket.learning_budget == module.ZERO_RESOURCE_LEARNING_BUDGET
+    _limit, usage, _reserved = aggregate.get_budget(ticket.loop_id)
+    assert usage == BudgetUsage()
