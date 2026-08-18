@@ -1,7 +1,7 @@
 # Tianwen Alpha-C Real-Evidence Sampling Design
 
 **Date:** 2026-08-18
-**Status:** Approved stage goal; implementation and live evidence pending
+**Status:** Approved stage goal; proportional-safety revision approved; live evidence pending
 **Base:** `4638026f210c0de29262d307dd051934570d975e`
 
 ## 1. Purpose
@@ -26,9 +26,10 @@ smaller internal ceiling and never spends merely because budget remains.
   Runtime fact and is never Alpha-C learning evidence.
 - Do not modify Runtime or DSH, add a scheduler, add a prompt shim, build a general evidence
   framework, run an external Skill market, promote, enter Shadow, or enter Alpha-D.
-- Do not weaken Trial confirmation. A paid Trial may start only after a real local TTY receives
-  the exact `CONFIRM <trial-id>` text shown for the persisted preview. Environment variables,
-  pytest switches, pipes, and implicit controller approval cannot forge `confirmed_via=local_tty`.
+- The approved Goal, authority and cumulative CNY 20 budget authorize bounded Trial execution.
+  Preview, frozen conditions and receipts remain audit records; they are not per-Trial approval
+  gates. After a legal preflight the operator executes automatically without TTY, pipe or
+  environment confirmation.
 - No Candidate may exist without a persisted real Case and conditional Lesson. Candidate
   creation never changes the active pointer.
 
@@ -85,8 +86,9 @@ changing Runtime or creating a reusable framework.
 
 ### 4.3 Direct pytest or ad-hoc Python invocation
 
-Rejected. It cannot honestly provide the required real-TTY confirmation and makes the one-retry,
-cost, and stop decisions too easy to bypass accidentally.
+Rejected. It makes the one-retry, cumulative-cost, durable-receipt and stop decisions too easy to
+bypass accidentally. The stage-local operator remains useful for bounded execution and audit,
+not for adding another approval layer.
 
 ### 4.4 Run all A1-A5
 
@@ -115,10 +117,12 @@ model, prompt, task, Skill, verifier, Docker image, or budget values.
 
 ## 6. Price and budget accounting
 
-The current official DeepSeek Chinese pricing page is
+The official DeepSeek Chinese pricing page is
 `https://api-docs.deepseek.com/zh-cn/quick_start/pricing/`. It was checked on 2026-08-18.
 For `deepseek-v4-pro`, the highest published category is peak-time output at CNY 27 per million
-tokens. Prices can change, so the page must be checked again immediately before a paid Trial.
+tokens. This observed maximum is a conservative estimate for this one bounded stage, not an
+execution authority. Network availability, cache age, or a refresh timestamp do not block a Trial
+while the resulting estimate remains clearly below the approved CNY 20 ceiling.
 
 Python's current durable Trial usage contains total tokens but not input/cache/output categories.
 This stage therefore records two different facts:
@@ -128,15 +132,15 @@ This stage therefore records two different facts:
    `tokens * highest current published CNY rate / 1_000_000`.
 
 Before each Trial, its full 40,000-token budget is reserved against the stage ledger at the
-current maximum rate. At CNY 27/M this is CNY 1.08 per Trial and CNY 2.16 for the two-Trial
+observed maximum rate. At CNY 27/M this is CNY 1.08 per Trial and CNY 2.16 for the two-Trial
 maximum, well inside the cumulative CNY 20 authorization. If a provider request fails before
 exact settlement, the still-reserved token ceiling remains charged to the conservative ledger.
-The script refuses to prepare or confirm a Trial if the reservation would exceed the remaining
-Alpha-C budget.
+The script records the model, source, observed rate and estimate in receipts and refuses to start
+a Trial only when the projected cumulative amount would exceed the remaining Alpha-C budget.
 
 ## 7. Zero-paid preflight
 
-The preflight must complete before a real TTY can confirm execution. It verifies and records:
+The preflight must complete before automatic bounded execution. It verifies and records:
 
 - exact Git branch/base and a clean tracked worktree;
 - fixed task A1 and immutable task/image-lock digests;
@@ -150,16 +154,17 @@ The preflight must complete before a real TTY can confirm execution. It verifies
 - Trial store, workspace, and condition snapshot digest;
 - zero Goal, zero Run, zero model budget usage, and `paid_execution_not_started`.
 
-It writes a new-only sanitized preflight receipt before displaying the confirmation text. Any
-missing credential, provider mismatch, stale Git/task/Champion, Docker/seed failure, existing
-receipt collision, or insufficient budget stops with zero paid requests.
+It writes a new-only sanitized preflight receipt and bounded preview before execution. Any missing
+credential, provider mismatch, stale Git/task/Champion, Docker/seed failure, existing receipt
+collision, or insufficient budget stops with zero paid requests. The preview and receipt prove
+what ran; they do not ask for another approval already granted at the stage boundary.
 
 ## 8. Natural sampling state machine
 
 ### 8.1 First Trial
 
-After real-TTY confirmation, execute exactly one A1 Trial and reload its immutable Manifest,
-Result, final verifier Evidence, and exact budget usage.
+After legal preflight, execute exactly one A1 Trial and reload its immutable Manifest, Result,
+final verifier Evidence, and exact budget usage.
 
 - `verdict=met`, completed execution/verification, passed boundary, and real model usage:
   project `verified_success`, triage it as `observe`, write the final stage stop receipt, and stop
@@ -173,8 +178,7 @@ Result, final verifier Evidence, and exact budget usage.
 
 ### 8.2 One independent repeat
 
-Prepare a fresh A1 Trial with `previous_trial_id=None`. Before displaying a second confirmation,
-require:
+Prepare a fresh A1 Trial with `previous_trial_id=None`. Before automatically executing it, require:
 
 - different trial IDs, stores, workspaces, Goals, and future Run contexts;
 - exact equality of the full condition snapshots;
@@ -184,9 +188,9 @@ require:
 
 Any mismatch stops before the second model request.
 
-After a real-TTY confirmation, execute the repeat once. A success or non-qualifying result stops
-without mixing unlike Outcomes. A qualifying failure proceeds only when the two projected
-Outcomes have exactly equal capability scope and problem fingerprint. Only then may existing
+Execute the repeat once. A success or non-qualifying result stops without mixing unlike Outcomes.
+A qualifying failure proceeds only when the two projected Outcomes have exactly equal capability
+scope and problem fingerprint. Only then may existing
 Intake triage create Gap, Signal, Ticket, and Case.
 
 The first Trial store is the aggregate Intake store because it owns the first Goal and parent META
@@ -234,7 +238,6 @@ reasoning, full source files, or unbounded provider responses.
 The stage stops immediately on any of the following:
 
 - cumulative conservative charge would exceed CNY 20;
-- real TTY confirmation is unavailable;
 - credential/provider/model/Docker/task/baseline/verifier/store/authority check fails;
 - a Result is not a qualified real model Trial;
 - first Trial succeeds or produces any non-qualifying failure;

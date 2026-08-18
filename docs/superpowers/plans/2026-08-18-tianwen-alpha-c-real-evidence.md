@@ -6,7 +6,7 @@
 **Goal:** Collect one bounded natural A1 sample, repeat only after a true verifier-backed failure,
 and feed only qualified real evidence into the existing Alpha-C gate.
 
-**Architecture:** One stage-local interactive runner composes existing AlphaTrialRunner and
+**Architecture:** One stage-local bounded runner composes existing AlphaTrialRunner and
 LearningIntake. It writes bounded JSON receipts under `D:\DevData`; it does not modify Runtime,
 DSH, Alpha-B, Promotion, Shadow, or the ActivePointer.
 
@@ -38,19 +38,20 @@ Steps:
 The runner must:
 
 1. accept only a new stage data root below `D:\DevData`;
-2. require the fixed A1 task, fixed model/provider/settings, fixed BudgetLimit, and current
-   official maximum CNY rate snapshot;
+2. require the fixed A1 task, fixed model/provider/settings, fixed BudgetLimit, and the stage's
+   recorded conservative CNY rate estimate;
 3. require a non-empty DeepSeek credential without reading, printing, or persisting it;
 4. construct the native PydanticAI model and existing AlphaTrialRunner;
 5. call `prepare()` and freeze condition plus Champion identity;
 6. verify no Goal/Run/model usage exists;
 7. write a new-only sanitized preflight receipt;
-8. reject a non-TTY stdin before `execute()`;
-9. in a real TTY, render the bounded preview and require exact `CONFIRM <trial-id>`.
+8. render and persist the bounded preview as audit evidence;
+9. after legal preflight, create a truthful approved-Goal/budget authority receipt and execute
+   without a second interactive approval.
 
 Offline tests must prove fake model request count remains zero for missing credential, provider
-mismatch, Git/task/Champion/Docker/seed failure, cost exhaustion, receipt collision, non-TTY, and
-wrong confirmation.
+mismatch, Git/task/Champion/Docker/seed failure, cost exhaustion and receipt collision. They must
+also prove a valid non-TTY process automatically executes exactly one bounded Trial.
 
 ## Task 3: Implement one Trial and honest stop classification
 
@@ -61,7 +62,7 @@ wrong confirmation.
 
 Steps:
 
-1. Execute the prepared Trial only after exact real-TTY confirmation.
+1. Execute the prepared Trial automatically after the fixed preflight and audit receipt.
 2. Reload durable Manifest, Result, final verifier Evidence, and store usage.
 3. Reject `qualifies_as_real_model_trial=false` before calling LearningIntake.
 4. For a qualified success, project and triage only that success, write `no_case`, and stop.
@@ -87,7 +88,7 @@ Steps:
 1. Prepare a second independent A1 only after the first qualifying failure.
 2. Keep `previous_trial_id=None` and prove trial/store/workspace identity is different.
 3. Compare the complete condition snapshots plus Champion version/digest.
-4. Write a retry authority before the second confirmation.
+4. Write a retry authority before the second automatic execution.
 5. Any drift or budget shortage stops with second-model request count zero.
 6. After the one repeat, never create a third Trial.
 7. Success or non-qualifying/mismatched failure stops without mixed triage.
@@ -130,31 +131,28 @@ Run serially with caches and temporary data on `D:\DevData`:
 
 Any Critical or Important finding returns to a focused tests-only RED before implementation.
 
-## Task 7: One-time live preflight
+## Task 7: One-time live launch checks
 
 Before any paid request:
 
 1. re-check branch/base/status;
 2. re-audit the production governance DB and confirm no prior qualified real Case/Candidate;
-3. open the official current DeepSeek pricing page and freeze the maximum current CNY rate;
+3. load the stage's recorded official price observation as an estimate, not an approval gate;
 4. verify remaining cumulative Alpha-C budget;
 5. verify configured credential as a boolean only;
-6. run the fixed script through prepare only;
-7. inspect the persisted preview, condition/Champion digests, Docker/seed/baseline/verifier, and
-   zero Goal/Run/model usage;
-8. report the exact reserved upper bound before entering a real local TTY.
+6. invoke the fixed script exactly once after offline gates and reviews pass;
+7. let the script persist the preview, condition/Champion digests, Docker/seed/baseline/verifier,
+   zero Goal/Run/model usage and reserved upper bound before it automatically executes.
 
-If any check fails, record zero paid requests and stop.
+If any pre-execution check fails, record zero paid requests and stop.
 
 ## Task 8: Bounded live sampling
 
-In a real local interactive terminal:
-
-1. run the fixed stage script;
-2. type the exact displayed `CONFIRM <trial-id>`;
+1. run the fixed stage script after offline review and gates pass;
+2. let the legal preflight automatically enter the first bounded Trial;
 3. inspect the first Result and stop classification;
-4. only if it is a qualifying verifier-backed failure, allow the script to prepare one independent
-   repeat, inspect the equality authority, and type its exact confirmation;
+4. only if it is a qualifying verifier-backed failure, let the script prepare and automatically
+   execute one independent repeat after its equality authority is persisted;
 5. never run a third Trial;
 6. record request count, total tokens, conservative CNY upper bound, remaining cumulative budget,
    Docker executions, and all external effects.
@@ -172,3 +170,30 @@ In a real local interactive terminal:
    exact remote SHA.
 7. Send the structured completion/blocker report to supervisor task
    `01a00d5a-8974-7c41-b660-127c15fcecb6` and wait. Do not merge main or enter Alpha-D.
+
+## Task 10: Remove disproportional price and TTY approval gates
+
+**Files:**
+
+- Modify `src/tianwen/alpha.py`
+- Modify `scripts/run_alpha_c_real_evidence.py`
+- Modify `tests/integration/test_alpha_c_real_evidence.py`
+- Modify `tests/integration/test_alpha_trial.py` only if the expanded receipt literal needs direct
+  Alpha contract coverage
+
+Steps:
+
+1. Add focused tests proving a legal non-TTY process executes the first prepared Trial exactly
+   once and a qualifying first failure executes at most one independent repeat without reading
+   stdin.
+2. Run the focused test and preserve RED showing the old `confirmation_not_granted` stop.
+3. Add the backward-compatible `approved_goal_budget` authority source to
+   `TrialConfirmation.confirmed_via`; keep exact trial ID and preview-digest checks unchanged.
+4. Delete `_confirm`, stdin dependencies, confirmation stop states, the ten-minute freshness
+   constant, the local price-file loader and their obsolete tests.
+5. Keep the recorded official source/model/CNY 27/M observation, positive-rate validation,
+   conservative token reservation, cumulative CNY 20 rejection and receipt fields.
+6. Run focused GREEN, Alpha Trial and Alpha-C Intake regressions, then complete Task 6's full
+   serial release gates and independent reviews before any paid request.
+7. With the existing stage root still absent, run the fixed CLI once. Do not delete or recreate
+   the one-use root to obtain another batch.
