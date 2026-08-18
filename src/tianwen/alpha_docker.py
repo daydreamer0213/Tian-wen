@@ -134,6 +134,10 @@ class DockerCheckExecutor:
     def _container_name(self, action_id: str) -> str:
         return f"tianwen-alpha-{content_digest(action_id)[7:31]}"
 
+    @property
+    def _canonical_cli_image_reference(self) -> str:
+        return f"docker.io/library/{self.bundle.image_lock.immutable_reference}"
+
     def _check(self, check_id: str) -> AlphaCheckSpec:
         for check in self.bundle.task.named_checks:
             if check.check_id == check_id:
@@ -180,7 +184,7 @@ class DockerCheckExecutor:
             "tmpfs_bytes": self.bundle.task.limits.tmpfs_bytes,
             "output_limit_bytes": spec.output_limit_bytes,
             "log_driver": "local",
-            "log_options": (f"max-size={spec.output_limit_bytes}", "max-file=1"),
+            "log_options": (f"max-size={spec.output_limit_bytes}", "max-file=1", "compress=false"),
             "mounts": ("/workspace", f"/checks/{script_name}"),
             "working_dir": "/workspace",
             "environment": ("HOME=/tmp", "TMPDIR=/tmp", "PYTHONDONTWRITEBYTECODE=1"),
@@ -236,6 +240,8 @@ class DockerCheckExecutor:
             f"max-size={spec.output_limit_bytes}",
             "--log-opt",
             "max-file=1",
+            "--log-opt",
+            "compress=false",
             "--mount",
             f"type=bind,src={self.paths.workspace},dst=/workspace,readonly",
             "--mount",
@@ -248,7 +254,7 @@ class DockerCheckExecutor:
             "TMPDIR=/tmp",
             "--env",
             "PYTHONDONTWRITEBYTECODE=1",
-            self.bundle.image_lock.immutable_reference,
+            self._canonical_cli_image_reference,
             *spec.argv,
         ]
         substitutions = {
@@ -619,6 +625,20 @@ class DockerCheckExecutor:
     async def run_seed_preflight(self) -> VerifierResult:
         return await self._run_verifier("seed-preflight", result_type="seed_preflight")
 
+    @staticmethod
+    def _observed_environment_matches(observed: Any, expected: tuple[str, ...]) -> bool:
+        if not isinstance(observed, list):
+            return False
+        parsed: dict[str, str] = {}
+        for item in observed:
+            if not isinstance(item, str) or "=" not in item:
+                return False
+            key, value = item.split("=", 1)
+            if not key or key in parsed:
+                return False
+            parsed[key] = value
+        return all(parsed.get(key) == value for key, value in (item.split("=", 1) for item in expected))
+
     def _inspect_matches(self, record: CheckExecutionRecord, observed: dict[str, Any]) -> bool:
         labels = observed.get("Config", {}).get("Labels", {})
         try:
@@ -650,7 +670,7 @@ class DockerCheckExecutor:
         return (
             observed.get("Id") == record.container_id
             and observed.get("Name") == f"/{record.container_name}"
-            and observed.get("Config", {}).get("Image") == self.bundle.image_lock.immutable_reference
+            and observed.get("Config", {}).get("Image") == self._canonical_cli_image_reference
             and labels
             == {
                 "tianwen.alpha.action_id": record.action_id,
@@ -672,11 +692,11 @@ class DockerCheckExecutor:
             and log_config
             == {
                 "Type": config["log_driver"],
-                "Config": {"max-size": str(config["output_limit_bytes"]), "max-file": "1"},
+                "Config": {"max-size": str(config["output_limit_bytes"]), "max-file": "1", "compress": "false"},
             }
             and observed_config.get("WorkingDir") == config["working_dir"]
             and observed_config.get("Cmd") == list(config["argv"])
-            and observed_config.get("Env") == list(config["environment"])
+            and self._observed_environment_matches(observed_config.get("Env"), config["environment"])
         )
 
     async def reconcile(self, action_id: str) -> CheckResult | VerifierResult | None:
@@ -763,7 +783,7 @@ class DockerCheckExecutor:
 
         version = self._preflight_cli_json(("version", "--format", "{{json .}}"))
         info = self._preflight_cli_json(("info", "--format", "{{json .}}"))
-        image = self._preflight_cli_json(("image", "inspect", self.bundle.image_lock.immutable_reference))
+        image = self._preflight_cli_json(("image", "inspect", self._canonical_cli_image_reference))
         server = version.get("Server", {})
         architecture = server.get("Arch") or info.get("Architecture")
         if server.get("Os") != "linux" or architecture not in {"amd64", "x86_64"}:

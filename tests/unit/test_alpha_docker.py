@@ -20,6 +20,18 @@ from tianwen.domain import content_digest
 from tianwen.store import StateStore
 
 _CONTAINER_ID = "a" * 64
+_INHERITED_IMAGE_ENV = (
+    "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "LANG=C.UTF-8",
+    "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+    "PYTHON_VERSION=3.12.11",
+    "PYTHON_SHA256=c30bb24b7f1e9a19b11b55a546434f74e739bb4c271a3e3a80ff4380d49f7adb",
+)
+_CONTROLLED_ENV = {
+    "HOME": "/tmp",
+    "TMPDIR": "/tmp",
+    "PYTHONDONTWRITEBYTECODE": "1",
+}
 
 
 class _Reader:
@@ -130,7 +142,7 @@ def _inspect(executor: DockerCheckExecutor, action_id: str, *, code: int, runnin
         "Id": _CONTAINER_ID,
         "Name": f"/{executor._container_name(action_id)}",
         "Config": {
-            "Image": executor.bundle.image_lock.immutable_reference,
+            "Image": f"docker.io/library/{executor.bundle.image_lock.immutable_reference}",
             "User": "65532:65532",
             "WorkingDir": "/workspace",
             "Cmd": ["python", "-I", "/checks/public.py", "/workspace"],
@@ -150,7 +162,7 @@ def _inspect(executor: DockerCheckExecutor, action_id: str, *, code: int, runnin
             "Memory": limits.memory_bytes,
             "NanoCpus": int(limits.cpus * 1_000_000_000),
             "Tmpfs": {"/tmp": f"rw,nosuid,nodev,noexec,size={limits.tmpfs_bytes}"},
-            "LogConfig": {"Type": "local", "Config": {"max-size": "16", "max-file": "1"}},
+            "LogConfig": {"Type": "local", "Config": {"max-size": "16", "max-file": "1", "compress": "false"}},
         },
         "Mounts": [
             {"Type": "bind", "Source": str(executor.paths.workspace), "Destination": "/workspace", "RW": False},
@@ -192,7 +204,11 @@ def _make_final_inspect(executor: DockerCheckExecutor, observed: dict[str, Any],
     observed["Config"]["Cmd"] = ["python", "-I", "/checks/verify.py", "/workspace"]
     observed["HostConfig"]["LogConfig"] = {
         "Type": "local",
-        "Config": {"max-size": str(executor.bundle.task.final_verifier.output_limit_bytes), "max-file": "1"},
+        "Config": {
+            "max-size": str(executor.bundle.task.final_verifier.output_limit_bytes),
+            "max-file": "1",
+            "compress": "false",
+        },
     }
     observed["Mounts"][1] = {
         "Type": "bind",
@@ -216,12 +232,91 @@ def test_create_argv_has_every_required_boundary_and_only_two_mounts(executor: D
     assert "--memory" in argv and "268435456" in argv
     assert "--cpus" in argv and "1.0" in argv
     assert "--pull" in argv and "never" in argv
+    assert tuple(argv[index + 1] for index, value in enumerate(argv) if value == "--log-opt") == (
+        "max-size=16",
+        "max-file=1",
+        "compress=false",
+    )
     assert sum(item.startswith("type=bind,") for item in argv) == 2
     assert "docker.sock" not in joined.casefold()
+    assert f"docker.io/library/{executor.bundle.image_lock.immutable_reference}" in argv
+    assert executor.bundle.image_lock.immutable_reference not in argv
     assert str(executor.paths.state) not in "\n".join(sanitized)
     assert str(executor.paths.workspace) not in "\n".join(sanitized)
     assert str(executor.bundle.root / "checks" / "public.py") not in "\n".join(sanitized)
     assert "DEEPSEEK_API_KEY" not in environment
+
+
+def test_normalized_local_log_configuration_disables_compression(executor: DockerCheckExecutor) -> None:
+    config = executor._normalized_config("public")
+
+    assert config["log_driver"] == "local"
+    assert config["log_options"] == ("max-size=16", "max-file=1", "compress=false")
+
+
+def test_recovery_identity_accepts_local_log_configuration_with_compression_disabled(
+    executor: DockerCheckExecutor,
+) -> None:
+    record = _record(executor, "action:log-compression")
+    observed = _inspect(executor, "action:log-compression", code=0)
+
+    assert observed["HostConfig"]["LogConfig"]["Config"] == {
+        "max-size": "16",
+        "max-file": "1",
+        "compress": "false",
+    }
+    assert executor._inspect_matches(record, observed)
+
+
+def test_recovery_identity_accepts_image_inherited_environment(executor: DockerCheckExecutor) -> None:
+    record = _record(executor, "action:inherited-env")
+    observed = _inspect(executor, "action:inherited-env", code=0)
+    observed["Config"]["Env"] = [
+        *_INHERITED_IMAGE_ENV,
+        *(f"{key}={value}" for key, value in _CONTROLLED_ENV.items()),
+    ]
+
+    assert executor._inspect_matches(record, observed)
+
+
+@pytest.mark.parametrize("controlled", tuple(_CONTROLLED_ENV))
+@pytest.mark.parametrize("mutation", ("missing", "changed", "duplicate"))
+def test_recovery_identity_rejects_missing_changed_or_duplicate_controlled_environment(
+    executor: DockerCheckExecutor, controlled: str, mutation: str
+) -> None:
+    record = _record(executor, f"action:controlled-env-{controlled}-{mutation}")
+    observed = _inspect(executor, f"action:controlled-env-{controlled}-{mutation}", code=0)
+    environment = [*_INHERITED_IMAGE_ENV, *(f"{key}={value}" for key, value in _CONTROLLED_ENV.items())]
+    if mutation == "missing":
+        environment = [item for item in environment if not item.startswith(f"{controlled}=")]
+    elif mutation == "changed":
+        environment = [
+            f"{controlled}=changed" if item.startswith(f"{controlled}=") else item for item in environment
+        ]
+    else:
+        environment.append(f"{controlled}={_CONTROLLED_ENV[controlled]}")
+    observed["Config"]["Env"] = environment
+
+    assert not executor._inspect_matches(record, observed)
+
+
+@pytest.mark.parametrize(
+    "environment",
+    (
+        {"HOME": "/tmp"},
+        [*_INHERITED_IMAGE_ENV, *(f"{key}={value}" for key, value in _CONTROLLED_ENV.items()), 1],
+        [*_INHERITED_IMAGE_ENV, *(f"{key}={value}" for key, value in _CONTROLLED_ENV.items()), "missing-equals"],
+        [*_INHERITED_IMAGE_ENV, *(f"{key}={value}" for key, value in _CONTROLLED_ENV.items()), "=empty-key"],
+    ),
+)
+def test_recovery_identity_rejects_malformed_observed_environment(
+    executor: DockerCheckExecutor, environment: Any
+) -> None:
+    record = _record(executor, "action:malformed-env")
+    observed = _inspect(executor, "action:malformed-env", code=0)
+    observed["Config"]["Env"] = environment
+
+    assert not executor._inspect_matches(record, observed)
 
 
 @pytest.mark.anyio
@@ -598,7 +693,7 @@ async def test_final_recovery_reads_logs_and_returns_only_verifier_result(
     inspected["Config"]["Cmd"] = ["python", "-I", "/checks/verify.py", "/workspace"]
     inspected["HostConfig"]["LogConfig"] = {
         "Type": "local",
-        "Config": {"max-size": str(final_limit), "max-file": "1"},
+        "Config": {"max-size": str(final_limit), "max-file": "1", "compress": "false"},
     }
     async def inspect(_id: str) -> dict[str, Any]:
         return inspected
@@ -664,6 +759,15 @@ def test_recovery_identity_rejects_extra_non_bind_mount(executor: DockerCheckExe
     assert not executor._inspect_matches(record, observed)
 
 
+def test_recovery_identity_requires_the_canonical_locked_image_reference(executor: DockerCheckExecutor) -> None:
+    record = _record(executor, "action:canonical-image")
+    observed = _inspect(executor, "action:canonical-image", code=0)
+
+    assert executor._inspect_matches(record, observed)
+    observed["Config"]["Image"] = executor.bundle.image_lock.immutable_reference
+    assert not executor._inspect_matches(record, observed)
+
+
 def test_preflight_uses_private_fakeable_cli_boundary(
     executor: DockerCheckExecutor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -692,7 +796,11 @@ def test_preflight_uses_private_fakeable_cli_boundary(
     preflight = executor.preflight()
 
     assert preflight.image_digest == executor.bundle.image_lock.manifest_digest
-    assert [command[0] for command in calls] == ["version", "info", "image"]
+    assert calls == [
+        ("version", "--format", "{{json .}}"),
+        ("info", "--format", "{{json .}}"),
+        ("image", "inspect", f"docker.io/library/{executor.bundle.image_lock.immutable_reference}"),
+    ]
 
 
 def test_credential_sentinel_never_crosses_durable_boundary(
