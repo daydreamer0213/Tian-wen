@@ -4,17 +4,25 @@
 **Stage branch:** `codex/tianwen-alpha-c-real-evidence`
 **Base `main` and `origin/main`:** `4638026f210c0de29262d307dd051934570d975e`
 **Proportional-safety design commit:** `774e5195b8ac3ef49dcd39b8f006a8b21b45cf49`
-**Implementation parent before this final-fix commit:** `7b01aa7671cd06065c8be778121607e36ac2b306`
-**Canonical final-fix revision:** the commit containing this document
-**Status:** proportional-safety correction complete; one live launch stopped at zero-paid Docker preflight
+**One-time recovery design/plan commit:** `e919a06`
+**One-time recovery implementation commit:** `d040692e5e2534ec887a34191f2492f11f712a44`
+**Canonical recovery-outcome revision:** the commit containing this document
+**Status:** recovery-1 consumed; stopped at zero-paid Docker image preflight; no real Trial
 
 ## 1. Current conclusion
 
-The Alpha-C proportional-safety correction is implemented, independently reviewed and fully
-verified offline. One authorized invocation of the fixed operator was then made. It stopped during
-`AlphaTrialRunner.prepare()` because Docker Desktop's Linux engine was not running. Docker CLI
-reported that `dockerDesktopLinuxEngine` did not exist, so no container, verifier or model request
-started.
+The Alpha-C proportional-safety correction and its one-time recovery are implemented,
+independently reviewed and fully verified offline. The first authorized invocation had stopped
+because Docker Desktop's Linux engine was unavailable. Its original root remains unchanged and
+its SQLite store still has zero Goal, Run, budget, Result, model-request, Action and Event rows.
+
+After supervision started and verified Docker 29.6.1 Linux/amd64, one authorized fixed recovery
+invocation used `D:\DevData\tianwen-alpha-c-real-evidence-recovery-1`. The recovery authority
+correctly bound the old authority digest and exact old Trial ID, then `AlphaTrialRunner.prepare()`
+stopped at Docker image preflight because the locked immutable image was not installed. Docker
+reported `No such image` for
+`python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7`.
+The daemon reported zero images and zero containers. No verifier or model request started.
 
 There is no local-TTY, stdin, pipe, environment-confirmation, price-file, network-refresh or
 price-freshness gate. After a legal zero-paid preflight, the script automatically executes the
@@ -27,16 +35,16 @@ Current factual outcome:
 - paid model requests: `0`;
 - model tokens: `0`;
 - CNY charged: `0`;
-- Docker engine/container executions: `0` (the CLI preflight failed before engine access);
+- Docker containers/verifier executions: `0`;
 - qualified real Case: none;
 - conditional Lesson: none;
 - Candidate: none;
 - Promotion or Shadow change: none.
 
-This is a truthful zero-paid environment stop, not a real Trial and not learning evidence. The
-one-use root was not deleted, moved or recreated, and the script was not rerun. Stage A remains a
-failed live proof; its exhausted Goal must not be replayed, and its historical `usage-invalid`
-fact remains operational evidence only.
+This is a second truthful zero-paid environment stop, not a real Trial and not learning evidence.
+Neither one-use root was deleted, moved, overwritten or rerun. Stage A remains a failed live
+proof; its exhausted Goal must not be replayed, and its historical `usage-invalid` fact remains
+operational evidence only.
 
 ## 2. Fixed authority and scope
 
@@ -79,17 +87,20 @@ preview digest. The stage writes the truthful source `approved_goal_budget`. The
 `local_tty` source remains backward-compatible for older Alpha callers, but this operator neither
 requests nor simulates it.
 
-## 4. Actual automatic execution sequence
+## 4. Authorized recovery execution sequence
 
-One invocation of `scripts/run_alpha_c_real_evidence.py` performs these steps in order:
+The reviewed recovery invocation of `scripts/run_alpha_c_real_evidence.py` performs these steps in
+order:
 
 1. Check only whether `DEEPSEEK_API_KEY` is configured; never print or persist its value.
 2. Validate the exact branch/base, clean tracked checkout, production Champion, provider/model,
    fixed budget and CNY 20 ceiling.
-3. Atomically create `D:\DevData\tianwen-alpha-c-real-evidence` as the one-use stage root. An
-   existing root stops the process; it is never overwritten or reused.
-4. Prepare fixed A1, complete Docker/seed/baseline preflight, prove zero Goal/Run/model usage, and
-   persist the stage authority, bounded preview and zero-paid preflight receipt.
+3. Reload the original authority and Trial store read-only, require the exact old Trial ID and zero
+   Goal/Run/budget/Result/model/Action/Event state, then atomically create only
+   `D:\DevData\tianwen-alpha-c-real-evidence-recovery-1`. An existing root stops the process.
+4. Persist the recovery stage authority with the old path/content digest/Trial binding, then
+   prepare fixed A1 and attempt Docker/seed/baseline preflight. A prepare exception writes the
+   bounded zero-paid final stop receipt.
 5. Create the exact `approved_goal_budget` audit binding and automatically execute the first Trial.
 6. Reload and validate the durable TrialResult, TrialManifest, final-verifier Evidence and exact
    budget usage, then write the honest stop/charge decision.
@@ -149,21 +160,52 @@ Fresh final gates after that fix:
 - private DSH imports: `0`;
 - full Vitest: `244 passed, 7 skipped`.
 
+Task 11 then added only the fixed recovery root, read-only old-store validator, `recovery_of`
+binding and bounded preflight-stop receipt. TDD evidence was:
+
+- initial recovery RED: `10 failed, 1 passed, 25 deselected`;
+- exact-old-state tightening RED: `2 failed, 36 deselected`;
+- focused GREEN: `13 passed, 25 deselected` in the independent review;
+- real-evidence + Alpha Trial + Alpha-C Intake: `81 passed`;
+- direct real-evidence tests: `38 passed`;
+- independent correctness: `C0 / I0 / M0`;
+- Ponytail/YAGNI: `APPROVED / lean`, `net: -0 lines possible`.
+
+Fresh release gates at `d040692e5e2534ec887a34191f2492f11f712a44`:
+
+- full Python: `547 passed, 4 skipped`;
+- Ruff, py_compile and full-branch `git diff --check`: passed;
+- Runtime Bundle dependency-topology build: passed;
+- workspace TypeScript typecheck: passed;
+- DSH public surface: exact `0.1.0-rc.6`, passed;
+- private DSH imports: `0`;
+- full Vitest: `244 passed, 7 skipped`.
+
+The first Vitest attempt omitted the already-required D-drive probe root and Python environment
+variables and failed in test setup (`223 passed, 21 failed, 7 skipped`). Re-running the unchanged
+suite with the audited fixed variables passed; this was an environment invocation error, not a
+product failure.
+
 ## 7. Current local state
 
-After the single live launch:
+After the original launch and the single authorized recovery launch:
 
 - branch: `codex/tianwen-alpha-c-real-evidence`;
-- reviewed live-launch code: `325a36a94fc7b1186e8d00a36494392985fcf68f`;
+- reviewed recovery code: `d040692e5e2534ec887a34191f2492f11f712a44`;
 - local `main`: `4638026f210c0de29262d307dd051934570d975e`;
 - local `origin/main`: `4638026f210c0de29262d307dd051934570d975e`;
 - pre-fix remote stage ref: `c26232094d4bf5638230fa01b8224c6a2910c1cb`;
-- fixed live root `D:\DevData\tianwen-alpha-c-real-evidence`: present and consumed;
-- attempted prepared identity: `trial-633752d776238190a9411a1cd8b7c71a`;
-- durable stage receipt: `receipts/stage-authority.json`;
-- Trial store objects: one existing Artifact, ActivePointer, AppConfig and EvalProtocol only;
-- Trial store Goal/Run/budget rows: `0 / 0 / 0`;
-- preflight/final Trial receipt: absent because Docker preflight raised before `prepare()` returned;
+- original root `D:\DevData\tianwen-alpha-c-real-evidence`: present, consumed and unchanged;
+- original Trial: `trial-633752d776238190a9411a1cd8b7c71a`;
+- original authority SHA-256: `66af629ca1e8b9ae7e1998ae0b1883952bcea9ee3afc9f7188568558f8d84192`;
+- recovery root `D:\DevData\tianwen-alpha-c-real-evidence-recovery-1`: present and consumed;
+- recovery Trial workspace: `trial-81c53da1ea42cc4330854a9e4182c2e5`;
+- recovery authority SHA-256: `f7651000fb2fda294e4b45bcd23cca78bb9327df0121a1db1cf112d0bf5e13a4`;
+- recovery stop receipt SHA-256: `78c2cd46d4ed03eca520c5ef8e555751872fe80bfa0def90198e5f990422e78e`;
+- both Trial stores contain only Artifact, ActivePointer, AppConfig and EvalProtocol;
+- both stores have zero budget, model-request reservation, Action and Event rows;
+- recovery stop receipt records `DockerExecutionError`, zero requests/tokens/CNY and no
+  Case/Lesson/Candidate;
 - Provider/model execution: not started;
 - credential value: never read into receipts, printed or persisted.
 
@@ -172,13 +214,12 @@ after commit/push. The stage is not merged to `main`.
 
 ## 8. Residual risks and mandatory stops
 
-- The live Provider, Docker image and verifier were not exercised because Docker Desktop's Linux
-  engine was unavailable.
-- The operator does not yet turn an exception raised inside Docker preflight into a dedicated
-  final stop receipt. The stage authority plus read-only database counts prove zero paid work, but
-  this is weaker operational packaging than the intended final receipt.
-- The stage root is intentionally non-restartable. Do not delete, move, overwrite or recreate it
-  to obtain another batch, and do not bypass the fixed root through a custom invocation.
+- The live Provider and verifier were not exercised because the locked immutable Docker image was
+  absent. Docker itself was running, but the daemon had zero images.
+- The recovery operator correctly wrote the dedicated zero-paid final stop receipt; the earlier
+  missing-receipt limitation is closed.
+- Both stage roots are intentionally non-restartable. Do not delete, move, overwrite or recreate
+  either root, and do not bypass them through a custom invocation.
 - Stop if checkout, Champion, provider/model, Docker, verifier, receipts, condition equality or
   cumulative cost fails validation.
 - Stop at CNY 20, any Goal/authority expansion, credential exposure or major irreversible risk.
@@ -188,23 +229,15 @@ after commit/push. The stage is not merged to `main`.
 
 None.
 
-This is an engineering recovery question inside the existing Goal, authority and CNY 20 ceiling,
-not a new product-value or authorization decision. The supervising session must still review the
-evidence before authorizing a recovery implementation because the existing one-use root has been
-consumed.
+There is no pending user decision. Any additional replacement root is outside the currently
+approved one-time recovery authority and must first be reviewed by the supervising session. The
+current branch must not infer or create `recovery-2` by itself.
 
 ## 10. Only recommended next entrance
 
-First report this zero-paid Docker-preflight stop and the consumed root to the supervising session.
-Do not rerun or merge the stage. If supervision approves recovery, the only recommended narrow
-follow-up is:
-
-1. start and verify Docker Desktop's Linux engine before creating any new execution authority;
-2. add one bounded recovery authority tied to the existing failed stage receipt and exact zero
-   Goal/Run/budget proof;
-3. allow at most one replacement one-use root without deleting or changing the failed root;
-4. write a dedicated preflight-failure/final receipt for any repeated environment stop; and
-5. re-review and run only after confirming cumulative paid usage remains zero and the CNY 20
-   ceiling is unchanged.
-
-No Candidate, Promotion, Shadow or Alpha-D work may start from this environment failure.
+Report the zero-paid missing-image stop, both consumed roots, exact receipts and unchanged CNY 20
+ledger to the supervising session. Do not rerun, create another root, pull and retry implicitly, or
+merge the stage. The only technically narrow future entrance, if supervision explicitly approves
+it, is to install the already-locked immutable image first, verify its digest, and separately bind
+any one-time replacement to both zero-paid stops. That future choice is not authorized by this
+handoff. No Candidate, Promotion, Shadow or Alpha-D work may start from this environment failure.
