@@ -365,8 +365,10 @@ def _docker_ready(module: Any, monkeypatch: pytest.MonkeyPatch) -> list[tuple[st
             value = {"Server": {"Os": "linux", "Arch": "amd64"}}
         else:
             value = {
-                "Id": module.LOCKED_IMAGE_ID,
+                "Id": "sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7",
                 "RepoDigests": [module.LOCKED_IMAGE_REFERENCE],
+                "Os": "linux",
+                "Architecture": "amd64",
             }
         return SimpleNamespace(returncode=0, stdout=json.dumps(value).encode("utf-8"), stderr=b"")
 
@@ -418,6 +420,29 @@ def test_host_readiness_rejects_malformed_success_json_as_stage_error(
 
     with pytest.raises(module.StageError, match="Docker readiness"):
         module._host_readiness()
+
+
+def test_host_readiness_accepts_the_locked_manifest_digest_image_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Break caught: Docker's manifest-digest image Id could be rejected despite the exact locked RepoDigest."""
+    module = _module()
+
+    def fake_run(argv: list[str], **_kwargs: Any) -> Any:
+        if argv[1:2] == ["version"]:
+            value = {"Server": {"Os": "linux", "Arch": "amd64"}}
+        else:
+            value = {
+                "Id": "sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7",
+                "RepoDigests": [module.LOCKED_IMAGE_REFERENCE],
+                "Os": "linux",
+                "Architecture": "amd64",
+            }
+        return SimpleNamespace(returncode=0, stdout=json.dumps(value).encode("utf-8"), stderr=b"")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    module._host_readiness()
 
 
 def test_cli_defaults_to_the_one_fixed_recovery_root() -> None:

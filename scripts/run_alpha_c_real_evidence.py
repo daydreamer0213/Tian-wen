@@ -43,7 +43,6 @@ RECOVERY_1_STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-
 RECOVERY_STAGE_ROOT = Path("D:/DevData/tianwen-alpha-c-real-evidence-recovery-2")
 RECOVERY_OF_TRIAL_ID = "trial-633752d776238190a9411a1cd8b7c71a"
 RECOVERY_1_TRIAL_ID = "trial-81c53da1ea42cc4330854a9e4182c2e5"
-LOCKED_IMAGE_ID = "sha256:c00fc7b44d844b6da22861ec24af43968a5200eac4ec607b4725d585165d6b49"
 LOCKED_IMAGE_REFERENCE = "python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7"
 ORIGINAL_AUTHORITY_DIGEST = "sha256:66af629ca1e8b9ae7e1998ae0b1883952bcea9ee3afc9f7188568558f8d84192"
 RECOVERY_1_AUTHORITY_DIGEST = "sha256:f7651000fb2fda294e4b45bcd23cca78bb9327df0121a1db1cf112d0bf5e13a4"
@@ -313,7 +312,6 @@ def _host_readiness() -> None:
             server.get("Os") != "linux"
             or server.get("Arch") != "amd64"
             or not isinstance(observed, dict)
-            or observed.get("Id") != LOCKED_IMAGE_ID
             or not isinstance(repo_digests, list)
             or LOCKED_IMAGE_REFERENCE not in repo_digests
         ):
