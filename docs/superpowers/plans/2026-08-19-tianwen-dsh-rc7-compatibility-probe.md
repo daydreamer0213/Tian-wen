@@ -361,7 +361,7 @@
 
   Correctness review 核对命令证据、public imports、Windows/Profile、resume/query 与错误分支；architecture-fitness review 回答模型看到了什么、工具结果是否返回、为何结束、Tianwen 如何只读解释，以及是否机械造字段/布尔/硬次数；Ponytail/比例化安全 review 检查是否可删除 runner、adapter DSL、event/normalizer framework、额外审批或宽泛清理。所有承重 finding 只允许修 probe test/report；若需要修 DSH 或产品代码，决策改为 `NOT_UPGRADE`。
 
-- [ ] **Step 4: 提交报告并普通推送 probe 分支**
+- [x] **Step 4: 提交报告并普通推送 probe 分支**
 
   ```powershell
   git add docs/research/2026-08-19-dsh-rc7-compatibility-probe-result.md
