@@ -4,7 +4,7 @@
 
 **Goal:** 在不升级产品依赖、不迁移 Tianwen 功能的前提下，验证 exact DSH rc.7 是否满足下一阶段产品复用所需的发布闭包、公开 API、Windows/headless/Profile、执行与非干扰合同，并产出明确的升级决策。
 
-**Architecture:** 在独立 Git worktree 中提交最小 probe fixture，但把依赖安装、Session、Profile、缓存和结果文件全部放到 `D:\DevData`。fixture 只使用 DSH package root exports、Node `node:test` 和现有 Tianwen Evidence 构建产物；每个 gate 要么通过，要么停止并记录 `NOT_UPGRADE`，绝不在 probe 内修 DSH 或建立兼容框架。
+**Architecture:** 在独立 Git worktree 中提交最小 probe fixture，但把依赖安装、Session、Profile、缓存和结果文件全部放到 `D:\DevData`。fixture 只使用 DSH package root exports、Node `node:test` 和现有 Tianwen Evidence 构建产物；gate 按承重与可选复用分层判定，绝不在 probe 内修 DSH 或建立兼容框架。
 
 **Tech Stack:** Node.js `>=22.19.0 <23`、pnpm `11.20.0`、TypeScript `6.0.3`、tsx `4.22.4`、DSH `0.1.0-rc.7`、PowerShell、Git。
 
@@ -19,7 +19,10 @@
 - Learning 默认 `BACKGROUND`/`DEFERRED`；本探针不扩展 Learning Intake，也不进入 Candidate、Evaluation、Shadow、Promotion 或 Rollback。
 - 不运行 Docker、Provider、付费模型、网络搜索或真实用户数据；模型边界只使用确定性本地 adapter。
 - 不修改、提交、清理或运行 `D:\Guo\zuochong\AGi` Alpha dirty worktree；不合并 `main`。
-- 任一 public API、closure 或行为 gate 不满足，立即停止后续能力测试，决策写为 `NOT_UPGRADE`；不得 patch DSH、加 private import、写兼容 framework 或降低断言。
+- `LOAD_BEARING` gates 是：npm/package closure 与原生 headless/Profile、Agent/Goal/Session resume、Session Query、Skill provider/catalog/loader、Tianwen Evidence 只读投影与 off/on 非干扰、effect 前授权/拒绝。任一项 `FAIL`，最终不得判为 `UPGRADE_CANDIDATE`。
+- `OPTIONAL_REUSE` gates 是：Jobs、Workflow、Message Feedback 等当前非承重扩展。单项失败只把该项标为 `DEFER`/`NOT_REUSE_YET`，不得单独否定整个 rc.7 升级候选。
+- closure/install/Profile 失败且后续无法运行时，技术性停止并把受影响 gate 记为 `BLOCKED`；单个语义 gate 失败时，不 patch DSH、不加 private import、不写兼容 framework、不降低断言，但继续执行与其独立且保持零 Provider/Docker/付费/真实副作用的探针。最终报告逐 gate 使用 `PASS`/`FAIL`/`BLOCKED`/`DEFER`，并按分层说明决策原因。
+- DSH Research Preview 发布不进入本 probe。
 - 比例化安全：本地临时文件只在显式 D 盘 probe root 内；不做宽泛删除、Docker prune、新审批层或推测性恢复框架。
 
 ---
@@ -66,7 +69,7 @@
   if ($npm.version -ne '0.1.0-rc.7' -or [string]::IsNullOrWhiteSpace($npm.dist.integrity)) { throw 'invalid rc.7 npm metadata' }
   ```
 
-  Expected: remote 恰为 `https://github.com/deepseek-ai/deepseek-harness.git`，HEAD 恰为 `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`，version 恰为 rc.7，`dist.integrity` 非空；任何不一致都停止为 `NOT_UPGRADE`。
+  Expected: remote 恰为 `https://github.com/deepseek-ai/deepseek-harness.git`，HEAD 恰为 `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`，version 恰为 rc.7，`dist.integrity` 非空；身份或包元数据不一致时把 closure 标为 `FAIL`，安装/fixture 无法继续时将下游标为 `BLOCKED` 并技术性停止。
 
   `dependencies` 精确固定以下公共包为 `0.1.0-rc.7`：
 
@@ -149,7 +152,7 @@
   rg -n "@deepseek-ai/dsh-headless(/startup)?" (Join-Path $probeRoot 'headless-profile.yml')
   ```
 
-  Expected: public packages import、CLI、built headless bundle 和 Profile composition 全部可用；命令不启动模型或监听端口。失败则执行 Task 5 的 `NOT_UPGRADE` 路径并停止。
+  Expected: public packages import、CLI、built headless bundle 和 Profile composition 全部可用；命令不启动模型或监听端口。失败即 `LOAD_BEARING: FAIL`，最终不得判为 `UPGRADE_CANDIDATE`；仅在失败使 fixture 无法继续运行时技术性停止并把下游记为 `BLOCKED`。
 
 - [ ] **Step 5: 提交独立 closure/Profile 交付**
 
@@ -183,7 +186,7 @@
 
 - [ ] **Step 2: 证明测试能识别行为漂移**
 
-  临时把预期 final text 改成 `RC7_WRONG_FINAL`，运行该文件并确认断言失败；还原后再运行。若真实失败来自 public API 或 resume/query 行为，不新增 adapter，直接停止为 `NOT_UPGRADE`。
+  临时把预期 final text 改成 `RC7_WRONG_FINAL`，运行该文件并确认断言失败；还原后再运行。若真实失败来自 public API 或 resume/query 行为，将对应 `LOAD_BEARING` gate 标为 `FAIL`，不新增 adapter，并继续其他可独立运行的探针。
 
 - [ ] **Step 3: 运行 Windows D 盘状态 smoke**
 
@@ -208,7 +211,7 @@
 
 **Interfaces:**
 - Consumes: `ctx.skills.list/get`, `ctx.jobs.start/wait/read`, `ctx.workflowEngine.start`, `ctx.messageFeedback.put/list`, public Approval/permission package exports.
-- Produces: Skill、Jobs、Workflow、Feedback 四个独立 `node:test` case；任一失败都能单独定位 package family。
+- Produces: Skill、Jobs、Workflow、Feedback 四个独立 `node:test` case；Skill 是 `LOAD_BEARING`，其余三项是 `OPTIONAL_REUSE`，任一失败都能单独定位 package family。
 
 - [ ] **Step 1: 写 Skill provider/catalog/loader smoke**
 
@@ -252,7 +255,7 @@
   pnpm --dir $replay exec tsx --test test/reuse-surface.test.ts
   ```
 
-  Expected: 四个 case 全绿，无 Provider、网络、Docker、用户数据。真实 public API/closure 失败则停止为 `NOT_UPGRADE`，不得换 private import。
+  Expected: 四个 case 分项记录且无 Provider、网络、Docker、用户数据。Skill 失败记 `LOAD_BEARING: FAIL`，最终不得判为 `UPGRADE_CANDIDATE`；Jobs、Workflow 或 Message Feedback 单项失败只记 `DEFER`/`NOT_REUSE_YET`。不得换 private import，独立 case 继续运行。
 
 - [ ] **Step 5: 提交扩大复用面的证据**
 
@@ -316,7 +319,7 @@
   pnpm --dir $replay exec tsx --test test/tianwen-boundary.test.ts
   ```
 
-  Expected: Evidence 可消费 rc.7 Session Query 的只读快照；off/on execution receipt 字节等价；拒绝发生在 effect counter 增加前。失败则停止为 `NOT_UPGRADE`，不改 projector 签名或 DSH。
+  Expected: Evidence 可消费 rc.7 Session Query 的只读快照；off/on execution receipt 字节等价；拒绝发生在 effect counter 增加前。对应项失败即 `LOAD_BEARING: FAIL`，最终不得判为 `UPGRADE_CANDIDATE`；不改 projector 签名或 DSH，继续其他可独立运行的探针。
 
 - [ ] **Step 5: 提交边界合同证据**
 
@@ -332,11 +335,11 @@
 
 **Interfaces:**
 - Consumes: Tasks 1–4 的 frozen lock、TAP/TS 输出、Profile dump、Session/Evidence receipts 和失败记录。
-- Produces: 唯一决策 `UPGRADE_CANDIDATE` 或 `NOT_UPGRADE`，以及逐包 `KEEP` / `DELETE` / `THIN_ADAPT` 表；不产生升级 commit。
+- Produces: 逐 gate 的层级与 `PASS`/`FAIL`/`BLOCKED`/`DEFER` 状态、唯一决策 `UPGRADE_CANDIDATE` 或 `NOT_UPGRADE`，以及逐包 `KEEP` / `DELETE` / `THIN_ADAPT` / `NOT_REUSE_YET` 表；不产生升级 commit。
 
 - [ ] **Step 1: 写事实报告与决策表**
 
-  报告固定记录 exact upstream SHA、npm integrity、Node/pnpm 版本、D 盘根、每个命令/exit code、Provider/Docker/paid 均为 0。逐项判断 `@tianwen/dsh-compat`、`runtime-bundle`、`profile-host`、`dsh-host`、`@tianwen/evidence`、`@tianwen/runtime`、`@tianwen/evolution/runtime-binding` 是保留、删除还是薄适配；没有证据的项写 `DEFER`，不得扩成迁移设计。
+  报告固定记录 exact upstream SHA、npm integrity、Node/pnpm 版本、D 盘根、每个命令/exit code、Provider/Docker/paid 均为 0。逐 gate 列出 `LOAD_BEARING`/`OPTIONAL_REUSE` 与 `PASS`/`FAIL`/`BLOCKED`/`DEFER`；逐项判断 `@tianwen/dsh-compat`、`runtime-bundle`、`profile-host`、`dsh-host`、`@tianwen/evidence`、`@tianwen/runtime`、`@tianwen/evolution/runtime-binding` 是保留、删除、薄适配还是 `NOT_REUSE_YET`。没有证据的项写 `DEFER`，不得扩成迁移设计。
 
 - [ ] **Step 2: 运行 fresh gates**
 
@@ -350,7 +353,7 @@
   git diff --check
   ```
 
-  Expected: 若全部通过才允许报告 `UPGRADE_CANDIDATE`；任何失败都必须报告 `NOT_UPGRADE`。本切片无 Python 改动，Python 回归明确为不适用，不启动任何 Python/Alpha 命令。
+  Expected: 只有全部 `LOAD_BEARING` gates 为 `PASS` 才允许报告 `UPGRADE_CANDIDATE`；其中任一 `FAIL` 或 `BLOCKED` 都必须报告 `NOT_UPGRADE` 并写明具体承重原因。`OPTIONAL_REUSE` 失败只标该项 `DEFER`/`NOT_REUSE_YET`。本切片无 Python 改动，Python 回归明确为不适用，不启动任何 Python/Alpha 命令。
 
 - [ ] **Step 3: 做三项独立只读复审**
 
