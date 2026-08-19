@@ -553,7 +553,7 @@ describeSandbox('real DSH local sandbox', () => {
       writeFileSync(REPORT_PATH, `${JSON.stringify({
         schemaVersion: 'tianwen.dsh_sandbox_probe.v1',
         platform: process.platform,
-        provider: '@deepseek-ai/dsh-sandbox-local@0.1.0-rc.6',
+        provider: '@deepseek-ai/dsh-sandbox-local@0.1.0-rc.7',
         enforcement: readOnly.enforcement,
         readOnlyWorkspaceWrite: readOnlyDenied ? 'denied' : 'not-proven',
         readOnlyDenialEvidence: readOnlyDenied

@@ -83,7 +83,7 @@ describe('tianwen resume', () => {
       mkdirSync(join(packageRoot, 'lib'), { recursive: true })
       writeFileSync(join(packageRoot, 'package.json'), `${JSON.stringify({
         name: '@deepseek-ai/dsh',
-        version: '0.1.0-rc.6',
+        version: '0.1.0-rc.7',
         bin: { dsh: 'lib/bin.js' },
       })}\n`)
       writeFileSync(bin, '')

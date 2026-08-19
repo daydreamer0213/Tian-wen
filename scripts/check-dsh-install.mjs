@@ -11,7 +11,7 @@ import { dirname, extname, isAbsolute, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
-const EXPECTED_DSH_VERSION = '0.1.0-rc.6'
+const EXPECTED_DSH_VERSION = '0.1.0-rc.7'
 const DSH_CLI_PACKAGE = '@deepseek-ai/dsh'
 const DSH_LIBRARY_PACKAGES = [
   '@deepseek-ai/dsh-agent',
@@ -20,14 +20,20 @@ const DSH_LIBRARY_PACKAGES = [
   '@deepseek-ai/dsh-cordis-host-runner',
   '@deepseek-ai/dsh-goal',
   '@deepseek-ai/dsh-goal-round-driver',
+  '@deepseek-ai/dsh-jobs-local',
   '@deepseek-ai/dsh-llm',
+  '@deepseek-ai/dsh-message-feedback',
   '@deepseek-ai/dsh-sandbox',
   '@deepseek-ai/dsh-sandbox-local',
   '@deepseek-ai/dsh-session',
   '@deepseek-ai/dsh-session-persistence-jsonl',
+  '@deepseek-ai/dsh-session-query',
+  '@deepseek-ai/dsh-session-query-sqlite',
+  '@deepseek-ai/dsh-skill',
   '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tool-goal',
   '@deepseek-ai/dsh-tools',
+  '@deepseek-ai/dsh-workflow-worker-thread',
 ]
 const EXPECTED_DIRECT_DSH_PACKAGES = [
   DSH_CLI_PACKAGE,
