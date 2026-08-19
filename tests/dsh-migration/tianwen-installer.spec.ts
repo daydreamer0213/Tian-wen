@@ -218,7 +218,7 @@ describe('Tianwen installer contract', () => {
       bin: { dsh: 'lib/bin.js' },
       version: '0.1.0-rc.5',
     }), 'utf8')
-    expect(() => validateInstalledHost(root)).toThrow(/0\.1\.0-rc\.6/u)
+    expect(() => validateInstalledHost(root)).toThrow(/0\.1\.0-rc\.7/u)
   })
 
   it('creates stable canonical receipt bytes without environment-specific commands', () => {

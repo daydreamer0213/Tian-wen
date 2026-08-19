@@ -82,10 +82,11 @@
 |---|---|---|
 | 模型、Provider、Agent Loop | 直接复用 DSH | 天问不包裹每一次模型请求，也不解释模型何时结束 |
 | Tools、MCP、工具反馈、普通 Sandbox | 直接复用 DSH | 天问只在真实外部副作用发生前接入授权判断 |
-| Session、恢复、Fork、Compaction、Query | 直接复用 DSH | DSH Session 是执行事实来源 |
+| Session、恢复、Fork、Compaction、Session Query | 直接复用 DSH | DSH Session 是执行事实来源；Tianwen 只读查询并投影需要的 Evidence |
 | 当前 Session 的 Goal、Plan、Todo | 直接复用 DSH | 服务当前执行，不冒充跨会话长期 Goal |
-| Skill provider、目录、catalog、loader | 直接复用 DSH | 天问不再自己造 Skill 加载框架 |
-| Jobs、Workflow、Subagent、Feedback、Approval UI | 优先复用 DSH | 是否在首版使用取决于真实需要，不复制同类组件 |
+| Skill provider、目录、catalog、loader | 直接复用 DSH | Tianwen 不再自己造 Skill 加载框架 |
+| Jobs、Workflow、Subagent | 直接复用 DSH | DSH 负责当前执行中的本地任务和工作流，不复制同类组件 |
+| Message Feedback、Approval、permissions | 直接复用 DSH | 反馈、审批和执行权限沿用 DSH 公共能力；Tianwen 只增加跨 Run 治理语义 |
 | 长期 Goal Graph 与下一 Task 选择 | Tianwen 新增 | 跨 Task、Run、Session 保存目标、依赖和进度 |
 | Run Manifest 与版本冻结 | Tianwen 薄适配 | 选择本次 Champion、Skill/Overlay、权限和验收标准，再交给 DSH |
 | Evidence 来源、用途、作用域绑定 | Tianwen 新增 | 从 DSH Session 单向投影，不复制第二份 Session |
@@ -93,6 +94,10 @@
 | Candidate、Evaluation、Shadow | Tianwen 新增 | 候选不能自己宣布成功，也不能影响当前 Run |
 | Promotion、Champion、Rollback | Tianwen 新增 | 只改变未来 Run 的活动版本，保留历史 |
 | Python Alpha、Docker verifier | 冻结为实验室 | 保存任务包、评测合同和失败证据，不再充当产品 Runtime |
+
+这条所有权边界必须保持清楚：DSH rc.7 提供 Session Query、Skill、Jobs、Workflow、Message Feedback、Approval 和 permissions；Tianwen 保留跨 Run Goal Graph、Evidence provenance（证据来源与流转记录）、学习归因和面向未来 Run 的版本治理。
+
+DSH Message Feedback 只是 Tianwen 做学习归因时可以读取的一项输入，不会自动成为 Lesson。DSH Job 表示当前进程中的一项工作，不等于可跨 Run 持久保存、进入学习治理的 Learning Ticket。
 
 这张表也给出了以后写代码的默认顺序：
 
@@ -230,11 +235,11 @@ DSH 能组合但缺一小段 → 写薄适配
 
 ## 10. 当前开发阶段与下一步
 
-当前正式 `main` 仍以 DSH rc.6 为产品依赖；rc.7 upstream 审计已经完成，兼容性探针正在独立执行。探针不升级产品依赖，只回答 rc.7 的承重公共能力是否真的可用。
+当前产品依赖基线已固定为 DSH `0.1.0-rc.7`。发布闭包、公共复用 seam、Agent/Goal/Session/Evidence 和 Runtime 组合稳定门已经通过；产品工作区在 fresh `DSH_HOME` 下执行原生 headless 配置检查时，首次维护完整 Profile fallback 链接超过了有界观察时间且没有输出。为此完成的三项且仅三项判别检查已经核对 CLI 身份与环境、Profile 加载入口和进程树：前两者一致，进程树只显示产品 fresh HOME 停留在 fallback 维护阶段；本次升级不再追加 headless 探针。独立 rc.7 fixture 的同一 CLI/Profile 能正常输出配置，因此这项事实记录为产品环境与首次初始化组合差异，不写成 rc.7 API 失败，也不伪称产品 headless 门已通过。原生 `dump-config` 不再作为 rc.7 依赖升级的承重阻断门；首次 Profile fallback 维护耗时作为独立的 bootstrap 性能问题跟踪。
 
 恢复建设顺序固定为：
 
-1. **rc.7 compatibility probe：** 验证发布闭包、Windows/headless/Profile、Agent/Goal/Session、Skill 和 Tianwen 非干扰 seam；
+1. **保持 rc.7 产品稳定门：** 以 exact closure、公共 seam、类型检查和执行语义回归作为升级承重证据；单独跟踪 fresh headless bootstrap 性能，不加超时或包装器掩盖；
 2. **DSH 原生普通任务：** Tianwen 关闭时，DSH 自己完成观察、工具反馈、修正和终答；
 3. **只开启 Evidence：** 证明 Tianwen 开关不改变普通执行；
 4. **接长期 Goal：** 跨 Task/Run 推进目标，不重造 DSH 单轮 Goal；
