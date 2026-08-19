@@ -1,5 +1,7 @@
 # 天问主控架构会话记忆
 
+> **阅读提示（2026-08-19）：** 本文保留项目愿景、讨论历史和主控监督约定，但不再作为产品架构的首要入口。请先阅读 [`tianwen-architecture-overview-v2.md`](tianwen-architecture-overview-v2.md)。正式 Runtime 边界以 [`2026-08-19-tianwen-runtime-boundary-reset-design.md`](superpowers/specs/2026-08-19-tianwen-runtime-boundary-reset-design.md) 为准；持续学习细则以 [`2026-08-17-tianwen-continuous-learning-governance-design.md`](superpowers/specs/2026-08-17-tianwen-continuous-learning-governance-design.md) 为准。本文中与这些文件冲突的旧状态、旧阶段顺序或双 Runtime 表述只作历史记录。
+
 更新日期：2026-08-17
 
 ## 1. 文档用途
