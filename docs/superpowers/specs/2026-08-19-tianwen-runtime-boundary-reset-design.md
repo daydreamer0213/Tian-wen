@@ -2,7 +2,7 @@
 
 **日期：** 2026-08-19
 
-**状态：** 架构方向已批准；书面版本待用户复审
+**状态：** 架构方向与书面边界已批准；已按 DSH rc.7 能力审计校准
 
 **权威范围：** Tianwen 正式产品的 Agent Runtime、长期 Goal、Evidence 与持续学习集成边界
 
@@ -17,6 +17,14 @@ DeepSeek Harness（下文简称 DSH）是 Tianwen 唯一的正式产品 Agent Ru
 - 不采用 DSH 与 Python 双 Runtime 长期并行。双 Runtime 会产生两套结束语义、工具事实、恢复权威和行为差异。
 - 不继续以 PydanticAI/Python `RepoTaskRuntime` 为正式产品底座。它只能保留为 Alpha 历史和评测辅助。
 - 不 Fork 或重写 DSH。只有公开 seam 被真实端到端证据证明无法承载 Tianwen 特有能力时，才单独重新评估最小替代方案。
+
+### 1.1 DSH rc.7 能力校准
+
+[DSH upstream 能力重叠审计](../../research/2026-08-19-dsh-upstream-capability-overlap-audit.md)把官方 `master@99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`（根版本 `0.1.0-rc.7`）与本项目实际固定的 rc.6 公共依赖逐项对比。rc.7 进一步扩大 `REUSE_DSH` 范围：Session Query/Projection、Skill provider/catalog/loader、Jobs、Schedule、Workflow、Message Feedback、Plan、Todo、User Questions、Approval/permission presets 和 opt-in 的临时 Cordis extensions 都不再由 Tianwen 规划通用替代组件。
+
+该审计也确认 DSH Goal 仍是 same-session Goal，runtime extensions 没有自动 save/install/promote 或重启恢复，并且 upstream 没有正式、通用、完整的 `Evidence → Case → Attribution → Lesson → Candidate → Evaluation → Shadow → Promotion → Rollback` 产品闭环。因此跨 Run 长期 Goal、Evidence 治理绑定、学习归因和未来版本治理仍是 Tianwen 特有职责。
+
+这项校准不授权产品依赖直接升级。唯一下一工程阶段是 exact rc.7 compatibility probe：只在 D 盘隔离环境验证发布闭包、公开 API、Windows/headless/Profile 和 Tianwen 薄 seam；任何承重合同不满足都结论为“不升级”，不得在 probe 内补写兼容框架或 patch DSH。
 
 ## 2. 核心架构：两个循环，一条旁路
 
@@ -225,6 +233,10 @@ tests/unit/test_learning.py
 
 恢复工作必须按以下顺序推进。每一步都先取得免费、可重复的端到端行为证据，再增加下一层治理；字段、单测或静态对象存在不能代替行为证据。
 
+### 阶段 0：exact rc.7 compatibility probe
+
+在阶段 1 前先验证 rc.7 发布包与公开 seam，不修改根 `package.json`、`pnpm-lock.yaml` 或任何产品包依赖。探针只给出 keep/delete/thin-adapt/不升级决策，不迁移功能，不修补 DSH，不进入长期 Goal、Learning 或 Candidate 实现。只有 closure、Windows、headless/Profile、核心执行、rc.7 新增复用面、Evidence 只读投影和 Tianwen off/on 非干扰合同全部通过，才允许另行设计依赖升级。
+
 ### 阶段 1：DSH 原生普通任务
 
 先证明没有 Tianwen 治理时，DSH 可以独立完成观察、读取、工具行动、反馈修正和终答。失败时先修复 DSH 配置或依赖使用，不建立 Python 补偿 Runtime。
@@ -286,6 +298,8 @@ Tianwen 只读取 DSH Session Event 并投影 Evidence，不改变冻结输入�
 
 本设计不是对 DSH 选型的重新开放，而是恢复已经批准的选型边界。它也不推翻持续学习治理；只明确 Learning 位于普通执行旁路，且默认不阻塞长期 Goal。
 
+`2026-08-19-dsh-upstream-capability-overlap-audit.md` 是本设计在 exact rc.7 上的组件能力证据；它扩大 DSH 复用清单，但不取代本文件的产品所有权与非干扰不变量。若后续 DSH 版本变化，必须重新做 compatibility probe，不能把会移动的 upstream `master` 当成已批准产品依赖。
+
 旧 `agent-execution-foundation` 文件目前只存在于冻结的 Alpha 分支，不在本设计的 `main@c00699b` 基线中。这里定义的是它与产品架构的权威关系，不要求为建立关系而把旧文件合并进 `main`。
 
 旧 `agent-execution-foundation` 文档中关于读取、反馈、Skill 可见、结果分类和 effect 计数的合理结论可以作为行为验收参考；其中指向 Python 通用 Runtime、request fuse、finalization hook、wall wrapper 或 Docker 普通执行底座的实现方向不再具有产品权威性。
@@ -311,4 +325,4 @@ Tianwen 只读取 DSH Session Event 并投影 Evidence，不改变冻结输入�
 
 ## 13. 后续入口
 
-本文件提交后只进入用户书面复审。用户确认文本前，不编写实现计划，不修改产品或测试代码，也不启动恢复顺序中的任何阶段。
+本文件与 rc.7 能力重叠审计已经用户批准。唯一下一入口是 `2026-08-19-tianwen-dsh-rc7-compatibility-probe.md`：先由用户复审该验证计划，再在独立分支执行阶段 0。计划获批前不修改产品或测试代码；探针完成前不直接升级依赖，也不启动阶段 1–5。
