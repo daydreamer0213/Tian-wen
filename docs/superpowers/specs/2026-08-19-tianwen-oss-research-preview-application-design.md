@@ -78,7 +78,7 @@ README 第一屏固定回答：
 - 使用 scripted/deterministic adapter；
 - 输出普通执行结果、Evidence 摘要和 `no Case` 结论；
 - Tianwen on/off 不改变动作、产物和最终结果；
-- rc.7 compatibility probe 如果结论为 `NOT_UPGRADE`，演示继续使用批准的 rc.6，不为发布伪造升级成功。
+- 2026-08-19 的 rc.7 探针已经证明全部承重公共能力，以及 Jobs、Workflow、Message Feedback 等复用面可用。唯一失败是既有产品 Profile 子进程的重复超时，它不是 rc.7 API 失败。经用户复核后，Research Preview 改为先升级到精确 rc.7；该 Profile 测试继续如实记录为非阻塞的不稳定诊断，不为它修建专用恢复或重试机制。
 
 本阶段不演示虚构 Candidate。未来真实候选闭环完成后再更新 Release。
 
