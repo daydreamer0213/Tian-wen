@@ -170,7 +170,7 @@
 - Consumes: public `Context`, `AgentLoop`, `mountAgentLoopTestDependencies`, `GoalService`, `JsonlSessionPersistence`, `SqliteSessionQueryEngine`, `SessionId`.
 - Produces: `runCoreScenario(): Promise<CoreReceipt>`，其中 `CoreReceipt` 只含 final text、请求次数、Goal 语义状态、Session event types 和 query replay event types。
 
-- [ ] **Step 1: 用现有公开 seam 写最小确定性测试**
+- [x] **Step 1: 用现有公开 seam 写最小确定性测试**
 
   直接移植 `packages/tianwen-dsh-compat/src/scripted-adapter.ts` 的测试用 `ScriptedAdapter` 形状，以及 `tests/dsh-probe/goal-recovery.spec.ts` 的 create→flush→dispose→resume 顺序；不要 import `@tianwen/dsh-compat`。rc.7 组合必须只用 package root：
 
@@ -184,11 +184,11 @@
 
   首个 Context 创建 Agent 与 Goal，提交一个本地 scripted response，flush 后销毁；第二个 Context resume 同一 Session。断言 resume 前模型请求为 0、Goal `activation === 'disarmed'`，且 `ctx.sessionQuery.readSession(id)` / `listEvents(id)` 与恢复 Session 的事件类型一致。
 
-- [ ] **Step 2: 证明测试能识别行为漂移**
+- [x] **Step 2: 证明测试能识别行为漂移**
 
   临时把预期 final text 改成 `RC7_WRONG_FINAL`，运行该文件并确认断言失败；还原后再运行。若真实失败来自 public API 或 resume/query 行为，将对应 `LOAD_BEARING` gate 标为 `FAIL`，不新增 adapter，并继续其他可独立运行的探针。
 
-- [ ] **Step 3: 运行 Windows D 盘状态 smoke**
+- [x] **Step 3: 运行 Windows D 盘状态 smoke**
 
   ```powershell
   $env:TIANWEN_RC7_STATE_ROOT = 'D:\DevData\tianwen-dsh-rc7-compatibility-probe\99f6f02\state'
@@ -197,7 +197,7 @@
 
   Expected: 一个确定性请求完成；durable JSONL 位于该 D 盘根；resume 不自动请求模型；Query 冷读不恢复 Agent。
 
-- [ ] **Step 4: 提交核心 Runtime 证据**
+- [x] **Step 4: 提交核心 Runtime 证据**
 
   ```powershell
   git add tests/dsh-rc7-probe/fixture/test/core-runtime.test.ts
