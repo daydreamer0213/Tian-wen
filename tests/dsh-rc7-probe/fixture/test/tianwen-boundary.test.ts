@@ -111,6 +111,7 @@ function modelVisibleRequests(requests: readonly GenerateOptions[]): unknown[] {
     system: request.system ?? null,
     messages: request.messages.map(message => ({
       role: message.role,
+      source: structuredClone(message.source),
       content: message.content.map(visibleBlock),
     })),
     tools: (request.tools ?? []).map(tool => ({
