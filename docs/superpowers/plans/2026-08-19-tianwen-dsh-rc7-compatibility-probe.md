@@ -274,7 +274,7 @@
 - Consumes: `projectEvidence(sessionId, events)` 的当前构建产物、rc.7 `SessionQueryEngine.readSession()`, DSH `tools/pre-execute` 与 `ApprovalService({ policy: 'never' })`。
 - Produces: `runScenario('off' | 'on'): Promise<{ execution: ExecutionReceipt; evidence?: readonly EvidenceRecord[] }>`；receipt 是本测试内的显式字段集合，不建立通用 normalizer。
 
-- [ ] **Step 1: 构造同一 deterministic task 的显式语义 receipt**
+- [x] **Step 1: 构造同一 deterministic task 的显式语义 receipt**
 
   两次运行冻结同一用户文本、adapter script、工具 schema、固定 tool call id 与权限。工具只在各自 D 盘临时目录写 `artifact.txt`。receipt 只抽取以下语义，不比较 ID、时间和绝对路径：
 
@@ -293,11 +293,11 @@
 
   `on` 只在 DSH 已完成后调用 `ctx.sessionQuery.readSession()`，再把其 events 交给 Tianwen `projectEvidence`；不得挂载 `@tianwen/runtime` 或 `@tianwen/evolution`。
 
-- [ ] **Step 2: 证明 off/on 断言有判别力后验证等价**
+- [x] **Step 2: 证明 off/on 断言有判别力后验证等价**
 
   先临时让 `on` 使用不同用户文本，确认 `assert.deepEqual(on.execution, off.execution)` 失败；还原后断言 execution 完全相等、`on.evidence` 恰有一条完整工具 Evidence、off 无治理记录。再复制一条 `tool/call`，保留相同 callId 但赋予不同 seq 后交给 projector，断言投影独立失败但先前成功的 `execution` receipt 不变。
 
-- [ ] **Step 3: 验证授权失败只在真实 effect 前阻断**
+- [x] **Step 3: 验证授权失败只在真实 effect 前阻断**
 
   注册 `tools/pre-execute` 返回 `{ kind: 'ask', reason: 'rc7 probe effect' }`，挂载 `ApprovalService({ policy: 'never' })`，让 adapter 调用固定 `effect_probe` 后读取 tool result 并给出诚实 final。断言：
 
@@ -310,7 +310,7 @@
 
   拒绝不得伪装成任务质量、Learning 或 Promotion 结果；测试不创建这些状态。
 
-- [ ] **Step 4: 构建现有 Evidence 并运行边界测试**
+- [x] **Step 4: 构建现有 Evidence 并运行边界测试**
 
   ```powershell
   pnpm run typecheck
@@ -321,7 +321,7 @@
 
   Expected: Evidence 可消费 rc.7 Session Query 的只读快照；off/on execution receipt 字节等价；拒绝发生在 effect counter 增加前。对应项失败即 `LOAD_BEARING: FAIL`，最终不得判为 `UPGRADE_CANDIDATE`；不改 projector 签名或 DSH，继续其他可独立运行的探针。
 
-- [ ] **Step 5: 提交边界合同证据**
+- [x] **Step 5: 提交边界合同证据**
 
   ```powershell
   git add tests/dsh-rc7-probe/fixture/test/tianwen-boundary.test.ts
