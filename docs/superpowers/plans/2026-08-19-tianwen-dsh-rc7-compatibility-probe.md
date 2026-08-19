@@ -29,7 +29,7 @@
 
 ## Execution Preflight
 
-- [ ] 使用 `superpowers:using-git-worktrees`，从已批准 docs 分支建立唯一实现 worktree；不要在 docs worktree 或 main 上执行：
+- [x] 使用 `superpowers:using-git-worktrees`，从已批准 docs 分支建立唯一实现 worktree；不要在 docs worktree 或 main 上执行：
 
   ```powershell
   git worktree add -b codex/tianwen-dsh-rc7-compatibility-probe D:\DevData\tianwen-worktrees\tianwen-dsh-rc7-compatibility-probe codex/tianwen-runtime-boundary-reset-design
@@ -51,7 +51,7 @@
 - Consumes: official commit `99f6f02...`, npm package `@deepseek-ai/dsh@0.1.0-rc.7`, existing `targetExistsInsidePackage(packageRoot, target)` semantics.
 - Produces: exact rc.7 frozen lockfile、所有已安装 DSH 包版本集合、公开 root export/CLI target 断言、D 盘 headless Profile dump。
 
-- [ ] **Step 1: 创建隔离 fixture manifest；不要改根依赖**
+- [x] **Step 1: 创建隔离 fixture manifest；不要改根依赖**
 
   先锁定已审计的官方源码与发布 metadata，输出只写 D 盘：
 
@@ -108,7 +108,7 @@
 
   `devDependencies` 只含 `@types/node@22.20.0`、`tsx@4.22.4`、`typescript@6.0.3`。`tsconfig.json` 使用 `module/moduleResolution: NodeNext`、`target: ES2024`、`strict: true`、`noEmit: true`。
 
-- [ ] **Step 2: 写 closure/public-surface 测试并证明它有判别力**
+- [x] **Step 2: 写 closure/public-surface 测试并证明它有判别力**
 
   测试从当前 fixture root 执行 `pnpm list --json --depth Infinity`，递归收集所有 `@deepseek-ai/dsh*`，并断言版本集合只有 rc.7；对直接 library 断言 `exports["."].types/default` 指向包内真实文件，对 `@deepseek-ai/dsh` 断言 `bin.dsh` 存在。核心断言为：
 
@@ -121,7 +121,7 @@
 
   先临时把期望版本改成 `0.1.0-rc.8`，运行单测并确认因版本集合失败；立即还原。若原合同已直接通过，不为制造 RED 修改任何产品代码。
 
-- [ ] **Step 3: 在 D 盘生成并 frozen replay lockfile**
+- [x] **Step 3: 在 D 盘生成并 frozen replay lockfile**
 
   ```powershell
   $first = Join-Path $probeRoot 'install-first'
@@ -142,7 +142,7 @@
 
   Expected: 两次安装都 exit 0，根 `package.json`/`pnpm-lock.yaml` 无 diff；所有新增大文件只在 D 盘。
 
-- [ ] **Step 4: 运行 closure、类型与原生 headless/Profile smoke**
+- [x] **Step 4: 运行 closure、类型与原生 headless/Profile smoke**
 
   ```powershell
   pnpm --dir $replay exec tsc -p tsconfig.json
@@ -154,7 +154,7 @@
 
   Expected: public packages import、CLI、built headless bundle 和 Profile composition 全部可用；命令不启动模型或监听端口。失败即 `LOAD_BEARING: FAIL`，最终不得判为 `UPGRADE_CANDIDATE`；仅在失败使 fixture 无法继续运行时技术性停止并把下游记为 `BLOCKED`。
 
-- [ ] **Step 5: 提交独立 closure/Profile 交付**
+- [x] **Step 5: 提交独立 closure/Profile 交付**
 
   ```powershell
   git add tests/dsh-rc7-probe/fixture scripts/check-dsh-install.mjs

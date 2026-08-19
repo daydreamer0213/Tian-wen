@@ -1,0 +1,45 @@
+{
+  "name": "tianwen-dsh-rc7-compatibility-probe-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=22.19.0 <23"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-agent": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-agent-loop": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-agent-loop-testkit": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-goal": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-goal-round-driver": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-headless": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-jobs": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-jobs-local": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-llm": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-message-feedback": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-permission-presets": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-session-query": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-session-query-sqlite": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-skill": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-skill-filesystem": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-storage": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-storage-json": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-subagent": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-tool-skill": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-user-approval": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-workflow": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-workflow-worker-thread": "0.1.0-rc.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "tsx": "4.22.4",
+    "typescript": "6.0.3"
+  }
+}

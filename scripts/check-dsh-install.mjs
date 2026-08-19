@@ -36,7 +36,7 @@ const EXPECTED_DIRECT_DSH_PACKAGES = [
 const root = resolve(import.meta.dirname, '..')
 const requireFromRoot = createRequire(resolve(root, 'package.json'))
 const scanExtensions = new Set(['.ts', '.mts', '.cts', '.js', '.mjs'])
-const scanRoots = ['packages', 'tests/dsh-probe', 'scripts']
+const scanRoots = ['packages', 'tests/dsh-probe', 'tests/dsh-rc7-probe', 'scripts']
 
 const isDshPackage = name =>
   name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')
