@@ -337,11 +337,11 @@
 - Consumes: Tasks 1–4 的 frozen lock、TAP/TS 输出、Profile dump、Session/Evidence receipts 和失败记录。
 - Produces: 逐 gate 的层级与 `PASS`/`FAIL`/`BLOCKED`/`DEFER` 状态、唯一决策 `UPGRADE_CANDIDATE` 或 `NOT_UPGRADE`，以及逐包 `KEEP` / `DELETE` / `THIN_ADAPT` / `NOT_REUSE_YET` 表；不产生升级 commit。
 
-- [ ] **Step 1: 写事实报告与决策表**
+- [x] **Step 1: 写事实报告与决策表**
 
   报告固定记录 exact upstream SHA、npm integrity、Node/pnpm 版本、D 盘根、每个命令/exit code、Provider/Docker/paid 均为 0。逐 gate 列出 `LOAD_BEARING`/`OPTIONAL_REUSE` 与 `PASS`/`FAIL`/`BLOCKED`/`DEFER`；逐项判断 `@tianwen/dsh-compat`、`runtime-bundle`、`profile-host`、`dsh-host`、`@tianwen/evidence`、`@tianwen/runtime`、`@tianwen/evolution/runtime-binding` 是保留、删除、薄适配还是 `NOT_REUSE_YET`。没有证据的项写 `DEFER`，不得扩成迁移设计。
 
-- [ ] **Step 2: 运行 fresh gates**
+- [x] **Step 2: 运行 fresh gates**
 
   ```powershell
   pnpm --dir $replay install --offline --frozen-lockfile --store-dir D:\DevData\pnpm-store --virtual-store-dir (Join-Path $replay '.pnpm')
@@ -355,7 +355,9 @@
 
   Expected: 只有全部 `LOAD_BEARING` gates 为 `PASS` 才允许报告 `UPGRADE_CANDIDATE`；其中任一 `FAIL` 或 `BLOCKED` 都必须报告 `NOT_UPGRADE` 并写明具体承重原因。`OPTIONAL_REUSE` 失败只标该项 `DEFER`/`NOT_REUSE_YET`。本切片无 Python 改动，Python 回归明确为不适用，不启动任何 Python/Alpha 命令。
 
-- [ ] **Step 3: 做三项独立只读复审**
+  Result: rc.7 的 `LOAD_BEARING` 与 `OPTIONAL_REUSE` 探针全部 `PASS`；但最终非 Python/Alpha 产品回归中，既有 rc.6 `runtime-profile` 默认 Profile case 在 120 秒超时，单文件串行复现仍失败。因此阶段决策为 `NOT_UPGRADE`，详见结果报告；未修改断言、DSH 或产品代码。
+
+- [x] **Step 3: 做三项独立只读复审**
 
   Correctness review 核对命令证据、public imports、Windows/Profile、resume/query 与错误分支；architecture-fitness review 回答模型看到了什么、工具结果是否返回、为何结束、Tianwen 如何只读解释，以及是否机械造字段/布尔/硬次数；Ponytail/比例化安全 review 检查是否可删除 runner、adapter DSL、event/normalizer framework、额外审批或宽泛清理。所有承重 finding 只允许修 probe test/report；若需要修 DSH 或产品代码，决策改为 `NOT_UPGRADE`。
 
