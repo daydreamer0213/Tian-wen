@@ -20,8 +20,10 @@ The sequence covers a simple implementation, a small feature, a frozen-source co
 
 ## Cost and stage status
 
-- The clean non-thinking A1–A5 sequence used 96,478 observed tokens. At the governance audit rate of CNY 27 per million tokens, its projection is CNY 2.604906.
-- The cumulative Alpha-C audit projection is CNY 15.510501 against the standing CNY 20 pool, leaving CNY 4.489499. These are uniform-rate governance projections, not a provider invoice.
+- The clean non-thinking A1–A5 sequence used 96,478 observed tokens. At the governance audit rate of CNY 27 per million tokens, its historical conservative projection is CNY 2.604906.
+- CNY 15.510501 used and CNY 4.489499 remaining are the former worst-case governance projection. They are not provider billing facts and no longer govern the current budget balance or a future execution decision.
+- Billing authority correction: on 2026-08-19, the user checked the provider billing record and explicitly confirmed that this project and stage had actually incurred CNY 0.48. Against the standing CNY 20 authorization, the current actual authorized balance is CNY 19.52.
+- The repository contains no billing screenshot or export for this correction. Its evidence type is explicit user billing confirmation; no invoice digest is claimed. A formal billing reference may be appended if one is imported later, but no CSV or screenshot is currently required.
 - The real-sampling/no-candidate substage is complete: all five tasks ended as `verified_success` / `observe`, with no `Case` and no `Candidate`.
 - Full Alpha-C is incomplete. No natural evidence yet supports the path from a genuine `Gap` through repeated `Case`, Attribution, Lesson, and Candidate.
 
@@ -31,4 +33,4 @@ The next Alpha-C entry must be triggered by either a repeated, attributable fail
 
 Ordinary successful runs, model self-reflection, and deliberately constructed failures must not be converted into learning Signals. Without a Candidate, Alpha-D remains locked: there is nothing to protect-evaluate, promote, shadow, or migrate.
 
-The consumed roots and retained audit containers remain immutable evidence. This stage now waits for a genuine event-driven trigger; it does not spend the remaining budget merely because funds remain.
+The consumed roots and retained audit containers remain immutable evidence. This stage now waits for a genuine event-driven trigger; it does not spend the CNY 19.52 actual authorized balance merely because funds remain.
