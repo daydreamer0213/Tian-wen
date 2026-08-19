@@ -213,7 +213,7 @@
 - Consumes: `ctx.skills.list/get`, `ctx.jobs.start/wait/read`, `ctx.workflowEngine.start`, `ctx.messageFeedback.put/list`, public Approval/permission package exports.
 - Produces: Skill、Jobs、Workflow、Feedback 四个独立 `node:test` case；Skill 是 `LOAD_BEARING`，其余三项是 `OPTIONAL_REUSE`，任一失败都能单独定位 package family。
 
-- [ ] **Step 1: 写 Skill provider/catalog/loader smoke**
+- [x] **Step 1: 写 Skill provider/catalog/loader smoke**
 
   在 `$env:TIANWEN_RC7_STATE_ROOT\skills\probe-skill\SKILL.md` 写固定 frontmatter/body；挂载 `SkillRegistry` 与 `SkillFilesystem`：
 
@@ -228,7 +228,7 @@
 
   同时从 `@deepseek-ai/dsh-tool-skill` root import 默认插件，证明 model-facing loader 是公开包；本 probe 不复制其 catalog/tool 实现。
 
-- [ ] **Step 2: 写真实 Local Jobs 与 worker-thread Workflow smoke**
+- [x] **Step 2: 写真实 Local Jobs 与 worker-thread Workflow smoke**
 
   Jobs 使用一个立即完成的本地 hook，断言 `start → wait → read`：
 
@@ -243,11 +243,11 @@
 
   Workflow 复用 upstream `source-worker.compat.spec.ts` 的最小公开组合：挂载 `SubagentRuntime`，注册不会被调用的 `spawn` fake provider，再挂载 `WorkerThreadWorkflowEngine`；执行 `script: 'return 6 * 7'`，断言 `{ value: 42, stopReason: 'completed', agentsStarted: 0 }`，最后 `run.dispose()`。
 
-- [ ] **Step 3: 写 Message Feedback 与 Approval surface smoke**
+- [x] **Step 3: 写 Message Feedback 与 Approval surface smoke**
 
   使用真实 `Storage` + `StorageJson` + `StorageDomain`、JSONL Session persistence 和一个已 flush 的 deterministic assistant message；挂载 `MessageFeedbackService({ maxNoteBytes: 64 })`，调用 `put({ rating: 'positive', ifVersion: null })` 后 `list`，断言同一 message id 只出现一项。Approval 的执行期行为放在 Task 4；本任务只确认 `ApprovalService`、`PermissionPresetService` 的 root export 可加载，避免为了 smoke 复制 shell/permission composition。
 
-- [ ] **Step 4: 做判别性变异并运行分项 smoke**
+- [x] **Step 4: 做判别性变异并运行分项 smoke**
 
   临时把 Skill body 期望改为 `WRONG_BODY` 或 Workflow 期望改为 `41`，确认对应 case 单独失败后还原：
 
@@ -257,7 +257,7 @@
 
   Expected: 四个 case 分项记录且无 Provider、网络、Docker、用户数据。Skill 失败记 `LOAD_BEARING: FAIL`，最终不得判为 `UPGRADE_CANDIDATE`；Jobs、Workflow 或 Message Feedback 单项失败只记 `DEFER`/`NOT_REUSE_YET`。不得换 private import，独立 case 继续运行。
 
-- [ ] **Step 5: 提交扩大复用面的证据**
+- [x] **Step 5: 提交扩大复用面的证据**
 
   ```powershell
   git add tests/dsh-rc7-probe/fixture/test/reuse-surface.test.ts
