@@ -16,4 +16,5 @@ export type {
   RuntimeBoundEvent,
   Sha256Digest,
 } from './ledger.js'
+export * from './learning-intake.js'
 export * from './runtime-binding.js'
