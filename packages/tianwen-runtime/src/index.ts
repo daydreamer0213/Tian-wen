@@ -7,6 +7,19 @@ import { TianwenEvolutionService } from '@tianwen/evolution'
 import { TianwenLearningIntakeService } from './learning-intake.js'
 
 export {
+  compareNormalizedSkillEvaluationRequests,
+  normalizeSkillEvaluationRequest,
+  observeSkillEvaluationRequest,
+} from './skill-evaluation.js'
+export type {
+  NormalizedSkillEvaluationRequestComparison,
+  ObserveSkillEvaluationRequestInput,
+  NormalizeSkillEvaluationRequestInput,
+  SkillEvaluationRequestObservation,
+  SkillEvaluationRequestNormalization,
+} from './skill-evaluation.js'
+
+export {
   TianwenLearningIntakeService,
 } from './learning-intake.js'
 export type {
