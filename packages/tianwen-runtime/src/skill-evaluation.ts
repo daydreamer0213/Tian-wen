@@ -5,6 +5,7 @@ import {
   createUserMessage,
   isAgentLoopRequest,
   renderSkillContent,
+  ScriptedAdapter,
 } from '@tianwen/dsh-compat'
 import type {
   AgentHandle,
@@ -14,6 +15,7 @@ import type {
   SessionEvent,
   SkillDefinition,
   SkillRegistration,
+  StreamChunk,
 } from '@tianwen/dsh-compat'
 import type { EvidenceRecord } from '@tianwen/evidence'
 import {
@@ -21,6 +23,7 @@ import {
   prepareRunSkillManifest,
   prepareSkillEvaluationPlan,
   sha256,
+  STAGE4_SCRIPTED_PROVIDER,
 } from '@tianwen/evolution'
 import type {
   GovernedSkillCandidateId,
@@ -82,6 +85,9 @@ export type NormalizedSkillEvaluationRequestComparison =
 const NORMALIZED_SESSION = '<paired-evaluation-session>'
 const NORMALIZED_SKILL_CONTENT = '<selected-skill-content>'
 const NORMALIZED_CATALOG_ENTRY = Object.freeze({ name: '<selected-skill-catalog-entry>' })
+const STAGE4_SCRIPTED_MODEL = 'scripted' as const
+
+export type Stage4ScriptedFixtureEntry = readonly StreamChunk[] | Error
 
 function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return value !== null && typeof value === 'object'
@@ -271,9 +277,12 @@ export class TianwenSkillEvaluationService extends Service {
       throw new Error('paired Skill evaluation requires a recorded Candidate and frozen protocol')
     }
     if (
-      input.callConfig.provider !== 'scripted-adapter'
-      || input.environment.providerId !== 'scripted-adapter'
-      || protocol.protocol.execution.providerId !== 'scripted-adapter'
+      input.callConfig.provider !== STAGE4_SCRIPTED_PROVIDER
+      || input.callConfig.model !== STAGE4_SCRIPTED_MODEL
+      || input.environment.providerId !== STAGE4_SCRIPTED_PROVIDER
+      || input.environment.modelId !== STAGE4_SCRIPTED_MODEL
+      || protocol.protocol.execution.providerId !== STAGE4_SCRIPTED_PROVIDER
+      || protocol.protocol.execution.modelId !== STAGE4_SCRIPTED_MODEL
       || input.callConfig.reasoningEffort !== undefined
       || input.callConfig.temperature !== undefined
       || input.callConfig.stop !== undefined
@@ -344,6 +353,8 @@ export class TianwenSkillEvaluationService extends Service {
       }
     }
 
+    const adapter = stage4ScriptedAdapter(input.scriptedFixture)
+    const disposeAdapter = this.ctx.llm.registerAdapter([STAGE4_SCRIPTED_PROVIDER], adapter)
     const prepared: PreparedSkillEvaluationArm[] = []
     try {
       for (const protocolCase of protocol.protocol.cases) {
@@ -469,9 +480,13 @@ export class TianwenSkillEvaluationService extends Service {
       if (result === undefined) throw new Error('paired Skill evaluation result was not durable')
       return { evaluationId: plan.evaluationId, plan, result }
     } finally {
-      for (const arm of prepared.reverse()) {
-        this.requests.delete(arm.sessionId)
-        await arm.handle.dispose()
+      try {
+        for (const arm of prepared.reverse()) {
+          this.requests.delete(arm.sessionId)
+          await arm.handle.dispose()
+        }
+      } finally {
+        disposeAdapter()
       }
     }
   }
@@ -501,16 +516,8 @@ export class TianwenSkillEvaluationService extends Service {
       const evidence = allEvidence
         .filter(item => item.action.toolName === planCase.acceptanceContract.toolName)
       const finalEvidence = evidence.at(-1)
-      const usage = {
-        modelRequests: requests.length,
-        tokens: 0,
-        toolCalls: allEvidence.length,
-        elapsedMs: Date.now() - startedAt,
-        cnyMilli: 0,
-      }
-      const withinBudget = usage.modelRequests <= budget.maxModelRequestsPerArm
-        && usage.toolCalls <= budget.maxToolCallsPerArm
-        && usage.elapsedMs <= budget.maxElapsedMsPerArm
+      const usage = observedArmUsage(requests, arm.handle.agent.session.events, startedAt)
+      const withinBudget = isWithinArmBudget(usage, budget)
       const outcome = outcomeFromEvidence(
         arm.handle.agent.session.events,
         finalEvidence,
@@ -576,13 +583,7 @@ export class TianwenSkillEvaluationService extends Service {
           : {}),
       }
     } catch {
-      const usage = {
-        modelRequests: requests.length,
-        tokens: 0,
-        toolCalls: this.ctx.tianwenEvidence.project(arm.handle.agent.session).length,
-        elapsedMs: Date.now() - startedAt,
-        cnyMilli: 0,
-      }
+      const usage = observedArmUsage(requests, arm.handle.agent.session.events, startedAt)
       if (!outcomeRecorded) {
         this.ctx.tianwenEvolution.recordOutcomeIntake({
           runId: arm.runId!,
@@ -600,6 +601,7 @@ export class TianwenSkillEvaluationService extends Service {
           content: arm.skill.content,
         }),
         usage,
+        isWithinArmBudget(usage, budget) ? 'missing-evidence' : 'arm-budget-exhausted',
       )
     }
   }
@@ -610,6 +612,7 @@ function inconclusiveArmObservation(
   executionManifestDigest: Sha256Digest,
   injectionProofDigest: Sha256Digest,
   usage: SkillEvaluationArmObservation['usage'],
+  reasonCode: 'missing-evidence' | 'arm-budget-exhausted',
 ): SkillEvaluationArmObservation {
   const subjectDigest = sha256({ sessionId: arm.sessionId, missingSubject: true })
   return {
@@ -628,8 +631,33 @@ function inconclusiveArmObservation(
     validatorSubjectDigest: subjectDigest,
     evaluatedSubjectDigest: subjectDigest,
     usage,
-    reasonCode: 'missing-evidence',
+    reasonCode,
   }
+}
+
+function observedArmUsage(
+  requests: readonly GenerateOptions[],
+  events: readonly SessionEvent[],
+  startedAt: number,
+): SkillEvaluationArmObservation['usage'] {
+  return {
+    modelRequests: requests.length,
+    tokens: 0,
+    toolCalls: events.filter(event => event.type === 'tool/result').length,
+    elapsedMs: Date.now() - startedAt,
+    cnyMilli: 0,
+  }
+}
+
+function isWithinArmBudget(
+  usage: SkillEvaluationArmObservation['usage'],
+  budget: SkillEvaluationPlan['environment']['budget'],
+): boolean {
+  return usage.modelRequests <= budget.maxModelRequestsPerArm
+    && usage.tokens <= budget.maxTokensPerArm
+    && usage.toolCalls <= budget.maxToolCallsPerArm
+    && usage.elapsedMs <= budget.maxElapsedMsPerArm
+    && usage.cnyMilli <= budget.maxCnyMilliPerArm
 }
 
 function executionManifestDigest(
@@ -672,6 +700,8 @@ export interface RunPairedSkillEvaluationInput {
   readonly environment: SkillEvaluationEnvironment
   readonly callConfig: LlmCallConfig
   readonly cases: readonly PairedSkillEvaluationCaseInput[]
+  /** Entries are consumed only by the exact service-owned zero-cost ScriptedAdapter. */
+  readonly scriptedFixture: readonly Stage4ScriptedFixtureEntry[]
 }
 
 export interface PairedSkillEvaluationReceipt {
@@ -692,6 +722,13 @@ interface PreparedSkillEvaluationArm {
   readonly contentDigest: Sha256Digest
   readonly toolSchemaDigest: Sha256Digest
   runId?: TianwenRunId
+}
+
+function stage4ScriptedAdapter(entries: readonly Stage4ScriptedFixtureEntry[]): ScriptedAdapter {
+  if (!Array.isArray(entries) || entries.some(entry => !Array.isArray(entry) && !(entry instanceof Error))) {
+    throw new Error('paired Skill evaluation requires static scripted fixture entries')
+  }
+  return new ScriptedAdapter(entries.map(entry => Array.isArray(entry) ? [...entry] : entry))
 }
 
 function scopedSurface(handle: AgentHandle): {

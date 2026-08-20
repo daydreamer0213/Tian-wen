@@ -106,6 +106,7 @@ export {
   prepareSkillEvaluationPlan,
   prepareSkillEvaluationResult,
   prepareSkillEvalProtocol,
+  STAGE4_SCRIPTED_PROVIDER,
 } from './skill-evaluation.js'
 export type {
   FreezeSkillEvalProtocolInput,

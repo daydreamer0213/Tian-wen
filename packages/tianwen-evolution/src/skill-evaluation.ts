@@ -118,6 +118,7 @@ export type SkillEvaluationEvidenceClass =
   | 'scripted-mechanism'
   | 'objective-screening'
   | 'independent-objective'
+export const STAGE4_SCRIPTED_PROVIDER = 'tianwen-stage4-scripted' as const
 export type SkillEvaluationReasonCode = SkillEvalProtocolReasonCode
 export type SkillEvaluationPolicyAuthorization = 'unobservable'
 export type SkillEvaluationDependencyBinding = 'unbound'
@@ -1192,7 +1193,7 @@ export function prepareSkillEvaluationResult(
   if (new Set(results.map(item => `${item.caseId}:${item.attempt}`)).size !== results.length) {
     throw new TypeError('Skill evaluation result has duplicate cases')
   }
-  const evidenceClass: SkillEvaluationEvidenceClass = plan.environment.providerId === 'scripted-adapter'
+  const evidenceClass: SkillEvaluationEvidenceClass = plan.environment.providerId === STAGE4_SCRIPTED_PROVIDER
     ? 'scripted-mechanism'
     : 'objective-screening'
   const unavailableDependencies = plan.environment.policyAuthorization === 'unobservable'

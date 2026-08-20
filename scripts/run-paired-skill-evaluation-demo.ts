@@ -16,7 +16,10 @@ import {
 } from '@tianwen/dsh-compat'
 import type { SessionEvent } from '@tianwen/dsh-compat'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
-import { PUBLIC_LEDGER_EVENT_TYPES } from '../packages/tianwen-evolution/src/index.js'
+import {
+  PUBLIC_LEDGER_EVENT_TYPES,
+  STAGE4_SCRIPTED_PROVIDER,
+} from '../packages/tianwen-evolution/src/index.js'
 import { sha256 } from '../packages/tianwen-evolution/src/learning-intake.js'
 import { EvolutionLedger } from '../packages/tianwen-evolution/src/ledger.js'
 import { apply } from '../packages/tianwen-runtime/src/index.js'
@@ -77,8 +80,13 @@ class SummaryRequirementNotMet extends HarnessError {
   }
 }
 
-const callConfig = {
-  provider: 'scripted-adapter',
+const governedCallConfig = {
+  provider: 'tianwen-probe',
+  model: 'scripted',
+  maxTokens: 256,
+} as const
+const evaluationCallConfig = {
+  provider: STAGE4_SCRIPTED_PROVIDER,
   model: 'scripted',
   maxTokens: 256,
 } as const
@@ -141,8 +149,8 @@ function evaluationProtocol(surface: {
       maxTotalCnyMilli: 0,
     },
     execution: {
-      providerId: callConfig.provider,
-      modelId: callConfig.model,
+      providerId: evaluationCallConfig.provider,
+      modelId: evaluationCallConfig.model,
       ...surface,
       validatorContractDigest: sha256('validator'),
     },
@@ -166,19 +174,16 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
   const handles: Array<{ dispose(): Promise<void> }> = []
   let disposeParent: (() => void) | undefined
   try {
-    const script = [
-      ...Array.from({ length: 3 }, (_, index) => [
+    const governedScript = Array.from({ length: 3 }, (_, index) => [
         toolCallResponse(`skill-${index + 1}`, 'skill', { name: parentSkill.name }),
         toolCallResponse(`verify-${index + 1}`, 'verify_summary', { text: `governed-${index + 1}` }),
         textResponse(`governed synthetic summary ${index + 1}`),
-      ]).flat(),
-      ...Array.from({ length: 8 }, (_, index) => [
+      ]).flat()
+    const evaluationScript = Array.from({ length: 8 }, (_, index) => [
         toolCallResponse(`evaluation-${index + 1}`, 'verify_summary', { text: `evaluation-${index + 1}` }),
         textResponse(`evaluation synthetic summary ${index + 1}`),
-      ]).flat(),
-    ]
-    harness = await mountCoreHarness(script)
-    harness.ctx.llm.registerAdapter(['scripted-adapter'], harness.adapter)
+      ]).flat()
+    harness = await mountCoreHarness(governedScript)
     await harness.ctx.plugin(SkillRegistry)
     await harness.ctx.plugin(applySkillTool)
     await harness.ctx.plugin(DynamicCordisRunnerService, {})
@@ -209,7 +214,7 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
     for (let index = 0; index < 3; index += 1) {
       const handle = await harness.ctx.agents.create({
         sessionId: SessionId(`paired-skill-evaluation-governed-${index + 1}`),
-        agentOptions: callConfig,
+        agentOptions: governedCallConfig,
       })
       handles.push(handle)
       const binding = await harness.ctx.tianwenLearningIntake.bindRunWithSkill(
@@ -292,9 +297,9 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
       protocolId: protocol.protocolId,
       environment: {
         dshVersion: '0.1.0-rc.7',
-        providerId: callConfig.provider,
-        modelId: callConfig.model,
-        callConfigDigest: sha256(callConfig),
+        providerId: evaluationCallConfig.provider,
+        modelId: evaluationCallConfig.model,
+        callConfigDigest: sha256(evaluationCallConfig),
         ...surface,
         workspaceSnapshotDigest: sha256('workspace'),
         validatorContractDigest: sha256('validator'),
@@ -304,11 +309,12 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
         dataBinding: 'unbound',
         budget: frozenProtocol.budget,
       },
-      callConfig,
+      callConfig: evaluationCallConfig,
       cases: evaluationCases.map(([caseId, category]) => ({
         caseId,
         input: `/research-summary\n${category}`,
       })),
+      scriptedFixture: evaluationScript,
     })
     const protocolReplay = harness.ctx.tianwenEvolution.freezeSkillEvalProtocol({
       ticketId,
@@ -355,7 +361,7 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
     const rootSkillUnchanged = (await harness.ctx.skills.get(parentSkill.name))?.content === parentSkill.content
     const fresh = await harness.ctx.agents.create({
       sessionId: SessionId('paired-skill-evaluation-fresh'),
-      agentOptions: callConfig,
+      agentOptions: governedCallConfig,
     })
     try {
       let freshContent: string | undefined
@@ -392,8 +398,11 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
       && restarted.getSkillCandidate(candidate.candidateId)?.candidateId === candidate.candidateId
       && restarted.getSkillEvaluation(evaluation.evaluationId)?.evaluationId === evaluation.evaluationId
       && restarted.getSkillEvaluationResult(evaluation.evaluationId)?.evaluationId === evaluation.evaluationId
+    const evaluationModelRequests = evaluation.result.cases.reduce((total, item) =>
+      total + item.baseline.usage.modelRequests + item.candidate.usage.modelRequests, 0)
     if (
-      harness.adapter.requests.length !== 25
+      harness.adapter.requests.length !== 9
+      || evaluationModelRequests !== 16
       || verifierCalls !== 11
       || governedToolCalls !== 6
       || !sessionsUnchanged

@@ -36,9 +36,11 @@ first-request equality. Outcome/Evidence is separate for every arm. Agent
 handles are disposed in `finally`; the root registry and a fresh ordinary Agent
 retain the parent Skill without Candidate residue.
 
-The executable path is intentionally **zero-cost scripted only**: it rejects a
-non-scripted Provider, a non-zero CNY allowance, or a call configuration the
-public rc.7 Agent cannot dispatch before any evaluation Agent or Turn exists.
+The executable path is intentionally **zero-cost scripted only**: the service
+itself owns the exact `ScriptedAdapter` on its reserved
+`tianwen-stage4-scripted` route, releases it in `finally`, and rejects a route
+collision, non-scripted Provider, non-zero CNY allowance, or unsupported call
+configuration before any evaluation Agent, Turn, or request exists.
 The captured schema digest is the visible DSH tool surface, not a Policy or
 permission proof. rc.7 exposes no authoritative Policy/authorization fact here,
 and workspace, data, and validator references are explicitly unbound; all make
@@ -93,4 +95,4 @@ The Stage 4 demo uses only the deterministic DSH scripted adapter and synthetic
 fixture data. Its audited cost is exactly zero for network, Provider requests,
 paid tokens, CNY, Docker, persistent external databases, and user data. The
 fixture is deleted after each run. The final Task 6 gate ran 15 Vitest files
-with 105 tests, all five demos, and the Python public contract with 8 tests.
+with 108 tests, all five demos, and the Python public contract with 8 tests.

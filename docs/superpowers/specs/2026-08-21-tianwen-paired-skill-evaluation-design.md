@@ -28,13 +28,17 @@ The first zero-cost demonstration proves the evaluation machinery with `Scripted
 ### 1.1 Stage 4 closure: zero-cost scope and trust limits
 
 The implemented Stage 4 execution path is deliberately narrower than a live
-evaluation facility. It accepts only the existing `scripted-adapter` with zero
-per-arm and aggregate CNY allowance, and rejects every non-scripted Provider
-or unsupported call-setting shape before it creates an Agent or starts a Turn.
-It does not claim to pre-authorize, reserve, stop, meter, or bill a live
-Provider. A later paid proof requires a separately designed preflight,
-reservation, trustworthy usage/cost receipt, and tally; it must not reuse this
-mechanism path or its tests as live-provider evidence.
+evaluation facility. It accepts only static scripted fixture entries with zero
+per-arm and aggregate CNY allowance. The service itself constructs the exact
+`ScriptedAdapter`, exclusively registers its reserved
+`tianwen-stage4-scripted` route before any Agent exists, and releases that
+route in `finally`. It never trusts a caller-registered adapter or a provider
+string; a route conflict, non-scripted Provider, or unsupported call-setting
+shape is rejected before an Agent, Turn, or request. It does not claim to
+pre-authorize, reserve, stop, meter, or bill a live Provider. A later paid
+proof requires a separately designed preflight, reservation, trustworthy
+usage/cost receipt, and tally; it must not reuse this mechanism path or its
+tests as live-provider evidence.
 
 Stage 4 can bind the actual visible DSH tool-schema surface and the actual
 first request. It cannot observe a public rc.7 Policy/authorization fact, and

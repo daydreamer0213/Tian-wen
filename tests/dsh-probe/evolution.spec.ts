@@ -367,8 +367,8 @@ describe('Tianwen append-only evolution ledger', () => {
             maxTotalCnyMilli: 0,
           },
           execution: {
-            providerId: 'scripted-adapter',
-            modelId: 'tianwen-probe',
+            providerId: 'tianwen-stage4-scripted',
+            modelId: 'scripted',
             toolSchemaDigest: RECEIPT_A,
             validatorContractDigest: RECEIPT_C,
           },

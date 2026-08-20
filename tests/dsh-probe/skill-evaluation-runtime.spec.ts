@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import {
   DynamicCordisRunnerService,
+  LlmAdapter,
   SessionId,
   SkillRegistry,
   applySkillTool,
@@ -13,7 +14,7 @@ import {
   toolCallResponse,
   waitForIdle,
 } from '@tianwen/dsh-compat'
-import type { GenerateOptions, LlmCallConfig } from '@tianwen/dsh-compat'
+import type { GenerateOptions, LlmCallConfig, StreamChunk } from '@tianwen/dsh-compat'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import {
   apply,
@@ -23,7 +24,7 @@ import {
 } from '../../packages/tianwen-runtime/src/index.js'
 
 const config: LlmCallConfig = {
-  provider: 'scripted-adapter',
+  provider: 'tianwen-stage4-scripted',
   model: 'scripted',
   maxTokens: 256,
 }
@@ -232,7 +233,10 @@ function seedCandidate(
   }
 }
 
-function evaluationInput(seeded: ReturnType<typeof seedCandidate>) {
+function evaluationInput(
+  seeded: ReturnType<typeof seedCandidate>,
+  scriptedFixture: readonly (readonly StreamChunk[] | Error)[] = [],
+) {
   return {
     candidateId: seeded.candidateId,
     protocolId: seeded.protocolId,
@@ -242,6 +246,16 @@ function evaluationInput(seeded: ReturnType<typeof seedCandidate>) {
       caseId,
       input: `/research-summary\n${category}`,
     })),
+    scriptedFixture,
+  }
+}
+
+class RouteCollisionAdapter extends LlmAdapter {
+  readonly requests: GenerateOptions[] = []
+
+  override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    this.requests.push(options)
+    yield* textResponse('must not dispatch')
   }
 }
 
@@ -290,8 +304,7 @@ describe('paired Skill evaluation request observation', () => {
       toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
       textResponse(`scripted answer ${index}`),
     ]).flat()
-    const harness = await mountCoreHarness(script)
-    harness.ctx.llm.registerAdapter(['scripted-adapter'], harness.adapter)
+    const harness = await mountCoreHarness([textResponse('host route remains unused')])
     await harness.ctx.plugin(SkillRegistry)
     await harness.ctx.plugin(applySkillTool)
     await harness.ctx.plugin(DynamicCordisRunnerService, {})
@@ -309,7 +322,7 @@ describe('paired Skill evaluation request observation', () => {
     try {
       await apply(harness.ctx, { evolutionRoot: root })
       const seeded = seedCandidate(harness)
-      const receipt = await harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded))
+      const receipt = await harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded, script))
       expect(receipt.plan.cases).toHaveLength(4)
       expect(receipt.result).toMatchObject({
         evidenceClass: 'scripted-mechanism',
@@ -327,18 +340,18 @@ describe('paired Skill evaluation request observation', () => {
       expect(receipt.result.cases.every(item =>
         item.baseline.normalizedFirstRequestDigest === item.candidate.normalizedFirstRequestDigest))
         .toBe(true)
-      expect(harness.adapter.requests).toHaveLength(16)
+      expect(harness.adapter.requests).toHaveLength(0)
       expect(harness.ctx.tianwenEvolution.listSkillEvaluations()).toHaveLength(1)
       expect(harness.ctx.tianwenEvolution.getSkillCandidate(seeded.candidateId))
         .toMatchObject({ status: 'recorded' })
-      const replay = await harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded))
+      const replay = await harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded, script))
       expect(replay.result).toEqual(receipt.result)
-      expect(harness.adapter.requests).toHaveLength(16)
+      expect(harness.adapter.requests).toHaveLength(0)
       await expect(harness.ctx.tianwenSkillEvaluation.run({
-        ...evaluationInput(seeded),
+        ...evaluationInput(seeded, script),
         callConfig: { ...config, maxTokens: 128 },
       })).rejects.toThrow('call config disagrees with its protocol')
-      expect(harness.adapter.requests).toHaveLength(16)
+      expect(harness.adapter.requests).toHaveLength(0)
       expect(await harness.ctx.skills.get(parent.name)).toMatchObject({ content: parent.content })
       expect(JSON.stringify(harness.ctx.tianwenEvolution.listEvents()))
         .not.toContain('skill-evaluation-opened')
@@ -352,7 +365,6 @@ describe('paired Skill evaluation request observation', () => {
   it('rejects a changed actual visible tool surface before opening a plan', async () => {
     const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-surface-mismatch'
     const harness = await mountCoreHarness([textResponse('unused')])
-    harness.ctx.llm.registerAdapter(['scripted-adapter'], harness.adapter)
     await harness.ctx.plugin(SkillRegistry)
     await harness.ctx.plugin(applySkillTool)
     await harness.ctx.plugin(DynamicCordisRunnerService, {})
@@ -388,7 +400,6 @@ describe('paired Skill evaluation request observation', () => {
   it('rejects a non-scripted provider before creating an Agent or dispatching a request', async () => {
     const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-non-scripted-preflight'
     const harness = await mountCoreHarness([textResponse('unused')])
-    harness.ctx.llm.registerAdapter(['scripted-adapter'], harness.adapter)
     await harness.ctx.plugin(SkillRegistry)
     await harness.ctx.plugin(applySkillTool)
     await harness.ctx.plugin(DynamicCordisRunnerService, {})
@@ -419,14 +430,52 @@ describe('paired Skill evaluation request observation', () => {
     }
   })
 
+  it('rejects an arbitrary adapter occupying the reserved Stage 4 route before an Agent or request', async () => {
+    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-scripted-route-collision'
+    const script = Array.from({ length: 8 }, (_, index) => [
+      toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
+      textResponse(`scripted answer ${index}`),
+    ]).flat()
+    const harness = await mountCoreHarness([textResponse('host route remains unused')])
+    await harness.ctx.plugin(SkillRegistry)
+    await harness.ctx.plugin(applySkillTool)
+    await harness.ctx.plugin(DynamicCordisRunnerService, {})
+    harness.ctx.tools.register(defineTool({
+      name: 'verify_summary',
+      description: 'verify one synthetic summary',
+      parameters: { text: { type: 'string', required: true } },
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute() { return 'accepted' },
+    }))
+    const disposeParent = harness.ctx.skills.register(parent)
+    const collision = new RouteCollisionAdapter()
+    const releaseCollision = harness.ctx.llm.registerAdapter(['tianwen-stage4-scripted'], collision)
+    const create = vi.spyOn(harness.ctx.agents, 'create')
+    try {
+      await apply(harness.ctx, { evolutionRoot: root })
+      const seeded = seedCandidate(harness)
+      await expect(harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded, script)))
+        .rejects.toThrow('already registered')
+      expect(create).not.toHaveBeenCalled()
+      expect(collision.requests).toHaveLength(0)
+      expect(harness.adapter.requests).toHaveLength(0)
+      expect(harness.ctx.tianwenEvolution.listSkillEvaluations()).toHaveLength(0)
+    } finally {
+      create.mockRestore()
+      releaseCollision()
+      disposeParent()
+      await harness.ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('records budget exhaustion as inconclusive while the stream observer continues exactly once', async () => {
     const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-budget-exhaustion'
     const script = Array.from({ length: 8 }, (_, index) => [
       toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
       textResponse(`scripted answer ${index}`),
     ]).flat()
-    const harness = await mountCoreHarness(script)
-    harness.ctx.llm.registerAdapter(['scripted-adapter'], harness.adapter)
+    const harness = await mountCoreHarness([textResponse('host route remains unused')])
     await harness.ctx.plugin(SkillRegistry)
     await harness.ctx.plugin(applySkillTool)
     await harness.ctx.plugin(DynamicCordisRunnerService, {})
@@ -452,7 +501,7 @@ describe('paired Skill evaluation request observation', () => {
         maxTotalModelRequests: 8,
         maxTotalToolCalls: 0,
       })
-      const receipt = await harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded))
+      const receipt = await harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded, script))
       expect(receipt.result).toMatchObject({ verdict: 'INCONCLUSIVE', comparison: 'not-comparable' })
       for (const item of receipt.result.cases) {
         expect(item.baseline).toMatchObject({
@@ -466,7 +515,7 @@ describe('paired Skill evaluation request observation', () => {
           usage: { modelRequests: 2, toolCalls: 1 },
         })
       }
-      expect(harness.adapter.requests).toHaveLength(16)
+      expect(harness.adapter.requests).toHaveLength(0)
       expect(downstreamRequests).toHaveLength(16)
     } finally {
       disposeParent()
@@ -481,8 +530,7 @@ describe('paired Skill evaluation request observation', () => {
       toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
       textResponse(`scripted answer ${index}`),
     ]).flat()
-    const harness = await mountCoreHarness(script)
-    harness.ctx.llm.registerAdapter(['scripted-adapter'], harness.adapter)
+    const harness = await mountCoreHarness([textResponse('host route remains unused')])
     await harness.ctx.plugin(SkillRegistry)
     await harness.ctx.plugin(applySkillTool)
     await harness.ctx.plugin(DynamicCordisRunnerService, {})
@@ -501,14 +549,101 @@ describe('paired Skill evaluation request observation', () => {
         .mockImplementationOnce(() => {
           throw new Error('synthetic post-turn intake failure')
         })
-      const receipt = await harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded))
+      const receipt = await harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded, script))
       expect(receipt.result.cases[0]!.baseline).toMatchObject({
         outcome: 'inconclusive',
         usage: { modelRequests: 2, toolCalls: 1, tokens: 0, cnyMilli: 0 },
       })
-      expect(harness.adapter.requests).toHaveLength(16)
+      expect(harness.adapter.requests).toHaveLength(0)
       consume.mockRestore()
     } finally {
+      disposeParent()
+      await harness.ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('durably records inconclusive arms when Evidence projection itself fails', async () => {
+    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-evidence-projection-failure'
+    const script = Array.from({ length: 8 }, (_, index) => [
+      toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
+      textResponse(`scripted answer ${index}`),
+    ]).flat()
+    const harness = await mountCoreHarness([textResponse('host route remains unused')])
+    await harness.ctx.plugin(SkillRegistry)
+    await harness.ctx.plugin(applySkillTool)
+    await harness.ctx.plugin(DynamicCordisRunnerService, {})
+    harness.ctx.tools.register(defineTool({
+      name: 'verify_summary',
+      description: 'verify one synthetic summary',
+      parameters: { text: { type: 'string', required: true } },
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute() { return 'accepted' },
+    }))
+    const disposeParent = harness.ctx.skills.register(parent)
+    await apply(harness.ctx, { evolutionRoot: root })
+    const project = vi.spyOn(harness.ctx.tianwenEvidence, 'project').mockImplementation(() => {
+      throw new Error('synthetic Evidence projection failure')
+    })
+    try {
+      const seeded = seedCandidate(harness)
+      const receipt = await harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded, script))
+      expect(receipt.result).toMatchObject({ verdict: 'INCONCLUSIVE', comparison: 'not-comparable' })
+      expect(receipt.result.cases[0]!.baseline).toMatchObject({
+        outcome: 'inconclusive',
+        reasonCode: 'missing-evidence',
+        usage: { modelRequests: 2, toolCalls: 1, tokens: 0, cnyMilli: 0 },
+      })
+      expect(harness.ctx.tianwenEvolution.getSkillEvaluationResult(receipt.evaluationId))
+        .toEqual(receipt.result)
+    } finally {
+      project.mockRestore()
+      disposeParent()
+      await harness.ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps over-budget exception usage durable with the budget reason', async () => {
+    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-evidence-projection-budget-failure'
+    const script = Array.from({ length: 8 }, (_, index) => [
+      toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
+      textResponse(`scripted answer ${index}`),
+    ]).flat()
+    const harness = await mountCoreHarness([textResponse('host route remains unused')])
+    await harness.ctx.plugin(SkillRegistry)
+    await harness.ctx.plugin(applySkillTool)
+    await harness.ctx.plugin(DynamicCordisRunnerService, {})
+    harness.ctx.tools.register(defineTool({
+      name: 'verify_summary',
+      description: 'verify one synthetic summary',
+      parameters: { text: { type: 'string', required: true } },
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute() { return 'accepted' },
+    }))
+    const disposeParent = harness.ctx.skills.register(parent)
+    await apply(harness.ctx, { evolutionRoot: root })
+    const project = vi.spyOn(harness.ctx.tianwenEvidence, 'project').mockImplementation(() => {
+      throw new Error('synthetic Evidence projection failure')
+    })
+    try {
+      const seeded = seedCandidate(harness, {
+        ...evaluationBudget(),
+        maxModelRequestsPerArm: 1,
+        maxToolCallsPerArm: 0,
+        maxTotalModelRequests: 8,
+        maxTotalToolCalls: 0,
+      })
+      const receipt = await harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded, script))
+      expect(receipt.result.cases[0]!.baseline).toMatchObject({
+        outcome: 'inconclusive',
+        reasonCode: 'arm-budget-exhausted',
+        usage: { modelRequests: 2, toolCalls: 1, tokens: 0, cnyMilli: 0 },
+      })
+      expect(harness.ctx.tianwenEvolution.getSkillEvaluationResult(receipt.evaluationId))
+        .toEqual(receipt.result)
+    } finally {
+      project.mockRestore()
       disposeParent()
       await harness.ctx.fiber.dispose()
       rmSync(root, { recursive: true, force: true })

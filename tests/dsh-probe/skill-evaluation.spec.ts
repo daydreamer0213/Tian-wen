@@ -19,6 +19,7 @@ import {
   assessSkillEvaluationFreshness,
   decideSkillEvaluation,
   prepareSkillEvaluationResult,
+  STAGE4_SCRIPTED_PROVIDER,
 } from '../../packages/tianwen-evolution/src/skill-evaluation.js'
 import type { LedgerEvent } from '../../packages/tianwen-evolution/src/index.js'
 
@@ -117,8 +118,8 @@ function protocol() {
       maxTotalCnyMilli: 0,
     },
     execution: {
-      providerId: 'scripted-adapter',
-      modelId: 'tianwen-probe',
+      providerId: STAGE4_SCRIPTED_PROVIDER,
+      modelId: 'scripted',
       toolSchemaDigest: digest('9'),
       validatorContractDigest: digest('b'),
     },
@@ -235,8 +236,8 @@ function seedCandidateWithProtocol(ledger: EvolutionLedger) {
 function environment() {
   return {
     dshVersion: '0.1.0-rc.7',
-    providerId: 'scripted-adapter',
-    modelId: 'tianwen-probe',
+    providerId: STAGE4_SCRIPTED_PROVIDER,
+    modelId: 'scripted',
     callConfigDigest: digest('c'),
     toolSchemaDigest: digest('9'),
     workspaceSnapshotDigest: digest('b'),

@@ -57,7 +57,7 @@ Candidate C 运行成对、隔离的普通 DSH Agent。它捕获真实的第一�
 Skill 差异后的归一化请求一致，并冻结可见的模型工具表面，为每个臂保存独立的 Outcome/Evidence 和私有 Evaluation
 结果。这是脚本化机制证明，因此真实效能结论始终是 `INCONCLUSIVE`、`not-comparable` 和
 `needs-evidence`，不会声称 C 优于 B。Candidate 仍仅为 `recorded`，不会安装、路由、进入 Shadow、Promotion 或 Reject。
-可执行评测器只接受零成本 scripted adapter，非 scripted Provider 会在创建评测 Agent 前被拒绝。工具摘要
+可执行评测器自行持有保留路由上的精确零成本 scripted adapter；路由冲突会被拒绝，非 scripted Provider 会在创建评测 Agent 前被拒绝。工具摘要
 只是可见工具表面，不是 DSH Policy/权限证明；Policy、workspace、data 和 validator 的独立绑定仍明确为
 未观察/未绑定。因此历史结果不能进入 Shadow；真实付费证明必须等待一份独立的 preflight、预留、可信
 receipt 与 tally 设计。
