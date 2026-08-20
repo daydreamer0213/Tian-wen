@@ -25,8 +25,8 @@ import {
 } from '@tianwen/dsh-compat'
 
 describe('tianwen-dsh-compat public seam', () => {
-  it('exports the exact rc.6 load-bearing surface', () => {
-    expect(DSH_VERSION).toBe('0.1.0-rc.6')
+  it('exports the exact rc.7 load-bearing surface', () => {
+    expect(DSH_VERSION).toBe('0.1.0-rc.7')
     expect(Context).toBeTypeOf('function')
     expect(AgentLoop).toBeTypeOf('function')
     expect(GoalService).toBeTypeOf('function')

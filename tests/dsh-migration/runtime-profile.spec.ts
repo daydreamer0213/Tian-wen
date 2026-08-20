@@ -59,7 +59,7 @@ describe('Tianwen Runtime Bundle Profile', () => {
       specifier: '@tianwen/runtime-bundle/runtime',
       name: 'tianwen-runtime',
       inject: ['dynamicCordisRunner'],
-      supportedDshVersion: '0.1.0-rc.6',
+      supportedDshVersion: '0.1.0-rc.7',
       externalSpecifiers: ['@deepseek-ai/cordis'],
     })
     expect(report.forbiddenEffects).toEqual({

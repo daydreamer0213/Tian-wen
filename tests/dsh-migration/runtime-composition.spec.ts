@@ -41,7 +41,7 @@ describe('@tianwen/runtime', () => {
     await ctx.plugin(DynamicCordisRunnerService, {})
 
     try {
-      expect(SUPPORTED_DSH_VERSION).toBe('0.1.0-rc.6')
+      expect(SUPPORTED_DSH_VERSION).toBe('0.1.0-rc.7')
       expect(DSH_VERSION).toBe(SUPPORTED_DSH_VERSION)
       await apply(ctx, { evolutionRoot: stateRoot() })
       expect(ctx.tianwenEvidence).toBeDefined()

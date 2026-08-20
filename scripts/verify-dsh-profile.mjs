@@ -29,7 +29,7 @@ const basePackage = '@deepseek-ai/dsh-base'
 const bundlePackage = '@tianwen/dsh-probe-bundle'
 const bundleAdapterPackage = `${bundlePackage}/adapter`
 const defaultModelPackage = '@deepseek-ai/dsh-agent-default-model'
-const expectedDshVersion = '0.1.0-rc.6'
+const expectedDshVersion = '0.1.0-rc.7'
 const tarballBasename = 'tianwen-dsh-probe-bundle-0.0.0.tgz'
 const runtimeBundlePackage = '@tianwen/runtime-bundle'
 const runtimeSpecifier = `${runtimeBundlePackage}/runtime`
@@ -315,7 +315,7 @@ export async function resolveAndImportRuntimeBundle(profileManifestPath) {
   await import(pathToFileURL(cordisResolved).href)
   const module = await import(pathToFileURL(runtimeResolved).href)
   requireAssertion(module.name === 'tianwen-runtime', 'wrong Runtime identity')
-  requireAssertion(module.SUPPORTED_DSH_VERSION === '0.1.0-rc.6', 'wrong DSH version')
+  requireAssertion(module.SUPPORTED_DSH_VERSION === '0.1.0-rc.7', 'wrong DSH version')
   requireAssertion(JSON.stringify(module.inject) === JSON.stringify(['dynamicCordisRunner']), 'wrong inject')
   requireAssertion(typeof module.apply === 'function', 'Runtime apply is unavailable')
   return { specifier: runtimeSpecifier, resolved: runtimeResolved, name: 'tianwen-runtime', inject: module.inject, supportedDshVersion: module.SUPPORTED_DSH_VERSION, externalSpecifiers: Object.keys(manifest.dependencies).sort(), externalResolved: { '@deepseek-ai/cordis': cordisResolved } }

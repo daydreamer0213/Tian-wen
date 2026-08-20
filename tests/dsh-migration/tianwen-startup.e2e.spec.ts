@@ -174,7 +174,7 @@ function requireDshBin(): string {
     version?: string
     bin?: { dsh?: string }
   }
-  expect(manifest.version).toBe('0.1.0-rc.6')
+  expect(manifest.version).toBe('0.1.0-rc.7')
   const bin = manifest.bin?.dsh
   expect(typeof bin).toBe('string')
   const dshBin = resolve(dirname(manifestPath), bin!)
@@ -226,7 +226,7 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   expect(createRunner.apply).toBeTypeOf('function')
   expect(modelRunner.apply).toBeTypeOf('function')
   expect(resumeRunner.apply).toBeTypeOf('function')
-  expect(runtimeManifest.dependencies['@deepseek-ai/dsh-system-prompt']).toBe('0.1.0-rc.6')
+  expect(runtimeManifest.dependencies['@deepseek-ai/dsh-system-prompt']).toBe('0.1.0-rc.7')
   const cli = resolve(runtimeRoot, runtimeManifest.bin.tianwen)
   expect(statSync(cli).isFile()).toBe(true)
   return { cli }
@@ -304,7 +304,7 @@ async function start(): Promise<void> {
     archivePath: resolve(archive),
     receiptPath: resolve(installReceiptPath),
     pnpmVersion: '11.20.0',
-    dshVersion: '0.1.0-rc.6',
+    dshVersion: '0.1.0-rc.7',
     profileBundles: [
       '@deepseek-ai/dsh-base',
       '@deepseek-ai/dsh-headless',
@@ -352,8 +352,8 @@ async function start(): Promise<void> {
     '@deepseek-ai/dsh-headless',
     runtimePackage,
   ])
-  expect(manifest.dependencies['@deepseek-ai/dsh-base']).toBe('0.1.0-rc.6')
-  expect(manifest.dependencies['@deepseek-ai/dsh-headless']).toBe('0.1.0-rc.6')
+  expect(manifest.dependencies['@deepseek-ai/dsh-base']).toBe('0.1.0-rc.7')
+  expect(manifest.dependencies['@deepseek-ai/dsh-headless']).toBe('0.1.0-rc.7')
   expect(manifest.dependencies[runtimePackage]).toBe('0.0.0')
   for (const packageName of manifest.dsh.profile.bundles) {
     const bundleRoot = realpathSync(resolve(profileRoot, 'node_modules', ...packageName.split('/')))

@@ -21,14 +21,20 @@ const expectedLibraries = [
   '@deepseek-ai/dsh-cordis-host-runner',
   '@deepseek-ai/dsh-goal',
   '@deepseek-ai/dsh-goal-round-driver',
+  '@deepseek-ai/dsh-jobs-local',
   '@deepseek-ai/dsh-llm',
+  '@deepseek-ai/dsh-message-feedback',
   '@deepseek-ai/dsh-sandbox',
   '@deepseek-ai/dsh-sandbox-local',
   '@deepseek-ai/dsh-session',
   '@deepseek-ai/dsh-session-persistence-jsonl',
+  '@deepseek-ai/dsh-session-query',
+  '@deepseek-ai/dsh-session-query-sqlite',
+  '@deepseek-ai/dsh-skill',
   '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tool-goal',
   '@deepseek-ai/dsh-tools',
+  '@deepseek-ai/dsh-workflow-worker-thread',
 ] as const
 
 function pnpmVersionCommand(): { executable: string; args: string[] } {
@@ -51,7 +57,7 @@ function pnpmVersionCommand(): { executable: string; args: string[] } {
 }
 
 describe('published DeepSeek Harness closure', () => {
-  it('pins every installed DSH package to rc.6', () => {
+  it('pins every installed DSH package to rc.7', () => {
     const output = execFileSync(
       process.execPath,
       [resolve(root, 'scripts/check-dsh-install.mjs')],
@@ -69,10 +75,10 @@ describe('published DeepSeek Harness closure', () => {
         cliTarget: boolean
       }>
     }
-    expect(report.expectedDshVersion).toBe('0.1.0-rc.6')
+    expect(report.expectedDshVersion).toBe('0.1.0-rc.7')
     expect(report.installedPackages.length).toBeGreaterThan(10)
     expect(new Set(report.installedPackages.map(item => item.version)))
-      .toEqual(new Set(['0.1.0-rc.6']))
+      .toEqual(new Set(['0.1.0-rc.7']))
 
     const cli = report.packageSurfaces.find(
       item => item.name === '@deepseek-ai/dsh',
@@ -103,7 +109,7 @@ describe('published DeepSeek Harness closure', () => {
     }
     for (const [name, version] of Object.entries(manifest.devDependencies)) {
       if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) {
-        expect(version).toBe('0.1.0-rc.6')
+        expect(version).toBe('0.1.0-rc.7')
       }
     }
     const compatManifest = JSON.parse(readFileSync(
@@ -112,7 +118,7 @@ describe('published DeepSeek Harness closure', () => {
     )) as { dependencies: Record<string, string> }
     for (const [name, version] of Object.entries(compatManifest.dependencies)) {
       if (name.startsWith('@deepseek-ai/dsh-')) {
-        expect(version).toBe('0.1.0-rc.6')
+        expect(version).toBe('0.1.0-rc.7')
       }
     }
     const command = pnpmVersionCommand()

@@ -59,7 +59,7 @@ function scriptedInstaller(
       writeFileSync(join(packageRoot, 'lib', 'bin.js'), 'export {}\n', 'utf8')
       writeJson(join(packageRoot, 'package.json'), {
         bin: { dsh: 'lib/bin.js' },
-        version: '0.1.0-rc.6',
+        version: '0.1.0-rc.7',
       })
     }
     if (argv.includes('pack')) {
@@ -75,8 +75,8 @@ function scriptedInstaller(
       const destination = argv.at(-1)!
       writeJson(join(destination, 'package.json'), {
         dependencies: {
-          '@deepseek-ai/dsh-base': '0.1.0-rc.6',
-          '@deepseek-ai/dsh-headless': '0.1.0-rc.6',
+          '@deepseek-ai/dsh-base': '0.1.0-rc.7',
+          '@deepseek-ai/dsh-headless': '0.1.0-rc.7',
           '@tianwen/runtime-bundle': '0.0.0',
         },
         dsh: {
@@ -203,14 +203,14 @@ describe('Tianwen installer contract', () => {
     expect(patch).toContain("name: '@tianwen/runtime-bundle/smoke'")
   })
 
-  it('accepts only an exact rc.6 host with a contained executable', () => {
+  it('accepts only an exact rc.7 host with a contained executable', () => {
     const root = testRoot('host')
     const packageRoot = join(root, 'node_modules', '@deepseek-ai', 'dsh')
     mkdirSync(join(packageRoot, 'lib'), { recursive: true })
     writeFileSync(join(packageRoot, 'lib', 'bin.js'), 'export {}\n', 'utf8')
     writeFileSync(join(packageRoot, 'package.json'), JSON.stringify({
       bin: { dsh: 'lib/bin.js' },
-      version: '0.1.0-rc.6',
+      version: '0.1.0-rc.7',
     }), 'utf8')
 
     expect(validateInstalledHost(root)).toBe(join(packageRoot, 'lib', 'bin.js'))
@@ -218,7 +218,7 @@ describe('Tianwen installer contract', () => {
       bin: { dsh: 'lib/bin.js' },
       version: '0.1.0-rc.5',
     }), 'utf8')
-    expect(() => validateInstalledHost(root)).toThrow(/0\.1\.0-rc\.6/u)
+    expect(() => validateInstalledHost(root)).toThrow(/0\.1\.0-rc\.7/u)
   })
 
   it('creates stable canonical receipt bytes without environment-specific commands', () => {
@@ -230,7 +230,7 @@ describe('Tianwen installer contract', () => {
     expect(receipt).toMatchObject({
       schemaVersion: 'tianwen.install.v1',
       status: 'ready',
-      dshVersion: '0.1.0-rc.6',
+      dshVersion: '0.1.0-rc.7',
       pnpmVersion: '11.20.0',
       profileBundles: [
         '@deepseek-ai/dsh-base',

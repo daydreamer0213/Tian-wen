@@ -4,7 +4,7 @@ import type { Context } from '@tianwen/dsh-compat'
 import { TianwenEvidenceService } from '@tianwen/evidence'
 import { TianwenEvolutionService } from '@tianwen/evolution'
 
-export const SUPPORTED_DSH_VERSION = '0.1.0-rc.6' as const
+export const SUPPORTED_DSH_VERSION = '0.1.0-rc.7' as const
 export const name = 'tianwen-runtime'
 export const inject = ['dynamicCordisRunner'] as const
 
