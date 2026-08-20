@@ -205,6 +205,10 @@ export class TianwenEvolutionService extends Service {
     return this.formalWrite(() => this.state().ledger.recordRunSkillUse(input))
   }
 
+  getRunSkillUse(runId: TianwenRunId): RunSkillUse | undefined {
+    return this.state().ledger.getRunSkillUse(runId)
+  }
+
   listRunSkillUses(): readonly RunSkillUse[] {
     return this.state().ledger.listRunSkillUses()
   }

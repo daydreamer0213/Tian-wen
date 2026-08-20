@@ -188,7 +188,7 @@ export type LedgerEvent =
   | ActivationFailedEvent
   | RecoveryFailedEvent
 
-export const PUBLIC_LEDGER_EVENT_TYPES = [
+export const PUBLIC_LEDGER_EVENT_TYPES = Object.freeze([
   'artifact-recorded',
   'evaluation-recorded',
   'approval-recorded',
@@ -197,7 +197,7 @@ export const PUBLIC_LEDGER_EVENT_TYPES = [
   'runtime-bound',
   'activation-failed',
   'recovery-failed',
-] as const satisfies readonly LedgerEvent['type'][]
+] as const) satisfies readonly LedgerEvent['type'][]
 
 export type PublicLedgerEventType =
   typeof PUBLIC_LEDGER_EVENT_TYPES[number]
@@ -1263,6 +1263,11 @@ export class EvolutionLedger {
       inputDigest: sha256(use),
     })
     return { parentVersionId: use.parentVersionId, duplicate: false }
+  }
+
+  getRunSkillUse(runId: TianwenRunId): RunSkillUse | undefined {
+    const use = this.#runSkillUses.get(runId)
+    return use === undefined ? undefined : clone(use)
   }
 
   listRunSkillUses(): readonly RunSkillUse[] {

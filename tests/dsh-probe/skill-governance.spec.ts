@@ -249,6 +249,22 @@ describe('governed Skill evidence', () => {
       .toThrow(LedgerIntegrityError)
   })
 
+  it('reads a defensive copy of one stored Run Skill use', () => {
+    const ledger = new EvolutionLedger(root('get-use'))
+    const seeded = seedMetOutcomeWithManifest(ledger, 'session:get-use')
+    ledger.recordRunSkillUse(useInput(seeded))
+
+    const stored = ledger.getRunSkillUse(seeded.runId)!
+    expect(stored).toMatchObject({
+      runId: seeded.runId,
+      parentVersionId: seeded.parentVersionId,
+      skillName: parent.name,
+    })
+    ;(stored as { skillName: string }).skillName = 'changed-copy'
+    expect(ledger.getRunSkillUse(seeded.runId)?.skillName).toBe(parent.name)
+    expect(ledger.getRunSkillUse(`run:${'f'.repeat(64)}`)).toBeUndefined()
+  })
+
   it('rejects missing or contradictory Run, Outcome, and sequence facts', () => {
     const ledger = new EvolutionLedger(root('invalid-use'))
     expect(() => ledger.recordRunSkillManifest({
