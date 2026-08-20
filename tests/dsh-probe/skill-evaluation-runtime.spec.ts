@@ -469,6 +469,69 @@ describe('paired Skill evaluation request observation', () => {
     }
   })
 
+  it('rejects an intruder Session without consuming the first paired fixture entry', async () => {
+    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-scripted-route-intruder'
+    const script = Array.from({ length: 8 }, (_, index) => [
+      toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
+      textResponse(`scripted answer ${index}`),
+    ]).flat()
+    const harness = await mountCoreHarness([textResponse('host route remains unused')])
+    await harness.ctx.plugin(SkillRegistry)
+    await harness.ctx.plugin(applySkillTool)
+    await harness.ctx.plugin(DynamicCordisRunnerService, {})
+    harness.ctx.tools.register(defineTool({
+      name: 'verify_summary',
+      description: 'verify one synthetic summary',
+      parameters: { text: { type: 'string', required: true } },
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute() { return 'accepted' },
+    }))
+    const disposeParent = harness.ctx.skills.register(parent)
+    let attempted = false
+    const intruderChunks: StreamChunk[] = []
+    const observedSessionIds: string[] = []
+    try {
+      await apply(harness.ctx, { evolutionRoot: root })
+      harness.ctx.on('llm/stream', (streamRequest, next) => {
+        observedSessionIds.push(String(streamRequest.sessionId))
+        if (attempted || !String(streamRequest.sessionId).startsWith('session:skill-eval:')) return next()
+        attempted = true
+        return (async function* () {
+          for await (const _chunk of harness.ctx.llm.stream({
+            ...config,
+            sessionId: SessionId('session:stage4-intruder'),
+            messages: [createUserMessage({
+              content: [{ type: 'text', text: 'intrude on the reserved evaluation route' }],
+              source: { kind: 'user' },
+            })],
+          })) intruderChunks.push(_chunk)
+          yield* next()
+        })()
+      })
+      const seeded = seedCandidate(harness)
+      const receipt = await harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded, script))
+      expect(attempted).toBe(true)
+      expect(observedSessionIds).toContain('session:stage4-intruder')
+      expect(intruderChunks).toEqual([
+        expect.objectContaining({
+          type: 'finish',
+          reason: expect.objectContaining({ kind: 'error' }),
+        }),
+      ])
+      expect(receipt.result.cases[0]!.baseline).toMatchObject({
+        outcome: 'met',
+        usage: { modelRequests: 2, toolCalls: 1 },
+      })
+      expect(JSON.stringify(receipt.result)).not.toContain('session:stage4-intruder')
+      expect(harness.ctx.tianwenEvolution.getSkillEvaluationResult(receipt.evaluationId))
+        .toEqual(receipt.result)
+    } finally {
+      disposeParent()
+      await harness.ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('records budget exhaustion as inconclusive while the stream observer continues exactly once', async () => {
     const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-budget-exhaustion'
     const script = Array.from({ length: 8 }, (_, index) => [

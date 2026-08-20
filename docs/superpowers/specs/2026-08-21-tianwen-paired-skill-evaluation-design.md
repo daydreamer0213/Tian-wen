@@ -302,7 +302,7 @@ interface SkillEvaluationResult {
 }
 ```
 
-`evidenceClass` is derived by the runtime/service and is never accepted from the caller. The current runtime accepts only `ScriptedAdapter`/`tianwen-probe`, which is always `scripted-mechanism`. It cannot emit `objective-screening` or `independent-objective`: a future design needs real Provider receipts plus independently bound Policy, workspace, data, and validator facts before it can do so.
+`evidenceClass` is derived by the runtime/service and is never accepted from the caller. The current runtime accepts only its service-owned `ScriptedAdapter` on `tianwen-stage4-scripted` with model `scripted`; its fixture is limited to the exact B/C arm Session allowlist derived from the frozen matrix. It is always `scripted-mechanism`. It cannot emit `objective-screening` or `independent-objective`: a future design needs real Provider receipts plus independently bound Policy, workspace, data, and validator facts before it can do so.
 
 Each `SkillEvaluationCaseResult` records, for both arms:
 

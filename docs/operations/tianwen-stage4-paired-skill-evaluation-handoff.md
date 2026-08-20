@@ -95,4 +95,4 @@ The Stage 4 demo uses only the deterministic DSH scripted adapter and synthetic
 fixture data. Its audited cost is exactly zero for network, Provider requests,
 paid tokens, CNY, Docker, persistent external databases, and user data. The
 fixture is deleted after each run. The final Task 6 gate ran 15 Vitest files
-with 108 tests, all five demos, and the Python public contract with 8 tests.
+with 109 tests, all five demos, and the Python public contract with 8 tests.

@@ -353,7 +353,10 @@ export class TianwenSkillEvaluationService extends Service {
       }
     }
 
-    const adapter = stage4ScriptedAdapter(input.scriptedFixture)
+    const adapter = stage4ScriptedAdapter(input.scriptedFixture, new Set(arms.flatMap(arm => [
+      String(arm.baseline.sessionId),
+      String(arm.candidate.sessionId),
+    ])))
     const disposeAdapter = this.ctx.llm.registerAdapter([STAGE4_SCRIPTED_PROVIDER], adapter)
     const prepared: PreparedSkillEvaluationArm[] = []
     try {
@@ -724,11 +727,33 @@ interface PreparedSkillEvaluationArm {
   runId?: TianwenRunId
 }
 
-function stage4ScriptedAdapter(entries: readonly Stage4ScriptedFixtureEntry[]): ScriptedAdapter {
+class Stage4ScriptedAdapter extends ScriptedAdapter {
+  constructor(
+    entries: Stage4ScriptedFixtureEntry[],
+    private readonly allowedSessionIds: ReadonlySet<string>,
+  ) {
+    super(entries)
+  }
+
+  override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    if (!this.allowedSessionIds.has(String(options.sessionId))) {
+      throw new Error('paired Skill evaluation scripted route rejects non-arm Session')
+    }
+    yield* super.stream(options)
+  }
+}
+
+function stage4ScriptedAdapter(
+  entries: readonly Stage4ScriptedFixtureEntry[],
+  allowedSessionIds: ReadonlySet<string>,
+): ScriptedAdapter {
   if (!Array.isArray(entries) || entries.some(entry => !Array.isArray(entry) && !(entry instanceof Error))) {
     throw new Error('paired Skill evaluation requires static scripted fixture entries')
   }
-  return new ScriptedAdapter(entries.map(entry => Array.isArray(entry) ? [...entry] : entry))
+  return new Stage4ScriptedAdapter(
+    entries.map(entry => Array.isArray(entry) ? [...entry] : entry),
+    allowedSessionIds,
+  )
 }
 
 function scopedSurface(handle: AgentHandle): {
