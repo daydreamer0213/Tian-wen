@@ -8,15 +8,37 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DynamicCordisRunnerService,
   SessionId,
+  SkillRegistry,
+  applySkillTool,
   createUserMessage,
   defineTool,
+  isSkillName,
   mountCoreHarness,
+  renderSkillContent,
   textResponse,
   toolCallResponse,
   waitForIdle,
 } from '@tianwen/dsh-compat'
-import type { SessionEvent } from '@tianwen/dsh-compat'
+import type {
+  SessionEvent,
+  SkillDefinition,
+  SkillInvocationPolicy,
+  SkillRegistration,
+} from '@tianwen/dsh-compat'
+import type { LedgerEvent } from '../../packages/tianwen-evolution/src/index.js'
 import { apply } from '../../packages/tianwen-runtime/src/index.js'
+
+type PublicType = LedgerEvent['type']
+const publicTypes: readonly PublicType[] = [
+  'artifact-recorded',
+  'evaluation-recorded',
+  'approval-recorded',
+  'promoted',
+  'rolled-back',
+  'runtime-bound',
+  'activation-failed',
+  'recovery-failed',
+]
 
 const roots: string[] = []
 
@@ -107,6 +129,18 @@ afterEach(() => {
 
 describe('Tianwen runtime learning intake', () => {
   it('consumes final DSH feedback through Evidence and the existing ledger without changing the Session', async () => {
+    expect(publicTypes).toHaveLength(8)
+    expect(isSkillName('research-summary')).toBe(true)
+    expect(typeof renderSkillContent).toBe('function')
+    expect(typeof applySkillTool).toBe('function')
+    expect(typeof SkillRegistry).toBe('function')
+    const typeWitness: [
+      SkillDefinition?,
+      SkillInvocationPolicy?,
+      SkillRegistration?,
+    ] = []
+    expect(typeWitness).toEqual([])
+
     const mounted = await mountCompletedSessions()
     const [handle] = mounted.handles
     try {

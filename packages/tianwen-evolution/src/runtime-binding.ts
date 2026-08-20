@@ -7,6 +7,7 @@ import type {
 import {
   EvolutionLedger,
   LedgerCommitUnknownError,
+  isPublicLedgerEvent,
 } from './ledger.js'
 import type {
   ApprovalRecord,
@@ -14,7 +15,6 @@ import type {
   ArtifactVersion,
   ChampionPointer,
   EvaluationRecord,
-  LedgerEvent,
   PublicLedgerEvent,
   TransitionAuthority,
 } from './ledger.js'
@@ -105,14 +105,6 @@ function publicBinding(binding: BoundRuntime): RuntimeBinding {
     pluginId: binding.pluginId,
     packageId: binding.packageId,
   }
-}
-
-function isPublicLedgerEvent(
-  event: LedgerEvent,
-): event is PublicLedgerEvent {
-  return event.type !== 'learning-intake-recorded'
-    && event.type !== 'run-binding-recorded'
-    && event.type !== 'outcome-intake-recorded'
 }
 
 export class TianwenEvolutionService extends Service {

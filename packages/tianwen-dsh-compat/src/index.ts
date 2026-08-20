@@ -35,10 +35,21 @@ export type {
   UserMessage,
 } from '@deepseek-ai/dsh-session'
 export { default as JsonlSessionPersistence } from '@deepseek-ai/dsh-session-persistence-jsonl'
+export { default as SkillRegistry } from '@deepseek-ai/dsh-skill'
+export {
+  isSkillName,
+  renderSkillContent,
+} from '@deepseek-ai/dsh-skill'
+export type {
+  SkillDefinition,
+  SkillInvocationPolicy,
+  SkillRegistration,
+} from '@deepseek-ai/dsh-skill'
 export { default as SystemPrompt } from '@deepseek-ai/dsh-system-prompt'
 export { default as ToolRuntime, defineContentToolFixture, defineTool } from '@deepseek-ai/dsh-tools'
 export type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 export * as toolGoal from '@deepseek-ai/dsh-tool-goal'
+export { apply as applySkillTool } from '@deepseek-ai/dsh-tool-skill'
 export {
   SANDBOX_UNAVAILABLE,
   SandboxUnavailableError,

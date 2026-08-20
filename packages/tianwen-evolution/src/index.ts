@@ -16,6 +16,8 @@ export {
   EvolutionGovernanceError,
   LedgerCommitUnknownError,
   LedgerIntegrityError,
+  PUBLIC_LEDGER_EVENT_TYPES,
+  isPublicLedgerEvent,
 } from './ledger.js'
 export type {
   ActivationFailedEvent,
@@ -25,6 +27,7 @@ export type {
   ChampionPointer,
   EvaluationRecord,
   GovernanceErrorCode,
+  PublicLedgerEventType,
   RecoveryFailedEvent,
   RuntimeBoundEvent,
   Sha256Digest,

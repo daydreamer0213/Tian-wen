@@ -134,12 +134,31 @@ export type LedgerEvent =
   | ActivationFailedEvent
   | RecoveryFailedEvent
 
-export type PublicLedgerEvent = Exclude<
+export const PUBLIC_LEDGER_EVENT_TYPES = [
+  'artifact-recorded',
+  'evaluation-recorded',
+  'approval-recorded',
+  'promoted',
+  'rolled-back',
+  'runtime-bound',
+  'activation-failed',
+  'recovery-failed',
+] as const satisfies readonly LedgerEvent['type'][]
+
+export type PublicLedgerEventType =
+  typeof PUBLIC_LEDGER_EVENT_TYPES[number]
+
+export type PublicLedgerEvent = Extract<
   LedgerEvent,
-  LearningIntakeRecordedEvent
-    | RunBindingRecordedEvent
-    | OutcomeIntakeRecordedEvent
+  { readonly type: PublicLedgerEventType }
 >
+
+export function isPublicLedgerEvent(
+  event: LedgerEvent,
+): event is PublicLedgerEvent {
+  return (PUBLIC_LEDGER_EVENT_TYPES as readonly string[])
+    .includes(event.type)
+}
 
 export type GovernanceErrorCode =
   | 'artifact-missing'
