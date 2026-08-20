@@ -379,7 +379,7 @@ The adapter uses public `renderSkillContent(B | C)` to derive the expected compl
 
 - a full first-request digest;
 - the selected Skill body/content digest;
-- a normalized first-request digest after structurally replacing every expected selected-Skill-derived surface — the public source-tagged catalog entry and the one user-role message whose complete content exactly equals the expected rendered Skill text — plus arm/session-only identity with fixed markers.
+- a normalized first-request digest after structurally replacing every present selected-Skill-derived surface — the optional public source-tagged catalog entry and the one user-role message whose complete content exactly equals the expected rendered Skill text — plus arm/session-only identity with fixed markers.
 
 For a case to be fair:
 
@@ -390,7 +390,7 @@ For a case to be fair:
 - both arms finish within the frozen budget;
 - each arm produces its own Outcome, Evidence, and validator receipt.
 
-The Skill-neutral normalization is structural, not a regular-expression rewrite over prompt text. It requires exactly one user-role message whose complete content is byte-equal to public `renderSkillContent()` for the selected B or C registration, and replaces only that complete content plus the target entry inside the public source-tagged `kind: 'skill-catalog'` message. It does not inspect or depend on an unexported `skill-invocation` source discriminator. Other catalog entries, message order, public source tags, framing, tools, and input remain byte-identical. Missing or multiple exact injection matches are `INCONCLUSIVE`. Only the first model request is subject to equality comparison: later requests legitimately contain different model/tool behavior and are evaluation output, not frozen input. An inequality outside the selected Skill surfaces in the first request makes that case `INCONCLUSIVE`; it is not evidence that either Skill is better.
+The Skill-neutral normalization is structural, not a regular-expression rewrite over prompt text. It requires exactly one user-role message whose complete content is byte-equal to public `renderSkillContent()` for the selected B or C registration, and replaces that complete content. DSH legally omits a user-only Skill (`modelInvocable=false`, `userInvocable=true`) from the catalog, so the target entry is pair-optional: when both B/C requests contain exactly one target entry in the public source-tagged `kind: 'skill-catalog'` message, normalize both; when both omit it, preserve the remaining catalogs unchanged; asymmetric presence, duplicate target entries, or unequal non-target entries is `INCONCLUSIVE`. The adapter does not inspect or depend on an unexported `skill-invocation` source discriminator. Other catalog entries, message order, public source tags, framing, tools, and input remain byte-identical. Missing or multiple exact injection matches are also `INCONCLUSIVE`. Only the first model request is subject to equality comparison: later requests legitimately contain different model/tool behavior and are evaluation output, not frozen input. An inequality outside the selected Skill surfaces in the first request makes that case `INCONCLUSIVE`; it is not evidence that either Skill is better.
 
 ### 8.3 Independent verification
 
