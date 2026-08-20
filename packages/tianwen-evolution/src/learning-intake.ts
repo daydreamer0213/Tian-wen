@@ -82,7 +82,7 @@ export interface LearningIntakeRecordedEvent {
 
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/
 
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(canonicalJson).join(',')}]`
   }
@@ -99,7 +99,7 @@ function canonicalJson(value: unknown): string {
   return encoded
 }
 
-function sha256(value: unknown): Sha256Digest {
+export function sha256(value: unknown): Sha256Digest {
   const hex = createHash('sha256')
     .update(canonicalJson(value), 'utf8')
     .digest('hex')
@@ -120,8 +120,8 @@ function requireDigest(value: unknown, label: string): Sha256Digest {
   return value as Sha256Digest
 }
 
-function normalizeNote(note: string): string {
-  return note.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase()
+export function normalizeLearningText(value: string): string {
+  return value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase()
 }
 
 function validateInput(input: LearningIntakeInput): LearningIntakeInput {
@@ -171,7 +171,7 @@ export function prepareLearningIntake(
   const inputDigest = sha256(input)
   const normalizedNote = input.note === undefined
     ? ''
-    : normalizeNote(input.note)
+    : normalizeLearningText(input.note)
 
   if (input.rating === 'positive') {
     return { kind: 'no-case', ingestionId, inputDigest }

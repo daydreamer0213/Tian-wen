@@ -14,7 +14,7 @@ import {
 import { join } from 'node:path'
 import { TextDecoder } from 'node:util'
 
-import { prepareLearningIntake } from './learning-intake.js'
+import { prepareLearningIntake, sha256 } from './learning-intake.js'
 import type {
   LearningIntakeInput,
   LearningIntakeReceipt,
@@ -24,6 +24,15 @@ import type {
   LearningTicket,
   LearningTicketId,
 } from './learning-intake.js'
+import { prepareRunBinding } from './outcome-intake.js'
+import type {
+  RunAcceptanceContract,
+  RunBindingInput,
+  RunBindingReceipt,
+  RunBindingRecordedEvent,
+  TianwenRunBinding,
+  TianwenRunId,
+} from './outcome-intake.js'
 
 export type ArtifactId = `artifact:${string}`
 export type Sha256Digest = `sha256:${string}`
@@ -109,6 +118,7 @@ export interface RecoveryFailedEvent {
 
 export type LedgerEvent =
   | LearningIntakeRecordedEvent
+  | RunBindingRecordedEvent
   | ArtifactRecordedEvent
   | EvaluationRecordedEvent
   | ApprovalRecordedEvent
@@ -119,7 +129,7 @@ export type LedgerEvent =
 
 export type PublicLedgerEvent = Exclude<
   LedgerEvent,
-  LearningIntakeRecordedEvent
+  LearningIntakeRecordedEvent | RunBindingRecordedEvent
 >
 
 export type GovernanceErrorCode =
@@ -509,6 +519,57 @@ function parseEvent(value: unknown): LedgerEvent {
   if (type === 'learning-intake-recorded') {
     return parseLearningEvent(value, at)
   }
+  if (type === 'run-binding-recorded') {
+    exactKeys(value, [
+      'schemaVersion',
+      'type',
+      'at',
+      'binding',
+      'inputDigest',
+    ])
+    if (value.schemaVersion !== 'tianwen.run-binding.v1') {
+      throw new LedgerIntegrityError('invalid Run binding schema version')
+    }
+    if (!isRecord(value.binding)) {
+      throw new LedgerIntegrityError('Run binding must be an object')
+    }
+    exactKeys(value.binding, [
+      'schemaVersion',
+      'runId',
+      'goalRef',
+      'taskRef',
+      'sessionId',
+      'scopeKey',
+      'acceptanceContract',
+      'acceptanceContractDigest',
+    ])
+    if (value.binding.schemaVersion !== 'tianwen.run-binding.v1') {
+      throw new LedgerIntegrityError('invalid stored Run binding version')
+    }
+    const binding = prepareRunBinding({
+      goalRef: requireString(value.binding.goalRef, 'goalRef'),
+      taskRef: requireString(value.binding.taskRef, 'taskRef'),
+      sessionId: requireString(value.binding.sessionId, 'sessionId'),
+      scopeKey: requireString(value.binding.scopeKey, 'scopeKey'),
+      acceptanceContract:
+        value.binding.acceptanceContract as RunAcceptanceContract,
+    })
+    if (
+      value.binding.runId !== binding.runId ||
+      value.binding.acceptanceContractDigest !==
+        binding.acceptanceContractDigest ||
+      requireDigest(value.inputDigest) !== sha256(binding)
+    ) {
+      throw new LedgerIntegrityError('Run binding event disagrees with input')
+    }
+    return {
+      schemaVersion: 'tianwen.run-binding.v1',
+      type,
+      at,
+      binding,
+      inputDigest: sha256(binding),
+    }
+  }
   if (type === 'artifact-recorded') {
     exactKeys(value, ['type', 'at', 'artifact'])
     const artifact = parseArtifact(value.artifact)
@@ -655,6 +716,8 @@ export class EvolutionLedger {
   readonly #pointerPath: string
   readonly #clock: () => string
   readonly #events: LedgerEvent[] = []
+  readonly #runBindings = new Map<TianwenRunId, TianwenRunBinding>()
+  readonly #runIdBySession = new Map<string, TianwenRunId>()
   readonly #learningIntakes = new Map<
     Sha256Digest,
     LearningIntakeRecordedEvent
@@ -681,6 +744,32 @@ export class EvolutionLedger {
       this.#verifySource(artifact)
     }
     this.#verifyPointer()
+  }
+
+  recordRunBinding(input: RunBindingInput): RunBindingReceipt {
+    const prepared = prepareRunBinding(input)
+    const sessionRunId = this.#runIdBySession.get(prepared.sessionId)
+    if (sessionRunId !== undefined) {
+      if (sessionRunId !== prepared.runId) {
+        throw new LedgerIntegrityError(
+          `DSH Session is already bound to another Tianwen Run: ${prepared.sessionId}`,
+        )
+      }
+      return { runId: prepared.runId, duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.run-binding.v1',
+      type: 'run-binding-recorded',
+      at: this.#now(),
+      binding: prepared,
+      inputDigest: sha256(prepared),
+    })
+    return { runId: prepared.runId, duplicate: false }
+  }
+
+  getRunBinding(runId: TianwenRunId): TianwenRunBinding | undefined {
+    const binding = this.#runBindings.get(runId)
+    return binding === undefined ? undefined : clone(binding)
   }
 
   recordLearningIntake(input: LearningIntakeInput): LearningIntakeReceipt {
@@ -1094,6 +1183,19 @@ export class EvolutionLedger {
   }
 
   #validateAgainstState(event: LedgerEvent): void {
+    if (event.type === 'run-binding-recorded') {
+      if (this.#runBindings.has(event.binding.runId)) {
+        throw new LedgerIntegrityError(
+          `duplicate Tianwen Run: ${event.binding.runId}`,
+        )
+      }
+      if (this.#runIdBySession.has(event.binding.sessionId)) {
+        throw new LedgerIntegrityError(
+          `duplicate DSH Session binding: ${event.binding.sessionId}`,
+        )
+      }
+      return
+    }
     if (event.type === 'learning-intake-recorded') {
       if (this.#learningIntakes.has(event.receipt.ingestionId)) {
         throw new LedgerIntegrityError(
@@ -1241,6 +1343,11 @@ export class EvolutionLedger {
 
   #apply(event: LedgerEvent): void {
     this.#events.push(event)
+    if (event.type === 'run-binding-recorded') {
+      this.#runBindings.set(event.binding.runId, event.binding)
+      this.#runIdBySession.set(event.binding.sessionId, event.binding.runId)
+      return
+    }
     if (event.type === 'learning-intake-recorded') {
       this.#learningIntakes.set(event.receipt.ingestionId, event)
       if (event.signal === undefined) {
