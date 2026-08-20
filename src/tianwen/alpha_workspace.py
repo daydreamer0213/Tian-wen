@@ -91,14 +91,16 @@ def _validate_trial_id(trial_id: str) -> None:
 
 
 def _git_environment(paths: AlphaTrialPaths) -> dict[str, str]:
-    return {
+    environment = {
         "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": "NUL",
+        "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_TERMINAL_PROMPT": "0",
         "HOME": str(paths.state / "git-home"),
         "PATH": os.environ["PATH"],
-        "SYSTEMROOT": os.environ["SYSTEMROOT"],
     }
+    if system_root := os.environ.get("SYSTEMROOT"):
+        environment["SYSTEMROOT"] = system_root
+    return environment
 
 
 def _authority_snapshot(task: AlphaTask) -> bytes:
