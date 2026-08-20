@@ -1,7 +1,7 @@
 # Tianwen Governed Skill Shadow Design
 
-**Date:** 2026-08-21  
-**Status:** Proposed Stage 5 design  
+**Date:** 2026-08-21
+**Status:** Proposed Stage 5 design
 **Depends on:** Stage 4 paired Skill Evaluation on `main` at
 `906f211572167e329c9564f5f75e63c49e2d1dec`
 
