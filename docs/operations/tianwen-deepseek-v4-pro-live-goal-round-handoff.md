@@ -36,7 +36,7 @@ and no force-push was used.
 
 The final candidate was tested from a controlled D-drive environment. Python
 imported the current integration worktree, never the stale editable install in
-`D:\Guo\zuochong\AGi\.venv`.
+`<legacy-alpha-worktree>\.venv`.
 
 Final evidence included:
 

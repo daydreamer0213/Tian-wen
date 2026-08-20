@@ -18,7 +18,7 @@
 - Preserve `docs/architecture-master-session-memory.md` and `docs/operations/tianwen-master-controller-session-handoff-2026-08-16.md` from the canonical main documentation spine.
 - The current authorization is Git/offline release work only. It does not authorize CNY `0.25`, a real provider request, or reuse of an earlier paid authorization. Until the user separately approves exactly `32,768 tokens / CNY 0.25`, the stage is `READY AT LIVE GATE / BLOCKED ON NUMERIC BUDGET`: it may be verified, reviewed, and pushed as a pre-live candidate, but its canonical live handoff must remain absent and it must not merge to `main`.
 - Do not call real Docker. Heavy gates are serial. Stores, caches, environments, installed Profiles, temporary files, and receipts remain under `D:\DevData`.
-- Before Python acceptance, print and exactly validate `tianwen.__file__` from the fresh integration environment. It must equal the current integration worktree’s `src\tianwen\__init__.py`; reject `D:\Guo\zuochong\AGi\.venv` and every other worktree.
+- Before Python acceptance, print and exactly validate `tianwen.__file__` from the fresh integration environment. It must equal the current integration worktree’s `src\tianwen\__init__.py`; reject `<main-worktree>\.venv` and every other worktree.
 - Apply Ponytail/YAGNI: Git’s native three-way merge and the two canonical documents are sufficient. Do not invent a release framework, ledger authority, compatibility layer, or retry path.
 
 ---
@@ -303,13 +303,13 @@
 
 - [ ] **Step 6: Merge the verified integration tip to main and verify remote state**
 
-  The main branch is checked out only in the linked worktree `D:\Guo\zuochong\AGi`; do not run `git switch main` in the integration worktree. First verify that this exact linked worktree is attached to `refs/heads/main`. Then use only command-local `safe.directory` configuration with `-C $mainRoot`; never modify the global safe-directory list. First push and verify the final integration SHA with `ls-remote`, check the linked main worktree is clean, fast-forward it only to the just-fetched `$finalMainSha` (or stop if that is impossible), then perform a normal `--no-ff` merge of the verified integration SHA:
+  The main branch is checked out only in the linked worktree `<main-worktree>`; do not run `git switch main` in the integration worktree. First verify that this exact linked worktree is attached to `refs/heads/main`. Then use only command-local `safe.directory` configuration with `-C $mainRoot`; never modify the global safe-directory list. First push and verify the final integration SHA with `ls-remote`, check the linked main worktree is clean, fast-forward it only to the just-fetched `$finalMainSha` (or stop if that is impossible), then perform a normal `--no-ff` merge of the verified integration SHA:
 
   ```powershell
   git push origin HEAD:refs/heads/codex/tianwen-integration
   $finalIntegrationSha = ((git ls-remote origin refs/heads/codex/tianwen-integration) -split '\s+')[0]
   git cat-file -e "$finalIntegrationSha^{commit}"
-  $mainRoot = 'D:\Guo\zuochong\AGi'
+  $mainRoot = '<main-worktree>'
   $mainGitPath = $mainRoot.Replace('\', '/')
   $mainWorktreeEntries = @(((git worktree list --porcelain) -join "`n") -split "(?:`r?`n){2}" | Where-Object {
     $entryLines = $_ -split "`r?`n"

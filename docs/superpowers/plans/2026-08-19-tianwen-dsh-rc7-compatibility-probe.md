@@ -18,7 +18,7 @@
 - 运行前绑定、真实副作用前授权、Session→Evidence、Run 之间 Learning/Promotion 是仅有四个 Tianwen/DSH seam；当前 Run 不热换版本。
 - Learning 默认 `BACKGROUND`/`DEFERRED`；本探针不扩展 Learning Intake，也不进入 Candidate、Evaluation、Shadow、Promotion 或 Rollback。
 - 不运行 Docker、Provider、付费模型、网络搜索或真实用户数据；模型边界只使用确定性本地 adapter。
-- 不修改、提交、清理或运行 `D:\Guo\zuochong\AGi` Alpha dirty worktree；不合并 `main`。
+- 不修改、提交、清理或运行 `<legacy-alpha-worktree>` Alpha dirty worktree；不合并 `main`。
 - `LOAD_BEARING` gates 是：npm/package closure 与原生 headless/Profile、Agent/Goal/Session resume、Session Query、Skill provider/catalog/loader、Tianwen Evidence 只读投影与 off/on 非干扰、effect 前授权/拒绝。任一项 `FAIL`，最终不得判为 `UPGRADE_CANDIDATE`。
 - `OPTIONAL_REUSE` gates 是：Jobs、Workflow、Message Feedback 等当前非承重扩展。单项失败只把该项标为 `DEFER`/`NOT_REUSE_YET`，不得单独否定整个 rc.7 升级候选。
 - closure/install/Profile 失败且后续无法运行时，技术性停止并把受影响 gate 记为 `BLOCKED`；单个语义 gate 失败时，不 patch DSH、不加 private import、不写兼容 framework、不降低断言，但继续执行与其独立且保持零 Provider/Docker/付费/真实副作用的探针。最终报告逐 gate 使用 `PASS`/`FAIL`/`BLOCKED`/`DEFER`，并按分层说明决策原因。

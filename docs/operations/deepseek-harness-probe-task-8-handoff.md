@@ -46,7 +46,7 @@ Before implementation:
 As recorded by Task 7, the probe baseline contains its canonical handoff but
 not the three canonical architecture/spec/plan files. The following were read
 without copying, cherry-picking, or changing the baseline from the clean
-repository checkout at `D:\Guo\zuochong\AGi`:
+repository checkout at `<main-worktree>`:
 
 - `docs/architecture-master-session-memory.md`;
 - `docs/superpowers/specs/2026-08-14-deepseek-harness-runtime-selection-design.md`;

@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Work only in D:\DevData\tianwen-worktrees\tianwen-oss-application-prep on codex/tianwen-oss-application-prep until final integration.
-- Do not touch or run the dirty D:\Guo\zuochong\AGi checkout on codex/tianwen-agent-execution-foundation.
+- Do not touch or run the dirty legacy Alpha checkout at `<legacy-alpha-worktree>` on codex/tianwen-agent-execution-foundation.
 - Use the user-approved Apache-2.0 license.
 - Keep Python/Node package versions at 0.0.0 and root package.json private=true; the tag is a repository research preview, not a package release.
 - No Provider, paid model, API key, Docker, user data, Trial root, receipt, or local database in the public demo or CI.
@@ -70,7 +70,7 @@ Create LICENSE from https://www.apache.org/licenses/LICENSE-2.0.txt without cust
 
 - [ ] **Step 5: Neutralize personal paths in the current tree**
 
-Replace D:\Guo\zuochong\AGi and C:\Users\Administrator examples with <repo>, <worktree>, or a neutral D:\DevData example while preserving historical SHAs and outcomes.
+Replace personal repository/profile absolute-path examples with `<repo>`, `<worktree>`, or a neutral `D:\DevData` example while preserving historical SHAs and outcomes.
 
 Verify:
 

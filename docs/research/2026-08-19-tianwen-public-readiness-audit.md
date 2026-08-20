@@ -2,7 +2,7 @@
 
 **日期：** 2026-08-19
 
-**状态：** 初步只读审计完成；在标准全历史密钥扫描和发布门完成前禁止切换为 public
+**状态：** Task 1 公开安全与许可证基线完成；其余发布门完成前禁止切换为 public
 
 ## 1. 结论
 
@@ -10,7 +10,7 @@ Tianwen 可以准备申请 OpenAI `Codex for Open Source`，但当前仓库不�
 
 项目的真实优势是：单人持续维护、374 个 `main` 提交、较完整的 Agent 治理研究、真实运行和评测证据，以及“复用 DSH 执行、Tianwen 只做长期 Goal/Evidence/学习版本治理”的清晰差异化方向。
 
-当前主要缺口不是代码量，而是公开产品面：GitHub 仓库仍为 private，没有开源许可证、CI、正式 Release、贡献/安全文档；README 还在描述已经冻结的旧 Python Runtime 架构。
+Task 1 已加入 canonical Apache-2.0 许可证、完成 Gitleaks 全 refs/current-tree 脱敏扫描，并中性化当前 Markdown 的个人绝对路径。当前主要缺口不是代码量，而是公开产品面：GitHub 仓库仍为 private，没有 CI、正式 Release、贡献/安全文档；README 还在描述已经冻结的旧 Python Runtime 架构。
 
 推荐先发布 `v0.1.0-research-preview`，再提交申请。旧 Alpha-D 不恢复；候选闭环继续作为 DSH 新架构的后续阶段，不作为本次申请前置门。
 
@@ -41,9 +41,9 @@ Tianwen 可以准备申请 OpenAI `Codex for Open Source`，但当前仓库不�
 | GitHub 仓库 | `daydreamer0213/Tian-wen`，private | 所有发布门通过后才改 public |
 | Maintainer 权限 | 用户为 owner/admin，可作为 Primary maintainer | 保持 GitHub profile 公开 |
 | 活跃维护 | `main` 374 commits，单一 maintainer | README 如实描述，不伪造团队或采用量 |
-| 远端分支 | 38 条实际远端分支 | 全 refs 扫描；不默认批量删除历史证据分支 |
+| 远端分支 | 45 条实际 `origin` 远端分支 | 已纳入全 refs 扫描；不默认批量删除历史证据分支 |
 | Tags / Release | 0 tags，无正式 Release | 创建 research-preview tag 和 GitHub Release |
-| 许可证 | 根目录无 LICENSE | 用户确认后加入 Apache-2.0（推荐）或其他明确许可证 |
+| 许可证 | 根目录为未经改写的 Apache License 2.0 | 保持单一 Apache-2.0，不增加额外限制或双许可证文字 |
 | README | 中文；仍称独立 Python Agent 控制面 | 改为 DSH 单 Runtime + Tianwen learning control plane |
 | 英文入口 | 无 | `README.md` 英文，新增 `README.zh-CN.md` |
 | 贡献/安全说明 | 无 | 新增 `CONTRIBUTING.md`、`SECURITY.md` |
@@ -52,40 +52,55 @@ Tianwen 可以准备申请 OpenAI `Codex for Open Source`，但当前仓库不�
 | 产品版本 | Python/Node manifest 均为 `0.0.0`，Node root `private: true` | `private: true` 可保留为 npm 防发布；版本策略在 Release 计划中说明 |
 | 上游 DSH 许可证 | 审计 clone 为 MIT | 与推荐 Apache-2.0 项目许可证原则上兼容；实施时仍检查分发内容 |
 
-本地 `main` 当前领先 `origin/main` 6 个纯文档提交，原因是 GitHub 连接不稳定。公开前必须普通 push 并核对 local/origin/GitHub `main` 一致，不能 force-push 掩盖远端变化。
+本地 `main`、`origin/main` 和 `git ls-remote` 当前均为 `c08b1106a0f390d8bedce30587441cea24f09e25`。后续公开前仍须对最终 `main` 重做三方核对，不能 force-push 掩盖远端变化。
 
-## 4. 初步敏感信息与历史审计
+## 4. 标准敏感信息扫描、许可证与路径审计
 
-### 4.1 已完成检查
+### 4.1 Gitleaks 8.30.1 工具校验与命令
 
-- 当前与历史文件名中没有被跟踪的 `.env`、数据库、日志、PEM、P12/PFX、私钥或 credential 文件；
-- 全 refs 历史差异做了只输出命中元数据的自定义扫描；
-- 未发现 OpenAI/DeepSeek 风格 `sk-` key、GitHub token、AWS access key、Slack token 或 Bearer token；
-- 11 个宽泛命中位于测试或示例文档：7 个 credential-assignment 示例/测试值，4 个历史测试文件中的 private-key header；
-- 当前树没有 private-key header；当前 credential-assignment 命中均为 README/计划示例或明确测试 sentinel；
-- 历史最大对象是 lockfile 和研究 Markdown，没有异常数据库、模型、压缩包或二进制产物。
+- 官方资产：`gitleaks_8.30.1_windows_x64.zip` 与 `gitleaks_8.30.1_checksums.txt`；
+- 官方 checksum 与本机 archive SHA-256 均为 `d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e`；
+- 解压后二进制报告版本 `8.30.1`；
+- 工具、archive、checksum、脱敏 JSON 和日志只保存在 `D:\DevData`，没有加入 Git；
+- 最终扫描时 `git for-each-ref` 清点 138 个 refs，`--log-opts='--all'` 覆盖所有 refs 可达历史；reviewed base commit 为 `ed83d12fe42b231a3c59442f93625279bb6f84e3`。
 
-这证明“没有发现明显真实凭据”，不等于最终公开授权。
+执行命令：
 
-### 4.2 尚需完成的承重门
+```powershell
+& 'D:\DevData\tools\gitleaks\8.30.1\gitleaks.exe' git --no-banner --redact=100 --report-format json --report-path 'D:\DevData\tianwen-public-audit\gitleaks-all-refs.json' --log-opts='--all' .
+& 'D:\DevData\tools\gitleaks\8.30.1\gitleaks.exe' dir --no-banner --redact=100 --report-format json --report-path 'D:\DevData\tianwen-public-audit\gitleaks-current-tree.json' .
+```
 
-公开前必须再使用一个成熟、支持 Git 历史的标准扫描器（例如 Gitleaks）扫描所有 refs，并对命中逐项只记录类型、ref、commit 和文件，不把疑似值写入报告。
+两次扫描 exit `1` 表示存在需要分类的命中，不表示已经确认真实凭据：
 
-若发现真实凭据：
+| 扫描 | 命中 | active real | revoked | 测试/公开夹具 | 非秘密误报 |
+|---|---:|---:|---:|---:|---:|
+| all refs | 6 | 0 | 0 | 5 | 1 |
+| current tree | 7 | 0 | 0 | 3 | 4 |
 
-1. 先撤销或轮换凭据；
-2. 核对外部使用记录；
-3. 再由用户明确批准是否改写历史；
-4. 改写后重新扫描所有 refs 和远端；
-5. 未完成上述步骤不得公开。
+### 4.2 命中分类
 
-测试夹具或假值只需被证明不能访问任何真实账户，不为“零命中”机械改写 374 个提交。
+下表只记录规则、ref/commit、路径、分类和处理状态，不记录疑似值：
 
-### 4.3 本地路径
+| 规则 | ref / commit | 路径 | 分类 | 处理状态 |
+|---|---|---|---|---|
+| `generic-api-key` | `e1390794e4a74db2711a77f985e2c3c51b4ca497`（2 refs）、`43e80c30a3d30cadb683951b1e6edfa569f416ca`（61 refs）及 current tree | `tests/unit/test_alpha_docker.py` | Docker 镜像公开 `GPG_KEY` 指纹，被继承环境测试固定；不是私密认证值 | 保留测试合同 |
+| `generic-api-key` | `50036cd6d834e60448758f512e165f7b9119ba8c`（2 refs） | `docs/operations/tianwen-alpha-c-real-evidence-handoff.md` | 同一 commit 的公开镜像环境测试夹具说明 | 保留历史事实 |
+| `generic-api-key` | `f136922cfbb6fc860bb5d9081408e11950c0a959`（92 refs）及 current tree | `packages/tianwen-evaluator-python/src/protocol.ts`、生成的 `dist/protocol.js` | `RECEIPT_KEYS` 校验标识符误报；命中行不含凭据赋值 | 保留源码/生成物 |
+| `private-key` | `a042cbeeec7169a5a6883fd5b582515d9ea625bd`（103 refs）及 current tree | `tests/unit/test_memory.py`、`tests/unit/test_evidence.py` | 专门验证防火墙/脱敏器的 credential-shaped 字符串；PEM 与 OpenSSH loader 均为 0 个可加载私钥 | 保留安全回归夹具 |
+| `generic-api-key` | current tree only | `.venv/Lib/site-packages/cryptography/.../hpke.pyi` | ignored 第三方类型声明中的 `private_key` 参数名误报，不是仓库发布内容 | 保留本地依赖；不提交 |
 
-当前 11 份历史计划/交接文档包含 `D:\Guo\zuochong\AGi` 或 `C:\Users\Administrator`。这不是密钥，但会泄露无必要的本地目录并降低公开可读性。
+分类结论：**completed scans found no unresolved real credential**。这只描述已完成扫描的结果，不宣称秘密绝对不可能存在，也不构成仓库公开授权。若后续扫描发现 active real credential，必须停止公开准备并由用户决定撤销/轮换和历史处理；本 Task 未轮换凭据，也未改写历史。
 
-公开分支的当前树应把个人路径改为 `<repo>`、`<worktree>` 或 `D:\DevData\...` 等中性示例。历史提交中的旧路径属于低风险元数据；除非用户明确要求隐私清理，不为此单独改写 Git 历史。
+### 4.3 Apache-2.0 许可证
+
+用户已批准 Apache-2.0。根 `LICENSE` 与 Apache 官方 `LICENSE-2.0.txt` 逐字节一致，SHA-256 均为 `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`；未添加额外限制、定制条款或双许可证文字。
+
+### 4.4 本地路径
+
+当前实测 12 份 Markdown 含个人绝对路径前缀，比初步审计记录的 11 份多一份。Task 1 已把当前树全部命中改为 `<repo>`、`<worktree>`、具名中性 worktree placeholder 或 `D:\DevData\...`，保留历史 SHA、实验结果和命令含义；focused path gate 现在为 0 matches。
+
+历史 commit 中的旧路径属于低风险元数据。本 Task 不改写 Git 历史。
 
 ## 5. 申请强弱项
 
@@ -111,12 +126,12 @@ Tianwen 可以准备申请 OpenAI `Codex for Open Source`，但当前仓库不�
 | 级别 | 项目 | 结论 |
 |---|---|---|
 | Blocker | 仓库 private | 申请表不接受当前状态；最后一步才切 public |
-| Blocker | 无 LICENSE | 公开前必须明确授权条款 |
-| Blocker | 标准全历史密钥扫描未完成 | 自定义扫描只能作为预检 |
+| Complete | Apache-2.0 LICENSE | 已与官方原文逐字节核对 |
+| Complete | 标准全历史密钥扫描 | Gitleaks all-refs/current-tree 完成；无 unresolved real credential |
 | Important | README 与新架构冲突 | 审核者会误解产品，需要重写 |
 | Important | 无 Release/CI/复现入口 | 难以证明公开维护和可重复性 |
-| Important | 38 条远端分支会随仓库公开 | 必须全部纳入扫描和可见性审查 |
-| Minor | 11 份当前文档含个人本地路径 | 当前树脱敏即可，不默认重写历史 |
+| Important | 45 条远端分支会随仓库公开 | 已纳入全 refs 扫描；Task 7 仍须展示可见性后果 |
+| Complete | 12 份当前文档的个人本地路径 | 当前树 0 matches；未改写历史 |
 | Minor | 无仓库描述/topics/英文入口 | 在可见性切换前补齐 |
 
 ## 7. 唯一推荐下一步

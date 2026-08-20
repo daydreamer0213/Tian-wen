@@ -138,10 +138,10 @@ exact npm closure
 Read completely:
 
 ```text
-D:\Guo\zuochong\AGi\docs\architecture-master-session-memory.md
-D:\Guo\zuochong\AGi\docs\research\2026-08-14-deepseek-harness-source-audit.md
-D:\Guo\zuochong\AGi\docs\superpowers\specs\2026-08-14-deepseek-harness-runtime-selection-design.md
-D:\Guo\zuochong\AGi\docs\superpowers\plans\2026-08-14-deepseek-harness-compatibility-probe.md
+<repo>\docs\architecture-master-session-memory.md
+<repo>\docs\research\2026-08-14-deepseek-harness-source-audit.md
+<repo>\docs\superpowers\specs\2026-08-14-deepseek-harness-runtime-selection-design.md
+<repo>\docs\superpowers\plans\2026-08-14-deepseek-harness-compatibility-probe.md
 ```
 
 Do not infer migration authority from these documents. They authorize only this probe.
