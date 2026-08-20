@@ -49,7 +49,14 @@ export { default as SystemPrompt } from '@deepseek-ai/dsh-system-prompt'
 export { default as ToolRuntime, defineContentToolFixture, defineTool } from '@deepseek-ai/dsh-tools'
 export type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 export * as toolGoal from '@deepseek-ai/dsh-tool-goal'
-export { apply as applySkillTool } from '@deepseek-ai/dsh-tool-skill'
+import {
+  apply as applyDshSkillTool,
+  inject as dshSkillToolInject,
+} from '@deepseek-ai/dsh-tool-skill'
+
+export const applySkillTool = Object.assign(applyDshSkillTool, {
+  inject: dshSkillToolInject,
+})
 export {
   SANDBOX_UNAVAILABLE,
   SandboxUnavailableError,

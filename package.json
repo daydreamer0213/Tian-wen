@@ -10,6 +10,7 @@
   "scripts": {
     "build": "node scripts/typecheck-packages.mjs",
     "demo:explicit-correction": "tsx scripts/run-explicit-correction-demo.ts",
+    "demo:governed-skill-candidate": "tsx scripts/run-governed-skill-candidate-demo.ts",
     "demo:repeated-outcome": "tsx scripts/run-repeated-outcome-demo.ts",
     "demo:research-preview": "tsx scripts/run-research-preview-demo.ts",
     "install:tianwen": "node scripts/install-tianwen.mjs",

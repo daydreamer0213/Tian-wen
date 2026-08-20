@@ -13,6 +13,8 @@ export type {
   FeedbackSnapshot,
   RuntimeLearningIntakeReceipt,
   RuntimeOutcomeIntakeReceipt,
+  RuntimeGovernedRunBindingReceipt,
+  RuntimeSkillUseReceipt,
   RuntimeRunBindingInput,
   RuntimeRunBindingReceipt,
 } from './learning-intake.js'
