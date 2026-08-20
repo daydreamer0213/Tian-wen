@@ -131,6 +131,8 @@ describe('Tianwen runtime learning intake', () => {
           messageId: String(finalMessage.data.message.id),
           evidenceIds: [expect.stringMatching(/^sha256:/u)],
         }])
+      expect(JSON.stringify(mounted.harness.ctx.tianwenEvolution.listEvents()))
+        .not.toContain('Preserve the tool result in the final answer.')
       expect(mounted.harness.adapter.requests).toHaveLength(2)
     } finally {
       await disposeMounted(mounted)

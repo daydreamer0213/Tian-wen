@@ -153,6 +153,7 @@ export class TianwenEvolutionService extends Service {
 
   listEvents(): readonly LedgerEvent[] {
     return this.state().ledger.listEvents()
+      .filter(event => event.type !== 'learning-intake-recorded')
   }
 
   promote(agent: Agent, artifactId: ArtifactId): Promise<RuntimeBinding> {
