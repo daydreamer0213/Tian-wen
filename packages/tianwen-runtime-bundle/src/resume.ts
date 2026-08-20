@@ -19,7 +19,7 @@ import {
 } from './goal-live-smoke.js'
 import type { GoalLiveSmokeReceipt } from './goal-live-smoke.js'
 
-const DSH_VERSION = '0.1.0-rc.6'
+const DSH_VERSION = '0.1.0-rc.7'
 const LIVE_SMOKE_CHILD_OUTPUT_LIMIT_BYTES = 65_536
 const LIVE_SMOKE_PARENT_GRACE_MS = 5_000
 

@@ -48,7 +48,7 @@ export type {
 } from '@deepseek-ai/dsh-sandbox'
 export { default as LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 
-export const DSH_VERSION = '0.1.0-rc.6' as const
+export const DSH_VERSION = '0.1.0-rc.7' as const
 
 export * from './scripted-adapter.js'
 export * from './test-harness.js'

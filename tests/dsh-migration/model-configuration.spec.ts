@@ -38,7 +38,7 @@ function installedDsh(dataDir: string): void {
   const root = join(dataDir, 'dsh-host', 'node_modules', '@deepseek-ai', 'dsh')
   mkdirSync(join(root, 'lib'), { recursive: true })
   writeFileSync(join(root, 'package.json'), `${JSON.stringify({
-    name: '@deepseek-ai/dsh', version: '0.1.0-rc.6', bin: { dsh: 'lib/bin.js' },
+    name: '@deepseek-ai/dsh', version: '0.1.0-rc.7', bin: { dsh: 'lib/bin.js' },
   })}\n`)
   writeFileSync(join(root, 'lib', 'bin.js'), 'process.exitCode = 0\n')
 }

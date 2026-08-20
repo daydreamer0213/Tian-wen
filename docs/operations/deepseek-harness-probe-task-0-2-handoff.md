@@ -6,7 +6,7 @@
 
 **Branch:** `codex/deepseek-harness-probe`
 
-**Worktree:** `C:\Users\Administrator\.codex\worktrees\7c86\AGi`
+**Worktree:** `<probe-worktree>`
 
 This probe does not make Tianwen production-ready and does not authorize full
 migration.

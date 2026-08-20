@@ -1,7 +1,7 @@
 [project]
 name = "tianwen"
 version = "0.0.0"
-description = "A continual-learning agent runtime."
+description = "An auditable learning control plane for long-running agents."
 requires-python = ">=3.11,<3.15"
 dependencies = [
     "pydantic-ai-harness[skills]==0.13.0",

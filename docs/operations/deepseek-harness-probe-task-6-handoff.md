@@ -371,7 +371,7 @@ frozen where applicable, and D drive backed.
 The failed automatic install left an untracked generated directory:
 
 ```text
-C:\Users\Administrator\.codex\worktrees\a0c7\AGi\
+<probe-worktree>\
 node_modules-task6-failed-install
 ```
 

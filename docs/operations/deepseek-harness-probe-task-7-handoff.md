@@ -44,7 +44,7 @@ Before implementation:
 The Task 7 baseline contains the Task 6 handoff but not the three canonical
 architecture/spec/plan files. Those files were read without copying or
 cherry-picking from the clean repository checkout at
-`D:\Guo\zuochong\AGi`, whose blobs matched `origin/main` exactly:
+`<main-worktree>`, whose blobs matched `origin/main` exactly:
 
 - `docs/architecture-master-session-memory.md`;
 - `docs/superpowers/specs/2026-08-14-deepseek-harness-runtime-selection-design.md`;

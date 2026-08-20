@@ -15,7 +15,7 @@ import { basename, delimiter, dirname, isAbsolute, relative, resolve, win32 } fr
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 
-const DSH_VERSION = '0.1.0-rc.6'
+const DSH_VERSION = '0.1.0-rc.7'
 const PNPM_VERSION = '11.20.0'
 const PROFILE = 'tianwen'
 const RUNTIME_PACKAGE = '@tianwen/runtime-bundle'

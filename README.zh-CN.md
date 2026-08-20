@@ -1,0 +1,90 @@
+# 天问（Tianwen）
+
+[English](README.md)
+
+天问是一个面向长时间运行 Agent、可审计的学习控制面。
+
+**研究预览。** DSH 0.1.0-rc.7 是唯一的产品 Agent Runtime。天问在后台以非干扰方式
+工作：它在一次正常 DSH Run 结束后读取执行事实，不替换正在运行的 Agent，也不热切换
+当前 Run。本预览已证明正常 Agent execution、Evidence 只读投影，以及
+zero qualifying signal → `no-case`、`candidateCreated=false`。
+Candidate/Shadow/Promotion 尚未完成。
+
+## 为什么需要天问
+
+Agent 可以完成一次 Session，但长期治理还需要回答另外一些问题：结果由哪些证据支持、
+不同 Run 之间发生了什么变化，以及反复出现的信号是否足以支持未来版本发生改变。
+天问的目标是让这些决定可追溯，同时把当前执行继续交给 Runtime。
+
+## 架构：DSH 执行，天问治理，Alpha 负责实验
+
+| 层 | 职责 |
+| --- | --- |
+| **DSH** | 运行当前 Agent Session。天问直接复用它的模型与 Provider、Agent loop、工具、MCP、sandbox、Session Query、Skill、Jobs、Workflow、Subagent、Message Feedback、Approval 和 permissions。 |
+| **天问** | 保留跨 Run 治理边界，包括 Goal Graph、Evidence provenance（证据来源与流转记录）、学习归因和面向未来 Run 的版本治理。当前预览只实际运行了 Evidence 只读投影和谨慎的 no-case 判断。 |
+| **Alpha** | Alpha 是实验与评测资产，不是第二套产品运行时。 |
+
+DSH Message Feedback 只是学习归因的一项输入，本身不等于 Lesson。DSH Job 表示当前进程
+中的工作，不等于可跨 Run 持久保存的 Learning Ticket。详细边界以
+[架构总览](docs/tianwen-architecture-overview-v2.md)为准。
+
+## 当前预览证明了什么
+
+确定性演示走正常的 DSH Agent loop：脚本化 Adapter 返回两次响应，确定性的
+`summarize` 工具执行一次，最终状态为 `execution.status=completed`。随后天问投影出一条
+完整 Evidence，而且没有改写 DSH Session；同一次 Run 内，投影前后的事件摘要完全一致。
+
+因为没有反复失败或用户纠正，正确的学习结果是 `no-case`、零个有效信号和
+`candidateCreated=false`。这只证明了有边界的执行与 Evidence 结果，不证明通用自主学习
+已经完成。
+
+## 三分钟零成本演示
+
+安装锁定的依赖，然后运行：
+
+```console
+pnpm install --frozen-lockfile
+pnpm demo:research-preview
+```
+
+命令只输出一个格式化 JSON 对象，不使用网络、Provider、token 预算、付费模型、Docker、
+持久化数据库或用户数据。预期结果是一项完成的执行、一条完整 Evidence、`no-case`、
+`candidateCreated=false`，以及相同的投影前后 Session 摘要。不同 Run 的摘要可能因事件中
+包含本次运行数据而不同；承重事实是同一次 Run 内前后相等，证明投影不干扰执行事实。
+
+## 当前限制
+
+- Candidate 生成、Shadow 评测和 Promotion 尚未完成。
+- 当前预览不提供生产 SLA，也没有完成的用户界面。
+- 一次成功执行不会自动产生学习，未来版本也不能进入正在运行的 Agent。
+- 已知的首次 Profile 初始化诊断另有事实记录，不能把它写成已经通过的发布门。
+
+## 仓库地图
+
+- [`scripts/run-research-preview-demo.ts`](scripts/run-research-preview-demo.ts)
+  是确定性演示。
+- [`packages/tianwen-dsh-compat`](packages/tianwen-dsh-compat) 是 DSH 公共兼容接缝。
+- [`packages/tianwen-evidence`](packages/tianwen-evidence) 实现 Evidence 只读投影。
+- [`docs/tianwen-architecture-overview-v2.md`](docs/tianwen-architecture-overview-v2.md)
+  是详细架构的权威入口。
+- [`docs/research`](docs/research) 保存有边界的研究证据和审计记录。
+- [`tests`](tests) 包含零成本合同与稳定门。
+
+## 开发命令
+
+```console
+pnpm run typecheck
+pnpm run check:dsh-install
+pnpm run check:no-private-dsh-imports
+pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts
+uv sync --frozen --dev
+uv run ruff check .
+uv run pytest
+```
+
+支持版本和贡献边界见 [CONTRIBUTING.md](CONTRIBUTING.md)，私密漏洞报告方式见
+[SECURITY.md](SECURITY.md)，英文入口见 [README.md](README.md)。
+
+## 许可证
+
+天问采用 [Apache License 2.0](LICENSE)。

@@ -21,7 +21,7 @@
 - 天问只管理 `tw_*` 表；Harness 数据只能通过公开 `StepStore` 方法访问。
 - Skills 的只读物化和版本选择属于天问；Harness `Skills` 只负责读取构造时快照。
 - Harness Shell 规则不是操作系统安全边界；契约测试只证明配置行为。
-- `.venv` 放在项目目录 `D:\Guo\zuochong\AGi`，uv 下载缓存固定到 `D:\DevData\uv-cache`，不新增 C 盘依赖缓存。
+- `.venv` 放在项目目录 `<repo>`，uv 下载缓存固定到 `D:\DevData\uv-cache`，不新增 C 盘依赖缓存。
 - 任一硬性契约失败时停止本计划，不修改上游包、不调用私有接口绕过，并将结论记为 `NO-GO`。
 
 ---
@@ -120,7 +120,7 @@ uv lock
 uv sync --all-groups
 ```
 
-Expected: both commands exit `0`, `uv.lock` exists, and `.venv` is created under `D:\Guo\zuochong\AGi`.
+Expected: both commands exit `0`, `uv.lock` exists, and `.venv` is created under `<repo>`.
 
 - [ ] **Step 5: Verify the exact pair**
 
