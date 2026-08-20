@@ -13,6 +13,8 @@ type PublicLedgerEventPrivacyContract = AssertNever<Extract<
       | 'run-skill-use-recorded'
       | 'learning-case-opened'
       | 'learning-attribution-recorded'
+      | 'learning-lesson-recorded'
+      | 'learning-candidate-recorded'
   }
 >>
 
@@ -62,22 +64,30 @@ export type {
 } from './outcome-intake.js'
 export {
   prepareAttribution,
+  prepareAcceptedLesson,
   prepareLearningCase,
   prepareRunSkillManifest,
   prepareRunSkillUse,
+  prepareSkillCandidate,
 } from './skill-governance.js'
 export type {
   AttributionInput,
+  AcceptedLesson,
+  AcceptedLessonInput,
+  AcceptedLessonReceipt,
   AttributionId,
   AttributionReceipt,
   AttributionRecord,
   CaseEvidenceRelation,
   GovernedSkillCandidateId,
+  GovernedSkillCandidate,
   GovernedSkillPayload,
   LearningCaseId,
   LearningCase,
   LearningCaseReceipt,
   LessonId,
+  SkillCandidateInput,
+  SkillCandidateReceipt,
   RunSkillManifest,
   RunSkillManifestInput,
   RunSkillManifestReceipt,

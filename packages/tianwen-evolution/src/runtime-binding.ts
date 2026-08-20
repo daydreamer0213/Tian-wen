@@ -48,6 +48,14 @@ import type {
   LearningCaseId,
   LearningCaseReceipt,
   OpenLearningCaseInput,
+  AcceptedLesson,
+  AcceptedLessonInput,
+  AcceptedLessonReceipt,
+  GovernedSkillCandidate,
+  GovernedSkillCandidateId,
+  LessonId,
+  SkillCandidateInput,
+  SkillCandidateReceipt,
 } from './skill-governance.js'
 
 export interface RuntimeBinding {
@@ -223,6 +231,34 @@ export class TianwenEvolutionService extends Service {
 
   listAttributions(): readonly AttributionRecord[] {
     return this.state().ledger.listAttributions()
+  }
+
+  recordAcceptedLesson(input: AcceptedLessonInput): AcceptedLessonReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordAcceptedLesson(input))
+  }
+
+  getAcceptedLesson(lessonId: LessonId): AcceptedLesson | undefined {
+    return this.state().ledger.getAcceptedLesson(lessonId)
+  }
+
+  listAcceptedLessons(): readonly AcceptedLesson[] {
+    return this.state().ledger.listAcceptedLessons()
+  }
+
+  recordSkillCandidate(input: SkillCandidateInput): SkillCandidateReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordSkillCandidate(input))
+  }
+
+  getSkillCandidate(
+    candidateId: GovernedSkillCandidateId,
+  ): GovernedSkillCandidate | undefined {
+    return this.state().ledger.getSkillCandidate(candidateId)
+  }
+
+  listSkillCandidates(): readonly GovernedSkillCandidate[] {
+    return this.state().ledger.listSkillCandidates()
   }
 
   listLearningSignals(): readonly (LearningSignal | OutcomeLearningSignal)[] {

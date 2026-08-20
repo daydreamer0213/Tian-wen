@@ -658,3 +658,224 @@ export function parseAttribution(value: unknown): AttributionRecord {
   }
   return copy
 }
+
+export interface AcceptedLesson {
+  readonly lessonId: LessonId
+  readonly ticketId: LearningTicketId
+  readonly caseId: LearningCaseId
+  readonly attributionId: AttributionId
+  readonly claim: string
+  readonly when: string
+  readonly notWhen: string
+  readonly supportingEvidenceIds: readonly Sha256Digest[]
+  readonly counterevidenceIds: readonly Sha256Digest[]
+  readonly targetScope: string
+  readonly status: 'accepted'
+}
+
+export type AcceptedLessonInput = Omit<
+  AcceptedLesson,
+  'lessonId' | 'ticketId' | 'status'
+>
+
+export interface AcceptedLessonReceipt {
+  readonly lessonId: LessonId
+  readonly duplicate: boolean
+}
+
+export interface GovernedSkillCandidate {
+  readonly candidateId: GovernedSkillCandidateId
+  readonly ticketId: LearningTicketId
+  readonly caseId: LearningCaseId
+  readonly attributionId: AttributionId
+  readonly lessonId: LessonId
+  readonly targetScope: string
+  readonly parentVersionId: SkillVersionId
+  readonly payloadDigest: Sha256Digest
+  readonly payload: GovernedSkillPayload
+  readonly evidenceIds: readonly Sha256Digest[]
+  readonly status: 'recorded'
+}
+
+export interface SkillCandidateInput {
+  readonly lessonId: LessonId
+  readonly payload: GovernedSkillPayload
+  readonly evidenceIds: readonly Sha256Digest[]
+}
+
+export interface SkillCandidateReceipt {
+  readonly candidateId: GovernedSkillCandidateId
+  readonly duplicate: boolean
+}
+
+export interface LearningLessonRecordedEvent {
+  readonly schemaVersion: 'tianwen.learning-lesson.v1'
+  readonly type: 'learning-lesson-recorded'
+  readonly at: string
+  readonly lesson: AcceptedLesson
+  readonly inputDigest: Sha256Digest
+}
+
+export interface LearningCandidateRecordedEvent {
+  readonly schemaVersion: 'tianwen.learning-candidate.v1'
+  readonly type: 'learning-candidate-recorded'
+  readonly at: string
+  readonly candidate: GovernedSkillCandidate
+  readonly inputDigest: Sha256Digest
+}
+
+export function prepareAcceptedLesson(
+  input: AcceptedLessonInput,
+  learningCase: LearningCase,
+  attribution: AttributionRecord,
+): AcceptedLesson {
+  if (!isRecord(input)) throw new TypeError('Accepted Lesson input must be an object')
+  exactKeys(input, [
+    'caseId', 'attributionId', 'claim', 'when', 'notWhen',
+    'supportingEvidenceIds', 'counterevidenceIds', 'targetScope',
+  ])
+  if (
+    attribution.resolution !== 'dsh-skill'
+    || input.caseId !== learningCase.caseId
+    || input.attributionId !== attribution.attributionId
+    || attribution.caseId !== learningCase.caseId
+    || input.targetScope !== learningCase.scopeKey
+    || !Array.isArray(input.supportingEvidenceIds)
+    || !Array.isArray(input.counterevidenceIds)
+  ) {
+    throw new TypeError('Accepted Lesson lacks resolved Case Attribution')
+  }
+  const supporting = unique(input.supportingEvidenceIds.map(value =>
+    digestValue(value, 'supportingEvidenceId')))
+  const counter = unique(input.counterevidenceIds.map(value =>
+    digestValue(value, 'counterevidenceId')))
+  if (
+    supporting.length === 0
+    || counter.length === 0
+    || supporting.some(value => !attribution.supportingEvidenceIds.includes(value))
+    || counter.some(value => !attribution.counterevidenceIds.includes(value))
+  ) {
+    throw new TypeError('Accepted Lesson Evidence is outside Attribution')
+  }
+  const body = {
+    ticketId: learningCase.ticketId,
+    caseId: input.caseId,
+    attributionId: input.attributionId,
+    claim: nonblank(input.claim, 'claim'),
+    when: nonblank(input.when, 'when'),
+    notWhen: nonblank(input.notWhen, 'notWhen'),
+    supportingEvidenceIds: supporting,
+    counterevidenceIds: counter,
+    targetScope: input.targetScope,
+    status: 'accepted' as const,
+  }
+  const digest = sha256(body)
+  return { lessonId: `lesson:${digest.slice('sha256:'.length)}`, ...body }
+}
+
+function prepareCandidatePayload(
+  payload: GovernedSkillPayload,
+  parent: GovernedSkillPayload,
+): GovernedSkillPayload {
+  if (!isRecord(payload)) throw new TypeError('Candidate payload must be an object')
+  exactKeys(
+    payload,
+    ['name', 'description', 'invocation', 'source', 'content'],
+    ['whenToUse'],
+  )
+  if (!isRecord(payload.invocation)) {
+    throw new TypeError('Candidate invocation must be an object')
+  }
+  exactKeys(payload.invocation, ['modelInvocable', 'userInvocable'])
+  if (
+    payload.name !== parent.name
+    || payload.source !== parent.source
+    || canonicalJson(payload.invocation) !== canonicalJson(parent.invocation)
+    || typeof payload.invocation.modelInvocable !== 'boolean'
+    || typeof payload.invocation.userInvocable !== 'boolean'
+  ) {
+    throw new TypeError('Candidate changed frozen Skill identity')
+  }
+  const whenToUse = payload.whenToUse === undefined
+    ? undefined
+    : nonblank(payload.whenToUse, 'payload.whenToUse')
+  return {
+    name: payload.name,
+    description: nonblank(payload.description, 'payload.description'),
+    ...(whenToUse === undefined ? {} : { whenToUse }),
+    invocation: {
+      modelInvocable: payload.invocation.modelInvocable,
+      userInvocable: payload.invocation.userInvocable,
+    },
+    source: payload.source,
+    content: nonblank(payload.content, 'payload.content'),
+  }
+}
+
+export function prepareSkillCandidate(
+  input: SkillCandidateInput,
+  lesson: AcceptedLesson,
+  learningCase: LearningCase,
+  attribution: AttributionRecord,
+  parent: GovernedSkillPayload,
+): GovernedSkillCandidate {
+  if (!isRecord(input)) throw new TypeError('Skill Candidate input must be an object')
+  exactKeys(input, ['lessonId', 'payload', 'evidenceIds'])
+  if (
+    input.lessonId !== lesson.lessonId
+    || lesson.caseId !== learningCase.caseId
+    || lesson.attributionId !== attribution.attributionId
+    || attribution.resolution !== 'dsh-skill'
+    || !Array.isArray(input.evidenceIds)
+  ) {
+    throw new TypeError('Skill Candidate lacks an Accepted Lesson chain')
+  }
+  const payload = prepareCandidatePayload(input.payload, parent)
+  const evidenceIds = unique(input.evidenceIds.map(value =>
+    digestValue(value, 'candidate Evidence ID')))
+  const required = unique([
+    ...lesson.supportingEvidenceIds,
+    ...lesson.counterevidenceIds,
+  ])
+  if (
+    evidenceIds.length !== required.length
+    || required.some(value => !evidenceIds.includes(value))
+  ) {
+    throw new TypeError('Skill Candidate must retain all Lesson Evidence')
+  }
+  const payloadDigest = sha256(payload)
+  const identity = sha256({
+    caseId: learningCase.caseId,
+    lessonId: lesson.lessonId,
+    parentVersionId: learningCase.parentVersionId,
+    payloadDigest,
+  })
+  return {
+    candidateId: `candidate:${identity.slice('sha256:'.length)}`,
+    ticketId: learningCase.ticketId,
+    caseId: learningCase.caseId,
+    attributionId: attribution.attributionId,
+    lessonId: lesson.lessonId,
+    targetScope: lesson.targetScope,
+    parentVersionId: learningCase.parentVersionId,
+    payloadDigest,
+    payload,
+    evidenceIds,
+    status: 'recorded',
+  }
+}
+
+export function parseAcceptedLesson(value: unknown): AcceptedLesson {
+  if (!isRecord(value)) throw new TypeError('Accepted Lesson must be an object')
+  const copy = structuredClone(value) as unknown as AcceptedLesson
+  const { lessonId, ...body } = copy
+  if (lessonId !== `lesson:${sha256(body).slice('sha256:'.length)}`) {
+    throw new TypeError('Accepted Lesson identity mismatch')
+  }
+  return copy
+}
+
+export function parseSkillCandidate(value: unknown): GovernedSkillCandidate {
+  if (!isRecord(value)) throw new TypeError('Skill Candidate must be an object')
+  return structuredClone(value) as unknown as GovernedSkillCandidate
+}

@@ -154,6 +154,41 @@ function seedGovernedCase(
   }
 }
 
+function seedResolvedAttribution(ledger: EvolutionLedger) {
+  const seeded = seedGovernedCase(ledger)
+  const receipt = ledger.recordAttribution({
+    caseId: seeded.caseId,
+    resolution: 'dsh-skill',
+    targetSkillName: parent.name,
+    hypothesis: 'The parent instruction omits result-first ordering.',
+    supportingEvidenceIds: seeded.supportingEvidenceIds,
+    counterevidenceIds: seeded.counterevidenceIds,
+    alternatives: 'Tool and Runtime causes remain unsupported.',
+  })
+  return {
+    ...seeded,
+    attributionId: receipt.attributionId,
+    scopeKey: seeded.value.scopeKey,
+    parentVersionId: seeded.value.parentVersionId,
+    parent: ledger.getRunSkillManifest(seeded.value.runIds[0]!)!.parent,
+  }
+}
+
+function seedAcceptedLesson(ledger: EvolutionLedger) {
+  const chain = seedResolvedAttribution(ledger)
+  const receipt = ledger.recordAcceptedLesson({
+    caseId: chain.caseId,
+    attributionId: chain.attributionId,
+    claim: 'State the observed result before interpretation.',
+    when: 'When summarizing a verified research observation.',
+    notWhen: 'When the task requests raw extraction without interpretation.',
+    supportingEvidenceIds: chain.supportingEvidenceIds,
+    counterevidenceIds: chain.counterevidenceIds,
+    targetScope: chain.scopeKey,
+  })
+  return { ...chain, lessonId: receipt.lessonId }
+}
+
 afterEach(() => {
   for (const value of roots.splice(0)) {
     rmSync(value, { recursive: true, force: true })
@@ -340,5 +375,91 @@ describe('governed Skill evidence', () => {
       resolution: 'outside-stage3',
       recommendation: 'Inspect the deterministic tool fixture separately.',
     })).toMatchObject({ decision: 'no-lesson', duplicate: false })
+  })
+
+  it('accepts a scoped Lesson only after dsh-skill attribution', () => {
+    const ledger = new EvolutionLedger(root('lesson'))
+    const chain = seedResolvedAttribution(ledger)
+    const input = {
+      caseId: chain.caseId,
+      attributionId: chain.attributionId,
+      claim: 'State the observed result before interpretation.',
+      when: 'When summarizing a verified research observation.',
+      notWhen: 'When the task requests raw extraction without interpretation.',
+      supportingEvidenceIds: chain.supportingEvidenceIds,
+      counterevidenceIds: chain.counterevidenceIds,
+      targetScope: chain.scopeKey,
+    } as const
+    const receipt = ledger.recordAcceptedLesson(input)
+    expect(receipt.lessonId).toMatch(/^lesson:[a-f0-9]{64}$/u)
+    expect(ledger.getAcceptedLesson(receipt.lessonId)).toMatchObject({
+      ...input,
+      status: 'accepted',
+    })
+    expect(ledger.recordAcceptedLesson(structuredClone(input)))
+      .toMatchObject({ duplicate: true })
+    expect(() => ledger.recordAcceptedLesson({ ...input, targetScope: 'other' }))
+      .toThrow(LedgerIntegrityError)
+    expect(() => ledger.recordAcceptedLesson({
+      ...input,
+      supportingEvidenceIds: [digest('f')],
+    })).toThrow(LedgerIntegrityError)
+  })
+
+  it('records one inert Candidate without touching Artifact or Champion state', () => {
+    const directory = root('candidate')
+    const ledger = new EvolutionLedger(directory)
+    const chain = seedAcceptedLesson(ledger)
+    const beforeEvents = ledger.listEvents().map(event => event.type)
+    const input = {
+      lessonId: chain.lessonId,
+      payload: {
+        ...chain.parent,
+        description: 'Summarize verified observations with result-first ordering.',
+        content: '# Research summary\n\nState the observed result first, then interpret it.\n\nhttps://example.test and `echo inert` are plain text.',
+      },
+      evidenceIds: [...chain.supportingEvidenceIds, ...chain.counterevidenceIds],
+    } as const
+    const receipt = ledger.recordSkillCandidate(input)
+    expect(receipt.candidateId).toMatch(/^candidate:[a-f0-9]{64}$/u)
+    expect(ledger.getSkillCandidate(receipt.candidateId)).toMatchObject({
+      parentVersionId: chain.parentVersionId,
+      status: 'recorded',
+      payload: input.payload,
+    })
+    expect(ledger.recordSkillCandidate(structuredClone(input)))
+      .toMatchObject({ duplicate: true })
+    expect(() => ledger.recordSkillCandidate({
+      ...input,
+      evidenceIds: input.evidenceIds.slice(1),
+    })).toThrow(LedgerIntegrityError)
+    expect(() => ledger.recordSkillCandidate({
+      ...input,
+      payload: { ...input.payload, name: 'different-skill' },
+    })).toThrow(LedgerIntegrityError)
+    expect(ledger.getChampion()).toBeUndefined()
+    const oldPath = [
+      'artifact-recorded', 'evaluation-recorded', 'approval-recorded',
+      'promoted', 'rolled-back', 'runtime-bound',
+    ]
+    expect(ledger.listEvents().map(event => event.type).filter(type =>
+      oldPath.includes(type))).toEqual(beforeEvents.filter(type =>
+      oldPath.includes(type)))
+    const restarted = new EvolutionLedger(directory)
+    expect([
+      restarted.listRunSkillManifests(),
+      restarted.listRunSkillUses(),
+      restarted.listLearningCases(),
+      restarted.listAttributions(),
+      restarted.listAcceptedLessons(),
+      restarted.listSkillCandidates(),
+    ]).toEqual([
+      ledger.listRunSkillManifests(),
+      ledger.listRunSkillUses(),
+      ledger.listLearningCases(),
+      ledger.listAttributions(),
+      ledger.listAcceptedLessons(),
+      ledger.listSkillCandidates(),
+    ])
   })
 })
