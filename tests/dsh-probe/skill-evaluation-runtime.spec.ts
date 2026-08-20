@@ -1,4 +1,6 @@
 import { rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, posix, win32 } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   DynamicCordisRunnerService,
@@ -27,6 +29,24 @@ const config: LlmCallConfig = {
   provider: 'tianwen-stage4-scripted',
   model: 'scripted',
   maxTokens: 256,
+}
+
+function stage4FixtureBaseRoot(
+  platform: NodeJS.Platform,
+  configuredRoot: string | undefined,
+  temporaryRoot: string,
+) {
+  return configuredRoot ?? (platform === 'win32'
+    ? 'D:\\DevData\\tianwen-stage4-test-fixtures'
+    : posix.join(temporaryRoot, 'tianwen-stage4-test-fixtures'))
+}
+
+function stage4FixtureRoot(name: string) {
+  return join(stage4FixtureBaseRoot(
+    process.platform,
+    process.env.TIANWEN_DSH_PROBE_ROOT,
+    tmpdir(),
+  ), name)
 }
 
 const request = {
@@ -271,8 +291,19 @@ function requestConfig(value: GenerateOptions): LlmCallConfig {
 }
 
 describe('paired Skill evaluation request observation', () => {
+  it('selects a configured or platform-absolute fixture root', () => {
+    const windowsRoot = stage4FixtureBaseRoot('win32', undefined, 'C:\\Temp')
+    const posixRoot = stage4FixtureBaseRoot('linux', undefined, '/tmp')
+    expect(windowsRoot).toBe('D:\\DevData\\tianwen-stage4-test-fixtures')
+    expect(win32.isAbsolute(windowsRoot)).toBe(true)
+    expect(posixRoot).toBe('/tmp/tianwen-stage4-test-fixtures')
+    expect(posix.isAbsolute(posixRoot)).toBe(true)
+    expect(stage4FixtureBaseRoot('linux', '/configured-fixture-root', '/tmp'))
+      .toBe('/configured-fixture-root')
+  })
+
   it('installs the isolated paired Skill evaluation coordinator with the normal runtime', async () => {
-    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-red'
+    const root = stage4FixtureRoot('runtime-red')
     const harness = await mountCoreHarness([textResponse('unused')])
     await harness.ctx.plugin(SkillRegistry)
     await harness.ctx.plugin(applySkillTool)
@@ -299,7 +330,7 @@ describe('paired Skill evaluation request observation', () => {
   })
 
   it('durably prepares the fixed B/C matrix before eight normal DSH Agent turns', async () => {
-    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-matrix'
+    const root = stage4FixtureRoot('runtime-matrix')
     const script = Array.from({ length: 8 }, (_, index) => [
       toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
       textResponse(`scripted answer ${index}`),
@@ -363,7 +394,7 @@ describe('paired Skill evaluation request observation', () => {
   })
 
   it('rejects a changed actual visible tool surface before opening a plan', async () => {
-    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-surface-mismatch'
+    const root = stage4FixtureRoot('runtime-surface-mismatch')
     const harness = await mountCoreHarness([textResponse('unused')])
     await harness.ctx.plugin(SkillRegistry)
     await harness.ctx.plugin(applySkillTool)
@@ -398,7 +429,7 @@ describe('paired Skill evaluation request observation', () => {
   })
 
   it('rejects a non-scripted provider before creating an Agent or dispatching a request', async () => {
-    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-non-scripted-preflight'
+    const root = stage4FixtureRoot('runtime-non-scripted-preflight')
     const harness = await mountCoreHarness([textResponse('unused')])
     await harness.ctx.plugin(SkillRegistry)
     await harness.ctx.plugin(applySkillTool)
@@ -431,7 +462,7 @@ describe('paired Skill evaluation request observation', () => {
   })
 
   it('rejects an arbitrary adapter occupying the reserved Stage 4 route before an Agent or request', async () => {
-    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-scripted-route-collision'
+    const root = stage4FixtureRoot('runtime-scripted-route-collision')
     const script = Array.from({ length: 8 }, (_, index) => [
       toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
       textResponse(`scripted answer ${index}`),
@@ -470,7 +501,7 @@ describe('paired Skill evaluation request observation', () => {
   })
 
   it('rejects an intruder Session without consuming the first paired fixture entry', async () => {
-    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-scripted-route-intruder'
+    const root = stage4FixtureRoot('runtime-scripted-route-intruder')
     const script = Array.from({ length: 8 }, (_, index) => [
       toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
       textResponse(`scripted answer ${index}`),
@@ -533,7 +564,7 @@ describe('paired Skill evaluation request observation', () => {
   })
 
   it('records budget exhaustion as inconclusive while the stream observer continues exactly once', async () => {
-    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-budget-exhaustion'
+    const root = stage4FixtureRoot('runtime-budget-exhaustion')
     const script = Array.from({ length: 8 }, (_, index) => [
       toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
       textResponse(`scripted answer ${index}`),
@@ -588,7 +619,7 @@ describe('paired Skill evaluation request observation', () => {
   })
 
   it('retains dispatched scripted usage when outcome intake fails after a Turn', async () => {
-    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-failed-usage'
+    const root = stage4FixtureRoot('runtime-failed-usage')
     const script = Array.from({ length: 8 }, (_, index) => [
       toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
       textResponse(`scripted answer ${index}`),
@@ -627,7 +658,7 @@ describe('paired Skill evaluation request observation', () => {
   })
 
   it('durably records inconclusive arms when Evidence projection itself fails', async () => {
-    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-evidence-projection-failure'
+    const root = stage4FixtureRoot('runtime-evidence-projection-failure')
     const script = Array.from({ length: 8 }, (_, index) => [
       toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
       textResponse(`scripted answer ${index}`),
@@ -668,7 +699,7 @@ describe('paired Skill evaluation request observation', () => {
   })
 
   it('keeps over-budget exception usage durable with the budget reason', async () => {
-    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-evidence-projection-budget-failure'
+    const root = stage4FixtureRoot('runtime-evidence-projection-budget-failure')
     const script = Array.from({ length: 8 }, (_, index) => [
       toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
       textResponse(`scripted answer ${index}`),
