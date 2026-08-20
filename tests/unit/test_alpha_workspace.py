@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -99,6 +100,29 @@ def alpha_data_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _create_for_test(data_root: Path, trial_id: str, bundle: Any):
     return alpha_workspace._create_trial_workspace(data_root, trial_id, bundle, allowed_drive=data_root.drive)
+
+
+def test_git_environment_does_not_require_windows_systemroot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trial_dir = tmp_path / "runs" / "trial-1"
+    paths = alpha_workspace.AlphaTrialPaths(
+        trial_id="trial-1",
+        data_root=tmp_path,
+        trial_dir=trial_dir,
+        workspace=trial_dir / "workspace",
+        state=trial_dir / "state",
+        logs=trial_dir / "logs",
+        diff_patch=trial_dir / "diff.patch",
+        trial_manifest_json=trial_dir / "trial-manifest.json",
+        trial_result_json=trial_dir / "trial-result.json",
+    )
+    monkeypatch.delenv("SYSTEMROOT", raising=False)
+
+    environment = alpha_workspace._git_environment(paths)
+
+    assert environment["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert "SYSTEMROOT" not in environment
 
 
 def test_public_trial_workspace_rejects_non_d_root(tmp_path: Path) -> None:
