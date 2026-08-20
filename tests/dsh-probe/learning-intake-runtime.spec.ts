@@ -16,9 +16,13 @@ import {
   waitForIdle,
 } from '@tianwen/dsh-compat'
 import type { SessionEvent } from '@tianwen/dsh-compat'
+import type { LedgerEvent } from '@tianwen/evolution'
 import { apply } from '../../packages/tianwen-runtime/src/index.js'
 
 const roots: string[] = []
+const publicLedgerExcludesLearningIntake: [
+  Extract<LedgerEvent, { type: 'learning-intake-recorded' }>,
+] extends [never] ? true : false = true
 
 function evolutionRoot(): string {
   const root = mkdtempSync(resolve('.tianwen-stage1-runtime-'))
@@ -107,6 +111,7 @@ afterEach(() => {
 
 describe('Tianwen runtime learning intake', () => {
   it('consumes final DSH feedback through Evidence and the existing ledger without changing the Session', async () => {
+    expect(publicLedgerExcludesLearningIntake).toBe(true)
     const mounted = await mountCompletedSessions()
     const [handle] = mounted.handles
     try {

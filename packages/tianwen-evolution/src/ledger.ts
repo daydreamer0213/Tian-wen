@@ -117,6 +117,11 @@ export type LedgerEvent =
   | ActivationFailedEvent
   | RecoveryFailedEvent
 
+export type PublicLedgerEvent = Exclude<
+  LedgerEvent,
+  LearningIntakeRecordedEvent
+>
+
 export type GovernanceErrorCode =
   | 'artifact-missing'
   | 'evaluation-required'
