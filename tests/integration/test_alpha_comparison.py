@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import sqlite3
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -40,6 +42,13 @@ from tianwen.domain import (
     PromotionRecord,
     content_digest,
 )
+
+_ALPHA_TEST_DATA_ROOT = (
+    Path("D:/DevData/alpha-b-task-2-tests")
+    if os.name == "nt"
+    else Path(tempfile.gettempdir()) / "tianwen-alpha-b-task-2-tests"
+)
+_ALPHA_TEST_ALLOWED_DRIVE = _ALPHA_TEST_DATA_ROOT.resolve().drive
 
 
 class _Model(TestModel):
@@ -170,7 +179,7 @@ def _budget() -> BudgetLimit:
 
 
 def _data_root(role: str) -> Path:
-    root = Path("D:/DevData/alpha-b-task-2-tests") / f"{role}-{secrets.token_hex(6)}"
+    root = _ALPHA_TEST_DATA_ROOT / f"{role}-{secrets.token_hex(6)}"
     root.mkdir(parents=True)
     return root
 
@@ -185,13 +194,14 @@ def _runner(
     root = Path(__file__).parents[2] / "alpha"
     model = model or _Model(role, request_order if request_order is not None else [])
     docker = docker or _Docker()
+    data_root = _data_root(role)
     runner = AlphaTrialRunner(
         task_root=root / "tasks",
         image_lock_path=root / "environment" / "image.lock",
-        data_root=_data_root(role),
+        data_root=data_root,
         model=model,
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
     return runner, model, docker
 
@@ -605,7 +615,7 @@ async def test_paired_a5_resume_rejects_replacement_runner_identity_before_round
         data_root=champion.paths.data_root,
         model=replacement,
         docker_factory=champion_runner.docker_factory,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
 
     with pytest.raises(AlphaTrialError, match="pair|identity|model|provider"):

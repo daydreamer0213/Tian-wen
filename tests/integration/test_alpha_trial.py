@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import secrets
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,13 @@ from tianwen.alpha_tasks import freeze_task_bundle
 from tianwen.domain import ActionStatus, BudgetLimit, GoalContract, RunRecord, RunStatus, content_digest
 from tianwen.gateway import EffectClass, freeze_action, proposal_action_id
 from tianwen.store import StateConflict
+
+_ALPHA_TEST_DATA_ROOT = (
+    Path("D:/DevData/alpha-task6-tests")
+    if os.name == "nt"
+    else Path(tempfile.gettempdir()) / "tianwen-alpha-task6-tests"
+)
+_ALPHA_TEST_ALLOWED_DRIVE = _ALPHA_TEST_DATA_ROOT.resolve().drive
 
 
 class _Model(TestModel):
@@ -142,7 +151,7 @@ def _budget(model_requests: int = 4) -> BudgetLimit:
 
 
 def _data_root() -> Path:
-    root = Path("D:/DevData/alpha-task6-tests") / secrets.token_hex(4)
+    root = _ALPHA_TEST_DATA_ROOT / secrets.token_hex(4)
     root.mkdir(parents=True)
     return root
 
@@ -276,7 +285,7 @@ def runner(tmp_path: Path) -> Any:
         model=model,
         public_evaluator_key=Ed25519PrivateKey.generate().public_key(),
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
 
 
@@ -446,7 +455,7 @@ def _runner(root: Path, model: _Model, docker: _Docker, data_root: Path | None =
         data_root=data_root or _data_root(),
         model=model,
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
 
 
@@ -784,7 +793,7 @@ async def test_resume_rejects_disabled_thinking_drift_before_model(tmp_path: Pat
         data_root=prepared.paths.data_root,
         model=replacement,
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
 
     with pytest.raises(AlphaTrialError, match="model settings"):
@@ -884,7 +893,7 @@ async def test_a5_uses_one_goal_two_runs_one_workspace_and_shared_budget(tmp_pat
         model=model,
         public_evaluator_key=Ed25519PrivateKey.generate().public_key(),
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
     prepared = runner.prepare("A5", budget=_budget())
     result = await runner.execute(prepared, _confirmation(prepared))
@@ -1119,7 +1128,7 @@ async def test_a3_records_frozen_source_before_execution_model_request(tmp_path:
         model=model,
         public_evaluator_key=Ed25519PrivateKey.generate().public_key(),
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
     prepared = runner.prepare("A3", budget=_budget())
     result = await runner.execute(prepared, _confirmation(prepared))
@@ -1170,7 +1179,7 @@ async def test_provider_failure_still_settles_final_verification(tmp_path: Path)
         model=_Model(fail=True),
         public_evaluator_key=Ed25519PrivateKey.generate().public_key(),
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
     prepared = runner.prepare("A1", budget=_budget())
     result = await runner.execute(prepared, _confirmation(prepared))
@@ -1186,7 +1195,7 @@ async def test_provider_failure_still_settles_final_verification(tmp_path: Path)
         data_root=prepared.paths.data_root,
         model=_Model(),
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
     assert await recovered.resume(result.trial_id) == result
 
@@ -1378,7 +1387,7 @@ async def test_resume_confirmed_prepared_trial_fails_closed_before_effects(tmp_p
         data_root=prepared.paths.data_root,
         model=_Model(),
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
 
     with pytest.raises(AlphaTrialError, match="confirmation"):
@@ -1502,7 +1511,7 @@ async def test_resume_running_completed_a5_round_one_executes_frozen_round_two(t
         data_root=prepared.paths.data_root,
         model=recovered_model,
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
 
     result = await recovered.resume(prepared.preview.trial_id)
@@ -1530,7 +1539,7 @@ async def test_resume_boundary_uses_original_baseline_not_modified_workspace(tmp
         data_root=prepared.paths.data_root,
         model=_Model(),
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
 
     result = await recovered.resume(prepared.preview.trial_id)
@@ -1630,7 +1639,7 @@ async def test_resume_settling_with_unreconciled_final_action_is_boundary_unknow
         data_root=prepared.paths.data_root,
         model=_Model(),
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
 
     result = await recovered.resume(prepared.preview.trial_id)
@@ -1844,7 +1853,7 @@ async def test_resume_running_recovers_the_persisted_incomplete_run(
         data_root=prepared.paths.data_root,
         model=_Model(),
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
 
     result = await recovered.resume(prepared.preview.trial_id)
@@ -1926,7 +1935,7 @@ async def test_confirmed_pre_manifest_resume_with_existing_goal_fails_closed(tmp
         data_root=prepared.paths.data_root,
         model=_Model(),
         docker_factory=lambda *_args: docker,
-        allowed_drive="D:",
+        allowed_drive=_ALPHA_TEST_ALLOWED_DRIVE,
     )
 
     before_effects = _effect_counts(docker)
