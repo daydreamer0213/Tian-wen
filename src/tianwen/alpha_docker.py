@@ -9,7 +9,7 @@ import stat
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 
 from pydantic import Field, ValidationError
@@ -809,10 +809,13 @@ class DockerCheckExecutor:
             ),
             None,
         )
-        if not isinstance(data_location, str) or Path(data_location).drive.casefold() != "d:":
+        if not isinstance(data_location, str) or PureWindowsPath(data_location).drive.casefold() != "d:":
             raise DockerExecutionError("docker_data_not_on_d_drive")
         usage = shutil.disk_usage(self.paths.data_root)
-        if self.paths.data_root.drive.casefold() != "d:" or usage.free < self.bundle.task.limits.min_free_bytes:
+        if (
+            PureWindowsPath(self.paths.data_root).drive.casefold() != "d:"
+            or usage.free < self.bundle.task.limits.min_free_bytes
+        ):
             raise DockerExecutionError("trial_data_not_ready")
         return DockerPreflight(
             docker_version=str(version.get("Client", {}).get("Version", "")),
