@@ -19,6 +19,9 @@ import type {
   TransitionAuthority,
 } from './ledger.js'
 import type {
+  OutcomeIntakeInput,
+  OutcomeIntakeReceipt,
+  OutcomeLearningSignal,
   RunBindingInput,
   RunBindingReceipt,
   TianwenRunBinding,
@@ -109,6 +112,7 @@ function isPublicLedgerEvent(
 ): event is PublicLedgerEvent {
   return event.type !== 'learning-intake-recorded'
     && event.type !== 'run-binding-recorded'
+    && event.type !== 'outcome-intake-recorded'
 }
 
 export class TianwenEvolutionService extends Service {
@@ -161,7 +165,12 @@ export class TianwenEvolutionService extends Service {
     return this.state().ledger.getRunBinding(runId)
   }
 
-  listLearningSignals(): readonly LearningSignal[] {
+  recordOutcomeIntake(input: OutcomeIntakeInput): OutcomeIntakeReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordOutcomeIntake(input))
+  }
+
+  listLearningSignals(): readonly (LearningSignal | OutcomeLearningSignal)[] {
     return this.state().ledger.listLearningSignals()
   }
 

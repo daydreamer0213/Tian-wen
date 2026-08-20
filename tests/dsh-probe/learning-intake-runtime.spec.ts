@@ -27,6 +27,10 @@ const publicRunBindingEventIsExcluded: Extract<
   LedgerEvent,
   { readonly type: 'run-binding-recorded' }
 > extends never ? true : false = true
+const publicOutcomeEventIsExcluded: Extract<
+  LedgerEvent,
+  { readonly type: 'outcome-intake-recorded' }
+> extends never ? true : false = true
 
 function evolutionRoot(): string {
   const root = mkdtempSync(resolve('.tianwen-stage1-runtime-'))
@@ -120,7 +124,7 @@ describe('Tianwen runtime learning intake', () => {
     const [handle] = mounted.handles
     try {
       const ctx = mounted.harness.ctx
-      ctx.tianwenEvolution.recordRunBinding({
+      const run = ctx.tianwenEvolution.recordRunBinding({
         goalRef: 'goal:public-boundary',
         taskRef: 'task:public-boundary',
         sessionId: 'session:public-boundary',
@@ -133,8 +137,17 @@ describe('Tianwen runtime learning intake', () => {
         },
       })
       expect(publicRunBindingEventIsExcluded).toBe(true)
+      ctx.tianwenEvolution.recordOutcomeIntake({
+        runId: run.runId,
+        verdict: 'met',
+        sessionDigest: `sha256:${'1'.repeat(64)}`,
+        evidenceIds: [`sha256:${'2'.repeat(64)}`],
+      })
+      expect(publicOutcomeEventIsExcluded).toBe(true)
       expect(JSON.stringify(ctx.tianwenEvolution.listEvents()))
         .not.toContain('run-binding-recorded')
+      expect(JSON.stringify(ctx.tianwenEvolution.listEvents()))
+        .not.toContain('outcome-intake-recorded')
 
       const finalMessage = finalAssistant(handle!.agent.session.events)
       const before = structuredClone(handle!.agent.session.events)

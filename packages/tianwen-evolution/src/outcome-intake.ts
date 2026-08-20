@@ -1,5 +1,9 @@
 import type { Sha256Digest } from './ledger.js'
 import { normalizeLearningText, sha256 } from './learning-intake.js'
+import type {
+  LearningSignalId,
+  LearningTicketId,
+} from './learning-intake.js'
 
 export type TianwenRunId = `run:${string}`
 export type OutcomeSeverity = 1 | 2 | 3 | 4 | 5
@@ -47,6 +51,77 @@ export interface RunBindingRecordedEvent {
   readonly binding: TianwenRunBinding
   readonly inputDigest: Sha256Digest
 }
+
+export type OutcomeVerdict = 'met' | 'not-met' | 'inconclusive'
+
+export interface OutcomeIntakeInput {
+  readonly runId: TianwenRunId
+  readonly verdict: OutcomeVerdict
+  readonly sessionDigest: Sha256Digest
+  readonly evidenceIds: readonly Sha256Digest[]
+}
+
+export interface OutcomeLearningSignal {
+  readonly signalId: LearningSignalId
+  readonly ingestionId: Sha256Digest
+  readonly runId: TianwenRunId
+  readonly sessionId: string
+  readonly scopeKey: string
+  readonly problemFingerprint: Sha256Digest
+  readonly problemCategory: string
+  readonly failureSignature: Sha256Digest
+  readonly severity: OutcomeSeverity
+  readonly blocksGoal: boolean
+  readonly sessionDigest: Sha256Digest
+  readonly evidenceIds: readonly Sha256Digest[]
+}
+
+export interface OutcomeIntakeReceipt {
+  readonly decision:
+    | 'no-case'
+    | 'continue-observing'
+    | 'ordinary-correction'
+    | 'signal-recorded'
+    | 'ticket-created'
+    | 'ticket-merged'
+  readonly ingestionId: Sha256Digest
+  readonly signalId?: LearningSignalId
+  readonly ticketId?: LearningTicketId
+  readonly duplicate: boolean
+}
+
+export interface OutcomeIntakeRecordedEvent {
+  readonly schemaVersion: 'tianwen.outcome-intake.v1'
+  readonly type: 'outcome-intake-recorded'
+  readonly at: string
+  readonly input: OutcomeIntakeInput
+  readonly inputDigest: Sha256Digest
+  readonly receipt: Omit<OutcomeIntakeReceipt, 'duplicate'>
+  readonly signal?: OutcomeLearningSignal
+}
+
+export type PreparedOutcomeIntake =
+  | {
+      readonly kind: 'no-signal'
+      readonly decision:
+        | 'no-case'
+        | 'continue-observing'
+        | 'ordinary-correction'
+      readonly ingestionId: Sha256Digest
+      readonly inputDigest: Sha256Digest
+    }
+  | {
+      readonly kind: 'reusable'
+      readonly ingestionId: Sha256Digest
+      readonly inputDigest: Sha256Digest
+      readonly signalId: LearningSignalId
+      readonly ticketId: LearningTicketId
+      readonly problemFingerprint: Sha256Digest
+      readonly failureSignature: Sha256Digest
+      readonly problemCategory: string
+      readonly severity: OutcomeSeverity
+      readonly blocksGoal: boolean
+    }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -170,5 +245,120 @@ export function prepareRunBinding(input: RunBindingInput): TianwenRunBinding {
     runId: `run:${runDigest.slice('sha256:'.length)}`,
     ...validated,
     acceptanceContractDigest,
+  }
+}
+
+const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/u
+
+function requireDigest(value: unknown, label: string): Sha256Digest {
+  if (typeof value !== 'string' || !SHA256_DIGEST.test(value)) {
+    throw new TypeError(`${label} must be a SHA-256 digest`)
+  }
+  return value as Sha256Digest
+}
+
+function validateOutcomeInput(input: OutcomeIntakeInput): OutcomeIntakeInput {
+  if (!isRecord(input)) {
+    throw new TypeError('Outcome intake input must be an object')
+  }
+  exactKeys(input, ['runId', 'verdict', 'sessionDigest', 'evidenceIds'])
+  if (typeof input.runId !== 'string' || !/^run:[a-f0-9]{64}$/u.test(input.runId)) {
+    throw new TypeError('runId must be a Tianwen Run ID')
+  }
+  if (
+    input.verdict !== 'met'
+    && input.verdict !== 'not-met'
+    && input.verdict !== 'inconclusive'
+  ) {
+    throw new TypeError('verdict must be met, not-met, or inconclusive')
+  }
+  if (!Array.isArray(input.evidenceIds)) {
+    throw new TypeError('evidenceIds must be an array')
+  }
+  const evidenceIds = input.evidenceIds.map((item, index) =>
+    requireDigest(item, `evidenceIds[${index}]`))
+  const allowedEvidence = input.verdict === 'inconclusive'
+    ? evidenceIds.length <= 1
+    : evidenceIds.length === 1
+  if (!allowedEvidence) {
+    throw new TypeError(
+      `${input.verdict} Outcome has invalid Evidence cardinality`,
+    )
+  }
+  return {
+    runId: input.runId,
+    verdict: input.verdict,
+    sessionDigest: requireDigest(input.sessionDigest, 'sessionDigest'),
+    evidenceIds,
+  }
+}
+
+export function prepareOutcomeIntake(
+  binding: TianwenRunBinding,
+  candidate: OutcomeIntakeInput,
+): PreparedOutcomeIntake {
+  const input = validateOutcomeInput(candidate)
+  if (input.runId !== binding.runId) {
+    throw new TypeError('Outcome Run does not match the binding')
+  }
+  const ingestionId = sha256({
+    runId: binding.runId,
+    acceptanceContractDigest: binding.acceptanceContractDigest,
+  })
+  const inputDigest = sha256(input)
+
+  if (input.verdict === 'met') {
+    return { kind: 'no-signal', decision: 'no-case', ingestionId, inputDigest }
+  }
+  if (input.verdict === 'inconclusive') {
+    return {
+      kind: 'no-signal',
+      decision: 'continue-observing',
+      ingestionId,
+      inputDigest,
+    }
+  }
+  if (binding.acceptanceContract.gapDisposition !== 'reusable') {
+    return {
+      kind: 'no-signal',
+      decision: binding.acceptanceContract.gapDisposition === 'observe'
+        ? 'continue-observing'
+        : 'ordinary-correction',
+      ingestionId,
+      inputDigest,
+    }
+  }
+
+  const failureSignature = sha256({
+    source: binding.acceptanceContract.source,
+    toolName: binding.acceptanceContract.toolName,
+    notMetErrorCode: binding.acceptanceContract.notMetErrorCode,
+    acceptanceContractDigest: binding.acceptanceContractDigest,
+  })
+  const problemCategory = normalizeLearningText(
+    binding.acceptanceContract.problemCategory,
+  )
+  const problemFingerprint = sha256({
+    scopeKey: binding.scopeKey,
+    problemCategory,
+    failureSignature,
+  })
+  const relevantEvidenceId = input.evidenceIds[0]!
+  const signalDigest = sha256({
+    runId: binding.runId,
+    problemFingerprint,
+    relevantEvidenceId,
+  })
+  return {
+    kind: 'reusable',
+    ingestionId,
+    inputDigest,
+    signalId: `signal:${signalDigest.slice('sha256:'.length)}`,
+    ticketId: `ticket:${problemFingerprint.slice('sha256:'.length)}`,
+    problemFingerprint,
+    failureSignature,
+    problemCategory,
+    severity: binding.acceptanceContract.severity,
+    blocksGoal: binding.acceptanceContract.blocksGoal,
   }
 }
