@@ -14,7 +14,11 @@ import {
 import { join } from 'node:path'
 import { TextDecoder } from 'node:util'
 
-import { prepareLearningIntake, sha256 } from './learning-intake.js'
+import {
+  canonicalJson,
+  prepareLearningIntake,
+  sha256,
+} from './learning-intake.js'
 import type {
   LearningIntakeInput,
   LearningIntakeReceipt,
@@ -39,6 +43,22 @@ import type {
   TianwenRunBinding,
   TianwenRunId,
 } from './outcome-intake.js'
+import {
+  parseRunSkillManifest,
+  parseRunSkillUse,
+  prepareRunSkillManifest,
+  prepareRunSkillUse,
+} from './skill-governance.js'
+import type {
+  RunSkillManifest,
+  RunSkillManifestInput,
+  RunSkillManifestReceipt,
+  RunSkillManifestRecordedEvent,
+  RunSkillUse,
+  RunSkillUseInput,
+  RunSkillUseReceipt,
+  RunSkillUseRecordedEvent,
+} from './skill-governance.js'
 
 export type ArtifactId = `artifact:${string}`
 export type Sha256Digest = `sha256:${string}`
@@ -126,6 +146,8 @@ export type LedgerEvent =
   | LearningIntakeRecordedEvent
   | RunBindingRecordedEvent
   | OutcomeIntakeRecordedEvent
+  | RunSkillManifestRecordedEvent
+  | RunSkillUseRecordedEvent
   | ArtifactRecordedEvent
   | EvaluationRecordedEvent
   | ApprovalRecordedEvent
@@ -743,6 +765,68 @@ function parseEvent(value: unknown): LedgerEvent {
   if (type === 'outcome-intake-recorded') {
     return parseOutcomeEvent(value, at)
   }
+  if (type === 'run-skill-manifest-recorded') {
+    exactKeys(value, [
+      'schemaVersion',
+      'type',
+      'at',
+      'manifest',
+      'inputDigest',
+    ])
+    if (value.schemaVersion !== 'tianwen.run-skill-manifest.v1') {
+      throw new LedgerIntegrityError('invalid Run Skill manifest event version')
+    }
+    let manifest
+    try {
+      manifest = parseRunSkillManifest(value.manifest)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid Run Skill manifest event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(manifest)) {
+      throw new LedgerIntegrityError('Run Skill manifest digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.run-skill-manifest.v1',
+      type,
+      at,
+      manifest,
+      inputDigest,
+    }
+  }
+  if (type === 'run-skill-use-recorded') {
+    exactKeys(value, [
+      'schemaVersion',
+      'type',
+      'at',
+      'use',
+      'inputDigest',
+    ])
+    if (value.schemaVersion !== 'tianwen.run-skill-use.v1') {
+      throw new LedgerIntegrityError('invalid Run Skill use event version')
+    }
+    let use
+    try {
+      use = parseRunSkillUse(value.use)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid Run Skill use event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(use)) {
+      throw new LedgerIntegrityError('Run Skill use digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.run-skill-use.v1',
+      type,
+      at,
+      use,
+      inputDigest,
+    }
+  }
   if (type === 'artifact-recorded') {
     exactKeys(value, ['type', 'at', 'artifact'])
     const artifact = parseArtifact(value.artifact)
@@ -905,6 +989,8 @@ export class EvolutionLedger {
     Sha256Digest,
     OutcomeIntakeRecordedEvent
   >()
+  readonly #runSkillManifests = new Map<TianwenRunId, RunSkillManifest>()
+  readonly #runSkillUses = new Map<TianwenRunId, RunSkillUse>()
   readonly #learningSignals = new Map<
     LearningSignalId,
     LearningSignal | OutcomeLearningSignal
@@ -956,6 +1042,89 @@ export class EvolutionLedger {
   getRunBinding(runId: TianwenRunId): TianwenRunBinding | undefined {
     const binding = this.#runBindings.get(runId)
     return binding === undefined ? undefined : clone(binding)
+  }
+
+  recordRunSkillManifest(
+    input: RunSkillManifestInput,
+  ): RunSkillManifestReceipt {
+    if (!this.#runBindings.has(input.runId)) {
+      throw new LedgerIntegrityError(`unknown Tianwen Run: ${input.runId}`)
+    }
+    let manifest
+    try {
+      manifest = prepareRunSkillManifest(input)
+    } catch (error) {
+      throw new LedgerIntegrityError('Run Skill manifest input is invalid', {
+        cause: error,
+      })
+    }
+    const existing = this.#runSkillManifests.get(manifest.runId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(manifest)) {
+        throw new LedgerIntegrityError(
+          `Run Skill manifest changed after freeze: ${manifest.runId}`,
+        )
+      }
+      return { parentVersionId: manifest.parentVersionId, duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.run-skill-manifest.v1',
+      type: 'run-skill-manifest-recorded',
+      at: this.#now(),
+      manifest,
+      inputDigest: sha256(manifest),
+    })
+    return { parentVersionId: manifest.parentVersionId, duplicate: false }
+  }
+
+  getRunSkillManifest(runId: TianwenRunId): RunSkillManifest | undefined {
+    const manifest = this.#runSkillManifests.get(runId)
+    return manifest === undefined ? undefined : clone(manifest)
+  }
+
+  listRunSkillManifests(): readonly RunSkillManifest[] {
+    return clone([...this.#runSkillManifests.values()])
+  }
+
+  recordRunSkillUse(input: RunSkillUseInput): RunSkillUseReceipt {
+    const binding = this.#runBindings.get(input.runId)
+    const manifest = this.#runSkillManifests.get(input.runId)
+    const outcome = [...this.#outcomeIntakes.values()]
+      .find(event => event.input.runId === input.runId)?.input
+    if (binding === undefined || manifest === undefined || outcome === undefined) {
+      throw new LedgerIntegrityError(
+        `Run Skill use lacks frozen Run facts: ${input.runId}`,
+      )
+    }
+    let use
+    try {
+      use = prepareRunSkillUse(input, manifest, binding, outcome)
+    } catch (error) {
+      throw new LedgerIntegrityError('Run Skill use input is invalid', {
+        cause: error,
+      })
+    }
+    const existing = this.#runSkillUses.get(use.runId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(use)) {
+        throw new LedgerIntegrityError(
+          `Run Skill use changed after freeze: ${use.runId}`,
+        )
+      }
+      return { parentVersionId: use.parentVersionId, duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.run-skill-use.v1',
+      type: 'run-skill-use-recorded',
+      at: this.#now(),
+      use,
+      inputDigest: sha256(use),
+    })
+    return { parentVersionId: use.parentVersionId, duplicate: false }
+  }
+
+  listRunSkillUses(): readonly RunSkillUse[] {
+    return clone([...this.#runSkillUses.values()])
   }
 
   recordOutcomeIntake(input: OutcomeIntakeInput): OutcomeIntakeReceipt {
@@ -1465,6 +1634,50 @@ export class EvolutionLedger {
       }
       return
     }
+    if (event.type === 'run-skill-manifest-recorded') {
+      if (!this.#runBindings.has(event.manifest.runId)) {
+        throw new LedgerIntegrityError(
+          `Run Skill manifest references unknown Run: ${event.manifest.runId}`,
+        )
+      }
+      if (
+        this.#runSkillManifests.has(event.manifest.runId)
+        || event.inputDigest !== sha256(event.manifest)
+      ) {
+        throw new LedgerIntegrityError('Run Skill manifest disagrees with history')
+      }
+      return
+    }
+    if (event.type === 'run-skill-use-recorded') {
+      const binding = this.#runBindings.get(event.use.runId)
+      const manifest = this.#runSkillManifests.get(event.use.runId)
+      const outcome = [...this.#outcomeIntakes.values()]
+        .find(stored => stored.input.runId === event.use.runId)?.input
+      if (
+        binding === undefined
+        || manifest === undefined
+        || outcome === undefined
+        || this.#runSkillUses.has(event.use.runId)
+      ) {
+        throw new LedgerIntegrityError('Run Skill use disagrees with history')
+      }
+      let prepared
+      try {
+        const { schemaVersion: _schemaVersion, ...input } = event.use
+        prepared = prepareRunSkillUse(input, manifest, binding, outcome)
+      } catch (error) {
+        throw new LedgerIntegrityError('Run Skill use event is invalid', {
+          cause: error,
+        })
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.use)
+        || event.inputDigest !== sha256(event.use)
+      ) {
+        throw new LedgerIntegrityError('Run Skill use disagrees with frozen facts')
+      }
+      return
+    }
     if (event.type === 'outcome-intake-recorded') {
       const binding = this.#runBindings.get(event.input.runId)
       if (binding === undefined) {
@@ -1699,6 +1912,14 @@ export class EvolutionLedger {
     if (event.type === 'run-binding-recorded') {
       this.#runBindings.set(event.binding.runId, event.binding)
       this.#runIdBySession.set(event.binding.sessionId, event.binding.runId)
+      return
+    }
+    if (event.type === 'run-skill-manifest-recorded') {
+      this.#runSkillManifests.set(event.manifest.runId, event.manifest)
+      return
+    }
+    if (event.type === 'run-skill-use-recorded') {
+      this.#runSkillUses.set(event.use.runId, event.use)
       return
     }
     if (event.type === 'outcome-intake-recorded') {

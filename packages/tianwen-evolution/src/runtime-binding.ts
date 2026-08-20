@@ -33,6 +33,14 @@ import type {
   LearningSignal,
   LearningTicket,
 } from './learning-intake.js'
+import type {
+  RunSkillManifest,
+  RunSkillManifestInput,
+  RunSkillManifestReceipt,
+  RunSkillUse,
+  RunSkillUseInput,
+  RunSkillUseReceipt,
+} from './skill-governance.js'
 
 export interface RuntimeBinding {
   readonly artifactId: ArtifactId
@@ -160,6 +168,29 @@ export class TianwenEvolutionService extends Service {
   recordOutcomeIntake(input: OutcomeIntakeInput): OutcomeIntakeReceipt {
     return this.formalWrite(() =>
       this.state().ledger.recordOutcomeIntake(input))
+  }
+
+  recordRunSkillManifest(
+    input: RunSkillManifestInput,
+  ): RunSkillManifestReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordRunSkillManifest(input))
+  }
+
+  getRunSkillManifest(runId: TianwenRunId): RunSkillManifest | undefined {
+    return this.state().ledger.getRunSkillManifest(runId)
+  }
+
+  listRunSkillManifests(): readonly RunSkillManifest[] {
+    return this.state().ledger.listRunSkillManifests()
+  }
+
+  recordRunSkillUse(input: RunSkillUseInput): RunSkillUseReceipt {
+    return this.formalWrite(() => this.state().ledger.recordRunSkillUse(input))
+  }
+
+  listRunSkillUses(): readonly RunSkillUse[] {
+    return this.state().ledger.listRunSkillUses()
   }
 
   listLearningSignals(): readonly (LearningSignal | OutcomeLearningSignal)[] {

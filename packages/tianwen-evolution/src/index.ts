@@ -9,6 +9,8 @@ type PublicLedgerEventPrivacyContract = AssertNever<Extract<
       | 'learning-intake-recorded'
       | 'run-binding-recorded'
       | 'outcome-intake-recorded'
+      | 'run-skill-manifest-recorded'
+      | 'run-skill-use-recorded'
   }
 >>
 
@@ -56,4 +58,19 @@ export type {
   TianwenRunBinding,
   TianwenRunId,
 } from './outcome-intake.js'
+export { prepareRunSkillManifest, prepareRunSkillUse } from './skill-governance.js'
+export type {
+  AttributionId,
+  GovernedSkillCandidateId,
+  GovernedSkillPayload,
+  LearningCaseId,
+  LessonId,
+  RunSkillManifest,
+  RunSkillManifestInput,
+  RunSkillManifestReceipt,
+  RunSkillUse,
+  RunSkillUseInput,
+  RunSkillUseReceipt,
+  SkillVersionId,
+} from './skill-governance.js'
 export * from './runtime-binding.js'
