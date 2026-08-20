@@ -114,7 +114,6 @@ function sessionDigest(events: readonly SessionEvent[]): `sha256:${string}` {
 
 function evaluationProtocol(surface: {
   readonly toolSchemaDigest: `sha256:${string}`
-  readonly permissionDigest: `sha256:${string}`
 }) {
   return {
     cases: evaluationCases.map(([caseId, category]) => ({
@@ -155,7 +154,6 @@ function scopedSurface(harness: Awaited<ReturnType<typeof mountCoreHarness>>) {
     left.name.localeCompare(right.name))
   return {
     toolSchemaDigest: sha256(schemas),
-    permissionDigest: sha256(schemas.map(schema => schema.name)),
   }
 }
 
@@ -300,6 +298,10 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
         ...surface,
         workspaceSnapshotDigest: sha256('workspace'),
         validatorContractDigest: sha256('validator'),
+        policyAuthorization: 'unobservable',
+        workspaceBinding: 'unbound',
+        validatorBinding: 'unbound',
+        dataBinding: 'unbound',
         budget: frozenProtocol.budget,
       },
       callConfig,

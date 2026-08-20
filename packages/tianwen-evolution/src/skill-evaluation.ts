@@ -33,6 +33,8 @@ export type SkillEvalProtocolReasonCode =
   | 'validator-subject-mismatch'
   | 'baseline-resolution-mismatch'
   | 'arm-budget-exhausted'
+  | 'policy-authorization-unobservable'
+  | 'unbound-dependency'
 
 export interface SkillEvalProtocolCase {
   readonly caseId: SkillEvalCaseId
@@ -68,7 +70,6 @@ export interface SkillEvalProtocol {
     readonly providerId: string
     readonly modelId: string
     readonly toolSchemaDigest: Sha256Digest
-    readonly permissionDigest: Sha256Digest
     readonly validatorContractDigest: Sha256Digest
   }
 }
@@ -118,6 +119,8 @@ export type SkillEvaluationEvidenceClass =
   | 'objective-screening'
   | 'independent-objective'
 export type SkillEvaluationReasonCode = SkillEvalProtocolReasonCode
+export type SkillEvaluationPolicyAuthorization = 'unobservable'
+export type SkillEvaluationDependencyBinding = 'unbound'
 
 export interface SkillEvaluationEnvironment {
   readonly dshVersion: '0.1.0-rc.7'
@@ -125,9 +128,14 @@ export interface SkillEvaluationEnvironment {
   readonly modelId: string
   readonly callConfigDigest: Sha256Digest
   readonly toolSchemaDigest: Sha256Digest
-  readonly permissionDigest: Sha256Digest
   readonly workspaceSnapshotDigest: Sha256Digest
   readonly validatorContractDigest: Sha256Digest
+  /** The rc.7 public surface exposes no authoritative Policy/authorization fact. */
+  readonly policyAuthorization: SkillEvaluationPolicyAuthorization
+  /** Stage 4 records these frozen references but cannot attest their independent binding. */
+  readonly workspaceBinding: SkillEvaluationDependencyBinding
+  readonly validatorBinding: SkillEvaluationDependencyBinding
+  readonly dataBinding: SkillEvaluationDependencyBinding
   readonly budget: SkillEvalProtocol['budget']
 }
 
@@ -241,6 +249,8 @@ export interface SkillEvaluationResult {
   readonly protocolId: SkillEvalProtocolId
   readonly candidateId: GovernedSkillCandidate['candidateId']
   readonly parentVersionId: SkillVersionId
+  /** Binds this immutable aggregate result to the complete frozen Evaluation plan. */
+  readonly planDigest: Sha256Digest
   readonly verdict: SkillEvaluationVerdict
   readonly comparison: SkillComparison
   readonly decision: SkillEvaluationDecision
@@ -254,6 +264,64 @@ export interface SkillEvaluationResult {
 export interface SkillEvaluationResultReceipt {
   readonly evaluationId: SkillEvaluationId
   readonly duplicate: boolean
+}
+
+export interface SkillEvaluationDecisionInput {
+  readonly verdict: SkillEvaluationVerdict
+  readonly comparison: SkillComparison
+  readonly evidenceClass: SkillEvaluationEvidenceClass
+  readonly baselineResolutionMatched: boolean
+  readonly protocolProvenance: SkillEvaluationPlan['protocolProvenance']
+}
+
+export type SkillEvaluationFreshnessReason =
+  | 'evaluation-plan-mismatch'
+  | 'parent-changed'
+  | 'candidate-changed'
+  | 'protocol-changed'
+  | 'runtime-changed'
+  | 'provider-or-model-changed'
+  | 'call-config-changed'
+  | 'tool-surface-changed'
+  | 'workspace-changed'
+  | 'validator-changed'
+  | 'data-changed'
+  | 'policy-authorization-unobservable'
+  | 'unbound-dependency'
+
+export type SkillEvaluationFreshness =
+  | { readonly state: 'fresh'; readonly reason: 'fresh' }
+  | { readonly state: 'stale'; readonly reason: SkillEvaluationFreshnessReason }
+
+/**
+ * Current facts are deliberately supplied separately from the immutable
+ * recorded plan/result. This is a pure Stage 5 decision seam: it neither
+ * appends an event nor changes the historic result.
+ */
+export interface SkillEvaluationCurrentDependencies {
+  readonly recordedPlan: SkillEvaluationPlan
+  readonly parentVersionId: SkillVersionId
+  readonly parentPayloadDigest: Sha256Digest
+  readonly candidateId: GovernedSkillCandidate['candidateId']
+  readonly candidatePayloadDigest: Sha256Digest
+  readonly protocolId: SkillEvalProtocolId
+  readonly protocolProvenance: SkillEvalProtocolRecord['provenance']
+  readonly dshVersion: string
+  readonly providerId: string
+  readonly modelId: string
+  readonly callConfigDigest: Sha256Digest
+  readonly toolSchemaDigest: Sha256Digest
+  readonly workspaceSnapshotDigest: Sha256Digest
+  readonly validatorContractDigest: Sha256Digest
+  readonly policyAuthorization: SkillEvaluationPolicyAuthorization
+  readonly workspaceBinding: SkillEvaluationDependencyBinding
+  readonly validatorBinding: SkillEvaluationDependencyBinding
+  readonly dataBinding: SkillEvaluationDependencyBinding
+  readonly dataSnapshotDigests: readonly {
+    readonly caseId: SkillEvalCaseId
+    readonly attempt: number
+    readonly dataSnapshotDigest: Sha256Digest
+  }[]
 }
 
 export interface SkillEvaluationResultRecordedEvent {
@@ -574,7 +642,6 @@ function prepareProtocol(value: unknown): SkillEvalProtocol {
     'providerId',
     'modelId',
     'toolSchemaDigest',
-    'permissionDigest',
     'validatorContractDigest',
   ])
   return {
@@ -592,7 +659,6 @@ function prepareProtocol(value: unknown): SkillEvalProtocol {
       providerId: safeIdentifier(value.execution.providerId, 'providerId'),
       modelId: safeIdentifier(value.execution.modelId, 'modelId'),
       toolSchemaDigest: digest(value.execution.toolSchemaDigest, 'toolSchemaDigest'),
-      permissionDigest: digest(value.execution.permissionDigest, 'permissionDigest'),
       validatorContractDigest: digest(
         value.execution.validatorContractDigest,
         'validatorContractDigest',
@@ -712,9 +778,12 @@ function prepareEnvironment(
     'modelId',
     'callConfigDigest',
     'toolSchemaDigest',
-    'permissionDigest',
     'workspaceSnapshotDigest',
     'validatorContractDigest',
+    'policyAuthorization',
+    'workspaceBinding',
+    'validatorBinding',
+    'dataBinding',
     'budget',
   ])
   if (value.dshVersion !== '0.1.0-rc.7' || canonicalJson(value.budget) !== canonicalJson(protocol.budget)) {
@@ -724,10 +793,17 @@ function prepareEnvironment(
     value.providerId !== protocol.execution.providerId
     || value.modelId !== protocol.execution.modelId
     || value.toolSchemaDigest !== protocol.execution.toolSchemaDigest
-    || value.permissionDigest !== protocol.execution.permissionDigest
     || value.validatorContractDigest !== protocol.execution.validatorContractDigest
   ) {
     throw new TypeError('Skill evaluation environment disagrees with the execution contract')
+  }
+  if (
+    value.policyAuthorization !== 'unobservable'
+    || value.workspaceBinding !== 'unbound'
+    || value.validatorBinding !== 'unbound'
+    || value.dataBinding !== 'unbound'
+  ) {
+    throw new TypeError('Stage 4 only supports explicitly unbound external dependencies')
   }
   return {
     dshVersion: '0.1.0-rc.7',
@@ -735,9 +811,12 @@ function prepareEnvironment(
     modelId: safeIdentifier(value.modelId, 'modelId'),
     callConfigDigest: digest(value.callConfigDigest, 'callConfigDigest'),
     toolSchemaDigest: digest(value.toolSchemaDigest, 'toolSchemaDigest'),
-    permissionDigest: digest(value.permissionDigest, 'permissionDigest'),
     workspaceSnapshotDigest: digest(value.workspaceSnapshotDigest, 'workspaceSnapshotDigest'),
     validatorContractDigest: digest(value.validatorContractDigest, 'validatorContractDigest'),
+    policyAuthorization: 'unobservable',
+    workspaceBinding: 'unbound',
+    validatorBinding: 'unbound',
+    dataBinding: 'unbound',
     budget: structuredClone(protocol.budget),
   }
 }
@@ -909,6 +988,7 @@ function prepareObservation(
     && !(Object.values({
       scripted: 'scripted-model-output', fairness: 'fairness-mismatch', missing: 'missing-evidence',
       subject: 'validator-subject-mismatch', baseline: 'baseline-resolution-mismatch', budget: 'arm-budget-exhausted',
+      policy: 'policy-authorization-unobservable', unbound: 'unbound-dependency',
     }) as readonly string[]).includes(value.reasonCode as string)
   ) {
     throw new TypeError('Skill evaluation reason code is invalid')
@@ -997,6 +1077,97 @@ function reduceCase(
   }
 }
 
+/** Pure policy reduction; Stage 4's runtime never supplies independent evidence. */
+export function decideSkillEvaluation(input: SkillEvaluationDecisionInput): SkillEvaluationDecision {
+  if (input.verdict === 'FAIL') return 'candidate-hard-gate-failed'
+  if (input.verdict === 'PASS' && input.comparison === 'tie') return 'retain-baseline'
+  if (
+    input.verdict === 'PASS'
+    && input.comparison === 'candidate-better'
+    && input.evidenceClass === 'independent-objective'
+    && input.baselineResolutionMatched
+    && input.protocolProvenance === 'pre-candidate'
+  ) {
+    return 'eligible-for-shadow-review'
+  }
+  return 'needs-evidence'
+}
+
+/**
+ * Pure freshness check for a historic result. A completed result is never
+ * implicitly current: Stage 4's deliberately unobservable Policy and unbound
+ * workspace/validator/data references keep it stale for any future Stage 5 use.
+ */
+export function assessSkillEvaluationFreshness(
+  current: SkillEvaluationCurrentDependencies,
+  result: SkillEvaluationResult,
+): SkillEvaluationFreshness {
+  const plan = current.recordedPlan
+  if (
+    result.evaluationId !== plan.evaluationId
+    || result.protocolId !== plan.protocolId
+    || result.candidateId !== plan.candidateId
+    || result.parentVersionId !== plan.parentVersionId
+    || result.planDigest !== sha256(plan)
+  ) {
+    return { state: 'stale', reason: 'evaluation-plan-mismatch' }
+  }
+  if (
+    current.parentVersionId !== plan.parentVersionId
+    || current.parentPayloadDigest !== plan.parentPayloadDigest
+  ) return { state: 'stale', reason: 'parent-changed' }
+  if (
+    current.candidateId !== plan.candidateId
+    || current.candidatePayloadDigest !== plan.candidatePayloadDigest
+  ) return { state: 'stale', reason: 'candidate-changed' }
+  if (
+    current.protocolId !== plan.protocolId
+    || current.protocolProvenance !== plan.protocolProvenance
+  ) return { state: 'stale', reason: 'protocol-changed' }
+  if (current.dshVersion !== plan.environment.dshVersion) {
+    return { state: 'stale', reason: 'runtime-changed' }
+  }
+  if (
+    current.providerId !== plan.environment.providerId
+    || current.modelId !== plan.environment.modelId
+  ) return { state: 'stale', reason: 'provider-or-model-changed' }
+  if (current.callConfigDigest !== plan.environment.callConfigDigest) {
+    return { state: 'stale', reason: 'call-config-changed' }
+  }
+  if (current.toolSchemaDigest !== plan.environment.toolSchemaDigest) {
+    return { state: 'stale', reason: 'tool-surface-changed' }
+  }
+  if (current.workspaceSnapshotDigest !== plan.environment.workspaceSnapshotDigest) {
+    return { state: 'stale', reason: 'workspace-changed' }
+  }
+  if (current.validatorContractDigest !== plan.environment.validatorContractDigest) {
+    return { state: 'stale', reason: 'validator-changed' }
+  }
+  const plannedData = plan.cases.map(item => ({
+    caseId: item.caseId,
+    attempt: item.attempt,
+    dataSnapshotDigest: item.dataSnapshotDigest,
+  }))
+  if (canonicalJson(current.dataSnapshotDigests) !== canonicalJson(plannedData)) {
+    return { state: 'stale', reason: 'data-changed' }
+  }
+  if (
+    current.policyAuthorization !== plan.environment.policyAuthorization
+    || plan.environment.policyAuthorization === 'unobservable'
+  ) {
+    return { state: 'stale', reason: 'policy-authorization-unobservable' }
+  }
+  if (
+    current.workspaceBinding !== plan.environment.workspaceBinding
+    || current.validatorBinding !== plan.environment.validatorBinding
+    || current.dataBinding !== plan.environment.dataBinding
+    || plan.environment.workspaceBinding === 'unbound'
+    || plan.environment.validatorBinding === 'unbound'
+    || plan.environment.dataBinding === 'unbound'
+  ) return { state: 'stale', reason: 'unbound-dependency' }
+  return { state: 'fresh', reason: 'fresh' }
+}
+
 export function prepareSkillEvaluationResult(
   input: RecordSkillEvaluationResultInput,
   plan: SkillEvaluationPlan,
@@ -1024,6 +1195,10 @@ export function prepareSkillEvaluationResult(
   const evidenceClass: SkillEvaluationEvidenceClass = plan.environment.providerId === 'scripted-adapter'
     ? 'scripted-mechanism'
     : 'objective-screening'
+  const unavailableDependencies = plan.environment.policyAuthorization === 'unobservable'
+    || plan.environment.workspaceBinding === 'unbound'
+    || plan.environment.validatorBinding === 'unbound'
+    || plan.environment.dataBinding === 'unbound'
   const usage = results.reduce((total, item) => ({
     modelRequests: total.modelRequests + item.baseline.usage.modelRequests + item.candidate.usage.modelRequests,
     tokens: total.tokens + item.baseline.usage.tokens + item.candidate.usage.tokens,
@@ -1042,27 +1217,41 @@ export function prepareSkillEvaluationResult(
     || item.candidate.reasonCode === 'arm-budget-exhausted')) {
     throw new TypeError('Skill evaluation result exceeds its frozen total budget')
   }
-  const verdict: SkillEvaluationVerdict = evidenceClass === 'scripted-mechanism' || !input.baselineResolutionMatched
+  const verdict: SkillEvaluationVerdict = evidenceClass === 'scripted-mechanism'
+    || unavailableDependencies
+    || !input.baselineResolutionMatched
     ? 'INCONCLUSIVE'
     : results.some(item => item.verdict === 'FAIL')
       ? 'FAIL'
       : results.some(item => item.verdict === 'INCONCLUSIVE') ? 'INCONCLUSIVE' : 'PASS'
-  const comparison: SkillComparison = evidenceClass === 'scripted-mechanism' || !input.baselineResolutionMatched
+  const comparison: SkillComparison = evidenceClass === 'scripted-mechanism'
+    || unavailableDependencies
+    || !input.baselineResolutionMatched
     ? 'not-comparable'
     : results.some(item => item.comparison === 'not-comparable')
       ? 'not-comparable'
       : results.some(item => item.comparison === 'baseline-better') ? 'baseline-better'
         : results.some(item => item.comparison === 'candidate-better') ? 'candidate-better' : 'tie'
-  const decision: SkillEvaluationDecision = verdict === 'FAIL'
-    ? 'candidate-hard-gate-failed'
-    : verdict === 'PASS' && comparison === 'tie'
-      ? 'retain-baseline'
-      : 'needs-evidence'
+  const decision = decideSkillEvaluation({
+    verdict,
+    comparison,
+    evidenceClass,
+    baselineResolutionMatched: input.baselineResolutionMatched,
+    protocolProvenance: plan.protocolProvenance,
+  })
   const reasonCodes = [...new Set(results.flatMap(item => [
     item.baseline.reasonCode,
     item.candidate.reasonCode,
   ].filter((reason): reason is SkillEvaluationReasonCode => reason !== undefined)))]
   if (evidenceClass === 'scripted-mechanism') reasonCodes.push('scripted-model-output')
+  if (plan.environment.policyAuthorization === 'unobservable') {
+    reasonCodes.push('policy-authorization-unobservable')
+  }
+  if (
+    plan.environment.workspaceBinding === 'unbound'
+    || plan.environment.validatorBinding === 'unbound'
+    || plan.environment.dataBinding === 'unbound'
+  ) reasonCodes.push('unbound-dependency')
   if (!input.baselineResolutionMatched) reasonCodes.push('baseline-resolution-mismatch')
   return {
     schemaVersion: 'tianwen.skill-evaluation-result.v1',
@@ -1070,6 +1259,7 @@ export function prepareSkillEvaluationResult(
     protocolId: plan.protocolId,
     candidateId: plan.candidateId,
     parentVersionId: plan.parentVersionId,
+    planDigest: sha256(plan),
     verdict,
     comparison,
     decision,
@@ -1085,12 +1275,13 @@ export function parseSkillEvaluationResult(value: unknown): SkillEvaluationResul
   if (!isRecord(value)) throw new TypeError('Skill evaluation result must be an object')
   const keys = [
     'schemaVersion', 'evaluationId', 'protocolId', 'candidateId', 'parentVersionId',
-    'verdict', 'comparison', 'decision', 'reasonCodes', 'cases',
+    'planDigest', 'verdict', 'comparison', 'decision', 'reasonCodes', 'cases',
     'baselineResolutionMatched', 'evidenceClass', 'protocolProvenance',
   ]
   exactKeys(value, keys)
   if (value.schemaVersion !== 'tianwen.skill-evaluation-result.v1') {
     throw new TypeError('Skill evaluation result has an invalid schema version')
   }
+  digest(value.planDigest, 'planDigest')
   return structuredClone(value) as unknown as SkillEvaluationResult
 }

@@ -261,6 +261,12 @@ Candidate 仍不会安装、路由、进入 Shadow、Promotion 或 Reject。Shad
 Rollback、生产 SLA/UI 和自主生成仍未完成。Alpha 与 Dynamic Cordis 路径继续冻结为实验资产，不是
 产品 Runtime 或 Candidate 激活路径；不得把 Python Alpha 接成第二套产品 Runtime。
 
+Stage 4 当前只运行零成本 scripted adapter，并在创建评测 Agent 前拒绝其他 Provider。它冻结并比对的是
+实际可见的工具表面，不把工具名称摘要称为 DSH Policy/权限证明；rc.7 在此处没有可公开绑定的
+Policy/authorization、workspace、data 或 validator 事实，所以结果明确为未观察/未绑定并且对后续
+Shadow 判定 stale。纯 reducer 保留完整的未来决策合同，纯 freshness assessor 保留历史依赖比较，二者都
+不会写状态、不会让当前 Candidate 进入 Shadow。
+
 这条顺序的目的不是重新开始，而是把已经验证的治理能力放回正确位置。
 
 ## 11. v0.1 应该怎样算“做完”

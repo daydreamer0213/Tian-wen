@@ -15,7 +15,11 @@ import {
   LedgerIntegrityError,
   isPublicLedgerEvent,
 } from '../../packages/tianwen-evolution/src/ledger.js'
-import { prepareSkillEvaluationResult } from '../../packages/tianwen-evolution/src/skill-evaluation.js'
+import {
+  assessSkillEvaluationFreshness,
+  decideSkillEvaluation,
+  prepareSkillEvaluationResult,
+} from '../../packages/tianwen-evolution/src/skill-evaluation.js'
 import type { LedgerEvent } from '../../packages/tianwen-evolution/src/index.js'
 
 type AssertNever<T extends never> = T
@@ -116,7 +120,6 @@ function protocol() {
       providerId: 'scripted-adapter',
       modelId: 'tianwen-probe',
       toolSchemaDigest: digest('9'),
-      permissionDigest: digest('a'),
       validatorContractDigest: digest('b'),
     },
   } as const
@@ -236,9 +239,12 @@ function environment() {
     modelId: 'tianwen-probe',
     callConfigDigest: digest('c'),
     toolSchemaDigest: digest('9'),
-    permissionDigest: digest('a'),
     workspaceSnapshotDigest: digest('b'),
     validatorContractDigest: digest('b'),
+    policyAuthorization: 'unobservable',
+    workspaceBinding: 'unbound',
+    validatorBinding: 'unbound',
+    dataBinding: 'unbound',
     budget: protocol().budget,
   } as const
 }
@@ -501,6 +507,19 @@ describe('paired Skill evaluation protocol', () => {
       environment: environment(),
       arms: plannedArms(),
     })).toEqual({ ...first, duplicate: true })
+    for (const field of [
+      'policyAuthorization',
+      'workspaceBinding',
+      'validatorBinding',
+      'dataBinding',
+    ] as const) {
+      expect(() => ledger.openSkillEvaluation({
+        candidateId: chain.candidateId,
+        protocolId: chain.protocolId,
+        environment: { ...environment(), [field]: 'bound' },
+        arms: plannedArms(),
+      })).toThrow(LedgerIntegrityError)
+    }
   })
 
   it('reduces hard-gate verdicts and comparisons without conflating failure and uncertainty', () => {
@@ -535,9 +554,9 @@ describe('paired Skill evaluation protocol', () => {
     } as const
     const result = prepareSkillEvaluationResult(resultInput, observedPlan)
     expect(result).toMatchObject({
-      verdict: 'FAIL',
+      verdict: 'INCONCLUSIVE',
       comparison: 'not-comparable',
-      decision: 'candidate-hard-gate-failed',
+      decision: 'needs-evidence',
       evidenceClass: 'objective-screening',
     })
     expect(result.reasonCodes).not.toContain('scripted-model-output')
@@ -569,6 +588,141 @@ describe('paired Skill evaluation protocol', () => {
       subjectDigest: digest('e'),
     })
     expect(() => prepareSkillEvaluationResult(subjectMismatch, observedPlan)).toThrow(TypeError)
+  })
+
+  it('makes Shadow-review eligibility a complete pure conjunction, never a runtime claim', () => {
+    const complete = {
+      verdict: 'PASS' as const,
+      comparison: 'candidate-better' as const,
+      evidenceClass: 'independent-objective' as const,
+      baselineResolutionMatched: true,
+      protocolProvenance: 'pre-candidate' as const,
+    }
+    expect(decideSkillEvaluation(complete)).toBe('eligible-for-shadow-review')
+    expect(decideSkillEvaluation({ ...complete, verdict: 'INCONCLUSIVE' }))
+      .toBe('needs-evidence')
+    expect(decideSkillEvaluation({ ...complete, comparison: 'tie' }))
+      .toBe('retain-baseline')
+    expect(decideSkillEvaluation({ ...complete, evidenceClass: 'objective-screening' }))
+      .toBe('needs-evidence')
+    expect(decideSkillEvaluation({ ...complete, baselineResolutionMatched: false }))
+      .toBe('needs-evidence')
+    expect(decideSkillEvaluation({ ...complete, protocolProvenance: 'retrospective' }))
+      .toBe('needs-evidence')
+  })
+
+  it('marks unobservable Policy and unbound validator/data facts inconclusive, and exposes pure freshness reasons', () => {
+    const ledger = new EvolutionLedger(root('freshness'))
+    const chain = seedCandidateWithProtocol(ledger)
+    const opened = ledger.openSkillEvaluation({
+      candidateId: chain.candidateId,
+      protocolId: chain.protocolId,
+      environment: environment(),
+      arms: plannedArms(),
+    })
+    const plan = ledger.getSkillEvaluation(opened.evaluationId)!
+    const observedPlan = {
+      ...plan,
+      environment: { ...plan.environment, providerId: 'observed-provider' },
+    } as const
+    const result = prepareSkillEvaluationResult({
+      evaluationId: plan.evaluationId,
+      cases: plan.cases.map(item => ({
+        caseId: item.caseId,
+        attempt: item.attempt,
+        baseline: observedArm(item.baseline, 'met', '1'),
+        candidate: observedArm(item.candidate, 'met', '2'),
+      })),
+      baselineResolutionMatched: true,
+    }, observedPlan)
+    expect(result).toMatchObject({
+      verdict: 'INCONCLUSIVE',
+      comparison: 'not-comparable',
+      decision: 'needs-evidence',
+    })
+    expect(result.reasonCodes).toEqual(expect.arrayContaining([
+      'policy-authorization-unobservable',
+      'unbound-dependency',
+    ]))
+    const dependencies = {
+      recordedPlan: observedPlan,
+      parentVersionId: observedPlan.parentVersionId,
+      parentPayloadDigest: observedPlan.parentPayloadDigest,
+      candidateId: observedPlan.candidateId,
+      candidatePayloadDigest: observedPlan.candidatePayloadDigest,
+      protocolId: observedPlan.protocolId,
+      protocolProvenance: observedPlan.protocolProvenance,
+      dshVersion: observedPlan.environment.dshVersion,
+      providerId: observedPlan.environment.providerId,
+      modelId: observedPlan.environment.modelId,
+      callConfigDigest: observedPlan.environment.callConfigDigest,
+      toolSchemaDigest: observedPlan.environment.toolSchemaDigest,
+      workspaceSnapshotDigest: observedPlan.environment.workspaceSnapshotDigest,
+      validatorContractDigest: observedPlan.environment.validatorContractDigest,
+      policyAuthorization: observedPlan.environment.policyAuthorization,
+      workspaceBinding: observedPlan.environment.workspaceBinding,
+      validatorBinding: observedPlan.environment.validatorBinding,
+      dataBinding: observedPlan.environment.dataBinding,
+      dataSnapshotDigests: observedPlan.cases.map(item => ({
+        caseId: item.caseId,
+        attempt: item.attempt,
+        dataSnapshotDigest: item.dataSnapshotDigest,
+      })),
+    } as const
+    expect(assessSkillEvaluationFreshness(dependencies, result))
+      .toEqual({ state: 'stale', reason: 'policy-authorization-unobservable' })
+    const substitutedPlan = {
+      ...observedPlan,
+      environment: {
+        ...observedPlan.environment,
+        toolSchemaDigest: digest('e'),
+      },
+    } as const
+    expect(assessSkillEvaluationFreshness({
+      ...dependencies,
+      recordedPlan: substitutedPlan,
+    }, result)).toEqual({ state: 'stale', reason: 'evaluation-plan-mismatch' })
+    expect(assessSkillEvaluationFreshness({
+      ...dependencies,
+      parentPayloadDigest: digest('e'),
+    }, result)).toEqual({ state: 'stale', reason: 'parent-changed' })
+    expect(assessSkillEvaluationFreshness({
+      ...dependencies,
+      candidatePayloadDigest: digest('e'),
+    }, result)).toEqual({ state: 'stale', reason: 'candidate-changed' })
+    expect(assessSkillEvaluationFreshness({
+      ...dependencies,
+      protocolProvenance: 'retrospective',
+    }, result)).toEqual({ state: 'stale', reason: 'protocol-changed' })
+    expect(assessSkillEvaluationFreshness({
+      ...dependencies,
+      dshVersion: '0.1.0-rc.8',
+    }, result)).toEqual({ state: 'stale', reason: 'runtime-changed' })
+    expect(assessSkillEvaluationFreshness({
+      ...dependencies,
+      providerId: 'changed-provider',
+    }, result)).toEqual({ state: 'stale', reason: 'provider-or-model-changed' })
+    expect(assessSkillEvaluationFreshness({
+      ...dependencies,
+      callConfigDigest: digest('e'),
+    }, result)).toEqual({ state: 'stale', reason: 'call-config-changed' })
+    expect(assessSkillEvaluationFreshness({
+      ...dependencies,
+      toolSchemaDigest: digest('e'),
+    }, result)).toEqual({ state: 'stale', reason: 'tool-surface-changed' })
+    expect(assessSkillEvaluationFreshness({
+      ...dependencies,
+      workspaceSnapshotDigest: digest('e'),
+    }, result)).toEqual({ state: 'stale', reason: 'workspace-changed' })
+    expect(assessSkillEvaluationFreshness({
+      ...dependencies,
+      validatorContractDigest: digest('e'),
+    }, result)).toEqual({ state: 'stale', reason: 'validator-changed' })
+    expect(assessSkillEvaluationFreshness({
+      ...dependencies,
+      dataSnapshotDigests: dependencies.dataSnapshotDigests.map((item, index) =>
+        index === 0 ? { ...item, dataSnapshotDigest: digest('e') } : item),
+    }, result)).toEqual({ state: 'stale', reason: 'data-changed' })
   })
 
   it('records, replays, and keeps the immutable aggregate result private', () => {

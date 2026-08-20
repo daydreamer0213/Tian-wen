@@ -270,6 +270,18 @@ export class TianwenSkillEvaluationService extends Service {
     if (candidate === undefined || protocol === undefined || candidate.status !== 'recorded') {
       throw new Error('paired Skill evaluation requires a recorded Candidate and frozen protocol')
     }
+    if (
+      input.callConfig.provider !== 'scripted-adapter'
+      || input.environment.providerId !== 'scripted-adapter'
+      || protocol.protocol.execution.providerId !== 'scripted-adapter'
+      || input.callConfig.reasoningEffort !== undefined
+      || input.callConfig.temperature !== undefined
+      || input.callConfig.stop !== undefined
+      || protocol.protocol.budget.maxCnyMilliPerArm !== 0
+      || protocol.protocol.budget.maxTotalCnyMilli !== 0
+    ) {
+      throw new Error('paired Skill evaluation only supports the zero-cost scripted mechanism')
+    }
     const learningCase = this.ctx.tianwenEvolution.getLearningCase(candidate.caseId)
     const parentManifest = this.ctx.tianwenEvolution.listRunSkillManifests()
       .find(manifest => manifest.parentVersionId === candidate.parentVersionId)
@@ -391,9 +403,8 @@ export class TianwenSkillEvaluationService extends Service {
       }
 
       if (!prepared.every(arm =>
-        arm.toolSchemaDigest === input.environment.toolSchemaDigest
-        && arm.permissionDigest === input.environment.permissionDigest)) {
-        throw new Error('paired Skill evaluation actual scoped tool or permission surface disagrees with its protocol')
+        arm.toolSchemaDigest === input.environment.toolSchemaDigest)) {
+        throw new Error('paired Skill evaluation actual visible tool surface disagrees with its protocol')
       }
 
       const opened = this.ctx.tianwenEvolution.openSkillEvaluation({
@@ -565,6 +576,13 @@ export class TianwenSkillEvaluationService extends Service {
           : {}),
       }
     } catch {
+      const usage = {
+        modelRequests: requests.length,
+        tokens: 0,
+        toolCalls: this.ctx.tianwenEvidence.project(arm.handle.agent.session).length,
+        elapsedMs: Date.now() - startedAt,
+        cnyMilli: 0,
+      }
       if (!outcomeRecorded) {
         this.ctx.tianwenEvolution.recordOutcomeIntake({
           runId: arm.runId!,
@@ -573,11 +591,16 @@ export class TianwenSkillEvaluationService extends Service {
           evidenceIds: [],
         })
       }
-      return inconclusiveArmObservation(arm, executionManifestDigest, sha256({
-        name: arm.skill.name,
-        provider: arm.provider,
-        content: arm.skill.content,
-      }))
+      return inconclusiveArmObservation(
+        arm,
+        executionManifestDigest,
+        sha256({
+          name: arm.skill.name,
+          provider: arm.provider,
+          content: arm.skill.content,
+        }),
+        usage,
+      )
     }
   }
 }
@@ -586,6 +609,7 @@ function inconclusiveArmObservation(
   arm: PreparedSkillEvaluationArm,
   executionManifestDigest: Sha256Digest,
   injectionProofDigest: Sha256Digest,
+  usage: SkillEvaluationArmObservation['usage'],
 ): SkillEvaluationArmObservation {
   const subjectDigest = sha256({ sessionId: arm.sessionId, missingSubject: true })
   return {
@@ -603,7 +627,7 @@ function inconclusiveArmObservation(
     validatorReceiptDigest: sha256({ evidenceId: null, subjectDigest }),
     validatorSubjectDigest: subjectDigest,
     evaluatedSubjectDigest: subjectDigest,
-    usage: { modelRequests: 0, tokens: 0, toolCalls: 0, elapsedMs: 0, cnyMilli: 0 },
+    usage,
     reasonCode: 'missing-evidence',
   }
 }
@@ -667,19 +691,16 @@ interface PreparedSkillEvaluationArm {
   readonly skillVersionId: SkillEvaluationArmObservation['skillVersionId']
   readonly contentDigest: Sha256Digest
   readonly toolSchemaDigest: Sha256Digest
-  readonly permissionDigest: Sha256Digest
   runId?: TianwenRunId
 }
 
 function scopedSurface(handle: AgentHandle): {
   readonly toolSchemaDigest: Sha256Digest
-  readonly permissionDigest: Sha256Digest
 } {
   const schemas = handle.agent.ctx.tools.schemas(handle.agent)
     .toSorted((left, right) => left.name.localeCompare(right.name))
   return {
     toolSchemaDigest: sha256(schemas),
-    permissionDigest: sha256(schemas.map(schema => schema.name)),
   }
 }
 

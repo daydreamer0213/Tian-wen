@@ -148,15 +148,19 @@ def test_paired_skill_evaluation_public_facts_and_ci() -> None:
     assert "pnpm demo:paired-skill-evaluation" in readme_en
     assert "paired isolated normal DSH Agents" in readme_en
     assert "scripted mechanism proof" in readme_en
+    assert "rejects a non-scripted Provider before it creates an evaluation Agent" in readme_en
+    assert "not DSH Policy/permission proof" in readme_en
     assert "INCONCLUSIVE" in readme_en
     assert "not installed, routed, shadowed, promoted, or rejected" in readme_en
     assert "成对、隔离的普通 DSH Agent" in readme_zh
     assert "脚本化机制证明" in readme_zh
+    assert "非 scripted Provider 会在创建评测 Agent 前被拒绝" in readme_zh
     assert "不会安装、路由、进入 Shadow、Promotion 或 Reject" in readme_zh
     assert "Stage 4 已证明" in architecture
     assert "成对、隔离的普通 DSH Agent" in architecture
     assert "脚本化机制证明" in architecture
     assert "INCONCLUSIVE" in architecture
+    assert "零成本 scripted adapter" in architecture
     assert "Shadow、Promotion" in architecture
     for command in (
         "tests/dsh-probe/skill-evaluation.spec.ts",

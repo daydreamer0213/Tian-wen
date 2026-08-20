@@ -3,7 +3,7 @@
 **Date:** 2026-08-21
 **Status:** Proposed canonical Stage 4 design
 **Prerequisite:** Stage 3 main merge `01879cb4d24290ac73fadd2ccb1184bc4e115e42` and exact-SHA CI run `32391248762` are green
-**Scope:** one governed Skill Candidate, one frozen parent baseline, one immutable EvalProtocol, isolated paired DSH Runs, independent Evidence, and a three-value Evaluation result
+**Scope:** one governed Skill Candidate, one frozen parent baseline, one immutable EvalProtocol, isolated paired DSH Runs, Outcome/Evidence records, and a three-value Evaluation result
 
 ## 1. Decision
 
@@ -13,7 +13,7 @@ Stage 4 adds one narrow product path:
 complete EvalProtocol frozen on an open Learning Ticket
 → Stage 3 records Skill Candidate C and its frozen parent Skill B
 → isolated, paired DSH evaluation Runs
-→ independent Outcome and Evidence for each arm
+→ separate per-arm Outcome and Evidence records
 → PASS | FAIL | INCONCLUSIVE
 + candidate-better | baseline-better | tie | not-comparable
 → stop
@@ -24,6 +24,36 @@ DSH `0.1.0-rc.7` remains the only product Agent Runtime. DSH creates Agents and 
 Stage 4 does **not** register a Candidate for ordinary Runs, install a Skill package, create an Active Pointer, enter Shadow, approve or promote a Candidate, or change any current or future ordinary Run. A successful result is evidence for the later Stage 5 design, not a routing action.
 
 The first zero-cost demonstration proves the evaluation machinery with `ScriptedAdapter`. Because scripted outputs are predetermined, that demonstration must end as `INCONCLUSIVE` for real efficacy even when all structural checks pass. It may not claim that C is truly better than B.
+
+### 1.1 Stage 4 closure: zero-cost scope and trust limits
+
+The implemented Stage 4 execution path is deliberately narrower than a live
+evaluation facility. It accepts only the existing `scripted-adapter` with zero
+per-arm and aggregate CNY allowance, and rejects every non-scripted Provider
+or unsupported call-setting shape before it creates an Agent or starts a Turn.
+It does not claim to pre-authorize, reserve, stop, meter, or bill a live
+Provider. A later paid proof requires a separately designed preflight,
+reservation, trustworthy usage/cost receipt, and tally; it must not reuse this
+mechanism path or its tests as live-provider evidence.
+
+Stage 4 can bind the actual visible DSH tool-schema surface and the actual
+first request. It cannot observe a public rc.7 Policy/authorization fact, and
+the frozen workspace, data, and validator digests are references rather than
+independent bindings. They are recorded explicitly as `unobservable` or
+`unbound`, never called permission proof. Consequently the product runtime
+always records `INCONCLUSIVE` / `needs-evidence`; it cannot emit
+`independent-objective` or a Shadow-ready result.
+
+The pure decision reducer nevertheless defines the complete future conjunction
+`PASS + candidate-better + independent-objective + baselineResolutionMatched
++ pre-candidate → eligible-for-shadow-review`. This is a deterministic domain
+contract, not a current runtime producer or a Stage 5 entry point. The pure
+`assessSkillEvaluationFreshness(currentDependencies, result)` compares the
+frozen parent, Candidate, protocol, runtime, provider/model/call configuration,
+visible tool surface, workspace, validator, and case-data digests without
+writing state. Current Stage 4 records are deliberately stale because
+Policy/authorization is unobservable and the external dependencies are
+unbound.
 
 ## 2. Authority and inherited invariants
 
@@ -42,7 +72,7 @@ The following constraints remain absolute:
 - Python Alpha, RepoTaskRuntime, AlphaRuntime, the Python evaluator, and old paired-comparison code remain frozen research and regression assets. Their useful semantics can inform contracts, but their execution path cannot become the Stage 4 product path.
 - The old TypeScript `ArtifactVersion` / `EvaluationRecord` / `ApprovalRecord` / Dynamic Cordis / global Champion path remains frozen. Stage 4 cannot call `recordArtifact()`, old `recordEvaluation()`, `recordApproval()`, `promote()`, `rollback()`, `rehydrateChampion()`, or Dynamic Cordis `define/run/stop`.
 - Evaluation cannot change a completed user result or a DSH Session. Evaluation failure, Evidence failure, Run failure, learning insufficiency, and Promotion rejection remain distinct facts.
-- Candidate, parent Skill, protocol, environment, permissions, budget, inputs, data snapshots, verifier contract, and actual model/tool settings are frozen before the first evaluated Turn.
+- Candidate, parent Skill, protocol, visible tool surface, budget, inputs, data snapshots, verifier contract, and actual model/tool settings are frozen before the first evaluated Turn. Stage 4 separately records that Policy/authorization and the external workspace/data/validator bindings are not observable through this rc.7 slice.
 - Each B/C arm has a distinct Tianwen Run and DSH Session. Stage 1–3 Evidence explains why the Candidate exists; it is not evidence that the Candidate won the evaluation.
 - No model, including the Candidate-generating model, may verify its own success. A user’s silence is never `PASS`.
 - Only future Run governance may eventually use a promoted version. Stage 4 does not change any ordinary Run.
@@ -51,7 +81,7 @@ The following constraints remain absolute:
 
 ### 3.1 Adopted: paired normal DSH Agents with Agent-scoped Skill registration
 
-For every protocol case, Stage 4 creates two fresh DSH Agents and Sessions. Both use the same DSH host, Provider configuration, model settings, tools, permissions, exact input bytes and digest, data snapshot, budget, acceptance contract, and verifier. The only intended behavioral difference is the frozen Skill payload:
+For every protocol case, Stage 4 creates two fresh DSH Agents and Sessions. Both use the same DSH host, scripted adapter/model settings, visible tools, exact input bytes and digest, data snapshot reference, budget, acceptance contract, and verifier reference. Policy/authorization and external workspace/data/validator binding are explicitly unobservable/unbound in this Stage 4 slice. The only intended behavioral difference is the frozen Skill payload:
 
 - baseline arm: the Candidate's exact frozen parent B;
 - candidate arm: the immutable Stage 3 Candidate C.
@@ -204,14 +234,14 @@ The plan references the immutable protocol record and repeats only the planned a
 - actual Provider and model safe identifiers, never Provider configuration or credentials;
 - reasoning effort, temperature, maximum tokens, stop conditions, and any other behavior-affecting model setting;
 - model-facing tool names and schema digest;
-- permission/Policy digest;
+- visible model-facing tool-schema digest; Policy/authorization is explicitly `unobservable`, not represented by a digest;
 - total and per-arm model request, token, tool-call, time, and CNY limits;
-- workspace snapshot digest and per-case data-snapshot digest, never cwd, an absolute path, or workspace content;
-- validator/acceptance contract digest;
+- workspace snapshot digest and per-case data-snapshot digest, never cwd, an absolute path, or workspace content; their external binding is explicitly `unbound`;
+- validator/acceptance contract digest; its external binding is explicitly `unbound`;
 - requested arm order for every case;
 - critical external fact/data versions when applicable.
 
-Category, arm order, reducer, metric, validator, and reason identifiers are closed schema literal unions rather than arbitrary strings. Provider/model safe identifiers are runtime-observed, normalized, bounded strings with no control characters, credentials, URL/query material, or absolute-path form. A deterministic-execution capability may come only from a trusted configured adapter capability plus its digest; the Evaluation caller cannot declare one. If that capability cannot be mechanically verified, evidence is conservatively no stronger than `objective-screening`.
+Category, arm order, reducer, metric, validator, and reason identifiers are closed schema literal unions rather than arbitrary strings. Provider/model safe identifiers are runtime-observed, normalized, bounded strings with no control characters, credentials, URL/query material, or absolute-path form. The current runtime accepts only the zero-cost scripted adapter. Any future deterministic-execution capability needs its own trusted public producer; the Evaluation caller cannot declare one.
 
 `SkillEvaluationCasePlan` contains only governed references and digests:
 
@@ -234,7 +264,7 @@ interface SkillEvaluationArmPlan {
 }
 ```
 
-Each `(caseId, attempt)` row has exactly one B arm and one C arm with different Run and Session IDs. Inputs, tools, permissions, data, budgets, and validators are case-equal. Only `role`, Run/Session identity, and Skill version may differ.
+Each `(caseId, attempt)` row has exactly one B arm and one C arm with different Run and Session IDs. Inputs, visible tools, budgets, and validator/data references are case-equal. Policy/authorization and external workspace/data/validator binding remain `unobservable`/`unbound`; only `role`, Run/Session identity, and Skill version may differ.
 
 The ledger stores only `inputDigest` and snapshot digests, not an `inputRef`, cwd, absolute path, raw case prompt, workspace content, or user content. The actual input bytes remain in the DSH Session or a private fixture source. A caller supplies those bytes at execution time and must match `inputDigest`. Provider/model fields are safe identifiers only; Provider configuration and credentials are never accepted by the plan schema.
 
@@ -249,6 +279,7 @@ interface SkillEvaluationResult {
   readonly protocolId: `eval-protocol:${string}`
   readonly candidateId: GovernedSkillCandidateId
   readonly parentVersionId: SkillVersionId
+  readonly planDigest: Sha256Digest // exact immutable Evaluation-plan binding
   readonly verdict: SkillEvaluationVerdict
   readonly comparison: SkillComparison
   readonly decision:
@@ -267,17 +298,17 @@ interface SkillEvaluationResult {
 }
 ```
 
-`evidenceClass` is derived by the runtime/service from the actual DSH adapter/route, request provenance, validator provenance, protocol repetition/determinism, and subject binding. It is never accepted from the caller. `ScriptedAdapter`/`tianwen-probe` is always `scripted-mechanism`. A non-deterministic Provider with one B/C sample is at most `objective-screening`. `independent-objective` requires either a documented deterministic execution contract or the protocol's bounded repetitions and aggregation rule to be fully satisfied.
+`evidenceClass` is derived by the runtime/service and is never accepted from the caller. The current runtime accepts only `ScriptedAdapter`/`tianwen-probe`, which is always `scripted-mechanism`. It cannot emit `objective-screening` or `independent-objective`: a future design needs real Provider receipts plus independently bound Policy, workspace, data, and validator facts before it can do so.
 
 Each `SkillEvaluationCaseResult` records, for both arms:
 
 - Run ID and Session ID from the plan;
 - actual frozen Skill version and content digest;
-- actual model/tool/permission/input/data/budget manifest digest;
+- actual model/visible-tool/input/data-reference/budget manifest digest;
 - full and Skill-neutral normalized first-request digests;
 - Skill-injection proof sequence/digest;
 - Outcome verdict;
-- Evidence IDs and independent validator receipt digest;
+- Evidence IDs and a structurally bound validator-receipt digest; that receipt is not independent proof in the current unbound slice;
 - `evaluatedSubjectDigest`, equal to the digest bound inside the validator receipt;
 - minimal usage totals;
 - a fixed reason code when the arm is inconclusive.
@@ -385,22 +416,22 @@ For a case to be fair:
 
 - B/C normalized first-request digests are equal;
 - actual call configurations are equal to the preflight values and to each other under public `callConfigEquals()`;
-- tool schema, permission, input, data, budget, acceptance, and validator digests match the plan and each other;
+- visible tool schema, input, budget, and acceptance facts match the plan and each other; Policy/authorization is unobservable and workspace, data, and validator references are unbound in this slice, so none can be presented as a matching independent fact;
 - both arms contain the expected Skill body and no other Candidate/parent body;
 - both arms finish within the frozen budget;
 - each arm produces its own Outcome, Evidence, and validator receipt.
 
 The Skill-neutral normalization is structural, not a regular-expression rewrite over prompt text. It requires exactly one user-role message whose complete content is byte-equal to public `renderSkillContent()` for the selected B or C registration, and replaces that complete content. DSH legally omits a user-only Skill (`modelInvocable=false`, `userInvocable=true`) from the catalog, so the target entry is pair-optional: when both B/C requests contain exactly one target entry in the public source-tagged `kind: 'skill-catalog'` message, normalize both; when both omit it, preserve the remaining catalogs unchanged; asymmetric presence, duplicate target entries, or unequal non-target entries is `INCONCLUSIVE`. The adapter does not inspect or depend on an unexported `skill-invocation` source discriminator. Other catalog entries, message order, public source tags, framing, tools, and input remain byte-identical. Missing or multiple exact injection matches are also `INCONCLUSIVE`. Only the first model request is subject to equality comparison: later requests legitimately contain different model/tool behavior and are evaluation output, not frozen input. An inequality outside the selected Skill surfaces in the first request makes that case `INCONCLUSIVE`; it is not evidence that either Skill is better.
 
-### 8.3 Independent verification
+### 8.3 Verification boundary
 
-The model's final answer and self-assessment are never the verifier. The first objective slice uses an existing DSH tool result plus Tianwen Evidence/Outcome intake as the independent verdict source. Every arm derives `evaluatedSubjectDigest` from the actual frozen final artifact/result selected by the protocol. The validator receipt must carry the same subject digest. Missing subject binding or a mismatch is `inconclusive`, even when the tool reports success. A matching successful validator result is `met`; the protocol's exact stable failure code is `not-met`; missing result, infrastructure error, unrecognized failure, Evidence error, budget stop, or unverifiable external state is `inconclusive`.
+The model's final answer and self-assessment are never a verifier. The zero-cost slice records the existing DSH tool result plus Tianwen Evidence/Outcome intake separately for each arm and preserves structural subject/receipt digests. Its validator, workspace, and data references are explicitly unbound, so these records do not constitute an independent verdict source: the aggregate is `INCONCLUSIVE` even when a tool reports success. Missing evidence, infrastructure error, an unrecognized failure, an Evidence error, a budget stop, or another unverifiable external state is likewise `inconclusive`.
 
-Subjective evaluation is deferred until a design can bind actual user preference Evidence. A model judge may later provide a preflight signal but cannot create `PASS` by itself.
+Independent verification and subjective evaluation are deferred until a later design can bind an actual validator, data/workspace facts, and user-preference Evidence. A model judge may later provide a preflight signal but cannot create `PASS` by itself.
 
 ### 8.4 Order and unstable environments
 
-Arm order and repetitions are frozen per case. The scripted mechanism slice executes one B and one C arm per case. A real Provider protocol without a documented deterministic seed/contract must use bounded repetitions and its frozen aggregation rule before it can become `independent-objective`; a single real B/C pair is only `objective-screening`. Changing repetition or order creates a new protocol. Stage 4 executes the small fixed matrix synchronously and does not build a general experiment scheduler.
+Arm order and repetitions are frozen per case. The scripted mechanism slice executes one B and one C arm per case. A future real-Provider design without a documented deterministic seed/contract must use bounded repetitions and its frozen aggregation rule before it can become `independent-objective`; a single real B/C pair would be only `objective-screening`. Changing repetition or order creates a new protocol. Stage 4 executes the small fixed matrix synchronously and does not build a general experiment scheduler.
 
 ## 9. Result reduction
 
@@ -468,18 +499,20 @@ reason includes scripted-model-output
 
 Unit tests may feed hand-constructed determinate arm facts into the pure reducer to prove all `PASS`, `FAIL`, `INCONCLUSIVE`, comparison, and decision branches, including the distinct `FAIL + tie` result when both arms reliably fail. Those tests are contracts, not real efficacy Evidence.
 
-### 10.2 Optional real Provider proof
+### 10.2 Real Provider proof is deferred
 
-After all zero-cost gates pass, Stage 4 may run one bounded objective screening protocol with an already configured DSH Provider under the user's cumulative 60 CNY authorization. It must:
+Stage 4 does not execute any live Provider proof, even when a cumulative budget
+exists. The rc.7 public execution surface used here has no trustworthy
+usage/cost receipt, interruption, reservation, or authorization-binding seam.
+The current zero-cost runtime therefore rejects a non-scripted Provider before
+Agent creation rather than presenting a potentially paid path as safe.
 
-- use only synthetic/public fixture inputs and no user data;
-- freeze an explicit per-evaluation and cumulative CNY/token/request cap before the first call;
-- stop rather than retry blindly when Provider, credential, verifier, or external state is unavailable;
-- use deterministic external validators, not model self-judgment;
-- report exact cost and requests;
-- never exceed the remaining cumulative authorization.
-
-One B/C sample from a non-deterministic Provider is `objective-screening`, not Shadow-eligible proof. A protocol may be `independent-objective` only when its documented deterministic contract or bounded repetitions and aggregation rule are satisfied. An existing Stage 3 Candidate without an earlier protocol remains retrospective regardless of Provider quality. Provider absence or an inconclusive result does not invalidate the Stage 4 mechanism implementation. It does mean no Candidate has real Shadow-eligible evidence unless a fresh chain has both mechanically proven `pre-candidate` provenance and qualifying independent objective evidence; otherwise Stage 5 may only prove its machinery in an isolated rehearsal.
+A future design may define a bounded objective screening protocol only after it
+adds separate, reviewable preflight, reservation, trustworthy usage/cost receipt,
+and tally contracts. One B/C sample from a non-deterministic Provider would then
+still be at most `objective-screening`, not Shadow-eligible proof. Until that
+separate design exists, no Candidate has a real Shadow-eligible result and Stage
+5 may only prove machinery in an isolated rehearsal.
 
 ## 11. Stale and dependency changes
 
@@ -487,7 +520,7 @@ The Evaluation permanently records the actual B/C pair and protocol. It is never
 
 Before result recording, the adapter resolves B again through the DSH public Skill registry. If B no longer matches the plan, the result is `INCONCLUSIVE`, `baselineResolutionMatched=false`, and `needs-evidence`. This field means only that the actual DSH baseline resolution matched; it does not claim an Active Pointer exists.
 
-After result recording, any affected parent Skill, Candidate, model/settings, tool schema, DSH Runtime, Policy/authorization, EvalProtocol, verifier, data snapshot, or critical external fact change makes the result stale for later Shadow/Promotion. Unrelated documentation or metadata changes do not.
+After result recording, any affected parent Skill, Candidate, model/settings, visible tool schema, DSH Runtime, EvalProtocol, verifier reference, data snapshot reference, or critical external fact change makes the result stale for later Shadow/Promotion. In this Stage 4 slice, Policy/authorization is already unobservable and the workspace/data/validator bindings are already unbound, so the assessor returns stale rather than treating caller-provided digest values as proof. Unrelated documentation or metadata changes do not.
 
 Stage 5 must re-check those exact dependency digests. Stage 4 does not add a mutable stale flag; it exposes a pure `assessSkillEvaluationFreshness(currentDependencies, result)` decision so history remains append-only. A changed parent requires a newly composed Candidate and new Evaluation; old evidence remains audit history.
 
@@ -504,8 +537,8 @@ The following are legal non-success results, not reasons to expand the system:
 - B and C tie → retain B;
 - baseline changes → stale/`INCONCLUSIVE`;
 - budget expires → stop and record `INCONCLUSIVE`/Deferred; never enlarge automatically;
-- unavailable Provider → skip optional live proof, do not patch DSH;
-- permission boundary blocks an actual action → preserve the structured refusal and do not relabel it as Candidate failure unless the frozen protocol explicitly tests that authorization behavior.
+- a non-scripted Provider or unsupported call configuration → reject before an Agent, Turn, or request; live proof remains deferred and does not patch DSH;
+- a Policy/authorization fact cannot be observed through rc.7's public seam → record it as `unobservable` and return `INCONCLUSIVE`, not as a permission proof or Candidate failure.
 
 Evaluation cannot use an experiment label to send, publish, buy, delete, or perform another real external write outside the original authorization. The first slice's validators are zero-side-effect.
 
@@ -540,6 +573,7 @@ Stage 4 does not implement:
 - broad statistical inference, confidence intervals, or candidate tournaments;
 - external Skill packages, sidecars, scripts, assets, references, dependencies, or remote resources;
 - Python/Alpha execution or Docker evaluation;
+- live Provider, paid-model, or independent-authorization proof;
 - UI, telemetry, SLA, multi-process write coordination, or distributed evaluation.
 
 The next Stage 5 design may consume only a still-fresh `PASS + candidate-better` independent result for real Shadow. If only scripted mechanism evidence exists, Stage 5 must label any execution as an isolated rehearsal and may not claim the Candidate is ready for ordinary traffic.
@@ -556,7 +590,7 @@ Stage 4 is complete only when all of the following are true:
 6. all behavior-affecting conditions are frozen before the first evaluated Turn;
 7. B and C run through normal DSH Agents with Agent-scoped temporary Skill registrations;
 8. actual requests prove the selected Skill and material equality outside the Skill version;
-9. each arm has independent Outcome, Evidence, and validator receipt;
+9. each arm has separate Outcome, Evidence, and structural validator-receipt records; current unbound references are not independent proof;
 10. the reducer accurately produces `PASS`, `FAIL`, and `INCONCLUSIVE` without compressing uncertainty;
 11. verdict, comparison, and decision cannot be confused with one another;
 12. Candidate tie keeps B and Candidate failure cannot affect B;
@@ -566,7 +600,7 @@ Stage 4 is complete only when all of the following are true:
 16. Sessions, ordinary Run selection, Candidate, old Artifact/Champion state, and Dynamic Cordis inventory are unchanged;
 17. no second Runtime/store/scheduler is introduced;
 18. zero-cost demo and exact main CI pass;
-19. any optional paid proof stays within the remaining 60 CNY total budget and reports exact cost;
+19. any paid proof remains deferred until a separate preflight/reservation/receipt/tally design is approved;
 20. correctness, architecture/privacy, and Ponytail/YAGNI reviews contain no Critical or Important issue.
 
 If a success gate appears to require reusing old Promotion, adding a Tianwen Agent Loop, reviving Python Alpha, installing the Candidate, or treating scripted/model self-output as independent Evidence, implementation must stop and return to this design rather than silently weaken the gate.

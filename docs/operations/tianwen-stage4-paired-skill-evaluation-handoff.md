@@ -36,6 +36,16 @@ first-request equality. Outcome/Evidence is separate for every arm. Agent
 handles are disposed in `finally`; the root registry and a fresh ordinary Agent
 retain the parent Skill without Candidate residue.
 
+The executable path is intentionally **zero-cost scripted only**: it rejects a
+non-scripted Provider, a non-zero CNY allowance, or a call configuration the
+public rc.7 Agent cannot dispatch before any evaluation Agent or Turn exists.
+The captured schema digest is the visible DSH tool surface, not a Policy or
+permission proof. rc.7 exposes no authoritative Policy/authorization fact here,
+and workspace, data, and validator references are explicitly unbound; all make
+the aggregate result `INCONCLUSIVE`. The pure eligibility reducer and pure
+freshness assessor are available for a later design, but this Stage 4 runtime
+cannot produce independent objective evidence or a Shadow-ready result.
+
 `pnpm demo:paired-skill-evaluation` prints one
 `tianwen.paired-skill-evaluation-demo.v1` JSON object with these actual facts:
 
@@ -64,6 +74,9 @@ status remains `recorded`.
 Shadow, Promotion, Active Pointer, Reject, Rollback, live Provider proof,
 production SLA/UI, and autonomous generation remain deferred. Alpha, old
 Artifact paths, and Dynamic Cordis execution remain outside the product path.
+Any paid proof needs a new, separate preflight/reservation/trusted-receipt/tally
+design; it must not repurpose the scripted mechanism as a safe live-provider
+path.
 
 ## Reproduction and gates
 
@@ -79,5 +92,5 @@ pnpm demo:paired-skill-evaluation
 The Stage 4 demo uses only the deterministic DSH scripted adapter and synthetic
 fixture data. Its audited cost is exactly zero for network, Provider requests,
 paid tokens, CNY, Docker, persistent external databases, and user data. The
-fixture is deleted after each run. The final feature gate ran 15 Vitest files
-with 99 tests, all five demos, and the Python public contract with 8 tests.
+fixture is deleted after each run. The final Task 6 gate ran 15 Vitest files
+with 105 tests, all five demos, and the Python public contract with 8 tests.

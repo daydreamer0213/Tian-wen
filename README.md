@@ -71,6 +71,11 @@ and stores a private Evaluation result with separate Outcome/Evidence per arm. T
 scripted mechanism proof, so its efficacy result is always `INCONCLUSIVE`,
 `not-comparable`, and `needs-evidence`: it does not claim C is better. Candidate remains
 `recorded` and is not installed, routed, shadowed, promoted, or rejected.
+The executable evaluator accepts only the zero-cost scripted adapter and rejects a non-scripted Provider before it creates an evaluation Agent. Its tool digest is a
+visible tool-surface fact, not DSH Policy/permission proof; Policy, workspace,
+data, and validator independence remain explicitly unbound. Its historic result
+is therefore not Shadow-ready, and live paid proof is deferred to a separate
+preflight/reservation/receipt/tally design.
 
 ## Zero-cost demos
 

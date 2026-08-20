@@ -370,7 +370,6 @@ describe('Tianwen append-only evolution ledger', () => {
             providerId: 'scripted-adapter',
             modelId: 'tianwen-probe',
             toolSchemaDigest: RECEIPT_A,
-            permissionDigest: RECEIPT_B,
             validatorContractDigest: RECEIPT_C,
           },
         },
