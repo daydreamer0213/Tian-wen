@@ -19,6 +19,7 @@ export interface EvidenceRecord {
     | {
       readonly status: 'complete'
       readonly resultDigest: `sha256:${string}`
+      readonly isError: boolean
       readonly errorCode?: string
     }
     | {
@@ -136,6 +137,7 @@ export function projectEvidence(
         : {
           status: 'complete',
           resultDigest: resultDigest!,
+          isError: result.data.message.content[0].isError === true,
           ...(result.data.error === undefined ? {} : {
             errorCode: result.data.error.code,
           }),

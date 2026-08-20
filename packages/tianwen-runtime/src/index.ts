@@ -12,6 +12,9 @@ export {
 export type {
   FeedbackSnapshot,
   RuntimeLearningIntakeReceipt,
+  RuntimeOutcomeIntakeReceipt,
+  RuntimeRunBindingInput,
+  RuntimeRunBindingReceipt,
 } from './learning-intake.js'
 
 export const SUPPORTED_DSH_VERSION = '0.1.0-rc.7' as const
