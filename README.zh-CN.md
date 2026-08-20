@@ -7,8 +7,8 @@
 **研究预览。** DSH 0.1.0-rc.7 是唯一的产品 Agent Runtime。天问在后台以非干扰方式
 工作：它在一次正常 DSH Run 结束后读取执行事实，不替换正在运行的 Agent，也不热切换
 当前 Run。本预览已证明正常 Agent execution、Evidence 只读投影，以及
-zero qualifying signal → `no-case`、`candidateCreated=false`。
-Candidate/Shadow/Promotion 尚未完成。
+zero qualifying signal → `no-case`、`candidateCreated=false`。它还证明了一个在用户结果完成后
+运行、不会阻塞当前 Run 的显式反馈学习入口。Candidate/Shadow/Promotion 尚未完成。
 
 ## 为什么需要天问
 
@@ -21,7 +21,7 @@ Agent 可以完成一次 Session，但长期治理还需要回答另外一些问
 | 层 | 职责 |
 | --- | --- |
 | **DSH** | 运行当前 Agent Session。天问直接复用它的模型与 Provider、Agent loop、工具、MCP、sandbox、Session Query、Skill、Jobs、Workflow、Subagent、Message Feedback、Approval 和 permissions。 |
-| **天问** | 保留跨 Run 治理边界，包括 Goal Graph、Evidence provenance（证据来源与流转记录）、学习归因和面向未来 Run 的版本治理。当前预览只实际运行了 Evidence 只读投影和谨慎的 no-case 判断。 |
+| **天问** | 保留跨 Run 治理边界，包括 Goal Graph、Evidence provenance（证据来源与流转记录）、学习归因和面向未来 Run 的版本治理。当前预览实际运行了 Evidence 只读投影、谨慎的 no-case 判断和显式反馈 Signal/Ticket 入口。 |
 | **Alpha** | Alpha 是实验与评测资产，不是第二套产品运行时。 |
 
 DSH Message Feedback 只是学习归因的一项输入，本身不等于 Lesson。DSH Job 表示当前进程
@@ -38,6 +38,11 @@ DSH Message Feedback 只是学习归因的一项输入，本身不等于 Lesson�
 `candidateCreated=false`。这只证明了有边界的执行与 Evidence 结果，不证明通用自主学习
 已经完成。
 
+带有具体说明的显式负面反馈可以创建持久化 Signal/Ticket。第二个零成本演示通过真实
+DSH Message Feedback 服务写入反馈，在最终答案完成后消费存储快照，并把一条 Signal 和
+一个开放 Ticket 写入现有 evolution ledger；重复消费保持幂等，而且不改变 Session。
+正面反馈和没有说明的负面反馈都不会创建 Ticket。Candidate、Shadow 和 Promotion 仍未实现。
+
 ## 三分钟零成本演示
 
 安装锁定的依赖，然后运行：
@@ -45,12 +50,14 @@ DSH Message Feedback 只是学习归因的一项输入，本身不等于 Lesson�
 ```console
 pnpm install --frozen-lockfile
 pnpm demo:research-preview
+pnpm demo:explicit-correction
 ```
 
-命令只输出一个格式化 JSON 对象，不使用网络、Provider、token 预算、付费模型、Docker、
-持久化数据库或用户数据。预期结果是一项完成的执行、一条完整 Evidence、`no-case`、
-`candidateCreated=false`，以及相同的投影前后 Session 摘要。不同 Run 的摘要可能因事件中
-包含本次运行数据而不同；承重事实是同一次 Run 内前后相等，证明投影不干扰执行事实。
+每个演示只输出一个格式化 JSON 对象，不使用网络、Provider、token 预算、付费模型、
+Docker、持久化数据库或用户数据。research-preview 演示报告一条完整 Evidence 和
+`no-case`；explicit-correction 演示报告已存储的负面反馈、一条 Signal、一个开放 Ticket、
+重复消费命中幂等和 `candidateCreated=false`。两个演示的 Session 前后摘要都相同。不同 Run
+的摘要可能因事件中包含本次运行数据而不同；承重事实是同一次 Run 内前后相等。
 
 ## 当前限制
 
@@ -62,7 +69,8 @@ pnpm demo:research-preview
 ## 仓库地图
 
 - [`scripts/run-research-preview-demo.ts`](scripts/run-research-preview-demo.ts)
-  是确定性演示。
+  是确定性的 no-case 演示；[`scripts/run-explicit-correction-demo.ts`](scripts/run-explicit-correction-demo.ts)
+  是显式反馈学习入口演示。
 - [`packages/tianwen-dsh-compat`](packages/tianwen-dsh-compat) 是 DSH 公共兼容接缝。
 - [`packages/tianwen-evidence`](packages/tianwen-evidence) 实现 Evidence 只读投影。
 - [`docs/tianwen-architecture-overview-v2.md`](docs/tianwen-architecture-overview-v2.md)
@@ -76,7 +84,7 @@ pnpm demo:research-preview
 pnpm run typecheck
 pnpm run check:dsh-install
 pnpm run check:no-private-dsh-imports
-pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts
+pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts
 uv sync --frozen --dev
 uv run ruff check .
 uv run pytest

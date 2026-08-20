@@ -243,8 +243,10 @@ DSH 能组合但缺一小段 → 写薄适配
 2. **DSH 原生普通任务：** Tianwen 关闭时，DSH 自己完成观察、工具反馈、修正和终答；
 3. **只开启 Evidence：** 证明 Tianwen 开关不改变普通执行；
 4. **接长期 Goal：** 跨 Task/Run 推进目标，不重造 DSH 单轮 Goal；
-5. **接非阻塞 Learning Ticket：** 学习后台运行，失败不影响用户结果；
+5. **接非阻塞 Learning Ticket（Stage 1 已证明）：** 真实 DSH 显式负面反馈可在用户结果完成后形成持久化 Signal/Ticket；入口失败不改变 Session 或当前 Run；
 6. **最后接 Candidate/Shadow/Promotion：** 用一个真实、可复现问题跑通候选闭环。
+
+Stage 1 只证明了显式反馈入口和幂等账本写入。下一阶段是识别跨 Run 重复出现、能够归因的失败；它尚未实现，也不能被当前的单次显式纠正冒充。
 
 这条顺序的目的不是重新开始，而是把已经验证的治理能力放回正确位置。
 
