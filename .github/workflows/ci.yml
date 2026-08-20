@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
       - run: uv python install 3.12
@@ -34,6 +34,7 @@ jobs:
           node-version: 22.20.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @tianwen/runtime... build
       - run: pnpm run typecheck
       - run: pnpm run check:dsh-install
       - run: pnpm run check:no-private-dsh-imports
