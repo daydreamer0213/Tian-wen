@@ -5,6 +5,7 @@ import { TianwenEvidenceService } from '@tianwen/evidence'
 import { TianwenEvolutionService } from '@tianwen/evolution'
 
 import { TianwenLearningIntakeService } from './learning-intake.js'
+import { TianwenSkillEvaluationService } from './skill-evaluation.js'
 
 export {
   compareNormalizedSkillEvaluationRequests,
@@ -17,6 +18,12 @@ export type {
   NormalizeSkillEvaluationRequestInput,
   SkillEvaluationRequestObservation,
   SkillEvaluationRequestNormalization,
+} from './skill-evaluation.js'
+export { TianwenSkillEvaluationService } from './skill-evaluation.js'
+export type {
+  PairedSkillEvaluationCaseInput,
+  PairedSkillEvaluationReceipt,
+  RunPairedSkillEvaluationInput,
 } from './skill-evaluation.js'
 
 export {
@@ -56,4 +63,5 @@ export async function apply(
   await ctx.plugin(TianwenEvidenceService)
   await ctx.plugin(TianwenEvolutionService, { root: config.evolutionRoot })
   await ctx.plugin(TianwenLearningIntakeService)
+  await ctx.plugin(TianwenSkillEvaluationService)
 }

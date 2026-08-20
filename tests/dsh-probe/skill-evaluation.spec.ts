@@ -478,7 +478,7 @@ describe('paired Skill evaluation protocol', () => {
     const receipt = ledger.openSkillEvaluation({
       candidateId: chain.candidateId,
       protocolId: chain.protocolId,
-      environment: environment(),
+      environment: { ...environment(), providerId: 'observed-provider' },
       arms: plannedArms(),
     })
     const plan = ledger.getSkillEvaluation(receipt.evaluationId)!
@@ -497,15 +497,15 @@ describe('paired Skill evaluation protocol', () => {
         candidate: observedArm(item.candidate, outcomes[index]![1], '2'),
       })),
       baselineResolutionMatched: true,
-      trustedExecution: { kind: 'scripted-adapter' },
+      trustedExecution: { kind: 'observed-provider' },
     }, plan)
     expect(result).toMatchObject({
       verdict: 'FAIL',
       comparison: 'not-comparable',
       decision: 'candidate-hard-gate-failed',
-      evidenceClass: 'scripted-mechanism',
+      evidenceClass: 'objective-screening',
     })
-    expect(result.reasonCodes).toContain('scripted-model-output')
+    expect(result.reasonCodes).not.toContain('scripted-model-output')
     expect(result.cases.map(item => [item.verdict, item.comparison])).toEqual([
       ['PASS', 'tie'],
       ['FAIL', 'tie'],
@@ -560,9 +560,9 @@ describe('paired Skill evaluation protocol', () => {
     expect(ledger.recordSkillEvaluationResult(structuredClone(input)))
       .toEqual({ ...first, duplicate: true })
     expect(ledger.getSkillEvaluationResult(first.evaluationId)).toMatchObject({
-      verdict: 'PASS',
-      comparison: 'tie',
-      decision: 'retain-baseline',
+      verdict: 'INCONCLUSIVE',
+      comparison: 'not-comparable',
+      decision: 'needs-evidence',
       evidenceClass: 'scripted-mechanism',
     })
     expect(new EvolutionLedger(directory).getSkillEvaluationResult(first.evaluationId))

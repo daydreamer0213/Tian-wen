@@ -1012,13 +1012,17 @@ export function prepareSkillEvaluationResult(
     : trustedExecution.deterministicCapabilityDigest !== undefined
       ? 'independent-objective'
       : 'objective-screening'
-  const verdict: SkillEvaluationVerdict = results.some(item => item.verdict === 'FAIL')
-    ? 'FAIL'
-    : results.some(item => item.verdict === 'INCONCLUSIVE') ? 'INCONCLUSIVE' : 'PASS'
-  const comparison: SkillComparison = results.some(item => item.comparison === 'not-comparable')
+  const verdict: SkillEvaluationVerdict = evidenceClass === 'scripted-mechanism'
+    ? 'INCONCLUSIVE'
+    : results.some(item => item.verdict === 'FAIL')
+      ? 'FAIL'
+      : results.some(item => item.verdict === 'INCONCLUSIVE') ? 'INCONCLUSIVE' : 'PASS'
+  const comparison: SkillComparison = evidenceClass === 'scripted-mechanism'
     ? 'not-comparable'
-    : results.some(item => item.comparison === 'baseline-better') ? 'baseline-better'
-      : results.some(item => item.comparison === 'candidate-better') ? 'candidate-better' : 'tie'
+    : results.some(item => item.comparison === 'not-comparable')
+      ? 'not-comparable'
+      : results.some(item => item.comparison === 'baseline-better') ? 'baseline-better'
+        : results.some(item => item.comparison === 'candidate-better') ? 'candidate-better' : 'tie'
   const decision: SkillEvaluationDecision = verdict === 'FAIL'
     ? 'candidate-hard-gate-failed'
     : verdict === 'PASS' && comparison === 'tie'
