@@ -245,11 +245,17 @@ DSH 能组合但缺一小段 → 写薄适配
 4. **接长期 Goal：** 跨 Task/Run 推进目标，不重造 DSH 单轮 Goal；
 5. **接非阻塞 Learning Ticket（Stage 1 已证明）：** 真实 DSH 显式负面反馈可在用户结果完成后形成持久化 Signal/Ticket；入口失败不改变 Session 或当前 Run；
 6. **接重复结构化 Outcome（Stage 2 已证明）：** 在 Run 结束后消费冻结的验收结果；第一次普通可复用失败只记录 Signal，另一个 Run 的第二次同类失败创建一个开放 Ticket；
-7. **最后接 Candidate/Shadow/Promotion：** 用一个真实、可复现问题跑通候选闭环。
+7. **接受治理 Candidate（Stage 3 已证明）：** Run 前冻结父 Skill manifest，Run 后消费真实 DSH `skill` 工具使用证明，以同 scope、同验收合同、同父 manifest 的支持证据与反证形成 Case、Attribution、Accepted Lesson 和最多一个惰性 Candidate；
+8. **最后接 Evaluation/Shadow/Promotion：** 用独立阶段验证候选，不让它自动进入任何 Run。
 
 Stage 2 已证明 Tianwen Run 身份与其绑定的 DSH Session 身份相互独立，并证明跨两个不同 Run 的结构化重复失败能够在现有 ledger 中形成两个 Signal 和一个 Ticket。同 Run 回放保持幂等。`met`、`inconclusive`、`observe`、`ordinary-correction` 和无关的基础设施错误都不会创建 Ticket，入口也不改变 DSH Session。
 
-Case、Attribution、Lesson、有限 Candidate、Evaluation、Shadow 和 Promotion 仍未实现。下一入口是 Stage 3 的 Case/Attribution/Lesson/有限 Candidate 设计；不得把 Python Alpha 接成第二套产品 Runtime。
+Stage 3 已证明真实 DSH 执行、Skill 工具使用、Outcome Signal/Ticket 和冻结来源能够形成
+Case、Attribution、Accepted Lesson 与最多一个 Candidate。Attribution、Lesson 和 Candidate
+内容是确定性的合成合同数据；Candidate 仅为 `recorded`，不注册、不安装，也不参与当前或未来
+Run。Evaluation、Shadow、Promotion、生产 SLA/UI 和自主生成仍未完成。Alpha 与 Dynamic Cordis
+路径继续冻结为实验资产，不是产品 Runtime 或 Candidate 激活路径；不得把 Python Alpha 接成
+第二套产品 Runtime。
 
 这条顺序的目的不是重新开始，而是把已经验证的治理能力放回正确位置。
 

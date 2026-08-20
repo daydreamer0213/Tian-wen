@@ -51,7 +51,7 @@ def test_required_public_surface_and_positioning() -> None:
     assert "Candidate/Shadow/Promotion" in readme_en
     assert "Explicit negative feedback with a concrete note can create a durable Signal/Ticket." in readme_en
     assert "Positive and note-free negative feedback create no Ticket." in readme_en
-    assert "Candidate, Shadow, and Promotion remain unimplemented." in readme_en
+    assert "Candidate status is only `recorded`" in readme_en
     assert "completed autonomous learning" not in readme_en
 
     with (ROOT / "pyproject.toml").open("rb") as handle:
@@ -78,7 +78,7 @@ def test_bilingual_documents_share_the_proven_preview_facts() -> None:
     assert "尚未完成" in readme_zh
     assert "带有具体说明的显式负面反馈可以创建持久化 Signal/Ticket。" in readme_zh
     assert "正面反馈和没有说明的负面反馈都不会创建 Ticket。" in readme_zh
-    assert "Candidate、Shadow 和 Promotion 仍未实现。" in readme_zh
+    assert "Candidate 状态仅为 `recorded`（已记录）" in readme_zh
     assert "Alpha 是实验与评测资产，不是第二套产品运行时。" in readme_zh
 
 
@@ -108,6 +108,33 @@ def test_repeated_outcome_public_facts_and_ci() -> None:
         "pnpm demo:repeated-outcome",
     ):
         assert command in ci
+
+
+def test_governed_skill_candidate_public_facts_and_limits() -> None:
+    readme_en = read_public_document("README.md")
+    readme_zh = read_public_document("README.zh-CN.md")
+    architecture = (ROOT / "docs" / "tianwen-architecture-overview-v2.md").read_text(
+        encoding="utf-8"
+    )
+
+    for document in (readme_en, readme_zh, architecture):
+        for concept in ("Case", "Attribution", "Lesson", "Candidate", "DSH"):
+            assert concept in document
+        for frozen_stage in ("Evaluation", "Shadow", "Promotion"):
+            assert frozen_stage in document
+
+    assert "pnpm demo:governed-skill-candidate" in readme_en
+    assert "Candidate status is only `recorded`" in readme_en
+    assert "deterministic synthetic contract data" in readme_en
+    assert "not registered, evaluated, shadowed, or promoted" in readme_en
+    assert "not autonomous production learning" in readme_en
+    assert "Candidate 状态仅为 `recorded`（已记录）" in readme_zh
+    assert "确定性的合成合同数据" in readme_zh
+    assert "不会注册、评测、进入 Shadow 或 Promotion" in readme_zh
+    assert "不是生产自主学习" in readme_zh
+    assert "Stage 3 已证明" in architecture
+    assert "Candidate 仅为 `recorded`" in architecture
+    assert "确定性的合成合同数据" in architecture
 
 
 def test_relative_links_in_public_documents_exist() -> None:
