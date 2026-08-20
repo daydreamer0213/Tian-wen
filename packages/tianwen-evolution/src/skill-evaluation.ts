@@ -1,5 +1,5 @@
 import type { Sha256Digest } from './ledger.js'
-import { sha256 } from './learning-intake.js'
+import { canonicalJson, sha256 } from './learning-intake.js'
 import type {
   LearningTicket,
   LearningTicketId,
@@ -8,7 +8,13 @@ import { prepareRunBinding } from './outcome-intake.js'
 import type {
   OutcomeLearningSignal,
   RunAcceptanceContract,
+  TianwenRunId,
 } from './outcome-intake.js'
+import type {
+  GovernedSkillCandidate,
+  LearningCase,
+  SkillVersionId,
+} from './skill-governance.js'
 
 export type SkillEvalProtocolId = `eval-protocol:${string}`
 export type SkillEvalCaseId = `eval-case:${string}`
@@ -95,9 +101,179 @@ export interface SkillEvalProtocolFrozenEvent {
   readonly inputDigest: Sha256Digest
 }
 
+export type SkillEvaluationId = `evaluation:${string}`
+export type SkillEvaluationVerdict = 'PASS' | 'FAIL' | 'INCONCLUSIVE'
+export type SkillComparison =
+  | 'candidate-better'
+  | 'baseline-better'
+  | 'tie'
+  | 'not-comparable'
+export type SkillEvaluationDecision =
+  | 'eligible-for-shadow-review'
+  | 'retain-baseline'
+  | 'candidate-hard-gate-failed'
+  | 'needs-evidence'
+export type SkillEvaluationEvidenceClass =
+  | 'scripted-mechanism'
+  | 'objective-screening'
+  | 'independent-objective'
+export type SkillEvaluationReasonCode = SkillEvalProtocolReasonCode
+
+export interface SkillEvaluationEnvironment {
+  readonly dshVersion: '0.1.0-rc.7'
+  readonly providerId: string
+  readonly modelId: string
+  readonly callConfigDigest: Sha256Digest
+  readonly toolSchemaDigest: Sha256Digest
+  readonly permissionDigest: Sha256Digest
+  readonly workspaceSnapshotDigest: Sha256Digest
+  readonly validatorContractDigest: Sha256Digest
+  readonly budget: SkillEvalProtocol['budget']
+}
+
+export interface SkillEvaluationArmInput {
+  readonly caseId: SkillEvalCaseId
+  readonly attempt: number
+  readonly baseline: { readonly runId: TianwenRunId; readonly sessionId: string }
+  readonly candidate: { readonly runId: TianwenRunId; readonly sessionId: string }
+}
+
+export interface OpenSkillEvaluationInput {
+  readonly candidateId: GovernedSkillCandidate['candidateId']
+  readonly protocolId: SkillEvalProtocolId
+  readonly environment: SkillEvaluationEnvironment
+  readonly arms: readonly SkillEvaluationArmInput[]
+}
+
+export interface SkillEvaluationArmPlan {
+  readonly role: 'baseline' | 'candidate'
+  readonly runId: TianwenRunId
+  readonly sessionId: string
+}
+
+export interface SkillEvaluationCasePlan {
+  readonly caseId: SkillEvalCaseId
+  readonly category: SkillEvalCaseCategory
+  readonly attempt: number
+  readonly inputDigest: Sha256Digest
+  readonly dataSnapshotDigest: Sha256Digest
+  readonly acceptanceContract: RunAcceptanceContract
+  readonly baseline: SkillEvaluationArmPlan
+  readonly candidate: SkillEvaluationArmPlan
+}
+
+export interface SkillEvaluationPlan {
+  readonly schemaVersion: 'tianwen.skill-evaluation-plan.v1'
+  readonly evaluationId: SkillEvaluationId
+  readonly protocolId: SkillEvalProtocolId
+  readonly candidateId: GovernedSkillCandidate['candidateId']
+  readonly parentVersionId: SkillVersionId
+  readonly parentPayloadDigest: Sha256Digest
+  readonly candidatePayloadDigest: Sha256Digest
+  readonly scopeKey: string
+  readonly protocolProvenance: SkillEvalProtocolRecord['provenance']
+  readonly environment: SkillEvaluationEnvironment
+  readonly cases: readonly SkillEvaluationCasePlan[]
+}
+
+export interface SkillEvaluationReceipt {
+  readonly evaluationId: SkillEvaluationId
+  readonly duplicate: boolean
+}
+
+export interface SkillEvaluationOpenedEvent {
+  readonly schemaVersion: 'tianwen.skill-evaluation-plan.v1'
+  readonly type: 'skill-evaluation-opened'
+  readonly at: string
+  readonly plan: SkillEvaluationPlan
+  readonly inputDigest: Sha256Digest
+}
+
+export interface SkillEvaluationUsage {
+  readonly modelRequests: number
+  readonly tokens: number
+  readonly toolCalls: number
+  readonly elapsedMs: number
+  readonly cnyMilli: number
+}
+
+export interface SkillEvaluationArmObservation {
+  readonly role: SkillEvaluationArmPlan['role']
+  readonly runId: TianwenRunId
+  readonly sessionId: string
+  readonly skillVersionId: SkillVersionId
+  readonly contentDigest: Sha256Digest
+  readonly executionManifestDigest: Sha256Digest
+  readonly fullRequestDigest: Sha256Digest
+  readonly normalizedFirstRequestDigest: Sha256Digest
+  readonly injectionProofDigest: Sha256Digest
+  readonly outcome: 'met' | 'not-met' | 'inconclusive'
+  readonly evidenceIds: readonly Sha256Digest[]
+  readonly validatorReceiptDigest: Sha256Digest
+  readonly evaluatedSubjectDigest: Sha256Digest
+  readonly usage: SkillEvaluationUsage
+  readonly reasonCode?: SkillEvaluationReasonCode
+}
+
+export interface SkillEvaluationCaseObservation {
+  readonly caseId: SkillEvalCaseId
+  readonly attempt: number
+  readonly baseline: SkillEvaluationArmObservation
+  readonly candidate: SkillEvaluationArmObservation
+}
+
+export interface SkillEvaluationCaseResult extends SkillEvaluationCaseObservation {
+  readonly category: SkillEvalCaseCategory
+  readonly verdict: SkillEvaluationVerdict
+  readonly comparison: SkillComparison
+}
+
+export interface TrustedSkillEvaluationExecution {
+  readonly kind: 'scripted-adapter' | 'observed-provider'
+  readonly deterministicCapabilityDigest?: Sha256Digest
+}
+
+export interface RecordSkillEvaluationResultInput {
+  readonly evaluationId: SkillEvaluationId
+  readonly cases: readonly SkillEvaluationCaseObservation[]
+  readonly baselineResolutionMatched: boolean
+  readonly trustedExecution: TrustedSkillEvaluationExecution
+}
+
+export interface SkillEvaluationResult {
+  readonly schemaVersion: 'tianwen.skill-evaluation-result.v1'
+  readonly evaluationId: SkillEvaluationId
+  readonly protocolId: SkillEvalProtocolId
+  readonly candidateId: GovernedSkillCandidate['candidateId']
+  readonly parentVersionId: SkillVersionId
+  readonly verdict: SkillEvaluationVerdict
+  readonly comparison: SkillComparison
+  readonly decision: SkillEvaluationDecision
+  readonly reasonCodes: readonly SkillEvaluationReasonCode[]
+  readonly cases: readonly SkillEvaluationCaseResult[]
+  readonly baselineResolutionMatched: boolean
+  readonly evidenceClass: SkillEvaluationEvidenceClass
+  readonly executionCapabilityDigest?: Sha256Digest
+  readonly protocolProvenance: SkillEvaluationPlan['protocolProvenance']
+}
+
+export interface SkillEvaluationResultReceipt {
+  readonly evaluationId: SkillEvaluationId
+  readonly duplicate: boolean
+}
+
+export interface SkillEvaluationResultRecordedEvent {
+  readonly schemaVersion: 'tianwen.skill-evaluation-result.v1'
+  readonly type: 'skill-evaluation-result-recorded'
+  readonly at: string
+  readonly result: SkillEvaluationResult
+  readonly inputDigest: Sha256Digest
+}
+
 const DIGEST = /^sha256:[a-f0-9]{64}$/u
 const TICKET_ID = /^ticket:[a-f0-9]{64}$/u
 const CASE_ID = /^eval-case:[a-z0-9][a-z0-9-]{0,63}$/u
+const RUN_ID = /^run:[a-f0-9]{64}$/u
 const CATEGORIES = [
   'problem',
   'regression',
@@ -184,6 +360,20 @@ function safeScope(value: unknown): string {
     throw new TypeError('scopeKey must be a governed scope identifier')
   }
   return scope
+}
+
+function safeSessionId(value: unknown): string {
+  const sessionId = nonblank(value, 'sessionId')
+  if (
+    sessionId.length > 256
+    || /[\u0000-\u001f\u007f]/u.test(sessionId)
+    || /^[a-z]:[\\/]/iu.test(sessionId)
+    || sessionId.startsWith('/')
+    || sessionId.includes('://')
+  ) {
+    throw new TypeError('sessionId must be a governed session identifier')
+  }
+  return sessionId
 }
 
 function category(value: unknown): SkillEvalCaseCategory {
@@ -513,4 +703,373 @@ export function parseSkillEvalProtocol(
     provenance: value.provenance,
     protocol,
   }
+}
+
+function prepareEnvironment(
+  value: unknown,
+  protocol: SkillEvalProtocol,
+): SkillEvaluationEnvironment {
+  if (!isRecord(value)) {
+    throw new TypeError('Skill evaluation environment must be an object')
+  }
+  exactKeys(value, [
+    'dshVersion',
+    'providerId',
+    'modelId',
+    'callConfigDigest',
+    'toolSchemaDigest',
+    'permissionDigest',
+    'workspaceSnapshotDigest',
+    'validatorContractDigest',
+    'budget',
+  ])
+  if (value.dshVersion !== '0.1.0-rc.7' || canonicalJson(value.budget) !== canonicalJson(protocol.budget)) {
+    throw new TypeError('Skill evaluation environment disagrees with the frozen protocol')
+  }
+  return {
+    dshVersion: '0.1.0-rc.7',
+    providerId: safeIdentifier(value.providerId, 'providerId'),
+    modelId: safeIdentifier(value.modelId, 'modelId'),
+    callConfigDigest: digest(value.callConfigDigest, 'callConfigDigest'),
+    toolSchemaDigest: digest(value.toolSchemaDigest, 'toolSchemaDigest'),
+    permissionDigest: digest(value.permissionDigest, 'permissionDigest'),
+    workspaceSnapshotDigest: digest(value.workspaceSnapshotDigest, 'workspaceSnapshotDigest'),
+    validatorContractDigest: digest(value.validatorContractDigest, 'validatorContractDigest'),
+    budget: structuredClone(protocol.budget),
+  }
+}
+
+function preparePlanArms(
+  value: unknown,
+  protocol: SkillEvalProtocol,
+): readonly SkillEvaluationCasePlan[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError('Skill evaluation arms must be an array')
+  }
+  const expected = protocol.cases.flatMap(item =>
+    Array.from({ length: protocol.repetition.attempts }, (_, index) => ({
+      caseId: item.caseId,
+      attempt: index + 1,
+    })))
+  if (value.length !== expected.length) {
+    throw new TypeError('Skill evaluation arms must cover the frozen matrix')
+  }
+  const protocolCases = new Map(protocol.cases.map(item => [item.caseId, item]))
+  const seen = new Set<string>()
+  const runIds = new Set<string>()
+  const sessionIds = new Set<string>()
+  const cases = value.map(item => {
+    if (!isRecord(item)) throw new TypeError('Skill evaluation arm row must be an object')
+    exactKeys(item, ['caseId', 'attempt', 'baseline', 'candidate'])
+    const caseId = nonblank(item.caseId, 'caseId') as SkillEvalCaseId
+    const attempt = boundedInteger(item.attempt, 'attempt', 1, protocol.repetition.attempts)
+    const protocolCase = protocolCases.get(caseId)
+    if (protocolCase === undefined || !seen.add(`${caseId}:${attempt}`)) {
+      throw new TypeError('Skill evaluation arm row is duplicate or outside the protocol')
+    }
+    const arm = (role: 'baseline' | 'candidate'): SkillEvaluationArmPlan => {
+      const valueArm = item[role]
+      if (!isRecord(valueArm)) throw new TypeError(`${role} arm must be an object`)
+      exactKeys(valueArm, ['runId', 'sessionId'])
+      if (typeof valueArm.runId !== 'string' || !RUN_ID.test(valueArm.runId)) {
+        throw new TypeError(`${role} runId must be a Tianwen Run ID`)
+      }
+      const sessionId = safeSessionId(valueArm.sessionId)
+      if (!runIds.add(valueArm.runId) || !sessionIds.add(sessionId)) {
+        throw new TypeError('Skill evaluation arms must use distinct Runs and Sessions')
+      }
+      return { role, runId: valueArm.runId as TianwenRunId, sessionId }
+    }
+    return {
+      caseId,
+      category: protocolCase.category,
+      attempt,
+      inputDigest: protocolCase.inputDigest,
+      dataSnapshotDigest: protocolCase.dataSnapshotDigest,
+      acceptanceContract: structuredClone(protocolCase.acceptanceContract),
+      baseline: arm('baseline'),
+      candidate: arm('candidate'),
+    }
+  })
+  if (expected.some(item => !seen.has(`${item.caseId}:${item.attempt}`))) {
+    throw new TypeError('Skill evaluation arms omit a frozen row')
+  }
+  return cases
+}
+
+export function prepareSkillEvaluationPlan(
+  input: OpenSkillEvaluationInput,
+  candidate: GovernedSkillCandidate,
+  learningCase: LearningCase,
+  protocolRecord: SkillEvalProtocolRecord,
+  parentPayloadDigest: Sha256Digest,
+): SkillEvaluationPlan {
+  if (!isRecord(input)) throw new TypeError('Skill evaluation input must be an object')
+  exactKeys(input, ['candidateId', 'protocolId', 'environment', 'arms'])
+  if (
+    input.candidateId !== candidate.candidateId
+    || input.protocolId !== protocolRecord.protocolId
+    || candidate.ticketId !== protocolRecord.ticketId
+    || candidate.caseId !== learningCase.caseId
+    || candidate.parentVersionId !== learningCase.parentVersionId
+    || candidate.parentVersionId !== learningCase.parentVersionId
+    || candidate.targetScope !== learningCase.scopeKey
+    || protocolRecord.scopeKey !== learningCase.scopeKey
+  ) {
+    throw new TypeError('Skill evaluation Candidate chain disagrees with its protocol')
+  }
+  const environment = prepareEnvironment(input.environment, protocolRecord.protocol)
+  const cases = preparePlanArms(input.arms, protocolRecord.protocol)
+  const identity = sha256({
+    candidateId: candidate.candidateId,
+    parentVersionId: candidate.parentVersionId,
+    protocolId: protocolRecord.protocolId,
+    environment,
+    arms: cases.map(item => ({
+      caseId: item.caseId,
+      attempt: item.attempt,
+      baseline: item.baseline,
+      candidate: item.candidate,
+    })),
+  })
+  return {
+    schemaVersion: 'tianwen.skill-evaluation-plan.v1',
+    evaluationId: `evaluation:${identity.slice('sha256:'.length)}`,
+    protocolId: protocolRecord.protocolId,
+    candidateId: candidate.candidateId,
+    parentVersionId: candidate.parentVersionId,
+    parentPayloadDigest,
+    candidatePayloadDigest: candidate.payloadDigest,
+    scopeKey: learningCase.scopeKey,
+    protocolProvenance: protocolRecord.provenance,
+    environment,
+    cases,
+  }
+}
+
+export function parseSkillEvaluationPlan(value: unknown): SkillEvaluationPlan {
+  if (!isRecord(value)) throw new TypeError('Skill evaluation plan must be an object')
+  exactKeys(value, [
+    'schemaVersion', 'evaluationId', 'protocolId', 'candidateId', 'parentVersionId',
+    'parentPayloadDigest', 'candidatePayloadDigest', 'scopeKey', 'protocolProvenance',
+    'environment', 'cases',
+  ])
+  if (
+    value.schemaVersion !== 'tianwen.skill-evaluation-plan.v1'
+    || typeof value.evaluationId !== 'string'
+    || !/^evaluation:[a-f0-9]{64}$/u.test(value.evaluationId)
+  ) {
+    throw new TypeError('Skill evaluation plan has an invalid identity')
+  }
+  return structuredClone(value) as unknown as SkillEvaluationPlan
+}
+
+function prepareUsage(value: unknown): SkillEvaluationUsage {
+  if (!isRecord(value)) throw new TypeError('Skill evaluation usage must be an object')
+  exactKeys(value, ['modelRequests', 'tokens', 'toolCalls', 'elapsedMs', 'cnyMilli'])
+  return {
+    modelRequests: boundedInteger(value.modelRequests, 'modelRequests', 0, MAX_TOTAL_MODEL_REQUESTS),
+    tokens: boundedInteger(value.tokens, 'tokens', 0, MAX_TOTAL_TOKENS),
+    toolCalls: boundedInteger(value.toolCalls, 'toolCalls', 0, MAX_TOTAL_TOOL_CALLS),
+    elapsedMs: boundedInteger(value.elapsedMs, 'elapsedMs', 0, MAX_TOTAL_ELAPSED_MS),
+    cnyMilli: boundedInteger(value.cnyMilli, 'cnyMilli', 0, MAX_TOTAL_CNY_MILLI),
+  }
+}
+
+function prepareObservation(
+  value: unknown,
+  plan: SkillEvaluationArmPlan,
+): SkillEvaluationArmObservation {
+  if (!isRecord(value)) throw new TypeError('Skill evaluation arm observation must be an object')
+  const keys = [
+    'role', 'runId', 'sessionId', 'skillVersionId', 'contentDigest',
+    'executionManifestDigest', 'fullRequestDigest', 'normalizedFirstRequestDigest',
+    'injectionProofDigest', 'outcome', 'evidenceIds', 'validatorReceiptDigest',
+    'evaluatedSubjectDigest', 'usage',
+  ]
+  if (value.reasonCode !== undefined) keys.push('reasonCode')
+  exactKeys(value, keys)
+  if (
+    value.role !== plan.role
+    || value.runId !== plan.runId
+    || value.sessionId !== plan.sessionId
+    || typeof value.skillVersionId !== 'string'
+    || !/^skill-version:[a-f0-9]{64}$/u.test(value.skillVersionId)
+    || (value.outcome !== 'met' && value.outcome !== 'not-met' && value.outcome !== 'inconclusive')
+    || !Array.isArray(value.evidenceIds)
+  ) {
+    throw new TypeError('Skill evaluation arm observation disagrees with its plan')
+  }
+  if (
+    value.reasonCode !== undefined
+    && !(Object.values({
+      scripted: 'scripted-model-output', fairness: 'fairness-mismatch', missing: 'missing-evidence',
+      subject: 'validator-subject-mismatch', baseline: 'baseline-resolution-mismatch', budget: 'arm-budget-exhausted',
+    }) as readonly string[]).includes(value.reasonCode as string)
+  ) {
+    throw new TypeError('Skill evaluation reason code is invalid')
+  }
+  return {
+    role: plan.role,
+    runId: plan.runId,
+    sessionId: plan.sessionId,
+    skillVersionId: value.skillVersionId as SkillVersionId,
+    contentDigest: digest(value.contentDigest, 'contentDigest'),
+    executionManifestDigest: digest(value.executionManifestDigest, 'executionManifestDigest'),
+    fullRequestDigest: digest(value.fullRequestDigest, 'fullRequestDigest'),
+    normalizedFirstRequestDigest: digest(value.normalizedFirstRequestDigest, 'normalizedFirstRequestDigest'),
+    injectionProofDigest: digest(value.injectionProofDigest, 'injectionProofDigest'),
+    outcome: value.outcome,
+    evidenceIds: value.evidenceIds.map(item => digest(item, 'evidenceId')),
+    validatorReceiptDigest: digest(value.validatorReceiptDigest, 'validatorReceiptDigest'),
+    evaluatedSubjectDigest: digest(value.evaluatedSubjectDigest, 'evaluatedSubjectDigest'),
+    usage: prepareUsage(value.usage),
+    ...(value.reasonCode === undefined
+      ? {}
+      : { reasonCode: value.reasonCode as SkillEvaluationReasonCode }),
+  }
+}
+
+function reduceCase(
+  plan: SkillEvaluationCasePlan,
+  value: unknown,
+): SkillEvaluationCaseResult {
+  if (!isRecord(value)) throw new TypeError('Skill evaluation case result must be an object')
+  exactKeys(value, ['caseId', 'attempt', 'baseline', 'candidate'])
+  if (value.caseId !== plan.caseId || value.attempt !== plan.attempt) {
+    throw new TypeError('Skill evaluation case result disagrees with its plan')
+  }
+  const baseline = prepareObservation(value.baseline, plan.baseline)
+  const candidate = prepareObservation(value.candidate, plan.candidate)
+  const unreliable = baseline.outcome === 'inconclusive'
+    || candidate.outcome === 'inconclusive'
+    || baseline.normalizedFirstRequestDigest !== candidate.normalizedFirstRequestDigest
+    || baseline.executionManifestDigest !== candidate.executionManifestDigest
+  const verdict = unreliable
+    ? 'INCONCLUSIVE'
+    : candidate.outcome === 'met' ? 'PASS' : 'FAIL'
+  const comparison: SkillComparison = unreliable
+    ? 'not-comparable'
+    : baseline.outcome === candidate.outcome ? 'tie'
+      : baseline.outcome === 'not-met' ? 'candidate-better' : 'baseline-better'
+  return {
+    caseId: plan.caseId,
+    category: plan.category,
+    attempt: plan.attempt,
+    baseline,
+    candidate,
+    verdict,
+    comparison,
+  }
+}
+
+function prepareTrustedExecution(value: unknown): TrustedSkillEvaluationExecution {
+  if (!isRecord(value)) throw new TypeError('trusted execution facts must be an object')
+  const keys = ['kind']
+  if (value.deterministicCapabilityDigest !== undefined) {
+    keys.push('deterministicCapabilityDigest')
+  }
+  exactKeys(value, keys)
+  if (value.kind !== 'scripted-adapter' && value.kind !== 'observed-provider') {
+    throw new TypeError('trusted execution kind is invalid')
+  }
+  return {
+    kind: value.kind,
+    ...(value.deterministicCapabilityDigest === undefined
+      ? {}
+      : { deterministicCapabilityDigest: digest(value.deterministicCapabilityDigest, 'deterministicCapabilityDigest') }),
+  }
+}
+
+export function prepareSkillEvaluationResult(
+  input: RecordSkillEvaluationResultInput,
+  plan: SkillEvaluationPlan,
+): SkillEvaluationResult {
+  if (!isRecord(input)) throw new TypeError('Skill evaluation result input must be an object')
+  exactKeys(input, ['evaluationId', 'cases', 'baselineResolutionMatched', 'trustedExecution'])
+  if (
+    input.evaluationId !== plan.evaluationId
+    || !Array.isArray(input.cases)
+    || typeof input.baselineResolutionMatched !== 'boolean'
+    || input.cases.length !== plan.cases.length
+  ) {
+    throw new TypeError('Skill evaluation result disagrees with its plan')
+  }
+  const planned = new Map(plan.cases.map(item => [`${item.caseId}:${item.attempt}`, item]))
+  const results = input.cases.map(value => {
+    if (!isRecord(value)) throw new TypeError('Skill evaluation case result must be an object')
+    const planCase = planned.get(`${value.caseId}:${value.attempt}`)
+    if (planCase === undefined) throw new TypeError('Skill evaluation result has an unknown case')
+    return reduceCase(planCase, value)
+  })
+  if (new Set(results.map(item => `${item.caseId}:${item.attempt}`)).size !== results.length) {
+    throw new TypeError('Skill evaluation result has duplicate cases')
+  }
+  const trustedExecution = prepareTrustedExecution(input.trustedExecution)
+  const evidenceClass: SkillEvaluationEvidenceClass = plan.environment.providerId === 'scripted-adapter'
+    || trustedExecution.kind === 'scripted-adapter'
+    ? 'scripted-mechanism'
+    : trustedExecution.deterministicCapabilityDigest !== undefined
+      ? 'independent-objective'
+      : 'objective-screening'
+  const verdict: SkillEvaluationVerdict = results.some(item => item.verdict === 'FAIL')
+    ? 'FAIL'
+    : results.some(item => item.verdict === 'INCONCLUSIVE') ? 'INCONCLUSIVE' : 'PASS'
+  const comparison: SkillComparison = results.some(item => item.comparison === 'not-comparable')
+    ? 'not-comparable'
+    : results.some(item => item.comparison === 'baseline-better') ? 'baseline-better'
+      : results.some(item => item.comparison === 'candidate-better') ? 'candidate-better' : 'tie'
+  const decision: SkillEvaluationDecision = verdict === 'FAIL'
+    ? 'candidate-hard-gate-failed'
+    : verdict === 'PASS' && comparison === 'tie'
+      ? 'retain-baseline'
+      : verdict === 'PASS'
+        && comparison === 'candidate-better'
+        && evidenceClass === 'independent-objective'
+        && input.baselineResolutionMatched
+        && plan.protocolProvenance === 'pre-candidate'
+        ? 'eligible-for-shadow-review'
+        : 'needs-evidence'
+  const reasonCodes = [...new Set(results.flatMap(item => [
+    item.baseline.reasonCode,
+    item.candidate.reasonCode,
+  ].filter((reason): reason is SkillEvaluationReasonCode => reason !== undefined)))]
+  if (evidenceClass === 'scripted-mechanism') reasonCodes.push('scripted-model-output')
+  if (!input.baselineResolutionMatched) reasonCodes.push('baseline-resolution-mismatch')
+  return {
+    schemaVersion: 'tianwen.skill-evaluation-result.v1',
+    evaluationId: plan.evaluationId,
+    protocolId: plan.protocolId,
+    candidateId: plan.candidateId,
+    parentVersionId: plan.parentVersionId,
+    verdict,
+    comparison,
+    decision,
+    reasonCodes: [...new Set(reasonCodes)].sort(),
+    cases: results,
+    baselineResolutionMatched: input.baselineResolutionMatched,
+    evidenceClass,
+    ...(trustedExecution.deterministicCapabilityDigest === undefined
+      ? {}
+      : { executionCapabilityDigest: trustedExecution.deterministicCapabilityDigest }),
+    protocolProvenance: plan.protocolProvenance,
+  }
+}
+
+export function parseSkillEvaluationResult(value: unknown): SkillEvaluationResult {
+  if (!isRecord(value)) throw new TypeError('Skill evaluation result must be an object')
+  const keys = [
+    'schemaVersion', 'evaluationId', 'protocolId', 'candidateId', 'parentVersionId',
+    'verdict', 'comparison', 'decision', 'reasonCodes', 'cases',
+    'baselineResolutionMatched', 'evidenceClass', 'protocolProvenance',
+  ]
+  if (value.executionCapabilityDigest !== undefined) keys.push('executionCapabilityDigest')
+  exactKeys(value, keys)
+  if (value.executionCapabilityDigest !== undefined) {
+    digest(value.executionCapabilityDigest, 'executionCapabilityDigest')
+  }
+  if (value.schemaVersion !== 'tianwen.skill-evaluation-result.v1') {
+    throw new TypeError('Skill evaluation result has an invalid schema version')
+  }
+  return structuredClone(value) as unknown as SkillEvaluationResult
 }

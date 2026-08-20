@@ -16,6 +16,8 @@ type PublicLedgerEventPrivacyContract = AssertNever<Extract<
       | 'learning-lesson-recorded'
       | 'learning-candidate-recorded'
       | 'skill-eval-protocol-frozen'
+      | 'skill-evaluation-opened'
+      | 'skill-evaluation-result-recorded'
   }
 >>
 
@@ -98,9 +100,34 @@ export type {
   OpenLearningCaseInput,
   SkillVersionId,
 } from './skill-governance.js'
-export { prepareSkillEvalProtocol } from './skill-evaluation.js'
+export {
+  prepareSkillEvaluationPlan,
+  prepareSkillEvaluationResult,
+  prepareSkillEvalProtocol,
+} from './skill-evaluation.js'
 export type {
   FreezeSkillEvalProtocolInput,
+  OpenSkillEvaluationInput,
+  RecordSkillEvaluationResultInput,
+  SkillComparison,
+  SkillEvaluationArmInput,
+  SkillEvaluationArmPlan,
+  SkillEvaluationArmObservation,
+  SkillEvaluationCaseObservation,
+  SkillEvaluationCaseResult,
+  SkillEvaluationCasePlan,
+  SkillEvaluationDecision,
+  SkillEvaluationEnvironment,
+  SkillEvaluationEvidenceClass,
+  SkillEvaluationId,
+  SkillEvaluationPlan,
+  SkillEvaluationReasonCode,
+  SkillEvaluationReceipt,
+  SkillEvaluationResult,
+  SkillEvaluationResultReceipt,
+  SkillEvaluationUsage,
+  TrustedSkillEvaluationExecution,
+  SkillEvaluationVerdict,
   SkillEvalArmOrder,
   SkillEvalAttemptReducer,
   SkillEvalCaseCategory,

@@ -8,17 +8,24 @@ import {
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
+import { prepareRunBinding } from '../../packages/tianwen-evolution/src/outcome-intake.js'
 import {
   EvolutionLedger,
   LedgerIntegrityError,
   isPublicLedgerEvent,
 } from '../../packages/tianwen-evolution/src/ledger.js'
+import { prepareSkillEvaluationResult } from '../../packages/tianwen-evolution/src/skill-evaluation.js'
 import type { LedgerEvent } from '../../packages/tianwen-evolution/src/index.js'
 
 type AssertNever<T extends never> = T
-type SkillEvalProtocolStaysPrivate = AssertNever<Extract<
+type SkillEvalEventsStayPrivate = AssertNever<Extract<
   LedgerEvent,
-  { type: 'skill-eval-protocol-frozen' }
+  {
+    type:
+      | 'skill-eval-protocol-frozen'
+      | 'skill-evaluation-opened'
+      | 'skill-evaluation-result-recorded'
+  }
 >>
 
 const roots: string[] = []
@@ -132,6 +139,151 @@ function seedOpenTicket(ledger: EvolutionLedger) {
     })
   })
   return outcomes[1].ticketId!
+}
+
+function seedCandidateWithProtocol(ledger: EvolutionLedger) {
+  const seeded = [
+    ['candidate-first', 'not-met', 'c', 'd'],
+    ['candidate-second', 'not-met', 'e', 'f'],
+    ['candidate-counterexample', 'met', 'a', 'b'],
+  ] as const
+  const runs = seeded.map(([suffix, verdict, sessionCharacter, evidenceCharacter]) => {
+    const sessionId = `session:${suffix}`
+    const binding = ledger.recordRunBinding({
+      goalRef: 'goal:research-preview',
+      taskRef: `task:${suffix}`,
+      sessionId,
+      scopeKey: 'project:tianwen/capability:research-summary',
+      acceptanceContract: acceptance,
+    })
+    const manifest = ledger.recordRunSkillManifest({ runId: binding.runId, skill: parent })
+    const sessionDigest = digest(sessionCharacter)
+    const acceptanceEvidenceId = digest(evidenceCharacter)
+    const outcome = ledger.recordOutcomeIntake({
+      runId: binding.runId,
+      verdict,
+      sessionDigest,
+      evidenceIds: [acceptanceEvidenceId],
+    })
+    ledger.recordRunSkillUse({
+      runId: binding.runId,
+      parentVersionId: manifest.parentVersionId,
+      sessionId,
+      sessionDigest,
+      skillName: parent.name,
+      contentDigest: ledger.getRunSkillManifest(binding.runId)!.contentDigest,
+      skillEvidenceId: digest(sessionCharacter),
+      acceptanceEvidenceId,
+      skillCallSeq: 10,
+      skillResultSeq: 11,
+      acceptanceCallSeq: 12,
+    })
+    return { ...binding, outcome, acceptanceEvidenceId }
+  })
+  const ticketId = runs[1]!.outcome.ticketId!
+  const protocolReceipt = ledger.freezeSkillEvalProtocol({ ticketId, protocol: protocol() })
+  const opened = ledger.openLearningCase({
+    ticketId,
+    counterevidenceRunIds: [runs[2]!.runId],
+  })
+  const learningCase = ledger.getLearningCase(opened.caseId)!
+  const attribution = ledger.recordAttribution({
+    caseId: opened.caseId,
+    resolution: 'dsh-skill',
+    targetSkillName: parent.name,
+    hypothesis: 'The parent instruction omits result-first ordering.',
+    supportingEvidenceIds: learningCase.supportingEvidenceIds,
+    counterevidenceIds: learningCase.counterevidence.flatMap(item => item.evidenceIds),
+    alternatives: 'Tool and Runtime causes remain unsupported.',
+  })
+  const lesson = ledger.recordAcceptedLesson({
+    caseId: opened.caseId,
+    attributionId: attribution.attributionId,
+    claim: 'State the observed result before interpretation.',
+    when: 'When summarizing a verified research observation.',
+    notWhen: 'When the task requests raw extraction without interpretation.',
+    supportingEvidenceIds: learningCase.supportingEvidenceIds,
+    counterevidenceIds: learningCase.counterevidence.flatMap(item => item.evidenceIds),
+    targetScope: learningCase.scopeKey,
+  })
+  const candidate = ledger.recordSkillCandidate({
+    lessonId: lesson.lessonId,
+    payload: {
+      name: parent.name,
+      description: 'Summarize verified observations with result-first ordering.',
+      whenToUse: 'When summarizing a verified result.',
+      invocation: parent.invocation,
+      source: parent.source,
+      content: '# Research summary\n\nState the observed result first, then interpret it.',
+    },
+    evidenceIds: [
+      ...learningCase.supportingEvidenceIds,
+      ...learningCase.counterevidence.flatMap(item => item.evidenceIds),
+    ],
+  })
+  return {
+    candidateId: candidate.candidateId,
+    protocolId: protocolReceipt.protocolId,
+    parentVersionId: learningCase.parentVersionId,
+  }
+}
+
+function environment() {
+  return {
+    dshVersion: '0.1.0-rc.7',
+    providerId: 'scripted-adapter',
+    modelId: 'tianwen-probe',
+    callConfigDigest: digest('c'),
+    toolSchemaDigest: digest('9'),
+    permissionDigest: digest('a'),
+    workspaceSnapshotDigest: digest('b'),
+    validatorContractDigest: digest('b'),
+    budget: protocol().budget,
+  } as const
+}
+
+function plannedArms() {
+  return protocol().cases.map(({ caseId }) => ({
+    caseId,
+    attempt: 1,
+    baseline: plannedBinding(caseId, 'baseline'),
+    candidate: plannedBinding(caseId, 'candidate'),
+  }))
+}
+
+function plannedBinding(caseId: string, role: 'baseline' | 'candidate') {
+  const sessionId = `session:eval-${role}-${caseId.slice('eval-case:'.length)}`
+  const binding = prepareRunBinding({
+    goalRef: 'goal:research-preview',
+    taskRef: `task:eval-${role}-${caseId.slice('eval-case:'.length)}`,
+    sessionId,
+    scopeKey: 'project:tianwen/capability:research-summary',
+    acceptanceContract: acceptance,
+  })
+  return { runId: binding.runId, sessionId }
+}
+
+function observedArm(
+  plan: { readonly role: 'baseline' | 'candidate'; readonly runId: string; readonly sessionId: string },
+  outcome: 'met' | 'not-met' | 'inconclusive',
+  character: string,
+) {
+  return {
+    role: plan.role,
+    runId: plan.runId,
+    sessionId: plan.sessionId,
+    skillVersionId: `skill-version:${character.repeat(64)}`,
+    contentDigest: digest(character),
+    executionManifestDigest: digest('a'),
+    fullRequestDigest: digest(character),
+    normalizedFirstRequestDigest: digest('b'),
+    injectionProofDigest: digest('c'),
+    outcome,
+    evidenceIds: [digest('d')],
+    validatorReceiptDigest: digest('e'),
+    evaluatedSubjectDigest: digest('f'),
+    usage: { modelRequests: 0, tokens: 0, toolCalls: 0, elapsedMs: 0, cnyMilli: 0 },
+  } as const
 }
 
 afterEach(() => {
@@ -280,6 +432,152 @@ describe('paired Skill evaluation protocol', () => {
     }
     event.protocol.provenance = 'pre-candidate'
     event.inputDigest = sha256(event.protocol)
+    lines[lines.length - 1] = JSON.stringify(event)
+    writeFileSync(path, `${lines.join('\n')}\n`, 'utf8')
+    expect(() => new EvolutionLedger(directory)).toThrow(LedgerIntegrityError)
+  })
+
+  it('opens one complete deterministic B/C plan from the durable Candidate chain', () => {
+    const ledger = new EvolutionLedger(root('paired-plan'))
+    const chain = seedCandidateWithProtocol(ledger)
+    const first = ledger.openSkillEvaluation({
+      candidateId: chain.candidateId,
+      protocolId: chain.protocolId,
+      environment: environment(),
+      arms: plannedArms(),
+    })
+    const plan = ledger.getSkillEvaluation(first.evaluationId)
+    expect(first).toEqual({ evaluationId: plan!.evaluationId, duplicate: false })
+    expect(plan).toMatchObject({
+      candidateId: chain.candidateId,
+      protocolId: chain.protocolId,
+      parentVersionId: chain.parentVersionId,
+      protocolProvenance: 'pre-candidate',
+      cases: expect.arrayContaining([
+        expect.objectContaining({
+          category: 'problem',
+          attempt: 1,
+          baseline: expect.objectContaining({ role: 'baseline' }),
+          candidate: expect.objectContaining({ role: 'candidate' }),
+        }),
+      ]),
+    })
+    expect(new Set(plan!.cases.flatMap(item => [item.baseline.runId, item.candidate.runId])).size)
+      .toBe(8)
+    expect(ledger.openSkillEvaluation({
+      candidateId: chain.candidateId,
+      protocolId: chain.protocolId,
+      environment: environment(),
+      arms: plannedArms(),
+    })).toEqual({ ...first, duplicate: true })
+  })
+
+  it('reduces hard-gate verdicts and comparisons without conflating failure and uncertainty', () => {
+    const ledger = new EvolutionLedger(root('paired-reduction'))
+    const chain = seedCandidateWithProtocol(ledger)
+    const receipt = ledger.openSkillEvaluation({
+      candidateId: chain.candidateId,
+      protocolId: chain.protocolId,
+      environment: environment(),
+      arms: plannedArms(),
+    })
+    const plan = ledger.getSkillEvaluation(receipt.evaluationId)!
+    const outcomes = [
+      ['met', 'met'],
+      ['not-met', 'not-met'],
+      ['not-met', 'met'],
+      ['met', 'inconclusive'],
+    ] as const
+    const result = prepareSkillEvaluationResult({
+      evaluationId: plan.evaluationId,
+      cases: plan.cases.map((item, index) => ({
+        caseId: item.caseId,
+        attempt: item.attempt,
+        baseline: observedArm(item.baseline, outcomes[index]![0], '1'),
+        candidate: observedArm(item.candidate, outcomes[index]![1], '2'),
+      })),
+      baselineResolutionMatched: true,
+      trustedExecution: { kind: 'scripted-adapter' },
+    }, plan)
+    expect(result).toMatchObject({
+      verdict: 'FAIL',
+      comparison: 'not-comparable',
+      decision: 'candidate-hard-gate-failed',
+      evidenceClass: 'scripted-mechanism',
+    })
+    expect(result.reasonCodes).toContain('scripted-model-output')
+    expect(result.cases.map(item => [item.verdict, item.comparison])).toEqual([
+      ['PASS', 'tie'],
+      ['FAIL', 'tie'],
+      ['PASS', 'candidate-better'],
+      ['INCONCLUSIVE', 'not-comparable'],
+    ])
+  })
+
+  it('records, replays, and keeps the immutable aggregate result private', () => {
+    const directory = root('paired-result')
+    const ledger = new EvolutionLedger(directory)
+    const chain = seedCandidateWithProtocol(ledger)
+    const opened = ledger.openSkillEvaluation({
+      candidateId: chain.candidateId,
+      protocolId: chain.protocolId,
+      environment: environment(),
+      arms: plannedArms(),
+    })
+    const plan = ledger.getSkillEvaluation(opened.evaluationId)!
+    for (const evaluationCase of plan.cases) {
+      for (const role of ['baseline', 'candidate'] as const) {
+        const binding = plannedBinding(evaluationCase.caseId, role)
+        expect(binding.runId).toBe(evaluationCase[role].runId)
+        ledger.recordRunBinding({
+          goalRef: 'goal:research-preview',
+          taskRef: `task:eval-${role}-${evaluationCase.caseId.slice('eval-case:'.length)}`,
+          sessionId: binding.sessionId,
+          scopeKey: plan.scopeKey,
+          acceptanceContract: evaluationCase.acceptanceContract,
+        })
+        ledger.recordOutcomeIntake({
+          runId: binding.runId,
+          verdict: 'met',
+          sessionDigest: digest(role === 'baseline' ? '1' : '2'),
+          evidenceIds: [digest('d')],
+        })
+      }
+    }
+    const input = {
+      evaluationId: plan.evaluationId,
+      cases: plan.cases.map(item => ({
+        caseId: item.caseId,
+        attempt: item.attempt,
+        baseline: observedArm(item.baseline, 'met', '1'),
+        candidate: observedArm(item.candidate, 'met', '2'),
+      })),
+      baselineResolutionMatched: true,
+      trustedExecution: { kind: 'scripted-adapter' as const },
+    }
+    const first = ledger.recordSkillEvaluationResult(input)
+    expect(first).toEqual({ evaluationId: plan.evaluationId, duplicate: false })
+    expect(ledger.recordSkillEvaluationResult(structuredClone(input)))
+      .toEqual({ ...first, duplicate: true })
+    expect(ledger.getSkillEvaluationResult(first.evaluationId)).toMatchObject({
+      verdict: 'PASS',
+      comparison: 'tie',
+      decision: 'retain-baseline',
+      evidenceClass: 'scripted-mechanism',
+    })
+    expect(new EvolutionLedger(directory).getSkillEvaluationResult(first.evaluationId))
+      .toEqual(ledger.getSkillEvaluationResult(first.evaluationId))
+    expect(ledger.listEvents().filter(isPublicLedgerEvent).map(event => event.type))
+      .not.toContain('skill-evaluation-result-recorded')
+
+    const path = join(directory, 'ledger.jsonl')
+    const lines = readFileSync(path, 'utf8').trimEnd().split('\n')
+    const event = JSON.parse(lines.at(-1)!) as {
+      result: { comparison: string }
+      inputDigest: string
+    }
+    event.result.comparison = 'candidate-better'
+    event.inputDigest = sha256(event.result)
     lines[lines.length - 1] = JSON.stringify(event)
     writeFileSync(path, `${lines.join('\n')}\n`, 'utf8')
     expect(() => new EvolutionLedger(directory)).toThrow(LedgerIntegrityError)

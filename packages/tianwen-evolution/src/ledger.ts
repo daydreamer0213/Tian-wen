@@ -88,11 +88,24 @@ import type {
   SkillCandidateReceipt,
 } from './skill-governance.js'
 import {
+  parseSkillEvaluationResult,
+  parseSkillEvaluationPlan,
+  prepareSkillEvaluationResult,
   parseSkillEvalProtocol,
+  prepareSkillEvaluationPlan,
   prepareSkillEvalProtocol,
 } from './skill-evaluation.js'
 import type {
   FreezeSkillEvalProtocolInput,
+  OpenSkillEvaluationInput,
+  RecordSkillEvaluationResultInput,
+  SkillEvaluationId,
+  SkillEvaluationOpenedEvent,
+  SkillEvaluationPlan,
+  SkillEvaluationResult,
+  SkillEvaluationResultReceipt,
+  SkillEvaluationResultRecordedEvent,
+  SkillEvaluationReceipt,
   SkillEvalProtocolFrozenEvent,
   SkillEvalProtocolId,
   SkillEvalProtocolReceipt,
@@ -192,6 +205,8 @@ export type LedgerEvent =
   | LearningLessonRecordedEvent
   | LearningCandidateRecordedEvent
   | SkillEvalProtocolFrozenEvent
+  | SkillEvaluationOpenedEvent
+  | SkillEvaluationResultRecordedEvent
   | ArtifactRecordedEvent
   | EvaluationRecordedEvent
   | ApprovalRecordedEvent
@@ -836,6 +851,52 @@ function parseEvent(value: unknown): LedgerEvent {
       inputDigest,
     }
   }
+  if (type === 'skill-evaluation-opened') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'plan', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.skill-evaluation-plan.v1') {
+      throw new LedgerIntegrityError('invalid Skill evaluation plan event version')
+    }
+    let plan
+    try {
+      plan = parseSkillEvaluationPlan(value.plan)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid Skill evaluation plan event', { cause: error })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(plan)) {
+      throw new LedgerIntegrityError('Skill evaluation plan digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.skill-evaluation-plan.v1',
+      type,
+      at,
+      plan,
+      inputDigest,
+    }
+  }
+  if (type === 'skill-evaluation-result-recorded') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'result', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.skill-evaluation-result.v1') {
+      throw new LedgerIntegrityError('invalid Skill evaluation result event version')
+    }
+    let result
+    try {
+      result = parseSkillEvaluationResult(value.result)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid Skill evaluation result event', { cause: error })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(result)) {
+      throw new LedgerIntegrityError('Skill evaluation result digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.skill-evaluation-result.v1',
+      type,
+      at,
+      result,
+      inputDigest,
+    }
+  }
   if (type === 'run-skill-manifest-recorded') {
     exactKeys(value, [
       'schemaVersion',
@@ -1180,6 +1241,14 @@ export class EvolutionLedger {
     LearningTicketId,
     SkillEvalProtocolId[]
   >()
+  readonly #skillEvaluationPlans = new Map<
+    SkillEvaluationId,
+    SkillEvaluationPlan
+  >()
+  readonly #skillEvaluationResults = new Map<
+    SkillEvaluationId,
+    SkillEvaluationResult
+  >()
   readonly #learningSignals = new Map<
     LearningSignalId,
     LearningSignal | OutcomeLearningSignal
@@ -1374,6 +1443,101 @@ export class EvolutionLedger {
 
   listSkillEvalProtocols(): readonly SkillEvalProtocolRecord[] {
     return clone([...this.#skillEvalProtocols.values()])
+  }
+
+  openSkillEvaluation(input: OpenSkillEvaluationInput): SkillEvaluationReceipt {
+    const candidate = this.#skillCandidates.get(input.candidateId)
+    const protocol = this.#skillEvalProtocols.get(input.protocolId)
+    if (candidate === undefined || protocol === undefined) {
+      throw new LedgerIntegrityError('Skill evaluation requires its Candidate and protocol')
+    }
+    const learningCase = this.#learningCases.get(candidate.caseId)
+    const lesson = this.#acceptedLessons.get(candidate.lessonId)
+    const attribution = this.#attributions.get(candidate.attributionId)
+    const parent = [...this.#runSkillManifests.values()]
+      .find(value => value.parentVersionId === candidate.parentVersionId)?.parent
+    if (
+      learningCase === undefined
+      || lesson?.caseId !== learningCase.caseId
+      || attribution?.caseId !== learningCase.caseId
+      || parent === undefined
+    ) {
+      throw new LedgerIntegrityError('Skill evaluation Candidate chain is incomplete')
+    }
+    let plan
+    try {
+      plan = prepareSkillEvaluationPlan(
+        input,
+        candidate,
+        learningCase,
+        protocol,
+        sha256(parent),
+      )
+    } catch (error) {
+      throw new LedgerIntegrityError('Skill evaluation input is invalid', { cause: error })
+    }
+    const existing = this.#skillEvaluationPlans.get(plan.evaluationId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(plan)) {
+        throw new LedgerIntegrityError(`Skill evaluation changed: ${plan.evaluationId}`)
+      }
+      return { evaluationId: existing.evaluationId, duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.skill-evaluation-plan.v1',
+      type: 'skill-evaluation-opened',
+      at: this.#now(),
+      plan,
+      inputDigest: sha256(plan),
+    })
+    return { evaluationId: plan.evaluationId, duplicate: false }
+  }
+
+  getSkillEvaluation(evaluationId: SkillEvaluationId): SkillEvaluationPlan | undefined {
+    const plan = this.#skillEvaluationPlans.get(evaluationId)
+    return plan === undefined ? undefined : clone(plan)
+  }
+
+  listSkillEvaluations(): readonly SkillEvaluationPlan[] {
+    return clone([...this.#skillEvaluationPlans.values()])
+  }
+
+  recordSkillEvaluationResult(
+    input: RecordSkillEvaluationResultInput,
+  ): SkillEvaluationResultReceipt {
+    const plan = this.#skillEvaluationPlans.get(input.evaluationId)
+    if (plan === undefined) {
+      throw new LedgerIntegrityError(`unknown Skill evaluation: ${input.evaluationId}`)
+    }
+    let result
+    try {
+      result = prepareSkillEvaluationResult(input, plan)
+    } catch (error) {
+      throw new LedgerIntegrityError('Skill evaluation result input is invalid', { cause: error })
+    }
+    this.#validateSkillEvaluationRunFacts(result)
+    const existing = this.#skillEvaluationResults.get(result.evaluationId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(result)) {
+        throw new LedgerIntegrityError(`Skill evaluation result changed: ${result.evaluationId}`)
+      }
+      return { evaluationId: existing.evaluationId, duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.skill-evaluation-result.v1',
+      type: 'skill-evaluation-result-recorded',
+      at: this.#now(),
+      result,
+      inputDigest: sha256(result),
+    })
+    return { evaluationId: result.evaluationId, duplicate: false }
+  }
+
+  getSkillEvaluationResult(
+    evaluationId: SkillEvaluationId,
+  ): SkillEvaluationResult | undefined {
+    const result = this.#skillEvaluationResults.get(evaluationId)
+    return result === undefined ? undefined : clone(result)
   }
 
   openLearningCase(input: OpenLearningCaseInput): LearningCaseReceipt {
@@ -2039,6 +2203,39 @@ export class EvolutionLedger {
       ?.findLast(record => !this.#usedApprovals.has(record.approvalId))
   }
 
+  #validateSkillEvaluationRunFacts(result: SkillEvaluationResult): void {
+    const plan = this.#skillEvaluationPlans.get(result.evaluationId)
+    if (plan === undefined) {
+      throw new LedgerIntegrityError('Skill evaluation result lacks its plan')
+    }
+    for (const evaluationCase of result.cases) {
+      const planCase = plan.cases.find(item =>
+        item.caseId === evaluationCase.caseId && item.attempt === evaluationCase.attempt)
+      if (planCase === undefined) {
+        throw new LedgerIntegrityError('Skill evaluation result has an unknown plan row')
+      }
+      for (const [arm, armPlan] of [
+        [evaluationCase.baseline, planCase.baseline],
+        [evaluationCase.candidate, planCase.candidate],
+      ] as const) {
+        const binding = this.#runBindings.get(arm.runId)
+        const outcome = [...this.#outcomeIntakes.values()]
+          .find(value => value.input.runId === arm.runId)?.input
+        if (
+          binding === undefined
+          || outcome === undefined
+          || binding.sessionId !== armPlan.sessionId
+          || binding.scopeKey !== plan.scopeKey
+          || canonicalJson(binding.acceptanceContract) !== canonicalJson(planCase.acceptanceContract)
+          || outcome.verdict !== arm.outcome
+          || canonicalJson(outcome.evidenceIds) !== canonicalJson(arm.evidenceIds)
+        ) {
+          throw new LedgerIntegrityError('Skill evaluation result disagrees with Run facts')
+        }
+      }
+    }
+  }
+
   #accept(event: LedgerEvent): void {
     const parsed = parseEvent(event)
     this.#validateAgainstState(parsed)
@@ -2154,6 +2351,95 @@ export class EvolutionLedger {
         || event.inputDigest !== sha256(event.protocol)
       ) {
         throw new LedgerIntegrityError('Skill evaluation protocol disagrees with Ticket history')
+      }
+      return
+    }
+    if (event.type === 'skill-evaluation-opened') {
+      const candidate = this.#skillCandidates.get(event.plan.candidateId)
+      const protocol = this.#skillEvalProtocols.get(event.plan.protocolId)
+      const learningCase = candidate === undefined
+        ? undefined
+        : this.#learningCases.get(candidate.caseId)
+      const parent = candidate === undefined
+        ? undefined
+        : [...this.#runSkillManifests.values()]
+          .find(value => value.parentVersionId === candidate.parentVersionId)?.parent
+      if (
+        candidate === undefined
+        || protocol === undefined
+        || learningCase === undefined
+        || parent === undefined
+        || this.#skillEvaluationPlans.has(event.plan.evaluationId)
+      ) {
+        throw new LedgerIntegrityError('Skill evaluation plan disagrees with history')
+      }
+      let prepared
+      try {
+        prepared = prepareSkillEvaluationPlan({
+          candidateId: event.plan.candidateId,
+          protocolId: event.plan.protocolId,
+          environment: event.plan.environment,
+          arms: event.plan.cases.map(item => ({
+            caseId: item.caseId,
+            attempt: item.attempt,
+            baseline: {
+              runId: item.baseline.runId,
+              sessionId: item.baseline.sessionId,
+            },
+            candidate: {
+              runId: item.candidate.runId,
+              sessionId: item.candidate.sessionId,
+            },
+          })),
+        }, candidate, learningCase, protocol, sha256(parent))
+      } catch (error) {
+        throw new LedgerIntegrityError('Skill evaluation plan event is invalid', { cause: error })
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.plan)
+        || event.inputDigest !== sha256(event.plan)
+      ) {
+        throw new LedgerIntegrityError('Skill evaluation plan disagrees with history')
+      }
+      return
+    }
+    if (event.type === 'skill-evaluation-result-recorded') {
+      const plan = this.#skillEvaluationPlans.get(event.result.evaluationId)
+      if (
+        plan === undefined
+        || this.#skillEvaluationResults.has(event.result.evaluationId)
+      ) {
+        throw new LedgerIntegrityError('Skill evaluation result disagrees with history')
+      }
+      let prepared
+      try {
+        prepared = prepareSkillEvaluationResult({
+          evaluationId: event.result.evaluationId,
+          cases: event.result.cases.map(item => ({
+            caseId: item.caseId,
+            attempt: item.attempt,
+            baseline: item.baseline,
+            candidate: item.candidate,
+          })),
+          baselineResolutionMatched: event.result.baselineResolutionMatched,
+          trustedExecution: {
+            kind: event.result.evidenceClass === 'scripted-mechanism'
+              ? 'scripted-adapter'
+              : 'observed-provider',
+            ...(event.result.executionCapabilityDigest === undefined
+              ? {}
+              : { deterministicCapabilityDigest: event.result.executionCapabilityDigest }),
+          },
+        }, plan)
+      } catch (error) {
+        throw new LedgerIntegrityError('Skill evaluation result event is invalid', { cause: error })
+      }
+      this.#validateSkillEvaluationRunFacts(prepared)
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.result)
+        || event.inputDigest !== sha256(event.result)
+      ) {
+        throw new LedgerIntegrityError('Skill evaluation result disagrees with history')
       }
       return
     }
@@ -2532,6 +2818,14 @@ export class EvolutionLedger {
         ?? []
       ids.push(event.protocol.protocolId)
       this.#skillEvalProtocolIdsByTicket.set(event.protocol.ticketId, ids)
+      return
+    }
+    if (event.type === 'skill-evaluation-opened') {
+      this.#skillEvaluationPlans.set(event.plan.evaluationId, event.plan)
+      return
+    }
+    if (event.type === 'skill-evaluation-result-recorded') {
+      this.#skillEvaluationResults.set(event.result.evaluationId, event.result)
       return
     }
     if (event.type === 'learning-case-opened') {
