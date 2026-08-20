@@ -14,7 +14,6 @@ import {
 } from '@tianwen/dsh-compat'
 import type { Session, SessionEvent } from '@tianwen/dsh-compat'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
-import type { LedgerEvent } from '@tianwen/evolution'
 import { apply } from '../../packages/tianwen-runtime/src/index.js'
 
 const roots: string[] = []
@@ -27,14 +26,6 @@ const acceptance = {
   severity: 2,
   blocksGoal: false,
 } as const
-const publicRunEventExcluded: Extract<
-  LedgerEvent,
-  { readonly type: 'run-binding-recorded' }
-> extends never ? true : false = true
-const publicOutcomeEventExcluded: Extract<
-  LedgerEvent,
-  { readonly type: 'outcome-intake-recorded' }
-> extends never ? true : false = true
 
 class SummaryRequirementNotMet extends HarnessError {
   constructor() {
@@ -155,8 +146,6 @@ describe('Tianwen runtime Outcome intake', () => {
       expect(harness.ctx.tianwenEvolution.listLearningSignals()).toHaveLength(2)
       expect(harness.ctx.tianwenEvolution.listLearningTickets())
         .toMatchObject([{ signalIds: [first!.signalId, second!.signalId] }])
-      expect(publicRunEventExcluded).toBe(true)
-      expect(publicOutcomeEventExcluded).toBe(true)
       const publicEvents = JSON.stringify(harness.ctx.tianwenEvolution.listEvents())
       expect(publicEvents).not.toContain('run-binding-recorded')
       expect(publicEvents).not.toContain('outcome-intake-recorded')

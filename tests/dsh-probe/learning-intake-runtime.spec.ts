@@ -16,21 +16,9 @@ import {
   waitForIdle,
 } from '@tianwen/dsh-compat'
 import type { SessionEvent } from '@tianwen/dsh-compat'
-import type { LedgerEvent } from '@tianwen/evolution'
 import { apply } from '../../packages/tianwen-runtime/src/index.js'
 
 const roots: string[] = []
-const publicLedgerExcludesLearningIntake: [
-  Extract<LedgerEvent, { type: 'learning-intake-recorded' }>,
-] extends [never] ? true : false = true
-const publicRunBindingEventIsExcluded: Extract<
-  LedgerEvent,
-  { readonly type: 'run-binding-recorded' }
-> extends never ? true : false = true
-const publicOutcomeEventIsExcluded: Extract<
-  LedgerEvent,
-  { readonly type: 'outcome-intake-recorded' }
-> extends never ? true : false = true
 
 function evolutionRoot(): string {
   const root = mkdtempSync(resolve('.tianwen-stage1-runtime-'))
@@ -119,7 +107,6 @@ afterEach(() => {
 
 describe('Tianwen runtime learning intake', () => {
   it('consumes final DSH feedback through Evidence and the existing ledger without changing the Session', async () => {
-    expect(publicLedgerExcludesLearningIntake).toBe(true)
     const mounted = await mountCompletedSessions()
     const [handle] = mounted.handles
     try {
@@ -136,14 +123,12 @@ describe('Tianwen runtime learning intake', () => {
           gapDisposition: 'observe',
         },
       })
-      expect(publicRunBindingEventIsExcluded).toBe(true)
       ctx.tianwenEvolution.recordOutcomeIntake({
         runId: run.runId,
         verdict: 'met',
         sessionDigest: `sha256:${'1'.repeat(64)}`,
         evidenceIds: [`sha256:${'2'.repeat(64)}`],
       })
-      expect(publicOutcomeEventIsExcluded).toBe(true)
       expect(JSON.stringify(ctx.tianwenEvolution.listEvents()))
         .not.toContain('run-binding-recorded')
       expect(JSON.stringify(ctx.tianwenEvolution.listEvents()))
