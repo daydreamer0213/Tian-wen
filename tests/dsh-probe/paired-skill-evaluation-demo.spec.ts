@@ -36,12 +36,18 @@ describe('paired Skill evaluation demo', () => {
           candidates: 1,
           evaluations: 1,
           results: 1,
+          evaluationId: expect.stringMatching(/^evaluation:/),
           candidateStatus: 'recorded',
           protocolProvenance: 'pre-candidate',
           evidenceClass: 'scripted-mechanism',
           verdict: 'INCONCLUSIVE',
           comparison: 'not-comparable',
           decision: 'needs-evidence',
+          baselineResolutionMatched: true,
+          freshness: {
+            state: 'stale',
+            reason: 'policy-authorization-unobservable',
+          },
           reasonIncludesScriptedModelOutput: true,
           duplicateReplay: true,
           restartMatched: true,
@@ -67,7 +73,7 @@ describe('paired Skill evaluation demo', () => {
         },
       })
       expect(JSON.stringify(result))
-        .not.toMatch(/<skill_content>|State the observed|https?:\/\/|[A-Z]:\\/u)
+        .not.toMatch(/<skill_content>|State the observed|evaluation synthetic summary|governed synthetic summary|https?:\/\/|[A-Z]:\\/u)
     } finally {
       if (previous === undefined) delete process.env.TIANWEN_DSH_PROBE_ROOT
       else process.env.TIANWEN_DSH_PROBE_ROOT = previous
