@@ -44,6 +44,7 @@ function toolResult(
   callId: string,
   text: string,
   errorCode?: string,
+  isError = errorCode !== undefined,
 ): SessionEvent<'tool/result'> {
   return {
     type: 'tool/result',
@@ -57,7 +58,7 @@ function toolResult(
       message: createToolResultMessage({
         callId: CallId(callId),
         content: [{ type: 'text', text }],
-        isError: errorCode !== undefined,
+        isError,
       }),
       ...(errorCode === undefined ? {} : {
         error: { name: 'EchoError', code: errorCode },
@@ -116,7 +117,7 @@ describe('Tianwen evidence projection', () => {
     expect(first[0]).toMatchObject({
       source: { callSeq: 3, resultSeq: 4 },
       action: { callId: 'call-complete', toolName: 'echo' },
-      outcome: { status: 'complete' },
+      outcome: { status: 'complete', isError: false },
     })
     expect(first[1]).toMatchObject({
       source: { callSeq: 5 },
@@ -124,6 +125,24 @@ describe('Tianwen evidence projection', () => {
     })
     expect(JSON.stringify(first)).not.toContain('raw-secret-argument')
     expect(JSON.stringify(first)).not.toContain('raw-secret-result')
+  })
+
+  it('preserves structured tool success and coded or uncoded failure facts', () => {
+    const evidence = projectEvidence(SessionId('structured-errors'), [
+      toolCall(1, 'success', '{}'),
+      toolResult(2, 'success', 'ok'),
+      toolCall(3, 'coded', '{}'),
+      toolResult(4, 'coded', 'private error', 'STABLE_CODE'),
+      toolCall(5, 'uncoded', '{}'),
+      toolResult(6, 'uncoded', 'private error', undefined, true),
+    ])
+
+    expect(evidence.map(item => item.outcome)).toMatchObject([
+      { status: 'complete', isError: false },
+      { status: 'complete', isError: true, errorCode: 'STABLE_CODE' },
+      { status: 'complete', isError: true },
+    ])
+    expect(evidence[2]!.outcome).not.toHaveProperty('errorCode')
   })
 
   it('canonically hashes recursively reordered arguments', () => {

@@ -10,6 +10,7 @@ facts after a normal DSH run and does not replace or hot-swap the running Agent.
 This preview proves normal Agent execution, read-only Evidence projection, and
 zero qualifying signal → `no-case` with `candidateCreated=false`. It also proves
 one non-blocking explicit-feedback intake path after the user result is complete.
+It also proves repeated structured Outcome intake across distinct Tianwen Runs.
 Candidate/Shadow/Promotion is not complete.
 
 ## Why Tianwen exists
@@ -25,7 +26,7 @@ to the Runtime.
 | Layer | Responsibility |
 | --- | --- |
 | **DSH** | Runs the current Agent session. Tianwen reuses its models and providers, Agent loop, tools, MCP, sandbox, Session Query, Skill, Jobs, Workflow, Subagent, Message Feedback, Approval, and permissions. |
-| **Tianwen** | Owns the cross-run governance boundary: Goal Graph, Evidence provenance, learning attribution, and future-run version governance. The current preview exercises read-only Evidence projection, a conservative no-case decision, and explicit-feedback Signal/Ticket intake. |
+| **Tianwen** | Owns the cross-run governance boundary: Goal Graph, Evidence provenance, learning attribution, and future-run version governance. The current preview exercises read-only Evidence projection, a conservative no-case decision, explicit-feedback Signal/Ticket intake, and repeated structured Outcome intake. |
 | **Alpha** | Supplies experimental and evaluation assets. It is not a second product Runtime. |
 
 DSH Message Feedback is an attribution input, not a Lesson by itself. A DSH Job
@@ -51,6 +52,11 @@ service, consumes the stored snapshot after the final answer, records one Signal
 and one open Ticket in the existing evolution ledger, and proves replay is
 idempotent without changing the Session.
 Positive and note-free negative feedback create no Ticket.
+The first ordinary reusable failure records only a Signal; the second matching failure from a different Tianwen Run creates one open Ticket.
+The repeated-outcome proof uses two distinct Tianwen Runs bound to two DSH
+Sessions. Replay is idempotent, and both Sessions remain unchanged. This is a
+zero-cost synthetic contract fixture, not naturally accumulated production
+learning evidence.
 Candidate, Shadow, and Promotion remain unimplemented.
 
 ## Three-minute, zero-cost demo
@@ -61,20 +67,23 @@ Install the locked dependencies, then run:
 pnpm install --frozen-lockfile
 pnpm demo:research-preview
 pnpm demo:explicit-correction
+pnpm demo:repeated-outcome
 ```
 
 Each demo prints one formatted JSON object. They use no network, Provider, token
 budget, paid model, Docker service, persistent database, or user data. The
 research-preview demo reports one complete Evidence record and `no-case`. The
 explicit-correction demo reports stored negative feedback, one Signal, one open
-Ticket, duplicate replay, and `candidateCreated=false`. Both report matching
+Ticket, duplicate replay, and `candidateCreated=false`. The repeated-outcome
+demo reports two structured `not-met` outcomes, two Signals, one open Ticket,
+duplicate replay, and unchanged Sessions. All report matching
 before/after Session digests. Digest values may differ between separate runs
 because Session events contain run-specific data; equality within a run is the
 non-interference check.
 
 ## Current limitations
 
-- Candidate generation, Shadow evaluation, and Promotion are not complete.
+- Case, Lesson, Candidate generation, Shadow evaluation, and Promotion are not complete.
 - The preview does not offer a production SLA or a finished user interface.
 - It does not claim that one successful run creates learning or that future
   changes can enter the currently running Agent.
@@ -85,7 +94,8 @@ non-interference check.
 
 - [`scripts/run-research-preview-demo.ts`](scripts/run-research-preview-demo.ts)
   contains the deterministic no-case demo; [`scripts/run-explicit-correction-demo.ts`](scripts/run-explicit-correction-demo.ts)
-  contains the explicit-feedback intake demo.
+  contains the explicit-feedback intake demo; [`scripts/run-repeated-outcome-demo.ts`](scripts/run-repeated-outcome-demo.ts)
+  contains the repeated structured Outcome demo.
 - [`packages/tianwen-dsh-compat`](packages/tianwen-dsh-compat) is the public DSH
   compatibility seam.
 - [`packages/tianwen-evidence`](packages/tianwen-evidence) performs the read-only
@@ -102,7 +112,7 @@ non-interference check.
 pnpm run typecheck
 pnpm run check:dsh-install
 pnpm run check:no-private-dsh-imports
-pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts
+pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts
 uv sync --frozen --dev
 uv run ruff check .
 uv run pytest

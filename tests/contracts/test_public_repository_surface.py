@@ -88,6 +88,28 @@ def test_ci_runs_both_zero_cost_demos() -> None:
     assert "pnpm demo:explicit-correction" in ci
 
 
+def test_repeated_outcome_public_facts_and_ci() -> None:
+    readme_en = read_public_document("README.md")
+    readme_zh = read_public_document("README.zh-CN.md")
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "pnpm demo:repeated-outcome" in readme_en
+    assert "pnpm demo:repeated-outcome" in readme_zh
+    assert "first ordinary reusable failure records only a Signal" in readme_en
+    assert "synthetic contract fixture" in readme_en
+    assert "第一次普通可复用失败只记录 Signal" in readme_zh
+    assert "合成合同夹具" in readme_zh
+    for command in (
+        "tests/dsh-probe/outcome-intake.spec.ts",
+        "tests/dsh-probe/outcome-intake-runtime.spec.ts",
+        "tests/dsh-probe/repeated-outcome-demo.spec.ts",
+        "pnpm demo:repeated-outcome",
+    ):
+        assert command in ci
+
+
 def test_relative_links_in_public_documents_exist() -> None:
     for name in PUBLIC_DOCUMENTS:
         document = read_public_document(name)

@@ -244,9 +244,12 @@ DSH 能组合但缺一小段 → 写薄适配
 3. **只开启 Evidence：** 证明 Tianwen 开关不改变普通执行；
 4. **接长期 Goal：** 跨 Task/Run 推进目标，不重造 DSH 单轮 Goal；
 5. **接非阻塞 Learning Ticket（Stage 1 已证明）：** 真实 DSH 显式负面反馈可在用户结果完成后形成持久化 Signal/Ticket；入口失败不改变 Session 或当前 Run；
-6. **最后接 Candidate/Shadow/Promotion：** 用一个真实、可复现问题跑通候选闭环。
+6. **接重复结构化 Outcome（Stage 2 已证明）：** 在 Run 结束后消费冻结的验收结果；第一次普通可复用失败只记录 Signal，另一个 Run 的第二次同类失败创建一个开放 Ticket；
+7. **最后接 Candidate/Shadow/Promotion：** 用一个真实、可复现问题跑通候选闭环。
 
-Stage 1 只证明了显式反馈入口和幂等账本写入。下一阶段是识别跨 Run 重复出现、能够归因的失败；它尚未实现，也不能被当前的单次显式纠正冒充。
+Stage 2 已证明 Tianwen Run 身份与其绑定的 DSH Session 身份相互独立，并证明跨两个不同 Run 的结构化重复失败能够在现有 ledger 中形成两个 Signal 和一个 Ticket。同 Run 回放保持幂等。`met`、`inconclusive`、`observe`、`ordinary-correction` 和无关的基础设施错误都不会创建 Ticket，入口也不改变 DSH Session。
+
+Case、Attribution、Lesson、有限 Candidate、Evaluation、Shadow 和 Promotion 仍未实现。下一入口是 Stage 3 的 Case/Attribution/Lesson/有限 Candidate 设计；不得把 Python Alpha 接成第二套产品 Runtime。
 
 这条顺序的目的不是重新开始，而是把已经验证的治理能力放回正确位置。
 

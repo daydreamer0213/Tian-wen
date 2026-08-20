@@ -36,7 +36,7 @@ Run the checks that cover your change. The stable public baseline is:
 pnpm run typecheck
 pnpm run check:dsh-install
 pnpm run check:no-private-dsh-imports
-pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts
+pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts
 uv run ruff check .
 uv run pytest
 ```
@@ -45,6 +45,7 @@ The deterministic public demo is also safe to run locally:
 
 ```console
 pnpm demo:research-preview
+pnpm demo:repeated-outcome
 ```
 
 It must remain network-free and use no Provider, paid model, token budget,
@@ -58,7 +59,8 @@ timeouts around it.
 - DSH is the only product Agent Runtime. Reuse its public APIs; private DSH
   imports and a second Runtime are not accepted.
 - Tianwen owns cross-run governance semantics, but the current preview proves
-  only normal execution, read-only Evidence projection, and a no-case result.
+  normal execution, read-only Evidence projection, a no-case result, explicit
+  feedback intake, and the narrow Run binding/Outcome/Signal/Ticket behavior.
 - Do not describe Candidate generation, Shadow, or Promotion as implemented.
 - DSH Message Feedback is an attribution input, not a Lesson by itself.
 - A DSH Job is process-local work, not a durable Learning Ticket.

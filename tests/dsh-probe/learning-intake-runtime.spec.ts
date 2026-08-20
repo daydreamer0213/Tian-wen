@@ -16,13 +16,9 @@ import {
   waitForIdle,
 } from '@tianwen/dsh-compat'
 import type { SessionEvent } from '@tianwen/dsh-compat'
-import type { LedgerEvent } from '@tianwen/evolution'
 import { apply } from '../../packages/tianwen-runtime/src/index.js'
 
 const roots: string[] = []
-const publicLedgerExcludesLearningIntake: [
-  Extract<LedgerEvent, { type: 'learning-intake-recorded' }>,
-] extends [never] ? true : false = true
 
 function evolutionRoot(): string {
   const root = mkdtempSync(resolve('.tianwen-stage1-runtime-'))
@@ -111,10 +107,33 @@ afterEach(() => {
 
 describe('Tianwen runtime learning intake', () => {
   it('consumes final DSH feedback through Evidence and the existing ledger without changing the Session', async () => {
-    expect(publicLedgerExcludesLearningIntake).toBe(true)
     const mounted = await mountCompletedSessions()
     const [handle] = mounted.handles
     try {
+      const ctx = mounted.harness.ctx
+      const run = ctx.tianwenEvolution.recordRunBinding({
+        goalRef: 'goal:public-boundary',
+        taskRef: 'task:public-boundary',
+        sessionId: 'session:public-boundary',
+        scopeKey: 'project:tianwen/capability:public-boundary',
+        acceptanceContract: {
+          source: 'dsh-tool-result',
+          toolName: 'verify_summary',
+          notMetErrorCode: 'SUMMARY_REQUIREMENT_NOT_MET',
+          gapDisposition: 'observe',
+        },
+      })
+      ctx.tianwenEvolution.recordOutcomeIntake({
+        runId: run.runId,
+        verdict: 'met',
+        sessionDigest: `sha256:${'1'.repeat(64)}`,
+        evidenceIds: [`sha256:${'2'.repeat(64)}`],
+      })
+      expect(JSON.stringify(ctx.tianwenEvolution.listEvents()))
+        .not.toContain('run-binding-recorded')
+      expect(JSON.stringify(ctx.tianwenEvolution.listEvents()))
+        .not.toContain('outcome-intake-recorded')
+
       const finalMessage = finalAssistant(handle!.agent.session.events)
       const before = structuredClone(handle!.agent.session.events)
 

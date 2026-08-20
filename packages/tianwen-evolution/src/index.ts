@@ -1,3 +1,17 @@
+import type { PublicLedgerEvent } from './ledger.js'
+
+export type LedgerEvent = PublicLedgerEvent
+type AssertNever<T extends never> = T
+type PublicLedgerEventPrivacyContract = AssertNever<Extract<
+  LedgerEvent,
+  {
+    type:
+      | 'learning-intake-recorded'
+      | 'run-binding-recorded'
+      | 'outcome-intake-recorded'
+  }
+>>
+
 export {
   EvolutionGovernanceError,
   LedgerCommitUnknownError,
@@ -11,7 +25,6 @@ export type {
   ChampionPointer,
   EvaluationRecord,
   GovernanceErrorCode,
-  PublicLedgerEvent as LedgerEvent,
   RecoveryFailedEvent,
   RuntimeBoundEvent,
   Sha256Digest,
@@ -26,4 +39,18 @@ export type {
   LearningTicketId,
   PreparedLearningIntake,
 } from './learning-intake.js'
+export { prepareOutcomeIntake, prepareRunBinding } from './outcome-intake.js'
+export type {
+  OutcomeIntakeInput,
+  OutcomeIntakeReceipt,
+  OutcomeLearningSignal,
+  OutcomeSeverity,
+  OutcomeVerdict,
+  PreparedOutcomeIntake,
+  RunAcceptanceContract,
+  RunBindingInput,
+  RunBindingReceipt,
+  TianwenRunBinding,
+  TianwenRunId,
+} from './outcome-intake.js'
 export * from './runtime-binding.js'
