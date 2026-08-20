@@ -126,15 +126,45 @@ def test_governed_skill_candidate_public_facts_and_limits() -> None:
     assert "pnpm demo:governed-skill-candidate" in readme_en
     assert "Candidate status is only `recorded`" in readme_en
     assert "deterministic synthetic contract data" in readme_en
-    assert "not registered, evaluated, shadowed, or promoted" in readme_en
+    assert "not registered for ordinary Runs, shadowed, or promoted" in readme_en
     assert "not autonomous production learning" in readme_en
     assert "Candidate 状态仅为 `recorded`（已记录）" in readme_zh
     assert "确定性的合成合同数据" in readme_zh
-    assert "不会注册、评测、进入 Shadow 或 Promotion" in readme_zh
+    assert "不会注册到普通 Run，也不会进入 Shadow 或 Promotion" in readme_zh
     assert "不是生产自主学习" in readme_zh
     assert "Stage 3 已证明" in architecture
     assert "Candidate 仅为 `recorded`" in architecture
     assert "确定性的合成合同数据" in architecture
+
+
+def test_paired_skill_evaluation_public_facts_and_ci() -> None:
+    readme_en = read_public_document("README.md")
+    readme_zh = read_public_document("README.zh-CN.md")
+    architecture = (ROOT / "docs" / "tianwen-architecture-overview-v2.md").read_text(
+        encoding="utf-8"
+    )
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "pnpm demo:paired-skill-evaluation" in readme_en
+    assert "paired isolated normal DSH Agents" in readme_en
+    assert "scripted mechanism proof" in readme_en
+    assert "INCONCLUSIVE" in readme_en
+    assert "not installed, routed, shadowed, promoted, or rejected" in readme_en
+    assert "成对、隔离的普通 DSH Agent" in readme_zh
+    assert "脚本化机制证明" in readme_zh
+    assert "不会安装、路由、进入 Shadow、Promotion 或 Reject" in readme_zh
+    assert "Stage 4 已证明" in architecture
+    assert "成对、隔离的普通 DSH Agent" in architecture
+    assert "脚本化机制证明" in architecture
+    assert "INCONCLUSIVE" in architecture
+    assert "Shadow、Promotion" in architecture
+    for command in (
+        "tests/dsh-probe/skill-evaluation.spec.ts",
+        "tests/dsh-probe/skill-evaluation-runtime.spec.ts",
+        "tests/dsh-probe/paired-skill-evaluation-demo.spec.ts",
+        "pnpm demo:paired-skill-evaluation",
+    ):
+        assert command in ci
 
 
 def test_relative_links_in_public_documents_exist() -> None:

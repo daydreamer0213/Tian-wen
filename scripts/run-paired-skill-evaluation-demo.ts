@@ -78,7 +78,7 @@ class SummaryRequirementNotMet extends HarnessError {
 }
 
 const callConfig = {
-  provider: 'tianwen-probe',
+  provider: 'scripted-adapter',
   model: 'scripted',
   maxTokens: 256,
 } as const
@@ -112,7 +112,10 @@ function sessionDigest(events: readonly SessionEvent[]): `sha256:${string}` {
     .update(JSON.stringify(events), 'utf8').digest('hex')}`
 }
 
-function evaluationProtocol() {
+function evaluationProtocol(surface: {
+  readonly toolSchemaDigest: `sha256:${string}`
+  readonly permissionDigest: `sha256:${string}`
+}) {
   return {
     cases: evaluationCases.map(([caseId, category]) => ({
       caseId,
@@ -141,10 +144,18 @@ function evaluationProtocol() {
     execution: {
       providerId: callConfig.provider,
       modelId: callConfig.model,
-      toolSchemaDigest: sha256('tool-schema'),
-      permissionDigest: sha256('permissions'),
+      ...surface,
       validatorContractDigest: sha256('validator'),
     },
+  }
+}
+
+function scopedSurface(harness: Awaited<ReturnType<typeof mountCoreHarness>>) {
+  const schemas = harness.ctx.tools.schemas().toSorted((left, right) =>
+    left.name.localeCompare(right.name))
+  return {
+    toolSchemaDigest: sha256(schemas),
+    permissionDigest: sha256(schemas.map(schema => schema.name)),
   }
 }
 
@@ -169,6 +180,7 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
       ]).flat(),
     ]
     harness = await mountCoreHarness(script)
+    harness.ctx.llm.registerAdapter(['scripted-adapter'], harness.adapter)
     await harness.ctx.plugin(SkillRegistry)
     await harness.ctx.plugin(applySkillTool)
     await harness.ctx.plugin(DynamicCordisRunnerService, {})
@@ -233,7 +245,8 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
     }
     const ticketId = outcomes[1]?.ticketId
     if (ticketId === undefined) throw new Error('recurrent Ticket was not created')
-    const frozenProtocol = evaluationProtocol()
+    const surface = scopedSurface(harness)
+    const frozenProtocol = evaluationProtocol(surface)
     const protocol = harness.ctx.tianwenEvolution.freezeSkillEvalProtocol({
       ticketId,
       protocol: frozenProtocol,
@@ -284,8 +297,7 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
         providerId: callConfig.provider,
         modelId: callConfig.model,
         callConfigDigest: sha256(callConfig),
-        toolSchemaDigest: sha256('tool-schema'),
-        permissionDigest: sha256('permissions'),
+        ...surface,
         workspaceSnapshotDigest: sha256('workspace'),
         validatorContractDigest: sha256('validator'),
         budget: frozenProtocol.budget,
@@ -320,7 +332,6 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
         candidate: item.candidate,
       })),
       baselineResolutionMatched: evaluation.result.baselineResolutionMatched,
-      trustedExecution: { kind: 'scripted-adapter' },
     })
     const restarted = new EvolutionLedger(evolutionRoot)
     const publicEvents = harness.ctx.tianwenEvolution.listEvents()

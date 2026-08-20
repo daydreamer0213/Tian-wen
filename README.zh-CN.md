@@ -9,7 +9,8 @@
 当前 Run。本预览已证明正常 Agent execution、Evidence 只读投影，以及
 zero qualifying signal → `no-case`、`candidateCreated=false`。它还证明了一个在用户结果完成后
 运行、不会阻塞当前 Run 的显式反馈学习入口。它还证明了跨不同 Tianwen Run 的结构化
-Outcome 重复失败入口和一个受治理 Skill Candidate 入口。Candidate/Shadow/Promotion 尚未完成。
+Outcome 重复失败入口、一个受治理 Skill Candidate 入口和一条成对 Skill Evaluation
+记录。Candidate/Shadow/Promotion 尚未完成。
 
 ## 为什么需要天问
 
@@ -22,7 +23,7 @@ Agent 可以完成一次 Session，但长期治理还需要回答另外一些问
 | 层 | 职责 |
 | --- | --- |
 | **DSH** | 运行当前 Agent Session。天问直接复用它的模型与 Provider、Agent loop、工具、MCP、sandbox、Session Query、Skill、Jobs、Workflow、Subagent、Message Feedback、Approval 和 permissions。 |
-| **天问** | 保留跨 Run 治理边界，包括 Goal Graph、Evidence provenance（证据来源与流转记录）、学习归因和面向未来 Run 的版本治理。当前预览实际运行了 Evidence 只读投影、谨慎的 no-case 判断、显式反馈 Signal/Ticket 入口和结构化 Outcome 重复失败入口。 |
+| **天问** | 保留跨 Run 治理边界，包括 Goal Graph、Evidence provenance（证据来源与流转记录）、学习归因和面向未来 Run 的版本治理。当前预览实际运行了 Evidence 只读投影、谨慎的 no-case 判断、显式反馈 Signal/Ticket 入口、结构化 Outcome 重复失败入口和成对 Skill Evaluation 记录。 |
 | **Alpha** | Alpha 是实验与评测资产，不是第二套产品运行时。 |
 
 DSH Message Feedback 只是学习归因的一项输入，本身不等于 Lesson。DSH Job 表示当前进程
@@ -49,7 +50,13 @@ DSH Message Feedback 服务写入反馈，在最终答案完成后消费存储�
 
 受治理 Skill Candidate 证明把三次真实 DSH `skill` 工具使用绑定到两个支持 Run 和一个相关
 的 met Run，再记录一个 Case、Attribution、Lesson 和惰性 Candidate。Candidate 状态仅为 `recorded`（已记录）；Attribution、Lesson 和 Candidate 内容是确定性的合成合同数据。
-Candidate 不会注册、评测、进入 Shadow 或 Promotion；这不是生产自主学习。
+Candidate 不会注册到普通 Run，也不会进入 Shadow 或 Promotion；这不是生产自主学习。
+
+成对 Skill Evaluation 证明先在 Candidate Case 之前冻结协议，再为冻结的父版本 B 和已记录
+Candidate C 运行成对、隔离的普通 DSH Agent。它捕获真实的第一条 DSH 模型请求，要求去除
+Skill 差异后的归一化请求一致，并冻结可见的模型工具表面，为每个臂保存独立的 Outcome/Evidence 和私有 Evaluation
+结果。这是脚本化机制证明，因此真实效能结论始终是 `INCONCLUSIVE`、`not-comparable` 和
+`needs-evidence`，不会声称 C 优于 B。Candidate 仍仅为 `recorded`，不会安装、路由、进入 Shadow、Promotion 或 Reject。
 
 ## 零成本演示
 
@@ -61,6 +68,7 @@ pnpm demo:research-preview
 pnpm demo:explicit-correction
 pnpm demo:repeated-outcome
 pnpm demo:governed-skill-candidate
+pnpm demo:paired-skill-evaluation
 ```
 
 每个演示只输出一个格式化 JSON 对象，不使用网络、Provider、token 预算、付费模型、
@@ -69,12 +77,15 @@ Docker、持久化数据库或用户数据。research-preview 演示报告一条
 重复消费命中幂等和 `candidateCreated=false`；repeated-outcome 演示报告两次结构化
 `not-met`、两条 Signal、一个开放 Ticket、幂等回放和不变的 Session；governed-skill-candidate
 演示报告三份冻结的 Skill manifest/use、一个 Case/Attribution/Lesson 和一个 `recorded`
-Candidate。四个演示的 Session 前后摘要都相同。不同 Run
-的摘要可能因事件中包含本次运行数据而不同；承重事实是同一次 Run 内前后相等。
+Candidate。所有演示的 Session 前后摘要都相同。不同 Run 的摘要可能因事件中包含本次运行
+数据而不同；承重事实是同一次 Run 内前后相等。paired-skill-evaluation 演示额外报告一个
+Candidate 之前冻结的协议、八个隔离的 B/C 臂、一条私有 Evaluation 结果、回放/重启检查和
+明确的 `INCONCLUSIVE` 脚本化机制结论；根 Skill registry 与新建普通 Agent 保持不变。
 
 ## 当前限制
 
-- Evaluation、Shadow、Promotion 和生产自主生成尚未完成。
+- Stage 4 只记录了一条成对 Evaluation 结果。脚本化证明只证明机制，不构成独立效能
+  Evidence；Shadow、Promotion、Active Pointer、Reject、Rollback 和生产自主生成尚未完成。
 - 当前预览不提供生产 SLA，也没有完成的用户界面。
 - 一次成功执行不会自动产生学习，未来版本也不能进入正在运行的 Agent。
 - 已知的首次 Profile 初始化诊断另有事实记录，不能把它写成已经通过的发布门。
@@ -85,7 +96,8 @@ Candidate。四个演示的 Session 前后摘要都相同。不同 Run
   是确定性的 no-case 演示；[`scripts/run-explicit-correction-demo.ts`](scripts/run-explicit-correction-demo.ts)
   是显式反馈学习入口演示；[`scripts/run-repeated-outcome-demo.ts`](scripts/run-repeated-outcome-demo.ts)
   是结构化 Outcome 重复失败演示；[`scripts/run-governed-skill-candidate-demo.ts`](scripts/run-governed-skill-candidate-demo.ts)
-  是受治理 Skill Candidate 演示。
+  是受治理 Skill Candidate 演示；[`scripts/run-paired-skill-evaluation-demo.ts`](scripts/run-paired-skill-evaluation-demo.ts)
+  是成对 B/C Skill Evaluation 演示。
 - [`packages/tianwen-dsh-compat`](packages/tianwen-dsh-compat) 是 DSH 公共兼容接缝。
 - [`packages/tianwen-evidence`](packages/tianwen-evidence) 实现 Evidence 只读投影。
 - [`docs/tianwen-architecture-overview-v2.md`](docs/tianwen-architecture-overview-v2.md)
@@ -99,7 +111,7 @@ Candidate。四个演示的 Session 前后摘要都相同。不同 Run
 pnpm run typecheck
 pnpm run check:dsh-install
 pnpm run check:no-private-dsh-imports
-pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts tests/dsh-probe/skill-governance.spec.ts tests/dsh-probe/skill-governance-runtime.spec.ts tests/dsh-probe/governed-skill-candidate-demo.spec.ts
+pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts tests/dsh-probe/skill-governance.spec.ts tests/dsh-probe/skill-governance-runtime.spec.ts tests/dsh-probe/governed-skill-candidate-demo.spec.ts tests/dsh-probe/skill-evaluation.spec.ts tests/dsh-probe/skill-evaluation-runtime.spec.ts tests/dsh-probe/paired-skill-evaluation-demo.spec.ts
 uv sync --frozen --dev
 uv run ruff check .
 uv run pytest

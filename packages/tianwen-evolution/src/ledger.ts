@@ -2208,6 +2208,22 @@ export class EvolutionLedger {
     if (plan === undefined) {
       throw new LedgerIntegrityError('Skill evaluation result lacks its plan')
     }
+    const candidate = this.#skillCandidates.get(plan.candidateId)
+    const parent = [...this.#runSkillManifests.values()]
+      .find(manifest => manifest.parentVersionId === plan.parentVersionId)
+    if (
+      candidate === undefined
+      || parent === undefined
+      || candidate.parentVersionId !== plan.parentVersionId
+      || candidate.payloadDigest !== plan.candidatePayloadDigest
+      || sha256(parent.parent) !== plan.parentPayloadDigest
+    ) {
+      throw new LedgerIntegrityError('Skill evaluation result lacks its governed Skill identities')
+    }
+    const candidateVersionId = prepareRunSkillManifest({
+      runId: result.cases[0]!.candidate.runId,
+      skill: { ...candidate.payload, provider: parent.resolvedProvider },
+    }).parentVersionId
     for (const evaluationCase of result.cases) {
       const planCase = plan.cases.find(item =>
         item.caseId === evaluationCase.caseId && item.attempt === evaluationCase.attempt)
@@ -2231,6 +2247,18 @@ export class EvolutionLedger {
           || canonicalJson(outcome.evidenceIds) !== canonicalJson(arm.evidenceIds)
         ) {
           throw new LedgerIntegrityError('Skill evaluation result disagrees with Run facts')
+        }
+        const expectedVersionId = arm.role === 'baseline'
+          ? plan.parentVersionId
+          : candidateVersionId
+        const expectedContentDigest = arm.role === 'baseline'
+          ? parent.contentDigest
+          : sha256(candidate.payload.content)
+        if (
+          arm.skillVersionId !== expectedVersionId
+          || arm.contentDigest !== expectedContentDigest
+        ) {
+          throw new LedgerIntegrityError('Skill evaluation result disagrees with governed Skill content')
         }
       }
     }
@@ -2422,14 +2450,6 @@ export class EvolutionLedger {
             candidate: item.candidate,
           })),
           baselineResolutionMatched: event.result.baselineResolutionMatched,
-          trustedExecution: {
-            kind: event.result.evidenceClass === 'scripted-mechanism'
-              ? 'scripted-adapter'
-              : 'observed-provider',
-            ...(event.result.executionCapabilityDigest === undefined
-              ? {}
-              : { deterministicCapabilityDigest: event.result.executionCapabilityDigest }),
-          },
         }, plan)
       } catch (error) {
         throw new LedgerIntegrityError('Skill evaluation result event is invalid', { cause: error })

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import {
   Service,
   SessionId,
@@ -13,10 +12,16 @@ import type {
   GenerateOptions,
   LlmCallConfig,
   SessionEvent,
+  SkillDefinition,
   SkillRegistration,
 } from '@tianwen/dsh-compat'
 import type { EvidenceRecord } from '@tianwen/evidence'
-import { prepareRunBinding, prepareRunSkillManifest } from '@tianwen/evolution'
+import {
+  prepareRunBinding,
+  prepareRunSkillManifest,
+  prepareSkillEvaluationPlan,
+  sha256,
+} from '@tianwen/evolution'
 import type {
   GovernedSkillCandidateId,
   Sha256Digest,
@@ -77,12 +82,6 @@ export type NormalizedSkillEvaluationRequestComparison =
 const NORMALIZED_SESSION = '<paired-evaluation-session>'
 const NORMALIZED_SKILL_CONTENT = '<selected-skill-content>'
 const NORMALIZED_CATALOG_ENTRY = Object.freeze({ name: '<selected-skill-catalog-entry>' })
-
-function sha256(value: unknown): `sha256:${string}` {
-  return `sha256:${createHash('sha256')
-    .update(JSON.stringify(value), 'utf8')
-    .digest('hex')}`
-}
 
 function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return value !== null && typeof value === 'object'
@@ -194,6 +193,31 @@ function requestConfig(request: GenerateOptions): LlmCallConfig {
   }
 }
 
+function isSkillDefinition(skill: SkillRegistration): skill is SkillRegistration & SkillDefinition {
+  if (
+    typeof skill.name !== 'string'
+    || typeof skill.description !== 'string'
+    || typeof skill.content !== 'string'
+    || typeof skill.source !== 'string'
+    || typeof skill.provider !== 'string'
+    || skill.invocation === undefined
+    || typeof skill.invocation.modelInvocable !== 'boolean'
+    || typeof skill.invocation.userInvocable !== 'boolean'
+  ) return false
+  return true
+}
+
+function sameSkillVersion(
+  skill: SkillRegistration,
+  expectedVersionId: SkillEvaluationPlan['parentVersionId'],
+): boolean {
+  if (!isSkillDefinition(skill)) return false
+  return prepareRunSkillManifest({
+    runId: `run:${sha256({ expectedVersionId, skill }).slice('sha256:'.length)}` as TianwenRunId,
+    skill,
+  }).parentVersionId === expectedVersionId
+}
+
 export function observeSkillEvaluationRequest(
   input: ObserveSkillEvaluationRequestInput,
 ): SkillEvaluationRequestObservation {
@@ -231,7 +255,9 @@ export class TianwenSkillEvaluationService extends Service {
   constructor(ctx: Context) {
     super(ctx, 'tianwenSkillEvaluation')
     ctx.on('llm/stream', (request, next) => {
-      this.requests.get(String(request.sessionId))?.push(request)
+      const sessionId = String(request.sessionId)
+      const requests = this.requests.get(sessionId)
+      if (requests !== undefined) requests.push(request)
       return next()
     })
   }
@@ -257,14 +283,17 @@ export class TianwenSkillEvaluationService extends Service {
     let rootParentMatches = false
     await this.ctx.inject(['skills'], async scopedCtx => {
       const resolved = await scopedCtx.skills.get(parentManifest.parent.name)
-      rootParentMatches = resolved?.content === parentManifest.parent.content
-        && resolved.invocation.userInvocable === true
+      rootParentMatches = resolved !== undefined
+        && sameSkillVersion(resolved, parentManifest.parentVersionId)
     })
     if (!rootParentMatches) {
       throw new Error('paired Skill evaluation cannot resolve its parent from the root Skill registry')
     }
-    if (input.callConfig.provider !== protocol.protocol.execution.providerId
-      || input.callConfig.model !== protocol.protocol.execution.modelId) {
+    if (
+      input.callConfig.provider !== protocol.protocol.execution.providerId
+      || input.callConfig.model !== protocol.protocol.execution.modelId
+      || sha256(input.callConfig) !== input.environment.callConfigDigest
+    ) {
       throw new Error('paired Skill evaluation call config disagrees with its protocol')
     }
     const caseInputs = new Map(input.cases.map(item => [item.caseId, item.input]))
@@ -272,6 +301,35 @@ export class TianwenSkillEvaluationService extends Service {
       || protocol.protocol.cases.some(item => caseInputs.get(item.caseId) === undefined
         || sha256(caseInputs.get(item.caseId)) !== item.inputDigest)) {
       throw new Error('paired Skill evaluation inputs disagree with the frozen protocol')
+    }
+
+    const arms = protocol.protocol.cases.flatMap(protocolCase =>
+      Array.from({ length: protocol.protocol.repetition.attempts }, (_, index) => {
+        const attempt = index + 1
+        const baseline = plannedBinding(protocolCase.caseId, attempt, 'baseline',
+          protocolCase.acceptanceContract, learningCase.scopeKey, input.protocolId)
+        const candidateArm = plannedBinding(protocolCase.caseId, attempt, 'candidate',
+          protocolCase.acceptanceContract, learningCase.scopeKey, input.protocolId)
+        return {
+          caseId: protocolCase.caseId,
+          attempt,
+          baseline: { runId: baseline.runId, sessionId: baseline.sessionId },
+          candidate: { runId: candidateArm.runId, sessionId: candidateArm.sessionId },
+        }
+      }))
+    const expectedPlan = prepareSkillEvaluationPlan({
+      candidateId: candidate.candidateId,
+      protocolId: protocol.protocolId,
+      environment: input.environment,
+      arms,
+    }, candidate, learningCase, protocol, sha256(parentManifest.parent))
+    const completed = this.ctx.tianwenEvolution.getSkillEvaluationResult(expectedPlan.evaluationId)
+    if (completed !== undefined) {
+      return {
+        evaluationId: expectedPlan.evaluationId,
+        plan: this.ctx.tianwenEvolution.getSkillEvaluation(expectedPlan.evaluationId) ?? expectedPlan,
+        result: completed,
+      }
     }
 
     const prepared: PreparedSkillEvaluationArm[] = []
@@ -297,13 +355,17 @@ export class TianwenSkillEvaluationService extends Service {
                 cwd: handle.agent.session.header.cwd,
                 scope: handle.agent,
               })
-              resolved = actual?.content === skill.content
-                && actual.invocation.userInvocable === true
+              resolved = actual !== undefined
+                && sameSkillVersion(actual, prepareRunSkillManifest({
+                  runId: `run:${sha256({ sessionId, role }).slice('sha256:'.length)}` as TianwenRunId,
+                  skill: registered,
+                }).parentVersionId)
             })
             if (!resolved) {
               await handle.dispose()
               throw new Error('paired Skill evaluation failed to resolve its scoped Skill')
             }
+            const surface = scopedSurface(handle)
             prepared.push({
               caseId: protocolCase.caseId,
               attempt,
@@ -322,25 +384,18 @@ export class TianwenSkillEvaluationService extends Service {
                 skill: registered,
               }).parentVersionId,
               contentDigest: sha256(registered.content),
+              ...surface,
             })
           }
         }
       }
 
-      const arms = protocol.protocol.cases.flatMap(protocolCase =>
-        Array.from({ length: protocol.protocol.repetition.attempts }, (_, index) => {
-          const attempt = index + 1
-          const baseline = plannedBinding(protocolCase.caseId, attempt, 'baseline',
-            protocolCase.acceptanceContract, learningCase.scopeKey, input.protocolId)
-          const candidateArm = plannedBinding(protocolCase.caseId, attempt, 'candidate',
-            protocolCase.acceptanceContract, learningCase.scopeKey, input.protocolId)
-          return {
-            caseId: protocolCase.caseId,
-            attempt,
-            baseline: { runId: baseline.runId, sessionId: baseline.sessionId },
-            candidate: { runId: candidateArm.runId, sessionId: candidateArm.sessionId },
-          }
-        }))
+      if (!prepared.every(arm =>
+        arm.toolSchemaDigest === input.environment.toolSchemaDigest
+        && arm.permissionDigest === input.environment.permissionDigest)) {
+        throw new Error('paired Skill evaluation actual scoped tool or permission surface disagrees with its protocol')
+      }
+
       const opened = this.ctx.tianwenEvolution.openSkillEvaluation({
         candidateId: candidate.candidateId,
         protocolId: protocol.protocolId,
@@ -374,12 +429,12 @@ export class TianwenSkillEvaluationService extends Service {
         const caseInput = caseInputs.get(planCase.caseId)!
         const baselineObservation = await this.runArm(
           baseline, planCase, caseInput, input.callConfig,
-          protocol.protocol.budget.maxModelRequestsPerArm,
+          protocol.protocol.budget,
           executionManifestDigest(plan, planCase),
         )
         const candidateObservation = await this.runArm(
           candidateArm, planCase, caseInput, input.callConfig,
-          protocol.protocol.budget.maxModelRequestsPerArm,
+          protocol.protocol.budget,
           executionManifestDigest(plan, planCase),
         )
         observed.push({
@@ -391,14 +446,13 @@ export class TianwenSkillEvaluationService extends Service {
       }
       await this.ctx.inject(['skills'], async scopedCtx => {
         const resolved = await scopedCtx.skills.get(parentManifest.parent.name)
-        rootParentMatches = resolved?.content === parentManifest.parent.content
-          && resolved.invocation.userInvocable === true
+        rootParentMatches = resolved !== undefined
+          && sameSkillVersion(resolved, parentManifest.parentVersionId)
       })
       const resultReceipt = this.ctx.tianwenEvolution.recordSkillEvaluationResult({
         evaluationId: plan.evaluationId,
         cases: observed,
         baselineResolutionMatched: rootParentMatches,
-        trustedExecution: { kind: 'scripted-adapter' },
       })
       const result = this.ctx.tianwenEvolution.getSkillEvaluationResult(resultReceipt.evaluationId)
       if (result === undefined) throw new Error('paired Skill evaluation result was not durable')
@@ -416,47 +470,61 @@ export class TianwenSkillEvaluationService extends Service {
     planCase: SkillEvaluationPlan['cases'][number],
     input: string,
     callConfig: LlmCallConfig,
-    maxModelRequests: number,
+    budget: SkillEvaluationPlan['environment']['budget'],
     executionManifestDigest: Sha256Digest,
   ): Promise<SkillEvaluationArmObservation> {
     if (!input.startsWith(`/${arm.skill.name}`)) {
       throw new Error('paired Skill evaluation input must use the selected /skill-name')
     }
+    const startedAt = Date.now()
     const requests: GenerateOptions[] = []
     this.requests.set(arm.sessionId, requests)
-    arm.handle.agent.followup(createUserMessage({
-      content: [{ type: 'text', text: input }],
-      source: { kind: 'user' },
-    }))
-    await arm.handle.agent.whenIdle()
-    const evidence = this.ctx.tianwenEvidence.project(arm.handle.agent.session)
-      .filter(item => item.action.toolName === planCase.acceptanceContract.toolName)
-    const finalEvidence = evidence.at(-1)
-    const withinBudget = requests.length <= maxModelRequests
-    const outcome = outcomeFromEvidence(
-      arm.handle.agent.session.events,
-      finalEvidence,
-      planCase.acceptanceContract.notMetErrorCode,
-    )
-    if (withinBudget) {
-      this.ctx.tianwenLearningIntake.consumeOutcome(arm.handle.agent.session, arm.runId!)
-    } else {
-      this.ctx.tianwenEvolution.recordOutcomeIntake({
-        runId: arm.runId!,
-        verdict: 'inconclusive',
-        sessionDigest: sha256(arm.handle.agent.session.events),
-        evidenceIds: finalEvidence === undefined ? [] : [finalEvidence.evidenceId],
+    let outcomeRecorded = false
+    try {
+      arm.handle.agent.followup(createUserMessage({
+        content: [{ type: 'text', text: input }],
+        source: { kind: 'user' },
+      }))
+      await arm.handle.agent.whenIdle()
+      const allEvidence = this.ctx.tianwenEvidence.project(arm.handle.agent.session)
+      const evidence = allEvidence
+        .filter(item => item.action.toolName === planCase.acceptanceContract.toolName)
+      const finalEvidence = evidence.at(-1)
+      const usage = {
+        modelRequests: requests.length,
+        tokens: 0,
+        toolCalls: allEvidence.length,
+        elapsedMs: Date.now() - startedAt,
+        cnyMilli: 0,
+      }
+      const withinBudget = usage.modelRequests <= budget.maxModelRequestsPerArm
+        && usage.toolCalls <= budget.maxToolCallsPerArm
+        && usage.elapsedMs <= budget.maxElapsedMsPerArm
+      const outcome = outcomeFromEvidence(
+        arm.handle.agent.session.events,
+        finalEvidence,
+        planCase.acceptanceContract.notMetErrorCode,
+      )
+      if (withinBudget) {
+        this.ctx.tianwenLearningIntake.consumeOutcome(arm.handle.agent.session, arm.runId!)
+      } else {
+        this.ctx.tianwenEvolution.recordOutcomeIntake({
+          runId: arm.runId!,
+          verdict: 'inconclusive',
+          sessionDigest: sha256(arm.handle.agent.session.events),
+          evidenceIds: finalEvidence === undefined ? [] : [finalEvidence.evidenceId],
+        })
+      }
+      outcomeRecorded = true
+      const expectedSkillContent = renderSkillContent({
+        name: arm.skill.name,
+        provider: arm.provider,
+        content: arm.skill.content,
       })
-    }
-    const expectedSkillContent = renderSkillContent({
-      name: arm.skill.name,
-      provider: arm.provider,
-      content: arm.skill.content,
-    })
-    const request = requests[0]
-    const observation = request === undefined
-      ? { accepted: false as const, reason: 'missing-evidence' }
-      : observeSkillEvaluationRequest({
+      const request = requests[0]
+      const observation = request === undefined
+        ? { accepted: false as const, reason: 'missing-evidence' }
+        : observeSkillEvaluationRequest({
           request,
           sessionId: arm.sessionId,
           preflight: callConfig,
@@ -464,38 +532,79 @@ export class TianwenSkillEvaluationService extends Service {
           expectedSkillContent,
           skillName: arm.skill.name,
           requestOrdinal: 1,
-          maxModelRequests,
+          maxModelRequests: budget.maxModelRequestsPerArm,
         })
-    return {
-      role: arm.role,
-      runId: arm.runId!,
-      sessionId: arm.sessionId,
-      skillVersionId: arm.skillVersionId,
-      contentDigest: arm.contentDigest,
-      executionManifestDigest,
-      fullRequestDigest: observation.accepted
-        ? observation.fullRequestDigest
-        : sha256({ sessionId: arm.sessionId, missingRequest: true }),
-      normalizedFirstRequestDigest: observation.accepted
-        ? observation.normalizedFirstRequestDigest
-        : sha256({ sessionId: arm.sessionId, missingRequest: true }),
-      injectionProofDigest: sha256(expectedSkillContent),
-      outcome: withinBudget ? outcome : 'inconclusive',
-      evidenceIds: finalEvidence === undefined ? [] : [finalEvidence.evidenceId],
-      validatorReceiptDigest: sha256(finalEvidence ?? { missing: true }),
-      evaluatedSubjectDigest: sha256(arm.handle.agent.session.events.findLast(event =>
-        event.type === 'assistant/message') ?? { missing: true }),
-      usage: {
-        modelRequests: requests.length,
-        tokens: 0,
-        toolCalls: evidence.length,
-        elapsedMs: 0,
-        cnyMilli: 0,
-      },
-      ...(!observation.accepted || !withinBudget || finalEvidence === undefined
-        ? { reasonCode: !withinBudget ? 'arm-budget-exhausted' as const : 'missing-evidence' as const }
-        : {}),
+      const validatorSubjectDigest = finalEvidence?.action.argumentsDigest
+        ?? sha256({ sessionId: arm.sessionId, missingSubject: true })
+      const evaluatedSubjectDigest = validatorSubjectDigest
+      return {
+        role: arm.role,
+        runId: arm.runId!,
+        sessionId: arm.sessionId,
+        skillVersionId: arm.skillVersionId,
+        contentDigest: arm.contentDigest,
+        executionManifestDigest,
+        fullRequestDigest: observation.accepted
+          ? observation.fullRequestDigest
+          : sha256({ sessionId: arm.sessionId, missingRequest: true }),
+        normalizedFirstRequestDigest: observation.accepted
+          ? observation.normalizedFirstRequestDigest
+          : sha256({ sessionId: arm.sessionId, missingRequest: true }),
+        injectionProofDigest: sha256(expectedSkillContent),
+        outcome: withinBudget ? outcome : 'inconclusive',
+        evidenceIds: finalEvidence === undefined ? [] : [finalEvidence.evidenceId],
+        validatorReceiptDigest: sha256({
+          evidenceId: finalEvidence?.evidenceId ?? null,
+          subjectDigest: validatorSubjectDigest,
+        }),
+        validatorSubjectDigest,
+        evaluatedSubjectDigest,
+        usage,
+        ...(!observation.accepted || !withinBudget || finalEvidence === undefined
+          ? { reasonCode: !withinBudget ? 'arm-budget-exhausted' as const : 'missing-evidence' as const }
+          : {}),
+      }
+    } catch {
+      if (!outcomeRecorded) {
+        this.ctx.tianwenEvolution.recordOutcomeIntake({
+          runId: arm.runId!,
+          verdict: 'inconclusive',
+          sessionDigest: sha256(arm.handle.agent.session.events),
+          evidenceIds: [],
+        })
+      }
+      return inconclusiveArmObservation(arm, executionManifestDigest, sha256({
+        name: arm.skill.name,
+        provider: arm.provider,
+        content: arm.skill.content,
+      }))
     }
+  }
+}
+
+function inconclusiveArmObservation(
+  arm: PreparedSkillEvaluationArm,
+  executionManifestDigest: Sha256Digest,
+  injectionProofDigest: Sha256Digest,
+): SkillEvaluationArmObservation {
+  const subjectDigest = sha256({ sessionId: arm.sessionId, missingSubject: true })
+  return {
+    role: arm.role,
+    runId: arm.runId!,
+    sessionId: arm.sessionId,
+    skillVersionId: arm.skillVersionId,
+    contentDigest: arm.contentDigest,
+    executionManifestDigest,
+    fullRequestDigest: sha256({ sessionId: arm.sessionId, missingRequest: true }),
+    normalizedFirstRequestDigest: sha256({ sessionId: arm.sessionId, missingRequest: true }),
+    injectionProofDigest,
+    outcome: 'inconclusive',
+    evidenceIds: [],
+    validatorReceiptDigest: sha256({ evidenceId: null, subjectDigest }),
+    validatorSubjectDigest: subjectDigest,
+    evaluatedSubjectDigest: subjectDigest,
+    usage: { modelRequests: 0, tokens: 0, toolCalls: 0, elapsedMs: 0, cnyMilli: 0 },
+    reasonCode: 'missing-evidence',
   }
 }
 
@@ -557,7 +666,21 @@ interface PreparedSkillEvaluationArm {
   readonly provider: string
   readonly skillVersionId: SkillEvaluationArmObservation['skillVersionId']
   readonly contentDigest: Sha256Digest
+  readonly toolSchemaDigest: Sha256Digest
+  readonly permissionDigest: Sha256Digest
   runId?: TianwenRunId
+}
+
+function scopedSurface(handle: AgentHandle): {
+  readonly toolSchemaDigest: Sha256Digest
+  readonly permissionDigest: Sha256Digest
+} {
+  const schemas = handle.agent.ctx.tools.schemas(handle.agent)
+    .toSorted((left, right) => left.name.localeCompare(right.name))
+  return {
+    toolSchemaDigest: sha256(schemas),
+    permissionDigest: sha256(schemas.map(schema => schema.name)),
+  }
 }
 
 function requestAgentOptions(config: LlmCallConfig) {

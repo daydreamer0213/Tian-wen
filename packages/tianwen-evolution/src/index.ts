@@ -41,7 +41,7 @@ export type {
   RuntimeBoundEvent,
   Sha256Digest,
 } from './ledger.js'
-export { prepareLearningIntake } from './learning-intake.js'
+export { prepareLearningIntake, sha256 } from './learning-intake.js'
 export type {
   LearningIntakeInput,
   LearningIntakeReceipt,
@@ -126,7 +126,6 @@ export type {
   SkillEvaluationResult,
   SkillEvaluationResultReceipt,
   SkillEvaluationUsage,
-  TrustedSkillEvaluationExecution,
   SkillEvaluationVerdict,
   SkillEvalArmOrder,
   SkillEvalAttemptReducer,

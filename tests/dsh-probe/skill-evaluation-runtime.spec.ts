@@ -23,7 +23,7 @@ import {
 } from '../../packages/tianwen-runtime/src/index.js'
 
 const config: LlmCallConfig = {
-  provider: 'tianwen-probe',
+  provider: 'scripted-adapter',
   model: 'scripted',
   maxTokens: 256,
 }
@@ -76,7 +76,50 @@ function protocolInputs() {
   ] as const
 }
 
-function seedCandidate(harness: Awaited<ReturnType<typeof mountCoreHarness>>) {
+function evaluationBudget() {
+  return {
+    maxModelRequestsPerArm: 3,
+    maxTokensPerArm: 2_000,
+    maxToolCallsPerArm: 2,
+    maxElapsedMsPerArm: 10_000,
+    maxCnyMilliPerArm: 0,
+    maxTotalModelRequests: 24,
+    maxTotalTokens: 16_000,
+    maxTotalToolCalls: 16,
+    maxTotalElapsedMs: 80_000,
+    maxTotalCnyMilli: 0,
+  }
+}
+
+function scopedSurface(harness: Awaited<ReturnType<typeof mountCoreHarness>>) {
+  const schemas = harness.ctx.tools.schemas().toSorted((left, right) =>
+    left.name.localeCompare(right.name))
+  return {
+    toolSchemaDigest: sha256(schemas),
+    permissionDigest: sha256(schemas.map(schema => schema.name)),
+  }
+}
+
+function evaluationEnvironment(
+  harness: Awaited<ReturnType<typeof mountCoreHarness>>,
+  budget = evaluationBudget(),
+) {
+  return {
+    dshVersion: '0.1.0-rc.7' as const,
+    providerId: config.provider,
+    modelId: config.model,
+    callConfigDigest: sha256(config),
+    ...scopedSurface(harness),
+    workspaceSnapshotDigest: digest('workspace'),
+    validatorContractDigest: digest('validator'),
+    budget,
+  }
+}
+
+function seedCandidate(
+  harness: Awaited<ReturnType<typeof mountCoreHarness>>,
+  budget = evaluationBudget(),
+) {
   const evolution = harness.ctx.tianwenEvolution
   const prior = [
     ['first', 'not-met', 'a'],
@@ -132,23 +175,11 @@ function seedCandidate(harness: Awaited<ReturnType<typeof mountCoreHarness>>) {
       hardGates: ['problem', 'regression', 'counterexample', 'safety'],
       softMetrics: ['model-requests', 'tool-calls'],
       thresholds: { requiredCasePasses: 4 },
-      budget: {
-        maxModelRequestsPerArm: 3,
-        maxTokensPerArm: 2_000,
-        maxToolCallsPerArm: 2,
-        maxElapsedMsPerArm: 10_000,
-        maxCnyMilliPerArm: 0,
-        maxTotalModelRequests: 24,
-        maxTotalTokens: 16_000,
-        maxTotalToolCalls: 16,
-        maxTotalElapsedMs: 80_000,
-        maxTotalCnyMilli: 0,
-      },
+      budget,
       execution: {
         providerId: config.provider,
         modelId: config.model,
-        toolSchemaDigest: digest('tool-schema'),
-        permissionDigest: digest('permissions'),
+        ...scopedSurface(harness),
         validatorContractDigest: digest('validator'),
       },
     },
@@ -191,35 +222,18 @@ function seedCandidate(harness: Awaited<ReturnType<typeof mountCoreHarness>>) {
       ...learningCase.counterevidence.flatMap(item => item.evidenceIds),
     ],
   })
-  return { candidateId: candidateReceipt.candidateId, protocolId: protocol.protocolId }
+  return {
+    candidateId: candidateReceipt.candidateId,
+    protocolId: protocol.protocolId,
+    environment: evaluationEnvironment(harness, budget),
+  }
 }
 
 function evaluationInput(seeded: ReturnType<typeof seedCandidate>) {
   return {
     candidateId: seeded.candidateId,
     protocolId: seeded.protocolId,
-    environment: {
-      dshVersion: '0.1.0-rc.7' as const,
-      providerId: config.provider,
-      modelId: config.model,
-      callConfigDigest: sha256(config),
-      toolSchemaDigest: digest('tool-schema'),
-      permissionDigest: digest('permissions'),
-      workspaceSnapshotDigest: digest('workspace'),
-      validatorContractDigest: digest('validator'),
-      budget: {
-        maxModelRequestsPerArm: 3,
-        maxTokensPerArm: 2_000,
-        maxToolCallsPerArm: 2,
-        maxElapsedMsPerArm: 10_000,
-        maxCnyMilliPerArm: 0,
-        maxTotalModelRequests: 24,
-        maxTotalTokens: 16_000,
-        maxTotalToolCalls: 16,
-        maxTotalElapsedMs: 80_000,
-        maxTotalCnyMilli: 0,
-      },
-    },
+    environment: seeded.environment,
     callConfig: config,
     cases: protocolInputs().map(([caseId, category]) => ({
       caseId,
@@ -274,6 +288,7 @@ describe('paired Skill evaluation request observation', () => {
       textResponse(`scripted answer ${index}`),
     ]).flat()
     const harness = await mountCoreHarness(script)
+    harness.ctx.llm.registerAdapter(['scripted-adapter'], harness.adapter)
     await harness.ctx.plugin(SkillRegistry)
     await harness.ctx.plugin(applySkillTool)
     await harness.ctx.plugin(DynamicCordisRunnerService, {})
@@ -313,9 +328,109 @@ describe('paired Skill evaluation request observation', () => {
       expect(harness.ctx.tianwenEvolution.listSkillEvaluations()).toHaveLength(1)
       expect(harness.ctx.tianwenEvolution.getSkillCandidate(seeded.candidateId))
         .toMatchObject({ status: 'recorded' })
+      const replay = await harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded))
+      expect(replay.result).toEqual(receipt.result)
+      expect(harness.adapter.requests).toHaveLength(16)
+      await expect(harness.ctx.tianwenSkillEvaluation.run({
+        ...evaluationInput(seeded),
+        callConfig: { ...config, maxTokens: 128 },
+      })).rejects.toThrow('call config disagrees with its protocol')
+      expect(harness.adapter.requests).toHaveLength(16)
       expect(await harness.ctx.skills.get(parent.name)).toMatchObject({ content: parent.content })
       expect(JSON.stringify(harness.ctx.tianwenEvolution.listEvents()))
         .not.toContain('skill-evaluation-opened')
+    } finally {
+      disposeParent()
+      await harness.ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a changed scoped tool or permission surface before opening a plan', async () => {
+    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-surface-mismatch'
+    const harness = await mountCoreHarness([textResponse('unused')])
+    harness.ctx.llm.registerAdapter(['scripted-adapter'], harness.adapter)
+    await harness.ctx.plugin(SkillRegistry)
+    await harness.ctx.plugin(applySkillTool)
+    await harness.ctx.plugin(DynamicCordisRunnerService, {})
+    harness.ctx.tools.register(defineTool({
+      name: 'verify_summary',
+      description: 'verify one synthetic summary',
+      parameters: { text: { type: 'string', required: true } },
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute() { return 'accepted' },
+    }))
+    const disposeParent = harness.ctx.skills.register(parent)
+    try {
+      await apply(harness.ctx, { evolutionRoot: root })
+      const seeded = seedCandidate(harness)
+      harness.ctx.tools.register(defineTool({
+        name: 'drifted_tool',
+        description: 'a tool added after the protocol was frozen',
+        parameters: {},
+        output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+        async execute() { return 'drifted' },
+      }))
+      await expect(harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded)))
+        .rejects.toThrow('actual scoped tool or permission surface disagrees with its protocol')
+      expect(harness.ctx.tianwenEvolution.listSkillEvaluations()).toHaveLength(0)
+      expect(harness.adapter.requests).toHaveLength(0)
+    } finally {
+      disposeParent()
+      await harness.ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('records budget exhaustion as inconclusive while the stream observer continues exactly once', async () => {
+    const root = 'D:\\DevData\\tianwen-stage4-test-fixtures\\runtime-budget-exhaustion'
+    const script = Array.from({ length: 8 }, (_, index) => [
+      toolCallResponse(`verify-${index}`, 'verify_summary', { text: `case ${index}` }),
+      textResponse(`scripted answer ${index}`),
+    ]).flat()
+    const harness = await mountCoreHarness(script)
+    harness.ctx.llm.registerAdapter(['scripted-adapter'], harness.adapter)
+    await harness.ctx.plugin(SkillRegistry)
+    await harness.ctx.plugin(applySkillTool)
+    await harness.ctx.plugin(DynamicCordisRunnerService, {})
+    harness.ctx.tools.register(defineTool({
+      name: 'verify_summary',
+      description: 'verify one synthetic summary',
+      parameters: { text: { type: 'string', required: true } },
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute() { return 'accepted' },
+    }))
+    const disposeParent = harness.ctx.skills.register(parent)
+    try {
+      await apply(harness.ctx, { evolutionRoot: root })
+      const downstreamRequests: GenerateOptions[] = []
+      harness.ctx.on('llm/stream', (streamRequest, next) => {
+        downstreamRequests.push(streamRequest)
+        return next()
+      })
+      const seeded = seedCandidate(harness, {
+        ...evaluationBudget(),
+        maxModelRequestsPerArm: 1,
+        maxToolCallsPerArm: 0,
+        maxTotalModelRequests: 8,
+        maxTotalToolCalls: 0,
+      })
+      const receipt = await harness.ctx.tianwenSkillEvaluation.run(evaluationInput(seeded))
+      expect(receipt.result).toMatchObject({ verdict: 'INCONCLUSIVE', comparison: 'not-comparable' })
+      for (const item of receipt.result.cases) {
+        expect(item.baseline).toMatchObject({
+          outcome: 'inconclusive',
+          reasonCode: 'arm-budget-exhausted',
+          usage: { modelRequests: 2, toolCalls: 1 },
+        })
+        expect(item.candidate).toMatchObject({
+          outcome: 'inconclusive',
+          reasonCode: 'arm-budget-exhausted',
+          usage: { modelRequests: 2, toolCalls: 1 },
+        })
+      }
+      expect(harness.adapter.requests).toHaveLength(16)
+      expect(downstreamRequests).toHaveLength(16)
     } finally {
       disposeParent()
       await harness.ctx.fiber.dispose()

@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { prepareRunBinding } from '../../packages/tianwen-evolution/src/outcome-intake.js'
+import { prepareRunSkillManifest } from '../../packages/tianwen-evolution/src/skill-governance.js'
 import {
   EvolutionLedger,
   LedgerIntegrityError,
@@ -268,6 +269,8 @@ function observedArm(
   outcome: 'met' | 'not-met' | 'inconclusive',
   character: string,
 ) {
+  const evidenceId = digest('d')
+  const subjectDigest = digest('f')
   return {
     role: plan.role,
     runId: plan.runId,
@@ -279,11 +282,39 @@ function observedArm(
     normalizedFirstRequestDigest: digest('b'),
     injectionProofDigest: digest('c'),
     outcome,
-    evidenceIds: [digest('d')],
-    validatorReceiptDigest: digest('e'),
-    evaluatedSubjectDigest: digest('f'),
+    evidenceIds: [evidenceId],
+    validatorReceiptDigest: sha256({ evidenceId, subjectDigest }),
+    validatorSubjectDigest: subjectDigest,
+    evaluatedSubjectDigest: subjectDigest,
     usage: { modelRequests: 0, tokens: 0, toolCalls: 0, elapsedMs: 0, cnyMilli: 0 },
   } as const
+}
+
+function governedObservedArm(
+  ledger: EvolutionLedger,
+  plan: NonNullable<ReturnType<EvolutionLedger['getSkillEvaluation']>>,
+  arm: { readonly role: 'baseline' | 'candidate'; readonly runId: string; readonly sessionId: string },
+) {
+  const candidate = ledger.getSkillCandidate(plan.candidateId)!
+  const parentManifest = ledger.listRunSkillManifests()
+    .find(value => value.parentVersionId === plan.parentVersionId)!
+  const skill = arm.role === 'baseline'
+    ? { ...parentManifest.parent, provider: parentManifest.resolvedProvider }
+    : { ...candidate.payload, provider: parentManifest.resolvedProvider }
+  const evidenceId = digest('d')
+  const subjectDigest = sha256({ subject: arm.runId })
+  return {
+    ...observedArm(arm, 'met', arm.role === 'baseline' ? '1' : '2'),
+    skillVersionId: prepareRunSkillManifest({
+      runId: arm.runId as `run:${string}`,
+      skill,
+    }).parentVersionId,
+    contentDigest: sha256(skill.content),
+    evidenceIds: [evidenceId],
+    validatorReceiptDigest: sha256({ evidenceId, subjectDigest }),
+    validatorSubjectDigest: subjectDigest,
+    evaluatedSubjectDigest: subjectDigest,
+  }
 }
 
 afterEach(() => {
@@ -478,7 +509,7 @@ describe('paired Skill evaluation protocol', () => {
     const receipt = ledger.openSkillEvaluation({
       candidateId: chain.candidateId,
       protocolId: chain.protocolId,
-      environment: { ...environment(), providerId: 'observed-provider' },
+      environment: environment(),
       arms: plannedArms(),
     })
     const plan = ledger.getSkillEvaluation(receipt.evaluationId)!
@@ -488,7 +519,7 @@ describe('paired Skill evaluation protocol', () => {
       ['not-met', 'met'],
       ['met', 'inconclusive'],
     ] as const
-    const result = prepareSkillEvaluationResult({
+    const resultInput = {
       evaluationId: plan.evaluationId,
       cases: plan.cases.map((item, index) => ({
         caseId: item.caseId,
@@ -497,8 +528,12 @@ describe('paired Skill evaluation protocol', () => {
         candidate: observedArm(item.candidate, outcomes[index]![1], '2'),
       })),
       baselineResolutionMatched: true,
-      trustedExecution: { kind: 'observed-provider' },
-    }, plan)
+    } as const
+    const observedPlan = {
+      ...plan,
+      environment: { ...plan.environment, providerId: 'observed-provider' },
+    } as const
+    const result = prepareSkillEvaluationResult(resultInput, observedPlan)
     expect(result).toMatchObject({
       verdict: 'FAIL',
       comparison: 'not-comparable',
@@ -512,6 +547,28 @@ describe('paired Skill evaluation protocol', () => {
       ['PASS', 'candidate-better'],
       ['INCONCLUSIVE', 'not-comparable'],
     ])
+    expect(prepareSkillEvaluationResult({
+      ...resultInput,
+      baselineResolutionMatched: false,
+    }, observedPlan)).toMatchObject({
+      verdict: 'INCONCLUSIVE',
+      comparison: 'not-comparable',
+      decision: 'needs-evidence',
+    })
+    expect(() => prepareSkillEvaluationResult({
+      ...resultInput,
+      trustedExecution: { kind: 'observed-provider', deterministicCapabilityDigest: digest('d') },
+    }, observedPlan)).toThrow(TypeError)
+    const overBudget = structuredClone(resultInput)
+    overBudget.cases[0]!.baseline.usage.modelRequests = plan.environment.budget.maxModelRequestsPerArm + 1
+    expect(() => prepareSkillEvaluationResult(overBudget, observedPlan)).toThrow(TypeError)
+    const subjectMismatch = structuredClone(resultInput)
+    subjectMismatch.cases[0]!.baseline.validatorSubjectDigest = digest('e')
+    subjectMismatch.cases[0]!.baseline.validatorReceiptDigest = sha256({
+      evidenceId: subjectMismatch.cases[0]!.baseline.evidenceIds[0],
+      subjectDigest: digest('e'),
+    })
+    expect(() => prepareSkillEvaluationResult(subjectMismatch, observedPlan)).toThrow(TypeError)
   })
 
   it('records, replays, and keeps the immutable aggregate result private', () => {
@@ -549,16 +606,19 @@ describe('paired Skill evaluation protocol', () => {
       cases: plan.cases.map(item => ({
         caseId: item.caseId,
         attempt: item.attempt,
-        baseline: observedArm(item.baseline, 'met', '1'),
-        candidate: observedArm(item.candidate, 'met', '2'),
+        baseline: governedObservedArm(ledger, plan, item.baseline),
+        candidate: governedObservedArm(ledger, plan, item.candidate),
       })),
       baselineResolutionMatched: true,
-      trustedExecution: { kind: 'scripted-adapter' as const },
     }
     const first = ledger.recordSkillEvaluationResult(input)
     expect(first).toEqual({ evaluationId: plan.evaluationId, duplicate: false })
     expect(ledger.recordSkillEvaluationResult(structuredClone(input)))
       .toEqual({ ...first, duplicate: true })
+    const wrongCandidateContent = structuredClone(input)
+    wrongCandidateContent.cases[0]!.candidate.contentDigest = digest('a')
+    expect(() => ledger.recordSkillEvaluationResult(wrongCandidateContent))
+      .toThrow(LedgerIntegrityError)
     expect(ledger.getSkillEvaluationResult(first.evaluationId)).toMatchObject({
       verdict: 'INCONCLUSIVE',
       comparison: 'not-comparable',

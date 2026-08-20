@@ -246,16 +246,20 @@ DSH 能组合但缺一小段 → 写薄适配
 5. **接非阻塞 Learning Ticket（Stage 1 已证明）：** 真实 DSH 显式负面反馈可在用户结果完成后形成持久化 Signal/Ticket；入口失败不改变 Session 或当前 Run；
 6. **接重复结构化 Outcome（Stage 2 已证明）：** 在 Run 结束后消费冻结的验收结果；第一次普通可复用失败只记录 Signal，另一个 Run 的第二次同类失败创建一个开放 Ticket；
 7. **接受治理 Candidate（Stage 3 已证明）：** Run 前冻结父 Skill manifest，Run 后消费真实 DSH `skill` 工具使用证明，以同 scope、同验收合同、同父 manifest 的支持证据与反证形成 Case、Attribution、Accepted Lesson 和最多一个惰性 Candidate；
-8. **最后接 Evaluation/Shadow/Promotion：** 用独立阶段验证候选，不让它自动进入任何 Run。
+8. **记录成对 Evaluation（Stage 4 已证明）：** 在 Candidate Case 前冻结完整协议，为父版本 B 与 `recorded` Candidate C 运行成对、隔离的普通 DSH Agent，保存私有计划/结果；脚本化机制证明固定为 `INCONCLUSIVE`，不改变任何普通 Run；
+9. **最后接 Shadow/Promotion：** 用独立阶段验证候选，不让它自动进入任何 Run。
 
 Stage 2 已证明 Tianwen Run 身份与其绑定的 DSH Session 身份相互独立，并证明跨两个不同 Run 的结构化重复失败能够在现有 ledger 中形成两个 Signal 和一个 Ticket。同 Run 回放保持幂等。`met`、`inconclusive`、`observe`、`ordinary-correction` 和无关的基础设施错误都不会创建 Ticket，入口也不改变 DSH Session。
 
 Stage 3 已证明真实 DSH 执行、Skill 工具使用、Outcome Signal/Ticket 和冻结来源能够形成
 Case、Attribution、Accepted Lesson 与最多一个 Candidate。Attribution、Lesson 和 Candidate
 内容是确定性的合成合同数据；Candidate 仅为 `recorded`，不注册、不安装，也不参与当前或未来
-Run。Evaluation、Shadow、Promotion、生产 SLA/UI 和自主生成仍未完成。Alpha 与 Dynamic Cordis
-路径继续冻结为实验资产，不是产品 Runtime 或 Candidate 激活路径；不得把 Python Alpha 接成
-第二套产品 Runtime。
+Run。Stage 4 已证明完整协议能在 Case 前冻结，并让父版本 B 与 Candidate C 通过成对、隔离的
+普通 DSH Agent 产生私有 Evaluation 计划/结果、独立 Outcome/Evidence、第一请求及可见模型工具表面的公平性核对。
+脚本化机制证明不是效能证明，结果固定为 `INCONCLUSIVE`、`not-comparable` 与 `needs-evidence`；
+Candidate 仍不会安装、路由、进入 Shadow、Promotion 或 Reject。Shadow、Promotion、Active Pointer、
+Rollback、生产 SLA/UI 和自主生成仍未完成。Alpha 与 Dynamic Cordis 路径继续冻结为实验资产，不是
+产品 Runtime 或 Candidate 激活路径；不得把 Python Alpha 接成第二套产品 Runtime。
 
 这条顺序的目的不是重新开始，而是把已经验证的治理能力放回正确位置。
 
@@ -266,8 +270,8 @@ Run。Evaluation、Shadow、Promotion、生产 SLA/UI 和自主生成仍未完�
 1. DSH 能正常完成一个普通任务；
 2. Tianwen 能把一次 DSH Session 绑定到长期 Goal 并投影 Evidence；
 3. 一个真实、可复现的问题能形成 Case、Lesson 和 Candidate；
-4. Champion 与 Candidate 能公平比较，并能得到 PASS/FAIL/INCONCLUSIVE；
-5. 通过的候选只影响未来 Run，失败可以保留 Champion 或回滚；
+4. 父版本与 Candidate 能在冻结协议下公平比较；当前脚本化机制证明的效能结论为 `INCONCLUSIVE`；
+5. Shadow、Promotion、Active Pointer、Reject 和 Rollback 仍须由后续独立阶段设计，当前候选不影响任何 Run；
 6. 有一条命令可复现实验，并有简短架构图、结果表和限制说明。
 
 这会把项目从“很多内部机制”变成一个可展示、可复现、可求职、也可让外部开发者判断价值的完整技术作品。

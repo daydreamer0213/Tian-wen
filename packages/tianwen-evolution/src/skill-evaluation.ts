@@ -210,6 +210,7 @@ export interface SkillEvaluationArmObservation {
   readonly outcome: 'met' | 'not-met' | 'inconclusive'
   readonly evidenceIds: readonly Sha256Digest[]
   readonly validatorReceiptDigest: Sha256Digest
+  readonly validatorSubjectDigest: Sha256Digest
   readonly evaluatedSubjectDigest: Sha256Digest
   readonly usage: SkillEvaluationUsage
   readonly reasonCode?: SkillEvaluationReasonCode
@@ -228,16 +229,10 @@ export interface SkillEvaluationCaseResult extends SkillEvaluationCaseObservatio
   readonly comparison: SkillComparison
 }
 
-export interface TrustedSkillEvaluationExecution {
-  readonly kind: 'scripted-adapter' | 'observed-provider'
-  readonly deterministicCapabilityDigest?: Sha256Digest
-}
-
 export interface RecordSkillEvaluationResultInput {
   readonly evaluationId: SkillEvaluationId
   readonly cases: readonly SkillEvaluationCaseObservation[]
   readonly baselineResolutionMatched: boolean
-  readonly trustedExecution: TrustedSkillEvaluationExecution
 }
 
 export interface SkillEvaluationResult {
@@ -253,7 +248,6 @@ export interface SkillEvaluationResult {
   readonly cases: readonly SkillEvaluationCaseResult[]
   readonly baselineResolutionMatched: boolean
   readonly evidenceClass: SkillEvaluationEvidenceClass
-  readonly executionCapabilityDigest?: Sha256Digest
   readonly protocolProvenance: SkillEvaluationPlan['protocolProvenance']
 }
 
@@ -726,6 +720,15 @@ function prepareEnvironment(
   if (value.dshVersion !== '0.1.0-rc.7' || canonicalJson(value.budget) !== canonicalJson(protocol.budget)) {
     throw new TypeError('Skill evaluation environment disagrees with the frozen protocol')
   }
+  if (
+    value.providerId !== protocol.execution.providerId
+    || value.modelId !== protocol.execution.modelId
+    || value.toolSchemaDigest !== protocol.execution.toolSchemaDigest
+    || value.permissionDigest !== protocol.execution.permissionDigest
+    || value.validatorContractDigest !== protocol.execution.validatorContractDigest
+  ) {
+    throw new TypeError('Skill evaluation environment disagrees with the execution contract')
+  }
   return {
     dshVersion: '0.1.0-rc.7',
     providerId: safeIdentifier(value.providerId, 'providerId'),
@@ -879,13 +882,14 @@ function prepareUsage(value: unknown): SkillEvaluationUsage {
 function prepareObservation(
   value: unknown,
   plan: SkillEvaluationArmPlan,
+  budget: SkillEvalProtocol['budget'],
 ): SkillEvaluationArmObservation {
   if (!isRecord(value)) throw new TypeError('Skill evaluation arm observation must be an object')
   const keys = [
     'role', 'runId', 'sessionId', 'skillVersionId', 'contentDigest',
     'executionManifestDigest', 'fullRequestDigest', 'normalizedFirstRequestDigest',
     'injectionProofDigest', 'outcome', 'evidenceIds', 'validatorReceiptDigest',
-    'evaluatedSubjectDigest', 'usage',
+    'validatorSubjectDigest', 'evaluatedSubjectDigest', 'usage',
   ]
   if (value.reasonCode !== undefined) keys.push('reasonCode')
   exactKeys(value, keys)
@@ -909,6 +913,34 @@ function prepareObservation(
   ) {
     throw new TypeError('Skill evaluation reason code is invalid')
   }
+  const usage = prepareUsage(value.usage)
+  const exceedsArmBudget =
+    usage.modelRequests > budget.maxModelRequestsPerArm
+    || usage.tokens > budget.maxTokensPerArm
+    || usage.toolCalls > budget.maxToolCallsPerArm
+    || usage.elapsedMs > budget.maxElapsedMsPerArm
+    || usage.cnyMilli > budget.maxCnyMilliPerArm
+  if (exceedsArmBudget && (
+    value.outcome !== 'inconclusive' || value.reasonCode !== 'arm-budget-exhausted'
+  )) {
+    throw new TypeError('Skill evaluation arm exceeds its frozen budget')
+  }
+  const evidenceIds = value.evidenceIds.map(item => digest(item, 'evidenceId'))
+  const validatorSubjectDigest = digest(value.validatorSubjectDigest, 'validatorSubjectDigest')
+  const evaluatedSubjectDigest = digest(value.evaluatedSubjectDigest, 'evaluatedSubjectDigest')
+  const validatorReceiptDigest = digest(value.validatorReceiptDigest, 'validatorReceiptDigest')
+  if (validatorReceiptDigest !== sha256({
+    evidenceId: evidenceIds.at(-1) ?? null,
+    subjectDigest: validatorSubjectDigest,
+  })) {
+    throw new TypeError('Skill evaluation validator receipt is not bound to its Evidence and subject')
+  }
+  if (
+    validatorSubjectDigest !== evaluatedSubjectDigest
+    && (value.outcome !== 'inconclusive' || value.reasonCode !== 'validator-subject-mismatch')
+  ) {
+    throw new TypeError('Skill evaluation validator subject disagrees with the evaluated subject')
+  }
   return {
     role: plan.role,
     runId: plan.runId,
@@ -920,10 +952,11 @@ function prepareObservation(
     normalizedFirstRequestDigest: digest(value.normalizedFirstRequestDigest, 'normalizedFirstRequestDigest'),
     injectionProofDigest: digest(value.injectionProofDigest, 'injectionProofDigest'),
     outcome: value.outcome,
-    evidenceIds: value.evidenceIds.map(item => digest(item, 'evidenceId')),
-    validatorReceiptDigest: digest(value.validatorReceiptDigest, 'validatorReceiptDigest'),
-    evaluatedSubjectDigest: digest(value.evaluatedSubjectDigest, 'evaluatedSubjectDigest'),
-    usage: prepareUsage(value.usage),
+    evidenceIds,
+    validatorReceiptDigest,
+    validatorSubjectDigest,
+    evaluatedSubjectDigest,
+    usage,
     ...(value.reasonCode === undefined
       ? {}
       : { reasonCode: value.reasonCode as SkillEvaluationReasonCode }),
@@ -933,14 +966,15 @@ function prepareObservation(
 function reduceCase(
   plan: SkillEvaluationCasePlan,
   value: unknown,
+  budget: SkillEvalProtocol['budget'],
 ): SkillEvaluationCaseResult {
   if (!isRecord(value)) throw new TypeError('Skill evaluation case result must be an object')
   exactKeys(value, ['caseId', 'attempt', 'baseline', 'candidate'])
   if (value.caseId !== plan.caseId || value.attempt !== plan.attempt) {
     throw new TypeError('Skill evaluation case result disagrees with its plan')
   }
-  const baseline = prepareObservation(value.baseline, plan.baseline)
-  const candidate = prepareObservation(value.candidate, plan.candidate)
+  const baseline = prepareObservation(value.baseline, plan.baseline, budget)
+  const candidate = prepareObservation(value.candidate, plan.candidate, budget)
   const unreliable = baseline.outcome === 'inconclusive'
     || candidate.outcome === 'inconclusive'
     || baseline.normalizedFirstRequestDigest !== candidate.normalizedFirstRequestDigest
@@ -963,30 +997,12 @@ function reduceCase(
   }
 }
 
-function prepareTrustedExecution(value: unknown): TrustedSkillEvaluationExecution {
-  if (!isRecord(value)) throw new TypeError('trusted execution facts must be an object')
-  const keys = ['kind']
-  if (value.deterministicCapabilityDigest !== undefined) {
-    keys.push('deterministicCapabilityDigest')
-  }
-  exactKeys(value, keys)
-  if (value.kind !== 'scripted-adapter' && value.kind !== 'observed-provider') {
-    throw new TypeError('trusted execution kind is invalid')
-  }
-  return {
-    kind: value.kind,
-    ...(value.deterministicCapabilityDigest === undefined
-      ? {}
-      : { deterministicCapabilityDigest: digest(value.deterministicCapabilityDigest, 'deterministicCapabilityDigest') }),
-  }
-}
-
 export function prepareSkillEvaluationResult(
   input: RecordSkillEvaluationResultInput,
   plan: SkillEvaluationPlan,
 ): SkillEvaluationResult {
   if (!isRecord(input)) throw new TypeError('Skill evaluation result input must be an object')
-  exactKeys(input, ['evaluationId', 'cases', 'baselineResolutionMatched', 'trustedExecution'])
+  exactKeys(input, ['evaluationId', 'cases', 'baselineResolutionMatched'])
   if (
     input.evaluationId !== plan.evaluationId
     || !Array.isArray(input.cases)
@@ -1000,24 +1016,38 @@ export function prepareSkillEvaluationResult(
     if (!isRecord(value)) throw new TypeError('Skill evaluation case result must be an object')
     const planCase = planned.get(`${value.caseId}:${value.attempt}`)
     if (planCase === undefined) throw new TypeError('Skill evaluation result has an unknown case')
-    return reduceCase(planCase, value)
+    return reduceCase(planCase, value, plan.environment.budget)
   })
   if (new Set(results.map(item => `${item.caseId}:${item.attempt}`)).size !== results.length) {
     throw new TypeError('Skill evaluation result has duplicate cases')
   }
-  const trustedExecution = prepareTrustedExecution(input.trustedExecution)
   const evidenceClass: SkillEvaluationEvidenceClass = plan.environment.providerId === 'scripted-adapter'
-    || trustedExecution.kind === 'scripted-adapter'
     ? 'scripted-mechanism'
-    : trustedExecution.deterministicCapabilityDigest !== undefined
-      ? 'independent-objective'
-      : 'objective-screening'
-  const verdict: SkillEvaluationVerdict = evidenceClass === 'scripted-mechanism'
+    : 'objective-screening'
+  const usage = results.reduce((total, item) => ({
+    modelRequests: total.modelRequests + item.baseline.usage.modelRequests + item.candidate.usage.modelRequests,
+    tokens: total.tokens + item.baseline.usage.tokens + item.candidate.usage.tokens,
+    toolCalls: total.toolCalls + item.baseline.usage.toolCalls + item.candidate.usage.toolCalls,
+    elapsedMs: total.elapsedMs + item.baseline.usage.elapsedMs + item.candidate.usage.elapsedMs,
+    cnyMilli: total.cnyMilli + item.baseline.usage.cnyMilli + item.candidate.usage.cnyMilli,
+  }), { modelRequests: 0, tokens: 0, toolCalls: 0, elapsedMs: 0, cnyMilli: 0 })
+  const exceedsTotalBudget =
+    usage.modelRequests > plan.environment.budget.maxTotalModelRequests
+    || usage.tokens > plan.environment.budget.maxTotalTokens
+    || usage.toolCalls > plan.environment.budget.maxTotalToolCalls
+    || usage.elapsedMs > plan.environment.budget.maxTotalElapsedMs
+    || usage.cnyMilli > plan.environment.budget.maxTotalCnyMilli
+  if (exceedsTotalBudget && !results.some(item =>
+    item.baseline.reasonCode === 'arm-budget-exhausted'
+    || item.candidate.reasonCode === 'arm-budget-exhausted')) {
+    throw new TypeError('Skill evaluation result exceeds its frozen total budget')
+  }
+  const verdict: SkillEvaluationVerdict = evidenceClass === 'scripted-mechanism' || !input.baselineResolutionMatched
     ? 'INCONCLUSIVE'
     : results.some(item => item.verdict === 'FAIL')
       ? 'FAIL'
       : results.some(item => item.verdict === 'INCONCLUSIVE') ? 'INCONCLUSIVE' : 'PASS'
-  const comparison: SkillComparison = evidenceClass === 'scripted-mechanism'
+  const comparison: SkillComparison = evidenceClass === 'scripted-mechanism' || !input.baselineResolutionMatched
     ? 'not-comparable'
     : results.some(item => item.comparison === 'not-comparable')
       ? 'not-comparable'
@@ -1027,13 +1057,7 @@ export function prepareSkillEvaluationResult(
     ? 'candidate-hard-gate-failed'
     : verdict === 'PASS' && comparison === 'tie'
       ? 'retain-baseline'
-      : verdict === 'PASS'
-        && comparison === 'candidate-better'
-        && evidenceClass === 'independent-objective'
-        && input.baselineResolutionMatched
-        && plan.protocolProvenance === 'pre-candidate'
-        ? 'eligible-for-shadow-review'
-        : 'needs-evidence'
+      : 'needs-evidence'
   const reasonCodes = [...new Set(results.flatMap(item => [
     item.baseline.reasonCode,
     item.candidate.reasonCode,
@@ -1053,9 +1077,6 @@ export function prepareSkillEvaluationResult(
     cases: results,
     baselineResolutionMatched: input.baselineResolutionMatched,
     evidenceClass,
-    ...(trustedExecution.deterministicCapabilityDigest === undefined
-      ? {}
-      : { executionCapabilityDigest: trustedExecution.deterministicCapabilityDigest }),
     protocolProvenance: plan.protocolProvenance,
   }
 }
@@ -1067,11 +1088,7 @@ export function parseSkillEvaluationResult(value: unknown): SkillEvaluationResul
     'verdict', 'comparison', 'decision', 'reasonCodes', 'cases',
     'baselineResolutionMatched', 'evidenceClass', 'protocolProvenance',
   ]
-  if (value.executionCapabilityDigest !== undefined) keys.push('executionCapabilityDigest')
   exactKeys(value, keys)
-  if (value.executionCapabilityDigest !== undefined) {
-    digest(value.executionCapabilityDigest, 'executionCapabilityDigest')
-  }
   if (value.schemaVersion !== 'tianwen.skill-evaluation-result.v1') {
     throw new TypeError('Skill evaluation result has an invalid schema version')
   }
