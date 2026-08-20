@@ -22,6 +22,8 @@ export type {
   MessageSource,
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
+export { default as MessageFeedbackService } from '@deepseek-ai/dsh-message-feedback'
+export type { MessageFeedbackItem } from '@deepseek-ai/dsh-message-feedback'
 export {
   SESSION_FORMAT_VERSION,
   Session,
