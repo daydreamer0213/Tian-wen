@@ -171,6 +171,33 @@ def test_paired_skill_evaluation_public_facts_and_ci() -> None:
         assert command in ci
 
 
+def test_governed_skill_shadow_eligibility_handoff_and_ci() -> None:
+    handoff = (ROOT / "docs" / "operations" / "tianwen-stage5-skill-shadow-eligibility-handoff.md").read_text(
+        encoding="utf-8"
+    )
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    for fact in (
+        "DSH `0.1.0-rc.7` remains the only product Agent Runtime",
+        "Stage 5 implements only the eligibility slice",
+        "no-eligible-shadow",
+        "Natural Shadow routing, five qualified natural Runs, Active Pointer, Promotion, and rollback remain unimplemented and unproven",
+        "Scripted evidence is not efficacy evidence",
+        "No Candidate is registered for ordinary traffic",
+        "0 Provider requests, 0 paid tokens, 0 CNY, 0 Docker, and 0 user data",
+        "Artifact, Dynamic Cordis, and Champion paths are not used for activation, routing, or state change",
+        "Python Alpha, RepoTaskRuntime, and AlphaRuntime are not used",
+    ):
+        assert fact in handoff
+
+    for command in (
+        "tests/dsh-probe/skill-shadow.spec.ts",
+        "tests/dsh-probe/skill-shadow-eligibility-demo.spec.ts",
+        "pnpm demo:shadow-eligibility",
+    ):
+        assert command in ci
+
+
 def test_relative_links_in_public_documents_exist() -> None:
     for name in PUBLIC_DOCUMENTS:
         document = read_public_document(name)
