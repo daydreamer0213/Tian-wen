@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -5,6 +6,11 @@ import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-test
 import GoalService from '@deepseek-ai/dsh-goal'
 import * as goalRoundDriver from '@deepseek-ai/dsh-goal-round-driver'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import DynamicCordisRunnerService from '@deepseek-ai/dsh-cordis-host-runner'
+import MessageFeedbackService from '@deepseek-ai/dsh-message-feedback'
+import Storage from '@deepseek-ai/dsh-storage'
+import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
+import * as JsonStorage from '@deepseek-ai/dsh-storage-json'
 
 import { ScriptedAdapter } from './scripted-adapter.js'
 import type { ScriptEntry } from './scripted-adapter.js'
@@ -44,6 +50,25 @@ export async function mountPersistentHarness(
   await mountAgentLoopTestDependencies(ctx)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+  return registerAdapter(ctx, script)
+}
+
+export async function mountFeedbackHarness(
+  root: string,
+  script: ScriptEntry[],
+): Promise<MountedHarness> {
+  const ctx = new Context()
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(JsonlSessionPersistence, {
+    root: join(root, 'sessions'),
+    compression: 'none',
+  })
+  await ctx.plugin(Storage)
+  await ctx.plugin(JsonStorage, { root: join(root, 'feedback-storage') })
+  await ctx.plugin(StorageDomain, { backend: 'json', routes: {} })
+  await ctx.plugin(MessageFeedbackService, { maxNoteBytes: 8192 })
+  await ctx.plugin(DynamicCordisRunnerService, {})
   return registerAdapter(ctx, script)
 }
 

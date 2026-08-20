@@ -47,7 +47,11 @@ def test_required_public_surface_and_positioning() -> None:
     assert "learning control plane" in readme_en
     assert "DSH" in readme_en
     assert "pnpm demo:research-preview" in readme_en
+    assert "pnpm demo:explicit-correction" in readme_en
     assert "Candidate/Shadow/Promotion" in readme_en
+    assert "Explicit negative feedback with a concrete note can create a durable Signal/Ticket." in readme_en
+    assert "Positive and note-free negative feedback create no Ticket." in readme_en
+    assert "Candidate, Shadow, and Promotion remain unimplemented." in readme_en
     assert "completed autonomous learning" not in readme_en
 
     with (ROOT / "pyproject.toml").open("rb") as handle:
@@ -72,7 +76,16 @@ def test_bilingual_documents_share_the_proven_preview_facts() -> None:
     assert "not complete" in readme_en
     assert "Evidence 只读投影" in readme_zh
     assert "尚未完成" in readme_zh
+    assert "带有具体说明的显式负面反馈可以创建持久化 Signal/Ticket。" in readme_zh
+    assert "正面反馈和没有说明的负面反馈都不会创建 Ticket。" in readme_zh
+    assert "Candidate、Shadow 和 Promotion 仍未实现。" in readme_zh
     assert "Alpha 是实验与评测资产，不是第二套产品运行时。" in readme_zh
+
+
+def test_ci_runs_both_zero_cost_demos() -> None:
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "pnpm demo:research-preview" in ci
+    assert "pnpm demo:explicit-correction" in ci
 
 
 def test_relative_links_in_public_documents_exist() -> None:

@@ -15,8 +15,15 @@ import type {
   ChampionPointer,
   EvaluationRecord,
   LedgerEvent,
+  PublicLedgerEvent,
   TransitionAuthority,
 } from './ledger.js'
+import type {
+  LearningIntakeInput,
+  LearningIntakeReceipt,
+  LearningSignal,
+  LearningTicket,
+} from './learning-intake.js'
 
 export interface RuntimeBinding {
   readonly artifactId: ArtifactId
@@ -91,6 +98,12 @@ function publicBinding(binding: BoundRuntime): RuntimeBinding {
   }
 }
 
+function isPublicLedgerEvent(
+  event: LedgerEvent,
+): event is PublicLedgerEvent {
+  return event.type !== 'learning-intake-recorded'
+}
+
 export class TianwenEvolutionService extends Service {
   static inject = ['dynamicCordisRunner']
 
@@ -128,12 +141,26 @@ export class TianwenEvolutionService extends Service {
     this.formalWrite(() => this.state().ledger.recordApproval(record))
   }
 
+  recordLearningIntake(input: LearningIntakeInput): LearningIntakeReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningIntake(input))
+  }
+
+  listLearningSignals(): readonly LearningSignal[] {
+    return this.state().ledger.listLearningSignals()
+  }
+
+  listLearningTickets(): readonly LearningTicket[] {
+    return this.state().ledger.listLearningTickets()
+  }
+
   getChampion(): ChampionPointer | undefined {
     return this.state().ledger.getChampion()
   }
 
-  listEvents(): readonly LedgerEvent[] {
+  listEvents(): readonly PublicLedgerEvent[] {
     return this.state().ledger.listEvents()
+      .filter(isPublicLedgerEvent)
   }
 
   promote(agent: Agent, artifactId: ArtifactId): Promise<RuntimeBinding> {

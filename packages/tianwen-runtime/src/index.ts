@@ -4,6 +4,16 @@ import type { Context } from '@tianwen/dsh-compat'
 import { TianwenEvidenceService } from '@tianwen/evidence'
 import { TianwenEvolutionService } from '@tianwen/evolution'
 
+import { TianwenLearningIntakeService } from './learning-intake.js'
+
+export {
+  TianwenLearningIntakeService,
+} from './learning-intake.js'
+export type {
+  FeedbackSnapshot,
+  RuntimeLearningIntakeReceipt,
+} from './learning-intake.js'
+
 export const SUPPORTED_DSH_VERSION = '0.1.0-rc.7' as const
 export const name = 'tianwen-runtime'
 export const inject = ['dynamicCordisRunner'] as const
@@ -27,4 +37,5 @@ export async function apply(
   }
   await ctx.plugin(TianwenEvidenceService)
   await ctx.plugin(TianwenEvolutionService, { root: config.evolutionRoot })
+  await ctx.plugin(TianwenLearningIntakeService)
 }

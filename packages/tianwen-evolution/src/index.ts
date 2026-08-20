@@ -11,9 +11,19 @@ export type {
   ChampionPointer,
   EvaluationRecord,
   GovernanceErrorCode,
-  LedgerEvent,
+  PublicLedgerEvent as LedgerEvent,
   RecoveryFailedEvent,
   RuntimeBoundEvent,
   Sha256Digest,
 } from './ledger.js'
+export { prepareLearningIntake } from './learning-intake.js'
+export type {
+  LearningIntakeInput,
+  LearningIntakeReceipt,
+  LearningSignal,
+  LearningSignalId,
+  LearningTicket,
+  LearningTicketId,
+  PreparedLearningIntake,
+} from './learning-intake.js'
 export * from './runtime-binding.js'

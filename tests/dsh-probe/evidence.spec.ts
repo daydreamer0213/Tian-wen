@@ -1,10 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import {
-  mkdirSync,
   mkdtempSync,
   rmSync,
 } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -276,11 +274,7 @@ describe('Tianwen evidence projection', () => {
   })
 
   it('replays persistent evidence identically without requesting another model response', async () => {
-    const fixtureBase = process.platform === 'win32'
-      ? 'D:/DevData/tianwen-dsh-probe/sessions'
-      : tmpdir()
-    mkdirSync(fixtureBase, { recursive: true })
-    const root = mkdtempSync(resolve(fixtureBase, 'evidence-replay-'))
+    const root = mkdtempSync(resolve('.tianwen-stage1-evidence-'))
     const sessionId = SessionId(`evidence-replay-${randomUUID()}`)
     let first: Awaited<ReturnType<typeof mountPersistentHarness>> | undefined
     let second: Awaited<ReturnType<typeof mountPersistentHarness>> | undefined

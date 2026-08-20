@@ -8,7 +8,8 @@ Tianwen is an auditable learning control plane for long-running agents.
 runs in the background as a non-interfering control plane: it reads execution
 facts after a normal DSH run and does not replace or hot-swap the running Agent.
 This preview proves normal Agent execution, read-only Evidence projection, and
-zero qualifying signal → `no-case` with `candidateCreated=false`.
+zero qualifying signal → `no-case` with `candidateCreated=false`. It also proves
+one non-blocking explicit-feedback intake path after the user result is complete.
 Candidate/Shadow/Promotion is not complete.
 
 ## Why Tianwen exists
@@ -24,7 +25,7 @@ to the Runtime.
 | Layer | Responsibility |
 | --- | --- |
 | **DSH** | Runs the current Agent session. Tianwen reuses its models and providers, Agent loop, tools, MCP, sandbox, Session Query, Skill, Jobs, Workflow, Subagent, Message Feedback, Approval, and permissions. |
-| **Tianwen** | Owns the cross-run governance boundary: Goal Graph, Evidence provenance, learning attribution, and future-run version governance. The current preview exercises only read-only Evidence projection and a conservative no-case decision. |
+| **Tianwen** | Owns the cross-run governance boundary: Goal Graph, Evidence provenance, learning attribution, and future-run version governance. The current preview exercises read-only Evidence projection, a conservative no-case decision, and explicit-feedback Signal/Ticket intake. |
 | **Alpha** | Supplies experimental and evaluation assets. It is not a second product Runtime. |
 
 DSH Message Feedback is an attribution input, not a Lesson by itself. A DSH Job
@@ -44,6 +45,14 @@ With no repeated failure or user correction, the correct learning result is
 `no-case`, zero qualifying signals, and `candidateCreated=false`. This is a
 bounded execution and Evidence result, not proof of general autonomous learning.
 
+Explicit negative feedback with a concrete note can create a durable Signal/Ticket.
+The second zero-cost demo writes feedback through the real DSH Message Feedback
+service, consumes the stored snapshot after the final answer, records one Signal
+and one open Ticket in the existing evolution ledger, and proves replay is
+idempotent without changing the Session.
+Positive and note-free negative feedback create no Ticket.
+Candidate, Shadow, and Promotion remain unimplemented.
+
 ## Three-minute, zero-cost demo
 
 Install the locked dependencies, then run:
@@ -51,14 +60,17 @@ Install the locked dependencies, then run:
 ```console
 pnpm install --frozen-lockfile
 pnpm demo:research-preview
+pnpm demo:explicit-correction
 ```
 
-The command prints one formatted JSON object. It uses no network, Provider,
-token budget, paid model, Docker service, persistent database, or user data.
-Expect one completed execution, one complete Evidence record, a `no-case`
-learning decision, `candidateCreated=false`, and matching before/after session
-digests. Digest values may differ between separate runs because session events
-contain run-specific data; equality within a run is the non-interference check.
+Each demo prints one formatted JSON object. They use no network, Provider, token
+budget, paid model, Docker service, persistent database, or user data. The
+research-preview demo reports one complete Evidence record and `no-case`. The
+explicit-correction demo reports stored negative feedback, one Signal, one open
+Ticket, duplicate replay, and `candidateCreated=false`. Both report matching
+before/after Session digests. Digest values may differ between separate runs
+because Session events contain run-specific data; equality within a run is the
+non-interference check.
 
 ## Current limitations
 
@@ -72,7 +84,8 @@ contain run-specific data; equality within a run is the non-interference check.
 ## Repository map
 
 - [`scripts/run-research-preview-demo.ts`](scripts/run-research-preview-demo.ts)
-  contains the deterministic demo.
+  contains the deterministic no-case demo; [`scripts/run-explicit-correction-demo.ts`](scripts/run-explicit-correction-demo.ts)
+  contains the explicit-feedback intake demo.
 - [`packages/tianwen-dsh-compat`](packages/tianwen-dsh-compat) is the public DSH
   compatibility seam.
 - [`packages/tianwen-evidence`](packages/tianwen-evidence) performs the read-only
@@ -89,7 +102,7 @@ contain run-specific data; equality within a run is the non-interference check.
 pnpm run typecheck
 pnpm run check:dsh-install
 pnpm run check:no-private-dsh-imports
-pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts
+pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts
 uv sync --frozen --dev
 uv run ruff check .
 uv run pytest

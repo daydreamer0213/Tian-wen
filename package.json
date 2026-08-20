@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "node scripts/typecheck-packages.mjs",
+    "demo:explicit-correction": "tsx scripts/run-explicit-correction-demo.ts",
     "demo:research-preview": "tsx scripts/run-research-preview-demo.ts",
     "install:tianwen": "node scripts/install-tianwen.mjs",
     "typecheck": "node scripts/typecheck-packages.mjs",
