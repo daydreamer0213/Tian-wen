@@ -490,7 +490,7 @@ export function prepareLearningCase(
   }
   const selected = ticket.signalIds.map(signalId =>
     signals.find(signal => signal.signalId === signalId))
-  if (selected.some(signal => signal === undefined) || selected.length < 2) {
+  if (selected.some(signal => signal === undefined) || selected.length < 1) {
     throw new TypeError('Learning Case requires all recurrent Outcome Signals')
   }
   const outcomes = byRun(facts.outcomes)
@@ -521,7 +521,7 @@ export function prepareLearningCase(
     throw new TypeError('Learning Case supporting Runs disagree')
   }
   const counterRunIds = unique(input.counterevidenceRunIds.map(runIdValue)).sort()
-  if (counterRunIds.length === 0 || counterRunIds.some(runId => runIds.includes(runId))) {
+  if (counterRunIds.some(runId => runIds.includes(runId))) {
     throw new TypeError('Learning Case requires distinct counterevidence Runs')
   }
   const counterevidence = counterRunIds.map(runId => {
@@ -565,7 +565,7 @@ export function prepareLearningCase(
 }
 
 function nonblank(value: unknown, label: string): string {
-  return stringValue(value, label)
+  return stringValue(value, label).trim()
 }
 
 export function prepareAttribution(
@@ -808,7 +808,7 @@ function prepareCandidatePayload(
       userInvocable: payload.invocation.userInvocable,
     },
     source: payload.source,
-    content: nonblank(payload.content, 'payload.content'),
+    content: stringValue(payload.content, 'payload.content'),
   }
 }
 

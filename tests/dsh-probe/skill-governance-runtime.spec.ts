@@ -185,6 +185,39 @@ describe('Tianwen governed Skill runtime intake', () => {
     }
   })
 
+  it('rechecks the pre-Turn boundary after asynchronous Skill resolution', async () => {
+    const harness = await mount([textResponse('unused')])
+    const handle = await harness.ctx.agents.create({
+      sessionId: SessionId(`skill-race-${randomUUID()}`),
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    let release!: () => void
+    const gate = new Promise<void>(resolveGate => { release = resolveGate })
+    vi.spyOn(harness.ctx.skills, 'get').mockImplementation(async () => {
+      await gate
+      return parent
+    })
+    const bindingWrite = vi.spyOn(
+      harness.ctx.tianwenEvolution,
+      'recordRunBinding',
+    )
+    try {
+      const pending = harness.ctx.tianwenLearningIntake.bindRunWithSkill(
+        handle.agent,
+        input('race'),
+        parent.name,
+      )
+      handle.agent.session.append('turn/start', { turn: 1 })
+      release()
+      await expect(pending).rejects.toThrow(/before the first DSH Turn/i)
+      expect(bindingWrite).not.toHaveBeenCalled()
+      expect(harness.ctx.tianwenEvolution.listRunSkillManifests()).toEqual([])
+    } finally {
+      await handle.dispose()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
   it('returns no-use-proof for altered rendered Skill output without changing Outcome', async () => {
     const harness = await mount([
       toolCallResponse('load-parent', 'skill', { name: parent.name }),

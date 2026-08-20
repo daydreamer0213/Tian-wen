@@ -138,6 +138,12 @@ export class TianwenLearningIntakeService extends Service {
       throw new Error(`DSH Skill is not model-invocable: ${skillName}`)
     }
     const manifest = prepareRunSkillManifest({ runId: binding.runId, skill })
+    if (
+      session.events.some(event => event.type === 'turn/start')
+      || sessionDigest(session.events) !== before
+    ) {
+      throw new Error('Tianwen Run must be bound before the first DSH Turn')
+    }
     const run = this.ctx.tianwenEvolution.recordRunBinding({
       ...input,
       sessionId: String(session.id),

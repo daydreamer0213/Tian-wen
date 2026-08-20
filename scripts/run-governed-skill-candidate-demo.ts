@@ -16,6 +16,7 @@ import {
 } from '@tianwen/dsh-compat'
 import type { SessionEvent } from '@tianwen/dsh-compat'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
+import { PUBLIC_LEDGER_EVENT_TYPES } from '../packages/tianwen-evolution/src/index.js'
 import { apply } from '../packages/tianwen-runtime/src/index.js'
 import { EvolutionLedger } from '../packages/tianwen-evolution/src/ledger.js'
 
@@ -218,6 +219,15 @@ export async function runGovernedSkillCandidateDemo(): Promise<GovernedCandidate
     const restartedCandidate = new EvolutionLedger(evolutionRoot)
       .getSkillCandidate(candidate.candidateId)
     const publicEvents = harness.ctx.tianwenEvolution.listEvents()
+    const serializedPublicEvents = JSON.stringify(publicEvents)
+    const internalTypes = [
+      'run-skill-manifest-recorded',
+      'run-skill-use-recorded',
+      'learning-case-opened',
+      'learning-attribution-recorded',
+      'learning-lesson-recorded',
+      'learning-candidate-recorded',
+    ]
     const artifactFiles = readdirSync(resolve(evolutionRoot, 'artifacts'))
     const sessionsUnchanged = before.every((value, index) => value === after[index])
     const inventoryUnchanged = JSON.stringify(inventoryBefore)
@@ -232,6 +242,10 @@ export async function runGovernedSkillCandidateDemo(): Promise<GovernedCandidate
       || toolCalls !== 6
       || !sessionsUnchanged
       || !inventoryUnchanged
+      || publicEvents.some(event =>
+        !PUBLIC_LEDGER_EVENT_TYPES.includes(event.type))
+      || internalTypes.some(type => serializedPublicEvents.includes(type))
+      || serializedPublicEvents.includes('State the observed')
     ) {
       throw new Error('governed Candidate demo invariant failed')
     }
