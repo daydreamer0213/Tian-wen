@@ -40,6 +40,14 @@ import type {
   RunSkillUse,
   RunSkillUseInput,
   RunSkillUseReceipt,
+  AttributionId,
+  AttributionInput,
+  AttributionReceipt,
+  AttributionRecord,
+  LearningCase,
+  LearningCaseId,
+  LearningCaseReceipt,
+  OpenLearningCaseInput,
 } from './skill-governance.js'
 
 export interface RuntimeBinding {
@@ -191,6 +199,30 @@ export class TianwenEvolutionService extends Service {
 
   listRunSkillUses(): readonly RunSkillUse[] {
     return this.state().ledger.listRunSkillUses()
+  }
+
+  openLearningCase(input: OpenLearningCaseInput): LearningCaseReceipt {
+    return this.formalWrite(() => this.state().ledger.openLearningCase(input))
+  }
+
+  getLearningCase(caseId: LearningCaseId): LearningCase | undefined {
+    return this.state().ledger.getLearningCase(caseId)
+  }
+
+  listLearningCases(): readonly LearningCase[] {
+    return this.state().ledger.listLearningCases()
+  }
+
+  recordAttribution(input: AttributionInput): AttributionReceipt {
+    return this.formalWrite(() => this.state().ledger.recordAttribution(input))
+  }
+
+  getAttribution(attributionId: AttributionId): AttributionRecord | undefined {
+    return this.state().ledger.getAttribution(attributionId)
+  }
+
+  listAttributions(): readonly AttributionRecord[] {
+    return this.state().ledger.listAttributions()
   }
 
   listLearningSignals(): readonly (LearningSignal | OutcomeLearningSignal)[] {

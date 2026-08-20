@@ -99,6 +99,61 @@ function useInput(
   }
 }
 
+function seedGovernedCase(
+  ledger: EvolutionLedger,
+  options: { readonly withUses?: boolean } = {},
+) {
+  const withUses = options.withUses ?? true
+  const runs = [
+    ['case-failure-1', 'not-met', '3', 'c'],
+    ['case-failure-2', 'not-met', '4', 'd'],
+    ['case-success', 'met', '5', 'e'],
+  ] as const
+  const seeded = runs.map(([session, verdict, sessionCharacter, evidenceCharacter]) => {
+    const sessionId = `session:${session}`
+    const { runId } = bindReusableRun(ledger, sessionId)
+    const manifest = ledger.recordRunSkillManifest({ runId, skill: parent })
+    const sessionDigest = digest(sessionCharacter)
+    const acceptanceEvidenceId = digest(evidenceCharacter)
+    const outcome = ledger.recordOutcomeIntake({
+      runId,
+      verdict,
+      sessionDigest,
+      evidenceIds: [acceptanceEvidenceId],
+    })
+    const input: RunSkillUseInput = {
+      runId,
+      parentVersionId: manifest.parentVersionId,
+      sessionId,
+      sessionDigest,
+      skillName: parent.name,
+      contentDigest: ledger.getRunSkillManifest(runId)!.contentDigest,
+      skillEvidenceId: digest(verdict === 'met' ? '8' : sessionCharacter),
+      acceptanceEvidenceId,
+      skillCallSeq: 10,
+      skillResultSeq: 11,
+      acceptanceCallSeq: 12,
+    }
+    if (withUses) {
+      ledger.recordRunSkillUse(input)
+    }
+    return { runId, acceptanceEvidenceId, outcome, use: input }
+  })
+  const ticketId = seeded[1].outcome.ticketId!
+  const opened = ledger.openLearningCase({
+    ticketId,
+    counterevidenceRunIds: [seeded[2].runId],
+  })
+  const value = ledger.getLearningCase(opened.caseId)!
+  return {
+    caseId: opened.caseId,
+    ticketId,
+    value,
+    supportingEvidenceIds: value.supportingEvidenceIds,
+    counterevidenceIds: value.counterevidence.flatMap(item => item.evidenceIds),
+  }
+}
+
 afterEach(() => {
   for (const value of roots.splice(0)) {
     rmSync(value, { recursive: true, force: true })
@@ -202,5 +257,88 @@ describe('governed Skill evidence', () => {
     expect(restarted.listRunSkillManifests())
       .toEqual(ledger.listRunSkillManifests())
     expect(restarted.listRunSkillUses()).toEqual(ledger.listRunSkillUses())
+  })
+
+  it('derives one Case only from Ticket facts and a related met Run', () => {
+    const ledger = new EvolutionLedger(root('case'))
+    const seeded = seedGovernedCase(ledger)
+    expect(seeded.value).toMatchObject({
+      ticketId: seeded.ticketId,
+      learningMode: 'experience-consolidation',
+      schedule: 'background',
+      experimentLimit: 0,
+      candidateLimit: 1,
+      parentSkillName: parent.name,
+    })
+    expect(seeded.value.signalIds).toHaveLength(2)
+    expect(seeded.value.runIds).toHaveLength(2)
+    expect(seeded.value.supporting).toHaveLength(2)
+    expect(seeded.value.counterevidence).toHaveLength(1)
+    expect(seeded.value.counterevidence[0]?.skillUse).toBeDefined()
+    expect(ledger.openLearningCase({
+      ticketId: seeded.ticketId,
+      counterevidenceRunIds: [seeded.value.counterevidence[0]!.runId],
+    })).toMatchObject({ caseId: seeded.caseId, duplicate: true })
+    expect(() => ledger.openLearningCase({
+      ticketId: seeded.ticketId,
+      counterevidenceRunIds: [],
+    })).toThrow(LedgerIntegrityError)
+    expect(() => ledger.openLearningCase({
+      ticketId: `ticket:${'f'.repeat(64)}`,
+      counterevidenceRunIds: [],
+    })).toThrow(LedgerIntegrityError)
+  })
+
+  it('allows unknown without use proof but gates dsh-skill attribution', () => {
+    const incompleteLedger = new EvolutionLedger(root('unknown-attribution'))
+    const incomplete = seedGovernedCase(incompleteLedger, { withUses: false })
+    expect(incompleteLedger.recordAttribution({
+      caseId: incomplete.caseId,
+      resolution: 'unknown',
+      reason: 'The frozen evidence does not distinguish Skill from tool behavior.',
+    })).toMatchObject({ duplicate: false, decision: 'no-lesson' })
+    expect(() => incompleteLedger.recordAttribution({
+      caseId: incomplete.caseId,
+      resolution: 'dsh-skill',
+      targetSkillName: parent.name,
+      hypothesis: 'The parent instruction omits result-first ordering.',
+      supportingEvidenceIds: incomplete.supportingEvidenceIds,
+      counterevidenceIds: incomplete.counterevidenceIds,
+      alternatives: 'Tool and Runtime causes remain unsupported.',
+    })).toThrow(LedgerIntegrityError)
+
+    const ledger = new EvolutionLedger(root('skill-attribution'))
+    const complete = seedGovernedCase(ledger)
+    const input = {
+      caseId: complete.caseId,
+      resolution: 'dsh-skill' as const,
+      targetSkillName: parent.name,
+      hypothesis: 'The parent instruction omits result-first ordering.',
+      supportingEvidenceIds: complete.supportingEvidenceIds,
+      counterevidenceIds: complete.counterevidenceIds,
+      alternatives: 'Tool and Runtime causes remain unsupported.',
+    }
+    expect(ledger.recordAttribution(input))
+      .toMatchObject({ duplicate: false, decision: 'resolved' })
+    expect(ledger.recordAttribution(structuredClone(input)))
+      .toMatchObject({ duplicate: true, decision: 'resolved' })
+    expect(() => ledger.recordAttribution({
+      ...input,
+      targetSkillName: 'another-skill',
+    })).toThrow(LedgerIntegrityError)
+    expect(() => ledger.recordAttribution({
+      ...input,
+      supportingEvidenceIds: [digest('f')],
+    })).toThrow(LedgerIntegrityError)
+  })
+
+  it('records outside-stage3 only with a nonblank recommendation', () => {
+    const ledger = new EvolutionLedger(root('outside-attribution'))
+    const seeded = seedGovernedCase(ledger, { withUses: false })
+    expect(ledger.recordAttribution({
+      caseId: seeded.caseId,
+      resolution: 'outside-stage3',
+      recommendation: 'Inspect the deterministic tool fixture separately.',
+    })).toMatchObject({ decision: 'no-lesson', duplicate: false })
   })
 })

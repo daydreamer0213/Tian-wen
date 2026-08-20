@@ -9,9 +9,15 @@ import type { Sha256Digest } from './ledger.js'
 import { canonicalJson, sha256 } from './learning-intake.js'
 import type {
   OutcomeIntakeInput,
+  OutcomeLearningSignal,
   TianwenRunBinding,
   TianwenRunId,
 } from './outcome-intake.js'
+import type {
+  LearningSignalId,
+  LearningTicket,
+  LearningTicketId,
+} from './learning-intake.js'
 
 export type SkillVersionId = `skill-version:${string}`
 export type LearningCaseId = `case:${string}`
@@ -348,4 +354,307 @@ export function parseRunSkillUse(value: unknown): RunSkillUse {
       acceptanceCallSeq: value.acceptanceCallSeq,
     }),
   }
+}
+
+export interface CaseEvidenceRelation {
+  readonly runId: TianwenRunId
+  readonly evidenceIds: readonly Sha256Digest[]
+  readonly skillUse?: RunSkillUse
+}
+
+export interface LearningCase {
+  readonly caseId: LearningCaseId
+  readonly ticketId: LearningTicketId
+  readonly problemFingerprint: Sha256Digest
+  readonly problemCategory: string
+  readonly scopeKey: string
+  readonly signalIds: readonly LearningSignalId[]
+  readonly runIds: readonly TianwenRunId[]
+  readonly supportingEvidenceIds: readonly Sha256Digest[]
+  readonly supporting: readonly CaseEvidenceRelation[]
+  readonly counterevidence: readonly CaseEvidenceRelation[]
+  readonly acceptanceContractDigest: Sha256Digest
+  readonly parentVersionId: SkillVersionId
+  readonly parentSkillName: string
+  readonly learningMode: 'experience-consolidation'
+  readonly schedule: 'background'
+  readonly experimentLimit: 0
+  readonly candidateLimit: 1
+  readonly stopConditions: readonly [
+    'sufficient',
+    'insufficient-evidence',
+    'risk-boundary',
+  ]
+}
+
+export interface OpenLearningCaseInput {
+  readonly ticketId: LearningTicketId
+  readonly counterevidenceRunIds: readonly TianwenRunId[]
+}
+
+export interface LearningCaseReceipt {
+  readonly caseId: LearningCaseId
+  readonly duplicate: boolean
+}
+
+export interface LearningCaseFacts {
+  readonly bindings: readonly TianwenRunBinding[]
+  readonly manifests: readonly RunSkillManifest[]
+  readonly uses: readonly RunSkillUse[]
+  readonly outcomes: readonly OutcomeIntakeInput[]
+}
+
+export type AttributionRecord =
+  | { readonly attributionId: AttributionId; readonly caseId: LearningCaseId;
+      readonly resolution: 'unknown'; readonly reason: string }
+  | { readonly attributionId: AttributionId; readonly caseId: LearningCaseId;
+      readonly resolution: 'outside-stage3'; readonly recommendation: string }
+  | { readonly attributionId: AttributionId; readonly caseId: LearningCaseId;
+      readonly resolution: 'dsh-skill'; readonly targetSkillName: string;
+      readonly hypothesis: string;
+      readonly supportingEvidenceIds: readonly Sha256Digest[];
+      readonly counterevidenceIds: readonly Sha256Digest[];
+      readonly alternatives: string }
+
+export type AttributionInput =
+  | { readonly caseId: LearningCaseId; readonly resolution: 'unknown';
+      readonly reason: string }
+  | { readonly caseId: LearningCaseId; readonly resolution: 'outside-stage3';
+      readonly recommendation: string }
+  | { readonly caseId: LearningCaseId; readonly resolution: 'dsh-skill';
+      readonly targetSkillName: string; readonly hypothesis: string;
+      readonly supportingEvidenceIds: readonly Sha256Digest[];
+      readonly counterevidenceIds: readonly Sha256Digest[];
+      readonly alternatives: string }
+
+export interface AttributionReceipt {
+  readonly attributionId: AttributionId
+  readonly decision: 'resolved' | 'no-lesson'
+  readonly duplicate: boolean
+}
+
+export interface LearningCaseOpenedEvent {
+  readonly schemaVersion: 'tianwen.learning-case.v1'
+  readonly type: 'learning-case-opened'
+  readonly at: string
+  readonly case: LearningCase
+  readonly inputDigest: Sha256Digest
+}
+
+export interface LearningAttributionRecordedEvent {
+  readonly schemaVersion: 'tianwen.learning-attribution.v1'
+  readonly type: 'learning-attribution-recorded'
+  readonly at: string
+  readonly attribution: AttributionRecord
+  readonly inputDigest: Sha256Digest
+}
+
+function byRun<T extends { readonly runId: TianwenRunId }>(
+  values: readonly T[],
+): Map<TianwenRunId, T> {
+  return new Map(values.map(value => [value.runId, value]))
+}
+
+function unique<T>(values: readonly T[]): T[] {
+  return [...new Set(values)]
+}
+
+function relation(
+  runId: TianwenRunId,
+  evidenceIds: readonly Sha256Digest[],
+  uses: Map<TianwenRunId, RunSkillUse>,
+): CaseEvidenceRelation {
+  const skillUse = uses.get(runId)
+  return {
+    runId,
+    evidenceIds: [...evidenceIds],
+    ...(skillUse === undefined ? {} : { skillUse }),
+  }
+}
+
+export function prepareLearningCase(
+  input: OpenLearningCaseInput,
+  ticket: LearningTicket,
+  signals: readonly OutcomeLearningSignal[],
+  facts: LearningCaseFacts,
+): LearningCase {
+  if (!isRecord(input)) {
+    throw new TypeError('Learning Case input must be an object')
+  }
+  exactKeys(input, ['ticketId', 'counterevidenceRunIds'])
+  if (!Array.isArray(input.counterevidenceRunIds)) {
+    throw new TypeError('counterevidenceRunIds must be an array')
+  }
+  if (ticket.status !== 'open' || input.ticketId !== ticket.ticketId) {
+    throw new TypeError('Learning Case requires its open Ticket')
+  }
+  const selected = ticket.signalIds.map(signalId =>
+    signals.find(signal => signal.signalId === signalId))
+  if (selected.some(signal => signal === undefined) || selected.length < 2) {
+    throw new TypeError('Learning Case requires all recurrent Outcome Signals')
+  }
+  const outcomes = byRun(facts.outcomes)
+  const bindings = byRun(facts.bindings)
+  const manifests = byRun(facts.manifests)
+  const uses = byRun(facts.uses)
+  const resolvedSignals = selected as OutcomeLearningSignal[]
+  const runIds = resolvedSignals.map(signal => signal.runId)
+  if (unique(runIds).length !== runIds.length) {
+    throw new TypeError('Learning Case Signal Runs must be distinct')
+  }
+  const firstBinding = bindings.get(runIds[0]!)
+  const firstManifest = manifests.get(runIds[0]!)
+  if (firstBinding === undefined || firstManifest === undefined) {
+    throw new TypeError('Learning Case lacks a frozen Run manifest')
+  }
+  const sameGovernedParent = (runId: TianwenRunId) => {
+    const binding = bindings.get(runId)
+    const manifest = manifests.get(runId)
+    return binding !== undefined
+      && manifest !== undefined
+      && binding.scopeKey === firstBinding.scopeKey
+      && binding.acceptanceContractDigest === firstBinding.acceptanceContractDigest
+      && canonicalJson(manifest.parent) === canonicalJson(firstManifest.parent)
+      && manifest.parentVersionId === firstManifest.parentVersionId
+  }
+  if (!runIds.every(sameGovernedParent)) {
+    throw new TypeError('Learning Case supporting Runs disagree')
+  }
+  const counterRunIds = unique(input.counterevidenceRunIds.map(runIdValue)).sort()
+  if (counterRunIds.length === 0 || counterRunIds.some(runId => runIds.includes(runId))) {
+    throw new TypeError('Learning Case requires distinct counterevidence Runs')
+  }
+  const counterevidence = counterRunIds.map(runId => {
+    const outcome = outcomes.get(runId)
+    if (
+      outcome?.verdict !== 'met'
+      || outcome.evidenceIds.length === 0
+      || !sameGovernedParent(runId)
+    ) {
+      throw new TypeError('Learning Case counterevidence is unrelated')
+    }
+    return relation(runId, outcome.evidenceIds, uses)
+  })
+  const supporting = resolvedSignals.map(signal =>
+    relation(signal.runId, signal.evidenceIds, uses))
+  const value = {
+    ticketId: ticket.ticketId,
+    problemFingerprint: ticket.problemFingerprint,
+    problemCategory: resolvedSignals[0]!.problemCategory,
+    scopeKey: firstBinding.scopeKey,
+    signalIds: [...ticket.signalIds],
+    runIds,
+    supportingEvidenceIds: unique(supporting.flatMap(item => item.evidenceIds)),
+    supporting,
+    counterevidence,
+    acceptanceContractDigest: firstBinding.acceptanceContractDigest,
+    parentVersionId: firstManifest.parentVersionId,
+    parentSkillName: firstManifest.parent.name,
+    learningMode: 'experience-consolidation' as const,
+    schedule: 'background' as const,
+    experimentLimit: 0 as const,
+    candidateLimit: 1 as const,
+    stopConditions: [
+      'sufficient',
+      'insufficient-evidence',
+      'risk-boundary',
+    ] as const,
+  }
+  const digest = sha256(value)
+  return { caseId: `case:${digest.slice('sha256:'.length)}`, ...value }
+}
+
+function nonblank(value: unknown, label: string): string {
+  return stringValue(value, label)
+}
+
+export function prepareAttribution(
+  input: AttributionInput,
+  learningCase: LearningCase,
+): AttributionRecord {
+  if (!isRecord(input)) {
+    throw new TypeError('Attribution input must be an object')
+  }
+  if (input.caseId !== learningCase.caseId) {
+    throw new TypeError('Attribution references another Case')
+  }
+  let record: AttributionInput
+  if (input.resolution === 'unknown') {
+    exactKeys(input, ['caseId', 'resolution', 'reason'])
+    record = { caseId: input.caseId, resolution: input.resolution,
+      reason: nonblank(input.reason, 'reason') }
+  } else if (input.resolution === 'outside-stage3') {
+    exactKeys(input, ['caseId', 'resolution', 'recommendation'])
+    record = { caseId: input.caseId, resolution: input.resolution,
+      recommendation: nonblank(input.recommendation, 'recommendation') }
+  } else if (input.resolution === 'dsh-skill') {
+    exactKeys(input, [
+      'caseId', 'resolution', 'targetSkillName', 'hypothesis',
+      'supportingEvidenceIds', 'counterevidenceIds', 'alternatives',
+    ])
+    if (
+      input.targetSkillName !== learningCase.parentSkillName
+      || !Array.isArray(input.supportingEvidenceIds)
+      || !Array.isArray(input.counterevidenceIds)
+      || input.supportingEvidenceIds.length === 0
+      || input.counterevidenceIds.length === 0
+      || [...learningCase.supporting, ...learningCase.counterevidence]
+        .some(item => item.skillUse?.parentVersionId !== learningCase.parentVersionId)
+    ) {
+      throw new TypeError('dsh-skill Attribution lacks governed Skill proof')
+    }
+    const supporting = new Set(learningCase.supporting.flatMap(item => item.evidenceIds))
+    const counter = new Set(learningCase.counterevidence.flatMap(item => item.evidenceIds))
+    const supportingEvidenceIds = unique(input.supportingEvidenceIds.map(value =>
+      digestValue(value, 'supportingEvidenceId')))
+    const counterevidenceIds = unique(input.counterevidenceIds.map(value =>
+      digestValue(value, 'counterevidenceId')))
+    if (
+      supportingEvidenceIds.some(value => !supporting.has(value))
+      || counterevidenceIds.some(value => !counter.has(value))
+    ) {
+      throw new TypeError('Attribution Evidence is outside its Case')
+    }
+    record = {
+      caseId: input.caseId,
+      resolution: input.resolution,
+      targetSkillName: input.targetSkillName,
+      hypothesis: nonblank(input.hypothesis, 'hypothesis'),
+      supportingEvidenceIds,
+      counterevidenceIds,
+      alternatives: nonblank(input.alternatives, 'alternatives'),
+    }
+  } else {
+    throw new TypeError('invalid Attribution resolution')
+  }
+  const digest = sha256(record)
+  return {
+    attributionId: `attribution:${digest.slice('sha256:'.length)}`,
+    ...record,
+  } as AttributionRecord
+}
+
+export function parseLearningCase(value: unknown): LearningCase {
+  if (!isRecord(value)) throw new TypeError('Learning Case must be an object')
+  const caseId = stringValue(value.caseId, 'caseId') as LearningCaseId
+  const copy = structuredClone(value) as unknown as LearningCase
+  const { caseId: _caseId, ...body } = copy
+  if (caseId !== `case:${sha256(body).slice('sha256:'.length)}`) {
+    throw new TypeError('Learning Case identity mismatch')
+  }
+  return copy
+}
+
+export function parseAttribution(value: unknown): AttributionRecord {
+  if (!isRecord(value)) throw new TypeError('Attribution must be an object')
+  const attributionId = stringValue(
+    value.attributionId,
+    'attributionId',
+  ) as AttributionId
+  const copy = structuredClone(value) as unknown as AttributionRecord
+  const { attributionId: _attributionId, ...body } = copy
+  if (attributionId !== `attribution:${sha256(body).slice('sha256:'.length)}`) {
+    throw new TypeError('Attribution identity mismatch')
+  }
+  return copy
 }
