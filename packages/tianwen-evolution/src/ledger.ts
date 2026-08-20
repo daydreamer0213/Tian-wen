@@ -14,6 +14,17 @@ import {
 import { join } from 'node:path'
 import { TextDecoder } from 'node:util'
 
+import { prepareLearningIntake } from './learning-intake.js'
+import type {
+  LearningIntakeInput,
+  LearningIntakeReceipt,
+  LearningIntakeRecordedEvent,
+  LearningSignal,
+  LearningSignalId,
+  LearningTicket,
+  LearningTicketId,
+} from './learning-intake.js'
+
 export type ArtifactId = `artifact:${string}`
 export type Sha256Digest = `sha256:${string}`
 
@@ -97,6 +108,7 @@ export interface RecoveryFailedEvent {
 }
 
 export type LedgerEvent =
+  | LearningIntakeRecordedEvent
   | ArtifactRecordedEvent
   | EvaluationRecordedEvent
   | ApprovalRecordedEvent
@@ -161,6 +173,8 @@ export interface ActivationFailure {
 }
 
 const ARTIFACT_ID = /^artifact:[a-f0-9]{64}$/
+const LEARNING_SIGNAL_ID = /^signal:[a-f0-9]{64}$/
+const LEARNING_TICKET_ID = /^ticket:[a-f0-9]{64}$/
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/
 const UTF8 = new TextDecoder('utf-8', { fatal: true })
 
@@ -204,6 +218,22 @@ function requireDigest(value: unknown): Sha256Digest {
     throw new LedgerIntegrityError(`invalid SHA-256 digest: ${digest}`)
   }
   return digest as Sha256Digest
+}
+
+function requireSignalId(value: unknown): LearningSignalId {
+  const id = requireString(value, 'signalId')
+  if (!LEARNING_SIGNAL_ID.test(id)) {
+    throw new LedgerIntegrityError(`invalid LearningSignalId: ${id}`)
+  }
+  return id as LearningSignalId
+}
+
+function requireTicketId(value: unknown): LearningTicketId {
+  const id = requireString(value, 'ticketId')
+  if (!LEARNING_TICKET_ID.test(id)) {
+    throw new LedgerIntegrityError(`invalid LearningTicketId: ${id}`)
+  }
+  return id as LearningTicketId
 }
 
 function requireTimestamp(value: unknown): string {
@@ -283,12 +313,197 @@ function parseApproval(value: unknown): ApprovalRecord {
   }
 }
 
+function parseLearningInput(value: unknown): LearningIntakeInput {
+  if (!isRecord(value)) {
+    throw new LedgerIntegrityError('learning input must be an object')
+  }
+  exactKeys(
+    value,
+    [
+      'sessionId',
+      'messageId',
+      'feedbackVersion',
+      'rating',
+      'scopeKey',
+      'sessionDigest',
+      'evidenceIds',
+    ],
+    ['note'],
+  )
+  if (value.rating !== 'positive' && value.rating !== 'negative') {
+    throw new LedgerIntegrityError('invalid learning feedback rating')
+  }
+  if (value.note !== undefined && typeof value.note !== 'string') {
+    throw new LedgerIntegrityError('learning note must be a string')
+  }
+  if (!Array.isArray(value.evidenceIds)) {
+    throw new LedgerIntegrityError('learning evidenceIds must be an array')
+  }
+  const input: LearningIntakeInput = {
+    sessionId: requireString(value.sessionId, 'sessionId'),
+    messageId: requireString(value.messageId, 'messageId'),
+    feedbackVersion: requireString(value.feedbackVersion, 'feedbackVersion'),
+    rating: value.rating,
+    ...(value.note === undefined ? {} : { note: value.note }),
+    scopeKey: requireString(value.scopeKey, 'scopeKey'),
+    sessionDigest: requireDigest(value.sessionDigest),
+    evidenceIds: value.evidenceIds.map(requireDigest),
+  }
+  try {
+    prepareLearningIntake(input)
+  } catch (error) {
+    throw new LedgerIntegrityError('learning input is invalid', {
+      cause: error,
+    })
+  }
+  return input
+}
+
+function parseLearningReceipt(
+  value: unknown,
+): Omit<LearningIntakeReceipt, 'duplicate'> {
+  if (!isRecord(value)) {
+    throw new LedgerIntegrityError('learning receipt must be an object')
+  }
+  exactKeys(value, ['decision', 'ingestionId'], ['signalId', 'ticketId'])
+  if (
+    value.decision !== 'no-case' &&
+    value.decision !== 'observed-gap' &&
+    value.decision !== 'ticket-created' &&
+    value.decision !== 'ticket-merged'
+  ) {
+    throw new LedgerIntegrityError('invalid learning intake decision')
+  }
+  const signalId = value.signalId === undefined
+    ? undefined
+    : requireSignalId(value.signalId)
+  const ticketId = value.ticketId === undefined
+    ? undefined
+    : requireTicketId(value.ticketId)
+  const ticketDecision =
+    value.decision === 'ticket-created' || value.decision === 'ticket-merged'
+  if (
+    ticketDecision
+      ? signalId === undefined || ticketId === undefined
+      : signalId !== undefined || ticketId !== undefined
+  ) {
+    throw new LedgerIntegrityError(
+      'learning receipt identifiers disagree with its decision',
+    )
+  }
+  return {
+    decision: value.decision,
+    ingestionId: requireDigest(value.ingestionId),
+    ...(signalId === undefined ? {} : { signalId }),
+    ...(ticketId === undefined ? {} : { ticketId }),
+  }
+}
+
+function parseLearningSignal(value: unknown): LearningSignal {
+  if (!isRecord(value)) {
+    throw new LedgerIntegrityError('learning signal must be an object')
+  }
+  exactKeys(value, [
+    'signalId',
+    'ingestionId',
+    'sessionId',
+    'messageId',
+    'feedbackVersion',
+    'scopeKey',
+    'problemFingerprint',
+    'noteDigest',
+    'sessionDigest',
+    'evidenceIds',
+  ])
+  if (!Array.isArray(value.evidenceIds)) {
+    throw new LedgerIntegrityError('learning signal evidenceIds must be an array')
+  }
+  return {
+    signalId: requireSignalId(value.signalId),
+    ingestionId: requireDigest(value.ingestionId),
+    sessionId: requireString(value.sessionId, 'sessionId'),
+    messageId: requireString(value.messageId, 'messageId'),
+    feedbackVersion: requireString(value.feedbackVersion, 'feedbackVersion'),
+    scopeKey: requireString(value.scopeKey, 'scopeKey'),
+    problemFingerprint: requireDigest(value.problemFingerprint),
+    noteDigest: requireDigest(value.noteDigest),
+    sessionDigest: requireDigest(value.sessionDigest),
+    evidenceIds: value.evidenceIds.map(requireDigest),
+  }
+}
+
+function parseLearningEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningIntakeRecordedEvent {
+  exactKeys(
+    value,
+    ['schemaVersion', 'type', 'at', 'input', 'inputDigest', 'receipt'],
+    ['signal'],
+  )
+  if (value.schemaVersion !== 'tianwen.learning-intake.v1') {
+    throw new LedgerIntegrityError('invalid learning intake schema version')
+  }
+  const input = parseLearningInput(value.input)
+  const prepared = prepareLearningIntake(input)
+  const inputDigest = requireDigest(value.inputDigest)
+  const receipt = parseLearningReceipt(value.receipt)
+  const signal = value.signal === undefined
+    ? undefined
+    : parseLearningSignal(value.signal)
+
+  if (
+    inputDigest !== prepared.inputDigest ||
+    receipt.ingestionId !== prepared.ingestionId
+  ) {
+    throw new LedgerIntegrityError('learning event disagrees with its input')
+  }
+  if (prepared.kind !== 'explicit-correction') {
+    if (receipt.decision !== prepared.kind || signal !== undefined) {
+      throw new LedgerIntegrityError('learning observation has invalid output')
+    }
+  } else {
+    if (
+      (receipt.decision !== 'ticket-created' &&
+        receipt.decision !== 'ticket-merged') ||
+      receipt.signalId !== prepared.signalId ||
+      receipt.ticketId !== prepared.ticketId ||
+      signal === undefined ||
+      signal.signalId !== prepared.signalId ||
+      signal.ingestionId !== prepared.ingestionId ||
+      signal.sessionId !== input.sessionId ||
+      signal.messageId !== input.messageId ||
+      signal.feedbackVersion !== input.feedbackVersion ||
+      signal.scopeKey !== input.scopeKey ||
+      signal.problemFingerprint !== prepared.problemFingerprint ||
+      signal.noteDigest !== prepared.noteDigest ||
+      signal.sessionDigest !== input.sessionDigest ||
+      JSON.stringify(signal.evidenceIds) !== JSON.stringify(input.evidenceIds)
+    ) {
+      throw new LedgerIntegrityError('learning Signal disagrees with its input')
+    }
+  }
+
+  return {
+    schemaVersion: 'tianwen.learning-intake.v1',
+    type: 'learning-intake-recorded',
+    at,
+    input,
+    inputDigest,
+    receipt,
+    ...(signal === undefined ? {} : { signal }),
+  }
+}
+
 function parseEvent(value: unknown): LedgerEvent {
   if (!isRecord(value)) {
     throw new LedgerIntegrityError('ledger event must be an object')
   }
   const type = requireString(value.type, 'event type')
   const at = requireTimestamp(value.at)
+  if (type === 'learning-intake-recorded') {
+    return parseLearningEvent(value, at)
+  }
   if (type === 'artifact-recorded') {
     exactKeys(value, ['type', 'at', 'artifact'])
     const artifact = parseArtifact(value.artifact)
@@ -435,6 +650,12 @@ export class EvolutionLedger {
   readonly #pointerPath: string
   readonly #clock: () => string
   readonly #events: LedgerEvent[] = []
+  readonly #learningIntakes = new Map<
+    Sha256Digest,
+    LearningIntakeRecordedEvent
+  >()
+  readonly #learningSignals = new Map<LearningSignalId, LearningSignal>()
+  readonly #learningTickets = new Map<LearningTicketId, LearningTicket>()
   readonly #artifacts = new Map<ArtifactId, ArtifactVersion>()
   readonly #evaluations = new Map<ArtifactId, EvaluationRecord>()
   readonly #approvals = new Map<ArtifactId, ApprovalRecord[]>()
@@ -455,6 +676,70 @@ export class EvolutionLedger {
       this.#verifySource(artifact)
     }
     this.#verifyPointer()
+  }
+
+  recordLearningIntake(input: LearningIntakeInput): LearningIntakeReceipt {
+    const parsedInput = parseLearningInput(input)
+    const prepared = prepareLearningIntake(parsedInput)
+    const existing = this.#learningIntakes.get(prepared.ingestionId)
+    if (existing !== undefined) {
+      if (existing.inputDigest !== prepared.inputDigest) {
+        throw new LedgerIntegrityError(
+          `learning ingestion replay changed content: ${prepared.ingestionId}`,
+        )
+      }
+      return { ...existing.receipt, duplicate: true }
+    }
+
+    const decision: LearningIntakeReceipt['decision'] =
+      prepared.kind === 'explicit-correction'
+        ? this.#learningTickets.has(prepared.ticketId)
+          ? 'ticket-merged'
+          : 'ticket-created'
+        : prepared.kind
+    const signal: LearningSignal | undefined =
+      prepared.kind === 'explicit-correction'
+        ? {
+            signalId: prepared.signalId,
+            ingestionId: prepared.ingestionId,
+            sessionId: parsedInput.sessionId,
+            messageId: parsedInput.messageId,
+            feedbackVersion: parsedInput.feedbackVersion,
+            scopeKey: parsedInput.scopeKey,
+            problemFingerprint: prepared.problemFingerprint,
+            noteDigest: prepared.noteDigest,
+            sessionDigest: parsedInput.sessionDigest,
+            evidenceIds: parsedInput.evidenceIds,
+          }
+        : undefined
+    const receipt: Omit<LearningIntakeReceipt, 'duplicate'> = {
+      decision,
+      ingestionId: prepared.ingestionId,
+      ...(prepared.kind === 'explicit-correction'
+        ? {
+            signalId: prepared.signalId,
+            ticketId: prepared.ticketId,
+          }
+        : {}),
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-intake.v1',
+      type: 'learning-intake-recorded',
+      at: this.#now(),
+      input: parsedInput,
+      inputDigest: prepared.inputDigest,
+      receipt,
+      ...(signal === undefined ? {} : { signal }),
+    })
+    return { ...receipt, duplicate: false }
+  }
+
+  listLearningSignals(): readonly LearningSignal[] {
+    return clone([...this.#learningSignals.values()])
+  }
+
+  listLearningTickets(): readonly LearningTicket[] {
+    return clone([...this.#learningTickets.values()])
   }
 
   recordArtifact(
@@ -804,6 +1089,38 @@ export class EvolutionLedger {
   }
 
   #validateAgainstState(event: LedgerEvent): void {
+    if (event.type === 'learning-intake-recorded') {
+      if (this.#learningIntakes.has(event.receipt.ingestionId)) {
+        throw new LedgerIntegrityError(
+          `duplicate learning ingestion: ${event.receipt.ingestionId}`,
+        )
+      }
+      if (event.signal === undefined) {
+        return
+      }
+      if (this.#learningSignals.has(event.signal.signalId)) {
+        throw new LedgerIntegrityError(
+          `duplicate LearningSignal: ${event.signal.signalId}`,
+        )
+      }
+      const ticketId = event.receipt.ticketId!
+      const ticket = this.#learningTickets.get(ticketId)
+      if (ticket === undefined) {
+        if (event.receipt.decision !== 'ticket-created') {
+          throw new LedgerIntegrityError(
+            `new LearningTicket must use ticket-created: ${ticketId}`,
+          )
+        }
+      } else if (
+        event.receipt.decision !== 'ticket-merged' ||
+        ticket.problemFingerprint !== event.signal.problemFingerprint
+      ) {
+        throw new LedgerIntegrityError(
+          `LearningTicket merge disagrees with history: ${ticketId}`,
+        )
+      }
+      return
+    }
     if (event.type === 'artifact-recorded') {
       if (this.#artifacts.has(event.artifact.artifactId)) {
         throw new LedgerIntegrityError(
@@ -919,6 +1236,27 @@ export class EvolutionLedger {
 
   #apply(event: LedgerEvent): void {
     this.#events.push(event)
+    if (event.type === 'learning-intake-recorded') {
+      this.#learningIntakes.set(event.receipt.ingestionId, event)
+      if (event.signal === undefined) {
+        return
+      }
+      this.#learningSignals.set(event.signal.signalId, event.signal)
+      const ticketId = event.receipt.ticketId!
+      const ticket = this.#learningTickets.get(ticketId)
+      this.#learningTickets.set(ticketId, ticket === undefined
+        ? {
+            ticketId,
+            problemFingerprint: event.signal.problemFingerprint,
+            status: 'open',
+            signalIds: [event.signal.signalId],
+          }
+        : {
+            ...ticket,
+            signalIds: [...ticket.signalIds, event.signal.signalId],
+          })
+      return
+    }
     if (event.type === 'artifact-recorded') {
       this.#artifacts.set(event.artifact.artifactId, event.artifact)
       return

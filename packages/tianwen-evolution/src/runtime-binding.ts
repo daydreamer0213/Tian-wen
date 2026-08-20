@@ -17,6 +17,12 @@ import type {
   LedgerEvent,
   TransitionAuthority,
 } from './ledger.js'
+import type {
+  LearningIntakeInput,
+  LearningIntakeReceipt,
+  LearningSignal,
+  LearningTicket,
+} from './learning-intake.js'
 
 export interface RuntimeBinding {
   readonly artifactId: ArtifactId
@@ -126,6 +132,19 @@ export class TianwenEvolutionService extends Service {
 
   recordApproval(record: ApprovalRecord): void {
     this.formalWrite(() => this.state().ledger.recordApproval(record))
+  }
+
+  recordLearningIntake(input: LearningIntakeInput): LearningIntakeReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningIntake(input))
+  }
+
+  listLearningSignals(): readonly LearningSignal[] {
+    return this.state().ledger.listLearningSignals()
+  }
+
+  listLearningTickets(): readonly LearningTicket[] {
+    return this.state().ledger.listLearningTickets()
   }
 
   getChampion(): ChampionPointer | undefined {

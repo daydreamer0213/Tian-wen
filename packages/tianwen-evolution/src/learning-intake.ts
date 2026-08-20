@@ -38,6 +38,48 @@ export type PreparedLearningIntake =
     readonly normalizedNote: string
   }
 
+export interface LearningSignal {
+  readonly signalId: LearningSignalId
+  readonly ingestionId: Sha256Digest
+  readonly sessionId: string
+  readonly messageId: string
+  readonly feedbackVersion: string
+  readonly scopeKey: string
+  readonly problemFingerprint: Sha256Digest
+  readonly noteDigest: Sha256Digest
+  readonly sessionDigest: Sha256Digest
+  readonly evidenceIds: readonly Sha256Digest[]
+}
+
+export interface LearningTicket {
+  readonly ticketId: LearningTicketId
+  readonly problemFingerprint: Sha256Digest
+  readonly status: 'open'
+  readonly signalIds: readonly LearningSignalId[]
+}
+
+export interface LearningIntakeReceipt {
+  readonly decision:
+    | 'no-case'
+    | 'observed-gap'
+    | 'ticket-created'
+    | 'ticket-merged'
+  readonly ingestionId: Sha256Digest
+  readonly signalId?: LearningSignalId
+  readonly ticketId?: LearningTicketId
+  readonly duplicate: boolean
+}
+
+export interface LearningIntakeRecordedEvent {
+  readonly schemaVersion: 'tianwen.learning-intake.v1'
+  readonly type: 'learning-intake-recorded'
+  readonly at: string
+  readonly input: LearningIntakeInput
+  readonly inputDigest: Sha256Digest
+  readonly receipt: Omit<LearningIntakeReceipt, 'duplicate'>
+  readonly signal?: LearningSignal
+}
+
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/
 
 function canonicalJson(value: unknown): string {
