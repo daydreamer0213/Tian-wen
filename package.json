@@ -14,6 +14,7 @@
     "demo:paired-skill-evaluation": "tsx scripts/run-paired-skill-evaluation-demo.ts",
     "demo:repeated-outcome": "tsx scripts/run-repeated-outcome-demo.ts",
     "demo:research-preview": "tsx scripts/run-research-preview-demo.ts",
+    "demo:shadow-eligibility": "tsx scripts/run-skill-shadow-eligibility-demo.ts",
     "install:tianwen": "node scripts/install-tianwen.mjs",
     "typecheck": "node scripts/typecheck-packages.mjs",
     "test:dsh": "vitest run",
