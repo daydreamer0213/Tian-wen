@@ -201,6 +201,42 @@ def test_governed_skill_shadow_eligibility_handoff_and_ci() -> None:
         assert command in ci
 
 
+def test_governed_skill_promotion_readiness_handoff_and_ci() -> None:
+    handoff = " ".join(
+        (
+            ROOT
+            / "docs"
+            / "operations"
+            / "tianwen-stage6-skill-promotion-readiness-handoff.md"
+        ).read_text(encoding="utf-8").split()
+    )
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    for fact in (
+        "DSH `0.1.0-rc.7` remains the only product Agent Runtime",
+        "Stage 6 implements only the pure Promotion readiness refusal slice",
+        "no-promotion-readiness",
+        (
+            "Natural Shadow, five qualified natural Runs, Active Pointer, exact human "
+            "Promotion approval, Promotion, and product rollback remain unimplemented and unproven"
+        ),
+        "The 60 CNY development budget is not a Promotion ApprovalReceipt",
+        "scripted evidence is mechanism evidence, not efficacy or stability evidence",
+        "Candidate traffic, pointers, Promotions, and rollbacks remain zero",
+        "0 Provider requests, 0 paid tokens, 0 CNY, 0 Docker, and 0 user data",
+        "Artifact, Dynamic Cordis, and global Champion paths are not used for activation, routing, or state change",
+        "Python Alpha, RepoTaskRuntime, and AlphaRuntime are not used",
+    ):
+        assert fact in handoff
+
+    for command in (
+        "tests/dsh-probe/skill-promotion.spec.ts",
+        "tests/dsh-probe/skill-promotion-readiness-demo.spec.ts",
+        "pnpm demo:promotion-readiness",
+    ):
+        assert command in ci
+
+
 def test_relative_links_in_public_documents_exist() -> None:
     for name in PUBLIC_DOCUMENTS:
         document = read_public_document(name)
