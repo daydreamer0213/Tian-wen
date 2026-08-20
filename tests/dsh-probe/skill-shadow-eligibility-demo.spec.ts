@@ -1,66 +1,65 @@
 import { mkdirSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { runPairedSkillEvaluationDemo } from '../../scripts/run-paired-skill-evaluation-demo.js'
+import { runSkillShadowEligibilityDemo } from '../../scripts/run-skill-shadow-eligibility-demo.js'
 
 const fixtureRoot = resolve(
   process.env.TIANWEN_DSH_PROBE_ROOT ?? '.dsh-probe',
-  'paired-skill-evaluation-demo',
+  'skill-shadow-eligibility-demo',
 )
 
 afterEach(() => rmSync(fixtureRoot, { recursive: true, force: true }))
 
-describe('paired Skill evaluation demo', () => {
-  it('reports the complete zero-cost B/C mechanism proof without efficacy claims', async () => {
+describe('governed Skill Shadow eligibility demo', () => {
+  it('keeps the current scripted Candidate unrouted', async () => {
     mkdirSync(fixtureRoot, { recursive: true })
     const previous = process.env.TIANWEN_DSH_PROBE_ROOT
     process.env.TIANWEN_DSH_PROBE_ROOT = fixtureRoot
     try {
-      const result = await runPairedSkillEvaluationDemo()
+      const result = await runSkillShadowEligibilityDemo()
       expect(result).toEqual({
-        schemaVersion: 'tianwen.paired-skill-evaluation-demo.v1',
-        execution: {
+        schemaVersion: 'tianwen.skill-shadow-eligibility-demo.v1',
+        stage4Mechanism: {
           governedRuns: 3,
           evaluationArms: 8,
           sessions: 11,
           scriptedModelRequests: 25,
           toolCalls: 14,
         },
-        learning: {
-          signals: 2,
-          tickets: 1,
-          protocols: 1,
-          cases: 1,
-          attributions: 1,
-          lessons: 1,
-          candidates: 1,
-          evaluations: 1,
-          results: 1,
+        evaluation: {
           evaluationId: expect.stringMatching(/^evaluation:/),
-          candidateStatus: 'recorded',
-          protocolProvenance: 'pre-candidate',
-          evidenceClass: 'scripted-mechanism',
           verdict: 'INCONCLUSIVE',
           comparison: 'not-comparable',
-          decision: 'needs-evidence',
+          evidenceClass: 'scripted-mechanism',
+          protocolProvenance: 'pre-candidate',
           baselineResolutionMatched: true,
           freshness: {
             state: 'stale',
             reason: 'policy-authorization-unobservable',
           },
-          reasonIncludesScriptedModelOutput: true,
-          duplicateReplay: true,
-          restartMatched: true,
         },
-        isolation: {
-          sessionsUnchanged: true,
-          rootSkillUnchanged: true,
-          candidateAbsentAfterDisposal: true,
-          dynamicCordisInventoryUnchanged: true,
-          legacyArtifactEventsCreated: 0,
-          artifactFilesCreated: 0,
-          championChanged: false,
-          publicEventsRedacted: true,
+        shadow: {
+          decision: 'no-eligible-shadow',
+          reasons: [
+            'evaluation-not-pass',
+            'candidate-not-better',
+            'evidence-not-independent-objective',
+            'evaluation-decision-mismatch',
+            'evaluation-stale',
+          ],
+          freshnessReason: 'policy-authorization-unobservable',
+          ordinaryRunsRouted: 0,
+          qualifiedNaturalRuns: 0,
+          candidateRegisteredForOrdinaryTraffic: false,
+          activePointerChanged: false,
+          legacyChampionChanged: false,
+        },
+        stage5Incremental: {
+          agents: 0,
+          sessions: 0,
+          runs: 0,
+          ledgerEvents: 0,
+          registryMutations: 0,
         },
         cost: {
           network: 0,

@@ -19,7 +19,9 @@ import { HarnessError } from '@deepseek-ai/dsh-llm'
 import {
   PUBLIC_LEDGER_EVENT_TYPES,
   STAGE4_SCRIPTED_PROVIDER,
+  assessSkillEvaluationFreshness,
 } from '../packages/tianwen-evolution/src/index.js'
+import type { SkillEvaluationFreshness } from '../packages/tianwen-evolution/src/index.js'
 import { sha256 } from '../packages/tianwen-evolution/src/learning-intake.js'
 import { EvolutionLedger } from '../packages/tianwen-evolution/src/ledger.js'
 import { apply } from '../packages/tianwen-runtime/src/index.js'
@@ -43,12 +45,15 @@ export interface PairedSkillEvaluationDemoResult {
     readonly candidates: 1
     readonly evaluations: 1
     readonly results: 1
+    readonly evaluationId: `evaluation:${string}`
     readonly candidateStatus: 'recorded'
     readonly protocolProvenance: 'pre-candidate'
     readonly evidenceClass: 'scripted-mechanism'
     readonly verdict: 'INCONCLUSIVE'
     readonly comparison: 'not-comparable'
     readonly decision: 'needs-evidence'
+    readonly baselineResolutionMatched: boolean
+    readonly freshness: SkillEvaluationFreshness
     readonly reasonIncludesScriptedModelOutput: true
     readonly duplicateReplay: true
     readonly restartMatched: true
@@ -341,6 +346,31 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
       })),
       baselineResolutionMatched: evaluation.result.baselineResolutionMatched,
     })
+    const freshness = assessSkillEvaluationFreshness({
+      recordedPlan: evaluation.plan,
+      parentVersionId: evaluation.plan.parentVersionId,
+      parentPayloadDigest: evaluation.plan.parentPayloadDigest,
+      candidateId: evaluation.plan.candidateId,
+      candidatePayloadDigest: evaluation.plan.candidatePayloadDigest,
+      protocolId: evaluation.plan.protocolId,
+      protocolProvenance: evaluation.plan.protocolProvenance,
+      dshVersion: evaluation.plan.environment.dshVersion,
+      providerId: evaluation.plan.environment.providerId,
+      modelId: evaluation.plan.environment.modelId,
+      callConfigDigest: evaluation.plan.environment.callConfigDigest,
+      toolSchemaDigest: evaluation.plan.environment.toolSchemaDigest,
+      workspaceSnapshotDigest: evaluation.plan.environment.workspaceSnapshotDigest,
+      validatorContractDigest: evaluation.plan.environment.validatorContractDigest,
+      policyAuthorization: evaluation.plan.environment.policyAuthorization,
+      workspaceBinding: evaluation.plan.environment.workspaceBinding,
+      validatorBinding: evaluation.plan.environment.validatorBinding,
+      dataBinding: evaluation.plan.environment.dataBinding,
+      dataSnapshotDigests: evaluation.plan.cases.map(item => ({
+        caseId: item.caseId,
+        attempt: item.attempt,
+        dataSnapshotDigest: item.dataSnapshotDigest,
+      })),
+    }, evaluation.result)
     const restarted = new EvolutionLedger(evolutionRoot)
     const publicEvents = harness.ctx.tianwenEvolution.listEvents()
     const serializedPublicEvents = JSON.stringify(publicEvents)
@@ -418,6 +448,9 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
       || evaluation.result.verdict !== 'INCONCLUSIVE'
       || evaluation.result.comparison !== 'not-comparable'
       || evaluation.result.decision !== 'needs-evidence'
+      || !evaluation.result.baselineResolutionMatched
+      || freshness.state !== 'stale'
+      || freshness.reason !== 'policy-authorization-unobservable'
       || !evaluation.result.reasonCodes.includes('scripted-model-output')
     ) {
       throw new Error('paired Skill evaluation demo invariant failed')
@@ -441,12 +474,15 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
         candidates: 1,
         evaluations: 1,
         results: 1,
+        evaluationId: evaluation.result.evaluationId,
         candidateStatus: 'recorded',
         protocolProvenance: 'pre-candidate',
         evidenceClass: 'scripted-mechanism',
         verdict: 'INCONCLUSIVE',
         comparison: 'not-comparable',
         decision: 'needs-evidence',
+        baselineResolutionMatched: evaluation.result.baselineResolutionMatched,
+        freshness,
         reasonIncludesScriptedModelOutput: true,
         duplicateReplay: true,
         restartMatched: true,

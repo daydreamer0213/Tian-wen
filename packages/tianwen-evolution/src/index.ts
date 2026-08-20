@@ -108,6 +108,7 @@ export {
   prepareSkillEvalProtocol,
   STAGE4_SCRIPTED_PROVIDER,
 } from './skill-evaluation.js'
+export { assessSkillShadowEligibility } from './skill-shadow.js'
 export type {
   FreezeSkillEvalProtocolInput,
   OpenSkillEvaluationInput,
@@ -147,4 +148,9 @@ export type {
   SkillEvalProtocolReceipt,
   SkillEvalProtocolRecord,
 } from './skill-evaluation.js'
+export type {
+  SkillShadowEligibility,
+  SkillShadowEligibilityInput,
+  SkillShadowIneligibilityReason,
+} from './skill-shadow.js'
 export * from './runtime-binding.js'
