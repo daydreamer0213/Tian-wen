@@ -57,6 +57,19 @@ import type {
   SkillCandidateInput,
   SkillCandidateReceipt,
 } from './skill-governance.js'
+import type {
+  FreezeSkillEvalProtocolInput,
+  OpenSkillEvaluationInput,
+  RecordSkillEvaluationResultInput,
+  SkillEvaluationId,
+  SkillEvaluationPlan,
+  SkillEvaluationReceipt,
+  SkillEvaluationResult,
+  SkillEvaluationResultReceipt,
+  SkillEvalProtocolId,
+  SkillEvalProtocolReceipt,
+  SkillEvalProtocolRecord,
+} from './skill-evaluation.js'
 
 export interface RuntimeBinding {
   readonly artifactId: ArtifactId
@@ -211,6 +224,47 @@ export class TianwenEvolutionService extends Service {
 
   listRunSkillUses(): readonly RunSkillUse[] {
     return this.state().ledger.listRunSkillUses()
+  }
+
+  freezeSkillEvalProtocol(
+    input: FreezeSkillEvalProtocolInput,
+  ): SkillEvalProtocolReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.freezeSkillEvalProtocol(input))
+  }
+
+  getSkillEvalProtocol(
+    protocolId: SkillEvalProtocolId,
+  ): SkillEvalProtocolRecord | undefined {
+    return this.state().ledger.getSkillEvalProtocol(protocolId)
+  }
+
+  listSkillEvalProtocols(): readonly SkillEvalProtocolRecord[] {
+    return this.state().ledger.listSkillEvalProtocols()
+  }
+
+  openSkillEvaluation(input: OpenSkillEvaluationInput): SkillEvaluationReceipt {
+    return this.formalWrite(() => this.state().ledger.openSkillEvaluation(input))
+  }
+
+  getSkillEvaluation(evaluationId: SkillEvaluationId): SkillEvaluationPlan | undefined {
+    return this.state().ledger.getSkillEvaluation(evaluationId)
+  }
+
+  listSkillEvaluations(): readonly SkillEvaluationPlan[] {
+    return this.state().ledger.listSkillEvaluations()
+  }
+
+  recordSkillEvaluationResult(
+    input: RecordSkillEvaluationResultInput,
+  ): SkillEvaluationResultReceipt {
+    return this.formalWrite(() => this.state().ledger.recordSkillEvaluationResult(input))
+  }
+
+  getSkillEvaluationResult(
+    evaluationId: SkillEvaluationId,
+  ): SkillEvaluationResult | undefined {
+    return this.state().ledger.getSkillEvaluationResult(evaluationId)
   }
 
   openLearningCase(input: OpenLearningCaseInput): LearningCaseReceipt {

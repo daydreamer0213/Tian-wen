@@ -10,8 +10,9 @@ facts after a normal DSH run and does not replace or hot-swap the running Agent.
 This preview proves normal Agent execution, read-only Evidence projection, and
 zero qualifying signal → `no-case` with `candidateCreated=false`. It also proves
 one non-blocking explicit-feedback intake path after the user result is complete.
-It also proves repeated structured Outcome intake across distinct Tianwen Runs
-and one governed Skill Candidate intake. Candidate/Shadow/Promotion is not complete.
+It also proves repeated structured Outcome intake across distinct Tianwen Runs,
+one governed Skill Candidate intake, and one paired Skill Evaluation record.
+Candidate/Shadow/Promotion is not complete.
 
 ## Why Tianwen exists
 
@@ -26,7 +27,7 @@ to the Runtime.
 | Layer | Responsibility |
 | --- | --- |
 | **DSH** | Runs the current Agent session. Tianwen reuses its models and providers, Agent loop, tools, MCP, sandbox, Session Query, Skill, Jobs, Workflow, Subagent, Message Feedback, Approval, and permissions. |
-| **Tianwen** | Owns the cross-run governance boundary: Goal Graph, Evidence provenance, learning attribution, and future-run version governance. The current preview exercises read-only Evidence projection, a conservative no-case decision, explicit-feedback Signal/Ticket intake, and repeated structured Outcome intake. |
+| **Tianwen** | Owns the cross-run governance boundary: Goal Graph, Evidence provenance, learning attribution, and future-run version governance. The current preview exercises read-only Evidence projection, a conservative no-case decision, explicit-feedback Signal/Ticket intake, repeated structured Outcome intake, and a paired Skill Evaluation record. |
 | **Alpha** | Supplies experimental and evaluation assets. It is not a second product Runtime. |
 
 DSH Message Feedback is an attribution input, not a Lesson by itself. A DSH Job
@@ -61,7 +62,20 @@ The governed Skill Candidate proof binds three real DSH `skill` tool uses to two
 supporting Runs and one related met Run, then records one Case, Attribution,
 Lesson, and inert Candidate. Candidate status is only `recorded`; Attribution,
 Lesson, and Candidate content is deterministic synthetic contract data. The
-Candidate is not registered, evaluated, shadowed, or promoted, and this is not autonomous production learning.
+Candidate is not registered for ordinary Runs, shadowed, or promoted, and this is not autonomous production learning.
+
+The paired Skill Evaluation proof creates a frozen protocol before the Candidate Case, then
+runs paired isolated normal DSH Agents for the frozen parent B and recorded Candidate C.
+It captures the real first DSH model request and visible model-facing tool surface, requires a Skill-neutral normalized match,
+and stores a private Evaluation result with separate Outcome/Evidence per arm. This is a
+scripted mechanism proof, so its efficacy result is always `INCONCLUSIVE`,
+`not-comparable`, and `needs-evidence`: it does not claim C is better. Candidate remains
+`recorded` and is not installed, routed, shadowed, promoted, or rejected.
+The executable evaluator owns the exact zero-cost scripted adapter on a reserved route and rejects a route collision. It rejects a non-scripted Provider before it creates an evaluation Agent. Its tool digest is a
+visible tool-surface fact, not DSH Policy/permission proof; Policy, workspace,
+data, and validator independence remain explicitly unbound. Its historic result
+is therefore not Shadow-ready, and live paid proof is deferred to a separate
+preflight/reservation/receipt/tally design.
 
 ## Zero-cost demos
 
@@ -73,6 +87,7 @@ pnpm demo:research-preview
 pnpm demo:explicit-correction
 pnpm demo:repeated-outcome
 pnpm demo:governed-skill-candidate
+pnpm demo:paired-skill-evaluation
 ```
 
 Each demo prints one formatted JSON object. They use no network, Provider, token
@@ -83,14 +98,19 @@ Ticket, duplicate replay, and `candidateCreated=false`. The repeated-outcome
 demo reports two structured `not-met` outcomes, two Signals, one open Ticket,
 duplicate replay, and unchanged Sessions. The governed Candidate demo reports
 three frozen Skill manifests and uses, one Case/Attribution/Lesson, and one
-`recorded` Candidate. All report matching
-before/after Session digests. Digest values may differ between separate runs
-because Session events contain run-specific data; equality within a run is the
-non-interference check.
+`recorded` Candidate. All report matching before/after Session digests. Digest
+values may differ between separate runs because Session events contain run-specific
+data; equality within a run is the non-interference check. The paired-evaluation
+demo adds one frozen pre-Candidate protocol, eight isolated B/C arms, one private
+Evaluation result, replay/restart checks, and an explicit `INCONCLUSIVE`
+scripted-mechanism outcome. It keeps the root Skill registry and ordinary fresh
+Agent unchanged.
 
 ## Current limitations
 
-- Evaluation, Shadow, Promotion, and production-autonomous generation are not complete.
+- Stage 4 has only recorded a paired Evaluation result. Scripted proof is mechanism-only,
+  not independent efficacy evidence; Shadow, Promotion, Active Pointer, Reject, Rollback,
+  and production-autonomous generation are not complete.
 - The preview does not offer a production SLA or a finished user interface.
 - It does not claim that one successful run creates learning or that future
   changes can enter the currently running Agent.
@@ -103,7 +123,8 @@ non-interference check.
   contains the deterministic no-case demo; [`scripts/run-explicit-correction-demo.ts`](scripts/run-explicit-correction-demo.ts)
   contains the explicit-feedback intake demo; [`scripts/run-repeated-outcome-demo.ts`](scripts/run-repeated-outcome-demo.ts)
   contains the repeated structured Outcome demo; [`scripts/run-governed-skill-candidate-demo.ts`](scripts/run-governed-skill-candidate-demo.ts)
-  contains the governed Skill Candidate demo.
+  contains the governed Skill Candidate demo; [`scripts/run-paired-skill-evaluation-demo.ts`](scripts/run-paired-skill-evaluation-demo.ts)
+  contains the paired B/C Skill Evaluation demo.
 - [`packages/tianwen-dsh-compat`](packages/tianwen-dsh-compat) is the public DSH
   compatibility seam.
 - [`packages/tianwen-evidence`](packages/tianwen-evidence) performs the read-only
@@ -120,7 +141,7 @@ non-interference check.
 pnpm run typecheck
 pnpm run check:dsh-install
 pnpm run check:no-private-dsh-imports
-pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts tests/dsh-probe/skill-governance.spec.ts tests/dsh-probe/skill-governance-runtime.spec.ts tests/dsh-probe/governed-skill-candidate-demo.spec.ts
+pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts tests/dsh-probe/skill-governance.spec.ts tests/dsh-probe/skill-governance-runtime.spec.ts tests/dsh-probe/governed-skill-candidate-demo.spec.ts tests/dsh-probe/skill-evaluation.spec.ts tests/dsh-probe/skill-evaluation-runtime.spec.ts tests/dsh-probe/paired-skill-evaluation-demo.spec.ts
 uv sync --frozen --dev
 uv run ruff check .
 uv run pytest

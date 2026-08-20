@@ -15,6 +15,9 @@ type PublicLedgerEventPrivacyContract = AssertNever<Extract<
       | 'learning-attribution-recorded'
       | 'learning-lesson-recorded'
       | 'learning-candidate-recorded'
+      | 'skill-eval-protocol-frozen'
+      | 'skill-evaluation-opened'
+      | 'skill-evaluation-result-recorded'
   }
 >>
 
@@ -38,7 +41,7 @@ export type {
   RuntimeBoundEvent,
   Sha256Digest,
 } from './ledger.js'
-export { prepareLearningIntake } from './learning-intake.js'
+export { prepareLearningIntake, sha256 } from './learning-intake.js'
 export type {
   LearningIntakeInput,
   LearningIntakeReceipt,
@@ -97,4 +100,51 @@ export type {
   OpenLearningCaseInput,
   SkillVersionId,
 } from './skill-governance.js'
+export {
+  assessSkillEvaluationFreshness,
+  decideSkillEvaluation,
+  prepareSkillEvaluationPlan,
+  prepareSkillEvaluationResult,
+  prepareSkillEvalProtocol,
+  STAGE4_SCRIPTED_PROVIDER,
+} from './skill-evaluation.js'
+export type {
+  FreezeSkillEvalProtocolInput,
+  OpenSkillEvaluationInput,
+  RecordSkillEvaluationResultInput,
+  SkillComparison,
+  SkillEvaluationArmInput,
+  SkillEvaluationArmPlan,
+  SkillEvaluationArmObservation,
+  SkillEvaluationCaseObservation,
+  SkillEvaluationCaseResult,
+  SkillEvaluationCasePlan,
+  SkillEvaluationDecision,
+  SkillEvaluationDecisionInput,
+  SkillEvaluationCurrentDependencies,
+  SkillEvaluationEnvironment,
+  SkillEvaluationEvidenceClass,
+  SkillEvaluationFreshness,
+  SkillEvaluationFreshnessReason,
+  SkillEvaluationId,
+  SkillEvaluationPlan,
+  SkillEvaluationReasonCode,
+  SkillEvaluationPolicyAuthorization,
+  SkillEvaluationDependencyBinding,
+  SkillEvaluationReceipt,
+  SkillEvaluationResult,
+  SkillEvaluationResultReceipt,
+  SkillEvaluationUsage,
+  SkillEvaluationVerdict,
+  SkillEvalArmOrder,
+  SkillEvalAttemptReducer,
+  SkillEvalCaseCategory,
+  SkillEvalCaseId,
+  SkillEvalMetric,
+  SkillEvalProtocol,
+  SkillEvalProtocolId,
+  SkillEvalProtocolReasonCode,
+  SkillEvalProtocolReceipt,
+  SkillEvalProtocolRecord,
+} from './skill-evaluation.js'
 export * from './runtime-binding.js'

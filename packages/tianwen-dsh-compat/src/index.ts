@@ -1,6 +1,11 @@
 export { Context, Service } from '@deepseek-ai/cordis'
 export { default as AgentRegistry, Inbox } from '@deepseek-ai/dsh-agent'
-export type { Agent, AgentStatus } from '@deepseek-ai/dsh-agent'
+export type {
+  Agent,
+  AgentHandle,
+  AgentStatus,
+  CreateAgentOptions,
+} from '@deepseek-ai/dsh-agent'
 export { default as AgentLoop } from '@deepseek-ai/dsh-agent-loop'
 export { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 export { default as DynamicCordisRunnerService } from '@deepseek-ai/dsh-cordis-host-runner'
@@ -15,10 +20,13 @@ export * as goalRoundDriver from '@deepseek-ai/dsh-goal-round-driver'
 export {
   CallId,
   LlmAdapter,
+  callConfigEquals,
   createUserMessage,
+  isAgentLoopRequest,
 } from '@deepseek-ai/dsh-llm'
 export type {
   GenerateOptions,
+  LlmCallConfig,
   MessageSource,
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
