@@ -57,6 +57,12 @@ import type {
   SkillCandidateInput,
   SkillCandidateReceipt,
 } from './skill-governance.js'
+import type {
+  FreezeSkillEvalProtocolInput,
+  SkillEvalProtocolId,
+  SkillEvalProtocolReceipt,
+  SkillEvalProtocolRecord,
+} from './skill-evaluation.js'
 
 export interface RuntimeBinding {
   readonly artifactId: ArtifactId
@@ -211,6 +217,23 @@ export class TianwenEvolutionService extends Service {
 
   listRunSkillUses(): readonly RunSkillUse[] {
     return this.state().ledger.listRunSkillUses()
+  }
+
+  freezeSkillEvalProtocol(
+    input: FreezeSkillEvalProtocolInput,
+  ): SkillEvalProtocolReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.freezeSkillEvalProtocol(input))
+  }
+
+  getSkillEvalProtocol(
+    protocolId: SkillEvalProtocolId,
+  ): SkillEvalProtocolRecord | undefined {
+    return this.state().ledger.getSkillEvalProtocol(protocolId)
+  }
+
+  listSkillEvalProtocols(): readonly SkillEvalProtocolRecord[] {
+    return this.state().ledger.listSkillEvalProtocols()
   }
 
   openLearningCase(input: OpenLearningCaseInput): LearningCaseReceipt {

@@ -297,6 +297,93 @@ describe('Tianwen append-only evolution ledger', () => {
     expect(publicApi).not.toHaveProperty('EvolutionLedger')
   })
 
+  it('keeps internal Skill evaluation protocols out of runtime event reads', async () => {
+    const root = ledgerRoot('private-skill-evaluation')
+    const mounted = await mountEvolution(root)
+    const evolution = mounted.ctx.tianwenEvolution
+    const acceptanceContract = {
+      source: 'dsh-tool-result' as const,
+      toolName: 'verify_summary',
+      notMetErrorCode: 'SUMMARY_REQUIREMENT_NOT_MET',
+      gapDisposition: 'reusable' as const,
+      problemCategory: 'summary-omits-required-result',
+      severity: 2 as const,
+      blocksGoal: false,
+    }
+    const bind = (suffix: string) => evolution.recordRunBinding({
+      goalRef: 'goal:research-preview',
+      taskRef: `task:${suffix}`,
+      sessionId: `session:${suffix}`,
+      scopeKey: 'project:tianwen/capability:research-summary',
+      acceptanceContract,
+    })
+    const first = bind('eval-protocol-first')
+    evolution.recordOutcomeIntake({
+      runId: first.runId,
+      verdict: 'not-met',
+      sessionDigest: RECEIPT_A,
+      evidenceIds: [RECEIPT_A],
+    })
+    const second = bind('eval-protocol-second')
+    const outcome = evolution.recordOutcomeIntake({
+      runId: second.runId,
+      verdict: 'not-met',
+      sessionDigest: RECEIPT_B,
+      evidenceIds: [RECEIPT_B],
+    })
+    const ticketId = outcome.ticketId!
+
+    try {
+      const receipt = evolution.freezeSkillEvalProtocol({
+        ticketId,
+        protocol: {
+          cases: [
+            ['problem', RECEIPT_A, RECEIPT_B],
+            ['regression', RECEIPT_B, RECEIPT_C],
+            ['counterexample', RECEIPT_C, RECEIPT_A],
+            ['safety', RECEIPT_A, RECEIPT_C],
+          ].map(([category, inputDigest, dataSnapshotDigest]) => ({
+            caseId: `eval-case:${category}`,
+            category,
+            inputDigest,
+            dataSnapshotDigest,
+            acceptanceContract,
+          })),
+          armOrder: 'baseline-then-candidate',
+          repetition: { attempts: 1, reducer: 'all-attempts-must-pass' },
+          hardGates: ['problem', 'regression', 'counterexample', 'safety'],
+          softMetrics: ['model-requests'],
+          thresholds: { requiredCasePasses: 4 },
+          budget: {
+            maxModelRequestsPerArm: 3,
+            maxTokensPerArm: 2_000,
+            maxToolCallsPerArm: 2,
+            maxElapsedMsPerArm: 10_000,
+            maxCnyMilliPerArm: 0,
+            maxTotalModelRequests: 24,
+            maxTotalTokens: 16_000,
+            maxTotalToolCalls: 16,
+            maxTotalElapsedMs: 80_000,
+            maxTotalCnyMilli: 0,
+          },
+          execution: {
+            providerId: 'scripted-adapter',
+            modelId: 'tianwen-probe',
+            toolSchemaDigest: RECEIPT_A,
+            permissionDigest: RECEIPT_B,
+            validatorContractDigest: RECEIPT_C,
+          },
+        },
+      })
+      expect(evolution.getSkillEvalProtocol(receipt.protocolId))
+        .toMatchObject({ provenance: 'pre-candidate' })
+      expect(eventTypes(evolution.listEvents()))
+        .not.toContain('skill-eval-protocol-frozen')
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
   it('fsyncs immutable source before accepting its ledger event', () => {
     const root = ledgerRoot('source-fsync')
     const ledger = new EvolutionLedger(root, {
