@@ -2,15 +2,15 @@
 
 **日期：** 2026-08-20
 
-**状态：** Tasks 1–6 候选证据已完成；主线合并与真实 CI 结果待回填，禁止切换为 public
+**状态：** Tasks 1–6 已合入主线，承重代码 SHA 的真实 CI 已通过；仓库仍为 private，Task 7/8 未授权
 
 ## 1. 结论
 
 Tianwen 可以准备申请 OpenAI `Codex for Open Source`，但当前仓库仍不具备直接提交条件。
 
-项目的真实优势是：单人持续维护、374 个 `main` 提交、较完整的 Agent 治理研究、真实运行和评测证据，以及“复用 DSH 执行、Tianwen 只做长期 Goal/Evidence/学习版本治理”的清晰差异化方向。
+项目的真实优势是：单人持续维护、超过 390 个 `main` 提交、较完整的 Agent 治理研究、真实运行和评测证据，以及“复用 DSH 执行、Tianwen 只做长期 Goal/Evidence/学习版本治理”的清晰差异化方向。
 
-Tasks 1–5 已加入 canonical Apache-2.0 许可证、中性化当前 Markdown 的个人绝对路径，建立准确的中英文公开门面、贡献/安全文档、零付费 CI 和确定性演示。Task 6 已完成最终 Gitleaks 全 refs/current-tree 脱敏扫描及本地新鲜门。当前主要未完成项是把候选合并到主线并取得该精确 SHA 的真实 GitHub Actions 绿灯；仓库仍为 private，也没有 tag 或 GitHub Release。
+Tasks 1–5 已加入 canonical Apache-2.0 许可证、中性化当前 Markdown 的个人绝对路径，建立准确的中英文公开门面、贡献/安全文档、零付费 CI 和确定性演示。Task 6 已完成候选扫描、本地新鲜门、普通主线合并，以及承重代码 SHA `150f4626ba9da5cfb6fab1a3d6d2cc5ee994291b` 的真实 GitHub Actions 绿灯。仓库仍为 private，tag 为 0，也没有 GitHub Release；Task 7/8 尚未授权。
 
 推荐先发布 `v0.1.0-research-preview`，再提交申请。旧 Alpha-D 不恢复；候选闭环继续作为 DSH 新架构的后续阶段，不作为本次申请前置门。
 
@@ -34,25 +34,25 @@ Tasks 1–5 已加入 canonical Apache-2.0 许可证、中性化当前 Markdown 
 
 ## 3. 当前仓库事实
 
-审计基线：本地 `main@c08b1106a0f390d8bedce30587441cea24f09e25`。
+承重代码与执行证据基线：`main@150f4626ba9da5cfb6fab1a3d6d2cc5ee994291b`。本次 docs-only attestation 不改变该代码树；最终公开目标 SHA 及其 CI 在提交后外部核对，不回填自身 SHA。
 
 | 项目 | 当前事实 | 公开前处理 |
 |---|---|---|
 | GitHub 仓库 | `daydreamer0213/Tian-wen`，private | 所有发布门通过后才改 public |
 | Maintainer 权限 | 用户为 owner/admin，可作为 Primary maintainer | 保持 GitHub profile 公开 |
-| 活跃维护 | `main` 374 commits，单一 maintainer | README 如实描述，不伪造团队或采用量 |
+| 活跃维护 | `main` 超过 390 commits，单一 maintainer | README 如实描述，不伪造团队或采用量 |
 | 远端分支 | 45 条实际 `origin` 远端分支 | 已纳入全 refs 扫描；不默认批量删除历史证据分支 |
-| Tags / Release | 0 tags，无正式 Release | 创建 research-preview tag 和 GitHub Release |
+| Tags / Release | 0 tags，无正式 Release | Task 7 获得用户明确确认后才创建 research-preview tag 和 GitHub Release |
 | 许可证 | 根目录为未经改写的 Apache License 2.0 | 保持单一 Apache-2.0，不增加额外限制或双许可证文字 |
 | README | 英文主入口与中文完整镜像；准确说明 DSH 单 Runtime + Tianwen learning control plane | 保持双语事实一致，不把路线图写成现状 |
 | 英文入口 | `README.md` | 已完成；架构总览仍为详细权威入口 |
 | 贡献/安全说明 | `CONTRIBUTING.md`、`SECURITY.md` | 已完成；安全报告使用 GitHub Security Advisories |
-| CI | 两个 Linux job，只读权限、零付费命令 | main 合并后必须核对精确 SHA 的两个 job 都为 green |
+| CI | 两个 Linux job，只读权限、零付费命令；承重代码 SHA 的两个 job 均为 green | docs-only attestation 的自动 CI 仍按精确 SHA 外部核对，不回填自身 SHA |
 | GitHub 描述/Topics | 私有仓库未形成公开门面 | 公开前设置描述和 agent/evaluation/governance 等 topics |
 | 产品版本 | Python/Node manifest 均为 `0.0.0`，Node root `private: true` | 本预览不发布 PyPI/npm；保留的 Python Runtime 代码是冻结实验室资产，不是受支持的产品 Runtime |
 | 上游 DSH 许可证 | 审计 clone 为 MIT | 与推荐 Apache-2.0 项目许可证原则上兼容；实施时仍检查分发内容 |
 
-本地 `main`、`origin/main` 和 `git ls-remote` 当前均为 `c08b1106a0f390d8bedce30587441cea24f09e25`。后续公开前仍须对最终 `main` 重做三方核对，不能 force-push 掩盖远端变化。
+承重代码提交完成后，本地 `main`、`origin/main` 和 `git ls-remote` 均为 `150f4626ba9da5cfb6fab1a3d6d2cc5ee994291b`。docs-only attestation 普通推送后仍须对最终 `main` 重做三方核对，不能 force-push 掩盖远端变化。
 
 ## 4. 标准敏感信息扫描、许可证与路径审计
 
@@ -62,8 +62,8 @@ Tasks 1–5 已加入 canonical Apache-2.0 许可证、中性化当前 Markdown 
 - 官方 checksum 与本机 archive SHA-256 均为 `d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e`；
 - 解压后二进制报告版本 `8.30.1`；
 - 工具、archive、checksum、脱敏 JSON 和日志只保存在 `D:\DevData`，没有加入 Git；
-- 最终扫描时 `git for-each-ref` 清点 138 个 refs，`--log-opts='--all'` 覆盖所有 refs 可达历史；reviewed feature base commit 为 `6959f24ce250814ff683837b4278a56faba72a60`，并包含本 Task 的三份未提交候选文档。
-- 最终报告 SHA-256：all refs 为 `e12a844ce072e3eaca5de9eae83b012c56c52751eabf5467aad4cced7398f1ab`，current tree 为 `93d635e89b73ae5a7cbe87e7d23b95d70f12a35004af3fd58121f295c3115d6d`。
+- release-candidate 扫描时 `git for-each-ref` 清点 138 个 refs，`--log-opts='--all'` 覆盖所有 refs 可达历史；reviewed feature base commit 为 `6959f24ce250814ff683837b4278a56faba72a60`，并包含当时的三份候选文档。
+- release-candidate 报告 SHA-256：all refs 为 `e12a844ce072e3eaca5de9eae83b012c56c52751eabf5467aad4cced7398f1ab`，current tree 为 `93d635e89b73ae5a7cbe87e7d23b95d70f12a35004af3fd58121f295c3115d6d`。
 
 执行命令：
 
@@ -94,6 +94,12 @@ Tasks 1–5 已加入 canonical Apache-2.0 许可证、中性化当前 Markdown 
 
 分类结论：**completed scans found no unresolved real credential**。这只描述已完成扫描的结果，不宣称秘密绝对不可能存在，也不构成仓库公开授权。若后续扫描发现 active real credential，必须停止公开准备并由用户决定撤销/轮换和历史处理；本 Task 未轮换凭据，也未改写历史。
 
+本次 docs-only attestation 及其自动 CI 完成后，使用同一已校验的 Gitleaks
+8.30.1 对最终 `main` 再做 all-refs 与 current-tree `--redact=100` 扫描。
+最终报告以 attestation 短 SHA 命名并只保存在 `D:\DevData`；最终目标
+SHA、CI 和分类结论记录在外部 controller handoff，不把自身 SHA 回填到
+本文件，避免形成无限文档提交循环。
+
 ### 4.3 Apache-2.0 许可证
 
 用户已批准 Apache-2.0。根 `LICENSE` 与 Apache 官方 `LICENSE-2.0.txt` 逐字节一致，SHA-256 均为 `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`；未添加额外限制、定制条款或双许可证文字。
@@ -106,6 +112,11 @@ Tasks 1–5 已加入 canonical Apache-2.0 许可证、中性化当前 Markdown 
 
 ## 5. Task 6 新鲜门与确定性演示
 
+release candidate 为 `63d6ace4e28455bee75de718078ef5202358ce0e`；
+portable-path feature fix 为
+`1b9e69281c98f67dba2c0fa6699e9ac0092bd870`；最终承重代码 main 为
+`150f4626ba9da5cfb6fab1a3d6d2cc5ee994291b`。
+
 | 验证 | 精确结果 |
 |---|---|
 | Ruff | pass |
@@ -117,6 +128,8 @@ Tasks 1–5 已加入 canonical Apache-2.0 许可证、中性化当前 Markdown 
 | Vitest（只排除旧 `runtime-profile.spec.ts`） | 22 files passed，2 skipped；245 tests passed，4 skipped，0 failed |
 | 零成本 demo | pass；单一格式化 JSON；before/after digest 相同 |
 | diff-check | pass |
+| code-bearing main Python CI | [run `32340254356` / job `96337751225`](https://github.com/daydreamer0213/Tian-wen/actions/runs/32340254356/job/96337751225) success |
+| code-bearing main TypeScript CI + demo | [run `32340254356` / job `96337751401`](https://github.com/daydreamer0213/Tian-wen/actions/runs/32340254356/job/96337751401) success |
 
 首次 Vitest 运行暴露的是本地夹具漂移：持久 DSH host 仍为 rc.6，且 exact probe Python 环境不完整。只重建一次性 probe 环境并临时提供 rc.7 host 后，同一承重门通过；原持久 host 已恢复，没有为变绿而跳过测试或修改产品代码。
 
@@ -149,14 +162,14 @@ Tasks 1–5 已加入 canonical Apache-2.0 许可证、中性化当前 Markdown 
 |---|---|---|
 | Blocker | 仓库 private | 申请表不接受当前状态；最后一步才切 public |
 | Complete | Apache-2.0 LICENSE | 已与官方原文逐字节核对 |
-| Complete | 标准全历史密钥扫描 | Gitleaks all-refs/current-tree 完成；无 unresolved real credential |
+| Complete | 标准全历史密钥扫描 | release-candidate 扫描完成且无 unresolved real credential；docs-only 最终目标扫描记录在外部见证 |
 | Complete | README 与新架构一致 | 中英文均明确唯一 DSH Runtime、只读 Evidence 和未完成边界 |
-| Pending | main 精确 SHA 的真实 CI | 本地新鲜门通过；main 合并后两个 GitHub Actions job 必须 green |
-| Pending | 无正式 tag / GitHub Release | 必须等用户明确确认 Task 7 外部动作 |
+| Complete | main 精确 SHA 的真实 CI | code-bearing `150f4626...` 的 Python / TypeScript job 均 green |
+| Blocker | 无正式 tag / GitHub Release | 必须等用户明确确认 Task 7 外部动作 |
 | Important | 45 条远端分支会随仓库公开 | 已纳入全 refs 扫描；Task 7 仍须展示可见性后果 |
 | Complete | 12 份当前文档的个人本地路径 | 当前树 0 matches；未改写历史 |
 | Minor | 无仓库描述/topics | 在可见性切换前补齐 |
 
 ## 8. 唯一推荐下一步
 
-先完成候选的普通主线合并，核对 local / tracking / remote main 三方 SHA，并等待该精确 SHA 的两个真实 GitHub Actions job 都为 green。随后停止，把目标 SHA、扫描、许可证、CI、demo、所有远端分支随仓库公开的后果、tag 和 Release 动作展示给用户；只有用户明确确认后才进入 Task 7。仓库公开不自动授权提交 OpenAI 表单。
+停止在 Task 7 外部动作门。把 docs-only 最终目标 SHA、最终扫描、许可证、代码承重 CI 与最终目标 CI、demo、所有远端分支随仓库公开的后果、tag 和 Release 动作展示给用户；只有用户明确确认后才进入 Task 7。仓库公开不自动授权提交 OpenAI 表单，Task 8 仍需单独授权。

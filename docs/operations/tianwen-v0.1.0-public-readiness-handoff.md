@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-20
 
-**State:** reviewed release candidate; mainline integration and GitHub Actions
-evidence are pending
+**State:** Tasks 1–6 integrated; the final code-bearing main SHA has green
+exact-SHA GitHub Actions evidence; public actions remain unauthorized
 
 ## Scope and product claim
 
@@ -27,7 +27,7 @@ in the repository for reproducibility and regression tests. It is frozen lab
 code, not a supported product Runtime, and this preview publishes no PyPI or
 npm package.
 
-## Final secret-scan evidence
+## Reviewed candidate secret-scan evidence
 
 Official Gitleaks 8.30.1 was used after its downloaded archive matched the
 published checksum
@@ -46,7 +46,17 @@ conclusion is: completed scans found no unresolved real credential. It is not
 an absolute claim that a secret can never exist. No credential was rotated and
 Git history was not rewritten.
 
+After this docs-only attestation and its own CI complete, the final public
+target is scanned again with Gitleaks 8.30.1. Those redacted reports use the
+attestation short SHA in filenames and remain under `D:\DevData`, outside Git.
+The final target SHA, CI, and scan classification are recorded in the external
+controller handoff instead of being backfilled here; this avoids an endless
+cycle in which recording a commit changes the commit being recorded.
+
 ## Fresh release-candidate gates
+
+These local gates were recorded for release candidate
+`63d6ace4e28455bee75de718078ef5202358ce0e` before mainline integration:
 
 | Gate | Result |
 |---|---|
@@ -90,21 +100,35 @@ persistent databases, and user data.
 ## Candidate and integration record
 
 - reviewed feature base: `6959f24ce250814ff683837b4278a56faba72a60`;
-- release-candidate commit: pending this documentation commit;
-- main merge commit: pending;
-- exact-main GitHub Actions run: pending;
+- release-candidate commit: `63d6ace4e28455bee75de718078ef5202358ce0e`;
+- portable-path feature fix: `1b9e69281c98f67dba2c0fa6699e9ac0092bd870`;
+- final code-bearing main commit:
+  `150f4626ba9da5cfb6fab1a3d6d2cc5ee994291b`;
+- exact-main GitHub Actions run:
+  [32340254356](https://github.com/daydreamer0213/Tian-wen/actions/runs/32340254356),
+  completed successfully for the code-bearing SHA;
+- Python job:
+  [96337751225](https://github.com/daydreamer0213/Tian-wen/actions/runs/32340254356/job/96337751225),
+  success;
+- TypeScript job:
+  [96337751401](https://github.com/daydreamer0213/Tian-wen/actions/runs/32340254356/job/96337751401),
+  success;
 - public visibility: unchanged (private);
-- tag / GitHub Release: not created.
+- remote branches: 45;
+- tag / GitHub Release: 0 tags; no GitHub Release.
 
-The final merge SHA, exact GitHub Actions run URL/result, and final local /
-tracking / remote SHA agreement must be recorded after mainline integration.
+This attestation commit is docs-only. It does not change the code tree proven
+at `150f4626ba9da5cfb6fab1a3d6d2cc5ee994291b`. Its own final target SHA and
+automatically triggered CI are verified externally after the commit and are
+not written back into the commit itself.
 
 ## External actions still requiring user confirmation
 
-Before Task 7, show the user the exact public target SHA, final scan result,
-license, green CI URL, demo result, and the consequence that every remote
-branch becomes visible with the repository. Obtain explicit confirmation
-before any of these independent external actions:
+Before Task 7, show the user the exact docs-only public target SHA, its final
+scan result and green CI URL, the code-bearing green CI above, the license,
+demo result, and the consequence that every remote branch becomes visible
+with the repository. Obtain explicit confirmation before any of these
+independent external actions:
 
 1. change `daydreamer0213/Tian-wen` from private to public and set public
    metadata/topics;
