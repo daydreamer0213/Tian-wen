@@ -8,8 +8,8 @@
 工作：它在一次正常 DSH Run 结束后读取执行事实，不替换正在运行的 Agent，也不热切换
 当前 Run。本预览已证明正常 Agent execution、Evidence 只读投影，以及
 zero qualifying signal → `no-case`、`candidateCreated=false`。它还证明了一个在用户结果完成后
-运行、不会阻塞当前 Run 的显式反馈学习入口。Candidate/Shadow/Promotion 尚未完成。
-它还证明了跨不同 Tianwen Run 的结构化 Outcome 重复失败入口。
+运行、不会阻塞当前 Run 的显式反馈学习入口。它还证明了跨不同 Tianwen Run 的结构化
+Outcome 重复失败入口和一个受治理 Skill Candidate 入口。Candidate/Shadow/Promotion 尚未完成。
 
 ## 为什么需要天问
 
@@ -42,12 +42,16 @@ DSH Message Feedback 只是学习归因的一项输入，本身不等于 Lesson�
 带有具体说明的显式负面反馈可以创建持久化 Signal/Ticket。第二个零成本演示通过真实
 DSH Message Feedback 服务写入反馈，在最终答案完成后消费存储快照，并把一条 Signal 和
 一个开放 Ticket 写入现有 evolution ledger；重复消费保持幂等，而且不改变 Session。
-正面反馈和没有说明的负面反馈都不会创建 Ticket。Candidate、Shadow 和 Promotion 仍未实现。
+正面反馈和没有说明的负面反馈都不会创建 Ticket。
 第一次普通可复用失败只记录 Signal；来自另一个 Tianwen Run 的第二次同类失败才创建一个开放 Ticket。
 重复 Outcome 证明使用两个不同的 Tianwen Run，并分别绑定两个 DSH Session；重复消费保持幂等，
 两个 Session 都不改变。这是零成本合成合同夹具，不是生产环境中自然积累的学习证据。
 
-## 三分钟零成本演示
+受治理 Skill Candidate 证明把三次真实 DSH `skill` 工具使用绑定到两个支持 Run 和一个相关
+的 met Run，再记录一个 Case、Attribution、Lesson 和惰性 Candidate。Candidate 状态仅为 `recorded`（已记录）；Attribution、Lesson 和 Candidate 内容是确定性的合成合同数据。
+Candidate 不会注册、评测、进入 Shadow 或 Promotion；这不是生产自主学习。
+
+## 零成本演示
 
 安装锁定的依赖，然后运行：
 
@@ -56,18 +60,21 @@ pnpm install --frozen-lockfile
 pnpm demo:research-preview
 pnpm demo:explicit-correction
 pnpm demo:repeated-outcome
+pnpm demo:governed-skill-candidate
 ```
 
 每个演示只输出一个格式化 JSON 对象，不使用网络、Provider、token 预算、付费模型、
 Docker、持久化数据库或用户数据。research-preview 演示报告一条完整 Evidence 和
 `no-case`；explicit-correction 演示报告已存储的负面反馈、一条 Signal、一个开放 Ticket、
 重复消费命中幂等和 `candidateCreated=false`；repeated-outcome 演示报告两次结构化
-`not-met`、两条 Signal、一个开放 Ticket、幂等回放和不变的 Session。三个演示的 Session 前后摘要都相同。不同 Run
+`not-met`、两条 Signal、一个开放 Ticket、幂等回放和不变的 Session；governed-skill-candidate
+演示报告三份冻结的 Skill manifest/use、一个 Case/Attribution/Lesson 和一个 `recorded`
+Candidate。四个演示的 Session 前后摘要都相同。不同 Run
 的摘要可能因事件中包含本次运行数据而不同；承重事实是同一次 Run 内前后相等。
 
 ## 当前限制
 
-- Case、Lesson、Candidate 生成、Shadow 评测和 Promotion 尚未完成。
+- Evaluation、Shadow、Promotion 和生产自主生成尚未完成。
 - 当前预览不提供生产 SLA，也没有完成的用户界面。
 - 一次成功执行不会自动产生学习，未来版本也不能进入正在运行的 Agent。
 - 已知的首次 Profile 初始化诊断另有事实记录，不能把它写成已经通过的发布门。
@@ -77,7 +84,8 @@ Docker、持久化数据库或用户数据。research-preview 演示报告一条
 - [`scripts/run-research-preview-demo.ts`](scripts/run-research-preview-demo.ts)
   是确定性的 no-case 演示；[`scripts/run-explicit-correction-demo.ts`](scripts/run-explicit-correction-demo.ts)
   是显式反馈学习入口演示；[`scripts/run-repeated-outcome-demo.ts`](scripts/run-repeated-outcome-demo.ts)
-  是结构化 Outcome 重复失败演示。
+  是结构化 Outcome 重复失败演示；[`scripts/run-governed-skill-candidate-demo.ts`](scripts/run-governed-skill-candidate-demo.ts)
+  是受治理 Skill Candidate 演示。
 - [`packages/tianwen-dsh-compat`](packages/tianwen-dsh-compat) 是 DSH 公共兼容接缝。
 - [`packages/tianwen-evidence`](packages/tianwen-evidence) 实现 Evidence 只读投影。
 - [`docs/tianwen-architecture-overview-v2.md`](docs/tianwen-architecture-overview-v2.md)
@@ -91,7 +99,7 @@ Docker、持久化数据库或用户数据。research-preview 演示报告一条
 pnpm run typecheck
 pnpm run check:dsh-install
 pnpm run check:no-private-dsh-imports
-pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts
+pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts tests/dsh-probe/skill-governance.spec.ts tests/dsh-probe/skill-governance-runtime.spec.ts tests/dsh-probe/governed-skill-candidate-demo.spec.ts
 uv sync --frozen --dev
 uv run ruff check .
 uv run pytest

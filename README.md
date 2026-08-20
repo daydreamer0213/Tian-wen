@@ -10,8 +10,8 @@ facts after a normal DSH run and does not replace or hot-swap the running Agent.
 This preview proves normal Agent execution, read-only Evidence projection, and
 zero qualifying signal → `no-case` with `candidateCreated=false`. It also proves
 one non-blocking explicit-feedback intake path after the user result is complete.
-It also proves repeated structured Outcome intake across distinct Tianwen Runs.
-Candidate/Shadow/Promotion is not complete.
+It also proves repeated structured Outcome intake across distinct Tianwen Runs
+and one governed Skill Candidate intake. Candidate/Shadow/Promotion is not complete.
 
 ## Why Tianwen exists
 
@@ -57,9 +57,13 @@ The repeated-outcome proof uses two distinct Tianwen Runs bound to two DSH
 Sessions. Replay is idempotent, and both Sessions remain unchanged. This is a
 zero-cost synthetic contract fixture, not naturally accumulated production
 learning evidence.
-Candidate, Shadow, and Promotion remain unimplemented.
+The governed Skill Candidate proof binds three real DSH `skill` tool uses to two
+supporting Runs and one related met Run, then records one Case, Attribution,
+Lesson, and inert Candidate. Candidate status is only `recorded`; Attribution,
+Lesson, and Candidate content is deterministic synthetic contract data. The
+Candidate is not registered, evaluated, shadowed, or promoted, and this is not autonomous production learning.
 
-## Three-minute, zero-cost demo
+## Zero-cost demos
 
 Install the locked dependencies, then run:
 
@@ -68,6 +72,7 @@ pnpm install --frozen-lockfile
 pnpm demo:research-preview
 pnpm demo:explicit-correction
 pnpm demo:repeated-outcome
+pnpm demo:governed-skill-candidate
 ```
 
 Each demo prints one formatted JSON object. They use no network, Provider, token
@@ -76,14 +81,16 @@ research-preview demo reports one complete Evidence record and `no-case`. The
 explicit-correction demo reports stored negative feedback, one Signal, one open
 Ticket, duplicate replay, and `candidateCreated=false`. The repeated-outcome
 demo reports two structured `not-met` outcomes, two Signals, one open Ticket,
-duplicate replay, and unchanged Sessions. All report matching
+duplicate replay, and unchanged Sessions. The governed Candidate demo reports
+three frozen Skill manifests and uses, one Case/Attribution/Lesson, and one
+`recorded` Candidate. All report matching
 before/after Session digests. Digest values may differ between separate runs
 because Session events contain run-specific data; equality within a run is the
 non-interference check.
 
 ## Current limitations
 
-- Case, Lesson, Candidate generation, Shadow evaluation, and Promotion are not complete.
+- Evaluation, Shadow, Promotion, and production-autonomous generation are not complete.
 - The preview does not offer a production SLA or a finished user interface.
 - It does not claim that one successful run creates learning or that future
   changes can enter the currently running Agent.
@@ -95,7 +102,8 @@ non-interference check.
 - [`scripts/run-research-preview-demo.ts`](scripts/run-research-preview-demo.ts)
   contains the deterministic no-case demo; [`scripts/run-explicit-correction-demo.ts`](scripts/run-explicit-correction-demo.ts)
   contains the explicit-feedback intake demo; [`scripts/run-repeated-outcome-demo.ts`](scripts/run-repeated-outcome-demo.ts)
-  contains the repeated structured Outcome demo.
+  contains the repeated structured Outcome demo; [`scripts/run-governed-skill-candidate-demo.ts`](scripts/run-governed-skill-candidate-demo.ts)
+  contains the governed Skill Candidate demo.
 - [`packages/tianwen-dsh-compat`](packages/tianwen-dsh-compat) is the public DSH
   compatibility seam.
 - [`packages/tianwen-evidence`](packages/tianwen-evidence) performs the read-only
@@ -112,7 +120,7 @@ non-interference check.
 pnpm run typecheck
 pnpm run check:dsh-install
 pnpm run check:no-private-dsh-imports
-pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts
+pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts tests/dsh-probe/skill-governance.spec.ts tests/dsh-probe/skill-governance-runtime.spec.ts tests/dsh-probe/governed-skill-candidate-demo.spec.ts
 uv sync --frozen --dev
 uv run ruff check .
 uv run pytest

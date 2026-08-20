@@ -7,6 +7,7 @@ import type {
 import {
   EvolutionLedger,
   LedgerCommitUnknownError,
+  isPublicLedgerEvent,
 } from './ledger.js'
 import type {
   ApprovalRecord,
@@ -14,7 +15,6 @@ import type {
   ArtifactVersion,
   ChampionPointer,
   EvaluationRecord,
-  LedgerEvent,
   PublicLedgerEvent,
   TransitionAuthority,
 } from './ledger.js'
@@ -33,6 +33,30 @@ import type {
   LearningSignal,
   LearningTicket,
 } from './learning-intake.js'
+import type {
+  RunSkillManifest,
+  RunSkillManifestInput,
+  RunSkillManifestReceipt,
+  RunSkillUse,
+  RunSkillUseInput,
+  RunSkillUseReceipt,
+  AttributionId,
+  AttributionInput,
+  AttributionReceipt,
+  AttributionRecord,
+  LearningCase,
+  LearningCaseId,
+  LearningCaseReceipt,
+  OpenLearningCaseInput,
+  AcceptedLesson,
+  AcceptedLessonInput,
+  AcceptedLessonReceipt,
+  GovernedSkillCandidate,
+  GovernedSkillCandidateId,
+  LessonId,
+  SkillCandidateInput,
+  SkillCandidateReceipt,
+} from './skill-governance.js'
 
 export interface RuntimeBinding {
   readonly artifactId: ArtifactId
@@ -107,14 +131,6 @@ function publicBinding(binding: BoundRuntime): RuntimeBinding {
   }
 }
 
-function isPublicLedgerEvent(
-  event: LedgerEvent,
-): event is PublicLedgerEvent {
-  return event.type !== 'learning-intake-recorded'
-    && event.type !== 'run-binding-recorded'
-    && event.type !== 'outcome-intake-recorded'
-}
-
 export class TianwenEvolutionService extends Service {
   static inject = ['dynamicCordisRunner']
 
@@ -168,6 +184,85 @@ export class TianwenEvolutionService extends Service {
   recordOutcomeIntake(input: OutcomeIntakeInput): OutcomeIntakeReceipt {
     return this.formalWrite(() =>
       this.state().ledger.recordOutcomeIntake(input))
+  }
+
+  recordRunSkillManifest(
+    input: RunSkillManifestInput,
+  ): RunSkillManifestReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordRunSkillManifest(input))
+  }
+
+  getRunSkillManifest(runId: TianwenRunId): RunSkillManifest | undefined {
+    return this.state().ledger.getRunSkillManifest(runId)
+  }
+
+  listRunSkillManifests(): readonly RunSkillManifest[] {
+    return this.state().ledger.listRunSkillManifests()
+  }
+
+  recordRunSkillUse(input: RunSkillUseInput): RunSkillUseReceipt {
+    return this.formalWrite(() => this.state().ledger.recordRunSkillUse(input))
+  }
+
+  getRunSkillUse(runId: TianwenRunId): RunSkillUse | undefined {
+    return this.state().ledger.getRunSkillUse(runId)
+  }
+
+  listRunSkillUses(): readonly RunSkillUse[] {
+    return this.state().ledger.listRunSkillUses()
+  }
+
+  openLearningCase(input: OpenLearningCaseInput): LearningCaseReceipt {
+    return this.formalWrite(() => this.state().ledger.openLearningCase(input))
+  }
+
+  getLearningCase(caseId: LearningCaseId): LearningCase | undefined {
+    return this.state().ledger.getLearningCase(caseId)
+  }
+
+  listLearningCases(): readonly LearningCase[] {
+    return this.state().ledger.listLearningCases()
+  }
+
+  recordAttribution(input: AttributionInput): AttributionReceipt {
+    return this.formalWrite(() => this.state().ledger.recordAttribution(input))
+  }
+
+  getAttribution(attributionId: AttributionId): AttributionRecord | undefined {
+    return this.state().ledger.getAttribution(attributionId)
+  }
+
+  listAttributions(): readonly AttributionRecord[] {
+    return this.state().ledger.listAttributions()
+  }
+
+  recordAcceptedLesson(input: AcceptedLessonInput): AcceptedLessonReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordAcceptedLesson(input))
+  }
+
+  getAcceptedLesson(lessonId: LessonId): AcceptedLesson | undefined {
+    return this.state().ledger.getAcceptedLesson(lessonId)
+  }
+
+  listAcceptedLessons(): readonly AcceptedLesson[] {
+    return this.state().ledger.listAcceptedLessons()
+  }
+
+  recordSkillCandidate(input: SkillCandidateInput): SkillCandidateReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordSkillCandidate(input))
+  }
+
+  getSkillCandidate(
+    candidateId: GovernedSkillCandidateId,
+  ): GovernedSkillCandidate | undefined {
+    return this.state().ledger.getSkillCandidate(candidateId)
+  }
+
+  listSkillCandidates(): readonly GovernedSkillCandidate[] {
+    return this.state().ledger.listSkillCandidates()
   }
 
   listLearningSignals(): readonly (LearningSignal | OutcomeLearningSignal)[] {

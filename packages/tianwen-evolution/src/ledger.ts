@@ -14,7 +14,11 @@ import {
 import { join } from 'node:path'
 import { TextDecoder } from 'node:util'
 
-import { prepareLearningIntake, sha256 } from './learning-intake.js'
+import {
+  canonicalJson,
+  prepareLearningIntake,
+  sha256,
+} from './learning-intake.js'
 import type {
   LearningIntakeInput,
   LearningIntakeReceipt,
@@ -39,6 +43,50 @@ import type {
   TianwenRunBinding,
   TianwenRunId,
 } from './outcome-intake.js'
+import {
+  parseRunSkillManifest,
+  parseRunSkillUse,
+  parseAttribution,
+  parseAcceptedLesson,
+  parseLearningCase,
+  parseSkillCandidate,
+  prepareAcceptedLesson,
+  prepareAttribution,
+  prepareLearningCase,
+  prepareSkillCandidate,
+  prepareRunSkillManifest,
+  prepareRunSkillUse,
+} from './skill-governance.js'
+import type {
+  RunSkillManifest,
+  RunSkillManifestInput,
+  RunSkillManifestReceipt,
+  RunSkillManifestRecordedEvent,
+  RunSkillUse,
+  RunSkillUseInput,
+  RunSkillUseReceipt,
+  RunSkillUseRecordedEvent,
+  AttributionId,
+  AttributionInput,
+  AttributionReceipt,
+  AttributionRecord,
+  LearningAttributionRecordedEvent,
+  LearningCase,
+  LearningCaseId,
+  LearningCaseOpenedEvent,
+  LearningCaseReceipt,
+  OpenLearningCaseInput,
+  AcceptedLesson,
+  AcceptedLessonInput,
+  AcceptedLessonReceipt,
+  GovernedSkillCandidate,
+  GovernedSkillCandidateId,
+  LearningCandidateRecordedEvent,
+  LearningLessonRecordedEvent,
+  LessonId,
+  SkillCandidateInput,
+  SkillCandidateReceipt,
+} from './skill-governance.js'
 
 export type ArtifactId = `artifact:${string}`
 export type Sha256Digest = `sha256:${string}`
@@ -126,6 +174,12 @@ export type LedgerEvent =
   | LearningIntakeRecordedEvent
   | RunBindingRecordedEvent
   | OutcomeIntakeRecordedEvent
+  | RunSkillManifestRecordedEvent
+  | RunSkillUseRecordedEvent
+  | LearningCaseOpenedEvent
+  | LearningAttributionRecordedEvent
+  | LearningLessonRecordedEvent
+  | LearningCandidateRecordedEvent
   | ArtifactRecordedEvent
   | EvaluationRecordedEvent
   | ApprovalRecordedEvent
@@ -134,12 +188,31 @@ export type LedgerEvent =
   | ActivationFailedEvent
   | RecoveryFailedEvent
 
-export type PublicLedgerEvent = Exclude<
+export const PUBLIC_LEDGER_EVENT_TYPES = Object.freeze([
+  'artifact-recorded',
+  'evaluation-recorded',
+  'approval-recorded',
+  'promoted',
+  'rolled-back',
+  'runtime-bound',
+  'activation-failed',
+  'recovery-failed',
+] as const) satisfies readonly LedgerEvent['type'][]
+
+export type PublicLedgerEventType =
+  typeof PUBLIC_LEDGER_EVENT_TYPES[number]
+
+export type PublicLedgerEvent = Extract<
   LedgerEvent,
-  LearningIntakeRecordedEvent
-    | RunBindingRecordedEvent
-    | OutcomeIntakeRecordedEvent
+  { readonly type: PublicLedgerEventType }
 >
+
+export function isPublicLedgerEvent(
+  event: LedgerEvent,
+): event is PublicLedgerEvent {
+  return (PUBLIC_LEDGER_EVENT_TYPES as readonly string[])
+    .includes(event.type)
+}
 
 export type GovernanceErrorCode =
   | 'artifact-missing'
@@ -724,6 +797,164 @@ function parseEvent(value: unknown): LedgerEvent {
   if (type === 'outcome-intake-recorded') {
     return parseOutcomeEvent(value, at)
   }
+  if (type === 'run-skill-manifest-recorded') {
+    exactKeys(value, [
+      'schemaVersion',
+      'type',
+      'at',
+      'manifest',
+      'inputDigest',
+    ])
+    if (value.schemaVersion !== 'tianwen.run-skill-manifest.v1') {
+      throw new LedgerIntegrityError('invalid Run Skill manifest event version')
+    }
+    let manifest
+    try {
+      manifest = parseRunSkillManifest(value.manifest)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid Run Skill manifest event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(manifest)) {
+      throw new LedgerIntegrityError('Run Skill manifest digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.run-skill-manifest.v1',
+      type,
+      at,
+      manifest,
+      inputDigest,
+    }
+  }
+  if (type === 'run-skill-use-recorded') {
+    exactKeys(value, [
+      'schemaVersion',
+      'type',
+      'at',
+      'use',
+      'inputDigest',
+    ])
+    if (value.schemaVersion !== 'tianwen.run-skill-use.v1') {
+      throw new LedgerIntegrityError('invalid Run Skill use event version')
+    }
+    let use
+    try {
+      use = parseRunSkillUse(value.use)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid Run Skill use event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(use)) {
+      throw new LedgerIntegrityError('Run Skill use digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.run-skill-use.v1',
+      type,
+      at,
+      use,
+      inputDigest,
+    }
+  }
+  if (type === 'learning-case-opened') {
+    exactKeys(value, [
+      'schemaVersion', 'type', 'at', 'case', 'inputDigest',
+    ])
+    if (value.schemaVersion !== 'tianwen.learning-case.v1') {
+      throw new LedgerIntegrityError('invalid Learning Case event version')
+    }
+    let learningCase
+    try {
+      learningCase = parseLearningCase(value.case)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid Learning Case event', { cause: error })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(learningCase)) {
+      throw new LedgerIntegrityError('Learning Case digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.learning-case.v1',
+      type,
+      at,
+      case: learningCase,
+      inputDigest,
+    }
+  }
+  if (type === 'learning-attribution-recorded') {
+    exactKeys(value, [
+      'schemaVersion', 'type', 'at', 'attribution', 'inputDigest',
+    ])
+    if (value.schemaVersion !== 'tianwen.learning-attribution.v1') {
+      throw new LedgerIntegrityError('invalid Attribution event version')
+    }
+    let attribution
+    try {
+      attribution = parseAttribution(value.attribution)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid Attribution event', { cause: error })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(attribution)) {
+      throw new LedgerIntegrityError('Attribution digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.learning-attribution.v1',
+      type,
+      at,
+      attribution,
+      inputDigest,
+    }
+  }
+  if (type === 'learning-lesson-recorded') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'lesson', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.learning-lesson.v1') {
+      throw new LedgerIntegrityError('invalid Accepted Lesson event version')
+    }
+    let lesson
+    try {
+      lesson = parseAcceptedLesson(value.lesson)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid Accepted Lesson event', { cause: error })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(lesson)) {
+      throw new LedgerIntegrityError('Accepted Lesson digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.learning-lesson.v1',
+      type,
+      at,
+      lesson,
+      inputDigest,
+    }
+  }
+  if (type === 'learning-candidate-recorded') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'candidate', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.learning-candidate.v1') {
+      throw new LedgerIntegrityError('invalid Skill Candidate event version')
+    }
+    let candidate
+    try {
+      candidate = parseSkillCandidate(value.candidate)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid Skill Candidate event', { cause: error })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(candidate)) {
+      throw new LedgerIntegrityError('Skill Candidate digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.learning-candidate.v1',
+      type,
+      at,
+      candidate,
+      inputDigest,
+    }
+  }
   if (type === 'artifact-recorded') {
     exactKeys(value, ['type', 'at', 'artifact'])
     const artifact = parseArtifact(value.artifact)
@@ -886,6 +1117,22 @@ export class EvolutionLedger {
     Sha256Digest,
     OutcomeIntakeRecordedEvent
   >()
+  readonly #runSkillManifests = new Map<TianwenRunId, RunSkillManifest>()
+  readonly #runSkillUses = new Map<TianwenRunId, RunSkillUse>()
+  readonly #learningCases = new Map<LearningCaseId, LearningCase>()
+  readonly #caseIdByTicket = new Map<LearningTicketId, LearningCaseId>()
+  readonly #attributions = new Map<AttributionId, AttributionRecord>()
+  readonly #attributionIdByCase = new Map<LearningCaseId, AttributionId>()
+  readonly #acceptedLessons = new Map<LessonId, AcceptedLesson>()
+  readonly #lessonIdByAttribution = new Map<AttributionId, LessonId>()
+  readonly #skillCandidates = new Map<
+    GovernedSkillCandidateId,
+    GovernedSkillCandidate
+  >()
+  readonly #candidateIdByCase = new Map<
+    LearningCaseId,
+    GovernedSkillCandidateId
+  >()
   readonly #learningSignals = new Map<
     LearningSignalId,
     LearningSignal | OutcomeLearningSignal
@@ -937,6 +1184,290 @@ export class EvolutionLedger {
   getRunBinding(runId: TianwenRunId): TianwenRunBinding | undefined {
     const binding = this.#runBindings.get(runId)
     return binding === undefined ? undefined : clone(binding)
+  }
+
+  recordRunSkillManifest(
+    input: RunSkillManifestInput,
+  ): RunSkillManifestReceipt {
+    if (!this.#runBindings.has(input.runId)) {
+      throw new LedgerIntegrityError(`unknown Tianwen Run: ${input.runId}`)
+    }
+    let manifest
+    try {
+      manifest = prepareRunSkillManifest(input)
+    } catch (error) {
+      throw new LedgerIntegrityError('Run Skill manifest input is invalid', {
+        cause: error,
+      })
+    }
+    const existing = this.#runSkillManifests.get(manifest.runId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(manifest)) {
+        throw new LedgerIntegrityError(
+          `Run Skill manifest changed after freeze: ${manifest.runId}`,
+        )
+      }
+      return { parentVersionId: manifest.parentVersionId, duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.run-skill-manifest.v1',
+      type: 'run-skill-manifest-recorded',
+      at: this.#now(),
+      manifest,
+      inputDigest: sha256(manifest),
+    })
+    return { parentVersionId: manifest.parentVersionId, duplicate: false }
+  }
+
+  getRunSkillManifest(runId: TianwenRunId): RunSkillManifest | undefined {
+    const manifest = this.#runSkillManifests.get(runId)
+    return manifest === undefined ? undefined : clone(manifest)
+  }
+
+  listRunSkillManifests(): readonly RunSkillManifest[] {
+    return clone([...this.#runSkillManifests.values()])
+  }
+
+  recordRunSkillUse(input: RunSkillUseInput): RunSkillUseReceipt {
+    const binding = this.#runBindings.get(input.runId)
+    const manifest = this.#runSkillManifests.get(input.runId)
+    const outcome = [...this.#outcomeIntakes.values()]
+      .find(event => event.input.runId === input.runId)?.input
+    if (binding === undefined || manifest === undefined || outcome === undefined) {
+      throw new LedgerIntegrityError(
+        `Run Skill use lacks frozen Run facts: ${input.runId}`,
+      )
+    }
+    let use
+    try {
+      use = prepareRunSkillUse(input, manifest, binding, outcome)
+    } catch (error) {
+      throw new LedgerIntegrityError('Run Skill use input is invalid', {
+        cause: error,
+      })
+    }
+    const existing = this.#runSkillUses.get(use.runId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(use)) {
+        throw new LedgerIntegrityError(
+          `Run Skill use changed after freeze: ${use.runId}`,
+        )
+      }
+      return { parentVersionId: use.parentVersionId, duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.run-skill-use.v1',
+      type: 'run-skill-use-recorded',
+      at: this.#now(),
+      use,
+      inputDigest: sha256(use),
+    })
+    return { parentVersionId: use.parentVersionId, duplicate: false }
+  }
+
+  getRunSkillUse(runId: TianwenRunId): RunSkillUse | undefined {
+    const use = this.#runSkillUses.get(runId)
+    return use === undefined ? undefined : clone(use)
+  }
+
+  listRunSkillUses(): readonly RunSkillUse[] {
+    return clone([...this.#runSkillUses.values()])
+  }
+
+  openLearningCase(input: OpenLearningCaseInput): LearningCaseReceipt {
+    const ticket = this.#learningTickets.get(input.ticketId)
+    if (ticket === undefined) {
+      throw new LedgerIntegrityError(`unknown LearningTicket: ${input.ticketId}`)
+    }
+    const signals = ticket.signalIds.map(id => this.#learningSignals.get(id))
+      .filter((signal): signal is OutcomeLearningSignal =>
+        signal !== undefined && isOutcomeSignal(signal))
+    let learningCase
+    try {
+      learningCase = prepareLearningCase(input, ticket, signals, {
+        bindings: [...this.#runBindings.values()],
+        manifests: [...this.#runSkillManifests.values()],
+        uses: [...this.#runSkillUses.values()],
+        outcomes: [...this.#outcomeIntakes.values()].map(event => event.input),
+      })
+    } catch (error) {
+      throw new LedgerIntegrityError('Learning Case input is invalid', {
+        cause: error,
+      })
+    }
+    const existingId = this.#caseIdByTicket.get(ticket.ticketId)
+    if (existingId !== undefined) {
+      const existing = this.#learningCases.get(existingId)!
+      if (canonicalJson(existing) !== canonicalJson(learningCase)) {
+        throw new LedgerIntegrityError(
+          `Learning Case changed after open: ${existingId}`,
+        )
+      }
+      return { caseId: existingId, duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-case.v1',
+      type: 'learning-case-opened',
+      at: this.#now(),
+      case: learningCase,
+      inputDigest: sha256(learningCase),
+    })
+    return { caseId: learningCase.caseId, duplicate: false }
+  }
+
+  getLearningCase(caseId: LearningCaseId): LearningCase | undefined {
+    const value = this.#learningCases.get(caseId)
+    return value === undefined ? undefined : clone(value)
+  }
+
+  listLearningCases(): readonly LearningCase[] {
+    return clone([...this.#learningCases.values()])
+  }
+
+  recordAttribution(input: AttributionInput): AttributionReceipt {
+    const learningCase = this.#learningCases.get(input.caseId)
+    if (learningCase === undefined) {
+      throw new LedgerIntegrityError(`unknown Learning Case: ${input.caseId}`)
+    }
+    let attribution
+    try {
+      attribution = prepareAttribution(input, learningCase)
+    } catch (error) {
+      throw new LedgerIntegrityError('Attribution input is invalid', {
+        cause: error,
+      })
+    }
+    const existingId = this.#attributionIdByCase.get(input.caseId)
+    if (existingId !== undefined) {
+      const existing = this.#attributions.get(existingId)!
+      if (canonicalJson(existing) !== canonicalJson(attribution)) {
+        throw new LedgerIntegrityError(
+          `Attribution changed after record: ${existingId}`,
+        )
+      }
+      return {
+        attributionId: existingId,
+        decision: existing.resolution === 'dsh-skill' ? 'resolved' : 'no-lesson',
+        duplicate: true,
+      }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-attribution.v1',
+      type: 'learning-attribution-recorded',
+      at: this.#now(),
+      attribution,
+      inputDigest: sha256(attribution),
+    })
+    return {
+      attributionId: attribution.attributionId,
+      decision: attribution.resolution === 'dsh-skill' ? 'resolved' : 'no-lesson',
+      duplicate: false,
+    }
+  }
+
+  getAttribution(attributionId: AttributionId): AttributionRecord | undefined {
+    const value = this.#attributions.get(attributionId)
+    return value === undefined ? undefined : clone(value)
+  }
+
+  listAttributions(): readonly AttributionRecord[] {
+    return clone([...this.#attributions.values()])
+  }
+
+  recordAcceptedLesson(input: AcceptedLessonInput): AcceptedLessonReceipt {
+    const learningCase = this.#learningCases.get(input.caseId)
+    const attribution = this.#attributions.get(input.attributionId)
+    if (learningCase === undefined || attribution === undefined) {
+      throw new LedgerIntegrityError('Accepted Lesson lacks Case or Attribution')
+    }
+    let lesson
+    try {
+      lesson = prepareAcceptedLesson(input, learningCase, attribution)
+    } catch (error) {
+      throw new LedgerIntegrityError('Accepted Lesson input is invalid', {
+        cause: error,
+      })
+    }
+    const existingId = this.#lessonIdByAttribution.get(input.attributionId)
+    if (existingId !== undefined) {
+      const existing = this.#acceptedLessons.get(existingId)!
+      if (canonicalJson(existing) !== canonicalJson(lesson)) {
+        throw new LedgerIntegrityError(`Accepted Lesson changed: ${existingId}`)
+      }
+      return { lessonId: existingId, duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-lesson.v1',
+      type: 'learning-lesson-recorded',
+      at: this.#now(),
+      lesson,
+      inputDigest: sha256(lesson),
+    })
+    return { lessonId: lesson.lessonId, duplicate: false }
+  }
+
+  getAcceptedLesson(lessonId: LessonId): AcceptedLesson | undefined {
+    const value = this.#acceptedLessons.get(lessonId)
+    return value === undefined ? undefined : clone(value)
+  }
+
+  listAcceptedLessons(): readonly AcceptedLesson[] {
+    return clone([...this.#acceptedLessons.values()])
+  }
+
+  recordSkillCandidate(input: SkillCandidateInput): SkillCandidateReceipt {
+    const lesson = this.#acceptedLessons.get(input.lessonId)
+    if (lesson === undefined) {
+      throw new LedgerIntegrityError(`unknown Accepted Lesson: ${input.lessonId}`)
+    }
+    const learningCase = this.#learningCases.get(lesson.caseId)!
+    const attribution = this.#attributions.get(lesson.attributionId)!
+    const parent = [...this.#runSkillManifests.values()]
+      .find(value => value.parentVersionId === learningCase.parentVersionId)?.parent
+    if (parent === undefined) {
+      throw new LedgerIntegrityError('Skill Candidate parent manifest is missing')
+    }
+    let candidate
+    try {
+      candidate = prepareSkillCandidate(
+        input,
+        lesson,
+        learningCase,
+        attribution,
+        parent,
+      )
+    } catch (error) {
+      throw new LedgerIntegrityError('Skill Candidate input is invalid', {
+        cause: error,
+      })
+    }
+    const existingId = this.#candidateIdByCase.get(learningCase.caseId)
+    if (existingId !== undefined) {
+      const existing = this.#skillCandidates.get(existingId)!
+      if (canonicalJson(existing) !== canonicalJson(candidate)) {
+        throw new LedgerIntegrityError(`Skill Candidate changed: ${existingId}`)
+      }
+      return { candidateId: existingId, duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-candidate.v1',
+      type: 'learning-candidate-recorded',
+      at: this.#now(),
+      candidate,
+      inputDigest: sha256(candidate),
+    })
+    return { candidateId: candidate.candidateId, duplicate: false }
+  }
+
+  getSkillCandidate(
+    candidateId: GovernedSkillCandidateId,
+  ): GovernedSkillCandidate | undefined {
+    const value = this.#skillCandidates.get(candidateId)
+    return value === undefined ? undefined : clone(value)
+  }
+
+  listSkillCandidates(): readonly GovernedSkillCandidate[] {
+    return clone([...this.#skillCandidates.values()])
   }
 
   recordOutcomeIntake(input: OutcomeIntakeInput): OutcomeIntakeReceipt {
@@ -1446,6 +1977,175 @@ export class EvolutionLedger {
       }
       return
     }
+    if (event.type === 'run-skill-manifest-recorded') {
+      if (!this.#runBindings.has(event.manifest.runId)) {
+        throw new LedgerIntegrityError(
+          `Run Skill manifest references unknown Run: ${event.manifest.runId}`,
+        )
+      }
+      if (
+        this.#runSkillManifests.has(event.manifest.runId)
+        || event.inputDigest !== sha256(event.manifest)
+      ) {
+        throw new LedgerIntegrityError('Run Skill manifest disagrees with history')
+      }
+      return
+    }
+    if (event.type === 'run-skill-use-recorded') {
+      const binding = this.#runBindings.get(event.use.runId)
+      const manifest = this.#runSkillManifests.get(event.use.runId)
+      const outcome = [...this.#outcomeIntakes.values()]
+        .find(stored => stored.input.runId === event.use.runId)?.input
+      if (
+        binding === undefined
+        || manifest === undefined
+        || outcome === undefined
+        || this.#runSkillUses.has(event.use.runId)
+      ) {
+        throw new LedgerIntegrityError('Run Skill use disagrees with history')
+      }
+      let prepared
+      try {
+        const { schemaVersion: _schemaVersion, ...input } = event.use
+        prepared = prepareRunSkillUse(input, manifest, binding, outcome)
+      } catch (error) {
+        throw new LedgerIntegrityError('Run Skill use event is invalid', {
+          cause: error,
+        })
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.use)
+        || event.inputDigest !== sha256(event.use)
+      ) {
+        throw new LedgerIntegrityError('Run Skill use disagrees with frozen facts')
+      }
+      return
+    }
+    if (event.type === 'learning-case-opened') {
+      const ticket = this.#learningTickets.get(event.case.ticketId)
+      if (ticket === undefined || this.#caseIdByTicket.has(ticket.ticketId)) {
+        throw new LedgerIntegrityError('Learning Case disagrees with history')
+      }
+      const signals = ticket.signalIds.map(id => this.#learningSignals.get(id))
+        .filter((signal): signal is OutcomeLearningSignal =>
+          signal !== undefined && isOutcomeSignal(signal))
+      let prepared
+      try {
+        prepared = prepareLearningCase({
+          ticketId: ticket.ticketId,
+          counterevidenceRunIds: event.case.counterevidence.map(item => item.runId),
+        }, ticket, signals, {
+          bindings: [...this.#runBindings.values()],
+          manifests: [...this.#runSkillManifests.values()],
+          uses: [...this.#runSkillUses.values()],
+          outcomes: [...this.#outcomeIntakes.values()].map(value => value.input),
+        })
+      } catch (error) {
+        throw new LedgerIntegrityError('Learning Case event is invalid', {
+          cause: error,
+        })
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.case)
+        || event.inputDigest !== sha256(event.case)
+      ) {
+        throw new LedgerIntegrityError('Learning Case disagrees with frozen facts')
+      }
+      return
+    }
+    if (event.type === 'learning-attribution-recorded') {
+      const learningCase = this.#learningCases.get(event.attribution.caseId)
+      if (
+        learningCase === undefined
+        || this.#attributionIdByCase.has(learningCase.caseId)
+      ) {
+        throw new LedgerIntegrityError('Attribution disagrees with history')
+      }
+      const { attributionId: _attributionId, ...input } = event.attribution
+      let prepared
+      try {
+        prepared = prepareAttribution(input, learningCase)
+      } catch (error) {
+        throw new LedgerIntegrityError('Attribution event is invalid', {
+          cause: error,
+        })
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.attribution)
+        || event.inputDigest !== sha256(event.attribution)
+      ) {
+        throw new LedgerIntegrityError('Attribution disagrees with its Case')
+      }
+      return
+    }
+    if (event.type === 'learning-lesson-recorded') {
+      const learningCase = this.#learningCases.get(event.lesson.caseId)
+      const attribution = this.#attributions.get(event.lesson.attributionId)
+      if (
+        learningCase === undefined
+        || attribution === undefined
+        || this.#lessonIdByAttribution.has(attribution.attributionId)
+      ) {
+        throw new LedgerIntegrityError('Accepted Lesson disagrees with history')
+      }
+      const {
+        lessonId: _lessonId,
+        ticketId: _ticketId,
+        status: _status,
+        ...input
+      } = event.lesson
+      let prepared
+      try {
+        prepared = prepareAcceptedLesson(input, learningCase, attribution)
+      } catch (error) {
+        throw new LedgerIntegrityError('Accepted Lesson event is invalid', {
+          cause: error,
+        })
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.lesson)
+        || event.inputDigest !== sha256(event.lesson)
+      ) {
+        throw new LedgerIntegrityError('Accepted Lesson disagrees with Attribution')
+      }
+      return
+    }
+    if (event.type === 'learning-candidate-recorded') {
+      const lesson = this.#acceptedLessons.get(event.candidate.lessonId)
+      const learningCase = this.#learningCases.get(event.candidate.caseId)
+      const attribution = this.#attributions.get(event.candidate.attributionId)
+      const parent = [...this.#runSkillManifests.values()]
+        .find(value =>
+          value.parentVersionId === event.candidate.parentVersionId)?.parent
+      if (
+        lesson === undefined
+        || learningCase === undefined
+        || attribution === undefined
+        || parent === undefined
+        || this.#candidateIdByCase.has(learningCase.caseId)
+      ) {
+        throw new LedgerIntegrityError('Skill Candidate disagrees with history')
+      }
+      let prepared
+      try {
+        prepared = prepareSkillCandidate({
+          lessonId: lesson.lessonId,
+          payload: event.candidate.payload,
+          evidenceIds: event.candidate.evidenceIds,
+        }, lesson, learningCase, attribution, parent)
+      } catch (error) {
+        throw new LedgerIntegrityError('Skill Candidate event is invalid', {
+          cause: error,
+        })
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.candidate)
+        || event.inputDigest !== sha256(event.candidate)
+      ) {
+        throw new LedgerIntegrityError('Skill Candidate disagrees with Lesson')
+      }
+      return
+    }
     if (event.type === 'outcome-intake-recorded') {
       const binding = this.#runBindings.get(event.input.runId)
       if (binding === undefined) {
@@ -1680,6 +2380,43 @@ export class EvolutionLedger {
     if (event.type === 'run-binding-recorded') {
       this.#runBindings.set(event.binding.runId, event.binding)
       this.#runIdBySession.set(event.binding.sessionId, event.binding.runId)
+      return
+    }
+    if (event.type === 'run-skill-manifest-recorded') {
+      this.#runSkillManifests.set(event.manifest.runId, event.manifest)
+      return
+    }
+    if (event.type === 'run-skill-use-recorded') {
+      this.#runSkillUses.set(event.use.runId, event.use)
+      return
+    }
+    if (event.type === 'learning-case-opened') {
+      this.#learningCases.set(event.case.caseId, event.case)
+      this.#caseIdByTicket.set(event.case.ticketId, event.case.caseId)
+      return
+    }
+    if (event.type === 'learning-attribution-recorded') {
+      this.#attributions.set(event.attribution.attributionId, event.attribution)
+      this.#attributionIdByCase.set(
+        event.attribution.caseId,
+        event.attribution.attributionId,
+      )
+      return
+    }
+    if (event.type === 'learning-lesson-recorded') {
+      this.#acceptedLessons.set(event.lesson.lessonId, event.lesson)
+      this.#lessonIdByAttribution.set(
+        event.lesson.attributionId,
+        event.lesson.lessonId,
+      )
+      return
+    }
+    if (event.type === 'learning-candidate-recorded') {
+      this.#skillCandidates.set(event.candidate.candidateId, event.candidate)
+      this.#candidateIdByCase.set(
+        event.candidate.caseId,
+        event.candidate.candidateId,
+      )
       return
     }
     if (event.type === 'outcome-intake-recorded') {
