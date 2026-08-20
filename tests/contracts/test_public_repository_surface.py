@@ -181,7 +181,10 @@ def test_governed_skill_shadow_eligibility_handoff_and_ci() -> None:
         "DSH `0.1.0-rc.7` remains the only product Agent Runtime",
         "Stage 5 implements only the eligibility slice",
         "no-eligible-shadow",
-        "Natural Shadow routing, five qualified natural Runs, Active Pointer, Promotion, and rollback remain unimplemented and unproven",
+        (
+            "Natural Shadow routing, five qualified natural Runs, Active Pointer, "
+            "Promotion, and rollback remain unimplemented and unproven"
+        ),
         "Scripted evidence is not efficacy evidence",
         "No Candidate is registered for ordinary traffic",
         "0 Provider requests, 0 paid tokens, 0 CNY, 0 Docker, and 0 user data",
