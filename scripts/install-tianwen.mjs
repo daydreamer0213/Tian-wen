@@ -522,19 +522,18 @@ export function installTianwen({
     }
     throw new Error('existing data directory is not a complete managed Tianwen installation')
   }
-  if (installation === 'managed-rc6') {
-    throw new Error('managed DSH rc.6 installation requires an explicit migration')
-  }
   if (installation === 'fresh') ensureManagedDataDir(paths)
   else assertManagedDataDir(paths)
   mkdirSync(dirname(paths.receiptPath), { recursive: true })
 
   const hostExists = existsSync(paths.hostRoot)
   const profileExists = existsSync(paths.profileRoot)
+  const migratingRc6 = installation === 'managed-rc6'
+  const hostNeedsDeploy = !hostExists || migratingRc6
   const installedArchiveDigest = previousArchiveDigest(paths)
   let dshBin
-  if (hostExists) dshBin = validateInstalledHost(paths.hostRoot)
-  if (profileExists) validateProfile(paths)
+  if (hostExists && !migratingRc6) dshBin = validateInstalledHost(paths.hostRoot)
+  if (profileExists && !migratingRc6) validateProfile(paths)
 
   const env = childEnvironment(paths, source)
   const pnpm = pnpmEntry(source)
@@ -548,21 +547,6 @@ export function installTianwen({
   if (version !== PNPM_VERSION) throw new Error(`pnpm ${PNPM_VERSION} is required, got ${version}`)
 
   invokePnpm(['install', '--offline', '--frozen-lockfile', '--ignore-scripts', '--trust-lockfile'], 300_000)
-  if (!hostExists) {
-    mkdirSync(dirname(paths.hostRoot), { recursive: true })
-    try {
-      invokePnpm([
-        '--config.inject-workspace-packages=true',
-        '--filter', '@tianwen/dsh-host',
-        'deploy', '--prod', paths.hostRoot,
-      ], 900_000)
-      dshBin = validateInstalledHost(paths.hostRoot)
-    } catch (error) {
-      rmSync(paths.hostRoot, { force: true, recursive: true })
-      throw error
-    }
-  }
-
   const packsRoot = dirname(paths.archivePath)
   const archiveStages = [randomUUID(), randomUUID()]
     .map(id => resolve(packsRoot, `.install-${process.pid}-${id}`))
@@ -573,7 +557,21 @@ export function installTianwen({
   let archivePublished = false
   let profileBackup
   let profileChanged = false
+  let hostBackup
   try {
+    if (hostNeedsDeploy) {
+      const hostsRoot = dirname(paths.hostRoot)
+      const id = `${process.pid}-${randomUUID()}`
+      hostBackup = migratingRc6 ? resolve(hostsRoot, `.dsh-host-backup-${id}`) : undefined
+      mkdirSync(hostsRoot, { recursive: true })
+      if (hostBackup !== undefined) renameSync(paths.hostRoot, hostBackup)
+      invokePnpm([
+        '--config.inject-workspace-packages=true',
+        '--filter', '@tianwen/dsh-host',
+        'deploy', '--prod', paths.hostRoot,
+      ], 900_000)
+      dshBin = validateInstalledHost(paths.hostRoot)
+    }
     for (const [index, archiveStage] of archiveStages.entries()) {
       mkdirSync(archiveStage, { recursive: true })
       invokePnpm(['--filter', `${RUNTIME_PACKAGE}...`, 'build'], 300_000)
@@ -590,7 +588,7 @@ export function installTianwen({
       throw new Error('Runtime Bundle archive is not stable across consecutive builds')
     }
     archiveDigest = archiveDigests[0]
-    profileChanged = !profileExists || installedArchiveDigest !== archiveDigest
+    profileChanged = migratingRc6 || !profileExists || installedArchiveDigest !== archiveDigest
     if (profileChanged) {
       const profilesRoot = dirname(paths.profileRoot)
       const id = `${process.pid}-${randomUUID()}`
@@ -648,6 +646,13 @@ export function installTianwen({
         // A stale backup is harmless after the archive and receipt are committed.
       }
     }
+    if (hostBackup !== undefined) {
+      try {
+        rmSync(hostBackup, { force: true, recursive: true })
+      } catch {
+        // A stale backup is harmless after the host and receipt are committed.
+      }
+    }
     return receipt
   } catch (error) {
     if (archivePublished) rmSync(paths.archivePath, { force: true })
@@ -658,6 +663,12 @@ export function installTianwen({
       rmSync(paths.profileRoot, { force: true, recursive: true })
       if (profileBackup !== undefined && existsSync(profileBackup)) {
         renameSync(profileBackup, paths.profileRoot)
+      }
+    }
+    if (hostNeedsDeploy) {
+      rmSync(paths.hostRoot, { force: true, recursive: true })
+      if (hostBackup !== undefined && existsSync(hostBackup)) {
+        renameSync(hostBackup, paths.hostRoot)
       }
     }
     throw error

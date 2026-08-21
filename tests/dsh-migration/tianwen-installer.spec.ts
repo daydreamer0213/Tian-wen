@@ -346,6 +346,54 @@ describe('Tianwen installer contract', () => {
     }
   })
 
+  it.each(['original-archive', 'locked-deploy'] as const)(
+    'migrates the complete %s rc.6 predecessor to rc.7 and replays without deploys',
+    (encoding) => {
+      const paths = deriveInstallPaths(testRoot(`migrate-${encoding}`), 'win32')
+      writeManagedRc6Predecessor(paths, encoding)
+      const session = join(paths.sessionsRoot, 'kept.jsonl')
+      const ledger = join(paths.evolutionRoot, 'ledger.jsonl')
+      mkdirSync(paths.sessionsRoot, { recursive: true })
+      mkdirSync(paths.evolutionRoot, { recursive: true })
+      writeFileSync(session, 'session bytes\n', 'utf8')
+      writeFileSync(ledger, 'ledger bytes\n', 'utf8')
+      const durableBefore = [readFileSync(session), readFileSync(ledger)]
+      const scripted = scriptedInstaller(paths)
+
+      const migrated = installTianwen({ dataDir: paths.dataDir, runner: scripted.runner })
+
+      expect(validateInstalledHost(paths.hostRoot)).toContain('bin.js')
+      expect(readFileSync(join(paths.profileRoot, 'package.json'), 'utf8')).toContain('0.1.0-rc.7')
+      expect(migrated.status).toBe('ready')
+      expect([readFileSync(session), readFileSync(ledger)]).toEqual(durableBefore)
+      expect(readdirSync(dirname(paths.hostRoot)).filter(name => name.startsWith('.dsh-host-backup-'))).toEqual([])
+      const deployCount = scripted.calls.filter(argv => argv.includes('deploy')).length
+      expect(installTianwen({ dataDir: paths.dataDir, runner: scripted.runner })).toEqual(migrated)
+      expect(scripted.calls.filter(argv => argv.includes('deploy'))).toHaveLength(deployCount)
+      expect(scripted.calls.every(argv => !argv.includes('plugin') && !argv.includes('--online'))).toBe(true)
+    },
+  )
+
+  it.each([
+    ['partial host deploy', '@tianwen/dsh-host', 'partial-host'],
+    ['failure after rc.7 host validation', 'build', 'post-host-validation'],
+  ])('restores the rc.6 installation after %s', (_label, failOn, fixtureName) => {
+    const paths = deriveInstallPaths(testRoot(`migration-rollback-${fixtureName}`), 'win32')
+    writeManagedRc6Predecessor(paths, 'original-archive')
+    const session = join(paths.sessionsRoot, 'kept.jsonl')
+    const ledger = join(paths.evolutionRoot, 'ledger.jsonl')
+    mkdirSync(paths.sessionsRoot, { recursive: true })
+    mkdirSync(paths.evolutionRoot, { recursive: true })
+    writeFileSync(session, 'session bytes\n', 'utf8')
+    writeFileSync(ledger, 'ledger bytes\n', 'utf8')
+    const before = snapshotTree(paths.dataDir)
+    const scripted = scriptedInstaller(paths, failOn)
+
+    expect(() => installTianwen({ dataDir: paths.dataDir, runner: scripted.runner })).toThrow(/scripted failure/u)
+    expect(snapshotTree(paths.dataDir)).toEqual(before)
+    expect(readdirSync(dirname(paths.hostRoot)).filter(name => name.startsWith('.dsh-host-backup-'))).toEqual([])
+  })
+
   it('creates stable canonical receipt bytes without environment-specific commands', () => {
     const paths = deriveInstallPaths('D:\\DevData\\tianwen', 'win32')
     const receipt = createInstallReceipt(paths, {
