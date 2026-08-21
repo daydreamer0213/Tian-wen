@@ -77,3 +77,20 @@ stage and stops: only successful migration can precede the separately
 authorized same Goal/manifest configured-Provider resume. It adds no retry,
 ordinary-resume fallback, raw-output retrieval, repair step, price activity,
 or another Provider attempt.
+
+## Machine-readable installer transport
+
+The only official package command for a machine-readable installer receipt is:
+
+```powershell
+node --run install:tianwen -- --data-dir D:\DevData\tianwen --json
+```
+
+The boundary is that ordinary pnpm lifecycle presentation is not a
+machine-readable transport; ordinary human non-JSON use remains unchanged. A
+machine caller uses Node 22's stable package-script runner, which preserves the
+`install:tianwen` package entry without a pnpm wrapper transport. It accepts
+one complete canonical ready receipt or the existing three-key failed receipt,
+then stops on any other transport result. A direct installer-source invocation,
+raw JSON scanning, raw-output retention, and schema changes remain rejected:
+they would repair the wrapper presentation at the wrong boundary.
