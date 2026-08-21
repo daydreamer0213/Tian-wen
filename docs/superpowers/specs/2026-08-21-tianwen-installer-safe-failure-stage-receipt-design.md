@@ -123,17 +123,59 @@ to `installer-internal` instead of exposing their text.
   operational limit. This design calls no Provider and performs no pricing
   activity.
 
-## 5. Exact-main CI bearing, test and replay contract
+## 5. Native-Windows installer-contract bearing, test and replay contract
 
-The implementation is permitted one mechanical workflow change: append
-`tests/dsh-migration/tianwen-installer.spec.ts` to the existing focused Vitest
-command in `.github/workflows/ci.yml`. It adds no job, step, permission, cache,
-dependency or workflow policy. The public repository contract must permanently
-assert that exact path is present in the focused command.
+The installer is a Windows product contract. The fixture helper may derive
+Windows paths, but `installTianwen({ platform: 'win32' })` does not virtualize
+the host Node filesystem, `path`/`realpath`, `process.execPath`, or Corepack.
+Consequently, an Ubuntu runner cannot truthfully bear this contract merely by
+passing `platform: 'win32'` to a fixture. The existing
+`installWindowsFixture` helper remains a useful fixture boundary; product
+installer code remains unchanged.
 
-The exact-main automatic CI run must execute that same focused step with the
-installer spec included. Runtime Bundle build, TypeScript typecheck and DSH
-closure do not replace this JavaScript installer contract.
+The two exact Linux CI failures are the RED evidence for this distinction:
+
+- run `32492058264` showed the missing fixture platform identity; and
+- run `32493142651` showed that correcting derived paths still left host
+  filesystem and Corepack truth on Linux.
+
+The existing Ubuntu TypeScript focused Vitest command must therefore remove
+`tests/dsh-migration/tianwen-installer.spec.ts` and continue to bear only its
+platform-independent focused suite and demos.
+
+The workflow must add exactly one independent job named
+`installer-windows`, with `runs-on: windows-latest`. It has only these normal
+steps: checkout, pnpm setup at `11.20.0`, Node `22.20.0` setup with the pnpm
+cache, frozen dependency installation, and one native-Windows installer
+contract step. It has no matrix, Docker, WSL, self-hosted runner, retry,
+telemetry, or product filesystem adapter.
+
+The Windows contract step uses `pwsh`. If `D:` does not exist, it temporarily
+maps `$env:RUNNER_TEMP` to `D:` using Windows-native `subst.exe`; it then
+creates `D:\DevData` and runs:
+
+```powershell
+pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts
+```
+
+The step removes a temporary mapping that it created before finishing. This is
+short-lived CI-runner infrastructure only: it neither changes repository
+storage policy nor creates a product Profile, and it disappears with the
+runner.
+
+The public repository contract must assert all of the following, so the
+Windows bearing cannot silently drift back to Ubuntu:
+
+- the exact `installer-windows` job and `windows-latest` runner exist;
+- the native `subst.exe`/`RUNNER_TEMP` fallback, `D:\DevData` preparation, and
+  installer-spec command exist in that job; and
+- the installer spec path is absent from the Ubuntu TypeScript focused Vitest
+  command.
+
+Exact-main CI success requires the Python, TypeScript, and
+`installer-windows` jobs to complete successfully. The Windows job must show
+the existing 29 installer-contract tests passing; the TypeScript demos must
+complete without being interrupted by an installer spec executing on Linux.
 
 The implementation starts RED and proves each ordinary stage by a representative
 existing installer failure seam. The tests must show the exact schema keys and
@@ -169,7 +211,7 @@ Candidate, Evaluation, Shadow, or Promotion follows from a failure receipt.
 - adding a generic error framework, logging/telemetry system, watchdog, retry
   or repair capability;
 - changing timeout policy, package/dependency layout, workflow other than the
-  one focused-Vitest path addition, Runtime,
+  focused-command removal and single native-Windows job defined above, Runtime,
   Provider or learning governance behavior;
 - using price queries, price polling, a price snapshot or a product budget
   state machine.
