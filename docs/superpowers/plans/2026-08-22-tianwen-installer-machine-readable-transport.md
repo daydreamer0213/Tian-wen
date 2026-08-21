@@ -72,7 +72,7 @@ repository contract.
   }
   ```
 
-### Task 1: RED/GREEN — canonical silent pnpm transport
+### Task 1: corrective Node package-script transport
 
 **Files:**
 
@@ -103,8 +103,8 @@ repository contract.
   sentinel in either stream, and `existsSync(root) === false` after the call.
   Temporary capture and whole-stream parsing are permitted only in this
   deterministic fixture test; they must never become product or operational
-  wrapper-output handling. Run the installer spec and record this known
-  lifecycle-presentation RED.
+  wrapper-output handling. Cite the already-observed non-silent pnpm probe as
+  the RED evidence; do not rerun it in this task or current installer spec.
 
 - [ ] Do not add production code. The final test locks the official Node
   package-script command rather than a direct source call or a pnpm wrapper.
@@ -114,7 +114,7 @@ repository contract.
 - [ ] Commit only the test:
 
   ```text
-  test: require silent pnpm installer JSON transport
+  test: use node run for installer JSON transport
   ```
 
 ### Task 2: RED/GREEN — document and permanently lock the command
@@ -140,15 +140,16 @@ repository contract.
   an environment and leave exact-main Python CI bearing. Otherwise record its
   exact RED failure.
 
-- [ ] GREEN: update only the current migration handoff with the canonical
-  command, silent-transport reason, receipt parsing rule, and one-attempt
-  stop line. Keep human non-JSON usage unchanged and do not rewrite historical
-  frozen plans. Re-run the public contract and `git diff --check`.
+- [ ] GREEN: update only the current migration handoff with the canonical Node
+  package-script command, package-manager-presentation boundary, receipt
+  parsing rule, and one-attempt stop line. Keep human non-JSON usage unchanged
+  and do not rewrite historical frozen plans. Re-run the public contract and
+  `git diff --check`.
 
 - [ ] Commit only the handoff and permanent contract:
 
   ```text
-  docs: specify silent installer JSON transport
+  docs: specify node run installer JSON transport
   ```
 
 ### Task 3: fresh gates, reviews, and feature push
@@ -176,12 +177,14 @@ findings within Tasks 1–2 using a focused RED/GREEN cycle.
   without creating an environment; exact-main Python remains bearing.
 
 - [ ] Independently review correctness/test intent, architecture/privacy/DSH,
-  and Ponytail/YAGNI. Require: actual pnpm entry, `--silent`, no direct-node
-  fallback, no raw lifecycle scan/retention, no product code/schema change, and
-  no expanded framework. Resolve only demonstrated Critical/Important issues.
+  and Ponytail/YAGNI. Require: Node 22 stable `--run` through
+  `process.execPath`, a fixed argument array, no shell or direct
+  installer-source invocation, no raw lifecycle scan/retention, no product
+  code/schema change, and no expanded framework. Resolve only demonstrated
+  Critical/Important issues.
 
 - [ ] Ordinary-push the clean feature once, verify local/tracking/`ls-remote`
-  equality, and send the supervisor the exact SHA, commits, 3-file audit,
+  equality, and send the supervisor the exact SHA, commits, 5-file audit,
   RED/GREEN evidence, gates, reviews, and resource audit. Stop before main
   integration.
 

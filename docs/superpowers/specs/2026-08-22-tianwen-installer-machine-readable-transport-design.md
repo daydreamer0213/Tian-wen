@@ -92,7 +92,7 @@ not require a price query, snapshot, reservation, or product request gate.
 
 Only after this correction reaches exact main and Python, TypeScript, and
 `installer-windows` CI are green may a separately authorized operation run the
-canonical silent command once against the existing product root. It must parse
+canonical Node `--run` command once against the existing product root. It must parse
 one canonical ready or stage-only failed receipt without raw scanning. Any
 other transport result stops at zero Provider; there is no retry, ordinary
 fallback, manual deploy, or repair.
