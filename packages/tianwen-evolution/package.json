@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./run-binding": {
+      "types": "./dist/run-binding.d.ts",
+      "default": "./dist/run-binding.js"
     }
   },
   "dependencies": {

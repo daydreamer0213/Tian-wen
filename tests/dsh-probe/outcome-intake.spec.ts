@@ -3,8 +3,10 @@ import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   LedgerIntegrityError,
+  prepareRunAcceptanceContract,
   prepareRunBinding,
   type RunBindingInput,
+  type RunBindingInputV2,
 } from '../../packages/tianwen-evolution/src/index.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 
@@ -84,6 +86,68 @@ describe('Tianwen Run binding', () => {
     expect(first.runId).toMatch(/^run:[a-f0-9]{64}$/u)
     expect(first.acceptanceContractDigest)
       .toMatch(/^sha256:[a-f0-9]{64}$/u)
+    expect(first.runId)
+      .toBe('run:651b90b41f091d26d593a60659738d971b37b667f7788a462ff21362c9cc0af2')
+  })
+
+  it('binds a v2 verifier subject outside the reusable acceptance contract', () => {
+    const subjectA = digest('a')
+    const subjectB = digest('b')
+    const v2: RunBindingInputV2 = {
+      ...base,
+      acceptanceSubjectDigest: subjectA,
+    }
+    const v1 = prepareRunBinding(base)
+    const first = prepareRunBinding(v2)
+    const changedSubject = prepareRunBinding({
+      ...v2,
+      acceptanceSubjectDigest: subjectB,
+    })
+
+    expect(prepareRunAcceptanceContract(acceptance)).toEqual(acceptance)
+    expect(first).toMatchObject({
+      schemaVersion: 'tianwen.run-binding.v2',
+      acceptanceSubjectDigest: subjectA,
+      acceptanceContractDigest: v1.acceptanceContractDigest,
+    })
+    expect(first.runId).not.toBe(v1.runId)
+    expect(changedSubject.runId).not.toBe(first.runId)
+    expect(changedSubject.acceptanceContractDigest)
+      .toBe(first.acceptanceContractDigest)
+    expect(() => prepareRunBinding({
+      ...v2,
+      acceptanceSubjectDigest: 'sha256:not-a-digest',
+    } as unknown as RunBindingInputV2)).toThrow(/acceptanceSubjectDigest/i)
+
+    const ledgerRoot = root('v2-binding')
+    const ledger = new EvolutionLedger(ledgerRoot)
+    expect(ledger.recordRunBinding(v2)).toMatchObject({ duplicate: false })
+    expect(ledger.recordRunBinding(v2)).toMatchObject({ duplicate: true })
+    expect(new EvolutionLedger(ledgerRoot).getRunBinding(first.runId))
+      .toEqual(first)
+    expect(() => ledger.recordRunBinding({
+      ...v2,
+      acceptanceSubjectDigest: subjectB,
+    })).toThrow(LedgerIntegrityError)
+  })
+
+  it('keeps different v2 subjects in the same reusable recurrence group', () => {
+    const ledger = new EvolutionLedger(root('v2-recurrence'))
+    const firstRun = ledger.recordRunBinding({
+      ...base,
+      sessionId: 'session:v2-subject-a',
+      acceptanceSubjectDigest: digest('a'),
+    }).runId
+    const secondRun = ledger.recordRunBinding({
+      ...base,
+      sessionId: 'session:v2-subject-b',
+      acceptanceSubjectDigest: digest('b'),
+    }).runId
+
+    expect(record(ledger, firstRun, 'not-met', 'a'))
+      .toMatchObject({ decision: 'signal-recorded' })
+    expect(record(ledger, secondRun, 'not-met', 'b'))
+      .toMatchObject({ decision: 'ticket-created' })
   })
 
   it('replays the same binding and rejects a changed binding for one Session', () => {

@@ -34,10 +34,19 @@ async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[
   return chunks
 }
 
+function externalPackages(
+  imports: readonly { path: string; external?: boolean }[],
+): string[] {
+  return [...new Set(imports
+    .filter(item => item.external === true && !item.path.startsWith('node:'))
+    .map(item => item.path))].sort()
+}
+
 function isAllowedRuntimeInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return path === 'src/runtime.ts'
     || path === '../tianwen-dsh-compat/dist/runtime.js'
+    || path === '../tianwen-dsh-compat/dist/scripted-adapter.js'
     || [
       '../tianwen-runtime/dist/',
       '../tianwen-evidence/dist/',
@@ -55,18 +64,30 @@ function isAllowedStatusInput(input: string): boolean {
     || path === '../tianwen-evidence/dist/projector.js'
 }
 
+function isAllowedNaturalTrialInput(path: string): boolean {
+  return path === 'src/natural-run-trial.ts' ||
+    path === '../tianwen-runtime/dist/run-binding.js' ||
+    [
+      '../tianwen-evolution/dist/run-binding.js',
+      '../tianwen-evolution/dist/outcome-intake.js',
+      '../tianwen-evolution/dist/learning-intake.js',
+    ].includes(path) || path === '../tianwen-evidence/dist/projector.js'
+}
+
 function isAllowedCliInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return path === 'src/cli.ts' || path === 'src/create.ts' ||
     path === 'src/model.ts' || path === 'src/resume.ts' ||
-    path === 'src/goal-live-smoke.ts' || isAllowedStatusInput(path)
+    path === 'src/goal-live-smoke.ts' || isAllowedNaturalTrialInput(path) ||
+    isAllowedStatusInput(path)
 }
 
 function isAllowedResumeRunnerInput(input: string): boolean {
+  const path = posix.normalize(input.replaceAll('\\', '/'))
   return [
     'src/resume-runner.ts',
     'src/goal-live-smoke.ts',
-  ].includes(posix.normalize(input.replaceAll('\\', '/')))
+  ].includes(path) || isAllowedNaturalTrialInput(path)
 }
 
 function isAllowedCreateRunnerInput(input: string): boolean {
@@ -78,6 +99,12 @@ function containsCredentialLiteral(text: string): boolean {
 }
 
 describe('runtime metafile input allowlist', () => {
+  it('permits the approved service-owned scripted adapter only', () => {
+    expect(isAllowedRuntimeInput(
+      '../tianwen-dsh-compat/dist/scripted-adapter.js',
+    )).toBe(true)
+  })
+
   it.each([
     '../unrelated-workspace/dist/index.js',
     'node_modules/zod/index.js',
@@ -85,6 +112,30 @@ describe('runtime metafile input allowlist', () => {
     '../test/helper.js',
   ])('rejects %s', input => {
     expect(isAllowedRuntimeInput(input)).toBe(false)
+  })
+})
+
+describe('CLI metafile input allowlist', () => {
+  it.each([
+    'src/natural-run-trial.ts',
+    '../tianwen-evidence/dist/projector.js',
+    '../tianwen-runtime/dist/run-binding.js',
+    '../tianwen-evolution/dist/run-binding.js',
+    '../tianwen-evolution/dist/outcome-intake.js',
+    '../tianwen-evolution/dist/learning-intake.js',
+  ])('permits the pure Stage 7 input %s', input => {
+    expect(isAllowedCliInput(input)).toBe(true)
+  })
+
+  it.each([
+    '../tianwen-evolution/dist/index.js',
+    '../tianwen-evolution/dist/ledger.js',
+    '../tianwen-evolution/dist/runtime-binding.js',
+    '../tianwen-evolution/dist/skill-governance.js',
+    '../tianwen-dsh-compat/dist/index.js',
+    '../tianwen-dsh-compat/dist/test-harness.js',
+  ])('rejects non-pure input %s', input => {
+    expect(isAllowedCliInput(input)).toBe(false)
   })
 })
 
@@ -143,6 +194,7 @@ describe('@tianwen/runtime-bundle', () => {
       '@deepseek-ai/dsh-llm': '0.1.0-rc.7',
       '@deepseek-ai/dsh-session': '0.1.0-rc.7',
       '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.0-rc.7',
+      '@deepseek-ai/dsh-skill': '0.1.0-rc.7',
       '@deepseek-ai/dsh-system-prompt': '0.1.0-rc.7',
       '@deepseek-ai/dsh-tools': '0.1.0-rc.7',
     })
@@ -203,6 +255,7 @@ describe('@tianwen/runtime-bundle', () => {
       '@deepseek-ai/dsh-llm': '0.1.0-rc.7',
       '@deepseek-ai/dsh-session': '0.1.0-rc.7',
       '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.0-rc.7',
+      '@deepseek-ai/dsh-skill': '0.1.0-rc.7',
       '@deepseek-ai/dsh-system-prompt': '0.1.0-rc.7',
       '@deepseek-ai/dsh-tools': '0.1.0-rc.7',
     })
@@ -375,7 +428,7 @@ describe('@tianwen/runtime-bundle', () => {
     )
   })
 
-  it('bundles Tianwen code and leaves only Cordis as a package external', () => {
+  it('bundles Tianwen code through the exact public DSH runtime seams', () => {
     const source = readFileSync(resolve(packageRoot, 'dist/runtime.js'), 'utf8')
     const metafile = json(resolve(packageRoot, 'dist/runtime.meta.json')) as {
       inputs: Record<string, unknown>
@@ -385,17 +438,19 @@ describe('@tianwen/runtime-bundle', () => {
       path.replaceAll('\\', '/').endsWith('/dist/runtime.js')
       || path.replaceAll('\\', '/').endsWith('dist/runtime.js'))?.[1]
     expect(output).toBeDefined()
-    const packageExternals = output!.imports
-      .filter(item => item.external === true && !item.path.startsWith('node:'))
-      .map(item => item.path)
-      .sort()
-    expect(packageExternals).toEqual(['@deepseek-ai/cordis'])
+    const packageExternals = externalPackages(output!.imports)
+    expect(packageExternals).toEqual([
+      '@deepseek-ai/cordis',
+      '@deepseek-ai/dsh-llm',
+      '@deepseek-ai/dsh-session',
+      '@deepseek-ai/dsh-skill',
+    ])
     expect(Object.keys(metafile.inputs).filter(input =>
       !isAllowedRuntimeInput(input))).toEqual([])
     expect(Object.keys(metafile.inputs).some(path =>
       /node_modules[\\/]@deepseek-ai/u.test(path))).toBe(false)
     expect(Object.keys(metafile.inputs).some(path =>
-      /scripted-adapter|test-harness|dsh-probe-bundle/u.test(path))).toBe(false)
+      /test-harness|dsh-probe-bundle/u.test(path))).toBe(false)
     expect(source).not.toMatch(/from\s+["']@tianwen\//u)
     expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
     expect(source).not.toContain('@tianwen/dsh-probe-bundle')
@@ -411,10 +466,7 @@ describe('@tianwen/runtime-bundle', () => {
       path.replaceAll('\\', '/').endsWith('/dist/smoke.js')
       || path.replaceAll('\\', '/').endsWith('dist/smoke.js'))?.[1]
     expect(output).toBeDefined()
-    const packageExternals = output!.imports
-      .filter(item => item.external === true && !item.path.startsWith('node:'))
-      .map(item => item.path)
-      .sort()
+    const packageExternals = externalPackages(output!.imports)
     expect(packageExternals).toEqual([
       '@deepseek-ai/dsh-llm',
       '@deepseek-ai/dsh-tools',
@@ -443,10 +495,7 @@ describe('@tianwen/runtime-bundle', () => {
     const output = Object.entries(metafile.outputs).find(([path]) =>
       path.replaceAll('\\', '/').endsWith(`dist/${entry}.js`))?.[1]
     expect(output).toBeDefined()
-    expect(output!.imports
-      .filter(item => item.external === true && !item.path.startsWith('node:'))
-      .map(item => item.path)
-      .sort()).toEqual([
+    expect(externalPackages(output!.imports)).toEqual([
       '@deepseek-ai/cordis',
       '@deepseek-ai/dsh-goal',
       '@deepseek-ai/dsh-session',
@@ -468,10 +517,7 @@ describe('@tianwen/runtime-bundle', () => {
     const output = Object.entries(metafile.outputs).find(([path]) =>
       path.replaceAll('\\', '/').endsWith('dist/resume-runner.js'))?.[1]
     expect(output).toBeDefined()
-    expect(output!.imports
-      .filter(item => item.external === true && !item.path.startsWith('node:'))
-      .map(item => item.path)
-      .sort()).toEqual([
+    expect(externalPackages(output!.imports)).toEqual([
       '@deepseek-ai/dsh-agent',
       '@deepseek-ai/dsh-credentials',
       '@deepseek-ai/dsh-goal',
@@ -493,10 +539,7 @@ describe('@tianwen/runtime-bundle', () => {
     const output = Object.entries(metafile.outputs).find(([path]) =>
       path.replaceAll('\\', '/').endsWith('dist/create-runner.js'))?.[1]
     expect(output).toBeDefined()
-    expect(output!.imports
-      .filter(item => item.external === true && !item.path.startsWith('node:'))
-      .map(item => item.path)
-      .sort()).toEqual([
+    expect(externalPackages(output!.imports)).toEqual([
       '@deepseek-ai/dsh-agent',
       '@deepseek-ai/dsh-session',
     ])
@@ -515,10 +558,7 @@ describe('@tianwen/runtime-bundle', () => {
     const output = Object.entries(metafile.outputs).find(([path]) =>
       path.replaceAll('\\', '/').endsWith('dist/model-runner.js'))?.[1]
     expect(output).toBeDefined()
-    expect(output!.imports
-      .filter(item => item.external === true && !item.path.startsWith('node:'))
-      .map(item => item.path)
-      .sort()).toEqual([
+    expect(externalPackages(output!.imports)).toEqual([
       '@deepseek-ai/dsh-credentials',
       '@deepseek-ai/dsh-llm',
     ])

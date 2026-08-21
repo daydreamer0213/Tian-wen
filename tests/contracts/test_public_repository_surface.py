@@ -237,6 +237,45 @@ def test_governed_skill_promotion_readiness_handoff_and_ci() -> None:
         assert command in ci
 
 
+def test_natural_run_evidence_handoff_and_ci() -> None:
+    handoff = " ".join(
+        (
+            ROOT
+            / "docs"
+            / "operations"
+            / "tianwen-stage7-natural-run-evidence-trial-handoff.md"
+        ).read_text(encoding="utf-8").split()
+    )
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    for fact in (
+        "DSH `0.1.0-rc.7` remains the only product Agent Runtime",
+        "zero-cost fixture proves only the mechanism",
+        "met/no-case",
+        (
+            "No configured-Provider natural receipt is claimed until one actually runs "
+            "once through the normal configured DSH path"
+        ),
+        (
+            "does not manufacture a Ticket, Case, Candidate, live B/C Evaluation, "
+            "Shadow, Active Pointer, Promotion, Reject, or rollback"
+        ),
+        "Exact CNY billing is unavailable and non-bearing",
+        "no price polling, price snapshot, budget store, reservation, or request gate",
+        "0 Provider network requests, 0 paid tokens, 0 exact CNY, 0 Docker, 0 external database, and 0 user data",
+        "Python Alpha, RepoTaskRuntime, AlphaRuntime, Artifact, Dynamic Cordis, or the global Champion",
+    ):
+        assert fact in handoff
+
+    for command in (
+        "pnpm --filter @tianwen/runtime-bundle... build",
+        "tests/dsh-probe/natural-run-evidence-runtime.spec.ts",
+        "tests/dsh-probe/natural-run-evidence-demo.spec.ts",
+        "pnpm demo:natural-run-evidence",
+    ):
+        assert command in ci
+
+
 def test_relative_links_in_public_documents_exist() -> None:
     for name in PUBLIC_DOCUMENTS:
         document = read_public_document(name)

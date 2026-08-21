@@ -51,7 +51,11 @@ export type {
   LearningTicketId,
   PreparedLearningIntake,
 } from './learning-intake.js'
-export { prepareOutcomeIntake, prepareRunBinding } from './outcome-intake.js'
+export {
+  prepareOutcomeIntake,
+  prepareRunAcceptanceContract,
+  prepareRunBinding,
+} from './outcome-intake.js'
 export type {
   OutcomeIntakeInput,
   OutcomeIntakeReceipt,
@@ -61,8 +65,12 @@ export type {
   PreparedOutcomeIntake,
   RunAcceptanceContract,
   RunBindingInput,
+  RunBindingInputV1,
+  RunBindingInputV2,
   RunBindingReceipt,
   TianwenRunBinding,
+  TianwenRunBindingV1,
+  TianwenRunBindingV2,
   TianwenRunId,
 } from './outcome-intake.js'
 export {

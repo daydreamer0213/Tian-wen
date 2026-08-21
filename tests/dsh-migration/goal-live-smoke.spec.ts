@@ -164,6 +164,7 @@ describe('tianwen live Goal smoke', () => {
   it('declares every Cordis service consumed by ordinary and live Goal resumes', () => {
     expect(resumeRunnerInject).toEqual([
       'agentDefaultModel', 'agents', 'credentials', 'goals', 'llm', 'sessions', 'tianwenEvidence',
+      'tianwenLearningIntake',
     ])
   })
 

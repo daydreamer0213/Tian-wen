@@ -44,7 +44,7 @@ function canonicalJson(value: unknown): string {
   return encoded
 }
 
-function sha256(value: unknown): `sha256:${string}` {
+export function canonicalEvidenceDigest(value: unknown): `sha256:${string}` {
   return `sha256:${createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex')}`
 }
 
@@ -101,13 +101,13 @@ export function projectEvidence(
 
   return calls.map(call => {
     const callId = String(call.data.callId)
-    const argumentsDigest = sha256(readArguments(call.data.arguments))
+    const argumentsDigest = canonicalEvidenceDigest(readArguments(call.data.arguments))
     const result = resultsByCallId.get(callId)
     const resultDigest = result === undefined
       ? undefined
-      : sha256(result.data.message.content)
+      : canonicalEvidenceDigest(result.data.message.content)
     const status = result === undefined ? 'missing-result' : 'complete'
-    const evidenceId = sha256({
+    const evidenceId = canonicalEvidenceDigest({
       sessionId: String(sessionId),
       callSeq: call.seq,
       resultSeq: result?.seq ?? null,

@@ -18,7 +18,10 @@ import {
 } from '@tianwen/dsh-compat'
 import type { SessionEvent } from '@tianwen/dsh-compat'
 import { createToolResultMessage } from '@deepseek-ai/dsh-llm'
-import { projectEvidence } from '../../packages/tianwen-evidence/src/index.js'
+import {
+  canonicalEvidenceDigest,
+  projectEvidence,
+} from '../../packages/tianwen-evidence/src/index.js'
 
 function toolCall(
   seq: number,
@@ -155,6 +158,26 @@ describe('Tianwen evidence projection', () => {
 
     expect(first[0]!.action.argumentsDigest)
       .toBe(second[0]!.action.argumentsDigest)
+  })
+
+  it('exposes the projector canonical digest for nested JSON values', () => {
+    const subject = {
+      z: { b: true, a: [{ y: 2, x: 1 }] },
+      a: 'first',
+    }
+    const evidence = projectEvidence(SessionId('canonical-subject'), [
+      toolCall(1, 'subject', '{"a":"first","z":{"a":[{"x":1,"y":2}],"b":true}}'),
+    ])
+
+    expect(canonicalEvidenceDigest(subject))
+      .toBe('sha256:c99463daee064cdd8b28f18aab3c9b27b67907b3b759f96ac2ef7e821b074187')
+    expect(canonicalEvidenceDigest(subject)).toBe(
+      evidence[0]!.action.argumentsDigest,
+    )
+    expect(() => canonicalEvidenceDigest({ absent: undefined }))
+      .toThrow(/canonical JSON does not support this value/i)
+    expect(() => canonicalEvidenceDigest({ tooLarge: 1n }))
+      .toThrow()
   })
 
   it('keeps each result paired to its call when completions arrive in reverse order', () => {

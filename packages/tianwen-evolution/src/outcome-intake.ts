@@ -25,7 +25,7 @@ export type RunAcceptanceContract =
       readonly blocksGoal: boolean
     })
 
-export interface RunBindingInput {
+export interface RunBindingInputV1 {
   readonly goalRef: string
   readonly taskRef: string
   readonly sessionId: string
@@ -33,11 +33,25 @@ export interface RunBindingInput {
   readonly acceptanceContract: RunAcceptanceContract
 }
 
-export interface TianwenRunBinding extends RunBindingInput {
+export interface RunBindingInputV2 extends RunBindingInputV1 {
+  readonly acceptanceSubjectDigest: Sha256Digest
+}
+
+export type RunBindingInput = RunBindingInputV1 | RunBindingInputV2
+
+export interface TianwenRunBindingV1 extends RunBindingInputV1 {
   readonly schemaVersion: 'tianwen.run-binding.v1'
   readonly runId: TianwenRunId
   readonly acceptanceContractDigest: Sha256Digest
 }
+
+export interface TianwenRunBindingV2 extends RunBindingInputV2 {
+  readonly schemaVersion: 'tianwen.run-binding.v2'
+  readonly runId: TianwenRunId
+  readonly acceptanceContractDigest: Sha256Digest
+}
+
+export type TianwenRunBinding = TianwenRunBindingV1 | TianwenRunBindingV2
 
 export interface RunBindingReceipt {
   readonly runId: TianwenRunId
@@ -145,36 +159,36 @@ function nonBlank(value: unknown, label: string): string {
   return value.trim()
 }
 
-function validateRunBindingInput(input: RunBindingInput): RunBindingInput {
-  if (!isRecord(input)) {
-    throw new TypeError('Run binding input must be an object')
+const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/u
+
+function requireDigest(value: unknown, label: string): Sha256Digest {
+  if (typeof value !== 'string' || !SHA256_DIGEST.test(value)) {
+    throw new TypeError(`${label} must be a SHA-256 digest`)
   }
-  exactKeys(input, [
-    'goalRef',
-    'taskRef',
-    'sessionId',
-    'scopeKey',
-    'acceptanceContract',
-  ])
-  const contract = input.acceptanceContract
-  if (!isRecord(contract)) {
+  return value as Sha256Digest
+}
+
+export function prepareRunAcceptanceContract(
+  value: unknown,
+): RunAcceptanceContract {
+  if (!isRecord(value)) {
     throw new TypeError('acceptanceContract must be an object')
   }
-  if (contract.source !== 'dsh-tool-result') {
+  if (value.source !== 'dsh-tool-result') {
     throw new TypeError('acceptanceContract source must be dsh-tool-result')
   }
-  const toolName = nonBlank(contract.toolName, 'toolName')
+  const toolName = nonBlank(value.toolName, 'toolName')
   const notMetErrorCode = nonBlank(
-    contract.notMetErrorCode,
+    value.notMetErrorCode,
     'notMetErrorCode',
   )
-  const gapDisposition = contract.gapDisposition
+  const gapDisposition = value.gapDisposition
   let acceptanceContract: RunAcceptanceContract
   if (
     gapDisposition === 'observe' ||
     gapDisposition === 'ordinary-correction'
   ) {
-    exactKeys(contract, [
+    exactKeys(value, [
       'source',
       'toolName',
       'notMetErrorCode',
@@ -187,7 +201,7 @@ function validateRunBindingInput(input: RunBindingInput): RunBindingInput {
       gapDisposition,
     }
   } else if (gapDisposition === 'reusable') {
-    exactKeys(contract, [
+    exactKeys(value, [
       'source',
       'toolName',
       'notMetErrorCode',
@@ -197,16 +211,16 @@ function validateRunBindingInput(input: RunBindingInput): RunBindingInput {
       'blocksGoal',
     ])
     const problemCategory = normalizeLearningText(
-      nonBlank(contract.problemCategory, 'problemCategory'),
+      nonBlank(value.problemCategory, 'problemCategory'),
     )
     if (
-      !Number.isInteger(contract.severity) ||
-      (contract.severity as number) < 1 ||
-      (contract.severity as number) > 5
+      !Number.isInteger(value.severity) ||
+      (value.severity as number) < 1 ||
+      (value.severity as number) > 5
     ) {
       throw new TypeError('severity must be an integer from 1 to 5')
     }
-    if (typeof contract.blocksGoal !== 'boolean') {
+    if (typeof value.blocksGoal !== 'boolean') {
       throw new TypeError('blocksGoal must be a boolean')
     }
     acceptanceContract = {
@@ -215,19 +229,44 @@ function validateRunBindingInput(input: RunBindingInput): RunBindingInput {
       notMetErrorCode,
       gapDisposition,
       problemCategory,
-      severity: contract.severity as OutcomeSeverity,
-      blocksGoal: contract.blocksGoal,
+      severity: value.severity as OutcomeSeverity,
+      blocksGoal: value.blocksGoal,
     }
   } else {
     throw new TypeError('acceptanceContract has an invalid gapDisposition')
   }
-  return {
+  return acceptanceContract
+}
+
+function validateRunBindingInput(input: RunBindingInput): RunBindingInput {
+  if (!isRecord(input)) {
+    throw new TypeError('Run binding input must be an object')
+  }
+  const isV2 = 'acceptanceSubjectDigest' in input
+  exactKeys(input, [
+    'goalRef',
+    'taskRef',
+    'sessionId',
+    'scopeKey',
+    'acceptanceContract',
+    ...(isV2 ? ['acceptanceSubjectDigest'] : []),
+  ])
+  const common: RunBindingInputV1 = {
     goalRef: nonBlank(input.goalRef, 'goalRef'),
     taskRef: nonBlank(input.taskRef, 'taskRef'),
     sessionId: nonBlank(input.sessionId, 'sessionId'),
     scopeKey: nonBlank(input.scopeKey, 'scopeKey'),
-    acceptanceContract,
+    acceptanceContract: prepareRunAcceptanceContract(input.acceptanceContract),
   }
+  return isV2
+    ? {
+        ...common,
+        acceptanceSubjectDigest: requireDigest(
+          input.acceptanceSubjectDigest,
+          'acceptanceSubjectDigest',
+        ),
+      }
+    : common
 }
 
 export function prepareRunBinding(input: RunBindingInput): TianwenRunBinding {
@@ -239,22 +278,24 @@ export function prepareRunBinding(input: RunBindingInput): TianwenRunBinding {
     sessionId: validated.sessionId,
     scopeKey: validated.scopeKey,
     acceptanceContractDigest,
+    ...('acceptanceSubjectDigest' in validated ? {
+      acceptanceSubjectDigest: validated.acceptanceSubjectDigest,
+    } : {}),
   })
-  return {
-    schemaVersion: 'tianwen.run-binding.v1',
-    runId: `run:${runDigest.slice('sha256:'.length)}`,
-    ...validated,
-    acceptanceContractDigest,
-  }
-}
-
-const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/u
-
-function requireDigest(value: unknown, label: string): Sha256Digest {
-  if (typeof value !== 'string' || !SHA256_DIGEST.test(value)) {
-    throw new TypeError(`${label} must be a SHA-256 digest`)
-  }
-  return value as Sha256Digest
+  const runId = `run:${runDigest.slice('sha256:'.length)}` as TianwenRunId
+  return 'acceptanceSubjectDigest' in validated
+    ? {
+        schemaVersion: 'tianwen.run-binding.v2',
+        runId,
+        ...validated,
+        acceptanceContractDigest,
+      }
+    : {
+        schemaVersion: 'tianwen.run-binding.v1',
+        runId,
+        ...validated,
+        acceptanceContractDigest,
+      }
 }
 
 function validateOutcomeInput(input: OutcomeIntakeInput): OutcomeIntakeInput {

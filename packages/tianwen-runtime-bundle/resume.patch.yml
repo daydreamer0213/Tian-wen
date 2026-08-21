@@ -28,3 +28,5 @@
         liveSmoke: !!js process.env.TIANWEN_RESUME_LIVE_SMOKE === 'true'
         evolutionRoot: !!js process.env.TIANWEN_RESUME_EVOLUTION_ROOT
         startedAtMs: !!js Number(process.env.TIANWEN_RESUME_STARTED_AT_MS)
+        trialManifestPath: !!js process.env.TIANWEN_RESUME_TRIAL_MANIFEST_PATH
+        trialManifestDigest: !!js process.env.TIANWEN_RESUME_TRIAL_MANIFEST_DIGEST

@@ -1,7 +1,7 @@
 import { Service } from '@tianwen/dsh-compat'
 import type { Context, Session } from '@tianwen/dsh-compat'
 
-import { projectEvidence } from './projector.js'
+import { canonicalEvidenceDigest, projectEvidence } from './projector.js'
 import type { EvidenceRecord } from './projector.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -10,7 +10,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-export { projectEvidence }
+export { canonicalEvidenceDigest, projectEvidence }
 export type { EvidenceRecord }
 
 export class TianwenEvidenceService extends Service {
