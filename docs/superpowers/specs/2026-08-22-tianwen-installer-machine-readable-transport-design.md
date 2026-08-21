@@ -35,12 +35,14 @@ stdout:
   `tianwen.install-failure.v1`, `failed`, and the existing closed stage enum.
 
 The canonical failure probe must exit 1, have empty stderr, and expose no
-path-like or credential-like sentinel. It uses the actual pnpm entry supplied
-by `process.env.npm_execpath`, `--silent`, and the package script; it must not
-call the installer source directly. The deliberately invalid parser argument
-prevents data-directory creation, package installation, managed deployment,
-Provider activity, or product mutation. Its designated fixture root must be
-absent before and after the process.
+path-like or credential-like sentinel. It uses a fully controlled command
+string with the native Windows shell resolving the actual `pnpm` command from
+PATH, `--silent`, and the package script; it must not call the installer source
+directly. The command's root comes only from the existing fixed-D-drive/UUID
+test helper and its sentinel is a fixed literal, never caller input. The
+deliberately invalid parser argument prevents data-directory creation, package
+installation, managed deployment, Provider activity, or product mutation. Its
+designated fixture root must be absent before and after the process.
 
 The controlled test may temporarily capture only its own deterministic child
 stdout/stderr to parse the complete JSON value and assert that its own sentinel
@@ -48,10 +50,11 @@ is absent. It neither prints, persists, redirects, fragment-searches, nor
 reuses those bytes. Production and operational paths never capture, scan,
 retain, log, redirect, or extract a receipt from raw pnpm wrapper output.
 
-An unavailable `npm_execpath` is a harness failure, not permission to fall back
-to direct Node or another package manager. The native Windows installer job is
-the bearing CI location because the installer itself is a Windows product
-contract.
+The native Windows installer job is the bearing CI location because the
+installer itself is a Windows product contract and its pnpm setup action puts
+the actual command on PATH. The controlled test shell seam is test-only; it is
+not a production wrapper or general launcher, and an unavailable command is
+not permission to fall back to direct Node or another package manager.
 
 ## 3. Rejected alternatives
 

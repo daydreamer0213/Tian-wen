@@ -8,9 +8,9 @@
 safe JSON receipt without lifecycle presentation contaminating its stdout.
 
 **Architecture:** Keep the installer untouched. The native-Windows installer
-test launches the actual pnpm entry from `process.env.npm_execpath` using
-`--silent run`, then locks the documented machine command in the existing
-handoff and public repository contract.
+test uses the native Windows shell to resolve the actual `pnpm` command from
+PATH with `--silent run`, then locks the documented machine command in the
+existing handoff and public repository contract.
 
 **Tech stack:** Existing pnpm 11.20.0 package script, Node.js `spawnSync`,
 native-Windows Vitest installer contract, and the existing Python public
@@ -78,17 +78,21 @@ repository contract.
 
 - [ ] RED: add a process-level test inside the existing installer contract.
   Derive a unique fixture-root path through `testRoot`, assert that it does not
-  exist, and obtain `process.env.npm_execpath`. Require that value to be a pnpm
-  JavaScript entry; do not supply a direct-Node fallback. First invoke the
-  actual package entry without `--silent`, while asserting the eventual exact
-  safe-receipt contract. The test must fail because normal pnpm lifecycle
-  presentation makes stdout more than one JSON value; it must not print,
-  persist, redirect, fragment-search, or reuse that raw presentation.
+  exist, and form one fully controlled command string using only that fixed
+  D-drive/UUID root and a fixed sentinel literal. Invoke it through native
+  Windows shell PATH resolution with `spawnSync(command, { shell: true, ... })`;
+  do not resolve launchers with `npm_execpath`, `where.exe`, launcher parsing,
+  or a direct-Node fallback. First invoke the actual package command without
+  `--silent`, while asserting the eventual exact safe-receipt contract. The
+  test must fail because normal pnpm lifecycle presentation makes stdout more
+  than one JSON value; it must not print, persist, redirect, fragment-search,
+  or reuse that raw presentation.
 
   ```ts
-  const result = spawnSync(process.execPath, [pnpmEntry, 'run',
-    'install:tianwen', '--', '--data-dir', root, '--json',
-    `--${credentialSentinel}`], { cwd: resolve('.'), encoding: 'utf8' })
+  const command = `pnpm run install:tianwen -- --data-dir ${root} --json --${credentialSentinel}`
+  const result = spawnSync(command, { shell: true, cwd: resolve('.'),
+    encoding: 'utf8', env: { ...process.env,
+      pnpm_config_verify_deps_before_run: 'false' } })
   ```
 
   The eventual assertions are exit 1, `stderr === ''`, a single parsed object exactly
@@ -99,11 +103,12 @@ repository contract.
   wrapper-output handling. Run the installer spec and record this known
   lifecycle-presentation RED.
 
-- [ ] Do not add production code. GREEN changes only that actual package-entry
-  invocation to `pnpmEntry, '--silent', 'run', ...`; the final test therefore
-  locks the official machine command rather than a direct Node call. Re-run the
-  named transport test and the installer spec; both must pass and leave every
-  fixture root empty.
+- [ ] Do not add production code. GREEN changes only that actual package command
+  to `pnpm --silent run ...`; the final test therefore locks the official
+  machine command rather than a direct Node call. The native installer-windows
+  job already supplies pnpm on PATH through its setup action. Re-run the named
+  transport test and the installer spec; both must pass and leave every fixture
+  root empty.
 
 - [ ] Commit only the test:
 
