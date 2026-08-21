@@ -264,6 +264,11 @@ def test_natural_run_evidence_handoff_and_ci() -> None:
         "no price polling, price snapshot, budget store, reservation, or request gate",
         "0 Provider network requests, 0 paid tokens, 0 exact CNY, 0 Docker, 0 external database, and 0 user data",
         "Python Alpha, RepoTaskRuntime, AlphaRuntime, Artifact, Dynamic Cordis, or the global Champion",
+        "first real attempt was pre-Turn, zero Provider, and unresolved",
+        "classified failure receipts contain only fixed codes, IDs, and zero counters",
+        "raw child output remains suppressed",
+        "No retry, second Runtime, logger, store, price lookup, budget subsystem, Candidate, Evaluation, Shadow, or Promotion was added",
+        "future receipt identifies a subsystem, not an underlying library or OS cause",
     ):
         assert fact in handoff
 
