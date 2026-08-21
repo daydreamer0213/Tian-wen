@@ -286,6 +286,33 @@ describe('Tianwen installer contract', () => {
     expect(`${json.stdout}${json.stderr}${plain.stdout}${plain.stderr}`).not.toContain(secret)
   })
 
+  it('requires silent pnpm transport for a machine-readable installer receipt', () => {
+    const root = testRoot('pnpm-machine-receipt')
+    const secret = 'credential-sentinel-do-not-emit'
+
+    expect(existsSync(root)).toBe(false)
+    const result = spawnSync(
+      `pnpm --silent run install:tianwen -- --data-dir ${root} --json --${secret}`,
+      {
+      shell: true,
+      cwd: resolve('.'),
+      encoding: 'utf8',
+      env: { ...process.env, pnpm_config_verify_deps_before_run: 'false' },
+      },
+    )
+
+    expect(result.status).toBe(1)
+    expect(() => JSON.parse(result.stdout)).not.toThrow()
+    expect(JSON.parse(result.stdout)).toEqual({
+      schemaVersion: 'tianwen.install-failure.v1',
+      status: 'failed',
+      stage: 'managed-layout-preflight',
+    })
+    expect(result.stderr).toBe('')
+    expect(`${result.stdout}${result.stderr}`).not.toContain(secret)
+    expect(existsSync(root)).toBe(false)
+  })
+
   it('maps every remaining installer boundary to a closed safe stage', () => {
     const secret = 'credential-sentinel-do-not-emit'
     const missingEntryRoot = testRoot('missing-pnpm-entry')
