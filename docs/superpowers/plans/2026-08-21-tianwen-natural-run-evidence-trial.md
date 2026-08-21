@@ -26,7 +26,7 @@ direct dependency of the deployable Runtime Bundle.
 
 - Canonical design:
   `docs/superpowers/specs/2026-08-21-tianwen-natural-run-evidence-trial-design.md`
-  at exact commit `a9ed082204323c7371d6fb8b6deb7ca388546937`.
+  at exact commit `5157d809f29719d4c5381bc4fa625c966700f928`.
 - DSH `0.1.0-rc.7` remains the only product Agent Runtime.
 - Reuse the existing Goal resume, Agent, Session, Skill, tool, Provider,
   permission, and persistence seams; do not implement a Tianwen Agent loop.
@@ -61,6 +61,11 @@ direct dependency of the deployable Runtime Bundle.
   `--lockfile-only --offline --ignore-scripts` refresh is authorized solely to
   declare the already-installed exact DSH Skill package in the Runtime Bundle;
   it must download zero packages and must not relink `node_modules`.
+- After that lockfile-only refresh, set the process-local
+  `pnpm_config_verify_deps_before_run=false` for remaining local commands. This
+  prevents pnpm from turning a script run into an implicit install against the
+  intentionally unrelinked existing workspace. Do not persist the setting in
+  `.npmrc`; exact-main CI performs its normal fresh frozen install.
 
 ---
 
@@ -147,6 +152,8 @@ failure green by creating another environment or changing an unrelated gate.
   v1/v2 Run bindings from the same ledger/event type.
 - `packages/tianwen-evolution/src/index.ts`: export the v2 types and acceptance
   contract normalizer.
+- `packages/tianwen-evolution/package.json`: expose one pure `./run-binding`
+  subpath without changing dependencies.
 - `packages/tianwen-runtime/src/learning-intake.ts`: accept the v2 binding input
   and return the selected Outcome Evidence ID.
 - `packages/tianwen-runtime/src/index.ts`: export the narrow v2 runtime types.
@@ -189,7 +196,10 @@ failure green by creating another environment or changing an unrelated gate.
 - `tests/dsh-probe/natural-run-evidence-runtime.spec.ts`: parent/child/runtime
   composition contract.
 - `packages/tianwen-runtime/src/run-binding.ts`: pure re-export seam for the
-  acceptance parser/types; it imports no Runtime service.
+  acceptance parser/types; it imports the pure Evolution subpath, not the
+  Evolution root or any Runtime service.
+- `packages/tianwen-evolution/src/run-binding.ts`: pure re-export seam from
+  `outcome-intake`; it imports no ledger/runtime binding or DSH compat root.
 - `scripts/run-natural-run-evidence-demo.ts`: zero-cost successful useful
   fixture.
 - `tests/dsh-probe/natural-run-evidence-demo.spec.ts`: safe truthful demo
@@ -461,6 +471,9 @@ Runtime composition.
 **Files:**
 
 - Modify: `packages/tianwen-dsh-compat/src/runtime.ts`
+- Create: `packages/tianwen-evolution/src/run-binding.ts`
+- Modify: `packages/tianwen-evolution/package.json`
+- Modify: `packages/tianwen-runtime/src/run-binding.ts`
 - Modify: `packages/tianwen-runtime-bundle/package.json`
 - Modify: `pnpm-lock.yaml`
 - Modify: `tests/dsh-migration/runtime-bundle.spec.ts`
@@ -475,6 +488,8 @@ Runtime composition.
 - Keeps `Context`, `Service`, and `DSH_VERSION` unchanged.
 - Declares `@deepseek-ai/dsh-skill: 0.1.0-rc.7` as a direct
   `@tianwen/runtime-bundle` dependency.
+- Keeps `@tianwen/runtime/run-binding` pure by routing it through the new
+  `@tianwen/evolution/run-binding` subpath rather than the Evolution root.
 
 - [ ] **Step 1: Record the two exact RED contracts**
 
@@ -490,6 +505,14 @@ First update the existing Runtime Bundle contract so that:
   `@deepseek-ai/dsh-skill`;
 - `test-harness`, probe helpers, private DSH paths, native addons, and unrelated
   workspace inputs remain forbidden.
+- CLI inputs contain only the existing CLI/resume/status modules plus the
+  Tianwen Evidence digest, Runtime run-binding, Evolution run-binding,
+  `outcome-intake`, and `learning-intake` pure modules; they must not contain
+  Evolution ledger/runtime-binding/governance modules or the DSH compat root.
+
+When comparing esbuild external package paths, normalize them through a
+`Set` before sorting. Multiple modules may legally import the same declared
+external package; duplicate import records are not duplicate dependencies.
 
 Run the focused manifest assertion and confirm it fails because the direct DSH
 Skill dependency is absent. Then run:
@@ -509,7 +532,34 @@ symbols listed in the Interfaces block and re-export the existing local
 `ScriptedAdapter`. Do not export `test-harness`, test helpers, the root compat
 surface, or any private DSH path.
 
-- [ ] **Step 3: Declare the one honest deployable dependency**
+- [ ] **Step 3: Keep the CLI Run-binding import pure**
+
+Create `packages/tianwen-evolution/src/run-binding.ts` that explicitly
+re-exports only:
+
+```ts
+export {
+  prepareRunAcceptanceContract,
+  prepareRunBinding,
+} from './outcome-intake.js'
+export type {
+  RunAcceptanceContract,
+  RunBindingInput,
+  RunBindingInputV1,
+  RunBindingInputV2,
+  TianwenRunBinding,
+  TianwenRunBindingV1,
+  TianwenRunBindingV2,
+  TianwenRunId,
+} from './outcome-intake.js'
+```
+
+Expose it as `./run-binding` in the Evolution package. Change the existing
+Runtime `./run-binding` source to re-export from
+`@tianwen/evolution/run-binding`. Do not import the Evolution root, duplicate
+any acceptance parser, or add a second schema.
+
+- [ ] **Step 4: Declare the one honest deployable dependency**
 
 Add exact `@deepseek-ai/dsh-skill: 0.1.0-rc.7` beside the Runtime Bundle's
 existing public DSH dependencies. Refresh only the lockfile:
@@ -524,7 +574,18 @@ runtime-bundle importer may gain the direct dependency; `node_modules`, other
 importers, package versions, and integrity records must not change. Any wider
 lockfile rewrite is a stop condition, not permission to normalize the file.
 
-- [ ] **Step 4: Run GREEN and the packaging boundary**
+Then set for this execution process only:
+
+```powershell
+$env:pnpm_config_verify_deps_before_run = 'false'
+```
+
+The already-installed package remains resolvable from the existing workspace
+root. This flag disables only pnpm's implicit pre-script install; it does not
+change dependency resolution, build output, source, lockfile, or CI. Do not
+authorize a relink merely to satisfy local metadata freshness.
+
+- [ ] **Step 5: Run GREEN and the packaging boundary**
 
 ```powershell
 pnpm --filter @tianwen/runtime-bundle... build
@@ -534,15 +595,20 @@ pnpm run check:no-private-dsh-imports
 git diff --check
 ```
 
-Expected: the Runtime Bundle builds; the metafile contains the exact local
-scripted adapter required by approved Stage 4 and no test harness/probe input;
-all external imports are declared exact public DSH dependencies. This does not
-authorize a second adapter, Provider wrapper, or live Evaluation path.
+Expected: the Runtime Bundle builds; the runtime metafile contains the exact
+local scripted adapter required by approved Stage 4 and no test harness/probe
+input; the CLI metafile contains only the narrow run-binding/digest modules and
+no Evolution service/DSH compat root; all external imports are declared exact
+public DSH dependencies. This does not authorize a second adapter, Provider
+wrapper, or live Evaluation path.
 
-- [ ] **Step 5: Commit the prerequisite repair**
+- [ ] **Step 6: Commit the prerequisite repair**
 
 ```powershell
 git add packages/tianwen-dsh-compat/src/runtime.ts `
+  packages/tianwen-evolution/src/run-binding.ts `
+  packages/tianwen-evolution/package.json `
+  packages/tianwen-runtime/src/run-binding.ts `
   packages/tianwen-runtime-bundle/package.json `
   pnpm-lock.yaml `
   tests/dsh-migration/runtime-bundle.spec.ts
