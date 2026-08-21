@@ -46,3 +46,18 @@ root. Stage 7 Task 8 remains pending until main CI is green and the real product
 migration completes. That later operational step may use the existing Profile
 once, with its pre-existing configured-Provider authorization; it is not part
 of this handoff and does not authorize retries or a new Profile.
+
+## First managed migration attempt
+
+The first real offline migration attempt stopped at the installer’s former
+900-second timeout while the managed host `pnpm deploy` child was still active.
+It made no Provider request and performed no download. The installer completed
+its transaction rollback: the managed rc.6 host, Profile, Runtime archive, and
+receipt state were restored, and the Session and Evolution trees were byte-for-
+byte unchanged.
+
+The installer now gives only the managed host and Profile `pnpm deploy` steps
+no timeout; every other child command remains bounded. A real rc.7 migration,
+and the later configured-Provider natural Run evidence, remain pending and
+require their separately authorized operational steps. This correction does not
+authorize a retry by itself.
