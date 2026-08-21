@@ -23,8 +23,22 @@ const PROFILE = 'tianwen'
 const RUNTIME_PACKAGE = '@tianwen/runtime-bundle'
 const INSTALLER_FAILURE_SCHEMA_VERSION = 'tianwen.install-failure.v1'
 const INSTALLER_FAILURE_STAGE = Object.freeze({
+  ARCHIVE_PUBLICATION: 'archive-publication',
+  ARCHIVE_STABILITY: 'archive-stability',
+  DSH_CONFIG_VALIDATION: 'dsh-config-validation',
   INSTALLER_INTERNAL: 'installer-internal',
   MANAGED_LAYOUT_PREFLIGHT: 'managed-layout-preflight',
+  MANAGED_HOST_DEPLOY: 'managed-host-deploy',
+  MANAGED_PROFILE_DEPLOY: 'managed-profile-deploy',
+  MANAGED_PROFILE_VALIDATION: 'managed-profile-validation',
+  PNPM_ENTRY_PREFLIGHT: 'pnpm-entry-preflight',
+  PNPM_VERSION: 'pnpm-version',
+  RECEIPT_PUBLICATION: 'receipt-publication',
+  RUNTIME_BUNDLE_BUILD_1: 'runtime-bundle-build-1',
+  RUNTIME_BUNDLE_BUILD_2: 'runtime-bundle-build-2',
+  RUNTIME_BUNDLE_PACK_1: 'runtime-bundle-pack-1',
+  RUNTIME_BUNDLE_PACK_2: 'runtime-bundle-pack-2',
+  WORKSPACE_INSTALL: 'workspace-install',
 })
 const PROFILE_BUNDLES = [
   '@deepseek-ai/dsh-base',
@@ -72,8 +86,8 @@ export function canonicalJson(value) {
 }
 
 class InstallStageError extends Error {
-  constructor(stage) {
-    super()
+  constructor(stage, cause) {
+    super(cause instanceof Error ? cause.message : '')
     this.stage = stage
   }
 }
@@ -94,6 +108,19 @@ function installerFailureStage(error) {
   return error instanceof InstallStageError
     ? error.stage
     : INSTALLER_FAILURE_STAGE.INSTALLER_INTERNAL
+}
+
+export function createInstallerFailureReceipt(error) {
+  return installerFailureReceipt(installerFailureStage(error))
+}
+
+function atInstallStage(stage, operation) {
+  try {
+    return operation()
+  } catch (error) {
+    if (error instanceof InstallStageError) throw error
+    throw new InstallStageError(stage, error)
+  }
 }
 
 export function parseInstallerArgs(argv) {
@@ -551,40 +578,64 @@ export function installTianwen({
   repoRoot = REPO_ROOT,
   runner = spawnSync,
 } = {}) {
-  const paths = deriveInstallPaths(dataDir, platform)
-  const installation = classifyManagedInstallation(paths)
-  if (installation === 'incompatible') {
-    if (existsSync(paths.hostRoot) && existsSync(paths.profileRoot)) {
-      validateInstalledHost(paths.hostRoot)
-      validateProfile(paths)
+  const paths = atInstallStage(
+    INSTALLER_FAILURE_STAGE.MANAGED_LAYOUT_PREFLIGHT,
+    () => deriveInstallPaths(dataDir, platform),
+  )
+  const installation = atInstallStage(
+    INSTALLER_FAILURE_STAGE.MANAGED_LAYOUT_PREFLIGHT,
+    () => classifyManagedInstallation(paths),
+  )
+  atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_LAYOUT_PREFLIGHT, () => {
+    if (installation === 'incompatible') {
+      if (existsSync(paths.hostRoot) && existsSync(paths.profileRoot)) {
+        validateInstalledHost(paths.hostRoot)
+        validateProfile(paths)
+      }
+      throw new Error('existing data directory is not a complete managed Tianwen installation')
     }
-    throw new Error('existing data directory is not a complete managed Tianwen installation')
-  }
-  if (installation === 'fresh') ensureManagedDataDir(paths)
-  else assertManagedDataDir(paths)
-  mkdirSync(dirname(paths.receiptPath), { recursive: true })
+    if (installation === 'fresh') ensureManagedDataDir(paths)
+    else assertManagedDataDir(paths)
+    mkdirSync(dirname(paths.receiptPath), { recursive: true })
+  })
 
   const hostExists = existsSync(paths.hostRoot)
   const profileExists = existsSync(paths.profileRoot)
   const migratingRc6 = installation === 'managed-rc6'
   const hostNeedsDeploy = !hostExists || migratingRc6
-  const installedArchiveDigest = previousArchiveDigest(paths)
+  let installedArchiveDigest
   let dshBin
-  if (hostExists && !migratingRc6) dshBin = validateInstalledHost(paths.hostRoot)
-  if (profileExists && !migratingRc6) validateProfile(paths)
+  atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_LAYOUT_PREFLIGHT, () => {
+    installedArchiveDigest = previousArchiveDigest(paths)
+    if (hostExists && !migratingRc6) dshBin = validateInstalledHost(paths.hostRoot)
+    if (profileExists && !migratingRc6) validateProfile(paths)
+  })
 
-  const env = childEnvironment(paths, source)
-  const pnpm = pnpmEntry(source)
-  if (!statSync(pnpm).isFile()) throw new Error(`exact pnpm entry is unavailable: ${pnpm}`)
+  const env = atInstallStage(
+    INSTALLER_FAILURE_STAGE.PNPM_ENTRY_PREFLIGHT,
+    () => childEnvironment(paths, source),
+  )
+  const pnpm = atInstallStage(INSTALLER_FAILURE_STAGE.PNPM_ENTRY_PREFLIGHT, () => {
+    const entry = pnpmEntry(source)
+    if (!statSync(entry).isFile()) throw new Error(`exact pnpm entry is unavailable: ${entry}`)
+    return entry
+  })
   const invokePnpm = (args, timeout) => runFixed(
     process.execPath,
     [pnpm, ...args],
     { cwd: repoRoot, env, runner, timeout },
   )
-  const version = invokePnpm(['--version']).stdout.trim()
-  if (version !== PNPM_VERSION) throw new Error(`pnpm ${PNPM_VERSION} is required, got ${version}`)
+  atInstallStage(INSTALLER_FAILURE_STAGE.PNPM_VERSION, () => {
+    const actual = invokePnpm(['--version']).stdout.trim()
+    if (actual !== PNPM_VERSION) {
+      throw new Error(`pnpm ${PNPM_VERSION} is required, got ${actual}`)
+    }
+  })
 
-  invokePnpm(['install', '--offline', '--frozen-lockfile', '--ignore-scripts', '--trust-lockfile'], 300_000)
+  atInstallStage(
+    INSTALLER_FAILURE_STAGE.WORKSPACE_INSTALL,
+    () => invokePnpm(['install', '--offline', '--frozen-lockfile', '--ignore-scripts', '--trust-lockfile'], 300_000),
+  )
   const packsRoot = dirname(paths.archivePath)
   const archiveStages = [randomUUID(), randomUUID()]
     .map(id => resolve(packsRoot, `.install-${process.pid}-${id}`))
@@ -598,78 +649,107 @@ export function installTianwen({
   let hostBackup
   try {
     if (hostNeedsDeploy) {
-      const hostsRoot = dirname(paths.hostRoot)
-      const id = `${process.pid}-${randomUUID()}`
-      hostBackup = migratingRc6 ? resolve(hostsRoot, `.dsh-host-backup-${id}`) : undefined
-      mkdirSync(hostsRoot, { recursive: true })
-      if (hostBackup !== undefined) renameSync(paths.hostRoot, hostBackup)
-      invokePnpm([
-        '--config.inject-workspace-packages=true',
-        '--filter', '@tianwen/dsh-host',
-        'deploy', '--prod', paths.hostRoot,
-      ], 0)
-      dshBin = validateInstalledHost(paths.hostRoot)
+      atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_HOST_DEPLOY, () => {
+        const hostsRoot = dirname(paths.hostRoot)
+        const id = `${process.pid}-${randomUUID()}`
+        hostBackup = migratingRc6 ? resolve(hostsRoot, `.dsh-host-backup-${id}`) : undefined
+        mkdirSync(hostsRoot, { recursive: true })
+        if (hostBackup !== undefined) renameSync(paths.hostRoot, hostBackup)
+        invokePnpm([
+          '--config.inject-workspace-packages=true',
+          '--filter', '@tianwen/dsh-host',
+          'deploy', '--prod', paths.hostRoot,
+        ], 0)
+        dshBin = validateInstalledHost(paths.hostRoot)
+      })
     }
     for (const [index, archiveStage] of archiveStages.entries()) {
-      mkdirSync(archiveStage, { recursive: true })
-      invokePnpm(['--filter', `${RUNTIME_PACKAGE}...`, 'build'], 300_000)
-      invokePnpm([
-        '--filter', RUNTIME_PACKAGE, 'pack', '--skip-manifest-obfuscation',
-        '--pack-destination', archiveStage,
-      ], 300_000)
-      if (!existsSync(stagedArchives[index]) || !statSync(stagedArchives[index]).isFile()) {
-        throw new Error('Runtime Bundle archive was not created')
+      const buildStage = index === 0
+        ? INSTALLER_FAILURE_STAGE.RUNTIME_BUNDLE_BUILD_1
+        : INSTALLER_FAILURE_STAGE.RUNTIME_BUNDLE_BUILD_2
+      const packStage = index === 0
+        ? INSTALLER_FAILURE_STAGE.RUNTIME_BUNDLE_PACK_1
+        : INSTALLER_FAILURE_STAGE.RUNTIME_BUNDLE_PACK_2
+      atInstallStage(buildStage, () => {
+        mkdirSync(archiveStage, { recursive: true })
+        invokePnpm(['--filter', `${RUNTIME_PACKAGE}...`, 'build'], 300_000)
+      })
+      atInstallStage(packStage, () => {
+        invokePnpm([
+          '--filter', RUNTIME_PACKAGE, 'pack', '--skip-manifest-obfuscation',
+          '--pack-destination', archiveStage,
+        ], 300_000)
+        if (!existsSync(stagedArchives[index]) || !statSync(stagedArchives[index]).isFile()) {
+          throw new Error('Runtime Bundle archive was not created')
+        }
+      })
+    }
+    archiveDigest = atInstallStage(INSTALLER_FAILURE_STAGE.ARCHIVE_STABILITY, () => {
+      const archiveDigests = stagedArchives.map(sha256File)
+      if (archiveDigests[0] !== archiveDigests[1]) {
+        throw new Error('Runtime Bundle archive is not stable across consecutive builds')
       }
-    }
-    const archiveDigests = stagedArchives.map(sha256File)
-    if (archiveDigests[0] !== archiveDigests[1]) {
-      throw new Error('Runtime Bundle archive is not stable across consecutive builds')
-    }
-    archiveDigest = archiveDigests[0]
+      return archiveDigests[0]
+    })
     profileChanged = migratingRc6 || !profileExists || installedArchiveDigest !== archiveDigest
     if (profileChanged) {
-      const profilesRoot = dirname(paths.profileRoot)
-      const id = `${process.pid}-${randomUUID()}`
-      profileBackup = profileExists
-        ? resolve(profilesRoot, `.tianwen-backup-${id}`)
-        : undefined
-      mkdirSync(profilesRoot, { recursive: true })
-      if (profileBackup !== undefined) renameSync(paths.profileRoot, profileBackup)
-      invokePnpm([
-        '--config.inject-workspace-packages=true',
-        '--filter', '@tianwen/profile-host',
-        'deploy', '--prod', paths.profileRoot,
-      ], 0)
-      normalizeDeployedProfile(paths, paths.profileRoot)
-      const deployedManifest = validateProfile(paths)
-      resolveInstalledCli(deployedManifest, repoRoot)
+      atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_PROFILE_DEPLOY, () => {
+        const profilesRoot = dirname(paths.profileRoot)
+        const id = `${process.pid}-${randomUUID()}`
+        profileBackup = profileExists
+          ? resolve(profilesRoot, `.tianwen-backup-${id}`)
+          : undefined
+        mkdirSync(profilesRoot, { recursive: true })
+        if (profileBackup !== undefined) renameSync(paths.profileRoot, profileBackup)
+        invokePnpm([
+          '--config.inject-workspace-packages=true',
+          '--filter', '@tianwen/profile-host',
+          'deploy', '--prod', paths.profileRoot,
+        ], 0)
+        normalizeDeployedProfile(paths, paths.profileRoot)
+      })
+      atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_PROFILE_VALIDATION, () => {
+        const deployedManifest = validateProfile(paths)
+        resolveInstalledCli(deployedManifest, repoRoot)
+      })
     }
 
-    const profileManifestPath = validateProfile(paths)
-    const dump = runFixed(process.execPath, [dshBin, '--profile', PROFILE, '--dump-config'], {
-      cwd: repoRoot,
-      env,
-      runner,
+    const profileManifestPath = atInstallStage(
+      INSTALLER_FAILURE_STAGE.MANAGED_PROFILE_VALIDATION,
+      () => validateProfile(paths),
+    )
+    const dump = atInstallStage(INSTALLER_FAILURE_STAGE.DSH_CONFIG_VALIDATION, () => runFixed(
+      process.execPath,
+      [dshBin, '--profile', PROFILE, '--dump-config'],
+      { cwd: repoRoot, env, runner },
+    ))
+    atInstallStage(INSTALLER_FAILURE_STAGE.DSH_CONFIG_VALIDATION, () => validateDump(dump.stdout, paths))
+    const cliPath = atInstallStage(
+      INSTALLER_FAILURE_STAGE.MANAGED_PROFILE_VALIDATION,
+      () => resolveInstalledCli(profileManifestPath, repoRoot),
+    )
+    const receipt = atInstallStage(INSTALLER_FAILURE_STAGE.ARCHIVE_PUBLICATION, () => {
+      const nextReceipt = createInstallReceipt(paths, {
+        archiveDigest,
+        cliPath,
+      })
+      if (existsSync(paths.archivePath)) {
+        archiveBackup = resolve(packsRoot, `.tianwen-backup-${process.pid}-${randomUUID()}.tgz`)
+        renameSync(paths.archivePath, archiveBackup)
+      }
+      renameSync(stagedArchive, paths.archivePath)
+      archivePublished = true
+      return nextReceipt
     })
-    validateDump(dump.stdout, paths)
-    const cliPath = resolveInstalledCli(profileManifestPath, repoRoot)
-    const receipt = createInstallReceipt(paths, {
-      archiveDigest,
-      cliPath,
+    atInstallStage(INSTALLER_FAILURE_STAGE.RECEIPT_PUBLICATION, () => {
+      const receiptStage = `${paths.receiptPath}.tmp-${process.pid}-${randomUUID()}`
+      try {
+        writeFileSync(receiptStage, canonicalJson(receipt), { encoding: 'utf8', flag: 'wx' })
+        renameSync(receiptStage, paths.receiptPath)
+      } finally {
+        rmSync(receiptStage, { force: true })
+      }
     })
-    if (existsSync(paths.archivePath)) {
-      archiveBackup = resolve(packsRoot, `.tianwen-backup-${process.pid}-${randomUUID()}.tgz`)
-      renameSync(paths.archivePath, archiveBackup)
-    }
-    renameSync(stagedArchive, paths.archivePath)
-    archivePublished = true
-    const receiptStage = `${paths.receiptPath}.tmp-${process.pid}-${randomUUID()}`
-    try {
-      writeFileSync(receiptStage, canonicalJson(receipt), { encoding: 'utf8', flag: 'wx' })
-      renameSync(receiptStage, paths.receiptPath)
-    } finally {
-      rmSync(receiptStage, { force: true })
-    }
     if (profileBackup !== undefined) {
       try {
         rmSync(profileBackup, { force: true, recursive: true })
@@ -732,9 +812,9 @@ async function main() {
       ? canonicalJson(receipt)
       : `Tianwen is ready. Add ${receipt.binDir} to PATH.\n`)
   } catch (error) {
-    const stage = installerFailureStage(error)
-    if (json) process.stdout.write(canonicalJson(installerFailureReceipt(stage)))
-    else process.stderr.write(`Tianwen installer failed at ${stage}.\n`)
+    const receipt = createInstallerFailureReceipt(error)
+    if (json) process.stdout.write(canonicalJson(receipt))
+    else process.stderr.write(`Tianwen installer failed at ${receipt.stage}.\n`)
     process.exitCode = 1
   }
 }
