@@ -129,6 +129,11 @@ describe('Tianwen runtime Outcome intake', () => {
           binding.runId,
         )
         receipts.push(receipt)
+        expect(receipt.acceptanceEvidenceId).toBe(
+          harness.ctx.tianwenEvidence.project(handle.agent.session)
+            .filter(record => record.action.toolName === 'verify_summary')
+            .at(-1)!.evidenceId,
+        )
         expect(handle.agent.session.events).toEqual(before)
       }
 

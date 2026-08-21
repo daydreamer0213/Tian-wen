@@ -784,6 +784,7 @@ function parseEvent(value: unknown): LedgerEvent {
     if (!isRecord(value.binding)) {
       throw new LedgerIntegrityError('Run binding must be an object')
     }
+    const isV2 = value.binding.schemaVersion === 'tianwen.run-binding.v2'
     exactKeys(value.binding, [
       'schemaVersion',
       'runId',
@@ -793,8 +794,12 @@ function parseEvent(value: unknown): LedgerEvent {
       'scopeKey',
       'acceptanceContract',
       'acceptanceContractDigest',
+      ...(isV2 ? ['acceptanceSubjectDigest'] : []),
     ])
-    if (value.binding.schemaVersion !== 'tianwen.run-binding.v1') {
+    if (
+      value.binding.schemaVersion !== 'tianwen.run-binding.v1'
+      && !isV2
+    ) {
       throw new LedgerIntegrityError('invalid stored Run binding version')
     }
     const binding = prepareRunBinding({
@@ -804,6 +809,11 @@ function parseEvent(value: unknown): LedgerEvent {
       scopeKey: requireString(value.binding.scopeKey, 'scopeKey'),
       acceptanceContract:
         value.binding.acceptanceContract as RunAcceptanceContract,
+      ...(isV2 ? {
+        acceptanceSubjectDigest: requireDigest(
+          value.binding.acceptanceSubjectDigest,
+        ),
+      } : {}),
     })
     if (
       value.binding.runId !== binding.runId ||

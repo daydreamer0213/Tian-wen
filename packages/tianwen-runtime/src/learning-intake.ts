@@ -9,7 +9,8 @@ import type {
 import type {
   LearningIntakeReceipt,
   OutcomeIntakeReceipt,
-  RunBindingInput,
+  RunBindingInputV1,
+  RunBindingInputV2,
   RunBindingReceipt,
   Sha256Digest,
   TianwenRunId,
@@ -31,7 +32,9 @@ export interface RuntimeLearningIntakeReceipt extends LearningIntakeReceipt {
   readonly sessionUnchanged: true
 }
 
-export type RuntimeRunBindingInput = Omit<RunBindingInput, 'sessionId'>
+export type RuntimeRunBindingInput =
+  | Omit<RunBindingInputV1, 'sessionId'>
+  | Omit<RunBindingInputV2, 'sessionId'>
 
 export interface RuntimeRunBindingReceipt extends RunBindingReceipt {
   readonly sessionUnchanged: true
@@ -56,6 +59,7 @@ export type RuntimeSkillUseReceipt =
     }
 
 export interface RuntimeOutcomeIntakeReceipt extends OutcomeIntakeReceipt {
+  readonly acceptanceEvidenceId?: Sha256Digest
   readonly sessionUnchanged: true
 }
 
@@ -309,7 +313,13 @@ export class TianwenLearningIntakeService extends Service {
     if (sessionDigest(session.events) !== before) {
       throw new Error('Outcome intake changed the DSH Session')
     }
-    return { ...receipt, sessionUnchanged: true }
+    return {
+      ...receipt,
+      ...(finalEvidence === undefined ? {} : {
+        acceptanceEvidenceId: finalEvidence.evidenceId,
+      }),
+      sessionUnchanged: true,
+    }
   }
 
   consume(
