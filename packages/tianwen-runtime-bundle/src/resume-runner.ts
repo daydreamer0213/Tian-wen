@@ -354,7 +354,9 @@ async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig,
 function isNaturalRunTrial(
   config: ResumeConfig | LiveSmokeResumeConfig | NaturalRunTrialResumeConfig,
 ): config is NaturalRunTrialResumeConfig {
-  return 'trialManifestPath' in config && 'trialManifestDigest' in config
+  return 'trialManifestPath' in config
+    && typeof config.trialManifestPath === 'string'
+    && typeof config.trialManifestDigest === 'string'
 }
 
 function settledTrialGoal(goal: ReturnType<Context['goals']['get']>) {

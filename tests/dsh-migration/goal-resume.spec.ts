@@ -392,6 +392,8 @@ describe('tianwen resume', () => {
           nonce: 'test-nonce',
           revision: goal.revision,
           sessionId: String(sessionId),
+          trialManifestPath: undefined,
+          trialManifestDigest: undefined,
         })
 
         expect(result).toMatchObject({
