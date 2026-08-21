@@ -326,6 +326,13 @@ def test_installer_safe_failure_stage_receipt_handoff_and_ci() -> None:
         "reports its stage and stops",
         "only successful migration can precede the separately authorized same Goal/manifest configured-Provider resume",
         "installer-internal",
+        "node --run install:tianwen -- --data-dir D:\\DevData\\tianwen --json",
+        "ordinary pnpm lifecycle presentation is not a machine-readable transport",
+        "direct installer-source invocation",
+        "pnpm wrapper transport",
+        "raw JSON scanning",
+        "raw-output retention",
+        "schema changes",
     ):
         assert fact in handoff
 
