@@ -80,6 +80,29 @@ export interface NaturalRunTrialReceipt {
   }
 }
 
+const SHA_256_DIGEST = /^sha256:[0-9a-f]{64}$/u
+
+const LEARNING_DECISIONS = [
+  'no-case',
+  'continue-observing',
+  'ordinary-correction',
+  'signal-recorded',
+  'ticket-created',
+  'ticket-merged',
+  'not-recorded',
+] as const
+
+const LEARNING_REASONS = [
+  'persistence-unavailable',
+  'verifier-evidence-missing',
+  'verifier-call-mismatch',
+  'evidence-projection-failed',
+  'outcome-intake-failed',
+  'outcome-evidence-mismatch',
+  'skill-use-intake-failed',
+  'governance-session-changed',
+] as const
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -92,6 +115,147 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): voi
     || actual.some(key => !keys.includes(key))
   ) {
     throw new TypeError('natural Run trial manifest has an invalid shape')
+  }
+}
+
+function onlyKeys(value: Record<string, unknown>, keys: readonly string[]): void {
+  if (Object.keys(value).some(key => !keys.includes(key))) {
+    throw new TypeError('natural Run trial receipt has an invalid shape')
+  }
+}
+
+function requireKeys(value: Record<string, unknown>, keys: readonly string[]): void {
+  if (keys.some(key => !(key in value))) {
+    throw new TypeError('natural Run trial receipt has an invalid shape')
+  }
+}
+
+function safeCounter(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError('natural Run trial receipt has an invalid counter')
+  }
+  return value
+}
+
+function digest(value: unknown): `sha256:${string}` {
+  if (typeof value !== 'string' || !SHA_256_DIGEST.test(value)) {
+    throw new TypeError('natural Run trial receipt has an invalid digest')
+  }
+  return value as `sha256:${string}`
+}
+
+function nonEmptyString(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new TypeError('natural Run trial receipt has an invalid string')
+  }
+  return value
+}
+
+function oneOf<const T extends readonly string[]>(value: unknown, values: T): T[number] {
+  if (typeof value !== 'string' || !values.includes(value)) {
+    throw new TypeError('natural Run trial receipt has an invalid enum')
+  }
+  return value as T[number]
+}
+
+export function parseNaturalRunTrialChildReceipt(
+  stdout: string,
+  stderr: string,
+  expected: { readonly goalId: string, readonly sessionId: string },
+): NaturalRunTrialReceipt {
+  if (stderr !== '') throw new TypeError('natural Run trial child wrote stderr')
+  let value: unknown
+  try { value = JSON.parse(stdout) as unknown } catch {
+    throw new TypeError('natural Run trial child receipt is invalid JSON')
+  }
+  if (!isRecord(value)) throw new TypeError('natural Run trial receipt must be an object')
+  exactKeys(value, ['schemaVersion', 'status', 'goal', 'session', 'run', 'learning', 'usage'])
+  if (value.schemaVersion !== 'tianwen.natural-run-trial-receipt.v1') {
+    throw new TypeError('natural Run trial receipt schema version is invalid')
+  }
+  const status = oneOf(value.status, ['settled', 'settled-with-learning-error'] as const)
+
+  if (!isRecord(value.goal)) throw new TypeError('natural Run trial receipt Goal is invalid')
+  exactKeys(value.goal, ['id', 'revision', 'phase'])
+  const goal = {
+    id: nonEmptyString(value.goal.id),
+    revision: safeCounter(value.goal.revision),
+    phase: oneOf(value.goal.phase, ['paused', 'blocked', 'complete'] as const),
+  }
+  if (goal.id !== expected.goalId) throw new TypeError('natural Run trial receipt Goal does not match')
+
+  if (!isRecord(value.session)) throw new TypeError('natural Run trial receipt Session is invalid')
+  exactKeys(value.session, ['id', 'eventCountDelta', 'unchangedByGovernance'])
+  const unchangedByGovernance = value.session.unchangedByGovernance
+  if (typeof unchangedByGovernance !== 'boolean') {
+    throw new TypeError('natural Run trial receipt Session is invalid')
+  }
+  const session = {
+    id: nonEmptyString(value.session.id),
+    eventCountDelta: safeCounter(value.session.eventCountDelta),
+    unchangedByGovernance,
+  }
+  if (session.id !== expected.sessionId) throw new TypeError('natural Run trial receipt Session does not match')
+
+  if (!isRecord(value.run)) throw new TypeError('natural Run trial receipt Run is invalid')
+  onlyKeys(value.run, ['runId', 'acceptanceSubjectDigest', 'acceptanceEvidenceId'])
+  requireKeys(value.run, ['runId', 'acceptanceSubjectDigest'])
+  const run = {
+    runId: nonEmptyString(value.run.runId),
+    acceptanceSubjectDigest: digest(value.run.acceptanceSubjectDigest),
+    ...(value.run.acceptanceEvidenceId === undefined
+      ? {} : { acceptanceEvidenceId: digest(value.run.acceptanceEvidenceId) }),
+  }
+
+  if (!isRecord(value.learning)) throw new TypeError('natural Run trial receipt learning is invalid')
+  onlyKeys(value.learning, ['decision', 'reason', 'ticketId', 'skillUse'])
+  requireKeys(value.learning, ['decision', 'skillUse'])
+  const learning = {
+    decision: oneOf(value.learning.decision, LEARNING_DECISIONS),
+    ...(value.learning.reason === undefined
+      ? {} : { reason: oneOf(value.learning.reason, LEARNING_REASONS) }),
+    ...(value.learning.ticketId === undefined
+      ? {} : { ticketId: nonEmptyString(value.learning.ticketId) }),
+    skillUse: oneOf(value.learning.skillUse, ['recorded', 'no-use-proof', 'not-attempted'] as const),
+  }
+
+  if (!isRecord(value.usage)) throw new TypeError('natural Run trial receipt usage is invalid')
+  onlyKeys(value.usage, ['modelRequests', 'toolCalls', 'tokens', 'exactCny'])
+  requireKeys(value.usage, ['modelRequests', 'toolCalls', 'exactCny'])
+  let tokens: NaturalRunTrialReceipt['usage']['tokens'] | undefined
+  if (value.usage.tokens !== undefined) {
+    if (!isRecord(value.usage.tokens)) throw new TypeError('natural Run trial receipt tokens are invalid')
+    onlyKeys(value.usage.tokens, [
+      'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens',
+    ])
+    requireKeys(value.usage.tokens, ['inputTokens', 'outputTokens'])
+    tokens = {
+      inputTokens: safeCounter(value.usage.tokens.inputTokens),
+      outputTokens: safeCounter(value.usage.tokens.outputTokens),
+      ...(value.usage.tokens.cacheReadTokens === undefined
+        ? {} : { cacheReadTokens: safeCounter(value.usage.tokens.cacheReadTokens) }),
+      ...(value.usage.tokens.cacheWriteTokens === undefined
+        ? {} : { cacheWriteTokens: safeCounter(value.usage.tokens.cacheWriteTokens) }),
+      ...(value.usage.tokens.reasoningTokens === undefined
+        ? {} : { reasoningTokens: safeCounter(value.usage.tokens.reasoningTokens) }),
+    }
+  }
+  if (value.usage.exactCny !== 'unavailable') {
+    throw new TypeError('natural Run trial receipt exact CNY is invalid')
+  }
+  return {
+    schemaVersion: 'tianwen.natural-run-trial-receipt.v1',
+    status,
+    goal,
+    session,
+    run,
+    learning,
+    usage: {
+      modelRequests: safeCounter(value.usage.modelRequests),
+      toolCalls: safeCounter(value.usage.toolCalls),
+      ...(tokens === undefined ? {} : { tokens }),
+      exactCny: 'unavailable',
+    },
   }
 }
 

@@ -18,11 +18,14 @@ import {
   parseGoalLiveSmokeChildReceipt,
 } from './goal-live-smoke.js'
 import type { GoalLiveSmokeReceipt } from './goal-live-smoke.js'
-import { readNaturalRunTrialManifest } from './natural-run-trial.js'
+import {
+  parseNaturalRunTrialChildReceipt,
+  readNaturalRunTrialManifest,
+} from './natural-run-trial.js'
 import type { PreparedNaturalRunTrialManifest } from './natural-run-trial.js'
 
 const DSH_VERSION = '0.1.0-rc.7'
-const LIVE_SMOKE_CHILD_OUTPUT_LIMIT_BYTES = 65_536
+const STRICT_CHILD_OUTPUT_LIMIT_BYTES = 65_536
 const LIVE_SMOKE_PARENT_GRACE_MS = 5_000
 
 export interface ResumePreflight {
@@ -48,6 +51,11 @@ export interface LiveSmokeChildDependencies {
   readonly setTimeout?: (callback: () => void, delay: number) => unknown
   readonly clearTimeout?: (timer: unknown) => void
   readonly write?: (line: string) => void
+}
+
+export interface NaturalTrialChildDependencies {
+  readonly write?: (line: string) => void
+  readonly writeError?: (line: string) => void
 }
 
 export class GoalResumeUnavailableError extends Error {
@@ -280,7 +288,7 @@ export async function monitorLiveSmokeChild(
     const collect = (chunks: Buffer[], chunk: Buffer, bytes: number): number => {
       if (finished) return bytes
       const nextBytes = bytes + chunk.byteLength
-      if (nextBytes > LIVE_SMOKE_CHILD_OUTPUT_LIMIT_BYTES) {
+      if (nextBytes > STRICT_CHILD_OUTPUT_LIMIT_BYTES) {
         overflow()
         return bytes
       }
@@ -307,6 +315,64 @@ export async function monitorLiveSmokeChild(
     child.stdout.once('error', overflow)
     child.stderr.once('error', overflow)
     deadlineTimer = schedule(beginDeadline, Math.max(0, startedAtMs + LIVE_GOAL_LIMITS.timeoutMs - now()))
+  })
+}
+
+export async function monitorNaturalRunTrialChild(
+  child: ChildProcess,
+  preflight: NaturalRunTrialResumePreflight,
+  dependencies: NaturalTrialChildDependencies = {},
+): Promise<number> {
+  const write = dependencies.write ?? (line => { process.stdout.write(line) })
+  const writeError = dependencies.writeError ?? (line => { process.stderr.write(line) })
+  const stdout: Buffer[] = []
+  const stderr: Buffer[] = []
+  let stdoutBytes = 0
+  let stderrBytes = 0
+  let finished = false
+  return await new Promise(resolveExit => {
+    const fail = () => {
+      if (finished) return
+      finished = true
+      writeError('tianwen resume: natural Run trial child failed\n')
+      resolveExit(1)
+    }
+    const collect = (chunks: Buffer[], chunk: Buffer, bytes: number): number => {
+      if (finished) return bytes
+      const nextBytes = bytes + chunk.byteLength
+      if (nextBytes > STRICT_CHILD_OUTPUT_LIMIT_BYTES) {
+        try { child.kill() } catch {}
+        fail()
+        return bytes
+      }
+      chunks.push(chunk)
+      return nextBytes
+    }
+    child.once('error', fail)
+    child.once('close', code => {
+      if (finished || code !== 0) {
+        fail()
+        return
+      }
+      try {
+        const receipt = parseNaturalRunTrialChildReceipt(
+          Buffer.concat(stdout).toString('utf8'),
+          Buffer.concat(stderr).toString('utf8'),
+          { goalId: preflight.goalId, sessionId: preflight.sessionId },
+        )
+        finished = true
+        write(`${JSON.stringify(receipt)}\n`)
+        resolveExit(0)
+      } catch { fail() }
+    })
+    if (child.stdout === null || child.stderr === null) {
+      fail()
+      return
+    }
+    child.stdout.on('data', (chunk: Buffer) => { stdoutBytes = collect(stdout, chunk, stdoutBytes) })
+    child.stderr.on('data', (chunk: Buffer) => { stderrBytes = collect(stderr, chunk, stderrBytes) })
+    child.stdout.once('error', fail)
+    child.stderr.once('error', fail)
   })
 }
 
@@ -344,9 +410,10 @@ export async function launchGoalResume(
       } : {}),
     },
     shell: false,
-    stdio: liveSmoke ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+    stdio: liveSmoke || naturalTrial ? ['ignore', 'pipe', 'pipe'] : 'inherit',
   })
   if (liveSmoke) return monitorLiveSmokeChild(child, preflight, startedAtMs)
+  if (naturalTrial) return monitorNaturalRunTrialChild(child, preflight)
   return await new Promise((resolveExit, reject) => {
     child.once('error', reject)
     child.once('exit', (code, signal) => resolveExit(code ?? (signal === null ? 1 : 1)))
