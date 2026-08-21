@@ -27,6 +27,59 @@ export interface PreparedNaturalRunTrialManifest {
   readonly acceptanceSubjectDigest: `sha256:${string}`
 }
 
+export interface NaturalRunTrialReceipt {
+  readonly schemaVersion: 'tianwen.natural-run-trial-receipt.v1'
+  readonly status: 'settled' | 'settled-with-learning-error'
+  readonly goal: {
+    readonly id: string
+    readonly revision: number
+    readonly phase: 'paused' | 'blocked' | 'complete'
+  }
+  readonly session: {
+    readonly id: string
+    readonly eventCountDelta: number
+    readonly unchangedByGovernance: boolean
+  }
+  readonly run: {
+    readonly runId: string
+    readonly acceptanceSubjectDigest: `sha256:${string}`
+    readonly acceptanceEvidenceId?: `sha256:${string}`
+  }
+  readonly learning: {
+    readonly decision:
+      | 'no-case'
+      | 'continue-observing'
+      | 'ordinary-correction'
+      | 'signal-recorded'
+      | 'ticket-created'
+      | 'ticket-merged'
+      | 'not-recorded'
+    readonly reason?:
+      | 'persistence-unavailable'
+      | 'verifier-evidence-missing'
+      | 'verifier-call-mismatch'
+      | 'evidence-projection-failed'
+      | 'outcome-intake-failed'
+      | 'outcome-evidence-mismatch'
+      | 'skill-use-intake-failed'
+      | 'governance-session-changed'
+    readonly ticketId?: string
+    readonly skillUse: 'recorded' | 'no-use-proof' | 'not-attempted'
+  }
+  readonly usage: {
+    readonly modelRequests: number
+    readonly toolCalls: number
+    readonly tokens?: {
+      readonly inputTokens: number
+      readonly outputTokens: number
+      readonly cacheReadTokens?: number
+      readonly cacheWriteTokens?: number
+      readonly reasoningTokens?: number
+    }
+    readonly exactCny: 'unavailable'
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }

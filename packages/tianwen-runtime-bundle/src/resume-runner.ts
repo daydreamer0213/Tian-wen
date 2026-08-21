@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
@@ -8,7 +9,7 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 
 import {
   LIVE_GOAL_LIMITS,
@@ -20,6 +21,8 @@ import {
   createGoalLiveSmokeFailure,
 } from './goal-live-smoke.js'
 import type { GoalLiveSmokeReceipt, GoalLiveSmokeSuccessReceipt } from './goal-live-smoke.js'
+import { readNaturalRunTrialManifest } from './natural-run-trial.js'
+import type { NaturalRunTrialReceipt } from './natural-run-trial.js'
 
 interface ResumeConfig {
   readonly goalId: string
@@ -33,6 +36,11 @@ export interface LiveSmokeResumeConfig extends ResumeConfig {
   readonly liveSmoke: true
   readonly evolutionRoot: string
   readonly startedAtMs: number
+}
+
+export interface NaturalRunTrialResumeConfig extends ResumeConfig {
+  readonly trialManifestDigest: `sha256:${string}`
+  readonly trialManifestPath: string
 }
 
 export interface LiveGoalResumeDependencies {
@@ -51,7 +59,7 @@ interface Receipt {
   }
 }
 
-type ResumeReceipt = Receipt | GoalLiveSmokeReceipt
+type ResumeReceipt = Receipt | GoalLiveSmokeReceipt | NaturalRunTrialReceipt
 
 function requireConfig(config: ResumeConfig): void {
   if (!config.goalId || !config.sessionId || !config.nonce ||
@@ -92,6 +100,47 @@ async function waitForDisarmed(ctx: Context, agent: Parameters<Context['goals'][
 
 function requestCount(events: readonly { readonly type: string }[]): number {
   return events.filter(event => event.type === 'step/start').length
+}
+
+function sessionDigest(events: readonly SessionEvent[]): `sha256:${string}` {
+  return `sha256:${createHash('sha256')
+    .update(JSON.stringify(events), 'utf8')
+    .digest('hex')}`
+}
+
+function naturalUsage(events: readonly SessionEvent[]): NaturalRunTrialReceipt['usage'] {
+  const assistantMessages = events.filter(event => event.type === 'assistant/message')
+  const toolCalls = events.filter(event => event.type === 'tool/call').length
+  let inputTokens = 0
+  let outputTokens = 0
+  let cacheReadTokens = 0
+  let cacheWriteTokens = 0
+  let reasoningTokens = 0
+  let hasUsage = false
+  for (const event of assistantMessages) {
+    const usage = event.data.usage
+    if (usage === undefined) continue
+    hasUsage = true
+    inputTokens += usage.inputTokens ?? 0
+    outputTokens += usage.outputTokens ?? 0
+    cacheReadTokens += usage.cacheReadTokens ?? 0
+    cacheWriteTokens += usage.cacheWriteTokens ?? 0
+    reasoningTokens += usage.reasoningTokens ?? 0
+  }
+  return {
+    modelRequests: assistantMessages.length,
+    toolCalls,
+    ...(hasUsage ? {
+      tokens: {
+        inputTokens,
+        outputTokens,
+        ...(cacheReadTokens === 0 ? {} : { cacheReadTokens }),
+        ...(cacheWriteTokens === 0 ? {} : { cacheWriteTokens }),
+        ...(reasoningTokens === 0 ? {} : { reasoningTokens }),
+      },
+    } : {}),
+    exactCny: 'unavailable',
+  }
 }
 
 function snapshotTree(root: string): Map<string, string> {
@@ -302,10 +351,242 @@ async function runLiveGoalResume(ctx: Context, config: LiveSmokeResumeConfig,
   }
 }
 
-export async function runGoalResume(ctx: Context, config: ResumeConfig | LiveSmokeResumeConfig,
+function isNaturalRunTrial(
+  config: ResumeConfig | LiveSmokeResumeConfig | NaturalRunTrialResumeConfig,
+): config is NaturalRunTrialResumeConfig {
+  return 'trialManifestPath' in config && 'trialManifestDigest' in config
+}
+
+function settledTrialGoal(goal: ReturnType<Context['goals']['get']>) {
+  if (
+    goal === undefined ||
+    !['paused', 'blocked', 'complete'].includes(goal.phase)
+  ) {
+    throw new Error('Natural Run trial Goal did not settle')
+  }
+  return {
+    id: String(goal.id),
+    revision: goal.revision,
+    phase: goal.phase as 'paused' | 'blocked' | 'complete',
+  }
+}
+
+async function runNaturalRunTrial(
+  ctx: Context,
+  config: NaturalRunTrialResumeConfig,
+  dependencies: LiveGoalResumeDependencies = {},
+): Promise<NaturalRunTrialReceipt> {
+  const trial = readNaturalRunTrialManifest(
+    config.trialManifestPath,
+    config.trialManifestDigest,
+  )
+  delete process.env.TIANWEN_RESUME_TRIAL_MANIFEST_PATH
+  delete process.env.TIANWEN_RESUME_TRIAL_MANIFEST_DIGEST
+  if (trial.manifest.goalId !== config.goalId) {
+    throw new Error('Natural Run trial manifest Goal does not match')
+  }
+  const defaultModel = ctx.get('agentDefaultModel') as {
+    currentSelection(): ModelSelection
+  } | undefined
+  const evidence = ctx.get('tianwenEvidence') as {
+    project(session: Session): readonly {
+      readonly evidenceId: `sha256:${string}`
+      readonly source: { readonly callSeq: number }
+      readonly action: {
+        readonly argumentsDigest: `sha256:${string}`
+        readonly toolName: string
+      }
+    }[]
+  } | undefined
+  const learning = ctx.get('tianwenLearningIntake') as {
+    bindRunWithSkill(
+      agent: unknown,
+      input: {
+        readonly acceptanceContract: typeof trial.manifest.acceptanceContract
+        readonly acceptanceSubjectDigest: `sha256:${string}`
+        readonly goalRef: string
+        readonly scopeKey: string
+        readonly taskRef: string
+      },
+      skillName: string,
+    ): Promise<{ readonly runId: `run:${string}` }>
+    consumeOutcome(session: Session, runId: `run:${string}`): {
+      readonly acceptanceEvidenceId?: `sha256:${string}`
+      readonly decision: NaturalRunTrialReceipt['learning']['decision']
+      readonly ticketId?: string
+    }
+    recordSkillUse(session: Session, runId: `run:${string}`): {
+      readonly decision: 'recorded' | 'no-use-proof'
+    }
+  } | undefined
+  if (defaultModel === undefined || evidence === undefined || learning === undefined) {
+    throw new Error('Tianwen natural Run services are unavailable')
+  }
+  const selection = defaultModel.currentSelection()
+  const handle = await ctx.agents.resume({
+    resumeSessionId: SessionId(config.sessionId),
+    agentOptions: { provider: selection.provider, model: selection.model },
+    setup: agentCtx => {
+      installModelSelection(agentCtx, { current: selection, assembled: undefined })
+    },
+  })
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve))
+    if (String(handle.agent.id) !== config.sessionId) {
+      throw new Error('Session changed after trial preflight')
+    }
+    const current = validateGoal(config, ctx.goals.get(handle.agent))
+    if (handle.agent.session.events.some(event => event.type === 'turn/start')) {
+      throw new Error('Natural Run trial requires the first DSH Turn')
+    }
+    if (!handle.agent.ctx.tools.schemas(handle.agent).some(tool =>
+      tool.name === trial.manifest.acceptanceContract.toolName)) {
+      throw new Error('Natural Run trial verifier is unavailable')
+    }
+    const beforeBinding = sessionDigest(handle.agent.session.events)
+    let binding: { readonly runId: `run:${string}` } | undefined
+    await ctx.inject(['skills'], async () => {
+      binding = await learning.bindRunWithSkill(handle.agent, {
+        goalRef: `dsh-goal:${String(current.id)}@${current.revision}`,
+        taskRef: trial.manifest.taskRef,
+        scopeKey: trial.manifest.scopeKey,
+        acceptanceContract: trial.manifest.acceptanceContract,
+        acceptanceSubjectDigest: trial.acceptanceSubjectDigest,
+      }, trial.manifest.parentSkillName)
+    })
+    if (binding === undefined || sessionDigest(handle.agent.session.events) !== beforeBinding) {
+      throw new Error('Natural Run trial binding changed the DSH Session')
+    }
+    const bound = binding
+    const eventCountBefore = handle.agent.session.events.length
+    ctx.goals.resume(handle.agent, {
+      id: GoalId(String(current.id)), revision: current.revision,
+    })
+    const settled = settledTrialGoal(await waitForDisarmed(ctx, handle.agent))
+    const receipt = (
+      status: NaturalRunTrialReceipt['status'],
+      learningResult: NaturalRunTrialReceipt['learning'],
+      acceptanceEvidenceId?: `sha256:${string}`,
+      governanceDigest = sessionDigest(handle.agent.session.events),
+    ): NaturalRunTrialReceipt => ({
+      schemaVersion: 'tianwen.natural-run-trial-receipt.v1',
+      status,
+      goal: settled,
+      session: {
+        id: String(handle.agent.id),
+        eventCountDelta: handle.agent.session.events.length - eventCountBefore,
+        unchangedByGovernance:
+          sessionDigest(handle.agent.session.events) === governanceDigest,
+      },
+      run: {
+        runId: bound.runId,
+        acceptanceSubjectDigest: trial.acceptanceSubjectDigest,
+        ...(acceptanceEvidenceId === undefined ? {} : { acceptanceEvidenceId }),
+      },
+      learning: learningResult,
+      usage: naturalUsage(handle.agent.session.events.slice(eventCountBefore)),
+    })
+    const flush = dependencies.flush ?? (session => ctx.sessions.flush(session))
+    try {
+      if (!await flush(handle.agent.session)) {
+        return receipt('settled-with-learning-error', {
+          decision: 'not-recorded', reason: 'persistence-unavailable',
+          skillUse: 'not-attempted',
+        })
+      }
+    } catch {
+      return receipt('settled-with-learning-error', {
+        decision: 'not-recorded', reason: 'persistence-unavailable',
+        skillUse: 'not-attempted',
+      })
+    }
+    const flushedDigest = sessionDigest(handle.agent.session.events)
+    let finalEvidence: ReturnType<typeof evidence.project>[number] | undefined
+    try {
+      finalEvidence = evidence.project(handle.agent.session)
+        .filter(item => item.action.toolName === trial.manifest.acceptanceContract.toolName)
+        .sort((left, right) => left.source.callSeq - right.source.callSeq)
+        .at(-1)
+    } catch {
+      return receipt('settled-with-learning-error', {
+        decision: 'not-recorded', reason: 'evidence-projection-failed',
+        skillUse: 'not-attempted',
+      }, undefined, flushedDigest)
+    }
+    if (sessionDigest(handle.agent.session.events) !== flushedDigest) {
+      return receipt('settled-with-learning-error', {
+        decision: 'not-recorded', reason: 'governance-session-changed',
+        skillUse: 'not-attempted',
+      }, undefined, flushedDigest)
+    }
+    if (finalEvidence === undefined) {
+      return receipt('settled-with-learning-error', {
+        decision: 'not-recorded', reason: 'verifier-evidence-missing',
+        skillUse: 'not-attempted',
+      }, undefined, flushedDigest)
+    }
+    if (finalEvidence.action.argumentsDigest !== trial.acceptanceSubjectDigest) {
+      return receipt('settled-with-learning-error', {
+        decision: 'not-recorded', reason: 'verifier-call-mismatch',
+        skillUse: 'not-attempted',
+      }, finalEvidence.evidenceId, flushedDigest)
+    }
+    let outcome: ReturnType<typeof learning.consumeOutcome>
+    try {
+      outcome = learning.consumeOutcome(handle.agent.session, bound.runId)
+    } catch {
+      return receipt('settled-with-learning-error', {
+        decision: 'not-recorded', reason: 'outcome-intake-failed',
+        skillUse: 'not-attempted',
+      }, finalEvidence.evidenceId, flushedDigest)
+    }
+    if (sessionDigest(handle.agent.session.events) !== flushedDigest) {
+      return receipt('settled-with-learning-error', {
+        decision: outcome.decision, reason: 'governance-session-changed',
+        skillUse: 'not-attempted',
+        ...(outcome.ticketId === undefined ? {} : { ticketId: outcome.ticketId }),
+      }, finalEvidence.evidenceId, flushedDigest)
+    }
+    if (outcome.acceptanceEvidenceId !== finalEvidence.evidenceId) {
+      return receipt('settled-with-learning-error', {
+        decision: outcome.decision, reason: 'outcome-evidence-mismatch',
+        skillUse: 'not-attempted',
+        ...(outcome.ticketId === undefined ? {} : { ticketId: outcome.ticketId }),
+      }, finalEvidence.evidenceId, flushedDigest)
+    }
+    let skillUse: ReturnType<typeof learning.recordSkillUse>
+    try {
+      skillUse = learning.recordSkillUse(handle.agent.session, bound.runId)
+    } catch {
+      return receipt('settled-with-learning-error', {
+        decision: outcome.decision, reason: 'skill-use-intake-failed',
+        skillUse: 'not-attempted',
+        ...(outcome.ticketId === undefined ? {} : { ticketId: outcome.ticketId }),
+      }, finalEvidence.evidenceId, flushedDigest)
+    }
+    if (sessionDigest(handle.agent.session.events) !== flushedDigest) {
+      return receipt('settled-with-learning-error', {
+        decision: outcome.decision, reason: 'governance-session-changed',
+        skillUse: 'not-attempted',
+        ...(outcome.ticketId === undefined ? {} : { ticketId: outcome.ticketId }),
+      }, finalEvidence.evidenceId, flushedDigest)
+    }
+    return receipt('settled', {
+      decision: outcome.decision,
+      skillUse: skillUse.decision,
+      ...(outcome.ticketId === undefined ? {} : { ticketId: outcome.ticketId }),
+    }, finalEvidence.evidenceId, flushedDigest)
+  } finally {
+    await handle.dispose()
+  }
+}
+
+export async function runGoalResume(ctx: Context,
+  config: ResumeConfig | LiveSmokeResumeConfig | NaturalRunTrialResumeConfig,
   dependencies?: LiveGoalResumeDependencies): Promise<ResumeReceipt> {
   requireConfig(config)
   if ('liveSmoke' in config && config.liveSmoke) return runLiveGoalResume(ctx, config, dependencies)
+  if (isNaturalRunTrial(config)) return runNaturalRunTrial(ctx, config, dependencies)
   const defaultModel = ctx.get('agentDefaultModel') as { currentSelection(): ModelSelection } | undefined
   if (defaultModel === undefined) throw new Error('Tianwen Profile has no default model')
   const selection = defaultModel.currentSelection()
@@ -331,15 +612,22 @@ export async function runGoalResume(ctx: Context, config: ResumeConfig | LiveSmo
 export const name = 'tianwen-resume-runner'
 export const inject = ['agentDefaultModel', 'agents', 'credentials', 'goals', 'llm', 'sessions', 'tianwenEvidence'] as const
 
-export function apply(ctx: Context, config: ResumeConfig | LiveSmokeResumeConfig): void {
+export function apply(ctx: Context,
+  config: ResumeConfig | LiveSmokeResumeConfig | NaturalRunTrialResumeConfig): void {
   const exit = ctx.get('appExit') as ((code: number) => void) | undefined
   if (exit === undefined) throw new Error('tianwen-resume-runner: appExit is unavailable')
   runGoalResume(ctx, config).then(receipt => {
     const liveSmoke = 'liveSmoke' in config && config.liveSmoke
+    const naturalTrial = isNaturalRunTrial(config)
     if (liveSmoke) {
       const strictReceipt = receipt as GoalLiveSmokeReceipt
       process.stdout.write(`${JSON.stringify(strictReceipt)}\n`)
       exit(strictReceipt.status === 'passed' ? 0 : 1)
+      return
+    }
+    if (naturalTrial) {
+      process.stdout.write(`${JSON.stringify(receipt)}\n`)
+      exit(0)
       return
     }
     const ordinary = receipt as Receipt
@@ -349,6 +637,11 @@ export function apply(ctx: Context, config: ResumeConfig | LiveSmokeResumeConfig
   }, error => {
     if ('liveSmoke' in config && config.liveSmoke) {
       process.stdout.write(`${JSON.stringify(createGoalLiveSmokeFailure('internal-error'))}\n`)
+      exit(1)
+      return
+    }
+    if (isNaturalRunTrial(config)) {
+      process.stderr.write('tianwen resume: natural Run trial failed\n')
       exit(1)
       return
     }

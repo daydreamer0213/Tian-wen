@@ -64,24 +64,30 @@ function isAllowedStatusInput(input: string): boolean {
     || path === '../tianwen-evidence/dist/projector.js'
 }
 
-function isAllowedCliInput(input: string): boolean {
-  const path = posix.normalize(input.replaceAll('\\', '/'))
-  return path === 'src/cli.ts' || path === 'src/create.ts' ||
-    path === 'src/model.ts' || path === 'src/resume.ts' ||
-    path === 'src/goal-live-smoke.ts' || path === 'src/natural-run-trial.ts' ||
+function isAllowedNaturalTrialInput(path: string): boolean {
+  return path === 'src/natural-run-trial.ts' ||
     path === '../tianwen-runtime/dist/run-binding.js' ||
     [
       '../tianwen-evolution/dist/run-binding.js',
       '../tianwen-evolution/dist/outcome-intake.js',
       '../tianwen-evolution/dist/learning-intake.js',
-    ].includes(path) || isAllowedStatusInput(path)
+    ].includes(path) || path === '../tianwen-evidence/dist/projector.js'
+}
+
+function isAllowedCliInput(input: string): boolean {
+  const path = posix.normalize(input.replaceAll('\\', '/'))
+  return path === 'src/cli.ts' || path === 'src/create.ts' ||
+    path === 'src/model.ts' || path === 'src/resume.ts' ||
+    path === 'src/goal-live-smoke.ts' || isAllowedNaturalTrialInput(path) ||
+    isAllowedStatusInput(path)
 }
 
 function isAllowedResumeRunnerInput(input: string): boolean {
+  const path = posix.normalize(input.replaceAll('\\', '/'))
   return [
     'src/resume-runner.ts',
     'src/goal-live-smoke.ts',
-  ].includes(posix.normalize(input.replaceAll('\\', '/')))
+  ].includes(path) || isAllowedNaturalTrialInput(path)
 }
 
 function isAllowedCreateRunnerInput(input: string): boolean {
