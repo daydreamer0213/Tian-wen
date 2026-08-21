@@ -79,6 +79,32 @@ The existing `goal-live-smoke` path is not reused as the learning entry. It is
 a narrowly frozen smoke proof and explicitly checks that Evolution state stays
 unchanged. Stage 7 extends the ordinary Goal resume composition instead.
 
+### 2.1 Runtime Bundle prerequisite
+
+The Stage 7 product entry ships through `@tianwen/runtime-bundle`, so that
+package must build the already-approved Stage 3/4 Runtime composition rather
+than an older subset of it. The existing bundle alias to
+`@tianwen/dsh-compat/runtime` stays in place; removing it would pull the broad
+test-harness export surface into the product bundle.
+
+The narrow runtime compat entry therefore exports only the public DSH seams
+currently required by the mounted Tianwen services: `Context`, `Service`,
+`SessionId`, `callConfigEquals`, `createUserMessage`, `isAgentLoopRequest`,
+`isSkillName`, `renderSkillContent`, and the already-approved service-owned
+`ScriptedAdapter`, plus `DSH_VERSION`. The bundle may include the exact local
+`scripted-adapter` module because Stage 4 explicitly owns that zero-cost
+mechanism. It must continue to exclude `test-harness`, probe helpers, private
+DSH paths, and unrelated workspace inputs.
+
+Because the resulting deployable bundle imports the public DSH Skill package,
+`@deepseek-ai/dsh-skill` `0.1.0-rc.7` becomes a direct runtime-bundle
+dependency. This promotes an already-installed exact DSH package from an
+indirect workspace dependency to an honest deployable-package dependency; it
+does not add another Runtime or a new third-party version. Refresh only the
+lockfile importer offline, with zero downloads. Exact-main CI must build the
+runtime bundle and its dependency closure before typecheck so this product
+packaging boundary cannot drift silently again.
+
 ## 3. Why Stage 7 stops before live Evaluation
 
 The current repository can truthfully persist a natural Run, Outcome,
@@ -460,8 +486,10 @@ Tests must prove:
     URL, or credential;
 20. Candidate, Evaluation, Shadow, Active Pointer, Promotion, rollback, old
     Champion, Dynamic Cordis, and Alpha state remain unchanged;
-21. no price lookup, budget store, Provider wrapper, dependency, or lockfile is
-    added.
+21. no price lookup, budget store, or Provider wrapper is added; the only
+    dependency/lockfile change is the offline direct declaration of the already
+    installed exact `@deepseek-ai/dsh-skill` `0.1.0-rc.7` package required by
+    the deployable Runtime Bundle.
 
 ### 11.2 Zero-cost mechanism demo
 
@@ -482,9 +510,19 @@ It must not deliberately fail to create a Signal or Ticket.
 
 ### 11.3 Natural paid or configured-Provider trial
 
-After the mechanism is merged, choose one small repository task that is useful
-on its own and has a stable, independent verifier. Run it once through the
-normal configured DSH Provider path under the existing cumulative budget.
+After the mechanism is merged, the supervisor may select a small repository
+task from a real current need and create a fresh DSH Goal for it. The task must
+be useful on its own even if Tianwen learning is disabled and must have a
+stable, independent verifier. It does not need to originate from an external
+user or pre-exist as a Goal. Run it once through the normal configured DSH
+Provider path under the existing cumulative budget.
+
+This is a pre-release developer-originated natural task: its value and
+acceptance contract are fixed before execution, its result is not scripted,
+and every truthful outcome is accepted. Do not add a simulated-user service,
+task generator, hidden answer, or retry loop. This receipt proves the natural
+DSH producer-to-consumer path; it does not by itself prove production-user
+distribution or general efficacy.
 
 The correct possible outcomes are all acceptable:
 
