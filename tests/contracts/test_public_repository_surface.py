@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import textwrap
 import tomllib
 from pathlib import Path
 from urllib.parse import unquote
@@ -327,6 +328,63 @@ def test_installer_safe_failure_stage_receipt_handoff_and_ci() -> None:
         "installer-internal",
     ):
         assert fact in handoff
+
+
+def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    job_match = re.search(
+        r"(?ms)^  installer-windows:\n(?P<job>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+        ci,
+    )
+    assert job_match, "missing installer-windows job"
+    installer_job = textwrap.dedent(job_match.group("job")).strip()
+    installer_command = "pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts"
+    expected_installer_job = textwrap.dedent(
+        """\
+        runs-on: windows-latest
+        steps:
+          - uses: actions/checkout@v7
+          - uses: pnpm/action-setup@v4
+            with:
+              version: 11.20.0
+          - uses: actions/setup-node@v7
+            with:
+              node-version: 22.20.0
+              cache: pnpm
+          - run: pnpm install --frozen-lockfile
+          - name: Run installer contract
+            shell: pwsh
+            run: |
+              $mappedDrive = $false
+              if (-not (Test-Path -LiteralPath 'D:\\')) {
+                & subst.exe D: $env:RUNNER_TEMP
+                if ($LASTEXITCODE -ne 0) { throw 'temporary D: mapping failed' }
+                $mappedDrive = $true
+              }
+              $testExit = 0
+              try {
+                New-Item -ItemType Directory -Force -Path 'D:\\DevData' | Out-Null
+              pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts
+                $testExit = $LASTEXITCODE
+              } finally {
+                if ($mappedDrive) { & subst.exe D: /D }
+              }
+              exit $testExit""",
+    ).strip()
+    assert installer_job == expected_installer_job
+
+    typescript_match = re.search(
+        r"(?ms)^  typescript:\n(?P<job>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+        ci,
+    )
+    assert typescript_match, "missing typescript job"
+    typescript_job = typescript_match.group("job")
+    assert installer_command.split("pnpm exec vitest run ", maxsplit=1)[1] not in typescript_job
+
+    amended_workflow = ci.lower()
+    for forbidden in PERSONAL_PATH_PREFIXES:
+        assert forbidden.lower() not in amended_workflow
+    assert not re.search(r"(?i)(?:TODO|TBD|FIXME|PLACEHOLDER|REPLACE_ME)", ci)
 
 
 def test_relative_links_in_public_documents_exist() -> None:
