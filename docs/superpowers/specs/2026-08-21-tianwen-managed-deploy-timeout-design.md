@@ -95,4 +95,3 @@ supervisor boundary; it does not justify price polling or new budget code.
 - changing timeouts for build, pack, install check or validation;
 - adding online recovery or automatic retries;
 - changing learning, Candidate, Evaluation, Shadow or Promotion semantics.
-
