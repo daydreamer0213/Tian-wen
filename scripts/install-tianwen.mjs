@@ -26,6 +26,11 @@ const PROFILE_BUNDLES = [
   '@deepseek-ai/dsh-headless',
   RUNTIME_PACKAGE,
 ]
+const PROFILE_DEPENDENCIES = [
+  '@deepseek-ai/dsh-base',
+  '@deepseek-ai/dsh-headless',
+  RUNTIME_PACKAGE,
+]
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const WORKSPACE_POLICY = `packages:
   - .
@@ -229,7 +234,8 @@ function inspectProfile(paths, profileRoot = paths.profileRoot) {
 }
 
 function matchesProfile(profile, dshVersion, runtime, patch) {
-  return profile.dependencies['@deepseek-ai/dsh-base'] === dshVersion
+  return JSON.stringify(Object.keys(profile.dependencies).sort()) === JSON.stringify(PROFILE_DEPENDENCIES)
+    && profile.dependencies['@deepseek-ai/dsh-base'] === dshVersion
     && profile.dependencies['@deepseek-ai/dsh-headless'] === dshVersion
     && profile.dependencies[RUNTIME_PACKAGE] === runtime
     && profile.patch === patch

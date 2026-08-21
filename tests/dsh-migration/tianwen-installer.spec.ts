@@ -334,6 +334,14 @@ describe('Tianwen installer contract', () => {
         writeFileSync(join(paths.profileRoot, 'cordis.patch.yml'), 'modified\n', 'utf8')
         return paths
       })(),
+      (() => {
+        const paths = deriveInstallPaths(testRoot('extra-dependency'), 'win32')
+        writeManagedRc6Predecessor(paths, 'locked-deploy')
+        const manifest = JSON.parse(readFileSync(join(paths.profileRoot, 'package.json'), 'utf8'))
+        manifest.dependencies['@example/extra'] = '1.0.0'
+        writeJson(join(paths.profileRoot, 'package.json'), manifest)
+        return paths
+      })(),
     ]
 
     for (const paths of incompatible) {
