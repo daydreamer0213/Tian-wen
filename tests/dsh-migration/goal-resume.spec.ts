@@ -403,6 +403,9 @@ describe('tianwen resume', () => {
           sessionId: String(sessionId),
           trialManifestPath: undefined,
           trialManifestDigest: `sha256:${'0'.repeat(64)}`,
+          liveSmoke: true,
+          evolutionRoot: join(dataDir, 'evolution'),
+          startedAtMs: Date.now(),
         })).rejects.toThrow('Natural Run trial manifest handoff is incomplete')
         expect(second.adapter.requests).toHaveLength(0)
 

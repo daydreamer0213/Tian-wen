@@ -596,11 +596,11 @@ export async function runGoalResume(ctx: Context,
   config: ResumeConfig | LiveSmokeResumeConfig | NaturalRunTrialResumeConfig,
   dependencies?: LiveGoalResumeDependencies): Promise<ResumeReceipt> {
   requireConfig(config)
-  if ('liveSmoke' in config && config.liveSmoke) return runLiveGoalResume(ctx, config, dependencies)
-  if (isNaturalRunTrial(config)) return runNaturalRunTrial(ctx, config, dependencies)
   if (hasPartialNaturalRunTrial(config)) {
     throw new Error('Natural Run trial manifest handoff is incomplete')
   }
+  if ('liveSmoke' in config && config.liveSmoke) return runLiveGoalResume(ctx, config, dependencies)
+  if (isNaturalRunTrial(config)) return runNaturalRunTrial(ctx, config, dependencies)
   const defaultModel = ctx.get('agentDefaultModel') as { currentSelection(): ModelSelection } | undefined
   if (defaultModel === undefined) throw new Error('Tianwen Profile has no default model')
   const selection = defaultModel.currentSelection()
@@ -649,12 +649,17 @@ export function apply(ctx: Context,
       : `Resumed Goal ${ordinary.goal.id} (${ordinary.session.eventCountDelta} events)\n`)
     exit(0)
   }, error => {
+    if (hasPartialNaturalRunTrial(config)) {
+      process.stderr.write('tianwen resume: natural Run trial failed\n')
+      exit(1)
+      return
+    }
     if ('liveSmoke' in config && config.liveSmoke) {
       process.stdout.write(`${JSON.stringify(createGoalLiveSmokeFailure('internal-error'))}\n`)
       exit(1)
       return
     }
-    if (isNaturalRunTrial(config) || hasPartialNaturalRunTrial(config)) {
+    if (isNaturalRunTrial(config)) {
       process.stderr.write('tianwen resume: natural Run trial failed\n')
       exit(1)
       return
