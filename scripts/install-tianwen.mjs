@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -16,10 +17,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 
 const DSH_VERSION = '0.1.0-rc.7'
+const PREDECESSOR_DSH_VERSION = '0.1.0-rc.6'
 const PNPM_VERSION = '11.20.0'
 const PROFILE = 'tianwen'
 const RUNTIME_PACKAGE = '@tianwen/runtime-bundle'
 const PROFILE_BUNDLES = [
+  '@deepseek-ai/dsh-base',
+  '@deepseek-ai/dsh-headless',
+  RUNTIME_PACKAGE,
+]
+const PROFILE_DEPENDENCIES = [
   '@deepseek-ai/dsh-base',
   '@deepseek-ai/dsh-headless',
   RUNTIME_PACKAGE,
@@ -155,35 +162,63 @@ export function renderProfilePatch(paths) {
 `
 }
 
+function renderOriginalRc6ProfilePatch(paths) {
+  return `- id: agent-default-model
+  config:
+    provider: tianwen-offline
+    model: phase2-smoke
+
+- id: session-persistence-jsonl
+  config:
+    root: '${portable(paths.sessionsRoot)}'
+    compression: none
+    packChunks: false
+
+- id: tianwen-runtime
+  config:
+    evolutionRoot: '${portable(paths.evolutionRoot)}'
+
+- insert:
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+
+    - id: tianwen-phase2-smoke
+      name: '@tianwen/runtime-bundle/smoke'
+`
+}
+
 function contained(root, candidate, label) {
   const child = relative(realpathSync(root), realpathSync(candidate))
   if (child.startsWith('..') || isAbsolute(child)) throw new Error(`${label} escapes its managed root`)
 }
 
-export function validateInstalledHost(hostRoot) {
+function inspectInstalledHost(hostRoot) {
   const packageRoot = resolve(hostRoot, 'node_modules', '@deepseek-ai', 'dsh')
+  contained(hostRoot, packageRoot, 'DSH package')
   const manifestPath = resolve(packageRoot, 'package.json')
   const manifest = assertPlainObject(JSON.parse(readFileSync(manifestPath, 'utf8')), 'DSH manifest')
-  if (manifest.version !== DSH_VERSION) {
-    throw new Error(`DSH host must contain exact DSH version ${DSH_VERSION}`)
-  }
   const bin = assertPlainObject(manifest.bin, 'DSH bin').dsh
   if (typeof bin !== 'string' || bin === '') throw new Error('DSH manifest must expose bin.dsh')
   const executable = resolve(packageRoot, bin)
   if (!statSync(executable).isFile()) throw new Error('DSH bin target must be a file')
   contained(packageRoot, executable, 'DSH bin')
-  return executable
+  return { executable, version: manifest.version }
 }
 
-function validateProfile(paths, profileRoot = paths.profileRoot) {
+export function validateInstalledHost(hostRoot) {
+  const host = inspectInstalledHost(hostRoot)
+  if (host.version !== DSH_VERSION) {
+    throw new Error(`DSH host must contain exact DSH version ${DSH_VERSION}`)
+  }
+  return host.executable
+}
+
+function inspectProfile(paths, profileRoot = paths.profileRoot) {
   const manifestPath = resolve(profileRoot, 'package.json')
   const policyPath = resolve(profileRoot, 'pnpm-workspace.yaml')
   const patchPath = resolve(profileRoot, 'cordis.patch.yml')
   if (readFileSync(policyPath, 'utf8') !== WORKSPACE_POLICY) {
     throw new Error('managed Profile workspace policy differs from Tianwen v1')
-  }
-  if (readFileSync(patchPath, 'utf8') !== renderProfilePatch(paths)) {
-    throw new Error('managed Profile patch differs from Tianwen v1')
   }
   const manifest = assertPlainObject(JSON.parse(readFileSync(manifestPath, 'utf8')), 'Profile manifest')
   const dependencies = assertPlainObject(manifest.dependencies, 'Profile dependencies')
@@ -192,14 +227,79 @@ function validateProfile(paths, profileRoot = paths.profileRoot) {
   if (JSON.stringify(profile.bundles) !== JSON.stringify(PROFILE_BUNDLES)) {
     throw new Error('managed Profile bundle order differs from Tianwen v1')
   }
-  if (dependencies['@deepseek-ai/dsh-base'] !== DSH_VERSION
-    || dependencies['@deepseek-ai/dsh-headless'] !== DSH_VERSION) {
+  return {
+    dependencies,
+    manifestPath,
+    patch: readFileSync(patchPath, 'utf8'),
+  }
+}
+
+function matchesProfile(profile, dshVersion, runtime, patch) {
+  return JSON.stringify(Object.keys(profile.dependencies).sort()) === JSON.stringify(PROFILE_DEPENDENCIES)
+    && profile.dependencies['@deepseek-ai/dsh-base'] === dshVersion
+    && profile.dependencies['@deepseek-ai/dsh-headless'] === dshVersion
+    && profile.dependencies[RUNTIME_PACKAGE] === runtime
+    && profile.patch === patch
+}
+
+function validateProfile(paths, profileRoot = paths.profileRoot) {
+  const profile = inspectProfile(paths, profileRoot)
+  if (profile.patch !== renderProfilePatch(paths)) {
+    throw new Error('managed Profile patch differs from Tianwen v1')
+  }
+  if (profile.dependencies['@deepseek-ai/dsh-base'] !== DSH_VERSION
+    || profile.dependencies['@deepseek-ai/dsh-headless'] !== DSH_VERSION) {
     throw new Error(`managed Profile must use DSH ${DSH_VERSION}`)
   }
-  if (dependencies[RUNTIME_PACKAGE] !== '0.0.0') {
+  if (profile.dependencies[RUNTIME_PACKAGE] !== '0.0.0') {
     throw new Error('managed Profile must use Tianwen Runtime 0.0.0')
   }
-  return manifestPath
+  return profile.manifestPath
+}
+
+function directoryHasOnly(root, names) {
+  return readdirSync(root, { withFileTypes: true }).every(entry => names.includes(entry.name))
+}
+
+function isFreshDataDirectory(paths) {
+  if (existsSync(paths.hostRoot) || existsSync(paths.profileRoot)) return false
+  if (!directoryHasOnly(paths.dataDir, ['dsh-home', 'state'])) return false
+  const stateRoot = dirname(paths.evolutionRoot)
+  return (!existsSync(paths.dshHome) || directoryHasOnly(paths.dshHome, ['sessions']))
+    && (!existsSync(stateRoot) || directoryHasOnly(stateRoot, ['evolution']))
+}
+
+export function classifyManagedInstallation(paths) {
+  if (!existsSync(paths.dataDir)) return 'fresh'
+  if (isFreshDataDirectory(paths)) return 'fresh'
+  if (!existsSync(paths.hostRoot) || !existsSync(paths.profileRoot)
+    || !existsSync(paths.archivePath) || !statSync(paths.archivePath).isFile()) {
+    return 'incompatible'
+  }
+  try {
+    const host = inspectInstalledHost(paths.hostRoot)
+    const profile = inspectProfile(paths)
+    if (host.version === DSH_VERSION && matchesProfile(profile, DSH_VERSION, '0.0.0', renderProfilePatch(paths))) {
+      return 'current'
+    }
+    const original = matchesProfile(
+      profile,
+      PREDECESSOR_DSH_VERSION,
+      `file:${portable(paths.archivePath)}`,
+      renderOriginalRc6ProfilePatch(paths),
+    )
+    const lockedDeploy = matchesProfile(
+      profile,
+      PREDECESSOR_DSH_VERSION,
+      '0.0.0',
+      renderProfilePatch(paths),
+    )
+    return host.version === PREDECESSOR_DSH_VERSION && (original || lockedDeploy)
+      ? 'managed-rc6'
+      : 'incompatible'
+  } catch {
+    return 'incompatible'
+  }
 }
 
 function normalizeDeployedProfile(paths, profileRoot) {
@@ -399,8 +499,7 @@ function runFixed(executable, argv, { cwd, env, runner, timeout = 120_000 }) {
   return { stderr: result.stderr ?? '', stdout: result.stdout ?? '' }
 }
 
-function ensureManagedDataDir(paths) {
-  mkdirSync(paths.dataDir, { recursive: true })
+function assertManagedDataDir(paths) {
   if (process.platform !== 'win32') return
   const allowed = realpathSync('D:\\DevData')
   const actual = realpathSync(paths.dataDir)
@@ -408,6 +507,11 @@ function ensureManagedDataDir(paths) {
   if (child === '' || child.startsWith('..') || isAbsolute(child)) {
     throw new Error('--data-dir resolves outside D:\\DevData')
   }
+}
+
+function ensureManagedDataDir(paths) {
+  mkdirSync(paths.dataDir, { recursive: true })
+  assertManagedDataDir(paths)
 }
 
 export function installTianwen({
@@ -418,15 +522,26 @@ export function installTianwen({
   runner = spawnSync,
 } = {}) {
   const paths = deriveInstallPaths(dataDir, platform)
-  ensureManagedDataDir(paths)
+  const installation = classifyManagedInstallation(paths)
+  if (installation === 'incompatible') {
+    if (existsSync(paths.hostRoot) && existsSync(paths.profileRoot)) {
+      validateInstalledHost(paths.hostRoot)
+      validateProfile(paths)
+    }
+    throw new Error('existing data directory is not a complete managed Tianwen installation')
+  }
+  if (installation === 'fresh') ensureManagedDataDir(paths)
+  else assertManagedDataDir(paths)
   mkdirSync(dirname(paths.receiptPath), { recursive: true })
 
   const hostExists = existsSync(paths.hostRoot)
   const profileExists = existsSync(paths.profileRoot)
+  const migratingRc6 = installation === 'managed-rc6'
+  const hostNeedsDeploy = !hostExists || migratingRc6
   const installedArchiveDigest = previousArchiveDigest(paths)
   let dshBin
-  if (hostExists) dshBin = validateInstalledHost(paths.hostRoot)
-  if (profileExists) validateProfile(paths)
+  if (hostExists && !migratingRc6) dshBin = validateInstalledHost(paths.hostRoot)
+  if (profileExists && !migratingRc6) validateProfile(paths)
 
   const env = childEnvironment(paths, source)
   const pnpm = pnpmEntry(source)
@@ -440,21 +555,6 @@ export function installTianwen({
   if (version !== PNPM_VERSION) throw new Error(`pnpm ${PNPM_VERSION} is required, got ${version}`)
 
   invokePnpm(['install', '--offline', '--frozen-lockfile', '--ignore-scripts', '--trust-lockfile'], 300_000)
-  if (!hostExists) {
-    mkdirSync(dirname(paths.hostRoot), { recursive: true })
-    try {
-      invokePnpm([
-        '--config.inject-workspace-packages=true',
-        '--filter', '@tianwen/dsh-host',
-        'deploy', '--prod', paths.hostRoot,
-      ], 900_000)
-      dshBin = validateInstalledHost(paths.hostRoot)
-    } catch (error) {
-      rmSync(paths.hostRoot, { force: true, recursive: true })
-      throw error
-    }
-  }
-
   const packsRoot = dirname(paths.archivePath)
   const archiveStages = [randomUUID(), randomUUID()]
     .map(id => resolve(packsRoot, `.install-${process.pid}-${id}`))
@@ -465,7 +565,21 @@ export function installTianwen({
   let archivePublished = false
   let profileBackup
   let profileChanged = false
+  let hostBackup
   try {
+    if (hostNeedsDeploy) {
+      const hostsRoot = dirname(paths.hostRoot)
+      const id = `${process.pid}-${randomUUID()}`
+      hostBackup = migratingRc6 ? resolve(hostsRoot, `.dsh-host-backup-${id}`) : undefined
+      mkdirSync(hostsRoot, { recursive: true })
+      if (hostBackup !== undefined) renameSync(paths.hostRoot, hostBackup)
+      invokePnpm([
+        '--config.inject-workspace-packages=true',
+        '--filter', '@tianwen/dsh-host',
+        'deploy', '--prod', paths.hostRoot,
+      ], 900_000)
+      dshBin = validateInstalledHost(paths.hostRoot)
+    }
     for (const [index, archiveStage] of archiveStages.entries()) {
       mkdirSync(archiveStage, { recursive: true })
       invokePnpm(['--filter', `${RUNTIME_PACKAGE}...`, 'build'], 300_000)
@@ -482,7 +596,7 @@ export function installTianwen({
       throw new Error('Runtime Bundle archive is not stable across consecutive builds')
     }
     archiveDigest = archiveDigests[0]
-    profileChanged = !profileExists || installedArchiveDigest !== archiveDigest
+    profileChanged = migratingRc6 || !profileExists || installedArchiveDigest !== archiveDigest
     if (profileChanged) {
       const profilesRoot = dirname(paths.profileRoot)
       const id = `${process.pid}-${randomUUID()}`
@@ -540,6 +654,13 @@ export function installTianwen({
         // A stale backup is harmless after the archive and receipt are committed.
       }
     }
+    if (hostBackup !== undefined) {
+      try {
+        rmSync(hostBackup, { force: true, recursive: true })
+      } catch {
+        // A stale backup is harmless after the host and receipt are committed.
+      }
+    }
     return receipt
   } catch (error) {
     if (archivePublished) rmSync(paths.archivePath, { force: true })
@@ -550,6 +671,12 @@ export function installTianwen({
       rmSync(paths.profileRoot, { force: true, recursive: true })
       if (profileBackup !== undefined && existsSync(profileBackup)) {
         renameSync(profileBackup, paths.profileRoot)
+      }
+    }
+    if (hostNeedsDeploy) {
+      rmSync(paths.hostRoot, { force: true, recursive: true })
+      if (hostBackup !== undefined && existsSync(hostBackup)) {
+        renameSync(hostBackup, paths.hostRoot)
       }
     }
     throw error

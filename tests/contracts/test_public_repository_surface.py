@@ -276,6 +276,28 @@ def test_natural_run_evidence_handoff_and_ci() -> None:
         assert command in ci
 
 
+def test_managed_rc6_install_migration_handoff() -> None:
+    handoff = " ".join(
+        (
+            ROOT
+            / "docs"
+            / "operations"
+            / "tianwen-rc6-rc7-managed-install-migration-handoff.md"
+        ).read_text(encoding="utf-8").split()
+    )
+
+    for fact in (
+        "DSH `0.1.0-rc.7` remains the only product Agent Runtime",
+        "only the two complete installer-produced managed rc.6 layouts",
+        "Arbitrary versions, partial, mixed, and modified installations remain unsupported",
+        "Session and Evolution bytes are preserved",
+        "not a second Runtime or a migration framework",
+        "0 Provider requests, 0 paid tokens, 0 Docker, and no new Profile",
+        "Stage 7 Task 8 remains pending until main CI is green and the real product migration completes",
+    ):
+        assert fact in handoff
+
+
 def test_relative_links_in_public_documents_exist() -> None:
     for name in PUBLIC_DOCUMENTS:
         document = read_public_document(name)

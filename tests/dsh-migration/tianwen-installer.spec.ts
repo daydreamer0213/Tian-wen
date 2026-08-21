@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   canonicalJson,
+  classifyManagedInstallation,
   createInstallReceipt,
   deriveInstallPaths,
   installTianwen,
@@ -13,6 +14,32 @@ import {
 } from '../../scripts/install-tianwen.mjs'
 
 const testRoots: string[] = []
+const RC6 = '0.1.0-rc.6'
+
+function renderOriginalRc6ProfilePatch(paths: ReturnType<typeof deriveInstallPaths>): string {
+  return `- id: agent-default-model
+  config:
+    provider: tianwen-offline
+    model: phase2-smoke
+
+- id: session-persistence-jsonl
+  config:
+    root: '${paths.sessionsRoot.replaceAll('\\', '/')}'
+    compression: none
+    packChunks: false
+
+- id: tianwen-runtime
+  config:
+    evolutionRoot: '${paths.evolutionRoot.replaceAll('\\', '/')}'
+
+- insert:
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+
+    - id: tianwen-phase2-smoke
+      name: '@tianwen/runtime-bundle/smoke'
+`
+}
 
 function testRoot(name: string): string {
   const root = `D:\\DevData\\tianwen-installer-tests\\${name}-${crypto.randomUUID()}`
@@ -23,6 +50,54 @@ function testRoot(name: string): string {
 function writeJson(path: string, value: unknown): void {
   mkdirSync(join(path, '..'), { recursive: true })
   writeFileSync(path, `${JSON.stringify(value)}\n`, 'utf8')
+}
+
+function snapshotTree(root: string): Readonly<Record<string, string>> {
+  const entries: Record<string, string> = {}
+  const visit = (directory: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      const label = path.slice(root.length + 1).replaceAll('\\', '/')
+      if (entry.isDirectory()) {
+        entries[`directory:${label}`] = ''
+        visit(path)
+      } else if (entry.isFile()) {
+        entries[`file:${label}`] = readFileSync(path).toString('base64')
+      }
+    }
+  }
+  if (existsSync(root)) visit(root)
+  return entries
+}
+
+function writeManagedRc6Predecessor(
+  paths: ReturnType<typeof deriveInstallPaths>,
+  encoding: 'original-archive' | 'locked-deploy',
+): void {
+  installTianwen({ dataDir: paths.dataDir, runner: scriptedInstaller(paths).runner })
+  const hostManifest = join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
+  writeJson(hostManifest, { bin: { dsh: 'lib/bin.js' }, version: RC6 })
+  writeJson(join(paths.profileRoot, 'package.json'), {
+    dependencies: {
+      '@deepseek-ai/dsh-base': RC6,
+      '@deepseek-ai/dsh-headless': RC6,
+      '@tianwen/runtime-bundle': encoding === 'original-archive'
+        ? `file:${paths.archivePath.replaceAll('\\', '/')}`
+        : '0.0.0',
+    },
+    dsh: {
+      profile: {
+        bundles: [
+          '@deepseek-ai/dsh-base',
+          '@deepseek-ai/dsh-headless',
+          '@tianwen/runtime-bundle',
+        ],
+      },
+    },
+  })
+  writeFileSync(join(paths.profileRoot, 'cordis.patch.yml'),
+    encoding === 'original-archive' ? renderOriginalRc6ProfilePatch(paths) : renderProfilePatch(paths),
+    'utf8')
 }
 
 function scriptedInstaller(
@@ -219,6 +294,136 @@ describe('Tianwen installer contract', () => {
       version: '0.1.0-rc.5',
     }), 'utf8')
     expect(() => validateInstalledHost(root)).toThrow(/0\.1\.0-rc\.7/u)
+  })
+
+  it('recognizes only the two complete managed rc.6 predecessors before child effects', () => {
+    const originalPaths = deriveInstallPaths(testRoot('original-rc6'), 'win32')
+    const lockedPaths = deriveInstallPaths(testRoot('locked-rc6'), 'win32')
+    writeManagedRc6Predecessor(originalPaths, 'original-archive')
+    writeManagedRc6Predecessor(lockedPaths, 'locked-deploy')
+
+    expect(classifyManagedInstallation(originalPaths)).toBe('managed-rc6')
+    expect(classifyManagedInstallation(lockedPaths)).toBe('managed-rc6')
+
+    const incompatible = [
+      (() => {
+        const paths = deriveInstallPaths(testRoot('rc5'), 'win32')
+        writeManagedRc6Predecessor(paths, 'original-archive')
+        writeJson(join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), {
+          bin: { dsh: 'lib/bin.js' }, version: '0.1.0-rc.5',
+        })
+        return paths
+      })(),
+      (() => {
+        const paths = deriveInstallPaths(testRoot('partial'), 'win32')
+        mkdirSync(paths.dataDir, { recursive: true })
+        writeFileSync(join(paths.dataDir, 'user-sentinel'), 'unchanged\n', 'utf8')
+        return paths
+      })(),
+      (() => {
+        const paths = deriveInstallPaths(testRoot('mixed'), 'win32')
+        writeManagedRc6Predecessor(paths, 'locked-deploy')
+        const manifest = JSON.parse(readFileSync(join(paths.profileRoot, 'package.json'), 'utf8'))
+        manifest.dependencies['@deepseek-ai/dsh-base'] = '0.1.0-rc.7'
+        writeJson(join(paths.profileRoot, 'package.json'), manifest)
+        return paths
+      })(),
+      (() => {
+        const paths = deriveInstallPaths(testRoot('modified'), 'win32')
+        writeManagedRc6Predecessor(paths, 'original-archive')
+        writeFileSync(join(paths.profileRoot, 'cordis.patch.yml'), 'modified\n', 'utf8')
+        return paths
+      })(),
+      (() => {
+        const paths = deriveInstallPaths(testRoot('extra-dependency'), 'win32')
+        writeManagedRc6Predecessor(paths, 'locked-deploy')
+        const manifest = JSON.parse(readFileSync(join(paths.profileRoot, 'package.json'), 'utf8'))
+        manifest.dependencies['@example/extra'] = '1.0.0'
+        writeJson(join(paths.profileRoot, 'package.json'), manifest)
+        return paths
+      })(),
+      (() => {
+        const paths = deriveInstallPaths(testRoot('archive-directory'), 'win32')
+        writeManagedRc6Predecessor(paths, 'original-archive')
+        rmSync(paths.archivePath)
+        mkdirSync(paths.archivePath)
+        return paths
+      })(),
+    ]
+
+    for (const paths of incompatible) {
+      const before = snapshotTree(paths.dataDir)
+      const scripted = scriptedInstaller(paths)
+      expect(classifyManagedInstallation(paths)).toBe('incompatible')
+      expect(() => installTianwen({ dataDir: paths.dataDir, runner: scripted.runner })).toThrow()
+      expect(scripted.calls).toEqual([])
+      expect(snapshotTree(paths.dataDir)).toEqual(before)
+    }
+  })
+
+  it('rejects a DSH package that resolves outside its managed host root', () => {
+    const hostRoot = testRoot('linked-host')
+    const externalRoot = testRoot('external-dsh-package')
+    const packageRoot = join(externalRoot, 'dsh')
+    mkdirSync(join(packageRoot, 'lib'), { recursive: true })
+    writeFileSync(join(packageRoot, 'lib', 'bin.js'), 'export {}\n', 'utf8')
+    writeJson(join(packageRoot, 'package.json'), {
+      bin: { dsh: 'lib/bin.js' },
+      version: '0.1.0-rc.7',
+    })
+    const linkedPackage = join(hostRoot, 'node_modules', '@deepseek-ai', 'dsh')
+    mkdirSync(dirname(linkedPackage), { recursive: true })
+    symlinkSync(packageRoot, linkedPackage, 'junction')
+
+    expect(() => validateInstalledHost(hostRoot)).toThrow(/DSH package escapes its managed root/u)
+  })
+
+  it.each(['original-archive', 'locked-deploy'] as const)(
+    'migrates the complete %s rc.6 predecessor to rc.7 and replays without deploys',
+    (encoding) => {
+      const paths = deriveInstallPaths(testRoot(`migrate-${encoding}`), 'win32')
+      writeManagedRc6Predecessor(paths, encoding)
+      const session = join(paths.sessionsRoot, 'kept.jsonl')
+      const ledger = join(paths.evolutionRoot, 'ledger.jsonl')
+      mkdirSync(paths.sessionsRoot, { recursive: true })
+      mkdirSync(paths.evolutionRoot, { recursive: true })
+      writeFileSync(session, 'session bytes\n', 'utf8')
+      writeFileSync(ledger, 'ledger bytes\n', 'utf8')
+      const durableBefore = [readFileSync(session), readFileSync(ledger)]
+      const scripted = scriptedInstaller(paths)
+
+      const migrated = installTianwen({ dataDir: paths.dataDir, runner: scripted.runner })
+
+      expect(validateInstalledHost(paths.hostRoot)).toContain('bin.js')
+      expect(readFileSync(join(paths.profileRoot, 'package.json'), 'utf8')).toContain('0.1.0-rc.7')
+      expect(migrated.status).toBe('ready')
+      expect([readFileSync(session), readFileSync(ledger)]).toEqual(durableBefore)
+      expect(readdirSync(dirname(paths.hostRoot)).filter(name => name.startsWith('.dsh-host-backup-'))).toEqual([])
+      const deployCount = scripted.calls.filter(argv => argv.includes('deploy')).length
+      expect(installTianwen({ dataDir: paths.dataDir, runner: scripted.runner })).toEqual(migrated)
+      expect(scripted.calls.filter(argv => argv.includes('deploy'))).toHaveLength(deployCount)
+      expect(scripted.calls.every(argv => !argv.includes('plugin') && !argv.includes('--online'))).toBe(true)
+    },
+  )
+
+  it.each([
+    ['partial host deploy', '@tianwen/dsh-host', 'partial-host'],
+    ['failure after rc.7 host validation', 'build', 'post-host-validation'],
+  ])('restores the rc.6 installation after %s', (_label, failOn, fixtureName) => {
+    const paths = deriveInstallPaths(testRoot(`migration-rollback-${fixtureName}`), 'win32')
+    writeManagedRc6Predecessor(paths, 'original-archive')
+    const session = join(paths.sessionsRoot, 'kept.jsonl')
+    const ledger = join(paths.evolutionRoot, 'ledger.jsonl')
+    mkdirSync(paths.sessionsRoot, { recursive: true })
+    mkdirSync(paths.evolutionRoot, { recursive: true })
+    writeFileSync(session, 'session bytes\n', 'utf8')
+    writeFileSync(ledger, 'ledger bytes\n', 'utf8')
+    const before = snapshotTree(paths.dataDir)
+    const scripted = scriptedInstaller(paths, failOn)
+
+    expect(() => installTianwen({ dataDir: paths.dataDir, runner: scripted.runner })).toThrow(/scripted failure/u)
+    expect(snapshotTree(paths.dataDir)).toEqual(before)
+    expect(readdirSync(dirname(paths.hostRoot)).filter(name => name.startsWith('.dsh-host-backup-'))).toEqual([])
   })
 
   it('creates stable canonical receipt bytes without environment-specific commands', () => {
