@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -342,6 +342,13 @@ describe('Tianwen installer contract', () => {
         writeJson(join(paths.profileRoot, 'package.json'), manifest)
         return paths
       })(),
+      (() => {
+        const paths = deriveInstallPaths(testRoot('archive-directory'), 'win32')
+        writeManagedRc6Predecessor(paths, 'original-archive')
+        rmSync(paths.archivePath)
+        mkdirSync(paths.archivePath)
+        return paths
+      })(),
     ]
 
     for (const paths of incompatible) {
@@ -352,6 +359,23 @@ describe('Tianwen installer contract', () => {
       expect(scripted.calls).toEqual([])
       expect(snapshotTree(paths.dataDir)).toEqual(before)
     }
+  })
+
+  it('rejects a DSH package that resolves outside its managed host root', () => {
+    const hostRoot = testRoot('linked-host')
+    const externalRoot = testRoot('external-dsh-package')
+    const packageRoot = join(externalRoot, 'dsh')
+    mkdirSync(join(packageRoot, 'lib'), { recursive: true })
+    writeFileSync(join(packageRoot, 'lib', 'bin.js'), 'export {}\n', 'utf8')
+    writeJson(join(packageRoot, 'package.json'), {
+      bin: { dsh: 'lib/bin.js' },
+      version: '0.1.0-rc.7',
+    })
+    const linkedPackage = join(hostRoot, 'node_modules', '@deepseek-ai', 'dsh')
+    mkdirSync(dirname(linkedPackage), { recursive: true })
+    symlinkSync(packageRoot, linkedPackage, 'junction')
+
+    expect(() => validateInstalledHost(hostRoot)).toThrow(/DSH package escapes its managed root/u)
   })
 
   it.each(['original-archive', 'locked-deploy'] as const)(

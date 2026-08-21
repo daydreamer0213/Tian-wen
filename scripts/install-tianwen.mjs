@@ -194,6 +194,7 @@ function contained(root, candidate, label) {
 
 function inspectInstalledHost(hostRoot) {
   const packageRoot = resolve(hostRoot, 'node_modules', '@deepseek-ai', 'dsh')
+  contained(hostRoot, packageRoot, 'DSH package')
   const manifestPath = resolve(packageRoot, 'package.json')
   const manifest = assertPlainObject(JSON.parse(readFileSync(manifestPath, 'utf8')), 'DSH manifest')
   const bin = assertPlainObject(manifest.bin, 'DSH bin').dsh
@@ -271,7 +272,8 @@ function isFreshDataDirectory(paths) {
 export function classifyManagedInstallation(paths) {
   if (!existsSync(paths.dataDir)) return 'fresh'
   if (isFreshDataDirectory(paths)) return 'fresh'
-  if (!existsSync(paths.hostRoot) || !existsSync(paths.profileRoot) || !existsSync(paths.archivePath)) {
+  if (!existsSync(paths.hostRoot) || !existsSync(paths.profileRoot)
+    || !existsSync(paths.archivePath) || !statSync(paths.archivePath).isFile()) {
     return 'incompatible'
   }
   try {
