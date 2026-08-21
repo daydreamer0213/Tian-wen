@@ -138,6 +138,7 @@ export class TianwenLearningIntakeService extends Service {
     agent: Agent,
     input: RuntimeRunBindingInput,
     skillName: string,
+    skills: Pick<Context['skills'], 'get'>,
   ): Promise<RuntimeGovernedRunBindingReceipt> {
     const session = agent.session
     const before = sessionDigest(session.events)
@@ -151,7 +152,7 @@ export class TianwenLearningIntakeService extends Service {
       ...input,
       sessionId: String(session.id),
     })
-    const skill = await this.ctx.skills.get(skillName, {
+    const skill = await skills.get(skillName, {
       cwd: session.header.cwd,
       scope: agent,
     })

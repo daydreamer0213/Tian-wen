@@ -447,6 +447,7 @@ async function runNaturalRunTrial(
           readonly taskRef: string
         },
         skillName: string,
+        skills: Pick<Context['skills'], 'get'>,
       ): Promise<{ readonly runId: `run:${string}` }>
       consumeOutcome(session: Session, runId: `run:${string}`): {
         readonly acceptanceEvidenceId?: `sha256:${string}`
@@ -488,14 +489,14 @@ async function runNaturalRunTrial(
       const beforeBinding = sessionDigest(handle.agent.session.events)
       let binding: { readonly runId: `run:${string}` } | undefined
       try {
-        await ctx.inject(['skills'], async () => {
+        await ctx.inject(['skills'], async injectedCtx => {
           binding = await learning.bindRunWithSkill(handle.agent, {
             goalRef: `dsh-goal:${String(current.id)}@${current.revision}`,
             taskRef: trial.manifest.taskRef,
             scopeKey: trial.manifest.scopeKey,
             acceptanceContract: trial.manifest.acceptanceContract,
             acceptanceSubjectDigest: trial.acceptanceSubjectDigest,
-          }, trial.manifest.parentSkillName)
+          }, trial.manifest.parentSkillName, injectedCtx.skills)
         })
       } catch (error) {
         failureCode = runSkillBindingFailureCode(error) ?? 'pre-turn-internal-error'

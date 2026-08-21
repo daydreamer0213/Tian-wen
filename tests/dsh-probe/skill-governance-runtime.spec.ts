@@ -15,7 +15,7 @@ import {
   waitForIdle,
 } from '@tianwen/dsh-compat'
 import type { Session } from '@tianwen/dsh-compat'
-import { apply } from '../../packages/tianwen-runtime/src/index.js'
+import * as TianwenRuntime from '../../packages/tianwen-runtime/src/index.js'
 
 const roots: string[] = []
 const parent = {
@@ -62,7 +62,10 @@ async function mount(script: Parameters<typeof mountCoreHarness>[0]) {
   await harness.ctx.plugin(SkillRegistry)
   await harness.ctx.plugin(applySkillTool)
   await harness.ctx.plugin(DynamicCordisRunnerService, {})
-  await apply(harness.ctx, { evolutionRoot: root() })
+  const runtime = harness.ctx.isolate('skills')
+  await runtime.inject(['dynamicCordisRunner'], async runtimeCtx => {
+    await runtimeCtx.plugin(TianwenRuntime, { evolutionRoot: root() })
+  })
   harness.ctx.tools.register(defineTool({
     name: 'verify_summary',
     description: 'verify a deterministic summary',
@@ -73,7 +76,7 @@ async function mount(script: Parameters<typeof mountCoreHarness>[0]) {
     },
     async execute() { return 'accepted' },
   }))
-  return harness
+  return { ...harness, runtime }
 }
 
 afterEach(() => {
@@ -100,23 +103,26 @@ describe('Tianwen governed Skill runtime intake', () => {
       agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
     })
     try {
-      const binding = await harness.ctx.tianwenLearningIntake.bindRunWithSkill(
+      const binding = await harness.runtime.tianwenLearningIntake.bindRunWithSkill(
         handle.agent,
         input('success'),
         parent.name,
+        harness.ctx.skills,
       )
       expect(binding).toMatchObject({ sessionUnchanged: true, duplicate: false })
       expect(binding.parentVersionId).toMatch(/^skill-version:[a-f0-9]{64}$/u)
+      expect(harness.runtime.tianwenEvolution.getRunBinding(binding.runId)).toBeDefined()
+      expect(harness.runtime.tianwenEvolution.listRunSkillManifests()).toHaveLength(1)
       handle.agent.followup(createUserMessage({
         content: [{ type: 'text', text: 'load and verify the summary' }],
         source: { kind: 'user' },
       }))
       await waitForIdle(harness.ctx, handle.agent)
-      expect(harness.ctx.tianwenLearningIntake.consumeOutcome(
+      expect(harness.runtime.tianwenLearningIntake.consumeOutcome(
         handle.agent.session,
         binding.runId,
       )).toMatchObject({ decision: 'no-case', sessionUnchanged: true })
-      const receipt = harness.ctx.tianwenLearningIntake.recordSkillUse(
+      const receipt = harness.runtime.tianwenLearningIntake.recordSkillUse(
         handle.agent.session,
         binding.runId,
       )
@@ -127,7 +133,7 @@ describe('Tianwen governed Skill runtime intake', () => {
         skillCallSeq: calls[1]!.seq,
         sessionUnchanged: true,
       })
-      expect(harness.ctx.tianwenEvolution.listRunSkillUses()).toHaveLength(1)
+      expect(harness.runtime.tianwenEvolution.listRunSkillUses()).toHaveLength(1)
       expect(define).not.toHaveBeenCalled()
       expect(run).not.toHaveBeenCalled()
       expect(stop).not.toHaveBeenCalled()
@@ -145,10 +151,11 @@ describe('Tianwen governed Skill runtime intake', () => {
       agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
     })
     try {
-      await expect(harness.ctx.tianwenLearningIntake.bindRunWithSkill(
+      await expect(harness.runtime.tianwenLearningIntake.bindRunWithSkill(
         handle.agent,
         input('unknown'),
         'unknown-skill',
+        harness.ctx.skills,
       )).rejects.toMatchObject({
         code: 'skill-unavailable', message: expect.stringMatching(/unknown DSH Skill/i),
       })
@@ -157,10 +164,11 @@ describe('Tianwen governed Skill runtime intake', () => {
         name: 'non-model-skill',
         invocation: { modelInvocable: false, userInvocable: true },
       })
-      await expect(harness.ctx.tianwenLearningIntake.bindRunWithSkill(
+      await expect(harness.runtime.tianwenLearningIntake.bindRunWithSkill(
         handle.agent,
         input('non-model'),
         'non-model-skill',
+        harness.ctx.skills,
       )).rejects.toMatchObject({
         code: 'skill-not-model-invocable', message: expect.stringMatching(/not model-invocable/i),
       })
@@ -170,18 +178,20 @@ describe('Tianwen governed Skill runtime intake', () => {
         name: 'sidecar-skill',
         resourceBase: { kind: 'url', url: 'https://invalid.test' },
       })
-      await expect(harness.ctx.tianwenLearningIntake.bindRunWithSkill(
+      await expect(harness.runtime.tianwenLearningIntake.bindRunWithSkill(
         handle.agent,
         input('sidecar'),
         'sidecar-skill',
+        harness.ctx.skills,
       )).rejects.toMatchObject({ code: 'run-binding-precondition-failed' })
       disposeSidecar()
-      expect(harness.ctx.tianwenEvolution.listRunSkillManifests()).toEqual([])
+      expect(harness.runtime.tianwenEvolution.listRunSkillManifests()).toEqual([])
       handle.agent.session.append('turn/start', { turn: 1 })
-      await expect(harness.ctx.tianwenLearningIntake.bindRunWithSkill(
+      await expect(harness.runtime.tianwenLearningIntake.bindRunWithSkill(
         handle.agent,
         input('late'),
         parent.name,
+        harness.ctx.skills,
       )).rejects.toMatchObject({
         code: 'run-binding-precondition-failed',
         message: expect.stringMatching(/before the first DSH Turn/i),
@@ -201,11 +211,11 @@ describe('Tianwen governed Skill runtime intake', () => {
       agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
     })
     try {
-      vi.spyOn(runHarness.ctx.tianwenEvolution, 'recordRunBinding').mockImplementation(() => {
+      vi.spyOn(runHarness.runtime.tianwenEvolution, 'recordRunBinding').mockImplementation(() => {
         throw source
       })
-      await expect(runHarness.ctx.tianwenLearningIntake.bindRunWithSkill(
-        runHandle.agent, input('persistence-run'), parent.name,
+      await expect(runHarness.runtime.tianwenLearningIntake.bindRunWithSkill(
+        runHandle.agent, input('persistence-run'), parent.name, runHarness.ctx.skills,
       )).rejects.toMatchObject({ code: 'run-binding-persistence-failed', cause: source })
     } finally {
       await runHandle.dispose()
@@ -220,11 +230,11 @@ describe('Tianwen governed Skill runtime intake', () => {
       agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
     })
     try {
-      vi.spyOn(manifestHarness.ctx.tianwenEvolution, 'recordRunSkillManifest').mockImplementation(() => {
+      vi.spyOn(manifestHarness.runtime.tianwenEvolution, 'recordRunSkillManifest').mockImplementation(() => {
         throw source
       })
-      await expect(manifestHarness.ctx.tianwenLearningIntake.bindRunWithSkill(
-        manifestHandle.agent, input('persistence-manifest'), parent.name,
+      await expect(manifestHarness.runtime.tianwenLearningIntake.bindRunWithSkill(
+        manifestHandle.agent, input('persistence-manifest'), parent.name, manifestHarness.ctx.skills,
       )).rejects.toMatchObject({ code: 'run-binding-persistence-failed', cause: source })
     } finally {
       await manifestHandle.dispose()
@@ -246,20 +256,21 @@ describe('Tianwen governed Skill runtime intake', () => {
       return parent
     })
     const bindingWrite = vi.spyOn(
-      harness.ctx.tianwenEvolution,
+      harness.runtime.tianwenEvolution,
       'recordRunBinding',
     )
     try {
-      const pending = harness.ctx.tianwenLearningIntake.bindRunWithSkill(
+      const pending = harness.runtime.tianwenLearningIntake.bindRunWithSkill(
         handle.agent,
         input('race'),
         parent.name,
+        harness.ctx.skills,
       )
       handle.agent.session.append('turn/start', { turn: 1 })
       release()
       await expect(pending).rejects.toThrow(/before the first DSH Turn/i)
       expect(bindingWrite).not.toHaveBeenCalled()
-      expect(harness.ctx.tianwenEvolution.listRunSkillManifests()).toEqual([])
+      expect(harness.runtime.tianwenEvolution.listRunSkillManifests()).toEqual([])
     } finally {
       await handle.dispose()
       await harness.ctx.fiber.dispose()
@@ -278,17 +289,18 @@ describe('Tianwen governed Skill runtime intake', () => {
       agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
     })
     try {
-      const binding = await harness.ctx.tianwenLearningIntake.bindRunWithSkill(
+      const binding = await harness.runtime.tianwenLearningIntake.bindRunWithSkill(
         handle.agent,
         input('no-proof'),
         parent.name,
+        harness.ctx.skills,
       )
       handle.agent.followup(createUserMessage({
         content: [{ type: 'text', text: 'load and verify the summary' }],
         source: { kind: 'user' },
       }))
       await waitForIdle(harness.ctx, handle.agent)
-      harness.ctx.tianwenLearningIntake.consumeOutcome(
+      harness.runtime.tianwenLearningIntake.consumeOutcome(
         handle.agent.session,
         binding.runId,
       )
@@ -305,11 +317,11 @@ describe('Tianwen governed Skill runtime intake', () => {
         header: handle.agent.session.header,
         events: alteredEvents,
       } as unknown as Session
-      expect(harness.ctx.tianwenLearningIntake.recordSkillUse(
+      expect(harness.runtime.tianwenLearningIntake.recordSkillUse(
         alteredSession,
         binding.runId,
       )).toEqual({ decision: 'no-use-proof', sessionUnchanged: true })
-      expect(harness.ctx.tianwenEvolution.listRunSkillUses()).toEqual([])
+      expect(harness.runtime.tianwenEvolution.listRunSkillUses()).toEqual([])
     } finally {
       await handle.dispose()
       disposeParent()

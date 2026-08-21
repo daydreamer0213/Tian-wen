@@ -154,6 +154,7 @@ export async function runGovernedSkillCandidateDemo(): Promise<GovernedCandidate
           acceptanceContract: acceptance,
         },
         parentSkill.name,
+        harness.ctx.skills,
       )
       bindings.push(binding)
       handle.agent.followup(createUserMessage({

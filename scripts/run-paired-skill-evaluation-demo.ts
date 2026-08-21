@@ -231,6 +231,7 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
           acceptanceContract: acceptance,
         },
         parentSkill.name,
+        harness.ctx.skills,
       )
       bindings.push(binding)
       handle.agent.followup(createUserMessage({

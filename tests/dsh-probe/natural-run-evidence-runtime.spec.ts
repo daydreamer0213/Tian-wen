@@ -371,6 +371,34 @@ describe('natural DSH Run trial runtime', () => {
     }
   })
 
+  it('passes the injected Skill registry to pre-Turn binding without resuming the Goal', async () => {
+    const mounted = await mountNaturalGoal([textResponse('must stay unused')])
+    const manifestPath = writeManifest(manifest({ goalId: String(mounted.goal.id) }))
+    const trial = readNaturalRunTrialManifest(manifestPath)
+    const injectedSkills = Object.freeze({ get: vi.fn() })
+    const injectedCtx = mounted.harness.ctx.extend({ skills: injectedSkills })
+    let receivedSkills: unknown
+    try {
+      vi.spyOn(mounted.harness.ctx, 'inject').mockImplementation(((_dependencies, callback) =>
+        Promise.resolve(callback(injectedCtx))) as never)
+      vi.spyOn(mounted.harness.ctx.tianwenLearningIntake, 'bindRunWithSkill')
+        .mockImplementation(async (...args) => {
+          receivedSkills = args[3]
+          throw Object.assign(new Error('missing parent Skill'), { code: 'skill-unavailable' })
+        })
+      const resume = vi.spyOn(mounted.harness.ctx.goals, 'resume')
+      const receipt = await runGoalResume(
+        mounted.harness.ctx, trialConfig(mounted, trial, manifestPath),
+      )
+      await expectPreTurnFailure(mounted, receipt, 'skill-unavailable')
+      expect(receivedSkills).toBe(injectedSkills)
+      expect(resume).not.toHaveBeenCalled()
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
   it('binds before the first Turn, consumes final Evidence, and keeps no Skill use as a legal outcome', async () => {
     const mounted = await mountNaturalGoal([
       toolCallResponse('verify-final', 'verify_summary', {
