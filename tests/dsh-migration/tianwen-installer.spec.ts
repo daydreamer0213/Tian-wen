@@ -1,9 +1,11 @@
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   canonicalJson,
   classifyManagedInstallation,
+  createInstallerFailureReceipt,
   createInstallReceipt,
   deriveInstallPaths,
   installTianwen,
@@ -70,6 +72,25 @@ function snapshotTree(root: string): Readonly<Record<string, string>> {
   return entries
 }
 
+function failureReceipt(operation: () => unknown) {
+  try {
+    operation()
+  } catch (error) {
+    return createInstallerFailureReceipt(error)
+  }
+  throw new Error('expected installer failure')
+}
+
+function scriptedFailure(
+  name: string,
+  failOn?: string,
+  archiveBytes?: string | readonly string[],
+) {
+  const paths = deriveInstallPaths(testRoot(name), 'win32')
+  const scripted = scriptedInstaller(paths, failOn, archiveBytes)
+  return () => installTianwen({ dataDir: paths.dataDir, runner: scripted.runner })
+}
+
 function writeManagedRc6Predecessor(
   paths: ReturnType<typeof deriveInstallPaths>,
   encoding: 'original-archive' | 'locked-deploy',
@@ -110,6 +131,8 @@ function scriptedInstaller(
   const childEnvironments: NodeJS.ProcessEnv[] = []
   const executables: string[] = []
   const spawnOptions: { shell: boolean, timeout: number }[] = []
+  const packedArchives: string[] = []
+  let buildOrdinal = 0
   let packOrdinal = 0
   const runner = (executable: string, argv: string[], options: {
     env: NodeJS.ProcessEnv
@@ -120,9 +143,17 @@ function scriptedInstaller(
     childEnvironments.push(options.env)
     executables.push(executable)
     calls.push([...argv])
-    const failed = failOn !== undefined && argv.includes(failOn)
+    const stageFailure = (failOn === 'runtime-bundle-build-1' && argv.includes('build') && buildOrdinal++ === 0)
+      || (failOn === 'runtime-bundle-build-2' && argv.includes('build') && buildOrdinal++ === 1)
+      || (failOn === 'runtime-bundle-pack-1' && argv.includes('pack') && packOrdinal === 0)
+      || (failOn === 'runtime-bundle-pack-2' && argv.includes('pack') && packOrdinal === 1)
+    const failed = (failOn !== undefined && argv.includes(failOn)) || stageFailure
     spawnOptions.push({ shell: options.shell, timeout: options.timeout })
-    if (argv[1] === '--version') return { status: 0, stderr: '', stdout: '11.20.0\n' }
+    if (argv[1] === '--version') {
+      return failed
+        ? { status: 12, stderr: 'scripted failure', stdout: '' }
+        : { status: 0, stderr: '', stdout: '11.20.0\n' }
+    }
     if (argv.includes('deploy') && argv.includes('@tianwen/dsh-host')) {
       const destination = argv.at(-1)!
       const packageRoot = join(destination, 'node_modules', '@deepseek-ai', 'dsh')
@@ -144,7 +175,9 @@ function scriptedInstaller(
       expect(destination).toBeTypeOf('string')
       expect(bytes).toBeTypeOf('string')
       mkdirSync(destination!, { recursive: true })
-      writeFileSync(join(destination!, 'tianwen-runtime-bundle-0.0.0.tgz'), bytes!, 'utf8')
+      const archive = join(destination!, 'tianwen-runtime-bundle-0.0.0.tgz')
+      packedArchives.push(archive)
+      writeFileSync(archive, bytes!, 'utf8')
     }
     if (argv.includes('deploy') && argv.includes('@tianwen/profile-host')) {
       const destination = argv.at(-1)!
@@ -167,7 +200,9 @@ function scriptedInstaller(
       const runtimeRoot = join(destination, 'node_modules', '@tianwen', 'runtime-bundle')
       mkdirSync(join(runtimeRoot, 'dist'), { recursive: true })
       writeFileSync(join(runtimeRoot, 'dist', 'runtime.js'), 'export default {}\n', 'utf8')
-      writeFileSync(join(runtimeRoot, 'dist', 'cli.js'), 'export {}\n', 'utf8')
+      if (failOn !== 'managed-profile-validation') {
+        writeFileSync(join(runtimeRoot, 'dist', 'cli.js'), 'export {}\n', 'utf8')
+      }
       const binDir = join(destination, 'node_modules', '.bin')
       mkdirSync(binDir, { recursive: true })
       writeFileSync(join(binDir, 'tianwen.CMD'), '@echo off\r\n', 'utf8')
@@ -181,6 +216,11 @@ function scriptedInstaller(
     }
     if (failed) return { status: 12, stderr: 'scripted failure', stdout: '' }
     if (argv.includes('--dump-config')) {
+      if (failOn === 'archive-publication') rmSync(packedArchives[0]!, { force: true })
+      if (failOn === 'receipt-publication') mkdirSync(paths.receiptPath)
+      if (failOn === 'dsh-config-validation') {
+        return { status: 0, stderr: '', stdout: 'invalid dump\n' }
+      }
       const sessionsRoot = dumpOptions.sessionsRoot ?? paths.sessionsRoot
       const renderedSessionsRoot = sessionsRoot.replaceAll('\\', '/')
       return {
@@ -214,6 +254,77 @@ afterEach(() => {
 })
 
 describe('Tianwen installer contract', () => {
+  it('emits only a stage-only safe receipt for a JSON parser failure', () => {
+    const installer = resolve('scripts', 'install-tianwen.mjs')
+    const secret = 'credential-sentinel-do-not-emit'
+    const json = spawnSync(process.execPath, [
+      installer,
+      '--json',
+      '--data-dir', 'D:\\DevData\\tianwen',
+      `--${secret}`,
+    ], { encoding: 'utf8' })
+    const plain = spawnSync(process.execPath, [
+      installer,
+      '--data-dir', 'D:\\DevData\\tianwen',
+      `--${secret}`,
+    ], { encoding: 'utf8' })
+
+    expect(json.status).toBe(1)
+    expect(json.stdout).toBe(canonicalJson({
+      schemaVersion: 'tianwen.install-failure.v1',
+      status: 'failed',
+      stage: 'managed-layout-preflight',
+    }))
+    expect(json.stderr).toBe('')
+    expect(plain.status).toBe(1)
+    expect(plain.stdout).toBe('')
+    expect(plain.stderr).toBe('Tianwen installer failed at managed-layout-preflight.\n')
+    expect(`${json.stdout}${json.stderr}${plain.stdout}${plain.stderr}`).not.toContain(secret)
+  })
+
+  it('maps every remaining installer boundary to a closed safe stage', () => {
+    const secret = 'credential-sentinel-do-not-emit'
+    const missingEntryRoot = testRoot('missing-pnpm-entry')
+    const missingEntryPaths = deriveInstallPaths(missingEntryRoot, 'win32')
+    const missingEntry = scriptedInstaller(missingEntryPaths)
+    const observed = [
+      failureReceipt(() => installTianwen({
+        dataDir: missingEntryRoot,
+        env: { ...process.env, npm_execpath: join(missingEntryRoot, 'pnpm.js') },
+        runner: missingEntry.runner,
+      })),
+      failureReceipt(scriptedFailure('pnpm-version', '--version')),
+      failureReceipt(scriptedFailure('workspace-install', 'install')),
+      failureReceipt(scriptedFailure('host-deploy', '@tianwen/dsh-host')),
+      failureReceipt(scriptedFailure('build-one', 'runtime-bundle-build-1')),
+      failureReceipt(scriptedFailure('pack-one', 'runtime-bundle-pack-1')),
+      failureReceipt(scriptedFailure('build-two', 'runtime-bundle-build-2')),
+      failureReceipt(scriptedFailure('pack-two', 'runtime-bundle-pack-2')),
+      failureReceipt(scriptedFailure('archive-stability', undefined, ['archive one\n', 'archive two\n'])),
+      failureReceipt(scriptedFailure('profile-deploy', '@tianwen/profile-host')),
+      failureReceipt(scriptedFailure('profile-validation', 'managed-profile-validation')),
+      failureReceipt(scriptedFailure('dsh-config', 'dsh-config-validation')),
+      failureReceipt(scriptedFailure('archive-publication', 'archive-publication')),
+      failureReceipt(scriptedFailure('receipt-publication', 'receipt-publication')),
+      createInstallerFailureReceipt(new Error(secret)),
+    ]
+    const expectedStages = [
+      'pnpm-entry-preflight', 'pnpm-version', 'workspace-install',
+      'managed-host-deploy', 'runtime-bundle-build-1', 'runtime-bundle-pack-1',
+      'runtime-bundle-build-2', 'runtime-bundle-pack-2', 'archive-stability',
+      'managed-profile-deploy', 'managed-profile-validation',
+      'dsh-config-validation', 'archive-publication', 'receipt-publication',
+      'installer-internal',
+    ]
+
+    expect(observed).toEqual(expectedStages.map(stage => ({
+      schemaVersion: 'tianwen.install-failure.v1',
+      status: 'failed',
+      stage,
+    })))
+    expect(JSON.stringify(observed)).not.toContain(secret)
+  })
+
   it('accepts only a data directory and optional JSON output', () => {
     expect(parseInstallerArgs(['--data-dir', 'D:\\DevData\\tianwen', '--json']))
       .toEqual({ dataDir: 'D:\\DevData\\tianwen', json: true })

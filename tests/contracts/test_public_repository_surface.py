@@ -306,6 +306,29 @@ def test_managed_rc6_install_migration_handoff() -> None:
         assert fact in handoff
 
 
+def test_installer_safe_failure_stage_receipt_handoff_and_ci() -> None:
+    handoff = " ".join(
+        (
+            ROOT
+            / "docs"
+            / "operations"
+            / "tianwen-rc6-rc7-managed-install-migration-handoff.md"
+        ).read_text(encoding="utf-8").split()
+    )
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "tests/dsh-migration/tianwen-installer.spec.ts" in ci
+    for fact in (
+        "non-persistent closed safe receipt",
+        "does not preserve raw child diagnostics",
+        "does not prove durable-data equality",
+        "reports its stage and stops",
+        "only successful migration can precede the separately authorized same Goal/manifest configured-Provider resume",
+        "installer-internal",
+    ):
+        assert fact in handoff
+
+
 def test_relative_links_in_public_documents_exist() -> None:
     for name in PUBLIC_DOCUMENTS:
         document = read_public_document(name)

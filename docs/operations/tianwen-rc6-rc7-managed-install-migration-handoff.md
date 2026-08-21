@@ -61,3 +61,19 @@ no timeout; every other child command remains bounded. A real rc.7 migration,
 and the later configured-Provider natural Run evidence, remain pending and
 require their separately authorized operational steps. This correction does not
 authorize a retry by itself.
+
+## Safe installer failure stage receipt
+
+For a failed `--json` install, the installer writes only a non-persistent
+closed safe receipt containing its schema version, failed status, and closed
+stage token. It does not preserve raw child diagnostics and does not prove
+durable-data equality; operators must continue to use before-and-after
+durable snapshots for that evidence. If rollback itself throws, the only safe
+stage is `installer-internal` and the operation stops.
+
+After exact-main CI carries the installer contract, one separately authorized
+official offline installer attempt may use this receipt. A failure reports its
+stage and stops: only successful migration can precede the separately
+authorized same Goal/manifest configured-Provider resume. It adds no retry,
+ordinary-resume fallback, raw-output retrieval, repair step, price activity,
+or another Provider attempt.
