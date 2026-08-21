@@ -149,7 +149,9 @@ describe('Tianwen governed Skill runtime intake', () => {
         handle.agent,
         input('unknown'),
         'unknown-skill',
-      )).rejects.toThrow(/unknown DSH Skill/i)
+      )).rejects.toMatchObject({
+        code: 'skill-unavailable', message: expect.stringMatching(/unknown DSH Skill/i),
+      })
       const disposeNonModel = harness.ctx.skills.register({
         ...parent,
         name: 'non-model-skill',
@@ -159,7 +161,9 @@ describe('Tianwen governed Skill runtime intake', () => {
         handle.agent,
         input('non-model'),
         'non-model-skill',
-      )).rejects.toThrow(/not model-invocable/i)
+      )).rejects.toMatchObject({
+        code: 'skill-not-model-invocable', message: expect.stringMatching(/not model-invocable/i),
+      })
       disposeNonModel()
       const disposeSidecar = harness.ctx.skills.register({
         ...parent,
@@ -170,7 +174,7 @@ describe('Tianwen governed Skill runtime intake', () => {
         handle.agent,
         input('sidecar'),
         'sidecar-skill',
-      )).rejects.toThrow()
+      )).rejects.toMatchObject({ code: 'run-binding-precondition-failed' })
       disposeSidecar()
       expect(harness.ctx.tianwenEvolution.listRunSkillManifests()).toEqual([])
       handle.agent.session.append('turn/start', { turn: 1 })
@@ -178,10 +182,54 @@ describe('Tianwen governed Skill runtime intake', () => {
         handle.agent,
         input('late'),
         parent.name,
-      )).rejects.toThrow(/before the first DSH Turn/i)
+      )).rejects.toMatchObject({
+        code: 'run-binding-precondition-failed',
+        message: expect.stringMatching(/before the first DSH Turn/i),
+      })
     } finally {
       await handle.dispose()
       await harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('classifies unknown Evolution binding writes without exposing their causes', async () => {
+    const source = new Error('D:/private/sk-run-binding-cause-DO-NOT-LEAK')
+    const runHarness = await mount([textResponse('unused')])
+    const runParent = runHarness.ctx.skills.register(parent)
+    const runHandle = await runHarness.ctx.agents.create({
+      sessionId: SessionId(`skill-persistence-run-${randomUUID()}`),
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      vi.spyOn(runHarness.ctx.tianwenEvolution, 'recordRunBinding').mockImplementation(() => {
+        throw source
+      })
+      await expect(runHarness.ctx.tianwenLearningIntake.bindRunWithSkill(
+        runHandle.agent, input('persistence-run'), parent.name,
+      )).rejects.toMatchObject({ code: 'run-binding-persistence-failed', cause: source })
+    } finally {
+      await runHandle.dispose()
+      runParent()
+      await runHarness.ctx.fiber.dispose()
+    }
+
+    const manifestHarness = await mount([textResponse('unused')])
+    const manifestParent = manifestHarness.ctx.skills.register(parent)
+    const manifestHandle = await manifestHarness.ctx.agents.create({
+      sessionId: SessionId(`skill-persistence-manifest-${randomUUID()}`),
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      vi.spyOn(manifestHarness.ctx.tianwenEvolution, 'recordRunSkillManifest').mockImplementation(() => {
+        throw source
+      })
+      await expect(manifestHarness.ctx.tianwenLearningIntake.bindRunWithSkill(
+        manifestHandle.agent, input('persistence-manifest'), parent.name,
+      )).rejects.toMatchObject({ code: 'run-binding-persistence-failed', cause: source })
+    } finally {
+      await manifestHandle.dispose()
+      manifestParent()
+      await manifestHarness.ctx.fiber.dispose()
     }
   })
 
