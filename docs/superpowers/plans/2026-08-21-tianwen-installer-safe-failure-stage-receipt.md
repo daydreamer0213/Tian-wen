@@ -24,24 +24,23 @@ offline workspace tooling and existing D-drive store.
 
 - Canonical design:
   docs/superpowers/specs/2026-08-21-tianwen-installer-safe-failure-stage-receipt-design.md.
-- Base main: acd1feff8da1db0786430ecc84615ab6a9a35212.
+- Base main for this native-Windows amendment:
+  25e7fe895b66a939579107a042253580e8f89cd1.
 - The execution order supplies the exact commit containing this plan. Stop if
   local, tracking and remote do not agree on it.
-- Implementation branch:
-  codex/tianwen-installer-safe-failure-stage-receipt.
+- Amendment implementation branch:
+  codex/tianwen-installer-windows-ci-contract.
 - DSH 0.1.0-rc.7 remains the sole product Agent Runtime.
-- Product implementation scope is limited to:
-  - scripts/install-tianwen.mjs
-  - tests/dsh-migration/tianwen-installer.spec.ts
-  - .github/workflows/ci.yml for one appended focused-Vitest path only
-  - docs/operations/tianwen-rc6-rc7-managed-install-migration-handoff.md
-  - tests/contracts/test_public_repository_surface.py only for the permanent
-    public handoff statement.
+- The historical safe-receipt scope is retained below only as a record. This
+  native-Windows amendment's implementation scope is exactly:
+  - `.github/workflows/ci.yml`; and
+  - `tests/contracts/test_public_repository_surface.py`.
 - Do not modify packages, lockfiles, dependencies, Runtime services, Profile
-  schema, ledger, learning paths, Provider paths or price/budget code. The only
-  workflow change is appending tests/dsh-migration/tianwen-installer.spec.ts to
-  the existing single focused Vitest command: no job, step, permission, cache,
-  dependency or policy change.
+  schema, ledger, learning paths, Provider paths or price/budget code. This
+  amendment permits exactly one native-Windows workflow job and removal of the
+  installer spec from the Ubuntu focused command; it adds no matrix, Docker,
+  WSL, self-hosted runner, product filesystem adapter, retry, telemetry or
+  workflow-policy change.
 - Reuse the sole approved D-drive implementation worktree, node_modules and
   D-drive stores. Do not install, download, relink, create a second worktree,
   clone, node_modules, .venv, Profile or probe, or clean unknown data.
@@ -53,6 +52,219 @@ offline workspace tooling and existing D-drive store.
   mechanism, timeout/watchdog, budget system, price query or price snapshot.
 - A failed gate outside the documented RED work is a stop line: preserve it,
   report it, and do not force a later task or operational installer.
+
+## Native-Windows CI amendment
+
+This amendment supersedes the prior plan's exact-main CI-bearing portions of
+Tasks 3–7. It does not reopen the implemented safe failure-receipt behavior,
+the managed installation transaction, or the existing Windows fixture helper.
+It records the smallest truthful response to the two exact Linux CI records:
+
+- `32492058264`: the fixture omitted its Windows platform identity; and
+- `32493142651`: supplying that identity changed only derived paths, while
+  host filesystem, `path`/`realpath`, `process.execPath`, and Corepack still
+  remained Linux truth.
+
+The approved answer is one native Windows job, not a production virtual
+filesystem/path adapter, a POSIX fixture that claims Windows proof, or further
+individual pnpm/path injections.
+
+### Amendment workspace setup and baseline stop gate
+
+**Files:** none.
+
+- [ ] **Step 1: Establish exact amendment state**
+
+  Reuse `D:\DevData\tianwen-worktrees\tianwen-explicit-feedback-intake`.
+  Require a clean worktree and verify exact main, amendment branch, local,
+  tracking, and `git ls-remote` identities before edits. Require the existing
+  `node_modules/.modules.yaml`; do not install or relink. Set only:
+
+      $env:pnpm_config_verify_deps_before_run = 'false'
+
+  Confirm plan-designated fixture roots are zero files/zero bytes. Do not
+  inspect product roots, existing Goals/manifests, credentials, Provider
+  configuration, or model selection.
+
+- [ ] **Step 2: Baseline platform-independent gates**
+
+      pnpm --filter @tianwen/runtime... build
+      pnpm --filter @tianwen/runtime-bundle... build
+      pnpm run typecheck
+      pnpm run check:dsh-install
+      pnpm run check:no-private-dsh-imports
+
+  On the native Windows implementation host, also establish the existing
+  installer contract baseline:
+
+      pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts
+
+  Expect the existing 29 installer tests to pass locally. Do not treat that
+  result as a Linux substitute; the two exact CI records above remain the RED
+  evidence for moving the bearing path.
+
+### Amendment Task 1: RED — pin the native Windows boundary
+
+**Files:**
+
+- Modify: `tests/contracts/test_public_repository_surface.py`
+
+- [ ] **Step 1: Extend the static public contract first**
+
+  Make the existing public repository contract fail until the workflow proves:
+
+  1. a job named `installer-windows` exists with
+     `runs-on: windows-latest`;
+  2. that job contains checkout, pnpm setup at `11.20.0`, Node `22.20.0`
+     setup with the pnpm cache, frozen install, and one Windows installer
+     contract step;
+  3. that step uses `pwsh`, conditionally runs
+     `subst.exe D: $env:RUNNER_TEMP` when `D:` is absent, creates
+     `D:\DevData`, and runs exactly
+     `pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts`; and
+  4. the installer spec path is absent from the Ubuntu TypeScript focused
+     Vitest command.
+
+  Assertions must remain mechanical and structural: they prevent the contract
+  being silently reinserted into Ubuntu, without adding a generic workflow
+  parser or policy framework. They also reject personal absolute paths and
+  unfinished-placeholder text in the amended public workflow contract.
+
+- [ ] **Step 2: Record RED**
+
+  With the existing approved Python only, run:
+
+      & $existingPython -m pytest tests/contracts/test_public_repository_surface.py
+
+  Expected RED: current workflow lacks the native job and still includes the
+  installer spec in the Ubuntu focused command. If that Python is unavailable,
+  record only that local fact; do not create or synchronize an environment.
+  An unrelated failure is a stop line.
+
+### Amendment Task 2: GREEN — one native Windows job only
+
+**Files:**
+
+- Modify: `.github/workflows/ci.yml`
+
+- [ ] **Step 1: Remove the one Ubuntu reference**
+
+  Remove only `tests/dsh-migration/tianwen-installer.spec.ts` from the existing
+  TypeScript focused Vitest command. Preserve the rest of that command, job,
+  demos, permissions, cache, dependencies, action versions, and order.
+
+- [ ] **Step 2: Add the independent native job**
+
+  Add exactly one `installer-windows` job with `runs-on: windows-latest`. It
+  has exactly these normal steps: `actions/checkout@v7`,
+  `pnpm/action-setup@v4` at `11.20.0`, `actions/setup-node@v7` at `22.20.0`
+  with pnpm cache, `pnpm install --frozen-lockfile`, and one named installer
+  contract step with `shell: pwsh`.
+
+  The contract step uses the following control flow, preserving the Vitest
+  exit status and removing only a mapping it created:
+
+  ```powershell
+  $mappedDrive = $false
+  if (-not (Test-Path -LiteralPath 'D:\')) {
+    & subst.exe D: $env:RUNNER_TEMP
+    if ($LASTEXITCODE -ne 0) { throw 'temporary D: mapping failed' }
+    $mappedDrive = $true
+  }
+  $testExit = 0
+  try {
+    New-Item -ItemType Directory -Force -Path 'D:\DevData' | Out-Null
+    pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts
+    $testExit = $LASTEXITCODE
+  } finally {
+    if ($mappedDrive) { & subst.exe D: /D }
+  }
+  exit $testExit
+  ```
+
+  `D:` mapping is ephemeral runner infrastructure, not product storage or
+  installation policy. It must not create a product Profile, mount a product
+  root, add a matrix, timeout, retry, telemetry, or change product code.
+
+- [ ] **Step 3: Focused GREEN and narrow commit**
+
+      & $existingPython -m pytest tests/contracts/test_public_repository_surface.py
+      git diff --check
+
+  Expected: the static contract passes and proves the installer contract has
+  left Ubuntu for native Windows. Commit only the two amendment files:
+
+      test: run installer contract on native Windows
+
+### Amendment Task 3: fresh gates, audit, review, and feature push
+
+**Files:** no additional files. Modify the two amendment files only for
+demonstrated Critical/Important review findings.
+
+- [ ] **Step 1: Fresh local gates**
+
+  On the native Windows implementation host, run:
+
+      pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts
+      pnpm --filter @tianwen/runtime-bundle... build
+      pnpm run typecheck
+      pnpm run check:dsh-install
+      pnpm run check:no-private-dsh-imports
+      & $existingPython -m pytest tests/contracts/test_public_repository_surface.py
+      & $existingPython -m ruff check .
+      git diff --check
+
+  The installer contract must report 29 passing tests. If the approved Python
+  is unavailable, report it as locally unavailable rather than creating an
+  environment; exact-main Python CI remains bearing. No local gate runs a
+  product installer or a Provider.
+
+- [ ] **Step 2: Mechanical CI self-review and resource audit**
+
+  Inspect, without triggering CI, the native job's command syntax, pnpm setup
+  before Node setup with pnpm cache, frozen install, `pwsh` mapping fallback,
+  cleanup, exact Vitest path, and absence of that path from the Ubuntu focused
+  command. Confirm no personal path or unfinished placeholder remains in the
+  amended workflow/public contract. Require fixtures to end at zero files/zero bytes
+  and record `node_modules/.modules.yaml` unchanged; record all install,
+  download, relink, product installer, Goal/resume/model, Provider/paid
+  token/CNY, Docker, Alpha, and runtime-profile actions as zero.
+
+- [ ] **Step 3: Three independent read-only reviews**
+
+  Review the exact feature for:
+
+  1. correctness/test intent — exact Linux RED records, genuine native Windows
+     boundary, `pwsh` syntax, exit propagation, temporary-map cleanup, and
+     exclusion from Ubuntu;
+  2. architecture/privacy/DSH — no production adapter, Runtime, Provider,
+     product-root mutation, raw diagnostics, or persistence expansion; and
+  3. Ponytail/YAGNI — one job and temporary mapping, not a cross-platform
+     abstraction, test framework, or matrix.
+
+  Fix only demonstrated Critical/Important findings with focused RED/GREEN,
+  then repeat affected gates and review. Ordinary-push the clean feature once,
+  verify local/tracking/`git ls-remote` equality, send the supervisor its exact
+  SHA, commits, file audit, RED/GREEN evidence, gates, reviews and resource
+  audit, and stop before main integration.
+
+### Amendment Task 4: supervisor-only main integration and exact-SHA CI
+
+After separate approval, merge and ordinary-push the exact feature once. Verify
+merge-tree equality and locate the unique automatic push run by merge SHA.
+Python, TypeScript, and `installer-windows` must all complete successfully.
+The Windows job must actually execute the existing 29 installer tests; the
+TypeScript demos must succeed without an installer test interrupting their
+Ubuntu step. Any CI failure is a narrow-log stop line: do not rerun or patch
+main.
+
+### Amendment Task 5: separately authorized operational stop line
+
+Only after exact-main CI is green may separate authorization permit one
+official offline installer attempt. Existing safe failure receipts remain
+non-persistent and a failure stops without retry, ordinary fallback,
+raw-output retrieval, Provider action, or product repair. A successful
+migration does not itself authorize further governance work.
 
 ---
 
@@ -227,7 +439,13 @@ rollback and later rollback tests remain green. Commit only Task 2 files:
 
 ---
 
-### Task 3: Put the installer contract on the exact-main bearing path
+> **Historical record — not executable.** The original Task 3–7 text below
+> records the already-merged safe-failure-receipt delivery. Its former Ubuntu
+> focused-Vitest bearing is explicitly superseded by the Native-Windows CI
+> amendment above. No worker may append or retain the installer spec in the
+> Ubuntu TypeScript focused command; follow Amendment Tasks 1–5 instead.
+
+### Historical Task 3: former Ubuntu installer bearing (superseded)
 
 **Files:**
 
@@ -244,8 +462,8 @@ rollback and later rollback tests remain green. Commit only Task 2 files:
 
 - [ ] **Step 1: RED — static public CI and handoff contracts**
 
-Extend the existing public repository contract so it first fails unless the
-focused Vitest command in .github/workflows/ci.yml contains exactly:
+The former public contract required the Ubuntu focused Vitest command to
+contain:
 
     tests/dsh-migration/tianwen-installer.spec.ts
 
@@ -261,12 +479,12 @@ The same contract must require that the migration handoff states:
 The contract must not add a personal absolute path, credential, raw manifest or
 claim that the unproved child root cause is known.
 
-- [ ] **Step 2: GREEN — append one existing focused command path**
+- [ ] **Step 2: Legacy record — do not execute**
 
-Append only `tests/dsh-migration/tianwen-installer.spec.ts` to the existing
-single focused Vitest command. Do not create a job/step, change permissions,
-cache/dependencies or alter any other workflow behavior. The Task 6 exact-main
-run must therefore execute this same contract.
+The former implementation appended only
+`tests/dsh-migration/tianwen-installer.spec.ts` to the existing single focused
+Vitest command. It is now expressly replaced by Amendment Tasks 1–5: the path
+is absent from Ubuntu and is borne by `installer-windows` on native Windows.
 
 Update the existing handoff with factual observed history, the stage-only safe
 receipt role, durable-snapshot limitation and one-attempt stop line. If rollback
@@ -309,9 +527,9 @@ Critical/Important review findings.
 
 Run Python public contract/Ruff only with the approved existing D-drive
 interpreter. No gate may invoke product installer, Goal, configured model or
-Provider. The final local focused run must include
-tests/dsh-migration/tianwen-installer.spec.ts; Task 6 requires the exact-main
-focused Vitest step to carry and pass the same path.
+Provider. For the amendment, the final local native-Windows run includes the
+installer spec, while exact-main `installer-windows` carries and passes it;
+the Ubuntu focused command must omit it.
 
 - [ ] **Step 2: Audit fixtures and external actions**
 
@@ -372,12 +590,10 @@ force-push.
 
 - [ ] **Step 2: Require the real exact-main bearing gate**
 
-Locate the single automatic push run whose head SHA equals the merge SHA. Both
-Python and TypeScript must complete successfully. The TypeScript focused Vitest
-step must include and pass tests/dsh-migration/tianwen-installer.spec.ts, in
-addition to the existing Runtime Bundle build, typecheck and DSH closure gates.
-If any job fails, capture only the narrow failing log and stop; do not rerun or
-patch main.
+This former exact-main requirement is superseded by Amendment Task 4: Python,
+TypeScript, and `installer-windows` must complete successfully; only the
+native Windows job executes the installer spec. If any job fails, capture only
+the narrow failing log and stop; do not rerun or patch main.
 
 ---
 
