@@ -1,15 +1,53 @@
 import { spawnSync } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
+import { PassThrough } from 'node:stream'
 
 import { describe, expect, it } from 'vitest'
 import {
   SessionId,
   mountGoalHarness,
 } from '@tianwen/dsh-compat'
+import {
+  parseNaturalRunTrialChildReceipt,
+} from '../../packages/tianwen-runtime-bundle/src/natural-run-trial.js'
+import {
+  monitorNaturalRunTrialChild,
+} from '../../packages/tianwen-runtime-bundle/src/resume.js'
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-goal-resume-tests')
 const CLI = resolve('packages/tianwen-runtime-bundle/dist/cli.js')
+
+function naturalTrialReceipt(overrides: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 'tianwen.natural-run-trial-receipt.v1',
+    status: 'settled',
+    goal: { id: 'goal-safe', revision: 2, phase: 'complete' },
+    session: { id: 'session-safe', eventCountDelta: 9, unchangedByGovernance: true },
+    run: {
+      runId: 'run:safe',
+      acceptanceSubjectDigest: `sha256:${'a'.repeat(64)}`,
+      acceptanceEvidenceId: `sha256:${'b'.repeat(64)}`,
+    },
+    learning: { decision: 'no-case', skillUse: 'recorded' },
+    usage: {
+      modelRequests: 1,
+      toolCalls: 2,
+      tokens: { inputTokens: 3, outputTokens: 4 },
+      exactCny: 'unavailable',
+    },
+    ...overrides,
+  }
+}
+
+function naturalTrialChild() {
+  return Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    kill: () => true,
+  })
+}
 
 function snapshotTree(root: string): Record<string, string> {
   const snapshot: Record<string, string> = {}
@@ -72,6 +110,69 @@ async function persistGoal(
 }
 
 describe('tianwen resume', () => {
+  it('accepts one exact natural trial receipt and rejects mixed child output', () => {
+    const receipt = naturalTrialReceipt()
+    expect(parseNaturalRunTrialChildReceipt(
+      `${JSON.stringify(receipt)}\n`, '', { goalId: 'goal-safe', sessionId: 'session-safe' },
+    )).toEqual(receipt)
+    expect(() => parseNaturalRunTrialChildReceipt(
+      `\u001b[?25l${JSON.stringify(receipt)}\n`, '', { goalId: 'goal-safe', sessionId: 'session-safe' },
+    )).toThrow()
+  })
+
+  it('emits only a normalized natural receipt or one fixed child failure', async () => {
+    const receipt = naturalTrialReceipt()
+    const expected = { goalId: 'goal-safe', sessionId: 'session-safe' }
+    const child = naturalTrialChild()
+    const output: string[] = []
+    const errors: string[] = []
+    const exit = monitorNaturalRunTrialChild(child as never, {
+      dataDir: 'D:/DevData/test', evolutionRoot: 'D:/DevData/test/state/evolution',
+      goalId: expected.goalId, revision: 2, sessionId: expected.sessionId,
+      sessionsRoot: 'D:/DevData/test/dsh-home/sessions', trial: {} as never,
+      trialManifestPath: 'D:/DevData/test/trial.json',
+    }, { write: line => { output.push(line) }, writeError: line => { errors.push(line) } })
+    child.stdout.write(`${JSON.stringify(receipt)}\n`)
+    child.emit('close', 0, null)
+
+    await expect(exit).resolves.toBe(0)
+    expect(output).toEqual([`${JSON.stringify(receipt)}\n`])
+    expect(errors).toEqual([])
+
+    const secret = 'sk-natural-child-output-DO-NOT-LEAK'
+    const failures: readonly [string, string, string, number][] = [
+      ['control prefix', `\u001b[?25l${JSON.stringify(receipt)}\n`, '', 0],
+      ['stderr output', `${JSON.stringify(receipt)}\n`, `D:/private/${secret}`, 0],
+      ['unknown nested key', `${JSON.stringify(naturalTrialReceipt({ usage: { ...receipt.usage, secret } }))}\n`, '', 0],
+      ['wrong Goal', `${JSON.stringify(naturalTrialReceipt({ goal: { ...receipt.goal, id: 'goal-wrong' } }))}\n`, '', 0],
+      ['wrong Session', `${JSON.stringify(naturalTrialReceipt({ session: { ...receipt.session, id: 'session-wrong' } }))}\n`, '', 0],
+      ['malformed JSON', '{not-json}\n', '', 0],
+      ['invalid digest and counter', `${JSON.stringify(naturalTrialReceipt({ run: { ...receipt.run, acceptanceSubjectDigest: 'sha256:not-a-digest' }, usage: { ...receipt.usage, modelRequests: -1 } }))}\n`, '', 0],
+      ['child non-zero exit', `${JSON.stringify(receipt)}\n`, '', 1],
+      ['output overflow', `${'x'.repeat(65_537)}${secret}`, '', 0],
+    ]
+    for (const [_name, stdout, stderr, code] of failures) {
+      const failedChild = naturalTrialChild()
+      const failedOutput: string[] = []
+      const failedErrors: string[] = []
+      const failedExit = monitorNaturalRunTrialChild(failedChild as never, {
+        dataDir: 'D:/DevData/test', evolutionRoot: 'D:/DevData/test/state/evolution',
+        goalId: expected.goalId, revision: 2, sessionId: expected.sessionId,
+        sessionsRoot: 'D:/DevData/test/dsh-home/sessions', trial: {} as never,
+        trialManifestPath: 'D:/DevData/test/trial.json',
+      }, { write: line => { failedOutput.push(line) }, writeError: line => { failedErrors.push(line) } })
+      failedChild.stdout.write(stdout)
+      failedChild.stderr.write(stderr)
+      failedChild.emit('close', code, null)
+
+      await expect(failedExit).resolves.toBe(1)
+      expect(failedOutput).toEqual([])
+      expect(failedErrors).toEqual(['tianwen resume: natural Run trial child failed\n'])
+      expect(failedOutput.join('')).not.toContain(secret)
+      expect(failedErrors.join('')).not.toContain(secret)
+    }
+  })
+
   it('resolves DSH only from the installed data-directory host', async () => {
     mkdirSync(FIXTURE_BASE, { recursive: true })
     const dataDir = mkdtempSync(join(FIXTURE_BASE, 'host-'))
