@@ -142,6 +142,52 @@ describe('tianwen resume', () => {
     },
   )
 
+  it('preflights one first-Turn natural evidence manifest without changing the Goal', async () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const dataDir = mkdtempSync(join(FIXTURE_BASE, 'natural-trial-'))
+    try {
+      const fixture = await persistGoal(dataDir, 'resume-natural-trial')
+      const manifestPath = join(dataDir, 'natural-trial.json')
+      writeFileSync(manifestPath, JSON.stringify({
+        schemaVersion: 'tianwen.natural-run-trial.v1',
+        goalId: fixture.goalId,
+        taskRef: 'task:verify-summary',
+        scopeKey: 'project:tianwen/capability:summary',
+        parentSkillName: 'summary-parent',
+        acceptanceContract: {
+          source: 'dsh-tool-result',
+          toolName: 'verify_summary',
+          notMetErrorCode: 'SUMMARY_REQUIREMENT_NOT_MET',
+          gapDisposition: 'reusable',
+          problemCategory: 'summary-omits-required-result',
+          severity: 2,
+          blocksGoal: false,
+        },
+        verifierArguments: { subject: { required: ['summary'] } },
+      }), 'utf8')
+      const before = snapshotTree(dataDir)
+      const { preflightNaturalRunTrial } = await import(
+        '../../packages/tianwen-runtime-bundle/src/resume.js'
+      )
+
+      await expect(preflightNaturalRunTrial(
+        fixture.goalId,
+        dataDir,
+        manifestPath,
+      )).resolves.toMatchObject({
+        goalId: fixture.goalId,
+        sessionId: fixture.sessionId,
+        trial: {
+          manifest: { goalId: fixture.goalId },
+          manifestDigest: expect.stringMatching(/^sha256:/u),
+        },
+      })
+      expect(snapshotTree(dataDir)).toEqual(before)
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
   it('rejects a stale preflight before appending a Goal mutation', async () => {
     mkdirSync(FIXTURE_BASE, { recursive: true })
     const dataDir = mkdtempSync(join(FIXTURE_BASE, 'stale-'))

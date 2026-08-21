@@ -15,6 +15,7 @@ import type { GoalListProjection, GoalStatusProjection } from './status.js'
 import {
   GoalResumeUnavailableError,
   launchGoalResume,
+  preflightNaturalRunTrial,
   preflightGoalResume,
 } from './resume.js'
 import { createGoalLiveSmokeFailure } from './goal-live-smoke.js'
@@ -34,6 +35,7 @@ const READ_ONLY_USAGE = [
 const RESUME_USAGE = [
   'Usage: tianwen resume --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
   'Usage: tianwen resume --goal GOAL_ID --data-dir ABSOLUTE_PATH --live-smoke --json',
+  'Usage: tianwen resume --goal GOAL_ID --data-dir ABSOLUTE_PATH --trial-manifest ABSOLUTE_PATH --json',
   '',
 ].join('\n')
 
@@ -72,8 +74,9 @@ function hasRepeatedStrictOption(args: readonly string[]): boolean {
   const optionCount = (name: string): number => args.filter(argument =>
     argument === `--${name}` || argument.startsWith(`--${name}=`)
   ).length
-  return optionCount('live-smoke') > 0 &&
-    ['goal', 'data-dir', 'live-smoke', 'json'].some(name => optionCount(name) > 1)
+  return (optionCount('live-smoke') > 0 || optionCount('trial-manifest') > 0) &&
+    ['goal', 'data-dir', 'live-smoke', 'trial-manifest', 'json']
+      .some(name => optionCount(name) > 1)
 }
 
 function formatText(status: GoalStatusProjection): string {
@@ -115,6 +118,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     readonly objective?: string
     readonly 'max-rounds'?: string
     readonly 'live-smoke'?: boolean
+    readonly 'trial-manifest'?: string
   }
   let positionals: string[]
   try {
@@ -130,6 +134,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
         objective: { type: 'string' },
         'max-rounds': { type: 'string' },
         'live-smoke': { type: 'boolean', default: false },
+        'trial-manifest': { type: 'string' },
       },
     })
     values = parsed.values
@@ -143,6 +148,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   const maxGoalRounds = positiveInteger(values['max-rounds'])
   const modelChoice = values.model as ModelChoice | undefined
   const liveSmoke = values['live-smoke'] === true
+  const trialManifest = values['trial-manifest']
   if (
     hasRepeatedStrictOption(args) ||
     (command === 'model' ? positionals.length !== 2 : positionals.length !== 1) ||
@@ -152,17 +158,19 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       command === 'status' || command === 'resume'
         ? values.goal === undefined || values.goal.length === 0 ||
           values.objective !== undefined || values['max-rounds'] !== undefined || values.model !== undefined ||
-          (command !== 'resume' && liveSmoke) || (liveSmoke && values.json !== true)
+          (command !== 'resume' && (liveSmoke || trialManifest !== undefined)) ||
+          (liveSmoke && trialManifest !== undefined) ||
+          ((liveSmoke || trialManifest !== undefined) && values.json !== true)
         : command === 'list'
           ? values.goal !== undefined || values.objective !== undefined ||
-            values['max-rounds'] !== undefined || values.model !== undefined || liveSmoke
+            values['max-rounds'] !== undefined || values.model !== undefined || liveSmoke || trialManifest !== undefined
           : command === 'create'
             ? values.goal !== undefined || values.objective?.trim().length === 0 ||
-              values.objective === undefined || maxGoalRounds === undefined || values.model !== undefined || liveSmoke
+              values.objective === undefined || maxGoalRounds === undefined || values.model !== undefined || liveSmoke || trialManifest !== undefined
             : command === 'model'
               ? values.goal !== undefined || values.objective !== undefined ||
                 values['max-rounds'] !== undefined ||
-                liveSmoke ||
+                liveSmoke || trialManifest !== undefined ||
                 (modelOperation === 'status' ? values.model !== undefined :
                   modelOperation === 'use'
                     ? modelChoice === undefined || !['offline', 'deepseek-v4-flash', 'deepseek-v4-pro'].includes(modelChoice)
@@ -188,9 +196,12 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       ), values.json === true)
     }
     if (command === 'resume') {
-      return await launchGoalResume(await preflightGoalResume(
-        values.goal!, values['data-dir'], liveSmoke,
-      ), values.json === true)
+      const preflight = trialManifest === undefined
+        ? await preflightGoalResume(values.goal!, values['data-dir'], liveSmoke)
+        : await preflightNaturalRunTrial(
+            values.goal!, values['data-dir'], trialManifest,
+          )
+      return await launchGoalResume(preflight, values.json === true)
     }
     if (command === 'list') {
       const list = await listGoals({ dataDir: values['data-dir'] })
@@ -210,6 +221,10 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   } catch (error) {
     if (command === 'resume' && liveSmoke) {
       process.stdout.write(`${JSON.stringify(createGoalLiveSmokeFailure('preflight-rejected'))}\n`)
+      return 1
+    }
+    if (command === 'resume' && trialManifest !== undefined) {
+      process.stderr.write('Error: natural Run trial preflight failed\n')
       return 1
     }
     if (error instanceof GoalStatusNotFoundError) {

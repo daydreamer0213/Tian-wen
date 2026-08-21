@@ -18,6 +18,8 @@ import {
   parseGoalLiveSmokeChildReceipt,
 } from './goal-live-smoke.js'
 import type { GoalLiveSmokeReceipt } from './goal-live-smoke.js'
+import { readNaturalRunTrialManifest } from './natural-run-trial.js'
+import type { PreparedNaturalRunTrialManifest } from './natural-run-trial.js'
 
 const DSH_VERSION = '0.1.0-rc.7'
 const LIVE_SMOKE_CHILD_OUTPUT_LIMIT_BYTES = 65_536
@@ -34,6 +36,11 @@ export interface ResumePreflight {
 
 export interface LiveSmokeResumePreflight extends ResumePreflight {
   readonly liveSmoke: true
+}
+
+export interface NaturalRunTrialResumePreflight extends ResumePreflight {
+  readonly trial: PreparedNaturalRunTrialManifest
+  readonly trialManifestPath: string
 }
 
 export interface LiveSmokeChildDependencies {
@@ -55,7 +62,7 @@ function inside(root: string, target: string): boolean {
   return path !== '' && !path.startsWith('..') && !isAbsolute(path)
 }
 
-function verifyInstalledRuntimeBundle(dataDir: string): void {
+export function verifyInstalledRuntimeBundle(dataDir: string): void {
   const packageRoot = join(
     dataDir, 'dsh-home', 'profiles', 'tianwen', 'node_modules',
     '@tianwen', 'runtime-bundle',
@@ -190,6 +197,25 @@ export async function preflightGoalResume(
   return preflight
 }
 
+export async function preflightNaturalRunTrial(
+  goalId: string,
+  dataDir: string,
+  manifestPath: string,
+): Promise<NaturalRunTrialResumePreflight> {
+  const trial = readNaturalRunTrialManifest(manifestPath)
+  if (trial.manifest.goalId !== goalId) {
+    throw new GoalResumeUnavailableError('trial manifest Goal does not match')
+  }
+  const preflight = await preflightGoalResume(goalId, dataDir)
+  const matches = (await scanDurableGoals(preflight.dataDir))
+    .filter(snapshot => String(snapshot.folded.goal?.id) === goalId)
+  const events = matches[0]?.inspection.events
+  if (events === undefined || events.some(event => event.type === 'turn/start')) {
+    throw new GoalResumeUnavailableError('Goal Session is not fresh for a trial')
+  }
+  return { ...preflight, trial, trialManifestPath: manifestPath }
+}
+
 export async function monitorLiveSmokeChild(
   child: ChildProcess,
   preflight: LiveSmokeResumePreflight,
@@ -285,11 +311,15 @@ export async function monitorLiveSmokeChild(
 }
 
 export async function launchGoalResume(
-  preflight: ResumePreflight | LiveSmokeResumePreflight,
+  preflight:
+    | ResumePreflight
+    | LiveSmokeResumePreflight
+    | NaturalRunTrialResumePreflight,
   json: boolean,
 ): Promise<number> {
   const liveSmoke = 'liveSmoke' in preflight
-  if (liveSmoke) verifyInstalledRuntimeBundle(preflight.dataDir)
+  const naturalTrial = 'trial' in preflight
+  if (liveSmoke || naturalTrial) verifyInstalledRuntimeBundle(preflight.dataDir)
   const startedAtMs = Date.now()
   const dshHome = join(preflight.dataDir, 'dsh-home')
   const child = spawn(process.execPath, [
@@ -308,6 +338,10 @@ export async function launchGoalResume(
       TIANWEN_RESUME_SESSION_ID: preflight.sessionId,
       TIANWEN_RESUME_SESSIONS_ROOT: preflight.sessionsRoot,
       TIANWEN_RESUME_STARTED_AT_MS: String(startedAtMs),
+      ...(naturalTrial ? {
+        TIANWEN_RESUME_TRIAL_MANIFEST_PATH: preflight.trialManifestPath,
+        TIANWEN_RESUME_TRIAL_MANIFEST_DIGEST: preflight.trial.manifestDigest,
+      } : {}),
     },
     shell: false,
     stdio: liveSmoke ? ['ignore', 'pipe', 'pipe'] : 'inherit',
