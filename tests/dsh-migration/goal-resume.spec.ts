@@ -386,6 +386,26 @@ describe('tianwen resume', () => {
         const { runGoalResume } = await import(
           '../../packages/tianwen-runtime-bundle/src/resume-runner.js'
         )
+        await expect(runGoalResume(second.ctx, {
+          goalId: String(goal.id),
+          json: true,
+          nonce: 'test-nonce',
+          revision: goal.revision,
+          sessionId: String(sessionId),
+          trialManifestPath: join(dataDir, 'trial-manifest.json'),
+          trialManifestDigest: undefined,
+        })).rejects.toThrow('Natural Run trial manifest handoff is incomplete')
+        await expect(runGoalResume(second.ctx, {
+          goalId: String(goal.id),
+          json: true,
+          nonce: 'test-nonce',
+          revision: goal.revision,
+          sessionId: String(sessionId),
+          trialManifestPath: undefined,
+          trialManifestDigest: `sha256:${'0'.repeat(64)}`,
+        })).rejects.toThrow('Natural Run trial manifest handoff is incomplete')
+        expect(second.adapter.requests).toHaveLength(0)
+
         const result = await runGoalResume(second.ctx, {
           goalId: String(goal.id),
           json: true,

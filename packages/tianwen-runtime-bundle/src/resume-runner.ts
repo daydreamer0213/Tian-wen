@@ -359,6 +359,15 @@ function isNaturalRunTrial(
     && typeof config.trialManifestDigest === 'string'
 }
 
+function hasPartialNaturalRunTrial(
+  config: ResumeConfig | LiveSmokeResumeConfig | NaturalRunTrialResumeConfig,
+): boolean {
+  return !isNaturalRunTrial(config) && (
+    ('trialManifestPath' in config && config.trialManifestPath !== undefined)
+    || ('trialManifestDigest' in config && config.trialManifestDigest !== undefined)
+  )
+}
+
 function settledTrialGoal(goal: ReturnType<Context['goals']['get']>) {
   if (
     goal === undefined ||
@@ -589,6 +598,9 @@ export async function runGoalResume(ctx: Context,
   requireConfig(config)
   if ('liveSmoke' in config && config.liveSmoke) return runLiveGoalResume(ctx, config, dependencies)
   if (isNaturalRunTrial(config)) return runNaturalRunTrial(ctx, config, dependencies)
+  if (hasPartialNaturalRunTrial(config)) {
+    throw new Error('Natural Run trial manifest handoff is incomplete')
+  }
   const defaultModel = ctx.get('agentDefaultModel') as { currentSelection(): ModelSelection } | undefined
   if (defaultModel === undefined) throw new Error('Tianwen Profile has no default model')
   const selection = defaultModel.currentSelection()
@@ -642,7 +654,7 @@ export function apply(ctx: Context,
       exit(1)
       return
     }
-    if (isNaturalRunTrial(config)) {
+    if (isNaturalRunTrial(config) || hasPartialNaturalRunTrial(config)) {
       process.stderr.write('tianwen resume: natural Run trial failed\n')
       exit(1)
       return
