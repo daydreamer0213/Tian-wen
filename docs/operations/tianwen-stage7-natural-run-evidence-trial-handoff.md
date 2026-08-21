@@ -4,12 +4,13 @@ DSH `0.1.0-rc.7` remains the only product Agent Runtime. Stage 7 adds a
 pre-Turn, manifest-bound natural Run evidence intake path to that Runtime; it
 does not add another Agent loop, Provider wrapper, ledger, store, or scheduler.
 
-The zero-cost fixture proves only the mechanism: a normal DSH Goal/Session,
-parent Skill manifest, final verifier Evidence, Outcome intake, recorded
-Skill-use provenance, `met/no-case`, and governance non-interference. Its
-scripted adapter is not a configured-Provider natural receipt and is not an
-efficacy claim. No configured-Provider natural receipt is claimed until one
-actually runs once through the normal configured DSH path.
+The zero-cost fixture proves only the mechanism, pre-Turn ordering,
+provenance, and `met/no-case`: a normal DSH Goal/Session, parent Skill
+manifest, final verifier Evidence, Outcome intake, recorded Skill-use, and
+governance non-interference. Its scripted adapter is not a configured-Provider
+natural receipt and is not an efficacy claim. No configured-Provider natural
+receipt is claimed until one actually runs once through the normal configured
+DSH path.
 
 The fixture does not manufacture a Ticket, Case, Candidate, live B/C
 Evaluation, Shadow, Active Pointer, Promotion, Reject, or rollback. Exact CNY
