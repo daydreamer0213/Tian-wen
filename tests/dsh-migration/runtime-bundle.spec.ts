@@ -578,6 +578,7 @@ describe('@tianwen/runtime-bundle', () => {
       .filter(Boolean)
       .sort()
     expect(entries).toEqual([
+      'package/LICENSE',
       'package/cordis.patch.yml',
       'package/create.patch.yml',
       'package/dist/cli.js',
