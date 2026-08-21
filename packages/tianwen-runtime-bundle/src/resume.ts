@@ -350,7 +350,7 @@ export async function monitorNaturalRunTrialChild(
     }
     child.once('error', fail)
     child.once('close', code => {
-      if (finished || code !== 0) {
+      if (finished) {
         fail()
         return
       }
@@ -360,9 +360,16 @@ export async function monitorNaturalRunTrialChild(
           Buffer.concat(stderr).toString('utf8'),
           { goalId: preflight.goalId, sessionId: preflight.sessionId },
         )
+        if (
+          (receipt.status === 'pre-turn-failed' && (code === null || code === 0))
+          || (receipt.status !== 'pre-turn-failed' && code !== 0)
+        ) {
+          fail()
+          return
+        }
         finished = true
         write(`${JSON.stringify(receipt)}\n`)
-        resolveExit(0)
+        resolveExit(receipt.status === 'pre-turn-failed' ? 1 : 0)
       } catch { fail() }
     })
     if (child.stdout === null || child.stderr === null) {

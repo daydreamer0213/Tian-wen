@@ -22,7 +22,7 @@ import {
 } from './goal-live-smoke.js'
 import type { GoalLiveSmokeReceipt, GoalLiveSmokeSuccessReceipt } from './goal-live-smoke.js'
 import { readNaturalRunTrialManifest } from './natural-run-trial.js'
-import type { NaturalRunTrialReceipt } from './natural-run-trial.js'
+import type { NaturalRunTrialReceipt, NaturalRunTrialSettledReceipt } from './natural-run-trial.js'
 
 interface ResumeConfig {
   readonly goalId: string
@@ -108,7 +108,7 @@ function sessionDigest(events: readonly SessionEvent[]): `sha256:${string}` {
     .digest('hex')}`
 }
 
-function naturalUsage(events: readonly SessionEvent[]): NaturalRunTrialReceipt['usage'] {
+function naturalUsage(events: readonly SessionEvent[]): NaturalRunTrialSettledReceipt['usage'] {
   const assistantMessages = events.filter(event => event.type === 'assistant/message')
   const toolCalls = events.filter(event => event.type === 'tool/call').length
   let inputTokens = 0
@@ -386,7 +386,7 @@ async function runNaturalRunTrial(
   ctx: Context,
   config: NaturalRunTrialResumeConfig,
   dependencies: LiveGoalResumeDependencies = {},
-): Promise<NaturalRunTrialReceipt> {
+): Promise<NaturalRunTrialSettledReceipt> {
   const trial = readNaturalRunTrialManifest(
     config.trialManifestPath,
     config.trialManifestDigest,
@@ -423,7 +423,7 @@ async function runNaturalRunTrial(
     ): Promise<{ readonly runId: `run:${string}` }>
     consumeOutcome(session: Session, runId: `run:${string}`): {
       readonly acceptanceEvidenceId?: `sha256:${string}`
-      readonly decision: NaturalRunTrialReceipt['learning']['decision']
+      readonly decision: NaturalRunTrialSettledReceipt['learning']['decision']
       readonly ticketId?: string
     }
     recordSkillUse(session: Session, runId: `run:${string}`): {
@@ -475,11 +475,11 @@ async function runNaturalRunTrial(
     })
     const settled = settledTrialGoal(await waitForDisarmed(ctx, handle.agent))
     const receipt = (
-      status: NaturalRunTrialReceipt['status'],
-      learningResult: NaturalRunTrialReceipt['learning'],
+      status: NaturalRunTrialSettledReceipt['status'],
+      learningResult: NaturalRunTrialSettledReceipt['learning'],
       acceptanceEvidenceId?: `sha256:${string}`,
       governanceDigest = sessionDigest(handle.agent.session.events),
-    ): NaturalRunTrialReceipt => ({
+    ): NaturalRunTrialSettledReceipt => ({
       schemaVersion: 'tianwen.natural-run-trial-receipt.v1',
       status,
       goal: settled,

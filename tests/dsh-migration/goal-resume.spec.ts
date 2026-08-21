@@ -10,6 +10,8 @@ import {
   mountGoalHarness,
 } from '@tianwen/dsh-compat'
 import {
+  NATURAL_RUN_TRIAL_FAILURE_CODES,
+  createNaturalRunTrialFailure,
   parseNaturalRunTrialChildReceipt,
 } from '../../packages/tianwen-runtime-bundle/src/natural-run-trial.js'
 import {
@@ -120,6 +122,18 @@ describe('tianwen resume', () => {
     )).toThrow()
   })
 
+  it.each(NATURAL_RUN_TRIAL_FAILURE_CODES)(
+    'normalizes safe pre-Turn failure %s',
+    code => {
+      const receipt = createNaturalRunTrialFailure(code, {
+        goalId: 'goal-safe', sessionId: 'session-safe',
+      })
+      expect(parseNaturalRunTrialChildReceipt(
+        `${JSON.stringify(receipt)}\n`, '', { goalId: 'goal-safe', sessionId: 'session-safe' },
+      )).toEqual(receipt)
+    },
+  )
+
   it('emits only a normalized natural receipt or one fixed child failure', async () => {
     const receipt = naturalTrialReceipt()
     const expected = { goalId: 'goal-safe', sessionId: 'session-safe' }
@@ -139,6 +153,23 @@ describe('tianwen resume', () => {
     expect(output).toEqual([`${JSON.stringify(receipt)}\n`])
     expect(errors).toEqual([])
 
+    const failureReceipt = createNaturalRunTrialFailure('agent-resume-failed', expected)
+    const failed = naturalTrialChild()
+    const failureOutput: string[] = []
+    const failureErrors: string[] = []
+    const failureExit = monitorNaturalRunTrialChild(failed as never, {
+      dataDir: 'D:/DevData/test', evolutionRoot: 'D:/DevData/test/state/evolution',
+      goalId: expected.goalId, revision: 2, sessionId: expected.sessionId,
+      sessionsRoot: 'D:/DevData/test/dsh-home/sessions', trial: {} as never,
+      trialManifestPath: 'D:/DevData/test/trial.json',
+    }, { write: line => { failureOutput.push(line) }, writeError: line => { failureErrors.push(line) } })
+    failed.stdout.write(`${JSON.stringify(failureReceipt)}\n`)
+    failed.emit('close', 1, null)
+
+    await expect(failureExit).resolves.toBe(1)
+    expect(failureOutput).toEqual([`${JSON.stringify(failureReceipt)}\n`])
+    expect(failureErrors).toEqual([])
+
     const secret = 'sk-natural-child-output-DO-NOT-LEAK'
     const failures: readonly [string, string, string, number][] = [
       ['control prefix', `\u001b[?25l${JSON.stringify(receipt)}\n`, '', 0],
@@ -149,6 +180,13 @@ describe('tianwen resume', () => {
       ['malformed JSON', '{not-json}\n', '', 0],
       ['invalid digest and counter', `${JSON.stringify(naturalTrialReceipt({ run: { ...receipt.run, acceptanceSubjectDigest: 'sha256:not-a-digest' }, usage: { ...receipt.usage, modelRequests: -1 } }))}\n`, '', 0],
       ['child non-zero exit', `${JSON.stringify(receipt)}\n`, '', 1],
+      ['failure with zero exit', `${JSON.stringify(failureReceipt)}\n`, '', 0],
+      ['failure unknown code', `${JSON.stringify({ ...failureReceipt, failureCode: 'unknown-code' })}\n`, '', 1],
+      ['failure extra key', `${JSON.stringify({ ...failureReceipt, secret })}\n`, '', 1],
+      ['failure wrong Goal', `${JSON.stringify({ ...failureReceipt, goal: { id: 'goal-wrong' } })}\n`, '', 1],
+      ['failure wrong Session', `${JSON.stringify({ ...failureReceipt, session: { id: 'session-wrong' } })}\n`, '', 1],
+      ['failure non-zero usage', `${JSON.stringify({ ...failureReceipt, usage: { ...failureReceipt.usage, modelRequests: 1 } })}\n`, '', 1],
+      ['failure stderr', `${JSON.stringify(failureReceipt)}\n`, `D:/private/${secret}`, 1],
       ['output overflow', `${'x'.repeat(65_537)}${secret}`, '', 0],
     ]
     for (const [_name, stdout, stderr, code] of failures) {
