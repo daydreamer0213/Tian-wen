@@ -344,10 +344,11 @@ carry that behavior.
 
 - [ ] **Step 4: Preflight one useful natural task**
 
-Set `DSH_AGENTS_HOME=C:\Users\Administrator\.codex` for the product command and
-select the already-existing `systematic-debugging` Skill by its DSH registry name.
-Require the trial preflight to resolve that exact Skill through the prepared
-Agent's public Skill scope; do not persist or hard-code its filesystem path.
+Set `DSH_AGENTS_HOME` to the current user's `.codex` directory for the product
+command and select the already-existing `systematic-debugging` Skill by its DSH
+registry name. Require the trial preflight to resolve that exact Skill through
+the prepared Agent's public Skill scope; do not persist or hard-code its
+filesystem path.
 If it is not resolver-visible, return `natural-trial-pending` rather than
 copying a Skill or registering a replacement. Create one fresh DSH Goal whose
 useful objective is to use that Skill, read
@@ -390,7 +391,12 @@ if ($receipt.schemaVersion -ne 'tianwen.install.v1' -or
     -not (Test-Path -LiteralPath $receipt.cliPath -PathType Leaf)) {
   throw 'natural-trial-pending: installed Tianwen CLI unavailable'
 }
-$env:DSH_AGENTS_HOME = 'C:\Users\Administrator\.codex'
+$codexAgentsHome = Join-Path $env:USERPROFILE '.codex'
+$systematicDebuggingSkill = Join-Path $codexAgentsHome 'skills\systematic-debugging\SKILL.md'
+if (-not (Test-Path -LiteralPath $systematicDebuggingSkill -PathType Leaf)) {
+  throw 'natural-trial-pending: parent Skill unavailable'
+}
+$env:DSH_AGENTS_HOME = $codexAgentsHome
 
 $modelStatusJson = & 'D:\hermes\node\node.exe' $receipt.cliPath model status `
   --data-dir 'D:\DevData\tianwen' --json
