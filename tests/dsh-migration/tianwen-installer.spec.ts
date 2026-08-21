@@ -286,20 +286,22 @@ describe('Tianwen installer contract', () => {
     expect(`${json.stdout}${json.stderr}${plain.stdout}${plain.stderr}`).not.toContain(secret)
   })
 
-  it('requires silent pnpm transport for a machine-readable installer receipt', () => {
+  it('uses node run transport for a machine-readable installer receipt', () => {
     const root = testRoot('pnpm-machine-receipt')
     const secret = 'credential-sentinel-do-not-emit'
 
     expect(existsSync(root)).toBe(false)
-    const result = spawnSync(
-      `pnpm --silent run install:tianwen -- --data-dir ${root} --json --${secret}`,
-      {
-      shell: true,
+    const result = spawnSync(process.execPath, [
+      '--run',
+      'install:tianwen',
+      '--',
+      '--data-dir', root,
+      '--json',
+      `--${secret}`,
+    ], {
       cwd: resolve('.'),
       encoding: 'utf8',
-      env: { ...process.env, pnpm_config_verify_deps_before_run: 'false' },
-      },
-    )
+    })
 
     expect(result.status).toBe(1)
     expect(() => JSON.parse(result.stdout)).not.toThrow()
