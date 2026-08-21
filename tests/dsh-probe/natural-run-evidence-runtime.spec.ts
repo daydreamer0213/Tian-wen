@@ -293,26 +293,62 @@ describe('natural DSH Run trial runtime', () => {
     }
   })
 
-  it.each([
-    'run-binding-precondition-failed',
-    'skill-unavailable',
-    'skill-not-model-invocable',
-    'run-binding-persistence-failed',
-  ] as const)('preserves the source-owned %s Run-binding code', async code => {
-    const mounted = await mountNaturalGoal([textResponse('must stay unused')])
-    const manifestPath = writeManifest(manifest({ goalId: String(mounted.goal.id) }))
-    const trial = readNaturalRunTrialManifest(manifestPath)
-    try {
-      vi.spyOn(mounted.harness.ctx.tianwenLearningIntake, 'bindRunWithSkill')
-        .mockRejectedValue(Object.assign(new Error('source-owned Run binding failure'), { code }))
-      await expectPreTurnFailure(
-        mounted,
-        await runGoalResume(mounted.harness.ctx, trialConfig(mounted, trial, manifestPath)),
-        code,
-      )
-    } finally {
-      mounted.disposeParent()
-      await mounted.harness.ctx.fiber.dispose()
+  it('preserves source-owned Run-binding codes through the natural runner', async () => {
+    type MountedNaturalGoal = Awaited<ReturnType<typeof mountNaturalGoal>>
+    const scenarios: readonly {
+      readonly code: 'run-binding-precondition-failed' | 'skill-unavailable'
+        | 'skill-not-model-invocable' | 'run-binding-persistence-failed'
+      readonly setup: (mounted: MountedNaturalGoal) => (() => void) | undefined
+    }[] = [
+      {
+        code: 'run-binding-precondition-failed',
+        setup: mounted => {
+          mounted.disposeParent()
+          return mounted.harness.ctx.skills.register({
+            ...parentSkill,
+            resourceBase: { kind: 'url', url: 'https://invalid.test' },
+          })
+        },
+      },
+      {
+        code: 'skill-unavailable',
+        setup: mounted => { mounted.disposeParent(); return undefined },
+      },
+      {
+        code: 'skill-not-model-invocable',
+        setup: mounted => {
+          mounted.disposeParent()
+          return mounted.harness.ctx.skills.register({
+            ...parentSkill,
+            invocation: { modelInvocable: false, userInvocable: true },
+          })
+        },
+      },
+      {
+        code: 'run-binding-persistence-failed',
+        setup: mounted => {
+          vi.spyOn(mounted.harness.ctx.tianwenEvolution, 'recordRunBinding')
+            .mockImplementation(() => { throw new Error('source-owned persistence failure') })
+          return undefined
+        },
+      },
+    ]
+    for (const scenario of scenarios) {
+      const mounted = await mountNaturalGoal([textResponse('must stay unused')])
+      const manifestPath = writeManifest(manifest({ goalId: String(mounted.goal.id) }))
+      const trial = readNaturalRunTrialManifest(manifestPath)
+      const dispose = scenario.setup(mounted)
+      try {
+        await expectPreTurnFailure(
+          mounted,
+          await runGoalResume(mounted.harness.ctx, trialConfig(mounted, trial, manifestPath)),
+          scenario.code,
+        )
+      } finally {
+        dispose?.()
+        mounted.disposeParent()
+        await mounted.harness.ctx.fiber.dispose()
+      }
     }
   })
 
