@@ -27,7 +27,23 @@ export interface PreparedNaturalRunTrialManifest {
   readonly acceptanceSubjectDigest: `sha256:${string}`
 }
 
-export interface NaturalRunTrialReceipt {
+export const NATURAL_RUN_TRIAL_FAILURE_CODES = [
+  'manifest-revalidation-failed',
+  'services-unavailable',
+  'agent-resume-failed',
+  'session-goal-preflight-failed',
+  'verifier-unavailable',
+  'run-binding-precondition-failed',
+  'skill-unavailable',
+  'skill-not-model-invocable',
+  'run-binding-persistence-failed',
+  'pre-turn-internal-error',
+] as const
+
+export type NaturalRunTrialFailureCode =
+  typeof NATURAL_RUN_TRIAL_FAILURE_CODES[number]
+
+export interface NaturalRunTrialSettledReceipt {
   readonly schemaVersion: 'tianwen.natural-run-trial-receipt.v1'
   readonly status: 'settled' | 'settled-with-learning-error'
   readonly goal: {
@@ -77,6 +93,37 @@ export interface NaturalRunTrialReceipt {
       readonly reasoningTokens?: number
     }
     readonly exactCny: 'unavailable'
+  }
+}
+
+export interface NaturalRunTrialFailureReceipt {
+  readonly schemaVersion: 'tianwen.natural-run-trial-receipt.v1'
+  readonly status: 'pre-turn-failed'
+  readonly failureCode: NaturalRunTrialFailureCode
+  readonly goal: { readonly id: string }
+  readonly session: { readonly id: string }
+  readonly usage: {
+    readonly modelRequests: 0
+    readonly toolCalls: 0
+    readonly exactCny: 'unavailable'
+  }
+}
+
+export type NaturalRunTrialReceipt =
+  | NaturalRunTrialSettledReceipt
+  | NaturalRunTrialFailureReceipt
+
+export function createNaturalRunTrialFailure(
+  failureCode: NaturalRunTrialFailureCode,
+  input: { readonly goalId: string, readonly sessionId: string },
+): NaturalRunTrialFailureReceipt {
+  return {
+    schemaVersion: 'tianwen.natural-run-trial-receipt.v1',
+    status: 'pre-turn-failed',
+    failureCode,
+    goal: { id: input.goalId },
+    session: { id: input.sessionId },
+    usage: { modelRequests: 0, toolCalls: 0, exactCny: 'unavailable' },
   }
 }
 
@@ -169,11 +216,41 @@ export function parseNaturalRunTrialChildReceipt(
     throw new TypeError('natural Run trial child receipt is invalid JSON')
   }
   if (!isRecord(value)) throw new TypeError('natural Run trial receipt must be an object')
-  exactKeys(value, ['schemaVersion', 'status', 'goal', 'session', 'run', 'learning', 'usage'])
   if (value.schemaVersion !== 'tianwen.natural-run-trial-receipt.v1') {
     throw new TypeError('natural Run trial receipt schema version is invalid')
   }
-  const status = oneOf(value.status, ['settled', 'settled-with-learning-error'] as const)
+  const status = oneOf(value.status, [
+    'settled', 'settled-with-learning-error', 'pre-turn-failed',
+  ] as const)
+
+  if (status === 'pre-turn-failed') {
+    exactKeys(value, ['schemaVersion', 'status', 'failureCode', 'goal', 'session', 'usage'])
+    if (!isRecord(value.goal)) throw new TypeError('natural Run trial receipt Goal is invalid')
+    exactKeys(value.goal, ['id'])
+    const goalId = nonEmptyString(value.goal.id)
+    if (goalId !== expected.goalId) throw new TypeError('natural Run trial receipt Goal does not match')
+
+    if (!isRecord(value.session)) throw new TypeError('natural Run trial receipt Session is invalid')
+    exactKeys(value.session, ['id'])
+    const sessionId = nonEmptyString(value.session.id)
+    if (sessionId !== expected.sessionId) throw new TypeError('natural Run trial receipt Session does not match')
+
+    if (!isRecord(value.usage)) throw new TypeError('natural Run trial receipt usage is invalid')
+    exactKeys(value.usage, ['modelRequests', 'toolCalls', 'exactCny'])
+    if (
+      value.usage.modelRequests !== 0
+      || value.usage.toolCalls !== 0
+      || value.usage.exactCny !== 'unavailable'
+    ) {
+      throw new TypeError('natural Run trial failure receipt usage is invalid')
+    }
+    return createNaturalRunTrialFailure(
+      oneOf(value.failureCode, NATURAL_RUN_TRIAL_FAILURE_CODES),
+      { goalId, sessionId },
+    )
+  }
+
+  exactKeys(value, ['schemaVersion', 'status', 'goal', 'session', 'run', 'learning', 'usage'])
 
   if (!isRecord(value.goal)) throw new TypeError('natural Run trial receipt Goal is invalid')
   exactKeys(value.goal, ['id', 'revision', 'phase'])
@@ -222,7 +299,7 @@ export function parseNaturalRunTrialChildReceipt(
   if (!isRecord(value.usage)) throw new TypeError('natural Run trial receipt usage is invalid')
   onlyKeys(value.usage, ['modelRequests', 'toolCalls', 'tokens', 'exactCny'])
   requireKeys(value.usage, ['modelRequests', 'toolCalls', 'exactCny'])
-  let tokens: NaturalRunTrialReceipt['usage']['tokens'] | undefined
+  let tokens: NaturalRunTrialSettledReceipt['usage']['tokens'] | undefined
   if (value.usage.tokens !== undefined) {
     if (!isRecord(value.usage.tokens)) throw new TypeError('natural Run trial receipt tokens are invalid')
     onlyKeys(value.usage.tokens, [

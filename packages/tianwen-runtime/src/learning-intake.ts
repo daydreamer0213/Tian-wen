@@ -69,6 +69,23 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+type RunSkillBindingFailureCode =
+  | 'run-binding-precondition-failed'
+  | 'skill-unavailable'
+  | 'skill-not-model-invocable'
+  | 'run-binding-persistence-failed'
+
+class RunSkillBindingError extends Error {
+  constructor(
+    readonly code: RunSkillBindingFailureCode,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options)
+    this.name = 'RunSkillBindingError'
+  }
+}
+
 function sessionDigest(events: readonly SessionEvent[]): Sha256Digest {
   return `sha256:${createHash('sha256')
     .update(JSON.stringify(events), 'utf8')
@@ -125,7 +142,10 @@ export class TianwenLearningIntakeService extends Service {
     const session = agent.session
     const before = sessionDigest(session.events)
     if (session.events.some(event => event.type === 'turn/start')) {
-      throw new Error('Tianwen Run must be bound before the first DSH Turn')
+      throw new RunSkillBindingError(
+        'run-binding-precondition-failed',
+        'Tianwen Run must be bound before the first DSH Turn',
+      )
     }
     const binding = prepareRunBinding({
       ...input,
@@ -136,31 +156,62 @@ export class TianwenLearningIntakeService extends Service {
       scope: agent,
     })
     if (skill === undefined) {
-      throw new Error(`unknown DSH Skill: ${skillName}`)
+      throw new RunSkillBindingError('skill-unavailable', `unknown DSH Skill: ${skillName}`)
     }
     if (skill.invocation.modelInvocable !== true) {
-      throw new Error(`DSH Skill is not model-invocable: ${skillName}`)
+      throw new RunSkillBindingError(
+        'skill-not-model-invocable',
+        `DSH Skill is not model-invocable: ${skillName}`,
+      )
     }
-    const manifest = prepareRunSkillManifest({ runId: binding.runId, skill })
+    let manifest: ReturnType<typeof prepareRunSkillManifest>
+    try {
+      manifest = prepareRunSkillManifest({ runId: binding.runId, skill })
+    } catch (cause) {
+      throw new RunSkillBindingError(
+        'run-binding-precondition-failed',
+        cause instanceof Error ? cause.message : 'DSH Skill manifest precondition failed',
+        { cause },
+      )
+    }
     if (
       session.events.some(event => event.type === 'turn/start')
       || sessionDigest(session.events) !== before
     ) {
-      throw new Error('Tianwen Run must be bound before the first DSH Turn')
+      throw new RunSkillBindingError(
+        'run-binding-precondition-failed',
+        'Tianwen Run must be bound before the first DSH Turn',
+      )
     }
-    const run = this.ctx.tianwenEvolution.recordRunBinding({
-      ...input,
-      sessionId: String(session.id),
-    })
-    const receipt = this.ctx.tianwenEvolution.recordRunSkillManifest({
-      runId: run.runId,
-      skill,
-    })
+    let run: RunBindingReceipt
+    let receipt: ReturnType<typeof this.ctx.tianwenEvolution.recordRunSkillManifest>
+    try {
+      run = this.ctx.tianwenEvolution.recordRunBinding({
+        ...input,
+        sessionId: String(session.id),
+      })
+      receipt = this.ctx.tianwenEvolution.recordRunSkillManifest({
+        runId: run.runId,
+        skill,
+      })
+    } catch (cause) {
+      throw new RunSkillBindingError(
+        'run-binding-persistence-failed',
+        'governed Run binding persistence failed',
+        { cause },
+      )
+    }
     if (sessionDigest(session.events) !== before) {
-      throw new Error('governed Run binding changed the DSH Session')
+      throw new RunSkillBindingError(
+        'run-binding-precondition-failed',
+        'governed Run binding changed the DSH Session',
+      )
     }
     if (receipt.parentVersionId !== manifest.parentVersionId) {
-      throw new Error('governed Run binding disagrees with prepared manifest')
+      throw new RunSkillBindingError(
+        'run-binding-precondition-failed',
+        'governed Run binding disagrees with prepared manifest',
+      )
     }
     return {
       ...run,

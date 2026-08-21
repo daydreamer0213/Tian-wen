@@ -139,7 +139,26 @@ function trialConfig(
   } as const
 }
 
+async function expectPreTurnFailure(
+  mounted: Awaited<ReturnType<typeof mountNaturalGoal>>,
+  receipt: unknown,
+  failureCode: string,
+): Promise<void> {
+  expect(receipt).toEqual({
+    schemaVersion: 'tianwen.natural-run-trial-receipt.v1',
+    status: 'pre-turn-failed',
+    failureCode,
+    goal: { id: String(mounted.goal.id) },
+    session: { id: String(mounted.sessionId) },
+    usage: { modelRequests: 0, toolCalls: 0, exactCny: 'unavailable' },
+  })
+  expect(mounted.harness.adapter.requests).toEqual([])
+  expect((await mounted.harness.ctx.sessionPersistence.inspect(mounted.sessionId)).events
+    .some(event => event.type === 'turn/start')).toBe(false)
+}
+
 afterEach(() => {
+  vi.restoreAllMocks()
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true })
   }
@@ -188,15 +207,164 @@ describe('natural DSH Run trial manifest', () => {
 })
 
 describe('natural DSH Run trial runtime', () => {
-  it('rejects a child Goal mismatch before creating an Agent request or driving the Goal', async () => {
+  it('reports a manifest revalidation failure before creating an Agent request or driving the Goal', async () => {
     const mounted = await mountNaturalGoal([textResponse('must stay unused')])
     const manifestPath = writeManifest(manifest({ goalId: String(mounted.goal.id) }))
     const trial = readNaturalRunTrialManifest(manifestPath)
     try {
-      await expect(runGoalResume(mounted.harness.ctx, {
+      const receipt = await runGoalResume(mounted.harness.ctx, {
         ...trialConfig(mounted, trial, manifestPath), goalId: 'goal:other',
-      })).rejects.toThrow(/manifest Goal/i)
+      })
+      expect(receipt).toEqual({
+        schemaVersion: 'tianwen.natural-run-trial-receipt.v1',
+        status: 'pre-turn-failed',
+        failureCode: 'manifest-revalidation-failed',
+        goal: { id: 'goal:other' },
+        session: { id: String(mounted.sessionId) },
+        usage: { modelRequests: 0, toolCalls: 0, exactCny: 'unavailable' },
+      })
       expect(mounted.harness.adapter.requests).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('reports unavailable services and rejected Agent resume before the first Turn', async () => {
+    const services = await mountNaturalGoal([textResponse('must stay unused')])
+    const servicesPath = writeManifest(manifest({ goalId: String(services.goal.id) }))
+    const servicesTrial = readNaturalRunTrialManifest(servicesPath)
+    try {
+      vi.spyOn(services.harness.ctx, 'get').mockReturnValue(undefined)
+      await expectPreTurnFailure(
+        services,
+        await runGoalResume(services.harness.ctx, trialConfig(services, servicesTrial, servicesPath)),
+        'services-unavailable',
+      )
+    } finally {
+      services.disposeParent()
+      await services.harness.ctx.fiber.dispose()
+    }
+
+    const agent = await mountNaturalGoal([textResponse('must stay unused')])
+    const agentPath = writeManifest(manifest({ goalId: String(agent.goal.id) }))
+    const agentTrial = readNaturalRunTrialManifest(agentPath)
+    try {
+      vi.spyOn(agent.harness.ctx.agents, 'resume').mockRejectedValue(
+        new Error('D:/private/sk-agent-resume-DO-NOT-LEAK'),
+      )
+      const receipt = await runGoalResume(agent.harness.ctx, trialConfig(agent, agentTrial, agentPath))
+      await expectPreTurnFailure(agent, receipt, 'agent-resume-failed')
+      expect(JSON.stringify(receipt)).not.toContain('sk-agent-resume-DO-NOT-LEAK')
+    } finally {
+      agent.disposeParent()
+      await agent.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('reports Session, Goal, and verifier preflight failures before the first Turn', async () => {
+    const sessionGoal = await mountNaturalGoal([textResponse('must stay unused')])
+    const sessionGoalPath = writeManifest(manifest({ goalId: String(sessionGoal.goal.id) }))
+    const sessionGoalTrial = readNaturalRunTrialManifest(sessionGoalPath)
+    try {
+      const receipt = await runGoalResume(sessionGoal.harness.ctx, {
+        ...trialConfig(sessionGoal, sessionGoalTrial, sessionGoalPath),
+        revision: sessionGoal.goal.revision + 1,
+      })
+      await expectPreTurnFailure(sessionGoal, receipt, 'session-goal-preflight-failed')
+    } finally {
+      sessionGoal.disposeParent()
+      await sessionGoal.harness.ctx.fiber.dispose()
+    }
+
+    const verifier = await mountNaturalGoal([textResponse('must stay unused')])
+    const verifierPath = writeManifest(manifest({ goalId: String(verifier.goal.id) }))
+    const verifierTrial = readNaturalRunTrialManifest(verifierPath)
+    try {
+      vi.spyOn(verifier.harness.ctx.tools, 'schemas').mockReturnValue([])
+      await expectPreTurnFailure(
+        verifier,
+        await runGoalResume(verifier.harness.ctx, trialConfig(verifier, verifierTrial, verifierPath)),
+        'verifier-unavailable',
+      )
+    } finally {
+      verifier.disposeParent()
+      await verifier.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('preserves source-owned Run-binding codes through the natural runner', async () => {
+    type MountedNaturalGoal = Awaited<ReturnType<typeof mountNaturalGoal>>
+    const scenarios: readonly {
+      readonly code: 'run-binding-precondition-failed' | 'skill-unavailable'
+        | 'skill-not-model-invocable' | 'run-binding-persistence-failed'
+      readonly setup: (mounted: MountedNaturalGoal) => (() => void) | undefined
+    }[] = [
+      {
+        code: 'run-binding-precondition-failed',
+        setup: mounted => {
+          mounted.disposeParent()
+          return mounted.harness.ctx.skills.register({
+            ...parentSkill,
+            resourceBase: { kind: 'url', url: 'https://invalid.test' },
+          })
+        },
+      },
+      {
+        code: 'skill-unavailable',
+        setup: mounted => { mounted.disposeParent(); return undefined },
+      },
+      {
+        code: 'skill-not-model-invocable',
+        setup: mounted => {
+          mounted.disposeParent()
+          return mounted.harness.ctx.skills.register({
+            ...parentSkill,
+            invocation: { modelInvocable: false, userInvocable: true },
+          })
+        },
+      },
+      {
+        code: 'run-binding-persistence-failed',
+        setup: mounted => {
+          vi.spyOn(mounted.harness.ctx.tianwenEvolution, 'recordRunBinding')
+            .mockImplementation(() => { throw new Error('source-owned persistence failure') })
+          return undefined
+        },
+      },
+    ]
+    for (const scenario of scenarios) {
+      const mounted = await mountNaturalGoal([textResponse('must stay unused')])
+      const manifestPath = writeManifest(manifest({ goalId: String(mounted.goal.id) }))
+      const trial = readNaturalRunTrialManifest(manifestPath)
+      const dispose = scenario.setup(mounted)
+      try {
+        await expectPreTurnFailure(
+          mounted,
+          await runGoalResume(mounted.harness.ctx, trialConfig(mounted, trial, manifestPath)),
+          scenario.code,
+        )
+      } finally {
+        dispose?.()
+        mounted.disposeParent()
+        await mounted.harness.ctx.fiber.dispose()
+      }
+    }
+  })
+
+  it('normalizes an unknown pre-Turn error without exposing its details', async () => {
+    const mounted = await mountNaturalGoal([textResponse('must stay unused')])
+    const manifestPath = writeManifest(manifest({ goalId: String(mounted.goal.id) }))
+    const trial = readNaturalRunTrialManifest(manifestPath)
+    const sentinel = 'D:/private/sk-pre-turn-DO-NOT-LEAK'
+    try {
+      vi.spyOn(mounted.harness.ctx.tianwenLearningIntake, 'bindRunWithSkill')
+        .mockRejectedValue(new Error(sentinel))
+      const receipt = await runGoalResume(
+        mounted.harness.ctx, trialConfig(mounted, trial, manifestPath),
+      )
+      await expectPreTurnFailure(mounted, receipt, 'pre-turn-internal-error')
+      expect(JSON.stringify(receipt)).not.toContain(sentinel)
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()
