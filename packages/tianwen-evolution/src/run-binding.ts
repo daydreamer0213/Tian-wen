@@ -1,7 +1,7 @@
 export {
   prepareRunAcceptanceContract,
   prepareRunBinding,
-} from '@tianwen/evolution/run-binding'
+} from './outcome-intake.js'
 export type {
   RunAcceptanceContract,
   RunBindingInput,
@@ -11,4 +11,4 @@ export type {
   TianwenRunBindingV1,
   TianwenRunBindingV2,
   TianwenRunId,
-} from '@tianwen/evolution/run-binding'
+} from './outcome-intake.js'
