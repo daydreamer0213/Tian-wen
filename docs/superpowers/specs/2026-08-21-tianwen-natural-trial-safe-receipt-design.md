@@ -1,6 +1,6 @@
 # Tianwen Natural Trial Safe Child Receipt Design
 
-**Status:** proposed correction after one real, zero-Provider stop
+**Status:** approved correction after one real, zero-Provider stop
 
 ## 1. Decision
 
