@@ -19,13 +19,14 @@ operational receipt after mainline integration.
 
 **Tech Stack:** TypeScript 6.0.3, Node 22, Vitest 4.1.8, pnpm 11.20.0, DSH
 `0.1.0-rc.7`, existing Tianwen Evidence/Evolution/Runtime packages. No new
-dependency.
+third-party version; the existing exact DSH Skill package becomes an honest
+direct dependency of the deployable Runtime Bundle.
 
 ## Global Constraints
 
 - Canonical design:
   `docs/superpowers/specs/2026-08-21-tianwen-natural-run-evidence-trial-design.md`
-  at exact commit `106c39936e594ed46437ef9e5680f574a206422a`.
+  at exact commit `a9ed082204323c7371d6fb8b6deb7ca388546937`.
 - DSH `0.1.0-rc.7` remains the only product Agent Runtime.
 - Reuse the existing Goal resume, Agent, Session, Skill, tool, Provider,
   permission, and persistence seams; do not implement a Tianwen Agent loop.
@@ -56,7 +57,10 @@ dependency.
 - Do not run Provider, paid model, Docker, Alpha, or runtime-profile before the
   explicit post-mainline natural-trial task.
 - Do not install or download dependencies. Reuse the existing D-drive
-  `node_modules`, shared caches, and conditional Python interpreter.
+  `node_modules`, shared caches, and conditional Python interpreter. One
+  `--lockfile-only --offline --ignore-scripts` refresh is authorized solely to
+  declare the already-installed exact DSH Skill package in the Runtime Bundle;
+  it must download zero packages and must not relink `node_modules`.
 
 ---
 
@@ -148,6 +152,14 @@ failure green by creating another environment or changing an unrelated gate.
 - `packages/tianwen-runtime/src/index.ts`: export the narrow v2 runtime types.
 - `packages/tianwen-runtime/package.json`: expose one pure `./run-binding`
   subpath without changing dependencies.
+- `packages/tianwen-dsh-compat/src/runtime.ts`: keep the existing narrow bundle
+  alias and export only the public DSH/runtime seams actually used by the
+  mounted Tianwen services.
+- `packages/tianwen-runtime-bundle/package.json`: declare the already-installed
+  exact `@deepseek-ai/dsh-skill` `0.1.0-rc.7` package as a direct deployable
+  dependency.
+- `pnpm-lock.yaml`: refresh only the runtime-bundle importer offline for that
+  direct dependency.
 - `packages/tianwen-runtime-bundle/src/cli.ts`: add the opt-in manifest option.
 - `packages/tianwen-runtime-bundle/src/resume.ts`: parent preflight, installed
   bundle check, and path+digest child handoff.
@@ -156,7 +168,9 @@ failure green by creating another environment or changing an unrelated gate.
 - `packages/tianwen-runtime-bundle/resume.patch.yml`: pass two bounded trial
   config values into the existing runner.
 - `package.json`: add one zero-cost demo command.
-- `.github/workflows/ci.yml`: add two focused specs and the demo step.
+- `.github/workflows/ci.yml`: make the existing TypeScript build gate build the
+  Runtime Bundle dependency closure, then add two focused specs and the demo
+  step.
 - `tests/dsh-probe/evidence.spec.ts`,
   `tests/dsh-probe/outcome-intake.spec.ts`,
   `tests/dsh-probe/outcome-intake-runtime.spec.ts`,
@@ -183,9 +197,10 @@ failure green by creating another environment or changing an unrelated gate.
 - `docs/operations/tianwen-stage7-natural-run-evidence-trial-handoff.md`:
   durable scope and evidence handoff.
 
-No workspace-package dependency declaration, lockfile, database schema, second
-patch, or second Runtime is added. The root `package.json` changes only by one
-demo command.
+No new third-party version, database schema, second patch, or second Runtime is
+added. The only package/lockfile topology change is the direct declaration of
+the exact DSH Skill package that the deployable bundle already imports. The
+root `package.json` changes only by one demo command.
 
 ---
 
@@ -431,6 +446,107 @@ git add packages/tianwen-evolution/src/outcome-intake.ts `
   tests/dsh-probe/outcome-intake-runtime.spec.ts `
   tests/dsh-probe/evolution.spec.ts
 git commit -m "feat: bind verifier subjects to Tianwen Runs"
+```
+
+---
+
+## Task 2A: Repair the existing deployable Runtime Bundle surface
+
+This is a narrow prerequisite discovered by the first Task 3 product build.
+The approved baseline already fails because Stage 3/4 mounted services consume
+public DSH seams that the older `@tianwen/dsh-compat/runtime` bundle entry does
+not export. It is not a Stage 7 feature and must not become a new facade or
+Runtime composition.
+
+**Files:**
+
+- Modify: `packages/tianwen-dsh-compat/src/runtime.ts`
+- Modify: `packages/tianwen-runtime-bundle/package.json`
+- Modify: `pnpm-lock.yaml`
+- Modify: `tests/dsh-migration/runtime-bundle.spec.ts`
+
+**Interfaces:**
+
+- Keeps the existing `@tianwen/dsh-compat/runtime` alias.
+- Adds only these already-used runtime exports:
+  `SessionId`, `callConfigEquals`, `createUserMessage`,
+  `isAgentLoopRequest`, `isSkillName`, `renderSkillContent`, and
+  `ScriptedAdapter`.
+- Keeps `Context`, `Service`, and `DSH_VERSION` unchanged.
+- Declares `@deepseek-ai/dsh-skill: 0.1.0-rc.7` as a direct
+  `@tianwen/runtime-bundle` dependency.
+
+- [ ] **Step 1: Record the two exact RED contracts**
+
+First update the existing Runtime Bundle contract so that:
+
+- its package dependency expectation includes exact
+  `@deepseek-ai/dsh-skill: 0.1.0-rc.7`;
+- its runtime metafile allowlist permits only
+  `../tianwen-dsh-compat/dist/scripted-adapter.js` in addition to the existing
+  Tianwen/runtime inputs;
+- its runtime external list is exactly `@deepseek-ai/cordis`,
+  `@deepseek-ai/dsh-llm`, `@deepseek-ai/dsh-session`, and
+  `@deepseek-ai/dsh-skill`;
+- `test-harness`, probe helpers, private DSH paths, native addons, and unrelated
+  workspace inputs remain forbidden.
+
+Run the focused manifest assertion and confirm it fails because the direct DSH
+Skill dependency is absent. Then run:
+
+```powershell
+pnpm --filter @tianwen/runtime-bundle... build
+```
+
+Expected second RED: TypeScript compilation passes, then esbuild reports the
+missing named exports from `@tianwen/dsh-compat/runtime`. Preserve the exact
+error list; do not edit the alias or broaden it to the root compat entry.
+
+- [ ] **Step 2: Add only the missing public runtime exports**
+
+In `packages/tianwen-dsh-compat/src/runtime.ts`, re-export the exact public DSH
+symbols listed in the Interfaces block and re-export the existing local
+`ScriptedAdapter`. Do not export `test-harness`, test helpers, the root compat
+surface, or any private DSH path.
+
+- [ ] **Step 3: Declare the one honest deployable dependency**
+
+Add exact `@deepseek-ai/dsh-skill: 0.1.0-rc.7` beside the Runtime Bundle's
+existing public DSH dependencies. Refresh only the lockfile:
+
+```powershell
+pnpm install --lockfile-only --offline --ignore-scripts `
+  --store-dir D:\DevData\pnpm-store
+```
+
+Require the command to download zero packages. Inspect the diff: only the
+runtime-bundle importer may gain the direct dependency; `node_modules`, other
+importers, package versions, and integrity records must not change. Any wider
+lockfile rewrite is a stop condition, not permission to normalize the file.
+
+- [ ] **Step 4: Run GREEN and the packaging boundary**
+
+```powershell
+pnpm --filter @tianwen/runtime-bundle... build
+pnpm exec vitest run tests/dsh-migration/runtime-bundle.spec.ts
+pnpm run check:dsh-install
+pnpm run check:no-private-dsh-imports
+git diff --check
+```
+
+Expected: the Runtime Bundle builds; the metafile contains the exact local
+scripted adapter required by approved Stage 4 and no test harness/probe input;
+all external imports are declared exact public DSH dependencies. This does not
+authorize a second adapter, Provider wrapper, or live Evaluation path.
+
+- [ ] **Step 5: Commit the prerequisite repair**
+
+```powershell
+git add packages/tianwen-dsh-compat/src/runtime.ts `
+  packages/tianwen-runtime-bundle/package.json `
+  pnpm-lock.yaml `
+  tests/dsh-migration/runtime-bundle.spec.ts
+git commit -m "fix: align the deployable Tianwen runtime bundle"
 ```
 
 ---
@@ -805,6 +921,21 @@ not-met. Print exactly one JSON object.
 
 - [ ] **Step 4: Add focused CI wiring**
 
+Replace the existing TypeScript build command:
+
+```text
+pnpm --filter @tianwen/runtime... build
+```
+
+with:
+
+```text
+pnpm --filter @tianwen/runtime-bundle... build
+```
+
+This one command builds the Runtime Bundle and its Tianwen dependency closure;
+do not add a second duplicate build step.
+
 Append these two specs to the current explicit Vitest command:
 
 ```text
@@ -819,7 +950,8 @@ pnpm demo:natural-run-evidence
 ```
 
 Do not change triggers, permissions, runners, setup actions, cache, Python
-job, dependencies, Docker, matrix, artifact, release, or deploy behavior.
+job, any other dependency command, Docker, matrix, artifact, release, or
+deploy behavior.
 
 - [ ] **Step 5: Write the handoff and permanent public contract**
 
@@ -955,7 +1087,9 @@ Require:
 - one existing `node_modules`, no `.venv`, clone, Profile, or disposable probe;
 - dependency operations downloaded zero;
 - Provider, paid token, CNY, Docker, and Alpha calls remain zero;
-- no lockfile or dependency changes.
+- the only dependency topology change is exact
+  `@deepseek-ai/dsh-skill@0.1.0-rc.7` becoming a direct Runtime Bundle
+  dependency, and the lockfile diff is limited to that importer declaration.
 
 Do not delete unknown data or shared caches.
 
@@ -1017,9 +1151,15 @@ mean a configured-Provider natural task has run.
 This is an operational evidence task after Task 7, not a mainline code gate.
 
 - [ ] Read-only audit existing D-drive DSH data directories. Select only an
-  existing product-like profile with configured credentials, a useful fresh
-  first-round Goal, an existing parent Skill, and a stable independent
-  verifier. Do not use a historical probe/Alpha fixture as natural evidence.
+  existing product-like profile with configured credentials, an existing
+  parent Skill, and a stable independent verifier. The supervisor may select a
+  small real repository need and create a fresh first-round DSH Goal for it;
+  the Goal does not need to exist before this task. Do not use a historical
+  probe/Alpha fixture as natural evidence.
+- [ ] Freeze the task value, acceptance contract, verifier, parent Skill, and
+  trial manifest before the Run. The task must remain useful even with Tianwen
+  learning disabled. Do not create a simulated-user service, task generator,
+  hidden answer, scripted Provider result, or retry loop.
 - [ ] If no such profile/task/verifier exists, output the non-persistent safe
   result `natural-trial-pending`, record it in the supervisor handoff, and stop
   successfully. Do not create a Profile merely to make the stage look green.
