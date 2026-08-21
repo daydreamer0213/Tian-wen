@@ -105,6 +105,14 @@ lockfile importer offline, with zero downloads. Exact-main CI must build the
 runtime bundle and its dependency closure before typecheck so this product
 packaging boundary cannot drift silently again.
 
+The Stage 7 CLI manifest parser also needs only the pure Run-binding contract.
+Its `@tianwen/runtime/run-binding` entry must re-export through an equally
+narrow `@tianwen/evolution/run-binding` entry, not through the Evolution root
+barrel. Otherwise a CLI-only parser would pull ledger services, the full DSH
+compat root, and test helpers into `dist/cli.js`. The narrow Evolution subpath
+re-exports only the existing acceptance/run-binding types and preparers from
+`outcome-intake`; it adds no service, store, dependency, or second parser.
+
 ## 3. Why Stage 7 stops before live Evaluation
 
 The current repository can truthfully persist a natural Run, Outcome,
