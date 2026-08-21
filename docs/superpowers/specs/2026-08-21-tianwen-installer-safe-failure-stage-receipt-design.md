@@ -14,14 +14,13 @@ repair it. The demonstrated, normal-path deficiency is narrower: an operator
 cannot safely learn the failed installer stage from `--json` output.
 
 For a failed `--json` invocation, add one non-persistent, canonical safe
-failure receipt. It reports a closed installer stage and, when the existing
-transaction had to recover, the truthful recovery result. It exits nonzero.
+failure receipt. It reports one closed installer stage and exits nonzero.
 The existing successful receipt, its ready-file schema, deployment transaction,
 and ordinary textual-success behavior remain unchanged.
 
 This is a small diagnostic repair under the project's personal-supervision
 principle: repair a proved operational gap, but do not promote theoretical
-corner cases into a logging or recovery platform.
+corner cases into a logging or generic operations platform.
 
 ## 2. Safe failure contract
 
@@ -32,7 +31,6 @@ type InstallerFailureReceipt = Readonly<{
   schemaVersion: 'tianwen.install-failure.v1'
   status: 'failed'
   stage: InstallFailureStage
-  recovery: InstallRecovery
 }>
 ```
 
@@ -58,7 +56,6 @@ type InstallFailureStage =
   | 'receipt-publication'
   | 'installer-internal'
 
-type InstallRecovery = 'not-required' | 'completed' | 'failed'
 ```
 
 The receipt contains no raw child output, error message, stack, argument,
@@ -74,14 +71,11 @@ Tianwen installer failed at <stage>.
 It may use only the same closed stage token. Neither form forwards an error's
 string representation.
 
-`recovery: 'not-required'` applies only to failures before the transaction's
-managed mutation/rollback boundary. `recovery: 'completed'` means every
-required existing host/Profile/archive/receipt restoration operation completed;
-it does **not** claim that Session or Evolution files are byte-identical.
-`recovery: 'failed'` means the existing recovery boundary itself could not
-finish. Operators continue to use before/after durable-data summaries as the
-proof for Session/Evolution equality. The receipt is not persisted, logged, or
-added to the ready receipt.
+The existing transaction and rollback remain unchanged, but the receipt makes
+no statement about restoration. Operators continue to use before/after durable-data
+summaries as the proof for Session/Evolution equality. If existing rollback
+itself throws, the outer safe boundary reports only `installer-internal` and
+stops. The receipt is not persisted, logged, or added to the ready receipt.
 
 ## 3. Stage mapping
 
@@ -91,7 +85,7 @@ matching.
 
 | Stage | Existing operation boundary |
 | --- | --- |
-| `managed-layout-preflight` | arguments, managed layout classification, current data-layout validation and managed host/Profile prechecks |
+| `managed-layout-preflight` | `parseInstallerArgs`, managed layout classification, current data-layout validation and managed host/Profile prechecks |
 | `pnpm-entry-preflight` | offline pnpm entrypoint/regular-file validation and fixed child-environment setup |
 | `pnpm-version` | fixed `pnpm --version` validation |
 | `workspace-install` | frozen offline workspace install |
@@ -109,8 +103,8 @@ matching.
 | `installer-internal` | an unwrapped or unknown internal failure |
 
 This mapping does not introduce a generic error classifier. A small local
-`InstallStageError` or equivalent wrapper may carry the closed token and
-recovery state across the existing function boundaries. Unknown exceptions map
+`InstallStageError` or equivalent wrapper may carry the closed token across the
+existing function boundaries. Unknown exceptions map
 to `installer-internal` instead of exposing their text.
 
 ## 4. Preserved transaction and product boundary
@@ -129,7 +123,17 @@ to `installer-internal` instead of exposing their text.
   operational limit. This design calls no Provider and performs no pricing
   activity.
 
-## 5. Test and replay contract
+## 5. Exact-main CI bearing, test and replay contract
+
+The implementation is permitted one mechanical workflow change: append
+`tests/dsh-migration/tianwen-installer.spec.ts` to the existing focused Vitest
+command in `.github/workflows/ci.yml`. It adds no job, step, permission, cache,
+dependency or workflow policy. The public repository contract must permanently
+assert that exact path is present in the focused command.
+
+The exact-main automatic CI run must execute that same focused step with the
+installer spec included. Runtime Bundle build, TypeScript typecheck and DSH
+closure do not replace this JavaScript installer contract.
 
 The implementation starts RED and proves each ordinary stage by a representative
 existing installer failure seam. The tests must show the exact schema keys and
@@ -141,7 +145,8 @@ failure output.
 The same tests retain the current success receipt/replay contract, the two
 accepted rc.6 predecessor layouts, current managed rc.7 upgrade behavior,
 partial deployment rollback and current transaction invariants. A failure
-receipt must never change the ready receipt or leave a durable failure record.
+receipt must never change the ready receipt, instrument rollback, or leave a
+durable failure record.
 
 ## 6. Operational boundary after exact-main CI
 
@@ -163,7 +168,8 @@ Candidate, Evaluation, Shadow, or Promotion follows from a failure receipt.
 - changing success receipt/ready-file schema or storing failed receipts;
 - adding a generic error framework, logging/telemetry system, watchdog, retry
   or repair capability;
-- changing timeout policy, package/dependency layout, workflow, Runtime,
+- changing timeout policy, package/dependency layout, workflow other than the
+  one focused-Vitest path addition, Runtime,
   Provider or learning governance behavior;
 - using price queries, price polling, a price snapshot or a product budget
   state machine.

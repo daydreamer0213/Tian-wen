@@ -1,8 +1,11 @@
 # Tianwen installer safe failure stage receipt implementation plan
 
-> **For agentic workers:** Execute task by task with executing-plans, TDD,
-> verification-before-completion, requesting-code-review, and Ponytail review.
-> Preserve every stated stop line.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or
+> superpowers:executing-plans to implement this plan task-by-task. Steps use
+> checkbox (`- [ ]`) syntax for tracking. Use TDD,
+> verification-before-completion, requesting-code-review and Ponytail review;
+> preserve every stated stop line.
 
 **Goal:** On a failed tianwen install --json invocation, return one canonical
 safe stage receipt without retaining raw diagnostics, changing the ready
@@ -10,9 +13,9 @@ receipt, or changing the managed installation transaction.
 
 **Architecture:** The installer keeps a small local current-stage carrier.
 Existing operation boundaries select a closed token before they run. The
-existing transaction catch records whether required restoration completed, and
-the CLI constructs a fresh receipt. Unknown exceptions reduce to
-installer-internal; no child text is forwarded.
+existing transaction catch remains unchanged, and the CLI constructs a fresh
+receipt. Unknown exceptions reduce to installer-internal; no child text is
+forwarded.
 
 **Tech stack:** Existing Node.js ESM installer, spawnSync, Vitest, pnpm
 offline workspace tooling and existing D-drive store.
@@ -30,11 +33,15 @@ offline workspace tooling and existing D-drive store.
 - Product implementation scope is limited to:
   - scripts/install-tianwen.mjs
   - tests/dsh-migration/tianwen-installer.spec.ts
+  - .github/workflows/ci.yml for one appended focused-Vitest path only
   - docs/operations/tianwen-rc6-rc7-managed-install-migration-handoff.md
   - tests/contracts/test_public_repository_surface.py only for the permanent
     public handoff statement.
-- Do not modify packages, lockfiles, dependencies, workflow, Runtime services,
-  Profile schema, ledger, learning paths, Provider paths or price/budget code.
+- Do not modify packages, lockfiles, dependencies, Runtime services, Profile
+  schema, ledger, learning paths, Provider paths or price/budget code. The only
+  workflow change is appending tests/dsh-migration/tianwen-installer.spec.ts to
+  the existing single focused Vitest command: no job, step, permission, cache,
+  dependency or policy change.
 - Reuse the sole approved D-drive implementation worktree, node_modules and
   D-drive stores. Do not install, download, relink, create a second worktree,
   clone, node_modules, .venv, Profile or probe, or clean unknown data.
@@ -93,7 +100,7 @@ install, download or relink. An unrelated failure stops execution.
 
 - Consumes: the current JSON installer CLI and scriptedInstaller child seams.
 - Produces: a newly constructed failure receipt with exactly schemaVersion,
-  status, stage and recovery; the ready/success receipt is unchanged.
+  status and stage; the ready/success receipt is unchanged.
 
 - [ ] **Step 1: RED — pin down safe failure output**
 
@@ -104,7 +111,6 @@ failure seam. It asserts exactly:
       schemaVersion: 'tianwen.install-failure.v1',
       status: 'failed',
       stage: 'managed-layout-preflight',
-      recovery: 'not-required',
     }
 
 Also assert exit code 1, stdout is one parseable JSON safe value, stderr is
@@ -122,15 +128,20 @@ failure receipt. An unrelated regression is a stop condition.
 
 - [ ] **Step 2: GREEN — only local vocabulary and formatter**
 
-In scripts/install-tianwen.mjs, define local closed stage/recovery constants and
-a tiny InstallStageError (or equivalent local wrapper). Add one formatter that
+In scripts/install-tianwen.mjs, define local closed stage constants and a tiny
+InstallStageError (or equivalent local wrapper). Add one formatter that
 constructs the receipt field by field. At the CLI error boundary select JSON or
 fixed text without using Error.message, child stdout/stderr, stack, argv or a
 path.
 
-Mark the current pre-transaction preflight as managed-layout-preflight and
-not-required. Unknown or unwrapped errors map to installer-internal; do not
-parse error strings.
+Map both parseInstallerArgs and managed-layout failures to
+managed-layout-preflight. Unknown or unwrapped errors map to
+installer-internal; do not parse error strings.
+
+Before parsing, derive only whether JSON was explicitly requested from the
+literal `--json`/`--json=true` switch so a parser failure can still choose the
+fixed JSON boundary. Do not echo an untrusted argument or derive a stage from
+its text.
 
 Keep installTianwen successful return values, ready receipt schema and ordinary
 success output byte-compatible. Do not add persistent failure state or change
@@ -147,7 +158,7 @@ Commit only Task 1 files:
 
 ---
 
-### Task 2: Map transaction boundaries and truthful recovery
+### Task 2: Map existing operation boundaries
 
 **Files:**
 
@@ -156,14 +167,24 @@ Commit only Task 1 files:
 
 **Interfaces:**
 
-- Consumes: current installer operation order and rollback closure.
-- Produces: a closed stage for every ordinary failure boundary and truthful
-  not-required, completed or failed recovery.
+- Consumes: current installer operation order and its unchanged rollback
+  closure.
+- Produces: a closed stage for every ordinary failure boundary.
 
-- [ ] **Step 1: RED — representative mapping and recovery**
+- [ ] **Step 1: RED — representative stage mapping**
 
 Extend the existing scripted child/deploy/archive/dump seam with
 representative failures for every ordinary stage:
+
+    const expectedStages = [
+      'managed-layout-preflight', 'pnpm-entry-preflight', 'pnpm-version',
+      'workspace-install', 'managed-host-deploy', 'runtime-bundle-build-1',
+      'runtime-bundle-pack-1', 'runtime-bundle-build-2',
+      'runtime-bundle-pack-2', 'archive-stability',
+      'managed-profile-deploy', 'managed-profile-validation',
+      'dsh-config-validation', 'archive-publication', 'receipt-publication',
+      'installer-internal',
+    ] as const
 
 - pnpm entry, version and workspace install;
 - host deploy;
@@ -173,22 +194,23 @@ representative failures for every ordinary stage:
 - DSH config validation;
 - archive publication and receipt publication.
 
-For each, assert the exact stage token, exact four-key JSON form, exit 1 and
-the correct recovery token. A deliberately unwrapped test exception must map
-to installer-internal. Add an injected restoration failure that proves
-recovery failed without exposing its sentinel.
+For each, assert the exact stage token, exact three-key JSON form and exit 1.
+A deliberately unwrapped test exception must map to installer-internal. Also
+prove the same path/credential-like raw sentinels cannot occur in either output
+form. Do not introduce restoration-failure injection or rollback
+instrumentation.
 
 Run the installer spec and record missing or misclassified mappings as RED.
 
 - [ ] **Step 2: GREEN — local stage carrier only**
 
 Set the current closed token immediately before each existing operation in the
-design order. Within the existing mutation transaction, wrap its failure with
-that token and execute the existing restoration order. Return completed only
-after required restoration calls return; return failed if a required
-restoration fails. Pre-transaction failures remain not-required.
+design order. Within the existing mutation transaction, preserve the existing
+restoration order unchanged. If rollback itself throws, the outer safe boundary
+returns only installer-internal and stops; it makes no statement about
+restoration.
 
-Do not claim durable Session/Evolution equality from recovery. Do not move
+Do not claim durable Session/Evolution equality from the receipt. Do not move
 transaction boundaries, retry a child, alter timeout settings, create a
 catch-all framework, retain raw child output or change success/replay paths.
 
@@ -205,22 +227,29 @@ rollback and later rollback tests remain green. Commit only Task 2 files:
 
 ---
 
-### Task 3: State the durable operational contract honestly
+### Task 3: Put the installer contract on the exact-main bearing path
 
 **Files:**
 
+- Modify: .github/workflows/ci.yml
 - Modify: docs/operations/tianwen-rc6-rc7-managed-install-migration-handoff.md
 - Modify: tests/contracts/test_public_repository_surface.py
 
 **Interfaces:**
 
-- Consumes: final fixed receipt vocabulary and observed nonzero/rollback fact.
-- Produces: a durable public operator statement separating transient stage
-  receipt from durable-state proof.
+- Consumes: final stage-only receipt vocabulary, observed nonzero/rollback fact
+  and the existing single focused Vitest command.
+- Produces: one direct exact-main JavaScript installer contract and a durable
+  public statement separating transient stage output from durable-state proof.
 
-- [ ] **Step 1: RED — public handoff contract**
+- [ ] **Step 1: RED — static public CI and handoff contracts**
 
-Extend the existing public repository contract so the migration handoff states:
+Extend the existing public repository contract so it first fails unless the
+focused Vitest command in .github/workflows/ci.yml contains exactly:
+
+    tests/dsh-migration/tianwen-installer.spec.ts
+
+The same contract must require that the migration handoff states:
 
 - failed JSON install output is a non-persistent closed safe receipt;
 - it preserves no raw child diagnostics and does not prove durable-data equality;
@@ -232,13 +261,19 @@ Extend the existing public repository contract so the migration handoff states:
 The contract must not add a personal absolute path, credential, raw manifest or
 claim that the unproved child root cause is known.
 
-- [ ] **Step 2: GREEN — concise handoff**
+- [ ] **Step 2: GREEN — append one existing focused command path**
 
-Update the existing handoff with the factual observed history, safe receipt role,
-recovery limitation and one-attempt stop line. Do not add instructions for
-logging, raw-output retrieval, manual repair, retry, price activity or a new
-Provider run. Preserve existing rc.6/rc.7 transaction and natural-trial
-boundaries.
+Append only `tests/dsh-migration/tianwen-installer.spec.ts` to the existing
+single focused Vitest command. Do not create a job/step, change permissions,
+cache/dependencies or alter any other workflow behavior. The Task 6 exact-main
+run must therefore execute this same contract.
+
+Update the existing handoff with factual observed history, the stage-only safe
+receipt role, durable-snapshot limitation and one-attempt stop line. If rollback
+itself throws, the operator receives only `installer-internal` and stops; no
+receipt claims restoration. Do not add instructions for logging, raw-output
+retrieval, manual repair, retry, price activity or a new Provider run. Preserve
+existing rc.6/rc.7 transaction and natural-trial boundaries.
 
 - [ ] **Step 3: Verify and commit**
 
@@ -252,7 +287,7 @@ unavailable and leave exact-main Python CI bearing.
 
 Commit only Task 3 files:
 
-    docs: describe safe installer failure receipts
+    test: run installer contract in CI
 
 ---
 
@@ -274,7 +309,9 @@ Critical/Important review findings.
 
 Run Python public contract/Ruff only with the approved existing D-drive
 interpreter. No gate may invoke product installer, Goal, configured model or
-Provider.
+Provider. The final local focused run must include
+tests/dsh-migration/tianwen-installer.spec.ts; Task 6 requires the exact-main
+focused Vitest step to carry and pass the same path.
 
 - [ ] **Step 2: Audit fixtures and external actions**
 
@@ -295,7 +332,7 @@ Critical/Important findings in Task 1–3 scope.
 
 Review exact feature head for:
 
-1. correctness/replay: stage ordering, recovery truth, safe output, success
+1. correctness/replay: stage ordering, stage-only safe output, success
    receipt/replay and rollback preservation;
 2. architecture/privacy/DSH: rc.7-only boundary, non-persistence, raw-data
    exclusion and no Runtime/Provider/learning expansion;
@@ -316,12 +353,35 @@ Stop before main integration.
 
 ---
 
-### Supervisor-only continuation: main integration and one operational gate
+### Task 6: Supervisor-only main integration and exact-SHA CI
 
-After separate exact-feature review, the supervisor alone may authorize a
-single no-fast-forward merge and ordinary main push. The executor must locate
-the one automatic push CI for that exact merge SHA and require Python and
-TypeScript success before a real product action.
+**Files:** none beyond the approved feature tree.
+
+**Interfaces:**
+
+- Consumes: supervisor-approved exact feature SHA.
+- Produces: one exact main merge SHA whose automatic push CI carries the
+  JavaScript installer contract.
+
+- [ ] **Step 1: Merge/push once after separate approval**
+
+From clean main, verify approved feature and main SHAs, merge once with
+no-fast-forward, prove merge tree equality with the feature, run diff-check,
+then ordinary-push once. Do not create a merge-only fix, fetch/rebase or
+force-push.
+
+- [ ] **Step 2: Require the real exact-main bearing gate**
+
+Locate the single automatic push run whose head SHA equals the merge SHA. Both
+Python and TypeScript must complete successfully. The TypeScript focused Vitest
+step must include and pass tests/dsh-migration/tianwen-installer.spec.ts, in
+addition to the existing Runtime Bundle build, typecheck and DSH closure gates.
+If any job fails, capture only the narrow failing log and stop; do not rerun or
+patch main.
+
+---
+
+### Task 7: Separately authorized one operational gate
 
 Only then may separate authorization permit one official offline installer
 attempt. A failure reports its safe stage and stops: no retry, ordinary fallback
