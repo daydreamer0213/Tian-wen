@@ -151,10 +151,12 @@ accounting for this manifest.
 `scopeKey`, and reusable `problemCategory` are short governance labels, not
 copies of the Goal objective or user request. Labels use a documented
 allowlist of ASCII letters, digits, `.`, `_`, `-`, `:`, and `/`, with a
-128-byte limit. The parser does not pretend to detect every possible secret by
-content; callers must not place credentials, Provider configuration, user
-prose, URLs with query material, or absolute paths in these fields or in
-`verifierArguments`.
+128-byte limit. After that syntax check, labels reject a leading `/`, a Windows
+drive-path prefix matching `^[A-Za-z]:[\\/]`, and a URI scheme matching
+`^[A-Za-z][A-Za-z0-9+.-]*://`. The parser does not pretend to detect every
+possible secret by content; callers must not place credentials, Provider
+configuration, user prose, URLs with query material, or absolute paths in
+these fields or in `verifierArguments`.
 
 `parentSkillName` is resolved through the prepared Agent's public DSH Skill
 scope. Stage 7 does not register or inject a Candidate.
