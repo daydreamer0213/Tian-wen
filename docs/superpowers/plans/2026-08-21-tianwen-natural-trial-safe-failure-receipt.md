@@ -107,6 +107,7 @@ output.
 **Files:**
 - Modify: `packages/tianwen-runtime-bundle/src/natural-run-trial.ts`
 - Modify: `packages/tianwen-runtime-bundle/src/resume.ts`
+- Modify: `packages/tianwen-runtime-bundle/src/resume-runner.ts` (type-only compatibility)
 - Modify: `tests/dsh-migration/goal-resume.spec.ts`
 
 **Interfaces:**
@@ -202,6 +203,13 @@ export type NaturalRunTrialReceipt =
 Parse `status` first, then apply an exact key set for that discriminant. Do not
 make success fields optional and do not accept free-form reasons.
 
+Before Task 3 adds failure emission, update only the existing settled runner
+annotations in `resume-runner.ts`: `runNaturalRunTrial()`, its local receipt
+factory, and their settled-only field references use
+`NaturalRunTrialSettledReceipt`. This is compile-time compatibility for the new
+union, not an early failure branch or runtime behavior change. The failing
+runtime-bundle build is the RED for this type boundary.
+
 - [ ] **Step 4: Write the monitor RED**
 
 Add child-process tests proving:
@@ -245,6 +253,7 @@ git diff --check
 ```powershell
 git add packages/tianwen-runtime-bundle/src/natural-run-trial.ts `
   packages/tianwen-runtime-bundle/src/resume.ts `
+  packages/tianwen-runtime-bundle/src/resume-runner.ts `
   tests/dsh-migration/goal-resume.spec.ts
 git commit -m "feat: report safe natural trial failures"
 ```
