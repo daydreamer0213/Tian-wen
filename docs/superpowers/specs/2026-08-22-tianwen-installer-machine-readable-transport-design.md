@@ -7,18 +7,18 @@ zero-side-effect parser probe established the remaining boundary precisely:
 
 - ordinary `pnpm run install:tianwen -- --json --invalid-safe-probe` adds pnpm
   lifecycle presentation, so stdout is not one JSON value;
-- `pnpm --silent run install:tianwen -- --json --invalid-safe-probe` exits 1
-  with one exact three-key `tianwen.install-failure.v1` receipt and empty
-  stderr; and
-- direct Node has the same installer result, but bypasses the normal package
-  entry and is not the operational interface.
+- `pnpm --silent run install:tianwen -- --json --invalid-safe-probe` can make
+  the wrapper quiet, but remains a package-manager presentation layer; and
+- Node 22's stable `node --run install:tianwen -- --json --invalid-safe-probe`
+  exits 1 with one exact three-key `tianwen.install-failure.v1` receipt and
+  empty stderr while running the package script itself.
 
 The root cause is therefore known: normal pnpm presentation, not the installer
 transaction, DSH, or the receipt schema, contaminates the machine-readable
 transport. The single canonical machine invocation is:
 
 ```powershell
-pnpm --silent run install:tianwen -- --data-dir D:\DevData\tianwen --json
+node --run install:tianwen -- --data-dir D:\DevData\tianwen --json
 ```
 
 This is an operational calling convention. It does not change the ordinary
@@ -35,14 +35,16 @@ stdout:
   `tianwen.install-failure.v1`, `failed`, and the existing closed stage enum.
 
 The canonical failure probe must exit 1, have empty stderr, and expose no
-path-like or credential-like sentinel. It uses a fully controlled command
-string with the native Windows shell resolving the actual `pnpm` command from
-PATH, `--silent`, and the package script; it must not call the installer source
+path-like or credential-like sentinel. It uses Node 22's stable `--run`
+package-script runner through `process.execPath` with a fixed argument array;
+it runs the `package.json` script and must not call the installer source
 directly. The command's root comes only from the existing fixed-D-drive/UUID
-test helper and its sentinel is a fixed literal, never caller input. The
-deliberately invalid parser argument prevents data-directory creation, package
-installation, managed deployment, Provider activity, or product mutation. Its
-designated fixture root must be absent before and after the process.
+test helper and its sentinel is a fixed literal, never caller input. The test
+uses no shell, pnpm launcher, `npm_execpath`, launcher parsing, or package
+manager fallback. The deliberately invalid parser argument prevents
+data-directory creation, package installation, managed deployment, Provider
+activity, or product mutation. Its designated fixture root must be absent
+before and after the process.
 
 The controlled test may temporarily capture only its own deterministic child
 stdout/stderr to parse the complete JSON value and assert that its own sentinel
@@ -51,22 +53,24 @@ reuses those bytes. Production and operational paths never capture, scan,
 retain, log, redirect, or extract a receipt from raw pnpm wrapper output.
 
 The native Windows installer job is the bearing CI location because the
-installer itself is a Windows product contract and its pnpm setup action puts
-the actual command on PATH. The controlled test shell seam is test-only; it is
-not a production wrapper or general launcher, and an unavailable command is
-not permission to fall back to direct Node or another package manager.
+installer itself is a Windows product contract. The repository already requires
+Node `>=22.19.0 <23` and CI runs Node 22.20.0, so its stable package-script
+runner is a supported contract. A direct source invocation, shell/launcher
+seam, or package-manager fallback is not a substitute.
 
 ## 3. Rejected alternatives
 
-- Scanning for a final JSON fragment would consume lifecycle text and make an
+- Scanning for a final JSON fragment would consume wrapper text and make an
   ambiguous wrapper stream look trustworthy.
 - Retaining, logging, redirecting, or searching raw wrapper output in a
   production or operational path would break the established safe-output
   boundary.
-- A generic transport/parser/logger module is unnecessary: pnpm already has
-  the one built-in presentation control required here.
-- Direct Node is a useful probe only; making it the official command would
-  bypass the package entry users actually run.
+- A generic transport/parser/logger module is unnecessary: Node already has
+  the stable package-script runner required here.
+- `pnpm --silent run` is usable but remains a wrapper-level repair; it is not
+  the primary machine transport. Directly invoking
+  `node scripts/install-tianwen.mjs` would bypass the package entry users
+  actually run.
 - Changing installer success or failure schemas would repair the wrong layer
   and break an already-correct contract.
 

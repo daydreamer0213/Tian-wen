@@ -4,16 +4,18 @@
 > `verification-before-completion`, `requesting-code-review`, and Ponytail.
 > Preserve the one-attempt operational stop line.
 
-**Goal:** Make the official pnpm package entry expose the existing installer
-safe JSON receipt without lifecycle presentation contaminating its stdout.
+**Goal:** Make the official Node package-script entry expose the existing
+installer safe JSON receipt without package-manager presentation contaminating
+its stdout.
 
 **Architecture:** Keep the installer untouched. The native-Windows installer
-test uses the native Windows shell to resolve the actual `pnpm` command from
-PATH with `--silent run`, then locks the documented machine command in the
-existing handoff and public repository contract.
+test invokes Node 22's stable `--run` package-script runner through
+`process.execPath`, then locks the documented machine command in the existing
+handoff and public repository contract. This runs `install:tianwen` from
+`package.json`; it is not a direct invocation of the installer source.
 
-**Tech stack:** Existing pnpm 11.20.0 package script, Node.js `spawnSync`,
-native-Windows Vitest installer contract, and the existing Python public
+**Tech stack:** Existing Node 22.20.0 package-script runner, Node.js
+`spawnSync`, native-Windows Vitest installer contract, and the existing Python public
 repository contract.
 
 ## Global constraints
@@ -76,23 +78,24 @@ repository contract.
 
 - Modify: `tests/dsh-migration/tianwen-installer.spec.ts`
 
-- [ ] RED: add a process-level test inside the existing installer contract.
-  Derive a unique fixture-root path through `testRoot`, assert that it does not
-  exist, and form one fully controlled command string using only that fixed
-  D-drive/UUID root and a fixed sentinel literal. Invoke it through native
-  Windows shell PATH resolution with `spawnSync(command, { shell: true, ... })`;
-  do not resolve launchers with `npm_execpath`, `where.exe`, launcher parsing,
-  or a direct-Node fallback. First invoke the actual package command without
-  `--silent`, while asserting the eventual exact safe-receipt contract. The
-  test must fail because normal pnpm lifecycle presentation makes stdout more
-  than one JSON value; it must not print, persist, redirect, fragment-search,
-  or reuse that raw presentation.
+- [ ] RED: retain the already-observed non-silent `pnpm run` lifecycle
+  presentation failure as the root-cause proof. Add the corrective
+  process-level package-script test inside the existing installer contract:
+  derive a unique fixture-root path through `testRoot`, assert that it does not
+  exist, and invoke the actual package script through `process.execPath` and a
+  fixed Node `--run` argument array. It must not invoke
+  `node scripts/install-tianwen.mjs` directly, use a shell, resolve a pnpm
+  launcher, read `npm_execpath`, parse launcher contents, or fall back to a
+  package manager. Its deliberately invalid fixed sentinel must be rejected
+  before any data-directory mutation. Temporary capture and whole-stream
+  parsing are permitted only in this deterministic fixture test; they must not
+  print, persist, redirect, fragment-search, or reuse that raw presentation.
 
   ```ts
-  const command = `pnpm run install:tianwen -- --data-dir ${root} --json --${credentialSentinel}`
-  const result = spawnSync(command, { shell: true, cwd: resolve('.'),
-    encoding: 'utf8', env: { ...process.env,
-      pnpm_config_verify_deps_before_run: 'false' } })
+  const result = spawnSync(process.execPath, [
+    '--run', 'install:tianwen', '--', '--data-dir', root, '--json',
+    `--${credentialSentinel}`,
+  ], { cwd: resolve('.'), encoding: 'utf8' })
   ```
 
   The eventual assertions are exit 1, `stderr === ''`, a single parsed object exactly
@@ -103,12 +106,10 @@ repository contract.
   wrapper-output handling. Run the installer spec and record this known
   lifecycle-presentation RED.
 
-- [ ] Do not add production code. GREEN changes only that actual package command
-  to `pnpm --silent run ...`; the final test therefore locks the official
-  machine command rather than a direct Node call. The native installer-windows
-  job already supplies pnpm on PATH through its setup action. Re-run the named
-  transport test and the installer spec; both must pass and leave every fixture
-  root empty.
+- [ ] Do not add production code. The final test locks the official Node
+  package-script command rather than a direct source call or a pnpm wrapper.
+  Re-run the named transport test and the installer spec; both must pass and
+  leave every fixture root empty.
 
 - [ ] Commit only the test:
 
@@ -127,12 +128,13 @@ repository contract.
   require the exact command:
 
   ```text
-  pnpm --silent run install:tianwen -- --data-dir D:\DevData\tianwen --json
+  node --run install:tianwen -- --data-dir D:\DevData\tianwen --json
   ```
 
   and the factual boundary that normal pnpm lifecycle presentation is not a
-  machine-readable transport. Require that direct Node, raw JSON scanning,
-  raw-output retention, and schema changes remain rejected. Run the Python
+  machine-readable transport. Require that direct installer-source invocation,
+  pnpm wrapper transport, raw JSON scanning, raw-output retention, and schema
+  changes remain rejected. Run the Python
   public contract conditionally with the exact existing interpreter established
   in workspace setup; if it is unavailable, record that fact without creating
   an environment and leave exact-main Python CI bearing. Otherwise record its
@@ -197,7 +199,7 @@ Only after Task 4 exact-main CI succeeds may separate authorization permit one
 official offline product installation using exactly:
 
 ```powershell
-pnpm --silent run install:tianwen -- --data-dir D:\DevData\tianwen --json
+node --run install:tianwen -- --data-dir D:\DevData\tianwen --json
 ```
 
 Consume one canonical ready or three-key failed receipt without raw scanning.
