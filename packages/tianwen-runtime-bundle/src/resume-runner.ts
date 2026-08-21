@@ -610,7 +610,7 @@ export async function runGoalResume(ctx: Context,
 }
 
 export const name = 'tianwen-resume-runner'
-export const inject = ['agentDefaultModel', 'agents', 'credentials', 'goals', 'llm', 'sessions', 'tianwenEvidence'] as const
+export const inject = ['agentDefaultModel', 'agents', 'credentials', 'goals', 'llm', 'sessions', 'tianwenEvidence', 'tianwenLearningIntake'] as const
 
 export function apply(ctx: Context,
   config: ResumeConfig | LiveSmokeResumeConfig | NaturalRunTrialResumeConfig): void {
