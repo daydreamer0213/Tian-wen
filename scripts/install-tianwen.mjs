@@ -21,6 +21,11 @@ const PREDECESSOR_DSH_VERSION = '0.1.0-rc.6'
 const PNPM_VERSION = '11.20.0'
 const PROFILE = 'tianwen'
 const RUNTIME_PACKAGE = '@tianwen/runtime-bundle'
+const INSTALLER_FAILURE_SCHEMA_VERSION = 'tianwen.install-failure.v1'
+const INSTALLER_FAILURE_STAGE = Object.freeze({
+  INSTALLER_INTERNAL: 'installer-internal',
+  MANAGED_LAYOUT_PREFLIGHT: 'managed-layout-preflight',
+})
 const PROFILE_BUNDLES = [
   '@deepseek-ai/dsh-base',
   '@deepseek-ai/dsh-headless',
@@ -64,6 +69,31 @@ function canonicalize(value) {
 
 export function canonicalJson(value) {
   return `${JSON.stringify(canonicalize(value), null, 2)}\n`
+}
+
+class InstallStageError extends Error {
+  constructor(stage) {
+    super()
+    this.stage = stage
+  }
+}
+
+function installerFailureReceipt(stage) {
+  return {
+    schemaVersion: INSTALLER_FAILURE_SCHEMA_VERSION,
+    status: 'failed',
+    stage,
+  }
+}
+
+function isJsonRequested(argv) {
+  return argv.includes('--json') || argv.includes('--json=true')
+}
+
+function installerFailureStage(error) {
+  return error instanceof InstallStageError
+    ? error.stage
+    : INSTALLER_FAILURE_STAGE.INSTALLER_INTERNAL
 }
 
 export function parseInstallerArgs(argv) {
@@ -688,15 +718,23 @@ export function installTianwen({
 }
 
 async function main() {
+  const argv = process.argv.slice(2)
+  const json = isJsonRequested(argv)
   try {
-    const options = parseInstallerArgs(process.argv.slice(2))
+    let options
+    try {
+      options = parseInstallerArgs(argv)
+    } catch {
+      throw new InstallStageError(INSTALLER_FAILURE_STAGE.MANAGED_LAYOUT_PREFLIGHT)
+    }
     const receipt = installTianwen(options)
     process.stdout.write(options.json
       ? canonicalJson(receipt)
       : `Tianwen is ready. Add ${receipt.binDir} to PATH.\n`)
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    process.stderr.write(`Error: ${message}\n`)
+    const stage = installerFailureStage(error)
+    if (json) process.stdout.write(canonicalJson(installerFailureReceipt(stage)))
+    else process.stderr.write(`Tianwen installer failed at ${stage}.\n`)
     process.exitCode = 1
   }
 }

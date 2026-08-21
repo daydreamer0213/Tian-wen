@@ -1,5 +1,6 @@
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   canonicalJson,
@@ -214,6 +215,34 @@ afterEach(() => {
 })
 
 describe('Tianwen installer contract', () => {
+  it('emits only a stage-only safe receipt for a JSON parser failure', () => {
+    const installer = resolve('scripts', 'install-tianwen.mjs')
+    const secret = 'credential-sentinel-do-not-emit'
+    const json = spawnSync(process.execPath, [
+      installer,
+      '--json',
+      '--data-dir', 'D:\\DevData\\tianwen',
+      `--${secret}`,
+    ], { encoding: 'utf8' })
+    const plain = spawnSync(process.execPath, [
+      installer,
+      '--data-dir', 'D:\\DevData\\tianwen',
+      `--${secret}`,
+    ], { encoding: 'utf8' })
+
+    expect(json.status).toBe(1)
+    expect(json.stdout).toBe(canonicalJson({
+      schemaVersion: 'tianwen.install-failure.v1',
+      status: 'failed',
+      stage: 'managed-layout-preflight',
+    }))
+    expect(json.stderr).toBe('')
+    expect(plain.status).toBe(1)
+    expect(plain.stdout).toBe('')
+    expect(plain.stderr).toBe('Tianwen installer failed at managed-layout-preflight.\n')
+    expect(`${json.stdout}${json.stderr}${plain.stdout}${plain.stderr}`).not.toContain(secret)
+  })
+
   it('accepts only a data directory and optional JSON output', () => {
     expect(parseInstallerArgs(['--data-dir', 'D:\\DevData\\tianwen', '--json']))
       .toEqual({ dataDir: 'D:\\DevData\\tianwen', json: true })
