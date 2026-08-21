@@ -502,10 +502,14 @@ describe('Tianwen installer contract', () => {
     ])
     expect(scripted.executables.every(executable => executable === process.execPath)).toBe(true)
     expect(scripted.spawnOptions.every(options => options.shell === false)).toBe(true)
-    expect(scripted.spawnOptions[scripted.calls.findIndex(argv =>
-      argv.includes('deploy') && argv.includes('@tianwen/dsh-host'))]?.timeout).toBe(900_000)
-    expect(scripted.spawnOptions[scripted.calls.findIndex(argv =>
-      argv.includes('deploy') && argv.includes('@tianwen/profile-host'))]?.timeout).toBe(900_000)
+    const hostDeployIndex = scripted.calls.findIndex(argv =>
+      argv.includes('deploy') && argv.includes('@tianwen/dsh-host'))
+    const profileDeployIndex = scripted.calls.findIndex(argv =>
+      argv.includes('deploy') && argv.includes('@tianwen/profile-host'))
+    expect(scripted.spawnOptions[hostDeployIndex]?.timeout).toBe(0)
+    expect(scripted.spawnOptions[profileDeployIndex]?.timeout).toBe(0)
+    expect(scripted.spawnOptions.filter((_options, index) =>
+      index !== hostDeployIndex && index !== profileDeployIndex).every(options => options.timeout > 0)).toBe(true)
     expect(scripted.calls.every(argv => !argv.includes(session) && !argv.includes(ledger))).toBe(true)
   })
 

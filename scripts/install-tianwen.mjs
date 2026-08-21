@@ -577,7 +577,7 @@ export function installTianwen({
         '--config.inject-workspace-packages=true',
         '--filter', '@tianwen/dsh-host',
         'deploy', '--prod', paths.hostRoot,
-      ], 900_000)
+      ], 0)
       dshBin = validateInstalledHost(paths.hostRoot)
     }
     for (const [index, archiveStage] of archiveStages.entries()) {
@@ -609,7 +609,7 @@ export function installTianwen({
         '--config.inject-workspace-packages=true',
         '--filter', '@tianwen/profile-host',
         'deploy', '--prod', paths.profileRoot,
-      ], 900_000)
+      ], 0)
       normalizeDeployedProfile(paths, paths.profileRoot)
       const deployedManifest = validateProfile(paths)
       resolveInstalledCli(deployedManifest, repoRoot)
