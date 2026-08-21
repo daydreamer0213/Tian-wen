@@ -21,8 +21,15 @@ import {
   createGoalLiveSmokeFailure,
 } from './goal-live-smoke.js'
 import type { GoalLiveSmokeReceipt, GoalLiveSmokeSuccessReceipt } from './goal-live-smoke.js'
-import { readNaturalRunTrialManifest } from './natural-run-trial.js'
-import type { NaturalRunTrialReceipt, NaturalRunTrialSettledReceipt } from './natural-run-trial.js'
+import {
+  createNaturalRunTrialFailure,
+  readNaturalRunTrialManifest,
+} from './natural-run-trial.js'
+import type {
+  NaturalRunTrialFailureCode,
+  NaturalRunTrialReceipt,
+  NaturalRunTrialSettledReceipt,
+} from './natural-run-trial.js'
 
 interface ResumeConfig {
   readonly goalId: string
@@ -60,6 +67,22 @@ interface Receipt {
 }
 
 type ResumeReceipt = Receipt | GoalLiveSmokeReceipt | NaturalRunTrialReceipt
+
+const RUN_SKILL_BINDING_FAILURE_CODES = [
+  'run-binding-precondition-failed',
+  'skill-unavailable',
+  'skill-not-model-invocable',
+  'run-binding-persistence-failed',
+] as const
+
+function runSkillBindingFailureCode(error: unknown): NaturalRunTrialFailureCode | undefined {
+  if (typeof error !== 'object' || error === null) return undefined
+  const code = (error as { readonly code?: unknown }).code
+  return typeof code === 'string'
+    && (RUN_SKILL_BINDING_FAILURE_CODES as readonly string[]).includes(code)
+    ? code as NaturalRunTrialFailureCode
+    : undefined
+}
 
 function requireConfig(config: ResumeConfig): void {
   if (!config.goalId || !config.sessionId || !config.nonce ||
@@ -386,100 +409,114 @@ async function runNaturalRunTrial(
   ctx: Context,
   config: NaturalRunTrialResumeConfig,
   dependencies: LiveGoalResumeDependencies = {},
-): Promise<NaturalRunTrialSettledReceipt> {
-  const trial = readNaturalRunTrialManifest(
-    config.trialManifestPath,
-    config.trialManifestDigest,
-  )
-  delete process.env.TIANWEN_RESUME_TRIAL_MANIFEST_PATH
-  delete process.env.TIANWEN_RESUME_TRIAL_MANIFEST_DIGEST
-  if (trial.manifest.goalId !== config.goalId) {
-    throw new Error('Natural Run trial manifest Goal does not match')
-  }
-  const defaultModel = ctx.get('agentDefaultModel') as {
-    currentSelection(): ModelSelection
-  } | undefined
-  const evidence = ctx.get('tianwenEvidence') as {
-    project(session: Session): readonly {
-      readonly evidenceId: `sha256:${string}`
-      readonly source: { readonly callSeq: number }
-      readonly action: {
-        readonly argumentsDigest: `sha256:${string}`
-        readonly toolName: string
-      }
-    }[]
-  } | undefined
-  const learning = ctx.get('tianwenLearningIntake') as {
-    bindRunWithSkill(
-      agent: unknown,
-      input: {
-        readonly acceptanceContract: typeof trial.manifest.acceptanceContract
-        readonly acceptanceSubjectDigest: `sha256:${string}`
-        readonly goalRef: string
-        readonly scopeKey: string
-        readonly taskRef: string
-      },
-      skillName: string,
-    ): Promise<{ readonly runId: `run:${string}` }>
-    consumeOutcome(session: Session, runId: `run:${string}`): {
-      readonly acceptanceEvidenceId?: `sha256:${string}`
-      readonly decision: NaturalRunTrialSettledReceipt['learning']['decision']
-      readonly ticketId?: string
+): Promise<NaturalRunTrialReceipt> {
+  let failureCode: NaturalRunTrialFailureCode = 'manifest-revalidation-failed'
+  let preTurn = true
+  try {
+    const trial = readNaturalRunTrialManifest(
+      config.trialManifestPath,
+      config.trialManifestDigest,
+    )
+    delete process.env.TIANWEN_RESUME_TRIAL_MANIFEST_PATH
+    delete process.env.TIANWEN_RESUME_TRIAL_MANIFEST_DIGEST
+    if (trial.manifest.goalId !== config.goalId) {
+      throw new Error('Natural Run trial manifest Goal does not match')
     }
-    recordSkillUse(session: Session, runId: `run:${string}`): {
+    failureCode = 'services-unavailable'
+    const defaultModel = ctx.get('agentDefaultModel') as {
+      currentSelection(): ModelSelection
+    } | undefined
+    const evidence = ctx.get('tianwenEvidence') as {
+      project(session: Session): readonly {
+        readonly evidenceId: `sha256:${string}`
+        readonly source: { readonly callSeq: number }
+        readonly action: {
+          readonly argumentsDigest: `sha256:${string}`
+          readonly toolName: string
+        }
+      }[]
+    } | undefined
+    const learning = ctx.get('tianwenLearningIntake') as {
+      bindRunWithSkill(
+        agent: unknown,
+        input: {
+          readonly acceptanceContract: typeof trial.manifest.acceptanceContract
+          readonly acceptanceSubjectDigest: `sha256:${string}`
+          readonly goalRef: string
+          readonly scopeKey: string
+          readonly taskRef: string
+        },
+        skillName: string,
+      ): Promise<{ readonly runId: `run:${string}` }>
+      consumeOutcome(session: Session, runId: `run:${string}`): {
+        readonly acceptanceEvidenceId?: `sha256:${string}`
+        readonly decision: NaturalRunTrialSettledReceipt['learning']['decision']
+        readonly ticketId?: string
+      }
+      recordSkillUse(session: Session, runId: `run:${string}`): {
       readonly decision: 'recorded' | 'no-use-proof'
     }
-  } | undefined
-  if (defaultModel === undefined || evidence === undefined || learning === undefined) {
-    throw new Error('Tianwen natural Run services are unavailable')
-  }
-  const selection = defaultModel.currentSelection()
-  const handle = await ctx.agents.resume({
-    resumeSessionId: SessionId(config.sessionId),
-    agentOptions: { provider: selection.provider, model: selection.model },
-    setup: agentCtx => {
-      installModelSelection(agentCtx, { current: selection, assembled: undefined })
-    },
-  })
-  try {
-    await new Promise<void>(resolve => setImmediate(resolve))
-    if (String(handle.agent.id) !== config.sessionId) {
-      throw new Error('Session changed after trial preflight')
+    } | undefined
+    if (defaultModel === undefined || evidence === undefined || learning === undefined) {
+      throw new Error('Tianwen natural Run services are unavailable')
     }
-    const current = validateGoal(config, ctx.goals.get(handle.agent))
-    if (handle.agent.session.events.some(event => event.type === 'turn/start')) {
-      throw new Error('Natural Run trial requires the first DSH Turn')
-    }
-    if (!handle.agent.ctx.tools.schemas(handle.agent).some(tool =>
-      tool.name === trial.manifest.acceptanceContract.toolName)) {
-      throw new Error('Natural Run trial verifier is unavailable')
-    }
-    const beforeBinding = sessionDigest(handle.agent.session.events)
-    let binding: { readonly runId: `run:${string}` } | undefined
-    await ctx.inject(['skills'], async () => {
-      binding = await learning.bindRunWithSkill(handle.agent, {
-        goalRef: `dsh-goal:${String(current.id)}@${current.revision}`,
-        taskRef: trial.manifest.taskRef,
-        scopeKey: trial.manifest.scopeKey,
-        acceptanceContract: trial.manifest.acceptanceContract,
-        acceptanceSubjectDigest: trial.acceptanceSubjectDigest,
-      }, trial.manifest.parentSkillName)
+    const selection = defaultModel.currentSelection()
+    failureCode = 'agent-resume-failed'
+    const handle = await ctx.agents.resume({
+      resumeSessionId: SessionId(config.sessionId),
+      agentOptions: { provider: selection.provider, model: selection.model },
+      setup: agentCtx => {
+        installModelSelection(agentCtx, { current: selection, assembled: undefined })
+      },
     })
-    if (binding === undefined || sessionDigest(handle.agent.session.events) !== beforeBinding) {
-      throw new Error('Natural Run trial binding changed the DSH Session')
-    }
-    const bound = binding
-    const eventCountBefore = handle.agent.session.events.length
-    ctx.goals.resume(handle.agent, {
-      id: GoalId(String(current.id)), revision: current.revision,
-    })
-    const settled = settledTrialGoal(await waitForDisarmed(ctx, handle.agent))
-    const receipt = (
-      status: NaturalRunTrialSettledReceipt['status'],
-      learningResult: NaturalRunTrialSettledReceipt['learning'],
-      acceptanceEvidenceId?: `sha256:${string}`,
-      governanceDigest = sessionDigest(handle.agent.session.events),
-    ): NaturalRunTrialSettledReceipt => ({
+    try {
+      failureCode = 'session-goal-preflight-failed'
+      await new Promise<void>(resolve => setImmediate(resolve))
+      if (String(handle.agent.id) !== config.sessionId) {
+        throw new Error('Session changed after trial preflight')
+      }
+      const current = validateGoal(config, ctx.goals.get(handle.agent))
+      if (handle.agent.session.events.some(event => event.type === 'turn/start')) {
+        throw new Error('Natural Run trial requires the first DSH Turn')
+      }
+      failureCode = 'verifier-unavailable'
+      if (!handle.agent.ctx.tools.schemas(handle.agent).some(tool =>
+        tool.name === trial.manifest.acceptanceContract.toolName)) {
+        throw new Error('Natural Run trial verifier is unavailable')
+      }
+      failureCode = 'run-binding-precondition-failed'
+      const beforeBinding = sessionDigest(handle.agent.session.events)
+      let binding: { readonly runId: `run:${string}` } | undefined
+      try {
+        await ctx.inject(['skills'], async () => {
+          binding = await learning.bindRunWithSkill(handle.agent, {
+            goalRef: `dsh-goal:${String(current.id)}@${current.revision}`,
+            taskRef: trial.manifest.taskRef,
+            scopeKey: trial.manifest.scopeKey,
+            acceptanceContract: trial.manifest.acceptanceContract,
+            acceptanceSubjectDigest: trial.acceptanceSubjectDigest,
+          }, trial.manifest.parentSkillName)
+        })
+      } catch (error) {
+        failureCode = runSkillBindingFailureCode(error) ?? 'pre-turn-internal-error'
+        throw error
+      }
+      if (binding === undefined || sessionDigest(handle.agent.session.events) !== beforeBinding) {
+        throw new Error('Natural Run trial binding changed the DSH Session')
+      }
+      const bound = binding
+      const eventCountBefore = handle.agent.session.events.length
+      preTurn = false
+      ctx.goals.resume(handle.agent, {
+        id: GoalId(String(current.id)), revision: current.revision,
+      })
+      const settled = settledTrialGoal(await waitForDisarmed(ctx, handle.agent))
+      const receipt = (
+        status: NaturalRunTrialSettledReceipt['status'],
+        learningResult: NaturalRunTrialSettledReceipt['learning'],
+        acceptanceEvidenceId?: `sha256:${string}`,
+        governanceDigest = sessionDigest(handle.agent.session.events),
+      ): NaturalRunTrialSettledReceipt => ({
       schemaVersion: 'tianwen.natural-run-trial-receipt.v1',
       status,
       goal: settled,
@@ -497,21 +534,21 @@ async function runNaturalRunTrial(
       learning: learningResult,
       usage: naturalUsage(handle.agent.session.events.slice(eventCountBefore)),
     })
-    const flush = dependencies.flush ?? (session => ctx.sessions.flush(session))
-    try {
+      const flush = dependencies.flush ?? (session => ctx.sessions.flush(session))
+      try {
       if (!await flush(handle.agent.session)) {
         return receipt('settled-with-learning-error', {
           decision: 'not-recorded', reason: 'persistence-unavailable',
           skillUse: 'not-attempted',
         })
       }
-    } catch {
+      } catch {
       return receipt('settled-with-learning-error', {
         decision: 'not-recorded', reason: 'persistence-unavailable',
         skillUse: 'not-attempted',
       })
-    }
-    const flushedDigest = sessionDigest(handle.agent.session.events)
+      }
+      const flushedDigest = sessionDigest(handle.agent.session.events)
     let finalEvidence: ReturnType<typeof evidence.project>[number] | undefined
     try {
       finalEvidence = evidence.project(handle.agent.session)
@@ -582,13 +619,17 @@ async function runNaturalRunTrial(
         ...(outcome.ticketId === undefined ? {} : { ticketId: outcome.ticketId }),
       }, finalEvidence.evidenceId, flushedDigest)
     }
-    return receipt('settled', {
+      return receipt('settled', {
       decision: outcome.decision,
       skillUse: skillUse.decision,
       ...(outcome.ticketId === undefined ? {} : { ticketId: outcome.ticketId }),
-    }, finalEvidence.evidenceId, flushedDigest)
-  } finally {
-    await handle.dispose()
+      }, finalEvidence.evidenceId, flushedDigest)
+    } finally {
+      await handle.dispose()
+    }
+  } catch (error) {
+    if (preTurn) return createNaturalRunTrialFailure(failureCode, config)
+    throw error
   }
 }
 
@@ -640,8 +681,9 @@ export function apply(ctx: Context,
       return
     }
     if (naturalTrial) {
-      process.stdout.write(`${JSON.stringify(receipt)}\n`)
-      exit(0)
+      const naturalReceipt = receipt as NaturalRunTrialReceipt
+      process.stdout.write(`${JSON.stringify(naturalReceipt)}\n`)
+      exit(naturalReceipt.status === 'pre-turn-failed' ? 1 : 0)
       return
     }
     const ordinary = receipt as Receipt
