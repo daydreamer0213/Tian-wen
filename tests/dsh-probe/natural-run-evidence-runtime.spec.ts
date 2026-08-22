@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   DynamicCordisRunnerService,
+  renderSkillContent,
   SessionId,
   SkillRegistry,
   applySkillTool,
@@ -72,6 +75,52 @@ const parentSkill = {
   provider: 'runtime',
   content: '# Summary parent\n\nState the verified result.',
 } as const
+
+function pureSkillProjection(skill: NonNullable<Awaited<ReturnType<Context['skills']['get']>>>) {
+  return {
+    name: skill.name,
+    description: skill.description,
+    ...(skill.whenToUse === undefined ? {} : { whenToUse: skill.whenToUse }),
+    invocation: skill.invocation,
+    source: skill.source,
+    provider: skill.provider,
+    content: skill.content,
+  }
+}
+
+async function mountFilesystemParent(
+  mounted: Awaited<ReturnType<typeof mountNaturalGoal>>,
+  options: { readonly sidecar?: boolean } = {},
+): Promise<void> {
+  mounted.disposeParent()
+  const skillsRoot = join(mounted.dataRoot, 'skills')
+  const parentRoot = join(skillsRoot, parentSkill.name)
+  mkdirSync(parentRoot, { recursive: true })
+  writeFileSync(join(parentRoot, 'SKILL.md'), [
+    '---',
+    `name: ${parentSkill.name}`,
+    `description: ${parentSkill.description}`,
+    '---',
+    '',
+    parentSkill.content,
+  ].join('\n'), 'utf8')
+  if (options.sidecar) writeFileSync(join(parentRoot, 'sidecar.md'), 'unsupported', 'utf8')
+  const requireFromRoot = createRequire(resolve(process.cwd(), 'package.json'))
+  const requireFromDsh = createRequire(requireFromRoot.resolve('@deepseek-ai/dsh/package.json'))
+  const localFs = await import(pathToFileURL(requireFromDsh.resolve('@deepseek-ai/dsh-fs-local')).href)
+  const filesystemSkills = await import(pathToFileURL(
+    requireFromDsh.resolve('@deepseek-ai/dsh-skill-filesystem'),
+  ).href)
+  await mounted.harness.ctx.plugin(localFs.default)
+  expect(mounted.harness.ctx.get('fs')).toBeDefined()
+  await mounted.harness.ctx.plugin(filesystemSkills, {
+    agentsHome: join(mounted.dataRoot, 'agents-home'),
+    customSkillDirs: [skillsRoot],
+    dshHome: join(mounted.dataRoot, 'dsh-home'),
+    includeDefaultRoots: false,
+    watch: false,
+  })
+}
 
 async function mountNaturalGoal(
   script: Parameters<typeof mountGoalHarness>[1],
@@ -207,6 +256,86 @@ describe('natural DSH Run trial manifest', () => {
 })
 
 describe('natural DSH Run trial runtime', () => {
+  it('binds one real filesystem parent before its first Turn and records its matching Skill use', async () => {
+    const mounted = await mountNaturalGoal([
+      toolCallResponse('load-parent', 'skill', { name: parentSkill.name }),
+      toolCallResponse('verify-final', 'verify_summary', {
+        subject: { include: ['result', 'evidence'] },
+      }),
+      toolCallResponse('pause-goal', 'update_goal', {}),
+      textResponse('summary verified'),
+    ])
+    const manifestPath = writeManifest(manifest({ goalId: String(mounted.goal.id) }))
+    const trial = readNaturalRunTrialManifest(manifestPath)
+    try {
+      await mountFilesystemParent(mounted)
+      const raw = await mounted.harness.ctx.skills.get(parentSkill.name)
+      expect(raw).toMatchObject({
+        name: parentSkill.name,
+        provider: 'filesystem',
+        resourceBase: { kind: 'directory' },
+      })
+      expect(raw).toHaveProperty('path')
+
+      const receipt = await runGoalResume(
+        mounted.harness.ctx, trialConfig(mounted, trial, manifestPath),
+      )
+
+      expect(receipt).toMatchObject({
+        status: 'settled',
+        learning: { skillUse: 'recorded' },
+      })
+      const [frozen] = mounted.harness.ctx.tianwenEvolution.listRunSkillManifests()
+      const [skillUse] = mounted.harness.ctx.tianwenEvolution.listRunSkillUses()
+      if (frozen === undefined || skillUse === undefined) throw new Error('missing frozen Skill facts')
+      expect(skillUse).toMatchObject({
+        parentVersionId: frozen.parentVersionId,
+        contentDigest: frozen.contentDigest,
+      })
+      const events = (await mounted.harness.ctx.sessionPersistence.inspect(mounted.sessionId)).events
+      const skillResult = events.find(event =>
+        event.type === 'tool/result'
+        && String(event.data.message.content[0].toolCallId) === 'load-parent')
+      if (skillResult?.type !== 'tool/result') throw new Error('missing Skill result')
+      const skillText = skillResult.data.message.content[0].content[0]
+      if (skillText?.type !== 'text') throw new Error('missing Skill text')
+      expect(skillText.text).toBe(renderSkillContent({
+        ...frozen.parent,
+        provider: frozen.resolvedProvider,
+      }))
+      const safeFacts = JSON.stringify({
+        frozen,
+        skillUse,
+        publicEvents: mounted.harness.ctx.tianwenEvolution.listEvents(),
+        receipt,
+      })
+      expect(safeFacts).not.toMatch(/"(?:path|resourceBase|metadata)"/u)
+      expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('refuses a real filesystem parent with a sidecar before binding or a Turn', async () => {
+    const mounted = await mountNaturalGoal([textResponse('must stay unused')])
+    const manifestPath = writeManifest(manifest({ goalId: String(mounted.goal.id) }))
+    const trial = readNaturalRunTrialManifest(manifestPath)
+    try {
+      await mountFilesystemParent(mounted, { sidecar: true })
+      const bindingWrite = vi.spyOn(mounted.harness.ctx.tianwenEvolution, 'recordRunBinding')
+      await expectPreTurnFailure(
+        mounted,
+        await runGoalResume(mounted.harness.ctx, trialConfig(mounted, trial, manifestPath)),
+        'run-binding-precondition-failed',
+      )
+      expect(bindingWrite).not.toHaveBeenCalled()
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillManifests()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
   it('reports a manifest revalidation failure before creating an Agent request or driving the Goal', async () => {
     const mounted = await mountNaturalGoal([textResponse('must stay unused')])
     const manifestPath = writeManifest(manifest({ goalId: String(mounted.goal.id) }))
@@ -358,7 +487,10 @@ describe('natural DSH Run trial runtime', () => {
     const trial = readNaturalRunTrialManifest(manifestPath)
     const sentinel = 'D:/private/sk-pre-turn-DO-NOT-LEAK'
     try {
-      vi.spyOn(mounted.harness.ctx.tianwenLearningIntake, 'bindRunWithSkill')
+      const learning = mounted.harness.ctx.get('tianwenLearningIntake') as {
+        bindRunWithSkill: (...args: readonly unknown[]) => Promise<unknown>
+      }
+      vi.spyOn(learning, 'bindRunWithSkill')
         .mockRejectedValue(new Error(sentinel))
       const receipt = await runGoalResume(
         mounted.harness.ctx, trialConfig(mounted, trial, manifestPath),
@@ -371,28 +503,64 @@ describe('natural DSH Run trial runtime', () => {
     }
   })
 
-  it('passes the injected Skill registry to pre-Turn binding without resuming the Goal', async () => {
-    const mounted = await mountNaturalGoal([textResponse('must stay unused')])
+  it('keeps the Agent-scoped pure snapshot visible through binding until the Goal drive', async () => {
+    const mounted = await mountNaturalGoal([
+      toolCallResponse('load-parent', 'skill', { name: parentSkill.name }),
+      toolCallResponse('verify-final', 'verify_summary', {
+        subject: { include: ['result', 'evidence'] },
+      }),
+      toolCallResponse('pause-goal', 'update_goal', {}),
+      textResponse('summary verified'),
+    ])
     const manifestPath = writeManifest(manifest({ goalId: String(mounted.goal.id) }))
     const trial = readNaturalRunTrialManifest(manifestPath)
-    const injectedSkills = Object.freeze({ get: vi.fn() })
-    const injectedCtx = mounted.harness.ctx.extend({ skills: injectedSkills })
-    let receivedSkills: unknown
+    let capturedAgent: Parameters<typeof mounted.harness.ctx.goals.resume>[0] | undefined
+    let boundView: NonNullable<Awaited<ReturnType<Context['skills']['get']>>> | undefined
+    let observed: NonNullable<Awaited<ReturnType<Context['skills']['get']>>> | undefined
+    let markGoalResumeEntered: (() => void) | undefined
+    const goalResumeEntered = new Promise<void>(resolve => { markGoalResumeEntered = resolve })
     try {
-      vi.spyOn(mounted.harness.ctx, 'inject').mockImplementation(((_dependencies, callback) =>
-        Promise.resolve(callback(injectedCtx))) as never)
-      vi.spyOn(mounted.harness.ctx.tianwenLearningIntake, 'bindRunWithSkill')
-        .mockImplementation(async (...args) => {
-          receivedSkills = args[3]
-          throw Object.assign(new Error('missing parent Skill'), { code: 'skill-unavailable' })
+      await mountFilesystemParent(mounted)
+      const learning = mounted.harness.ctx.get('tianwenLearningIntake') as {
+        bindRunWithSkill: typeof mounted.harness.ctx.tianwenLearningIntake.bindRunWithSkill
+      }
+      const bindRunWithSkill = learning.bindRunWithSkill.bind(learning)
+      vi.spyOn(learning, 'bindRunWithSkill')
+        .mockImplementation(async (agent, input, skillName, skills) => {
+          boundView = await skills.get(skillName, {
+            cwd: agent.session.header.cwd,
+            scope: agent,
+          })
+          return bindRunWithSkill(agent, input, skillName, skills)
         })
-      const resume = vi.spyOn(mounted.harness.ctx.goals, 'resume')
-      const receipt = await runGoalResume(
+      const resumeGoal = mounted.harness.ctx.goals.resume.bind(mounted.harness.ctx.goals)
+      vi.spyOn(mounted.harness.ctx.goals, 'resume').mockImplementation(((agent, input) => {
+        capturedAgent = agent
+        resumeGoal(agent, input)
+        markGoalResumeEntered!()
+      }) as never)
+      const running = runGoalResume(
         mounted.harness.ctx, trialConfig(mounted, trial, manifestPath),
       )
-      await expectPreTurnFailure(mounted, receipt, 'skill-unavailable')
-      expect(receivedSkills).toBe(injectedSkills)
-      expect(resume).not.toHaveBeenCalled()
+      await goalResumeEntered
+      expect(capturedAgent).toBeDefined()
+      await capturedAgent!.ctx.inject(['skills'], async testCtx => {
+        observed = await testCtx.skills.get(parentSkill.name, {
+          cwd: capturedAgent!.session.header.cwd,
+          scope: capturedAgent!,
+        })
+      })
+      if (boundView === undefined || observed === undefined) throw new Error('snapshot was not visible')
+      expect(pureSkillProjection(observed)).toEqual(pureSkillProjection(boundView))
+      expect(observed).not.toHaveProperty('path')
+      expect(observed).not.toHaveProperty('resourceBase')
+      expect(observed).not.toHaveProperty('metadata')
+      expect(mounted.harness.adapter.requests).toEqual([])
+      const receipt = await running
+      expect(receipt).toMatchObject({ status: 'settled' })
+      const root = await mounted.harness.ctx.skills.get(parentSkill.name)
+      expect(root).toMatchObject({ provider: 'filesystem', resourceBase: { kind: 'directory' } })
+      expect(root).toHaveProperty('path')
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()

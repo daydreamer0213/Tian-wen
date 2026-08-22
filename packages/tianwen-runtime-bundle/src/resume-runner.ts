@@ -75,6 +75,92 @@ const RUN_SKILL_BINDING_FAILURE_CODES = [
   'run-binding-persistence-failed',
 ] as const
 
+type NaturalParentSnapshotFailureCode = Extract<
+  typeof RUN_SKILL_BINDING_FAILURE_CODES[number],
+  'run-binding-precondition-failed' | 'skill-unavailable' | 'skill-not-model-invocable'
+>
+
+class NaturalParentSnapshotError extends Error {
+  readonly code: NaturalParentSnapshotFailureCode
+
+  constructor(code: NaturalParentSnapshotFailureCode) {
+    super('Natural Run parent snapshot precondition failed')
+    this.code = code
+  }
+}
+
+interface SnapshotFilesystemTarget {
+  readonly targetKey: unknown
+}
+
+interface SnapshotFilesystemEntry {
+  readonly name: string
+  readonly target: SnapshotFilesystemTarget
+  readonly type: 'directory' | 'file' | 'other'
+}
+
+interface SnapshotFilesystem {
+  resolve(path: string, options: { readonly cwd?: string }): Promise<SnapshotFilesystemTarget>
+  listDir(target: SnapshotFilesystemTarget): Promise<readonly SnapshotFilesystemEntry[]>
+}
+
+type ResolvedSkill = NonNullable<Awaited<ReturnType<Context['skills']['get']>>>
+
+function snapshotFilesystem(value: unknown): SnapshotFilesystem {
+  if (typeof value !== 'object' || value === null) throw new Error('filesystem unavailable')
+  const candidate = value as Partial<SnapshotFilesystem>
+  if (typeof candidate.resolve !== 'function' || typeof candidate.listDir !== 'function') {
+    throw new Error('filesystem unavailable')
+  }
+  return candidate as SnapshotFilesystem
+}
+
+async function registerNaturalParentSnapshot(
+  raw: ResolvedSkill | undefined,
+  skills: Pick<Context['skills'], 'register'>,
+  filesystemValue: unknown,
+  cwd: string | undefined,
+): Promise<void> {
+  if (raw === undefined) throw new NaturalParentSnapshotError('skill-unavailable')
+  if (!raw.invocation.modelInvocable) {
+    throw new NaturalParentSnapshotError('skill-not-model-invocable')
+  }
+  if (raw.provider !== 'filesystem') {
+    return
+  }
+  if (
+    raw.resourceBase?.kind !== 'directory'
+    || typeof raw.resourceBase.path !== 'string'
+    || typeof raw.path !== 'string'
+  ) {
+    throw new NaturalParentSnapshotError('run-binding-precondition-failed')
+  }
+  const filesystem = snapshotFilesystem(filesystemValue)
+  const resolveOptions = cwd === undefined ? {} : { cwd }
+  const [resourceBase, skillPath] = await Promise.all([
+    filesystem.resolve(raw.resourceBase.path, resolveOptions),
+    filesystem.resolve(raw.path, resolveOptions),
+  ])
+  const entries = await filesystem.listDir(resourceBase)
+  if (
+    entries.length !== 1
+    || entries[0]?.name !== 'SKILL.md'
+    || entries[0]?.type !== 'file'
+    || entries[0].target.targetKey !== skillPath.targetKey
+  ) {
+    throw new NaturalParentSnapshotError('run-binding-precondition-failed')
+  }
+  skills.register({
+    name: raw.name,
+    description: raw.description,
+    ...(raw.whenToUse === undefined ? {} : { whenToUse: raw.whenToUse }),
+    invocation: raw.invocation,
+    source: raw.source,
+    provider: raw.provider,
+    content: raw.content,
+  })
+}
+
 function runSkillBindingFailureCode(error: unknown): NaturalRunTrialFailureCode | undefined {
   if (typeof error !== 'object' || error === null) return undefined
   const code = (error as { readonly code?: unknown }).code
@@ -489,14 +575,31 @@ async function runNaturalRunTrial(
       const beforeBinding = sessionDigest(handle.agent.session.events)
       let binding: { readonly runId: `run:${string}` } | undefined
       try {
-        await ctx.inject(['skills'], async injectedCtx => {
-          binding = await learning.bindRunWithSkill(handle.agent, {
-            goalRef: `dsh-goal:${String(current.id)}@${current.revision}`,
-            taskRef: trial.manifest.taskRef,
-            scopeKey: trial.manifest.scopeKey,
-            acceptanceContract: trial.manifest.acceptanceContract,
-            acceptanceSubjectDigest: trial.acceptanceSubjectDigest,
-          }, trial.manifest.parentSkillName, injectedCtx.skills)
+        await handle.agent.ctx.inject(['skills'], async injectedCtx => {
+          const raw = await injectedCtx.skills.get(trial.manifest.parentSkillName, {
+            cwd: handle.agent.session.header.cwd,
+            scope: handle.agent,
+          })
+          const bind = async (filesystemValue: unknown) => {
+            await registerNaturalParentSnapshot(
+              raw,
+              injectedCtx.skills,
+              filesystemValue,
+              handle.agent.session.header.cwd,
+            )
+            binding = await learning.bindRunWithSkill(handle.agent, {
+              goalRef: `dsh-goal:${String(current.id)}@${current.revision}`,
+              taskRef: trial.manifest.taskRef,
+              scopeKey: trial.manifest.scopeKey,
+              acceptanceContract: trial.manifest.acceptanceContract,
+              acceptanceSubjectDigest: trial.acceptanceSubjectDigest,
+            }, trial.manifest.parentSkillName, injectedCtx.skills)
+          }
+          if (raw?.provider === 'filesystem') {
+            await handle.agent.ctx.inject(['fs'], filesystemCtx => bind(filesystemCtx.get('fs')))
+            return
+          }
+          await bind(undefined)
         })
       } catch (error) {
         failureCode = runSkillBindingFailureCode(error) ?? 'pre-turn-internal-error'
