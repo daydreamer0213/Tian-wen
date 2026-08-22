@@ -521,30 +521,45 @@ function materializeRuntimeBundlePublication(profileRoot, repoRoot) {
   if (JSON.stringify(installedManifest.files) !== JSON.stringify(publishedPaths)) {
     throw new Error('installed Runtime Bundle files differ from the workspace manifest')
   }
-  const publication = [...publishedPaths, 'package.json', 'LICENSE']
-  for (const path of publication) {
-    const installed = resolve(installedRoot, path)
-    const child = relative(installedRoot, installed)
-    if (child === '' || child.startsWith('..') || isAbsolute(child)
-      || !statSync(installed).isFile()) {
-      throw new Error('installed Runtime Bundle publication must contain only regular files')
-    }
+  const candidatePublication = [...publishedPaths, 'package.json']
+  const copyReplace = (source, installed) => {
     const stagedCopy = `${installed}.copy-${process.pid}-${randomUUID()}`
     try {
-      copyFileSync(installed, stagedCopy)
+      copyFileSync(source, stagedCopy)
       rmSync(installed, { force: true })
       renameSync(stagedCopy, installed)
     } finally {
       rmSync(stagedCopy, { force: true })
     }
   }
+  for (const path of candidatePublication) {
+    const installed = resolve(installedRoot, path)
+    const child = relative(installedRoot, installed)
+    if (child === '' || child.startsWith('..') || isAbsolute(child)
+      || !statSync(installed).isFile()) {
+      throw new Error('installed Runtime Bundle publication must contain only regular files')
+    }
+    copyReplace(installed, installed)
+  }
+  const licenseSource = resolve(repoRoot, 'LICENSE')
+  contained(repoRoot, licenseSource, 'Runtime Bundle LICENSE')
+  if (!statSync(licenseSource).isFile()) {
+    throw new Error('Runtime Bundle LICENSE must be a regular file')
+  }
+  const installedLicense = resolve(installedRoot, 'LICENSE')
+  const licenseChild = relative(installedRoot, installedLicense)
+  if (licenseChild === '' || licenseChild.startsWith('..') || isAbsolute(licenseChild)) {
+    throw new Error('installed Runtime Bundle LICENSE escapes its package root')
+  }
+  copyReplace(licenseSource, installedLicense)
+  const publication = [...candidatePublication, 'LICENSE']
   for (const path of publication) {
     const installed = resolve(installedRoot, path)
     const installedStat = statSync(installed, { bigint: true })
     if (!installedStat.isFile() || installedStat.nlink !== 1n) {
       throw new Error('installed Runtime Bundle publication must have independent file identity')
     }
-    const source = resolve(sourceRoot, path)
+    const source = path === 'LICENSE' ? licenseSource : resolve(sourceRoot, path)
     if (existsSync(source)) {
       if (!statSync(source).isFile() || sameFileIdentity(source, installed)) {
         throw new Error('installed Runtime Bundle publication must not share workspace file identity')
