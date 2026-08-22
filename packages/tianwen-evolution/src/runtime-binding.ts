@@ -70,6 +70,13 @@ import type {
   SkillEvalProtocolReceipt,
   SkillEvalProtocolRecord,
 } from './skill-evaluation.js'
+import type {
+  ControlledSkillEvaluationId,
+  ControlledSkillEvaluationObjective,
+  ControlledSkillEvaluationObjectiveReceipt,
+  ControlledSkillEvalTaskId,
+  RecordControlledSkillEvaluationObjectiveInput,
+} from './controlled-skill-evaluation.js'
 
 export interface RuntimeBinding {
   readonly artifactId: ArtifactId
@@ -265,6 +272,29 @@ export class TianwenEvolutionService extends Service {
     evaluationId: SkillEvaluationId,
   ): SkillEvaluationResult | undefined {
     return this.state().ledger.getSkillEvaluationResult(evaluationId)
+  }
+
+  recordControlledSkillEvaluationObjective(
+    input: RecordControlledSkillEvaluationObjectiveInput,
+  ): ControlledSkillEvaluationObjectiveReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordControlledSkillEvaluationObjective(input))
+  }
+
+  getControlledSkillEvaluationObjective(
+    evaluationId: ControlledSkillEvaluationId,
+    taskId: ControlledSkillEvalTaskId,
+  ): ControlledSkillEvaluationObjective | undefined {
+    return this.state().ledger.getControlledSkillEvaluationObjective(
+      evaluationId,
+      taskId,
+    )
+  }
+
+  listControlledSkillEvaluationObjectives(
+    evaluationId: ControlledSkillEvaluationId,
+  ): readonly ControlledSkillEvaluationObjective[] {
+    return this.state().ledger.listControlledSkillEvaluationObjectives(evaluationId)
   }
 
   openLearningCase(input: OpenLearningCaseInput): LearningCaseReceipt {

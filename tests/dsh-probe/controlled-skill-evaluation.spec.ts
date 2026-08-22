@@ -11,6 +11,7 @@ import {
   prepareControlledSkillEvaluationPlan,
   prepareControlledSkillEvalProtocol,
   prepareRunBinding,
+  TianwenEvolutionService,
 } from '../../packages/tianwen-evolution/src/index.js'
 import {
   EvolutionLedger,
@@ -48,6 +49,13 @@ const taskTypes = [
 ] as const
 
 const roots: string[] = []
+
+const controlledObjectiveServiceFacade: Pick<
+  EvolutionLedger,
+  | 'recordControlledSkillEvaluationObjective'
+  | 'getControlledSkillEvaluationObjective'
+  | 'listControlledSkillEvaluationObjectives'
+> = TianwenEvolutionService.prototype
 
 function fixtureRoot(prefix: string): string {
   const parent = resolve(
@@ -354,6 +362,15 @@ function openControlledObjectiveLedger(prefix: string) {
 }
 
 describe('controlled five-task Skill evaluation protocol', () => {
+  it('exposes controlled objective operations through the product service', () => {
+    expect(typeof controlledObjectiveServiceFacade.recordControlledSkillEvaluationObjective)
+      .toBe('function')
+    expect(typeof controlledObjectiveServiceFacade.getControlledSkillEvaluationObjective)
+      .toBe('function')
+    expect(typeof controlledObjectiveServiceFacade.listControlledSkillEvaluationObjectives)
+      .toBe('function')
+  })
+
   it('derives one deterministic development-only protocol with permanent evidence labels', () => {
     const { ticket, signals } = ticketFacts()
     const input = {
