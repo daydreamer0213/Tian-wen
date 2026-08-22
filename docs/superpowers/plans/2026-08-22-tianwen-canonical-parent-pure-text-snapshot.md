@@ -10,8 +10,9 @@
 
 ## Global constraints
 
-- Baseline implementation source is `codex/tianwen-canonical-parent-pure-text-snapshot-design` at `4eb54d7b25098439cd801931e8f14b1849eebb33`; current main is `a008686b0f1629225e36e8aa16b16b2851052249`.
-- Create the implementation branch `codex/tianwen-canonical-parent-pure-text-snapshot` from the exact design/plan baseline only after the implementation release is received. Reuse `D:\DevData\tianwen-worktrees\tianwen-explicit-feedback-intake` and its sole existing `node_modules`.
+- Approved design ancestor is `4eb54d7b25098439cd801931e8f14b1849eebb33`; current main is `a008686b0f1629225e36e8aa16b16b2851052249`.
+- An implementation release must provide its exact reviewed design+plan commit through `TIANWEN_PLAN_SHA`. A missing, non-commit, non-ancestor, or tree-incomplete value is a stop; do not guess a moving branch tip or implement from the design-only ancestor.
+- Create the implementation branch `codex/tianwen-canonical-parent-pure-text-snapshot` from the supervisor-provided `TIANWEN_PLAN_SHA` only after the implementation release is received. Reuse `D:\DevData\tianwen-worktrees\tianwen-explicit-feedback-intake` and its sole existing `node_modules`.
 - Use the existing D: pnpm store/cache. Do not create a worktree, clone, node_modules tree, virtual environment, profile, probe project, download, install, relink, Provider call, paid model call, Docker, Alpha, runtime-profile, Goal, or resume during implementation Tasks 1–3.
 - Set `pnpm_config_verify_deps_before_run=false` only in the process environment for local pnpm gates; do not write an `.npmrc`.
 - DSH `0.1.0-rc.7` remains the only product Agent Runtime. Do not add a Tianwen Agent loop, Runtime/service injection, Provider wrapper, registry service, store, event, queue, scheduler, logger, retry, error-code, budget, or price mechanism.
@@ -30,10 +31,22 @@ The Stage 7 local bearing set adds `tests/dsh-probe/evolution.spec.ts`, `tests/d
 
 ## Workspace setup and baseline stop gate
 
-1. Read the exact design and this plan in full, then read the current natural runner, learning-intake binding, skill-governance preparer, DSH public package declarations, current natural runtime tests, Stage 3/Stage 7 canonical specifications, current handoff, public contract, and CI command.
-2. Verify the D: implementation worktree is clean; the sole `node_modules/.modules.yaml` exists; the specified fixture roots are absent or contain zero files and zero bytes; and the exact design branch local, tracking, and `ls-remote` SHA are all `4eb54d7b25098439cd801931e8f14b1849eebb33`. Unknown fixture content is a stop, not cleanup.
-3. Create/switch the implementation branch at that exact SHA. Verify main local/tracking/remote remains `a008686b0f1629225e36e8aa16b16b2851052249` without fetching.
-4. Establish the baseline with the current runtime-bundle dependency build, repository typecheck, DSH rc.7 closure, private-import gate, the focused natural runtime spec, and `git diff --check`. A baseline failure outside the future diff is a stop with preserved evidence.
+1. Require the release-supplied SHA before reading or switching branches:
+
+```powershell
+$planSha = $env:TIANWEN_PLAN_SHA
+if ([string]::IsNullOrWhiteSpace($planSha)) { throw 'supervisor release must set TIANWEN_PLAN_SHA' }
+git rev-parse --verify "$planSha^{commit}"
+git merge-base --is-ancestor 4eb54d7b25098439cd801931e8f14b1849eebb33 $planSha
+if ($LASTEXITCODE -ne 0) { throw 'reviewed design+plan SHA does not descend from the approved design ancestor' }
+git cat-file -e "${planSha}:docs/superpowers/specs/2026-08-22-tianwen-canonical-parent-pure-text-snapshot-design.md"
+git cat-file -e "${planSha}:docs/superpowers/plans/2026-08-22-tianwen-canonical-parent-pure-text-snapshot.md"
+```
+
+2. Verify the D: implementation worktree is clean; the sole `node_modules/.modules.yaml` exists; and the specified fixture roots are absent or contain zero files and zero bytes. With the source design/plan branch still checked out, verify `git rev-parse HEAD`, `git rev-parse '@{u}'`, and `git ls-remote origin refs/heads/codex/tianwen-canonical-parent-pure-text-snapshot-design` all exactly equal `$planSha`. Unknown fixture content, a SHA mismatch, or a missing source ref is a stop, not cleanup or fetch.
+3. Read the exact design and this plan from `$planSha` in full, then read the current natural runner, learning-intake binding, skill-governance preparer, DSH public package declarations, current natural runtime tests, Stage 3/Stage 7 canonical specifications, current handoff, public contract, and CI command.
+4. Create/switch `codex/tianwen-canonical-parent-pure-text-snapshot` exactly at `$planSha`. Verify main local/tracking/remote remains `a008686b0f1629225e36e8aa16b16b2851052249` without fetching.
+5. Establish the baseline with the current runtime-bundle dependency build, repository typecheck, DSH rc.7 closure, private-import gate, the focused natural runtime spec, and `git diff --check`. A baseline failure outside the future diff is a stop with preserved evidence.
 
 ## Task 1: Scope-local pure-text snapshot and durable identity proof
 
@@ -208,7 +221,7 @@ If the selected parent is not exactly one self-contained `SKILL.md`, stop at zer
 
 ## Plan self-review before handoff
 
-1. Compare every task with the approved design’s scope, durability correction, data flow, privacy boundary, one-file limitation, and explicit deferred operation.
+1. Compare every task with the approved design’s scope, durability correction, data flow, privacy boundary, one-file limitation, and explicit deferred operation. Confirm the setup treats `4eb54d7b25098439cd801931e8f14b1849eebb33` only as the approved design ancestor; requires a supervisor-provided `TIANWEN_PLAN_SHA`; verifies source branch local/tracking/remote exact equality to that SHA; verifies the ancestor and both canonical files in that SHA’s tree; and creates the implementation branch at that SHA rather than an unreviewed moving tip.
 2. Re-read current source signatures: `bindRunWithSkill(agent, input, skillName, skills)` remains the binding interface; DSH rc.7 calls use the Agent itself as `scope: handle.agent` / `scope: agent`; the runner must use its injected scoped registry; and the new local filesystem structure must not rely on a package-only type.
 3. Confirm Task 1 is a real-provider RED and includes registration lifetime beyond the injection callback via the existing `goals.resume` barrier. Its observer must enter `capturedAgent.ctx.inject(['skills'], async testCtx => ...)` and call `testCtx.skills.get(..., { cwd: capturedAgent.session.header.cwd, scope: capturedAgent })`; it must not monkey-patch inject or claim access to the runner’s local callback value. Confirm render/manifest/use identity, raw-field absence, Candidate non-registration, and zero-write rejection cases. Confirm the only expected snapshot mappings are missing → `skill-unavailable`, non-invocable → `skill-not-model-invocable`, one-file/shape → `run-binding-precondition-failed`, while untagged exceptions remain `pre-turn-internal-error`.
 4. Confirm the 24-file set is the 20 current CI focused specs plus four established Stage 7 local bearing specs; confirm all eight existing demos are retained and no workflow expansion is proposed.
