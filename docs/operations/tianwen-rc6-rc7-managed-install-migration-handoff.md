@@ -155,7 +155,7 @@ data.
 
 These facts supersede the earlier `pending` operational statements but do not
 erase the stopped attempts or broaden the installer into a general migration
-framework. The terminal product baseline is
+framework. The terminal code-bearing product baseline is
 `main@b3be13476206a190f4299ee71a90b5d578b73b73`, with exact-main GitHub Actions
 run [32566723012](https://github.com/daydreamer0213/Tian-wen/actions/runs/32566723012)
 green for Python, TypeScript, and native Windows installer jobs.

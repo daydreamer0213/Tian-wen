@@ -12,7 +12,7 @@ The repository is public, and tag/public prerelease
 still describes the pre-public candidate and is stale; updating that external
 page remains separate from this repository docs-only closeout.
 
-The current product baseline is exact main
+The current product code-bearing baseline is exact main
 `b3be13476206a190f4299ee71a90b5d578b73b73`. Exact-main GitHub Actions run
 [32566723012](https://github.com/daydreamer0213/Tian-wen/actions/runs/32566723012)
 completed with Python, TypeScript, and native Windows installer jobs green.

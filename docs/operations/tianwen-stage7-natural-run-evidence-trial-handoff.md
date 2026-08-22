@@ -76,7 +76,7 @@ Ticket, Case, Lesson, Candidate, Evaluation, Shadow, Promotion, or Rollback.
 This is project-owner single-user product evidence for the exact path exercised;
 it is not external-user distribution evidence or a general efficacy claim.
 
-The terminal product baseline is
+The terminal code-bearing product baseline is
 `main@b3be13476206a190f4299ee71a90b5d578b73b73`. Exact-main GitHub Actions run
 [32566723012](https://github.com/daydreamer0213/Tian-wen/actions/runs/32566723012)
 completed with Python, TypeScript, and native Windows installer jobs green.
