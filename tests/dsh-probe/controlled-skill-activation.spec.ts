@@ -750,6 +750,9 @@ describe('controlled Skill activation governance', () => {
 
     const run = recordTransitionRunFacts(ledger, transition)
     const invalid = [
+      { ...run, usage: { ...run.usage, modelRequests: 0 } },
+      { ...run, usage: { ...run.usage, toolCalls: 0 } },
+      { ...run, usage: { ...run.usage, toolCalls: 1 } },
       { ...run, evidenceIds: [sha256('wrong-transition-evidence')] },
       { ...run, acceptanceSubjectDigest: sha256('wrong-transition-subject') },
       { ...run, usedToolNames: ['shell', 'skill', 'verify_summary'] },
@@ -772,10 +775,17 @@ describe('controlled Skill activation governance', () => {
     expect(ledger.listEvents().filter(item =>
       item.type === 'controlled-skill-transition-verified')).toHaveLength(0)
 
-    ledger.completeControlledSkillTransition({ transitionId: transition.transitionId, run })
+    const unboundedModelRequests = {
+      ...run,
+      usage: { ...run.usage, modelRequests: Number.MAX_SAFE_INTEGER },
+    }
+    ledger.completeControlledSkillTransition({
+      transitionId: transition.transitionId,
+      run: unboundedModelRequests,
+    })
     expect(() => ledger.completeControlledSkillTransition({
       transitionId: transition.transitionId,
-      run: { ...run, normalizedFirstRequestDigest: sha256('conflicting-request') },
+      run: { ...unboundedModelRequests, normalizedFirstRequestDigest: sha256('conflicting-request') },
     })).toThrow(/verification changed/u)
   })
 

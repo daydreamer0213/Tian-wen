@@ -828,7 +828,7 @@ function prepareUsage(value: unknown): ControlledSkillTransitionUsage {
   if (!isRecord(value)) throw new TypeError('controlled Skill transition usage must be an object')
   exactKeys(value, ['modelRequests', 'toolCalls', 'elapsedMs'])
   return {
-    modelRequests: boundedInteger(value.modelRequests, 'modelRequests', 0, Number.MAX_SAFE_INTEGER),
+    modelRequests: boundedInteger(value.modelRequests, 'modelRequests', 1, Number.MAX_SAFE_INTEGER),
     toolCalls: boundedInteger(value.toolCalls, 'toolCalls', 0, Number.MAX_SAFE_INTEGER),
     elapsedMs: boundedInteger(value.elapsedMs, 'elapsedMs', 0, Number.MAX_SAFE_INTEGER),
   }
@@ -898,6 +898,7 @@ export function prepareControlledSkillTransitionRun(
     || prepared.usedToolNames.some(tool => !transition.postCheck.allowedTools.includes(tool))
     || !prepared.usedToolNames.includes('skill')
     || !prepared.usedToolNames.includes(transition.postCheck.acceptanceContract.toolName)
+    || prepared.usage.toolCalls < prepared.usedToolNames.length
     || prepared.usage.toolCalls > transition.postCheck.stopContract.maxToolCalls
     || prepared.usage.elapsedMs > transition.postCheck.stopContract.maxElapsedMs
   )) throw new TypeError('controlled Skill transition run violates its frozen plan')
