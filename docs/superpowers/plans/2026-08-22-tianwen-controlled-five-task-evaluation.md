@@ -1,5 +1,9 @@
 # Tianwen v0.1 Controlled Five-Task Evaluation Implementation Plan
 
+> **Superseded execution notice (2026-08-23):** 已完成的历史 Task 1 和既有证据保留；项目所有者随后取消 Tianwen 侧 DeepSeek 预算、授权证据门控 Promotion，并确认故意缺陷 Skill 足以作为真实受控全生命周期测试。所有未完成执行步骤改由
+> `docs/superpowers/plans/2026-08-23-tianwen-v0.1-controlled-real-skill-lifecycle.md`
+> 约束，执行主控不得在两份计划间自行择取。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add one bounded v0.1 evaluation path that freezes five Candidate-specific tasks before Candidate materialization, executes one B and one C Session per task through the normal DSH runtime, combines reproducible objective verification with independent X/Y blind scoring, and permanently separates development-only synthetic evidence from product evidence.
@@ -26,7 +30,7 @@
 14. Use an intentionally defective B Skill and corrected C as the controlled Candidate after exact-main CI. Its five tasks must still represent real product capabilities, be frozen before Candidate materialization, and run through real DSH/DeepSeek/tools. Permanent labels prevent natural-user or market claims, while a separate `mechanism=pass` decision may authorize isolated test Shadow/Promotion/Rollback without affecting the ordinary incumbent.
 15. A real activity stops on task/rubric/config mutation, identity mismatch, evaluator leak, a second formal attempt, verifier unavailability, unauthorized tool/effect, privacy failure, Candidate hard-gate failure, or a fixed limit. Infrastructure failure becomes `inconclusive`; Candidate behavior failure becomes `rejected`. Never patch and continue the same activity.
 16. Internal v2 events stay private. `PUBLIC_LEDGER_EVENT_TYPES` and the installed read-only status privacy boundary must not expand.
-17. Reuse `D:\DevData\tianwen-worktrees\tianwen-architecture-overview-v2-merge`, its `node_modules`, and configured stores. Put generated fixtures under `D:\DevData\tianwen-v0.1-eval-fixtures`; never touch or clean `D:\Guo\zuochong\AGi`.
+17. Reuse `D:\DevData\tianwen-worktrees\tianwen-architecture-overview-v2-merge`, its `node_modules`, and configured stores. Put generated fixtures under `D:\DevData\tianwen-v0.1-eval-fixtures`; never touch or clean `<legacy-dirty-worktree>`.
 18. Do not run an installer, create/resume a real Goal, select/configure a real model, call a Provider, Promotion, Shadow, Rollback, or real product data while executing Tasks 1-6.
 
 ---
@@ -244,7 +248,7 @@ pnpm run check
 python -m pytest -q
 ```
 
-- [ ] Confirm the fixture root contains zero leftover files or logical bytes, the worktree contains no generated `dist`/cache artifacts, and `D:\Guo\zuochong\AGi` was not touched.
+- [ ] Confirm the fixture root contains zero leftover files or logical bytes, the worktree contains no generated `dist`/cache artifacts, and `<legacy-dirty-worktree>` was not touched.
 - [ ] Commit:
 
 ```text

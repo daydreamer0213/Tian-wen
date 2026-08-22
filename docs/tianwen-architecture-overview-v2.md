@@ -1,6 +1,6 @@
 # 天问架构总览 v2
 
-**更新：** 2026-08-22
+**更新：** 2026-08-23
 
 **状态：** 当前产品架构的首要阅读入口；Stage 7 已完成，受控评测生命周期设计已冻结
 
@@ -35,9 +35,10 @@ v0.1 文档收口
 ```
 
 模拟 evaluator Agent 只负责按冻结 rubric 评价主观质量，必须诚实标为 controlled/simulated；
-任务执行本身使用真实 Runtime、Provider 和工具。若自然任务没有产生合法 Candidate，只能在
-永久标记的 development-only 隔离命名空间验证学习机械链路，不能污染生产 incumbent 或冒充
-自然用户失败。完整门禁见
+任务执行本身使用真实 Runtime、Provider 和工具。若自然任务没有产生合法 Candidate，可以用
+永久标记的 development-only 缺陷 Skill 在隔离命名空间跑通学习、B/C、Shadow、Promotion、
+Rollback 和恢复的完整工程链；它不能污染普通产品 incumbent，也不能冒充自然用户失败。
+完整门禁见
 [`2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)。
 
 ## 1. 先说结论：天问是什么
@@ -272,8 +273,9 @@ Candidate 和 Evaluation 仍是 scripted/controlled mechanism proof；Stage 7 �
 因此当前不存在可直接晋升的 Candidate，也不继续为空生命周期扩建新框架。下一步只有一条：
 
 1. 完成当前入口文档与 release-note 源文档收口；
-2. 若自然证据形成合法 Candidate，则直接使用；否则仅在 development-only 隔离场景验证
-   `feedback → Ticket → Case → Lesson → Candidate` 机械链，且该 Candidate 永不进入生产；
+2. 若自然证据形成合法 Candidate，则直接使用；否则在 development-only 隔离场景用故意缺陷
+   Skill 形成 `feedback → Ticket → Case → Lesson → Candidate`，并继续验证完整受控生命周期；
+   该 Candidate 永不成为普通产品 incumbent，但可在专用 isolated-test scope 完成指针演练；
 3. 对受控 Candidate 冻结五个有现实代表性的任务、rubric、工具、Provider 条件和
    一次正式尝试；
 4. 由 B/C 通过真实 Runtime 各执行一次，客观 verifier 与不知道 B/C 身份的独立 evaluator Agent
@@ -298,8 +300,9 @@ Candidate 和 Evaluation 仍是 scripted/controlled mechanism proof；Stage 7 �
 5. 新 pointer 只影响隔离 scope 的未来 Run，随后证明可回到 B 并按建议恢复；
 6. 最终演示、README 和报告诚实区分机制证据、受控评测、单用户产品证据和外部用户泛化。
 
-如果只有 development-only Candidate，它可以证明机械链，但不能满足生产 Candidate 的 B/C、
-Shadow 或 Promotion 主张。缺少外部用户不阻塞开发收口；它只限制结论不能推广到其他用户。
+如果只有 development-only Candidate，它仍可以用真实 Runtime、Provider、工具和独立 Session
+证明完整工程链以及隔离 B/C、Shadow、Promotion、Rollback；但不能满足自然用户改善、普通产品
+incumbent 晋升或市场泛化主张。缺少外部用户不阻塞开发收口；它只限制结论不能推广到其他用户。
 
 ## 12. 文档地图与权威顺序
 
@@ -308,11 +311,12 @@ Shadow 或 Promotion 主张。缺少外部用户不阻塞开发收口；它只�
 1. 当前代码、exact SHA、测试与 exact-main CI：实现和运行事实；
 2. 本文：整体产品架构、组件关系、当前方向和阅读入口；
 3. [`2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)：当前评测、Shadow、Promotion、Rollback 与停止线；
-4. [`tianwen-stage7-natural-run-evidence-trial-handoff.md`](operations/tianwen-stage7-natural-run-evidence-trial-handoff.md) 与 [`tianwen-rc6-rc7-managed-install-migration-handoff.md`](operations/tianwen-rc6-rc7-managed-install-migration-handoff.md)：Stage 7 当前运营事实及终局 addendum；
-5. [`2026-08-19-tianwen-runtime-boundary-reset-design.md`](superpowers/specs/2026-08-19-tianwen-runtime-boundary-reset-design.md)：正式 Runtime 所有权、集成 seam、非干扰合同和恢复顺序；
-6. [`2026-08-17-tianwen-continuous-learning-governance-design.md`](superpowers/specs/2026-08-17-tianwen-continuous-learning-governance-design.md)：长期 Signal、Case、Lesson、Candidate、评测、权限、Shadow 和回滚原则；
-7. [`2026-08-19-dsh-upstream-capability-overlap-audit.md`](research/2026-08-19-dsh-upstream-capability-overlap-audit.md)：DSH rc.7 已有能力与 Tianwen 差异化边界的历史事实依据；
-8. 旧 Alpha 规格、plans、旧 handoff 和实验分支：局部合同与历史证据，不得反向改写当前产品事实。
+4. [`2026-08-23-tianwen-v0.1-controlled-real-skill-lifecycle.md`](superpowers/plans/2026-08-23-tianwen-v0.1-controlled-real-skill-lifecycle.md)：当前逐 Task 实现、复审、合并和真实 operation 顺序；
+5. [`tianwen-stage7-natural-run-evidence-trial-handoff.md`](operations/tianwen-stage7-natural-run-evidence-trial-handoff.md) 与 [`tianwen-rc6-rc7-managed-install-migration-handoff.md`](operations/tianwen-rc6-rc7-managed-install-migration-handoff.md)：Stage 7 当前运营事实及终局 addendum；
+6. [`2026-08-19-tianwen-runtime-boundary-reset-design.md`](superpowers/specs/2026-08-19-tianwen-runtime-boundary-reset-design.md)：正式 Runtime 所有权、集成 seam、非干扰合同和恢复顺序；
+7. [`2026-08-17-tianwen-continuous-learning-governance-design.md`](superpowers/specs/2026-08-17-tianwen-continuous-learning-governance-design.md)：长期 Signal、Case、Lesson、Candidate、评测、权限、Shadow 和回滚原则；
+8. [`2026-08-19-dsh-upstream-capability-overlap-audit.md`](research/2026-08-19-dsh-upstream-capability-overlap-audit.md)：DSH rc.7 已有能力与 Tianwen 差异化边界的历史事实依据；
+9. 旧 Alpha 规格、plans、旧 handoff 和实验分支：局部合同与历史证据，不得反向改写当前产品事实。
 
 旧的 [`architecture-master-session-memory.md`](architecture-master-session-memory.md) 保留会话历史、愿景和监督约定；其中与本文或 Runtime 边界重置冲突的旧状态、旧阶段顺序和双 Runtime 表述不再具有产品权威性。
 
