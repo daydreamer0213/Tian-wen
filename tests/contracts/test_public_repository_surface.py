@@ -49,7 +49,12 @@ def test_required_public_surface_and_positioning() -> None:
     assert "DSH" in readme_en
     assert "pnpm demo:research-preview" in readme_en
     assert "pnpm demo:explicit-correction" in readme_en
-    assert "Candidate/Shadow/Promotion" in readme_en
+    assert "Stage 7 complete" in readme_en
+    assert "No naturally triggered product Candidate has passed a real" in readme_en
+    assert "paired B/C evaluation yet." in readme_en
+    assert "isolated Shadow" in readme_en
+    assert "project-owner-approved" in readme_en
+    assert "Rollback rehearsal" in readme_en
     assert "Explicit negative feedback with a concrete note can create a durable Signal/Ticket." in readme_en
     assert "Positive and note-free negative feedback create no Ticket." in readme_en
     assert "Candidate status is only `recorded`" in readme_en
@@ -68,15 +73,22 @@ def test_bilingual_documents_share_the_proven_preview_facts() -> None:
         "DSH 0.1.0-rc.7",
         "no-case",
         "candidateCreated=false",
-        "Candidate/Shadow/Promotion",
+        "paired B/C",
+        "Shadow",
+        "Promotion",
+        "Rollback",
     ):
         assert fact in readme_en
         assert fact in readme_zh
 
     assert "read-only Evidence projection" in readme_en
-    assert "not complete" in readme_en
+    assert "Stage 7 complete" in readme_en
+    assert "single-user product evidence" in readme_en
+    assert "bounded closeout lifecycle is still pending" in readme_en
     assert "Evidence 只读投影" in readme_zh
-    assert "尚未完成" in readme_zh
+    assert "Stage 7 已完成" in readme_zh
+    assert "单用户产品证据" in readme_zh
+    assert "有界收口生命周期仍待完成" in readme_zh
     assert "带有具体说明的显式负面反馈可以创建持久化 Signal/Ticket。" in readme_zh
     assert "正面反馈和没有说明的负面反馈都不会创建 Ticket。" in readme_zh
     assert "Candidate 状态仅为 `recorded`（已记录）" in readme_zh
@@ -133,9 +145,8 @@ def test_governed_skill_candidate_public_facts_and_limits() -> None:
     assert "确定性的合成合同数据" in readme_zh
     assert "不会注册到普通 Run，也不会进入 Shadow 或 Promotion" in readme_zh
     assert "不是生产自主学习" in readme_zh
-    assert "Stage 3 已证明" in architecture
-    assert "Candidate 仅为 `recorded`" in architecture
-    assert "确定性的合成合同数据" in architecture
+    assert "受治理 Skill Candidate 机制" in architecture
+    assert "Candidate 和 Evaluation 仍是 scripted/controlled mechanism proof" in architecture
 
 
 def test_paired_skill_evaluation_public_facts_and_ci() -> None:
@@ -157,11 +168,8 @@ def test_paired_skill_evaluation_public_facts_and_ci() -> None:
     assert "脚本化机制证明" in readme_zh
     assert "非 scripted Provider 会在创建评测 Agent 前被拒绝" in readme_zh
     assert "不会安装、路由、进入 Shadow、Promotion 或 Reject" in readme_zh
-    assert "Stage 4 已证明" in architecture
-    assert "成对、隔离的普通 DSH Agent" in architecture
-    assert "脚本化机制证明" in architecture
+    assert "成对 Evaluation 记录" in architecture
     assert "INCONCLUSIVE" in architecture
-    assert "零成本 scripted adapter" in architecture
     assert "Shadow、Promotion" in architecture
     for command in (
         "tests/dsh-probe/skill-evaluation.spec.ts",
