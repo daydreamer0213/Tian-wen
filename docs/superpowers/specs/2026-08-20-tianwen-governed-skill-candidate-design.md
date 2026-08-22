@@ -186,7 +186,7 @@ interface RunSkillManifest {
 }
 ```
 
-运行适配层在 DSH 第一个 Turn 之前，用 DSH 公共 `ctx.skills.get()` 返回的 resolved `SkillDefinition` 构造受限 `parent`。纯文本边界要求 resolved definition 没有 `resourceBase`。`parentVersionId` 使用 `skill-version:<64 lowercase hex>`，由完整规范化 parent payload 和 resolved provider 确定性计算；`contentDigest` 单独冻结正文。完整 parent payload 和 provider 必须保留，不能只存 digest，否则 Stage 4 无法重建公平的 B-vs-C 对照或核对本次 DSH tool result。
+运行适配层在 DSH 第一个 Turn 之前，用 DSH 公共 `ctx.skills.get()` 返回的 resolved `SkillDefinition` 构造受限 `parent`。原始 filesystem definition 可以携带 `path`、`resourceBase` 和 `metadata` 这类运行时 transport 字段；它们不能直接进入治理负载。自然 Run 只对一个目录内恰有一个常规 `SKILL.md` 的 incumbent parent 投影 `name`、`description`、可选 `whenToUse`、`invocation`、`source`、`provider` 和 `content`，并只在同一 Agent scope 注册该纯文本 snapshot。模型实际看见的 snapshot 与冻结的 `parent` 是同一内容；Candidate 仍绝不注册。多文件或 sidecar parent 在绑定前拒绝，不把本 Stage 3 边界扩展成资源治理。`parentVersionId` 使用 `skill-version:<64 lowercase hex>`，由完整规范化 parent payload 和 resolved provider 确定性计算；`contentDigest` 单独冻结正文。完整 parent payload 和 provider 必须保留，不能只存 digest，否则 Stage 4 无法重建公平的 B-vs-C 对照或核对本次 DSH tool result。
 
 现有无 Skill manifest 的 Stage 1/2 Run 继续可读取、重放和做 Outcome intake，但不能进入本阶段 `dsh-skill` Case/Candidate。相同 Run + 相同 manifest 重放幂等；改换 name、内容、source、invocation 或任何 payload 字段都拒绝。manifest 必须在首个 `turn/start` 前记录，记录失败或提交结果未知时停止该 Run，不得执行后再补写。
 

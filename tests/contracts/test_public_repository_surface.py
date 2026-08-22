@@ -273,6 +273,10 @@ def test_natural_run_evidence_handoff_and_ci() -> None:
             "Candidate, Evaluation, Shadow, or Promotion was added"
         ),
         "future receipt identifies a subsystem, not an underlying library or OS cause",
+        "one self-contained filesystem incumbent parent is projected as a pure-text scoped snapshot",
+        "`path`, `resourceBase`, and `metadata` are excluded from the frozen parent and safe outputs",
+        "Candidate remains unregistered",
+        "Multi-file or sidecar filesystem parents stop before binding",
     ):
         assert fact in handoff
 

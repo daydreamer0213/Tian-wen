@@ -36,6 +36,12 @@ receipts contain only fixed codes, IDs, and zero counters; raw child output
 remains suppressed. A future receipt identifies a subsystem, not an underlying
 library or OS cause.
 
+For a natural Run, one self-contained filesystem incumbent parent is projected
+as a pure-text scoped snapshot before binding. Its `path`, `resourceBase`, and
+`metadata` are excluded from the frozen parent and safe outputs; Candidate
+remains unregistered. Multi-file or sidecar filesystem parents stop before
+binding. This is a one-file incumbent boundary, not general resource governance.
+
 No retry, second Runtime, logger, store, price lookup, budget subsystem,
 Candidate, Evaluation, Shadow, or Promotion was added. This is an
 execution-surface correction only; it does not change DSH's Agent loop,
