@@ -548,6 +548,60 @@ describe('controlled five-task Skill evaluation protocol', () => {
     })).toEqual({ evaluationId: plan.evaluationId, duplicate: true })
   })
 
+  it('binds all five objectives when the final Candidate hard gate fails', () => {
+    const { ledger, plan } = openControlledObjectiveLedger('result-final-hard-gate')
+    for (let index = 0; index < plan.tasks.length; index += 1) {
+      ledger.recordControlledSkillEvaluationObjective(recordControlledTaskFacts(
+        ledger,
+        plan,
+        index,
+        index === plan.tasks.length - 1
+          ? { baseline: 'met', candidate: 'not-met' }
+          : { baseline: 'met', candidate: 'met' },
+      ))
+    }
+    const objectives = ledger.listControlledSkillEvaluationObjectives(plan.evaluationId)
+
+    ledger.recordControlledSkillEvaluationResult({ evaluationId: plan.evaluationId })
+
+    expect(ledger.getControlledSkillEvaluationResult(plan.evaluationId)).toMatchObject({
+      objectiveSetDigest: sha256(objectives),
+      blindMapDigest: null,
+      evaluatorSetDigest: null,
+      mechanismVerdict: 'rejected',
+      reasonCode: 'candidate-objective-hard-gate-failed',
+      baselineTotal: null,
+      candidateTotal: null,
+    })
+  })
+
+  it('binds all five objectives when the final objective is inconclusive', () => {
+    const { ledger, plan } = openControlledObjectiveLedger('result-final-inconclusive')
+    for (let index = 0; index < plan.tasks.length; index += 1) {
+      ledger.recordControlledSkillEvaluationObjective(recordControlledTaskFacts(
+        ledger,
+        plan,
+        index,
+        index === plan.tasks.length - 1
+          ? { baseline: 'inconclusive', candidate: 'met' }
+          : { baseline: 'met', candidate: 'met' },
+      ))
+    }
+    const objectives = ledger.listControlledSkillEvaluationObjectives(plan.evaluationId)
+
+    ledger.recordControlledSkillEvaluationResult({ evaluationId: plan.evaluationId })
+
+    expect(ledger.getControlledSkillEvaluationResult(plan.evaluationId)).toMatchObject({
+      objectiveSetDigest: sha256(objectives),
+      blindMapDigest: null,
+      evaluatorSetDigest: null,
+      mechanismVerdict: 'inconclusive',
+      reasonCode: 'objective-inconclusive',
+      baselineTotal: null,
+      candidateTotal: null,
+    })
+  })
+
   it('freezes the deterministic blind map only after objective aggregate pass', () => {
     const { ledger, plan } = openControlledObjectiveLedger('blind-map')
     expect(() => ledger.freezeControlledSkillEvaluationBlindMap(Object.assign(

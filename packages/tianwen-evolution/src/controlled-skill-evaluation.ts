@@ -1557,9 +1557,12 @@ export function prepareControlledSkillEvaluationResult(
     || objective.taskId !== plan.tasks[index]?.taskId)) {
     throw new TypeError('controlled evaluation result has unknown objectives')
   }
+  const objectiveSetDigest = objectives.length === plan.tasks.length
+    ? sha256(objectives)
+    : null
   if (objectives.some(objective => objective.candidateHardGate === 'rejected')) {
     return prepareResultRecord(plan, {
-      objectiveSetDigest: null,
+      objectiveSetDigest,
       blindMapDigest: null,
       evaluatorSetDigest: null,
       mechanismVerdict: 'rejected',
@@ -1570,7 +1573,7 @@ export function prepareControlledSkillEvaluationResult(
   }
   if (objectives.some(objective => objective.objectiveVerdict === 'inconclusive')) {
     return prepareResultRecord(plan, {
-      objectiveSetDigest: null,
+      objectiveSetDigest,
       blindMapDigest: null,
       evaluatorSetDigest: null,
       mechanismVerdict: 'inconclusive',
@@ -1579,11 +1582,10 @@ export function prepareControlledSkillEvaluationResult(
       candidateTotal: null,
     })
   }
-  if (objectives.length !== plan.tasks.length) {
+  if (objectiveSetDigest === null) {
     throw new TypeError('controlled evaluation incomplete')
   }
   const complete = objectives
-  const objectiveSetDigest = sha256(complete)
   if (complete.slice(0, 2).every(objective => objective.comparison !== 'candidate-better')) {
     return prepareResultRecord(plan, {
       objectiveSetDigest,
