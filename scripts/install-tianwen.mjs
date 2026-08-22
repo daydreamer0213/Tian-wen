@@ -50,6 +50,13 @@ const PROFILE_DEPENDENCIES = [
   '@deepseek-ai/dsh-headless',
   RUNTIME_PACKAGE,
 ]
+const RUNTIME_BUILD_OUTPUTS = Object.freeze([
+  'packages/tianwen-dsh-compat/dist',
+  'packages/tianwen-evolution/dist',
+  'packages/tianwen-evidence/dist',
+  'packages/tianwen-runtime/dist',
+  'packages/tianwen-runtime-bundle/dist',
+])
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const WORKSPACE_POLICY = `packages:
   - .
@@ -446,6 +453,62 @@ function sha256File(path) {
   return `sha256:${createHash('sha256').update(readFileSync(path)).digest('hex')}`
 }
 
+function sameFileIdentity(left, right) {
+  const leftStat = statSync(left, { bigint: true })
+  const rightStat = statSync(right, { bigint: true })
+  return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino
+}
+
+function runtimePublishedPaths(repoRoot) {
+  const runtimeRoot = resolve(repoRoot, 'packages', 'tianwen-runtime-bundle')
+  const manifest = assertPlainObject(
+    JSON.parse(readFileSync(resolve(runtimeRoot, 'package.json'), 'utf8')),
+    'Runtime Bundle manifest',
+  )
+  if (!Array.isArray(manifest.files)
+    || manifest.files.length === 0
+    || manifest.files.some(path => typeof path !== 'string' || path === '')) {
+    throw new Error('Runtime Bundle manifest must expose a non-empty files array')
+  }
+  if (new Set(manifest.files).size !== manifest.files.length) {
+    throw new Error('Runtime Bundle manifest files must be unique')
+  }
+  for (const path of manifest.files) {
+    const child = relative(runtimeRoot, resolve(runtimeRoot, path))
+    if (child === '' || child.startsWith('..') || isAbsolute(child)) {
+      throw new Error('Runtime Bundle manifest file escapes its package root')
+    }
+  }
+  return [...manifest.files]
+}
+
+function hasSourceLinkedRuntimePublication(repoRoot, profileRoot) {
+  const sourceRoot = resolve(repoRoot, 'packages', 'tianwen-runtime-bundle')
+  const installedRoot = resolve(profileRoot, 'node_modules', '@tianwen', 'runtime-bundle')
+  let linked = false
+  for (const path of runtimePublishedPaths(repoRoot)) {
+    const source = resolve(sourceRoot, path)
+    const installed = resolve(installedRoot, path)
+    if (!existsSync(source) || !existsSync(installed)) continue
+    if (!statSync(source).isFile() || !statSync(installed).isFile()) {
+      throw new Error('Runtime Bundle publication entries must be regular files')
+    }
+    if (sameFileIdentity(source, installed)) linked = true
+  }
+  return linked
+}
+
+function isolateRuntimeBuildOutputs(repoRoot) {
+  for (const path of RUNTIME_BUILD_OUTPUTS) {
+    const output = resolve(repoRoot, path)
+    const child = relative(repoRoot, output)
+    if (child === '' || child.startsWith('..') || isAbsolute(child)) {
+      throw new Error('Runtime build output escapes its repository root')
+    }
+    rmSync(output, { force: true, recursive: true })
+  }
+}
+
 function previousArchiveDigest(paths) {
   if (!existsSync(paths.receiptPath)) return undefined
   try {
@@ -605,10 +668,13 @@ export function installTianwen({
   const hostNeedsDeploy = !hostExists || migratingRc6
   let installedArchiveDigest
   let dshBin
-  atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_LAYOUT_PREFLIGHT, () => {
+  const sourceLinkedProfile = atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_LAYOUT_PREFLIGHT, () => {
     installedArchiveDigest = previousArchiveDigest(paths)
     if (hostExists && !migratingRc6) dshBin = validateInstalledHost(paths.hostRoot)
     if (profileExists && !migratingRc6) validateProfile(paths)
+    return profileExists
+      && !migratingRc6
+      && hasSourceLinkedRuntimePublication(repoRoot, paths.profileRoot)
   })
 
   const env = atInstallStage(
@@ -672,6 +738,7 @@ export function installTianwen({
         : INSTALLER_FAILURE_STAGE.RUNTIME_BUNDLE_PACK_2
       atInstallStage(buildStage, () => {
         mkdirSync(archiveStage, { recursive: true })
+        if (index === 0) isolateRuntimeBuildOutputs(repoRoot)
         invokePnpm(['--filter', `${RUNTIME_PACKAGE}...`, 'build'], 300_000)
       })
       atInstallStage(packStage, () => {

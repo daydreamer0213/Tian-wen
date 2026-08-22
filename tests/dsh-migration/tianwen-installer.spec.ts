@@ -1,5 +1,15 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -130,6 +140,7 @@ function scriptedInstaller(
   failOn?: string,
   archiveBytes: string | readonly string[] = 'fixed runtime archive\n',
   dumpOptions: { foldedSessionsRoot?: boolean, sessionsRoot?: string } = {},
+  fixtureOptions: { onBuild?: (ordinal: number) => void } = {},
 ) {
   const calls: string[][] = []
   const childEnvironments: NodeJS.ProcessEnv[] = []
@@ -147,8 +158,9 @@ function scriptedInstaller(
     childEnvironments.push(options.env)
     executables.push(executable)
     calls.push([...argv])
-    const stageFailure = (failOn === 'runtime-bundle-build-1' && argv.includes('build') && buildOrdinal++ === 0)
-      || (failOn === 'runtime-bundle-build-2' && argv.includes('build') && buildOrdinal++ === 1)
+    const currentBuildOrdinal = argv.includes('build') ? buildOrdinal++ : undefined
+    const stageFailure = (failOn === 'runtime-bundle-build-1' && currentBuildOrdinal === 0)
+      || (failOn === 'runtime-bundle-build-2' && currentBuildOrdinal === 1)
       || (failOn === 'runtime-bundle-pack-1' && argv.includes('pack') && packOrdinal === 0)
       || (failOn === 'runtime-bundle-pack-2' && argv.includes('pack') && packOrdinal === 1)
     const failed = (failOn !== undefined && argv.includes(failOn)) || stageFailure
@@ -172,6 +184,7 @@ function scriptedInstaller(
         version: '0.1.0-rc.7',
       })
     }
+    if (currentBuildOrdinal !== undefined) fixtureOptions.onBuild?.(currentBuildOrdinal)
     if (argv.includes('pack')) {
       const destination = argv.at(argv.indexOf('--pack-destination') + 1)
       const bytes = typeof archiveBytes === 'string' ? archiveBytes : archiveBytes[packOrdinal]
@@ -811,6 +824,63 @@ describe('Tianwen installer contract', () => {
     expect(publishedPaths.map(path => readFileSync(path))).toEqual(publishedBefore)
     expect(readdirSync(dirname(paths.archivePath)).filter(name => name.startsWith('.install-')))
       .toEqual([])
+  })
+
+  it('protects the current Profile from source-linked builds', () => {
+    const root = testRoot('source-linked-build')
+    const paths = deriveInstallPaths(root, 'win32')
+    const repoRoot = testRoot('source-linked-repo')
+    const buildOutputs = [
+      'tianwen-dsh-compat',
+      'tianwen-evolution',
+      'tianwen-evidence',
+      'tianwen-runtime',
+      'tianwen-runtime-bundle',
+    ].map(name => join(repoRoot, 'packages', name, 'dist'))
+    for (const output of buildOutputs) mkdirSync(output, { recursive: true })
+    const runtimeRoot = join(repoRoot, 'packages', 'tianwen-runtime-bundle')
+    const sourceCli = join(runtimeRoot, 'dist', 'cli.js')
+    writeJson(join(runtimeRoot, 'package.json'), { files: ['dist/cli.js'] })
+    installWindowsFixture({
+      dataDir: root,
+      repoRoot,
+      runner: scriptedInstaller(paths).runner,
+    })
+    for (const output of buildOutputs) mkdirSync(output, { recursive: true })
+    writeFileSync(sourceCli, 'source runtime before build\n', 'utf8')
+    const installedCli = join(
+      paths.profileRoot,
+      'node_modules',
+      '@tianwen',
+      'runtime-bundle',
+      'dist',
+      'cli.js',
+    )
+    rmSync(installedCli)
+    linkSync(sourceCli, installedCli)
+    expect(statSync(sourceCli, { bigint: true }).ino)
+      .toBe(statSync(installedCli, { bigint: true }).ino)
+    const before = snapshotTree(paths.dataDir)
+    const unstable = scriptedInstaller(
+      paths,
+      undefined,
+      ['unstable runtime one\n', 'unstable runtime two\n'],
+      {},
+      {
+        onBuild(ordinal) {
+          if (ordinal !== 0) return
+          mkdirSync(dirname(sourceCli), { recursive: true })
+          writeFileSync(sourceCli, 'source runtime after build\n', 'utf8')
+        },
+      },
+    )
+
+    expect(() => installWindowsFixture({ dataDir: root, repoRoot, runner: unstable.runner }))
+      .toThrow('Runtime Bundle archive is not stable across consecutive builds')
+    expect(readFileSync(sourceCli, 'utf8')).toBe('source runtime after build\n')
+    expect(readFileSync(installedCli, 'utf8')).toBe('source runtime before build\n')
+    expect(snapshotTree(paths.dataDir)).toEqual(before)
+    expect(unstable.calls.filter(argv => argv.includes('@tianwen/profile-host'))).toHaveLength(0)
   })
 
   it('reuses caller-configured D-drive package stores', () => {
