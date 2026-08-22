@@ -9,6 +9,7 @@ import { TianwenSkillEvaluationService } from './skill-evaluation.js'
 
 export {
   compareNormalizedSkillEvaluationRequests,
+  ControlledSkillEvaluatorPreflightError,
   ControlledSkillEvaluationPreflightError,
   normalizeSkillEvaluationRequest,
   observeSkillEvaluationRequest,
@@ -16,6 +17,10 @@ export {
 export type {
   NormalizedSkillEvaluationRequestComparison,
   ControlledEvaluatorMaterialContract,
+  ControlledSkillEvaluatorPreflightCode,
+  ControlledSkillEvaluatorsReceipt,
+  ControlledSkillEvaluatorsStop,
+  ControlledSkillEvaluatorsStopReasonCode,
   ControlledSkillEvaluationArmsReceipt,
   ControlledSkillEvaluationArmsStop,
   ControlledSkillEvaluationArmsStopReasonCode,
@@ -28,6 +33,8 @@ export type {
   SkillEvaluationRequestNormalization,
   RunControlledSkillEvaluationArmsInput,
   RunControlledSkillEvaluationTaskInput,
+  RunControlledSkillEvaluatorTaskInput,
+  RunControlledSkillEvaluatorsInput,
 } from './skill-evaluation.js'
 export { TianwenSkillEvaluationService } from './skill-evaluation.js'
 export type {

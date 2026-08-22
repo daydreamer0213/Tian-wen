@@ -6,6 +6,7 @@ import { HarnessError } from '@deepseek-ai/dsh-llm'
 
 import {
   DynamicCordisRunnerService,
+  CallId,
   SessionId,
   ScriptedAdapter,
   SkillRegistry,
@@ -21,7 +22,10 @@ import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
-import { apply } from '../../packages/tianwen-runtime/src/index.js'
+import {
+  ControlledSkillEvaluatorPreflightError,
+  apply,
+} from '../../packages/tianwen-runtime/src/index.js'
 
 const CONTROLLED_PROVIDER = 'tianwen-controlled-scripted'
 const CONTROLLED_MODEL = 'scripted'
@@ -86,10 +90,12 @@ function rawDigest(content: string): `sha256:${string}` {
 
 class ControlledScriptedAdapter extends ScriptedAdapter {
   private delayed = false
+  private readonly delayedEvaluatorSessions = new Set<string>()
 
   constructor(
     script: readonly (readonly StreamChunk[] | Error)[],
     private readonly firstRequestDelayMs = 0,
+    private readonly evaluatorRequestDelayMs = 0,
   ) {
     super(script.map(entry => Array.isArray(entry) ? [...entry] : entry))
   }
@@ -109,6 +115,13 @@ class ControlledScriptedAdapter extends ScriptedAdapter {
     if (!this.delayed && this.firstRequestDelayMs > 0) {
       this.delayed = true
       await new Promise(resolve => setTimeout(resolve, this.firstRequestDelayMs))
+    }
+    const sessionId = String(options.sessionId)
+    if (sessionId.endsWith(':evaluator')
+      && !this.delayedEvaluatorSessions.has(sessionId)
+      && this.evaluatorRequestDelayMs > 0) {
+      this.delayedEvaluatorSessions.add(sessionId)
+      await new Promise(resolve => setTimeout(resolve, this.evaluatorRequestDelayMs))
     }
     yield* super.stream(options)
   }
@@ -216,6 +229,8 @@ async function mountControlledRuntime(
     readonly tamperFirstRequestPurpose?: boolean
     readonly baselineImprovementRequired?: boolean
     readonly inconclusiveCandidateTaskType?: typeof taskTypes[number]
+    readonly evaluatorRequestDelayMs?: number
+    readonly tamperEvaluatorRequestIdentity?: boolean
   } = {},
 ) {
   const root = fixtureRoot(name)
@@ -255,6 +270,7 @@ async function mountControlledRuntime(
   const adapter = new ControlledScriptedAdapter(
     script,
     options.firstRequestDelayMs,
+    options.evaluatorRequestDelayMs,
   )
   harness.ctx.llm.registerAdapter([CONTROLLED_PROVIDER], adapter)
   let selection = { provider: CONTROLLED_PROVIDER, model: CONTROLLED_MODEL }
@@ -272,6 +288,15 @@ async function mountControlledRuntime(
     })
   }
   await apply(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+  if (options.tamperEvaluatorRequestIdentity === true) {
+    harness.ctx.systemPrompt.section({
+      name: 'test:controlled-evaluator-identity-leak',
+      order: 999,
+      text: context => String(context.agent?.id).endsWith(':evaluator')
+        ? '# Controlled summary\n\nState the verified result before interpretation.'
+        : '',
+    })
+  }
 
   const allowedTools = ['skill', 'verify_summary'] as const
   const toolSchemas = harness.ctx.tools.schemas()
@@ -392,6 +417,118 @@ function successfulArmScript() {
     ]))
 }
 
+function blindSafeArmScript() {
+  return taskTypes.flatMap(taskType =>
+    (['baseline', 'candidate'] as const).flatMap((role, index) => [
+      toolCallResponse(`${taskType}-${role}-blind-skill`, 'skill', {
+        name: parentSkill.name,
+      }),
+      toolCallResponse(`${taskType}-${role}-blind-verify`, acceptance.toolName, {
+        subject: { task: taskType, accepted: true },
+      }),
+      textResponse(`completed ${taskType} option ${index + 1}`),
+    ]))
+}
+
+function successfulEvaluatorScript() {
+  return taskTypes.map(taskType => toolCallResponse(
+    `${taskType}-blind-score`,
+    'submit_blind_evaluation',
+    {
+      status: 'scored',
+      insufficientMaterial: false,
+      reasonCode: 'score-submitted',
+      scores: {
+        x: {
+          relevance: 3,
+          correctnessReasoning: 3,
+          clarityUsability: 3,
+          scopeRestraint: 3,
+        },
+        y: {
+          relevance: 3,
+          correctnessReasoning: 3,
+          clarityUsability: 3,
+          scopeRestraint: 3,
+        },
+      },
+    },
+  ))
+}
+
+function evaluatorSubmission(
+  status: 'scored' | 'inconclusive' = 'scored',
+) {
+  return status === 'scored'
+    ? {
+        status: 'scored' as const,
+        insufficientMaterial: false as const,
+        reasonCode: 'score-submitted' as const,
+        scores: {
+          x: {
+            relevance: 3,
+            correctnessReasoning: 3,
+            clarityUsability: 3,
+            scopeRestraint: 3,
+          },
+          y: {
+            relevance: 3,
+            correctnessReasoning: 3,
+            clarityUsability: 3,
+            scopeRestraint: 3,
+          },
+        },
+      }
+    : {
+        status: 'inconclusive' as const,
+        insufficientMaterial: true as const,
+        reasonCode: 'material-missing' as const,
+      }
+}
+
+function twoEvaluatorSubmissions(): StreamChunk[] {
+  return [
+    { type: 'block-start', index: 0, blockType: 'tool-call' },
+    {
+      type: 'block-end',
+      index: 0,
+      block: {
+        type: 'tool-call',
+        id: CallId('blind-score-first'),
+        name: 'submit_blind_evaluation',
+        arguments: JSON.stringify(evaluatorSubmission()),
+      },
+    },
+    { type: 'block-start', index: 1, blockType: 'tool-call' },
+    {
+      type: 'block-end',
+      index: 1,
+      block: {
+        type: 'tool-call',
+        id: CallId('blind-score-second'),
+        name: 'submit_blind_evaluation',
+        arguments: JSON.stringify(evaluatorSubmission()),
+      },
+    },
+    { type: 'finish', reason: { kind: 'tool-calls' } },
+  ]
+}
+
+function evaluatorInput(
+  input: Awaited<ReturnType<typeof mountControlledRuntime>>['input'],
+  evaluationId: string,
+) {
+  return {
+    evaluationId,
+    tasks: input.tasks.map(task => ({
+      taskId: task.taskId,
+      goal: task.goal,
+      input: task.input,
+      evaluatorMaterialContract: task.evaluatorMaterialContract,
+    })),
+  }
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
   for (const root of roots.splice(0)) {
@@ -405,6 +542,616 @@ describe('controlled Skill evaluation Runtime', () => {
       installModelSelection?: unknown
     }
     expect(compat.installModelSelection).toBeTypeOf('function')
+  })
+
+  it('rejects an invalid evaluator package before creating evaluator activity', async () => {
+    const harness = await mountCoreHarness([])
+    await harness.ctx.plugin(SkillRegistry)
+    await harness.ctx.plugin(DynamicCordisRunnerService, {})
+    await apply(harness.ctx, { evolutionRoot: fixtureRoot('invalid-evaluator-package') })
+    const service = harness.ctx.tianwenSkillEvaluation as unknown as {
+      runControlledEvaluators(input: unknown): Promise<unknown>
+    }
+
+    try {
+      const operation = Promise.resolve().then(() => service.runControlledEvaluators({
+        evaluationId: 'evaluation:missing',
+        tasks: [],
+      }))
+      await expect(operation).rejects.toBeInstanceOf(ControlledSkillEvaluatorPreflightError)
+      await expect(operation).rejects.toMatchObject({
+        name: 'ControlledSkillEvaluatorPreflightError',
+        code: 'task-package-mismatch',
+      })
+      expect(harness.ctx.agents.list()).toEqual([])
+      expect(harness.ctx.sessions.list()).toEqual([])
+      expect(harness.adapter.requests).toEqual([])
+      expect(harness.ctx.tianwenEvolution.listControlledSkillEvaluations()).toEqual([])
+    } finally {
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects evaluator task fact drift before creating an evaluator Agent', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-task-drift',
+      successfulArmScript(),
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+      const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+      const input = evaluatorInput(mounted.input, arms.evaluationId)
+      input.tasks[0] = { ...input.tasks[0]!, goal: 'changed after protocol freeze' }
+
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(input))
+        .rejects.toMatchObject({ code: 'task-package-mismatch' })
+      expect(create).not.toHaveBeenCalled()
+      expect(mounted.adapter.requests).toHaveLength(30)
+      expect(mounted.harness.ctx.tianwenEvolution.getControlledSkillEvaluationBlindMap(
+        arms.evaluationId,
+      )).toBeUndefined()
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects evaluator activity before all objective pairs pass', async () => {
+    const mounted = await mountControlledRuntime('evaluator-objective-gate')
+    try {
+      const opened = mounted.harness.ctx.tianwenEvolution.openControlledSkillEvaluation({
+        candidateId: mounted.input.candidateId,
+        protocolId: mounted.input.protocolId,
+        sessionAllocations: mounted.input.tasks.map(task => ({
+          taskId: task.taskId,
+          baselineSessionId: task.baselineSessionId,
+          candidateSessionId: task.candidateSessionId,
+          evaluatorSessionId: task.evaluatorSessionId,
+        })),
+      })
+      const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, opened.evaluationId),
+      )).rejects.toMatchObject({ code: 'evaluation-not-ready' })
+      expect(create).not.toHaveBeenCalled()
+      expect(mounted.adapter.requests).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.getControlledSkillEvaluationBlindMap(
+        opened.evaluationId,
+      )).toBeUndefined()
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('replays an objective-only terminal result without creating an evaluator Agent', async () => {
+    const firstTask = taskTypes[0]
+    const script = (['baseline', 'candidate'] as const).flatMap(role => [
+      toolCallResponse(`evaluator-terminal-${role}-skill`, 'skill', { name: parentSkill.name }),
+      toolCallResponse(`evaluator-terminal-${role}-verify`, acceptance.toolName, {
+        subject: { task: firstTask, accepted: true },
+      }),
+      textResponse(`${role} complete`),
+    ])
+    const mounted = await mountControlledRuntime(
+      'evaluator-objective-terminal',
+      script,
+      { rejectCandidateTaskType: firstTask },
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('terminal')
+      const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )
+      expect(receipt).toEqual({
+        schemaVersion: 'tianwen.controlled-skill-evaluators-receipt.v1',
+        evaluationId: arms.evaluationId,
+        state: 'terminal',
+        completedTaskIds: [],
+        result: arms.state === 'terminal' ? arms.result : undefined,
+      })
+      expect(create).not.toHaveBeenCalled()
+      expect(mounted.adapter.requests).toHaveLength(6)
+      expect(mounted.harness.ctx.tianwenEvolution.getControlledSkillEvaluationBlindMap(
+        arms.evaluationId,
+      )).toBeUndefined()
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('runs five independent blind evaluators and records the revealed result', async () => {
+    const mounted = await mountControlledRuntime(
+      'five-blind-evaluators',
+      [...blindSafeArmScript(), ...successfulEvaluatorScript()],
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+      const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+      const inspect = vi.spyOn(mounted.harness.ctx.sessionPersistence, 'inspect')
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )
+      expect(receipt).toMatchObject({
+        schemaVersion: 'tianwen.controlled-skill-evaluators-receipt.v1',
+        evaluationId: arms.evaluationId,
+        state: 'terminal',
+        completedTaskIds: mounted.input.tasks.map(task => task.taskId),
+        result: {
+          mechanismVerdict: 'pass',
+          reasonCode: 'all-gates-passed',
+          baselineTotal: 60,
+          candidateTotal: 60,
+        },
+      })
+      expect(create).toHaveBeenCalledTimes(5)
+      expect(inspect).toHaveBeenCalledTimes(10)
+      expect(mounted.adapter.requests).toHaveLength(35)
+      const evaluatorRequests = mounted.adapter.requests.slice(30)
+      expect(evaluatorRequests.map(request => String(request.sessionId))).toEqual(
+        mounted.input.tasks.map(task => task.evaluatorSessionId),
+      )
+      expect(evaluatorRequests.every(request =>
+        request.tools?.map(tool => tool.name).join(',') === 'submit_blind_evaluation'))
+        .toBe(true)
+      expect(evaluatorRequests.some(request => request.messages.some(message =>
+        (message.source as { kind?: string }).kind === 'skill-catalog'))).toBe(false)
+      const serializedRequests = JSON.stringify(evaluatorRequests)
+      expect(serializedRequests).not.toContain('candidatePassRules')
+      expect(serializedRequests).not.toContain(parentSkill.name)
+      expect(serializedRequests).not.toContain(mounted.input.candidateId)
+      const observations = mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluatorObservations(arms.evaluationId)
+      expect(observations).toHaveLength(5)
+      expect(observations.map(observation => observation.requestDigest)).toEqual(
+        evaluatorRequests.map(request => sha256(request)),
+      )
+      expect(observations.every(observation => observation.status === 'scored')).toBe(true)
+      const blindMap = mounted.harness.ctx.tianwenEvolution.getControlledSkillEvaluationBlindMap(
+        arms.evaluationId,
+      )!
+      const objectives = mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluationObjectives(arms.evaluationId)
+      for (const [index, request] of evaluatorRequests.entries()) {
+        const message = request.messages.findLast(item => item.role === 'user')!
+        const block = message.content.find(item => item.type === 'text')!
+        const envelope = JSON.parse(block.type === 'text' ? block.text : '') as Record<string, any>
+        const task = mounted.input.tasks[index]!
+        const assignment = blindMap.assignments[index]!
+        const objective = objectives[index]!
+        expect(Object.keys(envelope).sort()).toEqual([
+          'goal', 'input', 'rubric', 'rubricDigest', 'taskId', 'x', 'y',
+        ])
+        expect(Object.keys(envelope.rubric).sort()).toEqual(['dimensions', 'scoreAnchors'])
+        expect(envelope).toMatchObject({
+          taskId: task.taskId,
+          goal: task.goal,
+          input: task.input,
+          rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+          x: {
+            finalText: `completed ${taskTypes[index]} option ${assignment.xRole === 'baseline' ? 1 : 2}`,
+            outcome: objective[assignment.xRole].outcome,
+            materialDigest: objective[assignment.xRole].evaluatorMaterialDigest,
+            evidenceSetDigest: sha256(objective[assignment.xRole].evidenceIds),
+          },
+          y: {
+            finalText: `completed ${taskTypes[index]} option ${assignment.yRole === 'baseline' ? 1 : 2}`,
+            outcome: objective[assignment.yRole].outcome,
+            materialDigest: objective[assignment.yRole].evaluatorMaterialDigest,
+            evidenceSetDigest: sha256(objective[assignment.yRole].evidenceIds),
+          },
+        })
+      }
+      expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(15)
+      for (const task of mounted.input.tasks) {
+        const inspection = await mounted.harness.ctx.sessionPersistence.inspect(
+          SessionId(task.evaluatorSessionId),
+        )
+        expect(inspection.meta.cwd).toBeUndefined()
+      }
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects an actual evaluator request identity leak before the Provider', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-request-identity',
+      [...blindSafeArmScript(), ...successfulEvaluatorScript()],
+      { tamperEvaluatorRequestIdentity: true },
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'evaluator',
+          taskId: mounted.input.tasks[0]!.taskId,
+          reasonCode: 'identity-exposed',
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(30)
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluatorObservations(arms.evaluationId)).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('re-reads all execution material and rejects a persisted digest drift', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-material-drift',
+      [...blindSafeArmScript(), ...successfulEvaluatorScript()],
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+      const inspect = mounted.harness.ctx.sessionPersistence.inspect.bind(
+        mounted.harness.ctx.sessionPersistence,
+      )
+      let changed = false
+      vi.spyOn(mounted.harness.ctx.sessionPersistence, 'inspect')
+        .mockImplementation(async sessionId => {
+          const inspection = await inspect(sessionId)
+          if (changed) return inspection
+          changed = true
+          const clone = structuredClone(inspection) as typeof inspection & {
+            events: Array<Record<string, unknown>>
+          }
+          const message = clone.events.findLast(event => event.type === 'assistant/message') as {
+            data: { message: { content: unknown[] } }
+          }
+          message.data.message.content = [{ type: 'text', text: 'tampered durable material' }]
+          return clone as typeof inspection
+        })
+      const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )).rejects.toMatchObject({ code: 'material-mismatch' })
+      expect(create).not.toHaveBeenCalled()
+      expect(mounted.adapter.requests).toHaveLength(30)
+      expect(mounted.harness.ctx.tianwenEvolution.getControlledSkillEvaluationBlindMap(
+        arms.evaluationId,
+      )).toBeUndefined()
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects a non-fresh evaluator Session before freezing the blind map', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-session-not-fresh',
+      [...blindSafeArmScript(), ...successfulEvaluatorScript()],
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+      mounted.harness.ctx.sessions.create(
+        SessionId(mounted.input.tasks[0]!.evaluatorSessionId),
+      )
+
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )).rejects.toMatchObject({ code: 'session-not-empty' })
+      expect(mounted.adapter.requests).toHaveLength(30)
+      expect(mounted.harness.ctx.tianwenEvolution.getControlledSkillEvaluationBlindMap(
+        arms.evaluationId,
+      )).toBeUndefined()
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('records a submitted inconclusive observation and stops later evaluators', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-inconclusive',
+      [
+        ...blindSafeArmScript(),
+        toolCallResponse(
+          'blind-inconclusive',
+          'submit_blind_evaluation',
+          evaluatorSubmission('inconclusive'),
+        ),
+      ],
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )
+      expect(receipt).toMatchObject({
+        state: 'terminal',
+        completedTaskIds: [mounted.input.tasks[0]!.taskId],
+        result: {
+          mechanismVerdict: 'inconclusive',
+          reasonCode: 'material-missing',
+          baselineTotal: null,
+          candidateTotal: null,
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(31)
+      const observations = mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluatorObservations(arms.evaluationId)
+      expect(observations).toEqual([expect.objectContaining({
+        taskId: mounted.input.tasks[0]!.taskId,
+        status: 'inconclusive',
+        insufficientMaterial: true,
+        reasonCode: 'material-missing',
+      })])
+      expect(JSON.stringify(observations)).not.toContain('scores')
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not forge an observation for Provider failure and stops partial replay', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-provider-failure',
+      [...blindSafeArmScript(), new Error('D:/private/evaluator-provider-failure')],
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+      const input = evaluatorInput(mounted.input, arms.evaluationId)
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: { stage: 'evaluator', reasonCode: 'provider-failed' },
+      })
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluatorObservations(arms.evaluationId)).toEqual([])
+      expect(JSON.stringify(receipt)).not.toContain('evaluator-provider-failure')
+      const requests = mounted.adapter.requests.length
+
+      const replay = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        input,
+      )
+      expect(replay).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: { stage: 'postflight', reasonCode: 'existing-partial-activity' },
+      })
+      expect(mounted.adapter.requests).toHaveLength(requests)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not forge an observation when the evaluator submits no score', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-no-submit',
+      [...blindSafeArmScript(), textResponse('no score submitted')],
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: { stage: 'evaluator', reasonCode: 'score-not-submitted' },
+      })
+      expect(mounted.adapter.requests).toHaveLength(31)
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluatorObservations(arms.evaluationId)).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not forge an observation after the evaluator wall-clock timeout', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-timeout',
+      [...blindSafeArmScript(), textResponse('too late')],
+      { maxElapsedMs: 100, evaluatorRequestDelayMs: 250 },
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: { stage: 'evaluator', reasonCode: 'timeout' },
+      })
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluatorObservations(arms.evaluationId)).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects a second submit call before its tool body records an observation', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-second-submit',
+      [...blindSafeArmScript(), twoEvaluatorSubmissions()],
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: { stage: 'evaluator', reasonCode: 'submission-invalid' },
+      })
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluatorObservations(arms.evaluationId)).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects extra evaluator submission fields without recording an observation', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-invalid-submit',
+      [
+        ...blindSafeArmScript(),
+        toolCallResponse(
+          'blind-invalid-score',
+          'submit_blind_evaluation',
+          { ...evaluatorSubmission(), prose: 'controller must not accept this' },
+        ),
+      ],
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: { stage: 'evaluator', reasonCode: 'submission-invalid' },
+      })
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluatorObservations(arms.evaluationId)).toEqual([])
+      expect(JSON.stringify(receipt)).not.toContain('controller must not accept this')
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('continues from an exact blind-map commit-unknown write with empty evaluator Sessions', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-map-commit-unknown',
+      [...blindSafeArmScript(), ...successfulEvaluatorScript()],
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+      const freeze = mounted.harness.ctx.tianwenEvolution
+        .freezeControlledSkillEvaluationBlindMap.bind(mounted.harness.ctx.tianwenEvolution)
+      vi.spyOn(mounted.harness.ctx.tianwenEvolution, 'freezeControlledSkillEvaluationBlindMap')
+        .mockImplementation(input => {
+          freeze(input)
+          throw new Error('commit outcome unknown')
+        })
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )
+      expect(receipt).toMatchObject({
+        state: 'terminal',
+        completedTaskIds: mounted.input.tasks.map(task => task.taskId),
+        result: { mechanismVerdict: 'pass' },
+      })
+      expect(mounted.adapter.requests).toHaveLength(35)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('replays a committed result after its write outcome was unknown', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-result-commit-unknown',
+      [...blindSafeArmScript(), ...successfulEvaluatorScript()],
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+      const recordResult = mounted.harness.ctx.tianwenEvolution
+        .recordControlledSkillEvaluationResult.bind(mounted.harness.ctx.tianwenEvolution)
+      vi.spyOn(mounted.harness.ctx.tianwenEvolution, 'recordControlledSkillEvaluationResult')
+        .mockImplementation(input => {
+          recordResult(input)
+          throw new Error('commit outcome unknown')
+        })
+      const input = evaluatorInput(mounted.input, arms.evaluationId)
+
+      const unknown = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(input)
+      expect(unknown).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: mounted.input.tasks.map(task => task.taskId),
+        stop: { stage: 'postflight', reasonCode: 'run-fact-mismatch' },
+      })
+      expect(mounted.harness.ctx.tianwenEvolution.getControlledSkillEvaluationResult(
+        arms.evaluationId,
+      )).toMatchObject({ mechanismVerdict: 'pass' })
+      const requests = mounted.adapter.requests.length
+
+      const replay = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(input)
+      expect(replay).toMatchObject({
+        state: 'terminal',
+        completedTaskIds: mounted.input.tasks.map(task => task.taskId),
+        result: { mechanismVerdict: 'pass' },
+      })
+      expect(mounted.adapter.requests).toHaveLength(requests)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
   })
 
   it('rejects an invalid task package before creating formal activity', async () => {
