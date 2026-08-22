@@ -125,7 +125,11 @@ function failureReceipt(operation: () => unknown) {
 }
 
 function installWindowsFixture(options: NonNullable<Parameters<typeof installTianwen>[0]>) {
-  return installTianwen({ ...options, platform: 'win32' })
+  const repoRoot = options.repoRoot ?? testRoot('installer-repo')
+  if (options.repoRoot === undefined) {
+    writeRuntimePublication(join(repoRoot, 'packages', 'tianwen-runtime-bundle'), 'fixture-source')
+  }
+  return installTianwen({ ...options, platform: 'win32', repoRoot })
 }
 
 function scriptedFailure(
