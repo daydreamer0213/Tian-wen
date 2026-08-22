@@ -8,6 +8,18 @@ import { TianwenLearningIntakeService } from './learning-intake.js'
 import { TianwenSkillEvaluationService } from './skill-evaluation.js'
 
 export {
+  ControlledSkillActivationPreflightError,
+} from './controlled-skill-activation.js'
+export type {
+  ControlledSkillActivationPreflightCode,
+  ControlledSkillActivationRuntimeReceipt,
+  ControlledSkillActivationRuntimeStop,
+  ControlledSkillActivationRuntimeStopReasonCode,
+  RunControlledSkillTransitionInput,
+  RunControlledSkillTransitionTaskInput,
+} from './controlled-skill-activation.js'
+
+export {
   compareNormalizedSkillEvaluationRequests,
   ControlledSkillEvaluatorPreflightError,
   ControlledSkillEvaluationPreflightError,

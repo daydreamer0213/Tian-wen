@@ -25,9 +25,24 @@ import type {
 } from '@tianwen/dsh-compat'
 import type { EvidenceRecord } from '@tianwen/evidence'
 import {
+  ControlledSkillActivationPreflightError,
+  controlledSkillActivationRecoveredStop,
+  controlledSkillTransitionPostCheck,
+  parseRunControlledSkillTransitionInput,
+  stoppedControlledSkillActivationReceipt,
+  terminalControlledSkillActivationReceipt,
+} from './controlled-skill-activation.js'
+import type {
+  ControlledSkillActivationRuntimeReceipt,
+  ControlledSkillActivationRuntimeStop,
+  RunControlledSkillTransitionInput,
+} from './controlled-skill-activation.js'
+import {
   CONTROLLED_SKILL_EVAL_RUBRIC,
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   controlledSkillShadowExecutionManifestDigest,
+  controlledSkillTransitionExecutionManifestDigest,
+  prepareControlledSkillPromotionRecommendation,
   prepareRunBinding,
   prepareRunSkillManifest,
   prepareControlledSkillEvaluationPlan,
@@ -37,6 +52,7 @@ import {
   STAGE4_SCRIPTED_PROVIDER,
 } from '@tianwen/evolution'
 import type {
+  ControlledSkillActivationFailureReasonCode,
   GovernedSkillCandidateId,
   ControlledSkillEvalStopContract,
   ControlledSkillEvaluationId,
@@ -52,6 +68,7 @@ import type {
   ControlledSkillShadowRun,
   ControlledSkillShadowTaskId,
   ControlledSkillShadowTaskInput,
+  ControlledSkillTransition,
   ControlledSkillEvaluatorInconclusiveReasonCode,
   ControlledSkillEvaluatorObservation,
   ControlledSkillEvaluatorScores,
@@ -1169,6 +1186,574 @@ export class TianwenSkillEvaluationService extends Service {
 
   private readonly requests = new Map<string, GenerateOptions[]>()
   private readonly evaluators = new Map<string, ControlledEvaluatorState>()
+
+  async runControlledSkillTransition(
+    input: RunControlledSkillTransitionInput,
+  ): Promise<ControlledSkillActivationRuntimeReceipt> {
+    const parsed = parseRunControlledSkillTransitionInput(input)
+    const evolution = this.ctx.tianwenEvolution
+    const shadow = evolution.getControlledSkillShadow(parsed.shadowId)
+    const shadowResult = evolution.getControlledSkillShadowResult(parsed.shadowId)
+    const evaluation = shadow === undefined
+      ? undefined
+      : evolution.getControlledSkillEvaluation(shadow.evaluationId)
+    const evaluationResult = shadow === undefined
+      ? undefined
+      : evolution.getControlledSkillEvaluationResult(shadow.evaluationId)
+    const candidate = shadow === undefined
+      ? undefined
+      : evolution.getSkillCandidate(shadow.candidateId)
+    const parentManifest = shadow === undefined
+      ? undefined
+      : evolution.listRunSkillManifests()
+          .find(manifest => manifest.parentVersionId === shadow.parentVersionId)
+    if (shadow === undefined
+      || shadowResult === undefined
+      || evaluation === undefined
+      || evaluationResult === undefined
+      || candidate === undefined
+      || parentManifest === undefined
+      || candidate.status !== 'recorded'
+      || candidate.payload.name !== parentManifest.parent.name
+      || candidate.payload.invocation.modelInvocable !== true
+      || parentManifest.parent.invocation.modelInvocable !== true) {
+      throw new ControlledSkillActivationPreflightError('shadow-not-eligible')
+    }
+    let recommendation: ReturnType<typeof prepareControlledSkillPromotionRecommendation>
+    try {
+      recommendation = prepareControlledSkillPromotionRecommendation(
+        evaluation,
+        evaluationResult,
+        shadow,
+        shadowResult,
+        candidate,
+        sha256(parentManifest.parent),
+      )
+    } catch {
+      throw new ControlledSkillActivationPreflightError('shadow-not-eligible')
+    }
+
+    const defaultModel = this.ctx.get('agentDefaultModel') as {
+      currentSelection(): ModelSelection
+    } | undefined
+    if (defaultModel === undefined) {
+      throw new ControlledSkillActivationPreflightError('configured-route-mismatch')
+    }
+    let selection: ModelSelection
+    let resolved: LlmCallConfig
+    try {
+      selection = defaultModel.currentSelection()
+      resolved = await this.ctx.llm.resolveCallConfig(selection)
+    } catch {
+      throw new ControlledSkillActivationPreflightError('configured-route-mismatch')
+    }
+    if (resolved.provider !== shadow.execution.providerId
+      || resolved.model !== shadow.execution.modelId
+      || sha256(resolved) !== shadow.execution.callConfigDigest) {
+      throw new ControlledSkillActivationPreflightError('configured-route-mismatch')
+    }
+    let retryPolicy: ReturnType<typeof this.ctx.llm.providerRetryPolicy>
+    try {
+      retryPolicy = this.ctx.llm.providerRetryPolicy(resolved.provider)
+    } catch {
+      throw new ControlledSkillActivationPreflightError('retry-policy-mismatch')
+    }
+    if (retryPolicy.mode !== 'normal'
+      || retryPolicy.maxRetries !== 0
+      || sha256(retryPolicy) !== shadow.execution.retryPolicyDigest) {
+      throw new ControlledSkillActivationPreflightError('retry-policy-mismatch')
+    }
+
+    let actualWorkspace: ControlledWorkspaceSnapshot
+    try {
+      actualWorkspace = workspaceSnapshot(parsed.task.workspaceRoot)
+    } catch {
+      throw new ControlledSkillActivationPreflightError('task-package-mismatch')
+    }
+    if (sha256(actualWorkspace) !== sha256(parsed.task.workspaceSnapshot)) {
+      throw new ControlledSkillActivationPreflightError('task-package-mismatch')
+    }
+    let schemas: ReturnType<typeof this.ctx.tools.schemas>
+    try {
+      schemas = this.ctx.tools.schemas()
+        .filter(schema => parsed.task.allowedTools.includes(schema.name))
+        .toSorted((left, right) => left.name.localeCompare(right.name))
+    } catch {
+      throw new ControlledSkillActivationPreflightError('tool-surface-mismatch')
+    }
+    if (!parsed.task.allowedTools.includes('skill')
+      || !parsed.task.allowedTools.includes(parsed.task.acceptanceContract.toolName)
+      || schemas.length !== parsed.task.allowedTools.length
+      || schemas.some((schema, index) => schema.name !== parsed.task.allowedTools[index])) {
+      throw new ControlledSkillActivationPreflightError('tool-surface-mismatch')
+    }
+    const postCheck = controlledSkillTransitionPostCheck(parsed.task, sha256(schemas))
+    const sourceInputDigests = new Set([
+      ...evaluation.tasks.map(task => task.inputDigest),
+      ...shadow.tasks.map(task => task.inputDigest),
+    ])
+    const sourceWorkspaceDigests = new Set([
+      ...evaluation.tasks.map(task => task.workspaceSnapshotDigest),
+      ...shadow.tasks.map(task => task.workspaceSnapshotDigest),
+    ])
+    const sourceSessionIds = new Set([
+      ...evaluation.tasks.flatMap(task => [
+        task.baseline.sessionId,
+        task.candidate.sessionId,
+        task.evaluatorSessionId,
+      ]),
+      ...shadow.tasks.map(task => task.sessionId),
+    ])
+    if (sourceInputDigests.has(postCheck.inputDigest)
+      || sourceWorkspaceDigests.has(postCheck.workspaceSnapshotDigest)
+      || sourceSessionIds.has(postCheck.sessionId)) {
+      throw new ControlledSkillActivationPreflightError('task-package-mismatch')
+    }
+
+    const persistence = this.ctx.get('sessionPersistence') as {
+      list(): Promise<readonly { readonly id: string }[]>
+    } | undefined
+    if (persistence === undefined) {
+      throw new ControlledSkillActivationPreflightError('persistence-unavailable')
+    }
+    let persisted: readonly { readonly id: string }[]
+    try {
+      persisted = await persistence.list()
+    } catch {
+      throw new ControlledSkillActivationPreflightError('persistence-unavailable')
+    }
+
+    const transitions = evolution.listControlledSkillTransitions()
+      .filter(transition => transition.shadowId === shadow.shadowId)
+    const existing = transitions.find(transition =>
+      transition.kind === parsed.kind
+      && transition.previousPointer.revision === parsed.expectedRevision)
+    const otherTransitions = transitions.filter(transition => transition !== existing)
+    if (otherTransitions.some(transition =>
+      transition.postCheck.inputDigest === postCheck.inputDigest
+      || transition.postCheck.workspaceSnapshotDigest === postCheck.workspaceSnapshotDigest
+      || transition.postCheck.sessionId === postCheck.sessionId)) {
+      throw new ControlledSkillActivationPreflightError('task-package-mismatch')
+    }
+    const pointer = evolution.getControlledSkillScopePointer(shadow.scopeKey)
+    const expectedRevision = parsed.kind === 'promote' ? 1 : parsed.kind === 'rollback' ? 2 : 3
+    const expectedPriorKinds = parsed.kind === 'promote'
+      ? []
+      : parsed.kind === 'rollback'
+        ? ['promote']
+        : ['promote', 'rollback']
+    const prior = otherTransitions
+      .filter(transition => transition.previousPointer.revision < parsed.expectedRevision)
+      .toSorted((left, right) =>
+        left.previousPointer.revision - right.previousPointer.revision)
+    if (parsed.expectedRevision !== expectedRevision
+      || prior.length !== expectedPriorKinds.length
+      || prior.some((transition, index) =>
+        transition.kind !== expectedPriorKinds[index]
+        || evolution.getControlledSkillTransitionReceipt(transition.transitionId)?.state
+          !== 'verified')) {
+      throw new ControlledSkillActivationPreflightError('pointer-mismatch')
+    }
+    const previousPointer = existing?.previousPointer ?? pointer
+    if (previousPointer === undefined) {
+      throw new ControlledSkillActivationPreflightError('pointer-mismatch')
+    }
+    if (existing !== undefined) {
+      const { runId: _runId, ...existingPostCheck } = existing.postCheck
+      if (sha256(existingPostCheck) !== sha256(postCheck)
+        || sha256(existing.source) !== sha256(recommendation.source)) {
+        throw new ControlledSkillActivationPreflightError('pointer-mismatch')
+      }
+    }
+
+    let rootSkill: SkillRegistration | undefined
+    try {
+      rootSkill = await this.ctx.skills.get(parentManifest.parent.name, {
+        cwd: parsed.task.workspaceRoot,
+      })
+    } catch {
+      throw new ControlledSkillActivationPreflightError('root-skill-mismatch')
+    }
+    if (rootSkill === undefined || !sameSkillVersion(rootSkill, shadow.parentVersionId)) {
+      throw new ControlledSkillActivationPreflightError('root-skill-mismatch')
+    }
+    const targetVersionId = parsed.kind === 'rollback'
+      ? shadow.parentVersionId
+      : shadow.candidateVersionId
+    const targetSkill = targetVersionId === shadow.candidateVersionId
+      ? { ...candidate.payload, provider: parentManifest.resolvedProvider } as SkillDefinition
+      : { ...parentManifest.parent, provider: parentManifest.resolvedProvider } as SkillDefinition
+    const targetContentDigest = sha256(targetSkill.content)
+    try {
+      const targetManifest = prepareRunSkillManifest({
+        runId: existing?.postCheck.runId ?? `run:${sha256({
+          shadowId: parsed.shadowId,
+          kind: parsed.kind,
+          preflight: true,
+        }).slice('sha256:'.length)}` as TianwenRunId,
+        skill: targetSkill,
+      })
+      if (targetManifest.parentVersionId !== targetVersionId
+        || targetManifest.contentDigest !== targetContentDigest) {
+        throw new Error('active payload mismatch')
+      }
+    } catch {
+      throw new ControlledSkillActivationPreflightError('pointer-mismatch')
+    }
+
+    if (resolved.provider === 'tianwen-controlled-scripted') {
+      const fixtureRoot = process.env.TIANWEN_DSH_PROBE_ROOT
+      if (shadow.mode !== 'isolated-test'
+        || shadow.evidenceClaim !== 'controlled-synthetic-mechanism'
+        || fixtureRoot === undefined
+        || !isAbsolute(fixtureRoot)
+        || !isDedicatedChild(fixtureRoot, parsed.task.workspaceRoot)
+        || !parsed.task.sessionId.startsWith('session:controlled-activation:fixture:')) {
+        throw new ControlledSkillActivationPreflightError('scripted-boundary-mismatch')
+      }
+    }
+
+    const occupied = persisted.some(header => String(header.id) === parsed.task.sessionId)
+      || this.ctx.sessions.get(SessionId(parsed.task.sessionId)) !== undefined
+      || this.ctx.agents.get(SessionId(parsed.task.sessionId)) !== undefined
+    if (existing !== undefined) {
+      const receipt = evolution.getControlledSkillTransitionReceipt(existing.transitionId)
+      if (receipt?.state === 'verified') {
+        return terminalControlledSkillActivationReceipt(existing, receipt)
+      }
+      if (receipt?.state === 'recovered') {
+        return stoppedControlledSkillActivationReceipt(existing.transitionId, existing.kind, {
+          ...controlledSkillActivationRecoveredStop(
+            receipt.reasonCode ?? 'run-fact-mismatch',
+          ),
+        }, receipt)
+      }
+      if (receipt?.state !== 'pending-post-check'
+        || pointer === undefined
+        || sha256(pointer) !== sha256(existing.targetPointer)) {
+        throw new ControlledSkillActivationPreflightError('pointer-mismatch')
+      }
+      if (occupied
+        || evolution.getRunSkillManifest(existing.postCheck.runId) !== undefined
+        || evolution.getRunSkillUse(existing.postCheck.runId) !== undefined) {
+        return stoppedControlledSkillActivationReceipt(existing.transitionId, existing.kind, {
+          stage: 'activation',
+          reasonCode: 'existing-partial-activity',
+        }, receipt)
+      }
+    } else {
+      const expectedActiveVersion = parsed.kind === 'rollback'
+        ? shadow.candidateVersionId
+        : shadow.parentVersionId
+      const expectedPayloadDigest = parsed.kind === 'rollback'
+        ? shadow.candidatePayloadDigest
+        : shadow.parentPayloadDigest
+      if (pointer === undefined
+        || pointer.revision !== parsed.expectedRevision
+        || pointer.activeVersionId !== expectedActiveVersion
+        || pointer.payloadDigest !== expectedPayloadDigest) {
+        throw new ControlledSkillActivationPreflightError('pointer-mismatch')
+      }
+      if (occupied) throw new ControlledSkillActivationPreflightError('session-not-empty')
+    }
+
+    let transition = existing
+    if (transition === undefined) {
+      let startedId: string | undefined
+      try {
+        startedId = evolution.beginControlledSkillTransition({
+          shadowId: parsed.shadowId,
+          kind: parsed.kind,
+          expectedRevision: parsed.expectedRevision,
+          postCheck,
+        }).transitionId
+      } catch {
+        // Resolve a deterministic transition commit by reading its exact identity below.
+      }
+      transition = startedId === undefined
+        ? evolution.listControlledSkillTransitions().find(item =>
+            item.shadowId === parsed.shadowId
+            && item.kind === parsed.kind
+            && item.previousPointer.revision === parsed.expectedRevision)
+        : evolution.getControlledSkillTransition(startedId as ControlledSkillTransition['transitionId'])
+      if (transition === undefined) {
+        throw new ControlledSkillActivationPreflightError('persistence-unavailable')
+      }
+    }
+    const committedPointer = evolution.getControlledSkillScopePointer(shadow.scopeKey)
+    const { runId: _runId, ...committedPostCheck } = transition.postCheck
+    if (sha256(committedPostCheck) !== sha256(postCheck)
+      || sha256(transition.source) !== sha256(recommendation.source)
+      || committedPointer === undefined
+      || sha256(committedPointer) !== sha256(transition.targetPointer)) {
+      return this.recoverControlledSkillTransition(
+        transition,
+        { stage: 'postflight', reasonCode: 'pointer-drift' },
+      )
+    }
+
+    const guard: ControlledArmGuardState = {
+      sessionId: transition.postCheck.sessionId,
+      allowedTools: new Set(transition.postCheck.allowedTools),
+      maxToolCalls: transition.postCheck.stopContract.maxToolCalls,
+      active: false,
+      deadline: 0,
+      toolCalls: 0,
+      usedToolNames: new Set(),
+    }
+    let handle: AgentHandle | undefined
+    try {
+      try {
+        handle = await this.ctx.agents.create({
+          sessionId: SessionId(transition.postCheck.sessionId),
+          meta: { cwd: parsed.task.workspaceRoot },
+          agentOptions: requestAgentOptions(resolved),
+          setup: async agentCtx => {
+            installModelSelection(agentCtx, { current: selection, assembled: undefined })
+            agentCtx.tools.presentAs('native')
+            agentCtx.tools.restrict({ allow: transition!.postCheck.allowedTools })
+            agentCtx.tools.guard(execution => controlledArmGuard(execution, guard))
+            await agentCtx.inject(['skills'], scopedCtx => {
+              scopedCtx.skills.register(targetSkill)
+            })
+          },
+        })
+      } catch {
+        return this.recoverControlledSkillTransition(
+          transition,
+          { stage: 'activation', reasonCode: 'agent-create-failed' },
+        )
+      }
+      guard.agent = handle.agent
+      let scopedSkill: SkillDefinition | undefined
+      await handle.agent.ctx.inject(['skills'], async scopedCtx => {
+        scopedSkill = await scopedCtx.skills.get(targetSkill.name, {
+          cwd: parsed.task.workspaceRoot,
+          scope: handle!.agent,
+        })
+      })
+      const scopedSchemas = handle.agent.ctx.tools.schemas(handle.agent)
+        .toSorted((left, right) => left.name.localeCompare(right.name))
+      const currentRoot = await this.ctx.skills.get(parentManifest.parent.name, {
+        cwd: parsed.task.workspaceRoot,
+      })
+      if (scopedSkill === undefined
+        || !sameSkillVersion(scopedSkill, transition.targetPointer.activeVersionId)
+        || currentRoot === undefined
+        || !sameSkillVersion(currentRoot, shadow.parentVersionId)
+        || sha256(scopedSchemas) !== transition.postCheck.toolSchemaDigest
+        || handle.agent.session.header.cwd !== parsed.task.workspaceRoot
+        || sha256(handle.agent.options) !== sha256(requestAgentOptions(resolved))) {
+        return this.recoverControlledSkillTransition(
+          transition,
+          { stage: 'postflight', reasonCode: 'root-skill-drift' },
+        )
+      }
+
+      let boundRunId: TianwenRunId | undefined
+      try {
+        await handle.agent.ctx.inject(['skills'], async scopedCtx => {
+          const binding = await this.ctx.tianwenLearningIntake.bindRunWithSkill(
+            handle!.agent,
+            {
+              goalRef: `goal:controlled-skill-transition:${transition!.transitionId}`,
+              taskRef: `task:controlled-skill-transition:${transition!.kind}:post-check`,
+              scopeKey: transition!.source.scopeKey,
+              acceptanceContract: transition!.postCheck.acceptanceContract,
+              acceptanceSubjectDigest: transition!.postCheck.acceptanceSubjectDigest,
+            },
+            targetSkill.name,
+            scopedCtx.skills,
+          )
+          boundRunId = binding.runId
+        })
+      } catch {
+        return this.recoverControlledSkillTransition(
+          transition,
+          { stage: 'postflight', reasonCode: 'run-fact-mismatch' },
+        )
+      }
+      const binding = evolution.getRunBinding(transition.postCheck.runId)
+      const manifest = evolution.getRunSkillManifest(transition.postCheck.runId)
+      if (boundRunId !== transition.postCheck.runId
+        || binding === undefined
+        || sha256(binding) !== sha256(transition.runBinding)
+        || manifest === undefined
+        || manifest.parentVersionId !== transition.targetPointer.activeVersionId
+        || manifest.contentDigest !== targetContentDigest) {
+        return this.recoverControlledSkillTransition(
+          transition,
+          { stage: 'postflight', reasonCode: 'run-fact-mismatch' },
+        )
+      }
+
+      const activity = await this.runControlledActivity({
+        task: parsed.task,
+        planned: transition.postCheck,
+        skill: targetSkill,
+        handle,
+        guard,
+      }, transition.postCheck.runId, resolved)
+      if (activity.activity === undefined) {
+        return this.recoverControlledSkillTransition(transition, {
+          stage: 'activation',
+          reasonCode: activationFailureReason(activity.reasonCode),
+        })
+      }
+      if (activity.activity.outcome !== 'met') {
+        return this.recoverControlledSkillTransition(transition, {
+          stage: 'activation',
+          reasonCode: activity.activity.outcome === 'not-met'
+            ? 'post-check-not-met'
+            : 'post-check-inconclusive',
+        })
+      }
+
+      try {
+        const finalWorkspace = workspaceSnapshot(parsed.task.workspaceRoot)
+        const finalRoot = await this.ctx.skills.get(parentManifest.parent.name, {
+          cwd: parsed.task.workspaceRoot,
+        })
+        let finalScoped: SkillDefinition | undefined
+        await handle.agent.ctx.inject(['skills'], async scopedCtx => {
+          finalScoped = await scopedCtx.skills.get(targetSkill.name, {
+            cwd: parsed.task.workspaceRoot,
+            scope: handle!.agent,
+          })
+        })
+        const finalPointer = evolution.getControlledSkillScopePointer(shadow.scopeKey)
+        const finalBinding = evolution.getRunBinding(transition.postCheck.runId)
+        const finalManifest = evolution.getRunSkillManifest(transition.postCheck.runId)
+        const finalUse = evolution.getRunSkillUse(transition.postCheck.runId)
+        if (sha256(finalWorkspace) !== transition.postCheck.workspaceSnapshotDigest) {
+          return this.recoverControlledSkillTransition(
+            transition,
+            { stage: 'postflight', reasonCode: 'run-fact-mismatch' },
+          )
+        }
+        if (finalRoot === undefined
+          || !sameSkillVersion(finalRoot, shadow.parentVersionId)
+          || finalScoped === undefined
+          || !sameSkillVersion(finalScoped, transition.targetPointer.activeVersionId)) {
+          return this.recoverControlledSkillTransition(
+            transition,
+            { stage: 'postflight', reasonCode: 'root-skill-drift' },
+          )
+        }
+        if (finalPointer === undefined
+          || sha256(finalPointer) !== sha256(transition.targetPointer)) {
+          return this.recoverControlledSkillTransition(
+            transition,
+            { stage: 'postflight', reasonCode: 'pointer-drift' },
+          )
+        }
+        if (finalBinding === undefined
+          || sha256(finalBinding) !== sha256(transition.runBinding)
+          || finalManifest === undefined
+          || finalManifest.parentVersionId !== transition.targetPointer.activeVersionId
+          || finalManifest.contentDigest !== targetContentDigest
+          || finalUse === undefined
+          || finalUse.parentVersionId !== transition.targetPointer.activeVersionId
+          || !activity.activity.usedToolNames.includes('skill')
+          || !activity.activity.usedToolNames.includes(
+            transition.postCheck.acceptanceContract.toolName,
+          )
+          || activity.activity.usage.modelRequests < 1
+          || activity.activity.usage.toolCalls < activity.activity.usedToolNames.length
+          || activity.activity.usage.toolCalls > transition.postCheck.stopContract.maxToolCalls
+          || activity.activity.usage.elapsedMs > transition.postCheck.stopContract.maxElapsedMs) {
+          throw new Error('controlled activation postflight mismatch')
+        }
+      } catch {
+        return this.recoverControlledSkillTransition(
+          transition,
+          { stage: 'postflight', reasonCode: 'run-fact-mismatch' },
+        )
+      }
+
+      const run = {
+        ...activity.activity,
+        executionManifestDigest: controlledSkillTransitionExecutionManifestDigest(transition),
+      }
+      try {
+        evolution.completeControlledSkillTransition({
+          transitionId: transition.transitionId,
+          run,
+        })
+      } catch {
+        // Resolve a completion commit before deciding whether recovery is allowed.
+      }
+      const completed = evolution.getControlledSkillTransitionReceipt(transition.transitionId)
+      if (completed?.state === 'verified') {
+        return terminalControlledSkillActivationReceipt(transition, completed)
+      }
+      if (completed?.state === 'recovered') {
+        return stoppedControlledSkillActivationReceipt(
+          transition.transitionId,
+          transition.kind,
+          controlledSkillActivationRecoveredStop(
+            completed.reasonCode ?? 'run-fact-mismatch',
+          ),
+          completed,
+        )
+      }
+      return this.recoverControlledSkillTransition(
+        transition,
+        { stage: 'postflight', reasonCode: 'run-fact-mismatch' },
+      )
+    } catch {
+      return this.recoverControlledSkillTransition(
+        transition,
+        { stage: 'postflight', reasonCode: 'run-fact-mismatch' },
+      )
+    } finally {
+      if (handle !== undefined) {
+        this.requests.delete(String(handle.agent.id))
+        try {
+          await handle.dispose()
+        } catch {
+          // Disposal cannot rewrite an already durable verified/recovered transition.
+        }
+      }
+    }
+  }
+
+  private recoverControlledSkillTransition(
+    transition: ControlledSkillTransition,
+    stop: ControlledSkillActivationRuntimeStop & {
+      readonly reasonCode: ControlledSkillActivationFailureReasonCode
+    },
+  ): ControlledSkillActivationRuntimeReceipt {
+    const evolution = this.ctx.tianwenEvolution
+    try {
+      evolution.recordControlledSkillActivationFailed({
+        transitionId: transition.transitionId,
+        reasonCode: stop.reasonCode,
+      })
+    } catch {
+      // Resolve commit-unknown strictly by reading the governed receipt.
+    }
+    const receipt = evolution.getControlledSkillTransitionReceipt(transition.transitionId)
+    if (receipt?.state === 'verified') {
+      return terminalControlledSkillActivationReceipt(transition, receipt)
+    }
+    if (receipt?.state === 'recovered') {
+      return stoppedControlledSkillActivationReceipt(
+        transition.transitionId,
+        transition.kind,
+        controlledSkillActivationRecoveredStop(
+          receipt.reasonCode ?? stop.reasonCode,
+        ),
+        receipt,
+      )
+    }
+    return stoppedControlledSkillActivationReceipt(
+      transition.transitionId,
+      transition.kind,
+      { stage: 'recovery', reasonCode: 'recovery-unknown' },
+      receipt,
+    )
+  }
 
   async runControlledShadow(
     input: RunControlledSkillShadowInput,
@@ -3182,6 +3767,25 @@ function outcomeFromEvidence(
   }
   if (evidence.outcome.isError === false) return 'met'
   return evidence.outcome.errorCode === notMetErrorCode ? 'not-met' : 'inconclusive'
+}
+
+function activationFailureReason(
+  reason: ControlledSkillShadowStopReasonCode,
+): ControlledSkillActivationFailureReasonCode {
+  switch (reason) {
+    case 'persistence-unavailable':
+    case 'provider-failed':
+    case 'timeout':
+    case 'tool-limit-exceeded':
+    case 'request-contract-mismatch':
+    case 'skill-use-missing':
+    case 'acceptance-subject-mismatch':
+    case 'root-skill-drift':
+    case 'run-fact-mismatch':
+      return reason
+    default:
+      return 'run-fact-mismatch'
+  }
 }
 
 export interface PairedSkillEvaluationCaseInput {
