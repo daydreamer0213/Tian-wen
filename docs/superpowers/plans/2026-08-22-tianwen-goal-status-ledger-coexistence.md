@@ -287,10 +287,14 @@ including its message or private facts. Preserve existing not-found,
 ambiguous, Session/Evidence, CLI, and output schemas exactly.
 
 Add only `@tianwen/evolution: workspace:*` to Runtime Bundle
-`devDependencies`, add the existing narrow compat runtime alias only to the
-status esbuild command, and update only the Runtime Bundle workspace importer
-in `pnpm-lock.yaml`. Run one lockfile-only refresh and then, only if the direct
-workspace link is absent, one filtered link refresh:
+`devDependencies`, add the existing compat runtime alias to the status and CLI
+esbuild commands, and update only the Runtime Bundle workspace importer in
+`pnpm-lock.yaml`. The CLI also bundles the status consumer, so omitting the
+alias there is a real startup failure. Task 3 replaces both provisional aliases
+with the single-symbol Skill-name seam after its metafile RED proves that the
+broader runtime subpath also carries `ScriptedAdapter`. Run one lockfile-only
+refresh and then, only if the direct workspace link is absent, one filtered
+link refresh:
 
 ```powershell
 pnpm install --lockfile-only --offline --ignore-scripts
@@ -334,6 +338,9 @@ git commit -m "fix: read governed events in Goal status"
 
 **Files:**
 
+- Create: `packages/tianwen-dsh-compat/src/skill-name.ts`
+- Modify: `packages/tianwen-dsh-compat/package.json`
+- Modify: `packages/tianwen-runtime-bundle/package.json`
 - Modify: `tests/dsh-migration/runtime-bundle.spec.ts`
 - Modify: `tests/dsh-migration/goal-status.spec.ts`
 - Modify: `.github/workflows/ci.yml`
@@ -350,21 +357,37 @@ pnpm exec vitest run tests/dsh-migration/runtime-bundle.spec.ts
 ```
 
 Expected RED: its old status input/external allowlist rejects the new, already
-built authoritative inspection closure. Record the exact mismatch; do not
-weaken the allowlist.
+built authoritative inspection closure. The observed closure also contains
+`../tianwen-dsh-compat/dist/scripted-adapter.js` and the Stage 4 scripted
+provider because `@tianwen/dsh-compat/runtime` statically re-exports
+`ScriptedAdapter`. Record both exact mismatches; do not weaken the allowlist.
 
 ### Step 2: Update exact package and CI contracts
 
-Update tests only:
+First add one single-purpose public compat subpath:
+
+- `skill-name.ts` re-exports only `isSkillName` from
+  `@deepseek-ai/dsh-skill`;
+- package exports add only `./skill-name`; no dependency or lockfile changes;
+- the status and CLI build aliases both change from
+  `@tianwen/dsh-compat/runtime` to `@tianwen/dsh-compat/skill-name`;
+- the Runtime bundle retains its existing `@tianwen/dsh-compat/runtime` alias
+  unchanged.
+
+Then update the existing exact contracts:
 
 - the already implemented Runtime Bundle declaration and status build are
   locked to direct `@tianwen/evolution: workspace:*`, the Evolution inspection
-  subpath, and the existing narrow `@tianwen/dsh-compat/runtime` alias;
+  subpath, and the single-symbol `@tianwen/dsh-compat/skill-name` alias;
 - status metafile inputs are an exact allowlist of status, Evidence projector,
-  inspection, authoritative ledger/replay inputs, and narrow compat runtime;
+  inspection, authoritative ledger/replay inputs, and narrow Skill-name compat;
 - Evolution `index`, `runtime-binding`, Skill shadow/promotion, Tianwen Runtime,
   Dynamic Cordis, Agent, Provider, scripted adapter, test harness, probe, native
   addon, and private DSH source are absent;
+- the new compat subpath compiles and resolves only `isSkillName`; it exports no
+  render helper, `ScriptedAdapter`, or other value, and the status/CLI metafiles
+  and output text contain no scripted-adapter path, Stage 4 provider constant,
+  `dsh-tool-skill`, test harness, or probe;
 - external package paths are exact and deduplicated;
 - the TypeScript focused Vitest command includes
   `tests/dsh-migration/goal-status.spec.ts`;
