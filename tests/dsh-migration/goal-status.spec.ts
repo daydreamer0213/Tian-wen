@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -24,6 +25,10 @@ import {
 } from '@tianwen/dsh-compat'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import {
+  LedgerIntegrityError,
+  inspectEvolutionLedger,
+} from '../../packages/tianwen-evolution/src/inspection.js'
+import {
   GoalStatusAmbiguousError,
   GoalStatusIntegrityError,
   GoalStatusNotFoundError,
@@ -33,6 +38,22 @@ import {
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-goal-status-tests')
 const CLI = resolve('packages/tianwen-runtime-bundle/dist/cli.js')
+const DIGEST = (character: string) =>
+  `sha256:${character.repeat(64)}` as const
+const GOVERNED_PARENT = {
+  name: 'goal-status-parent',
+  description: 'Verify one Goal status projection',
+  invocation: { modelInvocable: true, userInvocable: true },
+  source: 'runtime',
+  provider: 'runtime',
+  content: '# Goal status parent\n\nProject only durable status facts.',
+} as const
+const GOVERNED_ACCEPTANCE = {
+  source: 'dsh-tool-result',
+  toolName: 'read',
+  notMetErrorCode: 'FS_NOT_FOUND',
+  gapDisposition: 'observe',
+} as const
 
 interface Fixture {
   readonly dataDir: string
@@ -58,6 +79,49 @@ function snapshotTree(root: string): Readonly<Record<string, string>> {
   }
   visit(root)
   return snapshot
+}
+
+function snapshotOptionalTree(root: string): Readonly<Record<string, string>> {
+  return existsSync(root) ? snapshotTree(root) : {}
+}
+
+function seedPrivateNaturalRun(evolutionRoot: string): void {
+  const ledger = new EvolutionLedger(evolutionRoot, {
+    clock: () => '2026-08-22T00:00:00.000Z',
+  })
+  const sessionId = 'session:goal-status-private-run'
+  const run = ledger.recordRunBinding({
+    goalRef: 'goal:goal-status-private-run',
+    taskRef: 'task:goal-status-private-run',
+    sessionId,
+    scopeKey: 'project:tianwen/capability:goal-status',
+    acceptanceContract: GOVERNED_ACCEPTANCE,
+  })
+  const manifest = ledger.recordRunSkillManifest({
+    runId: run.runId,
+    skill: GOVERNED_PARENT,
+  })
+  const sessionDigest = DIGEST('1')
+  const acceptanceEvidenceId = DIGEST('2')
+  ledger.recordOutcomeIntake({
+    runId: run.runId,
+    verdict: 'met',
+    sessionDigest,
+    evidenceIds: [acceptanceEvidenceId],
+  })
+  ledger.recordRunSkillUse({
+    runId: run.runId,
+    parentVersionId: manifest.parentVersionId,
+    sessionId,
+    sessionDigest,
+    skillName: GOVERNED_PARENT.name,
+    contentDigest: ledger.getRunSkillManifest(run.runId)!.contentDigest,
+    skillEvidenceId: DIGEST('3'),
+    acceptanceEvidenceId,
+    skillCallSeq: 1,
+    skillResultSeq: 2,
+    acceptanceCallSeq: 3,
+  })
 }
 
 function jsonlFiles(root: string): string[] {
@@ -219,6 +283,153 @@ function addChampion(evolutionRoot: string): {
   })
   return ledger.promote(artifact.artifactId)
 }
+
+describe('authoritative governed ledger inspection', () => {
+  it('replays the four real private natural Run facts without creating artifacts', () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const evolutionRoot = mkdtempSync(join(FIXTURE_BASE, 'inspection-private-'))
+    try {
+      seedPrivateNaturalRun(evolutionRoot)
+      const artifactsRoot = join(evolutionRoot, 'artifacts')
+      expect(readdirSync(artifactsRoot)).toEqual([])
+      rmdirSync(artifactsRoot)
+      const before = snapshotTree(evolutionRoot)
+
+      expect(inspectEvolutionLedger(evolutionRoot)).toEqual({ champion: null })
+      expect(existsSync(artifactsRoot)).toBe(false)
+      expect(snapshotTree(evolutionRoot)).toEqual(before)
+      expect(readFileSync(join(evolutionRoot, 'ledger.jsonl'), 'utf8')
+        .trimEnd().split('\n').map(line => JSON.parse(line).type)).toEqual([
+        'run-binding-recorded',
+        'run-skill-manifest-recorded',
+        'outcome-intake-recorded',
+        'run-skill-use-recorded',
+      ])
+    } finally {
+      rmSync(evolutionRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('returns null for an absent Evolution root without creating it', () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const parent = mkdtempSync(join(FIXTURE_BASE, 'inspection-absent-'))
+    const evolutionRoot = join(parent, 'state', 'evolution')
+    try {
+      const before = snapshotTree(parent)
+      expect(inspectEvolutionLedger(evolutionRoot)).toEqual({ champion: null })
+      expect(existsSync(evolutionRoot)).toBe(false)
+      expect(snapshotTree(parent)).toEqual(before)
+    } finally {
+      rmSync(parent, { recursive: true, force: true })
+    }
+  })
+
+  it('projects one valid legacy Champion without reading or changing its source', () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const evolutionRoot = mkdtempSync(join(FIXTURE_BASE, 'inspection-champion-'))
+    try {
+      const champion = addChampion(evolutionRoot)
+      const artifactSource = join(evolutionRoot, 'artifacts',
+        `sha256-${champion.artifactId.slice('artifact:'.length)}.mjs`)
+      rmSync(artifactSource)
+      const before = snapshotTree(evolutionRoot)
+
+      expect(inspectEvolutionLedger(evolutionRoot)).toEqual({ champion })
+      expect(snapshotTree(evolutionRoot)).toEqual(before)
+    } finally {
+      rmSync(evolutionRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects missing, stale, and mismatched Champion pointers without repair', () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    for (const kind of ['missing', 'stale', 'mismatched'] as const) {
+      const evolutionRoot = mkdtempSync(join(FIXTURE_BASE, `inspection-${kind}-`))
+      try {
+        const ledger = new EvolutionLedger(evolutionRoot, {
+          clock: () => '2026-08-22T00:00:00.000Z',
+        })
+        const first = ledger.recordArtifact('export default "first"')
+        ledger.recordEvaluation({
+          artifactId: first.artifactId,
+          receiptDigest: DIGEST('4'),
+          verdict: 'met',
+        })
+        ledger.recordApproval({
+          artifactId: first.artifactId,
+          authority: 'human',
+          approvalId: 'inspection-first',
+        })
+        const firstPointer = ledger.promote(first.artifactId)
+        if (kind === 'stale') {
+          const second = ledger.recordArtifact(
+            'export default "second"',
+            first.artifactId,
+          )
+          ledger.recordEvaluation({
+            artifactId: second.artifactId,
+            receiptDigest: DIGEST('5'),
+            verdict: 'met',
+          })
+          ledger.recordApproval({
+            artifactId: second.artifactId,
+            authority: 'human',
+            approvalId: 'inspection-second',
+          })
+          ledger.promote(second.artifactId)
+          writeFileSync(
+            join(evolutionRoot, 'champion.json'),
+            `${JSON.stringify(firstPointer)}\n`,
+          )
+        } else if (kind === 'missing') {
+          rmSync(join(evolutionRoot, 'champion.json'))
+        } else {
+          writeFileSync(
+            join(evolutionRoot, 'champion.json'),
+            `${JSON.stringify({
+              artifactId: `artifact:${'f'.repeat(64)}`,
+              revision: firstPointer.revision,
+            })}\n`,
+          )
+        }
+        const before = snapshotTree(evolutionRoot)
+        expect(() => inspectEvolutionLedger(evolutionRoot))
+          .toThrow(LedgerIntegrityError)
+        expect(snapshotTree(evolutionRoot)).toEqual(before)
+      } finally {
+        rmSync(evolutionRoot, { recursive: true, force: true })
+      }
+    }
+  })
+
+  it('fails closed for unknown, malformed, and broken private history', () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    for (const kind of ['unknown', 'malformed', 'broken-private'] as const) {
+      const evolutionRoot = mkdtempSync(join(FIXTURE_BASE, `inspection-${kind}-`))
+      try {
+        const ledgerPath = join(evolutionRoot, 'ledger.jsonl')
+        if (kind === 'unknown') {
+          writeFileSync(ledgerPath, `${JSON.stringify({
+            type: 'unknown-governed-event',
+            at: '2026-08-22T00:00:00.000Z',
+          })}\n`)
+        } else if (kind === 'malformed') {
+          writeFileSync(ledgerPath, '{not-json}\n')
+        } else {
+          seedPrivateNaturalRun(evolutionRoot)
+          const lines = readFileSync(ledgerPath, 'utf8').trimEnd().split('\n')
+          writeFileSync(ledgerPath, `${lines.slice(1).join('\n')}\n`)
+        }
+        const before = snapshotOptionalTree(evolutionRoot)
+        expect(() => inspectEvolutionLedger(evolutionRoot))
+          .toThrow(LedgerIntegrityError)
+        expect(snapshotOptionalTree(evolutionRoot)).toEqual(before)
+      } finally {
+        rmSync(evolutionRoot, { recursive: true, force: true })
+      }
+    }
+  })
+})
 
 describe('Tianwen read-only Goal status', () => {
   it('lists only current Goal summaries in deterministic recent-first order', async () => {
