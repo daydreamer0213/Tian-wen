@@ -130,3 +130,32 @@ accepted for this bounded replacement. The installer copies the root license
 into the uncommitted candidate inside the existing Profile rollback boundary.
 A complete sixteen-file detached publication is a success postcondition, not a
 preflight requirement imposed on the predecessor.
+
+## Terminal operational status — 2026-08-22
+
+The failed timeout and `archive-stability` attempts above remain the immutable
+operational sequence; neither was retried to obtain a nicer version of the same
+result. After their fixes reached exact main and green native Windows CI, one
+separately authorized official offline installation completed and returned the
+canonical ready receipt.
+
+The final postconditions were:
+
+- 16/16 published Profile entries were regular files;
+- each published file had independent file identity and no source hardlink;
+- the root `LICENSE` was present in the Runtime Bundle publication;
+- Sessions and Evolution were unchanged by installation;
+- no host/Profile/archive backup residue remained.
+
+The installed CLI then performed one read-only status query for a successfully
+completed Goal and returned exit 0. Its public projection did not expose Run,
+Skill, local-path, or governed private-ledger facts. The status query did not
+start an Agent, resume a Goal, invoke a model/Provider/tool, or mutate product
+data.
+
+These facts supersede the earlier `pending` operational statements but do not
+erase the stopped attempts or broaden the installer into a general migration
+framework. The terminal product baseline is
+`main@b3be13476206a190f4299ee71a90b5d578b73b73`, with exact-main GitHub Actions
+run [32566723012](https://github.com/daydreamer0213/Tian-wen/actions/runs/32566723012)
+green for Python, TypeScript, and native Windows installer jobs.

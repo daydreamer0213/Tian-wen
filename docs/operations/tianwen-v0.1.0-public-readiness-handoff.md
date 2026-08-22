@@ -2,8 +2,37 @@
 
 **Date:** 2026-08-20
 
-**State:** Tasks 1–6 integrated; the final code-bearing main SHA has green
-exact-SHA GitHub Actions evidence; public actions remain unauthorized
+**State:** historical 2026-08-20 public-release attestation plus a current
+2026-08-22 terminal-status addendum
+
+## Current status addendum — 2026-08-22
+
+The repository is public, and tag/public prerelease
+`v0.1.0-research-preview` exists. The already-published GitHub prerelease text
+still describes the pre-public candidate and is stale; updating that external
+page remains separate from this repository docs-only closeout.
+
+The current product baseline is exact main
+`b3be13476206a190f4299ee71a90b5d578b73b73`. Exact-main GitHub Actions run
+[32566723012](https://github.com/daydreamer0213/Tian-wen/actions/runs/32566723012)
+completed with Python, TypeScript, and native Windows installer jobs green.
+
+Stage 7 is complete. One fresh configured-model natural task completed through
+the installed DSH rc.7 product path with Goal complete, 45/45 complete Evidence,
+`Outcome=met`, learning=`no-case`, parent Skill-use=`recorded`, and subsequent
+offline model restoration. This is project-owner single-user product evidence,
+not external-user or general-efficacy evidence.
+
+The final official offline installer returned the canonical ready receipt,
+published 16/16 regular independent Profile files with no source hardlinks,
+and left Sessions/Evolution unchanged. Installed CLI read-only status returned
+exit 0 without exposing governed private-ledger facts.
+
+The bounded remaining route is real five-task paired B/C with blind controlled
+evaluation, isolated Shadow, explicit project-owner Promotion approval, and a
+Rollback rehearsal. The sections below preserve the 2026-08-20 candidate audit
+and its then-current gates; their private-repository and pre-Stage-7 statements
+are historical checkpoint facts, not current status.
 
 ## Scope and product claim
 
@@ -113,21 +142,21 @@ persistent databases, and user data.
 - TypeScript job:
   [96337751401](https://github.com/daydreamer0213/Tian-wen/actions/runs/32340254356/job/96337751401),
   success;
-- public visibility: unchanged (private);
+- public visibility at the 2026-08-20 checkpoint: private; later superseded by
+  the current-status addendum;
 - remote branches: 45;
-- tag / GitHub Release: 0 tags; no GitHub Release.
+- tag / GitHub Release at the checkpoint: 0; later superseded by the current-
+  status addendum.
 
 This attestation commit is docs-only. It does not change the code tree proven
 at `150f4626ba9da5cfb6fab1a3d6d2cc5ee994291b`. Its own final target SHA and
 automatically triggered CI are verified externally after the commit and are
 not written back into the commit itself.
 
-## External actions still requiring user confirmation
+## Historical external actions completed after this handoff
 
-Before Task 7, show the user the exact docs-only public target SHA, its final
-scan result and green CI URL, the code-bearing green CI above, the license,
-demo result, and the consequence that every remote branch becomes visible
-with the repository. Obtain explicit confirmation before any of these
+This handoff originally required the project owner to review the exact target,
+scan, CI, license, demo, and branch-visibility consequence before these three
 independent external actions:
 
 1. change `daydreamer0213/Tian-wen` from private to public and set public
@@ -135,5 +164,7 @@ independent external actions:
 2. create and push the annotated `v0.1.0-research-preview` tag;
 3. create the public prerelease from the reviewed release notes.
 
-Application preparation and submission remain Task 8 and require separate
-authorization. No public action follows automatically from this handoff.
+Those repository-publication actions were later completed, as recorded in the
+current-status addendum. This historical authorization does not authorize a new
+release, prerelease edit, application submission, Provider run, Promotion, or
+other external action now.
