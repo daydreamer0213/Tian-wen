@@ -111,6 +111,23 @@ import type {
   SkillEvalProtocolReceipt,
   SkillEvalProtocolRecord,
 } from './skill-evaluation.js'
+import {
+  parseControlledSkillEvaluationPlan,
+  parseControlledSkillEvalProtocol,
+  prepareControlledSkillEvaluationPlan,
+  prepareControlledSkillEvalProtocol,
+} from './controlled-skill-evaluation.js'
+import type {
+  ControlledSkillEvaluationId,
+  ControlledSkillEvaluationOpenedEvent,
+  ControlledSkillEvaluationPlan,
+  ControlledSkillEvaluationReceipt,
+  ControlledSkillEvalProtocolFrozenEvent,
+  ControlledSkillEvalProtocolReceipt,
+  ControlledSkillEvalProtocolRecord,
+  FreezeControlledSkillEvalProtocolInput,
+  OpenControlledSkillEvaluationInput,
+} from './controlled-skill-evaluation.js'
 
 export type ArtifactId = `artifact:${string}`
 export type Sha256Digest = `sha256:${string}`
@@ -207,6 +224,8 @@ export type LedgerEvent =
   | SkillEvalProtocolFrozenEvent
   | SkillEvaluationOpenedEvent
   | SkillEvaluationResultRecordedEvent
+  | ControlledSkillEvalProtocolFrozenEvent
+  | ControlledSkillEvaluationOpenedEvent
   | ArtifactRecordedEvent
   | EvaluationRecordedEvent
   | ApprovalRecordedEvent
@@ -836,6 +855,58 @@ function parseEvent(value: unknown): LedgerEvent {
   if (type === 'outcome-intake-recorded') {
     return parseOutcomeEvent(value, at)
   }
+  if (type === 'controlled-skill-eval-protocol-frozen') {
+    exactKeys(value, [
+      'schemaVersion', 'type', 'at', 'protocol', 'inputDigest',
+    ])
+    if (value.schemaVersion !== 'tianwen.controlled-skill-eval-protocol.v2') {
+      throw new LedgerIntegrityError('invalid controlled Skill evaluation protocol event version')
+    }
+    let protocol
+    try {
+      protocol = parseControlledSkillEvalProtocol(value.protocol)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid controlled Skill evaluation protocol event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(protocol)) {
+      throw new LedgerIntegrityError('controlled Skill evaluation protocol digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+      type,
+      at,
+      protocol,
+      inputDigest,
+    }
+  }
+  if (type === 'controlled-skill-evaluation-opened') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'plan', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.controlled-skill-evaluation-plan.v2') {
+      throw new LedgerIntegrityError('invalid controlled Skill evaluation plan event version')
+    }
+    let plan
+    try {
+      plan = parseControlledSkillEvaluationPlan(value.plan)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid controlled Skill evaluation plan event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(plan)) {
+      throw new LedgerIntegrityError('controlled Skill evaluation plan digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v2',
+      type,
+      at,
+      plan,
+      inputDigest,
+    }
+  }
   if (type === 'skill-eval-protocol-frozen') {
     exactKeys(value, [
       'schemaVersion', 'type', 'at', 'protocol', 'inputDigest',
@@ -1253,6 +1324,18 @@ export class EvolutionLedger {
     LearningTicketId,
     SkillEvalProtocolId[]
   >()
+  readonly #controlledSkillEvalProtocols = new Map<
+    SkillEvalProtocolId,
+    ControlledSkillEvalProtocolRecord
+  >()
+  readonly #controlledSkillEvalProtocolIdsByTicket = new Map<
+    LearningTicketId,
+    SkillEvalProtocolId[]
+  >()
+  readonly #controlledSkillEvaluationPlans = new Map<
+    ControlledSkillEvaluationId,
+    ControlledSkillEvaluationPlan
+  >()
   readonly #skillEvaluationPlans = new Map<
     SkillEvaluationId,
     SkillEvaluationPlan
@@ -1408,6 +1491,130 @@ export class EvolutionLedger {
 
   listRunSkillUses(): readonly RunSkillUse[] {
     return clone([...this.#runSkillUses.values()])
+  }
+
+  freezeControlledSkillEvalProtocol(
+    input: FreezeControlledSkillEvalProtocolInput,
+  ): ControlledSkillEvalProtocolReceipt {
+    const ticket = this.#learningTickets.get(input.ticketId)
+    if (ticket === undefined) {
+      throw new LedgerIntegrityError(`unknown LearningTicket: ${input.ticketId}`)
+    }
+    const signals = ticket.signalIds.map(id => this.#learningSignals.get(id))
+      .filter((signal): signal is OutcomeLearningSignal =>
+        signal !== undefined && isOutcomeSignal(signal))
+    const provenance = this.#caseIdByTicket.has(ticket.ticketId)
+      || (this.#controlledSkillEvalProtocolIdsByTicket.get(ticket.ticketId)?.length ?? 0) > 0
+      ? 'retrospective'
+      : 'pre-candidate'
+    let protocol
+    try {
+      protocol = prepareControlledSkillEvalProtocol(input, ticket, signals, provenance)
+    } catch (error) {
+      throw new LedgerIntegrityError('controlled Skill evaluation protocol input is invalid', {
+        cause: error,
+      })
+    }
+    const existing = this.#controlledSkillEvalProtocols.get(protocol.protocolId)
+    if (existing !== undefined) {
+      return {
+        protocolId: existing.protocolId,
+        provenance: existing.provenance,
+        duplicate: true,
+      }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+      type: 'controlled-skill-eval-protocol-frozen',
+      at: this.#now(),
+      protocol,
+      inputDigest: sha256(protocol),
+    })
+    return {
+      protocolId: protocol.protocolId,
+      provenance: protocol.provenance,
+      duplicate: false,
+    }
+  }
+
+  getControlledSkillEvalProtocol(
+    protocolId: SkillEvalProtocolId,
+  ): ControlledSkillEvalProtocolRecord | undefined {
+    const protocol = this.#controlledSkillEvalProtocols.get(protocolId)
+    return protocol === undefined ? undefined : clone(protocol)
+  }
+
+  listControlledSkillEvalProtocols(): readonly ControlledSkillEvalProtocolRecord[] {
+    return clone([...this.#controlledSkillEvalProtocols.values()])
+  }
+
+  openControlledSkillEvaluation(
+    input: OpenControlledSkillEvaluationInput,
+  ): ControlledSkillEvaluationReceipt {
+    const candidate = this.#skillCandidates.get(input.candidateId)
+    const protocol = this.#controlledSkillEvalProtocols.get(input.protocolId)
+    if (candidate === undefined || protocol === undefined) {
+      throw new LedgerIntegrityError(
+        'controlled Skill evaluation requires its Candidate and protocol',
+      )
+    }
+    const learningCase = this.#learningCases.get(candidate.caseId)
+    const lesson = this.#acceptedLessons.get(candidate.lessonId)
+    const attribution = this.#attributions.get(candidate.attributionId)
+    const parent = [...this.#runSkillManifests.values()]
+      .find(value => value.parentVersionId === candidate.parentVersionId)?.parent
+    if (
+      learningCase === undefined
+      || lesson?.caseId !== learningCase.caseId
+      || attribution?.caseId !== learningCase.caseId
+      || parent === undefined
+    ) {
+      throw new LedgerIntegrityError(
+        'controlled Skill evaluation Candidate chain is incomplete',
+      )
+    }
+    let plan
+    try {
+      plan = prepareControlledSkillEvaluationPlan(
+        input,
+        candidate,
+        learningCase,
+        protocol,
+        sha256(parent),
+      )
+    } catch (error) {
+      throw new LedgerIntegrityError('controlled Skill evaluation input is invalid', {
+        cause: error,
+      })
+    }
+    const existing = this.#controlledSkillEvaluationPlans.get(plan.evaluationId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(plan)) {
+        throw new LedgerIntegrityError(
+          `controlled Skill evaluation changed: ${plan.evaluationId}`,
+        )
+      }
+      return { evaluationId: existing.evaluationId, duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v2',
+      type: 'controlled-skill-evaluation-opened',
+      at: this.#now(),
+      plan,
+      inputDigest: sha256(plan),
+    })
+    return { evaluationId: plan.evaluationId, duplicate: false }
+  }
+
+  getControlledSkillEvaluation(
+    evaluationId: ControlledSkillEvaluationId,
+  ): ControlledSkillEvaluationPlan | undefined {
+    const plan = this.#controlledSkillEvaluationPlans.get(evaluationId)
+    return plan === undefined ? undefined : clone(plan)
+  }
+
+  listControlledSkillEvaluations(): readonly ControlledSkillEvaluationPlan[] {
+    return clone([...this.#controlledSkillEvaluationPlans.values()])
   }
 
   freezeSkillEvalProtocol(
@@ -2368,6 +2575,92 @@ export class EvolutionLedger {
       }
       return
     }
+    if (event.type === 'controlled-skill-eval-protocol-frozen') {
+      const ticket = this.#learningTickets.get(event.protocol.ticketId)
+      if (
+        ticket === undefined
+        || this.#controlledSkillEvalProtocols.has(event.protocol.protocolId)
+      ) {
+        throw new LedgerIntegrityError('controlled Skill evaluation protocol disagrees with history')
+      }
+      const signals = ticket.signalIds.map(id => this.#learningSignals.get(id))
+        .filter((signal): signal is OutcomeLearningSignal =>
+          signal !== undefined && isOutcomeSignal(signal))
+      const provenance = this.#caseIdByTicket.has(ticket.ticketId)
+        || (this.#controlledSkillEvalProtocolIdsByTicket.get(ticket.ticketId)?.length ?? 0) > 0
+        ? 'retrospective'
+        : 'pre-candidate'
+      let prepared
+      try {
+        prepared = prepareControlledSkillEvalProtocol({
+          ticketId: ticket.ticketId,
+          evidencePurpose: event.protocol.evidencePurpose,
+          protocol: event.protocol.protocol,
+        }, ticket, signals, provenance)
+      } catch (error) {
+        throw new LedgerIntegrityError('controlled Skill evaluation protocol event is invalid', {
+          cause: error,
+        })
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.protocol)
+        || event.inputDigest !== sha256(event.protocol)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation protocol disagrees with Ticket history',
+        )
+      }
+      return
+    }
+    if (event.type === 'controlled-skill-evaluation-opened') {
+      const candidate = this.#skillCandidates.get(event.plan.candidateId)
+      const protocol = this.#controlledSkillEvalProtocols.get(event.plan.protocolId)
+      const learningCase = candidate === undefined
+        ? undefined
+        : this.#learningCases.get(candidate.caseId)
+      const parent = candidate === undefined
+        ? undefined
+        : [...this.#runSkillManifests.values()]
+          .find(value => value.parentVersionId === candidate.parentVersionId)?.parent
+      if (
+        candidate === undefined
+        || protocol === undefined
+        || learningCase === undefined
+        || parent === undefined
+        || this.#controlledSkillEvaluationPlans.has(event.plan.evaluationId)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation plan disagrees with history',
+        )
+      }
+      let prepared
+      try {
+        prepared = prepareControlledSkillEvaluationPlan({
+          candidateId: event.plan.candidateId,
+          protocolId: event.plan.protocolId,
+          sessionAllocations: event.plan.tasks.map(task => ({
+            taskId: task.taskId,
+            baselineSessionId: task.baseline.sessionId,
+            candidateSessionId: task.candidate.sessionId,
+            evaluatorSessionId: task.evaluatorSessionId,
+          })),
+        }, candidate, learningCase, protocol, sha256(parent))
+      } catch (error) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation plan event is invalid',
+          { cause: error },
+        )
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.plan)
+        || event.inputDigest !== sha256(event.plan)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation plan disagrees with history',
+        )
+      }
+      return
+    }
     if (event.type === 'skill-eval-protocol-frozen') {
       const ticket = this.#learningTickets.get(event.protocol.ticketId)
       if (
@@ -2850,6 +3143,18 @@ export class EvolutionLedger {
     }
     if (event.type === 'run-skill-use-recorded') {
       this.#runSkillUses.set(event.use.runId, event.use)
+      return
+    }
+    if (event.type === 'controlled-skill-eval-protocol-frozen') {
+      this.#controlledSkillEvalProtocols.set(event.protocol.protocolId, event.protocol)
+      const ids = this.#controlledSkillEvalProtocolIdsByTicket.get(event.protocol.ticketId)
+        ?? []
+      ids.push(event.protocol.protocolId)
+      this.#controlledSkillEvalProtocolIdsByTicket.set(event.protocol.ticketId, ids)
+      return
+    }
+    if (event.type === 'controlled-skill-evaluation-opened') {
+      this.#controlledSkillEvaluationPlans.set(event.plan.evaluationId, event.plan)
       return
     }
     if (event.type === 'skill-eval-protocol-frozen') {

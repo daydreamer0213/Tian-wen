@@ -1,5 +1,5 @@
 import type { Sha256Digest } from './ledger.js'
-import { sha256 } from './learning-intake.js'
+import { canonicalJson, sha256 } from './learning-intake.js'
 import type {
   LearningTicket,
   LearningTicketId,
@@ -8,7 +8,13 @@ import { prepareRunBinding } from './outcome-intake.js'
 import type {
   OutcomeLearningSignal,
   RunAcceptanceContract,
+  TianwenRunId,
 } from './outcome-intake.js'
+import type {
+  GovernedSkillCandidate,
+  LearningCase,
+  SkillVersionId,
+} from './skill-governance.js'
 import type { SkillEvalProtocolId } from './skill-evaluation.js'
 
 export const CONTROLLED_SKILL_EVAL_TASK_TYPES = Object.freeze([
@@ -61,8 +67,7 @@ export type ControlledSkillEvalProtocolProvenance =
   | 'retrospective'
 export type ControlledSkillEvalTaskId = `eval-task:${string}`
 
-export interface ControlledSkillEvalLimits {
-  readonly maxModelRequests: number
+export interface ControlledSkillEvalStopContract {
   readonly maxToolCalls: number
   readonly maxElapsedMs: number
 }
@@ -81,7 +86,7 @@ export interface ControlledSkillEvalTask {
   readonly acceptanceContract: RunAcceptanceContract
   readonly acceptanceSubjectDigest: Sha256Digest
   readonly allowedTools: readonly string[]
-  readonly limits: ControlledSkillEvalLimits
+  readonly stopContract: ControlledSkillEvalStopContract
 }
 
 export interface ControlledSkillEvalExecution {
@@ -116,11 +121,84 @@ export interface ControlledSkillEvalProtocolRecord {
   readonly protocol: ControlledSkillEvalProtocol
 }
 
+export interface ControlledSkillEvalProtocolReceipt {
+  readonly protocolId: SkillEvalProtocolId
+  readonly provenance: ControlledSkillEvalProtocolProvenance
+  readonly duplicate: boolean
+}
+
+export interface ControlledSkillEvalProtocolFrozenEvent {
+  readonly schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2'
+  readonly type: 'controlled-skill-eval-protocol-frozen'
+  readonly at: string
+  readonly protocol: ControlledSkillEvalProtocolRecord
+  readonly inputDigest: Sha256Digest
+}
+
+export type ControlledSkillEvaluationId = `evaluation:${string}`
+
+export interface ControlledSkillEvalSessionAllocation {
+  readonly taskId: ControlledSkillEvalTaskId
+  readonly baselineSessionId: string
+  readonly candidateSessionId: string
+  readonly evaluatorSessionId: string
+}
+
+export interface OpenControlledSkillEvaluationInput {
+  readonly candidateId: GovernedSkillCandidate['candidateId']
+  readonly protocolId: SkillEvalProtocolId
+  readonly sessionAllocations: readonly ControlledSkillEvalSessionAllocation[]
+}
+
+export interface ControlledSkillEvalPlanArm {
+  readonly role: 'baseline' | 'candidate'
+  readonly runId: TianwenRunId
+  readonly sessionId: string
+}
+
+export interface ControlledSkillEvalTaskPlan extends ControlledSkillEvalTask {
+  readonly baseline: ControlledSkillEvalPlanArm
+  readonly candidate: ControlledSkillEvalPlanArm
+  readonly evaluatorSessionId: string
+}
+
+export interface ControlledSkillEvaluationPlan {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v2'
+  readonly evaluationId: ControlledSkillEvaluationId
+  readonly protocolId: SkillEvalProtocolId
+  readonly candidateId: GovernedSkillCandidate['candidateId']
+  readonly parentVersionId: SkillVersionId
+  readonly parentPayloadDigest: Sha256Digest
+  readonly candidatePayloadDigest: Sha256Digest
+  readonly scopeKey: string
+  readonly protocolProvenance: ControlledSkillEvalProtocolProvenance
+  readonly evidencePurpose: ControlledSkillEvalEvidencePurpose
+  readonly evidenceLabels: readonly ControlledSkillEvalEvidenceLabel[]
+  readonly execution: ControlledSkillEvalExecution
+  readonly tasks: readonly ControlledSkillEvalTaskPlan[]
+}
+
+export interface ControlledSkillEvaluationReceipt {
+  readonly evaluationId: ControlledSkillEvaluationId
+  readonly duplicate: boolean
+}
+
+export interface ControlledSkillEvaluationOpenedEvent {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v2'
+  readonly type: 'controlled-skill-evaluation-opened'
+  readonly at: string
+  readonly plan: ControlledSkillEvaluationPlan
+  readonly inputDigest: Sha256Digest
+}
+
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/u
 const TICKET_ID = /^ticket:[a-zA-Z0-9._:-]+$/u
 const TASK_ID = /^eval-task:[a-z0-9][a-z0-9._-]{0,96}$/u
 const SAFE_EXECUTION_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u
 const SAFE_TOOL_ID = /^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/u
+const CANDIDATE_ID = /^candidate:[a-f0-9]{64}$/u
+const SKILL_VERSION_ID = /^skill-version:[a-f0-9]{64}$/u
+const EVALUATION_ID = /^evaluation:[a-f0-9]{64}$/u
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -181,11 +259,10 @@ function prepareAcceptanceContract(value: unknown): RunAcceptanceContract {
   }).acceptanceContract
 }
 
-function prepareLimits(value: unknown): ControlledSkillEvalLimits {
-  if (!isRecord(value)) throw new TypeError('task limits must be an object')
-  exactKeys(value, ['maxModelRequests', 'maxToolCalls', 'maxElapsedMs'])
+function prepareStopContract(value: unknown): ControlledSkillEvalStopContract {
+  if (!isRecord(value)) throw new TypeError('task stopContract must be an object')
+  exactKeys(value, ['maxToolCalls', 'maxElapsedMs'])
   return {
-    maxModelRequests: boundedInteger(value.maxModelRequests, 'maxModelRequests', 1, 64),
     maxToolCalls: boundedInteger(value.maxToolCalls, 'maxToolCalls', 1, 256),
     maxElapsedMs: boundedInteger(value.maxElapsedMs, 'maxElapsedMs', 1, 3_600_000),
   }
@@ -223,7 +300,7 @@ function prepareTask(value: unknown): ControlledSkillEvalTask {
     'acceptanceContract',
     'acceptanceSubjectDigest',
     'allowedTools',
-    'limits',
+    'stopContract',
   ])
   if (typeof value.taskId !== 'string' || !TASK_ID.test(value.taskId)) {
     throw new TypeError('taskId must be a safe controlled evaluation task ID')
@@ -249,7 +326,7 @@ function prepareTask(value: unknown): ControlledSkillEvalTask {
     acceptanceContract,
     acceptanceSubjectDigest: digest(value.acceptanceSubjectDigest, 'acceptanceSubjectDigest'),
     allowedTools: prepareAllowedTools(value.allowedTools, acceptanceContract.toolName),
-    limits: prepareLimits(value.limits),
+    stopContract: prepareStopContract(value.stopContract),
   }
 }
 
@@ -328,6 +405,53 @@ function evidenceLabels(
     : []
 }
 
+function prepareRecord(
+  ticketId: unknown,
+  scopeKey: unknown,
+  provenance: unknown,
+  purpose: unknown,
+  protocolValue: unknown,
+): ControlledSkillEvalProtocolRecord {
+  if (typeof ticketId !== 'string' || !TICKET_ID.test(ticketId)) {
+    throw new TypeError('ticketId must be a Learning Ticket ID')
+  }
+  if (
+    typeof scopeKey !== 'string'
+    || scopeKey.trim().length === 0
+    || scopeKey.length > 240
+  ) {
+    throw new TypeError('controlled evaluation scopeKey is invalid')
+  }
+  if (
+    purpose !== 'controlled-product'
+    && purpose !== 'development-only-synthetic-defect'
+  ) {
+    throw new TypeError('controlled evaluation evidence purpose is invalid')
+  }
+  if (provenance !== 'pre-candidate' && provenance !== 'retrospective') {
+    throw new TypeError('controlled evaluation protocol provenance is invalid')
+  }
+  const protocol = prepareProtocol(protocolValue)
+  const labels = evidenceLabels(purpose)
+  const identity = sha256({
+    ticketId,
+    scopeKey,
+    evidencePurpose: purpose,
+    evidenceLabels: labels,
+    protocol,
+  })
+  return {
+    schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+    protocolId: `eval-protocol:${identity.slice('sha256:'.length)}`,
+    ticketId: ticketId as LearningTicketId,
+    scopeKey,
+    provenance,
+    evidencePurpose: purpose,
+    evidenceLabels: labels,
+    protocol,
+  }
+}
+
 export function prepareControlledSkillEvalProtocol(
   input: FreezeControlledSkillEvalProtocolInput,
   ticket: LearningTicket,
@@ -336,11 +460,179 @@ export function prepareControlledSkillEvalProtocol(
 ): ControlledSkillEvalProtocolRecord {
   if (!isRecord(input)) throw new TypeError('controlled evaluation protocol input must be an object')
   exactKeys(input, ['ticketId', 'evidencePurpose', 'protocol'])
-  if (typeof input.ticketId !== 'string' || !TICKET_ID.test(input.ticketId)) {
-    throw new TypeError('ticketId must be a Learning Ticket ID')
-  }
   if (input.ticketId !== ticket.ticketId) {
     throw new TypeError('controlled evaluation protocol references another Ticket')
+  }
+  const scopeKey = deriveScope(ticket, signals)
+  return prepareRecord(
+    input.ticketId,
+    scopeKey,
+    provenance,
+    input.evidencePurpose,
+    input.protocol,
+  )
+}
+
+export function parseControlledSkillEvalProtocol(
+  value: unknown,
+): ControlledSkillEvalProtocolRecord {
+  if (!isRecord(value)) throw new TypeError('controlled evaluation protocol record must be an object')
+  exactKeys(value, [
+    'schemaVersion',
+    'protocolId',
+    'ticketId',
+    'scopeKey',
+    'provenance',
+    'evidencePurpose',
+    'evidenceLabels',
+    'protocol',
+  ])
+  if (value.schemaVersion !== 'tianwen.controlled-skill-eval-protocol.v2') {
+    throw new TypeError('controlled evaluation protocol has an invalid schema version')
+  }
+  const prepared = prepareRecord(
+    value.ticketId,
+    value.scopeKey,
+    value.provenance,
+    value.evidencePurpose,
+    value.protocol,
+  )
+  if (canonicalJson(prepared) !== canonicalJson(value)) {
+    throw new TypeError('controlled evaluation protocol identity or labels are not canonical')
+  }
+  return prepared
+}
+
+function safeSessionId(value: unknown): string {
+  if (
+    typeof value !== 'string'
+    || value.trim().length === 0
+    || value.length > 256
+    || /[\u0000-\u001f\u007f]/u.test(value)
+    || /^[a-z]:[\\/]/iu.test(value)
+    || value.startsWith('/')
+    || value.includes('://')
+  ) {
+    throw new TypeError('controlled evaluation sessionId is invalid')
+  }
+  return value
+}
+
+function preparePlanArm(
+  role: ControlledSkillEvalPlanArm['role'],
+  task: ControlledSkillEvalTask,
+  protocolId: SkillEvalProtocolId,
+  scopeKey: string,
+  sessionValue: unknown,
+  runIds: Set<string>,
+  sessionIds: Set<string>,
+): ControlledSkillEvalPlanArm {
+  const sessionId = safeSessionId(sessionValue)
+  const binding = prepareRunBinding({
+    goalRef: `goal:controlled-skill-evaluation:${protocolId}`,
+    taskRef: `task:${task.taskId}:${role}`,
+    sessionId,
+    scopeKey,
+    acceptanceContract: task.acceptanceContract,
+    acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+  })
+  if (!runIds.add(binding.runId) || !sessionIds.add(sessionId)) {
+    throw new TypeError('controlled evaluation requires distinct Runs and Sessions')
+  }
+  return { role, runId: binding.runId, sessionId }
+}
+
+function preparePlanTasks(
+  value: unknown,
+  protocol: ControlledSkillEvalProtocol,
+  protocolId: SkillEvalProtocolId,
+  scopeKey: string,
+): readonly ControlledSkillEvalTaskPlan[] {
+  if (!Array.isArray(value) || value.length !== protocol.tasks.length) {
+    throw new TypeError('controlled evaluation Session allocations must cover the frozen five tasks')
+  }
+  const runIds = new Set<string>()
+  const sessionIds = new Set<string>()
+  return value.map((row, index) => {
+    if (!isRecord(row)) throw new TypeError('controlled evaluation Session allocation must be an object')
+    exactKeys(row, [
+      'taskId',
+      'baselineSessionId',
+      'candidateSessionId',
+      'evaluatorSessionId',
+    ])
+    const task = protocol.tasks[index]!
+    if (row.taskId !== task.taskId) {
+      throw new TypeError('controlled evaluation Session allocations disagree with the frozen task order')
+    }
+    const baseline = preparePlanArm(
+      'baseline',
+      task,
+      protocolId,
+      scopeKey,
+      row.baselineSessionId,
+      runIds,
+      sessionIds,
+    )
+    const candidate = preparePlanArm(
+      'candidate',
+      task,
+      protocolId,
+      scopeKey,
+      row.candidateSessionId,
+      runIds,
+      sessionIds,
+    )
+    const evaluatorSessionId = safeSessionId(row.evaluatorSessionId)
+    if (!sessionIds.add(evaluatorSessionId)) {
+      throw new TypeError('controlled evaluation requires distinct execution and evaluator Sessions')
+    }
+    return {
+      ...structuredClone(task),
+      baseline,
+      candidate,
+      evaluatorSessionId,
+    }
+  })
+}
+
+function preparePlanRecord(input: {
+  readonly protocolId: unknown
+  readonly candidateId: unknown
+  readonly parentVersionId: unknown
+  readonly parentPayloadDigest: unknown
+  readonly candidatePayloadDigest: unknown
+  readonly scopeKey: unknown
+  readonly protocolProvenance: unknown
+  readonly evidencePurpose: unknown
+  readonly evidenceLabels: unknown
+  readonly protocol: ControlledSkillEvalProtocol
+  readonly sessionAllocations: unknown
+}): ControlledSkillEvaluationPlan {
+  if (typeof input.protocolId !== 'string' || !/^eval-protocol:[a-f0-9]{64}$/u.test(input.protocolId)) {
+    throw new TypeError('controlled evaluation protocolId is invalid')
+  }
+  if (typeof input.candidateId !== 'string' || !CANDIDATE_ID.test(input.candidateId)) {
+    throw new TypeError('controlled evaluation candidateId is invalid')
+  }
+  if (typeof input.parentVersionId !== 'string' || !SKILL_VERSION_ID.test(input.parentVersionId)) {
+    throw new TypeError('controlled evaluation parentVersionId is invalid')
+  }
+  if (typeof input.parentPayloadDigest !== 'string' || !SHA256_DIGEST.test(input.parentPayloadDigest)) {
+    throw new TypeError('controlled evaluation parent payload digest is invalid')
+  }
+  if (typeof input.candidatePayloadDigest !== 'string' || !SHA256_DIGEST.test(input.candidatePayloadDigest)) {
+    throw new TypeError('controlled evaluation Candidate payload digest is invalid')
+  }
+  if (
+    typeof input.scopeKey !== 'string'
+    || input.scopeKey.trim().length === 0
+    || input.scopeKey.length > 240
+  ) {
+    throw new TypeError('controlled evaluation scopeKey is invalid')
+  }
+  if (input.protocolProvenance !== 'pre-candidate' && input.protocolProvenance !== 'retrospective') {
+    throw new TypeError('controlled evaluation protocol provenance is invalid')
   }
   if (
     input.evidencePurpose !== 'controlled-product'
@@ -348,27 +640,138 @@ export function prepareControlledSkillEvalProtocol(
   ) {
     throw new TypeError('controlled evaluation evidence purpose is invalid')
   }
-  if (provenance !== 'pre-candidate' && provenance !== 'retrospective') {
-    throw new TypeError('controlled evaluation protocol provenance is invalid')
-  }
-  const scopeKey = deriveScope(ticket, signals)
-  const protocol = prepareProtocol(input.protocol)
   const labels = evidenceLabels(input.evidencePurpose)
-  const identity = sha256({
-    ticketId: ticket.ticketId,
-    scopeKey,
-    evidencePurpose: input.evidencePurpose,
-    evidenceLabels: labels,
-    protocol,
-  })
-  return {
-    schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
-    protocolId: `eval-protocol:${identity.slice('sha256:'.length)}`,
-    ticketId: ticket.ticketId,
-    scopeKey,
-    provenance,
-    evidencePurpose: input.evidencePurpose,
-    evidenceLabels: labels,
-    protocol,
+  if (canonicalJson(input.evidenceLabels) !== canonicalJson(labels)) {
+    throw new TypeError('controlled evaluation evidence labels are not canonical')
   }
+  const protocol = prepareProtocol(input.protocol)
+  const tasks = preparePlanTasks(
+    input.sessionAllocations,
+    protocol,
+    input.protocolId as SkillEvalProtocolId,
+    input.scopeKey,
+  )
+  const body = {
+    protocolId: input.protocolId as SkillEvalProtocolId,
+    candidateId: input.candidateId as GovernedSkillCandidate['candidateId'],
+    parentVersionId: input.parentVersionId as SkillVersionId,
+    parentPayloadDigest: input.parentPayloadDigest as Sha256Digest,
+    candidatePayloadDigest: input.candidatePayloadDigest as Sha256Digest,
+    scopeKey: input.scopeKey,
+    protocolProvenance: input.protocolProvenance,
+    evidencePurpose: input.evidencePurpose,
+    evidenceLabels: labels,
+    execution: protocol.execution,
+    tasks,
+  } as const
+  const identity = sha256(body)
+  return {
+    schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v2',
+    evaluationId: `evaluation:${identity.slice('sha256:'.length)}`,
+    ...body,
+  }
+}
+
+export function prepareControlledSkillEvaluationPlan(
+  input: OpenControlledSkillEvaluationInput,
+  candidate: GovernedSkillCandidate,
+  learningCase: LearningCase,
+  protocolRecord: ControlledSkillEvalProtocolRecord,
+  parentPayloadDigest: Sha256Digest,
+): ControlledSkillEvaluationPlan {
+  if (!isRecord(input)) throw new TypeError('controlled evaluation input must be an object')
+  exactKeys(input, ['candidateId', 'protocolId', 'sessionAllocations'])
+  if (
+    input.candidateId !== candidate.candidateId
+    || input.protocolId !== protocolRecord.protocolId
+    || candidate.ticketId !== protocolRecord.ticketId
+    || candidate.caseId !== learningCase.caseId
+    || candidate.parentVersionId !== learningCase.parentVersionId
+    || candidate.targetScope !== learningCase.scopeKey
+    || protocolRecord.scopeKey !== learningCase.scopeKey
+  ) {
+    throw new TypeError('controlled evaluation Candidate chain disagrees with its protocol')
+  }
+  return preparePlanRecord({
+    protocolId: protocolRecord.protocolId,
+    candidateId: candidate.candidateId,
+    parentVersionId: candidate.parentVersionId,
+    parentPayloadDigest,
+    candidatePayloadDigest: candidate.payloadDigest,
+    scopeKey: learningCase.scopeKey,
+    protocolProvenance: protocolRecord.provenance,
+    evidencePurpose: protocolRecord.evidencePurpose,
+    evidenceLabels: protocolRecord.evidenceLabels,
+    protocol: protocolRecord.protocol,
+    sessionAllocations: input.sessionAllocations,
+  })
+}
+
+export function parseControlledSkillEvaluationPlan(
+  value: unknown,
+): ControlledSkillEvaluationPlan {
+  if (!isRecord(value)) throw new TypeError('controlled evaluation plan must be an object')
+  exactKeys(value, [
+    'schemaVersion',
+    'evaluationId',
+    'protocolId',
+    'candidateId',
+    'parentVersionId',
+    'parentPayloadDigest',
+    'candidatePayloadDigest',
+    'scopeKey',
+    'protocolProvenance',
+    'evidencePurpose',
+    'evidenceLabels',
+    'execution',
+    'tasks',
+  ])
+  if (value.schemaVersion !== 'tianwen.controlled-skill-evaluation-plan.v2') {
+    throw new TypeError('controlled evaluation plan has an invalid schema version')
+  }
+  if (typeof value.evaluationId !== 'string' || !EVALUATION_ID.test(value.evaluationId)) {
+    throw new TypeError('controlled evaluation plan has an invalid identity')
+  }
+  if (!Array.isArray(value.tasks)) throw new TypeError('controlled evaluation plan tasks must be an array')
+  const protocol = prepareProtocol({
+    rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+    tasks: value.tasks.map(task => {
+      if (!isRecord(task)) throw new TypeError('controlled evaluation plan task must be an object')
+      const copy = { ...task }
+      delete copy.baseline
+      delete copy.candidate
+      delete copy.evaluatorSessionId
+      return copy
+    }),
+    execution: value.execution,
+  })
+  const prepared = preparePlanRecord({
+    protocolId: value.protocolId,
+    candidateId: value.candidateId,
+    parentVersionId: value.parentVersionId,
+    parentPayloadDigest: value.parentPayloadDigest,
+    candidatePayloadDigest: value.candidatePayloadDigest,
+    scopeKey: value.scopeKey,
+    protocolProvenance: value.protocolProvenance,
+    evidencePurpose: value.evidencePurpose,
+    evidenceLabels: value.evidenceLabels,
+    protocol,
+    sessionAllocations: value.tasks.map(task => {
+      const item = task as Readonly<Record<string, unknown>>
+      return {
+        taskId: item.taskId,
+        baselineSessionId: isRecord(item.baseline)
+          ? item.baseline.sessionId
+          : item.baseline,
+        candidateSessionId: isRecord(item.candidate)
+          ? item.candidate.sessionId
+          : item.candidate,
+        evaluatorSessionId: item.evaluatorSessionId,
+      }
+    }),
+  })
+  if (canonicalJson(prepared) !== canonicalJson(value)) {
+    throw new TypeError('controlled evaluation plan identity or fields are not canonical')
+  }
+  return prepared
 }
