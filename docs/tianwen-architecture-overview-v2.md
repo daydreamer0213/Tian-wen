@@ -29,7 +29,7 @@ rc.7 产品路径正式运行一次：Goal complete，45/45 Evidence complete，
 v0.1 文档收口
 → 冻结五任务的真实 paired B/C 与盲态受控评价
 → 隔离 Shadow
-→ 项目所有者批准 Promotion
+→ 证据门通过后按监督建议 Promotion
 → 有界 Rollback 演练
 → 项目开发收口
 ```
@@ -186,7 +186,7 @@ DSH 能组合但缺一小段 → 写薄适配
 ```text
 当前 Champion B
 → 从 Case/Lesson 形成 Candidate C
-→ B 与 C 在同任务、同模型、同工具、同权限、同预算、同评测标准下比较
+→ B 与 C 在同任务、同模型、同工具、同权限、同 Provider 配置、同评测标准下比较
 → PASS / FAIL / INCONCLUSIVE
 → 通过后进入有限 Shadow
 → 稳定才 Promotion；异常则 Reject 或 Rollback
@@ -200,14 +200,14 @@ DSH 能组合但缺一小段 → 写薄适配
 
 设计关键是“是否越过用户授权边界”，不是风险标签从无风险变成低风险。
 
-在已经批准的 Goal、权限和累计预算内，可恢复、低成本的动作默认自动执行。审计记录用于说明发生了什么，不自动变成审批弹窗。只有以下情况才请求用户：
+在已经批准的 Goal、权限和影响边界内，可恢复的动作默认自动执行。审计记录用于说明发生了什么，不自动变成审批弹窗。只有以下情况才请求用户：
 
 - 改变顶层 Goal 或成功标准；
-- 扩大权限或累计预算；
+- 扩大权限或不可逆影响范围；
 - 重大不可逆外部影响；
 - 无法由系统替用户决定的价值取舍。
 
-普通 Agent 的执行预算由 DSH 的原生能力承担。Tianwen 可以在 Run 前冻结用户批准的成本和影响边界，但不再用机械的固定请求次数代替 Agent 的自然完成条件。限制应优先表达为真实资源上限、时间上限和无进展停止，而不是“第 8 次请求后无论是否完成都失败”。
+普通 Agent 按 DSH 的原生完成语义运行。项目所有者已在 API 平台设置 DeepSeek 额度，因此 Tianwen 不重复设置模型请求、token、金额预算或价格轮询，也不以机械的固定请求次数代替 Agent 的自然完成条件。权限、不可逆影响、无进展和真实安全停止仍由原有边界控制；API 额度耗尽则如实停止并保留现场。
 
 ## 8. 五条不可破坏的不变量
 
@@ -232,7 +232,7 @@ DSH 能组合但缺一小段 → 写薄适配
 - 经验总结与假设探索组成有界小循环；
 - Lesson 有适用范围、反例和失效条件；
 - Champion/Challenger 公平比较；
-- Candidate 有数量和预算边界；
+- Candidate 有数量、权限和影响边界；
 - 主观满意由真实用户证据决定；
 - Promotion、Shadow、Rollback 只改变未来 Run；
 - 边界内自主执行，越界才询问用户；
@@ -274,16 +274,15 @@ Candidate 和 Evaluation 仍是 scripted/controlled mechanism proof；Stage 7 �
 1. 完成当前入口文档与 release-note 源文档收口；
 2. 若自然证据形成合法 Candidate，则直接使用；否则仅在 development-only 隔离场景验证
    `feedback → Ticket → Case → Lesson → Candidate` 机械链，且该 Candidate 永不进入生产；
-3. 对合法产品 Candidate 冻结五个真实有意义任务、rubric、工具、Provider 条件、最大轮次和
+3. 对受控 Candidate 冻结五个有现实代表性的任务、rubric、工具、Provider 条件和
    一次正式尝试；
 4. 由 B/C 通过真实 Runtime 各执行一次，客观 verifier 与不知道 B/C 身份的独立 evaluator Agent
    分开判断；
 5. 只有 paired B/C 通过才进入五任务隔离 Shadow；
-6. 只有 Shadow 通过且项目所有者明确批准，才改变项目级 future-run pointer；
+6. 只有 Shadow 通过且监督基于冻结证据建议 Promotion，才在 2026-08-23 standing authorization 下改变隔离 scope 的 future-run pointer；
 7. 完成有界 Rollback 演练后停止开发收口。
 
-该路线固定了任务数、轮次和单次正式尝试作为成本上限，不新增价格轮询、预算器、遥测、
-scheduler、通用日志、第二 Runtime、global Champion 或自动 Promotion。
+该路线固定五任务和单次正式尝试以保证比较公平，但不设置 Tianwen 侧 DeepSeek 预算上限；不新增价格轮询、预算器、遥测、scheduler、通用日志、第二 Runtime、global Champion，或绕过证据门的 Promotion。
 
 ## 11. v0.1 应该怎样算“做完”
 
@@ -292,11 +291,11 @@ scheduler、通用日志、第二 Runtime、global Champion 或自动 Promotion�
 
 剩余的“v0.1 开发收口”完成主张更窄：
 
-1. 由一个有闭合来源和父版本的合法产品 Candidate 进入冻结五任务 paired B/C；
+1. 由一个有闭合受控来源和父版本的 Candidate 进入冻结五任务 paired B/C；故意有缺陷的测试 Skill 可以使用，但必须永久标明 controlled/development-only；
 2. 执行者、客观 verifier 与盲态 evaluator 分工清楚，正式结果没有挑重试；
 3. Candidate 通过 B/C 后只进入项目级隔离 Shadow；
-4. 项目所有者查看通俗摘要并明确批准 Promotion；
-5. 新 pointer 只影响未来 Run，随后证明可回到 B 并按批准结果恢复；
+4. 监督在 Shadow 通过后形成 Promotion 建议，并依据 2026-08-23 standing authorization 执行；
+5. 新 pointer 只影响隔离 scope 的未来 Run，随后证明可回到 B 并按建议恢复；
 6. 最终演示、README 和报告诚实区分机制证据、受控评测、单用户产品证据和外部用户泛化。
 
 如果只有 development-only Candidate，它可以证明机械链，但不能满足生产 Candidate 的 B/C、

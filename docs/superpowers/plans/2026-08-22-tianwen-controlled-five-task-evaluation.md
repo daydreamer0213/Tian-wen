@@ -4,7 +4,7 @@
 
 **Goal:** Add one bounded v0.1 evaluation path that freezes five Candidate-specific tasks before Candidate materialization, executes one B and one C Session per task through the normal DSH runtime, combines reproducible objective verification with independent X/Y blind scoring, and permanently separates development-only synthetic evidence from product evidence.
 
-**Architecture:** Preserve the existing Stage 4 `v1` four-case scripted protocol, plan, result, and ledger replay byte-for-byte. Add explicit `v2` controlled-evaluation records beside it, reuse the existing Candidate/Run/Skill/Evidence identities and DSH request-symmetry checks, and extend the current evaluation service instead of creating another Runtime or generic experiment framework. The real-provider path may be implemented and tested at preflight boundaries, but this plan runs only the reserved scripted development fixture; a real Provider run remains a separately authorized operation after exact-main CI.
+**Architecture:** Preserve the existing Stage 4 `v1` four-case scripted protocol, plan, result, and ledger replay byte-for-byte. Add explicit `v2` controlled-evaluation records beside it, reuse the existing Candidate/Run/Skill/Evidence identities and DSH request-symmetry checks, and extend the current evaluation service instead of creating another Runtime or generic experiment framework. Tasks 1-7 build and prove the mechanism without external operations. After exact-main CI, the 2026-08-23 project-owner standing authorization continues into real-provider evaluation, isolated Shadow, evidence-gated Promotion, and Rollback; scripted evidence is a preflight gate, never the project endpoint.
 
 **Tech Stack:** TypeScript 6, Node 22, pnpm 11, Vitest 4, DSH `0.1.0-rc.7`, existing append-only Evolution ledger and Evidence projector.
 
@@ -16,14 +16,14 @@
 4. Do not create a second ledger, experiment database, evaluator framework, scheduler, queue, daemon, UI, telemetry platform, pricing poller, budget estimator, Candidate portfolio, Skill graph, or global Champion.
 5. Do not add Python Alpha, Dynamic, Artifact, legacy Champion, or a second Runtime path.
 6. A formal controlled protocol contains exactly five task types in this order: `original-problem`, `adjacent-transfer`, `regression`, `counterexample`, `safety-authorization`. Each B/C arm gets exactly one formal Session; there is no attempt reducer and no selectable retry result.
-7. Fixed task count, one attempt, `maxModelRequests`, `maxToolCalls`, `maxElapsedMs`, and the existing call-config `maxTokens` are the whole cost bound. Do not add CNY fields, price queries, token-price conversion, or a general budget subsystem.
-8. Real-provider preflight requires the exact frozen Provider/model/call-config facts, a registered DSH route with `normal + maxRetries=0`, ten empty execution Sessions, five empty evaluator Sessions, and explicit operation authorization outside this code change. This plan must not call that route.
+7. Exactly five tasks and one formal attempt are fairness rules, not a model budget. Do not add or enforce Tianwen-side model-request, token, CNY, price-query, token-price conversion, or general budget limits; the API platform's existing DeepSeek quota is the only cost ceiling. Frozen tool authorization and safety stop facts remain in scope.
+8. Real-provider preflight requires the exact frozen Provider/model/call-config facts, a registered DSH route with `normal + maxRetries=0`, ten empty execution Sessions, five empty evaluator Sessions, and the recorded operation authorization. Tasks 1-7 must not call that route; the post-CI operational continuation must use it.
 9. Use DSH per-Agent `tools.restrict()` and monotonic `tools.guard()` to enforce the frozen allowed-tool set before dispatch. Do not build a parallel permission engine.
 10. Evolution ledger records only finite labels, identities, digests, scores, counters, and bounded reason codes. Raw prompts, model output, evaluator reasoning, Skill bodies, tool arguments/results, cwd, paths, secrets, and credentials stay in their private Session/workspace owners.
 11. An objective verifier remains the task-owned tool named by the frozen `RunAcceptanceContract`. Its exact expected subject is bound through the existing Run-binding `acceptanceSubjectDigest`; a caller-authored success flag is never accepted.
 12. The evaluator sees only X/Y, the fixed rubric, final assistant text allowed by the task package, and a closed non-sensitive projection of verifier facts. It never receives B/C labels, Candidate/parent IDs, Skill digests/content, or execution Session IDs.
 13. A development-only path must use a dedicated ledger root, workspace root, Skill name, Goal prefix, Session prefix, and reserved scripted Provider. Records carry immutable `development-only` and `synthetic-defect` labels. They can prove mechanics only and can never satisfy product-evidence, Shadow, or Promotion gates.
-14. Do not invent the five real product task texts now. The repository has no legitimate natural Candidate (`Stage 7 = met / no-case`), so production task contents must be derived from a future real Ticket/Case and frozen before that Candidate. This plan freezes the schema and a clearly labeled synthetic fixture only.
+14. Use an intentionally defective B Skill and corrected C as the controlled Candidate after exact-main CI. Its five tasks must still represent real product capabilities, be frozen before Candidate materialization, and run through real DSH/DeepSeek/tools. Permanent labels prevent natural-user or market claims, while a separate `mechanism=pass` decision may authorize isolated test Shadow/Promotion/Rollback without affecting the ordinary incumbent.
 15. A real activity stops on task/rubric/config mutation, identity mismatch, evaluator leak, a second formal attempt, verifier unavailability, unauthorized tool/effect, privacy failure, Candidate hard-gate failure, or a fixed limit. Infrastructure failure becomes `inconclusive`; Candidate behavior failure becomes `rejected`. Never patch and continue the same activity.
 16. Internal v2 events stay private. `PUBLIC_LEDGER_EVENT_TYPES` and the installed read-only status privacy boundary must not expand.
 17. Reuse `D:\DevData\tianwen-worktrees\tianwen-architecture-overview-v2-merge`, its `node_modules`, and configured stores. Put generated fixtures under `D:\DevData\tianwen-v0.1-eval-fixtures`; never touch or clean `D:\Guo\zuochong\AGi`.
@@ -94,7 +94,7 @@ git diff --check
 
 - [ ] Write RED tests for a fixed `CONTROLLED_SKILL_EVAL_RUBRIC` with four dimensions (`relevance`, `correctness-reasoning`, `clarity-usability`, `scope-restraint`), integer scores 0-4, fixed anchors, and the six approved Candidate pass rules.
 - [ ] Write RED tests for exactly five ordered tasks and one formal attempt. Reject missing/extra/duplicate categories, duplicate IDs, caller-authored rubric changes, a second attempt, unbounded counters, arbitrary evidence labels, unsafe identifiers, raw paths, raw credentials, or raw prompt/result fields in the durable record.
-- [ ] Define each frozen task package with only the necessary durable facts: task ID/type, goal/input/workspace/tool/authorization/verifier/stop/evaluator-material digests, `RunAcceptanceContract`, expected `acceptanceSubjectDigest`, allowed tool identifiers, and positive `maxModelRequests`, `maxToolCalls`, `maxElapsedMs`.
+- [ ] Define each frozen task package with only the necessary durable facts: task ID/type, goal/input/workspace/tool/authorization/verifier/stop/evaluator-material digests, `RunAcceptanceContract`, expected `acceptanceSubjectDigest`, and allowed tool identifiers. Do not add a Tianwen model-request/token/price budget. If a tool/time safety stop is needed, bind it as an authorization or stop-contract fact rather than a pricing subsystem.
 - [ ] Define execution facts as exact Provider ID, model ID, complete `callConfigDigest`, visible `toolSchemaDigest`, DSH version `0.1.0-rc.7`, and `retryPolicyDigest`. Do not add pricing fields.
 - [ ] Define a closed evidence-purpose union: `controlled-product` or `development-only-synthetic-defect`. The latter normalizes to permanent labels `development-only` and `synthetic-defect`; callers cannot remove or rename them.
 - [ ] Derive protocol scope from the Ticket's Outcome signals and derive provenance from ledger order, matching v1's trusted rule. The first v2 protocol before Case/Candidate can be `pre-candidate`; any later v2 protocol is `retrospective`.
@@ -127,7 +127,7 @@ feat: freeze controlled Skill evaluation protocols
 - [ ] Freeze one X/Y mapping per task after objective observations and before evaluator dispatch. The mapping event is private; the evaluator envelope contains X/Y only and is bound by digest.
 - [ ] Record exactly one immutable score receipt per task/evaluator Session. Scores are the eight integers (X/Y × four dimensions), `insufficientMaterial`, closed reason codes, blind-envelope digest, evaluator request/session digests, and the score-tool Evidence ID. Do not store evaluator prose.
 - [ ] Implement the pure aggregate reducer exactly as approved: all C objective hard gates; objective improvement on T1 or T2; no objective regression; C subjective total not below B; no dimension lower by two or more; no insufficient-material result.
-- [ ] Derive only `pass`, `rejected`, or `inconclusive`. Scripted or development-only evidence always remains `inconclusive` for product efficacy and `ineligible-for-shadow`, even if its mechanical comparison looks favorable.
+- [ ] Derive a mechanical decision of only `pass`, `rejected`, or `inconclusive`, separately from evidence scope. Development-only evidence always records `natural-user-evidence=not-claimed`; a mechanical `pass` may enter isolated test Shadow/Promotion but cannot affect the ordinary incumbent or support natural-user/market claims.
 - [ ] Add explicit stop reason codes for identity/config mismatch, protocol mutation, second attempt, verifier unavailable, unauthorized tool/effect, privacy leak, limit exhaustion, Candidate hard-gate failure, evaluator leak, and incomplete score material.
 - [ ] Prove all new events remain absent from public event exports and installed status projections.
 - [ ] Prove restart replay, duplicate idempotence, conflict rejection, forged label rejection, forged blind map/score/result rejection, and byte-for-byte v1 replay.
@@ -154,7 +154,7 @@ feat: record controlled Skill evaluation evidence
 - [ ] For `controlled-product`, require the configured Provider route to exist and expose `mode='normal'` with `maxRetries=0`. Record the resolved retry-policy digest. Do not register, replace, or select a Provider in this code path.
 - [ ] For `development-only-synthetic-defect`, require the reserved scripted route, zero external cost, the dedicated prefixes/roots, and a service-owned `ScriptedAdapter` limited to the exact fifteen Sessions (ten execution + five evaluator).
 - [ ] In each execution Agent's scoped setup, register only the exact B or C Skill, apply `tools.restrict({ allow })` to inherited tools, and add a monotonic guard that rejects any non-frozen tool before body dispatch. Reuse DSH; do not create a parallel authorization dispatcher.
-- [ ] Observe `llm/stream` before `next()`. Reject and cancel the arm before dispatching request `maxModelRequests + 1`. Use the DSH tool guard to reject tool call `maxToolCalls + 1` before its body. Use a bounded timer plus public Agent cancellation for `maxElapsedMs`.
+- [ ] Let the DSH Agent complete naturally; do not cancel because of a Tianwen model-request/token/price counter. Use DSH tool guards and public cancellation only for frozen authorization, explicit stop-contract, API-quota, user/system cancellation, or genuine no-progress/safety conditions.
 - [ ] Open the full plan before any Run, bind all ten Runs before the first Turn, and run in frozen order. Do not silently continue after the first global stop condition.
 - [ ] Capture final assistant text only through a fixed bounded projector for later blind evaluation. Keep it out of Evolution ledger; persist only its digest and Session-owned source.
 - [ ] Prove one real DSH Agent loop turn per scripted fixture arm, exact selected Skill injection, B/C normalized-request equality, distinct Sessions/Runs, acceptance subject equality, tool restriction, limit cancellation, and no root Skill-registry mutation.
@@ -177,7 +177,7 @@ feat: run bounded controlled Skill evaluation arms
 - [ ] Write RED tests for five evaluator Agents with distinct fresh Sessions, no execution Session inheritance, no B/C Skill registration, and a scoped `submit_blind_evaluation` tool.
 - [ ] Build each evaluator request from the constant rubric, one task's X/Y bounded final text, and the closed X/Y objective-fact projection. Assert the serialized request contains no `baseline`, `candidate`, B/C labels, Candidate/parent/protocol IDs, Skill bodies/digests, execution Session IDs, paths, or credentials.
 - [ ] Define the score tool with a closed DSH `defineTool` schema: task ID, X/Y four-dimension integer scores, `insufficientMaterial`, and finite reason codes. A second submission, wrong task/envelope, extra field, prose score, out-of-range score, or direct final-text score without the tool makes the activity `inconclusive`.
-- [ ] Restrict each evaluator Agent to the scoped score tool and apply the same request/time cap. The evaluator cannot run product tools or modify task artifacts.
+- [ ] Restrict each evaluator Agent to the scoped score tool and the same authorization/stop contract, without a Tianwen model budget. The evaluator cannot run product tools or modify task artifacts.
 - [ ] Record each score receipt immediately after its evaluator Session becomes idle. Freeze all five before reveal; then apply the pure reducer and record one aggregate result.
 - [ ] Test asymmetric X/Y maps, tied scores, T1/T2 objective improvement, every rejection rule, insufficient material, evaluator identity leak detection, and scripted evidence downgrade.
 - [ ] Commit:
@@ -199,7 +199,7 @@ feat: add blind evaluator scoring
 - [ ] Build one deliberately defective test Skill under a dedicated name and isolated ledger/workspace. Freeze the defect and expected signal before any execution.
 - [ ] Use five clearly synthetic fixture task types: original result-order defect, adjacent transfer, preserved regression behavior, a raw-extraction counterexample where the new rule must stay quiet, and a safety task that forbids secret disclosure/unauthorized publication.
 - [ ] Drive `feedback -> Ticket -> Case -> Lesson -> Candidate` in the isolated copy, then run the ten scripted B/C arms and five scripted evaluator Sessions once each.
-- [ ] Assert every durable v2 record carries `development-only` and `synthetic-defect`; the result is mechanism-only, `inconclusive` for product efficacy, and ineligible for Shadow/Promotion.
+- [ ] Assert every durable v2 record carries `development-only` and `synthetic-defect`; the result separately reports the mechanical B/C decision and `natural-user-evidence=not-claimed`. A mechanical pass is eligible only for isolated test Shadow/Promotion, never ordinary-incumbent or market claims.
 - [ ] Assert the ordinary parent Skill registry, any caller-supplied incumbent, product ledger fixture, Sessions/Evidence outside the dedicated prefixes, and legacy Champion/Dynamic state are unchanged.
 - [ ] Emit one small machine-readable receipt containing only schema version, evidence class, labels, counts, terminal decision, reason codes, and record digests. Do not emit prompts, model outputs, ledger paths, or private facts.
 - [ ] Run the demo once inside the test process; no Provider/model/product operation is permitted.
@@ -223,7 +223,7 @@ test: prove isolated controlled evaluation mechanics
 
 - [ ] Update public wording to say: the five-task/blind-evaluator mechanism is implemented and scripted-tested; no legitimate natural Candidate exists yet; no real paired B/C, Shadow, Promotion, or Rollback evidence has been produced.
 - [ ] In the handoff, record exact evidence classes, synthetic fixture identity, task/Session counts, stop reasons exercised, privacy proof, v1 replay proof, and the exact entry conditions for a future real Candidate-specific task freeze.
-- [ ] State that the next external action requires a real Ticket/Case/Lesson/Candidate plus separate Provider authorization. Do not publish the synthetic task results as user or market evidence.
+- [ ] State that the next external action uses the recorded standing authorization and an intentionally defective controlled Skill to create the isolated Ticket/Case/Lesson/Candidate chain. Do not publish the controlled task results as natural-user or market evidence.
 - [ ] Run focused gates:
 
 ```powershell
@@ -255,7 +255,7 @@ docs: hand off controlled five-task evaluation
 
 ## Task 7: Review and Integration Gate
 
-This task is supervision work after Tasks 1-6; it does not authorize external product operations.
+This task is supervision work after Tasks 1-6. It is the last gate before the already authorized bounded real-evaluation continuation; it does not itself call a Provider or mutate installed product state.
 
 - [ ] Run three independent review passes over the exact feature diff: correctness/security, architecture/evidence, and simplicity/scope. Critical/Important findings must be fixed with RED/GREEN evidence; minor theoretical edges do not block release without a reachable failure path.
 - [ ] Re-run the smallest affected gates after each fix, then the final focused and full gates.
@@ -263,17 +263,40 @@ This task is supervision work after Tasks 1-6; it does not authorize external pr
 - [ ] Merge only that reviewed SHA into current `main` without unrelated changes.
 - [ ] Push the exact merged main and wait for exact-main CI. All Python, TypeScript, and installer-windows jobs must be green for that SHA.
 - [ ] Update the handoff with exact feature/main SHA and CI URL only through a separately reviewed docs commit if needed.
-- [ ] Stop and report. Do not run a real Provider, create/resume a real Goal, start Shadow, request Promotion, or perform Rollback under this plan.
+- [ ] Report the exact-main gate result, then continue with the operational entry below. Do not claim project completion from scripted fixtures or CI.
 
-## Future Real-Activity Entry (Not Executed Here)
+## Task 8: Real-Provider Isolated Lifecycle Proof
 
-A future real run may start only when all of the following exist together:
+This task begins only after Task 7 exact-main CI is green. It uses the project owner's 2026-08-23 standing authorization and the fixed five-task/single-attempt fairness bounds; there is no Tianwen-side DeepSeek budget and no per-arm approval.
 
-1. a legitimate natural Ticket/Case/Attribution/Lesson and Candidate;
+- [ ] Re-run the zero-side-effect preflight against the installed exact-main product. Stop before dispatch if Provider/model/call-config/tool/retry facts, roots, Session emptiness, or authorization disagree.
+- [ ] Because no legitimate product Candidate currently exists, run the intentionally defective development-only Skill through real DSH rc.7, the configured Provider, real allowed tools, ten independent B/C Sessions, and five independent evaluator Sessions. Use one formal attempt only.
+- [ ] Keep the dedicated ledger/workspace/Skill/Goal/Session namespaces and permanent `development-only` / `synthetic-defect` labels. Do not read or mutate real product Sessions, Evolution, incumbent pointers, or user data.
+- [ ] Exercise the isolated feedback → Ticket → Case → Lesson → Candidate → paired B/C mechanics through the real product code. The receipts can prove `mechanism=pass` while permanently declaring `natural-user-evidence=not-claimed`.
+- [ ] Preserve the first real failure without retry. Diagnose before deciding whether a code change requires a new reviewed SHA and a wholly new formally identified activity.
+
+## Task 9: Isolated Real Shadow, Promotion, and Rollback
+
+- [ ] Enter a five-task isolated test Shadow only when the real-provider controlled B/C mechanical verdict passes. Candidate C affects only the preselected new Runs in the dedicated test scope; ordinary product Runs retain their incumbent.
+- [ ] If Shadow passes, the supervising session records its evidence-based `promote` recommendation and proceeds under the project owner's standing authorization without asking again.
+- [ ] Perform separate compare-and-set Promotion, `C → B` Rollback, and default `B → C` restoration transitions, each with its own exact pointer revision and machine-readable receipt.
+- [ ] Stop on stale evidence, identity mismatch, post-check failure, or a recommendation to retain B. Preserve the first real failure; never repeat an evaluation arm to improve the result.
+
+## Task 10: Closeout and Future Natural Evidence
+
+- [ ] Provide the project owner a beginner-readable summary, key samples, exact Candidate/incumbent digests, scope, real Provider/Session evidence, Promotion/Rollback receipts, and the explicit boundary `natural-user-evidence=not-claimed`.
+- [ ] Treat the successful controlled real lifecycle as sufficient v0.1 engineering closeout evidence. Do not require a naturally occurring failure or project-owner correction as a blocker.
+- [ ] Future natural Candidate work reuses the same gates and standing authorization, but remains a later product-efficacy evidence opportunity rather than unfinished v0.1 infrastructure.
+
+## Real Product Entry Conditions
+
+A real controlled run may start only when all of the following exist together:
+
+1. a deliberately defective controlled B Skill whose failure can be objectively verified, plus the governed Ticket/Case/Attribution/Lesson/Candidate chain derived inside the isolated test scope;
 2. five concrete, meaningful Candidate-specific task packages frozen before Candidate materialization;
 3. the exact approved rubric and ten empty B/C plus five empty evaluator Sessions;
 4. exact Provider/model/tool/workspace/retry facts and objective verifiers;
-5. explicit Provider-operation authorization;
+5. the project-owner Provider-operation authorization recorded on 2026-08-23;
 6. exact-main CI green for this mechanism.
 
-If natural use still yields no Candidate, the development-only fixture may prove mechanics again only after a new version/change requires it; it cannot be used to manufacture a production Candidate or to enter real Shadow.
+The intentionally defective Skill is sufficient to exercise and close the v0.1 engineering lifecycle when the whole activity uses real Runtime/Provider/tools and passes the frozen gates. Its permanent controlled labels forbid claims of natural-user failure, external-user benefit, or market generalization; those are future evidence classes, not release blockers.
