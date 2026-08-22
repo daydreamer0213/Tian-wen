@@ -5,6 +5,8 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import type { Context } from '@deepseek-ai/cordis'
+
 import {
   DynamicCordisRunnerService,
   renderSkillContent,
@@ -515,10 +517,13 @@ describe('natural DSH Run trial runtime', () => {
     const manifestPath = writeManifest(manifest({ goalId: String(mounted.goal.id) }))
     const trial = readNaturalRunTrialManifest(manifestPath)
     let capturedAgent: Parameters<typeof mounted.harness.ctx.goals.resume>[0] | undefined
+    let capturedInput: Parameters<typeof mounted.harness.ctx.goals.resume>[1] | undefined
     let boundView: NonNullable<Awaited<ReturnType<Context['skills']['get']>>> | undefined
     let observed: NonNullable<Awaited<ReturnType<Context['skills']['get']>>> | undefined
     let markGoalResumeEntered: (() => void) | undefined
+    let releaseGoalDrive: (() => void) | undefined
     const goalResumeEntered = new Promise<void>(resolve => { markGoalResumeEntered = resolve })
+    const goalDriveReleased = new Promise<void>(resolve => { releaseGoalDrive = resolve })
     try {
       await mountFilesystemParent(mounted)
       const learning = mounted.harness.ctx.get('tianwenLearningIntake') as {
@@ -536,7 +541,12 @@ describe('natural DSH Run trial runtime', () => {
       const resumeGoal = mounted.harness.ctx.goals.resume.bind(mounted.harness.ctx.goals)
       vi.spyOn(mounted.harness.ctx.goals, 'resume').mockImplementation(((agent, input) => {
         capturedAgent = agent
-        resumeGoal(agent, input)
+        capturedInput = input
+        const whenIdle = agent.whenIdle.bind(agent)
+        vi.spyOn(agent, 'whenIdle').mockImplementation((async () => {
+          await goalDriveReleased
+          return whenIdle()
+        }) as never)
         markGoalResumeEntered!()
       }) as never)
       const running = runGoalResume(
@@ -556,12 +566,16 @@ describe('natural DSH Run trial runtime', () => {
       expect(observed).not.toHaveProperty('resourceBase')
       expect(observed).not.toHaveProperty('metadata')
       expect(mounted.harness.adapter.requests).toEqual([])
+      resumeGoal(capturedAgent!, capturedInput!)
+      releaseGoalDrive!()
       const receipt = await running
       expect(receipt).toMatchObject({ status: 'settled' })
+      expect(capturedAgent!.ctx.fiber.uid).toBeNull()
       const root = await mounted.harness.ctx.skills.get(parentSkill.name)
       expect(root).toMatchObject({ provider: 'filesystem', resourceBase: { kind: 'directory' } })
       expect(root).toHaveProperty('path')
     } finally {
+      releaseGoalDrive?.()
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()
     }
