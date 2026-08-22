@@ -125,6 +125,23 @@ import {
   prepareControlledSkillEvaluatorObservation,
   prepareControlledSkillEvalProtocol,
 } from './controlled-skill-evaluation.js'
+import {
+  parseControlledSkillShadowPlan,
+  parseControlledSkillShadowResult,
+  prepareControlledSkillShadowPlan,
+  prepareControlledSkillShadowResult,
+} from './controlled-skill-shadow.js'
+import type {
+  ControlledSkillShadowId,
+  ControlledSkillShadowOpenedEvent,
+  ControlledSkillShadowPlan,
+  ControlledSkillShadowReceipt,
+  ControlledSkillShadowResult,
+  ControlledSkillShadowResultReceipt,
+  ControlledSkillShadowResultRecordedEvent,
+  OpenControlledSkillShadowInput,
+  RecordControlledSkillShadowResultInput,
+} from './controlled-skill-shadow.js'
 import type {
   ControlledSkillEvaluationId,
   ControlledSkillEvaluationBlindMap,
@@ -255,6 +272,8 @@ export type LedgerEvent =
   | ControlledSkillEvaluationBlindMapFrozenEvent
   | ControlledSkillEvaluatorObservationRecordedEvent
   | ControlledSkillEvaluationResultRecordedEvent
+  | ControlledSkillShadowOpenedEvent
+  | ControlledSkillShadowResultRecordedEvent
   | ArtifactRecordedEvent
   | EvaluationRecordedEvent
   | ApprovalRecordedEvent
@@ -1036,6 +1055,56 @@ function parseEvent(value: unknown): LedgerEvent {
       inputDigest,
     }
   }
+  if (type === 'controlled-skill-shadow-opened') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'plan', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.controlled-skill-shadow-plan.v2') {
+      throw new LedgerIntegrityError('invalid controlled Skill Shadow plan event version')
+    }
+    let plan
+    try {
+      plan = parseControlledSkillShadowPlan(value.plan)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid controlled Skill Shadow plan event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(plan)) {
+      throw new LedgerIntegrityError('controlled Skill Shadow plan digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.controlled-skill-shadow-plan.v2',
+      type,
+      at,
+      plan,
+      inputDigest,
+    }
+  }
+  if (type === 'controlled-skill-shadow-result-recorded') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'result', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.controlled-skill-shadow-result.v2') {
+      throw new LedgerIntegrityError('invalid controlled Skill Shadow result event version')
+    }
+    let result
+    try {
+      result = parseControlledSkillShadowResult(value.result)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid controlled Skill Shadow result event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(result)) {
+      throw new LedgerIntegrityError('controlled Skill Shadow result digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.controlled-skill-shadow-result.v2',
+      type,
+      at,
+      result,
+      inputDigest,
+    }
+  }
   if (type === 'skill-eval-protocol-frozen') {
     exactKeys(value, [
       'schemaVersion', 'type', 'at', 'protocol', 'inputDigest',
@@ -1480,6 +1549,18 @@ export class EvolutionLedger {
   readonly #controlledSkillEvaluationResults = new Map<
     ControlledSkillEvaluationId,
     ControlledSkillEvaluationResult
+  >()
+  readonly #controlledSkillShadowPlans = new Map<
+    ControlledSkillShadowId,
+    ControlledSkillShadowPlan
+  >()
+  readonly #controlledSkillShadowIdByEvaluation = new Map<
+    ControlledSkillEvaluationId,
+    ControlledSkillShadowId
+  >()
+  readonly #controlledSkillShadowResults = new Map<
+    ControlledSkillShadowId,
+    ControlledSkillShadowResult
   >()
   readonly #skillEvaluationPlans = new Map<
     SkillEvaluationId,
@@ -1983,6 +2064,134 @@ export class EvolutionLedger {
   ): ControlledSkillEvaluationResult | undefined {
     const result = this.#controlledSkillEvaluationResults.get(evaluationId)
     return result === undefined ? undefined : clone(result)
+  }
+
+  openControlledSkillShadow(
+    input: OpenControlledSkillShadowInput,
+  ): ControlledSkillShadowReceipt {
+    if (!isRecord(input)) {
+      throw new LedgerIntegrityError('controlled Skill Shadow input is invalid')
+    }
+    exactKeys(input, ['evaluationId', 'tasks'])
+    const evaluationId = requireString(
+      input.evaluationId,
+      'evaluationId',
+    ) as ControlledSkillEvaluationId
+    const evaluation = this.#controlledSkillEvaluationPlans.get(evaluationId)
+    const result = this.#controlledSkillEvaluationResults.get(evaluationId)
+    const candidate = evaluation === undefined
+      ? undefined
+      : this.#skillCandidates.get(evaluation.candidateId)
+    const parent = evaluation === undefined
+      ? undefined
+      : [...this.#runSkillManifests.values()]
+        .find(manifest => manifest.parentVersionId === evaluation.parentVersionId)
+    if (evaluation === undefined || result === undefined
+      || candidate === undefined || parent === undefined) {
+      throw new LedgerIntegrityError(`unknown controlled Skill evaluation: ${evaluationId}`)
+    }
+    const objectives = [
+      ...(this.#controlledSkillEvaluationObjectives.get(evaluationId)?.values() ?? []),
+    ]
+    const observations = [
+      ...(this.#controlledSkillEvaluatorObservations.get(evaluationId)?.values() ?? []),
+    ]
+    let plan
+    try {
+      plan = prepareControlledSkillShadowPlan(
+        input,
+        evaluation,
+        result,
+        candidate,
+        sha256(parent.parent),
+        objectives,
+        observations,
+      )
+    } catch (error) {
+      throw new LedgerIntegrityError('controlled Skill Shadow input is invalid', {
+        cause: error,
+      })
+    }
+    const existingId = this.#controlledSkillShadowIdByEvaluation.get(evaluationId)
+    if (existingId !== undefined) {
+      const existing = this.#controlledSkillShadowPlans.get(existingId)!
+      if (canonicalJson(existing) !== canonicalJson(plan)) {
+        throw new LedgerIntegrityError(`controlled Skill Shadow changed: ${existingId}`)
+      }
+      return { shadowId: existingId, duplicate: true }
+    }
+    if (plan.tasks.some(task => this.#runIdBySession.has(task.sessionId))) {
+      throw new LedgerIntegrityError('controlled Skill Shadow requires fresh Sessions')
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.controlled-skill-shadow-plan.v2',
+      type: 'controlled-skill-shadow-opened',
+      at: this.#now(),
+      plan,
+      inputDigest: sha256(plan),
+    })
+    return { shadowId: plan.shadowId, duplicate: false }
+  }
+
+  getControlledSkillShadow(
+    shadowId: ControlledSkillShadowId,
+  ): ControlledSkillShadowPlan | undefined {
+    const plan = this.#controlledSkillShadowPlans.get(shadowId)
+    return plan === undefined ? undefined : clone(plan)
+  }
+
+  listControlledSkillShadows(): readonly ControlledSkillShadowPlan[] {
+    return clone([...this.#controlledSkillShadowPlans.values()])
+  }
+
+  recordControlledSkillShadowResult(
+    input: RecordControlledSkillShadowResultInput,
+  ): ControlledSkillShadowResultReceipt {
+    if (!isRecord(input)) {
+      throw new LedgerIntegrityError('controlled Skill Shadow result input is invalid')
+    }
+    exactKeys(input, ['shadowId', 'runs'])
+    const shadowId = requireString(input.shadowId, 'shadowId') as ControlledSkillShadowId
+    const plan = this.#controlledSkillShadowPlans.get(shadowId)
+    if (plan === undefined) {
+      throw new LedgerIntegrityError(`unknown controlled Skill Shadow: ${shadowId}`)
+    }
+    let result
+    try {
+      result = prepareControlledSkillShadowResult(input, plan)
+    } catch (error) {
+      throw new LedgerIntegrityError(
+        error instanceof Error ? error.message : 'controlled Skill Shadow result input is invalid',
+        { cause: error },
+      )
+    }
+    const existing = this.#controlledSkillShadowResults.get(shadowId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(result)) {
+        throw new LedgerIntegrityError(`controlled Skill Shadow result changed: ${shadowId}`)
+      }
+      return { shadowId, duplicate: true }
+    }
+    this.#validateControlledSkillShadowRunFacts(plan, result)
+    this.#accept({
+      schemaVersion: 'tianwen.controlled-skill-shadow-result.v2',
+      type: 'controlled-skill-shadow-result-recorded',
+      at: this.#now(),
+      result,
+      inputDigest: sha256(result),
+    })
+    return { shadowId, duplicate: false }
+  }
+
+  getControlledSkillShadowResult(
+    shadowId: ControlledSkillShadowId,
+  ): ControlledSkillShadowResult | undefined {
+    const result = this.#controlledSkillShadowResults.get(shadowId)
+    return result === undefined ? undefined : clone(result)
+  }
+
+  listControlledSkillShadowResults(): readonly ControlledSkillShadowResult[] {
+    return clone([...this.#controlledSkillShadowResults.values()])
   }
 
   freezeSkillEvalProtocol(
@@ -2936,6 +3145,90 @@ export class EvolutionLedger {
     }
   }
 
+  #validateControlledSkillShadowRunFacts(
+    plan: ControlledSkillShadowPlan,
+    result: ControlledSkillShadowResult,
+  ): void {
+    const evaluation = this.#controlledSkillEvaluationPlans.get(plan.evaluationId)
+    const evaluationResult = this.#controlledSkillEvaluationResults.get(plan.evaluationId)
+    const candidate = this.#skillCandidates.get(plan.candidateId)
+    const parent = [...this.#runSkillManifests.values()]
+      .find(manifest => manifest.parentVersionId === plan.parentVersionId)
+    if (
+      evaluation === undefined
+      || evaluationResult === undefined
+      || candidate === undefined
+      || parent === undefined
+      || plan.evaluationPlanDigest !== sha256(evaluation)
+      || plan.evaluationResultDigest !== sha256(evaluationResult)
+      || candidate.candidateId !== evaluation.candidateId
+      || candidate.parentVersionId !== plan.parentVersionId
+      || candidate.payloadDigest !== plan.candidatePayloadDigest
+      || sha256(parent.parent) !== plan.parentPayloadDigest
+      || result.planDigest !== sha256(plan)
+      || result.evaluationPlanDigest !== plan.evaluationPlanDigest
+      || result.evaluationResultDigest !== plan.evaluationResultDigest
+    ) {
+      throw new LedgerIntegrityError(
+        'controlled Skill Shadow result lacks its governed Skill identities',
+      )
+    }
+    for (const [index, run] of result.runs.entries()) {
+      const task = plan.tasks[index]!
+      const binding = this.#runBindings.get(run.runId)
+      const manifest = this.#runSkillManifests.get(run.runId)
+      const use = this.#runSkillUses.get(run.runId)
+      const outcome = [...this.#outcomeIntakes.values()]
+        .find(event => event.input.runId === run.runId)?.input
+      const expectedBinding = prepareRunBinding({
+        goalRef: `goal:controlled-skill-shadow:${plan.shadowId}`,
+        taskRef: `task:${task.taskId}:candidate`,
+        sessionId: task.sessionId,
+        scopeKey: plan.scopeKey,
+        acceptanceContract: task.acceptanceContract,
+        acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+      })
+      if (
+        binding === undefined
+        || binding.schemaVersion !== 'tianwen.run-binding.v2'
+        || canonicalJson(binding) !== canonicalJson(expectedBinding)
+        || manifest === undefined
+        || use === undefined
+        || outcome === undefined
+        || run.taskId !== task.taskId
+        || run.runId !== task.runId
+        || run.sessionId !== task.sessionId
+        || run.skillVersionId !== plan.candidateVersionId
+        || run.skillVersionId !== manifest.parentVersionId
+        || run.contentDigest !== manifest.contentDigest
+        || run.contentDigest !== sha256(candidate.payload.content)
+        || use.runId !== run.runId
+        || use.parentVersionId !== manifest.parentVersionId
+        || use.sessionId !== run.sessionId
+        || use.skillName !== candidate.payload.name
+        || use.contentDigest !== run.contentDigest
+        || use.sessionDigest !== outcome.sessionDigest
+        || !run.evidenceIds.includes(use.acceptanceEvidenceId)
+        || run.acceptanceSubjectDigest !== task.acceptanceSubjectDigest
+        || outcome.verdict !== run.outcome
+        || canonicalJson(outcome.evidenceIds) !== canonicalJson(run.evidenceIds)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill Shadow result disagrees with Run facts',
+        )
+      }
+      const expectedManifest = prepareRunSkillManifest({
+        runId: run.runId,
+        skill: { ...candidate.payload, provider: manifest.resolvedProvider },
+      })
+      if (canonicalJson(manifest) !== canonicalJson(expectedManifest)) {
+        throw new LedgerIntegrityError(
+          'controlled Skill Shadow result disagrees with governed Candidate content',
+        )
+      }
+    }
+  }
+
   #accept(event: LedgerEvent): void {
     const parsed = parseEvent(event)
     this.#validateAgainstState(parsed)
@@ -3280,6 +3573,82 @@ export class EvolutionLedger {
         throw new LedgerIntegrityError(
           'controlled Skill evaluation result disagrees with frozen facts',
         )
+      }
+      return
+    }
+    if (event.type === 'controlled-skill-shadow-opened') {
+      const evaluation = this.#controlledSkillEvaluationPlans.get(event.plan.evaluationId)
+      const result = this.#controlledSkillEvaluationResults.get(event.plan.evaluationId)
+      const candidate = evaluation === undefined
+        ? undefined
+        : this.#skillCandidates.get(evaluation.candidateId)
+      const parent = evaluation === undefined
+        ? undefined
+        : [...this.#runSkillManifests.values()]
+          .find(manifest => manifest.parentVersionId === evaluation.parentVersionId)
+      if (
+        evaluation === undefined
+        || result === undefined
+        || candidate === undefined
+        || parent === undefined
+        || this.#controlledSkillShadowPlans.has(event.plan.shadowId)
+        || this.#controlledSkillShadowIdByEvaluation.has(event.plan.evaluationId)
+        || event.plan.tasks.some(task => this.#runIdBySession.has(task.sessionId))
+      ) {
+        throw new LedgerIntegrityError('controlled Skill Shadow plan disagrees with history')
+      }
+      const objectives = [
+        ...(this.#controlledSkillEvaluationObjectives
+          .get(event.plan.evaluationId)?.values() ?? []),
+      ]
+      const observations = [
+        ...(this.#controlledSkillEvaluatorObservations
+          .get(event.plan.evaluationId)?.values() ?? []),
+      ]
+      let prepared
+      try {
+        prepared = prepareControlledSkillShadowPlan({
+          evaluationId: event.plan.evaluationId,
+          tasks: event.plan.tasks.map(task => {
+            const { runId: _runId, ...input } = task
+            return input
+          }),
+        }, evaluation, result, candidate, sha256(parent.parent), objectives, observations)
+      } catch (error) {
+        throw new LedgerIntegrityError('controlled Skill Shadow plan event is invalid', {
+          cause: error,
+        })
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.plan)
+        || event.inputDigest !== sha256(event.plan)
+      ) {
+        throw new LedgerIntegrityError('controlled Skill Shadow plan disagrees with frozen facts')
+      }
+      return
+    }
+    if (event.type === 'controlled-skill-shadow-result-recorded') {
+      const plan = this.#controlledSkillShadowPlans.get(event.result.shadowId)
+      if (plan === undefined || this.#controlledSkillShadowResults.has(event.result.shadowId)) {
+        throw new LedgerIntegrityError('controlled Skill Shadow result disagrees with history')
+      }
+      let prepared
+      try {
+        prepared = prepareControlledSkillShadowResult({
+          shadowId: event.result.shadowId,
+          runs: event.result.runs,
+        }, plan)
+      } catch (error) {
+        throw new LedgerIntegrityError('controlled Skill Shadow result event is invalid', {
+          cause: error,
+        })
+      }
+      this.#validateControlledSkillShadowRunFacts(plan, prepared)
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.result)
+        || event.inputDigest !== sha256(event.result)
+      ) {
+        throw new LedgerIntegrityError('controlled Skill Shadow result disagrees with frozen facts')
       }
       return
     }
@@ -3805,6 +4174,18 @@ export class EvolutionLedger {
     }
     if (event.type === 'controlled-skill-evaluation-result-recorded') {
       this.#controlledSkillEvaluationResults.set(event.result.evaluationId, event.result)
+      return
+    }
+    if (event.type === 'controlled-skill-shadow-opened') {
+      this.#controlledSkillShadowPlans.set(event.plan.shadowId, event.plan)
+      this.#controlledSkillShadowIdByEvaluation.set(
+        event.plan.evaluationId,
+        event.plan.shadowId,
+      )
+      return
+    }
+    if (event.type === 'controlled-skill-shadow-result-recorded') {
+      this.#controlledSkillShadowResults.set(event.result.shadowId, event.result)
       return
     }
     if (event.type === 'skill-eval-protocol-frozen') {

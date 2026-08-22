@@ -24,6 +24,8 @@ type PublicLedgerEventPrivacyContract = AssertNever<Extract<
       | 'controlled-skill-evaluation-blind-map-frozen'
       | 'controlled-skill-evaluator-observation-recorded'
       | 'controlled-skill-evaluation-result-recorded'
+      | 'controlled-skill-shadow-opened'
+      | 'controlled-skill-shadow-result-recorded'
   }
 >>
 
@@ -174,6 +176,29 @@ export {
   prepareControlledSkillEvalProtocol,
   prepareControlledSkillEvaluatorObservation,
 } from './controlled-skill-evaluation.js'
+export {
+  controlledSkillShadowExecutionManifestDigest,
+  prepareControlledSkillShadowPlan,
+  prepareControlledSkillShadowResult,
+} from './controlled-skill-shadow.js'
+export type {
+  ControlledSkillShadowId,
+  ControlledSkillShadowMechanismVerdict,
+  ControlledSkillShadowMode,
+  ControlledSkillShadowPlan,
+  ControlledSkillShadowPromotionEligibility,
+  ControlledSkillShadowReceipt,
+  ControlledSkillShadowResult,
+  ControlledSkillShadowResultReasonCode,
+  ControlledSkillShadowResultReceipt,
+  ControlledSkillShadowRun,
+  ControlledSkillShadowTaskId,
+  ControlledSkillShadowTaskInput,
+  ControlledSkillShadowTaskPlan,
+  ControlledSkillShadowUsage,
+  OpenControlledSkillShadowInput,
+  RecordControlledSkillShadowResultInput,
+} from './controlled-skill-shadow.js'
 export type {
   ControlledSkillEvalEvidenceLabel,
   ControlledSkillEvalEvidencePurpose,

@@ -92,6 +92,15 @@ import type {
   ControlledSkillEvaluatorObservation,
   ControlledSkillEvaluatorObservationReceipt,
 } from './controlled-skill-evaluation.js'
+import type {
+  ControlledSkillShadowId,
+  ControlledSkillShadowPlan,
+  ControlledSkillShadowReceipt,
+  ControlledSkillShadowResult,
+  ControlledSkillShadowResultReceipt,
+  OpenControlledSkillShadowInput,
+  RecordControlledSkillShadowResultInput,
+} from './controlled-skill-shadow.js'
 
 export interface RuntimeBinding {
   readonly artifactId: ArtifactId
@@ -383,6 +392,40 @@ export class TianwenEvolutionService extends Service {
     evaluationId: ControlledSkillEvaluationId,
   ): ControlledSkillEvaluationResult | undefined {
     return this.state().ledger.getControlledSkillEvaluationResult(evaluationId)
+  }
+
+  openControlledSkillShadow(
+    input: OpenControlledSkillShadowInput,
+  ): ControlledSkillShadowReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.openControlledSkillShadow(input))
+  }
+
+  getControlledSkillShadow(
+    shadowId: ControlledSkillShadowId,
+  ): ControlledSkillShadowPlan | undefined {
+    return this.state().ledger.getControlledSkillShadow(shadowId)
+  }
+
+  listControlledSkillShadows(): readonly ControlledSkillShadowPlan[] {
+    return this.state().ledger.listControlledSkillShadows()
+  }
+
+  recordControlledSkillShadowResult(
+    input: RecordControlledSkillShadowResultInput,
+  ): ControlledSkillShadowResultReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordControlledSkillShadowResult(input))
+  }
+
+  getControlledSkillShadowResult(
+    shadowId: ControlledSkillShadowId,
+  ): ControlledSkillShadowResult | undefined {
+    return this.state().ledger.getControlledSkillShadowResult(shadowId)
+  }
+
+  listControlledSkillShadowResults(): readonly ControlledSkillShadowResult[] {
+    return this.state().ledger.listControlledSkillShadowResults()
   }
 
   openLearningCase(input: OpenLearningCaseInput): LearningCaseReceipt {
