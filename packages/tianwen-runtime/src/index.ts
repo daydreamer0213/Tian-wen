@@ -11,6 +11,7 @@ export {
   compareNormalizedSkillEvaluationRequests,
   ControlledSkillEvaluatorPreflightError,
   ControlledSkillEvaluationPreflightError,
+  ControlledSkillShadowPreflightError,
   normalizeSkillEvaluationRequest,
   observeSkillEvaluationRequest,
 } from './skill-evaluation.js'
@@ -25,6 +26,10 @@ export type {
   ControlledSkillEvaluationArmsStop,
   ControlledSkillEvaluationArmsStopReasonCode,
   ControlledSkillEvaluationPreflightCode,
+  ControlledSkillShadowPreflightCode,
+  ControlledSkillShadowRuntimeReceipt,
+  ControlledSkillShadowStop,
+  ControlledSkillShadowStopReasonCode,
   ControlledWorkspaceSnapshot,
   ControlledWorkspaceSnapshotEntry,
   ObserveSkillEvaluationRequestInput,
@@ -33,6 +38,8 @@ export type {
   SkillEvaluationRequestNormalization,
   RunControlledSkillEvaluationArmsInput,
   RunControlledSkillEvaluationTaskInput,
+  RunControlledSkillShadowInput,
+  RunControlledSkillShadowTaskInput,
   RunControlledSkillEvaluatorTaskInput,
   RunControlledSkillEvaluatorsInput,
 } from './skill-evaluation.js'

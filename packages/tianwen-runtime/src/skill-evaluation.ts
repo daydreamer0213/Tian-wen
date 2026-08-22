@@ -27,15 +27,18 @@ import type { EvidenceRecord } from '@tianwen/evidence'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC,
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  controlledSkillShadowExecutionManifestDigest,
   prepareRunBinding,
   prepareRunSkillManifest,
   prepareControlledSkillEvaluationPlan,
+  prepareControlledSkillShadowPlan,
   prepareSkillEvaluationPlan,
   sha256,
   STAGE4_SCRIPTED_PROVIDER,
 } from '@tianwen/evolution'
 import type {
   GovernedSkillCandidateId,
+  ControlledSkillEvalStopContract,
   ControlledSkillEvaluationId,
   ControlledSkillEvaluationBlindMap,
   ControlledSkillEvaluationObjective,
@@ -43,10 +46,17 @@ import type {
   ControlledSkillEvaluationPlan,
   ControlledSkillEvaluationResult,
   ControlledSkillEvalTaskId,
+  ControlledSkillShadowId,
+  ControlledSkillShadowPlan,
+  ControlledSkillShadowResult,
+  ControlledSkillShadowRun,
+  ControlledSkillShadowTaskId,
+  ControlledSkillShadowTaskInput,
   ControlledSkillEvaluatorInconclusiveReasonCode,
   ControlledSkillEvaluatorObservation,
   ControlledSkillEvaluatorScores,
   RecordControlledSkillEvaluatorObservationInput,
+  RunAcceptanceContract,
   Sha256Digest,
   SkillEvalCaseId,
   SkillEvalProtocolId,
@@ -126,6 +136,25 @@ export class ControlledSkillEvaluationPreflightError extends Error {
   }
 }
 
+export type ControlledSkillShadowPreflightCode =
+  | 'evaluation-not-eligible'
+  | 'candidate-chain-mismatch'
+  | 'task-package-mismatch'
+  | 'configured-route-mismatch'
+  | 'retry-policy-mismatch'
+  | 'tool-surface-mismatch'
+  | 'persistence-unavailable'
+  | 'session-not-empty'
+  | 'root-skill-mismatch'
+  | 'scripted-boundary-mismatch'
+
+export class ControlledSkillShadowPreflightError extends Error {
+  constructor(readonly code: ControlledSkillShadowPreflightCode) {
+    super(`controlled Skill Shadow preflight failed: ${code}`)
+    this.name = 'ControlledSkillShadowPreflightError'
+  }
+}
+
 export interface ControlledWorkspaceSnapshotEntry {
   readonly relativePath: string
   readonly contentDigest: Sha256Digest
@@ -164,6 +193,61 @@ export interface RunControlledSkillEvaluationArmsInput {
   readonly protocolId: SkillEvalProtocolId
   readonly tasks: readonly RunControlledSkillEvaluationTaskInput[]
 }
+
+export interface RunControlledSkillShadowTaskInput {
+  readonly taskId: `shadow-task:${string}`
+  readonly goal: string
+  readonly input: string
+  readonly workspaceRoot: string
+  readonly workspaceSnapshot: ControlledWorkspaceSnapshot
+  readonly authorization: unknown
+  readonly verifierContract: unknown
+  readonly stopCondition: unknown
+  readonly acceptanceContract: RunAcceptanceContract
+  readonly acceptanceSubject: unknown
+  readonly allowedTools: readonly string[]
+  readonly stopContract: ControlledSkillEvalStopContract
+  readonly sessionId: string
+}
+
+export interface RunControlledSkillShadowInput {
+  readonly evaluationId: ControlledSkillEvaluationId
+  readonly tasks: readonly RunControlledSkillShadowTaskInput[]
+}
+
+export type ControlledSkillShadowStopReasonCode =
+  | 'existing-partial-activity'
+  | 'persistence-unavailable'
+  | 'provider-failed'
+  | 'timeout'
+  | 'tool-limit-exceeded'
+  | 'request-contract-mismatch'
+  | 'skill-use-missing'
+  | 'acceptance-subject-mismatch'
+  | 'root-skill-drift'
+  | 'run-fact-mismatch'
+
+export interface ControlledSkillShadowStop {
+  readonly taskId: ControlledSkillShadowTaskId
+  readonly stage: 'candidate' | 'postflight'
+  readonly reasonCode: ControlledSkillShadowStopReasonCode
+}
+
+export type ControlledSkillShadowRuntimeReceipt =
+  | {
+      readonly schemaVersion: 'tianwen.controlled-skill-shadow-runtime-receipt.v1'
+      readonly shadowId: ControlledSkillShadowId
+      readonly state: 'terminal'
+      readonly completedTaskIds: readonly ControlledSkillShadowTaskId[]
+      readonly result: ControlledSkillShadowResult
+    }
+  | {
+      readonly schemaVersion: 'tianwen.controlled-skill-shadow-runtime-receipt.v1'
+      readonly shadowId: ControlledSkillShadowId
+      readonly state: 'stopped'
+      readonly completedTaskIds: readonly ControlledSkillShadowTaskId[]
+      readonly stop: ControlledSkillShadowStop
+    }
 
 export type ControlledSkillEvaluatorPreflightCode =
   | 'task-package-mismatch'
@@ -469,6 +553,118 @@ function parseControlledArmsInput(input: unknown): RunControlledSkillEvaluationA
   return {
     candidateId: source.candidateId as GovernedSkillCandidateId,
     protocolId: source.protocolId as SkillEvalProtocolId,
+    tasks,
+  }
+}
+
+function parseControlledShadowInput(input: unknown): RunControlledSkillShadowInput {
+  const source = record(input)
+  if (
+    source === undefined
+    || !exactRuntimeKeys(source, ['evaluationId', 'tasks'])
+    || typeof source.evaluationId !== 'string'
+    || !/^evaluation:[a-f0-9]{64}$/u.test(source.evaluationId)
+    || !Array.isArray(source.tasks)
+    || source.tasks.length !== 5
+  ) throw new ControlledSkillShadowPreflightError('task-package-mismatch')
+  const taskIds = new Set<string>()
+  const sessionIds = new Set<string>()
+  const workspaceRoots = new Set<string>()
+  const tasks = source.tasks.map(item => {
+    const task = record(item)
+    if (
+      task === undefined
+      || !exactRuntimeKeys(task, [
+        'taskId',
+        'goal',
+        'input',
+        'workspaceRoot',
+        'workspaceSnapshot',
+        'authorization',
+        'verifierContract',
+        'stopCondition',
+        'acceptanceContract',
+        'acceptanceSubject',
+        'allowedTools',
+        'stopContract',
+        'sessionId',
+      ])
+      || typeof task.taskId !== 'string'
+      || !/^shadow-task:[a-z0-9][a-z0-9._-]{0,96}$/u.test(task.taskId)
+      || taskIds.has(task.taskId)
+      || typeof task.goal !== 'string'
+      || task.goal.trim().length === 0
+      || typeof task.input !== 'string'
+      || task.input.trim().length === 0
+      || typeof task.workspaceRoot !== 'string'
+      || !isAbsolute(task.workspaceRoot)
+      || !isSafeSessionId(task.sessionId)
+      || sessionIds.has(task.sessionId)
+      || !isLosslessJson(task.authorization)
+      || !isLosslessJson(task.verifierContract)
+      || !isLosslessJson(task.stopCondition)
+      || !isLosslessJson(task.acceptanceSubject)
+      || !Array.isArray(task.allowedTools)
+      || task.allowedTools.length === 0
+      || task.allowedTools.some(name =>
+        typeof name !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/u.test(name))
+      || new Set(task.allowedTools).size !== task.allowedTools.length
+    ) throw new ControlledSkillShadowPreflightError('task-package-mismatch')
+    const workspaceIdentity = process.platform === 'win32'
+      ? resolve(task.workspaceRoot).toLowerCase()
+      : resolve(task.workspaceRoot)
+    if (workspaceRoots.has(workspaceIdentity)) {
+      throw new ControlledSkillShadowPreflightError('task-package-mismatch')
+    }
+    const stopContract = record(task.stopContract)
+    if (stopContract === undefined
+      || !exactRuntimeKeys(stopContract, ['maxToolCalls', 'maxElapsedMs'])
+      || !Number.isSafeInteger(stopContract.maxToolCalls)
+      || Number(stopContract.maxToolCalls) < 1
+      || Number(stopContract.maxToolCalls) > 256
+      || !Number.isSafeInteger(stopContract.maxElapsedMs)
+      || Number(stopContract.maxElapsedMs) < 1
+      || Number(stopContract.maxElapsedMs) > 3_600_000) {
+      throw new ControlledSkillShadowPreflightError('task-package-mismatch')
+    }
+    let workspaceManifest: ControlledWorkspaceSnapshot
+    let acceptanceContract: RunAcceptanceContract
+    try {
+      workspaceManifest = parseControlledWorkspaceSnapshot(task.workspaceSnapshot)
+      acceptanceContract = prepareRunBinding({
+        goalRef: 'goal:controlled-skill-shadow-input-validation',
+        taskRef: 'task:controlled-skill-shadow-input-validation',
+        sessionId: 'session:controlled-skill-shadow-input-validation',
+        scopeKey: 'scope:controlled-skill-shadow-input-validation',
+        acceptanceContract: task.acceptanceContract as RunAcceptanceContract,
+      }).acceptanceContract
+    } catch {
+      throw new ControlledSkillShadowPreflightError('task-package-mismatch')
+    }
+    taskIds.add(task.taskId)
+    sessionIds.add(task.sessionId)
+    workspaceRoots.add(workspaceIdentity)
+    return {
+      taskId: task.taskId as `shadow-task:${string}`,
+      goal: task.goal,
+      input: task.input,
+      workspaceRoot: task.workspaceRoot,
+      workspaceSnapshot: workspaceManifest,
+      authorization: structuredClone(task.authorization),
+      verifierContract: structuredClone(task.verifierContract),
+      stopCondition: structuredClone(task.stopCondition),
+      acceptanceContract,
+      acceptanceSubject: structuredClone(task.acceptanceSubject),
+      allowedTools: [...task.allowedTools] as string[],
+      stopContract: {
+        maxToolCalls: Number(stopContract.maxToolCalls),
+        maxElapsedMs: Number(stopContract.maxElapsedMs),
+      },
+      sessionId: task.sessionId,
+    }
+  })
+  return {
+    evaluationId: source.evaluationId as ControlledSkillEvaluationId,
     tasks,
   }
 }
@@ -973,6 +1169,445 @@ export class TianwenSkillEvaluationService extends Service {
 
   private readonly requests = new Map<string, GenerateOptions[]>()
   private readonly evaluators = new Map<string, ControlledEvaluatorState>()
+
+  async runControlledShadow(
+    input: RunControlledSkillShadowInput,
+  ): Promise<ControlledSkillShadowRuntimeReceipt> {
+    const parsed = parseControlledShadowInput(input)
+    const evaluation = this.ctx.tianwenEvolution.getControlledSkillEvaluation(
+      parsed.evaluationId,
+    )
+    const evaluationResult = this.ctx.tianwenEvolution
+      .getControlledSkillEvaluationResult(parsed.evaluationId)
+    if (
+      evaluation === undefined
+      || evaluationResult === undefined
+      || evaluationResult.mechanismVerdict !== 'pass'
+      || evaluationResult.reasonCode !== 'all-gates-passed'
+      || evaluationResult.shadowEligibility === 'ineligible'
+    ) {
+      throw new ControlledSkillShadowPreflightError('evaluation-not-eligible')
+    }
+    const candidate = this.ctx.tianwenEvolution.getSkillCandidate(evaluation.candidateId)
+    const parentManifest = this.ctx.tianwenEvolution.listRunSkillManifests()
+      .find(manifest => manifest.parentVersionId === evaluation.parentVersionId)
+    if (
+      candidate === undefined
+      || parentManifest === undefined
+      || candidate.status !== 'recorded'
+      || candidate.candidateId !== evaluation.candidateId
+      || candidate.parentVersionId !== evaluation.parentVersionId
+      || candidate.payloadDigest !== evaluation.candidatePayloadDigest
+      || sha256(parentManifest.parent) !== evaluation.parentPayloadDigest
+      || candidate.payload.name !== parentManifest.parent.name
+      || candidate.payload.invocation.modelInvocable !== true
+      || parentManifest.parent.invocation.modelInvocable !== true
+    ) throw new ControlledSkillShadowPreflightError('candidate-chain-mismatch')
+    const objectives = this.ctx.tianwenEvolution
+      .listControlledSkillEvaluationObjectives(evaluation.evaluationId)
+    const observations = this.ctx.tianwenEvolution
+      .listControlledSkillEvaluatorObservations(evaluation.evaluationId)
+    if (
+      objectives.length !== evaluation.tasks.length
+      || observations.length !== evaluation.tasks.length
+      || objectives.some((objective, index) =>
+        objective.taskId !== evaluation.tasks[index]?.taskId
+        || objective.objectiveVerdict !== 'pass')
+      || observations.some((observation, index) =>
+        observation.taskId !== evaluation.tasks[index]?.taskId
+        || observation.status !== 'scored')
+    ) throw new ControlledSkillShadowPreflightError('evaluation-not-eligible')
+
+    const defaultModel = this.ctx.get('agentDefaultModel') as {
+      currentSelection(): ModelSelection
+    } | undefined
+    if (defaultModel === undefined) {
+      throw new ControlledSkillShadowPreflightError('configured-route-mismatch')
+    }
+    let selection: ModelSelection
+    let resolved: LlmCallConfig
+    try {
+      selection = defaultModel.currentSelection()
+      resolved = await this.ctx.llm.resolveCallConfig(selection)
+    } catch {
+      throw new ControlledSkillShadowPreflightError('configured-route-mismatch')
+    }
+    if (
+      resolved.provider !== evaluation.execution.providerId
+      || resolved.model !== evaluation.execution.modelId
+      || sha256(resolved) !== evaluation.execution.callConfigDigest
+    ) throw new ControlledSkillShadowPreflightError('configured-route-mismatch')
+    let retryPolicy: ReturnType<typeof this.ctx.llm.providerRetryPolicy>
+    try {
+      retryPolicy = this.ctx.llm.providerRetryPolicy(resolved.provider)
+    } catch {
+      throw new ControlledSkillShadowPreflightError('retry-policy-mismatch')
+    }
+    if (
+      retryPolicy.mode !== 'normal'
+      || retryPolicy.maxRetries !== 0
+      || sha256(retryPolicy) !== evaluation.execution.retryPolicyDigest
+    ) throw new ControlledSkillShadowPreflightError('retry-policy-mismatch')
+
+    const plannedTasks: ControlledSkillShadowTaskInput[] = []
+    try {
+      for (const task of parsed.tasks) {
+        if (task.stopContract.maxToolCalls < 2
+          || sha256(workspaceSnapshot(task.workspaceRoot))
+          !== sha256(task.workspaceSnapshot)) {
+          throw new ControlledSkillShadowPreflightError('task-package-mismatch')
+        }
+        const allowedTools = [...task.allowedTools]
+          .sort((left, right) => left.localeCompare(right))
+        let schemas: ReturnType<typeof this.ctx.tools.schemas>
+        try {
+          schemas = this.ctx.tools.schemas()
+            .filter(schema => allowedTools.includes(schema.name))
+            .toSorted((left, right) => left.name.localeCompare(right.name))
+        } catch {
+          throw new ControlledSkillShadowPreflightError('tool-surface-mismatch')
+        }
+        if (
+          !allowedTools.includes('skill')
+          || !allowedTools.includes(task.acceptanceContract.toolName)
+          || schemas.length !== allowedTools.length
+          || schemas.some((schema, index) => schema.name !== allowedTools[index])
+        ) throw new ControlledSkillShadowPreflightError('tool-surface-mismatch')
+        plannedTasks.push({
+          taskId: task.taskId,
+          goalDigest: sha256(task.goal),
+          inputDigest: sha256(task.input),
+          workspaceSnapshotDigest: sha256(task.workspaceSnapshot),
+          toolSchemaDigest: sha256(schemas),
+          authorizationDigest: sha256(task.authorization),
+          verifierContractDigest: sha256(task.verifierContract),
+          stopConditionDigest: sha256(task.stopCondition),
+          acceptanceContract: task.acceptanceContract,
+          acceptanceSubjectDigest: sha256(task.acceptanceSubject),
+          allowedTools,
+          stopContract: task.stopContract,
+          sessionId: task.sessionId,
+        })
+      }
+    } catch (error) {
+      if (error instanceof ControlledSkillShadowPreflightError) throw error
+      throw new ControlledSkillShadowPreflightError('task-package-mismatch')
+    }
+
+    const openInput = {
+      evaluationId: evaluation.evaluationId,
+      tasks: plannedTasks,
+    }
+    let expectedPlan: ControlledSkillShadowPlan
+    try {
+      expectedPlan = prepareControlledSkillShadowPlan(
+        openInput,
+        evaluation,
+        evaluationResult,
+        candidate,
+        sha256(parentManifest.parent),
+        objectives,
+        observations,
+      )
+    } catch {
+      throw new ControlledSkillShadowPreflightError('task-package-mismatch')
+    }
+
+    const persistence = this.ctx.get('sessionPersistence') as {
+      list(): Promise<readonly { readonly id: string }[]>
+    } | undefined
+    if (persistence === undefined) {
+      throw new ControlledSkillShadowPreflightError('persistence-unavailable')
+    }
+    let persisted: readonly { readonly id: string }[]
+    try {
+      persisted = await persistence.list()
+    } catch {
+      throw new ControlledSkillShadowPreflightError('persistence-unavailable')
+    }
+    const sessionIds = parsed.tasks.map(task => task.sessionId)
+    const targets = new Set(sessionIds)
+    const occupied = persisted.some(header => targets.has(String(header.id)))
+      || sessionIds.some(id =>
+        this.ctx.sessions.get(SessionId(id)) !== undefined
+        || this.ctx.agents.get(SessionId(id)) !== undefined)
+    const existingPlan = this.ctx.tianwenEvolution.getControlledSkillShadow(
+      expectedPlan.shadowId,
+    )
+    if (existingPlan !== undefined && sha256(existingPlan) !== sha256(expectedPlan)) {
+      throw new ControlledSkillShadowPreflightError('task-package-mismatch')
+    }
+    const existingResult = this.ctx.tianwenEvolution.getControlledSkillShadowResult(
+      expectedPlan.shadowId,
+    )
+    if (existingResult !== undefined) {
+      return terminalControlledShadowReceipt(
+        expectedPlan,
+        existingResult.runs.map(run => run.taskId),
+        existingResult,
+      )
+    }
+    const hasRunActivity = expectedPlan.tasks.some(task =>
+      this.ctx.tianwenEvolution.getRunBinding(task.runId) !== undefined
+      || this.ctx.tianwenEvolution.getRunSkillManifest(task.runId) !== undefined
+      || this.ctx.tianwenEvolution.getRunSkillUse(task.runId) !== undefined)
+    if (existingPlan !== undefined && (occupied || hasRunActivity)) {
+      return stoppedControlledShadowReceipt(expectedPlan, [], {
+        taskId: expectedPlan.tasks[0]!.taskId,
+        stage: 'postflight',
+        reasonCode: 'existing-partial-activity',
+      })
+    }
+    if (occupied) {
+      throw new ControlledSkillShadowPreflightError('session-not-empty')
+    }
+
+    const candidateSkill = {
+      ...candidate.payload,
+      provider: parentManifest.resolvedProvider,
+    } as SkillDefinition
+    try {
+      const manifest = prepareRunSkillManifest({
+        runId: expectedPlan.tasks[0]!.runId,
+        skill: candidateSkill,
+      })
+      if (manifest.parentVersionId !== expectedPlan.candidateVersionId) {
+        throw new ControlledSkillShadowPreflightError('candidate-chain-mismatch')
+      }
+      for (const task of parsed.tasks) {
+        const rootSkill = await this.ctx.skills.get(parentManifest.parent.name, {
+          cwd: task.workspaceRoot,
+        })
+        if (rootSkill === undefined
+          || !sameSkillVersion(rootSkill, candidate.parentVersionId)) {
+          throw new ControlledSkillShadowPreflightError('root-skill-mismatch')
+        }
+      }
+    } catch (error) {
+      if (error instanceof ControlledSkillShadowPreflightError) throw error
+      throw new ControlledSkillShadowPreflightError('root-skill-mismatch')
+    }
+
+    if (resolved.provider === 'tianwen-controlled-scripted') {
+      const fixtureRoot = process.env.TIANWEN_DSH_PROBE_ROOT
+      if (
+        expectedPlan.mode !== 'isolated-test'
+        || expectedPlan.evidenceClaim !== 'controlled-synthetic-mechanism'
+        || fixtureRoot === undefined
+        || !isAbsolute(fixtureRoot)
+        || parsed.tasks.some(task =>
+          !isDedicatedChild(fixtureRoot, task.workspaceRoot)
+          || !task.sessionId.startsWith('session:controlled-shadow:fixture:'))
+      ) throw new ControlledSkillShadowPreflightError('scripted-boundary-mismatch')
+    }
+
+    const prepared: PreparedControlledSkillShadowRun[] = []
+    const completedTaskIds: ControlledSkillShadowTaskId[] = []
+    const runs: ControlledSkillShadowRun[] = []
+    const agentOptions = requestAgentOptions(resolved)
+    try {
+      for (const [index, task] of parsed.tasks.entries()) {
+        const planned = expectedPlan.tasks[index]!
+        const guard: ControlledArmGuardState = {
+          sessionId: planned.sessionId,
+          allowedTools: new Set(planned.allowedTools),
+          maxToolCalls: planned.stopContract.maxToolCalls,
+          active: false,
+          deadline: 0,
+          toolCalls: 0,
+          usedToolNames: new Set(),
+        }
+        const handle = await this.ctx.agents.create({
+          sessionId: SessionId(planned.sessionId),
+          meta: { cwd: task.workspaceRoot },
+          agentOptions,
+          setup: async agentCtx => {
+            installModelSelection(agentCtx, {
+              current: selection,
+              assembled: undefined,
+            })
+            agentCtx.tools.presentAs('native')
+            agentCtx.tools.restrict({ allow: planned.allowedTools })
+            agentCtx.tools.guard(execution => controlledArmGuard(execution, guard))
+            await agentCtx.inject(['skills'], scopedCtx => {
+              scopedCtx.skills.register(candidateSkill)
+            })
+          },
+        })
+        guard.agent = handle.agent
+        prepared.push({ task, planned, skill: candidateSkill, handle, guard })
+      }
+
+      for (const item of prepared) {
+        let scopedSkill: SkillDefinition | undefined
+        await item.handle.agent.ctx.inject(['skills'], async scopedCtx => {
+          scopedSkill = await scopedCtx.skills.get(item.skill.name, {
+            cwd: item.task.workspaceRoot,
+            scope: item.handle.agent,
+          })
+        })
+        const rootSkill = await this.ctx.skills.get(parentManifest.parent.name, {
+          cwd: item.task.workspaceRoot,
+        })
+        const schemas = item.handle.agent.ctx.tools.schemas(item.handle.agent)
+          .toSorted((left, right) => left.name.localeCompare(right.name))
+        if (
+          scopedSkill === undefined
+          || !sameSkillVersion(scopedSkill, expectedPlan.candidateVersionId)
+          || rootSkill === undefined
+          || !sameSkillVersion(rootSkill, expectedPlan.parentVersionId)
+          || sha256(schemas) !== item.planned.toolSchemaDigest
+          || item.handle.agent.session.header.cwd !== item.task.workspaceRoot
+          || sha256(item.handle.agent.options) !== sha256(agentOptions)
+        ) throw new ControlledSkillShadowPreflightError('root-skill-mismatch')
+      }
+
+      try {
+        this.ctx.tianwenEvolution.openControlledSkillShadow(openInput)
+      } catch {
+        // Resolve an exact commit-unknown write by reading the deterministic plan.
+      }
+      const plan = this.ctx.tianwenEvolution.getControlledSkillShadow(expectedPlan.shadowId)
+      if (plan === undefined || sha256(plan) !== sha256(expectedPlan)) {
+        return stoppedControlledShadowReceipt(expectedPlan, [], {
+          taskId: expectedPlan.tasks[0]!.taskId,
+          stage: 'postflight',
+          reasonCode: 'run-fact-mismatch',
+        })
+      }
+
+      for (const item of prepared) {
+        let boundRunId: TianwenRunId | undefined
+        await item.handle.agent.ctx.inject(['skills'], async scopedCtx => {
+          const binding = await this.ctx.tianwenLearningIntake.bindRunWithSkill(
+            item.handle.agent,
+            {
+              goalRef: `goal:controlled-skill-shadow:${plan.shadowId}`,
+              taskRef: `task:${item.planned.taskId}:candidate`,
+              scopeKey: plan.scopeKey,
+              acceptanceContract: item.planned.acceptanceContract,
+              acceptanceSubjectDigest: item.planned.acceptanceSubjectDigest,
+            },
+            item.skill.name,
+            scopedCtx.skills,
+          )
+          boundRunId = binding.runId
+        })
+        if (
+          boundRunId !== item.planned.runId
+          || this.ctx.tianwenEvolution.getRunSkillManifest(item.planned.runId) === undefined
+        ) return stoppedControlledShadowReceipt(plan, [], {
+          taskId: item.planned.taskId,
+          stage: 'postflight',
+          reasonCode: 'run-fact-mismatch',
+        })
+      }
+
+      for (const item of prepared) {
+        const activity = await this.runControlledActivity(
+          item,
+          item.planned.runId,
+          resolved,
+        )
+        if (activity.activity === undefined) {
+          return stoppedControlledShadowReceipt(plan, completedTaskIds, {
+            taskId: item.planned.taskId,
+            stage: 'candidate',
+            reasonCode: activity.reasonCode,
+          })
+        }
+        try {
+          const rootSkill = await this.ctx.skills.get(parentManifest.parent.name, {
+            cwd: item.task.workspaceRoot,
+          })
+          let scopedSkill: SkillDefinition | undefined
+          await item.handle.agent.ctx.inject(['skills'], async scopedCtx => {
+            scopedSkill = await scopedCtx.skills.get(candidateSkill.name, {
+              cwd: item.task.workspaceRoot,
+              scope: item.handle.agent,
+            })
+          })
+          if (
+            sha256(workspaceSnapshot(item.task.workspaceRoot))
+              !== item.planned.workspaceSnapshotDigest
+            || rootSkill === undefined
+            || !sameSkillVersion(rootSkill, plan.parentVersionId)
+            || scopedSkill === undefined
+            || !sameSkillVersion(scopedSkill, plan.candidateVersionId)
+          ) throw new Error('controlled Shadow root drift')
+        } catch {
+          return stoppedControlledShadowReceipt(plan, completedTaskIds, {
+            taskId: item.planned.taskId,
+            stage: 'postflight',
+            reasonCode: 'root-skill-drift',
+          })
+        }
+        const run: ControlledSkillShadowRun = {
+          taskId: item.planned.taskId,
+          ...activity.activity,
+          executionManifestDigest: controlledSkillShadowExecutionManifestDigest(
+            plan,
+            item.planned,
+          ),
+        }
+        runs.push(run)
+        completedTaskIds.push(item.planned.taskId)
+        if (run.outcome !== 'met' || runs.length === plan.tasks.length) {
+          try {
+            this.ctx.tianwenEvolution.recordControlledSkillShadowResult({
+              shadowId: plan.shadowId,
+              runs,
+            })
+          } catch {
+            // Resolve an exact result commit without a second model attempt.
+          }
+          const result = this.ctx.tianwenEvolution.getControlledSkillShadowResult(
+            plan.shadowId,
+          )
+          if (result === undefined) {
+            return stoppedControlledShadowReceipt(plan, completedTaskIds, {
+              taskId: item.planned.taskId,
+              stage: 'postflight',
+              reasonCode: 'run-fact-mismatch',
+            })
+          }
+          return terminalControlledShadowReceipt(plan, completedTaskIds, result)
+        }
+      }
+      return stoppedControlledShadowReceipt(plan, completedTaskIds, {
+        taskId: plan.tasks.at(-1)!.taskId,
+        stage: 'postflight',
+        reasonCode: 'run-fact-mismatch',
+      })
+    } catch (error) {
+      return stoppedControlledShadowReceipt(expectedPlan, completedTaskIds, {
+        taskId: expectedPlan.tasks[completedTaskIds.length]?.taskId
+          ?? expectedPlan.tasks.at(-1)!.taskId,
+        stage: 'postflight',
+        reasonCode: error instanceof ControlledSkillShadowPreflightError
+          && error.code === 'root-skill-mismatch'
+          ? 'root-skill-drift'
+          : 'run-fact-mismatch',
+      })
+    } finally {
+      let disposeFailed = false
+      for (const item of prepared.reverse()) {
+        this.requests.delete(String(item.handle.agent.id))
+        try {
+          await item.handle.dispose()
+        } catch {
+          disposeFailed = true
+        }
+      }
+      if (disposeFailed) {
+        return stoppedControlledShadowReceipt(expectedPlan, completedTaskIds, {
+          taskId: expectedPlan.tasks.at(-1)!.taskId,
+          stage: 'postflight',
+          reasonCode: 'run-fact-mismatch',
+        })
+      }
+    }
+  }
 
   async runControlledEvaluators(
     input: RunControlledSkillEvaluatorsInput,
@@ -1713,27 +2348,7 @@ export class TianwenSkillEvaluationService extends Service {
               })
               agentCtx.tools.presentAs('native')
               agentCtx.tools.restrict({ allow: planned.allowedTools })
-              agentCtx.tools.guard(execution => {
-                if (execution.agent !== guard.agent
-                  || String(execution.agent?.id) !== guard.sessionId) {
-                  return 'controlled evaluation tool identity mismatch'
-                }
-                if (!guard.active || !guard.allowedTools.has(execution.name)) {
-                  return 'controlled evaluation tool unavailable'
-                }
-                const now = Date.now()
-                if (now >= guard.deadline) {
-                  cancelControlledArm(guard, 'timeout', now)
-                  return 'controlled evaluation deadline exceeded'
-                }
-                if (guard.toolCalls >= guard.maxToolCalls) {
-                  cancelControlledArm(guard, 'tool-limit-exceeded', now)
-                  return 'controlled evaluation tool limit exceeded'
-                }
-                guard.toolCalls += 1
-                guard.usedToolNames.add(execution.name)
-                return undefined
-              })
+              agentCtx.tools.guard(execution => controlledArmGuard(execution, guard))
               await agentCtx.inject(['skills'], scopedCtx => {
                 scopedCtx.skills.register(skill)
               })
@@ -1992,8 +2607,35 @@ export class TianwenSkillEvaluationService extends Service {
     plan: ControlledSkillEvaluationPlan,
     config: LlmCallConfig,
   ): Promise<ControlledArmRunResult> {
-    const session = prepared.handle.agent.session
     const runId = prepared.planned[prepared.role].runId
+    const result = await this.runControlledActivity(prepared, runId, config)
+    if (result.activity === undefined) return result
+    const evaluatorMaterialDigest = controlledEvaluatorMaterial(
+      prepared.handle.agent.session.events,
+      prepared.task.evaluatorMaterialContract,
+    )
+    if (evaluatorMaterialDigest === undefined) {
+      return { reasonCode: 'evaluator-material-invalid' }
+    }
+    return {
+      arm: {
+        role: prepared.role,
+        ...result.activity,
+        executionManifestDigest: controlledExecutionManifestDigest(
+          plan,
+          prepared.planned,
+        ),
+        evaluatorMaterialDigest,
+      },
+    }
+  }
+
+  private async runControlledActivity(
+    prepared: PreparedControlledActivity,
+    runId: TianwenRunId,
+    config: LlmCallConfig,
+  ): Promise<ControlledActivityRunResult> {
+    const session = prepared.handle.agent.session
     const requests: GenerateOptions[] = []
     this.requests.set(String(session.id), requests)
     const startedAt = Date.now()
@@ -2047,7 +2689,15 @@ export class TianwenSkillEvaluationService extends Service {
     } catch {
       return { reasonCode: idleFailed ? 'provider-failed' : 'run-fact-mismatch' }
     }
-    const useReceipt = this.ctx.tianwenLearningIntake.recordSkillUse(session, runId)
+    let useRecorded = false
+    let useWriteFailed = false
+    try {
+      const useReceipt = this.ctx.tianwenLearningIntake.recordSkillUse(session, runId)
+      useRecorded = useReceipt.decision === 'recorded'
+    } catch {
+      // A formal write may be commit-unknown; the governed fact is checked below.
+      useWriteFailed = true
+    }
     const normalizedFirstRequestDigest = controlledFirstRequestDigest(
       requests,
       String(session.id),
@@ -2069,13 +2719,16 @@ export class TianwenSkillEvaluationService extends Service {
     const manifest = this.ctx.tianwenEvolution.getRunSkillManifest(runId)
     const use = this.ctx.tianwenEvolution.getRunSkillUse(runId)
     if (
-      useReceipt.decision !== 'recorded'
-      || manifest === undefined
+      manifest === undefined
       || use === undefined
       || use.sessionId !== String(session.id)
       || use.parentVersionId !== manifest.parentVersionId
       || use.contentDigest !== manifest.contentDigest
-    ) return { reasonCode: 'skill-use-missing' }
+    ) return {
+      reasonCode: useWriteFailed && !useRecorded
+        ? 'persistence-unavailable'
+        : 'skill-use-missing',
+    }
 
     const evidence = this.ctx.tianwenEvidence.project(session)
       .filter(item => item.action.toolName === prepared.planned.acceptanceContract.toolName)
@@ -2087,31 +2740,18 @@ export class TianwenSkillEvaluationService extends Service {
       || evidence.action.argumentsDigest !== prepared.planned.acceptanceSubjectDigest
       || use.acceptanceEvidenceId !== evidence.evidenceId
     ) return { reasonCode: 'acceptance-subject-mismatch' }
-    const evaluatorMaterialDigest = controlledEvaluatorMaterial(
-      session.events,
-      prepared.task.evaluatorMaterialContract,
-    )
-    if (evaluatorMaterialDigest === undefined) {
-      return { reasonCode: 'evaluator-material-invalid' }
-    }
     const usedToolNames = [...prepared.guard.usedToolNames]
       .sort((left, right) => left.localeCompare(right))
     return {
-      arm: {
-        role: prepared.role,
+      activity: {
         runId,
         sessionId: String(session.id),
         skillVersionId: manifest.parentVersionId,
         contentDigest: manifest.contentDigest,
-        executionManifestDigest: controlledExecutionManifestDigest(
-          plan,
-          prepared.planned,
-        ),
         normalizedFirstRequestDigest,
         outcome,
         evidenceIds: [evidence.evidenceId],
         acceptanceSubjectDigest: prepared.planned.acceptanceSubjectDigest,
-        evaluatorMaterialDigest,
         usedToolNames,
         usage: {
           modelRequests: requests.length,
@@ -2786,6 +3426,26 @@ interface PreparedControlledSkillEvaluationArm {
   readonly guard: ControlledArmGuardState
 }
 
+interface PreparedControlledSkillShadowRun {
+  readonly task: RunControlledSkillShadowTaskInput
+  readonly planned: ControlledSkillShadowPlan['tasks'][number]
+  readonly skill: SkillDefinition
+  readonly handle: AgentHandle
+  readonly guard: ControlledArmGuardState
+}
+
+interface PreparedControlledActivity {
+  readonly task: { readonly input: string }
+  readonly planned: {
+    readonly acceptanceContract: RunAcceptanceContract
+    readonly acceptanceSubjectDigest: Sha256Digest
+    readonly stopContract: ControlledSkillEvalStopContract
+  }
+  readonly skill: SkillDefinition
+  readonly handle: AgentHandle
+  readonly guard: ControlledArmGuardState
+}
+
 interface ControlledArmGuardState {
   readonly sessionId: string
   readonly allowedTools: ReadonlySet<string>
@@ -2815,6 +3475,46 @@ function cancelControlledArm(
   })
 }
 
+function controlledArmGuard(
+  execution: Readonly<{
+    readonly agent?: AgentHandle['agent']
+    readonly name: string
+  }>,
+  state: ControlledArmGuardState,
+): string | undefined {
+  if (execution.agent !== state.agent
+    || String(execution.agent?.id) !== state.sessionId) {
+    return 'controlled evaluation tool identity mismatch'
+  }
+  if (!state.active || !state.allowedTools.has(execution.name)) {
+    return 'controlled evaluation tool unavailable'
+  }
+  const now = Date.now()
+  if (now >= state.deadline) {
+    cancelControlledArm(state, 'timeout', now)
+    return 'controlled evaluation deadline exceeded'
+  }
+  if (state.toolCalls >= state.maxToolCalls) {
+    cancelControlledArm(state, 'tool-limit-exceeded', now)
+    return 'controlled evaluation tool limit exceeded'
+  }
+  state.toolCalls += 1
+  state.usedToolNames.add(execution.name)
+  return undefined
+}
+
+type ControlledActivityRun = Omit<
+  ControlledSkillShadowRun,
+  'taskId' | 'executionManifestDigest'
+>
+
+type ControlledActivityRunResult =
+  | { readonly activity: ControlledActivityRun; readonly reasonCode?: never }
+  | {
+      readonly activity?: never
+      readonly reasonCode: ControlledSkillShadowStopReasonCode
+    }
+
 type ControlledArmRunResult =
   | { readonly arm: ControlledSkillEvaluationObjectiveArm; readonly reasonCode?: never }
   | {
@@ -2833,6 +3533,34 @@ function stoppedControlledReceipt(
     state: 'stopped',
     completedTaskIds,
     stop,
+  }
+}
+
+function stoppedControlledShadowReceipt(
+  plan: ControlledSkillShadowPlan,
+  completedTaskIds: readonly ControlledSkillShadowTaskId[],
+  stop: ControlledSkillShadowStop,
+): ControlledSkillShadowRuntimeReceipt {
+  return {
+    schemaVersion: 'tianwen.controlled-skill-shadow-runtime-receipt.v1',
+    shadowId: plan.shadowId,
+    state: 'stopped',
+    completedTaskIds,
+    stop,
+  }
+}
+
+function terminalControlledShadowReceipt(
+  plan: ControlledSkillShadowPlan,
+  completedTaskIds: readonly ControlledSkillShadowTaskId[],
+  result: ControlledSkillShadowResult,
+): ControlledSkillShadowRuntimeReceipt {
+  return {
+    schemaVersion: 'tianwen.controlled-skill-shadow-runtime-receipt.v1',
+    shadowId: plan.shadowId,
+    state: 'terminal',
+    completedTaskIds,
+    result,
   }
 }
 
