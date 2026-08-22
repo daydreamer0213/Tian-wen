@@ -359,6 +359,9 @@ def test_installer_build_output_isolation_handoff() -> None:
         "raw double-pack comparison remains unchanged",
         "supervisor authorization boundary, not a persisted product degraded marker",
         "0 Provider, Goal, or model activity",
+        "repository-root LICENSE is the authoritative publication source",
+        "fifteen-file predecessor is accepted",
+        "sixteen-file detached publication is a success postcondition",
     ):
         assert fact in handoff
 

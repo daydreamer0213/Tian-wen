@@ -43,6 +43,7 @@ const RUNTIME_FILES = [
   'model.patch.yml',
   'resume.patch.yml',
 ] as const
+const RUNTIME_DEPLOYED_PUBLICATION = [...RUNTIME_FILES, 'package.json'] as const
 const RUNTIME_PUBLICATION = [...RUNTIME_FILES, 'package.json', 'LICENSE'] as const
 
 function renderOriginalRc6ProfilePatch(paths: ReturnType<typeof deriveInstallPaths>): string {
@@ -94,7 +95,11 @@ function writeRuntimePublication(runtimeRoot: string, label = 'runtime'): void {
     type: 'module',
     version: '0.0.0',
   })
-  writeFileSync(join(runtimeRoot, 'LICENSE'), `${label}:license\n`, 'utf8')
+}
+
+function writeRuntimeRepository(repoRoot: string, label = 'runtime'): void {
+  writeRuntimePublication(join(repoRoot, 'packages', 'tianwen-runtime-bundle'), label)
+  writeFileSync(join(repoRoot, 'LICENSE'), `${label}:license\n`, 'utf8')
 }
 
 function snapshotTree(root: string): Readonly<Record<string, string>> {
@@ -127,7 +132,7 @@ function failureReceipt(operation: () => unknown) {
 function installWindowsFixture(options: NonNullable<Parameters<typeof installTianwen>[0]>) {
   const repoRoot = options.repoRoot ?? testRoot('installer-repo')
   if (options.repoRoot === undefined) {
-    writeRuntimePublication(join(repoRoot, 'packages', 'tianwen-runtime-bundle'), 'fixture-source')
+    writeRuntimeRepository(repoRoot, 'fixture-source')
   }
   return installTianwen({ ...options, platform: 'win32', repoRoot })
 }
@@ -258,7 +263,7 @@ function scriptedInstaller(
       if (fixtureOptions.runtimeSourceRoot === undefined) {
         writeRuntimePublication(runtimeRoot, 'installed')
       } else {
-        for (const path of RUNTIME_PUBLICATION) {
+        for (const path of RUNTIME_DEPLOYED_PUBLICATION) {
           const installed = join(runtimeRoot, path)
           mkdirSync(dirname(installed), { recursive: true })
           linkSync(join(fixtureOptions.runtimeSourceRoot, path), installed)
@@ -879,7 +884,7 @@ describe('Tianwen installer contract', () => {
     for (const output of buildOutputs) mkdirSync(output, { recursive: true })
     const runtimeRoot = join(repoRoot, 'packages', 'tianwen-runtime-bundle')
     const sourceCli = join(runtimeRoot, 'dist', 'cli.js')
-    writeRuntimePublication(runtimeRoot, 'source-initial')
+    writeRuntimeRepository(repoRoot, 'source-initial')
     installWindowsFixture({
       dataDir: root,
       repoRoot,
@@ -927,13 +932,13 @@ describe('Tianwen installer contract', () => {
     const paths = deriveInstallPaths(root, 'win32')
     const repoRoot = testRoot('source-linked-replay-repo')
     const sourceRuntimeRoot = join(repoRoot, 'packages', 'tianwen-runtime-bundle')
-    writeRuntimePublication(sourceRuntimeRoot, 'source-initial')
+    writeRuntimeRepository(repoRoot, 'source-initial')
     installWindowsFixture({
       dataDir: root,
       repoRoot,
       runner: scriptedInstaller(paths).runner,
     })
-    writeRuntimePublication(sourceRuntimeRoot, 'source-before')
+    writeRuntimeRepository(repoRoot, 'source-before')
     const installedCli = join(
       paths.profileRoot,
       'node_modules',
@@ -956,12 +961,51 @@ describe('Tianwen installer contract', () => {
     expect(replay.calls.filter(argv => argv.includes('@tianwen/dsh-host'))).toHaveLength(0)
   })
 
+  it('repairs a source-linked current Profile whose package LICENSE is absent', () => {
+    const root = testRoot('source-linked-missing-license')
+    const paths = deriveInstallPaths(root, 'win32')
+    const repoRoot = testRoot('source-linked-missing-license-repo')
+    const sourceRuntimeRoot = join(repoRoot, 'packages', 'tianwen-runtime-bundle')
+    writeRuntimeRepository(repoRoot, 'source-initial')
+    installWindowsFixture({
+      dataDir: root,
+      repoRoot,
+      runner: scriptedInstaller(paths).runner,
+    })
+    const installedRuntimeRoot = join(
+      paths.profileRoot,
+      'node_modules',
+      '@tianwen',
+      'runtime-bundle',
+    )
+    rmSync(join(installedRuntimeRoot, 'LICENSE'))
+    writeRuntimePublication(sourceRuntimeRoot, 'source-before')
+    const installedCli = join(installedRuntimeRoot, 'dist', 'cli.js')
+    rmSync(installedCli)
+    linkSync(join(sourceRuntimeRoot, 'dist', 'cli.js'), installedCli)
+    expect(classifyManagedInstallation(paths)).toBe('current')
+    expect(existsSync(join(installedRuntimeRoot, 'LICENSE'))).toBe(false)
+    const replay = scriptedInstaller(paths, undefined, undefined, {}, {
+      onBuild(ordinal) {
+        if (ordinal === 0) writeRuntimePublication(sourceRuntimeRoot, 'source-built')
+      },
+    })
+
+    installWindowsFixture({ dataDir: root, repoRoot, runner: replay.runner })
+
+    expect(replay.calls.filter(argv => argv.includes('@tianwen/profile-host'))).toHaveLength(1)
+    expect(replay.calls.filter(argv => argv.includes('@tianwen/dsh-host'))).toHaveLength(0)
+    expect(readFileSync(join(installedRuntimeRoot, 'LICENSE'), 'utf8'))
+      .toBe('source-initial:license\n')
+    expect(statSync(join(installedRuntimeRoot, 'LICENSE'), { bigint: true }).nlink).toBe(1n)
+  })
+
   it('publishes a detached Runtime Bundle candidate', () => {
     const root = testRoot('detached-runtime-candidate')
     const paths = deriveInstallPaths(root, 'win32')
     const repoRoot = testRoot('detached-runtime-repo')
     const sourceRuntimeRoot = join(repoRoot, 'packages', 'tianwen-runtime-bundle')
-    writeRuntimePublication(sourceRuntimeRoot, 'source-before')
+    writeRuntimeRepository(repoRoot, 'source-before')
     const scripted = scriptedInstaller(paths, undefined, undefined, {}, {
       onBuild(ordinal) {
         if (ordinal === 0) writeRuntimePublication(sourceRuntimeRoot, 'source-built')
@@ -978,14 +1022,21 @@ describe('Tianwen installer contract', () => {
       'runtime-bundle',
     )
     for (const path of RUNTIME_PUBLICATION) {
-      const source = statSync(join(sourceRuntimeRoot, path), { bigint: true })
+      const sourcePath = path === 'LICENSE' ? join(repoRoot, 'LICENSE') : join(sourceRuntimeRoot, path)
+      const source = statSync(sourcePath, { bigint: true })
       const installed = statSync(join(installedRuntimeRoot, path), { bigint: true })
       expect({ dev: installed.dev, ino: installed.ino }).not.toEqual({ dev: source.dev, ino: source.ino })
       expect(installed.nlink).toBe(1n)
     }
+    expect(existsSync(join(sourceRuntimeRoot, 'LICENSE'))).toBe(false)
+    expect(readFileSync(join(installedRuntimeRoot, 'LICENSE'), 'utf8'))
+      .toBe('source-before:license\n')
     writeFileSync(join(sourceRuntimeRoot, 'dist', 'cli.js'), 'source-after-receipt\n', 'utf8')
+    writeFileSync(join(repoRoot, 'LICENSE'), 'license-after-receipt\n', 'utf8')
     expect(readFileSync(join(installedRuntimeRoot, 'dist', 'cli.js'), 'utf8'))
       .toBe('source-built:dist/cli.js\n')
+    expect(readFileSync(join(installedRuntimeRoot, 'LICENSE'), 'utf8'))
+      .toBe('source-before:license\n')
   })
 
   it.each([
@@ -1016,7 +1067,7 @@ describe('Tianwen installer contract', () => {
       const paths = deriveInstallPaths(root, 'win32')
       const repoRoot = testRoot(`source-linked-failure-repo-${expectedStage}`)
       const sourceRuntimeRoot = join(repoRoot, 'packages', 'tianwen-runtime-bundle')
-      writeRuntimePublication(sourceRuntimeRoot, 'source-initial')
+      writeRuntimeRepository(repoRoot, 'source-initial')
       installWindowsFixture({
         dataDir: root,
         repoRoot,

@@ -319,11 +319,13 @@ Add two real-hardlink tests through the existing runner:
    installed Runtime Bundle is linked to the fixture source. The old
    `profileChanged` expression skips deployment; expect this RED to show zero
    Profile deploy when one detached replacement is required.
-2. A successful Profile deploy whose runner creates the candidate's sixteen
-   package files as real hardlinks to fixture source files. The old installer
-   returns ready while source and installed `dev`/`ino` values remain equal;
-   mutate one source fixture after the receipt and prove the installed bytes
-   change.
+2. A successful Profile deploy whose runner creates the candidate's fourteen
+   manifest files plus `package.json` as real hardlinks to fixture source
+   files. The fixture must
+   match the real repository shape: the Runtime Bundle package root has no
+   `LICENSE`, while the fixture repository root has a regular `LICENSE`. The
+   old installer fails while trying to materialize the missing candidate
+   `LICENSE` (or otherwise fails the successful publication contract).
 
 The fixture publication set is exact:
 
@@ -350,13 +352,20 @@ The helper must:
 1. parse the candidate Runtime Bundle's own manifest as a plain object;
 2. require its `files` array to equal the workspace manifest's exact fourteen
    strings, preserving current package order/value;
-3. append only `package.json` and `LICENSE`;
-4. require each candidate entry to be a regular file contained by the installed
-   Runtime Bundle root;
-5. copy each file to a unique sibling with `copyFileSync`, remove/replace only
-   the candidate path, and clean its own sibling on error; and
-6. re-stat every candidate file and require `nlink === 1`, plus unequal
+3. require the fourteen manifest paths plus `package.json` to be regular files
+   contained by the installed Runtime Bundle root;
+4. require the repository-root `LICENSE` to be a contained regular file;
+5. copy-replace the fifteen existing candidate files with the current unique
+   sibling pattern, then copy the repository-root `LICENSE` to a unique sibling
+   beside the installed package's `LICENSE` and rename it into place;
+6. clean only its own sibling on error; and
+7. re-stat the final sixteen files and require `nlink === 1`, plus unequal
    `dev`/`ino` from the corresponding workspace file when that source exists.
+
+The predecessor may legitimately contain only the fourteen manifest files and
+`package.json`; do not make absence of its package-local `LICENSE` a managed
+layout preflight failure. The sixteen-file condition begins only after
+candidate materialization succeeds.
 
 Do not recurse through `node_modules`, copy dependencies, move the Profile from
 another directory or add package-import configuration as a substitute for the
@@ -617,6 +626,12 @@ memory for equality checks; do not print or persist them, source-link facts,
 child bytes or raw diagnostics. The safe operational report is limited to
 counts, equality/detached booleans, an aggregate durable-root equality result
 and the canonical receipt schema/status/closed failure stage.
+
+The known predecessor may report fifteen present Runtime Bundle publication
+files because its package-local `LICENSE` is absent. That pre-state is evidence
+for this repair, not a requirement that the new sixteen-file postcondition has
+already been met. All fourteen manifest files and `package.json` must remain
+regular and the other current/ready/rc.7 preflight facts must still hold.
 
 Run exactly once from clean exact main with the existing D-drive offline env:
 

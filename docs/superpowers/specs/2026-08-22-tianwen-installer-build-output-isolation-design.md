@@ -126,6 +126,12 @@ This is not a generic tamper detector. A modified, non-source-linked package is
 outside the proved defect and is not assigned a speculative repair policy.
 Existing partial/mixed/unknown-layout rejection remains unchanged.
 
+The proved source-linked predecessor may contain only the fourteen manifest
+files plus `package.json`: workspace deployment does not publish a
+package-local `LICENSE`. That fifteen-file shape does not make an otherwise
+exact `current`/ready/rc.7 predecessor incompatible. The successful candidate,
+not the predecessor preflight, owns the sixteen-file postcondition below.
+
 ## 5. Bounded build-output inode isolation
 
 The existing build command selects a finite five-package closure:
@@ -168,14 +174,19 @@ uncommitted candidate:
 
 - the fourteen paths from `package.json#files`;
 - `package.json`; and
-- `LICENSE`, which npm/pnpm includes in the sixteen-entry archive.
+- `LICENSE`, which npm/pnpm includes in the sixteen-entry archive and whose
+  source of truth is the repository-root regular `LICENSE` file.
 
-For each regular file, copy its bytes to a unique sibling and replace the
-candidate path, producing an independent inode while leaving the canonical
-path unchanged. Symlinks, package dependencies and unrelated Profile files are
-not traversed or copied. The helper then requires every materialized file to
-be a regular file with no file identity shared with the corresponding
-workspace publication where one exists.
+The fourteen manifest files and `package.json` must already be regular files
+in the deployed candidate. For each, copy its bytes to a unique sibling and
+replace the candidate path. The installer separately verifies that the
+repository-root `LICENSE` is a contained regular file, copies it to a unique
+sibling beside the candidate package's `LICENSE` path and renames that sibling
+into place. The candidate is not required to contain `LICENSE` before this
+step. Symlinks, package dependencies and unrelated Profile files are not
+traversed or copied. The helper then requires all sixteen materialized files to
+be regular files with `nlink === 1` and no file identity shared with a
+corresponding workspace publication where one exists.
 
 This is a bounded copy step inside `managed-profile-deploy`, not a general copy
 framework. Any copy, replacement or identity-validation failure removes the
@@ -247,8 +258,12 @@ Tests must not claim a degraded predecessor became ready on failure.
 Make the scripted Profile deploy create real hardlinks from the new fixture
 workspace package into the candidate. A successful install must prove:
 
+- the fixture Runtime Bundle package root has no `LICENSE`, while the fixture
+  repository root contains the regular authoritative `LICENSE`;
 - every one of the sixteen Runtime Bundle package publication files has the
   expected bytes and an independent file identity after materialization;
+- the installed `LICENSE` bytes equal the repository-root `LICENSE` and the
+  packed `package/LICENSE` publication;
 - source writes after commit cannot change installed bytes;
 - archive, ready receipt and installed CLI identify the new build;
 - no Profile/build/archive backup or staging residue remains; and
@@ -329,6 +344,11 @@ without status or Provider work. A successful ready receipt must additionally
 prove that the installed Runtime Bundle publication no longer shares file
 identity with the exact-main workspace before the separately authorized one
 read-only status check. No Goal is run again.
+
+The pre-install snapshot may observe the proved fifteen-file predecessor
+(fourteen manifest files plus `package.json`); it must not require the new
+candidate's `LICENSE` postcondition before the repair runs. Success requires
+the complete detached sixteen-file publication.
 
 ## 11. Minimal canonical supersession
 
