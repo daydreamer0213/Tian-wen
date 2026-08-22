@@ -20,6 +20,7 @@ type PublicLedgerEventPrivacyContract = AssertNever<Extract<
       | 'skill-evaluation-result-recorded'
       | 'controlled-skill-eval-protocol-frozen'
       | 'controlled-skill-evaluation-opened'
+      | 'controlled-skill-evaluation-objective-recorded'
   }
 >>
 
@@ -163,6 +164,7 @@ export {
   CONTROLLED_SKILL_EVAL_RUBRIC,
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   CONTROLLED_SKILL_EVAL_TASK_TYPES,
+  prepareControlledSkillEvaluationObjective,
   prepareControlledSkillEvaluationPlan,
   prepareControlledSkillEvalProtocol,
 } from './controlled-skill-evaluation.js'
@@ -181,10 +183,18 @@ export type {
   ControlledSkillEvalTaskPlan,
   ControlledSkillEvalTaskType,
   ControlledSkillEvaluationId,
+  ControlledSkillEvaluationCandidateHardGate,
+  ControlledSkillEvaluationComparison,
+  ControlledSkillEvaluationObjective,
+  ControlledSkillEvaluationObjectiveArm,
+  ControlledSkillEvaluationObjectiveReceipt,
+  ControlledSkillEvaluationObjectiveVerdict,
   ControlledSkillEvaluationPlan,
   ControlledSkillEvaluationReceipt,
+  ControlledSkillEvaluationUsage,
   FreezeControlledSkillEvalProtocolInput,
   OpenControlledSkillEvaluationInput,
+  RecordControlledSkillEvaluationObjectiveInput,
 } from './controlled-skill-evaluation.js'
 export type {
   SkillShadowEligibility,

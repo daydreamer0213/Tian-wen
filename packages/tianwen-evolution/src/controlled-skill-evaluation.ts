@@ -7,6 +7,7 @@ import type {
 import { prepareRunBinding } from './outcome-intake.js'
 import type {
   OutcomeLearningSignal,
+  OutcomeVerdict,
   RunAcceptanceContract,
   TianwenRunId,
 } from './outcome-intake.js'
@@ -188,6 +189,71 @@ export interface ControlledSkillEvaluationOpenedEvent {
   readonly type: 'controlled-skill-evaluation-opened'
   readonly at: string
   readonly plan: ControlledSkillEvaluationPlan
+  readonly inputDigest: Sha256Digest
+}
+
+export type ControlledSkillEvaluationComparison =
+  | 'candidate-better'
+  | 'baseline-better'
+  | 'tie'
+  | 'not-comparable'
+export type ControlledSkillEvaluationCandidateHardGate =
+  | 'pass'
+  | 'rejected'
+  | 'inconclusive'
+export type ControlledSkillEvaluationObjectiveVerdict =
+  | 'pass'
+  | 'rejected'
+  | 'inconclusive'
+
+export interface ControlledSkillEvaluationUsage {
+  readonly modelRequests: number
+  readonly toolCalls: number
+  readonly elapsedMs: number
+}
+
+export interface ControlledSkillEvaluationObjectiveArm {
+  readonly role: ControlledSkillEvalPlanArm['role']
+  readonly runId: TianwenRunId
+  readonly sessionId: string
+  readonly skillVersionId: SkillVersionId
+  readonly contentDigest: Sha256Digest
+  readonly executionManifestDigest: Sha256Digest
+  readonly normalizedFirstRequestDigest: Sha256Digest
+  readonly outcome: OutcomeVerdict
+  readonly evidenceIds: readonly Sha256Digest[]
+  readonly acceptanceSubjectDigest: Sha256Digest
+  readonly evaluatorMaterialDigest: Sha256Digest
+  readonly usedToolNames: readonly string[]
+  readonly usage: ControlledSkillEvaluationUsage
+}
+
+export interface RecordControlledSkillEvaluationObjectiveInput {
+  readonly evaluationId: ControlledSkillEvaluationId
+  readonly taskId: ControlledSkillEvalTaskId
+  readonly baseline: ControlledSkillEvaluationObjectiveArm
+  readonly candidate: ControlledSkillEvaluationObjectiveArm
+}
+
+export interface ControlledSkillEvaluationObjective
+  extends RecordControlledSkillEvaluationObjectiveInput {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-objective.v2'
+  readonly comparison: ControlledSkillEvaluationComparison
+  readonly candidateHardGate: ControlledSkillEvaluationCandidateHardGate
+  readonly objectiveVerdict: ControlledSkillEvaluationObjectiveVerdict
+}
+
+export interface ControlledSkillEvaluationObjectiveReceipt {
+  readonly evaluationId: ControlledSkillEvaluationId
+  readonly taskId: ControlledSkillEvalTaskId
+  readonly duplicate: boolean
+}
+
+export interface ControlledSkillEvaluationObjectiveRecordedEvent {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-objective.v2'
+  readonly type: 'controlled-skill-evaluation-objective-recorded'
+  readonly at: string
+  readonly objective: ControlledSkillEvaluationObjective
   readonly inputDigest: Sha256Digest
 }
 
@@ -775,6 +841,246 @@ export function parseControlledSkillEvaluationPlan(
   })
   if (canonicalJson(prepared) !== canonicalJson(value)) {
     throw new TypeError('controlled evaluation plan identity or fields are not canonical')
+  }
+  return prepared
+}
+
+function prepareObjectiveUsage(value: unknown): ControlledSkillEvaluationUsage {
+  if (!isRecord(value)) throw new TypeError('controlled evaluation usage must be an object')
+  exactKeys(value, ['modelRequests', 'toolCalls', 'elapsedMs'])
+  return {
+    modelRequests: boundedInteger(
+      value.modelRequests,
+      'modelRequests',
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    toolCalls: boundedInteger(value.toolCalls, 'toolCalls', 0, Number.MAX_SAFE_INTEGER),
+    elapsedMs: boundedInteger(value.elapsedMs, 'elapsedMs', 0, Number.MAX_SAFE_INTEGER),
+  }
+}
+
+function prepareUsedToolNames(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError('controlled evaluation usedToolNames must be an array')
+  }
+  const tools = value.map(item => {
+    if (typeof item !== 'string' || !SAFE_TOOL_ID.test(item)) {
+      throw new TypeError('controlled evaluation usedToolNames are invalid')
+    }
+    return item
+  })
+  const canonical = [...new Set(tools)].sort((left, right) => left.localeCompare(right))
+  if (canonicalJson(tools) !== canonicalJson(canonical)) {
+    throw new TypeError('controlled evaluation usedToolNames must be sorted and unique')
+  }
+  return canonical
+}
+
+function objectiveExecutionManifestDigest(
+  plan: ControlledSkillEvaluationPlan,
+  task: ControlledSkillEvalTaskPlan,
+): Sha256Digest {
+  return sha256({
+    execution: plan.execution,
+    goalDigest: task.goalDigest,
+    inputDigest: task.inputDigest,
+    workspaceSnapshotDigest: task.workspaceSnapshotDigest,
+    toolSchemaDigest: task.toolSchemaDigest,
+    authorizationDigest: task.authorizationDigest,
+    verifierContractDigest: task.verifierContractDigest,
+    stopConditionDigest: task.stopConditionDigest,
+    evaluatorMaterialContractDigest: task.evaluatorMaterialContractDigest,
+    acceptanceContract: task.acceptanceContract,
+    acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+    allowedTools: task.allowedTools,
+    stopContract: task.stopContract,
+  })
+}
+
+function prepareObjectiveArm(
+  value: unknown,
+  role: ControlledSkillEvalPlanArm['role'],
+  plan?: ControlledSkillEvalPlanArm,
+  evaluationPlan?: ControlledSkillEvaluationPlan,
+  task?: ControlledSkillEvalTaskPlan,
+): ControlledSkillEvaluationObjectiveArm {
+  if (!isRecord(value)) throw new TypeError('controlled evaluation objective arm must be an object')
+  exactKeys(value, [
+    'role',
+    'runId',
+    'sessionId',
+    'skillVersionId',
+    'contentDigest',
+    'executionManifestDigest',
+    'normalizedFirstRequestDigest',
+    'outcome',
+    'evidenceIds',
+    'acceptanceSubjectDigest',
+    'evaluatorMaterialDigest',
+    'usedToolNames',
+    'usage',
+  ])
+  if (
+    value.role !== role
+    || typeof value.runId !== 'string'
+    || !/^run:[a-f0-9]{64}$/u.test(value.runId)
+    || typeof value.skillVersionId !== 'string'
+    || !SKILL_VERSION_ID.test(value.skillVersionId)
+    || (value.outcome !== 'met'
+      && value.outcome !== 'not-met'
+      && value.outcome !== 'inconclusive')
+    || !Array.isArray(value.evidenceIds)
+  ) {
+    throw new TypeError('controlled evaluation objective arm is invalid')
+  }
+  const sessionId = safeSessionId(value.sessionId)
+  if (
+    plan !== undefined
+    && (value.runId !== plan.runId || sessionId !== plan.sessionId || role !== plan.role)
+  ) {
+    throw new TypeError('controlled evaluation objective arm disagrees with its plan')
+  }
+  const usage = prepareObjectiveUsage(value.usage)
+  const usedToolNames = prepareUsedToolNames(value.usedToolNames)
+  const executionManifestDigest = digest(
+    value.executionManifestDigest,
+    'executionManifestDigest',
+  )
+  const acceptanceSubjectDigest = digest(
+    value.acceptanceSubjectDigest,
+    'acceptanceSubjectDigest',
+  )
+  if (task !== undefined && evaluationPlan !== undefined) {
+    if (
+      executionManifestDigest !== objectiveExecutionManifestDigest(evaluationPlan, task)
+      || acceptanceSubjectDigest !== task.acceptanceSubjectDigest
+      || usedToolNames.some(tool => !task.allowedTools.includes(tool))
+      || !usedToolNames.includes('skill')
+      || !usedToolNames.includes(task.acceptanceContract.toolName)
+      || usage.toolCalls > task.stopContract.maxToolCalls
+      || usage.elapsedMs > task.stopContract.maxElapsedMs
+    ) {
+      throw new TypeError('controlled evaluation objective arm violates its frozen task')
+    }
+  }
+  return {
+    role,
+    runId: value.runId as TianwenRunId,
+    sessionId,
+    skillVersionId: value.skillVersionId as SkillVersionId,
+    contentDigest: digest(value.contentDigest, 'contentDigest'),
+    executionManifestDigest,
+    normalizedFirstRequestDigest: digest(
+      value.normalizedFirstRequestDigest,
+      'normalizedFirstRequestDigest',
+    ),
+    outcome: value.outcome,
+    evidenceIds: value.evidenceIds.map(item => digest(item, 'evidenceId')),
+    acceptanceSubjectDigest,
+    evaluatorMaterialDigest: digest(
+      value.evaluatorMaterialDigest,
+      'evaluatorMaterialDigest',
+    ),
+    usedToolNames,
+    usage,
+  }
+}
+
+function reduceObjectiveOutcomes(
+  baseline: ControlledSkillEvaluationObjectiveArm,
+  candidate: ControlledSkillEvaluationObjectiveArm,
+): Pick<
+  ControlledSkillEvaluationObjective,
+  'comparison' | 'candidateHardGate' | 'objectiveVerdict'
+> {
+  const inconclusive = baseline.outcome === 'inconclusive'
+    || candidate.outcome === 'inconclusive'
+  const comparison: ControlledSkillEvaluationComparison = inconclusive
+    ? 'not-comparable'
+    : baseline.outcome === candidate.outcome
+      ? 'tie'
+      : baseline.outcome === 'not-met'
+        ? 'candidate-better'
+        : 'baseline-better'
+  const candidateHardGate: ControlledSkillEvaluationCandidateHardGate =
+    candidate.outcome === 'met'
+      ? 'pass'
+      : candidate.outcome === 'not-met'
+        ? 'rejected'
+        : 'inconclusive'
+  const objectiveVerdict: ControlledSkillEvaluationObjectiveVerdict =
+    candidate.outcome === 'not-met'
+      ? 'rejected'
+      : inconclusive
+        ? 'inconclusive'
+        : 'pass'
+  return { comparison, candidateHardGate, objectiveVerdict }
+}
+
+export function prepareControlledSkillEvaluationObjective(
+  input: RecordControlledSkillEvaluationObjectiveInput,
+  plan: ControlledSkillEvaluationPlan,
+): ControlledSkillEvaluationObjective {
+  if (!isRecord(input)) throw new TypeError('controlled evaluation objective input must be an object')
+  exactKeys(input, ['evaluationId', 'taskId', 'baseline', 'candidate'])
+  const task = plan.tasks.find(item => item.taskId === input.taskId)
+  if (input.evaluationId !== plan.evaluationId || task === undefined) {
+    throw new TypeError('controlled evaluation objective disagrees with its plan')
+  }
+  const baseline = prepareObjectiveArm(input.baseline, 'baseline', task.baseline, plan, task)
+  const candidate = prepareObjectiveArm(input.candidate, 'candidate', task.candidate, plan, task)
+  if (
+    baseline.executionManifestDigest !== candidate.executionManifestDigest
+    || baseline.normalizedFirstRequestDigest !== candidate.normalizedFirstRequestDigest
+  ) {
+    throw new TypeError('controlled evaluation objective arms are not symmetric')
+  }
+  return {
+    schemaVersion: 'tianwen.controlled-skill-evaluation-objective.v2',
+    evaluationId: plan.evaluationId,
+    taskId: task.taskId,
+    baseline,
+    candidate,
+    ...reduceObjectiveOutcomes(baseline, candidate),
+  }
+}
+
+export function parseControlledSkillEvaluationObjective(
+  value: unknown,
+): ControlledSkillEvaluationObjective {
+  if (!isRecord(value)) throw new TypeError('controlled evaluation objective must be an object')
+  exactKeys(value, [
+    'schemaVersion',
+    'evaluationId',
+    'taskId',
+    'baseline',
+    'candidate',
+    'comparison',
+    'candidateHardGate',
+    'objectiveVerdict',
+  ])
+  if (
+    value.schemaVersion !== 'tianwen.controlled-skill-evaluation-objective.v2'
+    || typeof value.evaluationId !== 'string'
+    || !EVALUATION_ID.test(value.evaluationId)
+    || typeof value.taskId !== 'string'
+    || !TASK_ID.test(value.taskId)
+  ) {
+    throw new TypeError('controlled evaluation objective has an invalid identity')
+  }
+  const baseline = prepareObjectiveArm(value.baseline, 'baseline')
+  const candidate = prepareObjectiveArm(value.candidate, 'candidate')
+  const prepared: ControlledSkillEvaluationObjective = {
+    schemaVersion: 'tianwen.controlled-skill-evaluation-objective.v2',
+    evaluationId: value.evaluationId as ControlledSkillEvaluationId,
+    taskId: value.taskId as ControlledSkillEvalTaskId,
+    baseline,
+    candidate,
+    ...reduceObjectiveOutcomes(baseline, candidate),
+  }
+  if (canonicalJson(prepared) !== canonicalJson(value)) {
+    throw new TypeError('controlled evaluation objective is not canonical')
   }
   return prepared
 }

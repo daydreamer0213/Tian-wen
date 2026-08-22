@@ -245,6 +245,114 @@ function controlledSessionAllocations() {
   }))
 }
 
+function recordControlledTaskFacts(
+  ledger: EvolutionLedger,
+  plan: NonNullable<ReturnType<EvolutionLedger['getControlledSkillEvaluation']>>,
+  taskIndex: number,
+  outcomes: {
+    readonly baseline: 'met' | 'not-met' | 'inconclusive'
+    readonly candidate: 'met' | 'not-met' | 'inconclusive'
+  },
+  options: {
+    readonly skipUseRole?: 'baseline' | 'candidate'
+  } = {},
+) {
+  const task = plan.tasks[taskIndex]!
+  const candidate = ledger.getSkillCandidate(plan.candidateId)!
+  const executionManifestDigest = sha256({
+    execution: plan.execution,
+    goalDigest: task.goalDigest,
+    inputDigest: task.inputDigest,
+    workspaceSnapshotDigest: task.workspaceSnapshotDigest,
+    toolSchemaDigest: task.toolSchemaDigest,
+    authorizationDigest: task.authorizationDigest,
+    verifierContractDigest: task.verifierContractDigest,
+    stopConditionDigest: task.stopConditionDigest,
+    evaluatorMaterialContractDigest: task.evaluatorMaterialContractDigest,
+    acceptanceContract: task.acceptanceContract,
+    acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+    allowedTools: task.allowedTools,
+    stopContract: task.stopContract,
+  })
+  const normalizedFirstRequestDigest = digest(`objective:${task.taskId}:request`)
+  const arms = ([task.baseline, task.candidate] as const).map(arm => {
+    const binding = ledger.recordRunBinding({
+      goalRef: `goal:controlled-skill-evaluation:${plan.protocolId}`,
+      taskRef: `task:${task.taskId}:${arm.role}`,
+      sessionId: arm.sessionId,
+      scopeKey: plan.scopeKey,
+      acceptanceContract: task.acceptanceContract,
+      acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+    })
+    expect(binding.runId).toBe(arm.runId)
+    const skill = arm.role === 'baseline'
+      ? parent
+      : { ...candidate.payload, provider: 'runtime' }
+    const manifest = ledger.recordRunSkillManifest({ runId: arm.runId, skill })
+    const outcome = outcomes[arm.role]
+    const sessionDigest = digest(`objective:${task.taskId}:${arm.role}:session`)
+    const evidenceId = digest(`objective:${task.taskId}:${arm.role}:evidence`)
+    ledger.recordOutcomeIntake({
+      runId: arm.runId,
+      verdict: outcome,
+      sessionDigest,
+      evidenceIds: [evidenceId],
+    })
+    if (options.skipUseRole !== arm.role) {
+      ledger.recordRunSkillUse({
+        runId: arm.runId,
+        parentVersionId: manifest.parentVersionId,
+        sessionId: arm.sessionId,
+        sessionDigest,
+        skillName: parent.name,
+        contentDigest: digest(skill.content),
+        skillEvidenceId: digest(`objective:${task.taskId}:${arm.role}:skill-evidence`),
+        acceptanceEvidenceId: evidenceId,
+        skillCallSeq: 10,
+        skillResultSeq: 11,
+        acceptanceCallSeq: 12,
+      })
+    }
+    return {
+      role: arm.role,
+      runId: arm.runId,
+      sessionId: arm.sessionId,
+      skillVersionId: manifest.parentVersionId,
+      contentDigest: digest(skill.content),
+      executionManifestDigest,
+      normalizedFirstRequestDigest,
+      outcome,
+      evidenceIds: [evidenceId],
+      acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+      evaluatorMaterialDigest: digest(`objective:${task.taskId}:${arm.role}:material`),
+      usedToolNames: ['skill', 'verify_summary'],
+      usage: { modelRequests: 1, toolCalls: 2, elapsedMs: 500 },
+    }
+  })
+  return {
+    evaluationId: plan.evaluationId,
+    taskId: task.taskId,
+    baseline: arms[0]!,
+    candidate: arms[1]!,
+  }
+}
+
+function openControlledObjectiveLedger(prefix: string) {
+  const ledger = new EvolutionLedger(fixtureRoot(prefix), {
+    clock: () => '2026-08-22T16:20:00.000Z',
+  })
+  const seeded = seedCandidateWithControlledProtocol(ledger)
+  const receipt = ledger.openControlledSkillEvaluation({
+    candidateId: seeded.candidateId,
+    protocolId: seeded.protocolId,
+    sessionAllocations: controlledSessionAllocations(),
+  })
+  return {
+    ledger,
+    plan: ledger.getControlledSkillEvaluation(receipt.evaluationId)!,
+  }
+}
+
 describe('controlled five-task Skill evaluation protocol', () => {
   it('derives one deterministic development-only protocol with permanent evidence labels', () => {
     const { ticket, signals } = ticketFacts()
@@ -562,6 +670,289 @@ describe('controlled five-task Skill evaluation protocol', () => {
       .toThrow(/unexpected field: runId/i)
     expect(() => prepare(legacyArms))
       .toThrow(/unexpected field: arms/i)
+  })
+
+  it('records and replays one objective task pair with an idempotent receipt', () => {
+    const path = fixtureRoot('objective')
+    const ledger = new EvolutionLedger(path, { clock: () => '2026-08-22T16:20:00.000Z' })
+    const seeded = seedCandidateWithControlledProtocol(ledger)
+    const opened = ledger.openControlledSkillEvaluation({
+      candidateId: seeded.candidateId,
+      protocolId: seeded.protocolId,
+      sessionAllocations: controlledSessionAllocations(),
+    })
+    const plan = ledger.getControlledSkillEvaluation(opened.evaluationId)!
+    const input = recordControlledTaskFacts(ledger, plan, 0, {
+      baseline: 'not-met',
+      candidate: 'met',
+    })
+
+    const first = ledger.recordControlledSkillEvaluationObjective(input)
+    const duplicate = ledger.recordControlledSkillEvaluationObjective(structuredClone(input))
+    const stored = ledger.getControlledSkillEvaluationObjective(
+      plan.evaluationId,
+      plan.tasks[0]!.taskId,
+    )
+
+    expect(first).toEqual({
+      evaluationId: plan.evaluationId,
+      taskId: plan.tasks[0]!.taskId,
+      duplicate: false,
+    })
+    expect(duplicate).toEqual({ ...first, duplicate: true })
+    expect(stored).toMatchObject({
+      schemaVersion: 'tianwen.controlled-skill-evaluation-objective.v2',
+      comparison: 'candidate-better',
+      candidateHardGate: 'pass',
+      objectiveVerdict: 'pass',
+    })
+    expect(ledger.listControlledSkillEvaluationObjectives(plan.evaluationId)).toEqual([stored])
+    const exposed = ledger.getControlledSkillEvaluationObjective(
+      plan.evaluationId,
+      plan.tasks[0]!.taskId,
+    )!
+    const mutableTools = exposed.baseline.usedToolNames as string[]
+    mutableTools.push('mutated-clone')
+    expect(ledger.getControlledSkillEvaluationObjective(
+      plan.evaluationId,
+      plan.tasks[0]!.taskId,
+    )).toEqual(stored)
+    expect(ledger.listEvents().filter(event =>
+      event.type === 'controlled-skill-evaluation-objective-recorded')).toHaveLength(1)
+    expect(ledger.listEvents().filter(isPublicLedgerEvent)).toEqual([])
+
+    const replay = new EvolutionLedger(path)
+    expect(replay.getControlledSkillEvaluationObjective(
+      plan.evaluationId,
+      plan.tasks[0]!.taskId,
+    )).toEqual(stored)
+    expect(replay.recordControlledSkillEvaluationObjective(input).duplicate).toBe(true)
+    expect(replay.listEvents().filter(isPublicLedgerEvent)).toEqual([])
+  })
+
+  it('enforces protocol order, conflicting duplicates, and terminal objective stop', () => {
+    const { ledger, plan } = openControlledObjectiveLedger('objective-order')
+    const second = recordControlledTaskFacts(ledger, plan, 1, {
+      baseline: 'not-met',
+      candidate: 'met',
+    })
+    expect(() => ledger.recordControlledSkillEvaluationObjective(second))
+      .toThrow(/protocol task order/i)
+
+    const first = recordControlledTaskFacts(ledger, plan, 0, {
+      baseline: 'met',
+      candidate: 'not-met',
+    })
+    expect(ledger.recordControlledSkillEvaluationObjective(first).duplicate).toBe(false)
+    expect(ledger.getControlledSkillEvaluationObjective(plan.evaluationId, first.taskId))
+      .toMatchObject({
+        comparison: 'baseline-better',
+        candidateHardGate: 'rejected',
+        objectiveVerdict: 'rejected',
+      })
+    expect(ledger.recordControlledSkillEvaluationObjective(structuredClone(first)).duplicate)
+      .toBe(true)
+    expect(() => ledger.recordControlledSkillEvaluationObjective({
+      ...first,
+      candidate: {
+        ...first.candidate,
+        evaluatorMaterialDigest: digest('conflicting-evaluator-material'),
+      },
+    })).toThrow(/objective changed/i)
+    expect(() => ledger.recordControlledSkillEvaluationObjective(second))
+      .toThrow(/protocol task order/i)
+    expect(ledger.listControlledSkillEvaluationObjectives(plan.evaluationId)).toHaveLength(1)
+  })
+
+  it('reduces tie and inconclusive objective outcomes without continuing after terminal', () => {
+    const firstRun = openControlledObjectiveLedger('objective-reducers')
+    const tie = recordControlledTaskFacts(firstRun.ledger, firstRun.plan, 0, {
+      baseline: 'met',
+      candidate: 'met',
+    })
+    firstRun.ledger.recordControlledSkillEvaluationObjective(tie)
+    expect(firstRun.ledger.getControlledSkillEvaluationObjective(
+      firstRun.plan.evaluationId,
+      tie.taskId,
+    )).toMatchObject({
+      comparison: 'tie',
+      candidateHardGate: 'pass',
+      objectiveVerdict: 'pass',
+    })
+    const inconclusiveBaseline = recordControlledTaskFacts(
+      firstRun.ledger,
+      firstRun.plan,
+      1,
+      { baseline: 'inconclusive', candidate: 'met' },
+    )
+    firstRun.ledger.recordControlledSkillEvaluationObjective(inconclusiveBaseline)
+    expect(firstRun.ledger.getControlledSkillEvaluationObjective(
+      firstRun.plan.evaluationId,
+      inconclusiveBaseline.taskId,
+    )).toMatchObject({
+      comparison: 'not-comparable',
+      candidateHardGate: 'pass',
+      objectiveVerdict: 'inconclusive',
+    })
+    const afterInconclusive = recordControlledTaskFacts(
+      firstRun.ledger,
+      firstRun.plan,
+      2,
+      { baseline: 'not-met', candidate: 'met' },
+    )
+    expect(() => firstRun.ledger.recordControlledSkillEvaluationObjective(afterInconclusive))
+      .toThrow(/protocol task order/i)
+
+    const secondRun = openControlledObjectiveLedger('objective-candidate-inconclusive')
+    const inconclusiveCandidate = recordControlledTaskFacts(
+      secondRun.ledger,
+      secondRun.plan,
+      0,
+      { baseline: 'met', candidate: 'inconclusive' },
+    )
+    secondRun.ledger.recordControlledSkillEvaluationObjective(inconclusiveCandidate)
+    expect(secondRun.ledger.getControlledSkillEvaluationObjective(
+      secondRun.plan.evaluationId,
+      inconclusiveCandidate.taskId,
+    )).toMatchObject({
+      comparison: 'not-comparable',
+      candidateHardGate: 'inconclusive',
+      objectiveVerdict: 'inconclusive',
+    })
+
+    const thirdRun = openControlledObjectiveLedger('objective-rejected-priority')
+    const rejectedPriority = recordControlledTaskFacts(
+      thirdRun.ledger,
+      thirdRun.plan,
+      0,
+      { baseline: 'inconclusive', candidate: 'not-met' },
+    )
+    thirdRun.ledger.recordControlledSkillEvaluationObjective(rejectedPriority)
+    expect(thirdRun.ledger.getControlledSkillEvaluationObjective(
+      thirdRun.plan.evaluationId,
+      rejectedPriority.taskId,
+    )).toMatchObject({
+      comparison: 'not-comparable',
+      candidateHardGate: 'rejected',
+      objectiveVerdict: 'rejected',
+    })
+  })
+
+  it('rejects invalid objective facts but does not cap model requests', () => {
+    const { ledger, plan } = openControlledObjectiveLedger('objective-contract')
+    const valid = recordControlledTaskFacts(ledger, plan, 0, {
+      baseline: 'not-met',
+      candidate: 'met',
+    })
+    const invalidInputs = [
+      {
+        ...valid,
+        baseline: { ...valid.baseline, runId: valid.candidate.runId },
+      },
+      {
+        ...valid,
+        baseline: {
+          ...valid.baseline,
+          acceptanceSubjectDigest: digest('wrong-subject'),
+        },
+      },
+      {
+        ...valid,
+        baseline: {
+          ...valid.baseline,
+          skillVersionId: valid.candidate.skillVersionId,
+        },
+      },
+      {
+        ...valid,
+        baseline: {
+          ...valid.baseline,
+          evidenceIds: [digest('wrong-evidence')],
+        },
+      },
+      {
+        ...valid,
+        baseline: {
+          ...valid.baseline,
+          usedToolNames: ['not_allowed', 'skill', 'verify_summary'],
+        },
+      },
+      {
+        ...valid,
+        baseline: {
+          ...valid.baseline,
+          usedToolNames: ['verify_summary', 'skill'],
+        },
+      },
+      {
+        ...valid,
+        baseline: {
+          ...valid.baseline,
+          usage: { ...valid.baseline.usage, toolCalls: 5 },
+        },
+      },
+      {
+        ...valid,
+        baseline: {
+          ...valid.baseline,
+          usage: { ...valid.baseline.usage, elapsedMs: 10_001 },
+        },
+      },
+      {
+        ...valid,
+        baseline: {
+          ...valid.baseline,
+          usage: { ...valid.baseline.usage, modelRequests: -1 },
+        },
+      },
+      {
+        ...valid,
+        baseline: {
+          ...valid.baseline,
+          normalizedFirstRequestDigest: digest('asymmetric-request'),
+        },
+      },
+      {
+        ...valid,
+        baseline: {
+          ...valid.baseline,
+          executionManifestDigest: digest('wrong-execution-manifest'),
+        },
+      },
+      {
+        ...valid,
+        baseline: Object.assign({}, valid.baseline, { maxModelRequests: 1 }),
+      },
+      Object.assign({}, valid, { aggregate: true }),
+    ]
+    for (const input of invalidInputs) {
+      expect(() => ledger.recordControlledSkillEvaluationObjective(input)).toThrow()
+    }
+    expect(ledger.listControlledSkillEvaluationObjectives(plan.evaluationId)).toEqual([])
+
+    const unboundedModelUsage = {
+      ...valid,
+      baseline: {
+        ...valid.baseline,
+        usage: {
+          ...valid.baseline.usage,
+          modelRequests: Number.MAX_SAFE_INTEGER,
+        },
+      },
+    }
+    expect(ledger.recordControlledSkillEvaluationObjective(unboundedModelUsage).duplicate)
+      .toBe(false)
+
+    const missingUse = openControlledObjectiveLedger('objective-missing-use')
+    const missingUseInput = recordControlledTaskFacts(
+      missingUse.ledger,
+      missingUse.plan,
+      0,
+      { baseline: 'not-met', candidate: 'met' },
+      { skipUseRole: 'baseline' },
+    )
+    expect(() => missingUse.ledger.recordControlledSkillEvaluationObjective(missingUseInput))
+      .toThrow(/Run facts/i)
   })
 
 })

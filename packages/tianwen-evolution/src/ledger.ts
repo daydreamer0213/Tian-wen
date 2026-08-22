@@ -112,21 +112,28 @@ import type {
   SkillEvalProtocolRecord,
 } from './skill-evaluation.js'
 import {
+  parseControlledSkillEvaluationObjective,
   parseControlledSkillEvaluationPlan,
   parseControlledSkillEvalProtocol,
+  prepareControlledSkillEvaluationObjective,
   prepareControlledSkillEvaluationPlan,
   prepareControlledSkillEvalProtocol,
 } from './controlled-skill-evaluation.js'
 import type {
   ControlledSkillEvaluationId,
+  ControlledSkillEvaluationObjective,
+  ControlledSkillEvaluationObjectiveReceipt,
+  ControlledSkillEvaluationObjectiveRecordedEvent,
   ControlledSkillEvaluationOpenedEvent,
   ControlledSkillEvaluationPlan,
   ControlledSkillEvaluationReceipt,
+  ControlledSkillEvalTaskId,
   ControlledSkillEvalProtocolFrozenEvent,
   ControlledSkillEvalProtocolReceipt,
   ControlledSkillEvalProtocolRecord,
   FreezeControlledSkillEvalProtocolInput,
   OpenControlledSkillEvaluationInput,
+  RecordControlledSkillEvaluationObjectiveInput,
 } from './controlled-skill-evaluation.js'
 
 export type ArtifactId = `artifact:${string}`
@@ -226,6 +233,7 @@ export type LedgerEvent =
   | SkillEvaluationResultRecordedEvent
   | ControlledSkillEvalProtocolFrozenEvent
   | ControlledSkillEvaluationOpenedEvent
+  | ControlledSkillEvaluationObjectiveRecordedEvent
   | ArtifactRecordedEvent
   | EvaluationRecordedEvent
   | ApprovalRecordedEvent
@@ -907,6 +915,31 @@ function parseEvent(value: unknown): LedgerEvent {
       inputDigest,
     }
   }
+  if (type === 'controlled-skill-evaluation-objective-recorded') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'objective', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.controlled-skill-evaluation-objective.v2') {
+      throw new LedgerIntegrityError('invalid controlled Skill evaluation objective event version')
+    }
+    let objective
+    try {
+      objective = parseControlledSkillEvaluationObjective(value.objective)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid controlled Skill evaluation objective event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(objective)) {
+      throw new LedgerIntegrityError('controlled Skill evaluation objective digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.controlled-skill-evaluation-objective.v2',
+      type,
+      at,
+      objective,
+      inputDigest,
+    }
+  }
   if (type === 'skill-eval-protocol-frozen') {
     exactKeys(value, [
       'schemaVersion', 'type', 'at', 'protocol', 'inputDigest',
@@ -1336,6 +1369,10 @@ export class EvolutionLedger {
     ControlledSkillEvaluationId,
     ControlledSkillEvaluationPlan
   >()
+  readonly #controlledSkillEvaluationObjectives = new Map<
+    ControlledSkillEvaluationId,
+    Map<ControlledSkillEvalTaskId, ControlledSkillEvaluationObjective>
+  >()
   readonly #skillEvaluationPlans = new Map<
     SkillEvaluationId,
     SkillEvaluationPlan
@@ -1615,6 +1652,66 @@ export class EvolutionLedger {
 
   listControlledSkillEvaluations(): readonly ControlledSkillEvaluationPlan[] {
     return clone([...this.#controlledSkillEvaluationPlans.values()])
+  }
+
+  recordControlledSkillEvaluationObjective(
+    input: RecordControlledSkillEvaluationObjectiveInput,
+  ): ControlledSkillEvaluationObjectiveReceipt {
+    const plan = this.#controlledSkillEvaluationPlans.get(input.evaluationId)
+    if (plan === undefined) {
+      throw new LedgerIntegrityError(`unknown controlled Skill evaluation: ${input.evaluationId}`)
+    }
+    let objective
+    try {
+      objective = prepareControlledSkillEvaluationObjective(input, plan)
+    } catch (error) {
+      throw new LedgerIntegrityError('controlled Skill evaluation objective input is invalid', {
+        cause: error,
+      })
+    }
+    this.#validateControlledSkillEvaluationObjectiveRunFacts(objective)
+    const existing = this.#controlledSkillEvaluationObjectives
+      .get(objective.evaluationId)?.get(objective.taskId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(objective)) {
+        throw new LedgerIntegrityError(
+          `controlled Skill evaluation objective changed: ${objective.taskId}`,
+        )
+      }
+      return {
+        evaluationId: objective.evaluationId,
+        taskId: objective.taskId,
+        duplicate: true,
+      }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.controlled-skill-evaluation-objective.v2',
+      type: 'controlled-skill-evaluation-objective-recorded',
+      at: this.#now(),
+      objective,
+      inputDigest: sha256(objective),
+    })
+    return {
+      evaluationId: objective.evaluationId,
+      taskId: objective.taskId,
+      duplicate: false,
+    }
+  }
+
+  getControlledSkillEvaluationObjective(
+    evaluationId: ControlledSkillEvaluationId,
+    taskId: ControlledSkillEvalTaskId,
+  ): ControlledSkillEvaluationObjective | undefined {
+    const objective = this.#controlledSkillEvaluationObjectives.get(evaluationId)?.get(taskId)
+    return objective === undefined ? undefined : clone(objective)
+  }
+
+  listControlledSkillEvaluationObjectives(
+    evaluationId: ControlledSkillEvaluationId,
+  ): readonly ControlledSkillEvaluationObjective[] {
+    return clone([
+      ...(this.#controlledSkillEvaluationObjectives.get(evaluationId)?.values() ?? []),
+    ])
   }
 
   freezeSkillEvalProtocol(
@@ -2491,6 +2588,83 @@ export class EvolutionLedger {
     }
   }
 
+  #validateControlledSkillEvaluationObjectiveRunFacts(
+    objective: ControlledSkillEvaluationObjective,
+  ): void {
+    const plan = this.#controlledSkillEvaluationPlans.get(objective.evaluationId)
+    const task = plan?.tasks.find(item => item.taskId === objective.taskId)
+    const candidate = plan === undefined
+      ? undefined
+      : this.#skillCandidates.get(plan.candidateId)
+    const parent = plan === undefined
+      ? undefined
+      : [...this.#runSkillManifests.values()]
+        .find(manifest => manifest.parentVersionId === plan.parentVersionId)
+    if (
+      plan === undefined
+      || task === undefined
+      || candidate === undefined
+      || parent === undefined
+      || candidate.parentVersionId !== plan.parentVersionId
+      || candidate.payloadDigest !== plan.candidatePayloadDigest
+      || sha256(parent.parent) !== plan.parentPayloadDigest
+    ) {
+      throw new LedgerIntegrityError(
+        'controlled Skill evaluation objective lacks its governed Skill identities',
+      )
+    }
+    for (const [arm, armPlan] of [
+      [objective.baseline, task.baseline],
+      [objective.candidate, task.candidate],
+    ] as const) {
+      const binding = this.#runBindings.get(arm.runId)
+      const manifest = this.#runSkillManifests.get(arm.runId)
+      const use = this.#runSkillUses.get(arm.runId)
+      const outcome = [...this.#outcomeIntakes.values()]
+        .find(value => value.input.runId === arm.runId)?.input
+      const expectedBinding = prepareRunBinding({
+        goalRef: `goal:controlled-skill-evaluation:${plan.protocolId}`,
+        taskRef: `task:${task.taskId}:${arm.role}`,
+        sessionId: armPlan.sessionId,
+        scopeKey: plan.scopeKey,
+        acceptanceContract: task.acceptanceContract,
+        acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+      })
+      if (
+        binding === undefined
+        || binding.schemaVersion !== 'tianwen.run-binding.v2'
+        || canonicalJson(binding) !== canonicalJson(expectedBinding)
+        || manifest === undefined
+        || use === undefined
+        || outcome === undefined
+        || outcome.verdict !== arm.outcome
+        || canonicalJson(outcome.evidenceIds) !== canonicalJson(arm.evidenceIds)
+        || use.runId !== arm.runId
+        || use.parentVersionId !== manifest.parentVersionId
+        || use.sessionId !== arm.sessionId
+        || use.contentDigest !== manifest.contentDigest
+        || !arm.evidenceIds.includes(use.acceptanceEvidenceId)
+        || arm.skillVersionId !== manifest.parentVersionId
+        || arm.contentDigest !== manifest.contentDigest
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation objective disagrees with Run facts',
+        )
+      }
+      const expectedManifest = prepareRunSkillManifest({
+        runId: arm.runId,
+        skill: arm.role === 'baseline'
+          ? { ...parent.parent, provider: parent.resolvedProvider }
+          : { ...candidate.payload, provider: manifest.resolvedProvider },
+      })
+      if (canonicalJson(manifest) !== canonicalJson(expectedManifest)) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation objective disagrees with governed Skill content',
+        )
+      }
+    }
+  }
+
   #accept(event: LedgerEvent): void {
     const parsed = parseEvent(event)
     this.#validateAgainstState(parsed)
@@ -2657,6 +2831,55 @@ export class EvolutionLedger {
       ) {
         throw new LedgerIntegrityError(
           'controlled Skill evaluation plan disagrees with history',
+        )
+      }
+      return
+    }
+    if (event.type === 'controlled-skill-evaluation-objective-recorded') {
+      const plan = this.#controlledSkillEvaluationPlans.get(event.objective.evaluationId)
+      const stored = this.#controlledSkillEvaluationObjectives.get(event.objective.evaluationId)
+      if (
+        plan === undefined
+        || stored?.has(event.objective.taskId) === true
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation objective disagrees with history',
+        )
+      }
+      let prepared
+      try {
+        const { schemaVersion: _schemaVersion, ...input } = event.objective
+        const {
+          comparison: _comparison,
+          candidateHardGate: _candidateHardGate,
+          objectiveVerdict: _objectiveVerdict,
+          ...recordInput
+        } = input
+        prepared = prepareControlledSkillEvaluationObjective(recordInput, plan)
+      } catch (error) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation objective event is invalid',
+          { cause: error },
+        )
+      }
+      const previous = stored === undefined ? [] : [...stored.values()]
+      const expectedTask = plan.tasks[previous.length]
+      if (
+        expectedTask?.taskId !== prepared.taskId
+        || previous.at(-1)?.objectiveVerdict !== undefined
+          && previous.at(-1)?.objectiveVerdict !== 'pass'
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation objectives must follow the protocol task order',
+        )
+      }
+      this.#validateControlledSkillEvaluationObjectiveRunFacts(prepared)
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.objective)
+        || event.inputDigest !== sha256(event.objective)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation objective disagrees with frozen facts',
         )
       }
       return
@@ -3155,6 +3378,13 @@ export class EvolutionLedger {
     }
     if (event.type === 'controlled-skill-evaluation-opened') {
       this.#controlledSkillEvaluationPlans.set(event.plan.evaluationId, event.plan)
+      return
+    }
+    if (event.type === 'controlled-skill-evaluation-objective-recorded') {
+      const objectives = this.#controlledSkillEvaluationObjectives
+        .get(event.objective.evaluationId) ?? new Map()
+      objectives.set(event.objective.taskId, event.objective)
+      this.#controlledSkillEvaluationObjectives.set(event.objective.evaluationId, objectives)
       return
     }
     if (event.type === 'skill-eval-protocol-frozen') {
