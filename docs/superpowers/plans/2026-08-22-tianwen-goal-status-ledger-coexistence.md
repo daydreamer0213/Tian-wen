@@ -386,8 +386,12 @@ Then update the existing exact contracts:
   addon, and private DSH source are absent;
 - the new compat subpath compiles and resolves only `isSkillName`; it exports no
   render helper, `ScriptedAdapter`, or other value, and the status/CLI metafiles
-  and output text contain no scripted-adapter path, Stage 4 provider constant,
-  `dsh-tool-skill`, test harness, or probe;
+  contain no scripted-adapter implementation, `dsh-tool-skill`, test harness,
+  probe, Provider factory, or request path;
+- the authoritative private-event validator may retain its closed historical
+  provider/evidence enum literal. That literal is not executable Provider code
+  and remains private: the status schema and serialized output must never
+  project it or any governed event fact;
 - external package paths are exact and deduplicated;
 - the TypeScript focused Vitest command includes
   `tests/dsh-migration/goal-status.spec.ts`;
