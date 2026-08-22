@@ -26,6 +26,12 @@ type PublicLedgerEventPrivacyContract = AssertNever<Extract<
       | 'controlled-skill-evaluation-result-recorded'
       | 'controlled-skill-shadow-opened'
       | 'controlled-skill-shadow-result-recorded'
+      | 'controlled-skill-pointer-initialized'
+      | 'controlled-skill-promoted'
+      | 'controlled-skill-rolled-back'
+      | 'controlled-skill-restored'
+      | 'controlled-skill-transition-verified'
+      | 'controlled-skill-activation-failed'
   }
 >>
 
@@ -181,6 +187,34 @@ export {
   prepareControlledSkillShadowPlan,
   prepareControlledSkillShadowResult,
 } from './controlled-skill-shadow.js'
+export {
+  CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1,
+  controlledSkillTransitionExecutionManifestDigest,
+  prepareControlledSkillPromotionRecommendation,
+} from './controlled-skill-activation.js'
+export type {
+  BeginControlledSkillTransitionInput,
+  CompleteControlledSkillTransitionInput,
+  ControlledSkillActivationFailureReasonCode,
+  ControlledSkillActivationFailureReceipt,
+  ControlledSkillActivationSource,
+  ControlledSkillPromotionRecommendation,
+  ControlledSkillScopePointer,
+  ControlledSkillScopePointerReceipt,
+  ControlledSkillTransition,
+  ControlledSkillTransitionCompletionReceipt,
+  ControlledSkillTransitionId,
+  ControlledSkillTransitionKind,
+  ControlledSkillTransitionPostCheck,
+  ControlledSkillTransitionPostCheckInput,
+  ControlledSkillTransitionReceipt,
+  ControlledSkillTransitionRun,
+  ControlledSkillTransitionStartReceipt,
+  ControlledSkillTransitionState,
+  ControlledSkillTransitionUsage,
+  InitializeControlledSkillScopePointerInput,
+  RecordControlledSkillActivationFailedInput,
+} from './controlled-skill-activation.js'
 export type {
   ControlledSkillShadowId,
   ControlledSkillShadowMechanismVerdict,

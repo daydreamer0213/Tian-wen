@@ -170,6 +170,38 @@ import type {
   RecordControlledSkillEvaluationResultInput,
   RecordControlledSkillEvaluatorObservationInput,
 } from './controlled-skill-evaluation.js'
+import {
+  parseControlledSkillActivationFailure,
+  parseControlledSkillPointerInitialization,
+  parseControlledSkillTransition,
+  parseControlledSkillTransitionVerification,
+  prepareControlledSkillActivationFailure,
+  prepareControlledSkillPointerInitialization,
+  prepareControlledSkillPromotionRecommendation,
+  prepareControlledSkillTransition,
+  prepareControlledSkillTransitionVerification,
+} from './controlled-skill-activation.js'
+import type {
+  BeginControlledSkillTransitionInput,
+  CompleteControlledSkillTransitionInput,
+  ControlledSkillActivationFailedEvent,
+  ControlledSkillActivationFailure,
+  ControlledSkillActivationFailureReceipt,
+  ControlledSkillPointerInitializedEvent,
+  ControlledSkillPointerInitialization,
+  ControlledSkillScopePointer,
+  ControlledSkillScopePointerReceipt,
+  ControlledSkillTransition,
+  ControlledSkillTransitionCompletionReceipt,
+  ControlledSkillTransitionId,
+  ControlledSkillTransitionReceipt,
+  ControlledSkillTransitionStartReceipt,
+  ControlledSkillTransitionStartedEvent,
+  ControlledSkillTransitionVerifiedEvent,
+  ControlledSkillTransitionVerification,
+  InitializeControlledSkillScopePointerInput,
+  RecordControlledSkillActivationFailedInput,
+} from './controlled-skill-activation.js'
 
 export type ArtifactId = `artifact:${string}`
 export type Sha256Digest = `sha256:${string}`
@@ -274,6 +306,10 @@ export type LedgerEvent =
   | ControlledSkillEvaluationResultRecordedEvent
   | ControlledSkillShadowOpenedEvent
   | ControlledSkillShadowResultRecordedEvent
+  | ControlledSkillPointerInitializedEvent
+  | ControlledSkillTransitionStartedEvent
+  | ControlledSkillTransitionVerifiedEvent
+  | ControlledSkillActivationFailedEvent
   | ArtifactRecordedEvent
   | EvaluationRecordedEvent
   | ApprovalRecordedEvent
@@ -1105,6 +1141,111 @@ function parseEvent(value: unknown): LedgerEvent {
       inputDigest,
     }
   }
+  if (type === 'controlled-skill-pointer-initialized') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'initialization', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.controlled-skill-pointer-initialization.v2') {
+      throw new LedgerIntegrityError('invalid controlled Skill pointer event version')
+    }
+    let initialization
+    try {
+      initialization = parseControlledSkillPointerInitialization(value.initialization)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid controlled Skill pointer event', { cause: error })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(initialization)) {
+      throw new LedgerIntegrityError('controlled Skill pointer digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.controlled-skill-pointer-initialization.v2',
+      type,
+      at,
+      initialization,
+      inputDigest,
+    }
+  }
+  if (
+    type === 'controlled-skill-promoted'
+    || type === 'controlled-skill-rolled-back'
+    || type === 'controlled-skill-restored'
+  ) {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'transition', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.controlled-skill-transition.v2') {
+      throw new LedgerIntegrityError('invalid controlled Skill transition event version')
+    }
+    let transition
+    try {
+      transition = parseControlledSkillTransition(value.transition)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid controlled Skill transition event', { cause: error })
+    }
+    const expectedType = transition.kind === 'promote'
+      ? 'controlled-skill-promoted'
+      : transition.kind === 'rollback'
+        ? 'controlled-skill-rolled-back'
+        : 'controlled-skill-restored'
+    const inputDigest = requireDigest(value.inputDigest)
+    if (type !== expectedType || inputDigest !== sha256(transition)) {
+      throw new LedgerIntegrityError('controlled Skill transition digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.controlled-skill-transition.v2',
+      type,
+      at,
+      transition,
+      inputDigest,
+    }
+  }
+  if (type === 'controlled-skill-transition-verified') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'verification', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.controlled-skill-transition-verification.v2') {
+      throw new LedgerIntegrityError('invalid controlled Skill transition verification event version')
+    }
+    let verification
+    try {
+      verification = parseControlledSkillTransitionVerification(value.verification)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid controlled Skill transition verification event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(verification)) {
+      throw new LedgerIntegrityError('controlled Skill transition verification digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.controlled-skill-transition-verification.v2',
+      type,
+      at,
+      verification,
+      inputDigest,
+    }
+  }
+  if (type === 'controlled-skill-activation-failed') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'failure', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.controlled-skill-activation-failure.v2') {
+      throw new LedgerIntegrityError('invalid controlled Skill activation failure event version')
+    }
+    let failure
+    try {
+      failure = parseControlledSkillActivationFailure(value.failure)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid controlled Skill activation failure event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(failure)) {
+      throw new LedgerIntegrityError('controlled Skill activation failure digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.controlled-skill-activation-failure.v2',
+      type,
+      at,
+      failure,
+      inputDigest,
+    }
+  }
   if (type === 'skill-eval-protocol-frozen') {
     exactKeys(value, [
       'schemaVersion', 'type', 'at', 'protocol', 'inputDigest',
@@ -1561,6 +1702,38 @@ export class EvolutionLedger {
   readonly #controlledSkillShadowResults = new Map<
     ControlledSkillShadowId,
     ControlledSkillShadowResult
+  >()
+  readonly #controlledSkillPointerInitializations = new Map<
+    ControlledSkillShadowId,
+    ControlledSkillPointerInitialization
+  >()
+  readonly #controlledSkillPointerInitializationByScope = new Map<
+    string,
+    ControlledSkillPointerInitialization
+  >()
+  readonly #controlledSkillScopePointers = new Map<
+    string,
+    ControlledSkillScopePointer
+  >()
+  readonly #controlledSkillTransitions = new Map<
+    ControlledSkillTransitionId,
+    ControlledSkillTransition
+  >()
+  readonly #controlledSkillTransitionIdsByLogicalKey = new Map<
+    string,
+    ControlledSkillTransitionId
+  >()
+  readonly #controlledSkillTransitionIdsByShadow = new Map<
+    ControlledSkillShadowId,
+    ControlledSkillTransitionId[]
+  >()
+  readonly #controlledSkillTransitionVerifications = new Map<
+    ControlledSkillTransitionId,
+    ControlledSkillTransitionVerification
+  >()
+  readonly #controlledSkillActivationFailures = new Map<
+    ControlledSkillTransitionId,
+    ControlledSkillActivationFailure
   >()
   readonly #skillEvaluationPlans = new Map<
     SkillEvaluationId,
@@ -2192,6 +2365,262 @@ export class EvolutionLedger {
 
   listControlledSkillShadowResults(): readonly ControlledSkillShadowResult[] {
     return clone([...this.#controlledSkillShadowResults.values()])
+  }
+
+  initializeControlledSkillScopePointer(
+    input: InitializeControlledSkillScopePointerInput,
+  ): ControlledSkillScopePointerReceipt {
+    if (!isRecord(input)) {
+      throw new LedgerIntegrityError('controlled Skill pointer input is invalid')
+    }
+    exactKeys(input, ['shadowId'])
+    const shadowId = requireString(input.shadowId, 'shadowId') as ControlledSkillShadowId
+    const recommendation = this.#controlledSkillPromotionRecommendation(shadowId)
+    let initialization
+    try {
+      initialization = prepareControlledSkillPointerInitialization(recommendation)
+    } catch (error) {
+      throw new LedgerIntegrityError('controlled Skill pointer input is invalid', { cause: error })
+    }
+    const existing = this.#controlledSkillPointerInitializations.get(shadowId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(initialization)) {
+        throw new LedgerIntegrityError(`controlled Skill pointer changed: ${shadowId}`)
+      }
+      return {
+        scopeKey: existing.pointer.scopeKey,
+        revision: existing.pointer.revision,
+        duplicate: true,
+      }
+    }
+    if (this.#controlledSkillPointerInitializationByScope.has(initialization.pointer.scopeKey)) {
+      throw new LedgerIntegrityError(
+        `controlled Skill scope already has a governed pointer: ${initialization.pointer.scopeKey}`,
+      )
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.controlled-skill-pointer-initialization.v2',
+      type: 'controlled-skill-pointer-initialized',
+      at: this.#now(),
+      initialization,
+      inputDigest: sha256(initialization),
+    })
+    return {
+      scopeKey: initialization.pointer.scopeKey,
+      revision: initialization.pointer.revision,
+      duplicate: false,
+    }
+  }
+
+  getControlledSkillScopePointer(
+    scopeKey: string,
+  ): ControlledSkillScopePointer | undefined {
+    const pointer = this.#controlledSkillScopePointers.get(scopeKey)
+    return pointer === undefined ? undefined : clone(pointer)
+  }
+
+  listControlledSkillScopePointers(): readonly ControlledSkillScopePointer[] {
+    return clone([...this.#controlledSkillScopePointers.values()])
+  }
+
+  beginControlledSkillTransition(
+    input: BeginControlledSkillTransitionInput,
+  ): ControlledSkillTransitionStartReceipt {
+    if (!isRecord(input)) {
+      throw new LedgerIntegrityError('controlled Skill transition input is invalid')
+    }
+    exactKeys(input, ['shadowId', 'kind', 'expectedRevision', 'postCheck'])
+    const shadowId = requireString(input.shadowId, 'shadowId') as ControlledSkillShadowId
+    const kind = requireString(input.kind, 'kind')
+    if (!Number.isSafeInteger(input.expectedRevision)) {
+      throw new LedgerIntegrityError('controlled Skill transition expectedRevision is invalid')
+    }
+    const logicalKey = `${shadowId}:${kind}:${input.expectedRevision}`
+    const existingId = this.#controlledSkillTransitionIdsByLogicalKey.get(logicalKey)
+    const recommendation = this.#controlledSkillPromotionRecommendation(shadowId)
+    if (existingId !== undefined) {
+      const existing = this.#controlledSkillTransitions.get(existingId)!
+      let replay
+      try {
+        replay = prepareControlledSkillTransition(
+          input,
+          recommendation,
+          existing.previousPointer,
+        )
+      } catch (error) {
+        throw new LedgerIntegrityError('controlled Skill transition replay is invalid', {
+          cause: error,
+        })
+      }
+      if (canonicalJson(existing) !== canonicalJson(replay)) {
+        throw new LedgerIntegrityError(`controlled Skill transition changed: ${existingId}`)
+      }
+      return { transitionId: existingId, duplicate: true }
+    }
+    const initialization = this.#controlledSkillPointerInitializations.get(shadowId)
+    if (initialization === undefined) {
+      throw new LedgerIntegrityError(`controlled Skill pointer is not initialized: ${shadowId}`)
+    }
+    const previousPointer = this.#controlledSkillScopePointers.get(
+      initialization.pointer.scopeKey,
+    )
+    if (previousPointer === undefined) {
+      throw new LedgerIntegrityError('controlled Skill scope pointer is unavailable')
+    }
+    let transition
+    try {
+      transition = prepareControlledSkillTransition(input, recommendation, previousPointer)
+    } catch (error) {
+      throw new LedgerIntegrityError('controlled Skill transition input is invalid', { cause: error })
+    }
+    this.#validateControlledSkillTransitionOrder(transition)
+    if (this.#runIdBySession.has(transition.postCheck.sessionId)) {
+      throw new LedgerIntegrityError('controlled Skill transition requires a fresh Session')
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.controlled-skill-transition.v2',
+      type: transition.kind === 'promote'
+        ? 'controlled-skill-promoted'
+        : transition.kind === 'rollback'
+          ? 'controlled-skill-rolled-back'
+          : 'controlled-skill-restored',
+      at: this.#now(),
+      transition,
+      inputDigest: sha256(transition),
+    })
+    return { transitionId: transition.transitionId, duplicate: false }
+  }
+
+  getControlledSkillTransition(
+    transitionId: ControlledSkillTransitionId,
+  ): ControlledSkillTransition | undefined {
+    const transition = this.#controlledSkillTransitions.get(transitionId)
+    return transition === undefined ? undefined : clone(transition)
+  }
+
+  listControlledSkillTransitions(): readonly ControlledSkillTransition[] {
+    return clone([...this.#controlledSkillTransitions.values()])
+  }
+
+  completeControlledSkillTransition(
+    input: CompleteControlledSkillTransitionInput,
+  ): ControlledSkillTransitionCompletionReceipt {
+    if (!isRecord(input)) {
+      throw new LedgerIntegrityError('controlled Skill transition completion is invalid')
+    }
+    exactKeys(input, ['transitionId', 'run'])
+    const transitionId = requireString(
+      input.transitionId,
+      'transitionId',
+    ) as ControlledSkillTransitionId
+    const transition = this.#controlledSkillTransitions.get(transitionId)
+    if (transition === undefined) {
+      throw new LedgerIntegrityError(`unknown controlled Skill transition: ${transitionId}`)
+    }
+    let verification
+    try {
+      verification = prepareControlledSkillTransitionVerification(input, transition)
+    } catch (error) {
+      throw new LedgerIntegrityError('controlled Skill transition completion is invalid', {
+        cause: error,
+      })
+    }
+    const existing = this.#controlledSkillTransitionVerifications.get(transitionId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(verification)) {
+        throw new LedgerIntegrityError(
+          `controlled Skill transition verification changed: ${transitionId}`,
+        )
+      }
+      return { transitionId, state: 'verified', duplicate: true }
+    }
+    if (this.#controlledSkillActivationFailures.has(transitionId)) {
+      throw new LedgerIntegrityError('controlled Skill transition was recovered')
+    }
+    const pointer = this.#controlledSkillScopePointers.get(transition.targetPointer.scopeKey)
+    if (canonicalJson(pointer) !== canonicalJson(transition.targetPointer)) {
+      throw new LedgerIntegrityError('controlled Skill transition pointer drifted')
+    }
+    this.#validateControlledSkillTransitionRunFacts(transition, verification)
+    this.#accept({
+      schemaVersion: 'tianwen.controlled-skill-transition-verification.v2',
+      type: 'controlled-skill-transition-verified',
+      at: this.#now(),
+      verification,
+      inputDigest: sha256(verification),
+    })
+    return { transitionId, state: 'verified', duplicate: false }
+  }
+
+  getControlledSkillTransitionReceipt(
+    transitionId: ControlledSkillTransitionId,
+  ): ControlledSkillTransitionReceipt | undefined {
+    const transition = this.#controlledSkillTransitions.get(transitionId)
+    if (transition === undefined) return undefined
+    const failure = this.#controlledSkillActivationFailures.get(transitionId)
+    if (failure !== undefined) {
+      return {
+        transitionId,
+        state: 'recovered',
+        pointer: clone(failure.recoveredPointer),
+        reasonCode: failure.reasonCode,
+      }
+    }
+    return {
+      transitionId,
+      state: this.#controlledSkillTransitionVerifications.has(transitionId)
+        ? 'verified'
+        : 'pending-post-check',
+      pointer: clone(transition.targetPointer),
+      reasonCode: null,
+    }
+  }
+
+  recordControlledSkillActivationFailed(
+    input: RecordControlledSkillActivationFailedInput,
+  ): ControlledSkillActivationFailureReceipt {
+    if (!isRecord(input)) {
+      throw new LedgerIntegrityError('controlled Skill activation failure input is invalid')
+    }
+    exactKeys(input, ['transitionId', 'reasonCode'])
+    const transitionId = requireString(
+      input.transitionId,
+      'transitionId',
+    ) as ControlledSkillTransitionId
+    const transition = this.#controlledSkillTransitions.get(transitionId)
+    if (transition === undefined) {
+      throw new LedgerIntegrityError(`unknown controlled Skill transition: ${transitionId}`)
+    }
+    let failure
+    try {
+      failure = prepareControlledSkillActivationFailure(input, transition)
+    } catch (error) {
+      throw new LedgerIntegrityError('controlled Skill activation failure input is invalid', {
+        cause: error,
+      })
+    }
+    const existing = this.#controlledSkillActivationFailures.get(transitionId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(failure)) {
+        throw new LedgerIntegrityError(`controlled Skill activation failure changed: ${transitionId}`)
+      }
+      return { transitionId, state: 'recovered', duplicate: true }
+    }
+    if (this.#controlledSkillTransitionVerifications.has(transitionId)) {
+      throw new LedgerIntegrityError('verified controlled Skill transition cannot be recovered')
+    }
+    const pointer = this.#controlledSkillScopePointers.get(transition.targetPointer.scopeKey)
+    if (canonicalJson(pointer) !== canonicalJson(transition.targetPointer)) {
+      throw new LedgerIntegrityError('controlled Skill activation failure pointer drifted')
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.controlled-skill-activation-failure.v2',
+      type: 'controlled-skill-activation-failed',
+      at: this.#now(),
+      failure,
+      inputDigest: sha256(failure),
+    })
+    return { transitionId, state: 'recovered', duplicate: false }
   }
 
   freezeSkillEvalProtocol(
@@ -3007,6 +3436,164 @@ export class EvolutionLedger {
       ?.findLast(record => !this.#usedApprovals.has(record.approvalId))
   }
 
+  #controlledSkillPromotionRecommendation(
+    shadowId: ControlledSkillShadowId,
+  ): ReturnType<typeof prepareControlledSkillPromotionRecommendation> {
+    const shadow = this.#controlledSkillShadowPlans.get(shadowId)
+    const shadowResult = this.#controlledSkillShadowResults.get(shadowId)
+    const evaluation = shadow === undefined
+      ? undefined
+      : this.#controlledSkillEvaluationPlans.get(shadow.evaluationId)
+    const evaluationResult = shadow === undefined
+      ? undefined
+      : this.#controlledSkillEvaluationResults.get(shadow.evaluationId)
+    const candidate = shadow === undefined
+      ? undefined
+      : this.#skillCandidates.get(shadow.candidateId)
+    const parent = shadow === undefined
+      ? undefined
+      : [...this.#runSkillManifests.values()]
+        .find(manifest => manifest.parentVersionId === shadow.parentVersionId)
+    if (
+      shadow === undefined
+      || shadowResult === undefined
+      || evaluation === undefined
+      || evaluationResult === undefined
+      || candidate === undefined
+      || parent === undefined
+    ) {
+      throw new LedgerIntegrityError(`controlled Skill activation lacks evidence: ${shadowId}`)
+    }
+    try {
+      return prepareControlledSkillPromotionRecommendation(
+        evaluation,
+        evaluationResult,
+        shadow,
+        shadowResult,
+        candidate,
+        sha256(parent.parent),
+      )
+    } catch (error) {
+      throw new LedgerIntegrityError('controlled Skill activation evidence is not fresh', {
+        cause: error,
+      })
+    }
+  }
+
+  #validateControlledSkillTransitionOrder(
+    transition: ControlledSkillTransition,
+  ): void {
+    const initialization = this.#controlledSkillPointerInitializations
+      .get(transition.shadowId)
+    const pointer = this.#controlledSkillScopePointers.get(transition.source.scopeKey)
+    if (
+      initialization === undefined
+      || pointer === undefined
+      || canonicalJson(pointer) !== canonicalJson(transition.previousPointer)
+      || transition.recommendationDigest !== initialization.recommendationDigest
+      || transition.authorizationDigest !== initialization.authorizationDigest
+    ) {
+      throw new LedgerIntegrityError('controlled Skill transition failed compare-and-set')
+    }
+    const priorIds = this.#controlledSkillTransitionIdsByShadow.get(transition.shadowId) ?? []
+    const prior = priorIds.map(id => this.#controlledSkillTransitions.get(id)!)
+    if (
+      prior.some(item => this.#controlledSkillActivationFailures.has(item.transitionId))
+    ) {
+      throw new LedgerIntegrityError('controlled Skill activation stopped after recovery')
+    }
+    if (transition.kind === 'promote') {
+      if (
+        prior.length !== 0
+        || pointer.revision !== 1
+        || pointer.activeVersionId !== transition.source.parentVersionId
+        || pointer.payloadDigest !== transition.source.parentPayloadDigest
+      ) throw new LedgerIntegrityError('controlled Skill promote is out of order')
+      return
+    }
+    const previous = prior.at(-1)
+    if (
+      previous === undefined
+      || !this.#controlledSkillTransitionVerifications.has(previous.transitionId)
+      || canonicalJson(pointer) !== canonicalJson(previous.targetPointer)
+    ) throw new LedgerIntegrityError('prior controlled Skill post-check is not verified')
+    if (transition.kind === 'rollback') {
+      if (
+        prior.length !== 1
+        || previous.kind !== 'promote'
+        || pointer.revision !== 2
+      ) throw new LedgerIntegrityError('controlled Skill rollback is out of order')
+      return
+    }
+    if (
+      prior.length !== 2
+      || previous.kind !== 'rollback'
+      || pointer.revision !== 3
+    ) throw new LedgerIntegrityError('controlled Skill restore is out of order')
+  }
+
+  #validateControlledSkillTransitionRunFacts(
+    transition: ControlledSkillTransition,
+    verification: ControlledSkillTransitionVerification,
+  ): void {
+    const run = verification.run
+    const binding = this.#runBindings.get(run.runId)
+    const manifest = this.#runSkillManifests.get(run.runId)
+    const use = this.#runSkillUses.get(run.runId)
+    const outcome = [...this.#outcomeIntakes.values()]
+      .find(event => event.input.runId === run.runId)?.input
+    const candidate = this.#skillCandidates.get(transition.source.candidateId)
+    const parent = [...this.#runSkillManifests.values()]
+      .find(item => item.parentVersionId === transition.source.parentVersionId)
+    const candidateActive = transition.targetPointer.activeVersionId
+      === transition.source.candidateVersionId
+    const expectedContentDigest = candidateActive
+      ? candidate === undefined ? undefined : sha256(candidate.payload.content)
+      : parent?.contentDigest
+    if (
+      binding === undefined
+      || binding.schemaVersion !== 'tianwen.run-binding.v2'
+      || canonicalJson(binding) !== canonicalJson(transition.runBinding)
+      || manifest === undefined
+      || use === undefined
+      || outcome === undefined
+      || candidate === undefined
+      || parent === undefined
+      || run.runId !== transition.postCheck.runId
+      || run.sessionId !== transition.postCheck.sessionId
+      || run.skillVersionId !== transition.targetPointer.activeVersionId
+      || run.skillVersionId !== manifest.parentVersionId
+      || run.contentDigest !== expectedContentDigest
+      || run.contentDigest !== manifest.contentDigest
+      || use.runId !== run.runId
+      || use.parentVersionId !== manifest.parentVersionId
+      || use.sessionId !== run.sessionId
+      || use.skillName !== candidate.payload.name
+      || use.contentDigest !== run.contentDigest
+      || use.sessionDigest !== outcome.sessionDigest
+      || !run.evidenceIds.includes(use.acceptanceEvidenceId)
+      || run.acceptanceSubjectDigest !== transition.postCheck.acceptanceSubjectDigest
+      || outcome.verdict !== 'met'
+      || outcome.verdict !== run.outcome
+      || canonicalJson(outcome.evidenceIds) !== canonicalJson(run.evidenceIds)
+    ) {
+      throw new LedgerIntegrityError(
+        'controlled Skill transition verification disagrees with Run facts',
+      )
+    }
+    const expectedManifest = prepareRunSkillManifest({
+      runId: run.runId,
+      skill: candidateActive
+        ? { ...candidate.payload, provider: manifest.resolvedProvider }
+        : { ...parent.parent, provider: parent.resolvedProvider },
+    })
+    if (canonicalJson(manifest) !== canonicalJson(expectedManifest)) {
+      throw new LedgerIntegrityError(
+        'controlled Skill transition verification disagrees with active Skill content',
+      )
+    }
+  }
+
   #validateSkillEvaluationRunFacts(result: SkillEvaluationResult): void {
     const plan = this.#skillEvaluationPlans.get(result.evaluationId)
     if (plan === undefined) {
@@ -3652,6 +4239,152 @@ export class EvolutionLedger {
       }
       return
     }
+    if (event.type === 'controlled-skill-pointer-initialized') {
+      const recommendation = this.#controlledSkillPromotionRecommendation(
+        event.initialization.shadowId,
+      )
+      const prepared = prepareControlledSkillPointerInitialization(recommendation)
+      if (
+        this.#controlledSkillPointerInitializations.has(event.initialization.shadowId)
+        || this.#controlledSkillPointerInitializationByScope.has(
+          event.initialization.pointer.scopeKey,
+        )
+        || canonicalJson(prepared) !== canonicalJson(event.initialization)
+        || event.inputDigest !== sha256(event.initialization)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill pointer initialization disagrees with history',
+        )
+      }
+      return
+    }
+    if (
+      event.type === 'controlled-skill-promoted'
+      || event.type === 'controlled-skill-rolled-back'
+      || event.type === 'controlled-skill-restored'
+    ) {
+      const transition = event.transition
+      if (
+        this.#controlledSkillTransitions.has(transition.transitionId)
+        || this.#controlledSkillTransitionIdsByLogicalKey.has(
+          `${transition.shadowId}:${transition.kind}:${transition.previousPointer.revision}`,
+        )
+        || this.#runBindings.has(transition.runBinding.runId)
+        || this.#runIdBySession.has(transition.runBinding.sessionId)
+      ) {
+        throw new LedgerIntegrityError('controlled Skill transition disagrees with history')
+      }
+      const recommendation = this.#controlledSkillPromotionRecommendation(transition.shadowId)
+      let prepared
+      try {
+        prepared = prepareControlledSkillTransition({
+          shadowId: transition.shadowId,
+          kind: transition.kind,
+          expectedRevision: transition.previousPointer.revision,
+          postCheck: {
+            goalDigest: transition.postCheck.goalDigest,
+            inputDigest: transition.postCheck.inputDigest,
+            workspaceSnapshotDigest: transition.postCheck.workspaceSnapshotDigest,
+            toolSchemaDigest: transition.postCheck.toolSchemaDigest,
+            authorizationDigest: transition.postCheck.authorizationDigest,
+            verifierContractDigest: transition.postCheck.verifierContractDigest,
+            stopConditionDigest: transition.postCheck.stopConditionDigest,
+            acceptanceContract: transition.postCheck.acceptanceContract,
+            acceptanceSubjectDigest: transition.postCheck.acceptanceSubjectDigest,
+            allowedTools: transition.postCheck.allowedTools,
+            stopContract: transition.postCheck.stopContract,
+            sessionId: transition.postCheck.sessionId,
+          },
+        }, recommendation, transition.previousPointer)
+      } catch (error) {
+        throw new LedgerIntegrityError('controlled Skill transition event is invalid', {
+          cause: error,
+        })
+      }
+      this.#validateControlledSkillTransitionOrder(prepared)
+      if (
+        canonicalJson(prepared) !== canonicalJson(transition)
+        || event.inputDigest !== sha256(transition)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill transition disagrees with frozen facts',
+        )
+      }
+      return
+    }
+    if (event.type === 'controlled-skill-transition-verified') {
+      const transition = this.#controlledSkillTransitions.get(
+        event.verification.transitionId,
+      )
+      if (
+        transition === undefined
+        || this.#controlledSkillTransitionVerifications.has(transition.transitionId)
+        || this.#controlledSkillActivationFailures.has(transition.transitionId)
+        || canonicalJson(this.#controlledSkillScopePointers.get(
+          transition.targetPointer.scopeKey,
+        )) !== canonicalJson(transition.targetPointer)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill transition verification disagrees with history',
+        )
+      }
+      let prepared
+      try {
+        prepared = prepareControlledSkillTransitionVerification({
+          transitionId: transition.transitionId,
+          run: event.verification.run,
+        }, transition)
+      } catch (error) {
+        throw new LedgerIntegrityError('controlled Skill transition verification is invalid', {
+          cause: error,
+        })
+      }
+      this.#validateControlledSkillTransitionRunFacts(transition, prepared)
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.verification)
+        || event.inputDigest !== sha256(event.verification)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill transition verification disagrees with frozen facts',
+        )
+      }
+      return
+    }
+    if (event.type === 'controlled-skill-activation-failed') {
+      const transition = this.#controlledSkillTransitions.get(event.failure.transitionId)
+      if (
+        transition === undefined
+        || this.#controlledSkillActivationFailures.has(transition.transitionId)
+        || this.#controlledSkillTransitionVerifications.has(transition.transitionId)
+        || canonicalJson(this.#controlledSkillScopePointers.get(
+          transition.targetPointer.scopeKey,
+        )) !== canonicalJson(transition.targetPointer)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill activation failure disagrees with history',
+        )
+      }
+      let prepared
+      try {
+        prepared = prepareControlledSkillActivationFailure({
+          transitionId: transition.transitionId,
+          reasonCode: event.failure.reasonCode,
+        }, transition)
+      } catch (error) {
+        throw new LedgerIntegrityError('controlled Skill activation failure is invalid', {
+          cause: error,
+        })
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.failure)
+        || event.inputDigest !== sha256(event.failure)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill activation failure disagrees with frozen facts',
+        )
+      }
+      return
+    }
     if (event.type === 'skill-eval-protocol-frozen') {
       const ticket = this.#learningTickets.get(event.protocol.ticketId)
       if (
@@ -4186,6 +4919,65 @@ export class EvolutionLedger {
     }
     if (event.type === 'controlled-skill-shadow-result-recorded') {
       this.#controlledSkillShadowResults.set(event.result.shadowId, event.result)
+      return
+    }
+    if (event.type === 'controlled-skill-pointer-initialized') {
+      const initialization = event.initialization
+      this.#controlledSkillPointerInitializations.set(
+        initialization.shadowId,
+        initialization,
+      )
+      this.#controlledSkillPointerInitializationByScope.set(
+        initialization.pointer.scopeKey,
+        initialization,
+      )
+      this.#controlledSkillScopePointers.set(
+        initialization.pointer.scopeKey,
+        initialization.pointer,
+      )
+      return
+    }
+    if (
+      event.type === 'controlled-skill-promoted'
+      || event.type === 'controlled-skill-rolled-back'
+      || event.type === 'controlled-skill-restored'
+    ) {
+      const transition = event.transition
+      this.#controlledSkillTransitions.set(transition.transitionId, transition)
+      this.#controlledSkillTransitionIdsByLogicalKey.set(
+        `${transition.shadowId}:${transition.kind}:${transition.previousPointer.revision}`,
+        transition.transitionId,
+      )
+      const ids = this.#controlledSkillTransitionIdsByShadow.get(transition.shadowId) ?? []
+      ids.push(transition.transitionId)
+      this.#controlledSkillTransitionIdsByShadow.set(transition.shadowId, ids)
+      this.#controlledSkillScopePointers.set(
+        transition.targetPointer.scopeKey,
+        transition.targetPointer,
+      )
+      this.#runBindings.set(transition.runBinding.runId, transition.runBinding)
+      this.#runIdBySession.set(
+        transition.runBinding.sessionId,
+        transition.runBinding.runId,
+      )
+      return
+    }
+    if (event.type === 'controlled-skill-transition-verified') {
+      this.#controlledSkillTransitionVerifications.set(
+        event.verification.transitionId,
+        event.verification,
+      )
+      return
+    }
+    if (event.type === 'controlled-skill-activation-failed') {
+      this.#controlledSkillActivationFailures.set(
+        event.failure.transitionId,
+        event.failure,
+      )
+      this.#controlledSkillScopePointers.set(
+        event.failure.recoveredPointer.scopeKey,
+        event.failure.recoveredPointer,
+      )
       return
     }
     if (event.type === 'skill-eval-protocol-frozen') {

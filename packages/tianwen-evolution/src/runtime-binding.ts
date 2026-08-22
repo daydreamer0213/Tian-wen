@@ -101,6 +101,20 @@ import type {
   OpenControlledSkillShadowInput,
   RecordControlledSkillShadowResultInput,
 } from './controlled-skill-shadow.js'
+import type {
+  BeginControlledSkillTransitionInput,
+  CompleteControlledSkillTransitionInput,
+  ControlledSkillActivationFailureReceipt,
+  ControlledSkillScopePointer,
+  ControlledSkillScopePointerReceipt,
+  ControlledSkillTransition,
+  ControlledSkillTransitionCompletionReceipt,
+  ControlledSkillTransitionId,
+  ControlledSkillTransitionReceipt,
+  ControlledSkillTransitionStartReceipt,
+  InitializeControlledSkillScopePointerInput,
+  RecordControlledSkillActivationFailedInput,
+} from './controlled-skill-activation.js'
 
 export interface RuntimeBinding {
   readonly artifactId: ArtifactId
@@ -426,6 +440,60 @@ export class TianwenEvolutionService extends Service {
 
   listControlledSkillShadowResults(): readonly ControlledSkillShadowResult[] {
     return this.state().ledger.listControlledSkillShadowResults()
+  }
+
+  initializeControlledSkillScopePointer(
+    input: InitializeControlledSkillScopePointerInput,
+  ): ControlledSkillScopePointerReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.initializeControlledSkillScopePointer(input))
+  }
+
+  getControlledSkillScopePointer(
+    scopeKey: string,
+  ): ControlledSkillScopePointer | undefined {
+    return this.state().ledger.getControlledSkillScopePointer(scopeKey)
+  }
+
+  listControlledSkillScopePointers(): readonly ControlledSkillScopePointer[] {
+    return this.state().ledger.listControlledSkillScopePointers()
+  }
+
+  beginControlledSkillTransition(
+    input: BeginControlledSkillTransitionInput,
+  ): ControlledSkillTransitionStartReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.beginControlledSkillTransition(input))
+  }
+
+  getControlledSkillTransition(
+    transitionId: ControlledSkillTransitionId,
+  ): ControlledSkillTransition | undefined {
+    return this.state().ledger.getControlledSkillTransition(transitionId)
+  }
+
+  listControlledSkillTransitions(): readonly ControlledSkillTransition[] {
+    return this.state().ledger.listControlledSkillTransitions()
+  }
+
+  completeControlledSkillTransition(
+    input: CompleteControlledSkillTransitionInput,
+  ): ControlledSkillTransitionCompletionReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.completeControlledSkillTransition(input))
+  }
+
+  getControlledSkillTransitionReceipt(
+    transitionId: ControlledSkillTransitionId,
+  ): ControlledSkillTransitionReceipt | undefined {
+    return this.state().ledger.getControlledSkillTransitionReceipt(transitionId)
+  }
+
+  recordControlledSkillActivationFailed(
+    input: RecordControlledSkillActivationFailedInput,
+  ): ControlledSkillActivationFailureReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordControlledSkillActivationFailed(input))
   }
 
   openLearningCase(input: OpenLearningCaseInput): LearningCaseReceipt {
