@@ -53,7 +53,7 @@ Candidate 仍绝不注册。本设计只处理 incumbent parent 的当前 Agent 
 - Stage 3 Candidate payload 仍是纯文本，仍拒绝 `path`、`resourceBase`、`metadata`、assets、references、远程 base 和安装清单；Candidate 永不注册。
 - `RunSkillManifest` 在首个 Turn 前冻结，`RunSkillUse` 只能由真实 DSH `skill` tool 成功 result 派生；catalog 或 host-side `get()` 不能冒充 use proof。
 - 正常 `tianwen resume`、live smoke、Stage 1–6、Stage 4 scripted mechanism、旧 Artifact/Dynamic Cordis/Champion 和 Python Alpha 路径不变。
-- existing safe receipt schema 与 closed failure-code union 不增加成员。任何 snapshot、registration 或 binding 失败仍在 first Turn 前停止，并由现有安全 code/边界处理；不得输出原始异常、path、resource base、metadata、Skill body、prompt、tool 参数/结果或 credential。
+- existing safe receipt schema 与 closed failure-code union 不增加成员。filesystem resolve、单文件验证、snapshot projection、scoped registration 或 `prepareRunSkillManifest()` precondition 失败都在任何 Evolution write 前、first Turn 前停止；不得输出原始异常、path、resource base、metadata、Skill body、prompt、tool 参数/结果或 credential。既有 binding persistence 失败仍是另一条 source-owned 语义，见 §6.3；本设计不把它伪称为 0 Evolution write。
 - 60 CNY 仍只是外部累计授权；本设计和实现为 0 Provider、0 paid token、0 CNY、0 Docker，不引入价格查询、预算器、预留或轮询。
 
 ## 4. 方案比较
@@ -150,7 +150,11 @@ filesystem get in prepared Agent scope
   -> existing evidence + recordSkillUse compare frozen snapshot render
 ```
 
-只有最后两项已有成功路径才会写既有 Run/Outcome/Skill-use facts。snapshot validation、registration 或 binding 任何失败均在 `ctx.goals.resume()` 前、无 Turn/Model/Tool/Evolution write 时停止；safe child receipt 保持其现有 closed code 和零 usage 规则。不得将 raw resolved definition、directory/base、metadata 或 exception material写入 receipt、日志、CLI 或新文件。
+前四项与 `prepareRunSkillManifest()` 的 precondition 失败发生在任何 Evolution formal write 前，因此在 `ctx.goals.resume()` 前以 0 Evolution write、0 Turn/Model/Tool 停止。只有这些 snapshot-precondition failure 承诺 0 Evolution write。
+
+成功进入既有 `bindRunWithSkill()` persistence sequence 后，真实顺序是先 `recordRunBinding()`，再 `recordRunSkillManifest()`；两者都是独立的既有 formal write。若其中任一 write 失败或其 commit 状态未知，继续使用现有 `run-binding-persistence-failed` 与 ledger/commit-unknown 语义：尤其是第二项失败时，Run binding 可能已经持久化。本设计仍保证该失败发生在 first Turn 前，Provider/Tool usage 为 0，且不把原始 resolved definition、directory/base、metadata 或 exception material写入 receipt、日志、CLI 或新文件；但不新增清理、rollback、transaction 或补偿写入，也不宣称 0 Evolution write。
+
+只有完整 binding 成功后，正常 DSH Goal Turn 才可能开始；Turn 后才可能按既有路径写 Outcome、Evidence 派生的 Skill-use 等 facts。safe child receipt 保持现有 closed code 与零 usage 规则。
 
 ## 7. 保持不变的治理与隐私边界
 
@@ -165,12 +169,13 @@ filesystem get in prepared Agent scope
 
 后续 implementation plan 至少要求以下可执行合同：
 
-1. **真实 filesystem RED：** 用 rc.7 filesystem provider 返回带 `path/resourceBase` 的 parent，证明旧直接 manifest 投影得到 `run-binding-precondition-failed`，且仍是 first Turn / 0 Evolution write。
+1. **真实 filesystem RED：** 用 rc.7 filesystem provider 返回带 `path/resourceBase` 的 parent，证明旧直接 manifest 投影在 `prepareRunSkillManifest()` 处得到 `run-binding-precondition-failed`，且仍是 first Turn / 0 Evolution write。
 2. **scoped snapshot GREEN：** 通过完整 module namespace mount 的 filesystem provider，在 prepared Agent scope resolve single-file parent、validate、register snapshot，再 bind；manifest parent 和 provider 与 snapshot 精确一致。
 3. **模型与 ledger 同一 identity：** 经真实 DSH `skill` tool 的成功 result 必须等于 `renderSkillContent()` 对 frozen manifest parent/resolvedProvider 的 render；Skill-use evidence、content digest、version 一致。
 4. **隐私与 non-interference：** manifest、receipt、public `listEvents()` 与序列化输出都没有 `path`、`resourceBase`、`metadata`；root snapshot 保持 filesystem winner，handle dispose 后 agent scoped registration 不再可见。
-5. **明确拒绝多文件：** `SKILL.md` 加任一同目录 sidecar、URL/opaque base 或 directory/path mismatch 时在 first Turn 前安全失败，0 model request、0 Tool、0 Run/Outcome/Signal/Ticket/Candidate/Evaluation/Shadow/Promotion 写入。
-6. **兼容：** ordinary resume、live smoke、Stage 1–6 既有回归、Stage 3 Candidate 不注册、Stage 7 safe receipt/failure receipt、v1/v2 replay 和 privacy whitelist 全部保持。
+5. **明确拒绝多文件：** `SKILL.md` 加任一同目录 sidecar、URL/opaque base 或 directory/path mismatch 时在 `bindRunWithSkill()` 前安全失败，0 Evolution write、0 model request、0 Tool、0 Run/Outcome/Signal/Ticket/Candidate/Evaluation/Shadow/Promotion 写入。
+6. **既有 persistence 语义：** 分别注入 `recordRunBinding()` 与 `recordRunSkillManifest()` 的失败，保留现有 source-owned `run-binding-persistence-failed` 与 commit-unknown 语义；不要求所有情形 0 Evolution write，且第二 formal write 失败时允许已有 Run binding。两种情形均须锁定 first Turn / Provider / Tool usage 为 0、无 raw transport/resource 字段输出，以及无新增 rollback/transaction。
+7. **兼容：** ordinary resume、live smoke、Stage 1–6 既有回归、Stage 3 Candidate 不注册、Stage 7 safe receipt/failure receipt、v1/v2 replay 和 privacy whitelist 全部保持。
 
 测试不会以 scripted fixture 冒充 configured-Provider natural evidence；它们只证明 scoped snapshot mechanism。未来实任务仍可产生 `met/no-case`、`continue-observing`、Signal、Ticket 或 inconclusive，不能为了证明 Skill-use 或 Ticket 重跑。
 
@@ -200,4 +205,4 @@ filesystem get in prepared Agent scope
 
 ### 10.3 后续唯一入口
 
-下一步只能是独立 implementation plan，先对上述 real filesystem/scoped render RED→GREEN 作出精确文件与测试范围，再经 review、feature integration 和 exact-main CI。之后还需要单独 operational authorization，才能创建新的 agent-authored first-round Goal 并尝试一次 configured-Provider natural Run。此设计本身不授权安装、Goal、resume、model、Provider 或任何重试。
+下一步只能是独立 implementation plan，先对上述 real filesystem/scoped render RED→GREEN 作出精确文件与测试范围，再经 review、feature integration 和 exact-main CI。runtime-bundle 不得为了类型便利新增 `@deepseek-ai/dsh-fs` direct dependency 或 lockfile 变化；实现优先复用当前 Context 已公开能力或最窄 structural capability。若真实 typecheck/build 证明做不到，必须先报告，不能静默扩依赖。之后还需要单独 operational authorization，才能创建新的 agent-authored first-round Goal 并尝试一次 configured-Provider natural Run。此设计本身不授权安装、Goal、resume、model、Provider 或任何重试。
