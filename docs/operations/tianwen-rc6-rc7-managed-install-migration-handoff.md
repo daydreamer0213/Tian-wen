@@ -122,3 +122,11 @@ degraded marker. This handoff records the repair boundary; it does not claim
 that the current product installation has already been repaired. Only a
 separately approved exact-main installation may establish that operational
 fact, and a failure still stops without retry.
+
+The repository-root LICENSE is the authoritative publication source. A proved
+source-linked current Profile may contain the fourteen manifest files and
+`package.json` but no package-local `LICENSE`; that fifteen-file predecessor is
+accepted for this bounded replacement. The installer copies the root license
+into the uncommitted candidate inside the existing Profile rollback boundary.
+A complete sixteen-file detached publication is a success postcondition, not a
+preflight requirement imposed on the predecessor.
