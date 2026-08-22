@@ -1,8 +1,8 @@
 # 天问主控架构会话记忆
 
-> **阅读提示（2026-08-19）：** 本文保留项目愿景、讨论历史和主控监督约定，但不再作为产品架构的首要入口。请先阅读 [`tianwen-architecture-overview-v2.md`](tianwen-architecture-overview-v2.md)。正式 Runtime 边界以 [`2026-08-19-tianwen-runtime-boundary-reset-design.md`](superpowers/specs/2026-08-19-tianwen-runtime-boundary-reset-design.md) 为准；持续学习细则以 [`2026-08-17-tianwen-continuous-learning-governance-design.md`](superpowers/specs/2026-08-17-tianwen-continuous-learning-governance-design.md) 为准。本文中与这些文件冲突的旧状态、旧阶段顺序或双 Runtime 表述只作历史记录。
+> **历史文档提示（2026-08-22）：** 本文保存项目愿景、早期讨论、失败现场和监督约定，但动态状态截止在 Stage 7 终局之前。它不得用于判断当前 Runtime、预算授权、阶段顺序、blocker 或下一入口。当前架构先读 [`tianwen-architecture-overview-v2.md`](tianwen-architecture-overview-v2.md)；当前运营事实读 [`tianwen-stage7-natural-run-evidence-trial-handoff.md`](operations/tianwen-stage7-natural-run-evidence-trial-handoff.md) 与 [`tianwen-rc6-rc7-managed-install-migration-handoff.md`](operations/tianwen-rc6-rc7-managed-install-migration-handoff.md)；当前收口路线读 [`2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)。本文中的旧 Alpha 阶段、rc.6、Python Runtime、Dynamic/Artifact/global Champion、历史预算和待办只作历史证据，不能恢复为当前产品约束。
 
-更新日期：2026-08-17
+历史正文更新截止：2026-08-17；当前权威提示更新：2026-08-22
 
 ## 1. 文档用途
 
