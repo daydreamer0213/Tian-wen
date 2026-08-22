@@ -157,6 +157,25 @@ export type {
   SkillEvalProtocolReceipt,
   SkillEvalProtocolRecord,
 } from './skill-evaluation.js'
+export {
+  CONTROLLED_SKILL_EVAL_RUBRIC,
+  CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_EVAL_TASK_TYPES,
+  prepareControlledSkillEvalProtocol,
+} from './controlled-skill-evaluation.js'
+export type {
+  ControlledSkillEvalEvidenceLabel,
+  ControlledSkillEvalEvidencePurpose,
+  ControlledSkillEvalExecution,
+  ControlledSkillEvalLimits,
+  ControlledSkillEvalProtocol,
+  ControlledSkillEvalProtocolProvenance,
+  ControlledSkillEvalProtocolRecord,
+  ControlledSkillEvalTask,
+  ControlledSkillEvalTaskId,
+  ControlledSkillEvalTaskType,
+  FreezeControlledSkillEvalProtocolInput,
+} from './controlled-skill-evaluation.js'
 export type {
   SkillShadowEligibility,
   SkillShadowEligibilityInput,
