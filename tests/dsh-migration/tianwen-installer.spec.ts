@@ -1,5 +1,15 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -17,6 +27,23 @@ import {
 
 const testRoots: string[] = []
 const RC6 = '0.1.0-rc.6'
+const RUNTIME_FILES = [
+  'dist/index.js',
+  'dist/index.d.ts',
+  'dist/runtime.js',
+  'dist/smoke.js',
+  'dist/status.js',
+  'dist/status.d.ts',
+  'dist/cli.js',
+  'dist/model-runner.js',
+  'dist/create-runner.js',
+  'dist/resume-runner.js',
+  'cordis.patch.yml',
+  'create.patch.yml',
+  'model.patch.yml',
+  'resume.patch.yml',
+] as const
+const RUNTIME_PUBLICATION = [...RUNTIME_FILES, 'package.json', 'LICENSE'] as const
 
 function renderOriginalRc6ProfilePatch(paths: ReturnType<typeof deriveInstallPaths>): string {
   return `- id: agent-default-model
@@ -54,6 +81,22 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value)}\n`, 'utf8')
 }
 
+function writeRuntimePublication(runtimeRoot: string, label = 'runtime'): void {
+  for (const path of RUNTIME_FILES) {
+    mkdirSync(dirname(join(runtimeRoot, path)), { recursive: true })
+    writeFileSync(join(runtimeRoot, path), `${label}:${path}\n`, 'utf8')
+  }
+  writeJson(join(runtimeRoot, 'package.json'), {
+    bin: { tianwen: 'dist/cli.js' },
+    exports: { './runtime': './dist/runtime.js' },
+    files: [...RUNTIME_FILES],
+    name: '@tianwen/runtime-bundle',
+    type: 'module',
+    version: '0.0.0',
+  })
+  writeFileSync(join(runtimeRoot, 'LICENSE'), `${label}:license\n`, 'utf8')
+}
+
 function snapshotTree(root: string): Readonly<Record<string, string>> {
   const entries: Record<string, string> = {}
   const visit = (directory: string) => {
@@ -82,7 +125,11 @@ function failureReceipt(operation: () => unknown) {
 }
 
 function installWindowsFixture(options: NonNullable<Parameters<typeof installTianwen>[0]>) {
-  return installTianwen({ ...options, platform: 'win32' })
+  const repoRoot = options.repoRoot ?? testRoot('installer-repo')
+  if (options.repoRoot === undefined) {
+    writeRuntimePublication(join(repoRoot, 'packages', 'tianwen-runtime-bundle'), 'fixture-source')
+  }
+  return installTianwen({ ...options, platform: 'win32', repoRoot })
 }
 
 function scriptedFailure(
@@ -130,6 +177,10 @@ function scriptedInstaller(
   failOn?: string,
   archiveBytes: string | readonly string[] = 'fixed runtime archive\n',
   dumpOptions: { foldedSessionsRoot?: boolean, sessionsRoot?: string } = {},
+  fixtureOptions: {
+    onBuild?: (ordinal: number) => void
+    runtimeSourceRoot?: string
+  } = {},
 ) {
   const calls: string[][] = []
   const childEnvironments: NodeJS.ProcessEnv[] = []
@@ -147,8 +198,9 @@ function scriptedInstaller(
     childEnvironments.push(options.env)
     executables.push(executable)
     calls.push([...argv])
-    const stageFailure = (failOn === 'runtime-bundle-build-1' && argv.includes('build') && buildOrdinal++ === 0)
-      || (failOn === 'runtime-bundle-build-2' && argv.includes('build') && buildOrdinal++ === 1)
+    const currentBuildOrdinal = argv.includes('build') ? buildOrdinal++ : undefined
+    const stageFailure = (failOn === 'runtime-bundle-build-1' && currentBuildOrdinal === 0)
+      || (failOn === 'runtime-bundle-build-2' && currentBuildOrdinal === 1)
       || (failOn === 'runtime-bundle-pack-1' && argv.includes('pack') && packOrdinal === 0)
       || (failOn === 'runtime-bundle-pack-2' && argv.includes('pack') && packOrdinal === 1)
     const failed = (failOn !== undefined && argv.includes(failOn)) || stageFailure
@@ -172,6 +224,7 @@ function scriptedInstaller(
         version: '0.1.0-rc.7',
       })
     }
+    if (currentBuildOrdinal !== undefined) fixtureOptions.onBuild?.(currentBuildOrdinal)
     if (argv.includes('pack')) {
       const destination = argv.at(argv.indexOf('--pack-destination') + 1)
       const bytes = typeof archiveBytes === 'string' ? archiveBytes : archiveBytes[packOrdinal]
@@ -202,21 +255,20 @@ function scriptedInstaller(
         },
       })
       const runtimeRoot = join(destination, 'node_modules', '@tianwen', 'runtime-bundle')
-      mkdirSync(join(runtimeRoot, 'dist'), { recursive: true })
-      writeFileSync(join(runtimeRoot, 'dist', 'runtime.js'), 'export default {}\n', 'utf8')
-      if (failOn !== 'managed-profile-validation') {
-        writeFileSync(join(runtimeRoot, 'dist', 'cli.js'), 'export {}\n', 'utf8')
+      if (fixtureOptions.runtimeSourceRoot === undefined) {
+        writeRuntimePublication(runtimeRoot, 'installed')
+      } else {
+        for (const path of RUNTIME_PUBLICATION) {
+          const installed = join(runtimeRoot, path)
+          mkdirSync(dirname(installed), { recursive: true })
+          linkSync(join(fixtureOptions.runtimeSourceRoot, path), installed)
+        }
       }
       const binDir = join(destination, 'node_modules', '.bin')
       mkdirSync(binDir, { recursive: true })
-      writeFileSync(join(binDir, 'tianwen.CMD'), '@echo off\r\n', 'utf8')
-      writeJson(join(runtimeRoot, 'package.json'), {
-        bin: { tianwen: 'dist/cli.js' },
-        exports: { './runtime': './dist/runtime.js' },
-        name: '@tianwen/runtime-bundle',
-        type: 'module',
-        version: '0.0.0',
-      })
+      if (failOn !== 'managed-profile-validation') {
+        writeFileSync(join(binDir, 'tianwen.CMD'), '@echo off\r\n', 'utf8')
+      }
     }
     if (failed) return { status: 12, stderr: 'scripted failure', stdout: '' }
     if (argv.includes('--dump-config')) {
@@ -812,6 +864,203 @@ describe('Tianwen installer contract', () => {
     expect(readdirSync(dirname(paths.archivePath)).filter(name => name.startsWith('.install-')))
       .toEqual([])
   })
+
+  it('protects the current Profile from source-linked builds', () => {
+    const root = testRoot('source-linked-build')
+    const paths = deriveInstallPaths(root, 'win32')
+    const repoRoot = testRoot('source-linked-repo')
+    const buildOutputs = [
+      'tianwen-dsh-compat',
+      'tianwen-evolution',
+      'tianwen-evidence',
+      'tianwen-runtime',
+      'tianwen-runtime-bundle',
+    ].map(name => join(repoRoot, 'packages', name, 'dist'))
+    for (const output of buildOutputs) mkdirSync(output, { recursive: true })
+    const runtimeRoot = join(repoRoot, 'packages', 'tianwen-runtime-bundle')
+    const sourceCli = join(runtimeRoot, 'dist', 'cli.js')
+    writeRuntimePublication(runtimeRoot, 'source-initial')
+    installWindowsFixture({
+      dataDir: root,
+      repoRoot,
+      runner: scriptedInstaller(paths).runner,
+    })
+    for (const output of buildOutputs) mkdirSync(output, { recursive: true })
+    writeFileSync(sourceCli, 'source runtime before build\n', 'utf8')
+    const installedCli = join(
+      paths.profileRoot,
+      'node_modules',
+      '@tianwen',
+      'runtime-bundle',
+      'dist',
+      'cli.js',
+    )
+    rmSync(installedCli)
+    linkSync(sourceCli, installedCli)
+    expect(statSync(sourceCli, { bigint: true }).ino)
+      .toBe(statSync(installedCli, { bigint: true }).ino)
+    const before = snapshotTree(paths.dataDir)
+    const unstable = scriptedInstaller(
+      paths,
+      undefined,
+      ['unstable runtime one\n', 'unstable runtime two\n'],
+      {},
+      {
+        onBuild(ordinal) {
+          if (ordinal !== 0) return
+          mkdirSync(dirname(sourceCli), { recursive: true })
+          writeFileSync(sourceCli, 'source runtime after build\n', 'utf8')
+        },
+      },
+    )
+
+    expect(() => installWindowsFixture({ dataDir: root, repoRoot, runner: unstable.runner }))
+      .toThrow('Runtime Bundle archive is not stable across consecutive builds')
+    expect(readFileSync(sourceCli, 'utf8')).toBe('source runtime after build\n')
+    expect(readFileSync(installedCli, 'utf8')).toBe('source runtime before build\n')
+    expect(snapshotTree(paths.dataDir)).toEqual(before)
+    expect(unstable.calls.filter(argv => argv.includes('@tianwen/profile-host'))).toHaveLength(0)
+  })
+
+  it('replaces a source-linked current Profile when the archive is unchanged', () => {
+    const root = testRoot('source-linked-replay')
+    const paths = deriveInstallPaths(root, 'win32')
+    const repoRoot = testRoot('source-linked-replay-repo')
+    const sourceRuntimeRoot = join(repoRoot, 'packages', 'tianwen-runtime-bundle')
+    writeRuntimePublication(sourceRuntimeRoot, 'source-initial')
+    installWindowsFixture({
+      dataDir: root,
+      repoRoot,
+      runner: scriptedInstaller(paths).runner,
+    })
+    writeRuntimePublication(sourceRuntimeRoot, 'source-before')
+    const installedCli = join(
+      paths.profileRoot,
+      'node_modules',
+      '@tianwen',
+      'runtime-bundle',
+      'dist',
+      'cli.js',
+    )
+    rmSync(installedCli)
+    linkSync(join(sourceRuntimeRoot, 'dist', 'cli.js'), installedCli)
+    const replay = scriptedInstaller(paths, undefined, undefined, {}, {
+      onBuild(ordinal) {
+        if (ordinal === 0) writeRuntimePublication(sourceRuntimeRoot, 'source-built')
+      },
+    })
+
+    installWindowsFixture({ dataDir: root, repoRoot, runner: replay.runner })
+
+    expect(replay.calls.filter(argv => argv.includes('@tianwen/profile-host'))).toHaveLength(1)
+    expect(replay.calls.filter(argv => argv.includes('@tianwen/dsh-host'))).toHaveLength(0)
+  })
+
+  it('publishes a detached Runtime Bundle candidate', () => {
+    const root = testRoot('detached-runtime-candidate')
+    const paths = deriveInstallPaths(root, 'win32')
+    const repoRoot = testRoot('detached-runtime-repo')
+    const sourceRuntimeRoot = join(repoRoot, 'packages', 'tianwen-runtime-bundle')
+    writeRuntimePublication(sourceRuntimeRoot, 'source-before')
+    const scripted = scriptedInstaller(paths, undefined, undefined, {}, {
+      onBuild(ordinal) {
+        if (ordinal === 0) writeRuntimePublication(sourceRuntimeRoot, 'source-built')
+      },
+      runtimeSourceRoot: sourceRuntimeRoot,
+    })
+
+    installWindowsFixture({ dataDir: root, repoRoot, runner: scripted.runner })
+
+    const installedRuntimeRoot = join(
+      paths.profileRoot,
+      'node_modules',
+      '@tianwen',
+      'runtime-bundle',
+    )
+    for (const path of RUNTIME_PUBLICATION) {
+      const source = statSync(join(sourceRuntimeRoot, path), { bigint: true })
+      const installed = statSync(join(installedRuntimeRoot, path), { bigint: true })
+      expect({ dev: installed.dev, ino: installed.ino }).not.toEqual({ dev: source.dev, ino: source.ino })
+      expect(installed.nlink).toBe(1n)
+    }
+    writeFileSync(join(sourceRuntimeRoot, 'dist', 'cli.js'), 'source-after-receipt\n', 'utf8')
+    expect(readFileSync(join(installedRuntimeRoot, 'dist', 'cli.js'), 'utf8'))
+      .toBe('source-built:dist/cli.js\n')
+  })
+
+  it.each([
+    ['build one', 'runtime-bundle-build-1', undefined, 'runtime-bundle-build-1'],
+    ['pack one', 'runtime-bundle-pack-1', undefined, 'runtime-bundle-pack-1'],
+    ['build two', 'runtime-bundle-build-2', undefined, 'runtime-bundle-build-2'],
+    ['pack two', 'runtime-bundle-pack-2', undefined, 'runtime-bundle-pack-2'],
+    [
+      'archive stability',
+      undefined,
+      ['unstable runtime one\n', 'unstable runtime two\n'],
+      'archive-stability',
+    ],
+    ['partial Profile deploy', '@tianwen/profile-host', undefined, 'managed-profile-deploy'],
+    [
+      'Profile validation',
+      'managed-profile-validation',
+      undefined,
+      'managed-profile-validation',
+    ],
+    ['DSH config validation', 'dsh-config-validation', undefined, 'dsh-config-validation'],
+    ['archive publication', 'archive-publication', undefined, 'archive-publication'],
+    ['receipt publication', 'receipt-publication-path', undefined, 'receipt-publication'],
+  ] as const)(
+    'restores a source-linked current installation after %s failure',
+    (_label, failOn, archiveBytes, expectedStage) => {
+      const root = testRoot(`source-linked-failure-${expectedStage}`)
+      const paths = deriveInstallPaths(root, 'win32')
+      const repoRoot = testRoot(`source-linked-failure-repo-${expectedStage}`)
+      const sourceRuntimeRoot = join(repoRoot, 'packages', 'tianwen-runtime-bundle')
+      writeRuntimePublication(sourceRuntimeRoot, 'source-initial')
+      installWindowsFixture({
+        dataDir: root,
+        repoRoot,
+        runner: scriptedInstaller(paths).runner,
+      })
+      writeRuntimePublication(sourceRuntimeRoot, 'source-before')
+      const installedCli = join(
+        paths.profileRoot,
+        'node_modules',
+        '@tianwen',
+        'runtime-bundle',
+        'dist',
+        'cli.js',
+      )
+      rmSync(installedCli)
+      linkSync(join(sourceRuntimeRoot, 'dist', 'cli.js'), installedCli)
+      mkdirSync(paths.sessionsRoot, { recursive: true })
+      mkdirSync(paths.evolutionRoot, { recursive: true })
+      writeFileSync(join(paths.sessionsRoot, 'kept.jsonl'), 'session bytes\n', 'utf8')
+      writeFileSync(join(paths.evolutionRoot, 'ledger.jsonl'), 'ledger bytes\n', 'utf8')
+      if (expectedStage === 'receipt-publication') {
+        rmSync(paths.receiptPath)
+        mkdirSync(paths.receiptPath)
+      }
+      const before = snapshotTree(paths.dataDir)
+      const scripted = scriptedInstaller(paths, failOn, archiveBytes, {}, {
+        onBuild(ordinal) {
+          if (ordinal === 0) writeRuntimePublication(sourceRuntimeRoot, 'source-built')
+        },
+      })
+
+      expect(failureReceipt(() => installWindowsFixture({
+        dataDir: root,
+        repoRoot,
+        runner: scripted.runner,
+      }))).toEqual({
+        schemaVersion: 'tianwen.install-failure.v1',
+        status: 'failed',
+        stage: expectedStage,
+      })
+      expect(snapshotTree(paths.dataDir)).toEqual(before)
+      expect(scripted.calls.filter(argv => argv.includes('@tianwen/dsh-host'))).toHaveLength(0)
+    },
+  )
 
   it('reuses caller-configured D-drive package stores', () => {
     const root = testRoot('configured-store')

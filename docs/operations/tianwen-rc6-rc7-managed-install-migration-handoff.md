@@ -94,3 +94,31 @@ one complete canonical ready receipt or the existing three-key failed receipt,
 then stops on any other transport result. A direct installer-source invocation,
 raw JSON scanning, raw-output retention, and schema changes remain rejected:
 they would repair the wrapper presentation at the wrong boundary.
+
+## Runtime Bundle build-output identity isolation
+
+A later official offline installer operation stopped at `archive-stability`.
+Before that stop, the workspace build crossed a pnpm hardlink into the installed
+Profile before Profile backup and changed an installed Runtime Bundle payload.
+The transaction restored the managed filesystem state that was inside its
+existing rollback boundary, but the already-mutated Profile payload showed that
+build output identity had crossed that boundary. The operation had 0 Provider,
+Goal, or model activity.
+
+An isolated two-build/two-pack diagnostic produced `raw-equal` archives: their
+raw bytes, payloads, and archive metadata were equal. That result does not
+identify why the two earlier staged archives differed, so the raw double-pack
+comparison remains unchanged. The correction instead isolates the fixed
+generated build outputs before the first build and materializes only the
+Runtime Bundle's fourteen manifest files plus `package.json` and `LICENSE` in
+the deployed Profile. A committed Runtime Bundle publication therefore has
+independent file identity from the workspace.
+
+The ready and failure receipt schemas, closed failure stages, classifier, and
+raw archive digest algorithm remain unchanged. If an operation begins from the
+already-drifted source-linked product and then fails, stopping status and
+Provider work is a supervisor authorization boundary, not a persisted product
+degraded marker. This handoff records the repair boundary; it does not claim
+that the current product installation has already been repaired. Only a
+separately approved exact-main installation may establish that operational
+fact, and a failure still stops without retry.

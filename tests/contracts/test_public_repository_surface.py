@@ -341,6 +341,28 @@ def test_installer_safe_failure_stage_receipt_handoff_and_ci() -> None:
         assert fact in handoff
 
 
+def test_installer_build_output_isolation_handoff() -> None:
+    handoff = " ".join(
+        (
+            ROOT
+            / "docs"
+            / "operations"
+            / "tianwen-rc6-rc7-managed-install-migration-handoff.md"
+        ).read_text(encoding="utf-8").split()
+    )
+
+    for fact in (
+        "crossed a pnpm hardlink into the installed Profile before Profile backup",
+        "isolates the fixed generated build outputs before the first build",
+        "independent file identity from the workspace",
+        "raw-equal",
+        "raw double-pack comparison remains unchanged",
+        "supervisor authorization boundary, not a persisted product degraded marker",
+        "0 Provider, Goal, or model activity",
+    ):
+        assert fact in handoff
+
+
 def test_goal_status_spec_runs_in_typescript_focused_contract() -> None:
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     typescript_match = re.search(

@@ -58,7 +58,11 @@ The following remain hard failures:
 - a changed managed workspace policy, bundle order, Session/Evolution root,
   Runtime archive target, or unknown Profile patch;
 - mixed rc.6/rc.7 host and Profile state;
-- a source-worktree Runtime resolution.
+- a source-worktree Runtime resolution, except for the single proved exact
+  rc.7 `current` shape whose installed Runtime Bundle files share native file
+  identity with the invoking workspace. That shape is handled only by
+  `2026-08-22-tianwen-installer-build-output-isolation-design.md`; every other
+  source-worktree, partial, mixed or modified shape remains incompatible.
 
 ## 4. Minimal transaction
 
@@ -103,7 +107,10 @@ state, not migration history, so no receipt migration schema is needed.
 
 - Successful migration produces the same rc.7 ready state as a fresh install.
 - A second invocation is the existing exact rc.7 idempotent replay and does
-  not redeploy host/Profile when the Runtime archive digest is unchanged.
+  not redeploy host/Profile when the Runtime archive digest is unchanged and
+  the installed Runtime Bundle is not source-linked. The proved source-linked
+  rc.7 current shape forces one detached Profile replacement under
+  `2026-08-22-tianwen-installer-build-output-isolation-design.md`.
 - An exact retry after a pre-commit failure starts from the restored rc.6
   predecessor; there is no partial migration marker or repair state machine.
 - Stale backup directories left only after a committed receipt are harmless
@@ -120,7 +127,11 @@ scripted child runner:
 - a failure after rc.7 host deployment restores host, Profile, archive,
   receipt, Session and Evolution bytes;
 - success preserves Session/Evolution bytes and leaves no migration backup;
-- replay performs no host/Profile deploy;
+- a detached, non-source-linked current replay performs no host/Profile
+  deploy;
+- the single proved source-linked rc.7 current fixture forces one detached
+  Profile replacement, never a host deploy, even when its archive digest is
+  unchanged;
 - all package activity remains offline and uses the existing D-drive store.
 
 Only after feature review, main integration and exact-main green CI may the
