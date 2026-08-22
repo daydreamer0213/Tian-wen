@@ -681,6 +681,9 @@ export function prepareControlledSkillEvaluationPlan(
 ): ControlledSkillEvaluationPlan {
   if (!isRecord(input)) throw new TypeError('controlled evaluation input must be an object')
   exactKeys(input, ['candidateId', 'protocolId', 'sessionAllocations'])
+  if (protocolRecord.provenance !== 'pre-candidate') {
+    throw new TypeError('controlled evaluation requires a pre-candidate protocol')
+  }
   if (
     input.candidateId !== candidate.candidateId
     || input.protocolId !== protocolRecord.protocolId

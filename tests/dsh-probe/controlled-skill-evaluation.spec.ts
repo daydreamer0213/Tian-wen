@@ -15,6 +15,7 @@ import {
 import {
   EvolutionLedger,
   isPublicLedgerEvent,
+  LedgerIntegrityError,
 } from '../../packages/tianwen-evolution/src/ledger.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 
@@ -378,6 +379,33 @@ describe('controlled five-task Skill evaluation protocol', () => {
     expect(replay.getControlledSkillEvalProtocol(first.protocolId)).toEqual(stored)
     expect(replay.listControlledSkillEvalProtocols()).toEqual([stored])
     expect(replay.listEvents().filter(isPublicLedgerEvent)).toEqual([])
+  })
+
+  it('replays retrospective protocols but refuses to open them as formal evaluations', () => {
+    const path = fixtureRoot('retrospective-protocol')
+    const ledger = new EvolutionLedger(path, { clock: () => '2026-08-22T16:05:00.000Z' })
+    const seeded = seedCandidateWithControlledProtocol(ledger)
+    const protocol = structuredClone(controlledProtocol())
+    protocol.tasks[0]!.inputDigest = digest('retrospective-input')
+    const retrospective = ledger.freezeControlledSkillEvalProtocol({
+      ticketId: ledger.getSkillCandidate(seeded.candidateId)!.ticketId,
+      evidencePurpose: 'development-only-synthetic-defect',
+      protocol,
+    })
+    const stored = ledger.getControlledSkillEvalProtocol(retrospective.protocolId)
+
+    expect(retrospective.provenance).toBe('retrospective')
+    expect(new EvolutionLedger(path).getControlledSkillEvalProtocol(retrospective.protocolId))
+      .toEqual(stored)
+    expect(() => {
+      ledger.openControlledSkillEvaluation({
+        candidateId: seeded.candidateId,
+        protocolId: retrospective.protocolId,
+        sessionAllocations: controlledSessionAllocations(),
+      })
+    }).toThrow(LedgerIntegrityError)
+    expect(ledger.listEvents().filter(event =>
+      event.type === 'controlled-skill-evaluation-opened')).toEqual([])
   })
 
   it('opens one immutable five-task plan with ten execution and five evaluator Sessions', () => {
