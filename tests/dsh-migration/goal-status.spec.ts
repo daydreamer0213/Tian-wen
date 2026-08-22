@@ -38,6 +38,10 @@ import {
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-goal-status-tests')
 const CLI = resolve('packages/tianwen-runtime-bundle/dist/cli.js')
+const STATUS_BUNDLE = resolve('packages/tianwen-runtime-bundle/dist/status.js')
+const STATUS_METAFILE = resolve(
+  'packages/tianwen-runtime-bundle/dist/status.meta.json',
+)
 const DIGEST = (character: string) =>
   `sha256:${character.repeat(64)}` as const
 const GOVERNED_PARENT = {
@@ -442,6 +446,24 @@ describe('authoritative governed ledger inspection', () => {
 })
 
 describe('Tianwen read-only Goal status', () => {
+  it('keeps the status bundle free of private runtime and probe inputs', () => {
+    const metafile = JSON.parse(readFileSync(STATUS_METAFILE, 'utf8')) as {
+      inputs: Record<string, unknown>
+    }
+    const inputs = Object.keys(metafile.inputs).join('\n')
+    const source = readFileSync(STATUS_BUNDLE, 'utf8')
+    for (const forbidden of [
+      'scripted-adapter',
+      'dsh-tool-skill',
+      'runtime-binding',
+      'test-harness',
+      'dsh-probe',
+    ]) {
+      expect(inputs).not.toContain(forbidden)
+      expect(source).not.toContain(forbidden)
+    }
+  })
+
   it('lists only current Goal summaries in deterministic recent-first order', async () => {
     const recent = await createFixture({ objective: 'Recent\nGoal' })
     try {
@@ -904,6 +926,7 @@ describe('Tianwen read-only Goal status', () => {
         'run-skill-manifest-recorded',
         'outcome-intake-recorded',
         'run-skill-use-recorded',
+        'tianwen-stage4-scripted',
         GOVERNED_PARENT.content,
         'session:goal-status-private-run',
         'project:tianwen/capability:goal-status',

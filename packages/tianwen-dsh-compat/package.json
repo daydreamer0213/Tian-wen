@@ -13,6 +13,10 @@
     "./runtime": {
       "types": "./dist/runtime.d.ts",
       "default": "./dist/runtime.js"
+    },
+    "./skill-name": {
+      "types": "./dist/skill-name.d.ts",
+      "default": "./dist/skill-name.js"
     }
   },
   "dependencies": {

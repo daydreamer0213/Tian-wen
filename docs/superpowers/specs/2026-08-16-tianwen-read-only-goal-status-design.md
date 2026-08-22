@@ -120,19 +120,23 @@ current Goal id, the query fails as ambiguous instead of guessing.
 
 ### 5.2 Champion
 
-Do not instantiate `EvolutionLedger`: its constructor may create the artifacts
-directory and repair a missing or one-revision-stale derived pointer.
+Do not instantiate `EvolutionLedger`: its mutation constructor may create the
+artifacts directory, verify Artifact source, and repair a missing or
+one-revision-stale derived pointer.
 
-The status path instead performs a narrow read-only check:
+The status path instead delegates canonical event parsing, full authoritative
+reference replay, and Champion-pointer validation to the Evolution package's
+Champion-only read-only inspector. That inspector accepts legitimate private
+governed events interleaved with the legacy public Champion history, rejects
+unknown, malformed, contradictory, or reference-corrupt state, and returns
+only the validated Champion pointer or `null`.
 
-1. parse canonical LF-delimited `ledger.jsonl` when present;
-2. find the last `promoted` or `rolled-back` transition;
-3. parse `champion.json` when present;
-4. require the derived pointer to match that last formal transition;
-5. return the pointer or `null` when both are absent.
-
-It does not verify or expose Artifact source bytes. Mutation and repair remain
-owned by the existing Evolution governance path.
+Inspection never creates a directory, appends or repairs ledger state, writes
+a temporary file, or reads Artifact source bytes. Private governed events and
+their provider/evidence facts remain internal to integrity validation and are
+not projected into the status schema or serialized output. Mutation, source
+verification, and repair remain owned by the existing Evolution governance
+path.
 
 ## 6. Read-only boundary
 
