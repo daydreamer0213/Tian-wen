@@ -272,13 +272,27 @@ Turn, it must:
 2. recheck that no `turn/start` exists;
 3. confirm the verifier tool is visible in the prepared Agent scope;
 4. resolve the parent Skill from the same prepared Agent scope;
-5. derive `goalRef` only from the rechecked durable DSH Goal as
+5. for a filesystem incumbent, use the same Agent scope to require one directory
+   with exactly one regular `SKILL.md`, project only its pure text fields, register
+   that snapshot only in that scope, and use the same scoped registry for binding;
+   `path`, `resourceBase`, and `metadata` remain runtime transport data and never
+   enter the frozen parent, safe receipt, or public event projection. A multi-file,
+   sidecar, opaque, or mismatched filesystem parent stops before binding. A
+   non-filesystem parent continues through the same scoped registry without a
+   filesystem capability;
+6. derive `goalRef` only from the rechecked durable DSH Goal as
    `dsh-goal:<goal-id>@<revision>`; it is never accepted from the manifest;
-6. call `bindRunWithSkill()` with that reference, the manifest's existing
+7. call `bindRunWithSkill()` with that reference, the manifest's existing
    acceptance contract, and its precomputed `acceptanceSubjectDigest`;
-7. verify the Session digest is unchanged.
+8. verify the Session digest is unchanged.
 
-If any check fails, dispose the handle and stop before the Goal is driven.
+Filesystem resolve, one-file validation, pure projection, scoped registration,
+and parent preparation failures occur before either existing ledger formal write.
+If any of those checks fails, dispose the handle and stop before the Goal is
+driven. Once binding succeeds, existing persistence ordering remains unchanged:
+it records the Run binding first and the private Run Skill manifest second; a
+second-write commit-unknown keeps its existing source-owned semantics rather
+than claiming zero ledger writes.
 
 ### 5.3 Normal DSH execution
 
