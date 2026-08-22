@@ -9,15 +9,25 @@ import { TianwenSkillEvaluationService } from './skill-evaluation.js'
 
 export {
   compareNormalizedSkillEvaluationRequests,
+  ControlledSkillEvaluationPreflightError,
   normalizeSkillEvaluationRequest,
   observeSkillEvaluationRequest,
 } from './skill-evaluation.js'
 export type {
   NormalizedSkillEvaluationRequestComparison,
+  ControlledEvaluatorMaterialContract,
+  ControlledSkillEvaluationArmsReceipt,
+  ControlledSkillEvaluationArmsStop,
+  ControlledSkillEvaluationArmsStopReasonCode,
+  ControlledSkillEvaluationPreflightCode,
+  ControlledWorkspaceSnapshot,
+  ControlledWorkspaceSnapshotEntry,
   ObserveSkillEvaluationRequestInput,
   NormalizeSkillEvaluationRequestInput,
   SkillEvaluationRequestObservation,
   SkillEvaluationRequestNormalization,
+  RunControlledSkillEvaluationArmsInput,
+  RunControlledSkillEvaluationTaskInput,
 } from './skill-evaluation.js'
 export { TianwenSkillEvaluationService } from './skill-evaluation.js'
 export type {

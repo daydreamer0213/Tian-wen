@@ -1,0 +1,1276 @@
+import { createHash } from 'node:crypto'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { HarnessError } from '@deepseek-ai/dsh-llm'
+
+import {
+  DynamicCordisRunnerService,
+  SessionId,
+  ScriptedAdapter,
+  SkillRegistry,
+  applySkillTool,
+  defineTool,
+  mountCoreHarness,
+  mountPersistentHarness,
+  textResponse,
+  toolCallResponse,
+} from '@tianwen/dsh-compat'
+import type { GenerateOptions, StreamChunk } from '@tianwen/dsh-compat'
+import {
+  CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  sha256,
+} from '../../packages/tianwen-evolution/src/index.js'
+import { apply } from '../../packages/tianwen-runtime/src/index.js'
+
+const CONTROLLED_PROVIDER = 'tianwen-controlled-scripted'
+const CONTROLLED_MODEL = 'scripted'
+
+const acceptance = {
+  source: 'dsh-tool-result',
+  toolName: 'verify_summary',
+  notMetErrorCode: 'SUMMARY_REQUIREMENT_NOT_MET',
+  gapDisposition: 'reusable',
+  problemCategory: 'summary-omits-required-result',
+  severity: 2,
+  blocksGoal: false,
+} as const
+
+const parentSkill = {
+  name: 'controlled-runtime-summary',
+  description: 'Summarize one controlled observation.',
+  whenToUse: 'When a controlled task requests a concise verified summary.',
+  invocation: { modelInvocable: true, userInvocable: true },
+  source: 'runtime',
+  provider: 'runtime',
+  content: '# Controlled summary\n\nState the observation.',
+} as const
+
+const taskTypes = [
+  'original-problem',
+  'adjacent-transfer',
+  'regression',
+  'counterexample',
+  'safety-authorization',
+] as const
+
+const roots: string[] = []
+
+class SummaryRequirementNotMet extends HarnessError {
+  constructor() {
+    super('controlled baseline requirement not met', acceptance.notMetErrorCode)
+  }
+}
+
+class InconclusiveVerifierFailure extends HarnessError {
+  constructor() {
+    super('controlled verifier was inconclusive', 'CONTROLLED_VERIFIER_INCONCLUSIVE')
+  }
+}
+
+function fixtureRoot(name: string): string {
+  const root = resolve(
+    process.env.TIANWEN_DSH_PROBE_ROOT ?? '.dsh-probe',
+    'controlled-skill-evaluation-runtime',
+    name,
+  )
+  rmSync(root, { recursive: true, force: true })
+  mkdirSync(root, { recursive: true })
+  roots.push(root)
+  return root
+}
+
+function rawDigest(content: string): `sha256:${string}` {
+  return `sha256:${createHash('sha256').update(content, 'utf8').digest('hex')}`
+}
+
+class ControlledScriptedAdapter extends ScriptedAdapter {
+  private delayed = false
+
+  constructor(
+    script: readonly (readonly StreamChunk[] | Error)[],
+    private readonly firstRequestDelayMs = 0,
+  ) {
+    super(script.map(entry => Array.isArray(entry) ? [...entry] : entry))
+  }
+
+  override providerRetryPolicy() {
+    return {
+      mode: 'normal' as const,
+      maxRetries: 0,
+      retryableCodes: [],
+      initialDelayMs: 500,
+      maxDelayMs: 10_000,
+      jitterRatio: 0.1,
+    }
+  }
+
+  override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    if (!this.delayed && this.firstRequestDelayMs > 0) {
+      this.delayed = true
+      await new Promise(resolve => setTimeout(resolve, this.firstRequestDelayMs))
+    }
+    yield* super.stream(options)
+  }
+}
+
+function seedControlledCandidate(
+  evolution: Awaited<ReturnType<typeof mountPersistentHarness>>['ctx']['tianwenEvolution'],
+  protocol: Parameters<typeof evolution.freezeControlledSkillEvalProtocol>[0]['protocol'],
+) {
+  const seeded = [
+    ['first', 'not-met', 'a'],
+    ['second', 'not-met', 'b'],
+    ['counterexample', 'met', 'c'],
+  ] as const
+  const runs = seeded.map(([suffix, verdict, marker]) => {
+    const sessionId = `session:controlled-runtime-seed:${suffix}`
+    const binding = evolution.recordRunBinding({
+      goalRef: 'goal:controlled-runtime-seed',
+      taskRef: `task:controlled-runtime-seed:${suffix}`,
+      sessionId,
+      scopeKey: 'project:tianwen/capability:controlled-runtime-summary',
+      acceptanceContract: acceptance,
+    })
+    const manifest = evolution.recordRunSkillManifest({ runId: binding.runId, skill: parentSkill })
+    const sessionDigest = sha256(`seed-session:${marker}`)
+    const evidenceId = sha256(`seed-evidence:${marker}`)
+    const outcome = evolution.recordOutcomeIntake({
+      runId: binding.runId,
+      verdict,
+      sessionDigest,
+      evidenceIds: [evidenceId],
+    })
+    evolution.recordRunSkillUse({
+      runId: binding.runId,
+      parentVersionId: manifest.parentVersionId,
+      sessionId,
+      sessionDigest,
+      skillName: parentSkill.name,
+      contentDigest: sha256(parentSkill.content),
+      skillEvidenceId: sha256(`seed-skill-evidence:${marker}`),
+      acceptanceEvidenceId: evidenceId,
+      skillCallSeq: 10,
+      skillResultSeq: 11,
+      acceptanceCallSeq: 12,
+    })
+    return { binding, outcome }
+  })
+  const ticketId = runs[1]!.outcome.ticketId!
+  const frozen = evolution.freezeControlledSkillEvalProtocol({
+    ticketId,
+    evidencePurpose: 'development-only-synthetic-defect',
+    protocol,
+  })
+  const opened = evolution.openLearningCase({
+    ticketId,
+    counterevidenceRunIds: [runs[2]!.binding.runId],
+  })
+  const learningCase = evolution.getLearningCase(opened.caseId)!
+  const attribution = evolution.recordAttribution({
+    caseId: learningCase.caseId,
+    resolution: 'dsh-skill',
+    targetSkillName: parentSkill.name,
+    hypothesis: 'The parent omits verified result-first ordering.',
+    supportingEvidenceIds: learningCase.supportingEvidenceIds,
+    counterevidenceIds: learningCase.counterevidence.flatMap(item => item.evidenceIds),
+    alternatives: 'Runtime and verifier causes remain unsupported in this fixture.',
+  })
+  const lesson = evolution.recordAcceptedLesson({
+    caseId: learningCase.caseId,
+    attributionId: attribution.attributionId,
+    claim: 'State the verified result before interpretation.',
+    when: 'When summarizing a verified controlled observation.',
+    notWhen: 'When the task requests raw extraction only.',
+    supportingEvidenceIds: learningCase.supportingEvidenceIds,
+    counterevidenceIds: learningCase.counterevidence.flatMap(item => item.evidenceIds),
+    targetScope: learningCase.scopeKey,
+  })
+  const candidate = evolution.recordSkillCandidate({
+    lessonId: lesson.lessonId,
+    payload: {
+      name: parentSkill.name,
+      description: parentSkill.description,
+      whenToUse: parentSkill.whenToUse,
+      invocation: parentSkill.invocation,
+      source: parentSkill.source,
+      content: '# Controlled summary\n\nState the verified result before interpretation.',
+    },
+    evidenceIds: [
+      ...learningCase.supportingEvidenceIds,
+      ...learningCase.counterevidence.flatMap(item => item.evidenceIds),
+    ],
+  })
+  return { candidateId: candidate.candidateId, protocolId: frozen.protocolId }
+}
+
+async function mountControlledRuntime(
+  name: string,
+  script: readonly (readonly StreamChunk[] | Error)[] = [],
+  options: {
+    readonly maxToolCalls?: number
+    readonly maxElapsedMs?: number
+    readonly firstRequestDelayMs?: number
+    readonly rejectCandidateTaskType?: typeof taskTypes[number]
+    readonly maxEvaluatorMaterialBytes?: number
+    readonly tamperFirstRequestPurpose?: boolean
+    readonly baselineImprovementRequired?: boolean
+    readonly inconclusiveCandidateTaskType?: typeof taskTypes[number]
+  } = {},
+) {
+  const root = fixtureRoot(name)
+  const harness = await mountPersistentHarness(join(root, 'sessions'), [])
+  await harness.ctx.plugin(SkillRegistry)
+  await harness.ctx.plugin(applySkillTool)
+  await harness.ctx.plugin(DynamicCordisRunnerService, {})
+  const verifierBodies: string[] = []
+  const disposeVerifier = harness.ctx.tools.register(defineTool({
+    name: 'verify_summary',
+    description: 'Verify one controlled summary.',
+    parameters: { subject: { type: 'object', additionalProperties: true, required: true } },
+    output: {
+      schema: { type: 'string' },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    async execute(args, exec) {
+      verifierBodies.push(String(exec.agent?.id))
+      const task = (args as { subject?: { task?: unknown } }).subject?.task
+      if (String(exec.agent?.id).endsWith(':candidate')
+        && task === options.inconclusiveCandidateTaskType) {
+        throw new InconclusiveVerifierFailure()
+      }
+      if (
+        (options.baselineImprovementRequired !== false
+          && String(exec.agent?.id).endsWith(':baseline')
+          && (task === 'original-problem' || task === 'adjacent-transfer'))
+        || (String(exec.agent?.id).endsWith(':candidate')
+          && task === options.rejectCandidateTaskType)
+      ) {
+        throw new SummaryRequirementNotMet()
+      }
+      return 'verified'
+    },
+  }))
+  const disposeParent = harness.ctx.skills.register(parentSkill)
+  const adapter = new ControlledScriptedAdapter(
+    script,
+    options.firstRequestDelayMs,
+  )
+  harness.ctx.llm.registerAdapter([CONTROLLED_PROVIDER], adapter)
+  let selection = { provider: CONTROLLED_PROVIDER, model: CONTROLLED_MODEL }
+  harness.ctx.provide('agentDefaultModel', {
+    currentSelection: () => ({ ...selection }),
+  })
+  let requestTampered = false
+  if (options.tamperFirstRequestPurpose === true) {
+    harness.ctx.on('llm/stream', (request, next) => {
+      if (!requestTampered) {
+        requestTampered = true
+        ;(request as unknown as { purpose?: string }).purpose = 'controlled-test'
+      }
+      return next()
+    })
+  }
+  await apply(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+
+  const allowedTools = ['skill', 'verify_summary'] as const
+  const toolSchemas = harness.ctx.tools.schemas()
+    .filter(schema => allowedTools.includes(schema.name as typeof allowedTools[number]))
+    .toSorted((left, right) => left.name.localeCompare(right.name))
+  const toolSchemaDigest = sha256(toolSchemas)
+  const callConfig = await harness.ctx.llm.resolveCallConfig(selection)
+  const retryPolicy = harness.ctx.llm.providerRetryPolicy(selection.provider)
+  const tasks = taskTypes.map((taskType, index) => {
+    const workspaceContent = `controlled workspace ${index}\n`
+    const workspaceSnapshot = {
+      schemaVersion: 'tianwen.controlled-workspace-snapshot.v1' as const,
+      entries: [{
+        relativePath: 'brief.txt',
+        contentDigest: rawDigest(workspaceContent),
+        size: Buffer.byteLength(workspaceContent, 'utf8'),
+      }],
+    }
+    const baselineWorkspaceRoot = join(root, 'workspaces', taskType, 'baseline')
+    const candidateWorkspaceRoot = join(root, 'workspaces', taskType, 'candidate')
+    for (const workspaceRoot of [baselineWorkspaceRoot, candidateWorkspaceRoot]) {
+      mkdirSync(workspaceRoot, { recursive: true })
+      writeFileSync(join(workspaceRoot, 'brief.txt'), workspaceContent, 'utf8')
+    }
+    const verifierArguments = { subject: { task: taskType, accepted: true } }
+    const authorization = { mode: 'fixture-only', task: taskType }
+    const verifierContract = { toolName: acceptance.toolName, arguments: verifierArguments }
+    const stopCondition = { terminal: 'completed-final-assistant-text' }
+    const evaluatorMaterialContract = {
+      schemaVersion: 'tianwen.controlled-evaluator-material-contract.v1' as const,
+      source: 'final-completed-assistant-text' as const,
+      maxUtf8Bytes: options.maxEvaluatorMaterialBytes ?? 4_096,
+    }
+    return {
+      taskId: `eval-task:${taskType}` as const,
+      taskType,
+      goal: `Complete controlled ${taskType} task ${index}.`,
+      input: `Use the available Skill, then verify controlled task ${index}.`,
+      baselineWorkspaceRoot,
+      candidateWorkspaceRoot,
+      workspaceSnapshot,
+      authorization,
+      verifierContract,
+      verifierArguments,
+      stopCondition,
+      evaluatorMaterialContract,
+      baselineSessionId: `session:controlled-eval:fixture:${taskType}:baseline`,
+      candidateSessionId: `session:controlled-eval:fixture:${taskType}:candidate`,
+      evaluatorSessionId: `session:controlled-eval:fixture:${taskType}:evaluator`,
+      toolSchemaDigest,
+    }
+  })
+  const protocol = {
+    rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+    tasks: tasks.map(task => ({
+      taskId: task.taskId,
+      taskType: task.taskType,
+      goalDigest: sha256(task.goal),
+      inputDigest: sha256(task.input),
+      workspaceSnapshotDigest: sha256(task.workspaceSnapshot),
+      toolSchemaDigest: task.toolSchemaDigest,
+      authorizationDigest: sha256(task.authorization),
+      verifierContractDigest: sha256(task.verifierContract),
+      stopConditionDigest: sha256(task.stopCondition),
+      evaluatorMaterialContractDigest: sha256(task.evaluatorMaterialContract),
+      acceptanceContract: acceptance,
+      acceptanceSubjectDigest: sha256(task.verifierArguments),
+      allowedTools,
+      stopContract: {
+        maxToolCalls: options.maxToolCalls ?? 4,
+        maxElapsedMs: options.maxElapsedMs ?? 10_000,
+      },
+    })),
+    execution: {
+      dshVersion: '0.1.0-rc.7' as const,
+      providerId: callConfig.provider,
+      modelId: callConfig.model,
+      callConfigDigest: sha256(callConfig),
+      toolSchemaDigest: sha256(tasks.map(task => ({
+        taskId: task.taskId,
+        toolSchemaDigest: task.toolSchemaDigest,
+      }))),
+      retryPolicyDigest: sha256(retryPolicy),
+    },
+  }
+  const seeded = seedControlledCandidate(harness.ctx.tianwenEvolution, protocol)
+  return {
+    adapter,
+    disposeParent,
+    disposeVerifier,
+    harness,
+    verifierBodies,
+    requestWasTampered: () => requestTampered,
+    input: {
+      candidateId: seeded.candidateId,
+      protocolId: seeded.protocolId,
+      tasks: tasks.map(({
+        taskType: _taskType,
+        verifierArguments: _verifierArguments,
+        toolSchemaDigest: _toolSchemaDigest,
+        ...task
+      }) => task),
+    },
+    setSelection(value: { provider: string; model: string }) { selection = value },
+  }
+}
+
+function successfulArmScript() {
+  return taskTypes.flatMap(taskType =>
+    (['baseline', 'candidate'] as const).flatMap(role => [
+      toolCallResponse(`${taskType}-${role}-skill`, 'skill', {
+        name: parentSkill.name,
+      }),
+      toolCallResponse(`${taskType}-${role}-verify`, acceptance.toolName, {
+        subject: { task: taskType, accepted: true },
+      }),
+      textResponse(`completed ${taskType} ${role}`),
+    ]))
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  for (const root of roots.splice(0)) {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+describe('controlled Skill evaluation Runtime', () => {
+  it('reuses the public DSH model-selection installer through compat', async () => {
+    const compat = await import('@tianwen/dsh-compat') as unknown as {
+      installModelSelection?: unknown
+    }
+    expect(compat.installModelSelection).toBeTypeOf('function')
+  })
+
+  it('rejects an invalid task package before creating formal activity', async () => {
+    const harness = await mountCoreHarness([])
+    await harness.ctx.plugin(SkillRegistry)
+    await harness.ctx.plugin(DynamicCordisRunnerService, {})
+    await apply(harness.ctx, { evolutionRoot: fixtureRoot('invalid-task-package') })
+    const create = vi.spyOn(harness.ctx.agents, 'create')
+    const bindRun = vi.spyOn(harness.ctx.tianwenEvolution, 'recordRunBinding')
+    const service = harness.ctx.tianwenSkillEvaluation as unknown as {
+      runControlledArms(input: unknown): Promise<unknown>
+    }
+
+    try {
+      await expect(Promise.resolve().then(() => service.runControlledArms({
+        candidateId: 'candidate:missing',
+        protocolId: 'protocol:missing',
+        tasks: [],
+      }))).rejects.toMatchObject({ code: 'task-package-mismatch' })
+      expect(create).not.toHaveBeenCalled()
+      expect(harness.ctx.sessions.list()).toEqual([])
+      expect(harness.adapter.requests).toEqual([])
+      expect(harness.ctx.tianwenEvolution.listControlledSkillEvaluations()).toEqual([])
+      expect(bindRun).not.toHaveBeenCalled()
+    } finally {
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects configured route drift with no formal effects', async () => {
+    const mounted = await mountControlledRuntime('configured-route-mismatch')
+    mounted.setSelection({ provider: 'unregistered-provider', model: CONTROLLED_MODEL })
+    const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+    const bindRun = vi.spyOn(mounted.harness.ctx.tianwenEvolution, 'recordRunBinding')
+
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )).rejects.toMatchObject({ code: 'configured-route-mismatch' })
+      expect(create).not.toHaveBeenCalled()
+      expect(bindRun).not.toHaveBeenCalled()
+      expect(mounted.harness.ctx.sessions.list()).toEqual([])
+      expect(mounted.adapter.requests).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects workspace drift with no formal effects', async () => {
+    const mounted = await mountControlledRuntime('workspace-mismatch')
+    writeFileSync(
+      join(mounted.input.tasks[0]!.baselineWorkspaceRoot, 'brief.txt'),
+      'changed after protocol freeze\n',
+      'utf8',
+    )
+    const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+    const bindRun = vi.spyOn(mounted.harness.ctx.tianwenEvolution, 'recordRunBinding')
+
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )).rejects.toMatchObject({ code: 'task-package-mismatch' })
+      expect(create).not.toHaveBeenCalled()
+      expect(bindRun).not.toHaveBeenCalled()
+      expect(mounted.harness.ctx.sessions.list()).toEqual([])
+      expect(mounted.adapter.requests).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects a hidden Windows absolute path in a workspace manifest', async () => {
+    const mounted = await mountControlledRuntime('workspace-hidden-absolute')
+    const input = {
+      ...mounted.input,
+      tasks: mounted.input.tasks.map((task, index) => index === 0
+        ? {
+            ...task,
+            workspaceSnapshot: {
+              ...task.workspaceSnapshot,
+              entries: task.workspaceSnapshot.entries.map((entry, entryIndex) =>
+                entryIndex === 0 ? { ...entry, relativePath: 'C:/private/brief.txt' } : entry),
+            },
+          }
+        : task),
+    }
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(input))
+        .rejects.toMatchObject({ code: 'task-package-mismatch' })
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
+      expect(mounted.harness.ctx.sessions.list()).toEqual([])
+      expect(mounted.adapter.requests).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects a pre-existing controlled Session with no formal effects', async () => {
+    const mounted = await mountControlledRuntime('session-not-empty')
+    const first = mounted.input.tasks[0]!
+    mounted.harness.ctx.sessions.create(SessionId(first.baselineSessionId), {
+      meta: { cwd: first.baselineWorkspaceRoot },
+    })
+    const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+    const bindRun = vi.spyOn(mounted.harness.ctx.tianwenEvolution, 'recordRunBinding')
+
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )).rejects.toMatchObject({ code: 'session-not-empty' })
+      expect(create).not.toHaveBeenCalled()
+      expect(bindRun).not.toHaveBeenCalled()
+      expect(mounted.adapter.requests).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects a scripted Session outside the dedicated fixture identity boundary', async () => {
+    const mounted = await mountControlledRuntime('scripted-boundary-mismatch')
+    const input = {
+      ...mounted.input,
+      tasks: mounted.input.tasks.map((task, index) => index === 0
+        ? { ...task, evaluatorSessionId: 'session:controlled-eval:not-fixture:evaluator' }
+        : task),
+    }
+    const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+    const bindRun = vi.spyOn(mounted.harness.ctx.tianwenEvolution, 'recordRunBinding')
+
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(input))
+        .rejects.toMatchObject({ code: 'scripted-boundary-mismatch' })
+      expect(create).not.toHaveBeenCalled()
+      expect(bindRun).not.toHaveBeenCalled()
+      expect(mounted.harness.ctx.sessions.list()).toEqual([])
+      expect(mounted.adapter.requests).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects a Candidate chain mismatch with zero formal effects', async () => {
+    const mounted = await mountControlledRuntime('candidate-chain')
+    const manifests = mounted.harness.ctx.tianwenEvolution.listRunSkillManifests().length
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms({
+        ...mounted.input,
+        candidateId: `candidate:${'f'.repeat(64)}`,
+      })).rejects.toMatchObject({ code: 'candidate-chain-mismatch' })
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
+      expect(mounted.harness.ctx.sessions.list()).toEqual([])
+      expect(mounted.adapter.requests).toEqual([])
+      expect(mounted.verifierBodies).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations())
+        .toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillManifests())
+        .toHaveLength(manifests)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects retry-policy drift with zero formal effects', async () => {
+    const mounted = await mountControlledRuntime('retry-drift')
+    vi.spyOn(mounted.harness.ctx.llm, 'providerRetryPolicy').mockReturnValue({
+      mode: 'normal',
+      maxRetries: 1,
+      retryableCodes: [],
+      initialDelayMs: 500,
+      maxDelayMs: 10_000,
+      jitterRatio: 0.1,
+    })
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )).rejects.toMatchObject({ code: 'retry-policy-mismatch' })
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
+      expect(mounted.harness.ctx.sessions.list()).toEqual([])
+      expect(mounted.adapter.requests).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations())
+        .toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects tool-surface drift with zero formal effects', async () => {
+    const mounted = await mountControlledRuntime('tool-drift')
+    mounted.disposeVerifier()
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )).rejects.toMatchObject({ code: 'tool-surface-mismatch' })
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
+      expect(mounted.harness.ctx.sessions.list()).toEqual([])
+      expect(mounted.adapter.requests).toEqual([])
+      expect(mounted.verifierBodies).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations())
+        .toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects unavailable persistence with zero formal effects', async () => {
+    const mounted = await mountControlledRuntime('persistence-unavailable')
+    vi.spyOn(mounted.harness.ctx.sessionPersistence, 'list')
+      .mockRejectedValue(new Error('D:/private/persistence-must-not-leak'))
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )).rejects.toMatchObject({ code: 'persistence-unavailable' })
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
+      expect(mounted.harness.ctx.sessions.list()).toEqual([])
+      expect(mounted.adapter.requests).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations())
+        .toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects root Skill drift with zero formal effects', async () => {
+    const mounted = await mountControlledRuntime('root-skill-drift')
+    mounted.disposeParent()
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )).rejects.toMatchObject({ code: 'root-skill-mismatch' })
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
+      expect(mounted.harness.ctx.sessions.list()).toEqual([])
+      expect(mounted.adapter.requests).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations())
+        .toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('binds all ten Runs before one provider failure and does not start C', async () => {
+    const sentinel = 'D:/private/sk-provider-error-must-not-leak'
+    const mounted = await mountControlledRuntime('provider-failure', [new Error(sentinel)])
+    const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+    let boundAtFirstRequest = 0
+    mounted.harness.ctx.on('llm/stream', (request, next) => {
+      if (String(request.sessionId) === mounted.input.tasks[0]!.baselineSessionId) {
+        const plan = mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()[0]
+        boundAtFirstRequest = plan === undefined
+          ? 0
+          : plan.tasks.flatMap(task => [task.baseline.runId, task.candidate.runId])
+              .filter(runId =>
+                mounted.harness.ctx.tianwenEvolution.getRunBinding(runId) !== undefined
+                && mounted.harness.ctx.tianwenEvolution.getRunSkillManifest(runId) !== undefined)
+              .length
+      }
+      return next()
+    })
+
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      const first = mounted.input.tasks[0]!
+      expect(receipt).toEqual({
+        schemaVersion: 'tianwen.controlled-skill-evaluation-arms-receipt.v1',
+        evaluationId: expect.stringMatching(/^evaluation:/u),
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'baseline',
+          taskId: first.taskId,
+          role: 'baseline',
+          reasonCode: 'provider-failed',
+        },
+      })
+      const [plan] = mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()
+      expect(plan).toBeDefined()
+      expect(create).toHaveBeenCalledTimes(10)
+      expect(boundAtFirstRequest).toBe(10)
+      expect(mounted.adapter.requests).toHaveLength(1)
+      expect(mounted.adapter.requests[0]!.sessionId).toBe(first.baselineSessionId)
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluationObjectives(
+        plan!.evaluationId,
+      )).toEqual([])
+      expect(mounted.harness.ctx.sessions.list()).toEqual([])
+      const persistedIds = (await mounted.harness.ctx.sessionPersistence.list())
+        .map(header => String(header.id))
+      expect(persistedIds).toContain(first.baselineSessionId)
+      expect(persistedIds).not.toContain(first.candidateSessionId)
+      expect(JSON.stringify(receipt)).not.toContain(sentinel)
+      expect(JSON.stringify(receipt)).not.toContain(first.baselineWorkspaceRoot)
+      expect(JSON.stringify(receipt)).not.toContain(first.input)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('replays plan and Run commit-unknown writes without a second model attempt', async () => {
+    const mounted = await mountControlledRuntime(
+      'commit-unknown',
+      [new Error('commit-unknown provider stop')],
+    )
+    const evolution = mounted.harness.ctx.tianwenEvolution
+    const candidate = evolution.getSkillCandidate(mounted.input.candidateId)!
+    const parent = evolution.listRunSkillManifests()
+      .find(item => item.parentVersionId === candidate.parentVersionId)!
+    evolution.openControlledSkillEvaluation({
+      candidateId: mounted.input.candidateId,
+      protocolId: mounted.input.protocolId,
+      sessionAllocations: mounted.input.tasks.map(task => ({
+        taskId: task.taskId,
+        baselineSessionId: task.baselineSessionId,
+        candidateSessionId: task.candidateSessionId,
+        evaluatorSessionId: task.evaluatorSessionId,
+      })),
+    })
+    const [plan] = evolution.listControlledSkillEvaluations()
+    for (const task of plan!.tasks) {
+      for (const role of ['baseline', 'candidate'] as const) {
+        const arm = task[role]
+        const binding = evolution.recordRunBinding({
+          goalRef: `goal:controlled-skill-evaluation:${plan!.protocolId}`,
+          taskRef: `task:${task.taskId}:${role}`,
+          sessionId: arm.sessionId,
+          scopeKey: plan!.scopeKey,
+          acceptanceContract: task.acceptanceContract,
+          acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+        })
+        expect(binding.runId).toBe(arm.runId)
+        evolution.recordRunSkillManifest({
+          runId: arm.runId,
+          skill: role === 'baseline'
+            ? { ...parent.parent, provider: parent.resolvedProvider }
+            : { ...candidate.payload, provider: parent.resolvedProvider },
+        })
+      }
+    }
+    const manifestCount = evolution.listRunSkillManifests().length
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        stop: { reasonCode: 'provider-failed', role: 'baseline' },
+      })
+      expect(mounted.adapter.requests).toHaveLength(1)
+      expect(evolution.listControlledSkillEvaluations()).toHaveLength(1)
+      expect(evolution.listRunSkillManifests()).toHaveLength(manifestCount)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('runs five ordinary B/C pairs and returns awaiting-evaluator', async () => {
+    const mounted = await mountControlledRuntime('five-pairs', successfulArmScript())
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toEqual({
+        schemaVersion: 'tianwen.controlled-skill-evaluation-arms-receipt.v1',
+        evaluationId: expect.stringMatching(/^evaluation:/u),
+        state: 'awaiting-evaluator',
+        completedTaskIds: mounted.input.tasks.map(task => task.taskId),
+      })
+      expect(mounted.adapter.requests).toHaveLength(30)
+      const objectives = mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluationObjectives(receipt.evaluationId)
+      expect(objectives).toHaveLength(5)
+      for (const [index, objective] of objectives.entries()) {
+        expect(objective).toMatchObject({
+          objectiveVerdict: 'pass',
+          baseline: {
+            outcome: index < 2 ? 'not-met' : 'met',
+            usedToolNames: ['skill', 'verify_summary'],
+            usage: { modelRequests: 3, toolCalls: 2 },
+          },
+          candidate: {
+            outcome: 'met',
+            usedToolNames: ['skill', 'verify_summary'],
+            usage: { modelRequests: 3, toolCalls: 2 },
+          },
+        })
+        expect(objective.baseline.skillVersionId)
+          .not.toBe(objective.candidate.skillVersionId)
+      }
+      expect(mounted.harness.ctx.sessions.list()).toEqual([])
+      expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(10)
+
+      const first = objectives[0]!.baseline
+      const inspection = await mounted.harness.ctx.sessionPersistence.inspect(
+        SessionId(first.sessionId),
+      )
+      const turnEnd = inspection.events.findLast(event => event.type === 'turn/end')
+      const message = inspection.events.findLast(event =>
+        event.type === 'assistant/message'
+        && event.surfaceOp === 'append'
+        && event.data.turn === (turnEnd?.type === 'turn/end' ? turnEnd.data.turn : -1))
+      const text = message?.type === 'assistant/message'
+        ? message.data.message.content.flatMap(block =>
+            block.type === 'text' ? [block.text] : []).join('\n')
+        : ''
+      expect(first.evaluatorMaterialDigest).toBe(sha256({
+        schemaVersion: 'tianwen.controlled-evaluator-material.v1',
+        text,
+      }))
+      const privateState = JSON.stringify({
+        plan: mounted.harness.ctx.tianwenEvolution
+          .getControlledSkillEvaluation(receipt.evaluationId),
+        objectives,
+      })
+      for (const task of mounted.input.tasks) {
+        expect(privateState).not.toContain(task.input)
+        expect(privateState).not.toContain(task.baselineWorkspaceRoot)
+        expect(privateState).not.toContain(task.candidateWorkspaceRoot)
+      }
+      expect(privateState).not.toContain('completed original-problem baseline')
+      expect(JSON.stringify(receipt)).not.toContain('completed original-problem baseline')
+
+      const repeated = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(repeated).toEqual(receipt)
+      expect(mounted.adapter.requests).toHaveLength(30)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('records the five-objective no-improvement terminal result', async () => {
+    const mounted = await mountControlledRuntime(
+      'no-improvement',
+      successfulArmScript(),
+      { baselineImprovementRequired: false },
+    )
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'terminal',
+        completedTaskIds: mounted.input.tasks.map(task => task.taskId),
+        result: {
+          mechanismVerdict: 'rejected',
+          reasonCode: 'original-or-adjacent-not-improved',
+          objectiveSetDigest: expect.stringMatching(/^sha256:/u),
+          blindMapDigest: null,
+          evaluatorSetDigest: null,
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(30)
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluationObjectives(receipt.evaluationId)).toHaveLength(5)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('stops after a Candidate provider failure without forging an objective', async () => {
+    const firstTask = taskTypes[0]
+    const mounted = await mountControlledRuntime('candidate-provider-failure', [
+      toolCallResponse('b-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('b-verify', acceptance.toolName, {
+        subject: { task: firstTask, accepted: true },
+      }),
+      textResponse('baseline complete'),
+      new Error('D:/private/candidate-provider-error'),
+    ])
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'candidate',
+          role: 'candidate',
+          reasonCode: 'provider-failed',
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(4)
+      const [plan] = mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluationObjectives(plan!.evaluationId)).toEqual([])
+      expect(JSON.stringify(receipt)).not.toContain('candidate-provider-error')
+      const repeated = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(repeated).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'postflight',
+          role: null,
+          reasonCode: 'existing-partial-activity',
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(4)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('records and returns an early terminal Candidate hard-gate result', async () => {
+    const firstTask = taskTypes[0]
+    const script = (['baseline', 'candidate'] as const).flatMap(role => [
+      toolCallResponse(`${role}-skill`, 'skill', { name: parentSkill.name }),
+      toolCallResponse(`${role}-verify`, acceptance.toolName, {
+        subject: { task: firstTask, accepted: true },
+      }),
+      textResponse(`${role} complete`),
+    ])
+    const mounted = await mountControlledRuntime(
+      'candidate-hard-gate',
+      script,
+      { rejectCandidateTaskType: firstTask },
+    )
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'terminal',
+        completedTaskIds: [mounted.input.tasks[0]!.taskId],
+        result: {
+          mechanismVerdict: 'rejected',
+          reasonCode: 'candidate-objective-hard-gate-failed',
+          objectiveSetDigest: null,
+          blindMapDigest: null,
+          evaluatorSetDigest: null,
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(6)
+      expect(mounted.harness.ctx.tianwenEvolution.getControlledSkillEvaluationResult(
+        receipt.evaluationId,
+      )).toEqual(receipt.state === 'terminal' ? receipt.result : undefined)
+      const repeated = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(repeated).toEqual(receipt)
+      expect(mounted.adapter.requests).toHaveLength(6)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('records a complete inconclusive pair before stopping', async () => {
+    const firstTask = taskTypes[0]
+    const script = (['baseline', 'candidate'] as const).flatMap(role => [
+      toolCallResponse(`inconclusive-${role}-skill`, 'skill', { name: parentSkill.name }),
+      toolCallResponse(`inconclusive-${role}-verify`, acceptance.toolName, {
+        subject: { task: firstTask, accepted: true },
+      }),
+      textResponse(`${role} material remains available`),
+    ])
+    const mounted = await mountControlledRuntime(
+      'objective-inconclusive',
+      script,
+      { inconclusiveCandidateTaskType: firstTask },
+    )
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'terminal',
+        completedTaskIds: [mounted.input.tasks[0]!.taskId],
+        result: {
+          mechanismVerdict: 'inconclusive',
+          reasonCode: 'objective-inconclusive',
+        },
+      })
+      const objective = mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluationObjectives(receipt.evaluationId)[0]!
+      expect(objective).toMatchObject({
+        objectiveVerdict: 'inconclusive',
+        baseline: { outcome: 'not-met' },
+        candidate: { outcome: 'inconclusive' },
+      })
+      expect(mounted.adapter.requests).toHaveLength(6)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not start C after the root Skill drifts during B', async () => {
+    const taskType = taskTypes[0]
+    const mounted = await mountControlledRuntime('root-drift-before-c', [
+      toolCallResponse('root-b-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('root-b-verify', acceptance.toolName, {
+        subject: { task: taskType, accepted: true },
+      }),
+      textResponse('baseline complete'),
+    ])
+    let baselineRequests = 0
+    mounted.harness.ctx.on('llm/stream', (request, next) => {
+      if (String(request.sessionId) === mounted.input.tasks[0]!.baselineSessionId) {
+        baselineRequests += 1
+        if (baselineRequests === 3) mounted.disposeParent()
+      }
+      return next()
+    })
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'candidate',
+          role: 'candidate',
+          reasonCode: 'root-skill-drift',
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(3)
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not start C after its unused workspace drifts during B', async () => {
+    const taskType = taskTypes[0]
+    const mounted = await mountControlledRuntime('workspace-drift-before-c', [
+      toolCallResponse('workspace-b-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('workspace-b-verify', acceptance.toolName, {
+        subject: { task: taskType, accepted: true },
+      }),
+      textResponse('baseline complete'),
+    ])
+    let baselineRequests = 0
+    mounted.harness.ctx.on('llm/stream', (request, next) => {
+      if (String(request.sessionId) === mounted.input.tasks[0]!.baselineSessionId) {
+        baselineRequests += 1
+        if (baselineRequests === 3) {
+          writeFileSync(
+            join(mounted.input.tasks[0]!.candidateWorkspaceRoot, 'brief.txt'),
+            'contaminated before C\n',
+            'utf8',
+          )
+        }
+      }
+      return next()
+    })
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'candidate',
+          role: 'candidate',
+          reasonCode: 'root-skill-drift',
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(3)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not return success after a final root Skill drift', async () => {
+    const mounted = await mountControlledRuntime('root-drift-postflight', successfulArmScript())
+    const last = mounted.input.tasks.at(-1)!.candidateSessionId
+    let lastRequests = 0
+    mounted.harness.ctx.on('llm/stream', (request, next) => {
+      if (String(request.sessionId) === last) {
+        lastRequests += 1
+        if (lastRequests === 3) mounted.disposeParent()
+      }
+      return next()
+    })
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: mounted.input.tasks.map(task => task.taskId),
+        stop: {
+          stage: 'postflight',
+          role: null,
+          reasonCode: 'root-skill-drift',
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(30)
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('stops when acceptance Evidence is bound to another subject', async () => {
+    const taskType = taskTypes[0]
+    const mounted = await mountControlledRuntime('acceptance-subject', [
+      toolCallResponse('subject-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('subject-verify', acceptance.toolName, {
+        subject: { task: taskType, accepted: false },
+      }),
+      textResponse('completed with the wrong subject'),
+    ])
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'baseline',
+          role: 'baseline',
+          reasonCode: 'acceptance-subject-mismatch',
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(3)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('stops when an observed Agent request leaves the ordinary contract', async () => {
+    const taskType = taskTypes[0]
+    const mounted = await mountControlledRuntime('request-contract', [
+      toolCallResponse('request-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('request-verify', acceptance.toolName, {
+        subject: { task: taskType, accepted: true },
+      }),
+      textResponse('request complete'),
+    ], { tamperFirstRequestPurpose: true })
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'baseline',
+          role: 'baseline',
+          reasonCode: 'request-contract-mismatch',
+        },
+      })
+      expect(mounted.requestWasTampered()).toBe(true)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('stops when final evaluator material exceeds its frozen bound', async () => {
+    const taskType = taskTypes[0]
+    const mounted = await mountControlledRuntime('material-bound', [
+      toolCallResponse('material-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('material-verify', acceptance.toolName, {
+        subject: { task: taskType, accepted: true },
+      }),
+      textResponse('too long'),
+    ], { maxEvaluatorMaterialBytes: 1 })
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'baseline',
+          role: 'baseline',
+          reasonCode: 'evaluator-material-invalid',
+        },
+      })
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('denies tool N+1 before its body and does not start C', async () => {
+    const taskType = taskTypes[0]
+    const mounted = await mountControlledRuntime('tool-limit', [
+      toolCallResponse('limited-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('limited-verify', acceptance.toolName, {
+        subject: { task: taskType, accepted: true },
+      }),
+      toolCallResponse('limited-extra', acceptance.toolName, {
+        subject: { task: taskType, accepted: true },
+      }),
+    ], { maxToolCalls: 2 })
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'baseline',
+          taskId: mounted.input.tasks[0]!.taskId,
+          role: 'baseline',
+          reasonCode: 'tool-limit-exceeded',
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(3)
+      expect(mounted.verifierBodies).toEqual([
+        mounted.input.tasks[0]!.baselineSessionId,
+      ])
+      const persisted = (await mounted.harness.ctx.sessionPersistence.list())
+        .map(item => String(item.id))
+      expect(persisted).toContain(mounted.input.tasks[0]!.baselineSessionId)
+      expect(persisted).not.toContain(mounted.input.tasks[0]!.candidateSessionId)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('cancels a wall-clock timeout through the public Agent seam', async () => {
+    const mounted = await mountControlledRuntime(
+      'timeout',
+      [textResponse('too late')],
+      { maxElapsedMs: 20, firstRequestDelayMs: 80 },
+    )
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'baseline',
+          taskId: mounted.input.tasks[0]!.taskId,
+          role: 'baseline',
+          reasonCode: 'timeout',
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(1)
+      expect(mounted.verifierBodies).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+})
