@@ -71,11 +71,26 @@ import type {
   SkillEvalProtocolRecord,
 } from './skill-evaluation.js'
 import type {
+  ControlledSkillEvaluationBlindMap,
+  ControlledSkillEvaluationBlindMapReceipt,
   ControlledSkillEvaluationId,
   ControlledSkillEvaluationObjective,
   ControlledSkillEvaluationObjectiveReceipt,
+  ControlledSkillEvaluationPlan,
+  ControlledSkillEvaluationReceipt,
+  ControlledSkillEvaluationResult,
+  ControlledSkillEvaluationResultReceipt,
   ControlledSkillEvalTaskId,
+  ControlledSkillEvalProtocolReceipt,
+  ControlledSkillEvalProtocolRecord,
+  FreezeControlledSkillEvaluationBlindMapInput,
+  FreezeControlledSkillEvalProtocolInput,
+  OpenControlledSkillEvaluationInput,
   RecordControlledSkillEvaluationObjectiveInput,
+  RecordControlledSkillEvaluationResultInput,
+  RecordControlledSkillEvaluatorObservationInput,
+  ControlledSkillEvaluatorObservation,
+  ControlledSkillEvaluatorObservationReceipt,
 } from './controlled-skill-evaluation.js'
 
 export interface RuntimeBinding {
@@ -274,6 +289,40 @@ export class TianwenEvolutionService extends Service {
     return this.state().ledger.getSkillEvaluationResult(evaluationId)
   }
 
+  freezeControlledSkillEvalProtocol(
+    input: FreezeControlledSkillEvalProtocolInput,
+  ): ControlledSkillEvalProtocolReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.freezeControlledSkillEvalProtocol(input))
+  }
+
+  getControlledSkillEvalProtocol(
+    protocolId: SkillEvalProtocolId,
+  ): ControlledSkillEvalProtocolRecord | undefined {
+    return this.state().ledger.getControlledSkillEvalProtocol(protocolId)
+  }
+
+  listControlledSkillEvalProtocols(): readonly ControlledSkillEvalProtocolRecord[] {
+    return this.state().ledger.listControlledSkillEvalProtocols()
+  }
+
+  openControlledSkillEvaluation(
+    input: OpenControlledSkillEvaluationInput,
+  ): ControlledSkillEvaluationReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.openControlledSkillEvaluation(input))
+  }
+
+  getControlledSkillEvaluation(
+    evaluationId: ControlledSkillEvaluationId,
+  ): ControlledSkillEvaluationPlan | undefined {
+    return this.state().ledger.getControlledSkillEvaluation(evaluationId)
+  }
+
+  listControlledSkillEvaluations(): readonly ControlledSkillEvaluationPlan[] {
+    return this.state().ledger.listControlledSkillEvaluations()
+  }
+
   recordControlledSkillEvaluationObjective(
     input: RecordControlledSkillEvaluationObjectiveInput,
   ): ControlledSkillEvaluationObjectiveReceipt {
@@ -295,6 +344,45 @@ export class TianwenEvolutionService extends Service {
     evaluationId: ControlledSkillEvaluationId,
   ): readonly ControlledSkillEvaluationObjective[] {
     return this.state().ledger.listControlledSkillEvaluationObjectives(evaluationId)
+  }
+
+  freezeControlledSkillEvaluationBlindMap(
+    input: FreezeControlledSkillEvaluationBlindMapInput,
+  ): ControlledSkillEvaluationBlindMapReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.freezeControlledSkillEvaluationBlindMap(input))
+  }
+
+  getControlledSkillEvaluationBlindMap(
+    evaluationId: ControlledSkillEvaluationId,
+  ): ControlledSkillEvaluationBlindMap | undefined {
+    return this.state().ledger.getControlledSkillEvaluationBlindMap(evaluationId)
+  }
+
+  recordControlledSkillEvaluatorObservation(
+    input: RecordControlledSkillEvaluatorObservationInput,
+  ): ControlledSkillEvaluatorObservationReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordControlledSkillEvaluatorObservation(input))
+  }
+
+  listControlledSkillEvaluatorObservations(
+    evaluationId: ControlledSkillEvaluationId,
+  ): readonly ControlledSkillEvaluatorObservation[] {
+    return this.state().ledger.listControlledSkillEvaluatorObservations(evaluationId)
+  }
+
+  recordControlledSkillEvaluationResult(
+    input: RecordControlledSkillEvaluationResultInput,
+  ): ControlledSkillEvaluationResultReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordControlledSkillEvaluationResult(input))
+  }
+
+  getControlledSkillEvaluationResult(
+    evaluationId: ControlledSkillEvaluationId,
+  ): ControlledSkillEvaluationResult | undefined {
+    return this.state().ledger.getControlledSkillEvaluationResult(evaluationId)
   }
 
   openLearningCase(input: OpenLearningCaseInput): LearningCaseReceipt {

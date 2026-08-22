@@ -257,6 +257,151 @@ export interface ControlledSkillEvaluationObjectiveRecordedEvent {
   readonly inputDigest: Sha256Digest
 }
 
+export interface FreezeControlledSkillEvaluationBlindMapInput {
+  readonly evaluationId: ControlledSkillEvaluationId
+}
+
+export interface ControlledSkillEvaluationBlindAssignment {
+  readonly taskId: ControlledSkillEvalTaskId
+  readonly xRole: ControlledSkillEvalPlanArm['role']
+  readonly yRole: ControlledSkillEvalPlanArm['role']
+  readonly evaluatorSessionId: string
+  readonly envelopeDigest: Sha256Digest
+}
+
+export interface ControlledSkillEvaluationBlindMap {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2'
+  readonly evaluationId: ControlledSkillEvaluationId
+  readonly objectiveSetDigest: Sha256Digest
+  readonly assignments: readonly ControlledSkillEvaluationBlindAssignment[]
+}
+
+export interface ControlledSkillEvaluationBlindMapReceipt {
+  readonly evaluationId: ControlledSkillEvaluationId
+  readonly duplicate: boolean
+}
+
+export interface ControlledSkillEvaluationBlindMapFrozenEvent {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2'
+  readonly type: 'controlled-skill-evaluation-blind-map-frozen'
+  readonly at: string
+  readonly blindMap: ControlledSkillEvaluationBlindMap
+  readonly inputDigest: Sha256Digest
+}
+
+export type ControlledSkillEvaluationMechanismVerdict =
+  | 'pass'
+  | 'rejected'
+  | 'inconclusive'
+export type ControlledSkillEvaluationEvidenceClaim =
+  | 'controlled-product'
+  | 'controlled-synthetic-mechanism'
+export type ControlledSkillEvaluationShadowEligibility =
+  | 'eligible-for-project-shadow'
+  | 'eligible-for-isolated-test-shadow'
+  | 'ineligible'
+export type ControlledSkillEvaluatorInconclusiveReasonCode =
+  | 'material-missing'
+  | 'identity-exposed'
+  | 'objective-facts-incomplete'
+  | 'provider-failed'
+  | 'timeout'
+  | 'score-not-submitted'
+export type ControlledSkillEvaluationResultReasonCode =
+  | 'candidate-objective-hard-gate-failed'
+  | 'objective-inconclusive'
+  | 'original-or-adjacent-not-improved'
+  | ControlledSkillEvaluatorInconclusiveReasonCode
+  | 'candidate-subjective-total-lower'
+  | 'candidate-dimension-regression'
+  | 'all-gates-passed'
+
+export interface ControlledSkillEvaluatorDimensionScores {
+  readonly relevance: number
+  readonly correctnessReasoning: number
+  readonly clarityUsability: number
+  readonly scopeRestraint: number
+}
+
+export interface ControlledSkillEvaluatorScores {
+  readonly x: ControlledSkillEvaluatorDimensionScores
+  readonly y: ControlledSkillEvaluatorDimensionScores
+}
+
+interface ControlledSkillEvaluatorObservationCommon {
+  readonly evaluationId: ControlledSkillEvaluationId
+  readonly taskId: ControlledSkillEvalTaskId
+  readonly evaluatorSessionId: string
+  readonly envelopeDigest: Sha256Digest
+  readonly requestDigest: Sha256Digest
+  readonly evidenceId: Sha256Digest
+}
+
+export type RecordControlledSkillEvaluatorObservationInput =
+  | (ControlledSkillEvaluatorObservationCommon & {
+      readonly status: 'scored'
+      readonly insufficientMaterial: false
+      readonly reasonCode: 'score-submitted'
+      readonly scores: ControlledSkillEvaluatorScores
+    })
+  | (ControlledSkillEvaluatorObservationCommon & {
+      readonly status: 'inconclusive'
+      readonly insufficientMaterial: true
+      readonly reasonCode: ControlledSkillEvaluatorInconclusiveReasonCode
+    })
+
+export type ControlledSkillEvaluatorObservation =
+  RecordControlledSkillEvaluatorObservationInput & {
+    readonly schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2'
+  }
+
+export interface ControlledSkillEvaluatorObservationReceipt {
+  readonly evaluationId: ControlledSkillEvaluationId
+  readonly taskId: ControlledSkillEvalTaskId
+  readonly duplicate: boolean
+}
+
+export interface ControlledSkillEvaluatorObservationRecordedEvent {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2'
+  readonly type: 'controlled-skill-evaluator-observation-recorded'
+  readonly at: string
+  readonly observation: ControlledSkillEvaluatorObservation
+  readonly inputDigest: Sha256Digest
+}
+
+export interface RecordControlledSkillEvaluationResultInput {
+  readonly evaluationId: ControlledSkillEvaluationId
+}
+
+export interface ControlledSkillEvaluationResult {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2'
+  readonly evaluationId: ControlledSkillEvaluationId
+  readonly planDigest: Sha256Digest
+  readonly objectiveSetDigest: Sha256Digest | null
+  readonly blindMapDigest: Sha256Digest | null
+  readonly evaluatorSetDigest: Sha256Digest | null
+  readonly mechanismVerdict: ControlledSkillEvaluationMechanismVerdict
+  readonly evidenceClaim: ControlledSkillEvaluationEvidenceClaim
+  readonly naturalUserEvidence: 'not-claimed'
+  readonly shadowEligibility: ControlledSkillEvaluationShadowEligibility
+  readonly reasonCode: ControlledSkillEvaluationResultReasonCode
+  readonly baselineTotal: number | null
+  readonly candidateTotal: number | null
+}
+
+export interface ControlledSkillEvaluationResultReceipt {
+  readonly evaluationId: ControlledSkillEvaluationId
+  readonly duplicate: boolean
+}
+
+export interface ControlledSkillEvaluationResultRecordedEvent {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2'
+  readonly type: 'controlled-skill-evaluation-result-recorded'
+  readonly at: string
+  readonly result: ControlledSkillEvaluationResult
+  readonly inputDigest: Sha256Digest
+}
+
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/u
 const TICKET_ID = /^ticket:[a-zA-Z0-9._:-]+$/u
 const TASK_ID = /^eval-task:[a-z0-9][a-z0-9._-]{0,96}$/u
@@ -1083,4 +1228,531 @@ export function parseControlledSkillEvaluationObjective(
     throw new TypeError('controlled evaluation objective is not canonical')
   }
   return prepared
+}
+
+function blindEnvelopeArm(arm: ControlledSkillEvaluationObjectiveArm) {
+  return {
+    evaluatorMaterialDigest: arm.evaluatorMaterialDigest,
+    outcome: arm.outcome,
+    evidenceSetDigest: sha256(arm.evidenceIds),
+  }
+}
+
+export function prepareControlledSkillEvaluationBlindMap(
+  input: FreezeControlledSkillEvaluationBlindMapInput,
+  plan: ControlledSkillEvaluationPlan,
+  objectives: readonly ControlledSkillEvaluationObjective[],
+): ControlledSkillEvaluationBlindMap {
+  if (!isRecord(input)) throw new TypeError('controlled evaluation blind map input must be an object')
+  exactKeys(input, ['evaluationId'])
+  if (input.evaluationId !== plan.evaluationId) {
+    throw new TypeError('controlled evaluation blind map disagrees with its plan')
+  }
+  if (
+    objectives.length !== plan.tasks.length
+    || objectives.some((objective, index) =>
+      objective.evaluationId !== plan.evaluationId
+      || objective.taskId !== plan.tasks[index]?.taskId)
+  ) {
+    throw new TypeError('controlled evaluation incomplete')
+  }
+  const complete = objectives
+  if (
+    complete.some(objective => objective.objectiveVerdict !== 'pass')
+    || complete.slice(0, 2).every(objective => objective.comparison !== 'candidate-better')
+  ) {
+    throw new TypeError('controlled evaluation objective aggregate did not pass')
+  }
+  const objectiveSetDigest = sha256(complete)
+  return {
+    schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2',
+    evaluationId: plan.evaluationId,
+    objectiveSetDigest,
+    assignments: plan.tasks.map((task, index) => {
+      const objective = complete[index]!
+      const assignmentDigest = sha256({
+        domain: 'tianwen.controlled-blind-map.v1',
+        evaluationId: plan.evaluationId,
+        objectiveSetDigest,
+        taskId: task.taskId,
+      })
+      const xRole: ControlledSkillEvalPlanArm['role'] =
+        Number.parseInt(assignmentDigest.at(-1)!, 16) % 2 === 0
+          ? 'baseline'
+          : 'candidate'
+      const yRole = xRole === 'baseline' ? 'candidate' : 'baseline'
+      return {
+        taskId: task.taskId,
+        xRole,
+        yRole,
+        evaluatorSessionId: task.evaluatorSessionId,
+        envelopeDigest: sha256({
+          domain: 'tianwen.controlled-blind-envelope.v1',
+          taskId: task.taskId,
+          rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+          x: blindEnvelopeArm(objective[xRole]),
+          y: blindEnvelopeArm(objective[yRole]),
+        }),
+      }
+    }),
+  }
+}
+
+export function parseControlledSkillEvaluationBlindMap(
+  value: unknown,
+): ControlledSkillEvaluationBlindMap {
+  if (!isRecord(value)) throw new TypeError('controlled evaluation blind map must be an object')
+  exactKeys(value, ['schemaVersion', 'evaluationId', 'objectiveSetDigest', 'assignments'])
+  if (
+    value.schemaVersion !== 'tianwen.controlled-skill-evaluation-blind-map.v2'
+    || typeof value.evaluationId !== 'string'
+    || !EVALUATION_ID.test(value.evaluationId)
+    || !Array.isArray(value.assignments)
+  ) {
+    throw new TypeError('controlled evaluation blind map is invalid')
+  }
+  const prepared: ControlledSkillEvaluationBlindMap = {
+    schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2',
+    evaluationId: value.evaluationId as ControlledSkillEvaluationId,
+    objectiveSetDigest: digest(value.objectiveSetDigest, 'objectiveSetDigest'),
+    assignments: value.assignments.map(item => {
+      if (!isRecord(item)) throw new TypeError('controlled evaluation blind assignment must be an object')
+      exactKeys(item, [
+        'taskId',
+        'xRole',
+        'yRole',
+        'evaluatorSessionId',
+        'envelopeDigest',
+      ])
+      if (
+        typeof item.taskId !== 'string'
+        || !TASK_ID.test(item.taskId)
+        || (item.xRole !== 'baseline' && item.xRole !== 'candidate')
+        || (item.yRole !== 'baseline' && item.yRole !== 'candidate')
+        || item.xRole === item.yRole
+      ) {
+        throw new TypeError('controlled evaluation blind assignment is invalid')
+      }
+      return {
+        taskId: item.taskId as ControlledSkillEvalTaskId,
+        xRole: item.xRole,
+        yRole: item.yRole,
+        evaluatorSessionId: safeSessionId(item.evaluatorSessionId),
+        envelopeDigest: digest(item.envelopeDigest, 'envelopeDigest'),
+      }
+    }),
+  }
+  if (canonicalJson(prepared) !== canonicalJson(value)) {
+    throw new TypeError('controlled evaluation blind map is not canonical')
+  }
+  return prepared
+}
+
+function prepareDimensionScores(
+  value: unknown,
+): ControlledSkillEvaluatorDimensionScores {
+  if (!isRecord(value)) throw new TypeError('controlled evaluator dimension scores must be an object')
+  exactKeys(value, [
+    'relevance',
+    'correctnessReasoning',
+    'clarityUsability',
+    'scopeRestraint',
+  ])
+  return {
+    relevance: boundedInteger(value.relevance, 'relevance', 0, 4),
+    correctnessReasoning: boundedInteger(
+      value.correctnessReasoning,
+      'correctnessReasoning',
+      0,
+      4,
+    ),
+    clarityUsability: boundedInteger(value.clarityUsability, 'clarityUsability', 0, 4),
+    scopeRestraint: boundedInteger(value.scopeRestraint, 'scopeRestraint', 0, 4),
+  }
+}
+
+function prepareEvaluatorScores(value: unknown): ControlledSkillEvaluatorScores {
+  if (!isRecord(value)) throw new TypeError('controlled evaluator scores must be an object')
+  exactKeys(value, ['x', 'y'])
+  return {
+    x: prepareDimensionScores(value.x),
+    y: prepareDimensionScores(value.y),
+  }
+}
+
+function prepareObservationInput(
+  value: unknown,
+): RecordControlledSkillEvaluatorObservationInput {
+  if (!isRecord(value)) throw new TypeError('controlled evaluator observation input must be an object')
+  const commonKeys = [
+    'evaluationId',
+    'taskId',
+    'evaluatorSessionId',
+    'envelopeDigest',
+    'requestDigest',
+    'evidenceId',
+    'status',
+    'insufficientMaterial',
+    'reasonCode',
+  ]
+  if (value.status === 'scored') {
+    exactKeys(value, [...commonKeys, 'scores'])
+  } else if (value.status === 'inconclusive') {
+    exactKeys(value, commonKeys)
+  } else {
+    throw new TypeError('controlled evaluator observation status is invalid')
+  }
+  if (
+    typeof value.evaluationId !== 'string'
+    || !EVALUATION_ID.test(value.evaluationId)
+    || typeof value.taskId !== 'string'
+    || !TASK_ID.test(value.taskId)
+  ) {
+    throw new TypeError('controlled evaluator observation identity is invalid')
+  }
+  const common: ControlledSkillEvaluatorObservationCommon = {
+    evaluationId: value.evaluationId as ControlledSkillEvaluationId,
+    taskId: value.taskId as ControlledSkillEvalTaskId,
+    evaluatorSessionId: safeSessionId(value.evaluatorSessionId),
+    envelopeDigest: digest(value.envelopeDigest, 'envelopeDigest'),
+    requestDigest: digest(value.requestDigest, 'requestDigest'),
+    evidenceId: digest(value.evidenceId, 'evidenceId'),
+  }
+  if (value.status === 'scored') {
+    if (value.insufficientMaterial !== false || value.reasonCode !== 'score-submitted') {
+      throw new TypeError('scored controlled evaluator observation is invalid')
+    }
+    return {
+      ...common,
+      status: 'scored',
+      insufficientMaterial: false,
+      reasonCode: 'score-submitted',
+      scores: prepareEvaluatorScores(value.scores),
+    }
+  }
+  if (
+    value.insufficientMaterial !== true
+    || ![
+      'material-missing',
+      'identity-exposed',
+      'objective-facts-incomplete',
+      'provider-failed',
+      'timeout',
+      'score-not-submitted',
+    ].includes(value.reasonCode as string)
+  ) {
+    throw new TypeError('inconclusive controlled evaluator observation is invalid')
+  }
+  return {
+    ...common,
+    status: 'inconclusive',
+    insufficientMaterial: true,
+    reasonCode: value.reasonCode as ControlledSkillEvaluatorInconclusiveReasonCode,
+  }
+}
+
+export function prepareControlledSkillEvaluatorObservation(
+  input: RecordControlledSkillEvaluatorObservationInput,
+  plan: ControlledSkillEvaluationPlan,
+  blindMap: ControlledSkillEvaluationBlindMap,
+): ControlledSkillEvaluatorObservation {
+  const prepared = prepareObservationInput(input)
+  const taskIndex = plan.tasks.findIndex(task => task.taskId === prepared.taskId)
+  const task = plan.tasks[taskIndex]
+  const assignment = blindMap.assignments[taskIndex]
+  if (
+    prepared.evaluationId !== plan.evaluationId
+    || blindMap.evaluationId !== plan.evaluationId
+    || task === undefined
+    || assignment?.taskId !== task.taskId
+    || prepared.evaluatorSessionId !== task.evaluatorSessionId
+    || prepared.evaluatorSessionId !== assignment.evaluatorSessionId
+    || prepared.envelopeDigest !== assignment.envelopeDigest
+  ) {
+    throw new TypeError('controlled evaluator observation disagrees with frozen facts')
+  }
+  return {
+    schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2',
+    ...prepared,
+  }
+}
+
+export function parseControlledSkillEvaluatorObservation(
+  value: unknown,
+): ControlledSkillEvaluatorObservation {
+  if (!isRecord(value)) throw new TypeError('controlled evaluator observation must be an object')
+  const { schemaVersion, ...input } = value
+  if (schemaVersion !== 'tianwen.controlled-skill-evaluator-observation.v2') {
+    throw new TypeError('controlled evaluator observation schema version is invalid')
+  }
+  const prepared: ControlledSkillEvaluatorObservation = {
+    schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2',
+    ...prepareObservationInput(input as unknown as RecordControlledSkillEvaluatorObservationInput),
+  }
+  if (canonicalJson(prepared) !== canonicalJson(value)) {
+    throw new TypeError('controlled evaluator observation is not canonical')
+  }
+  return prepared
+}
+
+function resultEvidenceClaim(
+  plan: ControlledSkillEvaluationPlan,
+): ControlledSkillEvaluationEvidenceClaim {
+  return plan.evidencePurpose === 'controlled-product'
+    ? 'controlled-product'
+    : 'controlled-synthetic-mechanism'
+}
+
+function prepareResultRecord(
+  plan: ControlledSkillEvaluationPlan,
+  fields: Pick<
+    ControlledSkillEvaluationResult,
+    | 'objectiveSetDigest'
+    | 'blindMapDigest'
+    | 'evaluatorSetDigest'
+    | 'mechanismVerdict'
+    | 'reasonCode'
+    | 'baselineTotal'
+    | 'candidateTotal'
+  >,
+): ControlledSkillEvaluationResult {
+  const shadowEligibility: ControlledSkillEvaluationShadowEligibility =
+    fields.mechanismVerdict !== 'pass'
+      ? 'ineligible'
+      : plan.evidencePurpose === 'controlled-product'
+        ? 'eligible-for-project-shadow'
+        : 'eligible-for-isolated-test-shadow'
+  return {
+    schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2',
+    evaluationId: plan.evaluationId,
+    planDigest: sha256(plan),
+    ...fields,
+    evidenceClaim: resultEvidenceClaim(plan),
+    naturalUserEvidence: 'not-claimed',
+    shadowEligibility,
+  }
+}
+
+const EVALUATOR_SCORE_DIMENSIONS = [
+  'relevance',
+  'correctnessReasoning',
+  'clarityUsability',
+  'scopeRestraint',
+] as const
+
+export function prepareControlledSkillEvaluationResult(
+  input: RecordControlledSkillEvaluationResultInput,
+  plan: ControlledSkillEvaluationPlan,
+  objectives: readonly ControlledSkillEvaluationObjective[],
+  blindMap?: ControlledSkillEvaluationBlindMap,
+  observations: readonly ControlledSkillEvaluatorObservation[] = [],
+): ControlledSkillEvaluationResult {
+  if (!isRecord(input)) throw new TypeError('controlled evaluation result input must be an object')
+  exactKeys(input, ['evaluationId'])
+  if (input.evaluationId !== plan.evaluationId) {
+    throw new TypeError('controlled evaluation result disagrees with its plan')
+  }
+  if (objectives.some((objective, index) =>
+    objective.evaluationId !== plan.evaluationId
+    || objective.taskId !== plan.tasks[index]?.taskId)) {
+    throw new TypeError('controlled evaluation result has unknown objectives')
+  }
+  if (objectives.some(objective => objective.candidateHardGate === 'rejected')) {
+    return prepareResultRecord(plan, {
+      objectiveSetDigest: null,
+      blindMapDigest: null,
+      evaluatorSetDigest: null,
+      mechanismVerdict: 'rejected',
+      reasonCode: 'candidate-objective-hard-gate-failed',
+      baselineTotal: null,
+      candidateTotal: null,
+    })
+  }
+  if (objectives.some(objective => objective.objectiveVerdict === 'inconclusive')) {
+    return prepareResultRecord(plan, {
+      objectiveSetDigest: null,
+      blindMapDigest: null,
+      evaluatorSetDigest: null,
+      mechanismVerdict: 'inconclusive',
+      reasonCode: 'objective-inconclusive',
+      baselineTotal: null,
+      candidateTotal: null,
+    })
+  }
+  if (objectives.length !== plan.tasks.length) {
+    throw new TypeError('controlled evaluation incomplete')
+  }
+  const complete = objectives
+  const objectiveSetDigest = sha256(complete)
+  if (complete.slice(0, 2).every(objective => objective.comparison !== 'candidate-better')) {
+    return prepareResultRecord(plan, {
+      objectiveSetDigest,
+      blindMapDigest: null,
+      evaluatorSetDigest: null,
+      mechanismVerdict: 'rejected',
+      reasonCode: 'original-or-adjacent-not-improved',
+      baselineTotal: null,
+      candidateTotal: null,
+    })
+  }
+  if (
+    blindMap === undefined
+    || blindMap.evaluationId !== plan.evaluationId
+    || blindMap.objectiveSetDigest !== objectiveSetDigest
+  ) {
+    throw new TypeError('controlled evaluation incomplete')
+  }
+  if (observations.some((observation, index) =>
+    observation.evaluationId !== plan.evaluationId
+    || observation.taskId !== plan.tasks[index]?.taskId)) {
+    throw new TypeError('controlled evaluation result has unknown observations')
+  }
+  const blindMapDigest = sha256(blindMap)
+  const inconclusive = observations.find(observation =>
+    observation.status === 'inconclusive')
+  if (inconclusive !== undefined) {
+    return prepareResultRecord(plan, {
+      objectiveSetDigest,
+      blindMapDigest,
+      evaluatorSetDigest: sha256(observations),
+      mechanismVerdict: 'inconclusive',
+      reasonCode: inconclusive.reasonCode,
+      baselineTotal: null,
+      candidateTotal: null,
+    })
+  }
+  if (
+    observations.length !== plan.tasks.length
+    || observations.some(observation => observation.status !== 'scored')
+  ) {
+    throw new TypeError('controlled evaluation incomplete')
+  }
+  const scored = observations as readonly (ControlledSkillEvaluatorObservation & {
+    readonly status: 'scored'
+    readonly scores: ControlledSkillEvaluatorScores
+  })[]
+  let baselineTotal = 0
+  let candidateTotal = 0
+  let dimensionRegression = false
+  for (const [index, observation] of scored.entries()) {
+    const assignment = blindMap.assignments[index]!
+    const baseline = assignment.xRole === 'baseline'
+      ? observation.scores.x
+      : observation.scores.y
+    const candidate = assignment.xRole === 'candidate'
+      ? observation.scores.x
+      : observation.scores.y
+    for (const dimension of EVALUATOR_SCORE_DIMENSIONS) {
+      baselineTotal += baseline[dimension]
+      candidateTotal += candidate[dimension]
+      dimensionRegression ||= candidate[dimension] - baseline[dimension] <= -2
+    }
+  }
+  const evaluatorSetDigest = sha256(scored)
+  if (candidateTotal < baselineTotal) {
+    return prepareResultRecord(plan, {
+      objectiveSetDigest,
+      blindMapDigest,
+      evaluatorSetDigest,
+      mechanismVerdict: 'rejected',
+      reasonCode: 'candidate-subjective-total-lower',
+      baselineTotal,
+      candidateTotal,
+    })
+  }
+  if (dimensionRegression) {
+    return prepareResultRecord(plan, {
+      objectiveSetDigest,
+      blindMapDigest,
+      evaluatorSetDigest,
+      mechanismVerdict: 'rejected',
+      reasonCode: 'candidate-dimension-regression',
+      baselineTotal,
+      candidateTotal,
+    })
+  }
+  return prepareResultRecord(plan, {
+    objectiveSetDigest,
+    blindMapDigest,
+    evaluatorSetDigest,
+    mechanismVerdict: 'pass',
+    reasonCode: 'all-gates-passed',
+    baselineTotal,
+    candidateTotal,
+  })
+}
+
+export function parseControlledSkillEvaluationResult(
+  value: unknown,
+): ControlledSkillEvaluationResult {
+  if (!isRecord(value)) throw new TypeError('controlled evaluation result must be an object')
+  exactKeys(value, [
+    'schemaVersion',
+    'evaluationId',
+    'planDigest',
+    'objectiveSetDigest',
+    'blindMapDigest',
+    'evaluatorSetDigest',
+    'mechanismVerdict',
+    'evidenceClaim',
+    'naturalUserEvidence',
+    'shadowEligibility',
+    'reasonCode',
+    'baselineTotal',
+    'candidateTotal',
+  ])
+  if (
+    value.schemaVersion !== 'tianwen.controlled-skill-evaluation-result.v2'
+    || typeof value.evaluationId !== 'string'
+    || !EVALUATION_ID.test(value.evaluationId)
+    || (value.mechanismVerdict !== 'pass'
+      && value.mechanismVerdict !== 'rejected'
+      && value.mechanismVerdict !== 'inconclusive')
+    || (value.evidenceClaim !== 'controlled-product'
+      && value.evidenceClaim !== 'controlled-synthetic-mechanism')
+    || value.naturalUserEvidence !== 'not-claimed'
+    || (value.shadowEligibility !== 'eligible-for-project-shadow'
+      && value.shadowEligibility !== 'eligible-for-isolated-test-shadow'
+      && value.shadowEligibility !== 'ineligible')
+    || ![
+      'candidate-objective-hard-gate-failed',
+      'objective-inconclusive',
+      'original-or-adjacent-not-improved',
+      'material-missing',
+      'identity-exposed',
+      'objective-facts-incomplete',
+      'provider-failed',
+      'timeout',
+      'score-not-submitted',
+      'candidate-subjective-total-lower',
+      'candidate-dimension-regression',
+      'all-gates-passed',
+    ].includes(value.reasonCode as string)
+  ) {
+    throw new TypeError('controlled evaluation result is invalid')
+  }
+  const nullableDigest = (item: unknown, label: string) =>
+    item === null ? null : digest(item, label)
+  const total = (item: unknown, label: string) =>
+    item === null ? null : boundedInteger(item, label, 0, 80)
+  const baselineTotal = total(value.baselineTotal, 'baselineTotal')
+  const candidateTotal = total(value.candidateTotal, 'candidateTotal')
+  if ((baselineTotal === null) !== (candidateTotal === null)) {
+    throw new TypeError('controlled evaluation result totals must both be present or absent')
+  }
+  return {
+    schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2',
+    evaluationId: value.evaluationId as ControlledSkillEvaluationId,
+    planDigest: digest(value.planDigest, 'planDigest'),
+    objectiveSetDigest: nullableDigest(value.objectiveSetDigest, 'objectiveSetDigest'),
+    blindMapDigest: nullableDigest(value.blindMapDigest, 'blindMapDigest'),
+    evaluatorSetDigest: nullableDigest(value.evaluatorSetDigest, 'evaluatorSetDigest'),
+    mechanismVerdict: value.mechanismVerdict,
+    evidenceClaim: value.evidenceClaim,
+    naturalUserEvidence: 'not-claimed',
+    shadowEligibility: value.shadowEligibility,
+    reasonCode: value.reasonCode as ControlledSkillEvaluationResultReasonCode,
+    baselineTotal,
+    candidateTotal,
+  }
 }

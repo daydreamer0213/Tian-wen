@@ -21,6 +21,9 @@ type PublicLedgerEventPrivacyContract = AssertNever<Extract<
       | 'controlled-skill-eval-protocol-frozen'
       | 'controlled-skill-evaluation-opened'
       | 'controlled-skill-evaluation-objective-recorded'
+      | 'controlled-skill-evaluation-blind-map-frozen'
+      | 'controlled-skill-evaluator-observation-recorded'
+      | 'controlled-skill-evaluation-result-recorded'
   }
 >>
 
@@ -164,9 +167,12 @@ export {
   CONTROLLED_SKILL_EVAL_RUBRIC,
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   CONTROLLED_SKILL_EVAL_TASK_TYPES,
+  prepareControlledSkillEvaluationBlindMap,
   prepareControlledSkillEvaluationObjective,
   prepareControlledSkillEvaluationPlan,
+  prepareControlledSkillEvaluationResult,
   prepareControlledSkillEvalProtocol,
+  prepareControlledSkillEvaluatorObservation,
 } from './controlled-skill-evaluation.js'
 export type {
   ControlledSkillEvalEvidenceLabel,
@@ -184,17 +190,34 @@ export type {
   ControlledSkillEvalTaskType,
   ControlledSkillEvaluationId,
   ControlledSkillEvaluationCandidateHardGate,
+  ControlledSkillEvaluationBlindAssignment,
+  ControlledSkillEvaluationBlindMap,
+  ControlledSkillEvaluationBlindMapReceipt,
   ControlledSkillEvaluationComparison,
+  ControlledSkillEvaluationEvidenceClaim,
+  ControlledSkillEvaluationMechanismVerdict,
   ControlledSkillEvaluationObjective,
   ControlledSkillEvaluationObjectiveArm,
   ControlledSkillEvaluationObjectiveReceipt,
   ControlledSkillEvaluationObjectiveVerdict,
   ControlledSkillEvaluationPlan,
   ControlledSkillEvaluationReceipt,
+  ControlledSkillEvaluationResult,
+  ControlledSkillEvaluationResultReasonCode,
+  ControlledSkillEvaluationResultReceipt,
+  ControlledSkillEvaluationShadowEligibility,
   ControlledSkillEvaluationUsage,
+  ControlledSkillEvaluatorDimensionScores,
+  ControlledSkillEvaluatorInconclusiveReasonCode,
+  ControlledSkillEvaluatorObservation,
+  ControlledSkillEvaluatorObservationReceipt,
+  ControlledSkillEvaluatorScores,
   FreezeControlledSkillEvalProtocolInput,
+  FreezeControlledSkillEvaluationBlindMapInput,
   OpenControlledSkillEvaluationInput,
   RecordControlledSkillEvaluationObjectiveInput,
+  RecordControlledSkillEvaluationResultInput,
+  RecordControlledSkillEvaluatorObservationInput,
 } from './controlled-skill-evaluation.js'
 export type {
   SkillShadowEligibility,

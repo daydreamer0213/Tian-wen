@@ -112,28 +112,46 @@ import type {
   SkillEvalProtocolRecord,
 } from './skill-evaluation.js'
 import {
+  parseControlledSkillEvaluationBlindMap,
   parseControlledSkillEvaluationObjective,
   parseControlledSkillEvaluationPlan,
+  parseControlledSkillEvaluationResult,
+  parseControlledSkillEvaluatorObservation,
   parseControlledSkillEvalProtocol,
+  prepareControlledSkillEvaluationBlindMap,
   prepareControlledSkillEvaluationObjective,
   prepareControlledSkillEvaluationPlan,
+  prepareControlledSkillEvaluationResult,
+  prepareControlledSkillEvaluatorObservation,
   prepareControlledSkillEvalProtocol,
 } from './controlled-skill-evaluation.js'
 import type {
   ControlledSkillEvaluationId,
+  ControlledSkillEvaluationBlindMap,
+  ControlledSkillEvaluationBlindMapFrozenEvent,
+  ControlledSkillEvaluationBlindMapReceipt,
   ControlledSkillEvaluationObjective,
   ControlledSkillEvaluationObjectiveReceipt,
   ControlledSkillEvaluationObjectiveRecordedEvent,
   ControlledSkillEvaluationOpenedEvent,
   ControlledSkillEvaluationPlan,
   ControlledSkillEvaluationReceipt,
+  ControlledSkillEvaluationResult,
+  ControlledSkillEvaluationResultReceipt,
+  ControlledSkillEvaluationResultRecordedEvent,
+  ControlledSkillEvaluatorObservation,
+  ControlledSkillEvaluatorObservationReceipt,
+  ControlledSkillEvaluatorObservationRecordedEvent,
   ControlledSkillEvalTaskId,
   ControlledSkillEvalProtocolFrozenEvent,
   ControlledSkillEvalProtocolReceipt,
   ControlledSkillEvalProtocolRecord,
   FreezeControlledSkillEvalProtocolInput,
+  FreezeControlledSkillEvaluationBlindMapInput,
   OpenControlledSkillEvaluationInput,
   RecordControlledSkillEvaluationObjectiveInput,
+  RecordControlledSkillEvaluationResultInput,
+  RecordControlledSkillEvaluatorObservationInput,
 } from './controlled-skill-evaluation.js'
 
 export type ArtifactId = `artifact:${string}`
@@ -234,6 +252,9 @@ export type LedgerEvent =
   | ControlledSkillEvalProtocolFrozenEvent
   | ControlledSkillEvaluationOpenedEvent
   | ControlledSkillEvaluationObjectiveRecordedEvent
+  | ControlledSkillEvaluationBlindMapFrozenEvent
+  | ControlledSkillEvaluatorObservationRecordedEvent
+  | ControlledSkillEvaluationResultRecordedEvent
   | ArtifactRecordedEvent
   | EvaluationRecordedEvent
   | ApprovalRecordedEvent
@@ -940,6 +961,81 @@ function parseEvent(value: unknown): LedgerEvent {
       inputDigest,
     }
   }
+  if (type === 'controlled-skill-evaluation-blind-map-frozen') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'blindMap', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.controlled-skill-evaluation-blind-map.v2') {
+      throw new LedgerIntegrityError('invalid controlled Skill evaluation blind map event version')
+    }
+    let blindMap
+    try {
+      blindMap = parseControlledSkillEvaluationBlindMap(value.blindMap)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid controlled Skill evaluation blind map event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(blindMap)) {
+      throw new LedgerIntegrityError('controlled Skill evaluation blind map digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2',
+      type,
+      at,
+      blindMap,
+      inputDigest,
+    }
+  }
+  if (type === 'controlled-skill-evaluator-observation-recorded') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'observation', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.controlled-skill-evaluator-observation.v2') {
+      throw new LedgerIntegrityError('invalid controlled Skill evaluator observation event version')
+    }
+    let observation
+    try {
+      observation = parseControlledSkillEvaluatorObservation(value.observation)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid controlled Skill evaluator observation event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(observation)) {
+      throw new LedgerIntegrityError('controlled Skill evaluator observation digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2',
+      type,
+      at,
+      observation,
+      inputDigest,
+    }
+  }
+  if (type === 'controlled-skill-evaluation-result-recorded') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'result', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.controlled-skill-evaluation-result.v2') {
+      throw new LedgerIntegrityError('invalid controlled Skill evaluation result event version')
+    }
+    let result
+    try {
+      result = parseControlledSkillEvaluationResult(value.result)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid controlled Skill evaluation result event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(result)) {
+      throw new LedgerIntegrityError('controlled Skill evaluation result digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2',
+      type,
+      at,
+      result,
+      inputDigest,
+    }
+  }
   if (type === 'skill-eval-protocol-frozen') {
     exactKeys(value, [
       'schemaVersion', 'type', 'at', 'protocol', 'inputDigest',
@@ -1373,6 +1469,18 @@ export class EvolutionLedger {
     ControlledSkillEvaluationId,
     Map<ControlledSkillEvalTaskId, ControlledSkillEvaluationObjective>
   >()
+  readonly #controlledSkillEvaluationBlindMaps = new Map<
+    ControlledSkillEvaluationId,
+    ControlledSkillEvaluationBlindMap
+  >()
+  readonly #controlledSkillEvaluatorObservations = new Map<
+    ControlledSkillEvaluationId,
+    Map<ControlledSkillEvalTaskId, ControlledSkillEvaluatorObservation>
+  >()
+  readonly #controlledSkillEvaluationResults = new Map<
+    ControlledSkillEvaluationId,
+    ControlledSkillEvaluationResult
+  >()
   readonly #skillEvaluationPlans = new Map<
     SkillEvaluationId,
     SkillEvaluationPlan
@@ -1712,6 +1820,169 @@ export class EvolutionLedger {
     return clone([
       ...(this.#controlledSkillEvaluationObjectives.get(evaluationId)?.values() ?? []),
     ])
+  }
+
+  freezeControlledSkillEvaluationBlindMap(
+    input: FreezeControlledSkillEvaluationBlindMapInput,
+  ): ControlledSkillEvaluationBlindMapReceipt {
+    if (!isRecord(input)) {
+      throw new LedgerIntegrityError('controlled Skill evaluation blind map input is invalid')
+    }
+    exactKeys(input, ['evaluationId'])
+    const evaluationId = requireString(
+      input.evaluationId,
+      'evaluationId',
+    ) as ControlledSkillEvaluationId
+    const plan = this.#controlledSkillEvaluationPlans.get(evaluationId)
+    if (plan === undefined) {
+      throw new LedgerIntegrityError(`unknown controlled Skill evaluation: ${evaluationId}`)
+    }
+    if (this.#controlledSkillEvaluationBlindMaps.has(evaluationId)) {
+      return { evaluationId, duplicate: true }
+    }
+    if (this.#controlledSkillEvaluationResults.has(evaluationId)) {
+      throw new LedgerIntegrityError('controlled Skill evaluation is already terminal')
+    }
+    const objectives = [
+      ...(this.#controlledSkillEvaluationObjectives.get(evaluationId)?.values() ?? []),
+    ]
+    let blindMap
+    try {
+      blindMap = prepareControlledSkillEvaluationBlindMap(input, plan, objectives)
+    } catch (error) {
+      throw new LedgerIntegrityError(
+        error instanceof Error ? error.message : 'controlled evaluation blind map input is invalid',
+        { cause: error },
+      )
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2',
+      type: 'controlled-skill-evaluation-blind-map-frozen',
+      at: this.#now(),
+      blindMap,
+      inputDigest: sha256(blindMap),
+    })
+    return { evaluationId, duplicate: false }
+  }
+
+  getControlledSkillEvaluationBlindMap(
+    evaluationId: ControlledSkillEvaluationId,
+  ): ControlledSkillEvaluationBlindMap | undefined {
+    const blindMap = this.#controlledSkillEvaluationBlindMaps.get(evaluationId)
+    return blindMap === undefined ? undefined : clone(blindMap)
+  }
+
+  recordControlledSkillEvaluatorObservation(
+    input: RecordControlledSkillEvaluatorObservationInput,
+  ): ControlledSkillEvaluatorObservationReceipt {
+    if (!isRecord(input)) {
+      throw new LedgerIntegrityError('controlled Skill evaluator observation input is invalid')
+    }
+    const evaluationId = requireString(
+      input.evaluationId,
+      'evaluationId',
+    ) as ControlledSkillEvaluationId
+    const taskId = requireString(input.taskId, 'taskId') as ControlledSkillEvalTaskId
+    const plan = this.#controlledSkillEvaluationPlans.get(evaluationId)
+    const blindMap = this.#controlledSkillEvaluationBlindMaps.get(evaluationId)
+    if (plan === undefined || blindMap === undefined) {
+      throw new LedgerIntegrityError('controlled Skill evaluator observation lacks prerequisites')
+    }
+    let observation
+    try {
+      observation = prepareControlledSkillEvaluatorObservation(input, plan, blindMap)
+    } catch (error) {
+      throw new LedgerIntegrityError(
+        error instanceof Error ? error.message : 'controlled evaluator observation input is invalid',
+        { cause: error },
+      )
+    }
+    const existing = this.#controlledSkillEvaluatorObservations
+      .get(evaluationId)?.get(taskId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(observation)) {
+        throw new LedgerIntegrityError(
+          `controlled Skill evaluator observation changed: ${taskId}`,
+        )
+      }
+      return { evaluationId, taskId, duplicate: true }
+    }
+    if (this.#controlledSkillEvaluationResults.has(evaluationId)) {
+      throw new LedgerIntegrityError('controlled Skill evaluation is already terminal')
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2',
+      type: 'controlled-skill-evaluator-observation-recorded',
+      at: this.#now(),
+      observation,
+      inputDigest: sha256(observation),
+    })
+    return { evaluationId, taskId, duplicate: false }
+  }
+
+  listControlledSkillEvaluatorObservations(
+    evaluationId: ControlledSkillEvaluationId,
+  ): readonly ControlledSkillEvaluatorObservation[] {
+    return clone([
+      ...(this.#controlledSkillEvaluatorObservations.get(evaluationId)?.values() ?? []),
+    ])
+  }
+
+  recordControlledSkillEvaluationResult(
+    input: RecordControlledSkillEvaluationResultInput,
+  ): ControlledSkillEvaluationResultReceipt {
+    if (!isRecord(input)) {
+      throw new LedgerIntegrityError('controlled Skill evaluation result input is invalid')
+    }
+    exactKeys(input, ['evaluationId'])
+    const evaluationId = requireString(
+      input.evaluationId,
+      'evaluationId',
+    ) as ControlledSkillEvaluationId
+    const plan = this.#controlledSkillEvaluationPlans.get(evaluationId)
+    if (plan === undefined) {
+      throw new LedgerIntegrityError(`unknown controlled Skill evaluation: ${evaluationId}`)
+    }
+    if (this.#controlledSkillEvaluationResults.has(evaluationId)) {
+      return { evaluationId, duplicate: true }
+    }
+    const objectives = [
+      ...(this.#controlledSkillEvaluationObjectives.get(evaluationId)?.values() ?? []),
+    ]
+    const blindMap = this.#controlledSkillEvaluationBlindMaps.get(evaluationId)
+    const observations = [
+      ...(this.#controlledSkillEvaluatorObservations.get(evaluationId)?.values() ?? []),
+    ]
+    let result
+    try {
+      result = prepareControlledSkillEvaluationResult(
+        input,
+        plan,
+        objectives,
+        blindMap,
+        observations,
+      )
+    } catch (error) {
+      throw new LedgerIntegrityError(
+        error instanceof Error ? error.message : 'controlled evaluation result input is invalid',
+        { cause: error },
+      )
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2',
+      type: 'controlled-skill-evaluation-result-recorded',
+      at: this.#now(),
+      result,
+      inputDigest: sha256(result),
+    })
+    return { evaluationId, duplicate: false }
+  }
+
+  getControlledSkillEvaluationResult(
+    evaluationId: ControlledSkillEvaluationId,
+  ): ControlledSkillEvaluationResult | undefined {
+    const result = this.#controlledSkillEvaluationResults.get(evaluationId)
+    return result === undefined ? undefined : clone(result)
   }
 
   freezeSkillEvalProtocol(
@@ -2884,6 +3155,134 @@ export class EvolutionLedger {
       }
       return
     }
+    if (event.type === 'controlled-skill-evaluation-blind-map-frozen') {
+      const plan = this.#controlledSkillEvaluationPlans.get(event.blindMap.evaluationId)
+      if (
+        plan === undefined
+        || this.#controlledSkillEvaluationBlindMaps.has(event.blindMap.evaluationId)
+        || this.#controlledSkillEvaluationResults.has(event.blindMap.evaluationId)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation blind map disagrees with history',
+        )
+      }
+      const objectives = [
+        ...(this.#controlledSkillEvaluationObjectives
+          .get(event.blindMap.evaluationId)?.values() ?? []),
+      ]
+      let prepared
+      try {
+        prepared = prepareControlledSkillEvaluationBlindMap(
+          { evaluationId: event.blindMap.evaluationId },
+          plan,
+          objectives,
+        )
+      } catch (error) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation blind map event is invalid',
+          { cause: error },
+        )
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.blindMap)
+        || event.inputDigest !== sha256(event.blindMap)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation blind map disagrees with frozen facts',
+        )
+      }
+      return
+    }
+    if (event.type === 'controlled-skill-evaluator-observation-recorded') {
+      const plan = this.#controlledSkillEvaluationPlans.get(event.observation.evaluationId)
+      const blindMap = this.#controlledSkillEvaluationBlindMaps
+        .get(event.observation.evaluationId)
+      const stored = this.#controlledSkillEvaluatorObservations
+        .get(event.observation.evaluationId)
+      if (
+        plan === undefined
+        || blindMap === undefined
+        || stored?.has(event.observation.taskId) === true
+        || this.#controlledSkillEvaluationResults.has(event.observation.evaluationId)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluator observation disagrees with history',
+        )
+      }
+      let prepared
+      try {
+        const { schemaVersion: _schemaVersion, ...input } = event.observation
+        prepared = prepareControlledSkillEvaluatorObservation(input, plan, blindMap)
+      } catch (error) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluator observation event is invalid',
+          { cause: error },
+        )
+      }
+      const previous = stored === undefined ? [] : [...stored.values()]
+      if (
+        plan.tasks[previous.length]?.taskId !== prepared.taskId
+        || previous.at(-1)?.status === 'inconclusive'
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluator observations must follow the protocol task order',
+        )
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.observation)
+        || event.inputDigest !== sha256(event.observation)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluator observation disagrees with frozen facts',
+        )
+      }
+      return
+    }
+    if (event.type === 'controlled-skill-evaluation-result-recorded') {
+      const plan = this.#controlledSkillEvaluationPlans.get(event.result.evaluationId)
+      if (
+        plan === undefined
+        || this.#controlledSkillEvaluationResults.has(event.result.evaluationId)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation result disagrees with history',
+        )
+      }
+      const objectives = [
+        ...(this.#controlledSkillEvaluationObjectives
+          .get(event.result.evaluationId)?.values() ?? []),
+      ]
+      const blindMap = this.#controlledSkillEvaluationBlindMaps
+        .get(event.result.evaluationId)
+      const observations = [
+        ...(this.#controlledSkillEvaluatorObservations
+          .get(event.result.evaluationId)?.values() ?? []),
+      ]
+      let prepared
+      try {
+        prepared = prepareControlledSkillEvaluationResult(
+          { evaluationId: event.result.evaluationId },
+          plan,
+          objectives,
+          blindMap,
+          observations,
+        )
+      } catch (error) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation result event is invalid',
+          { cause: error },
+        )
+      }
+      if (
+        canonicalJson(prepared) !== canonicalJson(event.result)
+        || event.inputDigest !== sha256(event.result)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill evaluation result disagrees with frozen facts',
+        )
+      }
+      return
+    }
     if (event.type === 'skill-eval-protocol-frozen') {
       const ticket = this.#learningTickets.get(event.protocol.ticketId)
       if (
@@ -3385,6 +3784,27 @@ export class EvolutionLedger {
         .get(event.objective.evaluationId) ?? new Map()
       objectives.set(event.objective.taskId, event.objective)
       this.#controlledSkillEvaluationObjectives.set(event.objective.evaluationId, objectives)
+      return
+    }
+    if (event.type === 'controlled-skill-evaluation-blind-map-frozen') {
+      this.#controlledSkillEvaluationBlindMaps.set(
+        event.blindMap.evaluationId,
+        event.blindMap,
+      )
+      return
+    }
+    if (event.type === 'controlled-skill-evaluator-observation-recorded') {
+      const observations = this.#controlledSkillEvaluatorObservations
+        .get(event.observation.evaluationId) ?? new Map()
+      observations.set(event.observation.taskId, event.observation)
+      this.#controlledSkillEvaluatorObservations.set(
+        event.observation.evaluationId,
+        observations,
+      )
+      return
+    }
+    if (event.type === 'controlled-skill-evaluation-result-recorded') {
+      this.#controlledSkillEvaluationResults.set(event.result.evaluationId, event.result)
       return
     }
     if (event.type === 'skill-eval-protocol-frozen') {

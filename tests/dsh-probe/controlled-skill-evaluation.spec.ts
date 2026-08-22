@@ -50,11 +50,23 @@ const taskTypes = [
 
 const roots: string[] = []
 
-const controlledObjectiveServiceFacade: Pick<
+const controlledEvaluationServiceFacade: Pick<
   EvolutionLedger,
+  | 'freezeControlledSkillEvalProtocol'
+  | 'getControlledSkillEvalProtocol'
+  | 'listControlledSkillEvalProtocols'
+  | 'openControlledSkillEvaluation'
+  | 'getControlledSkillEvaluation'
+  | 'listControlledSkillEvaluations'
   | 'recordControlledSkillEvaluationObjective'
   | 'getControlledSkillEvaluationObjective'
   | 'listControlledSkillEvaluationObjectives'
+  | 'freezeControlledSkillEvaluationBlindMap'
+  | 'getControlledSkillEvaluationBlindMap'
+  | 'recordControlledSkillEvaluatorObservation'
+  | 'listControlledSkillEvaluatorObservations'
+  | 'recordControlledSkillEvaluationResult'
+  | 'getControlledSkillEvaluationResult'
 > = TianwenEvolutionService.prototype
 
 function fixtureRoot(prefix: string): string {
@@ -154,7 +166,11 @@ function seedOpenTicket(ledger: EvolutionLedger) {
   return receipts[1]!.ticketId!
 }
 
-function seedCandidateWithControlledProtocol(ledger: EvolutionLedger) {
+function seedCandidateWithControlledProtocol(
+  ledger: EvolutionLedger,
+  evidencePurpose: 'controlled-product' | 'development-only-synthetic-defect' =
+    'development-only-synthetic-defect',
+) {
   const seeded = [
     ['candidate-first', 'not-met', 'a'],
     ['candidate-second', 'not-met', 'b'],
@@ -196,7 +212,7 @@ function seedCandidateWithControlledProtocol(ledger: EvolutionLedger) {
   const ticketId = runs[1]!.outcome.ticketId!
   const protocol = ledger.freezeControlledSkillEvalProtocol({
     ticketId,
-    evidencePurpose: 'development-only-synthetic-defect',
+    evidencePurpose,
     protocol: controlledProtocol(),
   })
   const opened = ledger.openLearningCase({
@@ -345,30 +361,581 @@ function recordControlledTaskFacts(
   }
 }
 
-function openControlledObjectiveLedger(prefix: string) {
-  const ledger = new EvolutionLedger(fixtureRoot(prefix), {
+function openControlledObjectiveLedger(
+  prefix: string,
+  evidencePurpose: 'controlled-product' | 'development-only-synthetic-defect' =
+    'development-only-synthetic-defect',
+) {
+  const path = fixtureRoot(prefix)
+  const ledger = new EvolutionLedger(path, {
     clock: () => '2026-08-22T16:20:00.000Z',
   })
-  const seeded = seedCandidateWithControlledProtocol(ledger)
+  const seeded = seedCandidateWithControlledProtocol(ledger, evidencePurpose)
   const receipt = ledger.openControlledSkillEvaluation({
     candidateId: seeded.candidateId,
     protocolId: seeded.protocolId,
     sessionAllocations: controlledSessionAllocations(),
   })
   return {
+    path,
     ledger,
     plan: ledger.getControlledSkillEvaluation(receipt.evaluationId)!,
   }
 }
 
+function recordPassingControlledObjectives(
+  ledger: EvolutionLedger,
+  plan: NonNullable<ReturnType<EvolutionLedger['getControlledSkillEvaluation']>>,
+) {
+  for (let index = 0; index < plan.tasks.length; index += 1) {
+    ledger.recordControlledSkillEvaluationObjective(recordControlledTaskFacts(
+      ledger,
+      plan,
+      index,
+      index === 0
+        ? { baseline: 'not-met', candidate: 'met' }
+        : { baseline: 'met', candidate: 'met' },
+    ))
+  }
+  return ledger.listControlledSkillEvaluationObjectives(plan.evaluationId)
+}
+
+function controlledObservationCommon(
+  plan: NonNullable<ReturnType<EvolutionLedger['getControlledSkillEvaluation']>>,
+  blindMap: NonNullable<ReturnType<EvolutionLedger['getControlledSkillEvaluationBlindMap']>>,
+  taskIndex: number,
+) {
+  const task = plan.tasks[taskIndex]!
+  const assignment = blindMap.assignments[taskIndex]!
+  return {
+    evaluationId: plan.evaluationId,
+    taskId: task.taskId,
+    evaluatorSessionId: task.evaluatorSessionId,
+    envelopeDigest: assignment.envelopeDigest,
+    requestDigest: digest(`evaluator-request:${task.taskId}`),
+    evidenceId: digest(`evaluator-evidence:${task.taskId}`),
+  }
+}
+
+function scoredObservation(
+  plan: NonNullable<ReturnType<EvolutionLedger['getControlledSkillEvaluation']>>,
+  blindMap: NonNullable<ReturnType<EvolutionLedger['getControlledSkillEvaluationBlindMap']>>,
+  taskIndex: number,
+) {
+  return {
+    ...controlledObservationCommon(plan, blindMap, taskIndex),
+    status: 'scored' as const,
+    insufficientMaterial: false as const,
+    reasonCode: 'score-submitted' as const,
+    scores: {
+      x: {
+        relevance: 3,
+        correctnessReasoning: 3,
+        clarityUsability: 3,
+        scopeRestraint: 3,
+      },
+      y: {
+        relevance: 4,
+        correctnessReasoning: 4,
+        clarityUsability: 4,
+        scopeRestraint: 4,
+      },
+    },
+  }
+}
+
+function evaluatorDimensionScores(value: number) {
+  return {
+    relevance: value,
+    correctnessReasoning: value,
+    clarityUsability: value,
+    scopeRestraint: value,
+  }
+}
+
+function recordScoredEvaluatorSet(
+  ledger: EvolutionLedger,
+  plan: NonNullable<ReturnType<EvolutionLedger['getControlledSkillEvaluation']>>,
+  blindMap: NonNullable<ReturnType<EvolutionLedger['getControlledSkillEvaluationBlindMap']>>,
+  scores: (
+    taskIndex: number,
+  ) => {
+    readonly baseline: ReturnType<typeof evaluatorDimensionScores>
+    readonly candidate: ReturnType<typeof evaluatorDimensionScores>
+  },
+  startIndex = 0,
+) {
+  return plan.tasks.slice(startIndex).map((_, offset) => {
+    const index = startIndex + offset
+    const assignment = blindMap.assignments[index]!
+    const roleScores = scores(index)
+    const input = {
+      ...controlledObservationCommon(plan, blindMap, index),
+      status: 'scored' as const,
+      insufficientMaterial: false as const,
+      reasonCode: 'score-submitted' as const,
+      scores: {
+        x: roleScores[assignment.xRole],
+        y: roleScores[assignment.yRole],
+      },
+    }
+    ledger.recordControlledSkillEvaluatorObservation(input)
+    return input
+  })
+}
+
 describe('controlled five-task Skill evaluation protocol', () => {
-  it('exposes controlled objective operations through the product service', () => {
-    expect(typeof controlledObjectiveServiceFacade.recordControlledSkillEvaluationObjective)
-      .toBe('function')
-    expect(typeof controlledObjectiveServiceFacade.getControlledSkillEvaluationObjective)
-      .toBe('function')
-    expect(typeof controlledObjectiveServiceFacade.listControlledSkillEvaluationObjectives)
-      .toBe('function')
+  it('exposes the complete controlled evaluation ledger through the product service', () => {
+    const methods = [
+      'freezeControlledSkillEvalProtocol',
+      'getControlledSkillEvalProtocol',
+      'listControlledSkillEvalProtocols',
+      'openControlledSkillEvaluation',
+      'getControlledSkillEvaluation',
+      'listControlledSkillEvaluations',
+      'recordControlledSkillEvaluationObjective',
+      'getControlledSkillEvaluationObjective',
+      'listControlledSkillEvaluationObjectives',
+      'freezeControlledSkillEvaluationBlindMap',
+      'getControlledSkillEvaluationBlindMap',
+      'recordControlledSkillEvaluatorObservation',
+      'listControlledSkillEvaluatorObservations',
+      'recordControlledSkillEvaluationResult',
+      'getControlledSkillEvaluationResult',
+    ] as const
+    for (const method of methods) {
+      expect(typeof controlledEvaluationServiceFacade[method]).toBe('function')
+    }
+  })
+
+  it('derives an early objective rejection and refuses to invent missing facts', () => {
+    const { ledger, plan } = openControlledObjectiveLedger('result-objective-terminal')
+    expect(() => ledger.recordControlledSkillEvaluationResult({
+      evaluationId: plan.evaluationId,
+    })).toThrow(/evaluation incomplete/i)
+    expect(ledger.listEvents().some(event =>
+      event.type === 'controlled-skill-evaluation-result-recorded')).toBe(false)
+    expect(() => ledger.recordControlledSkillEvaluationResult(Object.assign(
+      { evaluationId: plan.evaluationId },
+      { mechanismVerdict: 'pass' },
+    ))).toThrow()
+
+    const objective = recordControlledTaskFacts(ledger, plan, 0, {
+      baseline: 'met',
+      candidate: 'not-met',
+    })
+    ledger.recordControlledSkillEvaluationObjective(objective)
+    expect(ledger.recordControlledSkillEvaluationResult({
+      evaluationId: plan.evaluationId,
+    })).toEqual({ evaluationId: plan.evaluationId, duplicate: false })
+    expect(ledger.getControlledSkillEvaluationResult(plan.evaluationId)).toEqual({
+      schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2',
+      evaluationId: plan.evaluationId,
+      planDigest: sha256(plan),
+      objectiveSetDigest: null,
+      blindMapDigest: null,
+      evaluatorSetDigest: null,
+      mechanismVerdict: 'rejected',
+      evidenceClaim: 'controlled-synthetic-mechanism',
+      naturalUserEvidence: 'not-claimed',
+      shadowEligibility: 'ineligible',
+      reasonCode: 'candidate-objective-hard-gate-failed',
+      baselineTotal: null,
+      candidateTotal: null,
+    })
+    expect(ledger.recordControlledSkillEvaluationResult({
+      evaluationId: plan.evaluationId,
+    })).toEqual({ evaluationId: plan.evaluationId, duplicate: true })
+  })
+
+  it('freezes the deterministic blind map only after objective aggregate pass', () => {
+    const { ledger, plan } = openControlledObjectiveLedger('blind-map')
+    expect(() => ledger.freezeControlledSkillEvaluationBlindMap(Object.assign(
+      { evaluationId: plan.evaluationId },
+      { assignments: [] },
+    ))).toThrow()
+    expect(() => ledger.freezeControlledSkillEvaluationBlindMap({
+      evaluationId: plan.evaluationId,
+    })).toThrow(/evaluation incomplete/i)
+    const objectives = recordPassingControlledObjectives(ledger, plan)
+    const objectiveSetDigest = sha256(objectives)
+    const expectedAssignments = plan.tasks.map((task, index) => {
+      const objective = objectives[index]!
+      const assignmentDigest = sha256({
+        domain: 'tianwen.controlled-blind-map.v1',
+        evaluationId: plan.evaluationId,
+        objectiveSetDigest,
+        taskId: task.taskId,
+      })
+      const xRole = Number.parseInt(assignmentDigest.at(-1)!, 16) % 2 === 0
+        ? 'baseline'
+        : 'candidate'
+      const yRole = xRole === 'baseline' ? 'candidate' : 'baseline'
+      const envelopeArm = (role: 'baseline' | 'candidate') => ({
+        evaluatorMaterialDigest: objective[role].evaluatorMaterialDigest,
+        outcome: objective[role].outcome,
+        evidenceSetDigest: sha256(objective[role].evidenceIds),
+      })
+      return {
+        taskId: task.taskId,
+        xRole,
+        yRole,
+        evaluatorSessionId: task.evaluatorSessionId,
+        envelopeDigest: sha256({
+          domain: 'tianwen.controlled-blind-envelope.v1',
+          taskId: task.taskId,
+          rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+          x: envelopeArm(xRole),
+          y: envelopeArm(yRole),
+        }),
+      }
+    })
+
+    expect(ledger.freezeControlledSkillEvaluationBlindMap({
+      evaluationId: plan.evaluationId,
+    })).toEqual({ evaluationId: plan.evaluationId, duplicate: false })
+    expect(ledger.getControlledSkillEvaluationBlindMap(plan.evaluationId)).toEqual({
+      schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2',
+      evaluationId: plan.evaluationId,
+      objectiveSetDigest,
+      assignments: expectedAssignments,
+    })
+    expect(ledger.freezeControlledSkillEvaluationBlindMap({
+      evaluationId: plan.evaluationId,
+    })).toEqual({ evaluationId: plan.evaluationId, duplicate: true })
+  })
+
+  it('records evaluator observations as an ordered terminal discriminated union', () => {
+    const { ledger, plan } = openControlledObjectiveLedger('evaluator-observation')
+    recordPassingControlledObjectives(ledger, plan)
+    ledger.freezeControlledSkillEvaluationBlindMap({ evaluationId: plan.evaluationId })
+    const blindMap = ledger.getControlledSkillEvaluationBlindMap(plan.evaluationId)!
+    const first = scoredObservation(plan, blindMap, 0)
+    const second = scoredObservation(plan, blindMap, 1)
+    expect(() => ledger.recordControlledSkillEvaluatorObservation(second))
+      .toThrow(/protocol task order/i)
+    expect(() => ledger.recordControlledSkillEvaluatorObservation({
+      ...first,
+      insufficientMaterial: true,
+    })).toThrow()
+    expect(() => ledger.recordControlledSkillEvaluatorObservation({
+      ...first,
+      scores: {
+        ...first.scores,
+        x: { ...first.scores.x, relevance: 5 },
+      },
+    })).toThrow()
+
+    expect(ledger.recordControlledSkillEvaluatorObservation(first)).toEqual({
+      evaluationId: plan.evaluationId,
+      taskId: plan.tasks[0]!.taskId,
+      duplicate: false,
+    })
+    expect(ledger.listControlledSkillEvaluatorObservations(plan.evaluationId)).toEqual([{
+      schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2',
+      ...first,
+    }])
+    expect(() => ledger.recordControlledSkillEvaluatorObservation({
+      ...first,
+      requestDigest: digest('conflicting-evaluator-request'),
+    })).toThrow(/observation changed/i)
+
+    const inconclusive = {
+      ...controlledObservationCommon(plan, blindMap, 1),
+      status: 'inconclusive' as const,
+      insufficientMaterial: true as const,
+      reasonCode: 'material-missing' as const,
+    }
+    expect(() => ledger.recordControlledSkillEvaluatorObservation({
+      ...inconclusive,
+      scores: second.scores,
+    })).toThrow()
+    expect(ledger.recordControlledSkillEvaluatorObservation(inconclusive)).toEqual({
+      evaluationId: plan.evaluationId,
+      taskId: plan.tasks[1]!.taskId,
+      duplicate: false,
+    })
+    expect(ledger.recordControlledSkillEvaluatorObservation(structuredClone(inconclusive)))
+      .toEqual({
+        evaluationId: plan.evaluationId,
+        taskId: plan.tasks[1]!.taskId,
+        duplicate: true,
+      })
+    expect(() => ledger.recordControlledSkillEvaluatorObservation(
+      scoredObservation(plan, blindMap, 2),
+    )).toThrow(/protocol task order/i)
+  })
+
+  it('reduces objective inconclusive and no-improvement without entering blind evaluation', () => {
+    const inconclusiveRun = openControlledObjectiveLedger('result-objective-inconclusive')
+    inconclusiveRun.ledger.recordControlledSkillEvaluationObjective(
+      recordControlledTaskFacts(inconclusiveRun.ledger, inconclusiveRun.plan, 0, {
+        baseline: 'inconclusive',
+        candidate: 'met',
+      }),
+    )
+    inconclusiveRun.ledger.recordControlledSkillEvaluationResult({
+      evaluationId: inconclusiveRun.plan.evaluationId,
+    })
+    expect(inconclusiveRun.ledger.getControlledSkillEvaluationResult(
+      inconclusiveRun.plan.evaluationId,
+    )).toMatchObject({
+      objectiveSetDigest: null,
+      blindMapDigest: null,
+      evaluatorSetDigest: null,
+      mechanismVerdict: 'inconclusive',
+      reasonCode: 'objective-inconclusive',
+      baselineTotal: null,
+      candidateTotal: null,
+    })
+
+    const noImprovement = openControlledObjectiveLedger('result-no-improvement')
+    for (let index = 0; index < noImprovement.plan.tasks.length; index += 1) {
+      noImprovement.ledger.recordControlledSkillEvaluationObjective(
+        recordControlledTaskFacts(noImprovement.ledger, noImprovement.plan, index, {
+          baseline: 'met',
+          candidate: 'met',
+        }),
+      )
+    }
+    const objectives = noImprovement.ledger.listControlledSkillEvaluationObjectives(
+      noImprovement.plan.evaluationId,
+    )
+    expect(() => noImprovement.ledger.freezeControlledSkillEvaluationBlindMap({
+      evaluationId: noImprovement.plan.evaluationId,
+    })).toThrow(/aggregate did not pass/i)
+    noImprovement.ledger.recordControlledSkillEvaluationResult({
+      evaluationId: noImprovement.plan.evaluationId,
+    })
+    expect(noImprovement.ledger.getControlledSkillEvaluationResult(
+      noImprovement.plan.evaluationId,
+    )).toMatchObject({
+      objectiveSetDigest: sha256(objectives),
+      blindMapDigest: null,
+      evaluatorSetDigest: null,
+      mechanismVerdict: 'rejected',
+      reasonCode: 'original-or-adjacent-not-improved',
+      baselineTotal: null,
+      candidateTotal: null,
+    })
+    expect(noImprovement.ledger.getControlledSkillEvaluationBlindMap(
+      noImprovement.plan.evaluationId,
+    )).toBeUndefined()
+    expect(() => noImprovement.ledger.freezeControlledSkillEvaluationBlindMap({
+      evaluationId: noImprovement.plan.evaluationId,
+    })).toThrow(/already terminal/i)
+  })
+
+  it('reduces each bounded evaluator inconclusive reason with a partial-set digest', () => {
+    const reasons = [
+      'material-missing',
+      'identity-exposed',
+      'objective-facts-incomplete',
+      'provider-failed',
+      'timeout',
+      'score-not-submitted',
+    ] as const
+    for (const reasonCode of reasons) {
+      const { ledger, plan } = openControlledObjectiveLedger(`result-${reasonCode}`)
+      const objectives = recordPassingControlledObjectives(ledger, plan)
+      ledger.freezeControlledSkillEvaluationBlindMap({ evaluationId: plan.evaluationId })
+      const blindMap = ledger.getControlledSkillEvaluationBlindMap(plan.evaluationId)!
+      const observation = {
+        ...controlledObservationCommon(plan, blindMap, 0),
+        status: 'inconclusive' as const,
+        insufficientMaterial: true as const,
+        reasonCode,
+      }
+      ledger.recordControlledSkillEvaluatorObservation(observation)
+      ledger.recordControlledSkillEvaluationResult({ evaluationId: plan.evaluationId })
+      expect(ledger.getControlledSkillEvaluationResult(plan.evaluationId)).toMatchObject({
+        objectiveSetDigest: sha256(objectives),
+        blindMapDigest: sha256(blindMap),
+        evaluatorSetDigest: sha256([
+          {
+            schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2',
+            ...observation,
+          },
+        ]),
+        mechanismVerdict: 'inconclusive',
+        reasonCode,
+        baselineTotal: null,
+        candidateTotal: null,
+      })
+    }
+  })
+
+  it('reveals five scored arms, persists a synthetic pass, and replays privately', () => {
+    const { path, ledger, plan } = openControlledObjectiveLedger('result-scored-pass')
+    const objectives = recordPassingControlledObjectives(ledger, plan)
+    expect(() => ledger.recordControlledSkillEvaluationResult({
+      evaluationId: plan.evaluationId,
+    })).toThrow(/evaluation incomplete/i)
+    ledger.freezeControlledSkillEvaluationBlindMap({ evaluationId: plan.evaluationId })
+    const blindMap = ledger.getControlledSkillEvaluationBlindMap(plan.evaluationId)!
+    const scoreRows = () => ({
+      baseline: evaluatorDimensionScores(3),
+      candidate: evaluatorDimensionScores(4),
+    })
+    const assignment = blindMap.assignments[0]!
+    const firstScores = scoreRows()
+    const firstInput = {
+      ...controlledObservationCommon(plan, blindMap, 0),
+      status: 'scored' as const,
+      insufficientMaterial: false as const,
+      reasonCode: 'score-submitted' as const,
+      scores: {
+        x: firstScores[assignment.xRole],
+        y: firstScores[assignment.yRole],
+      },
+    }
+    ledger.recordControlledSkillEvaluatorObservation(firstInput)
+    expect(() => ledger.recordControlledSkillEvaluationResult({
+      evaluationId: plan.evaluationId,
+    })).toThrow(/evaluation incomplete/i)
+    expect(ledger.listEvents().some(event =>
+      event.type === 'controlled-skill-evaluation-result-recorded')).toBe(false)
+    const inputs = [
+      firstInput,
+      ...recordScoredEvaluatorSet(ledger, plan, blindMap, scoreRows, 1),
+    ]
+    const observations = ledger.listControlledSkillEvaluatorObservations(plan.evaluationId)
+
+    expect(ledger.recordControlledSkillEvaluationResult({
+      evaluationId: plan.evaluationId,
+    })).toEqual({ evaluationId: plan.evaluationId, duplicate: false })
+    const result = ledger.getControlledSkillEvaluationResult(plan.evaluationId)
+    expect(result).toEqual({
+      schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2',
+      evaluationId: plan.evaluationId,
+      planDigest: sha256(plan),
+      objectiveSetDigest: sha256(objectives),
+      blindMapDigest: sha256(blindMap),
+      evaluatorSetDigest: sha256(observations),
+      mechanismVerdict: 'pass',
+      evidenceClaim: 'controlled-synthetic-mechanism',
+      naturalUserEvidence: 'not-claimed',
+      shadowEligibility: 'eligible-for-isolated-test-shadow',
+      reasonCode: 'all-gates-passed',
+      baselineTotal: 60,
+      candidateTotal: 80,
+    })
+    expect(JSON.stringify(observations)).not.toMatch(
+      /candidateId|parentVersionId|protocolId|skill-version:|run:/u,
+    )
+    expect(ledger.listEvents().filter(event =>
+      event.type === 'controlled-skill-evaluation-blind-map-frozen')).toHaveLength(1)
+    expect(ledger.listEvents().filter(event =>
+      event.type === 'controlled-skill-evaluator-observation-recorded')).toHaveLength(5)
+    expect(ledger.listEvents().filter(event =>
+      event.type === 'controlled-skill-evaluation-result-recorded')).toHaveLength(1)
+    expect(ledger.listEvents().filter(isPublicLedgerEvent)).toEqual([])
+
+    const replay = new EvolutionLedger(path)
+    expect(replay.getControlledSkillEvaluationBlindMap(plan.evaluationId)).toEqual(blindMap)
+    expect(replay.listControlledSkillEvaluatorObservations(plan.evaluationId))
+      .toEqual(observations)
+    expect(replay.getControlledSkillEvaluationResult(plan.evaluationId)).toEqual(result)
+    expect(replay.freezeControlledSkillEvaluationBlindMap({
+      evaluationId: plan.evaluationId,
+    })).toEqual({ evaluationId: plan.evaluationId, duplicate: true })
+    expect(replay.recordControlledSkillEvaluatorObservation(inputs[0]!)).toEqual({
+      evaluationId: plan.evaluationId,
+      taskId: plan.tasks[0]!.taskId,
+      duplicate: true,
+    })
+    expect(() => replay.recordControlledSkillEvaluatorObservation({
+      ...inputs[0]!,
+      requestDigest: digest('post-result-conflict'),
+    })).toThrow(/observation changed/i)
+    expect(replay.recordControlledSkillEvaluationResult({
+      evaluationId: plan.evaluationId,
+    })).toEqual({ evaluationId: plan.evaluationId, duplicate: true })
+    expect(replay.listEvents().filter(isPublicLedgerEvent)).toEqual([])
+  })
+
+  it('maps controlled-product pass to project shadow eligibility', () => {
+    const { ledger, plan } = openControlledObjectiveLedger(
+      'result-product-pass',
+      'controlled-product',
+    )
+    recordPassingControlledObjectives(ledger, plan)
+    ledger.freezeControlledSkillEvaluationBlindMap({ evaluationId: plan.evaluationId })
+    const blindMap = ledger.getControlledSkillEvaluationBlindMap(plan.evaluationId)!
+    recordScoredEvaluatorSet(ledger, plan, blindMap, () => ({
+      baseline: evaluatorDimensionScores(3),
+      candidate: evaluatorDimensionScores(4),
+    }))
+    ledger.recordControlledSkillEvaluationResult({ evaluationId: plan.evaluationId })
+    expect(ledger.getControlledSkillEvaluationResult(plan.evaluationId)).toMatchObject({
+      mechanismVerdict: 'pass',
+      evidenceClaim: 'controlled-product',
+      naturalUserEvidence: 'not-claimed',
+      shadowEligibility: 'eligible-for-project-shadow',
+    })
+  })
+
+  it('prioritizes subjective total loss before a compensated dimension regression', () => {
+    const lower = openControlledObjectiveLedger('result-total-lower')
+    recordPassingControlledObjectives(lower.ledger, lower.plan)
+    lower.ledger.freezeControlledSkillEvaluationBlindMap({
+      evaluationId: lower.plan.evaluationId,
+    })
+    const lowerMap = lower.ledger.getControlledSkillEvaluationBlindMap(
+      lower.plan.evaluationId,
+    )!
+    recordScoredEvaluatorSet(lower.ledger, lower.plan, lowerMap, () => ({
+      baseline: evaluatorDimensionScores(4),
+      candidate: evaluatorDimensionScores(3),
+    }))
+    lower.ledger.recordControlledSkillEvaluationResult({
+      evaluationId: lower.plan.evaluationId,
+    })
+    expect(lower.ledger.getControlledSkillEvaluationResult(lower.plan.evaluationId))
+      .toMatchObject({
+        mechanismVerdict: 'rejected',
+        reasonCode: 'candidate-subjective-total-lower',
+        baselineTotal: 80,
+        candidateTotal: 60,
+      })
+
+    const regression = openControlledObjectiveLedger('result-dimension-regression')
+    recordPassingControlledObjectives(regression.ledger, regression.plan)
+    regression.ledger.freezeControlledSkillEvaluationBlindMap({
+      evaluationId: regression.plan.evaluationId,
+    })
+    const regressionMap = regression.ledger.getControlledSkillEvaluationBlindMap(
+      regression.plan.evaluationId,
+    )!
+    recordScoredEvaluatorSet(regression.ledger, regression.plan, regressionMap, index => ({
+      baseline: index === 0
+        ? {
+          relevance: 4,
+          correctnessReasoning: 2,
+          clarityUsability: 2,
+          scopeRestraint: 2,
+        }
+        : evaluatorDimensionScores(3),
+      candidate: index === 0
+        ? {
+          relevance: 2,
+          correctnessReasoning: 4,
+          clarityUsability: 4,
+          scopeRestraint: 4,
+        }
+        : evaluatorDimensionScores(3),
+    }))
+    regression.ledger.recordControlledSkillEvaluationResult({
+      evaluationId: regression.plan.evaluationId,
+    })
+    expect(regression.ledger.getControlledSkillEvaluationResult(
+      regression.plan.evaluationId,
+    )).toMatchObject({
+      mechanismVerdict: 'rejected',
+      reasonCode: 'candidate-dimension-regression',
+      baselineTotal: 58,
+      candidateTotal: 62,
+    })
   })
 
   it('derives one deterministic development-only protocol with permanent evidence labels', () => {
