@@ -85,7 +85,10 @@ function snapshotOptionalTree(root: string): Readonly<Record<string, string>> {
   return existsSync(root) ? snapshotTree(root) : {}
 }
 
-function seedPrivateNaturalRun(evolutionRoot: string): void {
+function seedPrivateNaturalRun(
+  evolutionRoot: string,
+  interleave?: (ledger: EvolutionLedger) => void,
+): void {
   const ledger = new EvolutionLedger(evolutionRoot, {
     clock: () => '2026-08-22T00:00:00.000Z',
   })
@@ -101,6 +104,7 @@ function seedPrivateNaturalRun(evolutionRoot: string): void {
     runId: run.runId,
     skill: GOVERNED_PARENT,
   })
+  interleave?.(ledger)
   const sessionDigest = DIGEST('1')
   const acceptanceEvidenceId = DIGEST('2')
   ledger.recordOutcomeIntake({
@@ -263,13 +267,10 @@ async function addGoalLessSession(dataDir: string): Promise<string> {
   }
 }
 
-function addChampion(evolutionRoot: string): {
+function addChampionToLedger(ledger: EvolutionLedger): {
   readonly artifactId: string
   readonly revision: number
 } {
-  const ledger = new EvolutionLedger(evolutionRoot, {
-    clock: () => '2026-08-16T00:00:00.000Z',
-  })
   const artifact = ledger.recordArtifact('export default "champion-v1"')
   ledger.recordEvaluation({
     artifactId: artifact.artifactId,
@@ -282,6 +283,15 @@ function addChampion(evolutionRoot: string): {
     approvalId: 'goal-status-approval',
   })
   return ledger.promote(artifact.artifactId)
+}
+
+function addChampion(evolutionRoot: string): {
+  readonly artifactId: string
+  readonly revision: number
+} {
+  return addChampionToLedger(new EvolutionLedger(evolutionRoot, {
+    clock: () => '2026-08-16T00:00:00.000Z',
+  }))
 }
 
 describe('authoritative governed ledger inspection', () => {
@@ -867,6 +877,105 @@ describe('Tianwen read-only Goal status', () => {
       expect(snapshotTree(fixture.dataDir)).toEqual(before)
     } finally {
       rmSync(fixture.dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('projects no Champion across four private natural Run facts', async () => {
+    const fixture = await createFixture({ withEvidence: false })
+    try {
+      seedPrivateNaturalRun(fixture.evolutionRoot)
+      const before = snapshotTree(fixture.dataDir)
+
+      const status = await readGoalStatus({
+        goalId: fixture.goalId,
+        dataDir: fixture.dataDir,
+      })
+      expect(status.champion).toBeNull()
+      const cli = execFileSync(process.execPath, [
+        CLI,
+        'status',
+        '--goal', fixture.goalId,
+        '--data-dir', fixture.dataDir,
+        '--json',
+      ], { encoding: 'utf8' })
+      expect(JSON.parse(cli)).toEqual(status)
+      for (const privateValue of [
+        'run-binding-recorded',
+        'run-skill-manifest-recorded',
+        'outcome-intake-recorded',
+        'run-skill-use-recorded',
+        GOVERNED_PARENT.content,
+        'session:goal-status-private-run',
+        'project:tianwen/capability:goal-status',
+        fixture.dataDir,
+      ]) {
+        expect(cli).not.toContain(privateValue)
+      }
+      expect(snapshotTree(fixture.dataDir)).toEqual(before)
+    } finally {
+      rmSync(fixture.dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('projects the legacy Champion with interleaved private Run facts', async () => {
+    const fixture = await createFixture({ withEvidence: false })
+    try {
+      let champion: ReturnType<typeof addChampionToLedger> | undefined
+      seedPrivateNaturalRun(fixture.evolutionRoot, ledger => {
+        champion = addChampionToLedger(ledger)
+      })
+      const before = snapshotTree(fixture.dataDir)
+
+      expect((await readGoalStatus({
+        goalId: fixture.goalId,
+        dataDir: fixture.dataDir,
+      })).champion).toEqual(champion)
+      expect(snapshotTree(fixture.dataDir)).toEqual(before)
+    } finally {
+      rmSync(fixture.dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('maps invalid private or Champion history to one safe status error', async () => {
+    for (const kind of [
+      'broken-private',
+      'unknown-event',
+      'pointer-mismatch',
+    ] as const) {
+      const fixture = await createFixture({ withEvidence: false })
+      try {
+        seedPrivateNaturalRun(fixture.evolutionRoot)
+        const ledgerPath = join(fixture.evolutionRoot, 'ledger.jsonl')
+        if (kind === 'broken-private') {
+          const lines = readFileSync(ledgerPath, 'utf8').trimEnd().split('\n')
+          writeFileSync(ledgerPath, `${lines.slice(1).join('\n')}\n`)
+        } else if (kind === 'unknown-event') {
+          writeFileSync(ledgerPath, `${JSON.stringify({
+            type: 'unknown-governed-event',
+            at: '2026-08-22T00:00:00.000Z',
+          })}\n`, { flag: 'a' })
+        } else {
+          addChampion(fixture.evolutionRoot)
+          writeFileSync(
+            join(fixture.evolutionRoot, 'champion.json'),
+            `${JSON.stringify({
+              artifactId: `artifact:${'f'.repeat(64)}`,
+              revision: 1,
+            })}\n`,
+          )
+        }
+        const before = snapshotTree(fixture.dataDir)
+        await expect(readGoalStatus({
+          goalId: fixture.goalId,
+          dataDir: fixture.dataDir,
+        })).rejects.toMatchObject({
+          name: 'GoalStatusIntegrityError',
+          message: 'Evolution ledger is invalid',
+        })
+        expect(snapshotTree(fixture.dataDir)).toEqual(before)
+      } finally {
+        rmSync(fixture.dataDir, { recursive: true, force: true })
+      }
     }
   })
 

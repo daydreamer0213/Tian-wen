@@ -251,6 +251,9 @@ importers:
       '@tianwen/evidence':
         specifier: workspace:*
         version: link:../tianwen-evidence
+      '@tianwen/evolution':
+        specifier: workspace:*
+        version: link:../tianwen-evolution
       '@tianwen/runtime':
         specifier: workspace:*
         version: link:../tianwen-runtime
