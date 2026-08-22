@@ -81,18 +81,20 @@ copied into the status projection.
 
 ### Champion
 
-The command does not instantiate `EvolutionLedger`, because that constructor
-may create or repair state. It performs a narrow, read-only replay of canonical
-`ledger.jsonl` plus `champion.json` instead.
+The command does not instantiate `EvolutionLedger`, because that mutation
+constructor may create directories, verify Artifact source, or repair state.
+It instead delegates canonical event parsing and full authoritative reference
+replay to the Evolution package's Champion-only read-only inspector.
 
-The replay validates the formal event sequence needed to trust the derived
-Champion pointer, including latest evaluation authority, human approvals,
-approval consumption, promote/rollback history, runtime bindings and failure
-events. It deliberately does not read or verify immutable Artifact source
-bytes; Artifact verification and repair remain owned by the mutation path.
+The inspector accepts legitimate private governed events interleaved with the
+legacy public Champion history, validates the complete formal chain and the
+derived Champion pointer, then returns only that pointer or `null`. It never
+creates a directory, writes or appends a file, repairs a pointer, or reads
+immutable Artifact source bytes. Private event and provider/evidence facts are
+used only for integrity validation and never enter the status schema or output.
 
-Malformed or contradictory governance state returns an integrity error and is
-never repaired by the status command.
+Unknown, malformed, contradictory, or reference-corrupt governance state
+returns a fixed integrity error and is never repaired by the status command.
 
 ## Packaging
 

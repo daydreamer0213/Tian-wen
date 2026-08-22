@@ -285,6 +285,8 @@ export interface EvolutionLedgerOptions {
   readonly clock?: () => string
 }
 
+type EvolutionLedgerMode = 'mutation' | 'inspection'
+
 export interface ActivationFailure {
   readonly artifactId: ArtifactId
   readonly phase: ActivationFailedEvent['phase']
@@ -1272,18 +1274,26 @@ export class EvolutionLedger {
   readonly #promoted = new Set<ArtifactId>()
   #champion: ChampionPointer | undefined
 
-  constructor(root: string, options: EvolutionLedgerOptions = {}) {
+  constructor(
+    root: string,
+    options: EvolutionLedgerOptions = {},
+    mode: EvolutionLedgerMode = 'mutation',
+  ) {
     this.#root = root
     this.#artifactsRoot = join(root, 'artifacts')
     this.#ledgerPath = join(root, 'ledger.jsonl')
     this.#pointerPath = join(root, 'champion.json')
     this.#clock = options.clock ?? (() => new Date().toISOString())
-    mkdirSync(this.#artifactsRoot, { recursive: true })
-    this.#replay()
-    for (const artifact of this.#artifacts.values()) {
-      this.#verifySource(artifact)
+    if (mode === 'mutation') {
+      mkdirSync(this.#artifactsRoot, { recursive: true })
     }
-    this.#verifyPointer()
+    this.#replay()
+    if (mode === 'mutation') {
+      for (const artifact of this.#artifacts.values()) {
+        this.#verifySource(artifact)
+      }
+    }
+    this.#verifyPointer(mode === 'mutation')
   }
 
   recordRunBinding(input: RunBindingInput): RunBindingReceipt {
@@ -3009,7 +3019,7 @@ export class EvolutionLedger {
     }
   }
 
-  #verifyPointer(): void {
+  #verifyPointer(repair: boolean): void {
     if (this.#champion === undefined) {
       if (existsSync(this.#pointerPath)) {
         throw new LedgerIntegrityError(
@@ -3019,7 +3029,7 @@ export class EvolutionLedger {
       return
     }
     if (!existsSync(this.#pointerPath)) {
-      if (this.#champion.revision === 1) {
+      if (repair && this.#champion.revision === 1) {
         this.#writePointer(this.#champion)
         return
       }
@@ -3051,6 +3061,7 @@ export class EvolutionLedger {
     ) {
       const previous = this.#previousChampion()
       if (
+        repair &&
         previous !== undefined &&
         pointer.artifactId === previous.artifactId &&
         pointer.revision === previous.revision &&
@@ -3102,4 +3113,10 @@ export class EvolutionLedger {
       }
     }
   }
+}
+
+export function inspectEvolutionChampion(
+  root: string,
+): ChampionPointer | undefined {
+  return new EvolutionLedger(root, {}, 'inspection').getChampion()
 }

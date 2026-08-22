@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join, posix, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   Context,
@@ -15,6 +16,7 @@ import { apply as applyBundledRuntime } from '../../packages/tianwen-runtime-bun
 
 const root = resolve(import.meta.dirname, '../..')
 const packageRoot = resolve(root, 'packages/tianwen-runtime-bundle')
+const compatPackageRoot = resolve(root, 'packages/tianwen-dsh-compat')
 const hostPackageRoot = resolve(root, 'packages/tianwen-dsh-host')
 const packRoot = process.env.TIANWEN_E2E_DATA_DIR === undefined
   ? 'D:/DevData/tianwen/packs'
@@ -62,6 +64,15 @@ function isAllowedStatusInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return path === 'src/status.ts'
     || path === '../tianwen-evidence/dist/projector.js'
+    || path === '../tianwen-dsh-compat/dist/skill-name.js'
+    || [
+      '../tianwen-evolution/dist/inspection.js',
+      '../tianwen-evolution/dist/ledger.js',
+      '../tianwen-evolution/dist/learning-intake.js',
+      '../tianwen-evolution/dist/outcome-intake.js',
+      '../tianwen-evolution/dist/skill-evaluation.js',
+      '../tianwen-evolution/dist/skill-governance.js',
+    ].includes(path)
 }
 
 function isAllowedNaturalTrialInput(path: string): boolean {
@@ -118,24 +129,60 @@ describe('runtime metafile input allowlist', () => {
 describe('CLI metafile input allowlist', () => {
   it.each([
     'src/natural-run-trial.ts',
+    '../tianwen-dsh-compat/dist/skill-name.js',
     '../tianwen-evidence/dist/projector.js',
     '../tianwen-runtime/dist/run-binding.js',
+    '../tianwen-evolution/dist/inspection.js',
+    '../tianwen-evolution/dist/ledger.js',
     '../tianwen-evolution/dist/run-binding.js',
     '../tianwen-evolution/dist/outcome-intake.js',
     '../tianwen-evolution/dist/learning-intake.js',
+    '../tianwen-evolution/dist/skill-evaluation.js',
+    '../tianwen-evolution/dist/skill-governance.js',
   ])('permits the pure Stage 7 input %s', input => {
     expect(isAllowedCliInput(input)).toBe(true)
   })
 
   it.each([
     '../tianwen-evolution/dist/index.js',
-    '../tianwen-evolution/dist/ledger.js',
     '../tianwen-evolution/dist/runtime-binding.js',
-    '../tianwen-evolution/dist/skill-governance.js',
+    '../tianwen-evolution/dist/skill-shadow.js',
+    '../tianwen-evolution/dist/skill-promotion.js',
     '../tianwen-dsh-compat/dist/index.js',
     '../tianwen-dsh-compat/dist/test-harness.js',
   ])('rejects non-pure input %s', input => {
     expect(isAllowedCliInput(input)).toBe(false)
+  })
+})
+
+describe('Skill-name compatibility subpath', () => {
+  it('exports only the public Skill-name validator', async () => {
+    const manifest = json(resolve(compatPackageRoot, 'package.json')) as {
+      exports?: Record<string, unknown>
+    }
+    expect(manifest.exports?.['./skill-name']).toEqual({
+      types: './dist/skill-name.d.ts',
+      default: './dist/skill-name.js',
+    })
+    const module = await import(pathToFileURL(resolve(
+      compatPackageRoot,
+      'dist/skill-name.js',
+    )).href) as Record<string, unknown>
+    expect(Object.keys(module)).toEqual(['isSkillName'])
+    expect(module.isSkillName).toEqual(expect.any(Function))
+  })
+
+  it('uses the narrow seam only for status consumers', () => {
+    const manifest = json(resolve(packageRoot, 'package.json')) as {
+      scripts?: { build?: string }
+    }
+    const build = manifest.scripts?.build ?? ''
+    expect(build.match(
+      /--alias:@tianwen\/dsh-compat=@tianwen\/dsh-compat\/runtime/gu,
+    )).toHaveLength(1)
+    expect(build.match(
+      /--alias:@tianwen\/dsh-compat=@tianwen\/dsh-compat\/skill-name/gu,
+    )).toHaveLength(2)
   })
 })
 
@@ -500,12 +547,15 @@ describe('@tianwen/runtime-bundle', () => {
       '@deepseek-ai/dsh-goal',
       '@deepseek-ai/dsh-session',
       '@deepseek-ai/dsh-session-persistence-jsonl',
+      '@deepseek-ai/dsh-skill',
     ])
     expect(Object.keys(metafile.inputs).filter(input => !allowed(input)))
       .toEqual([])
     expect(source).not.toMatch(/from\s+["']@tianwen\//u)
     expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
-    expect(source).not.toMatch(/scripted-adapter|test-harness|dsh-probe-bundle/u)
+    expect(source).not.toMatch(
+      /scripted-adapter|dsh-tool-skill|test-harness|dsh-probe-bundle/u,
+    )
   })
 
   it('bundles the resume runner through its public DSH roots', () => {

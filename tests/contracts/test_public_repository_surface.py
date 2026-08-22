@@ -341,6 +341,16 @@ def test_installer_safe_failure_stage_receipt_handoff_and_ci() -> None:
         assert fact in handoff
 
 
+def test_goal_status_spec_runs_in_typescript_focused_contract() -> None:
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    typescript_match = re.search(
+        r"(?ms)^  typescript:\n(?P<job>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+        ci,
+    )
+    assert typescript_match, "missing typescript job"
+    assert "tests/dsh-migration/goal-status.spec.ts" in typescript_match.group("job")
+
+
 def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     job_match = re.search(
