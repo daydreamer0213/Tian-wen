@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -509,6 +510,49 @@ function isolateRuntimeBuildOutputs(repoRoot) {
   }
 }
 
+function materializeRuntimeBundlePublication(profileRoot, repoRoot) {
+  const sourceRoot = resolve(repoRoot, 'packages', 'tianwen-runtime-bundle')
+  const installedRoot = resolve(profileRoot, 'node_modules', '@tianwen', 'runtime-bundle')
+  const publishedPaths = runtimePublishedPaths(repoRoot)
+  const installedManifest = assertPlainObject(
+    JSON.parse(readFileSync(resolve(installedRoot, 'package.json'), 'utf8')),
+    'installed Runtime Bundle manifest',
+  )
+  if (JSON.stringify(installedManifest.files) !== JSON.stringify(publishedPaths)) {
+    throw new Error('installed Runtime Bundle files differ from the workspace manifest')
+  }
+  const publication = [...publishedPaths, 'package.json', 'LICENSE']
+  for (const path of publication) {
+    const installed = resolve(installedRoot, path)
+    const child = relative(installedRoot, installed)
+    if (child === '' || child.startsWith('..') || isAbsolute(child)
+      || !statSync(installed).isFile()) {
+      throw new Error('installed Runtime Bundle publication must contain only regular files')
+    }
+    const stagedCopy = `${installed}.copy-${process.pid}-${randomUUID()}`
+    try {
+      copyFileSync(installed, stagedCopy)
+      rmSync(installed, { force: true })
+      renameSync(stagedCopy, installed)
+    } finally {
+      rmSync(stagedCopy, { force: true })
+    }
+  }
+  for (const path of publication) {
+    const installed = resolve(installedRoot, path)
+    const installedStat = statSync(installed, { bigint: true })
+    if (!installedStat.isFile() || installedStat.nlink !== 1n) {
+      throw new Error('installed Runtime Bundle publication must have independent file identity')
+    }
+    const source = resolve(sourceRoot, path)
+    if (existsSync(source)) {
+      if (!statSync(source).isFile() || sameFileIdentity(source, installed)) {
+        throw new Error('installed Runtime Bundle publication must not share workspace file identity')
+      }
+    }
+  }
+}
+
 function previousArchiveDigest(paths) {
   if (!existsSync(paths.receiptPath)) return undefined
   try {
@@ -758,7 +802,10 @@ export function installTianwen({
       }
       return archiveDigests[0]
     })
-    profileChanged = migratingRc6 || !profileExists || installedArchiveDigest !== archiveDigest
+    profileChanged = migratingRc6
+      || !profileExists
+      || installedArchiveDigest !== archiveDigest
+      || sourceLinkedProfile
     if (profileChanged) {
       atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_PROFILE_DEPLOY, () => {
         const profilesRoot = dirname(paths.profileRoot)
@@ -773,6 +820,7 @@ export function installTianwen({
           '--filter', '@tianwen/profile-host',
           'deploy', '--prod', paths.profileRoot,
         ], 0)
+        materializeRuntimeBundlePublication(paths.profileRoot, repoRoot)
         normalizeDeployedProfile(paths, paths.profileRoot)
       })
       atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_PROFILE_VALIDATION, () => {
