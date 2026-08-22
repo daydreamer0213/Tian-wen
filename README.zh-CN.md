@@ -4,13 +4,12 @@
 
 天问是一个面向长时间运行 Agent、可审计的学习控制面。
 
-**研究预览。** DSH 0.1.0-rc.7 是唯一的产品 Agent Runtime。天问在后台以非干扰方式
-工作：它在一次正常 DSH Run 结束后读取执行事实，不替换正在运行的 Agent，也不热切换
-当前 Run。本预览已证明正常 Agent execution、Evidence 只读投影，以及
-zero qualifying signal → `no-case`、`candidateCreated=false`。它还证明了一个在用户结果完成后
-运行、不会阻塞当前 Run 的显式反馈学习入口。它还证明了跨不同 Tianwen Run 的结构化
-Outcome 重复失败入口、一个受治理 Skill Candidate 入口和一条成对 Skill Evaluation
-记录。Candidate/Shadow/Promotion 尚未完成。
+**研究预览；Stage 7 已完成。** DSH 0.1.0-rc.7 是唯一的产品 Agent Runtime。天问在后台
+以非干扰方式工作：它在一次正常 DSH Run 结束后读取执行事实，不替换正在运行的 Agent，
+也不热切换当前 Run。一个使用配置模型的全新自然任务已经通过已安装产品路径完成：Goal
+完成，45 条 Evidence 全部完整，`Outcome=met`，学习正确返回 `no-case`，父 Skill 使用记录
+成功，随后模型恢复 offline。这是项目所有者实际使用形成的单用户产品证据，不是外部用户
+验证，也不证明普遍效能。
 
 ## 为什么需要天问
 
@@ -23,7 +22,7 @@ Agent 可以完成一次 Session，但长期治理还需要回答另外一些问
 | 层 | 职责 |
 | --- | --- |
 | **DSH** | 运行当前 Agent Session。天问直接复用它的模型与 Provider、Agent loop、工具、MCP、sandbox、Session Query、Skill、Jobs、Workflow、Subagent、Message Feedback、Approval 和 permissions。 |
-| **天问** | 保留跨 Run 治理边界，包括 Goal Graph、Evidence provenance（证据来源与流转记录）、学习归因和面向未来 Run 的版本治理。当前预览实际运行了 Evidence 只读投影、谨慎的 no-case 判断、显式反馈 Signal/Ticket 入口、结构化 Outcome 重复失败入口和成对 Skill Evaluation 记录。 |
+| **天问** | 保留跨 Run 治理边界，包括 Goal Graph、Evidence provenance（证据来源与流转记录）、学习归因和面向未来 Run 的版本治理。当前预览实际运行了自然 Run/Skill 绑定、Evidence 只读投影、谨慎的 no-case 判断、Signal/Ticket 入口、合成 Candidate 入口和成对 Evaluation 记录。 |
 | **Alpha** | Alpha 是实验与评测资产，不是第二套产品运行时。 |
 
 DSH Message Feedback 只是学习归因的一项输入，本身不等于 Lesson。DSH Job 表示当前进程
@@ -31,6 +30,10 @@ DSH Message Feedback 只是学习归因的一项输入，本身不等于 Lesson�
 [架构总览](docs/tianwen-architecture-overview-v2.md)为准。
 
 ## 当前预览证明了什么
+
+仓库里有两类不同证据。零成本 scripted fixture 证明确定性机制；Stage 7 的自然任务证明已
+安装 Runtime、配置模型、真实工具、全新 Goal、Run 绑定、Evidence、Outcome 和 Skill 使用
+链路可以在项目所有者的实际使用中闭合一次。两类证据都不能证明 Candidate 已经普遍变好。
 
 确定性演示走正常的 DSH Agent loop：脚本化 Adapter 返回两次响应，确定性的
 `summarize` 工具执行一次，最终状态为 `execution.status=completed`。随后天问投影出一条
@@ -59,8 +62,11 @@ Skill 差异后的归一化请求一致，并冻结可见的模型工具表面�
 `needs-evidence`，不会声称 C 优于 B。Candidate 仍仅为 `recorded`，不会安装、路由、进入 Shadow、Promotion 或 Reject。
 可执行评测器自行持有保留路由上的精确零成本 scripted adapter；路由冲突会被拒绝，非 scripted Provider 会在创建评测 Agent 前被拒绝。工具摘要
 只是可见工具表面，不是 DSH Policy/权限证明；Policy、workspace、data 和 validator 的独立绑定仍明确为
-未观察/未绑定。因此历史结果不能进入 Shadow；真实付费证明必须等待一份独立的 preflight、预留、可信
-receipt 与 tally 设计。
+未观察/未绑定。因此历史结果不能进入 Shadow；新的真实 paired B/C 必须使用冻结五任务协议和受控评测门。
+
+后续 Stage 7 自然任务没有制造失败或 Candidate。它诚实得到 `met/no-case`：有实际用途的
+任务完成，45 条投影 Evidence 全部完整，父 Skill 的成功使用得到记录。因为没有合格学习
+问题，这个 Run 没有产生 Ticket、Case、Lesson、Candidate、Evaluation、Shadow 或 Promotion。
 
 ## 零成本演示
 
@@ -88,11 +94,13 @@ Candidate 之前冻结的协议、八个隔离的 B/C 臂、一条私有 Evaluat
 
 ## 当前限制
 
-- Stage 4 只记录了一条成对 Evaluation 结果。脚本化证明只证明机制，不构成独立效能
-  Evidence；Shadow、Promotion、Active Pointer、Reject、Rollback 和生产自主生成尚未完成。
+- 仓库里已记录的 Candidate 和成对 Evaluation 是合成机制证明；目前还没有由自然产品问题
+  触发、并通过真实 paired B/C 的产品 Candidate。
+- 有界收口生命周期仍待完成：冻结五任务的真实 B/C 与盲态受控评价、隔离 Shadow、项目
+  所有者批准的 Promotion，以及 Rollback 演练。
 - 当前预览不提供生产 SLA，也没有完成的用户界面。
-- 一次成功执行不会自动产生学习，未来版本也不能进入正在运行的 Agent。
-- 已知的首次 Profile 初始化诊断另有事实记录，不能把它写成已经通过的发布门。
+- 当前没有外部用户验证或多用户泛化证据；一次成功执行也不应该自动产生学习。
+- 未来版本只能影响新 Run，不能热切换正在运行的 Agent。
 
 ## 仓库地图
 
@@ -106,6 +114,10 @@ Candidate 之前冻结的协议、八个隔离的 B/C 臂、一条私有 Evaluat
 - [`packages/tianwen-evidence`](packages/tianwen-evidence) 实现 Evidence 只读投影。
 - [`docs/tianwen-architecture-overview-v2.md`](docs/tianwen-architecture-overview-v2.md)
   是详细架构的权威入口。
+- [`docs/operations/tianwen-stage7-natural-run-evidence-trial-handoff.md`](docs/operations/tianwen-stage7-natural-run-evidence-trial-handoff.md)
+  保存 Stage 7 的机制、失败现场和终局自然运行证据。
+- [`docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)
+  冻结有界的 v0.1 评测、Shadow、Promotion 和 Rollback 路线。
 - [`docs/research`](docs/research) 保存有边界的研究证据和审计记录。
 - [`tests`](tests) 包含零成本合同与稳定门。
 

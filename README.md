@@ -4,15 +4,15 @@
 
 Tianwen is an auditable learning control plane for long-running agents.
 
-**Research preview.** DSH 0.1.0-rc.7 is the only product Agent Runtime. Tianwen
-runs in the background as a non-interfering control plane: it reads execution
-facts after a normal DSH run and does not replace or hot-swap the running Agent.
-This preview proves normal Agent execution, read-only Evidence projection, and
-zero qualifying signal → `no-case` with `candidateCreated=false`. It also proves
-one non-blocking explicit-feedback intake path after the user result is complete.
-It also proves repeated structured Outcome intake across distinct Tianwen Runs,
-one governed Skill Candidate intake, and one paired Skill Evaluation record.
-Candidate/Shadow/Promotion is not complete.
+**Research preview; Stage 7 complete.** DSH 0.1.0-rc.7 is the only product
+Agent Runtime. Tianwen runs in the background as a non-interfering control
+plane: it reads execution facts after a normal DSH run and does not replace or
+hot-swap the running Agent. One fresh, configured-model natural task has now
+completed through the installed product path: its Goal completed, all 45
+Evidence records were complete, `Outcome=met`, learning correctly returned
+`no-case`, and parent Skill use was recorded before the model was restored to
+offline mode. This is project-owner, single-user product evidence—not external-
+user validation or proof of general efficacy.
 
 ## Why Tianwen exists
 
@@ -27,7 +27,7 @@ to the Runtime.
 | Layer | Responsibility |
 | --- | --- |
 | **DSH** | Runs the current Agent session. Tianwen reuses its models and providers, Agent loop, tools, MCP, sandbox, Session Query, Skill, Jobs, Workflow, Subagent, Message Feedback, Approval, and permissions. |
-| **Tianwen** | Owns the cross-run governance boundary: Goal Graph, Evidence provenance, learning attribution, and future-run version governance. The current preview exercises read-only Evidence projection, a conservative no-case decision, explicit-feedback Signal/Ticket intake, repeated structured Outcome intake, and a paired Skill Evaluation record. |
+| **Tianwen** | Owns the cross-run governance boundary: Goal Graph, Evidence provenance, learning attribution, and future-run version governance. The current preview exercises natural Run/Skill binding, read-only Evidence projection, conservative no-case decisions, Signal/Ticket intake, synthetic Candidate intake, and paired Evaluation recording. |
 | **Alpha** | Supplies experimental and evaluation assets. It is not a second product Runtime. |
 
 DSH Message Feedback is an attribution input, not a Lesson by itself. A DSH Job
@@ -36,6 +36,12 @@ boundary is maintained in the
 [architecture overview](docs/tianwen-architecture-overview-v2.md).
 
 ## What this preview proves
+
+The repository carries two different evidence classes. Zero-cost scripted
+fixtures prove deterministic mechanisms. The Stage 7 natural task proves that
+the installed Runtime, configured model, real tools, fresh Goal, Run binding,
+Evidence, Outcome, and Skill-use path can close once in the project owner's
+actual use. Neither class proves that a Candidate improves broadly.
 
 The deterministic demo follows the normal DSH Agent loop. A scripted adapter
 returns two responses, a deterministic `summarize` tool runs once, and the turn
@@ -74,8 +80,14 @@ scripted mechanism proof, so its efficacy result is always `INCONCLUSIVE`,
 The executable evaluator owns the exact zero-cost scripted adapter on a reserved route and rejects a route collision. It rejects a non-scripted Provider before it creates an evaluation Agent. Its tool digest is a
 visible tool-surface fact, not DSH Policy/permission proof; Policy, workspace,
 data, and validator independence remain explicitly unbound. Its historic result
-is therefore not Shadow-ready, and live paid proof is deferred to a separate
-preflight/reservation/receipt/tally design.
+is therefore not Shadow-ready; a new real paired B/C must use the frozen
+five-task protocol and controlled-evaluation gates.
+
+The later Stage 7 natural task did not manufacture a failure or Candidate. Its
+honest result was `met/no-case`: the useful task completed, all 45 projected
+Evidence records were complete, and the successful parent Skill use was
+recorded. Because no qualifying learning problem occurred, no Ticket, Case,
+Lesson, Candidate, Evaluation, Shadow, or Promotion was created from that run.
 
 ## Zero-cost demos
 
@@ -108,14 +120,17 @@ Agent unchanged.
 
 ## Current limitations
 
-- Stage 4 has only recorded a paired Evaluation result. Scripted proof is mechanism-only,
-  not independent efficacy evidence; Shadow, Promotion, Active Pointer, Reject, Rollback,
-  and production-autonomous generation are not complete.
+- The repository's recorded Candidate and paired Evaluation are synthetic
+  mechanism proofs. No naturally triggered product Candidate has passed a real
+  paired B/C evaluation yet.
+- The bounded closeout lifecycle is still pending: frozen five-task real B/C
+  with blind controlled evaluation, isolated Shadow, project-owner-approved
+  Promotion, and a Rollback rehearsal.
 - The preview does not offer a production SLA or a finished user interface.
-- It does not claim that one successful run creates learning or that future
-  changes can enter the currently running Agent.
-- The known first-profile bootstrap diagnostic is documented separately and is
-  not presented as a passing release gate.
+- It does not claim external-user validation, multi-user generalization, or
+  that one successful run should create learning.
+- Future changes can affect only new Runs; the currently running Agent is never
+  hot-swapped.
 
 ## Repository map
 
@@ -131,6 +146,10 @@ Agent unchanged.
   Evidence projection.
 - [`docs/tianwen-architecture-overview-v2.md`](docs/tianwen-architecture-overview-v2.md)
   is the detailed architecture authority.
+- [`docs/operations/tianwen-stage7-natural-run-evidence-trial-handoff.md`](docs/operations/tianwen-stage7-natural-run-evidence-trial-handoff.md)
+  records the Stage 7 mechanism, failures, and terminal natural-run evidence.
+- [`docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)
+  freezes the bounded v0.1 evaluation, Shadow, Promotion, and Rollback path.
 - [`docs/research`](docs/research) contains bounded research evidence and audit
   records.
 - [`tests`](tests) contains the zero-cost contracts and stable gates.

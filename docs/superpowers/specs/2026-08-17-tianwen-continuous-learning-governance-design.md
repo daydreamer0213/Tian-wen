@@ -4,6 +4,8 @@
 
 状态：用户已批准（2026-08-17 补充能力发现、结果分诊、受控实验及 Skill 采用与适配治理）
 
+> **当前实施提示（2026-08-22）：** 本文的长期治理原则继续有效，但其中 Python 原型、`ArtifactVersion`、全局 Champion 和旧 Alpha 阶段名称属于概念来源或历史实现，不是当前产品 Runtime 与激活路径。DSH `0.1.0-rc.7` 是唯一产品 Runtime；当前实现状态以 [`tianwen-architecture-overview-v2.md`](../../tianwen-architecture-overview-v2.md) 和 [`tianwen-stage7-natural-run-evidence-trial-handoff.md`](../../operations/tianwen-stage7-natural-run-evidence-trial-handoff.md) 为准；v0.1 的 paired B/C、Shadow、Promotion 与 Rollback 生命周期以 [`2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md) 为准。不得仅凭本文的历史名词恢复 Python Alpha、Dynamic、Artifact 或 global Champion 产品路径。
+
 性质：架构补充设计。本文补齐现有持续学习架构中的学习类型、调度、候选治理、评测、授权、试运行、回滚和恢复规则，不表示这些能力已经全部实现，也不授权本会话直接修改产品代码。
 
 ## 1. 结论

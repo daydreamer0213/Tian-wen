@@ -52,3 +52,31 @@ correction reaches exact-main CI and is installed into the managed product root
 may the already authorized single natural invocation be retried. Any real
 result remains limited to the natural producer-to-consumer chain, not
 production-user distribution or general efficacy.
+
+## Terminal operational status — 2026-08-22
+
+The preceding `pending` language records the state at each earlier stop and is
+not rewritten. It was later superseded by one successful terminal operation on
+the corrected installed product path.
+
+One fresh, useful Goal used the configured model, real DSH rc.7 Runtime, real
+tools, a self-contained incumbent parent Skill, and one formal natural attempt.
+The result was:
+
+- Goal complete;
+- 45/45 Evidence complete;
+- `Outcome=met`;
+- learning=`no-case`;
+- parent Skill-use=`recorded`;
+- model restored to offline after the run.
+
+There was no result-selection retry and no manufactured failure. Because the
+natural task produced no qualifying learning problem, it correctly created no
+Ticket, Case, Lesson, Candidate, Evaluation, Shadow, Promotion, or Rollback.
+This is project-owner single-user product evidence for the exact path exercised;
+it is not external-user distribution evidence or a general efficacy claim.
+
+The terminal code-bearing product baseline is
+`main@b3be13476206a190f4299ee71a90b5d578b73b73`. Exact-main GitHub Actions run
+[32566723012](https://github.com/daydreamer0213/Tian-wen/actions/runs/32566723012)
+completed with Python, TypeScript, and native Windows installer jobs green.
