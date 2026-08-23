@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -16,6 +17,7 @@ import type { StreamChunk } from '@tianwen/dsh-compat'
 import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import {
+  parseControlledLifecycleChildReceipt,
   readControlledLifecycleManifest,
 } from '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-contract.js'
 
@@ -218,6 +220,68 @@ function seedScript() {
   ]
 }
 
+function decisionScript(id: string, taskId: string, choice: string) {
+  return [
+    toolCallResponse(`${id}-skill`, 'skill', { name: parentSkill.name }),
+    toolCallResponse(`${id}-record`, 'record_architecture_decision', {
+      taskId,
+      choice,
+      explanation: `Choose ${choice} from the frozen task evidence.`,
+    }),
+    toolCallResponse(`${id}-verify`, 'verify_architecture_decision', { taskId }),
+    textResponse(`Choose ${choice} from the frozen task evidence.`),
+  ]
+}
+
+function fullLifecycleScript() {
+  const evaluations = [
+    ['t1', 'thin-run-binding', 'session-as-run'],
+    ['t2', 'node-package-script-transport', 'generic-shell-transport'],
+    ['t3', 'reuse-dsh-agent-tool-seams', 'reuse-dsh-agent-tool-seams'],
+    ['t4', 'stdlib-sort-no-governance', 'stdlib-sort-no-governance'],
+    ['t5', 'finite-source-safe-receipt', 'finite-source-safe-receipt'],
+  ] as const
+  const shadows = [
+    ['s1', 'pure-text-parent-snapshot'],
+    ['s2', 'agent-scoped-candidate'],
+    ['s3', 'public-status-private-ledger'],
+    ['s4', 'isolate-build-output-identity'],
+    ['s5', 'standing-authorization-constant'],
+  ] as const
+  const transitions = [
+    ['promote', 'reuse-public-session-id'],
+    ['rollback', 'standard-json-parser'],
+    ['restore', 'reuse-dsh-tool-guard'],
+  ] as const
+  const scores = {
+    relevance: 4,
+    correctnessReasoning: 4,
+    clarityUsability: 4,
+    scopeRestraint: 4,
+  }
+  return [
+    ...seedScript(),
+    ...evaluations.flatMap(([name, expected, baseline]) => [
+      ...decisionScript(`eval-${name}-baseline`, `eval-task:${name}`, baseline),
+      ...decisionScript(`eval-${name}-candidate`, `eval-task:${name}`, expected),
+    ]),
+    ...evaluations.map(([name]) => toolCallResponse(
+      `eval-${name}-blind-score`,
+      'submit_blind_evaluation',
+      {
+        status: 'scored',
+        insufficientMaterial: false,
+        reasonCode: 'score-submitted',
+        scores: { x: scores, y: scores },
+      },
+    )),
+    ...shadows.flatMap(([name, expected]) =>
+      decisionScript(`shadow-${name}`, `shadow-task:${name}`, expected)),
+    ...transitions.flatMap(([kind, expected]) =>
+      decisionScript(`transition-${kind}`, `transition-task:${kind}`, expected)),
+  ]
+}
+
 async function mountRunner(
   name: string,
   script = seedScript(),
@@ -296,10 +360,125 @@ describe('controlled real Skill lifecycle runner', () => {
     ) as unknown as { apply?: unknown }
 
     expect(runner.apply).toBeTypeOf('function')
+    const source = readFileSync(
+      resolve('packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.ts'),
+      'utf8',
+    )
+    expect(source).not.toMatch(/ScriptedAdapter|agent-loop-testkit|fixture queue/u)
+  })
+
+  it('emits one exact safe passed receipt after the complete one-shot lifecycle', async () => {
+    const mounted = await mountRunner('full-one-shot-red', fullLifecycleScript())
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as {
+      apply(
+        ctx: typeof mounted.harness.ctx,
+        config: { manifestPath: string, manifestDigest: string },
+      ): void
+    }
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const originalGet = mounted.harness.ctx.get.bind(mounted.harness.ctx)
+    let resolveExit!: (code: number) => void
+    const exited = new Promise<number>(resolve => { resolveExit = resolve })
+    vi.spyOn(mounted.harness.ctx as never, 'get').mockImplementation((service: string) =>
+      service === 'appExit' ? resolveExit : originalGet(service as never))
+    try {
+      runner.apply(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })
+      expect(await exited).toBe(0)
+      expect(stdout).toHaveBeenCalledTimes(1)
+      expect(stderr).not.toHaveBeenCalled()
+      const line = String(stdout.mock.calls[0]?.[0])
+      const receipt = parseControlledLifecycleChildReceipt(line, '', {
+        manifestDigest: mounted.prepared.manifestDigest,
+        installedArchiveDigest: mounted.manifest.installedArchiveDigest,
+      })
+      expect(receipt).toMatchObject({
+        status: 'passed',
+        counts: {
+          formalSessions: 25,
+          acceptanceEvidence: 20,
+        },
+        pointer: { revision: 4 },
+      })
+      if (receipt.status !== 'passed') throw new Error('expected passed receipt')
+      const inspections = await Promise.all(mounted.prepared.sessionIds.map(sessionId =>
+        mounted.harness.ctx.sessionPersistence.inspect(sessionId),
+      ))
+      expect(receipt.counts.modelRequests).toBe(inspections.flatMap(item => item.events)
+        .filter(event => event.type === 'step/start').length)
+      expect(receipt.counts.toolCalls).toBe(inspections.flatMap(item => item.events)
+        .filter(event => event.type === 'tool/call').length)
+      for (const forbidden of [
+        mounted.root,
+        mounted.manifest.tasks.evaluations[0]!.input,
+        mounted.manifest.tasks.evaluations[0]!.baselineSessionId,
+        parentSkill.content,
+        candidateSkill.content,
+      ]) expect(line).not.toContain(forbidden)
+      expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(25)
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('emits one finite stopped receipt without starting an Agent on preflight failure', async () => {
+    const mounted = await mountRunner('safe-stopped-receipt', seedScript(), {
+      credentialConfigured: false,
+    })
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { apply(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): void }
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const originalGet = mounted.harness.ctx.get.bind(mounted.harness.ctx)
+    let resolveExit!: (code: number) => void
+    const exited = new Promise<number>(resolve => { resolveExit = resolve })
+    vi.spyOn(mounted.harness.ctx as never, 'get').mockImplementation((service: string) =>
+      service === 'appExit' ? resolveExit : originalGet(service as never))
+    try {
+      runner.apply(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })
+      expect(await exited).toBe(1)
+      expect(stdout).toHaveBeenCalledTimes(1)
+      expect(stderr).not.toHaveBeenCalled()
+      const line = String(stdout.mock.calls[0]?.[0])
+      expect(parseControlledLifecycleChildReceipt(line, '', {
+        manifestDigest: mounted.prepared.manifestDigest,
+        installedArchiveDigest: mounted.manifest.installedArchiveDigest,
+      })).toEqual({
+        schemaVersion: 'tianwen.controlled-real-skill-lifecycle.v1',
+        status: 'stopped',
+        evidence: mounted.manifest.evidence,
+        activityDigest: mounted.prepared.manifestDigest,
+        completedStage: 'preflight',
+        reasonCode: 'credential-missing',
+        completedRoles: {
+          seedRuns: 0,
+          evaluationArms: 0,
+          evaluators: 0,
+          shadowRuns: 0,
+          transitions: 0,
+        },
+      })
+      expect(line).not.toContain(mounted.root)
+      expect(mounted.adapter.requests).toEqual([])
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
   })
 
   it('runs two ordinary seed Agents and records the governed Candidate chain', async () => {
-    const mounted = await mountRunner('two-seeds')
+    const mounted = await mountRunner('two-seeds', fullLifecycleScript())
     const runner = await import(
       '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
     ) as unknown as {
@@ -308,26 +487,8 @@ describe('controlled real Skill lifecycle runner', () => {
         config: { manifestPath: string, manifestDigest: string },
       ) => Promise<{
         status: string
-        seedRuns: readonly {
-          runId: string
-          verdict: string
-          modelRequests: number
-          toolCalls: number
-          evidenceCount: number
-        }[]
-        evaluationTasks: readonly {
-          taskId: string
-          goal: string
-          input: string
-          workspaceSnapshot: unknown
-          authorization: unknown
-          verifierContract: unknown
-          stopCondition: unknown
-          evaluatorMaterialContract: unknown
-          baselineSessionId: string
-          candidateSessionId: string
-          evaluatorSessionId: string
-        }[]
+        counts: { modelRequests: number, toolCalls: number, acceptanceEvidence: number }
+        pointer: { revision: number, versionDigest: string }
       }>
     }
     try {
@@ -338,19 +499,39 @@ describe('controlled real Skill lifecycle runner', () => {
       })
 
       expect(result).toMatchObject({
-        status: 'candidate-recorded',
-        seedRuns: [
-          { verdict: 'not-met', modelRequests: 4, toolCalls: 3, evidenceCount: 1 },
-          { verdict: 'met', modelRequests: 4, toolCalls: 3, evidenceCount: 1 },
-        ],
+        status: 'passed',
+        counts: { acceptanceEvidence: 20 },
+        pointer: { revision: 4 },
       })
-      expect(mounted.adapter.requests).toHaveLength(8)
+      expect(result.counts.modelRequests).toBe(mounted.adapter.requests.length)
       expect(mounted.adapter.requests.every(request =>
         request.provider === 'deepseek-official'
         && request.model === 'deepseek-v4-pro'
-        && request.maxTokens === undefined
-        && request.tools?.map(tool => tool.name).toSorted().join(',')
-          === 'record_architecture_decision,skill,verify_architecture_decision')).toBe(true)
+        && request.maxTokens === undefined)).toBe(true)
+      const expectedSessionOrder = [
+        ...mounted.manifest.tasks.seeds.map(task => task.sessionId),
+        ...mounted.manifest.tasks.evaluations.flatMap(task => [
+          task.baselineSessionId,
+          task.candidateSessionId,
+        ]),
+        ...mounted.manifest.tasks.evaluations.map(task => task.evaluatorSessionId),
+        ...mounted.manifest.tasks.shadows.map(task => task.sessionId),
+        ...mounted.manifest.tasks.transitions.map(task => task.sessionId),
+      ]
+      const observedSessionOrder = mounted.adapter.requests.map(request => String(request.sessionId))
+        .filter((sessionId, index, all) => index === 0 || sessionId !== all[index - 1])
+      expect(observedSessionOrder).toEqual(expectedSessionOrder)
+      const evaluatorSessionIds = new Set(mounted.manifest.tasks.evaluations
+        .map(task => task.evaluatorSessionId))
+      const evaluatorRequests = mounted.adapter.requests.filter(request =>
+        evaluatorSessionIds.has(String(request.sessionId)))
+      expect(evaluatorRequests).toHaveLength(5)
+      expect(evaluatorRequests.every(request =>
+        request.tools?.map(tool => tool.name).join(',') === 'submit_blind_evaluation')).toBe(true)
+      const evaluatorMessages = JSON.stringify(evaluatorRequests.map(request => request.messages))
+      expect(evaluatorMessages).not.toContain(parentSkill.name)
+      expect(evaluatorMessages).not.toContain(parentSkill.content)
+      expect(evaluatorMessages).not.toContain(candidateSkill.content)
       for (const request of [mounted.adapter.requests[0], mounted.adapter.requests[4]]) {
         const serialized = JSON.stringify(request)
         for (const task of [
@@ -370,10 +551,11 @@ describe('controlled real Skill lifecycle runner', () => {
         expect(messages).toContain('record_architecture_decision')
         expect(messages).toContain('verify_architecture_decision')
       }
-      expect((await mounted.harness.ctx.sessionPersistence.list())
-        .map(header => String(header.id)).toSorted()).toEqual(
-        mounted.manifest.tasks.seeds.map(task => task.sessionId).toSorted(),
-      )
+      const persistedSessionIds = (await mounted.harness.ctx.sessionPersistence.list())
+        .map(header => String(header.id))
+      expect(persistedSessionIds).toHaveLength(25)
+      expect(persistedSessionIds.filter(id => id.includes(':seed-')).toSorted())
+        .toEqual(mounted.manifest.tasks.seeds.map(task => task.sessionId).toSorted())
       expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets()).toHaveLength(1)
       expect(mounted.harness.ctx.tianwenEvolution.listLearningCases()).toHaveLength(1)
       expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toHaveLength(1)
@@ -386,33 +568,83 @@ describe('controlled real Skill lifecycle runner', () => {
         providerId: 'deepseek-official',
         modelId: 'deepseek-v4-pro',
       })
-      for (const [index, task] of result.evaluationTasks.entries()) {
+      const evaluation = mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluations()[0]
+      expect(evaluation?.tasks).toHaveLength(5)
+      for (const [index, task] of mounted.manifest.tasks.evaluations.entries()) {
+        const snapshot = {
+          schemaVersion: 'tianwen.controlled-workspace-snapshot.v1',
+          entries: [{
+            relativePath: 'case.md',
+            contentDigest: `sha256:${createHash('sha256').update(`${task.input}\n`).digest('hex')}`,
+            size: Buffer.byteLength(`${task.input}\n`, 'utf8'),
+          }],
+        }
+        const authorization = {
+          standingAuthorizationDigest: mounted.manifest.standingAuthorizationDigest,
+          taskId: task.taskId,
+        }
+        const verifierContract = {
+          toolName: 'verify_architecture_decision',
+          arguments: { taskId: task.taskId },
+        }
         expect(protocol?.protocol.tasks[index]).toMatchObject({
           taskId: task.taskId,
           goalDigest: sha256(task.goal),
           inputDigest: sha256(task.input),
-          workspaceSnapshotDigest: sha256(task.workspaceSnapshot),
-          authorizationDigest: sha256(task.authorization),
-          verifierContractDigest: sha256(task.verifierContract),
-          stopConditionDigest: sha256(task.stopCondition),
-          evaluatorMaterialContractDigest: sha256(task.evaluatorMaterialContract),
-          acceptanceSubjectDigest: sha256(
-            (task.verifierContract as { arguments: unknown }).arguments,
-          ),
+          workspaceSnapshotDigest: sha256(snapshot),
+          authorizationDigest: sha256(authorization),
+          verifierContractDigest: sha256(verifierContract),
+          stopConditionDigest: sha256({ terminal: 'completed-final-assistant-text' }),
+          evaluatorMaterialContractDigest: sha256(mounted.manifest.execution.evaluatorMaterialContract),
+          acceptanceSubjectDigest: sha256(verifierContract.arguments),
           allowedTools: [...mounted.manifest.execution.allowedTools].toSorted(),
           stopContract: mounted.manifest.execution.stopContract,
         })
       }
-      const allocatedSessions = result.evaluationTasks.flatMap(task => [
-        task.baselineSessionId, task.candidateSessionId, task.evaluatorSessionId,
+      const allocatedSessions = evaluation!.tasks.flatMap(task => [
+        task.baseline.sessionId, task.candidate.sessionId, task.evaluatorSessionId,
       ])
       expect(allocatedSessions).toHaveLength(15)
       expect(new Set(allocatedSessions).size).toBe(15)
+      const objectives = mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluationObjectives(evaluation!.evaluationId)
+      expect(objectives.map(item => item.comparison))
+        .toEqual(['candidate-better', 'candidate-better', 'tie', 'tie', 'tie'])
+      expect(objectives.every(item => item.objectiveVerdict === 'pass')).toBe(true)
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluatorObservations(evaluation!.evaluationId)).toHaveLength(5)
+      expect(mounted.harness.ctx.tianwenEvolution
+        .getControlledSkillEvaluationResult(evaluation!.evaluationId)).toMatchObject({
+          mechanismVerdict: 'pass',
+          reasonCode: 'all-gates-passed',
+          baselineTotal: 80,
+          candidateTotal: 80,
+        })
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillShadowResults()).toMatchObject([{
+          mechanismVerdict: 'pass',
+          promotionEligibility: 'eligible-for-isolated-test-promotion',
+          runs: expect.arrayContaining([
+            expect.objectContaining({ outcome: 'met' }),
+          ]),
+        }])
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillTransitions().map(item => item.kind))
+        .toEqual(['promote', 'rollback', 'restore'])
+      const pointer = mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillScopePointers()[0]!
+      expect(result.pointer.versionDigest)
+        .toBe(`sha256:${pointer.activeVersionId.slice('skill-version:'.length)}`)
       const candidate = mounted.harness.ctx.tianwenEvolution.listSkillCandidates()[0]
       expect(candidate?.payload.content).toBe(candidateSkill.content)
       const learningCase = mounted.harness.ctx.tianwenEvolution.listLearningCases()[0]
+      const seedUses = mounted.harness.ctx.tianwenEvolution.listRunSkillUses()
+        .filter(use => mounted.manifest.tasks.seeds.some(task => task.sessionId === use.sessionId))
+      const counterevidenceRunId = seedUses.find(use =>
+        use.sessionId === mounted.manifest.tasks.seeds[1]!.sessionId)?.runId
       expect(learningCase?.counterevidence.map(item => item.runId))
-        .toEqual([result.seedRuns[1]!.runId])
+        .toEqual([counterevidenceRunId])
       const inspected = await Promise.all(mounted.manifest.tasks.seeds.map(task =>
         mounted.harness.ctx.sessionPersistence.inspect(task.sessionId),
       ))
@@ -421,8 +653,9 @@ describe('controlled real Skill lifecycle runner', () => {
       expect(inspected.flatMap(item => item.events)
         .filter(event => event.type === 'step/start')).toHaveLength(8)
       const uses = mounted.harness.ctx.tianwenEvolution.listRunSkillUses()
-      expect(uses).toHaveLength(2)
-      expect(new Set(uses.map(use => use.acceptanceEvidenceId)).size).toBe(2)
+      expect(uses).toHaveLength(20)
+      expect(seedUses).toHaveLength(2)
+      expect(new Set(seedUses.map(use => use.acceptanceEvidenceId)).size).toBe(2)
       expect(mounted.harness.ctx.tianwenEvolution.listEvents()).toEqual([])
       const eventTypes = readFileSync(
         join(mounted.manifest.roots.evolutionRoot, 'ledger.jsonl'),
@@ -430,10 +663,267 @@ describe('controlled real Skill lifecycle runner', () => {
       ).trim().split('\n').map(line => (JSON.parse(line) as { type: string }).type)
       expect(eventTypes.indexOf('controlled-skill-eval-protocol-frozen'))
         .toBeLessThan(eventTypes.indexOf('learning-candidate-recorded'))
+      const replaySnapshot = {
+        requests: mounted.adapter.requests.length,
+        sessions: (await mounted.harness.ctx.sessionPersistence.list()).length,
+        ledger: readFileSync(
+          join(mounted.manifest.roots.evolutionRoot, 'ledger.jsonl'),
+          'utf8',
+        ),
+      }
+      await expect(runner.runControlledLifecycle!(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })).rejects.toMatchObject({ code: 'session-not-fresh' })
+      expect(mounted.adapter.requests).toHaveLength(replaySnapshot.requests)
+      expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(
+        replaySnapshot.sessions,
+      )
+      expect(readFileSync(
+        join(mounted.manifest.roots.evolutionRoot, 'ledger.jsonl'),
+        'utf8',
+      )).toBe(replaySnapshot.ledger)
     } finally {
       await mounted.harness.ctx.fiber.dispose()
     }
   })
+
+  it('stops after the first rejected B/C pair without starting an evaluator', async () => {
+    const mounted = await mountRunner('evaluation-terminal-stop', [
+      ...seedScript(),
+      ...decisionScript('eval-t1-baseline-stop', 'eval-task:t1', 'session-as-run'),
+      ...decisionScript('eval-t1-candidate-stop', 'eval-task:t1', 'session-as-run'),
+    ])
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })).rejects.toMatchObject({
+        code: 'evaluation-failed',
+        completedStage: 'evaluation',
+        completedRoles: {
+          seedRuns: 2,
+          evaluationArms: 2,
+          evaluators: 0,
+          shadowRuns: 0,
+          transitions: 0,
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(16)
+      expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(4)
+      const evaluationId = mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluations()[0]!.evaluationId
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluationObjectives(evaluationId)).toHaveLength(1)
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluatorObservations(evaluationId)).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillShadows()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillTransitions()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not count a persisted failed arm Session as a completed role', async () => {
+    const mounted = await mountRunner('first-arm-provider-stop', [
+      ...seedScript(),
+      new Error('raw first arm provider detail'),
+    ])
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { apply(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): void }
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const originalGet = mounted.harness.ctx.get.bind(mounted.harness.ctx)
+    let resolveExit!: (code: number) => void
+    const exited = new Promise<number>(resolve => { resolveExit = resolve })
+    vi.spyOn(mounted.harness.ctx as never, 'get').mockImplementation((service: string) =>
+      service === 'appExit' ? resolveExit : originalGet(service as never))
+    try {
+      runner.apply(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })
+      expect(await exited).toBe(1)
+      expect(stdout).toHaveBeenCalledTimes(1)
+      const line = String(stdout.mock.calls[0]?.[0])
+      expect(parseControlledLifecycleChildReceipt(line, '', {
+        manifestDigest: mounted.prepared.manifestDigest,
+        installedArchiveDigest: mounted.manifest.installedArchiveDigest,
+      })).toMatchObject({
+        status: 'stopped',
+        completedStage: 'candidate',
+        reasonCode: 'evaluation-failed',
+        completedRoles: {
+          seedRuns: 2,
+          evaluationArms: 0,
+          evaluators: 0,
+          shadowRuns: 0,
+          transitions: 0,
+        },
+      })
+      expect(line).not.toContain('raw first arm provider detail')
+      expect(mounted.adapter.requests).toHaveLength(9)
+      expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(3)
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toHaveLength(2)
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('binds verifier truth to the exact Agent task instead of a submitted taskId', async () => {
+    const mounted = await mountRunner('cross-task-stop', [
+      ...seedScript(),
+      ...decisionScript('eval-t1-cross-task', 'eval-task:t2', 'node-package-script-transport'),
+    ])
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })).rejects.toMatchObject({ code: 'evaluation-failed' })
+      expect(mounted.adapter.requests).toHaveLength(12)
+      const sessions = (await mounted.harness.ctx.sessionPersistence.list())
+        .map(header => String(header.id))
+      expect(sessions).toContain(mounted.manifest.tasks.evaluations[0]!.baselineSessionId)
+      expect(sessions).not.toContain(mounted.manifest.tasks.evaluations[0]!.candidateSessionId)
+      expect(sessions).not.toContain(mounted.manifest.tasks.evaluations[1]!.baselineSessionId)
+      const evaluationId = mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluations()[0]!.evaluationId
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluationObjectives(evaluationId)).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not start Shadow after the first evaluator Provider failure', async () => {
+    const mounted = await mountRunner('evaluator-stop', [
+      ...fullLifecycleScript().slice(0, 48),
+      new Error('raw evaluator provider detail'),
+    ])
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      const error = await runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      }).then(() => undefined, cause => cause as {
+        code?: string, completedStage?: string, message?: string,
+      })
+      expect(error).toMatchObject({ code: 'evaluator-failed', completedStage: 'evaluation' })
+      expect(error?.message).not.toContain('raw evaluator provider detail')
+      expect(mounted.adapter.requests).toHaveLength(49)
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillShadows()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillTransitions()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not initialize a pointer after the first Shadow rejection', async () => {
+    const mounted = await mountRunner('shadow-stop', [
+      ...fullLifecycleScript().slice(0, 53),
+      ...decisionScript('shadow-s1-stop', 'shadow-task:s1', 'mutable-parent-object'),
+    ])
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })).rejects.toMatchObject({ code: 'shadow-failed', completedStage: 'shadow' })
+      expect(mounted.adapter.requests).toHaveLength(57)
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillScopePointers()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillTransitions()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('recovers the pointer and does not start rollback after a rejected promote post-check', async () => {
+    const mounted = await mountRunner('transition-stop', [
+      ...fullLifecycleScript().slice(0, 73),
+      ...decisionScript(
+        'transition-promote-stop',
+        'transition-task:promote',
+        'private-session-replacement',
+      ),
+    ])
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })).rejects.toMatchObject({ code: 'transition-failed', completedStage: 'shadow' })
+      expect(mounted.adapter.requests).toHaveLength(77)
+      const transitions = mounted.harness.ctx.tianwenEvolution.listControlledSkillTransitions()
+      expect(transitions).toHaveLength(1)
+      expect(mounted.harness.ctx.tianwenEvolution
+        .getControlledSkillTransitionReceipt(transitions[0]!.transitionId))
+        .toMatchObject({ state: 'recovered' })
+      expect((await mounted.harness.ctx.sessionPersistence.list())
+        .map(header => String(header.id)))
+        .not.toContain(mounted.manifest.tasks.transitions[1]!.sessionId)
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it.each([
+    ['B/C', 48, 12, 'candidate'],
+    ['evaluator', 53, 17, 'evaluation'],
+    ['Shadow', 73, 22, 'evaluators'],
+  ] as const)(
+    'revalidates the configured route after the %s stage before the next Agent',
+    async (_label, requestCutoff, sessionCount, completedStage) => {
+      const mounted = await mountRunner(
+        `route-drift-${completedStage}`,
+        fullLifecycleScript(),
+      )
+      const runner = await import(
+        '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+      ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+        manifestPath: string, manifestDigest: string,
+      }): Promise<unknown> }
+      let requests = 0
+      mounted.harness.ctx.on('llm/stream', (request, next) => {
+        requests += 1
+        if (requests === requestCutoff) mounted.selection.model = 'drifted-after-stage'
+        return next()
+      })
+      try {
+        await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+          manifestPath: mounted.manifestPath,
+          manifestDigest: mounted.prepared.manifestDigest,
+        })).rejects.toMatchObject({ code: 'selection-mismatch', completedStage })
+        expect(mounted.adapter.requests).toHaveLength(requestCutoff)
+        expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(sessionCount)
+      } finally {
+        await mounted.harness.ctx.fiber.dispose()
+      }
+    },
+  )
 
   it('does not freeze a protocol or Candidate after a future workspace drifts', async () => {
     const mounted = await mountRunner('future-workspace-drift')
@@ -794,11 +1284,54 @@ describe('controlled real Skill lifecycle runner', () => {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
       }).then(() => undefined, cause => cause as { code?: string, message?: string })
-      expect(error).toMatchObject({ code: 'candidate-failed' })
+      expect(error).toMatchObject({
+        code: 'candidate-failed',
+        completedStage: 'seeds',
+        completedRoles: { seedRuns: 2 },
+      })
       expect(error?.message).not.toContain('candidate-write-secret')
       expect(mounted.harness.ctx.tianwenEvolution
         .listControlledSkillEvalProtocols()).toHaveLength(1)
       expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not close the Candidate stage when its post-boundary route check fails', async () => {
+    const mounted = await mountRunner('candidate-boundary-drift', fullLifecycleScript())
+    const original = mounted.harness.ctx.tianwenEvolution.recordSkillCandidate
+      .bind(mounted.harness.ctx.tianwenEvolution)
+    vi.spyOn(mounted.harness.ctx.tianwenEvolution, 'recordSkillCandidate')
+      .mockImplementation(input => {
+        const receipt = original(input)
+        mounted.selection.model = 'drifted-during-candidate-write'
+        return receipt
+      })
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })).rejects.toMatchObject({
+        code: 'selection-mismatch',
+        completedStage: 'seeds',
+        completedRoles: {
+          seedRuns: 2,
+          evaluationArms: 0,
+          evaluators: 0,
+          shadowRuns: 0,
+          transitions: 0,
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(8)
+      expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(2)
+      expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toHaveLength(1)
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()).toEqual([])
     } finally {
       await mounted.harness.ctx.fiber.dispose()
     }

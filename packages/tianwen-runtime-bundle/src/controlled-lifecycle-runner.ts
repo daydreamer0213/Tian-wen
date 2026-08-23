@@ -15,21 +15,21 @@ import { createUserMessage, HarnessError } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import {
+  CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1,
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   sha256,
 } from '@tianwen/evolution'
 import type {
-  GovernedSkillCandidateId,
   LearningTicketId,
   Sha256Digest,
   ControlledSkillEvalTaskType,
-  SkillEvalProtocolId,
   TianwenRunId,
 } from '@tianwen/evolution'
 
 import { readControlledLifecycleManifest } from './controlled-lifecycle-contract.js'
 import type {
   ControlledLifecycleManifest,
+  ControlledLifecycleReceipt,
 } from './controlled-lifecycle-contract.js'
 
 const ACCEPTANCE_TOOL = 'verify_architecture_decision'
@@ -44,6 +44,13 @@ const ACCEPTANCE_CONTRACT = {
   blocksGoal: false,
 } as const
 const SCOPE_KEY = 'project:tianwen/capability:controlled-architecture-decision'
+const RECEIPT_EVIDENCE = {
+  source: 'configured-provider-capable',
+  environment: 'development-only',
+  defect: 'synthetic-defect',
+  naturalUserEvidence: 'not-claimed',
+  externalUserEvidence: 'not-claimed',
+} as const
 
 export interface ControlledLifecycleRunnerConfig {
   readonly manifestPath: string
@@ -93,15 +100,6 @@ export interface ControlledLifecycleEvaluationTaskInput {
   readonly evaluatorSessionId: string
 }
 
-export interface ControlledLifecycleCandidateState {
-  readonly status: 'candidate-recorded'
-  readonly manifestDigest: `sha256:${string}`
-  readonly seedRuns: readonly [ControlledLifecycleSeedRun, ControlledLifecycleSeedRun]
-  readonly protocolId: SkillEvalProtocolId
-  readonly candidateId: GovernedSkillCandidateId
-  readonly evaluationTasks: readonly ControlledLifecycleEvaluationTaskInput[]
-}
-
 export type ControlledLifecycleRunnerFailureCode =
   | 'manifest-revalidation-failed'
   | 'services-unavailable'
@@ -116,12 +114,38 @@ export type ControlledLifecycleRunnerFailureCode =
   | 'seed-failed'
   | 'persistence-failed'
   | 'candidate-failed'
+  | 'evaluation-failed'
+  | 'evaluator-failed'
+  | 'shadow-failed'
+  | 'transition-failed'
+  | 'internal-error'
 
 export class ControlledLifecycleRunnerError extends Error {
-  constructor(readonly code: ControlledLifecycleRunnerFailureCode) {
+  constructor(
+    readonly code: ControlledLifecycleRunnerFailureCode,
+    readonly completedStage?: ControlledLifecycleStoppedStage,
+    readonly completedRoles?: ControlledLifecycleCompletedRoles,
+  ) {
     super(`controlled lifecycle runner stopped: ${code}`)
     this.name = 'ControlledLifecycleRunnerError'
   }
+}
+
+type ControlledLifecycleStoppedStage =
+  | 'preflight'
+  | 'seeds'
+  | 'candidate'
+  | 'evaluation'
+  | 'evaluators'
+  | 'shadow'
+  | 'transitions'
+
+interface ControlledLifecycleCompletedRoles {
+  seedRuns: number
+  evaluationArms: number
+  evaluators: number
+  shadowRuns: number
+  transitions: number
 }
 
 interface DecisionSubmission {
@@ -376,6 +400,67 @@ function evaluationTasks(
   })
 }
 
+function singleArmTask(
+  manifest: ControlledLifecycleManifest,
+  task: ControlledLifecycleManifest['tasks']['shadows'][number]
+    | ControlledLifecycleManifest['tasks']['transitions'][number],
+) {
+  const taskId = task.taskId as `shadow-task:${string}` | `transition-task:${string}`
+  const acceptanceSubject = { taskId }
+  return {
+    taskId,
+    goal: task.goal,
+    input: task.input,
+    workspaceRoot: task.workspaceRoot,
+    workspaceSnapshot: workspaceSnapshot(task.workspaceRoot),
+    authorization: {
+      standingAuthorizationDigest: manifest.standingAuthorizationDigest,
+      taskId,
+    },
+    verifierContract: {
+      toolName: ACCEPTANCE_TOOL,
+      arguments: acceptanceSubject,
+    },
+    stopCondition: { terminal: 'completed-final-assistant-text' as const },
+    acceptanceContract: ACCEPTANCE_CONTRACT,
+    acceptanceSubject,
+    allowedTools: manifest.execution.allowedTools,
+    stopContract: manifest.execution.stopContract,
+    sessionId: task.sessionId,
+  }
+}
+
+function setDecisionStates(
+  states: Map<string, DecisionState>,
+  tasks: readonly {
+    readonly taskId: string
+    readonly hiddenExpectedChoice: string
+    readonly sessionIds: readonly string[]
+  }[],
+): void {
+  states.clear()
+  for (const task of tasks) {
+    for (const sessionId of task.sessionIds) {
+      if (states.has(sessionId)) throw new ControlledLifecycleRunnerError('identity-mismatch')
+      states.set(sessionId, {
+        taskId: task.taskId,
+        expectedChoice: task.hiddenExpectedChoice,
+        recordAttempts: 0,
+        verifyAttempts: 0,
+      })
+    }
+  }
+}
+
+function requireCompletedDecisionStates(states: Map<string, DecisionState>): void {
+  if ([...states.values()].some(state =>
+    state.recordAttempts !== 1
+    || state.verifyAttempts !== 1
+    || state.submission?.taskId !== state.taskId)) {
+    throw new ControlledLifecycleRunnerError('identity-mismatch')
+  }
+}
+
 function allWorkspaceSnapshots(
   manifest: ControlledLifecycleManifest,
 ): readonly ControlledLifecycleWorkspaceSnapshot[] {
@@ -493,9 +578,18 @@ async function readSeedExecutionFacts(
   ) throw new ControlledLifecycleRunnerError('tool-surface-mismatch')
 
   try {
-    for (const task of manifest.tasks.seeds) {
+    const skillRoots = [
+      ...manifest.tasks.seeds.map(task => task.workspaceRoot),
+      ...manifest.tasks.evaluations.flatMap(task => [
+        task.baselineWorkspaceRoot,
+        task.candidateWorkspaceRoot,
+      ]),
+      ...manifest.tasks.shadows.map(task => task.workspaceRoot),
+      ...manifest.tasks.transitions.map(task => task.workspaceRoot),
+    ]
+    for (const workspaceRoot of skillRoots) {
       const rootSkill = await ctx.skills.get(manifest.skills.parent.name, {
-        cwd: task.workspaceRoot,
+        cwd: workspaceRoot,
       })
       if (!sameSkill(rootSkill, manifest.skills.parent)) {
         throw new ControlledLifecycleRunnerError('identity-mismatch')
@@ -726,10 +820,102 @@ async function runSeed(
   }
 }
 
+function emptyCompletedRoles(): ControlledLifecycleCompletedRoles {
+  return {
+    seedRuns: 0,
+    evaluationArms: 0,
+    evaluators: 0,
+    shadowRuns: 0,
+    transitions: 0,
+  }
+}
+
+function refreshCompletedRunRoles(
+  ctx: Context,
+  manifest: ControlledLifecycleManifest,
+  roles: ControlledLifecycleCompletedRoles,
+): void {
+  const usedSessions = new Set(ctx.tianwenEvolution.listRunSkillUses()
+    .map(use => use.sessionId))
+  roles.evaluationArms = manifest.tasks.evaluations.flatMap(task => [
+    task.baselineSessionId,
+    task.candidateSessionId,
+  ]).filter(sessionId => usedSessions.has(sessionId)).length
+  roles.shadowRuns = manifest.tasks.shadows
+    .filter(task => usedSessions.has(task.sessionId)).length
+  roles.transitions = manifest.tasks.transitions
+    .filter(task => usedSessions.has(task.sessionId)).length
+}
+
+function stoppedReason(code: ControlledLifecycleRunnerFailureCode):
+  Extract<ControlledLifecycleReceipt, { readonly status: 'stopped' }>['reasonCode'] {
+  switch (code) {
+    case 'manifest-revalidation-failed':
+    case 'services-unavailable':
+    case 'credential-missing':
+    case 'session-not-fresh':
+    case 'seed-failed':
+    case 'candidate-failed':
+    case 'evaluation-failed':
+    case 'evaluator-failed':
+    case 'shadow-failed':
+    case 'transition-failed':
+    case 'persistence-failed':
+    case 'workspace-drift':
+    case 'root-drift':
+    case 'identity-mismatch':
+    case 'internal-error':
+      return code
+    case 'selection-mismatch':
+    case 'retry-policy-mismatch':
+      return 'selection-mismatch'
+    case 'tool-surface-mismatch':
+      return 'identity-mismatch'
+  }
+}
+
+function stoppedReceipt(
+  manifestDigest: `sha256:${string}`,
+  error: ControlledLifecycleRunnerError,
+): ControlledLifecycleReceipt {
+  return {
+    schemaVersion: 'tianwen.controlled-real-skill-lifecycle.v1',
+    status: 'stopped',
+    evidence: RECEIPT_EVIDENCE,
+    activityDigest: manifestDigest,
+    completedStage: error.completedStage ?? 'preflight',
+    reasonCode: stoppedReason(error.code),
+    completedRoles: error.completedRoles ?? emptyCompletedRoles(),
+  }
+}
+
+async function formalActivityCounts(
+  ctx: Context,
+  manifest: ControlledLifecycleManifest,
+): Promise<{ readonly modelRequests: number, readonly toolCalls: number }> {
+  let modelRequests = 0
+  let toolCalls = 0
+  for (const sessionId of [
+    ...manifest.tasks.seeds.map(task => task.sessionId),
+    ...manifest.tasks.evaluations.flatMap(task => [
+      task.baselineSessionId,
+      task.candidateSessionId,
+      task.evaluatorSessionId,
+    ]),
+    ...manifest.tasks.shadows.map(task => task.sessionId),
+    ...manifest.tasks.transitions.map(task => task.sessionId),
+  ]) {
+    const inspection = await ctx.sessionPersistence.inspect(SessionId(sessionId))
+    modelRequests += requestCount(inspection.events)
+    toolCalls += toolCallCount(inspection.events)
+  }
+  return { modelRequests, toolCalls }
+}
+
 export async function runControlledLifecycle(
   ctx: Context,
   config: ControlledLifecycleRunnerConfig,
-): Promise<ControlledLifecycleCandidateState> {
+): Promise<Extract<ControlledLifecycleReceipt, { readonly status: 'passed' }>> {
   let prepared: ReturnType<typeof readControlledLifecycleManifest>
   try {
     prepared = readControlledLifecycleManifest(config.manifestPath, config.manifestDigest)
@@ -745,17 +931,18 @@ export async function runControlledLifecycle(
     || ctx.get('tianwenEvidence') === undefined
     || ctx.get('tianwenEvolution') === undefined
     || ctx.get('tianwenLearningIntake') === undefined
+    || ctx.get('tianwenSkillEvaluation') === undefined
   ) throw new ControlledLifecycleRunnerError('services-unavailable')
   try {
     await loader.await()
   } catch {
     throw new ControlledLifecycleRunnerError('services-unavailable')
   }
-  rootPreflight(ctx, manifest)
-  workspaceRootPreflight(manifest)
   if (!freshEvolution(ctx, manifest.roots.evolutionRoot)) {
     throw new ControlledLifecycleRunnerError('session-not-fresh')
   }
+  rootPreflight(ctx, manifest)
+  workspaceRootPreflight(manifest)
   const persisted = await ctx.sessionPersistence.list()
   if (
     persisted.length !== 0
@@ -767,7 +954,9 @@ export async function runControlledLifecycle(
     throw new ControlledLifecycleRunnerError('workspace-drift')
   }
 
+  const progress = emptyCompletedRoles()
   const stateByAgent = new WeakMap<object, DecisionState>()
+  const stateBySessionId = new Map<string, DecisionState>()
   const disposeDecision = ctx.tools.register(defineTool({
     name: DECISION_TOOL,
     description: 'Record the first architecture decision for this controlled task.',
@@ -783,7 +972,7 @@ export async function runControlledLifecycle(
     async execute(args, exec) {
       const state = exec.agent === undefined
         ? undefined
-        : stateByAgent.get(exec.agent)
+        : stateByAgent.get(exec.agent) ?? stateBySessionId.get(String(exec.agent.id))
       if (state === undefined) {
         throw new ArchitectureDecisionUnavailable('ARCHITECTURE_DECISION_CONTEXT_MISSING')
       }
@@ -815,7 +1004,7 @@ export async function runControlledLifecycle(
     async execute(args, exec) {
       const state = exec.agent === undefined
         ? undefined
-        : stateByAgent.get(exec.agent)
+        : stateByAgent.get(exec.agent) ?? stateBySessionId.get(String(exec.agent.id))
       if (state === undefined) {
         throw new ArchitectureDecisionUnavailable('ARCHITECTURE_DECISION_CONTEXT_MISSING')
       }
@@ -835,12 +1024,14 @@ export async function runControlledLifecycle(
     },
   }))
   const disposeParent = ctx.skills.register(manifest.skills.parent)
+  let lastClosedStage: ControlledLifecycleStoppedStage = 'preflight'
   try {
     const initialFacts = await readSeedExecutionFacts(ctx, manifest)
     const tasks = evaluationTasks(manifest)
     const first = await runSeed(
       ctx, manifest, manifest.tasks.seeds[0]!, stateByAgent, allSnapshots[0]!,
     )
+    progress.seedRuns = 1
     if (first.verdict !== 'not-met' || first.ticketId === undefined) {
       throw new ControlledLifecycleRunnerError('seed-failed')
     }
@@ -848,10 +1039,12 @@ export async function runControlledLifecycle(
     const second = await runSeed(
       ctx, manifest, manifest.tasks.seeds[1]!, stateByAgent, allSnapshots[1]!,
     )
+    progress.seedRuns = 2
     if (second.verdict !== 'met' || second.ticketId !== undefined) {
       throw new ControlledLifecycleRunnerError('seed-failed')
     }
     await revalidateSeedBoundary(ctx, config, manifest, allSnapshots, initialFacts)
+    lastClosedStage = 'seeds'
     let protocol
     let candidate
     try {
@@ -936,14 +1129,275 @@ export async function runControlledLifecycle(
       if (error instanceof ControlledLifecycleRunnerError) throw error
       throw new ControlledLifecycleRunnerError('candidate-failed')
     }
-    return {
-      status: 'candidate-recorded',
-      manifestDigest: prepared.manifestDigest,
-      seedRuns: [first, second],
-      protocolId: protocol.protocolId,
-      candidateId: candidate.candidateId,
-      evaluationTasks: tasks,
+    await revalidateSeedBoundary(ctx, config, manifest, allSnapshots, initialFacts)
+    lastClosedStage = 'candidate'
+    setDecisionStates(stateBySessionId, manifest.tasks.evaluations.map(task => ({
+      taskId: task.taskId,
+      hiddenExpectedChoice: task.hiddenExpectedChoice,
+      sessionIds: [task.baselineSessionId, task.candidateSessionId],
+    })))
+    let arms
+    try {
+      arms = await ctx.tianwenSkillEvaluation.runControlledArms({
+        candidateId: candidate.candidateId,
+        protocolId: protocol.protocolId,
+        tasks,
+      })
+      refreshCompletedRunRoles(ctx, manifest, progress)
+      if (arms.state === 'awaiting-evaluator') {
+        requireCompletedDecisionStates(stateBySessionId)
+      }
+    } catch {
+      refreshCompletedRunRoles(ctx, manifest, progress)
+      throw new ControlledLifecycleRunnerError('evaluation-failed')
+    } finally {
+      stateBySessionId.clear()
     }
+    if (arms.state === 'terminal') {
+      lastClosedStage = 'evaluation'
+      throw new ControlledLifecycleRunnerError('evaluation-failed')
+    }
+    if (
+      arms.state !== 'awaiting-evaluator'
+      || arms.completedTaskIds.length !== manifest.tasks.evaluations.length
+    ) throw new ControlledLifecycleRunnerError('evaluation-failed')
+    await revalidateSeedBoundary(ctx, config, manifest, allSnapshots, initialFacts)
+    lastClosedStage = 'evaluation'
+
+    let evaluators
+    try {
+      evaluators = await ctx.tianwenSkillEvaluation.runControlledEvaluators({
+        evaluationId: arms.evaluationId,
+        tasks: tasks.map(task => ({
+          taskId: task.taskId,
+          goal: task.goal,
+          input: task.input,
+          evaluatorMaterialContract: task.evaluatorMaterialContract,
+        })),
+      })
+      progress.evaluators = evaluators.completedTaskIds.length
+    } catch {
+      progress.evaluators = ctx.tianwenEvolution
+        .listControlledSkillEvaluatorObservations(arms.evaluationId).length
+      throw new ControlledLifecycleRunnerError('evaluator-failed')
+    }
+    if (evaluators.state !== 'terminal') {
+      throw new ControlledLifecycleRunnerError('evaluator-failed')
+    }
+    if (
+      evaluators.completedTaskIds.length !== manifest.tasks.evaluations.length
+      || evaluators.result.mechanismVerdict !== 'pass'
+      || evaluators.result.reasonCode !== 'all-gates-passed'
+    ) {
+      lastClosedStage = 'evaluators'
+      throw new ControlledLifecycleRunnerError('evaluator-failed')
+    }
+    for (const task of manifest.tasks.evaluations) {
+      const inspection = await ctx.sessionPersistence.inspect(SessionId(task.evaluatorSessionId))
+      if (
+        inspection.meta.cwd !== undefined
+        || inspection.events.filter(event => event.type === 'tool/call').length !== 1
+      ) throw new ControlledLifecycleRunnerError('identity-mismatch')
+    }
+    await revalidateSeedBoundary(ctx, config, manifest, allSnapshots, initialFacts)
+    lastClosedStage = 'evaluators'
+
+    const shadowTasks = manifest.tasks.shadows.map(task => ({
+      ...singleArmTask(manifest, task),
+      taskId: task.taskId as `shadow-task:${string}`,
+    }))
+    setDecisionStates(stateBySessionId, manifest.tasks.shadows.map(task => ({
+      taskId: task.taskId,
+      hiddenExpectedChoice: task.hiddenExpectedChoice,
+      sessionIds: [task.sessionId],
+    })))
+    let shadow
+    try {
+      shadow = await ctx.tianwenSkillEvaluation.runControlledShadow({
+        evaluationId: arms.evaluationId,
+        tasks: shadowTasks,
+      })
+      refreshCompletedRunRoles(ctx, manifest, progress)
+      if (shadow.state === 'terminal' && shadow.result.mechanismVerdict === 'pass') {
+        requireCompletedDecisionStates(stateBySessionId)
+      }
+    } catch {
+      refreshCompletedRunRoles(ctx, manifest, progress)
+      throw new ControlledLifecycleRunnerError('shadow-failed')
+    } finally {
+      stateBySessionId.clear()
+    }
+    if (shadow.state !== 'terminal') {
+      throw new ControlledLifecycleRunnerError('shadow-failed')
+    }
+    if (
+      shadow.completedTaskIds.length !== manifest.tasks.shadows.length
+      || shadow.result.mechanismVerdict !== 'pass'
+      || shadow.result.reasonCode !== 'all-shadow-runs-qualified'
+      || shadow.result.promotionEligibility !== 'eligible-for-isolated-test-promotion'
+    ) {
+      lastClosedStage = 'shadow'
+      throw new ControlledLifecycleRunnerError('shadow-failed')
+    }
+    await revalidateSeedBoundary(ctx, config, manifest, allSnapshots, initialFacts)
+    lastClosedStage = 'shadow'
+
+    const shadowPlan = ctx.tianwenEvolution.getControlledSkillShadow(shadow.shadowId)
+    if (shadowPlan === undefined || shadowPlan.mode !== 'isolated-test') {
+      throw new ControlledLifecycleRunnerError('transition-failed')
+    }
+    let initialized
+    try {
+      initialized = ctx.tianwenEvolution.initializeControlledSkillScopePointer({
+        shadowId: shadow.shadowId,
+      })
+    } catch {
+      throw new ControlledLifecycleRunnerError('transition-failed')
+    }
+    let pointer = ctx.tianwenEvolution.getControlledSkillScopePointer(shadowPlan.scopeKey)
+    if (
+      initialized.revision !== 1
+      || initialized.duplicate
+      || pointer?.revision !== 1
+      || pointer.activeVersionId !== shadowPlan.parentVersionId
+    ) throw new ControlledLifecycleRunnerError('transition-failed')
+    await revalidateSeedBoundary(ctx, config, manifest, allSnapshots, initialFacts)
+
+    const transitionReceipts = []
+    for (const [index, task] of manifest.tasks.transitions.entries()) {
+      await revalidateSeedBoundary(ctx, config, manifest, allSnapshots, initialFacts)
+      setDecisionStates(stateBySessionId, [{
+        taskId: task.taskId,
+        hiddenExpectedChoice: task.hiddenExpectedChoice,
+        sessionIds: [task.sessionId],
+      }])
+      const { taskId: _taskId, ...postCheckTask } = singleArmTask(manifest, task)
+      let transition
+      try {
+        transition = await ctx.tianwenSkillEvaluation.runControlledSkillTransition({
+          shadowId: shadow.shadowId,
+          kind: task.kind,
+          expectedRevision: index + 1,
+          task: {
+            ...postCheckTask,
+            authorization: CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1,
+          },
+        })
+        refreshCompletedRunRoles(ctx, manifest, progress)
+        if (transition.state === 'terminal') requireCompletedDecisionStates(stateBySessionId)
+      } catch {
+        refreshCompletedRunRoles(ctx, manifest, progress)
+        throw new ControlledLifecycleRunnerError('transition-failed')
+      } finally {
+        stateBySessionId.clear()
+      }
+      const expectedVersionId = task.kind === 'rollback'
+        ? shadowPlan.parentVersionId
+        : shadowPlan.candidateVersionId
+      if (
+        transition.state !== 'terminal'
+        || transition.transition.state !== 'verified'
+        || transition.transition.pointer.revision !== index + 2
+        || transition.transition.pointer.activeVersionId !== expectedVersionId
+      ) throw new ControlledLifecycleRunnerError('transition-failed')
+      transitionReceipts.push(transition)
+      await revalidateSeedBoundary(ctx, config, manifest, allSnapshots, initialFacts)
+    }
+    lastClosedStage = 'transitions'
+
+    pointer = ctx.tianwenEvolution.getControlledSkillScopePointer(shadowPlan.scopeKey)
+    const persisted = await ctx.sessionPersistence.list()
+    const expectedSessionIds = prepared.sessionIds.toSorted()
+    const actualSessionIds = persisted.map(header => String(header.id)).toSorted()
+    const manifests = ctx.tianwenEvolution.listRunSkillManifests()
+    const uses = ctx.tianwenEvolution.listRunSkillUses()
+    const rootSkill = await ctx.skills.get(manifest.skills.parent.name)
+    if (
+      pointer?.revision !== 4
+      || pointer.activeVersionId !== shadowPlan.candidateVersionId
+      || actualSessionIds.length !== 25
+      || actualSessionIds.join('\n') !== expectedSessionIds.join('\n')
+      || ctx.agents.list().length !== 0
+      || ctx.sessions.list().length !== 0
+      || manifests.length !== 20
+      || uses.length !== 20
+      || new Set(manifests.map(item => item.runId)).size !== 20
+      || new Set(uses.map(item => item.runId)).size !== 20
+      || manifests.map(item => item.runId).toSorted().join('\n')
+        !== uses.map(item => item.runId).toSorted().join('\n')
+      || new Set(uses.map(item => item.acceptanceEvidenceId)).size !== 20
+      || !sameSkill(rootSkill, manifest.skills.parent)
+      || ctx.tianwenEvolution.getChampion() !== undefined
+      || ctx.tianwenEvolution.listControlledSkillScopePointers().length !== 1
+      || ctx.tianwenEvolution.listEvents().length !== 0
+    ) throw new ControlledLifecycleRunnerError('identity-mismatch')
+    const counts = await formalActivityCounts(ctx, manifest)
+    const protocolRecord = ctx.tianwenEvolution.getControlledSkillEvalProtocol(protocol.protocolId)
+    if (protocolRecord === undefined) throw new ControlledLifecycleRunnerError('identity-mismatch')
+    return {
+      schemaVersion: 'tianwen.controlled-real-skill-lifecycle.v1',
+      status: 'passed',
+      evidence: RECEIPT_EVIDENCE,
+      digests: {
+        activity: prepared.manifestDigest,
+        installedArchive: manifest.installedArchiveDigest,
+        manifest: prepared.manifestDigest,
+        protocol: sha256(protocolRecord),
+        evaluation: sha256(evaluators.result),
+        shadow: sha256(shadow.result),
+        transitionSet: sha256(transitionReceipts.map(item => item.transition)),
+        finalPointer: sha256(pointer),
+      },
+      mechanism: {
+        evaluation: 'pass',
+        evaluationReason: 'all-gates-passed',
+        shadow: 'pass',
+        shadowEligibility: 'eligible-for-isolated-test-promotion',
+        transitions: {
+          promote: 'verified',
+          rollback: 'verified',
+          restore: 'verified',
+        },
+      },
+      counts: {
+        formalSessions: 25,
+        roles: {
+          seedRuns: 2,
+          evaluationArms: 10,
+          evaluators: 5,
+          shadowRuns: 5,
+          transitions: 3,
+        },
+        modelRequests: counts.modelRequests,
+        toolCalls: counts.toolCalls,
+        acceptanceEvidence: 20,
+      },
+      pointer: {
+        revision: 4,
+        versionDigest:
+          `sha256:${pointer.activeVersionId.slice('skill-version:'.length)}`,
+      },
+      isolation: {
+        ordinaryRootSkillUnchanged: true,
+        legacyChampionUnchanged: true,
+        otherControlledScopesUnchanged: true,
+        realProductDataUntouched: true,
+      },
+    }
+  } catch (error) {
+    const failure = error instanceof ControlledLifecycleRunnerError
+      ? error
+      : new ControlledLifecycleRunnerError('internal-error')
+    try {
+      refreshCompletedRunRoles(ctx, manifest, progress)
+    } catch {
+      // Preserve the last facts already observed by this runner.
+    }
+    throw new ControlledLifecycleRunnerError(
+      failure.code,
+      failure.completedStage ?? lastClosedStage,
+      failure.completedRoles ?? { ...progress },
+    )
   } finally {
     disposeParent()
     disposeVerifier()
@@ -954,7 +1408,8 @@ export async function runControlledLifecycle(
 export const name = 'tianwen-controlled-lifecycle-runner'
 export const inject = [
   'agentDefaultModel', 'agents', 'credentials', 'llm', 'loader', 'sessionPersistence',
-  'sessions', 'skills', 'tianwenEvidence', 'tianwenEvolution', 'tianwenLearningIntake', 'tools',
+  'sessions', 'skills', 'tianwenEvidence', 'tianwenEvolution', 'tianwenLearningIntake',
+  'tianwenSkillEvaluation', 'tools',
 ] as const
 
 export function apply(ctx: Context, config: ControlledLifecycleRunnerConfig): void {
@@ -963,7 +1418,16 @@ export function apply(ctx: Context, config: ControlledLifecycleRunnerConfig): vo
     throw new Error('tianwen-controlled-lifecycle-runner: appExit is unavailable')
   }
   void runControlledLifecycle(ctx, config).then(
-    () => { exit(1) },
-    () => { exit(1) },
+    receipt => {
+      process.stdout.write(`${JSON.stringify(receipt)}\n`)
+      exit(0)
+    },
+    error => {
+      const failure = error instanceof ControlledLifecycleRunnerError
+        ? error
+        : new ControlledLifecycleRunnerError('internal-error')
+      process.stdout.write(`${JSON.stringify(stoppedReceipt(config.manifestDigest, failure))}\n`)
+      exit(1)
+    },
   )
 }
