@@ -544,6 +544,15 @@ describe('controlled Skill evaluation Runtime', () => {
     expect(compat.installModelSelection).toBeTypeOf('function')
   })
 
+  it('loads controlled Runtime dependencies from the public compat subpath', async () => {
+    const runtime = await import('@tianwen/dsh-compat/runtime') as unknown as {
+      defineTool?: unknown
+      installModelSelection?: unknown
+    }
+    expect(runtime.defineTool).toBeTypeOf('function')
+    expect(runtime.installModelSelection).toBeTypeOf('function')
+  })
+
   it('rejects an invalid evaluator package before creating evaluator activity', async () => {
     const harness = await mountCoreHarness([])
     await harness.ctx.plugin(SkillRegistry)
