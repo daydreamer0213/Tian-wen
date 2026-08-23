@@ -350,47 +350,87 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         " ".join(document.split()) for document in (readme_en, readme_zh, architecture)
     )
 
-    for document in (normalized_readme_en, normalized_readme_zh, normalized_architecture):
-        for fact in (
-            "18/18", "R0.1", "R0.2", "normal/0", "activity-01",
-            "Python", "TypeScript", "installer-windows",
+    common_facts = (
+        "18/18", "R0.1", "R0.2", "normal/0", "activity-01", "activity-02",
+        "Python", "TypeScript", "installer-windows", "--model",
+    )
+    expected_by_document = {
+        "README.md": (
+            "Installed ingress readiness", "canonical real file identity",
+            "0 stderr bytes", "0 stdout bytes", "was not rerun",
+            "official `main()` usage parser", "exit 2", "activity-01 is consumed",
+            "lifecycle invocation=0", "closed roles=0/25",
+            "activity-02 has not started", "unknown (none-observed)",
+            "formal real Provider lifecycle has not run",
+            "model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json",
+            "20 new workspaces", "25 new Sessions",
+            "naturalUserEvidence=not-claimed", "externalUserEvidence=not-claimed",
+            "tianwen-v0.1-controlled-real-activity-01-handoff.md",
+        ),
+        "README.zh-CN.md": (
+            "已安装入口准备状态", "canonical real file identity",
+            "stderr 0 bytes", "stdout 0 bytes", "没有重跑",
+            "official `main()` usage parser", "exit 2", "activity-01 已消费",
+            "lifecycle invocation=0", "closed roles=0/25",
+            "activity-02 尚未开始", "unknown (none-observed)",
+            "真实 Provider lifecycle 尚未运行",
+            "model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json",
+            "20 个新 workspace", "25 个新 Session",
+            "naturalUserEvidence=not-claimed", "externalUserEvidence=not-claimed",
+            "tianwen-v0.1-controlled-real-activity-01-handoff.md",
+        ),
+        "architecture": (
+            "scripted mechanics", "installed ingress readiness",
+            "Stage 7 项目所有者自然任务", "official `main()` usage parser",
+            "exit 2", "activity-01 已消费", "lifecycle invocation=0",
+            "closed roles=0/25", "activity-02 尚未开始",
+            "unknown (none-observed)", "配置的 DeepSeek 真实受控生命周期尚未运行",
+            "model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json",
+            "20 个新 workspace", "25 个新 Session",
+            "tianwen-v0.1-controlled-real-activity-01-handoff.md",
+        ),
+    }
+    documents = {
+        "README.md": normalized_readme_en,
+        "README.zh-CN.md": normalized_readme_zh,
+        "architecture": normalized_architecture,
+    }
+    model_use = (
+        "tianwen model use --model deepseek-v4-pro "
+        "--data-dir ABSOLUTE_PRODUCT_ROOT --json"
+    )
+    model_status = (
+        "tianwen model status --data-dir ABSOLUTE_PRODUCT_ROOT --json"
+    )
+    lifecycle = (
+        "tianwen controlled-lifecycle --manifest ABSOLUTE_MANIFEST "
+        "--data-dir ABSOLUTE_PRODUCT_ROOT --json"
+    )
+    offline = (
+        "tianwen model use --model offline "
+        "--data-dir ABSOLUTE_PRODUCT_ROOT --json"
+    )
+    command_sequence_failures = {}
+    for name, document in documents.items():
+        model_use_at = document.find(model_use)
+        first_status_at = document.find(model_status, model_use_at + len(model_use))
+        lifecycle_at = document.find(lifecycle, first_status_at + len(model_status))
+        offline_at = document.find(offline, lifecycle_at + len(lifecycle))
+        final_status_at = document.find(model_status, offline_at + len(offline))
+        if document.count(model_status) != 2 or not (
+            0 <= model_use_at < first_status_at < lifecycle_at < offline_at < final_status_at
         ):
-            assert fact in document
+            command_sequence_failures[name] = {
+                "status_count": document.count(model_status),
+                "ordered": False,
+            }
+    assert not command_sequence_failures, command_sequence_failures
 
-    for fact in (
-        "Installed ingress readiness",
-        "canonical real file identity",
-        "0 stderr bytes", "0 stdout bytes", "was not rerun",
-        "activity-01 remains unconsumed", "real Provider activity remains 0",
-        "formal real Provider lifecycle has not run", "new formal product root",
-        "packet freeze",
-        "tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json",
-        "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
-    ):
-        assert fact in normalized_readme_en
-
-    for fact in (
-        "已安装入口准备状态",
-        "canonical real file identity",
-        "stderr 0 bytes", "stdout 0 bytes", "没有重跑",
-        "activity-01 尚未消费", "真实 Provider activity 仍为 0",
-        "真实 Provider lifecycle 尚未运行", "new formal product root", "packet freeze",
-        "tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json",
-        "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
-    ):
-        assert fact in normalized_readme_zh
-
-    for fact in (
-        "scripted mechanics",
-        "installed ingress readiness",
-        "Stage 7 项目所有者自然任务",
-        "stderr 0 bytes", "stdout 0 bytes", "没有重跑",
-        "activity-01 尚未消费", "new formal product root", "packet freeze",
-        "配置的 DeepSeek 真实受控生命周期尚未运行",
-        "canonical real file identity",
-        "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
-    ):
-        assert fact in normalized_architecture
+    missing = {
+        name: [fact for fact in (*common_facts, *expected_by_document[name]) if fact not in text]
+        for name, text in documents.items()
+    }
+    assert not any(missing.values()), missing
 
     for document in (normalized_readme_en, normalized_readme_zh, normalized_architecture):
         for overbroad_claim in (
@@ -399,8 +439,54 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
             "production runner 不注册 `ScriptedAdapter`",
             "生产 runner 不注册 `ScriptedAdapter`",
             "scripted adapter 只存在于测试",
+            "activity-01 remains unconsumed",
+            "activity-01 尚未消费",
+            "activity-01 product defect",
+            "activity-01 产品缺陷",
+            "activity-01 Provider failure",
+            "activity-01 Provider 失败",
+            "real Provider lifecycle succeeded",
+            "真实 Provider lifecycle 已成功",
         ):
             assert overbroad_claim not in document
+
+
+def test_controlled_real_activity_01_handoff_records_failure_and_recovery_boundary() -> None:
+    handoff_path = (
+        ROOT
+        / "docs"
+        / "operations"
+        / "tianwen-v0.1-controlled-real-activity-01-handoff.md"
+    )
+    assert handoff_path.is_file(), "missing controlled real activity-01 handoff"
+    handoff = " ".join(handoff_path.read_text(encoding="utf-8").split())
+
+    for fact in (
+        "ddaeffc0c486454cb923d9e31461b248be12475b",
+        "32653721315", "pre-invocation-shell-launch-failure",
+        "officialLauncherEntered=false", "activityConsumed=false",
+        "official `main()` usage parser", "exit 2", "activity-01 is consumed",
+        "missing `--model`", "not a product defect", "not a Provider defect",
+        "lifecycle invocation=0", "closed roles=0/25",
+        "tianwen-offline/phase2-smoke", "modelRequestsDelta=0",
+        "Provider-account actual requests=unknown (none-observed)",
+        "tool-body actual executions=unknown (none-observed)",
+        "model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json",
+        "activity-02 has not started", "new product root", "new evidence root",
+        "new operation root", "20 new workspaces", "25 new Sessions",
+        "reviewed", "authority SHA", "controlled integration",
+        "automatic exact-main push attempt 1",
+        "Python", "TypeScript", "installer-windows", "no retry",
+        "naturalUserEvidence=not-claimed", "externalUserEvidence=not-claimed",
+    ):
+        assert fact in handoff
+
+    for forbidden in (
+        "activity-01 remains unconsumed", "real Provider lifecycle succeeded",
+        "activity-01 product defect", "activity-01 Provider failure",
+        "session:controlled-real:activity-02:", "DEEPSEEK_API_KEY=",
+    ):
+        assert forbidden not in handoff
 
 
 def test_controlled_skill_lifecycle_handoff_records_mechanics_and_limits() -> None:
