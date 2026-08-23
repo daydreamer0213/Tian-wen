@@ -69,5 +69,5 @@ installer-windows 三 job 在新 exact main 全绿，才可进入 Task 9 runbook
 - 不修改任何 `packages/**`、Runtime、Evolution、installer 或 lockfile；
 - 不调用 Provider、Goal、installed product 或真实数据；
 - 不补跑、删除或隐藏失败 run `32609883224`；
-- 不触碰或清理 `D:\Guo\zuochong\AGi`；
+- 不触碰或清理现有 legacy dirty worktree；
 - 不趁机扩建 CI helper、预算器、遥测、重试或生命周期框架。
