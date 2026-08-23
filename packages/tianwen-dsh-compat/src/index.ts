@@ -1,10 +1,15 @@
 export { Context, Service } from '@deepseek-ai/cordis'
-export { default as AgentRegistry, Inbox } from '@deepseek-ai/dsh-agent'
+export {
+  default as AgentRegistry,
+  Inbox,
+  installModelSelection,
+} from '@deepseek-ai/dsh-agent'
 export type {
   Agent,
   AgentHandle,
   AgentStatus,
   CreateAgentOptions,
+  ModelSelection,
 } from '@deepseek-ai/dsh-agent'
 export { default as AgentLoop } from '@deepseek-ai/dsh-agent-loop'
 export { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'

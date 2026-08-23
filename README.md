@@ -14,6 +14,11 @@ Evidence records were complete, `Outcome=met`, learning correctly returned
 offline mode. This is project-owner, single-user product evidence—not external-
 user validation or proof of general efficacy.
 
+The Stage 7 project-owner natural task and official installer/status proof remain complete.
+The five-task B/C, blind evaluator, isolated Shadow, and Promotion/Rollback/Restore product mechanisms are implemented and covered by a 0-external-Provider scripted full-chain fixture.
+The configured DeepSeek controlled lifecycle has not run. Its evidence remains
+`naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed`.
+
 ## Why Tianwen exists
 
 An Agent can finish one session without answering the longer-lived governance
@@ -27,7 +32,7 @@ to the Runtime.
 | Layer | Responsibility |
 | --- | --- |
 | **DSH** | Runs the current Agent session. Tianwen reuses its models and providers, Agent loop, tools, MCP, sandbox, Session Query, Skill, Jobs, Workflow, Subagent, Message Feedback, Approval, and permissions. |
-| **Tianwen** | Owns the cross-run governance boundary: Goal Graph, Evidence provenance, learning attribution, and future-run version governance. The current preview exercises natural Run/Skill binding, read-only Evidence projection, conservative no-case decisions, Signal/Ticket intake, synthetic Candidate intake, and paired Evaluation recording. |
+| **Tianwen** | Owns the cross-run governance boundary: Goal Graph, Evidence provenance, learning attribution, and future-run version governance. The current preview exercises natural Run/Skill binding, read-only Evidence projection, conservative no-case decisions, Signal/Ticket intake, synthetic Candidate intake, controlled Evaluation, isolated Shadow, and governed future-run pointer transitions. |
 | **Alpha** | Supplies experimental and evaluation assets. It is not a second product Runtime. |
 
 DSH Message Feedback is an attribution input, not a Lesson by itself. A DSH Job
@@ -89,6 +94,14 @@ Evidence records were complete, and the successful parent Skill use was
 recorded. Because no qualifying learning problem occurred, no Ticket, Case,
 Lesson, Candidate, Evaluation, Shadow, or Promotion was created from that run.
 
+The controlled lifecycle demo separately proves the product mechanics for a
+permanently development-only synthetic defect. It freezes five task types before
+Candidate creation, runs ten B/C arms, five blind evaluators, five isolated
+Shadow Runs, and three governed pointer checks through ordinary DSH Agents. It
+finishes at C@rev4 after Promotion, Rollback, and Restore under the existing
+standing authorization. This local scripted fixture proves mechanics and stop
+lines only; it is not evidence of natural user improvement or external efficacy.
+
 ## Zero-cost demos
 
 Install the locked dependencies, then run:
@@ -100,9 +113,10 @@ pnpm demo:explicit-correction
 pnpm demo:repeated-outcome
 pnpm demo:governed-skill-candidate
 pnpm demo:paired-skill-evaluation
+pnpm demo:controlled-skill-lifecycle
 ```
 
-Each demo prints one formatted JSON object. They use no network, Provider, token
+Each demo prints one formatted JSON object. They use no network or external Provider, token
 budget, paid model, Docker service, persistent database, or user data. The
 research-preview demo reports one complete Evidence record and `no-case`. The
 explicit-correction demo reports stored negative feedback, one Signal, one open
@@ -117,18 +131,24 @@ demo adds one frozen pre-Candidate protocol, eight isolated B/C arms, one privat
 Evaluation result, replay/restart checks, and an explicit `INCONCLUSIVE`
 scripted-mechanism outcome. It keeps the root Skill registry and ordinary fresh
 Agent unchanged.
+The controlled-lifecycle demo reports one privacy-bounded receipt for 25 formal
+Sessions, 65 local scripted requests, 45 tool bodies, 0 external Provider
+requests, the five-task Evaluation and isolated Shadow passes, and the
+B@rev1→C@rev2→B@rev3→C@rev4 pointer sequence. Its terminal replay adds no
+activity, a conflicting task package stops with `task-package-mismatch` before
+activity, and its dedicated fixture root is empty after cleanup.
 
 ## Current limitations
 
 - The repository's recorded Candidate and paired Evaluation are synthetic
   mechanism proofs. No naturally triggered product Candidate has passed a real
   paired B/C evaluation yet.
-- The bounded closeout lifecycle is still pending: frozen five-task real B/C
-  with blind controlled evaluation, isolated Shadow, project-owner-approved
-  Promotion, and a Rollback rehearsal.
+- The bounded controlled lifecycle is implemented and covered by a scripted
+  full-chain fixture under standing authorization, but it has not run against
+  the configured DeepSeek Provider.
 - The preview does not offer a production SLA or a finished user interface.
-- It does not claim external-user validation, multi-user generalization, or
-  that one successful run should create learning.
+- It does not claim natural-user improvement, external-user validation,
+  multi-user generalization, or that one successful run should create learning.
 - Future changes can affect only new Runs; the currently running Agent is never
   hot-swapped.
 
@@ -139,7 +159,8 @@ Agent unchanged.
   contains the explicit-feedback intake demo; [`scripts/run-repeated-outcome-demo.ts`](scripts/run-repeated-outcome-demo.ts)
   contains the repeated structured Outcome demo; [`scripts/run-governed-skill-candidate-demo.ts`](scripts/run-governed-skill-candidate-demo.ts)
   contains the governed Skill Candidate demo; [`scripts/run-paired-skill-evaluation-demo.ts`](scripts/run-paired-skill-evaluation-demo.ts)
-  contains the paired B/C Skill Evaluation demo.
+  contains the paired B/C Skill Evaluation demo; [`scripts/run-controlled-skill-lifecycle-demo.ts`](scripts/run-controlled-skill-lifecycle-demo.ts)
+  contains the 0-external-Provider controlled full-chain fixture.
 - [`packages/tianwen-dsh-compat`](packages/tianwen-dsh-compat) is the public DSH
   compatibility seam.
 - [`packages/tianwen-evidence`](packages/tianwen-evidence) performs the read-only
@@ -148,6 +169,8 @@ Agent unchanged.
   is the detailed architecture authority.
 - [`docs/operations/tianwen-stage7-natural-run-evidence-trial-handoff.md`](docs/operations/tianwen-stage7-natural-run-evidence-trial-handoff.md)
   records the Stage 7 mechanism, failures, and terminal natural-run evidence.
+- [`docs/operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md`](docs/operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md)
+  records the controlled lifecycle receipt, privacy boundary, and evidence limits.
 - [`docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)
   freezes the bounded v0.1 evaluation, Shadow, Promotion, and Rollback path.
 - [`docs/research`](docs/research) contains bounded research evidence and audit
@@ -161,6 +184,7 @@ pnpm run typecheck
 pnpm run check:dsh-install
 pnpm run check:no-private-dsh-imports
 pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts tests/dsh-probe/skill-governance.spec.ts tests/dsh-probe/skill-governance-runtime.spec.ts tests/dsh-probe/governed-skill-candidate-demo.spec.ts tests/dsh-probe/skill-evaluation.spec.ts tests/dsh-probe/skill-evaluation-runtime.spec.ts tests/dsh-probe/paired-skill-evaluation-demo.spec.ts
+pnpm demo:controlled-skill-lifecycle
 uv sync --frozen --dev
 uv run ruff check .
 uv run pytest

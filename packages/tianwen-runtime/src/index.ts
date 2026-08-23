@@ -8,16 +8,52 @@ import { TianwenLearningIntakeService } from './learning-intake.js'
 import { TianwenSkillEvaluationService } from './skill-evaluation.js'
 
 export {
+  ControlledSkillActivationPreflightError,
+} from './controlled-skill-activation.js'
+export type {
+  ControlledSkillActivationPreflightCode,
+  ControlledSkillActivationRuntimeReceipt,
+  ControlledSkillActivationRuntimeStop,
+  ControlledSkillActivationRuntimeStopReasonCode,
+  RunControlledSkillTransitionInput,
+  RunControlledSkillTransitionTaskInput,
+} from './controlled-skill-activation.js'
+
+export {
   compareNormalizedSkillEvaluationRequests,
+  ControlledSkillEvaluatorPreflightError,
+  ControlledSkillEvaluationPreflightError,
+  ControlledSkillShadowPreflightError,
   normalizeSkillEvaluationRequest,
   observeSkillEvaluationRequest,
 } from './skill-evaluation.js'
 export type {
   NormalizedSkillEvaluationRequestComparison,
+  ControlledEvaluatorMaterialContract,
+  ControlledSkillEvaluatorPreflightCode,
+  ControlledSkillEvaluatorsReceipt,
+  ControlledSkillEvaluatorsStop,
+  ControlledSkillEvaluatorsStopReasonCode,
+  ControlledSkillEvaluationArmsReceipt,
+  ControlledSkillEvaluationArmsStop,
+  ControlledSkillEvaluationArmsStopReasonCode,
+  ControlledSkillEvaluationPreflightCode,
+  ControlledSkillShadowPreflightCode,
+  ControlledSkillShadowRuntimeReceipt,
+  ControlledSkillShadowStop,
+  ControlledSkillShadowStopReasonCode,
+  ControlledWorkspaceSnapshot,
+  ControlledWorkspaceSnapshotEntry,
   ObserveSkillEvaluationRequestInput,
   NormalizeSkillEvaluationRequestInput,
   SkillEvaluationRequestObservation,
   SkillEvaluationRequestNormalization,
+  RunControlledSkillEvaluationArmsInput,
+  RunControlledSkillEvaluationTaskInput,
+  RunControlledSkillShadowInput,
+  RunControlledSkillShadowTaskInput,
+  RunControlledSkillEvaluatorTaskInput,
+  RunControlledSkillEvaluatorsInput,
 } from './skill-evaluation.js'
 export { TianwenSkillEvaluationService } from './skill-evaluation.js'
 export type {

@@ -53,8 +53,8 @@ def test_required_public_surface_and_positioning() -> None:
     assert "No naturally triggered product Candidate has passed a real" in readme_en
     assert "paired B/C evaluation yet." in readme_en
     assert "isolated Shadow" in readme_en
-    assert "project-owner-approved" in readme_en
-    assert "Rollback rehearsal" in readme_en
+    assert "standing authorization" in readme_en
+    assert "Promotion, Rollback, and Restore" in readme_en
     assert "Explicit negative feedback with a concrete note can create a durable Signal/Ticket." in readme_en
     assert "Positive and note-free negative feedback create no Ticket." in readme_en
     assert "Candidate status is only `recorded`" in readme_en
@@ -84,11 +84,11 @@ def test_bilingual_documents_share_the_proven_preview_facts() -> None:
     assert "read-only Evidence projection" in readme_en
     assert "Stage 7 complete" in readme_en
     assert "single-user product evidence" in readme_en
-    assert "bounded closeout lifecycle is still pending" in readme_en
+    assert "0-external-Provider scripted full-chain fixture" in readme_en
     assert "Evidence 只读投影" in readme_zh
     assert "Stage 7 已完成" in readme_zh
     assert "单用户产品证据" in readme_zh
-    assert "有界收口生命周期仍待完成" in readme_zh
+    assert "0-external-Provider scripted 全链夹具" in readme_zh
     assert "带有具体说明的显式负面反馈可以创建持久化 Signal/Ticket。" in readme_zh
     assert "正面反馈和没有说明的负面反馈都不会创建 Ticket。" in readme_zh
     assert "Candidate 状态仅为 `recorded`（已记录）" in readme_zh
@@ -295,6 +295,117 @@ def test_natural_run_evidence_handoff_and_ci() -> None:
         "pnpm demo:natural-run-evidence",
     ):
         assert command in ci
+
+
+def test_controlled_skill_lifecycle_public_evidence_boundaries() -> None:
+    readme_en = read_public_document("README.md")
+    readme_zh = read_public_document("README.zh-CN.md")
+    architecture = (ROOT / "docs" / "tianwen-architecture-overview-v2.md").read_text(
+        encoding="utf-8"
+    )
+
+    for fact in (
+        "The Stage 7 project-owner natural task and official installer/status proof remain complete.",
+        (
+            "The five-task B/C, blind evaluator, isolated Shadow, and "
+            "Promotion/Rollback/Restore product mechanisms are implemented and covered "
+            "by a 0-external-Provider scripted full-chain fixture."
+        ),
+        "The configured DeepSeek controlled lifecycle has not run.",
+        "`naturalUserEvidence=not-claimed`",
+        "`externalUserEvidence=not-claimed`",
+        "pnpm demo:controlled-skill-lifecycle",
+    ):
+        assert fact in readme_en
+
+    for fact in (
+        "Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成。",
+        (
+            "五任务 B/C、盲态 evaluator、隔离 Shadow 与 Promotion/Rollback/Restore "
+            "产品机制已经实现，并由 0-external-Provider scripted 全链夹具覆盖。"
+        ),
+        "配置的 DeepSeek 受控生命周期尚未运行。",
+        "`naturalUserEvidence=not-claimed`",
+        "`externalUserEvidence=not-claimed`",
+        "pnpm demo:controlled-skill-lifecycle",
+    ):
+        assert fact in readme_zh
+
+    for fact in (
+        "0-external-Provider scripted 全链夹具",
+        "配置的 DeepSeek 受控生命周期尚未运行",
+        "naturalUserEvidence=not-claimed",
+        "externalUserEvidence=not-claimed",
+        "feature exact-SHA → 受控 main integration → exact-main CI → 一次正式真实 Provider lifecycle",
+    ):
+        assert fact in architecture
+
+
+def test_controlled_skill_lifecycle_handoff_records_mechanics_and_limits() -> None:
+    handoff_path = (
+        ROOT
+        / "docs"
+        / "operations"
+        / "tianwen-v0.1-controlled-skill-lifecycle-handoff.md"
+    )
+    assert handoff_path.is_file(), "missing controlled Skill lifecycle handoff"
+    handoff = " ".join(handoff_path.read_text(encoding="utf-8").split())
+
+    for fact in (
+        "original-defect",
+        "adjacent-transfer",
+        "preserved-regression",
+        "raw-extraction-counterexample",
+        "safety-boundary",
+        "25 formal roles",
+        "65 local scripted requests",
+        "45 tool bodies",
+        "0 external Provider requests",
+        "20 Run fact sets",
+        "3 Signals",
+        "one Ticket, one Case, one Attribution, one Lesson, and one Candidate",
+        "five objective records and five blind evaluator observations",
+        "60/60",
+        "isolated-test Shadow pass",
+        "B@rev1 → C@rev2 → B@rev3 → C@rev4",
+        "terminal replay",
+        "task-package-mismatch",
+        "0 Agent, 0 ledger mutation, 0 Provider request, and 0 tool body",
+        "0 files and 0 logical bytes",
+        "naturalUserEvidence=not-claimed",
+        "externalUserEvidence=not-claimed",
+        "configured DeepSeek controlled lifecycle has not run",
+        "activity-local anonymous fingerprints",
+        "historical checkpoints rather than current capability lists",
+        "standing authorization",
+        "feature exact-SHA → controlled main integration → exact-main CI → one formal real Provider lifecycle",
+    ):
+        assert fact in handoff
+
+
+def test_controlled_skill_lifecycle_ci_contract() -> None:
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    typescript_match = re.search(
+        r"(?ms)^  typescript:\n(?P<job>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+        ci,
+    )
+    assert typescript_match, "missing typescript job"
+    typescript_job = typescript_match.group("job")
+
+    for command in (
+        "tests/dsh-probe/controlled-skill-evaluation.spec.ts",
+        "tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts",
+        "tests/dsh-probe/controlled-skill-shadow.spec.ts",
+        "tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts",
+        "tests/dsh-probe/controlled-skill-activation.spec.ts",
+        "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts",
+        "tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts",
+        "pnpm demo:controlled-skill-lifecycle",
+    ):
+        assert command in typescript_job
+
+    assert "TIANWEN_DSH_PROBE_ROOT" in typescript_job
+    assert "${{ runner.temp }}/tianwen-v0.1-eval-fixtures" in typescript_job
 
 
 def test_managed_rc6_install_migration_handoff() -> None:

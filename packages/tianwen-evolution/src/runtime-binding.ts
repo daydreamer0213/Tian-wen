@@ -70,6 +70,51 @@ import type {
   SkillEvalProtocolReceipt,
   SkillEvalProtocolRecord,
 } from './skill-evaluation.js'
+import type {
+  ControlledSkillEvaluationBlindMap,
+  ControlledSkillEvaluationBlindMapReceipt,
+  ControlledSkillEvaluationId,
+  ControlledSkillEvaluationObjective,
+  ControlledSkillEvaluationObjectiveReceipt,
+  ControlledSkillEvaluationPlan,
+  ControlledSkillEvaluationReceipt,
+  ControlledSkillEvaluationResult,
+  ControlledSkillEvaluationResultReceipt,
+  ControlledSkillEvalTaskId,
+  ControlledSkillEvalProtocolReceipt,
+  ControlledSkillEvalProtocolRecord,
+  FreezeControlledSkillEvaluationBlindMapInput,
+  FreezeControlledSkillEvalProtocolInput,
+  OpenControlledSkillEvaluationInput,
+  RecordControlledSkillEvaluationObjectiveInput,
+  RecordControlledSkillEvaluationResultInput,
+  RecordControlledSkillEvaluatorObservationInput,
+  ControlledSkillEvaluatorObservation,
+  ControlledSkillEvaluatorObservationReceipt,
+} from './controlled-skill-evaluation.js'
+import type {
+  ControlledSkillShadowId,
+  ControlledSkillShadowPlan,
+  ControlledSkillShadowReceipt,
+  ControlledSkillShadowResult,
+  ControlledSkillShadowResultReceipt,
+  OpenControlledSkillShadowInput,
+  RecordControlledSkillShadowResultInput,
+} from './controlled-skill-shadow.js'
+import type {
+  BeginControlledSkillTransitionInput,
+  CompleteControlledSkillTransitionInput,
+  ControlledSkillActivationFailureReceipt,
+  ControlledSkillScopePointer,
+  ControlledSkillScopePointerReceipt,
+  ControlledSkillTransition,
+  ControlledSkillTransitionCompletionReceipt,
+  ControlledSkillTransitionId,
+  ControlledSkillTransitionReceipt,
+  ControlledSkillTransitionStartReceipt,
+  InitializeControlledSkillScopePointerInput,
+  RecordControlledSkillActivationFailedInput,
+} from './controlled-skill-activation.js'
 
 export interface RuntimeBinding {
   readonly artifactId: ArtifactId
@@ -265,6 +310,190 @@ export class TianwenEvolutionService extends Service {
     evaluationId: SkillEvaluationId,
   ): SkillEvaluationResult | undefined {
     return this.state().ledger.getSkillEvaluationResult(evaluationId)
+  }
+
+  freezeControlledSkillEvalProtocol(
+    input: FreezeControlledSkillEvalProtocolInput,
+  ): ControlledSkillEvalProtocolReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.freezeControlledSkillEvalProtocol(input))
+  }
+
+  getControlledSkillEvalProtocol(
+    protocolId: SkillEvalProtocolId,
+  ): ControlledSkillEvalProtocolRecord | undefined {
+    return this.state().ledger.getControlledSkillEvalProtocol(protocolId)
+  }
+
+  listControlledSkillEvalProtocols(): readonly ControlledSkillEvalProtocolRecord[] {
+    return this.state().ledger.listControlledSkillEvalProtocols()
+  }
+
+  openControlledSkillEvaluation(
+    input: OpenControlledSkillEvaluationInput,
+  ): ControlledSkillEvaluationReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.openControlledSkillEvaluation(input))
+  }
+
+  getControlledSkillEvaluation(
+    evaluationId: ControlledSkillEvaluationId,
+  ): ControlledSkillEvaluationPlan | undefined {
+    return this.state().ledger.getControlledSkillEvaluation(evaluationId)
+  }
+
+  listControlledSkillEvaluations(): readonly ControlledSkillEvaluationPlan[] {
+    return this.state().ledger.listControlledSkillEvaluations()
+  }
+
+  recordControlledSkillEvaluationObjective(
+    input: RecordControlledSkillEvaluationObjectiveInput,
+  ): ControlledSkillEvaluationObjectiveReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordControlledSkillEvaluationObjective(input))
+  }
+
+  getControlledSkillEvaluationObjective(
+    evaluationId: ControlledSkillEvaluationId,
+    taskId: ControlledSkillEvalTaskId,
+  ): ControlledSkillEvaluationObjective | undefined {
+    return this.state().ledger.getControlledSkillEvaluationObjective(
+      evaluationId,
+      taskId,
+    )
+  }
+
+  listControlledSkillEvaluationObjectives(
+    evaluationId: ControlledSkillEvaluationId,
+  ): readonly ControlledSkillEvaluationObjective[] {
+    return this.state().ledger.listControlledSkillEvaluationObjectives(evaluationId)
+  }
+
+  freezeControlledSkillEvaluationBlindMap(
+    input: FreezeControlledSkillEvaluationBlindMapInput,
+  ): ControlledSkillEvaluationBlindMapReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.freezeControlledSkillEvaluationBlindMap(input))
+  }
+
+  getControlledSkillEvaluationBlindMap(
+    evaluationId: ControlledSkillEvaluationId,
+  ): ControlledSkillEvaluationBlindMap | undefined {
+    return this.state().ledger.getControlledSkillEvaluationBlindMap(evaluationId)
+  }
+
+  recordControlledSkillEvaluatorObservation(
+    input: RecordControlledSkillEvaluatorObservationInput,
+  ): ControlledSkillEvaluatorObservationReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordControlledSkillEvaluatorObservation(input))
+  }
+
+  listControlledSkillEvaluatorObservations(
+    evaluationId: ControlledSkillEvaluationId,
+  ): readonly ControlledSkillEvaluatorObservation[] {
+    return this.state().ledger.listControlledSkillEvaluatorObservations(evaluationId)
+  }
+
+  recordControlledSkillEvaluationResult(
+    input: RecordControlledSkillEvaluationResultInput,
+  ): ControlledSkillEvaluationResultReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordControlledSkillEvaluationResult(input))
+  }
+
+  getControlledSkillEvaluationResult(
+    evaluationId: ControlledSkillEvaluationId,
+  ): ControlledSkillEvaluationResult | undefined {
+    return this.state().ledger.getControlledSkillEvaluationResult(evaluationId)
+  }
+
+  openControlledSkillShadow(
+    input: OpenControlledSkillShadowInput,
+  ): ControlledSkillShadowReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.openControlledSkillShadow(input))
+  }
+
+  getControlledSkillShadow(
+    shadowId: ControlledSkillShadowId,
+  ): ControlledSkillShadowPlan | undefined {
+    return this.state().ledger.getControlledSkillShadow(shadowId)
+  }
+
+  listControlledSkillShadows(): readonly ControlledSkillShadowPlan[] {
+    return this.state().ledger.listControlledSkillShadows()
+  }
+
+  recordControlledSkillShadowResult(
+    input: RecordControlledSkillShadowResultInput,
+  ): ControlledSkillShadowResultReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordControlledSkillShadowResult(input))
+  }
+
+  getControlledSkillShadowResult(
+    shadowId: ControlledSkillShadowId,
+  ): ControlledSkillShadowResult | undefined {
+    return this.state().ledger.getControlledSkillShadowResult(shadowId)
+  }
+
+  listControlledSkillShadowResults(): readonly ControlledSkillShadowResult[] {
+    return this.state().ledger.listControlledSkillShadowResults()
+  }
+
+  initializeControlledSkillScopePointer(
+    input: InitializeControlledSkillScopePointerInput,
+  ): ControlledSkillScopePointerReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.initializeControlledSkillScopePointer(input))
+  }
+
+  getControlledSkillScopePointer(
+    scopeKey: string,
+  ): ControlledSkillScopePointer | undefined {
+    return this.state().ledger.getControlledSkillScopePointer(scopeKey)
+  }
+
+  listControlledSkillScopePointers(): readonly ControlledSkillScopePointer[] {
+    return this.state().ledger.listControlledSkillScopePointers()
+  }
+
+  beginControlledSkillTransition(
+    input: BeginControlledSkillTransitionInput,
+  ): ControlledSkillTransitionStartReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.beginControlledSkillTransition(input))
+  }
+
+  getControlledSkillTransition(
+    transitionId: ControlledSkillTransitionId,
+  ): ControlledSkillTransition | undefined {
+    return this.state().ledger.getControlledSkillTransition(transitionId)
+  }
+
+  listControlledSkillTransitions(): readonly ControlledSkillTransition[] {
+    return this.state().ledger.listControlledSkillTransitions()
+  }
+
+  completeControlledSkillTransition(
+    input: CompleteControlledSkillTransitionInput,
+  ): ControlledSkillTransitionCompletionReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.completeControlledSkillTransition(input))
+  }
+
+  getControlledSkillTransitionReceipt(
+    transitionId: ControlledSkillTransitionId,
+  ): ControlledSkillTransitionReceipt | undefined {
+    return this.state().ledger.getControlledSkillTransitionReceipt(transitionId)
+  }
+
+  recordControlledSkillActivationFailed(
+    input: RecordControlledSkillActivationFailedInput,
+  ): ControlledSkillActivationFailureReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordControlledSkillActivationFailed(input))
   }
 
   openLearningCase(input: OpenLearningCaseInput): LearningCaseReceipt {

@@ -18,6 +18,20 @@ type PublicLedgerEventPrivacyContract = AssertNever<Extract<
       | 'skill-eval-protocol-frozen'
       | 'skill-evaluation-opened'
       | 'skill-evaluation-result-recorded'
+      | 'controlled-skill-eval-protocol-frozen'
+      | 'controlled-skill-evaluation-opened'
+      | 'controlled-skill-evaluation-objective-recorded'
+      | 'controlled-skill-evaluation-blind-map-frozen'
+      | 'controlled-skill-evaluator-observation-recorded'
+      | 'controlled-skill-evaluation-result-recorded'
+      | 'controlled-skill-shadow-opened'
+      | 'controlled-skill-shadow-result-recorded'
+      | 'controlled-skill-pointer-initialized'
+      | 'controlled-skill-promoted'
+      | 'controlled-skill-rolled-back'
+      | 'controlled-skill-restored'
+      | 'controlled-skill-transition-verified'
+      | 'controlled-skill-activation-failed'
   }
 >>
 
@@ -157,6 +171,113 @@ export type {
   SkillEvalProtocolReceipt,
   SkillEvalProtocolRecord,
 } from './skill-evaluation.js'
+export {
+  CONTROLLED_SKILL_EVAL_RUBRIC,
+  CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_EVAL_TASK_TYPES,
+  prepareControlledSkillEvaluationBlindMap,
+  prepareControlledSkillEvaluationObjective,
+  prepareControlledSkillEvaluationPlan,
+  prepareControlledSkillEvaluationResult,
+  prepareControlledSkillEvalProtocol,
+  prepareControlledSkillEvaluatorObservation,
+} from './controlled-skill-evaluation.js'
+export {
+  controlledSkillShadowExecutionManifestDigest,
+  prepareControlledSkillShadowPlan,
+  prepareControlledSkillShadowResult,
+} from './controlled-skill-shadow.js'
+export {
+  CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1,
+  controlledSkillTransitionExecutionManifestDigest,
+  prepareControlledSkillPromotionRecommendation,
+} from './controlled-skill-activation.js'
+export type {
+  BeginControlledSkillTransitionInput,
+  CompleteControlledSkillTransitionInput,
+  ControlledSkillActivationFailureReasonCode,
+  ControlledSkillActivationFailureReceipt,
+  ControlledSkillActivationSource,
+  ControlledSkillPromotionRecommendation,
+  ControlledSkillScopePointer,
+  ControlledSkillScopePointerReceipt,
+  ControlledSkillTransition,
+  ControlledSkillTransitionCompletionReceipt,
+  ControlledSkillTransitionId,
+  ControlledSkillTransitionKind,
+  ControlledSkillTransitionPostCheck,
+  ControlledSkillTransitionPostCheckInput,
+  ControlledSkillTransitionReceipt,
+  ControlledSkillTransitionRun,
+  ControlledSkillTransitionStartReceipt,
+  ControlledSkillTransitionState,
+  ControlledSkillTransitionUsage,
+  InitializeControlledSkillScopePointerInput,
+  RecordControlledSkillActivationFailedInput,
+} from './controlled-skill-activation.js'
+export type {
+  ControlledSkillShadowId,
+  ControlledSkillShadowMechanismVerdict,
+  ControlledSkillShadowMode,
+  ControlledSkillShadowPlan,
+  ControlledSkillShadowPromotionEligibility,
+  ControlledSkillShadowReceipt,
+  ControlledSkillShadowResult,
+  ControlledSkillShadowResultReasonCode,
+  ControlledSkillShadowResultReceipt,
+  ControlledSkillShadowRun,
+  ControlledSkillShadowTaskId,
+  ControlledSkillShadowTaskInput,
+  ControlledSkillShadowTaskPlan,
+  ControlledSkillShadowUsage,
+  OpenControlledSkillShadowInput,
+  RecordControlledSkillShadowResultInput,
+} from './controlled-skill-shadow.js'
+export type {
+  ControlledSkillEvalEvidenceLabel,
+  ControlledSkillEvalEvidencePurpose,
+  ControlledSkillEvalExecution,
+  ControlledSkillEvalPlanArm,
+  ControlledSkillEvalProtocol,
+  ControlledSkillEvalProtocolProvenance,
+  ControlledSkillEvalProtocolRecord,
+  ControlledSkillEvalSessionAllocation,
+  ControlledSkillEvalStopContract,
+  ControlledSkillEvalTask,
+  ControlledSkillEvalTaskId,
+  ControlledSkillEvalTaskPlan,
+  ControlledSkillEvalTaskType,
+  ControlledSkillEvaluationId,
+  ControlledSkillEvaluationCandidateHardGate,
+  ControlledSkillEvaluationBlindAssignment,
+  ControlledSkillEvaluationBlindMap,
+  ControlledSkillEvaluationBlindMapReceipt,
+  ControlledSkillEvaluationComparison,
+  ControlledSkillEvaluationEvidenceClaim,
+  ControlledSkillEvaluationMechanismVerdict,
+  ControlledSkillEvaluationObjective,
+  ControlledSkillEvaluationObjectiveArm,
+  ControlledSkillEvaluationObjectiveReceipt,
+  ControlledSkillEvaluationObjectiveVerdict,
+  ControlledSkillEvaluationPlan,
+  ControlledSkillEvaluationReceipt,
+  ControlledSkillEvaluationResult,
+  ControlledSkillEvaluationResultReasonCode,
+  ControlledSkillEvaluationResultReceipt,
+  ControlledSkillEvaluationShadowEligibility,
+  ControlledSkillEvaluationUsage,
+  ControlledSkillEvaluatorDimensionScores,
+  ControlledSkillEvaluatorInconclusiveReasonCode,
+  ControlledSkillEvaluatorObservation,
+  ControlledSkillEvaluatorObservationReceipt,
+  ControlledSkillEvaluatorScores,
+  FreezeControlledSkillEvalProtocolInput,
+  FreezeControlledSkillEvaluationBlindMapInput,
+  OpenControlledSkillEvaluationInput,
+  RecordControlledSkillEvaluationObjectiveInput,
+  RecordControlledSkillEvaluationResultInput,
+  RecordControlledSkillEvaluatorObservationInput,
+} from './controlled-skill-evaluation.js'
 export type {
   SkillShadowEligibility,
   SkillShadowEligibilityInput,
