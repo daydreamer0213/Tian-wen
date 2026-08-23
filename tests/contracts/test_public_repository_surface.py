@@ -336,7 +336,6 @@ def test_controlled_skill_lifecycle_public_evidence_boundaries() -> None:
         "配置的 DeepSeek 受控生命周期尚未运行",
         "naturalUserEvidence=not-claimed",
         "externalUserEvidence=not-claimed",
-        "feature exact-SHA → 受控 main integration → exact-main CI → 一次正式真实 Provider lifecycle",
     ):
         assert fact in architecture
 
@@ -347,131 +346,53 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
     architecture = (ROOT / "docs" / "tianwen-architecture-overview-v2.md").read_text(
         encoding="utf-8"
     )
+    normalized_readme_en, normalized_readme_zh, normalized_architecture = (
+        " ".join(document.split()) for document in (readme_en, readme_zh, architecture)
+    )
+
+    for document in (normalized_readme_en, normalized_readme_zh, normalized_architecture):
+        for fact in (
+            "18/18", "R0.1", "R0.2", "normal/0", "activity-01",
+            "Python", "TypeScript", "installer-windows",
+        ):
+            assert fact in document
 
     for fact in (
         "Installed ingress readiness",
-        "official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch",
-        "zero-real-Provider installer, preflight, and transport evidence",
-        "not a successful configured DeepSeek lifecycle",
-        "The configured DeepSeek real controlled lifecycle has not run.",
-        (
-            "The installed controlled-lifecycle one-shot runner does not import or "
-            "register `ScriptedAdapter`; the scripted adapter used by this fixture "
-            "is supplied only by tests."
-        ),
-        "`configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`",
-        "`naturalUserEvidence=not-claimed`",
-        "`externalUserEvidence=not-claimed`",
+        "canonical real file identity",
+        "0 stderr bytes", "0 stdout bytes", "was not rerun",
+        "activity-01 remains unconsumed", "real Provider activity remains 0",
+        "formal real Provider lifecycle has not run", "new formal product root",
+        "packet freeze",
         "tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json",
         "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
-        (
-            "Repair `7042a7d84712d499671b464251d0f09ec898fcf6` is merged as "
-            "main `67ce961487f93734230c06c1624f44573703691f`."
-        ),
-        "run `32639440639`, event `push`, attempt 1",
-        "Python and TypeScript succeeded; installer-windows failed.",
-        "recursive Runtime Bundle build succeeded",
-        "1 failed / 103 passed",
-        "installer and controlled command specs passed",
-        "Windows checkout text used CRLF while the test template used LF",
-        (
-            "not evidence of a Runtime, Agent, lifecycle, or installer product "
-            "semantic defect"
-        ),
-        "That run will not be rerun or dispatched.",
-        (
-            "Task 9B remains blocked until Python, TypeScript, and "
-            "installer-windows all succeed on a new exact-main CI push run attempt 1"
-        ),
-        "real Provider activity remains 0",
-        (
-            "reviewed repair exact SHA → new automatic exact-main push run attempt 1 "
-            "with Python, TypeScript, and installer-windows all successful → exactly "
-            "one formal real Provider lifecycle"
-        ),
     ):
-        assert fact in readme_en
+        assert fact in normalized_readme_en
 
     for fact in (
         "已安装入口准备状态",
-        "官方 installer 会发布 CLI 入口、one-shot runner 和静态 DSH Profile patch",
-        "zero-real-Provider 的 installer、preflight 与 transport 分段证据",
-        "不代表配置的 DeepSeek 生命周期已经成功",
-        "配置的 DeepSeek 真实受控生命周期尚未运行。",
-        (
-            "已安装的 controlled-lifecycle one-shot runner 不导入或注册 "
-            "`ScriptedAdapter`；这个夹具使用的 scripted adapter 只由测试提供。"
-        ),
-        "`configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`",
-        "`naturalUserEvidence=not-claimed`",
-        "`externalUserEvidence=not-claimed`",
+        "canonical real file identity",
+        "stderr 0 bytes", "stdout 0 bytes", "没有重跑",
+        "activity-01 尚未消费", "真实 Provider activity 仍为 0",
+        "真实 Provider lifecycle 尚未运行", "new formal product root", "packet freeze",
         "tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json",
         "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
-        (
-            "repair `7042a7d84712d499671b464251d0f09ec898fcf6` 已合并为 main "
-            "`67ce961487f93734230c06c1624f44573703691f`。"
-        ),
-        "run `32639440639`、event `push`、attempt 1",
-        "Python 和 TypeScript 成功；installer-windows 失败。",
-        "recursive Runtime Bundle build 成功",
-        "1 failed / 103 passed",
-        "installer 与 controlled command specs 通过",
-        "Windows checkout 文本使用 CRLF，测试 template 使用 LF",
-        "不是 Runtime、Agent、lifecycle 或 installer 产品语义缺陷的证据",
-        "该 run 不会 rerun 或 dispatch",
-        (
-            "Task 9B 继续阻塞，直到新的 exact-main CI push run attempt 1 中 "
-            "Python、TypeScript 和 installer-windows 全部成功"
-        ),
-        "真实 Provider activity 仍为 0",
-        (
-            "reviewed repair exact SHA → 新 automatic exact-main push run attempt 1，"
-            "Python、TypeScript 和 installer-windows 全部成功 → 唯一一次正式 real "
-            "Provider lifecycle"
-        ),
     ):
-        assert fact in readme_zh
+        assert fact in normalized_readme_zh
 
     for fact in (
         "scripted mechanics",
         "installed ingress readiness",
         "Stage 7 项目所有者自然任务",
+        "stderr 0 bytes", "stdout 0 bytes", "没有重跑",
+        "activity-01 尚未消费", "new formal product root", "packet freeze",
         "配置的 DeepSeek 真实受控生命周期尚未运行",
-        "externalUserEvidence=not-claimed",
-        "历史 Stage 7 16/16 publication proof",
-        "当前 runner + patch publication contract 是 18/18",
-        "regular file、independent inode/identity、no source hardlink、LICENSE 保留",
-        (
-            "installed CLI → installed DSH rc.7 Profile → one-shot runner → "
-            "既有 Tianwen Runtime/Evolution services"
-        ),
-        "DSH rc.7 仍是唯一 Agent Runtime；没有第二 controller 或 ledger",
-        (
-            "已安装的 controlled-lifecycle one-shot runner 不导入或注册 "
-            "`ScriptedAdapter`；这个夹具使用的 scripted adapter 只由测试提供。"
-        ),
-        "2026-08-23-tianwen-v0.1-controlled-real-operation-design.md",
-        "2026-08-23-tianwen-v0.1-controlled-real-operation.md",
+        "canonical real file identity",
         "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
-        "tianwen-v0.1-controlled-skill-lifecycle-handoff.md",
-        "repair `7042a7d84712d499671b464251d0f09ec898fcf6` 已合并为 main `67ce961487f93734230c06c1624f44573703691f`",
-        "run `32639440639`、event `push`、attempt 1",
-        "Python 与 TypeScript 成功，installer-windows 失败",
-        "Windows checkout 的 CRLF 与测试 template 的 LF 表示差异",
-        "不是 Runtime、Agent、lifecycle 或 installer 产品语义缺陷的证据",
-        "Task 9B 继续阻塞",
-        "这个受控生命周期的真实 Provider activity 仍为 0",
-        (
-            "reviewed patch newline repair exact-SHA → 新 automatic exact-main push "
-            "attempt 1 → 三 job 成功后一次正式真实 Provider lifecycle"
-        ),
     ):
-        assert fact in architecture
+        assert fact in normalized_architecture
 
-    normalized_documents = tuple(
-        " ".join(document.split()) for document in (readme_en, readme_zh, architecture)
-    )
-    for document in normalized_documents:
+    for document in (normalized_readme_en, normalized_readme_zh, normalized_architecture):
         for overbroad_claim in (
             "Production does not register `ScriptedAdapter`",
             "scripted adapters exist only in tests",
@@ -607,7 +528,6 @@ def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
             "installer-windows owns the installer, controlled-lifecycle command, and "
             "Runtime Bundle specs after a recursive Runtime Bundle build"
         ),
-        "Task 9B remains blocked",
         "real Provider activity remains 0",
         "new repair exact SHA and a new exact-main CI push run attempt 1",
         "run `32639440639`, event `push`, attempt 1",
@@ -624,6 +544,25 @@ def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
         "new automatic exact-main push run attempt 1",
         "naturalUserEvidence=not-claimed",
         "externalUserEvidence=not-claimed",
+        "pre-integration readiness snapshot", "18/18 publication",
+        "0 stderr bytes", "0 stdout bytes", "It was not rerun",
+        "Formal `activity-01` remains unconsumed",
+        "f7a89783097c83404576cb62b77949186e9fbca4",
+        "1b323c498a6fa177975fdd852738d9738995c604",
+        "canonical real file identity", "llm-deepseek retryPolicy=normal/0",
+        "Only session-title-llm is disabled", "ordinary Profile remains DSH normal/2",
+        "0 Agent, 0 model request, and 0 durable ledger",
+        "receipt-certified", "durable-observed", "unknown",
+        "Provider-account actual request count remains unknown",
+        "tool-body actual execution count remains unknown",
+        "15 tasks, 20 workspaces, and 25 Sessions",
+        "source=configured-provider-capable", "environment=development-only",
+        "defect=synthetic-defect",
+        "`scripted-fixture` is only the exercised source of the existing mechanism fixture",
+        "not a label on the future formal operation manifest or receipt",
+        "permanent gate order", "reviewed feature",
+        "automatic exact-main push attempt 1", "new formal product root",
+        "packet freeze", "exactly one real lifecycle",
     ):
         assert fact in handoff
 
@@ -657,7 +596,8 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         "tests/dsh-probe/controlled-skill-activation.spec.ts "
         "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts "
         "tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts "
-        "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts"
+        "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts "
+        "tests/dsh-migration/controlled-lifecycle-profile.spec.ts"
     )
 
     violations: list[str] = []
@@ -670,6 +610,7 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts",
         "tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts",
         "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts",
+        "tests/dsh-migration/controlled-lifecycle-profile.spec.ts",
         "pnpm demo:controlled-skill-lifecycle",
     ):
         if command not in typescript_job:
@@ -710,6 +651,13 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
     ):
         if forbidden in ci:
             violations.append(f"automatic CI enables long installed E2E: {forbidden}")
+    installer_match = re.search(
+        r"(?ms)^  installer-windows:\n(?P<job>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+        ci,
+    )
+    assert installer_match, "missing installer-windows job"
+    if "tests/dsh-migration/controlled-lifecycle-profile.spec.ts" in installer_match.group("job"):
+        violations.append("controlled Profile spec moved into installer-windows")
     assert not violations, "; ".join(violations)
 
 

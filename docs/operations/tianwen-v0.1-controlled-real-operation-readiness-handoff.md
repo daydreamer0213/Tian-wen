@@ -2,7 +2,9 @@
 
 ## 1. Conclusion and evidence boundary
 
-The controlled lifecycle now has installed ingress readiness: the official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch. This conclusion rests on zero-real-Provider installer, preflight, and transport evidence. It does not claim a successful configured DeepSeek lifecycle. The scripted full-chain proves the mechanics; the configured real operation remains the next evidence boundary.
+The controlled lifecycle has complete archive/publication readiness. Task 9B.0 proved that the preserved official installation's launcher did not yet execute `main()`: the first official `tianwen.CMD model status --json` exited 0 with empty stdout because the CLI main-entry guard compared a pnpm link spelling with the module's canonical real path.
+
+This is a core installed-command defect, not a patch-format or archive-content mismatch. The failed status was not rerun. The scripted full-chain still proves mechanics only; configured real Provider activity remains 0.
 
 The reviewed product boundary is:
 
@@ -26,6 +28,13 @@ These are implementation audit points. This handoff deliberately does not invent
 Feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` was merged as main `ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d`. The merge tree equals the reviewed feature tree; the current repair will receive its own reviewed exact SHA rather than rewriting this audit point.
 
 Repair `7042a7d84712d499671b464251d0f09ec898fcf6` was then merged as main `67ce961487f93734230c06c1624f44573703691f`. Its merge tree equals the reviewed repair tree; the newline repair will likewise receive a reviewed exact SHA before integration.
+
+Newline repair `402b23d4252910ad367ba2070528b99067a041ca` was merged as main `95077be9265818cbcec443a89a71e22363ae1cde`. Automatic exact-main CI run `32641914572`, event `push`, attempt 1 completed successfully: Python, TypeScript, and installer-windows all passed. No earlier failed run was rerun or dispatched.
+
+At the pre-integration readiness snapshot anchored by R0.2 exact `1b323c498a6fa177975fdd852738d9738995c604` and recorded before controlled main integration, the readiness-closure feature contained two reviewed implementation points without an installed-product operation:
+
+- R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` changes the CLI guard to canonical real file identity. A Windows pnpm-like junction focused contract proves the launcher spelling resolves to the built entry. Post-repair official `.CMD` status has not been run.
+- R0.2 `1b323c498a6fa177975fdd852738d9738995c604` freezes the controlled overlay at `llm-deepseek retryPolicy=normal/0`. Only session-title-llm is disabled; session-title, llm-retry, and settings remain enabled, while the ordinary Profile remains DSH normal/2. With an actual normal/2 policy, the runner fails closed with 0 Agent, 0 model request, and 0 durable ledger. `--dump-config` is configuration-composition evidence, not a fresh installed operation.
 
 ## 3. What the scripted full-chain proves
 
@@ -79,6 +88,33 @@ The long installed E2E requires Windows and explicit `TIANWEN_CONTROLLED_INSTALL
 
 ## 7. Next boundary: 9A6-R2 then 9B
 
-Task 9B remains blocked. For this controlled lifecycle, real Provider activity remains 0. The next boundary is a reviewed repair exact SHA and a new automatic exact-main push run attempt 1; it is not an attempt 2 or rerun of either preserved failure. Task 9B may begin only if Python, TypeScript, and installer-windows all succeed on that new attempt 1.
+This heading preserves the historical pre-R2 boundary: a new repair exact SHA and a new automatic exact-main push run attempt 1. R2 later passed exact-main CI; the current boundary is recorded below rather than rewriting that evidence checkpoint.
 
-Only then may the project perform exactly one formal real Provider lifecycle. That operation must retain the same evidence labels and must report a stopped result as evidence rather than retrying it into a better-looking outcome.
+## 8. Task 9B.0 official installation evidence
+
+Task 9B.0 official installer succeeded with 18/18 publication. It ran exactly once at main `95077be9265818cbcec443a89a71e22363ae1cde` into a fresh dedicated product root. The installer returned a canonical `ready` receipt with DSH `0.1.0-rc.7`, pnpm `11.20.0`, and archive digest `sha256:fa92696ea23686e10d83fb1d068eee3f4c3e2a95c9ea718c73f30e2775945f1d`.
+
+Independent read-only checks proved:
+
+- publication is 18/18 regular files, 18/18 `nlink=1`, 18/18 source/installed file identities distinct, and 0 source hardlinks;
+- Sessions and Evolution were absent/empty after install and remained absent/empty after the failed status;
+- the installer stdout receipt and persisted receipt were byte- and JSON-identical;
+- the persisted archive digest matched a fresh raw archive SHA-256.
+
+The single installed status used the official `tianwen.CMD` resolved from the receipt's bin directory. It returned exit 0 with 0 stderr bytes and 0 stdout bytes. Therefore it did not certify offline selection, configured credential reference, or `modelRequestsDelta=0`. It was preserved as `schema-mismatch` caused by empty transport. It was not rerun.
+
+The preserved product root and evidence remain intact. No manifest, operation root, Agent, Session, Evolution ledger, model switch, Provider request, Goal, or controlled lifecycle was created. Formal `activity-01` remains unconsumed, and real Provider activity remains 0.
+
+## 9. Next boundary: Task 9B-R0 then one formal lifecycle
+
+At that pre-integration readiness snapshot, Task 9B remained blocked: no new formal product root had been installed or checked with model status, and no Provider had been called.
+
+The formal operation packet remains frozen with 15 tasks, 20 workspaces, and 25 Sessions, plus exact byte rules, an operation freeze receipt, and a pre-frozen postmortem checker. Its frozen formal operation labels are source=configured-provider-capable, environment=development-only, defect=synthetic-defect, with `naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed`. `scripted-fixture` is only the exercised source of the existing mechanism fixture, not a label on the future formal operation manifest or receipt.
+
+Failure evidence has three levels:
+
+- `receipt-certified`: a legal passed receipt certifies its Session roles and model-step/tool-call/Evidence event reductions. Without an independent existing fact source, Provider-account actual request count remains unknown and tool-body actual execution count remains unknown.
+- `durable-observed`: the frozen checker may aggregate facts already persisted by the 25 Sessions, but it does not turn those durable events into Provider-account or tool-body observations.
+- `unknown`: a stopped or transport outcome remains unclaimed wherever neither of those sources proves the fact.
+
+No receipt schema, telemetry, budgeter, database, or general evidence framework is added for this reporting boundary. The permanent gate order requires a reviewed feature to enter main through controlled integration and its corresponding automatic exact-main push attempt 1 to pass Python, TypeScript, and installer-windows. Only then may one official install and model status run on a new formal product root with packet freeze, followed by exactly one real lifecycle. The preserved Task 9B.0 root must not be reused, overwritten, or cleaned, and any stopped result remains evidence rather than a reason to retry into a better-looking outcome.

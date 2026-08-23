@@ -68,15 +68,18 @@ const candidateSkill = {
   ].join('\n'),
 } as const
 
-class NoRetryScriptedAdapter extends ScriptedAdapter {
-  constructor(script: readonly (readonly StreamChunk[] | Error)[]) {
+class ControlledScriptedAdapter extends ScriptedAdapter {
+  constructor(
+    script: readonly (readonly StreamChunk[] | Error)[],
+    private readonly maxRetries = 0,
+  ) {
     super(script.map(entry => Array.isArray(entry) ? [...entry] : entry))
   }
 
   override providerRetryPolicy() {
     return {
       mode: 'normal' as const,
-      maxRetries: 0,
+      maxRetries: this.maxRetries,
       retryableCodes: [],
       initialDelayMs: 500,
       maxDelayMs: 10_000,
@@ -297,6 +300,7 @@ async function mountRunner(
     readonly loaderAvailable?: boolean
     readonly sessionRootMismatch?: boolean
     readonly evolutionRootMismatch?: boolean
+    readonly retryPolicyMaxRetries?: number
   } = {},
 ) {
   const root = fixtureRoot(name)
@@ -327,7 +331,7 @@ async function mountRunner(
   await harness.ctx.plugin(SkillRegistry)
   await harness.ctx.plugin(applySkillTool)
   await harness.ctx.plugin(DynamicCordisRunnerService, {})
-  const adapter = new NoRetryScriptedAdapter(script)
+  const adapter = new ControlledScriptedAdapter(script, options.retryPolicyMaxRetries)
   harness.ctx.llm.registerAdapter(['deepseek-official'], adapter)
   const selection = {
     provider: 'deepseek-official',
@@ -1027,6 +1031,34 @@ describe('controlled real Skill lifecycle runner', () => {
       expect(mounted.harness.ctx.agents.list()).toEqual([])
       expect(mounted.adapter.requests).toEqual([])
       expect(mounted.harness.ctx.tianwenEvolution.listLearningSignals()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects actual normal/2 retry policy before Agent or durable activity', async () => {
+    const mounted = await mountRunner('retry-policy-mismatch', seedScript(), {
+      retryPolicyMaxRetries: 2,
+    })
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })).rejects.toMatchObject({ code: 'retry-policy-mismatch' })
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
+      expect(mounted.adapter.requests).toEqual([])
+      expect(await mounted.harness.ctx.sessionPersistence.list()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listLearningSignals()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listLearningCases()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvalProtocols()).toEqual([])
+      expect(existsSync(join(mounted.manifest.roots.evolutionRoot, 'ledger.jsonl'))).toBe(false)
     } finally {
       await mounted.harness.ctx.fiber.dispose()
     }

@@ -1,6 +1,13 @@
-import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { dirname, join, posix, resolve } from 'node:path'
+import { execFileSync, spawnSync } from 'node:child_process'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs'
+import { dirname, isAbsolute, join, posix, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
@@ -181,6 +188,57 @@ describe('CLI metafile input allowlist', () => {
   })
 })
 
+describe('CLI installed entry identity', () => {
+  it.runIf(process.platform === 'win32')(
+    'executes main through a pnpm-like Runtime Bundle junction',
+    () => {
+      const fixtureBase = resolve('D:/DevData/tianwen-runtime-bundle-tests/cli-main-entry')
+      const devDataRoot = resolve('D:/DevData')
+      expect(isAbsolute(packageRoot)).toBe(true)
+      expect(relative(devDataRoot, packageRoot)).not.toMatch(/^\.\.(?:[\\/]|$)/u)
+      mkdirSync(fixtureBase, { recursive: true })
+      const fixtureRoot = mkdtempSync(join(fixtureBase, 'entry-'))
+      expect(relative(fixtureBase, fixtureRoot)).not.toMatch(/^\.\.(?:[\\/]|$)/u)
+      const aliasRoot = join(
+        fixtureRoot,
+        'node_modules',
+        '@tianwen',
+        'runtime-bundle',
+      )
+      mkdirSync(dirname(aliasRoot), { recursive: true })
+      symlinkSync(packageRoot, aliasRoot, 'junction')
+      try {
+        const result = spawnSync(process.execPath, [
+          join(aliasRoot, 'dist', 'cli.js'),
+        ], {
+          encoding: 'utf8',
+          shell: false,
+          windowsHide: true,
+        })
+        expect({
+          error: result.error,
+          signal: result.signal,
+          status: result.status,
+          stderr: result.stderr,
+          stdout: result.stdout,
+        }).toEqual({
+          error: undefined,
+          signal: null,
+          status: 2,
+          stderr: [
+            'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
+            'Usage: tianwen list --data-dir ABSOLUTE_PATH [--json]',
+            '',
+          ].join('\n'),
+          stdout: '',
+        })
+      } finally {
+        rmSync(fixtureRoot, { recursive: true, force: true })
+      }
+    },
+  )
+})
+
 describe('Skill-name compatibility subpath', () => {
   it('exports only the public Skill-name validator', async () => {
     const manifest = json(resolve(compatPackageRoot, 'package.json')) as {
@@ -334,6 +392,15 @@ describe('@tianwen/runtime-bundle', () => {
   disabled: true
 
 - id: goal-round-driver
+  disabled: true
+
+- id: llm-deepseek
+  config:
+    retryPolicy:
+      mode: normal
+      maxRetries: 0
+
+- id: session-title-llm
   disabled: true
 
 - insert:
