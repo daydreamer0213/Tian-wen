@@ -112,13 +112,15 @@ function isAllowedCreateRunnerInput(input: string): boolean {
 
 function isAllowedControlledLifecycleRunnerInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
-  return path === 'src/controlled-lifecycle-runner.ts'
-    || path === 'src/controlled-lifecycle-contract.ts'
-    || [
-      '../tianwen-runtime/dist/',
-      '../tianwen-evidence/dist/',
-      '../tianwen-evolution/dist/',
-    ].some(root => path.startsWith(root))
+  return [
+    'src/controlled-lifecycle-runner.ts',
+    'src/controlled-lifecycle-contract.ts',
+    '../tianwen-evidence/dist/projector.js',
+    '../tianwen-evolution/dist/controlled-skill-activation.js',
+    '../tianwen-evolution/dist/controlled-skill-evaluation.js',
+    '../tianwen-evolution/dist/learning-intake.js',
+    '../tianwen-evolution/dist/outcome-intake.js',
+  ].includes(path)
 }
 
 function containsCredentialLiteral(text: string): boolean {
@@ -139,6 +141,14 @@ describe('runtime metafile input allowlist', () => {
     '../test/helper.js',
   ])('rejects %s', input => {
     expect(isAllowedRuntimeInput(input)).toBe(false)
+  })
+
+  it.each([
+    '../tianwen-evolution/dist/ledger.js',
+    '../tianwen-runtime/dist/unrelated.js',
+    '../tianwen-evidence/dist/private.js',
+  ])('rejects non-approved controlled lifecycle runner input %s', input => {
+    expect(isAllowedControlledLifecycleRunnerInput(input)).toBe(false)
   })
 })
 
