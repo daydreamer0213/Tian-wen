@@ -23,6 +23,8 @@ The reviewed Task 9A1-A4 implementation chain is:
 
 These are implementation audit points. This handoff deliberately does not invent a future documentation, merge, or CI SHA.
 
+Feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` was merged as main `ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d`. The merge tree equals the reviewed feature tree; the current repair will receive its own reviewed exact SHA rather than rewriting this audit point.
+
 ## 3. What the scripted full-chain proves
 
 Two separate scripted fixtures carry different, non-interchangeable counts:
@@ -63,12 +65,14 @@ Its bounded single-line receipt carries only digests, counts, and finite labels.
 
 ## 6. Feature gates / exact verification
 
-The public feature gate keeps the controlled runner, command, and Runtime Bundle specs together in the TypeScript focused step. The native installer contract remains isolated in the Windows job. Automatic CI does not enable the long installed E2E.
+Exact-main CI run `32635033552`, event `push`, attempt 1 is permanently preserved. Python and installer-windows succeeded; TypeScript failed. All four failures were test-platform placement failures: Windows-owned command and Runtime Bundle specs were placed on Ubuntu, where their fixed `D:` paths, junction boundary, and Windows Node/Corepack/archive contracts do not apply. The platform-independent controlled-real runner spec passed on Ubuntu. This is not evidence of a Runtime, Agent, or lifecycle semantic defect.
+
+The failed run will not be rerun. Ubuntu keeps the seven controlled mechanism specs and the controlled-real runner spec, with its fixture root remaining step-local. installer-windows owns the installer, controlled-lifecycle command, and Runtime Bundle specs after a recursive Runtime Bundle build, inside the existing `D:` mapping and cleanup boundary. The runner spec does not move to Windows.
 
 The long installed E2E requires Windows and explicit `TIANWEN_CONTROLLED_INSTALLED_E2E=1`; the default is skip. Local feature acceptance additionally runs the repository TypeScript check, full Python suite, full Ruff check, and diff whitespace validation from the canonical D: cache and fixture environment.
 
-## 7. Next boundary: 9A6 then 9B
+## 7. Next boundary: 9A6-R1 then 9B
 
-Task 9A6 archives the exact feature, performs the controlled main integration, and waits for one exact-main CI attempt. Task 9B may begin only if Python, TypeScript, and installer-windows all succeed on attempt 1.
+Task 9B remains blocked. For this controlled lifecycle, real Provider activity remains 0. The next boundary is a new repair exact SHA and a new exact-main CI push run attempt 1; it is not an attempt 2 or rerun of the preserved failure. Task 9B may begin only if Python, TypeScript, and installer-windows all succeed on that new attempt 1.
 
 Only then may the project perform exactly one formal real Provider lifecycle. That operation must retain the same evidence labels and must report a stopped result as evidence rather than retrying it into a better-looking outcome.

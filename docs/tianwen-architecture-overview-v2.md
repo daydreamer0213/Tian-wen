@@ -33,6 +33,7 @@ rc.7 产品路径正式运行一次：Goal complete，45/45 Evidence complete，
   regular file、independent inode/identity、no source hardlink、LICENSE 保留。已安装产品接缝是
   installed CLI → installed DSH rc.7 Profile → one-shot runner → 既有 Tianwen Runtime/Evolution services。
   DSH rc.7 仍是唯一 Agent Runtime；没有第二 controller 或 ledger。
+- **exact-main CI：** feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` 已合并为 main `ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d`。run `32635033552` attempt 1 中，Python 与 installer-windows 成功，TypeScript 因 Windows-owned contract specs 错放在 Ubuntu 而失败。这不是 Runtime、Agent 或 lifecycle 业务语义缺陷的证据；旧 run 不会重跑，Task 9B 继续阻塞，这个受控生命周期的真实 Provider activity 仍为 0。
 - **真实 Provider 与用户效果：** 配置的 DeepSeek 受控生命周期尚未运行。进一步说，
   配置的 DeepSeek 真实受控生命周期尚未运行；`naturalUserEvidence=not-claimed` 且
   `externalUserEvidence=not-claimed`。
@@ -47,7 +48,8 @@ zero-real-Provider 的 installer、preflight 与 transport 分段证据。
 当前下一主线不是继续搭基础设施，而是一条有限的交付和正式运行链：
 
 ```text
-feature exact-SHA → 受控 main integration → exact-main CI → 一次正式真实 Provider lifecycle
+长期顺序不变：feature exact-SHA → 受控 main integration → exact-main CI → 一次正式真实 Provider lifecycle
+reviewed CI platform repair exact-SHA → 新 exact-main CI push attempt 1 → 成功后一次正式真实 Provider lifecycle
 ```
 
 脚本化 evaluator Agent 只按冻结 rubric 评价盲态 X/Y，所有 fixture 永久标记为
@@ -293,8 +295,8 @@ B@rev1→C@rev2→B@rev3→C@rev4 的 Promotion/Rollback/Restore 机制。
 和静态 Profile patch，但它没有把 zero-real-Provider readiness 变成真实 Provider 成功。
 下一步不是增加新 Runtime、预算器、适配器或治理框架，而是：
 
-1. 固定 feature exact SHA 并完成受控 main integration；
-2. 在 exact main 上通过 Python、TypeScript 和 installer CI；
+1. 固定 reviewed CI platform repair exact SHA 并完成新的受控 main integration；
+2. 在新 exact main 上通过 Python、TypeScript 和 installer-windows CI attempt 1；
 3. 只按后续冻结 runbook 运行一次正式真实 Provider lifecycle；
 4. 任何首次失败都保留现场并停止，不挑结果、不补跑局部活动。
 
