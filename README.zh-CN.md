@@ -30,8 +30,13 @@ R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` 在 CLI guard 中比较 canonica
 
 ```console
 tianwen model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json
-tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
+tianwen model status --data-dir ABSOLUTE_PRODUCT_ROOT --json
+tianwen controlled-lifecycle --manifest ABSOLUTE_MANIFEST --data-dir ABSOLUTE_PRODUCT_ROOT --json
+tianwen model use --model offline --data-dir ABSOLUTE_PRODUCT_ROOT --json
+tianwen model status --data-dir ABSOLUTE_PRODUCT_ROOT --json
 ```
+
+无论 lifecycle 成功或失败，都必须执行 offline model selection 和最终 status。
 
 [受控真实运行准备交接](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)保留 operation 前的实现与 CI 审计历史；[activity-01 交接](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md)记录后续 usage failure 与恢复边界。activity-02 必须先让 reviewed authority SHA 受控进入 main，并由新的 automatic exact-main push attempt 1 的 Python、TypeScript、installer-windows 三个 job 全绿。随后使用 new product root、new evidence root、new operation root、20 个新 workspace 和 25 个新 Session。activity-01 保留，不重跑、不清理、不补阶段。
 

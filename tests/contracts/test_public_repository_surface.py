@@ -395,6 +395,37 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         "README.zh-CN.md": normalized_readme_zh,
         "architecture": normalized_architecture,
     }
+    model_use = (
+        "tianwen model use --model deepseek-v4-pro "
+        "--data-dir ABSOLUTE_PRODUCT_ROOT --json"
+    )
+    model_status = (
+        "tianwen model status --data-dir ABSOLUTE_PRODUCT_ROOT --json"
+    )
+    lifecycle = (
+        "tianwen controlled-lifecycle --manifest ABSOLUTE_MANIFEST "
+        "--data-dir ABSOLUTE_PRODUCT_ROOT --json"
+    )
+    offline = (
+        "tianwen model use --model offline "
+        "--data-dir ABSOLUTE_PRODUCT_ROOT --json"
+    )
+    command_sequence_failures = {}
+    for name, document in documents.items():
+        model_use_at = document.find(model_use)
+        first_status_at = document.find(model_status, model_use_at + len(model_use))
+        lifecycle_at = document.find(lifecycle, first_status_at + len(model_status))
+        offline_at = document.find(offline, lifecycle_at + len(lifecycle))
+        final_status_at = document.find(model_status, offline_at + len(offline))
+        if document.count(model_status) != 2 or not (
+            0 <= model_use_at < first_status_at < lifecycle_at < offline_at < final_status_at
+        ):
+            command_sequence_failures[name] = {
+                "status_count": document.count(model_status),
+                "ordered": False,
+            }
+    assert not command_sequence_failures, command_sequence_failures
+
     missing = {
         name: [fact for fact in (*common_facts, *expected_by_document[name]) if fact not in text]
         for name, text in documents.items()

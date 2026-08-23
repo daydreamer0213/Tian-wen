@@ -33,8 +33,13 @@ The formal installed command shape is:
 
 ```console
 tianwen model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json
-tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
+tianwen model status --data-dir ABSOLUTE_PRODUCT_ROOT --json
+tianwen controlled-lifecycle --manifest ABSOLUTE_MANIFEST --data-dir ABSOLUTE_PRODUCT_ROOT --json
+tianwen model use --model offline --data-dir ABSOLUTE_PRODUCT_ROOT --json
+tianwen model status --data-dir ABSOLUTE_PRODUCT_ROOT --json
 ```
+
+Whether the lifecycle passes or stops, the offline model selection and final status are mandatory.
 
 The [controlled real operation readiness handoff](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) retains the pre-operation implementation and CI audit history; the [activity-01 handoff](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md) records the later usage failure and recovery boundary. Activity-02 requires a reviewed authority SHA to enter main through controlled integration and a new automatic exact-main push attempt 1 to pass Python, TypeScript, and installer-windows. It then uses a new product root, new evidence root, new operation root, 20 new workspaces, and 25 new Sessions. Activity-01 is preserved without retry, cleanup, or partial continuation.
 

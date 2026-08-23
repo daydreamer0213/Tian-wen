@@ -44,10 +44,18 @@ rc.7 产品路径正式运行一次：Goal complete，45/45 Evidence complete，
   配置的 DeepSeek 真实受控生命周期尚未运行；`naturalUserEvidence=not-claimed` 且
   `externalUserEvidence=not-claimed`。
 
-已安装入口使用固定命令形态；模型选择的 exact argv 是
-`model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json`，随后才是
-`tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json`。其当前证明来自
-zero-real-Provider 的 installer、preflight 与 transport 分段证据。
+已安装入口使用固定的五步 exact argv：
+
+```text
+tianwen model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json
+tianwen model status --data-dir ABSOLUTE_PRODUCT_ROOT --json
+tianwen controlled-lifecycle --manifest ABSOLUTE_MANIFEST --data-dir ABSOLUTE_PRODUCT_ROOT --json
+tianwen model use --model offline --data-dir ABSOLUTE_PRODUCT_ROOT --json
+tianwen model status --data-dir ABSOLUTE_PRODUCT_ROOT --json
+```
+
+无论 lifecycle 成功或失败，最后两步都必须执行。其当前证明来自 zero-real-Provider 的
+installer、preflight 与 transport 分段证据。
 已安装的 controlled-lifecycle one-shot runner 不导入或注册 `ScriptedAdapter`；这个夹具使用的 scripted adapter 只由测试提供。
 scripted mechanism fixture 的 exercised source 是 `scripted-fixture`；正式 operation 标签只包含
 `configured-provider-capable` + `development-only` + `synthetic-defect`，且 natural/external 均为 not-claimed。
