@@ -16,6 +16,20 @@ Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成
 配置的 DeepSeek 受控生命周期尚未运行。证据仍固定为
 `naturalUserEvidence=not-claimed` 和 `externalUserEvidence=not-claimed`。
 
+## 已安装入口准备状态
+
+已安装入口现在已准备好：官方 installer 会发布 CLI 入口、one-shot runner 和静态 DSH Profile patch。这些是 zero-real-Provider 的 installer、preflight 与 transport 分段证据；不代表配置的 DeepSeek 生命周期已经成功。配置的 DeepSeek 真实受控生命周期尚未运行。
+
+生产 runner 不注册 `ScriptedAdapter`；scripted adapter 只存在于测试。证据标签仍是 `configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`，并且 `naturalUserEvidence=not-claimed`、`externalUserEvidence=not-claimed`。
+
+正式已安装命令的形式是：
+
+```console
+tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
+```
+
+[受控真实运行准备交接](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)记录了已验证的边界和仍缺失的证据。下一边界仍是：exact feature → 受控 main integration → exact-main CI → 唯一一次正式 real Provider lifecycle。
+
 ## 为什么需要天问
 
 Agent 可以完成一次 Session，但长期治理还需要回答另外一些问题：结果由哪些证据支持、
@@ -135,6 +149,8 @@ Shadow 通过，以及 B@rev1→C@rev2→B@rev3→C@rev4 指针序列。终态�
   保存 Stage 7 的机制、失败现场和终局自然运行证据。
 - [`docs/operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md`](docs/operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md)
   保存受控生命周期 receipt、隐私边界和证据限制。
+- [`docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)
+  保存已安装入口准备边界和尚未通过的真实 Provider 门。
 - [`docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)
   冻结有界的 v0.1 评测、Shadow、Promotion 和 Rollback 路线。
 - [`docs/research`](docs/research) 保存有边界的研究证据和审计记录。

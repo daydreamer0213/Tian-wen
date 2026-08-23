@@ -19,6 +19,20 @@ The five-task B/C, blind evaluator, isolated Shadow, and Promotion/Rollback/Rest
 The configured DeepSeek controlled lifecycle has not run. Its evidence remains
 `naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed`.
 
+## Installed ingress readiness
+
+Installed ingress readiness is now complete: the official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch. This is zero-real-Provider installer, preflight, and transport evidence; it is not a successful configured DeepSeek lifecycle. The configured DeepSeek real controlled lifecycle has not run.
+
+Production does not register `ScriptedAdapter`; scripted adapters exist only in tests. Evidence remains `configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`, with `naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed`.
+
+The formal installed command shape is:
+
+```console
+tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
+```
+
+The [controlled real operation readiness handoff](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) records the verified boundary and the evidence that is still missing. The next boundary remains: exact feature → controlled main → exact-main CI → exactly one formal real Provider lifecycle.
+
 ## Why Tianwen exists
 
 An Agent can finish one session without answering the longer-lived governance
@@ -171,6 +185,8 @@ activity, and its dedicated fixture root is empty after cleanup.
   records the Stage 7 mechanism, failures, and terminal natural-run evidence.
 - [`docs/operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md`](docs/operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md)
   records the controlled lifecycle receipt, privacy boundary, and evidence limits.
+- [`docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)
+  records the installed ingress readiness boundary and the remaining real-Provider gate.
 - [`docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)
   freezes the bounded v0.1 evaluation, Shadow, Promotion, and Rollback path.
 - [`docs/research`](docs/research) contains bounded research evidence and audit
