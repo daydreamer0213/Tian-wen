@@ -392,6 +392,17 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
     assert typescript_match, "missing typescript job"
     typescript_job = typescript_match.group("job")
 
+    controlled_vitest = (
+        "pnpm exec vitest run "
+        "tests/dsh-probe/controlled-skill-evaluation.spec.ts "
+        "tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts "
+        "tests/dsh-probe/controlled-skill-shadow.spec.ts "
+        "tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts "
+        "tests/dsh-probe/controlled-skill-activation.spec.ts "
+        "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts "
+        "tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts"
+    )
+
     for command in (
         "tests/dsh-probe/controlled-skill-evaluation.spec.ts",
         "tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts",
@@ -404,8 +415,23 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
     ):
         assert command in typescript_job
 
-    assert "TIANWEN_DSH_PROBE_ROOT" in typescript_job
-    assert "${{ runner.temp }}/tianwen-v0.1-eval-fixtures" in typescript_job
+    job_prelude, steps_marker, typescript_steps = typescript_job.partition(
+        "    steps:\n"
+    )
+    assert steps_marker, "missing typescript steps"
+    fixture_root = "${{ runner.temp }}/tianwen-v0.1-eval-fixtures"
+    violations: list[str] = []
+    if "TIANWEN_DSH_PROBE_ROOT" in job_prelude or "runner.temp" in job_prelude:
+        violations.append("controlled fixture root remains at TypeScript job level")
+    for command in (controlled_vitest, "pnpm demo:controlled-skill-lifecycle"):
+        expected_step = (
+            f"      - run: {command}\n"
+            "        env:\n"
+            f"          TIANWEN_DSH_PROBE_ROOT: {fixture_root}"
+        )
+        if expected_step not in typescript_steps:
+            violations.append(f"missing step-level controlled fixture root: {command}")
+    assert not violations, "; ".join(violations)
 
 
 def test_managed_rc6_install_migration_handoff() -> None:
