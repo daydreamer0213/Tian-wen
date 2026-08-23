@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -310,8 +317,6 @@ async function mountRunner(
     mkdirSync(task.root, { recursive: true })
     writeFileSync(join(task.root, 'case.md'), `${task.text}\n`, 'utf8')
   }
-  mkdirSync(sessionsRoot, { recursive: true })
-  mkdirSync(evolutionRoot, { recursive: true })
   const manifestPath = join(operationRoot, 'manifest.json')
   writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, 'utf8')
   const prepared = readControlledLifecycleManifest(manifestPath)
@@ -385,6 +390,7 @@ describe('controlled real Skill lifecycle runner', () => {
     vi.spyOn(mounted.harness.ctx as never, 'get').mockImplementation((service: string) =>
       service === 'appExit' ? resolveExit : originalGet(service as never))
     try {
+      expect(existsSync(mounted.manifest.roots.sessionsRoot)).toBe(false)
       runner.apply(mounted.harness.ctx, {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
@@ -421,6 +427,7 @@ describe('controlled real Skill lifecycle runner', () => {
         candidateSkill.content,
       ]) expect(line).not.toContain(forbidden)
       expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(25)
+      expect(existsSync(mounted.manifest.roots.sessionsRoot)).toBe(true)
     } finally {
       await mounted.harness.ctx.fiber.dispose()
     }
@@ -1011,6 +1018,8 @@ describe('controlled real Skill lifecycle runner', () => {
       manifestPath: string, manifestDigest: string,
     }): Promise<unknown> }
     try {
+      expect(existsSync(mounted.manifest.roots.sessionsRoot)).toBe(false)
+      expect(existsSync(join(mounted.manifest.roots.evolutionRoot, 'artifacts'))).toBe(true)
       await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
@@ -1066,6 +1075,29 @@ describe('controlled real Skill lifecycle runner', () => {
       expect(mounted.harness.ctx.agents.list()).toEqual([])
       expect(mounted.adapter.requests).toEqual([])
       expect(mounted.harness.ctx.tianwenEvolution.listLearningSignals()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects an existing Session junction that escapes the product root', async () => {
+    const mounted = await mountRunner('session-root-junction')
+    const escaped = join(mounted.root, 'escaped-sessions')
+    mkdirSync(escaped, { recursive: true })
+    mkdirSync(join(mounted.manifest.roots.dataDir, 'dsh-home'), { recursive: true })
+    symlinkSync(escaped, mounted.manifest.roots.sessionsRoot, 'junction')
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })).rejects.toMatchObject({ code: 'root-drift' })
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
+      expect(mounted.adapter.requests).toEqual([])
     } finally {
       await mounted.harness.ctx.fiber.dispose()
     }

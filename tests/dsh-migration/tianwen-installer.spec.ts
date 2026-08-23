@@ -38,10 +38,12 @@ const RUNTIME_FILES = [
   'dist/model-runner.js',
   'dist/create-runner.js',
   'dist/resume-runner.js',
+  'dist/controlled-lifecycle-runner.js',
   'cordis.patch.yml',
   'create.patch.yml',
   'model.patch.yml',
   'resume.patch.yml',
+  'controlled-lifecycle.patch.yml',
 ] as const
 const RUNTIME_DEPLOYED_PUBLICATION = [...RUNTIME_FILES, 'package.json'] as const
 const RUNTIME_PUBLICATION = [...RUNTIME_FILES, 'package.json', 'LICENSE'] as const
@@ -89,7 +91,10 @@ function writeRuntimePublication(runtimeRoot: string, label = 'runtime'): void {
   }
   writeJson(join(runtimeRoot, 'package.json'), {
     bin: { tianwen: 'dist/cli.js' },
-    exports: { './runtime': './dist/runtime.js' },
+    exports: {
+      './runtime': './dist/runtime.js',
+      './controlled-lifecycle-runner': './dist/controlled-lifecycle-runner.js',
+    },
     files: [...RUNTIME_FILES],
     name: '@tianwen/runtime-bundle',
     type: 'module',
@@ -1001,6 +1006,7 @@ describe('Tianwen installer contract', () => {
   })
 
   it('publishes a detached Runtime Bundle candidate', () => {
+    expect(RUNTIME_PUBLICATION).toHaveLength(18)
     const root = testRoot('detached-runtime-candidate')
     const paths = deriveInstallPaths(root, 'win32')
     const repoRoot = testRoot('detached-runtime-repo')
@@ -1133,6 +1139,23 @@ describe('Tianwen installer contract', () => {
       && env.PNPM_CONFIG_CACHE_DIR === 'D:\\DevData\\custom-npm-cache'
       && env.PNPM_CONFIG_MINIMUM_RELEASE_AGE === undefined
       && env.PNPM_CONFIG_STORE_DIR === 'D:\\DevData\\custom-pnpm-store')).toBe(true)
+  })
+
+  it('pins every pnpm child to one libuv worker despite a caller override', () => {
+    const root = testRoot('fixed-pnpm-worker')
+    const paths = deriveInstallPaths(root, 'win32')
+    const scripted = scriptedInstaller(paths)
+
+    installWindowsFixture({
+      dataDir: root,
+      env: { ...process.env, UV_THREADPOOL_SIZE: '64' },
+      runner: scripted.runner,
+    })
+
+    const pnpmEnvironments = scripted.childEnvironments.filter((_env, index) =>
+      /pnpm\.(?:c?js|mjs)$/iu.test(scripted.calls[index]?.[0] ?? ''))
+    expect(pnpmEnvironments.length).toBeGreaterThan(0)
+    expect(pnpmEnvironments.every(env => env.UV_THREADPOOL_SIZE === '1')).toBe(true)
   })
 
   it('reinstalls the fixed Profile when the Runtime archive changes', () => {

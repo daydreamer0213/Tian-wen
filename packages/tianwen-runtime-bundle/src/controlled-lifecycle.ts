@@ -42,6 +42,15 @@ export interface ControlledLifecycleChildDependencies {
   readonly writeError?: (line: string) => void
 }
 
+export class ControlledLifecyclePreflightError extends Error {
+  readonly code = 'installed-receipt-mismatch' as const
+
+  constructor() {
+    super('controlled lifecycle preflight failed')
+    this.name = 'ControlledLifecyclePreflightError'
+  }
+}
+
 const INSTALL_RECEIPT_KEYS = [
   'archiveDigest', 'archivePath', 'binDir', 'cliPath', 'dataDir', 'dshVersion',
   'hostRoot', 'pnpmVersion', 'profileBundles', 'profileRoot', 'receiptPath',
@@ -112,9 +121,10 @@ export function preflightControlledLifecycle(
     }
   }
   const realRuntimeRoot = realpathSync(runtimeRoot)
+  const realCliPath = realpathSync(cliPath)
   if (
     !strictChild(realDataDir, realRuntimeRoot) ||
-    !strictChild(realRuntimeRoot, realpathSync(cliPath)) ||
+    !strictChild(realRuntimeRoot, realCliPath) ||
     !strictChild(realRuntimeRoot, realpathSync(runtimePath))
   ) throw new TypeError('installed Tianwen Runtime Bundle escapes its root')
   const profileManifest = record(JSON.parse(
@@ -128,9 +138,23 @@ export function preflightControlledLifecycle(
     !lstatSync(join(profileRoot, 'cordis.patch.yml')).isFile() ||
     !lstatSync(join(profileRoot, 'node_modules', '.bin')).isDirectory()
   ) throw new TypeError('installed Tianwen Profile is incomplete')
-  for (const root of [sessionsRoot, evolutionRoot]) {
-    if (!lstatSync(root).isDirectory() || !strictChild(realDataDir, realpathSync(root))) {
-      throw new TypeError('installed Tianwen state root is invalid')
+  for (const ownerChain of [['dsh-home', 'sessions'], ['state', 'evolution']] as const) {
+    let path = dataDir
+    for (const segment of ownerChain) {
+      path = join(path, segment)
+      let pathStats: ReturnType<typeof lstatSync>
+      try {
+        pathStats = lstatSync(path)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') break
+        throw error
+      }
+      if (
+        !pathStats.isDirectory() || pathStats.isSymbolicLink() ||
+        !strictChild(realDataDir, realpathSync(path))
+      ) {
+        throw new TypeError('installed Tianwen state root is invalid')
+      }
     }
   }
   const receipt = record(JSON.parse(readFileSync(receiptPath, 'utf8')) as unknown)
@@ -138,11 +162,14 @@ export function preflightControlledLifecycle(
     throw new TypeError('installed Tianwen receipt has an invalid shape')
   }
   const archiveDigest = sha256File(archivePath)
+  if (receipt.cliPath !== realCliPath) {
+    throw new ControlledLifecyclePreflightError()
+  }
   if (
     receipt.schemaVersion !== 'tianwen.install.v1' || receipt.status !== 'ready' ||
     receipt.archiveDigest !== archiveDigest || receipt.archivePath !== archivePath ||
     receipt.binDir !== join(profileRoot, 'node_modules', '.bin') ||
-    receipt.cliPath !== cliPath || receipt.dataDir !== dataDir ||
+    receipt.dataDir !== dataDir ||
     receipt.dshVersion !== '0.1.0-rc.7' ||
     receipt.hostRoot !== join(dataDir, 'dsh-host') ||
     receipt.pnpmVersion !== '11.20.0' ||
@@ -217,27 +244,64 @@ export async function monitorControlledLifecycleChild(
   let stdoutBytes = 0
   let stderrBytes = 0
   let finished = false
+  const rawChildStdout = child.stdout
+  if (rawChildStdout === null) {
+    writeError('tianwen controlled-lifecycle: child transport failed\n')
+    return 1
+  }
+  const childStdout: NonNullable<ChildProcess['stdout']> = rawChildStdout
+  const rawChildStderr = child.stderr
+  if (rawChildStderr === null) {
+    writeError('tianwen controlled-lifecycle: child transport failed\n')
+    return 1
+  }
+  const childStderr: NonNullable<ChildProcess['stderr']> = rawChildStderr
   return await new Promise(resolveExit => {
-    const fail = () => {
+    let exitCode: number | null | undefined
+    let exitSignal: NodeJS.Signals | null | undefined
+    let exitObserved = false
+    let terminationRequested = false
+    let stdoutEnded = false
+    let stderrEnded = false
+    function cleanup(): void {
+      child.removeListener('error', fail)
+      child.removeListener('exit', onExit)
+      childStdout.removeListener('data', onStdoutData)
+      childStdout.removeListener('end', onStdoutEnd)
+      childStdout.removeListener('error', fail)
+      childStdout.removeListener('close', onStdoutClose)
+      childStderr.removeListener('data', onStderrData)
+      childStderr.removeListener('end', onStderrEnd)
+      childStderr.removeListener('error', fail)
+      childStderr.removeListener('close', onStderrClose)
+    }
+    function fail(): void {
       if (finished) return
       finished = true
+      if (!exitObserved && !terminationRequested) {
+        terminationRequested = true
+        try { child.kill() } catch {}
+        try { childStdout.destroy() } catch {}
+        try { childStderr.destroy() } catch {}
+      }
       writeError('tianwen controlled-lifecycle: child transport failed\n')
       resolveExit(1)
     }
-    const collect = (chunks: Buffer[], chunk: Buffer, bytes: number): number => {
+    function collect(chunks: Buffer[], chunk: Buffer, bytes: number): number {
       if (finished) return bytes
       const nextBytes = bytes + chunk.byteLength
       if (nextBytes > CONTROLLED_LIFECYCLE_CHILD_OUTPUT_LIMIT_BYTES) {
-        try { child.kill() } catch {}
         fail()
         return bytes
       }
       chunks.push(chunk)
       return nextBytes
     }
-    child.once('error', fail)
-    child.once('close', code => {
-      if (finished) return
+    function maybeFinish(): void {
+      if (
+        finished || exitCode === undefined || exitSignal === undefined ||
+        !stdoutEnded || !stderrEnded
+      ) return
       try {
         const receipt = parseControlledLifecycleChildReceipt(
           Buffer.concat(stdout).toString('utf8'),
@@ -245,27 +309,52 @@ export async function monitorControlledLifecycleChild(
           expected,
         )
         const expectedCode = receipt.status === 'passed' ? 0 : 1
-        if (code !== expectedCode) {
+        if (exitSignal !== null || exitCode !== expectedCode) {
           fail()
           return
         }
         finished = true
+        cleanup()
         write(`${JSON.stringify(receipt)}\n`)
         resolveExit(expectedCode)
       } catch { fail() }
-    })
-    if (child.stdout === null || child.stderr === null) {
-      fail()
-      return
     }
-    child.stdout.on('data', (chunk: Buffer) => {
+    function onExit(code: number | null, signal: NodeJS.Signals | null): void {
+      exitObserved = true
+      exitCode = code
+      exitSignal = signal
+      maybeFinish()
+    }
+    function onStdoutData(chunk: Buffer): void {
       stdoutBytes = collect(stdout, chunk, stdoutBytes)
-    })
-    child.stderr.on('data', (chunk: Buffer) => {
+    }
+    function onStderrData(chunk: Buffer): void {
       stderrBytes = collect(stderr, chunk, stderrBytes)
-    })
-    child.stdout.once('error', fail)
-    child.stderr.once('error', fail)
+    }
+    function onStdoutEnd(): void {
+      stdoutEnded = true
+      maybeFinish()
+    }
+    function onStderrEnd(): void {
+      stderrEnded = true
+      maybeFinish()
+    }
+    function onStdoutClose(): void {
+      if (!stdoutEnded) fail()
+    }
+    function onStderrClose(): void {
+      if (!stderrEnded) fail()
+    }
+    child.on('error', fail)
+    child.once('exit', onExit)
+    childStdout.on('data', onStdoutData)
+    childStderr.on('data', onStderrData)
+    childStdout.once('end', onStdoutEnd)
+    childStderr.once('end', onStderrEnd)
+    childStdout.on('error', fail)
+    childStderr.on('error', fail)
+    childStdout.once('close', onStdoutClose)
+    childStderr.once('close', onStderrClose)
   })
 }
 

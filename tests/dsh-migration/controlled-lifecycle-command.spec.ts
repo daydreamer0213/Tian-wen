@@ -4,6 +4,9 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -18,6 +21,7 @@ import {
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
 import { main } from '../../packages/tianwen-runtime-bundle/src/cli.js'
+import * as controlledLifecycleModule from '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle.js'
 import {
   buildControlledLifecycleInvocation,
   monitorControlledLifecycleChild,
@@ -190,13 +194,18 @@ function installedProduct(
   const dshRoot = join(dataDir, 'dsh-host', 'node_modules', '@deepseek-ai', 'dsh')
   const profileRoot = join(dataDir, 'dsh-home', 'profiles', 'tianwen')
   const runtimeRoot = join(profileRoot, 'node_modules', '@tianwen', 'runtime-bundle')
+  const runtimeStoreRoot = join(
+    profileRoot,
+    'node_modules', '.pnpm', '@tianwen+runtime-bundle@0.0.0',
+    'node_modules', '@tianwen', 'runtime-bundle',
+  )
   const cliPath = join(runtimeRoot, 'dist', 'cli.js')
   const receiptPath = join(dataDir, 'receipts', 'tianwen-install.json')
   mkdirSync(join(dshRoot, 'lib'), { recursive: true })
-  mkdirSync(join(runtimeRoot, 'dist'), { recursive: true })
+  mkdirSync(join(runtimeStoreRoot, 'dist'), { recursive: true })
+  mkdirSync(join(runtimeRoot, '..'), { recursive: true })
+  symlinkSync(runtimeStoreRoot, runtimeRoot, 'junction')
   mkdirSync(join(profileRoot, 'node_modules', '.bin'), { recursive: true })
-  mkdirSync(join(dataDir, 'dsh-home', 'sessions'), { recursive: true })
-  mkdirSync(join(dataDir, 'state', 'evolution'), { recursive: true })
   mkdirSync(join(dataDir, 'packs'), { recursive: true })
   mkdirSync(join(dataDir, 'receipts'), { recursive: true })
   writeFileSync(join(dshRoot, 'package.json'), `${JSON.stringify({
@@ -214,9 +223,22 @@ function installedProduct(
   writeFileSync(join(runtimeRoot, 'package.json'), `${JSON.stringify({
     name: '@tianwen/runtime-bundle', version: '0.0.0',
     bin: { tianwen: 'dist/cli.js' },
+    exports: {
+      './controlled-lifecycle-runner': './dist/controlled-lifecycle-runner.js',
+    },
   })}\n`, 'utf8')
   writeFileSync(cliPath, 'process.exitCode = 0\n', 'utf8')
   writeFileSync(join(runtimeRoot, 'dist', 'runtime.js'), 'export {}\n', 'utf8')
+  writeFileSync(
+    join(runtimeRoot, 'dist', 'controlled-lifecycle-runner.js'),
+    'export const name = "tianwen-controlled-lifecycle-runner"\n',
+    'utf8',
+  )
+  writeFileSync(
+    join(runtimeRoot, 'controlled-lifecycle.patch.yml'),
+    '- insert:\n    - id: tianwen-controlled-lifecycle-runner\n      name: "@tianwen/runtime-bundle/controlled-lifecycle-runner"\n',
+    'utf8',
+  )
   const archive = Buffer.from('controlled runtime archive fixture', 'utf8')
   writeFileSync(archivePath, archive)
   const archiveDigest = `sha256:${createHash('sha256').update(archive).digest('hex')}` as const
@@ -224,7 +246,7 @@ function installedProduct(
     archiveDigest,
     archivePath,
     binDir: join(profileRoot, 'node_modules', '.bin'),
-    cliPath,
+    cliPath: realpathSync(cliPath),
     dataDir,
     dshVersion: '0.1.0-rc.7',
     hostRoot: join(dataDir, 'dsh-host'),
@@ -315,6 +337,10 @@ function controlledChild() {
   })
 }
 
+function nextEventLoopTurn(): Promise<void> {
+  return new Promise(resolve => { setImmediate(resolve) })
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -324,7 +350,7 @@ afterAll(() => {
 })
 
 describe('tianwen controlled-lifecycle', () => {
-  it('forwards one exact child receipt only when status and exit code agree', async () => {
+  it('forwards one exact child receipt after exit and both stream ends without child close', async () => {
     const expected = {
       manifestDigest: DIGEST_B as `sha256:${string}`,
       installedArchiveDigest: DIGEST_A as `sha256:${string}`,
@@ -340,10 +366,50 @@ describe('tianwen controlled-lifecycle', () => {
         write: line => { output.push(line) },
         writeError: line => { errors.push(line) },
       })
-      child.stdout.write(`${JSON.stringify(receipt)}\n`)
-      child.emit('close', code, null)
+      let settled = false
+      void exit.then(() => { settled = true })
+      child.stdout.end(`${JSON.stringify(receipt)}\n`)
+      child.stderr.end()
+      child.emit('exit', code, null)
+      await nextEventLoopTurn()
+      expect(settled).toBe(true)
       await expect(exit).resolves.toBe(code)
       expect(output).toEqual([`${JSON.stringify(receipt)}\n`])
+      expect(errors).toEqual([])
+      expect(child.kill).not.toHaveBeenCalled()
+    }
+  })
+
+  it('waits for child exit and both stream ends in any order', async () => {
+    const expected = {
+      manifestDigest: DIGEST_B as `sha256:${string}`,
+      installedArchiveDigest: DIGEST_A as `sha256:${string}`,
+    }
+    for (const last of ['exit', 'stdout', 'stderr'] as const) {
+      const child = controlledChild()
+      const output: string[] = []
+      const errors: string[] = []
+      const result = monitorControlledLifecycleChild(child as never, expected, {
+        write: line => { output.push(line) },
+        writeError: line => { errors.push(line) },
+      })
+      let settled = false
+      void result.then(() => { settled = true })
+      const events = {
+        exit: () => { child.emit('exit', 1, null) },
+        stdout: () => { child.stdout.end(`${JSON.stringify(stoppedReceipt())}\n`) },
+        stderr: () => { child.stderr.end() },
+      }
+      for (const event of ['exit', 'stdout', 'stderr'] as const) {
+        if (event !== last) events[event]()
+      }
+      await nextEventLoopTurn()
+      expect(settled).toBe(false)
+      events[last]()
+      await nextEventLoopTurn()
+      expect(settled).toBe(true)
+      await expect(result).resolves.toBe(1)
+      expect(output).toEqual([`${JSON.stringify(stoppedReceipt())}\n`])
       expect(errors).toEqual([])
     }
   })
@@ -396,22 +462,89 @@ describe('tianwen controlled-lifecycle', () => {
         write: line => { output.push(line) },
         writeError: line => { errors.push(line) },
       })
-      child.stdout.write(`${JSON.stringify(receipt)}\n`)
-      child.emit('close', code, null)
+      child.stdout.end(`${JSON.stringify(receipt)}\n`)
+      child.stderr.end()
+      child.emit('exit', code, null)
       await expect(exit).resolves.toBe(1)
       expect(output).toEqual([])
       expect(errors).toEqual(['tianwen controlled-lifecycle: child transport failed\n'])
+      expect(child.kill).not.toHaveBeenCalled()
     }
 
-    const child = controlledChild()
-    const errors: string[] = []
-    const exit = monitorControlledLifecycleChild(child as never, expected, {
-      writeError: line => { errors.push(line) },
-    })
-    child.stdout.write(Buffer.alloc(64 * 1024 + 1, 0x78))
-    await expect(exit).resolves.toBe(1)
-    expect(child.kill).toHaveBeenCalledOnce()
-    expect(errors).toEqual(['tianwen controlled-lifecycle: child transport failed\n'])
+  })
+
+  it('fails closed for incomplete or unsafe child transport events', async () => {
+    const expected = {
+      manifestDigest: DIGEST_B as `sha256:${string}`,
+      installedArchiveDigest: DIGEST_A as `sha256:${string}`,
+    }
+    for (const [stdout, stderr, code, signal] of [
+      [
+        `${JSON.stringify(stoppedReceipt())}\n${JSON.stringify(stoppedReceipt())}\n`,
+        '', 1, null,
+      ],
+      [`${JSON.stringify(stoppedReceipt())}\n`, 'raw-child-error', 1, null],
+      [`${JSON.stringify(stoppedReceipt())}\n`, '', null, 'SIGTERM'],
+    ] as const) {
+      const child = controlledChild()
+      const output: string[] = []
+      const errors: string[] = []
+      const result = monitorControlledLifecycleChild(child as never, expected, {
+        write: line => { output.push(line) },
+        writeError: line => { errors.push(line) },
+      })
+      child.stdout.end(stdout)
+      child.stderr.end(stderr)
+      child.emit('exit', code, signal)
+      await expect(result).resolves.toBe(1)
+      expect(output).toEqual([])
+      expect(errors).toEqual(['tianwen controlled-lifecycle: child transport failed\n'])
+      expect(child.kill).not.toHaveBeenCalled()
+    }
+
+    for (const failChild of [
+      (child: ReturnType<typeof controlledChild>) => {
+        child.emit('error', new Error('spawn failed'))
+      },
+      (child: ReturnType<typeof controlledChild>) => {
+        child.stdout.emit('error', new Error('stdout failed'))
+      },
+      (child: ReturnType<typeof controlledChild>) => {
+        child.stderr.emit('error', new Error('stderr failed'))
+      },
+      (child: ReturnType<typeof controlledChild>) => { child.stdout.emit('close') },
+      (child: ReturnType<typeof controlledChild>) => { child.stderr.emit('close') },
+      (child: ReturnType<typeof controlledChild>) => {
+        child.stdout.write(Buffer.alloc(64 * 1024 + 1, 0x78))
+      },
+    ]) {
+      const child = controlledChild()
+      const output: string[] = []
+      const errors: string[] = []
+      const result = monitorControlledLifecycleChild(child as never, expected, {
+        write: line => { output.push(line) },
+        writeError: line => { errors.push(line) },
+      })
+      failChild(child)
+      await expect(result).resolves.toBe(1)
+      const killCalls = child.kill.mock.calls.length
+      let lateEventThrew = false
+      try {
+        child.emit('error', new Error('late child error'))
+        child.stdout.emit('error', new Error('late stdout error'))
+        child.stderr.emit('error', new Error('late stderr error'))
+        child.stdout.emit('close')
+        child.stderr.emit('close')
+        child.stdout.emit('end')
+        child.stderr.emit('end')
+      } catch {
+        lateEventThrew = true
+      }
+      expect({ killCalls, lateEventThrew }).toEqual({ killCalls: 1, lateEventThrew: false })
+      expect(output).toEqual([])
+      expect(errors).toEqual(['tianwen controlled-lifecycle: child transport failed\n'])
+      expect(child.kill).toHaveBeenCalledOnce()
+    }
   })
 
   it('accepts only the exact digest-bound safe success and stopped receipts', () => {
@@ -462,6 +595,12 @@ describe('tianwen controlled-lifecycle', () => {
         '--profile', 'tianwen', '--patch',
         expect.stringMatching(/controlled-lifecycle\.patch\.yml$/u),
       ])
+      expect(existsSync(invocation.args.at(-1)!)).toBe(true)
+      expect(existsSync(join(
+        dataDir,
+        'dsh-home', 'profiles', 'tianwen', 'node_modules',
+        '@tianwen', 'runtime-bundle', 'dist', 'controlled-lifecycle-runner.js',
+      ))).toBe(true)
       expect(invocation.options).toMatchObject({
         shell: false,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -477,6 +616,63 @@ describe('tianwen controlled-lifecycle', () => {
         ])
     } finally {
       delete process.env.DEEPSEEK_API_KEY
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('reports only the proven installed receipt mismatch and starts no child', async () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const dataDir = mkdtempSync(join(FIXTURE_BASE, 'receipt-mismatch-'))
+    const operationRoot = join(dataDir, 'controlled-operation', 'activity-01')
+    const manifestPath = join(operationRoot, 'manifest.json')
+    const childMarker = join(dataDir, 'child-started')
+    const receiptPath = join(dataDir, 'receipts', 'tianwen-install.json')
+    mkdirSync(operationRoot, { recursive: true })
+    const archiveDigest = installedProduct(dataDir, [
+      "const { writeFileSync } = require('node:fs')",
+      `writeFileSync(${JSON.stringify(childMarker)}, '')`,
+      'process.exitCode = 0',
+      '',
+    ].join('\n'))
+    writeFileSync(manifestPath, `${JSON.stringify(
+      validManifest(dataDir, operationRoot, archiveDigest),
+    )}\n`, 'utf8')
+    const receipt = JSON.parse(readFileSync(receiptPath, 'utf8')) as Record<string, unknown>
+    receipt.cliPath = join(
+      dataDir, 'dsh-home', 'profiles', 'tianwen', 'node_modules',
+      '@tianwen', 'runtime-bundle', 'dist', 'cli.js',
+    )
+    writeFileSync(receiptPath, `${JSON.stringify(receipt)}\n`, 'utf8')
+    const errorConstructor = (
+      controlledLifecycleModule as typeof controlledLifecycleModule & {
+        ControlledLifecyclePreflightError?: new (...args: never[]) => Error & {
+          readonly code: 'installed-receipt-mismatch'
+        }
+      }
+    ).ControlledLifecyclePreflightError
+    let directError: unknown
+    try {
+      preflightControlledLifecycle(manifestPath, dataDir)
+    } catch (error) {
+      directError = error
+    }
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    try {
+      expect(errorConstructor).toBeTypeOf('function')
+      expect(directError).toMatchObject({ code: 'installed-receipt-mismatch' })
+      if (errorConstructor !== undefined) {
+        expect(directError).toBeInstanceOf(errorConstructor)
+      }
+      await expect(main([
+        'controlled-lifecycle', '--manifest', manifestPath,
+        '--data-dir', dataDir, '--json',
+      ])).resolves.toBe(1)
+      expect(stderr).toHaveBeenCalledTimes(1)
+      expect(stderr).toHaveBeenCalledWith(
+        'Error: controlled lifecycle preflight failed: installed-receipt-mismatch\n',
+      )
+      expect(existsSync(childMarker)).toBe(false)
+    } finally {
       rmSync(dataDir, { recursive: true, force: true })
     }
   })
@@ -658,6 +854,28 @@ describe('tianwen controlled-lifecycle', () => {
     } finally {
       rmSync(dataDir, { recursive: true, force: true })
       rmSync(escapedSessions, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a fresh Evolution root beneath an external state owner', () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const dataDir = mkdtempSync(join(FIXTURE_BASE, 'state-owner-data-'))
+    const escapedState = mkdtempSync(join(FIXTURE_BASE, 'state-owner-target-'))
+    const operationRoot = join(dataDir, 'controlled-operation', 'activity-01')
+    const manifestPath = join(operationRoot, 'manifest.json')
+    mkdirSync(operationRoot, { recursive: true })
+    const archiveDigest = installedProduct(dataDir)
+    symlinkSync(escapedState, join(dataDir, 'state'), 'junction')
+    writeFileSync(manifestPath, `${JSON.stringify(
+      validManifest(dataDir, operationRoot, archiveDigest),
+    )}\n`, 'utf8')
+    try {
+      expect(readdirSync(escapedState)).toEqual([])
+      expect(() => preflightControlledLifecycle(manifestPath, dataDir)).toThrow()
+      expect(readdirSync(escapedState)).toEqual([])
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+      rmSync(escapedState, { recursive: true, force: true })
     }
   })
 

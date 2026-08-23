@@ -651,6 +651,7 @@ function childEnvironment(paths, source) {
     SystemRoot: systemRoot,
     TEMP: temp,
     TMP: temp,
+    UV_THREADPOOL_SIZE: '1',
     WINDIR: source.WINDIR ?? systemRoot,
   }
 }

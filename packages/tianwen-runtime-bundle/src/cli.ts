@@ -26,6 +26,7 @@ import {
 } from './model.js'
 import type { ModelChoice } from './model.js'
 import {
+  ControlledLifecyclePreflightError,
   launchControlledLifecycle,
   preflightControlledLifecycle,
 } from './controlled-lifecycle.js'
@@ -265,7 +266,10 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       return 3
     }
     if (command === 'controlled-lifecycle') {
-      process.stderr.write('Error: controlled lifecycle preflight failed\n')
+      process.stderr.write(error instanceof ControlledLifecyclePreflightError &&
+        error.code === 'installed-receipt-mismatch'
+        ? 'Error: controlled lifecycle preflight failed: installed-receipt-mismatch\n'
+        : 'Error: controlled lifecycle preflight failed\n')
       return 1
     }
     if (

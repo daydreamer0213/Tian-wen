@@ -6,7 +6,7 @@ import {
   readdirSync,
   realpathSync,
 } from 'node:fs'
-import { isAbsolute, join, relative, sep } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
@@ -14,17 +14,15 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { createUserMessage, HarnessError } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import {
-  CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1,
-  CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
-  sha256,
-} from '@tianwen/evolution'
 import type {
   LearningTicketId,
   Sha256Digest,
   ControlledSkillEvalTaskType,
   TianwenRunId,
 } from '@tianwen/evolution'
+import { CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1 } from '../../tianwen-evolution/dist/controlled-skill-activation.js'
+import { CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST } from '../../tianwen-evolution/dist/controlled-skill-evaluation.js'
+import { sha256 } from '../../tianwen-evolution/dist/learning-intake.js'
 
 import { readControlledLifecycleManifest } from './controlled-lifecycle-contract.js'
 import type {
@@ -256,7 +254,6 @@ function rootPreflight(
     const declaredRoots = [
       manifest.roots.dataDir,
       manifest.roots.operationRoot,
-      manifest.roots.sessionsRoot,
       manifest.roots.evolutionRoot,
     ]
     for (const root of declaredRoots) {
@@ -265,21 +262,31 @@ function rootPreflight(
     }
     const dataRoot = realpathSync(manifest.roots.dataDir)
     const operationRoot = realpathSync(manifest.roots.operationRoot)
-    const sessionsRoot = realpathSync(manifest.roots.sessionsRoot)
     const evolutionRoot = realpathSync(manifest.roots.evolutionRoot)
     if (
       !strictChild(operationRoot, dataRoot)
-      || !strictChild(sessionsRoot, dataRoot)
       || !strictChild(evolutionRoot, dataRoot)
     ) throw new Error('root boundary mismatch')
 
     const configuredSessionsRoot = (ctx.sessionPersistence as unknown as {
       readonly config?: { readonly root?: unknown }
     }).config?.root
+    const declaredSessionsRoot = resolve(manifest.roots.sessionsRoot)
     if (
       typeof configuredSessionsRoot !== 'string'
-      || realpathSync(configuredSessionsRoot) !== sessionsRoot
+      || resolve(configuredSessionsRoot) !== declaredSessionsRoot
     ) throw new Error('session root mismatch')
+    let sessionsStat: ReturnType<typeof lstatSync> | undefined
+    try {
+      sessionsStat = lstatSync(declaredSessionsRoot)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || activityStarted) throw error
+    }
+    if (sessionsStat !== undefined && (
+      !sessionsStat.isDirectory()
+      || sessionsStat.isSymbolicLink()
+      || !strictChild(realpathSync(declaredSessionsRoot), dataRoot)
+    )) throw new Error('session root mismatch')
 
     const evolutionEntries = readdirSync(evolutionRoot, { withFileTypes: true })
     const expectedEntries = activityStarted ? ['artifacts', 'ledger.jsonl'] : ['artifacts']

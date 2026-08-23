@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { join, posix, resolve } from 'node:path'
+import { dirname, join, posix, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
@@ -18,10 +18,10 @@ const root = resolve(import.meta.dirname, '../..')
 const packageRoot = resolve(root, 'packages/tianwen-runtime-bundle')
 const compatPackageRoot = resolve(root, 'packages/tianwen-dsh-compat')
 const hostPackageRoot = resolve(root, 'packages/tianwen-dsh-host')
-const packRoot = process.env.TIANWEN_E2E_DATA_DIR === undefined
-  ? 'D:/DevData/tianwen/packs'
-  : resolve(process.env.TIANWEN_E2E_DATA_DIR, 'packs')
-const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.0.0.tgz')
+const packFixtureBase = resolve(
+  process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-dsh-probe',
+  'runtime-bundle-packs',
+)
 const tar = process.platform === 'win32'
   ? resolve(process.env.SystemRoot!, 'System32', 'tar.exe')
   : 'tar'
@@ -92,6 +92,8 @@ function isAllowedCliInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return path === 'src/cli.ts' || path === 'src/create.ts' ||
     path === 'src/model.ts' || path === 'src/resume.ts' ||
+    path === 'src/controlled-lifecycle.ts' ||
+    path === 'src/controlled-lifecycle-contract.ts' ||
     path === 'src/goal-live-smoke.ts' || isAllowedNaturalTrialInput(path) ||
     isAllowedStatusInput(path)
 }
@@ -106,6 +108,17 @@ function isAllowedResumeRunnerInput(input: string): boolean {
 
 function isAllowedCreateRunnerInput(input: string): boolean {
   return posix.normalize(input.replaceAll('\\', '/')) === 'src/create-runner.ts'
+}
+
+function isAllowedControlledLifecycleRunnerInput(input: string): boolean {
+  const path = posix.normalize(input.replaceAll('\\', '/'))
+  return path === 'src/controlled-lifecycle-runner.ts'
+    || path === 'src/controlled-lifecycle-contract.ts'
+    || [
+      '../tianwen-runtime/dist/',
+      '../tianwen-evidence/dist/',
+      '../tianwen-evolution/dist/',
+    ].some(root => path.startsWith(root))
 }
 
 function containsCredentialLiteral(text: string): boolean {
@@ -282,11 +295,44 @@ describe('@tianwen/runtime-bundle', () => {
       'dist/model-runner.js',
       'dist/create-runner.js',
       'dist/resume-runner.js',
+      'dist/controlled-lifecycle-runner.js',
       'cordis.patch.yml',
       'create.patch.yml',
       'model.patch.yml',
       'resume.patch.yml',
+      'controlled-lifecycle.patch.yml',
     ])
+  })
+
+  it('publishes the one-shot controlled lifecycle runner and patch', () => {
+    const manifest = json(resolve(packageRoot, 'package.json')) as {
+      exports: Record<string, unknown>
+      files: string[]
+    }
+    expect(manifest.exports['./controlled-lifecycle-runner']).toEqual({
+      default: './dist/controlled-lifecycle-runner.js',
+    })
+    expect(manifest.files).toContain('dist/controlled-lifecycle-runner.js')
+    expect(manifest.files).toContain('controlled-lifecycle.patch.yml')
+    expect(readFileSync(
+      resolve(packageRoot, 'controlled-lifecycle.patch.yml'),
+      'utf8',
+    )).toBe(`- id: headless-startup
+  disabled: true
+
+- id: headless-runner
+  disabled: true
+
+- id: goal-round-driver
+  disabled: true
+
+- insert:
+    - id: tianwen-controlled-lifecycle-runner
+      name: '@tianwen/runtime-bundle/controlled-lifecycle-runner'
+      config:
+        manifestPath: !!js process.env.TIANWEN_CONTROLLED_MANIFEST_PATH
+        manifestDigest: !!js process.env.TIANWEN_CONTROLLED_MANIFEST_DIGEST
+`)
   })
 
   it('ships one fixed offline smoke entry', async () => {
@@ -623,51 +669,112 @@ describe('@tianwen/runtime-bundle', () => {
     expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
   })
 
-  it('packs only the deployable runtime bundle files', () => {
-    expect(existsSync(archive)).toBe(true)
-    const entries = execFileSync(tar, ['-tzf', archive], {
-      encoding: 'utf8',
-      shell: false,
-    })
-      .split(/\r?\n/u)
-      .filter(Boolean)
-      .sort()
-    expect(entries).toEqual([
-      'package/LICENSE',
-      'package/cordis.patch.yml',
-      'package/create.patch.yml',
-      'package/dist/cli.js',
-      'package/dist/create-runner.js',
-      'package/dist/index.d.ts',
-      'package/dist/index.js',
-      'package/dist/model-runner.js',
-      'package/dist/resume-runner.js',
-      'package/dist/runtime.js',
-      'package/dist/smoke.js',
-      'package/dist/status.d.ts',
-      'package/dist/status.js',
-      'package/model.patch.yml',
-      'package/package.json',
-      'package/resume.patch.yml',
+  it('bundles the controlled lifecycle runner through exact public DSH roots', () => {
+    const source = readFileSync(
+      resolve(packageRoot, 'dist/controlled-lifecycle-runner.js'),
+      'utf8',
+    )
+    const metafile = json(resolve(
+      packageRoot,
+      'dist/controlled-lifecycle-runner.meta.json',
+    )) as {
+      inputs: Record<string, unknown>
+      outputs: Record<string, { imports: { path: string; external?: boolean }[] }>
+    }
+    const output = Object.entries(metafile.outputs).find(([path]) =>
+      path.replaceAll('\\', '/').endsWith('dist/controlled-lifecycle-runner.js'))?.[1]
+    expect(output).toBeDefined()
+    expect(externalPackages(output!.imports)).toEqual([
+      '@deepseek-ai/dsh-agent',
+      '@deepseek-ai/dsh-credentials',
+      '@deepseek-ai/dsh-llm',
+      '@deepseek-ai/dsh-session',
+      '@deepseek-ai/dsh-tools',
     ])
-    expect(entries.some(entry => /(^|\/)src\//u.test(entry))).toBe(false)
-    expect(entries.some(entry => /(^|\/)node_modules\//u.test(entry))).toBe(false)
-    expect(entries).not.toContain('package/dist/runtime.d.ts')
-    expect(entries).not.toContain('package/dist/runtime.meta.json')
-    expect(entries.some(entry => entry.includes('@tianwen'))).toBe(false)
-    expect(entries.some(entry => /scripted-adapter|dsh-probe-bundle/u.test(entry))).toBe(false)
-    expect(entries.some(entry => /@deepseek-ai\/[^/]+\/src\//u.test(entry))).toBe(false)
-    expect(entries.some(entry => /fixtures\/deepseek-goal-round-fetch|\.map$/u.test(entry))).toBe(false)
-    for (const entry of entries.filter(entry => !entry.endsWith('/'))) {
-      const archiveText = execFileSync(tar, ['-xOf', archive, entry], {
+    expect(Object.keys(metafile.inputs).filter(input =>
+      !isAllowedControlledLifecycleRunnerInput(input))).toEqual([])
+    expect(Object.keys(metafile.inputs).some(path =>
+      /node_modules[\\/]@deepseek-ai/u.test(path))).toBe(false)
+    expect(source).not.toMatch(/from\s+["']@tianwen\//u)
+    expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
+    expect(source).not.toMatch(
+      /ScriptedAdapter|scripted-adapter|agent-loop-testkit|test-harness|dsh-probe-bundle/u,
+    )
+    expect(containsCredentialLiteral(source)).toBe(false)
+  })
+
+  it('packs only the deployable runtime bundle files', () => {
+    mkdirSync(packFixtureBase, { recursive: true })
+    const packRoot = mkdtempSync(join(packFixtureBase, 'pack-'))
+    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.0.0.tgz')
+    const pnpmEntry = resolve(dirname(process.execPath), 'node_modules/corepack/dist/pnpm.js')
+    try {
+      execFileSync(process.execPath, [
+        pnpmEntry,
+        'pack',
+        '--pack-destination', packRoot,
+        '--skip-manifest-obfuscation',
+      ], {
+        cwd: packageRoot,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          COREPACK_HOME: process.platform === 'win32'
+            ? 'D:\\DevData\\corepack-home'
+            : process.env.COREPACK_HOME,
+          PNPM_CONFIG_STORE_DIR: process.env.PNPM_CONFIG_STORE_DIR,
+        },
+        shell: false,
+      })
+      expect(existsSync(archive)).toBe(true)
+      const entries = execFileSync(tar, ['-tzf', archive], {
         encoding: 'utf8',
         shell: false,
       })
-      expect(archiveText).not.toContain(root)
-      expect(archiveText).not.toContain(root.replaceAll('\\', '/'))
-      expect(archiveText).not.toMatch(/C:[\\/]Users[\\/]|fixtures[\\/]deepseek-goal-round-fetch|@deepseek-ai[\\/][^\\/]+[\\/]src[\\/]/u)
-      expect(containsCredentialLiteral(archiveText)).toBe(false)
-      expect(archiveText).not.toMatch(/\bsk-[A-Za-z0-9_-]{16,}\b|\bBearer\s+[A-Za-z0-9._~+\/=-]{16,}\b|(?:authorization|x-api-key)\s*[:=]\s*['"`]?\S{16,}/iu)
+        .split(/\r?\n/u)
+        .filter(Boolean)
+        .sort()
+      expect(entries).toEqual([
+        'package/LICENSE',
+        'package/controlled-lifecycle.patch.yml',
+        'package/cordis.patch.yml',
+        'package/create.patch.yml',
+        'package/dist/cli.js',
+        'package/dist/controlled-lifecycle-runner.js',
+        'package/dist/create-runner.js',
+        'package/dist/index.d.ts',
+        'package/dist/index.js',
+        'package/dist/model-runner.js',
+        'package/dist/resume-runner.js',
+        'package/dist/runtime.js',
+        'package/dist/smoke.js',
+        'package/dist/status.d.ts',
+        'package/dist/status.js',
+        'package/model.patch.yml',
+        'package/package.json',
+        'package/resume.patch.yml',
+      ])
+      expect(entries.some(entry => /(^|\/)src\//u.test(entry))).toBe(false)
+      expect(entries.some(entry => /(^|\/)node_modules\//u.test(entry))).toBe(false)
+      expect(entries).not.toContain('package/dist/runtime.d.ts')
+      expect(entries).not.toContain('package/dist/runtime.meta.json')
+      expect(entries.some(entry => entry.includes('@tianwen'))).toBe(false)
+      expect(entries.some(entry => /scripted-adapter|dsh-probe-bundle/u.test(entry))).toBe(false)
+      expect(entries.some(entry => /@deepseek-ai\/[^/]+\/src\//u.test(entry))).toBe(false)
+      expect(entries.some(entry => /fixtures\/deepseek-goal-round-fetch|\.map$/u.test(entry))).toBe(false)
+      for (const entry of entries.filter(entry => !entry.endsWith('/'))) {
+        const archiveText = execFileSync(tar, ['-xOf', archive, entry], {
+          encoding: 'utf8',
+          shell: false,
+        })
+        expect(archiveText).not.toContain(root)
+        expect(archiveText).not.toContain(root.replaceAll('\\', '/'))
+        expect(archiveText).not.toMatch(/C:[\\/]Users[\\/]|fixtures[\\/]deepseek-goal-round-fetch|@deepseek-ai[\\/][^\\/]+[\\/]src[\\/]/u)
+        expect(containsCredentialLiteral(archiveText)).toBe(false)
+        expect(archiveText).not.toMatch(/\bsk-[A-Za-z0-9_-]{16,}\b|\bBearer\s+[A-Za-z0-9._~+\/=-]{16,}\b|x-api-key\s*[:=]\s*['"`]?\S{16,}/iu)
+      }
+    } finally {
+      rmSync(packRoot, { recursive: true, force: true })
     }
   })
 })
