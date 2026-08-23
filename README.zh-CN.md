@@ -18,13 +18,11 @@ Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成
 
 ## 已安装入口准备状态
 
-“已安装入口准备状态”是正式操作前的 publication 结论：官方 installer 会发布 CLI 入口、one-shot runner 和静态 DSH Profile patch。这些是 zero-real-Provider 的 installer、preflight 与 transport 分段证据；不代表配置的 DeepSeek 生命周期已经成功。Task 9B.0 随后把范围收窄为“archive/publication 已准备好，official launcher 仍需下文修正”。配置的 DeepSeek 真实受控生命周期尚未运行。
+“已安装入口准备状态”表示官方 installer 会发布 CLI 入口、one-shot runner 和静态 DSH Profile patch。Task 9B.0 完成了一次 official installer，18/18 publication 通过。唯一一次 official `tianwen.CMD model status --json` 为 exit 0、stderr 0 bytes、stdout 0 bytes，且没有重跑。正式 activity-01 尚未消费，真实 Provider activity 仍为 0，真实 Provider lifecycle 尚未运行。
 
-repair `7042a7d84712d499671b464251d0f09ec898fcf6` 已合并为 main `67ce961487f93734230c06c1624f44573703691f`。exact-main CI run `32639440639`、event `push`、attempt 1 中，Python 和 TypeScript 成功；installer-windows 失败。recursive Runtime Bundle build 成功；Windows 单一三-spec 命令为 1 failed / 103 passed。installer 与 controlled command specs 通过；唯一失败是 Runtime Bundle patch 完整文本比较中，Windows checkout 文本使用 CRLF，测试 template 使用 LF。这种表示差异不是 Runtime、Agent、lifecycle 或 installer 产品语义缺陷的证据。
+R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` 在 CLI guard 中比较 canonical real file identity，并由 Windows pnpm-like junction focused contract 证明。R0.2 `1b323c498a6fa177975fdd852738d9738995c604` 把 controlled overlay 固定为 DeepSeek normal/0，只禁用 session-title-llm，并保持 ordinary Profile 为 normal/2。
 
-该 run 不会 rerun 或 dispatch。Task 9B 继续阻塞，直到新的 exact-main CI push run attempt 1 中 Python、TypeScript 和 installer-windows 全部成功；这个受控生命周期的真实 Provider activity 仍为 0。
-
-已安装的 controlled-lifecycle one-shot runner 不导入或注册 `ScriptedAdapter`；这个夹具使用的 scripted adapter 只由测试提供。证据标签仍是 `configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`，并且 `naturalUserEvidence=not-claimed`、`externalUserEvidence=not-claimed`。
+已安装的 controlled-lifecycle one-shot runner 不导入或注册 `ScriptedAdapter`；mechanism fixture 使用的 scripted adapter 只由测试提供。正式 operation 标签是 `configured-provider-capable` + `development-only` + `synthetic-defect`，并固定 `naturalUserEvidence=not-claimed`、`externalUserEvidence=not-claimed`；`scripted-fixture` 不是正式 operation 标签。
 
 正式已安装命令的形式是：
 
@@ -32,13 +30,7 @@ repair `7042a7d84712d499671b464251d0f09ec898fcf6` 已合并为 main `67ce961487f
 tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
 ```
 
-[受控真实运行准备交接](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)记录了已验证的边界和仍缺失的证据。历史 pre-R0 边界曾是：reviewed repair exact SHA → 新 automatic exact-main push run attempt 1，Python、TypeScript 和 installer-windows 全部成功 → 唯一一次正式 real Provider lifecycle。该历史措辞已被下文的当前顺序取代。只有旧 exact-main CI checkpoint 已完成；real Provider lifecycle 部分没有运行，activity-01 尚未消费。
-
-上述历史 CI 门已经完成：newline repair `402b23d4252910ad367ba2070528b99067a041ca` 已合并为 main `95077be9265818cbcec443a89a71e22363ae1cde`，automatic push run `32641914572`、attempt 1 的 Python、TypeScript、installer-windows 三 job 全绿。Task 9B.0 完成了一次 official installer，18/18 publication 通过。唯一一次 official `tianwen.CMD model status --json` 为 exit 0、stderr 0 bytes、stdout 0 bytes；没有重跑。旧产品根及其证据继续保留，正式 activity-01 尚未消费，真实 Provider activity 仍为 0。
-
-R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` 仍只是 feature implementation：CLI guard 现在比较 canonical real file identity，并由 Windows pnpm-like junction focused contract 证明。修正后的 official `.CMD` status 尚未运行。R0.2 `1b323c498a6fa177975fdd852738d9738995c604` 把 controlled overlay 固定为 DeepSeek normal/0，只禁用 session-title-llm；session-title、llm-retry、settings 仍启用，ordinary Profile 保持 normal/2。
-
-这些修改尚未受控 merge，没有匹配的新 exact-main CI，也没有在新 formal product root 做 official install 或 model status；保留的 Task 9B.0 旧 root 不会复用。唯一当前顺序是：独立 exact feature review → controlled main integration → automatic exact-main push attempt 1 的 Python、TypeScript、installer-windows 全部成功 → 在新 formal product root 做一次 official install/status + packet freeze → 恰好一次真实 lifecycle。
+[受控真实运行准备交接](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)保留精确实现与 CI 审计历史。长期发布门只有一条：reviewed feature 必须先受控进入 main，并由对应 automatic exact-main push attempt 1 的 Python、TypeScript、installer-windows 三个 job 全绿。之后才允许在 new formal product root 做一次 official install/status 与 packet freeze，最后恰好运行一次 formal real lifecycle。保留的 Task 9B.0 旧 root 不会复用。
 
 ## 为什么需要天问
 

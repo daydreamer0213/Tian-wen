@@ -31,7 +31,7 @@ Repair `7042a7d84712d499671b464251d0f09ec898fcf6` was then merged as main `67ce9
 
 Newline repair `402b23d4252910ad367ba2070528b99067a041ca` was merged as main `95077be9265818cbcec443a89a71e22363ae1cde`. Automatic exact-main CI run `32641914572`, event `push`, attempt 1 completed successfully: Python, TypeScript, and installer-windows all passed. No earlier failed run was rerun or dispatched.
 
-The readiness-closure feature then added two reviewed implementation points without yet merging or operating the installed product:
+At the pre-integration readiness snapshot anchored by R0.2 exact `1b323c498a6fa177975fdd852738d9738995c604` and recorded before controlled main integration, the readiness-closure feature contained two reviewed implementation points without an installed-product operation:
 
 - R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` changes the CLI guard to canonical real file identity. A Windows pnpm-like junction focused contract proves the launcher spelling resolves to the built entry. Post-repair official `.CMD` status has not been run.
 - R0.2 `1b323c498a6fa177975fdd852738d9738995c604` freezes the controlled overlay at `llm-deepseek retryPolicy=normal/0`. Only session-title-llm is disabled; session-title, llm-retry, and settings remain enabled, while the ordinary Profile remains DSH normal/2. With an actual normal/2 policy, the runner fails closed with 0 Agent, 0 model request, and 0 durable ledger. `--dump-config` is configuration-composition evidence, not a fresh installed operation.
@@ -107,7 +107,7 @@ The preserved product root and evidence remain intact. No manifest, operation ro
 
 ## 9. Next boundary: Task 9B-R0 then one formal lifecycle
 
-Task 9B remains blocked. R0.1 and R0.2 are feature implementation only: the feature has not been merged, there is no matching new exact-main CI run, no new formal product root has been installed or checked with model status, and no Provider has been called.
+At that pre-integration readiness snapshot, Task 9B remained blocked: no new formal product root had been installed or checked with model status, and no Provider had been called.
 
 The formal operation packet remains frozen with 15 tasks, 20 workspaces, and 25 Sessions, plus exact byte rules, an operation freeze receipt, and a pre-frozen postmortem checker. Its frozen formal operation labels are source=configured-provider-capable, environment=development-only, defect=synthetic-defect, with `naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed`. `scripted-fixture` is only the exercised source of the existing mechanism fixture, not a label on the future formal operation manifest or receipt.
 
@@ -117,4 +117,4 @@ Failure evidence has three levels:
 - `durable-observed`: the frozen checker may aggregate facts already persisted by the 25 Sessions, but it does not turn those durable events into Provider-account or tool-body observations.
 - `unknown`: a stopped or transport outcome remains unclaimed wherever neither of those sources proves the fact.
 
-No receipt schema, telemetry, budgeter, database, or general evidence framework is added for this reporting boundary. The exact next sequence is independent exact feature review → controlled main integration → automatic exact-main push attempt 1 with Python, TypeScript, and installer-windows all successful → one official install and model status on a new formal product root plus packet freeze → exactly one real lifecycle. The preserved Task 9B.0 root must not be reused, overwritten, or cleaned, and any stopped result remains evidence rather than a reason to retry into a better-looking outcome.
+No receipt schema, telemetry, budgeter, database, or general evidence framework is added for this reporting boundary. The permanent gate order requires a reviewed feature to enter main through controlled integration and its corresponding automatic exact-main push attempt 1 to pass Python, TypeScript, and installer-windows. Only then may one official install and model status run on a new formal product root with packet freeze, followed by exactly one real lifecycle. The preserved Task 9B.0 root must not be reused, overwritten, or cleaned, and any stopped result remains evidence rather than a reason to retry into a better-looking outcome.

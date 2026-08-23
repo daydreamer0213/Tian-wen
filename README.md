@@ -21,13 +21,11 @@ The configured DeepSeek controlled lifecycle has not run. Its evidence remains
 
 ## Installed ingress readiness
 
-Installed ingress readiness was the pre-operation publication conclusion: the official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch. This is zero-real-Provider installer, preflight, and transport evidence; it is not a successful configured DeepSeek lifecycle. Task 9B.0 later narrowed that claim: archive/publication readiness is complete, while the official launcher still needs the correction recorded below. The configured DeepSeek real controlled lifecycle has not run.
+Installed ingress readiness means the official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch. Task 9B.0 completed one official installer run with 18/18 publication. Its only official `tianwen.CMD model status --json` invocation exited 0 with 0 stderr bytes and 0 stdout bytes and was not rerun. Formal activity-01 remains unconsumed, real Provider activity remains 0, and the formal real Provider lifecycle has not run.
 
-Repair `7042a7d84712d499671b464251d0f09ec898fcf6` is merged as main `67ce961487f93734230c06c1624f44573703691f`. Exact-main CI run `32639440639`, event `push`, attempt 1: Python and TypeScript succeeded; installer-windows failed. The recursive Runtime Bundle build succeeded, and the single Windows three-spec command finished with 1 failed / 103 passed. The installer and controlled command specs passed. The only failure was the Runtime Bundle patch's full-text comparison: Windows checkout text used CRLF while the test template used LF. This representation mismatch is not evidence of a Runtime, Agent, lifecycle, or installer product semantic defect.
+R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` compares canonical real file identity in the CLI guard, as proved by a Windows pnpm-like junction focused contract. R0.2 `1b323c498a6fa177975fdd852738d9738995c604` freezes the controlled overlay at DeepSeek normal/0, disables only session-title-llm, and preserves the ordinary Profile at normal/2.
 
-That run will not be rerun or dispatched. Task 9B remains blocked until Python, TypeScript, and installer-windows all succeed on a new exact-main CI push run attempt 1; for this controlled lifecycle, real Provider activity remains 0.
-
-The installed controlled-lifecycle one-shot runner does not import or register `ScriptedAdapter`; the scripted adapter used by this fixture is supplied only by tests. Evidence remains `configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`, with `naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed`.
+The installed controlled-lifecycle one-shot runner does not import or register `ScriptedAdapter`; the scripted adapter used by the mechanism fixture is supplied only by tests. Formal operation labels are `configured-provider-capable` + `development-only` + `synthetic-defect`, with `naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed`; `scripted-fixture` is not a formal operation label.
 
 The formal installed command shape is:
 
@@ -35,13 +33,7 @@ The formal installed command shape is:
 tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
 ```
 
-The [controlled real operation readiness handoff](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) records the verified boundary and the evidence that is still missing. Its historical pre-R0 boundary was: reviewed repair exact SHA → new automatic exact-main push run attempt 1 with Python, TypeScript, and installer-windows all successful → exactly one formal real Provider lifecycle. That historical wording is superseded by the current sequence below. Only the old exact-main CI checkpoint was completed; the real Provider lifecycle portion did not run, and activity-01 remains unconsumed.
-
-That historical CI boundary is now complete: newline repair `402b23d4252910ad367ba2070528b99067a041ca` was merged as main `95077be9265818cbcec443a89a71e22363ae1cde`, and automatic push run `32641914572`, attempt 1, passed Python, TypeScript, and installer-windows. Task 9B.0 completed one official installer run with 18/18 publication. The only official `tianwen.CMD model status --json` invocation exited 0 with 0 stderr bytes and 0 stdout bytes. It was not rerun. The preserved product root and its evidence remain intact; formal activity-01 remains unconsumed, and real Provider activity remains 0.
-
-R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` is feature implementation only: the CLI guard now compares canonical real file identity, as proved by a Windows pnpm-like junction focused contract. Post-repair official `.CMD` status has not been run. R0.2 `1b323c498a6fa177975fdd852738d9738995c604` freezes the controlled overlay at DeepSeek normal/0 and disables only session-title-llm; session-title, llm-retry, and settings remain enabled, while the ordinary Profile remains normal/2.
-
-These changes have not been merged, there is no matching new exact-main CI, and no new formal product root has been installed or checked with model status. The preserved Task 9B.0 root will not be reused. The only current sequence is independent exact feature review → controlled main integration → automatic exact-main push attempt 1 with Python, TypeScript, and installer-windows all successful → one official install and model status on a new formal product root plus packet freeze → exactly one real lifecycle.
+The [controlled real operation readiness handoff](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) retains the exact implementation and CI audit history. The permanent release gate is simpler: a reviewed feature must first enter main through controlled integration, and its corresponding automatic exact-main push attempt 1 must pass Python, TypeScript, and installer-windows. Only then may one official install and model status run on a new formal product root with packet freeze, followed by exactly one formal real lifecycle. The preserved Task 9B.0 root is not reused.
 
 ## Why Tianwen exists
 
