@@ -70,6 +70,9 @@ function isAllowedStatusInput(input: string): boolean {
       '../tianwen-evolution/dist/ledger.js',
       '../tianwen-evolution/dist/learning-intake.js',
       '../tianwen-evolution/dist/outcome-intake.js',
+      '../tianwen-evolution/dist/controlled-skill-activation.js',
+      '../tianwen-evolution/dist/controlled-skill-evaluation.js',
+      '../tianwen-evolution/dist/controlled-skill-shadow.js',
       '../tianwen-evolution/dist/skill-evaluation.js',
       '../tianwen-evolution/dist/skill-governance.js',
     ].includes(path)
@@ -488,9 +491,11 @@ describe('@tianwen/runtime-bundle', () => {
     const packageExternals = externalPackages(output!.imports)
     expect(packageExternals).toEqual([
       '@deepseek-ai/cordis',
+      '@deepseek-ai/dsh-agent',
       '@deepseek-ai/dsh-llm',
       '@deepseek-ai/dsh-session',
       '@deepseek-ai/dsh-skill',
+      '@deepseek-ai/dsh-tools',
     ])
     expect(Object.keys(metafile.inputs).filter(input =>
       !isAllowedRuntimeInput(input))).toEqual([])
