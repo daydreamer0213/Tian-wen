@@ -20,9 +20,9 @@ Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成
 
 已安装入口现在已准备好：官方 installer 会发布 CLI 入口、one-shot runner 和静态 DSH Profile patch。这些是 zero-real-Provider 的 installer、preflight 与 transport 分段证据；不代表配置的 DeepSeek 生命周期已经成功。配置的 DeepSeek 真实受控生命周期尚未运行。
 
-feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` 已合并为 main `ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d`。exact-main CI run `32635033552` attempt 1 中，Python 和 installer-windows 成功；TypeScript 因 Windows-owned contract specs 在 Ubuntu 运行而失败。这次平台归属失败不是 Runtime、Agent 或 lifecycle 业务语义缺陷的证据。
+repair `7042a7d84712d499671b464251d0f09ec898fcf6` 已合并为 main `67ce961487f93734230c06c1624f44573703691f`。exact-main CI run `32639440639`、event `push`、attempt 1 中，Python 和 TypeScript 成功；installer-windows 失败。recursive Runtime Bundle build 成功；Windows 单一三-spec 命令为 1 failed / 103 passed。installer 与 controlled command specs 通过；唯一失败是 Runtime Bundle patch 完整文本比较中，Windows checkout 文本使用 CRLF，测试 template 使用 LF。这种表示差异不是 Runtime、Agent、lifecycle 或 installer 产品语义缺陷的证据。
 
-旧 run 不会重跑。Task 9B 继续阻塞，直到新的 exact-main CI push run attempt 1 中 Python、TypeScript 和 installer-windows 全部成功；这个受控生命周期的真实 Provider activity 仍为 0。
+该 run 不会 rerun 或 dispatch。Task 9B 继续阻塞，直到新的 exact-main CI push run attempt 1 中 Python、TypeScript 和 installer-windows 全部成功；这个受控生命周期的真实 Provider activity 仍为 0。
 
 已安装的 controlled-lifecycle one-shot runner 不导入或注册 `ScriptedAdapter`；这个夹具使用的 scripted adapter 只由测试提供。证据标签仍是 `configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`，并且 `naturalUserEvidence=not-claimed`、`externalUserEvidence=not-claimed`。
 
@@ -32,7 +32,7 @@ feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` 已合并为 main `ce3521f26e
 tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
 ```
 
-[受控真实运行准备交接](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)记录了已验证的边界和仍缺失的证据。下一边界是：reviewed repair exact SHA → 新 exact-main CI push run attempt 1，Python、TypeScript 和 installer-windows 全部成功 → 唯一一次正式 real Provider lifecycle。
+[受控真实运行准备交接](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)记录了已验证的边界和仍缺失的证据。下一边界是：reviewed repair exact SHA → 新 automatic exact-main push run attempt 1，Python、TypeScript 和 installer-windows 全部成功 → 唯一一次正式 real Provider lifecycle。
 
 ## 为什么需要天问
 

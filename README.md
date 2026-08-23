@@ -23,9 +23,9 @@ The configured DeepSeek controlled lifecycle has not run. Its evidence remains
 
 Installed ingress readiness is now complete: the official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch. This is zero-real-Provider installer, preflight, and transport evidence; it is not a successful configured DeepSeek lifecycle. The configured DeepSeek real controlled lifecycle has not run.
 
-Feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` is merged as main `ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d`. Exact-main CI run `32635033552` attempt 1 kept the Python and Windows installer checks green. Python and installer-windows succeeded; TypeScript failed because Windows-owned contract specs ran on Ubuntu. This placement failure is not evidence of a Runtime, Agent, or lifecycle semantic defect.
+Repair `7042a7d84712d499671b464251d0f09ec898fcf6` is merged as main `67ce961487f93734230c06c1624f44573703691f`. Exact-main CI run `32639440639`, event `push`, attempt 1: Python and TypeScript succeeded; installer-windows failed. The recursive Runtime Bundle build succeeded, and the single Windows three-spec command finished with 1 failed / 103 passed. The installer and controlled command specs passed. The only failure was the Runtime Bundle patch's full-text comparison: Windows checkout text used CRLF while the test template used LF. This representation mismatch is not evidence of a Runtime, Agent, lifecycle, or installer product semantic defect.
 
-That run will not be rerun. Task 9B remains blocked until Python, TypeScript, and installer-windows all succeed on a new exact-main CI push run attempt 1; for this controlled lifecycle, real Provider activity remains 0.
+That run will not be rerun or dispatched. Task 9B remains blocked until Python, TypeScript, and installer-windows all succeed on a new exact-main CI push run attempt 1; for this controlled lifecycle, real Provider activity remains 0.
 
 The installed controlled-lifecycle one-shot runner does not import or register `ScriptedAdapter`; the scripted adapter used by this fixture is supplied only by tests. Evidence remains `configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`, with `naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed`.
 
@@ -35,7 +35,7 @@ The formal installed command shape is:
 tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
 ```
 
-The [controlled real operation readiness handoff](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) records the verified boundary and the evidence that is still missing. The next boundary is: reviewed repair exact SHA → new exact-main CI push run attempt 1 with Python, TypeScript, and installer-windows all successful → exactly one formal real Provider lifecycle.
+The [controlled real operation readiness handoff](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) records the verified boundary and the evidence that is still missing. The next boundary is: reviewed repair exact SHA → new automatic exact-main push run attempt 1 with Python, TypeScript, and installer-windows all successful → exactly one formal real Provider lifecycle.
 
 ## Why Tianwen exists
 

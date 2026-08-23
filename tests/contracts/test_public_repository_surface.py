@@ -365,22 +365,29 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         "tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json",
         "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
         (
-            "Feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` is merged as "
-            "main `ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d`."
+            "Repair `7042a7d84712d499671b464251d0f09ec898fcf6` is merged as "
+            "main `67ce961487f93734230c06c1624f44573703691f`."
         ),
-        "run `32635033552` attempt 1",
-        "Python and installer-windows succeeded; TypeScript failed because Windows-owned contract specs ran on Ubuntu.",
-        "not evidence of a Runtime, Agent, or lifecycle semantic defect",
-        "That run will not be rerun.",
+        "run `32639440639`, event `push`, attempt 1",
+        "Python and TypeScript succeeded; installer-windows failed.",
+        "recursive Runtime Bundle build succeeded",
+        "1 failed / 103 passed",
+        "installer and controlled command specs passed",
+        "Windows checkout text used CRLF while the test template used LF",
+        (
+            "not evidence of a Runtime, Agent, lifecycle, or installer product "
+            "semantic defect"
+        ),
+        "That run will not be rerun or dispatched.",
         (
             "Task 9B remains blocked until Python, TypeScript, and "
             "installer-windows all succeed on a new exact-main CI push run attempt 1"
         ),
         "real Provider activity remains 0",
         (
-            "reviewed repair exact SHA → new exact-main CI push run attempt 1 with "
-            "Python, TypeScript, and installer-windows all successful → exactly one "
-            "formal real Provider lifecycle"
+            "reviewed repair exact SHA → new automatic exact-main push run attempt 1 "
+            "with Python, TypeScript, and installer-windows all successful → exactly "
+            "one formal real Provider lifecycle"
         ),
     ):
         assert fact in readme_en
@@ -400,20 +407,27 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         "`externalUserEvidence=not-claimed`",
         "tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json",
         "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
-        "feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` 已合并为 main `ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d`。",
-        "run `32635033552` attempt 1",
-        "Python 和 installer-windows 成功；TypeScript 因 Windows-owned contract specs 在 Ubuntu 运行而失败。",
-        "不是 Runtime、Agent 或 lifecycle 业务语义缺陷的证据",
-        "旧 run 不会重跑",
+        (
+            "repair `7042a7d84712d499671b464251d0f09ec898fcf6` 已合并为 main "
+            "`67ce961487f93734230c06c1624f44573703691f`。"
+        ),
+        "run `32639440639`、event `push`、attempt 1",
+        "Python 和 TypeScript 成功；installer-windows 失败。",
+        "recursive Runtime Bundle build 成功",
+        "1 failed / 103 passed",
+        "installer 与 controlled command specs 通过",
+        "Windows checkout 文本使用 CRLF，测试 template 使用 LF",
+        "不是 Runtime、Agent、lifecycle 或 installer 产品语义缺陷的证据",
+        "该 run 不会 rerun 或 dispatch",
         (
             "Task 9B 继续阻塞，直到新的 exact-main CI push run attempt 1 中 "
             "Python、TypeScript 和 installer-windows 全部成功"
         ),
         "真实 Provider activity 仍为 0",
         (
-            "reviewed repair exact SHA → 新 exact-main CI push run attempt 1，"
-            "Python、TypeScript 和 installer-windows 全部成功 → 唯一一次正式 "
-            "real Provider lifecycle"
+            "reviewed repair exact SHA → 新 automatic exact-main push run attempt 1，"
+            "Python、TypeScript 和 installer-windows 全部成功 → 唯一一次正式 real "
+            "Provider lifecycle"
         ),
     ):
         assert fact in readme_zh
@@ -440,15 +454,16 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         "2026-08-23-tianwen-v0.1-controlled-real-operation.md",
         "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
         "tianwen-v0.1-controlled-skill-lifecycle-handoff.md",
-        "feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` 已合并为 main `ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d`",
-        "run `32635033552` attempt 1",
-        "Python 与 installer-windows 成功，TypeScript 因 Windows-owned contract specs 错放在 Ubuntu 而失败",
-        "不是 Runtime、Agent 或 lifecycle 业务语义缺陷的证据",
+        "repair `7042a7d84712d499671b464251d0f09ec898fcf6` 已合并为 main `67ce961487f93734230c06c1624f44573703691f`",
+        "run `32639440639`、event `push`、attempt 1",
+        "Python 与 TypeScript 成功，installer-windows 失败",
+        "Windows checkout 的 CRLF 与测试 template 的 LF 表示差异",
+        "不是 Runtime、Agent、lifecycle 或 installer 产品语义缺陷的证据",
         "Task 9B 继续阻塞",
         "这个受控生命周期的真实 Provider activity 仍为 0",
         (
-            "reviewed CI platform repair exact-SHA → 新 exact-main CI push attempt 1 → "
-            "成功后一次正式真实 Provider lifecycle"
+            "reviewed patch newline repair exact-SHA → 新 automatic exact-main push "
+            "attempt 1 → 三 job 成功后一次正式真实 Provider lifecycle"
         ),
     ):
         assert fact in architecture
@@ -527,7 +542,7 @@ def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
         "## 4. Installed ingress readiness and preserved validation history",
         "## 5. Evidence labels, receipt and privacy",
         "## 6. Feature gates / exact verification",
-        "## 7. Next boundary: 9A6-R1 then 9B",
+        "## 7. Next boundary: 9A6-R2 then 9B",
     ):
         assert heading in raw_handoff
 
@@ -538,6 +553,8 @@ def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
         "3f3d8ce9a4e102eb79d1f964504d7f0aa61362a1",
         "9da1f45843cc92ca011b94b3344c1a8581dadd78",
         "ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d",
+        "7042a7d84712d499671b464251d0f09ec898fcf6",
+        "67ce961487f93734230c06c1624f44573703691f",
         (
             "current controlled-real-operation runner spec: 25 formal Sessions, "
             "85 local scripted model requests, 65 tool bodies, 20 acceptance Evidence, "
@@ -593,6 +610,18 @@ def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
         "Task 9B remains blocked",
         "real Provider activity remains 0",
         "new repair exact SHA and a new exact-main CI push run attempt 1",
+        "run `32639440639`, event `push`, attempt 1",
+        "Python and TypeScript succeeded; installer-windows failed",
+        "recursive Runtime Bundle build succeeded",
+        "1 failed / 103 passed",
+        "installer and controlled command specs passed",
+        "Windows checkout text used CRLF while the test template used LF",
+        (
+            "not evidence of a Runtime, Agent, lifecycle, or installer product "
+            "semantic defect"
+        ),
+        "run `32639440639` will not be rerun or dispatched",
+        "new automatic exact-main push run attempt 1",
         "naturalUserEvidence=not-claimed",
         "externalUserEvidence=not-claimed",
     ):

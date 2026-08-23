@@ -25,6 +25,8 @@ These are implementation audit points. This handoff deliberately does not invent
 
 Feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` was merged as main `ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d`. The merge tree equals the reviewed feature tree; the current repair will receive its own reviewed exact SHA rather than rewriting this audit point.
 
+Repair `7042a7d84712d499671b464251d0f09ec898fcf6` was then merged as main `67ce961487f93734230c06c1624f44573703691f`. Its merge tree equals the reviewed repair tree; the newline repair will likewise receive a reviewed exact SHA before integration.
+
 ## 3. What the scripted full-chain proves
 
 Two separate scripted fixtures carry different, non-interchangeable counts:
@@ -67,12 +69,16 @@ Its bounded single-line receipt carries only digests, counts, and finite labels.
 
 Exact-main CI run `32635033552`, event `push`, attempt 1 is permanently preserved. Python and installer-windows succeeded; TypeScript failed. All four failures were test-platform placement failures: Windows-owned command and Runtime Bundle specs were placed on Ubuntu, where their fixed `D:` paths, junction boundary, and Windows Node/Corepack/archive contracts do not apply. The platform-independent controlled-real runner spec passed on Ubuntu. This is not evidence of a Runtime, Agent, or lifecycle semantic defect.
 
-The failed run will not be rerun. Ubuntu keeps the seven controlled mechanism specs and the controlled-real runner spec, with its fixture root remaining step-local. installer-windows owns the installer, controlled-lifecycle command, and Runtime Bundle specs after a recursive Runtime Bundle build, inside the existing `D:` mapping and cleanup boundary. The runner spec does not move to Windows.
+The failed run will not be rerun. Its recorded next boundary was a new repair exact SHA and a new exact-main CI push run attempt 1. Ubuntu keeps the seven controlled mechanism specs and the controlled-real runner spec, with its fixture root remaining step-local. installer-windows owns the installer, controlled-lifecycle command, and Runtime Bundle specs after a recursive Runtime Bundle build, inside the existing `D:` mapping and cleanup boundary. The runner spec does not move to Windows.
+
+Exact-main CI run `32639440639`, event `push`, attempt 1 is also permanently preserved. Python and TypeScript succeeded; installer-windows failed. Its recursive Runtime Bundle build succeeded. The single Windows three-spec command finished with 1 failed / 103 passed: the installer and controlled command specs passed, and the only failure was the Runtime Bundle patch's complete-text comparison. Windows checkout text used CRLF while the test template used LF. DSH reads the patch as UTF-8 YAML, so this representation difference is not evidence of a Runtime, Agent, lifecycle, or installer product semantic defect.
+
+run `32639440639` will not be rerun or dispatched. The narrow repair preserves the complete LF template comparison after normalizing only standard CRLF input; bare CR, BOM, content, order, indentation, blank-line, and trailing-newline changes remain rejected.
 
 The long installed E2E requires Windows and explicit `TIANWEN_CONTROLLED_INSTALLED_E2E=1`; the default is skip. Local feature acceptance additionally runs the repository TypeScript check, full Python suite, full Ruff check, and diff whitespace validation from the canonical D: cache and fixture environment.
 
-## 7. Next boundary: 9A6-R1 then 9B
+## 7. Next boundary: 9A6-R2 then 9B
 
-Task 9B remains blocked. For this controlled lifecycle, real Provider activity remains 0. The next boundary is a new repair exact SHA and a new exact-main CI push run attempt 1; it is not an attempt 2 or rerun of the preserved failure. Task 9B may begin only if Python, TypeScript, and installer-windows all succeed on that new attempt 1.
+Task 9B remains blocked. For this controlled lifecycle, real Provider activity remains 0. The next boundary is a reviewed repair exact SHA and a new automatic exact-main push run attempt 1; it is not an attempt 2 or rerun of either preserved failure. Task 9B may begin only if Python, TypeScript, and installer-windows all succeed on that new attempt 1.
 
 Only then may the project perform exactly one formal real Provider lifecycle. That operation must retain the same evidence labels and must report a stopped result as evidence rather than retrying it into a better-looking outcome.

@@ -327,7 +327,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(readFileSync(
       resolve(packageRoot, 'controlled-lifecycle.patch.yml'),
       'utf8',
-    )).toBe(`- id: headless-startup
+    ).replaceAll('\r\n', '\n')).toBe(`- id: headless-startup
   disabled: true
 
 - id: headless-runner
