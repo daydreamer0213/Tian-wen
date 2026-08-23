@@ -31,6 +31,9 @@
     },
     "./model-runner": {
       "default": "./dist/model-runner.js"
+    },
+    "./controlled-lifecycle-runner": {
+      "default": "./dist/controlled-lifecycle-runner.js"
     }
   },
   "files": [
@@ -44,10 +47,12 @@
     "dist/model-runner.js",
     "dist/create-runner.js",
     "dist/resume-runner.js",
+    "dist/controlled-lifecycle-runner.js",
     "cordis.patch.yml",
     "create.patch.yml",
     "model.patch.yml",
-    "resume.patch.yml"
+    "resume.patch.yml",
+    "controlled-lifecycle.patch.yml"
   ],
   "dsh": {
     "bundle": {
@@ -73,7 +78,7 @@
     "esbuild": "0.28.2"
   },
   "scripts": {
-    "build": "tsc -b && esbuild src/runtime.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/runtime --metafile=dist/runtime.meta.json --outfile=dist/runtime.js && esbuild src/smoke.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/smoke.meta.json --outfile=dist/smoke.js && esbuild src/status.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/skill-name --metafile=dist/status.meta.json --outfile=dist/status.js && esbuild src/cli.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/skill-name --metafile=dist/cli.meta.json --outfile=dist/cli.js && esbuild src/model-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/model-runner.meta.json --outfile=dist/model-runner.js && esbuild src/create-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/create-runner.meta.json --outfile=dist/create-runner.js && esbuild src/resume-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/resume-runner.meta.json --outfile=dist/resume-runner.js",
+    "build": "tsc -b && esbuild src/runtime.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/runtime --metafile=dist/runtime.meta.json --outfile=dist/runtime.js && esbuild src/smoke.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/smoke.meta.json --outfile=dist/smoke.js && esbuild src/status.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/skill-name --metafile=dist/status.meta.json --outfile=dist/status.js && esbuild src/cli.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/skill-name --metafile=dist/cli.meta.json --outfile=dist/cli.js && esbuild src/model-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/model-runner.meta.json --outfile=dist/model-runner.js && esbuild src/create-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/create-runner.meta.json --outfile=dist/create-runner.js && esbuild src/resume-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/resume-runner.meta.json --outfile=dist/resume-runner.js && esbuild src/controlled-lifecycle-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/controlled-lifecycle-runner.meta.json --outfile=dist/controlled-lifecycle-runner.js",
     "typecheck": "tsc -b --pretty false"
   }
 }

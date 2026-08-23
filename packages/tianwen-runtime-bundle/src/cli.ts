@@ -25,6 +25,11 @@ import {
   preflightModelCommand,
 } from './model.js'
 import type { ModelChoice } from './model.js'
+import {
+  ControlledLifecyclePreflightError,
+  launchControlledLifecycle,
+  preflightControlledLifecycle,
+} from './controlled-lifecycle.js'
 
 const READ_ONLY_USAGE = [
   'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
@@ -51,7 +56,13 @@ const MODEL_USAGE = [
   '',
 ].join('\n')
 
+const CONTROLLED_LIFECYCLE_USAGE = [
+  'Usage: tianwen controlled-lifecycle --manifest ABSOLUTE_JSON --data-dir ABSOLUTE_PRODUCT_ROOT --json',
+  '',
+].join('\n')
+
 function usage(command: string | undefined): string {
+  if (command === 'controlled-lifecycle') return CONTROLLED_LIFECYCLE_USAGE
   if (command === 'model') return MODEL_USAGE
   if (command === 'resume') return RESUME_USAGE
   return command === 'create' ? CREATE_USAGE : READ_ONLY_USAGE
@@ -77,6 +88,14 @@ function hasRepeatedStrictOption(args: readonly string[]): boolean {
   return (optionCount('live-smoke') > 0 || optionCount('trial-manifest') > 0) &&
     ['goal', 'data-dir', 'live-smoke', 'trial-manifest', 'json']
       .some(name => optionCount(name) > 1)
+}
+
+function hasRepeatedControlledOption(args: readonly string[]): boolean {
+  return ['manifest', 'data-dir', 'json'].some(name =>
+    args.filter(argument =>
+      argument === `--${name}` || argument.startsWith(`--${name}=`)
+    ).length > 1,
+  )
 }
 
 function formatText(status: GoalStatusProjection): string {
@@ -119,6 +138,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     readonly 'max-rounds'?: string
     readonly 'live-smoke'?: boolean
     readonly 'trial-manifest'?: string
+    readonly manifest?: string
   }
   let positionals: string[]
   try {
@@ -135,6 +155,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
         'max-rounds': { type: 'string' },
         'live-smoke': { type: 'boolean', default: false },
         'trial-manifest': { type: 'string' },
+        manifest: { type: 'string' },
       },
     })
     values = parsed.values
@@ -151,6 +172,8 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   const trialManifest = values['trial-manifest']
   if (
     hasRepeatedStrictOption(args) ||
+    (command === 'controlled-lifecycle' && hasRepeatedControlledOption(args)) ||
+    (command !== 'controlled-lifecycle' && values.manifest !== undefined) ||
     (command === 'model' ? positionals.length !== 2 : positionals.length !== 1) ||
     values['data-dir'] === undefined ||
     !isAbsolute(values['data-dir']) ||
@@ -167,7 +190,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
           : command === 'create'
             ? values.goal !== undefined || values.objective?.trim().length === 0 ||
               values.objective === undefined || maxGoalRounds === undefined || values.model !== undefined || liveSmoke || trialManifest !== undefined
-            : command === 'model'
+          : command === 'model'
               ? values.goal !== undefined || values.objective !== undefined ||
                 values['max-rounds'] !== undefined ||
                 liveSmoke || trialManifest !== undefined ||
@@ -177,6 +200,12 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
                     : modelOperation === 'smoke'
                       ? modelChoice !== 'deepseek-v4-pro' || !isSmokeDataDir(values['data-dir'])
                     : true)
+            : command === 'controlled-lifecycle'
+              ? values.goal !== undefined || values.objective !== undefined ||
+                values['max-rounds'] !== undefined || values.model !== undefined ||
+                liveSmoke || trialManifest !== undefined ||
+                values.manifest === undefined || !isAbsolute(values.manifest) ||
+                values.json !== true
             : true
     )
   ) {
@@ -185,6 +214,11 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   }
 
   try {
+    if (command === 'controlled-lifecycle') {
+      return await launchControlledLifecycle(preflightControlledLifecycle(
+        values.manifest!, values['data-dir'],
+      ))
+    }
     if (command === 'model') {
       return await launchModelCommand(preflightModelCommand(
         modelOperation as 'status' | 'use' | 'smoke', modelChoice, values['data-dir'],
@@ -230,6 +264,13 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     if (error instanceof GoalStatusNotFoundError) {
       process.stderr.write(`${error.message}\n`)
       return 3
+    }
+    if (command === 'controlled-lifecycle') {
+      process.stderr.write(error instanceof ControlledLifecyclePreflightError &&
+        error.code === 'installed-receipt-mismatch'
+        ? 'Error: controlled lifecycle preflight failed: installed-receipt-mismatch\n'
+        : 'Error: controlled lifecycle preflight failed\n')
+      return 1
     }
     if (
       error instanceof GoalStatusAmbiguousError ||

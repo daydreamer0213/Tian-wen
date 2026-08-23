@@ -12,12 +12,13 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
-import { delimiter, dirname, isAbsolute, relative, resolve } from 'node:path'
+import { delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { SessionId } from '@tianwen/dsh-compat'
 import type { SessionEvent } from '@tianwen/dsh-compat'
 import { projectEvidence } from '../../packages/tianwen-evidence/src/projector.js'
+import { readControlledLifecycleManifest } from '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-contract.js'
 
 const root = resolve(import.meta.dirname, '../..')
 const tianwenRoot = process.env.TIANWEN_E2E_DATA_DIR ?? 'D:/DevData/tianwen-installer-e2e'
@@ -37,8 +38,163 @@ const installer = resolve(root, 'scripts/install-tianwen.mjs')
 const taskText = 'run the Tianwen phase 2 smoke task'
 const completeCallId = 'tianwen-phase2-goal-complete'
 const enabled = process.env.TIANWEN_DSH_PHASE2_STARTUP === '1'
+const controlledInstalledEnabled = process.platform === 'win32' &&
+  process.env.TIANWEN_CONTROLLED_INSTALLED_E2E === '1'
 const runtimePackage = '@tianwen/runtime-bundle'
 const liveGoalObjective = 'Call tianwen_smoke_action exactly once. After it succeeds, mark this Goal complete with update_goal, then reply exactly TIANWEN_GOAL_ROUND_OK.'
+const controlledFixtureBase = resolve(
+  process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-dsh-probe',
+  'installed-controlled-lifecycle',
+)
+
+const controlledParentSkill = {
+  name: 'tianwen-controlled-architecture-decision-v01',
+  description: 'Choose a bounded Tianwen architecture decision from frozen options.',
+  whenToUse: 'When a controlled Tianwen task asks for one architecture choice and a concise reason.',
+  invocation: { modelInvocable: true, userInvocable: true },
+  source: 'runtime',
+  provider: 'runtime',
+  content: [
+    '# Interface-first Tianwen architecture decision',
+    '',
+    'For an architecture task, choose the option most directly expressible through the currently visible',
+    'interface. If the product meaning would require an identity or contract that the interface does not',
+    'already expose, collapse that meaning into the nearest interface-shaped state. If no direct interface',
+    'exists, prefer Tianwen-owned coordination around the available interface. Do not let broader product',
+    'design override the interface-shaped choice.',
+    '',
+    'Use `record_architecture_decision` exactly once, then call `verify_architecture_decision` exactly once.',
+    'After verifier feedback, do not change the choice; finish with the selected option and one concise reason.',
+  ].join('\n'),
+}
+
+const controlledCandidateSkill = {
+  ...controlledParentSkill,
+  content: [
+    '# Evidence-led Tianwen architecture decision',
+    '',
+    'First derive the product semantic contract from the current canonical architecture, module ownership,',
+    'and the newest exact code, CI, and operational evidence. Then map that contract to public interfaces:',
+    'reuse a sufficient interface; when only a connection is missing, add the thinnest binding; for generic',
+    'Agent, platform, or data-format behavior, use the existing DSH, standard-library, or native-platform',
+    'seam. If an older document conflicts with newer exact evidence, reconcile the fact before deciding.',
+    'Keep a purely local implementation choice local instead of expanding it into product governance.',
+    '',
+    'Use `record_architecture_decision` exactly once, then call `verify_architecture_decision` exactly once.',
+    'After verifier feedback, do not change the choice; finish with the selected option and one concise reason.',
+  ].join('\n'),
+}
+
+function controlledTaskText(taskId: string): { goal: string, input: string } {
+  return {
+    goal: `Choose the frozen architecture option for ${taskId}.`,
+    input: `Controlled architecture case ${taskId}.`,
+  }
+}
+
+function controlledManifest(
+  dataDir: string,
+  operationRoot: string,
+  installedArchiveDigest: string,
+) {
+  const workspace = (name: string) => join(operationRoot, 'workspaces', name)
+  return {
+    schemaVersion: 'tianwen.controlled-real-skill-lifecycle-manifest.v1',
+    activityLabel: 'tianwen-v0.1-controlled-real-activity-01',
+    evidence: {
+      source: 'configured-provider-capable',
+      environment: 'development-only',
+      defect: 'synthetic-defect',
+      naturalUserEvidence: 'not-claimed',
+      externalUserEvidence: 'not-claimed',
+    },
+    installedArchiveDigest,
+    standingAuthorizationDigest: 'sha256:90ed036e3761de4b9da9f31822fdbabe800c2085001a9c94d94214f5379d0fb6',
+    roots: {
+      dataDir,
+      operationRoot,
+      sessionsRoot: join(dataDir, 'dsh-home', 'sessions'),
+      evolutionRoot: join(dataDir, 'state', 'evolution'),
+    },
+    execution: {
+      dshVersion: '0.1.0-rc.7',
+      providerId: 'deepseek-official',
+      modelId: 'deepseek-v4-pro',
+      retryPolicy: { mode: 'normal', maxRetries: 0 },
+      allowedTools: [
+        'skill',
+        'record_architecture_decision',
+        'verify_architecture_decision',
+      ],
+      evaluatorTool: 'submit_blind_evaluation',
+      stopContract: { maxToolCalls: 6, maxElapsedMs: 180_000 },
+      evaluatorMaterialContract: {
+        schemaVersion: 'tianwen.controlled-evaluator-material-contract.v1',
+        source: 'final-completed-assistant-text',
+        maxUtf8Bytes: 4_096,
+      },
+    },
+    skills: { parent: controlledParentSkill, candidate: controlledCandidateSkill },
+    tasks: {
+      seeds: [
+        {
+          taskId: 'seed-task:d1', ...controlledTaskText('D1'),
+          workspaceRoot: workspace('seed-d1'),
+          hiddenExpectedChoice: 'thin-run-binding',
+          sessionId: 'session:controlled-real:seed-d1',
+        },
+        {
+          taskId: 'seed-task:d2', ...controlledTaskText('D2'),
+          workspaceRoot: workspace('seed-d2'),
+          hiddenExpectedChoice: 'reuse-dsh-agent-loop',
+          sessionId: 'session:controlled-real:seed-d2',
+        },
+      ],
+      evaluations: [
+        ['t1', 'original-problem', 'thin-run-binding'],
+        ['t2', 'adjacent-transfer', 'node-package-script-transport'],
+        ['t3', 'regression', 'reuse-dsh-agent-tool-seams'],
+        ['t4', 'counterexample', 'stdlib-sort-no-governance'],
+        ['t5', 'safety-authorization', 'finite-source-safe-receipt'],
+      ].map(([name, taskType, hiddenExpectedChoice]) => ({
+        taskId: `eval-task:${name}`,
+        taskType,
+        ...controlledTaskText(name!.toUpperCase()),
+        baselineWorkspaceRoot: workspace(`evaluation-${name}-baseline`),
+        candidateWorkspaceRoot: workspace(`evaluation-${name}-candidate`),
+        hiddenExpectedChoice,
+        baselineSessionId: `session:controlled-real:evaluation-${name}-baseline`,
+        candidateSessionId: `session:controlled-real:evaluation-${name}-candidate`,
+        evaluatorSessionId: `session:controlled-real:evaluation-${name}-evaluator`,
+      })),
+      shadows: [
+        ['s1', 'pure-text-parent-snapshot'],
+        ['s2', 'agent-scoped-candidate'],
+        ['s3', 'public-status-private-ledger'],
+        ['s4', 'isolate-build-output-identity'],
+        ['s5', 'standing-authorization-constant'],
+      ].map(([name, hiddenExpectedChoice]) => ({
+        taskId: `shadow-task:${name}`,
+        ...controlledTaskText(name!.toUpperCase()),
+        workspaceRoot: workspace(`shadow-${name}`),
+        hiddenExpectedChoice,
+        sessionId: `session:controlled-real:shadow-${name}`,
+      })),
+      transitions: [
+        ['promote', 'reuse-public-session-id'],
+        ['rollback', 'standard-json-parser'],
+        ['restore', 'reuse-dsh-tool-guard'],
+      ].map(([kind, hiddenExpectedChoice]) => ({
+        taskId: `transition-task:${kind}`,
+        kind,
+        ...controlledTaskText(kind!),
+        workspaceRoot: workspace(`transition-${kind}`),
+        hiddenExpectedChoice,
+        sessionId: `session:controlled-real:transition-${kind}`,
+      })),
+    },
+  }
+}
 
 function run(
   executable: string,
@@ -168,6 +324,71 @@ function childEnvironment(): NodeJS.ProcessEnv {
   }
 }
 
+function controlledInstallEnvironment(dataDir: string): NodeJS.ProcessEnv {
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR
+  expect(systemRoot).toBeDefined()
+  const environmentRoot = `${dataDir}-environment`
+  const temp = join(environmentRoot, 'temp')
+  const cache = join(environmentRoot, 'pnpm-cache')
+  const virtualStore = join(environmentRoot, 'virtual-store')
+  mkdirSync(temp, { recursive: true })
+  mkdirSync(virtualStore, { recursive: true })
+  return {
+    CI: 'true',
+    COREPACK_HOME: 'D:/DevData/corepack-home',
+    COREPACK_ENABLE_NETWORK: '0',
+    DSH_HOME: join(dataDir, 'dsh-home'),
+    DSH_TELEMETRY_DISABLED: '1',
+    NPM_CONFIG_CACHE: cache,
+    NPM_CONFIG_OFFLINE: 'true',
+    PATH: [dirname(process.execPath), resolve(systemRoot!, 'System32')].join(delimiter),
+    PATHEXT: process.env.PATHEXT,
+    PNPM_CONFIG_CACHE_DIR: cache,
+    PNPM_CONFIG_AUTO_INSTALL_PEERS: 'true',
+    PNPM_CONFIG_OFFLINE: 'true',
+    PNPM_CONFIG_STORE_DIR: 'D:/DevData/pnpm-store',
+    PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: 'false',
+    PNPM_CONFIG_VIRTUAL_STORE_DIR: virtualStore,
+    SystemRoot: systemRoot,
+    TEMP: temp,
+    TMP: temp,
+    WINDIR: process.env.WINDIR ?? systemRoot,
+    ComSpec: process.env.ComSpec,
+  }
+}
+
+function expectStoppedControlledReceipt(
+  result: ReturnType<typeof run>,
+  manifestDigest: string,
+  reasonCode: string,
+): void {
+  expect(result.status, `${result.stdout}\n${result.stderr}\n${result.error?.message ?? ''}`).toBe(1)
+  expect(result.stderr).toBe('')
+  expect(result.stdout.endsWith('\n')).toBe(true)
+  expect(result.stdout.trimEnd().split(/\r?\n/u)).toHaveLength(1)
+  expect(JSON.parse(result.stdout)).toEqual({
+    schemaVersion: 'tianwen.controlled-real-skill-lifecycle.v1',
+    status: 'stopped',
+    evidence: {
+      source: 'configured-provider-capable',
+      environment: 'development-only',
+      defect: 'synthetic-defect',
+      naturalUserEvidence: 'not-claimed',
+      externalUserEvidence: 'not-claimed',
+    },
+    activityDigest: manifestDigest,
+    completedStage: 'preflight',
+    reasonCode,
+    completedRoles: {
+      seedRuns: 0,
+      evaluationArms: 0,
+      evaluators: 0,
+      shadowRuns: 0,
+      transitions: 0,
+    },
+  })
+}
+
 function requireDshBin(): string {
   const manifestPath = `${dshHostRoot}/node_modules/@deepseek-ai/dsh/package.json`
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
@@ -199,6 +420,9 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   const createRunnerResolved = requireFromProfile.resolve(`${runtimePackage}/create-runner`)
   const modelRunnerResolved = requireFromProfile.resolve(`${runtimePackage}/model-runner`)
   const resumeRunnerResolved = requireFromProfile.resolve(`${runtimePackage}/resume-runner`)
+  const controlledRunnerResolved = requireFromProfile.resolve(
+    `${runtimePackage}/controlled-lifecycle-runner`,
+  )
   const runtimeRoot = resolve(dirname(runtimeResolved), '..')
   const runtimeManifest = JSON.parse(readFileSync(
     resolve(runtimeRoot, 'package.json'),
@@ -211,13 +435,16 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   for (const external of Object.keys(runtimeManifest.dependencies).sort()) {
     await import(pathToFileURL(requireFromRuntime.resolve(external)).href)
   }
-  const [runtime, smoke, status, createRunner, modelRunner, resumeRunner] = await Promise.all([
+  const [
+    runtime, smoke, status, createRunner, modelRunner, resumeRunner, controlledRunner,
+  ] = await Promise.all([
     import(pathToFileURL(runtimeResolved).href),
     import(pathToFileURL(smokeResolved).href),
     import(pathToFileURL(statusResolved).href),
     import(pathToFileURL(createRunnerResolved).href),
     import(pathToFileURL(modelRunnerResolved).href),
     import(pathToFileURL(resumeRunnerResolved).href),
+    import(pathToFileURL(controlledRunnerResolved).href),
   ])
   expect(runtime).toMatchObject({ name: 'tianwen-runtime', inject: ['dynamicCordisRunner'] })
   expect(smoke).toMatchObject({ name: 'tianwen-phase2-smoke', inject: ['llm', 'tools'] })
@@ -226,6 +453,7 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   expect(createRunner.apply).toBeTypeOf('function')
   expect(modelRunner.apply).toBeTypeOf('function')
   expect(resumeRunner.apply).toBeTypeOf('function')
+  expect(controlledRunner.apply).toBeTypeOf('function')
   expect(runtimeManifest.dependencies['@deepseek-ai/dsh-system-prompt']).toBe('0.1.0-rc.7')
   const cli = resolve(runtimeRoot, runtimeManifest.bin.tianwen)
   expect(statSync(cli).isFile()).toBe(true)
@@ -1165,6 +1393,150 @@ async function start(): Promise<void> {
 }
 
 describe('Tianwen formal headless startup', () => {
+  it.runIf(controlledInstalledEnabled)(
+    'installs the controlled lifecycle runner and stops four child preflights without Provider activity',
+    async () => {
+      mkdirSync(controlledFixtureBase, { recursive: true })
+      const dataDir = join(controlledFixtureBase, `product-${randomUUID()}`)
+      const env = controlledInstallEnvironment(dataDir)
+      let completed = false
+      try {
+        const installedResult = run(process.execPath, [
+          installer,
+          '--data-dir', dataDir,
+          '--json',
+        ], env, 2_100_000)
+        expect(
+          installedResult.status,
+          `${installedResult.stdout}\n${installedResult.stderr}\n${installedResult.error?.message ?? ''}`,
+        ).toBe(0)
+        expect(installedResult.stderr).toBe('')
+        const installReceipt = JSON.parse(installedResult.stdout) as {
+          archiveDigest: string
+          cliPath: string
+          hostRoot: string
+          profileRoot: string
+        }
+        const installedBundle = await assertInstalledBundle(
+          join(installReceipt.profileRoot, 'package.json'),
+        )
+        expect(realpathSync(installReceipt.cliPath)).toBe(realpathSync(installedBundle.cli))
+
+        const operationRoot = join(dataDir, 'controlled-operation', 'activity-01')
+        const manifestPath = join(operationRoot, 'manifest.json')
+        const manifest = controlledManifest(
+          dataDir,
+          operationRoot,
+          installReceipt.archiveDigest,
+        )
+        const workspaceRoots = [
+          ...manifest.tasks.seeds.map(task => task.workspaceRoot),
+          ...manifest.tasks.evaluations.flatMap(task => [
+            task.baselineWorkspaceRoot,
+            task.candidateWorkspaceRoot,
+          ]),
+          ...manifest.tasks.shadows.map(task => task.workspaceRoot),
+          ...manifest.tasks.transitions.map(task => task.workspaceRoot),
+        ]
+        expect(workspaceRoots).toHaveLength(20)
+        for (const workspaceRoot of workspaceRoots) {
+          mkdirSync(workspaceRoot, { recursive: true })
+          writeFileSync(join(workspaceRoot, 'case.md'), 'controlled installed preflight\n', 'utf8')
+        }
+        writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, 'utf8')
+        const manifestDigest = readControlledLifecycleManifest(manifestPath).manifestDigest
+        const dshManifestPath = join(
+          installReceipt.hostRoot,
+          'node_modules', '@deepseek-ai', 'dsh', 'package.json',
+        )
+        const dshManifest = JSON.parse(readFileSync(dshManifestPath, 'utf8')) as {
+          bin: { dsh: string }
+        }
+        const dshBin = resolve(dirname(dshManifestPath), dshManifest.bin.dsh)
+        const controlledPatch = join(
+          installReceipt.profileRoot,
+          'node_modules', '@tianwen', 'runtime-bundle', 'controlled-lifecycle.patch.yml',
+        )
+
+        const mismatchedDigest = `sha256:${'f'.repeat(64)}`
+        const childMismatch = run(process.execPath, [
+          dshBin,
+          '--profile', 'tianwen',
+          '--patch', controlledPatch,
+        ], {
+          ...env,
+          DSH_HOME: join(dataDir, 'dsh-home'),
+          TIANWEN_CONTROLLED_DATA_DIR: dataDir,
+          TIANWEN_CONTROLLED_JSON: 'true',
+          TIANWEN_CONTROLLED_MANIFEST_DIGEST: mismatchedDigest,
+          TIANWEN_CONTROLLED_MANIFEST_PATH: manifestPath,
+        })
+        expectStoppedControlledReceipt(
+          childMismatch,
+          mismatchedDigest,
+          'manifest-revalidation-failed',
+        )
+
+        const command = [
+          'controlled-lifecycle',
+          '--manifest', manifestPath,
+          '--data-dir', dataDir,
+          '--json',
+        ]
+        expectStoppedControlledReceipt(
+          run(process.execPath, [installedBundle.cli, ...command], env),
+          manifestDigest,
+          'credential-missing',
+        )
+        expectStoppedControlledReceipt(
+          run(process.execPath, [installedBundle.cli, ...command], {
+            ...env,
+            DEEPSEEK_API_KEY: `installed-zero-provider-${randomUUID()}`,
+          }),
+          manifestDigest,
+          'selection-mismatch',
+        )
+
+        const sessionsRoot = join(dataDir, 'dsh-home', 'sessions')
+        const existingSession = join(
+          sessionsRoot,
+          '_no-cwd',
+          'installed-preexisting',
+          'session.jsonl',
+        )
+        mkdirSync(dirname(existingSession), { recursive: true })
+        writeFileSync(existingSession, `${JSON.stringify({
+          type: 'session',
+          version: 0,
+          id: 'installed-preexisting',
+          createdAt: 0,
+          delegationDepth: 0,
+        })}\n`, 'utf8')
+        expectStoppedControlledReceipt(
+          run(process.execPath, [installedBundle.cli, ...command], {
+            ...env,
+            DEEPSEEK_API_KEY: `installed-zero-provider-${randomUUID()}`,
+          }),
+          manifestDigest,
+          'session-not-fresh',
+        )
+
+        const sessionLogs = globSync('**/session.jsonl', { cwd: sessionsRoot })
+        expect(sessionLogs).toHaveLength(1)
+        expect(resolve(sessionsRoot, sessionLogs[0]!)).toBe(existingSession)
+        expect(readFileSync(existingSession, 'utf8').trimEnd().split(/\r?\n/u)).toHaveLength(1)
+        expect(existsSync(join(dataDir, 'state', 'evolution', 'ledger.jsonl'))).toBe(false)
+        completed = true
+      } finally {
+        if (completed) {
+          rmSync(dataDir, { recursive: true, force: true })
+          rmSync(`${dataDir}-environment`, { recursive: true, force: true })
+        }
+      }
+    },
+    2_700_000,
+  )
+
   it.runIf(enabled)('installs the formal Profile and proves the public headless authority path', async () => {
     await start()
   }, 2_700_000)

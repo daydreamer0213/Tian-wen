@@ -341,6 +341,91 @@ def test_controlled_skill_lifecycle_public_evidence_boundaries() -> None:
         assert fact in architecture
 
 
+def test_controlled_real_operation_public_readiness_boundaries() -> None:
+    readme_en = read_public_document("README.md")
+    readme_zh = read_public_document("README.zh-CN.md")
+    architecture = (ROOT / "docs" / "tianwen-architecture-overview-v2.md").read_text(
+        encoding="utf-8"
+    )
+
+    for fact in (
+        "Installed ingress readiness",
+        "official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch",
+        "zero-real-Provider installer, preflight, and transport evidence",
+        "not a successful configured DeepSeek lifecycle",
+        "The configured DeepSeek real controlled lifecycle has not run.",
+        (
+            "The installed controlled-lifecycle one-shot runner does not import or "
+            "register `ScriptedAdapter`; the scripted adapter used by this fixture "
+            "is supplied only by tests."
+        ),
+        "`configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`",
+        "`naturalUserEvidence=not-claimed`",
+        "`externalUserEvidence=not-claimed`",
+        "tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json",
+        "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
+        "exact feature → controlled main → exact-main CI → exactly one formal real Provider lifecycle",
+    ):
+        assert fact in readme_en
+
+    for fact in (
+        "已安装入口准备状态",
+        "官方 installer 会发布 CLI 入口、one-shot runner 和静态 DSH Profile patch",
+        "zero-real-Provider 的 installer、preflight 与 transport 分段证据",
+        "不代表配置的 DeepSeek 生命周期已经成功",
+        "配置的 DeepSeek 真实受控生命周期尚未运行。",
+        (
+            "已安装的 controlled-lifecycle one-shot runner 不导入或注册 "
+            "`ScriptedAdapter`；这个夹具使用的 scripted adapter 只由测试提供。"
+        ),
+        "`configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`",
+        "`naturalUserEvidence=not-claimed`",
+        "`externalUserEvidence=not-claimed`",
+        "tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json",
+        "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
+        "exact feature → 受控 main integration → exact-main CI → 唯一一次正式 real Provider lifecycle",
+    ):
+        assert fact in readme_zh
+
+    for fact in (
+        "scripted mechanics",
+        "installed ingress readiness",
+        "Stage 7 项目所有者自然任务",
+        "配置的 DeepSeek 真实受控生命周期尚未运行",
+        "externalUserEvidence=not-claimed",
+        "历史 Stage 7 16/16 publication proof",
+        "当前 runner + patch publication contract 是 18/18",
+        "regular file、independent inode/identity、no source hardlink、LICENSE 保留",
+        (
+            "installed CLI → installed DSH rc.7 Profile → one-shot runner → "
+            "既有 Tianwen Runtime/Evolution services"
+        ),
+        "DSH rc.7 仍是唯一 Agent Runtime；没有第二 controller 或 ledger",
+        (
+            "已安装的 controlled-lifecycle one-shot runner 不导入或注册 "
+            "`ScriptedAdapter`；这个夹具使用的 scripted adapter 只由测试提供。"
+        ),
+        "2026-08-23-tianwen-v0.1-controlled-real-operation-design.md",
+        "2026-08-23-tianwen-v0.1-controlled-real-operation.md",
+        "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
+        "tianwen-v0.1-controlled-skill-lifecycle-handoff.md",
+    ):
+        assert fact in architecture
+
+    normalized_documents = tuple(
+        " ".join(document.split()) for document in (readme_en, readme_zh, architecture)
+    )
+    for document in normalized_documents:
+        for overbroad_claim in (
+            "Production does not register `ScriptedAdapter`",
+            "scripted adapters exist only in tests",
+            "production runner 不注册 `ScriptedAdapter`",
+            "生产 runner 不注册 `ScriptedAdapter`",
+            "scripted adapter 只存在于测试",
+        ):
+            assert overbroad_claim not in document
+
+
 def test_controlled_skill_lifecycle_handoff_records_mechanics_and_limits() -> None:
     handoff_path = (
         ROOT
@@ -383,6 +468,89 @@ def test_controlled_skill_lifecycle_handoff_records_mechanics_and_limits() -> No
         assert fact in handoff
 
 
+def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
+    handoff_path = (
+        ROOT
+        / "docs"
+        / "operations"
+        / "tianwen-v0.1-controlled-real-operation-readiness-handoff.md"
+    )
+    assert handoff_path.is_file(), "missing controlled real operation readiness handoff"
+    raw_handoff = handoff_path.read_text(encoding="utf-8")
+    handoff = " ".join(raw_handoff.split())
+
+    for heading in (
+        "## 1. Conclusion and evidence boundary",
+        "## 2. Implementation audit trail",
+        "## 3. What the scripted full-chain proves",
+        "## 4. Installed ingress readiness and preserved validation history",
+        "## 5. Evidence labels, receipt and privacy",
+        "## 6. Feature gates / exact verification",
+        "## 7. Next boundary: 9A6 then 9B",
+    ):
+        assert heading in raw_handoff
+
+    for fact in (
+        "4819fd768b6e250df4a8492ec03c006f44794023",
+        "c85d4cbd8a3f2cb8a285cfbe261fdc4ef0f91b9b",
+        "df628cee8f5c619ab58b9ba62de79c66e35e8b68",
+        "3f3d8ce9a4e102eb79d1f964504d7f0aa61362a1",
+        (
+            "current controlled-real-operation runner spec: 25 formal Sessions, "
+            "85 local scripted model requests, 65 tool bodies, 20 acceptance Evidence, "
+            "evaluation pass 80/80, and 0 external Provider requests"
+        ),
+        (
+            "older controlled-skill-lifecycle demo: 25 formal Sessions, "
+            "65 local scripted requests, 45 tool bodies, evaluation pass 60/60, "
+            "and 0 external Provider requests"
+        ),
+        "tianwen-v0.1-controlled-skill-lifecycle-handoff.md",
+        "pnpm manifest asynchronous key ordering",
+        "UV_THREADPOOL_SIZE=1",
+        "canonical real path",
+        "DSH-owned Session/Evolution roots",
+        "child exit + stdout end + stderr end",
+        "kill once and fail closed",
+        "post-R3",
+        "manifest revalidation",
+        "missing credential",
+        "selection-mismatch",
+        "R4",
+        "R5",
+        "R6",
+        "about 4.9 seconds",
+        "The corrected ten-minute official E2E was not rerun",
+        "focused contract",
+        "18/18",
+        (
+            "For this controlled lifecycle, real DeepSeek requests: 0; real controlled "
+            "lifecycle runs: 0. No real-provider success has been demonstrated for this "
+            "controlled lifecycle."
+        ),
+        (
+            "The installed controlled-lifecycle one-shot runner does not import or "
+            "register `ScriptedAdapter`; the scripted adapter used by this fixture "
+            "is supplied only by tests."
+        ),
+        "The operation receipt and this readiness handoff exclude operation-specific raw paths",
+        "TIANWEN_CONTROLLED_INSTALLED_E2E=1",
+        "default is skip",
+        "Python, TypeScript, and installer-windows",
+        "attempt 1",
+        "naturalUserEvidence=not-claimed",
+        "externalUserEvidence=not-claimed",
+    ):
+        assert fact in handoff
+
+    assert "real Provider succeeded" not in handoff
+    assert "all four official installed E2E cases passed" not in handoff
+    assert "Production does not register `ScriptedAdapter`" not in handoff
+    assert "scripted adapters exist only in tests" not in handoff
+    assert "Current external counts are exact" not in handoff
+    assert "Public documentation and receipts exclude" not in handoff
+
+
 def test_controlled_skill_lifecycle_ci_contract() -> None:
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     typescript_match = re.search(
@@ -400,7 +568,10 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         "tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts "
         "tests/dsh-probe/controlled-skill-activation.spec.ts "
         "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts "
-        "tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts"
+        "tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts "
+        "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts "
+        "tests/dsh-migration/controlled-lifecycle-command.spec.ts "
+        "tests/dsh-migration/runtime-bundle.spec.ts"
     )
 
     for command in (
@@ -411,6 +582,9 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         "tests/dsh-probe/controlled-skill-activation.spec.ts",
         "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts",
         "tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts",
+        "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts",
+        "tests/dsh-migration/controlled-lifecycle-command.spec.ts",
+        "tests/dsh-migration/runtime-bundle.spec.ts",
         "pnpm demo:controlled-skill-lifecycle",
     ):
         assert command in typescript_job
@@ -431,6 +605,12 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         )
         if expected_step not in typescript_steps:
             violations.append(f"missing step-level controlled fixture root: {command}")
+    for forbidden in (
+        "TIANWEN_CONTROLLED_INSTALLED_E2E",
+        "TIANWEN_DSH_PHASE2_STARTUP",
+    ):
+        if forbidden in ci:
+            violations.append(f"automatic CI enables long installed E2E: {forbidden}")
     assert not violations, "; ".join(violations)
 
 
