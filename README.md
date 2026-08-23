@@ -23,7 +23,7 @@ The configured DeepSeek controlled lifecycle has not run. Its evidence remains
 
 Installed ingress readiness is now complete: the official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch. This is zero-real-Provider installer, preflight, and transport evidence; it is not a successful configured DeepSeek lifecycle. The configured DeepSeek real controlled lifecycle has not run.
 
-Production does not register `ScriptedAdapter`; scripted adapters exist only in tests. Evidence remains `configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`, with `naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed`.
+The installed controlled-lifecycle one-shot runner does not import or register `ScriptedAdapter`; the scripted adapter used by this fixture is supplied only by tests. Evidence remains `configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`, with `naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed`.
 
 The formal installed command shape is:
 

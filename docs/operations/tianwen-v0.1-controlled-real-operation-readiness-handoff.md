@@ -30,7 +30,7 @@ Two separate scripted fixtures carry different, non-interchangeable counts:
 - The current controlled-real-operation runner spec: 25 formal Sessions, 85 local scripted model requests, 65 tool bodies, 20 acceptance Evidence, evaluation pass 80/80, and 0 external Provider requests.
 - The older controlled-skill-lifecycle demo: 25 formal Sessions, 65 local scripted requests, 45 tool bodies, evaluation pass 60/60, and 0 external Provider requests. [`tianwen-v0.1-controlled-skill-lifecycle-handoff.md`](tianwen-v0.1-controlled-skill-lifecycle-handoff.md) remains authoritative for that demo.
 
-Both fixtures prove scripted mechanics only. Neither set of counts is installed-operation or real-Provider evidence. Production does not register `ScriptedAdapter`; scripted adapters exist only in tests.
+Both fixtures prove scripted mechanics only. Neither set of counts is installed-operation or real-Provider evidence. The installed controlled-lifecycle one-shot runner does not import or register `ScriptedAdapter`; the scripted adapter used by this fixture is supplied only by tests. Older development-only mechanism paths retain their service-owned or script-local adapters; they are outside this installed runner.
 
 ## 4. Installed ingress readiness and preserved validation history
 
@@ -51,7 +51,7 @@ The current runner-plus-patch publication contract is 18/18: every published ent
 
 Mechanism capability is labeled `configured-provider-capable`; the exercised source is `scripted-fixture`, and the evidence remains `development-only` with `synthetic-defect`. These are distinct evidence dimensions, not a claim that all four values are one receipt field. `naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed` remain fixed.
 
-Current external counts are exact: real DeepSeek requests: 0; real controlled lifecycle runs: 0. No real-provider success has been demonstrated.
+For this controlled lifecycle, real DeepSeek requests: 0; real controlled lifecycle runs: 0. No real-provider success has been demonstrated for this controlled lifecycle.
 
 The installed command is:
 
@@ -59,7 +59,7 @@ The installed command is:
 tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
 ```
 
-Its bounded single-line receipt carries only digests, counts, and finite labels. Public documentation and receipts exclude raw tasks, prompts, outputs, tool arguments/results, evaluator reasoning, Skill content, Session/Run/Candidate identity, paths, credentials, and raw errors.
+Its bounded single-line receipt carries only digests, counts, and finite labels. The operation receipt and this readiness handoff exclude operation-specific raw paths, raw tasks, prompts, outputs, tool arguments/results, evaluator reasoning, Skill content, Session/Run/Candidate identity, credentials, and raw errors.
 
 ## 6. Feature gates / exact verification
 

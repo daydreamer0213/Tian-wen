@@ -354,7 +354,11 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         "zero-real-Provider installer, preflight, and transport evidence",
         "not a successful configured DeepSeek lifecycle",
         "The configured DeepSeek real controlled lifecycle has not run.",
-        "Production does not register `ScriptedAdapter`; scripted adapters exist only in tests.",
+        (
+            "The installed controlled-lifecycle one-shot runner does not import or "
+            "register `ScriptedAdapter`; the scripted adapter used by this fixture "
+            "is supplied only by tests."
+        ),
         "`configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`",
         "`naturalUserEvidence=not-claimed`",
         "`externalUserEvidence=not-claimed`",
@@ -370,7 +374,10 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         "zero-real-Provider 的 installer、preflight 与 transport 分段证据",
         "不代表配置的 DeepSeek 生命周期已经成功",
         "配置的 DeepSeek 真实受控生命周期尚未运行。",
-        "生产 runner 不注册 `ScriptedAdapter`；scripted adapter 只存在于测试。",
+        (
+            "已安装的 controlled-lifecycle one-shot runner 不导入或注册 "
+            "`ScriptedAdapter`；这个夹具使用的 scripted adapter 只由测试提供。"
+        ),
         "`configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`",
         "`naturalUserEvidence=not-claimed`",
         "`externalUserEvidence=not-claimed`",
@@ -394,12 +401,29 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
             "既有 Tianwen Runtime/Evolution services"
         ),
         "DSH rc.7 仍是唯一 Agent Runtime；没有第二 controller 或 ledger",
+        (
+            "已安装的 controlled-lifecycle one-shot runner 不导入或注册 "
+            "`ScriptedAdapter`；这个夹具使用的 scripted adapter 只由测试提供。"
+        ),
         "2026-08-23-tianwen-v0.1-controlled-real-operation-design.md",
         "2026-08-23-tianwen-v0.1-controlled-real-operation.md",
         "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
         "tianwen-v0.1-controlled-skill-lifecycle-handoff.md",
     ):
         assert fact in architecture
+
+    normalized_documents = tuple(
+        " ".join(document.split()) for document in (readme_en, readme_zh, architecture)
+    )
+    for document in normalized_documents:
+        for overbroad_claim in (
+            "Production does not register `ScriptedAdapter`",
+            "scripted adapters exist only in tests",
+            "production runner 不注册 `ScriptedAdapter`",
+            "生产 runner 不注册 `ScriptedAdapter`",
+            "scripted adapter 只存在于测试",
+        ):
+            assert overbroad_claim not in document
 
 
 def test_controlled_skill_lifecycle_handoff_records_mechanics_and_limits() -> None:
@@ -499,8 +523,17 @@ def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
         "The corrected ten-minute official E2E was not rerun",
         "focused contract",
         "18/18",
-        "real DeepSeek requests: 0",
-        "real controlled lifecycle runs: 0",
+        (
+            "For this controlled lifecycle, real DeepSeek requests: 0; real controlled "
+            "lifecycle runs: 0. No real-provider success has been demonstrated for this "
+            "controlled lifecycle."
+        ),
+        (
+            "The installed controlled-lifecycle one-shot runner does not import or "
+            "register `ScriptedAdapter`; the scripted adapter used by this fixture "
+            "is supplied only by tests."
+        ),
+        "The operation receipt and this readiness handoff exclude operation-specific raw paths",
         "TIANWEN_CONTROLLED_INSTALLED_E2E=1",
         "default is skip",
         "Python, TypeScript, and installer-windows",
@@ -512,6 +545,10 @@ def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
 
     assert "real Provider succeeded" not in handoff
     assert "all four official installed E2E cases passed" not in handoff
+    assert "Production does not register `ScriptedAdapter`" not in handoff
+    assert "scripted adapters exist only in tests" not in handoff
+    assert "Current external counts are exact" not in handoff
+    assert "Public documentation and receipts exclude" not in handoff
 
 
 def test_controlled_skill_lifecycle_ci_contract() -> None:

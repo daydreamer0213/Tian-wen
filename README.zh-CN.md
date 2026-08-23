@@ -20,7 +20,7 @@ Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成
 
 已安装入口现在已准备好：官方 installer 会发布 CLI 入口、one-shot runner 和静态 DSH Profile patch。这些是 zero-real-Provider 的 installer、preflight 与 transport 分段证据；不代表配置的 DeepSeek 生命周期已经成功。配置的 DeepSeek 真实受控生命周期尚未运行。
 
-生产 runner 不注册 `ScriptedAdapter`；scripted adapter 只存在于测试。证据标签仍是 `configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`，并且 `naturalUserEvidence=not-claimed`、`externalUserEvidence=not-claimed`。
+已安装的 controlled-lifecycle one-shot runner 不导入或注册 `ScriptedAdapter`；这个夹具使用的 scripted adapter 只由测试提供。证据标签仍是 `configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`，并且 `naturalUserEvidence=not-claimed`、`externalUserEvidence=not-claimed`。
 
 正式已安装命令的形式是：
 

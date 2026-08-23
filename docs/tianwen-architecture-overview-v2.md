@@ -39,8 +39,9 @@ rc.7 产品路径正式运行一次：Goal complete，45/45 Evidence complete，
 
 已安装入口使用固定命令形态
 `tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json`。其当前证明来自
-zero-real-Provider 的 installer、preflight 与 transport 分段证据；production runner 不注册
-`ScriptedAdapter`，scripted adapter 只存在于测试。证据标签保持
+zero-real-Provider 的 installer、preflight 与 transport 分段证据。
+已安装的 controlled-lifecycle one-shot runner 不导入或注册 `ScriptedAdapter`；这个夹具使用的 scripted adapter 只由测试提供。
+证据标签保持
 `configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`。
 
 当前下一主线不是继续搭基础设施，而是一条有限的交付和正式运行链：
