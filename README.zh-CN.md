@@ -18,7 +18,7 @@ Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成
 
 ## 已安装入口准备状态
 
-已安装入口现在已准备好：官方 installer 会发布 CLI 入口、one-shot runner 和静态 DSH Profile patch。这些是 zero-real-Provider 的 installer、preflight 与 transport 分段证据；不代表配置的 DeepSeek 生命周期已经成功。配置的 DeepSeek 真实受控生命周期尚未运行。
+“已安装入口准备状态”是正式操作前的 publication 结论：官方 installer 会发布 CLI 入口、one-shot runner 和静态 DSH Profile patch。这些是 zero-real-Provider 的 installer、preflight 与 transport 分段证据；不代表配置的 DeepSeek 生命周期已经成功。Task 9B.0 随后把范围收窄为“archive/publication 已准备好，official launcher 仍需下文修正”。配置的 DeepSeek 真实受控生命周期尚未运行。
 
 repair `7042a7d84712d499671b464251d0f09ec898fcf6` 已合并为 main `67ce961487f93734230c06c1624f44573703691f`。exact-main CI run `32639440639`、event `push`、attempt 1 中，Python 和 TypeScript 成功；installer-windows 失败。recursive Runtime Bundle build 成功；Windows 单一三-spec 命令为 1 failed / 103 passed。installer 与 controlled command specs 通过；唯一失败是 Runtime Bundle patch 完整文本比较中，Windows checkout 文本使用 CRLF，测试 template 使用 LF。这种表示差异不是 Runtime、Agent、lifecycle 或 installer 产品语义缺陷的证据。
 
@@ -33,6 +33,10 @@ tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
 ```
 
 [受控真实运行准备交接](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)记录了已验证的边界和仍缺失的证据。下一边界是：reviewed repair exact SHA → 新 automatic exact-main push run attempt 1，Python、TypeScript 和 installer-windows 全部成功 → 唯一一次正式 real Provider lifecycle。
+
+上述历史 CI 门已经完成：newline repair `402b23d4252910ad367ba2070528b99067a041ca` 已合并为 main `95077be9265818cbcec443a89a71e22363ae1cde`，automatic push run `32641914572`、attempt 1 的 Python、TypeScript、installer-windows 三 job 全绿。Task 9B.0 随后完成一次 fresh official install 并证明 18/18 publication；但第一次 official `tianwen.CMD model status --json` 虽 exit 0，stdout 却为空。该命令没有重跑。这是 link path 与 real path 的主入口比较导致的核心已安装启动缺陷，不是归档格式不一致。
+
+因此 Task 9B 在任何 Provider activity 前仍被阻塞。下一步只闭合 official CLI 入口、controlled DSH 的 DeepSeek normal/0 retry，以及只禁用模型型 Session-title provider，再取得新的三 job 全绿 exact-main CI。失败安装根永久保留；之后的正式 lifecycle 使用全新产品根并只尝试一次。
 
 ## 为什么需要天问
 

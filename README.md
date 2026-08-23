@@ -21,7 +21,7 @@ The configured DeepSeek controlled lifecycle has not run. Its evidence remains
 
 ## Installed ingress readiness
 
-Installed ingress readiness is now complete: the official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch. This is zero-real-Provider installer, preflight, and transport evidence; it is not a successful configured DeepSeek lifecycle. The configured DeepSeek real controlled lifecycle has not run.
+Installed ingress readiness was the pre-operation publication conclusion: the official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch. This is zero-real-Provider installer, preflight, and transport evidence; it is not a successful configured DeepSeek lifecycle. Task 9B.0 later narrowed that claim: archive/publication readiness is complete, while the official launcher still needs the correction recorded below. The configured DeepSeek real controlled lifecycle has not run.
 
 Repair `7042a7d84712d499671b464251d0f09ec898fcf6` is merged as main `67ce961487f93734230c06c1624f44573703691f`. Exact-main CI run `32639440639`, event `push`, attempt 1: Python and TypeScript succeeded; installer-windows failed. The recursive Runtime Bundle build succeeded, and the single Windows three-spec command finished with 1 failed / 103 passed. The installer and controlled command specs passed. The only failure was the Runtime Bundle patch's full-text comparison: Windows checkout text used CRLF while the test template used LF. This representation mismatch is not evidence of a Runtime, Agent, lifecycle, or installer product semantic defect.
 
@@ -36,6 +36,10 @@ tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
 ```
 
 The [controlled real operation readiness handoff](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) records the verified boundary and the evidence that is still missing. The next boundary is: reviewed repair exact SHA → new automatic exact-main push run attempt 1 with Python, TypeScript, and installer-windows all successful → exactly one formal real Provider lifecycle.
+
+That historical CI boundary is now complete: newline repair `402b23d4252910ad367ba2070528b99067a041ca` was merged as main `95077be9265818cbcec443a89a71e22363ae1cde`, and automatic push run `32641914572`, attempt 1, passed Python, TypeScript, and installer-windows. Task 9B.0 then completed one fresh official installation and verified the 18/18 publication, but the first official `tianwen.CMD model status --json` exited 0 with empty stdout. It was not rerun. This is a core installed-launcher defect caused by link-path versus real-path main-entry comparison, not an archive-format mismatch.
+
+Task 9B is therefore still blocked before any Provider activity. The bounded next step is to repair the official CLI entry, set the controlled DSH overlay to DeepSeek normal/0 retry, disable only the model-backed Session-title provider, and obtain a new three-job-green exact-main CI. The preserved failed installation will not be reused; the later formal lifecycle will use a fresh product root and exactly one attempt.
 
 ## Why Tianwen exists
 
