@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "node scripts/typecheck-packages.mjs",
+    "demo:controlled-skill-lifecycle": "tsx scripts/run-controlled-skill-lifecycle-demo.ts",
     "demo:explicit-correction": "tsx scripts/run-explicit-correction-demo.ts",
     "demo:governed-skill-candidate": "tsx scripts/run-governed-skill-candidate-demo.ts",
     "demo:natural-run-evidence": "tsx scripts/run-natural-run-evidence-demo.ts",
