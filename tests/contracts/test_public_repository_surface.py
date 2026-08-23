@@ -472,6 +472,58 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         " ".join(document.split()) for document in (readme_en, readme_zh, architecture)
     )
     for document in normalized_documents:
+        for fact in (
+            "18/18",
+            "f7a89783097c83404576cb62b77949186e9fbca4",
+            "1b323c498a6fa177975fdd852738d9738995c604",
+            "normal/0",
+            "activity-01",
+        ):
+            assert fact in document
+
+    current_boundaries = (
+        (
+            normalized_documents[0],
+            "superseded by the current sequence",
+            (
+                "Only the old exact-main CI checkpoint was completed; the real "
+                "Provider lifecycle portion did not run, and activity-01 remains "
+                "unconsumed"
+            ),
+            "Post-repair official `.CMD` status has not been run",
+            "no matching new exact-main CI",
+        ),
+        (
+            normalized_documents[1],
+            "被下文的当前顺序取代",
+            (
+                "只有旧 exact-main CI checkpoint 已完成；real Provider lifecycle "
+                "部分没有运行，activity-01 尚未消费"
+            ),
+            "修正后的 official `.CMD` status 尚未运行",
+            "没有匹配的新 exact-main CI",
+        ),
+        (
+            normalized_documents[2],
+            "历史兼容句（已 superseded）",
+            (
+                "只有旧 main@`95077be9265818cbcec443a89a71e22363ae1cde` / "
+                "run `32641914572` 的 CI checkpoint 已完成；真实 Provider lifecycle "
+                "未运行，activity-01 仍未消费"
+            ),
+            "修正后的 official `.CMD` status 没有运行",
+            "没有匹配的新 exact-main CI",
+        ),
+    )
+    for document, *facts in current_boundaries:
+        for fact in (*facts, "formal product root", "packet freeze"):
+            assert fact in document
+
+    assert "The next boundary is: reviewed repair exact SHA" not in readme_en
+    assert "下一边界是：reviewed repair exact SHA" not in readme_zh
+    assert "当前顺序为：official CLI realpath entry" not in architecture
+
+    for document in normalized_documents:
         for overbroad_claim in (
             "Production does not register `ScriptedAdapter`",
             "scripted adapters exist only in tests",
@@ -624,8 +676,41 @@ def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
         "new automatic exact-main push run attempt 1",
         "naturalUserEvidence=not-claimed",
         "externalUserEvidence=not-claimed",
+        "18/18 publication",
+        "0 stderr bytes",
+        "0 stdout bytes",
+        "activity-01",
+        "f7a89783097c83404576cb62b77949186e9fbca4",
+        "canonical real file identity",
+        "official `.CMD` status has not been run",
+        "1b323c498a6fa177975fdd852738d9738995c604",
+        "llm-deepseek retryPolicy=normal/0",
+        "Only session-title-llm is disabled",
+        "ordinary Profile remains DSH normal/2",
+        "0 Agent, 0 model request, and 0 durable ledger",
+        "receipt-certified",
+        "durable-observed",
+        "unknown",
+        "Provider-account actual request count remains unknown",
+        "tool-body actual execution count remains unknown",
+        "15 tasks, 20 workspaces, and 25 Sessions",
+        (
+            "source=configured-provider-capable, environment=development-only, "
+            "defect=synthetic-defect"
+        ),
+        "`scripted-fixture` is only the exercised source of the existing mechanism fixture",
+        "not a label on the future formal operation manifest or receipt",
+        "no matching new exact-main CI run",
+        "no new formal product root has been installed or checked with model status",
+        "packet freeze",
+        "exactly one real lifecycle",
     ):
         assert fact in handoff
+
+    assert (
+        "The evidence labels remain `configured-provider-capable`, "
+        "`scripted-fixture`, `development-only`, and `synthetic-defect`"
+    ) not in handoff
 
     assert "real Provider succeeded" not in handoff
     assert "all four official installed E2E cases passed" not in handoff

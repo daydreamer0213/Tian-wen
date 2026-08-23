@@ -36,7 +36,10 @@ rc.7 产品路径正式运行一次：Goal complete，45/45 Evidence complete，
   DSH rc.7 仍是唯一 Agent Runtime；没有第二 controller 或 ledger。
 - **exact-main CI：** repair `7042a7d84712d499671b464251d0f09ec898fcf6` 已合并为 main `67ce961487f93734230c06c1624f44573703691f`。run `32639440639`、event `push`、attempt 1 中，Python 与 TypeScript 成功，installer-windows 失败；recursive Runtime Bundle build 成功，Windows 单一三-spec 为 1 failed / 103 passed，installer 与 controlled command specs 通过。唯一失败是 Windows checkout 的 CRLF 与测试 template 的 LF 表示差异；这不是 Runtime、Agent、lifecycle 或 installer 产品语义缺陷的证据。该 run 不会 rerun 或 dispatch；Task 9B 继续阻塞，这个受控生命周期的真实 Provider activity 仍为 0。
 - **最新 exact-main：** newline repair `402b23d4252910ad367ba2070528b99067a041ca` 已合并为 main `95077be9265818cbcec443a89a71e22363ae1cde`。automatic run `32641914572`、event `push`、attempt 1 的 Python、TypeScript、installer-windows 全绿；旧失败 run 均未 rerun。
-- **Task 9B.0 首次安装：** official installer 与 18/18 publication 已通过，Sessions/Evolution 保持 fresh；唯一一次 receipt.binDir 下 `tianwen.CMD model status --json` exit 0 但 stdout 为空，没有重跑。根因是 pnpm link path 与 module real path 的 CLI main-entry lexical comparison，属于正常 installed command 的核心缺陷，不是 archive 格式差异。没有创建 operation root、Agent、Session、Evolution、Provider 或 Goal，正式 activity-01 尚未消费。
+- **Task 9B.0 首次安装：** Task 9B.0 official installer 与 18/18 publication 成功，Sessions/Evolution 保持 fresh；唯一一次 receipt.binDir 下 `tianwen.CMD model status --json` exit 0、stderr 0 bytes、stdout 0 bytes，没有重跑。旧产品根及证据继续保留；没有创建 operation root、Agent、Session、Evolution、Provider 或 Goal，正式 activity-01 尚未消费。
+- **R0.1 feature：** R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` 把 CLI main-entry guard 改为 canonical real file identity，并由 Windows pnpm-like junction focused contract 证明；修正后的 official `.CMD` status 没有运行。
+- **R0.2 feature：** R0.2 `1b323c498a6fa177975fdd852738d9738995c604` 固定 `llm-deepseek retryPolicy=normal/0`，只禁用 `session-title-llm`，`session-title`、`llm-retry` 与 `settings` 仍启用；ordinary Profile 保持 DSH normal/2。真实配置若仍是 normal/2，runner 会在 0 Agent、0 model request、0 durable ledger 前 fail closed。`--dump-config` 是配置组合证据，不是 fresh installed operation。
+- **失败证据边界：** `receipt-certified` 只认证合法 passed receipt 对 Session 角色和 model-step/tool-call/Evidence 事件的归约；`durable-observed` 是既有事实源对 durable Session 事实的观察；没有独立事实源时为 `unknown`，不能把 Provider 账户实际请求数或 tool body 实际执行数写成已证明。
 - **真实 Provider 与用户效果：** 配置的 DeepSeek 受控生命周期尚未运行。进一步说，
   配置的 DeepSeek 真实受控生命周期尚未运行；`naturalUserEvidence=not-claimed` 且
   `externalUserEvidence=not-claimed`。
@@ -51,9 +54,11 @@ zero-real-Provider 的 installer、preflight 与 transport 分段证据。
 当前下一主线不是继续搭基础设施，而是一条有限的交付和正式运行链：
 
 ```text
-长期顺序不变：feature exact-SHA → 受控 main integration → exact-main CI → 一次正式真实 Provider lifecycle
-reviewed patch newline repair exact-SHA → 新 automatic exact-main push attempt 1 → 三 job 成功后一次正式真实 Provider lifecycle
-该历史 CI 门已通过。当前顺序为：official CLI realpath entry + controlled DeepSeek normal/0 retry + 禁用模型标题 provider → reviewed exact-SHA → 新 exact-main 三 job 全绿 → fresh formal install/operation packet → 一次正式真实 Provider lifecycle
+历史兼容句（已 superseded）：feature exact-SHA → 受控 main integration → exact-main CI → 一次正式真实 Provider lifecycle
+历史 R0 前边界（已 superseded）：reviewed patch newline repair exact-SHA → 新 automatic exact-main push attempt 1 → 三 job 成功后一次正式真实 Provider lifecycle
+历史 R0.1/R0.2 实现路径（已 superseded）：official CLI realpath entry + controlled DeepSeek normal/0 retry + 禁用模型标题 provider → reviewed exact-SHA → 新 exact-main 三 job 全绿 → fresh formal install/operation packet → 一次正式真实 Provider lifecycle
+只有旧 main@`95077be9265818cbcec443a89a71e22363ae1cde` / run `32641914572` 的 CI checkpoint 已完成；真实 Provider lifecycle 未运行，activity-01 仍未消费。
+feature 尚未受控 merge，没有匹配的新 exact-main CI。唯一当前顺序：独立 exact feature review → controlled main integration → automatic exact-main push attempt 1 三 job 全绿 → 新 formal product root 的一次 official install/status + packet freeze → 恰好一次真实 lifecycle
 ```
 
 脚本化 evaluator Agent 只按冻结 rubric 评价盲态 X/Y，所有 fixture 永久标记为
@@ -297,12 +302,12 @@ B@rev1→C@rev2→B@rev3→C@rev4 的 Promotion/Rollback/Restore 机制。
 `met/no-case`，没有合法产生自然 Candidate。因此机制已齐备，但配置的 DeepSeek 受控
 生命周期尚未运行。已安装入口又通过 official installer 的分段证据闭合 CLI、one-shot runner
 和静态 Profile patch，但它没有把 zero-real-Provider readiness 变成真实 Provider 成功。
-下一步不是增加新 Runtime、预算器、适配器或治理框架，而是：
+R0.1 与 R0.2 已在 feature 上闭合 main-entry identity 与 command-scoped Provider policy，但尚未受控合并，也没有新的 exact-main CI 或 fresh installed operation。下一步不是增加新 Runtime、预算器、适配器或治理框架，而是：
 
-1. 修复 official CLI 的 canonical realpath main-entry，并用 pnpm-like junction 证明普通 launcher 路径；
-2. 通过 DSH command overlay 固定 DeepSeek normal/0 retry，只禁用模型型 Session-title provider；
-3. 受控合并 reviewed exact SHA，并在新 automatic exact-main push run attempt 1 上通过三 job；
-4. 在全新 formal product root 物化已冻结的 15 任务/20 workspace/25 Session，再运行一次真实 lifecycle；
+1. 独立复审 exact feature；
+2. 受控合并，并只接受新 automatic exact-main push attempt 1 的 Python、TypeScript、installer-windows 三 job 全绿；
+3. 在全新 formal product root 做一次 official install/status，并冻结既有 15 任务/20 workspace/25 Session packet；
+4. 只运行恰好一次真实 lifecycle；
 5. 任何首次失败都保留现场并停止，不挑结果、不补跑局部活动。
 
 正式运行仍冻结五任务和单次尝试以保证比较公平，不设 Tianwen 侧模型、token 或金额上限；

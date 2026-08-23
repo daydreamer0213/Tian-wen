@@ -32,11 +32,13 @@ repair `7042a7d84712d499671b464251d0f09ec898fcf6` 已合并为 main `67ce961487f
 tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
 ```
 
-[受控真实运行准备交接](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)记录了已验证的边界和仍缺失的证据。下一边界是：reviewed repair exact SHA → 新 automatic exact-main push run attempt 1，Python、TypeScript 和 installer-windows 全部成功 → 唯一一次正式 real Provider lifecycle。
+[受控真实运行准备交接](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)记录了已验证的边界和仍缺失的证据。历史 pre-R0 边界曾是：reviewed repair exact SHA → 新 automatic exact-main push run attempt 1，Python、TypeScript 和 installer-windows 全部成功 → 唯一一次正式 real Provider lifecycle。该历史措辞已被下文的当前顺序取代。只有旧 exact-main CI checkpoint 已完成；real Provider lifecycle 部分没有运行，activity-01 尚未消费。
 
-上述历史 CI 门已经完成：newline repair `402b23d4252910ad367ba2070528b99067a041ca` 已合并为 main `95077be9265818cbcec443a89a71e22363ae1cde`，automatic push run `32641914572`、attempt 1 的 Python、TypeScript、installer-windows 三 job 全绿。Task 9B.0 随后完成一次 fresh official install 并证明 18/18 publication；但第一次 official `tianwen.CMD model status --json` 虽 exit 0，stdout 却为空。该命令没有重跑。这是 link path 与 real path 的主入口比较导致的核心已安装启动缺陷，不是归档格式不一致。
+上述历史 CI 门已经完成：newline repair `402b23d4252910ad367ba2070528b99067a041ca` 已合并为 main `95077be9265818cbcec443a89a71e22363ae1cde`，automatic push run `32641914572`、attempt 1 的 Python、TypeScript、installer-windows 三 job 全绿。Task 9B.0 完成了一次 official installer，18/18 publication 通过。唯一一次 official `tianwen.CMD model status --json` 为 exit 0、stderr 0 bytes、stdout 0 bytes；没有重跑。旧产品根及其证据继续保留，正式 activity-01 尚未消费，真实 Provider activity 仍为 0。
 
-因此 Task 9B 在任何 Provider activity 前仍被阻塞。下一步只闭合 official CLI 入口、controlled DSH 的 DeepSeek normal/0 retry，以及只禁用模型型 Session-title provider，再取得新的三 job 全绿 exact-main CI。失败安装根永久保留；之后的正式 lifecycle 使用全新产品根并只尝试一次。
+R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` 仍只是 feature implementation：CLI guard 现在比较 canonical real file identity，并由 Windows pnpm-like junction focused contract 证明。修正后的 official `.CMD` status 尚未运行。R0.2 `1b323c498a6fa177975fdd852738d9738995c604` 把 controlled overlay 固定为 DeepSeek normal/0，只禁用 session-title-llm；session-title、llm-retry、settings 仍启用，ordinary Profile 保持 normal/2。
+
+这些修改尚未受控 merge，没有匹配的新 exact-main CI，也没有在新 formal product root 做 official install 或 model status；保留的 Task 9B.0 旧 root 不会复用。唯一当前顺序是：独立 exact feature review → controlled main integration → automatic exact-main push attempt 1 的 Python、TypeScript、installer-windows 全部成功 → 在新 formal product root 做一次 official install/status + packet freeze → 恰好一次真实 lifecycle。
 
 ## 为什么需要天问
 
