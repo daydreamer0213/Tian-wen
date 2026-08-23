@@ -364,7 +364,24 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         "`externalUserEvidence=not-claimed`",
         "tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json",
         "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
-        "exact feature → controlled main → exact-main CI → exactly one formal real Provider lifecycle",
+        (
+            "Feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` is merged as "
+            "main `ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d`."
+        ),
+        "run `32635033552` attempt 1",
+        "Python and installer-windows succeeded; TypeScript failed because Windows-owned contract specs ran on Ubuntu.",
+        "not evidence of a Runtime, Agent, or lifecycle semantic defect",
+        "That run will not be rerun.",
+        (
+            "Task 9B remains blocked until Python, TypeScript, and "
+            "installer-windows all succeed on a new exact-main CI push run attempt 1"
+        ),
+        "real Provider activity remains 0",
+        (
+            "reviewed repair exact SHA → new exact-main CI push run attempt 1 with "
+            "Python, TypeScript, and installer-windows all successful → exactly one "
+            "formal real Provider lifecycle"
+        ),
     ):
         assert fact in readme_en
 
@@ -383,7 +400,21 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         "`externalUserEvidence=not-claimed`",
         "tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json",
         "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
-        "exact feature → 受控 main integration → exact-main CI → 唯一一次正式 real Provider lifecycle",
+        "feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` 已合并为 main `ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d`。",
+        "run `32635033552` attempt 1",
+        "Python 和 installer-windows 成功；TypeScript 因 Windows-owned contract specs 在 Ubuntu 运行而失败。",
+        "不是 Runtime、Agent 或 lifecycle 业务语义缺陷的证据",
+        "旧 run 不会重跑",
+        (
+            "Task 9B 继续阻塞，直到新的 exact-main CI push run attempt 1 中 "
+            "Python、TypeScript 和 installer-windows 全部成功"
+        ),
+        "真实 Provider activity 仍为 0",
+        (
+            "reviewed repair exact SHA → 新 exact-main CI push run attempt 1，"
+            "Python、TypeScript 和 installer-windows 全部成功 → 唯一一次正式 "
+            "real Provider lifecycle"
+        ),
     ):
         assert fact in readme_zh
 
@@ -409,6 +440,16 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         "2026-08-23-tianwen-v0.1-controlled-real-operation.md",
         "tianwen-v0.1-controlled-real-operation-readiness-handoff.md",
         "tianwen-v0.1-controlled-skill-lifecycle-handoff.md",
+        "feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` 已合并为 main `ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d`",
+        "run `32635033552` attempt 1",
+        "Python 与 installer-windows 成功，TypeScript 因 Windows-owned contract specs 错放在 Ubuntu 而失败",
+        "不是 Runtime、Agent 或 lifecycle 业务语义缺陷的证据",
+        "Task 9B 继续阻塞",
+        "这个受控生命周期的真实 Provider activity 仍为 0",
+        (
+            "reviewed CI platform repair exact-SHA → 新 exact-main CI push attempt 1 → "
+            "成功后一次正式真实 Provider lifecycle"
+        ),
     ):
         assert fact in architecture
 
@@ -486,7 +527,7 @@ def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
         "## 4. Installed ingress readiness and preserved validation history",
         "## 5. Evidence labels, receipt and privacy",
         "## 6. Feature gates / exact verification",
-        "## 7. Next boundary: 9A6 then 9B",
+        "## 7. Next boundary: 9A6-R1 then 9B",
     ):
         assert heading in raw_handoff
 
@@ -495,6 +536,8 @@ def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
         "c85d4cbd8a3f2cb8a285cfbe261fdc4ef0f91b9b",
         "df628cee8f5c619ab58b9ba62de79c66e35e8b68",
         "3f3d8ce9a4e102eb79d1f964504d7f0aa61362a1",
+        "9da1f45843cc92ca011b94b3344c1a8581dadd78",
+        "ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d",
         (
             "current controlled-real-operation runner spec: 25 formal Sessions, "
             "85 local scripted model requests, 65 tool bodies, 20 acceptance Evidence, "
@@ -537,7 +580,19 @@ def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
         "TIANWEN_CONTROLLED_INSTALLED_E2E=1",
         "default is skip",
         "Python, TypeScript, and installer-windows",
-        "attempt 1",
+        "run `32635033552`, event `push`, attempt 1",
+        "Python and installer-windows succeeded; TypeScript failed",
+        "Windows-owned command and Runtime Bundle specs were placed on Ubuntu",
+        "not evidence of a Runtime, Agent, or lifecycle semantic defect",
+        "The failed run will not be rerun",
+        "Ubuntu keeps the seven controlled mechanism specs and the controlled-real runner spec",
+        (
+            "installer-windows owns the installer, controlled-lifecycle command, and "
+            "Runtime Bundle specs after a recursive Runtime Bundle build"
+        ),
+        "Task 9B remains blocked",
+        "real Provider activity remains 0",
+        "new repair exact SHA and a new exact-main CI push run attempt 1",
         "naturalUserEvidence=not-claimed",
         "externalUserEvidence=not-claimed",
     ):
@@ -549,6 +604,10 @@ def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
     assert "scripted adapters exist only in tests" not in handoff
     assert "Current external counts are exact" not in handoff
     assert "Public documentation and receipts exclude" not in handoff
+    assert (
+        "keeps the controlled runner, command, and Runtime Bundle specs together "
+        "in the TypeScript focused step"
+    ) not in handoff
 
 
 def test_controlled_skill_lifecycle_ci_contract() -> None:
@@ -569,11 +628,10 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         "tests/dsh-probe/controlled-skill-activation.spec.ts "
         "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts "
         "tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts "
-        "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts "
-        "tests/dsh-migration/controlled-lifecycle-command.spec.ts "
-        "tests/dsh-migration/runtime-bundle.spec.ts"
+        "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts"
     )
 
+    violations: list[str] = []
     for command in (
         "tests/dsh-probe/controlled-skill-evaluation.spec.ts",
         "tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts",
@@ -583,18 +641,29 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts",
         "tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts",
         "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts",
-        "tests/dsh-migration/controlled-lifecycle-command.spec.ts",
-        "tests/dsh-migration/runtime-bundle.spec.ts",
         "pnpm demo:controlled-skill-lifecycle",
     ):
-        assert command in typescript_job
+        if command not in typescript_job:
+            violations.append(f"missing Ubuntu controlled contract: {command}")
+    for forbidden in (
+        "tests/dsh-migration/controlled-lifecycle-command.spec.ts",
+        "tests/dsh-migration/runtime-bundle.spec.ts",
+        "tests/dsh-migration/tianwen-installer.spec.ts",
+    ):
+        if forbidden in typescript_job:
+            violations.append(f"Windows-owned spec remains in Ubuntu: {forbidden}")
 
     job_prelude, steps_marker, typescript_steps = typescript_job.partition(
         "    steps:\n"
     )
     assert steps_marker, "missing typescript steps"
+    runs_on = [
+        line.strip()
+        for line in job_prelude.splitlines()
+        if line.strip().startswith("runs-on:")
+    ]
+    assert runs_on == ["runs-on: ubuntu-latest"]
     fixture_root = "${{ runner.temp }}/tianwen-v0.1-eval-fixtures"
-    violations: list[str] = []
     if "TIANWEN_DSH_PROBE_ROOT" in job_prelude or "runner.temp" in job_prelude:
         violations.append("controlled fixture root remains at TypeScript job level")
     for command in (controlled_vitest, "pnpm demo:controlled-skill-lifecycle"):
@@ -605,6 +674,7 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         )
         if expected_step not in typescript_steps:
             violations.append(f"missing step-level controlled fixture root: {command}")
+
     for forbidden in (
         "TIANWEN_CONTROLLED_INSTALLED_E2E",
         "TIANWEN_DSH_PHASE2_STARTUP",
@@ -710,6 +780,11 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
     assert job_match, "missing installer-windows job"
     installer_job = textwrap.dedent(job_match.group("job")).strip()
     installer_command = "pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts"
+    windows_vitest_command = (
+        "pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts "
+        "tests/dsh-migration/controlled-lifecycle-command.spec.ts "
+        "tests/dsh-migration/runtime-bundle.spec.ts"
+    )
     expected_installer_job = textwrap.dedent(
         """\
         runs-on: windows-latest
@@ -723,6 +798,7 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
               node-version: 22.20.0
               cache: pnpm
           - run: pnpm install --frozen-lockfile
+          - run: pnpm --filter @tianwen/runtime-bundle... build
           - name: Run installer contract
             shell: pwsh
             run: |
@@ -735,12 +811,14 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
               $testExit = 0
               try {
                 New-Item -ItemType Directory -Force -Path 'D:\\DevData' | Out-Null
-              pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts
+              {windows_vitest_command}
                 $testExit = $LASTEXITCODE
               } finally {
                 if ($mappedDrive) { & subst.exe D: /D }
               }
-              exit $testExit""",
+              exit $testExit""".replace(
+            "{windows_vitest_command}", windows_vitest_command
+        ),
     ).strip()
     assert installer_job == expected_installer_job
 
@@ -750,7 +828,13 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
     )
     assert typescript_match, "missing typescript job"
     typescript_job = typescript_match.group("job")
-    assert installer_command.split("pnpm exec vitest run ", maxsplit=1)[1] not in typescript_job
+    for windows_owned_spec in (
+        installer_command.split("pnpm exec vitest run ", maxsplit=1)[1],
+        "tests/dsh-migration/controlled-lifecycle-command.spec.ts",
+        "tests/dsh-migration/runtime-bundle.spec.ts",
+    ):
+        assert windows_owned_spec not in typescript_job
+    assert "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts" not in installer_job
 
     amended_workflow = ci.lower()
     for forbidden in PERSONAL_PATH_PREFIXES:

@@ -23,6 +23,10 @@ The configured DeepSeek controlled lifecycle has not run. Its evidence remains
 
 Installed ingress readiness is now complete: the official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch. This is zero-real-Provider installer, preflight, and transport evidence; it is not a successful configured DeepSeek lifecycle. The configured DeepSeek real controlled lifecycle has not run.
 
+Feature `9da1f45843cc92ca011b94b3344c1a8581dadd78` is merged as main `ce3521f26e08d3fbf2f435fd869c9d64e8ed8b3d`. Exact-main CI run `32635033552` attempt 1 kept the Python and Windows installer checks green. Python and installer-windows succeeded; TypeScript failed because Windows-owned contract specs ran on Ubuntu. This placement failure is not evidence of a Runtime, Agent, or lifecycle semantic defect.
+
+That run will not be rerun. Task 9B remains blocked until Python, TypeScript, and installer-windows all succeed on a new exact-main CI push run attempt 1; for this controlled lifecycle, real Provider activity remains 0.
+
 The installed controlled-lifecycle one-shot runner does not import or register `ScriptedAdapter`; the scripted adapter used by this fixture is supplied only by tests. Evidence remains `configured-provider-capable` + `scripted-fixture` + `development-only` + `synthetic-defect`, with `naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed`.
 
 The formal installed command shape is:
@@ -31,7 +35,7 @@ The formal installed command shape is:
 tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
 ```
 
-The [controlled real operation readiness handoff](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) records the verified boundary and the evidence that is still missing. The next boundary remains: exact feature → controlled main → exact-main CI → exactly one formal real Provider lifecycle.
+The [controlled real operation readiness handoff](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) records the verified boundary and the evidence that is still missing. The next boundary is: reviewed repair exact SHA → new exact-main CI push run attempt 1 with Python, TypeScript, and installer-windows all successful → exactly one formal real Provider lifecycle.
 
 ## Why Tianwen exists
 
