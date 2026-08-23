@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
+import { realpathSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
 import {
@@ -293,7 +294,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 
 if (
   process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+  realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))
 ) {
   process.exitCode = await main()
 }
