@@ -260,11 +260,12 @@ async function mountRunner(
   await harness.ctx.plugin(DynamicCordisRunnerService, {})
   const adapter = new NoRetryScriptedAdapter(script)
   harness.ctx.llm.registerAdapter(['deepseek-official'], adapter)
+  const selection = {
+    provider: 'deepseek-official',
+    model: 'deepseek-v4-pro',
+  }
   harness.ctx.provide('agentDefaultModel', {
-    currentSelection: () => ({
-      provider: 'deepseek-official',
-      model: 'deepseek-v4-pro',
-    }),
+    currentSelection: () => ({ ...selection }),
   })
   harness.ctx.provide('credentials', {
     describe: async () => ({
@@ -280,7 +281,7 @@ async function mountRunner(
       ? join(root, 'wrong-evolution')
       : evolutionRoot,
   })
-  return { adapter, harness, manifest, manifestPath, prepared, root }
+  return { adapter, harness, manifest, manifestPath, prepared, root, selection }
 }
 
 afterEach(() => {
@@ -461,6 +462,42 @@ describe('controlled real Skill lifecycle runner', () => {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
       })).rejects.toMatchObject({ code: 'workspace-drift' })
+      expect(mounted.adapter.requests).toHaveLength(4)
+      expect((await mounted.harness.ctx.sessionPersistence.list())
+        .map(header => String(header.id)))
+        .toEqual([mounted.manifest.tasks.seeds[0]!.sessionId])
+      expect(mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvalProtocols()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listLearningCases()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not start D2 after the configured model drifts during D1', async () => {
+    const mounted = await mountRunner('selection-drift-after-d1')
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as {
+      runControlledLifecycle(
+        ctx: typeof mounted.harness.ctx,
+        config: { manifestPath: string, manifestDigest: string },
+      ): Promise<unknown>
+    }
+    let changed = false
+    mounted.harness.ctx.on('llm/stream', (request, next) => {
+      if (!changed) {
+        changed = true
+        mounted.selection.model = 'drifted-model'
+      }
+      return next()
+    })
+    try {
+      await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })).rejects.toMatchObject({ code: 'selection-mismatch' })
       expect(mounted.adapter.requests).toHaveLength(4)
       expect((await mounted.harness.ctx.sessionPersistence.list())
         .map(header => String(header.id)))

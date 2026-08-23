@@ -147,6 +147,12 @@ interface SeedGuard {
   failed: boolean
 }
 
+interface SeedExecutionFacts {
+  readonly callConfig: Awaited<ReturnType<Context['llm']['resolveCallConfig']>>
+  readonly retryPolicy: ReturnType<Context['llm']['providerRetryPolicy']>
+  readonly toolSchemas: ReturnType<Context['tools']['schemas']>
+}
+
 class ArchitectureDecisionNotMet extends HarnessError {
   constructor() {
     super('architecture decision did not meet the frozen requirement',
@@ -217,7 +223,11 @@ function strictChild(child: string, parent: string): boolean {
     && !segment.startsWith(`..${sep}`)
 }
 
-function rootPreflight(ctx: Context, manifest: ControlledLifecycleManifest): void {
+function rootPreflight(
+  ctx: Context,
+  manifest: ControlledLifecycleManifest,
+  activityStarted = false,
+): void {
   try {
     const declaredRoots = [
       manifest.roots.dataDir,
@@ -248,12 +258,17 @@ function rootPreflight(ctx: Context, manifest: ControlledLifecycleManifest): voi
     ) throw new Error('session root mismatch')
 
     const evolutionEntries = readdirSync(evolutionRoot, { withFileTypes: true })
-    const artifacts = evolutionEntries[0]
+    const expectedEntries = activityStarted ? ['artifacts', 'ledger.jsonl'] : ['artifacts']
+    const artifacts = evolutionEntries.find(entry => entry.name === 'artifacts')
+    const ledger = evolutionEntries.find(entry => entry.name === 'ledger.jsonl')
     if (
-      evolutionEntries.length !== 1
-      || artifacts?.name !== 'artifacts'
-      || !artifacts.isDirectory()
+      evolutionEntries.map(entry => entry.name).toSorted().join(',') !== expectedEntries.join(',')
+      || !artifacts?.isDirectory()
       || lstatSync(join(evolutionRoot, 'artifacts')).isSymbolicLink()
+      || (activityStarted && (
+        !ledger?.isFile()
+        || lstatSync(join(evolutionRoot, 'ledger.jsonl')).isSymbolicLink()
+      ))
     ) throw new Error('evolution root mismatch')
 
   } catch {
@@ -404,6 +419,120 @@ function freshEvolution(ctx: Context, root: string): boolean {
     && ctx.tianwenEvolution.listControlledSkillShadows().length === 0
     && ctx.tianwenEvolution.listControlledSkillScopePointers().length === 0
     && ctx.tianwenEvolution.listControlledSkillTransitions().length === 0
+}
+
+async function readSeedExecutionFacts(
+  ctx: Context,
+  manifest: ControlledLifecycleManifest,
+  activityStarted = false,
+): Promise<SeedExecutionFacts> {
+  const credentials = ctx.get('credentials') as {
+    describe(reference: ReturnType<typeof credentialRef>): Promise<{ readonly configured: boolean }>
+  } | undefined
+  try {
+    if (
+      credentials === undefined
+      || !(await credentials.describe(credentialRef('DEEPSEEK_API_KEY'))).configured
+    ) throw new ControlledLifecycleRunnerError('credential-missing')
+  } catch (error) {
+    if (error instanceof ControlledLifecycleRunnerError) throw error
+    throw new ControlledLifecycleRunnerError('credential-missing')
+  }
+
+  let selection: { readonly provider: string, readonly model: string }
+  try {
+    selection = (ctx.get('agentDefaultModel') as {
+      currentSelection(): { readonly provider: string, readonly model: string }
+    }).currentSelection()
+  } catch {
+    throw new ControlledLifecycleRunnerError('selection-mismatch')
+  }
+  if (
+    selection.provider !== manifest.execution.providerId
+    || selection.model !== manifest.execution.modelId
+  ) throw new ControlledLifecycleRunnerError('selection-mismatch')
+
+  let callConfig: SeedExecutionFacts['callConfig']
+  try {
+    callConfig = await ctx.llm.resolveCallConfig(selection)
+  } catch {
+    throw new ControlledLifecycleRunnerError('selection-mismatch')
+  }
+  if (
+    callConfig.provider !== manifest.execution.providerId
+    || callConfig.model !== manifest.execution.modelId
+  ) throw new ControlledLifecycleRunnerError('selection-mismatch')
+
+  let retryPolicy: SeedExecutionFacts['retryPolicy']
+  try {
+    retryPolicy = ctx.llm.providerRetryPolicy(selection.provider)
+  } catch {
+    throw new ControlledLifecycleRunnerError('retry-policy-mismatch')
+  }
+  if (retryPolicy.mode !== 'normal' || retryPolicy.maxRetries !== 0) {
+    throw new ControlledLifecycleRunnerError('retry-policy-mismatch')
+  }
+
+  rootPreflight(ctx, manifest, activityStarted)
+  workspaceRootPreflight(manifest)
+
+  let toolSchemas: SeedExecutionFacts['toolSchemas']
+  try {
+    toolSchemas = ctx.tools.schemas()
+      .filter(schema => manifest.execution.allowedTools.includes(
+        schema.name as typeof manifest.execution.allowedTools[number],
+      ))
+      .toSorted((left, right) => left.name.localeCompare(right.name))
+  } catch {
+    throw new ControlledLifecycleRunnerError('tool-surface-mismatch')
+  }
+  if (
+    toolSchemas.length !== manifest.execution.allowedTools.length
+    || toolSchemas.map(schema => schema.name).join(',')
+      !== [...manifest.execution.allowedTools].toSorted().join(',')
+  ) throw new ControlledLifecycleRunnerError('tool-surface-mismatch')
+
+  try {
+    for (const task of manifest.tasks.seeds) {
+      const rootSkill = await ctx.skills.get(manifest.skills.parent.name, {
+        cwd: task.workspaceRoot,
+      })
+      if (!sameSkill(rootSkill, manifest.skills.parent)) {
+        throw new ControlledLifecycleRunnerError('identity-mismatch')
+      }
+    }
+  } catch (error) {
+    if (error instanceof ControlledLifecycleRunnerError) throw error
+    throw new ControlledLifecycleRunnerError('identity-mismatch')
+  }
+
+  return { callConfig, retryPolicy, toolSchemas }
+}
+
+function requireSameSeedExecutionFacts(
+  expected: SeedExecutionFacts,
+  actual: SeedExecutionFacts,
+): void {
+  if (sha256(actual.callConfig) !== sha256(expected.callConfig)) {
+    throw new ControlledLifecycleRunnerError('selection-mismatch')
+  }
+  if (sha256(actual.retryPolicy) !== sha256(expected.retryPolicy)) {
+    throw new ControlledLifecycleRunnerError('retry-policy-mismatch')
+  }
+  if (sha256(actual.toolSchemas) !== sha256(expected.toolSchemas)) {
+    throw new ControlledLifecycleRunnerError('tool-surface-mismatch')
+  }
+}
+
+async function revalidateSeedBoundary(
+  ctx: Context,
+  config: ControlledLifecycleRunnerConfig,
+  manifest: ControlledLifecycleManifest,
+  expectedSnapshots: readonly ControlledLifecycleWorkspaceSnapshot[],
+  expectedFacts: SeedExecutionFacts,
+): Promise<void> {
+  revalidateFrozenInputs(config, config.manifestDigest, manifest, expectedSnapshots)
+  requireSameSeedExecutionFacts(expectedFacts, await readSeedExecutionFacts(ctx, manifest, true))
 }
 
 async function runSeed(
@@ -622,33 +751,6 @@ export async function runControlledLifecycle(
   } catch {
     throw new ControlledLifecycleRunnerError('services-unavailable')
   }
-  const credentials = ctx.get('credentials') as {
-    describe(reference: ReturnType<typeof credentialRef>): Promise<{ readonly configured: boolean }>
-  }
-  try {
-    if (!(await credentials.describe(credentialRef('DEEPSEEK_API_KEY'))).configured) {
-      throw new ControlledLifecycleRunnerError('credential-missing')
-    }
-  } catch (error) {
-    if (error instanceof ControlledLifecycleRunnerError) throw error
-    throw new ControlledLifecycleRunnerError('credential-missing')
-  }
-  const selection = (ctx.get('agentDefaultModel') as {
-    currentSelection(): { readonly provider: string, readonly model: string }
-  }).currentSelection()
-  if (
-    selection.provider !== manifest.execution.providerId
-    || selection.model !== manifest.execution.modelId
-  ) throw new ControlledLifecycleRunnerError('selection-mismatch')
-  const callConfig = await ctx.llm.resolveCallConfig(selection)
-  if (
-    callConfig.provider !== manifest.execution.providerId
-    || callConfig.model !== manifest.execution.modelId
-  ) throw new ControlledLifecycleRunnerError('selection-mismatch')
-  const retryPolicy = ctx.llm.providerRetryPolicy(selection.provider)
-  if (retryPolicy.mode !== 'normal' || retryPolicy.maxRetries !== 0) {
-    throw new ControlledLifecycleRunnerError('retry-policy-mismatch')
-  }
   rootPreflight(ctx, manifest)
   workspaceRootPreflight(manifest)
   if (!freshEvolution(ctx, manifest.roots.evolutionRoot)) {
@@ -734,24 +836,7 @@ export async function runControlledLifecycle(
   }))
   const disposeParent = ctx.skills.register(manifest.skills.parent)
   try {
-    const toolSchemas = ctx.tools.schemas()
-      .filter(schema => manifest.execution.allowedTools.includes(
-        schema.name as typeof manifest.execution.allowedTools[number],
-      ))
-      .toSorted((left, right) => left.name.localeCompare(right.name))
-    if (
-      toolSchemas.length !== manifest.execution.allowedTools.length
-      || toolSchemas.map(schema => schema.name).join(',')
-        !== [...manifest.execution.allowedTools].toSorted().join(',')
-    ) throw new ControlledLifecycleRunnerError('tool-surface-mismatch')
-    for (const task of manifest.tasks.seeds) {
-      const rootSkill = await ctx.skills.get(manifest.skills.parent.name, {
-        cwd: task.workspaceRoot,
-      })
-      if (!sameSkill(rootSkill, manifest.skills.parent)) {
-        throw new ControlledLifecycleRunnerError('identity-mismatch')
-      }
-    }
+    const initialFacts = await readSeedExecutionFacts(ctx, manifest)
     const tasks = evaluationTasks(manifest)
     const first = await runSeed(
       ctx, manifest, manifest.tasks.seeds[0]!, stateByAgent, allSnapshots[0]!,
@@ -759,14 +844,14 @@ export async function runControlledLifecycle(
     if (first.verdict !== 'not-met' || first.ticketId === undefined) {
       throw new ControlledLifecycleRunnerError('seed-failed')
     }
-    revalidateFrozenInputs(config, prepared.manifestDigest, manifest, allSnapshots)
+    await revalidateSeedBoundary(ctx, config, manifest, allSnapshots, initialFacts)
     const second = await runSeed(
       ctx, manifest, manifest.tasks.seeds[1]!, stateByAgent, allSnapshots[1]!,
     )
     if (second.verdict !== 'met' || second.ticketId !== undefined) {
       throw new ControlledLifecycleRunnerError('seed-failed')
     }
-    revalidateFrozenInputs(config, prepared.manifestDigest, manifest, allSnapshots)
+    await revalidateSeedBoundary(ctx, config, manifest, allSnapshots, initialFacts)
     let protocol
     let candidate
     try {
@@ -782,7 +867,7 @@ export async function runControlledLifecycle(
             goalDigest: sha256(task.goal),
             inputDigest: sha256(task.input),
             workspaceSnapshotDigest: sha256(task.workspaceSnapshot),
-            toolSchemaDigest: sha256(toolSchemas),
+            toolSchemaDigest: sha256(initialFacts.toolSchemas),
             authorizationDigest: sha256(task.authorization),
             verifierContractDigest: sha256(task.verifierContract),
             stopConditionDigest: sha256(task.stopCondition),
@@ -794,14 +879,14 @@ export async function runControlledLifecycle(
           })),
           execution: {
             dshVersion: manifest.execution.dshVersion,
-            providerId: callConfig.provider,
-            modelId: callConfig.model,
-            callConfigDigest: sha256(callConfig),
+            providerId: initialFacts.callConfig.provider,
+            modelId: initialFacts.callConfig.model,
+            callConfigDigest: sha256(initialFacts.callConfig),
             toolSchemaDigest: sha256(tasks.map(task => ({
               taskId: task.taskId,
-              toolSchemaDigest: sha256(toolSchemas),
+              toolSchemaDigest: sha256(initialFacts.toolSchemas),
             }))),
-            retryPolicyDigest: sha256(retryPolicy),
+            retryPolicyDigest: sha256(initialFacts.retryPolicy),
           },
         },
       })
