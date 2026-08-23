@@ -657,7 +657,8 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         "tests/dsh-probe/controlled-skill-activation.spec.ts "
         "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts "
         "tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts "
-        "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts"
+        "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts "
+        "tests/dsh-migration/controlled-lifecycle-profile.spec.ts"
     )
 
     violations: list[str] = []
@@ -670,6 +671,7 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts",
         "tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts",
         "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts",
+        "tests/dsh-migration/controlled-lifecycle-profile.spec.ts",
         "pnpm demo:controlled-skill-lifecycle",
     ):
         if command not in typescript_job:
@@ -710,6 +712,13 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
     ):
         if forbidden in ci:
             violations.append(f"automatic CI enables long installed E2E: {forbidden}")
+    installer_match = re.search(
+        r"(?ms)^  installer-windows:\n(?P<job>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+        ci,
+    )
+    assert installer_match, "missing installer-windows job"
+    if "tests/dsh-migration/controlled-lifecycle-profile.spec.ts" in installer_match.group("job"):
+        violations.append("controlled Profile spec moved into installer-windows")
     assert not violations, "; ".join(violations)
 
 

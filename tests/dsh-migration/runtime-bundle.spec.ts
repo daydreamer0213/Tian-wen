@@ -394,6 +394,15 @@ describe('@tianwen/runtime-bundle', () => {
 - id: goal-round-driver
   disabled: true
 
+- id: llm-deepseek
+  config:
+    retryPolicy:
+      mode: normal
+      maxRetries: 0
+
+- id: session-title-llm
+  disabled: true
+
 - insert:
     - id: tianwen-controlled-lifecycle-runner
       name: '@tianwen/runtime-bundle/controlled-lifecycle-runner'
