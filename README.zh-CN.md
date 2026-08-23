@@ -18,7 +18,9 @@ Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成
 
 ## 已安装入口准备状态
 
-“已安装入口准备状态”表示官方 installer 会发布 CLI 入口、one-shot runner 和静态 DSH Profile patch。Task 9B.0 完成了一次 official installer，18/18 publication 通过。唯一一次 official `tianwen.CMD model status --json` 为 exit 0、stderr 0 bytes、stdout 0 bytes，且没有重跑。正式 activity-01 尚未消费，真实 Provider activity 仍为 0，真实 Provider lifecycle 尚未运行。
+“已安装入口准备状态”表示官方 installer 会发布 CLI 入口、one-shot runner 和静态 DSH Profile patch。Task 9B.0 完成了一次 official installer，18/18 publication 通过。唯一一次 official `tianwen.CMD model status --json` 为 exit 0、stderr 0 bytes、stdout 0 bytes，且没有重跑；在这个历史检查点，activity-01 当时尚未消费。
+
+随后 activity-01 进入 official `main()` usage parser，并以 exit 2 停止，因此 activity-01 已消费。旧 operation authority 漏写了必需的 `--model`；这是操作 authority 错误，不是产品、Provider 或 Candidate 缺陷。更早的 outer shell failure 仍是 pre-invocation 证据，没有消费 activity。lifecycle invocation=0、closed roles=0/25，最终 offline receipt 合法。Provider 账户请求和 tool body 实际执行数保持 unknown (none-observed)，不能写成 receipt-certified 0。真实 Provider lifecycle 尚未运行，activity-02 尚未开始。
 
 R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` 在 CLI guard 中比较 canonical real file identity，并由 Windows pnpm-like junction focused contract 证明。R0.2 `1b323c498a6fa177975fdd852738d9738995c604` 把 controlled overlay 固定为 DeepSeek normal/0，只禁用 session-title-llm，并保持 ordinary Profile 为 normal/2。
 
@@ -27,10 +29,11 @@ R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` 在 CLI guard 中比较 canonica
 正式已安装命令的形式是：
 
 ```console
+tianwen model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json
 tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
 ```
 
-[受控真实运行准备交接](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)保留精确实现与 CI 审计历史。长期发布门只有一条：reviewed feature 必须先受控进入 main，并由对应 automatic exact-main push attempt 1 的 Python、TypeScript、installer-windows 三个 job 全绿。之后才允许在 new formal product root 做一次 official install/status 与 packet freeze，最后恰好运行一次 formal real lifecycle。保留的 Task 9B.0 旧 root 不会复用。
+[受控真实运行准备交接](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)保留 operation 前的实现与 CI 审计历史；[activity-01 交接](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md)记录后续 usage failure 与恢复边界。activity-02 必须先让 reviewed authority SHA 受控进入 main，并由新的 automatic exact-main push attempt 1 的 Python、TypeScript、installer-windows 三个 job 全绿。随后使用 new product root、new evidence root、new operation root、20 个新 workspace 和 25 个新 Session。activity-01 保留，不重跑、不清理、不补阶段。
 
 ## 为什么需要天问
 
@@ -153,6 +156,8 @@ Shadow 通过，以及 B@rev1→C@rev2→B@rev3→C@rev4 指针序列。终态�
   保存受控生命周期 receipt、隐私边界和证据限制。
 - [`docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)
   保存已安装入口准备边界和尚未通过的真实 Provider 门。
+- [`docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md)
+  保存已消费的 activity-01 usage failure 与隔离的 activity-02 恢复门。
 - [`docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)
   冻结有界的 v0.1 评测、Shadow、Promotion 和 Rollback 路线。
 - [`docs/research`](docs/research) 保存有边界的研究证据和审计记录。

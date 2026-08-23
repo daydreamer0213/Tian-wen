@@ -21,7 +21,9 @@ The configured DeepSeek controlled lifecycle has not run. Its evidence remains
 
 ## Installed ingress readiness
 
-Installed ingress readiness means the official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch. Task 9B.0 completed one official installer run with 18/18 publication. Its only official `tianwen.CMD model status --json` invocation exited 0 with 0 stderr bytes and 0 stdout bytes and was not rerun. Formal activity-01 remains unconsumed, real Provider activity remains 0, and the formal real Provider lifecycle has not run.
+Installed ingress readiness means the official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch. Task 9B.0 completed one official installer run with 18/18 publication. Its only official `tianwen.CMD model status --json` invocation exited 0 with 0 stderr bytes and 0 stdout bytes and was not rerun; at that historical checkpoint, activity-01 was still unconsumed.
+
+Activity-01 later entered the official `main()` usage parser and stopped with exit 2, so activity-01 is consumed. The old operation text had omitted the required `--model`; this was an operator-authority error, not a product, Provider, or Candidate defect. The earlier outer shell failure remained pre-invocation and did not consume the activity. The lifecycle invocation=0, closed roles=0/25, and the final offline receipt is valid. Provider-account requests and tool-body executions remain unknown (none-observed), rather than receipt-certified zero. The formal real Provider lifecycle has not run, and activity-02 has not started.
 
 R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` compares canonical real file identity in the CLI guard, as proved by a Windows pnpm-like junction focused contract. R0.2 `1b323c498a6fa177975fdd852738d9738995c604` freezes the controlled overlay at DeepSeek normal/0, disables only session-title-llm, and preserves the ordinary Profile at normal/2.
 
@@ -30,10 +32,11 @@ The installed controlled-lifecycle one-shot runner does not import or register `
 The formal installed command shape is:
 
 ```console
+tianwen model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json
 tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json
 ```
 
-The [controlled real operation readiness handoff](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) retains the exact implementation and CI audit history. The permanent release gate is simpler: a reviewed feature must first enter main through controlled integration, and its corresponding automatic exact-main push attempt 1 must pass Python, TypeScript, and installer-windows. Only then may one official install and model status run on a new formal product root with packet freeze, followed by exactly one formal real lifecycle. The preserved Task 9B.0 root is not reused.
+The [controlled real operation readiness handoff](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) retains the pre-operation implementation and CI audit history; the [activity-01 handoff](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md) records the later usage failure and recovery boundary. Activity-02 requires a reviewed authority SHA to enter main through controlled integration and a new automatic exact-main push attempt 1 to pass Python, TypeScript, and installer-windows. It then uses a new product root, new evidence root, new operation root, 20 new workspaces, and 25 new Sessions. Activity-01 is preserved without retry, cleanup, or partial continuation.
 
 ## Why Tianwen exists
 
@@ -189,6 +192,8 @@ activity, and its dedicated fixture root is empty after cleanup.
   records the controlled lifecycle receipt, privacy boundary, and evidence limits.
 - [`docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)
   records the installed ingress readiness boundary and the remaining real-Provider gate.
+- [`docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md)
+  records the consumed activity-01 usage failure and the isolated activity-02 recovery gate.
 - [`docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)
   freezes the bounded v0.1 evaluation, Shadow, Promotion, and Rollback path.
 - [`docs/research`](docs/research) contains bounded research evidence and audit
