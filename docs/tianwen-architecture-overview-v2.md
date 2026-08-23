@@ -2,7 +2,7 @@
 
 **更新：** 2026-08-23
 
-**状态：** 当前产品架构的首要阅读入口；Stage 7 已完成，受控评测生命周期设计已冻结
+**状态：** 当前产品架构的首要阅读入口；Stage 7 已完成，受控 Skill 生命周期机制已实现
 
 **一句话定义：**
 
@@ -23,21 +23,22 @@ rc.7 产品路径正式运行一次：Goal complete，45/45 Evidence complete，
 独立文件身份且没有 source hardlink。安装前后 Sessions/Evolution 不变。installed CLI 的
 只读 status 对已成功 Goal 返回 exit 0，而且不泄露 governed private-ledger facts。
 
-当前下一主线不是继续修 Stage 7，而是一条有限的开发收口链：
+Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成。另一条
+0-external-Provider scripted 全链夹具现已通过普通 DSH Agent 路径覆盖五任务
+B/C、盲态 evaluator、隔离 Shadow、Promotion/Rollback/Restore 产品机制。配置的 DeepSeek 受控生命周期尚未运行；
+`naturalUserEvidence=not-claimed` 且
+`externalUserEvidence=not-claimed`。
+
+当前下一主线不是继续搭基础设施，而是一条有限的交付和正式运行链：
 
 ```text
-v0.1 文档收口
-→ 冻结五任务的真实 paired B/C 与盲态受控评价
-→ 隔离 Shadow
-→ 证据门通过后按监督建议 Promotion
-→ 有界 Rollback 演练
-→ 项目开发收口
+feature exact-SHA → 受控 main integration → exact-main CI → 一次正式真实 Provider lifecycle
 ```
 
-模拟 evaluator Agent 只负责按冻结 rubric 评价主观质量，必须诚实标为 controlled/simulated；
-任务执行本身使用真实 Runtime、Provider 和工具。若自然任务没有产生合法 Candidate，可以用
-永久标记的 development-only 缺陷 Skill 在隔离命名空间跑通学习、B/C、Shadow、Promotion、
-Rollback 和恢复的完整工程链；它不能污染普通产品 incumbent，也不能冒充自然用户失败。
+脚本化 evaluator Agent 只按冻结 rubric 评价盲态 X/Y，所有 fixture 永久标记为
+controlled/development-only/synthetic-defect。这份证据证明工程机制和停止线，不冒充
+真实 Provider 成功、自然用户改善或市场泛化。正式运行仍必须在冻结证据门和已有
+standing authorization 边界内进行。
 完整门禁见
 [`2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)。
 
@@ -264,45 +265,41 @@ DSH 能组合但缺一小段 → 写薄适配
 
 ## 10. 当前开发阶段与下一步
 
-产品基线固定为 DSH `0.1.0-rc.7`，Stage 1–7 已在同一个产品 Runtime 上依次证明非阻塞
-Signal/Ticket、跨 Run Outcome、受治理 Skill Candidate 机制、成对 Evaluation 记录、Shadow
-readiness、Promotion readiness，以及自然 Run/Skill/Evidence/Outcome 终局链。前六阶段里的
-Candidate 和 Evaluation 仍是 scripted/controlled mechanism proof；Stage 7 自然任务是项目所有者
-实际使用证据，但结果为 `met/no-case`，没有合法产生自然 Candidate。
+产品基线固定为 DSH `0.1.0-rc.7`。Stage 1–7 的自然 Run/Skill/Evidence/Outcome 终局链、
+官方 installer/status 证明、受治理 Skill Candidate 机制和成对 Evaluation 记录保持有效。
+这些早期 Candidate 和 Evaluation 仍是 scripted/controlled mechanism proof。
+受控全链 fixture 又通过同一
+产品 Runtime 证明五任务 B/C、独立客观门、盲态 evaluator、五任务 isolated Shadow，以及
+B@rev1→C@rev2→B@rev3→C@rev4 的 Promotion/Rollback/Restore 机制。
 
-因此当前不存在可直接晋升的 Candidate，也不继续为空生命周期扩建新框架。下一步只有一条：
+这项新证据是 0-external-Provider scripted 全链夹具，而 Stage 7 自然任务结果仍是
+`met/no-case`，没有合法产生自然 Candidate。因此机制已齐备，但配置的 DeepSeek 受控
+生命周期尚未运行。下一步不是增加新 Runtime、预算器、适配器或治理框架，而是：
 
-1. 完成当前入口文档与 release-note 源文档收口；
-2. 若自然证据形成合法 Candidate，则直接使用；否则在 development-only 隔离场景用故意缺陷
-   Skill 形成 `feedback → Ticket → Case → Lesson → Candidate`，并继续验证完整受控生命周期；
-   该 Candidate 永不成为普通产品 incumbent，但可在专用 isolated-test scope 完成指针演练；
-3. 对受控 Candidate 冻结五个有现实代表性的任务、rubric、工具、Provider 条件和
-   一次正式尝试；
-4. 由 B/C 通过真实 Runtime 各执行一次，客观 verifier 与不知道 B/C 身份的独立 evaluator Agent
-   分开判断；
-5. 只有 paired B/C 通过才进入五任务隔离 Shadow；
-6. 只有 Shadow 通过且监督基于冻结证据建议 Promotion，才在 2026-08-23 standing authorization 下改变隔离 scope 的 future-run pointer；
-7. 完成有界 Rollback 演练后停止开发收口。
+1. 固定 feature exact SHA 并完成受控 main integration；
+2. 在 exact main 上通过 Python、TypeScript 和 installer CI；
+3. 只按后续冻结 runbook 运行一次正式真实 Provider lifecycle；
+4. 任何首次失败都保留现场并停止，不挑结果、不补跑局部活动。
 
-该路线固定五任务和单次正式尝试以保证比较公平，但不设置 Tianwen 侧 DeepSeek 预算上限；不新增价格轮询、预算器、遥测、scheduler、通用日志、第二 Runtime、global Champion，或绕过证据门的 Promotion。
+正式运行仍冻结五任务和单次尝试以保证比较公平，不设 Tianwen 侧模型、token 或金额上限；
+也不绕过冻结证据门和 standing authorization 边界。
 
 ## 11. v0.1 应该怎样算“做完”
 
 公开的 `Tianwen v0.1.0 Research Preview` 已经存在。它证明了可复现机制和一次项目所有者自然
 任务，不应被重新写成“尚未发布”，也不能因此宣称完整自主学习或广泛效能已经完成。
 
-剩余的“v0.1 开发收口”完成主张更窄：
+“v0.1 开发收口”现可以做出的主张很窄：
 
-1. 由一个有闭合受控来源和父版本的 Candidate 进入冻结五任务 paired B/C；故意有缺陷的测试 Skill 可以使用，但必须永久标明 controlled/development-only；
-2. 执行者、客观 verifier 与盲态 evaluator 分工清楚，正式结果没有挑重试；
-3. Candidate 通过 B/C 后只进入项目级隔离 Shadow；
-4. 监督在 Shadow 通过后形成 Promotion 建议，并依据 2026-08-23 standing authorization 执行；
-5. 新 pointer 只影响隔离 scope 的未来 Run，随后证明可回到 B 并按建议恢复；
-6. 最终演示、README 和报告诚实区分机制证据、受控评测、单用户产品证据和外部用户泛化。
+1. development-only synthetic-defect Candidate 在 Candidate 物化前冻结五任务；
+2. 执行者、客观 verifier 与盲态 evaluator 分工清楚，fixture 不挑重试；
+3. Candidate 通过 B/C 后只进入 `isolated-test` Shadow；
+4. Shadow 通过后在 2026-08-23 standing authorization 下完成 Promotion；
+5. pointer 只影响隔离 scope 的未来 Run，并已证明回到 B 再恢复 C；
+6. 演示、README 和报告区分机制证据、单用户产品证据和未声称的外部效果。
 
-如果只有 development-only Candidate，它仍可以用真实 Runtime、Provider、工具和独立 Session
-证明完整工程链以及隔离 B/C、Shadow、Promotion、Rollback；但不能满足自然用户改善、普通产品
-incumbent 晋升或市场泛化主张。缺少外部用户不阻塞开发收口；它只限制结论不能推广到其他用户。
+development-only Candidate 只能证明受控工程链。它不能满足自然用户改善、普通产品
+incumbent 晋升、外部用户效果或市场泛化主张。缺少这些证据不否定机制收口；它只限制公开结论。
 
 ## 12. 文档地图与权威顺序
 
@@ -312,11 +309,12 @@ incumbent 晋升或市场泛化主张。缺少外部用户不阻塞开发收口�
 2. 本文：整体产品架构、组件关系、当前方向和阅读入口；
 3. [`2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)：当前评测、Shadow、Promotion、Rollback 与停止线；
 4. [`2026-08-23-tianwen-v0.1-controlled-real-skill-lifecycle.md`](superpowers/plans/2026-08-23-tianwen-v0.1-controlled-real-skill-lifecycle.md)：当前逐 Task 实现、复审、合并和真实 operation 顺序；
-5. [`tianwen-stage7-natural-run-evidence-trial-handoff.md`](operations/tianwen-stage7-natural-run-evidence-trial-handoff.md) 与 [`tianwen-rc6-rc7-managed-install-migration-handoff.md`](operations/tianwen-rc6-rc7-managed-install-migration-handoff.md)：Stage 7 当前运营事实及终局 addendum；
-6. [`2026-08-19-tianwen-runtime-boundary-reset-design.md`](superpowers/specs/2026-08-19-tianwen-runtime-boundary-reset-design.md)：正式 Runtime 所有权、集成 seam、非干扰合同和恢复顺序；
-7. [`2026-08-17-tianwen-continuous-learning-governance-design.md`](superpowers/specs/2026-08-17-tianwen-continuous-learning-governance-design.md)：长期 Signal、Case、Lesson、Candidate、评测、权限、Shadow 和回滚原则；
-8. [`2026-08-19-dsh-upstream-capability-overlap-audit.md`](research/2026-08-19-dsh-upstream-capability-overlap-audit.md)：DSH rc.7 已有能力与 Tianwen 差异化边界的历史事实依据；
-9. 旧 Alpha 规格、plans、旧 handoff 和实验分支：局部合同与历史证据，不得反向改写当前产品事实。
+5. [`tianwen-v0.1-controlled-skill-lifecycle-handoff.md`](operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md)：受控全链 fixture 的机制、计数、隐私与证据限制；
+6. [`tianwen-stage7-natural-run-evidence-trial-handoff.md`](operations/tianwen-stage7-natural-run-evidence-trial-handoff.md) 与 [`tianwen-rc6-rc7-managed-install-migration-handoff.md`](operations/tianwen-rc6-rc7-managed-install-migration-handoff.md)：Stage 7 自然任务与 installer/status 当前运营事实；
+7. [`2026-08-19-tianwen-runtime-boundary-reset-design.md`](superpowers/specs/2026-08-19-tianwen-runtime-boundary-reset-design.md)：正式 Runtime 所有权、集成 seam、非干扰合同和恢复顺序；
+8. [`2026-08-17-tianwen-continuous-learning-governance-design.md`](superpowers/specs/2026-08-17-tianwen-continuous-learning-governance-design.md)：长期 Signal、Case、Lesson、Candidate、评测、权限、Shadow 和回滚原则；
+9. [`2026-08-19-dsh-upstream-capability-overlap-audit.md`](research/2026-08-19-dsh-upstream-capability-overlap-audit.md)：DSH rc.7 已有能力与 Tianwen 差异化边界的历史事实依据；
+10. Stage 4/5/6 handoff、2026-08-20 public-readiness 与旧 Alpha 资料：历史 checkpoint，不再是当前能力清单，不得反向改写当前事实。
 
 旧的 [`architecture-master-session-memory.md`](architecture-master-session-memory.md) 保留会话历史、愿景和监督约定；其中与本文或 Runtime 边界重置冲突的旧状态、旧阶段顺序和双 Runtime 表述不再具有产品权威性。
 

@@ -11,6 +11,11 @@
 成功，随后模型恢复 offline。这是项目所有者实际使用形成的单用户产品证据，不是外部用户
 验证，也不证明普遍效能。
 
+Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成。
+五任务 B/C、盲态 evaluator、隔离 Shadow 与 Promotion/Rollback/Restore 产品机制已经实现，并由 0-external-Provider scripted 全链夹具覆盖。
+配置的 DeepSeek 受控生命周期尚未运行。证据仍固定为
+`naturalUserEvidence=not-claimed` 和 `externalUserEvidence=not-claimed`。
+
 ## 为什么需要天问
 
 Agent 可以完成一次 Session，但长期治理还需要回答另外一些问题：结果由哪些证据支持、
@@ -22,7 +27,7 @@ Agent 可以完成一次 Session，但长期治理还需要回答另外一些问
 | 层 | 职责 |
 | --- | --- |
 | **DSH** | 运行当前 Agent Session。天问直接复用它的模型与 Provider、Agent loop、工具、MCP、sandbox、Session Query、Skill、Jobs、Workflow、Subagent、Message Feedback、Approval 和 permissions。 |
-| **天问** | 保留跨 Run 治理边界，包括 Goal Graph、Evidence provenance（证据来源与流转记录）、学习归因和面向未来 Run 的版本治理。当前预览实际运行了自然 Run/Skill 绑定、Evidence 只读投影、谨慎的 no-case 判断、Signal/Ticket 入口、合成 Candidate 入口和成对 Evaluation 记录。 |
+| **天问** | 保留跨 Run 治理边界，包括 Goal Graph、Evidence provenance（证据来源与流转记录）、学习归因和面向未来 Run 的版本治理。当前预览实际运行了自然 Run/Skill 绑定、Evidence 只读投影、谨慎的 no-case 判断、Signal/Ticket 入口、合成 Candidate 入口、受控 Evaluation、隔离 Shadow 和面向未来 Run 的指针转换。 |
 | **Alpha** | Alpha 是实验与评测资产，不是第二套产品运行时。 |
 
 DSH Message Feedback 只是学习归因的一项输入，本身不等于 Lesson。DSH Job 表示当前进程
@@ -68,6 +73,12 @@ Skill 差异后的归一化请求一致，并冻结可见的模型工具表面�
 任务完成，45 条投影 Evidence 全部完整，父 Skill 的成功使用得到记录。因为没有合格学习
 问题，这个 Run 没有产生 Ticket、Case、Lesson、Candidate、Evaluation、Shadow 或 Promotion。
 
+受控生命周期演示则独立证明一个永久标记为 development-only 的合成缺陷机制。
+它在 Candidate 产生前冻结五类任务，通过普通 DSH Agent 运行 10 个 B/C 臂、5 个
+盲态 evaluator、5 个隔离 Shadow Run 和 3 个受治理指针检查，并在现有 standing
+authorization 下完成 Promotion、Rollback 和 Restore，最终为 C@rev4。这个本地
+scripted 夹具只证明机制和停止线，不是自然用户改善或外部效能证据。
+
 ## 零成本演示
 
 安装锁定的依赖，然后运行：
@@ -79,9 +90,10 @@ pnpm demo:explicit-correction
 pnpm demo:repeated-outcome
 pnpm demo:governed-skill-candidate
 pnpm demo:paired-skill-evaluation
+pnpm demo:controlled-skill-lifecycle
 ```
 
-每个演示只输出一个格式化 JSON 对象，不使用网络、Provider、token 预算、付费模型、
+每个演示只输出一个格式化 JSON 对象，不使用网络或外部 Provider、token 预算、付费模型、
 Docker、持久化数据库或用户数据。research-preview 演示报告一条完整 Evidence 和
 `no-case`；explicit-correction 演示报告已存储的负面反馈、一条 Signal、一个开放 Ticket、
 重复消费命中幂等和 `candidateCreated=false`；repeated-outcome 演示报告两次结构化
@@ -91,15 +103,19 @@ Candidate。所有演示的 Session 前后摘要都相同。不同 Run 的摘要
 数据而不同；承重事实是同一次 Run 内前后相等。paired-skill-evaluation 演示额外报告一个
 Candidate 之前冻结的协议、八个隔离的 B/C 臂、一条私有 Evaluation 结果、回放/重启检查和
 明确的 `INCONCLUSIVE` 脚本化机制结论；根 Skill registry 与新建普通 Agent 保持不变。
+受控生命周期演示用一份受隐私约束的 receipt 报告 25 个正式 Session、65 次本地
+scripted 请求、45 次工具主体执行、0 次外部 Provider 请求、五任务 Evaluation 和隔离
+Shadow 通过，以及 B@rev1→C@rev2→B@rev3→C@rev4 指针序列。终态回放不增加活动，
+冲突的任务包会在活动前以 `task-package-mismatch` 停止，清理后专用 fixture root 为空。
 
 ## 当前限制
 
 - 仓库里已记录的 Candidate 和成对 Evaluation 是合成机制证明；目前还没有由自然产品问题
   触发、并通过真实 paired B/C 的产品 Candidate。
-- 有界收口生命周期仍待完成：冻结五任务的真实 B/C 与盲态受控评价、隔离 Shadow、项目
-  所有者批准的 Promotion，以及 Rollback 演练。
+- 有界受控生命周期已实现，并在 standing authorization 下由 scripted 全链夹具覆盖，
+  但尚未针对已配置的 DeepSeek Provider 运行。
 - 当前预览不提供生产 SLA，也没有完成的用户界面。
-- 当前没有外部用户验证或多用户泛化证据；一次成功执行也不应该自动产生学习。
+- 当前没有自然用户改善、外部用户验证或多用户泛化证据；一次成功执行也不应该自动产生学习。
 - 未来版本只能影响新 Run，不能热切换正在运行的 Agent。
 
 ## 仓库地图
@@ -109,13 +125,16 @@ Candidate 之前冻结的协议、八个隔离的 B/C 臂、一条私有 Evaluat
   是显式反馈学习入口演示；[`scripts/run-repeated-outcome-demo.ts`](scripts/run-repeated-outcome-demo.ts)
   是结构化 Outcome 重复失败演示；[`scripts/run-governed-skill-candidate-demo.ts`](scripts/run-governed-skill-candidate-demo.ts)
   是受治理 Skill Candidate 演示；[`scripts/run-paired-skill-evaluation-demo.ts`](scripts/run-paired-skill-evaluation-demo.ts)
-  是成对 B/C Skill Evaluation 演示。
+  是成对 B/C Skill Evaluation 演示；[`scripts/run-controlled-skill-lifecycle-demo.ts`](scripts/run-controlled-skill-lifecycle-demo.ts)
+  是 0-external-Provider 受控全链夹具。
 - [`packages/tianwen-dsh-compat`](packages/tianwen-dsh-compat) 是 DSH 公共兼容接缝。
 - [`packages/tianwen-evidence`](packages/tianwen-evidence) 实现 Evidence 只读投影。
 - [`docs/tianwen-architecture-overview-v2.md`](docs/tianwen-architecture-overview-v2.md)
   是详细架构的权威入口。
 - [`docs/operations/tianwen-stage7-natural-run-evidence-trial-handoff.md`](docs/operations/tianwen-stage7-natural-run-evidence-trial-handoff.md)
   保存 Stage 7 的机制、失败现场和终局自然运行证据。
+- [`docs/operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md`](docs/operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md)
+  保存受控生命周期 receipt、隐私边界和证据限制。
 - [`docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)
   冻结有界的 v0.1 评测、Shadow、Promotion 和 Rollback 路线。
 - [`docs/research`](docs/research) 保存有边界的研究证据和审计记录。
@@ -128,6 +147,7 @@ pnpm run typecheck
 pnpm run check:dsh-install
 pnpm run check:no-private-dsh-imports
 pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts tests/dsh-probe/skill-governance.spec.ts tests/dsh-probe/skill-governance-runtime.spec.ts tests/dsh-probe/governed-skill-candidate-demo.spec.ts tests/dsh-probe/skill-evaluation.spec.ts tests/dsh-probe/skill-evaluation-runtime.spec.ts tests/dsh-probe/paired-skill-evaluation-demo.spec.ts
+pnpm demo:controlled-skill-lifecycle
 uv sync --frozen --dev
 uv run ruff check .
 uv run pytest
