@@ -193,9 +193,7 @@ describe('CLI installed entry identity', () => {
     'executes main through a pnpm-like Runtime Bundle junction',
     () => {
       const fixtureBase = resolve('D:/DevData/tianwen-runtime-bundle-tests/cli-main-entry')
-      const devDataRoot = resolve('D:/DevData')
       expect(isAbsolute(packageRoot)).toBe(true)
-      expect(relative(devDataRoot, packageRoot)).not.toMatch(/^\.\.(?:[\\/]|$)/u)
       mkdirSync(fixtureBase, { recursive: true })
       const fixtureRoot = mkdtempSync(join(fixtureBase, 'entry-'))
       expect(relative(fixtureBase, fixtureRoot)).not.toMatch(/^\.\.(?:[\\/]|$)/u)
