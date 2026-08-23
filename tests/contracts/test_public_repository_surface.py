@@ -360,7 +360,7 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
     for fact in (
         "Installed ingress readiness",
         "canonical real file identity",
-        "0 stderr bytes and 0 stdout bytes", "was not rerun",
+        "0 stderr bytes", "0 stdout bytes", "was not rerun",
         "activity-01 remains unconsumed", "real Provider activity remains 0",
         "formal real Provider lifecycle has not run", "new formal product root",
         "packet freeze",
@@ -372,7 +372,7 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
     for fact in (
         "已安装入口准备状态",
         "canonical real file identity",
-        "stderr 0 bytes、stdout 0 bytes", "没有重跑",
+        "stderr 0 bytes", "stdout 0 bytes", "没有重跑",
         "activity-01 尚未消费", "真实 Provider activity 仍为 0",
         "真实 Provider lifecycle 尚未运行", "new formal product root", "packet freeze",
         "tianwen controlled-lifecycle --manifest ABS --data-dir ABS --json",
@@ -384,7 +384,7 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         "scripted mechanics",
         "installed ingress readiness",
         "Stage 7 项目所有者自然任务",
-        "stderr 0 bytes、stdout 0 bytes", "没有重跑",
+        "stderr 0 bytes", "stdout 0 bytes", "没有重跑",
         "activity-01 尚未消费", "new formal product root", "packet freeze",
         "配置的 DeepSeek 真实受控生命周期尚未运行",
         "canonical real file identity",
