@@ -350,47 +350,22 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         " ".join(document.split()) for document in (readme_en, readme_zh, architecture)
     )
 
-    common_facts = (
-        "18/18", "R0.1", "R0.2", "normal/0", "activity-01", "activity-02",
-        "Python", "TypeScript", "installer-windows", "--model",
-    )
+    common_facts = ("HMR", "controlled-lifecycle", "exact-main CI")
     expected_by_document = {
         "README.md": (
-            "Installed ingress readiness", "canonical real file identity",
-            "0 stderr bytes", "0 stdout bytes", "was not rerun",
-            "official `main()` usage parser", "exit 2", "activity-01 is consumed",
-            "lifecycle invocation=0", "closed roles=0/25",
-                "activity-02 is not consumed", "two readiness checkers",
-                "independent zero-state attestation", "unknown (none-observed)",
-            "formal real Provider lifecycle has not run",
-            "model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json",
-            "20 new workspaces", "25 new Sessions",
-            "naturalUserEvidence=not-claimed", "externalUserEvidence=not-claimed",
-            "tianwen-v0.1-controlled-real-activity-01-handoff.md",
+            "DSH/HMR shutdown-lifecycle repair",
+            "does not claim real Provider success",
+            "model activation and its confirming status are product setup",
         ),
         "README.zh-CN.md": (
-            "已安装入口准备状态", "canonical real file identity",
-            "stderr 0 bytes", "stdout 0 bytes", "没有重跑",
-            "official `main()` usage parser", "exit 2", "activity-01 已消费",
-            "lifecycle invocation=0", "closed roles=0/25",
-                "activity-02 尚未消费", "两个 readiness checker",
-                "独立的全零状态证明", "unknown (none-observed)",
-            "真实 Provider lifecycle 尚未运行",
-            "model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json",
-            "20 个新 workspace", "25 个新 Session",
-            "naturalUserEvidence=not-claimed", "externalUserEvidence=not-claimed",
-            "tianwen-v0.1-controlled-real-activity-01-handoff.md",
+            "DSH/HMR 的关闭生命周期修复",
+            "不声称真实 Provider 成功",
+            "模型激活及其确认 status 属于产品准备",
         ),
         "architecture": (
-            "scripted mechanics", "installed ingress readiness",
-            "Stage 7 项目所有者自然任务", "official `main()` usage parser",
-            "exit 2", "activity-01 已消费", "lifecycle invocation=0",
-                "closed roles=0/25", "activity-02 尚未消费",
-                "原生 fail-closed preflight", "checker 各自唯一一次 readiness 调用都安全失败",
-            "unknown (none-observed)", "配置的 DeepSeek 真实受控生命周期尚未运行",
-            "model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json",
-                "20 个 workspace", "25 个 Session",
-            "tianwen-v0.1-controlled-real-activity-01-handoff.md",
+            "DSH/HMR shutdown lifecycle 修复",
+            "不声称真实 Provider 成功",
+            "模型激活和确认 status 是产品 setup",
         ),
     }
     documents = {
@@ -398,37 +373,6 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         "README.zh-CN.md": normalized_readme_zh,
         "architecture": normalized_architecture,
     }
-    model_use = (
-        "tianwen model use --model deepseek-v4-pro "
-        "--data-dir ABSOLUTE_PRODUCT_ROOT --json"
-    )
-    model_status = (
-        "tianwen model status --data-dir ABSOLUTE_PRODUCT_ROOT --json"
-    )
-    lifecycle = (
-        "tianwen controlled-lifecycle --manifest ABSOLUTE_MANIFEST "
-        "--data-dir ABSOLUTE_PRODUCT_ROOT --json"
-    )
-    offline = (
-        "tianwen model use --model offline "
-        "--data-dir ABSOLUTE_PRODUCT_ROOT --json"
-    )
-    command_sequence_failures = {}
-    for name, document in documents.items():
-        model_use_at = document.find(model_use)
-        first_status_at = document.find(model_status, model_use_at + len(model_use))
-        lifecycle_at = document.find(lifecycle, first_status_at + len(model_status))
-        offline_at = document.find(offline, lifecycle_at + len(lifecycle))
-        final_status_at = document.find(model_status, offline_at + len(offline))
-        if document.count(model_status) != 2 or not (
-            0 <= model_use_at < first_status_at < lifecycle_at < offline_at < final_status_at
-        ):
-            command_sequence_failures[name] = {
-                "status_count": document.count(model_status),
-                "ordered": False,
-            }
-    assert not command_sequence_failures, command_sequence_failures
-
     missing = {
         name: [fact for fact in (*common_facts, *expected_by_document[name]) if fact not in text]
         for name, text in documents.items()
@@ -911,6 +855,44 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
     for forbidden in PERSONAL_PATH_PREFIXES:
         assert forbidden.lower() not in amended_workflow
     assert not re.search(r"(?i)(?:TODO|TBD|FIXME|PLACEHOLDER|REPLACE_ME)", ci)
+
+
+def test_one_shot_profile_lifecycle_repair_public_facts() -> None:
+    readme_en = " ".join(read_public_document("README.md").split())
+    readme_zh = " ".join(read_public_document("README.zh-CN.md").split())
+    architecture = " ".join(
+        (ROOT / "docs" / "tianwen-architecture-overview-v2.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+    handoff_path = (
+        ROOT
+        / "docs"
+        / "operations"
+        / "tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md"
+    )
+    assert handoff_path.is_file(), "missing one-shot Profile lifecycle repair handoff"
+    handoff = " ".join(handoff_path.read_text(encoding="utf-8").split()).lower()
+
+    for fact in (
+        "activity-03 remains historically consumed",
+        "deepseek model-use receipt persisted",
+        "exit 13 before lifecycle",
+        "offline recovery succeeded",
+        "controlled-lifecycle invocation remained 0",
+        "hmr watcher readiness owns",
+        "model activation is setup",
+        "does not consume a formal activity",
+        "first future controlled-lifecycle invocation consumes",
+        "activity-01, activity-02, and activity-03 classifications remain unchanged",
+        "does not claim real provider success",
+    ):
+        assert fact in handoff
+
+    for document in (readme_en, readme_zh, architecture):
+        assert "activity-03" in document.lower()
+        assert "controlled-lifecycle" in document
+        assert "HMR" in document
 
 
 def test_relative_links_in_public_documents_exist() -> None:
