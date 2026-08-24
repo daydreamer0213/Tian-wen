@@ -879,34 +879,41 @@ def test_one_shot_profile_lifecycle_repair_public_facts() -> None:
             readme_en,
             (
                 "dsh/hmr", "watcher-readiness", "owns", "deepseek", "model-use receipt",
-                "persisted", "exit 13", "offline recovery", "controlled-lifecycle", "invocation=0",
+                "persisted", "exit 13", "historically consumed", "offline recovery", "succeeded",
+                "controlled-lifecycle", "invocation=0",
                 "model activation", "product setup", "do not consume a formal activity", "first future",
-                "does not claim real provider success", "historical classifications", "not rewritten",
+                "consumes", "does not claim real provider success", "historical classifications", "not rewritten",
             ),
         ),
         (
             readme_zh,
             (
                 "dsh/hmr", "watcher readiness", "拥有", "deepseek", "model-use receipt",
-                "已持久化", "exit 13", "offline", "controlled-lifecycle", "invocation=0", "模型激活",
+                "已持久化", "exit 13", "仍已消费", "offline 恢复", "均成功", "controlled-lifecycle",
+                "invocation=0", "模型激活",
                 "不消费正式 activity", "首次未来", "不声称真实 provider 成功", "历史分类", "不被改写",
+                "消费",
             ),
         ),
         (
             architecture,
             (
                 "dsh/hmr", "watcher readiness", "负责", "deepseek", "model-use receipt",
-                "已持久化", "exit 13", "offline", "controlled-lifecycle", "invocation=0", "模型激活",
+                "已持久化", "exit 13", "仍已消费", "offline 恢复", "均成功", "controlled-lifecycle",
+                "invocation=0", "模型激活",
                 "不消费正式 activity", "首次未来", "不声称真实 provider 成功", "历史分类", "不被改写",
+                "消费",
             ),
         ),
         (
             handoff,
             (
                 "dsh/hmr", "deepseek", "receipt", "persisted", "exit 13", "before lifecycle",
-                "offline recovery", "succeeded", "controlled-lifecycle", "invocation remained 0",
+                "historically consumed", "offline recovery", "succeeded", "controlled-lifecycle",
+                "invocation remained 0",
                 "hmr watcher readiness", "model activation", "does not consume a formal activity",
-                "first future", "does not claim real provider success", "classifications", "remain unchanged",
+                "first future", "consumes", "does not claim real provider success", "classifications",
+                "remain unchanged",
             ),
         ),
     ):
