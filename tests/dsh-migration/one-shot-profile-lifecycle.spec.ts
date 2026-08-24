@@ -10,13 +10,13 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { createRequire } from 'node:module'
+import fsPromises from 'node:fs/promises'
+import { createRequire, syncBuiltinESMExports } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 
 import { Context } from '@deepseek-ai/cordis'
-import Hmr from '@deepseek-ai/cordis-plugin-hmr'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Timer from '@deepseek-ai/cordis-plugin-timer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -37,6 +37,55 @@ interface ControlledWatcher {
 }
 
 const controlledWatchers = vi.hoisted(() => [] as ControlledWatcher[])
+
+const watcherGate = vi.hoisted(() => {
+  let notify: (() => void) | undefined
+  return {
+    next() {
+      return new Promise<void>(resolve => { notify = resolve })
+    },
+    notify() {
+      notify?.()
+      notify = undefined
+    },
+    reset() {
+      notify = undefined
+    },
+  }
+})
+
+const realStat = fsPromises.stat
+let activeStatGate: { entered: () => void, released: Promise<void> } | undefined
+
+const statGate = {
+  arm() {
+    let entered: (() => void) | undefined
+    let release: (() => void) | undefined
+    const enteredPromise = new Promise<void>(resolve => { entered = resolve })
+    const released = new Promise<void>(resolve => { release = resolve })
+    activeStatGate = { entered: () => entered?.(), released }
+    fsPromises.stat = async (...args: Parameters<typeof realStat>) => {
+      const gate = activeStatGate
+      if (gate) {
+        activeStatGate = undefined
+        gate.entered()
+        await gate.released
+        statGate.reset()
+      }
+      return realStat(...args)
+    }
+    syncBuiltinESMExports()
+    return {
+      entered: enteredPromise,
+      release: () => release?.(),
+    }
+  },
+  reset() {
+    activeStatGate = undefined
+    fsPromises.stat = realStat
+    syncBuiltinESMExports()
+  },
+}
 
 const chokidarMock = vi.hoisted(() => ({
   watch: vi.fn(() => {
@@ -60,6 +109,7 @@ const chokidarMock = vi.hoisted(() => ({
       close: vi.fn(async () => {}),
     }
     controlledWatchers.push(watcher)
+    watcherGate.notify()
     return watcher
   }),
 }))
@@ -138,7 +188,14 @@ function expectReceipt(
   })
 }
 
+async function bootHmr(ctx: Context): Promise<void> {
+  const { default: Hmr } = await import('@deepseek-ai/cordis-plugin-hmr')
+  await ctx.plugin(Hmr, { root: [], ignored: [], debounce: 0 })
+}
+
 afterEach(() => {
+  statGate.reset()
+  watcherGate.reset()
   controlledWatchers.splice(0)
   vi.clearAllMocks()
 })
@@ -153,7 +210,7 @@ describe('one-shot Profile lifecycle', () => {
     try {
       await ctx.plugin(Loader)
       await ctx.plugin(Timer)
-      await ctx.plugin(Hmr, { root: [], ignored: [], debounce: 0 })
+      await bootHmr(ctx)
 
       let outcome: 'pending' | 'resolved' | 'rejected' = 'pending'
       const registration = ctx.hmr.registerConfig(configPath, () => {})
@@ -169,6 +226,39 @@ describe('one-shot Profile lifecycle', () => {
       expect(controlledWatchers[1]!.close).toHaveBeenCalledTimes(1)
       expect(() => controlledWatchers[1]!.emit('ready')).not.toThrow()
       expect(() => controlledWatchers[1]!.emit('error', new Error('late'))).not.toThrow()
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(fixtureRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('does not create a config watcher after disposal pauses watch-root discovery', async () => {
+    mkdirSync(fixtureParent, { recursive: true })
+    const fixtureRoot = mkdtempSync(join(fixtureParent, 'root-dispose-'))
+    const configPath = join(fixtureRoot, 'model.patch.yml')
+    const ctx = new Context()
+    ctx.baseUrl = pathToFileURL(fixtureRoot).href + '/'
+    try {
+      await ctx.plugin(Loader)
+      await ctx.plugin(Timer)
+      const gate = statGate.arm()
+      await bootHmr(ctx)
+
+      const anotherWatcher = watcherGate.next()
+      const registration = ctx.hmr.registerConfig(configPath, () => {})
+      await gate.entered
+      await ctx.fiber.dispose()
+      gate.release()
+
+      const resumed = await Promise.race([
+        registration.then(
+          () => 'registration resolved' as const,
+          () => 'registration rejected' as const,
+        ),
+        anotherWatcher.then(() => 'another watcher' as const),
+      ])
+      expect(resumed).toBe('registration rejected')
+      expect(controlledWatchers).toHaveLength(1)
     } finally {
       await ctx.fiber.dispose()
       rmSync(fixtureRoot, { recursive: true, force: true })

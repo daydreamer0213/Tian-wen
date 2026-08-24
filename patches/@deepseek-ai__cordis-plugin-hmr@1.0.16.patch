@@ -1,8 +1,16 @@
 diff --git a/lib/index.js b/lib/index.js
-index 357a18bac52de13f1f4b05e454faeb59d55e4487..72204fd2da9c8d23c5d802e2e98094890fe4a91c 100644
+index 357a18bac52de13f1f4b05e454faeb59d55e4487..f1d09efa69cd3f20f91a8efbdd2b662bd7ff7e35 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -129,7 +129,14 @@ var Hmr = class extends Service {
+@@ -119,6 +119,7 @@ var Hmr = class extends Service {
+ 		if (!this.watcher) throw new Error("HMR is not active");
+ 		filename = resolve(this.baseDir, filename);
+ 		const target = await findWatchRoot(filename);
++		if (!this.watcher) throw new Error("HMR is not active");
+ 		const watchFilename = target.filename;
+ 		if (this.configs.has(watchFilename)) throw new Error(`config path already registered: ${filename}`);
+ 		const { root, depth } = target;
+@@ -129,7 +130,14 @@ var Hmr = class extends Service {
  			ignored: void 0,
  			ignoreInitial: false
  		});
@@ -18,7 +26,7 @@ index 357a18bac52de13f1f4b05e454faeb59d55e4487..72204fd2da9c8d23c5d802e2e9809489
  		this.configs.set(watchFilename, registration);
  		const onChange = (path) => {
  			const observed = resolve(path);
-@@ -139,9 +146,8 @@ var Hmr = class extends Service {
+@@ -139,9 +147,8 @@ var Hmr = class extends Service {
  		watcher.on("add", onChange);
  		watcher.on("change", onChange);
  		watcher.on("unlink", onChange);
@@ -29,7 +37,7 @@ index 357a18bac52de13f1f4b05e454faeb59d55e4487..72204fd2da9c8d23c5d802e2e9809489
  			readyState = "resolved";
  			ready.resolve();
  		});
-@@ -149,7 +155,7 @@ var Hmr = class extends Service {
+@@ -149,7 +156,7 @@ var Hmr = class extends Service {
  			if (readyState === "pending") {
  				readyState = "rejected";
  				ready.reject(error);
@@ -38,7 +46,7 @@ index 357a18bac52de13f1f4b05e454faeb59d55e4487..72204fd2da9c8d23c5d802e2e9809489
  		});
  		try {
  			await ready.promise;
-@@ -159,8 +165,10 @@ var Hmr = class extends Service {
+@@ -159,8 +166,10 @@ var Hmr = class extends Service {
  				await this.configRefreshes.get(registration)?.running;
  			}, "hmr.registerConfig()");
  		} catch (error) {
@@ -51,22 +59,24 @@ index 357a18bac52de13f1f4b05e454faeb59d55e4487..72204fd2da9c8d23c5d802e2e9809489
  			throw error;
  		}
  	}
-@@ -178,9 +186,11 @@ var Hmr = class extends Service {
+@@ -178,9 +187,13 @@ var Hmr = class extends Service {
  	}
  	async *[Service.init]() {
  		yield async () => {
 -			await this.watcher?.close();
 -			await Promise.allSettled([...this.configs.values()].map((registration) => registration.watcher.close()));
++			const watcher = this.watcher;
++			this.watcher = void 0;
 +			const registrations = [...this.configs.values()];
  			this.configs.clear();
 +			registrations.forEach((registration) => registration.cancelReady());
-+			await this.watcher?.close();
++			await watcher?.close();
 +			await Promise.allSettled(registrations.map((registration) => registration.watcher.close()));
  			await Promise.allSettled([...this.refreshTasks]);
  		};
  		const { loader } = this.ctx;
 diff --git a/src/index.ts b/src/index.ts
-index f79d8344dcf3d6312d26f371eb33596dd0d85998..1c2fc804ad55cc1b4d92aa24a28028537e9078e2 100644
+index f79d8344dcf3d6312d26f371eb33596dd0d85998..6e8eb5c7737fbfbde6440a505a02e87bdca958ff 100644
 --- a/src/index.ts
 +++ b/src/index.ts
 @@ -59,6 +59,7 @@ interface ConfigRefresh {
@@ -77,7 +87,15 @@ index f79d8344dcf3d6312d26f371eb33596dd0d85998..1c2fc804ad55cc1b4d92aa24a2802853
  }
  
  async function findWatchRoot(filename: string): Promise<{ filename: string; root: string; depth: number }> {
-@@ -146,7 +147,14 @@ class Hmr extends Service {
+@@ -135,6 +136,7 @@ class Hmr extends Service {
+     if (!this.watcher) throw new Error('HMR is not active')
+     filename = resolve(this.baseDir, filename)
+     const target = await findWatchRoot(filename)
++    if (!this.watcher) throw new Error('HMR is not active')
+     const watchFilename = target.filename
+     if (this.configs.has(watchFilename)) throw new Error(`config path already registered: ${filename}`)
+ 
+@@ -146,7 +148,14 @@ class Hmr extends Service {
        ignored: undefined,
        ignoreInitial: false,
      })
@@ -93,7 +111,7 @@ index f79d8344dcf3d6312d26f371eb33596dd0d85998..1c2fc804ad55cc1b4d92aa24a2802853
      this.configs.set(watchFilename, registration)
      const onChange = (path: string) => {
        const observed = resolve(path)
-@@ -157,9 +165,8 @@ class Hmr extends Service {
+@@ -157,9 +166,8 @@ class Hmr extends Service {
      watcher.on('change', onChange)
      watcher.on('unlink', onChange)
  
@@ -104,7 +122,7 @@ index f79d8344dcf3d6312d26f371eb33596dd0d85998..1c2fc804ad55cc1b4d92aa24a2802853
        readyState = 'resolved'
        ready.resolve()
      })
-@@ -167,7 +174,7 @@ class Hmr extends Service {
+@@ -167,7 +175,7 @@ class Hmr extends Service {
        if (readyState === 'pending') {
          readyState = 'rejected'
          ready.reject(error)
@@ -113,7 +131,7 @@ index f79d8344dcf3d6312d26f371eb33596dd0d85998..1c2fc804ad55cc1b4d92aa24a2802853
          this.ctx.logger.warn(error)
        }
      })
-@@ -180,8 +187,10 @@ class Hmr extends Service {
+@@ -180,8 +188,10 @@ class Hmr extends Service {
          await this.configRefreshes.get(registration)?.running
        }, 'hmr.registerConfig()')
      } catch (error) {
@@ -126,16 +144,18 @@ index f79d8344dcf3d6312d26f371eb33596dd0d85998..1c2fc804ad55cc1b4d92aa24a2802853
        throw error
      }
    }
-@@ -198,9 +207,11 @@ class Hmr extends Service {
+@@ -198,9 +208,13 @@ class Hmr extends Service {
  
    async* [Service.init]() {
      yield async () => {
 -      await this.watcher?.close()
 -      await Promise.allSettled([...this.configs.values()].map(registration => registration.watcher.close()))
++      const watcher = this.watcher
++      this.watcher = undefined!
 +      const registrations = [...this.configs.values()]
        this.configs.clear()
 +      registrations.forEach(registration => registration.cancelReady())
-+      await this.watcher?.close()
++      await watcher?.close()
 +      await Promise.allSettled(registrations.map(registration => registration.watcher.close()))
        await Promise.allSettled([...this.refreshTasks])
      }
