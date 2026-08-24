@@ -892,7 +892,7 @@ def test_one_shot_profile_lifecycle_repair_public_facts() -> None:
                 "已持久化", "exit 13", "仍已消费", "offline 恢复", "均成功", "controlled-lifecycle",
                 "invocation=0", "模型激活",
                 "不消费正式 activity", "首次未来", "不声称真实 provider 成功", "历史分类", "不被改写",
-                "消费",
+                "才开始并消费",
             ),
         ),
         (
@@ -902,7 +902,7 @@ def test_one_shot_profile_lifecycle_repair_public_facts() -> None:
                 "已持久化", "exit 13", "仍已消费", "offline 恢复", "均成功", "controlled-lifecycle",
                 "invocation=0", "模型激活",
                 "不消费正式 activity", "首次未来", "不声称真实 provider 成功", "历史分类", "不被改写",
-                "消费",
+                "才开始并消费",
             ),
         ),
         (
