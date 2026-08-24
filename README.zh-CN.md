@@ -26,7 +26,7 @@ Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成
 
 这是 DSH/HMR 的关闭生命周期修复，不是 receipt 或安全功能。HMR 拥有 Profile 启动时创建的 watcher readiness promise；关闭先于 readiness 到来时，修复让这个 owner 得到确定的终态。天问不增加第二个关闭控制器，不重试、不延时，也不强制退出。
 
-activity-03 在历史上仍已消费。它的 DeepSeek model-use receipt 已持久化，但进程在任何 controlled-lifecycle 调用之前以 exit 13 结束；offline 恢复和最终 status 均成功。activity-01、activity-02 和 activity-03 的历史分类不被改写，本次修复不声称真实 Provider 成功。
+activity-03 在历史上仍已消费。它的 DeepSeek model-use receipt 已持久化，但进程在任何 controlled-lifecycle 调用之前以 exit 13 结束；`controlled-lifecycle invocation=0`，offline 恢复和最终 status 均成功。activity-01、activity-02 和 activity-03 的历史分类不被改写，本次修复不声称真实 Provider 成功。
 
 未来正式工作中，模型激活及其确认 status 属于产品准备，不消费正式 Activity；首次未来 `controlled-lifecycle` 调用才开始并消费该 Activity。聚焦的确定性 owner 回归和真实 Profile 进程回归已通过；一次全新的官方零请求安装证明仍需等待 exact-main CI。
 

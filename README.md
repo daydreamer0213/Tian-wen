@@ -29,7 +29,7 @@ model activation → fresh status confirms selection → first controlled-lifecy
 
 This is a DSH/HMR shutdown-lifecycle repair, not receipt or security work. HMR owns the watcher-readiness promise created during Profile boot; the repair gives that owner a terminal outcome when shutdown arrives before readiness. Tianwen does not add a second shutdown controller, retry, delay, or forced exit.
 
-Activity-03 remains historically consumed. Its DeepSeek model-use receipt persisted, but the process ended with exit 13 before any controlled-lifecycle invocation; offline recovery and final status succeeded. The historical classifications of Activity-01, Activity-02, and Activity-03 are not rewritten, and this repair does not claim real Provider success.
+Activity-03 remains historically consumed. Its DeepSeek model-use receipt persisted, but the process ended with exit 13 before any controlled-lifecycle invocation; `controlled-lifecycle invocation=0`, and offline recovery and final status succeeded. The historical classifications of Activity-01, Activity-02, and Activity-03 are not rewritten, and this repair does not claim real Provider success.
 
 For future formal work, model activation and its confirming status are product setup and do not consume a formal Activity. The first future `controlled-lifecycle` invocation begins and consumes that Activity. The focused deterministic owner regression and real Profile process regression are green; one fresh official zero-request installed proof still waits for exact-main CI.
 

@@ -858,13 +858,13 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
 
 
 def test_one_shot_profile_lifecycle_repair_public_facts() -> None:
-    readme_en = " ".join(read_public_document("README.md").split())
-    readme_zh = " ".join(read_public_document("README.zh-CN.md").split())
+    readme_en = " ".join(read_public_document("README.md").split()).lower()
+    readme_zh = " ".join(read_public_document("README.zh-CN.md").split()).lower()
     architecture = " ".join(
         (ROOT / "docs" / "tianwen-architecture-overview-v2.md")
         .read_text(encoding="utf-8")
         .split()
-    )
+    ).lower()
     handoff_path = (
         ROOT
         / "docs"
@@ -874,25 +874,61 @@ def test_one_shot_profile_lifecycle_repair_public_facts() -> None:
     assert handoff_path.is_file(), "missing one-shot Profile lifecycle repair handoff"
     handoff = " ".join(handoff_path.read_text(encoding="utf-8").split()).lower()
 
-    for fact in (
-        "activity-03 remains historically consumed",
-        "deepseek model-use receipt persisted",
-        "exit 13 before lifecycle",
-        "offline recovery succeeded",
-        "controlled-lifecycle invocation remained 0",
-        "hmr watcher readiness owns",
-        "model activation is setup",
-        "does not consume a formal activity",
-        "first future controlled-lifecycle invocation consumes",
-        "activity-01, activity-02, and activity-03 classifications remain unchanged",
-        "does not claim real provider success",
+    for document, atoms in (
+        (
+            readme_en,
+            (
+                "dsh/hmr", "watcher-readiness", "owns", "deepseek", "model-use receipt",
+                "persisted", "exit 13", "offline recovery", "controlled-lifecycle", "invocation=0",
+                "model activation", "product setup", "do not consume a formal activity", "first future",
+                "does not claim real provider success", "historical classifications", "not rewritten",
+            ),
+        ),
+        (
+            readme_zh,
+            (
+                "dsh/hmr", "watcher readiness", "拥有", "deepseek", "model-use receipt",
+                "已持久化", "exit 13", "offline", "controlled-lifecycle", "invocation=0", "模型激活",
+                "不消费正式 activity", "首次未来", "不声称真实 provider 成功", "历史分类", "不被改写",
+            ),
+        ),
+        (
+            architecture,
+            (
+                "dsh/hmr", "watcher readiness", "负责", "deepseek", "model-use receipt",
+                "已持久化", "exit 13", "offline", "controlled-lifecycle", "invocation=0", "模型激活",
+                "不消费正式 activity", "首次未来", "不声称真实 provider 成功", "历史分类", "不被改写",
+            ),
+        ),
+        (
+            handoff,
+            (
+                "dsh/hmr", "deepseek", "receipt", "persisted", "exit 13", "before lifecycle",
+                "offline recovery", "succeeded", "controlled-lifecycle", "invocation remained 0",
+                "hmr watcher readiness", "model activation", "does not consume a formal activity",
+                "first future", "does not claim real provider success", "classifications", "remain unchanged",
+            ),
+        ),
     ):
-        assert fact in handoff
+        for atom in atoms:
+            assert atom in document
+        for activity in ("activity-01", "activity-02", "activity-03"):
+            assert activity in document
 
-    for document in (readme_en, readme_zh, architecture):
-        assert "activity-03" in document.lower()
-        assert "controlled-lifecycle" in document
-        assert "HMR" in document
+
+def test_architecture_lists_current_one_shot_lifecycle_authority_first() -> None:
+    architecture_path = ROOT / "docs" / "tianwen-architecture-overview-v2.md"
+    raw_architecture = architecture_path.read_text(encoding="utf-8")
+    architecture = " ".join(raw_architecture.split())
+
+    assert "## 当前状态（2026-08-25）" in raw_architecture
+    design = "2026-08-24-tianwen-one-shot-profile-lifecycle-repair-design.md"
+    handoff = "tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md"
+    historical_activity_authorities = "Activity-01、Activity-02 和 Activity-03"
+    assert design in architecture
+    assert handoff in architecture
+    assert historical_activity_authorities in architecture
+    assert architecture.index(design) < architecture.index(historical_activity_authorities)
 
 
 def test_relative_links_in_public_documents_exist() -> None:
