@@ -144,11 +144,16 @@ Provider retry 继续为 normal/0。Tianwen 继续不设置模型请求、token�
    - acceptance Evidence 恰好一项、result 完整、arguments digest 等于 exact `{ taskId }`；
    - verifier 结果只能归约为 `met` 或 exact
      `ARCHITECTURE_DECISION_NOT_MET` 对应的 `not-met`，不得是 `inconclusive`；
-8. 只有上述条件全部成立，才调用现有 `consumeOutcome()` 与 `recordSkillUse()`；
-9. 两个 receipt 必须与已验证的 verdict、Evidence ID、Session digest 和 Skill manifest 一致；
-10. 最后按 D1/D2 的固定预期决定是否推进下一 seed 或 Candidate。
+8. 通过现有 `TianwenLearningIntakeService` 的只读 `hasSkillUseProof()` 证明父 Skill 调用、结果、
+   Evidence 与 frozen Run facts 足以让后续 Skill-use intake 成立；该检查不得写 ledger；
+9. 只有上述条件全部成立，才按现有治理顺序调用 `consumeOutcome()` 与 `recordSkillUse()`；
+10. 两个 receipt 必须与已验证的 verdict、Evidence ID、Session digest 和 Skill manifest 一致；
+11. 最后按 D1/D2 的固定预期决定是否推进下一 seed 或 Candidate。
 
-步骤 8 的两个 ledger 写仍沿用现有串行与 commit-unknown/replay 语义。本设计不新增跨事件事务。
+`hasSkillUseProof()` 只复用 `recordSkillUse()` 现有的内存证据判定。具体实现把该判定抽到同一
+service 的私有 helper；`recordSkillUse()` 和只读入口共同调用它，runner 不复制 Skill-use 算法。
+Outcome 必须先写入是现有 Evolution `recordRunSkillUse()` 的完整性前提，因此两个正式 ledger 写
+仍保持 Outcome → Skill-use 的既有顺序。本设计不新增跨事件事务、rollback 或第二个 service。
 关键变化是：已知 invalid protocol 或未持久化 Session 不再主动触发 Outcome/Skill-use 写入。
 
 ## 8. 失败语义与隐私
@@ -172,10 +177,11 @@ Activity-02 的既有 partial ledger 不迁移、不删除、不伪装成新语�
 2. 缺少 decision 字段的真实 DSH tool call 不能闭合 seed，且 Outcome/Skill-use 数量保持 0；
 3. duplicate decision、duplicate verifier、wrong task 或 invalid verifier result 均为 `seed-failed`，
    exact Session 可读回，但 Outcome/Skill-use 为 0；
-4. mock `flush=true` 但 `inspect` missing、meta mismatch 或 events digest mismatch，均为
+4. 未调用、错误调用或无法证明父 Skill 使用的 seed 为 `seed-failed`，且 Outcome/Skill-use 为 0；
+5. mock `flush=true` 但 `inspect` missing、meta mismatch 或 events digest mismatch，均为
    `persistence-failed`，Outcome/Skill-use 为 0；
-5. 合法 D1 仍形成 `not-met` + Ticket，合法 D2 仍形成 `met` counterevidence；
-6. 现有完整 scripted lifecycle、Runtime Bundle build、typecheck、no-private-imports 与公共边界继续
+6. 合法 D1 仍形成 `not-met` + Ticket，合法 D2 仍形成 `met` counterevidence；
+7. 现有完整 scripted lifecycle、Runtime Bundle build、typecheck、no-private-imports 与公共边界继续
    通过。
 
 测试只使用 development-only scripted fixture 验证机制，不把它冒充真实 Provider 证据。修复阶段

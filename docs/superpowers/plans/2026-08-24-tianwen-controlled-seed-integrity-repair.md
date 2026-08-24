@@ -417,7 +417,8 @@ verdict === 'not-met'
   : outcome.decision === 'no-case' && outcome.ticketId === undefined
 ```
 
-Do not add a shared projector, new service method, transaction, retry, or reason code.
+Within Task 3, do not add a shared projector, service method, transaction, retry, or reason code.
+Task 3A below is the separately reviewed correction for the later-proven Skill-use interface gap.
 
 - [ ] **Step 4: Run the duplicate-decision GREEN**
 
@@ -497,14 +498,104 @@ Expected: one commit, clean tree. Report the structured Task 3 result and stop.
 
 ---
 
+### Task 3A: Prove Parent Skill Use Before Outcome Intake
+
+**Files:**
+- Modify: `packages/tianwen-runtime/src/learning-intake.ts:224-318`
+- Modify: `packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.ts:774-850`
+- Test: `tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts`
+
+**Interfaces:**
+- Consumes: the existing in-memory Skill call/result/Evidence proof inside
+  `TianwenLearningIntakeService.recordSkillUse()`.
+- Produces: `hasSkillUseProof(session: Session, runId: TianwenRunId): boolean`, a read-only
+  check used before Outcome intake. It writes no ledger event and exposes no raw proof.
+
+- [ ] **Step 1: Preserve the missing-Skill RED**
+
+Use the existing Task 4 review regression: one seed omits the `skill` tool call but performs one
+valid decision, one valid verifier, and a natural final response. It must return `seed-failed`, keep
+the Session inspectable, and require zero `outcome-intake-recorded`, zero
+`run-skill-use-recorded`, zero Run Skill uses, zero Tickets, and zero Candidates.
+
+Expected RED on `d951ce7`: `outcome-intake-recorded` exists even though no Skill use can be proven.
+
+- [ ] **Step 2: Extract one private Skill-use proof**
+
+In `TianwenLearningIntakeService`, move only the current read-only binding/manifest, Evidence,
+Skill call/result, rendered content, and Skill Evidence checks from `recordSkillUse()` into one
+private `skillUseProof(session, runId)` method. It returns the already-derived facts used by the
+existing ledger write, or `undefined`.
+
+Do not change any comparison or add a second implementation. Do not move the Evolution write into
+the helper.
+
+- [ ] **Step 3: Add the thin read-only service seam**
+
+Add:
+
+```ts
+hasSkillUseProof(session: Session, runId: TianwenRunId): boolean {
+  return this.skillUseProof(session, runId) !== undefined
+}
+```
+
+Update `recordSkillUse()` to reuse the same private proof and preserve its existing
+`no-use-proof`/`recorded` receipts, ledger input, Session digest check, and Outcome-before-Skill-use
+precondition.
+
+- [ ] **Step 4: Gate Outcome without changing ledger order**
+
+After the existing seed protocol/Evidence validation and before `consumeOutcome()`, call
+`hasSkillUseProof()`. A false result or projection failure maps to `seed-failed` before any Outcome
+or Skill-use write. Keep the formal write order unchanged:
+
+```text
+hasSkillUseProof (read-only) → consumeOutcome → recordSkillUse
+```
+
+Do not call `recordSkillUse()` before Outcome. Do not add a dry-run object, transaction, rollback,
+new service, reason code, retry, or runner-local copy of the proof algorithm.
+
+- [ ] **Step 5: Run the correction GREEN gates**
+
+Run:
+
+```powershell
+pnpm exec vitest run tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts -t "without parent Skill use"
+pnpm exec vitest run tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts
+pnpm exec vitest run tests/dsh-probe/natural-run-evidence-runtime.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/controlled-lifecycle-command.spec.ts tests/dsh-migration/tianwen-installer.spec.ts
+pnpm --filter @tianwen/runtime-bundle... build
+pnpm run typecheck
+pnpm run check:no-private-dsh-imports
+git diff --check
+```
+
+Expected: all pass; normal D1/D2/full lifecycle counts remain unchanged.
+
+- [ ] **Step 6: Commit and stop**
+
+Run:
+
+```powershell
+git add packages/tianwen-runtime/src/learning-intake.ts packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.ts tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts
+git diff --cached --check
+git commit -m "fix: prove controlled seed Skill use before Outcome"
+git status --short
+```
+
+Expected: one correction commit and a clean tree. Report the exact SHA and stop before final review.
+
+---
+
 ### Task 4: Fresh Feature Gate and Exact-SHA Review
 
 **Files:**
-- Verify only: the two implementation files changed by Tasks 1-3.
+- Verify only: the three implementation files changed by Tasks 1-3A.
 - Do not edit docs, workflow, package manifests, lockfile, Runtime, Evolution, DSH compat, or public contracts unless a reviewer first identifies a reachable Critical/Important and the architecture supervisor authorizes a new TDD correction task.
 
 **Interfaces:**
-- Consumes: Task 3 exact SHA and clean tree.
+- Consumes: Task 3A exact SHA and clean tree.
 - Produces: reviewed feature exact SHA ready for controlled main integration; no push or merge.
 
 - [ ] **Step 1: Set the proven D-drive environment in one PowerShell process**
@@ -545,7 +636,7 @@ Review the exact branch diff against the design under these separate lenses:
 
 1. correctness/security: schema requiredness, readback identity/digest, no pre-write invalid Outcome/use, D1/D2 behavior;
 2. architecture/evidence/privacy: no overclaim about Activity-02, no raw material or new public surface, existing DSH/Evolution seams only;
-3. simplicity/YAGNI: only two implementation files, no new dependency/framework/reason code/transaction/retry/budget.
+3. simplicity/YAGNI: only three implementation files, one thin read-only seam, no new dependency/framework/reason code/transaction/retry/budget.
 
 Any reachable Critical/Important means stop without fixing. Report it to the architecture supervisor for a new bounded correction task.
 
@@ -565,6 +656,7 @@ git diff --name-only "$seedRepairBase..HEAD"
 `$seedRepairBase` must equal the exact plan commit supplied in the handoff. Expected changed implementation files are exactly:
 
 ```text
+packages/tianwen-runtime/src/learning-intake.ts
 packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.ts
 tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts
 ```
