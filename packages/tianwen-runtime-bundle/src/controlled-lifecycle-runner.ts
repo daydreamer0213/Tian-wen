@@ -968,9 +968,9 @@ export async function runControlledLifecycle(
     name: DECISION_TOOL,
     description: 'Record the first architecture decision for this controlled task.',
     parameters: {
-      taskId: { type: 'string' },
-      choice: { type: 'string' },
-      explanation: { type: 'string' },
+      taskId: { type: 'string', required: true },
+      choice: { type: 'string', required: true },
+      explanation: { type: 'string', required: true },
     },
     output: {
       schema: { type: 'string' },
@@ -1003,7 +1003,7 @@ export async function runControlledLifecycle(
   const disposeVerifier = ctx.tools.register(defineTool({
     name: ACCEPTANCE_TOOL,
     description: 'Verify the first recorded architecture decision for this controlled task.',
-    parameters: { taskId: { type: 'string' } },
+    parameters: { taskId: { type: 'string', required: true } },
     output: {
       schema: { type: 'string' },
       render: (_args, value) => [{ type: 'text', text: value }],

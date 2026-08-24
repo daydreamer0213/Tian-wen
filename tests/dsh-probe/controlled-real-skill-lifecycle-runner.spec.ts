@@ -402,6 +402,17 @@ describe('controlled real Skill lifecycle runner', () => {
       expect(await exited).toBe(0)
       expect(stdout).toHaveBeenCalledTimes(1)
       expect(stderr).not.toHaveBeenCalled()
+      const tools = mounted.adapter.requests[0]!.tools ?? []
+      const decision = tools.find(tool => tool.name === 'record_architecture_decision')
+      const verifier = tools.find(tool => tool.name === 'verify_architecture_decision')
+      expect(decision?.parameters).toMatchObject({
+        type: 'object',
+        required: ['taskId', 'choice', 'explanation'],
+      })
+      expect(verifier?.parameters).toMatchObject({
+        type: 'object',
+        required: ['taskId'],
+      })
       const line = String(stdout.mock.calls[0]?.[0])
       const receipt = parseControlledLifecycleChildReceipt(line, '', {
         manifestDigest: mounted.prepared.manifestDigest,
