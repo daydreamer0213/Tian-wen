@@ -852,7 +852,8 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
     windows_vitest_command = (
         "pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts "
         "tests/dsh-migration/controlled-lifecycle-command.spec.ts "
-        "tests/dsh-migration/runtime-bundle.spec.ts"
+        "tests/dsh-migration/runtime-bundle.spec.ts "
+        "tests/dsh-migration/one-shot-profile-lifecycle.spec.ts"
     )
     expected_installer_job = textwrap.dedent(
         """\
@@ -901,6 +902,7 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
         installer_command.split("pnpm exec vitest run ", maxsplit=1)[1],
         "tests/dsh-migration/controlled-lifecycle-command.spec.ts",
         "tests/dsh-migration/runtime-bundle.spec.ts",
+        "tests/dsh-migration/one-shot-profile-lifecycle.spec.ts",
     ):
         assert windows_owned_spec not in typescript_job
     assert "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts" not in installer_job
