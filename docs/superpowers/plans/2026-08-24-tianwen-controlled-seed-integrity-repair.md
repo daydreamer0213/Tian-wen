@@ -592,6 +592,7 @@ Expected: one correction commit and a clean tree. Report the exact SHA and stop 
 
 **Files:**
 - Verify only: the three implementation files changed by Tasks 1-3A.
+- The feature diff also contains the approved design/plan addendum commit that authorized Task 3A.
 - Do not edit docs, workflow, package manifests, lockfile, Runtime, Evolution, DSH compat, or public contracts unless a reviewer first identifies a reachable Critical/Important and the architecture supervisor authorizes a new TDD correction task.
 
 **Interfaces:**
@@ -610,11 +611,19 @@ $env:TIANWEN_DSH_PROBE_PYTHON='D:\DevData\tianwen-dsh-probe\venv-task-6\Scripts\
 
 - [ ] **Step 2: Run the focused compatibility gate**
 
+On the current Windows worktree, `controlled-lifecycle-profile.spec.ts` has a preserved local
+performance classification: its two synchronous rc.7 `dump-config` children take about 114-123
+seconds, exceeding the test-local 60-second limit, while one temporary 180-second diagnostic passed
+all original assertions and the file was restored byte-for-byte. Do not rerun or modify that spec in
+this feature. Run the remaining six focused specs; exact-main CI remains the standard Profile gate.
+
 ```powershell
-pnpm exec vitest run tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts tests/dsh-probe/natural-run-evidence-runtime.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-migration/controlled-lifecycle-profile.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/controlled-lifecycle-command.spec.ts tests/dsh-migration/tianwen-installer.spec.ts
+pnpm exec vitest run tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts tests/dsh-probe/natural-run-evidence-runtime.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/controlled-lifecycle-command.spec.ts tests/dsh-migration/tianwen-installer.spec.ts
 ```
 
-Expected: all selected specs pass. This is scripted/mechanism evidence only, not real Provider evidence.
+Expected: all six selected specs pass. This is scripted/mechanism evidence only, not real Provider
+evidence. Run `pnpm run check` once; if its only failure is the same classified Profile timeout and
+all other tests/checks pass, preserve that result and continue the remaining repository gates.
 
 - [ ] **Step 3: Run the fresh repository gates once**
 
@@ -628,7 +637,8 @@ uv run ruff check tests/contracts/test_public_repository_surface.py
 git diff --check
 ```
 
-Expected: all pass on the same tree. Do not hide a first failure with selective reruns; stop and report its exact first cause.
+Expected: every gate except the already classified local Profile timeout passes on the same tree. Do
+not hide a first failure with selective reruns; any different failure is a new stop condition.
 
 - [ ] **Step 4: Perform three read-only reviews**
 
@@ -653,7 +663,8 @@ git diff "$seedRepairBase..HEAD" --check
 git diff --name-only "$seedRepairBase..HEAD"
 ```
 
-`$seedRepairBase` must equal the exact plan commit supplied in the handoff. Expected changed implementation files are exactly:
+`$seedRepairBase` must equal the exact plan commit supplied in the handoff. Expected implementation
+files are exactly:
 
 ```text
 packages/tianwen-runtime/src/learning-intake.ts
@@ -661,7 +672,15 @@ packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.ts
 tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts
 ```
 
-The design and plan files are inherited from the parent and are not implementation diff. Report exact feature SHA, commit chain, all fresh gates, review verdicts, changed files, and clean status. Do not push, merge, trigger CI, or begin Activity-03.
+The full base-to-feature changed-file set also includes the approved Task 3A authority addendum:
+
+```text
+docs/superpowers/specs/2026-08-24-tianwen-controlled-seed-integrity-repair-design.md
+docs/superpowers/plans/2026-08-24-tianwen-controlled-seed-integrity-repair.md
+```
+
+Report exact feature SHA, commit chain, all fresh gates, review verdicts, changed files, and clean
+status. Do not push, merge, trigger CI, or begin Activity-03.
 
 ## Supervised Integration After This Plan
 
