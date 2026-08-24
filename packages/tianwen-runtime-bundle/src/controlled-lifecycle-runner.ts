@@ -746,14 +746,6 @@ async function runSeed(
       guard.active = false
       clearTimeout(timer)
     }
-    try {
-      if (!await ctx.sessions.flush(handle.agent.session)) {
-        throw new ControlledLifecycleRunnerError('persistence-failed')
-      }
-    } catch (error) {
-      if (error instanceof ControlledLifecycleRunnerError) throw error
-      throw new ControlledLifecycleRunnerError('persistence-failed')
-    }
     const terminal = handle.agent.session.events.findLast(event =>
       event.type === 'turn/start' || event.type === 'turn/end')
     if (
@@ -763,6 +755,25 @@ async function runSeed(
       || terminal.data.reason.kind !== 'completed'
       || sha256(workspaceSnapshot(task.workspaceRoot)) !== sha256(beforeSnapshot)
     ) throw new ControlledLifecycleRunnerError('seed-failed')
+    try {
+      if (!await ctx.sessions.flush(handle.agent.session)) {
+        throw new ControlledLifecycleRunnerError('persistence-failed')
+      }
+    } catch (error) {
+      if (error instanceof ControlledLifecycleRunnerError) throw error
+      throw new ControlledLifecycleRunnerError('persistence-failed')
+    }
+    let inspection: Awaited<ReturnType<typeof ctx.sessionPersistence.inspect>>
+    try {
+      inspection = await ctx.sessionPersistence.inspect(SessionId(task.sessionId))
+    } catch {
+      throw new ControlledLifecycleRunnerError('persistence-failed')
+    }
+    if (
+      String(inspection.meta.id) !== task.sessionId
+      || inspection.meta.cwd !== task.workspaceRoot
+      || sha256(inspection.events) !== sha256(handle.agent.session.events)
+    ) throw new ControlledLifecycleRunnerError('persistence-failed')
     let outcome: ReturnType<typeof ctx.tianwenLearningIntake.consumeOutcome>
     let use: ReturnType<typeof ctx.tianwenLearningIntake.recordSkillUse>
     try {
