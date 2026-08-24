@@ -221,10 +221,10 @@ export class TianwenLearningIntakeService extends Service {
     }
   }
 
-  recordSkillUse(
+  private skillUseProof(
     session: Session,
     runId: TianwenRunId,
-  ): RuntimeSkillUseReceipt {
+  ) {
     const before = sessionDigest(session.events)
     const binding = this.ctx.tianwenEvolution.getRunBinding(runId)
     const manifest = this.ctx.tianwenEvolution.getRunSkillManifest(runId)
@@ -233,7 +233,7 @@ export class TianwenLearningIntakeService extends Service {
       || manifest === undefined
       || binding.sessionId !== String(session.id)
     ) {
-      return { decision: 'no-use-proof', sessionUnchanged: true }
+      return undefined
     }
     const evidence = this.ctx.tianwenEvidence.project(session)
     const acceptance = evidence
@@ -241,7 +241,7 @@ export class TianwenLearningIntakeService extends Service {
       .sort((left, right) => left.source.callSeq - right.source.callSeq)
       .at(-1)
     if (acceptance?.outcome.status !== 'complete') {
-      return { decision: 'no-use-proof', sessionUnchanged: true }
+      return undefined
     }
     const expected = renderSkillContent({
       name: manifest.parent.name,
@@ -286,16 +286,39 @@ export class TianwenLearningIntakeService extends Service {
       .sort((left, right) => right.seq - left.seq)
     const call = matches[0]
     if (call === undefined) {
-      return { decision: 'no-use-proof', sessionUnchanged: true }
+      return undefined
     }
     const skillEvidence = evidence.find(item =>
       item.source.callSeq === call.seq
       && item.action.toolName === 'skill'
       && item.outcome.status === 'complete'
       && item.outcome.isError === false)
-    if (skillEvidence?.source.resultSeq === undefined) {
+    if (skillEvidence === undefined) {
+      return undefined
+    }
+    const skillResultSeq = skillEvidence.source.resultSeq
+    if (skillResultSeq === undefined) {
+      return undefined
+    }
+    return { before, manifest, acceptance, skillEvidence, skillResultSeq }
+  }
+
+  hasSkillUseProof(
+    session: Session,
+    runId: TianwenRunId,
+  ): boolean {
+    return this.skillUseProof(session, runId) !== undefined
+  }
+
+  recordSkillUse(
+    session: Session,
+    runId: TianwenRunId,
+  ): RuntimeSkillUseReceipt {
+    const proof = this.skillUseProof(session, runId)
+    if (proof === undefined) {
       return { decision: 'no-use-proof', sessionUnchanged: true }
     }
+    const { before, manifest, acceptance, skillEvidence, skillResultSeq } = proof
     const receipt = this.ctx.tianwenEvolution.recordRunSkillUse({
       runId,
       parentVersionId: manifest.parentVersionId,
@@ -306,7 +329,7 @@ export class TianwenLearningIntakeService extends Service {
       skillEvidenceId: skillEvidence.evidenceId,
       acceptanceEvidenceId: acceptance.evidenceId,
       skillCallSeq: skillEvidence.source.callSeq,
-      skillResultSeq: skillEvidence.source.resultSeq,
+      skillResultSeq,
       acceptanceCallSeq: acceptance.source.callSeq,
     })
     if (sessionDigest(session.events) !== before) {

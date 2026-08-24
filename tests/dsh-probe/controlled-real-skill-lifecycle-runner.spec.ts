@@ -107,6 +107,14 @@ function fixtureRoot(name: string): string {
   return root
 }
 
+function ledgerEventTypes(evolutionRoot: string): string[] {
+  const ledgerPath = join(evolutionRoot, 'ledger.jsonl')
+  if (!existsSync(ledgerPath)) return []
+  const text = readFileSync(ledgerPath, 'utf8').trim()
+  if (text.length === 0) return []
+  return text.split('\n').map(line => (JSON.parse(line) as { type: string }).type)
+}
+
 function validManifest(dataDir: string, operationRoot: string) {
   const workspace = (name: string) => join(operationRoot, 'workspaces', name)
   return {
@@ -402,6 +410,17 @@ describe('controlled real Skill lifecycle runner', () => {
       expect(await exited).toBe(0)
       expect(stdout).toHaveBeenCalledTimes(1)
       expect(stderr).not.toHaveBeenCalled()
+      const tools = mounted.adapter.requests[0]!.tools ?? []
+      const decision = tools.find(tool => tool.name === 'record_architecture_decision')
+      const verifier = tools.find(tool => tool.name === 'verify_architecture_decision')
+      expect(decision?.parameters).toMatchObject({
+        type: 'object',
+        required: ['taskId', 'choice', 'explanation'],
+      })
+      expect(verifier?.parameters).toMatchObject({
+        type: 'object',
+        required: ['taskId'],
+      })
       const line = String(stdout.mock.calls[0]?.[0])
       const receipt = parseControlledLifecycleChildReceipt(line, '', {
         manifestDigest: mounted.prepared.manifestDigest,
@@ -666,12 +685,10 @@ describe('controlled real Skill lifecycle runner', () => {
       const uses = mounted.harness.ctx.tianwenEvolution.listRunSkillUses()
       expect(uses).toHaveLength(20)
       expect(seedUses).toHaveLength(2)
+      expect(uses.filter(use => String(use.sessionId).includes(':seed-'))).toHaveLength(2)
       expect(new Set(seedUses.map(use => use.acceptanceEvidenceId)).size).toBe(2)
       expect(mounted.harness.ctx.tianwenEvolution.listEvents()).toEqual([])
-      const eventTypes = readFileSync(
-        join(mounted.manifest.roots.evolutionRoot, 'ledger.jsonl'),
-        'utf8',
-      ).trim().split('\n').map(line => (JSON.parse(line) as { type: string }).type)
+      const eventTypes = ledgerEventTypes(mounted.manifest.roots.evolutionRoot)
       expect(eventTypes.indexOf('controlled-skill-eval-protocol-frozen'))
         .toBeLessThan(eventTypes.indexOf('learning-candidate-recorded'))
       const replaySnapshot = {
@@ -1241,16 +1258,147 @@ describe('controlled real Skill lifecycle runner', () => {
       manifestPath: string, manifestDigest: string,
     }): Promise<unknown> }
     try {
-      await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+      const error = await runner.runControlledLifecycle(mounted.harness.ctx, {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
-      })).rejects.toMatchObject({ code: 'seed-failed' })
+      }).then(() => undefined, cause => cause as { code?: string, message?: string })
+      expect(error).toMatchObject({ code: 'seed-failed' })
+      expect(error?.message).not.toContain('ARCHITECTURE_DECISION_ALREADY_RECORDED')
       expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets()).toEqual([])
       const inspection = await mounted.harness.ctx.sessionPersistence
         .inspect(mounted.manifest.tasks.seeds[0]!.sessionId)
       expect(inspection.events.filter(event =>
         event.type === 'tool/call'
         && event.data.name === 'record_architecture_decision')).toHaveLength(2)
+      const types = ledgerEventTypes(mounted.manifest.roots.evolutionRoot)
+      expect(types).not.toContain('outcome-intake-recorded')
+      expect(types).not.toContain('run-skill-use-recorded')
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not govern a seed without a parent Skill use', async () => {
+    const mounted = await mountRunner('missing-seed-skill-use', [
+      toolCallResponse('seed-d1-record', 'record_architecture_decision', {
+        taskId: 'seed-task:d1', choice: 'session-as-run', explanation: 'First choice.',
+      }),
+      toolCallResponse('seed-d1-verify', 'verify_architecture_decision', {
+        taskId: 'seed-task:d1',
+      }),
+      textResponse('Finish without loading the parent Skill.'),
+    ])
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      const error = await runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      }).then(() => undefined, cause => cause as { code?: string, message?: string })
+      expect(error).toMatchObject({ code: 'seed-failed' })
+      expect(error?.message).not.toContain('no-use-proof')
+      const inspection = await mounted.harness.ctx.sessionPersistence
+        .inspect(mounted.manifest.tasks.seeds[0]!.sessionId)
+      expect(inspection.events.filter(event =>
+        event.type === 'tool/call' && event.data.name === 'skill')).toEqual([])
+      expect(inspection.events.filter(event =>
+        event.type === 'tool/call'
+        && event.data.name === 'record_architecture_decision')).toHaveLength(1)
+      expect(inspection.events.filter(event =>
+        event.type === 'tool/call'
+        && event.data.name === 'verify_architecture_decision')).toHaveLength(1)
+      const types = ledgerEventTypes(mounted.manifest.roots.evolutionRoot)
+      expect(types).not.toContain('outcome-intake-recorded')
+      expect(types).not.toContain('run-skill-use-recorded')
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects a missing required decision field before governance', async () => {
+    const mounted = await mountRunner('missing-required-decision', [
+      toolCallResponse('seed-d1-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('seed-d1-record-invalid', 'record_architecture_decision', {
+        taskId: 'seed-task:d1', choice: 'session-as-run',
+      }),
+      toolCallResponse('seed-d1-verify', 'verify_architecture_decision', {
+        taskId: 'seed-task:d1',
+      }),
+      textResponse('Finish after the invalid decision call.'),
+    ])
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      const error = await runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      }).then(() => undefined, cause => cause as { code?: string, message?: string })
+      expect(error).toMatchObject({ code: 'seed-failed' })
+      expect(error?.message).not.toContain('explanation')
+      const inspection = await mounted.harness.ctx.sessionPersistence
+        .inspect(mounted.manifest.tasks.seeds[0]!.sessionId)
+      expect(inspection.events.filter(event =>
+        event.type === 'tool/call'
+        && event.data.name === 'record_architecture_decision')).toHaveLength(1)
+      const types = ledgerEventTypes(mounted.manifest.roots.evolutionRoot)
+      expect(types).not.toContain('outcome-intake-recorded')
+      expect(types).not.toContain('run-skill-use-recorded')
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects a duplicate verifier before governance', async () => {
+    const mounted = await mountRunner('duplicate-verifier', [
+      toolCallResponse('seed-d1-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('seed-d1-record', 'record_architecture_decision', {
+        taskId: 'seed-task:d1', choice: 'session-as-run', explanation: 'First choice.',
+      }),
+      toolCallResponse('seed-d1-verify-1', 'verify_architecture_decision', {
+        taskId: 'seed-task:d1',
+      }),
+      toolCallResponse('seed-d1-verify-2', 'verify_architecture_decision', {
+        taskId: 'seed-task:d1',
+      }),
+      textResponse('Finish after duplicate verification.'),
+    ])
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      const error = await runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      }).then(() => undefined, cause => cause as { code?: string, message?: string })
+      expect(error).toMatchObject({ code: 'seed-failed' })
+      expect(error?.message).not.toContain('ARCHITECTURE_DECISION_ALREADY_VERIFIED')
+      const inspection = await mounted.harness.ctx.sessionPersistence
+        .inspect(mounted.manifest.tasks.seeds[0]!.sessionId)
+      expect(inspection.events.filter(event =>
+        event.type === 'tool/call'
+        && event.data.name === 'verify_architecture_decision')).toHaveLength(2)
+      const types = ledgerEventTypes(mounted.manifest.roots.evolutionRoot)
+      expect(types).not.toContain('outcome-intake-recorded')
+      expect(types).not.toContain('run-skill-use-recorded')
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
     } finally {
       await mounted.harness.ctx.fiber.dispose()
     }
@@ -1273,10 +1421,21 @@ describe('controlled real Skill lifecycle runner', () => {
       manifestPath: string, manifestDigest: string,
     }): Promise<unknown> }
     try {
-      await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+      const error = await runner.runControlledLifecycle(mounted.harness.ctx, {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
-      })).rejects.toMatchObject({ code: 'seed-failed' })
+      }).then(() => undefined, cause => cause as { code?: string, message?: string })
+      expect(error).toMatchObject({ code: 'seed-failed' })
+      expect(error?.message).not.toContain('ARCHITECTURE_DECISION_INCONCLUSIVE')
+      const inspection = await mounted.harness.ctx.sessionPersistence
+        .inspect(mounted.manifest.tasks.seeds[0]!.sessionId)
+      expect(inspection.events.filter(event =>
+        event.type === 'tool/call'
+        && event.data.name === 'verify_architecture_decision')).toHaveLength(1)
+      const types = ledgerEventTypes(mounted.manifest.roots.evolutionRoot)
+      expect(types).not.toContain('outcome-intake-recorded')
+      expect(types).not.toContain('run-skill-use-recorded')
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toEqual([])
       expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets()).toEqual([])
       expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
     } finally {
@@ -1305,16 +1464,100 @@ describe('controlled real Skill lifecycle runner', () => {
     }
   })
 
+  it('does not govern a seed when the flushed Session cannot be read back', async () => {
+    const mounted = await mountRunner('seed-session-readback-missing')
+    vi.spyOn(mounted.harness.ctx.sessionPersistence, 'inspect')
+      .mockRejectedValueOnce(new Error('missing persisted Session'))
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })).rejects.toMatchObject({ code: 'persistence-failed' })
+      const types = ledgerEventTypes(mounted.manifest.roots.evolutionRoot)
+      expect(types).toContain('run-binding-recorded')
+      expect(types).toContain('run-skill-manifest-recorded')
+      expect(types).not.toContain('outcome-intake-recorded')
+      expect(types).not.toContain('run-skill-use-recorded')
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects a persisted Session identity or cwd drift before governance', async () => {
+    const mounted = await mountRunner('seed-session-identity-drift')
+    const inspect = mounted.harness.ctx.sessionPersistence.inspect
+      .bind(mounted.harness.ctx.sessionPersistence)
+    vi.spyOn(mounted.harness.ctx.sessionPersistence, 'inspect')
+      .mockImplementationOnce(async id => {
+        const value = await inspect(id)
+        return { ...value, meta: { ...value.meta, cwd: `${value.meta.cwd}-drift` } }
+      })
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      const error = await runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      }).then(() => undefined, cause => cause as { code?: string, message?: string })
+      expect(error).toMatchObject({ code: 'persistence-failed' })
+      expect(error?.message).not.toContain('-drift')
+      const types = ledgerEventTypes(mounted.manifest.roots.evolutionRoot)
+      expect(types).not.toContain('outcome-intake-recorded')
+      expect(types).not.toContain('run-skill-use-recorded')
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects a persisted Session event digest drift before governance', async () => {
+    const mounted = await mountRunner('seed-session-event-digest-drift')
+    const inspect = mounted.harness.ctx.sessionPersistence.inspect
+      .bind(mounted.harness.ctx.sessionPersistence)
+    let mismatchedDigest: string | undefined
+    vi.spyOn(mounted.harness.ctx.sessionPersistence, 'inspect')
+      .mockImplementationOnce(async id => {
+        const value = await inspect(id)
+        const events = value.events.slice(0, -1)
+        mismatchedDigest = sha256(events)
+        return { ...value, events }
+      })
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      const error = await runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      }).then(() => undefined, cause => cause as { code?: string, message?: string })
+      expect(error).toMatchObject({ code: 'persistence-failed' })
+      if (mismatchedDigest === undefined) throw new Error('expected persisted Session inspection')
+      expect(error?.message).not.toContain(mismatchedDigest)
+      const types = ledgerEventTypes(mounted.manifest.roots.evolutionRoot)
+      expect(types).not.toContain('outcome-intake-recorded')
+      expect(types).not.toContain('run-skill-use-recorded')
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
   it('does not leak a final Evidence projection failure or create a Candidate', async () => {
     const mounted = await mountRunner('evidence-projection-failure')
-    const original = mounted.harness.ctx.tianwenEvidence.project
-      .bind(mounted.harness.ctx.tianwenEvidence)
-    let calls = 0
     vi.spyOn(mounted.harness.ctx.tianwenEvidence, 'project')
-      .mockImplementation(session => {
-        calls += 1
-        if (calls === 3) throw new Error('evidence-project-secret')
-        return original(session)
+      .mockImplementationOnce(() => {
+        throw new Error('evidence-project-secret')
       })
     const runner = await import(
       '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
@@ -1329,6 +1572,10 @@ describe('controlled real Skill lifecycle runner', () => {
       expect(error).toMatchObject({ code: 'seed-failed' })
       expect(error?.message).not.toContain('evidence-project-secret')
       expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
+      const types = ledgerEventTypes(mounted.manifest.roots.evolutionRoot)
+      expect(types).not.toContain('outcome-intake-recorded')
+      expect(types).not.toContain('run-skill-use-recorded')
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toEqual([])
     } finally {
       await mounted.harness.ctx.fiber.dispose()
     }

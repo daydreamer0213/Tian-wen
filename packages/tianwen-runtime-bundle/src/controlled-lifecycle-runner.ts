@@ -746,14 +746,6 @@ async function runSeed(
       guard.active = false
       clearTimeout(timer)
     }
-    try {
-      if (!await ctx.sessions.flush(handle.agent.session)) {
-        throw new ControlledLifecycleRunnerError('persistence-failed')
-      }
-    } catch (error) {
-      if (error instanceof ControlledLifecycleRunnerError) throw error
-      throw new ControlledLifecycleRunnerError('persistence-failed')
-    }
     const terminal = handle.agent.session.events.findLast(event =>
       event.type === 'turn/start' || event.type === 'turn/end')
     if (
@@ -763,6 +755,86 @@ async function runSeed(
       || terminal.data.reason.kind !== 'completed'
       || sha256(workspaceSnapshot(task.workspaceRoot)) !== sha256(beforeSnapshot)
     ) throw new ControlledLifecycleRunnerError('seed-failed')
+    try {
+      if (!await ctx.sessions.flush(handle.agent.session)) {
+        throw new ControlledLifecycleRunnerError('persistence-failed')
+      }
+    } catch (error) {
+      if (error instanceof ControlledLifecycleRunnerError) throw error
+      throw new ControlledLifecycleRunnerError('persistence-failed')
+    }
+    let inspection: Awaited<ReturnType<typeof ctx.sessionPersistence.inspect>>
+    try {
+      inspection = await ctx.sessionPersistence.inspect(SessionId(task.sessionId))
+    } catch {
+      throw new ControlledLifecycleRunnerError('persistence-failed')
+    }
+    if (
+      String(inspection.meta.id) !== task.sessionId
+      || inspection.meta.cwd !== task.workspaceRoot
+      || sha256(inspection.events) !== sha256(handle.agent.session.events)
+    ) throw new ControlledLifecycleRunnerError('persistence-failed')
+    const evidenceService = ctx.get('tianwenEvidence') as {
+      project(session: typeof handle.agent.session): readonly {
+        readonly evidenceId: Sha256Digest
+        readonly source: { readonly callSeq: number }
+        readonly action: {
+          readonly toolName: string
+          readonly argumentsDigest: Sha256Digest
+        }
+        readonly outcome: {
+          readonly status: string
+          readonly isError?: boolean
+          readonly errorCode?: string
+        }
+      }[]
+    }
+    const decisionCalls = handle.agent.session.events.filter(event =>
+      event.type === 'tool/call' && event.data.name === DECISION_TOOL)
+    const verifierCalls = handle.agent.session.events.filter(event =>
+      event.type === 'tool/call' && event.data.name === ACCEPTANCE_TOOL)
+    let evidence: ReturnType<typeof evidenceService.project>
+    try {
+      evidence = evidenceService.project(handle.agent.session)
+        .filter(item => item.action.toolName === ACCEPTANCE_TOOL)
+        .sort((left, right) => left.source.callSeq - right.source.callSeq)
+    } catch {
+      throw new ControlledLifecycleRunnerError('seed-failed')
+    }
+    const finalEvidence = evidence.at(-1)
+    const verdict = finalEvidence?.outcome.status === 'complete'
+      && finalEvidence.outcome.isError === false
+      && finalEvidence.outcome.errorCode === undefined
+      ? 'met'
+      : finalEvidence?.outcome.status === 'complete'
+          && finalEvidence.outcome.isError === true
+          && finalEvidence.outcome.errorCode === 'ARCHITECTURE_DECISION_NOT_MET'
+        ? 'not-met'
+        : undefined
+    if (
+      decisionCalls.length !== 1
+      || verifierCalls.length !== 1
+      || decisionCalls[0]!.seq >= verifierCalls[0]!.seq
+      || state.recordAttempts !== 1
+      || state.verifyAttempts !== 1
+      || state.submission?.taskId !== task.taskId
+      || evidence.length !== 1
+      || finalEvidence === undefined
+      || finalEvidence.action.argumentsDigest !== sha256(acceptanceArguments)
+      || verdict === undefined
+    ) throw new ControlledLifecycleRunnerError('seed-failed')
+    let hasSkillUseProof: boolean
+    try {
+      hasSkillUseProof = ctx.tianwenLearningIntake.hasSkillUseProof(
+        handle.agent.session,
+        bound.runId,
+      )
+    } catch {
+      throw new ControlledLifecycleRunnerError('seed-failed')
+    }
+    if (!hasSkillUseProof) {
+      throw new ControlledLifecycleRunnerError('seed-failed')
+    }
     let outcome: ReturnType<typeof ctx.tianwenLearningIntake.consumeOutcome>
     let use: ReturnType<typeof ctx.tianwenLearningIntake.recordSkillUse>
     try {
@@ -777,40 +849,13 @@ async function runSeed(
     } catch {
       throw new ControlledLifecycleRunnerError('persistence-failed')
     }
-    const evidenceService = ctx.get('tianwenEvidence') as {
-      project(session: typeof handle.agent.session): readonly {
-        readonly evidenceId: Sha256Digest
-        readonly source: { readonly callSeq: number }
-        readonly action: {
-          readonly toolName: string
-          readonly argumentsDigest: Sha256Digest
-        }
-      }[]
-    }
-    let evidence: ReturnType<typeof evidenceService.project>
-    try {
-      evidence = evidenceService.project(handle.agent.session)
-        .filter(item => item.action.toolName === ACCEPTANCE_TOOL)
-        .sort((left, right) => left.source.callSeq - right.source.callSeq)
-    } catch {
-      throw new ControlledLifecycleRunnerError('seed-failed')
-    }
-    const finalEvidence = evidence.at(-1)
     if (
-      state.recordAttempts !== 1
-      || state.verifyAttempts !== 1
-      || state.submission === undefined
-      || state.submission.taskId !== task.taskId
-      || evidence.length !== 1
-      || finalEvidence === undefined
-      || finalEvidence.action.argumentsDigest !== sha256(acceptanceArguments)
-      || outcome.acceptanceEvidenceId !== finalEvidence.evidenceId
+      outcome.acceptanceEvidenceId !== finalEvidence.evidenceId
       || use.decision !== 'recorded'
+      || (verdict === 'not-met'
+        ? outcome.decision !== 'ticket-created' || outcome.ticketId === undefined
+        : outcome.decision !== 'no-case' || outcome.ticketId !== undefined)
     ) throw new ControlledLifecycleRunnerError('seed-failed')
-    const verdict = outcome.decision === 'ticket-created' ? 'not-met'
-      : outcome.decision === 'no-case' ? 'met'
-        : undefined
-    if (verdict === undefined) throw new ControlledLifecycleRunnerError('seed-failed')
     return {
       taskId: task.taskId,
       runId: bound.runId,
@@ -968,9 +1013,9 @@ export async function runControlledLifecycle(
     name: DECISION_TOOL,
     description: 'Record the first architecture decision for this controlled task.',
     parameters: {
-      taskId: { type: 'string' },
-      choice: { type: 'string' },
-      explanation: { type: 'string' },
+      taskId: { type: 'string', required: true },
+      choice: { type: 'string', required: true },
+      explanation: { type: 'string', required: true },
     },
     output: {
       schema: { type: 'string' },
@@ -1003,7 +1048,7 @@ export async function runControlledLifecycle(
   const disposeVerifier = ctx.tools.register(defineTool({
     name: ACCEPTANCE_TOOL,
     description: 'Verify the first recorded architecture decision for this controlled task.',
-    parameters: { taskId: { type: 'string' } },
+    parameters: { taskId: { type: 'string', required: true } },
     output: {
       schema: { type: 'string' },
       render: (_args, value) => [{ type: 'text', text: value }],
