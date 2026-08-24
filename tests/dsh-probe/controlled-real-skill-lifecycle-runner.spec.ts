@@ -1280,6 +1280,49 @@ describe('controlled real Skill lifecycle runner', () => {
     }
   })
 
+  it('does not govern a seed without a parent Skill use', async () => {
+    const mounted = await mountRunner('missing-seed-skill-use', [
+      toolCallResponse('seed-d1-record', 'record_architecture_decision', {
+        taskId: 'seed-task:d1', choice: 'session-as-run', explanation: 'First choice.',
+      }),
+      toolCallResponse('seed-d1-verify', 'verify_architecture_decision', {
+        taskId: 'seed-task:d1',
+      }),
+      textResponse('Finish without loading the parent Skill.'),
+    ])
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<unknown> }
+    try {
+      const error = await runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      }).then(() => undefined, cause => cause as { code?: string, message?: string })
+      expect(error).toMatchObject({ code: 'seed-failed' })
+      expect(error?.message).not.toContain('no-use-proof')
+      const inspection = await mounted.harness.ctx.sessionPersistence
+        .inspect(mounted.manifest.tasks.seeds[0]!.sessionId)
+      expect(inspection.events.filter(event =>
+        event.type === 'tool/call' && event.data.name === 'skill')).toEqual([])
+      expect(inspection.events.filter(event =>
+        event.type === 'tool/call'
+        && event.data.name === 'record_architecture_decision')).toHaveLength(1)
+      expect(inspection.events.filter(event =>
+        event.type === 'tool/call'
+        && event.data.name === 'verify_architecture_decision')).toHaveLength(1)
+      const types = ledgerEventTypes(mounted.manifest.roots.evolutionRoot)
+      expect(types).not.toContain('outcome-intake-recorded')
+      expect(types).not.toContain('run-skill-use-recorded')
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets()).toEqual([])
+      expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
   it('rejects a missing required decision field before governance', async () => {
     const mounted = await mountRunner('missing-required-decision', [
       toolCallResponse('seed-d1-skill', 'skill', { name: parentSkill.name }),

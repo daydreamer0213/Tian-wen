@@ -823,6 +823,18 @@ async function runSeed(
       || finalEvidence.action.argumentsDigest !== sha256(acceptanceArguments)
       || verdict === undefined
     ) throw new ControlledLifecycleRunnerError('seed-failed')
+    let hasSkillUseProof: boolean
+    try {
+      hasSkillUseProof = ctx.tianwenLearningIntake.hasSkillUseProof(
+        handle.agent.session,
+        bound.runId,
+      )
+    } catch {
+      throw new ControlledLifecycleRunnerError('seed-failed')
+    }
+    if (!hasSkillUseProof) {
+      throw new ControlledLifecycleRunnerError('seed-failed')
+    }
     let outcome: ReturnType<typeof ctx.tianwenLearningIntake.consumeOutcome>
     let use: ReturnType<typeof ctx.tianwenLearningIntake.recordSkillUse>
     try {
