@@ -38,7 +38,13 @@ rc.7 产品路径正式运行一次：Goal complete，45/45 Evidence complete，
 - **R0.1：** R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` 把 CLI main-entry guard 改为 canonical real file identity，并由 Windows pnpm-like junction focused contract 证明。
 - **R0.2 feature：** R0.2 `1b323c498a6fa177975fdd852738d9738995c604` 固定 `llm-deepseek retryPolicy=normal/0`，只禁用 `session-title-llm`，`session-title`、`llm-retry` 与 `settings` 仍启用；ordinary Profile 保持 DSH normal/2。真实配置若仍是 normal/2，runner 会在 0 Agent、0 model request、0 durable ledger 前 fail closed。`--dump-config` 是配置组合证据，不是 fresh installed operation。
 - **activity-01 正式结果：** 更早的 outer shell failure 是 pre-invocation 证据，不消费 activity；后续 direct official 调用进入 official `main()` usage parser，并以 exit 2 正式停止，因此 activity-01 已消费。根因是旧 operation authority 漏写必需的 `--model`，不是产品、CLI、Runtime、Provider 或 Candidate 缺陷。lifecycle invocation=0、closed roles=0/25，最终 offline receipt 合法。Provider 账户请求和 tool body 实际执行数保持 unknown (none-observed)，不能由 durable 0 升级。
-- **activity-02 恢复门：** activity-02 尚未开始。reviewed authority SHA 只有受控进入 main 且新的 automatic exact-main push attempt 1 中 Python、TypeScript、installer-windows 三 job 全绿后，才可物化 new product root、new evidence root、new operation root、20 个新 workspace 和 25 个新 Session。activity-01 保留，不重跑、不清理、不补阶段。
+- **activity-02 当前状态：** new product/evidence/operation root、20 个 workspace、25 个 Session allocation、
+  official install/offline status、manifest 与 freeze 已物化，但首个 model-use 尚未调用，因此 activity-02
+  尚未消费。原 checker 与 recovery checker 各自唯一一次 readiness 调用都安全失败；两份失败永久保留，
+  不重跑，也不冒充全零证明。外层只读状态仍是 Session root absent、Evolution 空、ledger/champion
+  absent；这只属于 `filesystem-observed`。最新 authority 把准入交还唯一 official lifecycle 的原生
+  fail-closed preflight，不再创建 checker 或 activity-03；它必须先受控进入 main 且新的 automatic
+  exact-main push attempt 1 三 job 全绿。
 - **失败证据边界：** `receipt-certified` 只认证合法 passed receipt 对 Session 角色和 model-step/tool-call/Evidence 事件的归约；`durable-observed` 是既有事实源对 durable Session 事实的观察；没有独立事实源时为 `unknown`，不能把 Provider 账户实际请求数或 tool body 实际执行数写成已证明。
 - **真实 Provider 与用户效果：** 配置的 DeepSeek 受控生命周期尚未运行。进一步说，
   配置的 DeepSeek 真实受控生命周期尚未运行；`naturalUserEvidence=not-claimed` 且
@@ -63,7 +69,7 @@ scripted mechanism fixture 的 exercised source 是 `scripted-fixture`；正式 
 长期发布门顺序固定为：
 
 ```text
-reviewed authority SHA → controlled main integration → 新的 automatic exact-main push attempt 1 的 Python、TypeScript、installer-windows 三 job 全绿 → activity-02 new formal product root 一次 official install/status + packet freeze → 恰好一次 formal real lifecycle
+Task 4D reviewed authority SHA → controlled main integration → 新的 automatic exact-main push attempt 1 的 Python、TypeScript、installer-windows 三 job 全绿 → 复核既有 activity-02 product/packet 未漂移 → 恰好一次 formal real lifecycle（其内部 preflight 同时承担 readiness）
 ```
 
 脚本化 evaluator Agent 只按冻结 rubric 评价盲态 X/Y，所有 fixture 永久标记为
@@ -306,14 +312,22 @@ B@rev1→C@rev2→B@rev3→C@rev4 的 Promotion/Rollback/Restore 机制。
 这项新证据是 0-external-Provider scripted 全链夹具，而 Stage 7 自然任务结果仍是
 `met/no-case`，没有合法产生自然 Candidate。因此机制已齐备，但配置的 DeepSeek 受控
 生命周期尚未运行。activity-01 已在 official `main()` usage parser 的 exit 2 处消费，未调用
-lifecycle；旧 operation authority 漏写 `--model`，不是产品或 Provider 缺陷。已安装入口又通过 official installer 的分段证据闭合 CLI、one-shot runner
-和静态 Profile patch，但它没有把 zero-real-Provider readiness 变成真实 Provider 成功。
-R0.1 与 R0.2 已闭合 main-entry identity 与 command-scoped Provider policy。正式 operation 不需要增加新 Runtime、预算器、适配器或治理框架，但必须永久遵守以下门顺序：
+lifecycle；旧 operation authority 漏写 `--model`，不是产品或 Provider 缺陷。activity-02 已完成一次
+official install/offline status 和 packet freeze，但两个外部 checker 都只得到安全 incomplete 回执；
+没有独立 readiness attestation。静态核对没有发现 installed DSH package/export/API 或 tracked loader 的
+确定性缺陷，安全回执又没有保留内部 failure stage，所以不能继续靠第三个 checker 猜原因。
+
+这不构成产品 lifecycle blocker：产品自身在首个 Agent/Provider request 前已经重读 manifest、等待 loader、
+检查 Evolution/Session/live Agent 全空、20 workspace、credential、selection/call config、normal/0 retry、
+tool surface 与 parent Skill identity。它能保证脏状态 fail closed，但不生成独立全零 readiness receipt。
+R0.1 与 R0.2 已闭合 main-entry identity 与 command-scoped Provider policy。正式 operation 不需要增加新
+Runtime、预算器、适配器、checker 或治理框架，但必须永久遵守以下门顺序：
 
 1. reviewed feature 受控进入 main；
 2. 对应 automatic exact-main push attempt 1 的 Python、TypeScript、installer-windows 三 job 全绿；
-3. 为 activity-02 在 new formal product root 做一次 official install/status，并完成 15 任务、20 个新 workspace、25 个新 Session 的 packet freeze；
-4. 只运行恰好一次 formal real lifecycle；
+3. 只读证明既有 activity-02 install/archive、manifest/freeze、20 workspace、25 Session allocation 和
+   两次 checker failure transport 未漂移；不重跑 installer/status/generator/checker；
+4. 只运行恰好一次 formal real lifecycle，并由同一次调用内部的 product-native preflight 承担 readiness；
 5. 任何首次失败都保留现场并停止，不挑结果、不补跑局部活动。
 
 正式运行仍冻结五任务和单次尝试以保证比较公平，不设 Tianwen 侧模型、token 或金额上限；
