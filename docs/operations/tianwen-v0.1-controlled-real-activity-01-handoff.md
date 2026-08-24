@@ -28,11 +28,20 @@ model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json
 
 The CLI, Runtime, installer, Profile patch, Provider integration, and lifecycle mechanism are unchanged. Recovery corrects only the reviewed operation authority. Activity-01 and all of its packet, workspace, allocation, and evidence artifacts remain preserved with no retry, cleanup, or partial continuation.
 
-## Activity-02 boundary
+## Activity-02 boundary: historical checkpoint and current pointer
 
-The recovery activity-02 has not started. Its current authority is the reviewed [recovery design](../superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-02-recovery-design.md), [packet](../superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-02-packet.md), and [plan](../superpowers/plans/2026-08-24-tianwen-v0.1-controlled-real-activity-02-recovery.md). That authority SHA must enter main through controlled integration, followed by a new automatic exact-main push attempt 1 in which Python, TypeScript, and installer-windows all succeed.
+At this handoff's historical checkpoint, activity-02 had not started. A new product root, new evidence root,
+new operation root, 20 new workspaces, and 25 new Sessions were still future requirements, and none could
+reuse activity-01. That checkpoint is preserved as history, not as the current execution state.
 
-Only after those gates may activity-02 use a new product root, new evidence root, new operation root, 20 new workspaces, and 25 new Sessions. None of those resources may reuse activity-01. The first direct official model-use invocation will consume activity-02; any official nonzero result then stops without retry.
+Activity-02 now has its isolated product/evidence/operation roots, frozen packet, 20 workspaces, and 25
+allocated Sessions. Its first direct official model-use invocation has not been called, so activity-02 remains
+unconsumed and the real Provider lifecycle still has not run. Two readiness checkers each made their only
+allowed call and failed safely with `unknown` values and `inspectionComplete=false`; neither produced an
+independent zero-state attestation. They must not be rerun, replaced by a third checker, or treated as product
+failure evidence.
+
+The sole current authority is Task 4D in the reviewed [recovery design](../superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-02-recovery-design.md), [packet](../superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-02-packet.md), and [plan](../superpowers/plans/2026-08-24-tianwen-v0.1-controlled-real-activity-02-recovery.md). After that reviewed authority SHA enters main through controlled integration and a new automatic exact-main push attempt 1 has Python, TypeScript, and installer-windows all succeed, the preserved packet may proceed once. Readiness is then enforced by the official product-native fail-closed preflight before any Agent, Provider/model request, or tool body. The first direct official model-use invocation consumes activity-02; any official nonzero result stops without retry and only the frozen offline recovery follows.
 
 ## Privacy boundary
 
