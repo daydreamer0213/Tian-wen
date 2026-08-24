@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-24
 
-**Status:** approved product direction; written-spec review pending
+**Status:** approved
 
 **Baseline:** `main@c6edff01314f2595948fb2390fa9aea273b1a7b4`
 
