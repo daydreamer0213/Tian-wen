@@ -856,8 +856,7 @@ function controlledIdentityExposed(
   value: unknown,
   forbidden: ReadonlySet<string>,
 ): boolean {
-  return /\b(?:baseline|candidate)\b/iu.test(JSON.stringify(value))
-    || controlledForbiddenIdentityExposed(value, forbidden)
+  return controlledForbiddenIdentityExposed(value, forbidden)
 }
 
 function controlledEvaluatorForbiddenIdentities(

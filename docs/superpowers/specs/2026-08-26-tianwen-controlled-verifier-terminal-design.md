@@ -58,14 +58,26 @@ The generic controlled-evaluation runtime keeps supporting
 `final-completed-assistant-text` for other protocols. The real lifecycle manifest uses the new
 `recorded-decision-submission` source and freezes `completed-verifier-result` as its stop condition.
 
-## 5. Failure ordering
+## 5. Blindness is a structural boundary
+
+Blind evaluation hides the arm assignment and exact machine identities by construction: the runtime
+maps the two governed arms to `x` and `y`, omits Skill/Run/Session/workspace identities, and rejects
+exact forbidden identifiers if they reach persisted material or an evaluator request.
+
+It does not censor ordinary natural-language words such as `baseline` or `candidate`. Those words are
+part of normal architecture vocabulary and are not reliable proof that a model knows its arm role.
+Treating their mere appearance as identity exposure blocks valid task output while adding no dependable
+blindness guarantee. The enforceable contract is structural equality of the two request paths plus
+absence of exact role-specific machine facts.
+
+## 6. Failure ordering
 
 After Session flush, the runtime validates request identity, guard cancellation and terminal Turn
 before Outcome or Skill-use intake. A timeout remains `timeout`; a Provider failure remains
 `provider-failed`; an incomplete protocol remains a run-fact failure. No invalid or aborted activity
 writes Outcome merely because a verifier Evidence record exists.
 
-## 6. Scope and acceptance
+## 7. Scope and acceptance
 
 The implementation reuses the existing DSH Agent loop, tool registry, Evidence projector, Learning
 Intake and controlled evaluator. It adds no retry, budget, scheduler, transport, checker or security
@@ -77,6 +89,8 @@ Acceptance requires:
   acceptance Evidence records;
 - both `met` and `not-met` verifiers to end their Turn after the third request for ordinary roles;
 - evaluators to consume recorded decision material without a final assistant message;
+- ordinary task prose may use architecture words such as `baseline` or `candidate`, while exact
+  Skill/Run/Session/workspace identities remain forbidden;
 - timeout and Provider failures to stop before Outcome/Skill-use governance writes;
 - existing generic final-text evaluation protocols to remain compatible;
 - Runtime Bundle build, typecheck, no-private-import checks and exact-main CI to pass before another
