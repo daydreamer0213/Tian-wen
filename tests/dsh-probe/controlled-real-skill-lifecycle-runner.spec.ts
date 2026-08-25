@@ -823,7 +823,7 @@ describe('controlled real Skill lifecycle runner', () => {
       })).toMatchObject({
         status: 'stopped',
         completedStage: 'candidate',
-        reasonCode: 'evaluation-failed',
+        reasonCode: 'run-fact-mismatch',
         completedRoles: {
           seedRuns: 2,
           evaluationArms: 0,
@@ -842,14 +842,27 @@ describe('controlled real Skill lifecycle runner', () => {
   })
 
   it.each([
-    'agent-create-failed',
-    'run-binding-failed',
-    'agent-dispose-failed',
-    'skill-identity-drift',
-    'tool-surface-mismatch',
-    'agent-context-mismatch',
-    'workspace-drift',
-  ] as const)('preserves the finite evaluation phase reason %s in the public receipt', async reasonCode => {
+    ['existing-partial-activity', 'existing-partial-activity'],
+    ['agent-create-failed', 'agent-create-failed'],
+    ['run-binding-failed', 'run-binding-failed'],
+    ['agent-dispose-failed', 'agent-dispose-failed'],
+    ['skill-identity-drift', 'skill-identity-drift'],
+    ['tool-surface-mismatch', 'tool-surface-mismatch'],
+    ['agent-context-mismatch', 'agent-context-mismatch'],
+    ['persistence-unavailable', 'persistence-failed'],
+    ['provider-failed', 'provider-failed'],
+    ['timeout', 'timeout'],
+    ['tool-limit-exceeded', 'tool-limit-exceeded'],
+    ['request-contract-mismatch', 'request-contract-mismatch'],
+    ['skill-use-missing', 'skill-use-missing'],
+    ['acceptance-subject-mismatch', 'acceptance-subject-mismatch'],
+    ['evaluator-material-invalid', 'evaluator-material-invalid'],
+    ['workspace-drift', 'workspace-drift'],
+    ['root-skill-drift', 'root-skill-drift'],
+    ['run-fact-mismatch', 'run-fact-mismatch'],
+  ] as const)(
+    'preserves the finite evaluation phase reason %s as %s in the public receipt',
+    async (reasonCode, publicReasonCode) => {
     const mounted = await mountRunner(`evaluation-${reasonCode}`, seedScript())
     vi.spyOn(mounted.harness.ctx.tianwenSkillEvaluation, 'runControlledArms')
       .mockResolvedValue({
@@ -888,7 +901,7 @@ describe('controlled real Skill lifecycle runner', () => {
       })).toMatchObject({
         status: 'stopped',
         completedStage: 'candidate',
-        reasonCode,
+        reasonCode: publicReasonCode,
         completedRoles: {
           seedRuns: 2,
           evaluationArms: 0,
@@ -900,7 +913,8 @@ describe('controlled real Skill lifecycle runner', () => {
     } finally {
       await mounted.harness.ctx.fiber.dispose()
     }
-  })
+      },
+  )
 
   it('binds verifier truth to the exact Agent task instead of a submitted taskId', async () => {
     const mounted = await mountRunner('cross-task-stop', [
@@ -916,7 +930,7 @@ describe('controlled real Skill lifecycle runner', () => {
       await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
-      })).rejects.toMatchObject({ code: 'evaluation-failed' })
+      })).rejects.toMatchObject({ code: 'run-fact-mismatch' })
       expect(mounted.adapter.requests).toHaveLength(12)
       const sessions = (await mounted.harness.ctx.sessionPersistence.list())
         .map(header => String(header.id))
