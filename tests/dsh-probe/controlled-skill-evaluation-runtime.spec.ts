@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
+import * as DshCompat from '@tianwen/dsh-compat'
 
 import {
   DynamicCordisRunnerService,
@@ -1624,6 +1625,60 @@ describe('controlled Skill evaluation Runtime', () => {
       )
       expect(repeated).toEqual(receipt)
       expect(mounted.adapter.requests).toHaveLength(30)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('accepts arm requests owned by active controlled Sessions across module identities', async () => {
+    const agentLoopIdentity = vi.spyOn(DshCompat, 'isAgentLoopRequest')
+      .mockReturnValue(false)
+    const mounted = await mountControlledRuntime(
+      'owned-arm-requests-across-module-identities',
+      successfulArmScript(),
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms).toMatchObject({
+        state: 'awaiting-evaluator',
+        completedTaskIds: mounted.input.tasks.map(task => task.taskId),
+      })
+      expect(agentLoopIdentity).not.toHaveBeenCalled()
+    } finally {
+      agentLoopIdentity.mockRestore()
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('accepts evaluator requests owned by active controlled Sessions across module identities', async () => {
+    const mounted = await mountControlledRuntime(
+      'owned-evaluator-requests-across-module-identities',
+      [...blindSafeArmScript(), ...successfulEvaluatorScript()],
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+      const agentLoopIdentity = vi.spyOn(DshCompat, 'isAgentLoopRequest')
+        .mockReturnValue(false)
+      try {
+        const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+          evaluatorInput(mounted.input, arms.evaluationId),
+        )
+        expect(receipt).toMatchObject({
+          state: 'terminal',
+          completedTaskIds: mounted.input.tasks.map(task => task.taskId),
+          result: { mechanismVerdict: 'pass', reasonCode: 'all-gates-passed' },
+        })
+        expect(agentLoopIdentity).not.toHaveBeenCalled()
+      } finally {
+        agentLoopIdentity.mockRestore()
+      }
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()
