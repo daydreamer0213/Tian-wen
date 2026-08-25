@@ -651,7 +651,6 @@ function childEnvironment(paths, source) {
     SystemRoot: systemRoot,
     TEMP: temp,
     TMP: temp,
-    UV_THREADPOOL_SIZE: '1',
     WINDIR: source.WINDIR ?? systemRoot,
   }
 }
@@ -741,15 +740,16 @@ export function installTianwen({
     INSTALLER_FAILURE_STAGE.PNPM_ENTRY_PREFLIGHT,
     () => childEnvironment(paths, source),
   )
+  const packEnv = { ...env, UV_THREADPOOL_SIZE: '1' }
   const pnpm = atInstallStage(INSTALLER_FAILURE_STAGE.PNPM_ENTRY_PREFLIGHT, () => {
     const entry = pnpmEntry(source)
     if (!statSync(entry).isFile()) throw new Error(`exact pnpm entry is unavailable: ${entry}`)
     return entry
   })
-  const invokePnpm = (args, timeout) => runFixed(
+  const invokePnpm = (args, timeout, childEnv = env) => runFixed(
     process.execPath,
     [pnpm, ...args],
-    { cwd: repoRoot, env, runner, timeout },
+    { cwd: repoRoot, env: childEnv, runner, timeout },
   )
   atInstallStage(INSTALLER_FAILURE_STAGE.PNPM_VERSION, () => {
     const actual = invokePnpm(['--version']).stdout.trim()
@@ -760,7 +760,7 @@ export function installTianwen({
 
   atInstallStage(
     INSTALLER_FAILURE_STAGE.WORKSPACE_INSTALL,
-    () => invokePnpm(['install', '--offline', '--frozen-lockfile', '--ignore-scripts', '--trust-lockfile'], 300_000),
+    () => invokePnpm(['install', '--offline', '--frozen-lockfile', '--ignore-scripts', '--trust-lockfile'], 0),
   )
   const packsRoot = dirname(paths.archivePath)
   const archiveStages = [randomUUID(), randomUUID()]
@@ -805,7 +805,7 @@ export function installTianwen({
         invokePnpm([
           '--filter', RUNTIME_PACKAGE, 'pack', '--skip-manifest-obfuscation',
           '--pack-destination', archiveStage,
-        ], 300_000)
+        ], 300_000, packEnv)
         if (!existsSync(stagedArchives[index]) || !statSync(stagedArchives[index]).isFile()) {
           throw new Error('Runtime Bundle archive was not created')
         }

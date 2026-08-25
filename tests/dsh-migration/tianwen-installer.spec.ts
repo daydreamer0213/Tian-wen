@@ -708,15 +708,34 @@ describe('Tianwen installer contract', () => {
     ])
     expect(scripted.executables.every(executable => executable === process.execPath)).toBe(true)
     expect(scripted.spawnOptions.every(options => options.shell === false)).toBe(true)
+    expect(scripted.calls.every(argv => !argv.includes(session) && !argv.includes(ledger))).toBe(true)
+  })
+
+  it('uses completion-owned workspace installation while keeping build and pack deadlines', () => {
+    const root = testRoot('stage-timeouts')
+    const paths = deriveInstallPaths(root, 'win32')
+    const scripted = scriptedInstaller(paths)
+
+    installWindowsFixture({ dataDir: root, runner: scripted.runner })
+
+    const workspaceInstallIndex = scripted.calls.findIndex(argv =>
+      argv.includes('install') && argv.includes('--offline'))
     const hostDeployIndex = scripted.calls.findIndex(argv =>
       argv.includes('deploy') && argv.includes('@tianwen/dsh-host'))
     const profileDeployIndex = scripted.calls.findIndex(argv =>
       argv.includes('deploy') && argv.includes('@tianwen/profile-host'))
+    expect(scripted.spawnOptions[workspaceInstallIndex]?.timeout).toBe(0)
     expect(scripted.spawnOptions[hostDeployIndex]?.timeout).toBe(0)
     expect(scripted.spawnOptions[profileDeployIndex]?.timeout).toBe(0)
+
+    const buildAndPackIndexes = scripted.calls
+      .map((argv, index) => argv.includes('build') || argv.includes('pack') ? index : -1)
+      .filter(index => index >= 0)
+    expect(buildAndPackIndexes.map(index => scripted.spawnOptions[index]?.timeout))
+      .toEqual([300_000, 300_000, 300_000, 300_000])
     expect(scripted.spawnOptions.filter((_options, index) =>
-      index !== hostDeployIndex && index !== profileDeployIndex).every(options => options.timeout > 0)).toBe(true)
-    expect(scripted.calls.every(argv => !argv.includes(session) && !argv.includes(ledger))).toBe(true)
+      ![workspaceInstallIndex, hostDeployIndex, profileDeployIndex].includes(index))
+      .every(options => options.timeout > 0)).toBe(true)
   })
 
   it('accepts a folded DSH sessions root and rejects a different folded root', () => {
@@ -1141,7 +1160,7 @@ describe('Tianwen installer contract', () => {
       && env.PNPM_CONFIG_STORE_DIR === 'D:\\DevData\\custom-pnpm-store')).toBe(true)
   })
 
-  it('pins every pnpm child to one libuv worker despite a caller override', () => {
+  it('serializes only Runtime Bundle pack children', () => {
     const root = testRoot('fixed-pnpm-worker')
     const paths = deriveInstallPaths(root, 'win32')
     const scripted = scriptedInstaller(paths)
@@ -1152,10 +1171,16 @@ describe('Tianwen installer contract', () => {
       runner: scripted.runner,
     })
 
-    const pnpmEnvironments = scripted.childEnvironments.filter((_env, index) =>
-      /pnpm\.(?:c?js|mjs)$/iu.test(scripted.calls[index]?.[0] ?? ''))
-    expect(pnpmEnvironments.length).toBeGreaterThan(0)
-    expect(pnpmEnvironments.every(env => env.UV_THREADPOOL_SIZE === '1')).toBe(true)
+    const pnpmChildren = scripted.calls.map((argv, index) => ({
+      argv,
+      env: scripted.childEnvironments[index]!,
+    })).filter(({ argv }) => /pnpm\.(?:c?js|mjs)$/iu.test(argv[0] ?? ''))
+    const packChildren = pnpmChildren.filter(({ argv }) => argv.includes('pack'))
+    const ordinaryChildren = pnpmChildren.filter(({ argv }) => !argv.includes('pack'))
+
+    expect(packChildren).toHaveLength(2)
+    expect(packChildren.every(({ env }) => env.UV_THREADPOOL_SIZE === '1')).toBe(true)
+    expect(ordinaryChildren.every(({ env }) => env.UV_THREADPOOL_SIZE === undefined)).toBe(true)
   })
 
   it('reinstalls the fixed Profile when the Runtime archive changes', () => {
