@@ -12,6 +12,7 @@ import {
   SkillRegistry,
   applySkillTool,
   defineTool,
+  mountCoreHarness,
   mountPersistentHarness,
   textResponse,
   toolCallResponse,
@@ -537,12 +538,10 @@ afterEach(() => {
 })
 
 describe('controlled Skill evaluation Runtime', () => {
-  it('declares every runtime capability used by controlled evaluation', () => {
+  it('declares common runtime capabilities without requiring controlled-only prerequisites', () => {
     expect(TianwenSkillEvaluationService.inject).toEqual([
-      'agentDefaultModel',
       'agents',
       'llm',
-      'sessionPersistence',
       'sessions',
       'skills',
       'tianwenEvidence',
@@ -569,14 +568,10 @@ describe('controlled Skill evaluation Runtime', () => {
   })
 
   it('rejects an invalid evaluator package before creating evaluator activity', async () => {
-    const root = fixtureRoot('invalid-evaluator-package')
-    const harness = await mountPersistentHarness(join(root, 'sessions'), [])
+    const harness = await mountCoreHarness([])
     await harness.ctx.plugin(SkillRegistry)
     await harness.ctx.plugin(DynamicCordisRunnerService, {})
-    harness.ctx.provide('agentDefaultModel', {
-      currentSelection: () => ({ provider: 'unused', model: 'unused' }),
-    })
-    await apply(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+    await apply(harness.ctx, { evolutionRoot: fixtureRoot('invalid-evaluator-package') })
     const service = harness.ctx.tianwenSkillEvaluation as unknown as {
       runControlledEvaluators(input: unknown): Promise<unknown>
     }
@@ -1183,14 +1178,10 @@ describe('controlled Skill evaluation Runtime', () => {
   })
 
   it('rejects an invalid task package before creating formal activity', async () => {
-    const root = fixtureRoot('invalid-task-package')
-    const harness = await mountPersistentHarness(join(root, 'sessions'), [])
+    const harness = await mountCoreHarness([])
     await harness.ctx.plugin(SkillRegistry)
     await harness.ctx.plugin(DynamicCordisRunnerService, {})
-    harness.ctx.provide('agentDefaultModel', {
-      currentSelection: () => ({ provider: 'unused', model: 'unused' }),
-    })
-    await apply(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+    await apply(harness.ctx, { evolutionRoot: fixtureRoot('invalid-task-package') })
     const create = vi.spyOn(harness.ctx.agents, 'create')
     const bindRun = vi.spyOn(harness.ctx.tianwenEvolution, 'recordRunBinding')
     const service = harness.ctx.tianwenSkillEvaluation as unknown as {

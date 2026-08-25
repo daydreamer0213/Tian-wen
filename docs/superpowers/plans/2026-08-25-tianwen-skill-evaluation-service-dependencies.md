@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the installed Tianwen evaluation service own every Cordis runtime capability used by its controlled evaluation methods.
+**Goal:** Make the installed Tianwen evaluation service own its common Cordis runtime capabilities without disabling ordinary paired evaluation.
 
-**Architecture:** Keep all controlled evaluation behavior in `TianwenSkillEvaluationService`. Extend only its static dependency declaration so installed Cordis settles the service with the same capabilities already assumed by its methods and source harness.
+**Architecture:** Keep all controlled evaluation behavior in `TianwenSkillEvaluationService`. Its static declaration owns the eight capabilities directly consumed in every mounted mode. `agentDefaultModel` and `sessionPersistence` remain controlled-operation prerequisites checked at their existing `ctx.get()` call sites.
 
 **Tech Stack:** TypeScript, Cordis services, Vitest, pnpm workspace builds, GitHub Actions.
 
@@ -25,19 +25,17 @@
 
 **Interfaces:**
 - Consumes: `TianwenSkillEvaluationService.inject`
-- Produces: the complete Cordis dependency list for the existing service
+- Produces: the common Cordis dependency list for the existing service
 
 - [ ] **Step 1: Write the failing dependency contract**
 
 Import `TianwenSkillEvaluationService` from the Runtime index and add:
 
 ```ts
-it('declares every runtime capability used by controlled evaluation', () => {
+it('declares common runtime capabilities without requiring controlled-only prerequisites', () => {
   expect(TianwenSkillEvaluationService.inject).toEqual([
-    'agentDefaultModel',
     'agents',
     'llm',
-    'sessionPersistence',
     'sessions',
     'skills',
     'tianwenEvidence',
@@ -53,14 +51,14 @@ it('declares every runtime capability used by controlled evaluation', () => {
 Run:
 
 ```powershell
-pnpm exec vitest run tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts -t "declares every runtime capability used by controlled evaluation"
+pnpm exec vitest run tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts -t "declares common runtime capabilities without requiring controlled-only prerequisites"
 ```
 
-Expected: FAIL because the six base runtime capabilities are absent.
+Expected: FAIL because the four missing common runtime capabilities are absent.
 
 - [ ] **Step 3: Implement the minimal GREEN**
 
-Replace the existing four-item `static inject` list with the exact ten-item list from the test. Do not edit method bodies.
+Replace the existing four-item `static inject` list with the exact eight-item list from the test. Do not edit method bodies.
 
 - [ ] **Step 4: Run focused and full service tests**
 
@@ -94,7 +92,7 @@ fix: declare evaluation service runtime dependencies
 
 - [ ] **Step 1: Run focused compatibility**
 
-Run the controlled evaluation, lifecycle runner, Runtime Bundle, command, and Profile specs using the existing step-local `TIANWEN_DSH_PROBE_ROOT` on `D:\DevData`.
+Run ordinary paired evaluation and its demo, controlled evaluation, lifecycle runner, Runtime Bundle, command, and Profile specs using the existing step-local `TIANWEN_DSH_PROBE_ROOT` on `D:\DevData`.
 
 - [ ] **Step 2: Run build and static gates**
 
@@ -111,7 +109,16 @@ Expected: all PASS, no dependency or lockfile diff.
 
 - [ ] **Step 3: Review correctness, architecture, and simplicity**
 
-Confirm that the declaration matches every `this.ctx` service consumed by `TianwenSkillEvaluationService`, introduces no circular ownership, and does not change evaluation behavior.
+Confirm that the declaration matches every direct scoped-context service consumed by `TianwenSkillEvaluationService`, while the two controlled-only `ctx.get()` prerequisites remain method-level checks. Confirm that this introduces no circular ownership and does not change evaluation behavior.
+
+### Task 2A: Close the exact-main compatibility finding
+
+The first implementation incorrectly promoted `agentDefaultModel` and `sessionPersistence` to class-level hard dependencies. Automatic exact-main run `32822067134` attempt 1 kept Python and installer-windows green but failed the TypeScript ordinary evaluation step because the service no longer mounted in the core runtime harness.
+
+- [ ] Preserve that run as the RED; do not rerun it.
+- [ ] Reduce `static inject` to the exact eight common dependencies.
+- [ ] Restore the two invalid-input tests to the dependency-light core harness.
+- [ ] Run both ordinary and controlled evaluation specs together before the broader compatibility gate.
 
 - [ ] **Step 4: Record the exact feature SHA**
 
