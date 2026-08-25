@@ -335,6 +335,9 @@ export type ControlledSkillEvaluatorsReceipt =
 
 export type ControlledSkillEvaluationArmsStopReasonCode =
   | 'existing-partial-activity'
+  | 'agent-create-failed'
+  | 'run-binding-failed'
+  | 'agent-dispose-failed'
   | 'persistence-unavailable'
   | 'provider-failed'
   | 'timeout'
@@ -343,6 +346,7 @@ export type ControlledSkillEvaluationArmsStopReasonCode =
   | 'skill-use-missing'
   | 'acceptance-subject-mismatch'
   | 'evaluator-material-invalid'
+  | 'workspace-drift'
   | 'root-skill-drift'
   | 'run-fact-mismatch'
 
@@ -2952,8 +2956,7 @@ export class TianwenSkillEvaluationService extends Service {
           toolCalls: 0,
           usedToolNames: new Set(),
         }
-        let handle: AgentHandle | undefined
-        let result: ControlledArmRunResult = { reasonCode: 'run-fact-mismatch' }
+        let handle: AgentHandle
         try {
           handle = await this.ctx.agents.create({
             sessionId: SessionId(planArm.sessionId),
@@ -2972,6 +2975,11 @@ export class TianwenSkillEvaluationService extends Service {
               })
             },
           })
+        } catch {
+          return { reasonCode: 'agent-create-failed' }
+        }
+        let result: ControlledArmRunResult | undefined
+        try {
           guard.agent = handle.agent
           const armHandle = handle
           const prepared: PreparedControlledSkillEvaluationArm = {
@@ -2982,63 +2990,75 @@ export class TianwenSkillEvaluationService extends Service {
             handle: armHandle,
             guard,
           }
-          let actualSkill: SkillDefinition | undefined
-          await armHandle.agent.ctx.inject(['skills'], async scopedCtx => {
-            actualSkill = await scopedCtx.skills.get(skill.name, {
-              cwd: armHandle.agent.session.header.cwd,
-              scope: armHandle.agent,
-            })
-          })
-          const expectedVersionId = role === 'baseline'
-            ? candidate.parentVersionId
-            : prepareRunSkillManifest({
-                runId: planArm.runId,
-                skill: candidateSkill,
-              }).parentVersionId
-          const schemas = armHandle.agent.ctx.tools.schemas(armHandle.agent)
-            .toSorted((left, right) => left.name.localeCompare(right.name))
-          if (
-            actualSkill === undefined
-            || !sameSkillVersion(actualSkill, expectedVersionId)
-            || sha256(schemas) !== planned.toolSchemaDigest
-            || armHandle.agent.session.header.cwd !== cwd
-            || sha256(armHandle.agent.options) !== sha256(agentOptions)
-          ) {
-            result = { reasonCode: 'root-skill-drift' }
-          } else {
-            let boundRunId: TianwenRunId | undefined
+          try {
+            let actualSkill: SkillDefinition | undefined
             await armHandle.agent.ctx.inject(['skills'], async scopedCtx => {
-              const binding = await this.ctx.tianwenLearningIntake.bindRunWithSkill(
-                armHandle.agent,
-                {
-                  goalRef: `goal:controlled-skill-evaluation:${plan.protocolId}`,
-                  taskRef: `task:${planned.taskId}:${role}`,
-                  scopeKey: plan.scopeKey,
-                  acceptanceContract: planned.acceptanceContract,
-                  acceptanceSubjectDigest: planned.acceptanceSubjectDigest,
-                },
-                skill.name,
-                scopedCtx.skills,
-              )
-              boundRunId = binding.runId
+              actualSkill = await scopedCtx.skills.get(skill.name, {
+                cwd: armHandle.agent.session.header.cwd,
+                scope: armHandle.agent,
+              })
             })
-            result = boundRunId === planArm.runId
-              ? await this.runControlledArm(prepared, plan, resolved, resolveVerdict)
-              : { reasonCode: 'run-fact-mismatch' }
+            const expectedVersionId = role === 'baseline'
+              ? candidate.parentVersionId
+              : prepareRunSkillManifest({
+                  runId: planArm.runId,
+                  skill: candidateSkill,
+                }).parentVersionId
+            const schemas = armHandle.agent.ctx.tools.schemas(armHandle.agent)
+              .toSorted((left, right) => left.name.localeCompare(right.name))
+            if (
+              actualSkill === undefined
+              || !sameSkillVersion(actualSkill, expectedVersionId)
+              || sha256(schemas) !== planned.toolSchemaDigest
+              || armHandle.agent.session.header.cwd !== cwd
+              || sha256(armHandle.agent.options) !== sha256(agentOptions)
+            ) result = { reasonCode: 'root-skill-drift' }
+          } catch {
+            result = { reasonCode: 'root-skill-drift' }
           }
-        } catch {
-          result = { reasonCode: 'run-fact-mismatch' }
-        } finally {
-          if (handle !== undefined) {
-            this.requests.delete(String(handle.agent.id))
+          if (result === undefined) {
+            let boundRunId: TianwenRunId | undefined
             try {
-              await handle.dispose()
+              await armHandle.agent.ctx.inject(['skills'], async scopedCtx => {
+                const binding = await this.ctx.tianwenLearningIntake.bindRunWithSkill(
+                  armHandle.agent,
+                  {
+                    goalRef: `goal:controlled-skill-evaluation:${plan.protocolId}`,
+                    taskRef: `task:${planned.taskId}:${role}`,
+                    scopeKey: plan.scopeKey,
+                    acceptanceContract: planned.acceptanceContract,
+                    acceptanceSubjectDigest: planned.acceptanceSubjectDigest,
+                  },
+                  skill.name,
+                  scopedCtx.skills,
+                )
+                boundRunId = binding.runId
+              })
+            } catch {
+              result = { reasonCode: 'run-binding-failed' }
+            }
+            if (result === undefined && boundRunId !== planArm.runId) {
+              result = { reasonCode: 'run-binding-failed' }
+            }
+          }
+          if (result === undefined) {
+            try {
+              result = await this.runControlledArm(prepared, plan, resolved, resolveVerdict)
             } catch {
               result = { reasonCode: 'run-fact-mismatch' }
             }
           }
+        } finally {
+          this.requests.delete(String(handle.agent.id))
+          try {
+            await handle.dispose()
+          } catch {
+            if (result?.arm !== undefined || result === undefined) {
+              result = { reasonCode: 'agent-dispose-failed' }
+            }
+          }
         }
-        return result
+        return result ?? { reasonCode: 'run-fact-mismatch' }
       }
 
       const baselineSkill = {
@@ -3065,7 +3085,7 @@ export class TianwenSkillEvaluationService extends Service {
               stage: 'candidate',
               taskId: planned.taskId,
               role: 'candidate',
-              reasonCode: 'root-skill-drift',
+              reasonCode: 'workspace-drift',
             })
           }
         } catch {
@@ -3073,7 +3093,7 @@ export class TianwenSkillEvaluationService extends Service {
             stage: 'candidate',
             taskId: planned.taskId,
             role: 'candidate',
-            reasonCode: 'root-skill-drift',
+            reasonCode: 'workspace-drift',
           })
         }
         const candidateResult = await runArm(task, planned, 'candidate', candidateSkill)

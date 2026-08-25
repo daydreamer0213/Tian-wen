@@ -175,7 +175,8 @@ const STOPPED_STAGES = [
 const STOPPED_REASON_CODES = [
   'manifest-revalidation-failed', 'services-unavailable',
   'selection-mismatch', 'credential-missing', 'session-not-fresh',
-  'seed-failed', 'candidate-failed', 'evaluation-failed',
+  'seed-failed', 'candidate-failed', 'agent-create-failed',
+  'run-binding-failed', 'agent-dispose-failed', 'evaluation-failed',
   'evaluator-failed', 'shadow-failed', 'transition-failed',
   'persistence-failed', 'identity-mismatch', 'workspace-drift', 'root-drift',
   'internal-error',
