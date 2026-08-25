@@ -2492,8 +2492,6 @@ export class TianwenSkillEvaluationService extends Service {
       plan.parentPayloadDigest,
       plan.candidatePayloadDigest,
       plan.scopeKey,
-      plan.execution.providerId,
-      plan.execution.modelId,
       parentManifest.parent.name,
       parentManifest.parent.content,
       candidate.payload.name,

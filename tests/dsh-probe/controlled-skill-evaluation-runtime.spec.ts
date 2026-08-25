@@ -233,6 +233,7 @@ async function mountControlledRuntime(
     readonly inconclusiveCandidateTaskType?: typeof taskTypes[number]
     readonly evaluatorRequestDelayMs?: number
     readonly tamperEvaluatorRequestIdentity?: boolean
+    readonly includeConfiguredRouteContext?: boolean
     readonly includeReviewedCommonIdentityContext?: boolean
     readonly includeWorkspacePolicyContext?: boolean
     readonly includeRoleSpecificPromptDrift?: boolean
@@ -320,6 +321,15 @@ async function mountControlledRuntime(
       order: 999,
       text: context => String(context.agent?.id).endsWith(':evaluator')
         ? '# Controlled summary\n\nState the verified result before interpretation.'
+        : '',
+    })
+  }
+  if (options.includeConfiguredRouteContext === true) {
+    harness.ctx.systemPrompt.context({
+      name: 'test:configured-route-context',
+      order: 998,
+      text: context => String(context.agent?.id).endsWith(':evaluator')
+        ? `Configured route: ${CONTROLLED_PROVIDER}/${CONTROLLED_MODEL}.`
         : '',
     })
   }
@@ -886,6 +896,31 @@ describe('controlled Skill evaluation Runtime', () => {
       expect(mounted.harness.ctx.tianwenEvolution.getControlledSkillEvaluationBlindMap(
         arms.evaluationId,
       )).toBeDefined()
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps the shared configured route visible to both blind arms', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-common-route',
+      [...blindSafeArmScript(), ...successfulEvaluatorScript()],
+      { includeConfiguredRouteContext: true },
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )
+      expect(receipt).toMatchObject({
+        state: 'terminal',
+        result: { mechanismVerdict: 'pass', reasonCode: 'all-gates-passed' },
+      })
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()
