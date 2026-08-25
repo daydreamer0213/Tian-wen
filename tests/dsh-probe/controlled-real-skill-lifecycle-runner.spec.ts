@@ -726,6 +726,38 @@ describe('controlled real Skill lifecycle runner', () => {
     }
   })
 
+  it('accepts a completed evaluator after unavailable tool attempts', async () => {
+    const script = fullLifecycleScript()
+    const finalEvaluatorSubmission = script[40]!
+    script.splice(
+      40,
+      1,
+      toolCallResponse('eval-t5-unavailable-glob', 'glob', { pattern: '**/*' }),
+      toolCallResponse('eval-t5-unavailable-grep', 'grep', { pattern: 'candidate' }),
+      finalEvaluatorSubmission,
+    )
+    const mounted = await mountRunner('evaluator-unavailable-tool-recovery', script)
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): Promise<{ status: string }> }
+    try {
+      await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })).resolves.toMatchObject({ status: 'passed' })
+      const evaluatorSessionId = mounted.manifest.tasks.evaluations[4]!.evaluatorSessionId
+      const evaluatorRequests = mounted.adapter.requests.filter(request =>
+        String(request.sessionId) === evaluatorSessionId)
+      expect(evaluatorRequests).toHaveLength(3)
+      expect(evaluatorRequests.every(request =>
+        request.tools?.map(tool => tool.name).join(',') === 'submit_blind_evaluation')).toBe(true)
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
   it('closes a not-met seed through successful terminal verifier evidence', async () => {
     const mounted = await mountRunner('terminal-not-met-verifier', fullLifecycleScript())
     const runner = await import(
