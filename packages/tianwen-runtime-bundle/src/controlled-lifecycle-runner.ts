@@ -115,6 +115,8 @@ export type ControlledLifecycleRunnerFailureCode =
   | 'agent-create-failed'
   | 'run-binding-failed'
   | 'agent-dispose-failed'
+  | 'skill-identity-drift'
+  | 'agent-context-mismatch'
   | 'evaluation-failed'
   | 'evaluator-failed'
   | 'shadow-failed'
@@ -922,6 +924,9 @@ function stoppedReason(code: ControlledLifecycleRunnerFailureCode):
     case 'agent-create-failed':
     case 'run-binding-failed':
     case 'agent-dispose-failed':
+    case 'skill-identity-drift':
+    case 'tool-surface-mismatch':
+    case 'agent-context-mismatch':
     case 'evaluation-failed':
     case 'evaluator-failed':
     case 'shadow-failed':
@@ -935,8 +940,6 @@ function stoppedReason(code: ControlledLifecycleRunnerFailureCode):
     case 'selection-mismatch':
     case 'retry-policy-mismatch':
       return 'selection-mismatch'
-    case 'tool-surface-mismatch':
-      return 'identity-mismatch'
   }
 }
 
@@ -945,6 +948,9 @@ function evaluationStoppedReason(reasonCode: string): ControlledLifecycleRunnerF
     case 'agent-create-failed':
     case 'run-binding-failed':
     case 'agent-dispose-failed':
+    case 'skill-identity-drift':
+    case 'tool-surface-mismatch':
+    case 'agent-context-mismatch':
     case 'workspace-drift':
       return reasonCode
     default:

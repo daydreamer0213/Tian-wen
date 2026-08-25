@@ -338,6 +338,9 @@ export type ControlledSkillEvaluationArmsStopReasonCode =
   | 'agent-create-failed'
   | 'run-binding-failed'
   | 'agent-dispose-failed'
+  | 'skill-identity-drift'
+  | 'tool-surface-mismatch'
+  | 'agent-context-mismatch'
   | 'persistence-unavailable'
   | 'provider-failed'
   | 'timeout'
@@ -2990,31 +2993,45 @@ export class TianwenSkillEvaluationService extends Service {
             handle: armHandle,
             guard,
           }
+          let actualSkill: SkillDefinition | undefined
+          let expectedVersionId: SkillEvaluationPlan['parentVersionId'] | undefined
           try {
-            let actualSkill: SkillDefinition | undefined
             await armHandle.agent.ctx.inject(['skills'], async scopedCtx => {
               actualSkill = await scopedCtx.skills.get(skill.name, {
                 cwd: armHandle.agent.session.header.cwd,
                 scope: armHandle.agent,
               })
             })
-            const expectedVersionId = role === 'baseline'
+            expectedVersionId = role === 'baseline'
               ? candidate.parentVersionId
               : prepareRunSkillManifest({
                   runId: planArm.runId,
                   skill: candidateSkill,
                 }).parentVersionId
-            const schemas = armHandle.agent.ctx.tools.schemas(armHandle.agent)
-              .toSorted((left, right) => left.name.localeCompare(right.name))
-            if (
-              actualSkill === undefined
-              || !sameSkillVersion(actualSkill, expectedVersionId)
-              || sha256(schemas) !== planned.toolSchemaDigest
-              || armHandle.agent.session.header.cwd !== cwd
-              || sha256(armHandle.agent.options) !== sha256(agentOptions)
-            ) result = { reasonCode: 'root-skill-drift' }
           } catch {
-            result = { reasonCode: 'root-skill-drift' }
+            result = { reasonCode: 'skill-identity-drift' }
+          }
+          if (result === undefined && (
+            actualSkill === undefined
+            || expectedVersionId === undefined
+            || !sameSkillVersion(actualSkill, expectedVersionId)
+          )) result = { reasonCode: 'skill-identity-drift' }
+          if (result === undefined) {
+            try {
+              const schemas = armHandle.agent.ctx.tools.schemas(armHandle.agent)
+                .toSorted((left, right) => left.name.localeCompare(right.name))
+              if (sha256(schemas) !== planned.toolSchemaDigest) {
+                result = { reasonCode: 'tool-surface-mismatch' }
+              }
+            } catch {
+              result = { reasonCode: 'tool-surface-mismatch' }
+            }
+          }
+          if (result === undefined && (
+            armHandle.agent.session.header.cwd !== cwd
+            || sha256(armHandle.agent.options) !== sha256(agentOptions)
+          )) {
+            result = { reasonCode: 'agent-context-mismatch' }
           }
           if (result === undefined) {
             let boundRunId: TianwenRunId | undefined

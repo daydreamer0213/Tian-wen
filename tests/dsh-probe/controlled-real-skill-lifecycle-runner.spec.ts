@@ -845,6 +845,9 @@ describe('controlled real Skill lifecycle runner', () => {
     'agent-create-failed',
     'run-binding-failed',
     'agent-dispose-failed',
+    'skill-identity-drift',
+    'tool-surface-mismatch',
+    'agent-context-mismatch',
     'workspace-drift',
   ] as const)('preserves the finite evaluation phase reason %s in the public receipt', async reasonCode => {
     const mounted = await mountRunner(`evaluation-${reasonCode}`, seedScript())
