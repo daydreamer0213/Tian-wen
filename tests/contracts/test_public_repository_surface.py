@@ -311,7 +311,7 @@ def test_controlled_skill_lifecycle_public_evidence_boundaries() -> None:
             "Promotion/Rollback/Restore product mechanisms are implemented and covered "
             "by a 0-external-Provider scripted full-chain fixture."
         ),
-        "The configured DeepSeek controlled lifecycle has not run.",
+        "A fresh official installed configured-DeepSeek controlled lifecycle has now returned `passed`.",
         "`naturalUserEvidence=not-claimed`",
         "`externalUserEvidence=not-claimed`",
         "pnpm demo:controlled-skill-lifecycle",
@@ -324,7 +324,7 @@ def test_controlled_skill_lifecycle_public_evidence_boundaries() -> None:
             "五任务 B/C、盲态 evaluator、隔离 Shadow 与 Promotion/Rollback/Restore "
             "产品机制已经实现，并由 0-external-Provider scripted 全链夹具覆盖。"
         ),
-        "配置的 DeepSeek 受控生命周期尚未运行。",
+        "一个全新的官方已安装 configured-DeepSeek 受控生命周期现已返回 `passed`。",
         "`naturalUserEvidence=not-claimed`",
         "`externalUserEvidence=not-claimed`",
         "pnpm demo:controlled-skill-lifecycle",
@@ -333,11 +333,54 @@ def test_controlled_skill_lifecycle_public_evidence_boundaries() -> None:
 
     for fact in (
         "0-external-Provider scripted 全链夹具",
-        "配置的 DeepSeek 受控生命周期尚未运行",
+        "官方已安装 configured-DeepSeek 受控生命周期",
+        "返回 `passed`",
         "naturalUserEvidence=not-claimed",
         "externalUserEvidence=not-claimed",
     ):
         assert fact in architecture
+
+
+def test_controlled_real_activity_22_records_formal_success() -> None:
+    handoff_path = (
+        ROOT
+        / "docs"
+        / "operations"
+        / "tianwen-v0.1-controlled-real-activity-22-handoff.md"
+    )
+    assert handoff_path.is_file(), "missing controlled real activity-22 handoff"
+    handoff = " ".join(handoff_path.read_text(encoding="utf-8").split())
+
+    for fact in (
+        "7d8344810f216c2275f4d307bd0674886027827b",
+        "32883408309",
+        "tianwen.controlled-real-skill-lifecycle.v1",
+        "status=passed",
+        "25 formal Sessions",
+        "seedRuns=2",
+        "evaluationArms=10",
+        "evaluators=5",
+        "shadowRuns=5",
+        "transitions=3",
+        "70 model-request events",
+        "72 tool-call events",
+        "20 acceptance Evidence",
+        "7 failed unavailable-tool results",
+        "B@rev1 → C@rev2 → B@rev3 → C@rev4",
+        "tianwen-offline/phase2-smoke",
+        "Provider-account request count remains unknown",
+        "naturalUserEvidence=not-claimed",
+        "externalUserEvidence=not-claimed",
+    ):
+        assert fact in handoff
+
+    for forbidden in (
+        "DEEPSEEK_API_KEY=",
+        "session:controlled-real:activity-22:",
+        "raw prompt",
+        "raw reasoning",
+    ):
+        assert forbidden not in handoff
 
 
 def test_controlled_real_operation_public_readiness_boundaries() -> None:
@@ -350,22 +393,22 @@ def test_controlled_real_operation_public_readiness_boundaries() -> None:
         " ".join(document.split()) for document in (readme_en, readme_zh, architecture)
     )
 
-    common_facts = ("HMR", "controlled-lifecycle", "exact-main CI")
+    common_facts = ("HMR", "controlled-lifecycle", "Activity-22")
     expected_by_document = {
         "README.md": (
             "DSH/HMR shutdown-lifecycle repair",
-            "does not claim real Provider success",
-            "model activation and its confirming status are product setup",
+            "Model activation and its confirming status remain product setup",
+            "Provider-account request counts",
         ),
         "README.zh-CN.md": (
             "DSH/HMR 的关闭生命周期修复",
-            "不声称真实 Provider 成功",
-            "模型激活及其确认 status 属于产品准备",
+            "模型激活及其确认 status 仍属于产品准备",
+            "Provider 账户请求计数",
         ),
         "architecture": (
             "DSH/HMR shutdown lifecycle 修复",
-            "不声称真实 Provider 成功",
             "模型激活和确认 status 是产品 setup",
+            "Provider-account 实际请求数没有独立事实源",
         ),
     }
     documents = {
@@ -881,8 +924,9 @@ def test_one_shot_profile_lifecycle_repair_public_facts() -> None:
                 "dsh/hmr", "watcher-readiness", "owns", "deepseek", "model-use receipt",
                 "persisted", "exit 13", "historically consumed", "offline recovery", "succeeded",
                 "controlled-lifecycle", "invocation=0",
-                "model activation", "product setup", "do not consume a formal activity", "first future",
-                "consumes", "does not claim real provider success", "historical classifications", "not rewritten",
+                "model activation", "product setup", "do not consume a formal activity",
+                "does not claim real provider success", "historical classifications", "not rewritten",
+                "activity-22", "returned `passed`",
             ),
         ),
         (
@@ -891,8 +935,8 @@ def test_one_shot_profile_lifecycle_repair_public_facts() -> None:
                 "dsh/hmr", "watcher readiness", "拥有", "deepseek", "model-use receipt",
                 "已持久化", "exit 13", "仍已消费", "offline 恢复", "均成功", "controlled-lifecycle",
                 "invocation=0", "模型激活",
-                "不消费正式 activity", "首次未来", "不声称真实 provider 成功", "历史分类", "不被改写",
-                "才开始并消费",
+                "不消费正式 activity", "不声称真实 provider 成功", "历史分类", "不被改写",
+                "activity-22", "返回 `passed`",
             ),
         ),
         (
@@ -901,8 +945,8 @@ def test_one_shot_profile_lifecycle_repair_public_facts() -> None:
                 "dsh/hmr", "watcher readiness", "负责", "deepseek", "model-use receipt",
                 "已持久化", "exit 13", "仍已消费", "offline 恢复", "均成功", "controlled-lifecycle",
                 "invocation=0", "模型激活",
-                "不消费正式 activity", "首次未来", "不声称真实 provider 成功", "历史分类", "不被改写",
-                "才开始并消费",
+                "不消费正式 activity", "历史分类", "不被改写",
+                "activity-22", "返回 `passed`",
             ),
         ),
         (
@@ -923,19 +967,19 @@ def test_one_shot_profile_lifecycle_repair_public_facts() -> None:
             assert activity in document
 
 
-def test_architecture_lists_current_one_shot_lifecycle_authority_first() -> None:
+def test_architecture_lists_current_controlled_lifecycle_evidence_first() -> None:
     architecture_path = ROOT / "docs" / "tianwen-architecture-overview-v2.md"
     raw_architecture = architecture_path.read_text(encoding="utf-8")
     architecture = " ".join(raw_architecture.split())
 
-    assert "## 当前状态（2026-08-25）" in raw_architecture
-    design = "2026-08-24-tianwen-one-shot-profile-lifecycle-repair-design.md"
-    handoff = "tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md"
+    assert "## 当前状态（2026-08-26）" in raw_architecture
+    current_handoff = "tianwen-v0.1-controlled-real-activity-22-handoff.md"
     historical_activity_authorities = "Activity-01、Activity-02 和 Activity-03"
-    assert design in architecture
-    assert handoff in architecture
+    assert current_handoff in architecture
     assert historical_activity_authorities in architecture
-    assert architecture.index(design) < architecture.index(historical_activity_authorities)
+    assert architecture.index(current_handoff) < architecture.index(
+        historical_activity_authorities
+    )
 
 
 def test_relative_links_in_public_documents_exist() -> None:
