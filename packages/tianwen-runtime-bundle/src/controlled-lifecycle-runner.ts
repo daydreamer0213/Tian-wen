@@ -23,6 +23,7 @@ import type {
 import { CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1 } from '../../tianwen-evolution/dist/controlled-skill-activation.js'
 import { CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST } from '../../tianwen-evolution/dist/controlled-skill-evaluation.js'
 import { sha256 } from '../../tianwen-evolution/dist/learning-intake.js'
+import type { ControlledSkillEvaluationArmsStopReasonCode } from '../../tianwen-runtime/dist/skill-evaluation.js'
 
 import { readControlledLifecycleManifest } from './controlled-lifecycle-contract.js'
 import type {
@@ -117,6 +118,7 @@ export type ControlledLifecycleRunnerFailureCode =
   | 'agent-dispose-failed'
   | 'skill-identity-drift'
   | 'agent-context-mismatch'
+  | Exclude<ControlledSkillEvaluationArmsStopReasonCode, 'persistence-unavailable'>
   | 'evaluation-failed'
   | 'evaluator-failed'
   | 'shadow-failed'
@@ -914,48 +916,13 @@ function refreshCompletedRunRoles(
 
 function stoppedReason(code: ControlledLifecycleRunnerFailureCode):
   Extract<ControlledLifecycleReceipt, { readonly status: 'stopped' }>['reasonCode'] {
-  switch (code) {
-    case 'manifest-revalidation-failed':
-    case 'services-unavailable':
-    case 'credential-missing':
-    case 'session-not-fresh':
-    case 'seed-failed':
-    case 'candidate-failed':
-    case 'agent-create-failed':
-    case 'run-binding-failed':
-    case 'agent-dispose-failed':
-    case 'skill-identity-drift':
-    case 'tool-surface-mismatch':
-    case 'agent-context-mismatch':
-    case 'evaluation-failed':
-    case 'evaluator-failed':
-    case 'shadow-failed':
-    case 'transition-failed':
-    case 'persistence-failed':
-    case 'workspace-drift':
-    case 'root-drift':
-    case 'identity-mismatch':
-    case 'internal-error':
-      return code
-    case 'selection-mismatch':
-    case 'retry-policy-mismatch':
-      return 'selection-mismatch'
-  }
+  return code === 'retry-policy-mismatch' ? 'selection-mismatch' : code
 }
 
-function evaluationStoppedReason(reasonCode: string): ControlledLifecycleRunnerFailureCode {
-  switch (reasonCode) {
-    case 'agent-create-failed':
-    case 'run-binding-failed':
-    case 'agent-dispose-failed':
-    case 'skill-identity-drift':
-    case 'tool-surface-mismatch':
-    case 'agent-context-mismatch':
-    case 'workspace-drift':
-      return reasonCode
-    default:
-      return 'evaluation-failed'
-  }
+function evaluationStoppedReason(
+  reasonCode: ControlledSkillEvaluationArmsStopReasonCode,
+): ControlledLifecycleRunnerFailureCode {
+  return reasonCode === 'persistence-unavailable' ? 'persistence-failed' : reasonCode
 }
 
 function stoppedReceipt(
