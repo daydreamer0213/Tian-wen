@@ -233,6 +233,8 @@ async function mountControlledRuntime(
     readonly inconclusiveCandidateTaskType?: typeof taskTypes[number]
     readonly evaluatorRequestDelayMs?: number
     readonly tamperEvaluatorRequestIdentity?: boolean
+    readonly includeWorkspacePolicyContext?: boolean
+    readonly includeRoleSpecificPromptDrift?: boolean
   } = {},
 ) {
   const root = fixtureRoot(name)
@@ -287,6 +289,27 @@ async function mountControlledRuntime(
         ;(request as unknown as { purpose?: string }).purpose = 'controlled-test'
       }
       return next()
+    })
+  }
+  if (options.includeWorkspacePolicyContext === true) {
+    harness.ctx.systemPrompt.context({
+      name: 'sandbox:policy',
+      order: 110,
+      text: context => {
+        const cwd = context.agent?.session.header.cwd
+        return cwd === undefined
+          ? ''
+          : `Current DSH file policy workspace: ${JSON.stringify(cwd)}.`
+      },
+    })
+  }
+  if (options.includeRoleSpecificPromptDrift === true) {
+    harness.ctx.systemPrompt.context({
+      name: 'test:role-specific-drift',
+      order: 111,
+      text: context => String(context.agent?.id).endsWith(':baseline')
+        ? 'Unowned prompt fact alpha.'
+        : 'Unowned prompt fact beta.',
     })
   }
   await apply(harness.ctx, { evolutionRoot: join(root, 'evolution') })
@@ -1679,6 +1702,52 @@ describe('controlled Skill evaluation Runtime', () => {
       } finally {
         agentLoopIdentity.mockRestore()
       }
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('compares paired request semantics across distinct controlled workspace contexts', async () => {
+    const mounted = await mountControlledRuntime(
+      'paired-request-workspace-context',
+      successfulArmScript(),
+      { includeWorkspacePolicyContext: true },
+    )
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'awaiting-evaluator',
+        completedTaskIds: mounted.input.tasks.map(task => task.taskId),
+      })
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('still rejects unowned prompt drift between a controlled pair', async () => {
+    const mounted = await mountControlledRuntime(
+      'paired-request-unowned-context-drift',
+      successfulArmScript(),
+      { includeRoleSpecificPromptDrift: true },
+    )
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'pair',
+          role: null,
+          reasonCode: 'request-contract-mismatch',
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(6)
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()

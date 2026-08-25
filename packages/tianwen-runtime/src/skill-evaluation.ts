@@ -908,6 +908,37 @@ function workspaceSnapshot(root: string): ControlledWorkspaceSnapshot {
   }
 }
 
+function normalizeControlledRequestOwnership(
+  value: unknown,
+  sessionId: string,
+  workspaceRoot: string,
+): unknown {
+  const replacements = [
+    [JSON.stringify(workspaceRoot).slice(1, -1), '<controlled-workspace>'],
+    [workspaceRoot, '<controlled-workspace>'],
+    [workspaceRoot.replaceAll('\\', '/'), '<controlled-workspace>'],
+    [sessionId, '<controlled-session>'],
+  ] as const
+  if (typeof value === 'string') {
+    return replacements.reduce(
+      (text, [owned, normalized]) => text.replaceAll(owned, normalized),
+      value,
+    )
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeControlledRequestOwnership(
+      item,
+      sessionId,
+      workspaceRoot,
+    ))
+  }
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    key,
+    normalizeControlledRequestOwnership(item, sessionId, workspaceRoot),
+  ]))
+}
+
 function isDedicatedChild(root: string, target: string): boolean {
   const child = relative(root, target)
   return child.length > 0
@@ -921,6 +952,7 @@ function controlledFirstRequestDigest(
   sessionId: string,
   config: LlmCallConfig,
   skill: SkillDefinition,
+  workspaceRoot: string,
 ): Sha256Digest | undefined {
   // Requests reach this function only through the active controlled Session map.
   if (requests.length === 0 || requests.some(request =>
@@ -934,7 +966,7 @@ function controlledFirstRequestDigest(
   const targetRows = first.messages.flatMap(message => catalogEntries(message) ?? [])
     .filter(entry => isTargetCatalogEntry(entry, skill.name))
   if (targetRows.length !== 1) return undefined
-  return sha256({
+  return sha256(normalizeControlledRequestOwnership({
     ...first,
     sessionId: NORMALIZED_SESSION,
     messages: first.messages.map((message, index) => {
@@ -953,7 +985,7 @@ function controlledFirstRequestDigest(
         }),
       }
     }),
-  })
+  }, sessionId, workspaceRoot))
 }
 
 function controlledExecutionManifestDigest(
@@ -1610,7 +1642,7 @@ export class TianwenSkillEvaluationService extends Service {
         skill: targetSkill,
         handle,
         guard,
-      }, transition.postCheck.runId, resolved, resolveVerdict)
+      }, transition.postCheck.runId, resolved, parsed.task.workspaceRoot, resolveVerdict)
       if (activity.activity === undefined) {
         return this.recoverControlledSkillTransition(transition, {
           stage: 'activation',
@@ -2111,6 +2143,7 @@ export class TianwenSkillEvaluationService extends Service {
           item,
           item.planned.runId,
           resolved,
+          item.task.workspaceRoot,
           resolveVerdict,
         )
         if (activity.activity === undefined) {
@@ -3195,6 +3228,9 @@ export class TianwenSkillEvaluationService extends Service {
       prepared,
       runId,
       config,
+      prepared.role === 'baseline'
+        ? prepared.task.baselineWorkspaceRoot
+        : prepared.task.candidateWorkspaceRoot,
       resolveVerdict,
     )
     if (result.activity === undefined) return result
@@ -3222,6 +3258,7 @@ export class TianwenSkillEvaluationService extends Service {
     prepared: PreparedControlledActivity,
     runId: TianwenRunId,
     config: LlmCallConfig,
+    workspaceRoot: string,
     resolveVerdict?: ControlledOutcomeVerdictResolver,
   ): Promise<ControlledActivityRunResult> {
     const session = prepared.handle.agent.session
@@ -3306,6 +3343,7 @@ export class TianwenSkillEvaluationService extends Service {
       String(session.id),
       config,
       prepared.skill,
+      workspaceRoot,
     )
     if (normalizedFirstRequestDigest === undefined) {
       return { reasonCode: 'request-contract-mismatch' }
