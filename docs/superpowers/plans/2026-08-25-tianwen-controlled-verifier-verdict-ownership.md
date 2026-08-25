@@ -12,13 +12,14 @@ two facts agree.
 
 **Design:**
 `docs/superpowers/specs/2026-08-25-tianwen-controlled-verifier-verdict-ownership-design.md`
-at `97248a644eee2772d7fb61ddcecafb8fb941a229`.
+at `b9ca4cf65369b0340d2c6f76cf572d099d044b1d`.
 
 ## Constraints
 
 1. Core state-machine behavior is the acceptance target. Do not add evidence inventories or
    transport rules unrelated to the verdict.
-2. Modify only the runner and its existing runner spec for product implementation.
+2. Modify only Learning Intake, controlled skill evaluation, the runner and their existing focused
+   specs for product implementation.
 3. Do not modify DSH packages, the Evidence projector, installer, Profile, workflow, dependencies or
    lockfile.
 4. Do not parse raw error text or infer not-met from `isError` alone.
@@ -31,27 +32,40 @@ at `97248a644eee2772d7fb61ddcecafb8fb941a229`.
 
 1. Add one test around the ordinary full lifecycle fixture.
 2. Wrap the existing Evidence projector and remove only
-   `ARCHITECTURE_DECISION_NOT_MET` from the first error Evidence outcome.
+   `ARCHITECTURE_DECISION_NOT_MET` from every not-met Evidence outcome.
 3. Preserve `status=complete`, `isError=true`, exact action arguments and every other projected fact.
 4. Assert that the lifecycle still passes, D1 creates one Ticket, both seed Skill uses are recorded,
    25 Sessions persist and the final pointer reaches C revision 4.
 5. Run only this test and retain the expected original `seed-failed` RED.
+6. Retain the first runner-only GREEN attempt as a second RED: adding the live verdict alone still
+   stops at D1 because Learning Intake owns the Outcome write.
 
-## Task 2: Make the verifier own its verdict
+## Task 2: Connect verdict ownership to Outcome intake
 
-**File:** `packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.ts`
+**Files:**
+
+- `packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.ts`
+- `packages/tianwen-runtime/src/learning-intake.ts`
+- `packages/tianwen-runtime/src/skill-evaluation.ts`
+- `tests/dsh-probe/outcome-intake-runtime.spec.ts`
 
 1. Add optional private `verdict: 'met' | 'not-met'` to `DecisionState`.
 2. In the verifier body, set `not-met` immediately before the existing not-met throw and set `met`
    immediately before the existing success return.
 3. Leave all inconclusive paths without a verdict.
-4. After Session flush/readback, derive acceptance only when:
-   - call counts, order, arguments digest and Evidence cardinality remain exact;
+4. Add an optional internal Outcome attestation containing only verdict and acceptance Evidence id.
+5. The runner keeps its exact call counts, order, arguments digest and Evidence cardinality checks.
+6. Learning Intake must independently resolve the final Evidence and accept the attestation only
+   when:
    - `met` agrees with a complete non-error Evidence result and no error code;
    - `not-met` agrees with a complete error Evidence result, and any present error code equals the
      frozen not-met code.
-5. Keep the existing proof-before-Outcome and Outcome-before-Skill-use ordering unchanged.
-6. Run the new focused test, then the full runner spec.
+7. Calls without an attestation keep the existing Evidence-only behavior.
+8. Pass a read-only Session-id verdict resolver as a second argument through controlled arms,
+   Shadow and transition methods. Do not add it to parsed task inputs, digests or durable facts.
+9. Keep the existing proof-before-Outcome and Outcome-before-Skill-use ordering unchanged.
+10. Add focused Learning Intake tests for accepted missing-code not-met and rejected polarity/id
+   mismatch, then run the new runner test and full runner spec.
 
 ## Task 3: Compatibility and verification
 
@@ -75,7 +89,8 @@ that platform/runtime integration proof.
    failure paths.
 2. Review architecture/evidence: no raw-text routing, no Evidence-projector scope expansion and no
    Activity-04 overclaim.
-3. Review YAGNI: only one private field and the smallest validation change.
+3. Review YAGNI: one private field, one small attestation value and direct optional resolver
+   parameters; no registry or new service.
 4. Commit the implementation separately from these authority documents.
 5. Push the feature normally, perform one no-ff merge after exact tree equality and diff checks, and
    push main normally.
