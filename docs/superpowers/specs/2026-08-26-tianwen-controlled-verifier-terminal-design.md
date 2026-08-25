@@ -64,6 +64,10 @@ Blind evaluation hides the arm assignment and exact machine identities by constr
 maps the two governed arms to `x` and `y`, omits Skill/Run/Session/workspace identities, and rejects
 exact forbidden identifiers if they reach persisted material or an evaluator request.
 
+The configured Provider/model route is shared execution context, not an arm identity. It remains
+subject to the evaluator's exact request contract but is not placed in the blind-identity deny set.
+Otherwise the ordinary DSH system prompt can make every correctly configured evaluator reject itself.
+
 It does not censor ordinary natural-language words such as `baseline` or `candidate`. Those words are
 part of normal architecture vocabulary and are not reliable proof that a model knows its arm role.
 Treating their mere appearance as identity exposure blocks valid task output while adding no dependable
