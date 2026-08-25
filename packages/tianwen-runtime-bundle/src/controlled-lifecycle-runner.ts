@@ -112,6 +112,9 @@ export type ControlledLifecycleRunnerFailureCode =
   | 'seed-failed'
   | 'persistence-failed'
   | 'candidate-failed'
+  | 'agent-create-failed'
+  | 'run-binding-failed'
+  | 'agent-dispose-failed'
   | 'evaluation-failed'
   | 'evaluator-failed'
   | 'shadow-failed'
@@ -916,6 +919,9 @@ function stoppedReason(code: ControlledLifecycleRunnerFailureCode):
     case 'session-not-fresh':
     case 'seed-failed':
     case 'candidate-failed':
+    case 'agent-create-failed':
+    case 'run-binding-failed':
+    case 'agent-dispose-failed':
     case 'evaluation-failed':
     case 'evaluator-failed':
     case 'shadow-failed':
@@ -931,6 +937,18 @@ function stoppedReason(code: ControlledLifecycleRunnerFailureCode):
       return 'selection-mismatch'
     case 'tool-surface-mismatch':
       return 'identity-mismatch'
+  }
+}
+
+function evaluationStoppedReason(reasonCode: string): ControlledLifecycleRunnerFailureCode {
+  switch (reasonCode) {
+    case 'agent-create-failed':
+    case 'run-binding-failed':
+    case 'agent-dispose-failed':
+    case 'workspace-drift':
+      return reasonCode
+    default:
+      return 'evaluation-failed'
   }
 }
 
@@ -1215,6 +1233,9 @@ export async function runControlledLifecycle(
       throw new ControlledLifecycleRunnerError('evaluation-failed')
     } finally {
       stateBySessionId.clear()
+    }
+    if (arms.state === 'stopped') {
+      throw new ControlledLifecycleRunnerError(evaluationStoppedReason(arms.stop.reasonCode))
     }
     if (arms.state === 'terminal') {
       lastClosedStage = 'evaluation'

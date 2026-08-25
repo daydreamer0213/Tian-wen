@@ -841,6 +841,64 @@ describe('controlled real Skill lifecycle runner', () => {
     }
   })
 
+  it.each([
+    'agent-create-failed',
+    'run-binding-failed',
+    'agent-dispose-failed',
+    'workspace-drift',
+  ] as const)('preserves the finite evaluation phase reason %s in the public receipt', async reasonCode => {
+    const mounted = await mountRunner(`evaluation-${reasonCode}`, seedScript())
+    vi.spyOn(mounted.harness.ctx.tianwenSkillEvaluation, 'runControlledArms')
+      .mockResolvedValue({
+        schemaVersion: 'tianwen.controlled-skill-evaluation-arms-receipt.v1',
+        evaluationId: 'controlled-skill-evaluation:phase-stop',
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'candidate',
+          taskId: 'eval-task:t1',
+          role: 'candidate',
+          reasonCode,
+        },
+      } as never)
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { apply(ctx: typeof mounted.harness.ctx, config: {
+      manifestPath: string, manifestDigest: string,
+    }): void }
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const originalGet = mounted.harness.ctx.get.bind(mounted.harness.ctx)
+    let resolveExit!: (code: number) => void
+    const exited = new Promise<number>(resolve => { resolveExit = resolve })
+    vi.spyOn(mounted.harness.ctx as never, 'get').mockImplementation((service: string) =>
+      service === 'appExit' ? resolveExit : originalGet(service as never))
+    try {
+      runner.apply(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })
+      expect(await exited).toBe(1)
+      expect(stdout).toHaveBeenCalledTimes(1)
+      expect(parseControlledLifecycleChildReceipt(String(stdout.mock.calls[0]?.[0]), '', {
+        manifestDigest: mounted.prepared.manifestDigest,
+        installedArchiveDigest: mounted.manifest.installedArchiveDigest,
+      })).toMatchObject({
+        status: 'stopped',
+        completedStage: 'candidate',
+        reasonCode,
+        completedRoles: {
+          seedRuns: 2,
+          evaluationArms: 0,
+          evaluators: 0,
+          shadowRuns: 0,
+          transitions: 0,
+        },
+      })
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
   it('binds verifier truth to the exact Agent task instead of a submitted taskId', async () => {
     const mounted = await mountRunner('cross-task-stop', [
       ...seedScript(),

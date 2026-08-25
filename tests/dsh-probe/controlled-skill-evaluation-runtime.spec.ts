@@ -1741,6 +1741,188 @@ describe('controlled Skill evaluation Runtime', () => {
     }
   })
 
+  it('reports the candidate Agent creation phase instead of collapsing it into Run facts', async () => {
+    const firstTask = taskTypes[0]
+    const mounted = await mountControlledRuntime('candidate-create-failure', [
+      toolCallResponse('create-b-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('create-b-verify', acceptance.toolName, {
+        subject: { task: firstTask, accepted: true },
+      }),
+      textResponse('baseline complete'),
+    ])
+    const originalCreate = mounted.harness.ctx.agents.create.bind(mounted.harness.ctx.agents)
+    let createCalls = 0
+    vi.spyOn(mounted.harness.ctx.agents, 'create').mockImplementation(async (...args) => {
+      createCalls += 1
+      if (createCalls === 2) throw new Error('candidate create sentinel')
+      return originalCreate(...args)
+    })
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'candidate',
+          role: 'candidate',
+          reasonCode: 'agent-create-failed',
+        },
+      })
+      const [plan] = mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()
+      expect(mounted.harness.ctx.tianwenEvolution.getRunBinding(
+        plan!.tasks[0]!.baseline.runId,
+      )).toBeDefined()
+      expect(mounted.harness.ctx.tianwenEvolution.getRunBinding(
+        plan!.tasks[0]!.candidate.runId,
+      )).toBeUndefined()
+      expect(mounted.adapter.requests).toHaveLength(3)
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('reports the candidate Run binding phase before any candidate model request', async () => {
+    const firstTask = taskTypes[0]
+    const mounted = await mountControlledRuntime('candidate-binding-failure', [
+      toolCallResponse('bind-b-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('bind-b-verify', acceptance.toolName, {
+        subject: { task: firstTask, accepted: true },
+      }),
+      textResponse('baseline complete'),
+    ])
+    const intake = mounted.harness.ctx.tianwenLearningIntake
+    const originalBind = intake.bindRunWithSkill.bind(intake)
+    let bindCalls = 0
+    vi.spyOn(intake, 'bindRunWithSkill').mockImplementation(async (...args) => {
+      bindCalls += 1
+      if (bindCalls === 2) throw new Error('candidate binding sentinel')
+      return originalBind(...args)
+    })
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'candidate',
+          role: 'candidate',
+          reasonCode: 'run-binding-failed',
+        },
+      })
+      const [plan] = mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()
+      expect(mounted.harness.ctx.tianwenEvolution.getRunBinding(
+        plan!.tasks[0]!.candidate.runId,
+      )).toBeUndefined()
+      expect(mounted.adapter.requests).toHaveLength(3)
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('reports candidate Agent disposal after its governed facts close', async () => {
+    const firstTask = taskTypes[0]
+    const mounted = await mountControlledRuntime('candidate-dispose-failure', [
+      toolCallResponse('dispose-b-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('dispose-b-verify', acceptance.toolName, {
+        subject: { task: firstTask, accepted: true },
+      }),
+      textResponse('baseline complete'),
+      toolCallResponse('dispose-c-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('dispose-c-verify', acceptance.toolName, {
+        subject: { task: firstTask, accepted: true },
+      }),
+      textResponse('candidate complete'),
+    ])
+    const originalCreate = mounted.harness.ctx.agents.create.bind(mounted.harness.ctx.agents)
+    let createCalls = 0
+    vi.spyOn(mounted.harness.ctx.agents, 'create').mockImplementation(async (...args) => {
+      createCalls += 1
+      const handle = await originalCreate(...args)
+      if (createCalls !== 2) return handle
+      return {
+        agent: handle.agent,
+        async dispose() {
+          await handle.dispose()
+          throw new Error('candidate dispose sentinel')
+        },
+      }
+    })
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'candidate',
+          role: 'candidate',
+          reasonCode: 'agent-dispose-failed',
+        },
+      })
+      const [plan] = mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()
+      expect(mounted.harness.ctx.tianwenEvolution.getRunBinding(
+        plan!.tasks[0]!.candidate.runId,
+      )).toBeDefined()
+      expect(mounted.adapter.requests).toHaveLength(6)
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not let candidate disposal overwrite an earlier execution failure', async () => {
+    const firstTask = taskTypes[0]
+    const mounted = await mountControlledRuntime('candidate-provider-and-dispose-failure', [
+      toolCallResponse('provider-dispose-b-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('provider-dispose-b-verify', acceptance.toolName, {
+        subject: { task: firstTask, accepted: true },
+      }),
+      textResponse('baseline complete'),
+      new Error('candidate provider sentinel'),
+    ])
+    const originalCreate = mounted.harness.ctx.agents.create.bind(mounted.harness.ctx.agents)
+    let createCalls = 0
+    vi.spyOn(mounted.harness.ctx.agents, 'create').mockImplementation(async (...args) => {
+      createCalls += 1
+      const handle = await originalCreate(...args)
+      if (createCalls !== 2) return handle
+      return {
+        agent: handle.agent,
+        async dispose() {
+          await handle.dispose()
+          throw new Error('candidate dispose sentinel')
+        },
+      }
+    })
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )).resolves.toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'candidate',
+          role: 'candidate',
+          reasonCode: 'provider-failed',
+        },
+      })
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
   it('records and returns an early terminal Candidate hard-gate result', async () => {
     const firstTask = taskTypes[0]
     const script = (['baseline', 'candidate'] as const).flatMap(role => [
@@ -1886,7 +2068,7 @@ describe('controlled Skill evaluation Runtime', () => {
         stop: {
           stage: 'candidate',
           role: 'candidate',
-          reasonCode: 'root-skill-drift',
+          reasonCode: 'workspace-drift',
         },
       })
       expect(mounted.adapter.requests).toHaveLength(3)
