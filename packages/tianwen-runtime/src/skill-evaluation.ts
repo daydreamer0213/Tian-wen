@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { lstatSync, readFileSync, readdirSync } from 'node:fs'
-import { isAbsolute, join, posix, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path'
 import {
   Service,
   SessionId,
@@ -2477,6 +2477,7 @@ export class TianwenSkillEvaluationService extends Service {
       const task = parsed.tasks[index]!
       let baselineMaterial: ControlledEvaluatorMaterial | undefined
       let candidateMaterial: ControlledEvaluatorMaterial | undefined
+      let evaluatorWorkspaceRoot: string | undefined
       for (const role of ['baseline', 'candidate'] as const) {
         const arm = objective[role]
         if (!persistedIds.has(arm.sessionId)) {
@@ -2493,6 +2494,7 @@ export class TianwenSkillEvaluationService extends Service {
           task.evaluatorMaterialContract,
         )
         if (String(inspection.meta.id) !== arm.sessionId
+          || inspection.meta.cwd === undefined
           || text === undefined
           || sha256({
             schemaVersion: 'tianwen.controlled-evaluator-material.v1',
@@ -2500,17 +2502,26 @@ export class TianwenSkillEvaluationService extends Service {
           }) !== arm.evaluatorMaterialDigest) {
           throw new ControlledSkillEvaluatorPreflightError('material-mismatch')
         }
-        if (inspection.meta.cwd !== undefined) forbidden.add(inspection.meta.cwd)
+        forbidden.add(inspection.meta.cwd)
+        const roleWorkspaceRoot = dirname(inspection.meta.cwd)
+        if (evaluatorWorkspaceRoot === undefined) {
+          evaluatorWorkspaceRoot = roleWorkspaceRoot
+        } else if (evaluatorWorkspaceRoot !== roleWorkspaceRoot) {
+          throw new ControlledSkillEvaluatorPreflightError('material-mismatch')
+        }
         const material = { text, digest: arm.evaluatorMaterialDigest }
         if (role === 'baseline') baselineMaterial = material
         else candidateMaterial = material
       }
-      if (baselineMaterial === undefined || candidateMaterial === undefined) {
+      if (baselineMaterial === undefined
+        || candidateMaterial === undefined
+        || evaluatorWorkspaceRoot === undefined) {
         throw new ControlledSkillEvaluatorPreflightError('material-mismatch')
       }
       materials.set(task.taskId, {
         baseline: baselineMaterial,
         candidate: candidateMaterial,
+        workspaceRoot: evaluatorWorkspaceRoot,
       })
     }
     if (parsed.tasks.some(task => controlledIdentityExposed({
@@ -2591,6 +2602,7 @@ export class TianwenSkillEvaluationService extends Service {
         }
         const handle = await this.ctx.agents.create({
           sessionId: SessionId(planned.evaluatorSessionId),
+          meta: { cwd: material.workspaceRoot },
           agentOptions,
           setup: agentCtx => {
             installModelSelection(agentCtx, { current: selection, assembled: undefined })
@@ -2602,7 +2614,7 @@ export class TianwenSkillEvaluationService extends Service {
         })
         state.agent = handle.agent
         const schemas = handle.agent.ctx.tools.schemas(handle.agent)
-        if (handle.agent.session.header.cwd !== undefined
+        if (handle.agent.session.header.cwd !== material.workspaceRoot
           || sha256(handle.agent.options) !== sha256(agentOptions)
           || schemas.length !== 1
           || schemas[0]?.name !== 'submit_blind_evaluation') {
@@ -3924,6 +3936,7 @@ interface ControlledEvaluatorMaterial {
 interface ControlledEvaluatorPairMaterial {
   readonly baseline: ControlledEvaluatorMaterial
   readonly candidate: ControlledEvaluatorMaterial
+  readonly workspaceRoot: string
 }
 
 interface ControlledEvaluatorEnvelopeArm {

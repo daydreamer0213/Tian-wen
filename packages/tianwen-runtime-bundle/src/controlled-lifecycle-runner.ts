@@ -6,7 +6,7 @@ import {
   readdirSync,
   realpathSync,
 } from 'node:fs'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
@@ -1304,7 +1304,7 @@ export async function runControlledLifecycle(
     for (const task of manifest.tasks.evaluations) {
       const inspection = await ctx.sessionPersistence.inspect(SessionId(task.evaluatorSessionId))
       if (
-        inspection.meta.cwd !== undefined
+        inspection.meta.cwd !== dirname(task.baselineWorkspaceRoot)
         || inspection.events.filter(event => event.type === 'tool/call').length !== 1
       ) throw new ControlledLifecycleRunnerError('identity-mismatch')
     }

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import * as DshCompat from '@tianwen/dsh-compat'
@@ -766,6 +766,10 @@ describe('controlled Skill evaluation Runtime', () => {
       expect(serializedRequests).not.toContain('candidatePassRules')
       expect(serializedRequests).not.toContain(parentSkill.name)
       expect(serializedRequests).not.toContain(mounted.input.candidateId)
+      for (const task of mounted.input.tasks) {
+        expect(serializedRequests).not.toContain(task.baselineWorkspaceRoot)
+        expect(serializedRequests).not.toContain(task.candidateWorkspaceRoot)
+      }
       const observations = mounted.harness.ctx.tianwenEvolution
         .listControlledSkillEvaluatorObservations(arms.evaluationId)
       expect(observations).toHaveLength(5)
@@ -813,7 +817,7 @@ describe('controlled Skill evaluation Runtime', () => {
         const inspection = await mounted.harness.ctx.sessionPersistence.inspect(
           SessionId(task.evaluatorSessionId),
         )
-        expect(inspection.meta.cwd).toBeUndefined()
+        expect(inspection.meta.cwd).toBe(dirname(task.baselineWorkspaceRoot))
       }
     } finally {
       mounted.disposeParent()
@@ -958,6 +962,44 @@ describe('controlled Skill evaluation Runtime', () => {
       expect(mounted.harness.ctx.tianwenEvolution.getControlledSkillEvaluationBlindMap(
         arms.evaluationId,
       )).toBeUndefined()
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects evaluator activity when a persisted arm leaves the pair workspace', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-pair-workspace-drift',
+      [...blindSafeArmScript(), ...successfulEvaluatorScript()],
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+      const inspect = mounted.harness.ctx.sessionPersistence.inspect.bind(
+        mounted.harness.ctx.sessionPersistence,
+      )
+      const candidateSessionId = mounted.input.tasks[0]!.candidateSessionId
+      vi.spyOn(mounted.harness.ctx.sessionPersistence, 'inspect')
+        .mockImplementation(async sessionId => {
+          const inspection = await inspect(sessionId)
+          if (String(sessionId) !== candidateSessionId) return inspection
+          return {
+            ...inspection,
+            meta: {
+              ...inspection.meta,
+              cwd: join(inspection.meta.cwd!, '..', 'other-pair', 'candidate'),
+            },
+          }
+        })
+      const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )).rejects.toMatchObject({ code: 'material-mismatch' })
+      expect(create).not.toHaveBeenCalled()
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()
