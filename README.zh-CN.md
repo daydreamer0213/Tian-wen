@@ -13,7 +13,9 @@
 
 Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成。
 五任务 B/C、盲态 evaluator、隔离 Shadow 与 Promotion/Rollback/Restore 产品机制已经实现，并由 0-external-Provider scripted 全链夹具覆盖。
-配置的 DeepSeek 受控生命周期尚未运行。证据仍固定为
+一个全新的官方已安装 configured-DeepSeek 受控生命周期现已返回 `passed`。Activity-22
+闭合了全部 25 个正式角色，包括 5 个 evaluator、5 个 Shadow 和 3 次 transition，随后恢复
+offline。证据仍固定为
 `naturalUserEvidence=not-claimed` 和 `externalUserEvidence=not-claimed`。
 
 ## 已安装入口准备状态
@@ -28,9 +30,14 @@ Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成
 
 activity-03 在历史上仍已消费。它的 DeepSeek model-use receipt 已持久化，但进程在任何 controlled-lifecycle 调用之前以 exit 13 结束；`controlled-lifecycle invocation=0`，offline 恢复和最终 status 均成功。activity-01、activity-02 和 activity-03 的历史分类不被改写，本次修复不声称真实 Provider 成功。
 
-未来正式工作中，模型激活及其确认 status 属于产品准备，不消费正式 Activity；首次未来 `controlled-lifecycle` 调用才开始并消费该 Activity。聚焦的确定性 owner 回归和真实 Profile 进程回归已通过；一次全新的官方零请求安装证明仍需等待 exact-main CI。
+模型激活及其确认 status 仍属于产品准备，不消费正式 Activity。Activity-22 随后通过唯一一次
+官方 `controlled-lifecycle` 调用完成已安装产品状态机，并恢复 offline。这个当前成功不会改写
+activity-01、activity-02 或 activity-03，也不建立 Provider 账户请求计数或用户效果主张。
 
-[一次性 Profile 生命周期修复交接](docs/operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md)记录历史边界和修复证据。此前的[准备状态交接](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)和[activity-01 交接](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md)仍是历史记录。
+[Activity-22 交接](docs/operations/tianwen-v0.1-controlled-real-activity-22-handoff.md)记录当前正式结果和
+证据边界。[一次性 Profile 生命周期修复交接](docs/operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md)、
+此前的[准备状态交接](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)和
+[activity-01 交接](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md)仍是历史记录。
 
 ## 为什么需要天问
 
@@ -128,8 +135,8 @@ Shadow 通过，以及 B@rev1→C@rev2→B@rev3→C@rev4 指针序列。终态�
 
 - 仓库里已记录的 Candidate 和成对 Evaluation 是合成机制证明；目前还没有由自然产品问题
   触发、并通过真实 paired B/C 的产品 Candidate。
-- 有界受控生命周期已实现，并在 standing authorization 下由 scripted 全链夹具覆盖，
-  但尚未针对已配置的 DeepSeek Provider 运行。
+- 有界受控生命周期已在 standing authorization 下通过官方已安装 configured-DeepSeek 路径完成一次。
+  这次合成 operation 不建立自然用户改善、外部用户验证或 Provider 账户请求计数。
 - 当前预览不提供生产 SLA，也没有完成的用户界面。
 - 当前没有自然用户改善、外部用户验证或多用户泛化证据；一次成功执行也不应该自动产生学习。
 - 未来版本只能影响新 Run，不能热切换正在运行的 Agent。
@@ -152,7 +159,9 @@ Shadow 通过，以及 B@rev1→C@rev2→B@rev3→C@rev4 指针序列。终态�
 - [`docs/operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md`](docs/operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md)
   保存受控生命周期 receipt、隐私边界和证据限制。
 - [`docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)
-  保存已安装入口准备边界和尚未通过的真实 Provider 门。
+  保存历史已安装入口准备边界。
+- [`docs/operations/tianwen-v0.1-controlled-real-activity-22-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-activity-22-handoff.md)
+  保存官方已安装 configured-DeepSeek 生命周期通过事实和证据边界。
 - [`docs/operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md`](docs/operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md)
   保存 DSH/HMR 一次性关闭修复和未来 Activity 边界。
 - [`docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md)

@@ -16,7 +16,9 @@ user validation or proof of general efficacy.
 
 The Stage 7 project-owner natural task and official installer/status proof remain complete.
 The five-task B/C, blind evaluator, isolated Shadow, and Promotion/Rollback/Restore product mechanisms are implemented and covered by a 0-external-Provider scripted full-chain fixture.
-The configured DeepSeek controlled lifecycle has not run. Its evidence remains
+A fresh official installed configured-DeepSeek controlled lifecycle has now returned `passed`.
+Activity-22 closed all 25 formal roles, including five evaluators, five Shadow runs, and three
+transitions, then restored the product to offline. Its evidence remains
 `naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed`.
 
 ## Installed ingress readiness
@@ -31,9 +33,17 @@ This is a DSH/HMR shutdown-lifecycle repair, not receipt or security work. HMR o
 
 Activity-03 remains historically consumed. Its DeepSeek model-use receipt persisted, but the process ended with exit 13 before any controlled-lifecycle invocation; `controlled-lifecycle invocation=0`, and offline recovery and final status succeeded. The historical classifications of Activity-01, Activity-02, and Activity-03 are not rewritten, and this repair does not claim real Provider success.
 
-For future formal work, model activation and its confirming status are product setup and do not consume a formal Activity. The first future `controlled-lifecycle` invocation begins and consumes that Activity. The focused deterministic owner regression and real Profile process regression are green; one fresh official zero-request installed proof still waits for exact-main CI.
+Model activation and its confirming status remain product setup and do not consume a formal Activity.
+Activity-22 then used one official `controlled-lifecycle` invocation to complete the installed product
+state machine and restored offline. This current success does not rewrite Activity-01, Activity-02,
+or Activity-03, and it does not establish Provider-account request counts or user-effect claims.
 
-The [one-shot Profile lifecycle repair handoff](docs/operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md) records the historical boundary and repair evidence. Earlier [readiness](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) and [Activity-01](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md) handoffs remain historical records.
+The [Activity-22 handoff](docs/operations/tianwen-v0.1-controlled-real-activity-22-handoff.md)
+records the current formal result and evidence limits. The
+[one-shot Profile lifecycle repair handoff](docs/operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md)
+and earlier [readiness](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)
+and [Activity-01](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md) handoffs remain
+historical records.
 
 ## Why Tianwen exists
 
@@ -159,9 +169,9 @@ activity, and its dedicated fixture root is empty after cleanup.
 - The repository's recorded Candidate and paired Evaluation are synthetic
   mechanism proofs. No naturally triggered product Candidate has passed a real
   paired B/C evaluation yet.
-- The bounded controlled lifecycle is implemented and covered by a scripted
-  full-chain fixture under standing authorization, but it has not run against
-  the configured DeepSeek Provider.
+- The bounded controlled lifecycle has completed once through the official installed
+  configured-DeepSeek path under standing authorization. This synthetic operation does not establish
+  natural-user improvement, external-user validation, or Provider-account request counts.
 - The preview does not offer a production SLA or a finished user interface.
 - It does not claim natural-user improvement, external-user validation,
   multi-user generalization, or that one successful run should create learning.
@@ -188,7 +198,9 @@ activity, and its dedicated fixture root is empty after cleanup.
 - [`docs/operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md`](docs/operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md)
   records the controlled lifecycle receipt, privacy boundary, and evidence limits.
 - [`docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)
-  records the installed ingress readiness boundary and the remaining real-Provider gate.
+  records the historical installed-ingress readiness boundary.
+- [`docs/operations/tianwen-v0.1-controlled-real-activity-22-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-activity-22-handoff.md)
+  records the passed official installed configured-DeepSeek lifecycle and its evidence limits.
 - [`docs/operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md`](docs/operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md)
   records the DSH/HMR one-shot shutdown repair and the prospective Activity boundary.
 - [`docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md)
