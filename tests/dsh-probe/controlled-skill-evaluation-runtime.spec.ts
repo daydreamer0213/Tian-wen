@@ -865,7 +865,7 @@ describe('controlled Skill evaluation Runtime', () => {
     }
   })
 
-  it('still rejects arm role labels after allowing reviewed common context', async () => {
+  it('does not treat ordinary baseline or candidate words as machine identity', async () => {
     const mounted = await mountControlledRuntime(
       'evaluator-arm-role-identity',
       [...successfulArmScript(), ...successfulEvaluatorScript()],
@@ -876,15 +876,16 @@ describe('controlled Skill evaluation Runtime', () => {
         mounted.input,
       )
       expect(arms.state).toBe('awaiting-evaluator')
-      const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
-
-      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
         evaluatorInput(mounted.input, arms.evaluationId),
-      )).rejects.toMatchObject({ code: 'identity-exposed' })
-      expect(create).not.toHaveBeenCalled()
+      )
+      expect(receipt).toMatchObject({
+        state: 'terminal',
+        result: { mechanismVerdict: 'pass', reasonCode: 'all-gates-passed' },
+      })
       expect(mounted.harness.ctx.tianwenEvolution.getControlledSkillEvaluationBlindMap(
         arms.evaluationId,
-      )).toBeUndefined()
+      )).toBeDefined()
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()
