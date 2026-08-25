@@ -156,6 +156,7 @@ interface DecisionState {
   readonly taskId: string
   readonly expectedChoice: string
   submission?: DecisionSubmission
+  verdict?: 'met' | 'not-met'
   recordAttempts: number
   verifyAttempts: number
 }
@@ -463,7 +464,8 @@ function requireCompletedDecisionStates(states: Map<string, DecisionState>): voi
   if ([...states.values()].some(state =>
     state.recordAttempts !== 1
     || state.verifyAttempts !== 1
-    || state.submission?.taskId !== state.taskId)) {
+    || state.submission?.taskId !== state.taskId
+    || state.verdict === undefined)) {
     throw new ControlledLifecycleRunnerError('identity-mismatch')
   }
 }
@@ -802,13 +804,18 @@ async function runSeed(
       throw new ControlledLifecycleRunnerError('seed-failed')
     }
     const finalEvidence = evidence.at(-1)
-    const verdict = finalEvidence?.outcome.status === 'complete'
+    const verdict = state.verdict === 'met'
+      && finalEvidence?.outcome.status === 'complete'
       && finalEvidence.outcome.isError === false
       && finalEvidence.outcome.errorCode === undefined
       ? 'met'
-      : finalEvidence?.outcome.status === 'complete'
+      : state.verdict === 'not-met'
+          && finalEvidence?.outcome.status === 'complete'
           && finalEvidence.outcome.isError === true
-          && finalEvidence.outcome.errorCode === 'ARCHITECTURE_DECISION_NOT_MET'
+          && (
+            finalEvidence.outcome.errorCode === undefined
+            || finalEvidence.outcome.errorCode === ACCEPTANCE_CONTRACT.notMetErrorCode
+          )
         ? 'not-met'
         : undefined
     if (
@@ -841,6 +848,7 @@ async function runSeed(
       outcome = ctx.tianwenLearningIntake.consumeOutcome(
         handle.agent.session,
         bound.runId,
+        { verdict, acceptanceEvidenceId: finalEvidence.evidenceId },
       )
       use = ctx.tianwenLearningIntake.recordSkillUse(
         handle.agent.session,
@@ -1009,6 +1017,7 @@ export async function runControlledLifecycle(
   const progress = emptyCompletedRoles()
   const stateByAgent = new WeakMap<object, DecisionState>()
   const stateBySessionId = new Map<string, DecisionState>()
+  const resolveVerdict = (sessionId: string) => stateBySessionId.get(sessionId)?.verdict
   const disposeDecision = ctx.tools.register(defineTool({
     name: DECISION_TOOL,
     description: 'Record the first architecture decision for this controlled task.',
@@ -1070,8 +1079,10 @@ export async function runControlledLifecycle(
         || state.submission === undefined
       ) throw new ArchitectureDecisionUnavailable('ARCHITECTURE_DECISION_INCONCLUSIVE')
       if (state.submission.choice !== state.expectedChoice) {
+        state.verdict = 'not-met'
         throw new ArchitectureDecisionNotMet()
       }
+      state.verdict = 'met'
       return 'verified'
     },
   }))
@@ -1194,7 +1205,7 @@ export async function runControlledLifecycle(
         candidateId: candidate.candidateId,
         protocolId: protocol.protocolId,
         tasks,
-      })
+      }, resolveVerdict)
       refreshCompletedRunRoles(ctx, manifest, progress)
       if (arms.state === 'awaiting-evaluator') {
         requireCompletedDecisionStates(stateBySessionId)
@@ -1268,7 +1279,7 @@ export async function runControlledLifecycle(
       shadow = await ctx.tianwenSkillEvaluation.runControlledShadow({
         evaluationId: arms.evaluationId,
         tasks: shadowTasks,
-      })
+      }, resolveVerdict)
       refreshCompletedRunRoles(ctx, manifest, progress)
       if (shadow.state === 'terminal' && shadow.result.mechanismVerdict === 'pass') {
         requireCompletedDecisionStates(stateBySessionId)
@@ -1334,7 +1345,7 @@ export async function runControlledLifecycle(
             ...postCheckTask,
             authorization: CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1,
           },
-        })
+        }, resolveVerdict)
         refreshCompletedRunRoles(ctx, manifest, progress)
         if (transition.state === 'terminal') requireCompletedDecisionStates(stateBySessionId)
       } catch {
