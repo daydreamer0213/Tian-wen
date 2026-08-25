@@ -24,7 +24,11 @@ import type {
 import { CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1 } from '../../tianwen-evolution/dist/controlled-skill-activation.js'
 import { CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST } from '../../tianwen-evolution/dist/controlled-skill-evaluation.js'
 import { sha256 } from '../../tianwen-evolution/dist/learning-intake.js'
-import type { ControlledSkillEvaluationArmsStopReasonCode } from '../../tianwen-runtime/dist/skill-evaluation.js'
+import type {
+  ControlledSkillEvaluationArmsStopReasonCode,
+  ControlledSkillEvaluatorPreflightCode,
+  ControlledSkillEvaluatorsStopReasonCode,
+} from '../../tianwen-runtime/dist/skill-evaluation.js'
 
 import { readControlledLifecycleManifest } from './controlled-lifecycle-contract.js'
 import type {
@@ -120,6 +124,7 @@ export type ControlledLifecycleRunnerFailureCode =
   | 'skill-identity-drift'
   | 'agent-context-mismatch'
   | Exclude<ControlledSkillEvaluationArmsStopReasonCode, 'persistence-unavailable'>
+  | Exclude<ControlledSkillEvaluatorsStopReasonCode, 'persistence-unavailable'>
   | Exclude<ControlledSkillEvaluationResultReasonCode, 'all-gates-passed'>
   | 'evaluation-failed'
   | 'evaluator-failed'
@@ -933,6 +938,34 @@ function evaluationResultStoppedReason(
   return reasonCode === 'all-gates-passed' ? 'evaluation-failed' : reasonCode
 }
 
+function evaluatorStoppedReason(
+  reasonCode: ControlledSkillEvaluatorsStopReasonCode,
+): ControlledLifecycleRunnerFailureCode {
+  return reasonCode === 'persistence-unavailable' ? 'persistence-failed' : reasonCode
+}
+
+function evaluatorPreflightStoppedReason(
+  error: unknown,
+): ControlledLifecycleRunnerFailureCode | undefined {
+  if (!(error instanceof Error)
+    || error.name !== 'ControlledSkillEvaluatorPreflightError'
+    || !('code' in error)
+    || typeof error.code !== 'string') return undefined
+  switch (error.code as ControlledSkillEvaluatorPreflightCode) {
+    case 'configured-route-mismatch': return 'selection-mismatch'
+    case 'retry-policy-mismatch': return 'retry-policy-mismatch'
+    case 'persistence-unavailable': return 'persistence-failed'
+    case 'material-mismatch': return 'evaluator-material-invalid'
+    case 'identity-exposed': return 'identity-exposed'
+    case 'session-not-empty': return 'session-not-fresh'
+    case 'task-package-mismatch':
+    case 'evaluation-not-ready':
+      return 'evaluation-failed'
+    default:
+      return undefined
+  }
+}
+
 function stoppedReceipt(
   manifestDigest: `sha256:${string}`,
   error: ControlledLifecycleRunnerError,
@@ -1243,13 +1276,17 @@ export async function runControlledLifecycle(
         })),
       })
       progress.evaluators = evaluators.completedTaskIds.length
-    } catch {
+    } catch (error) {
       progress.evaluators = ctx.tianwenEvolution
         .listControlledSkillEvaluatorObservations(arms.evaluationId).length
-      throw new ControlledLifecycleRunnerError('evaluator-failed')
+      throw new ControlledLifecycleRunnerError(
+        evaluatorPreflightStoppedReason(error) ?? 'evaluator-failed',
+      )
     }
-    if (evaluators.state !== 'terminal') {
-      throw new ControlledLifecycleRunnerError('evaluator-failed')
+    if (evaluators.state === 'stopped') {
+      throw new ControlledLifecycleRunnerError(
+        evaluatorStoppedReason(evaluators.stop.reasonCode),
+      )
     }
     if (evaluators.completedTaskIds.length !== manifest.tasks.evaluations.length) {
       lastClosedStage = 'evaluators'

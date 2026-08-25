@@ -563,10 +563,16 @@ describe('tianwen controlled-lifecycle', () => {
     expect(parseControlledLifecycleChildReceipt(
       `${JSON.stringify(stopped)}\n`, '', expected,
     )).toEqual(stopped)
-    const rejected = stoppedReceipt(DIGEST_B, 'original-or-adjacent-not-improved')
-    expect(parseControlledLifecycleChildReceipt(
-      `${JSON.stringify(rejected)}\n`, '', expected,
-    )).toEqual(rejected)
+    for (const reasonCode of [
+      'original-or-adjacent-not-improved',
+      'submission-invalid',
+      'evidence-mismatch',
+    ]) {
+      const rejected = stoppedReceipt(DIGEST_B, reasonCode)
+      expect(parseControlledLifecycleChildReceipt(
+        `${JSON.stringify(rejected)}\n`, '', expected,
+      )).toEqual(rejected)
+    }
     for (const actual of [0, Number.MAX_SAFE_INTEGER]) {
       const counted = {
         ...success,
