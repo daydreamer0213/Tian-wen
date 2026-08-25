@@ -1163,10 +1163,16 @@ export function observeSkillEvaluationRequest(
 
 export class TianwenSkillEvaluationService extends Service {
   static inject = [
+    'agentDefaultModel',
+    'agents',
+    'llm',
+    'sessionPersistence',
+    'sessions',
+    'skills',
     'tianwenEvidence',
     'tianwenEvolution',
     'tianwenLearningIntake',
-    'skills',
+    'tools',
   ] as const
 
   constructor(ctx: Context) {
