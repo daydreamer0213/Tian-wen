@@ -1,6 +1,11 @@
 # Tianwen Controlled Verifier Verdict Ownership Design
 
-**Status:** approved design
+**Status:** superseded for the controlled runner by
+[`2026-08-26-tianwen-controlled-verifier-terminal-design.md`](2026-08-26-tianwen-controlled-verifier-terminal-design.md)
+
+This document remains the audit record for the optional-error-code repair. Activity-18 later proved
+that preserving `not-met` as a tool failure also preserved an unnecessary post-verifier model step;
+the newer design corrects that deeper lifecycle mistake.
 
 **Date:** 2026-08-25
 

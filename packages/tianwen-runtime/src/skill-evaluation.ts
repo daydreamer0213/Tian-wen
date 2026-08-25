@@ -185,7 +185,7 @@ export interface ControlledWorkspaceSnapshot {
 
 export interface ControlledEvaluatorMaterialContract {
   readonly schemaVersion: 'tianwen.controlled-evaluator-material-contract.v1'
-  readonly source: 'final-completed-assistant-text'
+  readonly source: 'final-completed-assistant-text' | 'recorded-decision-submission'
   readonly maxUtf8Bytes: number
 }
 
@@ -481,14 +481,15 @@ function parseControlledMaterialContract(value: unknown): ControlledEvaluatorMat
     source === undefined
     || !exactRuntimeKeys(source, ['schemaVersion', 'source', 'maxUtf8Bytes'])
     || source.schemaVersion !== 'tianwen.controlled-evaluator-material-contract.v1'
-    || source.source !== 'final-completed-assistant-text'
+    || (source.source !== 'final-completed-assistant-text'
+      && source.source !== 'recorded-decision-submission')
     || !Number.isSafeInteger(source.maxUtf8Bytes)
     || Number(source.maxUtf8Bytes) < 1
     || Number(source.maxUtf8Bytes) > 65_536
   ) throw new ControlledSkillEvaluationPreflightError('task-package-mismatch')
   return {
     schemaVersion: 'tianwen.controlled-evaluator-material-contract.v1',
-    source: 'final-completed-assistant-text',
+    source: source.source,
     maxUtf8Bytes: Number(source.maxUtf8Bytes),
   }
 }
@@ -1082,16 +1083,53 @@ function controlledEvaluatorMaterialText(
   if (turnEnd?.type !== 'turn/end' || turnEnd.data.reason.kind !== 'completed') {
     return undefined
   }
-  const message = events.findLast(event =>
-    event.type === 'assistant/message'
-    && event.surfaceOp === 'append'
-    && event.data.turn === turnEnd.data.turn
-    && event.seq < turnEnd.seq
-    && event.seq < turnEnd.seq)
-  if (message?.type !== 'assistant/message') return undefined
-  const text = message.data.message.content
-    .flatMap(block => block.type === 'text' ? [block.text] : [])
-    .join('\n')
+  let text: string | undefined
+  if (contract.source === 'final-completed-assistant-text') {
+    const message = events.findLast(event =>
+      event.type === 'assistant/message'
+      && event.surfaceOp === 'append'
+      && event.data.turn === turnEnd.data.turn
+      && event.seq < turnEnd.seq)
+    if (message?.type !== 'assistant/message') return undefined
+    text = message.data.message.content
+      .flatMap(block => block.type === 'text' ? [block.text] : [])
+      .join('\n')
+  } else {
+    const calls = events.filter((event): event is SessionEvent<'tool/call'> =>
+      event.type === 'tool/call'
+      && event.data.name === 'record_architecture_decision'
+      && event.seq < turnEnd.seq)
+    if (calls.length !== 1) return undefined
+    let args: unknown
+    try {
+      args = JSON.parse(calls[0]!.data.arguments) as unknown
+    } catch {
+      return undefined
+    }
+    const submission = record(args)
+    if (
+      submission === undefined
+      || !exactRuntimeKeys(submission, ['taskId', 'choice', 'explanation'])
+      || typeof submission.taskId !== 'string'
+      || typeof submission.choice !== 'string'
+      || typeof submission.explanation !== 'string'
+      || submission.taskId.length === 0
+      || submission.choice.length === 0
+      || submission.explanation.length === 0
+    ) return undefined
+    const result = events.find(event =>
+      event.type === 'tool/result'
+      && event.seq < turnEnd.seq
+      && String(event.data.message.content[0]?.toolCallId)
+        === String(calls[0]!.data.callId))
+    if (result?.type !== 'tool/result'
+      || result.data.message.content[0]?.isError === true) return undefined
+    text = JSON.stringify({
+      taskId: submission.taskId,
+      choice: submission.choice,
+      explanation: submission.explanation,
+    })
+  }
   if (text.length === 0 || Buffer.byteLength(text, 'utf8') > contract.maxUtf8Bytes) {
     return undefined
   }
@@ -3360,6 +3398,26 @@ export class TianwenSkillEvaluationService extends Service {
       return { reasonCode: 'persistence-unavailable' }
     }
 
+    const normalizedFirstRequestDigest = controlledFirstRequestDigest(
+      requests,
+      String(session.id),
+      config,
+      prepared.skill,
+      workspaceRoot,
+    )
+    if (normalizedFirstRequestDigest === undefined) {
+      return { reasonCode: 'request-contract-mismatch' }
+    }
+    if (prepared.guard.reasonCode !== undefined) {
+      return { reasonCode: prepared.guard.reasonCode }
+    }
+    const terminal = session.events.findLast(event =>
+      event.type === 'turn/start' || event.type === 'turn/end')
+    if (idleFailed || terminal?.type !== 'turn/end'
+      || terminal.data.reason.kind !== 'completed') {
+      return { reasonCode: 'provider-failed' }
+    }
+
     let outcome: OutcomeVerdict
     let acceptanceEvidenceId: Sha256Digest | undefined
     try {
@@ -3400,25 +3458,6 @@ export class TianwenSkillEvaluationService extends Service {
     } catch {
       // A formal write may be commit-unknown; the governed fact is checked below.
       useWriteFailed = true
-    }
-    const normalizedFirstRequestDigest = controlledFirstRequestDigest(
-      requests,
-      String(session.id),
-      config,
-      prepared.skill,
-      workspaceRoot,
-    )
-    if (normalizedFirstRequestDigest === undefined) {
-      return { reasonCode: 'request-contract-mismatch' }
-    }
-    if (prepared.guard.reasonCode !== undefined) {
-      return { reasonCode: prepared.guard.reasonCode }
-    }
-    const terminal = session.events.findLast(event =>
-      event.type === 'turn/start' || event.type === 'turn/end')
-    if (idleFailed || terminal?.type !== 'turn/end'
-      || terminal.data.reason.kind !== 'completed') {
-      return { reasonCode: 'provider-failed' }
     }
     const manifest = this.ctx.tianwenEvolution.getRunSkillManifest(runId)
     const use = this.ctx.tianwenEvolution.getRunSkillUse(runId)
@@ -3940,7 +3979,7 @@ interface ControlledEvaluatorPairMaterial {
 }
 
 interface ControlledEvaluatorEnvelopeArm {
-  readonly finalText: string
+  readonly materialText: string
   readonly outcome: OutcomeVerdict
   readonly materialDigest: Sha256Digest
   readonly evidenceSetDigest: Sha256Digest
@@ -4011,7 +4050,7 @@ function controlledEvaluatorEnvelope(
   material: ControlledEvaluatorPairMaterial,
 ): ControlledEvaluatorEnvelope {
   const arm = (role: 'baseline' | 'candidate'): ControlledEvaluatorEnvelopeArm => ({
-    finalText: material[role].text,
+    materialText: material[role].text,
     outcome: objective[role].outcome,
     materialDigest: material[role].digest,
     evidenceSetDigest: sha256(objective[role].evidenceIds),

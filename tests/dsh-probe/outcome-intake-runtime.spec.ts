@@ -367,6 +367,50 @@ describe('Tianwen runtime Outcome intake', () => {
     }
   })
 
+  it('accepts an attested not-met verdict from a successful terminal verifier result', async () => {
+    const harness = await mount([
+      toolCallResponse('call-terminal-not-met', 'verify_summary', { text: 'not met' }),
+      textResponse('terminal verifier completed'),
+    ])
+    const handle = await harness.ctx.agents.create({
+      sessionId: SessionId(`outcome-terminal-not-met-${randomUUID()}`),
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      handle.agent.followup(createUserMessage({
+        content: [{ type: 'text', text: 'verify terminal not-met outcome' }],
+        source: { kind: 'user' },
+      }))
+      await waitForIdle(harness.ctx, handle.agent)
+      const events = structuredClone(handle.agent.session.events)
+      const result = events.find(event => event.type === 'tool/result')!
+      if (result.type !== 'tool/result') throw new Error('expected verifier result')
+      result.data.message.content[0].isError = false
+      delete (result.data as { error?: unknown }).error
+      const session = fakeSession(`outcome-terminal-not-met-copy-${randomUUID()}`)
+      const binding = harness.ctx.tianwenLearningIntake.bindRun(
+        session,
+        bindingInput('terminal-not-met'),
+      )
+      setEvents(session, events)
+      const evidence = harness.ctx.tianwenEvidence.project(session)
+        .find(record => record.action.toolName === 'verify_summary')!
+
+      expect(harness.ctx.tianwenLearningIntake.consumeOutcome(
+        session,
+        binding.runId,
+        { verdict: 'not-met', acceptanceEvidenceId: evidence.evidenceId },
+      )).toMatchObject({
+        decision: 'signal-recorded',
+        acceptanceEvidenceId: evidence.evidenceId,
+        sessionUnchanged: true,
+      })
+    } finally {
+      await handle.dispose()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
   it('rejects a newer unmatched Turn boundary before writing', async () => {
     const harness = await mount([
       toolCallResponse('call-open', 'verify_summary', { text: 'open' }),

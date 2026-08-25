@@ -799,13 +799,13 @@ describe('controlled Skill evaluation Runtime', () => {
           input: task.input,
           rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
           x: {
-            finalText: `completed ${taskTypes[index]} option ${assignment.xRole === 'baseline' ? 1 : 2}`,
+            materialText: `completed ${taskTypes[index]} option ${assignment.xRole === 'baseline' ? 1 : 2}`,
             outcome: objective[assignment.xRole].outcome,
             materialDigest: objective[assignment.xRole].evaluatorMaterialDigest,
             evidenceSetDigest: sha256(objective[assignment.xRole].evidenceIds),
           },
           y: {
-            finalText: `completed ${taskTypes[index]} option ${assignment.yRole === 'baseline' ? 1 : 2}`,
+            materialText: `completed ${taskTypes[index]} option ${assignment.yRole === 'baseline' ? 1 : 2}`,
             outcome: objective[assignment.yRole].outcome,
             materialDigest: objective[assignment.yRole].evaluatorMaterialDigest,
             evidenceSetDigest: sha256(objective[assignment.yRole].evidenceIds),
@@ -852,12 +852,12 @@ describe('controlled Skill evaluation Runtime', () => {
         const block = message.content.find(item => item.type === 'text')!
         const envelope = JSON.parse(block.type === 'text' ? block.text : '') as {
           input: string
-          x: { finalText: string }
-          y: { finalText: string }
+          x: { materialText: string }
+          y: { materialText: string }
         }
         expect(envelope.input).toContain(parentSkill.name)
-        expect(envelope.x.finalText).not.toMatch(/\b(?:baseline|candidate)\b/iu)
-        expect(envelope.y.finalText).not.toMatch(/\b(?:baseline|candidate)\b/iu)
+        expect(envelope.x.materialText).not.toMatch(/\b(?:baseline|candidate)\b/iu)
+        expect(envelope.y.materialText).not.toMatch(/\b(?:baseline|candidate)\b/iu)
       }
     } finally {
       mounted.disposeParent()
@@ -2586,6 +2586,10 @@ describe('controlled Skill evaluation Runtime', () => {
       [textResponse('too late')],
       { maxElapsedMs: 20, firstRequestDelayMs: 80 },
     )
+    const outcomeIntake = vi.spyOn(
+      mounted.harness.ctx.tianwenLearningIntake,
+      'consumeOutcome',
+    )
     try {
       const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
         mounted.input,
@@ -2602,6 +2606,7 @@ describe('controlled Skill evaluation Runtime', () => {
       })
       expect(mounted.adapter.requests).toHaveLength(1)
       expect(mounted.verifierBodies).toEqual([])
+      expect(outcomeIntake).not.toHaveBeenCalled()
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()

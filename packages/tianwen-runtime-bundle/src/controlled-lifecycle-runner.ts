@@ -96,7 +96,7 @@ export interface ControlledLifecycleEvaluationTaskInput {
     readonly toolName: typeof ACCEPTANCE_TOOL
     readonly arguments: { readonly taskId: `eval-task:${string}` }
   }
-  readonly stopCondition: { readonly terminal: 'completed-final-assistant-text' }
+  readonly stopCondition: { readonly terminal: 'completed-verifier-result' }
   readonly evaluatorMaterialContract:
     ControlledLifecycleManifest['execution']['evaluatorMaterialContract']
   readonly baselineSessionId: string
@@ -188,13 +188,6 @@ interface SeedExecutionFacts {
   readonly callConfig: Awaited<ReturnType<Context['llm']['resolveCallConfig']>>
   readonly retryPolicy: ReturnType<Context['llm']['providerRetryPolicy']>
   readonly toolSchemas: ReturnType<Context['tools']['schemas']>
-}
-
-class ArchitectureDecisionNotMet extends HarnessError {
-  constructor() {
-    super('architecture decision did not meet the frozen requirement',
-      ACCEPTANCE_CONTRACT.notMetErrorCode)
-  }
 }
 
 class ArchitectureDecisionUnavailable extends HarnessError {
@@ -413,7 +406,7 @@ function evaluationTasks(
         toolName: ACCEPTANCE_TOOL,
         arguments: { taskId: task.taskId as `eval-task:${string}` },
       },
-      stopCondition: { terminal: 'completed-final-assistant-text' },
+      stopCondition: { terminal: 'completed-verifier-result' },
       evaluatorMaterialContract: manifest.execution.evaluatorMaterialContract,
       baselineSessionId: task.baselineSessionId,
       candidateSessionId: task.candidateSessionId,
@@ -443,7 +436,7 @@ function singleArmTask(
       toolName: ACCEPTANCE_TOOL,
       arguments: acceptanceSubject,
     },
-    stopCondition: { terminal: 'completed-final-assistant-text' as const },
+    stopCondition: { terminal: 'completed-verifier-result' as const },
     acceptanceContract: ACCEPTANCE_CONTRACT,
     acceptanceSubject,
     allowedTools: manifest.execution.allowedTools,
@@ -746,7 +739,7 @@ async function runSeed(
             `Load Skill \`${manifest.skills.parent.name}\` exactly once.`,
             `Call \`${DECISION_TOOL}\` exactly once with this taskId, your choice, and a concise explanation.`,
             `Then call \`${ACCEPTANCE_TOOL}\` exactly once with this taskId.`,
-            'After verifier feedback, finish naturally without calling either decision tool again.',
+            'The verifier ends this Turn; do not attempt another model step.',
             '',
             task.goal,
             '',
@@ -825,10 +818,14 @@ async function runSeed(
       ? 'met'
       : state.verdict === 'not-met'
           && finalEvidence?.outcome.status === 'complete'
-          && finalEvidence.outcome.isError === true
           && (
-            finalEvidence.outcome.errorCode === undefined
-            || finalEvidence.outcome.errorCode === ACCEPTANCE_CONTRACT.notMetErrorCode
+            (finalEvidence.outcome.isError === false
+              && finalEvidence.outcome.errorCode === undefined)
+            || (finalEvidence.outcome.isError === true
+              && (
+                finalEvidence.outcome.errorCode === undefined
+                || finalEvidence.outcome.errorCode === ACCEPTANCE_CONTRACT.notMetErrorCode
+              ))
           )
         ? 'not-met'
         : undefined
@@ -1091,7 +1088,7 @@ export async function runControlledLifecycle(
     description: 'Verify the first recorded architecture decision for this controlled task.',
     parameters: { taskId: { type: 'string', required: true } },
     output: {
-      schema: { type: 'string' },
+      schema: { type: 'string', enum: ['verified', 'not-met'] },
       render: (_args, value) => [{ type: 'text', text: value }],
     },
     async execute(args, exec) {
@@ -1112,9 +1109,11 @@ export async function runControlledLifecycle(
       ) throw new ArchitectureDecisionUnavailable('ARCHITECTURE_DECISION_INCONCLUSIVE')
       if (state.submission.choice !== state.expectedChoice) {
         state.verdict = 'not-met'
-        throw new ArchitectureDecisionNotMet()
+        exec.concludeTurn()
+        return 'not-met'
       }
       state.verdict = 'met'
+      exec.concludeTurn()
       return 'verified'
     },
   }))

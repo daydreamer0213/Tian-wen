@@ -40,7 +40,7 @@ At the pre-integration readiness snapshot anchored by R0.2 exact `1b323c498a6fa1
 
 Two separate scripted fixtures carry different, non-interchangeable counts:
 
-- The current controlled-real-operation runner spec: 25 formal Sessions, 85 local scripted model requests, 65 tool bodies, 20 acceptance Evidence, evaluation pass 80/80, and 0 external Provider requests.
+- The current controlled-real-operation runner spec: 25 formal Sessions, 65 local scripted model requests, 65 tool bodies, 20 acceptance Evidence, evaluation pass 80/80, and 0 external Provider requests. The verifier is now the terminal protocol action, so ordinary roles no longer make a fourth prose-only model request.
 - The older controlled-skill-lifecycle demo: 25 formal Sessions, 65 local scripted requests, 45 tool bodies, evaluation pass 60/60, and 0 external Provider requests. [`tianwen-v0.1-controlled-skill-lifecycle-handoff.md`](tianwen-v0.1-controlled-skill-lifecycle-handoff.md) remains authoritative for that demo.
 
 Both fixtures prove scripted mechanics only. Neither set of counts is installed-operation or real-Provider evidence. The installed controlled-lifecycle one-shot runner does not import or register `ScriptedAdapter`; the scripted adapter used by this fixture is supplied only by tests. Older development-only mechanism paths retain their service-owned or script-local adapters; they are outside this installed runner.
