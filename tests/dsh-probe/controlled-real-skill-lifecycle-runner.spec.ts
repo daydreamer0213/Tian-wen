@@ -716,6 +716,42 @@ describe('controlled real Skill lifecycle runner', () => {
     }
   })
 
+  it('keeps a valid not-met seed when installed DSH omits the optional error code', async () => {
+    const mounted = await mountRunner('installed-not-met-without-error-code', fullLifecycleScript())
+    const project = mounted.harness.ctx.tianwenEvidence.project
+      .bind(mounted.harness.ctx.tianwenEvidence)
+    vi.spyOn(mounted.harness.ctx.tianwenEvidence, 'project')
+      .mockImplementation(session => project(session).map(item => {
+        if (
+          item.action.toolName !== 'verify_architecture_decision'
+          || item.outcome.status !== 'complete'
+          || item.outcome.isError !== true
+          || item.outcome.errorCode !== 'ARCHITECTURE_DECISION_NOT_MET'
+        ) return item
+        const { errorCode: _errorCode, ...outcome } = item.outcome
+        return { ...item, outcome }
+      }))
+    const runner = await import(
+      '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
+    ) as unknown as { runControlledLifecycle(
+      ctx: typeof mounted.harness.ctx,
+      config: { manifestPath: string, manifestDigest: string },
+    ): Promise<{ status: string, pointer: { revision: number } }> }
+    try {
+      await expect(runner.runControlledLifecycle(mounted.harness.ctx, {
+        manifestPath: mounted.manifestPath,
+        manifestDigest: mounted.prepared.manifestDigest,
+      })).resolves.toMatchObject({ status: 'passed', pointer: { revision: 4 } })
+      expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(25)
+      expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets()).toHaveLength(1)
+      const seedUses = mounted.harness.ctx.tianwenEvolution.listRunSkillUses()
+        .filter(use => mounted.manifest.tasks.seeds.some(task => task.sessionId === use.sessionId))
+      expect(seedUses).toHaveLength(2)
+    } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
   it('stops after the first rejected B/C pair without starting an evaluator', async () => {
     const mounted = await mountRunner('evaluation-terminal-stop', [
       ...seedScript(),

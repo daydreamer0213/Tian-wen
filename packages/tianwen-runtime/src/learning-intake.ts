@@ -63,6 +63,11 @@ export interface RuntimeOutcomeIntakeReceipt extends OutcomeIntakeReceipt {
   readonly sessionUnchanged: true
 }
 
+export interface RuntimeOutcomeVerdictAttestation {
+  readonly verdict: 'met' | 'not-met'
+  readonly acceptanceEvidenceId: Sha256Digest
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     tianwenLearningIntake: TianwenLearningIntakeService
@@ -347,6 +352,7 @@ export class TianwenLearningIntakeService extends Service {
   consumeOutcome(
     session: Session,
     runId: TianwenRunId,
+    attestation?: RuntimeOutcomeVerdictAttestation,
   ): RuntimeOutcomeIntakeReceipt {
     const binding = this.ctx.tianwenEvolution.getRunBinding(runId)
     if (binding === undefined) {
@@ -366,7 +372,7 @@ export class TianwenLearningIntakeService extends Service {
         record.action.toolName === binding.acceptanceContract.toolName)
       .sort((left, right) => left.source.callSeq - right.source.callSeq)
     const finalEvidence = matches.at(-1)
-    const verdict = finalBoundary.data.reason.kind !== 'completed'
+    const evidenceVerdict = finalBoundary.data.reason.kind !== 'completed'
       || finalEvidence === undefined
       || finalEvidence.outcome.status === 'missing-result'
       ? 'inconclusive'
@@ -378,6 +384,24 @@ export class TianwenLearningIntakeService extends Service {
             === binding.acceptanceContract.notMetErrorCode
           ? 'not-met'
           : 'inconclusive'
+    let verdict: 'met' | 'not-met' | 'inconclusive' = evidenceVerdict
+    if (attestation !== undefined) {
+      const agrees = finalBoundary.data.reason.kind === 'completed'
+        && finalEvidence !== undefined
+        && finalEvidence.evidenceId === attestation.acceptanceEvidenceId
+        && finalEvidence.outcome.status === 'complete'
+        && (attestation.verdict === 'met'
+          ? finalEvidence.outcome.isError === false
+            && finalEvidence.outcome.errorCode === undefined
+          : finalEvidence.outcome.isError === true
+            && (
+              finalEvidence.outcome.errorCode === undefined
+              || finalEvidence.outcome.errorCode
+                === binding.acceptanceContract.notMetErrorCode
+            ))
+      if (!agrees) throw new Error('Outcome verdict attestation does not match Evidence')
+      verdict = attestation.verdict
+    }
 
     const receipt = this.ctx.tianwenEvolution.recordOutcomeIntake({
       runId,

@@ -310,6 +310,63 @@ describe('Tianwen runtime Outcome intake', () => {
     }
   })
 
+  it('accepts an exact verifier attestation when the durable error code is absent', async () => {
+    const harness = await mount([
+      toolCallResponse('call-attested', 'verify_summary', { text: 'attested' }),
+      textResponse('attested result completed'),
+    ])
+    const handle = await harness.ctx.agents.create({
+      sessionId: SessionId(`outcome-attested-${randomUUID()}`),
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      handle.agent.followup(createUserMessage({
+        content: [{ type: 'text', text: 'verify attested outcome' }],
+        source: { kind: 'user' },
+      }))
+      await waitForIdle(harness.ctx, handle.agent)
+      const events = structuredClone(handle.agent.session.events)
+      const result = events.find(event => event.type === 'tool/result')!
+      if (result.type !== 'tool/result') throw new Error('expected verifier result')
+      delete (result.data as { error?: unknown }).error
+      const session = fakeSession(`outcome-attested-copy-${randomUUID()}`)
+      const binding = harness.ctx.tianwenLearningIntake.bindRun(
+        session,
+        bindingInput('attested'),
+      )
+      setEvents(session, events)
+      const evidence = harness.ctx.tianwenEvidence.project(session)
+        .find(record => record.action.toolName === 'verify_summary')!
+      const write = vi.spyOn(harness.ctx.tianwenEvolution, 'recordOutcomeIntake')
+      expect(() => harness.ctx.tianwenLearningIntake.consumeOutcome(
+        session,
+        binding.runId,
+        {
+          verdict: 'not-met',
+          acceptanceEvidenceId: `sha256:${'0'.repeat(64)}`,
+        },
+      )).toThrow(/attestation does not match Evidence/i)
+      expect(() => harness.ctx.tianwenLearningIntake.consumeOutcome(
+        session,
+        binding.runId,
+        { verdict: 'met', acceptanceEvidenceId: evidence.evidenceId },
+      )).toThrow(/attestation does not match Evidence/i)
+      expect(write).not.toHaveBeenCalled()
+      expect(harness.ctx.tianwenLearningIntake.consumeOutcome(
+        session,
+        binding.runId,
+        { verdict: 'not-met', acceptanceEvidenceId: evidence.evidenceId },
+      )).toMatchObject({
+        decision: 'signal-recorded',
+        acceptanceEvidenceId: evidence.evidenceId,
+        sessionUnchanged: true,
+      })
+    } finally {
+      await handle.dispose()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
   it('rejects a newer unmatched Turn boundary before writing', async () => {
     const harness = await mount([
       toolCallResponse('call-open', 'verify_summary', { text: 'open' }),

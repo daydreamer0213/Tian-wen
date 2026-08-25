@@ -232,6 +232,10 @@ export interface RunControlledSkillShadowInput {
   readonly tasks: readonly RunControlledSkillShadowTaskInput[]
 }
 
+type ControlledOutcomeVerdictResolver = (
+  sessionId: string,
+) => 'met' | 'not-met' | undefined
+
 export type ControlledSkillShadowStopReasonCode =
   | 'existing-partial-activity'
   | 'persistence-unavailable'
@@ -1189,6 +1193,7 @@ export class TianwenSkillEvaluationService extends Service {
 
   async runControlledSkillTransition(
     input: RunControlledSkillTransitionInput,
+    resolveVerdict?: ControlledOutcomeVerdictResolver,
   ): Promise<ControlledSkillActivationRuntimeReceipt> {
     const parsed = parseRunControlledSkillTransitionInput(input)
     const evolution = this.ctx.tianwenEvolution
@@ -1593,7 +1598,7 @@ export class TianwenSkillEvaluationService extends Service {
         skill: targetSkill,
         handle,
         guard,
-      }, transition.postCheck.runId, resolved)
+      }, transition.postCheck.runId, resolved, resolveVerdict)
       if (activity.activity === undefined) {
         return this.recoverControlledSkillTransition(transition, {
           stage: 'activation',
@@ -1757,6 +1762,7 @@ export class TianwenSkillEvaluationService extends Service {
 
   async runControlledShadow(
     input: RunControlledSkillShadowInput,
+    resolveVerdict?: ControlledOutcomeVerdictResolver,
   ): Promise<ControlledSkillShadowRuntimeReceipt> {
     const parsed = parseControlledShadowInput(input)
     const evaluation = this.ctx.tianwenEvolution.getControlledSkillEvaluation(
@@ -2093,6 +2099,7 @@ export class TianwenSkillEvaluationService extends Service {
           item,
           item.planned.runId,
           resolved,
+          resolveVerdict,
         )
         if (activity.activity === undefined) {
           return stoppedControlledShadowReceipt(plan, completedTaskIds, {
@@ -2678,6 +2685,7 @@ export class TianwenSkillEvaluationService extends Service {
 
   async runControlledArms(
     input: RunControlledSkillEvaluationArmsInput,
+    resolveVerdict?: ControlledOutcomeVerdictResolver,
   ): Promise<ControlledSkillEvaluationArmsReceipt> {
     const parsed = parseControlledArmsInput(input)
     const candidate = this.ctx.tianwenEvolution.getSkillCandidate(parsed.candidateId)
@@ -3037,6 +3045,7 @@ export class TianwenSkillEvaluationService extends Service {
           baseline,
           plan,
           resolved,
+          resolveVerdict,
         )
         if (baselineResult.arm === undefined) {
           return stoppedControlledReceipt(plan, completedTaskIds, {
@@ -3081,6 +3090,7 @@ export class TianwenSkillEvaluationService extends Service {
           candidateArm,
           plan,
           resolved,
+          resolveVerdict,
         )
         if (candidateResult.arm === undefined) {
           return stoppedControlledReceipt(plan, completedTaskIds, {
@@ -3191,9 +3201,15 @@ export class TianwenSkillEvaluationService extends Service {
     prepared: PreparedControlledSkillEvaluationArm,
     plan: ControlledSkillEvaluationPlan,
     config: LlmCallConfig,
+    resolveVerdict?: ControlledOutcomeVerdictResolver,
   ): Promise<ControlledArmRunResult> {
     const runId = prepared.planned[prepared.role].runId
-    const result = await this.runControlledActivity(prepared, runId, config)
+    const result = await this.runControlledActivity(
+      prepared,
+      runId,
+      config,
+      resolveVerdict,
+    )
     if (result.activity === undefined) return result
     const evaluatorMaterialDigest = controlledEvaluatorMaterial(
       prepared.handle.agent.session.events,
@@ -3219,6 +3235,7 @@ export class TianwenSkillEvaluationService extends Service {
     prepared: PreparedControlledActivity,
     runId: TianwenRunId,
     config: LlmCallConfig,
+    resolveVerdict?: ControlledOutcomeVerdictResolver,
   ): Promise<ControlledActivityRunResult> {
     const session = prepared.handle.agent.session
     const requests: GenerateOptions[] = []
@@ -3259,14 +3276,28 @@ export class TianwenSkillEvaluationService extends Service {
     let outcome: OutcomeVerdict
     let acceptanceEvidenceId: Sha256Digest | undefined
     try {
-      const intake = this.ctx.tianwenLearningIntake.consumeOutcome(session, runId)
-      acceptanceEvidenceId = intake.acceptanceEvidenceId
       const evidence = this.ctx.tianwenEvidence.project(session)
         .filter(item => item.action.toolName
           === prepared.planned.acceptanceContract.toolName)
         .sort((left, right) => left.source.callSeq - right.source.callSeq)
         .at(-1)
-      outcome = outcomeFromEvidence(
+      const controlledVerdict = resolveVerdict?.(String(session.id))
+      if (resolveVerdict !== undefined
+        && (controlledVerdict === undefined || evidence === undefined)) {
+        return { reasonCode: 'run-fact-mismatch' }
+      }
+      const intake = this.ctx.tianwenLearningIntake.consumeOutcome(
+        session,
+        runId,
+        controlledVerdict === undefined || evidence === undefined
+          ? undefined
+          : {
+              verdict: controlledVerdict,
+              acceptanceEvidenceId: evidence.evidenceId,
+            },
+      )
+      acceptanceEvidenceId = intake.acceptanceEvidenceId
+      outcome = controlledVerdict ?? outcomeFromEvidence(
         session.events,
         evidence,
         prepared.planned.acceptanceContract.notMetErrorCode,
