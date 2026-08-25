@@ -514,7 +514,7 @@ def test_controlled_real_operation_readiness_handoff_records_limits() -> None:
         "67ce961487f93734230c06c1624f44573703691f",
         (
             "current controlled-real-operation runner spec: 25 formal Sessions, "
-            "85 local scripted model requests, 65 tool bodies, 20 acceptance Evidence, "
+            "65 local scripted model requests, 65 tool bodies, 20 acceptance Evidence, "
             "evaluation pass 80/80, and 0 external Provider requests"
         ),
         (

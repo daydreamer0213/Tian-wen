@@ -393,12 +393,14 @@ export class TianwenLearningIntakeService extends Service {
         && (attestation.verdict === 'met'
           ? finalEvidence.outcome.isError === false
             && finalEvidence.outcome.errorCode === undefined
-          : finalEvidence.outcome.isError === true
-            && (
-              finalEvidence.outcome.errorCode === undefined
-              || finalEvidence.outcome.errorCode
-                === binding.acceptanceContract.notMetErrorCode
-            ))
+          : (finalEvidence.outcome.isError === false
+              && finalEvidence.outcome.errorCode === undefined)
+            || (finalEvidence.outcome.isError === true
+              && (
+                finalEvidence.outcome.errorCode === undefined
+                || finalEvidence.outcome.errorCode
+                  === binding.acceptanceContract.notMetErrorCode
+              )))
       if (!agrees) throw new Error('Outcome verdict attestation does not match Evidence')
       verdict = attestation.verdict
     }

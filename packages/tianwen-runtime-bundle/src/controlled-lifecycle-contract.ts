@@ -31,7 +31,7 @@ const PARENT_SKILL = {
     'invocation boundary. Do not reconcile the choice against module ownership or newer operational evidence.',
     '',
     'Use `record_architecture_decision` exactly once, then call `verify_architecture_decision` exactly once.',
-    'After verifier feedback, do not change the choice; finish with the selected option and one concise reason.',
+    'The verifier ends the Turn after recording the verdict; do not attempt another model step.',
   ].join('\n'),
 } as const
 
@@ -48,7 +48,7 @@ const CANDIDATE_SKILL = {
     'Keep a purely local implementation choice local instead of expanding it into product governance.',
     '',
     'Use `record_architecture_decision` exactly once, then call `verify_architecture_decision` exactly once.',
-    'After verifier feedback, do not change the choice; finish with the selected option and one concise reason.',
+    'The verifier ends the Turn after recording the verdict; do not attempt another model step.',
   ].join('\n'),
 } as const
 
@@ -109,7 +109,7 @@ export interface ControlledLifecycleManifest {
     readonly stopContract: { readonly maxToolCalls: 6, readonly maxElapsedMs: 180000 }
     readonly evaluatorMaterialContract: {
       readonly schemaVersion: 'tianwen.controlled-evaluator-material-contract.v1'
-      readonly source: 'final-completed-assistant-text'
+      readonly source: 'recorded-decision-submission'
       readonly maxUtf8Bytes: 4096
     }
   }
@@ -616,7 +616,7 @@ export function readControlledLifecycleManifest(
     stopContract: { maxToolCalls: 6, maxElapsedMs: 180_000 },
     evaluatorMaterialContract: {
       schemaVersion: 'tianwen.controlled-evaluator-material-contract.v1',
-      source: 'final-completed-assistant-text',
+      source: 'recorded-decision-submission',
       maxUtf8Bytes: 4_096,
     },
   } as const)

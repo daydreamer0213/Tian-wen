@@ -47,7 +47,7 @@ const parentSkill = {
     'invocation boundary. Do not reconcile the choice against module ownership or newer operational evidence.',
     '',
     'Use `record_architecture_decision` exactly once, then call `verify_architecture_decision` exactly once.',
-    'After verifier feedback, do not change the choice; finish with the selected option and one concise reason.',
+    'The verifier ends the Turn after recording the verdict; do not attempt another model step.',
   ].join('\n'),
 } as const
 
@@ -64,7 +64,7 @@ const candidateSkill = {
     'Keep a purely local implementation choice local instead of expanding it into product governance.',
     '',
     'Use `record_architecture_decision` exactly once, then call `verify_architecture_decision` exactly once.',
-    'After verifier feedback, do not change the choice; finish with the selected option and one concise reason.',
+    'The verifier ends the Turn after recording the verdict; do not attempt another model step.',
   ].join('\n'),
 } as const
 
@@ -147,7 +147,7 @@ function validManifest(dataDir: string, operationRoot: string) {
       stopContract: { maxToolCalls: 6, maxElapsedMs: 180_000 },
       evaluatorMaterialContract: {
         schemaVersion: 'tianwen.controlled-evaluator-material-contract.v1',
-        source: 'final-completed-assistant-text',
+        source: 'recorded-decision-submission',
         maxUtf8Bytes: 4_096,
       },
     },
@@ -224,7 +224,6 @@ function seedScript() {
     toolCallResponse('seed-d1-verify', 'verify_architecture_decision', {
       taskId: 'seed-task:d1',
     }),
-    textResponse('Choose session-as-run because the Session interface is direct.'),
     toolCallResponse('seed-d2-skill', 'skill', { name: parentSkill.name }),
     toolCallResponse('seed-d2-record', 'record_architecture_decision', {
       taskId: 'seed-task:d2',
@@ -234,7 +233,6 @@ function seedScript() {
     toolCallResponse('seed-d2-verify', 'verify_architecture_decision', {
       taskId: 'seed-task:d2',
     }),
-    textResponse('Choose reuse-dsh-agent-loop because the public loop is sufficient.'),
   ]
 }
 
@@ -247,7 +245,6 @@ function decisionScript(id: string, taskId: string, choice: string) {
       explanation: `Choose ${choice} from the frozen task evidence.`,
     }),
     toolCallResponse(`${id}-verify`, 'verify_architecture_decision', { taskId }),
-    textResponse(`Choose ${choice} from the frozen task evidence.`),
   ]
 }
 
@@ -530,7 +527,7 @@ describe('controlled real Skill lifecycle runner', () => {
 
       expect(result).toMatchObject({
         status: 'passed',
-        counts: { acceptanceEvidence: 20 },
+        counts: { acceptanceEvidence: 20, modelRequests: 65 },
         pointer: { revision: 4 },
       })
       expect(result.counts.modelRequests).toBe(mounted.adapter.requests.length)
@@ -562,7 +559,20 @@ describe('controlled real Skill lifecycle runner', () => {
       expect(evaluatorMessages).not.toContain(parentSkill.name)
       expect(evaluatorMessages).not.toContain(parentSkill.content)
       expect(evaluatorMessages).not.toContain(candidateSkill.content)
-      for (const request of [mounted.adapter.requests[0], mounted.adapter.requests[4]]) {
+      const materialSubmissions = evaluatorRequests.flatMap(request => {
+        const first = request.messages[0]?.content[0]
+        if (first?.type !== 'text') throw new Error('expected evaluator material')
+        const envelope = JSON.parse(first.text) as {
+          x: { materialText: string }
+          y: { materialText: string }
+        }
+        return [envelope.x.materialText, envelope.y.materialText]
+          .map(text => JSON.parse(text) as { choice: string, explanation: string })
+      })
+      expect(materialSubmissions.map(item => item.choice)).toContain('session-as-run')
+      expect(materialSubmissions.map(item => item.choice)).toContain('thin-run-binding')
+      expect(materialSubmissions.every(item => item.explanation.length > 0)).toBe(true)
+      for (const request of [mounted.adapter.requests[0], mounted.adapter.requests[3]]) {
         const serialized = JSON.stringify(request)
         for (const task of [
           ...mounted.manifest.tasks.seeds,
@@ -573,9 +583,9 @@ describe('controlled real Skill lifecycle runner', () => {
       }
       expect(JSON.stringify(mounted.adapter.requests[0]?.messages))
         .toContain('seed-task:d1')
-      expect(JSON.stringify(mounted.adapter.requests[4]?.messages))
+      expect(JSON.stringify(mounted.adapter.requests[3]?.messages))
         .toContain('seed-task:d2')
-      for (const index of [0, 4]) {
+      for (const index of [0, 3]) {
         const messages = JSON.stringify(mounted.adapter.requests[index]?.messages)
         expect(messages).toContain(parentSkill.name)
         expect(messages).toContain('record_architecture_decision')
@@ -625,7 +635,7 @@ describe('controlled real Skill lifecycle runner', () => {
           workspaceSnapshotDigest: sha256(snapshot),
           authorizationDigest: sha256(authorization),
           verifierContractDigest: sha256(verifierContract),
-          stopConditionDigest: sha256({ terminal: 'completed-final-assistant-text' }),
+          stopConditionDigest: sha256({ terminal: 'completed-verifier-result' }),
           evaluatorMaterialContractDigest: sha256(mounted.manifest.execution.evaluatorMaterialContract),
           acceptanceSubjectDigest: sha256(verifierContract.arguments),
           allowedTools: [...mounted.manifest.execution.allowedTools].toSorted(),
@@ -681,7 +691,7 @@ describe('controlled real Skill lifecycle runner', () => {
       expect(inspected.flatMap(item => item.events)
         .filter(event => event.type === 'tool/call')).toHaveLength(6)
       expect(inspected.flatMap(item => item.events)
-        .filter(event => event.type === 'step/start')).toHaveLength(8)
+        .filter(event => event.type === 'step/start')).toHaveLength(6)
       const uses = mounted.harness.ctx.tianwenEvolution.listRunSkillUses()
       expect(uses).toHaveLength(20)
       expect(seedUses).toHaveLength(2)
@@ -716,21 +726,8 @@ describe('controlled real Skill lifecycle runner', () => {
     }
   })
 
-  it('keeps a valid not-met seed when installed DSH omits the optional error code', async () => {
-    const mounted = await mountRunner('installed-not-met-without-error-code', fullLifecycleScript())
-    const project = mounted.harness.ctx.tianwenEvidence.project
-      .bind(mounted.harness.ctx.tianwenEvidence)
-    vi.spyOn(mounted.harness.ctx.tianwenEvidence, 'project')
-      .mockImplementation(session => project(session).map(item => {
-        if (
-          item.action.toolName !== 'verify_architecture_decision'
-          || item.outcome.status !== 'complete'
-          || item.outcome.isError !== true
-          || item.outcome.errorCode !== 'ARCHITECTURE_DECISION_NOT_MET'
-        ) return item
-        const { errorCode: _errorCode, ...outcome } = item.outcome
-        return { ...item, outcome }
-      }))
+  it('closes a not-met seed through successful terminal verifier evidence', async () => {
+    const mounted = await mountRunner('terminal-not-met-verifier', fullLifecycleScript())
     const runner = await import(
       '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
     ) as unknown as { runControlledLifecycle(
@@ -742,6 +739,18 @@ describe('controlled real Skill lifecycle runner', () => {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
       })).resolves.toMatchObject({ status: 'passed', pointer: { revision: 4 } })
+      const seed = await mounted.harness.ctx.sessionPersistence.inspect(
+        mounted.manifest.tasks.seeds[0]!.sessionId,
+      )
+      const verifierEvidence = mounted.harness.ctx.tianwenEvidence.project({
+        id: seed.meta.id,
+        events: seed.events,
+      } as never).find(item => item.action.toolName === 'verify_architecture_decision')
+      expect(verifierEvidence?.outcome).toMatchObject({
+        status: 'complete',
+        isError: false,
+      })
+      expect(seed.events.filter(event => event.type === 'step/start')).toHaveLength(3)
       expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(25)
       expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets()).toHaveLength(1)
       const seedUses = mounted.harness.ctx.tianwenEvolution.listRunSkillUses()
@@ -778,7 +787,7 @@ describe('controlled real Skill lifecycle runner', () => {
           transitions: 0,
         },
       })
-      expect(mounted.adapter.requests).toHaveLength(16)
+      expect(mounted.adapter.requests).toHaveLength(12)
       expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(4)
       const evaluationId = mounted.harness.ctx.tianwenEvolution
         .listControlledSkillEvaluations()[0]!.evaluationId
@@ -823,7 +832,7 @@ describe('controlled real Skill lifecycle runner', () => {
       })).toMatchObject({
         status: 'stopped',
         completedStage: 'candidate',
-        reasonCode: 'run-fact-mismatch',
+        reasonCode: 'provider-failed',
         completedRoles: {
           seedRuns: 2,
           evaluationArms: 0,
@@ -833,7 +842,7 @@ describe('controlled real Skill lifecycle runner', () => {
         },
       })
       expect(line).not.toContain('raw first arm provider detail')
-      expect(mounted.adapter.requests).toHaveLength(9)
+      expect(mounted.adapter.requests).toHaveLength(7)
       expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(3)
       expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toHaveLength(2)
     } finally {
@@ -920,6 +929,7 @@ describe('controlled real Skill lifecycle runner', () => {
     const mounted = await mountRunner('cross-task-stop', [
       ...seedScript(),
       ...decisionScript('eval-t1-cross-task', 'eval-task:t2', 'node-package-script-transport'),
+      textResponse('Stop after the rejected cross-task verifier call.'),
     ])
     const runner = await import(
       '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
@@ -931,7 +941,7 @@ describe('controlled real Skill lifecycle runner', () => {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
       })).rejects.toMatchObject({ code: 'run-fact-mismatch' })
-      expect(mounted.adapter.requests).toHaveLength(12)
+      expect(mounted.adapter.requests).toHaveLength(10)
       const sessions = (await mounted.harness.ctx.sessionPersistence.list())
         .map(header => String(header.id))
       expect(sessions).toContain(mounted.manifest.tasks.evaluations[0]!.baselineSessionId)
@@ -948,7 +958,7 @@ describe('controlled real Skill lifecycle runner', () => {
 
   it('does not start Shadow after the first evaluator Provider failure', async () => {
     const mounted = await mountRunner('evaluator-stop', [
-      ...fullLifecycleScript().slice(0, 48),
+      ...fullLifecycleScript().slice(0, 36),
       new Error('raw evaluator provider detail'),
     ])
     const runner = await import(
@@ -965,7 +975,7 @@ describe('controlled real Skill lifecycle runner', () => {
       })
       expect(error).toMatchObject({ code: 'provider-failed', completedStage: 'evaluation' })
       expect(error?.message).not.toContain('raw evaluator provider detail')
-      expect(mounted.adapter.requests).toHaveLength(49)
+      expect(mounted.adapter.requests).toHaveLength(37)
       expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillShadows()).toEqual([])
       expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillTransitions()).toEqual([])
     } finally {
@@ -975,7 +985,7 @@ describe('controlled real Skill lifecycle runner', () => {
 
   it('does not initialize a pointer after the first Shadow rejection', async () => {
     const mounted = await mountRunner('shadow-stop', [
-      ...fullLifecycleScript().slice(0, 53),
+      ...fullLifecycleScript().slice(0, 41),
       ...decisionScript('shadow-s1-stop', 'shadow-task:s1', 'mutable-parent-object'),
     ])
     const runner = await import(
@@ -988,7 +998,7 @@ describe('controlled real Skill lifecycle runner', () => {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
       })).rejects.toMatchObject({ code: 'shadow-failed', completedStage: 'shadow' })
-      expect(mounted.adapter.requests).toHaveLength(57)
+      expect(mounted.adapter.requests).toHaveLength(44)
       expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillScopePointers()).toEqual([])
       expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillTransitions()).toEqual([])
     } finally {
@@ -998,7 +1008,7 @@ describe('controlled real Skill lifecycle runner', () => {
 
   it('recovers the pointer and does not start rollback after a rejected promote post-check', async () => {
     const mounted = await mountRunner('transition-stop', [
-      ...fullLifecycleScript().slice(0, 73),
+      ...fullLifecycleScript().slice(0, 56),
       ...decisionScript(
         'transition-promote-stop',
         'transition-task:promote',
@@ -1015,7 +1025,7 @@ describe('controlled real Skill lifecycle runner', () => {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
       })).rejects.toMatchObject({ code: 'transition-failed', completedStage: 'shadow' })
-      expect(mounted.adapter.requests).toHaveLength(77)
+      expect(mounted.adapter.requests).toHaveLength(59)
       const transitions = mounted.harness.ctx.tianwenEvolution.listControlledSkillTransitions()
       expect(transitions).toHaveLength(1)
       expect(mounted.harness.ctx.tianwenEvolution
@@ -1030,9 +1040,9 @@ describe('controlled real Skill lifecycle runner', () => {
   })
 
   it.each([
-    ['B/C', 48, 12, 'candidate'],
-    ['evaluator', 53, 17, 'evaluation'],
-    ['Shadow', 73, 22, 'evaluators'],
+    ['B/C', 36, 12, 'candidate'],
+    ['evaluator', 41, 17, 'evaluation'],
+    ['Shadow', 56, 22, 'evaluators'],
   ] as const)(
     'revalidates the configured route after the %s stage before the next Agent',
     async (_label, requestCutoff, sessionCount, completedStage) => {
@@ -1091,7 +1101,7 @@ describe('controlled real Skill lifecycle runner', () => {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
       })).rejects.toMatchObject({ code: 'workspace-drift' })
-      expect(mounted.adapter.requests).toHaveLength(4)
+      expect(mounted.adapter.requests).toHaveLength(3)
       expect((await mounted.harness.ctx.sessionPersistence.list())
         .map(header => String(header.id)))
         .toEqual([mounted.manifest.tasks.seeds[0]!.sessionId])
@@ -1127,7 +1137,7 @@ describe('controlled real Skill lifecycle runner', () => {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
       })).rejects.toMatchObject({ code: 'selection-mismatch' })
-      expect(mounted.adapter.requests).toHaveLength(4)
+      expect(mounted.adapter.requests).toHaveLength(3)
       expect((await mounted.harness.ctx.sessionPersistence.list())
         .map(header => String(header.id)))
         .toEqual([mounted.manifest.tasks.seeds[0]!.sessionId])
@@ -1329,7 +1339,6 @@ describe('controlled real Skill lifecycle runner', () => {
       toolCallResponse('seed-d1-verify', 'verify_architecture_decision', {
         taskId: 'seed-task:d1',
       }),
-      textResponse('Choose thin-run-binding.'),
     ])
     const runner = await import(
       '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
@@ -1341,7 +1350,7 @@ describe('controlled real Skill lifecycle runner', () => {
         manifestPath: mounted.manifestPath,
         manifestDigest: mounted.prepared.manifestDigest,
       })).rejects.toMatchObject({ code: 'seed-failed' })
-      expect(mounted.adapter.requests).toHaveLength(4)
+      expect(mounted.adapter.requests).toHaveLength(3)
       expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets()).toEqual([])
       expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
     } finally {
@@ -1473,7 +1482,7 @@ describe('controlled real Skill lifecycle runner', () => {
     }
   })
 
-  it('rejects a duplicate verifier before governance', async () => {
+  it('ends the Turn at the first verifier and cannot execute a duplicate verifier', async () => {
     const mounted = await mountRunner('duplicate-verifier', [
       toolCallResponse('seed-d1-skill', 'skill', { name: parentSkill.name }),
       toolCallResponse('seed-d1-record', 'record_architecture_decision', {
@@ -1503,12 +1512,12 @@ describe('controlled real Skill lifecycle runner', () => {
         .inspect(mounted.manifest.tasks.seeds[0]!.sessionId)
       expect(inspection.events.filter(event =>
         event.type === 'tool/call'
-        && event.data.name === 'verify_architecture_decision')).toHaveLength(2)
+        && event.data.name === 'verify_architecture_decision')).toHaveLength(1)
       const types = ledgerEventTypes(mounted.manifest.roots.evolutionRoot)
-      expect(types).not.toContain('outcome-intake-recorded')
-      expect(types).not.toContain('run-skill-use-recorded')
-      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toEqual([])
-      expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets()).toEqual([])
+      expect(types).toContain('outcome-intake-recorded')
+      expect(types).toContain('run-skill-use-recorded')
+      expect(mounted.harness.ctx.tianwenEvolution.listRunSkillUses()).toHaveLength(1)
+      expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets()).toHaveLength(1)
       expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
     } finally {
       await mounted.harness.ctx.fiber.dispose()
@@ -1750,7 +1759,7 @@ describe('controlled real Skill lifecycle runner', () => {
           transitions: 0,
         },
       })
-      expect(mounted.adapter.requests).toHaveLength(8)
+      expect(mounted.adapter.requests).toHaveLength(6)
       expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(2)
       expect(mounted.harness.ctx.tianwenEvolution.listSkillCandidates()).toHaveLength(1)
       expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()).toEqual([])
