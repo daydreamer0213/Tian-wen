@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import {
@@ -742,7 +742,10 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
       const inspection = await harness.ctx.sessionPersistence.inspect(
         SessionId(task.evaluatorSessionId),
       )
-      invariant(inspection.meta.cwd === undefined, 'evaluator-workspace')
+      invariant(
+        inspection.meta.cwd === dirname(task.baselineWorkspaceRoot),
+        'evaluator-workspace',
+      )
     }
 
     const replaySnapshot = {
