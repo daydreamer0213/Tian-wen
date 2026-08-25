@@ -1827,6 +1827,120 @@ describe('controlled Skill evaluation Runtime', () => {
     }
   })
 
+  it('reports candidate Skill identity drift before Run binding', async () => {
+    const firstTask = taskTypes[0]
+    const mounted = await mountControlledRuntime('candidate-skill-identity-drift', [
+      toolCallResponse('skill-drift-b-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('skill-drift-b-verify', acceptance.toolName, {
+        subject: { task: firstTask, accepted: true },
+      }),
+      textResponse('baseline complete'),
+    ])
+    const originalGet = mounted.harness.ctx.skills.get.bind(mounted.harness.ctx.skills)
+    const candidateSessionId = mounted.input.tasks[0]!.candidateSessionId
+    vi.spyOn(mounted.harness.ctx.skills, 'get').mockImplementation((name, options) =>
+      String(options?.scope?.id) === candidateSessionId
+        ? Promise.resolve(undefined)
+        : originalGet(name, options))
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )).resolves.toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'candidate',
+          role: 'candidate',
+          reasonCode: 'skill-identity-drift',
+        },
+      })
+      const [plan] = mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()
+      expect(mounted.harness.ctx.tianwenEvolution.getRunBinding(
+        plan!.tasks[0]!.candidate.runId,
+      )).toBeUndefined()
+      expect(mounted.adapter.requests).toHaveLength(3)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('reports candidate tool-surface drift before Run binding', async () => {
+    const firstTask = taskTypes[0]
+    const mounted = await mountControlledRuntime('candidate-tool-surface-drift', [
+      toolCallResponse('tool-drift-b-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('tool-drift-b-verify', acceptance.toolName, {
+        subject: { task: firstTask, accepted: true },
+      }),
+      textResponse('baseline complete'),
+    ])
+    const originalSchemas = mounted.harness.ctx.tools.schemas.bind(mounted.harness.ctx.tools)
+    const candidateSessionId = mounted.input.tasks[0]!.candidateSessionId
+    vi.spyOn(mounted.harness.ctx.tools, 'schemas').mockImplementation(scope => {
+      const schemas = originalSchemas(scope)
+      return String(scope?.id) === candidateSessionId ? schemas.slice(1) : schemas
+    })
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )).resolves.toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'candidate',
+          role: 'candidate',
+          reasonCode: 'tool-surface-mismatch',
+        },
+      })
+      const [plan] = mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()
+      expect(mounted.harness.ctx.tianwenEvolution.getRunBinding(
+        plan!.tasks[0]!.candidate.runId,
+      )).toBeUndefined()
+      expect(mounted.adapter.requests).toHaveLength(3)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('reports candidate Agent context drift before Run binding', async () => {
+    const firstTask = taskTypes[0]
+    const mounted = await mountControlledRuntime('candidate-context-drift', [
+      toolCallResponse('context-drift-b-skill', 'skill', { name: parentSkill.name }),
+      toolCallResponse('context-drift-b-verify', acceptance.toolName, {
+        subject: { task: firstTask, accepted: true },
+      }),
+      textResponse('baseline complete'),
+    ])
+    const first = mounted.input.tasks[0]!
+    const originalCreate = mounted.harness.ctx.agents.create.bind(mounted.harness.ctx.agents)
+    vi.spyOn(mounted.harness.ctx.agents, 'create').mockImplementation(request =>
+      originalCreate(String(request.sessionId) === first.candidateSessionId
+        ? { ...request, meta: { cwd: first.baselineWorkspaceRoot } }
+        : request))
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )).resolves.toMatchObject({
+        state: 'stopped',
+        completedTaskIds: [],
+        stop: {
+          stage: 'candidate',
+          role: 'candidate',
+          reasonCode: 'agent-context-mismatch',
+        },
+      })
+      const [plan] = mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()
+      expect(mounted.harness.ctx.tianwenEvolution.getRunBinding(
+        plan!.tasks[0]!.candidate.runId,
+      )).toBeUndefined()
+      expect(mounted.adapter.requests).toHaveLength(3)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
   it('reports candidate Agent disposal after its governed facts close', async () => {
     const firstTask = taskTypes[0]
     const mounted = await mountControlledRuntime('candidate-dispose-failure', [
