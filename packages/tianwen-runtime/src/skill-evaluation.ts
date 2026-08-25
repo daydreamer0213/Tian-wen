@@ -856,8 +856,9 @@ function evaluatorRequestReason(
   request: GenerateOptions,
   state: ControlledEvaluatorState,
 ): 'request-contract-mismatch' | 'identity-exposed' | undefined {
-  if (!isAgentLoopRequest(request)
-    || String(request.sessionId) !== state.sessionId
+  // The active evaluator Session owns this request. A process-local DSH marker
+  // is not portable across installed host/Profile module instances.
+  if (String(request.sessionId) !== state.sessionId
     || request.purpose !== undefined
     || !callConfigEquals(requestConfig(request), state.config)
     || request.tools?.length !== 1
@@ -921,9 +922,9 @@ function controlledFirstRequestDigest(
   config: LlmCallConfig,
   skill: SkillDefinition,
 ): Sha256Digest | undefined {
+  // Requests reach this function only through the active controlled Session map.
   if (requests.length === 0 || requests.some(request =>
-    !isAgentLoopRequest(request)
-    || String(request.sessionId) !== sessionId
+    String(request.sessionId) !== sessionId
     || request.purpose !== undefined
     || !callConfigEquals(requestConfig(request), config))) return undefined
   const first = requests[0]!
