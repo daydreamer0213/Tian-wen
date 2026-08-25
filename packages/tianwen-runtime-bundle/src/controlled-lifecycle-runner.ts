@@ -1302,10 +1302,9 @@ export async function runControlledLifecycle(
     }
     for (const task of manifest.tasks.evaluations) {
       const inspection = await ctx.sessionPersistence.inspect(SessionId(task.evaluatorSessionId))
-      if (
-        inspection.meta.cwd !== dirname(task.baselineWorkspaceRoot)
-        || inspection.events.filter(event => event.type === 'tool/call').length !== 1
-      ) throw new ControlledLifecycleRunnerError('identity-mismatch')
+      if (inspection.meta.cwd !== dirname(task.baselineWorkspaceRoot)) {
+        throw new ControlledLifecycleRunnerError('identity-mismatch')
+      }
     }
     await revalidateSeedBoundary(ctx, config, manifest, allSnapshots, initialFacts)
     lastClosedStage = 'evaluators'

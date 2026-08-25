@@ -74,14 +74,27 @@ Treating their mere appearance as identity exposure blocks valid task output whi
 blindness guarantee. The enforceable contract is structural equality of the two request paths plus
 absence of exact role-specific machine facts.
 
-## 6. Failure ordering
+## 6. Evaluator completion ownership
+
+The controlled evaluator service owns whether an evaluator completed successfully. It validates the
+single accepted `submit_blind_evaluation` body, matching Evidence, terminal Turn and durable
+observation. The outer lifecycle runner may verify the allocated Session workspace, but it must not
+reinterpret the total number of `tool/call` events as the number of accepted evaluator submissions.
+
+An ordinary model can request an unavailable tool, receive a failed tool result and then use the one
+published evaluator tool correctly in the same Turn. Those failed requests are part of the real Agent
+transcript and remain included in observed request/tool-event counts; they are not evaluator identity
+failures and they do not mean that another tool body ran. This keeps the coordinator aligned with the
+service that owns the evaluator state transition instead of imposing a conflicting Session-shape rule.
+
+## 7. Failure ordering
 
 After Session flush, the runtime validates request identity, guard cancellation and terminal Turn
 before Outcome or Skill-use intake. A timeout remains `timeout`; a Provider failure remains
 `provider-failed`; an incomplete protocol remains a run-fact failure. No invalid or aborted activity
 writes Outcome merely because a verifier Evidence record exists.
 
-## 7. Scope and acceptance
+## 8. Scope and acceptance
 
 The implementation reuses the existing DSH Agent loop, tool registry, Evidence projector, Learning
 Intake and controlled evaluator. It adds no retry, budget, scheduler, transport, checker or security
@@ -93,6 +106,8 @@ Acceptance requires:
   acceptance Evidence records;
 - both `met` and `not-met` verifiers to end their Turn after the third request for ordinary roles;
 - evaluators to consume recorded decision material without a final assistant message;
+- a terminal evaluator observation to remain authoritative when the same Session first contains
+  failed requests for unavailable tools and then one accepted blind-evaluation submission;
 - ordinary task prose may use architecture words such as `baseline` or `candidate`, while exact
   Skill/Run/Session/workspace identities remain forbidden;
 - timeout and Provider failures to stop before Outcome/Skill-use governance writes;
