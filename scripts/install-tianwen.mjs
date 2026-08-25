@@ -662,7 +662,7 @@ function pnpmEntry(source) {
   return resolve(dirname(process.execPath), 'node_modules', 'corepack', 'dist', 'pnpm.js')
 }
 
-function runFixed(executable, argv, { cwd, env, runner, timeout = 120_000 }) {
+function runFixed(executable, argv, { cwd, env, runner, timeout }) {
   const result = runner(executable, argv, {
     cwd,
     encoding: 'utf8',
@@ -752,7 +752,7 @@ export function installTianwen({
     { cwd: repoRoot, env: childEnv, runner, timeout },
   )
   atInstallStage(INSTALLER_FAILURE_STAGE.PNPM_VERSION, () => {
-    const actual = invokePnpm(['--version']).stdout.trim()
+    const actual = invokePnpm(['--version'], 120_000).stdout.trim()
     if (actual !== PNPM_VERSION) {
       throw new Error(`pnpm ${PNPM_VERSION} is required, got ${actual}`)
     }
@@ -852,7 +852,7 @@ export function installTianwen({
     const dump = atInstallStage(INSTALLER_FAILURE_STAGE.DSH_CONFIG_VALIDATION, () => runFixed(
       process.execPath,
       [dshBin, '--profile', PROFILE, '--dump-config'],
-      { cwd: repoRoot, env, runner },
+      { cwd: repoRoot, env, runner, timeout: 0 },
     ))
     atInstallStage(INSTALLER_FAILURE_STAGE.DSH_CONFIG_VALIDATION, () => validateDump(dump.stdout, paths))
     const cliPath = atInstallStage(

@@ -711,7 +711,7 @@ describe('Tianwen installer contract', () => {
     expect(scripted.calls.every(argv => !argv.includes(session) && !argv.includes(ledger))).toBe(true)
   })
 
-  it('uses completion-owned workspace installation while keeping build and pack deadlines', () => {
+  it('assigns every child lifetime to its installer stage', () => {
     const root = testRoot('stage-timeouts')
     const paths = deriveInstallPaths(root, 'win32')
     const scripted = scriptedInstaller(paths)
@@ -724,17 +724,32 @@ describe('Tianwen installer contract', () => {
       argv.includes('deploy') && argv.includes('@tianwen/dsh-host'))
     const profileDeployIndex = scripted.calls.findIndex(argv =>
       argv.includes('deploy') && argv.includes('@tianwen/profile-host'))
+    const dshConfigIndexes = scripted.calls
+      .map((argv, index) => argv.includes('--dump-config') ? index : -1)
+      .filter(index => index >= 0)
+    const pnpmVersionIndex = scripted.calls.findIndex(argv =>
+      /pnpm\.(?:c?js|mjs)$/iu.test(argv[0] ?? '') && argv[1] === '--version')
     expect(scripted.spawnOptions[workspaceInstallIndex]?.timeout).toBe(0)
     expect(scripted.spawnOptions[hostDeployIndex]?.timeout).toBe(0)
     expect(scripted.spawnOptions[profileDeployIndex]?.timeout).toBe(0)
+    expect(dshConfigIndexes).toHaveLength(1)
+    expect(dshConfigIndexes.map(index => scripted.spawnOptions[index]?.timeout))
+      .toEqual([0])
+    expect(scripted.spawnOptions[pnpmVersionIndex]?.timeout).toBe(120_000)
 
     const buildAndPackIndexes = scripted.calls
       .map((argv, index) => argv.includes('build') || argv.includes('pack') ? index : -1)
       .filter(index => index >= 0)
     expect(buildAndPackIndexes.map(index => scripted.spawnOptions[index]?.timeout))
       .toEqual([300_000, 300_000, 300_000, 300_000])
+    const completionOwnedIndexes = [
+      workspaceInstallIndex,
+      hostDeployIndex,
+      profileDeployIndex,
+      ...dshConfigIndexes,
+    ]
     expect(scripted.spawnOptions.filter((_options, index) =>
-      ![workspaceInstallIndex, hostDeployIndex, profileDeployIndex].includes(index))
+      !completionOwnedIndexes.includes(index))
       .every(options => options.timeout > 0)).toBe(true)
   })
 
