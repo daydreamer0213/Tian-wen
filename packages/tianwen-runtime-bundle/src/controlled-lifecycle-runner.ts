@@ -18,6 +18,7 @@ import type {
   LearningTicketId,
   Sha256Digest,
   ControlledSkillEvalTaskType,
+  ControlledSkillEvaluationResultReasonCode,
   TianwenRunId,
 } from '@tianwen/evolution'
 import { CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1 } from '../../tianwen-evolution/dist/controlled-skill-activation.js'
@@ -119,6 +120,7 @@ export type ControlledLifecycleRunnerFailureCode =
   | 'skill-identity-drift'
   | 'agent-context-mismatch'
   | Exclude<ControlledSkillEvaluationArmsStopReasonCode, 'persistence-unavailable'>
+  | Exclude<ControlledSkillEvaluationResultReasonCode, 'all-gates-passed'>
   | 'evaluation-failed'
   | 'evaluator-failed'
   | 'shadow-failed'
@@ -925,6 +927,12 @@ function evaluationStoppedReason(
   return reasonCode === 'persistence-unavailable' ? 'persistence-failed' : reasonCode
 }
 
+function evaluationResultStoppedReason(
+  reasonCode: ControlledSkillEvaluationResultReasonCode,
+): ControlledLifecycleRunnerFailureCode {
+  return reasonCode === 'all-gates-passed' ? 'evaluation-failed' : reasonCode
+}
+
 function stoppedReceipt(
   manifestDigest: `sha256:${string}`,
   error: ControlledLifecycleRunnerError,
@@ -1212,7 +1220,9 @@ export async function runControlledLifecycle(
     }
     if (arms.state === 'terminal') {
       lastClosedStage = 'evaluation'
-      throw new ControlledLifecycleRunnerError('evaluation-failed')
+      throw new ControlledLifecycleRunnerError(
+        evaluationResultStoppedReason(arms.result.reasonCode),
+      )
     }
     if (
       arms.state !== 'awaiting-evaluator'
@@ -1241,13 +1251,18 @@ export async function runControlledLifecycle(
     if (evaluators.state !== 'terminal') {
       throw new ControlledLifecycleRunnerError('evaluator-failed')
     }
+    if (evaluators.completedTaskIds.length !== manifest.tasks.evaluations.length) {
+      lastClosedStage = 'evaluators'
+      throw new ControlledLifecycleRunnerError('evaluator-failed')
+    }
     if (
-      evaluators.completedTaskIds.length !== manifest.tasks.evaluations.length
-      || evaluators.result.mechanismVerdict !== 'pass'
+      evaluators.result.mechanismVerdict !== 'pass'
       || evaluators.result.reasonCode !== 'all-gates-passed'
     ) {
       lastClosedStage = 'evaluators'
-      throw new ControlledLifecycleRunnerError('evaluator-failed')
+      throw new ControlledLifecycleRunnerError(
+        evaluationResultStoppedReason(evaluators.result.reasonCode),
+      )
     }
     for (const task of manifest.tasks.evaluations) {
       const inspection = await ctx.sessionPersistence.inspect(SessionId(task.evaluatorSessionId))
