@@ -21,27 +21,19 @@ The configured DeepSeek controlled lifecycle has not run. Its evidence remains
 
 ## Installed ingress readiness
 
-Installed ingress readiness means the official installer publishes the CLI ingress, one-shot runner, and static DSH Profile patch. Task 9B.0 completed one official installer run with 18/18 publication. Its only official `tianwen.CMD model status --json` invocation exited 0 with 0 stderr bytes and 0 stdout bytes and was not rerun; at that historical checkpoint, activity-01 was still unconsumed.
+The normal one-shot product flow now completes Profile shutdown before it returns:
 
-Activity-01 later entered the official `main()` usage parser and stopped with exit 2, so activity-01 is consumed. The old operation text had omitted the required `--model`; this was an operator-authority error, not a product, Provider, or Candidate defect. The earlier outer shell failure remained pre-invocation and did not consume the activity. The lifecycle invocation=0, closed roles=0/25, and the final offline receipt is valid. Provider-account requests and tool-body executions remain unknown (none-observed), rather than receipt-certified zero. The formal real Provider lifecycle has not run. Activity-02 now has its isolated install, packet, 20 new workspaces, and 25 new Sessions, but its first model-use has not been invoked, so activity-02 is not consumed. Its two readiness checkers both failed safely and are preserved without retry; neither produced an independent zero-state attestation.
-
-R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` compares canonical real file identity in the CLI guard, as proved by a Windows pnpm-like junction focused contract. R0.2 `1b323c498a6fa177975fdd852738d9738995c604` freezes the controlled overlay at DeepSeek normal/0, disables only session-title-llm, and preserves the ordinary Profile at normal/2.
-
-The installed controlled-lifecycle one-shot runner does not import or register `ScriptedAdapter`; the scripted adapter used by the mechanism fixture is supplied only by tests. Formal operation labels are `configured-provider-capable` + `development-only` + `synthetic-defect`, with `naturalUserEvidence=not-claimed` and `externalUserEvidence=not-claimed`; `scripted-fixture` is not a formal operation label.
-
-The formal installed command shape is:
-
-```console
-tianwen model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json
-tianwen model status --data-dir ABSOLUTE_PRODUCT_ROOT --json
-tianwen controlled-lifecycle --manifest ABSOLUTE_MANIFEST --data-dir ABSOLUTE_PRODUCT_ROOT --json
-tianwen model use --model offline --data-dir ABSOLUTE_PRODUCT_ROOT --json
-tianwen model status --data-dir ABSOLUTE_PRODUCT_ROOT --json
+```text
+model activation → fresh status confirms selection → first controlled-lifecycle invocation begins formal evaluation → offline recovery → final status
 ```
 
-Whether the lifecycle passes or stops, the offline model selection and final status are mandatory.
+This is a DSH/HMR shutdown-lifecycle repair, not receipt or security work. HMR owns the watcher-readiness promise created during Profile boot; the repair gives that owner a terminal outcome when shutdown arrives before readiness. Tianwen does not add a second shutdown controller, retry, delay, or forced exit.
 
-The [controlled real operation readiness handoff](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) retains the pre-operation implementation and CI audit history; the [activity-01 handoff](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md) records the later usage failure and recovery boundary. The latest Task 4D authority preserves both checker failures and uses the one official lifecycle call's product-native preflight as the safety gate; it does not create a third checker or activity-03. That authority must enter main through controlled integration and a new automatic exact-main push attempt 1 must pass Python, TypeScript, and installer-windows before the preserved activity-02 packet can be consumed. Activity-01 remains preserved without retry, cleanup, or partial continuation.
+Activity-03 remains historically consumed. Its DeepSeek model-use receipt persisted, but the process ended with exit 13 before any controlled-lifecycle invocation; `controlled-lifecycle invocation=0`, and offline recovery and final status succeeded. The historical classifications of Activity-01, Activity-02, and Activity-03 are not rewritten, and this repair does not claim real Provider success.
+
+For future formal work, model activation and its confirming status are product setup and do not consume a formal Activity. The first future `controlled-lifecycle` invocation begins and consumes that Activity. The focused deterministic owner regression and real Profile process regression are green; one fresh official zero-request installed proof still waits for exact-main CI.
+
+The [one-shot Profile lifecycle repair handoff](docs/operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md) records the historical boundary and repair evidence. Earlier [readiness](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md) and [Activity-01](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md) handoffs remain historical records.
 
 ## Why Tianwen exists
 
@@ -197,6 +189,8 @@ activity, and its dedicated fixture root is empty after cleanup.
   records the controlled lifecycle receipt, privacy boundary, and evidence limits.
 - [`docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)
   records the installed ingress readiness boundary and the remaining real-Provider gate.
+- [`docs/operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md`](docs/operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md)
+  records the DSH/HMR one-shot shutdown repair and the prospective Activity boundary.
 - [`docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md`](docs/operations/tianwen-v0.1-controlled-real-activity-01-handoff.md)
   records the consumed activity-01 usage failure and the isolated activity-02 recovery gate.
 - [`docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](docs/superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)

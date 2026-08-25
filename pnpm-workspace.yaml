@@ -7,3 +7,5 @@ allowBuilds:
   koffi: false
   node-pty: false
   protobufjs: false
+patchedDependencies:
+  '@deepseek-ai/cordis-plugin-hmr@1.0.16': patches/@deepseek-ai__cordis-plugin-hmr@1.0.16.patch

@@ -1,8 +1,8 @@
 # 天问架构总览 v2
 
-**更新：** 2026-08-24
+**更新：** 2026-08-25
 
-**状态：** 当前产品架构的首要阅读入口；Stage 7 已完成，受控 Skill 生命周期机制与已安装入口均已准备好
+**状态：** 当前产品架构的首要阅读入口；Stage 7 已完成，DSH/HMR 一次性 Profile 关闭已修复
 
 **一句话定义：**
 
@@ -12,7 +12,7 @@
 
 如果只想快速把握项目，先读“当前状态”和第 1–3、9–10 节即可；其余章节用于实现时消除歧义。
 
-## 当前状态（2026-08-23）
+## 当前状态（2026-08-25）
 
 Stage 7 已经完成，不再是待验证能力。一个使用配置模型的全新自然任务通过已安装的 DSH
 rc.7 产品路径正式运行一次：Goal complete，45/45 Evidence complete，`Outcome=met`，学习
@@ -34,50 +34,29 @@ rc.7 产品路径正式运行一次：Goal complete，45/45 Evidence complete，
   installed CLI → installed DSH rc.7 Profile → one-shot runner → 既有 Tianwen Runtime/Evolution services。
   这只证明 archive/publication，不证明真实 Provider lifecycle 成功。
   DSH rc.7 仍是唯一 Agent Runtime；没有第二 controller 或 ledger。
-- **Task 9B.0 首次安装：** Task 9B.0 official installer 与 18/18 publication 成功，Sessions/Evolution 保持 fresh；唯一一次 receipt.binDir 下 `tianwen.CMD model status --json` exit 0、stderr 0 bytes、stdout 0 bytes，没有重跑。旧产品根及证据继续保留；没有创建 operation root、Agent、Session、Evolution、Provider 或 Goal。在这个历史检查点，activity-01 当时尚未消费。
-- **R0.1：** R0.1 `f7a89783097c83404576cb62b77949186e9fbca4` 把 CLI main-entry guard 改为 canonical real file identity，并由 Windows pnpm-like junction focused contract 证明。
-- **R0.2 feature：** R0.2 `1b323c498a6fa177975fdd852738d9738995c604` 固定 `llm-deepseek retryPolicy=normal/0`，只禁用 `session-title-llm`，`session-title`、`llm-retry` 与 `settings` 仍启用；ordinary Profile 保持 DSH normal/2。真实配置若仍是 normal/2，runner 会在 0 Agent、0 model request、0 durable ledger 前 fail closed。`--dump-config` 是配置组合证据，不是 fresh installed operation。
-- **activity-01 正式结果：** 更早的 outer shell failure 是 pre-invocation 证据，不消费 activity；后续 direct official 调用进入 official `main()` usage parser，并以 exit 2 正式停止，因此 activity-01 已消费。根因是旧 operation authority 漏写必需的 `--model`，不是产品、CLI、Runtime、Provider 或 Candidate 缺陷。lifecycle invocation=0、closed roles=0/25，最终 offline receipt 合法。Provider 账户请求和 tool body 实际执行数保持 unknown (none-observed)，不能由 durable 0 升级。
-- **activity-02 当前状态：** new product/evidence/operation root、20 个 workspace、25 个 Session allocation、
-  official install/offline status、manifest 与 freeze 已物化，但首个 model-use 尚未调用，因此 activity-02
-  尚未消费。原 checker 与 recovery checker 各自唯一一次 readiness 调用都安全失败；两份失败永久保留，
-  不重跑，也不冒充全零证明。外层只读状态仍是 Session root absent、Evolution 空、ledger/champion
-  absent；这只属于 `filesystem-observed`。最新 authority 把准入交还唯一 official lifecycle 的原生
-  fail-closed preflight，不再创建 checker 或 activity-03；它必须先受控进入 main 且新的 automatic
-  exact-main push attempt 1 三 job 全绿。
-- **失败证据边界：** `receipt-certified` 只认证合法 passed receipt 对 Session 角色和 model-step/tool-call/Evidence 事件的归约；`durable-observed` 是既有事实源对 durable Session 事实的观察；没有独立事实源时为 `unknown`，不能把 Provider 账户实际请求数或 tool body 实际执行数写成已证明。
-- **真实 Provider 与用户效果：** 配置的 DeepSeek 受控生命周期尚未运行。进一步说，
-  配置的 DeepSeek 真实受控生命周期尚未运行；`naturalUserEvidence=not-claimed` 且
-  `externalUserEvidence=not-claimed`。
+- **Activity-03 历史结果：** DeepSeek model-use receipt 已持久化，但 DSH 进程在任何
+  `controlled-lifecycle` 调用前以 exit 13 结束；offline 恢复和最终 status 均成功，
+  `controlled-lifecycle` invocation=0。Activity-03 仍已消费，且 Activity-01、Activity-02、
+  Activity-03 的历史分类不被改写。
+- **关闭所有权：** DSH 负责 Profile 的启动和关闭；HMR watcher readiness 负责自己创建的
+  readiness promise。关闭先于 watcher ready 时，修复由 HMR owner 结算该 promise；Tianwen
+  不增加第二个关闭控制器、重试、延时或强制退出。这是 DSH/HMR shutdown lifecycle 修复，
+  不是 receipt 或安全功能。
+- **当前功能证据：** 版本绑定的 HMR owner 回归与真实 Profile 四进程模型选择回归均已通过；
+  它们不创建 Agent、Session、Goal 或 Provider 请求。一次新的官方零请求安装证明仍须在
+  exact-main CI 通过后单独执行。
+- **未来 Activity 边界：** 模型激活和确认 status 是产品 setup，不消费正式 Activity；首次未来
+  `controlled-lifecycle` 调用才开始并消费该 Activity。配置的 DeepSeek 受控生命周期尚未运行，
+  `naturalUserEvidence=not-claimed`、`externalUserEvidence=not-claimed`，因而不声称真实 Provider 成功。
 
-已安装入口使用固定的五步 exact argv：
-
-```text
-tianwen model use --model deepseek-v4-pro --data-dir ABSOLUTE_PRODUCT_ROOT --json
-tianwen model status --data-dir ABSOLUTE_PRODUCT_ROOT --json
-tianwen controlled-lifecycle --manifest ABSOLUTE_MANIFEST --data-dir ABSOLUTE_PRODUCT_ROOT --json
-tianwen model use --model offline --data-dir ABSOLUTE_PRODUCT_ROOT --json
-tianwen model status --data-dir ABSOLUTE_PRODUCT_ROOT --json
-```
-
-无论 lifecycle 成功或失败，最后两步都必须执行。其当前证明来自 zero-real-Provider 的
-installer、preflight 与 transport 分段证据。
-已安装的 controlled-lifecycle one-shot runner 不导入或注册 `ScriptedAdapter`；这个夹具使用的 scripted adapter 只由测试提供。
-scripted mechanism fixture 的 exercised source 是 `scripted-fixture`；正式 operation 标签只包含
-`configured-provider-capable` + `development-only` + `synthetic-defect`，且 natural/external 均为 not-claimed。
-
-长期发布门顺序固定为：
+正常状态转换为：
 
 ```text
-Task 4D reviewed authority SHA → controlled main integration → 新的 automatic exact-main push attempt 1 的 Python、TypeScript、installer-windows 三 job 全绿 → 复核既有 activity-02 product/packet 未漂移 → 恰好一次 formal real lifecycle（其内部 preflight 同时承担 readiness）
+模型激活 → 新 status 确认选择 → 首次 controlled-lifecycle 调用开始正式评测 → offline 恢复 → 最终 status
 ```
 
-脚本化 evaluator Agent 只按冻结 rubric 评价盲态 X/Y，所有 fixture 永久标记为
-controlled/development-only/synthetic-defect。这份证据证明工程机制和停止线，不冒充
-真实 Provider 成功、自然用户改善或市场泛化。正式运行仍必须在冻结证据门和已有
-standing authorization 边界内进行。
-完整门禁见
-[`2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)。
+修复设计和完整历史边界见
+[`one-shot Profile lifecycle repair handoff`](operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md)。
 
 ## 1. 先说结论：天问是什么
 
@@ -310,25 +289,16 @@ DSH 能组合但缺一小段 → 写薄适配
 B@rev1→C@rev2→B@rev3→C@rev4 的 Promotion/Rollback/Restore 机制。
 
 这项新证据是 0-external-Provider scripted 全链夹具，而 Stage 7 自然任务结果仍是
-`met/no-case`，没有合法产生自然 Candidate。因此机制已齐备，但配置的 DeepSeek 受控
-生命周期尚未运行。activity-01 已在 official `main()` usage parser 的 exit 2 处消费，未调用
-lifecycle；旧 operation authority 漏写 `--model`，不是产品或 Provider 缺陷。activity-02 已完成一次
-official install/offline status 和 packet freeze，但两个外部 checker 都只得到安全 incomplete 回执；
-没有独立 readiness attestation。静态核对没有发现 installed DSH package/export/API 或 tracked loader 的
-确定性缺陷，安全回执又没有保留内部 failure stage，所以不能继续靠第三个 checker 猜原因。
+`met/no-case`，没有合法产生自然 Candidate。配置的 DeepSeek 受控生命周期尚未运行。
 
-这不构成产品 lifecycle blocker：产品自身在首个 Agent/Provider request 前已经重读 manifest、等待 loader、
-检查 Evolution/Session/live Agent 全空、20 workspace、credential、selection/call config、normal/0 retry、
-tool surface 与 parent Skill identity。它能保证脏状态 fail closed，但不生成独立全零 readiness receipt。
-R0.1 与 R0.2 已闭合 main-entry identity 与 command-scoped Provider policy。正式 operation 不需要增加新
-Runtime、预算器、适配器、checker 或治理框架，但必须永久遵守以下门顺序：
+Activity-03 的模型选择 receipt 已持久化 DeepSeek，但进程在 lifecycle 前以 exit 13 结束；offline
+恢复成功且 lifecycle invocation=0。该历史结果保持已消费。根因位于 DSH/HMR 的关闭边界：DSH
+关闭 Profile 时，HMR watcher readiness 必须结算其拥有的 promise。当前修复只处理这一 owner，
+没有改变 receipt、安全边界或正式 Provider 工作。
 
-1. reviewed feature 受控进入 main；
-2. 对应 automatic exact-main push attempt 1 的 Python、TypeScript、installer-windows 三 job 全绿；
-3. 只读证明既有 activity-02 install/archive、manifest/freeze、20 workspace、25 Session allocation 和
-   两次 checker failure transport 未漂移；不重跑 installer/status/generator/checker；
-4. 只运行恰好一次 formal real lifecycle，并由同一次调用内部的 product-native preflight 承担 readiness；
-5. 任何首次失败都保留现场并停止，不挑结果、不补跑局部活动。
+下一步只允许在 exact-main CI 通过后进行一次全新的官方零请求安装证明。未来的模型激活是 setup，
+不会消费正式 Activity；第一次未来 `controlled-lifecycle` 调用才开始并消费它。Activity-01、
+Activity-02、Activity-03 的历史分类保持不变，任何真实 Provider 成功仍未被声称。
 
 正式运行仍冻结五任务和单次尝试以保证比较公平，不设 Tianwen 侧模型、token 或金额上限；
 也不绕过冻结证据门和 standing authorization 边界。
@@ -356,10 +326,10 @@ incumbent 晋升、外部用户效果或市场泛化主张。缺少这些证据�
 
 1. 当前代码、exact SHA、测试与 exact-main CI：实现和运行事实；
 2. 本文：整体产品架构、组件关系、当前方向和阅读入口；
-3. [`activity-02 recovery design`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-02-recovery-design.md)、[`packet`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-02-packet.md) 与 [`plan`](superpowers/plans/2026-08-24-tianwen-v0.1-controlled-real-activity-02-recovery.md)：当前 recovery authority、exact argv、隔离边界与实施顺序；
-4. [`tianwen-v0.1-controlled-real-activity-01-handoff.md`](operations/tianwen-v0.1-controlled-real-activity-01-handoff.md)：activity-01 usage failure、证据分级与隔离的 activity-02 恢复门；
-5. [`2026-08-23 controlled real operation design`](superpowers/specs/2026-08-23-tianwen-v0.1-controlled-real-operation-design.md) 与 [`plan`](superpowers/plans/2026-08-23-tianwen-v0.1-controlled-real-operation.md)：activity-01 的历史 authority 与实现审计，不再覆盖 recovery authority；
-6. [`tianwen-v0.1-controlled-real-operation-readiness-handoff.md`](operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)：已安装入口 readiness、分段验证历史与 pre-operation 隐私边界；
+3. 已批准的 [`one-shot Profile lifecycle repair design`](superpowers/specs/2026-08-24-tianwen-one-shot-profile-lifecycle-repair-design.md) 与其 [`handoff`](operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md)：当前一次性 Profile 生命周期修复的执行 authority 和证据边界；
+4. Activity-01、Activity-02 和 Activity-03 的 operation design、packet、plan 与 handoff 都是历史 authorities，不是当前执行说明：[`Activity-01 handoff`](operations/tianwen-v0.1-controlled-real-activity-01-handoff.md)、[`Activity-02 recovery design`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-02-recovery-design.md)、[`packet`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-02-packet.md)、[`plan`](superpowers/plans/2026-08-24-tianwen-v0.1-controlled-real-activity-02-recovery.md)、[`Activity-03 design`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-03-design.md)、[`packet`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-03-packet.md) 与 [`plan`](superpowers/plans/2026-08-24-tianwen-v0.1-controlled-real-activity-03.md)；它们保留当时事实，不改写分类。
+5. [`2026-08-23 controlled real operation design`](superpowers/specs/2026-08-23-tianwen-v0.1-controlled-real-operation-design.md) 与 [`plan`](superpowers/plans/2026-08-23-tianwen-v0.1-controlled-real-operation.md)：Activity-01 的历史 authority 与实现审计；
+6. [`tianwen-v0.1-controlled-real-operation-readiness-handoff.md`](operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)：历史 installed-ingress readiness、分段验证和隐私边界；
 7. [`2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)：当前评测、Shadow、Promotion、Rollback 与停止线；
 8. [`2026-08-23-tianwen-v0.1-controlled-real-skill-lifecycle.md`](superpowers/plans/2026-08-23-tianwen-v0.1-controlled-real-skill-lifecycle.md)：受控机制的逐 Task 实现、复审与合并顺序；
 9. [`tianwen-v0.1-controlled-skill-lifecycle-handoff.md`](operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md)：scripted 历史依据，记录受控全链 fixture 的机制、计数、隐私与证据限制；
