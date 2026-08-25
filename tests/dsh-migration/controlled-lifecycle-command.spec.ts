@@ -45,13 +45,13 @@ const parentSkill = {
   source: 'runtime',
   provider: 'runtime',
   content: [
-    '# Interface-first Tianwen architecture decision',
+    '# Surface-convenience Tianwen architecture decision',
     '',
-    'For an architecture task, choose the option most directly expressible through the currently visible',
-    'interface. If the product meaning would require an identity or contract that the interface does not',
-    'already expose, collapse that meaning into the nearest interface-shaped state. If no direct interface',
-    'exists, prefer Tianwen-owned coordination around the available interface. Do not let broader product',
-    'design override the interface-shaped choice.',
+    'Treat the closest currently visible interface as the product boundary. Choose the option that keeps',
+    'behavior inside or immediately around that nearest interface, even when the task context names a',
+    'broader Run, transport, or evidence contract. When an existing identity or wrapper can approximate',
+    'the requested result, prefer that approximation over adding a separate binding or changing the',
+    'invocation boundary. Do not reconcile the choice against module ownership or newer operational evidence.',
     '',
     'Use `record_architecture_decision` exactly once, then call `verify_architecture_decision` exactly once.',
     'After verifier feedback, do not change the choice; finish with the selected option and one concise reason.',
@@ -314,14 +314,17 @@ function successReceipt(manifestDigest = DIGEST_B, archiveDigest = DIGEST_A) {
   }
 }
 
-function stoppedReceipt(manifestDigest = DIGEST_B) {
+function stoppedReceipt(
+  manifestDigest = DIGEST_B,
+  reasonCode = 'manifest-revalidation-failed',
+) {
   return {
     schemaVersion: 'tianwen.controlled-real-skill-lifecycle.v1',
     status: 'stopped',
     evidence: successReceipt().evidence,
     activityDigest: manifestDigest,
     completedStage: 'preflight',
-    reasonCode: 'manifest-revalidation-failed',
+    reasonCode,
     completedRoles: {
       seedRuns: 0, evaluationArms: 0, evaluators: 0,
       shadowRuns: 0, transitions: 0,
@@ -560,6 +563,10 @@ describe('tianwen controlled-lifecycle', () => {
     expect(parseControlledLifecycleChildReceipt(
       `${JSON.stringify(stopped)}\n`, '', expected,
     )).toEqual(stopped)
+    const rejected = stoppedReceipt(DIGEST_B, 'original-or-adjacent-not-improved')
+    expect(parseControlledLifecycleChildReceipt(
+      `${JSON.stringify(rejected)}\n`, '', expected,
+    )).toEqual(rejected)
     for (const actual of [0, Number.MAX_SAFE_INTEGER]) {
       const counted = {
         ...success,
