@@ -963,7 +963,7 @@ describe('controlled real Skill lifecycle runner', () => {
       }).then(() => undefined, cause => cause as {
         code?: string, completedStage?: string, message?: string,
       })
-      expect(error).toMatchObject({ code: 'evaluator-failed', completedStage: 'evaluation' })
+      expect(error).toMatchObject({ code: 'provider-failed', completedStage: 'evaluation' })
       expect(error?.message).not.toContain('raw evaluator provider detail')
       expect(mounted.adapter.requests).toHaveLength(49)
       expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillShadows()).toEqual([])

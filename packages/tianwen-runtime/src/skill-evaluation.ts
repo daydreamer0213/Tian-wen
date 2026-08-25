@@ -833,15 +833,61 @@ function parseControlledEvaluatorSubmission(value: unknown): ControlledEvaluator
   }
 }
 
-function controlledIdentityExposed(
+function serializedContainsControlledIdentity(
+  serialized: string,
+  identity: string,
+): boolean {
+  return identity.length > 0
+    && (serialized.includes(identity)
+      || serialized.includes(JSON.stringify(identity).slice(1, -1)))
+}
+
+function controlledForbiddenIdentityExposed(
   value: unknown,
   forbidden: ReadonlySet<string>,
 ): boolean {
   const serialized = JSON.stringify(value)
-  return /\b(?:baseline|candidate)\b/iu.test(serialized)
-    || [...forbidden].some(identity => identity.length > 0
-      && (serialized.includes(identity)
-        || serialized.includes(JSON.stringify(identity).slice(1, -1))))
+  return [...forbidden].some(identity =>
+    serializedContainsControlledIdentity(serialized, identity))
+}
+
+function controlledIdentityExposed(
+  value: unknown,
+  forbidden: ReadonlySet<string>,
+): boolean {
+  return /\b(?:baseline|candidate)\b/iu.test(JSON.stringify(value))
+    || controlledForbiddenIdentityExposed(value, forbidden)
+}
+
+function controlledEvaluatorForbiddenIdentities(
+  task: Pick<RunControlledSkillEvaluatorTaskInput, 'goal' | 'input'>,
+  forbidden: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const commonContext = JSON.stringify({ goal: task.goal, input: task.input })
+  return new Set([...forbidden].filter(identity =>
+    !serializedContainsControlledIdentity(commonContext, identity)))
+}
+
+function redactControlledEvaluatorCommonContext(
+  value: unknown,
+  context: Pick<RunControlledSkillEvaluatorTaskInput, 'goal' | 'input'>,
+): unknown {
+  if (typeof value === 'string') {
+    return [context.goal, context.input].reduce((text, common) => text
+      .replaceAll(common, '<controlled-common-context>')
+      .replaceAll(
+        JSON.stringify(common).slice(1, -1),
+        '<controlled-common-context>',
+      ), value)
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => redactControlledEvaluatorCommonContext(item, context))
+  }
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    key,
+    redactControlledEvaluatorCommonContext(item, context),
+  ]))
 }
 
 function evaluatorVisibleRequest(request: GenerateOptions) {
@@ -866,7 +912,13 @@ function evaluatorRequestReason(
     return 'request-contract-mismatch'
   }
   if (request.messages.some(message => record(message.source)?.kind === 'skill-catalog')
-    || controlledIdentityExposed(evaluatorVisibleRequest(request), state.forbidden)) {
+    || controlledIdentityExposed(
+      redactControlledEvaluatorCommonContext(
+        evaluatorVisibleRequest(request),
+        state.commonContext,
+      ),
+      state.forbidden,
+    )) {
     return 'identity-exposed'
   }
   return undefined
@@ -2462,11 +2514,9 @@ export class TianwenSkillEvaluationService extends Service {
       })
     }
     if (parsed.tasks.some(task => controlledIdentityExposed({
-      goal: task.goal,
-      input: task.input,
-      baselineMaterial: materials.get(task.taskId)!.baseline.text,
-      candidateMaterial: materials.get(task.taskId)!.candidate.text,
-    }, forbidden))) {
+      x: materials.get(task.taskId)!.baseline.text,
+      y: materials.get(task.taskId)!.candidate.text,
+    }, controlledEvaluatorForbiddenIdentities(task, forbidden)))) {
       throw new ControlledSkillEvaluatorPreflightError('identity-exposed')
     }
 
@@ -2532,7 +2582,8 @@ export class TianwenSkillEvaluationService extends Service {
         const state: ControlledEvaluatorState = {
           sessionId: planned.evaluatorSessionId,
           config: resolved,
-          forbidden,
+          forbidden: controlledEvaluatorForbiddenIdentities(task, forbidden),
+          commonContext: { goal: task.goal, input: task.input },
           requests: [],
           active: false,
           deadline: 0,
@@ -3896,6 +3947,7 @@ interface ControlledEvaluatorState {
   readonly sessionId: string
   readonly config: LlmCallConfig
   readonly forbidden: ReadonlySet<string>
+  readonly commonContext: Pick<RunControlledSkillEvaluatorTaskInput, 'goal' | 'input'>
   readonly requests: GenerateOptions[]
   agent?: AgentHandle['agent']
   active: boolean

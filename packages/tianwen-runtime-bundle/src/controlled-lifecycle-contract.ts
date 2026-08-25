@@ -184,6 +184,7 @@ const STOPPED_REASON_CODES = [
   'candidate-objective-hard-gate-failed', 'objective-inconclusive',
   'original-or-adjacent-not-improved', 'material-missing', 'identity-exposed',
   'objective-facts-incomplete', 'score-not-submitted',
+  'submission-invalid', 'evidence-mismatch',
   'candidate-subjective-total-lower', 'candidate-dimension-regression',
   'evaluator-failed', 'shadow-failed', 'transition-failed',
   'persistence-failed', 'identity-mismatch', 'workspace-drift', 'root-drift',

@@ -233,6 +233,7 @@ async function mountControlledRuntime(
     readonly inconclusiveCandidateTaskType?: typeof taskTypes[number]
     readonly evaluatorRequestDelayMs?: number
     readonly tamperEvaluatorRequestIdentity?: boolean
+    readonly includeReviewedCommonIdentityContext?: boolean
     readonly includeWorkspacePolicyContext?: boolean
     readonly includeRoleSpecificPromptDrift?: boolean
   } = {},
@@ -358,8 +359,12 @@ async function mountControlledRuntime(
     return {
       taskId: `eval-task:${taskType}` as const,
       taskType,
-      goal: `Complete controlled ${taskType} task ${index}.`,
-      input: `Use the available Skill, then verify controlled task ${index}.`,
+      goal: options.includeReviewedCommonIdentityContext === true
+        ? `Compare the candidate architecture for controlled ${taskType} task ${index}.`
+        : `Complete controlled ${taskType} task ${index}.`,
+      input: options.includeReviewedCommonIdentityContext === true
+        ? `Use ${parentSkill.name} for the shared task context, then verify task ${index}.`
+        : `Use the available Skill, then verify controlled task ${index}.`,
       baselineWorkspaceRoot,
       candidateWorkspaceRoot,
       workspaceSnapshot,
@@ -810,6 +815,72 @@ describe('controlled Skill evaluation Runtime', () => {
         )
         expect(inspection.meta.cwd).toBeUndefined()
       }
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps reviewed common task identity visible while blinding arm material', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-reviewed-common-context',
+      [...blindSafeArmScript(), ...successfulEvaluatorScript()],
+      { includeReviewedCommonIdentityContext: true },
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )
+      expect(receipt).toMatchObject({
+        state: 'terminal',
+        completedTaskIds: mounted.input.tasks.map(task => task.taskId),
+        result: { mechanismVerdict: 'pass', reasonCode: 'all-gates-passed' },
+      })
+      const evaluatorRequests = mounted.adapter.requests.slice(30)
+      expect(evaluatorRequests).toHaveLength(5)
+      for (const request of evaluatorRequests) {
+        const message = request.messages.findLast(item => item.role === 'user')!
+        const block = message.content.find(item => item.type === 'text')!
+        const envelope = JSON.parse(block.type === 'text' ? block.text : '') as {
+          input: string
+          x: { finalText: string }
+          y: { finalText: string }
+        }
+        expect(envelope.input).toContain(parentSkill.name)
+        expect(envelope.x.finalText).not.toMatch(/\b(?:baseline|candidate)\b/iu)
+        expect(envelope.y.finalText).not.toMatch(/\b(?:baseline|candidate)\b/iu)
+      }
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('still rejects arm role labels after allowing reviewed common context', async () => {
+    const mounted = await mountControlledRuntime(
+      'evaluator-arm-role-identity',
+      [...successfulArmScript(), ...successfulEvaluatorScript()],
+      { includeReviewedCommonIdentityContext: true },
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+      const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )).rejects.toMatchObject({ code: 'identity-exposed' })
+      expect(create).not.toHaveBeenCalled()
+      expect(mounted.harness.ctx.tianwenEvolution.getControlledSkillEvaluationBlindMap(
+        arms.evaluationId,
+      )).toBeUndefined()
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()
