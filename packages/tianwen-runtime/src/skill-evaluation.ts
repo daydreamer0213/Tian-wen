@@ -2908,90 +2908,9 @@ export class TianwenSkillEvaluationService extends Service {
       ) throw new ControlledSkillEvaluationPreflightError('scripted-boundary-mismatch')
     }
 
-    const prepared: PreparedControlledSkillEvaluationArm[] = []
     const completedTaskIds: ControlledSkillEvalTaskId[] = []
     const agentOptions = requestAgentOptions(resolved)
     try {
-      for (const [index, task] of parsed.tasks.entries()) {
-        const planned = expectedPlan.tasks[index]!
-        for (const role of ['baseline', 'candidate'] as const) {
-          const skill = role === 'baseline'
-            ? {
-                ...parentManifest.parent,
-                provider: parentManifest.resolvedProvider,
-              } as SkillDefinition
-            : candidateSkill
-          const planArm = planned[role]
-          const cwd = role === 'baseline'
-            ? task.baselineWorkspaceRoot
-            : task.candidateWorkspaceRoot
-          const guard: ControlledArmGuardState = {
-            sessionId: planArm.sessionId,
-            allowedTools: new Set(planned.allowedTools),
-            maxToolCalls: planned.stopContract.maxToolCalls,
-            active: false,
-            deadline: 0,
-            toolCalls: 0,
-            usedToolNames: new Set(),
-          }
-          const handle = await this.ctx.agents.create({
-            sessionId: SessionId(planArm.sessionId),
-            meta: { cwd },
-            agentOptions,
-            setup: async agentCtx => {
-              installModelSelection(agentCtx, {
-                current: selection,
-                assembled: undefined,
-              })
-              agentCtx.tools.presentAs('native')
-              agentCtx.tools.restrict({ allow: planned.allowedTools })
-              agentCtx.tools.guard(execution => controlledArmGuard(execution, guard))
-              await agentCtx.inject(['skills'], scopedCtx => {
-                scopedCtx.skills.register(skill)
-              })
-            },
-          })
-          guard.agent = handle.agent
-          prepared.push({ task, planned, role, skill, handle, guard })
-        }
-      }
-
-      for (const arm of prepared) {
-        let actualSkill: SkillDefinition | undefined
-        await arm.handle.agent.ctx.inject(['skills'], async scopedCtx => {
-          actualSkill = await scopedCtx.skills.get(arm.skill.name, {
-            cwd: arm.handle.agent.session.header.cwd,
-            scope: arm.handle.agent,
-          })
-        })
-        const expectedVersionId = arm.role === 'baseline'
-          ? candidate.parentVersionId
-          : prepareRunSkillManifest({
-              runId: arm.planned[arm.role].runId,
-              skill: candidateSkill,
-            }).parentVersionId
-        const schemas = arm.handle.agent.ctx.tools.schemas(arm.handle.agent)
-          .toSorted((left, right) => left.name.localeCompare(right.name))
-        const expectedCwd = arm.role === 'baseline'
-          ? arm.task.baselineWorkspaceRoot
-          : arm.task.candidateWorkspaceRoot
-        if (
-          actualSkill === undefined
-          || !sameSkillVersion(actualSkill, expectedVersionId)
-          || sha256(schemas) !== arm.planned.toolSchemaDigest
-          || arm.handle.agent.session.header.cwd !== expectedCwd
-          || sha256(arm.handle.agent.options) !== sha256(agentOptions)
-        ) throw new ControlledSkillEvaluationPreflightError('root-skill-mismatch')
-      }
-      for (const task of parsed.tasks) {
-        for (const cwd of [task.baselineWorkspaceRoot, task.candidateWorkspaceRoot]) {
-          const skill = await this.ctx.skills.get(parentManifest.parent.name, { cwd })
-          if (skill === undefined || !sameSkillVersion(skill, candidate.parentVersionId)) {
-            throw new ControlledSkillEvaluationPreflightError('root-skill-mismatch')
-          }
-        }
-      }
-
       const opened = this.ctx.tianwenEvolution.openControlledSkillEvaluation({
         candidateId: parsed.candidateId,
         protocolId: parsed.protocolId,
@@ -3014,43 +2933,122 @@ export class TianwenSkillEvaluationService extends Service {
         })
       }
 
-      for (const arm of prepared) {
-        const planned = arm.planned[arm.role]
-        let boundRunId: TianwenRunId | undefined
-        await arm.handle.agent.ctx.inject(['skills'], async scopedCtx => {
-          const binding = await this.ctx.tianwenLearningIntake.bindRunWithSkill(
-            arm.handle.agent,
-            {
-              goalRef: `goal:controlled-skill-evaluation:${plan.protocolId}`,
-              taskRef: `task:${arm.planned.taskId}:${arm.role}`,
-              scopeKey: plan.scopeKey,
-              acceptanceContract: arm.planned.acceptanceContract,
-              acceptanceSubjectDigest: arm.planned.acceptanceSubjectDigest,
-            },
-            arm.skill.name,
-            scopedCtx.skills,
-          )
-          boundRunId = binding.runId
-        })
-        if (boundRunId !== planned.runId) {
-          return stoppedControlledReceipt(plan, [], {
-            stage: 'postflight',
-            taskId: arm.planned.taskId,
-            role: arm.role,
-            reasonCode: 'run-fact-mismatch',
-          })
+      const runArm = async (
+        task: RunControlledSkillEvaluationTaskInput,
+        planned: ControlledSkillEvaluationPlan['tasks'][number],
+        role: 'baseline' | 'candidate',
+        skill: SkillDefinition,
+      ): Promise<ControlledArmRunResult> => {
+        const planArm = planned[role]
+        const cwd = role === 'baseline'
+          ? task.baselineWorkspaceRoot
+          : task.candidateWorkspaceRoot
+        const guard: ControlledArmGuardState = {
+          sessionId: planArm.sessionId,
+          allowedTools: new Set(planned.allowedTools),
+          maxToolCalls: planned.stopContract.maxToolCalls,
+          active: false,
+          deadline: 0,
+          toolCalls: 0,
+          usedToolNames: new Set(),
         }
+        let handle: AgentHandle | undefined
+        let result: ControlledArmRunResult = { reasonCode: 'run-fact-mismatch' }
+        try {
+          handle = await this.ctx.agents.create({
+            sessionId: SessionId(planArm.sessionId),
+            meta: { cwd },
+            agentOptions,
+            setup: async agentCtx => {
+              installModelSelection(agentCtx, {
+                current: selection,
+                assembled: undefined,
+              })
+              agentCtx.tools.presentAs('native')
+              agentCtx.tools.restrict({ allow: planned.allowedTools })
+              agentCtx.tools.guard(execution => controlledArmGuard(execution, guard))
+              await agentCtx.inject(['skills'], scopedCtx => {
+                scopedCtx.skills.register(skill)
+              })
+            },
+          })
+          guard.agent = handle.agent
+          const armHandle = handle
+          const prepared: PreparedControlledSkillEvaluationArm = {
+            task,
+            planned,
+            role,
+            skill,
+            handle: armHandle,
+            guard,
+          }
+          let actualSkill: SkillDefinition | undefined
+          await armHandle.agent.ctx.inject(['skills'], async scopedCtx => {
+            actualSkill = await scopedCtx.skills.get(skill.name, {
+              cwd: armHandle.agent.session.header.cwd,
+              scope: armHandle.agent,
+            })
+          })
+          const expectedVersionId = role === 'baseline'
+            ? candidate.parentVersionId
+            : prepareRunSkillManifest({
+                runId: planArm.runId,
+                skill: candidateSkill,
+              }).parentVersionId
+          const schemas = armHandle.agent.ctx.tools.schemas(armHandle.agent)
+            .toSorted((left, right) => left.name.localeCompare(right.name))
+          if (
+            actualSkill === undefined
+            || !sameSkillVersion(actualSkill, expectedVersionId)
+            || sha256(schemas) !== planned.toolSchemaDigest
+            || armHandle.agent.session.header.cwd !== cwd
+            || sha256(armHandle.agent.options) !== sha256(agentOptions)
+          ) {
+            result = { reasonCode: 'root-skill-drift' }
+          } else {
+            let boundRunId: TianwenRunId | undefined
+            await armHandle.agent.ctx.inject(['skills'], async scopedCtx => {
+              const binding = await this.ctx.tianwenLearningIntake.bindRunWithSkill(
+                armHandle.agent,
+                {
+                  goalRef: `goal:controlled-skill-evaluation:${plan.protocolId}`,
+                  taskRef: `task:${planned.taskId}:${role}`,
+                  scopeKey: plan.scopeKey,
+                  acceptanceContract: planned.acceptanceContract,
+                  acceptanceSubjectDigest: planned.acceptanceSubjectDigest,
+                },
+                skill.name,
+                scopedCtx.skills,
+              )
+              boundRunId = binding.runId
+            })
+            result = boundRunId === planArm.runId
+              ? await this.runControlledArm(prepared, plan, resolved, resolveVerdict)
+              : { reasonCode: 'run-fact-mismatch' }
+          }
+        } catch {
+          result = { reasonCode: 'run-fact-mismatch' }
+        } finally {
+          if (handle !== undefined) {
+            this.requests.delete(String(handle.agent.id))
+            try {
+              await handle.dispose()
+            } catch {
+              result = { reasonCode: 'run-fact-mismatch' }
+            }
+          }
+        }
+        return result
       }
 
+      const baselineSkill = {
+        ...parentManifest.parent,
+        provider: parentManifest.resolvedProvider,
+      } as SkillDefinition
+
       for (const [index, planned] of plan.tasks.entries()) {
-        const baseline = prepared[index * 2]!
-        const candidateArm = prepared[index * 2 + 1]!
-        const baselineResult = await this.runControlledArm(
-          baseline,
-          plan,
-          resolved,
-          resolveVerdict,
-        )
+        const task = parsed.tasks[index]!
+        const baselineResult = await runArm(task, planned, 'baseline', baselineSkill)
         if (baselineResult.arm === undefined) {
           return stoppedControlledReceipt(plan, completedTaskIds, {
             stage: 'baseline',
@@ -3061,20 +3059,8 @@ export class TianwenSkillEvaluationService extends Service {
         }
 
         try {
-          if (sha256(workspaceSnapshot(candidateArm.task.candidateWorkspaceRoot))
-            !== sha256(candidateArm.task.workspaceSnapshot)) {
-            return stoppedControlledReceipt(plan, completedTaskIds, {
-              stage: 'candidate',
-              taskId: planned.taskId,
-              role: 'candidate',
-              reasonCode: 'root-skill-drift',
-            })
-          }
-          const rootSkill = await this.ctx.skills.get(parentManifest.parent.name, {
-            cwd: candidateArm.task.candidateWorkspaceRoot,
-          })
-          if (rootSkill === undefined
-            || !sameSkillVersion(rootSkill, candidate.parentVersionId)) {
+          if (sha256(workspaceSnapshot(task.candidateWorkspaceRoot))
+            !== sha256(task.workspaceSnapshot)) {
             return stoppedControlledReceipt(plan, completedTaskIds, {
               stage: 'candidate',
               taskId: planned.taskId,
@@ -3090,12 +3076,7 @@ export class TianwenSkillEvaluationService extends Service {
             reasonCode: 'root-skill-drift',
           })
         }
-        const candidateResult = await this.runControlledArm(
-          candidateArm,
-          plan,
-          resolved,
-          resolveVerdict,
-        )
+        const candidateResult = await runArm(task, planned, 'candidate', candidateSkill)
         if (candidateResult.arm === undefined) {
           return stoppedControlledReceipt(plan, completedTaskIds, {
             stage: 'candidate',
@@ -3146,24 +3127,6 @@ export class TianwenSkillEvaluationService extends Service {
           return terminalControlledReceipt(plan, completedTaskIds, result)
         }
       }
-      try {
-        for (const task of parsed.tasks) {
-          for (const cwd of [task.baselineWorkspaceRoot, task.candidateWorkspaceRoot]) {
-            const rootSkill = await this.ctx.skills.get(parentManifest.parent.name, { cwd })
-            if (rootSkill === undefined
-              || !sameSkillVersion(rootSkill, candidate.parentVersionId)) {
-              throw new Error('root Skill drift')
-            }
-          }
-        }
-      } catch {
-        return stoppedControlledReceipt(plan, completedTaskIds, {
-          stage: 'postflight',
-          taskId: plan.tasks.at(-1)!.taskId,
-          role: null,
-          reasonCode: 'root-skill-drift',
-        })
-      }
       return {
         schemaVersion: 'tianwen.controlled-skill-evaluation-arms-receipt.v1',
         evaluationId: plan.evaluationId,
@@ -3180,24 +3143,6 @@ export class TianwenSkillEvaluationService extends Service {
           ? 'root-skill-drift'
           : 'run-fact-mismatch',
       })
-    } finally {
-      let disposeFailed = false
-      for (const arm of prepared.reverse()) {
-        this.requests.delete(String(arm.handle.agent.id))
-        try {
-          await arm.handle.dispose()
-        } catch {
-          disposeFailed = true
-        }
-      }
-      if (disposeFailed) {
-        return stoppedControlledReceipt(expectedPlan, completedTaskIds, {
-          stage: 'postflight',
-          taskId: expectedPlan.tasks.at(-1)!.taskId,
-          role: null,
-          reasonCode: 'run-fact-mismatch',
-        })
-      }
     }
   }
 

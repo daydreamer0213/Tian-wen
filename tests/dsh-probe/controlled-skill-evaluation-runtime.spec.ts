@@ -1427,13 +1427,15 @@ describe('controlled Skill evaluation Runtime', () => {
     }
   })
 
-  it('binds all ten Runs before one provider failure and does not start C', async () => {
+  it('binds only the first Run before one provider failure and does not start C', async () => {
     const sentinel = 'D:/private/sk-provider-error-must-not-leak'
     const mounted = await mountControlledRuntime('provider-failure', [new Error(sentinel)])
     const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
     let boundAtFirstRequest = 0
+    let liveAtFirstRequest = 0
     mounted.harness.ctx.on('llm/stream', (request, next) => {
       if (String(request.sessionId) === mounted.input.tasks[0]!.baselineSessionId) {
+        liveAtFirstRequest = mounted.harness.ctx.agents.list().length
         const plan = mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()[0]
         boundAtFirstRequest = plan === undefined
           ? 0
@@ -1465,8 +1467,9 @@ describe('controlled Skill evaluation Runtime', () => {
       })
       const [plan] = mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()
       expect(plan).toBeDefined()
-      expect(create).toHaveBeenCalledTimes(10)
-      expect(boundAtFirstRequest).toBe(10)
+      expect(create).toHaveBeenCalledTimes(1)
+      expect(boundAtFirstRequest).toBe(1)
+      expect(liveAtFirstRequest).toBe(1)
       expect(mounted.adapter.requests).toHaveLength(1)
       expect(mounted.adapter.requests[0]!.sessionId).toBe(first.baselineSessionId)
       expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluationObjectives(
@@ -1477,6 +1480,12 @@ describe('controlled Skill evaluation Runtime', () => {
         .map(header => String(header.id))
       expect(persistedIds).toContain(first.baselineSessionId)
       expect(persistedIds).not.toContain(first.candidateSessionId)
+      const boundRunIds = plan!.tasks.flatMap(task => [task.baseline.runId, task.candidate.runId])
+        .filter(runId =>
+          mounted.harness.ctx.tianwenEvolution.getRunBinding(runId) !== undefined
+          || mounted.harness.ctx.tianwenEvolution.getRunSkillManifest(runId) !== undefined)
+      expect(boundRunIds).toEqual([plan!.tasks[0]!.baseline.runId])
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
       expect(JSON.stringify(receipt)).not.toContain(sentinel)
       expect(JSON.stringify(receipt)).not.toContain(first.baselineWorkspaceRoot)
       expect(JSON.stringify(receipt)).not.toContain(first.input)
@@ -1652,6 +1661,8 @@ describe('controlled Skill evaluation Runtime', () => {
   })
 
   it('stops after a Candidate provider failure without forging an objective', async () => {
+    let boundAtCandidateRequest = 0
+    let liveAtCandidateRequest = 0
     const firstTask = taskTypes[0]
     const mounted = await mountControlledRuntime('candidate-provider-failure', [
       toolCallResponse('b-skill', 'skill', { name: parentSkill.name }),
@@ -1661,6 +1672,21 @@ describe('controlled Skill evaluation Runtime', () => {
       textResponse('baseline complete'),
       new Error('D:/private/candidate-provider-error'),
     ])
+    const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+    mounted.harness.ctx.on('llm/stream', (request, next) => {
+      if (String(request.sessionId) === mounted.input.tasks[0]!.candidateSessionId) {
+        liveAtCandidateRequest = mounted.harness.ctx.agents.list().length
+        const plan = mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()[0]
+        boundAtCandidateRequest = plan === undefined
+          ? 0
+          : plan.tasks.flatMap(task => [task.baseline.runId, task.candidate.runId])
+              .filter(runId =>
+                mounted.harness.ctx.tianwenEvolution.getRunBinding(runId) !== undefined
+                && mounted.harness.ctx.tianwenEvolution.getRunSkillManifest(runId) !== undefined)
+              .length
+      }
+      return next()
+    })
     try {
       const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
         mounted.input,
@@ -1674,10 +1700,27 @@ describe('controlled Skill evaluation Runtime', () => {
           reasonCode: 'provider-failed',
         },
       })
+      expect(create).toHaveBeenCalledTimes(2)
+      expect(boundAtCandidateRequest).toBe(2)
+      expect(liveAtCandidateRequest).toBe(1)
+      expect(mounted.harness.ctx.agents.list()).toEqual([])
       expect(mounted.adapter.requests).toHaveLength(4)
       const [plan] = mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations()
       expect(mounted.harness.ctx.tianwenEvolution
         .listControlledSkillEvaluationObjectives(plan!.evaluationId)).toEqual([])
+      const boundRunIds = plan!.tasks.flatMap(task => [task.baseline.runId, task.candidate.runId])
+        .filter(runId =>
+          mounted.harness.ctx.tianwenEvolution.getRunBinding(runId) !== undefined
+          || mounted.harness.ctx.tianwenEvolution.getRunSkillManifest(runId) !== undefined)
+      expect(boundRunIds).toEqual([
+        plan!.tasks[0]!.baseline.runId,
+        plan!.tasks[0]!.candidate.runId,
+      ])
+      expect((await mounted.harness.ctx.sessionPersistence.list())
+        .map(header => String(header.id)).toSorted()).toEqual([
+          mounted.input.tasks[0]!.baselineSessionId,
+          mounted.input.tasks[0]!.candidateSessionId,
+        ].toSorted())
       expect(JSON.stringify(receipt)).not.toContain('candidate-provider-error')
       const repeated = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
         mounted.input,
@@ -1782,15 +1825,11 @@ describe('controlled Skill evaluation Runtime', () => {
     }
   })
 
-  it('does not start C after the root Skill drifts during B', async () => {
-    const taskType = taskTypes[0]
-    const mounted = await mountControlledRuntime('root-drift-before-c', [
-      toolCallResponse('root-b-skill', 'skill', { name: parentSkill.name }),
-      toolCallResponse('root-b-verify', acceptance.toolName, {
-        subject: { task: taskType, accepted: true },
-      }),
-      textResponse('baseline complete'),
-    ])
+  it('continues from frozen Skill definitions after the ambient root registration ends', async () => {
+    const mounted = await mountControlledRuntime(
+      'frozen-skill-after-root-dispose',
+      successfulArmScript(),
+    )
     let baselineRequests = 0
     mounted.harness.ctx.on('llm/stream', (request, next) => {
       if (String(request.sessionId) === mounted.input.tasks[0]!.baselineSessionId) {
@@ -1804,15 +1843,11 @@ describe('controlled Skill evaluation Runtime', () => {
         mounted.input,
       )
       expect(receipt).toMatchObject({
-        state: 'stopped',
-        completedTaskIds: [],
-        stop: {
-          stage: 'candidate',
-          role: 'candidate',
-          reasonCode: 'root-skill-drift',
-        },
+        state: 'awaiting-evaluator',
+        completedTaskIds: mounted.input.tasks.map(task => task.taskId),
       })
-      expect(mounted.adapter.requests).toHaveLength(3)
+      expect(mounted.adapter.requests).toHaveLength(30)
+      expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(10)
     } finally {
       await mounted.harness.ctx.fiber.dispose()
     }
@@ -1861,7 +1896,7 @@ describe('controlled Skill evaluation Runtime', () => {
     }
   })
 
-  it('does not return success after a final root Skill drift', async () => {
+  it('does not replace frozen Skill authority with a final ambient root lookup', async () => {
     const mounted = await mountControlledRuntime('root-drift-postflight', successfulArmScript())
     const last = mounted.input.tasks.at(-1)!.candidateSessionId
     let lastRequests = 0
@@ -1877,15 +1912,11 @@ describe('controlled Skill evaluation Runtime', () => {
         mounted.input,
       )
       expect(receipt).toMatchObject({
-        state: 'stopped',
+        state: 'awaiting-evaluator',
         completedTaskIds: mounted.input.tasks.map(task => task.taskId),
-        stop: {
-          stage: 'postflight',
-          role: null,
-          reasonCode: 'root-skill-drift',
-        },
       })
       expect(mounted.adapter.requests).toHaveLength(30)
+      expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(10)
     } finally {
       await mounted.harness.ctx.fiber.dispose()
     }
