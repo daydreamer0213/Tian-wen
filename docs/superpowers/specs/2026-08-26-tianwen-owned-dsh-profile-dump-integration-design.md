@@ -84,6 +84,20 @@ a runtime dependency and is not pushed as part of this design.
 
 The patch changes ownership, not the fallback algorithm.
 
+### 5.3 Repository Profile verifier
+
+The existing migration verifier dumps a freshly installed probe Profile and then imports that
+Profile's bundle exports. The import phase historically depended on dump-config's accidental
+fallback side effect. With the product boundary corrected, the verifier must split those phases:
+
+1. run dump-config and prove the fallback is still absent;
+2. before executable module-resolution checks, call the public
+   `healProfilesModuleFallback()` seam with the exact installed DSH package anchor and probe home;
+3. prove the fallback now exists and continue the existing import checks.
+
+This is an explicit test-harness transition into runtime resolution preparation. It does not put the
+side effect back into config inspection and does not change the installed product.
+
 ## 6. Implementation surface
 
 Expected product files:
@@ -92,6 +106,8 @@ Expected product files:
 - `pnpm-workspace.yaml` — one new `patchedDependencies` entry;
 - `pnpm-lock.yaml` — generated patch binding;
 - `tests/dsh-migration/controlled-lifecycle-profile.spec.ts` — functional cold-dump assertion;
+- `scripts/verify-dsh-profile.mjs` — separate boot-free dump from executable import preparation;
+- `tests/dsh-migration/runtime-profile.spec.ts` — preserve the public Profile verifier contract;
 - installer/startup tests only if the existing public product tests cannot prove deployed behavior.
 
 Do not modify the Tianwen Runtime Bundle, DSH Profile patch, model selection, controlled lifecycle,
@@ -123,6 +139,10 @@ ordinary `normal/2`, controlled `normal/0`, title-LLM, and runner-presence asser
 No additional help or usage command is needed: model status already proves the real boot boundary.
 The real-boot check may allow enough time for the existing Windows link materialization cost. This
 task does not optimize that cost or change unrelated upstream E2E timeouts.
+
+Repository tests that intentionally perform this real cold preparation may use a bounded 240-second
+child limit on Windows. The boot-free Profile dump test retains its existing 60-second limit; the
+larger runtime limit must never be used to hide a slow config dump.
 
 ## 8. Failure and rollback
 

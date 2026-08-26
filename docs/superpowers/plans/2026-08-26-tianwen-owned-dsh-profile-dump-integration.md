@@ -68,6 +68,8 @@ version.
 
 - `pnpm-workspace.yaml`
 - `pnpm-lock.yaml`
+- `scripts/verify-dsh-profile.mjs`
+- `tests/dsh-migration/runtime-profile.spec.ts` only if a new assertion is needed
 
 1. Inspect the exact rc.7 package manifest and built Profile boot filename. Confirm the package is
    `0.1.0-rc.7` and the old call is present in `prepareProfile()` but absent from `composeProfile()`.
@@ -81,7 +83,14 @@ version.
    and no longer in the old location.
 6. Run the Profile spec. It must pass within its unchanged 60-second limit, with the fallback absent
    before, between, and after both dumps.
-7. Run `pnpm run check:dsh-install`, `pnpm run typecheck`, and the focused Runtime Bundle, model
+7. Update the repository Profile verifier's existing two-phase workflow. Immediately after its
+   dump, assert the fallback is absent. Before it imports installed bundle exports, call public
+   `healProfilesModuleFallback()` with the exact DSH package anchor and probe home, assert the
+   fallback exists, and continue the existing checks. Do not create a second resolver or copy the
+   fallback algorithm.
+8. Where an existing Windows test intentionally performs real cold fallback preparation, allow a
+   bounded 240-second child limit while retaining the boot-free dump test's 60-second limit.
+9. Run `pnpm run check:dsh-install`, `pnpm run typecheck`, and the focused Runtime Bundle, model
    configuration, controlled lifecycle command, installer, and Profile specs.
 
 Expected product outcome: config composition is fast and boot-free; all existing policy assertions
