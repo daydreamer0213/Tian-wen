@@ -34,6 +34,10 @@ surface is 505 links. The official installer's managed DSH host materializes a
 slightly larger complete closure of 510 links. The DSH source build's 233-link
 surface, the workspace package surface, and the managed-host surface are
 distinct deployment facts rather than interchangeable correctness thresholds.
+The product regression therefore records the observed total but gates on all
+eight boots completing, at least 500 links being present, and no private staged
+link remaining. Exact equality would make a valid reused installation fail on
+an unrelated extra package.
 
 The first GREEN of that D:-hosted revision exposed a second test-only defect:
 all eight CLI children had exited, while synchronous `rmSync(..., recursive)`

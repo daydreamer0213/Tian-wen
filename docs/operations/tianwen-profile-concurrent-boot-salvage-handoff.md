@@ -73,8 +73,11 @@ The source build's 233 links, Tianwen workspace's 505 links, and official
 managed host's 510 links are three different deployment closures. The first
 official-product check retained an expected-value failure after all 8 children
 succeeded but the workspace-only 505 threshold encountered the managed host's
-510 links. Making the deployment-specific expectation explicit was a test
-correction, not a product retry.
+510 links. A later pre-push main check observed 506 because that reused
+worktree retained one additional valid `negotiator` link. The final regression
+therefore requires all 8 real boots, a full-scale closure of at least 500
+links, and zero staged links while reporting the observed count. Removing exact
+cross-layout equality was a test correction, not a product retry.
 
 ## Tianwen integration facts
 
