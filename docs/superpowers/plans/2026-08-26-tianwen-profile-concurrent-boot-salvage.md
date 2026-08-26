@@ -54,10 +54,10 @@ Expected: the new branch points exactly at the frozen parent.
 - [ ] **Step 3: Install from the existing D:-hosted pnpm store**
 
 ```powershell
-pnpm install --frozen-lockfile --offline
+pnpm install --frozen-lockfile
 ```
 
-Expected: pnpm 11.7.0 completes without changing tracked files. If the store lacks a required artifact, stop and report the exact missing package instead of silently changing versions.
+Expected: pnpm 11.7.0 completes without changing tracked files or locked versions. Reuse the existing D:-hosted store; a missing locked tarball may be downloaded into that store, but no dependency version may change.
 
 - [ ] **Step 4: Run the clean focused baseline**
 
