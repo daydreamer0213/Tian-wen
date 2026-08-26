@@ -8,6 +8,9 @@
 
 **Tech Stack:** Node.js 22, TypeScript 6, Vitest 4, Node child-process IPC, Windows junctions, pnpm 11 patched dependencies, PowerShell 7.
 
+**Execution status:** Tasks 1-5 and Task 6 Steps 1-4 are complete. Task 6
+Step 5 (controlled main merge and exact-main CI) remains pending.
+
 ## Global Constraints
 
 - The natural task remains immutable `task-incomplete`; this work is controller-owned engineering evidence.
