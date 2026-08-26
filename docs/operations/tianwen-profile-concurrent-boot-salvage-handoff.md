@@ -105,8 +105,8 @@ Node command, after which its focused 25/25 and full 608-test gates passed.
 
 One built-CLI validation script accidentally used PowerShell's reserved
 `$HOME` variable name. Its intended D:-hosted path assignment failed, so 24
-invalid samples targeted `C:\Users\Administrator` and created one temporary
-`profiles\web` directory plus 233 fallback links. The samples were discarded.
+invalid samples targeted the Windows user-profile root on `C:` and created one
+temporary `profiles\web` directory plus 233 fallback links. The samples were discarded.
 The controller verified every created link target, removed only those 233 links
 and the new `web` directory, and restored the documented preflight state: ten
 regular Profile directories, no `web`, and zero reparse points. No historical
