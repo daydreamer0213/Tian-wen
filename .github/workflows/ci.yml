@@ -79,7 +79,9 @@ jobs:
           $testExit = 0
           try {
             New-Item -ItemType Directory -Force -Path 'D:\DevData' | Out-Null
-          pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts tests/dsh-migration/controlled-lifecycle-command.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/one-shot-profile-lifecycle.spec.ts
+            node tests/dsh-migration/profile-concurrent-boot.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Profile concurrent cold-boot check failed' }
+            pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts tests/dsh-migration/controlled-lifecycle-command.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/one-shot-profile-lifecycle.spec.ts
             $testExit = $LASTEXITCODE
           } finally {
             if ($mappedDrive) { & subst.exe D: /D }

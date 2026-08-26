@@ -4,7 +4,7 @@
 
 **Goal:** Turn the useful DSH concurrent-boot candidate into a deterministic controller-verified fix, then carry that fix in Tianwen's exact rc.7 dependency patches without changing the historical natural-task result.
 
-**Architecture:** A source-level IPC barrier makes eight real child processes race on one managed junction, proving the direct-publication bug on the frozen parent and the staged-publication fix on the candidate. Independent built CLI checks then prove the complete 233-link product path. Tianwen keeps its existing CLI dump patch and adds one exact app-boot patch because the published CLI imports `healProfilesModuleFallback()` from `@deepseek-ai/dsh-app-boot`.
+**Architecture:** A source-level IPC barrier makes eight real child processes race on one managed junction, proving the direct-publication bug on the frozen parent and the staged-publication fix on the candidate. A second barrier regression proves that concurrent initial Profile files are published complete rather than read mid-write. Independent built CLI checks then prove the complete 233-link DSH source-build path. Tianwen keeps its existing CLI dump patch and adds one exact app-boot patch because the published CLI imports both behaviors from `@deepseek-ai/dsh-app-boot`; the workspace package surface has 505 links and the official managed host has 510.
 
 **Tech Stack:** Node.js 22, TypeScript 6, Vitest 4, Node child-process IPC, Windows junctions, pnpm 11 patched dependencies, PowerShell 7.
 
@@ -268,6 +268,29 @@ git diff --check
 
 Expected: 3 files and 16 tests pass; diff check exits 0.
 
+#### Controller execution amendment: concurrent initial Profile files
+
+The first patched package-boundary run stopped with `Unexpected end of JSON
+input` while one process read a fresh Profile manifest that another process was
+still writing. This is a separate product race, not a retry of the fallback-link
+test. The controller added:
+
+- `packages/boot/app-boot/tests/init-concurrent.spec.ts`;
+- `packages/boot/app-boot/tests/fixtures/init-concurrent.mjs`;
+- private `writeFileIfMissing()` in `profile.ts`, using a private complete file
+  plus atomic no-overwrite hard-link publication for `package.json`,
+  `cordis.patch.yml`, and `pnpm-workspace.yaml`.
+
+The synchronized eight-writer/one-observer regression failed 3/3 on direct
+writes with truncated JSON and passed 3/3 after the minimal fix. The DSH branch
+therefore contains two reviewed local commits rather than the originally
+planned one:
+
+```text
+d86d5de4da964a5ac9904cca142b8b49052403c3 fix: publish Profile fallback links atomically
+74070e06adbea2f8facbc858f261340dcc3c99fb fix: publish initial Profile files atomically
+```
+
 ---
 
 ### Task 4: Verify the real built DSH path and review the local DSH commit
@@ -276,7 +299,7 @@ Expected: 3 files and 16 tests pass; diff check exits 0.
 
 **Interfaces:**
 - Consumes: source-level GREEN candidate.
-- Produces: official built CLI evidence, one reviewed local DSH commit, and no upstream action.
+- Produces: official built CLI evidence, two reviewed local DSH commits, and no upstream action.
 
 - [ ] **Step 1: Run typecheck, official build, and focused config-dump checks**
 
@@ -334,81 +357,73 @@ Reject the commit if it contains a timeout increase, command retry, production t
 
 **Files:**
 - Create: `patches/@deepseek-ai__dsh-app-boot@0.1.0-rc.7.patch`
-- Create: `tests/dsh-migration/profile-concurrent-boot.spec.ts`
+- Create: `tests/dsh-migration/profile-concurrent-boot.mjs`
 - Modify: `pnpm-workspace.yaml`
 - Modify: `pnpm-lock.yaml`
+- Modify: `.github/workflows/ci.yml`
 - Preserve unchanged: `patches/@deepseek-ai__dsh@0.1.0-rc.7.patch`
 
 **Interfaces:**
 - Consumes: reviewed local DSH source commit and published `@deepseek-ai/dsh-app-boot@0.1.0-rc.7/lib/index.js`.
-- Produces: one exact transitive pnpm patch and one Windows built-product regression.
+- Produces: one exact transitive pnpm patch and one Windows built-product regression invoked directly by the Windows shell.
 
 - [ ] **Step 1: Write the Tianwen built-product RED regression first**
 
-```typescript
-import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { createRequire } from 'node:module'
-import { describe, expect, it } from 'vitest'
+Create one Windows-only standalone Node check. It resolves the installed built
+DSH CLI, creates a fresh home under
+`D:/DevData/tianwen-v0.1-eval-fixtures`, launches eight `web --help` processes
+together, retains the 120-second per-child ceiling, and requires 8/8 exit 0,
+usage output, empty stderr, exactly 505 fallback junctions, and no staged
+entries. Cleanup uses awaited `fs/promises.rm`.
 
-const require = createRequire(import.meta.url)
-const dshBin = join(dirname(require.resolve('@deepseek-ai/dsh/package.json')), 'lib', 'bin.js')
-const CONCURRENCY = 8
+Controller amendment after the first patched GREEN: the original test revision
+used `os.tmpdir()` on `C:` and timed out at 120 seconds with 138/506 links and
+eight staged entries. The same exact package and eight processes completed on
+a fresh `D:` home in 8.438 seconds with 506 links and no staged entry. Preserve
+that failed GREEN, apply only the D:-hosted fixture-parent change above, and
+restart the entire three-RED/three-GREEN sequence. Do not increase the timeout,
+reduce concurrency, or count the diagnostic as GREEN.
 
-function runDsh(home: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [dshBin, 'web', '--help'], {
-      env: { ...process.env, DSH_HOME: home },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    let stdout = ''
-    let stderr = ''
-    child.stdout.setEncoding('utf8')
-    child.stderr.setEncoding('utf8')
-    child.stdout.on('data', (chunk: string) => { stdout += chunk })
-    child.stderr.on('data', (chunk: string) => { stderr += chunk })
-    child.once('error', reject)
-    child.once('close', code => resolve({ code, stdout, stderr }))
-  })
-}
+The first D:-hosted GREEN then proved all CLI children had exited while
+synchronous recursive cleanup was still deleting junctions; it timed out with
+191/506 links remaining. An asynchronous standard-library `rm()` deleted a full
+506-link diagnostic home in 0.122 seconds. Preserve that failed result, replace
+only `rmSync` with awaited `fs/promises.rm`, and restart the full
+RED/GREEN sequence once more. The 120-second ceiling remains unchanged.
 
-describe.skipIf(process.platform !== 'win32')('patched rc.7 Profile cold boot', () => {
-  it('lets eight built CLI launches share one fresh fallback', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'tianwen-dsh-concurrent-'))
-    try {
-      const results = await Promise.all(Array.from({ length: CONCURRENCY }, () => runDsh(home)))
-      for (const result of results) {
-        expect(result.code, result.stderr).toBe(0)
-        expect(result.stdout).toContain('Usage: dsh --profile web')
-        expect(result.stderr).toBe('')
-      }
-    } finally {
-      rmSync(home, { recursive: true, force: true })
-    }
-  }, 120_000)
-})
-```
+The awaited-cleanup Vitest revision still timed out because all eight children
+remained active. Direct ordinary Node completed the same exact controller on
+the same `D:` root in 7.815--8.842 seconds, while both Vitest descendants and
+`pnpm exec node` reproduced the slowdown. Also preserve those failures. Reject
+the runner-distorted Vitest test and invoke the standalone product check with
+direct `node`; retain the deterministic source Vitest regression as the
+code-level race proof. The earlier 506-link readings included rejected
+`content-type`/`negotiator` lock refreshes; the restored exact rc.7 surface is
+505.
 
 - [ ] **Step 2: Prove Tianwen RED three times before adding the app-boot patch**
 
 Run this exact command three separate times on Windows:
 
 ```powershell
-pnpm exec vitest run tests/dsh-migration/profile-concurrent-boot.spec.ts --reporter=verbose
+node tests/dsh-migration/profile-concurrent-boot.mjs
 ```
 
 Expected: every run fails through one or more ordinary CLI exits containing the original junction-publication error. A pass or a 120-second timeout stops patch integration and reopens the regression design.
 
 - [ ] **Step 3: Generate the exact app-boot patch**
 
-Use pnpm's patch workflow against `@deepseek-ai/dsh-app-boot@0.1.0-rc.7`. Modify only `lib/index.js`:
+Use pnpm's patch workflow against `@deepseek-ai/dsh-app-boot@0.1.0-rc.7`. Modify only `lib/index.js`; carry both reviewed atomic-publication fixes:
 
 ```javascript
 import { randomBytes } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 ```
+
+Also publish each missing initial Profile file from a complete private file via
+`linkSync(temp, final)`, treating an already published final file as the winning
+initializer and always removing the private file. Do not overwrite an existing
+user-owned file.
 
 Replace the direct `symlinkSync(target, link, "junction")` publication tail with the built JavaScript equivalent of the reviewed source implementation:
 
@@ -432,15 +447,24 @@ Commit the patch directory with `pnpm patch-commit`, producing `patches/@deepsee
 
 ```powershell
 pnpm install --frozen-lockfile
-pnpm exec vitest run tests/dsh-migration/profile-concurrent-boot.spec.ts --reporter=verbose
+node tests/dsh-migration/profile-concurrent-boot.mjs
 ```
 
-Run the Vitest command three separate times. Expected: 1 test passes in every run; no failure is rerun away.
+Run the Node command three separate times. Expected: all eight launches and the
+505-link surface pass in every run; no failure is rerun away. Add that direct
+Node command to the Windows CI shell before its Vitest installer suite.
+
+Actual final samples after both fixes: 8/8 with 505 links in 7835 ms, 7862 ms,
+and 7847 ms. The app-boot patch SHA-256 is
+`712b5501c7657d9df49baedfec33c31c042a668c3501361c9766f92a12d553ad`;
+the pre-existing CLI dump patch remains byte-identical at
+`5542c030bc6f1ad2dca8007d22de62cd330e29d553b09779985df9a24133c83f`.
 
 - [ ] **Step 5: Run Tianwen focused and repository gates**
 
 ```powershell
-pnpm exec vitest run tests/dsh-migration/profile-concurrent-boot.spec.ts tests/dsh-migration/controlled-lifecycle-profile.spec.ts tests/dsh-migration/runtime-profile.spec.ts tests/dsh-migration/tianwen-installer.spec.ts
+node tests/dsh-migration/profile-concurrent-boot.mjs
+pnpm exec vitest run tests/dsh-migration/controlled-lifecycle-profile.spec.ts tests/dsh-migration/runtime-profile.spec.ts tests/dsh-migration/tianwen-installer.spec.ts
 pnpm run check:dsh-install
 pnpm run check:no-private-dsh-imports
 pnpm run typecheck
@@ -449,7 +473,24 @@ pnpm run check
 git diff --check
 ```
 
-Expected: every command exits 0. The Windows-only concurrency case is skipped on non-Windows hosts and must pass on the local Windows controller before integration.
+Expected: every command exits 0. The Windows-only concurrency check runs on
+the local Windows controller and exact-main Windows CI before integration.
+
+Actual local gates:
+
+- focused Profile/installer group: 50 passed, 3 skipped;
+- first unconfigured `pnpm run check`: invalid controller invocation, 87 failed
+  because the documented `TIANWEN_DSH_PROBE_ROOT` and
+  `TIANWEN_DSH_PROBE_PYTHON` were omitted; this result is retained and was not
+  classified as a product failure;
+- first correctly configured `pnpm run check`: 52 files passed, 2 skipped;
+  668 tests passed, 8 skipped;
+- Ruff and compileall: exit 0;
+- first Python suite after the CI edit: 607 passed, 4 skipped, 1 contract
+  failure because the exact Windows-job expectation still described the old
+  command; after updating that existing contract, the focused file passed
+  25/25 and the full suite passed 608 with 4 skips;
+- exact Windows installer Vitest group: 4 files and 109 tests passed.
 
 ---
 
@@ -469,14 +510,26 @@ Use a new product root and evidence root below `D:\DevData\tianwen-profile-cold-
 
 - [ ] **Step 2: Run the installed product concurrency and dump boundaries**
 
-From three fresh installed-product DSH homes, run eight installed `dsh web --help` processes together and require 24/24 exit 0, usage output, empty stderr, 233 fallback links, and no staged entries. From another fresh home, require installed `dsh web --dump-config` exit 0 with `profiles/node_modules` absent. These are controller product checks, not natural evidence and not Provider billing facts.
+From three fresh D:-hosted installed-product DSH homes, run eight installed `dsh web --help` processes together and require 24/24 exit 0, usage output, empty stderr, the official managed host's complete 510-link fallback surface, and no staged entries. On the installed `tianwen` Profile, require `dsh --profile tianwen --dump-config` exit 0 with the shared `profiles/node_modules` fallback absent before and after. These are controller product checks, not natural evidence and not Provider billing facts. Do not substitute the DSH source build's 233-link or workspace package's 505-link surface for this managed-host fact.
+
+Actual official product root:
+`D:\DevData\tianwen-profile-cold-boot-natural-02\official-install-controller-salvage-01`.
+The installer returned `status=ready`, exact DSH `0.1.0-rc.7`, and Runtime
+archive digest
+`sha256:56001f3af96eb17a36c3688a212537ce70b4fdcbbee3d1e30b654b0b16264cb8`.
+The first installed-product check correctly stopped after 8/8 processes
+succeeded but the workspace-only 505-link expectation saw the managed host's
+510 links. After making that expected surface explicit, the three fixed rounds
+passed 24/24 in 8771 ms, 8502 ms, and 8468 ms with no staged entry. Installed
+`dsh --profile tianwen --dump-config` exited 0 in 180 ms and left the shared
+fallback absent.
 
 - [ ] **Step 3: Review exact ownership and simplicity**
 
 Require all of the following:
 
 ```text
-DSH local branch: one source file + one regression + one fixture
+DSH local branch: one source file + two regressions + two fixtures in two local commits
 Tianwen: one exact app-boot patch + one Windows product regression + pnpm binding
 Existing exact dsh CLI dump patch: unchanged
 Provider/model calls: zero
@@ -496,7 +549,7 @@ Merge the reviewed feature into current Tianwen main without pushing DSH upstrea
 
 - The focused source regression fails three out of three times on the frozen parent for the expected publication race and passes three out of three times on the candidate.
 - DSH focused tests, typecheck, build, built dump tests, 24/24 product launches, complete link surfaces, and boot-free dump all pass.
-- A reviewed local DSH commit exists and is not pushed.
+- Two reviewed local DSH commits exist and are not pushed.
 - Tianwen reproducibly patches exact `@deepseek-ai/dsh-app-boot@0.1.0-rc.7` while preserving its exact CLI dump patch.
 - Tianwen focused tests, full repository gates, official installed product, controlled merge, and exact-main CI pass.
 - The second natural task remains `task-incomplete`, learning remains `no-case`, and no Provider cost or upstream publication is claimed.
