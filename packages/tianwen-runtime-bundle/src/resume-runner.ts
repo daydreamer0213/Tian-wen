@@ -761,7 +761,14 @@ export async function runGoalResume(ctx: Context,
     const current = validateGoal(config, ctx.goals.get(handle.agent))
     ctx.goals.resume(handle.agent, { id: GoalId(String(current.id)), revision: current.revision })
     const settled = await waitForDisarmed(ctx, handle.agent)
-    await ctx.sessions.flush(handle.agent.session)
+    const flush = dependencies?.flush ?? (session => ctx.sessions.flush(session))
+    let flushed: boolean
+    try {
+      flushed = await flush(handle.agent.session)
+    } catch {
+      throw new Error('Session persistence is unavailable')
+    }
+    if (!flushed) throw new Error('Session persistence is unavailable')
     if (settled.phase === 'active') throw new Error('Goal resume did not settle')
     return ordinaryReceipt(settled, config.sessionId, eventCountBefore, handle.agent.session.events.length,
       requestCount(handle.agent.session.events) - requestCountBefore)
