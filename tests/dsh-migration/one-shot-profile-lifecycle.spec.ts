@@ -161,7 +161,7 @@ function runModelProfile(
         TIANWEN_MODEL_MODEL: model ?? '',
       },
       shell: false,
-      timeout: 120_000,
+      timeout: 240_000,
       windowsHide: true,
     },
   )
