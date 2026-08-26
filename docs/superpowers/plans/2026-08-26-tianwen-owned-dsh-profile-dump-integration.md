@@ -100,10 +100,12 @@ remain unchanged.
    a sibling evidence root.
 3. Validate the ordinary install receipt and publication contracts already owned by the installer.
 4. Verify `dsh-home/profiles/node_modules` is absent after installation.
-5. Run official `tianwen model status --json` exactly once. Verify the expected offline receipt and
-   confirm the fallback remains absent.
-6. Run one Provider-free real installed DSH Profile help or usage invocation with a bounded timeout.
-   Verify it exits normally and creates the fallback before plugin resolution.
+5. Run official `tianwen model status --json` exactly once. This command launches the installed DSH
+   with Tianwen's model patch and is therefore the first Provider-free real Profile invocation, not
+   another boot-free dump. Verify the expected offline receipt, zero model requests, and that the
+   fallback now exists.
+6. Do not run a redundant Profile help or usage command; model status already proves that real boot
+   creates the fallback before plugin resolution.
 7. Do not run model use, model smoke, controlled lifecycle, Goal, Provider, or any real product data.
 
 If the real boot remains slow while completing successfully, record that as the existing Windows

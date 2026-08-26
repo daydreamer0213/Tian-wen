@@ -115,10 +115,12 @@ ordinary `normal/2`, controlled `normal/0`, title-LLM, and runner-presence asser
 - `check:dsh-install` still reports one exact rc.7 package family and valid public surfaces.
 - Type checking and focused migration tests pass.
 - The official installer on a new product root deploys the patched DSH CLI.
-- Installer config validation and a subsequent official model status leave
-  `profiles/node_modules` absent.
-- One Provider-free real Profile help or usage invocation creates the fallback and exits normally.
+- Installer config validation leaves `profiles/node_modules` absent.
+- Official `tianwen model status` then starts the installed DSH with the model patch, so it is the
+  first Provider-free real Profile invocation rather than another boot-free config dump. It must
+  create the fallback, return the offline status receipt, and report zero model requests.
 
+No additional help or usage command is needed: model status already proves the real boot boundary.
 The real-boot check may allow enough time for the existing Windows link materialization cost. This
 task does not optimize that cost or change unrelated upstream E2E timeouts.
 
