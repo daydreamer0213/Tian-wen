@@ -102,6 +102,7 @@ describe('controlled lifecycle Profile policy', () => {
     mkdirSync(fixtureParent, { recursive: true })
     const root = mkdtempSync(join(fixtureParent, 'profile-'))
     const paths = deriveInstallPaths(root)
+    const profilesModuleFallback = join(paths.dshHome, 'profiles', 'node_modules')
     try {
       mkdirSync(join(paths.profileRoot, 'node_modules', '@tianwen'), { recursive: true })
       writeFileSync(join(paths.profileRoot, 'package.json'), canonicalJson({
@@ -137,8 +138,11 @@ describe('controlled lifecycle Profile policy', () => {
 
       expect(existsSync(paths.sessionsRoot)).toBe(false)
       expect(existsSync(paths.evolutionRoot)).toBe(false)
+      expect(existsSync(profilesModuleFallback)).toBe(false)
       const ordinary = runDump(paths.dshHome, [])
+      expect(existsSync(profilesModuleFallback)).toBe(false)
       const controlled = runDump(paths.dshHome, ['--patch', controlledPatch])
+      expect(existsSync(profilesModuleFallback)).toBe(false)
       expect(() => validateDump(ordinary, paths)).not.toThrow()
       expect(() => validateDump(controlled, paths)).not.toThrow()
 

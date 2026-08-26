@@ -1,0 +1,10 @@
+diff --git a/lib/profile-boot-DG5t9aNs.js b/lib/profile-boot-DG5t9aNs.js
+index 08882d0..ae30b29 100644
+--- a/lib/profile-boot-DG5t9aNs.js
++++ b/lib/profile-boot-DG5t9aNs.js
+@@ -140,2 +140 @@ const PROFILE_ROOT_CONFIG = "# DSH profile runtime root. Bundle defaults are co
+ function prepareProfile(name, userLayer = true) {
+-	healProfilesModuleFallback(INSTALL_ANCHOR);
+@@ -166 +165,2 @@ function allPatches(composed) {
+ function composeProfile(name, patchFiles) {
++	healProfilesModuleFallback(INSTALL_ANCHOR);

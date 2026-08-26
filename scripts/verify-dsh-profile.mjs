@@ -653,6 +653,27 @@ async function main() {
     commands,
   ).stdout
 
+  const profilesModuleFallback = childPath(dshHome, 'profiles', 'node_modules')
+  requireAssertion(
+    !existsSync(profilesModuleFallback),
+    'dump-config must not materialize the Profile module fallback',
+  )
+  const dshInstallAnchor = realpathSync(resolve(
+    repoRoot,
+    'node_modules',
+    '@deepseek-ai',
+    'dsh',
+    'package.json',
+  ))
+  const requireFromDshInstall = createRequire(dshInstallAnchor)
+  const appBootEntry = requireFromDshInstall.resolve('@deepseek-ai/dsh-app-boot')
+  const { healProfilesModuleFallback } = await import(pathToFileURL(appBootEntry).href)
+  healProfilesModuleFallback(dshInstallAnchor, dshHome)
+  requireAssertion(
+    existsSync(profilesModuleFallback),
+    'Profile module fallback was not prepared for executable import checks',
+  )
+
   const profileManifestPath = childPath(profileRoot, 'package.json')
   requireAssertion(
     existsSync(profileManifestPath),

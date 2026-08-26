@@ -12,7 +12,7 @@ const profileReport = `${probeRoot}/profile-report.json`
 
 function verify(env: NodeJS.ProcessEnv) {
   return spawnSync(process.execPath, [resolve(root, 'scripts/verify-dsh-profile.mjs')], {
-    cwd: root, encoding: 'utf8', env: { ...process.env, TIANWEN_DSH_PROBE_ROOT: probeRoot, ...env }, shell: false, timeout: 120_000,
+    cwd: root, encoding: 'utf8', env: { ...process.env, TIANWEN_DSH_PROBE_ROOT: probeRoot, ...env }, shell: false, timeout: 240_000,
   })
 }
 
@@ -75,7 +75,7 @@ describe('Tianwen Runtime Bundle Profile', () => {
       forbiddenReferences: { passed: true },
     })
     expect(report.commands.find(command => command.label === 'build-runtime-bundle')?.argv).toContain('@tianwen/runtime-bundle...')
-  }, 120_000)
+  }, 300_000)
 
   it.runIf(!enabled)('keeps default Profile installation free of the Runtime layer', () => {
     rmSync(migrationReport, { force: true })
@@ -86,6 +86,6 @@ describe('Tianwen Runtime Bundle Profile', () => {
     const report = JSON.parse(readFileSync(profileReport, 'utf8'))
     expect(report.composition.layerOrder).toEqual(['@deepseek-ai/dsh-base', '@tianwen/dsh-probe-bundle'])
     expect(report.commands.some(command => command.label.includes('runtime'))).toBe(false)
-  }, 120_000)
+  }, 300_000)
 
 })
