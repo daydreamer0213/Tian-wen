@@ -835,6 +835,7 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
     )
     assert job_match, "missing installer-windows job"
     installer_job = textwrap.dedent(job_match.group("job")).strip()
+    profile_concurrent_command = "node tests/dsh-migration/profile-concurrent-boot.mjs"
     installer_command = "pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts"
     windows_vitest_command = (
         "pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts "
@@ -868,14 +869,16 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
               $testExit = 0
               try {
                 New-Item -ItemType Directory -Force -Path 'D:\\DevData' | Out-Null
-              {windows_vitest_command}
+                {profile_concurrent_command}
+                if ($LASTEXITCODE -ne 0) { throw 'Profile concurrent cold-boot check failed' }
+                {windows_vitest_command}
                 $testExit = $LASTEXITCODE
               } finally {
                 if ($mappedDrive) { & subst.exe D: /D }
               }
-              exit $testExit""".replace(
-            "{windows_vitest_command}", windows_vitest_command
-        ),
+              exit $testExit"""
+        .replace("{profile_concurrent_command}", profile_concurrent_command)
+        .replace("{windows_vitest_command}", windows_vitest_command),
     ).strip()
     assert installer_job == expected_installer_job
 
@@ -886,6 +889,7 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
     assert typescript_match, "missing typescript job"
     typescript_job = typescript_match.group("job")
     for windows_owned_spec in (
+        profile_concurrent_command,
         installer_command.split("pnpm exec vitest run ", maxsplit=1)[1],
         "tests/dsh-migration/controlled-lifecycle-command.spec.ts",
         "tests/dsh-migration/runtime-bundle.spec.ts",
