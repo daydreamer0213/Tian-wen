@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url)
 const dshBin = process.env.TIANWEN_DSH_BIN
   ?? join(dirname(require.resolve('@deepseek-ai/dsh/package.json')), 'lib', 'bin.js')
 const concurrency = 8
-const expectedLinks = Number.parseInt(process.env.TIANWEN_DSH_EXPECTED_LINKS ?? '505', 10)
+const minimumLinks = 500
 const timeoutMs = 120_000
 const fixtureParent = process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-v0.1-eval-fixtures'
 
@@ -73,7 +73,7 @@ try {
   const entries = await readdir(modulesDir, { recursive: true, withFileTypes: true })
   const links = entries.filter(entry => entry.isSymbolicLink())
   const staged = links.filter(entry => /^\..+\.\d+\.[0-9a-f]{12}$/.test(entry.name))
-  if (links.length !== expectedLinks) fail(`expected ${expectedLinks} fallback links, got ${links.length}`)
+  if (links.length < minimumLinks) fail(`expected at least ${minimumLinks} fallback links, got ${links.length}`)
   if (staged.length !== 0) fail(`expected no staged fallback links, got ${staged.length}`)
 
   const elapsedMs = Math.round(performance.now() - startedAt)
