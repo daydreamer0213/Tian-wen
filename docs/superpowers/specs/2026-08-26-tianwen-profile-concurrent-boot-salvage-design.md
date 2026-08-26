@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26
 
-**Status:** User approved the controller-owned salvage direction; written review pending.
+**Status:** Approved by the user for controller-owned implementation.
 
 ## 1. Outcome
 
@@ -70,7 +70,7 @@ Three fixed repetitions are a stability gate, not a retry mechanism: all results
 If every gate passes:
 
 1. commit the controller-owned DSH salvage on a local branch without pushing upstream;
-2. update Tianwen's existing exact rc.7 pnpm patch with the reviewed production and test changes required by the package boundary;
+2. preserve Tianwen's existing exact `@deepseek-ai/dsh@0.1.0-rc.7` dump-boundary patch and add an exact `@deepseek-ai/dsh-app-boot@0.1.0-rc.7` pnpm patch for the reviewed junction-publication change; the published CLI imports this implementation from app-boot, so placing it in the CLI patch would cross the verified package boundary;
 3. run Tianwen's focused patch/Profile tests and repository gates;
 4. perform controlled Tianwen main integration;
 5. run exact-main CI and report its exact SHA and run result.
