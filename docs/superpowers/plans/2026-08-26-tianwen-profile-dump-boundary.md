@@ -164,11 +164,11 @@ Vitest, official Tianwen installed CLI, DSH rc.7 natural-run services, Git.
 **Files:**
 
 - Create under evidence root: `task-brief.md`
-- Create under fresh Tianwen product: `dsh-home/skills/tianwen-project-owner/SKILL.md`
+- Create under evidence root: `skill-source/tianwen-project-owner/SKILL.md`
 - Create under evidence root: `natural-run-trial.json`
 - Create under evidence root: `acceptance.json`
 
-- [ ] **Step 1: Create fresh product and evidence roots**
+- [ ] **Step 1: Reserve a fresh product root and create the evidence root**
 
   Require the product and task-evidence roots not to exist:
 
@@ -177,8 +177,9 @@ Vitest, official Tianwen installed CLI, DSH rc.7 natural-run services, Git.
   D:\DevData\tianwen-profile-dump-pilot-evidence
   ```
 
-  Revalidate the Task 0 upstream checkout at the frozen commit with a clean tree. Never reuse an
-  Activity-01/02/03/22 product or evidence root.
+  Leave the product root absent so that the official installer remains the sole owner of its initial
+  layout. Create only the evidence root. Revalidate the Task 0 upstream checkout at the frozen
+  commit with a clean tree. Never reuse an Activity-01/02/03/22 product or evidence root.
 
 - [ ] **Step 2: Write the generic parent Skill**
 
@@ -290,6 +291,8 @@ Vitest, official Tianwen installed CLI, DSH rc.7 natural-run services, Git.
 
 - Read: `scripts/install-tianwen.mjs`
 - Read: installed receipt under the fresh product
+- Read: frozen Skill under `D:\DevData\tianwen-profile-dump-pilot-evidence\skill-source`
+- Create after install: `dsh-home/skills/tianwen-project-owner/SKILL.md`
 - Create: transport files under `D:\DevData\tianwen-profile-dump-pilot-evidence`
 
 - [ ] **Step 1: Run the official installer once**
@@ -299,7 +302,11 @@ Vitest, official Tianwen installed CLI, DSH rc.7 natural-run services, Git.
   installed CLI identity, and publication contract. Do not add Activity-grade archive rituals beyond
   the installer's existing contract.
 
-- [ ] **Step 2: Confirm the ordinary tool surface without an Agent turn**
+- [ ] **Step 2: Publish the frozen Skill and confirm the ordinary tool surface without an Agent turn**
+
+  After the installer has completed, create the product's Skill directory and copy the frozen Skill
+  bytes exactly once. Require the installed Skill bytes to equal the frozen source bytes. Do not
+  pre-create `dsh-home/skills` before installation and do not modify the installer.
 
   Use the installed official DSH dump only if needed and record whether `skill`, `read`, `write`,
   `edit`, and filesystem search tools are enabled while `pwsh` is disabled. If `read`, `write`,
