@@ -170,7 +170,7 @@ describe('Tianwen DSH Bundle', () => {
     })).toThrow()
   })
 
-  it('parses only the two authorized Bundle patch operations', async () => {
+  it('parses only the three authorized Bundle patch operations', async () => {
     const verifier = await import('../../scripts/verify-dsh-profile.mjs')
     expect(verifier.parseAuthoredPatch).toBeTypeOf('function')
     const patch = readFileSync(
@@ -189,6 +189,11 @@ describe('Tianwen DSH Bundle', () => {
       insertedAdapter: {
         id: 'tianwen-probe-adapter',
         name: '@tianwen/dsh-probe-bundle/adapter',
+      },
+      insertedCompositionProbe: {
+        id: 'tianwen-composition-probe',
+        name: '@tianwen/dsh-probe-bundle/composition',
+        disabledByDefault: true,
       },
     })
     expect(() => verifier.parseAuthoredPatch(`${patch}

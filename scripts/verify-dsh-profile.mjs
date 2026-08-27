@@ -152,13 +152,23 @@ export function parseAuthoredPatch(source) {
     .replaceAll('\r\n', '\n')
     .split('\n')
     .filter(line => line !== '')
-  requireAssertion(lines.length === 7, 'Bundle patch must contain exactly two operations')
+  requireAssertion(lines.length === 15, 'Bundle patch must contain exactly three operations')
 
   const modelId = /^- id: ([a-z0-9-]+)$/u.exec(lines[0] ?? '')?.[1]
   const provider = /^ {4}provider: ([a-z0-9-]+)$/u.exec(lines[2] ?? '')?.[1]
   const model = /^ {4}model: ([a-z0-9-]+)$/u.exec(lines[3] ?? '')?.[1]
   const adapterId = /^ {4}- id: ([a-z0-9-]+)$/u.exec(lines[5] ?? '')?.[1]
   const adapterName = /^ {6}name: (.+)$/u.exec(lines[6] ?? '')?.[1]
+  const compositionId = /^ {4}- id: ([a-z0-9-]+)$/u.exec(lines[7] ?? '')?.[1]
+  const compositionName = /^ {6}name: (.+)$/u.exec(lines[8] ?? '')?.[1]
+  const expectedCompositionLines = [
+    "      disabled: !!js process.env.TIANWEN_COMPOSITION_PROBE_RECEIPT === undefined || process.env.TIANWEN_COMPOSITION_PROBE_RECEIPT === '' || process.env.TIANWEN_COMPOSITION_PROBE_STOP === undefined || process.env.TIANWEN_COMPOSITION_PROBE_STOP === '' || (process.env.TIANWEN_COMPOSITION_PROBE_SURFACE !== 'headless' && process.env.TIANWEN_COMPOSITION_PROBE_SURFACE !== 'web')",
+    '      config:',
+    '        receiptPath: !!js process.env.TIANWEN_COMPOSITION_PROBE_RECEIPT',
+    '        stopPath: !!js process.env.TIANWEN_COMPOSITION_PROBE_STOP',
+    '        surface: !!js process.env.TIANWEN_COMPOSITION_PROBE_SURFACE',
+    "        exitAfterReceipt: !!js process.env.TIANWEN_COMPOSITION_PROBE_EXIT_AFTER_RECEIPT === 'true'",
+  ]
   requireAssertion(
     modelId === 'agent-default-model'
     && lines[1] === '  config:'
@@ -168,13 +178,25 @@ export function parseAuthoredPatch(source) {
     && adapterId === 'tianwen-probe-adapter'
     && adapterName !== undefined
     && scalar(adapterName) === bundleAdapterPackage,
-    'Bundle patch differs from the two authorized operations',
+    'Bundle patch differs from the authorized model and adapter operations',
+  )
+  requireAssertion(
+    compositionId === 'tianwen-composition-probe'
+    && compositionName !== undefined
+    && scalar(compositionName) === '@tianwen/dsh-probe-bundle/composition'
+    && JSON.stringify(lines.slice(9)) === JSON.stringify(expectedCompositionLines),
+    'Bundle patch differs from the authorized disabled composition probe operation',
   )
   return {
     defaultModel: { provider, model },
     insertedAdapter: {
       id: adapterId,
       name: scalar(adapterName),
+    },
+    insertedCompositionProbe: {
+      id: compositionId,
+      name: scalar(compositionName),
+      disabledByDefault: true,
     },
   }
 }
@@ -800,11 +822,14 @@ async function main() {
       dumpedAdapter.name === bundleAdapterPackage,
     adapterRowPresent:
       dumpedAdapter.id === 'tianwen-probe-adapter',
-    authoredPatchExactlyTwoOperations:
+    authoredPatchExactlyThreeOperations:
       authoredPatch.defaultModel.provider === 'tianwen-probe'
       && authoredPatch.defaultModel.model === 'scripted'
       && authoredPatch.insertedAdapter.id === 'tianwen-probe-adapter'
-      && authoredPatch.insertedAdapter.name === bundleAdapterPackage,
+      && authoredPatch.insertedAdapter.name === bundleAdapterPackage
+      && authoredPatch.insertedCompositionProbe.id === 'tianwen-composition-probe'
+      && authoredPatch.insertedCompositionProbe.name === '@tianwen/dsh-probe-bundle/composition'
+      && authoredPatch.insertedCompositionProbe.disabledByDefault === true,
     baseBeforeBundle:
       baseIndex >= 0
       && bundleIndex > baseIndex

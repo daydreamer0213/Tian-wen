@@ -166,7 +166,7 @@ function runModelProfile(
     },
   )
   expect(result.error).toBeUndefined()
-  expect(result.status).toBe(0)
+  expect(result.status, `${result.stdout ?? ''}\n${result.stderr ?? ''}`).toBe(0)
   expect(result.signal).toBeNull()
   expect(result.stderr).toBe('')
   const stdout = result.stdout.trim()
