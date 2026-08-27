@@ -4,8 +4,9 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -32,6 +33,21 @@ const RAW_STDOUT =
   '{"failed_checks":[],"failure_categories":[],"passed_checks":["escaped_quote","escaped_quote_interior_whitespace","malformed_quote","ordinary_fields","quoted_field_whitespace","quoted_final_field_whitespace","quoted_separator"],"summary":"7/7 checks passed","verdict":"met"}\n'
 const RAW_STDOUT_DIGEST =
   'sha256:41cc799ba4f5a911608f28bc82a336ad95aed4196f9a14674d550cb6a76473ca'
+
+function requiredProbeRoot(): string {
+  const probeRoot = process.env.TIANWEN_DSH_PROBE_ROOT
+  if (probeRoot === undefined) {
+    throw new Error('TIANWEN_DSH_PROBE_ROOT is required')
+  }
+  mkdirSync(probeRoot, { recursive: true })
+  return resolve(probeRoot)
+}
+
+function createPythonFixture(path: string): string {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, '')
+  return path
+}
 
 const REQUEST: EvalRequestV1 = {
   schema_version: 'tianwen.eval_request.v1',
@@ -201,26 +217,177 @@ describe('A1 evaluator protocol', () => {
 })
 
 describe('PythonA1Evaluator', () => {
-  it('rejects a non-Python executable outside the controlled probe environment', () => {
-    const probeRoot = process.env.TIANWEN_DSH_PROBE_ROOT
-    if (probeRoot === undefined) {
-      throw new Error('TIANWEN_DSH_PROBE_ROOT is required')
+  it('accepts an existing canonical authority root below D:\\DevData', () => {
+    if (process.platform !== 'win32') {
+      return
     }
+    const root = resolve(
+      requiredProbeRoot(),
+      `authority-valid-${randomUUID()}`,
+    )
+    const pythonExecutable = createPythonFixture(resolve(
+      root,
+      'python-venv',
+      'Scripts',
+      'python.exe',
+    ))
+
+    try {
+      expect(
+        () =>
+          new PythonA1Evaluator({
+            repoRoot: REPO_ROOT,
+            stateRoot: resolve(root, 'state'),
+            pythonExecutable,
+            authorityRoot: root,
+          }),
+      ).not.toThrow()
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+
+  it('rejects a relative authority root', () => {
+    const probeRoot = requiredProbeRoot()
+    expect(
+      () =>
+        new PythonA1Evaluator({
+          repoRoot: REPO_ROOT,
+          stateRoot: resolve(probeRoot, 'authority-relative-state'),
+          pythonExecutable: process.execPath,
+          authorityRoot: 'relative-authority',
+        }),
+    ).toThrow(/authorityRoot.*absolute/)
+  })
+
+  it.each([
+    ['drive root', 'D:\\'],
+    ['DevData itself', 'D:\\DevData'],
+    ['another drive', 'C:\\'],
+    ['Windows system directory', process.env.SystemRoot ?? 'C:\\Windows'],
+  ])('rejects %s as an authority root', (_label, authorityRoot) => {
+    if (process.platform !== 'win32') {
+      return
+    }
+    const probeRoot = requiredProbeRoot()
+    expect(
+      () =>
+        new PythonA1Evaluator({
+          repoRoot: REPO_ROOT,
+          stateRoot: resolve(probeRoot, 'authority-system-state'),
+          pythonExecutable: process.execPath,
+          authorityRoot,
+        }),
+    ).toThrow(/authorityRoot.*strict child of D:\\DevData/)
+  })
+
+  it('rejects an authority-root junction', () => {
+    if (process.platform !== 'win32') {
+      return
+    }
+    const probeRoot = requiredProbeRoot()
+    const fixtureRoot = resolve(
+      probeRoot,
+      `authority-reparse-${randomUUID()}`,
+    )
+    const target = resolve(fixtureRoot, 'target')
+    const junction = resolve(fixtureRoot, 'junction')
+    mkdirSync(target, { recursive: true })
+    symlinkSync(target, junction, 'junction')
+
+    try {
+      expect(
+        () =>
+          new PythonA1Evaluator({
+            repoRoot: REPO_ROOT,
+            stateRoot: resolve(junction, 'state'),
+            pythonExecutable: process.execPath,
+            authorityRoot: junction,
+          }),
+      ).toThrow(/authorityRoot.*reparse/)
+    } finally {
+      rmSync(fixtureRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('rejects a state root that escapes the selected authority', () => {
+    if (process.platform !== 'win32') {
+      return
+    }
+    const fixtureRoot = resolve(
+      requiredProbeRoot(),
+      `authority-state-escape-${randomUUID()}`,
+    )
+    const authorityRoot = resolve(fixtureRoot, 'authority')
+    const pythonExecutable = createPythonFixture(resolve(
+      authorityRoot,
+      'python-venv',
+      'Scripts',
+      'python.exe',
+    ))
+
+    try {
+      expect(
+        () =>
+          new PythonA1Evaluator({
+            repoRoot: REPO_ROOT,
+            stateRoot: resolve(fixtureRoot, 'outside-state'),
+            pythonExecutable,
+            authorityRoot,
+          }),
+      ).toThrow(/stateRoot.*authorityRoot/)
+    } finally {
+      rmSync(fixtureRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('rejects an explicit Python executable that escapes the selected authority', () => {
+    if (process.platform !== 'win32') {
+      return
+    }
+    const fixtureRoot = resolve(
+      requiredProbeRoot(),
+      `authority-python-escape-${randomUUID()}`,
+    )
+    const authorityRoot = resolve(fixtureRoot, 'authority')
+    mkdirSync(authorityRoot, { recursive: true })
+    const pythonExecutable = createPythonFixture(resolve(
+      fixtureRoot,
+      'outside-python',
+      'Scripts',
+      'python.exe',
+    ))
+
+    try {
+      expect(
+        () =>
+          new PythonA1Evaluator({
+            repoRoot: REPO_ROOT,
+            stateRoot: resolve(authorityRoot, 'state'),
+            pythonExecutable,
+            authorityRoot,
+          }),
+      ).toThrow(/pythonExecutable.*authorityRoot/)
+    } finally {
+      rmSync(fixtureRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('rejects a non-Python executable outside the controlled probe environment', () => {
+    const probeRoot = requiredProbeRoot()
     expect(
       () =>
         new PythonA1Evaluator({
           repoRoot: REPO_ROOT,
           stateRoot: resolve(probeRoot, 'task-6-constructor-boundary'),
           pythonExecutable: process.execPath,
+          authorityRoot: probeRoot,
         }),
     ).toThrow(/pythonExecutable.*controlled/)
   })
 
   it('rejects a repoRoot other than the current Tianwen worktree', () => {
-    const probeRoot = process.env.TIANWEN_DSH_PROBE_ROOT
-    if (probeRoot === undefined) {
-      throw new Error('TIANWEN_DSH_PROBE_ROOT is required')
-    }
+    const probeRoot = requiredProbeRoot()
     expect(
       () =>
         new PythonA1Evaluator({
@@ -229,6 +396,7 @@ describe('PythonA1Evaluator', () => {
           pythonExecutable:
             process.env.TIANWEN_DSH_PROBE_PYTHON ??
             resolve(probeRoot, 'venv-task-6', 'Scripts', 'python.exe'),
+          authorityRoot: probeRoot,
         }),
     ).toThrow(/current Tianwen worktree/)
   })
@@ -237,10 +405,7 @@ describe('PythonA1Evaluator', () => {
     if (process.platform !== 'win32') {
       return
     }
-    const probeRoot = process.env.TIANWEN_DSH_PROBE_ROOT
-    if (probeRoot === undefined) {
-      throw new Error('TIANWEN_DSH_PROBE_ROOT is required')
-    }
+    const probeRoot = requiredProbeRoot()
     const stateRoot = resolve(
       probeRoot,
       `task-6-path-boundary-${randomUUID()}`,
@@ -256,6 +421,7 @@ describe('PythonA1Evaluator', () => {
             pythonExecutable:
               process.env.TIANWEN_DSH_PROBE_PYTHON ??
               resolve(probeRoot, 'venv-task-6', 'Scripts', 'python.exe'),
+            authorityRoot: probeRoot,
           }),
       ).toThrow(/evaluations.*outside/)
     } finally {
@@ -266,10 +432,7 @@ describe('PythonA1Evaluator', () => {
   it(
     'reuses the frozen A1 evaluator for repeatable nop and oracle receipts',
     async () => {
-      const probeRoot = process.env.TIANWEN_DSH_PROBE_ROOT
-      if (probeRoot === undefined) {
-        throw new Error('TIANWEN_DSH_PROBE_ROOT is required')
-      }
+      const probeRoot = requiredProbeRoot()
       const pythonExecutable =
         process.env.TIANWEN_DSH_PROBE_PYTHON ??
         resolve(probeRoot, 'venv-task-6', 'Scripts', 'python.exe')
@@ -277,6 +440,7 @@ describe('PythonA1Evaluator', () => {
         repoRoot: REPO_ROOT,
         stateRoot: resolve(probeRoot, 'task-6-evaluator'),
         pythonExecutable,
+        authorityRoot: probeRoot,
       })
 
       const nop1 = await evaluator.evaluateA1('nop')

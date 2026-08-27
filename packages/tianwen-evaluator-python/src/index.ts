@@ -52,6 +52,7 @@ export interface PythonA1EvaluatorOptions {
   readonly repoRoot: string
   readonly stateRoot: string
   readonly pythonExecutable?: string
+  readonly authorityRoot?: string
 }
 
 function isWithin(root: string, candidate: string): boolean {
@@ -65,14 +66,34 @@ function samePath(left: string, right: string): boolean {
     : left === right
 }
 
-function windowsProbeRoot(): string {
-  const expected = resolve(WINDOWS_PROBE_ROOT)
-  if (lstatSync(expected).isSymbolicLink()) {
-    throw new Error(`${WINDOWS_PROBE_ROOT} must not be a reparse point`)
+function configuredAuthorityRoot(path: string | undefined): string | undefined {
+  if (path !== undefined && !isAbsolute(path)) {
+    throw new Error('authorityRoot must be an absolute path')
+  }
+  if (process.platform !== 'win32') {
+    return undefined
+  }
+  const configured = path ?? WINDOWS_PROBE_ROOT
+  const expected = resolve(configured)
+  const devDataRoot = resolve('D:\\DevData')
+  if (samePath(expected, devDataRoot) || !isWithin(devDataRoot, expected)) {
+    throw new Error('authorityRoot must be a strict child of D:\\DevData')
+  }
+  let entry: ReturnType<typeof lstatSync>
+  try {
+    entry = lstatSync(expected)
+  } catch {
+    throw new Error(`authorityRoot is unavailable: ${configured}`)
+  }
+  if (entry.isSymbolicLink()) {
+    throw new Error('authorityRoot must not be a reparse point')
+  }
+  if (!entry.isDirectory()) {
+    throw new Error(`authorityRoot is not a directory: ${configured}`)
   }
   const actual = realpathSync(expected)
   if (!samePath(actual, expected)) {
-    throw new Error(`${WINDOWS_PROBE_ROOT} must resolve to itself`)
+    throw new Error('authorityRoot must resolve to itself')
   }
   return actual
 }
@@ -90,21 +111,22 @@ function requireFile(path: string, label: string): string {
   return resolved
 }
 
-function prepareStateRoot(path: string): string {
+function prepareStateRoot(
+  path: string,
+  authorityRoot: string | undefined,
+): string {
   const lexical = resolve(path)
-  const authority =
-    process.platform === 'win32' ? windowsProbeRoot() : undefined
   if (
-    authority !== undefined &&
-    !isWithin(authority, lexical)
+    authorityRoot !== undefined &&
+    !isWithin(authorityRoot, lexical)
   ) {
-    throw new Error(`stateRoot must remain below ${WINDOWS_PROBE_ROOT}`)
+    throw new Error('stateRoot must remain below authorityRoot')
   }
   mkdirSync(lexical, { recursive: true })
   const actual = realpathSync(lexical)
-  if (authority !== undefined) {
-    if (!isWithin(authority, actual)) {
-      throw new Error(`stateRoot resolves outside ${WINDOWS_PROBE_ROOT}`)
+  if (authorityRoot !== undefined) {
+    if (!isWithin(authorityRoot, actual)) {
+      throw new Error('stateRoot resolves outside authorityRoot')
     }
   }
   return actual
@@ -123,6 +145,7 @@ function prepareStateDirectory(stateRoot: string, name: string): string {
 function controlledPython(
   path: string,
   defaultPython: string,
+  authorityRoot: string | undefined,
 ): string {
   const executable = requireFile(path, 'pythonExecutable')
   if (process.platform !== 'win32') {
@@ -132,13 +155,17 @@ function controlledPython(
     basename(executable).toLowerCase() === 'python.exe' &&
     basename(dirname(executable)).toLowerCase() === 'scripts'
   const isRepositoryDefault = samePath(executable, resolve(defaultPython))
-  const isProbePython = isWithin(
-    windowsProbeRoot(),
-    executable,
-  )
-  if (!hasPythonShape || (!isRepositoryDefault && !isProbePython)) {
+  if (!hasPythonShape) {
     throw new Error(
       'pythonExecutable must be a controlled Scripts\\python.exe',
+    )
+  }
+  if (
+    !isRepositoryDefault &&
+    (authorityRoot === undefined || !isWithin(authorityRoot, executable))
+  ) {
+    throw new Error(
+      'pythonExecutable must remain below authorityRoot or use the repository default',
     )
   }
   return executable
@@ -210,6 +237,7 @@ function canonicalResult(value: unknown, serialized: string): void {
 
 export class PythonA1Evaluator {
   readonly #repoRoot: string
+  readonly #authorityRoot: string
   readonly #stateRoot: string
   readonly #pythonExecutable: string
   readonly #workerScript: string
@@ -221,7 +249,9 @@ export class PythonA1Evaluator {
     if (!samePath(this.#repoRoot, realpathSync(process.cwd()))) {
       throw new Error('repoRoot must be the current Tianwen worktree')
     }
-    this.#stateRoot = prepareStateRoot(options.stateRoot)
+    const authorityRoot = configuredAuthorityRoot(options.authorityRoot)
+    this.#stateRoot = prepareStateRoot(options.stateRoot, authorityRoot)
+    this.#authorityRoot = authorityRoot ?? this.#stateRoot
     this.#evaluationsRoot = prepareStateDirectory(
       this.#stateRoot,
       'evaluations',
@@ -241,6 +271,7 @@ export class PythonA1Evaluator {
       this.#pythonExecutable = controlledPython(
         configuredPython,
         defaultPython,
+        authorityRoot,
       )
     } catch (error) {
       if (options.pythonExecutable === undefined) {
@@ -276,10 +307,11 @@ export class PythonA1Evaluator {
       throw new EvalProtocolError('candidateKind must be nop or oracle')
     }
     const requestId = randomUUID()
-    const auditRoot = join(this.#evaluationsRoot, requestId)
-    const tempRoot = join(auditRoot, 'temp')
-    mkdirSync(auditRoot)
-    mkdirSync(tempRoot)
+    const auditRoot = prepareStateDirectory(this.#evaluationsRoot, requestId)
+    const tempRoot = prepareStateDirectory(auditRoot, 'temp')
+    if (!isWithin(this.#authorityRoot, tempRoot)) {
+      throw new Error('TEMP and TMP must remain below authorityRoot')
+    }
     const requestPath = join(auditRoot, 'request.json')
     const resultPath = join(auditRoot, 'result.json')
     const request: EvalRequestV1 = parseEvalRequest({
@@ -302,6 +334,8 @@ export class PythonA1Evaluator {
       this.#pythonExecutable,
       [
         this.#workerScript,
+        '--authority-root',
+        this.#authorityRoot,
         '--repo-root',
         this.#repoRoot,
         '--state-root',

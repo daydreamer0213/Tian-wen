@@ -16,8 +16,11 @@ import { PythonA1Evaluator } from '../../packages/tianwen-evaluator-python/src/i
 import { apply } from '../../packages/tianwen-runtime/src/index.js'
 
 const repoRoot = resolve(import.meta.dirname, '../..')
-const fixtureRoot = resolve(
+const probeRoot = resolve(
   process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-test-fixtures',
+)
+const fixtureRoot = resolve(
+  probeRoot,
   'runtime-governance',
 )
 const V1 = 'return { name: "phase1-v1", apply() {} }'
@@ -78,6 +81,7 @@ describe('Tianwen runtime governance migration', () => {
       repoRoot,
       stateRoot,
       pythonExecutable,
+      authorityRoot: probeRoot,
     })
     const nop1 = await evaluator.evaluateA1('nop')
     const nop2 = await evaluator.evaluateA1('nop')

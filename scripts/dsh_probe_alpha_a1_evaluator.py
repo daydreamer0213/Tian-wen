@@ -16,7 +16,7 @@ from typing import Literal, TypedDict, cast
 
 from tianwen.alpha_tasks import load_task_bundle
 
-PROBE_ROOT = Path(r"D:\DevData\tianwen-dsh-probe")
+WINDOWS_DATA_ROOT = Path(r"D:\DevData")
 TASK_BUNDLE_DIGEST = "sha256:15e08373a535c14bb0de636724170afb05cbb2e8ace1f91ca53bc877f73184d0"
 MODEL_INPUT_DIGEST = "sha256:b8f76aae549aeca56d9a4749aa188788648fc0fae578f422c85cfb6da28eb490"
 SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -60,14 +60,22 @@ def _within(root: Path, candidate: Path) -> bool:
     return True
 
 
-def _probe_root() -> Path:
-    expected = Path(os.path.abspath(PROBE_ROOT))
+def _authority_root(path: str) -> Path:
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        raise ValueError("authority-root must be absolute")
+    expected = Path(os.path.abspath(candidate))
+    data_root = WINDOWS_DATA_ROOT.resolve(strict=True)
+    if expected == data_root or not _within(data_root, expected):
+        raise ValueError("authority-root must be a strict child of D:\\DevData")
     attributes = getattr(expected.lstat(), "st_file_attributes", 0)
     if attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
-        raise ValueError(f"{PROBE_ROOT} must not be a reparse point")
+        raise ValueError("authority-root must not be a reparse point")
     resolved = expected.resolve(strict=True)
+    if not resolved.is_dir():
+        raise ValueError("authority-root must be a directory")
     if os.path.normcase(str(resolved)) != os.path.normcase(str(expected)):
-        raise ValueError(f"{PROBE_ROOT} must resolve to itself")
+        raise ValueError("authority-root must resolve to itself")
     return resolved
 
 
@@ -187,6 +195,7 @@ def _atomic_json(path: Path, value: dict[str, object]) -> None:
 
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--authority-root", required=True)
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--state-root", required=True)
     parser.add_argument("--request", required=True)
@@ -204,7 +213,22 @@ def run() -> None:
     request_path = _existing_file(arguments.request, "request")
     result_path = _result_file(arguments.result, state_root)
     if os.name == "nt":
-        probe_root = _probe_root()
+        authority_root = _authority_root(arguments.authority_root)
+        python_executable = Path(sys.executable).resolve(strict=True)
+        repository_default = repo_root / ".venv" / "Scripts" / "python.exe"
+        is_repository_default = (
+            repository_default.exists()
+            and os.path.normcase(str(repository_default.resolve(strict=True)))
+            == os.path.normcase(str(python_executable))
+        )
+        if (
+            python_executable.name.lower() != "python.exe"
+            or python_executable.parent.name.lower() != "scripts"
+            or (not is_repository_default and not _within(authority_root, python_executable))
+        ):
+            raise ValueError(
+                "pythonExecutable must remain below authority-root or use the repository default"
+            )
         for label, path in (
             ("state-root", state_root),
             ("request", request_path),
@@ -212,8 +236,8 @@ def run() -> None:
             ("TEMP", _existing_directory(os.environ.get("TEMP", ""), "TEMP")),
             ("TMP", _existing_directory(os.environ.get("TMP", ""), "TMP")),
         ):
-            if not _within(probe_root, path):
-                raise ValueError(f"{label} must remain below {PROBE_ROOT}")
+            if not _within(authority_root, path):
+                raise ValueError(f"{label} must remain below authority-root")
     if not _within(state_root, request_path):
         raise ValueError("request must remain below state-root")
 
