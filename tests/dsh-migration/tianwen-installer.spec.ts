@@ -591,6 +591,82 @@ describe('Tianwen installer contract', () => {
     }
   })
 
+  it('rejects a predecessor receipt whose binDir differs from the current install path', () => {
+    const paths = deriveInstallPaths(testRoot('mismatched-receipt-bin-dir'), 'win32')
+    writeManagedPredecessor(paths, 'locked-deploy')
+    const receipt = JSON.parse(readFileSync(paths.receiptPath, 'utf8'))
+    expect(receipt.binDir).toBe(paths.binDir)
+    receipt.binDir = resolve(paths.dataDir, 'tampered-bin')
+    writeJson(paths.receiptPath, receipt)
+    const before = snapshotTree(paths.dataDir)
+    const scripted = scriptedInstaller(paths)
+
+    expect(classifyManagedInstallation(paths)).toBe('incompatible')
+    expect(() => installWindowsFixture({ dataDir: paths.dataDir, runner: scripted.runner })).toThrow()
+    expect(scripted.calls).toEqual([])
+    expect(snapshotTree(paths.dataDir)).toEqual(before)
+  })
+
+  it('rejects a predecessor receipt whose cliPath differs from the installed Runtime CLI', () => {
+    const paths = deriveInstallPaths(testRoot('mismatched-receipt-cli-path'), 'win32')
+    writeManagedPredecessor(paths, 'locked-deploy')
+    const receipt = JSON.parse(readFileSync(paths.receiptPath, 'utf8'))
+    const installedCli = resolve(
+      paths.profileRoot,
+      'node_modules',
+      '@tianwen',
+      'runtime-bundle',
+      'dist',
+      'cli.js',
+    )
+    expect(receipt.cliPath).toBe(installedCli)
+    receipt.cliPath = resolve(paths.dataDir, 'tampered-cli.js')
+    writeJson(paths.receiptPath, receipt)
+    const before = snapshotTree(paths.dataDir)
+    const scripted = scriptedInstaller(paths)
+
+    expect(classifyManagedInstallation(paths)).toBe('incompatible')
+    expect(() => installWindowsFixture({ dataDir: paths.dataDir, runner: scripted.runner })).toThrow()
+    expect(scripted.calls).toEqual([])
+    expect(snapshotTree(paths.dataDir)).toEqual(before)
+  })
+
+  it('rejects a source-linked predecessor before child or persistent effects', () => {
+    const paths = deriveInstallPaths(testRoot('source-linked-predecessor'), 'win32')
+    const repoRoot = testRoot('source-linked-predecessor-repo')
+    const sourceCli = join(
+      repoRoot,
+      'packages',
+      'tianwen-runtime-bundle',
+      'dist',
+      'cli.js',
+    )
+    const installedCli = join(
+      paths.profileRoot,
+      'node_modules',
+      '@tianwen',
+      'runtime-bundle',
+      'dist',
+      'cli.js',
+    )
+    writeRuntimeRepository(repoRoot, 'predecessor-source')
+    writeManagedPredecessor(paths, 'locked-deploy')
+    rmSync(installedCli)
+    linkSync(sourceCli, installedCli)
+    expect(statSync(sourceCli, { bigint: true }).ino)
+      .toBe(statSync(installedCli, { bigint: true }).ino)
+    const before = snapshotTree(paths.dataDir)
+    const scripted = scriptedInstaller(paths)
+
+    expect(() => installWindowsFixture({
+      dataDir: paths.dataDir,
+      repoRoot,
+      runner: scripted.runner,
+    })).toThrow(/must not be source-linked/u)
+    expect(scripted.calls).toEqual([])
+    expect(snapshotTree(paths.dataDir)).toEqual(before)
+  })
+
   it('rejects a DSH package that resolves outside its managed host root', () => {
     const hostRoot = testRoot('linked-host')
     const externalRoot = testRoot('external-dsh-package')

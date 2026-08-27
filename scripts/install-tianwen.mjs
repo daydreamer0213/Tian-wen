@@ -346,6 +346,15 @@ function matchesPredecessorReceipt(paths) {
       && receipt.dshVersion === PREDECESSOR_DSH_VERSION
       && receipt.pnpmVersion === PNPM_VERSION
       && receipt.dataDir === paths.dataDir
+      && receipt.binDir === paths.binDir
+      && receipt.cliPath === resolve(
+        paths.profileRoot,
+        'node_modules',
+        '@tianwen',
+        'runtime-bundle',
+        'dist',
+        'cli.js',
+      )
       && receipt.hostRoot === paths.hostRoot
       && receipt.profileRoot === paths.profileRoot
       && receipt.archivePath === paths.archivePath
@@ -734,6 +743,10 @@ export function installTianwen({
     () => classifyManagedInstallation(paths),
   )
   atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_LAYOUT_PREFLIGHT, () => {
+    if (installation === 'managed-predecessor'
+      && hasSourceLinkedRuntimePublication(repoRoot, paths.profileRoot)) {
+      throw new Error('managed predecessor Runtime publication must not be source-linked')
+    }
     if (installation === 'incompatible') {
       if (existsSync(paths.hostRoot) && existsSync(paths.profileRoot)) {
         validateInstalledHost(paths.hostRoot)
