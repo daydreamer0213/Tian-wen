@@ -160,6 +160,11 @@ function writeManagedPredecessor(
   encoding: 'original-archive' | 'locked-deploy',
 ): void {
   installWindowsFixture({ dataDir: paths.dataDir, runner: scriptedInstaller(paths).runner })
+  const predecessorArchivePath = paths.archivePath.replace(
+    'tianwen-runtime-bundle-0.1.0.tgz',
+    'tianwen-runtime-bundle-0.0.0.tgz',
+  )
+  renameSync(paths.archivePath, predecessorArchivePath)
   const hostManifest = join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
   writeJson(hostManifest, { bin: { dsh: 'lib/bin.js' }, version: PREDECESSOR_DSH_VERSION })
   writeJson(join(paths.profileRoot, 'package.json'), {
@@ -167,7 +172,7 @@ function writeManagedPredecessor(
       '@deepseek-ai/dsh-base': PREDECESSOR_DSH_VERSION,
       '@deepseek-ai/dsh-headless': PREDECESSOR_DSH_VERSION,
       '@tianwen/runtime-bundle': encoding === 'original-archive'
-        ? `file:${paths.archivePath.replaceAll('\\', '/')}`
+        ? `file:${predecessorArchivePath.replaceAll('\\', '/')}`
         : '0.0.0',
     },
     dsh: {
@@ -185,6 +190,7 @@ function writeManagedPredecessor(
     'utf8')
   const receipt = JSON.parse(readFileSync(paths.receiptPath, 'utf8'))
   receipt.dshVersion = PREDECESSOR_DSH_VERSION
+  receipt.archivePath = predecessorArchivePath
   writeJson(paths.receiptPath, receipt)
 }
 
@@ -557,14 +563,16 @@ describe('Tianwen installer contract', () => {
       (() => {
         const paths = deriveInstallPaths(testRoot('archive-directory'), 'win32')
         writeManagedPredecessor(paths, 'original-archive')
-        rmSync(paths.archivePath)
-        mkdirSync(paths.archivePath)
+        const archivePath = paths.archivePath.replace('0.1.0.tgz', '0.0.0.tgz')
+        rmSync(archivePath)
+        mkdirSync(archivePath)
         return paths
       })(),
       (() => {
         const paths = deriveInstallPaths(testRoot('archive-digest'), 'win32')
         writeManagedPredecessor(paths, 'original-archive')
-        writeFileSync(paths.archivePath, 'tampered archive\n', 'utf8')
+        const archivePath = paths.archivePath.replace('0.1.0.tgz', '0.0.0.tgz')
+        writeFileSync(archivePath, 'tampered archive\n', 'utf8')
         return paths
       })(),
       (() => {

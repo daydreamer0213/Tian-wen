@@ -334,7 +334,15 @@ function isFreshDataDirectory(paths) {
     && (!existsSync(stateRoot) || directoryHasOnly(stateRoot, ['evolution']))
 }
 
-function matchesPredecessorReceipt(paths) {
+function predecessorArchivePath(paths) {
+  const currentBasename = 'tianwen-runtime-bundle-0.1.0.tgz'
+  if (!paths.archivePath.endsWith(currentBasename)) {
+    throw new Error('current Runtime archive path is invalid')
+  }
+  return `${paths.archivePath.slice(0, -currentBasename.length)}tianwen-runtime-bundle-0.0.0.tgz`
+}
+
+function matchesPredecessorReceipt(paths, archivePath) {
   if (!existsSync(paths.receiptPath) || !statSync(paths.receiptPath).isFile()) return false
   try {
     const receipt = assertPlainObject(
@@ -357,10 +365,10 @@ function matchesPredecessorReceipt(paths) {
       ))
       && receipt.hostRoot === paths.hostRoot
       && receipt.profileRoot === paths.profileRoot
-      && receipt.archivePath === paths.archivePath
+      && receipt.archivePath === archivePath
       && receipt.receiptPath === paths.receiptPath
       && JSON.stringify(receipt.profileBundles) === JSON.stringify(PROFILE_BUNDLES)
-      && receipt.archiveDigest === sha256File(paths.archivePath)
+      && receipt.archiveDigest === sha256File(archivePath)
   } catch {
     return false
   }
@@ -369,20 +377,24 @@ function matchesPredecessorReceipt(paths) {
 export function classifyManagedInstallation(paths) {
   if (!existsSync(paths.dataDir)) return 'fresh'
   if (isFreshDataDirectory(paths)) return 'fresh'
-  if (!existsSync(paths.hostRoot) || !existsSync(paths.profileRoot)
-    || !existsSync(paths.archivePath) || !statSync(paths.archivePath).isFile()) {
+  if (!existsSync(paths.hostRoot) || !existsSync(paths.profileRoot)) {
     return 'incompatible'
   }
   try {
     const host = inspectInstalledHost(paths.hostRoot)
     const profile = inspectProfile(paths)
-    if (host.version === DSH_VERSION && matchesProfile(profile, DSH_VERSION, '0.1.0', renderProfilePatch(paths))) {
+    if (host.version === DSH_VERSION
+      && existsSync(paths.archivePath)
+      && statSync(paths.archivePath).isFile()
+      && matchesProfile(profile, DSH_VERSION, '0.1.0', renderProfilePatch(paths))) {
       return 'current'
     }
+    const archivePath = predecessorArchivePath(paths)
+    if (!existsSync(archivePath) || !statSync(archivePath).isFile()) return 'incompatible'
     const original = matchesProfile(
       profile,
       PREDECESSOR_DSH_VERSION,
-      `file:${portable(paths.archivePath)}`,
+      `file:${portable(archivePath)}`,
       renderPredecessorProfilePatch(paths),
     )
     const lockedDeploy = matchesProfile(
@@ -393,7 +405,7 @@ export function classifyManagedInstallation(paths) {
     )
     return host.version === PREDECESSOR_DSH_VERSION
       && (original || lockedDeploy)
-      && matchesPredecessorReceipt(paths)
+      && matchesPredecessorReceipt(paths, archivePath)
       ? 'managed-predecessor'
       : 'incompatible'
   } catch {
