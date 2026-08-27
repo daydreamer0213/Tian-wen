@@ -171,7 +171,7 @@ export function deriveInstallPaths(dataDir, platform = process.platform) {
   const dshHome = pathApi.join(dataDir, 'dsh-home')
   const profileRoot = pathApi.join(dshHome, 'profiles', PROFILE)
   return {
-    archivePath: pathApi.join(dataDir, 'packs', 'tianwen-runtime-bundle-0.0.0.tgz'),
+    archivePath: pathApi.join(dataDir, 'packs', 'tianwen-runtime-bundle-0.1.0.tgz'),
     binDir: pathApi.join(profileRoot, 'node_modules', '.bin'),
     dataDir,
     dshHome,
@@ -316,8 +316,8 @@ function validateProfile(paths, profileRoot = paths.profileRoot) {
     || profile.dependencies['@deepseek-ai/dsh-headless'] !== DSH_VERSION) {
     throw new Error(`managed Profile must use DSH ${DSH_VERSION}`)
   }
-  if (profile.dependencies[RUNTIME_PACKAGE] !== '0.0.0') {
-    throw new Error('managed Profile must use Tianwen Runtime 0.0.0')
+  if (profile.dependencies[RUNTIME_PACKAGE] !== '0.1.0') {
+    throw new Error('managed Profile must use Tianwen Runtime 0.1.0')
   }
   return profile.manifestPath
 }
@@ -376,7 +376,7 @@ export function classifyManagedInstallation(paths) {
   try {
     const host = inspectInstalledHost(paths.hostRoot)
     const profile = inspectProfile(paths)
-    if (host.version === DSH_VERSION && matchesProfile(profile, DSH_VERSION, '0.0.0', renderProfilePatch(paths))) {
+    if (host.version === DSH_VERSION && matchesProfile(profile, DSH_VERSION, '0.1.0', renderProfilePatch(paths))) {
       return 'current'
     }
     const original = matchesProfile(
@@ -407,7 +407,7 @@ function normalizeDeployedProfile(paths, profileRoot) {
   manifest.dependencies = {
     '@deepseek-ai/dsh-base': DSH_VERSION,
     '@deepseek-ai/dsh-headless': DSH_VERSION,
-    [RUNTIME_PACKAGE]: '0.0.0',
+    [RUNTIME_PACKAGE]: '0.1.0',
   }
   manifest.dsh = { profile: { bundles: [...PROFILE_BUNDLES] } }
   writeFileSync(manifestPath, canonicalJson(manifest), 'utf8')

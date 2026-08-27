@@ -182,7 +182,7 @@ function readJson<T>(path: string): T {
 function installPaths(productRoot: string) {
   const profileRoot = join(productRoot, 'dsh-home', 'profiles', 'tianwen')
   return {
-    archive: join(productRoot, 'packs', 'tianwen-runtime-bundle-0.0.0.tgz'),
+    archive: join(productRoot, 'packs', 'tianwen-runtime-bundle-0.1.0.tgz'),
     hostManifest: join(productRoot, 'dsh-host', 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
     profileRoot,
     receipt: join(productRoot, 'receipts', 'tianwen-install.json'),

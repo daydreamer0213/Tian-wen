@@ -33,7 +33,7 @@ const expectedDshVersion = '0.1.1-rc.2'
 const tarballBasename = 'tianwen-dsh-probe-bundle-0.0.0.tgz'
 const runtimeBundlePackage = '@tianwen/runtime-bundle'
 const runtimeSpecifier = `${runtimeBundlePackage}/runtime`
-const runtimeTarballBasename = 'tianwen-runtime-bundle-0.0.0.tgz'
+const runtimeTarballBasename = 'tianwen-runtime-bundle-0.1.0.tgz'
 const migrationMode = process.env.TIANWEN_DSH_MIGRATION_PROFILE === '1'
 const windowsDataRoot = 'D:\\DevData'
 

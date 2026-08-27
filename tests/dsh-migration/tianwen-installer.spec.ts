@@ -101,7 +101,7 @@ function writeRuntimePublication(runtimeRoot: string, label = 'runtime'): void {
     files: [...RUNTIME_FILES],
     name: '@tianwen/runtime-bundle',
     type: 'module',
-    version: '0.0.0',
+    version: '0.1.0',
   })
 }
 
@@ -248,7 +248,7 @@ function scriptedInstaller(
       expect(destination).toBeTypeOf('string')
       expect(bytes).toBeTypeOf('string')
       mkdirSync(destination!, { recursive: true })
-      const archive = join(destination!, 'tianwen-runtime-bundle-0.0.0.tgz')
+      const archive = join(destination!, 'tianwen-runtime-bundle-0.1.0.tgz')
       packedArchives.push(archive)
       writeFileSync(archive, bytes!, 'utf8')
     }
@@ -258,7 +258,7 @@ function scriptedInstaller(
         dependencies: {
           '@deepseek-ai/dsh-base': CURRENT_DSH_VERSION,
           '@deepseek-ai/dsh-headless': CURRENT_DSH_VERSION,
-          '@tianwen/runtime-bundle': '0.0.0',
+          '@tianwen/runtime-bundle': '0.1.0',
         },
         dsh: {
           profile: {
@@ -446,7 +446,7 @@ describe('Tianwen installer contract', () => {
   it('derives the complete fixed Windows installation surface', () => {
     const paths = deriveInstallPaths('D:\\DevData\\tianwen', 'win32')
     expect(paths).toEqual({
-      archivePath: 'D:\\DevData\\tianwen\\packs\\tianwen-runtime-bundle-0.0.0.tgz',
+      archivePath: 'D:\\DevData\\tianwen\\packs\\tianwen-runtime-bundle-0.1.0.tgz',
       binDir: 'D:\\DevData\\tianwen\\dsh-home\\profiles\\tianwen\\node_modules\\.bin',
       dataDir: 'D:\\DevData\\tianwen',
       dshHome: 'D:\\DevData\\tianwen\\dsh-home',
