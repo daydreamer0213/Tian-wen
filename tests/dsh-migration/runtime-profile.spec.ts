@@ -298,6 +298,7 @@ describe('Tianwen Runtime Bundle Profile', () => {
 
   it.runIf(!enabled)('keeps default Profile installation free of the Runtime layer', () => {
     rmSync(migrationReport, { force: true })
+    prefetchOfflineDependencies()
     const result = verify({ TIANWEN_DSH_MIGRATION_PROFILE: undefined })
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
     expect(existsSync(profileReport)).toBe(true)
