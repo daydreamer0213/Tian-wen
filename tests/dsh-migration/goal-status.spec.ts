@@ -730,10 +730,12 @@ describe('Tianwen read-only Goal status', () => {
     }
   })
 
-  it('rejects invalid list grammar with the two-line usage', () => {
+  it('rejects invalid list grammar with managed and portable usage', () => {
     const usage = [
       'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
+      'Usage: tianwen status --goal GOAL_ID --dsh-root ABSOLUTE_PATH --dsh-home ABSOLUTE_PATH --profile NAME --state-root ABSOLUTE_PATH [--json]',
       'Usage: tianwen list --data-dir ABSOLUTE_PATH [--json]',
+      'Usage: tianwen list --dsh-root ABSOLUTE_PATH --dsh-home ABSOLUTE_PATH --profile NAME --state-root ABSOLUTE_PATH [--json]',
       '',
     ].join('\n')
     for (const args of [

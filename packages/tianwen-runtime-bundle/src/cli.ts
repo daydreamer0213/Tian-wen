@@ -18,9 +18,15 @@ import {
   launchGoalResume,
   preflightNaturalRunTrial,
   preflightGoalResume,
+  preflightPortableGoalResume,
 } from './resume.js'
 import { createGoalLiveSmokeFailure } from './goal-live-smoke.js'
-import { launchGoalCreate, preflightGoalCreate } from './create.js'
+import {
+  launchGoalCreate,
+  preflightGoalCreate,
+  preflightPortableGoalCreate,
+} from './create.js'
+import { resolvePortableProfileTarget } from './portable-profile.js'
 import {
   launchModelCommand,
   preflightModelCommand,
@@ -34,12 +40,15 @@ import {
 
 const READ_ONLY_USAGE = [
   'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
+  'Usage: tianwen status --goal GOAL_ID --dsh-root ABSOLUTE_PATH --dsh-home ABSOLUTE_PATH --profile NAME --state-root ABSOLUTE_PATH [--json]',
   'Usage: tianwen list --data-dir ABSOLUTE_PATH [--json]',
+  'Usage: tianwen list --dsh-root ABSOLUTE_PATH --dsh-home ABSOLUTE_PATH --profile NAME --state-root ABSOLUTE_PATH [--json]',
   '',
 ].join('\n')
 
 const RESUME_USAGE = [
   'Usage: tianwen resume --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
+  'Usage: tianwen resume --goal GOAL_ID --dsh-root ABSOLUTE_PATH --dsh-home ABSOLUTE_PATH --profile NAME --state-root ABSOLUTE_PATH [--json]',
   'Usage: tianwen resume --goal GOAL_ID --data-dir ABSOLUTE_PATH --live-smoke --json',
   'Usage: tianwen resume --goal GOAL_ID --data-dir ABSOLUTE_PATH --trial-manifest ABSOLUTE_PATH --json',
   '',
@@ -47,6 +56,7 @@ const RESUME_USAGE = [
 
 const CREATE_USAGE = [
   'Usage: tianwen create --objective TEXT --data-dir ABSOLUTE_PATH [--max-rounds N] [--json]',
+  'Usage: tianwen create --objective TEXT --dsh-root ABSOLUTE_PATH --dsh-home ABSOLUTE_PATH --profile NAME --state-root ABSOLUTE_PATH [--max-rounds N] [--json]',
   '',
 ].join('\n')
 
@@ -91,6 +101,14 @@ function hasRepeatedStrictOption(args: readonly string[]): boolean {
       .some(name => optionCount(name) > 1)
 }
 
+function hasRepeatedTargetOption(args: readonly string[]): boolean {
+  return [
+    'data-dir', 'dsh-root', 'dsh-home', 'profile', 'state-root',
+  ].some(name => args.filter(argument =>
+    argument === `--${name}` || argument.startsWith(`--${name}=`)
+  ).length > 1)
+}
+
 function hasRepeatedControlledOption(args: readonly string[]): boolean {
   return ['manifest', 'data-dir', 'json'].some(name =>
     args.filter(argument =>
@@ -133,6 +151,10 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   let values: {
     readonly goal?: string
     readonly 'data-dir'?: string
+    readonly 'dsh-root'?: string
+    readonly 'dsh-home'?: string
+    readonly profile?: string
+    readonly 'state-root'?: string
     readonly json?: boolean
     readonly model?: string
     readonly objective?: string
@@ -150,6 +172,10 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       options: {
         goal: { type: 'string' },
         'data-dir': { type: 'string' },
+        'dsh-root': { type: 'string' },
+        'dsh-home': { type: 'string' },
+        profile: { type: 'string' },
+        'state-root': { type: 'string' },
         json: { type: 'boolean', default: false },
         model: { type: 'string' },
         objective: { type: 'string' },
@@ -171,13 +197,26 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   const modelChoice = values.model as ModelChoice | undefined
   const liveSmoke = values['live-smoke'] === true
   const trialManifest = values['trial-manifest']
+  const portableValues = [
+    values['dsh-root'], values['dsh-home'], values.profile, values['state-root'],
+  ]
+  const hasPortableTarget = portableValues.some(value => value !== undefined)
+  const completePortableTarget = portableValues.every(value => value !== undefined)
+  const managedTarget = values['data-dir'] !== undefined
+  const portableCommand = ['status', 'list', 'create', 'resume'].includes(command ?? '')
+  const validTarget = managedTarget
+    ? !hasPortableTarget && isAbsolute(values['data-dir']!)
+    : portableCommand && completePortableTarget && portableValues
+      .filter((_, index) => index !== 2)
+      .every(value => isAbsolute(value!))
   if (
     hasRepeatedStrictOption(args) ||
+    hasRepeatedTargetOption(args) ||
     (command === 'controlled-lifecycle' && hasRepeatedControlledOption(args)) ||
     (command !== 'controlled-lifecycle' && values.manifest !== undefined) ||
     (command === 'model' ? positionals.length !== 2 : positionals.length !== 1) ||
-    values['data-dir'] === undefined ||
-    !isAbsolute(values['data-dir']) ||
+    !validTarget ||
+    (!managedTarget && (liveSmoke || trialManifest !== undefined)) ||
     (
       command === 'status' || command === 'resume'
         ? values.goal === undefined || values.goal.length === 0 ||
@@ -199,7 +238,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
                   modelOperation === 'use'
                     ? modelChoice === undefined || !['offline', 'deepseek-v4-flash', 'deepseek-v4-pro'].includes(modelChoice)
                     : modelOperation === 'smoke'
-                      ? modelChoice !== 'deepseek-v4-pro' || !isSmokeDataDir(values['data-dir'])
+                      ? modelChoice !== 'deepseek-v4-pro' || !isSmokeDataDir(values['data-dir']!)
                     : true)
             : command === 'controlled-lifecycle'
               ? values.goal !== undefined || values.objective !== undefined ||
@@ -215,40 +254,54 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   }
 
   try {
+    const portableTarget = managedTarget ? undefined : resolvePortableProfileTarget({
+      dshRoot: values['dsh-root']!,
+      dshHome: values['dsh-home']!,
+      profile: values.profile!,
+      stateRoot: values['state-root']!,
+    })
     if (command === 'controlled-lifecycle') {
       return await launchControlledLifecycle(preflightControlledLifecycle(
-        values.manifest!, values['data-dir'],
+        values.manifest!, values['data-dir']!,
       ))
     }
     if (command === 'model') {
       return await launchModelCommand(preflightModelCommand(
-        modelOperation as 'status' | 'use' | 'smoke', modelChoice, values['data-dir'],
+        modelOperation as 'status' | 'use' | 'smoke', modelChoice, values['data-dir']!,
       ), values.json === true)
     }
     if (command === 'create') {
-      return await launchGoalCreate(preflightGoalCreate(
-        values.objective!, maxGoalRounds!, values['data-dir'],
-      ), values.json === true)
+      const preflight = portableTarget === undefined
+        ? preflightGoalCreate(values.objective!, maxGoalRounds!, values['data-dir']!)
+        : preflightPortableGoalCreate(values.objective!, maxGoalRounds!, portableTarget)
+      return await launchGoalCreate(preflight, values.json === true)
     }
     if (command === 'resume') {
-      const preflight = trialManifest === undefined
-        ? await preflightGoalResume(values.goal!, values['data-dir'], liveSmoke)
+      const preflight = portableTarget !== undefined
+        ? await preflightPortableGoalResume(values.goal!, portableTarget)
+        : trialManifest === undefined
+        ? await preflightGoalResume(values.goal!, values['data-dir']!, liveSmoke)
         : await preflightNaturalRunTrial(
-            values.goal!, values['data-dir'], trialManifest,
+            values.goal!, values['data-dir']!, trialManifest,
           )
       return await launchGoalResume(preflight, values.json === true)
     }
     if (command === 'list') {
-      const list = await listGoals({ dataDir: values['data-dir'] })
+      const list = portableTarget === undefined
+        ? await listGoals({ dataDir: values['data-dir']! })
+        : await listGoals({ sessionsRoot: portableTarget.sessionsRoot })
       process.stdout.write(values.json
         ? `${JSON.stringify(list)}\n`
         : formatListText(list))
       return 0
     }
-    const status = await readGoalStatus({
-      goalId: values.goal!,
-      dataDir: values['data-dir'],
-    })
+    const status = portableTarget === undefined
+      ? await readGoalStatus({ goalId: values.goal!, dataDir: values['data-dir']! })
+      : await readGoalStatus({
+          goalId: values.goal!,
+          sessionsRoot: portableTarget.sessionsRoot,
+          evolutionRoot: portableTarget.evolutionRoot,
+        })
     process.stdout.write(values.json
       ? `${JSON.stringify(status)}\n`
       : formatText(status))

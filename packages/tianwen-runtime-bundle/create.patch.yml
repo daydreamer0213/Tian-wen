@@ -22,6 +22,7 @@
       name: '@tianwen/runtime-bundle/create-runner'
       config:
         dataDir: !!js process.env.TIANWEN_CREATE_DATA_DIR
+        resumeTarget: !!js process.env.TIANWEN_CREATE_RESUME_TARGET
         objective: !!js process.env.TIANWEN_CREATE_OBJECTIVE
         maxGoalRounds: !!js Number(process.env.TIANWEN_CREATE_MAX_ROUNDS)
         nonce: !!js process.env.TIANWEN_CREATE_NONCE

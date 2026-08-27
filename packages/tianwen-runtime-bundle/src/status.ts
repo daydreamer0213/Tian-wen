@@ -11,13 +11,24 @@ import {
   inspectEvolutionLedger,
 } from '@tianwen/evolution/inspection'
 
-export interface GoalStatusInput {
+export type GoalStatusInput = {
   readonly goalId: string
   readonly dataDir: string
+  readonly evolutionRoot?: never
+  readonly sessionsRoot?: never
+} | {
+  readonly goalId: string
+  readonly dataDir?: never
+  readonly evolutionRoot: string
+  readonly sessionsRoot: string
 }
 
-export interface GoalListInput {
+export type GoalListInput = {
   readonly dataDir: string
+  readonly sessionsRoot?: never
+} | {
+  readonly dataDir?: never
+  readonly sessionsRoot: string
 }
 
 export interface GoalStatusProjection {
@@ -112,9 +123,12 @@ export interface DurableGoalSnapshot {
 }
 
 export async function scanDurableGoals(
-  dataDir: string,
+  sessionsRootInput: string,
 ): Promise<readonly DurableGoalSnapshot[]> {
-  const sessionsRoot = join(dataDir, 'dsh-home', 'sessions')
+  if (!isAbsolute(sessionsRootInput)) {
+    throw new TypeError('sessionsRoot must be an absolute path')
+  }
+  const sessionsRoot = resolve(sessionsRootInput)
   if (!existsSync(sessionsRoot)) return []
 
   const ctx = new Context()
@@ -147,12 +161,19 @@ export async function scanDurableGoals(
 export async function listGoals(
   input: GoalListInput,
 ): Promise<GoalListProjection> {
-  if (!isAbsolute(input.dataDir)) {
-    throw new TypeError('dataDir must be an absolute path')
+  const sessionsRoot = input.dataDir === undefined
+    ? input.sessionsRoot
+    : isAbsolute(input.dataDir)
+      ? join(resolve(input.dataDir), 'dsh-home', 'sessions')
+      : undefined
+  if (sessionsRoot === undefined || !isAbsolute(sessionsRoot)) {
+    throw new TypeError(input.dataDir === undefined
+      ? 'sessionsRoot must be an absolute path'
+      : 'dataDir must be an absolute path')
   }
   const goalIds = new Set<string>()
   const goals: GoalListProjection['goals'][number][] = []
-  for (const snapshot of await scanDurableGoals(resolve(input.dataDir))) {
+  for (const snapshot of await scanDurableGoals(sessionsRoot)) {
     const folded = snapshot.folded
     const goal = folded.goal
     if (goal === undefined) continue
@@ -199,15 +220,26 @@ export async function listGoals(
 export async function readGoalStatus(
   input: GoalStatusInput,
 ): Promise<GoalStatusProjection> {
-  if (!isAbsolute(input.dataDir)) {
-    throw new TypeError('dataDir must be an absolute path')
-  }
   if (input.goalId.length === 0) {
     throw new TypeError('goalId must not be empty')
   }
-  const dataDir = resolve(input.dataDir)
+  const roots = input.dataDir === undefined
+    ? {
+        sessionsRoot: input.sessionsRoot,
+        evolutionRoot: input.evolutionRoot,
+      }
+    : isAbsolute(input.dataDir)
+      ? {
+          sessionsRoot: join(resolve(input.dataDir), 'dsh-home', 'sessions'),
+          evolutionRoot: join(resolve(input.dataDir), 'state', 'evolution'),
+        }
+      : undefined
+  if (roots === undefined) throw new TypeError('dataDir must be an absolute path')
+  if (!isAbsolute(roots.sessionsRoot) || !isAbsolute(roots.evolutionRoot)) {
+    throw new TypeError('sessionsRoot and evolutionRoot must be absolute paths')
+  }
   try {
-    const matches = (await scanDurableGoals(dataDir))
+    const matches = (await scanDurableGoals(roots.sessionsRoot))
       .filter(snapshot => String(snapshot.folded.goal?.id) === input.goalId)
     if (matches.length === 0) {
       throw new GoalStatusNotFoundError(input.goalId)
@@ -231,7 +263,7 @@ export async function readGoalStatus(
       record => record.outcome.status === 'complete',
     ).length
     const champion = inspectEvolutionLedger(
-      join(dataDir, 'state', 'evolution'),
+      roots.evolutionRoot,
     ).champion
 
     return {

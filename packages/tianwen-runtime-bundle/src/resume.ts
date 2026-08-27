@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import type { ChildProcess } from 'node:child_process'
+import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,6 +23,7 @@ import {
   readNaturalRunTrialManifest,
 } from './natural-run-trial.js'
 import type { PreparedNaturalRunTrialManifest } from './natural-run-trial.js'
+import type { ResolvedPortableProfileTarget } from './portable-profile.js'
 
 const DSH_VERSION = '0.1.1-rc.2'
 const STRICT_CHILD_OUTPUT_LIMIT_BYTES = 65_536
@@ -35,6 +36,21 @@ export interface ResumePreflight {
   readonly revision: number
   readonly sessionId: string
   readonly sessionsRoot: string
+}
+
+export interface PortableResumePreflight {
+  readonly evolutionRoot: string
+  readonly goalId: string
+  readonly portableTarget: ResolvedPortableProfileTarget
+  readonly revision: number
+  readonly sessionId: string
+  readonly sessionsRoot: string
+}
+
+export interface GoalResumeInvocation {
+  readonly args: string[]
+  readonly options: SpawnOptions
+  readonly program: string
 }
 
 export interface LiveSmokeResumePreflight extends ResumePreflight {
@@ -159,7 +175,8 @@ export async function preflightGoalResume(
   if (liveSmoke && !inside(devData, dataDir)) {
     throw new GoalResumeUnavailableError('Goal is not eligible for live smoke')
   }
-  const matches = (await scanDurableGoals(dataDir))
+  const sessionsRoot = join(dataDir, 'dsh-home', 'sessions')
+  const matches = (await scanDurableGoals(sessionsRoot))
     .filter(snapshot => String(snapshot.folded.goal?.id) === goalId)
   if (matches.length === 0) throw new GoalStatusNotFoundError(goalId)
   if (matches.length > 1) throw new GoalStatusAmbiguousError(goalId)
@@ -174,7 +191,7 @@ export async function preflightGoalResume(
     goalId,
     revision: goal.revision,
     sessionId: String(snapshot.inspection.meta.id),
-    sessionsRoot: join(dataDir, 'dsh-home', 'sessions'),
+    sessionsRoot,
   }
   if (liveSmoke) {
     const createEvent = snapshot.inspection.events[0]
@@ -205,6 +222,32 @@ export async function preflightGoalResume(
   return preflight
 }
 
+export async function preflightPortableGoalResume(
+  goalId: string,
+  target: ResolvedPortableProfileTarget,
+): Promise<PortableResumePreflight> {
+  if (goalId.length === 0) throw new TypeError('goalId must not be empty')
+  const matches = (await scanDurableGoals(target.sessionsRoot))
+    .filter(snapshot => String(snapshot.folded.goal?.id) === goalId)
+  if (matches.length === 0) throw new GoalStatusNotFoundError(goalId)
+  if (matches.length > 1) throw new GoalStatusAmbiguousError(goalId)
+  const snapshot = matches[0]!
+  const goal = snapshot.folded.goal
+  if (goal === undefined) throw new GoalStatusIntegrityError('Goal replay is incomplete')
+  if (goal.phase === 'complete') throw new GoalResumeUnavailableError('Goal is complete')
+  if (snapshot.folded.roundsStarted >= goal.maxGoalRounds) {
+    throw new GoalResumeUnavailableError('Goal round budget is exhausted')
+  }
+  return {
+    evolutionRoot: target.evolutionRoot,
+    goalId,
+    portableTarget: target,
+    revision: goal.revision,
+    sessionId: String(snapshot.inspection.meta.id),
+    sessionsRoot: target.sessionsRoot,
+  }
+}
+
 export async function preflightNaturalRunTrial(
   goalId: string,
   dataDir: string,
@@ -215,7 +258,7 @@ export async function preflightNaturalRunTrial(
     throw new GoalResumeUnavailableError('trial manifest Goal does not match')
   }
   const preflight = await preflightGoalResume(goalId, dataDir)
-  const matches = (await scanDurableGoals(preflight.dataDir))
+  const matches = (await scanDurableGoals(preflight.sessionsRoot))
     .filter(snapshot => String(snapshot.folded.goal?.id) === goalId)
   const events = matches[0]?.inspection.events
   if (events === undefined || events.some(event => event.type === 'turn/start')) {
@@ -386,6 +429,7 @@ export async function monitorNaturalRunTrialChild(
 export async function launchGoalResume(
   preflight:
     | ResumePreflight
+    | PortableResumePreflight
     | LiveSmokeResumePreflight
     | NaturalRunTrialResumePreflight,
   json: boolean,
@@ -394,11 +438,45 @@ export async function launchGoalResume(
   const naturalTrial = 'trial' in preflight
   if (liveSmoke || naturalTrial) verifyInstalledRuntimeBundle(preflight.dataDir)
   const startedAtMs = Date.now()
-  const dshHome = join(preflight.dataDir, 'dsh-home')
-  const child = spawn(process.execPath, [
-    resolveInstalledDshBin(preflight.dataDir), '--profile', 'tianwen', '--patch',
-    resolve(dirname(fileURLToPath(import.meta.url)), '../resume.patch.yml'),
-  ], {
+  const invocation = buildGoalResumeInvocation(
+    preflight, json, randomUUID(), startedAtMs,
+  )
+  const child = spawn(invocation.program, invocation.args, invocation.options)
+  if (liveSmoke) return monitorLiveSmokeChild(child, preflight, startedAtMs)
+  if (naturalTrial) return monitorNaturalRunTrialChild(child, preflight)
+  return await new Promise((resolveExit, reject) => {
+    child.once('error', reject)
+    child.once('exit', (code, signal) => resolveExit(code ?? (signal === null ? 1 : 1)))
+  })
+}
+
+export function buildGoalResumeInvocation(
+  preflight:
+    | ResumePreflight
+    | PortableResumePreflight
+    | LiveSmokeResumePreflight
+    | NaturalRunTrialResumePreflight,
+  json: boolean,
+  nonce: string,
+  startedAtMs: number,
+): GoalResumeInvocation {
+  const liveSmoke = 'liveSmoke' in preflight
+  const naturalTrial = 'trial' in preflight
+  const portable = 'portableTarget' in preflight
+  const dshHome = portable
+    ? preflight.portableTarget.dshHome
+    : join(preflight.dataDir, 'dsh-home')
+  const dshBin = portable
+    ? preflight.portableTarget.dshBin
+    : resolveInstalledDshBin(preflight.dataDir)
+  const profile = portable ? preflight.portableTarget.profile : 'tianwen'
+  return {
+    program: process.execPath,
+    args: [
+      dshBin, '--profile', profile, '--patch',
+      resolve(dirname(fileURLToPath(import.meta.url)), '../resume.patch.yml'),
+    ],
+    options: {
     env: {
       ...process.env,
       DSH_HOME: dshHome,
@@ -406,7 +484,7 @@ export async function launchGoalResume(
       TIANWEN_RESUME_LIVE_SMOKE: String(liveSmoke),
       TIANWEN_RESUME_GOAL_ID: preflight.goalId,
       TIANWEN_RESUME_JSON: String(json),
-      TIANWEN_RESUME_NONCE: randomUUID(),
+      TIANWEN_RESUME_NONCE: nonce,
       TIANWEN_RESUME_REVISION: String(preflight.revision),
       TIANWEN_RESUME_SESSION_ID: preflight.sessionId,
       TIANWEN_RESUME_SESSIONS_ROOT: preflight.sessionsRoot,
@@ -418,11 +496,6 @@ export async function launchGoalResume(
     },
     shell: false,
     stdio: liveSmoke || naturalTrial ? ['ignore', 'pipe', 'pipe'] : 'inherit',
-  })
-  if (liveSmoke) return monitorLiveSmokeChild(child, preflight, startedAtMs)
-  if (naturalTrial) return monitorNaturalRunTrialChild(child, preflight)
-  return await new Promise((resolveExit, reject) => {
-    child.once('error', reject)
-    child.once('exit', (code, signal) => resolveExit(code ?? (signal === null ? 1 : 1)))
-  })
+    },
+  }
 }

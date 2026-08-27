@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { resolveInstalledDshBin } from './resume.js'
+import type { ResolvedPortableProfileTarget } from './portable-profile.js'
 
 export interface GoalCreatePreflight {
   readonly dataDir: string
@@ -12,6 +13,15 @@ export interface GoalCreatePreflight {
   readonly evolutionRoot: string
   readonly maxGoalRounds: number
   readonly objective: string
+  readonly sessionsRoot: string
+}
+
+export interface PortableGoalCreatePreflight {
+  readonly evolutionRoot: string
+  readonly maxGoalRounds: number
+  readonly objective: string
+  readonly portableTarget: ResolvedPortableProfileTarget
+  readonly resumeTarget: string
   readonly sessionsRoot: string
 }
 
@@ -43,25 +53,66 @@ export function preflightGoalCreate(
   }
 }
 
+function portableArgument(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`
+}
+
+export function preflightPortableGoalCreate(
+  objectiveInput: string,
+  maxGoalRounds: number,
+  target: ResolvedPortableProfileTarget,
+): PortableGoalCreatePreflight {
+  const objective = objectiveInput.trim()
+  if (objective.length === 0) throw new TypeError('objective must not be empty')
+  if (!Number.isSafeInteger(maxGoalRounds) || maxGoalRounds < 1) {
+    throw new TypeError('maxGoalRounds must be a positive safe integer')
+  }
+  return {
+    evolutionRoot: target.evolutionRoot,
+    maxGoalRounds,
+    objective,
+    portableTarget: target,
+    resumeTarget: [
+      '--dsh-root', portableArgument(target.dshRoot),
+      '--dsh-home', portableArgument(target.dshHome),
+      '--profile', portableArgument(target.profile),
+      '--state-root', portableArgument(target.stateRoot),
+    ].join(' '),
+    sessionsRoot: target.sessionsRoot,
+  }
+}
+
 export function buildGoalCreateInvocation(
-  preflight: GoalCreatePreflight,
+  preflight: GoalCreatePreflight | PortableGoalCreatePreflight,
   json: boolean,
   nonce: string,
 ): GoalCreateInvocation {
+  const portable = 'portableTarget' in preflight
+  const dshBin = portable
+    ? preflight.portableTarget.dshBin
+    : preflight.dshBin
+  const dshHome = portable
+    ? preflight.portableTarget.dshHome
+    : join(preflight.dataDir, 'dsh-home')
+  const profile = portable ? preflight.portableTarget.profile : 'tianwen'
   return {
     program: process.execPath,
     args: [
-      preflight.dshBin,
+      dshBin,
       '--profile',
-      'tianwen',
+      profile,
       '--patch',
       resolve(dirname(fileURLToPath(import.meta.url)), '../create.patch.yml'),
     ],
     options: {
       env: {
         ...process.env,
-        DSH_HOME: join(preflight.dataDir, 'dsh-home'),
-        TIANWEN_CREATE_DATA_DIR: preflight.dataDir,
+        DSH_HOME: dshHome,
+        ...(portable ? {
+          TIANWEN_CREATE_RESUME_TARGET: preflight.resumeTarget,
+        } : {
+          TIANWEN_CREATE_DATA_DIR: preflight.dataDir,
+        }),
         TIANWEN_CREATE_EVOLUTION_ROOT: preflight.evolutionRoot,
         TIANWEN_CREATE_JSON: String(json),
         TIANWEN_CREATE_MAX_ROUNDS: String(preflight.maxGoalRounds),
@@ -76,7 +127,7 @@ export function buildGoalCreateInvocation(
 }
 
 export async function launchGoalCreate(
-  preflight: GoalCreatePreflight,
+  preflight: GoalCreatePreflight | PortableGoalCreatePreflight,
   json: boolean,
 ): Promise<number> {
   const invocation = buildGoalCreateInvocation(preflight, json, randomUUID())

@@ -5,11 +5,12 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { isAbsolute } from 'node:path'
 
 export interface CreateConfig {
-  readonly dataDir: string
+  readonly dataDir?: string
   readonly json: boolean
   readonly maxGoalRounds: number
   readonly nonce: string
   readonly objective: string
+  readonly resumeTarget?: string
 }
 
 export interface GoalCreateReceipt {
@@ -31,7 +32,11 @@ export interface GoalCreateReceipt {
 
 function requireConfig(config: CreateConfig): void {
   if (
-    !isAbsolute(config.dataDir) || config.objective.trim().length === 0 ||
+    ((config.dataDir === undefined) === (config.resumeTarget === undefined)) ||
+    (config.dataDir !== undefined && !isAbsolute(config.dataDir)) ||
+    (config.resumeTarget !== undefined && (
+      config.resumeTarget.length === 0 || config.resumeTarget !== config.resumeTarget.trim()
+    )) || config.objective.trim().length === 0 ||
     config.objective !== config.objective.trim() ||
     !Number.isSafeInteger(config.maxGoalRounds) || config.maxGoalRounds < 1 ||
     config.nonce.length === 0 || config.nonce !== config.nonce.trim()
@@ -104,6 +109,17 @@ export function formatGoalCreateText(
   ].join('\n')
 }
 
+export function formatPortableGoalCreateText(
+  receipt: GoalCreateReceipt,
+  resumeTarget: string,
+): string {
+  return [
+    `Created Goal ${receipt.goal.id}: ${receipt.goal.objective}`,
+    `Next: tianwen resume --goal ${receipt.goal.id} ${resumeTarget}`,
+    '',
+  ].join('\n')
+}
+
 export const name = 'tianwen-create-runner'
 export const inject = ['agentDefaultModel', 'agents', 'goals', 'sessions'] as const
 
@@ -113,7 +129,9 @@ export function apply(ctx: Context, config: CreateConfig): void {
   runGoalCreate(ctx, config).then(receipt => {
     process.stdout.write(config.json
       ? `${JSON.stringify(receipt)}\n`
-      : formatGoalCreateText(receipt, config.dataDir))
+      : config.dataDir === undefined
+        ? formatPortableGoalCreateText(receipt, config.resumeTarget!)
+        : formatGoalCreateText(receipt, config.dataDir))
     exit(0)
   }, error => {
     process.stderr.write(`tianwen create: ${error instanceof Error ? error.message : 'failed'}\n`)
