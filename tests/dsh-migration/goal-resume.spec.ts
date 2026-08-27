@@ -592,4 +592,82 @@ describe('tianwen resume', () => {
       rmSync(dataDir, { recursive: true, force: true })
     }
   })
+
+  it.each([
+    ['a false Session flush', 'false'],
+    ['a rejected Session flush', 'reject'],
+  ] as const)(
+    'reports one deterministic persistence failure after %s without a success receipt',
+    async (_name, flushMode) => {
+      mkdirSync(FIXTURE_BASE, { recursive: true })
+      const dataDir = mkdtempSync(join(FIXTURE_BASE, 'flush-failure-'))
+      const sessionsRoot = join(dataDir, 'dsh-home', 'sessions')
+      const sessionId = SessionId('resume-flush-failure')
+      const first = await mountGoalHarness(sessionsRoot, [], { goalRoundDriver: false })
+      const initial = await first.ctx.agents.create({
+        sessionId,
+        agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+      })
+      try {
+        const goal = first.ctx.goals.create(initial.agent, {
+          objective: 'confirm a durable resume persistence failure', maxGoalRounds: 1,
+        })
+        await first.ctx.sessions.flush(initial.agent.session)
+        await initial.dispose()
+        await first.ctx.fiber.dispose()
+
+        const second = await mountGoalHarness(
+          sessionsRoot, [
+            [
+              { type: 'block-start', index: 0, blockType: 'text' },
+              { type: 'block-end', index: 0, block: { type: 'text', text: 'round complete' } },
+              { type: 'finish', reason: { kind: 'stop' } },
+            ],
+          ], { goalRoundDriver: true },
+        )
+        try {
+          second.ctx.provide('agentDefaultModel', {
+            currentSelection: () => ({ provider: 'tianwen-probe', model: 'scripted' }),
+          })
+          const { runGoalResume } = await import(
+            '../../packages/tianwen-runtime-bundle/src/resume-runner.js'
+          )
+          let flushCalls = 0
+          let flushedEvents: readonly { readonly type: string }[] = []
+          const failure = await runGoalResume(second.ctx, {
+            goalId: String(goal.id),
+            json: true,
+            nonce: 'test-nonce',
+            revision: goal.revision,
+            sessionId: String(sessionId),
+          }, {
+            flush: async session => {
+              flushCalls += 1
+              flushedEvents = session.events
+              if (flushMode === 'false') return false
+              throw new Error('D:/private/flush-sentinel-must-not-leak')
+            },
+          }).catch((error: unknown) => error)
+
+          expect(failure).toBeInstanceOf(Error)
+          expect((failure as Error).message).toBe('Session persistence is unavailable')
+          expect((failure as Error).message).not.toContain('flush-sentinel')
+          expect(second.adapter.requests).toHaveLength(1)
+          expect(flushCalls).toBe(1)
+          expect(flushedEvents.some(event => event.type === 'step/start')).toBe(true)
+          const released = await second.ctx.agents.resume({
+            resumeSessionId: sessionId,
+            agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+          })
+          expect(second.ctx.goals.get(released.agent)?.activation).toBe('disarmed')
+          await released.dispose()
+        } finally {
+          await second.ctx.fiber.dispose()
+        }
+      } finally {
+        await first.ctx.fiber.dispose()
+        rmSync(dataDir, { recursive: true, force: true })
+      }
+    },
+  )
 })
