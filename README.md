@@ -66,6 +66,45 @@ is process-local work, not a durable cross-run Learning Ticket. The detailed
 boundary is maintained in the
 [architecture overview](docs/tianwen-architecture-overview-v2.md).
 
+## Use Tianwen in an existing DSH Profile
+
+The portable package currently supports exact `@deepseek-ai/dsh@0.1.1-rc.2`.
+Build the one Runtime Bundle tarball from this checkout, then let DSH install it
+into the Profile selected by the user:
+
+```powershell
+pnpm --filter @tianwen/runtime-bundle... build
+pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
+$env:DSH_HOME = 'D:\DevData\dsh-home'
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.0.tgz
+```
+
+`--allow-build=koffi` is an explicit pnpm approval recorded in that Profile; it
+does not change global pnpm settings. Add `--offline` before the tarball only
+when the complete dependency closure is already present in the selected pnpm
+store.
+
+The installed Profile-local `tianwen` command can target that existing DSH
+installation without using the managed Tianwen product root.
+`DSH_PACKAGE_ROOT` below is the installed `@deepseek-ai/dsh` package directory,
+not `DSH_HOME`:
+
+```powershell
+& "$env:DSH_HOME\profiles\work\node_modules\.bin\tianwen.cmd" list --dsh-root DSH_PACKAGE_ROOT --dsh-home $env:DSH_HOME --profile work --state-root "$env:DSH_HOME\profiles\work\state"
+```
+
+Remove only the Bundle with `dsh plugin --profile work remove
+@tianwen/runtime-bundle`. Tianwen state below the Profile's `state` directory
+is deliberately retained. The repository-owned managed installer remains an
+alternative for project-controlled deployments:
+
+```powershell
+node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
+```
+
+Desktop packaging and a public package/CLI name are later distribution
+decisions; they do not require a second Tianwen Runtime Bundle.
+
 ## What this preview proves
 
 The repository carries two different evidence classes. Zero-cost scripted

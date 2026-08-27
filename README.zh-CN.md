@@ -57,6 +57,39 @@ DSH Message Feedback 只是学习归因的一项输入，本身不等于 Lesson�
 中的工作，不等于可跨 Run 持久保存的 Learning Ticket。详细边界以
 [架构总览](docs/tianwen-architecture-overview-v2.md)为准。
 
+## 在已有 DSH Profile 中使用天问
+
+当前可移植包只支持精确版本 `@deepseek-ai/dsh@0.1.1-rc.2`。先从本仓库构建唯一的
+Runtime Bundle 压缩包，再交给 DSH 安装到用户自己选择的 Profile：
+
+```powershell
+pnpm --filter @tianwen/runtime-bundle... build
+pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
+$env:DSH_HOME = 'D:\DevData\dsh-home'
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.0.tgz
+```
+
+`--allow-build=koffi` 是写入当前 Profile 的 pnpm 明确许可，不会修改全局 pnpm 设置。只有
+当所选 pnpm store 已包含完整依赖时，才在压缩包路径前增加 `--offline`。
+
+安装在该 Profile 内的 `tianwen` 命令可以直接指向这套已有 DSH，不要求使用天问托管
+产品目录。下面的 `DSH_PACKAGE_ROOT` 是已安装 `@deepseek-ai/dsh` 包的目录，不是
+`DSH_HOME`：
+
+```powershell
+& "$env:DSH_HOME\profiles\work\node_modules\.bin\tianwen.cmd" list --dsh-root DSH_PACKAGE_ROOT --dsh-home $env:DSH_HOME --profile work --state-root "$env:DSH_HOME\profiles\work\state"
+```
+
+使用 `dsh plugin --profile work remove @tianwen/runtime-bundle` 只移除 Bundle；Profile
+下 `state` 目录里的天问状态会保留。对于项目方自己控制的部署，仓库自带的托管安装器仍是
+另一种可选路径：
+
+```powershell
+node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
+```
+
+桌面端封装和公开包名/命令名属于后续分发决策，不需要另做一套天问 Runtime Bundle。
+
 ## 当前预览证明了什么
 
 仓库里有两类不同证据。零成本 scripted fixture 证明确定性机制；Stage 7 的自然任务证明已
