@@ -1,8 +1,8 @@
 # 天问架构总览 v2
 
-**更新：** 2026-08-26
+**更新：** 2026-08-27
 
-**状态：** 当前产品架构的首要阅读入口；Stage 7 已完成，官方已安装受控全链已通过
+**状态：** 当前产品架构的首要阅读入口；自然开发能力取证已收口，项目转入普通产品开发
 
 **一句话定义：**
 
@@ -12,7 +12,7 @@
 
 如果只想快速把握项目，先读“当前状态”和第 1–3、9–10 节即可；其余章节用于实现时消除歧义。
 
-## 当前状态（2026-08-26）
+## 当前状态（2026-08-27）
 
 Stage 7 已经完成，不再是待验证能力。一个使用配置模型的全新自然任务通过已安装的 DSH
 rc.7 产品路径正式运行一次：Goal complete，45/45 Evidence complete，`Outcome=met`，学习
@@ -27,6 +27,13 @@ rc.7 产品路径正式运行一次：Goal complete，45/45 Evidence complete，
 
 - **Stage 7 项目所有者自然任务：** 自然任务与官方 installer/status 证明仍已完成；
   历史 Stage 7 16/16 publication proof 保留为当时的发布事实。
+- **自然开发任务：** Profile dump 与 ordinary resume persistence 两项真实代码任务均为
+  `task-passed`，前者及其 Tianwen-owned DSH patch 已进入 main，后者也已完成受控集成。
+  cold Profile boot 与 Natural Trial stream-error 任务保持 `task-incomplete`，independent verdict
+  intake 保持 `task-incomplete + task-design-invalid`；这些结果都没有通过重跑改写。
+- **自然任务阶段边界：** 现有成功、失败和监督设计错误样本已经足以证明当前阶段，不再为了
+  测试 Tianwen 而制造新自然任务。以后只把真实项目待办交给 Tianwen；新的正式盲评只用于
+  外部用户任务、尚未证明的产品边界，或已经合法形成的 Candidate。
 - **scripted mechanics：** 0-external-Provider scripted 全链夹具已通过普通 DSH Agent
   路径覆盖五任务 B/C、盲态 evaluator、隔离 Shadow、Promotion/Rollback/Restore 产品机制。
 - **installed ingress readiness：** runner + patch publication contract 是 18/18；每项均为
@@ -305,12 +312,19 @@ Activity-03 的模型选择 receipt 已持久化 DeepSeek，但进程在 lifecyc
 没有改变 receipt、安全边界或正式 Provider 工作。
 
 Activity-22 已完成新的官方安装、离线 status、完整生命周期、offline 恢复与最终 status。
-Activity-01、Activity-02、Activity-03 的历史分类保持不变。下一项有价值的产品证据不应再是
-重复合成 operation，而应来自普通项目所有者或外部用户任务；在那之前，自然用户改善、外部用户
-验证、Provider-account 请求计数和普遍效果都保持未声明。
+Activity-01、Activity-02、Activity-03 的历史分类保持不变。为能力取证而安排自然任务的阶段也已
+收口：Stage 7、Profile dump、cold Profile boot、independent verdict intake、ordinary resume
+persistence 与 Natural Trial stream-error 已覆盖链路成立、成功交付、失败保留和任务设计错误。
+继续堆同类次数不会证明学习泛化。
 
-正式运行仍冻结五任务和单次尝试以保证比较公平，不设 Tianwen 侧模型、token 或金额上限；
-也不绕过冻结证据门和 standing authorization 边界。
+当前主线回到普通产品开发：集成已经通过的成果，修复真实主路径缺陷，并让后续自然证据来自
+本来就有价值的项目所有者或外部用户任务。Natural Trial stream-error 只影响
+`resume --trial-manifest` 辅助路径，普通 resume 不经过该 monitor；它作为低优先级 backlog
+保留，不阻塞当前阶段。自然用户改善、外部用户验证、Provider-account 请求计数和普遍效果仍
+保持未声明。
+
+若未来已有合法 Candidate，需要同家族盲评时，仍冻结任务和单次尝试以保证比较公平；不设
+Tianwen 侧模型、token 或金额上限，也不绕过 standing authorization 边界。
 
 ## 11. v0.1 应该怎样算“做完”
 

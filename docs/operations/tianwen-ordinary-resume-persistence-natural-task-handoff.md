@@ -89,3 +89,33 @@ Keep the passing feature branch unchanged. Once the previous exact-main CI is
 confirmed green, integrate it through the controlled main path, rerun the local
 exact-main gates, push Tianwen main once, and require CI whose head SHA equals
 the merge SHA. External DSH publication remains out of scope.
+
+## Terminal integration update — 2026-08-27
+
+The historical next-step text above records the original stop line. It was
+superseded by explicit project-owner direction after both prior exact-main runs
+remained queued with zero jobs and unchanged timestamps. Their GitHub monitor
+was removed; neither run is represented as green.
+
+The exact Agent-authored feature was integrated without modification in merge
+commit `0793ee9`. No replacement Goal, Agent Turn, model call, DSH change, or
+external DSH publication was used. Fresh pre-integration verification passed:
+
+- focused ordinary resume: 26 tests;
+- related create, live-smoke, and Natural Run suites: 71 tests;
+- TypeScript full suite: 52 files passed, 2 skipped; 670 tests passed, 8 skipped;
+- Python full suite: 608 passed, 4 skipped;
+- DSH install, private-import, typecheck, Ruff, and diff checks;
+- two independent read-only reviews with no blocking finding.
+
+A fresh official install from the merged main returned `status=ready` with DSH
+`0.1.0-rc.7` at
+`D:\DevData\tianwen-resume-stage-closeout-install-01`. Installed model status
+remained offline with zero model requests. With the installed `DSH_HOME`,
+`--dump-config` completed in 215 ms, contained the Tianwen Runtime Bundle, and
+did not change the Profile root timestamp.
+
+This closes evaluation-oriented natural development for the current stage.
+Future Tianwen work must serve a real product backlog item rather than create
+another task merely to test Agent capability. The incomplete Natural Trial
+stream-error diff remains unintegrated as low-priority auxiliary-path evidence.
