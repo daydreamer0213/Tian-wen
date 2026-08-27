@@ -71,11 +71,10 @@ async function createActiveGoal(root: string) {
       throw new Error('Session persistence is unavailable')
     }
     if (adapter.requests.length !== 0) throw new Error('fixture generation must not request a model')
-    return { goal, handle, harness }
-  } catch (error) {
+    return { id: String(goal.id), revision: goal.revision }
+  } finally {
     await handle.dispose()
     await harness.ctx.fiber.dispose()
-    throw error
   }
 }
 
@@ -86,28 +85,23 @@ async function generate(root: string): Promise<void> {
   if (existsSync(join(root, META_FILE))) throw new Error('frozen fixture already exists')
   mkdirSync(root, { recursive: true })
 
-  const { goal, handle, harness } = await createActiveGoal(root)
-  try {
-    const logPath = findSessionLog(root)
-    const bytes = readFileSync(logPath)
-    const relativeLogPath = relative(root, logPath).replaceAll('\\', '/')
-    if (!relativeLogPath || relativeLogPath.startsWith('../')) {
-      throw new Error('session.jsonl must stay inside TIANWEN_DSH_JSONL_ROOT')
-    }
-    const meta: FixtureMeta = {
-      sourceVersion: DSH_VERSION,
-      sessionId: SESSION_ID,
-      goal: { id: String(goal.id), revision: goal.revision },
-      relativeLogPath,
-      byteLength: bytes.byteLength,
-      sha256: sha256(bytes),
-    }
-    writeFileSync(join(root, META_FILE), `${JSON.stringify(meta, null, 2)}\n`)
-    process.stdout.write(`${JSON.stringify(meta)}\n`)
-  } finally {
-    await handle.dispose()
-    await harness.ctx.fiber.dispose()
+  const goal = await createActiveGoal(root)
+  const logPath = findSessionLog(root)
+  const bytes = readFileSync(logPath)
+  const relativeLogPath = relative(root, logPath).replaceAll('\\', '/')
+  if (!relativeLogPath || relativeLogPath.startsWith('../')) {
+    throw new Error('session.jsonl must stay inside TIANWEN_DSH_JSONL_ROOT')
   }
+  const meta: FixtureMeta = {
+    sourceVersion: DSH_VERSION,
+    sessionId: SESSION_ID,
+    goal,
+    relativeLogPath,
+    byteLength: bytes.byteLength,
+    sha256: sha256(bytes),
+  }
+  writeFileSync(join(root, META_FILE), `${JSON.stringify(meta, null, 2)}\n`)
+  process.stdout.write(`${JSON.stringify(meta)}\n`)
 }
 
 async function verify(root: string): Promise<void> {
