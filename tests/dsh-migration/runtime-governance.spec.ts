@@ -16,6 +16,10 @@ import { PythonA1Evaluator } from '../../packages/tianwen-evaluator-python/src/i
 import { apply } from '../../packages/tianwen-runtime/src/index.js'
 
 const repoRoot = resolve(import.meta.dirname, '../..')
+const fixtureRoot = resolve(
+  process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-test-fixtures',
+  'runtime-governance',
+)
 const V1 = 'return { name: "phase1-v1", apply() {} }'
 const BROKEN = 'throw new Error("phase1 broken candidate")'
 const RECEIPT_V1 = `sha256:${'1'.repeat(64)}` as const
@@ -65,9 +69,7 @@ async function mountGovernance(root: string, id: string) {
 
 describe('Tianwen runtime governance migration', () => {
   it('keeps Python A1 as an independent repo-task evaluator', async () => {
-    const stateRoot = resolve(
-      'D:/DevData/tianwen-dsh-probe/migration-phase-1-a1',
-    )
+    const stateRoot = resolve(fixtureRoot, 'migration-phase-1-a1')
     const pythonExecutable = process.env.TIANWEN_DSH_PROBE_PYTHON
     if (pythonExecutable === undefined) {
       throw new Error('TIANWEN_DSH_PROBE_PYTHON is required')
@@ -97,7 +99,7 @@ describe('Tianwen runtime governance migration', () => {
   })
 
   it('keeps Cordis source governance separate from Python A1 evaluation', async () => {
-    const base = 'D:/DevData/tianwen-dsh-probe/migration-phase-1-governance'
+    const base = resolve(fixtureRoot, 'migration-phase-1-governance')
     mkdirSync(base, { recursive: true })
     const root = mkdtempSync(join(base, 'runtime-governance-'))
     let first: Awaited<ReturnType<typeof mountGovernance>> | undefined

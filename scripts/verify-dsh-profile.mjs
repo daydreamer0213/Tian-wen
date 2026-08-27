@@ -29,13 +29,13 @@ const basePackage = '@deepseek-ai/dsh-base'
 const bundlePackage = '@tianwen/dsh-probe-bundle'
 const bundleAdapterPackage = `${bundlePackage}/adapter`
 const defaultModelPackage = '@deepseek-ai/dsh-agent-default-model'
-const expectedDshVersion = '0.1.0-rc.7'
+const expectedDshVersion = '0.1.1-rc.2'
 const tarballBasename = 'tianwen-dsh-probe-bundle-0.0.0.tgz'
 const runtimeBundlePackage = '@tianwen/runtime-bundle'
 const runtimeSpecifier = `${runtimeBundlePackage}/runtime`
 const runtimeTarballBasename = 'tianwen-runtime-bundle-0.0.0.tgz'
 const migrationMode = process.env.TIANWEN_DSH_MIGRATION_PROFILE === '1'
-const windowsProbeRoot = 'D:\\DevData\\tianwen-dsh-probe'
+const windowsDataRoot = 'D:\\DevData'
 
 function isWithin(base, candidate) {
   const child = relative(base, candidate)
@@ -50,25 +50,19 @@ function requireProbeRoot() {
 
   const candidate = resolve(value)
   if (process.platform === 'win32') {
-    const allowed = resolve(windowsProbeRoot)
-    if (candidate.toLowerCase() !== allowed.toLowerCase()) {
-      throw new Error(
-        'TIANWEN_DSH_PROBE_ROOT must stay under '
-        + windowsProbeRoot
-        + ' and must equal it exactly',
-      )
+    const parent = resolve(windowsDataRoot)
+    if (samePath(process.platform, candidate, parent) || !isWithin(parent, candidate)) {
+      throw new Error(`TIANWEN_DSH_PROBE_ROOT must be a child of ${windowsDataRoot}`)
     }
-    mkdirSync(allowed, { recursive: true })
-    const realAllowed = realpathSync(allowed)
+    mkdirSync(parent, { recursive: true })
+    mkdirSync(candidate, { recursive: true })
+    const realParent = realpathSync(parent)
     const realCandidate = realpathSync(candidate)
     if (
-      realAllowed.toLowerCase() !== allowed.toLowerCase()
-      || realCandidate.toLowerCase() !== allowed.toLowerCase()
+      samePath(process.platform, realCandidate, realParent)
+      || !isWithin(realParent, realCandidate)
     ) {
-      throw new Error(
-        'TIANWEN_DSH_PROBE_ROOT real path must equal '
-        + windowsProbeRoot,
-      )
+      throw new Error(`TIANWEN_DSH_PROBE_ROOT real path must be a child of ${windowsDataRoot}`)
     }
     return realCandidate
   }
@@ -106,7 +100,7 @@ function samePath(platform, left, right) {
 export function validateFixedInstallBoundary(values) {
   const fixedTarballBasename = values.tarballBasename ?? tarballBasename
   const expectedTarball = resolve(
-    values.platform === 'win32' ? windowsProbeRoot : values.probeRoot,
+    values.probeRoot,
     'packs',
     fixedTarballBasename,
   )
@@ -114,18 +108,10 @@ export function validateFixedInstallBoundary(values) {
     values.profileName === profileName,
     `profile must be exactly ${profileName}`,
   )
-  if (values.platform === 'win32') {
-    requireAssertion(
-      samePath(values.platform, values.probeRoot, windowsProbeRoot)
-      && samePath(values.platform, values.realProbeRoot, windowsProbeRoot),
-      `Windows probe root and real path must equal ${windowsProbeRoot}`,
-    )
-  } else {
-    requireAssertion(
-      samePath(values.platform, values.probeRoot, values.realProbeRoot),
-      'probe root and real path must match',
-    )
-  }
+  requireAssertion(
+    samePath(values.platform, values.probeRoot, values.realProbeRoot),
+    'probe root and real path must match',
+  )
   requireAssertion(
     basename(values.tarballPath) === fixedTarballBasename
     && samePath(values.platform, values.tarballPath, expectedTarball)
@@ -195,15 +181,15 @@ export function parseAuthoredPatch(source) {
 
 export function parseRuntimePatch(source) {
   const lines = source.replaceAll('\r\n', '\n').split('\n').filter(line => line !== '')
+  const evolutionRoot = /^ {8}evolutionRoot: '(.+)'$/u.exec(lines[4] ?? '')?.[1]
   requireAssertion(
-    JSON.stringify(lines) === JSON.stringify([
+    JSON.stringify(lines.slice(0, 4)) === JSON.stringify([
       '- insert:', '    - id: tianwen-runtime',
       "      name: '@tianwen/runtime-bundle/runtime'", '      config:',
-      "        evolutionRoot: 'D:/DevData/tianwen-dsh-probe/evolution'",
-    ]),
+    ]) && lines.length === 5 && evolutionRoot !== undefined,
     'Runtime patch differs from the single authorized operation',
   )
-  return { insertedRuntime: { id: 'tianwen-runtime', name: runtimeSpecifier, evolutionRoot: 'D:/DevData/tianwen-dsh-probe/evolution' } }
+  return { insertedRuntime: { id: 'tianwen-runtime', name: runtimeSpecifier, evolutionRoot } }
 }
 
 function dumpedRows(source) {
@@ -315,7 +301,7 @@ export async function resolveAndImportRuntimeBundle(profileManifestPath) {
   await import(pathToFileURL(cordisResolved).href)
   const module = await import(pathToFileURL(runtimeResolved).href)
   requireAssertion(module.name === 'tianwen-runtime', 'wrong Runtime identity')
-  requireAssertion(module.SUPPORTED_DSH_VERSION === '0.1.0-rc.7', 'wrong DSH version')
+  requireAssertion(module.SUPPORTED_DSH_VERSION === '0.1.1-rc.2', 'wrong DSH version')
   requireAssertion(JSON.stringify(module.inject) === JSON.stringify(['dynamicCordisRunner']), 'wrong inject')
   requireAssertion(typeof module.apply === 'function', 'Runtime apply is unavailable')
   return { specifier: runtimeSpecifier, resolved: runtimeResolved, name: 'tianwen-runtime', inject: module.inject, supportedDshVersion: module.SUPPORTED_DSH_VERSION, externalSpecifiers: Object.keys(manifest.dependencies).sort(), externalResolved: { '@deepseek-ai/cordis': cordisResolved } }
@@ -392,18 +378,10 @@ function runtimeEnvironment(
   corepackHome,
 ) {
   const temp = childPath(probeRoot, 'temp')
-  const pnpmHome = process.platform === 'win32'
-    ? 'D:\\DevData\\pnpm-home'
-    : childPath(probeRoot, 'pnpm-home')
-  const store = process.platform === 'win32'
-    ? 'D:\\DevData\\pnpm-store'
-    : childPath(probeRoot, 'pnpm-store')
-  const pnpmCache = process.platform === 'win32'
-    ? 'D:\\DevData\\pnpm-cache'
-    : childPath(probeRoot, 'pnpm-cache')
-  const npmCache = process.platform === 'win32'
-    ? 'D:\\DevData\\npm-cache'
-    : childPath(probeRoot, 'npm-cache')
+  const pnpmHome = childPath(probeRoot, 'pnpm-home')
+  const store = childPath(probeRoot, 'pnpm-store')
+  const pnpmCache = childPath(probeRoot, 'pnpm-cache')
+  const npmCache = childPath(probeRoot, 'npm-cache')
   const appData = childPath(probeRoot, 'app-data')
   const localAppData = childPath(probeRoot, 'local-app-data')
   const disposableUserProfile = childPath(probeRoot, 'user-profile')
@@ -536,16 +514,12 @@ async function main() {
   const reportBasename = migrationMode
     ? 'migration-profile-report.json'
     : 'profile-report.json'
-  if (process.platform === 'win32') {
-    rmSync(resolve(windowsProbeRoot, reportBasename), { force: true })
-  }
   const probeRoot = requireProbeRoot()
   const reportPath = childPath(probeRoot, reportBasename)
   rmSync(reportPath, { force: true })
   const packsRoot = childPath(probeRoot, 'packs')
   const dshHome = childPath(probeRoot, 'home')
-  const workspaceVirtualStore = process.env.PNPM_CONFIG_VIRTUAL_STORE_DIR
-    ?? childPath(probeRoot, 'workspace-virtual-store')
+  const workspaceVirtualStore = childPath(probeRoot, 'workspace-virtual-store')
   const profileVirtualStore = childPath(probeRoot, 'profile-virtual-store')
   const childCorepackHome = prepareChildCorepack(probeRoot)
   const childCorepackState = JSON.parse(readFileSync(
@@ -562,8 +536,8 @@ async function main() {
 
   requireAssertion(
     process.platform !== 'win32'
-      || resolve(workspaceVirtualStore).toLowerCase().startsWith('d:\\devdata\\'),
-    'workspace virtual store must stay on D:\\DevData',
+      || isWithin(probeRoot, resolve(workspaceVirtualStore)),
+    'workspace virtual store must stay under the selected probe root',
   )
   requireAssertion(
     childCorepackState.pnpm?.startsWith('11.20.0+sha512.') === true,
@@ -715,7 +689,7 @@ async function main() {
     const installedRuntimePatch = parseRuntimePatch(readFileSync(resolve(runtimeRoot, 'cordis.patch.yml'), 'utf8'))
     requireAssertion(JSON.stringify(authoredRuntimePatch) === JSON.stringify(installedRuntimePatch), 'installed Runtime patch differs from authored patch')
     const runtimeRow = dumpedRow(dump, 'tianwen-runtime')
-    requireAssertion(rowValue(runtimeRow, /^ {2}name: (.+)$/u, 'name') === runtimeSpecifier && rowValue({ ...runtimeRow, lines: runtimeRow.lines.slice(runtimeRow.lines.indexOf('  config:') + 1) }, /^ {4}evolutionRoot: (.+)$/u, 'evolutionRoot') === 'D:/DevData/tianwen-dsh-probe/evolution', 'dumped Runtime row is wrong')
+    requireAssertion(rowValue(runtimeRow, /^ {2}name: (.+)$/u, 'name') === runtimeSpecifier && rowValue({ ...runtimeRow, lines: runtimeRow.lines.slice(runtimeRow.lines.indexOf('  config:') + 1) }, /^ {4}evolutionRoot: (.+)$/u, 'evolutionRoot') === authoredRuntimePatch.insertedRuntime.evolutionRoot, 'dumped Runtime row is wrong')
     const meta = JSON.parse(readFileSync(metaPath, 'utf8'))
     const external = [...new Set(meta.outputs['dist/runtime.js'].imports.filter(item => item.external && !item.path.startsWith('node:')).map(item => item.path))].sort()
     requireAssertion(JSON.stringify(external) === JSON.stringify(runtimeBundle.externalSpecifiers), 'Runtime metafile external closure differs from installed manifest')
@@ -823,12 +797,13 @@ async function main() {
       profileVirtualStore,
       workspaceVirtualStore,
       corepackHome: childCorepackHome,
-      pnpmCache: process.platform === 'win32'
-        ? 'D:\\DevData\\pnpm-cache'
-        : childPath(probeRoot, 'pnpm-cache'),
-      pnpmStore: process.platform === 'win32'
-        ? 'D:\\DevData\\pnpm-store'
-        : childPath(probeRoot, 'pnpm-store'),
+      pnpmHome: childPath(probeRoot, 'pnpm-home'),
+      pnpmCache: childPath(probeRoot, 'pnpm-cache'),
+      pnpmStore: childPath(probeRoot, 'pnpm-store'),
+      npmCache: childPath(probeRoot, 'npm-cache'),
+      appData: childPath(probeRoot, 'app-data'),
+      localAppData: childPath(probeRoot, 'local-app-data'),
+      userProfile: childPath(probeRoot, 'user-profile'),
       temp: childPath(probeRoot, 'temp'),
     },
     commands,

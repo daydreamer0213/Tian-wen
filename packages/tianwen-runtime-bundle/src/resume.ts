@@ -24,7 +24,7 @@ import {
 } from './natural-run-trial.js'
 import type { PreparedNaturalRunTrialManifest } from './natural-run-trial.js'
 
-const DSH_VERSION = '0.1.0-rc.7'
+const DSH_VERSION = '0.1.1-rc.2'
 const STRICT_CHILD_OUTPUT_LIMIT_BYTES = 65_536
 const LIVE_SMOKE_PARENT_GRACE_MS = 5_000
 

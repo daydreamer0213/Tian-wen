@@ -43,8 +43,8 @@ const controlledInstalledEnabled = process.platform === 'win32' &&
 const runtimePackage = '@tianwen/runtime-bundle'
 const liveGoalObjective = 'Call tianwen_smoke_action exactly once. After it succeeds, mark this Goal complete with update_goal, then reply exactly TIANWEN_GOAL_ROUND_OK.'
 const controlledFixtureBase = resolve(
-  process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-dsh-probe',
-  'installed-controlled-lifecycle',
+  process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-test-fixtures',
+  'tianwen-startup',
 )
 
 const controlledParentSkill = {
@@ -454,7 +454,7 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
   expect(modelRunner.apply).toBeTypeOf('function')
   expect(resumeRunner.apply).toBeTypeOf('function')
   expect(controlledRunner.apply).toBeTypeOf('function')
-  expect(runtimeManifest.dependencies['@deepseek-ai/dsh-system-prompt']).toBe('0.1.0-rc.7')
+  expect(runtimeManifest.dependencies['@deepseek-ai/dsh-system-prompt']).toBe('0.1.1-rc.2')
   const cli = resolve(runtimeRoot, runtimeManifest.bin.tianwen)
   expect(statSync(cli).isFile()).toBe(true)
   return { cli }

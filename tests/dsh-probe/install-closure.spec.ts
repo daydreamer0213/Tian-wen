@@ -9,7 +9,6 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, resolve } from 'node:path'
-import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
 import { targetExistsInsidePackage } from '../../scripts/check-dsh-install.mjs'
 
@@ -57,7 +56,7 @@ function pnpmVersionCommand(): { executable: string; args: string[] } {
 }
 
 describe('published DeepSeek Harness closure', () => {
-  it('pins every installed DSH package to rc.7', () => {
+  it('pins every installed DSH package to rc.2', () => {
     const output = execFileSync(
       process.execPath,
       [resolve(root, 'scripts/check-dsh-install.mjs')],
@@ -75,10 +74,10 @@ describe('published DeepSeek Harness closure', () => {
         cliTarget: boolean
       }>
     }
-    expect(report.expectedDshVersion).toBe('0.1.0-rc.7')
+    expect(report.expectedDshVersion).toBe('0.1.1-rc.2')
     expect(report.installedPackages.length).toBeGreaterThan(10)
     expect(new Set(report.installedPackages.map(item => item.version)))
-      .toEqual(new Set(['0.1.0-rc.7']))
+      .toEqual(new Set(['0.1.1-rc.2']))
 
     const cli = report.packageSurfaces.find(
       item => item.name === '@deepseek-ai/dsh',
@@ -109,7 +108,7 @@ describe('published DeepSeek Harness closure', () => {
     }
     for (const [name, version] of Object.entries(manifest.devDependencies)) {
       if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) {
-        expect(version).toBe('0.1.0-rc.7')
+        expect(version).toBe('0.1.1-rc.2')
       }
     }
     const compatManifest = JSON.parse(readFileSync(
@@ -118,7 +117,7 @@ describe('published DeepSeek Harness closure', () => {
     )) as { dependencies: Record<string, string> }
     for (const [name, version] of Object.entries(compatManifest.dependencies)) {
       if (name.startsWith('@deepseek-ai/dsh-')) {
-        expect(version).toBe('0.1.0-rc.7')
+        expect(version).toBe('0.1.1-rc.2')
       }
     }
     const command = pnpmVersionCommand()
@@ -203,9 +202,10 @@ describe('published DeepSeek Harness closure', () => {
   })
 
   it('accepts only real files physically contained by the package root', () => {
-    const fixtureBase = process.platform === 'win32'
-      ? 'D:/DevData/tianwen-dsh-probe'
-      : tmpdir()
+    const fixtureBase = resolve(
+      process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-test-fixtures',
+      'install-closure',
+    )
     mkdirSync(fixtureBase, { recursive: true })
     const packageRoot = mkdtempSync(resolve(fixtureBase, 'package-surface-'))
     const outsideFile = `${packageRoot}-outside.mjs`

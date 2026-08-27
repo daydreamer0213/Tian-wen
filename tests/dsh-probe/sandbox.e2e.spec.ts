@@ -24,7 +24,10 @@ import { describe, expect, it } from 'vitest'
 const runSandbox = process.env.TIANWEN_RUN_DSH_SANDBOX === '1'
 const describeSandbox = runSandbox ? describe : describe.skip
 
-const PROBE_ROOT = resolve('D:/DevData/tianwen-dsh-probe')
+const PROBE_ROOT = resolve(
+  process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-test-fixtures',
+  'sandbox',
+)
 const SANDBOX_ROOT = join(PROBE_ROOT, 'sandbox')
 const REPORT_PATH = join(PROBE_ROOT, 'sandbox-report.json')
 const DENIAL_PREFIX = 'TIANWEN_SANDBOX_WRITE_DENIED '
@@ -274,7 +277,7 @@ function ensureSandboxRoot(): void {
 
 describeSandbox('real DSH local sandbox', () => {
   it('accepts only an exact structured child filesystem denial', () => {
-    const targetPath = 'D:\\DevData\\tianwen-dsh-probe\\sandbox\\target.txt'
+    const targetPath = join(SANDBOX_ROOT, 'target.txt')
     const denialPrefix = 'TIANWEN_SANDBOX_WRITE_DENIED '
     const confined: ConfinedArgv = {
       argv: [],
@@ -436,7 +439,7 @@ describeSandbox('real DSH local sandbox', () => {
     const configuredRoot = process.env.TIANWEN_DSH_PROBE_ROOT
     if (
       configuredRoot === undefined
-      || resolve(configuredRoot).toLowerCase() !== PROBE_ROOT.toLowerCase()
+      || resolve(configuredRoot, 'sandbox').toLowerCase() !== PROBE_ROOT.toLowerCase()
     ) {
       throw new Error(`TIANWEN_DSH_PROBE_ROOT must be exactly ${PROBE_ROOT}`)
     }
@@ -553,7 +556,7 @@ describeSandbox('real DSH local sandbox', () => {
       writeFileSync(REPORT_PATH, `${JSON.stringify({
         schemaVersion: 'tianwen.dsh_sandbox_probe.v1',
         platform: process.platform,
-        provider: '@deepseek-ai/dsh-sandbox-local@0.1.0-rc.7',
+        provider: '@deepseek-ai/dsh-sandbox-local@0.1.1-rc.2',
         enforcement: readOnly.enforcement,
         readOnlyWorkspaceWrite: readOnlyDenied ? 'denied' : 'not-proven',
         readOnlyDenialEvidence: readOnlyDenied

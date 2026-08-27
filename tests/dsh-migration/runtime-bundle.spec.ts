@@ -26,8 +26,8 @@ const packageRoot = resolve(root, 'packages/tianwen-runtime-bundle')
 const compatPackageRoot = resolve(root, 'packages/tianwen-dsh-compat')
 const hostPackageRoot = resolve(root, 'packages/tianwen-dsh-host')
 const packFixtureBase = resolve(
-  process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-dsh-probe',
-  'runtime-bundle-packs',
+  process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-test-fixtures',
+  'runtime-bundle',
 )
 const tar = process.platform === 'win32'
   ? resolve(process.env.SystemRoot!, 'System32', 'tar.exe')
@@ -317,15 +317,15 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.bin).toEqual({ tianwen: 'dist/cli.js' })
     expect(manifest.dependencies).toEqual({
       '@deepseek-ai/cordis': '4.0.1',
-      '@deepseek-ai/dsh-agent': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-credentials': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-goal': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-llm': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-session': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-skill': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-system-prompt': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-tools': '0.1.0-rc.7',
+      '@deepseek-ai/dsh-agent': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-credentials': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-goal': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-llm': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-session': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-skill': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-system-prompt': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-tools': '0.1.1-rc.2',
     })
     expect(Object.keys(manifest.dependencies)).not.toContainEqual(
       expect.stringMatching(/^@tianwen\//u),
@@ -336,7 +336,7 @@ describe('@tianwen/runtime-bundle', () => {
       name: '@tianwen/dsh-host',
       private: true,
       dependencies: {
-      '@deepseek-ai/dsh': '0.1.0-rc.7',
+        '@deepseek-ai/dsh': '0.1.1-rc.2',
       },
     })
     expect(manifest.devDependencies).toMatchObject({
@@ -420,15 +420,15 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.files).toContain('dist/smoke.js')
     expect(manifest.dependencies).toEqual({
       '@deepseek-ai/cordis': '4.0.1',
-      '@deepseek-ai/dsh-agent': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-credentials': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-goal': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-llm': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-session': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-skill': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-system-prompt': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-tools': '0.1.0-rc.7',
+      '@deepseek-ai/dsh-agent': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-credentials': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-goal': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-llm': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-session': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-skill': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-system-prompt': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-tools': '0.1.1-rc.2',
     })
 
     const smoke = await import(

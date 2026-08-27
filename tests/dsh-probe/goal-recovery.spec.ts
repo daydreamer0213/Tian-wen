@@ -34,9 +34,10 @@ function nextEventLoopTurn(): Promise<void> {
 
 describe('DSH goal recovery', () => {
   it('recovers disarmed and performs exactly one explicitly resumed round', async () => {
-    const fixtureBase = process.platform === 'win32'
-      ? resolve('D:/DevData/tianwen-dsh-probe/sessions')
-      : resolve(process.cwd(), '.dsh-probe/sessions')
+    const fixtureBase = resolve(
+      process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-test-fixtures',
+      'goal-recovery',
+    )
     mkdirSync(fixtureBase, { recursive: true })
     const persistenceRoot = mkdtempSync(resolve(fixtureBase, 'goal-recovery-'))
     const sessionId = SessionId(`goal-recovery-${randomUUID()}`)

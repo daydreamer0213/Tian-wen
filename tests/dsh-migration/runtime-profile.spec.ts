@@ -6,7 +6,9 @@ import { assertNoRuntimeForbiddenReferences } from '../../scripts/verify-dsh-pro
 
 const root = resolve(import.meta.dirname, '../..')
 const enabled = process.env.TIANWEN_DSH_MIGRATION_PROFILE === '1'
-const probeRoot = 'D:/DevData/tianwen-dsh-probe'
+const probeParent = process.env.TIANWEN_DSH_PROBE_ROOT
+  ?? 'D:/DevData/tianwen-test-fixtures'
+const probeRoot = resolve(probeParent, 'runtime-profile')
 const migrationReport = `${probeRoot}/migration-profile-report.json`
 const profileReport = `${probeRoot}/profile-report.json`
 
@@ -26,14 +28,14 @@ describe('Tianwen Runtime Bundle Profile', () => {
     expect(() => assertNoRuntimeForbiddenReferences(['{"inputs":{"probe/adapter.ts":{}}}'])).toThrow()
   })
 
-  it.runIf(enabled)('invalidates a stale migration report before root validation', () => {
+  it.runIf(enabled)('leaves an authorized stale report untouched when root validation fails', () => {
     writeFileSync(migrationReport, '{"stale":true}\n')
     const result = verify({
       TIANWEN_DSH_MIGRATION_PROFILE: '1',
       TIANWEN_DSH_PROBE_ROOT: '',
     })
     expect(result.status).toBe(1)
-    expect(existsSync(migrationReport)).toBe(false)
+    expect(existsSync(migrationReport)).toBe(true)
   })
 
   it.runIf(enabled)('invalidates a stale migration report before early setup failure', () => {
@@ -59,8 +61,25 @@ describe('Tianwen Runtime Bundle Profile', () => {
       specifier: '@tianwen/runtime-bundle/runtime',
       name: 'tianwen-runtime',
       inject: ['dynamicCordisRunner'],
-      supportedDshVersion: '0.1.0-rc.7',
+      supportedDshVersion: '0.1.1-rc.2',
       externalSpecifiers: ['@deepseek-ai/cordis'],
+    })
+    expect(report.paths).toMatchObject({
+      probeRoot,
+      dshHome: resolve(probeRoot, 'home'),
+      profileRoot: resolve(probeRoot, 'home', 'profiles', 'tianwen-probe'),
+      packsRoot: resolve(probeRoot, 'packs'),
+      profileVirtualStore: resolve(probeRoot, 'profile-virtual-store'),
+      workspaceVirtualStore: resolve(probeRoot, 'workspace-virtual-store'),
+      corepackHome: resolve(probeRoot, 'corepack-home'),
+      pnpmHome: resolve(probeRoot, 'pnpm-home'),
+      pnpmCache: resolve(probeRoot, 'pnpm-cache'),
+      pnpmStore: resolve(probeRoot, 'pnpm-store'),
+      npmCache: resolve(probeRoot, 'npm-cache'),
+      appData: resolve(probeRoot, 'app-data'),
+      localAppData: resolve(probeRoot, 'local-app-data'),
+      userProfile: resolve(probeRoot, 'user-profile'),
+      temp: resolve(probeRoot, 'temp'),
     })
     expect(report.forbiddenEffects).toEqual({
       interactiveAppStarts: 0,

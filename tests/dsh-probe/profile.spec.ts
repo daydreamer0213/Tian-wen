@@ -1,5 +1,12 @@
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+} from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -53,7 +60,7 @@ describe('Tianwen DSH Bundle', () => {
   })
 
   it.runIf(process.platform === 'win32')(
-    'rejects a Windows profile root outside the D drive probe boundary',
+    'rejects a Windows profile root outside the D drive data boundary',
     () => {
       const result = spawnSync(
         process.execPath,
@@ -69,8 +76,60 @@ describe('Tianwen DSH Bundle', () => {
       )
       expect(result.status).toBe(1)
       expect(result.stderr).toContain(
-        'must stay under D:\\DevData\\tianwen-dsh-probe',
+        'must be a child of D:\\DevData',
       )
+    },
+  )
+
+  it.runIf(process.platform === 'win32')(
+    'rejects the D drive data root and a traversal back to it',
+    () => {
+      for (const probeRoot of [
+        'D:\\DevData',
+        'D:\\DevData\\tianwen-dsh-rc2-spike\\..',
+      ]) {
+        const result = spawnSync(
+          process.execPath,
+          [resolve(root, 'scripts/verify-dsh-profile.mjs')],
+          {
+            cwd: root,
+            encoding: 'utf8',
+            env: { TIANWEN_DSH_PROBE_ROOT: probeRoot },
+            shell: false,
+          },
+        )
+        expect(result.status).toBe(1)
+        expect(result.stderr).toContain('must be a child of D:\\DevData')
+      }
+    },
+  )
+
+  it.runIf(process.platform === 'win32')(
+    'rejects a D drive child whose real path escapes the data root',
+    () => {
+      const parent = `D:\\DevData\\tianwen-profile-root-test-${randomUUID()}`
+      const probeRoot = `${parent}\\escaped`
+      mkdirSync(parent)
+      symlinkSync('C:\\Windows\\Temp', probeRoot, 'junction')
+      try {
+        const result = spawnSync(
+          process.execPath,
+          [resolve(root, 'scripts/verify-dsh-profile.mjs')],
+          {
+            cwd: root,
+            encoding: 'utf8',
+            env: { TIANWEN_DSH_PROBE_ROOT: probeRoot },
+            shell: false,
+          },
+        )
+        expect(result.status).toBe(1)
+        expect(result.stderr).toContain(
+          'real path must be a child of D:\\DevData',
+        )
+      } finally {
+        unlinkSync(probeRoot)
+        rmSync(parent, { recursive: true, force: true })
+      }
     },
   )
 
@@ -78,7 +137,7 @@ describe('Tianwen DSH Bundle', () => {
     const verifier = await import('../../scripts/verify-dsh-profile.mjs')
     expect(verifier.validateFixedInstallBoundary).toBeTypeOf('function')
 
-    const probeRoot = 'D:\\DevData\\tianwen-dsh-probe'
+    const probeRoot = 'D:\\DevData\\tianwen-dsh-rc2-spike\\profile-contract'
     const tarballPath = `${probeRoot}\\packs\\tianwen-dsh-probe-bundle-0.0.0.tgz`
     const values = {
       platform: 'win32',
@@ -99,7 +158,6 @@ describe('Tianwen DSH Bundle', () => {
     })
     expect(() => verifier.validateFixedInstallBoundary({
       ...values,
-      probeRoot: `${probeRoot}\\child`,
       realProbeRoot: `${probeRoot}\\child`,
     })).toThrow()
     expect(() => verifier.validateFixedInstallBoundary({

@@ -8,5 +8,5 @@ export {
 export { SessionId } from '@deepseek-ai/dsh-session'
 export { isSkillName, renderSkillContent } from '@deepseek-ai/dsh-skill'
 export { defineTool } from '@deepseek-ai/dsh-tools'
-export const DSH_VERSION = '0.1.0-rc.7' as const
+export const DSH_VERSION = '0.1.1-rc.2' as const
 export { ScriptedAdapter } from './scripted-adapter.js'

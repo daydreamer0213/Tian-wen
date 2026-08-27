@@ -3,7 +3,6 @@ import {
   mkdtempSync,
   rmSync,
 } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -25,8 +24,8 @@ import {
 } from '@tianwen/dsh-compat'
 
 describe('tianwen-dsh-compat public seam', () => {
-  it('exports the exact rc.7 load-bearing surface', () => {
-    expect(DSH_VERSION).toBe('0.1.0-rc.7')
+  it('exports the exact rc.2 load-bearing surface', () => {
+    expect(DSH_VERSION).toBe('0.1.1-rc.2')
     expect(Context).toBeTypeOf('function')
     expect(AgentLoop).toBeTypeOf('function')
     expect(GoalService).toBeTypeOf('function')
@@ -74,9 +73,10 @@ describe('tianwen-dsh-compat public seam', () => {
   })
 
   it('mounts persistent harness storage under a disposable root', async () => {
-    const fixtureBase = process.platform === 'win32'
-      ? 'D:/DevData/tianwen-dsh-probe'
-      : tmpdir()
+    const fixtureBase = resolve(
+      process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-test-fixtures',
+      'public-surface',
+    )
     mkdirSync(fixtureBase, { recursive: true })
     const persistenceRoot = mkdtempSync(resolve(fixtureBase, 'public-persistence-'))
     const harness = await mountPersistentHarness(persistenceRoot, [])

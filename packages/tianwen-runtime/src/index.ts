@@ -75,7 +75,7 @@ export type {
   RuntimeRunBindingReceipt,
 } from './learning-intake.js'
 
-export const SUPPORTED_DSH_VERSION = '0.1.0-rc.7' as const
+export const SUPPORTED_DSH_VERSION = '0.1.1-rc.2' as const
 export const name = 'tianwen-runtime'
 export const inject = ['dynamicCordisRunner'] as const
 

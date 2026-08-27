@@ -11,7 +11,7 @@ import { dirname, extname, isAbsolute, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
-const EXPECTED_DSH_VERSION = '0.1.0-rc.7'
+const EXPECTED_DSH_VERSION = '0.1.1-rc.2'
 const DSH_CLI_PACKAGE = '@deepseek-ai/dsh'
 const DSH_LIBRARY_PACKAGES = [
   '@deepseek-ai/dsh-agent',

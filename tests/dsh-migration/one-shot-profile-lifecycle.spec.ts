@@ -118,8 +118,8 @@ vi.mock('chokidar', () => chokidarMock)
 
 const fixtureParent = resolve(
   process.env.TIANWEN_DSH_PROBE_ROOT
-    ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-v0.1-eval-fixtures' : tmpdir()),
-  'one-shot-profile-lifecycle',
+    ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-test-fixtures' : tmpdir()),
+  'one-shot-profile',
 )
 const repoRoot = resolve(import.meta.dirname, '..', '..')
 const require = createRequire(import.meta.url)
@@ -268,7 +268,7 @@ describe('one-shot Profile lifecycle', () => {
   it.skipIf(process.platform !== 'win32')(
     'completes DeepSeek activation and offline recovery through four fresh Profile processes',
     () => {
-      expect(dshManifest.version).toBe('0.1.0-rc.7')
+      expect(dshManifest.version).toBe('0.1.1-rc.2')
       mkdirSync(fixtureParent, { recursive: true })
       const root = mkdtempSync(join(fixtureParent, 'profile-'))
       const paths = deriveInstallPaths(root)
@@ -280,8 +280,8 @@ describe('one-shot Profile lifecycle', () => {
           private: true,
           type: 'module',
           dependencies: {
-            '@deepseek-ai/dsh-base': '0.1.0-rc.7',
-            '@deepseek-ai/dsh-headless': '0.1.0-rc.7',
+            '@deepseek-ai/dsh-base': '0.1.1-rc.2',
+            '@deepseek-ai/dsh-headless': '0.1.1-rc.2',
             '@tianwen/runtime-bundle': '0.0.0',
           },
           dsh: {
