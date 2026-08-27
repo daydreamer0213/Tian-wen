@@ -98,6 +98,7 @@ function isAllowedCliInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return path === 'src/cli.ts' || path === 'src/create.ts' ||
     path === 'src/model.ts' || path === 'src/resume.ts' ||
+    path === 'src/portable-profile.ts' ||
     path === 'src/controlled-lifecycle.ts' ||
     path === 'src/controlled-lifecycle-contract.ts' ||
     path === 'src/goal-live-smoke.ts' || isAllowedNaturalTrialInput(path) ||
@@ -161,6 +162,7 @@ describe('runtime metafile input allowlist', () => {
 describe('CLI metafile input allowlist', () => {
   it.each([
     'src/natural-run-trial.ts',
+    'src/portable-profile.ts',
     '../tianwen-dsh-compat/dist/skill-name.js',
     '../tianwen-evidence/dist/projector.js',
     '../tianwen-runtime/dist/run-binding.js',
@@ -224,7 +226,9 @@ describe('CLI installed entry identity', () => {
           status: 2,
           stderr: [
             'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
+            'Usage: tianwen status --goal GOAL_ID --dsh-root ABSOLUTE_PATH --dsh-home ABSOLUTE_PATH --profile NAME --state-root ABSOLUTE_PATH [--json]',
             'Usage: tianwen list --data-dir ABSOLUTE_PATH [--json]',
+            'Usage: tianwen list --dsh-root ABSOLUTE_PATH --dsh-home ABSOLUTE_PATH --profile NAME --state-root ABSOLUTE_PATH [--json]',
             '',
           ].join('\n'),
           stdout: '',
