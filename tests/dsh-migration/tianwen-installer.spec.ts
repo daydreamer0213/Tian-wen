@@ -26,7 +26,8 @@ import {
 } from '../../scripts/install-tianwen.mjs'
 
 const testRoots: string[] = []
-const RC6 = '0.1.0-rc.6'
+const CURRENT_DSH_VERSION = '0.1.1-rc.2'
+const PREDECESSOR_DSH_VERSION = '0.1.0-rc.7'
 const RUNTIME_FILES = [
   'dist/index.js',
   'dist/index.d.ts',
@@ -48,7 +49,7 @@ const RUNTIME_FILES = [
 const RUNTIME_DEPLOYED_PUBLICATION = [...RUNTIME_FILES, 'package.json'] as const
 const RUNTIME_PUBLICATION = [...RUNTIME_FILES, 'package.json', 'LICENSE'] as const
 
-function renderOriginalRc6ProfilePatch(paths: ReturnType<typeof deriveInstallPaths>): string {
+function renderPredecessorProfilePatch(paths: ReturnType<typeof deriveInstallPaths>): string {
   return `- id: agent-default-model
   config:
     provider: tianwen-offline
@@ -152,17 +153,17 @@ function scriptedFailure(
   return () => installWindowsFixture({ dataDir: paths.dataDir, runner: scripted.runner })
 }
 
-function writeManagedRc6Predecessor(
+function writeManagedPredecessor(
   paths: ReturnType<typeof deriveInstallPaths>,
   encoding: 'original-archive' | 'locked-deploy',
 ): void {
   installWindowsFixture({ dataDir: paths.dataDir, runner: scriptedInstaller(paths).runner })
   const hostManifest = join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
-  writeJson(hostManifest, { bin: { dsh: 'lib/bin.js' }, version: RC6 })
+  writeJson(hostManifest, { bin: { dsh: 'lib/bin.js' }, version: PREDECESSOR_DSH_VERSION })
   writeJson(join(paths.profileRoot, 'package.json'), {
     dependencies: {
-      '@deepseek-ai/dsh-base': RC6,
-      '@deepseek-ai/dsh-headless': RC6,
+      '@deepseek-ai/dsh-base': PREDECESSOR_DSH_VERSION,
+      '@deepseek-ai/dsh-headless': PREDECESSOR_DSH_VERSION,
       '@tianwen/runtime-bundle': encoding === 'original-archive'
         ? `file:${paths.archivePath.replaceAll('\\', '/')}`
         : '0.0.0',
@@ -178,8 +179,11 @@ function writeManagedRc6Predecessor(
     },
   })
   writeFileSync(join(paths.profileRoot, 'cordis.patch.yml'),
-    encoding === 'original-archive' ? renderOriginalRc6ProfilePatch(paths) : renderProfilePatch(paths),
+    encoding === 'original-archive' ? renderPredecessorProfilePatch(paths) : renderProfilePatch(paths),
     'utf8')
+  const receipt = JSON.parse(readFileSync(paths.receiptPath, 'utf8'))
+  receipt.dshVersion = PREDECESSOR_DSH_VERSION
+  writeJson(paths.receiptPath, receipt)
 }
 
 function scriptedInstaller(
@@ -231,7 +235,7 @@ function scriptedInstaller(
       writeFileSync(join(packageRoot, 'lib', 'bin.js'), 'export {}\n', 'utf8')
       writeJson(join(packageRoot, 'package.json'), {
         bin: { dsh: 'lib/bin.js' },
-        version: '0.1.0-rc.7',
+        version: CURRENT_DSH_VERSION,
       })
     }
     if (currentBuildOrdinal !== undefined) fixtureOptions.onBuild?.(currentBuildOrdinal)
@@ -250,8 +254,8 @@ function scriptedInstaller(
       const destination = argv.at(-1)!
       writeJson(join(destination, 'package.json'), {
         dependencies: {
-          '@deepseek-ai/dsh-base': '0.1.0-rc.7',
-          '@deepseek-ai/dsh-headless': '0.1.0-rc.7',
+          '@deepseek-ai/dsh-base': CURRENT_DSH_VERSION,
+          '@deepseek-ai/dsh-headless': CURRENT_DSH_VERSION,
           '@tianwen/runtime-bundle': '0.0.0',
         },
         dsh: {
@@ -484,14 +488,14 @@ describe('Tianwen installer contract', () => {
     expect(patch).toContain("name: '@tianwen/runtime-bundle/smoke'")
   })
 
-  it('accepts only an exact rc.7 host with a contained executable', () => {
+  it('accepts only an exact current host with a contained executable', () => {
     const root = testRoot('host')
     const packageRoot = join(root, 'node_modules', '@deepseek-ai', 'dsh')
     mkdirSync(join(packageRoot, 'lib'), { recursive: true })
     writeFileSync(join(packageRoot, 'lib', 'bin.js'), 'export {}\n', 'utf8')
     writeFileSync(join(packageRoot, 'package.json'), JSON.stringify({
       bin: { dsh: 'lib/bin.js' },
-      version: '0.1.0-rc.7',
+      version: CURRENT_DSH_VERSION,
     }), 'utf8')
 
     expect(validateInstalledHost(root)).toBe(join(packageRoot, 'lib', 'bin.js'))
@@ -499,22 +503,22 @@ describe('Tianwen installer contract', () => {
       bin: { dsh: 'lib/bin.js' },
       version: '0.1.0-rc.5',
     }), 'utf8')
-    expect(() => validateInstalledHost(root)).toThrow(/0\.1\.0-rc\.7/u)
+    expect(() => validateInstalledHost(root)).toThrow(CURRENT_DSH_VERSION)
   })
 
-  it('recognizes only the two complete managed rc.6 predecessors before child effects', () => {
-    const originalPaths = deriveInstallPaths(testRoot('original-rc6'), 'win32')
-    const lockedPaths = deriveInstallPaths(testRoot('locked-rc6'), 'win32')
-    writeManagedRc6Predecessor(originalPaths, 'original-archive')
-    writeManagedRc6Predecessor(lockedPaths, 'locked-deploy')
+  it('recognizes only the two complete managed predecessors before child effects', () => {
+    const originalPaths = deriveInstallPaths(testRoot('original-predecessor'), 'win32')
+    const lockedPaths = deriveInstallPaths(testRoot('locked-predecessor'), 'win32')
+    writeManagedPredecessor(originalPaths, 'original-archive')
+    writeManagedPredecessor(lockedPaths, 'locked-deploy')
 
-    expect(classifyManagedInstallation(originalPaths)).toBe('managed-rc6')
-    expect(classifyManagedInstallation(lockedPaths)).toBe('managed-rc6')
+    expect(classifyManagedInstallation(originalPaths)).toBe('managed-predecessor')
+    expect(classifyManagedInstallation(lockedPaths)).toBe('managed-predecessor')
 
     const incompatible = [
       (() => {
         const paths = deriveInstallPaths(testRoot('rc5'), 'win32')
-        writeManagedRc6Predecessor(paths, 'original-archive')
+        writeManagedPredecessor(paths, 'original-archive')
         writeJson(join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), {
           bin: { dsh: 'lib/bin.js' }, version: '0.1.0-rc.5',
         })
@@ -528,21 +532,21 @@ describe('Tianwen installer contract', () => {
       })(),
       (() => {
         const paths = deriveInstallPaths(testRoot('mixed'), 'win32')
-        writeManagedRc6Predecessor(paths, 'locked-deploy')
+        writeManagedPredecessor(paths, 'locked-deploy')
         const manifest = JSON.parse(readFileSync(join(paths.profileRoot, 'package.json'), 'utf8'))
-        manifest.dependencies['@deepseek-ai/dsh-base'] = '0.1.0-rc.7'
+        manifest.dependencies['@deepseek-ai/dsh-base'] = CURRENT_DSH_VERSION
         writeJson(join(paths.profileRoot, 'package.json'), manifest)
         return paths
       })(),
       (() => {
         const paths = deriveInstallPaths(testRoot('modified'), 'win32')
-        writeManagedRc6Predecessor(paths, 'original-archive')
+        writeManagedPredecessor(paths, 'original-archive')
         writeFileSync(join(paths.profileRoot, 'cordis.patch.yml'), 'modified\n', 'utf8')
         return paths
       })(),
       (() => {
         const paths = deriveInstallPaths(testRoot('extra-dependency'), 'win32')
-        writeManagedRc6Predecessor(paths, 'locked-deploy')
+        writeManagedPredecessor(paths, 'locked-deploy')
         const manifest = JSON.parse(readFileSync(join(paths.profileRoot, 'package.json'), 'utf8'))
         manifest.dependencies['@example/extra'] = '1.0.0'
         writeJson(join(paths.profileRoot, 'package.json'), manifest)
@@ -550,9 +554,29 @@ describe('Tianwen installer contract', () => {
       })(),
       (() => {
         const paths = deriveInstallPaths(testRoot('archive-directory'), 'win32')
-        writeManagedRc6Predecessor(paths, 'original-archive')
+        writeManagedPredecessor(paths, 'original-archive')
         rmSync(paths.archivePath)
         mkdirSync(paths.archivePath)
+        return paths
+      })(),
+      (() => {
+        const paths = deriveInstallPaths(testRoot('archive-digest'), 'win32')
+        writeManagedPredecessor(paths, 'original-archive')
+        writeFileSync(paths.archivePath, 'tampered archive\n', 'utf8')
+        return paths
+      })(),
+      (() => {
+        const paths = deriveInstallPaths(testRoot('missing-receipt'), 'win32')
+        writeManagedPredecessor(paths, 'locked-deploy')
+        rmSync(paths.receiptPath)
+        return paths
+      })(),
+      (() => {
+        const paths = deriveInstallPaths(testRoot('mismatched-receipt'), 'win32')
+        writeManagedPredecessor(paths, 'locked-deploy')
+        const receipt = JSON.parse(readFileSync(paths.receiptPath, 'utf8'))
+        receipt.dshVersion = CURRENT_DSH_VERSION
+        writeJson(paths.receiptPath, receipt)
         return paths
       })(),
     ]
@@ -575,7 +599,7 @@ describe('Tianwen installer contract', () => {
     writeFileSync(join(packageRoot, 'lib', 'bin.js'), 'export {}\n', 'utf8')
     writeJson(join(packageRoot, 'package.json'), {
       bin: { dsh: 'lib/bin.js' },
-      version: '0.1.0-rc.7',
+      version: CURRENT_DSH_VERSION,
     })
     const linkedPackage = join(hostRoot, 'node_modules', '@deepseek-ai', 'dsh')
     mkdirSync(dirname(linkedPackage), { recursive: true })
@@ -585,10 +609,10 @@ describe('Tianwen installer contract', () => {
   })
 
   it.each(['original-archive', 'locked-deploy'] as const)(
-    'migrates the complete %s rc.6 predecessor to rc.7 and replays without deploys',
+    'migrates the complete %s predecessor to the current version and replays without deploys',
     (encoding) => {
       const paths = deriveInstallPaths(testRoot(`migrate-${encoding}`), 'win32')
-      writeManagedRc6Predecessor(paths, encoding)
+      writeManagedPredecessor(paths, encoding)
       const session = join(paths.sessionsRoot, 'kept.jsonl')
       const ledger = join(paths.evolutionRoot, 'ledger.jsonl')
       mkdirSync(paths.sessionsRoot, { recursive: true })
@@ -601,7 +625,7 @@ describe('Tianwen installer contract', () => {
       const migrated = installWindowsFixture({ dataDir: paths.dataDir, runner: scripted.runner })
 
       expect(validateInstalledHost(paths.hostRoot)).toContain('bin.js')
-      expect(readFileSync(join(paths.profileRoot, 'package.json'), 'utf8')).toContain('0.1.0-rc.7')
+      expect(readFileSync(join(paths.profileRoot, 'package.json'), 'utf8')).toContain(CURRENT_DSH_VERSION)
       expect(migrated.status).toBe('ready')
       expect([readFileSync(session), readFileSync(ledger)]).toEqual(durableBefore)
       expect(readdirSync(dirname(paths.hostRoot)).filter(name => name.startsWith('.dsh-host-backup-'))).toEqual([])
@@ -614,10 +638,10 @@ describe('Tianwen installer contract', () => {
 
   it.each([
     ['partial host deploy', '@tianwen/dsh-host', 'partial-host'],
-    ['failure after rc.7 host validation', 'build', 'post-host-validation'],
-  ])('restores the rc.6 installation after %s', (_label, failOn, fixtureName) => {
+    ['failure after current host validation', 'build', 'post-host-validation'],
+  ])('restores the predecessor installation after %s', (_label, failOn, fixtureName) => {
     const paths = deriveInstallPaths(testRoot(`migration-rollback-${fixtureName}`), 'win32')
-    writeManagedRc6Predecessor(paths, 'original-archive')
+    writeManagedPredecessor(paths, 'original-archive')
     const session = join(paths.sessionsRoot, 'kept.jsonl')
     const ledger = join(paths.evolutionRoot, 'ledger.jsonl')
     mkdirSync(paths.sessionsRoot, { recursive: true })
@@ -641,7 +665,7 @@ describe('Tianwen installer contract', () => {
     expect(receipt).toMatchObject({
       schemaVersion: 'tianwen.install.v1',
       status: 'ready',
-      dshVersion: '0.1.0-rc.7',
+      dshVersion: CURRENT_DSH_VERSION,
       pnpmVersion: '11.20.0',
       profileBundles: [
         '@deepseek-ai/dsh-base',

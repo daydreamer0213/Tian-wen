@@ -17,8 +17,8 @@ import { basename, delimiter, dirname, isAbsolute, relative, resolve, win32 } fr
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 
-const DSH_VERSION = '0.1.0-rc.7'
-const PREDECESSOR_DSH_VERSION = '0.1.0-rc.6'
+const DSH_VERSION = '0.1.1-rc.2'
+const PREDECESSOR_DSH_VERSION = '0.1.0-rc.7'
 const PNPM_VERSION = '11.20.0'
 const PROFILE = 'tianwen'
 const RUNTIME_PACKAGE = '@tianwen/runtime-bundle'
@@ -227,7 +227,7 @@ export function renderProfilePatch(paths) {
 `
 }
 
-function renderOriginalRc6ProfilePatch(paths) {
+function renderPredecessorProfilePatch(paths) {
   return `- id: agent-default-model
   config:
     provider: tianwen-offline
@@ -334,6 +334,29 @@ function isFreshDataDirectory(paths) {
     && (!existsSync(stateRoot) || directoryHasOnly(stateRoot, ['evolution']))
 }
 
+function matchesPredecessorReceipt(paths) {
+  if (!existsSync(paths.receiptPath) || !statSync(paths.receiptPath).isFile()) return false
+  try {
+    const receipt = assertPlainObject(
+      JSON.parse(readFileSync(paths.receiptPath, 'utf8')),
+      'install receipt',
+    )
+    return receipt.schemaVersion === 'tianwen.install.v1'
+      && receipt.status === 'ready'
+      && receipt.dshVersion === PREDECESSOR_DSH_VERSION
+      && receipt.pnpmVersion === PNPM_VERSION
+      && receipt.dataDir === paths.dataDir
+      && receipt.hostRoot === paths.hostRoot
+      && receipt.profileRoot === paths.profileRoot
+      && receipt.archivePath === paths.archivePath
+      && receipt.receiptPath === paths.receiptPath
+      && JSON.stringify(receipt.profileBundles) === JSON.stringify(PROFILE_BUNDLES)
+      && receipt.archiveDigest === sha256File(paths.archivePath)
+  } catch {
+    return false
+  }
+}
+
 export function classifyManagedInstallation(paths) {
   if (!existsSync(paths.dataDir)) return 'fresh'
   if (isFreshDataDirectory(paths)) return 'fresh'
@@ -351,7 +374,7 @@ export function classifyManagedInstallation(paths) {
       profile,
       PREDECESSOR_DSH_VERSION,
       `file:${portable(paths.archivePath)}`,
-      renderOriginalRc6ProfilePatch(paths),
+      renderPredecessorProfilePatch(paths),
     )
     const lockedDeploy = matchesProfile(
       profile,
@@ -359,8 +382,10 @@ export function classifyManagedInstallation(paths) {
       '0.0.0',
       renderProfilePatch(paths),
     )
-    return host.version === PREDECESSOR_DSH_VERSION && (original || lockedDeploy)
-      ? 'managed-rc6'
+    return host.version === PREDECESSOR_DSH_VERSION
+      && (original || lockedDeploy)
+      && matchesPredecessorReceipt(paths)
+      ? 'managed-predecessor'
       : 'incompatible'
   } catch {
     return 'incompatible'
@@ -723,16 +748,16 @@ export function installTianwen({
 
   const hostExists = existsSync(paths.hostRoot)
   const profileExists = existsSync(paths.profileRoot)
-  const migratingRc6 = installation === 'managed-rc6'
-  const hostNeedsDeploy = !hostExists || migratingRc6
+  const migratingPredecessor = installation === 'managed-predecessor'
+  const hostNeedsDeploy = !hostExists || migratingPredecessor
   let installedArchiveDigest
   let dshBin
   const sourceLinkedProfile = atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_LAYOUT_PREFLIGHT, () => {
     installedArchiveDigest = previousArchiveDigest(paths)
-    if (hostExists && !migratingRc6) dshBin = validateInstalledHost(paths.hostRoot)
-    if (profileExists && !migratingRc6) validateProfile(paths)
+    if (hostExists && !migratingPredecessor) dshBin = validateInstalledHost(paths.hostRoot)
+    if (profileExists && !migratingPredecessor) validateProfile(paths)
     return profileExists
-      && !migratingRc6
+      && !migratingPredecessor
       && hasSourceLinkedRuntimePublication(repoRoot, paths.profileRoot)
   })
 
@@ -778,7 +803,7 @@ export function installTianwen({
       atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_HOST_DEPLOY, () => {
         const hostsRoot = dirname(paths.hostRoot)
         const id = `${process.pid}-${randomUUID()}`
-        hostBackup = migratingRc6 ? resolve(hostsRoot, `.dsh-host-backup-${id}`) : undefined
+        hostBackup = migratingPredecessor ? resolve(hostsRoot, `.dsh-host-backup-${id}`) : undefined
         mkdirSync(hostsRoot, { recursive: true })
         if (hostBackup !== undefined) renameSync(paths.hostRoot, hostBackup)
         invokePnpm([
@@ -818,7 +843,7 @@ export function installTianwen({
       }
       return archiveDigests[0]
     })
-    profileChanged = migratingRc6
+    profileChanged = migratingPredecessor
       || !profileExists
       || installedArchiveDigest !== archiveDigest
       || sourceLinkedProfile
