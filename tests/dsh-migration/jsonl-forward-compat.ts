@@ -54,7 +54,7 @@ function sha256(bytes: Buffer): string {
 function isOutsideRoot(root: string, path: string): boolean {
   const pathRelativeToRoot = relative(root, path)
   const normalized = pathRelativeToRoot.replaceAll('\\', '/')
-  return isAbsolute(pathRelativeToRoot) || normalized === '..' || normalized.startsWith('../')
+  return isAbsolute(pathRelativeToRoot) || normalized === '' || normalized === '..' || normalized.startsWith('../')
 }
 
 function readMeta(root: string): FixtureMeta {
