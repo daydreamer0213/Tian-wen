@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   Context,
   DSH_VERSION,
-  DynamicCordisRunnerService,
   SystemPrompt,
   ToolRuntime,
 } from '@tianwen/dsh-compat'
@@ -39,7 +38,6 @@ describe('@tianwen/runtime', () => {
     await ctx.plugin(TimerService)
     await ctx.plugin(SystemPrompt, {})
     await ctx.plugin(ToolRuntime, {})
-    await ctx.plugin(DynamicCordisRunnerService, {})
 
     try {
       const profileRoot = stateRoot()
@@ -50,6 +48,7 @@ describe('@tianwen/runtime', () => {
       await apply(ctx, { evolutionRoot })
       expect(ctx.tianwenEvidence).toBeDefined()
       expect(ctx.tianwenEvolution).toBeDefined()
+      expect('dynamicCordisRunner' in ctx).toBe(false)
       expect('goals' in ctx).toBe(false)
       expect('agents' in ctx).toBe(false)
       expect(existsSync(join(evolutionRoot, 'artifacts'))).toBe(true)
@@ -64,7 +63,6 @@ describe('@tianwen/runtime', () => {
     await ctx.plugin(TimerService)
     await ctx.plugin(SystemPrompt, {})
     await ctx.plugin(ToolRuntime, {})
-    await ctx.plugin(DynamicCordisRunnerService, {})
 
     try {
       const profileRoot = stateRoot()
@@ -83,7 +81,6 @@ describe('@tianwen/runtime', () => {
     await ctx.plugin(TimerService)
     await ctx.plugin(SystemPrompt, {})
     await ctx.plugin(ToolRuntime, {})
-    await ctx.plugin(DynamicCordisRunnerService, {})
     try {
       await expect(apply(ctx, { evolutionRoot: 'relative/evolution' }))
         .rejects.toThrow(/evolutionRoot.*absolute/)

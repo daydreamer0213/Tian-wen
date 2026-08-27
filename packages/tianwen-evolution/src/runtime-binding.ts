@@ -190,8 +190,6 @@ function publicBinding(binding: BoundRuntime): RuntimeBinding {
 }
 
 export class TianwenEvolutionService extends Service {
-  static inject = ['dynamicCordisRunner']
-
   constructor(ctx: Context, config: TianwenEvolutionConfig) {
     super(ctx, 'tianwenEvolution')
     const ledger = new EvolutionLedger(config.root, {
@@ -783,7 +781,7 @@ export class TianwenEvolutionService extends Service {
     state.blocked = true
     let stopError: unknown
     try {
-      const stopped = await this.ctx.dynamicCordisRunner.stop(
+      const stopped = await this.dynamicRunner().stop(
         agent,
         binding.pluginId,
       )
@@ -832,7 +830,7 @@ export class TianwenEvolutionService extends Service {
     source: string,
     pluginId?: DynamicPluginId,
   ): BoundRuntime {
-    const receipt = this.ctx.dynamicCordisRunner.define({
+    const receipt = this.dynamicRunner().define({
       sessionId: agent.id,
       plugin: pluginId === undefined
         ? { kind: 'new', idPrefix: 'tian' }
@@ -853,7 +851,7 @@ export class TianwenEvolutionService extends Service {
     binding: BoundRuntime,
     mode: 'run' | 'update',
   ): Promise<void> {
-    const result = await this.ctx.dynamicCordisRunner.run(
+    const result = await this.dynamicRunner().run(
       agent,
       binding.pluginId,
       binding.packageId,
@@ -917,7 +915,7 @@ export class TianwenEvolutionService extends Service {
     }
 
     try {
-      const row = this.ctx.dynamicCordisRunner.inventory()
+      const row = this.dynamicRunner().inventory()
         .find(item => item.pluginId === previousBinding.pluginId)
       const mode = row?.currentPackageId === previousBinding.packageId
         ? 'run'
@@ -971,7 +969,7 @@ export class TianwenEvolutionService extends Service {
   }
 
   private isActive(binding: BoundRuntime): boolean {
-    const row = this.ctx.dynamicCordisRunner.inventory()
+    const row = this.dynamicRunner().inventory()
       .find(item => item.pluginId === binding.pluginId)
     return (
       row?.currentPackageId === binding.packageId &&
@@ -985,6 +983,15 @@ export class TianwenEvolutionService extends Service {
         'Tianwen evolution is blocked after Champion recovery failure',
       )
     }
+  }
+
+  private dynamicRunner(): Context['dynamicCordisRunner'] {
+    if (!('dynamicCordisRunner' in this.ctx)) {
+      throw new Error(
+        'dynamicCordisRunner is required for artifact activation',
+      )
+    }
+    return this.ctx.dynamicCordisRunner
   }
 
   private requireNoTransition(): void {

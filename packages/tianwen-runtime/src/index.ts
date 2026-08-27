@@ -78,7 +78,7 @@ export type {
 
 export const SUPPORTED_DSH_VERSION = '0.1.1-rc.2' as const
 export const name = 'tianwen-runtime'
-export const inject = ['dynamicCordisRunner'] as const
+export const inject = [] as const
 
 export interface TianwenRuntimeConfig {
   readonly evolutionRoot?: string

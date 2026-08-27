@@ -271,6 +271,21 @@ async function mountEvolution(
   return { ctx, agent: createStubAgent(ctx, agentId) }
 }
 
+async function mountEvolutionWithoutRunner(
+  root: string,
+  agentId = `evolution-${randomUUID()}`,
+): Promise<{ ctx: Context; agent: Agent }> {
+  const ctx = new Context()
+  await ctx.plugin(TimerService)
+  await ctx.plugin(SystemPrompt, {})
+  await ctx.plugin(ToolRuntime, {})
+  await ctx.plugin(TianwenEvolutionService, {
+    root,
+    clock: deterministicClock(),
+  })
+  return { ctx, agent: createStubAgent(ctx, agentId) }
+}
+
 function eventTypes(events: readonly LedgerEvent[]): string[] {
   return events.map(event => event.type)
 }
@@ -598,6 +613,65 @@ describe('Tianwen append-only evolution ledger', () => {
 })
 
 describe('formal governance over process-local Dynamic Cordis versions', () => {
+  it('keeps ordinary learning available without the dynamic runner', async () => {
+    const mounted = await mountEvolutionWithoutRunner(
+      ledgerRoot('runner-optional-learning'),
+    )
+    const evolution = mounted.ctx.tianwenEvolution
+
+    try {
+      expect('dynamicCordisRunner' in mounted.ctx).toBe(false)
+      expect(evolution.recordLearningIntake({
+        sessionId: 'session:runner-optional',
+        messageId: 'message:runner-optional',
+        feedbackVersion: 'feedback:runner-optional',
+        rating: 'positive',
+        scopeKey: 'project:tianwen/capability:runtime-composition',
+        sessionDigest: RECEIPT_A,
+        evidenceIds: [RECEIPT_B],
+      })).toMatchObject({ decision: 'no-case', duplicate: false })
+      await expect(evolution.rehydrateChampion(mounted.agent))
+        .resolves.toBeUndefined()
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('requires the dynamic runner only when artifact activation begins', async () => {
+    const mounted = await mountEvolutionWithoutRunner(
+      ledgerRoot('runner-required-activation'),
+    )
+    const evolution = mounted.ctx.tianwenEvolution
+
+    try {
+      const v1 = prepareMetArtifact(
+        evolution,
+        V1,
+        'human-runner-required',
+        RECEIPT_A,
+      )
+
+      await expect(evolution.promote(mounted.agent, v1.artifactId))
+        .rejects.toMatchObject({
+          name: 'EvolutionActivationError',
+          message: expect.stringMatching(
+            /dynamicCordisRunner.*artifact activation/iu,
+          ),
+        })
+      expect(evolution.getChampion()).toBeUndefined()
+      expect(evolution.listEvents().filter(
+        event => event.type === 'runtime-bound',
+      )).toEqual([])
+      const failure = evolution.listEvents().find(
+        event => event.type === 'activation-failed',
+      )
+      expect(failure).toBeDefined()
+      expect(failure).not.toHaveProperty('binding')
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
   it('serializes concurrent transitions before a second define/run can reuse approval', async () => {
     const root = ledgerRoot('concurrent')
     const mounted = await mountEvolution(root)

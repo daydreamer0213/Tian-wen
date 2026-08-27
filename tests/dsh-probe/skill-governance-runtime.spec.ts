@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  DynamicCordisRunnerService,
   SessionId,
   SkillRegistry,
   applySkillTool,
@@ -61,11 +60,8 @@ async function mount(script: Parameters<typeof mountCoreHarness>[0]) {
   const harness = await mountCoreHarness(script)
   await harness.ctx.plugin(SkillRegistry)
   await harness.ctx.plugin(applySkillTool)
-  await harness.ctx.plugin(DynamicCordisRunnerService, {})
   const runtime = harness.ctx.isolate('skills')
-  await runtime.inject(['dynamicCordisRunner'], async runtimeCtx => {
-    await runtimeCtx.plugin(TianwenRuntime, { evolutionRoot: root() })
-  })
+  await runtime.plugin(TianwenRuntime, { evolutionRoot: root() })
   harness.ctx.tools.register(defineTool({
     name: 'verify_summary',
     description: 'verify a deterministic summary',
@@ -95,9 +91,6 @@ describe('Tianwen governed Skill runtime intake', () => {
       textResponse('synthetic summary complete'),
     ])
     const disposeParent = harness.ctx.skills.register(parent)
-    const define = vi.spyOn(harness.ctx.dynamicCordisRunner, 'define')
-    const run = vi.spyOn(harness.ctx.dynamicCordisRunner, 'run')
-    const stop = vi.spyOn(harness.ctx.dynamicCordisRunner, 'stop')
     const handle = await harness.ctx.agents.create({
       sessionId: SessionId(`skill-runtime-${randomUUID()}`),
       agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
@@ -134,9 +127,7 @@ describe('Tianwen governed Skill runtime intake', () => {
         sessionUnchanged: true,
       })
       expect(harness.runtime.tianwenEvolution.listRunSkillUses()).toHaveLength(1)
-      expect(define).not.toHaveBeenCalled()
-      expect(run).not.toHaveBeenCalled()
-      expect(stop).not.toHaveBeenCalled()
+      expect('dynamicCordisRunner' in harness.runtime).toBe(false)
     } finally {
       await handle.dispose()
       disposeParent()
