@@ -13,6 +13,10 @@
     "./adapter": {
       "types": "./dist/adapter.d.ts",
       "default": "./dist/adapter.js"
+    },
+    "./composition": {
+      "types": "./dist/composition.d.ts",
+      "default": "./dist/composition.js"
     }
   },
   "files": [

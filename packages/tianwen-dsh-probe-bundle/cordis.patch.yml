@@ -6,3 +6,11 @@
 - insert:
     - id: tianwen-probe-adapter
       name: '@tianwen/dsh-probe-bundle/adapter'
+    - id: tianwen-composition-probe
+      name: '@tianwen/dsh-probe-bundle/composition'
+      disabled: !!js process.env.TIANWEN_COMPOSITION_PROBE_RECEIPT === undefined || process.env.TIANWEN_COMPOSITION_PROBE_RECEIPT === '' || process.env.TIANWEN_COMPOSITION_PROBE_STOP === undefined || process.env.TIANWEN_COMPOSITION_PROBE_STOP === '' || (process.env.TIANWEN_COMPOSITION_PROBE_SURFACE !== 'headless' && process.env.TIANWEN_COMPOSITION_PROBE_SURFACE !== 'web')
+      config:
+        receiptPath: !!js process.env.TIANWEN_COMPOSITION_PROBE_RECEIPT
+        stopPath: !!js process.env.TIANWEN_COMPOSITION_PROBE_STOP
+        surface: !!js process.env.TIANWEN_COMPOSITION_PROBE_SURFACE
+        exitAfterReceipt: !!js process.env.TIANWEN_COMPOSITION_PROBE_EXIT_AFTER_RECEIPT === 'true'
