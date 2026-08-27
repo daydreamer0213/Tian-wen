@@ -155,7 +155,7 @@ rc.7 产品路径正式运行一次：Goal complete，45/45 Evidence complete，
 | Promotion、Champion、Rollback | Tianwen 新增 | 只改变未来 Run 的活动版本，保留历史 |
 | Python Alpha、Docker verifier | 冻结为实验室 | 保存任务包、评测合同和失败证据，不再充当产品 Runtime |
 
-这条所有权边界必须保持清楚：DSH rc.7 提供 Session Query、Skill、Jobs、Workflow、Message Feedback、Approval 和 permissions；Tianwen 保留跨 Run Goal Graph、Evidence provenance（证据来源与流转记录）、学习归因和面向未来 Run 的版本治理。
+这条所有权边界必须保持清楚：DSH `0.1.1-rc.2` 提供 Session Query、Skill、Jobs、Workflow、Message Feedback、Approval 和 permissions；Tianwen 保留跨 Run Goal Graph、Evidence provenance（证据来源与流转记录）、学习归因和面向未来 Run 的版本治理。
 
 DSH Message Feedback 只是 Tianwen 做学习归因时可以读取的一项输入，不会自动成为 Lesson。DSH Job 表示当前进程中的一项工作，不等于可跨 Run 持久保存、进入学习治理的 Learning Ticket。
 
@@ -295,7 +295,7 @@ DSH 能组合但缺一小段 → 写薄适配
 
 ## 10. 当前开发阶段与下一步
 
-产品基线固定为 DSH `0.1.0-rc.7`。Stage 1–7 的自然 Run/Skill/Evidence/Outcome 终局链、
+产品基线固定为 DSH `0.1.1-rc.2`。Stage 1–7 的自然 Run/Skill/Evidence/Outcome 终局链、
 官方 installer/status 证明、受治理 Skill Candidate 机制和成对 Evaluation 记录保持有效。
 这些早期 Candidate 和 Evaluation 仍是 scripted/controlled mechanism proof。
 受控全链 fixture 又通过同一

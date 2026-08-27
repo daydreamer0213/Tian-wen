@@ -10,7 +10,7 @@ default verification.
 - pnpm `11.20.0`
 - Python `>=3.11 <3.15`
 - uv with the checked-in `uv.lock`
-- DSH packages pinned to `0.1.0-rc.7` by `pnpm-lock.yaml`
+- DSH packages pinned to `0.1.1-rc.2` by `pnpm-lock.yaml`
 
 Do not update toolchains or dependency versions as part of an unrelated change.
 Keep downloaded caches and generated development data off the system drive when

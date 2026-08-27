@@ -4,7 +4,7 @@
 
 天问是一个面向长时间运行 Agent、可审计的学习控制面。
 
-**研究预览；Stage 7 已完成。** DSH 0.1.0-rc.7 是唯一的产品 Agent Runtime。天问在后台
+**研究预览；Stage 7 已完成。** DSH 0.1.1-rc.2 是唯一的产品 Agent Runtime。天问在后台
 以非干扰方式工作：它在一次正常 DSH Run 结束后读取执行事实，不替换正在运行的 Agent，
 也不热切换当前 Run。一个使用配置模型的全新自然任务已经通过已安装产品路径完成：Goal
 完成，45 条 Evidence 全部完整，`Outcome=met`，学习正确返回 `no-case`，父 Skill 使用记录

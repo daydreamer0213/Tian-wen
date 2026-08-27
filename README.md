@@ -4,7 +4,7 @@
 
 Tianwen is an auditable learning control plane for long-running agents.
 
-**Research preview; Stage 7 complete.** DSH 0.1.0-rc.7 is the only product
+**Research preview; Stage 7 complete.** DSH 0.1.1-rc.2 is the only product
 Agent Runtime. Tianwen runs in the background as a non-interfering control
 plane: it reads execution facts after a normal DSH run and does not replace or
 hot-swap the running Agent. One fresh, configured-model natural task has now

@@ -70,7 +70,7 @@ def test_bilingual_documents_share_the_proven_preview_facts() -> None:
     readme_zh = read_public_document("README.zh-CN.md")
 
     for fact in (
-        "DSH 0.1.0-rc.7",
+        "DSH 0.1.1-rc.2",
         "no-case",
         "candidateCreated=false",
         "paired B/C",
