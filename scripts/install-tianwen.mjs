@@ -347,14 +347,14 @@ function matchesPredecessorReceipt(paths) {
       && receipt.pnpmVersion === PNPM_VERSION
       && receipt.dataDir === paths.dataDir
       && receipt.binDir === paths.binDir
-      && receipt.cliPath === resolve(
+      && receipt.cliPath === realpathSync(resolve(
         paths.profileRoot,
         'node_modules',
         '@tianwen',
         'runtime-bundle',
         'dist',
         'cli.js',
-      )
+      ))
       && receipt.hostRoot === paths.hostRoot
       && receipt.profileRoot === paths.profileRoot
       && receipt.archivePath === paths.archivePath

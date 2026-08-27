@@ -4,7 +4,9 @@ import {
   linkSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -629,6 +631,38 @@ describe('Tianwen installer contract', () => {
     expect(() => installWindowsFixture({ dataDir: paths.dataDir, runner: scripted.runner })).toThrow()
     expect(scripted.calls).toEqual([])
     expect(snapshotTree(paths.dataDir)).toEqual(before)
+  })
+
+  it('accepts a predecessor receipt whose cliPath is the canonical pnpm-linked Runtime CLI', () => {
+    const paths = deriveInstallPaths(testRoot('pnpm-linked-predecessor-cli'), 'win32')
+    writeManagedPredecessor(paths, 'locked-deploy')
+    const publicRuntime = join(
+      paths.profileRoot,
+      'node_modules',
+      '@tianwen',
+      'runtime-bundle',
+    )
+    const canonicalRuntime = join(
+      paths.profileRoot,
+      'node_modules',
+      '.pnpm',
+      '@tianwen+runtime-bundle@0.0.0',
+      'node_modules',
+      '@tianwen',
+      'runtime-bundle',
+    )
+    mkdirSync(dirname(canonicalRuntime), { recursive: true })
+    renameSync(publicRuntime, canonicalRuntime)
+    symlinkSync(canonicalRuntime, publicRuntime, 'junction')
+    const publicCli = join(publicRuntime, 'dist', 'cli.js')
+    const canonicalCli = realpathSync(publicCli)
+    expect(canonicalCli).not.toBe(publicCli)
+    const receipt = JSON.parse(readFileSync(paths.receiptPath, 'utf8'))
+    receipt.cliPath = canonicalCli
+    writeJson(paths.receiptPath, receipt)
+
+    expect(realpathSync(publicCli)).toBe(receipt.cliPath)
+    expect(classifyManagedInstallation(paths)).toBe('managed-predecessor')
   })
 
   it('rejects a source-linked predecessor before child or persistent effects', () => {
