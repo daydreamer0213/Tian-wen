@@ -10,6 +10,7 @@ export interface CreateConfig {
   readonly maxGoalRounds: number
   readonly nonce: string
   readonly objective: string
+  readonly resumeShell?: 'posix' | 'powershell'
   readonly resumeTarget?: string
 }
 
@@ -33,6 +34,7 @@ export interface GoalCreateReceipt {
 function requireConfig(config: CreateConfig): void {
   if (
     ((config.dataDir === undefined) === (config.resumeTarget === undefined)) ||
+    ((config.resumeShell === undefined) !== (config.resumeTarget === undefined)) ||
     (config.dataDir !== undefined && !isAbsolute(config.dataDir)) ||
     (config.resumeTarget !== undefined && (
       config.resumeTarget.length === 0 || config.resumeTarget !== config.resumeTarget.trim()
@@ -111,11 +113,12 @@ export function formatGoalCreateText(
 
 export function formatPortableGoalCreateText(
   receipt: GoalCreateReceipt,
+  shell: 'posix' | 'powershell',
   resumeTarget: string,
 ): string {
   return [
     `Created Goal ${receipt.goal.id}: ${receipt.goal.objective}`,
-    `Next: tianwen resume --goal ${receipt.goal.id} ${resumeTarget}`,
+    `Next (${shell === 'powershell' ? 'PowerShell' : 'POSIX shell'}): tianwen resume --goal ${receipt.goal.id} ${resumeTarget}`,
     '',
   ].join('\n')
 }
@@ -130,7 +133,9 @@ export function apply(ctx: Context, config: CreateConfig): void {
     process.stdout.write(config.json
       ? `${JSON.stringify(receipt)}\n`
       : config.dataDir === undefined
-        ? formatPortableGoalCreateText(receipt, config.resumeTarget!)
+        ? formatPortableGoalCreateText(
+            receipt, config.resumeShell!, config.resumeTarget!,
+          )
         : formatGoalCreateText(receipt, config.dataDir))
     exit(0)
   }, error => {

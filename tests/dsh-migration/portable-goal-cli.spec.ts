@@ -47,8 +47,11 @@ function targetFixture() {
   const profile = 'work'
   const profileRoot = join(dshHome, 'profiles', profile)
   const stateRoot = join(root, 'state')
+  const runtimeRoot = join(
+    profileRoot, 'node_modules', '@tianwen', 'runtime-bundle',
+  )
   mkdirSync(join(dshRoot, 'lib'), { recursive: true })
-  mkdirSync(profileRoot, { recursive: true })
+  mkdirSync(join(runtimeRoot, 'dist'), { recursive: true })
   writeFileSync(join(dshRoot, 'package.json'), `${JSON.stringify({
     name: '@deepseek-ai/dsh',
     version: '0.1.1-rc.2',
@@ -58,8 +61,17 @@ function targetFixture() {
   writeFileSync(join(profileRoot, 'package.json'), `${JSON.stringify({
     name: `@deepseek-ai/dsh-profile-${profile}`,
     private: true,
-    dsh: { profile: { bundles: [] } },
+    dependencies: { '@tianwen/runtime-bundle': 'file:runtime.tgz' },
+    dsh: { profile: { bundles: ['@tianwen/runtime-bundle'] } },
   })}\n`, 'utf8')
+  writeFileSync(join(runtimeRoot, 'package.json'), `${JSON.stringify({
+    name: '@tianwen/runtime-bundle',
+    version: '0.1.0',
+    bin: { tianwen: 'dist/cli.js' },
+    dsh: { bundle: { patch: './cordis.patch.yml' } },
+  })}\n`, 'utf8')
+  writeFileSync(join(runtimeRoot, 'dist', 'cli.js'), '#!/usr/bin/env node\n', 'utf8')
+  writeFileSync(join(runtimeRoot, 'cordis.patch.yml'), '- insert: []\n', 'utf8')
   return resolvePortableProfileTarget({
     dshRoot, dshHome, profile, stateRoot,
   })
@@ -115,6 +127,37 @@ describe('portable goal CLI target', () => {
     expect(snapshotTree(join(target.dshHome, '..'))).toEqual(before)
   })
 
+  it.each(['missing', 'wrong-version'] as const)(
+    'rejects a %s Runtime Bundle before reading state or starting DSH',
+    async failure => {
+      const target = targetFixture()
+      const runtimeRoot = join(
+        target.profileRoot, 'node_modules', '@tianwen', 'runtime-bundle',
+      )
+      if (failure === 'missing') {
+        rmSync(runtimeRoot, { recursive: true })
+      } else {
+        const manifestPath = join(runtimeRoot, 'package.json')
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+          version: string
+        }
+        manifest.version = '0.0.0'
+        writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, 'utf8')
+      }
+      const before = snapshotTree(join(target.dshHome, '..'))
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+      await expect(main([
+        'create', '--objective', 'must not start', ...portableArgs(target),
+      ])).resolves.toBe(1)
+
+      expect(stderr).toHaveBeenCalledWith(
+        'selected Profile must contain exact @tianwen/runtime-bundle@0.1.0\n',
+      )
+      expect(snapshotTree(join(target.dshHome, '..'))).toEqual(before)
+    },
+  )
+
   it('builds one shell-free create invocation for the selected Profile', () => {
     const target = targetFixture()
     const preflight = preflightPortableGoalCreate('build a project', 3, target)
@@ -131,12 +174,31 @@ describe('portable goal CLI target', () => {
     expect(invocation.options.env).toMatchObject({
       DSH_HOME: target.dshHome,
       TIANWEN_CREATE_EVOLUTION_ROOT: target.evolutionRoot,
+      TIANWEN_CREATE_RESUME_SHELL: process.platform === 'win32'
+        ? 'powershell'
+        : 'posix',
       TIANWEN_CREATE_RESUME_TARGET: expect.stringContaining(
         `--dsh-root '${target.dshRoot.replaceAll("'", "''")}'`,
       ),
       TIANWEN_CREATE_SESSIONS_ROOT: target.sessionsRoot,
     })
     expect(invocation.options.env).not.toHaveProperty('TIANWEN_CREATE_DATA_DIR')
+  })
+
+  it('quotes apostrophes for the shell named by the follow-up command', () => {
+    const target = targetFixture()
+    const quotedTarget = {
+      ...target,
+      dshRoot: join(target.dshRoot, "Owner's DSH"),
+    }
+    const preflight = preflightPortableGoalCreate('build', 1, quotedTarget)
+
+    expect(preflight.resumeShell).toBe(
+      process.platform === 'win32' ? 'powershell' : 'posix',
+    )
+    expect(preflight.resumeTarget).toContain(process.platform === 'win32'
+      ? "Owner''s DSH"
+      : `Owner'"'"'s DSH`)
   })
 
   it('preflights and invokes ordinary resume against the selected Profile', async () => {

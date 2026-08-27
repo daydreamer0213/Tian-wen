@@ -21,6 +21,7 @@ export interface PortableGoalCreatePreflight {
   readonly maxGoalRounds: number
   readonly objective: string
   readonly portableTarget: ResolvedPortableProfileTarget
+  readonly resumeShell: 'posix' | 'powershell'
   readonly resumeTarget: string
   readonly sessionsRoot: string
 }
@@ -53,8 +54,13 @@ export function preflightGoalCreate(
   }
 }
 
-function portableArgument(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`
+function portableArgument(
+  value: string,
+  shell: PortableGoalCreatePreflight['resumeShell'],
+): string {
+  return shell === 'powershell'
+    ? `'${value.replaceAll("'", "''")}'`
+    : `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
 export function preflightPortableGoalCreate(
@@ -67,16 +73,18 @@ export function preflightPortableGoalCreate(
   if (!Number.isSafeInteger(maxGoalRounds) || maxGoalRounds < 1) {
     throw new TypeError('maxGoalRounds must be a positive safe integer')
   }
+  const resumeShell = process.platform === 'win32' ? 'powershell' : 'posix'
   return {
     evolutionRoot: target.evolutionRoot,
     maxGoalRounds,
     objective,
     portableTarget: target,
+    resumeShell,
     resumeTarget: [
-      '--dsh-root', portableArgument(target.dshRoot),
-      '--dsh-home', portableArgument(target.dshHome),
-      '--profile', portableArgument(target.profile),
-      '--state-root', portableArgument(target.stateRoot),
+      '--dsh-root', portableArgument(target.dshRoot, resumeShell),
+      '--dsh-home', portableArgument(target.dshHome, resumeShell),
+      '--profile', portableArgument(target.profile, resumeShell),
+      '--state-root', portableArgument(target.stateRoot, resumeShell),
     ].join(' '),
     sessionsRoot: target.sessionsRoot,
   }
@@ -109,6 +117,7 @@ export function buildGoalCreateInvocation(
         ...process.env,
         DSH_HOME: dshHome,
         ...(portable ? {
+          TIANWEN_CREATE_RESUME_SHELL: preflight.resumeShell,
           TIANWEN_CREATE_RESUME_TARGET: preflight.resumeTarget,
         } : {
           TIANWEN_CREATE_DATA_DIR: preflight.dataDir,

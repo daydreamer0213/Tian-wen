@@ -26,7 +26,11 @@ import {
   preflightGoalCreate,
   preflightPortableGoalCreate,
 } from './create.js'
-import { resolvePortableProfileTarget } from './portable-profile.js'
+import {
+  PortableRuntimeBundleUnavailableError,
+  resolvePortableProfileTarget,
+  verifyPortableRuntimeBundle,
+} from './portable-profile.js'
 import {
   launchModelCommand,
   preflightModelCommand,
@@ -260,6 +264,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       profile: values.profile!,
       stateRoot: values['state-root']!,
     })
+    if (portableTarget !== undefined) verifyPortableRuntimeBundle(portableTarget)
     if (command === 'controlled-lifecycle') {
       return await launchControlledLifecycle(preflightControlledLifecycle(
         values.manifest!, values['data-dir']!,
@@ -318,6 +323,10 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     if (error instanceof GoalStatusNotFoundError) {
       process.stderr.write(`${error.message}\n`)
       return 3
+    }
+    if (error instanceof PortableRuntimeBundleUnavailableError) {
+      process.stderr.write(`${error.message}\n`)
+      return 1
     }
     if (command === 'controlled-lifecycle') {
       process.stderr.write(error instanceof ControlledLifecyclePreflightError &&

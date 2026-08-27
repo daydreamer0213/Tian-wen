@@ -4,6 +4,8 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 const DSH_NAME = '@deepseek-ai/dsh'
 const DSH_VERSION = '0.1.1-rc.2'
 const PROFILE_NAME = /^[a-z0-9][a-z0-9-]*$/u
+const RUNTIME_BUNDLE_NAME = '@tianwen/runtime-bundle'
+const RUNTIME_BUNDLE_VERSION = '0.1.0'
 
 export interface PortableProfileTargetInput {
   readonly dshRoot: string
@@ -21,6 +23,13 @@ export interface ResolvedPortableProfileTarget {
   readonly sessionsRoot: string
   readonly stateRoot: string
   readonly evolutionRoot: string
+}
+
+export class PortableRuntimeBundleUnavailableError extends Error {
+  constructor() {
+    super(`selected Profile must contain exact ${RUNTIME_BUNDLE_NAME}@${RUNTIME_BUNDLE_VERSION}`)
+    this.name = 'PortableRuntimeBundleUnavailableError'
+  }
 }
 
 function absolutePath(value: string, name: string): string {
@@ -113,5 +122,55 @@ export function resolvePortableProfileTarget(
     sessionsRoot: join(dshHome, 'sessions'),
     stateRoot,
     evolutionRoot: join(stateRoot, 'evolution'),
+  }
+}
+
+export function verifyPortableRuntimeBundle(
+  target: ResolvedPortableProfileTarget,
+): void {
+  try {
+    const profileManifest = JSON.parse(readFileSync(
+      join(target.profileRoot, 'package.json'), 'utf8',
+    )) as {
+      dependencies?: Record<string, unknown>
+      dsh?: { profile?: { bundles?: unknown } }
+    }
+    const bundles = profileManifest.dsh?.profile?.bundles
+    if (
+      typeof profileManifest.dependencies?.[RUNTIME_BUNDLE_NAME] !== 'string'
+      || !Array.isArray(bundles)
+      || bundles.filter(name => name === RUNTIME_BUNDLE_NAME).length !== 1
+    ) throw new Error('Profile does not declare the Runtime Bundle')
+
+    const runtimeRoot = join(
+      target.profileRoot, 'node_modules', '@tianwen', 'runtime-bundle',
+    )
+    const manifest = JSON.parse(readFileSync(
+      join(runtimeRoot, 'package.json'), 'utf8',
+    )) as {
+      name?: unknown
+      version?: unknown
+      bin?: { tianwen?: unknown }
+      dsh?: { bundle?: { patch?: unknown } }
+    }
+    if (
+      manifest.name !== RUNTIME_BUNDLE_NAME
+      || manifest.version !== RUNTIME_BUNDLE_VERSION
+      || typeof manifest.bin?.tianwen !== 'string'
+      || manifest.dsh?.bundle?.patch !== './cordis.patch.yml'
+    ) throw new Error('Runtime Bundle manifest is incompatible')
+
+    const realRuntimeRoot = realpathSync(runtimeRoot)
+    for (const file of [manifest.bin.tianwen, manifest.dsh.bundle.patch]) {
+      const realFile = realpathSync(resolve(runtimeRoot, file))
+      const child = relative(realRuntimeRoot, realFile)
+      if (
+        child === '' || child.startsWith('..') || isAbsolute(child)
+        || !statSync(realFile).isFile()
+      ) throw new Error('Runtime Bundle file is unavailable')
+    }
+  } catch (error) {
+    if (error instanceof PortableRuntimeBundleUnavailableError) throw error
+    throw new PortableRuntimeBundleUnavailableError()
   }
 }
