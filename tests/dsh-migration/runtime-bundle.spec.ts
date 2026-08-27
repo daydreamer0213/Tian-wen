@@ -286,21 +286,25 @@ describe('archive credential literal detection', () => {
 
 describe('@tianwen/runtime-bundle', () => {
   it('executes the built runtime and mounts evidence and evolution', async () => {
-    const base = 'D:/DevData/tianwen-runtime-bundle-tests/evolution'
+    const base = 'D:/DevData/tianwen-runtime-bundle-tests/profiles'
     mkdirSync(base, { recursive: true })
-    const evolutionRoot = mkdtempSync(join(base, 'composition-'))
+    const profileRoot = mkdtempSync(join(base, 'composition-'))
     const ctx = new Context()
     try {
       await ctx.plugin(TimerService)
       await ctx.plugin(SystemPrompt, {})
       await ctx.plugin(ToolRuntime, {})
       await ctx.plugin(DynamicCordisRunnerService, {})
-      await applyBundledRuntime(ctx, { evolutionRoot })
+      ctx.baseUrl = pathToFileURL(profileRoot).href
+      await applyBundledRuntime(ctx, {})
       expect(ctx.tianwenEvidence).toBeDefined()
       expect(ctx.tianwenEvolution).toBeDefined()
+      expect(existsSync(
+        join(profileRoot, 'state', 'evolution', 'artifacts'),
+      )).toBe(true)
     } finally {
       await ctx.fiber.dispose()
-      rmSync(evolutionRoot, { recursive: true, force: true })
+      rmSync(profileRoot, { recursive: true, force: true })
     }
   })
 
@@ -312,8 +316,12 @@ describe('@tianwen/runtime-bundle', () => {
       devDependencies: Record<string, string>
       exports: Record<string, unknown>
       bin: Record<string, string>
+      private?: boolean
+      version: string
     }
     expect(manifest.name).toBe('@tianwen/runtime-bundle')
+    expect(manifest.version).toBe('0.1.0')
+    expect(manifest).not.toHaveProperty('private')
     expect(manifest.bin).toEqual({ tianwen: 'dist/cli.js' })
     expect(manifest.dependencies).toEqual({
       '@deepseek-ai/cordis': '4.0.1',
@@ -368,6 +376,18 @@ describe('@tianwen/runtime-bundle', () => {
       'resume.patch.yml',
       'controlled-lifecycle.patch.yml',
     ])
+  })
+
+  it('leaves Runtime state rooted at the selected Profile', () => {
+    const defaultPatch = readFileSync(
+      resolve(packageRoot, 'cordis.patch.yml'),
+      'utf8',
+    ).replaceAll('\r\n', '\n')
+    expect(defaultPatch).toBe(`- insert:
+    - id: tianwen-runtime
+      name: '@tianwen/runtime-bundle/runtime'
+`)
+    expect(defaultPatch).not.toMatch(/[A-Za-z]:[\\/]|file:\/\//u)
   })
 
   it('publishes the one-shot controlled lifecycle runner and patch', () => {
@@ -781,7 +801,7 @@ describe('@tianwen/runtime-bundle', () => {
   it('packs only the deployable runtime bundle files', () => {
     mkdirSync(packFixtureBase, { recursive: true })
     const packRoot = mkdtempSync(join(packFixtureBase, 'pack-'))
-    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.0.0.tgz')
+    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.1.0.tgz')
     const pnpmEntry = resolve(dirname(process.execPath), 'node_modules/corepack/dist/pnpm.js')
     try {
       execFileSync(process.execPath, [

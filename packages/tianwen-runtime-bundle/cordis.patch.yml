@@ -1,5 +1,3 @@
 - insert:
     - id: tianwen-runtime
       name: '@tianwen/runtime-bundle/runtime'
-      config:
-        evolutionRoot: 'D:/DevData/tianwen-dsh-probe/evolution'
