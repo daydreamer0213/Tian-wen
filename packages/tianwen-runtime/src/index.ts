@@ -1,4 +1,5 @@
-import { isAbsolute } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { DSH_VERSION } from '@tianwen/dsh-compat'
 import type { Context } from '@tianwen/dsh-compat'
 import { TianwenEvidenceService } from '@tianwen/evidence'
@@ -80,7 +81,7 @@ export const name = 'tianwen-runtime'
 export const inject = ['dynamicCordisRunner'] as const
 
 export interface TianwenRuntimeConfig {
-  readonly evolutionRoot: string
+  readonly evolutionRoot?: string
 }
 
 export async function apply(
@@ -90,14 +91,16 @@ export async function apply(
   if (DSH_VERSION !== SUPPORTED_DSH_VERSION) {
     throw new Error(`unsupported DSH version: ${DSH_VERSION}`)
   }
-  if (
-    typeof config.evolutionRoot !== 'string'
-    || !isAbsolute(config.evolutionRoot)
-  ) {
+  const evolutionRoot = config.evolutionRoot === undefined
+    ? ctx.baseUrl === undefined
+      ? undefined
+      : resolve(fileURLToPath(ctx.baseUrl), 'state', 'evolution')
+    : config.evolutionRoot
+  if (typeof evolutionRoot !== 'string' || !isAbsolute(evolutionRoot)) {
     throw new Error('evolutionRoot must be an absolute path')
   }
   await ctx.plugin(TianwenEvidenceService)
-  await ctx.plugin(TianwenEvolutionService, { root: config.evolutionRoot })
+  await ctx.plugin(TianwenEvolutionService, { root: evolutionRoot })
   await ctx.plugin(TianwenLearningIntakeService)
   await ctx.plugin(TianwenSkillEvaluationService)
 }

@@ -1,5 +1,6 @@
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   Context,
@@ -33,7 +34,7 @@ afterEach(() => {
 })
 
 describe('@tianwen/runtime', () => {
-  it('mounts only Tianwen evidence and evolution on the existing DSH context', async () => {
+  it('uses an explicit absolute Evolution root instead of the Profile default', async () => {
     const ctx = new Context()
     await ctx.plugin(TimerService)
     await ctx.plugin(SystemPrompt, {})
@@ -41,13 +42,37 @@ describe('@tianwen/runtime', () => {
     await ctx.plugin(DynamicCordisRunnerService, {})
 
     try {
+      const profileRoot = stateRoot()
+      const evolutionRoot = stateRoot()
+      ctx.baseUrl = pathToFileURL(profileRoot).href
       expect(SUPPORTED_DSH_VERSION).toBe('0.1.1-rc.2')
       expect(DSH_VERSION).toBe(SUPPORTED_DSH_VERSION)
-      await apply(ctx, { evolutionRoot: stateRoot() })
+      await apply(ctx, { evolutionRoot })
       expect(ctx.tianwenEvidence).toBeDefined()
       expect(ctx.tianwenEvolution).toBeDefined()
       expect('goals' in ctx).toBe(false)
       expect('agents' in ctx).toBe(false)
+      expect(existsSync(join(evolutionRoot, 'artifacts'))).toBe(true)
+      expect(existsSync(join(profileRoot, 'state', 'evolution'))).toBe(false)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('defaults Evolution state below the exact Profile-anchored base URL', async () => {
+    const ctx = new Context()
+    await ctx.plugin(TimerService)
+    await ctx.plugin(SystemPrompt, {})
+    await ctx.plugin(ToolRuntime, {})
+    await ctx.plugin(DynamicCordisRunnerService, {})
+
+    try {
+      const profileRoot = stateRoot()
+      ctx.baseUrl = pathToFileURL(profileRoot).href
+      await apply(ctx, {})
+      expect(existsSync(
+        join(profileRoot, 'state', 'evolution', 'artifacts'),
+      )).toBe(true)
     } finally {
       await ctx.fiber.dispose()
     }
