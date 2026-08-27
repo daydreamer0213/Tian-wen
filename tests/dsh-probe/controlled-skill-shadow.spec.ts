@@ -96,7 +96,7 @@ function controlledProtocol() {
       stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
     })),
     execution: {
-      dshVersion: '0.1.0-rc.7' as const,
+      dshVersion: '0.1.1-rc.2' as const,
       providerId: 'tianwen-shadow-scripted',
       modelId: 'scripted',
       callConfigDigest: sha256('shadow-call-config'),
@@ -602,6 +602,7 @@ describe('controlled Skill Shadow governance', () => {
     const input = { evaluationId: evaluation.evaluationId, tasks: shadowTasks() }
     const opened = ledger.openControlledSkillShadow(input)
     const plan = ledger.getControlledSkillShadow(opened.shadowId)!
+    expect(plan.execution.dshVersion).toBe('0.1.1-rc.2')
 
     expect(ledger.openControlledSkillShadow(input)).toEqual({
       shadowId: opened.shadowId,

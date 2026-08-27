@@ -235,7 +235,7 @@ function seedCandidateWithProtocol(ledger: EvolutionLedger) {
 
 function environment() {
   return {
-    dshVersion: '0.1.0-rc.7',
+    dshVersion: '0.1.1-rc.2',
     providerId: STAGE4_SCRIPTED_PROVIDER,
     modelId: 'scripted',
     callConfigDigest: digest('c'),
@@ -485,6 +485,7 @@ describe('paired Skill evaluation protocol', () => {
       arms: plannedArms(),
     })
     const plan = ledger.getSkillEvaluation(first.evaluationId)
+    expect(plan?.environment.dshVersion).toBe('0.1.1-rc.2')
     expect(first).toEqual({ evaluationId: plan!.evaluationId, duplicate: false })
     expect(plan).toMatchObject({
       candidateId: chain.candidateId,

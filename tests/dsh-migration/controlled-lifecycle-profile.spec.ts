@@ -91,7 +91,7 @@ function runDump(dshHome: string, extraArgs: readonly string[]): string {
 
 describe('controlled lifecycle Profile policy', () => {
   it('scopes zero-retry DeepSeek and disabled title LLM to the controlled command', () => {
-    expect(dshManifest.version).toBe('0.1.0-rc.7')
+    expect(dshManifest.version).toBe('0.1.1-rc.2')
     const fixtureParent = resolve(
       process.env.TIANWEN_DSH_PROBE_ROOT
         ?? (process.platform === 'win32'
@@ -111,8 +111,8 @@ describe('controlled lifecycle Profile policy', () => {
         private: true,
         type: 'module',
         dependencies: {
-          '@deepseek-ai/dsh-base': '0.1.0-rc.7',
-          '@deepseek-ai/dsh-headless': '0.1.0-rc.7',
+          '@deepseek-ai/dsh-base': '0.1.1-rc.2',
+          '@deepseek-ai/dsh-headless': '0.1.1-rc.2',
           '@tianwen/runtime-bundle': '0.0.0',
         },
         dsh: {
@@ -152,7 +152,7 @@ describe('controlled lifecycle Profile policy', () => {
       expect(controlledDeepSeek).toHaveLength(1)
       expect(retryConfig(ordinaryDeepSeek[0]!)).toBeUndefined()
       expect(resolveRetryPolicy(undefined, 'ordinary llm-deepseek retryPolicy'))
-        .toMatchObject({ mode: 'normal', maxRetries: 2 })
+        .toMatchObject({ mode: 'normal', maxRetries: 5 })
       const controlledRetry = retryConfig(controlledDeepSeek[0]!)
       const controlledResolved = resolveRetryPolicy(
         controlledRetry,

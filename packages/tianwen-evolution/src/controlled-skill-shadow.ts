@@ -349,7 +349,7 @@ function prepareExecution(
     'retryPolicyDigest',
   ])
   if (
-    value.dshVersion !== '0.1.0-rc.7'
+    (value.dshVersion !== '0.1.0-rc.7' && value.dshVersion !== '0.1.1-rc.2')
     || typeof value.providerId !== 'string'
     || !SAFE_EXECUTION_ID.test(value.providerId)
     || typeof value.modelId !== 'string'
@@ -363,7 +363,7 @@ function prepareExecution(
     throw new TypeError('controlled Skill Shadow tool surface is invalid')
   }
   return {
-    dshVersion: '0.1.0-rc.7',
+    dshVersion: value.dshVersion,
     providerId: value.providerId,
     modelId: value.modelId,
     callConfigDigest: digest(value.callConfigDigest, 'callConfigDigest'),

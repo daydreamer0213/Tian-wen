@@ -302,7 +302,7 @@ export async function runPairedSkillEvaluationDemo(): Promise<PairedSkillEvaluat
       candidateId: candidate.candidateId,
       protocolId: protocol.protocolId,
       environment: {
-        dshVersion: '0.1.0-rc.7',
+        dshVersion: '0.1.1-rc.2',
         providerId: evaluationCallConfig.provider,
         modelId: evaluationCallConfig.model,
         callConfigDigest: sha256(evaluationCallConfig),

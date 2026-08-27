@@ -98,7 +98,7 @@ export interface ControlledLifecycleManifest {
     readonly evolutionRoot: string
   }
   readonly execution: {
-    readonly dshVersion: '0.1.0-rc.7'
+    readonly dshVersion: '0.1.0-rc.7' | '0.1.1-rc.2'
     readonly providerId: 'deepseek-official'
     readonly modelId: 'deepseek-v4-pro'
     readonly retryPolicy: { readonly mode: 'normal', readonly maxRetries: 0 }
@@ -604,8 +604,13 @@ export function readControlledLifecycleManifest(
     naturalUserEvidence: 'not-claimed',
     externalUserEvidence: 'not-claimed',
   } as const)
+  const executionSource = record(source.execution)
+  if (
+    executionSource.dshVersion !== '0.1.0-rc.7'
+    && executionSource.dshVersion !== '0.1.1-rc.2'
+  ) throw new TypeError('controlled lifecycle manifest DSH version is invalid')
   const execution = exactValue(source.execution, {
-    dshVersion: '0.1.0-rc.7',
+    dshVersion: executionSource.dshVersion,
     providerId: 'deepseek-official',
     modelId: 'deepseek-v4-pro',
     retryPolicy: { mode: 'normal', maxRetries: 0 },

@@ -487,7 +487,7 @@ async function mountActivationRuntime(
     rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
     tasks: protocolTasks,
     execution: {
-      dshVersion: '0.1.0-rc.7',
+      dshVersion: '0.1.1-rc.2',
       providerId: callConfig.provider,
       modelId: callConfig.model,
       callConfigDigest: sha256(callConfig),

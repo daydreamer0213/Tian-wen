@@ -140,7 +140,7 @@ function controlledProtocol() {
       stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
     })),
     execution: {
-      dshVersion: '0.1.0-rc.7' as const,
+      dshVersion: '0.1.1-rc.2' as const,
       providerId: 'tianwen-activation-scripted',
       modelId: 'scripted',
       callConfigDigest: sha256('activation-call-config'),

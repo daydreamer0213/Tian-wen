@@ -475,7 +475,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
           stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
         })),
         execution: {
-          dshVersion: '0.1.0-rc.7' as const,
+          dshVersion: '0.1.1-rc.2' as const,
           providerId: callConfig.provider,
           modelId: callConfig.model,
           callConfigDigest: sha256(callConfig),

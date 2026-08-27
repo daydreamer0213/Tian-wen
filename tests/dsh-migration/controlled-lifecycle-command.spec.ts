@@ -86,6 +86,7 @@ function validManifest(
   dataDir: string,
   operationRoot: string,
   installedArchiveDigest = DIGEST_A,
+  dshVersion: '0.1.0-rc.7' | '0.1.1-rc.2' = '0.1.1-rc.2',
 ) {
   const workspace = (name: string) => join(operationRoot, 'workspaces', name)
   return {
@@ -107,7 +108,7 @@ function validManifest(
       evolutionRoot: join(dataDir, 'state', 'evolution'),
     },
     execution: {
-      dshVersion: '0.1.0-rc.7',
+      dshVersion,
       providerId: 'deepseek-official',
       modelId: 'deepseek-v4-pro',
       retryPolicy: { mode: 'normal', maxRetries: 0 },
@@ -209,13 +210,13 @@ function installedProduct(
   mkdirSync(join(dataDir, 'packs'), { recursive: true })
   mkdirSync(join(dataDir, 'receipts'), { recursive: true })
   writeFileSync(join(dshRoot, 'package.json'), `${JSON.stringify({
-    name: '@deepseek-ai/dsh', version: '0.1.0-rc.7', bin: { dsh: 'lib/bin.js' },
+    name: '@deepseek-ai/dsh', version: '0.1.1-rc.2', bin: { dsh: 'lib/bin.js' },
   })}\n`, 'utf8')
   writeFileSync(join(dshRoot, 'lib', 'bin.js'), dshSource, 'utf8')
   writeFileSync(join(profileRoot, 'package.json'), `${JSON.stringify({
     dependencies: {
-      '@deepseek-ai/dsh-base': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-headless': '0.1.0-rc.7',
+      '@deepseek-ai/dsh-base': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-headless': '0.1.1-rc.2',
       '@tianwen/runtime-bundle': '0.0.0',
     },
   })}\n`, 'utf8')
@@ -248,7 +249,7 @@ function installedProduct(
     binDir: join(profileRoot, 'node_modules', '.bin'),
     cliPath: realpathSync(cliPath),
     dataDir,
-    dshVersion: '0.1.0-rc.7',
+    dshVersion: '0.1.1-rc.2',
     hostRoot: join(dataDir, 'dsh-host'),
     pnpmVersion: '11.20.0',
     profileBundles: [
@@ -710,7 +711,7 @@ describe('tianwen controlled-lifecycle', () => {
           externalUserEvidence: 'not-claimed',
         },
         execution: {
-          dshVersion: '0.1.0-rc.7',
+          dshVersion: '0.1.1-rc.2',
           providerId: 'deepseek-official',
           modelId: 'deepseek-v4-pro',
           retryPolicy: { mode: 'normal', maxRetries: 0 },
@@ -747,6 +748,26 @@ describe('tianwen controlled-lifecycle', () => {
       expect(prepared.manifest.standingAuthorizationDigest)
         .toBe(sha256(CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1))
       expect(prepared.manifestDigest).toMatch(/^sha256:[0-9a-f]{64}$/u)
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('reads a persisted DSH 0.1.0-rc.7 manifest without rewriting its version', () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const dataDir = mkdtempSync(join(FIXTURE_BASE, 'legacy-manifest-'))
+    const operationRoot = join(dataDir, 'controlled-operation', 'activity-01')
+    const manifestPath = join(operationRoot, 'manifest.json')
+    mkdirSync(operationRoot, { recursive: true })
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify(validManifest(dataDir, operationRoot, DIGEST_A, '0.1.0-rc.7'))}\n`,
+      'utf8',
+    )
+    try {
+      const parsed = readControlledLifecycleManifest(manifestPath)
+      expect(parsed.manifest.execution.dshVersion).toBe('0.1.0-rc.7')
+      expect(JSON.stringify(parsed.manifest)).toContain('0.1.0-rc.7')
     } finally {
       rmSync(dataDir, { recursive: true, force: true })
     }

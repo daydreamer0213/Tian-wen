@@ -38,7 +38,7 @@ function installedDsh(dataDir: string): void {
   const root = join(dataDir, 'dsh-host', 'node_modules', '@deepseek-ai', 'dsh')
   mkdirSync(join(root, 'lib'), { recursive: true })
   writeFileSync(join(root, 'package.json'), `${JSON.stringify({
-    name: '@deepseek-ai/dsh', version: '0.1.0-rc.7', bin: { dsh: 'lib/bin.js' },
+    name: '@deepseek-ai/dsh', version: '0.1.1-rc.2', bin: { dsh: 'lib/bin.js' },
   })}\n`)
   writeFileSync(join(root, 'lib', 'bin.js'), 'process.exitCode = 0\n')
 }
@@ -132,43 +132,55 @@ describe('tianwen model', () => {
   })
 
   it('builds one fixed shell-free model Profile invocation without adding secrets', () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const dataDir = mkdtempSync(join(FIXTURE_BASE, 'invocation-'))
     const sentinelKey = randomUUID()
     process.env.DEEPSEEK_API_KEY = sentinelKey
     const before = new Set(Object.keys(process.env))
-    const invocation = buildModelInvocation(preflightModelCommand(
-      'use', 'deepseek-v4-pro', 'D:\\DevData\\tianwen',
-    ), true)
+    try {
+      installedDsh(dataDir)
+      const invocation = buildModelInvocation(preflightModelCommand(
+        'use', 'deepseek-v4-pro', dataDir,
+      ), true)
 
-    expect(invocation.program).toBe(process.execPath)
-    expect(invocation.args).toEqual([
-      expect.stringMatching(/@deepseek-ai[\\/]dsh[\\/]lib[\\/]bin\.js$/u),
-      '--profile', 'tianwen', '--patch', expect.stringMatching(/model\.patch\.yml$/u),
-    ])
-    expect(invocation.options).toMatchObject({ shell: false, stdio: 'inherit' })
-    expect(invocation.options.env).toMatchObject({
-      DSH_HOME: 'D:\\DevData\\tianwen\\dsh-home',
-      TIANWEN_MODEL_JSON: 'true',
-      TIANWEN_MODEL_OPERATION: 'use',
-      TIANWEN_MODEL_MODEL: 'deepseek-v4-pro',
-    })
-    expect(invocation.options.env?.DEEPSEEK_API_KEY).toBe(sentinelKey)
-    expect(Object.keys(invocation.options.env!).filter(key => !before.has(key))).toEqual([
-      'DSH_HOME', 'TIANWEN_MODEL_JSON', 'TIANWEN_MODEL_MODEL', 'TIANWEN_MODEL_OPERATION',
-    ])
+      expect(invocation.program).toBe(process.execPath)
+      expect(invocation.args).toEqual([
+        expect.stringMatching(/@deepseek-ai[\\/]dsh[\\/]lib[\\/]bin\.js$/u),
+        '--profile', 'tianwen', '--patch', expect.stringMatching(/model\.patch\.yml$/u),
+      ])
+      expect(invocation.options).toMatchObject({ shell: false, stdio: 'inherit' })
+      expect(invocation.options.env).toMatchObject({
+        DSH_HOME: join(dataDir, 'dsh-home'),
+        TIANWEN_MODEL_JSON: 'true',
+        TIANWEN_MODEL_OPERATION: 'use',
+        TIANWEN_MODEL_MODEL: 'deepseek-v4-pro',
+      })
+      expect(invocation.options.env?.DEEPSEEK_API_KEY).toBe(sentinelKey)
+      expect(Object.keys(invocation.options.env!).filter(key => !before.has(key))).toEqual([
+        'DSH_HOME', 'TIANWEN_MODEL_JSON', 'TIANWEN_MODEL_MODEL', 'TIANWEN_MODEL_OPERATION',
+      ])
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
   })
 
   it('accepts smoke only for DeepSeek V4 Pro below D:\\DevData', () => {
-    expect(preflightModelCommand(
-      'smoke', 'deepseek-v4-pro', 'D:\\DevData\\tianwen',
-    )).toMatchObject({
-      operation: 'smoke', model: 'deepseek-v4-pro', dataDir: 'D:\\DevData\\tianwen',
-    })
-    expect(() => preflightModelCommand(
-      'smoke', 'deepseek-v4-pro', 'D:\\not-devdata',
-    )).toThrow('dataDir must be a strict child of D:\\DevData')
-    expect(() => preflightModelCommand(
-      'smoke', 'deepseek-v4-pro', 'D:\\DevData',
-    )).toThrow('dataDir must be a strict child of D:\\DevData')
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const dataDir = mkdtempSync(join(FIXTURE_BASE, 'smoke-'))
+    try {
+      installedDsh(dataDir)
+      expect(preflightModelCommand(
+        'smoke', 'deepseek-v4-pro', dataDir,
+      )).toMatchObject({ operation: 'smoke', model: 'deepseek-v4-pro', dataDir })
+      expect(() => preflightModelCommand(
+        'smoke', 'deepseek-v4-pro', 'D:\\not-devdata',
+      )).toThrow('dataDir must be a strict child of D:\\DevData')
+      expect(() => preflightModelCommand(
+        'smoke', 'deepseek-v4-pro', 'D:\\DevData',
+      )).toThrow('dataDir must be a strict child of D:\\DevData')
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
   })
 
   it('rejects a smoke junction that resolves outside D:\\DevData before spawn', async () => {

@@ -132,8 +132,8 @@ export function preflightControlledLifecycle(
   ) as unknown)
   const dependencies = record(profileManifest.dependencies)
   if (
-    dependencies['@deepseek-ai/dsh-base'] !== '0.1.0-rc.7' ||
-    dependencies['@deepseek-ai/dsh-headless'] !== '0.1.0-rc.7' ||
+    dependencies['@deepseek-ai/dsh-base'] !== '0.1.1-rc.2' ||
+    dependencies['@deepseek-ai/dsh-headless'] !== '0.1.1-rc.2' ||
     dependencies['@tianwen/runtime-bundle'] !== '0.0.0' ||
     !lstatSync(join(profileRoot, 'cordis.patch.yml')).isFile() ||
     !lstatSync(join(profileRoot, 'node_modules', '.bin')).isDirectory()
@@ -170,7 +170,7 @@ export function preflightControlledLifecycle(
     receipt.archiveDigest !== archiveDigest || receipt.archivePath !== archivePath ||
     receipt.binDir !== join(profileRoot, 'node_modules', '.bin') ||
     receipt.dataDir !== dataDir ||
-    receipt.dshVersion !== '0.1.0-rc.7' ||
+    receipt.dshVersion !== '0.1.1-rc.2' ||
     receipt.hostRoot !== join(dataDir, 'dsh-host') ||
     receipt.pnpmVersion !== '11.20.0' ||
     JSON.stringify(receipt.profileBundles) !== JSON.stringify([
@@ -186,6 +186,7 @@ export function preflightControlledLifecycle(
     manifest.manifest.roots.dataDir !== dataDir ||
     manifest.manifest.roots.sessionsRoot !== sessionsRoot ||
     manifest.manifest.roots.evolutionRoot !== evolutionRoot ||
+    manifest.manifest.execution.dshVersion !== '0.1.1-rc.2' ||
     manifest.manifest.installedArchiveDigest !== archiveDigest ||
     !strictChild(realDataDir, realOperationRoot) ||
     !strictChild(realOperationRoot, realManifestPath)

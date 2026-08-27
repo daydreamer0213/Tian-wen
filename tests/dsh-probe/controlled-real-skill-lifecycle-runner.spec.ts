@@ -136,7 +136,7 @@ function validManifest(dataDir: string, operationRoot: string) {
       evolutionRoot: join(dataDir, 'state', 'evolution'),
     },
     execution: {
-      dshVersion: '0.1.0-rc.7',
+      dshVersion: '0.1.1-rc.2',
       providerId: 'deepseek-official',
       modelId: 'deepseek-v4-pro',
       retryPolicy: { mode: 'normal', maxRetries: 0 },
@@ -604,7 +604,7 @@ describe('controlled real Skill lifecycle runner', () => {
       expect(protocol).toMatchObject({ provenance: 'pre-candidate' })
       expect(protocol?.protocol.tasks).toHaveLength(5)
       expect(protocol?.protocol.execution).toMatchObject({
-        dshVersion: '0.1.0-rc.7',
+        dshVersion: '0.1.1-rc.2',
         providerId: 'deepseek-official',
         modelId: 'deepseek-v4-pro',
       })

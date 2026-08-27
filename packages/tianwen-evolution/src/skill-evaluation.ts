@@ -124,7 +124,7 @@ export type SkillEvaluationPolicyAuthorization = 'unobservable'
 export type SkillEvaluationDependencyBinding = 'unbound'
 
 export interface SkillEvaluationEnvironment {
-  readonly dshVersion: '0.1.0-rc.7'
+  readonly dshVersion: '0.1.0-rc.7' | '0.1.1-rc.2'
   readonly providerId: string
   readonly modelId: string
   readonly callConfigDigest: Sha256Digest
@@ -787,7 +787,10 @@ function prepareEnvironment(
     'dataBinding',
     'budget',
   ])
-  if (value.dshVersion !== '0.1.0-rc.7' || canonicalJson(value.budget) !== canonicalJson(protocol.budget)) {
+  if (
+    (value.dshVersion !== '0.1.0-rc.7' && value.dshVersion !== '0.1.1-rc.2')
+    || canonicalJson(value.budget) !== canonicalJson(protocol.budget)
+  ) {
     throw new TypeError('Skill evaluation environment disagrees with the frozen protocol')
   }
   if (
@@ -807,7 +810,7 @@ function prepareEnvironment(
     throw new TypeError('Stage 4 only supports explicitly unbound external dependencies')
   }
   return {
-    dshVersion: '0.1.0-rc.7',
+    dshVersion: value.dshVersion,
     providerId: safeIdentifier(value.providerId, 'providerId'),
     modelId: safeIdentifier(value.modelId, 'modelId'),
     callConfigDigest: digest(value.callConfigDigest, 'callConfigDigest'),

@@ -91,7 +91,7 @@ export interface ControlledSkillEvalTask {
 }
 
 export interface ControlledSkillEvalExecution {
-  readonly dshVersion: '0.1.0-rc.7'
+  readonly dshVersion: '0.1.0-rc.7' | '0.1.1-rc.2'
   readonly providerId: string
   readonly modelId: string
   readonly callConfigDigest: Sha256Digest
@@ -551,11 +551,11 @@ function prepareExecution(value: unknown): ControlledSkillEvalExecution {
     'toolSchemaDigest',
     'retryPolicyDigest',
   ])
-  if (value.dshVersion !== '0.1.0-rc.7') {
-    throw new TypeError('controlled evaluation requires DSH 0.1.0-rc.7')
+  if (value.dshVersion !== '0.1.0-rc.7' && value.dshVersion !== '0.1.1-rc.2') {
+    throw new TypeError('controlled evaluation DSH version is unsupported')
   }
   return {
-    dshVersion: '0.1.0-rc.7',
+    dshVersion: value.dshVersion,
     providerId: safeExecutionId(value.providerId, 'providerId'),
     modelId: safeExecutionId(value.modelId, 'modelId'),
     callConfigDigest: digest(value.callConfigDigest, 'callConfigDigest'),

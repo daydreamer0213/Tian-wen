@@ -114,7 +114,9 @@ function ticketFacts(scopeKey = 'project:tianwen/capability:research-summary') {
   return { ticket, signals }
 }
 
-function controlledProtocol() {
+function controlledProtocol(
+  dshVersion: '0.1.0-rc.7' | '0.1.1-rc.2' = '0.1.1-rc.2',
+) {
   return {
     rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
     tasks: taskTypes.map((taskType, index) => ({
@@ -137,7 +139,7 @@ function controlledProtocol() {
       },
     })),
     execution: {
-      dshVersion: '0.1.0-rc.7',
+      dshVersion,
       providerId: 'tianwen-v0.1-eval-scripted',
       modelId: 'scripted',
       callConfigDigest: digest('call-config'),
@@ -1116,6 +1118,7 @@ describe('controlled five-task Skill evaluation protocol', () => {
     expect(first).toMatchObject({ duplicate: false, provenance: 'pre-candidate' })
     expect(duplicate).toEqual({ ...first, duplicate: true })
     expect(stored?.evidenceLabels).toEqual(['development-only', 'synthetic-defect'])
+    expect(stored?.protocol.execution.dshVersion).toBe('0.1.1-rc.2')
     expect(ledger.listEvents().filter(isPublicLedgerEvent)).toEqual([])
 
     const lines = readFileSync(join(path, 'ledger.jsonl'), 'utf8').trimEnd().split('\n')
@@ -1125,6 +1128,21 @@ describe('controlled five-task Skill evaluation protocol', () => {
     expect(replay.getControlledSkillEvalProtocol(first.protocolId)).toEqual(stored)
     expect(replay.listControlledSkillEvalProtocols()).toEqual([stored])
     expect(replay.listEvents().filter(isPublicLedgerEvent)).toEqual([])
+  })
+
+  it('replays a persisted DSH 0.1.0-rc.7 execution without rewriting it', () => {
+    const path = fixtureRoot('legacy-rc7-protocol')
+    const ledger = new EvolutionLedger(path)
+    const ticketId = seedOpenTicket(ledger)
+    const receipt = ledger.freezeControlledSkillEvalProtocol({
+      ticketId,
+      evidencePurpose: 'development-only-synthetic-defect',
+      protocol: controlledProtocol('0.1.0-rc.7'),
+    })
+
+    const parsed = new EvolutionLedger(path).getControlledSkillEvalProtocol(receipt.protocolId)!
+    expect(parsed.protocol.execution.dshVersion).toBe('0.1.0-rc.7')
+    expect(JSON.stringify(parsed)).toContain('0.1.0-rc.7')
   })
 
   it('replays retrospective protocols but refuses to open them as formal evaluations', () => {
