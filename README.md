@@ -90,8 +90,12 @@ installation without using the managed Tianwen product root.
 not `DSH_HOME`:
 
 ```powershell
-& "$env:DSH_HOME\profiles\work\node_modules\.bin\tianwen.cmd" list --dsh-root DSH_PACKAGE_ROOT --dsh-home $env:DSH_HOME --profile work --state-root "$env:DSH_HOME\profiles\work\state"
+$DshPackageRoot = (Resolve-Path 'D:\path\to\your\dsh-host\node_modules\@deepseek-ai\dsh').Path
+& "$env:DSH_HOME\profiles\work\node_modules\.bin\tianwen.cmd" list --dsh-root $DshPackageRoot --dsh-home $env:DSH_HOME --profile work --state-root "$env:DSH_HOME\profiles\work\state"
 ```
+
+Replace only the first path with the package location used by your DSH
+installation.
 
 Remove only the Bundle with `dsh plugin --profile work remove
 @tianwen/runtime-bundle`. Tianwen state below the Profile's `state` directory

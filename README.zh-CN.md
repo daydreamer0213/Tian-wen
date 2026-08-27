@@ -77,8 +77,11 @@ dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianw
 `DSH_HOME`：
 
 ```powershell
-& "$env:DSH_HOME\profiles\work\node_modules\.bin\tianwen.cmd" list --dsh-root DSH_PACKAGE_ROOT --dsh-home $env:DSH_HOME --profile work --state-root "$env:DSH_HOME\profiles\work\state"
+$DshPackageRoot = (Resolve-Path 'D:\path\to\your\dsh-host\node_modules\@deepseek-ai\dsh').Path
+& "$env:DSH_HOME\profiles\work\node_modules\.bin\tianwen.cmd" list --dsh-root $DshPackageRoot --dsh-home $env:DSH_HOME --profile work --state-root "$env:DSH_HOME\profiles\work\state"
 ```
+
+只需把第一行的路径替换为你自己的 DSH 包位置。
 
 使用 `dsh plugin --profile work remove @tianwen/runtime-bundle` 只移除 Bundle；Profile
 下 `state` 目录里的天问状态会保留。对于项目方自己控制的部署，仓库自带的托管安装器仍是
