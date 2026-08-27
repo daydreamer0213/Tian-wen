@@ -12,7 +12,6 @@ import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   Context,
-  DynamicCordisRunnerService,
   SystemPrompt,
   ToolRuntime,
 } from '@tianwen/dsh-compat'
@@ -286,7 +285,9 @@ describe('archive credential literal detection', () => {
 
 describe('@tianwen/runtime-bundle', () => {
   it('executes the built runtime and mounts evidence and evolution', async () => {
-    const base = 'D:/DevData/tianwen-runtime-bundle-tests/profiles'
+    const base = process.platform === 'win32'
+      ? 'D:/DevData/tianwen-runtime-bundle-tests/profiles'
+      : resolve('tmp/tianwen-runtime-bundle-tests/profiles')
     mkdirSync(base, { recursive: true })
     const profileRoot = mkdtempSync(join(base, 'composition-'))
     const ctx = new Context()
@@ -294,11 +295,11 @@ describe('@tianwen/runtime-bundle', () => {
       await ctx.plugin(TimerService)
       await ctx.plugin(SystemPrompt, {})
       await ctx.plugin(ToolRuntime, {})
-      await ctx.plugin(DynamicCordisRunnerService, {})
       ctx.baseUrl = pathToFileURL(profileRoot).href
       await applyBundledRuntime(ctx, {})
       expect(ctx.tianwenEvidence).toBeDefined()
       expect(ctx.tianwenEvolution).toBeDefined()
+      expect('dynamicCordisRunner' in ctx).toBe(false)
       expect(existsSync(
         join(profileRoot, 'state', 'evolution', 'artifacts'),
       )).toBe(true)

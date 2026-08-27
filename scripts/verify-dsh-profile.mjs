@@ -181,15 +181,14 @@ export function parseAuthoredPatch(source) {
 
 export function parseRuntimePatch(source) {
   const lines = source.replaceAll('\r\n', '\n').split('\n').filter(line => line !== '')
-  const evolutionRoot = /^ {8}evolutionRoot: '(.+)'$/u.exec(lines[4] ?? '')?.[1]
   requireAssertion(
-    JSON.stringify(lines.slice(0, 4)) === JSON.stringify([
+    JSON.stringify(lines) === JSON.stringify([
       '- insert:', '    - id: tianwen-runtime',
-      "      name: '@tianwen/runtime-bundle/runtime'", '      config:',
-    ]) && lines.length === 5 && evolutionRoot !== undefined,
+      "      name: '@tianwen/runtime-bundle/runtime'",
+    ]),
     'Runtime patch differs from the single authorized operation',
   )
-  return { insertedRuntime: { id: 'tianwen-runtime', name: runtimeSpecifier, evolutionRoot } }
+  return { insertedRuntime: { id: 'tianwen-runtime', name: runtimeSpecifier } }
 }
 
 function dumpedRows(source) {
@@ -313,7 +312,7 @@ export async function resolveAndImportRuntimeBundle(profileManifestPath) {
   const module = await import(pathToFileURL(runtimeResolved).href)
   requireAssertion(module.name === 'tianwen-runtime', 'wrong Runtime identity')
   requireAssertion(module.SUPPORTED_DSH_VERSION === '0.1.1-rc.2', 'wrong DSH version')
-  requireAssertion(JSON.stringify(module.inject) === JSON.stringify(['dynamicCordisRunner']), 'wrong inject')
+  requireAssertion(JSON.stringify(module.inject) === JSON.stringify([]), 'wrong inject')
   requireAssertion(typeof module.apply === 'function', 'Runtime apply is unavailable')
   return { specifier: runtimeSpecifier, resolved: runtimeResolved, name: 'tianwen-runtime', inject: module.inject, supportedDshVersion: module.SUPPORTED_DSH_VERSION, externalSpecifiers: Object.keys(manifest.dependencies).sort(), externalResolved: { '@deepseek-ai/cordis': cordisResolved } }
 }
@@ -719,7 +718,11 @@ async function main() {
     const installedRuntimePatch = parseRuntimePatch(readFileSync(resolve(runtimeRoot, 'cordis.patch.yml'), 'utf8'))
     requireAssertion(JSON.stringify(authoredRuntimePatch) === JSON.stringify(installedRuntimePatch), 'installed Runtime patch differs from authored patch')
     const runtimeRow = dumpedRow(dump, 'tianwen-runtime')
-    requireAssertion(rowValue(runtimeRow, /^ {2}name: (.+)$/u, 'name') === runtimeSpecifier && rowValue({ ...runtimeRow, lines: runtimeRow.lines.slice(runtimeRow.lines.indexOf('  config:') + 1) }, /^ {4}evolutionRoot: (.+)$/u, 'evolutionRoot') === authoredRuntimePatch.insertedRuntime.evolutionRoot, 'dumped Runtime row is wrong')
+    requireAssertion(
+      rowValue(runtimeRow, /^ {2}name: (.+)$/u, 'name') === runtimeSpecifier
+      && !runtimeRow.lines.some(line => /^ {4}evolutionRoot:/u.test(line)),
+      'dumped Runtime row is wrong',
+    )
     const meta = JSON.parse(readFileSync(metaPath, 'utf8'))
     const external = [...new Set(meta.outputs['dist/runtime.js'].imports.filter(item => item.external && !item.path.startsWith('node:')).map(item => item.path))].sort()
     requireAssertion(

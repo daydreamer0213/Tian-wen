@@ -458,7 +458,7 @@ async function assertInstalledBundle(profileManifestPath: string): Promise<{
     import(pathToFileURL(resumeRunnerResolved).href),
     import(pathToFileURL(controlledRunnerResolved).href),
   ])
-  expect(runtime).toMatchObject({ name: 'tianwen-runtime', inject: ['dynamicCordisRunner'] })
+  expect(runtime).toMatchObject({ name: 'tianwen-runtime', inject: [] })
   expect(smoke).toMatchObject({ name: 'tianwen-phase2-smoke', inject: ['llm', 'tools'] })
   expect(status.readGoalStatus).toBeTypeOf('function')
   expect(status.listGoals).toBeTypeOf('function')

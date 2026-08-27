@@ -230,7 +230,7 @@ describe('Tianwen Runtime Bundle Profile', () => {
     expect(report.composition.runtimeBundle).toMatchObject({
       specifier: '@tianwen/runtime-bundle/runtime',
       name: 'tianwen-runtime',
-      inject: ['dynamicCordisRunner'],
+      inject: [],
       supportedDshVersion: '0.1.1-rc.2',
       externalSpecifiers: [
         '@deepseek-ai/cordis',
