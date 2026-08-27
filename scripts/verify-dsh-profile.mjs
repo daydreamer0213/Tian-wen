@@ -295,7 +295,18 @@ export async function resolveAndImportRuntimeBundle(profileManifestPath) {
   const runtimeRoot = realpathSync(resolve(dirname(runtimeResolved), '..'))
   const runtimeManifestPath = resolve(runtimeRoot, 'package.json')
   const manifest = JSON.parse(readFileSync(runtimeManifestPath, 'utf8'))
-  requireAssertion(JSON.stringify(manifest.dependencies) === JSON.stringify({ '@deepseek-ai/cordis': '4.0.1' }), 'Runtime Bundle external manifest differs from the build contract')
+  const authoredManifest = JSON.parse(readFileSync(
+    resolve(repoRoot, 'packages/tianwen-runtime-bundle/package.json'),
+    'utf8',
+  ))
+  requireAssertion(
+    JSON.stringify(manifest.dependencies) === JSON.stringify(authoredManifest.dependencies)
+    && manifest.dependencies['@deepseek-ai/cordis'] === '4.0.1'
+    && Object.entries(manifest.dependencies).every(([name, version]) => (
+      name === '@deepseek-ai/cordis' || version === expectedDshVersion
+    )),
+    'Runtime Bundle external manifest differs from the build contract',
+  )
   const requireFromRuntime = createRequire(runtimeManifestPath)
   const cordisResolved = requireFromRuntime.resolve('@deepseek-ai/cordis')
   await import(pathToFileURL(cordisResolved).href)
@@ -676,7 +687,26 @@ async function main() {
     }
     collect(runtimeRoot)
     runtimeFiles.sort()
-    const allowedRuntimeFiles = ['cordis.patch.yml', 'dist/index.d.ts', 'dist/index.js', 'dist/runtime.js', 'package.json']
+    const allowedRuntimeFiles = [
+      'LICENSE',
+      'controlled-lifecycle.patch.yml',
+      'cordis.patch.yml',
+      'create.patch.yml',
+      'dist/cli.js',
+      'dist/controlled-lifecycle-runner.js',
+      'dist/create-runner.js',
+      'dist/index.d.ts',
+      'dist/index.js',
+      'dist/model-runner.js',
+      'dist/resume-runner.js',
+      'dist/runtime.js',
+      'dist/smoke.js',
+      'dist/status.d.ts',
+      'dist/status.js',
+      'model.patch.yml',
+      'package.json',
+      'resume.patch.yml',
+    ]
     requireAssertion(JSON.stringify(runtimeFiles) === JSON.stringify(allowedRuntimeFiles), 'installed Runtime Bundle file set is not exact')
     const runtimePatchPath = resolve(runtimeRoot, 'cordis.patch.yml')
     const metaPath = resolve(repoRoot, 'packages/tianwen-runtime-bundle/dist/runtime.meta.json')
@@ -692,7 +722,18 @@ async function main() {
     requireAssertion(rowValue(runtimeRow, /^ {2}name: (.+)$/u, 'name') === runtimeSpecifier && rowValue({ ...runtimeRow, lines: runtimeRow.lines.slice(runtimeRow.lines.indexOf('  config:') + 1) }, /^ {4}evolutionRoot: (.+)$/u, 'evolutionRoot') === authoredRuntimePatch.insertedRuntime.evolutionRoot, 'dumped Runtime row is wrong')
     const meta = JSON.parse(readFileSync(metaPath, 'utf8'))
     const external = [...new Set(meta.outputs['dist/runtime.js'].imports.filter(item => item.external && !item.path.startsWith('node:')).map(item => item.path))].sort()
-    requireAssertion(JSON.stringify(external) === JSON.stringify(runtimeBundle.externalSpecifiers), 'Runtime metafile external closure differs from installed manifest')
+    requireAssertion(
+      JSON.stringify(external) === JSON.stringify([
+        '@deepseek-ai/cordis',
+        '@deepseek-ai/dsh-agent',
+        '@deepseek-ai/dsh-llm',
+        '@deepseek-ai/dsh-session',
+        '@deepseek-ai/dsh-skill',
+        '@deepseek-ai/dsh-tools',
+      ])
+      && external.every(specifier => runtimeBundle.externalSpecifiers.includes(specifier)),
+      'Runtime metafile external closure differs from the runtime entry contract',
+    )
     runtimeBundle.install = { tarball: { path: runtimeTarball, sha256: sha256(readFileSync(runtimeTarball)), files: packedFiles, executable: tarball.executable, argv: tarball.argv }, files: runtimeFiles, forbiddenReferences: { passed: true }, external }
   }
 

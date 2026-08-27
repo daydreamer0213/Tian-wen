@@ -1,0 +1,14 @@
+diff --git a/lib/profile-boot-DG5t9aNs.js b/lib/profile-boot-DG5t9aNs.js
+--- a/lib/profile-boot-DG5t9aNs.js
++++ b/lib/profile-boot-DG5t9aNs.js
+@@ -140,5 +140,4 @@
+ function prepareProfile(name, userLayer = true) {
+-	healProfilesModuleFallback(INSTALL_ANCHOR);
+ 	const profile = loadProfile(NAME, name, INSTALL_ANCHOR, void 0, { userLayer });
+ 	writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG);
+ 	return profile;
+@@ -166,3 +165,4 @@
+ function composeProfile(name, patchFiles) {
++	healProfilesModuleFallback(INSTALL_ANCHOR);
+ 	const profile = prepareProfile(name);
+ 	const homePatches = loadOptionalPatches(NAME, homePatchPath()) ?? [];

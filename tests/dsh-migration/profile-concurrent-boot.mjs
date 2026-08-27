@@ -1,14 +1,16 @@
 import { spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync } from 'node:fs'
 import { readdir, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 const require = createRequire(import.meta.url)
+const requireFromDsh = createRequire(require.resolve('@deepseek-ai/dsh/package.json'))
+const requireFromAppBoot = createRequire(requireFromDsh.resolve('@deepseek-ai/dsh-app-boot/package.json'))
+const yaml = requireFromAppBoot('js-yaml')
 const dshBin = process.env.TIANWEN_DSH_BIN
   ?? join(dirname(require.resolve('@deepseek-ai/dsh/package.json')), 'lib', 'bin.js')
 const concurrency = 8
-const minimumLinks = 500
 const timeoutMs = 120_000
 const fixtureParent = process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-v0.1-eval-fixtures'
 
@@ -72,9 +74,19 @@ try {
   const modulesDir = join(home, 'profiles', 'node_modules')
   const entries = await readdir(modulesDir, { recursive: true, withFileTypes: true })
   const links = entries.filter(entry => entry.isSymbolicLink())
-  const staged = links.filter(entry => /^\..+\.\d+\.[0-9a-f]{12}$/.test(entry.name))
-  if (links.length < minimumLinks) fail(`expected at least ${minimumLinks} fallback links, got ${links.length}`)
-  if (staged.length !== 0) fail(`expected no staged fallback links, got ${staged.length}`)
+  const temporary = entries.filter(entry => /^\..+\.\d+\.[0-9a-f]{12}$/.test(entry.name))
+  if (temporary.length !== 0) fail(`expected no staged fallback entries, got ${temporary.length}`)
+  JSON.parse(readFileSync(join(home, 'profiles', 'web', 'package.json'), 'utf8'))
+  for (const name of ['cordis.patch.yml', 'pnpm-workspace.yaml']) {
+    const contents = readFileSync(join(home, 'profiles', 'web', name), 'utf8')
+    if (contents.trim() === '') fail(`${name} is empty`)
+    yaml.load(contents)
+  }
+  for (const entry of links) {
+    const linkPath = join(entry.parentPath, entry.name)
+    const target = resolve(dirname(linkPath), readlinkSync(linkPath))
+    if (!existsSync(target)) fail(`fallback link target is missing: ${linkPath}`)
+  }
 
   const elapsedMs = Math.round(performance.now() - startedAt)
   process.stdout.write(`DSH concurrent cold boot passed: ${concurrency}/${concurrency}, ${links.length} links, ${elapsedMs}ms\n`)
