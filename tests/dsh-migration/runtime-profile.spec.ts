@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { delimiter, dirname, isAbsolute, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { assertNoRuntimeForbiddenReferences } from '../../scripts/verify-dsh-profile.mjs'
 
@@ -18,24 +18,111 @@ function verify(env: NodeJS.ProcessEnv) {
   })
 }
 
+function dependencyPreparationEnvironment(selectedRoot: string, source: NodeJS.ProcessEnv) {
+  const paths = {
+    appData: resolve(selectedRoot, 'app-data'),
+    localAppData: resolve(selectedRoot, 'local-app-data'),
+    npmCache: resolve(selectedRoot, 'npm-cache'),
+    npmConfig: resolve(selectedRoot, 'npm-config'),
+    npmPrefix: resolve(selectedRoot, 'npm-prefix'),
+    pnpmCache: resolve(selectedRoot, 'pnpm-cache'),
+    pnpmHome: resolve(selectedRoot, 'pnpm-home'),
+    pnpmStore: resolve(selectedRoot, 'pnpm-store'),
+    temp: resolve(selectedRoot, 'temp'),
+    userProfile: resolve(selectedRoot, 'user-profile'),
+    xdgCache: resolve(selectedRoot, 'xdg-cache'),
+    xdgConfig: resolve(selectedRoot, 'xdg-config'),
+    xdgData: resolve(selectedRoot, 'xdg-data'),
+  }
+  for (const path of Object.values(paths)) mkdirSync(path, { recursive: true })
+  const userConfig = resolve(paths.npmConfig, 'user.npmrc')
+  const globalConfig = resolve(paths.npmConfig, 'global.npmrc')
+  writeFileSync(userConfig, '', 'utf8')
+  writeFileSync(globalConfig, '', 'utf8')
+  const systemRoot = source.SystemRoot ?? source.WINDIR
+  if (process.platform === 'win32' && systemRoot === undefined) {
+    throw new Error('SystemRoot is required for dependency preparation')
+  }
+  return {
+    APPDATA: paths.appData,
+    CI: 'true',
+    ComSpec: systemRoot === undefined ? undefined : resolve(systemRoot, 'System32/cmd.exe'),
+    HOME: paths.userProfile,
+    LOCALAPPDATA: paths.localAppData,
+    NPM_CONFIG_AUDIT: 'false',
+    NPM_CONFIG_CACHE: paths.npmCache,
+    NPM_CONFIG_FUND: 'false',
+    NPM_CONFIG_GLOBALCONFIG: globalConfig,
+    NPM_CONFIG_PREFIX: paths.npmPrefix,
+    NPM_CONFIG_REGISTRY: 'https://registry.npmmirror.com/',
+    NPM_CONFIG_UPDATE_NOTIFIER: 'false',
+    NPM_CONFIG_USERCONFIG: userConfig,
+    PATH: [dirname(process.execPath), systemRoot === undefined ? undefined : resolve(systemRoot, 'System32')]
+      .filter(value => value !== undefined)
+      .join(delimiter),
+    PATHEXT: source.PATHEXT ?? '.COM;.EXE;.BAT;.CMD',
+    PNPM_CONFIG_AUTO_INSTALL_PEERS: 'false',
+    PNPM_CONFIG_CACHE_DIR: paths.pnpmCache,
+    PNPM_CONFIG_IGNORE_SCRIPTS: 'true',
+    PNPM_CONFIG_REGISTRY: 'https://registry.npmmirror.com/',
+    PNPM_CONFIG_STORE_DIR: paths.pnpmStore,
+    PNPM_HOME: paths.pnpmHome,
+    SystemRoot: systemRoot,
+    TEMP: paths.temp,
+    TMP: paths.temp,
+    USERPROFILE: paths.userProfile,
+    WINDIR: systemRoot,
+    XDG_CACHE_HOME: paths.xdgCache,
+    XDG_CONFIG_HOME: paths.xdgConfig,
+    XDG_DATA_HOME: paths.xdgData,
+  }
+}
+
+function retainedPnpm(source: NodeJS.ProcessEnv) {
+  const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
+    packageManager?: string
+  }
+  if (manifest.packageManager !== 'pnpm@11.20.0') {
+    throw new Error('dependency preparation requires packageManager pnpm@11.20.0')
+  }
+  const configuredCorepackHome = source.COREPACK_HOME ?? 'D:/DevData/corepack-home'
+  if (!isAbsolute(configuredCorepackHome)) throw new Error('COREPACK_HOME must be absolute')
+  const corepackHome = resolve(configuredCorepackHome)
+  let actualCorepackHome = corepackHome
+  if (process.platform === 'win32') {
+    const approvedCorepackHome = realpathSync('D:/DevData/corepack-home')
+    actualCorepackHome = realpathSync(corepackHome)
+    if (actualCorepackHome.toLowerCase() !== approvedCorepackHome.toLowerCase()) {
+      throw new Error('COREPACK_HOME must be the approved D:/DevData/corepack-home')
+    }
+  }
+  const pnpmRoot = realpathSync(resolve(corepackHome, 'v1/pnpm/11.20.0'))
+  const pnpmRootChild = relative(actualCorepackHome, pnpmRoot)
+  if (pnpmRootChild === '' || pnpmRootChild.startsWith('..') || isAbsolute(pnpmRootChild)) {
+    throw new Error('retained pnpm root must stay under COREPACK_HOME')
+  }
+  const metadata = JSON.parse(readFileSync(resolve(pnpmRoot, '.corepack'), 'utf8')) as {
+    locator?: { name?: string, reference?: string }
+    bin?: { pnpm?: string }
+  }
+  if (metadata.locator?.name !== 'pnpm'
+    || metadata.locator.reference !== '11.20.0'
+    || metadata.bin?.pnpm !== './bin/pnpm.mjs') {
+    throw new Error('retained Corepack pnpm metadata does not match pnpm@11.20.0')
+  }
+  const pnpm = realpathSync(resolve(pnpmRoot, 'bin/pnpm.mjs'))
+  const pnpmChild = relative(pnpmRoot, pnpm)
+  if (pnpmChild.startsWith('..') || isAbsolute(pnpmChild) || !statSync(pnpm).isFile()) {
+    throw new Error('retained pnpm executable must be a file under its exact package')
+  }
+  return pnpm
+}
+
 function prefetchOfflineDependencies() {
   const seedRoot = resolve(probeRoot, 'dependency-prefetch')
-  const temp = resolve(probeRoot, 'temp')
   mkdirSync(seedRoot, { recursive: true })
-  mkdirSync(temp, { recursive: true })
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    NPM_CONFIG_CACHE: resolve(probeRoot, 'npm-cache'),
-    PNPM_CONFIG_AUTO_INSTALL_PEERS: 'false',
-    PNPM_CONFIG_CACHE_DIR: resolve(probeRoot, 'pnpm-cache'),
-    PNPM_CONFIG_STORE_DIR: resolve(probeRoot, 'pnpm-store'),
-    TEMP: temp,
-    TMP: temp,
-  }
-  delete env.NPM_CONFIG_OFFLINE
-  delete env.PNPM_CONFIG_OFFLINE
-  const pnpm = process.env.npm_execpath
-    ?? resolve(process.env.COREPACK_HOME ?? 'D:/DevData/corepack-home', 'v1/pnpm/11.20.0/bin/pnpm.mjs')
+  const env = dependencyPreparationEnvironment(probeRoot, process.env)
+  const pnpm = retainedPnpm(process.env)
   const dependencies = new Set<string>()
   for (const manifestPath of [
     'packages/tianwen-dsh-probe-bundle/package.json',
@@ -48,19 +135,57 @@ function prefetchOfflineDependencies() {
       dependencies.add(`${name}@${version}`)
     }
   }
-  const result = spawnSync(process.execPath, [
-    pnpm,
-    '--dir', seedRoot,
-    'add', ...[...dependencies].sort(),
-    '--ignore-scripts',
-  ], { cwd: root, encoding: 'utf8', env, shell: false, timeout: 120_000 })
-  rmSync(seedRoot, { recursive: true, force: true })
-  if (result.status !== 0) {
-    throw new Error(`dependency prefetch failed\n${result.stdout}\n${result.stderr}`)
+  try {
+    const result = spawnSync(process.execPath, [
+      pnpm,
+      '--dir', seedRoot,
+      'add', ...[...dependencies].sort(),
+      '--ignore-scripts',
+    ], { cwd: root, encoding: 'utf8', env, shell: false, timeout: 120_000 })
+    if (result.status !== 0) {
+      throw new Error(`dependency prefetch failed\n${result.stdout}\n${result.stderr}`)
+    }
+  } finally {
+    rmSync(seedRoot, { recursive: true, force: true })
   }
 }
 
 describe('Tianwen Runtime Bundle Profile', () => {
+  it('contains dependency preparation despite contaminated user and npm environments', () => {
+    const selectedRoot = resolve(probeRoot, 'dependency-preparation-env-contract')
+    rmSync(selectedRoot, { recursive: true, force: true })
+    try {
+      const env = dependencyPreparationEnvironment(selectedRoot, {
+        APPDATA: 'C:/contaminated/app-data',
+        COREPACK_HOME: 'D:/DevData/corepack-home',
+        LOCALAPPDATA: 'C:/contaminated/local-app-data',
+        NPM_CONFIG_USERCONFIG: 'C:/contaminated/.npmrc',
+        NPM_TOKEN: 'credential-marker',
+        SystemRoot: process.env.SystemRoot,
+        USERPROFILE: 'C:/contaminated/user-profile',
+        WINDIR: process.env.WINDIR,
+      })
+      expect(env).toMatchObject({
+        APPDATA: resolve(selectedRoot, 'app-data'),
+        LOCALAPPDATA: resolve(selectedRoot, 'local-app-data'),
+        NPM_CONFIG_GLOBALCONFIG: resolve(selectedRoot, 'npm-config/global.npmrc'),
+        NPM_CONFIG_USERCONFIG: resolve(selectedRoot, 'npm-config/user.npmrc'),
+        PNPM_HOME: resolve(selectedRoot, 'pnpm-home'),
+        USERPROFILE: resolve(selectedRoot, 'user-profile'),
+      })
+      expect(env).not.toHaveProperty('NPM_TOKEN')
+      expect(env).not.toHaveProperty('npm_execpath')
+      expect(readFileSync(env.NPM_CONFIG_USERCONFIG!, 'utf8')).toBe('')
+      expect(readFileSync(env.NPM_CONFIG_GLOBALCONFIG!, 'utf8')).toBe('')
+      expect(retainedPnpm({
+        COREPACK_HOME: 'D:/DevData/corepack-home',
+        npm_execpath: 'C:/contaminated/pnpm.cjs',
+      })).toBe(realpathSync('D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs'))
+    } finally {
+      rmSync(selectedRoot, { recursive: true, force: true })
+    }
+  })
+
   it('keeps the real migration Profile gate opt-in', () => {
     expect(existsSync(resolve(root, 'scripts/verify-dsh-profile.mjs'))).toBe(true)
   })

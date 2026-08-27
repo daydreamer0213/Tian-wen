@@ -26,14 +26,20 @@ function requireChoice(name, choices) {
   return value
 }
 
-function requireBin() {
+function requireDsh(label) {
   const value = required('TIANWEN_DSH_BIN')
   if (!isAbsolute(value)) throw new Error('TIANWEN_DSH_BIN must be absolute')
-  const path = realpathSync(value)
-  if (!statSync(path).isFile() || basename(path).toLowerCase() !== 'bin.js') {
+  const bin = realpathSync(value)
+  if (!statSync(bin).isFile() || basename(bin).toLowerCase() !== 'bin.js') {
     throw new Error('TIANWEN_DSH_BIN must be a packaged DSH bin.js file')
   }
-  return path
+  const manifestPath = realpathSync(resolve(dirname(bin), '..', 'package.json'))
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const expectedVersion = { rc7: '0.1.0-rc.7', rc2: '0.1.1-rc.2' }[label]
+  if (manifest.name !== '@deepseek-ai/dsh' || manifest.version !== expectedVersion) {
+    throw new Error(`${label} requires @deepseek-ai/dsh@${expectedVersion}`)
+  }
+  return { bin, manifestPath, version: manifest.version }
 }
 
 function requireFreshProbeRoot() {
@@ -77,14 +83,14 @@ function validateBoot(home, stdout, yaml) {
 }
 
 try {
-  const bin = requireBin()
   const label = requireChoice('TIANWEN_DSH_TIMING_LABEL', ['rc7', 'rc2'])
   const mode = requireChoice('TIANWEN_DSH_TIMING_MODE', ['dump', 'boot'])
+  const dsh = requireDsh(label)
   const probeRoot = requireFreshProbeRoot()
   const argv = mode === 'dump'
     ? ['--profile', 'headless', '--dump-config']
     : ['web', '--help']
-  const requireFromDsh = createRequire(resolve(dirname(bin), '..', 'package.json'))
+  const requireFromDsh = createRequire(dsh.manifestPath)
   const requireFromAppBoot = createRequire(requireFromDsh.resolve('@deepseek-ai/dsh-app-boot/package.json'))
   const yaml = requireFromAppBoot('js-yaml')
   const samples = []
@@ -99,7 +105,7 @@ try {
       mkdirSync(path, { recursive: true })
     }
     const startedAt = performance.now()
-    const result = spawnSync(process.execPath, [bin, ...argv], {
+    const result = spawnSync(process.execPath, [dsh.bin, ...argv], {
       encoding: 'utf8',
       env: {
         ...process.env,
@@ -136,6 +142,8 @@ try {
   process.stdout.write(`${JSON.stringify({
     label,
     mode,
+    bin: dsh.bin,
+    packageVersion: dsh.version,
     argv,
     samples,
     medianMs: elapsed[1],
