@@ -51,6 +51,12 @@ function sha256(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
+function isOutsideRoot(root: string, path: string): boolean {
+  const pathRelativeToRoot = relative(root, path)
+  const normalized = pathRelativeToRoot.replaceAll('\\', '/')
+  return isAbsolute(pathRelativeToRoot) || normalized === '..' || normalized.startsWith('../')
+}
+
 function readMeta(root: string): FixtureMeta {
   return JSON.parse(readFileSync(join(root, META_FILE), 'utf8')) as FixtureMeta
 }
@@ -113,7 +119,7 @@ async function verify(root: string): Promise<void> {
     throw new Error('fixture metadata does not describe the frozen rc.7 Session')
   }
   const logPath = resolve(root, meta.relativeLogPath)
-  if (relative(root, logPath).startsWith('../') || !existsSync(logPath)) {
+  if (isOutsideRoot(root, logPath) || !existsSync(logPath)) {
     throw new Error('fixture metadata points outside its root or to a missing JSONL log')
   }
   const before = readFileSync(logPath)
