@@ -47,6 +47,21 @@ const controlledFixtureBase = resolve(
   'tianwen-startup',
 )
 
+function selectedPnpmStore(configuredStore: string | undefined): string {
+  return configuredStore ?? 'D:/DevData/pnpm-store'
+}
+
+function formalStartupEnvironmentPaths(productRoot: string): {
+  temp: string
+  virtualStore: string
+} {
+  const environmentRoot = `${productRoot}-environment`
+  return {
+    temp: join(environmentRoot, 'temp'),
+    virtualStore: join(environmentRoot, 'virtual-store'),
+  }
+}
+
 const controlledParentSkill = {
   name: 'tianwen-controlled-architecture-decision-v01',
   description: 'Choose a bounded Tianwen architecture decision from frozen options.',
@@ -276,10 +291,9 @@ function expectOutsideWorktree(path: string): void {
 function childEnvironment(): NodeJS.ProcessEnv {
   const systemRoot = process.env.SystemRoot ?? process.env.WINDIR
   expect(systemRoot).toBeDefined()
-  const temp = `${tianwenRoot}/temp`
-  const store = 'D:/DevData/pnpm-store'
+  const { temp, virtualStore } = formalStartupEnvironmentPaths(tianwenRoot)
+  const store = selectedPnpmStore(process.env.PNPM_CONFIG_STORE_DIR)
   const cache = 'D:/DevData/pnpm-cache'
-  const virtualStore = `${tianwenRoot}/virtual-store`
   const system32 = resolve(systemRoot!, 'System32')
   const paths = [
     dshHome,
@@ -294,8 +308,6 @@ function childEnvironment(): NodeJS.ProcessEnv {
     resumeReceiptPath,
     installReceiptPath,
     archive,
-    temp,
-    virtualStore,
   ]
   mkdirSync(tianwenRoot, { recursive: true })
   paths.forEach(requireWithinRoot)
@@ -346,7 +358,7 @@ function controlledInstallEnvironment(dataDir: string): NodeJS.ProcessEnv {
     PNPM_CONFIG_CACHE_DIR: cache,
     PNPM_CONFIG_AUTO_INSTALL_PEERS: 'true',
     PNPM_CONFIG_OFFLINE: 'true',
-    PNPM_CONFIG_STORE_DIR: 'D:/DevData/pnpm-store',
+    PNPM_CONFIG_STORE_DIR: selectedPnpmStore(process.env.PNPM_CONFIG_STORE_DIR),
     PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: 'false',
     PNPM_CONFIG_VIRTUAL_STORE_DIR: virtualStore,
     SystemRoot: systemRoot,
@@ -1025,7 +1037,10 @@ async function start(): Promise<void> {
 
   const modelSentinel = randomUUID()
   const fakeFetch = resolve(root, 'tests/dsh-migration/fixtures/deepseek-goal-round-fetch.cjs')
-  const fetchTracePath = `${tianwenRoot}/temp/goal-round-fetch-${randomUUID()}.jsonl`
+  const fetchTracePath = join(
+    formalStartupEnvironmentPaths(tianwenRoot).temp,
+    `goal-round-fetch-${randomUUID()}.jsonl`,
+  )
   rmSync(fetchTracePath, { force: true })
   const modelEnv = {
     ...env,
@@ -1393,6 +1408,27 @@ async function start(): Promise<void> {
 }
 
 describe('Tianwen formal headless startup', () => {
+  it.each([
+    ['inherits the controller store', 'D:/DevData/controller-pnpm-store', 'D:/DevData/controller-pnpm-store'],
+    ['uses the D drive fallback', undefined, 'D:/DevData/pnpm-store'],
+  ])('%s for fixture installs', (_label, configuredStore, expectedStore) => {
+    expect(selectedPnpmStore(configuredStore)).toBe(expectedStore)
+  })
+
+  it('keeps formal startup environment directories beside the product root', () => {
+    const productRoot = resolve('D:/DevData/tianwen-startup-boundary-product')
+    const environmentRoot = resolve(`${productRoot}-environment`)
+    const paths = formalStartupEnvironmentPaths(productRoot)
+
+    expect(paths).toEqual({
+      temp: join(environmentRoot, 'temp'),
+      virtualStore: join(environmentRoot, 'virtual-store'),
+    })
+    for (const path of Object.values(paths)) {
+      expect(relative(productRoot, path)).toMatch(/^\.\.(?:[\\/]|$)/u)
+    }
+  })
+
   it.runIf(controlledInstalledEnabled)(
     'installs the controlled lifecycle runner and stops four child preflights without Provider activity',
     async () => {
