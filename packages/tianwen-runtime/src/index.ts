@@ -86,7 +86,7 @@ export interface TianwenRuntimeConfig {
 
 export async function apply(
   ctx: Context,
-  config: TianwenRuntimeConfig,
+  config: TianwenRuntimeConfig = {},
 ): Promise<void> {
   if (DSH_VERSION !== SUPPORTED_DSH_VERSION) {
     throw new Error(`unsupported DSH version: ${DSH_VERSION}`)

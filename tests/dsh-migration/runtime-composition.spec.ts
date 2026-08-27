@@ -67,7 +67,7 @@ describe('@tianwen/runtime', () => {
     try {
       const profileRoot = stateRoot()
       ctx.baseUrl = pathToFileURL(profileRoot).href
-      await apply(ctx, {})
+      await apply(ctx)
       expect(existsSync(
         join(profileRoot, 'state', 'evolution', 'artifacts'),
       )).toBe(true)
