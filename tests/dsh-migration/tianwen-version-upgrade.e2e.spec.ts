@@ -1,14 +1,16 @@
 import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
 import { delimiter, dirname, join, relative, resolve, win32 } from 'node:path'
+import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
 
 type DirectoryState = 'missing' | 'file' | 'empty-directory' | 'nonempty-directory'
@@ -20,12 +22,20 @@ const devDataRoot = 'D:\\DevData'
 const oldAuthoritySha = 'ceafb6bc5d842402c83a0030cb2c2c57105c0dd8'
 const predecessorDshVersion = '0.1.0-rc.7'
 const currentDshVersion = '0.1.1-rc.2'
+const upgradeTestTimeoutMs = 7_200_000
 const enabled = process.platform === 'win32'
   && process.env.TIANWEN_RUN_DSH_UPGRADE_E2E === '1'
 const validEnvironment: NodeJS.ProcessEnv = {
   TIANWEN_RUN_DSH_UPGRADE_E2E: '1',
   TIANWEN_DSH_RC7_AUTHORITY_ROOT: 'D:\\DevData\\tianwen-worktrees\\tianwen-dsh-rc7-upgrade-authority',
   TIANWEN_DSH_UPGRADE_ROOT: 'D:\\DevData\\tianwen-dsh-rc2-product-migration\\real-upgrade',
+}
+
+function contractProductRoot(): string {
+  const parent = process.platform === 'win32'
+    ? 'D:\\DevData\\tianwen-dsh-upgrade-contract-tests'
+    : join(tmpdir(), 'tianwen-dsh-upgrade-contract-tests')
+  return join(parent, randomUUID())
 }
 
 function inspectDirectory(path: string): DirectoryState {
@@ -85,6 +95,15 @@ function withValidatedUpgradeInputs(
   operation({ oldAuthorityRoot, productRoot })
 }
 
+function childProcessErrorMessage(
+  label: string,
+  error: Error,
+  stdout: string,
+  stderr: string,
+): string {
+  return `${label}: ${error.message}\nstdout:\n${stdout}\nstderr:\n${stderr}`
+}
+
 function runChecked(
   label: string,
   executable: string,
@@ -98,11 +117,20 @@ function runChecked(
   })
   const stdout = typeof result.stdout === 'string' ? result.stdout : result.stdout?.toString() ?? ''
   const stderr = typeof result.stderr === 'string' ? result.stderr : result.stderr?.toString() ?? ''
-  if (result.error !== undefined) throw new Error(`${label}: ${result.error.message}`)
+  if (result.error !== undefined) {
+    throw new Error(childProcessErrorMessage(label, result.error, stdout, stderr))
+  }
   if (result.status !== 0) {
     throw new Error(`${label} exited ${result.status}: ${stdout}\n${stderr}`)
   }
   return stdout
+}
+
+function assertOldAuthorityState(revision: string, trackedStatus: string): void {
+  if (revision.trim() !== oldAuthoritySha) {
+    throw new Error(`old authority must be exact ${oldAuthoritySha}`)
+  }
+  if (trackedStatus.trim() !== '') throw new Error('old authority must be clean')
 }
 
 function childEnvironment(productRoot: string): NodeJS.ProcessEnv {
@@ -273,6 +301,31 @@ function hashSyntheticState(productRoot: string): Readonly<Record<string, string
   }
 }
 
+function snapshotPersistentState(productRoot: string): Readonly<Record<string, string>> {
+  const snapshot: Record<string, string> = {}
+  const visit = (path: string): void => {
+    const label = relative(productRoot, path).replaceAll('\\', '/')
+    snapshot[`directory:${label}`] = ''
+    for (const entry of readdirSync(path, { withFileTypes: true }).sort((left, right) =>
+      left.name.localeCompare(right.name))) {
+      const child = join(path, entry.name)
+      const childLabel = relative(productRoot, child).replaceAll('\\', '/')
+      if (entry.isDirectory()) visit(child)
+      else if (entry.isFile()) snapshot[`file:${childLabel}`] = readFileSync(child).toString('base64')
+      else snapshot[`other:${childLabel}`] = entry.isSymbolicLink() ? 'symbolic-link' : 'other'
+    }
+  }
+
+  for (const path of [
+    join(productRoot, 'dsh-home', 'sessions'),
+    join(productRoot, 'state', 'evolution'),
+  ]) {
+    if (existsSync(path)) visit(path)
+    else snapshot[`missing:${relative(productRoot, path).replaceAll('\\', '/')}`] = ''
+  }
+  return snapshot
+}
+
 function snapshotManagedFiles(productRoot: string): Readonly<Record<string, string>> {
   const paths = installPaths(productRoot)
   const files = [
@@ -297,7 +350,33 @@ function matchingChildren(rootPath: string, prefixes: readonly string[]): string
     .map(name => join(rootPath, name))
 }
 
+function findRuntimeStagedCopies(runtimeRoot: string): string[] {
+  if (!existsSync(runtimeRoot) || !statSync(runtimeRoot).isDirectory()) return []
+  const found: string[] = []
+  const visit = (path: string): void => {
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      const child = join(path, entry.name)
+      if (entry.isDirectory()) visit(child)
+      else if (entry.isFile()
+        && /\.copy-\d+-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(entry.name)) {
+        found.push(child)
+      }
+    }
+  }
+  visit(runtimeRoot)
+  return found
+}
+
 function findInstallerResidue(productRoot: string): string[] {
+  const runtimeRoot = join(
+    productRoot,
+    'dsh-home',
+    'profiles',
+    'tianwen',
+    'node_modules',
+    '@tianwen',
+    'runtime-bundle',
+  )
   return [
     ...matchingChildren(productRoot, ['.dsh-host-backup-']),
     ...matchingChildren(join(productRoot, 'packs'), ['.install-', '.tianwen-backup-']),
@@ -309,6 +388,7 @@ function findInstallerResidue(productRoot: string): string[] {
       join(productRoot, 'receipts'),
       ['tianwen-install.json.tmp-'],
     ),
+    ...findRuntimeStagedCopies(runtimeRoot),
   ].map(path => relative(productRoot, path)).sort()
 }
 
@@ -325,7 +405,13 @@ function runUpgradeAcceptance({ oldAuthorityRoot, productRoot }: UpgradeInputs):
     ['-C', oldAuthorityRoot, 'rev-parse', '--verify', 'HEAD'],
     { cwd: oldAuthorityRoot, env: process.env, timeout: 30_000 },
   ).trim()
-  expect(authorityHead).toBe(oldAuthoritySha)
+  const authorityStatus = runChecked(
+    'old authority tracked status check',
+    'git',
+    ['-C', oldAuthorityRoot, 'status', '--porcelain', '--untracked-files=no'],
+    { cwd: oldAuthorityRoot, env: process.env, timeout: 30_000 },
+  )
+  assertOldAuthorityState(authorityHead, authorityStatus)
 
   runInstaller(oldInstaller, productRoot, environment)
   expect(assertInstalledVersion(productRoot, predecessorDshVersion)).toBeTypeOf('string')
@@ -333,6 +419,7 @@ function runUpgradeAcceptance({ oldAuthorityRoot, productRoot }: UpgradeInputs):
 
   runInstaller(currentInstaller, productRoot, environment)
   const dshBin = assertInstalledVersion(productRoot, currentDshVersion)
+  const persistentStateBeforeDump = snapshotPersistentState(productRoot)
   const dump = runChecked(
     'current Profile dump',
     process.execPath,
@@ -340,6 +427,7 @@ function runUpgradeAcceptance({ oldAuthorityRoot, productRoot }: UpgradeInputs):
     { cwd: root, env: environment, timeout: 120_000 },
   )
   expect(dump.length).toBeGreaterThan(0)
+  expect(snapshotPersistentState(productRoot)).toEqual(persistentStateBeforeDump)
   const boot = runChecked(
     'current offline Profile boot',
     process.execPath,
@@ -370,6 +458,80 @@ const invalidInputs = [
 ] satisfies ReadonlyArray<readonly [string, NodeJS.ProcessEnv, InspectDirectory]>
 
 describe('Tianwen managed product upgrade acceptance boundary', () => {
+  it('accepts the exact clean old authority when ignored dependencies are absent from tracked status', () => {
+    expect(() => assertOldAuthorityState(`${oldAuthoritySha}\n`, '')).not.toThrow()
+  })
+
+  it('rejects tracked old-authority changes before the first installer', () => {
+    expect(() => assertOldAuthorityState(oldAuthoritySha, ' M scripts/install-tianwen.mjs\n'))
+      .toThrow(/old authority must be clean/u)
+  })
+
+  it('detects added state directories, files, and changed bytes recursively', () => {
+    const productRoot = contractProductRoot()
+    const session = join(productRoot, 'dsh-home', 'sessions', 'existing', 'session.jsonl')
+    try {
+      mkdirSync(dirname(session), { recursive: true })
+      writeFileSync(session, 'before\n', 'utf8')
+      const before = snapshotPersistentState(productRoot)
+
+      const nested = join(productRoot, 'state', 'evolution', 'added', 'nested')
+      mkdirSync(nested, { recursive: true })
+      const afterDirectory = snapshotPersistentState(productRoot)
+      expect(afterDirectory).not.toEqual(before)
+
+      writeFileSync(join(nested, 'ledger.jsonl'), 'added\n', 'utf8')
+      const afterFile = snapshotPersistentState(productRoot)
+      expect(afterFile).not.toEqual(afterDirectory)
+
+      writeFileSync(session, 'after\n', 'utf8')
+      expect(snapshotPersistentState(productRoot)).not.toEqual(afterFile)
+    } finally {
+      rmSync(productRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('finds nested Runtime Bundle staged-copy residue', () => {
+    const productRoot = contractProductRoot()
+    const staged = join(
+      productRoot,
+      'dsh-home',
+      'profiles',
+      'tianwen',
+      'node_modules',
+      '@tianwen',
+      'runtime-bundle',
+      'dist',
+      'nested',
+      `chunk.js.copy-4321-${randomUUID()}`,
+    )
+    try {
+      mkdirSync(dirname(staged), { recursive: true })
+      writeFileSync(staged, 'staged copy\n', 'utf8')
+
+      expect(findInstallerResidue(productRoot)).toEqual([relative(productRoot, staged)])
+    } finally {
+      rmSync(productRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps the outer timeout above every bounded child-process budget', () => {
+    expect(upgradeTestTimeoutMs).toBeGreaterThan(6_660_000)
+  })
+
+  it('keeps child stdout and stderr when a process reports an execution error', () => {
+    const message = childProcessErrorMessage(
+      'candidate installer',
+      new Error('spawn timed out'),
+      'partial stdout',
+      'partial stderr',
+    )
+
+    expect(message).toContain('spawn timed out')
+    expect(message).toContain('partial stdout')
+    expect(message).toContain('partial stderr')
+  })
+
   it('does nothing unless the exact opt-in value is enabled', () => {
     let operations = 0
 
@@ -411,6 +573,6 @@ describe('Tianwen real DSH 0.1.0-rc.7 product upgrade', () => {
   it.runIf(enabled)(
     'upgrades once, preserves synthetic state, and replays the current installer once',
     () => withValidatedUpgradeInputs(process.env, inspectDirectory, runUpgradeAcceptance),
-    6_600_000,
+    upgradeTestTimeoutMs,
   )
 })
