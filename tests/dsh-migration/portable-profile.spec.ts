@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -112,6 +113,22 @@ describe('portable DSH Profile target', () => {
       name: '@deepseek-ai/dsh',
       version: '0.1.1-rc.2',
       bin: { dsh: '../outside.js' },
+    })}\n`, 'utf8')
+
+    expect(() => resolvePortableProfileTarget(fixture))
+      .toThrow(/DSH bin.*inside dshRoot/u)
+  })
+
+  it('rejects a package-internal junction that resolves the DSH bin outside', () => {
+    const fixture = targetFixture()
+    const outsideRoot = join(fixture.dshRoot, '..', 'outside-bin')
+    mkdirSync(outsideRoot)
+    writeFileSync(join(outsideRoot, 'bin.js'), '#!/usr/bin/env node\n', 'utf8')
+    symlinkSync(outsideRoot, join(fixture.dshRoot, 'linked-bin'), 'junction')
+    writeFileSync(join(fixture.dshRoot, 'package.json'), `${JSON.stringify({
+      name: '@deepseek-ai/dsh',
+      version: '0.1.1-rc.2',
+      bin: { dsh: 'linked-bin/bin.js' },
     })}\n`, 'utf8')
 
     expect(() => resolvePortableProfileTarget(fixture))

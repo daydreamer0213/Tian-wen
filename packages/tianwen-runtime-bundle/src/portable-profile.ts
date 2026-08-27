@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs'
+import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
 const DSH_NAME = '@deepseek-ai/dsh'
@@ -60,10 +60,24 @@ function exactDshBin(dshRoot: string): string {
   if (child === '' || child.startsWith('..') || isAbsolute(child)) {
     throw new Error('DSH bin must remain inside dshRoot')
   }
+  let realRoot: string
+  let realBin: string
   try {
-    if (statSync(dshBin).isFile()) return dshBin
-  } catch {}
-  throw new Error('DSH bin must be an existing file')
+    realRoot = realpathSync(dshRoot)
+    realBin = realpathSync(dshBin)
+  } catch {
+    throw new Error('DSH bin must be an existing file')
+  }
+  const realChild = relative(realRoot, realBin)
+  if (
+    realChild === '' || realChild.startsWith('..') || isAbsolute(realChild)
+  ) {
+    throw new Error('DSH bin must remain inside dshRoot')
+  }
+  if (!statSync(realBin).isFile()) {
+    throw new Error('DSH bin must be an existing file')
+  }
+  return realBin
 }
 
 export function resolvePortableProfileTarget(
