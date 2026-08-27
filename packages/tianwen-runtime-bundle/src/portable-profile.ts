@@ -160,7 +160,13 @@ export function verifyPortableRuntimeBundle(
       || manifest.dsh?.bundle?.patch !== './cordis.patch.yml'
     ) throw new Error('Runtime Bundle manifest is incompatible')
 
+    const realProfileRoot = realpathSync(target.profileRoot)
     const realRuntimeRoot = realpathSync(runtimeRoot)
+    const runtimeChild = relative(realProfileRoot, realRuntimeRoot)
+    if (
+      runtimeChild === '' || runtimeChild.startsWith('..')
+      || isAbsolute(runtimeChild)
+    ) throw new Error('Runtime Bundle must remain inside the Profile')
     for (const file of [manifest.bin.tianwen, manifest.dsh.bundle.patch]) {
       const realFile = realpathSync(resolve(runtimeRoot, file))
       const child = relative(realRuntimeRoot, realFile)

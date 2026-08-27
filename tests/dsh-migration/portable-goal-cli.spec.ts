@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -157,6 +157,25 @@ describe('portable goal CLI target', () => {
       expect(snapshotTree(join(target.dshHome, '..'))).toEqual(before)
     },
   )
+
+  it('rejects a Runtime Bundle junction that resolves outside the Profile', async () => {
+    const target = targetFixture()
+    const runtimeRoot = join(
+      target.profileRoot, 'node_modules', '@tianwen', 'runtime-bundle',
+    )
+    const outsideRoot = join(target.dshHome, 'outside-runtime')
+    renameSync(runtimeRoot, outsideRoot)
+    symlinkSync(outsideRoot, runtimeRoot, 'junction')
+    const before = snapshotTree(join(target.dshHome, '..'))
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+    await expect(main(['list', ...portableArgs(target)])).resolves.toBe(1)
+
+    expect(stderr).toHaveBeenCalledWith(
+      'selected Profile must contain exact @tianwen/runtime-bundle@0.1.0\n',
+    )
+    expect(snapshotTree(join(target.dshHome, '..'))).toEqual(before)
+  })
 
   it('builds one shell-free create invocation for the selected Profile', () => {
     const target = targetFixture()
