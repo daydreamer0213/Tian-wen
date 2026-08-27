@@ -389,6 +389,7 @@ export function classifyManagedInstallation(paths) {
       && matchesProfile(profile, DSH_VERSION, '0.1.0', renderProfilePatch(paths))) {
       return 'current'
     }
+    if (existsSync(paths.archivePath)) return 'incompatible'
     const archivePath = predecessorArchivePath(paths)
     if (!existsSync(archivePath) || !statSync(archivePath).isFile()) return 'incompatible'
     const original = matchesProfile(

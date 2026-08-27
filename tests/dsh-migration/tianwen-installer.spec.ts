@@ -576,6 +576,12 @@ describe('Tianwen installer contract', () => {
         return paths
       })(),
       (() => {
+        const paths = deriveInstallPaths(testRoot('mixed-runtime-archives'), 'win32')
+        writeManagedPredecessor(paths, 'locked-deploy')
+        writeFileSync(paths.archivePath, 'unproven current archive\n', 'utf8')
+        return paths
+      })(),
+      (() => {
         const paths = deriveInstallPaths(testRoot('missing-receipt'), 'win32')
         writeManagedPredecessor(paths, 'locked-deploy')
         rmSync(paths.receiptPath)
