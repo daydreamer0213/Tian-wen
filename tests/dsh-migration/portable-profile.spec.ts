@@ -42,6 +42,11 @@ function targetFixture(): TargetFixture {
     bin: { dsh: 'lib/bin.js' },
   })}\n`, 'utf8')
   writeFileSync(join(dshRoot, 'lib', 'bin.js'), '#!/usr/bin/env node\n', 'utf8')
+  writeFileSync(join(profileRoot, 'package.json'), `${JSON.stringify({
+    name: `@deepseek-ai/dsh-profile-${profile}`,
+    private: true,
+    dsh: { profile: { bundles: [] } },
+  })}\n`, 'utf8')
   return { dshHome, dshRoot, profile, profileRoot, stateRoot }
 }
 
@@ -150,6 +155,16 @@ describe('portable DSH Profile target', () => {
     expect(() => resolvePortableProfileTarget(fixture))
       .toThrow(/Profile.*exist/u)
     expect(existsSync(fixture.profileRoot)).toBe(false)
+    expect(existsSync(fixture.stateRoot)).toBe(false)
+  })
+
+  it('rejects an empty Profile directory before DSH can initialize it', () => {
+    const fixture = targetFixture()
+    rmSync(join(fixture.profileRoot, 'package.json'))
+
+    expect(() => resolvePortableProfileTarget(fixture))
+      .toThrow(/Profile.*package\.json/u)
+    expect(existsSync(join(fixture.profileRoot, 'package.json'))).toBe(false)
     expect(existsSync(fixture.stateRoot)).toBe(false)
   })
 })

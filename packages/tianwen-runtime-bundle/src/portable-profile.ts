@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync, statSync } from 'node:fs'
+import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
 const DSH_NAME = '@deepseek-ai/dsh'
@@ -96,6 +96,13 @@ export function resolvePortableProfileTarget(
     }
   } catch {
     throw new Error('Profile must already exist')
+  }
+  try {
+    if (!lstatSync(join(profileRoot, 'package.json')).isFile()) {
+      throw new Error('not a regular file')
+    }
+  } catch {
+    throw new Error('Profile package.json must already exist')
   }
   return {
     dshRoot,
