@@ -898,12 +898,58 @@ Expected: deterministic tests pass; both real E2Es are planned skips without opt
 & $node $pnpm run typecheck
 & $node $pnpm run check:dsh-install
 & $node $pnpm run check:no-private-dsh-imports
+
+# A bare full-suite invocation is invalid locally: probe/Python/Corepack
+# prerequisites below are deliberately not supplied by the normal shell.
+# Create one fresh strict root. It must not already exist and must not be a
+# reparse point; do not use or inspect any prior probe root.
+$probeRoot = 'D:\DevData\tianwen-desktop-distribution\task10-probe'
+if (Test-Path -LiteralPath $probeRoot) { throw "Probe root already exists: $probeRoot" }
+New-Item -ItemType Directory -Path $probeRoot -ErrorAction Stop | Out-Null
+$probeItem = Get-Item -LiteralPath $probeRoot -Force
+if (($probeItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+  throw "Probe root is a reparse point: $probeRoot"
+}
+
+$repoRoot = (Get-Location).Path
+$uv = 'D:\hermes\bin\uv.exe' # exact installed uv used by this local gate
+$env:UV_PROJECT_ENVIRONMENT = Join-Path $probeRoot 'venv-task-6'
+$env:UV_CACHE_DIR = 'D:\DevData\uv-cache'
+$env:UV_PYTHON_INSTALL_DIR = 'D:\DevData\uv-python'
+
+# First prepare from the existing D-drive cache. One and only one online
+# fallback is permitted only after the offline output proves that a locked
+# asset is absent from that cache; any other offline failure stops the gate.
+& $uv sync --frozen --offline --dev --python 3.12
+if ($LASTEXITCODE -ne 0) {
+  throw 'Stop: inspect the saved offline output. Run one online sync only when it proves a locked asset is absent from the D-drive cache.'
+}
+# If, and only if, the recorded offline failure is solely a missing locked
+# cache asset, replace the preceding throw with this single fallback and record
+# its network impact before continuing:
+# & $uv sync --frozen --dev --python 3.12
+# if ($LASTEXITCODE -ne 0) { throw 'Online locked sync failed' }
+
+$probePython = Join-Path $env:UV_PROJECT_ENVIRONMENT 'Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $probePython)) { throw "Probe Python missing: $probePython" }
+& $probePython -c "from pathlib import Path; import tianwen; expected=Path(r'$repoRoot').resolve(); actual=Path(tianwen.__file__).resolve(); assert expected in actual.parents, (actual, expected); print(actual)"
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Python did not import tianwen from this worktree' }
+
+$env:COREPACK_HOME = 'D:\DevData\corepack-home'
+$env:TIANWEN_DSH_PROBE_ROOT = $probeRoot
+$env:TIANWEN_DSH_PROBE_PYTHON = $probePython
+$env:TIANWEN_DSH_MIGRATION_PROFILE = '0'
+if ((Test-Path Env:TIANWEN_DESKTOP_DISTRIBUTION_E2E) -or (Test-Path Env:TIANWEN_DESKTOP_HOST_E2E)) {
+  throw 'Desktop real-E2E opt-in is set; refusing the full suite'
+}
 & $node $pnpm exec vitest run
 git diff --check
 git status --short
 ```
 
-Expected: all exit `0`; only intentional handoff correction may remain before the final commit.
+Expected: all exit `0`; the fresh probe Python imports `tianwen` from this
+worktree; both real Desktop E2Es remain unset and therefore planned skips; and
+only an intentional handoff correction may remain before the final commit.
 
 - [ ] **Step 3: Rebuild and inspect final artifacts**
 
