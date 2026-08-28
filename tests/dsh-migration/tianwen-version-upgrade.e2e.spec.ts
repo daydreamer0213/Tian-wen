@@ -179,10 +179,11 @@ function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, 'utf8')) as T
 }
 
-function installPaths(productRoot: string) {
+function installPaths(productRoot: string, dshVersion = currentDshVersion) {
   const profileRoot = join(productRoot, 'dsh-home', 'profiles', 'tianwen')
+  const runtimeVersion = dshVersion === predecessorDshVersion ? '0.0.0' : '0.1.0'
   return {
-    archive: join(productRoot, 'packs', 'tianwen-runtime-bundle-0.1.0.tgz'),
+    archive: join(productRoot, 'packs', `tianwen-runtime-bundle-${runtimeVersion}.tgz`),
     hostManifest: join(productRoot, 'dsh-host', 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
     profileRoot,
     receipt: join(productRoot, 'receipts', 'tianwen-install.json'),
@@ -190,7 +191,7 @@ function installPaths(productRoot: string) {
 }
 
 function assertInstalledVersion(productRoot: string, version: string): string {
-  const paths = installPaths(productRoot)
+  const paths = installPaths(productRoot, version)
   const host = readJson<{ version: string, bin: { dsh: string } }>(paths.hostManifest)
   const profile = readJson<{
     dependencies: Record<string, string>
@@ -460,6 +461,23 @@ const invalidInputs = [
 describe('Tianwen managed product upgrade acceptance boundary', () => {
   it('accepts the exact clean old authority when ignored dependencies are absent from tracked status', () => {
     expect(() => assertOldAuthorityState(`${oldAuthoritySha}\n`, '')).not.toThrow()
+  })
+
+  it('uses the Runtime archive that belongs to each managed product generation', () => {
+    const productRoot = contractProductRoot()
+    const predecessorPaths = installPaths(productRoot, predecessorDshVersion)
+    const currentPaths = installPaths(productRoot, currentDshVersion)
+
+    expect(predecessorPaths.archive).toBe(join(
+      productRoot,
+      'packs',
+      'tianwen-runtime-bundle-0.0.0.tgz',
+    ))
+    expect(currentPaths.archive).toBe(join(
+      productRoot,
+      'packs',
+      'tianwen-runtime-bundle-0.1.0.tgz',
+    ))
   })
 
   it('rejects tracked old-authority changes before the first installer', () => {
