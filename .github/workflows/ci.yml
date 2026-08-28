@@ -43,6 +43,7 @@ jobs:
       - run: pnpm exec vitest run tests/dsh-probe/controlled-skill-evaluation.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-probe/controlled-skill-shadow.spec.ts tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts tests/dsh-probe/controlled-skill-activation.spec.ts tests/dsh-probe/controlled-skill-activation-runtime.spec.ts tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts tests/dsh-migration/controlled-lifecycle-profile.spec.ts
         env:
           TIANWEN_DSH_PROBE_ROOT: ${{ runner.temp }}/tianwen-v0.1-eval-fixtures
+      - run: pnpm exec vitest run tests/dsh-migration/tianwen-desktop-host.spec.ts tests/dsh-migration/tianwen-desktop-bootstrap.spec.ts tests/dsh-migration/tianwen-desktop-artifact.spec.ts
       - run: pnpm demo:research-preview
       - run: pnpm demo:explicit-correction
       - run: pnpm demo:repeated-outcome
@@ -88,3 +89,48 @@ jobs:
             if ($mappedDrive) { & subst.exe D: /D }
           }
           exit $testExit
+
+  desktop-windows:
+    runs-on: windows-latest
+    env:
+      ELECTRON_CACHE: ${{ runner.temp }}\electron
+      ELECTRON_BUILDER_CACHE: ${{ runner.temp }}\electron-builder
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @tianwen/desktop-host build
+      - name: Run deterministic Desktop tests
+        shell: pwsh
+        run: |
+          $mappedDrive = $false
+          if (-not (Test-Path -LiteralPath 'D:\')) {
+            & subst.exe D: $env:RUNNER_TEMP
+            if ($LASTEXITCODE -ne 0) { throw 'temporary D: mapping failed' }
+            $mappedDrive = $true
+          }
+          $testExit = 0
+          try {
+            New-Item -ItemType Directory -Force -Path 'D:\DevData' | Out-Null
+            pnpm exec vitest run tests/dsh-migration/tianwen-desktop-host.spec.ts tests/dsh-migration/tianwen-desktop-bootstrap.spec.ts tests/dsh-migration/tianwen-desktop-artifact.spec.ts
+            $testExit = $LASTEXITCODE
+          } finally {
+            if ($mappedDrive) { & subst.exe D: /D }
+          }
+          exit $testExit
+      - run: pnpm --filter @tianwen/desktop-host pack:dir
+      - run: node scripts/audit-desktop-artifact.mjs dist/tianwen-desktop/win-unpacked
+      - run: pnpm --filter @tianwen/desktop-host pack:win
+      - name: Assert one Desktop installer
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -LiteralPath 'dist\tianwen-desktop' -Filter '*.exe' -File)
+          if ($installers.Count -ne 1) {
+            throw "expected exactly one Desktop installer, found $($installers.Count)"
+          }

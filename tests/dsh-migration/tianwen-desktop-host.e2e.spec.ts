@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { readFileSync, realpathSync } from 'node:fs'
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
@@ -51,12 +51,32 @@ function resolveElectronExecutable(): string {
     'tianwen-desktop-host',
     'package.json',
   ))
-  const manifestPath = realpathSync(
-    packageRequire.resolve('electron/package.json'),
-  )
-  const packageRoot = dirname(manifestPath)
-  const executablePath = readFileSync(join(packageRoot, 'path.txt'), 'utf8').trim()
-  return realpathSync(join(packageRoot, 'dist', executablePath))
+  const executable = packageRequire('electron') as unknown
+  if (typeof executable !== 'string' || !isAbsolute(executable)) {
+    throw new Error('Electron did not resolve to an absolute executable path')
+  }
+  return realpathSync(executable)
+}
+
+function resolveDesktopLaunch(
+  packagedExecutable: string | undefined,
+  resolveDevelopmentExecutable = resolveElectronExecutable,
+): {
+  readonly executable: string
+  readonly prefixArgs: readonly string[]
+} {
+  if (packagedExecutable !== undefined) {
+    if (!isAbsolute(packagedExecutable)) {
+      throw new Error('TIANWEN_DESKTOP_EXECUTABLE must be an absolute path')
+    }
+    return { executable: realpathSync(packagedExecutable), prefixArgs: [] }
+  }
+  return {
+    executable: resolveDevelopmentExecutable(),
+    prefixArgs: [
+      join(repoRoot, 'packages', 'tianwen-desktop-host', 'dist', 'main.js'),
+    ],
+  }
 }
 
 function childEnvironment(): NodeJS.ProcessEnv {
@@ -276,8 +296,9 @@ describe.skipIf(!enabled).sequential('Tianwen Desktop host on Windows', () => {
     const dshHome = requiredPath('TIANWEN_DESKTOP_HOST_DSH_HOME')
     buildDesktop()
 
-    const result = await runElectron(resolveElectronExecutable(), [
-      join(repoRoot, 'packages', 'tianwen-desktop-host', 'dist', 'main.js'),
+    const launch = resolveDesktopLaunch(process.env.TIANWEN_DESKTOP_EXECUTABLE)
+    const result = await runElectron(launch.executable, [
+      ...launch.prefixArgs,
       '--node', nodeExecutable,
       '--dsh-root', dshRoot,
       '--dsh-home', dshHome,
@@ -310,6 +331,33 @@ describe.skipIf(!enabled).sequential('Tianwen Desktop host on Windows', () => {
       )
     }
   }, 240_000)
+})
+
+describe('Desktop launcher selection', () => {
+  it('keeps packaged and development launch forms distinct', () => {
+    const fixtureRoot = `D:\\DevData\\tianwen-desktop-launch-tests\\${crypto.randomUUID()}`
+    const packagedExecutable = join(fixtureRoot, 'Tianwen Desktop.exe')
+    const developmentExecutable = join(fixtureRoot, 'electron.exe')
+    mkdirSync(fixtureRoot, { recursive: true })
+    writeFileSync(packagedExecutable, '')
+    writeFileSync(developmentExecutable, '')
+    try {
+      expect(resolveDesktopLaunch(packagedExecutable, () => {
+        throw new Error('development Electron must not resolve for packaged launch')
+      })).toEqual({
+        executable: realpathSync(packagedExecutable),
+        prefixArgs: [],
+      })
+      const development = resolveDesktopLaunch(
+        undefined,
+        () => realpathSync(developmentExecutable),
+      )
+      expect(development.executable).toBe(realpathSync(developmentExecutable))
+      expect(development.prefixArgs.at(-1)).toMatch(/dist[\\/]main\.js$/u)
+    } finally {
+      rmSync(fixtureRoot, { force: true, recursive: true })
+    }
+  })
 })
 
 describe('Desktop child cleanup fallback', () => {
