@@ -56,6 +56,11 @@ describe('Tianwen Desktop saved target bootstrap', () => {
     expect(loadSavedDesktopTarget(path)).toBeUndefined()
   })
 
+  it('rejects an unreadable saved settings path instead of treating it as missing', () => {
+    const path = `${join(fixture().dshHome, 'desktop-target.json')}\0`
+    expect(() => loadSavedDesktopTarget(path)).toThrow(/Desktop target settings/u)
+  })
+
   it.each([
     {},
     { schemaVersion: 'wrong', nodeExecutable: 'C:\\node.exe', dshRoot: 'C:\\dsh', dshHome: 'D:\\home' },

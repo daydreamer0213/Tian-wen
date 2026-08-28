@@ -26,7 +26,6 @@ function isSavedDesktopTarget(value: unknown): value is SavedDesktopTarget {
 }
 
 export function loadSavedDesktopTarget(filePath: string): DesktopTargetInput | undefined {
-  if (!existsSync(filePath)) return undefined
   try {
     const parsed: unknown = JSON.parse(readFileSync(filePath, 'utf8'))
     if (!isSavedDesktopTarget(parsed)) throw invalidSettings()
@@ -36,6 +35,7 @@ export function loadSavedDesktopTarget(filePath: string): DesktopTargetInput | u
       dshHome: parsed.dshHome,
     }
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     if (error instanceof Error && error.message === 'Desktop target settings are invalid') throw error
     throw invalidSettings()
   }
