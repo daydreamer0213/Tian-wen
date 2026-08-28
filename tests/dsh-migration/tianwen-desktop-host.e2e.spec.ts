@@ -10,11 +10,31 @@ const enabled = process.platform === 'win32'
   && process.env.TIANWEN_DESKTOP_HOST_E2E === '1'
 
 interface ElectronResult {
+  readonly electronPid: number
   readonly code: number | null
   readonly signal: NodeJS.Signals | null
   readonly stdout: string
   readonly stderr: string
 }
+
+interface StrictSpawnSyncOptions {
+  readonly encoding: 'utf8'
+  readonly shell: false
+  readonly windowsHide: true
+}
+
+interface StrictSpawnSyncResult {
+  readonly status: number | null
+  readonly stdout: string
+  readonly stderr: string
+  readonly error?: Error
+}
+
+type StrictSpawnSync = (
+  program: string,
+  args: readonly string[],
+  options: StrictSpawnSyncOptions,
+) => StrictSpawnSyncResult
 
 function requiredPath(name: string): string {
   const value = process.env[name]
@@ -92,6 +112,13 @@ function runElectron(
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     })
+    const electronPid = child.pid
+    if (electronPid === undefined) {
+      child.once('error', () => {})
+      child.kill()
+      rejectResult(new Error('Electron did not report its process ID'))
+      return
+    }
     let stdout = ''
     let stderr = ''
     child.stdout.setEncoding('utf8')
@@ -116,7 +143,7 @@ function runElectron(
     })
     child.once('exit', (code, signal) => {
       clearTimeout(timeout)
-      resolveResult({ code, signal, stdout, stderr })
+      resolveResult({ electronPid, code, signal, stdout, stderr })
     })
   })
 }
@@ -145,6 +172,87 @@ function terminateProcessTree(pid: number): void {
   ], { encoding: 'utf8', shell: false, windowsHide: true })
   if (result.status !== 0 && processExists(pid)) {
     throw new Error(`taskkill exited ${String(result.status)}: ${result.stderr}`)
+  }
+}
+
+function runSyncStrict(
+  program: string,
+  args: readonly string[],
+  options: StrictSpawnSyncOptions,
+): StrictSpawnSyncResult {
+  const result = spawnSync(program, [...args], options)
+  const output = {
+    status: result.status,
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+  }
+  return result.error === undefined ? output : { ...output, error: result.error }
+}
+
+function directNodeChildren(
+  electronPid: number,
+  dependencies: {
+    readonly systemRoot?: string
+    readonly runSync?: StrictSpawnSync
+  } = {},
+): number[] {
+  if (!Number.isSafeInteger(electronPid) || electronPid <= 0) {
+    throw new Error(`Invalid Electron PID: ${String(electronPid)}`)
+  }
+  const systemRoot = dependencies.systemRoot
+    ?? process.env.SystemRoot
+    ?? process.env.WINDIR
+    ?? 'C:\\Windows'
+  const powershell = join(
+    systemRoot,
+    'System32',
+    'WindowsPowerShell',
+    'v1.0',
+    'powershell.exe',
+  )
+  if (!isAbsolute(powershell)) throw new Error('Windows PowerShell path must be absolute')
+  const command = `Get-CimInstance Win32_Process -Filter "ParentProcessId = ${electronPid} AND Name = 'node.exe'" | Select-Object -ExpandProperty ProcessId | ConvertTo-Json -Compress`
+  const result = (dependencies.runSync ?? runSyncStrict)(powershell, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command,
+  ], { encoding: 'utf8', shell: false, windowsHide: true })
+  if (result.status !== 0 || result.error !== undefined || result.stderr.trim() !== '') {
+    throw new Error([
+      `Direct Node child query exited ${String(result.status)}`,
+      result.error?.message,
+      result.stderr,
+    ].filter(Boolean).join('\n'))
+  }
+  const output = result.stdout.trim()
+  if (output === '') return []
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(output)
+  } catch {
+    throw new Error('Direct Node child query returned invalid JSON')
+  }
+  const values = Array.isArray(decoded) ? decoded : [decoded]
+  if (values.some(pid => typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0)) {
+    throw new Error('Direct Node child query returned an invalid PID')
+  }
+  return [...new Set(values as number[])]
+}
+
+function cleanupDesktopChildren(
+  input: { readonly electronPid: number, readonly ownedDshPid?: number },
+  dependencies: {
+    readonly directNodeChildren?: (electronPid: number) => readonly number[]
+    readonly processExists?: (pid: number) => boolean
+    readonly terminateProcessTree?: (pid: number) => void
+  } = {},
+): void {
+  const exactPid = input.ownedDshPid
+  const candidates = exactPid !== undefined && Number.isSafeInteger(exactPid) && exactPid > 0
+    ? [exactPid]
+    : [...(dependencies.directNodeChildren ?? directNodeChildren)(input.electronPid)]
+  const exists = dependencies.processExists ?? processExists
+  const terminate = dependencies.terminateProcessTree ?? terminateProcessTree
+  for (const pid of new Set(candidates)) {
+    if (pid !== input.electronPid && exists(pid)) terminate(pid)
   }
 }
 
@@ -195,9 +303,62 @@ describe.skipIf(!enabled).sequential('Tianwen Desktop host on Windows', () => {
       expect(pidAliveAfterExit).toBe(false)
       expect(closedAttempts).toBe(3)
     } finally {
-      if (pid !== undefined && Number.isSafeInteger(pid) && processExists(pid)) {
-        terminateProcessTree(pid)
-      }
+      cleanupDesktopChildren(
+        pid === undefined
+          ? { electronPid: result.electronPid }
+          : { electronPid: result.electronPid, ownedDshPid: pid },
+      )
     }
   }, 240_000)
+})
+
+describe('Desktop child cleanup fallback', () => {
+  it('prefers the emitted DSH PID without querying other Node processes', () => {
+    const terminated: number[] = []
+    cleanupDesktopChildren({ electronPid: 101, ownedDshPid: 202 }, {
+      directNodeChildren: () => { throw new Error('unexpected CIM query') },
+      processExists: () => true,
+      terminateProcessTree: pid => { terminated.push(pid) },
+    })
+    expect(terminated).toEqual([202])
+  })
+
+  it('cleans only the Electron process direct Node children when the PID line is absent', () => {
+    const queried: number[] = []
+    const terminated: number[] = []
+    cleanupDesktopChildren({ electronPid: 101 }, {
+      directNodeChildren: pid => {
+        queried.push(pid)
+        return [303, 404]
+      },
+      processExists: pid => pid === 404,
+      terminateProcessTree: pid => { terminated.push(pid) },
+    })
+    expect(queried).toEqual([101])
+    expect(terminated).toEqual([404])
+  })
+
+  it('strictly parses direct Node child PIDs from the absolute CIM query', () => {
+    let invocation: {
+      readonly program: string
+      readonly args: readonly string[]
+      readonly options: StrictSpawnSyncOptions
+    } | undefined
+    const pids = directNodeChildren(101, {
+      systemRoot: 'C:\\Windows',
+      runSync: (program, args, options) => {
+        invocation = { program, args, options }
+        return { status: 0, stdout: '[303,404]\r\n', stderr: '' }
+      },
+    })
+    expect(pids).toEqual([303, 404])
+    expect(invocation).toEqual({
+      program: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+      args: [
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+        'Get-CimInstance Win32_Process -Filter "ParentProcessId = 101 AND Name = \'node.exe\'" | Select-Object -ExpandProperty ProcessId | ConvertTo-Json -Compress',
+      ],
+      options: { encoding: 'utf8', shell: false, windowsHide: true },
+    })
+  })
 })

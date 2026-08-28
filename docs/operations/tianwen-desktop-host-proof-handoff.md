@@ -34,8 +34,9 @@ The root cause was reproduced outside the E2E: Node 22 on this Windows host retu
 `spawnSync pnpm.cmd EINVAL` for a direct `.cmd` launch with `shell:false`. The harness now invokes the
 workspace TypeScript compiler through the current Node executable instead. That corrected E2E file
 also records PID/port state before assertions and terminates a surviving owned PID in `finally`. It
-has SHA-256 `D9B5D80738B7F905151BF264BDE5ACD2C0F2F7D7886875AC1072FAC8DAF65F13` and passes repository
-typecheck, but the real opt-in test was intentionally not rerun.
+had SHA-256 `D9B5D80738B7F905151BF264BDE5ACD2C0F2F7D7886875AC1072FAC8DAF65F13` at commit
+`864851fe0da3078fb7f390dd101e3860783e2b40` and passed repository typecheck, but the real opt-in test
+was intentionally not rerun.
 
 At `2026-08-28T05:41:59.2606617Z`, post-attempt inspection ran this read-only query:
 
@@ -51,6 +52,24 @@ Get-CimInstance Win32_Process |
 
 Raw result: zero matching rows. This is an operation record rather than a separately persisted process
 snapshot. No ready URL was produced, so there is no port-closure claim.
+
+## Future harness cleanup boundary
+
+Final branch review found one remaining future-run cleanup gap: if Electron had launched DSH but the
+owned PID line was absent or malformed, the harness had no precise fallback candidate. The harness
+now retains the spawned Electron main-process PID. A usable emitted DSH PID remains the preferred and
+only candidate. When that line is unavailable after a normal Electron return, the harness invokes
+the absolute Windows PowerShell executable with `shell:false` and queries only `node.exe` processes
+whose `ParentProcessId` equals that specific Electron PID. It strictly accepts positive integer JSON
+PIDs, checks each candidate still exists, and terminates each surviving process tree. It never scans
+or kills global Node processes and does not infer ownership from `dshHome`, which is not present in
+the DSH command line.
+
+Three pure dependency-injected tests cover exact-PID preference, direct-child fallback selection,
+and the absolute CIM command/strict PID parsing. Default execution runs those tests and keeps the one
+real E2E as a planned skip, without starting Electron/DSH. The hardened E2E source has SHA-256
+`7A0F771520D72031B7978F1800BB0B357E8AB9E596704045758CE87F15630793`. This hardening did not rerun or
+change the frozen `incomplete` result.
 
 ## Product and runtime evidence
 
