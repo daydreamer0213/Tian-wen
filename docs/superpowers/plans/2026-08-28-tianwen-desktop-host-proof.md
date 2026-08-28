@@ -181,6 +181,7 @@ git commit -m "feat: add desktop Web host contract"
 - Modify: `packages/tianwen-desktop-host/package.json`
 - Create: `packages/tianwen-desktop-host/src/main.ts`
 - Modify: `package.json`
+- Modify: `pnpm-workspace.yaml`
 - Modify: `pnpm-lock.yaml`
 - Modify: `tests/dsh-migration/tianwen-desktop-host.spec.ts`
 
@@ -218,6 +219,9 @@ $env:PNPM_CONFIG_STORE_DIR = 'D:\DevData\pnpm-store'
 $env:NPM_CONFIG_CACHE = 'D:\DevData\npm-cache'
 pnpm --filter @tianwen/desktop-host add --save-dev --save-exact electron@43.4.0
 ```
+
+Add `electron: true` to the workspace `allowBuilds` map so pnpm permits Electron's own binary
+download script; do not enable any DSH native dependency build.
 
 Add package script `start: electron dist/main.js` and root script
 `desktop: pnpm --filter @tianwen/desktop-host start`.
@@ -263,7 +267,7 @@ the desktop manifest or its production dependency closure.
 - [ ] **Step 6: Commit Task 2**
 
 ```powershell
-git add package.json pnpm-lock.yaml packages/tianwen-desktop-host tests/dsh-migration/tianwen-desktop-host.spec.ts
+git add package.json pnpm-workspace.yaml pnpm-lock.yaml packages/tianwen-desktop-host tests/dsh-migration/tianwen-desktop-host.spec.ts
 git commit -m "feat: open Tianwen Web in Electron"
 ```
 
