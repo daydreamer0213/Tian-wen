@@ -1,4 +1,4 @@
-import { spawn as nodeSpawn } from 'node:child_process'
+import { execFileSync, spawn as nodeSpawn } from 'node:child_process'
 import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { SpawnOptions } from 'node:child_process'
@@ -70,8 +70,8 @@ function readManifest(path: string, label: string): Record<string, unknown> {
 }
 
 function hasRuntimeDeclaration(value: unknown): boolean {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) &&
-    Object.prototype.hasOwnProperty.call(value, runtimePackage)
+  if (Array.isArray(value)) return value.includes(runtimePackage)
+  return value !== null && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, runtimePackage)
 }
 
 export function parseDesktopArgs(argv: readonly string[]): DesktopTargetInput {
@@ -98,6 +98,14 @@ export function parseDesktopArgs(argv: readonly string[]): DesktopTargetInput {
 
 export function resolveDesktopTarget(input: DesktopTargetInput): DesktopTarget {
   const nodeExecutable = pathToExistingFile(input.nodeExecutable, 'node executable')
+  try {
+    if (!/^v22\.\d+\.\d+\s*$/u.test(execFileSync(nodeExecutable, ['--version'], {
+      encoding: 'utf8', shell: false, windowsHide: true,
+    }))) fail('node executable must report v22.x')
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Invalid Tianwen Desktop target:')) throw error
+    fail('node executable must report v22.x')
+  }
   const dshRoot = pathToExistingDirectory(input.dshRoot, 'DSH root')
   const dshHome = pathToExistingDirectory(input.dshHome, 'DSH home')
   const dshManifest = readManifest(join(dshRoot, 'package.json'), 'DSH manifest')
@@ -106,7 +114,7 @@ export function resolveDesktopTarget(input: DesktopTargetInput): DesktopTarget {
     fail('DSH manifest is not the required exact package')
   }
   const dshBinEntry = (bin as Record<string, unknown>).dsh
-  if (typeof dshBinEntry !== 'string') fail('DSH manifest is not the required exact package')
+  if (dshBinEntry !== 'lib/bin.js') fail('DSH manifest is not the required exact package')
   const dshBin = realpathSync(resolve(dshRoot, dshBinEntry))
   if (!isWithin(dshRoot, dshBin) || !statSync(dshBin).isFile()) fail('DSH bin.dsh escapes the package')
 
@@ -125,7 +133,7 @@ export function resolveDesktopTarget(input: DesktopTargetInput): DesktopTarget {
   if (!hasRuntimeDeclaration(profile.dependencies) || (profile.dependencies as Record<string, unknown>)[runtimePackage] !== runtimeVersion) {
     fail('Web Profile must declare the exact Runtime dependency')
   }
-  for (const section of ['devDependencies', 'optionalDependencies', 'peerDependencies'] as const) {
+  for (const section of ['devDependencies', 'optionalDependencies', 'peerDependencies', 'bundledDependencies', 'bundleDependencies'] as const) {
     if (hasRuntimeDeclaration(profile[section])) fail(`Web Profile cannot declare Runtime in ${section}`)
   }
   const runtimeRoot = realpathSync(join(profileRoot, 'node_modules', '@tianwen', 'runtime-bundle'))
@@ -182,6 +190,27 @@ export function startDesktopWebHost(target: DesktopTarget, dependencies: Desktop
     exited = true
     resolveExited!({ code, signal })
   })
+  const stopOwnedProcess = (): Promise<void> => {
+    if (stopPromise !== undefined) return stopPromise
+    stopPromise = (async () => {
+      if (exited) return
+      child.kill()
+      if (!exited) {
+        await new Promise<void>(resolveWait => {
+          let timer: ReturnType<typeof setTimer> | undefined
+          const finish = (): void => {
+            if (timer !== undefined) clearTimer(timer)
+            resolveWait()
+          }
+          void exitedPromise.then(finish)
+          timer = setTimer(finish, gracefulStopTimeoutMs)
+          if (exited) clearTimer(timer)
+        })
+      }
+      if (!exited) await (dependencies.stopTree ?? defaultStopTree)(child.pid!)
+    })()
+    return stopPromise
+  }
 
   return new Promise((resolveHost, rejectHost) => {
     let ready = false
@@ -193,8 +222,7 @@ export function startDesktopWebHost(target: DesktopTarget, dependencies: Desktop
       if (settled) return
       settled = true
       clearTimer(timeout)
-      child.kill()
-      rejectHost(error)
+      void stopOwnedProcess().then(() => rejectHost(error), () => rejectHost(error))
     }
     const onOutput = (chunk: Buffer | string): void => {
       if (ready) return
@@ -214,19 +242,7 @@ export function startDesktopWebHost(target: DesktopTarget, dependencies: Desktop
           pid: child.pid!,
           url,
           exited: exitedPromise,
-          stop: (): Promise<void> => {
-            if (stopPromise !== undefined) return stopPromise
-            stopPromise = (async () => {
-              if (exited) return
-              child.kill()
-              await Promise.race([
-                exitedPromise.then(() => undefined),
-                new Promise<void>(resolveWait => setTimer(resolveWait, gracefulStopTimeoutMs)),
-              ])
-              if (!exited) await (dependencies.stopTree ?? defaultStopTree)(child.pid!)
-            })()
-            return stopPromise
-          },
+          stop: stopOwnedProcess,
         })
       } catch (error) {
         reject(error instanceof Error ? error : new Error('DSH Web readiness failed'))

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { copyFileSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -32,12 +32,11 @@ function fixture(): { nodeExecutable: string, dshRoot: string, dshHome: string }
   fixtures.push(root)
   const dshRoot = join(root, 'dsh')
   const dshHome = join(root, 'home')
-  mkdirSync(join(dshRoot, 'dist'), { recursive: true })
+  mkdirSync(join(dshRoot, 'lib'), { recursive: true })
   mkdirSync(join(dshHome, 'profiles', 'web'), { recursive: true })
-  copyFileSync(process.execPath, join(root, 'node.exe'))
-  writeFileSync(join(dshRoot, 'dist', 'cli.js'), 'export {}\n', 'utf8')
+  writeFileSync(join(dshRoot, 'lib', 'bin.js'), 'export {}\n', 'utf8')
   writeJson(join(dshRoot, 'package.json'), {
-    name: '@deepseek-ai/dsh', version: dshVersion, bin: { dsh: 'dist/cli.js' },
+    name: '@deepseek-ai/dsh', version: dshVersion, bin: { dsh: 'lib/bin.js' },
   })
   writeJson(join(dshHome, 'profiles', 'web', 'package.json'), {
     name: '@tianwen/web-profile',
@@ -47,16 +46,16 @@ function fixture(): { nodeExecutable: string, dshRoot: string, dshHome: string }
   writeJson(join(dshHome, 'profiles', 'web', 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
     name: '@tianwen/runtime-bundle', version: runtimeVersion,
   })
-  return { nodeExecutable: join(root, 'node.exe'), dshRoot, dshHome }
+  return { nodeExecutable: process.execPath, dshRoot, dshHome }
 }
 
-function child(): FakeChild {
+function child(exitsOnKill = true): FakeChild {
   const result = new EventEmitter() as FakeChild
   result.pid = 4321
   result.stdout = new PassThrough()
   result.stderr = new PassThrough()
   result.kill = () => {
-    queueMicrotask(() => result.emit('exit', 0, null))
+    if (exitsOnKill) queueMicrotask(() => result.emit('exit', 0, null))
     return true
   }
   return result
@@ -71,7 +70,7 @@ describe('Tianwen Desktop Web host contract', () => {
     const input = fixture()
     expect(resolveDesktopTarget(input)).toMatchObject({
       nodeExecutable: realpathSync(input.nodeExecutable),
-      dshBin: realpathSync(join(input.dshRoot, 'dist/cli.js')),
+      dshBin: realpathSync(join(input.dshRoot, 'lib/bin.js')),
       dshHome: realpathSync(input.dshHome),
       profileRoot: realpathSync(join(input.dshHome, 'profiles/web')),
     })
@@ -79,8 +78,14 @@ describe('Tianwen Desktop Web host contract', () => {
 
   it.each([
     ['relative paths', (input: ReturnType<typeof fixture>) => ({ ...input, dshRoot: 'relative' })],
+    ['non-Node executable', (input: ReturnType<typeof fixture>) => ({ ...input, nodeExecutable: process.env.ComSpec! })],
     ['wrong DSH version', (input: ReturnType<typeof fixture>) => {
-      writeJson(join(input.dshRoot, 'package.json'), { name: '@deepseek-ai/dsh', version: '0.1.1', bin: { dsh: 'dist/cli.js' } })
+      writeJson(join(input.dshRoot, 'package.json'), { name: '@deepseek-ai/dsh', version: '0.1.1', bin: { dsh: 'lib/bin.js' } })
+      return input
+    }],
+    ['an alternate DSH entry point', (input: ReturnType<typeof fixture>) => {
+      writeFileSync(join(input.dshRoot, 'lib', 'alternate.js'), 'export {}\n', 'utf8')
+      writeJson(join(input.dshRoot, 'package.json'), { name: '@deepseek-ai/dsh', version: dshVersion, bin: { dsh: 'lib/alternate.js' } })
       return input
     }],
     ['escaping bin.dsh', (input: ReturnType<typeof fixture>) => {
@@ -104,11 +109,25 @@ describe('Tianwen Desktop Web host contract', () => {
       return input
     }],
     ['Runtime directory outside Profile', (input: ReturnType<typeof fixture>) => {
-      const outside = join(input.dshHome, 'runtime-package.json')
-      writeJson(outside, { name: '@tianwen/runtime-bundle', version: runtimeVersion })
+      const outside = join(input.dshHome, 'runtime-outside-profile')
+      writeJson(join(outside, 'package.json'), { name: '@tianwen/runtime-bundle', version: runtimeVersion })
       rmSync(join(input.dshHome, 'profiles', 'web', 'node_modules'), { recursive: true })
       mkdirSync(join(input.dshHome, 'profiles', 'web', 'node_modules', '@tianwen'), { recursive: true })
-      writeFileSync(join(input.dshHome, 'profiles', 'web', 'node_modules', '@tianwen', 'runtime-bundle'), outside, 'utf8')
+      symlinkSync(outside, join(input.dshHome, 'profiles', 'web', 'node_modules', '@tianwen', 'runtime-bundle'), 'junction')
+      return input
+    }],
+    ['Runtime in bundledDependencies', (input: ReturnType<typeof fixture>) => {
+      writeJson(join(input.dshHome, 'profiles', 'web', 'package.json'), {
+        dsh: { profile: { bundles: [runtimePackage] } }, dependencies: { [runtimePackage]: runtimeVersion },
+        bundledDependencies: [runtimePackage],
+      })
+      return input
+    }],
+    ['Runtime in bundleDependencies', (input: ReturnType<typeof fixture>) => {
+      writeJson(join(input.dshHome, 'profiles', 'web', 'package.json'), {
+        dsh: { profile: { bundles: [runtimePackage] } }, dependencies: { [runtimePackage]: runtimeVersion },
+        bundleDependencies: [runtimePackage],
+      })
       return input
     }],
   ])('rejects %s', (_label, change) => {
@@ -180,6 +199,45 @@ describe('Tianwen Desktop Web host contract', () => {
     await expect(pending).rejects.toThrow(/120/u)
   })
 
+  it.each([
+    ['timeout', (fake: FakeChild, fire: (delay: number) => void) => fire(120_000)],
+    ['overflow', (fake: FakeChild) => fake.stderr.write(Buffer.alloc(65_537))],
+    ['invalid ready URL', (fake: FakeChild) => fake.stdout.write('https://example.com/\n')],
+  ])('cleans up an owned child before rejecting startup %s', async (_label, trigger) => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child(false)
+    let nextTimer = 0
+    const timers = new Map<number, { delay: number, handler: () => void }>()
+    const cleared: number[] = []
+    let fallbackCalls = 0
+    const pending = startDesktopWebHost(target, {
+      spawn: (() => fake) as never,
+      stopTree: async () => { fallbackCalls += 1 },
+      setTimeout: ((handler: () => void, delay: number) => {
+        const id = nextTimer += 1
+        timers.set(id, { delay, handler })
+        return id
+      }) as never,
+      clearTimeout: ((id: number) => { cleared.push(id) }) as never,
+    })
+    const fire = (delay: number): void => {
+      const timer = [...timers.values()].find(candidate => candidate.delay === delay)
+      if (timer === undefined) throw new Error(`missing ${delay}ms timer`)
+      timer.handler()
+    }
+    trigger(fake, fire)
+    let rejected = false
+    void pending.catch(() => { rejected = true })
+    await Promise.resolve()
+    expect(rejected).toBe(false)
+    expect(fallbackCalls).toBe(0)
+    fire(5_000)
+    await expect(pending).rejects.toThrow()
+    expect(fallbackCalls).toBe(1)
+    const gracefulTimer = [...timers.entries()].find(([, timer]) => timer.delay === 5_000)?.[0]
+    expect(cleared).toContain(gracefulTimer!)
+  })
+
   it('rejects more than 64 KiB before readiness', async () => {
     const target = resolveDesktopTarget(fixture())
     const fake = child()
@@ -205,5 +263,56 @@ describe('Tianwen Desktop Web host contract', () => {
     }) as never })
     await Promise.all([host.stop(), host.stop()])
     expect(kills).toBe(1)
+  })
+
+  it('clears the graceful-stop timer when the child exits first', async () => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child()
+    let nextTimer = 0
+    const timers = new Map<number, { delay: number, handler: () => void }>()
+    const cleared: number[] = []
+    const host = await startDesktopWebHost(target, {
+      spawn: (() => {
+        queueMicrotask(() => fake.stdout.write('http://127.0.0.1:4314/\n'))
+        return fake
+      }) as never,
+      setTimeout: ((handler: () => void, delay: number) => {
+        const id = nextTimer += 1
+        timers.set(id, { delay, handler })
+        return id
+      }) as never,
+      clearTimeout: ((id: number) => { cleared.push(id) }) as never,
+    })
+    await host.stop()
+    const gracefulTimer = [...timers.entries()].find(([, timer]) => timer.delay === 5_000)?.[0]
+    expect(gracefulTimer).toBeDefined()
+    expect(cleared).toContain(gracefulTimer!)
+  })
+
+  it('uses the fallback once when normal stop outlives its grace period', async () => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child(false)
+    let nextTimer = 0
+    const timers = new Map<number, { delay: number, handler: () => void }>()
+    let fallbackCalls = 0
+    const host = await startDesktopWebHost(target, {
+      spawn: (() => {
+        queueMicrotask(() => fake.stdout.write('http://127.0.0.1:4315/\n'))
+        return fake
+      }) as never,
+      stopTree: async () => { fallbackCalls += 1 },
+      setTimeout: ((handler: () => void, delay: number) => {
+        const id = nextTimer += 1
+        timers.set(id, { delay, handler })
+        return id
+      }) as never,
+      clearTimeout: (() => undefined) as never,
+    })
+    const stopped = host.stop()
+    const gracefulTimer = [...timers.values()].find(timer => timer.delay === 5_000)
+    if (gracefulTimer === undefined) throw new Error('missing graceful stop timer')
+    gracefulTimer.handler()
+    await stopped
+    expect(fallbackCalls).toBe(1)
   })
 })
