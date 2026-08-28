@@ -1,17 +1,34 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
+import { join } from 'node:path'
+import {
+  DESKTOP_TARGET_FILE_NAME,
+  createDesktopBootstrapInteractions,
+  resolveDesktopBootstrapTarget,
+} from './bootstrap.js'
 import {
   DESKTOP_WINDOW_OPTIONS,
   createDesktopShutdownCoordinator,
   desktopNavigationAllowed,
-  parseDesktopArgs,
+  resolveDesktopBaseTarget,
   resolveDesktopTarget,
   startDesktopWebHost,
 } from './host.js'
 
 async function start(): Promise<void> {
-  const input = parseDesktopArgs(process.argv.slice(2))
-  const target = resolveDesktopTarget(input)
   await app.whenReady()
+  const base = await resolveDesktopBootstrapTarget(
+    process.argv.slice(2),
+    join(app.getPath('userData'), DESKTOP_TARGET_FILE_NAME),
+    {
+      ...createDesktopBootstrapInteractions(dialog),
+      validateTarget: resolveDesktopBaseTarget,
+    },
+  )
+  if (base === undefined) {
+    app.exit(0)
+    return
+  }
+  const target = resolveDesktopTarget(base)
   const host = await startDesktopWebHost(target)
   const shutdown = createDesktopShutdownCoordinator({
     stop: () => host.stop(),

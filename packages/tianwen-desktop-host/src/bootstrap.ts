@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
+import { parseDesktopArgs, resolveDesktopBaseTarget } from './host.js'
 import type { DesktopBaseTarget, DesktopTargetInput } from './host.js'
 
 export const DESKTOP_TARGET_FILE_NAME = 'desktop-target.json'
@@ -118,4 +119,132 @@ export function discoverDesktopTargetInputs(
     }
   }
   return results
+}
+
+export interface DesktopBootstrapInteractions {
+  selectTarget(suggested?: Partial<DesktopTargetInput>): Promise<DesktopTargetInput | undefined>
+  confirmSavedTargetReplacement(reason: string): Promise<boolean>
+  reportSelectedTargetError(reason: string): Promise<void>
+}
+
+export interface DesktopBootstrapDependencies extends DesktopBootstrapInteractions {
+  readonly validateTarget?: (input: DesktopTargetInput) => DesktopBaseTarget
+  readonly loadSavedTarget?: (filePath: string) => DesktopTargetInput | undefined
+  readonly saveTarget?: (filePath: string, target: DesktopBaseTarget) => void
+  readonly discoverTargetInputs?: () => readonly DesktopTargetInput[]
+}
+
+function errorReason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+export async function resolveDesktopBootstrapTarget(
+  argv: readonly string[],
+  settingsPath: string,
+  dependencies: DesktopBootstrapDependencies,
+): Promise<DesktopBaseTarget | undefined> {
+  const validateTarget = dependencies.validateTarget ?? resolveDesktopBaseTarget
+  const loadSavedTarget = dependencies.loadSavedTarget ?? loadSavedDesktopTarget
+  const saveTarget = dependencies.saveTarget ?? saveDesktopTarget
+  const discoverTargetInputs = dependencies.discoverTargetInputs ?? discoverDesktopTargetInputs
+
+  if (argv.length > 0) return validateTarget(parseDesktopArgs(argv))
+
+  const saved = loadSavedTarget(settingsPath)
+  if (saved !== undefined) {
+    try {
+      return validateTarget(saved)
+    } catch (error) {
+      if (!await dependencies.confirmSavedTargetReplacement(errorReason(error))) return undefined
+      return resolveSelectedTarget(saved, settingsPath, validateTarget, saveTarget, dependencies)
+    }
+  }
+
+  for (const candidate of discoverTargetInputs()) {
+    try {
+      const target = validateTarget(candidate)
+      saveTarget(settingsPath, target)
+      return target
+    } catch {
+      // Automatic candidates are speculative; move on to the next one.
+    }
+  }
+  return resolveSelectedTarget(undefined, settingsPath, validateTarget, saveTarget, dependencies)
+}
+
+async function resolveSelectedTarget(
+  initialSuggestion: Partial<DesktopTargetInput> | undefined,
+  settingsPath: string,
+  validateTarget: (input: DesktopTargetInput) => DesktopBaseTarget,
+  saveTarget: (filePath: string, target: DesktopBaseTarget) => void,
+  interactions: DesktopBootstrapInteractions,
+): Promise<DesktopBaseTarget | undefined> {
+  let suggested = initialSuggestion
+  for (;;) {
+    const selected = await interactions.selectTarget(suggested)
+    if (selected === undefined) return undefined
+    try {
+      const target = validateTarget(selected)
+      saveTarget(settingsPath, target)
+      return target
+    } catch (error) {
+      await interactions.reportSelectedTargetError(errorReason(error))
+      suggested = selected
+    }
+  }
+}
+
+export interface DesktopDialog {
+  showOpenDialog(options: Electron.OpenDialogOptions): Promise<Electron.OpenDialogReturnValue>
+  showMessageBox(options: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue>
+}
+
+export function createDesktopBootstrapInteractions(dialog: DesktopDialog): DesktopBootstrapInteractions {
+  return {
+    async selectTarget(suggested) {
+      const node = await dialog.showOpenDialog({
+        title: 'Select Node executable',
+        ...(suggested?.nodeExecutable === undefined ? {} : { defaultPath: suggested.nodeExecutable }),
+        properties: ['openFile'],
+        filters: [{ name: 'Node executable', extensions: ['exe'] }],
+      })
+      if (node.canceled) return undefined
+      const dshRoot = await dialog.showOpenDialog({
+        title: 'Select DSH root',
+        ...(suggested?.dshRoot === undefined ? {} : { defaultPath: suggested.dshRoot }),
+        properties: ['openDirectory'],
+      })
+      if (dshRoot.canceled) return undefined
+      const dshHome = await dialog.showOpenDialog({
+        title: 'Select DSH home',
+        ...(suggested?.dshHome === undefined ? {} : { defaultPath: suggested.dshHome }),
+        properties: ['openDirectory'],
+      })
+      if (dshHome.canceled) return undefined
+      return {
+        nodeExecutable: node.filePaths[0]!,
+        dshRoot: dshRoot.filePaths[0]!,
+        dshHome: dshHome.filePaths[0]!,
+      }
+    },
+    async confirmSavedTargetReplacement(reason) {
+      const result = await dialog.showMessageBox({
+        type: 'warning',
+        message: 'Saved Tianwen Desktop target is invalid',
+        detail: reason,
+        buttons: ['Choose replacement', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      return result.response === 0
+    },
+    async reportSelectedTargetError(reason) {
+      await dialog.showMessageBox({
+        type: 'error',
+        message: 'Selected Tianwen Desktop target is invalid',
+        detail: reason,
+        buttons: ['OK'],
+      })
+    },
+  }
 }
