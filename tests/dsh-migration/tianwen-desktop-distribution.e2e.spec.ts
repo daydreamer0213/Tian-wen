@@ -764,7 +764,7 @@ class UiAutomationController {
   ) {
     assertCredentialFree(environment)
     this.child = spawn(powershell, [
-      '-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-File', scriptPath,
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
     ], {
       cwd: dirname(scriptPath),
       env: environment,
