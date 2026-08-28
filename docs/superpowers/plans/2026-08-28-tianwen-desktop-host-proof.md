@@ -65,13 +65,14 @@ Build temporary exact manifests under a D-drive test fixture and assert:
 ```ts
 expect(resolveDesktopTarget({ nodeExecutable, dshRoot, dshHome })).toMatchObject({
   nodeExecutable: realpathSync(nodeExecutable),
-  dshBin: realpathSync(join(dshRoot, 'dist/cli.js')),
+  dshBin: realpathSync(join(dshRoot, 'lib/bin.js')),
   dshHome: realpathSync(dshHome),
   profileRoot: realpathSync(join(dshHome, 'profiles/web')),
 })
 ```
 
-Add one table that rejects: relative paths, wrong DSH version, escaping `bin.dsh`, missing `web`
+Add one table that rejects: relative paths, a Node executable that does not report `v22.x`, wrong
+DSH version, any `bin.dsh` other than the exact rc.2 `lib/bin.js`, escaping `bin.dsh`, missing `web`
 Profile, missing/duplicate Runtime bundle declaration, wrong Runtime version, and a Runtime directory
 outside the Profile.
 
@@ -106,8 +107,10 @@ export function resolveDesktopTarget(input: DesktopTargetInput): DesktopTarget
 ```
 
 `parseDesktopArgs` accepts exactly one value for each of `--node`, `--dsh-root`, and `--dsh-home`,
-with no positionals or aliases. `resolveDesktopTarget` uses `realpathSync`/`statSync`, exact manifests,
-and `relative` containment checks. It reads the fixed `profiles/web/package.json` and its local
+with no positionals or aliases. `resolveDesktopTarget` uses `execFileSync(nodeExecutable,
+['--version'])`, `realpathSync`/`statSync`, exact manifests, and `relative` containment checks. It
+requires the executable to report `v22.x`, requires the exact rc.2 `bin.dsh` value `lib/bin.js`, and
+reads the fixed `profiles/web/package.json` and its local
 `node_modules/@tianwen/runtime-bundle/package.json`; it does not resolve through the source worktree.
 The Profile must declare the Runtime exactly once in `dsh.profile.bundles` and exactly once in
 `dependencies`; declarations in other dependency sections are rejected.
