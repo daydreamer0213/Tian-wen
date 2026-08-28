@@ -2,7 +2,7 @@
 
 Date: 2026-08-28
 
-Status: product direction approved; written specification awaiting final review
+Status: approved for implementation
 
 ## 1. Goal
 
@@ -49,7 +49,7 @@ On first launch, the bootstrap resolves the target in this order:
 3. a Node `22.x` executable found through `where.exe node`, DSH package roots returned by the user's available `npm root -g` or `pnpm root -g`, and `DSH_HOME` or an existing `%USERPROFILE%\.dsh`;
 4. Electron native file/directory dialogs for any unresolved path.
 
-Every candidate passes the existing exact target validator before it can be saved or launched. Failed automatic candidates are skipped; a failed user-selected candidate receives a concrete error and returns to selection. The bootstrap does not silently switch to another DSH after a saved target becomes invalid.
+Every candidate passes the exact Node/DSH/home portion of the existing target validator before it can be saved. The existing full target validator then remains the final authority before launch. Failed automatic candidates are skipped; a failed user-selected candidate receives a concrete error and returns to selection. The bootstrap does not silently switch to another DSH after a saved target becomes invalid.
 
 The saved file is `desktop-target.json` under Electron `userData`. It contains only the three canonical absolute paths and a schema version; it contains no credential, model setting, Session content or Profile data. This small settings file may live under the Windows user profile. DSH homes, Profiles, dependencies, stores and other large data remain in the user's selected location.
 
@@ -62,11 +62,11 @@ B2 adds the exact Runtime tarball as an allowlisted application resource. It nev
 After target discovery:
 
 - if `profiles/web` already contains exact Runtime `0.1.0`, preparation is a no-op;
-- if the exact `web` Profile exists without Tianwen, the app asks for one explicit confirmation and invokes the selected DSH's native `plugin --profile web --allow-build=koffi add <bundled-tarball>` command;
-- if `profiles/web` does not exist, the same DSH command creates the standard `web` template and adds the tarball;
+- if the exact `web` Profile exists without Tianwen, automatic preparation stays disabled and the app displays the exact selected-DSH command for the user to run;
+- if `profiles/web` does not exist, the app asks for one explicit confirmation, then the selected DSH's native `plugin --profile web --allow-build=koffi add <bundled-tarball>` command creates the standard `web` template and adds the tarball;
 - if the Profile contains another Tianwen Runtime version or an incompatible declaration, the app stops with an upgrade/incompatibility message. It does not guess a migration.
 
-Before B2 is shipped, disposable-Profile tests must prove that an induced package/store failure does not alter an existing Profile's manifest, workspace policy, patch or lock bytes and does not change its installed Runtime declaration. If exact DSH cannot preserve that boundary, automatic preparation of existing Profiles stays disabled: B1 remains usable and the error presents the exact native DSH command for the user to run. This stage does not build a generic Profile backup, transaction or repair framework.
+A disposable-Profile test against exact DSH `0.1.1-rc.2` proved that an induced package/store failure preserves the manifest and patch but rewrites `pnpm-workspace.yaml` with the requested native-build policy. Therefore the required all-bytes-unchanged boundary is not available for an existing Profile, and automatic preparation of existing Profiles is disabled. B1 remains usable and the error presents the exact native DSH command for the user to run. This stage does not build a generic Profile backup, transaction or repair framework.
 
 For a Profile created by the B2 attempt, a failure is reported as an incomplete DSH Profile with its exact path. The Desktop does not recursively delete it automatically because native dependencies and Windows long paths make blind cleanup unsafe.
 
@@ -123,8 +123,8 @@ No Provider call, live Tianwen task, telemetry request or update check is part o
 
 - discovery order, saved-target schema and invalid-target replacement;
 - Node/DSH/home candidate validation and native-dialog cancellation;
-- exact B2 command, confirmation requirement, no-op and incompatible-version stops;
-- induced preparation failure with before/after Profile byte comparison;
+- exact B2 command, confirmation requirement for a missing Profile, no-op and incompatible-version stops;
+- induced existing-Profile preparation failure with before/after byte comparison that records the DSH workspace-policy mutation and keeps that path disabled;
 - package file allowlist, Runtime archive digest and forbidden-closure scan;
 - installer/uninstaller boundaries and settings behavior.
 
