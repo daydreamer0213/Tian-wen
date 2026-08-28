@@ -57,9 +57,11 @@ interface DistributionInputs {
 
 interface ProcessResult {
   readonly code: number | null
+  readonly endedAt: string
   readonly error?: Error
   readonly pid: number
   readonly signal: NodeJS.Signals | null
+  readonly startedAt: string
   readonly stderr: string
   readonly stdout: string
 }
@@ -110,6 +112,12 @@ interface TreeSnapshot {
   readonly entries: number
 }
 
+interface ProcessIdentity {
+  readonly creationTimeUtc: string
+  readonly executablePath: string
+  readonly pid: number
+}
+
 function fail(message: string): never {
   throw new Error(message)
 }
@@ -142,19 +150,49 @@ function requireProofRoot(): string {
   if (child === '' || child.startsWith('..') || win32.isAbsolute(child)) {
     fail(`proof root must be a strict child of ${devDataRoot}`)
   }
-  const root = requiredEnvironmentPath(
-    'TIANWEN_DESKTOP_DISTRIBUTION_PROOF_ROOT',
-    'directory',
+  let suppliedStats: ReturnType<typeof lstatSync>
+  try {
+    suppliedStats = lstatSync(normalized)
+  } catch {
+    fail('TIANWEN_DESKTOP_DISTRIBUTION_PROOF_ROOT must already exist')
+  }
+  if (!suppliedStats.isDirectory()) fail('proof root must be an existing directory')
+  if (suppliedStats.isSymbolicLink()) fail('supplied proof root must not be a reparse point')
+  if (readdirSync(normalized).length !== 0) fail('proof root must be empty and is never reused')
+
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR
+  if (systemRoot === undefined || !win32.isAbsolute(systemRoot)) {
+    fail('SystemRoot must be an absolute Windows path')
+  }
+  const system32 = realpathSync(join(systemRoot, 'System32'))
+  const powershell = realpathSync(join(
+    system32,
+    'WindowsPowerShell',
+    'v1.0',
+    'powershell.exe',
+  ))
+  const reparseEnvironment: NodeJS.ProcessEnv = {
+    ComSpec: join(system32, 'cmd.exe'),
+    PATH: system32,
+    SystemRoot: dirname(system32),
+    TEMP: normalized,
+    TMP: normalized,
+    WINDIR: dirname(system32),
+  }
+  assertCredentialFree(reparseEnvironment)
+  validateProofRootReparseState(
+    powershell,
+    normalized,
+    reparseEnvironment,
   )
+
+  const canonical = realpathSync(normalized)
   const realDevDataRoot = realpathSync(devDataRoot)
-  const realChild = win32.relative(realDevDataRoot, root)
+  const realChild = win32.relative(realDevDataRoot, canonical)
   if (realChild === '' || realChild.startsWith('..') || win32.isAbsolute(realChild)) {
     fail(`real proof root must remain a strict child of ${realDevDataRoot}`)
   }
-  const stats = lstatSync(root)
-  if (stats.isSymbolicLink()) fail('proof root must not be a reparse point')
-  if (readdirSync(root).length !== 0) fail('proof root must be empty and is never reused')
-  return root
+  return canonical
 }
 
 function queryChildEnvironment(
@@ -314,6 +352,7 @@ function runProcessSync(
   timeout = processTimeoutMs,
 ): ProcessResult {
   assertCredentialFree(environment)
+  const startedAt = new Date().toISOString()
   const result = spawnSync(executable, [...args], {
     cwd: environment.TEMP,
     encoding: 'utf8',
@@ -322,11 +361,14 @@ function runProcessSync(
     timeout,
     windowsHide: true,
   })
+  const endedAt = new Date().toISOString()
   const output: ProcessResult = {
     code: result.status,
+    endedAt,
     ...(result.error === undefined ? {} : { error: result.error }),
     pid: result.pid ?? -1,
     signal: result.signal,
+    startedAt,
     stderr: result.stderr ?? '',
     stdout: result.stdout ?? '',
   }
@@ -635,6 +677,9 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
     $baselineIds = [Collections.Generic.HashSet[string]]::new()
     foreach ($record in $baseline) { [void]$baselineIds.Add([string]$record.runtimeId) }
     $result = $null
+    $confirmed = $false
+    $confirmation = $null
+    $confirmationRuntimeId = $null
     while ([DateTime]::UtcNow -lt $deadline -and $null -eq $result) {
       $ids = Process-Tree ([int]$command.rootPid)
       $windows = @(Top-Windows | Where-Object {
@@ -649,15 +694,23 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
         $text = Dialog-Text $window
         if ($text -like '*Tianwen Desktop failed to start*') {
           if ($ok.Count -eq 1) { Invoke-Button $ok[0] }
-          $result = @{ kind = 'error-dialog'; diagnostic = $text; window = Window-Record $window }
+          $result = @{ kind = $(if ($confirmed) { 'post-confirmation-error-dialog' } else { 'error-dialog' }); diagnostic = $text; window = Window-Record $window }
           break
         }
-        if ($create.Count -gt 0 -or $cancel.Count -gt 0) {
+        $windowRuntimeId = [string]::Join('.', $window.GetRuntimeId())
+        if ($confirmed -and ($create.Count -gt 0 -or $cancel.Count -gt 0) -and $windowRuntimeId -ne $confirmationRuntimeId) {
+          if ($cancel.Count -eq 1) { Invoke-Button $cancel[0] }
+          $result = @{ kind = 'repeated-confirmation'; createCount = $create.Count; cancelCount = $cancel.Count; diagnostic = $text; window = Window-Record $window }
+          break
+        }
+        if (-not $confirmed -and ($create.Count -gt 0 -or $cancel.Count -gt 0)) {
           if ($create.Count -ne 1 -or $cancel.Count -ne 1) {
             $result = @{ kind = 'invalid-confirmation'; createCount = $create.Count; cancelCount = $cancel.Count; diagnostic = $text; window = Window-Record $window }
           } elseif ($command.action -eq 'confirm') {
             Invoke-Button $create[0]
-            $result = @{ kind = 'confirmed'; createCount = 1; cancelCount = 1; window = Window-Record $window }
+            $confirmed = $true
+            $confirmation = Window-Record $window
+            $confirmationRuntimeId = $windowRuntimeId
           } else {
             Invoke-Button $cancel[0]
             $result = @{ kind = 'unexpected-confirmation'; createCount = 1; cancelCount = 1; diagnostic = $text; window = Window-Record $window }
@@ -666,7 +719,11 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
         }
       }
       if ($null -eq $result -and -not (Get-Process -Id ([int]$command.rootPid) -ErrorAction SilentlyContinue)) {
-        $result = @{ kind = $(if ($command.action -eq 'confirm') { 'process-exited-before-confirmation' } else { 'clean' }) }
+        if ($command.action -eq 'confirm' -and $confirmed) {
+          $result = @{ kind = 'confirmed'; createCount = 1; cancelCount = 1; window = $confirmation }
+        } else {
+          $result = @{ kind = $(if ($command.action -eq 'confirm') { 'process-exited-before-confirmation' } else { 'clean' }) }
+        }
       }
       if ($null -eq $result) { Start-Sleep -Milliseconds 100 }
     }
@@ -770,13 +827,13 @@ class UiAutomationController {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         rejectRequest(new Error(`UI Automation request timed out\n${this.stderr}`))
-      }, processTimeoutMs + 10_000)
+      }, applicationTimeoutMs + 10_000)
       this.pending.set(id, { reject: rejectRequest, resolve: resolveRequest, timer })
       this.child.stdin.write(`${JSON.stringify({
         action,
         id,
         rootPid,
-        timeoutMs: processTimeoutMs,
+        timeoutMs: applicationTimeoutMs,
       })}\n`)
     })
   }
@@ -806,24 +863,46 @@ class UiAutomationController {
   }
 }
 
-function processExists(tasklist: string, pid: number, environment: NodeJS.ProcessEnv): boolean {
-  const result = spawnSync(tasklist, ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
-    encoding: 'utf8',
-    env: environment,
-    shell: false,
-    windowsHide: true,
-  })
-  if (result.status !== 0) fail(`tasklist failed: ${result.stderr ?? ''}`)
-  return new RegExp(`(?:^|,)"${pid}"(?:,|$)`, 'mu').test(result.stdout ?? '')
+function captureProcessIdentity(
+  powershell: string,
+  pid: number,
+  environment: NodeJS.ProcessEnv,
+): ProcessIdentity | undefined {
+  const identity = runPowerShellJson<ProcessIdentity | null>(
+    powershell,
+    String.raw`$process = Get-CimInstance Win32_Process -Filter "ProcessId = $($args[0])" -ErrorAction Stop; if ($null -eq $process) { 'null' } else { @{ pid = [int]$process.ProcessId; executablePath = [string]$process.ExecutablePath; creationTimeUtc = $process.CreationDate.ToUniversalTime().ToString('o') } | ConvertTo-Json -Compress }`,
+    [String(pid)],
+    environment,
+  )
+  if (identity === null) return undefined
+  if (identity.pid !== pid || identity.executablePath === '' || identity.creationTimeUtc === '') {
+    fail(`process identity was incomplete for PID ${pid}`)
+  }
+  return identity
+}
+
+function sameProcessIdentity(
+  expected: ProcessIdentity,
+  current: ProcessIdentity | undefined,
+): boolean {
+  return current !== undefined
+    && current.pid === expected.pid
+    && win32.normalize(current.executablePath).toLowerCase()
+      === win32.normalize(expected.executablePath).toLowerCase()
+    && current.creationTimeUtc === expected.creationTimeUtc
 }
 
 function terminateObservedTree(
-  taskkill: string,
-  pid: number,
+  inputs: Pick<DistributionInputs, 'powershell' | 'system32'>,
+  identity: ProcessIdentity | undefined,
   environment: NodeJS.ProcessEnv,
 ): void {
-  if (!processExists(join(dirname(taskkill), 'tasklist.exe'), pid, environment)) return
-  spawnSync(taskkill, ['/PID', String(pid), '/T', '/F'], {
+  if (identity === undefined) return
+  const current = captureProcessIdentity(inputs.powershell, identity.pid, environment)
+  if (!sameProcessIdentity(identity, current)) return
+  spawnSync(join(inputs.system32, 'taskkill.exe'), [
+    '/PID', String(identity.pid), '/T', '/F',
+  ], {
     encoding: 'utf8', env: environment, shell: false, windowsHide: true,
   })
 }
@@ -848,9 +927,10 @@ async function runDesktop(
   environment: NodeJS.ProcessEnv,
   uiController: UiAutomationController,
   uiAction: 'confirm' | 'forbid-confirmation',
-  inputs: Pick<DistributionInputs, 'system32'>,
+  inputs: Pick<DistributionInputs, 'nodeExecutable' | 'powershell' | 'system32'>,
 ): Promise<DesktopResult> {
   assertCredentialFree(environment)
+  const startedAt = new Date().toISOString()
   const child = spawn(executable, [], {
     cwd: environment.TEMP,
     env: environment,
@@ -860,11 +940,32 @@ async function runDesktop(
   })
   const pid = child.pid
   if (pid === undefined) fail(`${label} did not expose its process ID`)
+  const rootIdentity = captureProcessIdentity(inputs.powershell, pid, environment)
+  if (rootIdentity === undefined) {
+    child.kill()
+    fail(`${label} process identity could not be captured while live`)
+  }
+  if (win32.normalize(rootIdentity.executablePath).toLowerCase()
+      !== win32.normalize(executable).toLowerCase()) {
+    terminateObservedTree(inputs, rootIdentity, environment)
+    fail(`${label} process identity did not match its executable`)
+  }
   let stdout = ''
   let stderr = ''
+  let ownedDshIdentity: ProcessIdentity | undefined
   child.stdout.setEncoding('utf8')
   child.stderr.setEncoding('utf8')
-  child.stdout.on('data', chunk => { stdout += String(chunk) })
+  child.stdout.on('data', chunk => {
+    stdout += String(chunk)
+    const emittedPid = /Tianwen Desktop owns DSH PID (\d+)/u.exec(stdout)?.[1]
+    if (ownedDshIdentity === undefined && emittedPid !== undefined) {
+      ownedDshIdentity = captureProcessIdentity(
+        inputs.powershell,
+        Number(emittedPid),
+        environment,
+      )
+    }
+  })
   child.stderr.on('data', chunk => { stderr += String(chunk) })
   let timedOut = false
   const exited = new Promise<ProcessResult>((resolveExit, rejectExit) => {
@@ -876,13 +977,20 @@ async function runDesktop(
       clearTimeout(timer)
       rejectExit(error)
     })
-    child.once('exit', (code, signal) => {
+    child.once('close', (code, signal) => {
       clearTimeout(timer)
-      resolveExit({ code, pid, signal, stderr, stdout })
+      resolveExit({
+        code,
+        endedAt: new Date().toISOString(),
+        pid,
+        signal,
+        startedAt,
+        stderr,
+        stdout,
+      })
     })
   })
-  const taskkill = join(inputs.system32, 'taskkill.exe')
-  const tasklist = join(inputs.system32, 'tasklist.exe')
+  let cleanupRequired = true
   try {
     const interaction = uiController.request(uiAction, pid).then(value => {
       const accepted = uiAction === 'confirm'
@@ -904,11 +1012,6 @@ async function runDesktop(
       || ui.kind === 'invalid-confirmation' || ui.kind === 'timeout') {
       fail(`${label} UI result: ${JSON.stringify(ui)}`)
     }
-    if (uiAction === 'confirm') {
-      expect(ui).toMatchObject({ kind: 'confirmed', createCount: 1, cancelCount: 1 })
-    } else {
-      expect(ui, ui.diagnostic).toMatchObject({ kind: 'clean' })
-    }
     const pidMatches = [...result.stdout.matchAll(/Tianwen Desktop owns DSH PID (\d+)/gu)]
     const urlMatches = [...result.stdout.matchAll(/Tianwen Desktop ready at (http:\/\/127\.0\.0\.1:\d+\/?)\s*/gu)]
     expect(pidMatches, `${label} must emit exactly one owned DSH PID`).toHaveLength(1)
@@ -918,8 +1021,9 @@ async function runDesktop(
     if (!Number.isSafeInteger(ownedDshPid) || ownedDshPid <= 0 || readyUrl === undefined) {
       fail(`${label} emitted invalid lifecycle evidence`)
     }
-    expect(processExists(tasklist, ownedDshPid, environment)).toBe(false)
+    expect(captureProcessIdentity(inputs.powershell, ownedDshPid, environment)).toBeUndefined()
     await waitForEndpointClosed(readyUrl)
+    cleanupRequired = false
     return {
       ...result,
       ownedDshPid,
@@ -935,10 +1039,9 @@ async function runDesktop(
       `stderr:\n${stderr}`,
     ].join('\n'))
   } finally {
-    const emittedPid = /Tianwen Desktop owns DSH PID (\d+)/u.exec(stdout)?.[1]
-    if (emittedPid !== undefined) terminateObservedTree(taskkill, Number(emittedPid), environment)
-    if (timedOut || processExists(tasklist, pid, environment)) {
-      terminateObservedTree(taskkill, pid, environment)
+    if (cleanupRequired || timedOut) {
+      terminateObservedTree(inputs, ownedDshIdentity, environment)
+      terminateObservedTree(inputs, rootIdentity, environment)
     }
   }
 }
@@ -948,9 +1051,10 @@ async function runAsyncProcess(
   executable: string,
   args: readonly string[],
   environment: NodeJS.ProcessEnv,
-  inputs: Pick<DistributionInputs, 'system32'>,
+  inputs: Pick<DistributionInputs, 'powershell' | 'system32'>,
 ): Promise<ProcessResult> {
   assertCredentialFree(environment)
+  const startedAt = new Date().toISOString()
   const child = spawn(executable, [...args], {
     cwd: environment.TEMP,
     env: environment,
@@ -960,13 +1064,22 @@ async function runAsyncProcess(
   })
   const pid = child.pid
   if (pid === undefined) fail(`${label} did not expose its process ID`)
+  const identity = captureProcessIdentity(inputs.powershell, pid, environment)
+  if (identity === undefined) {
+    child.kill()
+    fail(`${label} process identity could not be captured while live`)
+  }
+  if (win32.normalize(identity.executablePath).toLowerCase()
+      !== win32.normalize(executable).toLowerCase()) {
+    terminateObservedTree(inputs, identity, environment)
+    fail(`${label} process identity did not match its executable`)
+  }
   let stdout = ''
   let stderr = ''
   child.stdout.setEncoding('utf8')
   child.stderr.setEncoding('utf8')
   child.stdout.on('data', chunk => { stdout += String(chunk) })
   child.stderr.on('data', chunk => { stderr += String(chunk) })
-  const taskkill = join(inputs.system32, 'taskkill.exe')
   let completed = false
   try {
     const result = await new Promise<ProcessResult>((resolveExit, rejectExit) => {
@@ -975,10 +1088,18 @@ async function runAsyncProcess(
         clearTimeout(timer)
         rejectExit(error)
       })
-      child.once('exit', (code, signal) => {
+      child.once('close', (code, signal) => {
         clearTimeout(timer)
         completed = true
-        resolveExit({ code, pid, signal, stderr, stdout })
+        resolveExit({
+          code,
+          endedAt: new Date().toISOString(),
+          pid,
+          signal,
+          startedAt,
+          stderr,
+          stdout,
+        })
       })
     })
     process.stdout.write(`\n--- ${label} stdout ---\n${stdout}`)
@@ -988,7 +1109,7 @@ async function runAsyncProcess(
     }
     return result
   } finally {
-    if (!completed) terminateObservedTree(taskkill, pid, environment)
+    if (!completed) terminateObservedTree(inputs, identity, environment)
   }
 }
 
@@ -1082,6 +1203,29 @@ async function waitForRemoval(path: string): Promise<void> {
   fail(`uninstaller did not remove ${path}`)
 }
 
+describe('Desktop distribution process cleanup identity', () => {
+  it('accepts only the same executable and creation time for a reused PID', () => {
+    const expected: ProcessIdentity = {
+      pid: 4040,
+      executablePath: 'D:\\Proof\\Tianwen Desktop.exe',
+      creationTimeUtc: '2026-08-28T12:00:00.0000000Z',
+    }
+    expect(sameProcessIdentity(expected, {
+      ...expected,
+      executablePath: 'd:\\proof\\TIANWEN DESKTOP.EXE',
+    })).toBe(true)
+    expect(sameProcessIdentity(expected, {
+      ...expected,
+      creationTimeUtc: '2026-08-28T12:00:01.0000000Z',
+    })).toBe(false)
+    expect(sameProcessIdentity(expected, {
+      ...expected,
+      executablePath: 'D:\\Other\\Tianwen Desktop.exe',
+    })).toBe(false)
+    expect(sameProcessIdentity(expected, undefined)).toBe(false)
+  })
+})
+
 describe('Tianwen Desktop distribution on an existing DSH', () => {
   it.runIf(enabled)(
     'proves missing-Profile creation, saved reuse, shortcut launch, and uninstall exactly once',
@@ -1089,7 +1233,6 @@ describe('Tianwen Desktop distribution on an existing DSH', () => {
       const startedAt = new Date().toISOString()
       const inputs = validateInputs()
       const queryEnvironment = queryChildEnvironment(inputs)
-      validateProofRootReparseState(inputs.powershell, inputs.proofRoot, queryEnvironment)
       verifyExactTools(inputs, queryEnvironment)
       const shellBefore = captureShellState(inputs.powershell, queryEnvironment)
       expect(shellBefore.shortcuts).toEqual([])
@@ -1253,7 +1396,11 @@ describe('Tianwen Desktop distribution on an existing DSH', () => {
           uiBaselineWindows: baseline.length,
           providerCredentialsPassed: [],
           launches: [first, second, installed].map(result => ({
+            startedAt: result.startedAt,
+            endedAt: result.endedAt,
             executablePid: result.pid,
+            exitCode: result.code,
+            signal: result.signal,
             ownedDshPid: result.ownedDshPid,
             readyUrl: result.readyUrl,
             stdoutSha256: result.stdoutSha256,
@@ -1281,8 +1428,22 @@ describe('Tianwen Desktop distribution on an existing DSH', () => {
             applicationLaunches: 3,
             installers: 1,
             uninstallers: 1,
-            installerStdoutSha256: hashBytes(installerResult.stdout),
-            uninstallerStdoutSha256: hashBytes(uninstallerResult.stdout),
+            installer: {
+              startedAt: installerResult.startedAt,
+              endedAt: installerResult.endedAt,
+              exitCode: installerResult.code,
+              signal: installerResult.signal,
+              stdoutSha256: hashBytes(installerResult.stdout),
+              stderrSha256: hashBytes(installerResult.stderr),
+            },
+            uninstaller: {
+              startedAt: uninstallerResult.startedAt,
+              endedAt: uninstallerResult.endedAt,
+              exitCode: uninstallerResult.code,
+              signal: uninstallerResult.signal,
+              stdoutSha256: hashBytes(uninstallerResult.stdout),
+              stderrSha256: hashBytes(uninstallerResult.stderr),
+            },
           },
           preserved: {
             desktopTargetSha256: hashBytes(settingsAfterFirst),
