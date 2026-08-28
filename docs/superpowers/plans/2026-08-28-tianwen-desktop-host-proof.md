@@ -358,3 +358,40 @@ Separate:
 Run focused tests, desktop build, repository typecheck, complete default Vitest suite, Python gate,
 installer-windows gate, and `git diff --check`. Commit the E2E and handoff only after the actual result
 and independent review are recorded.
+
+### Task 4: Separate recovery proof after the frozen incomplete attempt
+
+**Files:**
+- Create: `docs/operations/tianwen-desktop-host-recovery-proof-handoff.md`
+
+**Boundary:**
+
+- Preserve Task 3's `INCOMPLETE` result and `D:\DevData\tw-desktop-proof-20260828-01` unchanged.
+- Use the reviewed harness at commit `2523a7402333a1f67035e64000c634f80b8be1a1` and a new root
+  `D:\DevData\tw-desktop-proof-20260828-02`.
+- Make no Provider request, trigger no GitHub workflow, and change no product code during the proof.
+
+- [ ] **Step 1: Preflight without Electron**
+
+Confirm the branch is clean, the new root does not exist, the E2E hash is
+`7A0F771520D72031B7978F1800BB0B357E8AB9E596704045758CE87F15630793`, and the exact identities are
+Node 22, `@deepseek-ai/dsh@0.1.1-rc.2` with `lib/bin.js`, Electron 43.4.0, and Runtime 0.1.0.
+
+- [ ] **Step 2: Prepare the fresh Profile**
+
+Build and pack Runtime 0.1.0 into the new root, then run the DSH-owned offline Profile add exactly
+once. Verify one Runtime dependency, one Runtime bundle, the exact installed manifest, and physical
+containment inside the fresh Profile. Stop before Electron if any identity check fails.
+
+- [ ] **Step 3: Execute the recovery proof exactly once**
+
+With all caches/temp data on `D:\DevData` and Provider credentials removed, run only the opt-in
+Desktop E2E once. Do not repeat a failure. A pass requires Electron exit `0`, an owned DSH PID and
+loopback ready URL, the PID absent after exit, and three failed HTTP connection attempts to the
+closed port.
+
+- [ ] **Step 4: Independent review and handoff**
+
+Review the exact log, identities, Profile manifest, PID/port closure, and surviving process query.
+Write a separate recovery handoff with task result, runtime evidence, learning facts, external facts,
+and integration recommendation. Commit the handoff only after review; do not rewrite Task 3.
