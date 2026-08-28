@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   DESKTOP_WINDOW_OPTIONS,
+  createDesktopShutdownCoordinator,
   desktopNavigationAllowed,
   parseDesktopArgs,
   resolveDesktopTarget,
@@ -76,7 +77,36 @@ describe('Tianwen Desktop Web host contract', () => {
       sandbox: true,
     })
     expect(desktopNavigationAllowed('http://127.0.0.1:3210/path', readyUrl)).toBe(true)
+    expect(desktopNavigationAllowed('http://127.0.0.1:3211/', readyUrl)).toBe(false)
     expect(desktopNavigationAllowed('https://example.com/', readyUrl)).toBe(false)
+  })
+
+  it('coordinates concurrent shutdown calls and exits after the owned host stops', async () => {
+    let stops = 0
+    const exits: number[] = []
+    const reports: string[] = []
+    const shutdown = createDesktopShutdownCoordinator({
+      stop: async () => { stops += 1 },
+      exit: code => { exits.push(code) },
+      report: message => { reports.push(message) },
+    })
+    await Promise.all([shutdown(), shutdown()])
+    expect(stops).toBe(1)
+    expect(exits).toEqual([0])
+    expect(reports).toEqual([])
+  })
+
+  it('reports a shutdown failure and exits nonzero', async () => {
+    const exits: number[] = []
+    const reports: string[] = []
+    const shutdown = createDesktopShutdownCoordinator({
+      stop: async () => { throw new Error('stop failed') },
+      exit: code => { exits.push(code) },
+      report: message => { reports.push(message) },
+    })
+    await shutdown()
+    expect(exits).toEqual([1])
+    expect(reports).toEqual(['Tianwen Desktop failed to stop: stop failed'])
   })
 
   it('resolves only the fixed installed DSH and Web Profile layout', () => {

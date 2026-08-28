@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import {
   DESKTOP_WINDOW_OPTIONS,
+  createDesktopShutdownCoordinator,
   desktopNavigationAllowed,
   parseDesktopArgs,
   resolveDesktopTarget,
@@ -12,13 +13,14 @@ async function start(): Promise<void> {
   const target = resolveDesktopTarget(input)
   await app.whenReady()
   const host = await startDesktopWebHost(target)
-  let stopping = false
-  const stop = async (event?: Electron.Event): Promise<void> => {
+  const shutdown = createDesktopShutdownCoordinator({
+    stop: () => host.stop(),
+    exit: code => app.exit(code),
+    report: message => process.stderr.write(`${message}\n`),
+  })
+  const stop = (event?: Electron.Event): Promise<void> => {
     event?.preventDefault()
-    if (stopping) return
-    stopping = true
-    await host.stop()
-    app.exit(0)
+    return shutdown()
   }
   try {
     const window = new BrowserWindow(DESKTOP_WINDOW_OPTIONS)

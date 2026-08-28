@@ -27,6 +27,27 @@ export function desktopNavigationAllowed(url: string, readyUrl: URL): boolean {
   }
 }
 
+export interface DesktopShutdownDependencies {
+  stop(): Promise<void>
+  exit(code: number): void
+  report(message: string): void
+}
+
+export function createDesktopShutdownCoordinator(dependencies: DesktopShutdownDependencies): () => Promise<void> {
+  let shutdown: Promise<void> | undefined
+  return (): Promise<void> => {
+    if (shutdown !== undefined) return shutdown
+    shutdown = dependencies.stop().then(
+      () => { dependencies.exit(0) },
+      error => {
+        dependencies.report(`Tianwen Desktop failed to stop: ${error instanceof Error ? error.message : String(error)}`)
+        dependencies.exit(1)
+      },
+    )
+    return shutdown
+  }
+}
+
 export interface DesktopTargetInput {
   readonly nodeExecutable: string
   readonly dshRoot: string
