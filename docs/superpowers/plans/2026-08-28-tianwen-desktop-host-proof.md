@@ -395,3 +395,36 @@ closed port.
 Review the exact log, identities, Profile manifest, PID/port closure, and surviving process query.
 Write a separate recovery handoff with task result, runtime evidence, learning facts, external facts,
 and integration recommendation. Commit the handoff only after review; do not rewrite Task 3.
+
+### Task 5: Product-first Desktop proof after preparation-only failures
+
+**Files:**
+- Create: `docs/operations/tianwen-desktop-host-product-proof-handoff.md`
+
+**Corrected boundary:**
+
+- Preserve `-01` and `-02` as separate incomplete records.
+- Use `D:\DevData\tw-desktop-proof-20260828-03` and the already validated shared
+  `D:\DevData\pnpm-store`.
+- Profile preparation is setup, not product evidence. Environmental setup errors may be corrected
+  before Electron starts; they must not be relabeled as Desktop attempts.
+- After the Profile is valid, the opt-in Electron E2E is the sole frozen product attempt and runs
+  exactly once. Its result is never retried or selected.
+
+- [ ] **Step 1: Prepare and validate the environment**
+
+Build and pack Runtime 0.1.0, install it into a fresh exact rc.2 Web Profile with the shared D-drive
+store, and validate declarations, installed identity, and containment. Verify the reviewed E2E hash
+and exact Node/DSH/Electron identities immediately before the product attempt.
+
+- [ ] **Step 2: Run the product attempt exactly once**
+
+Remove Provider credentials, keep all caches/temp on `D:\DevData`, and run only the opt-in Desktop
+E2E. Require Electron exit `0`, owned DSH PID and ready URL, PID disappearance, and three refused
+connections after shutdown.
+
+- [ ] **Step 3: Independently review and record**
+
+Independently verify the log and hashes, surviving processes, Profile identity, PID, URL, and port
+closure. Write a separate handoff and decide only then whether the branch may enter integration
+evaluation. Do not modify the two incomplete handoffs.
