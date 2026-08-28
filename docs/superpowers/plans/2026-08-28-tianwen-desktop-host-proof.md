@@ -296,8 +296,10 @@ directory or process.
 
 - [ ] **Step 2: Write the real Electron assertion**
 
-Resolve the workspace Electron executable without importing Electron into Vitest, build the desktop
-package, and spawn Electron with `TIANWEN_DESKTOP_E2E_EXIT_AFTER_LOAD=1`. Assert:
+Resolve Electron from `packages/tianwen-desktop-host/package.json` without importing Electron into
+Vitest, build the desktop package, and spawn the real Electron executable with
+`TIANWEN_DESKTOP_E2E_EXIT_AFTER_LOAD=1`. Remove inherited `ELECTRON_RUN_AS_NODE`,
+`ELECTRON_OVERRIDE_DIST_PATH`, and `NODE_OPTIONS` from the child environment. Assert:
 
 ```ts
 expect(result.code).toBe(0)
@@ -314,7 +316,7 @@ Run the E2E file without opt-in. Expected: one planned skip and no filesystem ch
 
 - [ ] **Step 4: Prepare one fresh D-drive Web Profile outside the test**
 
-Use a fresh root under `D:\DevData\tianwen-desktop-host-proof-20260828`. Reuse exact rc.2 DSH and
+Use a short fresh root under `D:\DevData\tw-desktop-proof-20260828-01`. Reuse exact rc.2 DSH and
 the existing `tianwen-runtime-bundle-0.1.0.tgz`. Run the DSH-owned command once:
 
 ```powershell
@@ -328,7 +330,7 @@ of the Electron app and makes no Provider request.
 - [ ] **Step 5: Run the real opt-in test exactly once**
 
 Set all large caches to `D:\DevData`, remove Provider credentials from the child environment, set
-the four required E2E variables, and run only
+the three required E2E variables, and run only
 `tests/dsh-migration/tianwen-desktop-host.e2e.spec.ts`. Capture exact commit, host PID, UTC times,
 command output, exit code, and log hash. Do not rerun a failed real proof to select a better result.
 
