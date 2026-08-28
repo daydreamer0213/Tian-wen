@@ -393,10 +393,14 @@ function runPowerShellJson<T>(
   args: readonly string[],
   environment: NodeJS.ProcessEnv,
 ): T {
+  const encodedCommand = Buffer.from(
+    `& {\n${script}\n}${args.length === 0 ? '' : ` ${args.map((argument) => `'${argument.replaceAll("'", "''")}'`).join(' ')}`}`,
+    'utf16le',
+  ).toString('base64')
   const result = runProcessSync(
     'Windows PowerShell query',
     powershell,
-    ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script, ...args],
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodedCommand],
     environment,
   )
   return parseJson<T>(result.stdout.trim(), 'Windows PowerShell query')
