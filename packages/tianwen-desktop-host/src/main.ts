@@ -10,9 +10,9 @@ import {
   createDesktopShutdownCoordinator,
   desktopNavigationAllowed,
   resolveDesktopBaseTarget,
-  resolveDesktopTarget,
   startDesktopWebHost,
 } from './host.js'
+import { resolvePreparedDesktopTarget } from './profile-prepare.js'
 
 async function start(): Promise<void> {
   await app.whenReady()
@@ -28,7 +28,35 @@ async function start(): Promise<void> {
     app.exit(0)
     return
   }
-  const target = resolveDesktopTarget(base)
+  const target = await resolvePreparedDesktopTarget(
+    base,
+    join(process.resourcesPath, 'runtime', 'tianwen-runtime-bundle-0.1.0.tgz'),
+    {
+      async confirmCreateProfile(profileRoot) {
+        const result = await dialog.showMessageBox({
+          type: 'warning',
+          message: 'Create the Tianwen Web Profile?',
+          detail: `Tianwen Desktop will ask the selected DSH to create this missing Profile once:\n${profileRoot}`,
+          buttons: ['Create Profile', 'Cancel'],
+          defaultId: 0,
+          cancelId: 1,
+        })
+        return result.response === 0
+      },
+      async showManualPreparation(reason, command) {
+        await dialog.showMessageBox({
+          type: 'info',
+          message: 'Manual Web Profile preparation is required',
+          detail: `${reason}\n\nRun this PowerShell command, then open Tianwen Desktop again:\n${command}`,
+          buttons: ['OK'],
+        })
+      },
+    },
+  )
+  if (target === undefined) {
+    app.exit(0)
+    return
+  }
   const host = await startDesktopWebHost(target)
   const shutdown = createDesktopShutdownCoordinator({
     stop: () => host.stop(),
@@ -60,9 +88,19 @@ async function start(): Promise<void> {
 }
 
 if (app.requestSingleInstanceLock()) {
-  void start().catch(error => {
-    process.stderr.write(`Tianwen Desktop failed to start: ${error instanceof Error ? error.message : String(error)}\n`)
-    app.exit(1)
+  void start().catch(async error => {
+    const reason = error instanceof Error ? error.message : String(error)
+    process.stderr.write(`Tianwen Desktop failed to start: ${reason}\n`)
+    try {
+      if (app.isReady()) await dialog.showMessageBox({
+        type: 'error',
+        message: 'Tianwen Desktop failed to start',
+        detail: reason,
+        buttons: ['OK'],
+      })
+    } finally {
+      app.exit(1)
+    }
   })
 } else {
   app.exit(0)
