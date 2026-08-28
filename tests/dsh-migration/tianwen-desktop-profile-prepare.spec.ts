@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -157,6 +157,23 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
       spawn: (() => { spawns += 1; return fakeChild() }) as never,
     })).rejects.toThrow(/already exists/u)
     expect(spawns).toBe(0)
+  })
+
+  it('rejects a missing Profile below an external profiles junction before preparation can spawn', async () => {
+    const target = fixture()
+    const externalProfiles = join(target.dshRoot, 'external-profiles')
+    rmSync(join(target.dshHome, 'profiles'), { recursive: true })
+    mkdirSync(externalProfiles)
+    symlinkSync(externalProfiles, join(target.dshHome, 'profiles'), 'junction')
+    expect(inspectWebProfile(target)).toMatchObject({
+      kind: 'incompatible', profileRoot: profileRoot(target),
+    })
+    let spawns = 0
+    await expect(prepareMissingWebProfile(target, 'D:\\runtime.tgz', {
+      spawn: (() => { spawns += 1; return fakeChild() }) as never,
+    })).rejects.toThrow(/Profile|profiles|Web/u)
+    expect(spawns).toBe(0)
+    expect(existsSync(join(externalProfiles, 'web'))).toBe(false)
   })
 
   it.each([

@@ -130,6 +130,21 @@ each command exited `0`.
 
 ## Pending work and external facts
 
+## Final-review source boundary fix (post-Task-10)
+
+The final whole-branch review identified two Important source findings after
+the Task 10 build-source gate: unrecoverable saved-target settings load
+failures and missing-Profile preparation below an external parent junction.
+The focused source fix has fresh deterministic evidence: 39 bootstrap/Profile
+tests passed, desktop-host and repository typechecks passed, and both real
+Desktop E2E files remained default planned skips (no product process). The
+ignored report is
+`.superpowers/sdd/2026-08-28-tianwen-existing-dsh-desktop-distribution/final-review-fix-report.md`.
+
+This is not a product-proof rerun, installed-product result, rebuild, or
+release-readiness claim. Final whole-branch verification/review of the source
+fix remains pending.
+
 Whole-branch independent review, controlled integration, and exact-main CI
 remain pending.  Exact-main CI is a post-integration gate and is not part of
 this frozen Task 9 result.

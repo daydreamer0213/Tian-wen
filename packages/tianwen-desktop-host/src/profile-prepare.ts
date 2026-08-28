@@ -1,6 +1,6 @@
 import { spawn as nodeSpawn } from 'node:child_process'
-import { lstatSync, readFileSync, realpathSync } from 'node:fs'
-import { isAbsolute, join, relative } from 'node:path'
+import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative } from 'node:path'
 import { resolveDesktopTarget } from './host.js'
 import type { DesktopBaseTarget, DesktopTarget } from './host.js'
 
@@ -53,6 +53,31 @@ function profileResolvesWithinHome(target: DesktopBaseTarget, path: string): boo
   }
 }
 
+function missingProfileParentResolvesWithinHome(target: DesktopBaseTarget, path: string): boolean {
+  let ancestor = path
+  for (;;) {
+    let entry: ReturnType<typeof lstatSync> | undefined
+    try {
+      entry = lstatSync(ancestor, { throwIfNoEntry: false })
+    } catch {
+      return false
+    }
+    if (entry !== undefined) {
+      try {
+        const home = realpathSync(target.dshHome)
+        const resolved = realpathSync(ancestor)
+        const child = relative(home, resolved)
+        return statSync(resolved).isDirectory() && (child === '' || (!child.startsWith('..') && !isAbsolute(child)))
+      } catch {
+        return false
+      }
+    }
+    const parent = dirname(ancestor)
+    if (parent === ancestor) return false
+    ancestor = parent
+  }
+}
+
 function mentionsRuntime(value: unknown): boolean {
   if (Array.isArray(value)) return value.includes(runtimePackage)
   return value !== null && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, runtimePackage)
@@ -84,7 +109,9 @@ export function inspectWebProfile(target: DesktopBaseTarget): WebProfileState {
     return { kind: 'ready', profileRoot: resolveDesktopTarget(target).profileRoot }
   } catch (error) {
     const reason = errorReason(error)
-    if (!profileEntryExists(profileRoot)) return { kind: 'missing-profile', profileRoot }
+    if (!profileEntryExists(profileRoot) && missingProfileParentResolvesWithinHome(target, profileRoot)) {
+      return { kind: 'missing-profile', profileRoot }
+    }
     if (profileResolvesWithinHome(target, profileRoot) && profileManifestWithoutRuntime(profileRoot)) {
       return { kind: 'missing-runtime', profileRoot }
     }
@@ -110,11 +137,18 @@ export function prepareMissingWebProfile(
   dependencies: { readonly spawn?: typeof import('node:child_process').spawn } = {},
 ): Promise<void> {
   const profileRoot = join(target.dshHome, 'profiles', 'web')
-  if (profileEntryExists(profileRoot)) return Promise.reject(new Error(`Web Profile entry already exists: ${profileRoot}`))
 
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof nodeSpawn>
     try {
+      if (profileEntryExists(profileRoot)) {
+        reject(new Error(`Web Profile entry already exists: ${profileRoot}`))
+        return
+      }
+      if (!missingProfileParentResolvesWithinHome(target, profileRoot)) {
+        reject(new Error(`Web Profile parent is not contained within DSH home: ${profileRoot}`))
+        return
+      }
       child = (dependencies.spawn ?? nodeSpawn)(target.nodeExecutable, [
         target.dshBin,
         'plugin', '--profile', 'web', '--allow-build=koffi',

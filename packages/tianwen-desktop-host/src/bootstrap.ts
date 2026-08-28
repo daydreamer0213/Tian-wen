@@ -150,7 +150,13 @@ export async function resolveDesktopBootstrapTarget(
 
   if (argv.length > 0) return validateTarget(parseDesktopArgs(argv))
 
-  const saved = loadSavedTarget(settingsPath)
+  let saved: DesktopTargetInput | undefined
+  try {
+    saved = loadSavedTarget(settingsPath)
+  } catch (error) {
+    if (!await dependencies.confirmSavedTargetReplacement(errorReason(error))) return undefined
+    return resolveSelectedTarget(undefined, settingsPath, validateTarget, saveTarget, dependencies)
+  }
   if (saved !== undefined) {
     try {
       return validateTarget(saved)

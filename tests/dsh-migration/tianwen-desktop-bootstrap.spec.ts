@@ -217,6 +217,53 @@ describe('Tianwen Desktop saved target bootstrap', () => {
     expect(discoveries).toBe(0)
   })
 
+  it.each([
+    { label: 'malformed JSON', write: (path: string) => writeFileSync(path, '{not json', 'utf8') },
+    { label: 'wrong-schema JSON', write: (path: string) => writeFileSync(path, JSON.stringify({ schemaVersion: 'wrong' }), 'utf8') },
+    { label: 'directory settings path', write: (path: string) => mkdirSync(path) },
+  ])('requires explicit replacement for a saved target load failure from $label', async ({ write }) => {
+    const rejected = fixture()
+    const rejectedSettingsPath = join(rejected.dshHome, 'desktop-target.json')
+    write(rejectedSettingsPath)
+    let rejectedDiscoveries = 0
+    const rejectedResult = await resolveDesktopBootstrapTarget([], rejectedSettingsPath, {
+      discoverTargetInputs: () => { rejectedDiscoveries += 1; return [] },
+      selectTarget: async () => { throw new Error('unexpected selection') },
+      confirmSavedTargetReplacement: async reason => {
+        expect(reason).toBe('Desktop target settings are invalid')
+        return false
+      },
+      reportSelectedTargetError: async () => undefined,
+    })
+    expect(rejectedResult).toBeUndefined()
+    expect(rejectedDiscoveries).toBe(0)
+
+    const replacement = fixture()
+    const accepted = fixture()
+    const acceptedSettingsPath = join(accepted.dshHome, 'desktop-target.json')
+    write(acceptedSettingsPath)
+    let acceptedDiscoveries = 0
+    let selectedSuggestion: unknown = 'not selected'
+    let saved = 0
+    const acceptedResult = await resolveDesktopBootstrapTarget([], acceptedSettingsPath, {
+      discoverTargetInputs: () => { acceptedDiscoveries += 1; return [accepted] },
+      selectTarget: async suggested => {
+        selectedSuggestion = suggested
+        return replacement
+      },
+      confirmSavedTargetReplacement: async reason => {
+        expect(reason).toBe('Desktop target settings are invalid')
+        return true
+      },
+      reportSelectedTargetError: async () => undefined,
+      saveTarget: () => { saved += 1 },
+    })
+    expect(acceptedResult).toEqual(resolveDesktopBaseTarget(replacement))
+    expect(selectedSuggestion).toBeUndefined()
+    expect(acceptedDiscoveries).toBe(0)
+    expect(saved).toBe(1)
+  })
+
   it('sends an accepted invalid saved target directly to selection', async () => {
     const replacement = fixture()
     const expected = resolveDesktopBaseTarget(replacement)
