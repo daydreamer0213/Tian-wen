@@ -1,9 +1,12 @@
 packages:
   - packages/*
+overrides:
+  '@electron/get@^3.0.0': 3.1.0
 allowBuilds:
   '@deepseek-ai/dsh-subprocess-local': false
   '@google/genai': false
   electron: true
+  electron-winstaller: false
   esbuild: false
   koffi: false
   node-pty: false

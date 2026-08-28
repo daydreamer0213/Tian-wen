@@ -350,6 +350,7 @@ git commit -m "feat: bootstrap Desktop from an existing DSH"
 - Create: `tests/dsh-migration/tianwen-desktop-artifact.spec.ts`
 - Modify: `packages/tianwen-desktop-host/package.json`
 - Modify: `pnpm-lock.yaml`
+- Modify: `pnpm-workspace.yaml`
 
 **Interfaces:**
 - Consumes: compiled `dist/main.js`, `dist/host.js`, and `dist/bootstrap.js`.
@@ -448,6 +449,15 @@ Update the lockfile with the exact package command before the frozen install:
 & $node $pnpm --filter '@tianwen/desktop-host' add --save-dev --save-exact electron-builder@26.15.3
 ```
 
+`electron-builder@26.15.3` calls the cache-mode API introduced in `@electron/get@3.1.0` even though its declared range starts at `3.0.0`. Pin only that transitive `^3.0.0` range to `3.1.0` in the workspace override, leaving Electron's separate `@electron/get@5` dependency untouched. Explicitly deny the unused `electron-winstaller` install script because B1 builds NSIS, not Squirrel:
+
+```yaml
+overrides:
+  '@electron/get@^3.0.0': 3.1.0
+allowBuilds:
+  electron-winstaller: false
+```
+
 - [ ] **Step 5: Run unit green, build the unpacked directory, and audit it**
 
 ```powershell
@@ -467,7 +477,7 @@ Expected: audit passes; no Runtime resource or DSH closure exists in B1.
 - [ ] **Step 6: Commit Task 4**
 
 ```powershell
-git add packages/tianwen-desktop-host/package.json packages/tianwen-desktop-host/THIRD_PARTY_NOTICES.md scripts/audit-desktop-artifact.mjs tests/dsh-migration/tianwen-desktop-artifact.spec.ts pnpm-lock.yaml
+git add packages/tianwen-desktop-host/package.json packages/tianwen-desktop-host/THIRD_PARTY_NOTICES.md scripts/audit-desktop-artifact.mjs tests/dsh-migration/tianwen-desktop-artifact.spec.ts pnpm-lock.yaml pnpm-workspace.yaml docs/superpowers/plans/2026-08-28-tianwen-existing-dsh-desktop-distribution.md
 git commit -m "feat: package the existing-DSH Desktop shell"
 ```
 

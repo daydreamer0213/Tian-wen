@@ -1,6 +1,6 @@
 {
   "name": "@tianwen/desktop-host",
-  "version": "0.0.0",
+  "version": "0.1.0-preview.1",
   "private": true,
   "type": "module",
   "main": "./dist/main.js",
@@ -13,9 +13,51 @@
   "scripts": {
     "start": "electron dist/main.js",
     "build": "tsc -b --pretty false",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "pack:dir": "electron-builder --dir --win --x64",
+    "pack:win": "electron-builder --win nsis --x64"
   },
   "devDependencies": {
-    "electron": "43.4.0"
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "io.github.daydreamer0213.tianwen.desktop",
+    "productName": "Tianwen Desktop",
+    "asar": false,
+    "directories": {
+      "output": "../../dist/tianwen-desktop"
+    },
+    "files": [
+      "dist/main.js",
+      "dist/host.js",
+      "dist/bootstrap.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../LICENSE",
+        "to": "LICENSE.txt"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
+    }
   }
 }
