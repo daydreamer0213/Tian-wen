@@ -5,8 +5,9 @@
 The frozen formal Desktop distribution proof **FAILED / is incomplete**.  The
 post-run Desktop discovery bug fix is deterministically verified, but it does
 not change the formal result to a pass.  Do not rerun the consumed one-shot
-proof.  Continue with Task 10 whole-repository gates and review, without
-claiming release readiness.
+proof.  Task 10 local gates and the final artifact rebuild now have fresh
+evidence, but whole-branch independent review, controlled integration, and
+exact-main CI are still pending.  Do not claim release readiness.
 
 ## Frozen formal product result
 
@@ -66,26 +67,74 @@ formal one-shot result to a pass or prove the installed-product path.
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
 | Runtime source tarball `D:\DevData\tianwen-desktop-distribution\packs\tianwen-runtime-bundle-0.1.0.tgz` | 223,473 | `f0fb4dbec8776aac3c18e5efa95ddb5006dc503e30c5fa4ff1605aa6cf5dd440` |
+| Packaged Runtime resource `dist\tianwen-desktop\win-unpacked\resources\runtime\tianwen-runtime-bundle-0.1.0.tgz` | 223,473 | `f0fb4dbec8776aac3c18e5efa95ddb5006dc503e30c5fa4ff1605aa6cf5dd440` |
 | Unpacked executable `dist\tianwen-desktop\win-unpacked\Tianwen Desktop.exe` | 225,533,440 | `d4baf79b8fc06de442bfeb9636ca2d458e299841544b31529319032508d972a9` |
-| Installer `dist\tianwen-desktop\Tianwen Desktop Setup 0.1.0-preview.1.exe` | 99,750,573 | `c807fa20c9b6645332f319f775b3ae35fc8789ce9ae32b00bcd1caac0111f03b` |
+| Installer `dist\tianwen-desktop\Tianwen Desktop Setup 0.1.0-preview.1.exe` | 99,750,573 | `48bd94750d6ed06ed3845319d7916b8ff44606fe786aab22ee5cc3c4b99f1e00` |
 
-The installer/resource audit passed after electron-builder's unused elevate
-helper was explicitly disabled; the exact resource allowlist remained strict.
-The artifacts were built from product packaging inputs unchanged between
-`2c7f53e` and formal SHA `4990ff7`.
+The fresh Task 10 rebuild audited `win-unpacked` against the same exact source
+tarball.  The audit passed with the exact resource allowlist and no-second-DSH
+boundary intact.  Source and packaged Runtime have identical byte length,
+SHA-256, and byte-for-byte content.  Exactly one direct NSIS setup `.exe` and
+the expected `win-unpacked\Tianwen Desktop.exe` were present.  Neither output
+was executed.
 
 Existing-Profile no-mutation and one-spawn/no-retry preparation boundaries
 currently have deterministic test evidence only.  The formal proof did not
 reach those boundaries.
 
+## Task 10 local-gate closure (not a product-proof rerun)
+
+The original Task 10 plan incorrectly invoked bare `pnpm exec vitest run`.
+That command is invalid in this local controller shell because it omits the
+required fresh probe root, probe Python, and approved Corepack environment;
+the defect is in the gate plan, not a Desktop regression.  The plan correction
+is `4ad6629147d1ec5cb6019406c84d19ef242d4c10`
+(`docs: correct Desktop full-suite gate preconditions`).
+
+The historical bare-command evidence remains preserved in the ignored Task 10
+report: the first controller invocation lost its terminal capture at the
+30-second boundary and has **no verdict**; the durable follow-up bare command
+then exited `1` with 99 failures caused by missing probe/Python/Corepack
+preconditions and scripted-boundary fixtures.  Neither result was a product
+proof or product action.
+
+From clean build-source SHA `4ad6629147d1ec5cb6019406c84d19ef242d4c10`,
+Task 10 created the previously absent, non-reparse strict child
+`D:\DevData\tianwen-desktop-distribution\task10-probe`.  Exact installed
+`D:\hermes\bin\uv.exe sync --frozen --offline --dev --python 3.12` prepared
+its `venv-task-6` successfully from D-drive caches (no online fallback and no
+network use).  That Python imported `tianwen` from this exact worktree.  The
+corrected full-suite process scoped `COREPACK_HOME` to
+`D:\DevData\corepack-home`, `TIANWEN_DSH_PROBE_ROOT` to the fresh child,
+`TIANWEN_DSH_PROBE_PYTHON` to that venv Python, and
+`TIANWEN_DSH_MIGRATION_PROFILE=0`.
+
+Both `TIANWEN_DESKTOP_DISTRIBUTION_E2E` and
+`TIANWEN_DESKTOP_HOST_E2E` remained unset.  The corrected full suite ran once
+from `2026-08-28T16:16:09.2131879Z` through
+`2026-08-28T16:21:10.6777074Z`, exited `0`, and reported 61 passed / 4
+planned-skipped files and 831 passed / 17 planned-skipped tests.  Therefore
+both real Desktop E2Es were only default planned skips: no product rerun,
+Desktop launch, install, uninstall, Profile creation, Provider/model call, or
+proof-root/controller-log action occurred.
+
+The earlier green local evidence at
+`968d2308302f03b4f378764614e5db27f2d18ff0` is carried forward unchanged:
+the focused Desktop suite reported 5 passed / 1 skipped files and 87 passed /
+2 skipped tests; desktop-host typecheck, repository typecheck,
+`check:dsh-install`, and `check:no-private-dsh-imports` each exited `0`.
+After the corrected full suite, `git diff --check` exited `0`.  The final
+rebuild then staged the existing Runtime tarball without repacking, built
+desktop-host, completed `pack:dir` and `pack:win`, and ran the artifact audit;
+each command exited `0`.
+
 ## Pending work and external facts
 
-Task 10 final whole-repository gates and final artifact rebuild are pending.
-Task 10 may amend this handoff after completing those actions.  Exact-main CI
-is a post-integration gate and is not part of this frozen Task 9 result.
+Whole-branch independent review, controlled integration, and exact-main CI
+remain pending.  Exact-main CI is a post-integration gate and is not part of
+this frozen Task 9 result.
 
 No Provider credential or Provider model call was used.  This was supervised
 Codex product development, not a Tianwen natural task, so it produced no
 Tianwen learning decision or skill record.  No DSH upstream push or publication
-occurred.  The preview is unsigned, internal only, and not public
-release-ready.
+occurred.  The preview is internal only and not public release-ready.
