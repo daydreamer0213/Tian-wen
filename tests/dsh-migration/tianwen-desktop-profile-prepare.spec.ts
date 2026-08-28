@@ -93,6 +93,17 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
       reason: 'Invalid Tianwen Desktop target: Runtime manifest is not the required exact package',
     })
 
+    const escaped = fixture()
+    const outsideProfile = join(escaped.dshRoot, 'outside-web-profile')
+    rmSync(profileRoot(escaped), { recursive: true })
+    writeJson(join(outsideProfile, 'package.json'), { name: '@deepseek-ai/dsh-profile-web' })
+    symlinkSync(outsideProfile, profileRoot(escaped), 'junction')
+    expect(inspectWebProfile(escaped)).toEqual({
+      kind: 'incompatible',
+      profileRoot: profileRoot(escaped),
+      reason: 'Invalid Tianwen Desktop target: Web Profile is missing',
+    })
+
     const broken = fixture()
     rmSync(profileRoot(broken), { recursive: true })
     symlinkSync(join(broken.dshHome, 'missing-target'), profileRoot(broken), 'junction')
@@ -171,6 +182,10 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
       stage: 'dsh-plugin-add', exitCode: expectedExitCode,
       profileRoot: profileRoot(target), stderr: 'first line\nlast line\n',
     })
+    expect(failure.message).toContain('stage=dsh-plugin-add')
+    expect(failure.message).toContain(`exitCode=${String(expectedExitCode)}`)
+    expect(failure.message).toContain(`profileRoot=${profileRoot(target)}`)
+    expect(failure.message).toContain('first line\nlast line')
   })
 
   it('maps a spawn error once without waiting for a later close', async () => {
@@ -189,6 +204,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     await expect(preparation).rejects.toMatchObject({
       stage: 'dsh-plugin-add', exitCode: null,
       profileRoot: profileRoot(target), stderr: 'could not spawn DSH',
+      message: expect.stringContaining('stage=dsh-plugin-add, exitCode=null'),
     })
   })
 

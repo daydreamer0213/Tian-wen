@@ -1,6 +1,6 @@
 import { spawn as nodeSpawn } from 'node:child_process'
-import { lstatSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { lstatSync, readFileSync, realpathSync } from 'node:fs'
+import { isAbsolute, join, relative } from 'node:path'
 import { resolveDesktopTarget } from './host.js'
 import type { DesktopBaseTarget, DesktopTarget } from './host.js'
 
@@ -27,7 +27,7 @@ export class ProfilePreparationError extends Error implements ProfilePreparation
     readonly profileRoot: string,
     readonly stderr: string,
   ) {
-    super(`DSH Profile preparation failed at ${profileRoot}${stderr.length === 0 ? '' : `: ${stderr.trim()}`}`)
+    super(`DSH Profile preparation failed (stage=dsh-plugin-add, exitCode=${String(exitCode)}, profileRoot=${profileRoot})${stderr.length === 0 ? '' : `: ${stderr.trim()}`}`)
     this.name = 'ProfilePreparationError'
   }
 }
@@ -41,6 +41,15 @@ function profileEntryExists(path: string): boolean {
     return lstatSync(path, { throwIfNoEntry: false }) !== undefined
   } catch {
     return true
+  }
+}
+
+function profileResolvesWithinHome(target: DesktopBaseTarget, path: string): boolean {
+  try {
+    const child = relative(target.dshHome, realpathSync(path))
+    return child === '' || (!child.startsWith('..') && !isAbsolute(child))
+  } catch {
+    return false
   }
 }
 
@@ -76,7 +85,9 @@ export function inspectWebProfile(target: DesktopBaseTarget): WebProfileState {
   } catch (error) {
     const reason = errorReason(error)
     if (!profileEntryExists(profileRoot)) return { kind: 'missing-profile', profileRoot }
-    if (profileManifestWithoutRuntime(profileRoot)) return { kind: 'missing-runtime', profileRoot }
+    if (profileResolvesWithinHome(target, profileRoot) && profileManifestWithoutRuntime(profileRoot)) {
+      return { kind: 'missing-runtime', profileRoot }
+    }
     return { kind: 'incompatible', profileRoot, reason }
   }
 }
