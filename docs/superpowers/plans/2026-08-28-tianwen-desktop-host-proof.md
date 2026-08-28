@@ -219,6 +219,8 @@ Set:
 
 ```powershell
 $env:electron_config_cache = 'D:\DevData\electron-cache'
+$env:TEMP = 'D:\DevData\tianwen-desktop-electron-temp'
+$env:TMP = 'D:\DevData\tianwen-desktop-electron-temp'
 $env:PNPM_CONFIG_STORE_DIR = 'D:\DevData\pnpm-store'
 $env:NPM_CONFIG_CACHE = 'D:\DevData\npm-cache'
 pnpm --filter @tianwen/desktop-host add --save-dev --save-exact electron@43.4.0
