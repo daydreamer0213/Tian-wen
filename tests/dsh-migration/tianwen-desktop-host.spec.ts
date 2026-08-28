@@ -15,6 +15,7 @@ import {
 
 const fixtureRoot = resolve('D:/DevData/tianwen-desktop-host-tests')
 const dshVersion = '0.1.1-rc.2'
+const runtimePackage = '@tianwen/runtime-bundle'
 const runtimeVersion = '0.1.0'
 const fixtures: string[] = []
 
@@ -119,6 +120,29 @@ describe('Tianwen Desktop Web host contract', () => {
     })
   })
 
+  it('accepts a non-empty Runtime package spec declared by DSH', () => {
+    const input = fixture()
+    writeJson(join(input.dshHome, 'profiles', 'web', 'package.json'), {
+      dsh: { profile: { bundles: [runtimePackage] } },
+      dependencies: { [runtimePackage]: 'file:D:/packs/tianwen-runtime-bundle-0.1.0.tgz' },
+    })
+    expect(resolveDesktopTarget(input).profileRoot).toBe(realpathSync(join(input.dshHome, 'profiles', 'web')))
+  })
+
+  it.each([
+    ['missing', {}],
+    ['null', { [runtimePackage]: null }],
+    ['object', { [runtimePackage]: { version: runtimeVersion } }],
+    ['array', { [runtimePackage]: [runtimeVersion] }],
+    ['empty string', { [runtimePackage]: '' }],
+  ])('rejects a %s Runtime dependency declaration', (_label, dependencies) => {
+    const input = fixture()
+    writeJson(join(input.dshHome, 'profiles', 'web', 'package.json'), {
+      dsh: { profile: { bundles: [runtimePackage] } }, dependencies,
+    })
+    expect(() => resolveDesktopTarget(input)).toThrow()
+  })
+
   it.each([
     ['relative paths', (input: ReturnType<typeof fixture>) => ({ ...input, dshRoot: 'relative' })],
     ['non-Node executable', (input: ReturnType<typeof fixture>) => ({ ...input, nodeExecutable: process.env.ComSpec! })],
@@ -173,6 +197,17 @@ describe('Tianwen Desktop Web host contract', () => {
       })
       return input
     }],
+    ...['devDependencies', 'optionalDependencies', 'peerDependencies'].map(section => [
+      `Runtime in ${section}`,
+      (input: ReturnType<typeof fixture>) => {
+        writeJson(join(input.dshHome, 'profiles', 'web', 'package.json'), {
+          dsh: { profile: { bundles: [runtimePackage] } },
+          dependencies: { [runtimePackage]: runtimeVersion },
+          [section]: { [runtimePackage]: runtimeVersion },
+        })
+        return input
+      },
+    ] as const),
   ])('rejects %s', (_label, change) => {
     expect(() => resolveDesktopTarget(change(fixture()))).toThrow()
   })

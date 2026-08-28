@@ -168,7 +168,10 @@ export function resolveDesktopTarget(input: DesktopTargetInput): DesktopTarget {
   if (!Array.isArray(bundles) || bundles.filter(bundle => bundle === runtimePackage).length !== 1) {
     fail('Web Profile must declare the Runtime bundle exactly once')
   }
-  if (!hasRuntimeDeclaration(profile.dependencies) || (profile.dependencies as Record<string, unknown>)[runtimePackage] !== runtimeVersion) {
+  const runtimeDeclaration = hasRuntimeDeclaration(profile.dependencies)
+    ? (profile.dependencies as Record<string, unknown>)[runtimePackage]
+    : undefined
+  if (typeof runtimeDeclaration !== 'string' || runtimeDeclaration.length === 0) {
     fail('Web Profile must declare the exact Runtime dependency')
   }
   for (const section of ['devDependencies', 'optionalDependencies', 'peerDependencies', 'bundledDependencies', 'bundleDependencies'] as const) {
