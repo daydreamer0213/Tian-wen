@@ -1,7 +1,11 @@
 # Tianwen DSH rc.2 integration-unlock handoff
 
 Date: 2026-08-28
-Status: closed as incomplete; do not merge this branch to `main`
+Status: historical result closed as incomplete; its original decision was do not merge this branch to `main`
+
+## Subsequent authority
+
+The historical Candidate 3 result below remains `5/6`, exit `1`. A later current-candidate acceptance corrected only the diagnosed controller path depth and passed `6/6`, exit `0`, once. Therefore this file remains the authority for the old execution, while its permanent integration no-go is superseded for the current branch by `docs/operations/tianwen-current-integration-acceptance-handoff.md`.
 
 ## Decision
 
