@@ -1,13 +1,9 @@
-import { existsSync, readdirSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { createHash } from 'node:crypto'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const B1_APPLICATION_FILES = new Set([
-  'dist/bootstrap.js',
-  'dist/host.js',
-  'dist/main.js',
-  'package.json',
-])
+const RUNTIME_ARCHIVE_NAME = 'tianwen-runtime-bundle-0.1.0.tgz'
 
 const B1_RESOURCE_FILES = new Set([
   'app/dist/bootstrap.js',
@@ -16,6 +12,12 @@ const B1_RESOURCE_FILES = new Set([
   'app/package.json',
   'LICENSE.txt',
   'THIRD_PARTY_NOTICES.md',
+])
+
+const B2_RESOURCE_FILES = new Set([
+  ...B1_RESOURCE_FILES,
+  'app/dist/profile-prepare.js',
+  `runtime/${RUNTIME_ARCHIVE_NAME}`,
 ])
 
 function collectFiles(root) {
@@ -38,43 +40,53 @@ export function auditDesktopArtifact(unpackedRoot, expectedRuntimeTarball) {
   const root = resolve(unpackedRoot)
   const resources = join(root, 'resources')
   const resourceFiles = collectFiles(resources)
-  if (expectedRuntimeTarball === undefined) {
-    const unexpectedResourceFiles = resourceFiles.filter(path => !B1_RESOURCE_FILES.has(path))
-    const missingResourceFiles = [...B1_RESOURCE_FILES].filter(path => !resourceFiles.includes(path))
-    if (unexpectedResourceFiles.length > 0 || missingResourceFiles.length > 0) {
-      throw new Error(
-        `resource allowlist mismatch; forbidden: ${unexpectedResourceFiles.join(', ') || 'none'}; missing: ${missingResourceFiles.join(', ') || 'none'}`,
-      )
-    }
-
-    if (existsSync(join(resources, 'runtime'))) {
-      throw new Error('forbidden Runtime resource in B1 artifact')
-    }
-    return
+  if (expectedRuntimeTarball === undefined && existsSync(join(resources, 'runtime'))) {
+    throw new Error('forbidden Runtime resource in B1 artifact')
   }
-
-  const applicationFiles = resourceFiles
-    .filter(path => path.startsWith('app/'))
-    .map(path => path.slice('app/'.length))
-  const unexpectedApplicationFiles = applicationFiles.filter(path => !B1_APPLICATION_FILES.has(path))
-  const missingApplicationFiles = [...B1_APPLICATION_FILES].filter(path => !applicationFiles.includes(path))
-  if (unexpectedApplicationFiles.length > 0 || missingApplicationFiles.length > 0) {
+  const allowlist = expectedRuntimeTarball === undefined
+    ? B1_RESOURCE_FILES
+    : B2_RESOURCE_FILES
+  const unexpectedResourceFiles = resourceFiles.filter(path => !allowlist.has(path))
+  const missingResourceFiles = [...allowlist].filter(path => !resourceFiles.includes(path))
+  if (unexpectedResourceFiles.length > 0 || missingResourceFiles.length > 0) {
     throw new Error(
-      `application allowlist mismatch; forbidden: ${unexpectedApplicationFiles.join(', ') || 'none'}; missing: ${missingApplicationFiles.join(', ') || 'none'}`,
+      `resource allowlist mismatch; forbidden: ${unexpectedResourceFiles.join(', ') || 'none'}; missing: ${missingResourceFiles.join(', ') || 'none'}`,
     )
   }
 
-  for (const legalResource of ['LICENSE.txt', 'THIRD_PARTY_NOTICES.md']) {
-    if (!resourceFiles.includes(legalResource)) throw new Error(`missing required resource: ${legalResource}`)
+  if (expectedRuntimeTarball === undefined) return
+  if (!isAbsolute(expectedRuntimeTarball)) {
+    throw new Error('expected Runtime source path must be absolute')
+  }
+  if (basename(expectedRuntimeTarball) !== RUNTIME_ARCHIVE_NAME) {
+    throw new Error(`expected Runtime source basename must be ${RUNTIME_ARCHIVE_NAME}`)
+  }
+
+  let sourceStats
+  try {
+    sourceStats = statSync(expectedRuntimeTarball)
+  } catch {
+    throw new Error(`expected Runtime source file is missing: ${expectedRuntimeTarball}`)
+  }
+  if (!sourceStats.isFile()) {
+    throw new Error(`expected Runtime source must be a file: ${expectedRuntimeTarball}`)
+  }
+
+  const packagedRuntime = join(resources, 'runtime', RUNTIME_ARCHIVE_NAME)
+  const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
+  if (digest(expectedRuntimeTarball) !== digest(packagedRuntime)) {
+    throw new Error('Runtime SHA-256 digest does not match the source archive')
   }
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
-    const unpackedRoot = process.argv[2]
-    if (unpackedRoot === undefined) throw new Error('usage: node scripts/audit-desktop-artifact.mjs <win-unpacked>')
-    auditDesktopArtifact(unpackedRoot)
-    process.stdout.write(`Desktop artifact audit passed: ${resolve(unpackedRoot)}\n`)
+    const args = process.argv.slice(2)
+    if (args.length < 1 || args.length > 2) {
+      throw new Error('usage: node scripts/audit-desktop-artifact.mjs <win-unpacked> [absolute-runtime-tarball]')
+    }
+    auditDesktopArtifact(args[0], args[1])
+    process.stdout.write(`Desktop artifact audit passed: ${resolve(args[0])}\n`)
   } catch (error) {
     process.stderr.write(`Desktop artifact audit failed: ${error instanceof Error ? error.message : String(error)}\n`)
     process.exitCode = 1

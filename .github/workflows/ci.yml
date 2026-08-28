@@ -43,7 +43,7 @@ jobs:
       - run: pnpm exec vitest run tests/dsh-probe/controlled-skill-evaluation.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-probe/controlled-skill-shadow.spec.ts tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts tests/dsh-probe/controlled-skill-activation.spec.ts tests/dsh-probe/controlled-skill-activation-runtime.spec.ts tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts tests/dsh-migration/controlled-lifecycle-profile.spec.ts
         env:
           TIANWEN_DSH_PROBE_ROOT: ${{ runner.temp }}/tianwen-v0.1-eval-fixtures
-      - run: pnpm exec vitest run tests/dsh-migration/tianwen-desktop-host.spec.ts tests/dsh-migration/tianwen-desktop-bootstrap.spec.ts tests/dsh-migration/tianwen-desktop-artifact.spec.ts
+      - run: pnpm exec vitest run tests/dsh-migration/tianwen-desktop-host.spec.ts tests/dsh-migration/tianwen-desktop-bootstrap.spec.ts tests/dsh-migration/tianwen-desktop-profile-prepare.spec.ts tests/dsh-migration/tianwen-desktop-artifact.spec.ts
       - run: pnpm demo:research-preview
       - run: pnpm demo:explicit-correction
       - run: pnpm demo:repeated-outcome
@@ -105,6 +105,9 @@ jobs:
           node-version: 22.20.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter '@tianwen/runtime-bundle...' build
+      - run: pnpm --filter '@tianwen/runtime-bundle' pack --pack-destination "${{ runner.temp }}/tianwen-runtime-pack"
+      - run: node scripts/stage-desktop-runtime.mjs "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.0.tgz"
       - run: pnpm --filter @tianwen/desktop-host build
       - name: Run deterministic Desktop tests
         shell: pwsh
@@ -118,14 +121,14 @@ jobs:
           $testExit = 0
           try {
             New-Item -ItemType Directory -Force -Path 'D:\DevData' | Out-Null
-            pnpm exec vitest run tests/dsh-migration/tianwen-desktop-host.spec.ts tests/dsh-migration/tianwen-desktop-bootstrap.spec.ts tests/dsh-migration/tianwen-desktop-artifact.spec.ts
+            pnpm exec vitest run tests/dsh-migration/tianwen-desktop-host.spec.ts tests/dsh-migration/tianwen-desktop-bootstrap.spec.ts tests/dsh-migration/tianwen-desktop-profile-prepare.spec.ts tests/dsh-migration/tianwen-desktop-artifact.spec.ts
             $testExit = $LASTEXITCODE
           } finally {
             if ($mappedDrive) { & subst.exe D: /D }
           }
           exit $testExit
       - run: pnpm --filter @tianwen/desktop-host pack:dir
-      - run: node scripts/audit-desktop-artifact.mjs dist/tianwen-desktop/win-unpacked
+      - run: node scripts/audit-desktop-artifact.mjs dist/tianwen-desktop/win-unpacked "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.0.tgz"
       - run: pnpm --filter @tianwen/desktop-host pack:win
       - name: Assert one Desktop installer
         shell: pwsh

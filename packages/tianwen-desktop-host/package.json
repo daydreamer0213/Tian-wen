@@ -32,6 +32,7 @@
       "dist/main.js",
       "dist/host.js",
       "dist/bootstrap.js",
+      "dist/profile-prepare.js",
       "package.json"
     ],
     "extraResources": [
@@ -42,6 +43,10 @@
       {
         "from": "THIRD_PARTY_NOTICES.md",
         "to": "THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "dist/runtime/tianwen-runtime-bundle-0.1.0.tgz",
+        "to": "runtime/tianwen-runtime-bundle-0.1.0.tgz"
       }
     ],
     "win": {
