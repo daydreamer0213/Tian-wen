@@ -9,6 +9,7 @@ import {
   createDesktopShutdownCoordinator,
   desktopNavigationAllowed,
   parseDesktopArgs,
+  resolveDesktopBaseTarget,
   resolveDesktopTarget,
   startDesktopWebHost,
 } from '../../packages/tianwen-desktop-host/src/host.js'
@@ -118,6 +119,26 @@ describe('Tianwen Desktop Web host contract', () => {
       dshHome: realpathSync(input.dshHome),
       profileRoot: realpathSync(join(input.dshHome, 'profiles/web')),
     })
+  })
+
+  it('resolves a compatible external DSH before its Web Profile exists', () => {
+    const input = fixture()
+    rmSync(join(input.dshHome, 'profiles', 'web'), { recursive: true })
+    expect(resolveDesktopBaseTarget(input)).toMatchObject({
+      nodeExecutable: realpathSync(input.nodeExecutable),
+      dshRoot: realpathSync(input.dshRoot),
+      dshHome: realpathSync(input.dshHome),
+      dshBin: realpathSync(join(input.dshRoot, 'lib/bin.js')),
+    })
+    expect(() => resolveDesktopTarget(input)).toThrow(/Web Profile is missing/u)
+  })
+
+  it('does not weaken exact DSH validation for a base target', () => {
+    const input = fixture()
+    writeJson(join(input.dshRoot, 'package.json'), {
+      name: '@deepseek-ai/dsh', version: '0.1.1', bin: { dsh: 'lib/bin.js' },
+    })
+    expect(() => resolveDesktopBaseTarget(input)).toThrow(/required exact package/u)
   })
 
   it('accepts a non-empty Runtime package spec declared by DSH', () => {

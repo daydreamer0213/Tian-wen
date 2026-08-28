@@ -54,8 +54,11 @@ export interface DesktopTargetInput {
   readonly dshHome: string
 }
 
-export interface DesktopTarget extends DesktopTargetInput {
+export interface DesktopBaseTarget extends DesktopTargetInput {
   readonly dshBin: string
+}
+
+export interface DesktopTarget extends DesktopBaseTarget {
   readonly profileRoot: string
 }
 
@@ -134,7 +137,7 @@ export function parseDesktopArgs(argv: readonly string[]): DesktopTargetInput {
   return { nodeExecutable: values.nodeExecutable, dshRoot: values.dshRoot, dshHome: values.dshHome }
 }
 
-export function resolveDesktopTarget(input: DesktopTargetInput): DesktopTarget {
+export function resolveDesktopBaseTarget(input: DesktopTargetInput): DesktopBaseTarget {
   const nodeExecutable = pathToExistingFile(input.nodeExecutable, 'node executable')
   try {
     if (!/^v22\.\d+\.\d+\s*$/u.test(execFileSync(nodeExecutable, ['--version'], {
@@ -156,8 +159,19 @@ export function resolveDesktopTarget(input: DesktopTargetInput): DesktopTarget {
   const dshBin = realpathSync(resolve(dshRoot, dshBinEntry))
   if (!isWithin(dshRoot, dshBin) || !statSync(dshBin).isFile()) fail('DSH bin.dsh escapes the package')
 
-  const profileRoot = realpathSync(join(dshHome, 'profiles', 'web'))
-  if (!statSync(profileRoot).isDirectory() || !isWithin(dshHome, profileRoot)) fail('Web Profile is missing')
+  return { nodeExecutable, dshRoot, dshHome, dshBin }
+}
+
+export function resolveDesktopTarget(input: DesktopTargetInput): DesktopTarget {
+  const base = resolveDesktopBaseTarget(input)
+
+  let profileRoot: string
+  try {
+    profileRoot = realpathSync(join(base.dshHome, 'profiles', 'web'))
+  } catch {
+    fail('Web Profile is missing')
+  }
+  if (!statSync(profileRoot).isDirectory() || !isWithin(base.dshHome, profileRoot)) fail('Web Profile is missing')
   const profile = readManifest(join(profileRoot, 'package.json'), 'Web Profile manifest')
   const dsh = profile.dsh
   const bundles = dsh !== null && typeof dsh === 'object' && !Array.isArray(dsh) &&
@@ -181,7 +195,7 @@ export function resolveDesktopTarget(input: DesktopTargetInput): DesktopTarget {
   if (!isWithin(profileRoot, runtimeRoot) || !statSync(runtimeRoot).isDirectory()) fail('Runtime directory escapes Web Profile')
   const runtime = readManifest(join(runtimeRoot, 'package.json'), 'Runtime manifest')
   if (runtime.name !== runtimePackage || runtime.version !== runtimeVersion) fail('Runtime manifest is not the required exact package')
-  return { nodeExecutable, dshRoot, dshHome, dshBin, profileRoot }
+  return { ...base, profileRoot }
 }
 
 function defaultStopTree(pid: number): Promise<void> {
