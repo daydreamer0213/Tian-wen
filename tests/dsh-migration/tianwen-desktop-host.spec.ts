@@ -1,0 +1,209 @@
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
+import { copyFileSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  parseDesktopArgs,
+  resolveDesktopTarget,
+  startDesktopWebHost,
+} from '../../packages/tianwen-desktop-host/src/host.js'
+
+const fixtureRoot = resolve('D:/DevData/tianwen-desktop-host-tests')
+const dshVersion = '0.1.1-rc.2'
+const runtimeVersion = '0.1.0'
+const fixtures: string[] = []
+
+interface FakeChild extends EventEmitter {
+  pid: number
+  stdout: PassThrough
+  stderr: PassThrough
+  kill: () => boolean
+}
+
+function writeJson(path: string, value: unknown): void {
+  mkdirSync(resolve(path, '..'), { recursive: true })
+  writeFileSync(path, `${JSON.stringify(value)}\n`, 'utf8')
+}
+
+function fixture(): { nodeExecutable: string, dshRoot: string, dshHome: string } {
+  const root = join(fixtureRoot, randomUUID())
+  fixtures.push(root)
+  const dshRoot = join(root, 'dsh')
+  const dshHome = join(root, 'home')
+  mkdirSync(join(dshRoot, 'dist'), { recursive: true })
+  mkdirSync(join(dshHome, 'profiles', 'web'), { recursive: true })
+  copyFileSync(process.execPath, join(root, 'node.exe'))
+  writeFileSync(join(dshRoot, 'dist', 'cli.js'), 'export {}\n', 'utf8')
+  writeJson(join(dshRoot, 'package.json'), {
+    name: '@deepseek-ai/dsh', version: dshVersion, bin: { dsh: 'dist/cli.js' },
+  })
+  writeJson(join(dshHome, 'profiles', 'web', 'package.json'), {
+    name: '@tianwen/web-profile',
+    dsh: { profile: { bundles: ['@tianwen/runtime-bundle'] } },
+    dependencies: { '@tianwen/runtime-bundle': runtimeVersion },
+  })
+  writeJson(join(dshHome, 'profiles', 'web', 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
+    name: '@tianwen/runtime-bundle', version: runtimeVersion,
+  })
+  return { nodeExecutable: join(root, 'node.exe'), dshRoot, dshHome }
+}
+
+function child(): FakeChild {
+  const result = new EventEmitter() as FakeChild
+  result.pid = 4321
+  result.stdout = new PassThrough()
+  result.stderr = new PassThrough()
+  result.kill = () => {
+    queueMicrotask(() => result.emit('exit', 0, null))
+    return true
+  }
+  return result
+}
+
+afterEach(() => {
+  while (fixtures.length) rmSync(fixtures.pop()!, { recursive: true, force: true })
+})
+
+describe('Tianwen Desktop Web host contract', () => {
+  it('resolves only the fixed installed DSH and Web Profile layout', () => {
+    const input = fixture()
+    expect(resolveDesktopTarget(input)).toMatchObject({
+      nodeExecutable: realpathSync(input.nodeExecutable),
+      dshBin: realpathSync(join(input.dshRoot, 'dist/cli.js')),
+      dshHome: realpathSync(input.dshHome),
+      profileRoot: realpathSync(join(input.dshHome, 'profiles/web')),
+    })
+  })
+
+  it.each([
+    ['relative paths', (input: ReturnType<typeof fixture>) => ({ ...input, dshRoot: 'relative' })],
+    ['wrong DSH version', (input: ReturnType<typeof fixture>) => {
+      writeJson(join(input.dshRoot, 'package.json'), { name: '@deepseek-ai/dsh', version: '0.1.1', bin: { dsh: 'dist/cli.js' } })
+      return input
+    }],
+    ['escaping bin.dsh', (input: ReturnType<typeof fixture>) => {
+      writeJson(join(input.dshRoot, 'package.json'), { name: '@deepseek-ai/dsh', version: dshVersion, bin: { dsh: '../cli.js' } })
+      return input
+    }],
+    ['missing Web Profile', (input: ReturnType<typeof fixture>) => {
+      rmSync(join(input.dshHome, 'profiles', 'web'), { recursive: true })
+      return input
+    }],
+    ['missing Runtime bundle declaration', (input: ReturnType<typeof fixture>) => {
+      writeJson(join(input.dshHome, 'profiles', 'web', 'package.json'), { dsh: { profile: { bundles: [] } }, dependencies: {} })
+      return input
+    }],
+    ['duplicate Runtime bundle declaration', (input: ReturnType<typeof fixture>) => {
+      writeJson(join(input.dshHome, 'profiles', 'web', 'package.json'), { dsh: { profile: { bundles: ['@tianwen/runtime-bundle', '@tianwen/runtime-bundle'] } }, dependencies: { '@tianwen/runtime-bundle': runtimeVersion } })
+      return input
+    }],
+    ['wrong Runtime version', (input: ReturnType<typeof fixture>) => {
+      writeJson(join(input.dshHome, 'profiles', 'web', 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), { name: '@tianwen/runtime-bundle', version: '9.9.9' })
+      return input
+    }],
+    ['Runtime directory outside Profile', (input: ReturnType<typeof fixture>) => {
+      const outside = join(input.dshHome, 'runtime-package.json')
+      writeJson(outside, { name: '@tianwen/runtime-bundle', version: runtimeVersion })
+      rmSync(join(input.dshHome, 'profiles', 'web', 'node_modules'), { recursive: true })
+      mkdirSync(join(input.dshHome, 'profiles', 'web', 'node_modules', '@tianwen'), { recursive: true })
+      writeFileSync(join(input.dshHome, 'profiles', 'web', 'node_modules', '@tianwen', 'runtime-bundle'), outside, 'utf8')
+      return input
+    }],
+  ])('rejects %s', (_label, change) => {
+    expect(() => resolveDesktopTarget(change(fixture()))).toThrow()
+  })
+
+  it('accepts one exact value for every command argument', () => {
+    const input = fixture()
+    expect(parseDesktopArgs(['--node', input.nodeExecutable, '--dsh-root', input.dshRoot, '--dsh-home', input.dshHome])).toEqual(input)
+    expect(() => parseDesktopArgs(['--node', input.nodeExecutable, '--node', input.nodeExecutable, '--dsh-root', input.dshRoot, '--dsh-home', input.dshHome])).toThrow()
+    expect(() => parseDesktopArgs(['--node', input.nodeExecutable, '--dsh-root', input.dshRoot, '--dsh-home', input.dshHome, 'extra'])).toThrow()
+  })
+
+  it('starts DSH Web with the fixed loopback command and environment', async () => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child()
+    let spawned: unknown
+    const hostPromise = startDesktopWebHost(target, { spawn: ((program, args, options) => {
+      spawned = { program, args, options }
+      queueMicrotask(() => fake.stdout.write('ready http://127.0.0.1:4312/\n'))
+      return fake
+    }) as never })
+    const host = await hostPromise
+    expect(spawned).toEqual({
+      program: target.nodeExecutable,
+      args: [target.dshBin, 'web', '--host', '127.0.0.1', '--port', '0', '--no-open'],
+      options: expect.objectContaining({ shell: false, windowsHide: true }),
+    })
+    expect((spawned as { options: { env: NodeJS.ProcessEnv } }).options.env).toMatchObject({
+      ...process.env, DSH_HOME: target.dshHome, DSH_TELEMETRY_DISABLED: '1',
+    })
+    expect(host.url.href).toBe('http://127.0.0.1:4312/')
+    await host.stop()
+  })
+
+  it.each(['https://example.com/', 'file:///C:/secret', 'data:text/plain,nope'])('rejects a non-loopback ready URL', async url => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child()
+    const pending = startDesktopWebHost(target, { spawn: (() => {
+      queueMicrotask(() => fake.stdout.write(`${url}\n`))
+      return fake
+    }) as never })
+    await expect(pending).rejects.toThrow()
+  })
+
+  it('rejects when the child exits before readiness', async () => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child()
+    const pending = startDesktopWebHost(target, { spawn: (() => {
+      queueMicrotask(() => fake.emit('exit', 1, null))
+      return fake
+    }) as never })
+    await expect(pending).rejects.toThrow()
+  })
+
+  it('rejects after the injected 120-second readiness timeout', async () => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child()
+    let fire: (() => void) | undefined
+    const pending = startDesktopWebHost(target, {
+      spawn: (() => fake) as never,
+      setTimeout: ((handler: () => void) => {
+        fire = handler
+        return 1
+      }) as never,
+      clearTimeout: (() => undefined) as never,
+    })
+    fire!()
+    await expect(pending).rejects.toThrow(/120/u)
+  })
+
+  it('rejects more than 64 KiB before readiness', async () => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child()
+    const pending = startDesktopWebHost(target, { spawn: (() => {
+      queueMicrotask(() => fake.stderr.write(Buffer.alloc(65_537)))
+      return fake
+    }) as never })
+    await expect(pending).rejects.toThrow(/64/u)
+  })
+
+  it('shares one stop operation between concurrent callers', async () => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child()
+    let kills = 0
+    fake.kill = () => {
+      kills += 1
+      queueMicrotask(() => fake.emit('exit', 0, null))
+      return true
+    }
+    const host = await startDesktopWebHost(target, { spawn: (() => {
+      queueMicrotask(() => fake.stdout.write('http://127.0.0.1:4313/\n'))
+      return fake
+    }) as never })
+    await Promise.all([host.stop(), host.stop()])
+    expect(kills).toBe(1)
+  })
+})
