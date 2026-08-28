@@ -136,7 +136,18 @@ async function initializeProfile(profileRoot: string): Promise<void> {
   appBoot.initProfile(profileRoot, appBoot.DEFAULT_PROFILE_BUNDLES)
 }
 
-function childEnvironment(dshHome: string): NodeJS.ProcessEnv {
+async function initializeWebProfile(profileRoot: string): Promise<void> {
+  const appBoot = await import(pathToFileURL(appBootEntry).href) as {
+    PROFILE_TEMPLATES: Record<string, readonly string[]>
+    initProfile(path: string, bundles: readonly string[]): void
+  }
+  appBoot.initProfile(profileRoot, appBoot.PROFILE_TEMPLATES.web)
+}
+
+function childEnvironment(
+  dshHome: string,
+  store = storeRoot,
+): NodeJS.ProcessEnv {
   const systemRoot = process.env.SystemRoot ?? process.env.WINDIR
   if (systemRoot === undefined) throw new Error('SystemRoot is required')
   const tempRoot = join(runRoot, 'temp')
@@ -155,7 +166,7 @@ function childEnvironment(dshHome: string): NodeJS.ProcessEnv {
     PNPM_CONFIG_CACHE_DIR: join(lifecycleRoot, 'npm-cache'),
     PNPM_CONFIG_CONFIRM_MODULES_PURGE: 'false',
     PNPM_CONFIG_OFFLINE: 'true',
-    PNPM_CONFIG_STORE_DIR: storeRoot,
+    PNPM_CONFIG_STORE_DIR: store,
     PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: 'false',
     SystemRoot: systemRoot,
     TEMP: tempRoot,
@@ -166,7 +177,11 @@ function childEnvironment(dshHome: string): NodeJS.ProcessEnv {
   return environment
 }
 
-function runDshPlugin(dshHome: string, args: string[]): DshResult {
+function runDshPlugin(
+  dshHome: string,
+  args: string[],
+  store = storeRoot,
+): DshResult {
   dshSpawnCount += 1
   const result = spawnSync(
     process.execPath,
@@ -174,7 +189,7 @@ function runDshPlugin(dshHome: string, args: string[]): DshResult {
     {
       cwd: runRoot,
       encoding: 'utf8',
-      env: childEnvironment(dshHome),
+      env: childEnvironment(dshHome, store),
       shell: false,
       timeout: 600_000,
       windowsHide: true,
@@ -367,5 +382,99 @@ describe.runIf(enabled)('portable native DSH plugin lifecycle', () => {
     expect(readFileSync(join(selectedRoot, 'pnpm-workspace.yaml'), 'utf8'))
       .toMatch(/^allowBuilds:\r?\n  koffi: true$/mu)
     expectRuntimeRemoved(selectedRoot)
+  }, 1_200_000)
+
+  it('mutates workspace policy and disables automatic existing-Profile preparation', async () => {
+    const dshHome = join(runRoot, 'existing-web-failure-home')
+    const selectedRoot = join(dshHome, 'profiles', 'web')
+    const controlRoot = join(dshHome, 'profiles', 'control')
+    const stateRoot = join(selectedRoot, 'state')
+    await initializeWebProfile(selectedRoot)
+    await initializeProfile(controlRoot)
+    mkdirSync(stateRoot, { recursive: true })
+    writeFileSync(join(stateRoot, 'preserved.json'), '{"preserved":true}\n')
+
+    const lock = spawnSync(
+      process.execPath,
+      [pnpmEntry, 'install', '--offline', '--lockfile-only', '--ignore-scripts'],
+      {
+        cwd: selectedRoot,
+        encoding: 'utf8',
+        env: childEnvironment(dshHome),
+        shell: false,
+        timeout: 600_000,
+        windowsHide: true,
+      },
+    )
+    expect(lock.error).toBeUndefined()
+    expect(lock.signal).toBeNull()
+    expect(lock.status, `${lock.stdout ?? ''}\n${lock.stderr ?? ''}`).toBe(0)
+
+    const protectedFiles = [
+      'package.json',
+      'pnpm-workspace.yaml',
+      'cordis.patch.yml',
+      'pnpm-lock.yaml',
+    ] as const
+    const protectedBefore = Object.fromEntries(protectedFiles.map(name => [
+      name,
+      readFileSync(join(selectedRoot, name)),
+    ])) as Record<typeof protectedFiles[number], Buffer>
+    const selectedManifestBefore = readJson<{
+      dependencies?: Record<string, string>
+      dsh?: { profile?: { bundles?: string[] } }
+    }>(join(selectedRoot, 'package.json'))
+    const runtimeDeclarationBefore = {
+      dependency: selectedManifestBefore.dependencies?.[runtimePackage],
+      bundles: selectedManifestBefore.dsh?.profile?.bundles?.filter(
+        bundle => bundle === runtimePackage,
+      ) ?? [],
+    }
+    expect(selectedManifestBefore.dsh?.profile?.bundles).toEqual([
+      '@deepseek-ai/dsh-base',
+      '@deepseek-ai/dsh-web-app',
+    ])
+    expect(runtimeDeclarationBefore).toEqual({ dependency: undefined, bundles: [] })
+    const controlBefore = snapshotTree(controlRoot)
+    const stateBefore = snapshotTree(stateRoot)
+
+    const emptyStore = join(runRoot, 'empty-store-existing-web-failure')
+    mkdirSync(emptyStore)
+    expect(readdirSync(emptyStore)).toEqual([])
+
+    const spawnCountBefore = dshSpawnCount
+    const failure = runDshPlugin(dshHome, [
+      '--profile', 'web', '--allow-build=koffi',
+      'add', runtimeTarball,
+    ], emptyStore)
+
+    expect(dshSpawnCount - spawnCountBefore).toBe(1)
+    expect(failure.error).toBeUndefined()
+    expect(failure.signal).toBeNull()
+    expect(failure.status).not.toBeNull()
+    expect(failure.status, `${failure.stdout}\n${failure.stderr}`).not.toBe(0)
+    expect(readFileSync(join(selectedRoot, 'package.json')))
+      .toEqual(protectedBefore['package.json'])
+    expect(readFileSync(join(selectedRoot, 'cordis.patch.yml')))
+      .toEqual(protectedBefore['cordis.patch.yml'])
+    expect(readFileSync(join(selectedRoot, 'pnpm-lock.yaml')))
+      .toEqual(protectedBefore['pnpm-lock.yaml'])
+    expect(readFileSync(join(selectedRoot, 'pnpm-workspace.yaml')))
+      .not.toEqual(protectedBefore['pnpm-workspace.yaml'])
+    expect(readFileSync(join(selectedRoot, 'pnpm-workspace.yaml'), 'utf8'))
+      .toMatch(/(?:^|\r?\n)allowBuilds:\r?\n  koffi: true(?:\r?\n|$)/u)
+
+    const selectedManifestAfter = readJson<{
+      dependencies?: Record<string, string>
+      dsh?: { profile?: { bundles?: string[] } }
+    }>(join(selectedRoot, 'package.json'))
+    expect({
+      dependency: selectedManifestAfter.dependencies?.[runtimePackage],
+      bundles: selectedManifestAfter.dsh?.profile?.bundles?.filter(
+        bundle => bundle === runtimePackage,
+      ) ?? [],
+    }).toEqual(runtimeDeclarationBefore)
+    expect(snapshotTree(controlRoot)).toBe(controlBefore)
+    expect(snapshotTree(stateRoot)).toBe(stateBefore)
   }, 1_200_000)
 })
