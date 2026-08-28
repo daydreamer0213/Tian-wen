@@ -111,6 +111,26 @@ planned skip, the Desktop package built, repository typecheck passed, and `git d
 These checks protect the implementation and default boundary; they do not substitute for the missing
 real Desktop proof.
 
+## Post-fix local gates
+
+After the harness cleanup fix `3909ccca745feeb2a028a118f2d6c9ef6225d2dd`, the controller ran the
+fresh local gates with the opt-in and Provider environment removed:
+
+- frozen install, Runtime build, Desktop build, repository typecheck, DSH install check, and private
+  import check: exit `0`;
+- Desktop focused tests: `42 passed`, plus the one planned real E2E skip;
+- canonical TypeScript Vitest partitions: `158/158` and `204/204` passed;
+- all nine offline TypeScript CI demos: exit `0` with no Provider request;
+- Windows installer gate: concurrent cold boot `8/8` (428 links), then `116/116` tests passed;
+- Python gate on D-drive CPython `3.12.13`: Ruff and compileall exit `0`, then `608 passed` and
+  `4 skipped` (the paid live probe and three documented Windows-specific skips);
+- final `git diff --check`: exit `0`.
+
+An initial `uv python install 3.12` attempt exhausted its network retries while fetching the standalone
+archive. The already materialized D-drive CPython `3.12.13` was then verified and used with downloads
+disabled for the successful code gate. This external download failure is not a project test failure.
+None of these default/offline gates reran the frozen opt-in E2E or replace its incomplete result.
+
 ## Learning facts
 
 - This was infrastructure verification, not a natural development task.
