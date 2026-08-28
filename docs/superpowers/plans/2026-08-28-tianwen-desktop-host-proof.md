@@ -200,10 +200,14 @@ expect(DESKTOP_WINDOW_OPTIONS.webPreferences).toEqual({
   sandbox: true,
 })
 expect(desktopNavigationAllowed('http://127.0.0.1:3210/path', readyUrl)).toBe(true)
+expect(desktopNavigationAllowed('http://127.0.0.1:3211/', readyUrl)).toBe(false)
 expect(desktopNavigationAllowed('https://example.com/', readyUrl)).toBe(false)
 ```
 
 Keep these constants/functions in `host.ts` so the default Node test never imports Electron.
+Also expose the smallest Node-only shutdown coordinator used by `main.ts`; test that concurrent calls
+share one `host.stop()`, exit `0` after success, and report a concise error plus exit `1` after a stop
+failure.
 
 - [ ] **Step 2: Verify the new assertions fail**
 
@@ -214,7 +218,7 @@ Run the focused Vitest file and expect missing exports.
 Set:
 
 ```powershell
-$env:ELECTRON_CACHE = 'D:\DevData\electron-cache'
+$env:electron_config_cache = 'D:\DevData\electron-cache'
 $env:PNPM_CONFIG_STORE_DIR = 'D:\DevData\pnpm-store'
 $env:NPM_CONFIG_CACHE = 'D:\DevData\npm-cache'
 pnpm --filter @tianwen/desktop-host add --save-dev --save-exact electron@43.4.0
@@ -244,8 +248,9 @@ await window.loadURL(host.url.href)
 
 Use `app.requestSingleInstanceLock()`. Print the owned DSH PID after launch and print the ready URL
 only after `did-finish-load`. On `window-all-closed`/`before-quit`, prevent final exit once, await the
-idempotent `host.stop()`, then call `app.exit(0)`. A startup error writes one concise stderr message
-and exits nonzero. No preload or renderer file is created.
+idempotent `host.stop()`, then call `app.exit(0)`. If shutdown fails, write one concise stderr message
+and call `app.exit(1)` so the app cannot hang after its last window closes. A startup error likewise
+writes one concise stderr message and exits nonzero. No preload or renderer file is created.
 
 When `TIANWEN_DESKTOP_E2E_EXIT_AFTER_LOAD=1`, close the window after the ready line. This is the only
 test seam in the Electron process.
