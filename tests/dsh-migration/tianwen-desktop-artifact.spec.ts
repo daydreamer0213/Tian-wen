@@ -54,4 +54,15 @@ describe('Tianwen Desktop B1 artifact audit', () => {
     mkdirSync(join(unpackedRoot, 'resources/runtime'), { recursive: true })
     expect(() => auditDesktopArtifact(unpackedRoot)).toThrow(/runtime|forbidden/iu)
   })
+
+  it('rejects an out-of-app payload elsewhere in resources', () => {
+    const unpackedRoot = createUnpackedRoot()
+    writeFixture(
+      unpackedRoot,
+      'resources/vendor/node_modules/@deepseek-ai/dsh/package.json',
+      'forbidden',
+    )
+
+    expect(() => auditDesktopArtifact(unpackedRoot)).toThrow(/forbidden|allowlist/iu)
+  })
 })

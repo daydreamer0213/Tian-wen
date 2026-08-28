@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -7,6 +7,15 @@ const B1_APPLICATION_FILES = new Set([
   'dist/host.js',
   'dist/main.js',
   'package.json',
+])
+
+const B1_RESOURCE_FILES = new Set([
+  'app/dist/bootstrap.js',
+  'app/dist/host.js',
+  'app/dist/main.js',
+  'app/package.json',
+  'LICENSE.txt',
+  'THIRD_PARTY_NOTICES.md',
 ])
 
 function collectFiles(root) {
@@ -28,7 +37,25 @@ function collectFiles(root) {
 export function auditDesktopArtifact(unpackedRoot, expectedRuntimeTarball) {
   const root = resolve(unpackedRoot)
   const resources = join(root, 'resources')
-  const applicationFiles = collectFiles(join(resources, 'app'))
+  const resourceFiles = collectFiles(resources)
+  if (expectedRuntimeTarball === undefined) {
+    const unexpectedResourceFiles = resourceFiles.filter(path => !B1_RESOURCE_FILES.has(path))
+    const missingResourceFiles = [...B1_RESOURCE_FILES].filter(path => !resourceFiles.includes(path))
+    if (unexpectedResourceFiles.length > 0 || missingResourceFiles.length > 0) {
+      throw new Error(
+        `resource allowlist mismatch; forbidden: ${unexpectedResourceFiles.join(', ') || 'none'}; missing: ${missingResourceFiles.join(', ') || 'none'}`,
+      )
+    }
+
+    if (existsSync(join(resources, 'runtime'))) {
+      throw new Error('forbidden Runtime resource in B1 artifact')
+    }
+    return
+  }
+
+  const applicationFiles = resourceFiles
+    .filter(path => path.startsWith('app/'))
+    .map(path => path.slice('app/'.length))
   const unexpectedApplicationFiles = applicationFiles.filter(path => !B1_APPLICATION_FILES.has(path))
   const missingApplicationFiles = [...B1_APPLICATION_FILES].filter(path => !applicationFiles.includes(path))
   if (unexpectedApplicationFiles.length > 0 || missingApplicationFiles.length > 0) {
@@ -38,13 +65,7 @@ export function auditDesktopArtifact(unpackedRoot, expectedRuntimeTarball) {
   }
 
   for (const legalResource of ['LICENSE.txt', 'THIRD_PARTY_NOTICES.md']) {
-    const path = join(resources, legalResource)
-    if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`missing required resource: ${legalResource}`)
-  }
-
-  const runtime = join(resources, 'runtime')
-  if (expectedRuntimeTarball === undefined && existsSync(runtime)) {
-    throw new Error('forbidden Runtime resource in B1 artifact')
+    if (!resourceFiles.includes(legalResource)) throw new Error(`missing required resource: ${legalResource}`)
   }
 }
 
