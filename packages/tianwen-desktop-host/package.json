@@ -11,7 +11,11 @@
     }
   },
   "scripts": {
+    "start": "electron dist/main.js",
     "build": "tsc -b --pretty false",
     "typecheck": "tsc -b --pretty false"
+  },
+  "devDependencies": {
+    "electron": "43.4.0"
   }
 }

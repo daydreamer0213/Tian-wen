@@ -10,6 +10,23 @@ const maxStartupOutputBytes = 64 * 1024
 const readinessTimeoutMs = 120_000
 const gracefulStopTimeoutMs = 5_000
 
+export const DESKTOP_WINDOW_OPTIONS = {
+  webPreferences: {
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+  },
+} as const
+
+export function desktopNavigationAllowed(url: string, readyUrl: URL): boolean {
+  try {
+    return readyUrl.protocol === 'http:' && ['127.0.0.1', '[::1]', '::1'].includes(readyUrl.hostname) &&
+      new URL(url).origin === readyUrl.origin
+  } catch {
+    return false
+  }
+}
+
 export interface DesktopTargetInput {
   readonly nodeExecutable: string
   readonly dshRoot: string

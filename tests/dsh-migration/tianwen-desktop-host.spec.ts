@@ -5,6 +5,8 @@ import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  DESKTOP_WINDOW_OPTIONS,
+  desktopNavigationAllowed,
   parseDesktopArgs,
   resolveDesktopTarget,
   startDesktopWebHost,
@@ -66,6 +68,17 @@ afterEach(() => {
 })
 
 describe('Tianwen Desktop Web host contract', () => {
+  it('exposes a sandboxed window boundary that accepts only the ready origin', () => {
+    const readyUrl = new URL('http://127.0.0.1:3210/')
+    expect(DESKTOP_WINDOW_OPTIONS.webPreferences).toEqual({
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    })
+    expect(desktopNavigationAllowed('http://127.0.0.1:3210/path', readyUrl)).toBe(true)
+    expect(desktopNavigationAllowed('https://example.com/', readyUrl)).toBe(false)
+  })
+
   it('resolves only the fixed installed DSH and Web Profile layout', () => {
     const input = fixture()
     expect(resolveDesktopTarget(input)).toMatchObject({

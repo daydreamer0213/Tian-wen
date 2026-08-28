@@ -3,6 +3,7 @@ packages:
 allowBuilds:
   '@deepseek-ai/dsh-subprocess-local': false
   '@google/genai': false
+  electron: true
   esbuild: false
   koffi: false
   node-pty: false
