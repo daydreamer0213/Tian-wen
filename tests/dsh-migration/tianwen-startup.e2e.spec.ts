@@ -41,6 +41,7 @@ const enabled = process.env.TIANWEN_DSH_PHASE2_STARTUP === '1'
 const controlledInstalledEnabled = process.platform === 'win32' &&
   process.env.TIANWEN_CONTROLLED_INSTALLED_E2E === '1'
 const runtimePackage = '@tianwen/runtime-bundle'
+const runtimePackageVersion = '0.1.0'
 const liveGoalObjective = 'Call tianwen_smoke_action exactly once. After it succeeds, mark this Goal complete with update_goal, then reply exactly TIANWEN_GOAL_ROUND_OK.'
 const controlledFixtureBase = resolve(
   process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-test-fixtures',
@@ -594,7 +595,7 @@ async function start(): Promise<void> {
   ])
   expect(manifest.dependencies['@deepseek-ai/dsh-base']).toBe('0.1.1-rc.2')
   expect(manifest.dependencies['@deepseek-ai/dsh-headless']).toBe('0.1.1-rc.2')
-  expect(manifest.dependencies[runtimePackage]).toBe('0.0.0')
+  expect(manifest.dependencies[runtimePackage]).toBe(runtimePackageVersion)
   for (const packageName of manifest.dsh.profile.bundles) {
     const bundleRoot = realpathSync(resolve(profileRoot, 'node_modules', ...packageName.split('/')))
     expect(relative(realpathSync(profileRoot), bundleRoot).startsWith('..')).toBe(false)
@@ -1408,6 +1409,10 @@ async function start(): Promise<void> {
 }
 
 describe('Tianwen formal headless startup', () => {
+  it('keeps the Profile Runtime version aligned with the published archive', () => {
+    expect(archive).toContain(`-${runtimePackageVersion}.tgz`)
+  })
+
   it.each([
     ['inherits the controller store', 'D:/DevData/controller-pnpm-store', 'D:/DevData/controller-pnpm-store'],
     ['uses the D drive fallback', undefined, 'D:/DevData/pnpm-store'],
