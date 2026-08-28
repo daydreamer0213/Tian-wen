@@ -93,8 +93,8 @@ export function discoverDesktopTargetInputs(
   const cmd = join(systemRoot, 'System32', 'cmd.exe')
   const nodes = unique(commandOutput(run, where, ['node']))
   const packageRoots = unique([
-    ...commandOutput(run, cmd, ['/d', '/s', '/c', '"npm root -g"']),
-    ...commandOutput(run, cmd, ['/d', '/s', '/c', '"pnpm root -g"']),
+    ...commandOutput(run, cmd, ['/d', '/s', '/c', 'npm root -g']),
+    ...commandOutput(run, cmd, ['/d', '/s', '/c', 'pnpm root -g']),
   ])
   const homes: string[] = []
   if (env.DSH_HOME !== undefined && env.DSH_HOME !== '') homes.push(env.DSH_HOME)

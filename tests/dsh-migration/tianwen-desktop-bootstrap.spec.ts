@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   createDesktopBootstrapInteractions,
@@ -83,14 +83,14 @@ describe('Tianwen Desktop saved target bootstrap', () => {
       run: (program, args) => {
         calls.push({ program, args })
         if (program.endsWith('where.exe')) return 'C:\\Node22\\node.exe\r\nC:\\Node22\\node.exe\r\n'
-        if (args.at(-1) === '"npm root -g"') return 'C:\\npm-global\\node_modules\r\n'
+        if (args.at(-1) === 'npm root -g') return 'C:\\npm-global\\node_modules\r\n'
         return 'C:\\pnpm-global\\node_modules\r\nC:\\pnpm-global\\node_modules\r\n'
       },
     })
     expect(calls).toEqual([
       { program: 'C:\\Windows\\System32\\where.exe', args: ['node'] },
-      { program: 'C:\\Windows\\System32\\cmd.exe', args: ['/d', '/s', '/c', '"npm root -g"'] },
-      { program: 'C:\\Windows\\System32\\cmd.exe', args: ['/d', '/s', '/c', '"pnpm root -g"'] },
+      { program: 'C:\\Windows\\System32\\cmd.exe', args: ['/d', '/s', '/c', 'npm root -g'] },
+      { program: 'C:\\Windows\\System32\\cmd.exe', args: ['/d', '/s', '/c', 'pnpm root -g'] },
     ])
     expect(inputs).toEqual([
       {
@@ -111,7 +111,7 @@ describe('Tianwen Desktop saved target bootstrap', () => {
       env: { SystemRoot: 'C:\\Windows', DSH_HOME: 'D:\\dsh-home' },
       run: (program, args) => {
         if (program.endsWith('where.exe')) return 'C:\\Node22\\node.exe\n'
-        if (args.at(-1) === '"npm root -g"') throw new Error('npm unavailable')
+        if (args.at(-1) === 'npm root -g') throw new Error('npm unavailable')
         return 'C:\\pnpm-global\\node_modules\n'
       },
     })
@@ -120,6 +120,36 @@ describe('Tianwen Desktop saved target bootstrap', () => {
       dshRoot: 'C:\\pnpm-global\\node_modules\\@deepseek-ai\\dsh',
       dshHome: 'D:\\dsh-home',
     }])
+  })
+
+  it.skipIf(process.platform !== 'win32')('discovers the pnpm global root through real cmd.exe arguments', () => {
+    const root = fixture()
+    const shimDirectory = join(root.dshHome, 'pnpm-shim')
+    const sentinelRoot = join(root.dshHome, 'sentinel-global', 'node_modules')
+    const pathKey = Object.keys(process.env).find(key => key.toUpperCase() === 'PATH') ?? 'Path'
+    const originalPath = process.env[pathKey]
+    const systemDirectory = join(process.env.SystemRoot!, 'System32')
+    mkdirSync(shimDirectory, { recursive: true })
+    writeFileSync(join(shimDirectory, 'pnpm.cmd'), [
+      '@echo off',
+      'if not "%~1"=="root" exit /b 1',
+      'if not "%~2"=="-g" exit /b 1',
+      'if not "%~3"=="" exit /b 1',
+      `echo ${sentinelRoot}`,
+    ].join('\r\n'), 'utf8')
+    process.env[pathKey] = `${shimDirectory};${dirname(process.execPath)};${systemDirectory};${originalPath ?? ''}`
+    try {
+      const inputs = discoverDesktopTargetInputs({
+        env: { SystemRoot: process.env.SystemRoot, DSH_HOME: root.dshHome },
+      })
+      expect(inputs).toContainEqual(expect.objectContaining({
+        dshRoot: join(sentinelRoot, '@deepseek-ai', 'dsh'),
+        dshHome: root.dshHome,
+      }))
+    } finally {
+      if (originalPath === undefined) delete process.env[pathKey]
+      else process.env[pathKey] = originalPath
+    }
   })
 
   it('uses a complete CLI target without touching settings, discovery, or selection', async () => {
