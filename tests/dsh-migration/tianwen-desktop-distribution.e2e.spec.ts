@@ -118,6 +118,10 @@ interface ProcessIdentity {
   readonly pid: number
 }
 
+type OwnedProcessIdentityAcceptance =
+  | { readonly kind: 'accepted', readonly identity: ProcessIdentity }
+  | { readonly kind: 'rejected', readonly reason: string }
+
 function fail(message: string): never {
   throw new Error(message)
 }
@@ -892,6 +896,81 @@ function sameProcessIdentity(
     && current.creationTimeUtc === expected.creationTimeUtc
 }
 
+function captureOwnedProcessIdentity(
+  inputs: Pick<DistributionInputs, 'nodeExecutable' | 'powershell'>,
+  rootIdentity: ProcessIdentity,
+  ownedPid: number,
+  environment: NodeJS.ProcessEnv,
+): OwnedProcessIdentityAcceptance {
+  const result = runPowerShellJson<OwnedProcessIdentityAcceptance>(
+    inputs.powershell,
+    String.raw`
+function Reject([string]$reason) {
+  @{ kind = 'rejected'; reason = $reason } | ConvertTo-Json -Compress
+  exit 0
+}
+function Created-At($process) {
+  $process.CreationDate.ToUniversalTime().ToString('o')
+}
+$processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+$byId = @{}
+foreach ($process in $processes) { $byId[[int]$process.ProcessId] = $process }
+$rootPid = [int]$args[0]
+$ownedPid = [int]$args[1]
+$root = $byId[$rootPid]
+if ($null -eq $root) { Reject 'Desktop root process is no longer live' }
+if (-not [string]::Equals([string]$root.ExecutablePath, [string]$args[2], [StringComparison]::OrdinalIgnoreCase) -or
+    (Created-At $root) -cne [string]$args[3]) {
+  Reject 'Desktop root process identity changed before DSH identity acceptance'
+}
+$owned = $byId[$ownedPid]
+if ($null -eq $owned) { Reject 'emitted DSH PID was not live during identity acceptance' }
+if (-not [string]::Equals([string]$owned.ExecutablePath, [string]$args[4], [StringComparison]::OrdinalIgnoreCase)) {
+  Reject 'emitted DSH PID does not run the exact selected Node executable'
+}
+$seen = [Collections.Generic.HashSet[int]]::new()
+$cursor = $owned
+$belongs = $false
+while ($null -ne $cursor) {
+  $parentPid = [int]$cursor.ParentProcessId
+  if ($parentPid -le 0 -or -not $seen.Add($parentPid)) { break }
+  $parent = $byId[$parentPid]
+  if ($null -eq $parent -or $cursor.CreationDate.ToUniversalTime() -lt $parent.CreationDate.ToUniversalTime()) { break }
+  if ($parentPid -eq $rootPid) { $belongs = $true; break }
+  $cursor = $parent
+}
+if (-not $belongs) { Reject 'emitted DSH PID is not in the captured Desktop root process tree' }
+@{
+  kind = 'accepted'
+  identity = @{
+    pid = [int]$owned.ProcessId
+    executablePath = [string]$owned.ExecutablePath
+    creationTimeUtc = Created-At $owned
+  }
+} | ConvertTo-Json -Compress -Depth 4
+`,
+    [
+      String(rootIdentity.pid),
+      String(ownedPid),
+      rootIdentity.executablePath,
+      rootIdentity.creationTimeUtc,
+      inputs.nodeExecutable,
+    ],
+    environment,
+  )
+  if (result.kind === 'accepted') {
+    if (result.identity.pid !== ownedPid
+      || win32.normalize(result.identity.executablePath).toLowerCase()
+        !== win32.normalize(inputs.nodeExecutable).toLowerCase()
+      || result.identity.creationTimeUtc === '') {
+      return { kind: 'rejected', reason: 'accepted DSH identity payload was invalid' }
+    }
+    return result
+  }
+  if (result.kind === 'rejected' && result.reason !== '') return result
+  return { kind: 'rejected', reason: 'DSH identity query returned an invalid result' }
+}
+
 function terminateObservedTree(
   inputs: Pick<DistributionInputs, 'powershell' | 'system32'>,
   identity: ProcessIdentity | undefined,
@@ -953,17 +1032,27 @@ async function runDesktop(
   let stdout = ''
   let stderr = ''
   let ownedDshIdentity: ProcessIdentity | undefined
+  let ownedDshIdentityError: string | undefined
+  let ownedDshIdentityChecked = false
   child.stdout.setEncoding('utf8')
   child.stderr.setEncoding('utf8')
   child.stdout.on('data', chunk => {
     stdout += String(chunk)
     const emittedPid = /Tianwen Desktop owns DSH PID (\d+)/u.exec(stdout)?.[1]
-    if (ownedDshIdentity === undefined && emittedPid !== undefined) {
-      ownedDshIdentity = captureProcessIdentity(
-        inputs.powershell,
-        Number(emittedPid),
-        environment,
-      )
+    if (!ownedDshIdentityChecked && emittedPid !== undefined) {
+      ownedDshIdentityChecked = true
+      try {
+        const acceptance = captureOwnedProcessIdentity(
+          inputs,
+          rootIdentity,
+          Number(emittedPid),
+          environment,
+        )
+        if (acceptance.kind === 'accepted') ownedDshIdentity = acceptance.identity
+        else ownedDshIdentityError = acceptance.reason
+      } catch (error) {
+        ownedDshIdentityError = error instanceof Error ? error.message : String(error)
+      }
     }
   })
   child.stderr.on('data', chunk => { stderr += String(chunk) })
@@ -1020,6 +1109,12 @@ async function runDesktop(
     const readyUrl = urlMatches[0]?.[1]
     if (!Number.isSafeInteger(ownedDshPid) || ownedDshPid <= 0 || readyUrl === undefined) {
       fail(`${label} emitted invalid lifecycle evidence`)
+    }
+    if (ownedDshIdentityError !== undefined) {
+      fail(`${label} rejected its emitted DSH process identity: ${ownedDshIdentityError}`)
+    }
+    if (!ownedDshIdentityChecked || ownedDshIdentity?.pid !== ownedDshPid) {
+      fail(`${label} did not accept the emitted DSH process identity while it was live`)
     }
     expect(captureProcessIdentity(inputs.powershell, ownedDshPid, environment)).toBeUndefined()
     await waitForEndpointClosed(readyUrl)
@@ -1202,29 +1297,6 @@ async function waitForRemoval(path: string): Promise<void> {
   }
   fail(`uninstaller did not remove ${path}`)
 }
-
-describe('Desktop distribution process cleanup identity', () => {
-  it('accepts only the same executable and creation time for a reused PID', () => {
-    const expected: ProcessIdentity = {
-      pid: 4040,
-      executablePath: 'D:\\Proof\\Tianwen Desktop.exe',
-      creationTimeUtc: '2026-08-28T12:00:00.0000000Z',
-    }
-    expect(sameProcessIdentity(expected, {
-      ...expected,
-      executablePath: 'd:\\proof\\TIANWEN DESKTOP.EXE',
-    })).toBe(true)
-    expect(sameProcessIdentity(expected, {
-      ...expected,
-      creationTimeUtc: '2026-08-28T12:00:01.0000000Z',
-    })).toBe(false)
-    expect(sameProcessIdentity(expected, {
-      ...expected,
-      executablePath: 'D:\\Other\\Tianwen Desktop.exe',
-    })).toBe(false)
-    expect(sameProcessIdentity(expected, undefined)).toBe(false)
-  })
-})
 
 describe('Tianwen Desktop distribution on an existing DSH', () => {
   it.runIf(enabled)(
