@@ -176,6 +176,27 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     expect(existsSync(join(externalProfiles, 'web'))).toBe(false)
   })
 
+  it('pins the missing-Profile DSH home before preparation can spawn', async () => {
+    const target = fixture()
+    rmSync(profileRoot(target), { recursive: true })
+    expect(inspectWebProfile(target)).toEqual({ kind: 'missing-profile', profileRoot: profileRoot(target) })
+    const externalHome = join(target.dshRoot, 'external-home')
+    rmSync(target.dshHome, { recursive: true })
+    mkdirSync(externalHome)
+    symlinkSync(externalHome, target.dshHome, 'junction')
+    let spawns = 0
+    await expect(prepareMissingWebProfile(target, 'D:\\runtime.tgz', {
+      spawn: (() => {
+        spawns += 1
+        const child = fakeChild()
+        queueMicrotask(() => child.emit('close', 0, null))
+        return child
+      }) as never,
+    })).rejects.toThrow(/DSH home|Profile parent/u)
+    expect(spawns).toBe(0)
+    expect(existsSync(join(externalHome, 'profiles', 'web'))).toBe(false)
+  })
+
   it.each([
     { label: 'nonzero exit', code: 7, signal: null, expectedExitCode: 7 },
     { label: 'signal exit', code: null, signal: 'SIGTERM', expectedExitCode: null },

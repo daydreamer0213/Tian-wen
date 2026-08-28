@@ -64,9 +64,9 @@ function missingProfileParentResolvesWithinHome(target: DesktopBaseTarget, path:
     }
     if (entry !== undefined) {
       try {
-        const home = realpathSync(target.dshHome)
+        if (realpathSync(target.dshHome) !== target.dshHome) return false
         const resolved = realpathSync(ancestor)
-        const child = relative(home, resolved)
+        const child = relative(target.dshHome, resolved)
         return statSync(resolved).isDirectory() && (child === '' || (!child.startsWith('..') && !isAbsolute(child)))
       } catch {
         return false
