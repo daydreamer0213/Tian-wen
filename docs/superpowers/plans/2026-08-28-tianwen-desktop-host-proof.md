@@ -324,8 +324,11 @@ node <exact-dsh-bin> plugin --profile web --allow-build=koffi add --offline <run
 ```
 
 Run it with `DSH_HOME` set to the fresh home and `DSH_TELEMETRY_DISABLED=1`. Verify the `web` Profile
-declares exactly one Runtime bundle and record the Runtime tarball hash. This preparation is not part
-of the Electron app and makes no Provider request.
+declares exactly one Runtime bundle and record the Runtime tarball hash. The DSH-owned offline add
+may record a non-empty `file:` package spec in `dependencies`; the installed package manifest
+(`@tianwen/runtime-bundle@0.1.0`) and its real path inside the Profile remain the authoritative
+identity and isolation checks. This preparation is not part of the Electron app and makes no
+Provider request.
 
 - [ ] **Step 5: Run the real opt-in test exactly once**
 
