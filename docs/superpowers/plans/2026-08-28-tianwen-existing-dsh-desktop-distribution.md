@@ -835,25 +835,25 @@ git commit -m "feat: bundle the exact Desktop Runtime archive"
 
 - [ ] **Step 1: Add default-skip and disposable-root guards**
 
-Run only on Windows when `TIANWEN_DESKTOP_DISTRIBUTION_E2E=1`. Require absolute paths for the packaged executable, exact DSH root, exact Node, source Runtime tarball, and a pre-created strict child of `D:\DevData`. Without opt-in, the file reports one planned skip and creates no files/processes.
+Run only on Windows when `TIANWEN_DESKTOP_DISTRIBUTION_E2E=1`. Require absolute paths for the packaged executable, NSIS installer, exact DSH root, exact Node, exact pnpm entry, source Runtime tarball, and a pre-created empty non-reparse strict child of `D:\DevData`. Without opt-in, the file reports one planned skip and creates no files/processes. Before the first product process, also require no conflicting Tianwen installation, shortcut, or running process; preflight failures may be corrected without consuming the one-shot product proof.
 
 - [ ] **Step 2: Implement automatic-discovery and saved-target proof**
 
-Under the disposable root, create a command shim directory where `pnpm.cmd` prints the exact global `node_modules` root containing the selected DSH. Set `PATH` to the shim, exact Node directory, and `%SystemRoot%\System32` in that order, set fresh `DSH_HOME`, and redirect `APPDATA`, `LOCALAPPDATA`, TEMP/TMP, pnpm and Electron caches under the same D-drive root. Remove all Provider credentials.
+Under the disposable root, create a command shim directory where `pnpm.cmd` prints the exact global `node_modules` root containing the selected DSH only for `root -g`; every other argument is forwarded to the preflighted exact pnpm entry. Set `PATH` to the shim, exact Node directory, and `%SystemRoot%\System32` in that order, set fresh `DSH_HOME`, and redirect `APPDATA`, `LOCALAPPDATA`, TEMP/TMP, pnpm and Electron caches under the same D-drive root. Remove all Provider credentials.
 
 Run the unpacked packaged executable with no path arguments and `TIANWEN_DESKTOP_E2E_EXIT_AFTER_LOAD=1`. The first run must discover/save the target and display the real native missing-Profile confirmation. The test uses Windows' built-in `System.Windows.Automation` API from its controller process to locate the `Tianwen Desktop` confirmation window, assert the create/cancel controls are present, and invoke the create button exactly once. No production environment variable or hidden product command bypasses confirmation. The app then installs the bundled Runtime through that exact DSH, loads the real loopback Web page, and exits cleanly. Remove the discovery shim and `DSH_HOME` hints and run the same executable again; the second run must use `desktop-target.json` and exit cleanly without another confirmation or Profile installation.
 
 - [ ] **Step 3: Assert the real product outcome**
 
-Assert both exits are `0`; each emits one owned DSH PID and one ready loopback URL; each owned PID is gone and each endpoint is closed. Assert saved settings have exactly four keys, installed Runtime is exact `0.1.0`, its Profile path is under the selected DSH home, the bundled and source tarball SHA-256 match, another initialized control Profile/tree is byte-identical, and no Provider credential was passed.
+Assert all three application exits are `0`; each emits one owned DSH PID and one ready loopback URL; each owned PID is gone and each endpoint is closed. Assert saved settings have exactly four keys, installed Runtime is exact `0.1.0`, its Profile path is under the selected DSH home, the source, unpacked, and installed Runtime tarball SHA-256 match, another standard initialized control Profile/tree is byte-identical, and no Provider credential was passed.
 
-Install the same NSIS artifact silently with `/S` and `/D=D:\DevData\tianwen-desktop-distribution\product-proof-01\installed`, run the installed shortcut target once against the already prepared Profile, then run its uninstaller silently. Assert the installed shell is removed while the external DSH root, DSH home, both Profiles, and `desktop-target.json` remain byte-identical. The configured `deleteAppDataOnUninstall: false` is therefore checked through real behavior rather than source text.
+Install the same NSIS artifact silently with `/S` and `/D=D:\DevData\tianwen-desktop-distribution\product-proof-01\installed`. Resolve the one newly created Windows shortcut with the built-in Windows Script Host, assert its target is the proof installation executable, then spawn that target directly so stdout/stderr and the isolated environment remain observable. After the installed B1 launch, run its uninstaller silently. Assert the installed shell and newly created shortcut/registration state are removed while the external DSH root, DSH home, both Profiles, and `desktop-target.json` remain byte-identical. The configured `deleteAppDataOnUninstall: false` is therefore checked through real behavior rather than source text.
 
 - [ ] **Step 4: Freeze and run the product proof once**
 
-Record the exact feature SHA before execution. Build/audit unpacked and NSIS artifacts first, then run only this opt-in file once using `D:\DevData\tianwen-desktop-distribution\product-proof-01`. Capture stdout/stderr, exit code, start/end UTC, source/resource hashes, executable/installer hashes, and test log hash. A failure is diagnosed from the preserved root; it is not silently rerun to obtain a nicer result.
+First commit and independently review the default-skipped E2E harness. Freeze that harness commit as the exact feature SHA. Build/audit unpacked and NSIS artifacts from that SHA, complete every read-only/preparation preflight, then start the one-shot boundary immediately before the first unpacked executable launch. Run only this opt-in file once using `D:\DevData\tianwen-desktop-distribution\product-proof-01`; the frozen sequence is unpacked B2 creation, unpacked saved-target B1 reuse, one silent install, installed saved-target B1 launch, and one silent uninstall. Capture stdout/stderr, exit code, start/end UTC, source/resource hashes, executable/installer/uninstaller hashes, and an outer-controller test log hash. Any failure stops the sequence and is diagnosed from the preserved root; it is not silently rerun to obtain a nicer result.
 
-- [ ] **Step 5: Write the handoff with separated facts**
+- [ ] **Step 5: Write the handoff after the frozen run with separated facts**
 
 The handoff reports separately:
 
@@ -864,11 +864,14 @@ The handoff reports separately:
 5. CI/local repository gates;
 6. external facts: unsigned preview, no public release/signing, no Provider task, no DSH upstream push.
 
-- [ ] **Step 6: Commit Task 9**
+- [ ] **Step 6: Commit the harness before execution, then the handoff after execution**
 
 ```powershell
-git add tests/dsh-migration/tianwen-desktop-distribution.e2e.spec.ts docs/operations/tianwen-existing-dsh-desktop-distribution-handoff.md
-git commit -m "test: prove existing-DSH Desktop distribution"
+git add tests/dsh-migration/tianwen-desktop-distribution.e2e.spec.ts
+git commit -m "test: add existing-DSH Desktop distribution proof"
+# independently review and freeze this SHA, then execute exactly once
+git add docs/operations/tianwen-existing-dsh-desktop-distribution-handoff.md
+git commit -m "docs: record existing-DSH Desktop distribution proof"
 ```
 
 ### Task 10: Run final gates and close the feature branch
