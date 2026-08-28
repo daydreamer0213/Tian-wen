@@ -128,8 +128,8 @@ jobs:
           }
           exit $testExit
       - run: pnpm --filter @tianwen/desktop-host pack:dir
-      - run: node scripts/audit-desktop-artifact.mjs dist/tianwen-desktop/win-unpacked "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.0.tgz"
       - run: pnpm --filter @tianwen/desktop-host pack:win
+      - run: node scripts/audit-desktop-artifact.mjs dist/tianwen-desktop/win-unpacked "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.0.tgz"
       - name: Assert one Desktop installer
         shell: pwsh
         run: |
