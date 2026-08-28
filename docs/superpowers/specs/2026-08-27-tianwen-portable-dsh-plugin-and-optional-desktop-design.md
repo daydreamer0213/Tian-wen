@@ -11,11 +11,11 @@ Tianwen 的主产品不是一个绑定专用安装器或桌面壳的独立 Agent
 
 ```text
 DeepSeek Harness
-└── Tianwen Runtime Bundle
-    ├── DSH CLI / headless Profile
-    ├── dsh web Profile
-    ├── DSH Desktop
-    └── Tianwen 自带安装器或桌面发行版
+├── Tianwen Runtime Bundle
+│   ├── DSH CLI / headless Profile
+│   └── dsh web Profile
+├── Tianwen 自带安装器（消费同一 Runtime）
+└── 可选 Tianwen-owned Electron 薄壳（消费同一 Runtime）
 ```
 
 核心 Bundle 只依赖 DSH 的公开插件、Profile、Agent、Session、Goal、Tool 和 Skill
@@ -25,8 +25,9 @@ DeepSeek Harness
 指向该用户的 DSH home、Profile 和状态根，不能继续假设 Tianwen 托管安装目录。
 
 Tianwen 自带安装器继续保留，作为隔离、已知版本、开箱即用的便利方案。桌面端则
-复用社区项目 DSH Desktop，作为第三种可选分发形式；它预装同一个 Tianwen Runtime
-Bundle，但不能成为核心产品的上游依赖。
+由 Tianwen 提供最小 Electron 薄壳，作为第三种可选分发形式；它只启动已经安装好的
+同一个 Tianwen Runtime Bundle。社区 DSH Desktop 仅作为桌面生命周期与 Windows
+打包经验的只读参考，不能成为核心产品的上游依赖或第二套 Runtime。
 
 实施顺序固定为：
 
@@ -38,9 +39,9 @@ Bundle，但不能成为核心产品的上游依赖。
 首期不开发 Tianwen 专属 Web 页面。Goal、Evidence、Learning 等能力先通过现有
 Runtime 和 CLI 合同工作，Web 与 Desktop 继续使用 DSH 自带界面。
 
-## 2. 当前事实
+## 2. 设计时事实快照
 
-### 2.1 Tianwen 当前产品基线
+### 2.1 2026-08-27 Tianwen 产品基线
 
 当前仓库固定 DSH `0.1.0-rc.7`。`@tianwen/runtime-bundle` 已具备 DSH Bundle
 metadata、Cordis patch、公开运行入口和 `tianwen` bin，因此产品依赖方向已经基本
@@ -82,14 +83,15 @@ Bundle，以及 Web 启动和界面改进。中间的
 最匹配的现有项目是社区维护的
 [`anywhere-labs/dsh-desktop`](https://github.com/anywhere-labs/dsh-desktop)，本设计核对
 的版本为 [`v2.0.3`](https://github.com/anywhere-labs/dsh-desktop/releases/tag/v2.0.3)。
-它是一个 Electron 薄壳，启动正式 DSH Host/Web UI，并通过 DSH/Cordis 插件增加
+它是一个 Electron 桌面发行版，启动 DSH Host/Web UI，并通过 DSH/Cordis 插件增加
 窗口、托盘、终端、Profile 管理和更新能力；其
 [`architecture.md`](https://github.com/anywhere-labs/dsh-desktop/blob/v2.0.3/docs/architecture.md)
-明确把 DSH 保持为未修改的上游子模块。
+说明了它如何同步固定上游源码。
 
-它适合作为可复用桌面外壳，不适合作为 Tianwen 核心依赖。它是社区项目而非
-DeepSeek 官方产品，Tianwen 发行版必须自己固定来源、版本、更新入口和验收，不得
-直接继承社区发行版的品牌与自动更新通道。
+进一步的源码复核表明，它同时打包完整 DSH 依赖闭包、pnpm、原生模块和多项 rc.2
+patch，因此不适合作为 Tianwen 可直接复用的桌面外壳。它适合只读借鉴 Electron
+生命周期、Profile 选择和 Windows 打包经验。Tianwen 薄壳必须直接消费已经验证的
+Runtime Bundle，不得继承社区发行版的 Runtime、品牌、市场、遥测或自动更新通道。
 
 ## 3. 产品依赖边界
 
@@ -267,25 +269,29 @@ DSH 公开安装/卸载机制，对目标 Profile 做前后快照和真实失败
 
 ## 8. 阶段四：可选桌面发行版
 
-### 8.1 复用方式
+### 8.1 实现方式
 
-桌面端基于固定版本的 DSH Desktop 源码和固定、兼容的 DSH 版本构建。它只负责：
+桌面端是 Tianwen 自己维护的最小 Electron 薄壳。它只负责：
 
-- 桌面窗口、托盘、终端和 Profile 管理；
-- 启动 DSH Host/Web UI；
-- 创建或选择一个 desktop-capable Profile；
-- 在该 Profile 中预装与 CLI 用户相同的 Tianwen Runtime Bundle；
-- Tianwen 的产品名、图标、默认 Profile、数据位置和更新来源。
+- 单实例、桌面窗口、可选托盘与最小应用生命周期；
+- 启动已经安装好的 Tianwen Profile 的 DSH Host/Web UI；
+- 等待 loopback ready URL，并只在原生窗口中加载该本地页面；
+- 退出时回收自己启动的 Runtime 子进程；
+- Tianwen 的产品名、图标、数据位置和后续单独决定的更新来源。
 
-Tianwen 不从零重写 Electron 壳，也不把 DSH Desktop 代码复制进 Runtime Bundle。
-桌面发行物必须保留 DSH Desktop 的 MIT 许可证、版权文本和必要第三方 notices；这是一
-项明确发行验收，不扩建通用合规框架。
+薄壳不得再次声明或打包完整 `@deepseek-ai/*` 运行时闭包、pnpm、社区项目 patch、市场、
+更新服务或另一份 DSH lockfile。Profile 创建、Runtime Bundle 安装和依赖物化继续沿用
+已经验证的 Tianwen 产品流程，桌面启动本身不执行新的包安装。
+
+Tianwen 不复制社区 DSH Desktop 的产品代码来形成第二 Runtime；只读借鉴其生命周期
+和 Windows 打包经验。若后续确实采用少量 MIT 源码，才对实际采用内容保留相应许可证、
+版权文本和第三方 notices；最终发行物仍需按自己的真实依赖闭包生成 notices。
 
 ### 8.2 Profile 边界
 
 桌面 Profile 由 DSH 桌面运行所需的 base/web 组件与 Tianwen Runtime Bundle 组成。
-准确层顺序由阶段一对新版 DSH/DSH Desktop 的真实兼容探测决定，不在本设计中猜测
-内部服务顺序。
+准确层顺序由阶段一对新版 DSH、Tianwen Web Profile 与 Electron ABI 的真实兼容探测
+决定，不在本设计中猜测内部服务顺序。
 
 同一个 Tianwen Bundle 必须也能安装到纯 CLI/headless Profile。若某个功能只有桌面
 Profile 才能工作，它不能被算作核心 Bundle 首期完成。
