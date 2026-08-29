@@ -1,4 +1,5 @@
-import { copyFileSync, mkdirSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { copyFileSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -19,8 +20,13 @@ export function stageDesktopRuntime(sourceTarball, packageRoot) {
   if (!sourceStats.isFile()) throw new Error(`Runtime source must be a file: ${sourceTarball}`)
 
   const staged = join(resolve(packageRoot), 'dist', 'runtime', RUNTIME_ARCHIVE_NAME)
+  const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
+  const sourceDigest = digest(sourceTarball)
   mkdirSync(dirname(staged), { recursive: true })
   copyFileSync(sourceTarball, staged)
+  if (digest(staged) !== sourceDigest || digest(sourceTarball) !== sourceDigest) {
+    throw new Error('Staged Runtime SHA-256 digest does not match the source archive')
+  }
   return staged
 }
 

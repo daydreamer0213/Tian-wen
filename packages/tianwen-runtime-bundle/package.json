@@ -36,7 +36,8 @@
     },
     "./client": {
       "default": "./dist/client.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist/index.js",
