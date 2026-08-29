@@ -4,7 +4,7 @@
 
 **Goal:** Add an installed CLI path where one Tianwen long Goal advances through explicitly authored ordered Tasks, each bound to its own ordinary DSH Goal and Session.
 
-**Architecture:** Persist only Tianwen's long-Goal record and Task-to-execution bindings under the existing state root. Reuse the current Goal-create JSON receipt, `readGoalStatus()`, and Goal-resume launch for every DSH-owned execution fact. Keep the existing one-Goal commands unchanged and add no scheduler, DAG, model decomposition, runner, or Desktop UI.
+**Architecture:** Persist only Tianwen's long-Goal record and Task-to-execution bindings under the existing state root. Reuse the current Goal-create JSON receipt, `readGoalStatus()`, and Goal-resume launch for every DSH-owned execution fact. The existing Evolution Run binding remains the authority for acceptance-driven Run identity and evidence; this slice keeps stable long-Goal/Task references but does not mislabel a Task execution binding as a formal Run receipt. Keep the existing one-Goal commands unchanged and add no scheduler, DAG, model decomposition, runner, or Desktop UI.
 
 **Tech Stack:** TypeScript, Node.js standard library, existing DSH `0.1.1-rc.2` public APIs, Vitest, pnpm 11.20.0.
 
@@ -13,6 +13,7 @@
 - Follow `docs/superpowers/specs/2026-08-29-tianwen-ordinary-goal-tasks-design.md` exactly.
 - Keep `@deepseek-ai/dsh@0.1.1-rc.2` as the only Agent Runtime.
 - Existing `create`, `list`, `status`, and `resume` commands and receipt schemas must remain compatible.
+- Do not duplicate or replace Evolution Run bindings. Long-Goal and Task IDs are stable future `goalRef` and `taskRef` values; this stage does not create a natural-trial or learning receipt.
 - Managed records live under `<data-dir>/state/long-goals`; portable records live under `<state-root>/long-goals`.
 - All tests are deterministic and offline. Do not use a Provider credential, model request, real installed-product run, controlled Activity, or natural-task proof.
 - Each production file has one task owner. Do not refactor unrelated Runtime or governance code.
@@ -342,4 +343,3 @@ git commit -m "feat: run ordered Tasks across DSH Sessions"
 ## Final Controller Gate
 
 After the three task commits, the controller runs the full TypeScript typecheck, the focused compatibility command from Task 3, and the repository's existing full local gates. Review only the feature diff for correctness and accidental duplicate DSH ownership. Do not add a real Provider run, installed-product proof, or extra review layer unless a changed product path specifically requires it.
-

@@ -11,10 +11,21 @@ Sessions.  Tianwen owns only the long-Goal record, Task ordering, and the
 Task-to-DSH execution binding.  DSH remains the sole owner of each Task's
 Session, current execution Goal, Agent loop, tools, model, and resume behavior.
 
-This closes the main architecture-to-product gap described in
+This is the first ordinary-product slice of the architecture gap described in
 `docs/tianwen-architecture-overview-v2.md`: Tianwen currently exposes one DSH
 Goal bound to one Session, but does not yet expose a durable Goal containing
-multiple Tasks and Runs.
+multiple ordered Tasks.  It does not claim to finish the full Goal Graph or
+formal Tianwen Run lifecycle in this stage.
+
+The repository already has four related foundations, and this work must not
+rebuild them: ordinary single-Goal persistence and resume, private Evolution
+`goalRef`/`taskRef` Run bindings, the fixed controlled-lifecycle state machine,
+and the frozen Python Alpha Goal/Task models.  None of those foundations owns
+ordinary Task ordering or next-Task selection.  Long-Goal and Task IDs created
+here remain stable references that a later acceptance-driven Tianwen Run can
+bind through the existing Evolution service; the Task-to-DSH Goal/Session
+execution binding in this slice is not itself presented as a formal Run
+binding or learning receipt.
 
 ## Product boundary
 
@@ -52,6 +63,8 @@ This stage does not add:
 - a general DAG, parallel scheduler, daemon, retries, budgets, or background
   worker;
 - learning, Candidate, Evaluation, or controlled-Activity behavior;
+- automatic creation of an acceptance-driven Tianwen Run binding or natural
+  trial manifest;
 - a custom Desktop renderer or Goal panel;
 - a second Session store or a duplicate DSH Agent loop;
 - an additional installed-product or natural-task proof solely for this
