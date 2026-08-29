@@ -253,6 +253,21 @@ const statusV2 = {
   runtime: { activation: 'not-loaded', modelRequests: 0, readOnly: true },
 } as const
 
+const planningStatus = {
+  ...statusV2,
+  goal: {
+    ...statusV2.goal,
+    phase: 'planning',
+    revision: 1,
+    completedTasks: 0,
+    abandonedTasks: 0,
+    totalTasks: 0,
+  },
+  planner: { ...statusV2.planner, phase: 'unplanned', planRevision: 0 },
+  tasks: [],
+  currentTaskId: null,
+} as const
+
 const summaryV1 = {
   id: unboundStatus.goal.id,
   objective: unboundStatus.goal.objective,
@@ -434,7 +449,7 @@ describe('Learn Loop compiled DSH client module', () => {
     expect(text(tree)).not.toContain('Add task')
   })
 
-  it('creates from the selected workspace Session ID and exposes the returned Task Session', async () => {
+  it('opens the returned Task Session after it enters the projection', async () => {
     const list = createSessionList({
       current: 'workspace-session',
       byId: {
@@ -463,7 +478,6 @@ describe('Learn Loop compiled DSH client module', () => {
       workspaceSessionId: 'workspace-session',
     }, expect.any(AbortSignal)])
     expect(text(tree)).toContain('Ship goal-first Learn Loop')
-    ;(findButton(tree, 'Open Session').props.onClick as () => void)()
     expect(client.open).not.toHaveBeenCalled()
     list.set({
       current: 'workspace-session',
@@ -474,21 +488,152 @@ describe('Learn Loop compiled DSH client module', () => {
     })
     await flushClient()
     expect(client.open).toHaveBeenCalledWith('task-session')
+    expect(text(client.render())).not.toContain('Ship goal-first Learn Loop')
   })
 
-  it('uses each returned revision and guidance never invokes Continue implicitly', async () => {
-    const selected = sessionRow({ sessionId: 'workspace-session', cwd: 'D:/workspace' })
-    const list = createSessionList({ current: 'workspace-session', byId: { 'workspace-session': selected } })
-    const revision5 = { ...statusV2, goal: { ...statusV2.goal, revision: 5 } }
-    const revision6 = { ...statusV2, goal: { ...statusV2.goal, revision: 6 }, guidance: ['Prefer native controls'] }
+  it('does not navigate when returning to the Goal list while Task Session projection is pending', async () => {
+    const workspace = sessionRow({ sessionId: 'workspace-session', cwd: 'D:/workspace' })
+    const list = createSessionList({ current: 'workspace-session', byId: { 'workspace-session': workspace } })
     const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
       if (endpoint === 'list') return { ok: true, value: { goals: [] } }
       if (endpoint === 'create-goal-first') return { ok: true, value: {
         schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'started',
-        status: statusV2, sessionId: null,
+        status: statusV2, sessionId: 'task-session',
+      } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const client = loadClientModule({ list, rpc })
+    let tree = await createGoal(client.render)
+    ;(findButton(tree, 'Back').props.onClick as () => void)()
+    list.set({
+      current: 'workspace-session',
+      byId: { 'workspace-session': workspace, 'task-session': sessionRow({ sessionId: 'task-session', cwd: 'D:/workspace' }) },
+    })
+    await flushClient()
+
+    expect(client.open).not.toHaveBeenCalled()
+    expect(findButton(client.render(), 'Create Goal')).toBeDefined()
+  })
+
+  it('opens the Task Session returned by Continue after it enters the projection', async () => {
+    const workspace = sessionRow({ sessionId: 'workspace-session', cwd: 'D:/workspace' })
+    const list = createSessionList({ current: 'workspace-session', byId: { 'workspace-session': workspace } })
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [] } }
+      if (endpoint === 'create-goal-first') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'planning-pending',
+        status: planningStatus, sessionId: null,
       } }
       if (endpoint === 'continue-progress') return { ok: true, value: {
-        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'already-running',
+        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'continued',
+        status: statusV2, sessionId: 'task-session',
+      } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const client = loadClientModule({ list, rpc })
+    let tree = await createGoal(client.render)
+    ;(findButton(tree, 'Continue progress').props.onClick as () => void)()
+    await flushClient()
+
+    expect(client.open).not.toHaveBeenCalled()
+    list.set({
+      current: 'workspace-session',
+      byId: {
+        'workspace-session': workspace,
+        'task-session': sessionRow({ sessionId: 'task-session', cwd: 'D:/workspace' }),
+      },
+    })
+    await flushClient()
+
+    expect(client.open).toHaveBeenCalledWith('task-session')
+    expect(text(client.render())).not.toContain('Ship goal-first Learn Loop')
+  })
+
+  it('reads the authoritative Goal status when reopening after Task Session navigation', async () => {
+    const workspace = sessionRow({ sessionId: 'workspace-session', cwd: 'D:/workspace' })
+    const taskSession = sessionRow({ sessionId: 'task-session', cwd: 'D:/workspace' })
+    const list = createSessionList({
+      current: 'workspace-session',
+      byId: { 'workspace-session': workspace, 'task-session': taskSession },
+    })
+    const authoritative = {
+      ...statusV2,
+      goal: {
+        ...statusV2.goal,
+        objective: 'Authoritative completed Task status',
+        phase: 'planning',
+        revision: 5,
+        completedTasks: 1,
+      },
+      tasks: [{ ...statusV2.tasks[0], phase: 'complete' }],
+      currentTaskId: null,
+    } as const
+    const authoritativeSummary = {
+      schemaVersion: 'tianwen.long-goal-summary.v2',
+      id: 'goal-first-1',
+      objective: 'Authoritative completed Task status',
+      phase: 'planning',
+      revision: 5,
+      completedTasks: 1,
+      abandonedTasks: 0,
+      totalTasks: 1,
+      currentTaskId: null,
+      updatedAt: 2,
+    } as const
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [authoritativeSummary] } }
+      if (endpoint === 'create-goal-first') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'planning-pending',
+        status: planningStatus, sessionId: null,
+      } }
+      if (endpoint === 'continue-progress') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'continued',
+        status: statusV2, sessionId: 'task-session',
+      } }
+      if (endpoint === 'status') return { ok: true, value: { status: authoritative } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const client = loadClientModule({ list, rpc })
+    let tree = await createGoal(client.render)
+    ;(findButton(tree, 'Continue progress').props.onClick as () => void)()
+    await flushClient()
+    expect(client.open).toHaveBeenCalledWith('task-session')
+
+    tree = client.render()
+    ;(findElement(tree, element => element.props['aria-label'] === 'Learn Loop').props.onClick as () => void)()
+    await flushClient()
+    tree = client.render()
+    ;(findElement(tree, element => element.type === 'button' &&
+      text(element).includes('Authoritative completed Task status')).props.onClick as () => void)()
+    await flushClient()
+
+    const refreshedTree = client.render()
+    expect(text(refreshedTree)).toContain('Authoritative completed Task status')
+    expect(text(refreshedTree)).toContain('1/1 tasks complete')
+    expect(text(refreshedTree)).toContain('Implement the Web flow — complete')
+    expect(rpc.call.mock.calls.map(call => call[1])).toEqual([
+      'list', 'create-goal-first', 'continue-progress', 'list', 'status',
+    ])
+  })
+
+  it('keeps Goal detail for a null Task Session and guidance never invokes Continue implicitly', async () => {
+    const selected = sessionRow({ sessionId: 'workspace-session', cwd: 'D:/workspace' })
+    const list = createSessionList({ current: 'workspace-session', byId: { 'workspace-session': selected } })
+    const revision5 = { ...planningStatus, goal: { ...planningStatus.goal, revision: 5 } }
+    const revision6 = {
+      ...planningStatus,
+      goal: { ...planningStatus.goal, revision: 6 },
+      planner: { ...planningStatus.planner, phase: 'needs-replan' },
+      guidance: ['Prefer native controls'],
+    }
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [] } }
+      if (endpoint === 'create-goal-first') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'planning-pending',
+        status: planningStatus, sessionId: null,
+      } }
+      if (endpoint === 'continue-progress') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'planning-pending',
         status: revision5, sessionId: null,
       } }
       if (endpoint === 'add-guidance') return { ok: true, value: {
@@ -511,7 +656,7 @@ describe('Learn Loop compiled DSH client module', () => {
 
     const continueCall = rpc.call.mock.calls.find(call => call[1] === 'continue-progress')
     const guidanceCall = rpc.call.mock.calls.find(call => call[1] === 'add-guidance')
-    expect(continueCall?.[2]).toEqual({ longGoalId: 'goal-first-1', expectedRevision: 4 })
+    expect(continueCall?.[2]).toEqual({ longGoalId: 'goal-first-1', expectedRevision: 1 })
     expect(guidanceCall?.[2]).toEqual({
       longGoalId: 'goal-first-1', expectedRevision: 5, text: 'Prefer native controls',
     })
@@ -529,8 +674,8 @@ describe('Learn Loop compiled DSH client module', () => {
       byId: { 'workspace-session': selected },
     })
     const secondStatus = {
-      ...statusV2,
-      goal: { ...statusV2.goal, id: 'goal-first-2', objective: 'Second Goal' },
+      ...planningStatus,
+      goal: { ...planningStatus.goal, id: 'goal-first-2', objective: 'Second Goal' },
     }
     let createCalls = 0
     const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
@@ -539,8 +684,8 @@ describe('Learn Loop compiled DSH client module', () => {
         createCalls += 1
         return { ok: true, value: {
           schemaVersion: 'tianwen.goal-first-progress-result.v2',
-          action: 'started',
-          status: createCalls === 1 ? statusV2 : secondStatus,
+          action: 'planning-pending',
+          status: createCalls === 1 ? planningStatus : secondStatus,
           sessionId: null,
         } }
       }
@@ -578,8 +723,8 @@ describe('Learn Loop compiled DSH client module', () => {
     const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
       if (endpoint === 'list') return { ok: true, value: { goals: [] } }
       if (endpoint === 'create-goal-first') return { ok: true, value: {
-        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'started',
-        status: statusV2, sessionId: null,
+        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'planning-pending',
+        status: planningStatus, sessionId: null,
       } }
       if (endpoint === 'continue-progress') return { ok: false, error: {
         code: 'revision-conflict', message: 'revision-conflict',
@@ -629,12 +774,21 @@ describe('Learn Loop compiled DSH client module', () => {
       tasks: [{ ...blockedStatus.tasks[0], phase: 'abandoned', resolution: 'abandoned' }],
       currentTaskId: null,
     }
+    const blockedSummary = {
+      schemaVersion: 'tianwen.long-goal-summary.v2',
+      id: 'goal-first-1',
+      objective: 'Ship goal-first Learn Loop',
+      phase: 'blocked',
+      revision: 4,
+      completedTasks: 0,
+      abandonedTasks: 0,
+      totalTasks: 1,
+      currentTaskId: 'task-v2-1',
+      updatedAt: 1,
+    } as const
     const blockedRpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
-      if (endpoint === 'list') return { ok: true, value: { goals: [] } }
-      if (endpoint === 'create-goal-first') return { ok: true, value: {
-        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'blocked',
-        status: blockedStatus, sessionId: null,
-      } }
+      if (endpoint === 'list') return { ok: true, value: { goals: [blockedSummary] } }
+      if (endpoint === 'status') return { ok: true, value: { status: blockedStatus } }
       if (endpoint === 'abandon-current-task') return { ok: true, value: {
         schemaVersion: 'tianwen.long-goal-abandon-result.v2', action: 'abandoned',
         status: afterAbandon,
@@ -643,7 +797,7 @@ describe('Learn Loop compiled DSH client module', () => {
     }) }
     const locale = new TestLocale('en')
     const blockedClient = loadClientModule({ list: blockedList, locale, rpc: blockedRpc })
-    let blockedTree = await createGoal(blockedClient.render)
+    let blockedTree = await openListedGoal(blockedClient.render, 'Ship goal-first Learn Loop')
     expect(findButton(blockedTree, 'Open Session')).toBeDefined()
     expect(findButton(blockedTree, 'Abandon this Task and replan')).toBeDefined()
     expect(text(blockedTree)).toContain('Task reached its round limit.')

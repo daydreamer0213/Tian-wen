@@ -455,6 +455,13 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
     }
   }, [client])
 
+  const backToList = () => {
+    requestGeneration.current.close()
+    setLoading(false)
+    setView('list')
+    void refresh()
+  }
+
   useEffect(() => {
     if (view === 'closed') return
     const onKeyDown = (event: KeyboardEvent) => {
@@ -490,6 +497,13 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
     }
   }
 
+  const openReturnedTaskSession = async (sessionId: string, request: RequestHandle): Promise<void> => {
+    await waitForSessionProjection(ctx.sessions.list, sessionId, request.signal)
+    if (!request.isCurrent()) return
+    closeOverlay()
+    ctx.sessions.open(sessionId)
+  }
+
   const createPlan = async () => {
     const trimmedObjective = objective.trim()
     const selectedSessionId = sessionList.current !== undefined &&
@@ -516,6 +530,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
         setOperationSessionId(result.sessionId ?? undefined)
         setView('detail')
       }
+      if (result.sessionId !== null) await openReturnedTaskSession(result.sessionId, request)
     } catch (cause) {
       if (request.isCurrent()) {
         setError(cause instanceof Error ? { message: cause.message } : { key: 'error.create' })
@@ -614,6 +629,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
         setDetail(result.status)
         setOperationSessionId(result.sessionId ?? undefined)
       }
+      if (result.sessionId !== null) await openReturnedTaskSession(result.sessionId, request)
     } catch (cause) {
       await handleMutationFailure(cause, request, failedDetail, 'error.run')
     } finally {
@@ -760,7 +776,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
               <label>{t('form.context')}<textarea value={context} onChange={event => setContext(event.target.value)} style={fieldStyle} /></label>
               <label>{t('form.successCriteria')}<textarea value={successCriteria} onChange={event => setSuccessCriteria(event.target.value)} style={fieldStyle} /></label>
               {!selectedWorkspaceSession && <p role="status" style={{ margin: 0 }}>{t('reason.workspaceRequired')}</p>}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}><button type="submit" disabled={loading || !selectedWorkspaceSession} style={buttonStyle}>{t('form.startProgressing')}</button><button type="button" onClick={() => setView('list')} style={buttonStyle}>{t('form.back')}</button></div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}><button type="submit" disabled={loading || !selectedWorkspaceSession} style={buttonStyle}>{t('form.startProgressing')}</button><button type="button" onClick={backToList} style={buttonStyle}>{t('form.back')}</button></div>
             </form>}
             {view === 'detail' && detail !== undefined && <div style={{ display: 'grid', gap: 10, marginTop: 16 }}>
               <h3 style={{ margin: 0 }}>{detail.goal.objective}</h3>
@@ -776,7 +792,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
                 {action?.reason !== undefined && <p role="status" style={{ margin: 0 }}>{translateActionReason(t, action.reason, detail, sessionList)}</p>}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   <button type="button" onClick={() => void runTask()} disabled={loading || action?.disabled !== false} style={buttonStyle}>{t(actionLabelKeys[action?.label ?? 'Plan complete'])}</button>
-                  <button type="button" onClick={() => setView('list')} style={buttonStyle}>{t('form.back')}</button>
+                  <button type="button" onClick={backToList} style={buttonStyle}>{t('form.back')}</button>
                 </div>
               </> : <>
                 {detail.goal.context !== null && <p style={{ margin: 0 }}>{detail.goal.context}</p>}
@@ -792,7 +808,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
                   <button type="button" onClick={() => void addGuidance()} disabled={loading || guidance.trim().length === 0} style={buttonStyle}>{t('action.addGuidance')}</button>
                   {v2SessionId !== undefined && <button type="button" onClick={() => void openTaskSession(v2SessionId)} disabled={loading} style={buttonStyle}>{t('action.openSession')}</button>}
                   {canAbandon && <button type="button" onClick={() => void abandonCurrentTask()} disabled={loading} style={buttonStyle}>{t('action.abandon')}</button>}
-                  <button type="button" onClick={() => setView('list')} style={buttonStyle}>{t('form.back')}</button>
+                  <button type="button" onClick={backToList} style={buttonStyle}>{t('form.back')}</button>
                 </div>
               </>}
             </div>}
