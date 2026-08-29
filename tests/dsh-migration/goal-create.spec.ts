@@ -6,21 +6,46 @@ import { SessionId, mountGoalHarness } from '@tianwen/dsh-compat'
 
 import {
   buildGoalCreateInvocation,
+  captureGoalCreate,
+  parseGoalCreateReceipt,
   preflightGoalCreate,
 } from '../../packages/tianwen-runtime-bundle/src/create.js'
 import {
   formatGoalCreateText,
   runGoalCreate,
 } from '../../packages/tianwen-runtime-bundle/src/create-runner.js'
+import type { GoalCreateReceipt } from '../../packages/tianwen-runtime-bundle/src/create-runner.js'
 import { main } from '../../packages/tianwen-runtime-bundle/src/cli.js'
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-goal-create-tests')
+
+const capturedReceipt: GoalCreateReceipt = {
+  schemaVersion: 'tianwen.goal-create.v1',
+  goal: {
+    id: 'goal-captured', maxGoalRounds: 3, objective: 'build a project',
+    phase: 'active', revision: 1, roundsStarted: 0,
+  },
+  session: { eventCount: 1, id: 'session-captured', modelRequestsDelta: 0 },
+}
+
+const capturedPreflight = {
+  dataDir: 'D:\\DevData\\tianwen',
+  dshBin: 'D:\\DevData\\tianwen\\dsh-host\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
+  evolutionRoot: 'D:\\DevData\\tianwen\\state\\evolution',
+  maxGoalRounds: 3,
+  objective: 'build a project',
+  sessionsRoot: 'D:\\DevData\\tianwen\\dsh-home\\sessions',
+} as const
 
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
 describe('tianwen create', () => {
+  it('accepts one exact captured create receipt', () => {
+    expect(parseGoalCreateReceipt(capturedReceipt)).toEqual(capturedReceipt)
+  })
+
   it.each([
     ['missing objective', ['create', '--data-dir', 'D:/DevData/tianwen']],
     ['empty objective', ['create', '--objective', '   ', '--data-dir', 'D:/DevData/tianwen']],
@@ -82,6 +107,54 @@ describe('tianwen create', () => {
       TIANWEN_CREATE_OBJECTIVE: 'build a project',
       TIANWEN_CREATE_SESSIONS_ROOT: 'D:\\DevData\\tianwen\\dsh-home\\sessions',
     })
+  })
+
+  it.each([
+    ['a missing receipt key', {
+      goal: capturedReceipt.goal,
+      session: capturedReceipt.session,
+    }],
+    ['an extra receipt key', { ...capturedReceipt, unexpected: true }],
+    ['the wrong schema', { ...capturedReceipt, schemaVersion: 'tianwen.goal-create.v2' }],
+    ['an empty Goal id', { ...capturedReceipt, goal: { ...capturedReceipt.goal, id: '' } }],
+    ['an empty Session id', { ...capturedReceipt, session: { ...capturedReceipt.session, id: '' } }],
+    ['a model request', { ...capturedReceipt, session: { ...capturedReceipt.session, modelRequestsDelta: 1 } }],
+    ['a malformed Goal value', { ...capturedReceipt, goal: { ...capturedReceipt.goal, maxGoalRounds: 0 } }],
+  ])('rejects %s in a captured create receipt', (_label, receipt) => {
+    expect(() => parseGoalCreateReceipt(receipt)).toThrow()
+  })
+
+  it('captures the existing JSON create receipt from one invocation', async () => {
+    let invocation: ReturnType<typeof buildGoalCreateInvocation> | undefined
+    const receipt = await captureGoalCreate(capturedPreflight, {
+      nonce: () => '00000000-0000-4000-8000-000000000002',
+      run: async captured => {
+        invocation = captured
+        return { code: 0, stdout: `${JSON.stringify(capturedReceipt)}\n`, stderr: '' }
+      },
+    })
+
+    expect(receipt).toEqual(capturedReceipt)
+    expect(invocation).toMatchObject({
+      options: { env: { TIANWEN_CREATE_JSON: 'true', TIANWEN_CREATE_NONCE: '00000000-0000-4000-8000-000000000002' } },
+    })
+  })
+
+  it.each([
+    ['a nonzero exit', { code: 1, stdout: '', stderr: 'create failed\n' }],
+    ['invalid JSON', { code: 0, stdout: 'not json\n', stderr: '' }],
+    ['multiple non-empty lines', { code: 0, stdout: `${JSON.stringify(capturedReceipt)}\nextra\n`, stderr: '' }],
+    ['stderr-only failure', { code: 0, stdout: '', stderr: 'create failed\n' }],
+  ])('rejects %s from a captured create without retrying', async (_label, result) => {
+    let calls = 0
+    await expect(captureGoalCreate(capturedPreflight, {
+      nonce: () => '00000000-0000-4000-8000-000000000002',
+      run: async () => {
+        calls += 1
+        return result
+      },
+    })).rejects.toThrow()
+    expect(calls).toBe(1)
   })
 
   it('prints a directly usable next resume command', () => {
