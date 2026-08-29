@@ -1,17 +1,28 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SessionId, mountGoalHarness } from '@tianwen/dsh-compat'
 import {
+  abandonBlockedLongGoalTask,
+  appendLongGoalGuidance,
+  bindGoalFirstLongGoalTask,
   bindLongGoalTask,
+  commitLongGoalPlan,
+  createGoalFirstLongGoal,
   createLongGoal,
   formatLongGoalStatusText,
   listLongGoals,
   LongGoalIntegrityError,
+  LongGoalRevisionConflictError,
   readLongGoal,
   readLongGoalStatus,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
+import { runLongGoalTask } from '../../packages/tianwen-runtime-bundle/src/long-goal-run.js'
+import {
+  runCurrentWebTask,
+  type TianwenLongGoalRunDependencies,
+} from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-ordinary-long-goal-tests')
 const GOAL_ID = 'tianwen-long-goal-00000000-0000-4000-8000-000000000001'
@@ -440,4 +451,227 @@ describe('ordinary long Goal status projection', () => {
       }
     },
   )
+})
+
+describe('goal-first long Goal v2 records', () => {
+  it('keeps an unplanned v2 Goal out of the legacy task executor', async () => {
+    const dataDir = createStateRoot()
+    const stateRoot = join(dataDir, 'state')
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    try {
+      const record = createGoalFirstLongGoal({
+        stateRoot, objective: 'Use goal-first service', context: null, successCriteria: null,
+        workspaceRoot: resolve(dataDir, 'workspace'), agentPreset: 'planner',
+      }, { goalSuffix: () => 'legacy-guard', plannerSessionId: () => 'planner-legacy-guard', now: () => 1 })
+
+      await expect(runLongGoalTask({
+        longGoalId: record.id, productTarget: { kind: 'managed', dataDir }, json: true,
+      })).rejects.toThrow('Goal-first Long Goal requires goal-first service')
+      expect(stdout).not.toHaveBeenCalled()
+    } finally {
+      stdout.mockRestore()
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps an unplanned v2 Goal out of the legacy web executor', async () => {
+    const dataDir = createStateRoot()
+    const stateRoot = join(dataDir, 'state')
+    try {
+      const record = createGoalFirstLongGoal({
+        stateRoot, objective: 'Use goal-first service', context: null, successCriteria: null,
+        workspaceRoot: resolve(dataDir, 'workspace'), agentPreset: 'planner',
+      }, { goalSuffix: () => 'web-legacy-guard', plannerSessionId: () => 'planner-web-legacy-guard', now: () => 1 })
+      const dependencies: TianwenLongGoalRunDependencies = {
+        readLongGoal,
+        readLongGoalStatus,
+        bindLongGoalTask,
+        listSessions: async () => [],
+        createSession: async () => { throw new Error('must not create a Session') },
+        attachedAgent: () => undefined,
+        createGoal: () => { throw new Error('must not create a Goal') },
+        readGoalRef: async () => { throw new Error('must not read a Goal') },
+        resumeColdGoal: async () => { throw new Error('must not resume a Goal') },
+        flushSession: async () => undefined,
+      }
+
+      await expect(runCurrentWebTask({
+        roots: {
+          stateRoot,
+          sessionsRoot: join(dataDir, 'dsh-home', 'sessions'),
+          evolutionRoot: join(stateRoot, 'evolution'),
+        },
+        longGoalId: record.id,
+      }, dependencies)).rejects.toThrow('Goal-first Long Goal requires goal-first service')
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('reads mixed strict v1/v2 records and keeps all v1 status snapshots unchanged', async () => {
+    const dataDir = createStateRoot()
+    const stateRoot = join(dataDir, 'state')
+    const workspaceRoot = resolve(dataDir, 'workspace')
+    try {
+      const v1 = createLongGoal({
+        stateRoot, objective: 'Existing v1', tasks: ['Keep unchanged'], maxTaskRounds: 1,
+      }, { id: () => 'v1-fixture', now: () => 1 })
+      const unplanned = createGoalFirstLongGoal({
+        stateRoot, objective: 'Unplanned v2', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'planner',
+      }, { goalSuffix: () => 'v2-unplanned', plannerSessionId: () => 'planner-unplanned', now: () => 2 })
+      const ready = createGoalFirstLongGoal({
+        stateRoot, objective: 'Ready v2', context: 'Context', successCriteria: 'Done',
+        workspaceRoot, agentPreset: 'planner',
+      }, { goalSuffix: () => 'v2-ready', plannerSessionId: () => 'planner-ready', now: () => 3 })
+      commitLongGoalPlan({
+        stateRoot, longGoalId: ready.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Ready task' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000001', now: () => 4 })
+      const needsReplan = createGoalFirstLongGoal({
+        stateRoot, objective: 'Needs replan v2', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'planner',
+      }, { goalSuffix: () => 'v2-needs-replan', plannerSessionId: () => 'planner-needs-replan', now: () => 5 })
+      appendLongGoalGuidance(stateRoot, needsReplan.id, 1, 'Reconsider scope')
+      const complete = createGoalFirstLongGoal({
+        stateRoot, objective: 'Complete v2', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'planner',
+      }, { goalSuffix: () => 'v2-complete', plannerSessionId: () => 'planner-complete', now: () => 6 })
+      commitLongGoalPlan({
+        stateRoot, longGoalId: complete.id, expectedRevision: 1, outcome: 'complete', tasks: [], consideredSettledTasks: 0,
+      }, { now: () => 7 })
+
+      expect(listLongGoals(stateRoot).map(record => record.schemaVersion)).toEqual([
+        'tianwen.long-goal.v2', 'tianwen.long-goal.v2', 'tianwen.long-goal.v2', 'tianwen.long-goal.v2', 'tianwen.long-goal.v1',
+      ])
+      expect(readLongGoal(stateRoot, v1.id)).toEqual(v1)
+      expect(readLongGoal(stateRoot, ready.id)).toMatchObject({
+        schemaVersion: 'tianwen.long-goal.v2', planner: { phase: 'ready' }, guidance: [],
+      })
+      expect(readLongGoal(stateRoot, needsReplan.id)).toMatchObject({
+        schemaVersion: 'tianwen.long-goal.v2', planner: { phase: 'needs-replan' }, guidance: ['Reconsider scope'],
+      })
+      expect(readLongGoal(stateRoot, complete.id)).toMatchObject({
+        schemaVersion: 'tianwen.long-goal.v2', planner: { phase: 'complete' }, tasks: [],
+      })
+      await expect(readLongGoalStatus({
+        stateRoot, longGoalId: unplanned.id, dshStatusTarget: { dataDir },
+      })).resolves.toMatchObject({
+        schemaVersion: 'tianwen.long-goal-status.v2', goal: { phase: 'planning' }, currentTaskId: null,
+      })
+      await expect(readLongGoalStatus({
+        stateRoot, longGoalId: ready.id, dshStatusTarget: { dataDir },
+      })).resolves.toMatchObject({
+        schemaVersion: 'tianwen.long-goal-status.v2', goal: { phase: 'active' }, currentTaskId: '00000000-0000-4000-8000-000000000001',
+      })
+      await expect(readLongGoalStatus({
+        stateRoot, longGoalId: v1.id, dshStatusTarget: { dataDir },
+      })).resolves.toEqual({
+        schemaVersion: 'tianwen.long-goal-status.v1',
+        goal: { id: v1.id, objective: 'Existing v1', phase: 'active', completedTasks: 0, totalTasks: 1 },
+        tasks: [{ id: 'task-1', objective: 'Keep unchanged', phase: 'pending', execution: null }],
+        currentTaskId: 'task-1',
+        runtime: { activation: 'not-loaded', modelRequests: 0, readOnly: true },
+      })
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('persists guidance before planning and rejects stale mutations without changing bytes', () => {
+    const stateRoot = createStateRoot()
+    const workspaceRoot = resolve(stateRoot, 'workspace')
+    try {
+      const record = createGoalFirstLongGoal({
+        stateRoot, objective: 'Ship v2', context: null, successCriteria: null, workspaceRoot, agentPreset: 'planner',
+      }, { goalSuffix: () => 'guidance', plannerSessionId: () => 'planner-guidance', now: () => 10 })
+      const guided = appendLongGoalGuidance(stateRoot, record.id, 1, 'Keep the existing behavior')
+      expect(guided).toMatchObject({
+        revision: 2, planner: { phase: 'needs-replan' }, guidance: ['Keep the existing behavior'],
+      })
+      const path = longGoalPath(stateRoot, record.id)
+      const before = readFileSync(path, 'utf8')
+      expect(() => appendLongGoalGuidance(stateRoot, record.id, 1, 'Stale')).toThrow(LongGoalRevisionConflictError)
+      expect(readFileSync(path, 'utf8')).toBe(before)
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('commits only valid plans and replaces only an unbound suffix with fresh ids', async () => {
+    const dataDir = createStateRoot()
+    const stateRoot = join(dataDir, 'state')
+    const workspaceRoot = resolve(dataDir, 'workspace')
+    try {
+      const record = createGoalFirstLongGoal({
+        stateRoot, objective: 'Plan v2', context: null, successCriteria: null, workspaceRoot, agentPreset: 'planner',
+      }, { goalSuffix: () => 'planning', plannerSessionId: () => 'planner-plan', now: () => 10 })
+      expect(() => commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue', tasks: [], consideredSettledTasks: 0,
+      })).toThrow()
+      expect(() => commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue',
+        tasks: Array.from({ length: 6 }, () => ({ objective: 'Too many' })), consideredSettledTasks: 0,
+      })).toThrow()
+      expect(() => commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue', tasks: [{ objective: ' ' }], consideredSettledTasks: 0,
+      })).toThrow()
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'First task' }, { objective: 'Future task' }], consideredSettledTasks: 0,
+      }, { taskId: (() => {
+        const ids = ['00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000012']
+        return () => ids.shift()!
+      })(), now: () => 11 })
+      const complete = await persistGoal(dataDir, 'v2-complete', 'complete')
+      const bound = bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId: '00000000-0000-4000-8000-000000000011', execution: complete,
+      })
+      const replanned = commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 3, outcome: 'continue',
+        tasks: [{ objective: 'Replacement task' }], consideredSettledTasks: 1,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000013' })
+      expect(replanned.tasks).toEqual([
+        bound.tasks[0],
+        { id: '00000000-0000-4000-8000-000000000013', objective: 'Replacement task', execution: null, resolution: null },
+      ])
+      expect(replanned).toMatchObject({ revision: 4, planner: { phase: 'ready', planRevision: 2, consideredSettledTasks: 1 } })
+      expect(planned.tasks[1]!.id).not.toBe(replanned.tasks[1]!.id)
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('binds v2 with a revision and abandons only its current blocked task without clearing execution', async () => {
+    const dataDir = createStateRoot()
+    const stateRoot = join(dataDir, 'state')
+    const workspaceRoot = resolve(dataDir, 'workspace')
+    try {
+      const record = createGoalFirstLongGoal({
+        stateRoot, objective: 'Blocked v2', context: null, successCriteria: null, workspaceRoot, agentPreset: 'planner',
+      }, { goalSuffix: () => 'blocked', plannerSessionId: () => 'planner-blocked', now: () => 10 })
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue', tasks: [{ objective: 'Blocked task' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000021', now: () => 11 })
+      const blocked = await persistGoal(dataDir, 'v2-blocked', 'blocked')
+      const bound = bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId: '00000000-0000-4000-8000-000000000021', execution: blocked,
+      })
+      await expect(readLongGoalStatus({ stateRoot, longGoalId: record.id, dshStatusTarget: { dataDir } }))
+        .resolves.toMatchObject({ goal: { phase: 'blocked' }, currentTaskId: '00000000-0000-4000-8000-000000000021' })
+      const abandoned = abandonBlockedLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 3, taskId: '00000000-0000-4000-8000-000000000021',
+      })
+      expect(abandoned).toMatchObject({
+        revision: 4, planner: { phase: 'needs-replan' },
+        tasks: [{ id: '00000000-0000-4000-8000-000000000021', execution: blocked, resolution: 'abandoned' }],
+      })
+      expect(() => abandonBlockedLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 4, taskId: '00000000-0000-4000-8000-000000000021',
+      })).toThrow(LongGoalIntegrityError)
+      expect(bound.revision).toBe(3)
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
 })

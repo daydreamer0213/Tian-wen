@@ -9,8 +9,11 @@ import type { GoalView } from '@deepseek-ai/dsh-goal'
 import { SessionId } from '@deepseek-ai/dsh-session'
 
 import type {
+  AnyLongGoalStatusProjection,
+  AnyLongGoalSummary,
   LongGoalStatusProjection,
   LongGoalSummary,
+  LongGoalSummaryV2,
 } from './long-goal-contract.js'
 import {
   bindLongGoalTask,
@@ -199,12 +202,21 @@ export async function runCurrentWebTask(input: {
   readonly longGoalId: string
   readonly initialCwd?: string
 }, dependencies: TianwenLongGoalRunDependencies): Promise<RunCurrentTaskResult> {
-  const readStatus = () => dependencies.readLongGoalStatus(statusInput(input))
+  const readStatus = async (): Promise<LongGoalStatusProjection> => {
+    const status = await dependencies.readLongGoalStatus(statusInput(input))
+    if (status.schemaVersion !== 'tianwen.long-goal-status.v1') {
+      throw new Error('Goal-first Long Goal requires goal-first service')
+    }
+    return status
+  }
   const status = await readStatus()
   if (status.currentTaskId === null) return { status, action: 'complete' }
 
   const projectedTask = status.tasks.find(task => task.id === status.currentTaskId)
   const record = dependencies.readLongGoal(input.roots.stateRoot, input.longGoalId)
+  if (record.schemaVersion !== 'tianwen.long-goal.v1') {
+    throw new Error('Goal-first Long Goal requires goal-first service')
+  }
   const taskIndex = record.tasks.findIndex(task => task.id === status.currentTaskId)
   const task = record.tasks[taskIndex]
   if (projectedTask === undefined || task === undefined) {
@@ -309,8 +321,23 @@ function invalidRequest(): RpcResult<never> {
   return { ok: false, error: { code: 'internal', message: 'invalid-request', details: {} } }
 }
 
-function summary(status: LongGoalStatusProjection, updatedAt: number): LongGoalSummary {
-  return {
+function summary(status: AnyLongGoalStatusProjection, updatedAt: number): AnyLongGoalSummary {
+  if (status.schemaVersion === 'tianwen.long-goal-status.v2') {
+    const result: LongGoalSummaryV2 = {
+      schemaVersion: 'tianwen.long-goal-summary.v2',
+      id: status.goal.id,
+      objective: status.goal.objective,
+      phase: status.goal.phase,
+      revision: status.goal.revision,
+      completedTasks: status.goal.completedTasks,
+      abandonedTasks: status.goal.abandonedTasks,
+      totalTasks: status.goal.totalTasks,
+      currentTaskId: status.currentTaskId,
+      updatedAt,
+    }
+    return result
+  }
+  const result: LongGoalSummary = {
     id: status.goal.id,
     objective: status.goal.objective,
     phase: status.goal.phase,
@@ -319,6 +346,7 @@ function summary(status: LongGoalStatusProjection, updatedAt: number): LongGoalS
     currentTaskId: status.currentTaskId,
     updatedAt,
   }
+  return result
 }
 
 function assertAbsoluteConfiguredRoot(name: string, value: string | undefined): void {

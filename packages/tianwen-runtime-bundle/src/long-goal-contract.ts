@@ -56,6 +56,87 @@ export interface LongGoalSummary {
   readonly updatedAt: number
 }
 
+export interface LongGoalTaskRecordV2 {
+  readonly id: string
+  readonly objective: string
+  readonly execution: TaskExecutionBinding | null
+  readonly resolution: null | 'abandoned'
+}
+
+export interface LongGoalRecordV2 {
+  readonly schemaVersion: 'tianwen.long-goal.v2'
+  readonly id: string
+  readonly revision: number
+  readonly objective: string
+  readonly context: string | null
+  readonly successCriteria: string | null
+  readonly workspaceRoot: string
+  readonly maxTaskRounds: number
+  readonly planner: {
+    readonly sessionId: string
+    readonly agentPreset: string
+    readonly planRevision: number
+    readonly phase: 'unplanned' | 'ready' | 'needs-replan' | 'complete'
+    readonly consideredSettledTasks: number
+  }
+  readonly guidance: readonly string[]
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly tasks: readonly LongGoalTaskRecordV2[]
+}
+
+export interface LongGoalSummaryV2 {
+  readonly schemaVersion: 'tianwen.long-goal-summary.v2'
+  readonly id: string
+  readonly objective: string
+  readonly phase: 'planning' | 'active' | 'blocked' | 'complete'
+  readonly revision: number
+  readonly completedTasks: number
+  readonly abandonedTasks: number
+  readonly totalTasks: number
+  readonly currentTaskId: string | null
+  readonly updatedAt: number
+}
+
+export interface LongGoalStatusProjectionV2 {
+  readonly schemaVersion: 'tianwen.long-goal-status.v2'
+  readonly goal: {
+    readonly id: string
+    readonly objective: string
+    readonly context: string | null
+    readonly successCriteria: string | null
+    readonly phase: 'planning' | 'active' | 'blocked' | 'complete'
+    readonly revision: number
+    readonly completedTasks: number
+    readonly abandonedTasks: number
+    readonly totalTasks: number
+  }
+  readonly planner: {
+    readonly sessionId: string
+    readonly phase: 'unplanned' | 'ready' | 'needs-replan' | 'complete'
+    readonly planRevision: number
+  }
+  readonly guidance: readonly string[]
+  readonly tasks: readonly {
+    readonly id: string
+    readonly objective: string
+    readonly phase: 'pending' | 'active' | 'paused' | 'blocked' | 'complete' | 'abandoned'
+    readonly execution: TaskExecutionBinding | null
+    readonly resolution: null | 'abandoned'
+    readonly blockedReason?: { readonly code: string, readonly message: string }
+  }[]
+  readonly currentTaskId: string | null
+  readonly runtime: {
+    readonly activation: 'not-loaded'
+    readonly modelRequests: 0
+    readonly readOnly: true
+  }
+}
+
+export type AnyLongGoalRecord = LongGoalRecord | LongGoalRecordV2
+export type AnyLongGoalStatusProjection = LongGoalStatusProjection | LongGoalStatusProjectionV2
+export type AnyLongGoalSummary = LongGoalSummary | LongGoalSummaryV2
+
 export type TianwenLongGoalRpcRequest =
   | { readonly endpoint: 'list'; readonly payload: Record<string, never> }
   | { readonly endpoint: 'create'; readonly payload: {

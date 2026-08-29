@@ -16,7 +16,6 @@ import {
   readLongGoal,
   readLongGoalStatus,
 } from './long-goal.js'
-import type { LongGoalRecord, LongGoalStatusProjection } from './long-goal.js'
 import type { ResolvedPortableProfileTarget } from './portable-profile.js'
 import {
   launchGoalResume,
@@ -30,7 +29,7 @@ export type LongGoalProductTarget =
   | { readonly kind: 'portable', readonly target: ResolvedPortableProfileTarget }
 
 export interface LongGoalRunDependencies {
-  readonly readLongGoal?: (stateRoot: string, goalId: string) => LongGoalRecord
+  readonly readLongGoal?: typeof readLongGoal
   readonly readLongGoalStatus?: typeof readLongGoalStatus
   readonly bindLongGoalTask?: typeof bindLongGoalTask
   readonly preflightGoalCreate?: typeof preflightGoalCreate
@@ -44,7 +43,7 @@ export interface LongGoalRunDependencies {
   readonly launchGoalResume?: typeof launchGoalResume
 }
 
-function writeProjection(status: LongGoalStatusProjection, json: boolean): void {
+function writeProjection(status: Awaited<ReturnType<typeof readLongGoalStatus>>, json: boolean): void {
   process.stdout.write(json
     ? `${JSON.stringify(status)}\n`
     : `${formatLongGoalStatusText(status)}\n`)
@@ -70,8 +69,11 @@ export async function runLongGoalTask(input: {
       : {
           sessionsRoot: input.productTarget.target.sessionsRoot,
           evolutionRoot: input.productTarget.target.evolutionRoot,
-        },
+      },
   })
+  if (status.schemaVersion !== 'tianwen.long-goal-status.v1') {
+    throw new LongGoalIntegrityError('Goal-first Long Goal requires goal-first service')
+  }
   if (status.currentTaskId === null) {
     writeProjection(status, input.json)
     return 0
@@ -82,6 +84,9 @@ export async function runLongGoalTask(input: {
     throw new LongGoalIntegrityError('Long Goal current Task is missing')
   }
   const record = readRecord(stateRoot, input.longGoalId)
+  if (record.schemaVersion !== 'tianwen.long-goal.v1') {
+    throw new LongGoalIntegrityError('Goal-first Long Goal requires goal-first service')
+  }
   const task = record.tasks.find(candidate => candidate.id === projectedTask.id)
   if (task === undefined) throw new LongGoalIntegrityError('Long Goal current Task is missing')
 
