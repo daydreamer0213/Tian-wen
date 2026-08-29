@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 import { vi } from 'vitest'
-import type { Context } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle, AgentSetup } from '@deepseek-ai/dsh-agent'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
@@ -12,6 +12,7 @@ import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import {
   createTianwenLongGoalRpcHandler,
   LongGoalTaskAdmissionError,
+  mountTianwenLongGoalHost,
   resolveTianwenLongGoalHostRoots,
   runCurrentWebTask,
   type TianwenGoalFirstOperations,
@@ -221,6 +222,44 @@ function plannerHandle(
 }
 
 describe('Tianwen Long Goal Web host', () => {
+  it('waits for the configured model and preset services before mounting the Goal-first RPC host', async () => {
+    const ctx = new Context()
+    const handle = vi.fn()
+    ctx.baseUrl = pathToFileURL('D:/DevData/tianwen-learn-loop-host-tests/profile/').href
+    try {
+      for (const [name, service] of Object.entries({
+        connection: { rpc: { handle } },
+        apiProxy: {},
+        agents: {},
+        goals: {},
+        sessions: {},
+      })) {
+        ;(ctx as unknown as { provide(name: string, value: unknown): void }).provide(name, service)
+      }
+
+      mountTianwenLongGoalHost(ctx, ROOTS)
+      await Promise.resolve()
+      expect(handle).not.toHaveBeenCalled()
+
+      ;(ctx as unknown as { provide(name: string, value: unknown): void }).provide('agentDefaultModel', {
+        currentSelection: () => ({ provider: 'deepseek', model: 'deepseek-v4-pro' }),
+      })
+      await Promise.resolve()
+      expect(handle).not.toHaveBeenCalled()
+
+      ;(ctx as unknown as { provide(name: string, value: unknown): void }).provide('agentPresets', {
+        mount: async () => undefined,
+      })
+      await vi.waitFor(() => expect(handle).toHaveBeenCalledWith(
+        '/tianwen',
+        expect.any(Function),
+        { authority: 'loopback' },
+      ))
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('resolves profile, configured, and DSH session roots without accepting relative roots', () => {
     const fixture = createFixtureRoot()
     try {

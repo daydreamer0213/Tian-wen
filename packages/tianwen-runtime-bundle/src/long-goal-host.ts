@@ -713,7 +713,7 @@ export function mountTianwenLongGoalHost(
   ctx: Context,
   config?: TianwenLongGoalHostConfig,
 ): void {
-  ctx.inject(['connection', 'apiProxy', 'agents', 'goals', 'sessions'], injected => {
+  ctx.inject(['connection', 'apiProxy', 'agents', 'goals', 'sessions', 'agentDefaultModel', 'agentPresets'], injected => {
     if (injected.baseUrl === undefined) throw new Error('Tianwen Long Goal Web host requires a Profile base URL')
     const roots = resolveTianwenLongGoalHostRoots({
       profileBaseUrl: new URL(injected.baseUrl),
