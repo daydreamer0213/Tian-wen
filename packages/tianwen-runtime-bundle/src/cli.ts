@@ -275,6 +275,9 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   const goalGuide = command === 'goal' && longGoalOperation === 'guide'
   const goalAbandon = command === 'goal' && longGoalOperation === 'abandon'
   const goalFirstCommand = goalStart || goalContinue || goalGuide || goalAbandon
+  const hasGoalFirstOnlyField = values.context !== undefined ||
+    values['success-criteria'] !== undefined || values.revision !== undefined ||
+    values.text !== undefined
   const longGoalCommand = planCreate || planStatus || taskRun
   const maxGoalRounds = positiveInteger(values['max-rounds'])
   const revision = requiredPositiveInteger(values.revision)
@@ -301,6 +304,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     (goalFirstCommand && hasRepeatedGoalFirstOption(args)) ||
     (command === 'controlled-lifecycle' && hasRepeatedControlledOption(args)) ||
     (command !== 'controlled-lifecycle' && values.manifest !== undefined) ||
+    (!goalFirstCommand && hasGoalFirstOnlyField) ||
     (command === 'model' || longGoalCommand || goalFirstCommand
       ? positionals.length !== 2
       : positionals.length !== 1) ||

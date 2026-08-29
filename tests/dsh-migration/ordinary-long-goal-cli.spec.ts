@@ -249,6 +249,52 @@ describe('ordinary long Goal CLI', () => {
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining('tianwen goal'))
   })
 
+  it('rejects Goal-first-only fields for every legacy command before side effects', async () => {
+    const dataDir = fixtureRoot()
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const commands = [
+      { usage: 'tianwen status', args: ['status', '--goal', 'legacy-goal', '--data-dir', dataDir] },
+      { usage: 'tianwen list', args: ['list', '--data-dir', dataDir] },
+      { usage: 'tianwen create', args: ['create', '--objective', 'Legacy create', '--data-dir', dataDir] },
+      { usage: 'tianwen resume', args: ['resume', '--goal', 'legacy-goal', '--data-dir', dataDir] },
+      { usage: 'tianwen model', args: ['model', 'status', '--data-dir', dataDir] },
+      {
+        usage: 'tianwen controlled-lifecycle',
+        args: [
+          'controlled-lifecycle', '--manifest', join(dataDir, 'manifest.json'),
+          '--data-dir', dataDir, '--json',
+        ],
+      },
+      {
+        usage: 'tianwen plan',
+        args: [
+          'plan', 'create', '--objective', 'Legacy plan', '--task', 'Legacy task',
+          '--data-dir', dataDir,
+        ],
+      },
+      { usage: 'tianwen plan', args: ['plan', 'status', '--goal', 'legacy-plan', '--data-dir', dataDir] },
+      { usage: 'tianwen task', args: ['task', 'run', '--goal', 'legacy-plan', '--data-dir', dataDir] },
+    ] as const
+    const goalFirstOnlyFields = [
+      ['--context', 'context'],
+      ['--success-criteria', 'criterion'],
+      ['--revision', '1'],
+      ['--text', 'guidance'],
+    ] as const
+
+    for (const command of commands) {
+      for (const field of goalFirstOnlyFields) {
+        await expect(main([...command.args, ...field])).resolves.toBe(2)
+        expect(stderr).toHaveBeenLastCalledWith(expect.stringContaining(command.usage))
+      }
+    }
+
+    expect(stdout).not.toHaveBeenCalled()
+    expect(spawn).not.toHaveBeenCalled()
+    expect(readdirSync(dataDir)).toEqual([])
+  })
+
   it('creates an authored plan with repeated Tasks and starts no DSH process', async () => {
     const dataDir = fixtureRoot()
     const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
