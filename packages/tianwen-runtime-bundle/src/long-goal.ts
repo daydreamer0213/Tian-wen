@@ -626,12 +626,25 @@ export function bindGoalFirstLongGoalTask(input: {
   return updated
 }
 
-export function abandonBlockedLongGoalTask(input: {
+export async function abandonBlockedLongGoalTask(input: {
   readonly stateRoot: string
   readonly longGoalId: string
   readonly expectedRevision: number
   readonly taskId: string
-}): LongGoalRecordV2 {
+  readonly dshStatusTarget: StatusTarget
+}): Promise<LongGoalRecordV2> {
+  const status = await readLongGoalStatus({
+    stateRoot: input.stateRoot,
+    longGoalId: input.longGoalId,
+    dshStatusTarget: input.dshStatusTarget,
+  })
+  if (
+    status.schemaVersion !== 'tianwen.long-goal-status.v2' ||
+    status.currentTaskId !== input.taskId ||
+    status.tasks.find(task => task.id === input.taskId)?.phase !== 'blocked'
+  ) {
+    throw new LongGoalIntegrityError('Long Goal Task is not a current blocked Task')
+  }
   const record = readLongGoalV2(input.stateRoot, input.longGoalId)
   assertExpectedRevision(record, input.expectedRevision)
   const taskIndex = record.tasks.findIndex(task => task.id === input.taskId)
@@ -639,7 +652,12 @@ export function abandonBlockedLongGoalTask(input: {
   if (task === undefined || task.execution === null || task.resolution !== null) {
     throw new LongGoalIntegrityError('Long Goal Task is not a current blocked Task')
   }
-  if (record.tasks.slice(taskIndex + 1).some(later => later.execution !== null && later.resolution === null)) {
+  const projectedTask = status.tasks.find(candidate => candidate.id === input.taskId)
+  if (
+    projectedTask === undefined ||
+    projectedTask.execution?.goalId !== task.execution.goalId ||
+    projectedTask.execution.sessionId !== task.execution.sessionId
+  ) {
     throw new LongGoalIntegrityError('Long Goal Task is not a current blocked Task')
   }
   const updated: LongGoalRecordV2 = {

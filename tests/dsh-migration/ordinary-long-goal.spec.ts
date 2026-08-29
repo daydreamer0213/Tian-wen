@@ -659,19 +659,55 @@ describe('goal-first long Goal v2 records', () => {
       })
       await expect(readLongGoalStatus({ stateRoot, longGoalId: record.id, dshStatusTarget: { dataDir } }))
         .resolves.toMatchObject({ goal: { phase: 'blocked' }, currentTaskId: '00000000-0000-4000-8000-000000000021' })
-      const abandoned = abandonBlockedLongGoalTask({
+      const abandoned = await abandonBlockedLongGoalTask({
         stateRoot, longGoalId: record.id, expectedRevision: 3, taskId: '00000000-0000-4000-8000-000000000021',
+        dshStatusTarget: { dataDir },
       })
       expect(abandoned).toMatchObject({
         revision: 4, planner: { phase: 'needs-replan' },
         tasks: [{ id: '00000000-0000-4000-8000-000000000021', execution: blocked, resolution: 'abandoned' }],
       })
-      expect(() => abandonBlockedLongGoalTask({
+      await expect(abandonBlockedLongGoalTask({
         stateRoot, longGoalId: record.id, expectedRevision: 4, taskId: '00000000-0000-4000-8000-000000000021',
-      })).toThrow(LongGoalIntegrityError)
+        dshStatusTarget: { dataDir },
+      })).rejects.toThrow(LongGoalIntegrityError)
       expect(bound.revision).toBe(3)
     } finally {
       rmSync(dataDir, { recursive: true, force: true })
     }
   })
+
+  it.each(['active', 'complete'] as const)(
+    'refuses to abandon a current %s v2 Task without changing bytes',
+    async phase => {
+      const dataDir = createStateRoot()
+      const stateRoot = join(dataDir, 'state')
+      try {
+        const record = createGoalFirstLongGoal({
+          stateRoot, objective: `Keep ${phase} Task`, context: null, successCriteria: null,
+          workspaceRoot: resolve(dataDir, 'workspace'), agentPreset: 'planner',
+        }, { goalSuffix: () => `cannot-abandon-${phase}`, plannerSessionId: () => `planner-${phase}`, now: () => 10 })
+        const taskId = phase === 'active'
+          ? '00000000-0000-4000-8000-000000000031'
+          : '00000000-0000-4000-8000-000000000032'
+        commitLongGoalPlan({
+          stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue',
+          tasks: [{ objective: `${phase} Task` }], consideredSettledTasks: 0,
+        }, { taskId: () => taskId, now: () => 11 })
+        const execution = await persistGoal(dataDir, `cannot-abandon-${phase}`, phase)
+        bindGoalFirstLongGoalTask({
+          stateRoot, longGoalId: record.id, expectedRevision: 2, taskId, execution,
+        })
+        const path = longGoalPath(stateRoot, record.id)
+        const before = readFileSync(path, 'utf8')
+
+        await expect(abandonBlockedLongGoalTask({
+          stateRoot, longGoalId: record.id, expectedRevision: 3, taskId, dshStatusTarget: { dataDir },
+        })).rejects.toThrow('current blocked Task')
+        expect(readFileSync(path, 'utf8')).toBe(before)
+      } finally {
+        rmSync(dataDir, { recursive: true, force: true })
+      }
+    },
+  )
 })
