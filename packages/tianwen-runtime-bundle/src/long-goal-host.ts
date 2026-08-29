@@ -3,33 +3,57 @@ import { isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import { installModelSelection } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentSetup, ModelSelection } from '@deepseek-ai/dsh-agent'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
 import { SessionId } from '@deepseek-ai/dsh-session'
 
 import type {
+  AnyLongGoalRecord,
   AnyLongGoalStatusProjection,
   AnyLongGoalSummary,
+  GoalFirstProgressResultV2,
+  LongGoalAbandonResultV2,
+  LongGoalGuidanceResultV2,
   LongGoalStatusProjection,
+  LongGoalStatusProjectionV2,
   LongGoalSummary,
   LongGoalSummaryV2,
 } from './long-goal-contract.js'
 import {
+  abandonGoalFirstTask,
+  addGoalFirstGuidance,
+  continueGoalFirstProgress,
+  createGoalFirstProgress,
+} from './goal-first-service.js'
+import type { GoalFirstServiceDependencies } from './goal-first-service.js'
+import {
+  abandonBlockedLongGoalTask,
+  appendLongGoalGuidance,
+  bindGoalFirstLongGoalTask,
   bindLongGoalTask,
+  createGoalFirstLongGoal,
   createLongGoal,
   listLongGoals,
+  LongGoalIntegrityError,
+  LongGoalRevisionConflictError,
   readLongGoal,
   readLongGoalStatus,
 } from './long-goal.js'
+import { runLongGoalPlannerTurn } from './long-goal-planner.js'
+import type { LongGoalPlannerDependencies } from './long-goal-planner.js'
 import { readGoalStatus } from './status.js'
 
 type RpcResult<T> =
   | { readonly ok: true, readonly value: T }
   | { readonly ok: false, readonly error: {
-      readonly code: 'internal'
-      readonly message: 'invalid-request'
-      readonly details: Record<string, never>
+      readonly code: 'internal' | 'revision-conflict'
+      readonly message: 'invalid-request' | 'revision-conflict'
+      readonly details: Record<string, never> | {
+        readonly expectedRevision: number
+        readonly currentRevision: number
+      }
     } }
 
 type ConnectionRpcHandler = (
@@ -45,10 +69,15 @@ interface HostContext extends Context {
         readonly result: RpcResult<{ readonly items: readonly {
           readonly sessionId: string
           readonly cwd?: string
+          readonly agentPreset?: string
         }[] }>
       }>
-      create(input: { readonly rpcId: string; readonly payload: { readonly cwd: string } }): Promise<{
-        readonly result: RpcResult<{ readonly sessionId: string }>
+      create(input: { readonly rpcId: string; readonly payload: {
+        readonly cwd: string
+        readonly sessionId?: ReturnType<typeof SessionId>
+        readonly agentPreset?: string
+      } }): Promise<{
+        readonly result: RpcResult<{ readonly sessionId: string; readonly agentPreset?: string }>
       }>
     }
     readonly goals: {
@@ -73,6 +102,12 @@ interface HostContext extends Context {
         options: { readonly authority: 'loopback' },
       ): unknown
     }
+  }
+  readonly agentDefaultModel: {
+    currentSelection(): ModelSelection
+  }
+  readonly agentPresets: {
+    mount(agentCtx: Context, agentPreset: string): Promise<void>
   }
 }
 
@@ -100,15 +135,32 @@ export interface RunCurrentTaskResult {
   readonly action: 'started' | 'continued' | 'already-running' | 'complete'
 }
 
+export interface GoalFirstTaskRunResult {
+  readonly status: LongGoalStatusProjectionV2
+  readonly sessionId?: string
+  readonly action: 'started' | 'continued' | 'already-running' | 'complete'
+}
+
+type AnyRunCurrentTaskResult = {
+  readonly status: AnyLongGoalStatusProjection
+  readonly sessionId?: string
+  readonly action: 'started' | 'continued' | 'already-running' | 'complete'
+}
+
 export interface TianwenLongGoalRunDependencies {
   readonly readLongGoal: typeof readLongGoal
   readonly readLongGoalStatus: typeof readLongGoalStatus
   readonly bindLongGoalTask: typeof bindLongGoalTask
+  readonly bindGoalFirstLongGoalTask: typeof bindGoalFirstLongGoalTask
   readonly listSessions: () => Promise<readonly {
     readonly sessionId: string
     readonly cwd?: string
+    readonly agentPreset?: string
   }[]>
-  readonly createSession: (input: { readonly cwd: string }) => Promise<string>
+  readonly createSession: (input: {
+    readonly cwd: string
+    readonly agentPreset?: string
+  }) => Promise<string>
   readonly attachedAgent: (sessionId: string) => Agent | undefined
   readonly createGoal: (agent: Agent, input: {
     readonly objective: string
@@ -129,6 +181,29 @@ export interface TianwenLongGoalRunDependencies {
     readonly revision: number
   }) => Promise<void>
   readonly flushSession: (agent: Agent) => Promise<void>
+}
+
+export interface TianwenGoalFirstOperations {
+  readonly createGoalFirst: (input: {
+    readonly objective: string
+    readonly context: string | null
+    readonly successCriteria: string | null
+    readonly workspaceRoot: string
+    readonly agentPreset: string
+  }) => Promise<GoalFirstProgressResultV2>
+  readonly addGuidance: (input: {
+    readonly longGoalId: string
+    readonly expectedRevision: number
+    readonly text: string
+  }) => Promise<LongGoalGuidanceResultV2>
+  readonly continueProgress: (input: {
+    readonly longGoalId: string
+    readonly expectedRevision: number
+  }) => Promise<GoalFirstProgressResultV2>
+  readonly abandonCurrentTask: (input: {
+    readonly longGoalId: string
+    readonly expectedRevision: number
+  }) => Promise<LongGoalAbandonResultV2>
 }
 
 export class LongGoalTaskAdmissionError extends Error {
@@ -159,6 +234,10 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+}
+
+function isNullableNonEmptyString(value: unknown): value is string | null {
+  return value === null || isNonEmptyString(value)
 }
 
 function unwrapRpc<T>(response: { readonly result: RpcResult<T> }): T {
@@ -197,26 +276,61 @@ function statusInput(input: {
   }
 }
 
-export async function runCurrentWebTask(input: {
+async function requireGoalFirstTaskSessionHeader(
+  record: Extract<AnyLongGoalRecord, { readonly schemaVersion: 'tianwen.long-goal.v2' }>,
+  sessionId: string,
+  dependencies: TianwenLongGoalRunDependencies,
+): Promise<void> {
+  const matches = (await dependencies.listSessions())
+    .filter(session => session.sessionId === sessionId)
+  if (matches.length !== 1 || matches[0]!.cwd !== record.workspaceRoot) {
+    throw new LongGoalIntegrityError('Goal-first Task Session workspace mismatch')
+  }
+  const persistedPreset = matches[0]!.agentPreset
+  if (persistedPreset !== undefined && persistedPreset !== record.planner.agentPreset) {
+    throw new LongGoalIntegrityError('Goal-first Task Session preset mismatch')
+  }
+}
+
+export function runCurrentWebTask(input: {
+  readonly roots: TianwenLongGoalHostRoots
+  readonly longGoalId: string
+  readonly expectedRevision: number
+  readonly initialCwd?: string
+}, dependencies: TianwenLongGoalRunDependencies): Promise<GoalFirstTaskRunResult>
+export function runCurrentWebTask(input: {
   readonly roots: TianwenLongGoalHostRoots
   readonly longGoalId: string
   readonly initialCwd?: string
-}, dependencies: TianwenLongGoalRunDependencies): Promise<RunCurrentTaskResult> {
-  const readStatus = async (): Promise<LongGoalStatusProjection> => {
-    const status = await dependencies.readLongGoalStatus(statusInput(input))
-    if (status.schemaVersion !== 'tianwen.long-goal-status.v1') {
+}, dependencies: TianwenLongGoalRunDependencies): Promise<RunCurrentTaskResult>
+export async function runCurrentWebTask(input: {
+  readonly roots: TianwenLongGoalHostRoots
+  readonly longGoalId: string
+  readonly expectedRevision?: number
+  readonly initialCwd?: string
+}, dependencies: TianwenLongGoalRunDependencies): Promise<AnyRunCurrentTaskResult> {
+  const readStatus = (): Promise<AnyLongGoalStatusProjection> =>
+    dependencies.readLongGoalStatus(statusInput(input))
+  const status = await readStatus()
+  const record = dependencies.readLongGoal(input.roots.stateRoot, input.longGoalId)
+  const isV2 = record.schemaVersion === 'tianwen.long-goal.v2'
+  if (isV2 !== (status.schemaVersion === 'tianwen.long-goal-status.v2')) {
+    throw new LongGoalIntegrityError('Long Goal Task record/status schema mismatch')
+  }
+  if (isV2) {
+    if (input.expectedRevision === undefined) {
       throw new Error('Goal-first Long Goal requires goal-first service')
     }
-    return status
+    if (!isPositiveInteger(input.expectedRevision)) {
+      throw new TypeError('Goal-first Task admission expected revision is invalid')
+    }
+    if (record.revision !== input.expectedRevision) {
+      throw new LongGoalRevisionConflictError(input.expectedRevision, record.revision)
+    }
   }
-  const status = await readStatus()
   if (status.currentTaskId === null) return { status, action: 'complete' }
 
   const projectedTask = status.tasks.find(task => task.id === status.currentTaskId)
-  const record = dependencies.readLongGoal(input.roots.stateRoot, input.longGoalId)
-  if (record.schemaVersion !== 'tianwen.long-goal.v1') {
-    throw new Error('Goal-first Long Goal requires goal-first service')
-  }
   const taskIndex = record.tasks.findIndex(task => task.id === status.currentTaskId)
   const task = record.tasks[taskIndex]
   if (projectedTask === undefined || task === undefined) {
@@ -233,29 +347,67 @@ export async function runCurrentWebTask(input: {
   }
 
   if (task.execution === null) {
-    const firstBound = record.tasks.find(candidate => candidate.execution !== null)?.execution
-    let cwd = input.initialCwd
-    if (firstBound !== undefined && firstBound !== null) {
-      const sessions = await dependencies.listSessions()
-      cwd = sessions.find(session => session.sessionId === firstBound.sessionId)?.cwd
-      if (cwd === undefined) throw new Error('Long Goal Task workspace Session mismatch')
+    if (
+      status.schemaVersion === 'tianwen.long-goal-status.v2' &&
+      (status.planner.phase !== 'ready' || status.goal.phase !== 'active')
+    ) {
+      throw new LongGoalIntegrityError('Goal-first Task admission requires an active ready state')
+    }
+    let cwd: string | undefined
+    let agentPreset: string | undefined
+    if (record.schemaVersion === 'tianwen.long-goal.v2') {
+      cwd = record.workspaceRoot
+      agentPreset = record.planner.agentPreset
+    } else {
+      const firstBound = record.tasks.find(candidate => candidate.execution !== null)?.execution
+      cwd = input.initialCwd
+      if (firstBound !== undefined && firstBound !== null) {
+        const sessions = await dependencies.listSessions()
+        cwd = sessions.find(session => session.sessionId === firstBound.sessionId)?.cwd
+        if (cwd === undefined) throw new Error('Long Goal Task workspace Session mismatch')
+      }
     }
     if (cwd === undefined || cwd.length === 0) throw new Error('workspace-required')
 
-    const sessionId = await dependencies.createSession({ cwd })
+    const sessionId = await dependencies.createSession({
+      cwd,
+      ...(agentPreset === undefined ? {} : { agentPreset }),
+    })
     const agent = dependencies.attachedAgent(sessionId)
     if (agent === undefined || String(agent.session.id) !== sessionId) {
       throw new Error('New Long Goal Task Session has no attached Agent')
+    }
+    if (
+      record.schemaVersion === 'tianwen.long-goal.v2' &&
+      (
+        agent.session.header.cwd !== record.workspaceRoot ||
+        agent.session.header.agentPreset !== record.planner.agentPreset
+      )
+    ) {
+      throw new LongGoalIntegrityError('New Goal-first Task Session header mismatch')
     }
     const goal = dependencies.createGoal(agent, {
       objective: task.objective,
       maxGoalRounds: record.maxTaskRounds,
     })
     try {
-      dependencies.bindLongGoalTask(input.roots.stateRoot, input.longGoalId, task.id, {
-        sessionId,
-        goalId: String(goal.id),
-      })
+      const execution = { sessionId, goalId: String(goal.id) }
+      if (record.schemaVersion === 'tianwen.long-goal.v2') {
+        dependencies.bindGoalFirstLongGoalTask({
+          stateRoot: input.roots.stateRoot,
+          longGoalId: input.longGoalId,
+          expectedRevision: input.expectedRevision!,
+          taskId: task.id,
+          execution,
+        })
+      } else {
+        dependencies.bindLongGoalTask(
+          input.roots.stateRoot,
+          input.longGoalId,
+          task.id,
+          execution,
+        )
+      }
     } catch (bindingCause) {
       let cleanupCause: unknown
       try {
@@ -263,6 +415,9 @@ export async function runCurrentWebTask(input: {
         await dependencies.flushSession(agent)
       } catch (error) {
         cleanupCause = error
+      }
+      if (cleanupCause === undefined && bindingCause instanceof LongGoalRevisionConflictError) {
+        throw bindingCause
       }
       throw new LongGoalTaskAdmissionError(
         `Long Goal Task binding failed for Goal ${String(goal.id)} in Session ${sessionId}`,
@@ -282,6 +437,9 @@ export async function runCurrentWebTask(input: {
   const { sessionId, goalId } = task.execution
   let agent = dependencies.attachedAgent(sessionId)
   if (agent === undefined) {
+    if (record.schemaVersion === 'tianwen.long-goal.v2') {
+      await requireGoalFirstTaskSessionHeader(record, sessionId, dependencies)
+    }
     const ref = await dependencies.readGoalRef(sessionId, goalId)
     if (ref.id !== goalId || !Number.isSafeInteger(ref.revision) || ref.revision < 1) {
       throw new Error('Cold Long Goal Task Goal ref mismatch')
@@ -309,6 +467,9 @@ export async function runCurrentWebTask(input: {
   if ((goal.phase !== 'active' && goal.phase !== 'paused') || goal.activation !== 'disarmed') {
     throw new Error('Bound Long Goal Task Goal is not resumable')
   }
+  if (record.schemaVersion === 'tianwen.long-goal.v2') {
+    await requireGoalFirstTaskSessionHeader(record, sessionId, dependencies)
+  }
   const resumed = agent.ctx.goals.resume(agent, { id: goal.id, revision: goal.revision })
   if (String(resumed.id) !== goalId || resumed.phase !== 'active' || resumed.activation !== 'armed') {
     throw new Error('Resumed Long Goal Task Goal mismatch')
@@ -319,6 +480,27 @@ export async function runCurrentWebTask(input: {
 
 function invalidRequest(): RpcResult<never> {
   return { ok: false, error: { code: 'internal', message: 'invalid-request', details: {} } }
+}
+
+async function goalFirstRpc<T>(operation: () => Promise<T>): Promise<RpcResult<T>> {
+  try {
+    return { ok: true, value: await operation() }
+  } catch (error) {
+    if (error instanceof LongGoalRevisionConflictError) {
+      return {
+        ok: false,
+        error: {
+          code: 'revision-conflict',
+          message: 'revision-conflict',
+          details: {
+            expectedRevision: error.expectedRevision,
+            currentRevision: error.currentRevision,
+          },
+        },
+      }
+    }
+    throw error
+  }
 }
 
 function summary(status: AnyLongGoalStatusProjection, updatedAt: number): AnyLongGoalSummary {
@@ -384,6 +566,7 @@ export function createTianwenLongGoalRpcHandler(
     readLongGoalStatus,
   },
   runDependencies?: TianwenLongGoalRunDependencies,
+  goalFirstOperations?: TianwenGoalFirstOperations,
 ): ConnectionRpcHandler {
   const readStatus = (longGoalId: string) => dependencies.readLongGoalStatus({
     stateRoot: roots.stateRoot,
@@ -442,6 +625,86 @@ export function createTianwenLongGoalRpcHandler(
         }, runDependencies),
       }
     }
+    if (
+      endpoint === 'create-goal-first' &&
+      goalFirstOperations !== undefined &&
+      runDependencies !== undefined &&
+      isRecord(payload) &&
+      hasExactKeys(payload, ['objective', 'context', 'successCriteria', 'workspaceSessionId']) &&
+      isNonEmptyString(payload.objective) &&
+      isNullableNonEmptyString(payload.context) &&
+      isNullableNonEmptyString(payload.successCriteria) &&
+      isNonEmptyString(payload.workspaceSessionId)
+    ) {
+      const matches = (await runDependencies.listSessions())
+        .filter(session => session.sessionId === payload.workspaceSessionId)
+      const selected = matches.length === 1 ? matches[0] : undefined
+      if (
+        selected === undefined ||
+        !isNonEmptyString(selected.cwd) ||
+        !isNonEmptyString(selected.agentPreset)
+      ) return invalidRequest()
+      const objective = payload.objective
+      const context = payload.context
+      const successCriteria = payload.successCriteria
+      const workspaceRoot = selected.cwd
+      const agentPreset = selected.agentPreset
+      return goalFirstRpc(() => goalFirstOperations.createGoalFirst({
+        objective,
+        context,
+        successCriteria,
+        workspaceRoot,
+        agentPreset,
+      }))
+    }
+    if (
+      endpoint === 'add-guidance' &&
+      goalFirstOperations !== undefined &&
+      isRecord(payload) &&
+      hasExactKeys(payload, ['longGoalId', 'expectedRevision', 'text']) &&
+      isNonEmptyString(payload.longGoalId) &&
+      isPositiveInteger(payload.expectedRevision) &&
+      isNonEmptyString(payload.text)
+    ) {
+      const longGoalId = payload.longGoalId
+      const expectedRevision = payload.expectedRevision
+      const text = payload.text
+      return goalFirstRpc(() => goalFirstOperations.addGuidance({
+        longGoalId,
+        expectedRevision,
+        text,
+      }))
+    }
+    if (
+      endpoint === 'continue-progress' &&
+      goalFirstOperations !== undefined &&
+      isRecord(payload) &&
+      hasExactKeys(payload, ['longGoalId', 'expectedRevision']) &&
+      isNonEmptyString(payload.longGoalId) &&
+      isPositiveInteger(payload.expectedRevision)
+    ) {
+      const longGoalId = payload.longGoalId
+      const expectedRevision = payload.expectedRevision
+      return goalFirstRpc(() => goalFirstOperations.continueProgress({
+        longGoalId,
+        expectedRevision,
+      }))
+    }
+    if (
+      endpoint === 'abandon-current-task' &&
+      goalFirstOperations !== undefined &&
+      isRecord(payload) &&
+      hasExactKeys(payload, ['longGoalId', 'expectedRevision']) &&
+      isNonEmptyString(payload.longGoalId) &&
+      isPositiveInteger(payload.expectedRevision)
+    ) {
+      const longGoalId = payload.longGoalId
+      const expectedRevision = payload.expectedRevision
+      return goalFirstRpc(() => goalFirstOperations.abandonCurrentTask({
+        longGoalId,
+        expectedRevision,
+      }))
+    }
     return invalidRequest()
   }
 }
@@ -462,16 +725,18 @@ export function mountTianwenLongGoalHost(
       readLongGoal,
       readLongGoalStatus,
       bindLongGoalTask,
+      bindGoalFirstLongGoalTask,
       listSessions: async () => unwrapRpc(await host.apiProxy.sessions.list({
         rpcId: randomUUID(),
         payload: {},
       })).items.map(item => ({
         sessionId: String(item.sessionId),
         ...(item.cwd === undefined ? {} : { cwd: item.cwd }),
+        ...(item.agentPreset === undefined ? {} : { agentPreset: item.agentPreset }),
       })),
-      createSession: async ({ cwd }) => String(unwrapRpc(await host.apiProxy.sessions.create({
+      createSession: async ({ cwd, agentPreset }) => String(unwrapRpc(await host.apiProxy.sessions.create({
         rpcId: randomUUID(),
-        payload: { cwd },
+        payload: { cwd, ...(agentPreset === undefined ? {} : { agentPreset }) },
       })).sessionId),
       attachedAgent: sessionId => injected.agents.get(SessionId(sessionId)),
       createGoal: (agent, goalInput) => injected.goals.create(agent, goalInput),
@@ -507,10 +772,116 @@ export function mountTianwenLongGoalHost(
         await injected.sessions.flush(agent.session)
       },
     }
+    const dshStatusTarget = {
+      sessionsRoot: roots.sessionsRoot,
+      evolutionRoot: roots.evolutionRoot,
+    }
+    const plannerSetup = (
+      selection: ModelSelection,
+      agentPreset: string | undefined,
+      setup: AgentSetup,
+    ): AgentSetup => async agentCtx => {
+      const selectedPreset = agentPreset ?? agentCtx.agent?.session.header.agentPreset
+      if (!isNonEmptyString(selectedPreset)) {
+        throw new LongGoalIntegrityError('Long Goal planner Session preset mismatch')
+      }
+      installModelSelection(agentCtx, { current: selection, assembled: undefined })
+      await host.agentPresets.mount(agentCtx, selectedPreset)
+      return setup(agentCtx)
+    }
+    const plannerDependencies: LongGoalPlannerDependencies = {
+      inspectSession: async sessionId => {
+        const matches = (await runDependencies.listSessions())
+          .filter(session => session.sessionId === sessionId)
+        if (matches.length === 0) return { exists: false }
+        if (matches.length !== 1) {
+          throw new LongGoalIntegrityError('Long Goal planner Session identity mismatch')
+        }
+        return {
+          exists: true,
+          ...(matches[0]!.cwd === undefined ? {} : { cwd: matches[0]!.cwd }),
+          ...(matches[0]!.agentPreset === undefined
+            ? {}
+            : { agentPreset: matches[0]!.agentPreset }),
+        }
+      },
+      createAgent: async input => {
+        const selection = host.agentDefaultModel.currentSelection()
+        return injected.agents.create({
+          sessionId: SessionId(input.sessionId),
+          meta: {
+            cwd: input.cwd,
+            agentPreset: input.agentPreset,
+          },
+          agentOptions: { provider: selection.provider, model: selection.model },
+          setup: plannerSetup(selection, input.agentPreset, input.setup),
+        })
+      },
+      resumeAgent: async input => {
+        const selection = host.agentDefaultModel.currentSelection()
+        return injected.agents.resume({
+          resumeSessionId: SessionId(input.sessionId),
+          agentOptions: { provider: selection.provider, model: selection.model },
+          setup: plannerSetup(selection, undefined, input.setup),
+        })
+      },
+      flushSession: async agent => {
+        if (!await injected.sessions.flush(agent.session)) {
+          throw new Error('Session persistence is unavailable')
+        }
+      },
+    }
+    const serviceDependencies: GoalFirstServiceDependencies = {
+      createRecord: createGoalFirstLongGoal,
+      readRecord: readLongGoal,
+      readStatus: readLongGoalStatus,
+      appendGuidance: appendLongGoalGuidance,
+      abandonBlockedTask: abandonBlockedLongGoalTask,
+      runPlannerTurn: ({ record, reason }) => runLongGoalPlannerTurn({
+        stateRoot: roots.stateRoot,
+        dshStatusTarget,
+        record,
+        reason,
+      }, plannerDependencies),
+      runTask: async input => {
+        const result = await runCurrentWebTask({
+          roots,
+          longGoalId: input.longGoalId,
+          expectedRevision: input.expectedRevision,
+        }, runDependencies)
+        if (result.action === 'complete' || result.sessionId === undefined) {
+          throw new LongGoalIntegrityError('Goal-first Task admission returned no Session')
+        }
+        return { action: result.action, sessionId: result.sessionId }
+      },
+    }
+    const goalFirstOperations: TianwenGoalFirstOperations = {
+      createGoalFirst: input => createGoalFirstProgress({
+        stateRoot: roots.stateRoot,
+        dshStatusTarget,
+        ...input,
+      }, serviceDependencies),
+      addGuidance: input => addGoalFirstGuidance({
+        stateRoot: roots.stateRoot,
+        dshStatusTarget,
+        ...input,
+      }, serviceDependencies),
+      continueProgress: input => continueGoalFirstProgress({
+        stateRoot: roots.stateRoot,
+        dshStatusTarget,
+        ...input,
+      }, serviceDependencies),
+      abandonCurrentTask: input => abandonGoalFirstTask({
+        stateRoot: roots.stateRoot,
+        dshStatusTarget,
+        ...input,
+      }, serviceDependencies),
+    }
     host.connection.rpc.handle('/tianwen', createTianwenLongGoalRpcHandler(
       roots,
       undefined,
       runDependencies,
+      goalFirstOperations,
     ), {
       authority: 'loopback',
     })

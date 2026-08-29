@@ -2,26 +2,177 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentSetup } from '@deepseek-ai/dsh-agent'
 import { describe, expect, it } from 'vitest'
 
 import {
   SessionId,
   mountGoalHarness,
   textResponse,
+  toolCallResponse,
   waitForIdle,
 } from '@tianwen/dsh-compat'
 import {
+  abandonBlockedLongGoalTask,
+  appendLongGoalGuidance,
+  bindGoalFirstLongGoalTask,
   bindLongGoalTask,
+  createGoalFirstLongGoal,
   createLongGoal,
   readLongGoal,
   readLongGoalStatus,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
 import { runCurrentWebTask } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
+import { runLongGoalPlannerTurn } from '../../packages/tianwen-runtime-bundle/src/long-goal-planner.js'
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-learn-loop-host-integration')
 
 describe('Tianwen Long Goal Web host integration', () => {
+  it('cold-resumes one real planner Session with its scoped tool restored', async () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const fixture = mkdtempSync(join(FIXTURE_BASE, 'planner-'))
+    const stateRoot = join(fixture, 'state')
+    const sessionsRoot = join(fixture, 'sessions')
+    const evolutionRoot = join(stateRoot, 'evolution')
+    const harness = await mountGoalHarness(sessionsRoot, [
+      toolCallResponse('initial-plan', 'submit_long_goal_plan', {
+        expectedGoalRevision: 1,
+        outcome: 'continue',
+        tasks: [{ objective: 'Prepare notes' }, { objective: 'Publish draft' }],
+      }),
+      toolCallResponse('replacement-plan', 'submit_long_goal_plan', {
+        expectedGoalRevision: 6,
+        outcome: 'continue',
+        tasks: [{ objective: 'Publish release' }],
+      }),
+    ], { goalRoundDriver: false })
+
+    try {
+      const record = createGoalFirstLongGoal({
+        stateRoot,
+        objective: 'Ship release',
+        context: 'Keep a durable audit trail',
+        successCriteria: 'Release is published',
+        workspaceRoot: fixture,
+        agentPreset: 'planner-preset',
+      })
+      const dependencies = {
+        inspectSession: async (sessionId: string) => {
+          const matches = (await harness.ctx.sessionPersistence.list())
+            .filter(header => String(header.id) === sessionId)
+          if (matches.length === 0) return { exists: false }
+          const header = matches[0]!
+          return {
+            exists: true,
+            ...(header.cwd === undefined ? {} : { cwd: header.cwd }),
+            ...(header.agentPreset === undefined ? {} : { agentPreset: header.agentPreset }),
+          }
+        },
+        createAgent: async (input: {
+          readonly sessionId: string
+          readonly cwd: string
+          readonly agentPreset: string
+          readonly setup: AgentSetup
+        }) => harness.ctx.agents.create({
+          sessionId: SessionId(input.sessionId),
+          meta: { cwd: input.cwd, agentPreset: input.agentPreset },
+          agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+          setup: input.setup,
+        }),
+        resumeAgent: async (input: { readonly sessionId: string; readonly setup: AgentSetup }) =>
+          harness.ctx.agents.resume({
+            resumeSessionId: SessionId(input.sessionId),
+            agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+            setup: input.setup,
+          }),
+        flushSession: async (agent: Agent) => {
+          if (!await harness.ctx.sessions.flush(agent.session)) throw new Error('flush failed')
+        },
+      }
+      const plannerInput = {
+        stateRoot,
+        dshStatusTarget: { sessionsRoot, evolutionRoot },
+        record,
+        reason: 'create' as const,
+      }
+
+      await expect(runLongGoalPlannerTurn(plannerInput, dependencies)).resolves.toBe('submitted')
+      expect(harness.ctx.agents.get(SessionId(record.planner.sessionId))).toBeUndefined()
+      const initial = readLongGoal(stateRoot, record.id)
+      expect(initial).toMatchObject({
+        revision: 2,
+        planner: { planRevision: 1, phase: 'ready', consideredSettledTasks: 0 },
+        tasks: [{ objective: 'Prepare notes' }, { objective: 'Publish draft' }],
+      })
+      if (initial.schemaVersion !== 'tianwen.long-goal.v2') throw new Error('expected v2 record')
+
+      const persistTask = async (sessionId: string, phase: 'complete' | 'blocked') => {
+        const handle = await harness.ctx.agents.create({
+          sessionId: SessionId(sessionId),
+          meta: { cwd: fixture, agentPreset: 'planner-preset' },
+          agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+        })
+        try {
+          let goal = harness.ctx.goals.create(handle.agent, {
+            objective: sessionId,
+            maxGoalRounds: 3,
+          })
+          goal = phase === 'complete'
+            ? harness.ctx.goals.complete(handle.agent, goal)
+            : harness.ctx.goals.block(handle.agent, goal, {
+              code: 'needs-input', message: 'Needs user input',
+            })
+          if (!await harness.ctx.sessions.flush(handle.agent.session)) throw new Error('flush failed')
+          return { sessionId, goalId: String(goal.id) }
+        } finally {
+          await handle.dispose()
+        }
+      }
+      const complete = await persistTask('planner-proof-complete', 'complete')
+      const blocked = await persistTask('planner-proof-blocked', 'blocked')
+      bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 2,
+        taskId: initial.tasks[0]!.id, execution: complete,
+      })
+      bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 3,
+        taskId: initial.tasks[1]!.id, execution: blocked,
+      })
+      await abandonBlockedLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 4,
+        taskId: initial.tasks[1]!.id,
+        dshStatusTarget: { sessionsRoot, evolutionRoot },
+      })
+      const guided = appendLongGoalGuidance(
+        stateRoot, record.id, 5, 'Publish the final release now',
+      )
+
+      await expect(runLongGoalPlannerTurn({
+        ...plannerInput,
+        record: guided,
+        reason: 'guidance',
+      }, dependencies)).resolves.toBe('submitted')
+      expect(harness.ctx.agents.get(SessionId(record.planner.sessionId))).toBeUndefined()
+      expect(readLongGoal(stateRoot, record.id)).toMatchObject({
+        revision: 7,
+        planner: { planRevision: 2, phase: 'ready', consideredSettledTasks: 2 },
+        tasks: [
+          { objective: 'Prepare notes', execution: complete, resolution: null },
+          { objective: 'Publish draft', execution: blocked, resolution: 'abandoned' },
+          { objective: 'Publish release', execution: null, resolution: null },
+        ],
+      })
+      const inspection = await harness.ctx.sessionPersistence.inspect(
+        SessionId(record.planner.sessionId),
+      )
+      expect(inspection.events.filter(event => event.type === 'turn/start')).toHaveLength(2)
+      expect(harness.adapter.requests).toHaveLength(2)
+    } finally {
+      await harness.ctx.fiber.dispose()
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
   it('persists the Task binding before the real Goal driver starts its first turn', async () => {
     mkdirSync(FIXTURE_BASE, { recursive: true })
     const fixture = mkdtempSync(join(FIXTURE_BASE, 'host-'))
