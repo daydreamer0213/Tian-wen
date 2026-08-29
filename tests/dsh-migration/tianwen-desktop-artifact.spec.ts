@@ -30,6 +30,7 @@ function createUnpackedRoot(runtime?: Buffer): string {
   const files = [
     'resources/app/dist/bootstrap.js',
     'resources/app/dist/host.js',
+    'resources/app/dist/locale.js',
     'resources/app/dist/main.js',
     'resources/app/package.json',
     'resources/LICENSE.txt',
@@ -95,6 +96,7 @@ describe('Tianwen Desktop B1 artifact audit', () => {
     const unpackedRoot = createUnpackedRoot()
 
     for (const forbidden of [
+      'resources/app/dist/unknown.js',
       'resources/app/node_modules/@deepseek-ai/dsh/package.json',
       'resources/app/.pnpm/lock.yaml',
       'resources/app/patches/@deepseek-ai__dsh.patch',

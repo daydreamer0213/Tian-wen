@@ -21,6 +21,7 @@ function runtimeArchiveFiles(path) {
 const B1_RESOURCE_FILES = new Set([
   'app/dist/bootstrap.js',
   'app/dist/host.js',
+  'app/dist/locale.js',
   'app/dist/main.js',
   'app/package.json',
   'LICENSE.txt',
