@@ -45,5 +45,5 @@
         objective: !!js process.env.TIANWEN_GOAL_FIRST_OBJECTIVE || undefined
         context: !!js process.env.TIANWEN_GOAL_FIRST_CONTEXT || undefined
         successCriteria: !!js process.env.TIANWEN_GOAL_FIRST_SUCCESS_CRITERIA || undefined
-        revision: !!js process.env.TIANWEN_GOAL_FIRST_REVISION === '' ? undefined : Number(process.env.TIANWEN_GOAL_FIRST_REVISION)
+        revision: !!js "process.env.TIANWEN_GOAL_FIRST_REVISION === '' ? undefined : Number(process.env.TIANWEN_GOAL_FIRST_REVISION)"
         text: !!js process.env.TIANWEN_GOAL_FIRST_TEXT || undefined

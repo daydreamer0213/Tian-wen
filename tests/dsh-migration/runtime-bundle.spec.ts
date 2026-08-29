@@ -7,6 +7,7 @@ import {
   rmSync,
   symlinkSync,
 } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, posix, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
@@ -571,6 +572,33 @@ describe('@tianwen/runtime-bundle', () => {
     expect(patch).toContain('goal-round-driver')
     expect(patch).toContain('maxRetries: 0')
     expect(patch).toContain('session-title-llm')
+  })
+
+  it('parses Goal-first revision as a scalar expression for start and mutation config', async () => {
+    const requireFromRuntimeBundle = createRequire(resolve(packageRoot, 'package.json'))
+    const dshManifestPath = requireFromRuntimeBundle.resolve('@deepseek-ai/dsh/package.json')
+    const requireFromDsh = createRequire(dshManifestPath)
+    const appBoot = await import(pathToFileURL(requireFromDsh.resolve(
+      '@deepseek-ai/dsh-app-boot',
+    )).href) as {
+      loadOverlayPatches(binName: string, file: string): unknown[]
+    }
+    const patches = appBoot.loadOverlayPatches(
+      'tianwen-test', resolve(packageRoot, 'goal-first.patch.yml'),
+    ) as Array<{ insert?: Array<{ id?: string, config?: { revision?: unknown } }> }>
+    const runner = patches.flatMap(patch => patch.insert ?? []).find(entry =>
+      entry.id === 'tianwen-goal-first-runner')
+    const revision = runner?.config?.revision as { __jsExpr?: unknown } | undefined
+
+    expect(revision).toEqual({
+      __jsExpr: "process.env.TIANWEN_GOAL_FIRST_REVISION === '' ? undefined : Number(process.env.TIANWEN_GOAL_FIRST_REVISION)",
+    })
+    const evaluate = (value: string): unknown => Function('process',
+      `return (${revision!.__jsExpr as string})`,
+    )({ env: { TIANWEN_GOAL_FIRST_REVISION: value } })
+    expect(evaluate('')).toBeUndefined()
+    expect(evaluate('7')).toBe(7)
+    expect(typeof evaluate('7')).toBe('number')
   })
 
   it('ships one fixed offline smoke entry', async () => {
