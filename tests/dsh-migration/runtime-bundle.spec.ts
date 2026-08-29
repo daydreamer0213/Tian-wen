@@ -97,6 +97,7 @@ function isAllowedNaturalTrialInput(path: string): boolean {
 function isAllowedCliInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return path === 'src/cli.ts' || path === 'src/create.ts' ||
+    path === 'src/long-goal.ts' || path === 'src/long-goal-run.ts' ||
     path === 'src/model.ts' || path === 'src/resume.ts' ||
     path === 'src/portable-profile.ts' ||
     path === 'src/controlled-lifecycle.ts' ||
