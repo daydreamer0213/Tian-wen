@@ -43,7 +43,6 @@ jobs:
       - run: pnpm exec vitest run tests/dsh-probe/controlled-skill-evaluation.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-probe/controlled-skill-shadow.spec.ts tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts tests/dsh-probe/controlled-skill-activation.spec.ts tests/dsh-probe/controlled-skill-activation-runtime.spec.ts tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts tests/dsh-migration/controlled-lifecycle-profile.spec.ts
         env:
           TIANWEN_DSH_PROBE_ROOT: ${{ runner.temp }}/tianwen-v0.1-eval-fixtures
-      - run: pnpm exec vitest run tests/dsh-migration/tianwen-desktop-host.spec.ts tests/dsh-migration/tianwen-desktop-bootstrap.spec.ts tests/dsh-migration/tianwen-desktop-profile-prepare.spec.ts tests/dsh-migration/tianwen-desktop-artifact.spec.ts
       - run: pnpm demo:research-preview
       - run: pnpm demo:explicit-correction
       - run: pnpm demo:repeated-outcome

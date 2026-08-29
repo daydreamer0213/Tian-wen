@@ -798,7 +798,10 @@ Before Desktop packaging, build Runtime Bundle and run exactly one:
 
 Pass that same source path to the artifact audit after `pack:dir`. Do not run a second `pnpm pack` before NSIS.
 
-Also extend both deterministic Desktop CI commands introduced in Task 5 with `tests/dsh-migration/tianwen-desktop-profile-prepare.spec.ts`. The TypeScript job and `desktop-windows` job must each run host, bootstrap, Profile-preparation, and artifact specs on every PR.
+Run host, bootstrap, Profile-preparation, and artifact specs once in
+`desktop-windows`.  They intentionally assert Windows path and junction
+semantics, so the generic Ubuntu TypeScript job keeps build/typecheck coverage
+but does not duplicate these four Windows specs.
 
 - [ ] **Step 5: Build and audit locally from one D-drive pack**
 
