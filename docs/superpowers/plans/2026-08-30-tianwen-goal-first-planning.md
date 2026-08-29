@@ -74,7 +74,8 @@ export function abandonBlockedLongGoalTask(input: {
   readonly longGoalId: string
   readonly expectedRevision: number
   readonly taskId: string
-}): LongGoalRecordV2
+  readonly dshStatusTarget: StatusTarget
+}): Promise<LongGoalRecordV2>
 
 export function bindGoalFirstLongGoalTask(input: {
   readonly stateRoot: string
@@ -159,7 +160,7 @@ export function addGoalFirstGuidance(...): Promise<LongGoalGuidanceResultV2>
 export function abandonGoalFirstTask(...): Promise<LongGoalAbandonResultV2>
 ```
 
-- The four operation inputs contain `stateRoot`, DSH status target, long Goal fields/ID, and the exact expected revision required by the design; adapters do not supply transition decisions.
+- The four operation inputs contain `stateRoot`, DSH status target, long Goal fields/ID, and the exact expected revision required by the design; adapters do not supply transition decisions. The abandon operation awaits `abandonBlockedTask` with that same DSH status target.
 
 - [ ] **Step 1: Write the RED action-table tests**
 
