@@ -60,12 +60,19 @@ start; no model output was rerun to select a nicer plan.
   the one-shot runner, mounts the `standard` preset through
   `standingKeyFor('standard')`, and proves that no Goal, Session, or Turn is
   created. The full Runtime Bundle suite passed 57/57.
-- The Runtime Bundle focused TypeScript build passed. The root typecheck wrapper
-  could not start because pnpm wanted to purge `node_modules` without a TTY; this
-  was treated as an environment preflight issue rather than a product failure or
-  a reason to repeat unrelated validation.
+- The full TypeScript project build, install-shape check, and private-import
+  check passed.
+- A bare local full-suite command omitted the repository's required fresh probe
+  root, probe Python, and approved Corepack environment. It therefore had no
+  product verdict and reproduced the already documented environment-only result:
+  872 passed, 18 skipped, and 99 setup/fixture failures. The single valid local
+  full-suite gate then ran with a fresh D-drive root and current-worktree Python;
+  69 files and 971 tests passed, with 5 files and 18 opt-in tests skipped.
 - Independent review approved the Profile fix and its dynamic regression, and
   confirmed that the permission boundary was not widened.
+- Final whole-stage review found no integration blocker across v1 compatibility,
+  v2 transitions, planner/Task Session identity, replacement-suffix behavior,
+  CLI/installer/Desktop wiring, permission scope, or the handoff claims.
 
 ## Learning facts
 
