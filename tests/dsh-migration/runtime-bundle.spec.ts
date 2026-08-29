@@ -135,12 +135,10 @@ function isAllowedGoalFirstRunnerInput(input: string): boolean {
     'src/long-goal-host.ts',
     'src/long-goal-planner.ts',
     'src/long-goal.ts',
-  ].includes(path) || isAllowedStatusInput(path)
-    || [
-      '../tianwen-dsh-compat/dist/index.js',
-      '../tianwen-dsh-compat/dist/scripted-adapter.js',
-      '../tianwen-dsh-compat/dist/test-harness.js',
-    ].includes(path)
+  ].includes(path) || isAllowedStatusInput(path) || [
+    '../tianwen-dsh-compat/dist/runtime.js',
+    '../tianwen-dsh-compat/dist/scripted-adapter.js',
+  ].includes(path)
 }
 
 function isAllowedControlledLifecycleRunnerInput(input: string): boolean {
@@ -328,14 +326,14 @@ describe('Skill-name compatibility subpath', () => {
     expect(module.isSkillName).toEqual(expect.any(Function))
   })
 
-  it('uses the narrow seam only for status consumers', () => {
+  it('uses the production seam for runtime consumers and the narrow seam for status consumers', () => {
     const manifest = json(resolve(packageRoot, 'package.json')) as {
       scripts?: { build?: string }
     }
     const build = manifest.scripts?.build ?? ''
     expect(build.match(
       /--alias:@tianwen\/dsh-compat=@tianwen\/dsh-compat\/runtime/gu,
-    )).toHaveLength(1)
+    )).toHaveLength(2)
     expect(build.match(
       /--alias:@tianwen\/dsh-compat=@tianwen\/dsh-compat\/skill-name/gu,
     )).toHaveLength(2)
@@ -908,15 +906,27 @@ describe('@tianwen/runtime-bundle', () => {
     expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
   })
 
-  it('bundles the Goal-first runner through the shared service seams', () => {
+  it('bundles the Goal-first runner through installed production dependencies only', () => {
     const source = readFileSync(resolve(packageRoot, 'dist/goal-first-runner.js'), 'utf8')
+    const manifest = json(resolve(packageRoot, 'package.json')) as {
+      dependencies: Record<string, string>
+    }
     const metafile = json(resolve(packageRoot, 'dist/goal-first-runner.meta.json')) as {
       inputs: Record<string, unknown>
+      outputs: Record<string, { imports: { path: string; external?: boolean }[] }>
     }
+    const output = Object.entries(metafile.outputs).find(([path]) =>
+      path.replaceAll('\\', '/').endsWith('dist/goal-first-runner.js'))?.[1]
+    expect(output).toBeDefined()
+    expect(externalPackages(output!.imports).filter(name =>
+      manifest.dependencies[name] === undefined)).toEqual([])
     expect(Object.keys(metafile.inputs).filter(input => !isAllowedGoalFirstRunnerInput(input)))
       .toEqual([])
+    expect(Object.keys(metafile.inputs).some(path =>
+      /(?:^|[\\/])(index|test-harness)\.js$/u.test(path))).toBe(false)
     expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
     expect(source).not.toMatch(/from\s+["']@tianwen\//u)
+    expect(source).not.toMatch(/agent-loop-testkit|test-harness/u)
   })
 
   it('bundles the model runner through its public DSH roots', () => {
