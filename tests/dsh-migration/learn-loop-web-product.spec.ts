@@ -30,6 +30,11 @@ interface RpcResult<T> {
 
 interface ProductStatus {
   readonly goal: { readonly id: string }
+  readonly runtime: {
+    readonly activation: string
+    readonly modelRequests: number
+    readonly readOnly: boolean
+  }
   readonly tasks: readonly {
     readonly id: string
     readonly execution: null | { readonly sessionId: string, readonly goalId: string }
@@ -89,6 +94,7 @@ function runVerifier(): {
       ...childEnvironment(join(productRoot, 'home'), join(productRoot, 'verifier-environment')),
       COREPACK_HOME: 'D:\\DevData\\corepack-home',
       TIANWEN_DSH_MIGRATION_PROFILE: '1',
+      TIANWEN_LEARN_LOOP_PRODUCT_MODE: '1',
       TIANWEN_DSH_PROBE_ROOT: productRoot,
       TIANWEN_DSH_PROFILE: 'web',
     },
@@ -301,6 +307,19 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
       'runtime-bundle',
       'package.json',
     )))
+    const profileManifest = JSON.parse(readFileSync(
+      join(assembled.profileRoot, 'package.json'),
+      'utf8',
+    )) as {
+      readonly dependencies: Record<string, string>
+      readonly dsh: { readonly profile: { readonly bundles: readonly string[] } }
+    }
+    expect(profileManifest.dsh.profile.bundles).toEqual([
+      '@deepseek-ai/dsh-base',
+      '@deepseek-ai/dsh-web-app',
+      '@tianwen/runtime-bundle',
+    ])
+    expect(profileManifest.dependencies).not.toHaveProperty('@tianwen/dsh-probe-bundle')
     const workspacePolicy = readFileSync(
       join(assembled.profileRoot, 'pnpm-workspace.yaml'),
       'utf8',
@@ -401,6 +420,16 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
         .filter(event => event.type === 'turn/start').length
       expect(readBack.status.goal.id).toBe(created.status.goal.id)
       expect(readBack.status.tasks).toHaveLength(2)
+      expect(created.status.runtime).toEqual({
+        activation: 'not-loaded',
+        modelRequests: 0,
+        readOnly: true,
+      })
+      expect(readBack.status.runtime).toEqual({
+        activation: 'not-loaded',
+        modelRequests: 0,
+        readOnly: true,
+      })
       expect(sessionsAfterCreate).toBe(sessionsBeforeCreate)
       expect(turnsAfterCreate).toBe(turnsBeforeCreate)
       expect(sessionsAfterStatus).toBe(sessionsBeforeCreate)
@@ -436,7 +465,7 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
         `${created.status.goal.id}.json`,
       ), 'utf8')) as { readonly updatedAt: number }
       expect(firstTurn.time).toEqual(expect.any(Number))
-      expect(longGoalRecord.updatedAt).toBeLessThanOrEqual(firstTurn.time as number)
+      expect(longGoalRecord.updatedAt).toBeLessThan(firstTurn.time as number)
       proof = {
         schemaVersion: 'tianwen.learn-loop-web-product-proof.v1',
         dshVersion: dshManifest.version,
@@ -453,20 +482,20 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
           sessionCountAfter: sessionsAfterCreate,
           turnStartCountBefore: turnsBeforeCreate,
           turnStartCountAfter: turnsAfterCreate,
-          modelRequests: 0,
+          runtime: created.status.runtime,
         },
         statusRead: {
           sessionCountBefore: sessionsAfterCreate,
           sessionCountAfter: sessionsAfterStatus,
           turnStartCountBefore: turnsAfterCreate,
           turnStartCountAfter: turnsAfterStatus,
-          modelRequests: 0,
+          runtime: readBack.status.runtime,
         },
         admission: {
           sessionCount: sessionLogs(sessionsRoot).length,
           firstTurnStartTime: firstTurn.time,
           bindingUpdatedAt: longGoalRecord.updatedAt,
-          bindingBeforeFirstTurnStart: longGoalRecord.updatedAt <= (firstTurn.time as number),
+          bindingBeforeFirstTurnStart: longGoalRecord.updatedAt < (firstTurn.time as number),
         },
       }
     } finally {

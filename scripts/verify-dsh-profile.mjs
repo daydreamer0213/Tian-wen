@@ -45,6 +45,14 @@ const runtimeClientInject = [
   '@deepseek-ai/dsh-client-ui-sidebar',
 ]
 const migrationMode = process.env.TIANWEN_DSH_MIGRATION_PROFILE === '1'
+const productModeValue = process.env.TIANWEN_LEARN_LOOP_PRODUCT_MODE
+if (productModeValue !== undefined && productModeValue !== '1') {
+  throw new Error('TIANWEN_LEARN_LOOP_PRODUCT_MODE must be exactly 1 when set')
+}
+const productMode = productModeValue === '1'
+if (productMode && (!migrationMode || profileName !== 'web')) {
+  throw new Error('Learn Loop product mode requires the Web migration Profile')
+}
 const windowsDataRoot = 'D:\\DevData'
 
 function isWithin(base, candidate) {
@@ -637,8 +645,6 @@ async function main() {
     appBoot.initProfile(profileRoot, appBoot.PROFILE_TEMPLATES.web)
     webKoffiPolicy = pinWebProfileKoffi(profileRoot)
   }
-  const tarballExistedBeforePack = existsSync(tarball)
-
   const workspaceEnv = runtimeEnvironment(
     probeRoot,
     dshHome,
@@ -646,50 +652,6 @@ async function main() {
     true,
     childCorepackHome,
   )
-  runPnpm(
-    'build-bundle',
-    ['--filter', bundlePackage, 'build'],
-    workspaceEnv,
-    commands,
-  )
-  if (migrationMode) {
-    runPnpm('build-runtime-bundle', ['--filter', `${runtimeBundlePackage}...`, 'build'], workspaceEnv, commands)
-    runPnpm('pack-runtime-bundle', ['--filter', runtimeBundlePackage, 'pack', '--pack-destination', packsRoot], workspaceEnv, commands)
-    requireAssertion(existsSync(runtimeTarball), `runtime tarball is missing: ${runtimeTarball}`)
-  }
-  runPnpm(
-    'pack-bundle',
-    [
-      '--filter',
-      bundlePackage,
-      'pack',
-      '--pack-destination',
-      packsRoot,
-    ],
-    workspaceEnv,
-    commands,
-  )
-  requireAssertion(existsSync(tarball), `tarball is missing: ${tarball}`)
-  requireAssertion(statSync(tarball).isFile(), `tarball is not a file: ${tarball}`)
-  const realTarball = realpathSync(tarball)
-  const producedByCurrentRun = !tarballExistedBeforePack
-  const upstreamArgs = [
-    ...(profileName === 'web' ? ['--allow-build=koffi'] : []),
-    'add',
-    '--offline',
-    tarball,
-  ]
-  const installBoundary = validateFixedInstallBoundary({
-    platform: process.platform,
-    probeRoot,
-    realProbeRoot: realpathSync(probeRoot),
-    profileName,
-    tarballPath: tarball,
-    realTarballPath: realTarball,
-    producedByCurrentRun,
-    upstreamArgs,
-  })
-
   const profileEnv = runtimeEnvironment(
     probeRoot,
     dshHome,
@@ -698,19 +660,70 @@ async function main() {
     childCorepackHome,
   )
   if (profileName === 'web') profileEnv.PNPM_CONFIG_IGNORE_SCRIPTS = 'false'
-  runPnpm(
-    'plugin-add',
-    [
-      'exec',
-      'dsh',
-      'plugin',
-      '--profile',
+  let producedByCurrentRun = false
+  let upstreamArgs
+  let installBoundary
+  if (!productMode) {
+    runPnpm(
+      'build-bundle',
+      ['--filter', bundlePackage, 'build'],
+      workspaceEnv,
+      commands,
+    )
+  }
+  if (migrationMode) {
+    runPnpm('build-runtime-bundle', ['--filter', `${runtimeBundlePackage}...`, 'build'], workspaceEnv, commands)
+    runPnpm('pack-runtime-bundle', ['--filter', runtimeBundlePackage, 'pack', '--pack-destination', packsRoot], workspaceEnv, commands)
+    requireAssertion(existsSync(runtimeTarball), `runtime tarball is missing: ${runtimeTarball}`)
+  }
+  if (!productMode) {
+    const tarballExistedBeforePack = existsSync(tarball)
+    runPnpm(
+      'pack-bundle',
+      [
+        '--filter',
+        bundlePackage,
+        'pack',
+        '--pack-destination',
+        packsRoot,
+      ],
+      workspaceEnv,
+      commands,
+    )
+    requireAssertion(existsSync(tarball), `tarball is missing: ${tarball}`)
+    requireAssertion(statSync(tarball).isFile(), `tarball is not a file: ${tarball}`)
+    const realTarball = realpathSync(tarball)
+    producedByCurrentRun = !tarballExistedBeforePack
+    upstreamArgs = [
+      ...(profileName === 'web' ? ['--allow-build=koffi'] : []),
+      'add',
+      '--offline',
+      tarball,
+    ]
+    installBoundary = validateFixedInstallBoundary({
+      platform: process.platform,
+      probeRoot,
+      realProbeRoot: realpathSync(probeRoot),
       profileName,
-      ...upstreamArgs,
-    ],
-    profileEnv,
-    commands,
-  )
+      tarballPath: tarball,
+      realTarballPath: realTarball,
+      producedByCurrentRun,
+      upstreamArgs,
+    })
+    runPnpm(
+      'plugin-add',
+      [
+        'exec',
+        'dsh',
+        'plugin',
+        '--profile',
+        profileName,
+        ...upstreamArgs,
+      ],
+      profileEnv,
+      commands,
+    )
+  }
   if (migrationMode) {
     const runtimeArgs = [
       ...(profileName === 'web' ? ['--allow-build=koffi'] : []),
@@ -718,9 +731,15 @@ async function main() {
       '--offline',
       runtimeTarball,
     ]
-    validateFixedInstallBoundary({ platform: process.platform, probeRoot, realProbeRoot: realpathSync(probeRoot), profileName, tarballBasename: runtimeTarballBasename, tarballPath: runtimeTarball, realTarballPath: realpathSync(runtimeTarball), producedByCurrentRun: true, upstreamArgs: runtimeArgs })
+    const runtimeInstallBoundary = validateFixedInstallBoundary({ platform: process.platform, probeRoot, realProbeRoot: realpathSync(probeRoot), profileName, tarballBasename: runtimeTarballBasename, tarballPath: runtimeTarball, realTarballPath: realpathSync(runtimeTarball), producedByCurrentRun: true, upstreamArgs: runtimeArgs })
     runPnpm('plugin-add-runtime', ['exec', 'dsh', 'plugin', '--profile', profileName, ...runtimeArgs], profileEnv, commands)
+    if (productMode) {
+      producedByCurrentRun = true
+      upstreamArgs = runtimeArgs
+      installBoundary = runtimeInstallBoundary
+    }
   }
+  requireAssertion(upstreamArgs !== undefined && installBoundary !== undefined, 'install boundary was not recorded')
   const dump = runPnpm(
     'dump-config',
     ['exec', 'dsh', '--profile', profileName, '--dump-config'],
@@ -754,15 +773,17 @@ async function main() {
     'Profile module fallback was not prepared for executable import checks',
   )
 
-  const publicExportEvidence = await resolveAndImportBundleExports(
-    profileManifestPath,
-  )
+  const publicExportEvidence = productMode
+    ? undefined
+    : await resolveAndImportBundleExports(profileManifestPath)
   const runtimeBundle = migrationMode ? await resolveAndImportRuntimeBundle(profileManifestPath) : undefined
   const bundleNames = profileManifest.dsh?.profile?.bundles ?? []
   const baseIndex = bundleNames.indexOf(basePackage)
   const bundleIndex = bundleNames.indexOf(bundlePackage)
   if (migrationMode) {
-    const expectedBundleNames = profileName === 'web'
+    const expectedBundleNames = productMode
+      ? [basePackage, webAppPackage, runtimeBundlePackage]
+      : profileName === 'web'
       ? [basePackage, webAppPackage, bundlePackage, runtimeBundlePackage]
       : [basePackage, bundlePackage, runtimeBundlePackage]
     requireAssertion(JSON.stringify(bundleNames) === JSON.stringify(expectedBundleNames), 'Profile bundle order is wrong')
@@ -873,80 +894,95 @@ async function main() {
     readFileSync(resolvedBaseManifestPath, 'utf8'),
   )
 
-  const installedBundleRoot = childPath(
-    profileRoot,
-    'node_modules',
-    '@tianwen',
-    'dsh-probe-bundle',
-  )
-  const expectedBundleFiles = [
-    'package.json',
-    'cordis.patch.yml',
-    'dist/index.js',
-    'dist/index.d.ts',
-    'dist/adapter.js',
-    'dist/adapter.d.ts',
-  ]
-  const packageFilesPresent = Object.fromEntries(
-    expectedBundleFiles.map(path => [
-      path,
-      existsSync(resolve(installedBundleRoot, path)),
-    ]),
-  )
+  let probeComposition = {}
+  if (!productMode) {
+    const installedBundleRoot = childPath(
+      profileRoot,
+      'node_modules',
+      '@tianwen',
+      'dsh-probe-bundle',
+    )
+    const expectedBundleFiles = [
+      'package.json',
+      'cordis.patch.yml',
+      'dist/index.js',
+      'dist/index.d.ts',
+      'dist/adapter.js',
+      'dist/adapter.d.ts',
+    ]
+    const packageFilesPresent = Object.fromEntries(
+      expectedBundleFiles.map(path => [
+        path,
+        existsSync(resolve(installedBundleRoot, path)),
+      ]),
+    )
 
-  const authoredPatch = parseAuthoredPatch(readFileSync(
-    resolve(repoRoot, 'packages/tianwen-dsh-probe-bundle/cordis.patch.yml'),
-    'utf8',
-  ))
-  const installedPatch = parseAuthoredPatch(readFileSync(
-    resolve(installedBundleRoot, 'cordis.patch.yml'),
-    'utf8',
-  ))
-  requireAssertion(
-    JSON.stringify(installedPatch) === JSON.stringify(authoredPatch),
-    'installed Bundle patch differs from the authored patch',
-  )
-  const dumpedDefaultModel = parseDumpedDefaultModel(dump)
-  const dumpedAdapter = parseDumpedAdapter(dump)
-  const baseLayerOffset = dump.indexOf(basePackage)
-  const bundleLayerOffset = dump.indexOf(bundlePackage)
-  const assertions = {
-    adapterPackagePresent:
-      dumpedAdapter.name === bundleAdapterPackage,
-    adapterRowPresent:
-      dumpedAdapter.id === 'tianwen-probe-adapter',
-    authoredPatchExactlyThreeOperations:
-      authoredPatch.defaultModel.provider === 'tianwen-probe'
-      && authoredPatch.defaultModel.model === 'scripted'
-      && authoredPatch.insertedAdapter.id === 'tianwen-probe-adapter'
-      && authoredPatch.insertedAdapter.name === bundleAdapterPackage
-      && authoredPatch.insertedCompositionProbe.id === 'tianwen-composition-probe'
-      && authoredPatch.insertedCompositionProbe.name === '@tianwen/dsh-probe-bundle/composition'
-      && authoredPatch.insertedCompositionProbe.disabledByDefault === true,
-    baseBeforeBundle:
-      baseIndex >= 0
-      && bundleIndex > baseIndex
-      && baseLayerOffset >= 0
-      && bundleLayerOffset > baseLayerOffset,
-    baseResolvedExactRc6:
-      resolvedBaseManifest.version === expectedDshVersion,
-    bundleLayerPresent: bundleLayerOffset >= 0,
-    defaultModelProviderBoundToRow:
-      dumpedDefaultModel.provider === 'tianwen-probe',
-    defaultModelScriptedBoundToRow:
-      dumpedDefaultModel.model === 'scripted',
-    installedBundleComplete:
-      Object.values(packageFilesPresent).every(Boolean),
-    installedPatchMatchesAuthoredPatch:
+    const authoredPatch = parseAuthoredPatch(readFileSync(
+      resolve(repoRoot, 'packages/tianwen-dsh-probe-bundle/cordis.patch.yml'),
+      'utf8',
+    ))
+    const installedPatch = parseAuthoredPatch(readFileSync(
+      resolve(installedBundleRoot, 'cordis.patch.yml'),
+      'utf8',
+    ))
+    requireAssertion(
       JSON.stringify(installedPatch) === JSON.stringify(authoredPatch),
-    publicAdapterExportImported:
-      publicExportEvidence.adapterName === 'tianwen-probe-adapter',
-    publicRootExportImported:
-      publicExportEvidence.rootIdentity === 'tianwen-probe',
+      'installed Bundle patch differs from the authored patch',
+    )
+    const dumpedDefaultModel = parseDumpedDefaultModel(dump)
+    const dumpedAdapter = parseDumpedAdapter(dump)
+    const baseLayerOffset = dump.indexOf(basePackage)
+    const bundleLayerOffset = dump.indexOf(bundlePackage)
+    const assertions = {
+      adapterPackagePresent:
+        dumpedAdapter.name === bundleAdapterPackage,
+      adapterRowPresent:
+        dumpedAdapter.id === 'tianwen-probe-adapter',
+      authoredPatchExactlyThreeOperations:
+        authoredPatch.defaultModel.provider === 'tianwen-probe'
+        && authoredPatch.defaultModel.model === 'scripted'
+        && authoredPatch.insertedAdapter.id === 'tianwen-probe-adapter'
+        && authoredPatch.insertedAdapter.name === bundleAdapterPackage
+        && authoredPatch.insertedCompositionProbe.id === 'tianwen-composition-probe'
+        && authoredPatch.insertedCompositionProbe.name === '@tianwen/dsh-probe-bundle/composition'
+        && authoredPatch.insertedCompositionProbe.disabledByDefault === true,
+      baseBeforeBundle:
+        baseIndex >= 0
+        && bundleIndex > baseIndex
+        && baseLayerOffset >= 0
+        && bundleLayerOffset > baseLayerOffset,
+      baseResolvedExactRc6:
+        resolvedBaseManifest.version === expectedDshVersion,
+      bundleLayerPresent: bundleLayerOffset >= 0,
+      defaultModelProviderBoundToRow:
+        dumpedDefaultModel.provider === 'tianwen-probe',
+      defaultModelScriptedBoundToRow:
+        dumpedDefaultModel.model === 'scripted',
+      installedBundleComplete:
+        Object.values(packageFilesPresent).every(Boolean),
+      installedPatchMatchesAuthoredPatch:
+        JSON.stringify(installedPatch) === JSON.stringify(authoredPatch),
+      publicAdapterExportImported:
+        publicExportEvidence.adapterName === 'tianwen-probe-adapter',
+      publicRootExportImported:
+        publicExportEvidence.rootIdentity === 'tianwen-probe',
+    }
+    for (const [name, passed] of Object.entries(assertions)) {
+      requireAssertion(passed, `profile assertion failed: ${name}`)
+    }
+    probeComposition = {
+      bundlePackage,
+      bundleSpecifier: profileManifest.dependencies[bundlePackage],
+      packageFilesPresent,
+      authoredPatch,
+      dumpedDefaultModel,
+      dumpedAdapter,
+      publicExports: publicExportEvidence,
+      assertions,
+    }
   }
-  for (const [name, passed] of Object.entries(assertions)) {
-    requireAssertion(passed, `profile assertion failed: ${name}`)
-  }
+
+  const primaryTarball = productMode ? runtimeTarball : tarball
 
   const report = {
     schemaVersion: 'tianwen.dsh_profile_probe.v1',
@@ -970,23 +1006,16 @@ async function main() {
     },
     commands,
     tarball: {
-      path: tarball,
-      sha256: sha256(readFileSync(tarball)),
+      path: primaryTarball,
+      sha256: sha256(readFileSync(primaryTarball)),
     },
     composition: {
       layerOrder: bundleNames,
       basePackage,
       baseResolutionAuthority: '@deepseek-ai/dsh public dependency closure',
       baseResolvedVersion: resolvedBaseManifest.version,
-      bundlePackage,
-      bundleSpecifier: profileManifest.dependencies[bundlePackage],
-      packageFilesPresent,
-      authoredPatch,
-      dumpedDefaultModel,
-      dumpedAdapter,
-      publicExports: publicExportEvidence,
+      ...probeComposition,
       dumpConfigSha256: sha256(Buffer.from(dump, 'utf8')),
-      assertions,
       ...(migrationMode ? { runtimeBundle, runtimeInstall: runtimeBundle.install } : {}),
     },
     forbiddenEffects: {
@@ -1003,8 +1032,8 @@ async function main() {
       packageManager: 'pnpm@11.20.0',
       credentialVariablesPassed: [],
       fixedProfile: profileName,
-      fixedTarballBasename: tarballBasename,
-      fixedTarballPath: tarball,
+      fixedTarballBasename: basename(primaryTarball),
+      fixedTarballPath: primaryTarball,
       fixedUpstreamPluginArgv: upstreamArgs,
       allowedBuildPackages: profileName === 'web' ? ['koffi'] : [],
       ...(webKoffiPolicy === undefined ? {} : { dependencyOverride: webKoffiPolicy }),

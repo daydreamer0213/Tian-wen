@@ -21,6 +21,9 @@ The assembled-product test used a disposable root at
 packed Runtime Bundle in a fresh DSH Web Profile, and booted the official Web
 entry on loopback. The client graph contained `@tianwen/runtime-bundle`, and
 `/plugins/@tianwen/runtime-bundle/client.js` returned successfully.
+The product Profile's exact bundle order was `@deepseek-ai/dsh-base`,
+`@deepseek-ai/dsh-web-app`, then `@tianwen/runtime-bundle`; it did not install
+the probe bundle.
 
 Using the real `/tianwen` Connection RPC, the test created and read a two-Task
 plan without starting a Session or model turn. It then invoked
@@ -38,20 +41,22 @@ remained unbound.
 - Runtime tarball:
   `D:\DevData\tianwen-learn-loop-web-product-tests\proof\packs\tianwen-runtime-bundle-0.1.0.tgz`
 - Runtime SHA-256:
-  `cef72497e6f75b6ead7c40f5e78fd478a6bfcbe6e6f495ec54e303981a80e2ac`
-- Long Goal ID: `tianwen-long-goal-6b9d7975-81bc-430a-8a26-8e49cd925202`
+  `ca377faf6427d0a14c515fa303644eba2b25d389afd333a1bc93cfd47adc590f`
+- Long Goal ID: `tianwen-long-goal-71c6f7ee-56d6-4fb0-a5b7-146b7b436db0`
 - First Task binding:
-  - Goal ID: `goal-64fa6504-6284-414c-8a70-1569d3ccb3c2`
-  - Session ID: `session-a1a7d02d-bd14-4859-8af8-a40fc119911f`
+  - Goal ID: `goal-7601c4e1-3aca-4a89-845e-caf51a286fa4`
+  - Session ID: `session-75dee7ff-4914-4070-ad89-bf31f1d3697b`
 - Second Task binding: `null`
 - Creation facts: Session count `0 -> 0`; `turn/start` count `0 -> 0`;
-  model requests `0`.
+  actual RPC runtime status was `activation: not-loaded`, `modelRequests: 0`,
+  `readOnly: true`.
 - Status-read facts: Session count `0 -> 0`; `turn/start` count `0 -> 0`;
-  model requests `0`.
+  actual RPC runtime status was `activation: not-loaded`, `modelRequests: 0`,
+  `readOnly: true`.
 - Admission facts: Session count `1`; binding timestamp
-  `1788001692840`; first `turn/start` timestamp `1788001692876`; therefore the
-  binding preceded the first turn.
-- Owned Web PID during proof: `10336`. The test stopped that exact process tree
+  `1788003217758`; first `turn/start` timestamp `1788003217821`; therefore the
+  binding was strictly earlier than the first turn.
+- Owned Web PID during proof: `10916`. The test stopped that exact process tree
   in `finally`; the loopback endpoint was confirmed closed.
 - Desktop unpacked artifact:
   `D:\DevData\tianwen-worktrees\tianwen-architecture-overview-v2-merge\dist\tianwen-desktop\win-unpacked`
@@ -69,7 +74,10 @@ Web Profile bootstrap was aligned with the installer's existing managed policy
 by pinning Koffi `3.1.4`, while preserving `nodeLinker` and `allowBuilds`; no
 CMake install or copied native binary was introduced.
 
-The final flagged Web product run passed: `1` test passed in `73.31s`. The
+The review-fix RED proved that the original Profile still contained the probe
+bundle. The minimal product-only branch removed that install while leaving the
+ordinary verifier modes unchanged. The final flagged Web product run passed:
+`1` test passed in `69.70s`. The
 focused Desktop artifact spec passed `8/8`, including rejection of an otherwise
 valid Runtime tarball missing `package/dist/client.js`.
 
