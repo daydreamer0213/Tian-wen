@@ -40,10 +40,12 @@ const RUNTIME_FILES = [
   'dist/cli.js',
   'dist/model-runner.js',
   'dist/create-runner.js',
+  'dist/goal-first-runner.js',
   'dist/resume-runner.js',
   'dist/controlled-lifecycle-runner.js',
   'cordis.patch.yml',
   'create.patch.yml',
+  'goal-first.patch.yml',
   'model.patch.yml',
   'resume.patch.yml',
   'controlled-lifecycle.patch.yml',
@@ -1249,7 +1251,7 @@ describe('Tianwen installer contract', () => {
   })
 
   it('publishes a detached Runtime Bundle candidate', () => {
-    expect(RUNTIME_PUBLICATION).toHaveLength(18)
+    expect(RUNTIME_PUBLICATION).toHaveLength(20)
     const root = testRoot('detached-runtime-candidate')
     const paths = deriveInstallPaths(root, 'win32')
     const repoRoot = testRoot('detached-runtime-repo')

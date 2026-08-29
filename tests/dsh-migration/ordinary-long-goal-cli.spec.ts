@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { PassThrough } from 'node:stream'
 
@@ -136,11 +136,119 @@ function projection(
 }
 
 afterEach(() => {
+  vi.clearAllMocks()
   vi.restoreAllMocks()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
 describe('ordinary long Goal CLI', () => {
+  it('launches goal-first start once with the portable Profile and canonical workspace', async () => {
+    const target = portableFixture()
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const child = capturedChild()
+    vi.mocked(spawn).mockImplementationOnce(() => child)
+
+    const result = main([
+      'goal', 'start', '--objective', 'Ship the release',
+      '--context', 'Keep the changelog concise',
+      '--success-criteria', 'Release is published',
+      ...portableArgs(target), '--json',
+    ])
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1))
+    child.emit('exit', 0, null)
+
+    await expect(result).resolves.toBe(0)
+    const [program, args, options] = vi.mocked(spawn).mock.calls[0]!
+    expect(program).toBe(process.execPath)
+    expect(args).toEqual(expect.arrayContaining([
+      target.dshBin, '--profile', target.profile, '--patch',
+      expect.stringContaining('goal-first.patch.yml'),
+    ]))
+    expect(options).toMatchObject({
+      cwd: realpathSync(process.cwd()),
+      shell: false,
+      stdio: 'inherit',
+      env: expect.objectContaining({
+        DSH_HOME: target.dshHome,
+        TIANWEN_GOAL_FIRST_OPERATION: 'start',
+        TIANWEN_GOAL_FIRST_OBJECTIVE: 'Ship the release',
+        TIANWEN_GOAL_FIRST_CONTEXT: 'Keep the changelog concise',
+        TIANWEN_GOAL_FIRST_SUCCESS_CRITERIA: 'Release is published',
+        TIANWEN_GOAL_FIRST_STATE_ROOT: target.stateRoot,
+        TIANWEN_GOAL_FIRST_SESSIONS_ROOT: target.sessionsRoot,
+        TIANWEN_GOAL_FIRST_EVOLUTION_ROOT: target.evolutionRoot,
+      }),
+    })
+    expect(stdout).not.toHaveBeenCalled()
+    expect(stderr).not.toHaveBeenCalled()
+  })
+
+  it('dispatches every valid goal-first operation once and rejects strict mixed fields', async () => {
+    const target = portableFixture()
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const operations: string[] = []
+    vi.mocked(spawn).mockImplementation((_program, _args, options) => {
+      operations.push((options.env as NodeJS.ProcessEnv).TIANWEN_GOAL_FIRST_OPERATION!)
+      const child = capturedChild()
+      queueMicrotask(() => child.emit('exit', 0, null))
+      return child
+    })
+
+    await expect(main([
+      'goal', 'start', '--objective', 'Start Goal', ...portableArgs(target),
+    ])).resolves.toBe(0)
+    await expect(main([
+      'goal', 'continue', '--goal', 'tianwen-long-goal-one', '--revision', '1', ...portableArgs(target),
+    ])).resolves.toBe(0)
+    await expect(main([
+      'goal', 'guide', '--goal', 'tianwen-long-goal-one', '--revision', '2', '--text', 'New fact', ...portableArgs(target),
+    ])).resolves.toBe(0)
+    await expect(main([
+      'goal', 'abandon', '--goal', 'tianwen-long-goal-one', '--revision', '3', ...portableArgs(target),
+    ])).resolves.toBe(0)
+    const dataDir = fixtureRoot()
+    const dshPackage = join(dataDir, 'dsh-host', 'node_modules', '@deepseek-ai', 'dsh')
+    mkdirSync(join(dshPackage, 'lib'), { recursive: true })
+    writeFileSync(join(dshPackage, 'package.json'), `${JSON.stringify({
+      version: '0.1.1-rc.2', bin: { dsh: 'lib/bin.js' },
+    })}\n`)
+    writeFileSync(join(dshPackage, 'lib', 'bin.js'), '#!/usr/bin/env node\n')
+    await expect(main([
+      'goal', 'start', '--objective', 'Start managed Goal', '--data-dir', dataDir,
+    ])).resolves.toBe(0)
+    await expect(main([
+      'goal', 'continue', '--goal', 'tianwen-long-goal-one', '--revision', '1', '--data-dir', dataDir,
+    ])).resolves.toBe(0)
+    await expect(main([
+      'goal', 'guide', '--goal', 'tianwen-long-goal-one', '--revision', '2', '--text', 'Managed fact', '--data-dir', dataDir,
+    ])).resolves.toBe(0)
+    await expect(main([
+      'goal', 'abandon', '--goal', 'tianwen-long-goal-one', '--revision', '3', '--data-dir', dataDir,
+    ])).resolves.toBe(0)
+    expect(operations).toEqual([
+      'start', 'continue', 'guide', 'abandon',
+      'start', 'continue', 'guide', 'abandon',
+    ])
+
+    for (const args of [
+      ['goal', 'start', '--objective', ' ', ...portableArgs(target)],
+      ['goal', 'start', '--objective', 'Goal', '--objective', 'Again', ...portableArgs(target)],
+      ['goal', 'start', '--objective', 'Goal', '--task', 'not allowed', ...portableArgs(target)],
+      ['goal', 'continue', '--goal', 'id', ...portableArgs(target)],
+      ['goal', 'continue', '--goal', 'id', '--revision', '0', ...portableArgs(target)],
+      ['goal', 'continue', '--goal', 'id', '--revision', '-1', ...portableArgs(target)],
+      ['goal', 'continue', '--goal', 'id', '--revision', '1.5', ...portableArgs(target)],
+      ['goal', 'continue', '--goal', 'id', '--revision', '9007199254740992', ...portableArgs(target)],
+      ['goal', 'guide', '--goal', 'id', '--revision', '1', ...portableArgs(target)],
+      ['goal', 'abandon', '--goal', 'id', '--revision', '1', '--text', 'not allowed', ...portableArgs(target)],
+      ['goal', 'continue', '--goal', 'id', '--revision', '1', '--max-rounds', '3', ...portableArgs(target)],
+      ['goal', 'continue', '--goal', 'id', '--revision', '1', '--data-dir', fixtureRoot(), ...portableArgs(target)],
+      ['goal', 'continue', '--goal', 'id', '--revision', '1', '--dsh-root', target.dshRoot],
+    ]) await expect(main(args)).resolves.toBe(2)
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('tianwen goal'))
+  })
+
   it('creates an authored plan with repeated Tasks and starts no DSH process', async () => {
     const dataDir = fixtureRoot()
     const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)

@@ -55,7 +55,9 @@ function isAllowedRuntimeInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return [
     'src/runtime.ts',
+    'src/goal-first-service.ts',
     'src/long-goal-host.ts',
+    'src/long-goal-planner.ts',
     'src/long-goal.ts',
     'src/status.ts',
   ].includes(path)
@@ -103,6 +105,7 @@ function isAllowedNaturalTrialInput(path: string): boolean {
 function isAllowedCliInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return path === 'src/cli.ts' || path === 'src/create.ts' ||
+    path === 'src/goal-first.ts' ||
     path === 'src/long-goal.ts' || path === 'src/long-goal-run.ts' ||
     path === 'src/model.ts' || path === 'src/resume.ts' ||
     path === 'src/portable-profile.ts' ||
@@ -122,6 +125,22 @@ function isAllowedResumeRunnerInput(input: string): boolean {
 
 function isAllowedCreateRunnerInput(input: string): boolean {
   return posix.normalize(input.replaceAll('\\', '/')) === 'src/create-runner.ts'
+}
+
+function isAllowedGoalFirstRunnerInput(input: string): boolean {
+  const path = posix.normalize(input.replaceAll('\\', '/'))
+  return [
+    'src/goal-first-runner.ts',
+    'src/goal-first-service.ts',
+    'src/long-goal-host.ts',
+    'src/long-goal-planner.ts',
+    'src/long-goal.ts',
+  ].includes(path) || isAllowedStatusInput(path)
+    || [
+      '../tianwen-dsh-compat/dist/index.js',
+      '../tianwen-dsh-compat/dist/scripted-adapter.js',
+      '../tianwen-dsh-compat/dist/test-harness.js',
+    ].includes(path)
 }
 
 function isAllowedControlledLifecycleRunnerInput(input: string): boolean {
@@ -411,6 +430,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.dependencies).toEqual({
       '@deepseek-ai/cordis': '4.0.1',
       '@deepseek-ai/dsh-agent': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-agent-presets': '0.1.1-rc.2',
       '@deepseek-ai/dsh-credentials': '0.1.1-rc.2',
       '@deepseek-ai/dsh-goal': '0.1.1-rc.2',
       '@deepseek-ai/dsh-llm': '0.1.1-rc.2',
@@ -455,6 +475,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.exports).toHaveProperty('./status')
     expect(manifest.exports).toHaveProperty('./resume-runner')
     expect(manifest.exports).toHaveProperty('./create-runner')
+    expect(manifest.exports).toHaveProperty('./goal-first-runner')
     expect(manifest.exports).toHaveProperty('./model-runner')
     expect(manifest.files).toEqual([
       'dist/index.js',
@@ -466,11 +487,13 @@ describe('@tianwen/runtime-bundle', () => {
       'dist/cli.js',
       'dist/model-runner.js',
       'dist/create-runner.js',
+      'dist/goal-first-runner.js',
       'dist/resume-runner.js',
       'dist/controlled-lifecycle-runner.js',
       'dist/client.js',
       'cordis.patch.yml',
       'create.patch.yml',
+      'goal-first.patch.yml',
       'model.patch.yml',
       'resume.patch.yml',
       'controlled-lifecycle.patch.yml',
@@ -532,6 +555,26 @@ describe('@tianwen/runtime-bundle', () => {
 `)
   })
 
+  it('publishes the one-shot Goal-first runner and patch', () => {
+    const manifest = json(resolve(packageRoot, 'package.json')) as {
+      exports: Record<string, unknown>
+      files: string[]
+    }
+    expect(manifest.exports['./goal-first-runner']).toEqual({
+      default: './dist/goal-first-runner.js',
+    })
+    expect(manifest.files).toContain('dist/goal-first-runner.js')
+    expect(manifest.files).toContain('goal-first.patch.yml')
+    const patch = readFileSync(resolve(packageRoot, 'goal-first.patch.yml'), 'utf8')
+      .replaceAll('\r\n', '\n')
+    expect(patch).toContain("name: '@tianwen/runtime-bundle/goal-first-runner'")
+    expect(patch).toContain("name: '@deepseek-ai/dsh-agent-presets'")
+    expect(patch).toContain('TIANWEN_GOAL_FIRST_SESSIONS_ROOT')
+    expect(patch).toContain('goal-round-driver')
+    expect(patch).toContain('maxRetries: 0')
+    expect(patch).toContain('session-title-llm')
+  })
+
   it('ships one fixed offline smoke entry', async () => {
     const manifest = json(resolve(packageRoot, 'package.json')) as {
       exports: Record<string, unknown>
@@ -543,6 +586,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.dependencies).toEqual({
       '@deepseek-ai/cordis': '4.0.1',
       '@deepseek-ai/dsh-agent': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-agent-presets': '0.1.1-rc.2',
       '@deepseek-ai/dsh-credentials': '0.1.1-rc.2',
       '@deepseek-ai/dsh-goal': '0.1.1-rc.2',
       '@deepseek-ai/dsh-llm': '0.1.1-rc.2',
@@ -864,6 +908,17 @@ describe('@tianwen/runtime-bundle', () => {
     expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
   })
 
+  it('bundles the Goal-first runner through the shared service seams', () => {
+    const source = readFileSync(resolve(packageRoot, 'dist/goal-first-runner.js'), 'utf8')
+    const metafile = json(resolve(packageRoot, 'dist/goal-first-runner.meta.json')) as {
+      inputs: Record<string, unknown>
+    }
+    expect(Object.keys(metafile.inputs).filter(input => !isAllowedGoalFirstRunnerInput(input)))
+      .toEqual([])
+    expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
+    expect(source).not.toMatch(/from\s+["']@tianwen\//u)
+  })
+
   it('bundles the model runner through its public DSH roots', () => {
     const source = readFileSync(resolve(packageRoot, 'dist/model-runner.js'), 'utf8')
     const metafile = json(resolve(packageRoot, 'dist/model-runner.meta.json')) as {
@@ -957,6 +1012,7 @@ describe('@tianwen/runtime-bundle', () => {
         'package/dist/client.js',
         'package/dist/controlled-lifecycle-runner.js',
         'package/dist/create-runner.js',
+        'package/dist/goal-first-runner.js',
         'package/dist/index.d.ts',
         'package/dist/index.js',
         'package/dist/model-runner.js',
@@ -965,6 +1021,7 @@ describe('@tianwen/runtime-bundle', () => {
         'package/dist/smoke.js',
         'package/dist/status.d.ts',
         'package/dist/status.js',
+        'package/goal-first.patch.yml',
         'package/model.patch.yml',
         'package/package.json',
         'package/resume.patch.yml',

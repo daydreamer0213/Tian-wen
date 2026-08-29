@@ -50,6 +50,7 @@ import {
   readLongGoalStatus,
 } from './long-goal.js'
 import { runLongGoalTask } from './long-goal-run.js'
+import { launchGoalFirst, preflightGoalFirst } from './goal-first.js'
 
 const READ_ONLY_USAGE = [
   'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
@@ -99,11 +100,21 @@ const TASK_USAGE = [
   '',
 ].join('\n')
 
+const GOAL_USAGE = [
+  'Usage: tianwen goal start --objective TEXT --data-dir ABSOLUTE_PATH [--context TEXT] [--success-criteria TEXT] [--json]',
+  'Usage: tianwen goal start --objective TEXT --dsh-root ABSOLUTE_PATH --dsh-home ABSOLUTE_PATH --profile NAME --state-root ABSOLUTE_PATH [--context TEXT] [--success-criteria TEXT] [--json]',
+  'Usage: tianwen goal continue --goal GOAL_ID --revision N --data-dir ABSOLUTE_PATH [--json]',
+  'Usage: tianwen goal guide --goal GOAL_ID --revision N --text TEXT --data-dir ABSOLUTE_PATH [--json]',
+  'Usage: tianwen goal abandon --goal GOAL_ID --revision N --data-dir ABSOLUTE_PATH [--json]',
+  '',
+].join('\n')
+
 function usage(command: string | undefined): string {
   if (command === 'controlled-lifecycle') return CONTROLLED_LIFECYCLE_USAGE
   if (command === 'model') return MODEL_USAGE
   if (command === 'plan') return PLAN_USAGE
   if (command === 'task') return TASK_USAGE
+  if (command === 'goal') return GOAL_USAGE
   if (command === 'resume') return RESUME_USAGE
   return command === 'create' ? CREATE_USAGE : READ_ONLY_USAGE
 }
@@ -111,6 +122,12 @@ function usage(command: string | undefined): string {
 function positiveInteger(value: string | undefined): number | undefined {
   if (value === undefined) return 3
   if (!/^[1-9][0-9]*$/u.test(value)) return undefined
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) ? parsed : undefined
+}
+
+function requiredPositiveInteger(value: string | undefined): number | undefined {
+  if (value === undefined || !/^[1-9][0-9]*$/u.test(value)) return undefined
   const parsed = Number(value)
   return Number.isSafeInteger(parsed) ? parsed : undefined
 }
@@ -152,6 +169,15 @@ function hasRepeatedLongGoalOption(args: readonly string[]): boolean {
       argument === `--${name}` || argument.startsWith(`--${name}=`)
     ).length > 1,
   )
+}
+
+function hasRepeatedGoalFirstOption(args: readonly string[]): boolean {
+  return [
+    'goal', 'objective', 'context', 'success-criteria', 'revision', 'text',
+    'max-rounds', 'task', 'json',
+  ].some(name => args.filter(argument =>
+    argument === `--${name}` || argument.startsWith(`--${name}=`)
+  ).length > 1)
 }
 
 function formatText(status: GoalStatusProjection): string {
@@ -200,6 +226,10 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     readonly 'trial-manifest'?: string
     readonly manifest?: string
     readonly task?: string[]
+    readonly context?: string
+    readonly 'success-criteria'?: string
+    readonly revision?: string
+    readonly text?: string
   }
   let positionals: string[]
   try {
@@ -222,6 +252,10 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
         'trial-manifest': { type: 'string' },
         manifest: { type: 'string' },
         task: { type: 'string', multiple: true },
+        context: { type: 'string' },
+        'success-criteria': { type: 'string' },
+        revision: { type: 'string' },
+        text: { type: 'string' },
       },
     })
     values = parsed.values
@@ -236,8 +270,14 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   const planCreate = command === 'plan' && longGoalOperation === 'create'
   const planStatus = command === 'plan' && longGoalOperation === 'status'
   const taskRun = command === 'task' && longGoalOperation === 'run'
+  const goalStart = command === 'goal' && longGoalOperation === 'start'
+  const goalContinue = command === 'goal' && longGoalOperation === 'continue'
+  const goalGuide = command === 'goal' && longGoalOperation === 'guide'
+  const goalAbandon = command === 'goal' && longGoalOperation === 'abandon'
+  const goalFirstCommand = goalStart || goalContinue || goalGuide || goalAbandon
   const longGoalCommand = planCreate || planStatus || taskRun
   const maxGoalRounds = positiveInteger(values['max-rounds'])
+  const revision = requiredPositiveInteger(values.revision)
   const modelChoice = values.model as ModelChoice | undefined
   const liveSmoke = values['live-smoke'] === true
   const trialManifest = values['trial-manifest']
@@ -247,7 +287,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   const hasPortableTarget = portableValues.some(value => value !== undefined)
   const completePortableTarget = portableValues.every(value => value !== undefined)
   const managedTarget = values['data-dir'] !== undefined
-  const portableCommand = longGoalCommand ||
+  const portableCommand = longGoalCommand || goalFirstCommand ||
     ['status', 'list', 'create', 'resume'].includes(command ?? '')
   const validTarget = managedTarget
     ? !hasPortableTarget && isAbsolute(values['data-dir']!)
@@ -258,9 +298,10 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     hasRepeatedStrictOption(args) ||
     hasRepeatedTargetOption(args) ||
     (longGoalCommand && hasRepeatedLongGoalOption(args)) ||
+    (goalFirstCommand && hasRepeatedGoalFirstOption(args)) ||
     (command === 'controlled-lifecycle' && hasRepeatedControlledOption(args)) ||
     (command !== 'controlled-lifecycle' && values.manifest !== undefined) ||
-    (command === 'model' || longGoalCommand
+    (command === 'model' || longGoalCommand || goalFirstCommand
       ? positionals.length !== 2
       : positionals.length !== 1) ||
     !validTarget ||
@@ -276,6 +317,26 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
         : planStatus || taskRun
           ? values.goal === undefined || values.goal.length === 0 ||
             values.objective !== undefined || values['max-rounds'] !== undefined ||
+            values.model !== undefined || liveSmoke || trialManifest !== undefined
+        : goalStart
+          ? values.goal !== undefined || values.objective === undefined ||
+            values.objective.trim().length === 0 ||
+            (values.context !== undefined && values.context.trim().length === 0) ||
+            (values['success-criteria'] !== undefined && values['success-criteria'].trim().length === 0) ||
+            values.revision !== undefined || values.text !== undefined ||
+            values['max-rounds'] !== undefined || values.model !== undefined ||
+            liveSmoke || trialManifest !== undefined
+        : goalContinue || goalAbandon
+          ? values.goal === undefined || values.goal.trim().length === 0 || revision === undefined ||
+            values.objective !== undefined || values.context !== undefined ||
+            values['success-criteria'] !== undefined || values.text !== undefined ||
+            values['max-rounds'] !== undefined || values.model !== undefined ||
+            liveSmoke || trialManifest !== undefined
+        : goalGuide
+          ? values.goal === undefined || values.goal.trim().length === 0 || revision === undefined ||
+            values.text === undefined || values.text.trim().length === 0 ||
+            values.objective !== undefined || values.context !== undefined ||
+            values['success-criteria'] !== undefined || values['max-rounds'] !== undefined ||
             values.model !== undefined || liveSmoke || trialManifest !== undefined
       : command === 'status' || command === 'resume'
         ? values.goal === undefined || values.goal.length === 0 ||
@@ -320,6 +381,26 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       stateRoot: values['state-root']!,
     })
     if (portableTarget !== undefined) verifyPortableRuntimeBundle(portableTarget)
+    if (goalFirstCommand) {
+      return await launchGoalFirst(preflightGoalFirst({
+        operation: goalStart ? 'start' : goalContinue ? 'continue' : goalGuide ? 'guide' : 'abandon',
+        json: values.json === true,
+        ...(goalStart ? {
+          objective: values.objective!,
+          ...(values.context === undefined ? {} : { context: values.context }),
+          ...(values['success-criteria'] === undefined
+            ? {}
+            : { successCriteria: values['success-criteria'] }),
+        } : {
+          goalId: values.goal!,
+          revision: revision!,
+          ...(goalGuide ? { text: values.text! } : {}),
+        }),
+        ...(portableTarget === undefined
+          ? { dataDir: values['data-dir']! }
+          : { portableTarget }),
+      }))
+    }
     if (planCreate) {
       const stateRoot = portableTarget === undefined
         ? resolve(values['data-dir']!, 'state')
@@ -460,7 +541,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       process.stderr.write(`Error: ${error.message}\n`)
       return 1
     }
-    if (longGoalCommand) {
+    if (longGoalCommand || goalFirstCommand) {
       process.stderr.write(error instanceof Error
         ? `Error: ${error.message}\n`
         : 'Error: unable to run long Goal command\n')

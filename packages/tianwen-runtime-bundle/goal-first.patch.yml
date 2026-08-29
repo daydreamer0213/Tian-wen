@@ -1,0 +1,49 @@
+- id: session-persistence-jsonl
+  config:
+    root: !!js process.env.TIANWEN_GOAL_FIRST_SESSIONS_ROOT
+    compression: none
+    packChunks: false
+
+- id: tianwen-runtime
+  config:
+    evolutionRoot: !!js process.env.TIANWEN_GOAL_FIRST_EVOLUTION_ROOT
+
+- id: headless-startup
+  disabled: true
+
+- id: headless-runner
+  disabled: true
+
+- id: goal-round-driver
+  disabled: true
+
+- id: llm-deepseek
+  config:
+    retryPolicy:
+      mode: normal
+      maxRetries: 0
+
+- id: session-title-llm
+  disabled: true
+
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: standard
+
+    - id: tianwen-goal-first-runner
+      name: '@tianwen/runtime-bundle/goal-first-runner'
+      config:
+        operation: !!js process.env.TIANWEN_GOAL_FIRST_OPERATION
+        json: !!js process.env.TIANWEN_GOAL_FIRST_JSON === 'true'
+        stateRoot: !!js process.env.TIANWEN_GOAL_FIRST_STATE_ROOT
+        sessionsRoot: !!js process.env.TIANWEN_GOAL_FIRST_SESSIONS_ROOT
+        evolutionRoot: !!js process.env.TIANWEN_GOAL_FIRST_EVOLUTION_ROOT
+        workspaceRoot: !!js process.env.TIANWEN_GOAL_FIRST_WORKSPACE_ROOT
+        goalId: !!js process.env.TIANWEN_GOAL_FIRST_GOAL_ID || undefined
+        objective: !!js process.env.TIANWEN_GOAL_FIRST_OBJECTIVE || undefined
+        context: !!js process.env.TIANWEN_GOAL_FIRST_CONTEXT || undefined
+        successCriteria: !!js process.env.TIANWEN_GOAL_FIRST_SUCCESS_CRITERIA || undefined
+        revision: !!js process.env.TIANWEN_GOAL_FIRST_REVISION === '' ? undefined : Number(process.env.TIANWEN_GOAL_FIRST_REVISION)
+        text: !!js process.env.TIANWEN_GOAL_FIRST_TEXT || undefined
