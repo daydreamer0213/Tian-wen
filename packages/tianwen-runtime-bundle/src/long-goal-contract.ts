@@ -1,0 +1,72 @@
+export interface TaskExecutionBinding {
+  readonly goalId: string
+  readonly sessionId: string
+}
+
+export interface LongGoalTaskRecord {
+  readonly id: string
+  readonly objective: string
+  readonly execution: TaskExecutionBinding | null
+}
+
+export interface LongGoalRecord {
+  readonly schemaVersion: 'tianwen.long-goal.v1'
+  readonly id: string
+  readonly objective: string
+  readonly maxTaskRounds: number
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly tasks: readonly LongGoalTaskRecord[]
+}
+
+export interface LongGoalStatusProjection {
+  readonly schemaVersion: 'tianwen.long-goal-status.v1'
+  readonly goal: {
+    readonly id: string
+    readonly objective: string
+    readonly phase: 'active' | 'blocked' | 'complete'
+    readonly completedTasks: number
+    readonly totalTasks: number
+  }
+  readonly tasks: readonly {
+    readonly id: string
+    readonly objective: string
+    readonly phase: 'pending' | 'active' | 'paused' | 'blocked' | 'complete'
+    readonly execution: TaskExecutionBinding | null
+    readonly blockedReason?: {
+      readonly code: string
+      readonly message: string
+    }
+  }[]
+  readonly currentTaskId: string | null
+  readonly runtime: {
+    readonly activation: 'not-loaded'
+    readonly modelRequests: 0
+    readonly readOnly: true
+  }
+}
+
+export interface LongGoalSummary {
+  readonly id: string
+  readonly objective: string
+  readonly phase: 'active' | 'blocked' | 'complete'
+  readonly completedTasks: number
+  readonly totalTasks: number
+  readonly currentTaskId: string | null
+  readonly updatedAt: number
+}
+
+export type TianwenLongGoalRpcRequest =
+  | { readonly endpoint: 'list'; readonly payload: Record<string, never> }
+  | { readonly endpoint: 'create'; readonly payload: {
+      readonly objective: string
+      readonly tasks: readonly string[]
+      readonly maxTaskRounds: number
+    } }
+  | { readonly endpoint: 'status'; readonly payload: {
+      readonly longGoalId: string
+    } }
+  | { readonly endpoint: 'run-current-task'; readonly payload: {
+      readonly longGoalId: string
+      readonly initialCwd?: string
+    } }

@@ -7,6 +7,7 @@ import {
   bindLongGoalTask,
   createLongGoal,
   formatLongGoalStatusText,
+  listLongGoals,
   LongGoalIntegrityError,
   readLongGoal,
   readLongGoalStatus,
@@ -58,6 +59,31 @@ async function persistGoal(
 }
 
 describe('ordinary long Goal record', () => {
+  it('lists strict direct records by newest update without skipping malformed files', () => {
+    const stateRoot = createStateRoot()
+    try {
+      for (const [id, updatedAt] of [
+        ['list-oldest', 10],
+        ['list-newest', 30],
+        ['list-middle', 20],
+      ] as const) {
+        createLongGoal({
+          stateRoot,
+          objective: `Goal ${id}`,
+          tasks: ['Task'],
+          maxTaskRounds: 1,
+        }, { id: () => id, now: () => updatedAt })
+      }
+
+      expect(listLongGoals(stateRoot).map(record => record.updatedAt)).toEqual([30, 20, 10])
+
+      writeFileSync(join(stateRoot, 'long-goals', 'malformed.json'), '{', 'utf8')
+      expect(() => listLongGoals(stateRoot)).toThrow(LongGoalIntegrityError)
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
   it('persists one strict ordered record with stable task ids', () => {
     const stateRoot = createStateRoot()
     try {

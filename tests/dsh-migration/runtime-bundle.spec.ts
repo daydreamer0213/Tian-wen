@@ -9,7 +9,7 @@ import {
 } from 'node:fs'
 import { dirname, isAbsolute, join, posix, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   Context,
   SystemPrompt,
@@ -19,6 +19,7 @@ import { default as TimerService } from '@deepseek-ai/cordis-plugin-timer'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { apply as applyBundledRuntime } from '../../packages/tianwen-runtime-bundle/dist/runtime.js'
+import { apply as applyRuntimeBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 
 const root = resolve(import.meta.dirname, '../..')
 const packageRoot = resolve(root, 'packages/tianwen-runtime-bundle')
@@ -52,7 +53,12 @@ function externalPackages(
 
 function isAllowedRuntimeInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
-  return path === 'src/runtime.ts'
+  return [
+    'src/runtime.ts',
+    'src/long-goal-host.ts',
+    'src/long-goal.ts',
+    'src/status.ts',
+  ].includes(path)
     || path === '../tianwen-dsh-compat/dist/runtime.js'
     || path === '../tianwen-dsh-compat/dist/scripted-adapter.js'
     || [
@@ -289,6 +295,31 @@ describe('archive credential literal detection', () => {
 })
 
 describe('@tianwen/runtime-bundle', () => {
+  it('loads core services and defers the Web host when connection is unavailable', async () => {
+    const profileRoot = mkdtempSync(join(packFixtureBase, 'headless-'))
+    const ctx = new Context()
+    try {
+      await ctx.plugin(TimerService)
+      await ctx.plugin(SystemPrompt, {})
+      await ctx.plugin(ToolRuntime, {})
+      ctx.baseUrl = pathToFileURL(profileRoot).href
+      const inject = vi.spyOn(ctx, 'inject')
+
+      await applyRuntimeBundle(ctx, {})
+
+      expect(ctx.tianwenEvidence).toBeDefined()
+      expect(ctx.tianwenEvolution).toBeDefined()
+      expect('connection' in ctx).toBe(false)
+      expect(inject).toHaveBeenCalledWith(
+        ['connection', 'apiProxy', 'agents', 'goals'],
+        expect.any(Function),
+      )
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(profileRoot, { recursive: true, force: true })
+    }
+  })
+
   it('executes the built runtime and mounts evidence and evolution', async () => {
     const base = process.platform === 'win32'
       ? 'D:/DevData/tianwen-runtime-bundle-tests/profiles'
@@ -392,6 +423,9 @@ describe('@tianwen/runtime-bundle', () => {
     expect(defaultPatch).toBe(`- insert:
     - id: tianwen-runtime
       name: '@tianwen/runtime-bundle/runtime'
+
+    - id: tianwen-web-bridge
+      name: '@tianwen/runtime-bundle'
 `)
     expect(defaultPatch).not.toMatch(/[A-Za-z]:[\\/]|file:\/\//u)
   })
@@ -639,8 +673,10 @@ describe('@tianwen/runtime-bundle', () => {
     expect(packageExternals).toEqual([
       '@deepseek-ai/cordis',
       '@deepseek-ai/dsh-agent',
+      '@deepseek-ai/dsh-goal',
       '@deepseek-ai/dsh-llm',
       '@deepseek-ai/dsh-session',
+      '@deepseek-ai/dsh-session-persistence-jsonl',
       '@deepseek-ai/dsh-skill',
       '@deepseek-ai/dsh-tools',
     ])

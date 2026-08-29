@@ -66,10 +66,15 @@ function renderPredecessorProfilePatch(paths: ReturnType<typeof deriveInstallPat
 - id: tianwen-runtime
   config:
     evolutionRoot: '${paths.evolutionRoot.replaceAll('\\', '/')}'
+    stateRoot: '${paths.stateRoot.replaceAll('\\', '/')}'
+    sessionsRoot: '${paths.sessionsRoot.replaceAll('\\', '/')}'
 
 - insert:
     - id: cordis-host-runner
       name: '@deepseek-ai/dsh-cordis-host-runner'
+
+    - id: tianwen-web-bridge
+      name: '@tianwen/runtime-bundle'
 
     - id: tianwen-phase2-smoke
       name: '@tianwen/runtime-bundle/smoke'
@@ -317,6 +322,10 @@ function scriptedInstaller(
   name: '@deepseek-ai/dsh-cordis-host-runner'
 - id: tianwen-runtime
   evolutionRoot: ${paths.evolutionRoot.replaceAll('\\', '/')}
+  stateRoot: ${paths.stateRoot.replaceAll('\\', '/')}
+  sessionsRoot: ${paths.sessionsRoot.replaceAll('\\', '/')}
+- id: tianwen-web-bridge
+  name: '@tianwen/runtime-bundle'
 - id: tianwen-phase2-smoke
   name: '@tianwen/runtime-bundle/smoke'
 `,
@@ -457,6 +466,7 @@ describe('Tianwen installer contract', () => {
       dataDir: 'D:\\DevData\\tianwen',
       dshHome: 'D:\\DevData\\tianwen\\dsh-home',
       evolutionRoot: 'D:\\DevData\\tianwen\\state\\evolution',
+      stateRoot: 'D:\\DevData\\tianwen\\state',
       hostRoot: 'D:\\DevData\\tianwen\\dsh-host',
       profileRoot: 'D:\\DevData\\tianwen\\dsh-home\\profiles\\tianwen',
       receiptPath: 'D:\\DevData\\tianwen\\receipts\\tianwen-install.json',
@@ -487,12 +497,15 @@ describe('Tianwen installer contract', () => {
     expect(patch).toMatch(/\n$/u)
     expect(patch).toContain("root: 'D:/DevData/custom-tianwen/dsh-home/sessions'")
     expect(patch).toContain("evolutionRoot: 'D:/DevData/custom-tianwen/state/evolution'")
+    expect(patch).toContain("stateRoot: 'D:/DevData/custom-tianwen/state'")
+    expect(patch).toContain("sessionsRoot: 'D:/DevData/custom-tianwen/dsh-home/sessions'")
     expect(patch).toContain('- id: attachment-local\n  disabled: true')
     expect(patch).toContain('- id: sandbox\n  disabled: true')
     expect(patch).toContain('- id: pwsh-sandbox\n  disabled: true')
     expect(patch).toContain('- id: permission\n  disabled: true')
     expect(patch).toContain('- id: tool-pwsh\n  disabled: true')
     expect(patch).toContain("name: '@deepseek-ai/dsh-cordis-host-runner'")
+    expect(patch.match(/name: '@tianwen\/runtime-bundle'/gu)).toHaveLength(1)
     expect(patch).toContain("name: '@tianwen/runtime-bundle/smoke'")
   })
 
@@ -936,6 +949,10 @@ describe('Tianwen installer contract', () => {
   name: '@deepseek-ai/dsh-cordis-host-runner'
 - id: tianwen-runtime
   evolutionRoot: D:/DevData/tianwen-live-goal-round/test-data/installed-e2e/state/evolution
+  stateRoot: D:/DevData/tianwen-live-goal-round/test-data/installed-e2e/state
+  sessionsRoot: D:/DevData/tianwen-live-goal-round/test-data/installed-e2e/dsh-home/sessions
+- id: tianwen-web-bridge
+  name: '@tianwen/runtime-bundle'
 - id: tianwen-phase2-smoke
   name: '@tianwen/runtime-bundle/smoke'
 `

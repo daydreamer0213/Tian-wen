@@ -176,6 +176,7 @@ export function deriveInstallPaths(dataDir, platform = process.platform) {
     dataDir,
     dshHome,
     evolutionRoot: pathApi.join(dataDir, 'state', 'evolution'),
+    stateRoot: pathApi.join(dataDir, 'state'),
     hostRoot: pathApi.join(dataDir, 'dsh-host'),
     profileRoot,
     receiptPath: pathApi.join(dataDir, 'receipts', 'tianwen-install.json'),
@@ -202,6 +203,8 @@ export function renderProfilePatch(paths) {
 - id: tianwen-runtime
   config:
     evolutionRoot: '${portable(paths.evolutionRoot)}'
+    stateRoot: '${portable(paths.stateRoot)}'
+    sessionsRoot: '${portable(paths.sessionsRoot)}'
 
 - id: attachment-local
   disabled: true
@@ -221,6 +224,9 @@ export function renderProfilePatch(paths) {
 - insert:
     - id: cordis-host-runner
       name: '@deepseek-ai/dsh-cordis-host-runner'
+
+    - id: tianwen-web-bridge
+      name: '@tianwen/runtime-bundle'
 
     - id: tianwen-phase2-smoke
       name: '@tianwen/runtime-bundle/smoke'
@@ -242,10 +248,15 @@ function renderPredecessorProfilePatch(paths) {
 - id: tianwen-runtime
   config:
     evolutionRoot: '${portable(paths.evolutionRoot)}'
+    stateRoot: '${portable(paths.stateRoot)}'
+    sessionsRoot: '${portable(paths.sessionsRoot)}'
 
 - insert:
     - id: cordis-host-runner
       name: '@deepseek-ai/dsh-cordis-host-runner'
+
+    - id: tianwen-web-bridge
+      name: '@tianwen/runtime-bundle'
 
     - id: tianwen-phase2-smoke
       name: '@tianwen/runtime-bundle/smoke'
@@ -461,6 +472,9 @@ export function validateDump(source, paths) {
     ['session-persistence-jsonl', 'packChunks', 'false'],
     ['cordis-host-runner', 'name', '@deepseek-ai/dsh-cordis-host-runner'],
     ['tianwen-runtime', 'evolutionRoot', portable(paths.evolutionRoot)],
+    ['tianwen-runtime', 'stateRoot', portable(paths.stateRoot)],
+    ['tianwen-runtime', 'sessionsRoot', portable(paths.sessionsRoot)],
+    ['tianwen-web-bridge', 'name', '@tianwen/runtime-bundle'],
     ['tianwen-phase2-smoke', 'name', '@tianwen/runtime-bundle/smoke'],
   ]
   for (const [id, key, value] of expected) {
