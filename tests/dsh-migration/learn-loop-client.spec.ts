@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { createLearnLoopClient } from '../../packages/tianwen-runtime-bundle/src/learn-loop-client.js'
-import { apply, inject } from '../../packages/tianwen-runtime-bundle/src/client.js'
+import {
+  apply,
+  createRequestGeneration,
+  inject,
+} from '../../packages/tianwen-runtime-bundle/src/client.js'
 
 const status = {
   schemaVersion: 'tianwen.long-goal-status.v1',
@@ -59,6 +63,50 @@ describe('Learn Loop browser RPC client', () => {
       .rejects.toThrow('invalid Tianwen RPC response')
   })
 
+  it('rejects RpcResult envelopes with conflicting or extra keys', async () => {
+    const successWithError = {
+      call: vi.fn().mockResolvedValue({
+        ok: true,
+        value: { status },
+        error: { code: 'internal', message: 'unexpected', details: {} },
+      }),
+    }
+    const failureWithValue = {
+      call: vi.fn().mockResolvedValue({
+        ok: false,
+        value: { status },
+        error: { code: 'internal', message: 'unexpected', details: {} },
+      }),
+    }
+
+    await expect(createLearnLoopClient(successWithError as never).create({
+      objective: 'Ship the Learn Loop entry',
+      tasks: ['Add the browser entry'],
+      maxTaskRounds: 3,
+    })).rejects.toThrow('invalid Tianwen RPC response')
+    await expect(createLearnLoopClient(failureWithValue as never).create({
+      objective: 'Ship the Learn Loop entry',
+      tasks: ['Add the browser entry'],
+      maxTaskRounds: 3,
+    })).rejects.toThrow('invalid Tianwen RPC response')
+  })
+
+  it('rejects run-current-task action and sessionId combinations outside the host contract', async () => {
+    const invalidResults = [
+      { status, action: 'started' },
+      { status, action: 'continued' },
+      { status, action: 'already-running' },
+      { status, action: 'complete', sessionId: 'session-1' },
+    ]
+
+    for (const value of invalidResults) {
+      const rpc = { call: vi.fn().mockResolvedValue({ ok: true, value }) }
+      await expect(createLearnLoopClient(rpc as never).runCurrentTask({
+        longGoalId: 'tianwen-long-goal-1',
+      })).rejects.toThrow('invalid Tianwen RPC response')
+    }
+  })
+
   it('sends create and run-current-task only through the Tianwen channel', async () => {
     const rpc = {
       call: vi.fn()
@@ -94,6 +142,23 @@ describe('Learn Loop browser RPC client', () => {
 })
 
 describe('Learn Loop sidebar slot', () => {
+  it('does not apply a deferred request success after the overlay is closed', async () => {
+    let resolve: ((value: string) => void) | undefined
+    const response = new Promise<string>(done => { resolve = done })
+    const request = createRequestGeneration()
+    const isCurrent = request.begin()
+    const applied: string[] = []
+
+    const applyWhenCurrent = response.then(value => {
+      if (isCurrent()) applied.push(value)
+    })
+    request.close()
+    resolve?.('late success')
+    await applyWhenCurrent
+
+    expect(applied).toEqual([])
+  })
+
   it('registers one footer action and disposes the registration with its fiber', () => {
     let dispose: (() => void) | undefined
     const unregister = vi.fn()

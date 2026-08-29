@@ -1,9 +1,25 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { LongGoalStatusProjection, LongGoalSummary } from './long-goal-contract.js'
 import { createLearnLoopClient } from './learn-loop-client.js'
 
 type View = 'closed' | 'list' | 'create' | 'detail'
+
+export interface RequestGeneration {
+  begin(): () => boolean
+  close(): void
+}
+
+export function createRequestGeneration(): RequestGeneration {
+  let current = 0
+  return {
+    begin: () => {
+      const generation = ++current
+      return () => generation === current
+    },
+    close: () => { current += 1 },
+  }
+}
 
 export interface ClientContext {
   readonly connection: {
@@ -91,26 +107,37 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   const [maxTaskRounds, setMaxTaskRounds] = useState(3)
   const [error, setError] = useState<string | undefined>()
   const [loading, setLoading] = useState(false)
+  const requestGeneration = useRef(createRequestGeneration())
+
+  const closeOverlay = () => {
+    requestGeneration.current.close()
+    setLoading(false)
+    setView('closed')
+  }
 
   const refresh = useCallback(async () => {
+    const isCurrent = requestGeneration.current.begin()
     setLoading(true)
     setError(undefined)
     try {
-      setGoals(await client.list())
+      const nextGoals = await client.list()
+      if (isCurrent()) setGoals(nextGoals)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to refresh Learn Loop plans.')
+      if (isCurrent()) {
+        setError(cause instanceof Error ? cause.message : 'Unable to refresh Learn Loop plans.')
+      }
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }, [client])
 
   useEffect(() => {
     if (view === 'closed') return
-    const close = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setView('closed')
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeOverlay()
     }
-    window.addEventListener('keydown', close)
-    return () => window.removeEventListener('keydown', close)
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [view])
 
   const open = () => {
@@ -119,15 +146,21 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   }
 
   const openDetail = async (longGoalId: string) => {
+    const isCurrent = requestGeneration.current.begin()
     setLoading(true)
     setError(undefined)
     try {
-      setDetail(await client.status(longGoalId))
-      setView('detail')
+      const nextDetail = await client.status(longGoalId)
+      if (isCurrent()) {
+        setDetail(nextDetail)
+        setView('detail')
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to load this Learn Loop plan.')
+      if (isCurrent()) {
+        setError(cause instanceof Error ? cause.message : 'Unable to load this Learn Loop plan.')
+      }
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }
 
@@ -138,19 +171,25 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
       setError('Enter an objective, at least one task, and a positive task-round limit.')
       return
     }
+    const isCurrent = requestGeneration.current.begin()
     setLoading(true)
     setError(undefined)
     try {
-      setDetail(await client.create({
+      const nextDetail = await client.create({
         objective: trimmedObjective,
         tasks: trimmedTasks,
         maxTaskRounds,
-      }))
-      setView('detail')
+      })
+      if (isCurrent()) {
+        setDetail(nextDetail)
+        setView('detail')
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to create the Learn Loop plan.')
+      if (isCurrent()) {
+        setError(cause instanceof Error ? cause.message : 'Unable to create the Learn Loop plan.')
+      }
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }
 
@@ -166,6 +205,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
     const selectedCwd = firstTask && sessionList.current !== undefined
       ? sessionList.byId[sessionList.current]?.cwd
       : undefined
+    const isCurrent = requestGeneration.current.begin()
     setLoading(true)
     setError(undefined)
     try {
@@ -173,14 +213,18 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
         longGoalId: detail.goal.id,
         ...(selectedCwd === undefined ? {} : { initialCwd: selectedCwd }),
       })
-      setDetail(result.status)
-      if (result.sessionId !== undefined) {
-        ctx.sessions.open(result.sessionId)
+      if (isCurrent()) {
+        setDetail(result.status)
+        if (result.sessionId !== undefined) {
+          ctx.sessions.open(result.sessionId)
+        }
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to run the current task.')
+      if (isCurrent()) {
+        setError(cause instanceof Error ? cause.message : 'Unable to run the current task.')
+      }
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }
 
@@ -210,7 +254,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
         <div
           role="presentation"
           onMouseDown={event => {
-            if (event.target === event.currentTarget) setView('closed')
+            if (event.target === event.currentTarget) closeOverlay()
           }}
           style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--dsw-alias-scrim, color-mix(in srgb, var(--dsw-specific-sidebar-fill) 70%, transparent))', display: 'grid', placeItems: 'center', padding: 16 }}
         >
@@ -218,7 +262,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
             <style>{`.tianwen-learn-loop button:hover { background: var(--dsw-alias-interactive-bg-hover); } .tianwen-learn-loop button:focus-visible, .tianwen-learn-loop input:focus-visible, .tianwen-learn-loop textarea:focus-visible { outline: 2px solid var(--dsw-alias-label-primary); outline-offset: 2px; }`}</style>
             <header style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
               <h2 id="learn-loop-title" style={{ margin: 0, fontSize: 18 }}>Learn Loop</h2>
-              <button type="button" aria-label="Close Learn Loop" onClick={() => setView('closed')} style={buttonStyle}>Close</button>
+              <button type="button" aria-label="Close Learn Loop" onClick={closeOverlay} style={buttonStyle}>Close</button>
             </header>
             {error !== undefined && <p role="alert" style={{ color: 'var(--dsw-alias-label-primary)', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8, padding: 10 }}>{error}</p>}
             {loading && <p aria-live="polite">Loading…</p>}

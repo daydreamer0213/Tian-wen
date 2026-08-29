@@ -103,12 +103,17 @@ async function call(
   signal: AbortSignal | undefined,
 ): Promise<unknown> {
   const result = await rpc.call('/tianwen', endpoint, payload, signal)
-  if (!isRecord(result) || typeof result.ok !== 'boolean') invalidResponse()
+  if (!isRecord(result)) invalidResponse()
+  if (result.ok === true) {
+    if (!hasExactKeys(result, ['ok', 'value'])) invalidResponse()
+    return result.value
+  }
   if (result.ok === false) {
+    if (!hasExactKeys(result, ['ok', 'error'])) invalidResponse()
     if (!isRecord(result.error) || !isNonEmptyString(result.error.message)) invalidResponse()
     throw new Error(result.error.message)
   }
-  return result.value
+  invalidResponse()
 }
 
 export function createLearnLoopClient(rpc: ClientConnectionRpc): LearnLoopClient {
@@ -135,12 +140,11 @@ export function createLearnLoopClient(rpc: ClientConnectionRpc): LearnLoopClient
     },
     async runCurrentTask(input, signal) {
       const value = await call(rpc, 'run-current-task', input, signal)
-      if (!isRecord(value) || ![
-        hasExactKeys(value, ['status', 'action']),
-        hasExactKeys(value, ['status', 'action', 'sessionId']),
-      ].includes(true) || !isStatus(value.status) ||
-        !['started', 'continued', 'already-running', 'complete'].includes(String(value.action)) ||
-        (value.sessionId !== undefined && !isNonEmptyString(value.sessionId))) {
+      if (!isRecord(value) || !isStatus(value.status) || !(
+        (value.action === 'complete' && hasExactKeys(value, ['status', 'action'])) ||
+        ((value.action === 'started' || value.action === 'continued' || value.action === 'already-running') &&
+          hasExactKeys(value, ['status', 'action', 'sessionId']) && isNonEmptyString(value.sessionId))
+      )) {
         invalidResponse()
       }
       return value as unknown as RunCurrentTaskResult
