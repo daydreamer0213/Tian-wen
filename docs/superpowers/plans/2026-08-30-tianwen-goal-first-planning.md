@@ -262,6 +262,7 @@ export interface LongGoalPlannerDependencies {
 
 export async function runLongGoalPlannerTurn(input: {
   readonly stateRoot: string
+  readonly dshStatusTarget: Parameters<typeof readLongGoalStatus>[0]['dshStatusTarget']
   readonly record: LongGoalRecordV2
   readonly reason: 'create' | 'continue' | 'guidance'
 }, dependencies: LongGoalPlannerDependencies): Promise<'submitted' | 'not-submitted'>
@@ -286,7 +287,27 @@ Use public `ctx.sessionPersistence.list()`, `ctx.agents.create()`, `ctx.agents.r
 
 - [ ] **Step 3: Connect the host to the shared service**
 
-Add strict RPC endpoints `create-goal-first`, `add-guidance`, `continue-progress`, and `abandon-current-task`. Map a `LongGoalRevisionConflictError` to exact code `revision-conflict` and details; keep existing v1 endpoints exact. Resolve the selected Session's canonical cwd and preset server-side before creation, then call the platform-independent service.
+Add strict RPC endpoints with these exact payloads:
+
+```ts
+create-goal-first: {
+  objective: string
+  context: string | null
+  successCriteria: string | null
+  workspaceSessionId: string
+}
+add-guidance: { longGoalId: string; expectedRevision: number; text: string }
+continue-progress: { longGoalId: string; expectedRevision: number }
+abandon-current-task: { longGoalId: string; expectedRevision: number }
+```
+
+Each success uses the standard RPC envelope with its named v2 result directly
+as `value`. Map `LongGoalRevisionConflictError` to exact code
+`revision-conflict` and details `{ expectedRevision, currentRevision }`; keep
+existing v1 endpoints and their error envelope exact. Resolve
+`workspaceSessionId` through the server-side DSH Session list and require its
+canonical cwd plus persisted Agent preset before calling the
+platform-independent service. Browser input never supplies a path or preset.
 
 Task admission for v2 must use `record.workspaceRoot` and verify the persisted Session header on resume; do not accept or reuse browser `initialCwd` for v2.
 
