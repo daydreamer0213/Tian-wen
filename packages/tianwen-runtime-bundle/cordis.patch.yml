@@ -1,3 +1,6 @@
 - insert:
     - id: tianwen-runtime
       name: '@tianwen/runtime-bundle/runtime'
+
+    - id: tianwen-web-bridge
+      name: '@tianwen/runtime-bundle'

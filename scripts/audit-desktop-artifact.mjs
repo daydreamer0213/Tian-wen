@@ -1,9 +1,22 @@
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const RUNTIME_ARCHIVE_NAME = 'tianwen-runtime-bundle-0.1.0.tgz'
+
+function runtimeArchiveFiles(path) {
+  const candidate = process.platform === 'win32'
+    ? resolve(process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows', 'System32', 'tar.exe')
+    : (existsSync('/usr/bin/tar') ? '/usr/bin/tar' : '/bin/tar')
+  const executable = realpathSync(candidate)
+  if (!statSync(executable).isFile()) throw new Error('fixed tar executable is not a file')
+  const result = spawnSync(executable, ['-tzf', path], { encoding: 'utf8', shell: false })
+  if (result.status !== 0) throw new Error('packaged Runtime archive cannot be listed')
+  return result.stdout.replaceAll('\r\n', '\n').split('\n').filter(Boolean)
+    .map(name => name.replace(/^package\//u, ''))
+}
 
 const B1_RESOURCE_FILES = new Set([
   'app/dist/bootstrap.js',
@@ -76,6 +89,9 @@ export function auditDesktopArtifact(unpackedRoot, expectedRuntimeTarball) {
   const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
   if (digest(expectedRuntimeTarball) !== digest(packagedRuntime)) {
     throw new Error('Runtime SHA-256 digest does not match the source archive')
+  }
+  if (!runtimeArchiveFiles(packagedRuntime).includes('dist/client.js')) {
+    throw new Error('packaged Runtime archive is missing dist/client.js')
   }
 }
 

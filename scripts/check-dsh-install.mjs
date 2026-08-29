@@ -41,7 +41,7 @@ const EXPECTED_DIRECT_DSH_PACKAGES = [
 ]
 const root = resolve(import.meta.dirname, '..')
 const requireFromRoot = createRequire(resolve(root, 'package.json'))
-const scanExtensions = new Set(['.ts', '.mts', '.cts', '.js', '.mjs'])
+const scanExtensions = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs'])
 const scanRoots = ['packages', 'tests/dsh-probe', 'scripts']
 
 const isDshPackage = name =>

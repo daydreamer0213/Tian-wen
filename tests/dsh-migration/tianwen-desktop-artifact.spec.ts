@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import {
   appendFileSync,
   mkdirSync,
@@ -51,6 +52,26 @@ function createRuntimeSource(contents: Buffer): string {
   const source = join(root, 'tianwen-runtime-bundle-0.1.0.tgz')
   writeFileSync(source, contents)
   return source
+}
+
+function createRuntimeArchive(includeClient: boolean): { source: string, bytes: Buffer } {
+  const root = createTestRoot()
+  const contents = join(root, 'contents')
+  writeFixture(
+    contents,
+    includeClient ? 'package/dist/client.js' : 'package/dist/runtime.js',
+    'fixture',
+  )
+  const source = join(root, 'tianwen-runtime-bundle-0.1.0.tgz')
+  const executable = process.platform === 'win32'
+    ? join(process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows', 'System32', 'tar.exe')
+    : 'tar'
+  const result = spawnSync(executable, ['-czf', source, '-C', contents, 'package'], {
+    encoding: 'utf8',
+    shell: false,
+  })
+  if (result.status !== 0) throw new Error(`fixture tar failed: ${result.stderr}`)
+  return { source, bytes: readFileSync(source) }
 }
 
 function writeFixture(root: string, relativePath: string, contents: string | Buffer): void {
@@ -138,8 +159,7 @@ describe('Tianwen Desktop Runtime distribution', () => {
   })
 
   it('accepts only the exact B2 application, legal, and Runtime resources', () => {
-    const bytes = Buffer.from('exact Runtime archive bytes')
-    const source = createRuntimeSource(bytes)
+    const { source, bytes } = createRuntimeArchive(true)
     const unpackedRoot = createUnpackedRoot(bytes)
 
     expect(() => auditDesktopArtifact(unpackedRoot, source)).not.toThrow()
@@ -154,6 +174,14 @@ describe('Tianwen Desktop Runtime distribution', () => {
 
     rmSync(join(unpackedRoot, 'resources/app/dist/profile-prepare.js'))
     expect(() => auditDesktopArtifact(unpackedRoot, source)).toThrow(/missing|allowlist/iu)
+  })
+
+  it('rejects a Runtime archive without the Web client artifact', () => {
+    const { source, bytes } = createRuntimeArchive(false)
+    const unpackedRoot = createUnpackedRoot(bytes)
+
+    expect(() => auditDesktopArtifact(unpackedRoot, source))
+      .toThrow(/dist\/client\.js/iu)
   })
 
   it('rejects a packaged Runtime whose SHA-256 no longer matches the source', () => {

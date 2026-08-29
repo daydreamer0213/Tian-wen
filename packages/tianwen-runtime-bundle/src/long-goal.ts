@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   unlinkSync,
@@ -10,51 +11,19 @@ import {
 import { join, resolve } from 'node:path'
 
 import { readGoalStatus } from './status.js'
+import type {
+  LongGoalRecord,
+  LongGoalStatusProjection,
+  LongGoalTaskRecord,
+  TaskExecutionBinding,
+} from './long-goal-contract.js'
 
-export interface TaskExecutionBinding {
-  readonly goalId: string
-  readonly sessionId: string
-}
-
-export interface LongGoalTaskRecord {
-  readonly id: string
-  readonly objective: string
-  readonly execution: TaskExecutionBinding | null
-}
-
-export interface LongGoalRecord {
-  readonly schemaVersion: 'tianwen.long-goal.v1'
-  readonly id: string
-  readonly objective: string
-  readonly maxTaskRounds: number
-  readonly createdAt: number
-  readonly updatedAt: number
-  readonly tasks: readonly LongGoalTaskRecord[]
-}
-
-export interface LongGoalStatusProjection {
-  readonly schemaVersion: 'tianwen.long-goal-status.v1'
-  readonly goal: {
-    readonly id: string
-    readonly objective: string
-    readonly phase: 'active' | 'blocked' | 'complete'
-    readonly completedTasks: number
-    readonly totalTasks: number
-  }
-  readonly tasks: readonly {
-    readonly id: string
-    readonly objective: string
-    readonly phase: 'pending' | 'active' | 'paused' | 'blocked' | 'complete'
-    readonly execution: TaskExecutionBinding | null
-    readonly blockedReason?: { readonly code: string, readonly message: string }
-  }[]
-  readonly currentTaskId: string | null
-  readonly runtime: {
-    readonly activation: 'not-loaded'
-    readonly modelRequests: 0
-    readonly readOnly: true
-  }
-}
+export type {
+  LongGoalRecord,
+  LongGoalStatusProjection,
+  LongGoalTaskRecord,
+  TaskExecutionBinding,
+} from './long-goal-contract.js'
 
 export class LongGoalIntegrityError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -280,6 +249,28 @@ export function readLongGoal(stateRoot: string, goalId: string): LongGoalRecord 
     if (error instanceof LongGoalIntegrityError) throw error
     throw new LongGoalIntegrityError('Long Goal record is invalid', { cause: error })
   }
+}
+
+export function listLongGoals(stateRoot: string): readonly LongGoalRecord[] {
+  if (!isNonEmptyString(stateRoot)) throw new TypeError('Long Goal location is invalid')
+  const directory = longGoalsDirectory(stateRoot)
+  if (!existsSync(directory)) return []
+  const records = readdirSync(directory, { withFileTypes: true })
+    .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
+    .map(entry => {
+      const path = join(directory, entry.name)
+      try {
+        const record = parseLongGoal(JSON.parse(readFileSync(path, 'utf8')) as unknown)
+        if (entry.name !== `${record.id}.json`) {
+          throw new LongGoalIntegrityError('Long Goal record id does not match its path')
+        }
+        return record
+      } catch (error) {
+        if (error instanceof LongGoalIntegrityError) throw error
+        throw new LongGoalIntegrityError('Long Goal record is invalid', { cause: error })
+      }
+    })
+  return records.sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
 }
 
 export function bindLongGoalTask(
