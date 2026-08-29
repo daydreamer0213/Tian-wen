@@ -129,6 +129,7 @@ git commit -m "feat: add goal-first long-goal records"
 ### Task 2: Implement the Goal-First State Service With Deterministic Planner Doubles
 
 **Files:**
+- Modify: `packages/tianwen-runtime-bundle/src/long-goal-contract.ts`
 - Create: `packages/tianwen-runtime-bundle/src/goal-first-service.ts`
 - Create: `tests/dsh-migration/goal-first-service.spec.ts`
 
@@ -146,6 +147,8 @@ export interface GoalFirstServiceDependencies {
     readonly reason: 'create' | 'continue' | 'guidance'
   }) => Promise<'submitted' | 'not-submitted'>
   readonly runTask: (input: {
+    readonly stateRoot: string
+    readonly dshStatusTarget: Parameters<typeof readLongGoalStatus>[0]['dshStatusTarget']
     readonly longGoalId: string
     readonly expectedRevision: number
   }) => Promise<{
@@ -154,13 +157,45 @@ export interface GoalFirstServiceDependencies {
   }>
 }
 
-export function createGoalFirstProgress(...): Promise<GoalFirstProgressResultV2>
-export function continueGoalFirstProgress(...): Promise<GoalFirstProgressResultV2>
-export function addGoalFirstGuidance(...): Promise<LongGoalGuidanceResultV2>
-export function abandonGoalFirstTask(...): Promise<LongGoalAbandonResultV2>
+export function createGoalFirstProgress(input: {
+  readonly stateRoot: string
+  readonly dshStatusTarget: Parameters<typeof readLongGoalStatus>[0]['dshStatusTarget']
+  readonly objective: string
+  readonly context: string | null
+  readonly successCriteria: string | null
+  readonly workspaceRoot: string
+  readonly agentPreset: string
+}, dependencies: GoalFirstServiceDependencies): Promise<GoalFirstProgressResultV2>
+
+export function continueGoalFirstProgress(input: {
+  readonly stateRoot: string
+  readonly dshStatusTarget: Parameters<typeof readLongGoalStatus>[0]['dshStatusTarget']
+  readonly longGoalId: string
+  readonly expectedRevision: number
+}, dependencies: GoalFirstServiceDependencies): Promise<GoalFirstProgressResultV2>
+
+export function addGoalFirstGuidance(input: {
+  readonly stateRoot: string
+  readonly dshStatusTarget: Parameters<typeof readLongGoalStatus>[0]['dshStatusTarget']
+  readonly longGoalId: string
+  readonly expectedRevision: number
+  readonly text: string
+}, dependencies: GoalFirstServiceDependencies): Promise<LongGoalGuidanceResultV2>
+
+export function abandonGoalFirstTask(input: {
+  readonly stateRoot: string
+  readonly dshStatusTarget: Parameters<typeof readLongGoalStatus>[0]['dshStatusTarget']
+  readonly longGoalId: string
+  readonly expectedRevision: number
+}, dependencies: GoalFirstServiceDependencies): Promise<LongGoalAbandonResultV2>
 ```
 
-- The four operation inputs contain `stateRoot`, DSH status target, long Goal fields/ID, and the exact expected revision required by the design; adapters do not supply transition decisions. The abandon operation awaits `abandonBlockedTask` with that same DSH status target.
+- Add the three exact result interfaces from design section 5.2 to the
+  browser-safe `long-goal-contract.ts`; `goal-first-service.ts` imports and
+  re-exports those types rather than defining a second shape.
+- Adapters supply facts only; they never supply transition decisions. The
+  abandon operation awaits `abandonBlockedTask` with that same DSH status
+  target.
 
 - [ ] **Step 1: Write the RED action-table tests**
 
@@ -188,7 +223,7 @@ Implement direct branching over the frozen status/record facts. A single user op
 pnpm exec vitest run tests/dsh-migration/goal-first-service.spec.ts tests/dsh-migration/ordinary-long-goal.spec.ts
 pnpm --filter '@tianwen/runtime-bundle' typecheck
 git diff --check
-git add packages/tianwen-runtime-bundle/src/goal-first-service.ts tests/dsh-migration/goal-first-service.spec.ts
+git add packages/tianwen-runtime-bundle/src/long-goal-contract.ts packages/tianwen-runtime-bundle/src/goal-first-service.ts tests/dsh-migration/goal-first-service.spec.ts
 git commit -m "feat: orchestrate goal-first progress"
 ```
 
