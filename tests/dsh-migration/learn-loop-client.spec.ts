@@ -30,6 +30,69 @@ const status = {
   },
 } as const
 
+const statusV2 = {
+  schemaVersion: 'tianwen.long-goal-status.v2',
+  goal: {
+    id: 'tianwen-long-goal-v2',
+    objective: 'Ship goal-first Learn Loop',
+    context: 'Use the selected workspace',
+    successCriteria: 'The first Task is admitted',
+    phase: 'active',
+    revision: 4,
+    completedTasks: 0,
+    abandonedTasks: 0,
+    totalTasks: 2,
+  },
+  planner: {
+    sessionId: 'planner-session',
+    phase: 'ready',
+    planRevision: 1,
+  },
+  guidance: [],
+  tasks: [{
+    id: 'task-v2-1',
+    objective: 'Implement the default flow',
+    phase: 'active',
+    execution: { goalId: 'goal-v2-1', sessionId: 'task-session' },
+    resolution: null,
+  }, {
+    id: 'task-v2-2',
+    objective: 'Verify compatibility',
+    phase: 'pending',
+    execution: null,
+    resolution: null,
+  }],
+  currentTaskId: 'task-v2-1',
+  runtime: {
+    activation: 'not-loaded',
+    modelRequests: 0,
+    readOnly: true,
+  },
+} as const
+
+const summaryV1 = {
+  id: status.goal.id,
+  objective: status.goal.objective,
+  phase: status.goal.phase,
+  completedTasks: status.goal.completedTasks,
+  totalTasks: status.goal.totalTasks,
+  currentTaskId: status.currentTaskId,
+  updatedAt: 10,
+} as const
+
+const summaryV2 = {
+  schemaVersion: 'tianwen.long-goal-summary.v2',
+  id: statusV2.goal.id,
+  objective: statusV2.goal.objective,
+  phase: statusV2.goal.phase,
+  revision: statusV2.goal.revision,
+  completedTasks: statusV2.goal.completedTasks,
+  abandonedTasks: statusV2.goal.abandonedTasks,
+  totalTasks: statusV2.goal.totalTasks,
+  currentTaskId: statusV2.currentTaskId,
+  updatedAt: 20,
+} as const
+
 describe('Learn Loop browser RPC client', () => {
   it('sends the exact generic RPC status request and returns a valid projection', async () => {
     const signal = new AbortController().signal
@@ -61,6 +124,176 @@ describe('Learn Loop browser RPC client', () => {
 
     await expect(createLearnLoopClient(rpc as never).status('tianwen-long-goal-1'))
       .rejects.toThrow('invalid Tianwen RPC response')
+  })
+
+  it('strictly parses mixed v1/v2 list and status projections by schema version', async () => {
+    const rpc = {
+      call: vi.fn()
+        .mockResolvedValueOnce({ ok: true, value: { goals: [summaryV1, summaryV2] } })
+        .mockResolvedValueOnce({ ok: true, value: { status } })
+        .mockResolvedValueOnce({ ok: true, value: { status: statusV2 } }),
+    }
+    const client = createLearnLoopClient(rpc as never)
+
+    expect(await client.list()).toEqual([summaryV1, summaryV2])
+    expect(await client.status(status.goal.id)).toEqual(status)
+    expect(await client.status(statusV2.goal.id)).toEqual(statusV2)
+
+    const { updatedAt: _v1UpdatedAt, ...missingV1SummaryField } = summaryV1
+    const { revision: _v2Revision, ...missingV2SummaryField } = summaryV2
+    for (const invalid of [
+      { ...summaryV1, extra: true },
+      { ...summaryV2, extra: true },
+      missingV1SummaryField,
+      missingV2SummaryField,
+    ]) {
+      const invalidRpc = {
+        call: vi.fn().mockResolvedValue({ ok: true, value: { goals: [invalid] } }),
+      }
+      await expect(createLearnLoopClient(invalidRpc as never).list())
+        .rejects.toThrow('invalid Tianwen RPC response')
+    }
+    const { runtime: _v1Runtime, ...missingV1StatusField } = status
+    const { planner: _v2Planner, ...missingV2StatusField } = statusV2
+    for (const invalid of [
+      { ...status, extra: true },
+      { ...statusV2, extra: true },
+      missingV1StatusField,
+      missingV2StatusField,
+      {
+        ...statusV2,
+        tasks: [{ ...statusV2.tasks[0], phase: 'abandoned', resolution: null }],
+      },
+      {
+        ...statusV2,
+        tasks: [{ ...statusV2.tasks[0], phase: 'active', resolution: 'abandoned' }],
+      },
+      {
+        ...statusV2,
+        goal: { ...statusV2.goal, phase: 'blocked' },
+        tasks: [{ ...statusV2.tasks[0], phase: 'blocked' }],
+      },
+    ]) {
+      const invalidRpc = {
+        call: vi.fn().mockResolvedValue({ ok: true, value: { status: invalid } }),
+      }
+      await expect(createLearnLoopClient(invalidRpc as never).status('goal'))
+        .rejects.toThrow('invalid Tianwen RPC response')
+    }
+  })
+
+  it('sends exact v2 mutation requests and strictly parses their named results', async () => {
+    const progress = {
+      schemaVersion: 'tianwen.goal-first-progress-result.v2',
+      action: 'started',
+      status: statusV2,
+      sessionId: 'task-session',
+    } as const
+    const guidance = {
+      schemaVersion: 'tianwen.long-goal-guidance-result.v2',
+      planning: 'updated',
+      status: { ...statusV2, goal: { ...statusV2.goal, revision: 5 } },
+    } as const
+    const abandoned = {
+      schemaVersion: 'tianwen.long-goal-abandon-result.v2',
+      action: 'abandoned',
+      status: { ...statusV2, goal: { ...statusV2.goal, revision: 6 } },
+    } as const
+    const rpc = {
+      call: vi.fn()
+        .mockResolvedValueOnce({ ok: true, value: progress })
+        .mockResolvedValueOnce({ ok: true, value: { ...progress, action: 'already-running' } })
+        .mockResolvedValueOnce({ ok: true, value: guidance })
+        .mockResolvedValueOnce({ ok: true, value: abandoned }),
+    }
+    const client = createLearnLoopClient(rpc as never)
+
+    expect(await client.createGoalFirst({
+      objective: 'Ship goal-first Learn Loop',
+      context: 'Use the selected workspace',
+      successCriteria: 'The first Task is admitted',
+      workspaceSessionId: 'workspace-session',
+    })).toEqual(progress)
+    expect(await client.continueProgress({
+      longGoalId: statusV2.goal.id,
+      expectedRevision: 4,
+    })).toMatchObject({ action: 'already-running' })
+    expect(await client.addGuidance({
+      longGoalId: statusV2.goal.id,
+      expectedRevision: 5,
+      text: 'Prefer the smaller implementation',
+    })).toEqual(guidance)
+    expect(await client.abandonCurrentTask({
+      longGoalId: statusV2.goal.id,
+      expectedRevision: 6,
+    })).toEqual(abandoned)
+
+    expect(rpc.call.mock.calls).toEqual([
+      ['/tianwen', 'create-goal-first', {
+        objective: 'Ship goal-first Learn Loop',
+        context: 'Use the selected workspace',
+        successCriteria: 'The first Task is admitted',
+        workspaceSessionId: 'workspace-session',
+      }, undefined],
+      ['/tianwen', 'continue-progress', {
+        longGoalId: statusV2.goal.id,
+        expectedRevision: 4,
+      }, undefined],
+      ['/tianwen', 'add-guidance', {
+        longGoalId: statusV2.goal.id,
+        expectedRevision: 5,
+        text: 'Prefer the smaller implementation',
+      }, undefined],
+      ['/tianwen', 'abandon-current-task', {
+        longGoalId: statusV2.goal.id,
+        expectedRevision: 6,
+      }, undefined],
+    ])
+
+    const invalidRpc = { call: vi.fn().mockResolvedValue({
+      ok: true,
+      value: { ...progress, extra: true },
+    }) }
+    await expect(createLearnLoopClient(invalidRpc as never).createGoalFirst({
+      objective: 'Goal', context: null, successCriteria: null, workspaceSessionId: 'session',
+    })).rejects.toThrow('invalid Tianwen RPC response')
+
+    const invalidGuidanceRpc = { call: vi.fn().mockResolvedValue({
+      ok: true,
+      value: { ...guidance, extra: true },
+    }) }
+    await expect(createLearnLoopClient(invalidGuidanceRpc as never).addGuidance({
+      longGoalId: statusV2.goal.id, expectedRevision: 5, text: 'Guidance',
+    })).rejects.toThrow('invalid Tianwen RPC response')
+
+    const { action: _abandonAction, ...missingAbandonField } = abandoned
+    const invalidAbandonRpc = { call: vi.fn().mockResolvedValue({
+      ok: true,
+      value: missingAbandonField,
+    }) }
+    await expect(createLearnLoopClient(invalidAbandonRpc as never).abandonCurrentTask({
+      longGoalId: statusV2.goal.id, expectedRevision: 6,
+    })).rejects.toThrow('invalid Tianwen RPC response')
+  })
+
+  it('preserves exact revision-conflict details for UI recovery', async () => {
+    const rpc = { call: vi.fn().mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'revision-conflict',
+        message: 'revision-conflict',
+        details: { expectedRevision: 4, currentRevision: 5 },
+      },
+    }) }
+
+    await expect(createLearnLoopClient(rpc as never).continueProgress({
+      longGoalId: statusV2.goal.id,
+      expectedRevision: 4,
+    })).rejects.toMatchObject({
+      message: 'revision-conflict',
+      code: 'revision-conflict',
+      details: { expectedRevision: 4, currentRevision: 5 },
+    })
   })
 
   it('rejects RpcResult envelopes with conflicting or extra keys', async () => {

@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
-import type { LongGoalStatusProjection, LongGoalSummary } from './long-goal-contract.js'
-import { createLearnLoopClient } from './learn-loop-client.js'
+import type {
+  AnyLongGoalStatusProjection,
+  AnyLongGoalSummary,
+  LongGoalStatusProjection,
+  LongGoalStatusProjectionV2,
+} from './long-goal-contract.js'
+import { createLearnLoopClient, LearnLoopRpcError } from './learn-loop-client.js'
 
 type View = 'closed' | 'list' | 'create' | 'detail'
 
@@ -13,26 +18,23 @@ const zhMessages = {
   'common.close': '关闭',
   'common.loading': '加载中…',
   'list.refresh': '刷新长期任务',
-  'list.create': '创建长期任务',
+  'list.create': '创建目标',
   'list.empty': '还没有长期任务。',
   'list.empty.step1': '在 DSH 中打开或创建一个项目工作区。',
-  'list.empty.step2': '创建一个长期目标，并按执行顺序填写任务。',
-  'list.empty.step3': '启动当前任务，天问会在独立 DSH 会话中继续执行。',
+  'list.empty.step2': '创建一个长期目标，天问会规划并推进后续任务。',
+  'list.empty.step3': '可随时补充信息或调整方向。',
   'list.summary': '{completed}/{total} 个任务 · {phase}',
-  'form.objective': '长期目标',
-  'form.maxTaskRounds': '每个任务最多执行轮数',
-  'form.tasks': '任务',
-  'form.task': '任务 {number}',
-  'form.moveUpLabel': '上移任务 {number}',
-  'form.moveDownLabel': '下移任务 {number}',
-  'form.removeLabel': '删除任务 {number}',
-  'form.up': '上移',
-  'form.down': '下移',
-  'form.remove': '删除',
-  'form.addTask': '添加任务',
-  'form.create': '创建长期任务',
-  'form.back': '返回长期任务',
+  'form.goal': '目标',
+  'form.context': '背景（可选）',
+  'form.successCriteria': '成功标准（可选）',
+  'form.startProgressing': '开始推进',
+  'form.back': '返回',
   'detail.summary': '已完成 {completed}/{total} 个任务 · {phase}',
+  'detail.guidance': '补充信息或调整方向',
+  'detail.guidanceLabel': '补充信息',
+  'action.continueProgress': '继续推进',
+  'action.addGuidance': '提交补充信息',
+  'action.abandon': '放弃当前任务并重新规划',
   'action.start': '开始任务',
   'action.continue': '继续任务',
   'action.openSession': '打开会话',
@@ -44,9 +46,14 @@ const zhMessages = {
   'reason.workspaceRequired': '请先打开或创建一个 DSH 工作区。',
   'error.refresh': '无法刷新长期任务。',
   'error.load': '无法加载该长期任务。',
-  'error.validation': '请填写长期目标和至少一个任务，并将每个任务最多执行轮数设为正数。',
+  'error.goalValidation': '请填写目标，并先选择一个 DSH 工作区会话。',
   'error.create': '无法创建长期任务。',
   'error.run': '无法执行当前任务。',
+  'error.guidance': '无法提交补充信息。',
+  'error.abandon': '无法放弃当前任务。',
+  'error.revisionConflict': '该目标已在其他位置发生变化，已显示最新状态。请确认后重试。',
+  'phase.planning': '规划中',
+  'phase.abandoned': '已放弃',
   'phase.pending': '待执行',
   'phase.active': '执行中',
   'phase.paused': '已暂停',
@@ -63,26 +70,23 @@ const enMessages = {
   'common.close': 'Close',
   'common.loading': 'Loading…',
   'list.refresh': 'Refresh plans',
-  'list.create': 'Create plan',
+  'list.create': 'Create Goal',
   'list.empty': 'No Learn Loop plans yet.',
   'list.empty.step1': 'Open or create a project workspace in DSH.',
-  'list.empty.step2': 'Create a long-term goal and enter tasks in execution order.',
-  'list.empty.step3': 'Start the current task; Tianwen will continue it in a separate DSH Session.',
+  'list.empty.step2': 'Create a long-term Goal; Tianwen will plan and progress the Tasks.',
+  'list.empty.step3': 'Add information or adjust direction at any time.',
   'list.summary': '{completed}/{total} tasks · {phase}',
-  'form.objective': 'Objective',
-  'form.maxTaskRounds': 'Maximum rounds per task',
-  'form.tasks': 'Tasks',
-  'form.task': 'Task {number}',
-  'form.moveUpLabel': 'Move task {number} up',
-  'form.moveDownLabel': 'Move task {number} down',
-  'form.removeLabel': 'Remove task {number}',
-  'form.up': 'Up',
-  'form.down': 'Down',
-  'form.remove': 'Remove',
-  'form.addTask': 'Add task',
-  'form.create': 'Create plan',
-  'form.back': 'Back to plans',
+  'form.goal': 'Goal',
+  'form.context': 'Context (optional)',
+  'form.successCriteria': 'Success criteria (optional)',
+  'form.startProgressing': 'Start progressing',
+  'form.back': 'Back',
   'detail.summary': '{completed}/{total} tasks complete · {phase}',
+  'detail.guidance': 'Add information / adjust direction',
+  'detail.guidanceLabel': 'Guidance',
+  'action.continueProgress': 'Continue progress',
+  'action.addGuidance': 'Add guidance',
+  'action.abandon': 'Abandon this Task and replan',
   'action.start': 'Start Task',
   'action.continue': 'Continue Task',
   'action.openSession': 'Open Session',
@@ -94,9 +98,14 @@ const enMessages = {
   'reason.workspaceRequired': 'Open or create a DSH Workspace first.',
   'error.refresh': 'Unable to refresh Learn Loop plans.',
   'error.load': 'Unable to load this Learn Loop plan.',
-  'error.validation': 'Enter an objective, at least one task, and a positive task-round limit.',
+  'error.goalValidation': 'Enter a Goal and select a DSH Workspace Session first.',
   'error.create': 'Unable to create the Learn Loop plan.',
   'error.run': 'Unable to run the current task.',
+  'error.guidance': 'Unable to add guidance.',
+  'error.abandon': 'Unable to abandon the current Task.',
+  'error.revisionConflict': 'This Goal changed elsewhere. The latest status is shown; review it before retrying.',
+  'phase.planning': 'planning',
+  'phase.abandoned': 'abandoned',
   'phase.pending': 'pending',
   'phase.active': 'active',
   'phase.paused': 'paused',
@@ -120,11 +129,13 @@ const fixedReasonKeys: Readonly<Record<string, MessageKey>> = {
 }
 
 const phaseKeys: Readonly<Record<string, MessageKey>> = {
+  planning: 'phase.planning',
   pending: 'phase.pending',
   active: 'phase.active',
   paused: 'phase.paused',
   blocked: 'phase.blocked',
   complete: 'phase.complete',
+  abandoned: 'phase.abandoned',
 }
 
 type VisibleError =
@@ -397,11 +408,6 @@ export function waitForSessionProjection(
   })
 }
 
-interface DraftTask {
-  readonly id: string
-  readonly objective: string
-}
-
 function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   readonly ctx: ClientContext
 }): JSX.Element {
@@ -412,12 +418,13 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   const t = ctx.locale.bind(LOCALE_NAMESPACE)
   const client = createLearnLoopClient(ctx.connection.rpc)
   const [view, setView] = useState<View>('closed')
-  const [goals, setGoals] = useState<readonly LongGoalSummary[]>([])
-  const [detail, setDetail] = useState<LongGoalStatusProjection | undefined>()
+  const [goals, setGoals] = useState<readonly AnyLongGoalSummary[]>([])
+  const [detail, setDetail] = useState<AnyLongGoalStatusProjection | undefined>()
   const [objective, setObjective] = useState('')
-  const [tasks, setTasks] = useState<DraftTask[]>([{ id: 'task-row-1', objective: '' }])
-  const nextTaskRowId = useRef(1)
-  const [maxTaskRounds, setMaxTaskRounds] = useState(3)
+  const [context, setContext] = useState('')
+  const [successCriteria, setSuccessCriteria] = useState('')
+  const [guidance, setGuidance] = useState('')
+  const [operationSessionId, setOperationSessionId] = useState<string | undefined>()
   const [error, setError] = useState<VisibleError | undefined>()
   const [loading, setLoading] = useState(false)
   const requestGeneration = useRef(createRequestGeneration())
@@ -470,6 +477,8 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
       const nextDetail = await client.status(longGoalId, request.signal)
       if (request.isCurrent()) {
         setDetail(nextDetail)
+        setGuidance('')
+        setOperationSessionId(undefined)
         setView('detail')
       }
     } catch (cause) {
@@ -483,22 +492,28 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
 
   const createPlan = async () => {
     const trimmedObjective = objective.trim()
-    const trimmedTasks = tasks.map(task => task.objective.trim()).filter(Boolean)
-    if (trimmedObjective.length === 0 || trimmedTasks.length === 0 || maxTaskRounds < 1) {
-      setError({ key: 'error.validation' })
+    const selectedSessionId = sessionList.current !== undefined &&
+      sessionList.byId[sessionList.current]?.cwd?.trim()
+      ? sessionList.current
+      : undefined
+    if (trimmedObjective.length === 0 || selectedSessionId === undefined) {
+      setError({ key: 'error.goalValidation' })
       return
     }
     const request = requestGeneration.current.begin()
     setLoading(true)
     setError(undefined)
     try {
-      const nextDetail = await client.create({
+      const result = await client.createGoalFirst({
         objective: trimmedObjective,
-        tasks: trimmedTasks,
-        maxTaskRounds,
+        context: context.trim() || null,
+        successCriteria: successCriteria.trim() || null,
+        workspaceSessionId: selectedSessionId,
       }, request.signal)
       if (request.isCurrent()) {
-        setDetail(nextDetail)
+        setDetail(result.status)
+        setGuidance('')
+        setOperationSessionId(result.sessionId ?? undefined)
         setView('detail')
       }
     } catch (cause) {
@@ -511,7 +526,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   }
 
   const runTask = async () => {
-    if (detail === undefined) return
+    if (detail === undefined || detail.schemaVersion !== 'tianwen.long-goal-status.v1') return
     const action = taskAction(detail, sessionList)
     if (action.disabled) return
     if (action.sessionId !== undefined) {
@@ -556,17 +571,134 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
     }
   }
 
-  const moveTask = (index: number, direction: -1 | 1) => {
-    const nextIndex = index + direction
-    if (nextIndex < 0 || nextIndex >= tasks.length) return
-    setTasks(current => {
-      const next = [...current]
-      ;[next[index], next[nextIndex]] = [next[nextIndex]!, next[index]!]
-      return next
-    })
+  const handleMutationFailure = async (
+    cause: unknown,
+    request: RequestHandle,
+    failedDetail: LongGoalStatusProjectionV2,
+    fallback: MessageKey,
+  ): Promise<void> => {
+    if (cause instanceof LearnLoopRpcError && cause.code === 'revision-conflict') {
+      try {
+        const latest = await client.status(failedDetail.goal.id, request.signal)
+        if (request.isCurrent()) {
+          setDetail(latest)
+          setOperationSessionId(undefined)
+          setError({ key: 'error.revisionConflict' })
+        }
+      } catch (refreshCause) {
+        if (request.isCurrent()) {
+          setError(refreshCause instanceof Error
+            ? { message: refreshCause.message }
+            : { key: 'error.load' })
+        }
+      }
+      return
+    }
+    if (request.isCurrent()) {
+      setError(cause instanceof Error ? { message: cause.message } : { key: fallback })
+    }
   }
 
-  const action = detail === undefined ? undefined : taskAction(detail, sessionList)
+  const continueProgress = async () => {
+    if (detail === undefined || detail.schemaVersion !== 'tianwen.long-goal-status.v2') return
+    const failedDetail = detail
+    const request = requestGeneration.current.begin()
+    setLoading(true)
+    setError(undefined)
+    try {
+      const result = await client.continueProgress({
+        longGoalId: failedDetail.goal.id,
+        expectedRevision: failedDetail.goal.revision,
+      }, request.signal)
+      if (request.isCurrent()) {
+        setDetail(result.status)
+        setOperationSessionId(result.sessionId ?? undefined)
+      }
+    } catch (cause) {
+      await handleMutationFailure(cause, request, failedDetail, 'error.run')
+    } finally {
+      if (request.isCurrent()) setLoading(false)
+    }
+  }
+
+  const addGuidance = async () => {
+    if (detail === undefined || detail.schemaVersion !== 'tianwen.long-goal-status.v2') return
+    const text = guidance.trim()
+    if (text.length === 0) return
+    const failedDetail = detail
+    const request = requestGeneration.current.begin()
+    setLoading(true)
+    setError(undefined)
+    try {
+      const result = await client.addGuidance({
+        longGoalId: failedDetail.goal.id,
+        expectedRevision: failedDetail.goal.revision,
+        text,
+      }, request.signal)
+      if (request.isCurrent()) {
+        setDetail(result.status)
+        setGuidance('')
+        setOperationSessionId(undefined)
+      }
+    } catch (cause) {
+      await handleMutationFailure(cause, request, failedDetail, 'error.guidance')
+    } finally {
+      if (request.isCurrent()) setLoading(false)
+    }
+  }
+
+  const abandonCurrentTask = async () => {
+    if (detail === undefined || detail.schemaVersion !== 'tianwen.long-goal-status.v2') return
+    const failedDetail = detail
+    const request = requestGeneration.current.begin()
+    setLoading(true)
+    setError(undefined)
+    try {
+      const result = await client.abandonCurrentTask({
+        longGoalId: failedDetail.goal.id,
+        expectedRevision: failedDetail.goal.revision,
+      }, request.signal)
+      if (request.isCurrent()) {
+        setDetail(result.status)
+        setOperationSessionId(undefined)
+      }
+    } catch (cause) {
+      await handleMutationFailure(cause, request, failedDetail, 'error.abandon')
+    } finally {
+      if (request.isCurrent()) setLoading(false)
+    }
+  }
+
+  const openTaskSession = async (sessionId: string) => {
+    const request = requestGeneration.current.begin()
+    setLoading(true)
+    setError(undefined)
+    try {
+      await waitForSessionProjection(ctx.sessions.list, sessionId, request.signal)
+      if (request.isCurrent()) {
+        closeOverlay()
+        ctx.sessions.open(sessionId)
+      }
+    } catch (cause) {
+      if (request.isCurrent()) {
+        setError(cause instanceof Error ? { message: cause.message } : { key: 'error.run' })
+      }
+    } finally {
+      if (request.isCurrent()) setLoading(false)
+    }
+  }
+
+  const action = detail?.schemaVersion === 'tianwen.long-goal-status.v1'
+    ? taskAction(detail, sessionList)
+    : undefined
+  const v2CurrentTask = detail?.schemaVersion === 'tianwen.long-goal-status.v2'
+    ? detail.tasks.find(task => task.id === detail.currentTaskId)
+    : undefined
+  const v2SessionId = operationSessionId ?? v2CurrentTask?.execution?.sessionId
+  const canAbandon = v2CurrentTask?.phase === 'blocked' &&
+    v2CurrentTask.execution !== null && v2CurrentTask.resolution === null
+  const selectedWorkspaceSession = sessionList.current !== undefined &&
+    Boolean(sessionList.byId[sessionList.current]?.cwd?.trim())
 
   return (
     <>
@@ -624,22 +756,11 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
               )}
             </>}
             {view === 'create' && <form onSubmit={event => { event.preventDefault(); void createPlan() }} style={{ display: 'grid', gap: 10, marginTop: 16 }}>
-              <label>{t('form.objective')}<textarea value={objective} onChange={event => setObjective(event.target.value)} required style={fieldStyle} /></label>
-              <label>{t('form.maxTaskRounds')}<input type="number" min="1" value={maxTaskRounds} onChange={event => setMaxTaskRounds(Number(event.target.value))} style={fieldStyle} /></label>
-              <fieldset style={{ border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8 }}>
-                <legend>{t('form.tasks')}</legend>
-                {tasks.map((task, index) => <div key={task.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
-                  <input aria-label={t('form.task', { number: index + 1 })} value={task.objective} onChange={event => setTasks(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, objective: event.target.value } : item))} style={{ ...fieldStyle, flex: '1 1 180px' }} />
-                  <button type="button" aria-label={t('form.moveUpLabel', { number: index + 1 })} onClick={() => moveTask(index, -1)} disabled={index === 0} style={buttonStyle}>{t('form.up')}</button>
-                  <button type="button" aria-label={t('form.moveDownLabel', { number: index + 1 })} onClick={() => moveTask(index, 1)} disabled={index === tasks.length - 1} style={buttonStyle}>{t('form.down')}</button>
-                  <button type="button" aria-label={t('form.removeLabel', { number: index + 1 })} onClick={() => setTasks(current => current.length === 1 ? current.map(item => ({ ...item, objective: '' })) : current.filter((_, itemIndex) => itemIndex !== index))} style={buttonStyle}>{t('form.remove')}</button>
-                </div>)}
-                <button type="button" onClick={() => setTasks(current => {
-                  nextTaskRowId.current += 1
-                  return [...current, { id: `task-row-${nextTaskRowId.current}`, objective: '' }]
-                })} style={buttonStyle}>{t('form.addTask')}</button>
-              </fieldset>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}><button type="submit" disabled={loading} style={buttonStyle}>{t('form.create')}</button><button type="button" onClick={() => setView('list')} style={buttonStyle}>{t('form.back')}</button></div>
+              <label>{t('form.goal')}<textarea value={objective} onChange={event => setObjective(event.target.value)} required style={fieldStyle} /></label>
+              <label>{t('form.context')}<textarea value={context} onChange={event => setContext(event.target.value)} style={fieldStyle} /></label>
+              <label>{t('form.successCriteria')}<textarea value={successCriteria} onChange={event => setSuccessCriteria(event.target.value)} style={fieldStyle} /></label>
+              {!selectedWorkspaceSession && <p role="status" style={{ margin: 0 }}>{t('reason.workspaceRequired')}</p>}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}><button type="submit" disabled={loading || !selectedWorkspaceSession} style={buttonStyle}>{t('form.startProgressing')}</button><button type="button" onClick={() => setView('list')} style={buttonStyle}>{t('form.back')}</button></div>
             </form>}
             {view === 'detail' && detail !== undefined && <div style={{ display: 'grid', gap: 10, marginTop: 16 }}>
               <h3 style={{ margin: 0 }}>{detail.goal.objective}</h3>
@@ -651,11 +772,29 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
               <ol style={{ margin: 0, paddingLeft: 20 }}>
                 {detail.tasks.map(task => <li key={task.id}>{task.objective} — {translatePhase(t, task.phase)}{task.blockedReason === undefined ? '' : `: ${task.blockedReason.message}`}</li>)}
               </ol>
-              {action?.reason !== undefined && <p role="status" style={{ margin: 0 }}>{translateActionReason(t, action.reason, detail, sessionList)}</p>}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                <button type="button" onClick={() => void runTask()} disabled={loading || action?.disabled !== false} style={buttonStyle}>{t(actionLabelKeys[action?.label ?? 'Plan complete'])}</button>
-                <button type="button" onClick={() => setView('list')} style={buttonStyle}>{t('form.back')}</button>
-              </div>
+              {detail.schemaVersion === 'tianwen.long-goal-status.v1' ? <>
+                {action?.reason !== undefined && <p role="status" style={{ margin: 0 }}>{translateActionReason(t, action.reason, detail, sessionList)}</p>}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <button type="button" onClick={() => void runTask()} disabled={loading || action?.disabled !== false} style={buttonStyle}>{t(actionLabelKeys[action?.label ?? 'Plan complete'])}</button>
+                  <button type="button" onClick={() => setView('list')} style={buttonStyle}>{t('form.back')}</button>
+                </div>
+              </> : <>
+                {detail.goal.context !== null && <p style={{ margin: 0 }}>{detail.goal.context}</p>}
+                {detail.goal.successCriteria !== null && <p style={{ margin: 0 }}>{detail.goal.successCriteria}</p>}
+                {detail.guidance.length > 0 && <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {detail.guidance.map((item, index) => <li key={index}>{item}</li>)}
+                </ul>}
+                <label>{t('detail.guidance')}
+                  <textarea aria-label={t('detail.guidanceLabel')} value={guidance} onChange={event => setGuidance(event.target.value)} style={fieldStyle} />
+                </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <button type="button" onClick={() => void continueProgress()} disabled={loading || detail.goal.phase === 'blocked' || detail.goal.phase === 'complete'} style={buttonStyle}>{t('action.continueProgress')}</button>
+                  <button type="button" onClick={() => void addGuidance()} disabled={loading || guidance.trim().length === 0} style={buttonStyle}>{t('action.addGuidance')}</button>
+                  {v2SessionId !== undefined && <button type="button" onClick={() => void openTaskSession(v2SessionId)} disabled={loading} style={buttonStyle}>{t('action.openSession')}</button>}
+                  {canAbandon && <button type="button" onClick={() => void abandonCurrentTask()} disabled={loading} style={buttonStyle}>{t('action.abandon')}</button>}
+                  <button type="button" onClick={() => setView('list')} style={buttonStyle}>{t('form.back')}</button>
+                </div>
+              </>}
             </div>}
           </section>
         </div>

@@ -227,6 +227,42 @@ const coldStatus = {
   }],
 } as const
 
+const statusV2 = {
+  schemaVersion: 'tianwen.long-goal-status.v2',
+  goal: {
+    id: 'goal-first-1',
+    objective: 'Ship goal-first Learn Loop',
+    context: 'Keep the existing overlay',
+    successCriteria: 'Users author one Goal',
+    phase: 'active',
+    revision: 4,
+    completedTasks: 0,
+    abandonedTasks: 0,
+    totalTasks: 1,
+  },
+  planner: { sessionId: 'planner-session', phase: 'ready', planRevision: 1 },
+  guidance: [],
+  tasks: [{
+    id: 'task-v2-1',
+    objective: 'Implement the Web flow',
+    phase: 'active',
+    execution: { goalId: 'goal-v2-1', sessionId: 'task-session' },
+    resolution: null,
+  }],
+  currentTaskId: 'task-v2-1',
+  runtime: { activation: 'not-loaded', modelRequests: 0, readOnly: true },
+} as const
+
+const summaryV1 = {
+  id: unboundStatus.goal.id,
+  objective: unboundStatus.goal.objective,
+  phase: unboundStatus.goal.phase,
+  completedTasks: 0,
+  totalTasks: 1,
+  currentTaskId: 'task-1',
+  updatedAt: 1,
+} as const
+
 function sessionRow(input: {
   readonly sessionId: string
   readonly cwd?: string
@@ -314,23 +350,31 @@ function openCreateForm(render: () => unknown): unknown {
   let tree = render()
   ;(findElement(tree, element => element.props['aria-label'] === 'Learn Loop').props.onClick as () => void)()
   tree = render()
-  ;(findButton(tree, 'Create plan').props.onClick as () => void)()
+  ;(findButton(tree, 'Create Goal').props.onClick as () => void)()
   return render()
 }
 
-async function createPlan(render: () => unknown): Promise<unknown> {
+async function createGoal(render: () => unknown): Promise<unknown> {
   let tree = openCreateForm(render)
-  ;(findElement(tree, element => element.type === 'textarea').props.onChange as Function)({
-    target: { value: 'Ship Learn Loop' },
-  })
-  tree = render()
-  ;(findElement(tree, element => element.props['aria-label'] === 'Task 1').props.onChange as Function)({
-    target: { value: 'Open the UI' },
-  })
+  const textareas = elements(tree).filter(element => element.type === 'textarea')
+  ;(textareas[0]!.props.onChange as Function)({ target: { value: 'Ship goal-first Learn Loop' } })
+  ;(textareas[1]!.props.onChange as Function)({ target: { value: 'Keep the existing overlay' } })
+  ;(textareas[2]!.props.onChange as Function)({ target: { value: 'Users author one Goal' } })
   tree = render()
   ;(findElement(tree, element => element.type === 'form').props.onSubmit as Function)({
     preventDefault: () => undefined,
   })
+  await flushClient()
+  return render()
+}
+
+async function openListedGoal(render: () => unknown, objective: string): Promise<unknown> {
+  let tree = render()
+  ;(findElement(tree, element => element.props['aria-label'] === 'Learn Loop').props.onClick as () => void)()
+  await flushClient()
+  tree = render()
+  ;(findElement(tree, element => element.type === 'button' && text(element).includes(objective))
+    .props.onClick as () => void)()
   await flushClient()
   return render()
 }
@@ -350,10 +394,16 @@ describe('Learn Loop compiled DSH client module', () => {
     expect(findElement(tree, element => element.props['aria-label'] === '长期任务')).toBeDefined()
     expect(text(tree)).toContain('还没有长期任务')
     expect(text(tree)).toContain('在 DSH 中打开或创建一个项目工作区')
-    expect(text(tree)).toContain('创建一个长期目标，并按执行顺序填写任务')
-    expect(text(tree)).toContain('启动当前任务，天问会在独立 DSH 会话中继续执行')
+    expect(text(tree)).toContain('创建一个长期目标，天问会规划并推进后续任务')
+    expect(text(tree)).toContain('可随时补充信息或调整方向')
     expect(text(tree)).not.toContain('No Learn Loop plans yet')
     expect(locale.subscriberCount).toBe(1)
+
+    ;(findButton(tree, '创建目标').props.onClick as () => void)()
+    tree = client.render()
+    expect(text(tree)).toContain('背景（可选）')
+    expect(text(tree)).toContain('成功标准（可选）')
+    expect(findButton(tree, '开始推进')).toBeDefined()
 
     const rpcCalls = rpc.call.mock.calls.length
     locale.set('en')
@@ -366,139 +416,268 @@ describe('Learn Loop compiled DSH client module', () => {
     expect(rpc.call).toHaveBeenCalledTimes(rpcCalls)
   })
 
-  it('keeps an authored Task row key stable while its text changes', () => {
+  it('renders only the three goal-first fields and no authored Task or round controls', () => {
     const list = createSessionList({ current: undefined, byId: {} })
     const rpc = { call: vi.fn(async () => ({ ok: true, value: { goals: [] } })) }
     const client = loadClientModule({ list, rpc })
-    let tree = openCreateForm(client.render)
-    const row = () => findElement(tree, element => element.type === 'div' &&
-      (Array.isArray(element.props.children) ? element.props.children : [element.props.children])
-        .some(child => isElement(child) && child.props['aria-label'] === 'Task 1'))
-    const before = row().key
+    const tree = openCreateForm(client.render)
 
-    ;(findElement(tree, element => element.props['aria-label'] === 'Task 1').props.onChange as Function)({
-      target: { value: 'Keep focus while editing' },
-    })
-    tree = client.render()
-
-    expect(row().key).toBe(before)
+    expect(elements(tree).filter(element => element.type === 'textarea')).toHaveLength(3)
+    expect(text(tree)).toContain('Goal')
+    expect(text(tree)).toContain('Context (optional)')
+    expect(text(tree)).toContain('Success criteria (optional)')
+    expect(findButton(tree, 'Start progressing')).toBeDefined()
+    expect(findButton(tree, 'Back')).toBeDefined()
+    expect(elements(tree).some(element => element.type === 'input' && element.props.type === 'number'))
+      .toBe(false)
+    expect(text(tree)).not.toContain('Maximum rounds per task')
+    expect(text(tree)).not.toContain('Add task')
   })
 
-  it('opens the overlay, creates a plan, continues a cold Task, closes, then navigates', async () => {
+  it('creates from the selected workspace Session ID and exposes the returned Task Session', async () => {
     const list = createSessionList({
-      current: 'session-1',
+      current: 'workspace-session',
       byId: {
-        'session-1': sessionRow({
-          sessionId: 'session-1', cwd: 'D:/workspace', running: false, goalId: 'goal-1',
-        }),
+        'workspace-session': sessionRow({ sessionId: 'workspace-session', cwd: 'D:/workspace' }),
       },
     })
     const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
       if (endpoint === 'list') return { ok: true, value: { goals: [] } }
-      if (endpoint === 'create') return { ok: true, value: { status: coldStatus } }
-      if (endpoint === 'run-current-task') {
-        return { ok: true, value: { status: coldStatus, sessionId: 'session-1', action: 'continued' } }
-      }
-      throw new Error(`unexpected endpoint ${endpoint}`)
-    }) }
-    let render!: () => unknown
-    let dialogPresentWhenOpened = true
-    const open = vi.fn(() => {
-      dialogPresentWhenOpened = elements(render()).some(element => element.props.role === 'dialog')
-    })
-    const client = loadClientModule({ list, rpc, open })
-    render = client.render
-    const tree = await createPlan(render)
-
-    const action = findButton(tree, 'Continue Task')
-    expect(action.props.disabled).toBe(false)
-    ;(action.props.onClick as () => void)()
-    await flushClient()
-
-    expect(rpc.call.mock.calls.map(call => call[1])).toEqual([
-      'list', 'create', 'run-current-task',
-    ])
-    expect(open).toHaveBeenCalledWith('session-1')
-    expect(dialogPresentWhenOpened).toBe(false)
-  })
-
-  it('opens only a running Session whose projected Goal matches the Task binding', async () => {
-    const runningList = createSessionList({
-      current: 'session-1',
-      byId: { 'session-1': sessionRow({
-        sessionId: 'session-1', running: true, goalId: 'goal-1',
-      }) },
-    })
-    const runningRpc = { call: vi.fn(async (_channel: string, endpoint: string) => endpoint === 'list'
-      ? { ok: true, value: { goals: [] } }
-      : { ok: true, value: { status: coldStatus } }) }
-    const runningClient = loadClientModule({ list: runningList, rpc: runningRpc })
-    const runningTree = await createPlan(runningClient.render)
-    ;(findButton(runningTree, 'Open Session').props.onClick as () => void)()
-    expect(runningClient.open).toHaveBeenCalledWith('session-1')
-    expect(runningRpc.call.mock.calls.map(call => call[1])).toEqual(['list', 'create'])
-
-    const mismatchList = createSessionList({
-      current: 'session-1',
-      byId: { 'session-1': sessionRow({
-        sessionId: 'session-1', running: true, goalId: 'goal-other',
-      }) },
-    })
-    const mismatchRpc = { call: vi.fn(async (_channel: string, endpoint: string) => endpoint === 'list'
-      ? { ok: true, value: { goals: [] } }
-      : { ok: true, value: { status: coldStatus } }) }
-    const mismatchClient = loadClientModule({ list: mismatchList, rpc: mismatchRpc })
-    const mismatchTree = await createPlan(mismatchClient.render)
-    expect(findButton(mismatchTree, 'Continue Task').props.disabled).toBe(true)
-    expect(text(mismatchTree)).toContain('does not match this Task')
-    expect(mismatchClient.open).not.toHaveBeenCalled()
-  })
-
-  it('waits for the exact started Session projection before navigating', async () => {
-    const selected = sessionRow({ sessionId: 'selected', cwd: 'D:/workspace' })
-    const list = createSessionList({ current: 'selected', byId: { selected } })
-    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
-      if (endpoint === 'list') return { ok: true, value: { goals: [] } }
-      if (endpoint === 'create') return { ok: true, value: { status: unboundStatus } }
-      if (endpoint === 'run-current-task') {
-        return { ok: true, value: { status: coldStatus, sessionId: 'session-new', action: 'started' } }
+      if (endpoint === 'create-goal-first') {
+        return { ok: true, value: {
+          schemaVersion: 'tianwen.goal-first-progress-result.v2',
+          action: 'started',
+          status: statusV2,
+          sessionId: 'task-session',
+        } }
       }
       throw new Error(`unexpected endpoint ${endpoint}`)
     }) }
     const client = loadClientModule({ list, rpc })
-    const tree = await createPlan(client.render)
-    ;(findButton(tree, 'Start Task').props.onClick as () => void)()
-    await flushClient()
+    const tree = await createGoal(client.render)
 
+    expect(rpc.call.mock.calls[1]).toEqual(['/tianwen', 'create-goal-first', {
+      objective: 'Ship goal-first Learn Loop',
+      context: 'Keep the existing overlay',
+      successCriteria: 'Users author one Goal',
+      workspaceSessionId: 'workspace-session',
+    }, expect.any(AbortSignal)])
+    expect(text(tree)).toContain('Ship goal-first Learn Loop')
+    ;(findButton(tree, 'Open Session').props.onClick as () => void)()
     expect(client.open).not.toHaveBeenCalled()
     list.set({
-      current: 'selected',
+      current: 'workspace-session',
       byId: {
-        selected,
-        'session-new': sessionRow({ sessionId: 'session-new', cwd: 'D:/workspace' }),
+        'workspace-session': sessionRow({ sessionId: 'workspace-session', cwd: 'D:/workspace' }),
+        'task-session': sessionRow({ sessionId: 'task-session', cwd: 'D:/workspace' }),
       },
     })
     await flushClient()
-
-    expect(client.open).toHaveBeenCalledWith('session-new')
+    expect(client.open).toHaveBeenCalledWith('task-session')
   })
 
-  it('does not navigate after the overlay closes while Session projection is pending', async () => {
-    const selected = sessionRow({ sessionId: 'selected', cwd: 'D:/workspace' })
-    const list = createSessionList({ current: 'selected', byId: { selected } })
+  it('uses each returned revision and guidance never invokes Continue implicitly', async () => {
+    const selected = sessionRow({ sessionId: 'workspace-session', cwd: 'D:/workspace' })
+    const list = createSessionList({ current: 'workspace-session', byId: { 'workspace-session': selected } })
+    const revision5 = { ...statusV2, goal: { ...statusV2.goal, revision: 5 } }
+    const revision6 = { ...statusV2, goal: { ...statusV2.goal, revision: 6 }, guidance: ['Prefer native controls'] }
     const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
       if (endpoint === 'list') return { ok: true, value: { goals: [] } }
-      if (endpoint === 'create') return { ok: true, value: { status: unboundStatus } }
-      if (endpoint === 'run-current-task') {
-        return { ok: true, value: { status: coldStatus, sessionId: 'session-new', action: 'started' } }
+      if (endpoint === 'create-goal-first') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'started',
+        status: statusV2, sessionId: null,
+      } }
+      if (endpoint === 'continue-progress') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'already-running',
+        status: revision5, sessionId: null,
+      } }
+      if (endpoint === 'add-guidance') return { ok: true, value: {
+        schemaVersion: 'tianwen.long-goal-guidance-result.v2', planning: 'updated', status: revision6,
+      } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const client = loadClientModule({ list, rpc })
+    let tree = await createGoal(client.render)
+    ;(findButton(tree, 'Continue progress').props.onClick as () => void)()
+    await flushClient()
+    tree = client.render()
+    ;(findElement(tree, element => element.type === 'textarea' &&
+      element.props['aria-label'] === 'Guidance').props.onChange as Function)({
+      target: { value: 'Prefer native controls' },
+    })
+    tree = client.render()
+    ;(findButton(tree, 'Add guidance').props.onClick as () => void)()
+    await flushClient()
+
+    const continueCall = rpc.call.mock.calls.find(call => call[1] === 'continue-progress')
+    const guidanceCall = rpc.call.mock.calls.find(call => call[1] === 'add-guidance')
+    expect(continueCall?.[2]).toEqual({ longGoalId: 'goal-first-1', expectedRevision: 4 })
+    expect(guidanceCall?.[2]).toEqual({
+      longGoalId: 'goal-first-1', expectedRevision: 5, text: 'Prefer native controls',
+    })
+    expect(rpc.call.mock.calls.filter(call => call[1] === 'continue-progress')).toHaveLength(1)
+    expect(rpc.call.mock.calls.map(call => call[1])).toEqual([
+      'list', 'create-goal-first', 'continue-progress', 'add-guidance',
+    ])
+    expect(text(client.render())).toContain('Prefer native controls')
+  })
+
+  it('clears an unsent guidance draft when switching to another Goal', async () => {
+    const selected = sessionRow({ sessionId: 'workspace-session', cwd: 'D:/workspace' })
+    const list = createSessionList({
+      current: 'workspace-session',
+      byId: { 'workspace-session': selected },
+    })
+    const secondStatus = {
+      ...statusV2,
+      goal: { ...statusV2.goal, id: 'goal-first-2', objective: 'Second Goal' },
+    }
+    let createCalls = 0
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [] } }
+      if (endpoint === 'create-goal-first') {
+        createCalls += 1
+        return { ok: true, value: {
+          schemaVersion: 'tianwen.goal-first-progress-result.v2',
+          action: 'started',
+          status: createCalls === 1 ? statusV2 : secondStatus,
+          sessionId: null,
+        } }
       }
       throw new Error(`unexpected endpoint ${endpoint}`)
     }) }
     const client = loadClientModule({ list, rpc })
-    let tree = await createPlan(client.render)
-    ;(findButton(tree, 'Start Task').props.onClick as () => void)()
+    let tree = await createGoal(client.render)
+    ;(findElement(tree, element => element.type === 'textarea' &&
+      element.props['aria-label'] === 'Guidance').props.onChange as Function)({
+      target: { value: 'Draft meant only for the first Goal' },
+    })
+    tree = client.render()
+    ;(findButton(tree, 'Back').props.onClick as () => void)()
+    tree = client.render()
+    ;(findButton(tree, 'Create Goal').props.onClick as () => void)()
+    tree = client.render()
+    ;(findElement(tree, element => element.type === 'form').props.onSubmit as Function)({
+      preventDefault: () => undefined,
+    })
     await flushClient()
 
+    const secondTree = client.render()
+    expect(text(secondTree)).toContain('Second Goal')
+    expect(findElement(secondTree, element => element.type === 'textarea' &&
+      element.props['aria-label'] === 'Guidance').props.value).toBe('')
+  })
+
+  it('refreshes exactly once on revision conflict without replaying the mutation', async () => {
+    const selected = sessionRow({ sessionId: 'workspace-session', cwd: 'D:/workspace' })
+    const list = createSessionList({ current: 'workspace-session', byId: { 'workspace-session': selected } })
+    const refreshed = {
+      ...statusV2,
+      goal: { ...statusV2.goal, objective: 'Refreshed authoritative Goal', revision: 5 },
+    }
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [] } }
+      if (endpoint === 'create-goal-first') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'started',
+        status: statusV2, sessionId: null,
+      } }
+      if (endpoint === 'continue-progress') return { ok: false, error: {
+        code: 'revision-conflict', message: 'revision-conflict',
+        details: { expectedRevision: 4, currentRevision: 5 },
+      } }
+      if (endpoint === 'status') return { ok: true, value: { status: refreshed } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const client = loadClientModule({ list, rpc })
+    let tree = await createGoal(client.render)
+    ;(findButton(tree, 'Continue progress').props.onClick as () => void)()
+    await flushClient()
+
+    expect(rpc.call.mock.calls.filter(call => call[1] === 'continue-progress')).toHaveLength(1)
+    expect(rpc.call.mock.calls.filter(call => call[1] === 'status')).toHaveLength(1)
+    expect(text(client.render())).toContain('Refreshed authoritative Goal')
+    expect(text(client.render())).toContain('changed elsewhere')
+  })
+
+  it('requires a selected workspace Session and localizes blocked recovery actions', async () => {
+    const noWorkspace = createSessionList({ current: undefined, byId: {} })
+    const unboundRpc = { call: vi.fn(async () => ({ ok: true, value: { goals: [] } })) }
+    const unboundClient = loadClientModule({ list: noWorkspace, rpc: unboundRpc })
+    const unboundTree = openCreateForm(unboundClient.render)
+    expect(findButton(unboundTree, 'Start progressing').props.disabled).toBe(true)
+    expect(text(unboundTree)).toContain('Open or create a DSH Workspace first')
+
+    const blockedStatus = {
+      ...statusV2,
+      goal: { ...statusV2.goal, phase: 'blocked' },
+      tasks: [{
+        ...statusV2.tasks[0],
+        phase: 'blocked',
+        blockedReason: { code: 'round-limit', message: 'Task reached its round limit.' },
+      }],
+    } as const
+    const blockedList = createSessionList({
+      current: 'workspace-session',
+      byId: { 'workspace-session': sessionRow({
+        sessionId: 'workspace-session', cwd: 'D:/workspace', running: false,
+      }) },
+    })
+    const afterAbandon = {
+      ...blockedStatus,
+      goal: { ...blockedStatus.goal, phase: 'planning', revision: 5 },
+      planner: { ...blockedStatus.planner, phase: 'needs-replan' },
+      tasks: [{ ...blockedStatus.tasks[0], phase: 'abandoned', resolution: 'abandoned' }],
+      currentTaskId: null,
+    }
+    const blockedRpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [] } }
+      if (endpoint === 'create-goal-first') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'blocked',
+        status: blockedStatus, sessionId: null,
+      } }
+      if (endpoint === 'abandon-current-task') return { ok: true, value: {
+        schemaVersion: 'tianwen.long-goal-abandon-result.v2', action: 'abandoned',
+        status: afterAbandon,
+      } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const locale = new TestLocale('en')
+    const blockedClient = loadClientModule({ list: blockedList, locale, rpc: blockedRpc })
+    let blockedTree = await createGoal(blockedClient.render)
+    expect(findButton(blockedTree, 'Open Session')).toBeDefined()
+    expect(findButton(blockedTree, 'Abandon this Task and replan')).toBeDefined()
+    expect(text(blockedTree)).toContain('Task reached its round limit.')
+
+    locale.set('zh')
+    blockedTree = blockedClient.render()
+    expect(findButton(blockedTree, '打开会话')).toBeDefined()
+    expect(findButton(blockedTree, '放弃当前任务并重新规划')).toBeDefined()
+    ;(findButton(blockedTree, '放弃当前任务并重新规划').props.onClick as () => void)()
+    await flushClient()
+
+    const abandonCall = blockedRpc.call.mock.calls.find(call => call[1] === 'abandon-current-task')
+    expect(abandonCall?.[2]).toEqual({ longGoalId: 'goal-first-1', expectedRevision: 4 })
+    const zhBlockedTree = blockedClient.render()
+    expect(text(zhBlockedTree)).toContain('Task reached its round limit.')
+    expect(text(zhBlockedTree)).not.toContain('Abandon this Task and replan')
+  })
+
+  it('keeps v1 rendering/execution and prevents late navigation after close', async () => {
+    const selected = sessionRow({ sessionId: 'selected', cwd: 'D:/workspace' })
+    const list = createSessionList({ current: 'selected', byId: { selected } })
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [summaryV1] } }
+      if (endpoint === 'status') return { ok: true, value: { status: unboundStatus } }
+      if (endpoint === 'run-current-task') return { ok: true, value: {
+        status: coldStatus, sessionId: 'session-new', action: 'started',
+      } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const client = loadClientModule({ list, rpc })
+    let tree = await openListedGoal(client.render, 'Ship Learn Loop')
+    expect(findButton(tree, 'Start Task').props.disabled).toBe(false)
+    ;(findButton(tree, 'Start Task').props.onClick as () => void)()
+    await flushClient()
     tree = client.render()
     ;(findButton(tree, 'Close').props.onClick as () => void)()
     list.set({
@@ -510,47 +689,7 @@ describe('Learn Loop compiled DSH client module', () => {
     })
     await flushClient()
 
+    expect(rpc.call.mock.calls.map(call => call[1])).toEqual(['list', 'status', 'run-current-task'])
     expect(client.open).not.toHaveBeenCalled()
-  })
-
-  it('disables Start without a selected workspace and disables blocked Tasks with reasons', async () => {
-    const noWorkspace = createSessionList({ current: undefined, byId: {} })
-    const unboundRpc = { call: vi.fn(async (_channel: string, endpoint: string) => endpoint === 'list'
-      ? { ok: true, value: { goals: [] } }
-      : { ok: true, value: { status: unboundStatus } }) }
-    const unboundClient = loadClientModule({ list: noWorkspace, rpc: unboundRpc })
-    const unboundTree = await createPlan(unboundClient.render)
-    expect(findButton(unboundTree, 'Start Task').props.disabled).toBe(true)
-    expect(text(unboundTree)).toContain('Open or create a DSH Workspace first')
-
-    const blockedStatus = {
-      ...coldStatus,
-      goal: { ...coldStatus.goal, phase: 'blocked' },
-      tasks: [{
-        ...coldStatus.tasks[0],
-        phase: 'blocked',
-        blockedReason: { code: 'round-limit', message: 'Task reached its round limit.' },
-      }],
-    } as const
-    const blockedList = createSessionList({
-      current: 'session-1',
-      byId: { 'session-1': sessionRow({
-        sessionId: 'session-1', running: false, goalId: 'goal-1', goalPhase: 'blocked',
-      }) },
-    })
-    const blockedRpc = { call: vi.fn(async (_channel: string, endpoint: string) => endpoint === 'list'
-      ? { ok: true, value: { goals: [] } }
-      : { ok: true, value: { status: blockedStatus } }) }
-    const locale = new TestLocale('en')
-    const blockedClient = loadClientModule({ list: blockedList, locale, rpc: blockedRpc })
-    const blockedTree = await createPlan(blockedClient.render)
-    expect(findButton(blockedTree, 'Continue Task').props.disabled).toBe(true)
-    expect(text(blockedTree)).toContain('Task reached its round limit.')
-
-    locale.set('zh')
-    const zhBlockedTree = blockedClient.render()
-    expect(findButton(zhBlockedTree, '继续任务').props.disabled).toBe(true)
-    expect(text(zhBlockedTree)).toContain('Task reached its round limit.')
-    expect(text(zhBlockedTree)).not.toContain('Continue Task')
   })
 })

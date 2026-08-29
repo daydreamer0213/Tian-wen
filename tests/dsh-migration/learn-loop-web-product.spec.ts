@@ -29,7 +29,9 @@ interface RpcResult<T> {
 }
 
 interface ProductStatus {
-  readonly goal: { readonly id: string }
+  readonly schemaVersion: 'tianwen.long-goal-status.v2'
+  readonly goal: { readonly id: string, readonly revision: number, readonly phase: string }
+  readonly planner: { readonly sessionId: string, readonly phase: string }
   readonly runtime: {
     readonly activation: string
     readonly modelRequests: number
@@ -236,7 +238,7 @@ async function callConnectionRpc<T>(
   payload: unknown,
 ): Promise<RpcResult<T>> {
   const rpcId = randomUUID()
-  const response = await fetch(`${origin}/tianwen/${endpoint}`, {
+  const response = await fetch(`${origin}/${endpoint.includes('.') ? 'api' : 'tianwen'}/${endpoint}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -295,7 +297,7 @@ async function closedHttpAttempts(origin: string): Promise<number> {
 }
 
 describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
-  it('serves the packed client and runs one Task through the real loopback Connection RPC', async () => {
+  it('serves the packed client and creates a goal-first plan through the real loopback Connection RPC', async () => {
     const assembled = runVerifier()
     const registryRequire = createRequire(join(assembled.profileRoot, 'cordis.yml'))
     expect(realpathSync(registryRequire.resolve(
@@ -397,15 +399,24 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
       expect(await fetch(`${origin}/plugins/@tianwen/runtime-bundle/client.js`)
         .then(response => response.ok)).toBe(true)
 
+      const workspaceSession = unwrap(await callConnectionRpc<{
+        readonly sessionId: string
+        readonly agentPreset?: string
+      }>(origin, 'session.create', { cwd: repositoryCwd, agentPreset: 'standard' }))
+      expect(workspaceSession.agentPreset).toBe('standard')
       const sessionsBeforeCreate = sessionLogs(sessionsRoot).length
       const turnsBeforeCreate = sessionEvents(sessionsRoot)
         .filter(event => event.type === 'turn/start').length
       const created = unwrap(await callConnectionRpc<{
+        readonly schemaVersion: 'tianwen.goal-first-progress-result.v2'
+        readonly action: string
         readonly status: ProductStatus
-      }>(origin, 'create', {
-        objective: 'Prove the assembled Learn Loop product path',
-        tasks: ['Bind the first real Web Task', 'Keep the second Task pending'],
-        maxTaskRounds: 1,
+        readonly sessionId: string | null
+      }>(origin, 'create-goal-first', {
+        objective: 'Prove the assembled goal-first Learn Loop product path',
+        context: 'Use the selected DSH workspace Session',
+        successCriteria: 'Persist a recoverable v2 Goal and planner Session',
+        workspaceSessionId: workspaceSession.sessionId,
       }))
       const sessionsAfterCreate = sessionLogs(sessionsRoot).length
       const turnsAfterCreate = sessionEvents(sessionsRoot)
@@ -419,7 +430,13 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
       const turnsAfterStatus = sessionEvents(sessionsRoot)
         .filter(event => event.type === 'turn/start').length
       expect(readBack.status.goal.id).toBe(created.status.goal.id)
-      expect(readBack.status.tasks).toHaveLength(2)
+      expect(created.schemaVersion).toBe('tianwen.goal-first-progress-result.v2')
+      expect(created.action).toBe('planning-pending')
+      expect(created.sessionId).toBeNull()
+      expect(created.status.schemaVersion).toBe('tianwen.long-goal-status.v2')
+      expect(created.status.goal).toMatchObject({ phase: 'planning', revision: expect.any(Number) })
+      expect(readBack.status).toEqual(created.status)
+      expect(readBack.status.tasks).toEqual([])
       expect(created.status.runtime).toEqual({
         activation: 'not-loaded',
         modelRequests: 0,
@@ -430,44 +447,27 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
         modelRequests: 0,
         readOnly: true,
       })
-      expect(sessionsAfterCreate).toBe(sessionsBeforeCreate)
-      expect(turnsAfterCreate).toBe(turnsBeforeCreate)
-      expect(sessionsAfterStatus).toBe(sessionsBeforeCreate)
-      expect(turnsAfterStatus).toBe(turnsBeforeCreate)
+      expect(sessionsAfterCreate).toBe(sessionsBeforeCreate + 1)
+      expect(turnsAfterCreate).toBeGreaterThan(turnsBeforeCreate)
+      expect(sessionsAfterStatus).toBe(sessionsAfterCreate)
+      expect(turnsAfterStatus).toBe(turnsAfterCreate)
 
-      const started = unwrap(await callConnectionRpc<{
-        readonly action: string
-        readonly sessionId?: string
-        readonly status: ProductStatus
-      }>(origin, 'run-current-task', {
-        longGoalId: created.status.goal.id,
-        initialCwd: repositoryCwd,
-      }))
-      expect(started.action).toBe('started')
-      expect(started.sessionId).toEqual(expect.any(String))
-      const firstTurn = await waitFor(running, () => sessionEvents(sessionsRoot)
-        .find(event => event.type === 'turn/start'), 'the first turn/start')
-      const finalStatus = unwrap(await callConnectionRpc<{
-        readonly status: ProductStatus
-      }>(origin, 'status', {
-        longGoalId: created.status.goal.id,
-      })).status
-      const bindings = finalStatus.tasks.map(task => task.execution)
-      expect(sessionLogs(sessionsRoot)).toHaveLength(1)
-      expect(bindings[0]).toMatchObject({
-        sessionId: started.sessionId,
-        goalId: expect.any(String),
-      })
-      expect(bindings[1]).toBeNull()
       const longGoalRecord = JSON.parse(readFileSync(join(
         stateRoot,
         'long-goals',
         `${created.status.goal.id}.json`,
-      ), 'utf8')) as { readonly updatedAt: number }
-      expect(firstTurn.time).toEqual(expect.any(Number))
-      expect(longGoalRecord.updatedAt).toBeLessThan(firstTurn.time as number)
+      ), 'utf8')) as {
+        readonly schemaVersion: string
+        readonly workspaceRoot: string
+        readonly planner: { readonly sessionId: string }
+      }
+      expect(longGoalRecord).toMatchObject({
+        schemaVersion: 'tianwen.long-goal.v2',
+        workspaceRoot: realpathSync(repositoryCwd),
+        planner: { sessionId: created.status.planner.sessionId },
+      })
       proof = {
-        schemaVersion: 'tianwen.learn-loop-web-product-proof.v1',
+        schemaVersion: 'tianwen.learn-loop-web-product-proof.v2',
         dshVersion: dshManifest.version,
         runtimeTarball: assembled.runtimeTarball,
         runtimeDigest: assembled.runtimeDigest,
@@ -475,13 +475,15 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
         origin,
         ownedDshPid: running.child.pid,
         clientGraphIds,
+        workspaceSessionId: workspaceSession.sessionId,
         longGoalId: created.status.goal.id,
-        taskBindings: bindings,
         creation: {
           sessionCountBefore: sessionsBeforeCreate,
           sessionCountAfter: sessionsAfterCreate,
           turnStartCountBefore: turnsBeforeCreate,
           turnStartCountAfter: turnsAfterCreate,
+          action: created.action,
+          plannerSessionId: created.status.planner.sessionId,
           runtime: created.status.runtime,
         },
         statusRead: {
@@ -490,12 +492,6 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
           turnStartCountBefore: turnsAfterCreate,
           turnStartCountAfter: turnsAfterStatus,
           runtime: readBack.status.runtime,
-        },
-        admission: {
-          sessionCount: sessionLogs(sessionsRoot).length,
-          firstTurnStartTime: firstTurn.time,
-          bindingUpdatedAt: longGoalRecord.updatedAt,
-          bindingBeforeFirstTurnStart: longGoalRecord.updatedAt < (firstTurn.time as number),
         },
       }
     } finally {
