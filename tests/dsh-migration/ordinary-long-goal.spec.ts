@@ -7,6 +7,7 @@ import {
   bindLongGoalTask,
   createLongGoal,
   formatLongGoalStatusText,
+  LongGoalIntegrityError,
   readLongGoal,
   readLongGoalStatus,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
@@ -177,6 +178,49 @@ describe('ordinary long Goal record', () => {
     }
   })
 
+  it('rejects durable bindings that are non-prefix or reuse a Goal or Session id', () => {
+    const stateRoot = createStateRoot()
+    try {
+      for (const record of [
+        {
+          id: 'tianwen-long-goal-non-prefix',
+          tasks: [
+            { id: 'task-1', objective: 'First', execution: null },
+            { id: 'task-2', objective: 'Second', execution: { goalId: 'goal-2', sessionId: 'session-2' } },
+          ],
+        },
+        {
+          id: 'tianwen-long-goal-duplicate-goal',
+          tasks: [
+            { id: 'task-1', objective: 'First', execution: { goalId: 'goal-1', sessionId: 'session-1' } },
+            { id: 'task-2', objective: 'Second', execution: { goalId: 'goal-1', sessionId: 'session-2' } },
+          ],
+        },
+        {
+          id: 'tianwen-long-goal-duplicate-session',
+          tasks: [
+            { id: 'task-1', objective: 'First', execution: { goalId: 'goal-1', sessionId: 'session-1' } },
+            { id: 'task-2', objective: 'Second', execution: { goalId: 'goal-2', sessionId: 'session-1' } },
+          ],
+        },
+      ]) {
+        const path = longGoalPath(stateRoot, record.id)
+        mkdirSync(join(stateRoot, 'long-goals'), { recursive: true })
+        const serialized = JSON.stringify({
+          schemaVersion: 'tianwen.long-goal.v1',
+          objective: 'Strict bindings', maxTaskRounds: 1,
+          createdAt: 1, updatedAt: 1, ...record,
+        })
+        writeFileSync(path, serialized, 'utf8')
+
+        expect(() => readLongGoal(stateRoot, record.id)).toThrow(LongGoalIntegrityError)
+        expect(readFileSync(path, 'utf8')).toBe(serialized)
+      }
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
   it('binds only one existing unbound task atomically', () => {
     const stateRoot = createStateRoot()
     try {
@@ -209,6 +253,35 @@ describe('ordinary long Goal record', () => {
         goalId: 'other-goal', sessionId: 'other-session',
       })).toThrow()
       expect(readLongGoal(stateRoot, record.id)).toEqual(bound)
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('binds only the next Task and never reuses another Task binding identity', () => {
+    const stateRoot = createStateRoot()
+    try {
+      const outOfOrder = createLongGoal({
+        stateRoot, objective: 'Ordered bindings', tasks: ['First', 'Second'], maxTaskRounds: 1,
+      }, { id: () => 'out-of-order-bind', now: () => 1 })
+      expect(() => bindLongGoalTask(stateRoot, outOfOrder.id, 'task-2', {
+        goalId: 'goal-2', sessionId: 'session-2',
+      })).toThrow(LongGoalIntegrityError)
+
+      for (const [id, execution] of [
+        ['duplicate-goal-bind', { goalId: 'goal-1', sessionId: 'session-2' }],
+        ['duplicate-session-bind', { goalId: 'goal-2', sessionId: 'session-1' }],
+      ] as const) {
+        const record = createLongGoal({
+          stateRoot, objective: 'Unique bindings', tasks: ['First', 'Second'], maxTaskRounds: 1,
+        }, { id: () => id, now: () => 1 })
+        bindLongGoalTask(stateRoot, record.id, 'task-1', {
+          goalId: 'goal-1', sessionId: 'session-1',
+        }, { now: () => 2 })
+
+        expect(() => bindLongGoalTask(stateRoot, record.id, 'task-2', execution, { now: () => 3 }))
+          .toThrow(LongGoalIntegrityError)
+      }
     } finally {
       rmSync(stateRoot, { recursive: true, force: true })
     }
@@ -285,4 +358,60 @@ describe('ordinary long Goal status projection', () => {
       rmSync(dataDir, { recursive: true, force: true })
     }
   })
+
+  it('keeps a fully completed continuous binding sequence valid', async () => {
+    const dataDir = createStateRoot()
+    const stateRoot = join(dataDir, 'state')
+    try {
+      const first = await persistGoal(dataDir, 'completed-first', 'complete')
+      const second = await persistGoal(dataDir, 'completed-second', 'complete')
+      const record = createLongGoal({
+        stateRoot,
+        objective: 'Completed execution',
+        tasks: ['First Task', 'Second Task'],
+        maxTaskRounds: 1,
+      }, { id: () => 'fully-complete', now: () => 1 })
+      bindLongGoalTask(stateRoot, record.id, 'task-1', first, { now: () => 2 })
+      bindLongGoalTask(stateRoot, record.id, 'task-2', second, { now: () => 3 })
+
+      await expect(readLongGoalStatus({
+        stateRoot,
+        longGoalId: record.id,
+        dshStatusTarget: { dataDir },
+      })).resolves.toMatchObject({
+        goal: { phase: 'complete', completedTasks: 2, totalTasks: 2 },
+        currentTaskId: null,
+      })
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it.each(['active', 'blocked'] as const)(
+    'fails closed when a %s current Task has a bound later Task',
+    async phase => {
+      const dataDir = createStateRoot()
+      const stateRoot = join(dataDir, 'state')
+      try {
+        const first = await persistGoal(dataDir, `current-${phase}`, phase)
+        const later = await persistGoal(dataDir, `later-${phase}`, 'active')
+        const record = createLongGoal({
+          stateRoot,
+          objective: 'Ordered execution',
+          tasks: ['First Task', 'Later Task'],
+          maxTaskRounds: 1,
+        }, { id: () => `later-bound-${phase}`, now: () => 1 })
+        bindLongGoalTask(stateRoot, record.id, 'task-1', first, { now: () => 2 })
+        bindLongGoalTask(stateRoot, record.id, 'task-2', later, { now: () => 3 })
+
+        await expect(readLongGoalStatus({
+          stateRoot,
+          longGoalId: record.id,
+          dshStatusTarget: { dataDir },
+        })).rejects.toBeInstanceOf(LongGoalIntegrityError)
+      } finally {
+        rmSync(dataDir, { recursive: true, force: true })
+      }
+    },
+  )
 })

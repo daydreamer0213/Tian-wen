@@ -143,6 +143,26 @@ function parseTask(value: unknown, index: number): LongGoalTaskRecord {
   }
 }
 
+function validateTaskBindings(tasks: readonly LongGoalTaskRecord[]): void {
+  let reachedUnboundTask = false
+  const goalIds = new Set<string>()
+  const sessionIds = new Set<string>()
+  for (const task of tasks) {
+    if (task.execution === null) {
+      reachedUnboundTask = true
+      continue
+    }
+    if (reachedUnboundTask) {
+      throw new LongGoalIntegrityError('Long Goal Task bindings must form a continuous prefix')
+    }
+    if (goalIds.has(task.execution.goalId) || sessionIds.has(task.execution.sessionId)) {
+      throw new LongGoalIntegrityError('Long Goal Task bindings must use unique Goal and Session ids')
+    }
+    goalIds.add(task.execution.goalId)
+    sessionIds.add(task.execution.sessionId)
+  }
+}
+
 function parseLongGoal(value: unknown): LongGoalRecord {
   if (
     !isRecord(value) ||
@@ -162,6 +182,8 @@ function parseLongGoal(value: unknown): LongGoalRecord {
   ) {
     throw new LongGoalIntegrityError('Long Goal record is invalid')
   }
+  const tasks = value.tasks.map(parseTask)
+  validateTaskBindings(tasks)
   return {
     schemaVersion: 'tianwen.long-goal.v1',
     id: value.id,
@@ -169,7 +191,7 @@ function parseLongGoal(value: unknown): LongGoalRecord {
     maxTaskRounds: value.maxTaskRounds,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
-    tasks: value.tasks.map(parseTask),
+    tasks,
   }
 }
 
@@ -276,6 +298,16 @@ export function bindLongGoalTask(
   if (record.tasks[taskIndex]!.execution !== null) {
     throw new LongGoalIntegrityError('Long Goal Task is already bound')
   }
+  const firstUnboundTaskIndex = record.tasks.findIndex(task => task.execution === null)
+  if (taskIndex !== firstUnboundTaskIndex) {
+    throw new LongGoalIntegrityError('Long Goal Task binding must follow Task order')
+  }
+  if (record.tasks.some(task =>
+    task.execution?.goalId === validExecution.goalId ||
+    task.execution?.sessionId === validExecution.sessionId,
+  )) {
+    throw new LongGoalIntegrityError('Long Goal Task binding must use unique Goal and Session ids')
+  }
   const now = (dependencies.now ?? Date.now)()
   if (!isTimestamp(now) || now < record.updatedAt) {
     throw new TypeError('Long Goal clock is invalid')
@@ -339,6 +371,10 @@ export async function readLongGoalStatus(input: {
   const tasks = await Promise.all(record.tasks.map(task => projectTask(task, input.dshStatusTarget)))
   const completedTasks = tasks.filter(task => task.phase === 'complete').length
   const currentTask = tasks.find(task => task.phase !== 'complete')
+  const currentTaskIndex = currentTask === undefined ? -1 : tasks.indexOf(currentTask)
+  if (currentTask !== undefined && tasks.slice(currentTaskIndex + 1).some(task => task.execution !== null)) {
+    throw new LongGoalIntegrityError('Long Goal has a bound Task after its current incomplete Task')
+  }
   const phase = currentTask === undefined
     ? 'complete'
     : currentTask.phase === 'blocked'
