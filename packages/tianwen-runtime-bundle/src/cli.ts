@@ -41,6 +41,14 @@ import {
   launchControlledLifecycle,
   preflightControlledLifecycle,
 } from './controlled-lifecycle.js'
+import {
+  createLongGoal,
+  formatLongGoalStatusText,
+  LongGoalIntegrityError,
+  LongGoalNotFoundError,
+  readLongGoalStatus,
+} from './long-goal.js'
+import { runLongGoalTask } from './long-goal-run.js'
 
 const READ_ONLY_USAGE = [
   'Usage: tianwen status --goal GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
@@ -76,9 +84,25 @@ const CONTROLLED_LIFECYCLE_USAGE = [
   '',
 ].join('\n')
 
+const PLAN_USAGE = [
+  'Usage: tianwen plan create --objective TEXT --task TEXT [--task TEXT] --data-dir ABSOLUTE_PATH [--max-rounds N] [--json]',
+  'Usage: tianwen plan create --objective TEXT --task TEXT [--task TEXT] --dsh-root ABSOLUTE_PATH --dsh-home ABSOLUTE_PATH --profile NAME --state-root ABSOLUTE_PATH [--max-rounds N] [--json]',
+  'Usage: tianwen plan status --goal LONG_GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
+  'Usage: tianwen plan status --goal LONG_GOAL_ID --dsh-root ABSOLUTE_PATH --dsh-home ABSOLUTE_PATH --profile NAME --state-root ABSOLUTE_PATH [--json]',
+  '',
+].join('\n')
+
+const TASK_USAGE = [
+  'Usage: tianwen task run --goal LONG_GOAL_ID --data-dir ABSOLUTE_PATH [--json]',
+  'Usage: tianwen task run --goal LONG_GOAL_ID --dsh-root ABSOLUTE_PATH --dsh-home ABSOLUTE_PATH --profile NAME --state-root ABSOLUTE_PATH [--json]',
+  '',
+].join('\n')
+
 function usage(command: string | undefined): string {
   if (command === 'controlled-lifecycle') return CONTROLLED_LIFECYCLE_USAGE
   if (command === 'model') return MODEL_USAGE
+  if (command === 'plan') return PLAN_USAGE
+  if (command === 'task') return TASK_USAGE
   if (command === 'resume') return RESUME_USAGE
   return command === 'create' ? CREATE_USAGE : READ_ONLY_USAGE
 }
@@ -115,6 +139,14 @@ function hasRepeatedTargetOption(args: readonly string[]): boolean {
 
 function hasRepeatedControlledOption(args: readonly string[]): boolean {
   return ['manifest', 'data-dir', 'json'].some(name =>
+    args.filter(argument =>
+      argument === `--${name}` || argument.startsWith(`--${name}=`)
+    ).length > 1,
+  )
+}
+
+function hasRepeatedLongGoalOption(args: readonly string[]): boolean {
+  return ['goal', 'objective', 'max-rounds', 'json'].some(name =>
     args.filter(argument =>
       argument === `--${name}` || argument.startsWith(`--${name}=`)
     ).length > 1,
@@ -166,6 +198,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     readonly 'live-smoke'?: boolean
     readonly 'trial-manifest'?: string
     readonly manifest?: string
+    readonly task?: string[]
   }
   let positionals: string[]
   try {
@@ -187,6 +220,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
         'live-smoke': { type: 'boolean', default: false },
         'trial-manifest': { type: 'string' },
         manifest: { type: 'string' },
+        task: { type: 'string', multiple: true },
       },
     })
     values = parsed.values
@@ -197,6 +231,11 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   }
   const command = positionals[0]
   const modelOperation = positionals[1]
+  const longGoalOperation = positionals[1]
+  const planCreate = command === 'plan' && longGoalOperation === 'create'
+  const planStatus = command === 'plan' && longGoalOperation === 'status'
+  const taskRun = command === 'task' && longGoalOperation === 'run'
+  const longGoalCommand = planCreate || planStatus || taskRun
   const maxGoalRounds = positiveInteger(values['max-rounds'])
   const modelChoice = values.model as ModelChoice | undefined
   const liveSmoke = values['live-smoke'] === true
@@ -207,7 +246,8 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   const hasPortableTarget = portableValues.some(value => value !== undefined)
   const completePortableTarget = portableValues.every(value => value !== undefined)
   const managedTarget = values['data-dir'] !== undefined
-  const portableCommand = ['status', 'list', 'create', 'resume'].includes(command ?? '')
+  const portableCommand = longGoalCommand ||
+    ['status', 'list', 'create', 'resume'].includes(command ?? '')
   const validTarget = managedTarget
     ? !hasPortableTarget && isAbsolute(values['data-dir']!)
     : portableCommand && completePortableTarget && portableValues
@@ -216,13 +256,27 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   if (
     hasRepeatedStrictOption(args) ||
     hasRepeatedTargetOption(args) ||
+    (longGoalCommand && hasRepeatedLongGoalOption(args)) ||
     (command === 'controlled-lifecycle' && hasRepeatedControlledOption(args)) ||
     (command !== 'controlled-lifecycle' && values.manifest !== undefined) ||
-    (command === 'model' ? positionals.length !== 2 : positionals.length !== 1) ||
+    (command === 'model' || longGoalCommand
+      ? positionals.length !== 2
+      : positionals.length !== 1) ||
     !validTarget ||
     (!managedTarget && (liveSmoke || trialManifest !== undefined)) ||
+    (values.task !== undefined && !planCreate) ||
     (
-      command === 'status' || command === 'resume'
+      planCreate
+        ? values.goal !== undefined || values.objective?.trim().length === 0 ||
+          values.objective === undefined || values.task === undefined ||
+          values.task.length === 0 || values.task.some(task => task.trim().length === 0) ||
+          maxGoalRounds === undefined || values.model !== undefined ||
+          liveSmoke || trialManifest !== undefined
+        : planStatus || taskRun
+          ? values.goal === undefined || values.goal.length === 0 ||
+            values.objective !== undefined || values['max-rounds'] !== undefined ||
+            values.model !== undefined || liveSmoke || trialManifest !== undefined
+      : command === 'status' || command === 'resume'
         ? values.goal === undefined || values.goal.length === 0 ||
           values.objective !== undefined || values['max-rounds'] !== undefined || values.model !== undefined ||
           (command !== 'resume' && (liveSmoke || trialManifest !== undefined)) ||
@@ -265,6 +319,58 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       stateRoot: values['state-root']!,
     })
     if (portableTarget !== undefined) verifyPortableRuntimeBundle(portableTarget)
+    if (planCreate) {
+      const stateRoot = portableTarget === undefined
+        ? resolve(values['data-dir']!, 'state')
+        : portableTarget.stateRoot
+      const record = createLongGoal({
+        stateRoot,
+        objective: values.objective!,
+        tasks: values.task!,
+        maxTaskRounds: maxGoalRounds!,
+      })
+      const status = await readLongGoalStatus({
+        stateRoot,
+        longGoalId: record.id,
+        dshStatusTarget: portableTarget === undefined
+          ? { dataDir: values['data-dir']! }
+          : {
+              sessionsRoot: portableTarget.sessionsRoot,
+              evolutionRoot: portableTarget.evolutionRoot,
+            },
+      })
+      process.stdout.write(values.json
+        ? `${JSON.stringify(status)}\n`
+        : `${formatLongGoalStatusText(status)}\n`)
+      return 0
+    }
+    if (planStatus) {
+      const status = await readLongGoalStatus({
+        stateRoot: portableTarget === undefined
+          ? resolve(values['data-dir']!, 'state')
+          : portableTarget.stateRoot,
+        longGoalId: values.goal!,
+        dshStatusTarget: portableTarget === undefined
+          ? { dataDir: values['data-dir']! }
+          : {
+              sessionsRoot: portableTarget.sessionsRoot,
+              evolutionRoot: portableTarget.evolutionRoot,
+            },
+      })
+      process.stdout.write(values.json
+        ? `${JSON.stringify(status)}\n`
+        : `${formatLongGoalStatusText(status)}\n`)
+      return 0
+    }
+    if (taskRun) {
+      return await runLongGoalTask({
+        longGoalId: values.goal!,
+        productTarget: portableTarget === undefined
+          ? { kind: 'managed', dataDir: values['data-dir']! }
+          : { kind: 'portable', target: portableTarget },
+        json: values.json === true,
+      })
+    }
     if (command === 'controlled-lifecycle') {
       return await launchControlledLifecycle(preflightControlledLifecycle(
         values.manifest!, values['data-dir']!,
@@ -324,6 +430,10 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       process.stderr.write(`${error.message}\n`)
       return 3
     }
+    if (error instanceof LongGoalNotFoundError) {
+      process.stderr.write(`${error.message}\n`)
+      return 3
+    }
     if (error instanceof PortableRuntimeBundleUnavailableError) {
       process.stderr.write(`${error.message}\n`)
       return 1
@@ -338,9 +448,16 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     if (
       error instanceof GoalStatusAmbiguousError ||
       error instanceof GoalStatusIntegrityError ||
-      error instanceof GoalResumeUnavailableError
+      error instanceof GoalResumeUnavailableError ||
+      error instanceof LongGoalIntegrityError
     ) {
       process.stderr.write(`Error: ${error.message}\n`)
+      return 1
+    }
+    if (longGoalCommand) {
+      process.stderr.write(error instanceof Error
+        ? `Error: ${error.message}\n`
+        : 'Error: unable to run long Goal command\n')
       return 1
     }
     process.stderr.write(command === 'resume'
