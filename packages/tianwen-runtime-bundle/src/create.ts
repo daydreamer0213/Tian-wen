@@ -44,6 +44,20 @@ interface GoalCreateCaptureDependencies {
   readonly run?: (invocation: GoalCreateInvocation) => Promise<GoalCreateCaptureResult>
 }
 
+export class GoalCreateCaptureError extends Error {
+  readonly code: number
+  readonly stderr: string
+  readonly stdout: string
+
+  constructor(result: GoalCreateCaptureResult) {
+    super('Goal creation failed')
+    this.name = 'GoalCreateCaptureError'
+    this.code = result.code === 0 ? 1 : result.code
+    this.stdout = result.stdout
+    this.stderr = result.stderr
+  }
+}
+
 const GOAL_CREATE_CAPTURE_OUTPUT_LIMIT_BYTES = 16 * 1024
 
 function receiptRecord(value: unknown): Record<string, unknown> {
@@ -282,11 +296,13 @@ export async function captureGoalCreate(
 ): Promise<GoalCreateReceipt> {
   const invocation = buildGoalCreateInvocation(preflight, true, (dependencies.nonce ?? randomUUID)())
   const result = await (dependencies.run ?? runCapturedGoalCreate)(invocation)
+  if (result.code !== 0 || result.stderr !== '') {
+    throw new GoalCreateCaptureError(result)
+  }
   if (
-    result.code !== 0 || result.stderr !== '' ||
     Buffer.byteLength(result.stdout, 'utf8') > GOAL_CREATE_CAPTURE_OUTPUT_LIMIT_BYTES ||
     Buffer.byteLength(result.stderr, 'utf8') > GOAL_CREATE_CAPTURE_OUTPUT_LIMIT_BYTES
-  ) throw new Error('Goal creation failed')
+  ) throw new TypeError('Goal create child output is too large')
   const lines = result.stdout.split(/\r?\n/u).filter(line => line.trim().length > 0)
   if (lines.length !== 1) throw new TypeError('Goal create child must emit one JSON line')
   let receipt: unknown

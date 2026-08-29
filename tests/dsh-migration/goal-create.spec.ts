@@ -11,6 +11,7 @@ import { SessionId, mountGoalHarness } from '@tianwen/dsh-compat'
 import {
   buildGoalCreateInvocation,
   captureGoalCreate,
+  GoalCreateCaptureError,
   parseGoalCreateReceipt,
   preflightGoalCreate,
 } from '../../packages/tianwen-runtime-bundle/src/create.js'
@@ -167,6 +168,36 @@ describe('tianwen create', () => {
     child.emit('close', 0, null)
 
     await expect(captured).resolves.toEqual(capturedReceipt)
+  })
+
+  it('preserves a nonzero captured child result', async () => {
+    try {
+      await captureGoalCreate(capturedPreflight, {
+        nonce: () => '00000000-0000-4000-8000-000000000002',
+        run: async () => ({ code: 17, stdout: 'child stdout\n', stderr: 'child stderr\n' }),
+      })
+      throw new Error('capture unexpectedly succeeded')
+    } catch (error) {
+      expect(error).toBeInstanceOf(GoalCreateCaptureError)
+      expect(error).toMatchObject({
+        code: 17,
+        stdout: 'child stdout\n',
+        stderr: 'child stderr\n',
+      })
+    }
+  })
+
+  it('normalizes a stderr-only captured child result without discarding stderr', async () => {
+    try {
+      await captureGoalCreate(capturedPreflight, {
+        nonce: () => '00000000-0000-4000-8000-000000000002',
+        run: async () => ({ code: 0, stdout: '', stderr: 'child stderr\n' }),
+      })
+      throw new Error('capture unexpectedly succeeded')
+    } catch (error) {
+      expect(error).toBeInstanceOf(GoalCreateCaptureError)
+      expect(error).toMatchObject({ code: 1, stdout: '', stderr: 'child stderr\n' })
+    }
   })
 
   it.each([

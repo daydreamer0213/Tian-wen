@@ -22,6 +22,7 @@ import {
 } from './resume.js'
 import { createGoalLiveSmokeFailure } from './goal-live-smoke.js'
 import {
+  GoalCreateCaptureError,
   launchGoalCreate,
   preflightGoalCreate,
   preflightPortableGoalCreate,
@@ -425,6 +426,11 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     if (command === 'resume' && trialManifest !== undefined) {
       process.stderr.write('Error: natural Run trial preflight failed\n')
       return 1
+    }
+    if (taskRun && error instanceof GoalCreateCaptureError) {
+      if (error.stdout !== '') process.stdout.write(error.stdout)
+      if (error.stderr !== '') process.stderr.write(error.stderr)
+      return error.code
     }
     if (error instanceof GoalStatusNotFoundError) {
       process.stderr.write(`${error.message}\n`)

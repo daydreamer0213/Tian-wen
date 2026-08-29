@@ -1,5 +1,9 @@
+import { spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { PassThrough } from 'node:stream'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -19,10 +23,23 @@ import type {
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-run.js'
 import { resolvePortableProfileTarget } from '../../packages/tianwen-runtime-bundle/src/portable-profile.js'
 
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return { ...actual, spawn: vi.fn(actual.spawn) }
+})
+
 const FIXTURE_BASE = process.platform === 'win32'
   ? 'D:/DevData/tianwen-ordinary-long-goal-cli-tests'
   : resolve('tmp/tianwen-ordinary-long-goal-cli-tests')
 const roots: string[] = []
+
+function capturedChild(): ChildProcess {
+  return Object.assign(new EventEmitter(), {
+    stderr: new PassThrough(),
+    stdout: new PassThrough(),
+    kill: vi.fn(),
+  }) as unknown as ChildProcess
+}
 
 function fixtureRoot(): string {
   mkdirSync(FIXTURE_BASE, { recursive: true })
@@ -149,6 +166,35 @@ describe('ordinary long Goal CLI', () => {
         ],
       })
     expect(readdirSync(dataDir)).toEqual(['state'])
+  })
+
+  it('returns captured create failure output and exit code from task run', async () => {
+    const dataDir = fixtureRoot()
+    const record = createLongGoal({
+      stateRoot: join(dataDir, 'state'),
+      objective: 'Fail safely', tasks: ['Create fails'], maxTaskRounds: 3,
+    }, { id: () => 'captured-create-failure', now: () => 1 })
+    const dshPackage = join(dataDir, 'dsh-host', 'node_modules', '@deepseek-ai', 'dsh')
+    mkdirSync(join(dshPackage, 'lib'), { recursive: true })
+    writeFileSync(join(dshPackage, 'package.json'), `${JSON.stringify({
+      version: '0.1.1-rc.2', bin: { dsh: 'lib/bin.js' },
+    })}\n`)
+    writeFileSync(join(dshPackage, 'lib', 'bin.js'), '#!/usr/bin/env node\n')
+    const child = capturedChild()
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    vi.mocked(spawn).mockImplementationOnce(() => child)
+
+    const result = main(['task', 'run', '--goal', record.id, '--data-dir', dataDir])
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1))
+    child.stdout!.emit('data', Buffer.from('child stdout\n'))
+    child.stderr!.emit('data', Buffer.from('child stderr\n'))
+    child.emit('exit', 17, null)
+    child.emit('close', 17, null)
+
+    await expect(result).resolves.toBe(17)
+    expect(stdout).toHaveBeenCalledWith('child stdout\n')
+    expect(stderr).toHaveBeenCalledWith('child stderr\n')
   })
 
   it('binds one receipt, resumes the same active Task, then advances to a new Session', async () => {
