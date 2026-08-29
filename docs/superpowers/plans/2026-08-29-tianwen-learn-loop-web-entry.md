@@ -409,10 +409,12 @@ Expected: the run endpoint fails because orchestration is not implemented.
 For the current unbound Task:
 
 1. use `initialCwd` only when no earlier Task is bound;
-2. otherwise find the first bound Task's exact Session in DSH `session.list`
-   and reuse its `cwd`;
-3. call DSH `sessions.create` with `{ cwd }` and no reusable Workspace method;
-4. resolve the newly attached Agent from `ctx.agents`;
+2. otherwise find the first bound Task's exact Session through API Proxy
+   `sessions.list` and reuse its persisted `cwd`; do not rely on the live-only
+   in-process Session list;
+3. call public API Proxy `sessions.create` with a fresh `RpcId` and `{ cwd }`;
+   this creates both the real Session and its idle attached Agent;
+4. resolve the newly attached Agent with `ctx.agents.get(sessionId)`;
 5. call `ctx.goals.create(agent, { objective, maxGoalRounds })` synchronously;
 6. call `bindLongGoalTask()` synchronously before the first `await` after Goal
    creation;
@@ -421,7 +423,9 @@ For the current unbound Task:
 8. on success, `await agent.session.flush()` and return the refreshed status.
 
 Do not call `ctx.workspaces.connectWorkspace()`: that API may reuse a blank
-Session and would violate the one-Task/one-Session requirement.
+Session and would violate the one-Task/one-Session requirement.  Do not call
+the lower-level Session store's `create()` either, because it does not attach
+an Agent.
 
 - [ ] **Step 4: Implement bound Task continuation**
 
@@ -430,8 +434,10 @@ For a bound current Task:
 - if its attached Agent exists, verify the exact current Goal ID and phase;
 - return `already-running` when it is active and armed;
 - call the existing Goal service `resume()` when it is paused or disarmed;
-- if the Agent is cold, call the existing API Proxy Goal-resume path so DSH
-  performs its normal Session reconstruction and Agent preset composition;
+- if the Agent is cold, call public API Proxy `goals.resume` with a fresh
+  `RpcId`, exact `SessionId`, exact `GoalId`, and CAS `revision`, then unwrap
+  its `RpcResponse`; this performs DSH's normal Session reconstruction and
+  Agent preset composition;
 - verify the returned Goal ID and Session ID; and
 - never create a replacement Session on failure.
 
