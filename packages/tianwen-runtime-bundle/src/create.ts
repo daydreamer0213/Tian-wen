@@ -242,6 +242,7 @@ async function runCapturedGoalCreate(invocation: GoalCreateInvocation): Promise<
     let stdoutBytes = 0
     let stderrBytes = 0
     let outputError: Error | undefined
+    let exitCode: number | undefined
     const capture = (chunks: Buffer[], append: (size: number) => void) => (chunk: Buffer) => {
       if (outputError !== undefined) return
       append(chunk.length)
@@ -256,13 +257,18 @@ async function runCapturedGoalCreate(invocation: GoalCreateInvocation): Promise<
     child.stdout?.on('data', capture(stdout, size => { stdoutBytes += size }))
     child.stderr?.on('data', capture(stderr, size => { stderrBytes += size }))
     child.once('error', reject)
-    child.once('exit', code => {
+    child.once('exit', code => { exitCode = code ?? 1 })
+    child.once('close', () => {
       if (outputError !== undefined) {
         reject(outputError)
         return
       }
+      if (exitCode === undefined) {
+        reject(new Error('Goal create child exited without an exit status'))
+        return
+      }
       resolveResult({
-        code: code ?? 1,
+        code: exitCode,
         stdout: Buffer.concat(stdout).toString('utf8'),
         stderr: Buffer.concat(stderr).toString('utf8'),
       })

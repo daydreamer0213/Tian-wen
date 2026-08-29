@@ -1,5 +1,9 @@
+import { spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { PassThrough } from 'node:stream'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionId, mountGoalHarness } from '@tianwen/dsh-compat'
@@ -16,6 +20,11 @@ import {
 } from '../../packages/tianwen-runtime-bundle/src/create-runner.js'
 import type { GoalCreateReceipt } from '../../packages/tianwen-runtime-bundle/src/create-runner.js'
 import { main } from '../../packages/tianwen-runtime-bundle/src/cli.js'
+
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return { ...actual, spawn: vi.fn(actual.spawn) }
+})
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-goal-create-tests')
 
@@ -36,6 +45,14 @@ const capturedPreflight = {
   objective: 'build a project',
   sessionsRoot: 'D:\\DevData\\tianwen\\dsh-home\\sessions',
 } as const
+
+function capturedChild(): ChildProcess {
+  return Object.assign(new EventEmitter(), {
+    stderr: new PassThrough(),
+    stdout: new PassThrough(),
+    kill: vi.fn(),
+  }) as unknown as ChildProcess
+}
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -138,6 +155,18 @@ describe('tianwen create', () => {
     expect(invocation).toMatchObject({
       options: { env: { TIANWEN_CREATE_JSON: 'true', TIANWEN_CREATE_NONCE: '00000000-0000-4000-8000-000000000002' } },
     })
+  })
+
+  it('waits for close before reading receipt output that follows exit', async () => {
+    const child = capturedChild()
+    vi.mocked(spawn).mockImplementationOnce(() => child)
+    const captured = captureGoalCreate(capturedPreflight)
+
+    child.emit('exit', 0, null)
+    child.stdout!.emit('data', Buffer.from(`${JSON.stringify(capturedReceipt)}\n`))
+    child.emit('close', 0, null)
+
+    await expect(captured).resolves.toEqual(capturedReceipt)
   })
 
   it.each([
