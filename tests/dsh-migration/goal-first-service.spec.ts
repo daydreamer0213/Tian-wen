@@ -243,6 +243,49 @@ describe('Goal-first state service', () => {
     },
   )
 
+  it('returns the final authoritative Task Session instead of the temporary run result', async () => {
+    const current = record({
+      revision: 3,
+      planner: { ...record().planner, phase: 'ready', planRevision: 1 },
+      tasks: [{ id: TASK_ID, objective: 'Current work', execution: EXECUTION, resolution: null }],
+    })
+    const before = taskStatus(current, 'active', 'active')
+    const finalExecution = { goalId: 'dsh-goal-final', sessionId: 'task-session-b' }
+    const final = taskStatus(current, 'active', 'active', finalExecution)
+    const harness = doubles({
+      current,
+      currentStatus: before,
+      taskResult: { action: 'continued', sessionId: 'temporary-session-a' },
+      onTask: () => harness.setStatus(final),
+    })
+
+    await expect(continueGoalFirstProgress({
+      stateRoot: STATE_ROOT, dshStatusTarget: DSH_STATUS_TARGET, longGoalId: current.id, expectedRevision: current.revision,
+    }, harness.dependencies)).resolves.toEqual({
+      schemaVersion: 'tianwen.goal-first-progress-result.v2', action: 'continued', status: final, sessionId: finalExecution.sessionId,
+    })
+  })
+
+  it('fails closed when Task admission leaves no current bound execution', async () => {
+    const current = record({
+      revision: 3,
+      planner: { ...record().planner, phase: 'ready', planRevision: 1 },
+      tasks: [{ id: TASK_ID, objective: 'Current work', execution: EXECUTION, resolution: null }],
+    })
+    const before = taskStatus(current, 'active', 'active')
+    const final = status(current)
+    const harness = doubles({
+      current,
+      currentStatus: before,
+      taskResult: { action: 'continued', sessionId: 'temporary-session-a' },
+      onTask: () => harness.setStatus(final),
+    })
+
+    await expect(continueGoalFirstProgress({
+      stateRoot: STATE_ROOT, dshStatusTarget: DSH_STATUS_TARGET, longGoalId: current.id, expectedRevision: current.revision,
+    }, harness.dependencies)).rejects.toThrow('Goal-first Task admission did not leave a current bound Task')
+  })
+
   it('returns the blocked current Task without planning or admitting another Task', async () => {
     const current = record({
       revision: 3,

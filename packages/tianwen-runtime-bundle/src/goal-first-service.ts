@@ -103,7 +103,12 @@ async function admitTask(
     longGoalId: input.longGoalId,
     expectedRevision: input.expectedRevision,
   })
-  return result(admitted.action, await readStatus(input, dependencies), admitted.sessionId)
+  const status = await readStatus(input, dependencies)
+  const currentSessionId = sessionId(status)
+  if (currentSessionId === null) {
+    throw new LongGoalIntegrityError('Goal-first Task admission did not leave a current bound Task')
+  }
+  return result(admitted.action, status, currentSessionId)
 }
 
 async function planThenProgress(
