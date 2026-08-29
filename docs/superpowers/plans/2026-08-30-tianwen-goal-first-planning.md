@@ -368,6 +368,7 @@ git commit -m "feat: make Learn Loop goal-first"
 - Create: `packages/tianwen-runtime-bundle/goal-first.patch.yml`
 - Modify: `packages/tianwen-runtime-bundle/src/cli.ts`
 - Modify: `packages/tianwen-runtime-bundle/package.json`
+- Modify: `pnpm-lock.yaml`
 - Modify: `tests/dsh-migration/ordinary-long-goal-cli.spec.ts`
 - Modify: `tests/dsh-migration/runtime-bundle.spec.ts`
 - Modify: `tests/dsh-migration/tianwen-installer.spec.ts`
@@ -419,7 +420,7 @@ This smoke is runtime evidence only. Report Provider/model identity if available
 Review the implementation diff once for v1 compatibility, workspace/Session identity, state-table ownership, installed artifact completeness, and accidental scope expansion. Rerun only tests affected by review fixes.
 
 ```powershell
-git add packages/tianwen-runtime-bundle/src/goal-first-runner.ts packages/tianwen-runtime-bundle/src/goal-first.ts packages/tianwen-runtime-bundle/goal-first.patch.yml packages/tianwen-runtime-bundle/src/cli.ts packages/tianwen-runtime-bundle/package.json tests/dsh-migration/ordinary-long-goal-cli.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/tianwen-installer.spec.ts tests/dsh-migration/learn-loop-web-product.spec.ts scripts/verify-dsh-profile.mjs
+git add packages/tianwen-runtime-bundle/src/goal-first-runner.ts packages/tianwen-runtime-bundle/src/goal-first.ts packages/tianwen-runtime-bundle/goal-first.patch.yml packages/tianwen-runtime-bundle/src/cli.ts packages/tianwen-runtime-bundle/package.json pnpm-lock.yaml tests/dsh-migration/ordinary-long-goal-cli.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/tianwen-installer.spec.ts tests/dsh-migration/learn-loop-web-product.spec.ts scripts/verify-dsh-profile.mjs
 git commit -m "feat: ship goal-first Learn Loop"
 ```
 
