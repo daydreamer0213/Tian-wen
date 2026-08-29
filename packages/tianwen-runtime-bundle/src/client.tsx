@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 import type { LongGoalStatusProjection, LongGoalSummary } from './long-goal-contract.js'
 import { createLearnLoopClient } from './learn-loop-client.js'
@@ -6,19 +6,59 @@ import { createLearnLoopClient } from './learn-loop-client.js'
 type View = 'closed' | 'list' | 'create' | 'detail'
 
 export interface RequestGeneration {
-  begin(): () => boolean
+  begin(): RequestHandle
   close(): void
+}
+
+export interface RequestHandle {
+  readonly signal: AbortSignal
+  isCurrent(): boolean
 }
 
 export function createRequestGeneration(): RequestGeneration {
   let current = 0
+  let active: AbortController | undefined
   return {
     begin: () => {
+      active?.abort()
       const generation = ++current
-      return () => generation === current
+      const controller = new AbortController()
+      active = controller
+      return {
+        signal: controller.signal,
+        isCurrent: () => generation === current && !controller.signal.aborted,
+      }
     },
-    close: () => { current += 1 },
+    close: () => {
+      current += 1
+      active?.abort()
+      active = undefined
+    },
   }
+}
+
+interface SessionGoalProjection {
+  readonly goal: {
+    readonly id: string
+    readonly phase: 'active' | 'paused' | 'blocked' | 'complete'
+    readonly blockedReason?: { readonly message: string }
+  }
+}
+
+interface SessionListSnapshot {
+  readonly current: string | undefined
+  readonly byId: Readonly<Record<string, {
+    readonly cwd?: string
+    readonly running: boolean
+    readonly projectionValues?: {
+      readonly goal?: SessionGoalProjection | null
+    }
+  }>>
+}
+
+interface SessionListSource {
+  getSnapshot(): SessionListSnapshot
+  subscribe(listener: () => void): () => void
 }
 
 export interface ClientContext {
@@ -27,10 +67,8 @@ export interface ClientContext {
   }
   readonly sessions: {
     readonly list: {
-      getSnapshot(): {
-        readonly current: string | undefined
-        readonly byId: Readonly<Record<string, { readonly cwd?: string }>>
-      }
+      getSnapshot(): SessionListSnapshot
+      subscribe(listener: () => void): () => void
     }
     open(sessionId: string): void
   }
@@ -83,16 +121,122 @@ function LoopIcon(): JSX.Element {
   )
 }
 
-function taskAction(status: LongGoalStatusProjection): {
+export function taskAction(
+  status: LongGoalStatusProjection,
+  sessions: SessionListSnapshot,
+): {
   readonly label: 'Start Task' | 'Continue Task' | 'Open Session' | 'Plan complete'
   readonly sessionId?: string
+  readonly disabled: boolean
+  readonly reason?: string
 } {
   const task = status.tasks.find(candidate => candidate.id === status.currentTaskId)
-  if (task === undefined) return { label: 'Plan complete' }
-  if (task.execution !== null && task.phase === 'active') {
-    return { label: 'Open Session', sessionId: task.execution.sessionId }
+  if (task === undefined) return { label: 'Plan complete', disabled: true }
+  if (task.execution !== null) {
+    const session = sessions.byId[task.execution.sessionId]
+    const projectedGoal = session?.projectionValues?.goal?.goal
+    if (session === undefined) {
+      return {
+        label: 'Continue Task',
+        disabled: true,
+        reason: 'The bound DSH Session is not available.',
+      }
+    }
+    if (projectedGoal === undefined || String(projectedGoal.id) !== task.execution.goalId) {
+      return {
+        label: 'Continue Task',
+        disabled: true,
+        reason: 'The bound DSH Session Goal does not match this Task.',
+      }
+    }
+    if (task.phase === 'blocked' || projectedGoal.phase === 'blocked') {
+      return {
+        label: 'Continue Task',
+        disabled: true,
+        reason: task.blockedReason?.message ?? projectedGoal.blockedReason?.message ??
+          'This Task is blocked and cannot be continued.',
+      }
+    }
+    if (session.running && projectedGoal.phase === 'active') {
+      return {
+        label: 'Open Session',
+        sessionId: task.execution.sessionId,
+        disabled: false,
+      }
+    }
+    if (projectedGoal.phase === 'active' || projectedGoal.phase === 'paused') {
+      return { label: 'Continue Task', disabled: false }
+    }
+    return {
+      label: 'Continue Task',
+      disabled: true,
+      reason: 'The bound DSH Session Goal is not resumable.',
+    }
   }
-  return { label: task.execution === null ? 'Start Task' : 'Continue Task' }
+  if (task.phase === 'blocked') {
+    return {
+      label: 'Start Task',
+      disabled: true,
+      reason: task.blockedReason?.message ?? 'This Task is blocked and cannot be continued.',
+    }
+  }
+  const firstTask = status.tasks[0]?.id === task.id
+  const selectedCwd = sessions.current === undefined
+    ? undefined
+    : sessions.byId[sessions.current]?.cwd
+  if (firstTask && (selectedCwd === undefined || selectedCwd.trim().length === 0)) {
+    return {
+      label: 'Start Task',
+      disabled: true,
+      reason: 'Open or create a DSH Workspace first.',
+    }
+  }
+  return { label: 'Start Task', disabled: false }
+}
+
+function abortError(): Error {
+  const error = new Error('Learn Loop request cancelled')
+  error.name = 'AbortError'
+  return error
+}
+
+export function waitForSessionProjection(
+  list: SessionListSource,
+  sessionId: string,
+  signal: AbortSignal,
+  timeoutMs = 10_000,
+): Promise<void> {
+  if (signal.aborted) return Promise.reject(abortError())
+  if (list.getSnapshot().byId[sessionId] !== undefined) return Promise.resolve()
+  return new Promise((resolveWait, rejectWait) => {
+    let unsubscribe: () => void = () => undefined
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      unsubscribe()
+      signal.removeEventListener('abort', onAbort)
+      if (error === undefined) resolveWait()
+      else rejectWait(error)
+    }
+    const check = () => {
+      if (list.getSnapshot().byId[sessionId] !== undefined) finish()
+    }
+    const onAbort = () => finish(abortError())
+    const timeout = setTimeout(
+      () => finish(new Error(`DSH Session ${sessionId} did not enter the client projection.`)),
+      timeoutMs,
+    )
+    unsubscribe = list.subscribe(check)
+    signal.addEventListener('abort', onAbort, { once: true })
+    check()
+  })
+}
+
+interface DraftTask {
+  readonly id: string
+  readonly objective: string
 }
 
 function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
@@ -103,11 +247,16 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   const [goals, setGoals] = useState<readonly LongGoalSummary[]>([])
   const [detail, setDetail] = useState<LongGoalStatusProjection | undefined>()
   const [objective, setObjective] = useState('')
-  const [tasks, setTasks] = useState<string[]>([''])
+  const [tasks, setTasks] = useState<DraftTask[]>([{ id: 'task-row-1', objective: '' }])
+  const nextTaskRowId = useRef(1)
   const [maxTaskRounds, setMaxTaskRounds] = useState(3)
   const [error, setError] = useState<string | undefined>()
   const [loading, setLoading] = useState(false)
   const requestGeneration = useRef(createRequestGeneration())
+  const sessionList = useSyncExternalStore(
+    listener => ctx.sessions.list.subscribe(listener),
+    () => ctx.sessions.list.getSnapshot(),
+  )
 
   const closeOverlay = () => {
     requestGeneration.current.close()
@@ -116,18 +265,18 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   }
 
   const refresh = useCallback(async () => {
-    const isCurrent = requestGeneration.current.begin()
+    const request = requestGeneration.current.begin()
     setLoading(true)
     setError(undefined)
     try {
-      const nextGoals = await client.list()
-      if (isCurrent()) setGoals(nextGoals)
+      const nextGoals = await client.list(request.signal)
+      if (request.isCurrent()) setGoals(nextGoals)
     } catch (cause) {
-      if (isCurrent()) {
+      if (request.isCurrent()) {
         setError(cause instanceof Error ? cause.message : 'Unable to refresh Learn Loop plans.')
       }
     } finally {
-      if (isCurrent()) setLoading(false)
+      if (request.isCurrent()) setLoading(false)
     }
   }, [client])
 
@@ -146,32 +295,32 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   }
 
   const openDetail = async (longGoalId: string) => {
-    const isCurrent = requestGeneration.current.begin()
+    const request = requestGeneration.current.begin()
     setLoading(true)
     setError(undefined)
     try {
-      const nextDetail = await client.status(longGoalId)
-      if (isCurrent()) {
+      const nextDetail = await client.status(longGoalId, request.signal)
+      if (request.isCurrent()) {
         setDetail(nextDetail)
         setView('detail')
       }
     } catch (cause) {
-      if (isCurrent()) {
+      if (request.isCurrent()) {
         setError(cause instanceof Error ? cause.message : 'Unable to load this Learn Loop plan.')
       }
     } finally {
-      if (isCurrent()) setLoading(false)
+      if (request.isCurrent()) setLoading(false)
     }
   }
 
   const createPlan = async () => {
     const trimmedObjective = objective.trim()
-    const trimmedTasks = tasks.map(task => task.trim()).filter(Boolean)
+    const trimmedTasks = tasks.map(task => task.objective.trim()).filter(Boolean)
     if (trimmedObjective.length === 0 || trimmedTasks.length === 0 || maxTaskRounds < 1) {
       setError('Enter an objective, at least one task, and a positive task-round limit.')
       return
     }
-    const isCurrent = requestGeneration.current.begin()
+    const request = requestGeneration.current.begin()
     setLoading(true)
     setError(undefined)
     try {
@@ -179,52 +328,63 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
         objective: trimmedObjective,
         tasks: trimmedTasks,
         maxTaskRounds,
-      })
-      if (isCurrent()) {
+      }, request.signal)
+      if (request.isCurrent()) {
         setDetail(nextDetail)
         setView('detail')
       }
     } catch (cause) {
-      if (isCurrent()) {
+      if (request.isCurrent()) {
         setError(cause instanceof Error ? cause.message : 'Unable to create the Learn Loop plan.')
       }
     } finally {
-      if (isCurrent()) setLoading(false)
+      if (request.isCurrent()) setLoading(false)
     }
   }
 
   const runTask = async () => {
     if (detail === undefined) return
-    const action = taskAction(detail)
+    const action = taskAction(detail, sessionList)
+    if (action.disabled) return
     if (action.sessionId !== undefined) {
+      closeOverlay()
       ctx.sessions.open(action.sessionId)
       return
     }
     const firstTask = detail.tasks[0]?.id === detail.currentTaskId
-    const sessionList = ctx.sessions.list.getSnapshot()
     const selectedCwd = firstTask && sessionList.current !== undefined
       ? sessionList.byId[sessionList.current]?.cwd
       : undefined
-    const isCurrent = requestGeneration.current.begin()
+    const request = requestGeneration.current.begin()
     setLoading(true)
     setError(undefined)
     try {
       const result = await client.runCurrentTask({
         longGoalId: detail.goal.id,
         ...(selectedCwd === undefined ? {} : { initialCwd: selectedCwd }),
-      })
-      if (isCurrent()) {
+      }, request.signal)
+      if (result.sessionId !== undefined) {
+        await waitForSessionProjection(
+          ctx.sessions.list,
+          result.sessionId,
+          request.signal,
+        )
+      }
+      if (request.isCurrent()) {
         setDetail(result.status)
         if (result.sessionId !== undefined) {
+          requestGeneration.current.close()
+          setLoading(false)
+          setView('closed')
           ctx.sessions.open(result.sessionId)
         }
       }
     } catch (cause) {
-      if (isCurrent()) {
+      if (request.isCurrent()) {
         setError(cause instanceof Error ? cause.message : 'Unable to run the current task.')
       }
     } finally {
-      if (isCurrent()) setLoading(false)
+      if (request.isCurrent()) setLoading(false)
     }
   }
 
@@ -237,6 +397,8 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
       return next
     })
   }
+
+  const action = detail === undefined ? undefined : taskAction(detail, sessionList)
 
   return (
     <>
@@ -287,13 +449,16 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
               <label>Maximum rounds per task<input type="number" min="1" value={maxTaskRounds} onChange={event => setMaxTaskRounds(Number(event.target.value))} style={fieldStyle} /></label>
               <fieldset style={{ border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8 }}>
                 <legend>Tasks</legend>
-                {tasks.map((task, index) => <div key={`${index}-${task}`} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
-                  <input aria-label={`Task ${index + 1}`} value={task} onChange={event => setTasks(current => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} style={{ ...fieldStyle, flex: '1 1 180px' }} />
+                {tasks.map((task, index) => <div key={task.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+                  <input aria-label={`Task ${index + 1}`} value={task.objective} onChange={event => setTasks(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, objective: event.target.value } : item))} style={{ ...fieldStyle, flex: '1 1 180px' }} />
                   <button type="button" aria-label={`Move task ${index + 1} up`} onClick={() => moveTask(index, -1)} disabled={index === 0} style={buttonStyle}>Up</button>
                   <button type="button" aria-label={`Move task ${index + 1} down`} onClick={() => moveTask(index, 1)} disabled={index === tasks.length - 1} style={buttonStyle}>Down</button>
-                  <button type="button" aria-label={`Remove task ${index + 1}`} onClick={() => setTasks(current => current.length === 1 ? [''] : current.filter((_, itemIndex) => itemIndex !== index))} style={buttonStyle}>Remove</button>
+                  <button type="button" aria-label={`Remove task ${index + 1}`} onClick={() => setTasks(current => current.length === 1 ? current.map(item => ({ ...item, objective: '' })) : current.filter((_, itemIndex) => itemIndex !== index))} style={buttonStyle}>Remove</button>
                 </div>)}
-                <button type="button" onClick={() => setTasks(current => [...current, ''])} style={buttonStyle}>Add task</button>
+                <button type="button" onClick={() => setTasks(current => {
+                  nextTaskRowId.current += 1
+                  return [...current, { id: `task-row-${nextTaskRowId.current}`, objective: '' }]
+                })} style={buttonStyle}>Add task</button>
               </fieldset>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}><button type="submit" disabled={loading} style={buttonStyle}>Create plan</button><button type="button" onClick={() => setView('list')} style={buttonStyle}>Back to plans</button></div>
             </form>}
@@ -303,8 +468,9 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
               <ol style={{ margin: 0, paddingLeft: 20 }}>
                 {detail.tasks.map(task => <li key={task.id}>{task.objective} — {task.phase}{task.blockedReason === undefined ? '' : `: ${task.blockedReason.message}`}</li>)}
               </ol>
+              {action?.reason !== undefined && <p role="status" style={{ margin: 0 }}>{action.reason}</p>}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                <button type="button" onClick={() => void runTask()} disabled={loading || taskAction(detail).label === 'Plan complete'} style={buttonStyle}>{taskAction(detail).label}</button>
+                <button type="button" onClick={() => void runTask()} disabled={loading || action?.disabled !== false} style={buttonStyle}>{action?.label ?? 'Plan complete'}</button>
                 <button type="button" onClick={() => setView('list')} style={buttonStyle}>Back to plans</button>
               </div>
             </div>}

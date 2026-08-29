@@ -91,6 +91,55 @@ describe('Learn Loop browser RPC client', () => {
     })).rejects.toThrow('invalid Tianwen RPC response')
   })
 
+  it('accepts only the exact internal error envelope', async () => {
+    for (const error of [
+      { code: 'other', message: 'unexpected', details: {} },
+      { code: 'internal', message: 'unexpected' },
+      { code: 'internal', message: 'unexpected', details: { retry: true } },
+      { code: 'internal', message: 'unexpected', details: {}, extra: true },
+    ]) {
+      const rpc = { call: vi.fn().mockResolvedValue({ ok: false, error }) }
+      await expect(createLearnLoopClient(rpc as never).list())
+        .rejects.toThrow('invalid Tianwen RPC response')
+    }
+
+    const rpc = { call: vi.fn().mockResolvedValue({
+      ok: false,
+      error: { code: 'internal', message: 'expected failure', details: {} },
+    }) }
+    await expect(createLearnLoopClient(rpc as never).list())
+      .rejects.toThrow('expected failure')
+  })
+
+  it('rejects a status projection that reports any model request', async () => {
+    const rpc = { call: vi.fn().mockResolvedValue({
+      ok: true,
+      value: { status: { ...status, runtime: { ...status.runtime, modelRequests: 1 } } },
+    }) }
+
+    await expect(createLearnLoopClient(rpc as never).status('tianwen-long-goal-1'))
+      .rejects.toThrow('invalid Tianwen RPC response')
+  })
+
+  it('rejects blockedReason outside the blocked Task discriminant', async () => {
+    const invalidStatuses = [
+      {
+        ...status,
+        tasks: [{ ...status.tasks[0], blockedReason: { code: 'x', message: 'not blocked' } }],
+      },
+      {
+        ...status,
+        goal: { ...status.goal, phase: 'blocked' },
+        tasks: [{ ...status.tasks[0], phase: 'blocked' }],
+      },
+    ]
+    for (const invalid of invalidStatuses) {
+      const rpc = { call: vi.fn().mockResolvedValue({ ok: true, value: { status: invalid } }) }
+      await expect(createLearnLoopClient(rpc as never).status('tianwen-long-goal-1'))
+        .rejects.toThrow('invalid Tianwen RPC response')
+    }
+  })
+
   it('rejects run-current-task action and sessionId combinations outside the host contract', async () => {
     const invalidResults = [
       { status, action: 'started' },
@@ -146,13 +195,14 @@ describe('Learn Loop sidebar slot', () => {
     let resolve: ((value: string) => void) | undefined
     const response = new Promise<string>(done => { resolve = done })
     const request = createRequestGeneration()
-    const isCurrent = request.begin()
+    const pending = request.begin()
     const applied: string[] = []
 
     const applyWhenCurrent = response.then(value => {
-      if (isCurrent()) applied.push(value)
+      if (pending.isCurrent()) applied.push(value)
     })
     request.close()
+    expect(pending.signal.aborted).toBe(true)
     resolve?.('late success')
     await applyWhenCurrent
 

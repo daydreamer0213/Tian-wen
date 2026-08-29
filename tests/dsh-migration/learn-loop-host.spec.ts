@@ -128,7 +128,7 @@ function runDependencies(
     createSession: vi.fn(async () => 'session-new'),
     attachedAgent: vi.fn(() => undefined),
     createGoal: vi.fn(() => goalView()),
-    readGoalRef: vi.fn(async () => ({ id: 'goal-1', revision: 1 })),
+    readGoalRef: vi.fn(async () => ({ id: 'goal-1', revision: 1, phase: 'active' as const })),
     resumeColdGoal: vi.fn(async () => undefined),
     flushSession: vi.fn(async () => undefined),
     ...overrides,
@@ -336,7 +336,7 @@ describe('Tianwen Long Goal Web host', () => {
     const attachedAgent = vi.fn<RunDependencies['attachedAgent']>()
       .mockReturnValueOnce(undefined)
       .mockReturnValue(agent)
-    const readGoalRef = vi.fn(async () => ({ id: 'goal-1', revision: 7 }))
+    const readGoalRef = vi.fn(async () => ({ id: 'goal-1', revision: 7, phase: 'active' as const }))
     const dependencies = runDependencies(longGoalRecord([execution]), status, {
       attachedAgent,
       readGoalRef,
@@ -352,6 +352,63 @@ describe('Tianwen Long Goal Web host', () => {
     expect(readGoalRef).toHaveBeenCalledWith('session-1', 'goal-1')
     expect(dependencies.createSession).not.toHaveBeenCalled()
     expect(dependencies.createGoal).not.toHaveBeenCalled()
+  })
+
+  it('rejects a projected blocked Task before any create or resume operation', async () => {
+    const execution = { goalId: 'goal-1', sessionId: 'session-1' }
+    const base = longGoalStatus(['blocked'], [execution])
+    const status = {
+      ...base,
+      tasks: [{
+        ...base.tasks[0]!,
+        blockedReason: { code: 'round-limit', message: 'Task reached its round limit.' },
+      }],
+    }
+    const dependencies = runDependencies(longGoalRecord([execution]), status)
+
+    await expect(runCurrentWebTask({ roots: ROOTS, longGoalId: status.goal.id }, dependencies))
+      .rejects.toThrow('Task reached its round limit')
+    expect(dependencies.readGoalRef).not.toHaveBeenCalled()
+    expect(dependencies.resumeColdGoal).not.toHaveBeenCalled()
+    expect(dependencies.createSession).not.toHaveBeenCalled()
+    expect(dependencies.createGoal).not.toHaveBeenCalled()
+  })
+
+  it('rejects a cold Goal that became blocked without calling the resume API', async () => {
+    const execution = { goalId: 'goal-1', sessionId: 'session-1' }
+    const status = longGoalStatus(['active'], [execution])
+    const dependencies = runDependencies(longGoalRecord([execution]), status, {
+      readGoalRef: vi.fn(async () => ({
+        id: 'goal-1',
+        revision: 7,
+        phase: 'blocked' as const,
+        blockedReason: { code: 'round-limit', message: 'Task reached its round limit.' },
+      })),
+    })
+
+    await expect(runCurrentWebTask({ roots: ROOTS, longGoalId: status.goal.id }, dependencies))
+      .rejects.toThrow('Task reached its round limit')
+    expect(dependencies.resumeColdGoal).not.toHaveBeenCalled()
+    expect(dependencies.createSession).not.toHaveBeenCalled()
+  })
+
+  it('rejects an attached blocked Goal without calling goals.resume', async () => {
+    const execution = { goalId: 'goal-1', sessionId: 'session-1' }
+    const status = longGoalStatus(['active'], [execution])
+    const resume = vi.fn()
+    const agent = fakeAgent('session-1', goalView({
+      phase: 'blocked',
+      activation: 'disarmed',
+      blockedReason: { code: 'round-limit', message: 'Task reached its round limit.' },
+    }), { resume })
+    const dependencies = runDependencies(longGoalRecord([execution]), status, {
+      attachedAgent: vi.fn(() => agent),
+    })
+
+    await expect(runCurrentWebTask({ roots: ROOTS, longGoalId: status.goal.id }, dependencies))
+      .rejects.toThrow('Task reached its round limit')
+    expect(resume).not.toHaveBeenCalled()
+    expect(dependencies.resumeColdGoal).not.toHaveBeenCalled()
   })
 
   it('returns already-running for the exact active armed attached Task', async () => {

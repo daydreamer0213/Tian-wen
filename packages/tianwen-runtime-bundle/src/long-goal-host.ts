@@ -114,6 +114,11 @@ export interface TianwenLongGoalRunDependencies {
   readonly readGoalRef: (sessionId: string, goalId: string) => Promise<{
     readonly id: string
     readonly revision: number
+    readonly phase: 'active' | 'paused' | 'blocked' | 'complete'
+    readonly blockedReason?: {
+      readonly code: string
+      readonly message: string
+    }
   }>
   readonly resumeColdGoal: (input: {
     readonly sessionId: string
@@ -169,6 +174,12 @@ function currentGoal(agent: Agent, sessionId: string, goalId: string): GoalView 
   return goal
 }
 
+function blockedTaskError(taskId: string, reason?: { readonly message: string }): Error {
+  return new Error(`Long Goal Task ${taskId} is blocked${
+    reason === undefined ? '' : `: ${reason.message}`
+  }`)
+}
+
 function statusInput(input: {
   readonly roots: TianwenLongGoalHostRoots
   readonly longGoalId: string
@@ -204,6 +215,9 @@ export async function runCurrentWebTask(input: {
     projectedTask.execution?.goalId !== task.execution?.goalId
   ) {
     throw new Error('Long Goal Task status binding mismatch')
+  }
+  if (projectedTask.phase === 'blocked' || status.goal.phase === 'blocked') {
+    throw blockedTaskError(task.id, projectedTask.blockedReason)
   }
 
   if (task.execution === null) {
@@ -260,6 +274,10 @@ export async function runCurrentWebTask(input: {
     if (ref.id !== goalId || !Number.isSafeInteger(ref.revision) || ref.revision < 1) {
       throw new Error('Cold Long Goal Task Goal ref mismatch')
     }
+    if (ref.phase === 'blocked') throw blockedTaskError(task.id, ref.blockedReason)
+    if (ref.phase !== 'active' && ref.phase !== 'paused') {
+      throw new Error('Cold Long Goal Task Goal is not resumable')
+    }
     await dependencies.resumeColdGoal({ sessionId, goalId, revision: ref.revision })
     agent = dependencies.attachedAgent(sessionId)
     if (agent === undefined) throw new Error('Resumed Long Goal Task Session has no attached Agent')
@@ -275,7 +293,8 @@ export async function runCurrentWebTask(input: {
   if (goal.phase === 'active' && goal.activation === 'armed') {
     return { status, sessionId, action: 'already-running' }
   }
-  if (goal.phase !== 'paused' && goal.activation !== 'disarmed') {
+  if (goal.phase === 'blocked') throw blockedTaskError(task.id, goal.blockedReason)
+  if ((goal.phase !== 'active' && goal.phase !== 'paused') || goal.activation !== 'disarmed') {
     throw new Error('Bound Long Goal Task Goal is not resumable')
   }
   const resumed = agent.ctx.goals.resume(agent, { id: goal.id, revision: goal.revision })
@@ -437,7 +456,14 @@ export function mountTianwenLongGoalHost(
         if (status.session.id !== sessionId || status.goal.id !== goalId) {
           throw new Error('Cold Long Goal Task Goal ref mismatch')
         }
-        return { id: status.goal.id, revision: status.goal.revision }
+        return {
+          id: status.goal.id,
+          revision: status.goal.revision,
+          phase: status.goal.phase,
+          ...(status.goal.blockedReason === undefined
+            ? {}
+            : { blockedReason: status.goal.blockedReason }),
+        }
       },
       resumeColdGoal: async ({ sessionId, goalId, revision }) => {
         const result = unwrapRpc(await host.apiProxy.goals.resume({

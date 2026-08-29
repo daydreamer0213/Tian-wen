@@ -51,7 +51,7 @@ const RUNTIME_FILES = [
 const RUNTIME_DEPLOYED_PUBLICATION = [...RUNTIME_FILES, 'package.json'] as const
 const RUNTIME_PUBLICATION = [...RUNTIME_FILES, 'package.json', 'LICENSE'] as const
 
-function renderPredecessorProfilePatch(paths: ReturnType<typeof deriveInstallPaths>): string {
+function historicalOriginalProfilePatchFixture(paths: ReturnType<typeof deriveInstallPaths>): string {
   return `- id: agent-default-model
   config:
     provider: tianwen-offline
@@ -66,15 +66,50 @@ function renderPredecessorProfilePatch(paths: ReturnType<typeof deriveInstallPat
 - id: tianwen-runtime
   config:
     evolutionRoot: '${paths.evolutionRoot.replaceAll('\\', '/')}'
-    stateRoot: '${paths.stateRoot.replaceAll('\\', '/')}'
-    sessionsRoot: '${paths.sessionsRoot.replaceAll('\\', '/')}'
 
 - insert:
     - id: cordis-host-runner
       name: '@deepseek-ai/dsh-cordis-host-runner'
 
-    - id: tianwen-web-bridge
-      name: '@tianwen/runtime-bundle'
+    - id: tianwen-phase2-smoke
+      name: '@tianwen/runtime-bundle/smoke'
+`
+}
+
+function historicalLockedProfilePatchFixture(paths: ReturnType<typeof deriveInstallPaths>): string {
+  return `- id: agent-default-model
+  config:
+    provider: tianwen-offline
+    model: phase2-smoke
+
+- id: session-persistence-jsonl
+  config:
+    root: '${paths.sessionsRoot.replaceAll('\\', '/')}'
+    compression: none
+    packChunks: false
+
+- id: tianwen-runtime
+  config:
+    evolutionRoot: '${paths.evolutionRoot.replaceAll('\\', '/')}'
+
+- id: attachment-local
+  disabled: true
+
+- id: sandbox
+  disabled: true
+
+- id: pwsh-sandbox
+  disabled: true
+
+- id: permission
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true
+
+- insert:
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
 
     - id: tianwen-phase2-smoke
       name: '@tianwen/runtime-bundle/smoke'
@@ -191,7 +226,9 @@ function writeManagedPredecessor(
     },
   })
   writeFileSync(join(paths.profileRoot, 'cordis.patch.yml'),
-    encoding === 'original-archive' ? renderPredecessorProfilePatch(paths) : renderProfilePatch(paths),
+    encoding === 'original-archive'
+      ? historicalOriginalProfilePatchFixture(paths)
+      : historicalLockedProfilePatchFixture(paths),
     'utf8')
   const receipt = JSON.parse(readFileSync(paths.receiptPath, 'utf8'))
   receipt.dshVersion = PREDECESSOR_DSH_VERSION
@@ -563,6 +600,12 @@ describe('Tianwen installer contract', () => {
         const paths = deriveInstallPaths(testRoot('modified'), 'win32')
         writeManagedPredecessor(paths, 'original-archive')
         writeFileSync(join(paths.profileRoot, 'cordis.patch.yml'), 'modified\n', 'utf8')
+        return paths
+      })(),
+      (() => {
+        const paths = deriveInstallPaths(testRoot('forged-current-predecessor'), 'win32')
+        writeManagedPredecessor(paths, 'original-archive')
+        writeFileSync(join(paths.profileRoot, 'cordis.patch.yml'), renderProfilePatch(paths), 'utf8')
         return paths
       })(),
       (() => {

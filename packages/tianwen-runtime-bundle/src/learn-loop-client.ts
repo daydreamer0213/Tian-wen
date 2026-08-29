@@ -65,7 +65,7 @@ function isStatus(value: unknown): value is LongGoalStatusProjection {
     !isRecord(value.runtime) || !hasExactKeys(value.runtime, [
       'activation', 'modelRequests', 'readOnly',
     ]) || value.runtime.activation !== 'not-loaded' ||
-    !isNonNegativeInteger(value.runtime.modelRequests) || value.runtime.readOnly !== true) {
+    value.runtime.modelRequests !== 0 || value.runtime.readOnly !== true) {
     return false
   }
   return value.tasks.every(task => {
@@ -76,9 +76,10 @@ function isStatus(value: unknown): value is LongGoalStatusProjection {
       !isTaskPhase(task.phase) || (task.execution !== null && !isExecution(task.execution))) {
       return false
     }
-    return task.blockedReason === undefined || (isRecord(task.blockedReason) &&
+    const validBlockedReason = isRecord(task.blockedReason) &&
       hasExactKeys(task.blockedReason, ['code', 'message']) &&
-      isNonEmptyString(task.blockedReason.code) && isNonEmptyString(task.blockedReason.message))
+      isNonEmptyString(task.blockedReason.code) && isNonEmptyString(task.blockedReason.message)
+    return task.phase === 'blocked' ? validBlockedReason : task.blockedReason === undefined
   })
 }
 
@@ -110,7 +111,9 @@ async function call(
   }
   if (result.ok === false) {
     if (!hasExactKeys(result, ['ok', 'error'])) invalidResponse()
-    if (!isRecord(result.error) || !isNonEmptyString(result.error.message)) invalidResponse()
+    if (!isRecord(result.error) || !hasExactKeys(result.error, ['code', 'message', 'details']) ||
+      result.error.code !== 'internal' || !isNonEmptyString(result.error.message) ||
+      !isRecord(result.error.details) || !hasExactKeys(result.error.details, [])) invalidResponse()
     throw new Error(result.error.message)
   }
   invalidResponse()
