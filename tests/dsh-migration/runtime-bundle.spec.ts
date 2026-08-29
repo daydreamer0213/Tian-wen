@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, posix, relative, resolve } from 'node:path'
@@ -21,6 +22,7 @@ import { CallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { apply as applyBundledRuntime } from '../../packages/tianwen-runtime-bundle/dist/runtime.js'
 import { apply as applyRuntimeBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
+import { deriveInstallPaths, renderProfilePatch } from '../../scripts/install-tianwen.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
 const packageRoot = resolve(root, 'packages/tianwen-runtime-bundle')
@@ -600,6 +602,102 @@ describe('@tianwen/runtime-bundle', () => {
     expect(evaluate('7')).toBe(7)
     expect(typeof evaluate('7')).toBe('number')
   })
+
+  it('mounts the standard coding preset through the formal Goal-first Profile without a Session or Turn', () => {
+    const fixtureRoot = mkdtempSync(join(packFixtureBase, 'goal-first-preset-audit-'))
+    const paths = deriveInstallPaths(fixtureRoot)
+    const requireFromRuntimeBundle = createRequire(resolve(packageRoot, 'package.json'))
+    const dshManifestPath = requireFromRuntimeBundle.resolve('@deepseek-ai/dsh/package.json')
+    const dshManifest = json(dshManifestPath) as { bin: { dsh: string } }
+    const dshBin = resolve(dirname(dshManifestPath), dshManifest.bin.dsh)
+    const runtimeLink = join(paths.profileRoot, 'node_modules', '@tianwen', 'runtime-bundle')
+    const probeRoot = join(paths.profileRoot, 'node_modules', '@tianwen', 'goal-first-preset-audit')
+    const auditPatch = join(fixtureRoot, 'goal-first-preset-audit.patch.yml')
+    try {
+      mkdirSync(dirname(runtimeLink), { recursive: true })
+      writeFileSync(join(paths.profileRoot, 'package.json'), `${JSON.stringify({
+        name: '@tianwen/goal-first-profile-audit',
+        version: '0.0.0',
+        private: true,
+        type: 'module',
+        dependencies: {
+          '@deepseek-ai/dsh-base': '0.1.1-rc.2',
+          '@deepseek-ai/dsh-headless': '0.1.1-rc.2',
+          '@tianwen/runtime-bundle': '0.1.0',
+        },
+        dsh: {
+          profile: {
+            bundles: [
+              '@deepseek-ai/dsh-base',
+              '@deepseek-ai/dsh-headless',
+              '@tianwen/runtime-bundle',
+            ],
+          },
+        },
+      })}\n`)
+      writeFileSync(join(paths.profileRoot, 'cordis.patch.yml'), renderProfilePatch(paths))
+      symlinkSync(packageRoot, runtimeLink, 'junction')
+      mkdirSync(probeRoot, { recursive: true })
+      writeFileSync(join(probeRoot, 'package.json'), `${JSON.stringify({
+        name: '@tianwen/goal-first-preset-audit',
+        version: '0.0.0',
+        type: 'module',
+        exports: './index.js',
+      })}\n`)
+      writeFileSync(join(probeRoot, 'index.js'), [
+        "export const inject = ['agentPresets', 'appExit']",
+        'export function apply(ctx) {',
+        "  const exit = ctx.get('appExit')",
+        '  void (async () => {',
+        "    await ctx.get('loader')?.await()",
+        "    return await ctx.agentPresets.standingKeyFor('standard')",
+        '  })().then(',
+        "    key => { process.stdout.write(JSON.stringify({ standingKey: key }) + '\\n'); exit(0) },",
+        "    error => { process.stderr.write(String(error) + '\\n'); exit(1) },",
+        '  )',
+        '}',
+        '',
+      ].join('\n'))
+      writeFileSync(auditPatch, `- id: tianwen-goal-first-runner
+  disabled: true
+
+- insert:
+    - id: tianwen-goal-first-preset-audit
+      name: '@tianwen/goal-first-preset-audit'
+`)
+
+      const result = spawnSync(process.execPath, [
+        dshBin, '--profile', 'tianwen', '--patch',
+        resolve(packageRoot, 'goal-first.patch.yml'), '--patch', auditPatch,
+      ], {
+        cwd: root,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          DSH_HOME: paths.dshHome,
+          DSH_TELEMETRY_DISABLED: '1',
+          TIANWEN_GOAL_FIRST_JSON: 'true',
+          TIANWEN_GOAL_FIRST_OPERATION: 'start',
+          TIANWEN_GOAL_FIRST_STATE_ROOT: paths.stateRoot,
+          TIANWEN_GOAL_FIRST_SESSIONS_ROOT: paths.sessionsRoot,
+          TIANWEN_GOAL_FIRST_EVOLUTION_ROOT: paths.evolutionRoot,
+          TIANWEN_GOAL_FIRST_WORKSPACE_ROOT: root,
+        },
+        shell: false,
+        timeout: 15_000,
+        windowsHide: true,
+      })
+
+      expect(result.error, `${result.stdout}\n${result.stderr}`).toBeUndefined()
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+      expect(result.stderr).toBe('')
+      expect(JSON.parse(result.stdout)).toEqual({ standingKey: { agentPreset: 'standard' } })
+      expect(existsSync(paths.sessionsRoot)).toBe(false)
+      expect(existsSync(join(paths.stateRoot, 'long-goals'))).toBe(false)
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true })
+    }
+  }, 180_000)
 
   it('ships one fixed offline smoke entry', async () => {
     const manifest = json(resolve(packageRoot, 'package.json')) as {
