@@ -542,7 +542,8 @@ describe('Tianwen installer contract', () => {
     expect(patch).toContain('- id: permission\n  disabled: true')
     expect(patch).toContain('- id: tool-pwsh\n  disabled: true')
     expect(patch).toContain("name: '@deepseek-ai/dsh-cordis-host-runner'")
-    expect(patch.match(/name: '@tianwen\/runtime-bundle'/gu)).toHaveLength(1)
+    expect(patch).not.toContain('id: tianwen-web-bridge')
+    expect(patch.match(/name: '@tianwen\/runtime-bundle'/gu) ?? []).toHaveLength(0)
     expect(patch).toContain("name: '@tianwen/runtime-bundle/smoke'")
   })
 

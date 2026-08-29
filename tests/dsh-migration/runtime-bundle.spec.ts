@@ -340,6 +340,7 @@ describe('archive credential literal detection', () => {
 
 describe('@tianwen/runtime-bundle', () => {
   it('loads core services and defers the Web host when connection is unavailable', async () => {
+    mkdirSync(packFixtureBase, { recursive: true })
     const profileRoot = mkdtempSync(join(packFixtureBase, 'headless-'))
     const ctx = new Context()
     try {

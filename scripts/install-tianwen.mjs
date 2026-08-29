@@ -225,9 +225,6 @@ export function renderProfilePatch(paths) {
     - id: cordis-host-runner
       name: '@deepseek-ai/dsh-cordis-host-runner'
 
-    - id: tianwen-web-bridge
-      name: '@tianwen/runtime-bundle'
-
     - id: tianwen-phase2-smoke
       name: '@tianwen/runtime-bundle/smoke'
 `

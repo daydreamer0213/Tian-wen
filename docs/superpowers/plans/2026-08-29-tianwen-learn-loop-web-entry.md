@@ -287,9 +287,10 @@ to contain:
 ```
 
 Update the installer assertions to compare all three exact canonical paths.
-Insert the same `tianwen-web-bridge` package-root row in both generated
-patches.  Do not change ordinary portable Profile defaults or migrate existing
-state.
+The Runtime package bundle patch is the sole owner of the
+`tianwen-web-bridge` package-root row; the generated Profile patch must not
+insert it again.  Do not change ordinary portable Profile defaults or migrate
+existing state.
 
 - [ ] **Step 7: Run Task 1 verification**
 
