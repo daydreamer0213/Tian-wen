@@ -137,6 +137,13 @@ function isAllowedControlledLifecycleRunnerInput(input: string): boolean {
   ].includes(path)
 }
 
+function isAllowedClientInput(input: string): boolean {
+  return [
+    'src/client.tsx',
+    'src/learn-loop-client.ts',
+  ].includes(posix.normalize(input.replaceAll('\\', '/')))
+}
+
 function containsCredentialLiteral(text: string): boolean {
   return /\b(?:const|let|var)\s+(?:DEEPSEEK_API_KEY|API_KEY|TOKEN|[A-Z][A-Z0-9_]*_(?:API_KEY|TOKEN))\s*=\s*(['"])[A-Za-z0-9._~+\/=\-]{16,}\1/u.test(text)
 }
@@ -163,6 +170,43 @@ describe('runtime metafile input allowlist', () => {
     '../tianwen-evidence/dist/private.js',
   ])('rejects non-approved controlled lifecycle runner input %s', input => {
     expect(isAllowedControlledLifecycleRunnerInput(input)).toBe(false)
+  })
+
+  it.each([
+    'src/client.tsx',
+    'src/learn-loop-client.ts',
+  ])('permits the exact browser client input %s', input => {
+    expect(isAllowedClientInput(input)).toBe(true)
+  })
+
+  it.each([
+    'src/runtime.ts',
+    '../tianwen-runtime/dist/index.js',
+    'node_modules/react/index.js',
+  ])('rejects non-client input %s', input => {
+    expect(isAllowedClientInput(input)).toBe(false)
+  })
+})
+
+describe('Runtime Bundle browser client package surface', () => {
+  it('publishes the exact DSH browser entry metadata', () => {
+    const manifest = json(resolve(packageRoot, 'package.json')) as {
+      exports: Record<string, unknown>
+      files: string[]
+      dsh: { client: unknown }
+    }
+    expect(manifest.exports['./client']).toEqual({
+      default: './dist/client.js',
+    })
+    expect(manifest.files).toContain('dist/client.js')
+    expect(manifest.dsh.client).toEqual({
+      inject: [
+        '@deepseek-ai/dsh-client-connection',
+        '@deepseek-ai/dsh-client-runtime',
+        '@deepseek-ai/dsh-client-ui-sidebar',
+      ],
+      platform: 'web',
+    })
   })
 })
 
@@ -311,7 +355,7 @@ describe('@tianwen/runtime-bundle', () => {
       expect(ctx.tianwenEvolution).toBeDefined()
       expect('connection' in ctx).toBe(false)
       expect(inject).toHaveBeenCalledWith(
-        ['connection', 'apiProxy', 'agents', 'goals'],
+        ['connection', 'apiProxy', 'agents', 'goals', 'sessions'],
         expect.any(Function),
       )
     } finally {
@@ -353,6 +397,8 @@ describe('@tianwen/runtime-bundle', () => {
       devDependencies: Record<string, string>
       exports: Record<string, unknown>
       bin: Record<string, string>
+      peerDependencies: Record<string, string>
+      peerDependenciesMeta: Record<string, { optional: boolean }>
       private?: boolean
       version: string
     }
@@ -375,8 +421,18 @@ describe('@tianwen/runtime-bundle', () => {
     expect(Object.keys(manifest.dependencies)).not.toContainEqual(
       expect.stringMatching(/^@tianwen\//u),
     )
-    expect(manifest).not.toHaveProperty('peerDependencies')
-    expect(manifest).not.toHaveProperty('peerDependenciesMeta')
+    expect(manifest.peerDependencies).toEqual({
+      '@deepseek-ai/dsh-client-connection': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-client-runtime': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-client-ui-sidebar': '0.1.1-rc.2',
+      react: '18.2.0',
+    })
+    expect(manifest.peerDependenciesMeta).toEqual({
+      '@deepseek-ai/dsh-client-connection': { optional: true },
+      '@deepseek-ai/dsh-client-runtime': { optional: true },
+      '@deepseek-ai/dsh-client-ui-sidebar': { optional: true },
+      react: { optional: true },
+    })
     expect(json(resolve(hostPackageRoot, 'package.json'))).toMatchObject({
       name: '@tianwen/dsh-host',
       private: true,
@@ -407,6 +463,7 @@ describe('@tianwen/runtime-bundle', () => {
       'dist/create-runner.js',
       'dist/resume-runner.js',
       'dist/controlled-lifecycle-runner.js',
+      'dist/client.js',
       'cordis.patch.yml',
       'create.patch.yml',
       'model.patch.yml',
@@ -691,6 +748,21 @@ describe('@tianwen/runtime-bundle', () => {
     expect(source).not.toContain('@tianwen/dsh-probe-bundle')
   })
 
+  it('bundles the browser client without a second DSH runtime closure', () => {
+    const source = readFileSync(resolve(packageRoot, 'dist/client.js'), 'utf8')
+    const metafile = json(resolve(packageRoot, 'dist/client.meta.json')) as {
+      inputs: Record<string, unknown>
+      outputs: Record<string, { imports: { path: string; external?: boolean }[] }>
+    }
+    const output = Object.entries(metafile.outputs).find(([path]) =>
+      path.replaceAll('\\', '/').endsWith('dist/client.js'))?.[1]
+    expect(output).toBeDefined()
+    expect(externalPackages(output!.imports)).toEqual(['react', 'react/jsx-runtime'])
+    expect(Object.keys(metafile.inputs).filter(input => !isAllowedClientInput(input)))
+      .toEqual([])
+    expect(source).not.toMatch(/SessionRuntime|GoalService|@deepseek-ai\/[^"]+\/src\//u)
+  })
+
   it('bundles the smoke entry with only its two public DSH externals', () => {
     const source = readFileSync(resolve(packageRoot, 'dist/smoke.js'), 'utf8')
     const metafile = json(resolve(packageRoot, 'dist/smoke.meta.json')) as {
@@ -877,6 +949,7 @@ describe('@tianwen/runtime-bundle', () => {
         'package/cordis.patch.yml',
         'package/create.patch.yml',
         'package/dist/cli.js',
+        'package/dist/client.js',
         'package/dist/controlled-lifecycle-runner.js',
         'package/dist/create-runner.js',
         'package/dist/index.d.ts',
