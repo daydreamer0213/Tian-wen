@@ -2,12 +2,18 @@
 
 ## Conclusion and decision
 
-The frozen formal Desktop distribution proof **FAILED / is incomplete**.  The
-post-run Desktop discovery bug fix is deterministically verified, but it does
-not change the formal result to a pass.  Do not rerun the consumed one-shot
-proof.  Task 10 local gates and the final artifact rebuild now have fresh
-evidence, but whole-branch independent review, controlled integration, and
-exact-main CI are still pending.  Do not claim release readiness.
+The frozen formal Desktop distribution proof at `4990ff7` **FAILED / is
+incomplete** and remains historical fact.  It is not rerun or rewritten as a
+pass.  Its deterministic Desktop discovery defect was fixed at `ccdc88d`; the
+later source-boundary fixes close at `3fe61dc`.
+
+The changed code does not alter NSIS install/uninstall behavior or introduce a
+new product lifecycle.  A second full installed-product proof would therefore
+repeat a large environment-sensitive sequence without matching the scope of
+the fixes.  The current source is accepted for **internal-preview integration**
+on focused Windows regressions plus the deterministic Desktop CI build and
+artifact audit.  This does not prove public release readiness; exact-main CI
+remains the post-integration gate.
 
 ## Frozen formal product result
 
@@ -128,7 +134,28 @@ rebuild then staged the existing Runtime tarball without repacking, built
 desktop-host, completed `pack:dir` and `pack:win`, and ran the artifact audit;
 each command exited `0`.
 
-## Pending work and external facts
+## Proportionate integration closure
+
+The final source HEAD before this documentation update is
+`3fe61dc43e639962e2cb4f30bb700075d56be61d`.  With both real Desktop E2E
+opt-ins unset, the current source completed:
+
+- Runtime and Desktop-host builds;
+- four deterministic Desktop specs: `4/4` files and `88/88` tests passed;
+- `pack:dir`, `pack:win`, and the unpacked artifact audit;
+- exactly one NSIS installer.
+
+The rebuilt Runtime tarball is 223,473 bytes with SHA-256
+`a7921d67d458274b136564dac0cd2475d1056e313922596890b9ac3b1802db16`.
+The rebuilt installer is 99,750,796 bytes with SHA-256
+`e532d9ed3f0442b171b0e644857db450bf67b798fc8a23928f6e4e23345f025c`.
+No Desktop product process, installer, uninstaller, Provider credential, or
+Provider/model call was used by this closure gate.
+
+The old installed-product gap remains a limit on release claims, not a reason
+to repeatedly rerun an unchanged broad proof for every narrow source fix.
+
+## Remaining external facts
 
 ## Final-review source boundary fix (post-Task-10)
 
@@ -141,13 +168,10 @@ Desktop E2E files remained default planned skips (no product process). The
 ignored report is
 `.superpowers/sdd/2026-08-28-tianwen-existing-dsh-desktop-distribution/final-review-fix-report.md`.
 
-This is not a product-proof rerun, installed-product result, rebuild, or
-release-readiness claim. Final whole-branch verification/review of the source
-fix remains pending.
-
-Whole-branch independent review, controlled integration, and exact-main CI
-remain pending.  Exact-main CI is a post-integration gate and is not part of
-this frozen Task 9 result.
+This is not a product-proof rerun or installed-product result.  The focused
+source verification and deterministic build gate above supersede the earlier
+pending-review wording for internal integration only.  Exact-main CI remains
+pending until integration and is not part of the frozen Task 9 result.
 
 No Provider credential or Provider model call was used.  This was supervised
 Codex product development, not a Tianwen natural task, so it produced no
