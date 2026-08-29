@@ -11,17 +11,22 @@
   from running Open Session using the public Session/Goal projection, waited
   for Session projection before navigation, and disabled blocked or
   workspace-less actions.
-- **Web GUI visual smoke: NOT OBSERVED.** The component smoke is executable UI
-  behavior evidence, but this session did not control a real browser window or
-  observe painted DOM. It therefore does not claim Web GUI PASS.
-- **Desktop artifact path for this fix digest: NOT REVALIDATED.** The previous
-  unpacked Desktop artifact passed its archive audit, but it contains the
-  pre-fix Runtime tarball. This focused fix did not rebuild Desktop and does not
-  claim that the old artifact matches the refreshed Web proof digest.
-- **Desktop visual smoke: NOT OBSERVED.** This session had no trustworthy
-  interactive GUI control. It did not claim that a human saw or clicked the
-  Learn Loop sidebar action. No long-Goal semantic scenario was repeated through
-  Desktop.
+- **Standalone browser GUI visual smoke: NOT OBSERVED.** The earlier component
+  smoke remains executable UI behavior evidence, but no separate browser-plugin
+  window was controlled in that session.
+- **Localized Desktop artifact: PASS.** The unpacked Desktop was rebuilt with
+  the exact freshly packed localized Runtime. The fixed artifact audit passed,
+  including an exact SHA-256 comparison between the source tarball and the
+  Runtime embedded in Desktop.
+- **Packaged localized Desktop visual smoke: OBSERVED WITH TOOLING LIMITATION.**
+  One real packaged Desktop window displayed the DSH shell in Chinese, the
+  Tianwen sidebar entry as `长期任务`, and a Chinese-only create form. The
+  observation contained no simultaneous English Tianwen labels. Windows
+  Computer Use returned an uncertain input/refresh result before the three-step
+  empty-state instructions could be observed. Those three instructions are
+  covered by the passed compiled-client test, but this handoff does not claim
+  they were seen in the real window. This is an external GUI-control limitation,
+  not a Tianwen product failure.
 
 ## Product result
 
@@ -39,6 +44,15 @@ Separately, the always-run compiled-client smoke evaluated the exact built
 slot contract, opened the overlay, submitted the create form, and exercised
 cold Continue and Session navigation. This is component/runtime evidence, not
 a visual browser observation.
+
+The localized product integration then reused one freshly built Runtime
+tarball in one audited unpacked Desktop. On a `zh-CN` Windows system with no
+saved locale preference, one packaged Desktop launch showed the real DSH shell
+in Chinese, the `长期任务` entry, and the Chinese create form. No Goal was
+created and no Task was started. The three-step Chinese empty-state copy was
+not claimed as visually observed because the Windows GUI controller returned
+an uncertain click/refresh outcome; the already passed compiled-client test
+covers those exact three lines without making a visual claim.
 
 Using the real `/tianwen` Connection RPC, the test created and read a two-Task
 plan without starting a Session or model turn. It then invoked
@@ -75,6 +89,34 @@ remained unbound.
   in `finally`; the loopback endpoint was confirmed closed.
 - The existing unpacked Desktop artifact was not rebuilt for this digest.
 
+### Localized packaged Desktop integration
+
+- Source Runtime tarball:
+  `D:\DevData\tianwen-chinese-product-ux\pack\tianwen-runtime-bundle-0.1.0.tgz`
+- Runtime SHA-256:
+  `f71b6c910dc6cce52031ec8cb98d2cae282a9625c0a69f37ed0f6fd149aca6fa`
+- Audited unpacked Desktop:
+  `D:\DevData\tianwen-worktrees\tianwen-architecture-overview-v2-merge\dist\tianwen-desktop\win-unpacked`
+- Artifact audit: PASS. The embedded Runtime digest was exactly the source
+  digest above.
+- Disposable Web Profile:
+  `D:\DevData\tianwen-chinese-product-ux\gui-smoke\dsh-home\profiles\web`
+- Node: `v22.23.1` at `D:\hermes\node\node.exe`.
+- DSH: exact `@deepseek-ai/dsh@0.1.1-rc.2`.
+- The packaged Desktop accepted all three explicit `--node`, `--dsh-root`, and
+  `--dsh-home` targets and reached the ready loopback page.
+- Desktop root PID during the one observation: `8840`.
+- Desktop-owned DSH PID: `15684`; observed parent PID: `8840`.
+- Loopback endpoint: `http://127.0.0.1:61172/`; initial response status: `200`.
+- After closing the sole Desktop window, PID `8840`, PID `15684`, and the
+  loopback endpoint were all absent.
+- The child environment contained no Provider credential variable, and the
+  disposable DSH home contained no Provider credential file. No Goal, Task,
+  Session, Activity, or Provider action was created or started. No model request
+  was initiated.
+- DSH created only its upstream onboarding setting during the observation; it
+  did not save a locale preference.
+
 ## TDD evidence
 
 The first meaningful RED failed because the verifier's exact installed Runtime
@@ -109,13 +151,18 @@ No natural task, controlled Activity, learning-efficacy measurement, or new
 learning fact was produced in this stage. The offline deterministic product run
 is runtime acceptance evidence only.
 
-No paid Provider was called. This handoff makes no Provider billing claim and
-records no npm publication, GitHub Release, or DSH upstream push.
+No paid Provider was called. The localized packaged observation initiated zero
+model requests and no Provider action. This handoff makes no Provider billing
+claim and records no npm publication, GitHub Release, or DSH upstream push.
 
 ## Remaining boundary
 
-A human or interactive session still needs to open the prepared Web Profile in
-a real browser and launch the already built Desktop artifact, click **Learn
-Loop**, confirm the overlay is visibly painted in both surfaces, and close it
-while observing that Desktop's owned Web process and endpoint stop. That smoke
-must not rerun the long-Goal semantic scenario.
+The localized packaged Desktop product handoff is locally closed with one
+external tooling limitation: the real window observation covered Chinese DSH,
+the `长期任务` entry, and the Chinese-only create form, while the three-step
+empty-state instructions remain compiled-client test evidence rather than a
+real-window observation. No repeat launch was used to select a better outcome.
+
+This stage does not add a controlled Activity, learning-efficacy claim, paid
+Provider call, or repeated long-Goal semantic scenario. Push and exact-main CI
+remain controller-owned follow-up actions.
