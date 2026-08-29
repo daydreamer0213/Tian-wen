@@ -230,14 +230,23 @@ export async function runCurrentWebTask(input: {
         sessionId,
         goalId: String(goal.id),
       })
-    } catch (cause) {
-      agent.ctx.goals.disarm(agent)
-      await dependencies.flushSession(agent)
+    } catch (bindingCause) {
+      let cleanupCause: unknown
+      try {
+        agent.ctx.goals.disarm(agent)
+        await dependencies.flushSession(agent)
+      } catch (error) {
+        cleanupCause = error
+      }
       throw new LongGoalTaskAdmissionError(
         `Long Goal Task binding failed for Goal ${String(goal.id)} in Session ${sessionId}`,
         sessionId,
         String(goal.id),
-        { cause },
+        {
+          cause: cleanupCause === undefined
+            ? bindingCause
+            : new AggregateError([bindingCause, cleanupCause], 'Long Goal Task binding cleanup failed'),
+        },
       )
     }
     await dependencies.flushSession(agent)

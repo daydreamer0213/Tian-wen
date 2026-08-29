@@ -9,6 +9,7 @@ import type { GoalView } from '@deepseek-ai/dsh-goal'
 
 import {
   createTianwenLongGoalRpcHandler,
+  LongGoalTaskAdmissionError,
   resolveTianwenLongGoalHostRoots,
   runCurrentWebTask,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
@@ -417,6 +418,49 @@ describe('Tianwen Long Goal Web host', () => {
       'session-flushed',
     ])
     expect(dependencies.createSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps both admission IDs when binding cleanup fails', async () => {
+    for (const failingCleanup of ['disarm', 'flush'] as const) {
+      const status = longGoalStatus(['pending'], [null])
+      const record = longGoalRecord([null])
+      const agent = fakeAgent('session-new', goalView({ id: 'goal-new' as GoalView['id'] }), {
+        disarm: () => {
+          if (failingCleanup === 'disarm') throw new Error('cleanup-disarm')
+          return goalView({ id: 'goal-new' as GoalView['id'], activation: 'disarmed' })
+        },
+      })
+      const dependencies = runDependencies(record, status, {
+        attachedAgent: vi.fn(() => agent),
+        createGoal: vi.fn(() => goalView({ id: 'goal-new' as GoalView['id'] })),
+        bindLongGoalTask: vi.fn(() => {
+          throw new Error('disk-full')
+        }),
+        flushSession: vi.fn(async () => {
+          if (failingCleanup === 'flush') throw new Error('cleanup-flush')
+        }),
+      })
+
+      let caught: unknown
+      try {
+        await runCurrentWebTask({
+          roots: ROOTS,
+          longGoalId: status.goal.id,
+          initialCwd: 'D:/workspace',
+        }, dependencies)
+      } catch (error) {
+        caught = error
+      }
+
+      expect(caught).toBeInstanceOf(LongGoalTaskAdmissionError)
+      expect(caught).toMatchObject({ sessionId: 'session-new', goalId: 'goal-new' })
+      const cause = (caught as Error).cause
+      expect(cause).toBeInstanceOf(AggregateError)
+      expect((cause as AggregateError).errors.map(String)).toEqual([
+        'Error: disk-full',
+        `Error: cleanup-${failingCleanup}`,
+      ])
+    }
   })
 
   it('fails closed when the bound Session contains a different Goal', async () => {
