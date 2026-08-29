@@ -92,9 +92,6 @@ jobs:
 
   desktop-windows:
     runs-on: windows-latest
-    env:
-      ELECTRON_CACHE: ${{ runner.temp }}\electron
-      ELECTRON_BUILDER_CACHE: ${{ runner.temp }}\electron-builder
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
@@ -128,7 +125,13 @@ jobs:
           }
           exit $testExit
       - run: pnpm --filter @tianwen/desktop-host pack:dir
+        env:
+          ELECTRON_CACHE: ${{ runner.temp }}\electron
+          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}\electron-builder
       - run: pnpm --filter @tianwen/desktop-host pack:win
+        env:
+          ELECTRON_CACHE: ${{ runner.temp }}\electron
+          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}\electron-builder
       - run: node scripts/audit-desktop-artifact.mjs dist/tianwen-desktop/win-unpacked "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.0.tgz"
       - name: Assert one Desktop installer
         shell: pwsh
