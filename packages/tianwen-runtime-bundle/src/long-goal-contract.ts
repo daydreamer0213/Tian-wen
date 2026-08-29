@@ -133,6 +133,27 @@ export interface LongGoalStatusProjectionV2 {
   }
 }
 
+export interface GoalFirstProgressResultV2 {
+  readonly schemaVersion: 'tianwen.goal-first-progress-result.v2'
+  readonly action:
+    | 'planning-pending' | 'started' | 'continued'
+    | 'already-running' | 'blocked' | 'complete'
+  readonly status: LongGoalStatusProjectionV2
+  readonly sessionId: string | null
+}
+
+export interface LongGoalGuidanceResultV2 {
+  readonly schemaVersion: 'tianwen.long-goal-guidance-result.v2'
+  readonly planning: 'updated' | 'pending'
+  readonly status: LongGoalStatusProjectionV2
+}
+
+export interface LongGoalAbandonResultV2 {
+  readonly schemaVersion: 'tianwen.long-goal-abandon-result.v2'
+  readonly action: 'abandoned'
+  readonly status: LongGoalStatusProjectionV2
+}
+
 export type AnyLongGoalRecord = LongGoalRecord | LongGoalRecordV2
 export type AnyLongGoalStatusProjection = LongGoalStatusProjection | LongGoalStatusProjectionV2
 export type AnyLongGoalSummary = LongGoalSummary | LongGoalSummaryV2
