@@ -7,6 +7,10 @@ import type { DesktopBaseTarget, DesktopTargetInput } from './host.js'
 export const DESKTOP_TARGET_FILE_NAME = 'desktop-target.json'
 export const DESKTOP_TARGET_SCHEMA_VERSION = 'tianwen.desktop-target.v1' as const
 
+export function desktopTargetArguments(argv: readonly string[], packaged: boolean): readonly string[] {
+  return argv.slice(packaged ? 1 : 2)
+}
+
 interface SavedDesktopTarget extends DesktopTargetInput {
   readonly schemaVersion: typeof DESKTOP_TARGET_SCHEMA_VERSION
 }

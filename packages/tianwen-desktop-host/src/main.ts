@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import {
   DESKTOP_TARGET_FILE_NAME,
   createDesktopBootstrapInteractions,
+  desktopTargetArguments,
   resolveDesktopBootstrapTarget,
 } from './bootstrap.js'
 import {
@@ -17,7 +18,7 @@ import { resolvePreparedDesktopTarget } from './profile-prepare.js'
 async function start(): Promise<void> {
   await app.whenReady()
   const base = await resolveDesktopBootstrapTarget(
-    process.argv.slice(2),
+    desktopTargetArguments(process.argv, app.isPackaged),
     join(app.getPath('userData'), DESKTOP_TARGET_FILE_NAME),
     {
       ...createDesktopBootstrapInteractions(dialog),

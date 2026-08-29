@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   createDesktopBootstrapInteractions,
+  desktopTargetArguments,
   discoverDesktopTargetInputs,
   loadSavedDesktopTarget,
   resolveDesktopBootstrapTarget,
@@ -33,6 +34,16 @@ afterEach(() => {
 })
 
 describe('Tianwen Desktop saved target bootstrap', () => {
+  it('keeps every explicit target argument in packaged and development launches', () => {
+    const targetArguments = [
+      '--node', 'D:\\node.exe',
+      '--dsh-root', 'D:\\dsh',
+      '--dsh-home', 'D:\\home',
+    ]
+    expect(desktopTargetArguments(['Tianwen Desktop.exe', ...targetArguments], true)).toEqual(targetArguments)
+    expect(desktopTargetArguments(['electron.exe', 'main.js', ...targetArguments], false)).toEqual(targetArguments)
+  })
+
   it('round-trips only the four-key Desktop target schema', () => {
     const root = fixture()
     const path = join(root.dshHome, 'desktop-target.json')
