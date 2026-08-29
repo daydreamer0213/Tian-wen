@@ -204,6 +204,7 @@ describe('Runtime Bundle browser client package surface', () => {
         '@deepseek-ai/dsh-client-connection',
         '@deepseek-ai/dsh-client-runtime',
         '@deepseek-ai/dsh-client-ui-sidebar',
+        '@deepseek-ai/dsh-client-locale',
       ],
       platform: 'web',
     })
@@ -424,12 +425,14 @@ describe('@tianwen/runtime-bundle', () => {
     )
     expect(manifest.peerDependencies).toEqual({
       '@deepseek-ai/dsh-client-connection': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-client-locale': '0.1.1-rc.2',
       '@deepseek-ai/dsh-client-runtime': '0.1.1-rc.2',
       '@deepseek-ai/dsh-client-ui-sidebar': '0.1.1-rc.2',
       react: '18.2.0',
     })
     expect(manifest.peerDependenciesMeta).toEqual({
       '@deepseek-ai/dsh-client-connection': { optional: true },
+      '@deepseek-ai/dsh-client-locale': { optional: true },
       '@deepseek-ai/dsh-client-runtime': { optional: true },
       '@deepseek-ai/dsh-client-ui-sidebar': { optional: true },
       react: { optional: true },
@@ -442,6 +445,7 @@ describe('@tianwen/runtime-bundle', () => {
       },
     })
     expect(manifest.devDependencies).toMatchObject({
+      '@deepseek-ai/dsh-client-locale': '0.1.1-rc.2',
       '@tianwen/evidence': 'workspace:*',
       '@tianwen/runtime': 'workspace:*',
       esbuild: '0.28.2',

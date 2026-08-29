@@ -209,10 +209,15 @@ describe('Learn Loop sidebar slot', () => {
     expect(applied).toEqual([])
   })
 
-  it('registers one footer action and disposes the registration with its fiber', () => {
+  it('registers one localized footer action and disposes the slot and dictionaries', () => {
     let dispose: (() => void) | undefined
-    const unregister = vi.fn()
-    const register = vi.fn(() => unregister)
+    const unregisterSlot = vi.fn()
+    const unregisterZh = vi.fn()
+    const unregisterEn = vi.fn()
+    const register = vi.fn(() => unregisterSlot)
+    const registerLocale = vi.fn()
+      .mockReturnValueOnce(unregisterZh)
+      .mockReturnValueOnce(unregisterEn)
     const slots = {
       inject: vi.fn((_name: string, callback: () => (() => void)) => {
         dispose = callback()
@@ -222,14 +227,30 @@ describe('Learn Loop sidebar slot', () => {
     }
     const ctx = {
       slots,
+      locale: { register: registerLocale },
       sessions: { open: vi.fn(), current: undefined },
       connection: { rpc: { call: vi.fn() } },
     }
 
     apply(ctx as never)
 
-    expect(inject).toEqual(['slots', 'sessions', 'connection'])
+    expect(inject).toEqual(['slots', 'sessions', 'connection', 'locale'])
     expect(slots.inject).toHaveBeenCalledWith('sidebar.footer.action', expect.any(Function))
+    expect(registerLocale).toHaveBeenNthCalledWith(
+      1,
+      'tianwen.learn-loop',
+      'zh',
+      expect.any(Object),
+    )
+    expect(registerLocale).toHaveBeenNthCalledWith(
+      2,
+      'tianwen.learn-loop',
+      'en',
+      expect.any(Object),
+    )
+    expect(Object.keys(registerLocale.mock.calls[0]![2] as object).sort()).toEqual(
+      Object.keys(registerLocale.mock.calls[1]![2] as object).sort(),
+    )
     expect(register).toHaveBeenCalledTimes(1)
     expect(register).toHaveBeenCalledWith({
       name: 'sidebar.footer.action',
@@ -238,6 +259,8 @@ describe('Learn Loop sidebar slot', () => {
     }, expect.any(Function))
 
     dispose?.()
-    expect(unregister).toHaveBeenCalledOnce()
+    expect(unregisterSlot).toHaveBeenCalledOnce()
+    expect(unregisterZh).toHaveBeenCalledOnce()
+    expect(unregisterEn).toHaveBeenCalledOnce()
   })
 })
