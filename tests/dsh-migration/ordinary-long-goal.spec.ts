@@ -97,6 +97,45 @@ describe('ordinary long Goal record', () => {
     }
   })
 
+  it('rejects unsafe generated Long Goal ids before creating a record', () => {
+    const stateRoot = createStateRoot()
+    try {
+      expect(() => createLongGoal({
+        stateRoot,
+        objective: 'Ship the release',
+        tasks: ['Prepare notes'],
+        maxTaskRounds: 3,
+      }, { id: () => '../outside' })).toThrow('Long Goal id is invalid')
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects traversal Long Goal ids before reading or binding outside the record directory', () => {
+    const stateRoot = createStateRoot()
+    try {
+      const escapedPath = join(stateRoot, 'escaped.json')
+      const escaped = {
+        schemaVersion: 'tianwen.long-goal.v1',
+        id: GOAL_ID,
+        objective: 'Escaped record',
+        maxTaskRounds: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        tasks: [{ id: 'task-1', objective: 'Escaped task', execution: null }],
+      }
+      writeFileSync(escapedPath, JSON.stringify(escaped), 'utf8')
+
+      expect(() => readLongGoal(stateRoot, '../escaped')).toThrow('Long Goal id is invalid')
+      expect(() => bindLongGoalTask(stateRoot, '../escaped', 'task-1', {
+        goalId: 'dsh-goal-1', sessionId: 'dsh-session-1',
+      })).toThrow('Long Goal id is invalid')
+      expect(readFileSync(escapedPath, 'utf8')).toBe(JSON.stringify(escaped))
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
   it('rejects invalid authored values and malformed durable records without repair', () => {
     const stateRoot = createStateRoot()
     try {

@@ -77,6 +77,8 @@ type StatusTarget = {
   readonly evolutionRoot: string
 }
 
+const LONG_GOAL_ID = /^tianwen-long-goal-[A-Za-z0-9][A-Za-z0-9-]*$/
+
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(value).sort()
   const expected = [...keys].sort()
@@ -89,6 +91,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
+}
+
+function isLongGoalId(value: unknown): value is string {
+  return isNonEmptyString(value) && LONG_GOAL_ID.test(value)
 }
 
 function isPositiveInteger(value: unknown): value is number {
@@ -104,6 +110,7 @@ function longGoalsDirectory(stateRoot: string): string {
 }
 
 function recordPath(stateRoot: string, longGoalId: string): string {
+  if (!isLongGoalId(longGoalId)) throw new TypeError('Long Goal id is invalid')
   return join(longGoalsDirectory(stateRoot), `${longGoalId}.json`)
 }
 
@@ -144,8 +151,7 @@ function parseLongGoal(value: unknown): LongGoalRecord {
       'updatedAt', 'tasks',
     ]) ||
     value.schemaVersion !== 'tianwen.long-goal.v1' ||
-    !isNonEmptyString(value.id) ||
-    !value.id.startsWith('tianwen-long-goal-') ||
+    !isLongGoalId(value.id) ||
     !isNonEmptyString(value.objective) ||
     !isPositiveInteger(value.maxTaskRounds) ||
     !isTimestamp(value.createdAt) ||
@@ -214,12 +220,13 @@ export function createLongGoal(input: {
 } = {}): LongGoalRecord {
   validateCreateInput(input)
   const suffix = (dependencies.id ?? randomUUID)()
-  if (!isNonEmptyString(suffix)) throw new TypeError('Long Goal id is invalid')
+  const id = `tianwen-long-goal-${suffix}`
+  if (!isLongGoalId(id)) throw new TypeError('Long Goal id is invalid')
   const now = (dependencies.now ?? Date.now)()
   if (!isTimestamp(now)) throw new TypeError('Long Goal clock is invalid')
   const record: LongGoalRecord = {
     schemaVersion: 'tianwen.long-goal.v1',
-    id: `tianwen-long-goal-${suffix}`,
+    id,
     objective: input.objective,
     maxTaskRounds: input.maxTaskRounds,
     createdAt: now,
@@ -235,13 +242,18 @@ export function createLongGoal(input: {
 }
 
 export function readLongGoal(stateRoot: string, goalId: string): LongGoalRecord {
-  if (!isNonEmptyString(stateRoot) || !isNonEmptyString(goalId)) {
+  if (!isNonEmptyString(stateRoot)) {
     throw new TypeError('Long Goal location is invalid')
   }
+  if (!isLongGoalId(goalId)) throw new TypeError('Long Goal id is invalid')
   const path = recordPath(stateRoot, goalId)
   if (!existsSync(path)) throw new LongGoalNotFoundError(goalId)
   try {
-    return parseLongGoal(JSON.parse(readFileSync(path, 'utf8')) as unknown)
+    const record = parseLongGoal(JSON.parse(readFileSync(path, 'utf8')) as unknown)
+    if (record.id !== goalId) {
+      throw new LongGoalIntegrityError('Long Goal record id does not match its path')
+    }
+    return record
   } catch (error) {
     if (error instanceof LongGoalIntegrityError) throw error
     throw new LongGoalIntegrityError('Long Goal record is invalid', { cause: error })
