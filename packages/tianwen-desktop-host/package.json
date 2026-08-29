@@ -30,6 +30,7 @@
     },
     "files": [
       "dist/main.js",
+      "dist/locale.js",
       "dist/host.js",
       "dist/bootstrap.js",
       "dist/profile-prepare.js",

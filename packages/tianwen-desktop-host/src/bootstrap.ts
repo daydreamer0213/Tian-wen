@@ -2,7 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { parseDesktopArgs, resolveDesktopBaseTarget } from './host.js'
+import { desktopCopy } from './locale.js'
 import type { DesktopBaseTarget, DesktopTargetInput } from './host.js'
+import type { DesktopLocale } from './locale.js'
 
 export const DESKTOP_TARGET_FILE_NAME = 'desktop-target.json'
 export const DESKTOP_TARGET_SCHEMA_VERSION = 'tianwen.desktop-target.v1' as const
@@ -209,24 +211,28 @@ export interface DesktopDialog {
   showMessageBox(options: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue>
 }
 
-export function createDesktopBootstrapInteractions(dialog: DesktopDialog): DesktopBootstrapInteractions {
+export function createDesktopBootstrapInteractions(
+  dialog: DesktopDialog,
+  locale: DesktopLocale = 'en',
+): DesktopBootstrapInteractions {
+  const copy = desktopCopy(locale)
   return {
     async selectTarget(suggested) {
       const node = await dialog.showOpenDialog({
-        title: 'Select Node executable',
+        title: copy.selectNodeTitle,
         ...(suggested?.nodeExecutable === undefined ? {} : { defaultPath: suggested.nodeExecutable }),
         properties: ['openFile'],
-        filters: [{ name: 'Node executable', extensions: ['exe'] }],
+        filters: [{ name: copy.nodeExecutableFilter, extensions: ['exe'] }],
       })
       if (node.canceled) return undefined
       const dshRoot = await dialog.showOpenDialog({
-        title: 'Select DSH root',
+        title: copy.selectDshRootTitle,
         ...(suggested?.dshRoot === undefined ? {} : { defaultPath: suggested.dshRoot }),
         properties: ['openDirectory'],
       })
       if (dshRoot.canceled) return undefined
       const dshHome = await dialog.showOpenDialog({
-        title: 'Select DSH home',
+        title: copy.selectDshHomeTitle,
         ...(suggested?.dshHome === undefined ? {} : { defaultPath: suggested.dshHome }),
         properties: ['openDirectory'],
       })
@@ -240,9 +246,9 @@ export function createDesktopBootstrapInteractions(dialog: DesktopDialog): Deskt
     async confirmSavedTargetReplacement(reason) {
       const result = await dialog.showMessageBox({
         type: 'warning',
-        message: 'Saved Tianwen Desktop target is invalid',
+        message: copy.savedTargetInvalid,
         detail: reason,
-        buttons: ['Choose replacement', 'Cancel'],
+        buttons: [copy.chooseReplacement, copy.cancel],
         defaultId: 0,
         cancelId: 1,
       })
@@ -251,9 +257,9 @@ export function createDesktopBootstrapInteractions(dialog: DesktopDialog): Deskt
     async reportSelectedTargetError(reason) {
       await dialog.showMessageBox({
         type: 'error',
-        message: 'Selected Tianwen Desktop target is invalid',
+        message: copy.selectedTargetInvalid,
         detail: reason,
-        buttons: ['OK'],
+        buttons: [copy.ok],
       })
     },
   }

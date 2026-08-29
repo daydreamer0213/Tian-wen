@@ -13,7 +13,12 @@ import {
   resolveDesktopBaseTarget,
   startDesktopWebHost,
 } from './host.js'
+import { chromiumLocale, desktopCopy, desktopLocale } from './locale.js'
 import { resolvePreparedDesktopTarget } from './profile-prepare.js'
+
+const locale = desktopLocale()
+const copy = desktopCopy(locale)
+app.commandLine.appendSwitch('lang', chromiumLocale(locale))
 
 async function start(): Promise<void> {
   await app.whenReady()
@@ -21,7 +26,7 @@ async function start(): Promise<void> {
     desktopTargetArguments(process.argv, app.isPackaged),
     join(app.getPath('userData'), DESKTOP_TARGET_FILE_NAME),
     {
-      ...createDesktopBootstrapInteractions(dialog),
+      ...createDesktopBootstrapInteractions(dialog, locale),
       validateTarget: resolveDesktopBaseTarget,
     },
   )
@@ -36,9 +41,9 @@ async function start(): Promise<void> {
       async confirmCreateProfile(profileRoot) {
         const result = await dialog.showMessageBox({
           type: 'warning',
-          message: 'Create the Tianwen Web Profile?',
-          detail: `Tianwen Desktop will ask the selected DSH to create this missing Profile once:\n${profileRoot}`,
-          buttons: ['Create Profile', 'Cancel'],
+          message: copy.createProfileTitle,
+          detail: `${copy.createProfileInstruction}\n${profileRoot}`,
+          buttons: [copy.createProfileAction, copy.cancel],
           defaultId: 0,
           cancelId: 1,
         })
@@ -47,9 +52,9 @@ async function start(): Promise<void> {
       async showManualPreparation(reason, command) {
         await dialog.showMessageBox({
           type: 'info',
-          message: 'Manual Web Profile preparation is required',
-          detail: `${reason}\n\nRun this PowerShell command, then open Tianwen Desktop again:\n${command}`,
-          buttons: ['OK'],
+          message: copy.manualPreparationTitle,
+          detail: `${reason}\n\n${copy.manualPreparationInstruction}\n${command}`,
+          buttons: [copy.ok],
         })
       },
     },
@@ -95,9 +100,9 @@ if (app.requestSingleInstanceLock()) {
     try {
       if (app.isReady()) await dialog.showMessageBox({
         type: 'error',
-        message: 'Tianwen Desktop failed to start',
+        message: copy.fatalStartupTitle,
         detail: reason,
-        buttons: ['OK'],
+        buttons: [copy.ok],
       })
     } finally {
       app.exit(1)

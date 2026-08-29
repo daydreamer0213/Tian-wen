@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createDesktopBootstrapInteractions,
   desktopTargetArguments,
@@ -416,6 +416,24 @@ describe('Tianwen Desktop saved target bootstrap', () => {
     expect(calls[0]?.options).toMatchObject({ properties: ['openFile'], filters: [{ extensions: ['exe'] }] })
     if (cancelledAt > 0) expect(calls[1]?.options).toMatchObject({ properties: ['openDirectory'] })
     if (cancelledAt > 1) expect(calls[2]?.options).toMatchObject({ properties: ['openDirectory'] })
+  })
+
+  it('uses Chinese copy in native bootstrap dialogs when requested', async () => {
+    const dialog = {
+      showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['C:\\Node22\\node.exe'] })),
+      showMessageBox: vi.fn(async () => ({ response: 0, checkboxChecked: false })),
+    }
+    const interactions = createDesktopBootstrapInteractions(dialog, 'zh')
+
+    await interactions.selectTarget()
+    await interactions.confirmSavedTargetReplacement('upstream diagnostic')
+
+    expect(dialog.showOpenDialog).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      title: '选择 Node 可执行文件',
+    }))
+    expect(dialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
+      message: '已保存的 Tianwen Desktop 目标无效',
+    }))
   })
 
   it('omits native dialog default paths when no target is suggested', async () => {
