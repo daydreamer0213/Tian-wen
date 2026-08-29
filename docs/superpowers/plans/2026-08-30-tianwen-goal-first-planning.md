@@ -364,10 +364,15 @@ git commit -m "feat: make Learn Loop goal-first"
 
 **Files:**
 - Create: `packages/tianwen-runtime-bundle/src/goal-first-runner.ts`
+- Create: `packages/tianwen-runtime-bundle/src/goal-first.ts`
+- Create: `packages/tianwen-runtime-bundle/goal-first.patch.yml`
 - Modify: `packages/tianwen-runtime-bundle/src/cli.ts`
 - Modify: `packages/tianwen-runtime-bundle/package.json`
 - Modify: `tests/dsh-migration/ordinary-long-goal-cli.spec.ts`
+- Modify: `tests/dsh-migration/runtime-bundle.spec.ts`
+- Modify: `tests/dsh-migration/tianwen-installer.spec.ts`
 - Modify: `tests/dsh-migration/learn-loop-web-product.spec.ts`
+- Modify: `scripts/verify-dsh-profile.mjs`
 - Create: `docs/operations/tianwen-goal-first-planning-handoff.md`
 
 **Interfaces:**
@@ -387,11 +392,11 @@ tianwen goal abandon --goal <id> --revision <n>
 
 Require the four commands to reject missing/repeated/mixed fields, preserve all v1 command behavior, emit exact JSON results with `--json`, and call one fake shared service operation. Verify no CLI adapter contains its own planning/state-table branches.
 
-- [ ] **Step 2: Implement one runner over the existing DSH Profile boot pattern**
+- [ ] **Step 2: Implement one launcher and runner over the existing DSH Profile boot pattern**
 
 Reuse the same public Profile composition used by existing create/resume runners, then call `goal-first-service.ts` with `long-goal-planner.ts` and Task runtime adapters. Do not duplicate the planner prompt, typed-tool schema, or transition table in `cli.ts`; the CLI only validates arguments, resolves the product target, launches the runner, and prints the returned projection.
 
-Add `dist/goal-first-runner.js` to the Runtime Bundle build/files list and installer artifact checks.
+Publish a dedicated `goal-first.patch.yml` that mounts the configured Agent preset support and exactly one one-shot runner. Add `dist/goal-first-runner.js`, its export, the patch, and the exact verification allowlists to the Runtime Bundle and installer artifact checks. A built runner that the installed Profile cannot mount is incomplete.
 
 - [ ] **Step 3: Run deterministic product gates**
 
@@ -409,13 +414,22 @@ Use a fresh product root and disposable repository under `D:\DevData`. Through t
 
 This smoke is runtime evidence only. Report Provider/model identity if available, but do not infer billing from Session, Turn, tool, or request counts and do not create a controlled Activity.
 
-- [ ] **Step 5: Write the handoff, review, and commit**
+- [ ] **Step 5: Review and commit the deterministic product implementation**
 
-Separate product result, runtime evidence, learning facts (none unless independently produced), and external facts. Record any recoverable Provider/no-tool outcome honestly. Review the complete diff once for v1 compatibility, workspace/Session identity, state-table ownership, and accidental scope expansion; rerun only tests affected by review fixes.
+Review the implementation diff once for v1 compatibility, workspace/Session identity, state-table ownership, installed artifact completeness, and accidental scope expansion. Rerun only tests affected by review fixes.
 
 ```powershell
-git add packages/tianwen-runtime-bundle/src/goal-first-runner.ts packages/tianwen-runtime-bundle/src/cli.ts packages/tianwen-runtime-bundle/package.json tests/dsh-migration/ordinary-long-goal-cli.spec.ts tests/dsh-migration/learn-loop-web-product.spec.ts docs/operations/tianwen-goal-first-planning-handoff.md
+git add packages/tianwen-runtime-bundle/src/goal-first-runner.ts packages/tianwen-runtime-bundle/src/goal-first.ts packages/tianwen-runtime-bundle/goal-first.patch.yml packages/tianwen-runtime-bundle/src/cli.ts packages/tianwen-runtime-bundle/package.json tests/dsh-migration/ordinary-long-goal-cli.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/tianwen-installer.spec.ts tests/dsh-migration/learn-loop-web-product.spec.ts scripts/verify-dsh-profile.mjs
 git commit -m "feat: ship goal-first Learn Loop"
+```
+
+- [ ] **Step 6: Controller runs the one-shot smoke and writes the handoff**
+
+Separate product result, runtime evidence, learning facts (none unless independently produced), and external facts. Record any recoverable Provider/no-tool outcome honestly. Do not amend the reviewed implementation commit to make runtime evidence look pre-existing.
+
+```powershell
+git add docs/operations/tianwen-goal-first-planning-handoff.md
+git commit -m "docs: close goal-first planning"
 ```
 
 ---
