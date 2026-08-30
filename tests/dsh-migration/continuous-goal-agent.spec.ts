@@ -78,6 +78,22 @@ function operations(): ContinuousGoalAgentOperations & {
 }
 
 describe('continuous Goal Agent controls', () => {
+  it('shows command usage for empty input without querying or creating a Goal', async () => {
+    const subject = controlsAgent()
+    const ops = operations()
+    installContinuousGoalCommand(subject.agent, ops)
+
+    for (const rawInput of ['', '   ']) {
+      await expect(subject.commands[0]!.handler({ agent: subject.agent, rawInput }))
+        .resolves.toEqual({
+          kind: 'error',
+          text: 'Usage: /goal <objective> | pause | resume | edit <direction>',
+        })
+    }
+    expect(ops.create).not.toHaveBeenCalled()
+    expect(ops.control).not.toHaveBeenCalled()
+  })
+
   it('trims command separator whitespace and passes only the invoking Agent identity to Goal operations', async () => {
     const subject = controlsAgent()
     const ops = operations()

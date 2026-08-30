@@ -69,6 +69,9 @@ async function handleGoalCommand(
   input: string,
   operations: ContinuousGoalAgentOperations,
 ): Promise<{ readonly kind: 'success' | 'error', readonly text: string }> {
+  if (input.length === 0) {
+    return { kind: 'error', text: 'Usage: /goal <objective> | pause | resume | edit <direction>' }
+  }
   if (input === 'edit') return { kind: 'error', text: 'Usage: /goal edit <direction>' }
   if (input.startsWith('edit ')) {
     const text = input.slice('edit '.length).trim()
@@ -85,7 +88,6 @@ async function handleGoalCommand(
   try {
     if (input === 'pause') return { kind: 'success', text: (await operations.control(agent, { action: 'pause' })).action }
     if (input === 'resume') return { kind: 'success', text: (await operations.control(agent, { action: 'resume' })).action }
-    if (input.length === 0) return { kind: 'success', text: (await operations.control(agent, { action: 'status' })).action }
     return { kind: 'success', text: (await operations.create(agent, input)).action }
   } catch (error) {
     return commandError(error)
