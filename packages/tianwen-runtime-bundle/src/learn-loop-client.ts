@@ -24,6 +24,13 @@ export interface LearningClueAnalysisStart {
   readonly sessionId: string
 }
 
+export interface LearningClueReviewResult {
+  readonly schemaVersion: 'tianwen.learning-clue-review-result.v1'
+  readonly reviewed: true
+  readonly occurrenceCount: number
+  readonly reviewedAt: string
+}
+
 export interface LearnLoopClient {
   list(signal?: AbortSignal): Promise<readonly AnyLongGoalSummary[]>
   learningClues(signal?: AbortSignal): Promise<LearningClueStatus>
@@ -31,6 +38,10 @@ export interface LearnLoopClient {
     ticketId: string,
     signal?: AbortSignal,
   ): Promise<LearningClueAnalysisStart>
+  reviewLearningClue(
+    ticketId: string,
+    signal?: AbortSignal,
+  ): Promise<LearningClueReviewResult>
   create(input: {
     readonly objective: string
     readonly tasks: readonly string[]
@@ -331,6 +342,11 @@ function isLearningClueAnalysis(value: unknown): boolean {
     isCanonicalIsoTimestamp(value.finishedAt)
 }
 
+function isLearningClueReview(value: unknown): boolean {
+  return isRecord(value) && hasExactKeys(value, ['reviewedAt', 'occurrenceCount']) &&
+    isCanonicalIsoTimestamp(value.reviewedAt) && isPositiveInteger(value.occurrenceCount)
+}
+
 function isLearningClueStatus(value: unknown): value is LearningClueStatus {
   if (!isRecord(value) || !hasExactKeys(value, ['schemaVersion', 'items']) ||
     value.schemaVersion !== 'tianwen.learning-clue-status.v1' || !Array.isArray(value.items)) {
@@ -339,12 +355,18 @@ function isLearningClueStatus(value: unknown): value is LearningClueStatus {
   const ticketIds = new Set<string>()
   return value.items.every(item => {
     if (!isRecord(item) || !hasExactKeys(item, [
-      'ticketId', 'status', 'occurrenceCount', 'analysis', 'sources',
+      'ticketId', 'status', 'occurrenceCount', 'analysis', 'review', 'sources',
     ]) || typeof item.ticketId !== 'string' || !/^ticket:[a-f0-9]{64}$/.test(item.ticketId) ||
       ticketIds.has(item.ticketId) || item.status !== 'open' ||
       (item.analysis !== null && !isLearningClueAnalysis(item.analysis)) ||
+      (item.review !== null && !isLearningClueReview(item.review)) ||
       !isPositiveInteger(item.occurrenceCount) || !Array.isArray(item.sources) ||
       item.sources.length === 0) return false
+    if (item.review !== null && (
+      !isRecord(item.review) || !isRecord(item.analysis) ||
+      (item.analysis.phase !== 'complete' && item.analysis.phase !== 'failed') ||
+      item.review.occurrenceCount !== item.occurrenceCount
+    )) return false
     ticketIds.add(item.ticketId)
     const sourceIds = new Set<string>()
     return item.sources.every(source => {
@@ -417,6 +439,17 @@ export function createLearnLoopClient(rpc: ClientConnectionRpc): LearnLoopClient
         invalidResponse()
       }
       return value as unknown as LearningClueAnalysisStart
+    },
+    async reviewLearningClue(ticketId, signal) {
+      const value = await call(rpc, 'review-learning-clue', { ticketId }, signal)
+      if (!isRecord(value) || !hasExactKeys(value, [
+        'schemaVersion', 'reviewed', 'occurrenceCount', 'reviewedAt',
+      ]) || value.schemaVersion !== 'tianwen.learning-clue-review-result.v1' ||
+        value.reviewed !== true || !isPositiveInteger(value.occurrenceCount) ||
+        !isCanonicalIsoTimestamp(value.reviewedAt)) {
+        invalidResponse()
+      }
+      return value as unknown as LearningClueReviewResult
     },
     async create(input, signal) {
       const value = await call(rpc, 'create', input, signal)

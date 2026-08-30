@@ -36,7 +36,9 @@ Runtime 插件，Desktop 不拥有第二套 Goal 引擎。
 Agent Session。分析结果、运行进度和失败都由该 Session 持久化；重启或再次点击只打开同一个
 Session，不自动创建第二次分析。浏览器投影和界面不显示问题指纹、Signal ID、工作区、Evidence
 或原始反馈说明；没有安全 Goal-first 来源的 Ticket 不进入界面。分析仍不会自动升级为 Case、
-Lesson、Candidate、Skill 或代码修改。
+Lesson、Candidate、Skill 或代码修改。分析进入终态后，用户可将线索标记为“已审阅”；该状态只
+表达用户已经检查过线索，默认从待处理列表隐藏。若 Ticket 后续合并了新的 Signal，当前出现次数
+超过已审阅次数，线索会自动回到待处理。审阅记录不复制私密反馈或分析内容，也不表示问题已修复。
 
 当前可发布 Runtime 身份为 `@tianwen/runtime-bundle@0.1.1`，可选 Desktop 身份为
 `0.1.0-preview.2`。Desktop 只把精确 `0.1.0` 识别为可更新前身，得到用户确认后调用一次
@@ -369,10 +371,11 @@ persistence 与 Natural Trial stream-error 已覆盖链路成立、成功交付�
 必须先为普通 Task 冻结真实验收合同，不能用“Goal complete”代替验收通过；在此之前，继续改善
 Goal 规划、执行和用户引导比扩展学习治理框架更优先。
 
-Learning clue inbox 已让现有 Ticket 的来源和重复次数进入普通产品；“分析一次”也已经复用普通
-DSH Session 落地，私密反馈只进入该 Session，结果和失败不复制到第二套数据库。下一步若让分析
-产生行动，必须把“模型分析”与“证据成立”分开：先提供明确的用户选择或合法 Case 入口，再走
-既有验证与 Candidate 治理；不能因为模型认为问题可复用就自动改代码、安装 Skill 或宣称已经学习。
+Learning clue inbox 已让现有 Ticket 的来源和重复次数进入普通产品；“分析一次”复用普通 DSH
+Session，“已审阅”补齐了人工收件箱生命周期。私密反馈只进入分析 Session，结果和失败不复制到
+第二套数据库，审阅也不改变 Evolution 治理状态。现有分析 Session 和 Goal“补充方向”已经提供
+人工后续通道；若未来再增加自动行动，仍必须把“模型分析”与“证据成立”分开，不能因为模型认为
+问题可复用就自动改代码、创建 Candidate、安装 Skill 或宣称已经学习。
 
 Runtime `0.1.1` 与 Desktop `0.1.0-preview.2` 已解决“不同构建仍共用 0.1.0 身份”的分发问题。
 Desktop 和正式安装器各自只支持一个精确前身，不建设在线 updater、后台下载或通用版本比较器；

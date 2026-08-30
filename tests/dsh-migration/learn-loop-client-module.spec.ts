@@ -520,6 +520,7 @@ describe('Learn Loop compiled DSH client module', () => {
           status: 'open',
           occurrenceCount: 2,
           analysis: null,
+          review: null,
           sources: [{
             longGoalId: completed.goal.id,
             goalObjective: completed.goal.objective,
@@ -583,6 +584,7 @@ describe('Learn Loop compiled DSH client module', () => {
           status: 'open',
           occurrenceCount: 1,
           analysis: null,
+          review: null,
           sources: [{
             longGoalId: 'tianwen-long-goal-analysis',
             goalObjective: 'Improve future implementation quality',
@@ -651,6 +653,7 @@ describe('Learn Loop compiled DSH client module', () => {
         startedAt: '2026-08-30T00:00:00.000Z',
         ...(phase === 'running' ? {} : { finishedAt: '2026-08-30T00:01:00.000Z' }),
       },
+      review: null,
       sources: [{
         longGoalId: `tianwen-long-goal-${phase}`,
         goalObjective: `Goal ${phase}`,
@@ -687,6 +690,8 @@ describe('Learn Loop compiled DSH client module', () => {
     expect(text(tree)).toContain('Analysis did not complete')
     expect(elements(tree).filter(element => element.type === 'button' &&
       text(element) === 'Open analysis Session')).toHaveLength(3)
+    expect(elements(tree).filter(element => element.type === 'button' &&
+      text(element) === 'Mark reviewed')).toHaveLength(2)
     expect(text(tree)).not.toContain('analysis-running')
 
     locale.set('zh')
@@ -696,12 +701,139 @@ describe('Learn Loop compiled DSH client module', () => {
     expect(text(tree)).toContain('分析未完成')
     expect(elements(tree).filter(element => element.type === 'button' &&
       text(element) === '打开分析会话')).toHaveLength(3)
+    expect(elements(tree).filter(element => element.type === 'button' &&
+      text(element) === '标记为已审阅')).toHaveLength(2)
 
     ;(findButton(tree, '打开分析会话').props.onClick as () => void)()
     await flushClient()
 
     expect(client.open).toHaveBeenCalledWith('analysis-running')
     expect(rpc.call.mock.calls.some(call => call[1] === 'analyze-learning-clue')).toBe(false)
+  })
+
+  it('hides reviewed clues by default and refreshes after marking a terminal analysis reviewed', async () => {
+    const pendingTicketId = `ticket:${'4'.repeat(64)}`
+    const reviewedTicketId = `ticket:${'5'.repeat(64)}`
+    let pendingReview: null | { reviewedAt: string, occurrenceCount: number } = null
+    const learningClues = vi.fn(async () => ({
+      ok: true,
+      value: {
+        schemaVersion: 'tianwen.learning-clue-status.v1',
+        items: [{
+          ticketId: pendingTicketId,
+          status: 'open',
+          occurrenceCount: 1,
+          analysis: {
+            phase: 'complete', sessionId: 'analysis-pending',
+            startedAt: '2026-08-30T00:00:00.000Z',
+            finishedAt: '2026-08-30T00:01:00.000Z',
+          },
+          review: pendingReview,
+          sources: [{
+            longGoalId: 'goal-pending', goalObjective: 'Pending Goal',
+            taskId: 'task-pending', taskObjective: 'Pending Task',
+            recordedAt: '2026-08-30T00:00:00.000Z',
+          }],
+        }, {
+          ticketId: reviewedTicketId,
+          status: 'open',
+          occurrenceCount: 2,
+          analysis: {
+            phase: 'failed', sessionId: 'analysis-reviewed',
+            startedAt: '2026-08-30T00:00:00.000Z',
+            finishedAt: '2026-08-30T00:01:00.000Z',
+          },
+          review: { reviewedAt: '2026-08-30T00:02:00.000Z', occurrenceCount: 2 },
+          sources: [{
+            longGoalId: 'goal-reviewed', goalObjective: 'Reviewed Goal',
+            taskId: 'task-reviewed', taskObjective: 'Reviewed Task',
+            recordedAt: '2026-08-30T00:00:00.000Z',
+          }],
+        }],
+      },
+    }))
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string, payload: unknown) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [] } }
+      if (endpoint === 'review-learning-clue') {
+        pendingReview = { reviewedAt: '2026-08-30T00:03:00.000Z', occurrenceCount: 1 }
+        return { ok: true, value: {
+          schemaVersion: 'tianwen.learning-clue-review-result.v1',
+          reviewed: true,
+          occurrenceCount: 1,
+          reviewedAt: pendingReview.reviewedAt,
+        } }
+      }
+      throw new Error(`unexpected endpoint ${endpoint}: ${JSON.stringify(payload)}`)
+    }) }
+    const locale = new TestLocale('en')
+    const client = loadClientModule({
+      list: createSessionList({
+        current: undefined,
+        byId: {
+          'analysis-pending': sessionRow({ sessionId: 'analysis-pending', cwd: 'D:/workspace' }),
+          'analysis-reviewed': sessionRow({ sessionId: 'analysis-reviewed', cwd: 'D:/workspace' }),
+        },
+      }),
+      locale,
+      learningClues,
+      rpc,
+    })
+    let tree = client.render()
+
+    ;(findElement(tree, element => element.props['aria-label'] === 'Learn Loop').props.onClick as () => void)()
+    await flushClient()
+    tree = client.render()
+    expect(findButton(tree, 'Improvement clues (1)')).toBeDefined()
+    ;(findButton(tree, 'Improvement clues (1)').props.onClick as () => void)()
+    await flushClient()
+    tree = client.render()
+
+    expect(text(tree)).toContain('Pending Goal')
+    expect(text(tree)).not.toContain('Reviewed Goal')
+    expect(text(tree)).toContain('Reviewed (1)')
+    expect(findButton(tree, 'Show reviewed')).toBeDefined()
+    expect(elements(tree).filter(element => element.type === 'button' &&
+      text(element) === 'Mark reviewed')).toHaveLength(1)
+    expect(text(tree)).not.toContain(pendingTicketId)
+    expect(text(tree)).not.toContain(reviewedTicketId)
+
+    ;(findButton(tree, 'Show reviewed').props.onClick as () => void)()
+    tree = client.render()
+    expect(text(tree)).toContain('Reviewed Goal')
+    expect(findButton(tree, 'Hide reviewed')).toBeDefined()
+    expect(elements(tree).filter(element => element.type === 'button' &&
+      text(element) === 'Open analysis Session')).toHaveLength(2)
+
+    ;(findButton(tree, 'Hide reviewed').props.onClick as () => void)()
+    tree = client.render()
+    ;(findButton(tree, 'Mark reviewed').props.onClick as () => void)()
+    await flushClient()
+    tree = client.render()
+
+    expect(rpc.call.mock.calls.find(call => call[1] === 'review-learning-clue')?.[2])
+      .toEqual({ ticketId: pendingTicketId })
+    expect(learningClues).toHaveBeenCalledTimes(3)
+    expect(text(tree)).toContain('No pending improvement clues.')
+    expect(text(tree)).toContain('Reviewed (2)')
+    expect(text(tree)).not.toContain('Pending Goal')
+    expect(elements(tree).some(element => element.type === 'button' &&
+      text(element) === 'Mark reviewed')).toBe(false)
+
+    locale.set('zh')
+    tree = client.render()
+    expect(text(tree)).toContain('没有待处理的改进线索。')
+    expect(text(tree)).toContain('已审阅（2）')
+    expect(findButton(tree, '显示已审阅')).toBeDefined()
+
+    ;(findButton(tree, '显示已审阅').props.onClick as () => void)()
+    tree = client.render()
+    expect(text(tree)).toContain('Pending Goal')
+    expect(text(tree)).toContain('Reviewed Goal')
+    expect(elements(tree).filter(element => element.type === 'button' &&
+      text(element) === '打开分析会话')).toHaveLength(2)
+    ;(findButton(tree, '打开分析会话').props.onClick as () => void)()
+    await flushClient()
+    expect(client.open).toHaveBeenCalledWith('analysis-pending')
   })
 
   it('presents goal-first work as current, completed, next, and abandoned groups', async () => {

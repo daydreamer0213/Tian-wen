@@ -18,7 +18,10 @@ still a problem to understand. The user can explicitly choose **Analyze once**:
 the configured model receives the private feedback in one ordinary, read-only
 DSH Session, and reopening after restart returns to that same Session without
 automatically starting another analysis. Neither the clue nor its analysis
-automatically becomes a Case, Skill, or code change.
+automatically becomes a Case, Skill, or code change. After a terminal analysis,
+the user can mark the clue reviewed; reviewed clues are hidden from the default
+inbox but remain inspectable, and a later recurrence makes the clue pending
+again. Reviewed does not mean fixed or learned.
 
 One fresh configured-model natural task closed through the installed product
 path: its Goal completed, all 45 Evidence records were

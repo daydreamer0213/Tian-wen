@@ -21,6 +21,10 @@ export interface LearningClueItem {
     readonly startedAt: string
     readonly finishedAt?: string
   }
+  readonly review: null | {
+    readonly reviewedAt: string
+    readonly occurrenceCount: number
+  }
   readonly sources: readonly LearningClueSource[]
 }
 
@@ -66,6 +70,7 @@ export function projectLearningClueStatus(input: {
       status: ticket.status,
       occurrenceCount: ticket.signalIds.length,
       analysis: null,
+      review: null,
       sources,
     } satisfies LearningClueItem]
   }).sort((left, right) =>

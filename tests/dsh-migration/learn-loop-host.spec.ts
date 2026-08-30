@@ -20,6 +20,7 @@ import {
   type TianwenGoalTaskFeedbackOperations,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
 import { readLearningClueAnalysisBinding } from '../../packages/tianwen-runtime-bundle/src/learning-clue-analysis.js'
+import { readLearningClueReview } from '../../packages/tianwen-runtime-bundle/src/learning-clue-review.js'
 import { projectLearningClueStatus } from '../../packages/tianwen-runtime-bundle/src/learning-clue-status.js'
 import { runLongGoalPlannerTurn } from '../../packages/tianwen-runtime-bundle/src/long-goal-planner.js'
 import {
@@ -635,6 +636,7 @@ describe('Tianwen Long Goal Web host', () => {
         status: 'open',
         occurrenceCount: 2,
         analysis: null,
+        review: null,
         sources: [{
           longGoalId: 'goal-b',
           goalObjective: 'Reduce support friction',
@@ -720,6 +722,50 @@ describe('Tianwen Long Goal Web host', () => {
     expect(learningClues.analyze).toHaveBeenCalledOnce()
   })
 
+  it('marks a learning clue reviewed only for an exact Ticket payload', async () => {
+    const ticketId = `ticket:${'b'.repeat(64)}`
+    const reviewedAt = '2026-08-30T05:00:00.000Z'
+    const learningClues = {
+      status: vi.fn(async () => ({
+        schemaVersion: 'tianwen.learning-clue-status.v1' as const,
+        items: [],
+      })),
+      analyze: vi.fn(),
+      review: vi.fn(async () => ({
+        schemaVersion: 'tianwen.learning-clue-review-result.v1' as const,
+        reviewed: true as const,
+        occurrenceCount: 2,
+        reviewedAt,
+      })),
+    }
+    const handler = createTianwenLongGoalRpcHandler(
+      ROOTS,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      learningClues,
+    )
+    const signal = AbortSignal.timeout(1_000)
+
+    await expect(handler('review-learning-clue', { ticketId }, signal)).resolves.toEqual({
+      ok: true,
+      value: {
+        schemaVersion: 'tianwen.learning-clue-review-result.v1',
+        reviewed: true,
+        occurrenceCount: 2,
+        reviewedAt,
+      },
+    })
+    expect(learningClues.review).toHaveBeenCalledWith({ ticketId })
+    await expect(handler('review-learning-clue', { ticketId, ignored: true }, signal))
+      .resolves.toEqual({
+        ok: false,
+        error: { code: 'internal', message: 'invalid-request', details: {} },
+      })
+    expect(learningClues.review).toHaveBeenCalledOnce()
+  })
+
   it('analyzes one safe feedback source once without exposing its private evidence', async () => {
     const fixture = createFixtureRoot()
     const ticketId = `ticket:${'f'.repeat(64)}`
@@ -769,7 +815,7 @@ describe('Tianwen Long Goal Web host', () => {
       status: {
         schemaVersion: 'tianwen.learning-clue-status.v1' as const,
         items: [{
-          ticketId, status: 'open' as const, occurrenceCount: 1, analysis: null,
+          ticketId, status: 'open' as const, occurrenceCount: 1, analysis: null, review: null,
           sources: [{
             longGoalId: 'long-goal', goalObjective: '修正启动参数', taskId: 'task-1',
             taskObjective: '定位参数传递', recordedAt: '2026-08-30T00:00:00.000Z',
@@ -830,12 +876,45 @@ describe('Tianwen Long Goal Web host', () => {
       analysisEvents.splice(0, analysisEvents.length,
         { type: 'turn/start', seq: 1, data: { turn: 1 } },
         { type: 'user/message', seq: 2, data: { id: binding.messageId } },
+      )
+      await expect(operations.review({ ticketId })).rejects.toThrow('still running')
+      expect(readLearningClueReview(fixture, ticketId)).toBeUndefined()
+
+      analysisEvents.splice(0, analysisEvents.length,
+        { type: 'turn/start', seq: 1, data: { turn: 1 } },
+        { type: 'user/message', seq: 2, data: { id: binding.messageId } },
         { type: 'assistant/message', seq: 3, surfaceOp: 'append', data: { turn: 1 } },
         { type: 'turn/end', seq: 4, time: 2_000, data: { turn: 1, reason: { kind: 'completed' } } },
       )
       await expect(operations.status()).resolves.toMatchObject({
         items: [{ analysis: { phase: 'complete', sessionId: analysisSessionId } }],
       })
+      const review = await operations.review({ ticketId })
+      expect(review).toMatchObject({
+        schemaVersion: 'tianwen.learning-clue-review-result.v1',
+        reviewed: true,
+        occurrenceCount: 1,
+        reviewedAt: expect.any(String),
+      })
+      expect(readLearningClueReview(fixture, ticketId)).toMatchObject({
+        sessionId: analysisSessionId,
+        messageId: binding.messageId,
+        reviewedOccurrenceCount: 1,
+      })
+      await expect(operations.status()).resolves.toMatchObject({
+        items: [{ review: { occurrenceCount: 1, reviewedAt: review.reviewedAt } }],
+      })
+
+      snapshot.status.items[0]!.occurrenceCount = 2
+      await expect(operations.status()).resolves.toMatchObject({
+        items: [{ occurrenceCount: 2, review: null }],
+      })
+      await expect(operations.review({ ticketId })).resolves.toMatchObject({
+        reviewed: true,
+        occurrenceCount: 2,
+      })
+      expect(readLearningClueReview(fixture, ticketId)?.reviewedOccurrenceCount).toBe(2)
+
       analysisEvents.splice(2, 2,
         { type: 'turn/end', seq: 3, data: { turn: 1, reason: { kind: 'error' } } },
       )

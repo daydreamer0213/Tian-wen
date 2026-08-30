@@ -341,6 +341,7 @@ describe('Learn Loop browser RPC client', () => {
         status: 'open' as const,
         occurrenceCount: 2,
         analysis: null,
+        review: null,
         sources: [{
           longGoalId: statusV2.goal.id,
           goalObjective: statusV2.goal.objective,
@@ -384,11 +385,44 @@ describe('Learn Loop browser RPC client', () => {
         .resolves.toEqual(analyzed)
     }
 
+    const terminalAnalysis = {
+      phase: 'complete' as const,
+      sessionId: 'analysis-complete',
+      startedAt: '2026-08-30T00:01:00.000Z',
+      finishedAt: '2026-08-30T00:02:00.000Z',
+    }
+    const reviewed = {
+      ...clueStatus,
+      items: [{ ...clueStatus.items[0], analysis: terminalAnalysis, review: {
+        reviewedAt: '2026-08-30T00:03:00.000Z',
+        occurrenceCount: 2,
+      } }],
+    }
+    const reviewedRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: reviewed }) }
+    await expect(createLearnLoopClient(reviewedRpc as never).learningClues())
+      .resolves.toEqual(reviewed)
+
     for (const invalid of [
       { ...clueStatus, extra: true },
       { ...clueStatus, items: [{ ...clueStatus.items[0], problemFingerprint: 'private' }] },
       { ...clueStatus, items: [{ ...clueStatus.items[0], signalIds: ['private'] }] },
       { ...clueStatus, items: [{ ...clueStatus.items[0], occurrenceCount: 0 }] },
+      { ...reviewed, items: [{ ...reviewed.items[0], review: {
+        reviewedAt: '2026-08-30T00:03:00Z', occurrenceCount: 2,
+      } }] },
+      { ...reviewed, items: [{ ...reviewed.items[0], review: {
+        reviewedAt: '2026-08-30T00:03:00.000Z', occurrenceCount: 0,
+      } }] },
+      { ...reviewed, items: [{ ...reviewed.items[0], review: {
+        reviewedAt: '2026-08-30T00:03:00.000Z', occurrenceCount: 2, note: 'private',
+      } }] },
+      { ...reviewed, items: [{ ...reviewed.items[0], analysis: null }] },
+      { ...reviewed, items: [{ ...reviewed.items[0], analysis: {
+        phase: 'running', sessionId: 'analysis', startedAt: '2026-08-30T00:01:00.000Z',
+      } }] },
+      { ...reviewed, items: [{ ...reviewed.items[0], review: {
+        reviewedAt: '2026-08-30T00:03:00.000Z', occurrenceCount: 1,
+      } }] },
       { ...clueStatus, items: [{ ...clueStatus.items[0], analysis: {
         phase: 'running', sessionId: 'analysis', startedAt: '2026-08-30T00:01:00.000Z',
         finishedAt: '2026-08-30T00:02:00.000Z',
@@ -449,6 +483,36 @@ describe('Learn Loop browser RPC client', () => {
     ]) {
       const invalidRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: invalid }) }
       await expect(createLearnLoopClient(invalidRpc as never).analyzeLearningClue(ticketId))
+        .rejects.toThrow('invalid Tianwen RPC response')
+    }
+  })
+
+  it('marks one terminal learning clue reviewed with exact request and response parsing', async () => {
+    const ticketId = `ticket:${'a'.repeat(64)}`
+    const result = {
+      schemaVersion: 'tianwen.learning-clue-review-result.v1' as const,
+      reviewed: true as const,
+      occurrenceCount: 2,
+      reviewedAt: '2026-08-30T00:03:00.000Z',
+    }
+    const signal = new AbortController().signal
+    const rpc = { call: vi.fn().mockResolvedValue({ ok: true, value: result }) }
+    const client = createLearnLoopClient(rpc as never)
+
+    await expect(client.reviewLearningClue(ticketId, signal)).resolves.toEqual(result)
+    expect(rpc.call).toHaveBeenCalledWith(
+      '/tianwen', 'review-learning-clue', { ticketId }, signal,
+    )
+
+    for (const invalid of [
+      { ...result, extra: true },
+      { ...result, schemaVersion: 'tianwen.learning-clue-review-result.v2' },
+      { ...result, reviewed: false },
+      { ...result, occurrenceCount: 0 },
+      { ...result, reviewedAt: '2026-08-30T00:03:00Z' },
+    ]) {
+      const invalidRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: invalid }) }
+      await expect(createLearnLoopClient(invalidRpc as never).reviewLearningClue(ticketId))
         .rejects.toThrow('invalid Tianwen RPC response')
     }
   })

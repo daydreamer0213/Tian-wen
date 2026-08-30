@@ -64,6 +64,10 @@ import {
   readLearningClueAnalysisBinding,
   type LearningClueAnalysisBinding,
 } from './learning-clue-analysis.js'
+import {
+  readLearningClueReview,
+  writeLearningClueReview,
+} from './learning-clue-review.js'
 import { readGoalStatus } from './status.js'
 
 type RpcResult<T> =
@@ -247,6 +251,14 @@ export interface TianwenLearningClueOperations {
     readonly schemaVersion: 'tianwen.learning-clue-analysis-start.v1'
     readonly created: boolean
     readonly sessionId: string
+  }>
+  readonly review: (input: {
+    readonly ticketId: string
+  }) => Promise<{
+    readonly schemaVersion: 'tianwen.learning-clue-review-result.v1'
+    readonly reviewed: true
+    readonly occurrenceCount: number
+    readonly reviewedAt: string
   }>
 }
 
@@ -803,6 +815,17 @@ export function createTianwenLongGoalRpcHandler(
         ticketId: payload.ticketId,
       }) }
     }
+    if (
+      endpoint === 'review-learning-clue' &&
+      learningClueOperations !== undefined &&
+      isRecord(payload) &&
+      hasExactKeys(payload, ['ticketId']) &&
+      isNonEmptyString(payload.ticketId)
+    ) {
+      return { ok: true, value: await learningClueOperations.review({
+        ticketId: payload.ticketId,
+      }) }
+    }
     return invalidRequest()
   }
 }
@@ -958,30 +981,52 @@ export function createLearningClueAnalysisOperations(
     readonly created: boolean
     readonly sessionId: string
   }>>()
+  const projectClue = async (clue: LearningClueItem): Promise<LearningClueItem> => {
+    const binding = readLearningClueAnalysisBinding(dependencies.stateRoot, clue.ticketId)
+    const review = readLearningClueReview(dependencies.stateRoot, clue.ticketId)
+    if (binding === undefined) {
+      if (review !== undefined) throw new Error('Learning clue review has no analysis binding')
+      return clue
+    }
+    if (review !== undefined && (
+      review.sessionId !== binding.sessionId || review.messageId !== binding.messageId
+    )) throw new Error('Learning clue review analysis identity mismatch')
+    let projected: LearningClueItem
+    try {
+      const lease = await dependencies.openSession(binding.sessionId)
+      try {
+        projected = { ...clue, analysis: analysisState(binding, lease.session.events) }
+      } finally {
+        lease.release()
+      }
+    } catch {
+      projected = {
+        ...clue,
+        analysis: {
+          phase: 'failed',
+          sessionId: binding.sessionId,
+          startedAt: binding.startedAt,
+          finishedAt: binding.startedAt,
+        },
+      }
+    }
+    if (review === undefined) return projected
+    if (review.reviewedOccurrenceCount > clue.occurrenceCount) {
+      throw new Error('Learning clue review occurrence count exceeds current clue')
+    }
+    return {
+      ...projected,
+      review: review.reviewedOccurrenceCount === clue.occurrenceCount
+        ? {
+            reviewedAt: review.reviewedAt,
+            occurrenceCount: review.reviewedOccurrenceCount,
+          }
+        : null,
+    }
+  }
   const status = async (): Promise<LearningClueStatus> => {
     const snapshot = await dependencies.clueSnapshot()
-    const items = await Promise.all(snapshot.status.items.map(async clue => {
-      const binding = readLearningClueAnalysisBinding(dependencies.stateRoot, clue.ticketId)
-      if (binding === undefined) return clue
-      try {
-        const lease = await dependencies.openSession(binding.sessionId)
-        try {
-          return { ...clue, analysis: analysisState(binding, lease.session.events) }
-        } finally {
-          lease.release()
-        }
-      } catch {
-        return {
-          ...clue,
-          analysis: {
-            phase: 'failed' as const,
-            sessionId: binding.sessionId,
-            startedAt: binding.startedAt,
-            finishedAt: binding.startedAt,
-          },
-        }
-      }
-    }))
+    const items = await Promise.all(snapshot.status.items.map(projectClue))
     return { schemaVersion: 'tianwen.learning-clue-status.v1', items }
   }
   return {
@@ -1098,6 +1143,32 @@ export function createLearningClueAnalysisOperations(
         return await result
       } finally {
         if (pendingAnalyses.get(ticketId) === result) pendingAnalyses.delete(ticketId)
+      }
+    },
+    review: async ({ ticketId }) => {
+      const snapshot = await dependencies.clueSnapshot()
+      const clue = snapshot.status.items.find(item => item.ticketId === ticketId)
+      if (clue === undefined) throw new Error('Learning clue is not visible')
+      const binding = readLearningClueAnalysisBinding(dependencies.stateRoot, ticketId)
+      if (binding === undefined) throw new Error('Learning clue has no analysis')
+      const projected = await projectClue(clue)
+      if (projected.analysis === null) throw new Error('Learning clue has no analysis')
+      if (projected.analysis.phase === 'running') {
+        throw new Error('Learning clue analysis is still running')
+      }
+      const record = writeLearningClueReview({
+        stateRoot: dependencies.stateRoot,
+        ticketId,
+        sessionId: binding.sessionId,
+        messageId: binding.messageId,
+        reviewedOccurrenceCount: clue.occurrenceCount,
+        reviewedAt: new Date().toISOString(),
+      })
+      return {
+        schemaVersion: 'tianwen.learning-clue-review-result.v1',
+        reviewed: true,
+        occurrenceCount: record.reviewedOccurrenceCount,
+        reviewedAt: record.reviewedAt,
       }
     },
   }

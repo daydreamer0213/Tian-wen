@@ -25,7 +25,12 @@ const zhMessages = {
   'clues.refresh': '刷新线索',
   'clues.back': '返回目标列表',
   'clues.empty': '还没有改进线索。',
+  'clues.pendingEmpty': '没有待处理的改进线索。',
   'clues.occurrences': '出现 {count} 次',
+  'clues.reviewedCount': '已审阅（{count}）',
+  'clues.showReviewed': '显示已审阅',
+  'clues.hideReviewed': '隐藏已审阅',
+  'clues.markReviewed': '标记为已审阅',
   'clues.analysisPrivacy': '会把私密反馈交给当前模型，仅用于分析；天问不会自动修改项目或安装 Skill。',
   'clues.analyze': '分析一次',
   'clues.analysisRunning': '正在分析',
@@ -85,6 +90,7 @@ const zhMessages = {
   'error.abandon': '无法放弃当前任务。',
   'error.feedback': '无法记录任务反馈。',
   'error.analysis': '无法开始分析。',
+  'error.review': '无法标记为已审阅。',
   'error.revisionConflict': '该目标已在其他位置发生变化，已显示最新状态。请确认后重试。',
   'phase.planning': '规划中',
   'phase.abandoned': '已放弃',
@@ -109,7 +115,12 @@ const enMessages = {
   'clues.refresh': 'Refresh clues',
   'clues.back': 'Back to Goals',
   'clues.empty': 'No improvement clues yet.',
+  'clues.pendingEmpty': 'No pending improvement clues.',
   'clues.occurrences': '{count} occurrences',
+  'clues.reviewedCount': 'Reviewed ({count})',
+  'clues.showReviewed': 'Show reviewed',
+  'clues.hideReviewed': 'Hide reviewed',
+  'clues.markReviewed': 'Mark reviewed',
   'clues.analysisPrivacy': 'Private feedback will be sent to the current model for analysis only. Tianwen will not automatically modify the project or install a Skill.',
   'clues.analyze': 'Analyze once',
   'clues.analysisRunning': 'Analyzing',
@@ -169,6 +180,7 @@ const enMessages = {
   'error.abandon': 'Unable to abandon the current Task.',
   'error.feedback': 'Unable to record Task feedback.',
   'error.analysis': 'Unable to start analysis.',
+  'error.review': 'Unable to mark the clue reviewed.',
   'error.revisionConflict': 'This Goal changed elsewhere. The latest status is shown; review it before retrying.',
   'phase.planning': 'planning',
   'phase.abandoned': 'abandoned',
@@ -602,6 +614,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   const [view, setView] = useState<View>('closed')
   const [goals, setGoals] = useState<readonly AnyLongGoalSummary[]>([])
   const [clues, setClues] = useState<readonly LearningClueItem[]>([])
+  const [showReviewed, setShowReviewed] = useState(false)
   const [focusedTicketId, setFocusedTicketId] = useState<string | undefined>()
   const [detail, setDetail] = useState<AnyLongGoalStatusProjection | undefined>()
   const [objective, setObjective] = useState('')
@@ -658,6 +671,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
 
   const openClues = (ticketId?: string) => {
     setFocusedTicketId(ticketId)
+    setShowReviewed(false)
     setView('clues')
     void refresh()
   }
@@ -947,6 +961,22 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
     }
   }
 
+  const reviewClue = async (ticketId: string) => {
+    const request = requestGeneration.current.begin()
+    setLoading(true)
+    setError(undefined)
+    try {
+      await client.reviewLearningClue(ticketId, request.signal)
+      if (request.isCurrent()) await refresh()
+    } catch (cause) {
+      if (request.isCurrent()) {
+        setError(cause instanceof Error ? { message: cause.message } : { key: 'error.review' })
+      }
+    } finally {
+      if (request.isCurrent()) setLoading(false)
+    }
+  }
+
   const openBoundSession = async (sessionId: string) => {
     const request = requestGeneration.current.begin()
     setLoading(true)
@@ -966,6 +996,9 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
     }
   }
 
+  const pendingClues = clues.filter(clue => clue.review === null)
+  const reviewedClueCount = clues.length - pendingClues.length
+  const visibleClues = showReviewed ? clues : pendingClues
   const action = detail?.schemaVersion === 'tianwen.long-goal-status.v1'
     ? taskAction(detail, sessionList)
     : undefined
@@ -1023,7 +1056,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '16px 0' }}>
                 <button type="button" onClick={() => void refresh()} style={buttonStyle}>{t('list.refresh')}</button>
                 <button type="button" onClick={() => setView('create')} style={buttonStyle}>{t('list.create')}</button>
-                <button type="button" onClick={() => openClues()} style={buttonStyle}>{t('clues.open', { count: clues.length })}</button>
+                <button type="button" onClick={() => openClues()} style={buttonStyle}>{t('clues.open', { count: pendingClues.length })}</button>
               </div>
               {goals.length === 0 && !loading ? <div>
                 <p>{t('list.empty')}</p>
@@ -1051,11 +1084,17 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 <button type="button" onClick={() => void refresh()} style={buttonStyle}>{t('clues.refresh')}</button>
                 <button type="button" onClick={backToList} style={buttonStyle}>{t('clues.back')}</button>
+                <span style={{ alignSelf: 'center' }}>{t('clues.reviewedCount', { count: reviewedClueCount })}</span>
+                {reviewedClueCount > 0 && <button type="button" onClick={() => setShowReviewed(current => !current)} style={buttonStyle}>
+                  {t(showReviewed ? 'clues.hideReviewed' : 'clues.showReviewed')}
+                </button>}
               </div>
               {clues.length === 0 && !loading
                 ? <p>{t('clues.empty')}</p>
+                : visibleClues.length === 0 && !loading
+                  ? <p>{t('clues.pendingEmpty')}</p>
                 : <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 8 }}>
-                    {clues.map(clue => <li
+                    {visibleClues.map(clue => <li
                       key={clue.ticketId}
                       aria-current={clue.ticketId === focusedTicketId ? 'true' : undefined}
                       style={{ border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8, padding: 10 }}
@@ -1080,6 +1119,8 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
                         : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 8 }}>
                             <span role="status">{t(analysisPhaseKeys[clue.analysis.phase])}</span>
                             <button type="button" disabled={loading} onClick={() => void openBoundSession(clue.analysis!.sessionId)} style={buttonStyle}>{t('clues.openAnalysis')}</button>
+                            {clue.review === null && clue.analysis.phase !== 'running' &&
+                              <button type="button" disabled={loading} onClick={() => void reviewClue(clue.ticketId)} style={buttonStyle}>{t('clues.markReviewed')}</button>}
                           </div>}
                     </li>)}
                   </ul>}
