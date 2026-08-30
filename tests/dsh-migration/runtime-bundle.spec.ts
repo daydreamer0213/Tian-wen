@@ -79,6 +79,7 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/long-goal-host.ts',
     'src/long-goal-planner.ts',
     'src/long-goal.ts',
+    'src/settled-task-result.ts',
     'src/status.ts',
   ].includes(path)
     || path === '../tianwen-dsh-compat/dist/runtime.js'
@@ -159,6 +160,7 @@ function isAllowedGoalFirstRunnerInput(input: string): boolean {
     'src/long-goal-host.ts',
     'src/long-goal-planner.ts',
     'src/long-goal.ts',
+    'src/settled-task-result.ts',
   ].includes(path) || isAllowedStatusInput(path) || [
     '../tianwen-dsh-compat/dist/runtime.js',
     '../tianwen-dsh-compat/dist/scripted-adapter.js',

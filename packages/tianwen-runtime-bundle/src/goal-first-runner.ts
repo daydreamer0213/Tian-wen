@@ -8,6 +8,7 @@ import type { Agent, AgentHandle, AgentSetup, ModelSelection } from '@deepseek-a
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 import {
   abandonGoalFirstTask,
@@ -35,6 +36,7 @@ import type {
 import { runLongGoalPlannerTurn } from './long-goal-planner.js'
 import type { LongGoalPlannerDependencies } from './long-goal-planner.js'
 import { readGoalStatus } from './status.js'
+import { readSettledTaskResult } from './settled-task-result.js'
 
 export interface GoalFirstRunnerConfig {
   readonly context?: string
@@ -62,6 +64,10 @@ type SessionPersistence = {
     readonly cwd?: string
     readonly agentPreset?: string
   }[]>
+  inspect(id: SessionId): Promise<{
+    readonly meta: { readonly id: unknown }
+    readonly events: readonly SessionEvent[]
+  }>
 }
 
 interface RunnerServices {
@@ -269,6 +275,13 @@ export async function runGoalFirst(
       })
     },
     flushSession: agent => flush(ctx, agent),
+    readSettledTaskResult: async input => {
+      await ctx.agents.get(SessionId(input.sessionId))?.whenIdle()
+      return readSettledTaskResult(
+        input,
+        async sessionId => runnerServices.sessionPersistence.inspect(SessionId(sessionId)),
+      )
+    },
   }
   const serviceDependencies: GoalFirstServiceDependencies = {
     createRecord: createGoalFirstLongGoal,

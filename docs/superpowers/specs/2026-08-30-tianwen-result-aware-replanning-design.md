@@ -46,15 +46,21 @@ the exact Goal ID:
 - the matching terminal Goal change, with no later Turn before that change.
 
 `complete` Tasks require a DSH `complete` Goal change. Explicitly abandoned
-Tasks require the original DSH `blocked` Goal change. Missing, malformed, or
-unavailable history produces `availability: "unavailable"`; it does not abort
-the planner Turn or invent a result.
+Tasks require the original DSH `blocked` Goal change. A successfully inspected
+exact Session that has no anchored text produces `availability: "unavailable"`;
+it does not invent a result. Session identity mismatch, persistence corruption,
+or an I/O failure remains an integrity/runtime error and must not be swallowed,
+because a successful plan would otherwise permanently advance the checkpoint
+past an unread result.
 
 ## Implementation boundary
 
 - Add a small pure extractor for the anchored final assistant text.
 - Extend planner dependencies with one `readSettledTaskResult` operation so the
   planner does not know how Web/Desktop or CLI opens DSH Sessions.
+- Freeze the settled-count checkpoint from the same status snapshot that built
+  the prompt. A Task that settles while the model is planning remains new for
+  the next explicit Turn rather than being marked as already considered.
 - Wire the same operation in both installed CLI and Web/Desktop hosts.
 - Add deterministic tests for result inclusion, untrusted-data labeling,
   newly-settled selection, blocked/abandoned mapping, and unavailable history.

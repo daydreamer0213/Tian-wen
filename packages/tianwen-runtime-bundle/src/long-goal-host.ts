@@ -45,6 +45,7 @@ import {
 } from './long-goal.js'
 import { runLongGoalPlannerTurn } from './long-goal-planner.js'
 import type { LongGoalPlannerDependencies } from './long-goal-planner.js'
+import { readSettledTaskResult } from './settled-task-result.js'
 import {
   readGoalTaskFeedbackStatus,
   recordGoalTaskFeedback,
@@ -1298,6 +1299,13 @@ export function mountTianwenLongGoalHost(
         if (!await injected.sessions.flush(agent.session)) {
           throw new Error('Session persistence is unavailable')
         }
+      },
+      readSettledTaskResult: async input => {
+        await injected.agents.get(SessionId(input.sessionId))?.whenIdle()
+        return readSettledTaskResult(
+          input,
+          async sessionId => host.sessionPersistence.inspect(SessionId(sessionId)),
+        )
       },
     }
     const serviceDependencies: GoalFirstServiceDependencies = {

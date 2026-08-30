@@ -1470,6 +1470,41 @@ describe('Tianwen Long Goal Web host', () => {
 })
 
 describe('Long Goal DSH planner', () => {
+  it('rejects a settled-Task checkpoint beyond the current settled prefix', async () => {
+    const fixture = createFixtureRoot()
+    try {
+      const stateRoot = join(fixture, 'state')
+      const stored = createGoalFirstLongGoal({
+        stateRoot, objective: 'Ship release', context: null, successCriteria: null,
+        workspaceRoot: fixture, agentPreset: 'planner-preset',
+      })
+      const record = {
+        ...stored,
+        planner: { ...stored.planner, consideredSettledTasks: 1 },
+      }
+      const owned = plannerHandle(record)
+
+      await expect(runLongGoalPlannerTurn({
+        stateRoot,
+        dshStatusTarget: {
+          sessionsRoot: join(fixture, 'sessions'),
+          evolutionRoot: join(stateRoot, 'evolution'),
+        },
+        record,
+        reason: 'continue',
+      }, {
+        inspectSession: vi.fn(async () => ({ exists: false })),
+        createAgent: vi.fn(async () => owned.handle),
+        resumeAgent: vi.fn(async () => { throw new Error('unexpected resume') }),
+        flushSession: vi.fn(async () => undefined),
+        readSettledTaskResult: vi.fn(async () => undefined),
+      })).rejects.toThrow(/settled Task checkpoint/u)
+      expect(owned.followup).not.toHaveBeenCalled()
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
   it('creates then cold-resumes the one frozen Session with the scoped tool restored', async () => {
     const fixture = createFixtureRoot()
     try {
@@ -1500,7 +1535,10 @@ describe('Long Goal DSH planner', () => {
         return resumed.handle
       })
       const flushSession = vi.fn(async () => undefined)
-      const dependencies = { inspectSession, createAgent, resumeAgent, flushSession }
+      const dependencies = {
+        inspectSession, createAgent, resumeAgent, flushSession,
+        readSettledTaskResult: vi.fn(async () => undefined),
+      }
       const input = {
         stateRoot,
         dshStatusTarget: { sessionsRoot: join(fixture, 'sessions'), evolutionRoot: join(stateRoot, 'evolution') },
@@ -1571,6 +1609,7 @@ describe('Long Goal DSH planner', () => {
         }),
         resumeAgent: vi.fn(async () => { throw new Error('unexpected resume') }),
         flushSession,
+        readSettledTaskResult: vi.fn(async () => undefined),
       })).resolves.toBe('submitted')
 
       expect(concludeTurn).toHaveBeenCalledTimes(1)
@@ -1621,6 +1660,7 @@ describe('Long Goal DSH planner', () => {
         }),
         resumeAgent: vi.fn(async () => { throw new Error('unexpected resume') }),
         flushSession: vi.fn(async () => undefined),
+        readSettledTaskResult: vi.fn(async () => undefined),
       })).rejects.toThrow('exact')
       expect(readLongGoal(stateRoot, record.id)).toEqual(record)
     } finally {
@@ -1650,6 +1690,7 @@ describe('Long Goal DSH planner', () => {
         createAgent: vi.fn(),
         resumeAgent,
         flushSession: vi.fn(),
+        readSettledTaskResult: vi.fn(async () => undefined),
       })).rejects.toThrow('mismatch')
       expect(resumeAgent).not.toHaveBeenCalled()
     } finally {
@@ -1678,6 +1719,7 @@ describe('Long Goal DSH planner', () => {
         createAgent,
         resumeAgent: vi.fn(),
         flushSession: vi.fn(),
+        readSettledTaskResult: vi.fn(async () => undefined),
       })).rejects.toThrow('ambiguous-create')
       expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({
         sessionId: record.planner.sessionId,
