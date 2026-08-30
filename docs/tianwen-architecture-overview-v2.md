@@ -373,6 +373,14 @@ persistence 与 Natural Trial stream-error 已覆盖链路成立、成功交付�
 必须先为普通 Task 冻结真实验收合同，不能用“Goal complete”代替验收通过；在此之前，继续改善
 Goal 规划、执行和用户引导比扩展学习治理框架更优先。
 
+Goal-first 的结果回流也已完成一次正式安装产品的自然验证：一个只读 Task 的真实最终回复以
+“不可信历史执行数据”进入下一次 Planner Turn，并因果决定了后续最小产品任务。最终三个 Task
+使用不同 DSH Goal/Session，Long Goal 在 revision 8、Planner planRevision 4 正式完成。产品只在
+文本输出中增加按 phase 区分的下一步命令和最新 revision，JSON 合同、Goal 引擎与数据模型保持
+不变。该运行证明的是同一 Long Goal 内的结果感知规划，不是跨项目学习、Skill 形成或外部用户
+效果；详细边界见
+[`result-aware replanning natural task handoff`](operations/tianwen-result-aware-replanning-handoff.md)。
+
 Learning clue inbox 已让现有 Ticket 的来源和重复次数进入普通产品；“分析一次”复用普通 DSH
 Session，“已审阅”补齐了人工收件箱生命周期。私密反馈只进入分析 Session，结果和失败不复制到
 第二套数据库，审阅也不改变 Evolution 治理状态。现有分析 Session 和 Goal“补充方向”已经提供
@@ -410,19 +418,20 @@ incumbent 晋升、外部用户效果或市场泛化主张。缺少这些证据�
 
 1. 当前代码、exact SHA、测试与 exact-main CI：实现和运行事实；
 2. 本文：整体产品架构、组件关系、当前方向和阅读入口；
-3. [`tianwen-v0.1-controlled-real-activity-22-handoff.md`](operations/tianwen-v0.1-controlled-real-activity-22-handoff.md)：当前官方已安装 configured-DeepSeek 全链结果与证据边界；
-4. 已批准的 [`one-shot Profile lifecycle repair design`](superpowers/specs/2026-08-24-tianwen-one-shot-profile-lifecycle-repair-design.md) 与其 [`handoff`](operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md)：一次性 Profile 生命周期修复的历史执行 authority 和证据边界；
-5. Activity-01、Activity-02 和 Activity-03 的 operation design、packet、plan 与 handoff 都是历史 authorities，不是当前执行说明：[`Activity-01 handoff`](operations/tianwen-v0.1-controlled-real-activity-01-handoff.md)、[`Activity-02 recovery design`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-02-recovery-design.md)、[`packet`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-02-packet.md)、[`plan`](superpowers/plans/2026-08-24-tianwen-v0.1-controlled-real-activity-02-recovery.md)、[`Activity-03 design`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-03-design.md)、[`packet`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-03-packet.md) 与 [`plan`](superpowers/plans/2026-08-24-tianwen-v0.1-controlled-real-activity-03.md)；它们保留当时事实，不改写分类。
-6. [`2026-08-23 controlled real operation design`](superpowers/specs/2026-08-23-tianwen-v0.1-controlled-real-operation-design.md) 与 [`plan`](superpowers/plans/2026-08-23-tianwen-v0.1-controlled-real-operation.md)：Activity-01 的历史 authority 与实现审计；
-7. [`tianwen-v0.1-controlled-real-operation-readiness-handoff.md`](operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)：历史 installed-ingress readiness、分段验证和隐私边界；
-8. [`2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)：评测、Shadow、Promotion、Rollback 与停止线；
-9. [`2026-08-23-tianwen-v0.1-controlled-real-skill-lifecycle.md`](superpowers/plans/2026-08-23-tianwen-v0.1-controlled-real-skill-lifecycle.md)：受控机制的逐 Task 实现、复审与合并顺序；
-10. [`tianwen-v0.1-controlled-skill-lifecycle-handoff.md`](operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md)：scripted 历史依据，记录受控全链 fixture 的机制、计数、隐私与证据限制；
-11. [`tianwen-stage7-natural-run-evidence-trial-handoff.md`](operations/tianwen-stage7-natural-run-evidence-trial-handoff.md) 与 [`tianwen-rc6-rc7-managed-install-migration-handoff.md`](operations/tianwen-rc6-rc7-managed-install-migration-handoff.md)：Stage 7 自然任务与 installer/status 运营事实；
-12. [`2026-08-19-tianwen-runtime-boundary-reset-design.md`](superpowers/specs/2026-08-19-tianwen-runtime-boundary-reset-design.md)：正式 Runtime 所有权、集成 seam、非干扰合同和恢复顺序；
-13. [`2026-08-17-tianwen-continuous-learning-governance-design.md`](superpowers/specs/2026-08-17-tianwen-continuous-learning-governance-design.md)：长期 Signal、Case、Lesson、Candidate、评测、权限、Shadow 和回滚原则；
-14. [`2026-08-19-dsh-upstream-capability-overlap-audit.md`](research/2026-08-19-dsh-upstream-capability-overlap-audit.md)：DSH rc.7 已有能力与 Tianwen 差异化边界的历史事实依据；
-15. Stage 4/5/6 handoff、2026-08-20 public-readiness 与旧 Alpha 资料：历史 checkpoint，不再是当前能力清单，不得反向改写当前事实。
+3. [`tianwen-result-aware-replanning-handoff.md`](operations/tianwen-result-aware-replanning-handoff.md)：当前正式安装产品的自然结果回流、最小用户引导改进与证据边界；
+4. [`tianwen-v0.1-controlled-real-activity-22-handoff.md`](operations/tianwen-v0.1-controlled-real-activity-22-handoff.md)：当前官方已安装 configured-DeepSeek 全链结果与证据边界；
+5. 已批准的 [`one-shot Profile lifecycle repair design`](superpowers/specs/2026-08-24-tianwen-one-shot-profile-lifecycle-repair-design.md) 与其 [`handoff`](operations/tianwen-v0.1-one-shot-profile-lifecycle-repair-handoff.md)：一次性 Profile 生命周期修复的历史执行 authority 和证据边界；
+6. Activity-01、Activity-02 和 Activity-03 的 operation design、packet、plan 与 handoff 都是历史 authorities，不是当前执行说明：[`Activity-01 handoff`](operations/tianwen-v0.1-controlled-real-activity-01-handoff.md)、[`Activity-02 recovery design`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-02-recovery-design.md)、[`packet`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-02-packet.md)、[`plan`](superpowers/plans/2026-08-24-tianwen-v0.1-controlled-real-activity-02-recovery.md)、[`Activity-03 design`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-03-design.md)、[`packet`](superpowers/specs/2026-08-24-tianwen-v0.1-controlled-real-activity-03-packet.md) 与 [`plan`](superpowers/plans/2026-08-24-tianwen-v0.1-controlled-real-activity-03.md)；它们保留当时事实，不改写分类。
+7. [`2026-08-23 controlled real operation design`](superpowers/specs/2026-08-23-tianwen-v0.1-controlled-real-operation-design.md) 与 [`plan`](superpowers/plans/2026-08-23-tianwen-v0.1-controlled-real-operation.md)：Activity-01 的历史 authority 与实现审计；
+8. [`tianwen-v0.1-controlled-real-operation-readiness-handoff.md`](operations/tianwen-v0.1-controlled-real-operation-readiness-handoff.md)：历史 installed-ingress readiness、分段验证和隐私边界；
+9. [`2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md`](superpowers/specs/2026-08-22-tianwen-v0.1-closeout-and-controlled-evaluation-design.md)：评测、Shadow、Promotion、Rollback 与停止线；
+10. [`2026-08-23-tianwen-v0.1-controlled-real-skill-lifecycle.md`](superpowers/plans/2026-08-23-tianwen-v0.1-controlled-real-skill-lifecycle.md)：受控机制的逐 Task 实现、复审与合并顺序；
+11. [`tianwen-v0.1-controlled-skill-lifecycle-handoff.md`](operations/tianwen-v0.1-controlled-skill-lifecycle-handoff.md)：scripted 历史依据，记录受控全链 fixture 的机制、计数、隐私与证据限制；
+12. [`tianwen-stage7-natural-run-evidence-trial-handoff.md`](operations/tianwen-stage7-natural-run-evidence-trial-handoff.md) 与 [`tianwen-rc6-rc7-managed-install-migration-handoff.md`](operations/tianwen-rc6-rc7-managed-install-migration-handoff.md)：Stage 7 自然任务与 installer/status 运营事实；
+13. [`2026-08-19-tianwen-runtime-boundary-reset-design.md`](superpowers/specs/2026-08-19-tianwen-runtime-boundary-reset-design.md)：正式 Runtime 所有权、集成 seam、非干扰合同和恢复顺序；
+14. [`2026-08-17-tianwen-continuous-learning-governance-design.md`](superpowers/specs/2026-08-17-tianwen-continuous-learning-governance-design.md)：长期 Signal、Case、Lesson、Candidate、评测、权限、Shadow 和回滚原则；
+15. [`2026-08-19-dsh-upstream-capability-overlap-audit.md`](research/2026-08-19-dsh-upstream-capability-overlap-audit.md)：DSH rc.7 已有能力与 Tianwen 差异化边界的历史事实依据；
+16. Stage 4/5/6 handoff、2026-08-20 public-readiness 与旧 Alpha 资料：历史 checkpoint，不再是当前能力清单，不得反向改写当前事实。
 
 旧的 [`architecture-master-session-memory.md`](architecture-master-session-memory.md) 保留会话历史、愿景和监督约定；其中与本文或 Runtime 边界重置冲突的旧状态、旧阶段顺序和双 Runtime 表述不再具有产品权威性。
 
