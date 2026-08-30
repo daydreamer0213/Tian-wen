@@ -256,7 +256,7 @@ describe('Tianwen Long Goal Web host', () => {
       for (const [name, service] of Object.entries({
         connection: { rpc: { handle } },
         apiProxy: {},
-        agents: {},
+        agents: { list: () => [], get: () => undefined },
         goals: {},
         sessions: {},
         sessionPersistence: {},

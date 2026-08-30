@@ -36,9 +36,12 @@ import {
 import type { GoalFirstProgressResult, GoalFirstServiceDependencies } from './goal-first-service.js'
 import {
   abandonBlockedLongGoalTask,
+  abandonContinuousGoalTask,
   appendLongGoalGuidance,
+  appendContinuousGoalGuidance,
   bindGoalFirstLongGoalTask,
   bindLongGoalTask,
+  createContinuousLongGoal,
   createGoalFirstLongGoal,
   createLongGoal,
   listLongGoals,
@@ -46,9 +49,18 @@ import {
   LongGoalRevisionConflictError,
   readLongGoal,
   readLongGoalStatus,
+  redirectContinuousGoal,
+  setContinuousGoalMode,
 } from './long-goal.js'
 import { runLongGoalPlannerTurn } from './long-goal-planner.js'
 import type { LongGoalPlannerDependencies } from './long-goal-planner.js'
+import {
+  controlContinuousGoal,
+  createContinuousGoalProgress,
+} from './continuous-goal-service.js'
+import type { ContinuousGoalServiceDependencies } from './continuous-goal-service.js'
+import { installBoundContinuousGoalControls, installContinuousGoalCommand } from './continuous-goal-agent.js'
+import { mountContinuousGoalHost } from './continuous-goal-host.js'
 import { readSettledTaskResult } from './settled-task-result.js'
 import {
   readGoalTaskFeedbackStatus,
@@ -1358,7 +1370,7 @@ export function mountTianwenLongGoalHost(
       runPlannerTurn: ({ record, reason }) => runLongGoalPlannerTurn({
         stateRoot: roots.stateRoot,
         dshStatusTarget,
-        record: requireLegacyV2GoalFirstRecord(record),
+        record,
         reason,
       }, plannerDependencies),
       runTask: async input => {
@@ -1394,6 +1406,80 @@ export function mountTianwenLongGoalHost(
         dshStatusTarget,
         ...input,
       }, serviceDependencies),
+    }
+    const continuousServiceDependencies: ContinuousGoalServiceDependencies = {
+      ...serviceDependencies,
+      createContinuousRecord: createContinuousLongGoal,
+      setMode: setContinuousGoalMode,
+      appendGuidanceOnly: appendContinuousGoalGuidance,
+      redirect: redirectContinuousGoal,
+      abandonRedirectedTask: abandonContinuousGoalTask,
+      cancelTaskAndReadStatus: async execution => {
+        const taskAgent = injected.agents.get(SessionId(execution.sessionId))
+        if (taskAgent === undefined) {
+          throw new LongGoalIntegrityError(`Continuous Goal Task Session ${execution.sessionId} is not live`)
+        }
+        const goal = injected.goals.get(taskAgent)
+        if (goal === undefined || String(goal.id) !== execution.goalId) {
+          throw new LongGoalIntegrityError('Continuous Goal Task binding does not match live Goal')
+        }
+        taskAgent.cancel({ kind: 'parent' })
+        await taskAgent.whenIdle()
+        if (!await injected.sessions.flush(taskAgent.session)) {
+          throw new Error('Session persistence is unavailable')
+        }
+        const latest = await readGoalStatus({
+          goalId: execution.goalId,
+          sessionsRoot: roots.sessionsRoot,
+          evolutionRoot: roots.evolutionRoot,
+        })
+        if (latest.session.id !== execution.sessionId || latest.goal.id !== execution.goalId) {
+          throw new LongGoalIntegrityError('Continuous Goal Task cancellation binding mismatch')
+        }
+        if (latest.goal.phase === 'complete') return 'complete'
+        if (latest.goal.phase !== 'paused') {
+          throw new LongGoalIntegrityError('Continuous Goal Task did not pause after parent cancellation')
+        }
+        return 'paused'
+      },
+    }
+    const disposeContinuousGoalHost = mountContinuousGoalHost(injected as unknown as Context & {
+      readonly agents: {
+        list(): Agent[]
+        get(id: never): Agent | undefined
+      }
+    }, {
+      roots,
+      listLongGoals: () => listLongGoals(roots.stateRoot),
+      readLongGoal,
+      readStatus: async input => {
+        const status = await readLongGoalStatus(input)
+        if (status.schemaVersion !== 'tianwen.long-goal-status.v3') {
+          throw new LongGoalIntegrityError('Continuous Goal Host requires a v3 status')
+        }
+        return status
+      },
+      createProgress: async input => createContinuousGoalProgress({
+        stateRoot: roots.stateRoot, dshStatusTarget, ...input,
+      }, continuousServiceDependencies),
+      control: async input => controlContinuousGoal({
+        stateRoot: roots.stateRoot, dshStatusTarget, ...input,
+      }, continuousServiceDependencies),
+      continueProgress: async input => continueGoalFirstProgress({
+        stateRoot: roots.stateRoot, dshStatusTarget, ...input,
+      }, continuousServiceDependencies),
+      pause: input => setContinuousGoalMode({
+        stateRoot: roots.stateRoot, longGoalId: input.longGoalId,
+        expectedRevision: input.expectedRevision, mode: 'paused',
+      }),
+      flushSession: async agent => injected.sessions.flush(agent.session),
+      installCommand: installContinuousGoalCommand,
+      installBoundControls: installBoundContinuousGoalControls,
+    })
+    if (typeof injected.effect === 'function') {
+      injected.effect(function* () {
+        yield () => { void disposeContinuousGoalHost() }
+      })
     }
     const taskFeedbackDependencies: GoalTaskFeedbackDependencies = {
       readLongGoal,
