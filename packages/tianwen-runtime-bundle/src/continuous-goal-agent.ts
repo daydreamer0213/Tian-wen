@@ -166,7 +166,9 @@ export function installBoundContinuousGoalControls(
         const controlAgent = exec.agent
         const controlSessionId = controlAgent?.session.id
         if (controlAgent === undefined || controlSessionId === undefined) return NO_ACTIVE_GOAL
-        return formatControlResult(await operations.control(controlAgent, parseControlAction(args)))
+        const result = await operations.control(controlAgent, parseControlAction(args))
+        exec.concludeTurn()
+        return formatControlResult(result)
       },
     }))
     yield agent.ctx.systemPrompt.section({

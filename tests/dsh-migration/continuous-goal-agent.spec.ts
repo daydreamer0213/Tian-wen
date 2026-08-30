@@ -23,7 +23,10 @@ type ToolDefinition = {
   readonly parameters: {
     readonly properties: Record<string, { readonly description?: string }>
   }
-  readonly execute: (args: unknown, exec: { readonly agent?: Agent }) => Promise<string>
+  readonly execute: (args: unknown, exec: {
+    readonly agent?: Agent
+    readonly concludeTurn?: () => void
+  }) => Promise<string>
 }
 
 type PromptSection = {
@@ -172,8 +175,9 @@ describe('continuous Goal Agent controls', () => {
     const ops = operations()
     installBoundContinuousGoalControls(subject.agent, ops)
     const tool = subject.tools[0]!
+    const concludeTurn = vi.fn()
 
-    await expect(tool.execute({ action: 'pause' }, { agent: subject.agent }))
+    await expect(tool.execute({ action: 'pause' }, { agent: subject.agent, concludeTurn }))
       .resolves.toBe('paused')
     await expect(tool.execute({ action: 'pause', sessionId: 'smuggled' }, { agent: subject.agent }))
       .rejects.toThrow('Goal control arguments require exact keys')
@@ -182,6 +186,7 @@ describe('continuous Goal Agent controls', () => {
 
     expect(ops.control).toHaveBeenCalledTimes(1)
     expect(ops.control).toHaveBeenCalledWith(subject.agent, { action: 'pause' })
+    expect(concludeTurn).toHaveBeenCalledOnce()
   })
 
   it('returns compact redacted progress for status', async () => {
@@ -209,7 +214,9 @@ describe('continuous Goal Agent controls', () => {
     })
     installBoundContinuousGoalControls(subject.agent, ops)
 
-    const output = await subject.tools[0]!.execute({ action: 'status' }, { agent: subject.agent })
+    const output = await subject.tools[0]!.execute({ action: 'status' }, {
+      agent: subject.agent, concludeTurn: vi.fn(),
+    })
 
     expect(JSON.parse(output)).toEqual({
       action: 'status',
@@ -238,7 +245,9 @@ describe('continuous Goal Agent controls', () => {
     })
     installBoundContinuousGoalControls(subject.agent, ops)
 
-    const output = await subject.tools[0]!.execute({ action: 'status' }, { agent: subject.agent })
+    const output = await subject.tools[0]!.execute({ action: 'status' }, {
+      agent: subject.agent, concludeTurn: vi.fn(),
+    })
 
     expect(JSON.parse(output)).toEqual({
       action: 'status',
