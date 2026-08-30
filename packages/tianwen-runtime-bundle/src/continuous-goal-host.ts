@@ -121,17 +121,6 @@ function exactLiveArmedTask(ctx: HostContext, record: LongGoalRecordV3, status: 
     && goal.activation === 'armed'
 }
 
-function exactLiveCompletedTask(ctx: HostContext, status: LongGoalStatusProjectionV3): boolean {
-  if (status.currentTaskId === null) return false
-  const task = status.tasks.find(candidate => candidate.id === status.currentTaskId)
-  if (task?.execution === null || task?.execution === undefined) return false
-  const agent = ctx.agents.get(task.execution.sessionId as never)
-  const goal = agent?.ctx.goals.get(agent)
-  return goal !== undefined
-    && String(goal.id) === task.execution.goalId
-    && goal.phase === 'complete'
-}
-
 function isUserAbort(event: unknown): boolean {
   if (typeof event !== 'object' || event === null) return false
   const typed = event as {
@@ -312,7 +301,7 @@ export function mountContinuousGoalHost(
     ) return
     const status = await readStatus(longGoalId)
     if (status.goal.phase === 'blocked' || status.goal.phase === 'complete') return
-    if (exactLiveCompletedTask(ctx, status)) return
+    if (lanes.get(longGoalId)?.completion !== undefined) return
     const current = status.currentTaskId === null ? undefined : status.tasks.find(task => task.id === status.currentTaskId)
     const requiresContinue = record.planner.phase === 'unplanned'
       || record.planner.phase === 'needs-replan'

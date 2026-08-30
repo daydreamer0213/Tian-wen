@@ -264,21 +264,18 @@ describe('continuous Goal Host', () => {
     expect(subject.continueProgress).toHaveBeenCalledTimes(1)
   })
 
-  it('does not continue an observed completion while startup reconciliation is pending without goal/changed', async () => {
+  it('continues a settled Task recovered at startup even when its completion event was missed', async () => {
     const subject = harness()
-    let release!: () => void
-    const gate = new Promise<void>(resolve => { release = resolve })
     subject.dependencies.readStatus = vi.fn(async () => {
-      await gate
-      return status(record(), ['active'], TASK_1)
+      const settled = status(record(), ['complete'], TASK_1)
+      return { ...settled, goal: { ...settled.goal, phase: 'planning' } }
     })
-    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
     subject.first.setGoal('complete')
-    release()
 
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
     await dispose()
     expect(subject.first.whenIdle).not.toHaveBeenCalled()
     expect(subject.dependencies.flushSession).not.toHaveBeenCalled()
-    expect(subject.continueProgress).not.toHaveBeenCalled()
+    expect(subject.continueProgress).toHaveBeenCalledTimes(1)
   })
 })
