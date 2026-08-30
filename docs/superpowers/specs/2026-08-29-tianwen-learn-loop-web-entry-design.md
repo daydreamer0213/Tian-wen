@@ -2,7 +2,8 @@
 
 Date: 2026-08-29
 
-Status: approved product direction, frozen for implementation
+Status: historical v1 Web-entry baseline; the default create/detail flow is
+superseded by the 2026-08-30 Goal-first design
 
 ## 1. Decision
 

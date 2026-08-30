@@ -402,12 +402,12 @@ describe('Learn Loop compiled DSH client module', () => {
     const client = loadClientModule({ list, locale, rpc })
     let tree = client.render()
 
-    ;(findElement(tree, element => element.props['aria-label'] === '长期任务').props.onClick as () => void)()
+    ;(findElement(tree, element => element.props['aria-label'] === '长期目标').props.onClick as () => void)()
     await flushClient()
     tree = client.render()
 
-    expect(findElement(tree, element => element.props['aria-label'] === '长期任务')).toBeDefined()
-    expect(text(tree)).toContain('还没有长期任务')
+    expect(findElement(tree, element => element.props['aria-label'] === '长期目标')).toBeDefined()
+    expect(text(tree)).toContain('还没有长期目标')
     expect(text(tree)).toContain('在 DSH 中打开或创建一个项目工作区')
     expect(text(tree)).toContain('创建一个长期目标，天问会规划并推进后续任务')
     expect(text(tree)).toContain('可随时补充信息或调整方向')
@@ -426,8 +426,8 @@ describe('Learn Loop compiled DSH client module', () => {
 
     expect(findElement(tree, element => element.props['aria-label'] === 'Learn Loop')).toBeDefined()
     expect(text(tree)).toContain('Learn Loop')
-    expect(text(tree)).not.toContain('长期任务')
-    expect(elements(tree).some(element => element.props['aria-label'] === '长期任务')).toBe(false)
+    expect(text(tree)).not.toContain('长期目标')
+    expect(elements(tree).some(element => element.props['aria-label'] === '长期目标')).toBe(false)
     expect(rpc.call).toHaveBeenCalledTimes(rpcCalls)
   })
 
@@ -447,6 +447,114 @@ describe('Learn Loop compiled DSH client module', () => {
       .toBe(false)
     expect(text(tree)).not.toContain('Maximum rounds per task')
     expect(text(tree)).not.toContain('Add task')
+  })
+
+  it('presents goal-first work as current, completed, next, and abandoned groups', async () => {
+    const mixedStatus = {
+      ...statusV2,
+      goal: {
+        ...statusV2.goal,
+        completedTasks: 1,
+        abandonedTasks: 1,
+        totalTasks: 4,
+      },
+      tasks: [
+        {
+          id: 'task-complete', objective: 'Inspect the current behavior', phase: 'complete',
+          execution: { goalId: 'goal-complete', sessionId: 'session-complete' }, resolution: null,
+        },
+        {
+          id: 'task-abandoned', objective: 'Replace the whole interface', phase: 'abandoned',
+          execution: { goalId: 'goal-abandoned', sessionId: 'session-abandoned' },
+          resolution: 'abandoned',
+        },
+        statusV2.tasks[0],
+        {
+          id: 'task-next', objective: 'Polish the ordinary flow', phase: 'pending',
+          execution: null, resolution: null,
+        },
+      ],
+    } as const
+    const summary = {
+      schemaVersion: 'tianwen.long-goal-summary.v2',
+      id: mixedStatus.goal.id,
+      objective: mixedStatus.goal.objective,
+      phase: mixedStatus.goal.phase,
+      revision: mixedStatus.goal.revision,
+      completedTasks: mixedStatus.goal.completedTasks,
+      abandonedTasks: mixedStatus.goal.abandonedTasks,
+      totalTasks: mixedStatus.goal.totalTasks,
+      currentTaskId: mixedStatus.currentTaskId,
+      updatedAt: 1,
+    } as const
+    const list = createSessionList({ current: undefined, byId: {} })
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
+      if (endpoint === 'status') return { ok: true, value: { status: mixedStatus } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const client = loadClientModule({ list, rpc })
+    const tree = await openListedGoal(client.render, mixedStatus.goal.objective)
+
+    expect(text(tree)).toContain('Tianwen planned these steps from your Goal')
+    expect(text(findElement(tree, element => element.props['aria-label'] === 'Current work')))
+      .toContain('Implement the Web flow — active')
+    expect(text(findElement(tree, element => element.props['aria-label'] === 'Completed')))
+      .toContain('Inspect the current behavior — complete')
+    expect(text(findElement(tree, element => element.props['aria-label'] === 'Next steps')))
+      .toContain('Polish the ordinary flow — pending')
+    expect(text(findElement(tree, element => element.props['aria-label'] === 'Abandoned')))
+      .toContain('Replace the whole interface — abandoned')
+    expect(findButton(tree, 'Continue current work')).toBeDefined()
+  })
+
+  it('keeps a replannable pending Task under next steps and labels the action as planning', async () => {
+    const replanningStatus = {
+      ...statusV2,
+      goal: {
+        ...statusV2.goal,
+        phase: 'planning',
+        completedTasks: 1,
+        totalTasks: 2,
+      },
+      tasks: [
+        {
+          id: 'task-complete', objective: 'Inspect the completed work', phase: 'complete',
+          execution: { goalId: 'goal-complete', sessionId: 'session-complete' }, resolution: null,
+        },
+        {
+          id: 'task-pending', objective: 'Reconsider the planned follow-up', phase: 'pending',
+          execution: null, resolution: null,
+        },
+      ],
+      currentTaskId: 'task-pending',
+    } as const
+    const summary = {
+      schemaVersion: 'tianwen.long-goal-summary.v2',
+      id: replanningStatus.goal.id,
+      objective: replanningStatus.goal.objective,
+      phase: replanningStatus.goal.phase,
+      revision: replanningStatus.goal.revision,
+      completedTasks: replanningStatus.goal.completedTasks,
+      abandonedTasks: replanningStatus.goal.abandonedTasks,
+      totalTasks: replanningStatus.goal.totalTasks,
+      currentTaskId: replanningStatus.currentTaskId,
+      updatedAt: 1,
+    } as const
+    const list = createSessionList({ current: undefined, byId: {} })
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
+      if (endpoint === 'status') return { ok: true, value: { status: replanningStatus } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const client = loadClientModule({ list, rpc })
+    const tree = await openListedGoal(client.render, replanningStatus.goal.objective)
+
+    expect(text(findElement(tree, element => element.props['aria-label'] === 'Current work')))
+      .not.toContain('Reconsider the planned follow-up')
+    expect(text(findElement(tree, element => element.props['aria-label'] === 'Next steps')))
+      .toContain('Reconsider the planned follow-up — pending')
+    expect(findButton(tree, 'Continue planning')).toBeDefined()
   })
 
   it('opens the returned Task Session after it enters the projection', async () => {
@@ -532,7 +640,7 @@ describe('Learn Loop compiled DSH client module', () => {
     }) }
     const client = loadClientModule({ list, rpc })
     let tree = await createGoal(client.render)
-    ;(findButton(tree, 'Continue progress').props.onClick as () => void)()
+    ;(findButton(tree, 'Continue planning').props.onClick as () => void)()
     await flushClient()
 
     expect(client.open).not.toHaveBeenCalled()
@@ -595,7 +703,7 @@ describe('Learn Loop compiled DSH client module', () => {
     }) }
     const client = loadClientModule({ list, rpc })
     let tree = await createGoal(client.render)
-    ;(findButton(tree, 'Continue progress').props.onClick as () => void)()
+    ;(findButton(tree, 'Continue planning').props.onClick as () => void)()
     await flushClient()
     expect(client.open).toHaveBeenCalledWith('task-session')
 
@@ -643,7 +751,7 @@ describe('Learn Loop compiled DSH client module', () => {
     }) }
     const client = loadClientModule({ list, rpc })
     let tree = await createGoal(client.render)
-    ;(findButton(tree, 'Continue progress').props.onClick as () => void)()
+    ;(findButton(tree, 'Continue planning').props.onClick as () => void)()
     await flushClient()
     tree = client.render()
     ;(findElement(tree, element => element.type === 'textarea' &&
@@ -735,7 +843,7 @@ describe('Learn Loop compiled DSH client module', () => {
     }) }
     const client = loadClientModule({ list, rpc })
     let tree = await createGoal(client.render)
-    ;(findButton(tree, 'Continue progress').props.onClick as () => void)()
+    ;(findButton(tree, 'Continue planning').props.onClick as () => void)()
     await flushClient()
 
     expect(rpc.call.mock.calls.filter(call => call[1] === 'continue-progress')).toHaveLength(1)
@@ -769,9 +877,15 @@ describe('Learn Loop compiled DSH client module', () => {
     })
     const afterAbandon = {
       ...blockedStatus,
-      goal: { ...blockedStatus.goal, phase: 'planning', revision: 5 },
+      goal: { ...blockedStatus.goal, phase: 'planning', revision: 5, abandonedTasks: 1 },
       planner: { ...blockedStatus.planner, phase: 'needs-replan' },
-      tasks: [{ ...blockedStatus.tasks[0], phase: 'abandoned', resolution: 'abandoned' }],
+      tasks: [{
+        id: blockedStatus.tasks[0].id,
+        objective: blockedStatus.tasks[0].objective,
+        phase: 'abandoned',
+        execution: blockedStatus.tasks[0].execution,
+        resolution: 'abandoned',
+      }],
       currentTaskId: null,
     }
     const blockedSummary = {
@@ -801,6 +915,8 @@ describe('Learn Loop compiled DSH client module', () => {
     expect(findButton(blockedTree, 'Open Session')).toBeDefined()
     expect(findButton(blockedTree, 'Abandon this Task and replan')).toBeDefined()
     expect(text(blockedTree)).toContain('Task reached its round limit.')
+    expect(elements(blockedTree).some(element => element.type === 'button' &&
+      text(element) === 'Continue progress')).toBe(false)
 
     locale.set('zh')
     blockedTree = blockedClient.render()
@@ -812,8 +928,9 @@ describe('Learn Loop compiled DSH client module', () => {
     const abandonCall = blockedRpc.call.mock.calls.find(call => call[1] === 'abandon-current-task')
     expect(abandonCall?.[2]).toEqual({ longGoalId: 'goal-first-1', expectedRevision: 4 })
     const zhBlockedTree = blockedClient.render()
-    expect(text(zhBlockedTree)).toContain('Task reached its round limit.')
+    expect(text(zhBlockedTree)).not.toContain('Task reached its round limit.')
     expect(text(zhBlockedTree)).not.toContain('Abandon this Task and replan')
+    expect(text(zhBlockedTree)).toContain('继续规划')
   })
 
   it('keeps v1 rendering/execution and prevents late navigation after close', async () => {

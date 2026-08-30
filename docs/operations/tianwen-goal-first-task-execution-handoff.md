@@ -122,3 +122,6 @@ The next stage should improve the user-facing Goal experience: the user supplies
 one Goal and guidance, while Tianwen owns Task derivation, progress, and ordinary
 continuation. Manual Task entry and per-Task round controls should remain an
 advanced or compatibility path rather than the primary Desktop workflow.
+
+That next-stage UI boundary was subsequently closed by
+[`tianwen-goal-first-desktop-ux-handoff.md`](tianwen-goal-first-desktop-ux-handoff.md).

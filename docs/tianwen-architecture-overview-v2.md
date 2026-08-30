@@ -1,6 +1,6 @@
 # 天问架构总览 v2
 
-**更新：** 2026-08-27
+**更新：** 2026-08-30
 
 **状态：** 当前产品架构的首要阅读入口；自然开发能力取证已收口，项目转入普通产品开发
 
@@ -12,7 +12,23 @@
 
 如果只想快速把握项目，先读“当前状态”和第 1–3、9–10 节即可；其余章节用于实现时消除歧义。
 
-## 当前状态（2026-08-27）
+## 当前状态（2026-08-30）
+
+Goal-first 长期目标主线已经进入正式产品，而不是待实现设计：普通 Web/Desktop
+入口只让用户填写长期目标、可选背景和成功标准；天问使用同一个稳定 Planner Session
+自动维护未来 Task，并让每个已接纳 Task 在独立 DSH Session 中执行。用户可以补充方向，
+但不需要手工填写 Task 或每项轮数。v1 手工计划仅作为兼容/高级路径保留。
+
+正式安装产品已经用 configured DeepSeek 完成过一个三 Task 长期目标；当前 Desktop
+详情进一步按“当前工作、已完成、接下来、已放弃”展示权威状态，并把主操作明确为
+“继续规划、开始下一步或继续当前工作”。该界面来自与普通 `dsh web` 相同的
+Runtime 插件，Desktop 不拥有第二套 Goal 引擎。
+
+当前 Goal-first 权威下钻文档是
+[`设计`](superpowers/specs/2026-08-30-tianwen-goal-first-planning-design.md)、
+[`真实执行 handoff`](operations/tianwen-goal-first-task-execution-handoff.md) 和
+[`Desktop UX handoff`](operations/tianwen-goal-first-desktop-ux-handoff.md)。以下
+2026-08-27 证据分层继续作为历史事实保留，不应反向覆盖这一较新的产品状态。
 
 Stage 7 已经完成，不再是待验证能力。一个使用配置模型的全新自然任务通过已安装的 DSH
 rc.7 产品路径正式运行一次：Goal complete，45/45 Evidence complete，`Outcome=met`，学习
