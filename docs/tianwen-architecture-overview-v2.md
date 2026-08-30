@@ -24,10 +24,17 @@ Goal-first 长期目标主线已经进入正式产品，而不是待实现设计
 “继续规划、开始下一步或继续当前工作”。该界面来自与普通 `dsh web` 相同的
 Runtime 插件，Desktop 不拥有第二套 Goal 引擎。
 
+普通 Goal-first 已完成/已放弃 Task 现在也能从同一详情页进入既有 Learning Intake：
+“有帮助”持久化为 `no-case`，“需要改进”可形成 `observed-gap` 或 Learning Ticket；
+回显只暴露安全决策，不回显用户原始说明。反馈不会把普通 Task 完成冒充为受治理 Outcome，
+也不会自动创建 Case、Candidate 或 Skill。正式安装产品已用真实 DeepSeek Task 验证 Task
+完成与 Turn 收尾之间的竞态，Host 复用 DSH `Agent.whenIdle()` 后再登记反馈。
+
 当前 Goal-first 权威下钻文档是
 [`设计`](superpowers/specs/2026-08-30-tianwen-goal-first-planning-design.md)、
 [`真实执行 handoff`](operations/tianwen-goal-first-task-execution-handoff.md) 和
-[`Desktop UX handoff`](operations/tianwen-goal-first-desktop-ux-handoff.md)。以下
+[`Desktop UX handoff`](operations/tianwen-goal-first-desktop-ux-handoff.md)，以及
+[`Task feedback handoff`](operations/tianwen-goal-task-feedback-handoff.md)。以下
 2026-08-27 证据分层继续作为历史事实保留，不应反向覆盖这一较新的产品状态。
 
 Stage 7 已经完成，不再是待验证能力。一个使用配置模型的全新自然任务通过已安装的 DSH
@@ -338,6 +345,10 @@ persistence 与 Natural Trial stream-error 已覆盖链路成立、成功交付�
 `resume --trial-manifest` 辅助路径，普通 resume 不经过该 monitor；它作为低优先级 backlog
 保留，不阻塞当前阶段。自然用户改善、外部用户验证、Provider-account 请求计数和普遍效果仍
 保持未声明。
+
+普通 Goal-first Task 的显式用户反馈现已接入正式 Evolution ledger。下一步若处理自动 Outcome，
+必须先为普通 Task 冻结真实验收合同，不能用“Goal complete”代替验收通过；在此之前，继续改善
+Goal 规划、执行和用户引导比扩展学习治理框架更优先。
 
 若未来已有合法 Candidate，需要同家族盲评时，仍冻结任务和单次尝试以保证比较公平；不设
 Tianwen 侧模型、token 或金额上限，也不绕过 standing authorization 边界。

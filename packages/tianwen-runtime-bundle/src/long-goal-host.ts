@@ -43,6 +43,15 @@ import {
 } from './long-goal.js'
 import { runLongGoalPlannerTurn } from './long-goal-planner.js'
 import type { LongGoalPlannerDependencies } from './long-goal-planner.js'
+import {
+  readGoalTaskFeedbackStatus,
+  recordGoalTaskFeedback,
+} from './goal-task-feedback.js'
+import type {
+  GoalTaskFeedbackDependencies,
+  GoalTaskFeedbackRecordResult,
+  GoalTaskFeedbackStatus,
+} from './goal-task-feedback.js'
 import { readGoalStatus } from './status.js'
 
 type RpcResult<T> =
@@ -204,6 +213,18 @@ export interface TianwenGoalFirstOperations {
     readonly longGoalId: string
     readonly expectedRevision: number
   }) => Promise<LongGoalAbandonResultV2>
+}
+
+export interface TianwenGoalTaskFeedbackOperations {
+  readonly status: (input: {
+    readonly longGoalId: string
+  }) => Promise<GoalTaskFeedbackStatus>
+  readonly record: (input: {
+    readonly longGoalId: string
+    readonly taskId: string
+    readonly rating: 'positive' | 'negative'
+    readonly note: string | null
+  }) => Promise<GoalTaskFeedbackRecordResult>
 }
 
 export class LongGoalTaskAdmissionError extends Error {
@@ -567,6 +588,7 @@ export function createTianwenLongGoalRpcHandler(
   },
   runDependencies?: TianwenLongGoalRunDependencies,
   goalFirstOperations?: TianwenGoalFirstOperations,
+  taskFeedbackOperations?: TianwenGoalTaskFeedbackOperations,
 ): ConnectionRpcHandler {
   const readStatus = (longGoalId: string) => dependencies.readLongGoalStatus({
     stateRoot: roots.stateRoot,
@@ -705,6 +727,39 @@ export function createTianwenLongGoalRpcHandler(
         expectedRevision,
       }))
     }
+    if (
+      endpoint === 'feedback-status' &&
+      taskFeedbackOperations !== undefined &&
+      isRecord(payload) &&
+      hasExactKeys(payload, ['longGoalId']) &&
+      isNonEmptyString(payload.longGoalId)
+    ) {
+      return {
+        ok: true,
+        value: await taskFeedbackOperations.status({ longGoalId: payload.longGoalId }),
+      }
+    }
+    if (
+      endpoint === 'record-task-feedback' &&
+      taskFeedbackOperations !== undefined &&
+      isRecord(payload) &&
+      hasExactKeys(payload, ['longGoalId', 'taskId', 'rating', 'note']) &&
+      isNonEmptyString(payload.longGoalId) &&
+      isNonEmptyString(payload.taskId) &&
+      (payload.rating === 'positive' || payload.rating === 'negative') &&
+      isNullableNonEmptyString(payload.note) &&
+      (payload.rating === 'negative' || payload.note === null)
+    ) {
+      return {
+        ok: true,
+        value: await taskFeedbackOperations.record({
+          longGoalId: payload.longGoalId,
+          taskId: payload.taskId,
+          rating: payload.rating,
+          note: payload.note,
+        }),
+      }
+    }
     return invalidRequest()
   }
 }
@@ -713,7 +768,11 @@ export function mountTianwenLongGoalHost(
   ctx: Context,
   config?: TianwenLongGoalHostConfig,
 ): void {
-  ctx.inject(['connection', 'apiProxy', 'agents', 'goals', 'sessions', 'agentDefaultModel', 'agentPresets'], injected => {
+  ctx.inject([
+    'connection', 'apiProxy', 'agents', 'goals', 'sessions',
+    'agentDefaultModel', 'agentPresets', 'sessionPersistence',
+    'tianwenLearningIntake', 'tianwenEvolution',
+  ], injected => {
     if (injected.baseUrl === undefined) throw new Error('Tianwen Long Goal Web host requires a Profile base URL')
     const roots = resolveTianwenLongGoalHostRoots({
       profileBaseUrl: new URL(injected.baseUrl),
@@ -877,11 +936,49 @@ export function mountTianwenLongGoalHost(
         ...input,
       }, serviceDependencies),
     }
+    const taskFeedbackDependencies: GoalTaskFeedbackDependencies = {
+      readLongGoal,
+      readLongGoalStatus,
+      awaitSessionIdle: async sessionId => {
+        await injected.agents.get(SessionId(sessionId))?.whenIdle()
+      },
+      openSession: async sessionId => {
+        const live = injected.agents.get(SessionId(sessionId))
+        if (live !== undefined) {
+          if (!await injected.sessions.flush(live.session)) {
+            throw new Error('Session persistence is unavailable')
+          }
+          return { session: live.session, release: () => undefined }
+        }
+        const preparation = await host.sessionPersistence.prepare(SessionId(sessionId))
+        return {
+          session: preparation.session,
+          release: () => preparation[Symbol.dispose](),
+        }
+      },
+      consume: (session, scopeKey, feedback) =>
+        host.tianwenLearningIntake.consume(session, scopeKey, feedback),
+      getLearningIntakeStatus: sessionId =>
+        host.tianwenEvolution.getLearningIntakeStatus(sessionId),
+    }
+    const taskFeedbackOperations: TianwenGoalTaskFeedbackOperations = {
+      status: input => readGoalTaskFeedbackStatus({
+        stateRoot: roots.stateRoot,
+        dshStatusTarget,
+        ...input,
+      }, taskFeedbackDependencies),
+      record: input => recordGoalTaskFeedback({
+        stateRoot: roots.stateRoot,
+        dshStatusTarget,
+        ...input,
+      }, taskFeedbackDependencies),
+    }
     host.connection.rpc.handle('/tianwen', createTianwenLongGoalRpcHandler(
       roots,
       undefined,
       runDependencies,
       goalFirstOperations,
+      taskFeedbackOperations,
     ), {
       authority: 'loopback',
     })

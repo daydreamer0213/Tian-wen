@@ -72,6 +72,7 @@ function isAllowedRuntimeInput(input: string): boolean {
   return [
     'src/runtime.ts',
     'src/goal-first-service.ts',
+    'src/goal-task-feedback.ts',
     'src/long-goal-host.ts',
     'src/long-goal-planner.ts',
     'src/long-goal.ts',
@@ -148,12 +149,14 @@ function isAllowedGoalFirstRunnerInput(input: string): boolean {
   return [
     'src/goal-first-runner.ts',
     'src/goal-first-service.ts',
+    'src/goal-task-feedback.ts',
     'src/long-goal-host.ts',
     'src/long-goal-planner.ts',
     'src/long-goal.ts',
   ].includes(path) || isAllowedStatusInput(path) || [
     '../tianwen-dsh-compat/dist/runtime.js',
     '../tianwen-dsh-compat/dist/scripted-adapter.js',
+    '../tianwen-evolution/dist/learning-intake.js',
   ].includes(path)
 }
 
@@ -398,6 +401,9 @@ describe('@tianwen/runtime-bundle', () => {
           'sessions',
           'agentDefaultModel',
           'agentPresets',
+          'sessionPersistence',
+          'tianwenLearningIntake',
+          'tianwenEvolution',
         ],
         expect.any(Function),
       )

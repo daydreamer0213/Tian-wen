@@ -333,7 +333,11 @@ function loadClientModule(input: {
   }
   runInNewContext(
     readFileSync(resolve('packages/tianwen-runtime-bundle/dist/client.js'), 'utf8'),
-    { window, AbortController, AbortSignal, console, setTimeout, clearTimeout },
+    {
+      window,
+      crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
+      AbortController, AbortSignal, console, setTimeout, clearTimeout,
+    },
   )
   if (exports === undefined) throw new Error('client module did not register')
   exports.apply({
@@ -491,6 +495,9 @@ describe('Learn Loop compiled DSH client module', () => {
     const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
       if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
       if (endpoint === 'status') return { ok: true, value: { status: mixedStatus } }
+      if (endpoint === 'feedback-status') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-task-feedback-status.v1', items: [],
+      } }
       throw new Error(`unexpected endpoint ${endpoint}`)
     }) }
     const client = loadClientModule({ list, rpc })
@@ -545,6 +552,9 @@ describe('Learn Loop compiled DSH client module', () => {
     const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
       if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
       if (endpoint === 'status') return { ok: true, value: { status: replanningStatus } }
+      if (endpoint === 'feedback-status') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-task-feedback-status.v1', items: [],
+      } }
       throw new Error(`unexpected endpoint ${endpoint}`)
     }) }
     const client = loadClientModule({ list, rpc })
@@ -699,6 +709,9 @@ describe('Learn Loop compiled DSH client module', () => {
         status: statusV2, sessionId: 'task-session',
       } }
       if (endpoint === 'status') return { ok: true, value: { status: authoritative } }
+      if (endpoint === 'feedback-status') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-task-feedback-status.v1', items: [],
+      } }
       throw new Error(`unexpected endpoint ${endpoint}`)
     }) }
     const client = loadClientModule({ list, rpc })
@@ -720,8 +733,103 @@ describe('Learn Loop compiled DSH client module', () => {
     expect(text(refreshedTree)).toContain('1/1 tasks complete')
     expect(text(refreshedTree)).toContain('Implement the Web flow — complete')
     expect(rpc.call.mock.calls.map(call => call[1])).toEqual([
-      'list', 'create-goal-first', 'continue-progress', 'list', 'status',
+      'list', 'create-goal-first', 'continue-progress', 'list', 'status', 'feedback-status',
     ])
+  })
+
+  it('records settled Task feedback and shows the durable learning decision', async () => {
+    const completed = {
+      ...statusV2,
+      goal: {
+        ...statusV2.goal, phase: 'complete', completedTasks: 1,
+      },
+      planner: { ...statusV2.planner, phase: 'complete' },
+      tasks: [{ ...statusV2.tasks[0], phase: 'complete' }],
+      currentTaskId: null,
+    } as const
+    const summary = {
+      schemaVersion: 'tianwen.long-goal-summary.v2',
+      id: completed.goal.id, objective: completed.goal.objective,
+      phase: completed.goal.phase, revision: completed.goal.revision,
+      completedTasks: 1, abandonedTasks: 0, totalTasks: 1,
+      currentTaskId: null, updatedAt: 1,
+    } as const
+    const feedbackItem = {
+      taskId: 'task-v2-1', rating: 'negative' as const,
+      decision: 'ticket-created' as const,
+      recordedAt: '2026-08-30T00:00:00.000Z',
+      ticketId: `ticket:${'a'.repeat(64)}`,
+    }
+    const list = createSessionList({ current: undefined, byId: {} })
+    let recorded = false
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
+      if (endpoint === 'status') return { ok: true, value: { status: completed } }
+      if (endpoint === 'feedback-status') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-task-feedback-status.v1',
+        items: recorded ? [feedbackItem] : [],
+      } }
+      if (endpoint === 'record-task-feedback') {
+        recorded = true
+        return { ok: true, value: {
+          schemaVersion: 'tianwen.goal-task-feedback-record.v1',
+          duplicate: false, item: feedbackItem,
+        } }
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const client = loadClientModule({ list, rpc })
+    let tree = await openListedGoal(client.render, completed.goal.objective)
+
+    expect(findButton(tree, 'Helpful')).toBeDefined()
+    ;(findButton(tree, 'Needs improvement').props.onClick as () => void)()
+    tree = client.render()
+    ;(findElement(tree, element => element.type === 'textarea' &&
+      element.props['aria-label'] === 'What should improve? (optional)').props.onChange as Function)({
+      target: { value: 'Keep the final answer concrete.' },
+    })
+    tree = client.render()
+    ;(findButton(tree, 'Record feedback').props.onClick as () => void)()
+    await flushClient()
+
+    expect(rpc.call.mock.calls.find(call => call[1] === 'record-task-feedback')?.[2])
+      .toEqual({
+        longGoalId: completed.goal.id,
+        taskId: 'task-v2-1',
+        rating: 'negative',
+        note: 'Keep the final answer concrete.',
+      })
+    expect(text(client.render())).toContain('Improvement clue recorded')
+  })
+
+  it('opens a settled Goal even when its optional feedback status cannot be read', async () => {
+    const completed = {
+      ...statusV2,
+      goal: { ...statusV2.goal, phase: 'complete', completedTasks: 1 },
+      planner: { ...statusV2.planner, phase: 'complete' },
+      tasks: [{ ...statusV2.tasks[0], phase: 'complete' }],
+      currentTaskId: null,
+    } as const
+    const summary = {
+      schemaVersion: 'tianwen.long-goal-summary.v2',
+      id: completed.goal.id, objective: completed.goal.objective,
+      phase: completed.goal.phase, revision: completed.goal.revision,
+      completedTasks: 1, abandonedTasks: 0, totalTasks: 1,
+      currentTaskId: null, updatedAt: 1,
+    } as const
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
+      if (endpoint === 'status') return { ok: true, value: { status: completed } }
+      if (endpoint === 'feedback-status') throw new Error('temporary feedback read failure')
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const client = loadClientModule({ list: createSessionList({ current: undefined, byId: {} }), rpc })
+
+    const tree = await openListedGoal(client.render, completed.goal.objective)
+
+    expect(text(tree)).toContain(completed.goal.objective)
+    expect(text(tree)).toContain('Implement the Web flow — complete')
+    expect(text(tree)).not.toContain('temporary feedback read failure')
   })
 
   it('keeps Goal detail for a null Task Session and guidance never invokes Continue implicitly', async () => {

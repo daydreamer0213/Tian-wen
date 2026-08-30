@@ -17,6 +17,10 @@
     "./inspection": {
       "types": "./dist/inspection.d.ts",
       "default": "./dist/inspection.js"
+    },
+    "./learning-intake": {
+      "types": "./dist/learning-intake.d.ts",
+      "default": "./dist/learning-intake.js"
     }
   },
   "dependencies": {

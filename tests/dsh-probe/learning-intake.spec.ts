@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   LedgerIntegrityError,
   prepareLearningIntake,
+  sha256,
   type LearningIntakeInput,
 } from '../../packages/tianwen-evolution/src/index.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
@@ -193,6 +194,41 @@ describe('Tianwen learning intake ledger', () => {
       'learning-intake-recorded',
       'learning-intake-recorded',
     ])
+  })
+
+  it('returns the latest sanitized intake status for a Session after reload', () => {
+    const root = ledgerRoot('status')
+    const ledger = new EvolutionLedger(root, {
+      clock: () => '2026-08-20T00:00:00.000Z',
+    })
+    ledger.recordLearningIntake({ ...base, rating: 'positive' })
+    const latest = ledger.recordLearningIntake({
+      ...base,
+      feedbackVersion: '22222222-2222-4222-8222-222222222222',
+      note: 'Keep the final answer concrete.',
+    })
+
+    expect(ledger.getLearningIntakeStatus(base.sessionId)).toEqual({
+      sessionId: base.sessionId,
+      messageId: base.messageId,
+      scopeKey: base.scopeKey,
+      rating: 'negative',
+      feedbackFingerprint: sha256({
+        rating: 'negative',
+        normalizedNote: 'keep the final answer concrete.',
+      }),
+      recordedAt: '2026-08-20T00:00:00.000Z',
+      decision: 'ticket-created',
+      ingestionId: latest.ingestionId,
+      signalId: latest.signalId,
+      ticketId: latest.ticketId,
+    })
+    expect(JSON.stringify(ledger.getLearningIntakeStatus(base.sessionId)))
+      .not.toContain('Keep the final answer concrete.')
+
+    expect(new EvolutionLedger(root).getLearningIntakeStatus(base.sessionId))
+      .toEqual(ledger.getLearningIntakeStatus(base.sessionId))
+    expect(ledger.getLearningIntakeStatus('missing-session')).toBeUndefined()
   })
 
   it.each([

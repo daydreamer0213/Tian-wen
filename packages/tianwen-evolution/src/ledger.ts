@@ -16,6 +16,7 @@ import { TextDecoder } from 'node:util'
 
 import {
   canonicalJson,
+  learningFeedbackFingerprint,
   prepareLearningIntake,
   sha256,
 } from './learning-intake.js'
@@ -23,6 +24,7 @@ import type {
   LearningIntakeInput,
   LearningIntakeReceipt,
   LearningIntakeRecordedEvent,
+  LearningIntakeStatus,
   LearningSignal,
   LearningSignalId,
   LearningTicket,
@@ -3106,6 +3108,26 @@ export class EvolutionLedger {
       ...(signal === undefined ? {} : { signal }),
     })
     return { ...receipt, duplicate: false }
+  }
+
+  getLearningIntakeStatus(
+    sessionId: string,
+  ): LearningIntakeStatus | undefined {
+    const event = [...this.#learningIntakes.values()]
+      .findLast(candidate => candidate.input.sessionId === sessionId)
+    if (event === undefined) return undefined
+    return clone({
+      sessionId: event.input.sessionId,
+      messageId: event.input.messageId,
+      scopeKey: event.input.scopeKey,
+      rating: event.input.rating,
+      feedbackFingerprint: learningFeedbackFingerprint(
+        event.input.rating,
+        event.input.note,
+      ),
+      recordedAt: event.at,
+      ...event.receipt,
+    })
   }
 
   listLearningSignals(): readonly (LearningSignal | OutcomeLearningSignal)[] {

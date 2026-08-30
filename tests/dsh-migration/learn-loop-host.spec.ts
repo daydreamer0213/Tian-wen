@@ -16,6 +16,7 @@ import {
   resolveTianwenLongGoalHostRoots,
   runCurrentWebTask,
   type TianwenGoalFirstOperations,
+  type TianwenGoalTaskFeedbackOperations,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
 import { runLongGoalPlannerTurn } from '../../packages/tianwen-runtime-bundle/src/long-goal-planner.js'
 import {
@@ -186,6 +187,24 @@ function goalFirstOperations(status = goalFirstStatus()): TianwenGoalFirstOperat
   }
 }
 
+function taskFeedbackOperations(): TianwenGoalTaskFeedbackOperations {
+  const item = {
+    taskId: 'task-1', rating: 'negative' as const,
+    decision: 'ticket-created' as const,
+    recordedAt: '2026-08-30T00:00:00.000Z',
+    ticketId: `ticket:${'a'.repeat(64)}` as const,
+  }
+  return {
+    status: vi.fn(async () => ({
+      schemaVersion: 'tianwen.goal-task-feedback-status.v1', items: [item],
+    })),
+    record: vi.fn(async () => ({
+      schemaVersion: 'tianwen.goal-task-feedback-record.v1',
+      duplicate: false, item,
+    })),
+  }
+}
+
 async function installPlannerSetup(
   setup: AgentSetup,
   register: (tool: ToolDefinition) => void,
@@ -233,6 +252,9 @@ describe('Tianwen Long Goal Web host', () => {
         agents: {},
         goals: {},
         sessions: {},
+        sessionPersistence: {},
+        tianwenLearningIntake: {},
+        tianwenEvolution: {},
       })) {
         ;(ctx as unknown as { provide(name: string, value: unknown): void }).provide(name, service)
       }
@@ -474,6 +496,63 @@ describe('Tianwen Long Goal Web host', () => {
       },
     })
     expect(operations.continueProgress).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads and records settled Task feedback through exact RPC payloads', async () => {
+    const status = longGoalStatus(['complete'], [{ goalId: 'goal-1', sessionId: 'session-1' }])
+    const feedback = taskFeedbackOperations()
+    const handler = createTianwenLongGoalRpcHandler(
+      ROOTS,
+      undefined,
+      runDependencies(longGoalRecord([status.tasks[0]!.execution]), status),
+      goalFirstOperations(),
+      feedback,
+    )
+    const signal = AbortSignal.timeout(1_000)
+
+    await expect(handler('feedback-status', {
+      longGoalId: 'tianwen-long-goal-v2-test',
+    }, signal)).resolves.toMatchObject({
+      ok: true,
+      value: { schemaVersion: 'tianwen.goal-task-feedback-status.v1' },
+    })
+    await expect(handler('record-task-feedback', {
+      longGoalId: 'tianwen-long-goal-v2-test',
+      taskId: 'task-1',
+      rating: 'negative',
+      note: 'Keep the result concrete.',
+    }, signal)).resolves.toMatchObject({
+      ok: true,
+      value: { schemaVersion: 'tianwen.goal-task-feedback-record.v1' },
+    })
+    expect(feedback.status).toHaveBeenCalledWith({
+      longGoalId: 'tianwen-long-goal-v2-test',
+    })
+    expect(feedback.record).toHaveBeenCalledWith({
+      longGoalId: 'tianwen-long-goal-v2-test',
+      taskId: 'task-1',
+      rating: 'negative',
+      note: 'Keep the result concrete.',
+    })
+
+    for (const [endpoint, payload] of [
+      ['feedback-status', { longGoalId: 'goal', ignored: true }],
+      ['record-task-feedback', {
+        longGoalId: 'goal', taskId: 'task-1', rating: 'mixed', note: null,
+      }],
+      ['record-task-feedback', {
+        longGoalId: 'goal', taskId: 'task-1', rating: 'negative', note: ' ',
+      }],
+      ['record-task-feedback', {
+        longGoalId: 'goal', taskId: 'task-1', rating: 'positive', note: 'unexpected',
+      }],
+    ] as const) {
+      await expect(handler(endpoint, payload, signal)).resolves.toEqual({
+        ok: false,
+        error: { code: 'internal', message: 'invalid-request', details: {} },
+      })
+    }
+    expect(feedback.record).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the v1 create payload and result unchanged when goal-first operations are installed', async () => {

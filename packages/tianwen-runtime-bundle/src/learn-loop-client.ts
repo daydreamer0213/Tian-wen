@@ -12,6 +12,10 @@ import type {
   LongGoalSummaryV2,
 } from './long-goal-contract.js'
 import type { RunCurrentTaskResult } from './long-goal-host.js'
+import type {
+  GoalTaskFeedbackRecordResult,
+  GoalTaskFeedbackStatus,
+} from './goal-task-feedback.js'
 
 export interface LearnLoopClient {
   list(signal?: AbortSignal): Promise<readonly AnyLongGoalSummary[]>
@@ -44,6 +48,16 @@ export interface LearnLoopClient {
     readonly longGoalId: string
     readonly expectedRevision: number
   }, signal?: AbortSignal): Promise<LongGoalAbandonResultV2>
+  feedbackStatus(
+    longGoalId: string,
+    signal?: AbortSignal,
+  ): Promise<GoalTaskFeedbackStatus>
+  recordTaskFeedback(input: {
+    readonly longGoalId: string
+    readonly taskId: string
+    readonly rating: 'positive' | 'negative'
+    readonly note: string | null
+  }, signal?: AbortSignal): Promise<GoalTaskFeedbackRecordResult>
 }
 
 export class LearnLoopRpcError extends Error {
@@ -249,6 +263,37 @@ function isAbandonResult(value: unknown): value is LongGoalAbandonResultV2 {
     value.action === 'abandoned' && isStatusV2(value.status)
 }
 
+function isFeedbackItem(value: unknown): boolean {
+  if (!isRecord(value) || ![
+    hasExactKeys(value, ['taskId', 'rating', 'decision', 'recordedAt']),
+    hasExactKeys(value, ['taskId', 'rating', 'decision', 'recordedAt', 'ticketId']),
+  ].includes(true) || !isNonEmptyString(value.taskId) ||
+    (value.rating !== 'positive' && value.rating !== 'negative') ||
+    !['no-case', 'observed-gap', 'ticket-created', 'ticket-merged']
+      .includes(String(value.decision)) || !isNonEmptyString(value.recordedAt)) {
+    return false
+  }
+  const ticketDecision = value.decision === 'ticket-created' || value.decision === 'ticket-merged'
+  const ratingDecisionMatches = value.rating === 'positive'
+    ? value.decision === 'no-case'
+    : value.decision !== 'no-case'
+  return ratingDecisionMatches &&
+    (ticketDecision ? isNonEmptyString(value.ticketId) : value.ticketId === undefined)
+}
+
+function isFeedbackStatus(value: unknown): value is GoalTaskFeedbackStatus {
+  return isRecord(value) && hasExactKeys(value, ['schemaVersion', 'items']) &&
+    value.schemaVersion === 'tianwen.goal-task-feedback-status.v1' &&
+    Array.isArray(value.items) && value.items.every(isFeedbackItem)
+}
+
+function isFeedbackRecord(value: unknown): value is GoalTaskFeedbackRecordResult {
+  return isRecord(value) && hasExactKeys(value, [
+    'schemaVersion', 'duplicate', 'item',
+  ]) && value.schemaVersion === 'tianwen.goal-task-feedback-record.v1' &&
+    typeof value.duplicate === 'boolean' && isFeedbackItem(value.item)
+}
+
 function invalidResponse(): never {
   throw new Error('invalid Tianwen RPC response')
 }
@@ -338,6 +383,16 @@ export function createLearnLoopClient(rpc: ClientConnectionRpc): LearnLoopClient
     async abandonCurrentTask(input, signal) {
       const value = await call(rpc, 'abandon-current-task', input, signal)
       if (!isAbandonResult(value)) invalidResponse()
+      return value
+    },
+    async feedbackStatus(longGoalId, signal) {
+      const value = await call(rpc, 'feedback-status', { longGoalId }, signal)
+      if (!isFeedbackStatus(value)) invalidResponse()
+      return value
+    },
+    async recordTaskFeedback(input, signal) {
+      const value = await call(rpc, 'record-task-feedback', input, signal)
+      if (!isFeedbackRecord(value)) invalidResponse()
       return value
     },
   }

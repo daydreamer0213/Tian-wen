@@ -30,6 +30,7 @@ import type {
 import type {
   LearningIntakeInput,
   LearningIntakeReceipt,
+  LearningIntakeStatus,
   LearningSignal,
   LearningTicket,
 } from './learning-intake.js'
@@ -227,6 +228,10 @@ export class TianwenEvolutionService extends Service {
   recordLearningIntake(input: LearningIntakeInput): LearningIntakeReceipt {
     return this.formalWrite(() =>
       this.state().ledger.recordLearningIntake(input))
+  }
+
+  getLearningIntakeStatus(sessionId: string): LearningIntakeStatus | undefined {
+    return this.state().ledger.getLearningIntakeStatus(sessionId)
   }
 
   recordRunBinding(input: RunBindingInput): RunBindingReceipt {

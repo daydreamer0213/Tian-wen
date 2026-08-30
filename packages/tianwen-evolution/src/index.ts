@@ -55,10 +55,15 @@ export type {
   RuntimeBoundEvent,
   Sha256Digest,
 } from './ledger.js'
-export { prepareLearningIntake, sha256 } from './learning-intake.js'
+export {
+  learningFeedbackFingerprint,
+  prepareLearningIntake,
+  sha256,
+} from './learning-intake.js'
 export type {
   LearningIntakeInput,
   LearningIntakeReceipt,
+  LearningIntakeStatus,
   LearningSignal,
   LearningSignalId,
   LearningTicket,

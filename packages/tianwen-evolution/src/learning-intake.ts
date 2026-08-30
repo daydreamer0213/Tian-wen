@@ -70,6 +70,17 @@ export interface LearningIntakeReceipt {
   readonly duplicate: boolean
 }
 
+/** Sanitized latest intake projection for product status surfaces. */
+export interface LearningIntakeStatus
+  extends Omit<LearningIntakeReceipt, 'duplicate'> {
+  readonly sessionId: string
+  readonly messageId: string
+  readonly scopeKey: string
+  readonly rating: 'positive' | 'negative'
+  readonly feedbackFingerprint: Sha256Digest
+  readonly recordedAt: string
+}
+
 export interface LearningIntakeRecordedEvent {
   readonly schemaVersion: 'tianwen.learning-intake.v1'
   readonly type: 'learning-intake-recorded'
@@ -122,6 +133,17 @@ function requireDigest(value: unknown, label: string): Sha256Digest {
 
 export function normalizeLearningText(value: string): string {
   return value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase()
+}
+
+/** Compare feedback retries without exposing the user's private note. */
+export function learningFeedbackFingerprint(
+  rating: 'positive' | 'negative',
+  note?: string,
+): Sha256Digest {
+  return sha256({
+    rating,
+    normalizedNote: note === undefined ? '' : normalizeLearningText(note),
+  })
 }
 
 function validateInput(input: LearningIntakeInput): LearningIntakeInput {
