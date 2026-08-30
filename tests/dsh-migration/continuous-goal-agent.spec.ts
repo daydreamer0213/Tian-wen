@@ -208,6 +208,19 @@ describe('continuous Goal Agent controls', () => {
     expect(tool.parameters.properties.resume.description).toContain('pause-and-replan')
   })
 
+  it('treats the bound prompt as authority for natural Goal guidance before native get_goal', () => {
+    const subject = controlsAgent()
+    installBoundContinuousGoalControls(subject.agent, operations())
+
+    const prompt = subject.sections[0]!.text()
+    expect(prompt).toContain('this chat is bound to an active continuous Goal')
+    expect(prompt).toContain('native DSH get_goal')
+    expect(prompt).toContain('does not negate the continuous Goal binding')
+    expect(prompt).toContain('first action must be goal_control')
+    expect(prompt).toContain('Do not read from or write to the workspace before calling it')
+    expect(prompt).toContain('Unrelated conversation should proceed normally')
+  })
+
   it('owns tool and merged prompt registrations in one disposer that permits reinstall', () => {
     const subject = controlsAgent()
     const ops = operations()

@@ -149,11 +149,14 @@ export function installBoundContinuousGoalControls(
       name: 'tianwen:continuous-goal-control',
       order: 100,
       text: () => [
-        'For guidance, correction, pause, resume, or status of the current continuous Goal, call goal_control.',
+        'Because this chat is bound to an active continuous Goal, use goal_control for its guidance, correction, pause, resume, or status.',
+        'The native DSH get_goal tool manages a separate same-session Goal; a null result does not negate the continuous Goal binding.',
+        'When a user message is primarily guidance, correction, pause, resume, or status, the first action must be goal_control.',
+        'Do not read from or write to the workspace before calling it.',
         'Use exactly one of:',
         ...GOAL_CONTROL_SHAPES,
         'Do not add fields or use text/resume for an action that does not list them.',
-        'Leave unrelated conversation alone.',
+        'Unrelated conversation should proceed normally.',
       ].join('\n'),
     })
   })
