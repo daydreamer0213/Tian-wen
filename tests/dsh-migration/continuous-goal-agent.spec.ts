@@ -189,6 +189,20 @@ describe('continuous Goal Agent controls', () => {
     expect(concludeTurn).toHaveBeenCalledOnce()
   })
 
+  it('concludes the control Turn when Goal control fails', async () => {
+    const subject = controlsAgent()
+    const ops = operations()
+    const failure = new Error('Goal control failed')
+    ops.control.mockRejectedValue(failure)
+    installBoundContinuousGoalControls(subject.agent, ops)
+    const concludeTurn = vi.fn()
+
+    await expect(subject.tools[0]!.execute({ action: 'pause' }, {
+      agent: subject.agent, concludeTurn,
+    })).rejects.toThrow(failure)
+    expect(concludeTurn).toHaveBeenCalledOnce()
+  })
+
   it('returns compact redacted progress for status', async () => {
     const subject = controlsAgent()
     const ops = operations()
