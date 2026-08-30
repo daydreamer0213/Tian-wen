@@ -651,6 +651,64 @@ describe('goal-first long Goal v2 records', () => {
     }
   })
 
+  it('rejects persisted Goal-first Session role collisions during record and status reads', async () => {
+    const dataDir = createStateRoot()
+    const stateRoot = join(dataDir, 'state')
+    const workspaceRoot = resolve(dataDir, 'workspace')
+    try {
+      const v2 = createGoalFirstLongGoal({
+        stateRoot, objective: 'Parse v2 roles', context: null, successCriteria: null, workspaceRoot, agentPreset: 'planner',
+      }, { goalSuffix: () => 'parse-v2-roles', plannerSessionId: () => 'planner-v2', now: () => 10 })
+      const v2Plan = commitLongGoalPlan({
+        stateRoot, longGoalId: v2.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Task v2' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000071', now: () => 11 })
+      const v2Bound = bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: v2.id, expectedRevision: 2, taskId: v2Plan.tasks[0]!.id,
+        execution: { goalId: 'goal-v2', sessionId: 'task-v2' },
+      })
+      const v3 = createContinuousLongGoal({
+        stateRoot, objective: 'Parse v3 roles', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'control-v3',
+      }, { goalSuffix: () => 'parse-v3-roles', plannerSessionId: () => 'planner-v3', now: () => 20 })
+      const v3Plan = commitLongGoalPlan({
+        stateRoot, longGoalId: v3.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Task v3' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000072', now: () => 21 })
+      const v3Bound = bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: v3.id, expectedRevision: 2, taskId: v3Plan.tasks[0]!.id,
+        execution: { goalId: 'goal-v3', sessionId: 'task-v3' },
+      })
+      const corruptions = [
+        {
+          ...v2Bound,
+          tasks: v2Bound.tasks.map(task => ({
+            ...task,
+            execution: task.execution === null ? null : { ...task.execution, sessionId: v2Bound.planner.sessionId },
+          })),
+        },
+        {
+          ...v3Bound,
+          tasks: v3Bound.tasks.map(task => ({
+            ...task,
+            execution: task.execution === null ? null : { ...task.execution, sessionId: v3Bound.planner.sessionId },
+          })),
+        },
+        { ...v3Bound, control: { ...v3Bound.control, sessionId: v3Bound.planner.sessionId } },
+        { ...v3Bound, control: { ...v3Bound.control, sessionId: v3Bound.tasks[0]!.execution!.sessionId } },
+      ]
+
+      for (const corrupted of corruptions) {
+        writeFileSync(longGoalPath(stateRoot, corrupted.id), `${JSON.stringify(corrupted)}\n`, 'utf8')
+        expect(() => readLongGoal(stateRoot, corrupted.id)).toThrow(LongGoalIntegrityError)
+        await expect(readLongGoalStatus({ stateRoot, longGoalId: corrupted.id, dshStatusTarget: { dataDir } }))
+          .rejects.toThrow(LongGoalIntegrityError)
+      }
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
   it('updates a continuous Goal atomically, keeps same-mode writes idempotent, and finds its active control Session binding', () => {
     const stateRoot = createStateRoot()
     const workspaceRoot = resolve(stateRoot, 'workspace')

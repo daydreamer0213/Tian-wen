@@ -278,8 +278,12 @@ function parseGoalFirstLongGoalFields(
   ) {
     throw new LongGoalIntegrityError(`Long Goal ${schemaVersion} record is invalid`)
   }
+  const plannerSessionId = (value.planner as { readonly sessionId: string }).sessionId
   const tasks = value.tasks.map(parseV2Task)
   validateV2TaskBindings(tasks)
+  if (tasks.some(task => task.execution?.sessionId === plannerSessionId)) {
+    throw new LongGoalIntegrityError(`Long Goal ${schemaVersion} Task execution Session must differ from planner Session`)
+  }
   if (value.planner.phase === 'unplanned' && tasks.length !== 0) {
     throw new LongGoalIntegrityError(`Unplanned Long Goal ${schemaVersion} has Tasks`)
   }
@@ -323,9 +327,17 @@ function parseLongGoalV3(value: unknown): LongGoalRecordV3 {
   ) {
     throw new LongGoalIntegrityError('Long Goal v3 record is invalid')
   }
+  const controlSessionId = (value.control as { readonly sessionId: string }).sessionId
+  const fields = parseGoalFirstLongGoalFields(value, true, 'v3')
+  if (controlSessionId === fields.planner.sessionId) {
+    throw new LongGoalIntegrityError('Continuous Goal control Session must differ from planner Session')
+  }
+  if (fields.tasks.some(task => task.execution?.sessionId === controlSessionId)) {
+    throw new LongGoalIntegrityError('Continuous Goal control Session must differ from Task execution Session')
+  }
   return {
     schemaVersion: 'tianwen.long-goal.v3',
-    ...parseGoalFirstLongGoalFields(value, true, 'v3'),
+    ...fields,
     control: { sessionId: value.control.sessionId, autoProgress: value.control.autoProgress },
   }
 }
