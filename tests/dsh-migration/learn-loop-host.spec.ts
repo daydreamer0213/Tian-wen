@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -271,6 +271,13 @@ function plannerHandle(
 }
 
 describe('Tianwen Long Goal Web host', () => {
+  it('keeps cold continuous Task diagnostics free of internal Session ids', () => {
+    const source = readFileSync(resolve(import.meta.dirname,
+      '../../packages/tianwen-runtime-bundle/src/long-goal-host.ts'), 'utf8')
+    expect(source).not.toContain('Task Session ${execution.sessionId} is not live')
+    expect(source).toContain("LongGoalIntegrityError('Continuous Goal Task Session is not live')")
+  })
+
   it('waits for the configured model and preset services before mounting the Goal-first RPC host', async () => {
     const ctx = new Context()
     const handle = vi.fn()

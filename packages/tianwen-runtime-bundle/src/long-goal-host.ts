@@ -1425,7 +1425,7 @@ export function mountTianwenLongGoalHost(
       cancelTaskAndReadStatus: async execution => {
         const taskAgent = injected.agents.get(SessionId(execution.sessionId))
         if (taskAgent === undefined) {
-          throw new LongGoalIntegrityError(`Continuous Goal Task Session ${execution.sessionId} is not live`)
+          throw new LongGoalIntegrityError('Continuous Goal Task Session is not live')
         }
         const goal = injected.goals.get(taskAgent)
         if (goal === undefined || String(goal.id) !== execution.goalId) {
