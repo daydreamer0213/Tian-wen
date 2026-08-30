@@ -725,7 +725,9 @@ describe('@tianwen/runtime-bundle', () => {
           TIANWEN_GOAL_FIRST_WORKSPACE_ROOT: root,
         },
         shell: false,
-        timeout: 15_000,
+        // This is a correctness probe, not a cold-boot performance gate. The
+        // isolated Windows Profile can spend tens of seconds preparing links.
+        timeout: 60_000,
         windowsHide: true,
       })
 
