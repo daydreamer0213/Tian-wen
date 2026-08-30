@@ -841,7 +841,8 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
         "pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts "
         "tests/dsh-migration/controlled-lifecycle-command.spec.ts "
         "tests/dsh-migration/runtime-bundle.spec.ts "
-        "tests/dsh-migration/one-shot-profile-lifecycle.spec.ts"
+        "tests/dsh-migration/one-shot-profile-lifecycle.spec.ts "
+        "tests/dsh-migration/learn-loop-host.spec.ts"
     )
     expected_installer_job = textwrap.dedent(
         """\
@@ -894,6 +895,7 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
         "tests/dsh-migration/controlled-lifecycle-command.spec.ts",
         "tests/dsh-migration/runtime-bundle.spec.ts",
         "tests/dsh-migration/one-shot-profile-lifecycle.spec.ts",
+        "tests/dsh-migration/learn-loop-host.spec.ts",
     ):
         assert windows_owned_spec not in typescript_job
     assert "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts" not in installer_job
@@ -976,7 +978,7 @@ def test_architecture_lists_current_controlled_lifecycle_evidence_first() -> Non
     raw_architecture = architecture_path.read_text(encoding="utf-8")
     architecture = " ".join(raw_architecture.split())
 
-    assert "## 当前状态（2026-08-27）" in raw_architecture
+    assert "## 当前状态（2026-08-30）" in raw_architecture
     current_handoff = "tianwen-v0.1-controlled-real-activity-22-handoff.md"
     historical_activity_authorities = "Activity-01、Activity-02 和 Activity-03"
     assert current_handoff in architecture
