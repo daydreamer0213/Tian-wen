@@ -9,8 +9,11 @@ import type {
 
 export interface ContinuousGoalAgentOperations {
   create(agent: Agent, objective: string): Promise<Pick<ContinuousGoalControlResult, 'action'>>
-  control(agent: Agent, action: ContinuousGoalControlAction): Promise<Pick<ContinuousGoalControlResult, 'action'>>
+  control(agent: Agent, action: ContinuousGoalControlAction): Promise<ControlOperationResult>
 }
+
+type ControlOperationResult = Pick<ContinuousGoalControlResult, 'action'>
+  & Partial<Pick<ContinuousGoalControlResult, 'status'>>
 
 const NO_ACTIVE_GOAL = 'No active continuous Goal is bound to this Agent.'
 const GOAL_CONTROL_SHAPES = [
@@ -55,6 +58,27 @@ function parseControlAction(value: unknown): ContinuousGoalControlAction {
   if (args.action === 'resume' && exactKeys(args, ['action'])) return { action: 'resume' }
   if (args.action === 'status' && exactKeys(args, ['action'])) return { action: 'status' }
   throw new TypeError('Goal control arguments require exact keys')
+}
+
+function formatControlResult(result: ControlOperationResult): string {
+  const status = result.status
+  if (status === undefined) return result.action
+  const currentTask = status.currentTaskId === null
+    ? undefined
+    : status.tasks.find(task => task.id === status.currentTaskId)
+  return JSON.stringify({
+    action: result.action,
+    goal: {
+      objective: status.goal.objective,
+      phase: status.goal.phase,
+      completedTasks: status.goal.completedTasks,
+      totalTasks: status.goal.totalTasks,
+      autoProgress: status.control.autoProgress,
+      currentTask: currentTask === undefined
+        ? null
+        : { objective: currentTask.objective, phase: currentTask.phase },
+    },
+  })
 }
 
 function commandError(error: unknown): { readonly kind: 'error', readonly text: string } {
@@ -142,15 +166,15 @@ export function installBoundContinuousGoalControls(
         const controlAgent = exec.agent
         const controlSessionId = controlAgent?.session.id
         if (controlAgent === undefined || controlSessionId === undefined) return NO_ACTIVE_GOAL
-        return (await operations.control(controlAgent, parseControlAction(args))).action
+        return formatControlResult(await operations.control(controlAgent, parseControlAction(args)))
       },
     }))
     yield agent.ctx.systemPrompt.section({
       name: 'tianwen:continuous-goal-control',
       order: 100,
       text: () => [
-        'Because this chat is bound to an active continuous Goal, use goal_control for its guidance, correction, pause, resume, or status.',
-        'The native DSH get_goal tool manages a separate same-session Goal; a null result does not negate the continuous Goal binding.',
+        'goal_control is the authority for whether an active continuous Goal exists for this chat.',
+        'The native DSH get_goal tool manages a separate Goal domain; a null result must not be used to decide whether a continuous Goal exists.',
         'When a user message is primarily guidance, correction, pause, resume, or status, the first action must be goal_control.',
         'Do not read from or write to the workspace before calling it.',
         'Use exactly one of:',

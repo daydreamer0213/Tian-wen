@@ -184,6 +184,71 @@ describe('continuous Goal Agent controls', () => {
     expect(ops.control).toHaveBeenCalledWith(subject.agent, { action: 'pause' })
   })
 
+  it('returns compact redacted progress for status', async () => {
+    const subject = controlsAgent()
+    const ops = operations()
+    ops.control.mockResolvedValue({
+      schemaVersion: 'tianwen.continuous-goal-control-result.v1',
+      action: 'status',
+      sessionId: 'internal-task-session-id',
+      status: {
+        schemaVersion: 'tianwen.long-goal-status.v3',
+        goal: {
+          id: 'internal-long-goal-id', objective: 'Ship the migration', phase: 'active', revision: 7,
+          completedTasks: 2, abandonedTasks: 0, totalTasks: 4,
+        },
+        planner: { sessionId: 'internal-planner-session-id', phase: 'ready', planRevision: 3 },
+        guidance: [],
+        tasks: [
+          { id: 'internal-task-id', objective: 'Verify the release', phase: 'active', execution: { sessionId: 'internal-task-session-id' }, resolution: null },
+        ],
+        currentTaskId: 'internal-task-id',
+        runtime: { activation: 'not-loaded', modelRequests: 0, readOnly: true },
+        control: { sessionId: 'internal-control-session-id', autoProgress: 'running' },
+      },
+    })
+    installBoundContinuousGoalControls(subject.agent, ops)
+
+    const output = await subject.tools[0]!.execute({ action: 'status' }, { agent: subject.agent })
+
+    expect(JSON.parse(output)).toEqual({
+      action: 'status',
+      goal: {
+        objective: 'Ship the migration', phase: 'active', completedTasks: 2, totalTasks: 4,
+        autoProgress: 'running', currentTask: { objective: 'Verify the release', phase: 'active' },
+      },
+    })
+    for (const internalId of [
+      'internal-long-goal-id', 'internal-task-id', 'internal-task-session-id',
+      'internal-planner-session-id', 'internal-control-session-id',
+    ]) expect(output).not.toContain(internalId)
+  })
+
+  it('returns a null current Task when status has none', async () => {
+    const subject = controlsAgent()
+    const ops = operations()
+    ops.control.mockResolvedValue({
+      action: 'status',
+      status: {
+        goal: { objective: 'Ship the migration', phase: 'planning', completedTasks: 0, totalTasks: 1 },
+        tasks: [],
+        currentTaskId: null,
+        control: { autoProgress: 'paused' },
+      },
+    })
+    installBoundContinuousGoalControls(subject.agent, ops)
+
+    const output = await subject.tools[0]!.execute({ action: 'status' }, { agent: subject.agent })
+
+    expect(JSON.parse(output)).toEqual({
+      action: 'status',
+      goal: {
+        objective: 'Ship the migration', phase: 'planning', completedTasks: 0, totalTasks: 1,
+        autoProgress: 'paused', currentTask: null,
+      },
+    })
+  })
+
   it('advertises every exact goal_control action shape to the model before execution', () => {
     const subject = controlsAgent()
     installBoundContinuousGoalControls(subject.agent, operations())
@@ -213,9 +278,9 @@ describe('continuous Goal Agent controls', () => {
     installBoundContinuousGoalControls(subject.agent, operations())
 
     const prompt = subject.sections[0]!.text()
-    expect(prompt).toContain('this chat is bound to an active continuous Goal')
+    expect(prompt).toContain('goal_control is the authority for whether an active continuous Goal exists')
     expect(prompt).toContain('native DSH get_goal')
-    expect(prompt).toContain('does not negate the continuous Goal binding')
+    expect(prompt).toContain('a null result must not be used to decide whether a continuous Goal exists')
     expect(prompt).toContain('first action must be goal_control')
     expect(prompt).toContain('Do not read from or write to the workspace before calling it')
     expect(prompt).toContain('Unrelated conversation should proceed normally')
