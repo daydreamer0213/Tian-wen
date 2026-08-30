@@ -218,18 +218,15 @@ function defaultStopTree(pid: number): Promise<void> {
 }
 
 function loopbackUrl(output: string): URL | undefined {
-  const match = output.match(/(?:https?:\/\/[^\s]+|file:\/\/[^\s]+|data:[^\s]+)/u)
-  if (match === null) return undefined
-  let url: URL
-  try {
-    url = new URL(match[0])
-  } catch {
-    throw new Error('DSH Web emitted an invalid readiness URL')
+  for (const match of output.matchAll(/https?:\/\/[^\s]+/gu)) {
+    try {
+      const url = new URL(match[0])
+      if (url.protocol === 'http:' && ['127.0.0.1', '[::1]', '::1'].includes(url.hostname)) return url
+    } catch {
+      // Other startup text is not a readiness signal.
+    }
   }
-  if (url.protocol !== 'http:' || !['127.0.0.1', '[::1]', '::1'].includes(url.hostname)) {
-    throw new Error('DSH Web readiness URL must be loopback HTTP')
-  }
-  return url
+  return undefined
 }
 
 export function startDesktopWebHost(target: DesktopTarget, dependencies: DesktopHostDependencies = {}): Promise<DesktopWebHost> {

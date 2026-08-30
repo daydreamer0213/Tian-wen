@@ -280,14 +280,33 @@ describe('Tianwen Desktop Web host contract', () => {
     await host.stop()
   })
 
-  it.each(['https://example.com/', 'file:///C:/secret', 'data:text/plain,nope'])('rejects a non-loopback ready URL', async url => {
+  it('ignores unrelated external URLs before the loopback readiness URL', async () => {
     const target = resolveDesktopTarget(fixture())
     const fake = child()
     const pending = startDesktopWebHost(target, { spawn: (() => {
-      queueMicrotask(() => fake.stdout.write(`${url}\n`))
+      queueMicrotask(() => {
+        fake.stderr.write('Learn more at https://example.com/docs\n')
+        fake.stdout.write('ready http://127.0.0.1:4316/\n')
+      })
       return fake
     }) as never })
-    await expect(pending).rejects.toThrow()
+
+    const host = await pending
+    expect(host.url.href).toBe('http://127.0.0.1:4316/')
+    await host.stop()
+  })
+
+  it.each(['https://example.com/', 'file:///C:/secret', 'data:text/plain,nope'])('does not accept a non-loopback URL as readiness', async url => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child()
+    const pending = startDesktopWebHost(target, { spawn: (() => {
+      queueMicrotask(() => {
+        fake.stdout.write(`${url}\n`)
+        fake.emit('exit', 1, null)
+      })
+      return fake
+    }) as never })
+    await expect(pending).rejects.toThrow(/exited before readiness/u)
   })
 
   it('rejects when the child exits before readiness', async () => {
@@ -319,7 +338,6 @@ describe('Tianwen Desktop Web host contract', () => {
   it.each([
     ['timeout', (fake: FakeChild, fire: (delay: number) => void) => fire(120_000)],
     ['overflow', (fake: FakeChild) => fake.stderr.write(Buffer.alloc(65_537))],
-    ['invalid ready URL', (fake: FakeChild) => fake.stdout.write('https://example.com/\n')],
   ])('cleans up an owned child before rejecting startup %s', async (_label, trigger) => {
     const target = resolveDesktopTarget(fixture())
     const fake = child(false)
