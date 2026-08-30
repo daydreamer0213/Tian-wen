@@ -249,7 +249,7 @@ export interface TianwenGoalFirstOperations {
   }) => Promise<LongGoalAbandonResultV2>
 }
 
-function requireLegacyV2GoalFirstRecord(record: GoalFirstLongGoalRecord): LongGoalRecordV2 {
+function requireLegacyV2GoalFirstRecord(record: AnyLongGoalRecord): LongGoalRecordV2 {
   if (record.schemaVersion !== 'tianwen.long-goal.v2') {
     throw new LongGoalIntegrityError('Tianwen Goal-first Host supports only v2 records')
   }
@@ -695,6 +695,18 @@ export function createTianwenLongGoalRpcHandler(
         evolutionRoot: roots.evolutionRoot,
       },
     })
+  const legacyGoalFirstMutation = <T>(
+    longGoalId: string,
+    operation: () => Promise<T>,
+  ): Promise<RpcResult<T>> => goalFirstRpc(async () => {
+    if (runDependencies === undefined) {
+      throw new LongGoalIntegrityError('Tianwen Goal-first Host mutation dependencies are unavailable')
+    }
+    requireLegacyV2GoalFirstRecord(
+      runDependencies.readLongGoal(roots.stateRoot, longGoalId),
+    )
+    return operation()
+  })
   return async (endpoint, payload) => {
     if (endpoint === 'list' && isRecord(payload) && hasExactKeys(payload, [])) {
       const goals = await Promise.all(dependencies.listLongGoals(roots.stateRoot).map(async record =>
@@ -788,7 +800,7 @@ export function createTianwenLongGoalRpcHandler(
       const longGoalId = payload.longGoalId
       const expectedRevision = payload.expectedRevision
       const text = payload.text
-      return goalFirstRpc(() => goalFirstOperations.addGuidance({
+      return legacyGoalFirstMutation(longGoalId, () => goalFirstOperations.addGuidance({
         longGoalId,
         expectedRevision,
         text,
@@ -804,7 +816,7 @@ export function createTianwenLongGoalRpcHandler(
     ) {
       const longGoalId = payload.longGoalId
       const expectedRevision = payload.expectedRevision
-      return goalFirstRpc(() => goalFirstOperations.continueProgress({
+      return legacyGoalFirstMutation(longGoalId, () => goalFirstOperations.continueProgress({
         longGoalId,
         expectedRevision,
       }))
@@ -819,7 +831,7 @@ export function createTianwenLongGoalRpcHandler(
     ) {
       const longGoalId = payload.longGoalId
       const expectedRevision = payload.expectedRevision
-      return goalFirstRpc(() => goalFirstOperations.abandonCurrentTask({
+      return legacyGoalFirstMutation(longGoalId, () => goalFirstOperations.abandonCurrentTask({
         longGoalId,
         expectedRevision,
       }))

@@ -173,6 +173,27 @@ function goalFirstStatus(revision = 1): LongGoalStatusProjectionV2 {
   }
 }
 
+function goalFirstRecord(revision = 1): LongGoalRecordV2 {
+  return {
+    schemaVersion: 'tianwen.long-goal.v2',
+    id: 'tianwen-long-goal-v2-test',
+    revision,
+    objective: 'Ship release',
+    context: null,
+    successCriteria: null,
+    workspaceRoot: 'D:/workspace',
+    maxTaskRounds: 3,
+    planner: {
+      sessionId: 'planner-session', agentPreset: 'default', planRevision: 0,
+      phase: 'unplanned', consideredSettledTasks: 0,
+    },
+    guidance: [],
+    createdAt: 1,
+    updatedAt: 1,
+    tasks: [],
+  }
+}
+
 function continuousGoalStatus(input: {
   readonly phase?: LongGoalStatusProjectionV3['goal']['phase']
   readonly mode?: LongGoalStatusProjectionV3['control']['autoProgress']
@@ -476,6 +497,7 @@ describe('Tianwen Long Goal Web host', () => {
         cwd: 'D:/canonical-workspace',
         agentPreset: 'planner-preset',
       }]),
+      readLongGoal: vi.fn(() => goalFirstRecord(2)),
     })
     const operations = goalFirstOperations()
     const handler = createTianwenLongGoalRpcHandler(ROOTS, undefined, run, operations)
@@ -518,6 +540,62 @@ describe('Tianwen Long Goal Web host', () => {
     expect(run.listSessions).toHaveBeenCalledTimes(1)
   })
 
+  it('rejects every legacy mutation transport for v3 before calling its operation', async () => {
+    const status = longGoalStatus(['complete'], [{ goalId: 'goal-1', sessionId: 'session-1' }])
+    const continuousRecord: LongGoalRecordV3 = {
+      schemaVersion: 'tianwen.long-goal.v3',
+      id: 'tianwen-long-goal-v3-test',
+      revision: 3,
+      objective: 'Ship continuous Goal history',
+      context: null,
+      successCriteria: null,
+      workspaceRoot: 'D:/workspace',
+      maxTaskRounds: 3,
+      planner: {
+        sessionId: 'planner-session', agentPreset: 'default', planRevision: 1,
+        phase: 'ready', consideredSettledTasks: 0,
+      },
+      guidance: [],
+      createdAt: 1,
+      updatedAt: 2,
+      tasks: [],
+      control: { sessionId: 'control-session', autoProgress: 'running' },
+    }
+    const run = runDependencies(longGoalRecord([status.tasks[0]!.execution]), status, {
+      readLongGoal: vi.fn(() => continuousRecord),
+    })
+    const operations = goalFirstOperations()
+    const handler = createTianwenLongGoalRpcHandler(ROOTS, undefined, run, operations)
+    const signal = AbortSignal.timeout(1_000)
+
+    const results = await Promise.allSettled([
+      handler('add-guidance', {
+        longGoalId: continuousRecord.id, expectedRevision: 3, text: 'redirect',
+      }, signal),
+      handler('continue-progress', {
+        longGoalId: continuousRecord.id, expectedRevision: 3,
+      }, signal),
+      handler('abandon-current-task', {
+        longGoalId: continuousRecord.id, expectedRevision: 3,
+      }, signal),
+    ])
+
+    expect(results).toEqual([
+      expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({
+        message: 'Tianwen Goal-first Host supports only v2 records',
+      }) }),
+      expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({
+        message: 'Tianwen Goal-first Host supports only v2 records',
+      }) }),
+      expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({
+        message: 'Tianwen Goal-first Host supports only v2 records',
+      }) }),
+    ])
+    expect(operations.addGuidance).not.toHaveBeenCalled()
+    expect(operations.continueProgress).not.toHaveBeenCalled()
+    expect(operations.abandonCurrentTask).not.toHaveBeenCalled()
+  })
+
   it('rejects goal-first request extras and missing server-side workspace facts', async () => {
     const status = longGoalStatus(['complete'], [{ goalId: 'goal-1', sessionId: 'session-1' }])
     const operations = goalFirstOperations()
@@ -554,7 +632,9 @@ describe('Tianwen Long Goal Web host', () => {
     const handler = createTianwenLongGoalRpcHandler(
       ROOTS,
       undefined,
-      runDependencies(longGoalRecord([status.tasks[0]!.execution]), status),
+      runDependencies(longGoalRecord([status.tasks[0]!.execution]), status, {
+        readLongGoal: vi.fn(() => goalFirstRecord(4)),
+      }),
       operations,
     )
 

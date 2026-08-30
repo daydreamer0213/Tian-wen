@@ -30,6 +30,19 @@
 - `git diff --check` — passed.
 - No Provider or model request was made.
 
+## Review fix round 1
+
+- Review reproduced a transport-only escape: a caller could send the legacy
+  `continue-progress` RPC for a v3 Goal, letting the generalized service start
+  Planner/Task work before the v2 response adapter rejected the result.
+- RED: the new Host regression showed all three legacy mutation transports
+  (`add-guidance`, `continue-progress`, and `abandon-current-task`) calling their
+  operations for a v3 record.
+- GREEN: one shared RPC guard now reads the target record and requires exact v2
+  before invoking any legacy mutation operation. Internal continuous Host calls
+  still use the generalized service directly and are unchanged.
+- Focused Host result after the fix: 42 passed, 0 failed.
+
 ## Deliberate omissions
 
 - No dashboard, Goal composer, Task editor, polling loop, scheduler, retry, or
