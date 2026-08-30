@@ -687,7 +687,19 @@ export function redirectContinuousGoal(input: {
   readonly expectedRevision: number
   readonly text: string
 }): LongGoalRecordV3 {
-  return appendContinuousGoalGuidance(input)
+  if (!isNonEmptyString(input.text)) throw new TypeError('Continuous Goal guidance is invalid')
+  const record = readContinuousLongGoal(input.stateRoot, input.longGoalId)
+  assertExpectedRevision(record, input.expectedRevision)
+  const updated: LongGoalRecordV3 = {
+    ...record,
+    revision: record.revision + 1,
+    updatedAt: nextV2UpdatedAt(record, Date.now()),
+    planner: { ...record.planner, phase: 'needs-replan' },
+    guidance: [...record.guidance, input.text],
+    control: { ...record.control, autoProgress: 'paused' },
+  }
+  replaceRecordAtomically(recordPath(input.stateRoot, input.longGoalId), updated)
+  return updated
 }
 
 export function setContinuousGoalMode(input: {

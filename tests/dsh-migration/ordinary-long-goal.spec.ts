@@ -685,6 +685,28 @@ describe('goal-first long Goal v2 records', () => {
     }
   })
 
+  it('redirects a running continuous Goal by pausing it in the same revision', () => {
+    const stateRoot = createStateRoot()
+    const workspaceRoot = resolve(stateRoot, 'workspace')
+    try {
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Redirect a running Goal', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'session-control',
+      }, { goalSuffix: () => 'v3-running-redirect', plannerSessionId: () => 'planner-v3-running-redirect', now: () => 10 })
+
+      expect(redirectContinuousGoal({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, text: '先解决离线安装',
+      })).toMatchObject({
+        revision: 2,
+        guidance: ['先解决离线安装'],
+        planner: { phase: 'needs-replan' },
+        control: { autoProgress: 'paused' },
+      })
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
   it('abandons only a confirmed paused v3 Task and preserves its Goal and Session binding', async () => {
     const dataDir = createStateRoot()
     const stateRoot = join(dataDir, 'state')
