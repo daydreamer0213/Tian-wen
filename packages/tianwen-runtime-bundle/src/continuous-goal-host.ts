@@ -278,7 +278,8 @@ export function mountContinuousGoalHost(
           throw new Error('No active continuous Goal is bound to this Agent.')
         }
         return await dependencies.control({
-          longGoalId: latest.id, expectedRevision: latest.revision, action,
+          longGoalId: latest.id, expectedRevision: latest.revision,
+          action: latest.planner.phase === 'complete' ? { action: 'status' } : action,
         }) as Pick<ContinuousGoalControlResult, 'action'>
       })
     },

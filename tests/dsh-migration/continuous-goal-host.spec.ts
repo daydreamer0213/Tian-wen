@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { LongGoalIntegrityError } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
 import type { LongGoalRecordV3, LongGoalStatusProjectionV3 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
+import type { ContinuousGoalControlAction } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-service.js'
 import { mountContinuousGoalHost, type ContinuousGoalHostDependencies } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-host.js'
 
 const GOAL_ID = 'tianwen-long-goal-00000000-0000-4000-8000-000000000001'
@@ -70,7 +71,7 @@ function harness(initial = record()) {
   const agentListeners: ((input: { agent: Agent }) => void)[] = []
   const first = agent(EXECUTION_1.sessionId, EXECUTION_1.goalId)
   const live = new Map<string, Agent>([[EXECUTION_1.sessionId, first]])
-  const commands = new Map<Agent, { create(agent: Agent, objective: string): Promise<{ action: string }>, control(agent: Agent, action: { action: 'status' }): Promise<{ action: string }> }>()
+  const commands = new Map<Agent, { create(agent: Agent, objective: string): Promise<{ action: string }>, control(agent: Agent, action: ContinuousGoalControlAction): Promise<{ action: string }> }>()
   const order: string[] = []
   const ctx = {
     agents: { list: () => [...live.values()], get: (id: string) => live.get(id) },
@@ -133,7 +134,9 @@ function harness(initial = record()) {
     },
     created(created: Agent) { for (const listener of agentListeners) listener({ agent: created }) },
     create(controlAgent: Agent, objective: string) { return commands.get(controlAgent)!.create(controlAgent, objective) },
-    control(controlAgent: Agent) { return commands.get(controlAgent)!.control(controlAgent, { action: 'status' }) },
+    control(controlAgent: Agent, action: ContinuousGoalControlAction = { action: 'status' }) {
+      return commands.get(controlAgent)!.control(controlAgent, action)
+    },
   }
 }
 
@@ -232,6 +235,30 @@ describe('continuous Goal Host', () => {
 
     expect(subject.dependencies.installBoundControls).toHaveBeenCalledOnce()
     await expect(subject.control(controlAgent)).resolves.toMatchObject({ action: 'status' })
+    expect(subject.dependencies.control).toHaveBeenCalledWith({
+      longGoalId: GOAL_ID, expectedRevision: 5, action: { action: 'status' },
+    })
+    await dispose()
+  })
+
+  it('reports durable complete status instead of applying later control mutations', async () => {
+    const source = record({
+      revision: 5,
+      planner: { ...record().planner, phase: 'complete' },
+      tasks: [],
+    })
+    const sourceStatus = status(source, [], null)
+    const subject = harness(source)
+    const controlAgent = agent('control-session', 'control-goal')
+    subject.live.set('control-session', controlAgent)
+    subject.dependencies.control.mockImplementation(async input => input.action.action === 'status'
+      ? { action: 'status', status: sourceStatus }
+      : { action: 'guided' })
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+
+    await expect(subject.control(controlAgent, { action: 'guide', text: 'Change completed work' }))
+      .resolves.toMatchObject({ action: 'status' })
+    expect(subject.dependencies.control).toHaveBeenCalledOnce()
     expect(subject.dependencies.control).toHaveBeenCalledWith({
       longGoalId: GOAL_ID, expectedRevision: 5, action: { action: 'status' },
     })
