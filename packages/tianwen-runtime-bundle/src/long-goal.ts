@@ -14,27 +14,37 @@ import { readGoalStatus } from './status.js'
 import type {
   LongGoalRecord,
   LongGoalRecordV2,
+  LongGoalRecordV3,
   LongGoalStatusProjection,
   LongGoalStatusProjectionV2,
+  LongGoalStatusProjectionV3,
   LongGoalTaskRecord,
   LongGoalTaskRecordV2,
   TaskExecutionBinding,
   AnyLongGoalRecord,
   AnyLongGoalStatusProjection,
+  GoalFirstLongGoalRecord,
+  ReadLongGoalStatusProjection,
 } from './long-goal-contract.js'
 
 export type {
   LongGoalRecord,
   LongGoalRecordV2,
+  LongGoalRecordV3,
   LongGoalStatusProjection,
   LongGoalStatusProjectionV2,
+  LongGoalStatusProjectionV3,
   LongGoalTaskRecord,
   LongGoalTaskRecordV2,
   TaskExecutionBinding,
   AnyLongGoalRecord,
   AnyLongGoalStatusProjection,
   AnyLongGoalSummary,
+  GoalFirstLongGoalRecord,
+  GoalFirstLongGoalStatusProjection,
   LongGoalSummaryV2,
+  LongGoalSummaryV3,
+  ReadLongGoalStatusProjection,
 } from './long-goal-contract.js'
 
 export class LongGoalIntegrityError extends Error {
@@ -237,14 +247,18 @@ function validateV2TaskBindings(tasks: readonly LongGoalTaskRecordV2[]): void {
   }
 }
 
-function parseLongGoalV2(value: unknown): LongGoalRecordV2 {
+function parseGoalFirstLongGoalFields(
+  value: unknown,
+  hasControl: boolean,
+  schemaVersion: 'v2' | 'v3',
+): Omit<LongGoalRecordV2, 'schemaVersion'> {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
       'schemaVersion', 'id', 'revision', 'objective', 'context', 'successCriteria',
       'workspaceRoot', 'maxTaskRounds', 'planner', 'guidance', 'createdAt', 'updatedAt', 'tasks',
+      ...(hasControl ? ['control'] : []),
     ]) ||
-    value.schemaVersion !== 'tianwen.long-goal.v2' ||
     !isLongGoalId(value.id) ||
     !isPositiveInteger(value.revision) ||
     !isNonEmptyString(value.objective) ||
@@ -262,15 +276,14 @@ function parseLongGoalV2(value: unknown): LongGoalRecordV2 {
     !['unplanned', 'ready', 'needs-replan', 'complete'].includes(String(value.planner.phase)) ||
     !isNonNegativeInteger(value.planner.consideredSettledTasks)
   ) {
-    throw new LongGoalIntegrityError('Long Goal v2 record is invalid')
+    throw new LongGoalIntegrityError(`Long Goal ${schemaVersion} record is invalid`)
   }
   const tasks = value.tasks.map(parseV2Task)
   validateV2TaskBindings(tasks)
   if (value.planner.phase === 'unplanned' && tasks.length !== 0) {
-    throw new LongGoalIntegrityError('Unplanned Long Goal v2 has Tasks')
+    throw new LongGoalIntegrityError(`Unplanned Long Goal ${schemaVersion} has Tasks`)
   }
   return {
-    schemaVersion: 'tianwen.long-goal.v2',
     id: value.id,
     revision: value.revision,
     objective: value.objective,
@@ -292,10 +305,36 @@ function parseLongGoalV2(value: unknown): LongGoalRecordV2 {
   }
 }
 
+function parseLongGoalV2(value: unknown): LongGoalRecordV2 {
+  if (!isRecord(value) || value.schemaVersion !== 'tianwen.long-goal.v2') {
+    throw new LongGoalIntegrityError('Long Goal v2 record is invalid')
+  }
+  return { schemaVersion: 'tianwen.long-goal.v2', ...parseGoalFirstLongGoalFields(value, false, 'v2') }
+}
+
+function parseLongGoalV3(value: unknown): LongGoalRecordV3 {
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 'tianwen.long-goal.v3' ||
+    !isRecord(value.control) ||
+    !hasExactKeys(value.control, ['sessionId', 'autoProgress']) ||
+    !isNonEmptyString(value.control.sessionId) ||
+    (value.control.autoProgress !== 'running' && value.control.autoProgress !== 'paused')
+  ) {
+    throw new LongGoalIntegrityError('Long Goal v3 record is invalid')
+  }
+  return {
+    schemaVersion: 'tianwen.long-goal.v3',
+    ...parseGoalFirstLongGoalFields(value, true, 'v3'),
+    control: { sessionId: value.control.sessionId, autoProgress: value.control.autoProgress },
+  }
+}
+
 function parseAnyLongGoal(value: unknown): AnyLongGoalRecord {
   if (!isRecord(value)) throw new LongGoalIntegrityError('Long Goal record is invalid')
   if (value.schemaVersion === 'tianwen.long-goal.v1') return parseLongGoal(value)
   if (value.schemaVersion === 'tianwen.long-goal.v2') return parseLongGoalV2(value)
+  if (value.schemaVersion === 'tianwen.long-goal.v3') return parseLongGoalV3(value)
   throw new LongGoalIntegrityError('Long Goal record schema version is invalid')
 }
 
@@ -460,14 +499,22 @@ function readLongGoalV2(stateRoot: string, longGoalId: string): LongGoalRecordV2
   return record
 }
 
-function assertExpectedRevision(record: LongGoalRecordV2, expectedRevision: number): void {
+function readContinuousLongGoal(stateRoot: string, longGoalId: string): LongGoalRecordV3 {
+  const record = readLongGoal(stateRoot, longGoalId)
+  if (record.schemaVersion !== 'tianwen.long-goal.v3') {
+    throw new LongGoalIntegrityError('Continuous Goal mutation requires a v3 record')
+  }
+  return record
+}
+
+function assertExpectedRevision(record: GoalFirstLongGoalRecord, expectedRevision: number): void {
   if (!isPositiveInteger(expectedRevision)) throw new TypeError('Long Goal expected revision is invalid')
   if (record.revision !== expectedRevision) {
     throw new LongGoalRevisionConflictError(expectedRevision, record.revision)
   }
 }
 
-function nextV2UpdatedAt(record: LongGoalRecordV2, now: number): number {
+function nextV2UpdatedAt(record: GoalFirstLongGoalRecord, now: number): number {
   return nowAtLeast(record.updatedAt, now)
 }
 
@@ -522,6 +569,78 @@ export function createGoalFirstLongGoal(input: {
   return record
 }
 
+export function createContinuousLongGoal(input: {
+  readonly stateRoot: string
+  readonly objective: string
+  readonly context: string | null
+  readonly successCriteria: string | null
+  readonly workspaceRoot: string
+  readonly agentPreset: string
+  readonly controlSessionId: string
+}, dependencies: {
+  readonly goalSuffix?: () => string
+  readonly plannerSessionId?: () => string
+  readonly now?: () => number
+} = {}): LongGoalRecordV3 {
+  if (
+    !isNonEmptyString(input.stateRoot) || !isNonEmptyString(input.objective) ||
+    (input.context !== null && !isNonEmptyString(input.context)) ||
+    (input.successCriteria !== null && !isNonEmptyString(input.successCriteria)) ||
+    !isCanonicalWorkspaceRoot(input.workspaceRoot) || !isNonEmptyString(input.agentPreset) ||
+    !isNonEmptyString(input.controlSessionId)
+  ) {
+    throw new TypeError('Continuous Long Goal input is invalid')
+  }
+  const id = `tianwen-long-goal-${(dependencies.goalSuffix ?? randomUUID)()}`
+  const plannerSessionId = (dependencies.plannerSessionId ?? randomUUID)()
+  const now = (dependencies.now ?? Date.now)()
+  if (!isLongGoalId(id) || !isNonEmptyString(plannerSessionId) || !isTimestamp(now)) {
+    throw new TypeError('Continuous Long Goal input is invalid')
+  }
+  const record: LongGoalRecordV3 = {
+    schemaVersion: 'tianwen.long-goal.v3',
+    id,
+    revision: 1,
+    objective: input.objective,
+    context: input.context,
+    successCriteria: input.successCriteria,
+    workspaceRoot: input.workspaceRoot,
+    maxTaskRounds: 3,
+    planner: {
+      sessionId: plannerSessionId,
+      agentPreset: input.agentPreset,
+      planRevision: 0,
+      phase: 'unplanned',
+      consideredSettledTasks: 0,
+    },
+    guidance: [],
+    control: { sessionId: input.controlSessionId, autoProgress: 'running' },
+    createdAt: now,
+    updatedAt: now,
+    tasks: [],
+  }
+  writeRecordExclusive(recordPath(input.stateRoot, id), record)
+  return record
+}
+
+export function findContinuousGoalByControlSession(input: {
+  readonly stateRoot: string
+  readonly controlSessionId: string
+}): LongGoalRecordV3 | null {
+  if (!isNonEmptyString(input.controlSessionId)) {
+    throw new TypeError('Continuous Goal control Session is invalid')
+  }
+  const matches = listLongGoals(input.stateRoot).filter((record): record is LongGoalRecordV3 =>
+    record.schemaVersion === 'tianwen.long-goal.v3' &&
+    record.control.sessionId === input.controlSessionId &&
+    record.planner.phase !== 'complete',
+  )
+  if (matches.length > 1) {
+    throw new LongGoalIntegrityError('Continuous Goal control Session binding is ambiguous')
+  }
+  return matches[0] ?? null
+}
+
 export function appendLongGoalGuidance(
   stateRoot: string,
   longGoalId: string,
@@ -539,6 +658,57 @@ export function appendLongGoalGuidance(
     guidance: [...record.guidance, text],
   }
   replaceRecordAtomically(recordPath(stateRoot, longGoalId), updated)
+  return updated
+}
+
+export function appendContinuousGoalGuidance(input: {
+  readonly stateRoot: string
+  readonly longGoalId: string
+  readonly expectedRevision: number
+  readonly text: string
+}): LongGoalRecordV3 {
+  if (!isNonEmptyString(input.text)) throw new TypeError('Continuous Goal guidance is invalid')
+  const record = readContinuousLongGoal(input.stateRoot, input.longGoalId)
+  assertExpectedRevision(record, input.expectedRevision)
+  const updated: LongGoalRecordV3 = {
+    ...record,
+    revision: record.revision + 1,
+    updatedAt: nextV2UpdatedAt(record, Date.now()),
+    planner: { ...record.planner, phase: 'needs-replan' },
+    guidance: [...record.guidance, input.text],
+  }
+  replaceRecordAtomically(recordPath(input.stateRoot, input.longGoalId), updated)
+  return updated
+}
+
+export function redirectContinuousGoal(input: {
+  readonly stateRoot: string
+  readonly longGoalId: string
+  readonly expectedRevision: number
+  readonly text: string
+}): LongGoalRecordV3 {
+  return appendContinuousGoalGuidance(input)
+}
+
+export function setContinuousGoalMode(input: {
+  readonly stateRoot: string
+  readonly longGoalId: string
+  readonly expectedRevision: number
+  readonly mode: 'running' | 'paused'
+}): LongGoalRecordV3 {
+  if (input.mode !== 'running' && input.mode !== 'paused') {
+    throw new TypeError('Continuous Goal mode is invalid')
+  }
+  const record = readContinuousLongGoal(input.stateRoot, input.longGoalId)
+  assertExpectedRevision(record, input.expectedRevision)
+  if (record.control.autoProgress === input.mode) return record
+  const updated: LongGoalRecordV3 = {
+    ...record,
+    revision: record.revision + 1,
+    updatedAt: nextV2UpdatedAt(record, Date.now()),
+    control: { ...record.control, autoProgress: input.mode },
+  }
+  replaceRecordAtomically(recordPath(input.stateRoot, input.longGoalId), updated)
   return updated
 }
 
@@ -673,6 +843,53 @@ export async function abandonBlockedLongGoalTask(input: {
   return updated
 }
 
+export async function abandonContinuousGoalTask(input: {
+  readonly stateRoot: string
+  readonly longGoalId: string
+  readonly expectedRevision: number
+  readonly taskId: string
+  readonly dshStatusTarget: StatusTarget
+}): Promise<LongGoalRecordV3> {
+  const record = readContinuousLongGoal(input.stateRoot, input.longGoalId)
+  assertExpectedRevision(record, input.expectedRevision)
+  const taskIndex = record.tasks.findIndex(task => task.id === input.taskId)
+  const task = taskIndex === -1 ? undefined : record.tasks[taskIndex]
+  if (task === undefined || task.execution === null || task.resolution !== null) {
+    throw new LongGoalIntegrityError('Continuous Goal Task is not a current paused Task')
+  }
+  const status = await readLongGoalStatus({
+    stateRoot: input.stateRoot,
+    longGoalId: input.longGoalId,
+    dshStatusTarget: input.dshStatusTarget,
+  })
+  if (
+    status.schemaVersion !== 'tianwen.long-goal-status.v3' ||
+    status.currentTaskId !== input.taskId ||
+    status.tasks.find(candidate => candidate.id === input.taskId)?.phase !== 'paused'
+  ) {
+    throw new LongGoalIntegrityError('Continuous Goal Task is not a current paused Task')
+  }
+  const projectedTask = status.tasks.find(candidate => candidate.id === input.taskId)
+  if (
+    projectedTask === undefined ||
+    projectedTask.execution?.goalId !== task.execution.goalId ||
+    projectedTask.execution.sessionId !== task.execution.sessionId
+  ) {
+    throw new LongGoalIntegrityError('Continuous Goal Task is not a current paused Task')
+  }
+  const updated: LongGoalRecordV3 = {
+    ...record,
+    revision: record.revision + 1,
+    updatedAt: nextV2UpdatedAt(record, Date.now()),
+    planner: { ...record.planner, phase: 'needs-replan' },
+    tasks: record.tasks.map((candidate, index) => index === taskIndex
+      ? { ...candidate, resolution: 'abandoned' }
+      : candidate),
+  }
+  replaceRecordAtomically(recordPath(input.stateRoot, input.longGoalId), updated)
+  return updated
+}
+
 async function projectTask(
   task: LongGoalTaskRecord,
   target: StatusTarget,
@@ -766,9 +983,9 @@ export async function readLongGoalStatus(input: {
   readonly stateRoot: string
   readonly longGoalId: string
   readonly dshStatusTarget: StatusTarget
-}): Promise<AnyLongGoalStatusProjection> {
+}): Promise<ReadLongGoalStatusProjection> {
   const record = readLongGoal(input.stateRoot, input.longGoalId)
-  if (record.schemaVersion === 'tianwen.long-goal.v2') {
+  if (record.schemaVersion === 'tianwen.long-goal.v2' || record.schemaVersion === 'tianwen.long-goal.v3') {
     const tasks = await Promise.all(record.tasks.map(task => projectV2Task(task, input.dshStatusTarget)))
     const completedTasks = tasks.filter(task => task.phase === 'complete').length
     const abandonedTasks = tasks.filter(task => task.phase === 'abandoned').length
@@ -792,8 +1009,7 @@ export async function readLongGoalStatus(input: {
             tasks.every(task => task.execution !== null && (task.phase === 'complete' || task.phase === 'abandoned'))
           ? 'complete'
           : 'planning'
-    return {
-      schemaVersion: 'tianwen.long-goal-status.v2',
+    const projection: Omit<LongGoalStatusProjectionV2, 'schemaVersion'> = {
       goal: {
         id: record.id,
         objective: record.objective,
@@ -817,6 +1033,14 @@ export async function readLongGoalStatus(input: {
       currentTaskId,
       runtime: { activation: 'not-loaded', modelRequests: 0, readOnly: true },
     }
+    if (record.schemaVersion === 'tianwen.long-goal.v3') {
+      return {
+        schemaVersion: 'tianwen.long-goal-status.v3',
+        ...projection,
+        control: record.control,
+      }
+    }
+    return { schemaVersion: 'tianwen.long-goal-status.v2', ...projection }
   }
   const tasks = await Promise.all(record.tasks.map(task => projectTask(task, input.dshStatusTarget)))
   const completedTasks = tasks.filter(task => task.phase === 'complete').length
@@ -845,7 +1069,7 @@ export async function readLongGoalStatus(input: {
   }
 }
 
-export function formatLongGoalStatusText(status: AnyLongGoalStatusProjection): string {
+export function formatLongGoalStatusText(status: ReadLongGoalStatusProjection): string {
   const lines = [
     `Goal ${status.goal.id}: ${status.goal.completedTasks}/${status.goal.totalTasks} ${status.goal.phase}`,
   ]

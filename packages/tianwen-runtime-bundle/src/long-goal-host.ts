@@ -22,6 +22,7 @@ import type {
   LongGoalStatusProjectionV2,
   LongGoalSummary,
   LongGoalSummaryV2,
+  ReadLongGoalStatusProjection,
 } from './long-goal-contract.js'
 import {
   abandonGoalFirstTask,
@@ -333,6 +334,15 @@ function statusInput(input: {
   }
 }
 
+function requireLegacyLongGoalStatus(
+  status: ReadLongGoalStatusProjection,
+): AnyLongGoalStatusProjection {
+  if (status.schemaVersion === 'tianwen.long-goal-status.v3') {
+    throw new LongGoalIntegrityError('Continuous Long Goal is not supported by this host')
+  }
+  return status
+}
+
 async function requireGoalFirstTaskSessionHeader(
   record: Extract<AnyLongGoalRecord, { readonly schemaVersion: 'tianwen.long-goal.v2' }>,
   sessionId: string,
@@ -366,8 +376,8 @@ export async function runCurrentWebTask(input: {
   readonly expectedRevision?: number
   readonly initialCwd?: string
 }, dependencies: TianwenLongGoalRunDependencies): Promise<AnyRunCurrentTaskResult> {
-  const readStatus = (): Promise<AnyLongGoalStatusProjection> =>
-    dependencies.readLongGoalStatus(statusInput(input))
+  const readStatus = async (): Promise<AnyLongGoalStatusProjection> =>
+    requireLegacyLongGoalStatus(await dependencies.readLongGoalStatus(statusInput(input)))
   const status = await readStatus()
   const record = dependencies.readLongGoal(input.roots.stateRoot, input.longGoalId)
   const isV2 = record.schemaVersion === 'tianwen.long-goal.v2'
@@ -560,7 +570,8 @@ async function goalFirstRpc<T>(operation: () => Promise<T>): Promise<RpcResult<T
   }
 }
 
-function summary(status: AnyLongGoalStatusProjection, updatedAt: number): AnyLongGoalSummary {
+function summary(status: ReadLongGoalStatusProjection, updatedAt: number): AnyLongGoalSummary {
+  status = requireLegacyLongGoalStatus(status)
   if (status.schemaVersion === 'tianwen.long-goal-status.v2') {
     const result: LongGoalSummaryV2 = {
       schemaVersion: 'tianwen.long-goal-summary.v2',
@@ -627,14 +638,15 @@ export function createTianwenLongGoalRpcHandler(
   taskFeedbackOperations?: TianwenGoalTaskFeedbackOperations,
   learningClueOperations?: TianwenLearningClueOperations,
 ): ConnectionRpcHandler {
-  const readStatus = (longGoalId: string) => dependencies.readLongGoalStatus({
-    stateRoot: roots.stateRoot,
-    longGoalId,
-    dshStatusTarget: {
-      sessionsRoot: roots.sessionsRoot,
-      evolutionRoot: roots.evolutionRoot,
-    },
-  })
+  const readStatus = async (longGoalId: string): Promise<AnyLongGoalStatusProjection> =>
+    requireLegacyLongGoalStatus(await dependencies.readLongGoalStatus({
+      stateRoot: roots.stateRoot,
+      longGoalId,
+      dshStatusTarget: {
+        sessionsRoot: roots.sessionsRoot,
+        evolutionRoot: roots.evolutionRoot,
+      },
+    }))
   return async (endpoint, payload) => {
     if (endpoint === 'list' && isRecord(payload) && hasExactKeys(payload, [])) {
       const goals = await Promise.all(dependencies.listLongGoals(roots.stateRoot).map(async record =>
@@ -1356,7 +1368,7 @@ export function mountTianwenLongGoalHost(
     }
     const taskFeedbackDependencies: GoalTaskFeedbackDependencies = {
       readLongGoal,
-      readLongGoalStatus,
+      readLongGoalStatus: async input => requireLegacyLongGoalStatus(await readLongGoalStatus(input)),
       awaitSessionIdle: async sessionId => {
         await injected.agents.get(SessionId(sessionId))?.whenIdle()
       },
@@ -1404,11 +1416,11 @@ export function mountTianwenLongGoalHost(
       const records = listLongGoals(roots.stateRoot)
       const goals = await Promise.all(records.map(async record => ({
         record,
-        status: await readLongGoalStatus({
+        status: requireLegacyLongGoalStatus(await readLongGoalStatus({
           stateRoot: roots.stateRoot,
           longGoalId: record.id,
           dshStatusTarget,
-        }),
+        })),
         feedback: await taskFeedbackOperations.status({ longGoalId: record.id }),
       })))
       return {

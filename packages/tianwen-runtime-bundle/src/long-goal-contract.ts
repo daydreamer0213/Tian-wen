@@ -85,6 +85,16 @@ export interface LongGoalRecordV2 {
   readonly tasks: readonly LongGoalTaskRecordV2[]
 }
 
+export interface LongGoalRecordV3 extends Omit<LongGoalRecordV2, 'schemaVersion'> {
+  readonly schemaVersion: 'tianwen.long-goal.v3'
+  readonly control: {
+    readonly sessionId: string
+    readonly autoProgress: 'running' | 'paused'
+  }
+}
+
+export type GoalFirstLongGoalRecord = LongGoalRecordV2 | LongGoalRecordV3
+
 export interface LongGoalSummaryV2 {
   readonly schemaVersion: 'tianwen.long-goal-summary.v2'
   readonly id: string
@@ -96,6 +106,11 @@ export interface LongGoalSummaryV2 {
   readonly totalTasks: number
   readonly currentTaskId: string | null
   readonly updatedAt: number
+}
+
+export interface LongGoalSummaryV3 extends Omit<LongGoalSummaryV2, 'schemaVersion'> {
+  readonly schemaVersion: 'tianwen.long-goal-summary.v3'
+  readonly control: LongGoalRecordV3['control']
 }
 
 export interface LongGoalStatusProjectionV2 {
@@ -133,6 +148,14 @@ export interface LongGoalStatusProjectionV2 {
   }
 }
 
+export interface LongGoalStatusProjectionV3 extends Omit<LongGoalStatusProjectionV2, 'schemaVersion'> {
+  readonly schemaVersion: 'tianwen.long-goal-status.v3'
+  readonly control: LongGoalRecordV3['control']
+}
+
+export type GoalFirstLongGoalStatusProjection = LongGoalStatusProjectionV2 | LongGoalStatusProjectionV3
+export type ReadLongGoalStatusProjection = LongGoalStatusProjection | GoalFirstLongGoalStatusProjection
+
 export interface GoalFirstProgressResultV2 {
   readonly schemaVersion: 'tianwen.goal-first-progress-result.v2'
   readonly action:
@@ -154,7 +177,7 @@ export interface LongGoalAbandonResultV2 {
   readonly status: LongGoalStatusProjectionV2
 }
 
-export type AnyLongGoalRecord = LongGoalRecord | LongGoalRecordV2
+export type AnyLongGoalRecord = LongGoalRecord | GoalFirstLongGoalRecord
 export type AnyLongGoalStatusProjection = LongGoalStatusProjection | LongGoalStatusProjectionV2
 export type AnyLongGoalSummary = LongGoalSummary | LongGoalSummaryV2
 
