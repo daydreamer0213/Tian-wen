@@ -22,6 +22,7 @@ export interface MountedHarness {
 
 export interface GoalHarnessOptions {
   readonly goalRoundDriver: boolean
+  readonly compression?: 'none' | 'zstd'
 }
 
 async function registerAdapter(
@@ -79,7 +80,10 @@ export async function mountGoalHarness(
 ): Promise<MountedHarness> {
   const ctx = new Context()
   await mountAgentLoopTestDependencies(ctx)
-  await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+  await ctx.plugin(JsonlSessionPersistence, {
+    root,
+    compression: options.compression ?? 'none',
+  })
   await ctx.plugin(GoalService, {})
   if (options.goalRoundDriver) {
     await ctx.plugin(goalRoundDriver)

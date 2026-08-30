@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 
 import { Context } from '@deepseek-ai/cordis'
@@ -122,6 +122,18 @@ export interface DurableGoalSnapshot {
   readonly folded: ReturnType<typeof foldGoal>
 }
 
+function sessionCompression(root: string): 'none' | 'zstd' {
+  const pending = [root]
+  while (pending.length > 0) {
+    const directory = pending.pop()!
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isDirectory()) pending.push(join(directory, entry.name))
+      else if (entry.isFile() && entry.name === 'session.jsonl.zstd') return 'zstd'
+    }
+  }
+  return 'none'
+}
+
 export async function scanDurableGoals(
   sessionsRootInput: string,
 ): Promise<readonly DurableGoalSnapshot[]> {
@@ -136,7 +148,7 @@ export async function scanDurableGoals(
     await ctx.plugin(SessionStore)
     const persistence = new JsonlSessionPersistence(ctx, {
       root: sessionsRoot,
-      compression: 'none',
+      compression: sessionCompression(sessionsRoot),
     })
     const headers = (await persistence.list())
       .toSorted((left, right) => String(left.id).localeCompare(String(right.id)))

@@ -176,6 +176,7 @@ function mutateGoalChange(
 }
 
 async function createFixture(options: {
+  readonly compression?: 'none' | 'zstd'
   readonly root?: string
   readonly objective?: string
   readonly withEvidence?: boolean
@@ -197,7 +198,12 @@ async function createFixture(options: {
   const harness = await mountGoalHarness(
     sessionsRoot,
     script,
-    { goalRoundDriver: false },
+    {
+      goalRoundDriver: false,
+      ...(options.compression === undefined ? {} : {
+        compression: options.compression,
+      }),
+    },
   )
   if (options.withEvidence !== false) {
     harness.ctx.tools.register(defineTool({
@@ -548,6 +554,27 @@ describe('Tianwen read-only Goal status', () => {
       expect(snapshotTree(dataDir)).toEqual(before)
     } finally {
       rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('reads the official zstd Session root without changing it', async () => {
+    const fixture = await createFixture({
+      compression: 'zstd',
+      objective: 'Read a compressed Goal',
+      withEvidence: false,
+    })
+    try {
+      const before = snapshotTree(fixture.dataDir)
+
+      expect((await listGoals({ dataDir: fixture.dataDir })).goals)
+        .toEqual([expect.objectContaining({ id: fixture.goalId })])
+      expect((await readGoalStatus({
+        dataDir: fixture.dataDir,
+        goalId: fixture.goalId,
+      })).goal).toEqual(expect.objectContaining({ id: fixture.goalId }))
+      expect(snapshotTree(fixture.dataDir)).toEqual(before)
+    } finally {
+      rmSync(fixture.dataDir, { recursive: true, force: true })
     }
   })
 
