@@ -101,14 +101,18 @@ were made afterward and therefore are covered by deterministic tests, not by a s
   `outcome=continue`, while `outcome=complete` requires `tasks=[]`.
 - `9651bf7` ends the control Turn immediately after a successful `goal_control` operation, so the
   control Session cannot continue into workspace development after persisting the user's intent;
+- `a9ddbfd` applies the same Turn boundary when a valid `goal_control` operation fails, preventing
+  the control Session from falling through into workspace development on an error path;
 - `369d270` serializes control mutations through the same per-Goal lane as completion/replanning,
   rereads the durable revision inside that lane, and preserves the latest completed binding across
   Host restart and same-conversation replacement;
 - `bd17306` makes every control interaction with a completed Goal read-only and returns its durable
   final status instead of mutating it or requiring a current Task;
+- `847832f` keeps synchronous control errors out of the Host's background-failure ledger and
+  preserves completion deduplication while a control operation waits in the same Goal lane;
 - `b61618a` keeps cold Task cancellation diagnostics useful without exposing an internal Session ID.
 
-The final combined controller check passed 77 focused Agent/Host/service tests, Runtime type
+The final combined controller check passed 80 focused Agent/Host/service tests, Runtime type
 checking and build, and `git diff --check`. These fixes add no classifier model, retry loop,
 scheduler, budget, new UI, or data model.
 
