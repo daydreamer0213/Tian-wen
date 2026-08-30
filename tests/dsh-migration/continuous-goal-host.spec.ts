@@ -111,7 +111,10 @@ function harness(initial = record()) {
     control: vi.fn(async () => ({ action: 'paused' })), continueProgress,
     pause, flushSession: vi.fn(async () => { order.push('flush') }),
     reportError: vi.fn(),
-    installCommand: vi.fn((controlAgent: Agent, operations) => { commands.set(controlAgent, operations as never); return () => undefined }),
+    installCommand: vi.fn((controlAgent: Agent, operations) => {
+      commands.set(controlAgent, operations as never)
+      return { dispose: () => { commands.delete(controlAgent) } }
+    }),
     installBoundControls: vi.fn(() => () => undefined),
   } satisfies ContinuousGoalHostDependencies
   return {
@@ -221,6 +224,29 @@ describe('continuous Goal Host', () => {
 
     await expect(dispose()).rejects.toThrow(AggregateError)
     expect(subject.dependencies.reportError).toHaveBeenCalledWith(failure)
+  })
+
+  it('owns and awaits asynchronous command registration cleanup', async () => {
+    const subject = harness()
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const disposeStarted = vi.fn()
+    const disposed = vi.fn()
+    subject.dependencies.installCommand = vi.fn(() => ({
+      async dispose() {
+        disposeStarted()
+        await gate
+        disposed()
+      },
+    }) as never)
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+
+    const pending = dispose()
+    await vi.waitFor(() => expect(disposeStarted).toHaveBeenCalledOnce())
+    expect(disposed).not.toHaveBeenCalled()
+    release()
+    await expect(pending).resolves.toBeUndefined()
+    expect(disposed).toHaveBeenCalledOnce()
   })
 
   it('reports an unconfirmable cold Task after a control-session stop instead of silently returning', async () => {

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import CommandRuntime from '../../packages/tianwen-runtime-bundle/node_modules/@deepseek-ai/dsh-commands/lib/index.js'
 import {
   installBoundContinuousGoalControls,
   installContinuousGoalCommand,
@@ -33,36 +35,50 @@ function controlsAgent() {
   const commands: CommandDefinition[] = []
   const tools: ToolDefinition[] = []
   const sections: PromptSection[] = []
+  const commandRegistry = {
+    register(definition: CommandDefinition) {
+      commands.push(definition)
+      return () => commands.splice(commands.indexOf(definition), 1)
+    },
+  }
+  const agentContext = {
+    commands: commandRegistry,
+    inject(
+      _services: readonly string[],
+      register: (ctx: { commands: typeof commandRegistry }) => () => void,
+    ) {
+      const dispose = register(agentContext)
+      return {
+        dispose,
+        then(resolve: (value: unknown) => unknown) {
+          return Promise.resolve(resolve(undefined))
+        },
+      }
+    },
+    tools: {
+      register(definition: ToolDefinition) {
+        tools.push(definition)
+        return () => tools.splice(tools.indexOf(definition), 1)
+      },
+    },
+    systemPrompt: {
+      section(section: PromptSection) {
+        sections.push(section)
+        return () => sections.splice(sections.indexOf(section), 1)
+      },
+    },
+    effect(execute: () => Iterable<() => void>) {
+      const disposers = [...execute()]
+      return () => { for (const dispose of disposers.reverse()) dispose() }
+    },
+  }
   const agent = {
     id: 'control-session-1',
     session: {
       id: 'control-session-1',
       header: { cwd: 'D:/workspace', agentPreset: 'chat' },
     },
-    ctx: {
-      commands: {
-        register(definition: CommandDefinition) {
-          commands.push(definition)
-          return () => commands.splice(commands.indexOf(definition), 1)
-        },
-      },
-      tools: {
-        register(definition: ToolDefinition) {
-          tools.push(definition)
-          return () => tools.splice(tools.indexOf(definition), 1)
-        },
-      },
-      systemPrompt: {
-        section(section: PromptSection) {
-          sections.push(section)
-          return () => sections.splice(sections.indexOf(section), 1)
-        },
-      },
-      effect(execute: () => Iterable<() => void>) {
-        const disposers = [...execute()]
-        return () => { for (const dispose of disposers.reverse()) dispose() }
-      },
-    },
+    ctx: agentContext,
   } as unknown as Agent
   return { agent, commands, tools, sections }
 }
@@ -78,6 +94,36 @@ function operations(): ContinuousGoalAgentOperations & {
 }
 
 describe('continuous Goal Agent controls', () => {
+  it('registers the command through real Cordis injection and owns cleanup', async () => {
+    const root = new Context()
+    await root.plugin(CommandRuntime)
+    const agentData = {
+      id: 'real-cordis-control-session',
+      session: {
+        id: 'real-cordis-control-session',
+        header: { cwd: 'D:/workspace', agentPreset: 'chat' },
+      },
+      ctx: undefined as unknown as Context,
+    }
+    const agent = agentData as unknown as Agent
+    await root.plugin(ctx => { agentData.ctx = ctx.extend({ agent }) })
+    const commandRuntime = root.get('commands') as CommandRuntime
+
+    try {
+      const registration = installContinuousGoalCommand(agent, operations()) as unknown as
+        PromiseLike<unknown> & { dispose(): void | Promise<void> }
+      expect(commandRuntime.list(agent)).toEqual([])
+
+      await registration
+      expect(commandRuntime.list(agent).map(command => command.name)).toEqual(['goal'])
+
+      await registration.dispose()
+      expect(commandRuntime.list(agent)).toEqual([])
+    } finally {
+      await root.fiber.dispose()
+    }
+  })
+
   it('shows command usage for empty input without querying or creating a Goal', async () => {
     const subject = controlsAgent()
     const ops = operations()

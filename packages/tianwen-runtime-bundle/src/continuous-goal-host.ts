@@ -24,6 +24,10 @@ type GoalProgressInput = {
   readonly expectedRevision: number
 }
 
+type CommandRegistration = {
+  dispose(): void | Promise<void>
+}
+
 export interface ContinuousGoalHostDependencies {
   readonly roots: ContinuousGoalHostRoots
   readonly listLongGoals: () => readonly AnyLongGoalRecord[]
@@ -52,7 +56,7 @@ export interface ContinuousGoalHostDependencies {
   readonly installCommand: (
     agent: Agent,
     operations: ContinuousGoalAgentOperations,
-  ) => () => void
+  ) => CommandRegistration
   readonly installBoundControls: (
     agent: Agent,
     operations: ContinuousGoalAgentOperations,
@@ -151,7 +155,10 @@ export function mountContinuousGoalHost(
   type Lane = Promise<void> & { completion?: { readonly sessionId: string, readonly goalId: string } }
   const lanes = new Map<string, Lane>()
   const failures: unknown[] = []
-  const installed = new Map<Agent, { command: () => void, controls?: () => void | Promise<void> }>()
+  const installed = new Map<Agent, {
+    command: CommandRegistration
+    controls?: () => void | Promise<void>
+  }>()
   const creatingControlSessions = new Set<string>()
 
   const readStatus = (longGoalId: string) => dependencies.readStatus({
@@ -414,7 +421,7 @@ export function mountContinuousGoalHost(
     installed.clear()
     for (const registration of registrations) {
       await disposeRegistration(registration.controls)
-      registration.command()
+      await registration.command.dispose()
     }
     await Promise.allSettled([...lanes.values()])
     if (failures.length > 0) throw new AggregateError(failures, 'Continuous Goal Host lane failures')

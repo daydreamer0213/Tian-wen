@@ -97,13 +97,13 @@ async function handleGoalCommand(
 export function installContinuousGoalCommand(
   agent: Agent,
   operations: ContinuousGoalAgentOperations,
-): () => void {
-  return agent.ctx.commands.register({
+) {
+  return agent.ctx.inject(['commands'], scopedCtx => scopedCtx.commands.register({
     name: 'goal',
     description: 'start or control a long-running goal',
     input: { hint: '[<objective>|pause|resume|edit <direction>]', images: false },
     handler: invocation => handleGoalCommand(invocation.agent, invocation.rawInput.trim(), operations),
-  })
+  }))
 }
 
 export function installBoundContinuousGoalControls(
