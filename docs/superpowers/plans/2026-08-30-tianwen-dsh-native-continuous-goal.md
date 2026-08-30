@@ -27,7 +27,7 @@
 - `packages/tianwen-runtime-bundle/src/long-goal.ts`: strict v3 parsing, creation, mode/guidance/redirection mutations, projections, and binding lookup.
 - `packages/tianwen-runtime-bundle/src/goal-first-service.ts`: make the existing action table accept both v2 and v3 without changing v2 behavior.
 - `packages/tianwen-runtime-bundle/src/continuous-goal-service.ts`: v3-only start/control orchestration over existing Goal-first operations.
-- `packages/tianwen-runtime-bundle/src/continuous-goal-agent.ts`: Agent-scoped `/goal`, scoped `tianwen_goal_control` tool, and short prompt section.
+- `packages/tianwen-runtime-bundle/src/continuous-goal-agent.ts`: Agent-scoped `/goal`, scoped `goal_control` tool, and short prompt section.
 - `packages/tianwen-runtime-bundle/src/continuous-goal-host.ts`: DSH Agent/session/Task-complete event bridge, per-Goal serialization, and restart reconciliation.
 - `packages/tianwen-runtime-bundle/src/long-goal-host.ts`: compose the new service/agent/host adapters from existing DSH dependencies.
 - `packages/tianwen-runtime-bundle/src/learn-loop-client.ts` and `client.tsx`: keep the existing panel compatible as advanced v3 history only.
@@ -163,6 +163,9 @@ git commit -m "feat: persist continuous Goal control state"
 - Create: `packages/tianwen-runtime-bundle/src/continuous-goal-service.ts`
 - Modify: `tests/dsh-migration/goal-first-service.spec.ts`
 - Create: `tests/dsh-migration/continuous-goal-service.spec.ts`
+- Modify only for the legacy-v2 runner rejection regression: `tests/dsh-migration/goal-first-runner-next-step.spec.ts`
+- Modify only for honest legacy-v2 compile narrowing: `packages/tianwen-runtime-bundle/src/goal-first-runner.ts`
+- Modify only for honest legacy-v2 compile narrowing: `packages/tianwen-runtime-bundle/src/long-goal-host.ts`
 
 **Interfaces:**
 - Consumes: `GoalFirstLongGoalRecord` and Task/status projections from Task 1.
@@ -248,7 +251,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit the service boundary**
 
 ```powershell
-git add packages/tianwen-runtime-bundle/src/goal-first-service.ts packages/tianwen-runtime-bundle/src/continuous-goal-service.ts tests/dsh-migration/goal-first-service.spec.ts tests/dsh-migration/continuous-goal-service.spec.ts
+git add packages/tianwen-runtime-bundle/src/goal-first-service.ts packages/tianwen-runtime-bundle/src/continuous-goal-service.ts packages/tianwen-runtime-bundle/src/goal-first-runner.ts packages/tianwen-runtime-bundle/src/long-goal-host.ts tests/dsh-migration/goal-first-service.spec.ts tests/dsh-migration/continuous-goal-service.spec.ts tests/dsh-migration/goal-first-runner-next-step.spec.ts
 git commit -m "feat: add continuous Goal control service"
 ```
 
@@ -267,6 +270,9 @@ git commit -m "feat: add continuous Goal control service"
 - Produces: `installContinuousGoalCommand(agent, operations)` and `installBoundContinuousGoalControls(agent, operations)`; each returns its exact disposer.
 - Produces: `ContinuousGoalAgentOperations` with `create(agent, objective)` and
   `control(agent, action)` methods; model/command input never supplies identity.
+- Consumes the exact `@deepseek-ai/dsh-commands@0.1.1-rc.2` public package;
+  add it as a direct Runtime dev/peer dependency rather than relying on a
+  transitive install.
 
 - [ ] **Step 1: Write failing command grammar and scoping tests**
 
@@ -282,8 +288,9 @@ definition without a second global registration. Freeze this grammar:
 ```
 
 Reject empty `edit`, a second non-complete control binding, and a Planner/Task
-Session used as a control Session. Derive workspace, preset, and Session ID
-only from `invocation.agent.session.header`.
+Session used as a control Session. `rawInput` contains the leading separator,
+so trim it before parsing. Derive workspace, `agentPreset`, and Session ID only
+from `invocation.agent.session.header`.
 
 - [ ] **Step 2: Verify RED, implement the scoped command, verify GREEN**
 
@@ -294,7 +301,7 @@ const dispose = agent.ctx.commands.register({
   name: 'goal',
   description: 'start or control a long-running goal',
   input: { hint: '[<objective>|pause|resume|edit <direction>]', images: false },
-  handler: invocation => operations.handleCommand(invocation.agent, invocation.rawInput),
+  handler: invocation => handleGoalCommand(invocation.agent, invocation.rawInput.trim(), operations),
 })
 ```
 
@@ -304,21 +311,27 @@ need the driver.
 
 - [ ] **Step 3: Write failing scoped tool/prompt tests**
 
-Use one tool named `tianwen_goal_control` with the Task 2 action union. Prove:
+Use one tool named `goal_control` with the Task 2 action union. Prove:
 
 - the executor derives the control Session from `exec.agent?.session.id`;
-- model arguments contain no Goal, Task, Session, or workspace identifier;
-- unbound/missing Agent execution returns a benign no-active-Goal result;
+- the executor performs exact-key validation so model arguments cannot smuggle
+  a Goal, Task, Session, or workspace identifier through the otherwise-open
+  DSH tool schema;
+- an unbound Agent returns a benign no-active-Goal result; the real Agent-scoped
+  registry rejects a missing Agent before the executor, so do not claim a
+  product behavior that cannot occur;
 - the named system prompt section is merged, not `complete`, and tells the
   Agent to call the tool for Goal-relevant guidance, correction, pause, resume,
   or status while leaving unrelated conversation alone;
-- disposing/reinstalling creates no duplicate command, tool, or prompt section.
+- the combined control installer owns the exact command/tool/prompt disposers;
+  disposing before reinstalling creates no duplicate registration.
 
 - [ ] **Step 4: Verify RED, implement minimal scoped controls, verify GREEN**
 
 Use existing `defineTool`, `agent.ctx.tools.register()`, and
-`agent.ctx.systemPrompt.section()`. Do not add a natural-language keyword parser
-or classifier. Run:
+`agent.ctx.systemPrompt.section()`. Combine tool/prompt registrations with the
+Agent scope's effect ownership so one disposer removes both. Do not add a
+natural-language keyword parser or classifier. Run:
 
 ```powershell
 pnpm exec vitest run tests/dsh-migration/continuous-goal-agent.spec.ts
