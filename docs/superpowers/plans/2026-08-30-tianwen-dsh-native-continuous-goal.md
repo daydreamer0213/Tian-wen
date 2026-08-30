@@ -352,16 +352,47 @@ git commit -m "feat: expose continuous Goals in DSH chat"
 
 **Files:**
 - Create: `packages/tianwen-runtime-bundle/src/continuous-goal-host.ts`
+- Modify: `packages/tianwen-runtime-bundle/src/continuous-goal-service.ts`
+- Modify: `packages/tianwen-runtime-bundle/src/long-goal.ts`
+- Modify: `packages/tianwen-runtime-bundle/src/long-goal-planner.ts`
 - Modify: `packages/tianwen-runtime-bundle/src/long-goal-host.ts`
 - Create: `tests/dsh-migration/continuous-goal-host.spec.ts`
+- Modify: `tests/dsh-migration/continuous-goal-service.spec.ts`
+- Modify: `tests/dsh-migration/ordinary-long-goal.spec.ts`
 - Modify: `tests/dsh-migration/learn-loop-host.spec.ts`
 - Modify: `tests/dsh-migration/learn-loop-host.integration.spec.ts`
 
 **Interfaces:**
 - Consumes: v3 binding lookup, Task/status readers, Task 2 service operations, and Task 3 installers.
-- Produces: `mountContinuousGoalHost(ctx, dependencies): () => void`.
+- Produces: `mountContinuousGoalHost(ctx, dependencies)` with an async disposer
+  that unregisters listeners and waits for in-flight per-Goal lanes.
 
-- [ ] **Step 1: Write failing Task-complete bridge tests**
+- [ ] **Step 1: Write failing concrete v3 Planner and Task-admission tests**
+
+The Task 2 service tests use doubles, while the concrete Planner/Task runner is
+still v2-only. Before adding events, prove a v3 Goal can actually:
+
+- commit a Planner suffix while preserving its `control` block;
+- bind a Task with v3 revision conflict checks, workspace, preset, Session, and
+  Goal identity validation identical to v2;
+- run `runLongGoalPlannerTurn()` and `runCurrentWebTask()` without falling into
+  the v1 binder or the legacy `workspace-required` branch;
+- reject a second non-complete Goal for the same control Session and reject a
+  Planner/Task Session as a control Session in the concrete operations adapter.
+
+Generalize the existing Goal-first path from `v2` to `v2 | v3`; do not copy the
+Planner, binder, or Task runner. Preserve exact v1/v2 output bytes and behavior.
+
+- [ ] **Step 2: Verify RED, minimally generalize the concrete path, verify GREEN**
+
+Change `commitLongGoalPlan()`, `bindGoalFirstLongGoalTask()`, Planner record
+types, and `runCurrentWebTask()` checks only where v3 shares the exact v2
+semantics. The legacy CLI/Host adapter remains v2-only; the new continuous
+adapter supplies v3. Change `cancelTaskAndReadStatus` to receive the full
+`{ sessionId, goalId }` execution binding so the Host never cancels by Session
+alone.
+
+- [ ] **Step 3: Write failing Task-complete bridge tests**
 
 Drive the public DSH event shape and assert behavior:
 
@@ -372,18 +403,22 @@ coordinator.onGoalChanged({
 })
 ```
 
-Prove exact Task `sessionId + goalId` matching, `agent.whenIdle()` then Session
-flush, latest-revision reread, one call to existing Continue, result-aware
-Planner input preservation, and no action for v1/v2, paused v3, block/pause
-events, unrelated Goals, or an already-considered completion.
+Prove exact Task `sessionId + goalId` matching across all bound Tasks,
+`agent.whenIdle()` then successful Session flush, latest-revision reread, one
+call to existing Continue, result-aware Planner input preservation, and no
+action for v1/v2, paused v3, block/pause events, unrelated Goals, or an
+already-considered completion. Never use the DSH Goal revision as the Tianwen
+Long Goal revision.
 
-- [ ] **Step 2: Verify RED, add one per-Goal promise lane, verify GREEN**
+- [ ] **Step 4: Verify RED, add one per-Goal promise lane, verify GREEN**
 
 Use one `Map<string, Promise<void>>` to serialize by Long Goal ID and remove the
-entry in `finally`. Duplicate complete events join the current promise; they do
-not create a scheduler, retry queue, or permanent worker.
+entry in `finally`. Completion/reconciliation joins an existing lane; stop work
+chains behind it so user stop is never discarded. Every lane rereads durable
+state before acting. Do not add a scheduler, retry queue, permanent worker, or
+persistent in-memory binding index.
 
-- [ ] **Step 3: Write failing native-stop and Agent lifecycle tests**
+- [ ] **Step 5: Write failing native-stop and Agent lifecycle tests**
 
 Listen to the exact public Session event signature `(session, event)` and only
 pause when:
@@ -394,37 +429,49 @@ event.data.reason.kind === 'aborted' &&
 event.data.reason.reason.kind === 'user'
 ```
 
-Prove that a bound running v3 mode is persisted paused before the current Task
-Agent is cancelled, while unrelated, completed, already-paused, or non-user
-turn ends do nothing. Prove `agent/created({agent})` synchronously installs the
-scoped command and restores tool/prompt controls when a durable binding exists.
+Distinguish the event Session:
 
-- [ ] **Step 4: Write failing restart reconciliation tests**
+- user stop in the control Session persists v3 paused, then cancels the exact
+  bound Task `sessionId + goalId` with a non-user propagated cause, waits idle,
+  flushes, and rereads paused/complete;
+- user stop in the Task Session has already cancelled that Agent and let the
+  Goal Round Driver pause it, so Tianwen only persists control paused, waits,
+  flushes, and rereads; it does not cancel twice.
+
+Unrelated, completed, already-paused, or non-user turn ends do nothing. Prove
+`agent/created({agent})` synchronously installs the scoped command and restores
+tool/prompt controls when a unique durable binding exists. At mount, enumerate
+already-live Agents once so they are not missed; do not cold-resume a control
+Session merely to install UI controls.
+
+- [ ] **Step 6: Write failing restart reconciliation tests**
 
 At Host mount, prove:
 
-- paused v3 is indexed but not resumed;
-- running active Task relies on the existing Goal Round Driver;
-- running ready or newly-settled state calls Continue once through the lane;
+- paused v3 is recognized but not resumed;
+- running live active Task relies on the existing Goal Round Driver only when
+  the exact Goal matches and remains armed;
+- running `unplanned`, `needs-replan`, ready-unbound, newly-settled, or
+  cold/disarmed-active state calls Continue once through the lane;
 - blocked/complete states start nothing;
 - two reconciliations do not create another Task or Session.
 
-- [ ] **Step 5: Implement the Host adapter and run focused integration**
+- [ ] **Step 7: Implement the Host adapter and run focused integration**
 
 Keep DSH-specific event plumbing in `continuous-goal-host.ts`; pass existing
 `goalFirstOperations`, Session/Agent/Goal services, roots, and persistence from
 `long-goal-host.ts`. Run:
 
 ```powershell
-pnpm exec vitest run tests/dsh-migration/continuous-goal-host.spec.ts tests/dsh-migration/learn-loop-host.spec.ts tests/dsh-migration/learn-loop-host.integration.spec.ts
+pnpm exec vitest run tests/dsh-migration/ordinary-long-goal.spec.ts tests/dsh-migration/continuous-goal-service.spec.ts tests/dsh-migration/continuous-goal-host.spec.ts tests/dsh-migration/learn-loop-host.spec.ts tests/dsh-migration/learn-loop-host.integration.spec.ts
 ```
 
 Expected: PASS with no client polling and no custom Session event.
 
-- [ ] **Step 6: Commit the lifecycle bridge**
+- [ ] **Step 8: Commit the lifecycle bridge**
 
 ```powershell
-git add packages/tianwen-runtime-bundle/src/continuous-goal-host.ts packages/tianwen-runtime-bundle/src/long-goal-host.ts tests/dsh-migration/continuous-goal-host.spec.ts tests/dsh-migration/learn-loop-host.spec.ts tests/dsh-migration/learn-loop-host.integration.spec.ts
+git add packages/tianwen-runtime-bundle/src/continuous-goal-host.ts packages/tianwen-runtime-bundle/src/continuous-goal-service.ts packages/tianwen-runtime-bundle/src/long-goal.ts packages/tianwen-runtime-bundle/src/long-goal-planner.ts packages/tianwen-runtime-bundle/src/long-goal-host.ts tests/dsh-migration/ordinary-long-goal.spec.ts tests/dsh-migration/continuous-goal-service.spec.ts tests/dsh-migration/continuous-goal-host.spec.ts tests/dsh-migration/learn-loop-host.spec.ts tests/dsh-migration/learn-loop-host.integration.spec.ts
 git commit -m "feat: continue Goals across Task sessions"
 ```
 
