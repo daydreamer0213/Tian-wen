@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest'
 import type {
   LongGoalRecord,
   LongGoalRecordV2,
+  LongGoalRecordV3,
   LongGoalStatusProjectionV2,
+  LongGoalStatusProjectionV3,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
 import {
   abandonGoalFirstTask,
@@ -40,6 +42,16 @@ function record(overrides: Partial<LongGoalRecordV2> = {}): LongGoalRecordV2 {
     createdAt: 1,
     updatedAt: 1,
     tasks: [],
+    ...overrides,
+  }
+}
+
+function continuousRecord(overrides: Partial<LongGoalRecordV3> = {}): LongGoalRecordV3 {
+  const v2 = record(overrides)
+  return {
+    ...v2,
+    schemaVersion: 'tianwen.long-goal.v3',
+    control: { sessionId: 'continuous-control-session-1', autoProgress: 'running' },
     ...overrides,
   }
 }
@@ -105,6 +117,27 @@ function taskStatus(
     })),
     currentTaskId: source.tasks[0]?.id ?? null,
   })
+}
+
+function continuousStatus(
+  source: LongGoalRecordV3,
+  overrides: Partial<LongGoalStatusProjectionV3> = {},
+): LongGoalStatusProjectionV3 {
+  const v2 = status(source, overrides)
+  return {
+    ...v2,
+    ...overrides,
+    schemaVersion: 'tianwen.long-goal-status.v3',
+    control: source.control,
+  }
+}
+
+function continuousTaskStatus(
+  source: LongGoalRecordV3,
+  phase: LongGoalStatusProjectionV3['tasks'][number]['phase'],
+  goalPhase: LongGoalStatusProjectionV3['goal']['phase'],
+): LongGoalStatusProjectionV3 {
+  return continuousStatus(source, taskStatus(source, phase, goalPhase))
 }
 
 interface DoubleOptions {
@@ -181,6 +214,54 @@ function doubles(options: DoubleOptions = {}) {
 }
 
 describe('Goal-first state service', () => {
+  it.each([
+    ['planning', continuousRecord(), continuousStatus(continuousRecord()), 'planning-pending'],
+    ['active Task', continuousRecord({
+      revision: 2,
+      planner: { ...record().planner, phase: 'ready', planRevision: 1 },
+      tasks: [{ id: TASK_ID, objective: 'Active work', execution: EXECUTION, resolution: null }],
+    }), undefined, 'continued'],
+    ['paused Task', continuousRecord({
+      revision: 2,
+      planner: { ...record().planner, phase: 'ready', planRevision: 1 },
+      tasks: [{ id: TASK_ID, objective: 'Paused work', execution: EXECUTION, resolution: null }],
+    }), undefined, 'continued'],
+    ['blocked', continuousRecord(), undefined, 'blocked'],
+    ['ready', continuousRecord({
+      revision: 2,
+      planner: { ...record().planner, phase: 'ready', planRevision: 1 },
+      tasks: [{ id: TASK_ID, objective: 'Ready work', execution: null, resolution: null }],
+    }), undefined, 'started'],
+    ['complete', continuousRecord({ planner: { ...record().planner, phase: 'complete' } }), undefined, 'complete'],
+  ] as const)('reuses the Goal-first action table for a v3 %s record', async (label, current, suppliedStatus, expectedAction) => {
+    const authoritative = suppliedStatus ?? (
+      label === 'active Task' ? continuousTaskStatus(current, 'active', 'active')
+        : label === 'paused Task' ? continuousTaskStatus(current, 'paused', 'active')
+          : label === 'blocked' ? continuousStatus(current, { goal: { ...status(current).goal, phase: 'blocked' } })
+            : label === 'ready' ? continuousStatus(current, { goal: { ...status(current).goal, phase: 'active' }, currentTaskId: TASK_ID })
+              : continuousStatus(current, { goal: { ...status(current).goal, phase: 'complete' } })
+    )
+    const harness = doubles({
+      current: current as never,
+      currentStatus: authoritative as never,
+      plannerResult: label === 'planning' ? 'not-submitted' : 'submitted',
+      taskResult: { action: expectedAction === 'started' ? 'started' : 'continued', sessionId: EXECUTION.sessionId },
+      onTask: () => {
+        if (expectedAction === 'started') harness.setStatus(continuousTaskStatus(current, 'active', 'active') as never)
+      },
+    })
+
+    await expect(continueGoalFirstProgress({
+      stateRoot: STATE_ROOT,
+      dshStatusTarget: DSH_STATUS_TARGET,
+      longGoalId: current.id,
+      expectedRevision: current.revision,
+    }, harness.dependencies)).resolves.toMatchObject({
+      action: expectedAction,
+      status: { schemaVersion: 'tianwen.long-goal-status.v3' },
+    })
+  })
+
   it('persists, plans once, admits the first ready Task, and returns the final status on create', async () => {
     const created = record()
     const planned = record({

@@ -92,7 +92,7 @@ into the Profile selected by the user:
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.3.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.4.tgz
 ```
 
 `--allow-build=koffi` is an explicit pnpm approval recorded in that Profile; it
@@ -125,13 +125,17 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
 The optional Tianwen Desktop reuses the user's existing DSH and Web Profile. It
 is not a second Runtime and does not require the managed Tianwen installation.
 Desktop opens the same Goal-first UI. With confirmation, it can update the exact
-known Runtime `0.1.2` predecessor to its embedded `0.1.3`; unknown or damaged
+known Runtime `0.1.3` predecessor to its embedded `0.1.4`; unknown or damaged
 versions are never overwritten automatically.
 
-After installation, open **Long-running goals** in DSH Web or Tianwen Desktop
-and enter the goal, optional context, and success criteria. Tianwen maintains
-the derived Tasks, their individual execution Sessions, and progress; the user
-does not predeclare a task count or an execution-round count.
+After installation, enter `/goal <objective>` in an ordinary DSH Web or Tianwen
+Desktop conversation. Tianwen derives Tasks, runs each accepted Task in its own
+DSH Session, and continues at Task boundaries. Goal-relevant natural-language
+guidance stays in the control conversation; the native stop control pauses the
+Goal, and `/goal resume` continues it. The existing **Long-running goals** panel
+remains optional advanced history, not a second continuous-mode UI. Users do
+not predeclare a task count or execution-round count, and Tianwen adds no custom
+progress Session event.
 
 ## What this preview proves
 

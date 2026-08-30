@@ -42,7 +42,8 @@ export function projectLearningClueStatus(input: {
 }): LearningClueStatus {
   const sourcesByTicket = new Map<string, Map<string, LearningClueSource>>()
   for (const goal of input.goals) {
-    if (goal.status.schemaVersion !== 'tianwen.long-goal-status.v2') continue
+    if (goal.status.schemaVersion !== 'tianwen.long-goal-status.v2' &&
+      goal.status.schemaVersion !== 'tianwen.long-goal-status.v3') continue
     for (const feedback of goal.feedback.items) {
       if (feedback.ticketId === undefined) continue
       const task = goal.status.tasks.find(candidate => candidate.id === feedback.taskId)

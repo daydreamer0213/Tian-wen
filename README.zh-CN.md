@@ -77,7 +77,7 @@ Runtime Bundle 压缩包，再交给 DSH 安装到用户自己选择的 Profile�
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.3.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.4.tgz
 ```
 
 `--allow-build=koffi` 是写入当前 Profile 的 pnpm 明确许可，不会修改全局 pnpm 设置。只有
@@ -104,11 +104,13 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
 
 可选的 Tianwen Desktop 复用用户现有的 DSH 与 Web Profile；它不是第二套 Runtime，也不要求
 用户改用天问托管安装目录。Desktop 打开的是同一套 Goal-first 界面，旧的精确 Runtime
-`0.1.2` Profile 可在用户确认后更新到内嵌的 `0.1.3`；未知或损坏版本不会被自动覆盖。
+`0.1.3` Profile 可在用户确认后更新到内嵌的 `0.1.4`；未知或损坏版本不会被自动覆盖。
 
-安装后，在 DSH Web 或 Tianwen Desktop 中打开“长期目标”，填写目标、可选背景和成功标准
-即可。后续 Task、各自的执行 Session 和完成进度由天问维护，不需要用户预先填写任务数量
-或每个任务的执行轮数。
+安装后，在普通 DSH Web 或 Tianwen Desktop 对话中输入 `/goal <长期目标>`。天问会自动派生
+Task，让每个已接纳 Task 在独立 DSH Session 中执行，并在 Task 边界继续推进。与 Goal 有关的
+自然语言补充继续留在控制对话中；原生停止按钮会暂停 Goal，`/goal resume` 可继续。“长期目标”
+面板只保留为可选的高级历史入口，不是第二套连续模式界面。用户不需要预先填写 Task 数量或
+执行轮数，天问也不会新增自定义进度 Session 事件。
 
 ## 当前预览证明了什么
 

@@ -12,6 +12,8 @@ import type {
 import type {
   AnyLongGoalRecord,
   AnyLongGoalStatusProjection,
+  GoalFirstLongGoalRecord,
+  GoalFirstLongGoalStatusProjection,
   LongGoalStatusProjectionV2,
 } from './long-goal-contract.js'
 
@@ -74,6 +76,22 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
+function goalFirstHistoryPair(
+  record: AnyLongGoalRecord,
+  status: AnyLongGoalStatusProjection,
+): {
+  readonly record: GoalFirstLongGoalRecord
+  readonly status: GoalFirstLongGoalStatusProjection
+} | undefined {
+  if (
+    (record.schemaVersion === 'tianwen.long-goal.v2' &&
+      status.schemaVersion === 'tianwen.long-goal-status.v2') ||
+    (record.schemaVersion === 'tianwen.long-goal.v3' &&
+      status.schemaVersion === 'tianwen.long-goal-status.v3')
+  ) return { record, status }
+  return undefined
+}
+
 async function settledTarget(input: {
   readonly stateRoot: string
   readonly dshStatusTarget: StatusTarget
@@ -89,14 +107,10 @@ async function settledTarget(input: {
       dshStatusTarget: input.dshStatusTarget,
     }),
   ])
-  if (
-    record.schemaVersion !== 'tianwen.long-goal.v2' ||
-    status.schemaVersion !== 'tianwen.long-goal-status.v2'
-  ) {
-    throw new Error('Task feedback requires a Goal-first v2 Goal')
-  }
-  const task = status.tasks.find(candidate => candidate.id === input.taskId)
-  const stored = record.tasks.find(candidate => candidate.id === input.taskId)
+  const history = goalFirstHistoryPair(record, status)
+  if (history === undefined) throw new Error('Task feedback requires a Goal-first Goal')
+  const task = history.status.tasks.find(candidate => candidate.id === input.taskId)
+  const stored = history.record.tasks.find(candidate => candidate.id === input.taskId)
   if (
     task === undefined ||
     stored === undefined ||
@@ -110,7 +124,7 @@ async function settledTarget(input: {
   }
   return {
     task,
-    scopeKey: `workspace:${record.workspaceRoot}`,
+    scopeKey: `workspace:${history.record.workspaceRoot}`,
   }
 }
 
@@ -186,14 +200,12 @@ export async function readGoalTaskFeedbackStatus(input: {
       dshStatusTarget: input.dshStatusTarget,
     }),
   ])
-  if (
-    record.schemaVersion !== 'tianwen.long-goal.v2' ||
-    status.schemaVersion !== 'tianwen.long-goal-status.v2'
-  ) {
+  const history = goalFirstHistoryPair(record, status)
+  if (history === undefined) {
     return { schemaVersion: 'tianwen.goal-task-feedback-status.v1', items: [] }
   }
-  const scopeKey = `workspace:${record.workspaceRoot}`
-  const projected = await Promise.all(status.tasks.map(async task => {
+  const scopeKey = `workspace:${history.record.workspaceRoot}`
+  const projected = await Promise.all(history.status.tasks.map(async task => {
     if (
       task.execution === null ||
       (task.phase !== 'complete' && task.phase !== 'abandoned')

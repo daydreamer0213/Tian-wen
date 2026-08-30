@@ -9,7 +9,9 @@ import type {
   LongGoalStatusProjection,
   LongGoalSummary,
   LongGoalStatusProjectionV2,
+  LongGoalStatusProjectionV3,
   LongGoalSummaryV2,
+  LongGoalSummaryV3,
 } from './long-goal-contract.js'
 import type { RunCurrentTaskResult } from './long-goal-host.js'
 import type {
@@ -176,10 +178,22 @@ function isStatusV1(value: unknown): value is LongGoalStatusProjection {
   })
 }
 
-function isStatusV2(value: unknown): value is LongGoalStatusProjectionV2 {
-  if (!isRecord(value) || !hasExactKeys(value, [
+function isContinuousControl(value: unknown): boolean {
+  return isRecord(value) && hasExactKeys(value, ['sessionId', 'autoProgress']) &&
+    isNonEmptyString(value.sessionId) &&
+    (value.autoProgress === 'running' || value.autoProgress === 'paused')
+}
+
+function isGoalFirstStatus(
+  value: unknown,
+  schemaVersion: 'tianwen.long-goal-status.v2' | 'tianwen.long-goal-status.v3',
+): boolean {
+  const keys = [
     'schemaVersion', 'goal', 'planner', 'guidance', 'tasks', 'currentTaskId', 'runtime',
-  ]) || value.schemaVersion !== 'tianwen.long-goal-status.v2' ||
+    ...(schemaVersion === 'tianwen.long-goal-status.v3' ? ['control'] : []),
+  ]
+  if (!isRecord(value) || !hasExactKeys(value, keys) || value.schemaVersion !== schemaVersion ||
+    (schemaVersion === 'tianwen.long-goal-status.v3' && !isContinuousControl(value.control)) ||
     !isRecord(value.goal) || !hasExactKeys(value.goal, [
       'id', 'objective', 'context', 'successCriteria', 'phase', 'revision',
       'completedTasks', 'abandonedTasks', 'totalTasks',
@@ -227,10 +241,19 @@ function isStatusV2(value: unknown): value is LongGoalStatusProjectionV2 {
   })
 }
 
+function isStatusV2(value: unknown): value is LongGoalStatusProjectionV2 {
+  return isGoalFirstStatus(value, 'tianwen.long-goal-status.v2')
+}
+
+function isStatusV3(value: unknown): value is LongGoalStatusProjectionV3 {
+  return isGoalFirstStatus(value, 'tianwen.long-goal-status.v3')
+}
+
 function isStatus(value: unknown): value is AnyLongGoalStatusProjection {
   return isRecord(value) && (
     value.schemaVersion === 'tianwen.long-goal-status.v1' ? isStatusV1(value) :
-      value.schemaVersion === 'tianwen.long-goal-status.v2' && isStatusV2(value)
+      value.schemaVersion === 'tianwen.long-goal-status.v2' ? isStatusV2(value) :
+        value.schemaVersion === 'tianwen.long-goal-status.v3' && isStatusV3(value)
   )
 }
 
@@ -244,11 +267,16 @@ function isSummaryV1(value: unknown): value is LongGoalSummary {
     isNonNegativeInteger(value.updatedAt)
 }
 
-function isSummaryV2(value: unknown): value is LongGoalSummaryV2 {
+function isGoalFirstSummary(
+  value: unknown,
+  schemaVersion: 'tianwen.long-goal-summary.v2' | 'tianwen.long-goal-summary.v3',
+): boolean {
   return isRecord(value) && hasExactKeys(value, [
     'schemaVersion', 'id', 'objective', 'phase', 'revision', 'completedTasks',
     'abandonedTasks', 'totalTasks', 'currentTaskId', 'updatedAt',
-  ]) && value.schemaVersion === 'tianwen.long-goal-summary.v2' &&
+    ...(schemaVersion === 'tianwen.long-goal-summary.v3' ? ['control'] : []),
+  ]) && value.schemaVersion === schemaVersion &&
+    (schemaVersion !== 'tianwen.long-goal-summary.v3' || isContinuousControl(value.control)) &&
     isNonEmptyString(value.id) && isNonEmptyString(value.objective) &&
     isGoalPhaseV2(value.phase) && isPositiveInteger(value.revision) &&
     isNonNegativeInteger(value.completedTasks) && isNonNegativeInteger(value.abandonedTasks) &&
@@ -257,10 +285,19 @@ function isSummaryV2(value: unknown): value is LongGoalSummaryV2 {
     isNonNegativeInteger(value.updatedAt)
 }
 
+function isSummaryV2(value: unknown): value is LongGoalSummaryV2 {
+  return isGoalFirstSummary(value, 'tianwen.long-goal-summary.v2')
+}
+
+function isSummaryV3(value: unknown): value is LongGoalSummaryV3 {
+  return isGoalFirstSummary(value, 'tianwen.long-goal-summary.v3')
+}
+
 function isSummary(value: unknown): value is AnyLongGoalSummary {
   if (!isRecord(value)) return false
   if (value.schemaVersion === undefined) return isSummaryV1(value)
-  return value.schemaVersion === 'tianwen.long-goal-summary.v2' && isSummaryV2(value)
+  return value.schemaVersion === 'tianwen.long-goal-summary.v2' ? isSummaryV2(value) :
+    value.schemaVersion === 'tianwen.long-goal-summary.v3' && isSummaryV3(value)
 }
 
 function isProgressResult(value: unknown): value is GoalFirstProgressResultV2 {

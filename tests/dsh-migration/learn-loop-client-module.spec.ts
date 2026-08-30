@@ -268,6 +268,27 @@ const planningStatus = {
   currentTaskId: null,
 } as const
 
+const continuousStatus = {
+  ...statusV2,
+  schemaVersion: 'tianwen.long-goal-status.v3',
+  goal: {
+    ...statusV2.goal,
+    id: 'continuous-goal-1',
+    objective: 'Ship continuous Goal history',
+    completedTasks: 1,
+    totalTasks: 3,
+  },
+  planner: { ...statusV2.planner, sessionId: 'continuous-planner' },
+  tasks: [{
+    id: 'continuous-complete', objective: 'Inspect the existing flow', phase: 'complete',
+    execution: { goalId: 'goal-complete', sessionId: 'session-complete' }, resolution: null,
+  }, statusV2.tasks[0], {
+    id: 'continuous-next', objective: 'Verify compatibility', phase: 'pending',
+    execution: null, resolution: null,
+  }],
+  control: { sessionId: 'control-session', autoProgress: 'paused' },
+} as const
+
 const summaryV1 = {
   id: unboundStatus.goal.id,
   objective: unboundStatus.goal.objective,
@@ -896,6 +917,57 @@ describe('Learn Loop compiled DSH client module', () => {
     expect(text(findElement(tree, element => element.props['aria-label'] === 'Abandoned')))
       .toContain('Replace the whole interface — abandoned')
     expect(findButton(tree, 'Continue current work')).toBeDefined()
+  })
+
+  it('keeps continuous Goals in optional advanced history without legacy control buttons', async () => {
+    const summary = {
+      schemaVersion: 'tianwen.long-goal-summary.v3',
+      id: continuousStatus.goal.id,
+      objective: continuousStatus.goal.objective,
+      phase: continuousStatus.goal.phase,
+      revision: continuousStatus.goal.revision,
+      completedTasks: continuousStatus.goal.completedTasks,
+      abandonedTasks: continuousStatus.goal.abandonedTasks,
+      totalTasks: continuousStatus.goal.totalTasks,
+      currentTaskId: continuousStatus.currentTaskId,
+      updatedAt: 1,
+      control: continuousStatus.control,
+    } as const
+    const feedback = {
+      taskId: 'continuous-complete', rating: 'positive' as const,
+      decision: 'no-case' as const, recordedAt: '2026-08-30T00:00:00.000Z',
+    }
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
+      if (endpoint === 'status') return { ok: true, value: { status: continuousStatus } }
+      if (endpoint === 'feedback-status') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-task-feedback-status.v1', items: [feedback],
+      } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const client = loadClientModule({
+      list: createSessionList({ current: undefined, byId: {} }),
+      rpc,
+    })
+
+    let tree = client.render()
+    expect(elements(tree).some(element => element.props.role === 'dialog')).toBe(false)
+    expect(rpc.call).not.toHaveBeenCalled()
+
+    tree = await openListedGoal(client.render, continuousStatus.goal.objective)
+    expect(text(findElement(tree, element => element.props['aria-label'] === 'Current work')))
+      .toContain('Implement the Web flow — active')
+    expect(text(findElement(tree, element => element.props['aria-label'] === 'Completed')))
+      .toContain('Inspect the existing flow — complete')
+    expect(text(findElement(tree, element => element.props['aria-label'] === 'Next steps')))
+      .toContain('Verify compatibility — pending')
+    expect(text(tree)).toContain('Helpful result recorded')
+    for (const label of ['Continue current work', 'Add guidance', 'Abandon this Task and replan']) {
+      expect(elements(tree).some(element => element.type === 'button' && text(element) === label))
+        .toBe(false)
+    }
+    expect(elements(tree).some(element => element.props['aria-label'] === 'Guidance')).toBe(false)
+    expect(rpc.call.mock.calls.filter(call => call[1] === 'feedback-status')).toHaveLength(1)
   })
 
   it('keeps a replannable pending Task under next steps and labels the action as planning', async () => {

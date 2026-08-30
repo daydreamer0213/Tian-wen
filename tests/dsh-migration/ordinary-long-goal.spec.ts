@@ -5,18 +5,24 @@ import { describe, expect, it, vi } from 'vitest'
 import { SessionId, mountGoalHarness } from '@tianwen/dsh-compat'
 import {
   abandonBlockedLongGoalTask,
+  abandonContinuousGoalTask,
   appendLongGoalGuidance,
+  appendContinuousGoalGuidance,
   bindGoalFirstLongGoalTask,
   bindLongGoalTask,
   commitLongGoalPlan,
+  createContinuousLongGoal,
   createGoalFirstLongGoal,
   createLongGoal,
   formatLongGoalStatusText,
+  findContinuousGoalByControlSession,
   listLongGoals,
   LongGoalIntegrityError,
   LongGoalRevisionConflictError,
   readLongGoal,
   readLongGoalStatus,
+  redirectContinuousGoal,
+  setContinuousGoalMode,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
 import { runLongGoalTask } from '../../packages/tianwen-runtime-bundle/src/long-goal-run.js'
 import {
@@ -578,6 +584,303 @@ describe('goal-first long Goal v2 records', () => {
     }
   })
 
+  it('persists a strict v3 continuous Goal, rejects malformed control blocks, and leaves v2 bytes and status unchanged', async () => {
+    const dataDir = createStateRoot()
+    const stateRoot = join(dataDir, 'state')
+    const workspaceRoot = resolve(dataDir, 'workspace')
+    try {
+      const v1 = createLongGoal({
+        stateRoot, objective: 'Existing v1', tasks: ['Keep unchanged'], maxTaskRounds: 1,
+      }, { id: () => 'v3-mixed-v1', now: () => 1 })
+      const v2 = createGoalFirstLongGoal({
+        stateRoot, objective: 'Existing v2', context: null, successCriteria: null, workspaceRoot, agentPreset: 'planner',
+      }, { goalSuffix: () => 'v3-mixed-v2', plannerSessionId: () => 'planner-v2', now: () => 2 })
+      const v2Path = longGoalPath(stateRoot, v2.id)
+      const v2Bytes = readFileSync(v2Path, 'utf8')
+      const v2Status = await readLongGoalStatus({ stateRoot, longGoalId: v2.id, dshStatusTarget: { dataDir } })
+
+      const continuous = createContinuousLongGoal({
+        stateRoot,
+        objective: 'Ship the product',
+        context: null,
+        successCriteria: null,
+        workspaceRoot,
+        agentPreset: 'code',
+        controlSessionId: 'session-control',
+      }, { goalSuffix: () => 'v3-continuous', plannerSessionId: () => 'planner-v3', now: () => 3 })
+
+      expect(continuous.schemaVersion).toBe('tianwen.long-goal.v3')
+      expect(continuous.control).toEqual({ sessionId: 'session-control', autoProgress: 'running' })
+      expect(readLongGoal(stateRoot, continuous.id)).toEqual(continuous)
+      await expect(readLongGoalStatus({ stateRoot, longGoalId: continuous.id, dshStatusTarget: { dataDir } }))
+        .resolves.toMatchObject({
+          schemaVersion: 'tianwen.long-goal-status.v3',
+          goal: { phase: 'planning' },
+          control: { sessionId: 'session-control', autoProgress: 'running' },
+        })
+      expect(listLongGoals(stateRoot).map(record => record.schemaVersion)).toEqual([
+        'tianwen.long-goal.v3', 'tianwen.long-goal.v2', 'tianwen.long-goal.v1',
+      ])
+      expect(readFileSync(v2Path, 'utf8')).toBe(v2Bytes)
+      expect(await readLongGoalStatus({ stateRoot, longGoalId: v2.id, dshStatusTarget: { dataDir } })).toEqual(v2Status)
+
+      for (const control of [
+        { sessionId: 'session-control' },
+        { sessionId: 'session-control', autoProgress: 'running', extra: true },
+      ]) {
+        writeFileSync(longGoalPath(stateRoot, continuous.id), `${JSON.stringify({ ...continuous, control })}\n`, 'utf8')
+        expect(() => readLongGoal(stateRoot, continuous.id)).toThrow(LongGoalIntegrityError)
+      }
+      writeFileSync(longGoalPath(stateRoot, continuous.id), `${JSON.stringify(continuous)}\n`, 'utf8')
+      expect(readLongGoal(stateRoot, v1.id)).toEqual(v1)
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a continuous Goal whose generated Planner Session is its control Session before persisting', () => {
+    const stateRoot = createStateRoot()
+    try {
+      expect(() => createContinuousLongGoal({
+        stateRoot, objective: 'Isolate control', context: null, successCriteria: null,
+        workspaceRoot: resolve(stateRoot, 'workspace'), agentPreset: 'code', controlSessionId: 'shared-session',
+      }, { goalSuffix: () => 'shared-role', plannerSessionId: () => 'shared-session', now: () => 10 })).toThrow('Planner Session must differ from control Session')
+      expect(listLongGoals(stateRoot)).toEqual([])
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects persisted Goal-first Session role collisions during record and status reads', async () => {
+    const dataDir = createStateRoot()
+    const stateRoot = join(dataDir, 'state')
+    const workspaceRoot = resolve(dataDir, 'workspace')
+    try {
+      const v2 = createGoalFirstLongGoal({
+        stateRoot, objective: 'Parse v2 roles', context: null, successCriteria: null, workspaceRoot, agentPreset: 'planner',
+      }, { goalSuffix: () => 'parse-v2-roles', plannerSessionId: () => 'planner-v2', now: () => 10 })
+      const v2Plan = commitLongGoalPlan({
+        stateRoot, longGoalId: v2.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Task v2' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000071', now: () => 11 })
+      const v2Bound = bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: v2.id, expectedRevision: 2, taskId: v2Plan.tasks[0]!.id,
+        execution: { goalId: 'goal-v2', sessionId: 'task-v2' },
+      })
+      const v3 = createContinuousLongGoal({
+        stateRoot, objective: 'Parse v3 roles', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'control-v3',
+      }, { goalSuffix: () => 'parse-v3-roles', plannerSessionId: () => 'planner-v3', now: () => 20 })
+      const v3Plan = commitLongGoalPlan({
+        stateRoot, longGoalId: v3.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Task v3' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000072', now: () => 21 })
+      const v3Bound = bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: v3.id, expectedRevision: 2, taskId: v3Plan.tasks[0]!.id,
+        execution: { goalId: 'goal-v3', sessionId: 'task-v3' },
+      })
+      const corruptions = [
+        {
+          ...v2Bound,
+          tasks: v2Bound.tasks.map(task => ({
+            ...task,
+            execution: task.execution === null ? null : { ...task.execution, sessionId: v2Bound.planner.sessionId },
+          })),
+        },
+        {
+          ...v3Bound,
+          tasks: v3Bound.tasks.map(task => ({
+            ...task,
+            execution: task.execution === null ? null : { ...task.execution, sessionId: v3Bound.planner.sessionId },
+          })),
+        },
+        { ...v3Bound, control: { ...v3Bound.control, sessionId: v3Bound.planner.sessionId } },
+        { ...v3Bound, control: { ...v3Bound.control, sessionId: v3Bound.tasks[0]!.execution!.sessionId } },
+      ]
+
+      for (const corrupted of corruptions) {
+        writeFileSync(longGoalPath(stateRoot, corrupted.id), `${JSON.stringify(corrupted)}\n`, 'utf8')
+        expect(() => readLongGoal(stateRoot, corrupted.id)).toThrow(LongGoalIntegrityError)
+        await expect(readLongGoalStatus({ stateRoot, longGoalId: corrupted.id, dshStatusTarget: { dataDir } }))
+          .rejects.toThrow(LongGoalIntegrityError)
+      }
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('updates a continuous Goal atomically, keeps same-mode writes idempotent, and finds its active control Session binding', () => {
+    const stateRoot = createStateRoot()
+    const workspaceRoot = resolve(stateRoot, 'workspace')
+    try {
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Ship continuous Goal', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'session-control',
+      }, { goalSuffix: () => 'v3-mutations', plannerSessionId: () => 'planner-v3-mutations', now: () => 10 })
+
+      expect(findContinuousGoalByControlSession({ stateRoot, controlSessionId: 'session-control' })).toEqual(record)
+      const paused = setContinuousGoalMode({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, mode: 'paused',
+      })
+      expect(paused.control.autoProgress).toBe('paused')
+      expect(paused.revision).toBe(2)
+      const path = longGoalPath(stateRoot, record.id)
+      const pausedBytes = readFileSync(path, 'utf8')
+      expect(setContinuousGoalMode({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, mode: 'paused',
+      })).toEqual(paused)
+      expect(readFileSync(path, 'utf8')).toBe(pausedBytes)
+
+      expect(redirectContinuousGoal({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, text: '改成先解决离线安装',
+      })).toMatchObject({
+        revision: 3,
+        guidance: ['改成先解决离线安装'],
+        control: { autoProgress: 'paused' },
+      })
+      const redirectedBytes = readFileSync(path, 'utf8')
+      expect(() => redirectContinuousGoal({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, text: 'stale redirect',
+      })).toThrow(LongGoalRevisionConflictError)
+      expect(readFileSync(path, 'utf8')).toBe(redirectedBytes)
+
+      expect(appendContinuousGoalGuidance({
+        stateRoot, longGoalId: record.id, expectedRevision: 3, text: '保留离线步骤',
+      })).toMatchObject({
+        revision: 4,
+        planner: { phase: 'needs-replan' },
+        guidance: ['改成先解决离线安装', '保留离线步骤'],
+      })
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('commits and binds a v3 suffix without losing control or relaxing revision and binding identity checks', () => {
+    const stateRoot = createStateRoot()
+    const workspaceRoot = resolve(stateRoot, 'workspace')
+    try {
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Ship continuous Goal', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'control-session',
+      }, { goalSuffix: () => 'v3-plan-bind', plannerSessionId: () => 'planner-v3-plan-bind', now: () => 10 })
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'First work' }, { objective: 'Second work' }], consideredSettledTasks: 0,
+      }, { taskId: (() => {
+        const ids = ['00000000-0000-4000-8000-000000000051', '00000000-0000-4000-8000-000000000052']
+        return () => ids.shift()!
+      })(), now: () => 11 })
+      const execution = { goalId: 'goal-v3-task', sessionId: 'session-v3-task' }
+
+      expect(planned).toMatchObject({
+        schemaVersion: 'tianwen.long-goal.v3', revision: 2,
+        control: { sessionId: 'control-session', autoProgress: 'running' },
+      })
+      expect(() => bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, taskId: planned.tasks[0]!.id, execution,
+      })).toThrow(LongGoalRevisionConflictError)
+      expect(() => bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId: planned.tasks[0]!.id,
+        execution: { goalId: 'control-goal', sessionId: record.control.sessionId },
+      })).toThrow('control Session')
+      expect(() => bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId: planned.tasks[0]!.id,
+        execution: { goalId: 'planner-goal', sessionId: record.planner.sessionId },
+      })).toThrow('planner Session')
+      const bound = bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId: planned.tasks[0]!.id, execution,
+      })
+      expect(bound).toMatchObject({
+        schemaVersion: 'tianwen.long-goal.v3', revision: 3,
+        control: { sessionId: 'control-session', autoProgress: 'running' },
+      })
+      expect(bound.tasks[0]!.execution).toEqual(execution)
+      expect(() => bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 3, taskId: planned.tasks[1]!.id, execution,
+      })).toThrow('unique Goal and Session')
+      expect(readLongGoal(stateRoot, record.id)).toEqual(bound)
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('reserves a v2 Planner Session from Task execution while retaining normal binding', () => {
+    const stateRoot = createStateRoot()
+    try {
+      const record = createGoalFirstLongGoal({
+        stateRoot, objective: 'Isolate planner', context: null, successCriteria: null,
+        workspaceRoot: resolve(stateRoot, 'workspace'), agentPreset: 'planner',
+      }, { goalSuffix: () => 'v2-role-isolation', plannerSessionId: () => 'planner-session', now: () => 10 })
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Task work' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000061', now: () => 11 })
+
+      expect(() => bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId: planned.tasks[0]!.id,
+        execution: { goalId: 'planner-goal', sessionId: record.planner.sessionId },
+      })).toThrow('planner Session')
+      expect(bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId: planned.tasks[0]!.id,
+        execution: { goalId: 'task-goal', sessionId: 'task-session' },
+      })).toMatchObject({ revision: 3, tasks: [{ execution: { goalId: 'task-goal', sessionId: 'task-session' } }] })
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('redirects a running continuous Goal by pausing it in the same revision', () => {
+    const stateRoot = createStateRoot()
+    const workspaceRoot = resolve(stateRoot, 'workspace')
+    try {
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Redirect a running Goal', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'session-control',
+      }, { goalSuffix: () => 'v3-running-redirect', plannerSessionId: () => 'planner-v3-running-redirect', now: () => 10 })
+
+      expect(redirectContinuousGoal({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, text: '先解决离线安装',
+      })).toMatchObject({
+        revision: 2,
+        guidance: ['先解决离线安装'],
+        planner: { phase: 'needs-replan' },
+        control: { autoProgress: 'paused' },
+      })
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('abandons only a confirmed paused v3 Task and preserves its Goal and Session binding', async () => {
+    const dataDir = createStateRoot()
+    const stateRoot = join(dataDir, 'state')
+    const workspaceRoot = resolve(dataDir, 'workspace')
+    try {
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Redirect continuous Goal', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'session-control',
+      }, { goalSuffix: () => 'v3-paused-task', plannerSessionId: () => 'planner-v3-paused-task', now: () => 10 })
+      const execution = await persistGoal(dataDir, 'v3-paused-task', 'paused')
+      const taskId = '00000000-0000-4000-8000-000000000041'
+      writeFileSync(longGoalPath(stateRoot, record.id), `${JSON.stringify({
+        ...record,
+        planner: { ...record.planner, planRevision: 1, phase: 'ready' },
+        tasks: [{ id: taskId, objective: 'Paused Task', execution, resolution: null }],
+      })}\n`, 'utf8')
+
+      await expect(abandonContinuousGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, taskId, dshStatusTarget: { dataDir },
+      })).resolves.toMatchObject({
+        revision: 2,
+        planner: { phase: 'needs-replan' },
+        tasks: [{ id: taskId, execution, resolution: 'abandoned' }],
+      })
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
   it('persists guidance before planning and rejects stale mutations without changing bytes', () => {
     const stateRoot = createStateRoot()
     const workspaceRoot = resolve(stateRoot, 'workspace')
@@ -677,7 +980,7 @@ describe('goal-first long Goal v2 records', () => {
     }
   })
 
-  it.each(['active', 'complete'] as const)(
+  it.each(['active', 'paused', 'complete'] as const)(
     'refuses to abandon a current %s v2 Task without changing bytes',
     async phase => {
       const dataDir = createStateRoot()

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -25,14 +25,17 @@ import { projectLearningClueStatus } from '../../packages/tianwen-runtime-bundle
 import { runLongGoalPlannerTurn } from '../../packages/tianwen-runtime-bundle/src/long-goal-planner.js'
 import {
   createGoalFirstLongGoal,
+  createContinuousLongGoal,
   LongGoalRevisionConflictError,
   readLongGoal,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
 import type {
   LongGoalRecord,
   LongGoalRecordV2,
+  LongGoalRecordV3,
   LongGoalStatusProjection,
   LongGoalStatusProjectionV2,
+  LongGoalStatusProjectionV3,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-learn-loop-host-tests')
@@ -170,6 +173,19 @@ function goalFirstStatus(revision = 1): LongGoalStatusProjectionV2 {
   }
 }
 
+function continuousGoalStatus(input: {
+  readonly phase?: LongGoalStatusProjectionV3['goal']['phase']
+  readonly mode?: LongGoalStatusProjectionV3['control']['autoProgress']
+} = {}): LongGoalStatusProjectionV3 {
+  const base = goalFirstStatus(3)
+  return {
+    ...base,
+    schemaVersion: 'tianwen.long-goal-status.v3',
+    goal: { ...base.goal, id: 'tianwen-long-goal-v3-test', phase: input.phase ?? 'active' },
+    control: { sessionId: 'control-session', autoProgress: input.mode ?? 'running' },
+  }
+}
+
 function goalFirstOperations(status = goalFirstStatus()): TianwenGoalFirstOperations {
   return {
     createGoalFirst: vi.fn(async () => ({
@@ -188,6 +204,16 @@ function goalFirstOperations(status = goalFirstStatus()): TianwenGoalFirstOperat
       schemaVersion: 'tianwen.long-goal-abandon-result.v2',
       action: 'abandoned', status,
     })),
+  }
+}
+
+function longGoalHostDependencies(
+  status: LongGoalStatusProjection | LongGoalStatusProjectionV2 | LongGoalStatusProjectionV3,
+) {
+  return {
+    listLongGoals: vi.fn(() => []),
+    createLongGoal: vi.fn(() => { throw new Error('unexpected create') }),
+    readLongGoalStatus: vi.fn(async () => status),
   }
 }
 
@@ -220,7 +246,7 @@ async function installPlannerSetup(
 }
 
 function plannerHandle(
-  record: LongGoalRecordV2,
+  record: LongGoalRecordV2 | LongGoalRecordV3,
   onFollowup: () => void = () => undefined,
   header: { readonly cwd?: string; readonly agentPreset?: string } = {
     cwd: record.workspaceRoot,
@@ -245,6 +271,13 @@ function plannerHandle(
 }
 
 describe('Tianwen Long Goal Web host', () => {
+  it('keeps cold continuous Task diagnostics free of internal Session ids', () => {
+    const source = readFileSync(resolve(import.meta.dirname,
+      '../../packages/tianwen-runtime-bundle/src/long-goal-host.ts'), 'utf8')
+    expect(source).not.toContain('Task Session ${execution.sessionId} is not live')
+    expect(source).toContain("LongGoalIntegrityError('Continuous Goal Task Session is not live')")
+  })
+
   it('waits for the configured model and preset services before mounting the Goal-first RPC host', async () => {
     const ctx = new Context()
     const handle = vi.fn()
@@ -253,7 +286,7 @@ describe('Tianwen Long Goal Web host', () => {
       for (const [name, service] of Object.entries({
         connection: { rpc: { handle } },
         apiProxy: {},
-        agents: {},
+        agents: { list: () => [], get: () => undefined },
         goals: {},
         sessions: {},
         sessionPersistence: {},
@@ -371,6 +404,59 @@ describe('Tianwen Long Goal Web host', () => {
     }
   })
 
+  it('transports continuous Goals through the existing list and detail history endpoints', async () => {
+    const status = continuousGoalStatus({ mode: 'paused' })
+    const record: LongGoalRecordV3 = {
+      schemaVersion: 'tianwen.long-goal.v3',
+      id: status.goal.id,
+      revision: status.goal.revision,
+      objective: status.goal.objective,
+      context: status.goal.context,
+      successCriteria: status.goal.successCriteria,
+      workspaceRoot: 'D:/workspace',
+      maxTaskRounds: 3,
+      planner: {
+        sessionId: status.planner.sessionId,
+        agentPreset: 'default',
+        planRevision: status.planner.planRevision,
+        phase: status.planner.phase,
+        consideredSettledTasks: 0,
+      },
+      guidance: status.guidance,
+      createdAt: 1,
+      updatedAt: 2,
+      tasks: [],
+      control: status.control,
+    }
+    const handler = createTianwenLongGoalRpcHandler(ROOTS, {
+      listLongGoals: vi.fn(() => [record]),
+      createLongGoal: vi.fn(() => { throw new Error('unexpected create') }),
+      readLongGoalStatus: vi.fn(async () => status),
+    })
+    const signal = AbortSignal.timeout(1_000)
+
+    await expect(handler('list', {}, signal)).resolves.toEqual({
+      ok: true,
+      value: { goals: [{
+        schemaVersion: 'tianwen.long-goal-summary.v3',
+        id: status.goal.id,
+        objective: status.goal.objective,
+        phase: status.goal.phase,
+        revision: status.goal.revision,
+        completedTasks: status.goal.completedTasks,
+        abandonedTasks: status.goal.abandonedTasks,
+        totalTasks: status.goal.totalTasks,
+        currentTaskId: status.currentTaskId,
+        updatedAt: record.updatedAt,
+        control: status.control,
+      }] },
+    })
+    await expect(handler('status', { longGoalId: record.id }, signal)).resolves.toEqual({
+      ok: true,
+      value: { status },
+    })
+  })
+
   it('returns complete without calling a DSH operation', async () => {
     const status = longGoalStatus(['complete'], [{ goalId: 'goal-1', sessionId: 'session-1' }])
     const dependencies = runDependencies(longGoalRecord([status.tasks[0]!.execution]), status)
@@ -409,7 +495,12 @@ describe('Tianwen Long Goal Web host', () => {
       }]),
     })
     const operations = goalFirstOperations()
-    const handler = createTianwenLongGoalRpcHandler(ROOTS, undefined, run, operations)
+    const handler = createTianwenLongGoalRpcHandler(
+      ROOTS,
+      longGoalHostDependencies(goalFirstStatus(2)),
+      run,
+      operations,
+    )
     const signal = AbortSignal.timeout(1_000)
 
     const created = await handler('create-goal-first', {
@@ -449,6 +540,74 @@ describe('Tianwen Long Goal Web host', () => {
     expect(run.listSessions).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps legacy v2 mutations available without Task runner dependencies', async () => {
+    const status = goalFirstStatus(2)
+    const operations = goalFirstOperations(status)
+    const handler = createTianwenLongGoalRpcHandler(
+      ROOTS,
+      longGoalHostDependencies(status),
+      undefined,
+      operations,
+    )
+    const signal = AbortSignal.timeout(1_000)
+
+    const results = await Promise.all([
+      handler('add-guidance', {
+        longGoalId: status.goal.id, expectedRevision: 2, text: 'Keep the release small',
+      }, signal),
+      handler('continue-progress', {
+        longGoalId: status.goal.id, expectedRevision: 2,
+      }, signal),
+      handler('abandon-current-task', {
+        longGoalId: status.goal.id, expectedRevision: 2,
+      }, signal),
+    ])
+
+    expect(results.every(result => result.ok)).toBe(true)
+    expect(operations.addGuidance).toHaveBeenCalledTimes(1)
+    expect(operations.continueProgress).toHaveBeenCalledTimes(1)
+    expect(operations.abandonCurrentTask).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects every legacy mutation transport for v3 before calling its operation', async () => {
+    const status = continuousGoalStatus()
+    const operations = goalFirstOperations()
+    const handler = createTianwenLongGoalRpcHandler(
+      ROOTS,
+      longGoalHostDependencies(status),
+      undefined,
+      operations,
+    )
+    const signal = AbortSignal.timeout(1_000)
+
+    const results = await Promise.allSettled([
+      handler('add-guidance', {
+        longGoalId: status.goal.id, expectedRevision: 3, text: 'redirect',
+      }, signal),
+      handler('continue-progress', {
+        longGoalId: status.goal.id, expectedRevision: 3,
+      }, signal),
+      handler('abandon-current-task', {
+        longGoalId: status.goal.id, expectedRevision: 3,
+      }, signal),
+    ])
+
+    expect(results).toEqual([
+      expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({
+        message: 'Tianwen Goal-first Host supports only v2 records',
+      }) }),
+      expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({
+        message: 'Tianwen Goal-first Host supports only v2 records',
+      }) }),
+      expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({
+        message: 'Tianwen Goal-first Host supports only v2 records',
+      }) }),
+    ])
+    expect(operations.addGuidance).not.toHaveBeenCalled()
+    expect(operations.continueProgress).not.toHaveBeenCalled()
+    expect(operations.abandonCurrentTask).not.toHaveBeenCalled()
+  })
+
   it('rejects goal-first request extras and missing server-side workspace facts', async () => {
     const status = longGoalStatus(['complete'], [{ goalId: 'goal-1', sessionId: 'session-1' }])
     const operations = goalFirstOperations()
@@ -484,7 +643,7 @@ describe('Tianwen Long Goal Web host', () => {
     )
     const handler = createTianwenLongGoalRpcHandler(
       ROOTS,
-      undefined,
+      longGoalHostDependencies(goalFirstStatus(4)),
       runDependencies(longGoalRecord([status.tasks[0]!.execution]), status),
       operations,
     )
@@ -583,6 +742,7 @@ describe('Tianwen Long Goal Web host', () => {
     }
     const statusB = {
       ...statusA,
+      schemaVersion: 'tianwen.long-goal-status.v3' as const,
       goal: { ...statusA.goal, id: 'goal-b', objective: 'Reduce support friction' },
       planner: { ...statusA.planner, sessionId: 'planner-b' },
       tasks: [{
@@ -591,6 +751,7 @@ describe('Tianwen Long Goal Web host', () => {
         objective: 'Clarify the setup flow',
         execution: { goalId: 'dsh-goal-b', sessionId: 'session-b' },
       }],
+      control: { sessionId: 'control-b', autoProgress: 'running' as const },
     }
 
     const result = projectLearningClueStatus({
@@ -1131,6 +1292,62 @@ describe('Tianwen Long Goal Web host', () => {
     })
   })
 
+  it('admits a v3 Task through the Goal-first binder in its frozen workspace and preset', async () => {
+    const record: LongGoalRecordV3 = {
+      schemaVersion: 'tianwen.long-goal.v3', id: 'tianwen-long-goal-v3-test', revision: 3,
+      objective: 'Ship continuous release', context: null, successCriteria: null,
+      workspaceRoot: 'D:/frozen-workspace', maxTaskRounds: 3,
+      planner: {
+        sessionId: 'planner-session', agentPreset: 'planner-preset', planRevision: 1,
+        phase: 'ready', consideredSettledTasks: 0,
+      },
+      guidance: [], createdAt: 1, updatedAt: 1,
+      control: { sessionId: 'control-session', autoProgress: 'running' },
+      tasks: [{ id: 'task-v3', objective: 'Prepare notes', execution: null, resolution: null }],
+    }
+    const base = goalFirstStatus(3)
+    const status: LongGoalStatusProjectionV3 = {
+      ...base,
+      schemaVersion: 'tianwen.long-goal-status.v3',
+      goal: { ...base.goal, id: record.id, phase: 'active', totalTasks: 1 },
+      planner: { ...base.planner, phase: 'ready', planRevision: 1 },
+      control: record.control,
+      tasks: [{ id: 'task-v3', objective: 'Prepare notes', phase: 'pending', execution: null, resolution: null }],
+      currentTaskId: 'task-v3',
+    }
+    const execution = { goalId: 'goal-new', sessionId: 'session-new' }
+    const boundStatus: LongGoalStatusProjectionV3 = {
+      ...status,
+      goal: { ...status.goal, revision: 4 },
+      tasks: [{ ...status.tasks[0]!, phase: 'active', execution }],
+    }
+    const agent = fakeAgent('session-new', goalView({ id: 'goal-new' as GoalView['id'] }), {
+      header: { cwd: 'D:/frozen-workspace', agentPreset: 'planner-preset' },
+    })
+    const bindGoalFirstLongGoalTask = vi.fn(() => ({ ...record, revision: 4 }))
+    const dependencies = {
+      ...runDependencies(record as never, status as never),
+      readLongGoal: vi.fn(() => record),
+      readLongGoalStatus: vi.fn().mockResolvedValueOnce(status).mockResolvedValueOnce(boundStatus),
+      createSession: vi.fn(async () => 'session-new'),
+      attachedAgent: vi.fn(() => agent),
+      createGoal: vi.fn(() => goalView({ id: 'goal-new' as GoalView['id'] })),
+      bindGoalFirstLongGoalTask,
+    } as unknown as Parameters<typeof runCurrentWebTask>[1]
+
+    await expect(runCurrentWebTask({
+      roots: ROOTS, longGoalId: record.id, expectedRevision: 3,
+    }, dependencies)).resolves.toEqual({ status: boundStatus, sessionId: 'session-new', action: 'started' })
+    expect(dependencies.createSession).toHaveBeenCalledWith({
+      cwd: 'D:/frozen-workspace', agentPreset: 'planner-preset',
+    })
+    expect(bindGoalFirstLongGoalTask).toHaveBeenCalledWith({
+      stateRoot: ROOTS.stateRoot, longGoalId: record.id, expectedRevision: 3,
+      taskId: 'task-v3', execution,
+    })
+    expect(dependencies.bindLongGoalTask).not.toHaveBeenCalled()
+  })
+
   it('preserves a v2 bind revision conflict after cleaning up the created Goal', async () => {
     const record: LongGoalRecordV2 = {
       schemaVersion: 'tianwen.long-goal.v2', id: 'tianwen-long-goal-v2-test', revision: 3,
@@ -1624,6 +1841,58 @@ describe('Long Goal DSH planner', () => {
       expect(JSON.stringify(prompt)).toContain('Ship release')
       expect(JSON.stringify(prompt)).toContain('Expected Goal revision: 1')
       expect(JSON.stringify(prompt)).toContain('submit_long_goal_plan')
+      const outcomeRule = 'When the tasks array is non-empty, outcome must be "continue"; outcome "complete" is allowed only with tasks: [].'
+      const promptText = String((prompt as { content: readonly { text?: string }[] }).content[0]?.text)
+      expect(tool!.description).toContain(outcomeRule)
+      expect(promptText).toContain(outcomeRule)
+      expect(promptText).toContain('exactly once')
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('runs a v3 Planner turn through the same typed plan submission path without dropping control', async () => {
+    const fixture = createFixtureRoot()
+    try {
+      const stateRoot = join(fixture, 'state')
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Ship continuous release', context: 'Keep history', successCriteria: 'Published',
+        workspaceRoot: fixture, agentPreset: 'planner-preset', controlSessionId: 'control-session',
+      })
+      let tool: ToolDefinition | undefined
+      let pending = Promise.resolve<unknown>(undefined)
+      const owned = plannerHandle(record, () => {
+        pending = tool!.execute({
+          expectedGoalRevision: 1,
+          outcome: 'continue',
+          tasks: [{ objective: 'Prepare notes' }],
+        }, { concludeTurn: vi.fn() } as never)
+      })
+      vi.spyOn(owned.handle.agent, 'whenIdle').mockImplementation(async () => { await pending })
+
+      await expect(runLongGoalPlannerTurn({
+        stateRoot,
+        dshStatusTarget: { sessionsRoot: join(fixture, 'sessions'), evolutionRoot: join(stateRoot, 'evolution') },
+        record,
+        reason: 'create',
+      }, {
+        inspectSession: vi.fn(async () => ({ exists: false })),
+        createAgent: vi.fn(async input => {
+          await installPlannerSetup(input.setup, definition => { tool = definition })
+          return owned.handle
+        }),
+        resumeAgent: vi.fn(async () => { throw new Error('unexpected resume') }),
+        flushSession: vi.fn(async () => undefined),
+        readSettledTaskResult: vi.fn(async () => undefined),
+      })).resolves.toBe('submitted')
+
+      expect(readLongGoal(stateRoot, record.id)).toMatchObject({
+        schemaVersion: 'tianwen.long-goal.v3', revision: 2,
+        control: { sessionId: 'control-session', autoProgress: 'running' },
+        planner: { phase: 'ready', planRevision: 1, consideredSettledTasks: 0 },
+        tasks: [{ objective: 'Prepare notes' }],
+      })
+      expect(JSON.stringify(owned.followup.mock.calls[0]![0])).toContain('Newly settled Task results')
     } finally {
       rmSync(fixture, { recursive: true, force: true })
     }

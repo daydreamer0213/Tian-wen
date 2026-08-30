@@ -40,21 +40,30 @@ Lesson、Candidate、Skill 或代码修改。分析进入终态后，用户可�
 表达用户已经检查过线索，默认从待处理列表隐藏。若 Ticket 后续合并了新的 Signal，当前出现次数
 超过已审阅次数，线索会自动回到待处理。审阅记录不复制私密反馈或分析内容，也不表示问题已修复。
 
-当前可发布 Runtime 身份为 `@tianwen/runtime-bundle@0.1.2`，可选 Desktop 身份为
-`0.1.0-preview.3`。Desktop 只把精确 `0.1.1` 识别为可更新前身，得到用户确认后调用一次
-既有 DSH plugin add，并以 `0.1.2` 严格复核；未知、未来或损坏 Profile 不会被自动覆盖。
-正式安装器也能在同一 DSH rc2 host 上把 managed Runtime 从 `0.1.1` 更新到 `0.1.2`，
-不重新部署 DSH host。旧归档仍保留，因为同一 DSH home 的其他 Profile 可能继续引用它，
-直到各自完成更新。`0.1.2` 的隔离真实产品迁移已完成，证明发布字节到达现有 Profile、
-Desktop 更新幂等且真实 Web 可启动；Learning Clue 的行为结论仍以各自功能 handoff 为准，
-本次发布证明没有重复调用 Provider。
+Runtime `0.1.4` 新增 DSH 原生连续 Goal 模式：用户在普通 Web/Desktop 对话中输入 `/goal <目标>`，
+Agent 作用域命令创建绑定当前控制 Session 的 v3 Long Goal。Planner 继续维护 Task 边界，每个
+已接纳 Task 仍使用独立 DSH Goal/Session，完成结果按既有“不可信历史执行数据”边界进入下一次
+Planner Turn。用户可在控制对话中自然补充方向，模型通过受限的 `goal_control` 工具持久化引导、
+纠正、暂停、恢复或查询；DSH 原生停止控制会把连续 Goal 置为暂停。Host 只在 Task 完成、用户
+停止和冷启动恢复这些既有生命周期边界串行推进，不增加 scheduler、轮询器或重试队列。
+
+这项模式没有第二套 UI，也不写自定义进度 Session 事件：普通对话仍是默认入口，原“长期目标”
+面板只作为可选高级历史继续复用。v1/v2 显式 Goal-first 行为和数据保持兼容。
+
+本阶段 Runtime 身份为 `@tianwen/runtime-bundle@0.1.4`，可选 Desktop 身份为
+`0.1.0-preview.5`。Desktop 只把精确 `0.1.3` 识别为可更新前身，得到用户确认后调用一次
+既有 DSH plugin add，并以 `0.1.4` 严格复核；更旧、未知、未来或损坏 Profile 不会被自动覆盖。
+正式安装器也只在同一 DSH `0.1.1-rc.2` host 上把 managed Runtime `0.1.3` 更新到 `0.1.4`，
+不重新部署 DSH host；既有 rc.7 managed-predecessor 路径与旧归档保留。`0.1.4` 的正式安装、
+Desktop 与一次真实 Provider 证明属于后续 Task 6，本文不提前宣称已经完成。
 
 当前 Goal-first 权威下钻文档是
 [`设计`](superpowers/specs/2026-08-30-tianwen-goal-first-planning-design.md)、
 [`真实执行 handoff`](operations/tianwen-goal-first-task-execution-handoff.md) 和
 [`Desktop UX handoff`](operations/tianwen-goal-first-desktop-ux-handoff.md)，以及
 [`Task feedback handoff`](operations/tianwen-goal-task-feedback-handoff.md)；当前发布更新边界见
-[`Runtime 0.1.2 release handoff`](operations/tianwen-runtime-0.1.2-release-handoff.md)，上一版发布边界见
+[`Runtime 0.1.2 release handoff`](operations/tianwen-runtime-0.1.2-release-handoff.md)，当前连续 Goal
+发布实现边界见 [`implementation plan`](superpowers/plans/2026-08-30-tianwen-dsh-native-continuous-goal.md)，上一版发布边界见
 [`Runtime 0.1.1 release handoff`](operations/tianwen-runtime-release-identity-handoff.md)，线索可见性见
 [`Learning clue inbox handoff`](operations/tianwen-learning-clue-inbox-handoff.md)，单次分析边界见
 [`Learning clue analysis handoff`](operations/tianwen-learning-clue-analysis-handoff.md)。以下
@@ -387,9 +396,9 @@ Session，“已审阅”补齐了人工收件箱生命周期。私密反馈只�
 人工后续通道；若未来再增加自动行动，仍必须把“模型分析”与“证据成立”分开，不能因为模型认为
 问题可复用就自动改代码、创建 Candidate、安装 Skill 或宣称已经学习。
 
-Runtime `0.1.2` 与 Desktop `0.1.0-preview.3` 为 `0.1.1` 之后的 Learning Clue 产品能力提供
-唯一发布身份，避免不同功能字节继续共用 `0.1.1`。
-Desktop 和正式安装器各自只支持一个精确前身，不建设在线 updater、后台下载或通用版本比较器；
+Runtime `0.1.4` 与 Desktop `0.1.0-preview.5` 为 DSH 原生连续 Goal 能力提供唯一发布身份，
+避免新功能字节继续共用 `0.1.3`。Desktop 和正式安装器各自只支持精确 `0.1.3` 这一自动更新
+前身；更早版本继续使用已有分段迁移或手工安装，不建设在线 updater、后台下载或通用版本比较器。
 这条迁移只需一次真实旧安装验证，不需要再用合成 Activity 重复取证。
 
 若未来已有合法 Candidate，需要同家族盲评时，仍冻结任务和单次尝试以保证比较公平；不设

@@ -24,12 +24,12 @@ describe('Tianwen Desktop locale', () => {
   it('explains the one-time embedded Runtime update in the selected language', () => {
     expect(desktopCopy('zh')).toMatchObject({
       updateRuntimeTitle: '更新 Tianwen Runtime？',
-      updateRuntimeInstruction: expect.stringMatching(/0\.1\.2.*0\.1\.3/u),
+      updateRuntimeInstruction: expect.stringMatching(/0\.1\.3.*0\.1\.4/u),
       updateRuntimeAction: '更新 Runtime',
     })
     expect(desktopCopy('en')).toMatchObject({
       updateRuntimeTitle: 'Update the Tianwen Runtime?',
-      updateRuntimeInstruction: expect.stringMatching(/0\.1\.2.*0\.1\.3/u),
+      updateRuntimeInstruction: expect.stringMatching(/0\.1\.3.*0\.1\.4/u),
       updateRuntimeAction: 'Update Runtime',
     })
   })

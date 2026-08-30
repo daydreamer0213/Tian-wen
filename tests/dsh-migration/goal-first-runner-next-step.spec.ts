@@ -3,7 +3,11 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-import { formatGoalFirstText } from '../../packages/tianwen-runtime-bundle/src/goal-first-runner.js'
+import type { LongGoalRecordV3 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
+import {
+  formatGoalFirstText,
+  requireLegacyV2GoalFirstRecord,
+} from '../../packages/tianwen-runtime-bundle/src/goal-first-runner.js'
 
 const GOAL_ID = 'tianwen-long-goal-abc'
 const GOAL_OBJECTIVE = 'Ship the widget'
@@ -35,6 +39,17 @@ function result(overrides: {
       },
     },
     sessionId: null,
+  }
+}
+
+function terminalV3Record(phase: 'blocked' | 'complete'): LongGoalRecordV3 {
+  return {
+    schemaVersion: 'tianwen.long-goal.v3', id: GOAL_ID, revision: 3,
+    objective: GOAL_OBJECTIVE, context: null, successCriteria: null,
+    workspaceRoot: 'D:/workspace', maxTaskRounds: 3,
+    planner: { sessionId: 'planner-session-1', agentPreset: 'planner', planRevision: 1, phase, consideredSettledTasks: 0 },
+    guidance: [], control: { sessionId: 'continuous-control-session-1', autoProgress: 'running' },
+    createdAt: 1, updatedAt: 1, tasks: [],
   }
 }
 
@@ -90,6 +105,12 @@ describe('formatGoalFirstText next-step mapping', () => {
   it('prefers action over planning when both are present', () => {
     const text = formatGoalFirstText(result({ phase: 'active', revision: 4, action: 'started', planning: 'pending' }))
     expect(text).toContain(`started: Goal ${GOAL_ID} [active] ${GOAL_OBJECTIVE}`)
+  })
+})
+
+describe('legacy Goal-first runner boundary', () => {
+  it.each(['blocked', 'complete'] as const)('rejects a terminal v3 %s record before continuation can return success', phase => {
+    expect(() => requireLegacyV2GoalFirstRecord(terminalV3Record(phase))).toThrow('Goal-first runner supports only v2 records')
   })
 })
 
