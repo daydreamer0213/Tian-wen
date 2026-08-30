@@ -13,6 +13,13 @@ export interface ContinuousGoalAgentOperations {
 }
 
 const NO_ACTIVE_GOAL = 'No active continuous Goal is bound to this Agent.'
+const GOAL_CONTROL_SHAPES = [
+  '{ action: "guide", text: "<guidance>" }',
+  '{ action: "pause-and-replan", text: "<direction>", resume: <boolean> }',
+  '{ action: "pause" }',
+  '{ action: "resume" }',
+  '{ action: "status" }',
+] as const
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(value).sort()
@@ -104,15 +111,26 @@ export function installBoundContinuousGoalControls(
   return agent.ctx.effect(function* () {
     yield agent.ctx.tools.register(defineTool({
       name: 'goal_control',
-      description: 'Guide, pause, resume, replan, or inspect the continuous Goal bound to this Agent.',
+      description: [
+        'Guide, pause, resume, replan, or inspect the continuous Goal bound to this Agent.',
+        'Use exactly one of:',
+        ...GOAL_CONTROL_SHAPES,
+      ].join('\n'),
       parameters: {
         action: {
           type: 'string',
           enum: ['guide', 'pause-and-replan', 'pause', 'resume', 'status'],
           required: true,
+          description: 'Required operation; guide needs text, pause-and-replan needs text and resume.',
         },
-        text: { type: 'string' },
-        resume: { type: 'boolean' },
+        text: {
+          type: 'string',
+          description: 'Required only for guide and pause-and-replan; omit it for pause, resume, and status.',
+        },
+        resume: {
+          type: 'boolean',
+          description: 'Required only for pause-and-replan; true resumes after replanning and false leaves it paused.',
+        },
       },
       output: {
         schema: { type: 'string' },
@@ -130,6 +148,9 @@ export function installBoundContinuousGoalControls(
       order: 100,
       text: () => [
         'For guidance, correction, pause, resume, or status of the current continuous Goal, call goal_control.',
+        'Use exactly one of:',
+        ...GOAL_CONTROL_SHAPES,
+        'Do not add fields or use text/resume for an action that does not list them.',
         'Leave unrelated conversation alone.',
       ].join('\n'),
     })

@@ -17,13 +17,22 @@ type CommandDefinition = {
 
 type ToolDefinition = {
   readonly name: string
+  readonly description: string
+  readonly parameters: {
+    readonly properties: Record<string, { readonly description?: string }>
+  }
   readonly execute: (args: unknown, exec: { readonly agent?: Agent }) => Promise<string>
+}
+
+type PromptSection = {
+  readonly name: string
+  readonly text: () => string
 }
 
 function controlsAgent() {
   const commands: CommandDefinition[] = []
   const tools: ToolDefinition[] = []
-  const sections: { readonly name: string, readonly content: unknown }[] = []
+  const sections: PromptSection[] = []
   const agent = {
     id: 'control-session-1',
     session: {
@@ -44,7 +53,7 @@ function controlsAgent() {
         },
       },
       systemPrompt: {
-        section(section: { readonly name: string, readonly content: unknown }) {
+        section(section: PromptSection) {
           sections.push(section)
           return () => sections.splice(sections.indexOf(section), 1)
         },
@@ -111,6 +120,30 @@ describe('continuous Goal Agent controls', () => {
 
     expect(ops.control).toHaveBeenCalledTimes(1)
     expect(ops.control).toHaveBeenCalledWith(subject.agent, { action: 'pause' })
+  })
+
+  it('advertises every exact goal_control action shape to the model before execution', () => {
+    const subject = controlsAgent()
+    installBoundContinuousGoalControls(subject.agent, operations())
+
+    const tool = subject.tools[0]!
+    const prompt = subject.sections[0]!
+    const shapes = [
+      '{ action: "guide", text: "<guidance>" }',
+      '{ action: "pause-and-replan", text: "<direction>", resume: <boolean> }',
+      '{ action: "pause" }',
+      '{ action: "resume" }',
+      '{ action: "status" }',
+    ]
+
+    for (const shape of shapes) {
+      expect(tool.description).toContain(shape)
+      expect(prompt.text()).toContain(shape)
+    }
+    expect(tool.parameters.properties.action.description).toContain('guide')
+    expect(tool.parameters.properties.text.description).toContain('guide')
+    expect(tool.parameters.properties.text.description).toContain('pause-and-replan')
+    expect(tool.parameters.properties.resume.description).toContain('pause-and-replan')
   })
 
   it('owns tool and merged prompt registrations in one disposer that permits reinstall', () => {
