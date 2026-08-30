@@ -36,7 +36,7 @@ async function start(): Promise<void> {
   }
   const target = await resolvePreparedDesktopTarget(
     base,
-    join(process.resourcesPath, 'runtime', 'tianwen-runtime-bundle-0.1.2.tgz'),
+    join(process.resourcesPath, 'runtime', 'tianwen-runtime-bundle-0.1.3.tgz'),
     {
       async confirmCreateProfile(profileRoot) {
         const result = await dialog.showMessageBox({

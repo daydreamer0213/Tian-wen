@@ -5,7 +5,7 @@ const DSH_NAME = '@deepseek-ai/dsh'
 const DSH_VERSION = '0.1.1-rc.2'
 const PROFILE_NAME = /^[a-z0-9][a-z0-9-]*$/u
 const RUNTIME_BUNDLE_NAME = '@tianwen/runtime-bundle'
-const RUNTIME_BUNDLE_VERSION = '0.1.2'
+const RUNTIME_BUNDLE_VERSION = '0.1.3'
 
 export interface PortableProfileTargetInput {
   readonly dshRoot: string

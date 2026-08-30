@@ -17,7 +17,7 @@ import {
 const fixtureRoot = resolve('D:/DevData/tianwen-desktop-host-tests')
 const dshVersion = '0.1.1-rc.2'
 const runtimePackage = '@tianwen/runtime-bundle'
-const runtimeVersion = '0.1.2'
+const runtimeVersion = '0.1.3'
 const fixtures: string[] = []
 
 interface FakeChild extends EventEmitter {
@@ -124,14 +124,14 @@ describe('Tianwen Desktop Web host contract', () => {
   it('rejects the known old Runtime while accepting only the embedded current Runtime', () => {
     const old = fixture()
     writeJson(join(old.dshHome, 'profiles', 'web', 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
-      name: runtimePackage, version: '0.1.1',
+      name: runtimePackage, version: '0.1.2',
     })
     expect(() => resolveDesktopTarget(old)).toThrow(/required exact package/u)
 
     expect(resolveDesktopTarget(fixture()).profileRoot).toBeDefined()
   })
 
-  it.each(['0.0.9', '0.1.0', '0.1.3', '9.9.9'])('rejects an unknown or future Runtime version %s', version => {
+  it.each(['0.0.9', '0.1.0', '0.1.1', '0.1.4', '9.9.9'])('rejects an unknown or future Runtime version %s', version => {
     const input = fixture()
     writeJson(join(input.dshHome, 'profiles', 'web', 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
       name: runtimePackage, version,
@@ -163,7 +163,7 @@ describe('Tianwen Desktop Web host contract', () => {
     const input = fixture()
     writeJson(join(input.dshHome, 'profiles', 'web', 'package.json'), {
       dsh: { profile: { bundles: [runtimePackage] } },
-      dependencies: { [runtimePackage]: 'file:D:/packs/tianwen-runtime-bundle-0.1.2.tgz' },
+      dependencies: { [runtimePackage]: 'file:D:/packs/tianwen-runtime-bundle-0.1.3.tgz' },
     })
     expect(resolveDesktopTarget(input).profileRoot).toBe(realpathSync(join(input.dshHome, 'profiles', 'web')))
   })

@@ -66,7 +66,7 @@ function targetFixture() {
   })}\n`, 'utf8')
   writeFileSync(join(runtimeRoot, 'package.json'), `${JSON.stringify({
     name: '@tianwen/runtime-bundle',
-    version: '0.1.2',
+    version: '0.1.3',
     bin: { tianwen: 'dist/cli.js' },
     dsh: { bundle: { patch: './cordis.patch.yml' } },
   })}\n`, 'utf8')
@@ -152,7 +152,7 @@ describe('portable goal CLI target', () => {
       ])).resolves.toBe(1)
 
       expect(stderr).toHaveBeenCalledWith(
-        'selected Profile must contain exact @tianwen/runtime-bundle@0.1.2\n',
+        'selected Profile must contain exact @tianwen/runtime-bundle@0.1.3\n',
       )
       expect(snapshotTree(join(target.dshHome, '..'))).toEqual(before)
     },
@@ -172,7 +172,7 @@ describe('portable goal CLI target', () => {
     await expect(main(['list', ...portableArgs(target)])).resolves.toBe(1)
 
     expect(stderr).toHaveBeenCalledWith(
-      'selected Profile must contain exact @tianwen/runtime-bundle@0.1.2\n',
+      'selected Profile must contain exact @tianwen/runtime-bundle@0.1.3\n',
     )
     expect(snapshotTree(join(target.dshHome, '..'))).toEqual(before)
   })
