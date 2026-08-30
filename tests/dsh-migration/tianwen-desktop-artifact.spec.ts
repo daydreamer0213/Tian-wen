@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { auditDesktopArtifact } from '../../scripts/audit-desktop-artifact.mjs'
 import { stageDesktopRuntime } from '../../scripts/stage-desktop-runtime.mjs'
@@ -40,7 +40,7 @@ function createUnpackedRoot(runtime?: Buffer): string {
     files.push('resources/app/dist/profile-prepare.js')
     writeFixture(
       root,
-      'resources/runtime/tianwen-runtime-bundle-0.1.1.tgz',
+      'resources/runtime/tianwen-runtime-bundle-0.1.2.tgz',
       runtime,
     )
   }
@@ -50,7 +50,7 @@ function createUnpackedRoot(runtime?: Buffer): string {
 
 function createRuntimeSource(contents: Buffer): string {
   const root = createTestRoot()
-  const source = join(root, 'tianwen-runtime-bundle-0.1.1.tgz')
+  const source = join(root, 'tianwen-runtime-bundle-0.1.2.tgz')
   writeFileSync(source, contents)
   return source
 }
@@ -63,7 +63,7 @@ function createRuntimeArchive(includeClient: boolean): { source: string, bytes: 
     includeClient ? 'package/dist/client.js' : 'package/dist/runtime.js',
     'fixture',
   )
-  const source = join(root, 'tianwen-runtime-bundle-0.1.1.tgz')
+  const source = join(root, 'tianwen-runtime-bundle-0.1.2.tgz')
   const executable = process.platform === 'win32'
     ? join(process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows', 'System32', 'tar.exe')
     : 'tar'
@@ -125,21 +125,33 @@ describe('Tianwen Desktop B1 artifact audit', () => {
 })
 
 describe('Tianwen Desktop Runtime distribution', () => {
+  it('pins preview.3 to the exact embedded Runtime 0.1.2 resource', () => {
+    const manifest = JSON.parse(readFileSync(resolve(
+      'packages/tianwen-desktop-host/package.json',
+    ), 'utf8')) as { version: string, build: { extraResources: unknown[] } }
+
+    expect(manifest.version).toBe('0.1.0-preview.3')
+    expect(manifest.build.extraResources).toContainEqual({
+      from: 'dist/runtime/tianwen-runtime-bundle-0.1.2.tgz',
+      to: 'runtime/tianwen-runtime-bundle-0.1.2.tgz',
+    })
+  })
+
   it('rejects a non-absolute, wrongly named, missing, or non-file Runtime source', () => {
     const packageRoot = createTestRoot()
     const sourceRoot = createTestRoot()
     const wrongName = join(sourceRoot, 'runtime.tgz')
     writeFixture(sourceRoot, 'runtime.tgz', 'wrong name')
 
-    expect(() => stageDesktopRuntime('tianwen-runtime-bundle-0.1.1.tgz', packageRoot))
+    expect(() => stageDesktopRuntime('tianwen-runtime-bundle-0.1.2.tgz', packageRoot))
       .toThrow(/absolute/iu)
     expect(() => stageDesktopRuntime(wrongName, packageRoot)).toThrow(/basename|name/iu)
     expect(() => stageDesktopRuntime(
-      join(sourceRoot, 'missing', 'tianwen-runtime-bundle-0.1.1.tgz'),
+      join(sourceRoot, 'missing', 'tianwen-runtime-bundle-0.1.2.tgz'),
       packageRoot,
     )).toThrow(/missing|file/iu)
 
-    const directorySource = join(sourceRoot, 'directory', 'tianwen-runtime-bundle-0.1.1.tgz')
+    const directorySource = join(sourceRoot, 'directory', 'tianwen-runtime-bundle-0.1.2.tgz')
     mkdirSync(directorySource, { recursive: true })
     expect(() => stageDesktopRuntime(directorySource, packageRoot)).toThrow(/file/iu)
   })
@@ -155,7 +167,7 @@ describe('Tianwen Desktop Runtime distribution', () => {
       packageRoot,
       'dist',
       'runtime',
-      'tianwen-runtime-bundle-0.1.1.tgz',
+      'tianwen-runtime-bundle-0.1.2.tgz',
     ))
     expect(readFileSync(staged)).toEqual(bytes)
   })
@@ -196,7 +208,7 @@ describe('Tianwen Desktop Runtime distribution', () => {
       unpackedRoot,
       'resources',
       'runtime',
-      'tianwen-runtime-bundle-0.1.1.tgz',
+      'tianwen-runtime-bundle-0.1.2.tgz',
     )
     appendFileSync(packaged, 'changed')
 

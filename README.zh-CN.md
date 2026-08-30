@@ -77,7 +77,7 @@ Runtime Bundle 压缩包，再交给 DSH 安装到用户自己选择的 Profile�
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.1.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.2.tgz
 ```
 
 `--allow-build=koffi` 是写入当前 Profile 的 pnpm 明确许可，不会修改全局 pnpm 设置。只有
@@ -104,7 +104,7 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
 
 可选的 Tianwen Desktop 复用用户现有的 DSH 与 Web Profile；它不是第二套 Runtime，也不要求
 用户改用天问托管安装目录。Desktop 打开的是同一套 Goal-first 界面，旧的精确 Runtime
-`0.1.0` Profile 可在用户确认后更新到内嵌的 `0.1.1`；未知或损坏版本不会被自动覆盖。
+`0.1.1` Profile 可在用户确认后更新到内嵌的 `0.1.2`；未知或损坏版本不会被自动覆盖。
 
 安装后，在 DSH Web 或 Tianwen Desktop 中打开“长期目标”，填写目标、可选背景和成功标准
 即可。后续 Task、各自的执行 Session 和完成进度由天问维护，不需要用户预先填写任务数量

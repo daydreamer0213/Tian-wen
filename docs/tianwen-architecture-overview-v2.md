@@ -40,13 +40,13 @@ Lesson、Candidate、Skill 或代码修改。分析进入终态后，用户可�
 表达用户已经检查过线索，默认从待处理列表隐藏。若 Ticket 后续合并了新的 Signal，当前出现次数
 超过已审阅次数，线索会自动回到待处理。审阅记录不复制私密反馈或分析内容，也不表示问题已修复。
 
-当前可发布 Runtime 身份为 `@tianwen/runtime-bundle@0.1.1`，可选 Desktop 身份为
-`0.1.0-preview.2`。Desktop 只把精确 `0.1.0` 识别为可更新前身，得到用户确认后调用一次
-既有 DSH plugin add，并以 `0.1.1` 严格复核；未知、未来或损坏 Profile 不会被自动覆盖。
-正式安装器也能在同一 DSH rc2 host 上把 managed Runtime 从 `0.1.0` 更新到 `0.1.1`，
+当前可发布 Runtime 身份为 `@tianwen/runtime-bundle@0.1.2`，可选 Desktop 身份为
+`0.1.0-preview.3`。Desktop 只把精确 `0.1.1` 识别为可更新前身，得到用户确认后调用一次
+既有 DSH plugin add，并以 `0.1.2` 严格复核；未知、未来或损坏 Profile 不会被自动覆盖。
+正式安装器也能在同一 DSH rc2 host 上把 managed Runtime 从 `0.1.1` 更新到 `0.1.2`，
 不重新部署 DSH host。旧归档仍保留，因为同一 DSH home 的其他 Profile 可能继续引用它，
-直到各自完成更新。一次隔离真实产品迁移已证明 host 的 29,236 个文件前后整树摘要不变、
-managed/Web 两个 Profile 均到达 `0.1.1`，随后真实 Web 启动返回 HTTP 200。
+直到各自完成更新。`0.1.2` 的一次隔离真实产品迁移会只证明发布字节到达现有 Profile；
+Learning Clue 的行为结论仍以各自功能 handoff 为准，不重复调用 Provider。
 
 当前 Goal-first 权威下钻文档是
 [`设计`](superpowers/specs/2026-08-30-tianwen-goal-first-planning-design.md)、
@@ -377,9 +377,10 @@ Session，“已审阅”补齐了人工收件箱生命周期。私密反馈只�
 人工后续通道；若未来再增加自动行动，仍必须把“模型分析”与“证据成立”分开，不能因为模型认为
 问题可复用就自动改代码、创建 Candidate、安装 Skill 或宣称已经学习。
 
-Runtime `0.1.1` 与 Desktop `0.1.0-preview.2` 已解决“不同构建仍共用 0.1.0 身份”的分发问题。
+Runtime `0.1.2` 与 Desktop `0.1.0-preview.3` 为 `0.1.1` 之后的 Learning Clue 产品能力提供
+唯一发布身份，避免不同功能字节继续共用 `0.1.1`。
 Desktop 和正式安装器各自只支持一个精确前身，不建设在线 updater、后台下载或通用版本比较器；
-这条迁移已经通过真实旧安装验证，不需要再用合成 Activity 重复取证。
+这条迁移只需一次真实旧安装验证，不需要再用合成 Activity 重复取证。
 
 若未来已有合法 Candidate，需要同家族盲评时，仍冻结任务和单次尝试以保证比较公平；不设
 Tianwen 侧模型、token 或金额上限，也不绕过 standing authorization 边界。

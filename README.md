@@ -92,7 +92,7 @@ into the Profile selected by the user:
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.1.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.2.tgz
 ```
 
 `--allow-build=koffi` is an explicit pnpm approval recorded in that Profile; it
@@ -125,7 +125,7 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
 The optional Tianwen Desktop reuses the user's existing DSH and Web Profile. It
 is not a second Runtime and does not require the managed Tianwen installation.
 Desktop opens the same Goal-first UI. With confirmation, it can update the exact
-known Runtime `0.1.0` predecessor to its embedded `0.1.1`; unknown or damaged
+known Runtime `0.1.1` predecessor to its embedded `0.1.2`; unknown or damaged
 versions are never overwritten automatically.
 
 After installation, open **Long-running goals** in DSH Web or Tianwen Desktop

@@ -191,13 +191,13 @@ function installedProduct(
   dataDir: string,
   dshSource = 'process.exitCode = 0\n',
 ): `sha256:${string}` {
-  const archivePath = join(dataDir, 'packs', 'tianwen-runtime-bundle-0.1.1.tgz')
+  const archivePath = join(dataDir, 'packs', 'tianwen-runtime-bundle-0.1.2.tgz')
   const dshRoot = join(dataDir, 'dsh-host', 'node_modules', '@deepseek-ai', 'dsh')
   const profileRoot = join(dataDir, 'dsh-home', 'profiles', 'tianwen')
   const runtimeRoot = join(profileRoot, 'node_modules', '@tianwen', 'runtime-bundle')
   const runtimeStoreRoot = join(
     profileRoot,
-    'node_modules', '.pnpm', '@tianwen+runtime-bundle@0.1.1',
+    'node_modules', '.pnpm', '@tianwen+runtime-bundle@0.1.2',
     'node_modules', '@tianwen', 'runtime-bundle',
   )
   const cliPath = join(runtimeRoot, 'dist', 'cli.js')
@@ -217,12 +217,12 @@ function installedProduct(
     dependencies: {
       '@deepseek-ai/dsh-base': '0.1.1-rc.2',
       '@deepseek-ai/dsh-headless': '0.1.1-rc.2',
-      '@tianwen/runtime-bundle': '0.1.1',
+      '@tianwen/runtime-bundle': '0.1.2',
     },
   })}\n`, 'utf8')
   writeFileSync(join(profileRoot, 'cordis.patch.yml'), 'profile: tianwen\n', 'utf8')
   writeFileSync(join(runtimeRoot, 'package.json'), `${JSON.stringify({
-    name: '@tianwen/runtime-bundle', version: '0.1.1',
+    name: '@tianwen/runtime-bundle', version: '0.1.2',
     bin: { tianwen: 'dist/cli.js' },
     exports: {
       './controlled-lifecycle-runner': './dist/controlled-lifecycle-runner.js',

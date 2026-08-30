@@ -270,7 +270,7 @@ describe('Tianwen Runtime Bundle Profile', () => {
       dockerInvocations: 0,
     })
     expect(report.composition.runtimeInstall).toMatchObject({
-      tarball: expect.objectContaining({ path: expect.stringContaining('tianwen-runtime-bundle-0.1.1.tgz'), sha256: expect.any(String), executable: expect.stringMatching(/System32\\tar\.exe$/iu), argv: expect.any(Array) }),
+      tarball: expect.objectContaining({ path: expect.stringContaining('tianwen-runtime-bundle-0.1.2.tgz'), sha256: expect.any(String), executable: expect.stringMatching(/System32\\tar\.exe$/iu), argv: expect.any(Array) }),
       files: [
         'LICENSE',
         'controlled-lifecycle.patch.yml',
