@@ -477,16 +477,52 @@ git commit -m "feat: continue Goals across Task sessions"
 
 ---
 
-### Task 5: Preserve Advanced History and Publish One Release Identity
+### Task 5A: Preserve the Existing Panel as Advanced History
 
 **Files:**
+- Modify: `packages/tianwen-runtime-bundle/src/long-goal-contract.ts`
+- Modify: `packages/tianwen-runtime-bundle/src/long-goal-host.ts`
 - Modify: `packages/tianwen-runtime-bundle/src/learn-loop-client.ts`
 - Modify: `packages/tianwen-runtime-bundle/src/client.tsx`
 - Modify: `packages/tianwen-runtime-bundle/src/goal-task-feedback.ts`
+- Modify: `packages/tianwen-runtime-bundle/src/learning-clue-status.ts`
 - Modify: `tests/dsh-migration/learn-loop-client.spec.ts`
 - Modify: `tests/dsh-migration/learn-loop-client-module.spec.ts`
-- Modify: `tests/dsh-migration/learn-loop-web-product.spec.ts`
 - Modify: `tests/dsh-migration/goal-task-feedback.spec.ts`
+- Modify: `tests/dsh-migration/learn-loop-host.spec.ts`
+
+**Interfaces:**
+- Consumes: v3 projections from Task 1.
+- Preserves: the panel as optional advanced history; no new default entry or component.
+
+- [ ] **Step 1: Write failing v3 client/history tests**
+
+Prove strict v3 RPC decoding and list/detail transport through the existing
+Goal rows. Cover running, paused, blocked, and complete v3 summaries; settled
+v3 Task feedback and learning-clue reads remain available. Assert the sidebar
+entry remains optional advanced history and `/goal` does not open it.
+
+- [ ] **Step 2: Verify RED, implement only structural v3 compatibility, verify GREEN**
+
+Reuse v2 components with a small type guard/helper. Do not create a continuous
+mode dashboard, badge, composer, Task editor, or polling loop. Hide legacy v2
+Continue/Guidance/Abandon actions for v3 records: continuous control stays in
+the ordinary DSH conversation.
+
+- [ ] **Step 3: Run focused advanced-history tests and commit**
+
+```powershell
+pnpm exec vitest run tests/dsh-migration/goal-task-feedback.spec.ts tests/dsh-migration/learn-loop-host.spec.ts tests/dsh-migration/learn-loop-client.spec.ts tests/dsh-migration/learn-loop-client-module.spec.ts
+```
+
+Expected: PASS. Commit the reviewed compatibility change separately from the
+release identity.
+
+---
+
+### Task 5B: Publish One Release Identity
+
+**Files:**
 - Modify: `.github/workflows/ci.yml`
 - Modify: `README.md`
 - Modify: `README.zh-CN.md`
@@ -501,55 +537,54 @@ git commit -m "feat: continue Goals across Task sessions"
 - Modify: `scripts/install-tianwen.mjs`
 - Modify: `scripts/stage-desktop-runtime.mjs`
 - Modify: `scripts/verify-dsh-profile.mjs`
+- Modify: `tests/dsh-migration/controlled-lifecycle-command.spec.ts`
+- Modify: `tests/dsh-migration/controlled-lifecycle-profile.spec.ts`
+- Modify: `tests/dsh-migration/one-shot-profile-lifecycle.spec.ts`
+- Modify: `tests/dsh-migration/ordinary-long-goal-cli.spec.ts`
+- Modify: `tests/dsh-migration/portable-goal-cli.spec.ts`
+- Modify: `tests/dsh-migration/portable-plugin-lifecycle.e2e.spec.ts`
+- Modify: `tests/dsh-migration/portable-profile-composition.e2e.spec.ts`
 - Modify: `tests/dsh-migration/runtime-bundle.spec.ts`
-- Modify: `tests/dsh-migration/tianwen-installer.spec.ts`
+- Modify: `tests/dsh-migration/runtime-profile.spec.ts`
 - Modify: `tests/dsh-migration/tianwen-desktop-artifact.spec.ts`
 - Modify: `tests/dsh-migration/tianwen-desktop-distribution.e2e.spec.ts`
 - Modify: `tests/dsh-migration/tianwen-desktop-host.spec.ts`
 - Modify: `tests/dsh-migration/tianwen-desktop-locale.spec.ts`
 - Modify: `tests/dsh-migration/tianwen-desktop-profile-prepare.spec.ts`
+- Modify: `tests/dsh-migration/tianwen-installer.spec.ts`
+- Modify: `tests/dsh-migration/tianwen-startup.e2e.spec.ts`
 - Modify: `tests/dsh-migration/tianwen-version-upgrade.e2e.spec.ts`
 - Modify: `docs/tianwen-architecture-overview-v2.md`
 
 **Interfaces:**
-- Consumes: v3 projections from Task 1.
-- Preserves: the panel as optional advanced history; no new default entry or component.
+- Publishes: Runtime `0.1.4` and Desktop `0.1.0-preview.5`.
+- Preserves: exact DSH `0.1.1-rc.2` and the existing managed patch path.
 
-- [ ] **Step 1: Write failing v3 client/history tests**
-
-Prove strict v3 RPC decoding, list/detail rendering through the existing Goal
-rows, current action text for running/paused/blocked/complete v3, and existing
-feedback eligibility for settled v3 Tasks. Assert the sidebar entry remains
-optional advanced history and `/goal` does not open it.
-
-- [ ] **Step 2: Verify RED, implement only structural v3 compatibility, verify GREEN**
-
-Reuse v2 components with a small type guard/helper. Do not create a continuous
-mode dashboard, badge, composer, Task editor, or polling loop.
-
-- [ ] **Step 3: Write failing release-identity tests**
+- [ ] **Step 1: Write failing release-identity tests**
 
 Freeze the next identities as Runtime `0.1.4` and Desktop
 `0.1.0-preview.5`. The only automatic predecessor is exact Runtime `0.1.3`;
 unknown, older, future, or damaged Profiles remain manual. Update artifact
-allowlists only for files actually added by Tasks 1-4.
+allowlists only for files actually added by Tasks 1-4: the three continuous
+Goal runtime modules. Do not change output or Desktop resource allowlists when
+their file sets are unchanged.
 
-- [ ] **Step 4: Implement release metadata and correct architecture facts**
+- [ ] **Step 2: Implement release metadata and correct architecture facts**
 
 Update the stale architecture overview statements that still name Runtime
 `0.1.2` / Desktop `preview.3`, then document Runtime `0.1.4`, Desktop
 `preview.5`, native `/goal`, continuous Task boundaries, natural control, and
 the absence of a second UI/custom progress event.
 
-- [ ] **Step 5: Run focused compatibility and artifact tests**
+- [ ] **Step 3: Run focused release and artifact tests**
 
 ```powershell
-pnpm exec vitest run tests/dsh-migration/ordinary-long-goal.spec.ts tests/dsh-migration/goal-first-service.spec.ts tests/dsh-migration/continuous-goal-service.spec.ts tests/dsh-migration/continuous-goal-agent.spec.ts tests/dsh-migration/continuous-goal-host.spec.ts tests/dsh-migration/goal-task-feedback.spec.ts tests/dsh-migration/learn-loop-host.spec.ts tests/dsh-migration/learn-loop-host.integration.spec.ts tests/dsh-migration/learn-loop-client.spec.ts tests/dsh-migration/learn-loop-client-module.spec.ts tests/dsh-migration/learn-loop-web-product.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/tianwen-installer.spec.ts tests/dsh-migration/tianwen-desktop-artifact.spec.ts
+pnpm exec vitest run tests/dsh-migration/controlled-lifecycle-command.spec.ts tests/dsh-migration/controlled-lifecycle-profile.spec.ts tests/dsh-migration/one-shot-profile-lifecycle.spec.ts tests/dsh-migration/ordinary-long-goal-cli.spec.ts tests/dsh-migration/portable-goal-cli.spec.ts tests/dsh-migration/portable-plugin-lifecycle.e2e.spec.ts tests/dsh-migration/portable-profile-composition.e2e.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/runtime-profile.spec.ts tests/dsh-migration/tianwen-desktop-artifact.spec.ts tests/dsh-migration/tianwen-desktop-distribution.e2e.spec.ts tests/dsh-migration/tianwen-desktop-host.spec.ts tests/dsh-migration/tianwen-desktop-locale.spec.ts tests/dsh-migration/tianwen-desktop-profile-prepare.spec.ts tests/dsh-migration/tianwen-installer.spec.ts tests/dsh-migration/tianwen-startup.e2e.spec.ts tests/dsh-migration/tianwen-version-upgrade.e2e.spec.ts
 ```
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit product compatibility and release identity**
+- [ ] **Step 4: Commit release identity**
 
 Stage only reviewed feature/release/docs files, then:
 
