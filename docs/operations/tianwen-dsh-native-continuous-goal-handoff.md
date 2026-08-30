@@ -99,9 +99,18 @@ were made afterward and therefore are covered by deterministic tests, not by a s
   mode, and current Task objective/phase. It does not expose Long Goal, Task, Goal, or Session IDs;
 - `5f76d96` tells the Planner in both its prompt and tool description that non-empty Tasks require
   `outcome=continue`, while `outcome=complete` requires `tasks=[]`.
+- `9651bf7` ends the control Turn immediately after a successful `goal_control` operation, so the
+  control Session cannot continue into workspace development after persisting the user's intent;
+- `369d270` serializes control mutations through the same per-Goal lane as completion/replanning,
+  rereads the durable revision inside that lane, and preserves the latest completed binding across
+  Host restart and same-conversation replacement;
+- `bd17306` makes every control interaction with a completed Goal read-only and returns its durable
+  final status instead of mutating it or requiring a current Task;
+- `b61618a` keeps cold Task cancellation diagnostics useful without exposing an internal Session ID.
 
-Focused Agent/Host tests, Runtime type checking, Runtime build, and `git diff --check` passed for
-these fixes. They add no classifier model, retry loop, scheduler, budget, new UI, or data model.
+The final combined controller check passed 77 focused Agent/Host/service tests, Runtime type
+checking and build, and `git diff --check`. These fixes add no classifier model, retry loop,
+scheduler, budget, new UI, or data model.
 
 ## Learning facts
 
@@ -133,7 +142,8 @@ or a general model capability claim.
 - The post-run control-routing fix has deterministic coverage but intentionally has no second
   natural Provider run; repeating the same task would violate the frozen one-run evidence boundary.
 - Natural-language routing remains model-mediated. The product now removes the observed state-domain
-  ambiguity and provides an authoritative compact status result, but it does not add a second
+  ambiguity and provides an authoritative compact status result. After the model invokes
+  `goal_control`, that Turn ends deterministically; the product still does not add a second
   classifier or intercept every chat message.
 - The feature must still pass independent diff review, repository gates, controlled merge, and
   exact-main CI before release closure.
