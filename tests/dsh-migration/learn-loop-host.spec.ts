@@ -1834,6 +1834,11 @@ describe('Long Goal DSH planner', () => {
       expect(JSON.stringify(prompt)).toContain('Ship release')
       expect(JSON.stringify(prompt)).toContain('Expected Goal revision: 1')
       expect(JSON.stringify(prompt)).toContain('submit_long_goal_plan')
+      const outcomeRule = 'When the tasks array is non-empty, outcome must be "continue"; outcome "complete" is allowed only with tasks: [].'
+      const promptText = String((prompt as { content: readonly { text?: string }[] }).content[0]?.text)
+      expect(tool!.description).toContain(outcomeRule)
+      expect(promptText).toContain(outcomeRule)
+      expect(promptText).toContain('exactly once')
     } finally {
       rmSync(fixture, { recursive: true, force: true })
     }
