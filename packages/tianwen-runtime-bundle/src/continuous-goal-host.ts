@@ -83,12 +83,19 @@ function boundTask(record: LongGoalRecordV3, sessionId: string, goalId?: string)
     && (goalId === undefined || task.execution.goalId === goalId))
 }
 
-function controlRecords(
+function allControlRecords(
   records: readonly AnyLongGoalRecord[],
   sessionId: string,
 ): LongGoalRecordV3[] {
   return records.filter((record): record is LongGoalRecordV3 =>
-    isV3(record) && record.control.sessionId === sessionId && record.planner.phase !== 'complete')
+    isV3(record) && record.control.sessionId === sessionId)
+}
+
+function controlRecords(
+  records: readonly AnyLongGoalRecord[],
+  sessionId: string,
+): LongGoalRecordV3[] {
+  return allControlRecords(records, sessionId).filter(record => record.planner.phase !== 'complete')
 }
 
 function uniqueControlRecord(
@@ -96,7 +103,8 @@ function uniqueControlRecord(
   sessionId: string,
 ): LongGoalRecordV3 | undefined {
   const matches = controlRecords(records, sessionId)
-  return matches.length === 1 ? matches[0] : undefined
+  if (matches.length > 1) return undefined
+  return matches[0] ?? allControlRecords(records, sessionId)[0]
 }
 
 function controlSessionCollides(records: readonly AnyLongGoalRecord[], sessionId: string): boolean {
@@ -152,7 +160,7 @@ export function mountContinuousGoalHost(
     sessionsRoot: dependencies.roots.sessionsRoot,
     evolutionRoot: dependencies.roots.evolutionRoot,
   }
-  type Lane = Promise<void> & { completion?: { readonly sessionId: string, readonly goalId: string } }
+  type Lane = Promise<unknown> & { completion?: { readonly sessionId: string, readonly goalId: string } }
   const lanes = new Map<string, Lane>()
   const failures: unknown[] = []
   const installed = new Map<Agent, {
@@ -170,12 +178,12 @@ export function mountContinuousGoalHost(
     const record = dependencies.readLongGoal(dependencies.roots.stateRoot, longGoalId)
     return isV3(record) ? record : undefined
   }
-  const rememberLane = (
+  const rememberLane = <T>(
     longGoalId: string,
-    task: Promise<void>,
+    task: Promise<T>,
     completion?: { readonly sessionId: string, readonly goalId: string },
-  ): Lane => {
-    const lane = task as Lane
+  ): Promise<T> => {
+    const lane = task as Promise<T> & { completion?: { readonly sessionId: string, readonly goalId: string } }
     if (completion !== undefined) lane.completion = completion
     lanes.set(longGoalId, lane)
     void task.catch(error => {
@@ -189,10 +197,10 @@ export function mountContinuousGoalHost(
   }
   const joinOrStart = (longGoalId: string, work: () => Promise<void>): Promise<void> => {
     const existing = lanes.get(longGoalId)
-    if (existing !== undefined) return existing
+    if (existing !== undefined) return existing.then(() => undefined)
     return rememberLane(longGoalId, Promise.resolve().then(work))
   }
-  const append = (longGoalId: string, work: () => Promise<void>): Promise<void> => {
+  const append = <T>(longGoalId: string, work: () => Promise<T>): Promise<T> => {
     const previous = lanes.get(longGoalId) ?? Promise.resolve()
     const task = previous.then(work, work)
     return rememberLane(longGoalId, task)
@@ -205,7 +213,7 @@ export function mountContinuousGoalHost(
     if (
       previous?.completion?.sessionId === execution.sessionId
       && previous.completion.goalId === execution.goalId
-    ) return previous
+    ) return previous.then(() => undefined)
     const task = (previous ?? Promise.resolve()).then(
       () => continueAfterCompletion(longGoalId, execution),
       () => continueAfterCompletion(longGoalId, execution),
@@ -230,6 +238,7 @@ export function mountContinuousGoalHost(
       creatingControlSessions.add(controlSessionId)
       try {
         const records = dependencies.listLongGoals()
+        const existingGoalIds = new Set(records.map(record => record.id))
         const bindings = controlRecords(records, controlSessionId)
         if (bindings.length > 1) {
           throw new LongGoalIntegrityError('Continuous Goal control Session binding is ambiguous')
@@ -243,7 +252,8 @@ export function mountContinuousGoalHost(
         const result = await dependencies.createProgress({
           objective, context: null, successCriteria: null, workspaceRoot, agentPreset, controlSessionId,
         }) as Pick<ContinuousGoalControlResult, 'action'>
-        const createdBindings = controlRecords(dependencies.listLongGoals(), controlSessionId)
+        const createdBindings = allControlRecords(dependencies.listLongGoals(), controlSessionId)
+          .filter(record => !existingGoalIds.has(record.id))
         if (createdBindings.length !== 1) {
           throw new LongGoalIntegrityError('Continuous Goal control Session binding is ambiguous')
         }
@@ -254,15 +264,23 @@ export function mountContinuousGoalHost(
       }
     },
     control: async (agent, action) => {
-      const bindings = controlRecords(dependencies.listLongGoals(), String(agent.session.id))
+      const controlSessionId = String(agent.session.id)
+      const records = dependencies.listLongGoals()
+      const bindings = controlRecords(records, controlSessionId)
       if (bindings.length > 1) {
         throw new LongGoalIntegrityError('Continuous Goal control Session binding is ambiguous')
       }
-      const record = bindings[0]
+      const record = bindings[0] ?? allControlRecords(records, controlSessionId)[0]
       if (record === undefined) throw new Error('No active continuous Goal is bound to this Agent.')
-      return await dependencies.control({
-        longGoalId: record.id, expectedRevision: record.revision, action,
-      }) as Pick<ContinuousGoalControlResult, 'action'>
+      return await append(record.id, async () => {
+        const latest = readV3(record.id)
+        if (latest === undefined || latest.control.sessionId !== controlSessionId) {
+          throw new Error('No active continuous Goal is bound to this Agent.')
+        }
+        return await dependencies.control({
+          longGoalId: latest.id, expectedRevision: latest.revision, action,
+        }) as Pick<ContinuousGoalControlResult, 'action'>
+      })
     },
   }
 

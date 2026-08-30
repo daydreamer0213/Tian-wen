@@ -187,6 +187,89 @@ describe('continuous Goal Host', () => {
     await dispose()
   })
 
+  it('queues goal_control behind the Goal lane and rereads its latest durable revision', async () => {
+    const source = record()
+    const subject = harness(source)
+    const controlAgent = agent('control-session', 'control-goal')
+    subject.live.set('control-session', controlAgent)
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    subject.dependencies.readStatus = vi.fn(async () => {
+      await gate
+      return status(source, ['active'], TASK_1)
+    })
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(subject.dependencies.readStatus).toHaveBeenCalledOnce())
+
+    const pending = subject.control(controlAgent)
+    await Promise.resolve()
+    const callsBeforeRelease = subject.dependencies.control.mock.calls.length
+    subject.setRecords([{ ...source, revision: 5 }])
+    release()
+
+    await expect(pending).resolves.toEqual({ action: 'paused' })
+    expect(callsBeforeRelease).toBe(0)
+    expect(subject.dependencies.control).toHaveBeenCalledWith({
+      longGoalId: GOAL_ID, expectedRevision: 5, action: { action: 'status' },
+    })
+    await dispose()
+  })
+
+  it('keeps the latest completed binding controllable after Host restart', async () => {
+    const source = record({
+      revision: 5,
+      planner: { ...record().planner, phase: 'complete' },
+      tasks: [],
+    })
+    const sourceStatus = status(source, [], null)
+    const subject = harness(source)
+    subject.setStatus(sourceStatus)
+    const controlAgent = agent('control-session', 'control-goal')
+    subject.live.set('control-session', controlAgent)
+    subject.dependencies.control.mockResolvedValue({ action: 'status', status: sourceStatus })
+
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+
+    expect(subject.dependencies.installBoundControls).toHaveBeenCalledOnce()
+    await expect(subject.control(controlAgent)).resolves.toMatchObject({ action: 'status' })
+    expect(subject.dependencies.control).toHaveBeenCalledWith({
+      longGoalId: GOAL_ID, expectedRevision: 5, action: { action: 'status' },
+    })
+    await dispose()
+  })
+
+  it('allows a completed binding to be replaced when creation itself immediately completes', async () => {
+    const previous = record({
+      revision: 5,
+      updatedAt: 1,
+      planner: { ...record().planner, phase: 'complete' },
+      tasks: [],
+    })
+    const created = record({
+      id: `${GOAL_ID}-created`,
+      revision: 2,
+      updatedAt: 2,
+      planner: { ...record().planner, phase: 'complete' },
+      tasks: [],
+    })
+    const subject = harness(previous)
+    const controlAgent = agent('control-session', 'control-goal')
+    subject.live.set('control-session', controlAgent)
+    subject.dependencies.createProgress = vi.fn(async () => {
+      subject.setRecords([created, previous])
+      return { action: 'complete' }
+    })
+    subject.dependencies.control.mockResolvedValue({ action: 'status', status: status(created, [], null) })
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+
+    await expect(subject.create(controlAgent, 'Finish during initial planning')).resolves.toEqual({ action: 'complete' })
+    await expect(subject.control(controlAgent)).resolves.toMatchObject({ action: 'status' })
+    expect(subject.dependencies.control).toHaveBeenCalledWith({
+      longGoalId: created.id, expectedRevision: created.revision, action: { action: 'status' },
+    })
+    await dispose()
+  })
+
   it('ignores a historical Task Session abort but pauses and flushes the exact current Task without cancelling it again', async () => {
     const source = record({
       tasks: [
