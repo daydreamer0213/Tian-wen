@@ -45,6 +45,7 @@
 - Modify: `packages/tianwen-runtime-bundle/src/long-goal-contract.ts`
 - Modify: `packages/tianwen-runtime-bundle/src/long-goal.ts`
 - Modify: `tests/dsh-migration/ordinary-long-goal.spec.ts`
+- Modify only for honest v3 compile compatibility: `packages/tianwen-runtime-bundle/src/long-goal-host.ts`
 
 **Interfaces:**
 - Produces: `LongGoalRecordV3`, `LongGoalStatusProjectionV3`, `LongGoalSummaryV3`, `GoalFirstLongGoalRecord`.
@@ -149,7 +150,7 @@ PASS with no v1/v2 snapshot changes.
 - [ ] **Step 6: Commit the storage boundary**
 
 ```powershell
-git add packages/tianwen-runtime-bundle/src/long-goal-contract.ts packages/tianwen-runtime-bundle/src/long-goal.ts tests/dsh-migration/ordinary-long-goal.spec.ts
+git add packages/tianwen-runtime-bundle/src/long-goal-contract.ts packages/tianwen-runtime-bundle/src/long-goal.ts packages/tianwen-runtime-bundle/src/long-goal-host.ts tests/dsh-migration/ordinary-long-goal.spec.ts
 git commit -m "feat: persist continuous Goal control state"
 ```
 
