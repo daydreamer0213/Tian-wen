@@ -1473,12 +1473,13 @@ export function mountTianwenLongGoalHost(
         expectedRevision: input.expectedRevision, mode: 'paused',
       }),
       flushSession: async agent => injected.sessions.flush(agent.session),
+      reportError: error => host.logger('tianwen-continuous-goal').error(error),
       installCommand: installContinuousGoalCommand,
       installBoundControls: installBoundContinuousGoalControls,
     })
     if (typeof injected.effect === 'function') {
       injected.effect(function* () {
-        yield () => { void disposeContinuousGoalHost() }
+        yield disposeContinuousGoalHost
       })
     }
     const taskFeedbackDependencies: GoalTaskFeedbackDependencies = {

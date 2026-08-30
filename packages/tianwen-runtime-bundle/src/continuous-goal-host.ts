@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 
 import type { ContinuousGoalAgentOperations } from './continuous-goal-agent.js'
+import { LongGoalIntegrityError } from './long-goal.js'
 import type {
   ContinuousGoalControlAction,
   ContinuousGoalControlResult,
@@ -47,6 +48,7 @@ export interface ContinuousGoalHostDependencies {
   /** Persist only the v3 control mode; cancellation is owned by this Host. */
   readonly pause: (input: GoalProgressInput) => unknown
   readonly flushSession: (agent: Agent) => Promise<void | boolean>
+  readonly reportError: (error: unknown) => void
   readonly installCommand: (
     agent: Agent,
     operations: ContinuousGoalAgentOperations,
@@ -77,14 +79,20 @@ function boundTask(record: LongGoalRecordV3, sessionId: string, goalId?: string)
     && (goalId === undefined || task.execution.goalId === goalId))
 }
 
+function controlRecords(
+  records: readonly AnyLongGoalRecord[],
+  sessionId: string,
+): LongGoalRecordV3[] {
+  return records.filter((record): record is LongGoalRecordV3 =>
+    isV3(record) && record.control.sessionId === sessionId && record.planner.phase !== 'complete')
+}
+
 function uniqueControlRecord(
   records: readonly AnyLongGoalRecord[],
   sessionId: string,
 ): LongGoalRecordV3 | undefined {
-  const matches = records.filter((record): record is LongGoalRecordV3 =>
-    isV3(record) && record.control.sessionId === sessionId && record.planner.phase !== 'complete')
-  if (matches.length !== 1) return undefined
-  return matches[0]
+  const matches = controlRecords(records, sessionId)
+  return matches.length === 1 ? matches[0] : undefined
 }
 
 function controlSessionCollides(records: readonly AnyLongGoalRecord[], sessionId: string): boolean {
@@ -141,6 +149,7 @@ export function mountContinuousGoalHost(
     evolutionRoot: dependencies.roots.evolutionRoot,
   }
   const lanes = new Map<string, Promise<void>>()
+  const failures: unknown[] = []
   const installed = new Map<Agent, { command: () => void, controls?: () => void | Promise<void> }>()
   const creatingControlSessions = new Set<string>()
 
@@ -153,22 +162,26 @@ export function mountContinuousGoalHost(
     const record = dependencies.readLongGoal(dependencies.roots.stateRoot, longGoalId)
     return isV3(record) ? record : undefined
   }
+  const rememberLane = (longGoalId: string, task: Promise<void>): Promise<void> => {
+    lanes.set(longGoalId, task)
+    void task.catch(error => {
+      failures.push(error)
+      try { dependencies.reportError(error) } catch {}
+    })
+    void task.finally(() => {
+      if (lanes.get(longGoalId) === task) lanes.delete(longGoalId)
+    }).catch(() => undefined)
+    return task
+  }
   const joinOrStart = (longGoalId: string, work: () => Promise<void>): Promise<void> => {
     const existing = lanes.get(longGoalId)
     if (existing !== undefined) return existing
-    const task = work()
-    const tail = task.catch(() => undefined)
-    lanes.set(longGoalId, tail)
-    void tail.finally(() => { if (lanes.get(longGoalId) === tail) lanes.delete(longGoalId) })
-    return tail
+    return rememberLane(longGoalId, Promise.resolve().then(work))
   }
   const append = (longGoalId: string, work: () => Promise<void>): Promise<void> => {
     const previous = lanes.get(longGoalId) ?? Promise.resolve()
     const task = previous.then(work, work)
-    const tail = task.catch(() => undefined)
-    lanes.set(longGoalId, tail)
-    void tail.finally(() => { if (lanes.get(longGoalId) === tail) lanes.delete(longGoalId) })
-    return tail
+    return rememberLane(longGoalId, task)
   }
   const flush = async (agent: Agent): Promise<void> => {
     if (await dependencies.flushSession(agent) === false) throw new Error('Session persistence is unavailable')
@@ -188,21 +201,35 @@ export function mountContinuousGoalHost(
       creatingControlSessions.add(controlSessionId)
       try {
         const records = dependencies.listLongGoals()
-        if (uniqueControlRecord(records, controlSessionId) !== undefined) {
+        const bindings = controlRecords(records, controlSessionId)
+        if (bindings.length > 1) {
+          throw new LongGoalIntegrityError('Continuous Goal control Session binding is ambiguous')
+        }
+        if (bindings.length === 1) {
           throw new Error('A continuous Goal is already bound to this Session')
         }
         if (controlSessionCollides(records, controlSessionId)) {
           throw new Error('A Planner or Task Session cannot control a continuous Goal')
         }
-        return await dependencies.createProgress({
+        const result = await dependencies.createProgress({
           objective, context: null, successCriteria: null, workspaceRoot, agentPreset, controlSessionId,
         }) as Pick<ContinuousGoalControlResult, 'action'>
+        const createdBindings = controlRecords(dependencies.listLongGoals(), controlSessionId)
+        if (createdBindings.length !== 1) {
+          throw new LongGoalIntegrityError('Continuous Goal control Session binding is ambiguous')
+        }
+        installBoundControls(agent)
+        return result
       } finally {
         creatingControlSessions.delete(controlSessionId)
       }
     },
     control: async (agent, action) => {
-      const record = uniqueControlRecord(dependencies.listLongGoals(), String(agent.session.id))
+      const bindings = controlRecords(dependencies.listLongGoals(), String(agent.session.id))
+      if (bindings.length > 1) {
+        throw new LongGoalIntegrityError('Continuous Goal control Session binding is ambiguous')
+      }
+      const record = bindings[0]
       if (record === undefined) throw new Error('No active continuous Goal is bound to this Agent.')
       return await dependencies.control({
         longGoalId: record.id, expectedRevision: record.revision, action,
@@ -210,14 +237,17 @@ export function mountContinuousGoalHost(
     },
   }
 
+  const installBoundControls = (agent: Agent): void => {
+    const registration = installed.get(agent)
+    if (registration === undefined || registration.controls !== undefined) return
+    if (uniqueControlRecord(dependencies.listLongGoals(), String(agent.session.id)) === undefined) return
+    registration.controls = dependencies.installBoundControls(agent, operations)
+  }
   const install = (agent: Agent): void => {
     if (installed.has(agent)) return
     const command = dependencies.installCommand(agent, operations)
-    const binding = uniqueControlRecord(dependencies.listLongGoals(), String(agent.session.id))
-    installed.set(agent, {
-      command,
-      ...(binding === undefined ? {} : { controls: dependencies.installBoundControls(agent, operations) }),
-    })
+    installed.set(agent, { command })
+    installBoundControls(agent)
   }
 
   const continueAfterCompletion = async (longGoalId: string, execution: { sessionId: string, goalId: string }): Promise<void> => {
@@ -290,20 +320,30 @@ export function mountContinuousGoalHost(
       record === undefined
       || record.control.autoProgress !== 'running'
       || record.planner.phase === 'complete'
-      || boundTask(record, sessionId) === undefined
+    ) return
+    const status = await readStatus(longGoalId)
+    const current = status.currentTaskId === null ? undefined : status.tasks.find(task => task.id === status.currentTaskId)
+    const execution = current?.execution
+    if (execution === null || execution === undefined || execution.sessionId !== sessionId) return
+    const exact = boundTask(record, execution.sessionId, execution.goalId)
+    const taskAgent = ctx.agents.get(sessionId as never)
+    if (taskAgent === undefined) return
+    const goal = taskAgent.ctx.goals.get(taskAgent)
+    if (
+      exact === undefined
+      || exact.id !== current?.id
+      || goal === undefined
+      || String(goal.id) !== execution.goalId
     ) return
     dependencies.pause({ longGoalId, expectedRevision: record.revision })
-    const taskAgent = ctx.agents.get(sessionId as never)
-    if (taskAgent !== undefined) {
-      await taskAgent.whenIdle()
-      await flush(taskAgent)
-    }
+    await taskAgent.whenIdle()
+    await flush(taskAgent)
     await readStatus(longGoalId)
   }
 
   for (const agent of ctx.agents.list()) install(agent)
   for (const record of dependencies.listLongGoals()) {
-    if (isV3(record)) void joinOrStart(record.id, () => reconcile(record.id))
+    if (isV3(record)) void joinOrStart(record.id, () => reconcile(record.id)).catch(() => undefined)
   }
 
   const offGoal = ctx.on('goal/changed', ({ agent, change }) => {
@@ -317,7 +357,7 @@ export function mountContinuousGoalHost(
         || record.planner.phase === 'complete'
       ) continue
       if (boundTask(record, sessionId, goalId) !== undefined) {
-        void joinOrStart(record.id, () => continueAfterCompletion(record.id, { sessionId, goalId }))
+        void joinOrStart(record.id, () => continueAfterCompletion(record.id, { sessionId, goalId })).catch(() => undefined)
       }
     }
   })
@@ -331,9 +371,9 @@ export function mountContinuousGoalHost(
         || record.planner.phase === 'complete'
       ) continue
       if (record.control.sessionId === sessionId) {
-        void append(record.id, () => pauseForControlStop(record.id))
+        void append(record.id, () => pauseForControlStop(record.id)).catch(() => undefined)
       } else if (boundTask(record, sessionId) !== undefined) {
-        void append(record.id, () => pauseForTaskStop(record.id, sessionId))
+        void append(record.id, () => pauseForTaskStop(record.id, sessionId)).catch(() => undefined)
       }
     }
   })
@@ -350,5 +390,6 @@ export function mountContinuousGoalHost(
       registration.command()
     }
     await Promise.allSettled([...lanes.values()])
+    if (failures.length > 0) throw new AggregateError(failures, 'Continuous Goal Host lane failures')
   }
 }
