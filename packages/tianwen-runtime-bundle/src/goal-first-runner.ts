@@ -17,7 +17,7 @@ import {
   createGoalFirstProgress,
 } from './goal-first-service.js'
 import type { GoalFirstServiceDependencies } from './goal-first-service.js'
-import type { GoalFirstLongGoalRecord, LongGoalRecordV2 } from './long-goal-contract.js'
+import type { LongGoalRecordV2 } from './long-goal-contract.js'
 import {
   abandonBlockedLongGoalTask,
   appendLongGoalGuidance,
@@ -71,7 +71,7 @@ type SessionPersistence = {
   }>
 }
 
-function requireLegacyV2GoalFirstRecord(record: GoalFirstLongGoalRecord): LongGoalRecordV2 {
+export function requireLegacyV2GoalFirstRecord(record: ReturnType<typeof readLongGoal>): LongGoalRecordV2 {
   if (record.schemaVersion !== 'tianwen.long-goal.v2') {
     throw new LongGoalIntegrityError('Goal-first runner supports only v2 records')
   }
@@ -304,7 +304,7 @@ export async function runGoalFirst(
   }
   const serviceDependencies: GoalFirstServiceDependencies = {
     createRecord: createGoalFirstLongGoal,
-    readRecord: readLongGoal,
+    readRecord: (stateRoot, longGoalId) => requireLegacyV2GoalFirstRecord(readLongGoal(stateRoot, longGoalId)),
     readStatus: readLongGoalStatus,
     appendGuidance: appendLongGoalGuidance,
     abandonBlockedTask: abandonBlockedLongGoalTask,

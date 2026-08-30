@@ -172,7 +172,9 @@ export async function controlContinuousGoal(
     taskId: active.id,
     dshStatusTarget: input.dshStatusTarget,
   })
-  await dependencies.runPlannerTurn({ record: abandoned, reason: 'guidance' })
-  if (!input.action.resume) return result('redirected', await readStatus(input, dependencies))
+  if (!input.action.resume) {
+    await dependencies.runPlannerTurn({ record: abandoned, reason: 'guidance' })
+    return result('redirected', await readStatus(input, dependencies))
+  }
   return progressResult(await continueGoalFirstProgress({ ...input, expectedRevision: abandoned.revision }, dependencies), 'resumed')
 }
