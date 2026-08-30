@@ -45,15 +45,17 @@ Lesson、Candidate、Skill 或代码修改。分析进入终态后，用户可�
 既有 DSH plugin add，并以 `0.1.2` 严格复核；未知、未来或损坏 Profile 不会被自动覆盖。
 正式安装器也能在同一 DSH rc2 host 上把 managed Runtime 从 `0.1.1` 更新到 `0.1.2`，
 不重新部署 DSH host。旧归档仍保留，因为同一 DSH home 的其他 Profile 可能继续引用它，
-直到各自完成更新。`0.1.2` 的一次隔离真实产品迁移会只证明发布字节到达现有 Profile；
-Learning Clue 的行为结论仍以各自功能 handoff 为准，不重复调用 Provider。
+直到各自完成更新。`0.1.2` 的隔离真实产品迁移已完成，证明发布字节到达现有 Profile、
+Desktop 更新幂等且真实 Web 可启动；Learning Clue 的行为结论仍以各自功能 handoff 为准，
+本次发布证明没有重复调用 Provider。
 
 当前 Goal-first 权威下钻文档是
 [`设计`](superpowers/specs/2026-08-30-tianwen-goal-first-planning-design.md)、
 [`真实执行 handoff`](operations/tianwen-goal-first-task-execution-handoff.md) 和
 [`Desktop UX handoff`](operations/tianwen-goal-first-desktop-ux-handoff.md)，以及
 [`Task feedback handoff`](operations/tianwen-goal-task-feedback-handoff.md)；当前发布更新边界见
-[`Runtime release handoff`](operations/tianwen-runtime-release-identity-handoff.md)，线索可见性见
+[`Runtime 0.1.2 release handoff`](operations/tianwen-runtime-0.1.2-release-handoff.md)，上一版发布边界见
+[`Runtime 0.1.1 release handoff`](operations/tianwen-runtime-release-identity-handoff.md)，线索可见性见
 [`Learning clue inbox handoff`](operations/tianwen-learning-clue-inbox-handoff.md)，单次分析边界见
 [`Learning clue analysis handoff`](operations/tianwen-learning-clue-analysis-handoff.md)。以下
 2026-08-27 证据分层继续作为历史事实保留，不应反向覆盖这一较新的产品状态。
