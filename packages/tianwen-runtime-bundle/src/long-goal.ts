@@ -605,6 +605,9 @@ export function createContinuousLongGoal(input: {
   if (!isLongGoalId(id) || !isNonEmptyString(plannerSessionId) || !isTimestamp(now)) {
     throw new TypeError('Continuous Long Goal input is invalid')
   }
+  if (plannerSessionId === input.controlSessionId) {
+    throw new TypeError('Continuous Goal Planner Session must differ from control Session')
+  }
   const record: LongGoalRecordV3 = {
     schemaVersion: 'tianwen.long-goal.v3',
     id,
@@ -794,6 +797,12 @@ export function bindGoalFirstLongGoalTask(input: {
   if (execution === null) throw new TypeError('Long Goal Task execution binding is invalid')
   const record = readGoalFirstLongGoal(input.stateRoot, input.longGoalId)
   assertExpectedRevision(record, input.expectedRevision)
+  if (execution.sessionId === record.planner.sessionId) {
+    throw new LongGoalIntegrityError('Long Goal Task execution Session must differ from planner Session')
+  }
+  if (record.schemaVersion === 'tianwen.long-goal.v3' && execution.sessionId === record.control.sessionId) {
+    throw new LongGoalIntegrityError('Continuous Goal Task execution Session must differ from control Session')
+  }
   const taskIndex = record.tasks.findIndex(task => task.id === input.taskId)
   if (taskIndex === -1 || record.tasks[taskIndex]!.execution !== null) {
     throw new LongGoalIntegrityError('Long Goal Task is not ready to bind')

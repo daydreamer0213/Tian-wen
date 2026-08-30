@@ -638,6 +638,19 @@ describe('goal-first long Goal v2 records', () => {
     }
   })
 
+  it('rejects a continuous Goal whose generated Planner Session is its control Session before persisting', () => {
+    const stateRoot = createStateRoot()
+    try {
+      expect(() => createContinuousLongGoal({
+        stateRoot, objective: 'Isolate control', context: null, successCriteria: null,
+        workspaceRoot: resolve(stateRoot, 'workspace'), agentPreset: 'code', controlSessionId: 'shared-session',
+      }, { goalSuffix: () => 'shared-role', plannerSessionId: () => 'shared-session', now: () => 10 })).toThrow('Planner Session must differ from control Session')
+      expect(listLongGoals(stateRoot)).toEqual([])
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
   it('updates a continuous Goal atomically, keeps same-mode writes idempotent, and finds its active control Session binding', () => {
     const stateRoot = createStateRoot()
     const workspaceRoot = resolve(stateRoot, 'workspace')
@@ -709,6 +722,14 @@ describe('goal-first long Goal v2 records', () => {
       expect(() => bindGoalFirstLongGoalTask({
         stateRoot, longGoalId: record.id, expectedRevision: 1, taskId: planned.tasks[0]!.id, execution,
       })).toThrow(LongGoalRevisionConflictError)
+      expect(() => bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId: planned.tasks[0]!.id,
+        execution: { goalId: 'control-goal', sessionId: record.control.sessionId },
+      })).toThrow('control Session')
+      expect(() => bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId: planned.tasks[0]!.id,
+        execution: { goalId: 'planner-goal', sessionId: record.planner.sessionId },
+      })).toThrow('planner Session')
       const bound = bindGoalFirstLongGoalTask({
         stateRoot, longGoalId: record.id, expectedRevision: 2, taskId: planned.tasks[0]!.id, execution,
       })
@@ -721,6 +742,31 @@ describe('goal-first long Goal v2 records', () => {
         stateRoot, longGoalId: record.id, expectedRevision: 3, taskId: planned.tasks[1]!.id, execution,
       })).toThrow('unique Goal and Session')
       expect(readLongGoal(stateRoot, record.id)).toEqual(bound)
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('reserves a v2 Planner Session from Task execution while retaining normal binding', () => {
+    const stateRoot = createStateRoot()
+    try {
+      const record = createGoalFirstLongGoal({
+        stateRoot, objective: 'Isolate planner', context: null, successCriteria: null,
+        workspaceRoot: resolve(stateRoot, 'workspace'), agentPreset: 'planner',
+      }, { goalSuffix: () => 'v2-role-isolation', plannerSessionId: () => 'planner-session', now: () => 10 })
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Task work' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000061', now: () => 11 })
+
+      expect(() => bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId: planned.tasks[0]!.id,
+        execution: { goalId: 'planner-goal', sessionId: record.planner.sessionId },
+      })).toThrow('planner Session')
+      expect(bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId: planned.tasks[0]!.id,
+        execution: { goalId: 'task-goal', sessionId: 'task-session' },
+      })).toMatchObject({ revision: 3, tasks: [{ execution: { goalId: 'task-goal', sessionId: 'task-session' } }] })
     } finally {
       rmSync(stateRoot, { recursive: true, force: true })
     }
