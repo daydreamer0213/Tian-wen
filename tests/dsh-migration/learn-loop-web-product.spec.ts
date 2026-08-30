@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
@@ -322,6 +322,23 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
       '@tianwen/runtime-bundle',
     ])
     expect(profileManifest.dependencies).not.toHaveProperty('@tianwen/dsh-probe-bundle')
+    expect([
+      '@deepseek-ai/cordis',
+      '@deepseek-ai/dsh-agent',
+      '@deepseek-ai/dsh-agent-presets',
+      '@deepseek-ai/dsh-credentials',
+      '@deepseek-ai/dsh-goal',
+      '@deepseek-ai/dsh-llm',
+      '@deepseek-ai/dsh-session',
+      '@deepseek-ai/dsh-session-persistence-jsonl',
+      '@deepseek-ai/dsh-skill',
+      '@deepseek-ai/dsh-system-prompt',
+      '@deepseek-ai/dsh-tools',
+    ].filter(name => existsSync(join(
+      assembled.profileRoot,
+      'node_modules',
+      ...name.split('/'),
+    )))).toEqual([])
     const workspacePolicy = readFileSync(
       join(assembled.profileRoot, 'pnpm-workspace.yaml'),
       'utf8',
@@ -330,8 +347,7 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
     expect(workspacePolicy).toMatch(/^overrides:\r?\n  koffi: 3\.1\.4$/mu)
     expect(workspacePolicy).toMatch(/^allowBuilds:\r?\n  koffi: true$/mu)
     const profileLock = readFileSync(join(assembled.profileRoot, 'pnpm-lock.yaml'), 'utf8')
-    expect(profileLock).toMatch(/^  koffi@3\.1\.4:$/mu)
-    expect(profileLock).not.toContain('koffi@3.1.6')
+    expect(profileLock).not.toMatch(/^  koffi@/mu)
     const dshHome = join(productRoot, 'home')
     const sessionsRoot = join(dshHome, 'sessions')
     const stateRoot = join(productRoot, 'state')
@@ -405,7 +421,8 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
       }>(origin, 'session.create', { cwd: repositoryCwd, agentPreset: 'standard' }))
       expect(workspaceSession.agentPreset).toBe('standard')
       const sessionsBeforeCreate = sessionLogs(sessionsRoot).length
-      const turnsBeforeCreate = sessionEvents(sessionsRoot)
+      const eventsBeforeCreate = sessionEvents(sessionsRoot)
+      const turnsBeforeCreate = eventsBeforeCreate
         .filter(event => event.type === 'turn/start').length
       const created = unwrap(await callConnectionRpc<{
         readonly schemaVersion: 'tianwen.goal-first-progress-result.v2'
@@ -418,17 +435,34 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
         successCriteria: 'Persist a recoverable v2 Goal and planner Session',
         workspaceSessionId: workspaceSession.sessionId,
       }))
-      const sessionsAfterCreate = sessionLogs(sessionsRoot).length
-      const turnsAfterCreate = sessionEvents(sessionsRoot)
+      const logsAfterCreate = sessionLogs(sessionsRoot)
+      const sessionsAfterCreate = logsAfterCreate.length
+      const eventsAfterCreate = sessionEvents(sessionsRoot)
+      const turnsAfterCreate = eventsAfterCreate
         .filter(event => event.type === 'turn/start').length
+      const plannerLogPath = logsAfterCreate.find(path => (
+        basename(dirname(path)) === created.status.planner.sessionId
+      ))
+      expect(plannerLogPath).toBeDefined()
+      const plannerEventsAfterCreate = sessionEvents(dirname(plannerLogPath!))
+      const plannerToolCallsAfterCreate = plannerEventsAfterCreate
+        .filter(event => event.type === 'tool/call').length
+      const plannerToolResultsAfterCreate = plannerEventsAfterCreate
+        .filter(event => event.type === 'tool/result').length
       const readBack = unwrap(await callConnectionRpc<{
         readonly status: ProductStatus
       }>(origin, 'status', {
         longGoalId: created.status.goal.id,
       }))
       const sessionsAfterStatus = sessionLogs(sessionsRoot).length
-      const turnsAfterStatus = sessionEvents(sessionsRoot)
+      const eventsAfterStatus = sessionEvents(sessionsRoot)
+      const turnsAfterStatus = eventsAfterStatus
         .filter(event => event.type === 'turn/start').length
+      const plannerEventsAfterStatus = sessionEvents(dirname(plannerLogPath!))
+      const plannerToolCallsAfterStatus = plannerEventsAfterStatus
+        .filter(event => event.type === 'tool/call').length
+      const plannerToolResultsAfterStatus = plannerEventsAfterStatus
+        .filter(event => event.type === 'tool/result').length
       expect(readBack.status.goal.id).toBe(created.status.goal.id)
       expect(created.schemaVersion).toBe('tianwen.goal-first-progress-result.v2')
       expect(created.action).toBe('planning-pending')
@@ -447,10 +481,14 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
         modelRequests: 0,
         readOnly: true,
       })
-      expect(sessionsAfterCreate).toBe(sessionsBeforeCreate + 1)
+      expect(sessionsAfterCreate).toBeGreaterThanOrEqual(sessionsBeforeCreate + 1)
       expect(turnsAfterCreate).toBeGreaterThan(turnsBeforeCreate)
+      expect(plannerToolCallsAfterCreate).toBeGreaterThan(0)
+      expect(plannerToolResultsAfterCreate).toBe(plannerToolCallsAfterCreate)
       expect(sessionsAfterStatus).toBe(sessionsAfterCreate)
       expect(turnsAfterStatus).toBe(turnsAfterCreate)
+      expect(plannerToolCallsAfterStatus).toBe(plannerToolCallsAfterCreate)
+      expect(plannerToolResultsAfterStatus).toBe(plannerToolResultsAfterCreate)
 
       const longGoalRecord = JSON.parse(readFileSync(join(
         stateRoot,
@@ -482,6 +520,8 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
           sessionCountAfter: sessionsAfterCreate,
           turnStartCountBefore: turnsBeforeCreate,
           turnStartCountAfter: turnsAfterCreate,
+          plannerToolCallCount: plannerToolCallsAfterCreate,
+          plannerToolResultCount: plannerToolResultsAfterCreate,
           action: created.action,
           plannerSessionId: created.status.planner.sessionId,
           runtime: created.status.runtime,
@@ -491,6 +531,10 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
           sessionCountAfter: sessionsAfterStatus,
           turnStartCountBefore: turnsAfterCreate,
           turnStartCountAfter: turnsAfterStatus,
+          plannerToolCallCountBefore: plannerToolCallsAfterCreate,
+          plannerToolCallCountAfter: plannerToolCallsAfterStatus,
+          plannerToolResultCountBefore: plannerToolResultsAfterCreate,
+          plannerToolResultCountAfter: plannerToolResultsAfterStatus,
           runtime: readBack.status.runtime,
         },
       }

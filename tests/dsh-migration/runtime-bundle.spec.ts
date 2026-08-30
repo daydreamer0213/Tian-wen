@@ -35,6 +35,19 @@ const packFixtureBase = resolve(
 const tar = process.platform === 'win32'
   ? resolve(process.env.SystemRoot!, 'System32', 'tar.exe')
   : 'tar'
+const serverPeerDependencies = {
+  '@deepseek-ai/cordis': '4.0.1',
+  '@deepseek-ai/dsh-agent': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-agent-presets': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-credentials': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-goal': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-llm': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-session': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-skill': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-system-prompt': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-tools': '0.1.1-rc.2',
+} as const
 
 function json(path: string): unknown {
   return JSON.parse(readFileSync(path, 'utf8'))
@@ -377,7 +390,15 @@ describe('@tianwen/runtime-bundle', () => {
       expect(ctx.tianwenEvolution).toBeDefined()
       expect('connection' in ctx).toBe(false)
       expect(inject).toHaveBeenCalledWith(
-        ['connection', 'apiProxy', 'agents', 'goals', 'sessions'],
+        [
+          'connection',
+          'apiProxy',
+          'agents',
+          'goals',
+          'sessions',
+          'agentDefaultModel',
+          'agentPresets',
+        ],
         expect.any(Function),
       )
     } finally {
@@ -415,7 +436,7 @@ describe('@tianwen/runtime-bundle', () => {
     const manifest = json(resolve(packageRoot, 'package.json')) as {
       name: string
       files: string[]
-      dependencies: Record<string, string>
+      dependencies?: Record<string, string>
       devDependencies: Record<string, string>
       exports: Record<string, unknown>
       bin: Record<string, string>
@@ -428,23 +449,12 @@ describe('@tianwen/runtime-bundle', () => {
     expect(manifest.version).toBe('0.1.0')
     expect(manifest).not.toHaveProperty('private')
     expect(manifest.bin).toEqual({ tianwen: 'dist/cli.js' })
-    expect(manifest.dependencies).toEqual({
-      '@deepseek-ai/cordis': '4.0.1',
-      '@deepseek-ai/dsh-agent': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-agent-presets': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-credentials': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-goal': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-llm': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-session': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-skill': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-system-prompt': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-tools': '0.1.1-rc.2',
-    })
-    expect(Object.keys(manifest.dependencies)).not.toContainEqual(
+    expect(manifest.dependencies ?? {}).toEqual({})
+    expect(Object.keys(manifest.dependencies ?? {})).not.toContainEqual(
       expect.stringMatching(/^@tianwen\//u),
     )
     expect(manifest.peerDependencies).toEqual({
+      ...serverPeerDependencies,
       '@deepseek-ai/dsh-client-connection': '0.1.1-rc.2',
       '@deepseek-ai/dsh-client-locale': '0.1.1-rc.2',
       '@deepseek-ai/dsh-client-runtime': '0.1.1-rc.2',
@@ -466,6 +476,7 @@ describe('@tianwen/runtime-bundle', () => {
       },
     })
     expect(manifest.devDependencies).toMatchObject({
+      ...serverPeerDependencies,
       '@deepseek-ai/dsh-client-locale': '0.1.1-rc.2',
       '@tianwen/evidence': 'workspace:*',
       '@tianwen/runtime': 'workspace:*',
@@ -703,23 +714,9 @@ describe('@tianwen/runtime-bundle', () => {
     const manifest = json(resolve(packageRoot, 'package.json')) as {
       exports: Record<string, unknown>
       files: string[]
-      dependencies: Record<string, string>
     }
     expect(manifest.exports).toHaveProperty('./smoke')
     expect(manifest.files).toContain('dist/smoke.js')
-    expect(manifest.dependencies).toEqual({
-      '@deepseek-ai/cordis': '4.0.1',
-      '@deepseek-ai/dsh-agent': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-agent-presets': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-credentials': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-goal': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-llm': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-session': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-skill': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-system-prompt': '0.1.1-rc.2',
-      '@deepseek-ai/dsh-tools': '0.1.1-rc.2',
-    })
 
     const smoke = await import(
       '../../packages/tianwen-runtime-bundle/dist/smoke.js'
@@ -1032,10 +1029,10 @@ describe('@tianwen/runtime-bundle', () => {
     expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
   })
 
-  it('bundles the Goal-first runner through installed production dependencies only', () => {
+  it('bundles the Goal-first runner through declared host peers only', () => {
     const source = readFileSync(resolve(packageRoot, 'dist/goal-first-runner.js'), 'utf8')
     const manifest = json(resolve(packageRoot, 'package.json')) as {
-      dependencies: Record<string, string>
+      peerDependencies: Record<string, string>
     }
     const metafile = json(resolve(packageRoot, 'dist/goal-first-runner.meta.json')) as {
       inputs: Record<string, unknown>
@@ -1045,7 +1042,7 @@ describe('@tianwen/runtime-bundle', () => {
       path.replaceAll('\\', '/').endsWith('dist/goal-first-runner.js'))?.[1]
     expect(output).toBeDefined()
     expect(externalPackages(output!.imports).filter(name =>
-      manifest.dependencies[name] === undefined)).toEqual([])
+      manifest.peerDependencies[name] === undefined)).toEqual([])
     expect(Object.keys(metafile.inputs).filter(input => !isAllowedGoalFirstRunnerInput(input)))
       .toEqual([])
     expect(Object.keys(metafile.inputs).some(path =>

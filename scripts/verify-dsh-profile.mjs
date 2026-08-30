@@ -43,6 +43,7 @@ const runtimeClientInject = [
   '@deepseek-ai/dsh-client-connection',
   '@deepseek-ai/dsh-client-runtime',
   '@deepseek-ai/dsh-client-ui-sidebar',
+  '@deepseek-ai/dsh-client-locale',
 ]
 const migrationMode = process.env.TIANWEN_DSH_MIGRATION_PROFILE === '1'
 const productModeValue = process.env.TIANWEN_LEARN_LOOP_PRODUCT_MODE
@@ -348,10 +349,14 @@ export async function resolveAndImportRuntimeBundle(profileManifestPath) {
     resolve(repoRoot, 'packages/tianwen-runtime-bundle/package.json'),
     'utf8',
   ))
+  const requiredPeers = Object.fromEntries(Object.entries(manifest.peerDependencies ?? {})
+    .filter(([name]) => manifest.peerDependenciesMeta?.[name]?.optional !== true))
+  const authoredRequiredPeers = Object.fromEntries(Object.entries(authoredManifest.peerDependencies ?? {})
+    .filter(([name]) => authoredManifest.peerDependenciesMeta?.[name]?.optional !== true))
   requireAssertion(
-    JSON.stringify(manifest.dependencies) === JSON.stringify(authoredManifest.dependencies)
-    && manifest.dependencies['@deepseek-ai/cordis'] === '4.0.1'
-    && Object.entries(manifest.dependencies).every(([name, version]) => (
+    JSON.stringify(requiredPeers) === JSON.stringify(authoredRequiredPeers)
+    && requiredPeers['@deepseek-ai/cordis'] === '4.0.1'
+    && Object.entries(requiredPeers).every(([name, version]) => (
       name === '@deepseek-ai/cordis' || version === expectedDshVersion
     )),
     'Runtime Bundle external manifest differs from the build contract',
@@ -364,7 +369,7 @@ export async function resolveAndImportRuntimeBundle(profileManifestPath) {
   requireAssertion(module.SUPPORTED_DSH_VERSION === '0.1.1-rc.2', 'wrong DSH version')
   requireAssertion(JSON.stringify(module.inject) === JSON.stringify([]), 'wrong inject')
   requireAssertion(typeof module.apply === 'function', 'Runtime apply is unavailable')
-  return { specifier: runtimeSpecifier, resolved: runtimeResolved, name: 'tianwen-runtime', inject: module.inject, supportedDshVersion: module.SUPPORTED_DSH_VERSION, externalSpecifiers: Object.keys(manifest.dependencies).sort(), externalResolved: { '@deepseek-ai/cordis': cordisResolved } }
+  return { specifier: runtimeSpecifier, resolved: runtimeResolved, name: 'tianwen-runtime', inject: module.inject, supportedDshVersion: module.SUPPORTED_DSH_VERSION, externalSpecifiers: Object.keys(requiredPeers).sort(), externalResolved: { '@deepseek-ai/cordis': cordisResolved } }
 }
 
 function pnpmCommand(args) {
