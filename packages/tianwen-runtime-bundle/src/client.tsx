@@ -49,6 +49,7 @@ const zhMessages = {
   'form.back': '返回',
   'detail.summary': '已完成 {completed}/{total} 个任务 · {phase}',
   'detail.planOwnership': '以下步骤由天问根据目标自动规划；你只需继续当前工作或补充方向。',
+  'detail.continuousOwnership': '这里只显示历史；请回到原始 DSH 对话，通过自然语言继续、调整或暂停。',
   'detail.currentWork': '当前工作',
   'detail.completedWork': '已完成',
   'detail.nextSteps': '接下来',
@@ -139,6 +140,7 @@ const enMessages = {
   'form.back': 'Back',
   'detail.summary': '{completed}/{total} tasks complete · {phase}',
   'detail.planOwnership': 'Tianwen planned these steps from your Goal. You only need to continue the current work or add guidance.',
+  'detail.continuousOwnership': 'This is history only. Return to the original DSH conversation to continue, redirect, or pause naturally.',
   'detail.currentWork': 'Current work',
   'detail.completedWork': 'Completed',
   'detail.nextSteps': 'Next steps',
@@ -706,7 +708,8 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
         setView('detail')
       }
       if (
-        nextDetail.schemaVersion === 'tianwen.long-goal-status.v2' &&
+        (nextDetail.schemaVersion === 'tianwen.long-goal-status.v2' ||
+          nextDetail.schemaVersion === 'tianwen.long-goal-status.v3') &&
         nextDetail.tasks.some(task => task.phase === 'complete' || task.phase === 'abandoned')
       ) {
         void client.feedbackStatus(longGoalId, request.signal).then(nextFeedback => {
@@ -917,7 +920,8 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
     taskId: string,
     rating: 'positive' | 'negative',
   ) => {
-    if (detail === undefined || detail.schemaVersion !== 'tianwen.long-goal-status.v2') return
+    if (detail === undefined || (detail.schemaVersion !== 'tianwen.long-goal-status.v2' &&
+      detail.schemaVersion !== 'tianwen.long-goal-status.v3')) return
     const request = requestGeneration.current.begin()
     setLoading(true)
     setError(undefined)
@@ -1002,25 +1006,27 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   const action = detail?.schemaVersion === 'tianwen.long-goal-status.v1'
     ? taskAction(detail, sessionList)
     : undefined
-  const v2CurrentTask = detail?.schemaVersion === 'tianwen.long-goal-status.v2'
-    ? detail.tasks.find(task => task.id === detail.currentTaskId)
+  const goalFirstDetail = detail?.schemaVersion === 'tianwen.long-goal-status.v2' ||
+    detail?.schemaVersion === 'tianwen.long-goal-status.v3'
+    ? detail
     : undefined
-  const v2VisibleCurrentTask = detail?.schemaVersion === 'tianwen.long-goal-status.v2' &&
-    (detail.goal.phase === 'active' || detail.goal.phase === 'blocked')
-    ? v2CurrentTask
+  const goalFirstCurrentTask = goalFirstDetail?.tasks.find(task =>
+    task.id === goalFirstDetail.currentTaskId)
+  const goalFirstVisibleCurrentTask = goalFirstDetail !== undefined &&
+    (goalFirstDetail.goal.phase === 'active' || goalFirstDetail.goal.phase === 'blocked')
+    ? goalFirstCurrentTask
     : undefined
-  const v2CompletedTasks = detail?.schemaVersion === 'tianwen.long-goal-status.v2'
-    ? detail.tasks.filter(task => task.phase === 'complete')
-    : []
-  const v2NextTasks = detail?.schemaVersion === 'tianwen.long-goal-status.v2'
-    ? detail.tasks.filter(task => task.phase === 'pending' && task.id !== v2VisibleCurrentTask?.id)
-    : []
-  const v2AbandonedTasks = detail?.schemaVersion === 'tianwen.long-goal-status.v2'
-    ? detail.tasks.filter(task => task.phase === 'abandoned')
-    : []
-  const v2SessionId = operationSessionId ?? v2CurrentTask?.execution?.sessionId
-  const canAbandon = v2CurrentTask?.phase === 'blocked' &&
-    v2CurrentTask.execution !== null && v2CurrentTask.resolution === null
+  const goalFirstCompletedTasks = goalFirstDetail?.tasks.filter(task => task.phase === 'complete')
+    ?? []
+  const goalFirstNextTasks = goalFirstDetail?.tasks.filter(task =>
+    task.phase === 'pending' && task.id !== goalFirstVisibleCurrentTask?.id)
+    ?? []
+  const goalFirstAbandonedTasks = goalFirstDetail?.tasks.filter(task => task.phase === 'abandoned')
+    ?? []
+  const goalFirstSessionId = operationSessionId ?? goalFirstCurrentTask?.execution?.sessionId
+  const canAbandon = detail?.schemaVersion === 'tianwen.long-goal-status.v2' &&
+    goalFirstCurrentTask?.phase === 'blocked' && goalFirstCurrentTask.execution !== null &&
+    goalFirstCurrentTask.resolution === null
   const selectedWorkspaceSession = sessionList.current !== undefined &&
     Boolean(sessionList.byId[sessionList.current]?.cwd?.trim())
 
@@ -1073,7 +1079,10 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
                       <span>{t('list.summary', {
                         completed: goal.completedTasks,
                         total: goal.totalTasks,
-                        phase: translatePhase(t, goal.phase),
+                        phase: translatePhase(t, 'schemaVersion' in goal &&
+                          goal.schemaVersion === 'tianwen.long-goal-summary.v3' &&
+                          goal.control.autoProgress === 'paused' && goal.phase !== 'blocked' &&
+                          goal.phase !== 'complete' ? 'paused' : goal.phase),
                       })}</span>
                     </button>
                   </li>)}
@@ -1137,7 +1146,9 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
               <p style={{ margin: 0 }}>{t('detail.summary', {
                 completed: detail.goal.completedTasks,
                 total: detail.goal.totalTasks,
-                phase: translatePhase(t, detail.goal.phase),
+                phase: translatePhase(t, detail.schemaVersion === 'tianwen.long-goal-status.v3' &&
+                  detail.control.autoProgress === 'paused' && detail.goal.phase !== 'blocked' &&
+                  detail.goal.phase !== 'complete' ? 'paused' : detail.goal.phase),
               })}</p>
               {detail.schemaVersion === 'tianwen.long-goal-status.v1' ? <>
                 <ol style={{ margin: 0, paddingLeft: 20 }}>
@@ -1151,23 +1162,25 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
               </> : <>
                 {detail.goal.context !== null && <p style={{ margin: 0 }}>{detail.goal.context}</p>}
                 {detail.goal.successCriteria !== null && <p style={{ margin: 0 }}>{detail.goal.successCriteria}</p>}
-                <p style={{ margin: 0 }}>{t('detail.planOwnership')}</p>
+                <p style={{ margin: 0 }}>{t(detail.schemaVersion === 'tianwen.long-goal-status.v3'
+                  ? 'detail.continuousOwnership'
+                  : 'detail.planOwnership')}</p>
                 <section aria-label={t('detail.currentWork')}>
                   <h4 style={{ margin: '4px 0' }}>{t('detail.currentWork')}</h4>
-                  {v2VisibleCurrentTask === undefined
+                  {goalFirstVisibleCurrentTask === undefined
                     ? <p style={{ margin: 0 }}>{t(detail.goal.phase === 'planning'
                       ? 'detail.planningNext'
                       : detail.goal.phase === 'complete'
                         ? 'detail.goalComplete'
                         : 'detail.noCurrentWork')}</p>
                     : <ul style={{ margin: 0, paddingLeft: 20 }}><li>
-                      {v2VisibleCurrentTask.objective} — {translatePhase(t, v2VisibleCurrentTask.phase)}
-                      {v2VisibleCurrentTask.blockedReason === undefined ? '' : `: ${v2VisibleCurrentTask.blockedReason.message}`}
+                      {goalFirstVisibleCurrentTask.objective} — {translatePhase(t, goalFirstVisibleCurrentTask.phase)}
+                      {goalFirstVisibleCurrentTask.blockedReason === undefined ? '' : `: ${goalFirstVisibleCurrentTask.blockedReason.message}`}
                     </li></ul>}
                 </section>
                 <SettledTaskGroup
                   label={t('detail.completedWork')}
-                  tasks={v2CompletedTasks}
+                  tasks={goalFirstCompletedTasks}
                   feedback={taskFeedback}
                   feedbackTaskId={feedbackTaskId}
                   feedbackNote={feedbackNote}
@@ -1186,10 +1199,10 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
                   }}
                   onOpenClue={ticketId => openClues(ticketId)}
                 />
-                <GoalTaskGroup label={t('detail.nextSteps')} tasks={v2NextTasks} t={t} />
+                <GoalTaskGroup label={t('detail.nextSteps')} tasks={goalFirstNextTasks} t={t} />
                 <SettledTaskGroup
                   label={t('detail.abandonedWork')}
-                  tasks={v2AbandonedTasks}
+                  tasks={goalFirstAbandonedTasks}
                   feedback={taskFeedback}
                   feedbackTaskId={feedbackTaskId}
                   feedbackNote={feedbackNote}
@@ -1211,14 +1224,18 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
                 {detail.guidance.length > 0 && <ul style={{ margin: 0, paddingLeft: 20 }}>
                   {detail.guidance.map((item, index) => <li key={index}>{item}</li>)}
                 </ul>}
-                <label>{t('detail.guidance')}
+                {detail.schemaVersion === 'tianwen.long-goal-status.v2' && <label>{t('detail.guidance')}
                   <textarea aria-label={t('detail.guidanceLabel')} value={guidance} onChange={event => setGuidance(event.target.value)} style={fieldStyle} />
-                </label>
+                </label>}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {(detail.goal.phase === 'planning' || detail.goal.phase === 'active') && <button type="button" onClick={() => void continueProgress()} disabled={loading} style={buttonStyle}>{t(goalFirstActionLabel(detail))}</button>}
-                  <button type="button" onClick={() => void addGuidance()} disabled={loading || guidance.trim().length === 0} style={buttonStyle}>{t('action.addGuidance')}</button>
-                  {v2SessionId !== undefined && <button type="button" onClick={() => void openBoundSession(v2SessionId)} disabled={loading} style={buttonStyle}>{t('action.openSession')}</button>}
-                  {canAbandon && <button type="button" onClick={() => void abandonCurrentTask()} disabled={loading} style={buttonStyle}>{t('action.abandon')}</button>}
+                  {detail.schemaVersion === 'tianwen.long-goal-status.v2' &&
+                    (detail.goal.phase === 'planning' || detail.goal.phase === 'active') &&
+                    <button type="button" onClick={() => void continueProgress()} disabled={loading} style={buttonStyle}>{t(goalFirstActionLabel(detail))}</button>}
+                  {detail.schemaVersion === 'tianwen.long-goal-status.v2' &&
+                    <button type="button" onClick={() => void addGuidance()} disabled={loading || guidance.trim().length === 0} style={buttonStyle}>{t('action.addGuidance')}</button>}
+                  {goalFirstSessionId !== undefined && <button type="button" onClick={() => void openBoundSession(goalFirstSessionId)} disabled={loading} style={buttonStyle}>{t('action.openSession')}</button>}
+                  {detail.schemaVersion === 'tianwen.long-goal-status.v2' && canAbandon &&
+                    <button type="button" onClick={() => void abandonCurrentTask()} disabled={loading} style={buttonStyle}>{t('action.abandon')}</button>}
                   <button type="button" onClick={backToList} style={buttonStyle}>{t('form.back')}</button>
                 </div>
               </>}

@@ -12,7 +12,9 @@ import {
 } from '../../packages/tianwen-runtime-bundle/src/goal-task-feedback.js'
 import type {
   LongGoalRecordV2,
+  LongGoalRecordV3,
   LongGoalStatusProjectionV2,
+  LongGoalStatusProjectionV3,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
 
 const ROOTS = {
@@ -255,5 +257,36 @@ describe('Goal-first settled Task feedback', () => {
       ...ROOTS,
       longGoalId: 'tianwen-long-goal-feedback',
     }, deps))).not.toContain('Keep the final answer concrete.')
+  })
+
+  it('keeps settled continuous Goal feedback available through the existing history path', async () => {
+    const continuousRecord: LongGoalRecordV3 = {
+      ...record(),
+      schemaVersion: 'tianwen.long-goal.v3',
+      control: { sessionId: 'control-session', autoProgress: 'running' },
+    }
+    const continuousStatus: LongGoalStatusProjectionV3 = {
+      ...status(),
+      schemaVersion: 'tianwen.long-goal-status.v3',
+      control: continuousRecord.control,
+    }
+    const deps = dependencies(continuousStatus, intakeStatus())
+    vi.mocked(deps.readLongGoal).mockReturnValue(continuousRecord)
+
+    await expect(readGoalTaskFeedbackStatus({
+      ...ROOTS,
+      longGoalId: continuousRecord.id,
+    }, deps)).resolves.toMatchObject({
+      schemaVersion: 'tianwen.goal-task-feedback-status.v1',
+      items: [{ taskId: 'task-1', decision: 'ticket-created' }],
+    })
+    await expect(recordGoalTaskFeedback({
+      ...ROOTS,
+      longGoalId: continuousRecord.id,
+      taskId: 'task-1',
+      rating: 'negative',
+      note: 'Keep the final answer concrete.',
+    }, deps)).resolves.toMatchObject({ duplicate: true, item: { taskId: 'task-1' } })
+    expect(deps.consume).not.toHaveBeenCalled()
   })
 })

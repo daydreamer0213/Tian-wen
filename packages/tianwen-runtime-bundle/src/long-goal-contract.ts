@@ -178,8 +178,8 @@ export interface LongGoalAbandonResultV2 {
 }
 
 export type AnyLongGoalRecord = LongGoalRecord | GoalFirstLongGoalRecord
-export type AnyLongGoalStatusProjection = LongGoalStatusProjection | LongGoalStatusProjectionV2
-export type AnyLongGoalSummary = LongGoalSummary | LongGoalSummaryV2
+export type AnyLongGoalStatusProjection = LongGoalStatusProjection | GoalFirstLongGoalStatusProjection
+export type AnyLongGoalSummary = LongGoalSummary | LongGoalSummaryV2 | LongGoalSummaryV3
 
 export type TianwenLongGoalRpcRequest =
   | { readonly endpoint: 'list'; readonly payload: Record<string, never> }

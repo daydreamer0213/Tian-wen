@@ -93,6 +93,32 @@ const summaryV2 = {
   updatedAt: 20,
 } as const
 
+const statusV3 = {
+  ...statusV2,
+  schemaVersion: 'tianwen.long-goal-status.v3',
+  goal: {
+    ...statusV2.goal,
+    id: 'tianwen-long-goal-v3',
+    objective: 'Ship continuous Goal history',
+  },
+  planner: { ...statusV2.planner, sessionId: 'continuous-planner-session' },
+  control: { sessionId: 'control-session', autoProgress: 'running' },
+} as const
+
+const summaryV3 = {
+  schemaVersion: 'tianwen.long-goal-summary.v3',
+  id: statusV3.goal.id,
+  objective: statusV3.goal.objective,
+  phase: statusV3.goal.phase,
+  revision: statusV3.goal.revision,
+  completedTasks: statusV3.goal.completedTasks,
+  abandonedTasks: statusV3.goal.abandonedTasks,
+  totalTasks: statusV3.goal.totalTasks,
+  currentTaskId: statusV3.currentTaskId,
+  updatedAt: 30,
+  control: statusV3.control,
+} as const
+
 describe('Learn Loop browser RPC client', () => {
   it('sends the exact generic RPC status request and returns a valid projection', async () => {
     const signal = new AbortController().signal
@@ -178,6 +204,55 @@ describe('Learn Loop browser RPC client', () => {
         call: vi.fn().mockResolvedValue({ ok: true, value: { status: invalid } }),
       }
       await expect(createLearnLoopClient(invalidRpc as never).status('goal'))
+        .rejects.toThrow('invalid Tianwen RPC response')
+    }
+  })
+
+  it('strictly parses running, paused, blocked, and complete v3 history projections', async () => {
+    const summaries = [
+      summaryV3,
+      { ...summaryV3, id: 'paused', control: { ...summaryV3.control, autoProgress: 'paused' } },
+      { ...summaryV3, id: 'blocked', phase: 'blocked' },
+      {
+        ...summaryV3,
+        id: 'complete',
+        phase: 'complete',
+        completedTasks: summaryV3.totalTasks,
+        currentTaskId: null,
+      },
+    ] as const
+    const rpc = {
+      call: vi.fn()
+        .mockResolvedValueOnce({ ok: true, value: { goals: summaries } })
+        .mockResolvedValueOnce({ ok: true, value: { status: statusV3 } }),
+    }
+    const client = createLearnLoopClient(rpc as never)
+
+    expect(await client.list()).toEqual(summaries)
+    expect(await client.status(statusV3.goal.id)).toEqual(statusV3)
+
+    const { control: _missingSummaryControl, ...missingSummaryControl } = summaryV3
+    const { control: _missingStatusControl, ...missingStatusControl } = statusV3
+    for (const invalid of [
+      missingSummaryControl,
+      { ...summaryV3, control: { ...summaryV3.control, ignored: true } },
+      { ...summaryV3, control: { ...summaryV3.control, autoProgress: 'stopped' } },
+    ]) {
+      const invalidRpc = {
+        call: vi.fn().mockResolvedValue({ ok: true, value: { goals: [invalid] } }),
+      }
+      await expect(createLearnLoopClient(invalidRpc as never).list())
+        .rejects.toThrow('invalid Tianwen RPC response')
+    }
+    for (const invalid of [
+      missingStatusControl,
+      { ...statusV3, control: { ...statusV3.control, ignored: true } },
+      { ...statusV3, control: { ...statusV3.control, autoProgress: 'stopped' } },
+    ]) {
+      const invalidRpc = {
+        call: vi.fn().mockResolvedValue({ ok: true, value: { status: invalid } }),
+      }
+      await expect(createLearnLoopClient(invalidRpc as never).status(statusV3.goal.id))
         .rejects.toThrow('invalid Tianwen RPC response')
     }
   })

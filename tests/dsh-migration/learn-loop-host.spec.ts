@@ -173,6 +173,19 @@ function goalFirstStatus(revision = 1): LongGoalStatusProjectionV2 {
   }
 }
 
+function continuousGoalStatus(input: {
+  readonly phase?: LongGoalStatusProjectionV3['goal']['phase']
+  readonly mode?: LongGoalStatusProjectionV3['control']['autoProgress']
+} = {}): LongGoalStatusProjectionV3 {
+  const base = goalFirstStatus(3)
+  return {
+    ...base,
+    schemaVersion: 'tianwen.long-goal-status.v3',
+    goal: { ...base.goal, id: 'tianwen-long-goal-v3-test', phase: input.phase ?? 'active' },
+    control: { sessionId: 'control-session', autoProgress: input.mode ?? 'running' },
+  }
+}
+
 function goalFirstOperations(status = goalFirstStatus()): TianwenGoalFirstOperations {
   return {
     createGoalFirst: vi.fn(async () => ({
@@ -372,6 +385,59 @@ describe('Tianwen Long Goal Web host', () => {
     } finally {
       rmSync(fixture, { recursive: true, force: true })
     }
+  })
+
+  it('transports continuous Goals through the existing list and detail history endpoints', async () => {
+    const status = continuousGoalStatus({ mode: 'paused' })
+    const record: LongGoalRecordV3 = {
+      schemaVersion: 'tianwen.long-goal.v3',
+      id: status.goal.id,
+      revision: status.goal.revision,
+      objective: status.goal.objective,
+      context: status.goal.context,
+      successCriteria: status.goal.successCriteria,
+      workspaceRoot: 'D:/workspace',
+      maxTaskRounds: 3,
+      planner: {
+        sessionId: status.planner.sessionId,
+        agentPreset: 'default',
+        planRevision: status.planner.planRevision,
+        phase: status.planner.phase,
+        consideredSettledTasks: 0,
+      },
+      guidance: status.guidance,
+      createdAt: 1,
+      updatedAt: 2,
+      tasks: [],
+      control: status.control,
+    }
+    const handler = createTianwenLongGoalRpcHandler(ROOTS, {
+      listLongGoals: vi.fn(() => [record]),
+      createLongGoal: vi.fn(() => { throw new Error('unexpected create') }),
+      readLongGoalStatus: vi.fn(async () => status),
+    })
+    const signal = AbortSignal.timeout(1_000)
+
+    await expect(handler('list', {}, signal)).resolves.toEqual({
+      ok: true,
+      value: { goals: [{
+        schemaVersion: 'tianwen.long-goal-summary.v3',
+        id: status.goal.id,
+        objective: status.goal.objective,
+        phase: status.goal.phase,
+        revision: status.goal.revision,
+        completedTasks: status.goal.completedTasks,
+        abandonedTasks: status.goal.abandonedTasks,
+        totalTasks: status.goal.totalTasks,
+        currentTaskId: status.currentTaskId,
+        updatedAt: record.updatedAt,
+        control: status.control,
+      }] },
+    })
+    await expect(handler('status', { longGoalId: record.id }, signal)).resolves.toEqual({
+      ok: true,
+      value: { status },
+    })
   })
 
   it('returns complete without calling a DSH operation', async () => {
@@ -586,6 +652,7 @@ describe('Tianwen Long Goal Web host', () => {
     }
     const statusB = {
       ...statusA,
+      schemaVersion: 'tianwen.long-goal-status.v3' as const,
       goal: { ...statusA.goal, id: 'goal-b', objective: 'Reduce support friction' },
       planner: { ...statusA.planner, sessionId: 'planner-b' },
       tasks: [{
@@ -594,6 +661,7 @@ describe('Tianwen Long Goal Web host', () => {
         objective: 'Clarify the setup flow',
         execution: { goalId: 'dsh-goal-b', sessionId: 'session-b' },
       }],
+      control: { sessionId: 'control-b', autoProgress: 'running' as const },
     }
 
     const result = projectLearningClueStatus({
