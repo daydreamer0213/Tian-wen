@@ -176,5 +176,11 @@ export async function controlContinuousGoal(
     await dependencies.runPlannerTurn({ record: abandoned, reason: 'guidance' })
     return result('redirected', await readStatus(input, dependencies))
   }
-  return progressResult(await continueGoalFirstProgress({ ...input, expectedRevision: abandoned.revision }, dependencies), 'resumed')
+  const resumed = dependencies.setMode({
+    stateRoot: input.stateRoot,
+    longGoalId: input.longGoalId,
+    expectedRevision: abandoned.revision,
+    mode: 'running',
+  })
+  return progressResult(await continueGoalFirstProgress({ ...input, expectedRevision: resumed.revision }, dependencies), 'resumed')
 }
