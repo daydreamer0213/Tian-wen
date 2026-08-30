@@ -26,6 +26,12 @@ const zhMessages = {
   'clues.back': '返回目标列表',
   'clues.empty': '还没有改进线索。',
   'clues.occurrences': '出现 {count} 次',
+  'clues.analysisPrivacy': '会把私密反馈交给当前模型，仅用于分析；天问不会自动修改项目或安装 Skill。',
+  'clues.analyze': '分析一次',
+  'clues.analysisRunning': '正在分析',
+  'clues.analysisComplete': '分析完成',
+  'clues.analysisFailed': '分析未完成',
+  'clues.openAnalysis': '打开分析会话',
   'list.empty': '还没有长期目标。',
   'list.empty.step1': '在 DSH 中打开或创建一个项目工作区。',
   'list.empty.step2': '创建一个长期目标，天问会规划并推进后续任务。',
@@ -78,6 +84,7 @@ const zhMessages = {
   'error.guidance': '无法提交补充信息。',
   'error.abandon': '无法放弃当前任务。',
   'error.feedback': '无法记录任务反馈。',
+  'error.analysis': '无法开始分析。',
   'error.revisionConflict': '该目标已在其他位置发生变化，已显示最新状态。请确认后重试。',
   'phase.planning': '规划中',
   'phase.abandoned': '已放弃',
@@ -103,6 +110,12 @@ const enMessages = {
   'clues.back': 'Back to Goals',
   'clues.empty': 'No improvement clues yet.',
   'clues.occurrences': '{count} occurrences',
+  'clues.analysisPrivacy': 'Private feedback will be sent to the current model for analysis only. Tianwen will not automatically modify the project or install a Skill.',
+  'clues.analyze': 'Analyze once',
+  'clues.analysisRunning': 'Analyzing',
+  'clues.analysisComplete': 'Analysis complete',
+  'clues.analysisFailed': 'Analysis did not complete',
+  'clues.openAnalysis': 'Open analysis Session',
   'list.empty': 'No Learn Loop plans yet.',
   'list.empty.step1': 'Open or create a project workspace in DSH.',
   'list.empty.step2': 'Create a long-term Goal; Tianwen will plan and progress the Tasks.',
@@ -155,6 +168,7 @@ const enMessages = {
   'error.guidance': 'Unable to add guidance.',
   'error.abandon': 'Unable to abandon the current Task.',
   'error.feedback': 'Unable to record Task feedback.',
+  'error.analysis': 'Unable to start analysis.',
   'error.revisionConflict': 'This Goal changed elsewhere. The latest status is shown; review it before retrying.',
   'phase.planning': 'planning',
   'phase.abandoned': 'abandoned',
@@ -189,6 +203,12 @@ const phaseKeys: Readonly<Record<string, MessageKey>> = {
   complete: 'phase.complete',
   abandoned: 'phase.abandoned',
 }
+
+const analysisPhaseKeys = {
+  running: 'clues.analysisRunning',
+  complete: 'clues.analysisComplete',
+  failed: 'clues.analysisFailed',
+} as const satisfies Readonly<Record<string, MessageKey>>
 
 type VisibleError =
   | { readonly key: MessageKey }
@@ -688,7 +708,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
     }
   }
 
-  const openReturnedTaskSession = async (sessionId: string, request: RequestHandle): Promise<void> => {
+  const openReturnedSession = async (sessionId: string, request: RequestHandle): Promise<void> => {
     await waitForSessionProjection(ctx.sessions.list, sessionId, request.signal)
     if (!request.isCurrent()) return
     closeOverlay()
@@ -724,7 +744,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
         setOperationSessionId(result.sessionId ?? undefined)
         setView('detail')
       }
-      if (result.sessionId !== null) await openReturnedTaskSession(result.sessionId, request)
+      if (result.sessionId !== null) await openReturnedSession(result.sessionId, request)
     } catch (cause) {
       if (request.isCurrent()) {
         setError(cause instanceof Error ? { message: cause.message } : { key: 'error.create' })
@@ -823,7 +843,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
         setDetail(result.status)
         setOperationSessionId(result.sessionId ?? undefined)
       }
-      if (result.sessionId !== null) await openReturnedTaskSession(result.sessionId, request)
+      if (result.sessionId !== null) await openReturnedSession(result.sessionId, request)
     } catch (cause) {
       await handleMutationFailure(cause, request, failedDetail, 'error.run')
     } finally {
@@ -911,7 +931,23 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
     }
   }
 
-  const openTaskSession = async (sessionId: string) => {
+  const analyzeClue = async (ticketId: string) => {
+    const request = requestGeneration.current.begin()
+    setLoading(true)
+    setError(undefined)
+    try {
+      const result = await client.analyzeLearningClue(ticketId, request.signal)
+      await openReturnedSession(result.sessionId, request)
+    } catch (cause) {
+      if (request.isCurrent()) {
+        setError(cause instanceof Error ? { message: cause.message } : { key: 'error.analysis' })
+      }
+    } finally {
+      if (request.isCurrent()) setLoading(false)
+    }
+  }
+
+  const openBoundSession = async (sessionId: string) => {
     const request = requestGeneration.current.begin()
     setLoading(true)
     setError(undefined)
@@ -1034,6 +1070,17 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
                           </button>
                         </li>)}
                       </ul>
+                      {clue.analysis === null
+                        ? <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+                            <p style={{ margin: 0 }}>{t('clues.analysisPrivacy')}</p>
+                            <div>
+                              <button type="button" disabled={loading} onClick={() => void analyzeClue(clue.ticketId)} style={buttonStyle}>{t('clues.analyze')}</button>
+                            </div>
+                          </div>
+                        : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 8 }}>
+                            <span role="status">{t(analysisPhaseKeys[clue.analysis.phase])}</span>
+                            <button type="button" disabled={loading} onClick={() => void openBoundSession(clue.analysis!.sessionId)} style={buttonStyle}>{t('clues.openAnalysis')}</button>
+                          </div>}
                     </li>)}
                   </ul>}
             </div>}
@@ -1129,7 +1176,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {(detail.goal.phase === 'planning' || detail.goal.phase === 'active') && <button type="button" onClick={() => void continueProgress()} disabled={loading} style={buttonStyle}>{t(goalFirstActionLabel(detail))}</button>}
                   <button type="button" onClick={() => void addGuidance()} disabled={loading || guidance.trim().length === 0} style={buttonStyle}>{t('action.addGuidance')}</button>
-                  {v2SessionId !== undefined && <button type="button" onClick={() => void openTaskSession(v2SessionId)} disabled={loading} style={buttonStyle}>{t('action.openSession')}</button>}
+                  {v2SessionId !== undefined && <button type="button" onClick={() => void openBoundSession(v2SessionId)} disabled={loading} style={buttonStyle}>{t('action.openSession')}</button>}
                   {canAbandon && <button type="button" onClick={() => void abandonCurrentTask()} disabled={loading} style={buttonStyle}>{t('action.abandon')}</button>}
                   <button type="button" onClick={backToList} style={buttonStyle}>{t('form.back')}</button>
                 </div>

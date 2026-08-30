@@ -28,6 +28,7 @@ import type {
   LearningSignal,
   LearningSignalId,
   LearningTicket,
+  LearningTicketFeedback,
   LearningTicketId,
 } from './learning-intake.js'
 import { prepareOutcomeIntake, prepareRunBinding } from './outcome-intake.js'
@@ -3128,6 +3129,56 @@ export class EvolutionLedger {
       recordedAt: event.at,
       ...event.receipt,
     })
+  }
+
+  getLearningTicketFeedback(
+    ticketId: LearningTicketId,
+  ): LearningTicketFeedback | undefined {
+    const ticket = this.#learningTickets.get(ticketId)
+    if (ticket === undefined) return undefined
+
+    let scopeKey: string | undefined
+    let latest: LearningTicketFeedback['latest'] | undefined
+    for (const signalId of ticket.signalIds) {
+      const signal = this.#learningSignals.get(signalId)
+      if (signal === undefined || signal.problemFingerprint !== ticket.problemFingerprint) {
+        throw new LedgerIntegrityError(`Learning Ticket Signal is invalid: ${signalId}`)
+      }
+      if (isOutcomeSignal(signal)) continue
+
+      const event = this.#learningIntakes.get(signal.ingestionId)
+      const prepared = event === undefined ? undefined : prepareLearningIntake(event.input)
+      if (
+        event === undefined ||
+        prepared?.kind !== 'explicit-correction' ||
+        event.signal?.signalId !== signal.signalId ||
+        event.receipt.ticketId !== ticket.ticketId ||
+        event.input.note === undefined ||
+        sha256(event.input.note) !== signal.noteDigest ||
+        prepared.noteDigest !== signal.noteDigest ||
+        prepared.problemFingerprint !== ticket.problemFingerprint ||
+        prepared.ticketId !== ticket.ticketId ||
+        prepared.signalId !== signal.signalId
+      ) {
+        throw new LedgerIntegrityError(`Learning Ticket feedback is invalid: ${signalId}`)
+      }
+      if (scopeKey !== undefined && scopeKey !== signal.scopeKey) {
+        throw new LedgerIntegrityError(`Learning Ticket feedback scope is invalid: ${ticketId}`)
+      }
+      scopeKey = signal.scopeKey
+      if (latest === undefined || event.at >= latest.recordedAt) {
+        latest = {
+          note: event.input.note,
+          recordedAt: event.at,
+          sessionId: signal.sessionId,
+          messageId: signal.messageId,
+        }
+      }
+    }
+
+    return scopeKey === undefined || latest === undefined
+      ? undefined
+      : clone({ ticketId: ticket.ticketId, scopeKey, latest })
   }
 
   listLearningSignals(): readonly (LearningSignal | OutcomeLearningSignal)[] {

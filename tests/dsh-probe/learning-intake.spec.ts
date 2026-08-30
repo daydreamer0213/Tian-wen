@@ -231,6 +231,69 @@ describe('Tianwen learning intake ledger', () => {
     expect(ledger.getLearningIntakeStatus('missing-session')).toBeUndefined()
   })
 
+  it('returns the latest original feedback for an explicit Ticket after reload', () => {
+    const root = ledgerRoot('ticket-feedback')
+    let tick = 0
+    const ledger = new EvolutionLedger(root, {
+      clock: () => new Date(Date.UTC(2026, 7, 20, 0, 0, tick++)).toISOString(),
+    })
+    const created = ledger.recordLearningIntake(base)
+    ledger.recordLearningIntake({
+      ...base,
+      sessionId: 'session-2',
+      messageId: 'message-2',
+      feedbackVersion: '22222222-2222-4222-8222-222222222222',
+      note: 'PRESERVE tool feedback.',
+    })
+
+    const expected = {
+      ticketId: created.ticketId,
+      scopeKey: base.scopeKey,
+      latest: {
+        note: 'PRESERVE tool feedback.',
+        recordedAt: '2026-08-20T00:00:01.000Z',
+        sessionId: 'session-2',
+        messageId: 'message-2',
+      },
+    }
+    expect(ledger.getLearningTicketFeedback(created.ticketId!)).toEqual(expected)
+    expect(new EvolutionLedger(root).getLearningTicketFeedback(created.ticketId!))
+      .toEqual(expected)
+    expect(JSON.stringify(ledger.getLearningIntakeStatus('session-2')))
+      .not.toContain(expected.latest.note)
+  })
+
+  it('returns no private feedback for a missing or Outcome-only Ticket', () => {
+    const ledger = new EvolutionLedger(ledgerRoot('ticket-feedback-missing'))
+    expect(ledger.getLearningTicketFeedback(`ticket:${'f'.repeat(64)}`))
+      .toBeUndefined()
+
+    const runId = ledger.recordRunBinding({
+      goalRef: 'goal:outcome-only',
+      taskRef: 'task:outcome-only',
+      sessionId: 'session:outcome-only',
+      scopeKey: 'project:tianwen/capability:outcome-only',
+      acceptanceContract: {
+        source: 'dsh-tool-result',
+        toolName: 'verify_outcome',
+        notMetErrorCode: 'OUTCOME_NOT_MET',
+        gapDisposition: 'reusable',
+        problemCategory: 'outcome-only',
+        severity: 4,
+        blocksGoal: false,
+      },
+    }).runId
+    const outcome = ledger.recordOutcomeIntake({
+      runId,
+      verdict: 'not-met',
+      sessionDigest: `sha256:${'7'.repeat(64)}`,
+      evidenceIds: [`sha256:${'8'.repeat(64)}`],
+    })
+
+    expect(outcome.ticketId).toBeDefined()
+    expect(ledger.getLearningTicketFeedback(outcome.ticketId!)).toBeUndefined()
+  })
+
   it.each([
     ['note', { note: 'Changed correction' }],
     ['scope', { scopeKey: 'project:other/capability:agent-feedback' }],

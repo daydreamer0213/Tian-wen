@@ -630,6 +630,28 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
         sessionDigest: RECEIPT_A,
         evidenceIds: [RECEIPT_B],
       })).toMatchObject({ decision: 'no-case', duplicate: false })
+      const correction = evolution.recordLearningIntake({
+        sessionId: 'session:runner-optional-correction',
+        messageId: 'message:runner-optional-correction',
+        feedbackVersion: 'feedback:runner-optional-correction',
+        rating: 'negative',
+        note: 'Keep the final result concrete.',
+        scopeKey: 'project:tianwen/capability:runtime-composition',
+        sessionDigest: RECEIPT_A,
+        evidenceIds: [RECEIPT_B],
+      })
+      expect(evolution.getLearningTicketFeedback(correction.ticketId!)).toEqual({
+        ticketId: correction.ticketId,
+        scopeKey: 'project:tianwen/capability:runtime-composition',
+        latest: {
+          note: 'Keep the final result concrete.',
+          recordedAt: '2026-08-14T00:00:01.000Z',
+          sessionId: 'session:runner-optional-correction',
+          messageId: 'message:runner-optional-correction',
+        },
+      })
+      expect(JSON.stringify(evolution.listEvents()))
+        .not.toContain('Keep the final result concrete.')
       await expect(evolution.rehydrateChampion(mounted.agent))
         .resolves.toBeUndefined()
     } finally {

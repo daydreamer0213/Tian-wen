@@ -58,6 +58,17 @@ export interface LearningTicket {
   readonly signalIds: readonly LearningSignalId[]
 }
 
+export interface LearningTicketFeedback {
+  readonly ticketId: LearningTicketId
+  readonly scopeKey: string
+  readonly latest: {
+    readonly note: string
+    readonly recordedAt: string
+    readonly sessionId: string
+    readonly messageId: string
+  }
+}
+
 export interface LearningIntakeReceipt {
   readonly decision:
     | 'no-case'

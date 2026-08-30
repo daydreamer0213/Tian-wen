@@ -33,6 +33,8 @@ import type {
   LearningIntakeStatus,
   LearningSignal,
   LearningTicket,
+  LearningTicketFeedback,
+  LearningTicketId,
 } from './learning-intake.js'
 import type {
   RunSkillManifest,
@@ -232,6 +234,12 @@ export class TianwenEvolutionService extends Service {
 
   getLearningIntakeStatus(sessionId: string): LearningIntakeStatus | undefined {
     return this.state().ledger.getLearningIntakeStatus(sessionId)
+  }
+
+  getLearningTicketFeedback(
+    ticketId: LearningTicketId,
+  ): LearningTicketFeedback | undefined {
+    return this.state().ledger.getLearningTicketFeedback(ticketId)
   }
 
   recordRunBinding(input: RunBindingInput): RunBindingReceipt {

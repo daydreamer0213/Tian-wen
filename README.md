@@ -14,8 +14,11 @@ models, tools, and runtime; it does not replace or hot-swap the running Agent.
 
 The same Learn Loop dialog summarizes improvement clues created from Task
 feedback, including source Goal, Task, time, and recurrence count. A clue is
-still a problem to understand; it does not automatically become a Case, Skill,
-or code change.
+still a problem to understand. The user can explicitly choose **Analyze once**:
+the configured model receives the private feedback in one ordinary, read-only
+DSH Session, and reopening after restart returns to that same Session without
+automatically starting another analysis. Neither the clue nor its analysis
+automatically becomes a Case, Skill, or code change.
 
 One fresh configured-model natural task closed through the installed product
 path: its Goal completed, all 45 Evidence records were

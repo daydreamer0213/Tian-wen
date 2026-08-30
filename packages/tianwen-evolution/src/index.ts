@@ -67,6 +67,7 @@ export type {
   LearningSignal,
   LearningSignalId,
   LearningTicket,
+  LearningTicketFeedback,
   LearningTicketId,
   PreparedLearningIntake,
 } from './learning-intake.js'

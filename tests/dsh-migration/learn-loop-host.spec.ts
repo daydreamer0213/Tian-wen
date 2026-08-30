@@ -12,12 +12,14 @@ import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import {
   createTianwenLongGoalRpcHandler,
   LongGoalTaskAdmissionError,
+  createLearningClueAnalysisOperations,
   mountTianwenLongGoalHost,
   resolveTianwenLongGoalHostRoots,
   runCurrentWebTask,
   type TianwenGoalFirstOperations,
   type TianwenGoalTaskFeedbackOperations,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
+import { readLearningClueAnalysisBinding } from '../../packages/tianwen-runtime-bundle/src/learning-clue-analysis.js'
 import { projectLearningClueStatus } from '../../packages/tianwen-runtime-bundle/src/learning-clue-status.js'
 import { runLongGoalPlannerTurn } from '../../packages/tianwen-runtime-bundle/src/long-goal-planner.js'
 import {
@@ -632,6 +634,7 @@ describe('Tianwen Long Goal Web host', () => {
         ticketId: ticketA,
         status: 'open',
         occurrenceCount: 2,
+        analysis: null,
         sources: [{
           longGoalId: 'goal-b',
           goalObjective: 'Reduce support friction',
@@ -673,6 +676,215 @@ describe('Tianwen Long Goal Web host', () => {
         error: { code: 'internal', message: 'invalid-request', details: {} },
       })
     expect(learningClues.status).toHaveBeenCalledOnce()
+  })
+
+  it('starts one analysis only for an exact visible-clue Ticket payload', async () => {
+    const ticketId = `ticket:${'a'.repeat(64)}`
+    const learningClues = {
+      status: vi.fn(async () => ({
+        schemaVersion: 'tianwen.learning-clue-status.v1' as const,
+        items: [],
+      })),
+      analyze: vi.fn(async (input: { readonly ticketId: string }) => ({
+        schemaVersion: 'tianwen.learning-clue-analysis-start.v1' as const,
+        created: true,
+        sessionId: `analysis-session-for-${input.ticketId.slice(-4)}`,
+      })),
+    }
+    const status = longGoalStatus(['complete'], [{ goalId: 'goal-1', sessionId: 'session-1' }])
+    const handler = createTianwenLongGoalRpcHandler(
+      ROOTS,
+      undefined,
+      runDependencies(longGoalRecord([status.tasks[0]!.execution]), status),
+      goalFirstOperations(),
+      taskFeedbackOperations(),
+      learningClues,
+    )
+    const signal = AbortSignal.timeout(1_000)
+
+    await expect(handler('analyze-learning-clue', { ticketId }, signal)).resolves.toEqual({
+      ok: true,
+      value: {
+        schemaVersion: 'tianwen.learning-clue-analysis-start.v1',
+        created: true,
+        sessionId: 'analysis-session-for-aaaa',
+      },
+    })
+    expect(learningClues.analyze).toHaveBeenCalledWith({ ticketId })
+
+    await expect(handler('analyze-learning-clue', { ticketId, ignored: true }, signal))
+      .resolves.toEqual({
+        ok: false,
+        error: { code: 'internal', message: 'invalid-request', details: {} },
+      })
+    expect(learningClues.analyze).toHaveBeenCalledOnce()
+  })
+
+  it('analyzes one safe feedback source once without exposing its private evidence', async () => {
+    const fixture = createFixtureRoot()
+    const ticketId = `ticket:${'f'.repeat(64)}`
+    const feedbackNote = '请用中文说明这个参数为什么无效。'
+    const finalReply = '我会把参数直接传给启动脚本。'
+    const sourceSessionId = 'source-session'
+    let analysisSessionId = ''
+    const sourceEvents = [{ type: 'turn/start', seq: 1, data: { turn: 1 } }, {
+      type: 'user/message', seq: 2, data: { source: { kind: 'goal', goalId: 'source-goal' } },
+    }, {
+      type: 'assistant/message', seq: 3, surfaceOp: 'append', data: {
+        turn: 1, message: { id: 'assistant-anchor', content: [{ type: 'text', text: finalReply }] },
+      },
+    }, {
+      type: 'turn/end', seq: 4, time: 1_000, data: { turn: 1, reason: { kind: 'completed' } },
+    }, {
+      type: 'goal/change', seq: 5, data: {
+        operation: 'complete', goal: { id: 'source-goal', phase: 'complete' },
+      },
+    }]
+    const analysisEvents: unknown[] = []
+    const followup = vi.fn(() => {
+      expect(readLearningClueAnalysisBinding(fixture, ticketId)?.sessionId).toBe(analysisSessionId)
+    })
+    const flushSession = vi.fn(async () => undefined)
+    const analysisAgent = {
+      session: { id: 'analysis-session', header: { cwd: 'D:/workspace', agentPreset: 'tianwen' } },
+      followup,
+      whenIdle: vi.fn(async () => undefined),
+    } as unknown as Agent
+    const createSession = vi.fn(async (input: { readonly sessionId: string }) => {
+      analysisSessionId = input.sessionId
+      return { sessionId: input.sessionId, agent: analysisAgent }
+    })
+    const snapshot = {
+      goals: [{
+        record: {
+          id: 'long-goal', schemaVersion: 'tianwen.long-goal.v2', workspaceRoot: 'D:/workspace',
+          planner: { agentPreset: 'tianwen' },
+        } as unknown as LongGoalRecordV2,
+        status: {
+          schemaVersion: 'tianwen.long-goal-status.v2',
+          tasks: [{ id: 'task-1', phase: 'complete', execution: { goalId: 'source-goal', sessionId: sourceSessionId } }],
+        } as unknown as LongGoalStatusProjectionV2,
+        feedback: {} as never,
+      }],
+      status: {
+        schemaVersion: 'tianwen.learning-clue-status.v1' as const,
+        items: [{
+          ticketId, status: 'open' as const, occurrenceCount: 1, analysis: null,
+          sources: [{
+            longGoalId: 'long-goal', goalObjective: '修正启动参数', taskId: 'task-1',
+            taskObjective: '定位参数传递', recordedAt: '2026-08-30T00:00:00.000Z',
+          }],
+        }],
+      },
+    }
+    const openSession = vi.fn(async (sessionId: string) => ({
+      session: {
+        events: sessionId === sourceSessionId ? sourceEvents : analysisEvents,
+      } as never,
+      release: () => undefined,
+    }))
+    const operations = createLearningClueAnalysisOperations({
+      stateRoot: fixture,
+      clueSnapshot: async () => snapshot,
+      getFeedback: input => input === ticketId ? {
+        scopeKey: 'workspace:D:/workspace',
+        latest: { note: feedbackNote, sessionId: sourceSessionId, messageId: 'assistant-anchor' },
+      } : undefined,
+      openSession,
+      createSession,
+      flushSession,
+    })
+    const handler = createTianwenLongGoalRpcHandler(ROOTS, undefined, undefined, undefined, undefined, operations)
+    try {
+      const [first, concurrent] = await Promise.all([
+        handler('analyze-learning-clue', { ticketId }, AbortSignal.timeout(1_000)),
+        handler('analyze-learning-clue', { ticketId }, AbortSignal.timeout(1_000)),
+      ])
+      expect(first).toEqual({ ok: true, value: {
+        schemaVersion: 'tianwen.learning-clue-analysis-start.v1', created: true, sessionId: analysisSessionId,
+      } })
+      expect(concurrent).toEqual(first)
+      expect(JSON.stringify(first)).not.toContain(feedbackNote)
+      expect(createSession).toHaveBeenCalledOnce()
+      expect(followup).toHaveBeenCalledOnce()
+      const prompt = String((followup.mock.calls[0]![0] as { content: readonly { text?: string }[] }).content[0]?.text)
+      expect(prompt).toContain(feedbackNote)
+      expect(prompt).toContain(finalReply)
+      expect(prompt).toContain('中文')
+      expect(readLearningClueAnalysisBinding(fixture, ticketId)?.sessionId).toBe(analysisSessionId)
+      await expect(operations.status()).resolves.toMatchObject({
+        items: [{ analysis: {
+          phase: 'failed', sessionId: analysisSessionId,
+          finishedAt: expect.any(String),
+        } }],
+      })
+
+      const second = await handler('analyze-learning-clue', { ticketId }, AbortSignal.timeout(1_000))
+      expect(second).toEqual({ ok: true, value: {
+        schemaVersion: 'tianwen.learning-clue-analysis-start.v1', created: false, sessionId: analysisSessionId,
+      } })
+      expect(createSession).toHaveBeenCalledOnce()
+      expect(followup).toHaveBeenCalledOnce()
+
+      const binding = readLearningClueAnalysisBinding(fixture, ticketId)!
+      analysisEvents.splice(0, analysisEvents.length,
+        { type: 'turn/start', seq: 1, data: { turn: 1 } },
+        { type: 'user/message', seq: 2, data: { id: binding.messageId } },
+        { type: 'assistant/message', seq: 3, surfaceOp: 'append', data: { turn: 1 } },
+        { type: 'turn/end', seq: 4, time: 2_000, data: { turn: 1, reason: { kind: 'completed' } } },
+      )
+      await expect(operations.status()).resolves.toMatchObject({
+        items: [{ analysis: { phase: 'complete', sessionId: analysisSessionId } }],
+      })
+      analysisEvents.splice(2, 2,
+        { type: 'turn/end', seq: 3, data: { turn: 1, reason: { kind: 'error' } } },
+      )
+      await expect(operations.status()).resolves.toMatchObject({
+        items: [{ analysis: { phase: 'failed', sessionId: analysisSessionId } }],
+      })
+
+      const followupFailureFlush = vi.fn(async () => undefined)
+      const followupFailure = createLearningClueAnalysisOperations({
+        stateRoot: join(fixture, 'followup-failure'),
+        clueSnapshot: async () => snapshot,
+        getFeedback: input => input === ticketId ? {
+          scopeKey: 'workspace:D:/workspace',
+          latest: { note: feedbackNote, sessionId: sourceSessionId, messageId: 'assistant-anchor' },
+        } : undefined,
+        openSession,
+        createSession: async input => ({
+          sessionId: input.sessionId,
+          agent: {
+            session: { id: input.sessionId, header: {} },
+            followup: () => { throw new Error('followup failed') },
+            whenIdle: async () => undefined,
+          } as unknown as Agent,
+        }),
+        flushSession: followupFailureFlush,
+      })
+      await expect(followupFailure.analyze({ ticketId })).rejects.toThrow('followup failed')
+      expect(followupFailureFlush).toHaveBeenCalledOnce()
+      await expect(followupFailure.status()).resolves.toMatchObject({
+        items: [{ analysis: { phase: 'failed', finishedAt: expect.any(String) } }],
+      })
+
+      const rejected = createLearningClueAnalysisOperations({
+        stateRoot: join(fixture, 'rejected'),
+        clueSnapshot: async () => snapshot,
+        getFeedback: () => ({
+          scopeKey: 'workspace:D:/workspace',
+          latest: { note: feedbackNote, sessionId: 'wrong-source', messageId: 'assistant-anchor' },
+        }),
+        openSession,
+        createSession,
+        flushSession,
+      })
+      await expect(rejected.analyze({ ticketId })).rejects.toThrow('source mismatch')
+      await expect(rejected.analyze({ ticketId: `ticket:${'0'.repeat(64)}` })).rejects.toThrow('not visible')
+      expect(createSession).toHaveBeenCalledOnce()
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
   })
 
   it('keeps the v1 create payload and result unchanged when goal-first operations are installed', async () => {

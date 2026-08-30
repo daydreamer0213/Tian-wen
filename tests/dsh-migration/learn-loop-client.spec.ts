@@ -340,6 +340,7 @@ describe('Learn Loop browser RPC client', () => {
         ticketId: `ticket:${'a'.repeat(64)}`,
         status: 'open' as const,
         occurrenceCount: 2,
+        analysis: null,
         sources: [{
           longGoalId: statusV2.goal.id,
           goalObjective: statusV2.goal.objective,
@@ -355,11 +356,59 @@ describe('Learn Loop browser RPC client', () => {
     expect(await createLearnLoopClient(rpc as never).learningClues(signal)).toEqual(clueStatus)
     expect(rpc.call).toHaveBeenCalledWith('/tianwen', 'learning-clues', {}, signal)
 
+    for (const analysis of [
+      {
+        phase: 'running' as const,
+        sessionId: 'analysis-running',
+        startedAt: '2026-08-30T00:01:00.000Z',
+      },
+      {
+        phase: 'complete' as const,
+        sessionId: 'analysis-complete',
+        startedAt: '2026-08-30T00:01:00.000Z',
+        finishedAt: '2026-08-30T00:02:00.000Z',
+      },
+      {
+        phase: 'failed' as const,
+        sessionId: 'analysis-failed',
+        startedAt: '2026-08-30T00:01:00.000Z',
+        finishedAt: '2026-08-30T00:02:00.000Z',
+      },
+    ]) {
+      const analyzed = {
+        ...clueStatus,
+        items: [{ ...clueStatus.items[0], analysis }],
+      }
+      const analyzedRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: analyzed }) }
+      await expect(createLearnLoopClient(analyzedRpc as never).learningClues())
+        .resolves.toEqual(analyzed)
+    }
+
     for (const invalid of [
       { ...clueStatus, extra: true },
       { ...clueStatus, items: [{ ...clueStatus.items[0], problemFingerprint: 'private' }] },
       { ...clueStatus, items: [{ ...clueStatus.items[0], signalIds: ['private'] }] },
       { ...clueStatus, items: [{ ...clueStatus.items[0], occurrenceCount: 0 }] },
+      { ...clueStatus, items: [{ ...clueStatus.items[0], analysis: {
+        phase: 'running', sessionId: 'analysis', startedAt: '2026-08-30T00:01:00.000Z',
+        finishedAt: '2026-08-30T00:02:00.000Z',
+      } }] },
+      { ...clueStatus, items: [{ ...clueStatus.items[0], analysis: {
+        phase: 'complete', sessionId: 'analysis', startedAt: '2026-08-30T00:01:00.000Z',
+      } }] },
+      { ...clueStatus, items: [{ ...clueStatus.items[0], analysis: {
+        phase: 'failed', sessionId: 'analysis', startedAt: '2026-08-30T00:01:00.000Z',
+      } }] },
+      { ...clueStatus, items: [{ ...clueStatus.items[0], analysis: {
+        phase: 'running', sessionId: 'analysis', startedAt: '2026-08-30T00:01:00Z',
+      } }] },
+      { ...clueStatus, items: [{ ...clueStatus.items[0], analysis: {
+        phase: 'complete', sessionId: 'analysis', startedAt: '2026-08-30T00:01:00.000Z',
+        finishedAt: '2026-08-30T00:02:00Z',
+      } }] },
+      { ...clueStatus, items: [{ ...clueStatus.items[0], analysis: {
+        phase: 'complete', sessionId: 'analysis', startedAt: 'now', privateNote: 'private',
+      } }] },
       { ...clueStatus, items: [{ ...clueStatus.items[0], sources: [{
         ...clueStatus.items[0].sources[0], note: 'private',
       }] }] },
@@ -372,6 +421,34 @@ describe('Learn Loop browser RPC client', () => {
     ]) {
       const invalidRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: invalid }) }
       await expect(createLearnLoopClient(invalidRpc as never).learningClues())
+        .rejects.toThrow('invalid Tianwen RPC response')
+    }
+  })
+
+  it('starts one learning-clue analysis with exact request and response parsing', async () => {
+    const ticketId = `ticket:${'a'.repeat(64)}`
+    const start = {
+      schemaVersion: 'tianwen.learning-clue-analysis-start.v1' as const,
+      created: true,
+      sessionId: 'analysis-session',
+    }
+    const signal = new AbortController().signal
+    const rpc = { call: vi.fn().mockResolvedValue({ ok: true, value: start }) }
+    const client = createLearnLoopClient(rpc as never)
+
+    await expect(client.analyzeLearningClue(ticketId, signal)).resolves.toEqual(start)
+    expect(rpc.call).toHaveBeenCalledWith(
+      '/tianwen', 'analyze-learning-clue', { ticketId }, signal,
+    )
+
+    for (const invalid of [
+      { ...start, extra: true },
+      { ...start, schemaVersion: 'tianwen.learning-clue-analysis-start.v2' },
+      { ...start, created: 'yes' },
+      { ...start, sessionId: '' },
+    ]) {
+      const invalidRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: invalid }) }
+      await expect(createLearnLoopClient(invalidRpc as never).analyzeLearningClue(ticketId))
         .rejects.toThrow('invalid Tianwen RPC response')
     }
   })

@@ -15,6 +15,12 @@ export interface LearningClueItem {
   readonly ticketId: string
   readonly status: 'open'
   readonly occurrenceCount: number
+  readonly analysis: null | {
+    readonly phase: 'running' | 'complete' | 'failed'
+    readonly sessionId: string
+    readonly startedAt: string
+    readonly finishedAt?: string
+  }
   readonly sources: readonly LearningClueSource[]
 }
 
@@ -59,6 +65,7 @@ export function projectLearningClueStatus(input: {
       ticketId: ticket.ticketId,
       status: ticket.status,
       occurrenceCount: ticket.signalIds.length,
+      analysis: null,
       sources,
     } satisfies LearningClueItem]
   }).sort((left, right) =>
