@@ -25,14 +25,17 @@ import { projectLearningClueStatus } from '../../packages/tianwen-runtime-bundle
 import { runLongGoalPlannerTurn } from '../../packages/tianwen-runtime-bundle/src/long-goal-planner.js'
 import {
   createGoalFirstLongGoal,
+  createContinuousLongGoal,
   LongGoalRevisionConflictError,
   readLongGoal,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
 import type {
   LongGoalRecord,
   LongGoalRecordV2,
+  LongGoalRecordV3,
   LongGoalStatusProjection,
   LongGoalStatusProjectionV2,
+  LongGoalStatusProjectionV3,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-learn-loop-host-tests')
@@ -220,7 +223,7 @@ async function installPlannerSetup(
 }
 
 function plannerHandle(
-  record: LongGoalRecordV2,
+  record: LongGoalRecordV2 | LongGoalRecordV3,
   onFollowup: () => void = () => undefined,
   header: { readonly cwd?: string; readonly agentPreset?: string } = {
     cwd: record.workspaceRoot,
@@ -1131,6 +1134,62 @@ describe('Tianwen Long Goal Web host', () => {
     })
   })
 
+  it('admits a v3 Task through the Goal-first binder in its frozen workspace and preset', async () => {
+    const record: LongGoalRecordV3 = {
+      schemaVersion: 'tianwen.long-goal.v3', id: 'tianwen-long-goal-v3-test', revision: 3,
+      objective: 'Ship continuous release', context: null, successCriteria: null,
+      workspaceRoot: 'D:/frozen-workspace', maxTaskRounds: 3,
+      planner: {
+        sessionId: 'planner-session', agentPreset: 'planner-preset', planRevision: 1,
+        phase: 'ready', consideredSettledTasks: 0,
+      },
+      guidance: [], createdAt: 1, updatedAt: 1,
+      control: { sessionId: 'control-session', autoProgress: 'running' },
+      tasks: [{ id: 'task-v3', objective: 'Prepare notes', execution: null, resolution: null }],
+    }
+    const base = goalFirstStatus(3)
+    const status: LongGoalStatusProjectionV3 = {
+      ...base,
+      schemaVersion: 'tianwen.long-goal-status.v3',
+      goal: { ...base.goal, id: record.id, phase: 'active', totalTasks: 1 },
+      planner: { ...base.planner, phase: 'ready', planRevision: 1 },
+      control: record.control,
+      tasks: [{ id: 'task-v3', objective: 'Prepare notes', phase: 'pending', execution: null, resolution: null }],
+      currentTaskId: 'task-v3',
+    }
+    const execution = { goalId: 'goal-new', sessionId: 'session-new' }
+    const boundStatus: LongGoalStatusProjectionV3 = {
+      ...status,
+      goal: { ...status.goal, revision: 4 },
+      tasks: [{ ...status.tasks[0]!, phase: 'active', execution }],
+    }
+    const agent = fakeAgent('session-new', goalView({ id: 'goal-new' as GoalView['id'] }), {
+      header: { cwd: 'D:/frozen-workspace', agentPreset: 'planner-preset' },
+    })
+    const bindGoalFirstLongGoalTask = vi.fn(() => ({ ...record, revision: 4 }))
+    const dependencies = {
+      ...runDependencies(record as never, status as never),
+      readLongGoal: vi.fn(() => record),
+      readLongGoalStatus: vi.fn().mockResolvedValueOnce(status).mockResolvedValueOnce(boundStatus),
+      createSession: vi.fn(async () => 'session-new'),
+      attachedAgent: vi.fn(() => agent),
+      createGoal: vi.fn(() => goalView({ id: 'goal-new' as GoalView['id'] })),
+      bindGoalFirstLongGoalTask,
+    } as unknown as Parameters<typeof runCurrentWebTask>[1]
+
+    await expect(runCurrentWebTask({
+      roots: ROOTS, longGoalId: record.id, expectedRevision: 3,
+    }, dependencies)).resolves.toEqual({ status: boundStatus, sessionId: 'session-new', action: 'started' })
+    expect(dependencies.createSession).toHaveBeenCalledWith({
+      cwd: 'D:/frozen-workspace', agentPreset: 'planner-preset',
+    })
+    expect(bindGoalFirstLongGoalTask).toHaveBeenCalledWith({
+      stateRoot: ROOTS.stateRoot, longGoalId: record.id, expectedRevision: 3,
+      taskId: 'task-v3', execution,
+    })
+    expect(dependencies.bindLongGoalTask).not.toHaveBeenCalled()
+  })
+
   it('preserves a v2 bind revision conflict after cleaning up the created Goal', async () => {
     const record: LongGoalRecordV2 = {
       schemaVersion: 'tianwen.long-goal.v2', id: 'tianwen-long-goal-v2-test', revision: 3,
@@ -1624,6 +1683,53 @@ describe('Long Goal DSH planner', () => {
       expect(JSON.stringify(prompt)).toContain('Ship release')
       expect(JSON.stringify(prompt)).toContain('Expected Goal revision: 1')
       expect(JSON.stringify(prompt)).toContain('submit_long_goal_plan')
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('runs a v3 Planner turn through the same typed plan submission path without dropping control', async () => {
+    const fixture = createFixtureRoot()
+    try {
+      const stateRoot = join(fixture, 'state')
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Ship continuous release', context: 'Keep history', successCriteria: 'Published',
+        workspaceRoot: fixture, agentPreset: 'planner-preset', controlSessionId: 'control-session',
+      })
+      let tool: ToolDefinition | undefined
+      let pending = Promise.resolve<unknown>(undefined)
+      const owned = plannerHandle(record, () => {
+        pending = tool!.execute({
+          expectedGoalRevision: 1,
+          outcome: 'continue',
+          tasks: [{ objective: 'Prepare notes' }],
+        }, { concludeTurn: vi.fn() } as never)
+      })
+      vi.spyOn(owned.handle.agent, 'whenIdle').mockImplementation(async () => { await pending })
+
+      await expect(runLongGoalPlannerTurn({
+        stateRoot,
+        dshStatusTarget: { sessionsRoot: join(fixture, 'sessions'), evolutionRoot: join(stateRoot, 'evolution') },
+        record,
+        reason: 'create',
+      }, {
+        inspectSession: vi.fn(async () => ({ exists: false })),
+        createAgent: vi.fn(async input => {
+          await installPlannerSetup(input.setup, definition => { tool = definition })
+          return owned.handle
+        }),
+        resumeAgent: vi.fn(async () => { throw new Error('unexpected resume') }),
+        flushSession: vi.fn(async () => undefined),
+        readSettledTaskResult: vi.fn(async () => undefined),
+      })).resolves.toBe('submitted')
+
+      expect(readLongGoal(stateRoot, record.id)).toMatchObject({
+        schemaVersion: 'tianwen.long-goal.v3', revision: 2,
+        control: { sessionId: 'control-session', autoProgress: 'running' },
+        planner: { phase: 'ready', planRevision: 1, consideredSettledTasks: 0 },
+        tasks: [{ objective: 'Prepare notes' }],
+      })
+      expect(JSON.stringify(owned.followup.mock.calls[0]![0])).toContain('Newly settled Task results')
     } finally {
       rmSync(fixture, { recursive: true, force: true })
     }

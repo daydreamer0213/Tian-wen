@@ -16,6 +16,7 @@ import type {
   AnyLongGoalStatusProjection,
   AnyLongGoalSummary,
   GoalFirstLongGoalRecord,
+  GoalFirstLongGoalStatusProjection,
   GoalFirstProgressResultV2,
   LongGoalRecordV2,
   LongGoalAbandonResultV2,
@@ -165,13 +166,13 @@ export interface RunCurrentTaskResult {
 }
 
 export interface GoalFirstTaskRunResult {
-  readonly status: LongGoalStatusProjectionV2
+  readonly status: GoalFirstLongGoalStatusProjection
   readonly sessionId?: string
   readonly action: 'started' | 'continued' | 'already-running' | 'complete'
 }
 
 type AnyRunCurrentTaskResult = {
-  readonly status: AnyLongGoalStatusProjection
+  readonly status: ReadLongGoalStatusProjection
   readonly sessionId?: string
   readonly action: 'started' | 'continued' | 'already-running' | 'complete'
 }
@@ -365,7 +366,7 @@ function requireLegacyLongGoalStatus(
 }
 
 async function requireGoalFirstTaskSessionHeader(
-  record: Extract<AnyLongGoalRecord, { readonly schemaVersion: 'tianwen.long-goal.v2' }>,
+  record: GoalFirstLongGoalRecord,
   sessionId: string,
   dependencies: TianwenLongGoalRunDependencies,
 ): Promise<void> {
@@ -397,23 +398,30 @@ export async function runCurrentWebTask(input: {
   readonly expectedRevision?: number
   readonly initialCwd?: string
 }, dependencies: TianwenLongGoalRunDependencies): Promise<AnyRunCurrentTaskResult> {
-  const readStatus = async (): Promise<AnyLongGoalStatusProjection> =>
-    requireLegacyLongGoalStatus(await dependencies.readLongGoalStatus(statusInput(input)))
+  const readStatus = async (): Promise<ReadLongGoalStatusProjection> =>
+    dependencies.readLongGoalStatus(statusInput(input))
   const status = await readStatus()
   const record = dependencies.readLongGoal(input.roots.stateRoot, input.longGoalId)
-  const isV2 = record.schemaVersion === 'tianwen.long-goal.v2'
-  if (isV2 !== (status.schemaVersion === 'tianwen.long-goal-status.v2')) {
+  const goalFirstRecord = record.schemaVersion === 'tianwen.long-goal.v2' || record.schemaVersion === 'tianwen.long-goal.v3'
+    ? record
+    : undefined
+  const expectedStatusSchema = record.schemaVersion === 'tianwen.long-goal.v1'
+    ? 'tianwen.long-goal-status.v1'
+    : record.schemaVersion === 'tianwen.long-goal.v2'
+      ? 'tianwen.long-goal-status.v2'
+      : 'tianwen.long-goal-status.v3'
+  if (status.schemaVersion !== expectedStatusSchema) {
     throw new LongGoalIntegrityError('Long Goal Task record/status schema mismatch')
   }
-  if (isV2) {
+  if (goalFirstRecord !== undefined) {
     if (input.expectedRevision === undefined) {
       throw new Error('Goal-first Long Goal requires goal-first service')
     }
     if (!isPositiveInteger(input.expectedRevision)) {
       throw new TypeError('Goal-first Task admission expected revision is invalid')
     }
-    if (record.revision !== input.expectedRevision) {
-      throw new LongGoalRevisionConflictError(input.expectedRevision, record.revision)
+    if (goalFirstRecord.revision !== input.expectedRevision) {
+      throw new LongGoalRevisionConflictError(input.expectedRevision, goalFirstRecord.revision)
     }
   }
   if (status.currentTaskId === null) return { status, action: 'complete' }
@@ -435,17 +443,17 @@ export async function runCurrentWebTask(input: {
   }
 
   if (task.execution === null) {
-    if (
-      status.schemaVersion === 'tianwen.long-goal-status.v2' &&
-      (status.planner.phase !== 'ready' || status.goal.phase !== 'active')
-    ) {
+    if (goalFirstRecord !== undefined && (
+      (status as GoalFirstLongGoalStatusProjection).planner.phase !== 'ready' ||
+      status.goal.phase !== 'active'
+    )) {
       throw new LongGoalIntegrityError('Goal-first Task admission requires an active ready state')
     }
     let cwd: string | undefined
     let agentPreset: string | undefined
-    if (record.schemaVersion === 'tianwen.long-goal.v2') {
-      cwd = record.workspaceRoot
-      agentPreset = record.planner.agentPreset
+    if (goalFirstRecord !== undefined) {
+      cwd = goalFirstRecord.workspaceRoot
+      agentPreset = goalFirstRecord.planner.agentPreset
     } else {
       const firstBound = record.tasks.find(candidate => candidate.execution !== null)?.execution
       cwd = input.initialCwd
@@ -466,10 +474,10 @@ export async function runCurrentWebTask(input: {
       throw new Error('New Long Goal Task Session has no attached Agent')
     }
     if (
-      record.schemaVersion === 'tianwen.long-goal.v2' &&
+      goalFirstRecord !== undefined &&
       (
-        agent.session.header.cwd !== record.workspaceRoot ||
-        agent.session.header.agentPreset !== record.planner.agentPreset
+        agent.session.header.cwd !== goalFirstRecord.workspaceRoot ||
+        agent.session.header.agentPreset !== goalFirstRecord.planner.agentPreset
       )
     ) {
       throw new LongGoalIntegrityError('New Goal-first Task Session header mismatch')
@@ -480,7 +488,7 @@ export async function runCurrentWebTask(input: {
     })
     try {
       const execution = { sessionId, goalId: String(goal.id) }
-      if (record.schemaVersion === 'tianwen.long-goal.v2') {
+      if (goalFirstRecord !== undefined) {
         dependencies.bindGoalFirstLongGoalTask({
           stateRoot: input.roots.stateRoot,
           longGoalId: input.longGoalId,
@@ -525,8 +533,8 @@ export async function runCurrentWebTask(input: {
   const { sessionId, goalId } = task.execution
   let agent = dependencies.attachedAgent(sessionId)
   if (agent === undefined) {
-    if (record.schemaVersion === 'tianwen.long-goal.v2') {
-      await requireGoalFirstTaskSessionHeader(record, sessionId, dependencies)
+    if (goalFirstRecord !== undefined) {
+      await requireGoalFirstTaskSessionHeader(goalFirstRecord, sessionId, dependencies)
     }
     const ref = await dependencies.readGoalRef(sessionId, goalId)
     if (ref.id !== goalId || !Number.isSafeInteger(ref.revision) || ref.revision < 1) {
@@ -555,8 +563,8 @@ export async function runCurrentWebTask(input: {
   if ((goal.phase !== 'active' && goal.phase !== 'paused') || goal.activation !== 'disarmed') {
     throw new Error('Bound Long Goal Task Goal is not resumable')
   }
-  if (record.schemaVersion === 'tianwen.long-goal.v2') {
-    await requireGoalFirstTaskSessionHeader(record, sessionId, dependencies)
+  if (goalFirstRecord !== undefined) {
+    await requireGoalFirstTaskSessionHeader(goalFirstRecord, sessionId, dependencies)
   }
   const resumed = agent.ctx.goals.resume(agent, { id: goal.id, revision: goal.revision })
   if (String(resumed.id) !== goalId || resumed.phase !== 'active' || resumed.activation !== 'armed') {

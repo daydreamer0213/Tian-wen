@@ -41,6 +41,7 @@ function harness(initial = record()) {
   const events: string[] = []
   let current = initial
   let currentStatus = status(initial)
+  let cancelled: typeof EXECUTION | undefined
   const dependencies = {
     createRecord: (() => current) as ContinuousGoalServiceDependencies['createRecord'],
     readRecord: (() => current) as ContinuousGoalServiceDependencies['readRecord'],
@@ -54,11 +55,16 @@ function harness(initial = record()) {
     appendGuidanceOnly: ((input: { text: string }) => { events.push('guide'); current = { ...current, revision: current.revision + 1, guidance: [...current.guidance, input.text] }; return current }) as ContinuousGoalServiceDependencies['appendGuidanceOnly'],
     redirect: ((input: { text: string }) => { events.push('redirect'); current = { ...current, revision: current.revision + 1, guidance: [...current.guidance, input.text], control: { ...current.control, autoProgress: 'paused' } }; return current }) as ContinuousGoalServiceDependencies['redirect'],
     abandonRedirectedTask: (async input => { events.push('abandon'); current = { ...current, revision: current.revision + 1, tasks: current.tasks.map(task => task.id === input.taskId ? { ...task, resolution: 'abandoned' } : task) }; currentStatus = status(current, { goal: { ...status(current).goal, phase: 'planning' }, currentTaskId: null }); return current }) as ContinuousGoalServiceDependencies['abandonRedirectedTask'],
-    cancelTaskAndReadStatus: async () => { events.push('cancel'); return 'paused' as const },
+    cancelTaskAndReadStatus: async execution => {
+      events.push('cancel')
+      cancelled = execution
+      return 'paused' as const
+    },
   } satisfies ContinuousGoalServiceDependencies
   return {
     dependencies,
     events,
+    get cancelled() { return cancelled },
     get current() { return current },
     advancePlan() {
       current = {
@@ -93,6 +99,7 @@ describe('continuous Goal control service', () => {
     subject.setStatus(status(current))
     await controlContinuousGoal({ stateRoot: STATE_ROOT, dshStatusTarget: DSH_STATUS_TARGET, longGoalId: GOAL_ID, expectedRevision: 1, action: { action: 'pause' } }, subject.dependencies)
     expect(subject.events).toEqual(['mode:paused', 'cancel'])
+    expect(subject.cancelled).toEqual(EXECUTION)
   })
 
   it('writes running and invokes the Goal-first Continue operation once on resume', async () => {
@@ -108,6 +115,7 @@ describe('continuous Goal control service', () => {
     subject.setStatus(status(current, { tasks: [{ id: TASK_ID, objective: 'Old work', phase: 'active', execution: EXECUTION, resolution: null }] }))
     await expect(controlContinuousGoal({ stateRoot: STATE_ROOT, dshStatusTarget: DSH_STATUS_TARGET, longGoalId: GOAL_ID, expectedRevision: 1, action: { action: 'pause-and-replan', text: 'Change direction', resume: false } }, subject.dependencies)).resolves.toMatchObject({ action: 'redirected' })
     expect(subject.events).toEqual(['redirect', 'cancel', 'abandon', 'planner'])
+    expect(subject.cancelled).toEqual(EXECUTION)
   })
 
   it('lets Continue perform the only not-submitted redirect planner turn when resuming', async () => {

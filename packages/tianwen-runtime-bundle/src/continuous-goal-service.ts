@@ -6,7 +6,7 @@ import {
   redirectContinuousGoal,
   setContinuousGoalMode,
 } from './long-goal.js'
-import type { LongGoalStatusProjectionV3 } from './long-goal-contract.js'
+import type { LongGoalStatusProjectionV3, TaskExecutionBinding } from './long-goal-contract.js'
 import {
   continueGoalFirstProgress,
   type GoalFirstServiceDependencies,
@@ -35,7 +35,7 @@ export interface ContinuousGoalServiceDependencies extends GoalFirstServiceDepen
   readonly appendGuidanceOnly: typeof appendContinuousGoalGuidance
   readonly redirect: typeof redirectContinuousGoal
   readonly abandonRedirectedTask: typeof abandonContinuousGoalTask
-  readonly cancelTaskAndReadStatus: (sessionId: string) => Promise<'paused' | 'complete'>
+  readonly cancelTaskAndReadStatus: (execution: TaskExecutionBinding) => Promise<'paused' | 'complete'>
 }
 
 type ExistingInput = {
@@ -138,9 +138,8 @@ export async function controlContinuousGoal(
     const beforeCancel = await readStatus(input, dependencies)
     const active = beforeCancel.currentTaskId === null ? undefined : beforeCancel.tasks.find(task => task.id === beforeCancel.currentTaskId)
     if (active?.phase === 'active') {
-      const activeSessionId = active.execution?.sessionId
-      if (activeSessionId === undefined) throw new LongGoalIntegrityError('Continuous Goal active Task has no Session')
-      await dependencies.cancelTaskAndReadStatus(activeSessionId)
+      if (active.execution === null) throw new LongGoalIntegrityError('Continuous Goal active Task has no Session')
+      await dependencies.cancelTaskAndReadStatus(active.execution)
     }
     const status = await readStatus(input, dependencies)
     return result(status.goal.phase === 'complete' ? 'complete' : 'paused', status)
@@ -163,7 +162,7 @@ export async function controlContinuousGoal(
   if (active === undefined || active.execution === null) {
     throw new LongGoalIntegrityError('Continuous Goal redirection requires a current Task')
   }
-  const cancellation = await dependencies.cancelTaskAndReadStatus(active.execution.sessionId)
+  const cancellation = await dependencies.cancelTaskAndReadStatus(active.execution)
   if (cancellation === 'complete') return result('complete', await readStatus(input, dependencies))
   const abandoned = await dependencies.abandonRedirectedTask({
     stateRoot: input.stateRoot,

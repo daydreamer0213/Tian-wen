@@ -685,6 +685,47 @@ describe('goal-first long Goal v2 records', () => {
     }
   })
 
+  it('commits and binds a v3 suffix without losing control or relaxing revision and binding identity checks', () => {
+    const stateRoot = createStateRoot()
+    const workspaceRoot = resolve(stateRoot, 'workspace')
+    try {
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Ship continuous Goal', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'control-session',
+      }, { goalSuffix: () => 'v3-plan-bind', plannerSessionId: () => 'planner-v3-plan-bind', now: () => 10 })
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'First work' }, { objective: 'Second work' }], consideredSettledTasks: 0,
+      }, { taskId: (() => {
+        const ids = ['00000000-0000-4000-8000-000000000051', '00000000-0000-4000-8000-000000000052']
+        return () => ids.shift()!
+      })(), now: () => 11 })
+      const execution = { goalId: 'goal-v3-task', sessionId: 'session-v3-task' }
+
+      expect(planned).toMatchObject({
+        schemaVersion: 'tianwen.long-goal.v3', revision: 2,
+        control: { sessionId: 'control-session', autoProgress: 'running' },
+      })
+      expect(() => bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, taskId: planned.tasks[0]!.id, execution,
+      })).toThrow(LongGoalRevisionConflictError)
+      const bound = bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId: planned.tasks[0]!.id, execution,
+      })
+      expect(bound).toMatchObject({
+        schemaVersion: 'tianwen.long-goal.v3', revision: 3,
+        control: { sessionId: 'control-session', autoProgress: 'running' },
+      })
+      expect(bound.tasks[0]!.execution).toEqual(execution)
+      expect(() => bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 3, taskId: planned.tasks[1]!.id, execution,
+      })).toThrow('unique Goal and Session')
+      expect(readLongGoal(stateRoot, record.id)).toEqual(bound)
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
   it('redirects a running continuous Goal by pausing it in the same revision', () => {
     const stateRoot = createStateRoot()
     const workspaceRoot = resolve(stateRoot, 'workspace')

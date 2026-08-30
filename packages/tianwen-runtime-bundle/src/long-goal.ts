@@ -499,6 +499,14 @@ function readLongGoalV2(stateRoot: string, longGoalId: string): LongGoalRecordV2
   return record
 }
 
+function readGoalFirstLongGoal(stateRoot: string, longGoalId: string): GoalFirstLongGoalRecord {
+  const record = readLongGoal(stateRoot, longGoalId)
+  if (record.schemaVersion !== 'tianwen.long-goal.v2' && record.schemaVersion !== 'tianwen.long-goal.v3') {
+    throw new LongGoalIntegrityError('Goal-first mutation requires a v2 or v3 record')
+  }
+  return record
+}
+
 function readContinuousLongGoal(stateRoot: string, longGoalId: string): LongGoalRecordV3 {
   const record = readLongGoal(stateRoot, longGoalId)
   if (record.schemaVersion !== 'tianwen.long-goal.v3') {
@@ -734,7 +742,7 @@ export function commitLongGoalPlan(input: {
 }, dependencies: {
   readonly taskId?: () => string
   readonly now?: () => number
-} = {}): LongGoalRecordV2 {
+} = {}): GoalFirstLongGoalRecord {
   if (
     (input.outcome !== 'continue' && input.outcome !== 'complete') ||
     !Array.isArray(input.tasks) ||
@@ -745,7 +753,7 @@ export function commitLongGoalPlan(input: {
   ) {
     throw new TypeError('Long Goal plan is invalid')
   }
-  const record = readLongGoalV2(input.stateRoot, input.longGoalId)
+  const record = readGoalFirstLongGoal(input.stateRoot, input.longGoalId)
   assertExpectedRevision(record, input.expectedRevision)
   const boundCount = record.tasks.findIndex(task => task.execution === null)
   const bound = boundCount === -1 ? record.tasks : record.tasks.slice(0, boundCount)
@@ -758,7 +766,7 @@ export function commitLongGoalPlan(input: {
     return { id, objective: task.objective, execution: null, resolution: null } satisfies LongGoalTaskRecordV2
   })
   const now = nextV2UpdatedAt(record, (dependencies.now ?? Date.now)())
-  const updated: LongGoalRecordV2 = {
+  const updated: GoalFirstLongGoalRecord = {
     ...record,
     revision: record.revision + 1,
     updatedAt: now,
@@ -780,11 +788,11 @@ export function bindGoalFirstLongGoalTask(input: {
   readonly expectedRevision: number
   readonly taskId: string
   readonly execution: TaskExecutionBinding
-}): LongGoalRecordV2 {
+}): GoalFirstLongGoalRecord {
   if (!isNonEmptyString(input.taskId)) throw new TypeError('Long Goal Task id is invalid')
   const execution = parseExecution(input.execution)
   if (execution === null) throw new TypeError('Long Goal Task execution binding is invalid')
-  const record = readLongGoalV2(input.stateRoot, input.longGoalId)
+  const record = readGoalFirstLongGoal(input.stateRoot, input.longGoalId)
   assertExpectedRevision(record, input.expectedRevision)
   const taskIndex = record.tasks.findIndex(task => task.id === input.taskId)
   if (taskIndex === -1 || record.tasks[taskIndex]!.execution !== null) {
@@ -798,7 +806,7 @@ export function bindGoalFirstLongGoalTask(input: {
   )) {
     throw new LongGoalIntegrityError('Long Goal Task binding must use unique Goal and Session ids')
   }
-  const updated: LongGoalRecordV2 = {
+  const updated: GoalFirstLongGoalRecord = {
     ...record,
     revision: record.revision + 1,
     updatedAt: nextV2UpdatedAt(record, Date.now()),
