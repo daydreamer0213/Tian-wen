@@ -1,6 +1,6 @@
 {
   "name": "@tianwen/desktop-host",
-  "version": "0.1.0-preview.1",
+  "version": "0.1.0-preview.2",
   "private": true,
   "type": "module",
   "main": "./dist/main.js",
@@ -46,8 +46,8 @@
         "to": "THIRD_PARTY_NOTICES.md"
       },
       {
-        "from": "dist/runtime/tianwen-runtime-bundle-0.1.0.tgz",
-        "to": "runtime/tianwen-runtime-bundle-0.1.0.tgz"
+        "from": "dist/runtime/tianwen-runtime-bundle-0.1.1.tgz",
+        "to": "runtime/tianwen-runtime-bundle-0.1.1.tgz"
       }
     ],
     "win": {

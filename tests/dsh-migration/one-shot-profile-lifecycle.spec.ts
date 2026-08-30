@@ -282,7 +282,7 @@ describe('one-shot Profile lifecycle', () => {
           dependencies: {
             '@deepseek-ai/dsh-base': '0.1.1-rc.2',
             '@deepseek-ai/dsh-headless': '0.1.1-rc.2',
-            '@tianwen/runtime-bundle': '0.1.0',
+            '@tianwen/runtime-bundle': '0.1.1',
           },
           dsh: {
             profile: {

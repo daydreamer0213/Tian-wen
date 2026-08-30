@@ -5,7 +5,8 @@ import type { SpawnOptions } from 'node:child_process'
 
 const dshVersion = '0.1.1-rc.2'
 const runtimePackage = '@tianwen/runtime-bundle'
-const runtimeVersion = '0.1.0'
+const runtimeVersion = '0.1.1'
+const knownOldRuntimeVersion = '0.1.0'
 const maxStartupOutputBytes = 64 * 1024
 const readinessTimeoutMs = 120_000
 const gracefulStopTimeoutMs = 5_000
@@ -162,7 +163,7 @@ export function resolveDesktopBaseTarget(input: DesktopTargetInput): DesktopBase
   return { nodeExecutable, dshRoot, dshHome, dshBin }
 }
 
-export function resolveDesktopTarget(input: DesktopTargetInput): DesktopTarget {
+function resolveDesktopTargetAtRuntimeVersion(input: DesktopTargetInput, expectedRuntimeVersion: string): DesktopTarget {
   const base = resolveDesktopBaseTarget(input)
 
   let profileRoot: string
@@ -194,8 +195,16 @@ export function resolveDesktopTarget(input: DesktopTargetInput): DesktopTarget {
   const runtimeRoot = realpathSync(join(profileRoot, 'node_modules', '@tianwen', 'runtime-bundle'))
   if (!isWithin(profileRoot, runtimeRoot) || !statSync(runtimeRoot).isDirectory()) fail('Runtime directory escapes Web Profile')
   const runtime = readManifest(join(runtimeRoot, 'package.json'), 'Runtime manifest')
-  if (runtime.name !== runtimePackage || runtime.version !== runtimeVersion) fail('Runtime manifest is not the required exact package')
+  if (runtime.name !== runtimePackage || runtime.version !== expectedRuntimeVersion) fail('Runtime manifest is not the required exact package')
   return { ...base, profileRoot }
+}
+
+export function resolveDesktopTarget(input: DesktopTargetInput): DesktopTarget {
+  return resolveDesktopTargetAtRuntimeVersion(input, runtimeVersion)
+}
+
+export function resolveKnownOldDesktopTarget(input: DesktopTargetInput): DesktopTarget {
+  return resolveDesktopTargetAtRuntimeVersion(input, knownOldRuntimeVersion)
 }
 
 function defaultStopTree(pid: number): Promise<void> {

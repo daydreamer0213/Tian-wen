@@ -36,7 +36,7 @@ async function start(): Promise<void> {
   }
   const target = await resolvePreparedDesktopTarget(
     base,
-    join(process.resourcesPath, 'runtime', 'tianwen-runtime-bundle-0.1.0.tgz'),
+    join(process.resourcesPath, 'runtime', 'tianwen-runtime-bundle-0.1.1.tgz'),
     {
       async confirmCreateProfile(profileRoot) {
         const result = await dialog.showMessageBox({
@@ -44,6 +44,17 @@ async function start(): Promise<void> {
           message: copy.createProfileTitle,
           detail: `${copy.createProfileInstruction}\n${profileRoot}`,
           buttons: [copy.createProfileAction, copy.cancel],
+          defaultId: 0,
+          cancelId: 1,
+        })
+        return result.response === 0
+      },
+      async confirmUpdateRuntime(profileRoot) {
+        const result = await dialog.showMessageBox({
+          type: 'warning',
+          message: copy.updateRuntimeTitle,
+          detail: `${copy.updateRuntimeInstruction}\n${profileRoot}`,
+          buttons: [copy.updateRuntimeAction, copy.cancel],
           defaultId: 0,
           cancelId: 1,
         })

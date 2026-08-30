@@ -30,11 +30,20 @@ Runtime 插件，Desktop 不拥有第二套 Goal 引擎。
 也不会自动创建 Case、Candidate 或 Skill。正式安装产品已用真实 DeepSeek Task 验证 Task
 完成与 Turn 收尾之间的竞态，Host 复用 DSH `Agent.whenIdle()` 后再登记反馈。
 
+当前可发布 Runtime 身份为 `@tianwen/runtime-bundle@0.1.1`，可选 Desktop 身份为
+`0.1.0-preview.2`。Desktop 只把精确 `0.1.0` 识别为可更新前身，得到用户确认后调用一次
+既有 DSH plugin add，并以 `0.1.1` 严格复核；未知、未来或损坏 Profile 不会被自动覆盖。
+正式安装器也能在同一 DSH rc2 host 上把 managed Runtime 从 `0.1.0` 更新到 `0.1.1`，
+不重新部署 DSH host。旧归档仍保留，因为同一 DSH home 的其他 Profile 可能继续引用它，
+直到各自完成更新。一次隔离真实产品迁移已证明 host 的 29,236 个文件前后整树摘要不变、
+managed/Web 两个 Profile 均到达 `0.1.1`，随后真实 Web 启动返回 HTTP 200。
+
 当前 Goal-first 权威下钻文档是
 [`设计`](superpowers/specs/2026-08-30-tianwen-goal-first-planning-design.md)、
 [`真实执行 handoff`](operations/tianwen-goal-first-task-execution-handoff.md) 和
 [`Desktop UX handoff`](operations/tianwen-goal-first-desktop-ux-handoff.md)，以及
-[`Task feedback handoff`](operations/tianwen-goal-task-feedback-handoff.md)。以下
+[`Task feedback handoff`](operations/tianwen-goal-task-feedback-handoff.md)；当前发布更新边界见
+[`Runtime release handoff`](operations/tianwen-runtime-release-identity-handoff.md)。以下
 2026-08-27 证据分层继续作为历史事实保留，不应反向覆盖这一较新的产品状态。
 
 Stage 7 已经完成，不再是待验证能力。一个使用配置模型的全新自然任务通过已安装的 DSH
@@ -349,6 +358,10 @@ persistence 与 Natural Trial stream-error 已覆盖链路成立、成功交付�
 普通 Goal-first Task 的显式用户反馈现已接入正式 Evolution ledger。下一步若处理自动 Outcome，
 必须先为普通 Task 冻结真实验收合同，不能用“Goal complete”代替验收通过；在此之前，继续改善
 Goal 规划、执行和用户引导比扩展学习治理框架更优先。
+
+Runtime `0.1.1` 与 Desktop `0.1.0-preview.2` 已解决“不同构建仍共用 0.1.0 身份”的分发问题。
+Desktop 和正式安装器各自只支持一个精确前身，不建设在线 updater、后台下载或通用版本比较器；
+这条迁移已经通过真实旧安装验证，不需要再用合成 Activity 重复取证。
 
 若未来已有合法 Candidate，需要同家族盲评时，仍冻结任务和单次尝试以保证比较公平；不设
 Tianwen 侧模型、token 或金额上限，也不绕过 standing authorization 边界。

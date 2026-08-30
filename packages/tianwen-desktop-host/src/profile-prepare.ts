@@ -1,13 +1,14 @@
 import { spawn as nodeSpawn } from 'node:child_process'
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative } from 'node:path'
-import { resolveDesktopTarget } from './host.js'
+import { resolveDesktopTarget, resolveKnownOldDesktopTarget } from './host.js'
 import type { DesktopBaseTarget, DesktopTarget } from './host.js'
 
 const runtimePackage = '@tianwen/runtime-bundle'
 
 export type WebProfileState =
   | { readonly kind: 'ready', readonly profileRoot: string }
+  | { readonly kind: 'outdated-runtime', readonly profileRoot: string }
   | { readonly kind: 'missing-profile', readonly profileRoot: string }
   | { readonly kind: 'missing-runtime', readonly profileRoot: string }
   | { readonly kind: 'incompatible', readonly profileRoot: string, readonly reason: string }
@@ -109,6 +110,11 @@ export function inspectWebProfile(target: DesktopBaseTarget): WebProfileState {
     return { kind: 'ready', profileRoot: resolveDesktopTarget(target).profileRoot }
   } catch (error) {
     const reason = errorReason(error)
+    try {
+      return { kind: 'outdated-runtime', profileRoot: resolveKnownOldDesktopTarget(target).profileRoot }
+    } catch {
+      // Only the one known old Runtime is eligible for the embedded update path.
+    }
     if (!profileEntryExists(profileRoot) && missingProfileParentResolvesWithinHome(target, profileRoot)) {
       return { kind: 'missing-profile', profileRoot }
     }
@@ -131,24 +137,15 @@ export function renderManualPreparationCommand(target: DesktopBaseTarget, runtim
   ].map(powerShellLiteral).join(' ')} }`
 }
 
-export function prepareMissingWebProfile(
+function runRuntimePluginAdd(
   target: DesktopBaseTarget,
   runtimeTarball: string,
+  profileRoot: string,
   dependencies: { readonly spawn?: typeof import('node:child_process').spawn } = {},
 ): Promise<void> {
-  const profileRoot = join(target.dshHome, 'profiles', 'web')
-
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof nodeSpawn>
     try {
-      if (profileEntryExists(profileRoot)) {
-        reject(new Error(`Web Profile entry already exists: ${profileRoot}`))
-        return
-      }
-      if (!missingProfileParentResolvesWithinHome(target, profileRoot)) {
-        reject(new Error(`Web Profile parent is not contained within DSH home: ${profileRoot}`))
-        return
-      }
       child = (dependencies.spawn ?? nodeSpawn)(target.nodeExecutable, [
         target.dshBin,
         'plugin', '--profile', 'web', '--allow-build=koffi',
@@ -189,8 +186,31 @@ export function prepareMissingWebProfile(
   })
 }
 
+export function prepareMissingWebProfile(
+  target: DesktopBaseTarget,
+  runtimeTarball: string,
+  dependencies: { readonly spawn?: typeof import('node:child_process').spawn } = {},
+): Promise<void> {
+  const profileRoot = join(target.dshHome, 'profiles', 'web')
+  if (profileEntryExists(profileRoot)) return Promise.reject(new Error(`Web Profile entry already exists: ${profileRoot}`))
+  if (!missingProfileParentResolvesWithinHome(target, profileRoot)) {
+    return Promise.reject(new Error(`Web Profile parent is not contained within DSH home: ${profileRoot}`))
+  }
+  return runRuntimePluginAdd(target, runtimeTarball, profileRoot, dependencies)
+}
+
+export function updateOutdatedWebProfile(
+  target: DesktopBaseTarget,
+  runtimeTarball: string,
+  dependencies: { readonly spawn?: typeof import('node:child_process').spawn } = {},
+): Promise<void> {
+  const profileRoot = resolveKnownOldDesktopTarget(target).profileRoot
+  return runRuntimePluginAdd(target, runtimeTarball, profileRoot, dependencies)
+}
+
 export interface DesktopProfileInteractions {
   confirmCreateProfile(profileRoot: string): Promise<boolean>
+  confirmUpdateRuntime(profileRoot: string): Promise<boolean>
   showManualPreparation(reason: string, command: string): Promise<void>
 }
 
@@ -201,6 +221,7 @@ export async function resolvePreparedDesktopTarget(
   dependencies: {
     readonly inspect?: typeof inspectWebProfile
     readonly prepare?: typeof prepareMissingWebProfile
+    readonly update?: typeof updateOutdatedWebProfile
     readonly validate?: typeof resolveDesktopTarget
   } = {},
 ): Promise<DesktopTarget | undefined> {
@@ -213,6 +234,11 @@ export async function resolvePreparedDesktopTarget(
       renderManualPreparationCommand(base, runtimeTarball),
     )
     return undefined
+  }
+  if (state.kind === 'outdated-runtime') {
+    if (!await interactions.confirmUpdateRuntime(state.profileRoot)) return undefined
+    await (dependencies.update ?? updateOutdatedWebProfile)(base, runtimeTarball)
+    return validate(base)
   }
   if (state.kind === 'incompatible') throw new Error(state.reason)
   if (!await interactions.confirmCreateProfile(state.profileRoot)) return undefined

@@ -4,12 +4,17 @@
 
 天问是一个面向长时间运行 Agent、可审计的学习控制面。
 
-**研究预览；Stage 7 已完成。** DSH 0.1.1-rc.2 是唯一的产品 Agent Runtime。天问在后台
-以非干扰方式工作：它在一次正常 DSH Run 结束后读取执行事实，不替换正在运行的 Agent，
-也不热切换当前 Run。一个使用配置模型的全新自然任务已经通过已安装产品路径完成：Goal
-完成，45 条 Evidence 全部完整，`Outcome=met`，学习正确返回 `no-case`，父 Skill 使用记录
-成功，随后模型恢复 offline。这是项目所有者实际使用形成的单用户产品证据，不是外部用户
-验证，也不证明普遍效能。
+**研究预览；Stage 7 已完成。** DSH 0.1.1-rc.2 是当前精确支持的 Agent Runtime。普通产品
+入口以长期 Goal 为起点：用户只需填写目标、可选背景和成功标准；天问使用稳定的
+Planner Session 自动维护后续 Task，每个已接纳 Task 在自己的 DSH
+Session 中执行。用户可以随时补充方向、要求重新规划，并在 Task 完成或放弃后提供反馈。
+天问复用 DSH 的模型、工具和运行时，不替换正在运行的 Agent，也不热切换
+当前 Run。
+
+一个使用配置模型的全新自然任务已经通过已安装产品路径闭合：Goal 完成，
+45 条 Evidence 全部完整，`Outcome=met`，学习正确返回 `no-case`，父 Skill 使用记录成功，
+随后模型恢复 offline。这是项目所有者实际使用形成的单用户产品证据，不是外部用户验证，
+也不证明普遍效能。
 
 Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成。
 五任务 B/C、盲态 evaluator、隔离 Shadow 与 Promotion/Rollback/Restore 产品机制已经实现，并由 0-external-Provider scripted 全链夹具覆盖。
@@ -66,7 +71,7 @@ Runtime Bundle 压缩包，再交给 DSH 安装到用户自己选择的 Profile�
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.0.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.1.tgz
 ```
 
 `--allow-build=koffi` 是写入当前 Profile 的 pnpm 明确许可，不会修改全局 pnpm 设置。只有
@@ -91,7 +96,13 @@ $DshPackageRoot = (Resolve-Path 'D:\path\to\your\dsh-host\node_modules\@deepseek
 node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
 ```
 
-桌面端封装和公开包名/命令名属于后续分发决策，不需要另做一套天问 Runtime Bundle。
+可选的 Tianwen Desktop 复用用户现有的 DSH 与 Web Profile；它不是第二套 Runtime，也不要求
+用户改用天问托管安装目录。Desktop 打开的是同一套 Goal-first 界面，旧的精确 Runtime
+`0.1.0` Profile 可在用户确认后更新到内嵌的 `0.1.1`；未知或损坏版本不会被自动覆盖。
+
+安装后，在 DSH Web 或 Tianwen Desktop 中打开“长期目标”，填写目标、可选背景和成功标准
+即可。后续 Task、各自的执行 Session 和完成进度由天问维护，不需要用户预先填写任务数量
+或每个任务的执行轮数。
 
 ## 当前预览证明了什么
 

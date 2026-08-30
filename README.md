@@ -4,15 +4,20 @@
 
 Tianwen is an auditable learning control plane for long-running agents.
 
-**Research preview; Stage 7 complete.** DSH 0.1.1-rc.2 is the only product
-Agent Runtime. Tianwen runs in the background as a non-interfering control
-plane: it reads execution facts after a normal DSH run and does not replace or
-hot-swap the running Agent. One fresh, configured-model natural task has now
-completed through the installed product path: its Goal completed, all 45
-Evidence records were complete, `Outcome=met`, learning correctly returned
-`no-case`, and parent Skill use was recorded before the model was restored to
-offline mode. This is project-owner, single-user product evidence—not external-
-user validation or proof of general efficacy.
+**Research preview; Stage 7 complete.** DSH 0.1.1-rc.2 is the exact supported
+Agent Runtime. The ordinary product starts from a long-running Goal: the user
+supplies only the goal, optional context, and success criteria. Tianwen
+uses one stable Planner Session to maintain future Tasks, while each accepted
+Task runs in its own DSH Session. The user can add guidance, request replanning,
+and give feedback after a Task is completed or abandoned. Tianwen reuses DSH
+models, tools, and runtime; it does not replace or hot-swap the running Agent.
+
+One fresh configured-model natural task closed through the installed product
+path: its Goal completed, all 45 Evidence records were
+complete, `Outcome=met`, learning correctly returned `no-case`, and parent Skill
+use was recorded before the model was restored to offline mode. This is
+project-owner, single-user product evidence—not external-user validation or
+proof of general efficacy.
 
 The Stage 7 project-owner natural task and official installer/status proof remain complete.
 The five-task B/C, blind evaluator, isolated Shadow, and Promotion/Rollback/Restore product mechanisms are implemented and covered by a 0-external-Provider scripted full-chain fixture.
@@ -76,7 +81,7 @@ into the Profile selected by the user:
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.0.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.1.tgz
 ```
 
 `--allow-build=koffi` is an explicit pnpm approval recorded in that Profile; it
@@ -106,8 +111,16 @@ alternative for project-controlled deployments:
 node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
 ```
 
-Desktop packaging and a public package/CLI name are later distribution
-decisions; they do not require a second Tianwen Runtime Bundle.
+The optional Tianwen Desktop reuses the user's existing DSH and Web Profile. It
+is not a second Runtime and does not require the managed Tianwen installation.
+Desktop opens the same Goal-first UI. With confirmation, it can update the exact
+known Runtime `0.1.0` predecessor to its embedded `0.1.1`; unknown or damaged
+versions are never overwritten automatically.
+
+After installation, open **Long-running goals** in DSH Web or Tianwen Desktop
+and enter the goal, optional context, and success criteria. Tianwen maintains
+the derived Tasks, their individual execution Sessions, and progress; the user
+does not predeclare a task count or an execution-round count.
 
 ## What this preview proves
 

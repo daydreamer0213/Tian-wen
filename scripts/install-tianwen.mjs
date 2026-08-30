@@ -171,7 +171,7 @@ export function deriveInstallPaths(dataDir, platform = process.platform) {
   const dshHome = pathApi.join(dataDir, 'dsh-home')
   const profileRoot = pathApi.join(dshHome, 'profiles', PROFILE)
   return {
-    archivePath: pathApi.join(dataDir, 'packs', 'tianwen-runtime-bundle-0.1.0.tgz'),
+    archivePath: pathApi.join(dataDir, 'packs', 'tianwen-runtime-bundle-0.1.1.tgz'),
     binDir: pathApi.join(profileRoot, 'node_modules', '.bin'),
     dataDir,
     dshHome,
@@ -359,8 +359,8 @@ function validateProfile(paths, profileRoot = paths.profileRoot) {
     || profile.dependencies['@deepseek-ai/dsh-headless'] !== DSH_VERSION) {
     throw new Error(`managed Profile must use DSH ${DSH_VERSION}`)
   }
-  if (profile.dependencies[RUNTIME_PACKAGE] !== '0.1.0') {
-    throw new Error('managed Profile must use Tianwen Runtime 0.1.0')
+  if (profile.dependencies[RUNTIME_PACKAGE] !== '0.1.1') {
+    throw new Error('managed Profile must use Tianwen Runtime 0.1.1')
   }
   return profile.manifestPath
 }
@@ -378,14 +378,22 @@ function isFreshDataDirectory(paths) {
 }
 
 function predecessorArchivePath(paths) {
-  const currentBasename = 'tianwen-runtime-bundle-0.1.0.tgz'
+  const currentBasename = 'tianwen-runtime-bundle-0.1.1.tgz'
   if (!paths.archivePath.endsWith(currentBasename)) {
     throw new Error('current Runtime archive path is invalid')
   }
   return `${paths.archivePath.slice(0, -currentBasename.length)}tianwen-runtime-bundle-0.0.0.tgz`
 }
 
-function matchesPredecessorReceipt(paths, archivePath) {
+function runtimePredecessorArchivePath(paths) {
+  const currentBasename = 'tianwen-runtime-bundle-0.1.1.tgz'
+  if (!paths.archivePath.endsWith(currentBasename)) {
+    throw new Error('current Runtime archive path is invalid')
+  }
+  return `${paths.archivePath.slice(0, -currentBasename.length)}tianwen-runtime-bundle-0.1.0.tgz`
+}
+
+function matchesPredecessorReceipt(paths, archivePath, dshVersion) {
   if (!existsSync(paths.receiptPath) || !statSync(paths.receiptPath).isFile()) return false
   try {
     const receipt = assertPlainObject(
@@ -394,7 +402,7 @@ function matchesPredecessorReceipt(paths, archivePath) {
     )
     return receipt.schemaVersion === 'tianwen.install.v1'
       && receipt.status === 'ready'
-      && receipt.dshVersion === PREDECESSOR_DSH_VERSION
+      && receipt.dshVersion === dshVersion
       && receipt.pnpmVersion === PNPM_VERSION
       && receipt.dataDir === paths.dataDir
       && receipt.binDir === paths.binDir
@@ -429,12 +437,24 @@ export function classifyManagedInstallation(paths) {
     if (host.version === DSH_VERSION
       && existsSync(paths.archivePath)
       && statSync(paths.archivePath).isFile()
-      && matchesProfile(profile, DSH_VERSION, '0.1.0', renderProfilePatch(paths))) {
+      && matchesProfile(profile, DSH_VERSION, '0.1.1', renderProfilePatch(paths))) {
       return 'current'
     }
     if (existsSync(paths.archivePath)) return 'incompatible'
     const archivePath = predecessorArchivePath(paths)
-    if (!existsSync(archivePath) || !statSync(archivePath).isFile()) return 'incompatible'
+    const runtimeArchivePath = runtimePredecessorArchivePath(paths)
+    if (host.version === DSH_VERSION) {
+      return !existsSync(archivePath)
+        && existsSync(runtimeArchivePath)
+        && statSync(runtimeArchivePath).isFile()
+        && matchesProfile(profile, DSH_VERSION, '0.1.0', renderProfilePatch(paths))
+        && matchesPredecessorReceipt(paths, runtimeArchivePath, DSH_VERSION)
+        ? 'managed-runtime-predecessor'
+        : 'incompatible'
+    }
+    if (existsSync(runtimeArchivePath)
+      || !existsSync(archivePath)
+      || !statSync(archivePath).isFile()) return 'incompatible'
     const original = matchesProfile(
       profile,
       PREDECESSOR_DSH_VERSION,
@@ -449,7 +469,7 @@ export function classifyManagedInstallation(paths) {
     )
     return host.version === PREDECESSOR_DSH_VERSION
       && (original || lockedDeploy)
-      && matchesPredecessorReceipt(paths, archivePath)
+      && matchesPredecessorReceipt(paths, archivePath, PREDECESSOR_DSH_VERSION)
       ? 'managed-predecessor'
       : 'incompatible'
   } catch {
@@ -463,7 +483,7 @@ function normalizeDeployedProfile(paths, profileRoot) {
   manifest.dependencies = {
     '@deepseek-ai/dsh-base': DSH_VERSION,
     '@deepseek-ai/dsh-headless': DSH_VERSION,
-    [RUNTIME_PACKAGE]: '0.1.0',
+    [RUNTIME_PACKAGE]: '0.1.1',
   }
   manifest.dsh = { profile: { bundles: [...PROFILE_BUNDLES] } }
   writeFileSync(manifestPath, canonicalJson(manifest), 'utf8')
@@ -802,7 +822,7 @@ export function installTianwen({
     () => classifyManagedInstallation(paths),
   )
   atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_LAYOUT_PREFLIGHT, () => {
-    if (installation === 'managed-predecessor'
+    if ((installation === 'managed-predecessor' || installation === 'managed-runtime-predecessor')
       && hasSourceLinkedRuntimePublication(repoRoot, paths.profileRoot)) {
       throw new Error('managed predecessor Runtime publication must not be source-linked')
     }
@@ -820,13 +840,15 @@ export function installTianwen({
 
   const hostExists = existsSync(paths.hostRoot)
   const profileExists = existsSync(paths.profileRoot)
-  const migratingPredecessor = installation === 'managed-predecessor'
-  const hostNeedsDeploy = !hostExists || migratingPredecessor
+  const migratingDshPredecessor = installation === 'managed-predecessor'
+  const migratingRuntimePredecessor = installation === 'managed-runtime-predecessor'
+  const migratingPredecessor = migratingDshPredecessor || migratingRuntimePredecessor
+  const hostNeedsDeploy = !hostExists || migratingDshPredecessor
   let installedArchiveDigest
   let dshBin
   const sourceLinkedProfile = atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_LAYOUT_PREFLIGHT, () => {
     installedArchiveDigest = previousArchiveDigest(paths)
-    if (hostExists && !migratingPredecessor) dshBin = validateInstalledHost(paths.hostRoot)
+    if (hostExists && !migratingDshPredecessor) dshBin = validateInstalledHost(paths.hostRoot)
     if (profileExists && !migratingPredecessor) validateProfile(paths)
     return profileExists
       && !migratingPredecessor
@@ -875,7 +897,7 @@ export function installTianwen({
       atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_HOST_DEPLOY, () => {
         const hostsRoot = dirname(paths.hostRoot)
         const id = `${process.pid}-${randomUUID()}`
-        hostBackup = migratingPredecessor ? resolve(hostsRoot, `.dsh-host-backup-${id}`) : undefined
+        hostBackup = migratingDshPredecessor ? resolve(hostsRoot, `.dsh-host-backup-${id}`) : undefined
         mkdirSync(hostsRoot, { recursive: true })
         if (hostBackup !== undefined) renameSync(paths.hostRoot, hostBackup)
         invokePnpm([

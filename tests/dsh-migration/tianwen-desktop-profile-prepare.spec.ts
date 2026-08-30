@@ -12,11 +12,12 @@ import {
   prepareMissingWebProfile,
   renderManualPreparationCommand,
   resolvePreparedDesktopTarget,
+  updateOutdatedWebProfile,
 } from '../../packages/tianwen-desktop-host/src/profile-prepare.js'
 
 const fixtureRoot = resolve('D:/DevData/tianwen-desktop-profile-prepare-tests')
 const runtimePackage = '@tianwen/runtime-bundle'
-const runtimeVersion = '0.1.0'
+const runtimeVersion = '0.1.1'
 const fixtures: string[] = []
 
 interface FakeChild extends EventEmitter {
@@ -70,9 +71,15 @@ afterEach(() => {
 })
 
 describe('Tianwen Desktop Profile preparation boundary', () => {
-  it('classifies ready, missing, plain, incompatible, and broken Profile entries without mutation', () => {
+  it('classifies current, known-old, unknown, missing, plain, and broken Profile entries without mutation', () => {
     const ready = fixture()
     expect(inspectWebProfile(ready)).toEqual({ kind: 'ready', profileRoot: profileRoot(ready) })
+
+    const outdated = fixture()
+    writeJson(join(profileRoot(outdated), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
+      name: runtimePackage, version: '0.1.0',
+    })
+    expect(inspectWebProfile(outdated)).toEqual({ kind: 'outdated-runtime', profileRoot: profileRoot(outdated) })
 
     const missing = fixture()
     rmSync(profileRoot(missing), { recursive: true })
@@ -138,6 +145,32 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
       }) as never,
     })
     await expect(preparation).resolves.toBeUndefined()
+    expect(calls).toEqual([{
+      program: target.nodeExecutable,
+      args: [target.dshBin, 'plugin', '--profile', 'web', '--allow-build=koffi', 'add', runtimeTarball],
+      options: expect.objectContaining({ shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }),
+    }])
+    expect((calls[0] as { options: { env: NodeJS.ProcessEnv } }).options.env).toMatchObject({
+      ...process.env, DSH_HOME: target.dshHome, DSH_TELEMETRY_DISABLED: '1',
+    })
+  })
+
+  it('updates the known-old Runtime exactly once with the embedded tarball and selected home', async () => {
+    const target = fixture()
+    writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
+      name: runtimePackage, version: '0.1.0',
+    })
+    const child = fakeChild()
+    const calls: unknown[] = []
+    const runtimeTarball = 'D:\\Runtime Packs\\tianwen-runtime-bundle-0.1.1.tgz'
+    const update = updateOutdatedWebProfile(target, runtimeTarball, {
+      spawn: ((program, args, options) => {
+        calls.push({ program, args, options })
+        queueMicrotask(() => child.emit('close', 0, null))
+        return child
+      }) as never,
+    })
+    await expect(update).resolves.toBeUndefined()
     expect(calls).toEqual([{
       program: target.nodeExecutable,
       args: [target.dshBin, 'plugin', '--profile', 'web', '--allow-build=koffi', 'add', runtimeTarball],
@@ -251,6 +284,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     const calls: string[] = []
     const result = await resolvePreparedDesktopTarget(target, 'D:\\runtime.tgz', {
       confirmCreateProfile: async () => { calls.push('confirm'); return true },
+      confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
       showManualPreparation: async () => { calls.push('manual') },
     }, {
       inspect: base => { calls.push('inspect'); return inspectWebProfile(base) },
@@ -268,6 +302,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     const calls: string[] = []
     const result = await resolvePreparedDesktopTarget(target, 'D:\\Runtime Packs\\runtime.tgz', {
       confirmCreateProfile: async () => { calls.push('confirm'); return true },
+      confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
       showManualPreparation: async (reason, command) => {
         calls.push('manual')
         expect(reason).toContain(profileRoot(target))
@@ -289,6 +324,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     const calls: string[] = []
     await expect(resolvePreparedDesktopTarget(target, 'D:\\runtime.tgz', {
       confirmCreateProfile: async () => { calls.push('confirm'); return true },
+      confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
       showManualPreparation: async () => { calls.push('manual') },
     }, {
       prepare: async () => { calls.push('prepare') },
@@ -303,6 +339,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     const calls: string[] = []
     const result = await resolvePreparedDesktopTarget(target, 'D:\\runtime.tgz', {
       confirmCreateProfile: async root => { calls.push(`confirm:${root}`); return false },
+      confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
       showManualPreparation: async () => { calls.push('manual') },
     }, {
       prepare: async () => { calls.push('prepare') },
@@ -318,6 +355,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     const calls: string[] = []
     const result = await resolvePreparedDesktopTarget(target, 'D:\\runtime.tgz', {
       confirmCreateProfile: async () => { calls.push('confirm'); return true },
+      confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
       showManualPreparation: async () => { calls.push('manual') },
     }, {
       prepare: async base => { calls.push('prepare'); writeReadyProfile(base.dshHome) },
@@ -333,6 +371,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     const calls: string[] = []
     await expect(resolvePreparedDesktopTarget(target, 'D:\\runtime.tgz', {
       confirmCreateProfile: async () => { calls.push('confirm'); return true },
+      confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
       showManualPreparation: async () => { calls.push('manual') },
     }, {
       prepare: async base => {
@@ -343,5 +382,82 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     })).rejects.toThrow(/Runtime bundle exactly once/u)
     expect(calls).toEqual(['confirm', 'prepare', 'validate'])
     expect(inspectWebProfile(target)).toEqual({ kind: 'missing-runtime', profileRoot: profileRoot(target) })
+  })
+
+  it('stops normally without update or validation when the known-old Runtime update is refused', async () => {
+    const target = fixture()
+    writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
+      name: runtimePackage, version: '0.1.0',
+    })
+    const calls: string[] = []
+    const result = await resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.1.tgz', {
+      confirmCreateProfile: async () => { calls.push('create-confirm'); return true },
+      confirmUpdateRuntime: async root => { calls.push(`update-confirm:${root}`); return false },
+      showManualPreparation: async () => { calls.push('manual') },
+    }, {
+      update: async () => { calls.push('update') },
+      validate: base => { calls.push('validate'); return resolveDesktopTarget(base) },
+    })
+    expect(result).toBeUndefined()
+    expect(calls).toEqual([`update-confirm:${profileRoot(target)}`])
+    expect(inspectWebProfile(target)).toEqual({ kind: 'outdated-runtime', profileRoot: profileRoot(target) })
+  })
+
+  it('updates once after acceptance and then strictly validates the current Runtime', async () => {
+    const target = fixture()
+    writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
+      name: runtimePackage, version: '0.1.0',
+    })
+    const calls: string[] = []
+    const result = await resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.1.tgz', {
+      confirmCreateProfile: async () => { calls.push('create-confirm'); return true },
+      confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
+      showManualPreparation: async () => { calls.push('manual') },
+    }, {
+      update: async base => {
+        calls.push('update')
+        writeJson(join(profileRoot(base), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
+          name: runtimePackage, version: runtimeVersion,
+        })
+      },
+      validate: base => { calls.push('validate'); return resolveDesktopTarget(base) },
+    })
+    expect(result).toEqual(resolveDesktopTarget(target))
+    expect(calls).toEqual(['update-confirm', 'update', 'validate'])
+  })
+
+  it('preserves one Runtime update failure without validation or retry', async () => {
+    const target = fixture()
+    writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
+      name: runtimePackage, version: '0.1.0',
+    })
+    const calls: string[] = []
+    const failure = new ProfilePreparationError(12, profileRoot(target), 'update failed')
+    await expect(resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.1.tgz', {
+      confirmCreateProfile: async () => { calls.push('create-confirm'); return true },
+      confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
+      showManualPreparation: async () => { calls.push('manual') },
+    }, {
+      update: async () => { calls.push('update'); throw failure },
+      validate: base => { calls.push('validate'); return resolveDesktopTarget(base) },
+    })).rejects.toBe(failure)
+    expect(calls).toEqual(['update-confirm', 'update'])
+  })
+
+  it('does not accept an update unless strict post-update validation sees the current Runtime', async () => {
+    const target = fixture()
+    writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
+      name: runtimePackage, version: '0.1.0',
+    })
+    const calls: string[] = []
+    await expect(resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.1.tgz', {
+      confirmCreateProfile: async () => { calls.push('create-confirm'); return true },
+      confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
+      showManualPreparation: async () => { calls.push('manual') },
+    }, {
+      update: async () => { calls.push('update') },
+      validate: base => { calls.push('validate'); return resolveDesktopTarget(base) },
+    })).rejects.toThrow(/required exact package/u)
+    expect(calls).toEqual(['update-confirm', 'update', 'validate'])
   })
 })
