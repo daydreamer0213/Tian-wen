@@ -43,6 +43,18 @@
   still use the generalized service directly and are unchanged.
 - Focused Host result after the fix: 42 passed, 0 failed.
 
+## Review fix round 2
+
+- Review found that the shared transport guard depended on Task runner services,
+  which broke a valid standalone v2 Host configured with only status reads and
+  Goal-first operations.
+- RED: all three v2 legacy mutations failed with `mutation dependencies are
+  unavailable` when `runDependencies` was absent.
+- GREEN: the guard now uses the RPC handler's existing status reader and
+  requires exact v2 before dispatch. Standalone v2 mutations remain available,
+  while v3 mutations still reject before any operation is called.
+- Focused Host result after the compatibility fix: 43 passed, 0 failed.
+
 ## Deliberate omissions
 
 - No dashboard, Goal composer, Task editor, polling loop, scheduler, retry, or

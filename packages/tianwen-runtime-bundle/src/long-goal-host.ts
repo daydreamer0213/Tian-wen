@@ -18,7 +18,6 @@ import type {
   GoalFirstLongGoalRecord,
   GoalFirstLongGoalStatusProjection,
   GoalFirstProgressResultV2,
-  LongGoalRecordV2,
   LongGoalAbandonResultV2,
   LongGoalGuidanceResultV2,
   LongGoalStatusProjection,
@@ -247,13 +246,6 @@ export interface TianwenGoalFirstOperations {
     readonly longGoalId: string
     readonly expectedRevision: number
   }) => Promise<LongGoalAbandonResultV2>
-}
-
-function requireLegacyV2GoalFirstRecord(record: AnyLongGoalRecord): LongGoalRecordV2 {
-  if (record.schemaVersion !== 'tianwen.long-goal.v2') {
-    throw new LongGoalIntegrityError('Tianwen Goal-first Host supports only v2 records')
-  }
-  return record
 }
 
 function requireLegacyV2GoalFirstProgress(result: GoalFirstProgressResult): GoalFirstProgressResultV2 {
@@ -699,12 +691,9 @@ export function createTianwenLongGoalRpcHandler(
     longGoalId: string,
     operation: () => Promise<T>,
   ): Promise<RpcResult<T>> => goalFirstRpc(async () => {
-    if (runDependencies === undefined) {
-      throw new LongGoalIntegrityError('Tianwen Goal-first Host mutation dependencies are unavailable')
+    if ((await readStatus(longGoalId)).schemaVersion !== 'tianwen.long-goal-status.v2') {
+      throw new LongGoalIntegrityError('Tianwen Goal-first Host supports only v2 records')
     }
-    requireLegacyV2GoalFirstRecord(
-      runDependencies.readLongGoal(roots.stateRoot, longGoalId),
-    )
     return operation()
   })
   return async (endpoint, payload) => {
