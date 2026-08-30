@@ -142,14 +142,25 @@ function services(ctx: Context): RunnerServices {
   return { agentDefaultModel, agentPresets, sessionPersistence }
 }
 
-function formatGoalFirstText(result: unknown): string {
+export function formatGoalFirstText(result: unknown): string {
   const value = result as {
     readonly action?: string
     readonly planning?: string
-    readonly status: { readonly goal: { readonly id: string; readonly phase: string; readonly objective: string } }
+    readonly status: {
+      readonly goal: {
+        readonly id: string
+        readonly phase: string
+        readonly revision: number
+        readonly objective: string
+      }
+    }
   }
+  const goal = value.status.goal
   const action = value.action ?? value.planning ?? 'updated'
-  return `${action}: Goal ${value.status.goal.id} [${value.status.goal.phase}] ${value.status.goal.objective}\n`
+  const next = goal.phase === 'complete'
+    ? 'Next: complete'
+    : `Next: tianwen goal ${goal.phase === 'blocked' ? 'abandon' : 'continue'} --goal ${goal.id} --revision ${goal.revision}`
+  return `${action}: Goal ${goal.id} [${goal.phase}] ${goal.objective}\n${next}\n`
 }
 
 async function flush(ctx: Context, agent: Agent): Promise<void> {
