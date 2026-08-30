@@ -218,6 +218,50 @@ describe('continuous Goal Host', () => {
     await dispose()
   })
 
+  it('rejects an awaited goal_control failure without poisoning Host disposal', async () => {
+    const subject = harness()
+    const controlAgent = agent('control-session', 'control-goal')
+    subject.live.set('control-session', controlAgent)
+    const failure = new Error('requested control failed')
+    subject.dependencies.control.mockRejectedValue(failure)
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
+
+    await expect(subject.control(controlAgent)).rejects.toBe(failure)
+
+    expect(subject.dependencies.reportError).not.toHaveBeenCalled()
+    await expect(dispose()).resolves.toBeUndefined()
+  })
+
+  it('keeps completion deduplication while control waits behind a failed Continue', async () => {
+    const subject = harness()
+    const controlAgent = agent('control-session', 'control-goal')
+    subject.live.set('control-session', controlAgent)
+    const failure = new Error('Planner failed')
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    subject.dependencies.continueProgress = vi.fn(async () => {
+      await gate
+      throw failure
+    })
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
+
+    subject.first.setGoal('complete')
+    subject.setStatus(status(record(), ['complete'], null))
+    subject.complete()
+    await vi.waitFor(() => expect(subject.dependencies.continueProgress).toHaveBeenCalledOnce())
+    const pendingControl = subject.control(controlAgent)
+    subject.complete()
+    release()
+
+    await expect(pendingControl).resolves.toEqual({ action: 'paused' })
+    await expect(dispose()).rejects.toThrow(AggregateError)
+    expect(subject.dependencies.continueProgress).toHaveBeenCalledOnce()
+    expect(subject.dependencies.reportError).toHaveBeenCalledOnce()
+    expect(subject.dependencies.reportError).toHaveBeenCalledWith(failure)
+  })
+
   it('keeps the latest completed binding controllable after Host restart', async () => {
     const source = record({
       revision: 5,

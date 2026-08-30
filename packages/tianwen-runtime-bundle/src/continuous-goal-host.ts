@@ -182,14 +182,17 @@ export function mountContinuousGoalHost(
     longGoalId: string,
     task: Promise<T>,
     completion?: { readonly sessionId: string, readonly goalId: string },
+    reportFailure = true,
   ): Promise<T> => {
     const lane = task as Promise<T> & { completion?: { readonly sessionId: string, readonly goalId: string } }
     if (completion !== undefined) lane.completion = completion
     lanes.set(longGoalId, lane)
-    void task.catch(error => {
-      failures.push(error)
-      try { dependencies.reportError(error) } catch {}
-    })
+    if (reportFailure) {
+      void task.catch(error => {
+        failures.push(error)
+        try { dependencies.reportError(error) } catch {}
+      })
+    }
     void task.finally(() => {
       if (lanes.get(longGoalId) === lane) lanes.delete(longGoalId)
     }).catch(() => undefined)
@@ -200,10 +203,10 @@ export function mountContinuousGoalHost(
     if (existing !== undefined) return existing.then(() => undefined)
     return rememberLane(longGoalId, Promise.resolve().then(work))
   }
-  const append = <T>(longGoalId: string, work: () => Promise<T>): Promise<T> => {
-    const previous = lanes.get(longGoalId) ?? Promise.resolve()
-    const task = previous.then(work, work)
-    return rememberLane(longGoalId, task)
+  const append = <T>(longGoalId: string, work: () => Promise<T>, reportFailure = true): Promise<T> => {
+    const previous = lanes.get(longGoalId)
+    const task = (previous ?? Promise.resolve()).then(work, work)
+    return rememberLane(longGoalId, task, previous?.completion, reportFailure)
   }
   const appendCompletion = (
     longGoalId: string,
@@ -281,7 +284,7 @@ export function mountContinuousGoalHost(
           longGoalId: latest.id, expectedRevision: latest.revision,
           action: latest.planner.phase === 'complete' ? { action: 'status' } : action,
         }) as Pick<ContinuousGoalControlResult, 'action'>
-      })
+      }, false)
     },
   }
 
