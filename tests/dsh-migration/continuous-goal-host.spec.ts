@@ -80,7 +80,19 @@ function harness(initial = record()) {
       return () => listeners.splice(listeners.indexOf(listener as never), 1)
     },
   }
-  const continueProgress = vi.fn(async () => { order.push('continue') })
+  const continueProgress = vi.fn(async (input: { longGoalId: string }) => {
+    order.push('continue')
+    records = records.map(candidate => candidate.id === input.longGoalId
+      ? {
+          ...candidate,
+          revision: candidate.revision + 1,
+          planner: {
+            ...candidate.planner,
+            consideredSettledTasks: currentStatus.goal.completedTasks + currentStatus.goal.abandonedTasks,
+          },
+        }
+      : candidate)
+  })
   const readStatus = vi.fn(async () => { order.push('read'); return currentStatus })
   const pause = vi.fn((input: { longGoalId: string, expectedRevision: number }) => {
     order.push('pause')
@@ -226,21 +238,47 @@ describe('continuous Goal Host', () => {
     )
   })
 
-  it('continues exactly once when completion arrives while startup reconciliation is still reading', async () => {
+  it('queues an exact completion behind startup reconciliation for one idle-flush-reread barrier', async () => {
     const subject = harness()
     let release!: () => void
     const gate = new Promise<void>(resolve => { release = resolve })
+    let reads = 0
     subject.dependencies.readStatus = vi.fn(async () => {
-      await gate
+      reads += 1
+      if (reads === 1) {
+        await gate
+        return status(record(), ['active'], TASK_1)
+      }
       const completed = status(record(), ['complete'], null)
       return { ...completed, goal: { ...completed.goal, phase: 'planning' } }
     })
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
     subject.first.setGoal('complete')
     subject.complete()
+    subject.complete()
     release()
 
     await dispose()
+    expect(subject.first.whenIdle).toHaveBeenCalledOnce()
+    expect(subject.dependencies.flushSession).toHaveBeenCalledOnce()
     expect(subject.continueProgress).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not continue an observed completion while startup reconciliation is pending without goal/changed', async () => {
+    const subject = harness()
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    subject.dependencies.readStatus = vi.fn(async () => {
+      await gate
+      return status(record(), ['active'], TASK_1)
+    })
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    subject.first.setGoal('complete')
+    release()
+
+    await dispose()
+    expect(subject.first.whenIdle).not.toHaveBeenCalled()
+    expect(subject.dependencies.flushSession).not.toHaveBeenCalled()
+    expect(subject.continueProgress).not.toHaveBeenCalled()
   })
 })

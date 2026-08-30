@@ -121,6 +121,17 @@ function exactLiveArmedTask(ctx: HostContext, record: LongGoalRecordV3, status: 
     && goal.activation === 'armed'
 }
 
+function exactLiveCompletedTask(ctx: HostContext, status: LongGoalStatusProjectionV3): boolean {
+  if (status.currentTaskId === null) return false
+  const task = status.tasks.find(candidate => candidate.id === status.currentTaskId)
+  if (task?.execution === null || task?.execution === undefined) return false
+  const agent = ctx.agents.get(task.execution.sessionId as never)
+  const goal = agent?.ctx.goals.get(agent)
+  return goal !== undefined
+    && String(goal.id) === task.execution.goalId
+    && goal.phase === 'complete'
+}
+
 function isUserAbort(event: unknown): boolean {
   if (typeof event !== 'object' || event === null) return false
   const typed = event as {
@@ -148,7 +159,8 @@ export function mountContinuousGoalHost(
     sessionsRoot: dependencies.roots.sessionsRoot,
     evolutionRoot: dependencies.roots.evolutionRoot,
   }
-  const lanes = new Map<string, Promise<void>>()
+  type Lane = Promise<void> & { completion?: { readonly sessionId: string, readonly goalId: string } }
+  const lanes = new Map<string, Lane>()
   const failures: unknown[] = []
   const installed = new Map<Agent, { command: () => void, controls?: () => void | Promise<void> }>()
   const creatingControlSessions = new Set<string>()
@@ -162,16 +174,22 @@ export function mountContinuousGoalHost(
     const record = dependencies.readLongGoal(dependencies.roots.stateRoot, longGoalId)
     return isV3(record) ? record : undefined
   }
-  const rememberLane = (longGoalId: string, task: Promise<void>): Promise<void> => {
-    lanes.set(longGoalId, task)
+  const rememberLane = (
+    longGoalId: string,
+    task: Promise<void>,
+    completion?: { readonly sessionId: string, readonly goalId: string },
+  ): Lane => {
+    const lane = task as Lane
+    if (completion !== undefined) lane.completion = completion
+    lanes.set(longGoalId, lane)
     void task.catch(error => {
       failures.push(error)
       try { dependencies.reportError(error) } catch {}
     })
     void task.finally(() => {
-      if (lanes.get(longGoalId) === task) lanes.delete(longGoalId)
+      if (lanes.get(longGoalId) === lane) lanes.delete(longGoalId)
     }).catch(() => undefined)
-    return task
+    return lane
   }
   const joinOrStart = (longGoalId: string, work: () => Promise<void>): Promise<void> => {
     const existing = lanes.get(longGoalId)
@@ -182,6 +200,21 @@ export function mountContinuousGoalHost(
     const previous = lanes.get(longGoalId) ?? Promise.resolve()
     const task = previous.then(work, work)
     return rememberLane(longGoalId, task)
+  }
+  const appendCompletion = (
+    longGoalId: string,
+    execution: { readonly sessionId: string, readonly goalId: string },
+  ): Promise<void> => {
+    const previous = lanes.get(longGoalId)
+    if (
+      previous?.completion?.sessionId === execution.sessionId
+      && previous.completion.goalId === execution.goalId
+    ) return previous
+    const task = (previous ?? Promise.resolve()).then(
+      () => continueAfterCompletion(longGoalId, execution),
+      () => continueAfterCompletion(longGoalId, execution),
+    )
+    return rememberLane(longGoalId, task, execution)
   }
   const flush = async (agent: Agent): Promise<void> => {
     if (await dependencies.flushSession(agent) === false) throw new Error('Session persistence is unavailable')
@@ -279,6 +312,7 @@ export function mountContinuousGoalHost(
     ) return
     const status = await readStatus(longGoalId)
     if (status.goal.phase === 'blocked' || status.goal.phase === 'complete') return
+    if (exactLiveCompletedTask(ctx, status)) return
     const current = status.currentTaskId === null ? undefined : status.tasks.find(task => task.id === status.currentTaskId)
     const requiresContinue = record.planner.phase === 'unplanned'
       || record.planner.phase === 'needs-replan'
@@ -361,7 +395,7 @@ export function mountContinuousGoalHost(
         || record.planner.phase === 'complete'
       ) continue
       if (boundTask(record, sessionId, goalId) !== undefined) {
-        void joinOrStart(record.id, () => continueAfterCompletion(record.id, { sessionId, goalId })).catch(() => undefined)
+        void appendCompletion(record.id, { sessionId, goalId }).catch(() => undefined)
       }
     }
   })
