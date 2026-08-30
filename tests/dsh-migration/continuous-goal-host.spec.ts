@@ -210,4 +210,37 @@ describe('continuous Goal Host', () => {
     await expect(dispose()).rejects.toThrow(AggregateError)
     expect(subject.dependencies.reportError).toHaveBeenCalledWith(failure)
   })
+
+  it('reports an unconfirmable cold Task after a control-session stop instead of silently returning', async () => {
+    const subject = harness()
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
+    subject.live.delete(EXECUTION_1.sessionId)
+
+    subject.abort('control-session')
+
+    await expect(dispose()).rejects.toThrow(AggregateError)
+    expect(subject.pause).toHaveBeenCalledOnce()
+    expect(subject.dependencies.reportError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('cancellation could not be confirmed') }),
+    )
+  })
+
+  it('continues exactly once when completion arrives while startup reconciliation is still reading', async () => {
+    const subject = harness()
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    subject.dependencies.readStatus = vi.fn(async () => {
+      await gate
+      const completed = status(record(), ['complete'], null)
+      return { ...completed, goal: { ...completed.goal, phase: 'planning' } }
+    })
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    subject.first.setGoal('complete')
+    subject.complete()
+    release()
+
+    await dispose()
+    expect(subject.continueProgress).toHaveBeenCalledTimes(1)
+  })
 })

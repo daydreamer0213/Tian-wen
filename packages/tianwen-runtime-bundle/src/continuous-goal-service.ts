@@ -89,6 +89,20 @@ function progressResult(
   return result(runningAction, status)
 }
 
+async function cancelAndConfirmTask(
+  execution: TaskExecutionBinding,
+  dependencies: ContinuousGoalServiceDependencies,
+): Promise<'paused' | 'complete'> {
+  try {
+    return await dependencies.cancelTaskAndReadStatus(execution)
+  } catch (cause) {
+    throw new LongGoalIntegrityError(
+      'Continuous Goal active Task cancellation could not be confirmed',
+      { cause },
+    )
+  }
+}
+
 export async function createContinuousGoalProgress(input: {
   readonly stateRoot: string
   readonly dshStatusTarget: ExistingInput['dshStatusTarget']
@@ -139,7 +153,7 @@ export async function controlContinuousGoal(
     const active = beforeCancel.currentTaskId === null ? undefined : beforeCancel.tasks.find(task => task.id === beforeCancel.currentTaskId)
     if (active?.phase === 'active') {
       if (active.execution === null) throw new LongGoalIntegrityError('Continuous Goal active Task has no Session')
-      await dependencies.cancelTaskAndReadStatus(active.execution)
+      await cancelAndConfirmTask(active.execution, dependencies)
     }
     const status = await readStatus(input, dependencies)
     return result(status.goal.phase === 'complete' ? 'complete' : 'paused', status)
@@ -162,7 +176,7 @@ export async function controlContinuousGoal(
   if (active === undefined || active.execution === null) {
     throw new LongGoalIntegrityError('Continuous Goal redirection requires a current Task')
   }
-  const cancellation = await dependencies.cancelTaskAndReadStatus(active.execution)
+  const cancellation = await cancelAndConfirmTask(active.execution, dependencies)
   if (cancellation === 'complete') return result('complete', await readStatus(input, dependencies))
   const abandoned = await dependencies.abandonRedirectedTask({
     stateRoot: input.stateRoot,

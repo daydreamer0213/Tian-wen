@@ -102,6 +102,23 @@ describe('continuous Goal control service', () => {
     expect(subject.cancelled).toEqual(EXECUTION)
   })
 
+  it('keeps the durable pause but reports that a cold active Task could not be confirmed cancelled', async () => {
+    const current = record({ tasks: [{ id: TASK_ID, objective: 'Cold work', execution: EXECUTION, resolution: null }] })
+    const subject = harness(current)
+    subject.setStatus(status(current))
+    const dependencies = {
+      ...subject.dependencies,
+      cancelTaskAndReadStatus: async () => { throw new Error('Task Session task-session-1 is not live') },
+    } satisfies ContinuousGoalServiceDependencies
+
+    await expect(controlContinuousGoal({
+      stateRoot: STATE_ROOT, dshStatusTarget: DSH_STATUS_TARGET,
+      longGoalId: GOAL_ID, expectedRevision: 1, action: { action: 'pause' },
+    }, dependencies)).rejects.toThrow('cancellation could not be confirmed')
+    expect(subject.events).toEqual(['mode:paused'])
+    expect(subject.current.control.autoProgress).toBe('paused')
+  })
+
   it('writes running and invokes the Goal-first Continue operation once on resume', async () => {
     const current = record({ control: { sessionId: 'control-session-1', autoProgress: 'paused' } })
     const subject = harness(current)
@@ -149,7 +166,7 @@ describe('continuous Goal control service', () => {
       cancelTaskAndReadStatus: async () => { throw new Error('DSH cancellation failed') },
     } satisfies ContinuousGoalServiceDependencies
 
-    await expect(controlContinuousGoal({ stateRoot: STATE_ROOT, dshStatusTarget: DSH_STATUS_TARGET, longGoalId: GOAL_ID, expectedRevision: 1, action: { action: 'pause-and-replan', text: 'Change direction', resume: false } }, dependencies)).rejects.toThrow('DSH cancellation failed')
+    await expect(controlContinuousGoal({ stateRoot: STATE_ROOT, dshStatusTarget: DSH_STATUS_TARGET, longGoalId: GOAL_ID, expectedRevision: 1, action: { action: 'pause-and-replan', text: 'Change direction', resume: false } }, dependencies)).rejects.toThrow('cancellation could not be confirmed')
     expect(subject.events).toEqual(['redirect'])
     expect(subject.current).toMatchObject({ guidance: ['Change direction'], control: { autoProgress: 'paused' } })
   })
