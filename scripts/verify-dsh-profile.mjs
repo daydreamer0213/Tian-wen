@@ -38,7 +38,7 @@ const expectedDshVersion = '0.1.1-rc.2'
 const tarballBasename = 'tianwen-dsh-probe-bundle-0.0.0.tgz'
 const runtimeBundlePackage = '@tianwen/runtime-bundle'
 const runtimeSpecifier = `${runtimeBundlePackage}/runtime`
-const runtimeTarballBasename = 'tianwen-runtime-bundle-0.1.3.tgz'
+const runtimeTarballBasename = 'tianwen-runtime-bundle-0.1.4.tgz'
 const runtimeClientInject = [
   '@deepseek-ai/dsh-client-connection',
   '@deepseek-ai/dsh-client-runtime',

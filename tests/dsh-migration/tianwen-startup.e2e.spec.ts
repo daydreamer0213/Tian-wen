@@ -33,7 +33,7 @@ const listReceiptPath = `${tianwenRoot}/receipts/phase4-goal-list-receipt.json`
 const createReceiptPath = `${tianwenRoot}/receipts/goal-create-receipt.json`
 const resumeReceiptPath = `${tianwenRoot}/receipts/phase5-goal-resume-receipt.json`
 const installReceiptPath = `${tianwenRoot}/receipts/tianwen-install.json`
-const archive = `${tianwenRoot}/packs/tianwen-runtime-bundle-0.1.3.tgz`
+const archive = `${tianwenRoot}/packs/tianwen-runtime-bundle-0.1.4.tgz`
 const installer = resolve(root, 'scripts/install-tianwen.mjs')
 const taskText = 'run the Tianwen phase 2 smoke task'
 const completeCallId = 'tianwen-phase2-goal-complete'
@@ -41,7 +41,7 @@ const enabled = process.env.TIANWEN_DSH_PHASE2_STARTUP === '1'
 const controlledInstalledEnabled = process.platform === 'win32' &&
   process.env.TIANWEN_CONTROLLED_INSTALLED_E2E === '1'
 const runtimePackage = '@tianwen/runtime-bundle'
-const runtimePackageVersion = '0.1.3'
+const runtimePackageVersion = '0.1.4'
 const liveGoalObjective = 'Call tianwen_smoke_action exactly once. After it succeeds, mark this Goal complete with update_goal, then reply exactly TIANWEN_GOAL_ROUND_OK.'
 const controlledFixtureBase = resolve(
   process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-test-fixtures',

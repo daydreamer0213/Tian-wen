@@ -39,6 +39,7 @@ const serverPeerDependencies = {
   '@deepseek-ai/cordis': '4.0.1',
   '@deepseek-ai/dsh-agent': '0.1.1-rc.2',
   '@deepseek-ai/dsh-agent-presets': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-commands': '0.1.1-rc.2',
   '@deepseek-ai/dsh-credentials': '0.1.1-rc.2',
   '@deepseek-ai/dsh-goal': '0.1.1-rc.2',
   '@deepseek-ai/dsh-llm': '0.1.1-rc.2',
@@ -70,6 +71,9 @@ function externalPackages(
 function isAllowedRuntimeInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return [
+    'src/continuous-goal-agent.ts',
+    'src/continuous-goal-service.ts',
+    'src/continuous-goal-host.ts',
     'src/runtime.ts',
     'src/goal-first-service.ts',
     'src/goal-task-feedback.ts',
@@ -151,6 +155,9 @@ function isAllowedCreateRunnerInput(input: string): boolean {
 function isAllowedGoalFirstRunnerInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return [
+    'src/continuous-goal-agent.ts',
+    'src/continuous-goal-service.ts',
+    'src/continuous-goal-host.ts',
     'src/goal-first-runner.ts',
     'src/goal-first-service.ts',
     'src/goal-task-feedback.ts',
@@ -193,6 +200,15 @@ function containsCredentialLiteral(text: string): boolean {
 }
 
 describe('runtime metafile input allowlist', () => {
+  it.each([
+    'src/continuous-goal-agent.ts',
+    'src/continuous-goal-service.ts',
+    'src/continuous-goal-host.ts',
+  ])('permits the exact continuous Goal runtime input %s', input => {
+    expect(isAllowedRuntimeInput(input)).toBe(true)
+    expect(isAllowedGoalFirstRunnerInput(input)).toBe(true)
+  })
+
   it('permits the approved service-owned scripted adapter only', () => {
     expect(isAllowedRuntimeInput(
       '../tianwen-dsh-compat/dist/scripted-adapter.js',
@@ -460,7 +476,7 @@ describe('@tianwen/runtime-bundle', () => {
       version: string
     }
     expect(manifest.name).toBe('@tianwen/runtime-bundle')
-    expect(manifest.version).toBe('0.1.3')
+    expect(manifest.version).toBe('0.1.4')
     expect(manifest).not.toHaveProperty('private')
     expect(manifest.bin).toEqual({ tianwen: 'dist/cli.js' })
     expect(manifest.dependencies ?? {}).toEqual({})
@@ -648,7 +664,7 @@ describe('@tianwen/runtime-bundle', () => {
         dependencies: {
           '@deepseek-ai/dsh-base': '0.1.1-rc.2',
           '@deepseek-ai/dsh-headless': '0.1.1-rc.2',
-          '@tianwen/runtime-bundle': '0.1.3',
+          '@tianwen/runtime-bundle': '0.1.4',
         },
         dsh: {
           profile: {
@@ -914,6 +930,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(packageExternals).toEqual([
       '@deepseek-ai/cordis',
       '@deepseek-ai/dsh-agent',
+      '@deepseek-ai/dsh-commands',
       '@deepseek-ai/dsh-goal',
       '@deepseek-ai/dsh-llm',
       '@deepseek-ai/dsh-session',
@@ -1122,7 +1139,7 @@ describe('@tianwen/runtime-bundle', () => {
   it('packs only the deployable runtime bundle files', () => {
     mkdirSync(packFixtureBase, { recursive: true })
     const packRoot = mkdtempSync(join(packFixtureBase, 'pack-'))
-    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.1.3.tgz')
+    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.1.4.tgz')
     const pnpmEntry = resolve(dirname(process.execPath), 'node_modules/corepack/dist/pnpm.js')
     try {
       execFileSync(process.execPath, [
