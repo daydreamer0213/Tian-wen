@@ -15,7 +15,9 @@ import type {
   AnyLongGoalRecord,
   AnyLongGoalStatusProjection,
   AnyLongGoalSummary,
+  GoalFirstLongGoalRecord,
   GoalFirstProgressResultV2,
+  LongGoalRecordV2,
   LongGoalAbandonResultV2,
   LongGoalGuidanceResultV2,
   LongGoalStatusProjection,
@@ -30,7 +32,7 @@ import {
   continueGoalFirstProgress,
   createGoalFirstProgress,
 } from './goal-first-service.js'
-import type { GoalFirstServiceDependencies } from './goal-first-service.js'
+import type { GoalFirstProgressResult, GoalFirstServiceDependencies } from './goal-first-service.js'
 import {
   abandonBlockedLongGoalTask,
   appendLongGoalGuidance,
@@ -231,6 +233,25 @@ export interface TianwenGoalFirstOperations {
     readonly longGoalId: string
     readonly expectedRevision: number
   }) => Promise<LongGoalAbandonResultV2>
+}
+
+function requireLegacyV2GoalFirstRecord(record: GoalFirstLongGoalRecord): LongGoalRecordV2 {
+  if (record.schemaVersion !== 'tianwen.long-goal.v2') {
+    throw new LongGoalIntegrityError('Tianwen Goal-first Host supports only v2 records')
+  }
+  return record
+}
+
+function requireLegacyV2GoalFirstProgress(result: GoalFirstProgressResult): GoalFirstProgressResultV2 {
+  if (result.status.schemaVersion !== 'tianwen.long-goal-status.v2') {
+    throw new LongGoalIntegrityError('Tianwen Goal-first Host supports only v2 status')
+  }
+  return {
+    schemaVersion: result.schemaVersion,
+    action: result.action,
+    status: result.status,
+    sessionId: result.sessionId,
+  }
 }
 
 export interface TianwenGoalTaskFeedbackOperations {
@@ -1329,7 +1350,7 @@ export function mountTianwenLongGoalHost(
       runPlannerTurn: ({ record, reason }) => runLongGoalPlannerTurn({
         stateRoot: roots.stateRoot,
         dshStatusTarget,
-        record,
+        record: requireLegacyV2GoalFirstRecord(record),
         reason,
       }, plannerDependencies),
       runTask: async input => {
@@ -1345,21 +1366,21 @@ export function mountTianwenLongGoalHost(
       },
     }
     const goalFirstOperations: TianwenGoalFirstOperations = {
-      createGoalFirst: input => createGoalFirstProgress({
+      createGoalFirst: async input => requireLegacyV2GoalFirstProgress(await createGoalFirstProgress({
         stateRoot: roots.stateRoot,
         dshStatusTarget,
         ...input,
-      }, serviceDependencies),
+      }, serviceDependencies)),
       addGuidance: input => addGoalFirstGuidance({
         stateRoot: roots.stateRoot,
         dshStatusTarget,
         ...input,
       }, serviceDependencies),
-      continueProgress: input => continueGoalFirstProgress({
+      continueProgress: async input => requireLegacyV2GoalFirstProgress(await continueGoalFirstProgress({
         stateRoot: roots.stateRoot,
         dshStatusTarget,
         ...input,
-      }, serviceDependencies),
+      }, serviceDependencies)),
       abandonCurrentTask: input => abandonGoalFirstTask({
         stateRoot: roots.stateRoot,
         dshStatusTarget,

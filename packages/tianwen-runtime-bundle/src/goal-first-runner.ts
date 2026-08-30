@@ -17,6 +17,7 @@ import {
   createGoalFirstProgress,
 } from './goal-first-service.js'
 import type { GoalFirstServiceDependencies } from './goal-first-service.js'
+import type { GoalFirstLongGoalRecord, LongGoalRecordV2 } from './long-goal-contract.js'
 import {
   abandonBlockedLongGoalTask,
   appendLongGoalGuidance,
@@ -68,6 +69,13 @@ type SessionPersistence = {
     readonly meta: { readonly id: unknown }
     readonly events: readonly SessionEvent[]
   }>
+}
+
+function requireLegacyV2GoalFirstRecord(record: GoalFirstLongGoalRecord): LongGoalRecordV2 {
+  if (record.schemaVersion !== 'tianwen.long-goal.v2') {
+    throw new LongGoalIntegrityError('Goal-first runner supports only v2 records')
+  }
+  return record
 }
 
 interface RunnerServices {
@@ -303,7 +311,7 @@ export async function runGoalFirst(
     runPlannerTurn: ({ record, reason }) => runLongGoalPlannerTurn({
       stateRoot: roots.stateRoot,
       dshStatusTarget,
-      record,
+      record: requireLegacyV2GoalFirstRecord(record),
       reason,
     }, plannerDependencies),
     runTask: async input => {
