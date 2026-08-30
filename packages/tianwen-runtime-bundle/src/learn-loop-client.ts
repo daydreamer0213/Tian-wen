@@ -16,9 +16,11 @@ import type {
   GoalTaskFeedbackRecordResult,
   GoalTaskFeedbackStatus,
 } from './goal-task-feedback.js'
+import type { LearningClueSource, LearningClueStatus } from './learning-clue-status.js'
 
 export interface LearnLoopClient {
   list(signal?: AbortSignal): Promise<readonly AnyLongGoalSummary[]>
+  learningClues(signal?: AbortSignal): Promise<LearningClueStatus>
   create(input: {
     readonly objective: string
     readonly tasks: readonly string[]
@@ -294,6 +296,39 @@ function isFeedbackRecord(value: unknown): value is GoalTaskFeedbackRecordResult
     typeof value.duplicate === 'boolean' && isFeedbackItem(value.item)
 }
 
+function isLearningClueSource(value: unknown): value is LearningClueSource {
+  return isRecord(value) && hasExactKeys(value, [
+    'longGoalId', 'goalObjective', 'taskId', 'taskObjective', 'recordedAt',
+  ]) && isNonEmptyString(value.longGoalId) && isNonEmptyString(value.goalObjective) &&
+    isNonEmptyString(value.taskId) && isNonEmptyString(value.taskObjective) &&
+    isNonEmptyString(value.recordedAt)
+}
+
+function isLearningClueStatus(value: unknown): value is LearningClueStatus {
+  if (!isRecord(value) || !hasExactKeys(value, ['schemaVersion', 'items']) ||
+    value.schemaVersion !== 'tianwen.learning-clue-status.v1' || !Array.isArray(value.items)) {
+    return false
+  }
+  const ticketIds = new Set<string>()
+  return value.items.every(item => {
+    if (!isRecord(item) || !hasExactKeys(item, [
+      'ticketId', 'status', 'occurrenceCount', 'sources',
+    ]) || typeof item.ticketId !== 'string' || !/^ticket:[a-f0-9]{64}$/.test(item.ticketId) ||
+      ticketIds.has(item.ticketId) || item.status !== 'open' ||
+      !isPositiveInteger(item.occurrenceCount) || !Array.isArray(item.sources) ||
+      item.sources.length === 0) return false
+    ticketIds.add(item.ticketId)
+    const sourceIds = new Set<string>()
+    return item.sources.every(source => {
+      if (!isLearningClueSource(source)) return false
+      const sourceId = `${source.longGoalId}\0${source.taskId}`
+      if (sourceIds.has(sourceId)) return false
+      sourceIds.add(sourceId)
+      return true
+    })
+  })
+}
+
 function invalidResponse(): never {
   throw new Error('invalid Tianwen RPC response')
 }
@@ -339,6 +374,11 @@ export function createLearnLoopClient(rpc: ClientConnectionRpc): LearnLoopClient
       if (!isRecord(value) || !hasExactKeys(value, ['goals']) || !Array.isArray(value.goals) ||
         !value.goals.every(isSummary)) invalidResponse()
       return value.goals
+    },
+    async learningClues(signal) {
+      const value = await call(rpc, 'learning-clues', {}, signal)
+      if (!isLearningClueStatus(value)) invalidResponse()
+      return value
     },
     async create(input, signal) {
       const value = await call(rpc, 'create', input, signal)

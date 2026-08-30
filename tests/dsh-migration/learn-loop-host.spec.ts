@@ -18,6 +18,7 @@ import {
   type TianwenGoalFirstOperations,
   type TianwenGoalTaskFeedbackOperations,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
+import { projectLearningClueStatus } from '../../packages/tianwen-runtime-bundle/src/learning-clue-status.js'
 import { runLongGoalPlannerTurn } from '../../packages/tianwen-runtime-bundle/src/long-goal-planner.js'
 import {
   createGoalFirstLongGoal,
@@ -553,6 +554,125 @@ describe('Tianwen Long Goal Web host', () => {
       })
     }
     expect(feedback.record).toHaveBeenCalledTimes(1)
+  })
+
+  it('projects only safe settled Goal-first Ticket sources and sorts clues by latest source', () => {
+    const ticketA = `ticket:${'a'.repeat(64)}` as const
+    const ticketB = `ticket:${'b'.repeat(64)}` as const
+    const statusA = {
+      ...goalFirstStatus(4),
+      goal: {
+        ...goalFirstStatus(4).goal,
+        id: 'goal-a',
+        objective: 'Improve release quality',
+        phase: 'complete' as const,
+        completedTasks: 1,
+        totalTasks: 1,
+      },
+      planner: { sessionId: 'planner-a', phase: 'complete' as const, planRevision: 1 },
+      tasks: [{
+        id: 'task-a',
+        objective: 'Review the release notes',
+        phase: 'complete' as const,
+        execution: { goalId: 'dsh-goal-a', sessionId: 'session-a' },
+        resolution: null,
+      }],
+    }
+    const statusB = {
+      ...statusA,
+      goal: { ...statusA.goal, id: 'goal-b', objective: 'Reduce support friction' },
+      planner: { ...statusA.planner, sessionId: 'planner-b' },
+      tasks: [{
+        ...statusA.tasks[0],
+        id: 'task-b',
+        objective: 'Clarify the setup flow',
+        execution: { goalId: 'dsh-goal-b', sessionId: 'session-b' },
+      }],
+    }
+
+    const result = projectLearningClueStatus({
+      goals: [{
+        status: statusA,
+        feedback: {
+          schemaVersion: 'tianwen.goal-task-feedback-status.v1',
+          items: [{
+            taskId: 'task-a', rating: 'negative', decision: 'ticket-created',
+            recordedAt: '2026-08-30T01:00:00.000Z', ticketId: ticketA,
+          }],
+        },
+      }, {
+        status: statusB,
+        feedback: {
+          schemaVersion: 'tianwen.goal-task-feedback-status.v1',
+          items: [{
+            taskId: 'task-b', rating: 'negative', decision: 'ticket-merged',
+            recordedAt: '2026-08-30T03:00:00.000Z', ticketId: ticketA,
+          }, {
+            taskId: 'task-b', rating: 'negative', decision: 'ticket-merged',
+            recordedAt: '2026-08-30T03:00:00.000Z', ticketId: ticketA,
+          }],
+        },
+      }],
+      tickets: [{
+        ticketId: ticketB,
+        problemFingerprint: `sha256:${'2'.repeat(64)}`,
+        status: 'open',
+        signalIds: [`signal:${'3'.repeat(64)}`],
+      }, {
+        ticketId: ticketA,
+        problemFingerprint: `sha256:${'1'.repeat(64)}`,
+        status: 'open',
+        signalIds: [`signal:${'1'.repeat(64)}`, `signal:${'2'.repeat(64)}`],
+      }],
+    })
+
+    expect(result).toEqual({
+      schemaVersion: 'tianwen.learning-clue-status.v1',
+      items: [{
+        ticketId: ticketA,
+        status: 'open',
+        occurrenceCount: 2,
+        sources: [{
+          longGoalId: 'goal-b',
+          goalObjective: 'Reduce support friction',
+          taskId: 'task-b',
+          taskObjective: 'Clarify the setup flow',
+          recordedAt: '2026-08-30T03:00:00.000Z',
+        }, {
+          longGoalId: 'goal-a',
+          goalObjective: 'Improve release quality',
+          taskId: 'task-a',
+          taskObjective: 'Review the release notes',
+          recordedAt: '2026-08-30T01:00:00.000Z',
+        }],
+      }],
+    })
+    expect(JSON.stringify(result)).not.toMatch(
+      /"problemFingerprint"|"signalIds"|"note"|"workspace"|"evidence"/,
+    )
+  })
+
+  it('serves learning clues only for an exact empty RPC payload', async () => {
+    const expected = { schemaVersion: 'tianwen.learning-clue-status.v1' as const, items: [] }
+    const learningClues = { status: vi.fn(async () => expected) }
+    const status = longGoalStatus(['complete'], [{ goalId: 'goal-1', sessionId: 'session-1' }])
+    const handler = createTianwenLongGoalRpcHandler(
+      ROOTS,
+      undefined,
+      runDependencies(longGoalRecord([status.tasks[0]!.execution]), status),
+      goalFirstOperations(),
+      taskFeedbackOperations(),
+      learningClues,
+    )
+
+    await expect(handler('learning-clues', {}, AbortSignal.timeout(1_000)))
+      .resolves.toEqual({ ok: true, value: expected })
+    await expect(handler('learning-clues', { ignored: true }, AbortSignal.timeout(1_000)))
+      .resolves.toEqual({
+        ok: false,
+        error: { code: 'internal', message: 'invalid-request', details: {} },
+      })
+    expect(learningClues.status).toHaveBeenCalledOnce()
   })
 
   it('keeps the v1 create payload and result unchanged when goal-first operations are installed', async () => {

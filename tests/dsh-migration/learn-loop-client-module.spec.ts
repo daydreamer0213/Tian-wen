@@ -311,6 +311,7 @@ function sessionRow(input: {
 function loadClientModule(input: {
   readonly list: ReturnType<typeof createSessionList>
   readonly rpc: { call: ReturnType<typeof vi.fn> }
+  readonly learningClues?: ReturnType<typeof vi.fn>
   readonly open?: ReturnType<typeof vi.fn>
   readonly locale?: TestLocale
 }) {
@@ -341,7 +342,15 @@ function loadClientModule(input: {
   )
   if (exports === undefined) throw new Error('client module did not register')
   exports.apply({
-    connection: { rpc: input.rpc },
+    connection: { rpc: {
+      call: (channel: string, endpoint: string, payload: unknown, options: unknown) =>
+        endpoint === 'learning-clues'
+          ? (input.learningClues?.(channel, endpoint, payload, options) ?? Promise.resolve({
+              ok: true,
+              value: { schemaVersion: 'tianwen.learning-clue-status.v1', items: [] },
+            }))
+          : input.rpc.call(channel, endpoint, payload, options),
+    } },
     locale: input.locale ?? new TestLocale('en'),
     sessions: { list: input.list, open },
     slots: {
@@ -451,6 +460,115 @@ describe('Learn Loop compiled DSH client module', () => {
       .toBe(false)
     expect(text(tree)).not.toContain('Maximum rounds per task')
     expect(text(tree)).not.toContain('Add task')
+  })
+
+  it('shows an empty localized improvement-clue view from the Goal header', async () => {
+    const locale = new TestLocale('en')
+    const learningClues = vi.fn(async () => ({
+      ok: true,
+      value: { schemaVersion: 'tianwen.learning-clue-status.v1', items: [] },
+    }))
+    const client = loadClientModule({
+      list: createSessionList({ current: undefined, byId: {} }),
+      locale,
+      learningClues,
+      rpc: { call: vi.fn(async () => ({ ok: true, value: { goals: [] } })) },
+    })
+    let tree = client.render()
+
+    ;(findElement(tree, element => element.props['aria-label'] === 'Learn Loop').props.onClick as () => void)()
+    await flushClient()
+    tree = client.render()
+    ;(findButton(tree, 'Improvement clues (0)').props.onClick as () => void)()
+    await flushClient()
+    tree = client.render()
+
+    expect(text(tree)).toContain('No improvement clues yet.')
+    expect(findButton(tree, 'Refresh clues')).toBeDefined()
+    expect(findButton(tree, 'Back to Goals')).toBeDefined()
+    expect(learningClues).toHaveBeenCalledTimes(2)
+
+    locale.set('zh')
+    tree = client.render()
+    expect(text(tree)).toContain('还没有改进线索。')
+    expect(findButton(tree, '刷新线索')).toBeDefined()
+    expect(findButton(tree, '返回目标列表')).toBeDefined()
+  })
+
+  it('navigates from a focused Task feedback clue to its safe source Goal', async () => {
+    const completed = {
+      ...statusV2,
+      goal: { ...statusV2.goal, phase: 'complete', completedTasks: 1 },
+      planner: { ...statusV2.planner, phase: 'complete' },
+      tasks: [{ ...statusV2.tasks[0], phase: 'complete' }],
+      currentTaskId: null,
+    } as const
+    const summary = {
+      schemaVersion: 'tianwen.long-goal-summary.v2',
+      id: completed.goal.id, objective: completed.goal.objective,
+      phase: completed.goal.phase, revision: completed.goal.revision,
+      completedTasks: 1, abandonedTasks: 0, totalTasks: 1,
+      currentTaskId: null, updatedAt: 1,
+    } as const
+    const ticketId = `ticket:${'a'.repeat(64)}`
+    const learningClues = vi.fn(async () => ({
+      ok: true,
+      value: {
+        schemaVersion: 'tianwen.learning-clue-status.v1',
+        items: [{
+          ticketId,
+          status: 'open',
+          occurrenceCount: 2,
+          sources: [{
+            longGoalId: completed.goal.id,
+            goalObjective: completed.goal.objective,
+            taskId: 'task-v2-1',
+            taskObjective: 'Implement the Web flow',
+            recordedAt: '2026-08-30T00:00:00.000Z',
+          }],
+        }],
+      },
+    }))
+    const feedbackItem = {
+      taskId: 'task-v2-1', rating: 'negative' as const,
+      decision: 'ticket-created' as const,
+      recordedAt: '2026-08-30T00:00:00.000Z',
+      ticketId,
+    }
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
+      if (endpoint === 'status') return { ok: true, value: { status: completed } }
+      if (endpoint === 'feedback-status') return { ok: true, value: {
+        schemaVersion: 'tianwen.goal-task-feedback-status.v1', items: [feedbackItem],
+      } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const client = loadClientModule({
+      list: createSessionList({ current: undefined, byId: {} }),
+      learningClues,
+      rpc,
+    })
+    let tree = await openListedGoal(client.render, completed.goal.objective)
+
+    ;(findButton(tree, 'Improvement clue recorded').props.onClick as () => void)()
+    await flushClient()
+    tree = client.render()
+
+    expect(text(tree)).toContain('2 occurrences')
+    expect(text(tree)).toContain(completed.goal.objective)
+    expect(text(tree)).toContain('Implement the Web flow')
+    expect(text(tree)).toContain('2026-08-30T00:00:00.000Z')
+    expect(text(tree)).not.toContain(ticketId)
+    expect(text(tree)).not.toContain('Keep the final answer concrete')
+    expect(findElement(tree, element => element.props['aria-current'] === 'true')).toBeDefined()
+
+    ;(findElement(tree, element => element.type === 'button' &&
+      text(element).includes(completed.goal.objective) &&
+      text(element).includes('Implement the Web flow')).props.onClick as () => void)()
+    await flushClient()
+
+    expect(text(client.render())).toContain('1/1 tasks complete')
+    expect(rpc.call.mock.calls.filter(call => call[1] === 'status')).toHaveLength(2)
   })
 
   it('presents goal-first work as current, completed, next, and abandoned groups', async () => {

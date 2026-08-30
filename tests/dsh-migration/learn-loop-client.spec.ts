@@ -333,6 +333,49 @@ describe('Learn Loop browser RPC client', () => {
     }
   })
 
+  it('reads the safe learning clue projection and rejects private or malformed fields', async () => {
+    const clueStatus = {
+      schemaVersion: 'tianwen.learning-clue-status.v1' as const,
+      items: [{
+        ticketId: `ticket:${'a'.repeat(64)}`,
+        status: 'open' as const,
+        occurrenceCount: 2,
+        sources: [{
+          longGoalId: statusV2.goal.id,
+          goalObjective: statusV2.goal.objective,
+          taskId: statusV2.tasks[0].id,
+          taskObjective: statusV2.tasks[0].objective,
+          recordedAt: '2026-08-30T00:00:00.000Z',
+        }],
+      }],
+    }
+    const signal = new AbortController().signal
+    const rpc = { call: vi.fn().mockResolvedValue({ ok: true, value: clueStatus }) }
+
+    expect(await createLearnLoopClient(rpc as never).learningClues(signal)).toEqual(clueStatus)
+    expect(rpc.call).toHaveBeenCalledWith('/tianwen', 'learning-clues', {}, signal)
+
+    for (const invalid of [
+      { ...clueStatus, extra: true },
+      { ...clueStatus, items: [{ ...clueStatus.items[0], problemFingerprint: 'private' }] },
+      { ...clueStatus, items: [{ ...clueStatus.items[0], signalIds: ['private'] }] },
+      { ...clueStatus, items: [{ ...clueStatus.items[0], occurrenceCount: 0 }] },
+      { ...clueStatus, items: [{ ...clueStatus.items[0], sources: [{
+        ...clueStatus.items[0].sources[0], note: 'private',
+      }] }] },
+      { ...clueStatus, items: [{ ...clueStatus.items[0], sources: [] }] },
+      { ...clueStatus, items: [clueStatus.items[0], clueStatus.items[0]] },
+      { ...clueStatus, items: [{
+        ...clueStatus.items[0],
+        sources: [clueStatus.items[0].sources[0], clueStatus.items[0].sources[0]],
+      }] },
+    ]) {
+      const invalidRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: invalid }) }
+      await expect(createLearnLoopClient(invalidRpc as never).learningClues())
+        .rejects.toThrow('invalid Tianwen RPC response')
+    }
+  })
+
   it('preserves exact revision-conflict details for UI recovery', async () => {
     const rpc = { call: vi.fn().mockResolvedValue({
       ok: false,

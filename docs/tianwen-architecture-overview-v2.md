@@ -30,6 +30,12 @@ Runtime 插件，Desktop 不拥有第二套 Goal 引擎。
 也不会自动创建 Case、Candidate 或 Skill。正式安装产品已用真实 DeepSeek Task 验证 Task
 完成与 Turn 收尾之间的竞态，Host 复用 DSH `Agent.whenIdle()` 后再登记反馈。
 
+同一个 Goal-first 弹窗现在提供只读“改进线索”入口：它按 open Ticket 展示来源 Goal、
+来源 Task、记录时间和合并出现次数，并支持从 Task 反馈跳到线索、再返回来源 Goal。
+这份投影不暴露 Ticket ID、问题指纹、Signal ID、工作区、Evidence 或原始反馈说明；没有安全
+Goal-first 来源的 Ticket 不进入界面。它只是让既有持久 Ticket 可见，不把普通反馈升级为
+Case、Lesson、Candidate 或 Skill。
+
 当前可发布 Runtime 身份为 `@tianwen/runtime-bundle@0.1.1`，可选 Desktop 身份为
 `0.1.0-preview.2`。Desktop 只把精确 `0.1.0` 识别为可更新前身，得到用户确认后调用一次
 既有 DSH plugin add，并以 `0.1.1` 严格复核；未知、未来或损坏 Profile 不会被自动覆盖。
@@ -43,7 +49,8 @@ managed/Web 两个 Profile 均到达 `0.1.1`，随后真实 Web 启动返回 HTT
 [`真实执行 handoff`](operations/tianwen-goal-first-task-execution-handoff.md) 和
 [`Desktop UX handoff`](operations/tianwen-goal-first-desktop-ux-handoff.md)，以及
 [`Task feedback handoff`](operations/tianwen-goal-task-feedback-handoff.md)；当前发布更新边界见
-[`Runtime release handoff`](operations/tianwen-runtime-release-identity-handoff.md)。以下
+[`Runtime release handoff`](operations/tianwen-runtime-release-identity-handoff.md)，线索可见性见
+[`Learning clue inbox handoff`](operations/tianwen-learning-clue-inbox-handoff.md)。以下
 2026-08-27 证据分层继续作为历史事实保留，不应反向覆盖这一较新的产品状态。
 
 Stage 7 已经完成，不再是待验证能力。一个使用配置模型的全新自然任务通过已安装的 DSH
@@ -358,6 +365,11 @@ persistence 与 Natural Trial stream-error 已覆盖链路成立、成功交付�
 普通 Goal-first Task 的显式用户反馈现已接入正式 Evolution ledger。下一步若处理自动 Outcome，
 必须先为普通 Task 冻结真实验收合同，不能用“Goal complete”代替验收通过；在此之前，继续改善
 Goal 规划、执行和用户引导比扩展学习治理框架更优先。
+
+Learning clue inbox 已让现有 Ticket 的来源和重复次数进入普通产品，但它仍是只读线索，不是
+学习工作流状态机。下一项若增加“分析一次”，必须先明确私密反馈说明怎样只进入该次 Agent
+输入、分析结果怎样持久化，以及失败如何保持可见；不能直接复用要求 Outcome Run 证据的
+Case/Lesson/Candidate API。
 
 Runtime `0.1.1` 与 Desktop `0.1.0-preview.2` 已解决“不同构建仍共用 0.1.0 身份”的分发问题。
 Desktop 和正式安装器各自只支持一个精确前身，不建设在线 updater、后台下载或通用版本比较器；

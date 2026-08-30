@@ -52,6 +52,10 @@ import type {
   GoalTaskFeedbackRecordResult,
   GoalTaskFeedbackStatus,
 } from './goal-task-feedback.js'
+import {
+  projectLearningClueStatus,
+  type LearningClueStatus,
+} from './learning-clue-status.js'
 import { readGoalStatus } from './status.js'
 
 type RpcResult<T> =
@@ -225,6 +229,10 @@ export interface TianwenGoalTaskFeedbackOperations {
     readonly rating: 'positive' | 'negative'
     readonly note: string | null
   }) => Promise<GoalTaskFeedbackRecordResult>
+}
+
+export interface TianwenLearningClueOperations {
+  readonly status: () => Promise<LearningClueStatus>
 }
 
 export class LongGoalTaskAdmissionError extends Error {
@@ -589,6 +597,7 @@ export function createTianwenLongGoalRpcHandler(
   runDependencies?: TianwenLongGoalRunDependencies,
   goalFirstOperations?: TianwenGoalFirstOperations,
   taskFeedbackOperations?: TianwenGoalTaskFeedbackOperations,
+  learningClueOperations?: TianwenLearningClueOperations,
 ): ConnectionRpcHandler {
   const readStatus = (longGoalId: string) => dependencies.readLongGoalStatus({
     stateRoot: roots.stateRoot,
@@ -759,6 +768,14 @@ export function createTianwenLongGoalRpcHandler(
           note: payload.note,
         }),
       }
+    }
+    if (
+      endpoint === 'learning-clues' &&
+      learningClueOperations !== undefined &&
+      isRecord(payload) &&
+      hasExactKeys(payload, [])
+    ) {
+      return { ok: true, value: await learningClueOperations.status() }
     }
     return invalidRequest()
   }
@@ -973,12 +990,26 @@ export function mountTianwenLongGoalHost(
         ...input,
       }, taskFeedbackDependencies),
     }
+    const learningClueOperations: TianwenLearningClueOperations = {
+      status: async () => projectLearningClueStatus({
+        goals: await Promise.all(listLongGoals(roots.stateRoot).map(async record => ({
+          status: await readLongGoalStatus({
+            stateRoot: roots.stateRoot,
+            longGoalId: record.id,
+            dshStatusTarget,
+          }),
+          feedback: await taskFeedbackOperations.status({ longGoalId: record.id }),
+        }))),
+        tickets: host.tianwenEvolution.listLearningTickets(),
+      }),
+    }
     host.connection.rpc.handle('/tianwen', createTianwenLongGoalRpcHandler(
       roots,
       undefined,
       runDependencies,
       goalFirstOperations,
       taskFeedbackOperations,
+      learningClueOperations,
     ), {
       authority: 'loopback',
     })

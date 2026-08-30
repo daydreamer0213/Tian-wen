@@ -8,8 +8,9 @@ import type {
 } from './long-goal-contract.js'
 import { createLearnLoopClient, LearnLoopRpcError } from './learn-loop-client.js'
 import type { GoalTaskFeedbackItem } from './goal-task-feedback.js'
+import type { LearningClueItem } from './learning-clue-status.js'
 
-type View = 'closed' | 'list' | 'create' | 'detail'
+type View = 'closed' | 'list' | 'create' | 'detail' | 'clues'
 
 const LOCALE_NAMESPACE = 'tianwen.learn-loop'
 
@@ -20,6 +21,11 @@ const zhMessages = {
   'common.loading': '加载中…',
   'list.refresh': '刷新长期目标',
   'list.create': '创建目标',
+  'clues.open': '改进线索（{count}）',
+  'clues.refresh': '刷新线索',
+  'clues.back': '返回目标列表',
+  'clues.empty': '还没有改进线索。',
+  'clues.occurrences': '出现 {count} 次',
   'list.empty': '还没有长期目标。',
   'list.empty.step1': '在 DSH 中打开或创建一个项目工作区。',
   'list.empty.step2': '创建一个长期目标，天问会规划并推进后续任务。',
@@ -92,6 +98,11 @@ const enMessages = {
   'common.loading': 'Loading…',
   'list.refresh': 'Refresh plans',
   'list.create': 'Create Goal',
+  'clues.open': 'Improvement clues ({count})',
+  'clues.refresh': 'Refresh clues',
+  'clues.back': 'Back to Goals',
+  'clues.empty': 'No improvement clues yet.',
+  'clues.occurrences': '{count} occurrences',
   'list.empty': 'No Learn Loop plans yet.',
   'list.empty.step1': 'Open or create a project workspace in DSH.',
   'list.empty.step2': 'Create a long-term Goal; Tianwen will plan and progress the Tasks.',
@@ -461,6 +472,7 @@ function SettledTaskGroup({
   onNote,
   onSubmit,
   onCancel,
+  onOpenClue,
 }: {
   readonly label: string
   readonly tasks: LongGoalStatusProjectionV2['tasks']
@@ -474,6 +486,7 @@ function SettledTaskGroup({
   readonly onNote: (note: string) => void
   readonly onSubmit: (taskId: string) => void
   readonly onCancel: () => void
+  readonly onOpenClue: (ticketId: string) => void
 }): JSX.Element | null {
   if (tasks.length === 0) return null
   return (
@@ -482,10 +495,15 @@ function SettledTaskGroup({
       <ul style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 8 }}>
         {tasks.map(task => {
           const recorded = feedback.find(item => item.taskId === task.id)
+          const ticketId = recorded?.ticketId
           return <li key={task.id}>
             <div>{task.objective} — {translatePhase(t, task.phase)}</div>
             {recorded !== undefined && <p role="status" style={{ margin: '4px 0' }}>
-              {feedbackDecisionText(t, recorded)}
+              {ticketId === undefined
+                ? feedbackDecisionText(t, recorded)
+                : <button type="button" onClick={() => onOpenClue(ticketId)} style={buttonStyle}>
+                    {feedbackDecisionText(t, recorded)}
+                  </button>}
             </p>}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
               <button type="button" disabled={loading} onClick={() => onPositive(task.id)} style={buttonStyle}>{t('feedback.positive')}</button>
@@ -563,6 +581,8 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   const client = createLearnLoopClient(ctx.connection.rpc)
   const [view, setView] = useState<View>('closed')
   const [goals, setGoals] = useState<readonly AnyLongGoalSummary[]>([])
+  const [clues, setClues] = useState<readonly LearningClueItem[]>([])
+  const [focusedTicketId, setFocusedTicketId] = useState<string | undefined>()
   const [detail, setDetail] = useState<AnyLongGoalStatusProjection | undefined>()
   const [objective, setObjective] = useState('')
   const [context, setContext] = useState('')
@@ -591,8 +611,14 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
     setLoading(true)
     setError(undefined)
     try {
-      const nextGoals = await client.list(request.signal)
-      if (request.isCurrent()) setGoals(nextGoals)
+      const [nextGoals, nextClues] = await Promise.all([
+        client.list(request.signal),
+        client.learningClues(request.signal),
+      ])
+      if (request.isCurrent()) {
+        setGoals(nextGoals)
+        setClues(nextClues.items)
+      }
     } catch (cause) {
       if (request.isCurrent()) {
         setError(cause instanceof Error ? { message: cause.message } : { key: 'error.refresh' })
@@ -605,7 +631,14 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   const backToList = () => {
     requestGeneration.current.close()
     setLoading(false)
+    setFocusedTicketId(undefined)
     setView('list')
+    void refresh()
+  }
+
+  const openClues = (ticketId?: string) => {
+    setFocusedTicketId(ticketId)
+    setView('clues')
     void refresh()
   }
 
@@ -954,6 +987,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '16px 0' }}>
                 <button type="button" onClick={() => void refresh()} style={buttonStyle}>{t('list.refresh')}</button>
                 <button type="button" onClick={() => setView('create')} style={buttonStyle}>{t('list.create')}</button>
+                <button type="button" onClick={() => openClues()} style={buttonStyle}>{t('clues.open', { count: clues.length })}</button>
               </div>
               {goals.length === 0 && !loading ? <div>
                 <p>{t('list.empty')}</p>
@@ -977,6 +1011,32 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
                 </ul>
               )}
             </>}
+            {view === 'clues' && <div style={{ display: 'grid', gap: 10, marginTop: 16 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <button type="button" onClick={() => void refresh()} style={buttonStyle}>{t('clues.refresh')}</button>
+                <button type="button" onClick={backToList} style={buttonStyle}>{t('clues.back')}</button>
+              </div>
+              {clues.length === 0 && !loading
+                ? <p>{t('clues.empty')}</p>
+                : <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 8 }}>
+                    {clues.map(clue => <li
+                      key={clue.ticketId}
+                      aria-current={clue.ticketId === focusedTicketId ? 'true' : undefined}
+                      style={{ border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8, padding: 10 }}
+                    >
+                      <strong>{t('clues.occurrences', { count: clue.occurrenceCount })}</strong>
+                      <ul style={{ margin: '8px 0 0', padding: 0, listStyle: 'none', display: 'grid', gap: 8 }}>
+                        {clue.sources.map(source => <li key={`${source.longGoalId}:${source.taskId}`}>
+                          <button type="button" onClick={() => void openDetail(source.longGoalId)} style={{ ...buttonStyle, width: '100%', textAlign: 'left' }}>
+                            <strong>{source.goalObjective}</strong><br />
+                            <span>{source.taskObjective}</span><br />
+                            <time dateTime={source.recordedAt}>{source.recordedAt}</time>
+                          </button>
+                        </li>)}
+                      </ul>
+                    </li>)}
+                  </ul>}
+            </div>}
             {view === 'create' && <form onSubmit={event => { event.preventDefault(); void createPlan() }} style={{ display: 'grid', gap: 10, marginTop: 16 }}>
               <label>{t('form.goal')}<textarea value={objective} onChange={event => setObjective(event.target.value)} required style={fieldStyle} /></label>
               <label>{t('form.context')}<textarea value={context} onChange={event => setContext(event.target.value)} style={fieldStyle} /></label>
@@ -1036,6 +1096,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
                     setFeedbackTaskId(undefined)
                     setFeedbackNote('')
                   }}
+                  onOpenClue={ticketId => openClues(ticketId)}
                 />
                 <GoalTaskGroup label={t('detail.nextSteps')} tasks={v2NextTasks} t={t} />
                 <SettledTaskGroup
@@ -1057,6 +1118,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
                     setFeedbackTaskId(undefined)
                     setFeedbackNote('')
                   }}
+                  onOpenClue={ticketId => openClues(ticketId)}
                 />
                 {detail.guidance.length > 0 && <ul style={{ margin: 0, paddingLeft: 20 }}>
                   {detail.guidance.map((item, index) => <li key={index}>{item}</li>)}

@@ -12,6 +12,11 @@ Task runs in its own DSH Session. The user can add guidance, request replanning,
 and give feedback after a Task is completed or abandoned. Tianwen reuses DSH
 models, tools, and runtime; it does not replace or hot-swap the running Agent.
 
+The same Learn Loop dialog summarizes improvement clues created from Task
+feedback, including source Goal, Task, time, and recurrence count. A clue is
+still a problem to understand; it does not automatically become a Case, Skill,
+or code change.
+
 One fresh configured-model natural task closed through the installed product
 path: its Goal completed, all 45 Evidence records were
 complete, `Outcome=met`, learning correctly returned `no-case`, and parent Skill
