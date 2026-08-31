@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import {
+  projectConversationGoalFeedback,
+  selectConversationGoalSummary,
+} from '../../packages/tianwen-runtime-bundle/src/conversation-goal-feedback.js'
 import { createLearnLoopClient } from '../../packages/tianwen-runtime-bundle/src/learn-loop-client.js'
 import {
   apply,
@@ -118,6 +122,143 @@ const summaryV3 = {
   updatedAt: 30,
   control: statusV3.control,
 } as const
+
+describe('conversation Goal feedback projection', () => {
+  it.each([
+    ['planning work', { ...summaryV3, id: 'planning', phase: 'planning', updatedAt: 1 }, 'planning'],
+    ['active work', { ...summaryV3, id: 'active', updatedAt: 1 }, 'active'],
+    ['paused work', {
+      ...summaryV3,
+      id: 'paused',
+      updatedAt: 1,
+      control: { ...summaryV3.control, autoProgress: 'paused' },
+    }, 'paused'],
+    ['blocked work', { ...summaryV3, id: 'blocked', phase: 'blocked', updatedAt: 1 }, 'blocked'],
+  ] as const)('selects %s over a newer completed v3 Goal in the same control Session', (
+    _name,
+    current,
+    expectedId,
+  ) => {
+    const selected = selectConversationGoalSummary([
+      summaryV1,
+      summaryV2,
+      { ...summaryV3, id: 'other-session', updatedAt: 100, control: {
+        ...summaryV3.control,
+        sessionId: 'another-control-session',
+      } },
+      { ...summaryV3, id: 'historical-complete', phase: 'complete', updatedAt: 99 },
+      current,
+    ], 'control-session')
+
+    expect(selected?.id).toBe(expectedId)
+  })
+
+  it('selects the newest complete v3 Goal with the established stable ID tie-break', () => {
+    const selected = selectConversationGoalSummary([
+      summaryV1,
+      summaryV2,
+      { ...summaryV3, id: 'complete-z', phase: 'complete', updatedAt: 20 },
+      { ...summaryV3, id: 'complete-a', phase: 'complete', updatedAt: 20 },
+      { ...summaryV3, id: 'complete-old', phase: 'complete', updatedAt: 19 },
+    ], 'control-session')
+
+    expect(selected?.id).toBe('complete-a')
+  })
+
+  it.each([
+    ['planning', {
+      ...statusV3,
+      goal: { ...statusV3.goal, phase: 'planning' },
+      tasks: [{ ...statusV3.tasks[0], phase: 'complete' }],
+      currentTaskId: null,
+    }, {
+      phase: 'planning',
+      objective: 'Ship continuous Goal history',
+      completedTasks: 0,
+      totalTasks: 2,
+      latestSettledTaskObjective: 'Implement the default flow',
+      needsAttention: false,
+      message: 'Planning the next useful step.',
+    }],
+    ['running', statusV3, {
+      phase: 'running',
+      objective: 'Ship continuous Goal history',
+      completedTasks: 0,
+      totalTasks: 2,
+      currentTaskObjective: 'Implement the default flow',
+      needsAttention: false,
+      message: 'Work is in progress.',
+    }],
+    ['paused', {
+      ...statusV3,
+      control: { ...statusV3.control, autoProgress: 'paused' },
+    }, {
+      phase: 'paused',
+      objective: 'Ship continuous Goal history',
+      completedTasks: 0,
+      totalTasks: 2,
+      currentTaskObjective: 'Implement the default flow',
+      needsAttention: true,
+      message: 'Progress is paused. Resume or redirect in the composer.',
+    }],
+    ['blocked', {
+      ...statusV3,
+      goal: { ...statusV3.goal, phase: 'blocked' },
+      tasks: [{
+        ...statusV3.tasks[0],
+        phase: 'blocked',
+        blockedReason: { code: 'provider-error', message: 'secret raw provider error' },
+      }],
+    }, {
+      phase: 'blocked',
+      objective: 'Ship continuous Goal history',
+      completedTasks: 0,
+      totalTasks: 2,
+      currentTaskObjective: 'Implement the default flow',
+      blockedReason: 'A task needs attention.',
+      needsAttention: true,
+      message: 'A task needs attention. Review or redirect in the composer.',
+    }],
+    ['complete', {
+      ...statusV3,
+      goal: { ...statusV3.goal, phase: 'complete', completedTasks: 2 },
+      tasks: [{ ...statusV3.tasks[0], phase: 'complete' }],
+      currentTaskId: null,
+    }, {
+      phase: 'complete',
+      objective: 'Ship continuous Goal history',
+      completedTasks: 2,
+      totalTasks: 2,
+      latestSettledTaskObjective: 'Implement the default flow',
+      needsAttention: false,
+      message: 'Execution is complete. Ready for review.',
+    }],
+    ['unavailable', undefined, {
+      phase: 'unavailable',
+      needsAttention: false,
+      message: 'Goal status is currently unavailable.',
+    }],
+  ] as const)('projects compact %s feedback without operational detail', (
+    _name,
+    status,
+    expected,
+  ) => {
+    const unsafeStatus = status === undefined ? undefined : {
+      ...status,
+      error: 'secret raw provider error',
+      tasks: status.tasks.map(task => ({ ...task, finalReply: 'full Task reply' })),
+    }
+
+    const feedback = projectConversationGoalFeedback(unsafeStatus as never)
+
+    expect(feedback).toEqual(expected)
+    expect(JSON.stringify(feedback)).not.toContain('tianwen-long-goal-v3')
+    expect(JSON.stringify(feedback)).not.toContain('task-v2-1')
+    expect(JSON.stringify(feedback)).not.toContain('secret raw provider error')
+    expect(JSON.stringify(feedback)).not.toContain('full Task reply')
+    expect(JSON.stringify(feedback)).not.toMatch(/\d+%/u)
+  })
+})
 
 describe('Learn Loop browser RPC client', () => {
   it('sends the exact generic RPC status request and returns a valid projection', async () => {
