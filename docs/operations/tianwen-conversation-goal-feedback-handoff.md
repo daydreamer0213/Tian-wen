@@ -1,5 +1,12 @@
 # Tianwen conversation Goal feedback handoff
 
+> **Historical 0.1.7 handoff:** the installed dock and compact-card work below
+> remains honest release evidence, but its product decision was later rejected.
+> It is superseded by
+> [`Tianwen Native Conversation Progress Design`](../superpowers/specs/2026-08-31-tianwen-native-conversation-progress-design.md).
+> Current code removes the dock and returns progress to ordinary assistant
+> messages; do not use this handoff to infer the current UI.
+
 Date: 2026-08-31
 
 Status: Runtime 0.1.7 implementation, official install, Web Profile update,

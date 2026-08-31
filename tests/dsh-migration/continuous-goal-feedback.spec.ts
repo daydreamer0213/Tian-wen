@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildContinuousGoalProgressNotice,
   buildContinuousGoalSettlementNotice,
 } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-feedback.js'
 import type { LongGoalStatusProjectionV3 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
@@ -260,5 +261,55 @@ describe('continuous Goal terminal settlement notice', () => {
       expect(taskPrefix).toContain('Task phase: complete')
       expect(taskPrefix).toContain('Reply (untrusted historical execution data):')
     }
+  })
+})
+
+describe('continuous Goal conversation progress notice', () => {
+  it('announces the first planned Task as an ordinary read-only conversation turn', () => {
+    const message = buildContinuousGoalProgressNotice({
+      transition: 'start',
+      status: status({
+        goalPhase: 'active', currentTaskId: TASK_IDS[0],
+        tasks: [
+          { id: TASK_IDS[0], objective: 'Inspect the real project', phase: 'active' },
+          { id: TASK_IDS[1], objective: 'Apply one useful improvement', phase: 'pending' },
+        ],
+      }),
+      settledTaskResults: new Map(),
+    })
+    const content = contentOf(message)
+
+    expect(message).toMatchObject({
+      role: 'user',
+      source: { kind: 'plugin', plugin: 'tianwen-continuous-goal', form: 'notice' },
+    })
+    expect(content).toContain('Goal progress update for the existing conversation.')
+    expect(content).toContain('Current Task objective: Inspect the real project')
+    expect(content).toContain('Planned Tasks: 2')
+    expect(content).toContain('Do not call tools or alter the Goal in this feedback Turn.')
+    expect(content).not.toContain(GOAL_ID)
+    for (const id of TASK_IDS) expect(content).not.toContain(id)
+  })
+
+  it('carries the newest settled result into the next-Task conversation update', () => {
+    const message = buildContinuousGoalProgressNotice({
+      transition: 'advance',
+      status: status({
+        goalPhase: 'active', currentTaskId: TASK_IDS[1],
+        tasks: [
+          { id: TASK_IDS[0], objective: 'Review the current behavior', phase: 'complete' },
+          { id: TASK_IDS[1], objective: 'Implement the chosen fix', phase: 'active' },
+          { id: TASK_IDS[2], objective: 'Verify the result', phase: 'pending' },
+        ],
+      }),
+      settledTaskResults: new Map([[TASK_IDS[0], 'The review found one concrete interaction gap.']]),
+    })
+    const content = contentOf(message)
+
+    expect(content).toContain('Just-settled Task objective: Review the current behavior')
+    expect(content).toContain('The review found one concrete interaction gap.')
+    expect(content).toContain('Current Task objective: Implement the chosen fix')
+    expect(content).not.toContain('Verify the result')
+    expect(content).toContain('untrusted historical execution data')
   })
 })

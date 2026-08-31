@@ -1,5 +1,10 @@
 # Tianwen Conversation Goal Feedback Design
 
+> **Superseded:** this document records the Runtime 0.1.7 dock experiment. The
+> dock was rejected after ordinary product use because it remained a separate
+> UI rather than normal conversation. Do not restore it. The current design is
+> [`Tianwen Native Conversation Progress Design`](2026-08-31-tianwen-native-conversation-progress-design.md).
+
 Date: 2026-08-31
 
 Status: implemented and delivered in Runtime 0.1.7; installed deterministic proof complete; valid v3 natural acceptance awaits ordinary user use

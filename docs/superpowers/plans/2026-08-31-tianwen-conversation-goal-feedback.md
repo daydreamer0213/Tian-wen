@@ -1,5 +1,10 @@
 # Tianwen Conversation Goal Feedback Implementation Plan
 
+> **Historical plan:** Tasks 1-2 implemented the Runtime 0.1.7 dock that was
+> later rejected in ordinary use. They are not current backlog and must not be
+> replayed. The current interaction contract is
+> [`Tianwen Native Conversation Progress Design`](../specs/2026-08-31-tianwen-native-conversation-progress-design.md).
+
 Date: 2026-08-31
 
 Status: implementation and installed artifacts complete; valid v3 natural acceptance remains intentionally unclaimed

@@ -2,7 +2,7 @@
 
 **更新：** 2026-08-31
 
-**状态：** 当前产品架构和能力状态的首要阅读入口；Runtime `0.1.7` 已完成实现、正式安装、Web Profile 更新和桌面产物构建
+**状态：** 当前产品架构和能力状态的首要阅读入口；Runtime `0.1.8` 已完成实现、正式安装、Web Profile 更新和桌面产物构建
 
 **一句话定义：**
 
@@ -57,22 +57,22 @@ Planner Turn。用户可在控制对话中自然补充方向，模型通过受�
 这项模式没有第二套 UI，也不写自定义进度 Session 事件：普通对话仍是默认入口，原“长期目标”
 面板只作为可选高级历史继续复用。v1/v2 显式 Goal-first 行为和数据保持兼容。
 
-主对话反馈能力最初在 Runtime `0.1.6` 候选中实现，并以 Runtime `0.1.7` 正式交付。普通进度通过 DSH 公共
-`conversation.input.dock` 插槽显示为有宽度上限、居中的两行紧凑卡片；它只展示目标、阶段、
-当前或最近 Task 和当前计划计数，不轮询、不复制子 Session 输出，也不新增数据模型。v3 Goal
-完成或阻塞后，Host 可在原控制 Agent 空闲时发起一次只读总结 Turn；该 Turn 禁止工具和 Goal
-控制，没有持久重试队列。历史 Goal 在安装主对话反馈能力前已经完成时只恢复持久状态卡片，不重新唤醒
-Provider 补写旧对话。
+Runtime `0.1.7` 曾把普通进度放进 DSH 的 `conversation.input.dock` 紧凑卡片；普通产品使用证明这仍是
+独立 UI，不符合“天问内化在正常对话中”的产品方向。当前源码已经删除该插槽、投影模块和刷新逻辑，
+后续不得把它恢复成主入口。现在 v3 Goal 在首个 Task 开始、Task 切换、阻塞和最终完成这些关键边界，
+由原控制 Agent 产生一条普通助手回复并写回原 Session；用户无需识别天问组件。该反馈 Turn 禁止工具和
+Goal 控制，发送前复核精确持久状态，没有轮询、第二套消息记录或持久重试队列。原“长期目标”面板只保留
+为可选历史与诊断。历史 Goal 不重新唤醒 Provider 补写旧对话。
 
-本阶段最终 Runtime 身份为 `@tianwen/runtime-bundle@0.1.7`，可选 Desktop 身份为
-`0.1.0-preview.8`。Desktop 只把精确 `0.1.6` 识别为可更新前身，得到用户确认后调用一次
-既有 DSH plugin add，并以 `0.1.7` 严格复核；更旧、未知、未来或损坏 Profile 不会被自动覆盖。
-正式安装器也只在同一 DSH `0.1.1-rc.2` host 上把 managed Runtime `0.1.6` 更新到 `0.1.7`，
-不重新部署 DSH host；既有 rc.7 managed-predecessor 路径与旧归档保留。正式本地安装与
-`0.1.6` → `0.1.7` 更新、Desktop Profile pnpm store 保留和 provider-free Desktop 产物边界已经
-完成，详见[`主对话 Goal 反馈交接`](operations/tianwen-conversation-goal-feedback-handoff.md)。
-`0.1.6` 候选字节与先前安装字节共用版本号时，Desktop 会正确判断“已经是当前版本”而不覆盖；
-因此最终修复使用新的 `0.1.7` 身份触发一次明确更新，而不是增加同版本 digest 覆盖规则。
+当前交付身份为 `@tianwen/runtime-bundle@0.1.8`、Desktop `0.1.0-preview.9`。正式安装器已经在同一
+DSH `0.1.1-rc.2` host 上把 managed Runtime 更新到 `0.1.8`，Web Profile 也已通过正式 DSH
+`plugin add` 更新；安装后的客户端与构建产物哈希一致，且不再注册 `conversation.input.dock`。
+Desktop 只把精确 `0.1.7` 识别为可更新前身，得到用户确认后调用一次既有 DSH plugin add，并以
+`0.1.8` 严格复核；更旧、未知、未来或损坏 Profile 不会被自动覆盖。桌面安装包已经以
+`0.1.0-preview.9` 独立构建并通过离线产物审计，不重新部署 DSH host，也不增加在线更新器。
+当前交付证据见[`原生对话进度交接`](operations/tianwen-native-conversation-progress-handoff.md)，交互决策见
+[`原生对话进度设计`](superpowers/specs/2026-08-31-tianwen-native-conversation-progress-design.md)；被否决的
+Runtime `0.1.7` 紧凑卡片只保留为历史，不得反向覆盖当前状态。
 本阶段的真实 Provider 尝试没有走到有效 v3 continuous Goal 入口，因此不冒充自然验收；后续由
 普通用户实际 `/goal` 运行自然补齐，不再安排新的合成 Activity。外部 publish、tag、Release 与
 installer upload 仍未执行，因此本文不宣称已经外部发布。
@@ -82,7 +82,7 @@ installer upload 仍未执行，因此本文不宣称已经外部发布。
 [`真实执行 handoff`](operations/tianwen-goal-first-task-execution-handoff.md) 和
 [`Desktop UX handoff`](operations/tianwen-goal-first-desktop-ux-handoff.md)，以及
 [`Task feedback handoff`](operations/tianwen-goal-task-feedback-handoff.md)；当前发布边界见
-[`主对话 Goal 反馈交接`](operations/tianwen-conversation-goal-feedback-handoff.md)，连续 Goal 的
+[`原生对话进度交接`](operations/tianwen-native-conversation-progress-handoff.md)，连续 Goal 的
 历史自然运行与修复证据见
 [`continuous Goal handoff`](operations/tianwen-dsh-native-continuous-goal-handoff.md)，已完成的执行顺序见
 [`implementation plan`](superpowers/plans/2026-08-30-tianwen-dsh-native-continuous-goal.md)。上一版发布边界见
@@ -418,10 +418,10 @@ Session，“已审阅”补齐了人工收件箱生命周期。私密反馈只�
 人工后续通道；若未来再增加自动行动，仍必须把“模型分析”与“证据成立”分开，不能因为模型认为
 问题可复用就自动改代码、创建 Candidate、安装 Skill 或宣称已经学习。
 
-Runtime `0.1.7` 与 Desktop `0.1.0-preview.8` 为原控制对话反馈能力提供最终交付身份，
-避免修复后的字节继续共用已经安装的 `0.1.6`。Desktop 和正式安装器各自只支持精确 `0.1.6` 这一自动更新
-前身；更早版本继续使用已有分段迁移或手工安装，不建设在线 updater、后台下载或通用版本比较器。
-正式安装和桌面产物已完成；有效 v3 自然运行只由后续普通用户 `/goal` 使用补齐，不需要再用合成
+Runtime `0.1.8` 与 Desktop `0.1.0-preview.9` 为正常对话进度提供交付身份，避免继续复用已安装且
+包含紧凑卡片的 `0.1.7` 字节。Desktop 和正式安装器只支持精确 `0.1.7` 这一当前自动更新前身；更早版本
+继续使用已有分段迁移或手工安装，不建设在线 updater、后台下载或通用版本比较器。正式安装、Web Profile
+更新和桌面产物均已完成；有效 v3 自然运行只由后续普通用户 `/goal` 使用补齐，不需要再用合成
 Activity 或重复控制器任务取证。
 
 若未来已有合法 Candidate，需要同家族盲评时，仍冻结任务和单次尝试以保证比较公平；不设

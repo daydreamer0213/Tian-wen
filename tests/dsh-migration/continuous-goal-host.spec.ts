@@ -109,7 +109,13 @@ function harness(initial = record()) {
     createProgress: vi.fn(async (input: { controlSessionId: string }) => {
       const created = record({ id: `${GOAL_ID}-created`, control: { sessionId: input.controlSessionId, autoProgress: 'running' } })
       records = [...records, created]
-      return { action: 'started' }
+      const createdStatus = status(created, ['active'], TASK_1)
+      return {
+        schemaVersion: 'tianwen.continuous-goal-control-result.v1' as const,
+        action: 'started' as const,
+        status: createdStatus,
+        sessionId: EXECUTION_1.sessionId,
+      }
     }),
     control: vi.fn(async () => ({ action: 'paused' })), continueProgress,
     pause, flushSession: vi.fn(async () => { order.push('flush') }),
@@ -186,6 +192,61 @@ describe('continuous Goal Host', () => {
       longGoalId: GOAL_ID,
       transition: 'complete',
       status: completed,
+    }))
+  })
+
+  it('records conversation progress after initial planning and after advancing to the next Task', async () => {
+    const previous = record({ control: { sessionId: 'another-control', autoProgress: 'running' } })
+    const subject = harness(previous)
+    const controlAgent = agent('control-session', 'control-goal')
+    subject.live.set('control-session', controlAgent)
+    const created = record({
+      id: `${GOAL_ID}-created`, revision: 2,
+      control: { sessionId: 'control-session', autoProgress: 'running' },
+    })
+    const started = status(created, ['active'], TASK_1)
+    subject.dependencies.createProgress = vi.fn(async () => {
+      subject.setRecords([previous, created])
+      subject.setStatus(started)
+      return {
+        schemaVersion: 'tianwen.continuous-goal-control-result.v1' as const,
+        action: 'started' as const,
+        status: started,
+        sessionId: EXECUTION_1.sessionId,
+      }
+    })
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+
+    await expect(subject.create(controlAgent, 'Ship the actual Goal')).resolves.toMatchObject({ action: 'started' })
+    await vi.waitFor(() => expect(subject.dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
+      longGoalId: created.id,
+      transition: 'start',
+      status: started,
+    })))
+
+    const advancedRecord = record({
+      id: created.id, revision: 3,
+      control: created.control,
+      planner: { ...created.planner, consideredSettledTasks: 1, planRevision: 2 },
+      tasks: [
+        { id: TASK_1, objective: 'Publish', execution: EXECUTION_1, resolution: null },
+        { id: TASK_2, objective: 'Verify', execution: EXECUTION_2, resolution: null },
+      ],
+    })
+    const advanced = status(advancedRecord, ['complete', 'active'], TASK_2)
+    subject.dependencies.continueProgress = vi.fn(async () => {
+      subject.setRecords([previous, advancedRecord])
+      subject.setStatus(advanced)
+    })
+    subject.first.setGoal('complete')
+    subject.setStatus(status(created, ['complete'], TASK_1, 'planning'))
+    subject.complete()
+
+    await dispose()
+    expect(subject.dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
+      longGoalId: created.id,
+      transition: 'advance',
+      status: advanced,
     }))
   })
 
@@ -447,7 +508,12 @@ describe('continuous Goal Host', () => {
     subject.live.set('control-session', controlAgent)
     subject.dependencies.createProgress = vi.fn(async () => {
       subject.setRecords([created, previous])
-      return { action: 'complete' }
+      return {
+        schemaVersion: 'tianwen.continuous-goal-control-result.v1' as const,
+        action: 'complete' as const,
+        status: status(created, [], null),
+        sessionId: null,
+      }
     })
     subject.dependencies.control.mockResolvedValue({ action: 'status', status: status(created, [], null) })
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
@@ -578,6 +644,85 @@ describe('continuous Goal Host', () => {
     expect(subject.continueProgress).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['start', 'advance'] as const)(
+    'persists one guarded ordinary conversation reply for a %s transition',
+    async transition => {
+      const source = transition === 'start'
+        ? record()
+        : record({
+            tasks: [
+              { id: TASK_1, objective: 'Published', execution: EXECUTION_1, resolution: null },
+              { id: TASK_2, objective: 'Verify', execution: EXECUTION_2, resolution: null },
+            ],
+          })
+      const progress = transition === 'start'
+        ? status(source, ['active'], TASK_1)
+        : status(source, ['complete', 'active'], TASK_2)
+      const preStepListeners: ((payload: unknown, next: () => Promise<unknown>) => Promise<unknown>)[] = []
+      const sessionListeners: ((session: unknown, event: unknown) => void)[] = []
+      const guards: ((execution: { name: string }) => string | undefined)[] = []
+      const denied: string[] = []
+      let finishTurn!: () => void
+      const turnFinished = new Promise<void>(resolve => { finishTurn = resolve })
+      const controlAgent = {
+        session: { id: 'control-session' },
+        ctx: {
+          tools: { guard: (guard: (execution: { name: string }) => string | undefined) => {
+            guards.push(guard)
+            return () => guards.splice(guards.indexOf(guard), 1)
+          } },
+          on(name: string, listener: never) {
+            const listeners = name === 'agent/pre-step' ? preStepListeners : sessionListeners
+            listeners.push(listener)
+            return () => listeners.splice(listeners.indexOf(listener), 1)
+          },
+        },
+        whenIdle: vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(async () => turnFinished),
+        followup: vi.fn(message => queueMicrotask(async () => {
+          for (const listener of preStepListeners) {
+            await listener(
+              { agent: controlAgent, messages: [message], turn: 9, step: 1, signal: new AbortController().signal },
+              async () => ({ kind: 'enter', messages: [message] }),
+            )
+          }
+          if (guards.some(guard => guard({ name: 'goal_control' }) !== undefined)) denied.push('goal_control')
+          for (const listener of sessionListeners) {
+            listener(controlAgent.session, { type: 'turn/end', data: { turn: 9, reason: { kind: 'completed' } } })
+          }
+          finishTurn()
+        })),
+      } as unknown as Agent
+      const inspectSession = vi.fn(async () => ({
+        meta: { id: EXECUTION_1.sessionId },
+        events: [
+          { seq: 0, time: 1, type: 'assistant/message', surfaceOp: 'append', data: {
+            turn: 1, step: 1,
+            message: { id: 'task-reply', role: 'assistant', content: [{ type: 'text', text: 'Published successfully' }] },
+          } },
+          { seq: 1, time: 2, type: 'goal/change', data: {
+            operation: 'complete',
+            ref: { id: EXECUTION_1.goalId, revision: 2 },
+            goal: { id: EXECUTION_1.goalId, revision: 2, phase: 'complete' },
+          } },
+        ] as never,
+      }))
+      const flushSession = vi.fn(async () => true)
+
+      await deliverContinuousGoalSettlement({ longGoalId: GOAL_ID, transition, status: progress }, {
+        getAgent: () => controlAgent,
+        readStatus: async () => progress,
+        inspectSession,
+        flushSession,
+      })
+
+      expect(controlAgent.followup).toHaveBeenCalledOnce()
+      expect(denied).toEqual(['goal_control'])
+      expect(flushSession).toHaveBeenCalledOnce()
+      expect(guards).toEqual([])
+      expect(inspectSession).toHaveBeenCalledTimes(transition === 'advance' ? 1 : 0)
+    },
+  )
+
   it('delivers one guarded followup for the exact notice Turn and releases the guard before later user work', async () => {
     const source = record()
     const completed = status(source, ['complete'], null)
@@ -651,9 +796,6 @@ describe('continuous Goal Host', () => {
     await deliverContinuousGoalSettlement({
       longGoalId: GOAL_ID,
       transition: 'complete',
-      taskSessionId: EXECUTION_1.sessionId,
-      taskGoalId: EXECUTION_1.goalId,
-      taskGoalRevision: 99,
       status: completed,
     }, { getAgent, readStatus, inspectSession, flushSession })
 
@@ -680,9 +822,6 @@ describe('continuous Goal Host', () => {
     await expect(deliverContinuousGoalSettlement({
       longGoalId: GOAL_ID,
       transition: 'complete',
-      taskSessionId: EXECUTION_1.sessionId,
-      taskGoalId: EXECUTION_1.goalId,
-      taskGoalRevision: 99,
       status: completed,
     }, {
       getAgent: () => undefined,

@@ -62,7 +62,10 @@ import {
 import type { ContinuousGoalServiceDependencies } from './continuous-goal-service.js'
 import { installBoundContinuousGoalControls, installContinuousGoalCommand } from './continuous-goal-agent.js'
 import { mountContinuousGoalHost, type ContinuousGoalDeliveryIntent } from './continuous-goal-host.js'
-import { buildContinuousGoalSettlementNotice } from './continuous-goal-feedback.js'
+import {
+  buildContinuousGoalProgressNotice,
+  buildContinuousGoalSettlementNotice,
+} from './continuous-goal-feedback.js'
 import { readSettledTaskResult } from './settled-task-result.js'
 import {
   readGoalTaskFeedbackStatus,
@@ -1259,18 +1262,19 @@ function sameDeliveryState(
     || actual.control.sessionId !== expected.control.sessionId
     || actual.currentTaskId !== expected.currentTaskId
   ) return false
-  if (actual.goal.phase !== 'blocked') return actual.goal.phase === 'complete'
+  if (actual.goal.phase === 'complete') return true
   const current = actual.tasks.find(task => task.id === actual.currentTaskId)
   const expectedCurrent = expected.tasks.find(task => task.id === expected.currentTaskId)
-  return current?.phase === 'blocked'
-    && expectedCurrent?.phase === 'blocked'
+  const expectedPhase = actual.goal.phase === 'blocked' ? 'blocked' : 'active'
+  return current?.phase === expectedPhase
+    && expectedCurrent?.phase === expectedPhase
     && current.execution?.sessionId === expectedCurrent.execution?.sessionId
     && current.execution?.goalId === expectedCurrent.execution?.goalId
 }
 
 async function runGuardedSettlementTurn(
   agent: Agent,
-  notice: ReturnType<typeof buildContinuousGoalSettlementNotice>,
+  notice: ReturnType<typeof buildContinuousGoalSettlementNotice> | ReturnType<typeof buildContinuousGoalProgressNotice>,
   flushSession: (agent: Agent) => Promise<void | boolean>,
 ): Promise<void> {
   let noticeTurn: number | undefined
@@ -1303,12 +1307,12 @@ async function runGuardedSettlementTurn(
     }
   })
   const offGuard = agent.ctx.tools.guard(() => active
-    ? 'Continuous Goal settlement notices are read-only; tools are disabled for this Turn.'
+    ? 'Continuous Goal feedback notices are read-only; tools are disabled for this Turn.'
     : undefined)
   try {
     agent.followup(notice)
     const becameIdle = agent.whenIdle().then(() => {
-      if (!ended) throw new Error('Continuous Goal settlement notice Turn was not observed')
+      if (!ended) throw new Error('Continuous Goal feedback notice Turn was not observed')
     })
     await Promise.race([turnEnded, becameIdle])
     if (await flushSession(agent) === false) throw new Error('Session persistence is unavailable')
@@ -1327,6 +1331,8 @@ export async function deliverContinuousGoalSettlement(
   if (
     (intent.transition === 'complete' && intent.status.goal.phase !== 'complete')
     || (intent.transition === 'block' && intent.status.goal.phase !== 'blocked')
+    || ((intent.transition === 'start' || intent.transition === 'advance')
+      && intent.status.goal.phase !== 'active')
   ) return
   const sessionId = intent.status.control.sessionId
   const agent = dependencies.getAgent(sessionId)
@@ -1337,7 +1343,17 @@ export async function deliverContinuousGoalSettlement(
   if (!sameDeliveryState(intent.status, status)) return
 
   const settledTaskResults = new Map<string, string>()
-  for (const task of status.tasks) {
+  const currentIndex = status.tasks.findIndex(task => task.id === status.currentTaskId)
+  const latestSettled = currentIndex < 0
+    ? undefined
+    : status.tasks.slice(0, currentIndex).findLast(task =>
+        task.phase === 'complete' || task.phase === 'abandoned')
+  const tasksToInspect = intent.transition === 'start'
+    ? []
+    : intent.transition === 'advance'
+      ? (latestSettled === undefined ? [] : [latestSettled])
+      : status.tasks
+  for (const task of tasksToInspect) {
     const representable = task.phase === 'complete'
       || task.phase === 'abandoned'
       || (task.id === status.currentTaskId && task.phase === 'blocked')
@@ -1353,7 +1369,13 @@ export async function deliverContinuousGoalSettlement(
   if (dependencies.getAgent(sessionId) !== agent) return
   const rechecked = await dependencies.readStatus(intent.longGoalId)
   if (!sameDeliveryState(status, rechecked)) return
-  const notice = buildContinuousGoalSettlementNotice({ status: rechecked, settledTaskResults })
+  const notice = intent.transition === 'start' || intent.transition === 'advance'
+    ? buildContinuousGoalProgressNotice({
+        transition: intent.transition,
+        status: rechecked,
+        settledTaskResults,
+      })
+    : buildContinuousGoalSettlementNotice({ status: rechecked, settledTaskResults })
   await runGuardedSettlementTurn(agent, notice, dependencies.flushSession)
 }
 

@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import {
-  projectConversationGoalFeedback,
-  selectConversationGoalSummary,
-} from '../../packages/tianwen-runtime-bundle/src/conversation-goal-feedback.js'
 import { createLearnLoopClient } from '../../packages/tianwen-runtime-bundle/src/learn-loop-client.js'
 import {
   apply,
@@ -122,195 +118,6 @@ const summaryV3 = {
   updatedAt: 30,
   control: statusV3.control,
 } as const
-
-describe('conversation Goal feedback projection', () => {
-  it.each([
-    ['planning work', { ...summaryV3, id: 'planning', phase: 'planning', updatedAt: 1 }, 'planning'],
-    ['active work', { ...summaryV3, id: 'active', updatedAt: 1 }, 'active'],
-    ['paused work', {
-      ...summaryV3,
-      id: 'paused',
-      updatedAt: 1,
-      control: { ...summaryV3.control, autoProgress: 'paused' },
-    }, 'paused'],
-    ['blocked work', { ...summaryV3, id: 'blocked', phase: 'blocked', updatedAt: 1 }, 'blocked'],
-  ] as const)('selects %s over a newer completed v3 Goal in the same control Session', (
-    _name,
-    current,
-    expectedId,
-  ) => {
-    const selected = selectConversationGoalSummary([
-      summaryV1,
-      summaryV2,
-      { ...summaryV3, id: 'other-session', updatedAt: 100, control: {
-        ...summaryV3.control,
-        sessionId: 'another-control-session',
-      } },
-      { ...summaryV3, id: 'historical-complete', phase: 'complete', updatedAt: 99 },
-      current,
-    ], 'control-session')
-
-    expect(selected?.id).toBe(expectedId)
-  })
-
-  it('selects the newest complete v3 Goal with the established stable ID tie-break', () => {
-    const selected = selectConversationGoalSummary([
-      summaryV1,
-      summaryV2,
-      { ...summaryV3, id: 'complete-z', phase: 'complete', updatedAt: 20 },
-      { ...summaryV3, id: 'complete-a', phase: 'complete', updatedAt: 20 },
-      { ...summaryV3, id: 'complete-old', phase: 'complete', updatedAt: 19 },
-    ], 'control-session')
-
-    expect(selected?.id).toBe('complete-a')
-  })
-
-  it.each([
-    ['newer update', [
-      { ...summaryV3, id: 'active-old', updatedAt: 10 },
-      { ...summaryV3, id: 'planning-new', phase: 'planning', updatedAt: 11 },
-    ], 'planning-new'],
-    ['stable ID tie-break', [
-      { ...summaryV3, id: 'paused-z', updatedAt: 11, control: {
-        ...summaryV3.control,
-        autoProgress: 'paused',
-      } },
-      { ...summaryV3, id: 'blocked-a', phase: 'blocked', updatedAt: 11 },
-    ], 'blocked-a'],
-  ] as const)('orders multiple unfinished v3 candidates by %s', (_name, candidates, expectedId) => {
-    expect(selectConversationGoalSummary(candidates, 'control-session')?.id).toBe(expectedId)
-  })
-
-  it.each([
-    ['planning', {
-      ...statusV3,
-      goal: { ...statusV3.goal, phase: 'planning' },
-      tasks: [{ ...statusV3.tasks[0], phase: 'complete' }],
-      currentTaskId: null,
-    }, {
-      phase: 'planning',
-      objective: 'Ship continuous Goal history',
-      completedTasks: 0,
-      totalTasks: 2,
-      latestSettledTaskObjective: 'Implement the default flow',
-      needsAttention: false,
-      message: 'Planning the next useful step.',
-    }],
-    ['running', statusV3, {
-      phase: 'running',
-      objective: 'Ship continuous Goal history',
-      completedTasks: 0,
-      totalTasks: 2,
-      currentTaskObjective: 'Implement the default flow',
-      needsAttention: false,
-      message: 'Work is in progress.',
-    }],
-    ['paused', {
-      ...statusV3,
-      control: { ...statusV3.control, autoProgress: 'paused' },
-    }, {
-      phase: 'paused',
-      objective: 'Ship continuous Goal history',
-      completedTasks: 0,
-      totalTasks: 2,
-      currentTaskObjective: 'Implement the default flow',
-      needsAttention: true,
-      message: 'Progress is paused. Resume or redirect in the composer.',
-    }],
-    ['blocked', {
-      ...statusV3,
-      goal: { ...statusV3.goal, phase: 'blocked' },
-      tasks: [{
-        ...statusV3.tasks[0],
-        phase: 'blocked',
-        blockedReason: { code: 'provider-error', message: 'secret raw provider error' },
-      }],
-    }, {
-      phase: 'blocked',
-      objective: 'Ship continuous Goal history',
-      completedTasks: 0,
-      totalTasks: 2,
-      currentTaskObjective: 'Implement the default flow',
-      blockedReason: 'A task needs attention.',
-      needsAttention: true,
-      message: 'A task needs attention. Review or redirect in the composer.',
-    }],
-    ['complete', {
-      ...statusV3,
-      goal: { ...statusV3.goal, phase: 'complete', completedTasks: 2 },
-      tasks: [{ ...statusV3.tasks[0], phase: 'complete' }],
-      currentTaskId: null,
-    }, {
-      phase: 'complete',
-      objective: 'Ship continuous Goal history',
-      completedTasks: 2,
-      totalTasks: 2,
-      latestSettledTaskObjective: 'Implement the default flow',
-      needsAttention: false,
-      message: 'Execution is complete. Ready for review.',
-    }],
-    ['unavailable', undefined, {
-      phase: 'unavailable',
-      needsAttention: false,
-      message: 'Goal status is currently unavailable.',
-    }],
-  ] as const)('projects compact %s feedback without operational detail', (
-    _name,
-    status,
-    expected,
-  ) => {
-    const unsafeStatus = status === undefined ? undefined : {
-      ...status,
-      error: 'secret raw provider error',
-      tasks: status.tasks.map(task => ({ ...task, finalReply: 'full Task reply' })),
-    }
-
-    const feedback = projectConversationGoalFeedback(unsafeStatus as never)
-
-    expect(feedback).toEqual(expected)
-    expect(JSON.stringify(feedback)).not.toContain('tianwen-long-goal-v3')
-    expect(JSON.stringify(feedback)).not.toContain('task-v2-1')
-    expect(JSON.stringify(feedback)).not.toContain('secret raw provider error')
-    expect(JSON.stringify(feedback)).not.toContain('full Task reply')
-    expect(JSON.stringify(feedback)).not.toMatch(/\d+%/u)
-  })
-
-  it('uses the current Task as the settled-plan boundary instead of reading a later array entry', () => {
-    const feedback = projectConversationGoalFeedback({
-      ...statusV3,
-      tasks: [
-        { ...statusV3.tasks[0], id: 'settled-before', objective: 'Settled before', phase: 'complete' },
-        { ...statusV3.tasks[0], id: 'current-task', objective: 'Current work', phase: 'active' },
-        { ...statusV3.tasks[0], id: 'settled-after', objective: 'Must not be read', phase: 'complete' },
-      ],
-      currentTaskId: 'current-task',
-    })
-
-    expect(feedback).toMatchObject({
-      phase: 'running',
-      currentTaskObjective: 'Current work',
-      latestSettledTaskObjective: 'Settled before',
-    })
-  })
-
-  it('stops at the first unfinished Task when planning has no current Task', () => {
-    const feedback = projectConversationGoalFeedback({
-      ...statusV3,
-      goal: { ...statusV3.goal, phase: 'planning' },
-      tasks: [
-        { ...statusV3.tasks[0], id: 'settled-prefix', objective: 'Settled prefix', phase: 'complete' },
-        { ...statusV3.tasks[0], id: 'unstarted', objective: 'Unstarted work', phase: 'pending' },
-        { ...statusV3.tasks[0], id: 'untrusted-suffix', objective: 'Must not be read', phase: 'complete' },
-      ],
-      currentTaskId: null,
-    })
-
-    expect(feedback).toMatchObject({
-      phase: 'planning',
-      latestSettledTaskObjective: 'Settled prefix',
-    })
-  })
-})
 
 describe('Learn Loop browser RPC client', () => {
   it('sends the exact generic RPC status request and returns a valid projection', async () => {
@@ -951,15 +758,12 @@ describe('Learn Loop sidebar slot', () => {
     expect(applied).toEqual([])
   })
 
-  it('keeps the localized footer action and registers one conversation input dock', () => {
+  it('keeps the optional history action without registering a separate conversation dock', () => {
     let dispose: (() => void) | undefined
     const unregisterSlot = vi.fn()
-    const unregisterDock = vi.fn()
     const unregisterZh = vi.fn()
     const unregisterEn = vi.fn()
-    const register = vi.fn()
-      .mockReturnValueOnce(unregisterSlot)
-      .mockReturnValueOnce(unregisterDock)
+    const register = vi.fn().mockReturnValueOnce(unregisterSlot)
     const registerLocale = vi.fn()
       .mockReturnValueOnce(unregisterZh)
       .mockReturnValueOnce(unregisterEn)
@@ -996,21 +800,15 @@ describe('Learn Loop sidebar slot', () => {
     expect(Object.keys(registerLocale.mock.calls[0]![2] as object).sort()).toEqual(
       Object.keys(registerLocale.mock.calls[1]![2] as object).sort(),
     )
-    expect(register).toHaveBeenCalledTimes(2)
+    expect(register).toHaveBeenCalledOnce()
     expect(register).toHaveBeenNthCalledWith(1, {
       name: 'sidebar.footer.action',
       id: 'tianwen-learn-loop',
       order: 20,
     }, expect.any(Function))
-    expect(register).toHaveBeenNthCalledWith(2, {
-      name: 'conversation.input.dock',
-      id: 'tianwen-conversation-goal-feedback',
-      order: 100,
-    }, expect.any(Function))
 
     dispose?.()
     expect(unregisterSlot).toHaveBeenCalledOnce()
-    expect(unregisterDock).toHaveBeenCalledOnce()
     expect(unregisterZh).toHaveBeenCalledOnce()
     expect(unregisterEn).toHaveBeenCalledOnce()
   })

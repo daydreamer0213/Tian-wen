@@ -412,10 +412,7 @@ function loadClientModule(input: {
   return {
     open,
     render: () => runtime.render(sidebarSlot!({ wide: true })),
-    renderDock: (sessionId: string) => {
-      if (dockSlot === undefined) throw new Error('conversation input dock was not registered')
-      return runtime.render(dockSlot({ session: { sessionId }, input: {} }))
-    },
+    hasConversationDock: () => dockSlot !== undefined,
     unmount: () => runtime.unmount(),
   }
 }
@@ -460,229 +457,17 @@ async function openListedGoal(render: () => unknown, objective: string): Promise
 }
 
 describe('Learn Loop compiled DSH client module', () => {
-  it('refreshes the conversation dock on mount and coalesces snapshot invalidations without timers', async () => {
-    const summary = {
-      schemaVersion: 'tianwen.long-goal-summary.v3',
-      id: continuousStatus.goal.id,
-      objective: continuousStatus.goal.objective,
-      phase: continuousStatus.goal.phase,
-      revision: continuousStatus.goal.revision,
-      completedTasks: continuousStatus.goal.completedTasks,
-      abandonedTasks: continuousStatus.goal.abandonedTasks,
-      totalTasks: continuousStatus.goal.totalTasks,
-      currentTaskId: continuousStatus.currentTaskId,
-      updatedAt: 1,
-      control: continuousStatus.control,
-    } as const
-    const list = createSessionList({ current: 'control-session', byId: {} })
-    let resolveList: ((value: unknown) => void) | undefined
-    let resolveStatus: ((value: unknown) => void) | undefined
-    const firstList = new Promise<unknown>(resolve => { resolveList = resolve })
-    const firstStatus = new Promise<unknown>(resolve => { resolveStatus = resolve })
-    let listCalls = 0
-    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
-      if (endpoint === 'list') {
-        listCalls += 1
-        return listCalls === 1 ? firstList : { ok: true, value: { goals: [] } }
-      }
-      if (endpoint === 'status') return firstStatus
-      throw new Error(`unexpected endpoint ${endpoint}`)
-    }) }
-    const timers = vi.fn()
-    const client = loadClientModule({ list, rpc, setTimeout: timers as typeof setTimeout })
-
-    client.renderDock('control-session')
-    list.set({ current: 'control-session', byId: {} })
-    client.renderDock('control-session')
-    client.renderDock('control-session')
-    expect(rpc.call.mock.calls.filter(call => call[1] === 'list')).toHaveLength(1)
-
-    resolveList?.({ ok: true, value: { goals: [summary] } })
-    await flushClient()
-    expect(rpc.call.mock.calls.filter(call => call[1] === 'status')).toHaveLength(1)
-    resolveStatus?.({ ok: true, value: { status: continuousStatus } })
-    await flushClient()
-
-    expect(rpc.call.mock.calls.filter(call => call[1] === 'list')).toHaveLength(2)
-    expect(timers).not.toHaveBeenCalled()
-  })
-
-  it('hides settled feedback synchronously when the dock owner switches Session', async () => {
-    const summary = {
-      schemaVersion: 'tianwen.long-goal-summary.v3',
-      id: continuousStatus.goal.id,
-      objective: continuousStatus.goal.objective,
-      phase: continuousStatus.goal.phase,
-      revision: continuousStatus.goal.revision,
-      completedTasks: continuousStatus.goal.completedTasks,
-      abandonedTasks: continuousStatus.goal.abandonedTasks,
-      totalTasks: continuousStatus.goal.totalTasks,
-      currentTaskId: continuousStatus.currentTaskId,
-      updatedAt: 1,
-      control: continuousStatus.control,
-    } as const
-    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
-      if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
-      if (endpoint === 'status') return { ok: true, value: { status: continuousStatus } }
-      throw new Error(`unexpected endpoint ${endpoint}`)
-    }) }
+  it('does not register or query a separate conversation Goal dock', async () => {
+    const rpc = { call: vi.fn(async () => ({ ok: true, value: { goals: [] } })) }
     const client = loadClientModule({
       list: createSessionList({ current: 'control-session', byId: {} }),
       rpc,
     })
 
-    client.renderDock('control-session')
+    expect(client.hasConversationDock()).toBe(false)
     await flushClient()
-    expect(text(client.renderDock('control-session'))).toContain(continuousStatus.goal.objective)
-
-    expect(text(client.renderDock('other-session'))).not.toContain(continuousStatus.goal.objective)
+    expect(rpc.call).not.toHaveBeenCalled()
   })
-
-  it('renders long Goal feedback as a bounded two-row card without horizontal overflow', async () => {
-    const summary = {
-      schemaVersion: 'tianwen.long-goal-summary.v3',
-      id: continuousStatus.goal.id,
-      objective: continuousStatus.goal.objective,
-      phase: continuousStatus.goal.phase,
-      revision: continuousStatus.goal.revision,
-      completedTasks: continuousStatus.goal.completedTasks,
-      abandonedTasks: continuousStatus.goal.abandonedTasks,
-      totalTasks: continuousStatus.goal.totalTasks,
-      currentTaskId: continuousStatus.currentTaskId,
-      updatedAt: 1,
-      control: continuousStatus.control,
-    } as const
-    const client = loadClientModule({
-      list: createSessionList({ current: 'control-session', byId: {} }),
-      rpc: { call: vi.fn(async (_channel: string, endpoint: string) => {
-        if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
-        if (endpoint === 'status') return { ok: true, value: { status: continuousStatus } }
-        throw new Error(`unexpected endpoint ${endpoint}`)
-      }) },
-    })
-
-    client.renderDock('control-session')
-    await flushClient()
-    const tree = client.renderDock('control-session')
-    const card = findElement(tree, element => element.props['aria-label'] === 'Goal progress')
-    expect(card.props.style).toMatchObject({
-      display: 'grid',
-      gridTemplateColumns: 'minmax(0, 1fr) auto',
-      width: 'calc(100% - 24px)',
-      maxWidth: 720,
-      margin: '0 auto 8px',
-      boxSizing: 'border-box',
-      borderRadius: 10,
-    })
-    expect(findElement(tree, element => element.type === 'strong').props.style).toMatchObject({
-      minWidth: 0,
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-    })
-    expect(findElement(tree, element => element.type === 'span' &&
-      text(element).startsWith('Current:')).props.style).toMatchObject({
-      minWidth: 0,
-      gridColumn: '1 / -1',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-    })
-  })
-
-  it('aborts old conversation dock work on Session switch and unmount, rejecting late responses', async () => {
-    const list = createSessionList({ current: 'control-session', byId: {} })
-    let resolveOld: ((value: unknown) => void) | undefined
-    let oldSignal: AbortSignal | undefined
-    const oldList = new Promise<unknown>(resolve => { resolveOld = resolve })
-    const rpc = { call: vi.fn(async (_channel: string, endpoint: string, _payload: unknown, signal: AbortSignal) => {
-      if (endpoint !== 'list') throw new Error(`unexpected endpoint ${endpoint}`)
-      if (oldSignal === undefined) {
-        oldSignal = signal
-        return oldList
-      }
-      return { ok: true, value: { goals: [] } }
-    }) }
-    const client = loadClientModule({ list, rpc })
-
-    client.renderDock('control-session')
-    client.renderDock('other-session')
-    expect(oldSignal?.aborted).toBe(true)
-    resolveOld?.({ ok: true, value: { goals: [summaryV1] } })
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(rpc.call.mock.calls.filter(call => call[1] === 'status')).toHaveLength(0)
-    expect(text(client.renderDock('other-session'))).not.toContain(summaryV1.objective)
-
-    let unmountSignal: AbortSignal | undefined
-    const unmountClient = loadClientModule({
-      list,
-      rpc: { call: vi.fn(async (_channel: string, endpoint: string, _payload: unknown, signal: AbortSignal) => {
-        if (endpoint !== 'list') throw new Error(`unexpected endpoint ${endpoint}`)
-        unmountSignal = signal
-        return new Promise(() => undefined)
-      }) },
-    })
-    unmountClient.renderDock('control-session')
-    unmountClient.unmount()
-    expect(unmountSignal?.aborted).toBe(true)
-  })
-
-  it('rejects late status success and failure after dock Session switch or unmount', async () => {
-    const summary = {
-      schemaVersion: 'tianwen.long-goal-summary.v3',
-      id: continuousStatus.goal.id,
-      objective: continuousStatus.goal.objective,
-      phase: continuousStatus.goal.phase,
-      revision: continuousStatus.goal.revision,
-      completedTasks: continuousStatus.goal.completedTasks,
-      abandonedTasks: continuousStatus.goal.abandonedTasks,
-      totalTasks: continuousStatus.goal.totalTasks,
-      currentTaskId: continuousStatus.currentTaskId,
-      updatedAt: 1,
-      control: continuousStatus.control,
-    } as const
-    let resolveStatus: ((value: unknown) => void) | undefined
-    let switchSignal: AbortSignal | undefined
-    const switchedClient = loadClientModule({
-      list: createSessionList({ current: 'control-session', byId: {} }),
-      rpc: { call: vi.fn(async (_channel: string, endpoint: string, _payload: unknown, signal: AbortSignal) => {
-        if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
-        if (endpoint === 'status') {
-          switchSignal = signal
-          return new Promise(resolve => { resolveStatus = resolve })
-        }
-        throw new Error(`unexpected endpoint ${endpoint}`)
-      }) },
-    })
-
-    switchedClient.renderDock('control-session')
-    await flushClient()
-    switchedClient.renderDock('other-session')
-    expect(switchSignal?.aborted).toBe(true)
-    resolveStatus?.({ ok: true, value: { status: continuousStatus } })
-    await flushClient()
-    expect(text(switchedClient.renderDock('other-session'))).not.toContain(continuousStatus.goal.objective)
-
-    let rejectStatus: ((reason?: unknown) => void) | undefined
-    let unmountSignal: AbortSignal | undefined
-    const unmountedClient = loadClientModule({
-      list: createSessionList({ current: 'control-session', byId: {} }),
-      rpc: { call: vi.fn(async (_channel: string, endpoint: string, _payload: unknown, signal: AbortSignal) => {
-        if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
-        if (endpoint === 'status') {
-          unmountSignal = signal
-          return new Promise((_resolve, reject) => { rejectStatus = reject })
-        }
-        throw new Error(`unexpected endpoint ${endpoint}`)
-      }) },
-    })
-    unmountedClient.renderDock('control-session')
-    await flushClient()
-    unmountedClient.unmount()
-    expect(unmountSignal?.aborted).toBe(true)
-    rejectStatus?.(new Error('late status failure'))
-    await flushClient()
-  })
-
   it('renders one active locale and switches copy without another RPC', async () => {
     const list = createSessionList({ current: undefined, byId: {} })
     const locale = new TestLocale('zh')

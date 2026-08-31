@@ -30,10 +30,7 @@ type CommandRegistration = {
 
 export interface ContinuousGoalDeliveryIntent {
   readonly longGoalId: string
-  readonly transition: 'complete' | 'block'
-  readonly taskSessionId: string
-  readonly taskGoalId: string
-  readonly taskGoalRevision: number
+  readonly transition: 'start' | 'advance' | 'complete' | 'block'
   readonly status: LongGoalStatusProjectionV3
 }
 
@@ -53,7 +50,7 @@ export interface ContinuousGoalHostDependencies {
     readonly workspaceRoot: string
     readonly agentPreset: string
     readonly controlSessionId: string
-  }) => Promise<unknown>
+  }) => Promise<ContinuousGoalControlResult>
   readonly control: (input: GoalProgressInput & {
     readonly action: ContinuousGoalControlAction
   }) => Promise<unknown>
@@ -214,9 +211,8 @@ export function mountContinuousGoalHost(
     const key = [
       intent.longGoalId,
       intent.transition,
-      intent.taskSessionId,
-      intent.taskGoalId,
-      intent.taskGoalRevision,
+      intent.status.goal.revision,
+      intent.status.currentTaskId ?? 'no-current-task',
     ].join(':')
     if (deliveryKeys.has(key)) return
     deliveryKeys.add(key)
@@ -309,14 +305,32 @@ export function mountContinuousGoalHost(
         }
         const result = await dependencies.createProgress({
           objective, context: null, successCriteria: null, workspaceRoot, agentPreset, controlSessionId,
-        }) as Pick<ContinuousGoalControlResult, 'action'>
+        })
         const createdBindings = allControlRecords(dependencies.listLongGoals(), controlSessionId)
           .filter(record => !existingGoalIds.has(record.id))
         if (createdBindings.length !== 1) {
           throw new LongGoalIntegrityError('Continuous Goal control Session binding is ambiguous')
         }
+        const created = createdBindings[0]!
+        if (result.status.goal.id !== created.id) {
+          throw new LongGoalIntegrityError('Continuous Goal creation returned a different durable Goal')
+        }
+        const current = result.status.currentTaskId === null
+          ? undefined
+          : result.status.tasks.find(task => task.id === result.status.currentTaskId)
+        const transition = result.status.goal.phase === 'complete'
+          ? 'complete'
+          : result.status.goal.phase === 'blocked'
+            ? 'block'
+            : result.status.goal.phase === 'active' && current?.phase === 'active'
+              ? 'start'
+              : undefined
+        if (transition !== undefined) {
+          recordDelivery({ longGoalId: created.id, transition, status: result.status })
+          startPendingDeliveries(created.id)
+        }
         installBoundControls(agent)
-        return result
+        return { action: result.action }
       } finally {
         creatingControlSessions.delete(controlSessionId)
       }
@@ -375,16 +389,17 @@ export function mountContinuousGoalHost(
     if (projected?.phase !== 'complete' || settledTasks(status) <= record.planner.consideredSettledTasks) return
     await dependencies.continueProgress({ longGoalId, expectedRevision: record.revision })
     const finalStatus = await readStatus(longGoalId)
-    if (finalStatus.goal.phase === 'complete') {
-      recordDelivery({
-        longGoalId,
-        transition: 'complete',
-        taskSessionId: execution.sessionId,
-        taskGoalId: execution.goalId,
-        taskGoalRevision: execution.revision,
-        status: finalStatus,
-      })
-    }
+    const current = finalStatus.currentTaskId === null
+      ? undefined
+      : finalStatus.tasks.find(candidate => candidate.id === finalStatus.currentTaskId)
+    const transition = finalStatus.goal.phase === 'complete'
+      ? 'complete'
+      : finalStatus.goal.phase === 'blocked'
+        ? 'block'
+        : finalStatus.goal.phase === 'active' && current?.phase === 'active'
+          ? 'advance'
+          : undefined
+    if (transition !== undefined) recordDelivery({ longGoalId, transition, status: finalStatus })
   }
 
   const recordAfterBlock = async (longGoalId: string, execution: { sessionId: string, goalId: string, revision: number }): Promise<void> => {
@@ -410,9 +425,6 @@ export function mountContinuousGoalHost(
     recordDelivery({
       longGoalId,
       transition: 'block',
-      taskSessionId: execution.sessionId,
-      taskGoalId: execution.goalId,
-      taskGoalRevision: execution.revision,
       status: blocked,
     })
   }

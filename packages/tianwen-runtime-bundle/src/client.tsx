@@ -6,11 +6,6 @@ import type {
   LongGoalStatusProjection,
   LongGoalStatusProjectionV2,
 } from './long-goal-contract.js'
-import {
-  projectConversationGoalFeedback,
-  selectConversationGoalSummary,
-} from './conversation-goal-feedback.js'
-import type { ConversationGoalFeedback } from './conversation-goal-feedback.js'
 import { createLearnLoopClient, LearnLoopRpcError } from './learn-loop-client.js'
 import type { GoalTaskFeedbackItem } from './goal-task-feedback.js'
 import type { LearningClueItem } from './learning-clue-status.js'
@@ -105,15 +100,6 @@ const zhMessages = {
   'phase.paused': '已暂停',
   'phase.blocked': '已阻塞',
   'phase.complete': '已完成',
-  'dock.label': '目标进度',
-  'dock.unavailable': '目标状态暂时不可用。',
-  'dock.planning': '正在规划下一步。',
-  'dock.running': '正在推进。',
-  'dock.paused': '进度已暂停，可在对话中继续或调整方向。',
-  'dock.blocked': '有任务需要处理，可在对话中查看或调整方向。',
-  'dock.complete': '执行已完成，等待审阅。',
-  'dock.count': '{completed}/{total} 个任务',
-  'dock.task': '当前：{objective}',
 } as const
 
 type MessageKey = keyof typeof zhMessages
@@ -205,15 +191,6 @@ const enMessages = {
   'phase.paused': 'paused',
   'phase.blocked': 'blocked',
   'phase.complete': 'complete',
-  'dock.label': 'Goal progress',
-  'dock.unavailable': 'Goal status is currently unavailable.',
-  'dock.planning': 'Planning the next useful step.',
-  'dock.running': 'Work is in progress.',
-  'dock.paused': 'Progress is paused. Resume or redirect in the composer.',
-  'dock.blocked': 'A task needs attention. Review or redirect in the composer.',
-  'dock.complete': 'Execution is complete. Ready for review.',
-  'dock.count': '{completed}/{total} tasks',
-  'dock.task': 'Current: {objective}',
 } as const satisfies Readonly<Record<MessageKey, string>>
 
 const actionLabelKeys = {
@@ -307,16 +284,6 @@ interface SessionListSource {
   subscribe(listener: () => void): () => void
 }
 
-interface ConversationInputDockProps {
-  readonly session: { readonly sessionId: string }
-  readonly input: object
-}
-
-interface SessionConversationGoalFeedback {
-  readonly sessionId: string
-  readonly feedback: ConversationGoalFeedback
-}
-
 export interface ClientContext {
   readonly connection: {
     readonly rpc: Parameters<typeof createLearnLoopClient>[0]
@@ -352,14 +319,6 @@ export interface ClientContext {
         readonly order: 20
       },
       component: (props: { readonly wide: boolean }) => JSX.Element,
-    ): () => void
-    register(
-      options: {
-        readonly name: 'conversation.input.dock'
-        readonly id: 'tianwen-conversation-goal-feedback'
-        readonly order: 100
-      },
-      component: (props: ConversationInputDockProps) => JSX.Element,
     ): () => void
   }
 }
@@ -643,157 +602,6 @@ export function waitForSessionProjection(
     signal.addEventListener('abort', onAbort, { once: true })
     check()
   })
-}
-
-function ConversationGoalDock({
-  ctx,
-  session,
-  input,
-}: ConversationInputDockProps & { readonly ctx: ClientContext }): JSX.Element {
-  useSyncExternalStore(
-    listener => ctx.locale.subscribe(listener),
-    () => ctx.locale.getSnapshot(),
-  )
-  const t = ctx.locale.bind(LOCALE_NAMESPACE)
-  const client = useRef(createLearnLoopClient(ctx.connection.rpc)).current
-  const sessionList = useSyncExternalStore(
-    listener => ctx.sessions.list.subscribe(listener),
-    () => ctx.sessions.list.getSnapshot(),
-  )
-  const [feedback, setFeedback] = useState<SessionConversationGoalFeedback | undefined>()
-  const refreshState = useRef({
-    sessionId: undefined as string | undefined,
-    generation: 0,
-    inFlight: false,
-    queued: false,
-    controller: undefined as AbortController | undefined,
-  })
-
-  const refresh = useCallback(() => {
-    const state = refreshState.current
-    const sessionId = session.sessionId
-    if (state.sessionId !== sessionId) {
-      state.generation += 1
-      state.controller?.abort()
-      state.sessionId = sessionId
-      state.controller = undefined
-      state.inFlight = false
-      state.queued = false
-    }
-    if (state.inFlight) {
-      state.queued = true
-      return
-    }
-
-    const generation = ++state.generation
-    const controller = new AbortController()
-    state.controller = controller
-    state.inFlight = true
-    void (async () => {
-      try {
-        const summaries = await client.list(controller.signal)
-        if (controller.signal.aborted || state.generation !== generation || state.sessionId !== sessionId) return
-        const summary = selectConversationGoalSummary(summaries, sessionId)
-        if (summary === undefined) {
-          setFeedback(undefined)
-          return
-        }
-        const status = await client.status(summary.id, controller.signal)
-        if (controller.signal.aborted || state.generation !== generation || state.sessionId !== sessionId) return
-        setFeedback({
-          sessionId,
-          feedback: projectConversationGoalFeedback(
-            status.schemaVersion === 'tianwen.long-goal-status.v3' ? status : undefined,
-          ),
-        })
-      } catch {
-        if (!controller.signal.aborted && state.generation === generation && state.sessionId === sessionId) {
-          setFeedback({ sessionId, feedback: projectConversationGoalFeedback(undefined) })
-        }
-      } finally {
-        if (state.generation !== generation || state.sessionId !== sessionId) return
-        state.inFlight = false
-        state.controller = undefined
-        if (state.queued) {
-          state.queued = false
-          refresh()
-        }
-      }
-    })()
-  }, [client, session.sessionId])
-
-  useEffect(() => {
-    refresh()
-  }, [refresh, session, input, sessionList])
-  useEffect(() => () => {
-    const state = refreshState.current
-    state.generation += 1
-    state.queued = false
-    state.controller?.abort()
-    state.controller = undefined
-    state.inFlight = false
-  }, [])
-
-  const currentFeedback = feedback?.sessionId === session.sessionId ? feedback.feedback : undefined
-  if (currentFeedback === undefined) return <></>
-  if (currentFeedback.phase === 'unavailable') {
-    return <div aria-label={t('dock.label')} aria-live="polite" style={conversationGoalDockStyle}>
-      <span style={conversationGoalDockTaskStyle}>{t('dock.unavailable')}</span>
-    </div>
-  }
-  const taskObjective = currentFeedback.currentTaskObjective ?? currentFeedback.latestSettledTaskObjective
-  return <div aria-label={t('dock.label')} aria-live="polite" style={conversationGoalDockStyle}>
-    <strong style={conversationGoalDockObjectiveStyle}>{currentFeedback.objective}</strong>
-    <span style={conversationGoalDockMetaStyle}>
-      {t(`dock.${currentFeedback.phase}`)} · {t('dock.count', {
-        completed: currentFeedback.completedTasks,
-        total: currentFeedback.totalTasks,
-      })}
-    </span>
-    {taskObjective !== undefined && <span style={conversationGoalDockTaskStyle}>{t('dock.task', {
-      objective: taskObjective,
-    })}</span>}
-  </div>
-}
-
-const conversationGoalDockStyle = {
-  display: 'grid',
-  gridTemplateColumns: 'minmax(0, 1fr) auto',
-  alignItems: 'center',
-  columnGap: 12,
-  rowGap: 4,
-  width: 'calc(100% - 24px)',
-  maxWidth: 720,
-  minWidth: 0,
-  margin: '0 auto 8px',
-  padding: '8px 12px',
-  boxSizing: 'border-box' as const,
-  color: 'var(--dsw-alias-label-secondary)',
-  border: '1px solid var(--dsw-alias-border-l2)',
-  borderRadius: 10,
-  background: 'var(--dsw-alias-button-elevated-fill)',
-  fontSize: 12,
-  lineHeight: 1.4,
-}
-
-const conversationGoalDockObjectiveStyle = {
-  minWidth: 0,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap' as const,
-  color: 'var(--dsw-alias-label-primary)',
-}
-
-const conversationGoalDockMetaStyle = {
-  whiteSpace: 'nowrap' as const,
-}
-
-const conversationGoalDockTaskStyle = {
-  gridColumn: '1 / -1',
-  minWidth: 0,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap' as const,
 }
 
 function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
@@ -1450,13 +1258,7 @@ export function apply(ctx: ClientContext): void {
       id: 'tianwen-learn-loop',
       order: 20,
     }, props => <LearnLoopEntry {...props} ctx={ctx} />)
-    const unregisterDock = ctx.slots.register({
-      name: 'conversation.input.dock',
-      id: 'tianwen-conversation-goal-feedback',
-      order: 100,
-    }, props => <ConversationGoalDock {...props} ctx={ctx} />)
     return () => {
-      unregisterDock()
       unregisterSlot()
       unregisterEn()
       unregisterZh()
