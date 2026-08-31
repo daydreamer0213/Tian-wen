@@ -2,7 +2,7 @@
 
 Date: 2026-08-31
 
-Status: ready for implementation
+Status: implementation and installed artifacts complete; valid v3 natural acceptance remains intentionally unclaimed
 
 Design:
 [`2026-08-31-tianwen-conversation-goal-feedback-design.md`](../specs/2026-08-31-tianwen-conversation-goal-feedback-design.md)

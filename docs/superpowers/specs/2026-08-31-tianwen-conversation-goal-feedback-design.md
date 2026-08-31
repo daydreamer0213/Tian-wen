@@ -2,7 +2,7 @@
 
 Date: 2026-08-31
 
-Status: approved product design; implementation pending
+Status: implemented in Runtime 0.1.6 candidate; installed deterministic proof complete; valid v3 natural acceptance awaits ordinary user use
 
 ## 1. Decision
 

@@ -4,7 +4,7 @@
 
 Tianwen is an auditable learning control plane for long-running agents.
 
-**Current product snapshot: Runtime 0.1.5; Stage 7 complete.** DSH 0.1.1-rc.2 is
+**Current product snapshot: Runtime 0.1.6; Stage 7 remains complete.** DSH 0.1.1-rc.2 is
 the exact supported Agent Runtime. The ordinary entry is now inside a DSH
 Web/Desktop conversation: `/goal <objective>` starts long-running work without
 opening a Tianwen panel or asking the user to author Tasks or round counts.
@@ -14,9 +14,15 @@ or resume from the same conversation, and DSH's native stop control also pauses
 the continuous Goal. Tianwen reuses DSH models, tools, and runtime; it does not
 replace or hot-swap the running Agent.
 
+Runtime 0.1.6 adds the missing conversation feedback edge. The original chat
+now shows a compact, bounded two-row Goal card for planning, running, paused,
+blocked, and complete state. A terminal or blocked v3 Goal can also request one
+read-only natural summary in that same chat. The optional Long-running goals
+panel remains history and diagnostics, not the primary control surface.
+
 To decide whether a capability is implemented now, use the
 [Current status](docs/tianwen-architecture-overview-v2.md#当前状态2026-08-31),
-the [Runtime 0.1.5 release handoff](docs/operations/tianwen-runtime-0.1.5-release-handoff.md),
+the [conversation Goal feedback handoff](docs/operations/tianwen-conversation-goal-feedback-handoff.md),
 and current `main` source. Designs, implementation plans, and earlier natural-run
 handoffs preserve historical decisions and evidence; unchecked plan steps or a
 historical "next gate" do not override a later release closure.
@@ -101,7 +107,7 @@ into the Profile selected by the user:
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.5.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.6.tgz
 ```
 
 `--allow-build=koffi` is an explicit pnpm approval recorded in that Profile; it
@@ -134,7 +140,7 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
 The optional Tianwen Desktop reuses the user's existing DSH and Web Profile. It
 is not a second Runtime and does not require the managed Tianwen installation.
 Desktop opens the same Goal-first UI. With confirmation, it can update the exact
-known Runtime `0.1.4` predecessor to its embedded `0.1.5`; unknown or damaged
+known Runtime `0.1.5` predecessor to its embedded `0.1.6`; unknown or damaged
 versions are never overwritten automatically.
 
 After installation, enter `/goal <objective>` in an ordinary DSH Web or Tianwen
@@ -144,7 +150,9 @@ guidance stays in the control conversation; the native stop control pauses the
 Goal, and `/goal resume` continues it. The existing **Long-running goals** panel
 remains optional advanced history, not a second continuous-mode UI. Users do
 not predeclare a task count or execution-round count, and Tianwen adds no custom
-progress Session event.
+progress Session event. The compact card is reconstructed from durable v3 Goal
+state after restart; historical Goals completed before 0.1.6 are not woken or
+backfilled merely to manufacture a new chat summary.
 
 ## What this preview proves
 
