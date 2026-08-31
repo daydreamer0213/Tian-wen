@@ -312,6 +312,11 @@ interface ConversationInputDockProps {
   readonly input: object
 }
 
+interface SessionConversationGoalFeedback {
+  readonly sessionId: string
+  readonly feedback: ConversationGoalFeedback
+}
+
 export interface ClientContext {
   readonly connection: {
     readonly rpc: Parameters<typeof createLearnLoopClient>[0]
@@ -655,7 +660,7 @@ function ConversationGoalDock({
     listener => ctx.sessions.list.subscribe(listener),
     () => ctx.sessions.list.getSnapshot(),
   )
-  const [feedback, setFeedback] = useState<ConversationGoalFeedback | undefined>()
+  const [feedback, setFeedback] = useState<SessionConversationGoalFeedback | undefined>()
   const refreshState = useRef({
     sessionId: undefined as string | undefined,
     generation: 0,
@@ -695,12 +700,15 @@ function ConversationGoalDock({
         }
         const status = await client.status(summary.id, controller.signal)
         if (controller.signal.aborted || state.generation !== generation || state.sessionId !== sessionId) return
-        setFeedback(projectConversationGoalFeedback(
-          status.schemaVersion === 'tianwen.long-goal-status.v3' ? status : undefined,
-        ))
+        setFeedback({
+          sessionId,
+          feedback: projectConversationGoalFeedback(
+            status.schemaVersion === 'tianwen.long-goal-status.v3' ? status : undefined,
+          ),
+        })
       } catch {
         if (!controller.signal.aborted && state.generation === generation && state.sessionId === sessionId) {
-          setFeedback(projectConversationGoalFeedback(undefined))
+          setFeedback({ sessionId, feedback: projectConversationGoalFeedback(undefined) })
         }
       } finally {
         if (state.generation !== generation || state.sessionId !== sessionId) return
@@ -726,19 +734,20 @@ function ConversationGoalDock({
     state.inFlight = false
   }, [])
 
-  if (feedback === undefined) return <></>
-  if (feedback.phase === 'unavailable') {
+  const currentFeedback = feedback?.sessionId === session.sessionId ? feedback.feedback : undefined
+  if (currentFeedback === undefined) return <></>
+  if (currentFeedback.phase === 'unavailable') {
     return <div aria-label={t('dock.label')} aria-live="polite" style={conversationGoalDockStyle}>
       <span>{t('dock.unavailable')}</span>
     </div>
   }
-  const taskObjective = feedback.currentTaskObjective ?? feedback.latestSettledTaskObjective
+  const taskObjective = currentFeedback.currentTaskObjective ?? currentFeedback.latestSettledTaskObjective
   return <div aria-label={t('dock.label')} aria-live="polite" style={conversationGoalDockStyle}>
-    <strong style={conversationGoalDockObjectiveStyle}>{feedback.objective}</strong>
-    <span>{t(`dock.${feedback.phase}`)}</span>
+    <strong style={conversationGoalDockObjectiveStyle}>{currentFeedback.objective}</strong>
+    <span>{t(`dock.${currentFeedback.phase}`)}</span>
     <span>{t('dock.count', {
-      completed: feedback.completedTasks,
-      total: feedback.totalTasks,
+      completed: currentFeedback.completedTasks,
+      total: currentFeedback.totalTasks,
     })}</span>
     {taskObjective !== undefined && <span style={conversationGoalDockTaskStyle}>{t('dock.task', {
       objective: taskObjective,
@@ -759,6 +768,8 @@ const conversationGoalDockStyle = {
 }
 
 const conversationGoalDockObjectiveStyle = {
+  minWidth: 0,
+  flex: '1 1 0',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap' as const,
@@ -766,6 +777,8 @@ const conversationGoalDockObjectiveStyle = {
 }
 
 const conversationGoalDockTaskStyle = {
+  minWidth: 0,
+  flex: '1 1 0',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap' as const,

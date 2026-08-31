@@ -507,6 +507,74 @@ describe('Learn Loop compiled DSH client module', () => {
     expect(timers).not.toHaveBeenCalled()
   })
 
+  it('hides settled feedback synchronously when the dock owner switches Session', async () => {
+    const summary = {
+      schemaVersion: 'tianwen.long-goal-summary.v3',
+      id: continuousStatus.goal.id,
+      objective: continuousStatus.goal.objective,
+      phase: continuousStatus.goal.phase,
+      revision: continuousStatus.goal.revision,
+      completedTasks: continuousStatus.goal.completedTasks,
+      abandonedTasks: continuousStatus.goal.abandonedTasks,
+      totalTasks: continuousStatus.goal.totalTasks,
+      currentTaskId: continuousStatus.currentTaskId,
+      updatedAt: 1,
+      control: continuousStatus.control,
+    } as const
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
+      if (endpoint === 'status') return { ok: true, value: { status: continuousStatus } }
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const client = loadClientModule({
+      list: createSessionList({ current: 'control-session', byId: {} }),
+      rpc,
+    })
+
+    client.renderDock('control-session')
+    await flushClient()
+    expect(text(client.renderDock('control-session'))).toContain(continuousStatus.goal.objective)
+
+    expect(text(client.renderDock('other-session'))).not.toContain(continuousStatus.goal.objective)
+  })
+
+  it('keeps long dock objective and Task text shrinkable', async () => {
+    const summary = {
+      schemaVersion: 'tianwen.long-goal-summary.v3',
+      id: continuousStatus.goal.id,
+      objective: continuousStatus.goal.objective,
+      phase: continuousStatus.goal.phase,
+      revision: continuousStatus.goal.revision,
+      completedTasks: continuousStatus.goal.completedTasks,
+      abandonedTasks: continuousStatus.goal.abandonedTasks,
+      totalTasks: continuousStatus.goal.totalTasks,
+      currentTaskId: continuousStatus.currentTaskId,
+      updatedAt: 1,
+      control: continuousStatus.control,
+    } as const
+    const client = loadClientModule({
+      list: createSessionList({ current: 'control-session', byId: {} }),
+      rpc: { call: vi.fn(async (_channel: string, endpoint: string) => {
+        if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
+        if (endpoint === 'status') return { ok: true, value: { status: continuousStatus } }
+        throw new Error(`unexpected endpoint ${endpoint}`)
+      }) },
+    })
+
+    client.renderDock('control-session')
+    await flushClient()
+    const tree = client.renderDock('control-session')
+    expect(findElement(tree, element => element.type === 'strong').props.style).toMatchObject({
+      minWidth: 0,
+      flex: '1 1 0',
+    })
+    expect(findElement(tree, element => element.type === 'span' &&
+      text(element).startsWith('Current:')).props.style).toMatchObject({
+      minWidth: 0,
+      flex: '1 1 0',
+    })
+  })
+
   it('aborts old conversation dock work on Session switch and unmount, rejecting late responses', async () => {
     const list = createSessionList({ current: 'control-session', byId: {} })
     let resolveOld: ((value: unknown) => void) | undefined
@@ -543,6 +611,63 @@ describe('Learn Loop compiled DSH client module', () => {
     unmountClient.renderDock('control-session')
     unmountClient.unmount()
     expect(unmountSignal?.aborted).toBe(true)
+  })
+
+  it('rejects late status success and failure after dock Session switch or unmount', async () => {
+    const summary = {
+      schemaVersion: 'tianwen.long-goal-summary.v3',
+      id: continuousStatus.goal.id,
+      objective: continuousStatus.goal.objective,
+      phase: continuousStatus.goal.phase,
+      revision: continuousStatus.goal.revision,
+      completedTasks: continuousStatus.goal.completedTasks,
+      abandonedTasks: continuousStatus.goal.abandonedTasks,
+      totalTasks: continuousStatus.goal.totalTasks,
+      currentTaskId: continuousStatus.currentTaskId,
+      updatedAt: 1,
+      control: continuousStatus.control,
+    } as const
+    let resolveStatus: ((value: unknown) => void) | undefined
+    let switchSignal: AbortSignal | undefined
+    const switchedClient = loadClientModule({
+      list: createSessionList({ current: 'control-session', byId: {} }),
+      rpc: { call: vi.fn(async (_channel: string, endpoint: string, _payload: unknown, signal: AbortSignal) => {
+        if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
+        if (endpoint === 'status') {
+          switchSignal = signal
+          return new Promise(resolve => { resolveStatus = resolve })
+        }
+        throw new Error(`unexpected endpoint ${endpoint}`)
+      }) },
+    })
+
+    switchedClient.renderDock('control-session')
+    await flushClient()
+    switchedClient.renderDock('other-session')
+    expect(switchSignal?.aborted).toBe(true)
+    resolveStatus?.({ ok: true, value: { status: continuousStatus } })
+    await flushClient()
+    expect(text(switchedClient.renderDock('other-session'))).not.toContain(continuousStatus.goal.objective)
+
+    let rejectStatus: ((reason?: unknown) => void) | undefined
+    let unmountSignal: AbortSignal | undefined
+    const unmountedClient = loadClientModule({
+      list: createSessionList({ current: 'control-session', byId: {} }),
+      rpc: { call: vi.fn(async (_channel: string, endpoint: string, _payload: unknown, signal: AbortSignal) => {
+        if (endpoint === 'list') return { ok: true, value: { goals: [summary] } }
+        if (endpoint === 'status') {
+          unmountSignal = signal
+          return new Promise((_resolve, reject) => { rejectStatus = reject })
+        }
+        throw new Error(`unexpected endpoint ${endpoint}`)
+      }) },
+    })
+    unmountedClient.renderDock('control-session')
+    await flushClient()
+    unmountedClient.unmount()
+    expect(unmountSignal?.aborted).toBe(true)
+    rejectStatus?.(new Error('late status failure'))
+    await flushClient()
   })
 
   it('renders one active locale and switches copy without another RPC', async () => {
