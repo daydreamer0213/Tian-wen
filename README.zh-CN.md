@@ -4,14 +4,14 @@
 
 天问是一个面向长时间运行 Agent、可审计的学习控制面。
 
-**当前产品快照：Runtime 0.1.6；Stage 7 仍已完成。** DSH 0.1.1-rc.2 是当前精确支持的
+**当前产品快照：Runtime 0.1.7；Stage 7 仍已完成。** DSH 0.1.1-rc.2 是当前精确支持的
 Agent Runtime。普通入口已经内化到 DSH Web/Desktop 对话：用户输入 `/goal <长期目标>` 即可
 启动，不需要打开天问面板，也不需要填写 Task 或执行轮数。天问使用稳定的 Planner Session
 自动维护后续 Task，每个已接纳 Task 在自己的 DSH Session 中执行。用户可在同一对话中自然
 补充方向、纠偏、暂停或恢复；DSH 原生停止按钮也会暂停连续 Goal。天问复用 DSH 的模型、
 工具和运行时，不替换正在运行的 Agent，也不热切换当前 Run。
 
-Runtime 0.1.6 补上了主对话反馈：原对话现在会用一个有宽度上限的两行紧凑卡片显示规划、执行、
+Runtime 0.1.7 交付了主对话反馈：原对话现在会用一个有宽度上限的两行紧凑卡片显示规划、执行、
 暂停、阻塞和完成状态。v3 Goal 进入完成或阻塞时，还可以在同一对话触发一次只读的自然语言总结。
 “长期目标”面板仍只是历史和诊断入口，不是主要控制界面。
 
@@ -86,7 +86,7 @@ Runtime Bundle 压缩包，再交给 DSH 安装到用户自己选择的 Profile�
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.6.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.7.tgz
 ```
 
 `--allow-build=koffi` 是写入当前 Profile 的 pnpm 明确许可，不会修改全局 pnpm 设置。只有
@@ -113,14 +113,14 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
 
 可选的 Tianwen Desktop 复用用户现有的 DSH 与 Web Profile；它不是第二套 Runtime，也不要求
 用户改用天问托管安装目录。Desktop 打开的是同一套 Goal-first 界面，旧的精确 Runtime
-`0.1.5` Profile 可在用户确认后更新到内嵌的 `0.1.6`；未知或损坏版本不会被自动覆盖。
+`0.1.6` Profile 可在用户确认后更新到内嵌的 `0.1.7`；未知或损坏版本不会被自动覆盖。
 
 安装后，在普通 DSH Web 或 Tianwen Desktop 对话中输入 `/goal <长期目标>`。天问会自动派生
 Task，让每个已接纳 Task 在独立 DSH Session 中执行，并在 Task 边界继续推进。与 Goal 有关的
 自然语言补充继续留在控制对话中；原生停止按钮会暂停 Goal，`/goal resume` 可继续。“长期目标”
 面板只保留为可选的高级历史入口，不是第二套连续模式界面。用户不需要预先填写 Task 数量或
 执行轮数，天问也不会新增自定义进度 Session 事件。紧凑卡片会在重启后从持久化 v3 Goal 状态
-恢复；0.1.6 安装前已经完成的历史 Goal 不会为了补一条新总结而重新唤醒模型。
+恢复；安装主对话反馈能力前已经完成的历史 Goal 不会为了补一条新总结而重新唤醒模型。
 
 ## 当前预览证明了什么
 

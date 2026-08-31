@@ -2,14 +2,14 @@
 
 Date: 2026-08-31
 
-Status: Runtime 0.1.6 implementation, official install, Desktop preview.7 packaging,
-and deterministic review are complete. A valid installed-product v3 natural
+Status: Runtime 0.1.7 implementation, official install, Web Profile update,
+Desktop preview.8 packaging, and deterministic review are complete. A valid installed-product v3 natural
 acceptance is not claimed by this handoff.
 
 ## 1. Product result
 
 The ordinary DSH conversation remains the primary surface for continuous Goals.
-Runtime 0.1.6 adds two bounded feedback paths without adding another Goal engine:
+Runtime 0.1.7 delivers two bounded feedback paths without adding another Goal engine:
 
 - one event-driven `conversation.input.dock` card for planning, running, paused,
   blocked, and complete v3 state; and
@@ -36,40 +36,54 @@ The reviewable implementation chain on `codex/goal-chat-feedback` includes:
 - `a082942` and `fb785b2` — Runtime 0.1.6 / Desktop preview.7 identity and
   release-input coverage;
 - `9fc4525` — preserve the existing Desktop Profile pnpm store during update;
-- `f22515d` — replace the full-width one-line dock with the compact two-row card.
+- `f22515d` — replace the full-width one-line dock with the compact two-row card;
+- `b1e6f40` — assign the changed delivery bytes a new Runtime 0.1.7 / Desktop
+  preview.8 identity and accept only Runtime 0.1.6 as the managed predecessor.
 
 ## 3. Deterministic and packaging evidence
 
 The focused client suites passed after the compact-card change: 59 tests, 0
-failures. The Runtime bundle suite passed 62 tests. The Desktop Profile-prepare
-suite passed 20 tests. Earlier focused core feedback suites passed 179 tests;
-the broader independent check reported 89 passed and 9 environment-skipped,
-with TypeScript, Runtime build, private-import, and diff checks passing.
+failures. The final release-identity run passed 202 tests across installer,
+Desktop host, locale, Profile preparation, artifact, Runtime bundle, and Runtime
+Profile suites. Its one initial Runtime Profile failure was only the controller's
+missing required `COREPACK_HOME`; that file was rerun with the documented D-drive
+environment and passed 4 tests with 3 integration cases skipped. The final
+artifact suite passed 9 tests after packaging. TypeScript build and typecheck,
+Runtime build, Desktop unpacked audit, and diff checks passed.
 
 Independent reviewers found no Critical, Important, or Minor issue in either
 the delivery identity chain, the pnpm-store preservation fix, or the final
 compact-card change.
 
 The official installer upgraded the managed product root at
-`D:\DevData\tianwen-experience` to Runtime 0.1.6 on exact DSH 0.1.1-rc.2 and
+`D:\DevData\tianwen-experience` from Runtime 0.1.6 to Runtime 0.1.7 on exact DSH 0.1.1-rc.2 and
 returned `status=ready`. Existing Session files and settings were retained.
 The installed Runtime archive is:
 
 ```text
-D:\DevData\tianwen-experience\packs\tianwen-runtime-bundle-0.1.6.tgz
-SHA-256 51C05476F9B6DDF1A7A8C880D5592B7C8E4C1D94DFCB14362D077D021735F4F1
+D:\DevData\tianwen-experience\packs\tianwen-runtime-bundle-0.1.7.tgz
+SHA-256 52889328F2C6275E88265A6C4DB921435DA14113F77FBCFA685C1FB5E5592EF9
 ```
 
-Desktop `0.1.0-preview.7` was rebuilt with that exact archive. The unpacked
+Desktop `0.1.0-preview.8` was rebuilt with that exact archive. The unpacked
 artifact audit passed. The final installer is:
 
 ```text
-D:\DevData\tianwen-0.1.6-artifacts\Tianwen Desktop Setup 0.1.0-preview.7.exe
-SHA-256 B9DB4A64252A7FDD45E8F2EF2EBE662C592034383BC4E2A879540DC5CD3C77B7
+D:\DevData\tianwen-0.1.7-artifacts\Tianwen Desktop Setup 0.1.0-preview.8.exe
+SHA-256 F9576CC13F694A768E6E77CCB779BE8805F95CE31E8D36954D8AE8A014F3B33C
 ```
 
-The existing desktop shortcut still targets the rebuilt `win-unpacked` product,
-and the restarted Desktop kept its DSH Web listener alive.
+The existing desktop shortcut still targets the rebuilt `win-unpacked` product.
+The actual Web Profile was updated from Runtime 0.1.6 to 0.1.7 through the same
+DSH `plugin --profile web --allow-build=koffi add` path used by Desktop. Its
+installed `dist/client.js` has the same SHA-256 as the built client and contains
+the centered 720-pixel, two-row grid and ellipsis rules. The restarted Desktop
+kept its DSH Web listener alive.
+
+The intermediate 0.1.6 package remains historical evidence, not the final
+delivery identity. Rebuilding changed bytes under the already-installed 0.1.6
+version correctly did not trigger Desktop replacement. The final delivery uses
+0.1.7 rather than adding a same-version digest overwrite mechanism.
 
 ## 4. User screenshot and historical state
 
@@ -107,7 +121,7 @@ with one of three Tasks complete. It was not manually advanced to manufacture a
 passing result.
 
 No third Provider run was started. Neither controller invocation is counted as
-valid Runtime 0.1.6 v3 acceptance, and neither is misreported as a Tianwen product
+valid Runtime 0.1.7 v3 acceptance, and neither is misreported as a Tianwen product
 failure. Internal Session event counts are not Provider billing or cost facts.
 
 ## 6. Acceptance boundary and next evidence
