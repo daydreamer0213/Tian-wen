@@ -5,8 +5,8 @@ import type { SpawnOptions } from 'node:child_process'
 
 const dshVersion = '0.1.1-rc.2'
 const runtimePackage = '@tianwen/runtime-bundle'
-const runtimeVersion = '0.1.5'
-const knownOldRuntimeVersion = '0.1.4'
+const runtimeVersion = '0.1.6'
+const knownOldRuntimeVersion = '0.1.5'
 const maxStartupOutputBytes = 64 * 1024
 const readinessTimeoutMs = 120_000
 const gracefulStopTimeoutMs = 5_000

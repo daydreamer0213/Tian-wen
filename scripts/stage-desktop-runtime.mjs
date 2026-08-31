@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const RUNTIME_ARCHIVE_NAME = 'tianwen-runtime-bundle-0.1.5.tgz'
+const RUNTIME_ARCHIVE_NAME = 'tianwen-runtime-bundle-0.1.6.tgz'
 
 export function stageDesktopRuntime(sourceTarball, packageRoot) {
   if (!isAbsolute(sourceTarball)) throw new Error('Runtime source path must be absolute')
