@@ -166,6 +166,22 @@ describe('conversation Goal feedback projection', () => {
   })
 
   it.each([
+    ['newer update', [
+      { ...summaryV3, id: 'active-old', updatedAt: 10 },
+      { ...summaryV3, id: 'planning-new', phase: 'planning', updatedAt: 11 },
+    ], 'planning-new'],
+    ['stable ID tie-break', [
+      { ...summaryV3, id: 'paused-z', updatedAt: 11, control: {
+        ...summaryV3.control,
+        autoProgress: 'paused',
+      } },
+      { ...summaryV3, id: 'blocked-a', phase: 'blocked', updatedAt: 11 },
+    ], 'blocked-a'],
+  ] as const)('orders multiple unfinished v3 candidates by %s', (_name, candidates, expectedId) => {
+    expect(selectConversationGoalSummary(candidates, 'control-session')?.id).toBe(expectedId)
+  })
+
+  it.each([
     ['planning', {
       ...statusV3,
       goal: { ...statusV3.goal, phase: 'planning' },
@@ -257,6 +273,24 @@ describe('conversation Goal feedback projection', () => {
     expect(JSON.stringify(feedback)).not.toContain('secret raw provider error')
     expect(JSON.stringify(feedback)).not.toContain('full Task reply')
     expect(JSON.stringify(feedback)).not.toMatch(/\d+%/u)
+  })
+
+  it('uses the current Task as the settled-plan boundary instead of reading a later array entry', () => {
+    const feedback = projectConversationGoalFeedback({
+      ...statusV3,
+      tasks: [
+        { ...statusV3.tasks[0], id: 'settled-before', objective: 'Settled before', phase: 'complete' },
+        { ...statusV3.tasks[0], id: 'current-task', objective: 'Current work', phase: 'active' },
+        { ...statusV3.tasks[0], id: 'settled-after', objective: 'Must not be read', phase: 'complete' },
+      ],
+      currentTaskId: 'current-task',
+    })
+
+    expect(feedback).toMatchObject({
+      phase: 'running',
+      currentTaskObjective: 'Current work',
+      latestSettledTaskObjective: 'Settled before',
+    })
   })
 })
 
