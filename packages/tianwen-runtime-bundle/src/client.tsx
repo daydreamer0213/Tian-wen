@@ -738,17 +738,18 @@ function ConversationGoalDock({
   if (currentFeedback === undefined) return <></>
   if (currentFeedback.phase === 'unavailable') {
     return <div aria-label={t('dock.label')} aria-live="polite" style={conversationGoalDockStyle}>
-      <span>{t('dock.unavailable')}</span>
+      <span style={conversationGoalDockTaskStyle}>{t('dock.unavailable')}</span>
     </div>
   }
   const taskObjective = currentFeedback.currentTaskObjective ?? currentFeedback.latestSettledTaskObjective
   return <div aria-label={t('dock.label')} aria-live="polite" style={conversationGoalDockStyle}>
     <strong style={conversationGoalDockObjectiveStyle}>{currentFeedback.objective}</strong>
-    <span>{t(`dock.${currentFeedback.phase}`)}</span>
-    <span>{t('dock.count', {
-      completed: currentFeedback.completedTasks,
-      total: currentFeedback.totalTasks,
-    })}</span>
+    <span style={conversationGoalDockMetaStyle}>
+      {t(`dock.${currentFeedback.phase}`)} · {t('dock.count', {
+        completed: currentFeedback.completedTasks,
+        total: currentFeedback.totalTasks,
+      })}
+    </span>
     {taskObjective !== undefined && <span style={conversationGoalDockTaskStyle}>{t('dock.task', {
       objective: taskObjective,
     })}</span>}
@@ -756,29 +757,40 @@ function ConversationGoalDock({
 }
 
 const conversationGoalDockStyle = {
-  display: 'flex',
+  display: 'grid',
+  gridTemplateColumns: 'minmax(0, 1fr) auto',
   alignItems: 'center',
-  gap: 8,
+  columnGap: 12,
+  rowGap: 4,
+  width: 'calc(100% - 24px)',
+  maxWidth: 720,
   minWidth: 0,
-  padding: '6px 10px',
+  margin: '0 auto 8px',
+  padding: '8px 12px',
+  boxSizing: 'border-box' as const,
   color: 'var(--dsw-alias-label-secondary)',
-  borderTop: '1px solid var(--dsw-alias-border-l2)',
-  background: 'var(--dsw-alias-background-base)',
+  border: '1px solid var(--dsw-alias-border-l2)',
+  borderRadius: 10,
+  background: 'var(--dsw-alias-button-elevated-fill)',
   fontSize: 12,
+  lineHeight: 1.4,
 }
 
 const conversationGoalDockObjectiveStyle = {
   minWidth: 0,
-  flex: '1 1 0',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap' as const,
   color: 'var(--dsw-alias-label-primary)',
 }
 
+const conversationGoalDockMetaStyle = {
+  whiteSpace: 'nowrap' as const,
+}
+
 const conversationGoalDockTaskStyle = {
+  gridColumn: '1 / -1',
   minWidth: 0,
-  flex: '1 1 0',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap' as const,

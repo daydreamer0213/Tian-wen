@@ -538,7 +538,7 @@ describe('Learn Loop compiled DSH client module', () => {
     expect(text(client.renderDock('other-session'))).not.toContain(continuousStatus.goal.objective)
   })
 
-  it('keeps long dock objective and Task text shrinkable', async () => {
+  it('renders long Goal feedback as a bounded two-row card without horizontal overflow', async () => {
     const summary = {
       schemaVersion: 'tianwen.long-goal-summary.v3',
       id: continuousStatus.goal.id,
@@ -564,14 +564,27 @@ describe('Learn Loop compiled DSH client module', () => {
     client.renderDock('control-session')
     await flushClient()
     const tree = client.renderDock('control-session')
+    const card = findElement(tree, element => element.props['aria-label'] === 'Goal progress')
+    expect(card.props.style).toMatchObject({
+      display: 'grid',
+      gridTemplateColumns: 'minmax(0, 1fr) auto',
+      width: 'calc(100% - 24px)',
+      maxWidth: 720,
+      margin: '0 auto 8px',
+      boxSizing: 'border-box',
+      borderRadius: 10,
+    })
     expect(findElement(tree, element => element.type === 'strong').props.style).toMatchObject({
       minWidth: 0,
-      flex: '1 1 0',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
     })
     expect(findElement(tree, element => element.type === 'span' &&
       text(element).startsWith('Current:')).props.style).toMatchObject({
       minWidth: 0,
-      flex: '1 1 0',
+      gridColumn: '1 / -1',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
     })
   })
 
