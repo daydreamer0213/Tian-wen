@@ -1,7 +1,8 @@
 # Tianwen Runtime 0.1.5 release handoff
 
-**Date:** 2026-08-31  
-**Result:** passed locally; no external release action was taken
+**Date:** 2026-08-31
+**Result:** local product path passed with a retained Desktop evidence-capture
+gap; no external release action was taken
 
 ## Product result
 
@@ -13,9 +14,12 @@
 - One real fresh predecessor install established Runtime `0.1.4`, one candidate
   install upgraded it to `0.1.5`, and one candidate replay returned `ready`
   without changing the current installed product bytes.
-- One provider-free installed Desktop boundary opened the prepared `web`
-  Profile at a loopback root and closed its owned DSH process. This is local
-  startup evidence, not Provider usage or billing evidence.
+- Under the explicit product-priority boundary, the provider-free Desktop result
+  is accepted as a local product pass: the durable transcript records the
+  enabled exact target command and exit `0`, and the inspected exact test makes
+  that exit conditional on its ready/PID/closed-connection assertions. The
+  transcript does not retain the native `1 passed`, URL, or PID stdout, so the
+  Desktop evidence package is partial rather than complete.
 
 The isolated roots are:
 
@@ -47,6 +51,96 @@ The isolated roots are:
   `b0975fa9e78462213d47debb4d29e57ea8822acb4d5206e8e84cb9293408a280`.
 - Full machine-readable identities are retained at
   `D:\DevData\tw015-artifacts-20260831-114224\final-identities.json`.
+
+## Actual commands and exit results
+
+The cache variables used by build and install commands were:
+
+```powershell
+$env:COREPACK_HOME = 'D:\DevData\corepack-home'
+$env:PNPM_CONFIG_STORE_DIR = 'D:\DevData\pnpm-store'
+$env:NPM_CONFIG_CACHE = 'D:\DevData\npm-cache'
+$env:ELECTRON_CACHE = 'D:\DevData\electron-cache'
+$env:ELECTRON_BUILDER_CACHE = 'D:\DevData\electron-builder-cache'
+```
+
+The literal wrapper command below was attempted first and was blocked before
+native product startup by local PowerShell policy:
+
+```powershell
+pnpm --filter '@tianwen/runtime-bundle...' build
+```
+
+With the explicitly authorized resolved command entrypoint, the actual artifact
+commands were:
+
+```powershell
+$pnpmCmd = 'D:\hermes\node\pnpm.CMD'
+& $pnpmCmd --filter '@tianwen/runtime-bundle...' build
+& $pnpmCmd --filter '@tianwen/runtime-bundle' pack `
+  --skip-manifest-obfuscation `
+  --pack-destination 'D:\DevData\tw015-artifacts-20260831-114224\packs'
+$runtimeArchive = 'D:\DevData\tw015-artifacts-20260831-114224\packs\tianwen-runtime-bundle-0.1.5.tgz'
+node scripts/stage-desktop-runtime.mjs $runtimeArchive
+& $pnpmCmd --filter '@tianwen/desktop-host' build
+& $pnpmCmd --filter '@tianwen/desktop-host' pack:dir
+# The same pack:dir command was the one explicitly authorized transfer recovery.
+& $pnpmCmd --filter '@tianwen/desktop-host' pack:dir
+& $pnpmCmd --filter '@tianwen/desktop-host' pack:win
+node scripts/audit-desktop-artifact.mjs 'dist\tianwen-desktop\win-unpacked' $runtimeArchive
+```
+
+The corresponding exits were Runtime build `0`, Runtime pack `0`, Runtime
+stage `0`, Desktop build `0`, first `pack:dir` `1` (external download timeout),
+the single targeted `pack:dir` recovery `0`, the only `pack:win` `0`, and audit
+`0`.
+
+The actual predecessor and installed candidate commands were:
+
+```powershell
+$proofRoot = 'D:\DevData\tw015-proof-20260831-114224'
+git worktree add --detach 'D:\DevData\tianwen-worktrees\tw014-predecessor' `
+  c39c7c6d9e755aff31ee0e5358b3b5d02557837b
+node 'D:\DevData\tianwen-worktrees\tw014-predecessor\scripts\install-tianwen.mjs' `
+  --data-dir $proofRoot --json
+node scripts/install-tianwen.mjs --data-dir $proofRoot --json # one upgrade
+node scripts/install-tianwen.mjs --data-dir $proofRoot --json # one replay
+```
+
+All four exits were `0`. The actual archive identity comparison was:
+
+```powershell
+$installedArchive = "$proofRoot\packs\tianwen-runtime-bundle-0.1.5.tgz"
+$artifactHash = (Get-FileHash $runtimeArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+$installedHash = (Get-FileHash $installedArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($artifactHash -ne $installedHash) {
+  throw 'Standalone and installed Runtime archives differ'
+}
+```
+
+After matched Provider credential variables were removed from each command
+environment without recording their values, the actual Desktop commands were:
+
+```powershell
+$nodeExe = (Get-Command node.exe).Source
+$dshHome = "$proofRoot\dsh-home"
+$dshRoot = "$proofRoot\dsh-host\node_modules\@deepseek-ai\dsh"
+$desktopExe = (Resolve-Path 'dist\tianwen-desktop\win-unpacked\Tianwen Desktop.exe').Path
+$env:DSH_HOME = $dshHome
+$env:DSH_TELEMETRY_DISABLED = '1'
+& $nodeExe "$dshRoot\lib\bin.js" `
+  plugin --profile web --allow-build=koffi add $runtimeArchive
+$env:TIANWEN_DESKTOP_HOST_E2E = '1'
+$env:TIANWEN_DESKTOP_HOST_NODE = $nodeExe
+$env:TIANWEN_DESKTOP_HOST_DSH_ROOT = (Resolve-Path $dshRoot).Path
+$env:TIANWEN_DESKTOP_HOST_DSH_HOME = (Resolve-Path $dshHome).Path
+$env:TIANWEN_DESKTOP_EXECUTABLE = $desktopExe
+node node_modules/vitest/vitest.mjs run `
+  tests/dsh-migration/tianwen-desktop-host.e2e.spec.ts `
+  -t 'opens the prepared Web Profile and closes its owned DSH process'
+```
+
+The Profile command and exact E2E target command each returned exit `0`.
 
 ## Installed upgrade and replay
 
@@ -98,15 +192,33 @@ The formal installed DSH plugin command prepared existing Desktop Profile
 `DEEPSEEK_API_KEY` was removed from the command environment and the remaining
 matched Provider credential variable count was `0`.
 
-The focused installed Desktop E2E also ran with matched Provider credentials
-removed and exited `0`: one target test passed, four unrelated tests were
-skipped. Desktop reported owned DSH PID `8856` and reached
-`http://127.0.0.1:60172/`. That ready line is emitted only from the packaged
-BrowserWindow `did-finish-load` handler. The test then asserted Desktop exit
-code `0`, no exit signal, owned PID absent, and all three post-stop HTTP
-connection attempts failed. A fresh filtered process check also found zero
-proof-root `node.exe`, Electron, or Tianwen Desktop processes; PID `8856` does
-not exist.
+Durable evidence for the installed Desktop boundary is limited to these facts:
+
+- `desktop-provider-free-e2e.txt` records
+  `TIANWEN_DESKTOP_HOST_E2E='1'`, the exact test file and `-t` target, matched
+  Provider credential count `0`, and explicit native exit `0`;
+- the inspected test source places that exact test under
+  `describe.skipIf(!enabled)`, where `enabled` requires Windows and the same E2E
+  flag;
+- the exact test requires Desktop exit `0`, no signal, a parsed loopback ready
+  URL and owned PID, the owned PID absent after Desktop exit, and three failed
+  post-stop HTTP connection attempts.
+
+The controller observed the native `1 passed` summary, owned DSH PID `8856`, and
+`http://127.0.0.1:60172/` during that command. Windows transcript capture did not
+retain those three streamed stdout observations, so they are controller
+observations rather than independently durable log evidence. A later read-only
+filtered process check observed zero proof-root product processes and PID `8856`
+absent, but it cannot reconstruct the missing in-run stdout.
+
+The secondary `final-verification.txt` gate searched the transcript for
+`Tests 1 passed` and therefore ended with
+`FAIL=Desktop E2E pass evidence missing`. It did not run Vitest or report a
+product assertion failure; it failed because the searched native summary was
+not captured. There is no `FINAL_GATE=PASS` claim. Under the product-priority
+boundary, exact-target exit `0` plus the inspected assertion-bearing source is
+accepted as the local product result, while the missing durable URL/PID/test-
+count output remains an evidence-completeness uncertainty.
 
 The installed `web` Profile reports Runtime `0.1.5`. The interactive outdated-
 Profile confirmation path was not automated or repeated.
@@ -124,7 +236,10 @@ Profile confirmation path was not automated or repeated.
 - Exact predecessor worktree creation and install: exits `0`, `0`.
 - Candidate upgrade and replay: exits `0`, `0`.
 - Formal `web` Profile plugin preparation: exit `0`.
-- Provider-free installed Desktop E2E: exit `0`, 1/1 target test passed.
+- Provider-free installed Desktop exact target: durable exit `0`; the controller
+  observed `1 passed`, but that native summary is absent from the transcript.
+- Secondary transcript regex gate: `FAIL=Desktop E2E pass evidence missing`;
+  no `FINAL_GATE=PASS` is claimed.
 
 Command transcripts and sorted manifests are retained below the artifact root
 in `logs` and `manifests` respectively.
@@ -159,6 +274,13 @@ stdout. In particular, the Desktop E2E transcript retains credential clearing
 and explicit exit `0`, while the same command's controller output contains the
 `1 passed` Vitest summary, PID, and loopback ready line. Those facts are not
 silently upgraded into transcript content.
+
+The retained `logs\final-verification.txt` ends in
+`FAIL=Desktop E2E pass evidence missing` because it required the absent native
+summary. This secondary evidence check did not execute the product or its test;
+its failure is not a product assertion result. It does leave the documented
+uncertainty that the URL/PID/test-count observations are not independently
+recoverable from the transcript.
 
 No internal event, dependency download, test event, or process event is treated
 as evidence of Provider usage or cost.
