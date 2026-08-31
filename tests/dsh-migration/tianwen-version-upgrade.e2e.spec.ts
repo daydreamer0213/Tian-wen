@@ -181,7 +181,7 @@ function readJson<T>(path: string): T {
 
 function installPaths(productRoot: string, dshVersion = currentDshVersion) {
   const profileRoot = join(productRoot, 'dsh-home', 'profiles', 'tianwen')
-  const runtimeVersion = dshVersion === predecessorDshVersion ? '0.0.0' : '0.1.4'
+  const runtimeVersion = dshVersion === predecessorDshVersion ? '0.0.0' : '0.1.5'
   return {
     archive: join(productRoot, 'packs', `tianwen-runtime-bundle-${runtimeVersion}.tgz`),
     hostManifest: join(productRoot, 'dsh-host', 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
@@ -476,7 +476,7 @@ describe('Tianwen managed product upgrade acceptance boundary', () => {
     expect(currentPaths.archive).toBe(join(
       productRoot,
       'packs',
-      'tianwen-runtime-bundle-0.1.4.tgz',
+      'tianwen-runtime-bundle-0.1.5.tgz',
     ))
   })
 

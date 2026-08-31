@@ -143,7 +143,7 @@ function writeRuntimePublication(runtimeRoot: string, label = 'runtime'): void {
     files: [...RUNTIME_FILES],
     name: '@tianwen/runtime-bundle',
     type: 'module',
-    version: '0.1.4',
+    version: '0.1.5',
   })
 }
 
@@ -203,7 +203,7 @@ function writeManagedPredecessor(
 ): void {
   installWindowsFixture({ dataDir: paths.dataDir, runner: scriptedInstaller(paths).runner })
   const predecessorArchivePath = paths.archivePath.replace(
-    'tianwen-runtime-bundle-0.1.4.tgz',
+    'tianwen-runtime-bundle-0.1.5.tgz',
     'tianwen-runtime-bundle-0.0.0.tgz',
   )
   renameSync(paths.archivePath, predecessorArchivePath)
@@ -240,8 +240,8 @@ function writeManagedPredecessor(
 
 function runtimePredecessorArchivePath(paths: ReturnType<typeof deriveInstallPaths>): string {
   return paths.archivePath.replace(
+    'tianwen-runtime-bundle-0.1.5.tgz',
     'tianwen-runtime-bundle-0.1.4.tgz',
-    'tianwen-runtime-bundle-0.1.3.tgz',
   )
 }
 
@@ -251,7 +251,7 @@ function writeManagedRuntimePredecessor(paths: ReturnType<typeof deriveInstallPa
   renameSync(paths.archivePath, archivePath)
   const profileManifestPath = join(paths.profileRoot, 'package.json')
   const profile = JSON.parse(readFileSync(profileManifestPath, 'utf8'))
-  profile.dependencies['@tianwen/runtime-bundle'] = '0.1.3'
+  profile.dependencies['@tianwen/runtime-bundle'] = '0.1.4'
   writeJson(profileManifestPath, profile)
   const runtimeManifestPath = join(
     paths.profileRoot,
@@ -261,7 +261,7 @@ function writeManagedRuntimePredecessor(paths: ReturnType<typeof deriveInstallPa
     'package.json',
   )
   const runtime = JSON.parse(readFileSync(runtimeManifestPath, 'utf8'))
-  runtime.version = '0.1.3'
+  runtime.version = '0.1.4'
   writeJson(runtimeManifestPath, runtime)
   const receipt = JSON.parse(readFileSync(paths.receiptPath, 'utf8'))
   receipt.archivePath = archivePath
@@ -328,7 +328,7 @@ function scriptedInstaller(
       expect(destination).toBeTypeOf('string')
       expect(bytes).toBeTypeOf('string')
       mkdirSync(destination!, { recursive: true })
-      const archive = join(destination!, 'tianwen-runtime-bundle-0.1.4.tgz')
+      const archive = join(destination!, 'tianwen-runtime-bundle-0.1.5.tgz')
       packedArchives.push(archive)
       writeFileSync(archive, bytes!, 'utf8')
     }
@@ -338,7 +338,7 @@ function scriptedInstaller(
         dependencies: {
           '@deepseek-ai/dsh-base': CURRENT_DSH_VERSION,
           '@deepseek-ai/dsh-headless': CURRENT_DSH_VERSION,
-          '@tianwen/runtime-bundle': '0.1.4',
+          '@tianwen/runtime-bundle': '0.1.5',
         },
         dsh: {
           profile: {
@@ -530,7 +530,7 @@ describe('Tianwen installer contract', () => {
   it('derives the complete fixed Windows installation surface', () => {
     const paths = deriveInstallPaths('D:\\DevData\\tianwen', 'win32')
     expect(paths).toEqual({
-      archivePath: 'D:\\DevData\\tianwen\\packs\\tianwen-runtime-bundle-0.1.4.tgz',
+      archivePath: 'D:\\DevData\\tianwen\\packs\\tianwen-runtime-bundle-0.1.5.tgz',
       binDir: 'D:\\DevData\\tianwen\\dsh-home\\profiles\\tianwen\\node_modules\\.bin',
       dataDir: 'D:\\DevData\\tianwen',
       dshHome: 'D:\\DevData\\tianwen\\dsh-home',
@@ -652,7 +652,7 @@ describe('Tianwen installer contract', () => {
       (() => {
         const paths = deriveInstallPaths(testRoot('archive-directory'), 'win32')
         writeManagedPredecessor(paths, 'original-archive')
-        const archivePath = paths.archivePath.replace('0.1.4.tgz', '0.0.0.tgz')
+        const archivePath = paths.archivePath.replace('0.1.5.tgz', '0.0.0.tgz')
         rmSync(archivePath)
         mkdirSync(archivePath)
         return paths
@@ -660,7 +660,7 @@ describe('Tianwen installer contract', () => {
       (() => {
         const paths = deriveInstallPaths(testRoot('archive-digest'), 'win32')
         writeManagedPredecessor(paths, 'original-archive')
-        const archivePath = paths.archivePath.replace('0.1.4.tgz', '0.0.0.tgz')
+        const archivePath = paths.archivePath.replace('0.1.5.tgz', '0.0.0.tgz')
         writeFileSync(archivePath, 'tampered archive\n', 'utf8')
         return paths
       })(),
@@ -696,11 +696,11 @@ describe('Tianwen installer contract', () => {
     }
   })
 
-  it('recognizes only a complete same-DSH Runtime 0.1.3 predecessor before child effects', () => {
-    const complete = deriveInstallPaths(testRoot('runtime-predecessor'), 'win32')
-    writeManagedRuntimePredecessor(complete)
+  it('recognizes only a complete same-DSH Runtime 0.1.4 predecessor before child effects', () => {
+    const runtime014Fixture = deriveInstallPaths(testRoot('runtime-predecessor'), 'win32')
+    writeManagedRuntimePredecessor(runtime014Fixture)
 
-    expect(classifyManagedInstallation(complete)).toBe('managed-runtime-predecessor')
+    expect(classifyManagedInstallation(runtime014Fixture)).toBe('managed-runtime-predecessor')
 
     const incompatible = [
       (() => {
@@ -870,7 +870,7 @@ describe('Tianwen installer contract', () => {
     'migrates the complete %s predecessor to the current version and replays without deploys',
     (encoding) => {
       const paths = deriveInstallPaths(testRoot(`migrate-${encoding}`), 'win32')
-      const predecessorArchive = paths.archivePath.replace('0.1.4.tgz', '0.0.0.tgz')
+      const predecessorArchive = paths.archivePath.replace('0.1.5.tgz', '0.0.0.tgz')
       writeManagedPredecessor(paths, encoding)
       const session = join(paths.sessionsRoot, 'kept.jsonl')
       const ledger = join(paths.evolutionRoot, 'ledger.jsonl')
@@ -896,11 +896,11 @@ describe('Tianwen installer contract', () => {
     },
   )
 
-  it('migrates Runtime 0.1.3 while retaining older archives without redeploying the same DSH host', () => {
+  it('migrates Runtime 0.1.4 while retaining older archives without redeploying the same DSH host', () => {
     const paths = deriveInstallPaths(testRoot('migrate-runtime-predecessor'), 'win32')
     const predecessorArchive = runtimePredecessorArchivePath(paths)
-    const historicalArchive = paths.archivePath.replace('0.1.4.tgz', '0.0.0.tgz')
-    const historicalRuntimeArchive = paths.archivePath.replace('0.1.4.tgz', '0.1.1.tgz')
+    const historicalArchive = paths.archivePath.replace('0.1.5.tgz', '0.0.0.tgz')
+    const historicalRuntimeArchive = paths.archivePath.replace('0.1.5.tgz', '0.1.1.tgz')
     writeManagedRuntimePredecessor(paths)
     writeFileSync(historicalArchive, 'retained rc7 archive\n', 'utf8')
     writeFileSync(historicalRuntimeArchive, 'retained Runtime 0.1.1 archive\n', 'utf8')
@@ -917,14 +917,14 @@ describe('Tianwen installer contract', () => {
     expect(existsSync(predecessorArchive)).toBe(true)
     expect(existsSync(paths.archivePath)).toBe(true)
     expect(JSON.parse(readFileSync(join(paths.profileRoot, 'package.json'), 'utf8')))
-      .toMatchObject({ dependencies: { '@tianwen/runtime-bundle': '0.1.4' } })
+      .toMatchObject({ dependencies: { '@tianwen/runtime-bundle': '0.1.5' } })
     expect(JSON.parse(readFileSync(join(
       paths.profileRoot,
       'node_modules',
       '@tianwen',
       'runtime-bundle',
       'package.json',
-    ), 'utf8'))).toMatchObject({ version: '0.1.4' })
+    ), 'utf8'))).toMatchObject({ version: '0.1.5' })
     expect(JSON.parse(readFileSync(paths.receiptPath, 'utf8'))).toEqual(migrated)
     expect(migrated).toMatchObject({
       archivePath: paths.archivePath,
@@ -933,7 +933,7 @@ describe('Tianwen installer contract', () => {
     })
   })
 
-  it('restores the complete Runtime 0.1.3 predecessor after a pre-commit failure', () => {
+  it('restores the complete Runtime 0.1.4 predecessor after a pre-commit failure', () => {
     const paths = deriveInstallPaths(testRoot('runtime-predecessor-rollback'), 'win32')
     writeManagedRuntimePredecessor(paths)
     const before = snapshotTree(paths.dataDir)
