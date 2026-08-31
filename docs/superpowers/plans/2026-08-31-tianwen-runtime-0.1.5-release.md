@@ -210,7 +210,9 @@ $env:ELECTRON_CACHE = 'D:\DevData\electron-cache'
 $env:ELECTRON_BUILDER_CACHE = 'D:\DevData\electron-builder-cache'
 
 pnpm --filter '@tianwen/runtime-bundle...' build
-pnpm --filter '@tianwen/runtime-bundle' pack --pack-destination "$artifactRoot\packs"
+pnpm --filter '@tianwen/runtime-bundle' pack `
+  --skip-manifest-obfuscation `
+  --pack-destination "$artifactRoot\packs"
 $runtimeArchive = "$artifactRoot\packs\tianwen-runtime-bundle-0.1.5.tgz"
 node scripts/stage-desktop-runtime.mjs $runtimeArchive
 pnpm --filter '@tianwen/desktop-host' build
@@ -255,8 +257,19 @@ node scripts/install-tianwen.mjs --data-dir $proofRoot --json
 
 Expected: exit 0 and `status=ready`; exact Runtime becomes `0.1.5`; DSH host
 manifest and naturally existing user-state manifests are unchanged; both
-`0.1.4` and `0.1.5` archives remain; the receipt's `archiveDigest` equals the
-candidate packed archive digest.
+`0.1.4` and `0.1.5` archives remain. Explicitly compare the standalone and
+installed archive bytes:
+
+```powershell
+$installedArchive = "$proofRoot\packs\tianwen-runtime-bundle-0.1.5.tgz"
+$artifactHash = (Get-FileHash $runtimeArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+$installedHash = (Get-FileHash $installedArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($artifactHash -ne $installedHash) {
+  throw 'Standalone and installed Runtime archives differ'
+}
+```
+
+The receipt's `archiveDigest` must equal `sha256:$installedHash`.
 
 - [ ] **Step 6: Replay current installation once**
 
@@ -268,13 +281,39 @@ Expected: exit 0 and `status=ready`; receipt, Profile, current archive, DSH
 host, and user-state manifests remain byte-identical; no `.install-*` or
 `.tianwen-backup-*` directory remains.
 
-- [ ] **Step 7: Run one provider-free installed startup boundary**
+- [ ] **Step 7: Prepare and run one provider-free installed Desktop boundary**
 
-Use the built unpacked Desktop and the installed exact-current Profile with the
-existing Desktop host E2E boundary. Clear Provider credential variables. Verify
-one loopback HTTP root response, normal stop, and no owned DSH process remains.
-Do not automate or repeat the interactive outdated-Profile confirmation path;
-the focused deterministic tests cover it.
+The official installer prepares Profile `tianwen`, while Desktop intentionally
+uses Profile `web`. Prepare that existing Desktop Profile through the formal DSH
+plugin command in the same installed product root, using the candidate archive:
+
+```powershell
+$nodeExe = (Get-Command node.exe).Source
+$dshHome = "$proofRoot\dsh-home"
+$dshRoot = "$proofRoot\dsh-host\node_modules\@deepseek-ai\dsh"
+$desktopExe = (Resolve-Path `
+  'dist\tianwen-desktop\win-unpacked\Tianwen Desktop.exe').Path
+
+$env:DSH_HOME = $dshHome
+$env:DSH_TELEMETRY_DISABLED = '1'
+& $nodeExe "$dshRoot\lib\bin.js" `
+  plugin --profile web --allow-build=koffi add $runtimeArchive
+
+$env:TIANWEN_DESKTOP_HOST_E2E = '1'
+$env:TIANWEN_DESKTOP_HOST_NODE = $nodeExe
+$env:TIANWEN_DESKTOP_HOST_DSH_ROOT = (Resolve-Path $dshRoot).Path
+$env:TIANWEN_DESKTOP_HOST_DSH_HOME = (Resolve-Path $dshHome).Path
+$env:TIANWEN_DESKTOP_EXECUTABLE = $desktopExe
+node node_modules/vitest/vitest.mjs run `
+  tests/dsh-migration/tianwen-desktop-host.e2e.spec.ts `
+  -t 'opens the prepared Web Profile and closes its owned DSH process'
+```
+
+Clear Provider credential variables before the two commands. Expected: the
+BrowserWindow reaches `did-finish-load` at the loopback root, Desktop exits 0,
+its owned DSH PID disappears, and all three post-stop HTTP connection attempts
+fail. Do not automate or repeat the interactive outdated-Profile confirmation
+path; the focused deterministic tests cover it.
 
 - [ ] **Step 8: Write and commit the release handoff**
 
