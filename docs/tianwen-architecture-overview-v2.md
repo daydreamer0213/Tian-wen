@@ -54,8 +54,11 @@ Planner Turn。用户可在控制对话中自然补充方向，模型通过受�
 `0.1.0-preview.6`。Desktop 只把精确 `0.1.4` 识别为可更新前身，得到用户确认后调用一次
 既有 DSH plugin add，并以 `0.1.5` 严格复核；更旧、未知、未来或损坏 Profile 不会被自动覆盖。
 正式安装器也只在同一 DSH `0.1.1-rc.2` host 上把 managed Runtime `0.1.4` 更新到 `0.1.5`，
-不重新部署 DSH host；既有 rc.7 managed-predecessor 路径与旧归档保留。`0.1.5` 的正式安装、
-Desktop 与一次真实 Provider 证明属于后续 Task 6，本文不提前宣称已经完成。
+不重新部署 DSH host；既有 rc.7 managed-predecessor 路径与旧归档保留。正式本地安装与
+`0.1.4` → `0.1.5` 升级/回放、provider-free Desktop 边界已经完成，详见
+[`Runtime 0.1.5 release handoff`](operations/tianwen-runtime-0.1.5-release-handoff.md)。真实 Provider
+证明未执行，且不属于本 release 验收条件；外部 publish、push、tag、Release 与 installer upload
+仍未执行，因此本文不宣称已经发布。
 
 当前 Goal-first 权威下钻文档是
 [`设计`](superpowers/specs/2026-08-30-tianwen-goal-first-planning-design.md)、

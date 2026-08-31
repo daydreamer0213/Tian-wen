@@ -1,6 +1,6 @@
 # Tianwen Runtime 0.1.5 release design
 
-**Date:** 2026-08-31  
+**Date:** 2026-08-31
 **Status:** approved implementation boundary
 
 ## Product problem
