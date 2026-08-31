@@ -41,6 +41,10 @@ function isV3Summary(summary: AnyLongGoalSummary): summary is LongGoalSummaryV3 
   return 'schemaVersion' in summary && summary.schemaVersion === 'tianwen.long-goal-summary.v3'
 }
 
+function isSettledTask(task: LongGoalStatusProjectionV3['tasks'][number]): boolean {
+  return task.phase === 'complete' || task.phase === 'abandoned'
+}
+
 export function selectConversationGoalSummary(
   summaries: readonly AnyLongGoalSummary[],
   controlSessionId: string,
@@ -66,13 +70,18 @@ export function projectConversationGoalFeedback(
     }
   }
 
-  const currentTask = status.tasks.find(task => task.id === status.currentTaskId)
-  const settledBoundary = status.currentTaskId === null
-    ? status.tasks.length
-    : status.tasks.findIndex(task => task.id === status.currentTaskId)
-  const latestSettledTask = settledBoundary < 0 ? undefined
-    : status.tasks.slice(0, settledBoundary).findLast(task =>
-      task.phase === 'complete' || task.phase === 'abandoned')
+  const currentTaskIndex = status.tasks.findIndex(task => task.id === status.currentTaskId)
+  const currentTask = currentTaskIndex < 0 ? undefined : status.tasks[currentTaskIndex]
+  const settledCandidates = status.goal.phase === 'complete'
+    ? status.tasks
+    : status.currentTaskId === null
+      ? status.tasks
+      : currentTaskIndex < 0 ? [] : status.tasks.slice(0, currentTaskIndex)
+  const firstUnsettled = settledCandidates.findIndex(task => !isSettledTask(task))
+  const settledPrefix = firstUnsettled < 0
+    ? settledCandidates
+    : settledCandidates.slice(0, firstUnsettled)
+  const latestSettledTask = settledPrefix.at(-1)
   const phase = status.goal.phase === 'blocked' ? 'blocked'
     : status.goal.phase === 'complete' ? 'complete'
       : status.control.autoProgress === 'paused' ? 'paused'

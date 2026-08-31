@@ -292,6 +292,24 @@ describe('conversation Goal feedback projection', () => {
       latestSettledTaskObjective: 'Settled before',
     })
   })
+
+  it('stops at the first unfinished Task when planning has no current Task', () => {
+    const feedback = projectConversationGoalFeedback({
+      ...statusV3,
+      goal: { ...statusV3.goal, phase: 'planning' },
+      tasks: [
+        { ...statusV3.tasks[0], id: 'settled-prefix', objective: 'Settled prefix', phase: 'complete' },
+        { ...statusV3.tasks[0], id: 'unstarted', objective: 'Unstarted work', phase: 'pending' },
+        { ...statusV3.tasks[0], id: 'untrusted-suffix', objective: 'Must not be read', phase: 'complete' },
+      ],
+      currentTaskId: null,
+    })
+
+    expect(feedback).toMatchObject({
+      phase: 'planning',
+      latestSettledTaskObjective: 'Settled prefix',
+    })
+  })
 })
 
 describe('Learn Loop browser RPC client', () => {
