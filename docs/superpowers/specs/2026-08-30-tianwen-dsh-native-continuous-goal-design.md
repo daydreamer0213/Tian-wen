@@ -9,6 +9,13 @@ Status: implemented on `main` and released locally in Tianwen Runtime `0.1.5`
 > [`tianwen-runtime-0.1.5-release-handoff.md`](../../operations/tianwen-runtime-0.1.5-release-handoff.md);
 > the first natural run and its post-run fixes remain separately classified in
 > [`tianwen-dsh-native-continuous-goal-handoff.md`](../../operations/tianwen-dsh-native-continuous-goal-handoff.md).
+>
+> Update on 2026-08-31: installed-product use proved that the deferred
+> control-conversation feedback in sections 3.2 and 7 is a product defect. The
+> approved successor design is
+> [`2026-08-31-tianwen-conversation-goal-feedback-design.md`](2026-08-31-tianwen-conversation-goal-feedback-design.md).
+> Runtime 0.1.5 remains as described here until that successor is implemented
+> and released.
 
 ## 1. Decision
 
