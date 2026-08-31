@@ -212,6 +212,34 @@ describe('continuous Goal Host', () => {
     }))
   })
 
+  it('delivers distinct blocked Tasks even when their Goal revisions are equal', async () => {
+    const firstRecord = record()
+    const subject = harness(firstRecord)
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
+
+    subject.first.setGoal('blocked')
+    subject.setStatus(status(firstRecord, ['blocked'], TASK_1, 'blocked'))
+    subject.block()
+    await vi.waitFor(() => expect(subject.dependencies.deliver).toHaveBeenCalledOnce())
+
+    const secondRecord = record({
+      revision: 5,
+      tasks: [
+        firstRecord.tasks[0]!,
+        { id: TASK_2, objective: 'Verify', execution: EXECUTION_2, resolution: null },
+      ],
+    })
+    const second = agent(EXECUTION_2.sessionId, EXECUTION_2.goalId, 'blocked')
+    subject.live.set(EXECUTION_2.sessionId, second)
+    subject.setRecords([secondRecord])
+    subject.setStatus(status(secondRecord, ['complete', 'blocked'], TASK_2, 'blocked'))
+    subject.block(EXECUTION_2.sessionId, EXECUTION_2.goalId)
+    await dispose()
+
+    expect(subject.dependencies.deliver).toHaveBeenCalledTimes(2)
+  })
+
   it('releases the Goal lane before detached delivery waits', async () => {
     const subject = harness()
     const controlAgent = agent('control-session', 'control-goal')
@@ -557,8 +585,12 @@ describe('continuous Goal Host', () => {
     const sessionListeners: ((session: unknown, event: unknown) => void)[] = []
     const guards: ((execution: { name: string }) => string | undefined)[] = []
     const executed: string[] = []
+    const denied: string[] = []
     let finishDriver!: () => void
     const driverFinished = new Promise<void>(resolve => { finishDriver = resolve })
+    let finishLaterTurn!: () => void
+    const laterTurnFinished = new Promise<void>(resolve => { finishLaterTurn = resolve })
+    let nextTurn = 7
     const scopedContext = {
       tools: {
         guard: vi.fn((guard: (execution: { name: string }) => string | undefined) => {
@@ -572,6 +604,21 @@ describe('continuous Goal Host', () => {
         return () => listeners.splice(listeners.indexOf(listener), 1)
       },
     }
+    const runTurn = async (message: unknown, turn: number, toolNames: readonly string[]) => {
+      for (const listener of preStepListeners) {
+        await listener(
+          { agent: controlAgent, messages: [message], turn, step: 1, signal: new AbortController().signal },
+          async () => ({ kind: 'enter', messages: [message] }),
+        )
+      }
+      for (const name of toolNames) {
+        if (guards.some(guard => guard({ name }) !== undefined)) denied.push(name)
+        else executed.push(name)
+      }
+      for (const listener of sessionListeners) {
+        listener(controlAgent.session, { type: 'turn/end', data: { turn, reason: { kind: 'completed' } } })
+      }
+    }
     const controlAgent = {
       session: { id: 'control-session' },
       ctx: scopedContext,
@@ -579,21 +626,11 @@ describe('continuous Goal Host', () => {
         .mockResolvedValueOnce(undefined)
         .mockImplementationOnce(async () => driverFinished),
       followup: vi.fn(message => {
+        const turn = nextTurn++
         queueMicrotask(async () => {
-          const turn = 7
-          for (const listener of preStepListeners) {
-            await listener(
-              { agent: controlAgent, messages: [message], turn, step: 1, signal: new AbortController().signal },
-              async () => ({ kind: 'enter', messages: [message] }),
-            )
-          }
-          for (const name of ['goal_control', 'read_file']) {
-            if (!guards.some(guard => guard({ name }) !== undefined)) executed.push(name)
-          }
-          for (const listener of sessionListeners) {
-            listener(controlAgent.session, { type: 'turn/end', data: { turn, reason: { kind: 'completed' } } })
-          }
-          finishDriver()
+          await runTurn(message, turn, ['goal_control', 'read_file'])
+          if (turn === 7) finishDriver()
+          else finishLaterTurn()
         })
       }),
     } as unknown as Agent
@@ -614,16 +651,24 @@ describe('continuous Goal Host', () => {
     await deliverContinuousGoalSettlement({
       longGoalId: GOAL_ID,
       transition: 'complete',
+      taskSessionId: EXECUTION_1.sessionId,
+      taskGoalId: EXECUTION_1.goalId,
       taskGoalRevision: 99,
       status: completed,
     }, { getAgent, readStatus, inspectSession, flushSession })
 
     expect(controlAgent.followup).toHaveBeenCalledOnce()
     expect(inspectSession).toHaveBeenCalledWith(EXECUTION_1.sessionId)
+    expect(denied).toEqual(['goal_control', 'read_file'])
     expect(executed).toEqual([])
     expect(flushSession).toHaveBeenCalledOnce()
     expect(guards).toEqual([])
-    expect(guards.some(guard => guard({ name: 'goal_control' }) !== undefined)).toBe(false)
+
+    controlAgent.followup({ id: 'later-user-message' } as never)
+    await laterTurnFinished
+    expect(controlAgent.followup).toHaveBeenCalledTimes(2)
+    expect(denied).toEqual(['goal_control', 'read_file'])
+    expect(executed).toEqual(['goal_control', 'read_file'])
   })
 
   it('contains a missing bound control Agent without attempting persistence or delivery', async () => {
@@ -635,6 +680,8 @@ describe('continuous Goal Host', () => {
     await expect(deliverContinuousGoalSettlement({
       longGoalId: GOAL_ID,
       transition: 'complete',
+      taskSessionId: EXECUTION_1.sessionId,
+      taskGoalId: EXECUTION_1.goalId,
       taskGoalRevision: 99,
       status: completed,
     }, {

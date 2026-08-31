@@ -31,6 +31,8 @@ type CommandRegistration = {
 export interface ContinuousGoalDeliveryIntent {
   readonly longGoalId: string
   readonly transition: 'complete' | 'block'
+  readonly taskSessionId: string
+  readonly taskGoalId: string
   readonly taskGoalRevision: number
   readonly status: LongGoalStatusProjectionV3
 }
@@ -209,7 +211,13 @@ export function mountContinuousGoalHost(
     }
   }
   const recordDelivery = (intent: ContinuousGoalDeliveryIntent): void => {
-    const key = `${intent.longGoalId}:${intent.transition}:${intent.taskGoalRevision}`
+    const key = [
+      intent.longGoalId,
+      intent.transition,
+      intent.taskSessionId,
+      intent.taskGoalId,
+      intent.taskGoalRevision,
+    ].join(':')
     if (deliveryKeys.has(key)) return
     deliveryKeys.add(key)
     const intents = pendingDeliveries.get(intent.longGoalId) ?? []
@@ -368,7 +376,14 @@ export function mountContinuousGoalHost(
     await dependencies.continueProgress({ longGoalId, expectedRevision: record.revision })
     const finalStatus = await readStatus(longGoalId)
     if (finalStatus.goal.phase === 'complete') {
-      recordDelivery({ longGoalId, transition: 'complete', taskGoalRevision: execution.revision, status: finalStatus })
+      recordDelivery({
+        longGoalId,
+        transition: 'complete',
+        taskSessionId: execution.sessionId,
+        taskGoalId: execution.goalId,
+        taskGoalRevision: execution.revision,
+        status: finalStatus,
+      })
     }
   }
 
@@ -392,7 +407,14 @@ export function mountContinuousGoalHost(
       || current.execution?.sessionId !== execution.sessionId
       || current.execution.goalId !== execution.goalId
     ) return
-    recordDelivery({ longGoalId, transition: 'block', taskGoalRevision: execution.revision, status: blocked })
+    recordDelivery({
+      longGoalId,
+      transition: 'block',
+      taskSessionId: execution.sessionId,
+      taskGoalId: execution.goalId,
+      taskGoalRevision: execution.revision,
+      status: blocked,
+    })
   }
 
   const reconcile = async (longGoalId: string): Promise<void> => {
