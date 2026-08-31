@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'n
 import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const RUNTIME_ARCHIVE_NAME = 'tianwen-runtime-bundle-0.1.8.tgz'
+const RUNTIME_ARCHIVE_NAME = 'tianwen-runtime-bundle-0.1.9.tgz'
 
 function runtimeArchiveFiles(path) {
   const candidate = process.platform === 'win32'

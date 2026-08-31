@@ -2,7 +2,7 @@
 
 日期：2026-08-31
 
-状态：普通用户自然使用已完成一次；执行主线成立，但暴露四项真实交互缺陷。结果回传、冷会话恢复和 `/goal` 长时间占用输入框已修复并通过聚焦验证；内部任务会话展示与主对话进度粒度仍待后续完成
+状态：普通用户自然使用已完成一次；由此暴露的四项真实交互缺陷均已在 Runtime 0.1.9 收口，正式安装、Web Profile 更新和 Desktop preview.10 启动验证完成
 
 ## 产品结果
 
@@ -71,6 +71,41 @@ Task Session 持久化了完整项目审查结果，v3 Long Goal 也进入终态
 Runtime 与 Desktop TypeScript 检查通过，Runtime 构建通过。诊断阶段曾验证 Desktop 可以转发子进程输出，
 但没有把原始 stdout/stderr 默认持久化进产品，避免保存潜在敏感内容或让日志写入失败影响 Desktop 生命周期。
 
-剩余工作按产品价值排序：先让 Tianwen 内部 Planner/Task 不再作为普通顶层会话污染会话列表，再把主对话
-进度调整到“完成了什么、正在做什么、下一步是什么”的有限粒度。不得恢复独立 Goal 卡片，也不得为此增加
-轮询器、调度器或第二套消息数据库。
+## 2026-09-01 Runtime 0.1.9 收口
+
+四项问题已逐项闭合：
+
+1. `/goal` 在 Goal 与控制 Session 的持久绑定成立后返回，输入框不再等待首次 Planner/Task 完成；
+2. 新 v3 Planner/Task 创建时写入 DSH 原生 `parentSession`、`origin=subagent` 与
+   `delegationDepth=1`，因此不再出现在普通“未分组”会话列表；历史 Session 不迁移、不删除；
+3. start/advance 主对话回复不再只是单行确认，而是包含当前计划位置、最新完成结果、正在做的工作和
+   已知下一步；
+4. Task 终态与结果在控制 Session 重新变为 live 时恢复交付，并按既有持久助手 Turn 去重，不重跑 Task。
+
+内部 Session 变化只使用 DSH 的持久父子展示元数据；Tianwen 仍管理自己的 Goal/Planner 生命周期，
+不把这项改动冒充为已经迁移到 DSH 通用 continuable-subagent 管理器。冷恢复时，新的内部 Task Session
+由 Host 直接恢复其 Agent 与精确 Goal ref；旧 v1/v2 与既有普通 Session 继续使用原兼容路径。
+
+聚焦产品验证：
+
+- `continuous-goal-feedback`、`continuous-goal-host`、`learn-loop-host` 与其 integration 共 91/91 通过；
+- Runtime 与 Desktop TypeScript 检查通过，Runtime 构建通过；
+- 版本、installer、Desktop 和 Runtime 相关套件最终聚焦复核通过；一次 Runtime Profile 用例最初仅因
+  `COREPACK_HOME` 未指向批准的 D 盘目录而拒绝，按既定目录运行后通过；
+- 正式 installer 把 managed Profile 从 Runtime 0.1.8 更新到 0.1.9 并返回 `ready`；诊断期间留下的
+  同版本热更新包先恢复为与旧收据哈希一致的正式 0.1.8 包，再走正常升级，没有绕过 preflight；
+- Web Profile 通过正式 DSH `plugin add` 更新到 0.1.9；managed/Web 两处 `runtime.js` 与 `client.js`
+  分别和当前构建产物 SHA256 一致；
+- Desktop `0.1.0-preview.10` unpacked 与 NSIS installer 构建完成，离线产物审计通过；随后使用
+  真实升级 Web Profile 启动成功并返回 HTTP 200。端口由本次 DSH 启动动态分配，不固定为旧端口。
+
+当前交付物：
+
+- Runtime：`D:\DevData\tianwen-0.1.9-artifacts\tianwen-runtime-bundle-0.1.9.tgz`
+  - SHA256：`68D4578CE49C20F6AAA28601766D56A6120D2C1AA0319F4F85328BB32BEC7630`
+- Desktop：`D:\DevData\tianwen-0.1.9-artifacts\Tianwen Desktop Setup 0.1.0-preview.10.exe`
+  - SHA256：`37BE8BFC00C830AA708DC12658EA935FE8A30F2C59AA7E1BB741D36A4CE98E01`
+
+本次没有重新执行真实 DeepSeek Planner/Task，也没有从内部事件数量推断 Provider 请求或费用。现有普通
+用户运行提供症状和结果证据；修复通过确定性测试、正式安装字节核对和真实 Desktop 启动进入产品。没有
+创建 controlled Activity，没有外部 publish、tag、Release、installer upload 或 DSH 上游推送。

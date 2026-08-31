@@ -2,7 +2,7 @@
 
 Date: 2026-08-31
 
-Status: Runtime 0.1.8 ordinary-use acceptance exposed recovery gaps; result-return and command-latency repairs are implemented on `codex/goal-chat-feedback`, while internal-Session presentation and richer bounded progress remain follow-up work
+Status: implemented in Runtime 0.1.9; all four ordinary-use gaps are closed in the product path, with no repeat Provider Task
 
 ## Decision
 
@@ -24,15 +24,16 @@ This design supersedes the Runtime 0.1.7 `conversation.input.dock` design.
 
 ## User experience
 
-Tianwen adds one concise ordinary assistant reply at these durable boundaries:
+Tianwen adds one bounded ordinary assistant reply at these durable boundaries:
 
 1. initial planning has selected and started the first Task;
 2. one Task settles and replanning starts the next Task;
 3. the current Task blocks; or
 4. Goal execution completes and is ready for review.
 
-The reply says what just finished when that result exists, what is running now,
-or what requires attention. It uses the language of the existing conversation.
+The reply is short but not a one-line acknowledgement. It gives the current plan
+position, what just finished when that result exists, what is running now, and
+the next planned Task when one is known. It uses the language of the existing conversation.
 It does not expose internal IDs, Planner reasoning, tool events, request counts,
 or inferred Provider cost.
 
@@ -57,8 +58,9 @@ a model Turn. Tianwen therefore reuses the existing bound control Agent:
 - the resulting model-produced assistant message is flushed through normal DSH
   Session persistence, so it appears and restores like any other reply.
 
-Initial and Task-boundary notices include only the current Task and, after a
-transition, the newest settled Task result as untrusted historical data.
+Initial and Task-boundary notices include the current Task, the next pending Task
+when one exists, and, after a transition, the newest settled Task result as
+untrusted historical data.
 Terminal notices keep the existing bounded settlement bundle. Every notice
 remains subordinate to durable Goal state. Stale state or a Provider failure
 suppresses the message without changing that state. If the control Agent is
@@ -83,8 +85,12 @@ late.
 
 ## Compatibility
 
-- The v3 Goal/Task state model, Planner, Task Sessions, result-aware replanning,
-  restart recovery, and natural-language control contract are unchanged.
+- The v3 Goal/Task state model, result-aware replanning, restart recovery, and
+  natural-language control contract are unchanged. Newly created v3 Planner and
+  Task Sessions carry DSH's durable child presentation metadata
+  (`parentSession`, `origin=subagent`, `delegationDepth=1`), while Tianwen retains
+  its existing Goal lifecycle and does not claim migration to DSH's generic
+  continuable-subagent manager.
 - V1/v2 history and explicit manual flows remain available in the optional
   panel.
 - CLI users retain the same Runtime and Goal engine; no Desktop-specific
@@ -97,8 +103,8 @@ late.
 Focused tests must prove:
 
 1. the client registers no `conversation.input.dock` component;
-2. start and advance notices contain the exact current Task, with only the
-   newest settled result on advance, and no internal identity;
+2. start and advance notices contain the exact current and next planned Task,
+   with only the newest settled result on advance, and no internal identity;
 3. duplicate transitions deduplicate process-locally;
 4. stale revision/current-Task/control-Session state is not delivered;
 5. feedback Turns cannot execute tools and their Session is flushed;
@@ -106,7 +112,11 @@ Focused tests must prove:
 7. a terminal result missed while the control Session is cold is delivered when
    that Session next becomes live, without rerunning the Task; and
 8. a notice whose assistant reply is already durable is not sent again after a
-   restart or repeated Session attachment.
+   restart or repeated Session attachment; and
+9. new v3 Planner/Task creation carries the exact control Session parent while
+   v1/v2 behavior remains unchanged.
 
-Installed-product acceptance is one normal future `/goal` use, not a synthetic
-Activity or repeated Provider run selected for a better answer.
+The ordinary installed-product `/goal` use already supplied the real symptom and
+Task-result evidence. Runtime 0.1.9 was installed into the managed and Web
+Profiles, and Desktop preview.10 started against that Profile. The same Provider
+Task was not repeated merely to obtain a cleaner answer.

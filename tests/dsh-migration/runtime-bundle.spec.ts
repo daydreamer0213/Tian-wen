@@ -479,7 +479,7 @@ describe('@tianwen/runtime-bundle', () => {
       version: string
     }
     expect(runtimeManifest.name).toBe('@tianwen/runtime-bundle')
-    expect(runtimeManifest.version).toBe('0.1.8')
+    expect(runtimeManifest.version).toBe('0.1.9')
     expect(runtimeManifest).not.toHaveProperty('private')
     expect(runtimeManifest.bin).toEqual({ tianwen: 'dist/cli.js' })
     expect(runtimeManifest.dependencies ?? {}).toEqual({})
@@ -667,7 +667,7 @@ describe('@tianwen/runtime-bundle', () => {
         dependencies: {
           '@deepseek-ai/dsh-base': '0.1.1-rc.2',
           '@deepseek-ai/dsh-headless': '0.1.1-rc.2',
-          '@tianwen/runtime-bundle': '0.1.8',
+          '@tianwen/runtime-bundle': '0.1.9',
         },
         dsh: {
           profile: {
@@ -1144,7 +1144,7 @@ describe('@tianwen/runtime-bundle', () => {
   it('packs only the deployable runtime bundle files', () => {
     mkdirSync(packFixtureBase, { recursive: true })
     const packRoot = mkdtempSync(join(packFixtureBase, 'pack-'))
-    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.1.8.tgz')
+    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.1.9.tgz')
     const pnpmEntry = resolve(dirname(process.execPath), 'node_modules/corepack/dist/pnpm.js')
     try {
       execFileSync(process.execPath, [

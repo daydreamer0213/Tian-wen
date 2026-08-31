@@ -1340,6 +1340,7 @@ describe('Tianwen Long Goal Web host', () => {
     }, dependencies)).resolves.toEqual({ status: boundStatus, sessionId: 'session-new', action: 'started' })
     expect(dependencies.createSession).toHaveBeenCalledWith({
       cwd: 'D:/frozen-workspace', agentPreset: 'planner-preset',
+      parentSessionId: 'control-session',
     })
     expect(bindGoalFirstLongGoalTask).toHaveBeenCalledWith({
       stateRoot: ROOTS.stateRoot, longGoalId: record.id, expectedRevision: 3,
@@ -1869,6 +1870,10 @@ describe('Long Goal DSH planner', () => {
         }, { concludeTurn: vi.fn() } as never)
       })
       vi.spyOn(owned.handle.agent, 'whenIdle').mockImplementation(async () => { await pending })
+      const createAgent = vi.fn(async input => {
+        await installPlannerSetup(input.setup, definition => { tool = definition })
+        return owned.handle
+      })
 
       await expect(runLongGoalPlannerTurn({
         stateRoot,
@@ -1877,14 +1882,15 @@ describe('Long Goal DSH planner', () => {
         reason: 'create',
       }, {
         inspectSession: vi.fn(async () => ({ exists: false })),
-        createAgent: vi.fn(async input => {
-          await installPlannerSetup(input.setup, definition => { tool = definition })
-          return owned.handle
-        }),
+        createAgent,
         resumeAgent: vi.fn(async () => { throw new Error('unexpected resume') }),
         flushSession: vi.fn(async () => undefined),
         readSettledTaskResult: vi.fn(async () => undefined),
       })).resolves.toBe('submitted')
+
+      expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({
+        parentSessionId: 'control-session',
+      }))
 
       expect(readLongGoal(stateRoot, record.id)).toMatchObject({
         schemaVersion: 'tianwen.long-goal.v3', revision: 2,

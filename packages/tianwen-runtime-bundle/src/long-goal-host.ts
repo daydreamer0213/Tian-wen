@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
-import type { Agent, AgentSetup, ModelSelection } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentHandle, AgentSetup, ModelSelection } from '@deepseek-ai/dsh-agent'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -208,6 +208,7 @@ export interface TianwenLongGoalRunDependencies {
   readonly createSession: (input: {
     readonly cwd: string
     readonly agentPreset?: string
+    readonly parentSessionId?: string
   }) => Promise<string>
   readonly attachedAgent: (sessionId: string) => Agent | undefined
   readonly createGoal: (agent: Agent, input: {
@@ -470,6 +471,9 @@ export async function runCurrentWebTask(input: {
     const sessionId = await dependencies.createSession({
       cwd,
       ...(agentPreset === undefined ? {} : { agentPreset }),
+      ...(goalFirstRecord?.schemaVersion === 'tianwen.long-goal.v3'
+        ? { parentSessionId: goalFirstRecord.control.sessionId }
+        : {}),
     })
     const agent = dependencies.attachedAgent(sessionId)
     if (agent === undefined || String(agent.session.id) !== sessionId) {
@@ -1449,6 +1453,29 @@ export function mountTianwenLongGoalHost(
       ...(config === undefined ? {} : { config }),
     })
     const host = injected as HostContext
+    const ownedTaskHandles = new Map<string, AgentHandle>()
+    if (typeof injected.effect === 'function') {
+      injected.effect(function* () {
+        yield async () => {
+          const handles = [...ownedTaskHandles.values()]
+          ownedTaskHandles.clear()
+          await Promise.allSettled(handles.map(handle => handle.dispose()))
+        }
+      })
+    }
+    const agentSetup = (
+      selection: ModelSelection,
+      agentPreset: string | undefined,
+      setup: AgentSetup,
+    ): AgentSetup => async agentCtx => {
+      const selectedPreset = agentPreset ?? agentCtx.agent?.session.header.agentPreset
+      if (!isNonEmptyString(selectedPreset)) {
+        throw new LongGoalIntegrityError('Long Goal Session preset mismatch')
+      }
+      installModelSelection(agentCtx, { current: selection, assembled: undefined })
+      await host.agentPresets.mount(agentCtx, selectedPreset)
+      return setup(agentCtx)
+    }
     const runDependencies: TianwenLongGoalRunDependencies = {
       readLongGoal,
       readLongGoalStatus,
@@ -1462,10 +1489,30 @@ export function mountTianwenLongGoalHost(
         ...(item.cwd === undefined ? {} : { cwd: item.cwd }),
         ...(item.agentPreset === undefined ? {} : { agentPreset: item.agentPreset }),
       })),
-      createSession: async ({ cwd, agentPreset }) => String(unwrapRpc(await host.apiProxy.sessions.create({
-        rpcId: randomUUID(),
-        payload: { cwd, ...(agentPreset === undefined ? {} : { agentPreset }) },
-      })).sessionId),
+      createSession: async ({ cwd, agentPreset, parentSessionId }) => {
+        if (parentSessionId === undefined) {
+          return String(unwrapRpc(await host.apiProxy.sessions.create({
+            rpcId: randomUUID(),
+            payload: { cwd, ...(agentPreset === undefined ? {} : { agentPreset }) },
+          })).sessionId)
+        }
+        const selection = host.agentDefaultModel.currentSelection()
+        const sessionId = SessionId(`session-${randomUUID()}`)
+        const handle = await injected.agents.create({
+          sessionId,
+          meta: {
+            cwd,
+            parentSession: SessionId(parentSessionId),
+            origin: 'subagent',
+            delegationDepth: 1,
+            ...(agentPreset === undefined ? {} : { agentPreset }),
+          },
+          agentOptions: { provider: selection.provider, model: selection.model },
+          setup: agentSetup(selection, agentPreset, () => undefined),
+        })
+        ownedTaskHandles.set(String(sessionId), handle)
+        return String(sessionId)
+      },
       attachedAgent: sessionId => injected.agents.get(SessionId(sessionId)),
       createGoal: (agent, goalInput) => injected.goals.create(agent, goalInput),
       readGoalRef: async (sessionId, goalId) => {
@@ -1487,6 +1534,26 @@ export function mountTianwenLongGoalHost(
         }
       },
       resumeColdGoal: async ({ sessionId, goalId, revision }) => {
+        const inspection = await host.sessionPersistence.inspect(SessionId(sessionId))
+        if (inspection.meta.origin === 'subagent') {
+          const selection = host.agentDefaultModel.currentSelection()
+          const handle = await injected.agents.resume({
+            resumeSessionId: SessionId(sessionId),
+            agentOptions: { provider: selection.provider, model: selection.model },
+            setup: agentSetup(selection, undefined, () => undefined),
+          })
+          try {
+            const resumed = injected.goals.resume(handle.agent, { id: GoalId(goalId), revision })
+            if (String(resumed.id) !== goalId || resumed.revision <= revision) {
+              throw new Error('Resumed Long Goal Task Goal mismatch')
+            }
+          } catch (error) {
+            await handle.dispose()
+            throw error
+          }
+          ownedTaskHandles.set(sessionId, handle)
+          return
+        }
         const result = unwrapRpc(await host.apiProxy.goals.resume({
           rpcId: randomUUID(),
           payload: {
@@ -1503,19 +1570,6 @@ export function mountTianwenLongGoalHost(
     const dshStatusTarget = {
       sessionsRoot: roots.sessionsRoot,
       evolutionRoot: roots.evolutionRoot,
-    }
-    const plannerSetup = (
-      selection: ModelSelection,
-      agentPreset: string | undefined,
-      setup: AgentSetup,
-    ): AgentSetup => async agentCtx => {
-      const selectedPreset = agentPreset ?? agentCtx.agent?.session.header.agentPreset
-      if (!isNonEmptyString(selectedPreset)) {
-        throw new LongGoalIntegrityError('Long Goal planner Session preset mismatch')
-      }
-      installModelSelection(agentCtx, { current: selection, assembled: undefined })
-      await host.agentPresets.mount(agentCtx, selectedPreset)
-      return setup(agentCtx)
     }
     const plannerDependencies: LongGoalPlannerDependencies = {
       inspectSession: async sessionId => {
@@ -1540,9 +1594,16 @@ export function mountTianwenLongGoalHost(
           meta: {
             cwd: input.cwd,
             agentPreset: input.agentPreset,
+            ...(input.parentSessionId === undefined
+              ? {}
+              : {
+                  parentSession: SessionId(input.parentSessionId),
+                  origin: 'subagent' as const,
+                  delegationDepth: 1,
+                }),
           },
           agentOptions: { provider: selection.provider, model: selection.model },
-          setup: plannerSetup(selection, input.agentPreset, input.setup),
+          setup: agentSetup(selection, input.agentPreset, input.setup),
         })
       },
       resumeAgent: async input => {
@@ -1550,7 +1611,7 @@ export function mountTianwenLongGoalHost(
         return injected.agents.resume({
           resumeSessionId: SessionId(input.sessionId),
           agentOptions: { provider: selection.provider, model: selection.model },
-          setup: plannerSetup(selection, undefined, input.setup),
+          setup: agentSetup(selection, undefined, input.setup),
         })
       },
       flushSession: async agent => {

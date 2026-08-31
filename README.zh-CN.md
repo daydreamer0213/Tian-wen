@@ -4,18 +4,20 @@
 
 天问是一个面向长时间运行 Agent、可审计的学习控制面。
 
-**当前产品快照：Runtime 0.1.8；Stage 7 仍已完成。** DSH 0.1.1-rc.2 是当前精确支持的
+**当前产品快照：Runtime 0.1.9；Stage 7 仍已完成。** DSH 0.1.1-rc.2 是当前精确支持的
 Agent Runtime。普通入口已经内化到 DSH Web/Desktop 对话：用户输入 `/goal <长期目标>` 即可
 启动，不需要打开天问面板，也不需要填写 Task 或执行轮数。天问使用稳定的 Planner Session
 自动维护后续 Task，每个已接纳 Task 在自己的 DSH Session 中执行。用户可在同一对话中自然
 补充方向、纠偏、暂停或恢复；DSH 原生停止按钮也会暂停连续 Goal。天问复用 DSH 的模型、
 工具和运行时，不替换正在运行的 Agent，也不热切换当前 Run。
 
-Runtime 0.1.8 把主反馈真正放回正常对话：首个 Task 开始、Task 切换、阻塞和最终完成时，
-原控制会话会收到一条普通助手回复。Runtime 0.1.7 的独立紧凑卡片已删除，不再作为入口。
+Runtime 0.1.9 把主反馈真正放回正常对话：首个 Task 开始、Task 切换、阻塞和最终完成时，
+原控制会话会收到一条普通助手回复，说明当前计划位置、刚完成的结果、正在做的工作和已知下一步。
+新连续 Goal 的 Planner/Task 使用 DSH 原生父子 Session 元数据，不再占用普通“未分组”会话列表。
+Runtime 0.1.7 的独立紧凑卡片已删除，不再作为入口。
 “长期目标”面板仍只是可选历史和诊断，不是主要控制界面。
 
-判断一项能力当前是否已经实现时，以[架构总览的“当前状态”](docs/tianwen-architecture-overview-v2.md#当前状态2026-08-31)、
+判断一项能力当前是否已经实现时，以[架构总览的“当前状态”](docs/tianwen-architecture-overview-v2.md#当前状态2026-09-01)、
 [原生对话进度交接](docs/operations/tianwen-native-conversation-progress-handoff.md)和当前 `main` 源码为准。
 设计、实施计划及早期自然运行交接保留历史决策和证据；其中未勾选的步骤或当时的“下一道门”
 不得反向覆盖较新的发布状态。
@@ -86,7 +88,7 @@ Runtime Bundle 压缩包，再交给 DSH 安装到用户自己选择的 Profile�
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.8.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.9.tgz
 ```
 
 `--allow-build=koffi` 是写入当前 Profile 的 pnpm 明确许可，不会修改全局 pnpm 设置。只有
@@ -113,10 +115,10 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
 
 可选的 Tianwen Desktop 复用用户现有的 DSH 与 Web Profile；它不是第二套 Runtime，也不要求
 用户改用天问托管安装目录。Desktop 打开的是同一套 Goal-first 界面，旧的精确 Runtime
-`0.1.7` Profile 可在用户确认后更新到内嵌的 `0.1.8`；未知或损坏版本不会被自动覆盖。
+`0.1.8` Profile 可在用户确认后更新到内嵌的 `0.1.9`；未知或损坏版本不会被自动覆盖。
 
 安装后，在普通 DSH Web 或 Tianwen Desktop 对话中输入 `/goal <长期目标>`。天问会自动派生
-Task，让每个已接纳 Task 在独立 DSH Session 中执行，并在 Task 边界继续推进。与 Goal 有关的
+Task，让每个已接纳 Task 在独立 DSH 子 Session 中执行，并在 Task 边界继续推进。与 Goal 有关的
 自然语言补充继续留在控制对话中；原生停止按钮会暂停 Goal，`/goal resume` 可继续。“长期目标”
 面板只保留为可选的高级历史入口，不是第二套连续模式界面。用户不需要预先填写 Task 数量或
 执行轮数，天问也不会新增自定义进度 Session 事件。关键进度通过正常模型 Turn 持久化为普通
