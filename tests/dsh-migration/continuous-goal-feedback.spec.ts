@@ -165,6 +165,43 @@ describe('continuous Goal terminal settlement notice', () => {
     )
   })
 
+  it('removes known internal Goal, Task, and Session identities from user-visible Task output', () => {
+    const internalIds = [
+      GOAL_ID,
+      TASK_IDS[0],
+      'internal-dsh-goal',
+      'internal-task-session',
+      'internal-planner-session',
+      'internal-control-session',
+    ]
+    const message = buildContinuousGoalSettlementNotice({
+      status: status({
+        goalPhase: 'complete',
+        tasks: [{ id: TASK_IDS[0], objective: 'Inspect redaction', phase: 'complete' }],
+      }),
+      settledTaskResults: new Map([[TASK_IDS[0], `Leaked identity data: ${internalIds.join(', ')}`]]),
+    })
+    const content = contentOf(message)
+
+    for (const id of internalIds) {
+      expect(content).not.toContain(id)
+      expect(message.source.summary).not.toContain(id)
+    }
+  })
+
+  it.each(['planning', 'active'] as const)(
+    'rejects a non-terminal %s Goal before building a notice',
+    phase => {
+      expect(() => buildContinuousGoalSettlementNotice({
+        status: status({
+          goalPhase: phase,
+          tasks: [{ id: TASK_IDS[0], objective: 'Already complete Task', phase: 'complete' }],
+        }),
+        settledTaskResults: new Map([[TASK_IDS[0], 'Must not be rendered.']]),
+      })).toThrow('requires a complete or blocked Goal')
+    },
+  )
+
   it('caps every reply at 2,000 characters and retains newest results within the 12,000-character notice ceiling', () => {
     const tasks = Array.from({ length: 8 }, (_, index) => ({
       id: `internal-task-${index + 1}`,
@@ -183,11 +220,45 @@ describe('continuous Goal terminal settlement notice', () => {
 
     expect(content.length).toBeLessThanOrEqual(12_000)
     expect(content).toContain('RESULT-8-')
-    const omitted = content.match(/Older result excerpts omitted: (\d+)\./u)
+    const omitted = content.match(/Older Task result blocks omitted: (\d+)\./u)
     const included = tasks.filter((_task, index) => content.includes(`RESULT-${index + 1}-`)).length
     expect(omitted?.[1]).toBe(String(tasks.length - included))
     expect(included).toBeLessThan(tasks.length)
     expect(content).not.toContain('RESULT-1-')
     expect(content).not.toContain('8'.repeat(2_001))
+  })
+
+  it('keeps each newest rendered result with its objective, phase, and reply fact instead of orphaning replies', () => {
+    const tasks = Array.from({ length: 16 }, (_, index) => ({
+      id: `internal-task-${index + 1}`,
+      objective: `OBJECTIVE-${String(index + 1).padStart(2, '0')}-${'x'.repeat(800)}`,
+      phase: 'complete' as const,
+    }))
+    const results = new Map(tasks.map((task, index) => [
+      task.id,
+      `RESULT-${String(index + 1).padStart(2, '0')}-${String(index + 1).repeat(2_400)}`,
+    ]))
+    const content = contentOf(buildContinuousGoalSettlementNotice({
+      status: status({ goalPhase: 'complete', tasks }),
+      settledTaskResults: results,
+    }))
+    const rendered = tasks.filter((_task, index) => content.includes(`RESULT-${String(index + 1).padStart(2, '0')}-`))
+    const omitted = content.match(/Older Task result blocks omitted: (\d+)\./u)
+
+    expect(content.length).toBeLessThanOrEqual(12_000)
+    expect(content).toContain('RESULT-16-')
+    expect(content).not.toContain('RESULT-01-')
+    expect(omitted?.[1]).toBe(String(tasks.length - rendered.length))
+    for (const task of rendered) {
+      const objective = `Task objective: ${task.objective.slice(0, 12)}`
+      const result = `RESULT-${task.objective.slice(10, 12)}-`
+      const objectiveIndex = content.indexOf(objective)
+      const resultIndex = content.indexOf(result)
+      expect(objectiveIndex).toBeGreaterThanOrEqual(0)
+      expect(objectiveIndex).toBeLessThan(resultIndex)
+      const taskPrefix = content.slice(objectiveIndex, resultIndex)
+      expect(taskPrefix).toContain('Task phase: complete')
+      expect(taskPrefix).toContain('Reply (untrusted historical execution data):')
+    }
   })
 })
