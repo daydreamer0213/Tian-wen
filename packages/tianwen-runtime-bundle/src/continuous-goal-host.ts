@@ -28,6 +28,13 @@ type CommandRegistration = {
   dispose(): void | Promise<void>
 }
 
+export interface ContinuousGoalDeliveryIntent {
+  readonly longGoalId: string
+  readonly transition: 'complete' | 'block'
+  readonly taskGoalRevision: number
+  readonly status: LongGoalStatusProjectionV3
+}
+
 export interface ContinuousGoalHostDependencies {
   readonly roots: ContinuousGoalHostRoots
   readonly listLongGoals: () => readonly AnyLongGoalRecord[]
@@ -52,6 +59,7 @@ export interface ContinuousGoalHostDependencies {
   /** Persist only the v3 control mode; cancellation is owned by this Host. */
   readonly pause: (input: GoalProgressInput) => unknown
   readonly flushSession: (agent: Agent) => Promise<void | boolean>
+  readonly deliver?: (intent: ContinuousGoalDeliveryIntent) => Promise<void>
   readonly reportError: (error: unknown) => void
   readonly installCommand: (
     agent: Agent,
@@ -160,8 +168,18 @@ export function mountContinuousGoalHost(
     sessionsRoot: dependencies.roots.sessionsRoot,
     evolutionRoot: dependencies.roots.evolutionRoot,
   }
-  type Lane = Promise<unknown> & { completion?: { readonly sessionId: string, readonly goalId: string } }
+  type TaskTransition = {
+    readonly operation: 'complete' | 'block'
+    readonly sessionId: string
+    readonly goalId: string
+    readonly revision: number
+  }
+  type Lane = Promise<unknown> & { transition?: TaskTransition }
   const lanes = new Map<string, Lane>()
+  const pendingDeliveries = new Map<string, ContinuousGoalDeliveryIntent[]>()
+  const deliveryKeys = new Set<string>()
+  const observedTaskTransitions = new Set<string>()
+  const deliveryTasks = new Set<Promise<void>>()
   const failures: unknown[] = []
   const installed = new Map<Agent, {
     command: CommandRegistration
@@ -178,14 +196,34 @@ export function mountContinuousGoalHost(
     const record = dependencies.readLongGoal(dependencies.roots.stateRoot, longGoalId)
     return isV3(record) ? record : undefined
   }
+  const startPendingDeliveries = (longGoalId: string): void => {
+    const intents = pendingDeliveries.get(longGoalId)
+    pendingDeliveries.delete(longGoalId)
+    if (dependencies.deliver === undefined || intents === undefined) return
+    for (const intent of intents) {
+      const task = Promise.resolve().then(() => dependencies.deliver!(intent)).catch(error => {
+        try { dependencies.reportError(error) } catch {}
+      })
+      deliveryTasks.add(task)
+      void task.finally(() => { deliveryTasks.delete(task) }).catch(() => undefined)
+    }
+  }
+  const recordDelivery = (intent: ContinuousGoalDeliveryIntent): void => {
+    const key = `${intent.longGoalId}:${intent.transition}:${intent.taskGoalRevision}`
+    if (deliveryKeys.has(key)) return
+    deliveryKeys.add(key)
+    const intents = pendingDeliveries.get(intent.longGoalId) ?? []
+    intents.push(intent)
+    pendingDeliveries.set(intent.longGoalId, intents)
+  }
   const rememberLane = <T>(
     longGoalId: string,
     task: Promise<T>,
-    completion?: { readonly sessionId: string, readonly goalId: string },
+    transition?: TaskTransition,
     reportFailure = true,
   ): Promise<T> => {
-    const lane = task as Promise<T> & { completion?: { readonly sessionId: string, readonly goalId: string } }
-    if (completion !== undefined) lane.completion = completion
+    const lane = task as Promise<T> & { transition?: TaskTransition }
+    if (transition !== undefined) lane.transition = transition
     lanes.set(longGoalId, lane)
     if (reportFailure) {
       void task.catch(error => {
@@ -194,7 +232,10 @@ export function mountContinuousGoalHost(
       })
     }
     void task.finally(() => {
-      if (lanes.get(longGoalId) === lane) lanes.delete(longGoalId)
+      if (lanes.get(longGoalId) === lane) {
+        lanes.delete(longGoalId)
+        startPendingDeliveries(longGoalId)
+      }
     }).catch(() => undefined)
     return lane
   }
@@ -206,22 +247,28 @@ export function mountContinuousGoalHost(
   const append = <T>(longGoalId: string, work: () => Promise<T>, reportFailure = true): Promise<T> => {
     const previous = lanes.get(longGoalId)
     const task = (previous ?? Promise.resolve()).then(work, work)
-    return rememberLane(longGoalId, task, previous?.completion, reportFailure)
+    return rememberLane(longGoalId, task, previous?.transition, reportFailure)
   }
-  const appendCompletion = (
+  const appendTaskTransition = (
     longGoalId: string,
-    execution: { readonly sessionId: string, readonly goalId: string },
+    transition: TaskTransition,
   ): Promise<void> => {
     const previous = lanes.get(longGoalId)
     if (
-      previous?.completion?.sessionId === execution.sessionId
-      && previous.completion.goalId === execution.goalId
+      previous?.transition?.operation === transition.operation
+      && previous.transition.sessionId === transition.sessionId
+      && previous.transition.goalId === transition.goalId
+      && previous.transition.revision === transition.revision
     ) return previous.then(() => undefined)
     const task = (previous ?? Promise.resolve()).then(
-      () => continueAfterCompletion(longGoalId, execution),
-      () => continueAfterCompletion(longGoalId, execution),
+      () => transition.operation === 'complete'
+        ? continueAfterCompletion(longGoalId, transition)
+        : recordAfterBlock(longGoalId, transition),
+      () => transition.operation === 'complete'
+        ? continueAfterCompletion(longGoalId, transition)
+        : recordAfterBlock(longGoalId, transition),
     )
-    return rememberLane(longGoalId, task, execution)
+    return rememberLane(longGoalId, task, transition)
   }
   const flush = async (agent: Agent): Promise<void> => {
     if (await dependencies.flushSession(agent) === false) throw new Error('Session persistence is unavailable')
@@ -301,7 +348,7 @@ export function mountContinuousGoalHost(
     installBoundControls(agent)
   }
 
-  const continueAfterCompletion = async (longGoalId: string, execution: { sessionId: string, goalId: string }): Promise<void> => {
+  const continueAfterCompletion = async (longGoalId: string, execution: { sessionId: string, goalId: string, revision: number }): Promise<void> => {
     const taskAgent = ctx.agents.get(execution.sessionId as never)
     if (taskAgent !== undefined) {
       await taskAgent.whenIdle()
@@ -319,6 +366,33 @@ export function mountContinuousGoalHost(
     const projected = status.tasks.find(candidate => candidate.id === task.id)
     if (projected?.phase !== 'complete' || settledTasks(status) <= record.planner.consideredSettledTasks) return
     await dependencies.continueProgress({ longGoalId, expectedRevision: record.revision })
+    const finalStatus = await readStatus(longGoalId)
+    if (finalStatus.goal.phase === 'complete') {
+      recordDelivery({ longGoalId, transition: 'complete', taskGoalRevision: execution.revision, status: finalStatus })
+    }
+  }
+
+  const recordAfterBlock = async (longGoalId: string, execution: { sessionId: string, goalId: string, revision: number }): Promise<void> => {
+    const taskAgent = ctx.agents.get(execution.sessionId as never)
+    if (taskAgent === undefined) return
+    await taskAgent.whenIdle()
+    await flush(taskAgent)
+    const record = readV3(longGoalId)
+    if (record === undefined || record.control.autoProgress !== 'running' || record.planner.phase === 'complete') return
+    const task = boundTask(record, execution.sessionId, execution.goalId)
+    if (task === undefined) return
+    const blocked = await readStatus(longGoalId)
+    const current = blocked.currentTaskId === null
+      ? undefined
+      : blocked.tasks.find(candidate => candidate.id === blocked.currentTaskId)
+    if (
+      blocked.goal.phase !== 'blocked'
+      || current?.id !== task.id
+      || current.phase !== 'blocked'
+      || current.execution?.sessionId !== execution.sessionId
+      || current.execution.goalId !== execution.goalId
+    ) return
+    recordDelivery({ longGoalId, transition: 'block', taskGoalRevision: execution.revision, status: blocked })
   }
 
   const reconcile = async (longGoalId: string): Promise<void> => {
@@ -330,7 +404,7 @@ export function mountContinuousGoalHost(
     ) return
     const status = await readStatus(longGoalId)
     if (status.goal.phase === 'blocked' || status.goal.phase === 'complete') return
-    if (lanes.get(longGoalId)?.completion !== undefined) return
+    if (lanes.get(longGoalId)?.transition !== undefined) return
     const current = status.currentTaskId === null ? undefined : status.tasks.find(task => task.id === status.currentTaskId)
     const requiresContinue = record.planner.phase === 'unplanned'
       || record.planner.phase === 'needs-replan'
@@ -403,7 +477,7 @@ export function mountContinuousGoalHost(
   }
 
   const offGoal = ctx.on('goal/changed', ({ agent, change }) => {
-    if (change.operation !== 'complete') return
+    if (change.operation !== 'complete' && change.operation !== 'block') return
     const sessionId = String(agent.session.id)
     const goalId = String(change.ref.id)
     for (const record of dependencies.listLongGoals()) {
@@ -413,7 +487,15 @@ export function mountContinuousGoalHost(
         || record.planner.phase === 'complete'
       ) continue
       if (boundTask(record, sessionId, goalId) !== undefined) {
-        void appendCompletion(record.id, { sessionId, goalId }).catch(() => undefined)
+        const transitionKey = `${record.id}:${change.operation}:${sessionId}:${goalId}:${change.ref.revision}`
+        if (observedTaskTransitions.has(transitionKey)) continue
+        observedTaskTransitions.add(transitionKey)
+        void appendTaskTransition(record.id, {
+          operation: change.operation,
+          sessionId,
+          goalId,
+          revision: change.ref.revision,
+        }).catch(() => undefined)
       }
     }
   })
@@ -446,6 +528,7 @@ export function mountContinuousGoalHost(
       await registration.command.dispose()
     }
     await Promise.allSettled([...lanes.values()])
+    await Promise.allSettled([...deliveryTasks])
     if (failures.length > 0) throw new AggregateError(failures, 'Continuous Goal Host lane failures')
   }
 }

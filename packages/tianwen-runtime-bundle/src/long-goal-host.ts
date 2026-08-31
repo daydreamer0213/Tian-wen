@@ -25,6 +25,7 @@ import type {
   LongGoalSummary,
   LongGoalSummaryV2,
   LongGoalSummaryV3,
+  LongGoalStatusProjectionV3,
   ReadLongGoalStatusProjection,
 } from './long-goal-contract.js'
 import {
@@ -60,7 +61,8 @@ import {
 } from './continuous-goal-service.js'
 import type { ContinuousGoalServiceDependencies } from './continuous-goal-service.js'
 import { installBoundContinuousGoalControls, installContinuousGoalCommand } from './continuous-goal-agent.js'
-import { mountContinuousGoalHost } from './continuous-goal-host.js'
+import { mountContinuousGoalHost, type ContinuousGoalDeliveryIntent } from './continuous-goal-host.js'
+import { buildContinuousGoalSettlementNotice } from './continuous-goal-feedback.js'
 import { readSettledTaskResult } from './settled-task-result.js'
 import {
   readGoalTaskFeedbackStatus,
@@ -1236,6 +1238,125 @@ export function createLearningClueAnalysisOperations(
   }
 }
 
+export interface ContinuousGoalSettlementDeliveryDependencies {
+  readonly getAgent: (sessionId: string) => Agent | undefined
+  readonly readStatus: (longGoalId: string) => Promise<LongGoalStatusProjectionV3>
+  readonly inspectSession: (sessionId: string) => Promise<{
+    readonly meta: { readonly id: unknown }
+    readonly events: readonly SessionEvent[]
+  }>
+  readonly flushSession: (agent: Agent) => Promise<void | boolean>
+}
+
+function sameDeliveryState(
+  expected: LongGoalStatusProjectionV3,
+  actual: LongGoalStatusProjectionV3,
+): boolean {
+  if (
+    actual.goal.id !== expected.goal.id
+    || actual.goal.revision !== expected.goal.revision
+    || actual.goal.phase !== expected.goal.phase
+    || actual.control.sessionId !== expected.control.sessionId
+    || actual.currentTaskId !== expected.currentTaskId
+  ) return false
+  if (actual.goal.phase !== 'blocked') return actual.goal.phase === 'complete'
+  const current = actual.tasks.find(task => task.id === actual.currentTaskId)
+  const expectedCurrent = expected.tasks.find(task => task.id === expected.currentTaskId)
+  return current?.phase === 'blocked'
+    && expectedCurrent?.phase === 'blocked'
+    && current.execution?.sessionId === expectedCurrent.execution?.sessionId
+    && current.execution?.goalId === expectedCurrent.execution?.goalId
+}
+
+async function runGuardedSettlementTurn(
+  agent: Agent,
+  notice: ReturnType<typeof buildContinuousGoalSettlementNotice>,
+  flushSession: (agent: Agent) => Promise<void | boolean>,
+): Promise<void> {
+  let noticeTurn: number | undefined
+  let active = false
+  let ended = false
+  let resolveEnded!: () => void
+  const turnEnded = new Promise<void>(resolve => { resolveEnded = resolve })
+  const offPreStep = agent.ctx.on('agent/pre-step', async (payload, next) => {
+    const decision = await next()
+    if (
+      noticeTurn === undefined
+      && decision.kind === 'enter'
+      && decision.messages.some(message => String(message.id) === String(notice.id))
+    ) {
+      noticeTurn = payload.turn
+      active = true
+    }
+    return decision
+  })
+  const offSession = agent.ctx.on('session/event', (session, event) => {
+    if (
+      active
+      && String(session.id) === String(agent.session.id)
+      && event.type === 'turn/end'
+      && event.data.turn === noticeTurn
+    ) {
+      active = false
+      ended = true
+      resolveEnded()
+    }
+  })
+  const offGuard = agent.ctx.tools.guard(() => active
+    ? 'Continuous Goal settlement notices are read-only; tools are disabled for this Turn.'
+    : undefined)
+  try {
+    agent.followup(notice)
+    const becameIdle = agent.whenIdle().then(() => {
+      if (!ended) throw new Error('Continuous Goal settlement notice Turn was not observed')
+    })
+    await Promise.race([turnEnded, becameIdle])
+    if (await flushSession(agent) === false) throw new Error('Session persistence is unavailable')
+  } finally {
+    active = false
+    offGuard()
+    offSession()
+    offPreStep()
+  }
+}
+
+export async function deliverContinuousGoalSettlement(
+  intent: ContinuousGoalDeliveryIntent,
+  dependencies: ContinuousGoalSettlementDeliveryDependencies,
+): Promise<void> {
+  if (
+    (intent.transition === 'complete' && intent.status.goal.phase !== 'complete')
+    || (intent.transition === 'block' && intent.status.goal.phase !== 'blocked')
+  ) return
+  const sessionId = intent.status.control.sessionId
+  const agent = dependencies.getAgent(sessionId)
+  if (agent === undefined || String(agent.session.id) !== sessionId) return
+  await agent.whenIdle()
+  if (dependencies.getAgent(sessionId) !== agent) return
+  const status = await dependencies.readStatus(intent.longGoalId)
+  if (!sameDeliveryState(intent.status, status)) return
+
+  const settledTaskResults = new Map<string, string>()
+  for (const task of status.tasks) {
+    const representable = task.phase === 'complete'
+      || task.phase === 'abandoned'
+      || (task.id === status.currentTaskId && task.phase === 'blocked')
+    if (!representable || task.execution === null) continue
+    const result = await readSettledTaskResult({
+      sessionId: task.execution.sessionId,
+      goalId: task.execution.goalId,
+      phase: task.phase === 'complete' ? 'complete' : 'abandoned',
+    }, dependencies.inspectSession)
+    if (result !== undefined) settledTaskResults.set(task.id, result)
+  }
+
+  if (dependencies.getAgent(sessionId) !== agent) return
+  const rechecked = await dependencies.readStatus(intent.longGoalId)
+  if (!sameDeliveryState(status, rechecked)) return
+  const notice = buildContinuousGoalSettlementNotice({ status: rechecked, settledTaskResults })
+  await runGuardedSettlementTurn(agent, notice, dependencies.flushSession)
+}
+
 export function mountTianwenLongGoalHost(
   ctx: Context,
   config?: TianwenLongGoalHostConfig,
@@ -1451,6 +1572,17 @@ export function mountTianwenLongGoalHost(
         return 'paused'
       },
     }
+    const readContinuousStatus = async (longGoalId: string): Promise<LongGoalStatusProjectionV3> => {
+      const status = await readLongGoalStatus({
+        stateRoot: roots.stateRoot,
+        longGoalId,
+        dshStatusTarget,
+      })
+      if (status.schemaVersion !== 'tianwen.long-goal-status.v3') {
+        throw new LongGoalIntegrityError('Continuous Goal Host requires a v3 status')
+      }
+      return status
+    }
     const disposeContinuousGoalHost = mountContinuousGoalHost(injected as unknown as Context & {
       readonly agents: {
         list(): Agent[]
@@ -1460,13 +1592,7 @@ export function mountTianwenLongGoalHost(
       roots,
       listLongGoals: () => listLongGoals(roots.stateRoot),
       readLongGoal,
-      readStatus: async input => {
-        const status = await readLongGoalStatus(input)
-        if (status.schemaVersion !== 'tianwen.long-goal-status.v3') {
-          throw new LongGoalIntegrityError('Continuous Goal Host requires a v3 status')
-        }
-        return status
-      },
+      readStatus: input => readContinuousStatus(input.longGoalId),
       createProgress: async input => createContinuousGoalProgress({
         stateRoot: roots.stateRoot, dshStatusTarget, ...input,
       }, continuousServiceDependencies),
@@ -1481,6 +1607,12 @@ export function mountTianwenLongGoalHost(
         expectedRevision: input.expectedRevision, mode: 'paused',
       }),
       flushSession: async agent => injected.sessions.flush(agent.session),
+      deliver: intent => deliverContinuousGoalSettlement(intent, {
+        getAgent: sessionId => injected.agents.get(SessionId(sessionId)),
+        readStatus: readContinuousStatus,
+        inspectSession: sessionId => host.sessionPersistence.inspect(SessionId(sessionId)),
+        flushSession: async agent => injected.sessions.flush(agent.session),
+      }),
       reportError: error => host.logger('tianwen-continuous-goal').error(error),
       installCommand: installContinuousGoalCommand,
       installBoundControls: installBoundContinuousGoalControls,

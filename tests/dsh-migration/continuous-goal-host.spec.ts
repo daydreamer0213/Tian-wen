@@ -5,6 +5,7 @@ import { LongGoalIntegrityError } from '../../packages/tianwen-runtime-bundle/sr
 import type { LongGoalRecordV3, LongGoalStatusProjectionV3 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
 import type { ContinuousGoalControlAction } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-service.js'
 import { mountContinuousGoalHost, type ContinuousGoalHostDependencies } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-host.js'
+import { deliverContinuousGoalSettlement } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
 
 const GOAL_ID = 'tianwen-long-goal-00000000-0000-4000-8000-000000000001'
 const TASK_1 = '00000000-0000-4000-8000-000000000002'
@@ -29,12 +30,13 @@ function status(
   source: LongGoalRecordV3,
   phases: readonly ('pending' | 'active' | 'paused' | 'blocked' | 'complete' | 'abandoned')[],
   currentTaskId: string | null,
+  goalPhase?: LongGoalStatusProjectionV3['goal']['phase'],
 ): LongGoalStatusProjectionV3 {
   return {
     schemaVersion: 'tianwen.long-goal-status.v3',
     goal: {
       id: source.id, objective: source.objective, context: source.context, successCriteria: source.successCriteria,
-      phase: phases.every(phase => phase === 'complete' || phase === 'abandoned') ? 'complete' : 'active',
+      phase: goalPhase ?? (phases.every(phase => phase === 'complete' || phase === 'abandoned') ? 'complete' : 'active'),
       revision: source.revision, completedTasks: phases.filter(phase => phase === 'complete').length,
       abandonedTasks: phases.filter(phase => phase === 'abandoned').length, totalTasks: source.tasks.length,
     },
@@ -47,10 +49,10 @@ function status(
   }
 }
 
-function agent(sessionId: string, goalId: string, phase: 'active' | 'complete' = 'active'): Agent & {
+function agent(sessionId: string, goalId: string, phase: 'active' | 'blocked' | 'complete' = 'active'): Agent & {
   readonly whenIdle: ReturnType<typeof vi.fn>
   readonly cancel: ReturnType<typeof vi.fn>
-  setGoal(phase: 'active' | 'complete'): void
+  setGoal(phase: 'active' | 'blocked' | 'complete'): void
 } {
   let current = { id: goalId, phase, activation: phase === 'active' ? 'armed' as const : 'disarmed' as const }
   const whenIdle = vi.fn(async () => undefined)
@@ -60,7 +62,7 @@ function agent(sessionId: string, goalId: string, phase: 'active' | 'complete' =
     whenIdle, cancel,
     setGoal(next) { current = { ...current, phase: next, activation: next === 'active' ? 'armed' : 'disarmed' } },
     ctx: { goals: { get: () => current } },
-  } as unknown as Agent & { readonly whenIdle: ReturnType<typeof vi.fn>, readonly cancel: ReturnType<typeof vi.fn>, setGoal(phase: 'active' | 'complete'): void }
+  } as unknown as Agent & { readonly whenIdle: ReturnType<typeof vi.fn>, readonly cancel: ReturnType<typeof vi.fn>, setGoal(phase: 'active' | 'blocked' | 'complete'): void }
 }
 
 function harness(initial = record()) {
@@ -111,6 +113,7 @@ function harness(initial = record()) {
     }),
     control: vi.fn(async () => ({ action: 'paused' })), continueProgress,
     pause, flushSession: vi.fn(async () => { order.push('flush') }),
+    deliver: vi.fn(async () => undefined),
     reportError: vi.fn(),
     installCommand: vi.fn((controlAgent: Agent, operations) => {
       commands.set(controlAgent, operations as never)
@@ -120,12 +123,18 @@ function harness(initial = record()) {
   } satisfies ContinuousGoalHostDependencies
   return {
     ctx, dependencies, first, live, commands, order, continueProgress, readStatus, pause,
+    records: () => records,
     setStatus(next: LongGoalStatusProjectionV3) { currentStatus = next },
     setRecords(next: LongGoalRecordV3[]) { records = next },
     complete(sessionId = EXECUTION_1.sessionId, goalId = EXECUTION_1.goalId) {
       const target = live.get(sessionId)
       if (target === undefined) throw new Error('missing live Agent')
       for (const listener of goalListeners) listener({ agent: target, change: { operation: 'complete', ref: { id: goalId, revision: 99 } } })
+    },
+    block(sessionId = EXECUTION_1.sessionId, goalId = EXECUTION_1.goalId) {
+      const target = live.get(sessionId)
+      if (target === undefined) throw new Error('missing live Agent')
+      for (const listener of goalListeners) listener({ agent: target, change: { operation: 'block', ref: { id: goalId, revision: 99 } } })
     },
     abort(sessionId: string) {
       for (const listener of sessionListeners) listener({ id: sessionId }, {
@@ -158,6 +167,88 @@ describe('continuous Goal Host', () => {
     expect(subject.dependencies.flushSession).toHaveBeenCalledOnce()
     expect(subject.continueProgress).toHaveBeenCalledTimes(1)
     expect(subject.order).toEqual(expect.arrayContaining(['read', 'flush', 'continue']))
+  })
+
+  it('records one complete delivery after continuation reaches authoritative completion', async () => {
+    const subject = harness()
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
+
+    subject.first.setGoal('complete')
+    const completed = status(record(), ['complete'], null)
+    subject.setStatus(completed)
+    subject.complete()
+    subject.complete()
+    await dispose()
+
+    expect(subject.dependencies.deliver).toHaveBeenCalledOnce()
+    expect(subject.dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
+      longGoalId: GOAL_ID,
+      transition: 'complete',
+      status: completed,
+    }))
+  })
+
+  it('flushes and rereads one exact block without continuing, then records one attention delivery', async () => {
+    const subject = harness()
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
+
+    subject.first.setGoal('blocked')
+    const blocked = status(record(), ['blocked'], TASK_1, 'blocked')
+    subject.setStatus(blocked)
+    subject.block()
+    subject.block()
+    await dispose()
+
+    expect(subject.first.whenIdle).toHaveBeenCalledOnce()
+    expect(subject.dependencies.flushSession).toHaveBeenCalledOnce()
+    expect(subject.continueProgress).not.toHaveBeenCalled()
+    expect(subject.dependencies.deliver).toHaveBeenCalledOnce()
+    expect(subject.dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
+      longGoalId: GOAL_ID,
+      transition: 'block',
+      status: blocked,
+    }))
+  })
+
+  it('releases the Goal lane before detached delivery waits', async () => {
+    const subject = harness()
+    const controlAgent = agent('control-session', 'control-goal')
+    subject.live.set('control-session', controlAgent)
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    subject.dependencies.deliver = vi.fn(async () => gate)
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
+
+    subject.first.setGoal('complete')
+    subject.setStatus(status(record(), ['complete'], null))
+    subject.complete()
+    await vi.waitFor(() => expect(subject.dependencies.deliver).toHaveBeenCalledOnce())
+
+    await expect(subject.control(controlAgent)).resolves.toEqual({ action: 'paused' })
+    release()
+    await dispose()
+  })
+
+  it('contains a rejected delivery without mutating or reclassifying durable state', async () => {
+    const subject = harness()
+    const failure = new Error('notice delivery failed')
+    subject.dependencies.deliver = vi.fn(async () => { throw failure })
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
+
+    subject.first.setGoal('complete')
+    subject.setStatus(status(record(), ['complete'], null))
+    subject.complete()
+    await expect(dispose()).resolves.toBeUndefined()
+
+    expect(subject.pause).not.toHaveBeenCalled()
+    expect(subject.dependencies.control).not.toHaveBeenCalled()
+    expect(subject.records()[0]?.control.autoProgress).toBe('running')
+    expect(subject.dependencies.reportError).toHaveBeenCalledOnce()
+    expect(subject.dependencies.reportError).toHaveBeenCalledWith(failure)
   })
 
   it('rejects every existing control binding and reports ambiguous bindings as integrity errors', async () => {
@@ -457,5 +548,104 @@ describe('continuous Goal Host', () => {
     expect(subject.first.whenIdle).not.toHaveBeenCalled()
     expect(subject.dependencies.flushSession).not.toHaveBeenCalled()
     expect(subject.continueProgress).toHaveBeenCalledTimes(1)
+  })
+
+  it('delivers one guarded followup for the exact notice Turn and releases the guard before later user work', async () => {
+    const source = record()
+    const completed = status(source, ['complete'], null)
+    const preStepListeners: ((payload: unknown, next: () => Promise<unknown>) => Promise<unknown>)[] = []
+    const sessionListeners: ((session: unknown, event: unknown) => void)[] = []
+    const guards: ((execution: { name: string }) => string | undefined)[] = []
+    const executed: string[] = []
+    let finishDriver!: () => void
+    const driverFinished = new Promise<void>(resolve => { finishDriver = resolve })
+    const scopedContext = {
+      tools: {
+        guard: vi.fn((guard: (execution: { name: string }) => string | undefined) => {
+          guards.push(guard)
+          return () => guards.splice(guards.indexOf(guard), 1)
+        }),
+      },
+      on(name: string, listener: never) {
+        const listeners = name === 'agent/pre-step' ? preStepListeners : sessionListeners
+        listeners.push(listener)
+        return () => listeners.splice(listeners.indexOf(listener), 1)
+      },
+    }
+    const controlAgent = {
+      session: { id: 'control-session' },
+      ctx: scopedContext,
+      whenIdle: vi.fn()
+        .mockResolvedValueOnce(undefined)
+        .mockImplementationOnce(async () => driverFinished),
+      followup: vi.fn(message => {
+        queueMicrotask(async () => {
+          const turn = 7
+          for (const listener of preStepListeners) {
+            await listener(
+              { agent: controlAgent, messages: [message], turn, step: 1, signal: new AbortController().signal },
+              async () => ({ kind: 'enter', messages: [message] }),
+            )
+          }
+          for (const name of ['goal_control', 'read_file']) {
+            if (!guards.some(guard => guard({ name }) !== undefined)) executed.push(name)
+          }
+          for (const listener of sessionListeners) {
+            listener(controlAgent.session, { type: 'turn/end', data: { turn, reason: { kind: 'completed' } } })
+          }
+          finishDriver()
+        })
+      }),
+    } as unknown as Agent
+    const inspectSession = vi.fn(async () => ({
+      meta: { id: EXECUTION_1.sessionId },
+      events: [
+        { seq: 0, time: 1, type: 'turn/start', data: { turn: 1 } },
+        { seq: 1, time: 2, type: 'user/message', data: { id: 'task-input', source: { kind: 'goal', goalId: EXECUTION_1.goalId }, content: [{ type: 'text', text: 'work' }] } },
+        { seq: 2, time: 3, type: 'assistant/message', surfaceOp: 'append', data: { turn: 1, step: 1, message: { id: 'task-reply', role: 'assistant', content: [{ type: 'text', text: 'Published successfully' }] } } },
+        { seq: 3, time: 4, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+        { seq: 4, time: 5, type: 'goal/change', data: { operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 2 }, goal: { id: EXECUTION_1.goalId, revision: 2, phase: 'complete' } } },
+      ] as never,
+    }))
+    const flushSession = vi.fn(async () => true)
+    const getAgent = vi.fn(() => controlAgent)
+    const readStatus = vi.fn(async () => completed)
+
+    await deliverContinuousGoalSettlement({
+      longGoalId: GOAL_ID,
+      transition: 'complete',
+      taskGoalRevision: 99,
+      status: completed,
+    }, { getAgent, readStatus, inspectSession, flushSession })
+
+    expect(controlAgent.followup).toHaveBeenCalledOnce()
+    expect(inspectSession).toHaveBeenCalledWith(EXECUTION_1.sessionId)
+    expect(executed).toEqual([])
+    expect(flushSession).toHaveBeenCalledOnce()
+    expect(guards).toEqual([])
+    expect(guards.some(guard => guard({ name: 'goal_control' }) !== undefined)).toBe(false)
+  })
+
+  it('contains a missing bound control Agent without attempting persistence or delivery', async () => {
+    const completed = status(record(), ['complete'], null)
+    const readStatus = vi.fn(async () => completed)
+    const inspectSession = vi.fn(async () => ({ meta: { id: 'unused' }, events: [] }))
+    const flushSession = vi.fn(async () => true)
+
+    await expect(deliverContinuousGoalSettlement({
+      longGoalId: GOAL_ID,
+      transition: 'complete',
+      taskGoalRevision: 99,
+      status: completed,
+    }, {
+      getAgent: () => undefined,
+      readStatus,
+      inspectSession,
+      flushSession,
+    })).resolves.toBeUndefined()
+
+    expect(readStatus).not.toHaveBeenCalled()
+    expect(inspectSession).not.toHaveBeenCalled()
+    expect(flushSession).not.toHaveBeenCalled()
   })
 })
