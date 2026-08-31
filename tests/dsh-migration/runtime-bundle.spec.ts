@@ -463,7 +463,7 @@ describe('@tianwen/runtime-bundle', () => {
   })
 
   it('separates the deployable DSH host from the Profile runtime package', () => {
-    const manifest = json(resolve(packageRoot, 'package.json')) as {
+    const runtimeManifest = json(resolve(packageRoot, 'package.json')) as {
       name: string
       files: string[]
       dependencies?: Record<string, string>
@@ -475,15 +475,15 @@ describe('@tianwen/runtime-bundle', () => {
       private?: boolean
       version: string
     }
-    expect(manifest.name).toBe('@tianwen/runtime-bundle')
-    expect(manifest.version).toBe('0.1.4')
-    expect(manifest).not.toHaveProperty('private')
-    expect(manifest.bin).toEqual({ tianwen: 'dist/cli.js' })
-    expect(manifest.dependencies ?? {}).toEqual({})
-    expect(Object.keys(manifest.dependencies ?? {})).not.toContainEqual(
+    expect(runtimeManifest.name).toBe('@tianwen/runtime-bundle')
+    expect(runtimeManifest.version).toBe('0.1.5')
+    expect(runtimeManifest).not.toHaveProperty('private')
+    expect(runtimeManifest.bin).toEqual({ tianwen: 'dist/cli.js' })
+    expect(runtimeManifest.dependencies ?? {}).toEqual({})
+    expect(Object.keys(runtimeManifest.dependencies ?? {})).not.toContainEqual(
       expect.stringMatching(/^@tianwen\//u),
     )
-    expect(manifest.peerDependencies).toEqual({
+    expect(runtimeManifest.peerDependencies).toEqual({
       ...serverPeerDependencies,
       '@deepseek-ai/dsh-client-connection': '0.1.1-rc.2',
       '@deepseek-ai/dsh-client-locale': '0.1.1-rc.2',
@@ -491,7 +491,7 @@ describe('@tianwen/runtime-bundle', () => {
       '@deepseek-ai/dsh-client-ui-sidebar': '0.1.1-rc.2',
       react: '18.2.0',
     })
-    expect(manifest.peerDependenciesMeta).toEqual({
+    expect(runtimeManifest.peerDependenciesMeta).toEqual({
       '@deepseek-ai/dsh-client-connection': { optional: true },
       '@deepseek-ai/dsh-client-locale': { optional: true },
       '@deepseek-ai/dsh-client-runtime': { optional: true },
@@ -505,21 +505,21 @@ describe('@tianwen/runtime-bundle', () => {
         '@deepseek-ai/dsh': '0.1.1-rc.2',
       },
     })
-    expect(manifest.devDependencies).toMatchObject({
+    expect(runtimeManifest.devDependencies).toMatchObject({
       ...serverPeerDependencies,
       '@deepseek-ai/dsh-client-locale': '0.1.1-rc.2',
       '@tianwen/evidence': 'workspace:*',
       '@tianwen/runtime': 'workspace:*',
       esbuild: '0.28.2',
     })
-    expect(manifest.exports).toHaveProperty('./runtime')
-    expect(manifest.exports).toHaveProperty('./smoke')
-    expect(manifest.exports).toHaveProperty('./status')
-    expect(manifest.exports).toHaveProperty('./resume-runner')
-    expect(manifest.exports).toHaveProperty('./create-runner')
-    expect(manifest.exports).toHaveProperty('./goal-first-runner')
-    expect(manifest.exports).toHaveProperty('./model-runner')
-    expect(manifest.files).toEqual([
+    expect(runtimeManifest.exports).toHaveProperty('./runtime')
+    expect(runtimeManifest.exports).toHaveProperty('./smoke')
+    expect(runtimeManifest.exports).toHaveProperty('./status')
+    expect(runtimeManifest.exports).toHaveProperty('./resume-runner')
+    expect(runtimeManifest.exports).toHaveProperty('./create-runner')
+    expect(runtimeManifest.exports).toHaveProperty('./goal-first-runner')
+    expect(runtimeManifest.exports).toHaveProperty('./model-runner')
+    expect(runtimeManifest.files).toEqual([
       'dist/index.js',
       'dist/index.d.ts',
       'dist/runtime.js',
@@ -664,7 +664,7 @@ describe('@tianwen/runtime-bundle', () => {
         dependencies: {
           '@deepseek-ai/dsh-base': '0.1.1-rc.2',
           '@deepseek-ai/dsh-headless': '0.1.1-rc.2',
-          '@tianwen/runtime-bundle': '0.1.4',
+          '@tianwen/runtime-bundle': '0.1.5',
         },
         dsh: {
           profile: {
@@ -1141,7 +1141,7 @@ describe('@tianwen/runtime-bundle', () => {
   it('packs only the deployable runtime bundle files', () => {
     mkdirSync(packFixtureBase, { recursive: true })
     const packRoot = mkdtempSync(join(packFixtureBase, 'pack-'))
-    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.1.4.tgz')
+    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.1.5.tgz')
     const pnpmEntry = resolve(dirname(process.execPath), 'node_modules/corepack/dist/pnpm.js')
     try {
       execFileSync(process.execPath, [
