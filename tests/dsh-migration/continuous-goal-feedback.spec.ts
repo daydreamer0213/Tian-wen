@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildContinuousGoalPlanningFailureNotice,
   buildContinuousGoalProgressNotice,
   buildContinuousGoalSettlementNotice,
 } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-feedback.js'
@@ -265,6 +266,24 @@ describe('continuous Goal terminal settlement notice', () => {
 })
 
 describe('continuous Goal conversation progress notice', () => {
+  it('reports an initial planning failure without exposing the raw exception', () => {
+    const message = buildContinuousGoalPlanningFailureNotice(status({
+      goalPhase: 'planning',
+      tasks: [],
+    }))
+    const content = contentOf(message)
+
+    expect(message).toMatchObject({
+      role: 'user',
+      source: { kind: 'plugin', plugin: 'tianwen-continuous-goal', form: 'notice' },
+    })
+    expect(content).toContain('Initial Goal planning did not finish.')
+    expect(content).toContain('The Goal is saved in this conversation.')
+    expect(content).toContain('continue or provide a corrected direction')
+    expect(content).not.toContain('stack')
+    expect(content).not.toContain(GOAL_ID)
+  })
+
   it('announces the first planned Task as an ordinary read-only conversation turn', () => {
     const message = buildContinuousGoalProgressNotice({
       transition: 'start',

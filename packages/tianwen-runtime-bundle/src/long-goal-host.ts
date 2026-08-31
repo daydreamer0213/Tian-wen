@@ -63,6 +63,7 @@ import type { ContinuousGoalServiceDependencies } from './continuous-goal-servic
 import { installBoundContinuousGoalControls, installContinuousGoalCommand } from './continuous-goal-agent.js'
 import { mountContinuousGoalHost, type ContinuousGoalDeliveryIntent } from './continuous-goal-host.js'
 import {
+  buildContinuousGoalPlanningFailureNotice,
   buildContinuousGoalProgressNotice,
   buildContinuousGoalSettlementNotice,
 } from './continuous-goal-feedback.js'
@@ -1254,6 +1255,7 @@ export interface ContinuousGoalSettlementDeliveryDependencies {
 function sameDeliveryState(
   expected: LongGoalStatusProjectionV3,
   actual: LongGoalStatusProjectionV3,
+  transition?: ContinuousGoalDeliveryIntent['transition'],
 ): boolean {
   if (
     actual.goal.id !== expected.goal.id
@@ -1262,7 +1264,7 @@ function sameDeliveryState(
     || actual.control.sessionId !== expected.control.sessionId
     || actual.currentTaskId !== expected.currentTaskId
   ) return false
-  if (actual.goal.phase === 'complete') return true
+  if (actual.goal.phase === 'complete' || transition === 'planning-failed') return true
   const current = actual.tasks.find(task => task.id === actual.currentTaskId)
   const expectedCurrent = expected.tasks.find(task => task.id === expected.currentTaskId)
   const expectedPhase = actual.goal.phase === 'blocked' ? 'blocked' : 'active'
@@ -1272,9 +1274,54 @@ function sameDeliveryState(
     && current.execution?.goalId === expectedCurrent.execution?.goalId
 }
 
+function hasDurableNoticeReply(
+  events: readonly SessionEvent[],
+  notice: ReturnType<typeof buildContinuousGoalSettlementNotice>
+    | ReturnType<typeof buildContinuousGoalProgressNotice>
+    | ReturnType<typeof buildContinuousGoalPlanningFailureNotice>,
+): boolean {
+  const expectedSource = JSON.stringify(notice.source)
+  const expectedContent = JSON.stringify(notice.content)
+  for (let index = 0; index < events.length; index++) {
+    const event = events[index]
+    if (
+      event?.type !== 'user/message'
+      || JSON.stringify(event.data.source) !== expectedSource
+      || JSON.stringify(event.data.content) !== expectedContent
+    ) continue
+    let turn: number | undefined
+    for (let before = index - 1; before >= 0; before--) {
+      const candidate = events[before]
+      if (candidate?.type === 'turn/start') {
+        turn = candidate.data.turn
+        break
+      }
+    }
+    if (turn === undefined) continue
+    let hasReply = false
+    for (let after = index + 1; after < events.length; after++) {
+      const candidate = events[after]
+      if (candidate?.type === 'assistant/message' && candidate.data.turn === turn) {
+        hasReply ||= candidate.data.message.content.some(block =>
+          block.type === 'text' && block.text.trim().length > 0)
+      }
+      if (candidate?.type === 'turn/end' && candidate.data.turn === turn) {
+        if (
+          hasReply
+          && (candidate.data.reason.kind === 'completed' || candidate.data.reason.kind === 'max-tokens')
+        ) return true
+        break
+      }
+    }
+  }
+  return false
+}
+
 async function runGuardedSettlementTurn(
   agent: Agent,
-  notice: ReturnType<typeof buildContinuousGoalSettlementNotice> | ReturnType<typeof buildContinuousGoalProgressNotice>,
+  notice: ReturnType<typeof buildContinuousGoalSettlementNotice>
+    | ReturnType<typeof buildContinuousGoalProgressNotice>
+    | ReturnType<typeof buildContinuousGoalPlanningFailureNotice>,
   flushSession: (agent: Agent) => Promise<void | boolean>,
 ): Promise<void> {
   let noticeTurn: number | undefined
@@ -1327,20 +1374,22 @@ async function runGuardedSettlementTurn(
 export async function deliverContinuousGoalSettlement(
   intent: ContinuousGoalDeliveryIntent,
   dependencies: ContinuousGoalSettlementDeliveryDependencies,
-): Promise<void> {
+): Promise<boolean> {
   if (
     (intent.transition === 'complete' && intent.status.goal.phase !== 'complete')
     || (intent.transition === 'block' && intent.status.goal.phase !== 'blocked')
     || ((intent.transition === 'start' || intent.transition === 'advance')
       && intent.status.goal.phase !== 'active')
-  ) return
+    || (intent.transition === 'planning-failed'
+      && (intent.status.goal.phase !== 'planning' || intent.status.currentTaskId !== null))
+  ) return false
   const sessionId = intent.status.control.sessionId
   const agent = dependencies.getAgent(sessionId)
-  if (agent === undefined || String(agent.session.id) !== sessionId) return
+  if (agent === undefined || String(agent.session.id) !== sessionId) return false
   await agent.whenIdle()
-  if (dependencies.getAgent(sessionId) !== agent) return
+  if (dependencies.getAgent(sessionId) !== agent) return false
   const status = await dependencies.readStatus(intent.longGoalId)
-  if (!sameDeliveryState(intent.status, status)) return
+  if (!sameDeliveryState(intent.status, status, intent.transition)) return false
 
   const settledTaskResults = new Map<string, string>()
   const currentIndex = status.tasks.findIndex(task => task.id === status.currentTaskId)
@@ -1348,7 +1397,7 @@ export async function deliverContinuousGoalSettlement(
     ? undefined
     : status.tasks.slice(0, currentIndex).findLast(task =>
         task.phase === 'complete' || task.phase === 'abandoned')
-  const tasksToInspect = intent.transition === 'start'
+  const tasksToInspect = intent.transition === 'start' || intent.transition === 'planning-failed'
     ? []
     : intent.transition === 'advance'
       ? (latestSettled === undefined ? [] : [latestSettled])
@@ -1366,17 +1415,22 @@ export async function deliverContinuousGoalSettlement(
     if (result !== undefined) settledTaskResults.set(task.id, result)
   }
 
-  if (dependencies.getAgent(sessionId) !== agent) return
+  if (dependencies.getAgent(sessionId) !== agent) return false
   const rechecked = await dependencies.readStatus(intent.longGoalId)
-  if (!sameDeliveryState(status, rechecked)) return
-  const notice = intent.transition === 'start' || intent.transition === 'advance'
-    ? buildContinuousGoalProgressNotice({
-        transition: intent.transition,
-        status: rechecked,
-        settledTaskResults,
-      })
-    : buildContinuousGoalSettlementNotice({ status: rechecked, settledTaskResults })
+  if (!sameDeliveryState(status, rechecked, intent.transition)) return false
+  const notice = intent.transition === 'planning-failed'
+    ? buildContinuousGoalPlanningFailureNotice(rechecked)
+    : intent.transition === 'start' || intent.transition === 'advance'
+      ? buildContinuousGoalProgressNotice({
+          transition: intent.transition,
+          status: rechecked,
+          settledTaskResults,
+        })
+      : buildContinuousGoalSettlementNotice({ status: rechecked, settledTaskResults })
+  const controlSession = await dependencies.inspectSession(sessionId)
+  if (hasDurableNoticeReply(controlSession.events, notice)) return true
   await runGuardedSettlementTurn(agent, notice, dependencies.flushSession)
+  return true
 }
 
 export function mountTianwenLongGoalHost(

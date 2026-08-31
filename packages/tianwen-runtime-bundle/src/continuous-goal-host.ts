@@ -30,7 +30,7 @@ type CommandRegistration = {
 
 export interface ContinuousGoalDeliveryIntent {
   readonly longGoalId: string
-  readonly transition: 'start' | 'advance' | 'complete' | 'block'
+  readonly transition: 'start' | 'advance' | 'complete' | 'block' | 'planning-failed'
   readonly status: LongGoalStatusProjectionV3
 }
 
@@ -58,7 +58,7 @@ export interface ContinuousGoalHostDependencies {
   /** Persist only the v3 control mode; cancellation is owned by this Host. */
   readonly pause: (input: GoalProgressInput) => unknown
   readonly flushSession: (agent: Agent) => Promise<void | boolean>
-  readonly deliver?: (intent: ContinuousGoalDeliveryIntent) => Promise<void>
+  readonly deliver?: (intent: ContinuousGoalDeliveryIntent) => Promise<void | boolean>
   readonly reportError: (error: unknown) => void
   readonly installCommand: (
     agent: Agent,
@@ -200,25 +200,42 @@ export function mountContinuousGoalHost(
     pendingDeliveries.delete(longGoalId)
     if (dependencies.deliver === undefined || intents === undefined) return
     for (const intent of intents) {
-      const task = Promise.resolve().then(() => dependencies.deliver!(intent)).catch(error => {
+      const task = Promise.resolve().then(() => dependencies.deliver!(intent)).then(delivered => {
+        if (delivered === false) deliveryKeys.delete(deliveryKey(intent))
+      }, error => {
+        deliveryKeys.delete(deliveryKey(intent))
         try { dependencies.reportError(error) } catch {}
       })
       deliveryTasks.add(task)
       void task.finally(() => { deliveryTasks.delete(task) }).catch(() => undefined)
     }
   }
+  const deliveryKey = (intent: ContinuousGoalDeliveryIntent): string => [
+    intent.longGoalId,
+    intent.transition,
+    intent.status.goal.revision,
+    intent.status.currentTaskId ?? 'no-current-task',
+  ].join(':')
   const recordDelivery = (intent: ContinuousGoalDeliveryIntent): void => {
-    const key = [
-      intent.longGoalId,
-      intent.transition,
-      intent.status.goal.revision,
-      intent.status.currentTaskId ?? 'no-current-task',
-    ].join(':')
+    const key = deliveryKey(intent)
     if (deliveryKeys.has(key)) return
     deliveryKeys.add(key)
     const intents = pendingDeliveries.get(intent.longGoalId) ?? []
     intents.push(intent)
     pendingDeliveries.set(intent.longGoalId, intents)
+  }
+  const recordProgressDelivery = (longGoalId: string, status: LongGoalStatusProjectionV3): void => {
+    const current = status.currentTaskId === null
+      ? undefined
+      : status.tasks.find(candidate => candidate.id === status.currentTaskId)
+    const transition = status.goal.phase === 'complete'
+      ? 'complete'
+      : status.goal.phase === 'blocked'
+        ? 'block'
+        : status.goal.phase === 'active' && current?.phase === 'active'
+          ? 'advance'
+          : undefined
+    if (transition !== undefined) recordDelivery({ longGoalId, transition, status })
   }
   const rememberLane = <T>(
     longGoalId: string,
@@ -303,34 +320,53 @@ export function mountContinuousGoalHost(
         if (controlSessionCollides(records, controlSessionId)) {
           throw new Error('A Planner or Task Session cannot control a continuous Goal')
         }
-        const result = await dependencies.createProgress({
+        const progress = dependencies.createProgress({
           objective, context: null, successCriteria: null, workspaceRoot, agentPreset, controlSessionId,
         })
-        const createdBindings = allControlRecords(dependencies.listLongGoals(), controlSessionId)
+        let createdBindings = allControlRecords(dependencies.listLongGoals(), controlSessionId)
           .filter(record => !existingGoalIds.has(record.id))
+        if (createdBindings.length !== 1) {
+          await progress
+          createdBindings = allControlRecords(dependencies.listLongGoals(), controlSessionId)
+            .filter(record => !existingGoalIds.has(record.id))
+        }
         if (createdBindings.length !== 1) {
           throw new LongGoalIntegrityError('Continuous Goal control Session binding is ambiguous')
         }
         const created = createdBindings[0]!
-        if (result.status.goal.id !== created.id) {
-          throw new LongGoalIntegrityError('Continuous Goal creation returned a different durable Goal')
-        }
-        const current = result.status.currentTaskId === null
-          ? undefined
-          : result.status.tasks.find(task => task.id === result.status.currentTaskId)
-        const transition = result.status.goal.phase === 'complete'
-          ? 'complete'
-          : result.status.goal.phase === 'blocked'
-            ? 'block'
-            : result.status.goal.phase === 'active' && current?.phase === 'active'
-              ? 'start'
-              : undefined
-        if (transition !== undefined) {
-          recordDelivery({ longGoalId: created.id, transition, status: result.status })
-          startPendingDeliveries(created.id)
-        }
         installBoundControls(agent)
-        return { action: result.action }
+        rememberLane(created.id, progress.then(result => {
+          if (result.status.goal.id !== created.id) {
+            throw new LongGoalIntegrityError('Continuous Goal creation returned a different durable Goal')
+          }
+          const current = result.status.currentTaskId === null
+            ? undefined
+            : result.status.tasks.find(task => task.id === result.status.currentTaskId)
+          const transition = result.status.goal.phase === 'complete'
+            ? 'complete'
+            : result.status.goal.phase === 'blocked'
+              ? 'block'
+              : result.status.goal.phase === 'active' && current?.phase === 'active'
+                ? 'start'
+                : undefined
+          if (transition !== undefined) recordDelivery({ longGoalId: created.id, transition, status: result.status })
+        }, async error => {
+          try {
+            const failedStatus = await readStatus(created.id)
+            if (
+              failedStatus.goal.id === created.id
+              && failedStatus.control.sessionId === controlSessionId
+              && failedStatus.goal.phase === 'planning'
+              && failedStatus.currentTaskId === null
+            ) {
+              recordDelivery({ longGoalId: created.id, transition: 'planning-failed', status: failedStatus })
+            }
+          } catch (noticeError) {
+            try { dependencies.reportError(noticeError) } catch {}
+          }
+          throw error
+        }))
+        return { action: 'started' }
       } finally {
         creatingControlSessions.delete(controlSessionId)
       }
@@ -388,18 +424,7 @@ export function mountContinuousGoalHost(
     const projected = status.tasks.find(candidate => candidate.id === task.id)
     if (projected?.phase !== 'complete' || settledTasks(status) <= record.planner.consideredSettledTasks) return
     await dependencies.continueProgress({ longGoalId, expectedRevision: record.revision })
-    const finalStatus = await readStatus(longGoalId)
-    const current = finalStatus.currentTaskId === null
-      ? undefined
-      : finalStatus.tasks.find(candidate => candidate.id === finalStatus.currentTaskId)
-    const transition = finalStatus.goal.phase === 'complete'
-      ? 'complete'
-      : finalStatus.goal.phase === 'blocked'
-        ? 'block'
-        : finalStatus.goal.phase === 'active' && current?.phase === 'active'
-          ? 'advance'
-          : undefined
-    if (transition !== undefined) recordDelivery({ longGoalId, transition, status: finalStatus })
+    recordProgressDelivery(longGoalId, await readStatus(longGoalId))
   }
 
   const recordAfterBlock = async (longGoalId: string, execution: { sessionId: string, goalId: string, revision: number }): Promise<void> => {
@@ -431,22 +456,32 @@ export function mountContinuousGoalHost(
 
   const reconcile = async (longGoalId: string): Promise<void> => {
     const record = readV3(longGoalId)
-    if (
-      record === undefined
-      || record.control.autoProgress !== 'running'
-      || record.planner.phase === 'complete'
-    ) return
+    if (record === undefined) return
     const status = await readStatus(longGoalId)
-    if (status.goal.phase === 'blocked' || status.goal.phase === 'complete') return
+    if (status.goal.phase === 'blocked' || status.goal.phase === 'complete') {
+      recordProgressDelivery(longGoalId, status)
+      return
+    }
+    if (record.control.autoProgress !== 'running' || record.planner.phase === 'complete') return
     if (lanes.get(longGoalId)?.transition !== undefined) return
     const current = status.currentTaskId === null ? undefined : status.tasks.find(task => task.id === status.currentTaskId)
+    const hasNewSettledTask = settledTasks(status) > record.planner.consideredSettledTasks
+    const needsInitialPlan = record.planner.phase === 'unplanned'
     const requiresContinue = record.planner.phase === 'unplanned'
       || record.planner.phase === 'needs-replan'
       || status.goal.phase === 'planning'
       || current?.execution === null
-      || settledTasks(status) > record.planner.consideredSettledTasks
+      || hasNewSettledTask
       || !exactLiveArmedTask(ctx, record, status)
-    if (requiresContinue) await dependencies.continueProgress({ longGoalId, expectedRevision: record.revision })
+    if (requiresContinue) {
+      await dependencies.continueProgress({ longGoalId, expectedRevision: record.revision })
+      const recovered = await readStatus(longGoalId)
+      if (recovered.goal.phase === 'complete' || recovered.goal.phase === 'blocked' || hasNewSettledTask) {
+        recordProgressDelivery(longGoalId, recovered)
+      } else if (needsInitialPlan && recovered.goal.phase === 'active' && recovered.currentTaskId !== null) {
+        recordDelivery({ longGoalId, transition: 'start', status: recovered })
+      }
+    }
   }
 
   const pauseForControlStop = async (longGoalId: string): Promise<void> => {
@@ -549,7 +584,15 @@ export function mountContinuousGoalHost(
       }
     }
   })
-  const offAgent = ctx.on('agent/created', ({ agent }) => { install(agent) })
+  const offAgent = ctx.on('agent/created', ({ agent }) => {
+    install(agent)
+    const sessionId = String(agent.session.id)
+    for (const record of dependencies.listLongGoals()) {
+      if (isV3(record) && record.control.sessionId === sessionId) {
+        void joinOrStart(record.id, () => reconcile(record.id)).catch(() => undefined)
+      }
+    }
+  })
 
   return async () => {
     offGoal()

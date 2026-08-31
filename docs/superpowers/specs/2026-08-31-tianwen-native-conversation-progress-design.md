@@ -2,7 +2,7 @@
 
 Date: 2026-08-31
 
-Status: delivered in Runtime 0.1.8 and Desktop 0.1.0-preview.9; ordinary user acceptance remains natural future use
+Status: Runtime 0.1.8 ordinary-use acceptance exposed recovery gaps; result-return and command-latency repairs are implemented on `codex/goal-chat-feedback`, while internal-Session presentation and richer bounded progress remain follow-up work
 
 ## Decision
 
@@ -13,6 +13,12 @@ Goal card above the composer.
 
 The existing Long Goal panel remains optional history and diagnostics. Users
 do not need it to understand or control current work.
+
+The `/goal` command completes as soon as its durable Goal/control-Session
+binding exists, so the native composer is released while initial planning
+continues in the per-Goal lane. If that background planning rejects, Tianwen
+attempts one read-only control-conversation notice that says the Goal is saved
+and can be continued or redirected; raw exception details remain internal.
 
 This design supersedes the Runtime 0.1.7 `conversation.input.dock` design.
 
@@ -53,9 +59,15 @@ a model Turn. Tianwen therefore reuses the existing bound control Agent:
 
 Initial and Task-boundary notices include only the current Task and, after a
 transition, the newest settled Task result as untrusted historical data.
-Terminal notices keep the existing bounded settlement bundle. Every notice is
-best-effort with no persistent retry ledger: stale state, a missing Agent, or a
-Provider failure suppresses the message without changing durable Goal truth.
+Terminal notices keep the existing bounded settlement bundle. Every notice
+remains subordinate to durable Goal state. Stale state or a Provider failure
+suppresses the message without changing that state. If the control Agent is
+temporarily absent, the Host retains no notification queue; instead it
+reconstructs the exact delivery intent from durable Goal state when that
+control Session next becomes live. Before sending, it checks the control
+Session log for the same plugin notice followed by a completed assistant Turn,
+so a process restart or repeated `agent/created` event does not duplicate an
+already durable reply.
 
 The browser client no longer registers `conversation.input.dock`; its projection
 module, refresh machinery, locale copy, and dock tests are deleted rather than
@@ -63,7 +75,7 @@ left as a hidden second UI.
 
 ## Cost and noise boundary
 
-This produces one short Provider Turn per meaningful Task boundary. It does not
+This produces at most one short Provider Turn per meaningful Task boundary. It does not
 produce a Turn for Planner internals, tool events, percentage changes, native
 stop acknowledgement, or background polling. Fast consecutive transitions may
 make an older intent stale; the older message is then dropped instead of shown
@@ -89,8 +101,12 @@ Focused tests must prove:
    newest settled result on advance, and no internal identity;
 3. duplicate transitions deduplicate process-locally;
 4. stale revision/current-Task/control-Session state is not delivered;
-5. feedback Turns cannot execute tools and their Session is flushed; and
-6. complete and blocked settlement behavior remains intact.
+5. feedback Turns cannot execute tools and their Session is flushed;
+6. complete and blocked settlement behavior remains intact;
+7. a terminal result missed while the control Session is cold is delivered when
+   that Session next becomes live, without rerunning the Task; and
+8. a notice whose assistant reply is already durable is not sent again after a
+   restart or repeated Session attachment.
 
 Installed-product acceptance is one normal future `/goal` use, not a synthetic
 Activity or repeated Provider run selected for a better answer.

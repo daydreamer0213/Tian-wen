@@ -18,6 +18,32 @@ export interface ContinuousGoalProgressNoticeInput {
   readonly settledTaskResults: ReadonlyMap<string, string>
 }
 
+export function buildContinuousGoalPlanningFailureNotice(status: LongGoalStatusProjectionV3) {
+  if (status.goal.phase !== 'planning' || status.currentTaskId !== null) {
+    throw new Error('Continuous Goal planning failure notice requires an unfinished initial plan')
+  }
+  const identifiers = internalIdentifiers(status)
+  const content = [
+    'Initial Goal planning did not finish.',
+    'Produce one concise user-facing explanation in the same language as the existing conversation.',
+    'The Goal is saved in this conversation.',
+    'Tell the user they can continue or provide a corrected direction naturally.',
+    'Do not expose raw errors, call tools, or alter the Goal in this feedback Turn.',
+    '',
+    `Goal objective: ${truncate(redactInternalIdentifiers(status.goal.objective, identifiers), GOAL_FIELD_MAX_CHARS)}`,
+  ].join('\n')
+
+  return createUserMessage({
+    source: {
+      kind: 'plugin',
+      plugin: 'tianwen-continuous-goal',
+      form: 'notice',
+      summary: 'Initial Goal planning did not finish; user guidance is available.',
+    },
+    content: [{ type: 'text', text: content }],
+  })
+}
+
 interface RepresentableTask {
   readonly ordinal: number
   readonly objective: string
