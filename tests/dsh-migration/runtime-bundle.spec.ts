@@ -72,6 +72,7 @@ function isAllowedRuntimeInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return [
     'src/continuous-goal-agent.ts',
+    'src/continuous-goal-feedback.ts',
     'src/continuous-goal-service.ts',
     'src/continuous-goal-host.ts',
     'src/runtime.ts',
@@ -156,6 +157,7 @@ function isAllowedGoalFirstRunnerInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return [
     'src/continuous-goal-agent.ts',
+    'src/continuous-goal-feedback.ts',
     'src/continuous-goal-service.ts',
     'src/continuous-goal-host.ts',
     'src/goal-first-runner.ts',
@@ -191,6 +193,7 @@ function isAllowedControlledLifecycleRunnerInput(input: string): boolean {
 function isAllowedClientInput(input: string): boolean {
   return [
     'src/client.tsx',
+    'src/conversation-goal-feedback.tsx',
     'src/learn-loop-client.ts',
   ].includes(posix.normalize(input.replaceAll('\\', '/')))
 }
@@ -202,6 +205,7 @@ function containsCredentialLiteral(text: string): boolean {
 describe('runtime metafile input allowlist', () => {
   it.each([
     'src/continuous-goal-agent.ts',
+    'src/continuous-goal-feedback.ts',
     'src/continuous-goal-service.ts',
     'src/continuous-goal-host.ts',
   ])('permits the exact continuous Goal runtime input %s', input => {
@@ -234,6 +238,7 @@ describe('runtime metafile input allowlist', () => {
 
   it.each([
     'src/client.tsx',
+    'src/conversation-goal-feedback.tsx',
     'src/learn-loop-client.ts',
   ])('permits the exact browser client input %s', input => {
     expect(isAllowedClientInput(input)).toBe(true)
