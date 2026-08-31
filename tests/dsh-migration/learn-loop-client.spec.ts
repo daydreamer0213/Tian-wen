@@ -951,12 +951,15 @@ describe('Learn Loop sidebar slot', () => {
     expect(applied).toEqual([])
   })
 
-  it('registers one localized footer action and disposes the slot and dictionaries', () => {
+  it('keeps the localized footer action and registers one conversation input dock', () => {
     let dispose: (() => void) | undefined
     const unregisterSlot = vi.fn()
+    const unregisterDock = vi.fn()
     const unregisterZh = vi.fn()
     const unregisterEn = vi.fn()
-    const register = vi.fn(() => unregisterSlot)
+    const register = vi.fn()
+      .mockReturnValueOnce(unregisterSlot)
+      .mockReturnValueOnce(unregisterDock)
     const registerLocale = vi.fn()
       .mockReturnValueOnce(unregisterZh)
       .mockReturnValueOnce(unregisterEn)
@@ -993,15 +996,21 @@ describe('Learn Loop sidebar slot', () => {
     expect(Object.keys(registerLocale.mock.calls[0]![2] as object).sort()).toEqual(
       Object.keys(registerLocale.mock.calls[1]![2] as object).sort(),
     )
-    expect(register).toHaveBeenCalledTimes(1)
-    expect(register).toHaveBeenCalledWith({
+    expect(register).toHaveBeenCalledTimes(2)
+    expect(register).toHaveBeenNthCalledWith(1, {
       name: 'sidebar.footer.action',
       id: 'tianwen-learn-loop',
       order: 20,
     }, expect.any(Function))
+    expect(register).toHaveBeenNthCalledWith(2, {
+      name: 'conversation.input.dock',
+      id: 'tianwen-conversation-goal-feedback',
+      order: 100,
+    }, expect.any(Function))
 
     dispose?.()
     expect(unregisterSlot).toHaveBeenCalledOnce()
+    expect(unregisterDock).toHaveBeenCalledOnce()
     expect(unregisterZh).toHaveBeenCalledOnce()
     expect(unregisterEn).toHaveBeenCalledOnce()
   })

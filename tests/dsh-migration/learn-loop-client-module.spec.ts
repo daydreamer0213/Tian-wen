@@ -21,6 +21,7 @@ function isElement(value: unknown): value is ClientElement {
 
 class ClientComponentRuntime {
   private readonly hooks = new Map<Function, unknown[]>()
+  private readonly effectCleanups = new Set<() => void>()
   private currentHooks: unknown[] | undefined
   private cursor = 0
 
@@ -29,9 +30,23 @@ class ClientComponentRuntime {
       this.cursor += 1
       return callback
     },
-    useEffect: (effect: () => void | (() => void)): void => {
-      this.cursor += 1
-      effect()
+    useEffect: (effect: () => void | (() => void), dependencies?: readonly unknown[]): void => {
+      const hooks = this.requireHooks()
+      const index = this.cursor++
+      const previous = hooks[index] as {
+        readonly dependencies: readonly unknown[] | undefined
+        readonly cleanup: (() => void) | undefined
+      } | undefined
+      const changed = dependencies === undefined || previous === undefined ||
+        dependencies.length !== previous.dependencies?.length ||
+        dependencies.some((dependency, dependencyIndex) =>
+          dependency !== previous.dependencies?.[dependencyIndex])
+      if (!changed) return
+      previous?.cleanup?.()
+      if (previous?.cleanup !== undefined) this.effectCleanups.delete(previous.cleanup)
+      const cleanup = effect()
+      hooks[index] = { dependencies, cleanup }
+      if (cleanup !== undefined) this.effectCleanups.add(cleanup)
     },
     useRef: <T>(initial: T): { current: T } => {
       const hooks = this.requireHooks()
@@ -93,6 +108,11 @@ class ClientComponentRuntime {
         children: this.render(value.props.children),
       },
     }
+  }
+
+  unmount(): void {
+    for (const cleanup of this.effectCleanups) cleanup()
+    this.effectCleanups.clear()
   }
 
   private requireHooks(): unknown[] {
@@ -335,10 +355,15 @@ function loadClientModule(input: {
   readonly learningClues?: ReturnType<typeof vi.fn>
   readonly open?: ReturnType<typeof vi.fn>
   readonly locale?: TestLocale
+  readonly setTimeout?: typeof setTimeout
 }) {
   const runtime = new ClientComponentRuntime()
   let exports: { apply(ctx: unknown): void } | undefined
-  let slot: ((props: { readonly wide: boolean }) => unknown) | undefined
+  let sidebarSlot: ((props: { readonly wide: boolean }) => unknown) | undefined
+  let dockSlot: ((props: {
+    readonly session: { readonly sessionId: string }
+    readonly input: Record<string, never>
+  }) => unknown) | undefined
   const open = input.open ?? vi.fn()
   const window = {
     __ModuleLoader__: {
@@ -358,7 +383,7 @@ function loadClientModule(input: {
     {
       window,
       crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
-      AbortController, AbortSignal, console, setTimeout, clearTimeout,
+      AbortController, AbortSignal, console, setTimeout: input.setTimeout ?? setTimeout, clearTimeout,
     },
   )
   if (exports === undefined) throw new Error('client module did not register')
@@ -376,16 +401,22 @@ function loadClientModule(input: {
     sessions: { list: input.list, open },
     slots: {
       inject: (_name: string, callback: () => unknown) => callback(),
-      register: (_options: unknown, component: typeof slot) => {
-        slot = component
+      register: (options: { readonly name: string }, component: typeof sidebarSlot) => {
+        if (options.name === 'sidebar.footer.action') sidebarSlot = component
+        if (options.name === 'conversation.input.dock') dockSlot = component as typeof dockSlot
         return () => undefined
       },
     },
   })
-  if (slot === undefined) throw new Error('sidebar action was not registered')
+  if (sidebarSlot === undefined) throw new Error('sidebar action was not registered')
   return {
     open,
-    render: () => runtime.render(slot!({ wide: true })),
+    render: () => runtime.render(sidebarSlot!({ wide: true })),
+    renderDock: (sessionId: string) => {
+      if (dockSlot === undefined) throw new Error('conversation input dock was not registered')
+      return runtime.render(dockSlot({ session: { sessionId }, input: {} }))
+    },
+    unmount: () => runtime.unmount(),
   }
 }
 
@@ -429,6 +460,91 @@ async function openListedGoal(render: () => unknown, objective: string): Promise
 }
 
 describe('Learn Loop compiled DSH client module', () => {
+  it('refreshes the conversation dock on mount and coalesces snapshot invalidations without timers', async () => {
+    const summary = {
+      schemaVersion: 'tianwen.long-goal-summary.v3',
+      id: continuousStatus.goal.id,
+      objective: continuousStatus.goal.objective,
+      phase: continuousStatus.goal.phase,
+      revision: continuousStatus.goal.revision,
+      completedTasks: continuousStatus.goal.completedTasks,
+      abandonedTasks: continuousStatus.goal.abandonedTasks,
+      totalTasks: continuousStatus.goal.totalTasks,
+      currentTaskId: continuousStatus.currentTaskId,
+      updatedAt: 1,
+      control: continuousStatus.control,
+    } as const
+    const list = createSessionList({ current: 'control-session', byId: {} })
+    let resolveList: ((value: unknown) => void) | undefined
+    let resolveStatus: ((value: unknown) => void) | undefined
+    const firstList = new Promise<unknown>(resolve => { resolveList = resolve })
+    const firstStatus = new Promise<unknown>(resolve => { resolveStatus = resolve })
+    let listCalls = 0
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'list') {
+        listCalls += 1
+        return listCalls === 1 ? firstList : { ok: true, value: { goals: [] } }
+      }
+      if (endpoint === 'status') return firstStatus
+      throw new Error(`unexpected endpoint ${endpoint}`)
+    }) }
+    const timers = vi.fn()
+    const client = loadClientModule({ list, rpc, setTimeout: timers as typeof setTimeout })
+
+    client.renderDock('control-session')
+    list.set({ current: 'control-session', byId: {} })
+    client.renderDock('control-session')
+    client.renderDock('control-session')
+    expect(rpc.call.mock.calls.filter(call => call[1] === 'list')).toHaveLength(1)
+
+    resolveList?.({ ok: true, value: { goals: [summary] } })
+    await flushClient()
+    expect(rpc.call.mock.calls.filter(call => call[1] === 'status')).toHaveLength(1)
+    resolveStatus?.({ ok: true, value: { status: continuousStatus } })
+    await flushClient()
+
+    expect(rpc.call.mock.calls.filter(call => call[1] === 'list')).toHaveLength(2)
+    expect(timers).not.toHaveBeenCalled()
+  })
+
+  it('aborts old conversation dock work on Session switch and unmount, rejecting late responses', async () => {
+    const list = createSessionList({ current: 'control-session', byId: {} })
+    let resolveOld: ((value: unknown) => void) | undefined
+    let oldSignal: AbortSignal | undefined
+    const oldList = new Promise<unknown>(resolve => { resolveOld = resolve })
+    const rpc = { call: vi.fn(async (_channel: string, endpoint: string, _payload: unknown, signal: AbortSignal) => {
+      if (endpoint !== 'list') throw new Error(`unexpected endpoint ${endpoint}`)
+      if (oldSignal === undefined) {
+        oldSignal = signal
+        return oldList
+      }
+      return { ok: true, value: { goals: [] } }
+    }) }
+    const client = loadClientModule({ list, rpc })
+
+    client.renderDock('control-session')
+    client.renderDock('other-session')
+    expect(oldSignal?.aborted).toBe(true)
+    resolveOld?.({ ok: true, value: { goals: [summaryV1] } })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(rpc.call.mock.calls.filter(call => call[1] === 'status')).toHaveLength(0)
+    expect(text(client.renderDock('other-session'))).not.toContain(summaryV1.objective)
+
+    let unmountSignal: AbortSignal | undefined
+    const unmountClient = loadClientModule({
+      list,
+      rpc: { call: vi.fn(async (_channel: string, endpoint: string, _payload: unknown, signal: AbortSignal) => {
+        if (endpoint !== 'list') throw new Error(`unexpected endpoint ${endpoint}`)
+        unmountSignal = signal
+        return new Promise(() => undefined)
+      }) },
+    })
+    unmountClient.renderDock('control-session')
+    unmountClient.unmount()
+    expect(unmountSignal?.aborted).toBe(true)
+  })
+
   it('renders one active locale and switches copy without another RPC', async () => {
     const list = createSessionList({ current: undefined, byId: {} })
     const locale = new TestLocale('zh')
