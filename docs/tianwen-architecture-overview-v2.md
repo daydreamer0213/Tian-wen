@@ -1,8 +1,8 @@
 # 天问架构总览 v2
 
-**更新：** 2026-08-30
+**更新：** 2026-08-31
 
-**状态：** 当前产品架构的首要阅读入口；自然开发能力取证已收口，项目转入普通产品开发
+**状态：** 当前产品架构和能力状态的首要阅读入口；Runtime `0.1.5` 已进入 `main`
 
 **一句话定义：**
 
@@ -12,14 +12,21 @@
 
 如果只想快速把握项目，先读“当前状态”和第 1–3、9–10 节即可；其余章节用于实现时消除歧义。
 
-## 当前状态（2026-08-30）
+## 当前状态（2026-08-31）
 
-Goal-first 长期目标主线已经进入正式产品，而不是待实现设计：普通 Web/Desktop
-入口只让用户填写长期目标、可选背景和成功标准；天问使用同一个稳定 Planner Session
-自动维护未来 Task，并让每个已接纳 Task 在独立 DSH Session 中执行。用户可以补充方向，
-但不需要手工填写 Task 或每项轮数。v1 手工计划仅作为兼容/高级路径保留。
+判断“已经实现”还是“仍待开发”时，权威顺序固定为：当前 `main` 源码与最新发布交接、本文
+“当前状态”、功能运行交接、设计与实施计划。设计和计划用于保存当时的约束与执行顺序，不是
+发布后的待办列表；计划中保留的未勾选框、历史运行的 `incomplete`，以及当时尚未通过的门，
+都不能覆盖后来已经完成的实现、合并和 exact-main CI。历史证据本身仍保持原分类，不因发布而
+改写成一次成功的自然运行。
 
-正式安装产品已经用 configured DeepSeek 完成过一个三 Task 长期目标；当前 Desktop
+Goal-first 长期目标主线已经进入正式产品，而不是待实现设计。当前默认入口是普通 DSH
+Web/Desktop 对话中的 `/goal <目标>`；用户无需打开天问面板，也不需要手工填写 Task 或每项轮数。
+天问使用同一个稳定 Planner Session 自动维护未来 Task，并让每个已接纳 Task 在独立 DSH
+Session 中执行。原“长期目标”面板只作为兼容/高级历史入口保留；从该面板创建时也只填写目标、
+可选背景和成功标准，不恢复手工 Task 或轮数。
+
+正式安装产品已经用 configured DeepSeek 完成过一个三 Task 连续 Goal；可选 Desktop 面板
 详情进一步按“当前工作、已完成、接下来、已放弃”展示权威状态，并把主操作明确为
 “继续规划、开始下一步或继续当前工作”。该界面来自与普通 `dsh web` 相同的
 Runtime 插件，Desktop 不拥有第二套 Goal 引擎。
@@ -64,9 +71,11 @@ Planner Turn。用户可在控制对话中自然补充方向，模型通过受�
 [`设计`](superpowers/specs/2026-08-30-tianwen-goal-first-planning-design.md)、
 [`真实执行 handoff`](operations/tianwen-goal-first-task-execution-handoff.md) 和
 [`Desktop UX handoff`](operations/tianwen-goal-first-desktop-ux-handoff.md)，以及
-[`Task feedback handoff`](operations/tianwen-goal-task-feedback-handoff.md)；当前发布更新边界见
-[`Runtime 0.1.2 release handoff`](operations/tianwen-runtime-0.1.2-release-handoff.md)，当前连续 Goal
-发布实现边界见 [`implementation plan`](superpowers/plans/2026-08-30-tianwen-dsh-native-continuous-goal.md)，上一版发布边界见
+[`Task feedback handoff`](operations/tianwen-goal-task-feedback-handoff.md)；当前发布边界见
+[`Runtime 0.1.5 release handoff`](operations/tianwen-runtime-0.1.5-release-handoff.md)，连续 Goal 的
+历史自然运行与修复证据见
+[`continuous Goal handoff`](operations/tianwen-dsh-native-continuous-goal-handoff.md)，已完成的执行顺序见
+[`implementation plan`](superpowers/plans/2026-08-30-tianwen-dsh-native-continuous-goal.md)。上一版发布边界见
 [`Runtime 0.1.1 release handoff`](operations/tianwen-runtime-release-identity-handoff.md)，线索可见性见
 [`Learning clue inbox handoff`](operations/tianwen-learning-clue-inbox-handoff.md)，单次分析边界见
 [`Learning clue analysis handoff`](operations/tianwen-learning-clue-analysis-handoff.md)。以下

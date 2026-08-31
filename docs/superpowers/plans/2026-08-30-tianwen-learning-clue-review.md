@@ -1,5 +1,7 @@
 # Tianwen learning clue review implementation plan
 
+**Status:** implemented and retained in Tianwen Runtime `0.1.5`; historical plan, not current backlog.
+
 **Goal:** Let the user remove an inspected analysis clue from the default inbox
 without claiming the issue was fixed or mutating governed learning state.
 

@@ -1,5 +1,9 @@
 # Tianwen Result-Aware Replanning Natural Task Handoff
 
+**Current status:** this `task-passed` result and its implementation are retained in Runtime `0.1.5`.
+The evidence below remains the historical natural-task result; the current release status is recorded
+separately in the Runtime `0.1.5` release handoff.
+
 ## Task result
 
 The result-aware replanning natural task is `task-passed`.

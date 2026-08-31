@@ -1,7 +1,7 @@
 # Tianwen Runtime 0.1.2 release design
 
 **Date:** 2026-08-30
-**Status:** frozen for implementation
+**Status:** completed historical `0.1.2` release; superseded by Runtime `0.1.5`
 
 ## Product problem
 

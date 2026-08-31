@@ -2,7 +2,13 @@
 
 Date: 2026-08-30
 
-Status: accepted product direction, frozen for implementation
+Status: implemented on `main` and released locally in Tianwen Runtime `0.1.5`
+
+> Historical design authority. This document records the frozen product decision and constraints.
+> It is not a current implementation backlog. Current release status is recorded in
+> [`tianwen-runtime-0.1.5-release-handoff.md`](../../operations/tianwen-runtime-0.1.5-release-handoff.md);
+> the first natural run and its post-run fixes remain separately classified in
+> [`tianwen-dsh-native-continuous-goal-handoff.md`](../../operations/tianwen-dsh-native-continuous-goal-handoff.md).
 
 ## 1. Decision
 

@@ -4,6 +4,19 @@
 **Result:** local product path passed with a retained Desktop evidence-capture
 gap; no external release action was taken
 
+## Main integration closure
+
+- Final merged `main` SHA: `5ac340a06729d861c9db2a1b321199694628382d`.
+- `origin/main` was pushed to the same exact SHA.
+- GitHub Actions run
+  [`33357950429`](https://github.com/daydreamer0213/Tian-wen/actions/runs/33357950429)
+  completed with conclusion `success` for exact head SHA `5ac340a06729d861c9db2a1b321199694628382d`.
+- Exact-main jobs `python`, `typescript`, `installer-windows`, and `desktop-windows` all completed
+  with conclusion `success`.
+- This closes the local Runtime `0.1.5` implementation and release-integration stage. It does not
+  claim an npm publish, Git tag, GitHub Release, installer upload, external DSH change, or a second
+  natural Provider run.
+
 ## Product result
 
 - Candidate source SHA: `8d5536b32fd427e6385165eb200089ee3a989106`.

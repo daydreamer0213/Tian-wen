@@ -4,12 +4,17 @@
 
 天问是一个面向长时间运行 Agent、可审计的学习控制面。
 
-**研究预览；Stage 7 已完成。** DSH 0.1.1-rc.2 是当前精确支持的 Agent Runtime。普通产品
-入口以长期 Goal 为起点：用户只需填写目标、可选背景和成功标准；天问使用稳定的
-Planner Session 自动维护后续 Task，每个已接纳 Task 在自己的 DSH
-Session 中执行。用户可以随时补充方向、要求重新规划，并在 Task 完成或放弃后提供反馈。
-天问复用 DSH 的模型、工具和运行时，不替换正在运行的 Agent，也不热切换
-当前 Run。
+**当前产品快照：Runtime 0.1.5；Stage 7 已完成。** DSH 0.1.1-rc.2 是当前精确支持的
+Agent Runtime。普通入口已经内化到 DSH Web/Desktop 对话：用户输入 `/goal <长期目标>` 即可
+启动，不需要打开天问面板，也不需要填写 Task 或执行轮数。天问使用稳定的 Planner Session
+自动维护后续 Task，每个已接纳 Task 在自己的 DSH Session 中执行。用户可在同一对话中自然
+补充方向、纠偏、暂停或恢复；DSH 原生停止按钮也会暂停连续 Goal。天问复用 DSH 的模型、
+工具和运行时，不替换正在运行的 Agent，也不热切换当前 Run。
+
+判断一项能力当前是否已经实现时，以[架构总览的“当前状态”](docs/tianwen-architecture-overview-v2.md#当前状态2026-08-31)、
+[Runtime 0.1.5 发布交接](docs/operations/tianwen-runtime-0.1.5-release-handoff.md)和当前 `main` 源码为准。
+设计、实施计划及早期自然运行交接保留历史决策和证据；其中未勾选的步骤或当时的“下一道门”
+不得反向覆盖较新的发布状态。
 
 “长期目标”弹窗也会汇总由 Task 反馈形成的改进线索，显示来源 Goal、Task、时间和重复次数。
 用户可以明确点击“分析一次”，让当前配置模型在一个普通 DSH Session 中读取私密反馈并给出

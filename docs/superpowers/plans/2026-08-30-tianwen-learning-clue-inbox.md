@@ -1,5 +1,7 @@
 # Tianwen learning clue inbox implementation plan
 
+**Status:** implemented and retained in Tianwen Runtime `0.1.5`; historical plan, not current backlog.
+
 ## Goal
 
 Make existing Goal-first Learning Tickets visible as safe, source-linked

@@ -2,6 +2,10 @@
 
 Date: 2026-08-30
 
+**Status:** implemented and retained in Tianwen Runtime `0.1.5`. This is a frozen historical plan,
+not the current backlog. See the
+[`result-aware replanning handoff`](../../operations/tianwen-result-aware-replanning-handoff.md).
+
 ## Task 1: Extract one anchored settled-Task result
 
 - Add RED tests for complete, blocked, wrong Goal, later Turn, incomplete Turn,

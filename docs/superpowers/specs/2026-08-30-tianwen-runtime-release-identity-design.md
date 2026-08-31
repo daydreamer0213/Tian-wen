@@ -1,6 +1,6 @@
 # Tianwen Runtime release identity and Desktop Profile update design
 
-**Status:** approved implementation boundary
+**Status:** completed historical release-identity stage; current Runtime is `0.1.5`
 
 ## Product problem
 

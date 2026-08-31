@@ -2,7 +2,11 @@
 
 Date: 2026-08-30
 
-Status: accepted product direction, frozen for implementation
+Status: implemented and retained in Tianwen Runtime `0.1.5`
+
+> Historical design authority, not a current backlog. Product evidence is recorded in
+> [`tianwen-goal-first-planning-handoff.md`](../../operations/tianwen-goal-first-planning-handoff.md),
+> and the current release boundary is Runtime `0.1.5`.
 
 ## 1. Decision
 

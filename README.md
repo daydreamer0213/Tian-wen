@@ -4,13 +4,22 @@
 
 Tianwen is an auditable learning control plane for long-running agents.
 
-**Research preview; Stage 7 complete.** DSH 0.1.1-rc.2 is the exact supported
-Agent Runtime. The ordinary product starts from a long-running Goal: the user
-supplies only the goal, optional context, and success criteria. Tianwen
-uses one stable Planner Session to maintain future Tasks, while each accepted
-Task runs in its own DSH Session. The user can add guidance, request replanning,
-and give feedback after a Task is completed or abandoned. Tianwen reuses DSH
-models, tools, and runtime; it does not replace or hot-swap the running Agent.
+**Current product snapshot: Runtime 0.1.5; Stage 7 complete.** DSH 0.1.1-rc.2 is
+the exact supported Agent Runtime. The ordinary entry is now inside a DSH
+Web/Desktop conversation: `/goal <objective>` starts long-running work without
+opening a Tianwen panel or asking the user to author Tasks or round counts.
+Tianwen uses one stable Planner Session to maintain future Tasks, while each
+accepted Task runs in its own DSH Session. The user can guide, redirect, pause,
+or resume from the same conversation, and DSH's native stop control also pauses
+the continuous Goal. Tianwen reuses DSH models, tools, and runtime; it does not
+replace or hot-swap the running Agent.
+
+To decide whether a capability is implemented now, use the
+[Current status](docs/tianwen-architecture-overview-v2.md#当前状态2026-08-31),
+the [Runtime 0.1.5 release handoff](docs/operations/tianwen-runtime-0.1.5-release-handoff.md),
+and current `main` source. Designs, implementation plans, and earlier natural-run
+handoffs preserve historical decisions and evidence; unchecked plan steps or a
+historical "next gate" do not override a later release closure.
 
 The same Learn Loop dialog summarizes improvement clues created from Task
 feedback, including source Goal, Task, time, and recurrence count. A clue is

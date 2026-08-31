@@ -1,5 +1,7 @@
 # Tianwen learning clue analysis implementation plan
 
+**Status:** implemented and retained in Tianwen Runtime `0.1.5`; historical plan, not current backlog.
+
 **Goal:** Let a user explicitly open one durable ordinary DSH analysis Session
 for a visible improvement clue, without exposing private feedback through the
 browser RPC or promoting the clue into governed learning state.

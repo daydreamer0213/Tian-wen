@@ -1,5 +1,7 @@
 # Tianwen Runtime 0.1.2 release implementation plan
 
+**Status:** completed historical release plan; superseded by Runtime `0.1.5`.
+
 **Goal:** Give the post-`0.1.1` Learning Clue features one unique distributable
 identity and one supported upgrade path from exact Runtime `0.1.1`.
 

@@ -2,6 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** implemented and retained in Tianwen Runtime `0.1.5`. This frozen plan is not the
+current backlog; its unchecked boxes preserve the original execution text. See the
+[`Goal-first planning handoff`](../../operations/tianwen-goal-first-planning-handoff.md).
+
 **Goal:** Let an ordinary user state one long Goal, have Tianwen plan the next useful Tasks with the configured DSH Agent, continue each Task in its own DSH Session, and guide future planning without manually authoring Tasks or round limits.
 
 **Architecture:** Keep strict authored `tianwen.long-goal.v1` records unchanged and add a discriminated v2 record owned by Tianwen. A platform-independent service owns the state table; one stable DSH planner Session submits plans through an Agent-scoped typed tool, while existing DSH Goal/Session execution remains authoritative for each Task. Web/Desktop and installed CLI are adapters over that same service.

@@ -1,5 +1,10 @@
 # Tianwen Goal-First Planning Handoff
 
+**Current status:** this passed planning stage is implemented and retained in Runtime `0.1.5`.
+The “next product stage” language below records the boundary at the time of this handoff; subsequent
+Task completion, result-aware replanning, Desktop UX, and DSH-native continuous Goal work are now
+implemented and linked from the current architecture overview.
+
 ## Product result
 
 The Goal-first planning stage is `task-passed` for its frozen scope. The official
@@ -89,9 +94,9 @@ the same Turn; that is a local self-correction, not evidence of cross-task learn
 - No controlled Activity was created.
 - No external DSH repository was changed or pushed.
 
-## Remaining boundary
+## Historical stage boundary
 
-Goal-first planning, persistence, Task admission, and user guidance are now on the
-official installed-product path. The next product stage may drive admitted Tasks
-to completion and expose the same lifecycle more naturally in Desktop, but that
-work is not required to reinterpret this planning-stage result.
+Goal-first planning, persistence, Task admission, and user guidance entered the
+official installed-product path in this stage. Later stages drove admitted Tasks
+to completion and exposed the lifecycle through Desktop and ordinary DSH conversation.
+Those later results do not change this handoff's narrower planning-stage evidence.

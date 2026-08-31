@@ -1,5 +1,11 @@
 # Tianwen DSH-native Continuous Goal Handoff
 
+**Current status:** the implementation and post-run fixes described here were subsequently reviewed,
+merged to `main`, and included in Tianwen Runtime `0.1.5`. The natural-control acceptance below remains
+historically `incomplete` because that one Provider run is not rewritten or repeated. It is an evidence
+classification, not the current implementation status. Current release closure is recorded in
+[`tianwen-runtime-0.1.5-release-handoff.md`](tianwen-runtime-0.1.5-release-handoff.md).
+
 ## Product result
 
 The first installed-product continuous Goal run reached terminal `complete` through the ordinary
@@ -141,7 +147,7 @@ or a general model capability claim.
   used to infer cost.
 - No external DSH branch, package, or upstream repository was pushed or modified.
 
-## Known limitations and next gate
+## Known limitations and current evidence boundary
 
 - The post-run control-routing fix has deterministic coverage but intentionally has no second
   natural Provider run; repeating the same task would violate the frozen one-run evidence boundary.
@@ -149,5 +155,6 @@ or a general model capability claim.
   ambiguity and provides an authoritative compact status result. After the model invokes
   `goal_control`, that Turn ends deterministically; the product still does not add a second
   classifier or intercept every chat message.
-- The feature must still pass independent diff review, repository gates, controlled merge, and
-  exact-main CI before release closure.
+- The later Runtime `0.1.5` release passed independent review, controlled merge, and exact-main CI.
+  That release closure does not turn the earlier natural guidance failure into a natural success;
+  it proves that the post-run implementation reached the current released source boundary.

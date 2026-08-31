@@ -2,7 +2,11 @@
 
 Date: 2026-08-30
 
-Status: accepted product direction, frozen for implementation
+Status: implemented and retained in Tianwen Runtime `0.1.5`
+
+> Historical design authority, not a current backlog. The natural task and implementation result
+> are recorded in
+> [`tianwen-result-aware-replanning-handoff.md`](../../operations/tianwen-result-aware-replanning-handoff.md).
 
 ## Decision
 

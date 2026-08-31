@@ -2,6 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** implemented, reviewed, merged to `main`, and included in Tianwen Runtime `0.1.5`.
+
+> This is the frozen execution plan, not the current backlog. Its original unchecked boxes are
+> retained as historical plan text; they do not mean the feature is unimplemented. Use the
+> [`Runtime 0.1.5 release handoff`](../../operations/tianwen-runtime-0.1.5-release-handoff.md) for
+> release closure and the
+> [`continuous Goal handoff`](../../operations/tianwen-dsh-native-continuous-goal-handoff.md) for
+> the one-run natural evidence and post-run fixes.
+
 **Goal:** Make `/goal <objective>` in an ordinary DSH Web/Desktop conversation start and continuously progress a Tianwen Long Goal, while natural conversation and the native stop control can guide, pause, redirect, resume, and inspect it.
 
 **Architecture:** Register an Agent-scoped `goal` command that officially shadows DSH's global same-Session command without patching DSH. Add a strict v3 Long Goal record for the control Session and continuous mode, reuse the existing v2 Planner/Task/result-aware state machine, and add one serialized Host bridge from completed Task Goals to the existing Continue operation. Install one scoped control tool and prompt section only on bound control Agents; write no custom Session events and build no second UI.

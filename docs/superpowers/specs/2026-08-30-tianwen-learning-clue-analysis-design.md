@@ -1,7 +1,7 @@
 # Tianwen user-triggered learning clue analysis design
 
 **Date:** 2026-08-30
-**Status:** frozen for implementation
+**Status:** implemented and retained in Tianwen Runtime `0.1.5`; historical design authority
 
 ## Product problem
 

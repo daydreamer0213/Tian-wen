@@ -1,6 +1,6 @@
 # Tianwen learning clue inbox design
 
-**Status:** approved implementation boundary
+**Status:** implemented and retained in Tianwen Runtime `0.1.5`; historical design authority
 
 ## Product problem
 
