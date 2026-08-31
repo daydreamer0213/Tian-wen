@@ -160,6 +160,10 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
       name: runtimePackage, version: '0.1.5',
     })
+    writeJson(join(profileRoot(target), 'node_modules', '.modules.yaml'), {
+      packageManager: 'pnpm@11.20.0',
+      storeDir: 'D:\\DevData\\custom-pnpm-store\\v11',
+    })
     const child = fakeChild()
     const calls: unknown[] = []
     const runtimeTarball = 'D:\\Runtime Packs\\tianwen-runtime-bundle-0.1.6.tgz'
@@ -177,7 +181,10 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
       options: expect.objectContaining({ shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }),
     }])
     expect((calls[0] as { options: { env: NodeJS.ProcessEnv } }).options.env).toMatchObject({
-      ...process.env, DSH_HOME: target.dshHome, DSH_TELEMETRY_DISABLED: '1',
+      ...process.env,
+      DSH_HOME: target.dshHome,
+      DSH_TELEMETRY_DISABLED: '1',
+      PNPM_CONFIG_STORE_DIR: 'D:\\DevData\\custom-pnpm-store',
     })
   })
 

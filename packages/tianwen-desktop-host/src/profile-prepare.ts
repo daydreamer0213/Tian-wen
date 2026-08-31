@@ -1,6 +1,6 @@
 import { spawn as nodeSpawn } from 'node:child_process'
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import { dirname, isAbsolute, join, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import { resolveDesktopTarget, resolveKnownOldDesktopTarget } from './host.js'
 import type { DesktopBaseTarget, DesktopTarget } from './host.js'
 
@@ -104,6 +104,18 @@ function profileManifestWithoutRuntime(path: string): boolean {
   }
 }
 
+function profilePnpmStore(profileRoot: string): string | undefined {
+  try {
+    const metadata: unknown = JSON.parse(readFileSync(join(profileRoot, 'node_modules', '.modules.yaml'), 'utf8'))
+    if (metadata === null || typeof metadata !== 'object' || Array.isArray(metadata)) return undefined
+    const storeDir = (metadata as Record<string, unknown>).storeDir
+    if (typeof storeDir !== 'string' || !isAbsolute(storeDir)) return undefined
+    return /^v\d+$/u.test(basename(storeDir)) ? dirname(storeDir) : storeDir
+  } catch {
+    return undefined
+  }
+}
+
 export function inspectWebProfile(target: DesktopBaseTarget): WebProfileState {
   const profileRoot = join(target.dshHome, 'profiles', 'web')
   try {
@@ -144,6 +156,7 @@ function runRuntimePluginAdd(
   dependencies: { readonly spawn?: typeof import('node:child_process').spawn } = {},
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    const pnpmStore = profilePnpmStore(profileRoot)
     let child: ReturnType<typeof nodeSpawn>
     try {
       child = (dependencies.spawn ?? nodeSpawn)(target.nodeExecutable, [
@@ -151,7 +164,12 @@ function runRuntimePluginAdd(
         'plugin', '--profile', 'web', '--allow-build=koffi',
         'add', runtimeTarball,
       ], {
-        env: { ...process.env, DSH_HOME: target.dshHome, DSH_TELEMETRY_DISABLED: '1' },
+        env: {
+          ...process.env,
+          DSH_HOME: target.dshHome,
+          DSH_TELEMETRY_DISABLED: '1',
+          ...(pnpmStore === undefined ? {} : { PNPM_CONFIG_STORE_DIR: pnpmStore }),
+        },
         shell: false,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
