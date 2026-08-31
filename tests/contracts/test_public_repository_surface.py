@@ -49,7 +49,7 @@ def test_required_public_surface_and_positioning() -> None:
     assert "DSH" in readme_en
     assert "pnpm demo:research-preview" in readme_en
     assert "pnpm demo:explicit-correction" in readme_en
-    assert "Stage 7 complete" in readme_en
+    assert "Stage 7 remains complete" in readme_en
     assert "No naturally triggered product Candidate has passed a real" in readme_en
     assert "paired B/C evaluation yet." in readme_en
     assert "isolated Shadow" in readme_en
@@ -82,11 +82,11 @@ def test_bilingual_documents_share_the_proven_preview_facts() -> None:
         assert fact in readme_zh
 
     assert "read-only Evidence projection" in readme_en
-    assert "Stage 7 complete" in readme_en
+    assert "Stage 7 remains complete" in readme_en
     assert "single-user product evidence" in readme_en
     assert "0-external-Provider scripted full-chain fixture" in readme_en
     assert "Evidence 只读投影" in readme_zh
-    assert "Stage 7 已完成" in readme_zh
+    assert "Stage 7 仍已完成" in readme_zh
     assert "单用户产品证据" in readme_zh
     assert "0-external-Provider scripted 全链夹具" in readme_zh
     assert "带有具体说明的显式负面反馈可以创建持久化 Signal/Ticket。" in readme_zh
@@ -978,7 +978,7 @@ def test_architecture_lists_current_controlled_lifecycle_evidence_first() -> Non
     raw_architecture = architecture_path.read_text(encoding="utf-8")
     architecture = " ".join(raw_architecture.split())
 
-    assert "## 当前状态（2026-08-30）" in raw_architecture
+    assert "## 当前状态（2026-09-01）" in raw_architecture
     current_handoff = "tianwen-v0.1-controlled-real-activity-22-handoff.md"
     historical_activity_authorities = "Activity-01、Activity-02 和 Activity-03"
     assert current_handoff in architecture
