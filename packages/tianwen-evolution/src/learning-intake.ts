@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { normalize, resolve } from 'node:path'
 
 import type { Sha256Digest } from './ledger.js'
 
@@ -95,6 +96,8 @@ export interface LearningIntakeStatus
   readonly scopeKey: string
   readonly rating: 'positive' | 'negative'
   readonly feedbackFingerprint: Sha256Digest
+  /** Absent only for legacy history that cannot prove a Session lifecycle. */
+  readonly sessionLifecycleFingerprint?: Sha256Digest
   readonly recordedAt: string
 }
 
@@ -120,6 +123,8 @@ export interface LearningIntakeRecordedV2Event {
   readonly input: LearningIntakeInput
   readonly inputDigest: Sha256Digest
   readonly receipt: Omit<LearningIntakeReceipt, 'duplicate'>
+  /** Optional only when replaying events written before lifecycle fencing. */
+  readonly sessionLifecycleFingerprint?: Sha256Digest
   readonly supersedesFeedbackVersion?: string
   readonly analysisConsentRevision?: number
   readonly signal?: LearningSignal
@@ -129,7 +134,7 @@ export type LearningIntakeLedgerEvent =
   | LearningIntakeRecordedEvent
   | LearningIntakeRecordedV2Event
 
-export interface LearningFeedbackRetractedEvent {
+export interface LearningFeedbackRetractedV1Event {
   readonly schemaVersion: 'tianwen.learning-feedback-retracted.v1'
   readonly type: 'learning-feedback-retracted'
   readonly at: string
@@ -137,6 +142,20 @@ export interface LearningFeedbackRetractedEvent {
   readonly messageId: string
   readonly retractedFeedbackVersion: string
 }
+
+export interface LearningFeedbackRetractedV2Event {
+  readonly schemaVersion: 'tianwen.learning-feedback-retracted.v2'
+  readonly type: 'learning-feedback-retracted'
+  readonly at: string
+  readonly sessionId: string
+  readonly messageId: string
+  readonly retractedFeedbackVersion: string
+  readonly sessionLifecycleFingerprint: Sha256Digest
+}
+
+export type LearningFeedbackRetractedEvent =
+  | LearningFeedbackRetractedV1Event
+  | LearningFeedbackRetractedV2Event
 
 export interface LearningAnalysisConsentInput {
   readonly revision: number
@@ -211,6 +230,31 @@ export function learningFeedbackFingerprint(
   return sha256({
     rating,
     normalizedNote: note === undefined ? '' : normalizeLearningText(note),
+  })
+}
+
+/** Opaque identity for one persisted DSH Session lifecycle. */
+export function learningSessionLifecycleFingerprint(input: {
+  readonly sessionId: string
+  readonly createdAt: number
+  readonly cwd?: string
+}): Sha256Digest {
+  const sessionId = requireNonEmpty(input.sessionId, 'sessionId')
+  if (!Number.isSafeInteger(input.createdAt) || input.createdAt < 0) {
+    throw new TypeError('Session createdAt must be a non-negative safe integer')
+  }
+  let normalizedCwd: string | null = null
+  if (input.cwd !== undefined) {
+    if (typeof input.cwd !== 'string' || input.cwd.trim().length === 0) {
+      throw new TypeError('Session cwd must be a non-blank string')
+    }
+    normalizedCwd = normalize(resolve(input.cwd)).replaceAll('\\', '/')
+    if (process.platform === 'win32') normalizedCwd = normalizedCwd.toLowerCase()
+  }
+  return sha256({
+    sessionId,
+    createdAt: input.createdAt,
+    normalizedCwd,
   })
 }
 

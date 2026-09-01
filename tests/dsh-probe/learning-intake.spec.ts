@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   LedgerIntegrityError,
+  learningSessionLifecycleFingerprint,
   prepareLearningIntake,
   sha256,
   type LearningIntakeInput,
@@ -27,6 +28,8 @@ const base: LearningIntakeInput = {
   sessionDigest: `sha256:${'1'.repeat(64)}`,
   evidenceIds: [`sha256:${'2'.repeat(64)}`],
 }
+
+const SESSION_LIFECYCLE_FINGERPRINT = `sha256:${'3'.repeat(64)}` as const
 
 const fixtureRoots: string[] = []
 
@@ -79,6 +82,33 @@ describe('Tianwen learning intake domain', () => {
     expect(first.ticketId).toMatch(/^ticket:[a-f0-9]{64}$/)
   })
 
+  it('fingerprints the canonical Session lifecycle without exposing cwd', () => {
+    const rawCwd = resolve('private', 'workspace')
+    const canonical = learningSessionLifecycleFingerprint({
+      sessionId: 'session-lifecycle',
+      createdAt: 1,
+      cwd: join(rawCwd, '..', 'workspace'),
+    })
+
+    expect(canonical).toBe(learningSessionLifecycleFingerprint({
+      sessionId: 'session-lifecycle',
+      createdAt: 1,
+      cwd: rawCwd,
+    }))
+    expect(canonical).not.toBe(learningSessionLifecycleFingerprint({
+      sessionId: 'session-lifecycle',
+      createdAt: 2,
+      cwd: rawCwd,
+    }))
+    expect(canonical).not.toBe(learningSessionLifecycleFingerprint({
+      sessionId: 'session-lifecycle',
+      createdAt: 1,
+      cwd: resolve('private', 'other-workspace'),
+    }))
+    expect(canonical).toMatch(/^sha256:[0-9a-f]{64}$/u)
+    expect(canonical).not.toContain(rawCwd)
+  })
+
   it('merges only exact normalized corrections inside the same scope', () => {
     const first = prepareLearningIntake(base)
     const whitespaceVariant = prepareLearningIntake({
@@ -125,7 +155,10 @@ describe('Tianwen learning intake ledger', () => {
       clock: () => '2026-09-01T00:00:00.000Z',
     })
 
-    const receipt = ledger.recordLearningFeedbackRevision({ intake: base })
+    const receipt = ledger.recordLearningFeedbackRevision({
+      intake: base,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+    })
 
     expect(receipt).toMatchObject({
       decision: 'ticket-created',
@@ -135,6 +168,7 @@ describe('Tianwen learning intake ledger', () => {
       .toMatchObject({
         state: 'active',
         feedbackVersion: base.feedbackVersion,
+        sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
         signalId: receipt.signalId,
       })
     const lines = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
@@ -145,6 +179,7 @@ describe('Tianwen learning intake ledger', () => {
       schemaVersion: 'tianwen.learning-intake.v2',
       type: 'learning-intake-recorded',
       input: base,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
       receipt: {
         ingestionId: receipt.ingestionId,
       },
@@ -156,7 +191,10 @@ describe('Tianwen learning intake ledger', () => {
     const ledger = new EvolutionLedger(root, {
       clock: () => '2026-09-01T00:00:00.000Z',
     })
-    const first = ledger.recordLearningFeedbackRevision({ intake: base })
+    const first = ledger.recordLearningFeedbackRevision({
+      intake: base,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+    })
     const changed = {
       ...base,
       feedbackVersion: '22222222-2222-4222-8222-222222222222',
@@ -165,6 +203,7 @@ describe('Tianwen learning intake ledger', () => {
 
     const second = ledger.recordLearningFeedbackRevision({
       intake: changed,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
       supersedesFeedbackVersion: base.feedbackVersion,
     })
 
@@ -198,6 +237,7 @@ describe('Tianwen learning intake ledger', () => {
     })
     expect(ledger.recordLearningFeedbackRevision({
       intake: changed,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
       supersedesFeedbackVersion: base.feedbackVersion,
     })).toMatchObject({ duplicate: true })
     expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')
@@ -205,12 +245,22 @@ describe('Tianwen learning intake ledger', () => {
       .split('\n')).toHaveLength(2)
     expect(() => ledger.recordLearningFeedbackRevision({
       intake: { ...changed, note: 'Contradictory private note' },
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
       supersedesFeedbackVersion: base.feedbackVersion,
     })).toThrow(LedgerIntegrityError)
     expect(() => ledger.recordLearningFeedbackRevision({
       intake: changed,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
       supersedesFeedbackVersion: 'wrong-predecessor',
     })).toThrow(LedgerIntegrityError)
+    expect(() => ledger.recordLearningFeedbackRevision({
+      intake: {
+        ...changed,
+        feedbackVersion: '55555555-5555-4555-8555-555555555555',
+      },
+      sessionLifecycleFingerprint: `sha256:${'4'.repeat(64)}`,
+      supersedesFeedbackVersion: changed.feedbackVersion,
+    })).toThrow(/Session lifecycle/u)
 
     const positive = {
       ...base,
@@ -218,10 +268,14 @@ describe('Tianwen learning intake ledger', () => {
       rating: 'positive' as const,
       note: undefined,
     }
-    expect(() => ledger.recordLearningFeedbackRevision({ intake: positive }))
+    expect(() => ledger.recordLearningFeedbackRevision({
+      intake: positive,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+    }))
       .toThrow(LedgerIntegrityError)
     ledger.recordLearningFeedbackRevision({
       intake: positive,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
       supersedesFeedbackVersion: changed.feedbackVersion,
     })
     expect(ledger.getLearningIntakeStatus(base.sessionId, base.messageId))
@@ -240,19 +294,26 @@ describe('Tianwen learning intake ledger', () => {
     const ledger = new EvolutionLedger(root, {
       clock: () => '2026-09-01T00:00:00.000Z',
     })
-    const first = ledger.recordLearningFeedbackRevision({ intake: base })
+    const first = ledger.recordLearningFeedbackRevision({
+      intake: base,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+    })
     const other = {
       ...base,
       messageId: 'message-2',
       feedbackVersion: '22222222-2222-4222-8222-222222222222',
       note: 'PRESERVE tool feedback.',
     }
-    const second = ledger.recordLearningFeedbackRevision({ intake: other })
+    const second = ledger.recordLearningFeedbackRevision({
+      intake: other,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+    })
 
     expect(ledger.recordLearningFeedbackRetraction({
       sessionId: base.sessionId,
       messageId: base.messageId,
       retractedFeedbackVersion: base.feedbackVersion,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
     })).toEqual({ duplicate: false })
     expect(ledger.getLearningIntakeStatus(base.sessionId, base.messageId))
       .toMatchObject({ state: 'retracted', feedbackVersion: base.feedbackVersion })
@@ -273,6 +334,7 @@ describe('Tianwen learning intake ledger', () => {
       sessionId: base.sessionId,
       messageId: base.messageId,
       retractedFeedbackVersion: base.feedbackVersion,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
     })).toEqual({ duplicate: true })
     expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')
       .trimEnd()
@@ -281,12 +343,20 @@ describe('Tianwen learning intake ledger', () => {
       sessionId: base.sessionId,
       messageId: other.messageId,
       retractedFeedbackVersion: base.feedbackVersion,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
     })).toThrow(LedgerIntegrityError)
+    expect(() => ledger.recordLearningFeedbackRetraction({
+      sessionId: base.sessionId,
+      messageId: other.messageId,
+      retractedFeedbackVersion: other.feedbackVersion,
+      sessionLifecycleFingerprint: `sha256:${'4'.repeat(64)}`,
+    })).toThrow(/retraction disagrees/u)
 
     ledger.recordLearningFeedbackRetraction({
       sessionId: base.sessionId,
       messageId: other.messageId,
       retractedFeedbackVersion: other.feedbackVersion,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
     })
     expect(ledger.listLearningTickets()).toMatchObject([{
       ticketId: first.ticketId,
@@ -301,56 +371,95 @@ describe('Tianwen learning intake ledger', () => {
     expect(reloaded.listLearningIntakeStatuses(base.sessionId))
       .toEqual(ledger.listLearningIntakeStatuses(base.sessionId))
     expect(reloaded.listEvents().at(-1)).toMatchObject({
-      schemaVersion: 'tianwen.learning-feedback-retracted.v1',
+      schemaVersion: 'tianwen.learning-feedback-retracted.v2',
       type: 'learning-feedback-retracted',
       retractedFeedbackVersion: other.feedbackVersion,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
     })
   })
 
-  it('replays mixed v1 and v2 intakes in ledger order', () => {
+  it('replays legacy v2 history without guessing its Session lifecycle', () => {
     const root = ledgerRoot('revision-mixed')
     const ledger = new EvolutionLedger(root, {
       clock: () => '2026-09-01T00:00:00.000Z',
     })
     ledger.recordLearningIntake(base)
-    ledger.recordLearningFeedbackRevision({
+    const legacyRoot = ledgerRoot('legacy-v2-event')
+    const legacyLedger = new EvolutionLedger(legacyRoot, {
+      clock: () => '2026-09-01T00:00:01.000Z',
+    })
+    legacyLedger.recordLearningFeedbackRevision({
       intake: {
         ...base,
         feedbackVersion: '22222222-2222-4222-8222-222222222222',
         note: 'Second correction.',
       },
-      supersedesFeedbackVersion: base.feedbackVersion,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
     })
-    ledger.recordLearningIntake({
-      ...base,
-      feedbackVersion: '33333333-3333-4333-8333-333333333333',
-      rating: 'positive',
-      note: undefined,
+    const legacyEvent = JSON.parse(readFileSync(
+      join(legacyRoot, 'ledger.jsonl'),
+      'utf8',
+    )) as Record<string, unknown>
+    delete legacyEvent.sessionLifecycleFingerprint
+    legacyEvent.supersedesFeedbackVersion = base.feedbackVersion
+    writeFileSync(
+      join(root, 'ledger.jsonl'),
+      `${readFileSync(join(root, 'ledger.jsonl'), 'utf8')}${JSON.stringify(legacyEvent)}\n`,
+    )
+
+    const reloaded = new EvolutionLedger(root)
+    expect(reloaded.getLearningIntakeStatus(
+      base.sessionId,
+      base.messageId,
+    )).toMatchObject({
+      state: 'active',
+      feedbackVersion: '22222222-2222-4222-8222-222222222222',
     })
-    ledger.recordLearningFeedbackRevision({
+    expect(reloaded.getLearningIntakeStatus(
+      base.sessionId,
+      base.messageId,
+    )).not.toHaveProperty('sessionLifecycleFingerprint')
+    expect(() => reloaded.recordLearningFeedbackRevision({
       intake: {
         ...base,
-        feedbackVersion: '44444444-4444-4444-8444-444444444444',
-        note: 'Fourth correction.',
+        feedbackVersion: '33333333-3333-4333-8333-333333333333',
+        note: 'Must not supersede unknown lifecycle history.',
       },
-      supersedesFeedbackVersion: '33333333-3333-4333-8333-333333333333',
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+      supersedesFeedbackVersion: '22222222-2222-4222-8222-222222222222',
+    })).toThrow(/Session lifecycle/u)
+  })
+
+  it('replays a legacy v1 retraction without inventing lifecycle proof', () => {
+    const root = ledgerRoot('legacy-v1-retraction')
+    const ledger = new EvolutionLedger(root, {
+      clock: () => '2026-09-01T00:00:00.000Z',
     })
+    ledger.recordLearningIntake(base)
+    const legacyRetraction = {
+      schemaVersion: 'tianwen.learning-feedback-retracted.v1',
+      type: 'learning-feedback-retracted',
+      at: '2026-09-01T00:00:01.000Z',
+      sessionId: base.sessionId,
+      messageId: base.messageId,
+      retractedFeedbackVersion: base.feedbackVersion,
+    }
+    writeFileSync(
+      join(root, 'ledger.jsonl'),
+      `${readFileSync(join(root, 'ledger.jsonl'), 'utf8')}${JSON.stringify(legacyRetraction)}\n`,
+    )
 
     expect(new EvolutionLedger(root).getLearningIntakeStatus(
       base.sessionId,
       base.messageId,
     )).toMatchObject({
-      state: 'active',
-      feedbackVersion: '44444444-4444-4444-8444-444444444444',
+      state: 'retracted',
+      feedbackVersion: base.feedbackVersion,
     })
-    expect(new EvolutionLedger(root).listEvents()
-      .map(event => 'schemaVersion' in event ? event.schemaVersion : undefined))
-      .toEqual([
-        'tianwen.learning-intake.v1',
-        'tianwen.learning-intake.v2',
-        'tianwen.learning-intake.v1',
-        'tianwen.learning-intake.v2',
-      ])
+    expect(new EvolutionLedger(root).getLearningIntakeStatus(
+      base.sessionId,
+      base.messageId,
+    )).not.toHaveProperty('sessionLifecycleFingerprint')
   })
 
   it('records profile consent revisions with exact replay and reload', () => {
@@ -421,9 +530,13 @@ describe('Tianwen learning intake ledger', () => {
     })
     ledger.recordLearningFeedbackRevision({
       intake: base,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
       analysisConsentRevision: 1,
     })
-    expect(() => ledger.recordLearningFeedbackRevision({ intake: base }))
+    expect(() => ledger.recordLearningFeedbackRevision({
+      intake: base,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+    }))
       .toThrow(LedgerIntegrityError)
     ledger.recordLearningAnalysisConsent({
       revision: 2,
@@ -436,6 +549,7 @@ describe('Tianwen learning intake ledger', () => {
         messageId: 'message-2',
         feedbackVersion: '22222222-2222-4222-8222-222222222222',
       },
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
       analysisConsentRevision: 1,
     })).toThrow(LedgerIntegrityError)
     expect(JSON.stringify(ledger.listEvents().find(event =>

@@ -356,6 +356,229 @@ describe('Tianwen DSH Message Feedback bridge', () => {
     }
   })
 
+  it('fails closed when a restarted host sees a reused Session id lifecycle', async () => {
+    const root = evolutionRoot('restart-session-id-reuse')
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const sessionId = 'feedback-restart-session-id-reuse'
+    const first = completedSession(
+      sessionId,
+      ['message-old'],
+      'D:/private/old-workspace',
+      1,
+    )
+    sessions.add(first)
+    feedback.set(sessionId, [item({
+      messageId: 'message-old',
+      version: '16161616-1616-4616-8616-161616161616',
+      note: 'Old lifecycle correction.',
+    })])
+
+    const initial = await mountBridge(root, sessions, feedback)
+    expect(initial.ctx.tianwenEvolution
+      .getLearningIntakeStatus(sessionId, 'message-old'))
+      .toMatchObject({
+        state: 'active',
+        sessionLifecycleFingerprint: expect.stringMatching(
+          /^sha256:[0-9a-f]{64}$/u,
+        ),
+      })
+    await initial.ctx.fiber.dispose()
+
+    const replacement = completedSession(
+      sessionId,
+      ['message-old', 'message-new'],
+      'D:/private/new-workspace',
+      2,
+    )
+    sessions.add(replacement)
+    feedback.set(sessionId, [])
+    const restarted = await mountBridge(root, sessions, feedback)
+
+    try {
+      expect(restarted.ctx.tianwenEvolution
+        .getLearningIntakeStatus(sessionId, 'message-old')?.state)
+        .toBe('active')
+      await expect(restarted.bridge.reconcileSession(sessionId))
+        .resolves.toMatchObject({ state: 'pending' })
+
+      feedback.set(sessionId, [item({
+        messageId: 'message-old',
+        version: '17171717-1717-4717-8717-171717171717',
+        note: 'Must not supersede the old lifecycle correction.',
+        updatedAt: 3,
+      }), item({
+        messageId: 'message-new',
+        version: '21212121-2121-4121-8121-212121212121',
+        note: 'New lifecycle correction.',
+        updatedAt: 3,
+      })])
+      await expect(restarted.bridge.reconcileSession(sessionId))
+        .resolves.toMatchObject({ state: 'pending' })
+      expect(restarted.ctx.tianwenEvolution
+        .getLearningIntakeStatus(sessionId, 'message-old'))
+        .toMatchObject({
+          state: 'active',
+          feedbackVersion: '16161616-1616-4616-8616-161616161616',
+        })
+      expect(restarted.ctx.tianwenEvolution
+        .getLearningIntakeStatus(sessionId, 'message-new'))
+        .toBeUndefined()
+    } finally {
+      await restarted.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not guess the lifecycle of legacy feedback history', async () => {
+    const root = evolutionRoot('legacy-session-lifecycle')
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const session = completedSession(
+      'feedback-legacy-session-lifecycle',
+      ['message-1'],
+      'D:/private/legacy-workspace',
+      1,
+    )
+    sessions.add(session)
+    sessions.listed = []
+    feedback.set(String(session.id), [])
+    const mounted = await mountBridge(root, sessions, feedback)
+    mounted.ctx.tianwenEvolution.recordLearningIntake({
+      sessionId: String(session.id),
+      messageId: 'message-1',
+      feedbackVersion: '18181818-1818-4818-8818-181818181818',
+      rating: 'negative',
+      note: 'Legacy correction without lifecycle proof.',
+      scopeKey: 'profile:tianwen',
+      sessionDigest: `sha256:${'1'.repeat(64)}`,
+      evidenceIds: [],
+    })
+
+    try {
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'pending' })
+      expect(mounted.ctx.tianwenEvolution
+        .getLearningIntakeStatus(String(session.id), 'message-1'))
+        .toMatchObject({ state: 'active' })
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('fails closed when existing v2 statuses disagree on the Session lifecycle', async () => {
+    const root = evolutionRoot('inconsistent-session-lifecycle')
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const session = completedSession(
+      'feedback-inconsistent-session-lifecycle',
+      ['message-1', 'message-2'],
+      'D:/private/current-workspace',
+      1,
+    )
+    sessions.add(session)
+    sessions.listed = []
+    feedback.set(String(session.id), [])
+    const mounted = await mountBridge(root, sessions, feedback)
+    const intake = (messageId: string, feedbackVersion: string) => ({
+      sessionId: String(session.id),
+      messageId,
+      feedbackVersion,
+      rating: 'negative' as const,
+      note: `Correction for ${messageId}.`,
+      scopeKey: 'profile:tianwen',
+      sessionDigest: `sha256:${'1'.repeat(64)}` as const,
+      evidenceIds: [],
+    })
+    mounted.ctx.tianwenEvolution.recordLearningFeedbackRevision({
+      intake: intake(
+        'message-1',
+        '22222222-2222-4222-8222-222222222222',
+      ),
+      sessionLifecycleFingerprint: `sha256:${'a'.repeat(64)}`,
+    })
+    mounted.ctx.tianwenEvolution.recordLearningFeedbackRevision({
+      intake: intake(
+        'message-2',
+        '23232323-2323-4323-8323-232323232323',
+      ),
+      sessionLifecycleFingerprint: `sha256:${'b'.repeat(64)}`,
+    })
+
+    try {
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'pending' })
+      expect(mounted.ctx.tianwenEvolution
+        .listLearningIntakeStatuses(String(session.id)))
+        .toHaveLength(2)
+      expect(mounted.ctx.tianwenEvolution
+        .listLearningIntakeStatuses(String(session.id))
+        .every(status => status.state === 'active'))
+        .toBe(true)
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it.each([
+    ['the same millisecond', 0],
+    ['a later lifecycle', 1],
+  ] as const)(
+    'does not reuse an old Run scope for %s',
+    async (_label, createdAtOffset) => {
+      const root = evolutionRoot(`run-scope-lifecycle-${createdAtOffset}`)
+      const sessions = new SessionCatalog()
+      const feedback = new FeedbackCatalog()
+      const sessionId = `feedback-run-scope-lifecycle-${createdAtOffset}`
+      const first = completedSession(sessionId, [], 'D:/private/old-run', 1)
+      sessions.add(first)
+      sessions.listed = []
+      const mounted = await mountBridge(root, sessions, feedback)
+      mounted.ctx.tianwenEvolution.recordRunBinding({
+        goalRef: `goal:scope-lifecycle-${createdAtOffset}`,
+        taskRef: `task:scope-lifecycle-${createdAtOffset}`,
+        sessionId,
+        scopeKey: 'project:tianwen/capability:old-run-scope',
+        acceptanceContract: {
+          source: 'dsh-tool-result',
+          toolName: 'verify_scope_lifecycle',
+          notMetErrorCode: 'SCOPE_LIFECYCLE_NOT_MET',
+          gapDisposition: 'observe',
+        },
+      })
+      const bindingLine = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+        .trimEnd()
+        .split('\n')
+        .map(line => JSON.parse(line) as Record<string, unknown>)
+        .find(event => event.type === 'run-binding-recorded')
+      const bindingAt = Date.parse(String(bindingLine?.at))
+      const replacement = completedSession(
+        sessionId,
+        ['message-new'],
+        'D:/private/new-run',
+        bindingAt + createdAtOffset,
+      )
+      sessions.add(replacement)
+      feedback.set(sessionId, [item({
+        messageId: 'message-new',
+        version: createdAtOffset === 0
+          ? '19191919-1919-4919-8919-191919191919'
+          : '20202020-2020-4020-8020-202020202020',
+        note: 'Must not inherit the old Run scope.',
+        updatedAt: bindingAt + createdAtOffset + 1,
+      })])
+
+      try {
+        await expect(mounted.bridge.reconcileSession(sessionId))
+          .resolves.toMatchObject({ state: 'pending' })
+        expect(mounted.ctx.tianwenEvolution
+          .getLearningIntakeStatus(sessionId, 'message-new'))
+          .toBeUndefined()
+      } finally {
+        await mounted.ctx.fiber.dispose()
+      }
+    },
+  )
+
   it('reconciles the exact created Agent and exposes a read-only status trigger', async () => {
     const root = evolutionRoot('agent-created')
     const sessions = new SessionCatalog()

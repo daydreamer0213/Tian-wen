@@ -1,7 +1,11 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import type { Session } from '@deepseek-ai/dsh-session'
+import {
+  SESSION_FORMAT_VERSION,
+  SessionId,
+  type Session,
+} from '@deepseek-ai/dsh-session'
 import { mountCoreHarness } from '@tianwen/dsh-compat'
 import {
   sha256,
@@ -74,8 +78,15 @@ LongGoalStatusProjectionV2 {
 }
 
 function completedSession(terminalPhase: 'complete' | 'blocked' = 'complete'): Session {
+  const id = SessionId('session-1')
   return {
-    id: 'session-1',
+    id,
+    header: {
+      version: SESSION_FORMAT_VERSION,
+      id,
+      createdAt: 1,
+      cwd: 'D:/workspace',
+    },
     events: [
       { type: 'turn/start', seq: 0, data: { turn: 1 } },
       {

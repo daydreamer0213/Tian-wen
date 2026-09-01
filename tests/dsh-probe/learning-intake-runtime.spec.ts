@@ -229,6 +229,14 @@ describe('Tianwen runtime learning intake', () => {
         sessionUnchanged: true,
       })
       expect(handle!.agent.session.events).toEqual(before)
+      expect(ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(handle!.agent.session.id),
+        String(finalMessage.data.message.id),
+      )).toMatchObject({
+        sessionLifecycleFingerprint: expect.stringMatching(
+          /^sha256:[0-9a-f]{64}$/u,
+        ),
+      })
       expect(mounted.harness.ctx.tianwenEvolution.listLearningSignals())
         .toMatchObject([{
           sessionId: String(handle!.agent.session.id),

@@ -17,6 +17,7 @@ import type {
   SkillVersionId,
 } from '@tianwen/evolution'
 import {
+  learningSessionLifecycleFingerprint,
   prepareRunBinding,
   prepareRunSkillManifest,
 } from '@tianwen/evolution'
@@ -434,6 +435,13 @@ export class TianwenLearningIntakeService extends Service {
     const evidenceIds = this.ctx.tianwenEvidence.project(session)
       .map(record => record.evidenceId)
     const receipt = this.ctx.tianwenEvolution.recordLearningFeedbackRevision({
+      sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+        sessionId: String(session.id),
+        createdAt: session.header.createdAt,
+        ...(session.header.cwd === undefined
+          ? {}
+          : { cwd: session.header.cwd }),
+      }),
       intake: {
         sessionId: String(session.id),
         messageId: feedback.messageId,

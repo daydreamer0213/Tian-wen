@@ -333,7 +333,10 @@ describe('Tianwen append-only evolution ledger', () => {
     const bySession = first.ctx.tianwenEvolution
       .getRunBindingBySessionId(bindingInput.sessionId)
 
-    expect(bySession).toEqual(byRun)
+    expect(bySession).toMatchObject({
+      ...byRun,
+      recordedAt: '2026-08-14T00:00:00.000Z',
+    })
     expect(bySession).not.toBe(byRun)
     expect(bySession?.acceptanceContract).not.toBe(byRun?.acceptanceContract)
     expect(first.ctx.tianwenEvolution.listEvents()).toEqual(publicEventsBefore)
@@ -349,7 +352,10 @@ describe('Tianwen append-only evolution ledger', () => {
     try {
       expect(second.ctx.tianwenEvolution
         .getRunBindingBySessionId(bindingInput.sessionId))
-        .toEqual(byRun)
+        .toMatchObject({
+          ...byRun,
+          recordedAt: '2026-08-14T00:00:00.000Z',
+        })
       expect(second.ctx.tianwenEvolution.listEvents()).toEqual(publicEventsBefore)
     } finally {
       await second.ctx.fiber.dispose()

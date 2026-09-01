@@ -11,7 +11,10 @@ import {
   isAppendSurfaceEvent,
 } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence-jsonl'
-import { learningFeedbackFingerprint } from '@tianwen/evolution'
+import {
+  learningFeedbackFingerprint,
+  learningSessionLifecycleFingerprint,
+} from '@tianwen/evolution'
 import type {} from '@tianwen/runtime'
 
 const STARTUP_CONCURRENCY = 8
@@ -212,6 +215,19 @@ export class TianwenMessageFeedbackBridgeService extends Service {
     }
 
     const session = persistedSession(inspection)
+    const sessionLifecycleFingerprint = learningSessionLifecycleFingerprint({
+      sessionId,
+      createdAt: inspection.meta.createdAt,
+      ...(inspection.meta.cwd === undefined
+        ? {}
+        : { cwd: inspection.meta.cwd }),
+    })
+    const existingStatuses = this.ctx.tianwenEvolution
+      .listLearningIntakeStatuses(sessionId)
+    if (existingStatuses.some(status =>
+      status.sessionLifecycleFingerprint !== sessionLifecycleFingerprint)) {
+      throw new Error('feedback Session lifecycle does not match learning history')
+    }
     const consent = this.ctx.tianwenEvolution.getLearningAnalysisConsent()
     const scopeKey = this.scopeKey(sessionId, inspection)
     for (const [messageId, item] of byMessage) {
@@ -246,13 +262,13 @@ export class TianwenMessageFeedbackBridgeService extends Service {
     }
 
     const currentMessageIds = new Set(byMessage.keys())
-    for (const status of this.ctx.tianwenEvolution
-      .listLearningIntakeStatuses(sessionId)) {
+    for (const status of existingStatuses) {
       if (status.state === 'active' && !currentMessageIds.has(status.messageId)) {
         this.ctx.tianwenEvolution.recordLearningFeedbackRetraction({
           sessionId,
           messageId: status.messageId,
           retractedFeedbackVersion: status.feedbackVersion,
+          sessionLifecycleFingerprint,
         })
       }
     }
@@ -275,7 +291,18 @@ export class TianwenMessageFeedbackBridgeService extends Service {
   ): string {
     const binding = this.ctx.tianwenEvolution
       .getRunBindingBySessionId(sessionId)
-    if (binding !== undefined) return binding.scopeKey
+    if (binding !== undefined) {
+      const recordedAt = Date.parse(binding.recordedAt)
+      if (
+        !Number.isSafeInteger(inspection.meta.createdAt)
+        || inspection.meta.createdAt < 0
+        || !Number.isFinite(recordedAt)
+        || recordedAt <= inspection.meta.createdAt
+      ) {
+        throw new Error('Run binding does not prove the current Session lifecycle')
+      }
+      return binding.scopeKey
+    }
     const cwd = inspection.meta.cwd
     return typeof cwd === 'string' && cwd.trim().length > 0
       ? workspaceScope(cwd)

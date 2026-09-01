@@ -329,6 +329,10 @@ export type LedgerEvent =
   | ActivationFailedEvent
   | RecoveryFailedEvent
 
+export type RunBindingObservation = TianwenRunBinding & {
+  readonly recordedAt: string
+}
+
 export const PUBLIC_LEDGER_EVENT_TYPES = Object.freeze([
   'artifact-recorded',
   'evaluation-recorded',
@@ -681,7 +685,12 @@ function parseLearningEvent(
     value,
     ['schemaVersion', 'type', 'at', 'input', 'inputDigest', 'receipt'],
     v2
-      ? ['supersedesFeedbackVersion', 'analysisConsentRevision', 'signal']
+      ? [
+          'sessionLifecycleFingerprint',
+          'supersedesFeedbackVersion',
+          'analysisConsentRevision',
+          'signal',
+        ]
       : ['signal'],
   )
   if (!v2 && value.schemaVersion !== 'tianwen.learning-intake.v1') {
@@ -760,9 +769,16 @@ function parseLearningEvent(
       'analysisConsentRevision must be a positive integer',
     )
   }
+  const sessionLifecycleFingerprint =
+    value.sessionLifecycleFingerprint === undefined
+      ? undefined
+      : requireDigest(value.sessionLifecycleFingerprint)
   return {
     schemaVersion: 'tianwen.learning-intake.v2',
     ...base,
+    ...(sessionLifecycleFingerprint === undefined
+      ? {}
+      : { sessionLifecycleFingerprint }),
     ...(supersedesFeedbackVersion === undefined
       ? {}
       : { supersedesFeedbackVersion }),
@@ -776,6 +792,7 @@ function parseLearningFeedbackRetractionEvent(
   value: Record<string, unknown>,
   at: string,
 ): LearningFeedbackRetractedEvent {
+  const v2 = value.schemaVersion === 'tianwen.learning-feedback-retracted.v2'
   exactKeys(value, [
     'schemaVersion',
     'type',
@@ -783,13 +800,13 @@ function parseLearningFeedbackRetractionEvent(
     'sessionId',
     'messageId',
     'retractedFeedbackVersion',
+    ...(v2 ? ['sessionLifecycleFingerprint'] : []),
   ])
-  if (value.schemaVersion !== 'tianwen.learning-feedback-retracted.v1') {
+  if (!v2 && value.schemaVersion !== 'tianwen.learning-feedback-retracted.v1') {
     throw new LedgerIntegrityError('invalid learning retraction schema version')
   }
-  return {
-    schemaVersion: 'tianwen.learning-feedback-retracted.v1',
-    type: 'learning-feedback-retracted',
+  const common = {
+    type: 'learning-feedback-retracted' as const,
     at,
     sessionId: requireString(value.sessionId, 'sessionId'),
     messageId: requireString(value.messageId, 'messageId'),
@@ -798,6 +815,18 @@ function parseLearningFeedbackRetractionEvent(
       'retractedFeedbackVersion',
     ),
   }
+  return v2
+    ? {
+        schemaVersion: 'tianwen.learning-feedback-retracted.v2',
+        ...common,
+        sessionLifecycleFingerprint: requireDigest(
+          value.sessionLifecycleFingerprint,
+        ),
+      }
+    : {
+        schemaVersion: 'tianwen.learning-feedback-retracted.v1',
+        ...common,
+      }
 }
 
 function parseLearningAnalysisConsent(
@@ -1771,6 +1800,7 @@ type LearningRevisionWrite =
   | { readonly schemaVersion: 'tianwen.learning-intake.v1' }
   | {
     readonly schemaVersion: 'tianwen.learning-intake.v2'
+    readonly sessionLifecycleFingerprint: Sha256Digest
     readonly supersedesFeedbackVersion?: string
     readonly analysisConsentRevision?: number
   }
@@ -1784,6 +1814,7 @@ export class EvolutionLedger {
   readonly #events: LedgerEvent[] = []
   readonly #runBindings = new Map<TianwenRunId, TianwenRunBinding>()
   readonly #runIdBySession = new Map<string, TianwenRunId>()
+  readonly #runBindingRecordedAt = new Map<TianwenRunId, string>()
   readonly #learningIntakes = new Map<
     Sha256Digest,
     LearningIntakeLedgerEvent
@@ -1971,11 +2002,14 @@ export class EvolutionLedger {
     return binding === undefined ? undefined : clone(binding)
   }
 
-  getRunBindingBySessionId(sessionId: string): TianwenRunBinding | undefined {
+  getRunBindingBySessionId(sessionId: string): RunBindingObservation | undefined {
     const runId = this.#runIdBySession.get(sessionId)
     if (runId === undefined) return undefined
     const binding = this.#runBindings.get(runId)
-    return binding === undefined ? undefined : clone(binding)
+    const recordedAt = this.#runBindingRecordedAt.get(runId)
+    return binding === undefined || recordedAt === undefined
+      ? undefined
+      : clone({ ...binding, recordedAt })
   }
 
   recordRunSkillManifest(
@@ -3234,11 +3268,15 @@ export class EvolutionLedger {
 
   recordLearningFeedbackRevision(input: {
     readonly intake: LearningIntakeInput
+    readonly sessionLifecycleFingerprint: Sha256Digest
     readonly supersedesFeedbackVersion?: string
     readonly analysisConsentRevision?: number
   }): LearningIntakeReceipt {
     return this.#recordLearningRevision(input.intake, {
       schemaVersion: 'tianwen.learning-intake.v2',
+      sessionLifecycleFingerprint: requireDigest(
+        input.sessionLifecycleFingerprint,
+      ),
       ...(input.supersedesFeedbackVersion === undefined
         ? {}
         : { supersedesFeedbackVersion: input.supersedesFeedbackVersion }),
@@ -3267,6 +3305,8 @@ export class EvolutionLedger {
               !== revision.supersedesFeedbackVersion
             || existing.analysisConsentRevision
               !== revision.analysisConsentRevision
+            || existing.sessionLifecycleFingerprint
+              !== revision.sessionLifecycleFingerprint
           )
         )
       ) {
@@ -3321,6 +3361,7 @@ export class EvolutionLedger {
       : {
           schemaVersion: revision.schemaVersion,
           ...event,
+          sessionLifecycleFingerprint: revision.sessionLifecycleFingerprint,
           ...(revision.supersedesFeedbackVersion === undefined
             ? {}
             : {
@@ -3338,6 +3379,7 @@ export class EvolutionLedger {
     readonly sessionId: string
     readonly messageId: string
     readonly retractedFeedbackVersion: string
+    readonly sessionLifecycleFingerprint: Sha256Digest
   }): { readonly duplicate: boolean } {
     const parsed = {
       sessionId: requireString(input.sessionId, 'sessionId'),
@@ -3346,13 +3388,26 @@ export class EvolutionLedger {
         input.retractedFeedbackVersion,
         'retractedFeedbackVersion',
       ),
+      sessionLifecycleFingerprint: requireDigest(
+        input.sessionLifecycleFingerprint,
+      ),
     }
     const key = learningRetractionKey(parsed)
-    if (this.#learningRetractions.has(key)) {
+    const existing = this.#learningRetractions.get(key)
+    if (existing !== undefined) {
+      if (
+        existing.schemaVersion !== 'tianwen.learning-feedback-retracted.v2'
+        || existing.sessionLifecycleFingerprint
+          !== parsed.sessionLifecycleFingerprint
+      ) {
+        throw new LedgerIntegrityError(
+          'learning feedback retraction lifecycle is unknown or changed',
+        )
+      }
       return { duplicate: true }
     }
     this.#accept({
-      schemaVersion: 'tianwen.learning-feedback-retracted.v1',
+      schemaVersion: 'tianwen.learning-feedback-retracted.v2',
       type: 'learning-feedback-retracted',
       at: this.#now(),
       ...parsed,
@@ -5094,6 +5149,16 @@ export class EvolutionLedger {
         const current = this.#learningIntakeStatuses
           .get(event.input.sessionId)
           ?.get(event.input.messageId)
+        if (
+          event.sessionLifecycleFingerprint !== undefined
+          && current !== undefined
+          && current.sessionLifecycleFingerprint
+            !== event.sessionLifecycleFingerprint
+        ) {
+          throw new LedgerIntegrityError(
+            'learning feedback Session lifecycle disagrees with current revision',
+          )
+        }
         const expectedPredecessor = current?.state === 'active'
           ? current.feedbackVersion
           : undefined
@@ -5154,6 +5219,11 @@ export class EvolutionLedger {
       if (
         current?.state !== 'active'
         || current.feedbackVersion !== event.retractedFeedbackVersion
+        || (
+          event.schemaVersion === 'tianwen.learning-feedback-retracted.v2'
+          && current.sessionLifecycleFingerprint
+            !== event.sessionLifecycleFingerprint
+        )
       ) {
         throw new LedgerIntegrityError(
           'learning feedback retraction disagrees with current revision',
@@ -5295,6 +5365,7 @@ export class EvolutionLedger {
     if (event.type === 'run-binding-recorded') {
       this.#runBindings.set(event.binding.runId, event.binding)
       this.#runIdBySession.set(event.binding.sessionId, event.binding.runId)
+      this.#runBindingRecordedAt.set(event.binding.runId, event.at)
       return
     }
     if (event.type === 'run-skill-manifest-recorded') {
@@ -5518,6 +5589,13 @@ export class EvolutionLedger {
           event.input.rating,
           event.input.note,
         ),
+        ...(event.schemaVersion === 'tianwen.learning-intake.v2'
+          && event.sessionLifecycleFingerprint !== undefined
+          ? {
+              sessionLifecycleFingerprint:
+                event.sessionLifecycleFingerprint,
+            }
+          : {}),
         recordedAt: event.at,
         ...event.receipt,
       })

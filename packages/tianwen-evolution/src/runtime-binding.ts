@@ -16,6 +16,8 @@ import type {
   ChampionPointer,
   EvaluationRecord,
   PublicLedgerEvent,
+  RunBindingObservation,
+  Sha256Digest,
   TransitionAuthority,
 } from './ledger.js'
 import type {
@@ -237,6 +239,7 @@ export class TianwenEvolutionService extends Service {
 
   recordLearningFeedbackRevision(input: {
     readonly intake: LearningIntakeInput
+    readonly sessionLifecycleFingerprint: Sha256Digest
     readonly supersedesFeedbackVersion?: string
     readonly analysisConsentRevision?: number
   }): LearningIntakeReceipt {
@@ -248,6 +251,7 @@ export class TianwenEvolutionService extends Service {
     readonly sessionId: string
     readonly messageId: string
     readonly retractedFeedbackVersion: string
+    readonly sessionLifecycleFingerprint: Sha256Digest
   }): { readonly duplicate: boolean } {
     return this.formalWrite(() =>
       this.state().ledger.recordLearningFeedbackRetraction(input))
@@ -293,7 +297,7 @@ export class TianwenEvolutionService extends Service {
 
   getRunBindingBySessionId(
     sessionId: string,
-  ): TianwenRunBinding | undefined {
+  ): RunBindingObservation | undefined {
     return this.state().ledger.getRunBindingBySessionId(sessionId)
   }
 

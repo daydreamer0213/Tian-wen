@@ -54,11 +54,13 @@ export type {
   GovernanceErrorCode,
   PublicLedgerEventType,
   RecoveryFailedEvent,
+  RunBindingObservation,
   RuntimeBoundEvent,
   Sha256Digest,
 } from './ledger.js'
 export {
   learningFeedbackFingerprint,
+  learningSessionLifecycleFingerprint,
   prepareLearningIntake,
   sha256,
 } from './learning-intake.js'
