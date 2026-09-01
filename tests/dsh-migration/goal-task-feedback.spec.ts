@@ -153,7 +153,10 @@ function dependencies(
         duplicate: false, sessionUnchanged: true,
       }
     }),
-    getLearningIntakeStatus: vi.fn(() => consumed ? persisted : existing),
+    getLearningIntakeStatus: vi.fn((sessionId: string, messageId: string) =>
+      sessionId === 'session-1' && messageId === 'message-final'
+        ? consumed ? persisted : existing
+        : undefined),
   }
 }
 
@@ -184,6 +187,8 @@ describe('Goal-first settled Task feedback', () => {
         version: expect.stringMatching(/^goal-task:/u),
       }),
     )
+    expect(deps.getLearningIntakeStatus)
+      .toHaveBeenCalledWith('session-1', 'message-final')
     const lease = await vi.mocked(deps.openSession).mock.results[0]!.value
     expect(lease.release).toHaveBeenCalledOnce()
   })

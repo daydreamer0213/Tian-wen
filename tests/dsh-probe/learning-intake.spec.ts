@@ -196,19 +196,26 @@ describe('Tianwen learning intake ledger', () => {
     ])
   })
 
-  it('returns the latest sanitized intake status for a Session after reload', () => {
+  it('indexes sanitized intake statuses by Session and message after reload', () => {
     const root = ledgerRoot('status')
     const ledger = new EvolutionLedger(root, {
       clock: () => '2026-08-20T00:00:00.000Z',
     })
     ledger.recordLearningIntake({ ...base, rating: 'positive' })
-    const latest = ledger.recordLearningIntake({
+    const first = ledger.recordLearningIntake({
       ...base,
       feedbackVersion: '22222222-2222-4222-8222-222222222222',
       note: 'Keep the final answer concrete.',
     })
+    const second = ledger.recordLearningIntake({
+      ...base,
+      messageId: 'message-2',
+      feedbackVersion: '33333333-3333-4333-8333-333333333333',
+      rating: 'positive',
+      note: undefined,
+    })
 
-    expect(ledger.getLearningIntakeStatus(base.sessionId)).toEqual({
+    expect(ledger.getLearningIntakeStatus(base.sessionId, base.messageId)).toEqual({
       sessionId: base.sessionId,
       messageId: base.messageId,
       scopeKey: base.scopeKey,
@@ -219,16 +226,40 @@ describe('Tianwen learning intake ledger', () => {
       }),
       recordedAt: '2026-08-20T00:00:00.000Z',
       decision: 'ticket-created',
-      ingestionId: latest.ingestionId,
-      signalId: latest.signalId,
-      ticketId: latest.ticketId,
+      ingestionId: first.ingestionId,
+      signalId: first.signalId,
+      ticketId: first.ticketId,
     })
-    expect(JSON.stringify(ledger.getLearningIntakeStatus(base.sessionId)))
+    expect(ledger.getLearningIntakeStatus(base.sessionId, 'message-2')).toMatchObject({
+      messageId: 'message-2',
+      decision: 'no-case',
+      ingestionId: second.ingestionId,
+    })
+    expect(ledger.listLearningIntakeStatuses(base.sessionId)
+      .map(item => item.messageId)).toEqual(['message-1', 'message-2'])
+    expect(JSON.stringify(ledger.getLearningIntakeStatus(
+      base.sessionId,
+      base.messageId,
+    )))
       .not.toContain('Keep the final answer concrete.')
 
-    expect(new EvolutionLedger(root).getLearningIntakeStatus(base.sessionId))
-      .toEqual(ledger.getLearningIntakeStatus(base.sessionId))
-    expect(ledger.getLearningIntakeStatus('missing-session')).toBeUndefined()
+    const reloaded = new EvolutionLedger(root)
+    expect(reloaded.getLearningIntakeStatus(base.sessionId, base.messageId))
+      .toEqual(ledger.getLearningIntakeStatus(base.sessionId, base.messageId))
+    expect(reloaded.getLearningIntakeStatus(base.sessionId, 'message-2'))
+      .toEqual(ledger.getLearningIntakeStatus(base.sessionId, 'message-2'))
+    expect(reloaded.listLearningIntakeStatuses(base.sessionId))
+      .toEqual(ledger.listLearningIntakeStatuses(base.sessionId))
+    expect(ledger.getLearningIntakeStatus('missing-session', 'message-1'))
+      .toBeUndefined()
+    expect(ledger.getLearningIntakeStatus(base.sessionId, 'missing-message'))
+      .toBeUndefined()
+    expect(ledger.listLearningIntakeStatuses('missing-session')).toEqual([])
+
+    const firstList = ledger.listLearningIntakeStatuses(base.sessionId)
+    const secondList = ledger.listLearningIntakeStatuses(base.sessionId)
+    expect(secondList).not.toBe(firstList)
+    expect(secondList[0]).not.toBe(firstList[0])
   })
 
   it('returns the latest original feedback for an explicit Ticket after reload', () => {
@@ -259,7 +290,10 @@ describe('Tianwen learning intake ledger', () => {
     expect(ledger.getLearningTicketFeedback(created.ticketId!)).toEqual(expected)
     expect(new EvolutionLedger(root).getLearningTicketFeedback(created.ticketId!))
       .toEqual(expected)
-    expect(JSON.stringify(ledger.getLearningIntakeStatus('session-2')))
+    expect(JSON.stringify(ledger.getLearningIntakeStatus(
+      'session-2',
+      'message-2',
+    )))
       .not.toContain(expected.latest.note)
   })
 

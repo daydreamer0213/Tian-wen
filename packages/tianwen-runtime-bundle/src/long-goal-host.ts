@@ -2821,8 +2821,8 @@ export function mountTianwenLongGoalHost(
       },
       consume: (session, scopeKey, feedback) =>
         host.tianwenLearningIntake.consume(session, scopeKey, feedback),
-      getLearningIntakeStatus: sessionId =>
-        host.tianwenEvolution.getLearningIntakeStatus(sessionId),
+      getLearningIntakeStatus: (sessionId, messageId) =>
+        host.tianwenEvolution.getLearningIntakeStatus(sessionId, messageId),
     }
     const taskFeedbackOperations: TianwenGoalTaskFeedbackOperations = {
       status: input => readGoalTaskFeedbackStatus({

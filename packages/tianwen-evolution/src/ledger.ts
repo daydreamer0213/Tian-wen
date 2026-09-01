@@ -1638,6 +1638,10 @@ export class EvolutionLedger {
     Sha256Digest,
     LearningIntakeRecordedEvent
   >()
+  readonly #learningIntakeStatuses = new Map<
+    string,
+    Map<string, LearningIntakeStatus>
+  >()
   readonly #outcomeIntakes = new Map<
     Sha256Digest,
     OutcomeIntakeRecordedEvent
@@ -3113,22 +3117,18 @@ export class EvolutionLedger {
 
   getLearningIntakeStatus(
     sessionId: string,
+    messageId: string,
   ): LearningIntakeStatus | undefined {
-    const event = [...this.#learningIntakes.values()]
-      .findLast(candidate => candidate.input.sessionId === sessionId)
-    if (event === undefined) return undefined
-    return clone({
-      sessionId: event.input.sessionId,
-      messageId: event.input.messageId,
-      scopeKey: event.input.scopeKey,
-      rating: event.input.rating,
-      feedbackFingerprint: learningFeedbackFingerprint(
-        event.input.rating,
-        event.input.note,
-      ),
-      recordedAt: event.at,
-      ...event.receipt,
-    })
+    const status = this.#learningIntakeStatuses.get(sessionId)?.get(messageId)
+    return status === undefined ? undefined : clone(status)
+  }
+
+  /** Returns copied statuses in each message's first-recorded order. */
+  listLearningIntakeStatuses(
+    sessionId: string,
+  ): readonly LearningIntakeStatus[] {
+    return [...(this.#learningIntakeStatuses.get(sessionId)?.values() ?? [])]
+      .map(clone)
   }
 
   getLearningTicketFeedback(
@@ -5131,6 +5131,23 @@ export class EvolutionLedger {
     }
     if (event.type === 'learning-intake-recorded') {
       this.#learningIntakes.set(event.receipt.ingestionId, event)
+      let statuses = this.#learningIntakeStatuses.get(event.input.sessionId)
+      if (statuses === undefined) {
+        statuses = new Map()
+        this.#learningIntakeStatuses.set(event.input.sessionId, statuses)
+      }
+      statuses.set(event.input.messageId, {
+        sessionId: event.input.sessionId,
+        messageId: event.input.messageId,
+        scopeKey: event.input.scopeKey,
+        rating: event.input.rating,
+        feedbackFingerprint: learningFeedbackFingerprint(
+          event.input.rating,
+          event.input.note,
+        ),
+        recordedAt: event.at,
+        ...event.receipt,
+      })
       if (event.signal === undefined) {
         return
       }

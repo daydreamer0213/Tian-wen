@@ -232,8 +232,17 @@ export class TianwenEvolutionService extends Service {
       this.state().ledger.recordLearningIntake(input))
   }
 
-  getLearningIntakeStatus(sessionId: string): LearningIntakeStatus | undefined {
-    return this.state().ledger.getLearningIntakeStatus(sessionId)
+  getLearningIntakeStatus(
+    sessionId: string,
+    messageId: string,
+  ): LearningIntakeStatus | undefined {
+    return this.state().ledger.getLearningIntakeStatus(sessionId, messageId)
+  }
+
+  listLearningIntakeStatuses(
+    sessionId: string,
+  ): readonly LearningIntakeStatus[] {
+    return this.state().ledger.listLearningIntakeStatuses(sessionId)
   }
 
   getLearningTicketFeedback(

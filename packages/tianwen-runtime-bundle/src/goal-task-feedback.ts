@@ -64,6 +64,7 @@ export interface GoalTaskFeedbackDependencies {
   ) => RuntimeLearningIntakeReceipt
   readonly getLearningIntakeStatus: (
     sessionId: string,
+    messageId: string,
   ) => LearningIntakeStatus | undefined
 }
 
@@ -210,8 +211,6 @@ export async function readGoalTaskFeedbackStatus(input: {
       task.execution === null ||
       (task.phase !== 'complete' && task.phase !== 'abandoned')
     ) return undefined
-    const intake = dependencies.getLearningIntakeStatus(task.execution.sessionId)
-    if (intake === undefined || intake.scopeKey !== scopeKey) return undefined
     const lease = await dependencies.openSession(task.execution.sessionId)
     try {
       const messageId = finalAssistantMessageId(
@@ -219,9 +218,14 @@ export async function readGoalTaskFeedbackStatus(input: {
         task.execution.goalId,
         task.phase === 'complete' ? 'complete' : 'blocked',
       )
-      return messageId === intake.messageId
-        ? projectItem(task.id, intake)
-        : undefined
+      if (messageId === undefined) return undefined
+      const intake = dependencies.getLearningIntakeStatus(
+        task.execution.sessionId,
+        messageId,
+      )
+      return intake === undefined || intake.scopeKey !== scopeKey
+        ? undefined
+        : projectItem(task.id, intake)
     } finally {
       lease.release()
     }
@@ -264,7 +268,7 @@ export async function recordGoalTaskFeedback(input: {
       input.rating,
       input.note ?? undefined,
     )
-    const current = dependencies.getLearningIntakeStatus(sessionId)
+    const current = dependencies.getLearningIntakeStatus(sessionId, messageId)
     if (
       current !== undefined &&
       current.scopeKey === target.scopeKey &&
@@ -288,7 +292,7 @@ export async function recordGoalTaskFeedback(input: {
         feedbackFingerprint: requestedFingerprint,
       })}`,
     })
-    const persisted = dependencies.getLearningIntakeStatus(sessionId)
+    const persisted = dependencies.getLearningIntakeStatus(sessionId, messageId)
     if (
       persisted === undefined ||
       persisted.ingestionId !== receipt.ingestionId ||

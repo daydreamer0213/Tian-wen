@@ -92,6 +92,11 @@ export interface LearningIntakeStatus
   readonly recordedAt: string
 }
 
+export type MessageLearningState = ReadonlyMap<
+  string,
+  ReadonlyMap<string, LearningIntakeStatus>
+>
+
 export interface LearningIntakeRecordedEvent {
   readonly schemaVersion: 'tianwen.learning-intake.v1'
   readonly type: 'learning-intake-recorded'

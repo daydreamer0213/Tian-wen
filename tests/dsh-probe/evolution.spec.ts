@@ -640,6 +640,17 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
         sessionDigest: RECEIPT_A,
         evidenceIds: [RECEIPT_B],
       })
+      expect(evolution.getLearningIntakeStatus(
+        'session:runner-optional-correction',
+        'message:runner-optional-correction',
+      )).toMatchObject({
+        sessionId: 'session:runner-optional-correction',
+        messageId: 'message:runner-optional-correction',
+        ingestionId: correction.ingestionId,
+      })
+      expect(evolution.listLearningIntakeStatuses(
+        'session:runner-optional-correction',
+      )).toHaveLength(1)
       expect(evolution.getLearningTicketFeedback(correction.ticketId!)).toEqual({
         ticketId: correction.ticketId,
         scopeKey: 'project:tianwen/capability:runtime-composition',
