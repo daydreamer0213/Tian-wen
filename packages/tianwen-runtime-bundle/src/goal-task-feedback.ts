@@ -271,8 +271,18 @@ export async function recordGoalTaskFeedback(input: {
     const current = dependencies.getLearningIntakeStatus(sessionId, messageId)
     if (
       current !== undefined &&
-      current.scopeKey === target.scopeKey &&
-      current.messageId === messageId &&
+      (
+        current.state !== 'active' ||
+        current.sessionId !== sessionId ||
+        current.messageId !== messageId ||
+        current.scopeKey !== target.scopeKey ||
+        !isNonEmptyString(current.feedbackVersion)
+      )
+    ) {
+      throw new Error('Current Task feedback revision is not an active exact match')
+    }
+    if (
+      current !== undefined &&
       current.rating === input.rating &&
       current.feedbackFingerprint === requestedFingerprint
     ) {
@@ -291,6 +301,9 @@ export async function recordGoalTaskFeedback(input: {
         previousIngestionId: current?.ingestionId ?? null,
         feedbackFingerprint: requestedFingerprint,
       })}`,
+      ...(current === undefined
+        ? {}
+        : { supersedesFeedbackVersion: current.feedbackVersion }),
     })
     const persisted = dependencies.getLearningIntakeStatus(sessionId, messageId)
     if (

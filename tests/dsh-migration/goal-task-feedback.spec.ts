@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { Session } from '@deepseek-ai/dsh-session'
+import { mountCoreHarness } from '@tianwen/dsh-compat'
 import {
   sha256,
   type LearningIntakeStatus,
@@ -16,6 +19,7 @@ import type {
   LongGoalStatusProjectionV2,
   LongGoalStatusProjectionV3,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
+import { apply } from '../../packages/tianwen-runtime/src/index.js'
 
 const ROOTS = {
   stateRoot: 'D:/state',
@@ -115,8 +119,10 @@ function completedSession(terminalPhase: 'complete' | 'blocked' = 'complete'): S
 
 function intakeStatus(note = 'Keep the final answer concrete.'): LearningIntakeStatus {
   return {
+    state: 'active',
     sessionId: 'session-1',
     messageId: 'message-final',
+    feedbackVersion: 'goal-task:existing-revision',
     scopeKey: 'workspace:D:/workspace',
     rating: 'negative' as const,
     feedbackFingerprint: sha256({
@@ -243,6 +249,105 @@ describe('Goal-first settled Task feedback', () => {
     })
 
     expect(deps.consume).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['retracted', { ...intakeStatus(), state: 'retracted' as const }],
+    ['different-scope', {
+      ...intakeStatus(),
+      scopeKey: 'workspace:D:/other-workspace',
+    }],
+  ])('fails closed for a %s current revision instead of guessing its predecessor', async (_case, current) => {
+    const deps = dependencies(status(), current)
+
+    await expect(recordGoalTaskFeedback({
+      ...ROOTS,
+      longGoalId: 'tianwen-long-goal-feedback', taskId: 'task-1',
+      rating: 'negative', note: 'Keep the final answer concrete and cite evidence.',
+    }, deps)).rejects.toThrow(/current Task feedback revision/i)
+    expect(deps.consume).not.toHaveBeenCalled()
+  })
+
+  it('propagates a supersession conflict once without retrying against a guessed predecessor', async () => {
+    const deps = dependencies(status(), intakeStatus())
+    vi.mocked(deps.consume).mockImplementation(() => {
+      throw new Error('learning feedback supersession disagrees with current revision')
+    })
+
+    await expect(recordGoalTaskFeedback({
+      ...ROOTS,
+      longGoalId: 'tianwen-long-goal-feedback', taskId: 'task-1',
+      rating: 'negative', note: 'Keep the final answer concrete and cite evidence.',
+    }, deps)).rejects.toThrow(/supersession disagrees/i)
+    expect(deps.consume).toHaveBeenCalledOnce()
+  })
+
+  it('supersedes the active revision through the real Runtime host and keeps exact replay idempotent', async () => {
+    const evolutionRoot = mkdtempSync(resolve('.tianwen-stage2-task3-feedback-'))
+    const harness = await mountCoreHarness([])
+    await apply(harness.ctx, { evolutionRoot })
+    const deps: GoalTaskFeedbackDependencies = {
+      ...dependencies(),
+      consume: (session, scopeKey, snapshot) =>
+        harness.ctx.tianwenLearningIntake.consume(session, scopeKey, snapshot),
+      getLearningIntakeStatus: (sessionId, messageId) =>
+        harness.ctx.tianwenEvolution.getLearningIntakeStatus(
+          sessionId,
+          messageId,
+        ),
+    }
+    const input = {
+      ...ROOTS,
+      longGoalId: 'tianwen-long-goal-feedback',
+      taskId: 'task-1',
+      rating: 'negative' as const,
+      note: 'Keep the final answer concrete.',
+    }
+
+    try {
+      await expect(recordGoalTaskFeedback(input, deps)).resolves.toMatchObject({
+        duplicate: false,
+      })
+      const first = harness.ctx.tianwenEvolution.getLearningIntakeStatus(
+        'session-1',
+        'message-final',
+      )
+
+      await expect(recordGoalTaskFeedback({
+        ...input,
+        note: 'Keep the final answer concrete and cite the evidence.',
+      }, deps)).resolves.toMatchObject({ duplicate: false })
+      const second = harness.ctx.tianwenEvolution.getLearningIntakeStatus(
+        'session-1',
+        'message-final',
+      )
+
+      expect(first).toMatchObject({ state: 'active' })
+      expect(second).toMatchObject({ state: 'active' })
+      expect(second?.feedbackVersion).not.toBe(first?.feedbackVersion)
+      expect(harness.ctx.tianwenEvolution.listLearningSignals().map(signal => ({
+        feedbackVersion: 'feedbackVersion' in signal
+          ? signal.feedbackVersion
+          : undefined,
+        active: 'active' in signal ? signal.active : undefined,
+      }))).toEqual([
+        { feedbackVersion: first?.feedbackVersion, active: false },
+        { feedbackVersion: second?.feedbackVersion, active: true },
+      ])
+
+      await expect(recordGoalTaskFeedback({
+        ...input,
+        note: 'Keep the final answer concrete and cite the evidence.',
+      }, deps)).resolves.toMatchObject({ duplicate: true })
+      expect(harness.ctx.tianwenEvolution.listLearningSignals()).toHaveLength(2)
+      expect(harness.ctx.tianwenEvolution.getLearningIntakeStatus(
+        'session-1',
+        'message-final',
+      )?.feedbackVersion).toBe(second?.feedbackVersion)
+    } finally {
+      await harness.ctx.fiber.dispose()
+      rmSync(evolutionRoot, { recursive: true, force: true })
+    }
   })
 
   it('rebuilds a sanitized receipt list without exposing the correction note', async () => {
