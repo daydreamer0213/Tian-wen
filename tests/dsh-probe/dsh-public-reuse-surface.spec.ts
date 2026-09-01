@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
@@ -10,10 +10,14 @@ import WorkerThreadWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import { snapshotSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 
 const repositoryRoot = resolve(import.meta.dirname, '../..')
-const RUNTIME_DESCRIPTOR_CONSUMER = resolve(
+const REMOVED_RUNTIME_DESCRIPTOR_CONSUMER = resolve(
   repositoryRoot,
   'packages/tianwen-runtime-bundle/src/long-goal-subagent.ts',
 )
+const RUNTIME_PUBLIC_CONSUMERS = [
+  'packages/tianwen-runtime-bundle/src/long-goal-host.ts',
+  'packages/tianwen-runtime-bundle/src/native-long-goal-child.ts',
+].map(path => resolve(repositoryRoot, path))
 const DSH_SUBAGENT_ROOT = '@deepseek-ai/dsh-subagent'
 
 function modulePattern(node: ts.Expression | undefined): string | undefined {
@@ -41,7 +45,11 @@ function privateSubagentImports(source: string): string[] {
     if (
       pattern?.startsWith(`${DSH_SUBAGENT_ROOT}/`) === true
       || pattern?.includes('dsh-subagent/') === true
-      || (pattern?.includes('<dynamic>') === true && source.includes('dsh-subagent'))
+      || (
+        pattern?.includes('<dynamic>') === true
+        && /\/(?:lib|src)\//u.test(pattern)
+        && source.includes('dsh-subagent')
+      )
     ) violations.add(pattern)
   }
   const visit = (node: ts.Node): void => {
@@ -76,7 +84,11 @@ describe('DSH rc.2 reusable public seams', () => {
   })
 
   it('keeps the Runtime descriptor consumer on public DSH imports', () => {
-    expect(privateSubagentImports(readFileSync(RUNTIME_DESCRIPTOR_CONSUMER, 'utf8'))).toEqual([])
+    expect(existsSync(REMOVED_RUNTIME_DESCRIPTOR_CONSUMER)).toBe(false)
+    for (const consumer of RUNTIME_PUBLIC_CONSUMERS) {
+      expect(existsSync(consumer), consumer).toBe(true)
+      expect(privateSubagentImports(readFileSync(consumer, 'utf8')), consumer).toEqual([])
+    }
     for (const [name, source] of Object.entries({
       'static-lib': "import '@deepseek-ai/dsh-subagent/lib/private.js'\n",
       'static-src': "export * from '@deepseek-ai/dsh-subagent/src/private.js'\n",

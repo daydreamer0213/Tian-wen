@@ -103,6 +103,26 @@ describe('permission-limited attempt classification', () => {
     expect(isPermissionLimited(result, evidenceFor([toolCall(1), result]), snapshot)).toBe(true)
   })
 
+  it('classifies only structured SANDBOX_UNAVAILABLE when the legacy effective mode is unproven', () => {
+    const unavailable = toolResult({
+      seq: 2, text: 'sandbox runner could not start', errorCode: 'SANDBOX_UNAVAILABLE',
+    })
+    const markerOnly = toolResult({
+      seq: 2, text: sandboxDenialMarker('read-only'), isError: true,
+    })
+    const unknownSnapshot = {
+      eventSeq: null,
+      fingerprint: permissionSnapshot([], 'read-only').fingerprint,
+    }
+
+    expect(isPermissionLimited(
+      unavailable, evidenceFor([toolCall(1), unavailable]), unknownSnapshot,
+    )).toBe(true)
+    expect(isPermissionLimited(
+      markerOnly, evidenceFor([toolCall(1), markerOnly]), unknownSnapshot,
+    )).toBe(false)
+  })
+
   it('rejects ordinary command and provider failures', () => {
     const snapshot = permissionSnapshot([], 'workspace-write')
     const commandFailure = toolResult({

@@ -15,6 +15,10 @@ export interface PermissionSnapshot {
   readonly fingerprint: `sha256:${string}`
 }
 
+export type PermissionClassificationSnapshot = Omit<PermissionSnapshot, 'mode'> & {
+  readonly mode?: SandboxMode
+}
+
 function explicitSandboxEventSeq(events: readonly SessionEvent[]): number | null {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index] as unknown as {
@@ -43,21 +47,23 @@ export function permissionSnapshot(
 export function isPermissionLimited(
   result: SessionEvent<'tool/result'>,
   evidence: EvidenceRecord,
-  snapshot: PermissionSnapshot,
+  snapshot: PermissionClassificationSnapshot,
 ): boolean {
   if (evidence.outcome.status !== 'complete') return false
   if (evidence.outcome.errorCode === SANDBOX_UNAVAILABLE) return true
+  const mode = snapshot.mode
+  if (mode === undefined) return false
   const block = result.data.message.content[0]
   if (evidence.outcome.isError !== true || block?.isError !== true) return false
   return block.content.some(item =>
     item.type === 'text'
-    && item.text.split(/\r?\n/u).includes(sandboxDenialMarker(snapshot.mode)))
+    && item.text.split(/\r?\n/u).includes(sandboxDenialMarker(mode)))
 }
 
 export function permissionLimitedEvidence(
   events: readonly SessionEvent[],
   evidenceRecords: readonly EvidenceRecord[],
-  snapshot: PermissionSnapshot,
+  snapshot: PermissionClassificationSnapshot,
 ): EvidenceRecord | undefined {
   const results = new Map(events
     .filter((event): event is SessionEvent<'tool/result'> => event.type === 'tool/result')

@@ -431,11 +431,11 @@ function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): v
     if (event.type === 'attempt-permission-mode-observed') {
       if (
         current === undefined
-        || current.status !== 'permission-limited'
+        || (current.status !== 'running' && current.status !== 'permission-limited')
         || current.epoch !== event.epoch
         || current.childSessionId !== event.childSessionId
         || current.permissionMode !== undefined
-      ) throw new LongGoalIntegrityError('Tianwen permission mode observation requires the exact legacy limited attempt')
+      ) throw new LongGoalIntegrityError('Tianwen permission mode observation requires the exact legacy current attempt')
       projection.attempts[projection.attempts.length - 1] = {
         ...current,
         permissionMode: event.permissionMode,
@@ -1233,13 +1233,16 @@ export function observeTianwenAttemptPermissionMode(input: TianwenAttemptEventIn
   const current = readTianwenTaskAttemptProjection(record, input.taskId).attempts.at(-1)
   if (
     task === undefined
-    || task.execution !== null
     || task.resolution !== null
-    || current?.status !== 'permission-limited'
+    || current === undefined
+    || (current.status !== 'running' && current.status !== 'permission-limited')
+    || (current.status === 'running'
+      ? task.execution?.sessionId !== input.childSessionId
+      : task.execution !== null)
     || current.epoch !== input.epoch
     || current.childSessionId !== input.childSessionId
     || current.permissionMode !== undefined
-  ) throw new LongGoalIntegrityError('Tianwen permission mode observation requires the exact legacy limited attempt')
+  ) throw new LongGoalIntegrityError('Tianwen permission mode observation requires the exact legacy current attempt')
   return appendTianwenEvent(input, {
     type: 'attempt-permission-mode-observed',
     taskId: input.taskId,

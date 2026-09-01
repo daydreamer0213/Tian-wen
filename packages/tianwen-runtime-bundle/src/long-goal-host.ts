@@ -13,7 +13,7 @@ import { GoalId } from '@deepseek-ai/dsh-goal'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
 import { createUserMessage, freezeMessage, MessageId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { EvidenceRecord } from '@tianwen/evidence'
 import { projectEvidence as projectPersistedEvidence } from '@tianwen/evidence/projector'
 
@@ -276,6 +276,7 @@ export interface TianwenLongGoalRunDependencies {
 }
 
 type PermissionAttemptSessionView = {
+  readonly meta?: Partial<Pick<SessionHeader, 'id' | 'parentSession' | 'seedLength'>>
   readonly events: readonly SessionEvent[]
 }
 
@@ -333,17 +334,34 @@ function sandboxModeFromEvents(
   return undefined
 }
 
-function delegatedSandboxObservation(events: readonly SessionEvent[]): {
+function delegatedSandboxObservation(
+  sessionId: string,
+  parentSessionId: string,
+  view: PermissionAttemptSessionView,
+): {
   readonly mode: SandboxMode
   readonly seq: number
 } | undefined {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index] as unknown as {
+  const meta = view.meta
+  if (
+    meta === undefined
+    || String(meta.id) !== sessionId
+    || String(meta.parentSession) !== parentSessionId
+  ) return undefined
+  const seedLength = meta.seedLength ?? 0
+  if (!Number.isSafeInteger(seedLength) || (seedLength as number) < 0) return undefined
+  for (let index = view.events.length - 1; index >= 0; index -= 1) {
+    const event = view.events[index] as unknown as {
       readonly type?: unknown
       readonly seq?: unknown
       readonly data?: { readonly mode?: unknown, readonly source?: unknown }
     } | undefined
-    if (event?.type !== 'sandbox/mode' || event.data?.source !== 'delegation' || !Number.isSafeInteger(event.seq)) continue
+    if (
+      event?.type !== 'sandbox/mode'
+      || event.data?.source !== 'delegation'
+      || !Number.isSafeInteger(event.seq)
+      || (event.seq as number) < (seedLength as number)
+    ) continue
     const mode = event.data.mode
     if (mode === 'read-only' || mode === 'workspace-write' || mode === 'danger-full-access') {
       return { mode, seq: event.seq as number }
@@ -416,11 +434,45 @@ export function createPermissionAttemptHost(
   const quiesceAttempt = (
     record: LongGoalRecordV3,
     attempt: NonNullable<ReturnType<typeof currentAttemptTask>>['current'],
-  ): Promise<void> => dependencies.quiesceNativeAttempt({
-    controlSessionId: record.control.sessionId,
-    plannerSessionId: attempt.parentSessionId,
-    childSessionId: attempt.childSessionId,
-  })
+  ): Promise<void> => {
+    const liveTask = dependencies.attachedAgent(attempt.childSessionId)
+    if (
+      liveTask !== undefined
+      && (
+        String(liveTask.session.id) !== attempt.childSessionId
+        || String(liveTask.session.header.parentSession) !== attempt.parentSessionId
+      )
+    ) throw new LongGoalIntegrityError('Permission-limited Task lineage is not live and exact')
+    return dependencies.quiesceNativeAttempt({
+      controlSessionId: record.control.sessionId,
+      plannerSessionId: attempt.parentSessionId,
+      childSessionId: attempt.childSessionId,
+    })
+  }
+
+  const observeCurrentAttemptMode = async (record: LongGoalRecordV3): Promise<LongGoalRecordV3> => {
+    const attemptTask = currentAttemptTask(record)
+    if (attemptTask === undefined || attemptTask.current.permissionMode !== undefined) return record
+    const oldChild = await dependencies.inspectSession(attemptTask.current.childSessionId)
+    const observation = oldChild === undefined
+      ? undefined
+      : delegatedSandboxObservation(
+          attemptTask.current.childSessionId,
+          attemptTask.current.parentSessionId,
+          oldChild,
+        )
+    if (observation === undefined) return record
+    return observeTianwenAttemptPermissionMode({
+      stateRoot: dependencies.roots.stateRoot,
+      longGoalId: record.id,
+      expectedRevision: record.revision,
+      taskId: attemptTask.task.id,
+      epoch: attemptTask.current.epoch,
+      childSessionId: attemptTask.current.childSessionId,
+      permissionMode: observation.mode,
+      permissionEventSeq: observation.seq,
+    })
+  }
 
   const consumePersistedPermissionLimit = async (
     record: LongGoalRecordV3,
@@ -431,12 +483,11 @@ export function createPermissionAttemptHost(
       attemptTask?.current.status !== 'running'
       || attemptTask.task.execution?.sessionId !== attemptTask.current.childSessionId
       || attemptTask.task.resolution !== null
-      || attemptTask.current.permissionMode === undefined
     ) return record
     const persisted = await dependencies.inspectSession(attemptTask.current.childSessionId)
     if (persisted === undefined) return record
     const snapshot = {
-      mode: attemptTask.current.permissionMode,
+      ...(attemptTask.current.permissionMode === undefined ? {} : { mode: attemptTask.current.permissionMode }),
       eventSeq: null,
       fingerprint: attemptTask.current.permissionFingerprint,
     } as const
@@ -474,26 +525,9 @@ export function createPermissionAttemptHost(
   ): Promise<void> => {
     let record = dependencies.readLongGoal(dependencies.roots.stateRoot, input.longGoalId)
     if (record.schemaVersion !== 'tianwen.long-goal.v3') return
+    record = await observeCurrentAttemptMode(record)
     record = await consumePersistedPermissionLimit(record, quiescedChildSessionId)
     let attemptTask = currentAttemptTask(record)
-    if (attemptTask?.current.status === 'permission-limited' && attemptTask.current.permissionMode === undefined) {
-      const oldChild = await dependencies.inspectSession(attemptTask.current.childSessionId)
-      const observation = oldChild === undefined
-        ? undefined
-        : delegatedSandboxObservation(oldChild.events)
-      if (observation === undefined) return
-      record = observeTianwenAttemptPermissionMode({
-        stateRoot: dependencies.roots.stateRoot,
-        longGoalId: record.id,
-        expectedRevision: record.revision,
-        taskId: attemptTask.task.id,
-        epoch: attemptTask.current.epoch,
-        childSessionId: attemptTask.current.childSessionId,
-        permissionMode: observation.mode,
-        permissionEventSeq: observation.seq,
-      })
-      attemptTask = currentAttemptTask(record)
-    }
     if (
       attemptTask?.current.status === 'permission-limited'
       && attemptTask.task.execution === null
@@ -611,8 +645,9 @@ export function createPermissionAttemptHost(
     readonly session: Session
     readonly event: unknown
   }): Promise<void> => {
-    const record = dependencies.readLongGoal(dependencies.roots.stateRoot, input.longGoalId)
+    let record = dependencies.readLongGoal(dependencies.roots.stateRoot, input.longGoalId)
     if (record.schemaVersion !== 'tianwen.long-goal.v3') return
+    record = await observeCurrentAttemptMode(record)
     const attemptTask = currentAttemptTask(record)
     const typedEvent = input.event as { readonly type?: unknown, readonly seq?: unknown }
     const relevantTaskResult = typedEvent.type === 'tool/result'
@@ -623,12 +658,11 @@ export function createPermissionAttemptHost(
       && record.control.sessionId === String(input.session.id)
     if (!relevantTaskResult && !relevantMainMode) return
     if (relevantTaskResult) {
-      if (attemptTask!.current.permissionMode === undefined) return
       const evidence = permissionLimitedEvidence(
         input.session.events,
         dependencies.projectEvidence(String(input.session.id), input.session.events),
         {
-          mode: attemptTask!.current.permissionMode,
+          ...(attemptTask!.current.permissionMode === undefined ? {} : { mode: attemptTask!.current.permissionMode }),
           eventSeq: null,
           fingerprint: attemptTask!.current.permissionFingerprint,
         },
@@ -2184,6 +2218,10 @@ export function mountTianwenLongGoalHost(
           || String(main.session.id) !== controlSessionId
           || planner === undefined
           || String(planner.session.header.parentSession) !== controlSessionId
+          || (task !== undefined && (
+            String(task.session.id) !== childSessionId
+            || String(task.session.header.parentSession) !== plannerSessionId
+          ))
         ) throw new LongGoalIntegrityError('Permission-limited Planner lineage is not live and exact')
         const flushes = [planner, task]
           .filter((agent): agent is Agent => agent !== undefined)
