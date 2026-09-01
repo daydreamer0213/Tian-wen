@@ -23,20 +23,61 @@ const DSH_SUBAGENT_ROOT = '@deepseek-ai/dsh-subagent'
 function modulePattern(
   node: ts.Expression | undefined,
   constants: ReadonlyMap<string, string>,
+  shadowed: ReadonlySet<string>,
 ): string | undefined {
   if (node === undefined) return undefined
   if (ts.isStringLiteralLike(node)) return node.text
-  if (ts.isIdentifier(node)) return constants.get(node.text) ?? '<dynamic>'
-  if (ts.isParenthesizedExpression(node)) return modulePattern(node.expression, constants)
+  if (ts.isIdentifier(node)) return shadowed.has(node.text) ? '<dynamic>' : constants.get(node.text) ?? '<dynamic>'
+  if (ts.isParenthesizedExpression(node)) return modulePattern(node.expression, constants, shadowed)
   if (ts.isTemplateExpression(node)) {
     return node.head.text + node.templateSpans
-      .map(span => `${modulePattern(span.expression, constants) ?? '<dynamic>'}${span.literal.text}`)
+      .map(span => `${modulePattern(span.expression, constants, shadowed) ?? '<dynamic>'}${span.literal.text}`)
       .join('')
   }
   if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-    return `${modulePattern(node.left, constants) ?? '<dynamic>'}${modulePattern(node.right, constants) ?? '<dynamic>'}`
+    return `${modulePattern(node.left, constants, shadowed) ?? '<dynamic>'}${modulePattern(node.right, constants, shadowed) ?? '<dynamic>'}`
   }
   return undefined
+}
+
+function collectBindingNames(name: ts.BindingName, bindings: Set<string>): void {
+  if (ts.isIdentifier(name)) {
+    bindings.add(name.text)
+    return
+  }
+  for (const element of name.elements) {
+    if (ts.isBindingElement(element)) collectBindingNames(element.name, bindings)
+  }
+}
+
+function scopeShadowed(node: ts.Node): Set<string> {
+  const shadowed = new Set<string>()
+  for (let current = node.parent; current !== undefined && !ts.isSourceFile(current); current = current.parent) {
+    if (ts.isFunctionLike(current)) {
+      for (const parameter of current.parameters) collectBindingNames(parameter.name, shadowed)
+    } else if (ts.isBlock(current)) {
+      for (const statement of current.statements) {
+        if (ts.isVariableStatement(statement)) {
+          for (const declaration of statement.declarationList.declarations) {
+            collectBindingNames(declaration.name, shadowed)
+          }
+        } else if (
+          (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement))
+          && statement.name !== undefined
+        ) {
+          shadowed.add(statement.name.text)
+        }
+      }
+    } else if (ts.isForStatement(current) || ts.isForInStatement(current) || ts.isForOfStatement(current)) {
+      const initializer = current.initializer
+      if (initializer !== undefined && ts.isVariableDeclarationList(initializer)) {
+        for (const declaration of initializer.declarations) collectBindingNames(declaration.name, shadowed)
+      }
+    } else if (ts.isCatchClause(current) && current.variableDeclaration !== undefined) {
+      collectBindingNames(current.variableDeclaration.name, shadowed)
+    }
+  }
+  return shadowed
 }
 
 function privateSubagentImports(source: string): string[] {
@@ -62,7 +103,7 @@ function privateSubagentImports(source: string): string[] {
   collectConstants(sourceFile)
   const violations = new Set<string>()
   const inspect = (expression: ts.Expression | undefined): void => {
-    const pattern = modulePattern(expression, constants)
+    const pattern = modulePattern(expression, constants, scopeShadowed(expression ?? sourceFile))
     if (
       pattern?.startsWith(`${DSH_SUBAGENT_ROOT}/`) === true
       || pattern?.includes('dsh-subagent/') === true
@@ -132,6 +173,7 @@ describe('DSH rc.2 reusable public seams', () => {
       'combined-dynamic': "const packageName = 'dsh-subagent'\nconst privatePath = 'src/private.js'\nvoid import(`@deepseek-ai/${packageName}/${privatePath}`)\n",
       'let-forwarded': "let packageName = 'dsh-subagent'\nlet privatePath = 'src/private.js'\nvoid import(`@deepseek-ai/${packageName}/${privatePath}`)\n",
       'parameter-forwarded': "function load(packageName: string, privatePath: string) { return import(`@deepseek-ai/${packageName}/${privatePath}`) }\nvoid load('dsh-subagent', 'src/private.js')\n",
+      'scope-shadowing': "const packageName = 'safe-package'\nfunction load(packageName: string) {\n  return import(`@deepseek-ai/${packageName}/src/private.js`)\n}\nvoid load('dsh-subagent')\n",
     })) expect(privateSubagentImports(source), name).not.toEqual([])
     expect(privateSubagentImports(
       "import { snapshotSubagentDescriptor } from '@deepseek-ai/dsh-subagent'\n",
