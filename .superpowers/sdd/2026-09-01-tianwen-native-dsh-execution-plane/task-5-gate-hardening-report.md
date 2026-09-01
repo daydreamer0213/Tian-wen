@@ -46,3 +46,39 @@ No production code, dependency, compatibility file, or other test was changed.
 - No new dependency or general data-flow engine was introduced.
 
 Concern: the existing source-wide `dsh-subagent` fallback remains intentionally conservative for unresolved loader expressions and may report unrelated text only when it appears in a loader source file.
+
+## Gate-hardening fix round 1
+
+### RED
+
+Added the `case-block-shadowing` fixture:
+
+```ts
+const packageName = 'safe-package'
+switch (0) {
+  case 0:
+    let packageName = 'dsh-subagent'
+    import(`@deepseek-ai/${packageName}/src/private.js`)
+}
+```
+
+Before the fix, the target command failed as intended:
+
+```text
+AssertionError: case-block-shadowing: expected [] to not deeply equal []
+Test Files  1 failed (1)
+Tests  1 failed | 2 passed (3)
+```
+
+### GREEN
+
+Reused the existing statement-binding collection for `CaseBlock` clauses. `scopeShadowed` now collects lexical declarations from every clause statement in the switch's shared case scope, so the inner `let packageName` prevents resolution to the outer flat constant and enters the existing conservative dynamic rule.
+
+### Round-1 verification and self-review
+
+- Target probe: PASS; 1 file, 3 tests.
+- Runtime consumer regression set: PASS; 3 files, 67 tests.
+- `git diff --check`: PASS; no whitespace errors.
+- All prior fixtures remain in place; the change is limited to the owned test utility and report.
+
+Round-1 concern: `CaseBlock` handling intentionally covers direct clause statements only; nested scopes continue to be resolved through their own AST parents rather than a general data-flow engine.

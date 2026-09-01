@@ -50,24 +50,30 @@ function collectBindingNames(name: ts.BindingName, bindings: Set<string>): void 
   }
 }
 
+function collectStatementBindings(statements: readonly ts.Statement[], bindings: Set<string>): void {
+  for (const statement of statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        collectBindingNames(declaration.name, bindings)
+      }
+    } else if (
+      (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement))
+      && statement.name !== undefined
+    ) {
+      bindings.add(statement.name.text)
+    }
+  }
+}
+
 function scopeShadowed(node: ts.Node): Set<string> {
   const shadowed = new Set<string>()
   for (let current = node.parent; current !== undefined && !ts.isSourceFile(current); current = current.parent) {
     if (ts.isFunctionLike(current)) {
       for (const parameter of current.parameters) collectBindingNames(parameter.name, shadowed)
     } else if (ts.isBlock(current)) {
-      for (const statement of current.statements) {
-        if (ts.isVariableStatement(statement)) {
-          for (const declaration of statement.declarationList.declarations) {
-            collectBindingNames(declaration.name, shadowed)
-          }
-        } else if (
-          (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement))
-          && statement.name !== undefined
-        ) {
-          shadowed.add(statement.name.text)
-        }
-      }
+      collectStatementBindings(current.statements, shadowed)
+    } else if (ts.isCaseBlock(current)) {
+      for (const clause of current.clauses) collectStatementBindings(clause.statements, shadowed)
     } else if (ts.isForStatement(current) || ts.isForInStatement(current) || ts.isForOfStatement(current)) {
       const initializer = current.initializer
       if (initializer !== undefined && ts.isVariableDeclarationList(initializer)) {
@@ -174,6 +180,7 @@ describe('DSH rc.2 reusable public seams', () => {
       'let-forwarded': "let packageName = 'dsh-subagent'\nlet privatePath = 'src/private.js'\nvoid import(`@deepseek-ai/${packageName}/${privatePath}`)\n",
       'parameter-forwarded': "function load(packageName: string, privatePath: string) { return import(`@deepseek-ai/${packageName}/${privatePath}`) }\nvoid load('dsh-subagent', 'src/private.js')\n",
       'scope-shadowing': "const packageName = 'safe-package'\nfunction load(packageName: string) {\n  return import(`@deepseek-ai/${packageName}/src/private.js`)\n}\nvoid load('dsh-subagent')\n",
+      'case-block-shadowing': "const packageName = 'safe-package'\nswitch (0) {\n  case 0:\n    let packageName = 'dsh-subagent'\n    import(`@deepseek-ai/${packageName}/src/private.js`)\n}\n",
     })) expect(privateSubagentImports(source), name).not.toEqual([])
     expect(privateSubagentImports(
       "import { snapshotSubagentDescriptor } from '@deepseek-ai/dsh-subagent'\n",
