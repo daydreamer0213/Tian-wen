@@ -1,4 +1,5 @@
-import type { Agent, AgentHandle, AgentSetup } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentHandle, AgentOptions, AgentSetup } from '@deepseek-ai/dsh-agent'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
@@ -30,6 +31,27 @@ export interface LongGoalPlannerDependencies {
     readonly sessionId: string
     readonly setup: AgentSetup
   }) => Promise<AgentHandle>
+  readonly getAgent?: (sessionId: string) => Agent | undefined
+  readonly installNativeSetup?: (sessionId: string, setup: AgentSetup) => void
+  readonly startNativeChild?: (input: {
+    readonly parent: Agent
+    readonly childId: string
+    readonly label: string
+    readonly prompt: ContentBlock[]
+    readonly agentOptions: AgentOptions
+    readonly signal: AbortSignal
+  }) => Promise<{ readonly childId: unknown }>
+  readonly followupNativeChild?: (
+    parent: Agent,
+    childId: string,
+    prompt: ContentBlock[],
+    signal: AbortSignal,
+  ) => Promise<unknown>
+  readonly nativeAgentOptions?: AgentOptions
+  readonly admitTaskFromPlanner?: (input: {
+    readonly record: GoalFirstLongGoalRecord
+    readonly parent: Agent
+  }) => Promise<void>
   readonly flushSession: (agent: Agent) => Promise<void>
   readonly readSettledTaskResult: (input: {
     readonly sessionId: string
@@ -120,7 +142,9 @@ export async function runLongGoalPlannerTurn(input: {
 }, dependencies: LongGoalPlannerDependencies): Promise<'submitted' | 'not-submitted'> {
   let submitted = false
   let settledTasksAtTurnStart: number | undefined
+  let currentPlanner: Agent | undefined
   const setup: AgentSetup = agentCtx => {
+    currentPlanner = agentCtx.agent
     agentCtx.tools.register(defineTool({
       name: 'submit_long_goal_plan',
       description: 'Commit the complete replacement suffix of unstarted Tasks for this Long Goal. When the tasks array is non-empty, outcome must be "continue"; outcome "complete" is allowed only with tasks: [].',
@@ -161,7 +185,7 @@ export async function runLongGoalPlannerTurn(input: {
         if (settledTasksAtTurnStart === undefined) {
           throw new LongGoalIntegrityError('Long Goal planner settled Task snapshot is unavailable')
         }
-        commitLongGoalPlan({
+        const committed = commitLongGoalPlan({
           stateRoot: input.stateRoot,
           longGoalId: input.record.id,
           expectedRevision: args.expectedGoalRevision,
@@ -169,6 +193,13 @@ export async function runLongGoalPlannerTurn(input: {
           tasks: args.tasks,
           consideredSettledTasks: settledTasksAtTurnStart,
         })
+        if (committed.schemaVersion === 'tianwen.long-goal.v3' && dependencies.admitTaskFromPlanner !== undefined) {
+          if (currentPlanner === undefined) {
+            throw new LongGoalIntegrityError('Continuous Goal Planner Agent is unavailable during Task admission')
+          }
+          requirePlannerAgent(currentPlanner, committed)
+          await dependencies.admitTaskFromPlanner({ record: committed, parent: currentPlanner })
+        }
         submitted = true
         exec.concludeTurn()
         return 'plan-submitted'
@@ -177,6 +208,74 @@ export async function runLongGoalPlannerTurn(input: {
   }
 
   const inspected = await dependencies.inspectSession(input.record.planner.sessionId)
+  if (input.record.schemaVersion === 'tianwen.long-goal.v3') {
+    const { getAgent, installNativeSetup, startNativeChild, followupNativeChild, nativeAgentOptions } = dependencies
+    if (
+      getAgent === undefined || installNativeSetup === undefined || startNativeChild === undefined ||
+      followupNativeChild === undefined || nativeAgentOptions === undefined
+    ) {
+      throw new LongGoalIntegrityError('Continuous Goal native Planner services are unavailable')
+    }
+    const parent = getAgent(input.record.control.sessionId)
+    if (parent === undefined || String(parent.session.id) !== input.record.control.sessionId) {
+      return 'not-submitted'
+    }
+    if (inspected.exists) requirePlannerHeader(inspected, input.record)
+
+    const status = requireGoalFirstStatus(await readLongGoalStatus({
+      stateRoot: input.stateRoot,
+      longGoalId: input.record.id,
+      dshStatusTarget: input.dshStatusTarget,
+    }), input.record)
+    const settled = status.tasks
+      .filter(task => task.execution !== null && (task.phase === 'complete' || task.phase === 'abandoned'))
+    if (input.record.planner.consideredSettledTasks > settled.length) {
+      throw new LongGoalIntegrityError('Long Goal planner settled Task checkpoint exceeds current status')
+    }
+    settledTasksAtTurnStart = settled.length
+    const newlySettled = settled.slice(input.record.planner.consideredSettledTasks)
+    const settledTaskResults = await Promise.all(newlySettled.map(async task => {
+      const result = await dependencies.readSettledTaskResult({
+        sessionId: task.execution!.sessionId,
+        goalId: task.execution!.goalId,
+        phase: task.phase as 'complete' | 'abandoned',
+      })
+      return {
+        objective: task.objective,
+        phase: task.phase as 'complete' | 'abandoned',
+        availability: result === undefined ? 'unavailable' as const : 'available' as const,
+        result: result ?? null,
+      }
+    }))
+    const prompt: ContentBlock[] = [{
+      type: 'text',
+      text: plannerPrompt(input.record, status, input.reason, settledTaskResults),
+    }]
+    const signal = AbortSignal.timeout(30_000)
+    installNativeSetup(input.record.planner.sessionId, setup)
+    if (inspected.exists) {
+      await followupNativeChild(parent, input.record.planner.sessionId, prompt, signal)
+    } else {
+      const started = await startNativeChild({
+        parent,
+        childId: input.record.planner.sessionId,
+        label: 'Long Goal Planner',
+        prompt,
+        agentOptions: nativeAgentOptions,
+        signal,
+      })
+      if (String(started.childId) !== input.record.planner.sessionId) {
+        throw new LongGoalIntegrityError('Long Goal planner Session identity mismatch')
+      }
+    }
+    const planner = getAgent(input.record.planner.sessionId)
+    if (planner === undefined) return 'not-submitted'
+    requirePlannerAgent(planner, input.record)
+    await planner.whenIdle()
+    await dependencies.flushSession(planner)
+    return submitted ? 'submitted' : 'not-submitted'
+  }
+
   let handle: AgentHandle | undefined
   let idleAttempted = false
   let flushAttempted = false
@@ -192,12 +291,6 @@ export async function runLongGoalPlannerTurn(input: {
         sessionId: input.record.planner.sessionId,
         cwd: input.record.workspaceRoot,
         agentPreset: input.record.planner.agentPreset,
-        ...(input.record.schemaVersion === 'tianwen.long-goal.v3'
-          ? {
-              parentSessionId: input.record.control.sessionId,
-              label: 'Long Goal Planner',
-            }
-          : {}),
         setup,
       })
     }

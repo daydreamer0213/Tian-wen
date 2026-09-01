@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentHandle, AgentSetup, ModelSelection } from '@deepseek-ai/dsh-agent'
+import type { AgentOptions } from '@deepseek-ai/dsh-agent'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
 import { createUserMessage, freezeMessage, MessageId } from '@deepseek-ai/dsh-llm'
@@ -40,6 +41,8 @@ import {
   abandonContinuousGoalTask,
   appendLongGoalGuidance,
   appendContinuousGoalGuidance,
+  appendTianwenAttemptProvisioningFailed,
+  appendTianwenAttemptStarted,
   bindGoalFirstLongGoalTask,
   bindLongGoalTask,
   createContinuousLongGoal,
@@ -50,12 +53,12 @@ import {
   LongGoalRevisionConflictError,
   readLongGoal,
   readLongGoalStatus,
+  readTianwenTaskAttemptProjection,
   redirectContinuousGoal,
   setContinuousGoalMode,
 } from './long-goal.js'
 import { runLongGoalPlannerTurn } from './long-goal-planner.js'
 import type { LongGoalPlannerDependencies } from './long-goal-planner.js'
-import { installLongGoalSubagentDescriptor } from './long-goal-subagent.js'
 import {
   controlContinuousGoal,
   createContinuousGoalProgress,
@@ -94,6 +97,7 @@ import {
   writeLearningClueReview,
 } from './learning-clue-review.js'
 import { readGoalStatus } from './status.js'
+import { NativeLongGoalChild } from './native-long-goal-child.js'
 
 type RpcResult<T> =
   | { readonly ok: true, readonly value: T }
@@ -213,6 +217,22 @@ export interface TianwenLongGoalRunDependencies {
     readonly parentSessionId?: string
     readonly label?: string
   }) => Promise<string>
+  readonly reserveTaskSessionId?: () => string
+  readonly startNativeTaskChild?: (input: {
+    readonly parent: Agent
+    readonly childId: string
+    readonly label: string
+    readonly prompt: { readonly type: 'text', readonly text: string }[]
+    readonly agentOptions: AgentOptions
+    readonly signal: AbortSignal
+  }) => Promise<{ readonly childId: unknown }>
+  readonly followupNativeTaskChild?: (
+    parent: Agent,
+    childId: string,
+    prompt: { readonly type: 'text', readonly text: string }[],
+    signal: AbortSignal,
+  ) => Promise<unknown>
+  readonly nativeAgentOptions?: AgentOptions
   readonly attachedAgent: (sessionId: string) => Agent | undefined
   readonly createGoal: (agent: Agent, input: {
     readonly objective: string
@@ -455,6 +475,81 @@ export async function runCurrentWebTask(input: {
     )) {
       throw new LongGoalIntegrityError('Goal-first Task admission requires an active ready state')
     }
+    if (goalFirstRecord?.schemaVersion === 'tianwen.long-goal.v3') {
+      const reserveTaskSessionId = dependencies.reserveTaskSessionId
+      const startNativeTaskChild = dependencies.startNativeTaskChild
+      const nativeAgentOptions = dependencies.nativeAgentOptions
+      if (reserveTaskSessionId === undefined || startNativeTaskChild === undefined || nativeAgentOptions === undefined) {
+        throw new LongGoalIntegrityError('Continuous Goal native Task services are unavailable')
+      }
+      const parent = dependencies.attachedAgent(goalFirstRecord.planner.sessionId)
+      if (parent === undefined || String(parent.session.id) !== goalFirstRecord.planner.sessionId) {
+        throw new LongGoalIntegrityError('Continuous Goal Planner parent Agent is not live')
+      }
+      const attempts = readTianwenTaskAttemptProjection(goalFirstRecord, task.id).attempts
+      const epoch = attempts.length + 1
+      const sessionId = reserveTaskSessionId()
+      const permissionFingerprint = `sha256:unclassified:${goalFirstRecord.control.sessionId}` as const
+      appendTianwenAttemptStarted({
+        stateRoot: input.roots.stateRoot,
+        longGoalId: input.longGoalId,
+        expectedRevision: input.expectedRevision!,
+        taskId: task.id,
+        epoch,
+        parentSessionId: goalFirstRecord.planner.sessionId,
+        childSessionId: sessionId,
+        permissionFingerprint,
+        startedAt: new Date().toISOString(),
+      })
+      let started: { readonly childId: unknown }
+      try {
+        started = await startNativeTaskChild({
+          parent,
+          childId: sessionId,
+          label: `Task ${taskIndex + 1}: ${task.objective}`,
+          prompt: [{ type: 'text', text: task.objective }],
+          agentOptions: nativeAgentOptions,
+          signal: AbortSignal.timeout(30_000),
+        })
+      } catch (cause) {
+        appendTianwenAttemptProvisioningFailed({
+          stateRoot: input.roots.stateRoot,
+          longGoalId: input.longGoalId,
+          expectedRevision: input.expectedRevision! + 1,
+          taskId: task.id,
+          epoch,
+          terminalEventId: `provisioning-failed:${sessionId}:${randomUUID()}`,
+        })
+        throw cause
+      }
+      if (String(started.childId) !== sessionId) {
+        throw new LongGoalIntegrityError('Native Long Goal Task Session identity mismatch')
+      }
+      const agent = dependencies.attachedAgent(sessionId)
+      if (agent === undefined || String(agent.session.id) !== sessionId) {
+        throw new LongGoalIntegrityError('New native Long Goal Task Session has no exact Agent')
+      }
+      if (
+        agent.session.header.cwd !== goalFirstRecord.workspaceRoot ||
+        agent.session.header.agentPreset !== goalFirstRecord.planner.agentPreset
+      ) {
+        throw new LongGoalIntegrityError('New Goal-first Task Session header mismatch')
+      }
+      const goal = dependencies.createGoal(agent, {
+        objective: task.objective,
+        maxGoalRounds: record.maxTaskRounds,
+      })
+      dependencies.bindGoalFirstLongGoalTask({
+        stateRoot: input.roots.stateRoot,
+        longGoalId: input.longGoalId,
+        expectedRevision: input.expectedRevision! + 1,
+        taskId: task.id,
+        execution: { sessionId, goalId: String(goal.id) },
+      })
+      await dependencies.flushSession(agent)
+      return { status: await readStatus(), sessionId, action: 'started' }
+    }
+
     let cwd: string | undefined
     let agentPreset: string | undefined
     if (goalFirstRecord !== undefined) {
@@ -474,12 +569,6 @@ export async function runCurrentWebTask(input: {
     const sessionId = await dependencies.createSession({
       cwd,
       ...(agentPreset === undefined ? {} : { agentPreset }),
-      ...(goalFirstRecord?.schemaVersion === 'tianwen.long-goal.v3'
-        ? {
-            parentSessionId: goalFirstRecord.control.sessionId,
-            label: `Task ${taskIndex + 1}: ${task.objective}`,
-          }
-        : {}),
     })
     const agent = dependencies.attachedAgent(sessionId)
     if (agent === undefined || String(agent.session.id) !== sessionId) {
@@ -556,7 +645,23 @@ export async function runCurrentWebTask(input: {
     if (ref.phase !== 'active' && ref.phase !== 'paused') {
       throw new Error('Cold Long Goal Task Goal is not resumable')
     }
-    await dependencies.resumeColdGoal({ sessionId, goalId, revision: ref.revision })
+    if (goalFirstRecord?.schemaVersion === 'tianwen.long-goal.v3') {
+      if (dependencies.followupNativeTaskChild === undefined) {
+        throw new LongGoalIntegrityError('Continuous Goal native Task services are unavailable')
+      }
+      const parent = dependencies.attachedAgent(goalFirstRecord.planner.sessionId)
+      if (parent === undefined || String(parent.session.id) !== goalFirstRecord.planner.sessionId) {
+        throw new LongGoalIntegrityError('Continuous Goal Planner parent Agent is not live')
+      }
+      await dependencies.followupNativeTaskChild(
+        parent,
+        sessionId,
+        [{ type: 'text', text: `Continue Task: ${task.objective}` }],
+        AbortSignal.timeout(30_000),
+      )
+    } else {
+      await dependencies.resumeColdGoal({ sessionId, goalId, revision: ref.revision })
+    }
     agent = dependencies.attachedAgent(sessionId)
     if (agent === undefined) throw new Error('Resumed Long Goal Task Session has no attached Agent')
     const resumed = currentGoal(agent, sessionId, goalId)
@@ -581,6 +686,21 @@ export async function runCurrentWebTask(input: {
   const resumed = agent.ctx.goals.resume(agent, { id: goal.id, revision: goal.revision })
   if (String(resumed.id) !== goalId || resumed.phase !== 'active' || resumed.activation !== 'armed') {
     throw new Error('Resumed Long Goal Task Goal mismatch')
+  }
+  if (goalFirstRecord?.schemaVersion === 'tianwen.long-goal.v3') {
+    if (dependencies.followupNativeTaskChild === undefined) {
+      throw new LongGoalIntegrityError('Continuous Goal native Task services are unavailable')
+    }
+    const parent = dependencies.attachedAgent(goalFirstRecord.planner.sessionId)
+    if (parent === undefined || String(parent.session.id) !== goalFirstRecord.planner.sessionId) {
+      throw new LongGoalIntegrityError('Continuous Goal Planner parent Agent is not live')
+    }
+    await dependencies.followupNativeTaskChild(
+      parent,
+      sessionId,
+      [{ type: 'text', text: `Continue Task: ${task.objective}` }],
+      AbortSignal.timeout(30_000),
+    )
   }
   await dependencies.flushSession(agent)
   return { status: await readStatus(), sessionId, action: 'continued' }
@@ -1484,7 +1604,7 @@ export function mountTianwenLongGoalHost(
   config?: TianwenLongGoalHostConfig,
 ): void {
   ctx.inject([
-    'connection', 'apiProxy', 'agents', 'goals', 'sessions',
+    'connection', 'apiProxy', 'agents', 'goals', 'sessions', 'subagents',
     'agentDefaultModel', 'agentPresets', 'sessionPersistence',
     'tianwenLearningIntake', 'tianwenEvolution',
   ], injected => {
@@ -1495,13 +1615,25 @@ export function mountTianwenLongGoalHost(
       ...(config === undefined ? {} : { config }),
     })
     const host = injected as HostContext
-    const ownedTaskHandles = new Map<string, AgentHandle>()
+    const nativeChild = new NativeLongGoalChild(injected)
+    const nativeSetups = new Map<string, AgentSetup>()
+    const disposeNativeSetup = injected.subagents.registerContinuableSetup(childCtx => {
+      const sessionId = childCtx.agent === undefined ? undefined : String(childCtx.agent.session.id)
+      const setup = sessionId === undefined ? undefined : nativeSetups.get(sessionId)
+      if (setup !== undefined) {
+        const prepared = setup(childCtx)
+        if (prepared instanceof Promise) {
+          throw new LongGoalIntegrityError('Native Long Goal child setup must be synchronous')
+        }
+        prepared?.commit()
+      }
+      return () => undefined
+    })
     if (typeof injected.effect === 'function') {
       injected.effect(function* () {
-        yield async () => {
-          const handles = [...ownedTaskHandles.values()]
-          ownedTaskHandles.clear()
-          await Promise.allSettled(handles.map(handle => handle.dispose()))
+        yield () => {
+          nativeSetups.clear()
+          disposeNativeSetup()
         }
       })
     }
@@ -1531,32 +1663,18 @@ export function mountTianwenLongGoalHost(
         ...(item.cwd === undefined ? {} : { cwd: item.cwd }),
         ...(item.agentPreset === undefined ? {} : { agentPreset: item.agentPreset }),
       })),
-      createSession: async ({ cwd, agentPreset, parentSessionId, label }) => {
-        if (parentSessionId === undefined) {
-          return String(unwrapRpc(await host.apiProxy.sessions.create({
-            rpcId: randomUUID(),
-            payload: { cwd, ...(agentPreset === undefined ? {} : { agentPreset }) },
-          })).sessionId)
-        }
-        const selection = host.agentDefaultModel.currentSelection()
-        const sessionId = SessionId(`session-${randomUUID()}`)
-        const handle = await injected.agents.create({
-          sessionId,
-          meta: {
-            cwd,
-            parentSession: SessionId(parentSessionId),
-            origin: 'subagent',
-            delegationDepth: 1,
-            ...(agentPreset === undefined ? {} : { agentPreset }),
-          },
-          agentOptions: { provider: selection.provider, model: selection.model },
-          setup: agentSetup(selection, agentPreset, agentCtx => {
-            if (label !== undefined) installLongGoalSubagentDescriptor(agentCtx, label)
-          }),
-        })
-        ownedTaskHandles.set(String(sessionId), handle)
-        return String(sessionId)
-      },
+      createSession: async ({ cwd, agentPreset }) => String(unwrapRpc(await host.apiProxy.sessions.create({
+        rpcId: randomUUID(),
+        payload: { cwd, ...(agentPreset === undefined ? {} : { agentPreset }) },
+      })).sessionId),
+      reserveTaskSessionId: () => `session-${randomUUID()}`,
+      startNativeTaskChild: input => nativeChild.start({
+        ...input,
+        childId: SessionId(input.childId),
+      }),
+      followupNativeTaskChild: (parent, childId, prompt, signal) =>
+        nativeChild.followup(parent, SessionId(childId), prompt, signal),
+      nativeAgentOptions: host.agentDefaultModel.currentSelection(),
       attachedAgent: sessionId => injected.agents.get(SessionId(sessionId)),
       createGoal: (agent, goalInput) => injected.goals.create(agent, goalInput),
       readGoalRef: async (sessionId, goalId) => {
@@ -1578,26 +1696,6 @@ export function mountTianwenLongGoalHost(
         }
       },
       resumeColdGoal: async ({ sessionId, goalId, revision }) => {
-        const inspection = await host.sessionPersistence.inspect(SessionId(sessionId))
-        if (inspection.meta.origin === 'subagent') {
-          const selection = host.agentDefaultModel.currentSelection()
-          const handle = await injected.agents.resume({
-            resumeSessionId: SessionId(sessionId),
-            agentOptions: { provider: selection.provider, model: selection.model },
-            setup: agentSetup(selection, undefined, () => undefined),
-          })
-          try {
-            const resumed = injected.goals.resume(handle.agent, { id: GoalId(goalId), revision })
-            if (String(resumed.id) !== goalId || resumed.revision <= revision) {
-              throw new Error('Resumed Long Goal Task Goal mismatch')
-            }
-          } catch (error) {
-            await handle.dispose()
-            throw error
-          }
-          ownedTaskHandles.set(sessionId, handle)
-          return
-        }
         const result = unwrapRpc(await host.apiProxy.goals.resume({
           rpcId: randomUUID(),
           payload: {
@@ -1638,21 +1736,9 @@ export function mountTianwenLongGoalHost(
           meta: {
             cwd: input.cwd,
             agentPreset: input.agentPreset,
-            ...(input.parentSessionId === undefined
-              ? {}
-              : {
-                  parentSession: SessionId(input.parentSessionId),
-                  origin: 'subagent' as const,
-                  delegationDepth: 1,
-                }),
           },
           agentOptions: { provider: selection.provider, model: selection.model },
-          setup: agentSetup(selection, input.agentPreset, agentCtx => {
-            if (input.label !== undefined) {
-              installLongGoalSubagentDescriptor(agentCtx, input.label)
-            }
-            return input.setup(agentCtx)
-          }),
+          setup: agentSetup(selection, input.agentPreset, input.setup),
         })
       },
       resumeAgent: async input => {
@@ -1662,6 +1748,25 @@ export function mountTianwenLongGoalHost(
           agentOptions: { provider: selection.provider, model: selection.model },
           setup: agentSetup(selection, undefined, input.setup),
         })
+      },
+      getAgent: sessionId => injected.agents.get(SessionId(sessionId)),
+      installNativeSetup: (sessionId, setup) => { nativeSetups.set(sessionId, setup) },
+      startNativeChild: input => nativeChild.start({
+        ...input,
+        childId: SessionId(input.childId),
+      }),
+      followupNativeChild: (parent, childId, prompt, signal) =>
+        nativeChild.followup(parent, SessionId(childId), prompt, signal),
+      nativeAgentOptions: host.agentDefaultModel.currentSelection(),
+      admitTaskFromPlanner: async ({ record, parent }) => {
+        if (injected.agents.get(SessionId(record.planner.sessionId)) !== parent) {
+          throw new LongGoalIntegrityError('Continuous Goal Planner parent Agent is not live')
+        }
+        await runCurrentWebTask({
+          roots,
+          longGoalId: record.id,
+          expectedRevision: record.revision,
+        }, runDependencies)
       },
       flushSession: async agent => {
         if (!await injected.sessions.flush(agent.session)) {

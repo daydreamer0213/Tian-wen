@@ -1,12 +1,23 @@
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { describe, expect, it, vi } from 'vitest'
 
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { LongGoalIntegrityError } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
+import type { Agent, AgentOptions, AgentSetup } from '@deepseek-ai/dsh-agent'
+import {
+  LongGoalIntegrityError,
+  bindGoalFirstLongGoalTask,
+  commitLongGoalPlan,
+  createContinuousLongGoal,
+  readLongGoal,
+  readTianwenTaskAttemptProjection,
+} from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
 import type { LongGoalRecordV3, LongGoalStatusProjectionV3 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
 import type { ContinuousGoalControlAction } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-service.js'
 import { mountContinuousGoalHost, type ContinuousGoalHostDependencies } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-host.js'
 import { buildContinuousGoalSettlementNotice } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-feedback.js'
-import { deliverContinuousGoalSettlement } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
+import { deliverContinuousGoalSettlement, runCurrentWebTask } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
+import { runLongGoalPlannerTurn } from '../../packages/tianwen-runtime-bundle/src/long-goal-planner.js'
 
 const GOAL_ID = 'tianwen-long-goal-00000000-0000-4000-8000-000000000001'
 const TASK_1 = '00000000-0000-4000-8000-000000000002'
@@ -201,6 +212,232 @@ function harness(initial = record()) {
 }
 
 describe('continuous Goal Host', () => {
+  it('starts and continues the Planner through native DSH with the exact live main Agent parent', async () => {
+    const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
+    mkdirSync(base, { recursive: true })
+    const fixture = mkdtempSync(resolve(base, 'native-planner-'))
+    try {
+      const stateRoot = resolve(fixture, 'state')
+      const source = createContinuousLongGoal({
+        stateRoot,
+        objective: 'Keep native child lineage exact',
+        context: null,
+        successCriteria: null,
+        workspaceRoot: fixture,
+        agentPreset: 'planner-preset',
+        controlSessionId: 'main-control',
+      }, {
+        goalSuffix: () => 'native-planner-host',
+        plannerSessionId: () => 'reserved-planner',
+        now: () => 1,
+      })
+      const main = { session: { id: 'main-control' } } as unknown as Agent
+      const whenIdle = vi.fn(async () => undefined)
+      const planner = {
+        id: 'reserved-planner',
+        session: { id: 'reserved-planner', header: { cwd: fixture, agentPreset: 'planner-preset' } },
+        whenIdle,
+      } as unknown as Agent
+      const live = new Map<string, Agent>([['main-control', main]])
+      const start = vi.fn(async (input: { readonly parent: Agent, readonly childId: string }) => {
+        live.set(input.childId, planner)
+        return { childId: input.childId, messageId: 'initial-message' }
+      })
+      const followup = vi.fn(async () => 'followup-message')
+      const setups = new Map<string, AgentSetup>()
+      let persisted = false
+      const directCreate = vi.fn(async () => { throw new Error('direct Agent creation is forbidden for v3 Planner') })
+      const directResume = vi.fn(async () => { throw new Error('agents.resume is forbidden for v3 Planner continuation') })
+      const dependencies = {
+        inspectSession: vi.fn(async () => persisted
+          ? { exists: true, cwd: fixture, agentPreset: 'planner-preset' }
+          : { exists: false }),
+        createAgent: directCreate,
+        resumeAgent: directResume,
+        getAgent: (sessionId: string) => live.get(sessionId),
+        installNativeSetup: (sessionId: string, setup: AgentSetup) => { setups.set(sessionId, setup) },
+        startNativeChild: async (input: {
+          readonly parent: Agent
+          readonly childId: string
+          readonly label: string
+          readonly prompt: unknown[]
+          readonly agentOptions: AgentOptions
+          readonly signal: AbortSignal
+        }) => {
+          persisted = true
+          return start(input)
+        },
+        followupNativeChild: followup,
+        nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
+        flushSession: vi.fn(async () => undefined),
+        readSettledTaskResult: vi.fn(async () => undefined),
+      }
+      const input = {
+        stateRoot,
+        dshStatusTarget: { sessionsRoot: resolve(fixture, 'sessions'), evolutionRoot: resolve(stateRoot, 'evolution') },
+        record: source,
+        reason: 'create' as const,
+      }
+
+      await expect(runLongGoalPlannerTurn(input, dependencies as never)).resolves.toBe('not-submitted')
+      await expect(runLongGoalPlannerTurn({ ...input, reason: 'continue' }, dependencies as never)).resolves.toBe('not-submitted')
+
+      expect(start).toHaveBeenCalledWith(expect.objectContaining({
+        parent: main,
+        childId: 'reserved-planner',
+        label: 'Long Goal Planner',
+      }))
+      expect(followup).toHaveBeenCalledWith(
+        main,
+        'reserved-planner',
+        expect.any(Array),
+        expect.any(AbortSignal),
+      )
+      expect(setups.get('reserved-planner')).toBeTypeOf('function')
+      expect(directCreate).not.toHaveBeenCalled()
+      expect(directResume).not.toHaveBeenCalled()
+      expect(whenIdle).toHaveBeenCalledTimes(2)
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('closes a reserved Task attempt as interrupted when native DSH rejects before inbox acceptance', async () => {
+    const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
+    mkdirSync(base, { recursive: true })
+    const fixture = mkdtempSync(resolve(base, 'native-task-rejection-'))
+    try {
+      const stateRoot = resolve(fixture, 'state')
+      const source = createContinuousLongGoal({
+        stateRoot,
+        objective: 'Keep rejected work retryable',
+        context: null,
+        successCriteria: null,
+        workspaceRoot: fixture,
+        agentPreset: 'planner-preset',
+        controlSessionId: 'main-control',
+      }, {
+        goalSuffix: () => 'native-task-rejection',
+        plannerSessionId: () => 'live-planner',
+        now: () => 1,
+      })
+      const planned = commitLongGoalPlan({
+        stateRoot,
+        longGoalId: source.id,
+        expectedRevision: 1,
+        outcome: 'continue',
+        tasks: [{ objective: 'Start exact child' }],
+        consideredSettledTasks: 0,
+      }, {
+        taskId: () => '00000000-0000-4000-8000-000000000091',
+        now: () => 2,
+      }) as LongGoalRecordV3
+      const taskId = planned.tasks[0]!.id
+      const planner = {
+        id: 'live-planner',
+        session: { id: 'live-planner', header: { cwd: fixture, agentPreset: 'planner-preset' } },
+      } as unknown as Agent
+      const directCreate = vi.fn(async () => { throw new Error('direct Task Session creation is forbidden') })
+      const startNativeTaskChild = vi.fn(async (input: { readonly parent: Agent, readonly childId: string }) => {
+        expect(input.parent).toBe(planner)
+        expect(input.childId).toBe('reserved-task-child')
+        throw new Error('native start rejected before acceptance')
+      })
+      const pending = status(planned, ['pending'], taskId)
+      const dependencies = {
+        readLongGoal,
+        readLongGoalStatus: vi.fn(async () => pending),
+        bindLongGoalTask: vi.fn(),
+        bindGoalFirstLongGoalTask,
+        listSessions: vi.fn(async () => []),
+        createSession: directCreate,
+        reserveTaskSessionId: () => 'reserved-task-child',
+        startNativeTaskChild,
+        followupNativeTaskChild: vi.fn(),
+        nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
+        attachedAgent: (sessionId: string) => sessionId === 'live-planner' ? planner : undefined,
+        createGoal: vi.fn(),
+        readGoalRef: vi.fn(),
+        resumeColdGoal: vi.fn(),
+        flushSession: vi.fn(),
+      }
+
+      await expect(runCurrentWebTask({
+        roots: {
+          stateRoot,
+          sessionsRoot: resolve(fixture, 'sessions'),
+          evolutionRoot: resolve(stateRoot, 'evolution'),
+        },
+        longGoalId: source.id,
+        expectedRevision: planned.revision,
+      }, dependencies as never)).rejects.toThrow('native start rejected before acceptance')
+
+      expect(directCreate).not.toHaveBeenCalled()
+      expect(startNativeTaskChild).toHaveBeenCalledOnce()
+      const reloaded = readLongGoal(stateRoot, source.id)
+      if (reloaded.schemaVersion !== 'tianwen.long-goal.v3') throw new Error('expected v3 record')
+      expect(reloaded.tasks[0]!.execution).toBeNull()
+      expect(readTianwenTaskAttemptProjection(reloaded, taskId)).toMatchObject({
+        attempts: [{
+          epoch: 1,
+          parentSessionId: 'live-planner',
+          childSessionId: 'reserved-task-child',
+          status: 'interrupted',
+        }],
+      })
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('cold-continues a v3 Task through native followup with the exact live Planner parent', async () => {
+    const execution = { sessionId: 'cold-task', goalId: 'cold-goal' }
+    const source = record({
+      planner: { ...record().planner, sessionId: 'live-planner' },
+      tasks: [{ id: TASK_1, objective: 'Continue native Task', execution, resolution: null }],
+    })
+    const projected = status(source, ['active'], TASK_1)
+    const planner = { session: { id: 'live-planner' } } as unknown as Agent
+    const task = agent('cold-task', 'cold-goal')
+    let resumed = false
+    const followupNativeTaskChild = vi.fn(async (parent: Agent, childId: string) => {
+      expect(parent).toBe(planner)
+      expect(childId).toBe('cold-task')
+      resumed = true
+      return 'followup-message'
+    })
+    const resumeColdGoal = vi.fn(async () => { throw new Error('agents.resume path is forbidden for v3 Task') })
+    const dependencies = {
+      readLongGoal: vi.fn(() => source),
+      readLongGoalStatus: vi.fn(async () => projected),
+      bindLongGoalTask: vi.fn(),
+      bindGoalFirstLongGoalTask: vi.fn(),
+      listSessions: vi.fn(async () => [{
+        sessionId: 'cold-task', cwd: source.workspaceRoot, agentPreset: source.planner.agentPreset,
+      }]),
+      createSession: vi.fn(),
+      attachedAgent: (sessionId: string) => sessionId === 'live-planner' ? planner : resumed ? task : undefined,
+      createGoal: vi.fn(),
+      readGoalRef: vi.fn(async () => ({ id: 'cold-goal', revision: 1, phase: 'active' as const })),
+      resumeColdGoal,
+      followupNativeTaskChild,
+      flushSession: vi.fn(async () => undefined),
+    }
+
+    await expect(runCurrentWebTask({
+      roots: { stateRoot: 'D:/state', sessionsRoot: 'D:/sessions', evolutionRoot: 'D:/evolution' },
+      longGoalId: source.id,
+      expectedRevision: source.revision,
+    }, dependencies as never)).resolves.toEqual({
+      status: projected,
+      sessionId: 'cold-task',
+      action: 'continued',
+    })
+
+    expect(followupNativeTaskChild).toHaveBeenCalledOnce()
+    expect(resumeColdGoal).not.toHaveBeenCalled()
+  })
+
   it('does not continue a live armed Task at startup, then continues once after its exact completion', async () => {
     const subject = harness()
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)

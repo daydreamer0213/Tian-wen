@@ -293,7 +293,7 @@ function parseTianwenEvents(value: unknown, tasks: readonly LongGoalTaskRecordV2
       continue
     }
     if (
-      (event.type === 'attempt-permission-limited' || event.type === 'attempt-settled') &&
+      (event.type === 'attempt-permission-limited' || event.type === 'attempt-settled' || event.type === 'attempt-provisioning-failed') &&
       hasExactKeys(event, ['type', 'taskId', 'epoch', 'terminalEventId']) &&
       isPositiveInteger(event.epoch) && isNonEmptyString(event.terminalEventId)
     ) {
@@ -354,13 +354,17 @@ function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): v
       continue
     }
     const current = projection.attempts.at(-1)
-    if (event.type === 'attempt-permission-limited' || event.type === 'attempt-settled') {
+    if (event.type === 'attempt-permission-limited' || event.type === 'attempt-settled' || event.type === 'attempt-provisioning-failed') {
       if (current === undefined || current.status !== 'running' || current.epoch !== event.epoch) {
         throw new LongGoalIntegrityError('Tianwen terminal attempt event requires the current running attempt')
       }
       projection.attempts[projection.attempts.length - 1] = {
         ...current,
-        status: event.type === 'attempt-permission-limited' ? 'permission-limited' : 'settled',
+        status: event.type === 'attempt-permission-limited'
+          ? 'permission-limited'
+          : event.type === 'attempt-settled'
+            ? 'settled'
+            : 'interrupted',
         terminalEventId: event.terminalEventId,
       }
       continue
@@ -388,12 +392,16 @@ function tianwenTaskAttemptProjection(
     if (event.taskId !== taskId) continue
     if (event.type === 'attempt-started') {
       projection.attempts.push(event.attempt)
-    } else if (event.type === 'attempt-permission-limited' || event.type === 'attempt-settled') {
+    } else if (event.type === 'attempt-permission-limited' || event.type === 'attempt-settled' || event.type === 'attempt-provisioning-failed') {
       const current = projection.attempts.at(-1)
       if (current === undefined) throw new LongGoalIntegrityError('Tianwen attempt history is invalid')
       projection.attempts[projection.attempts.length - 1] = {
         ...current,
-        status: event.type === 'attempt-permission-limited' ? 'permission-limited' : 'settled',
+        status: event.type === 'attempt-permission-limited'
+          ? 'permission-limited'
+          : event.type === 'attempt-settled'
+            ? 'settled'
+            : 'interrupted',
         terminalEventId: event.terminalEventId,
       }
     } else {
@@ -977,6 +985,18 @@ export function appendTianwenAttemptSettled(input: TianwenAttemptEventInput & {
 }): LongGoalRecordV3 {
   return appendTianwenEvent(input, {
     type: 'attempt-settled',
+    taskId: input.taskId,
+    epoch: input.epoch,
+    terminalEventId: input.terminalEventId,
+  })
+}
+
+export function appendTianwenAttemptProvisioningFailed(input: TianwenAttemptEventInput & {
+  readonly epoch: number
+  readonly terminalEventId: string
+}): LongGoalRecordV3 {
+  return appendTianwenEvent(input, {
+    type: 'attempt-provisioning-failed',
     taskId: input.taskId,
     epoch: input.epoch,
     terminalEventId: input.terminalEventId,

@@ -7,6 +7,7 @@ import {
   abandonBlockedLongGoalTask,
   abandonContinuousGoalTask,
   appendTianwenAttemptPermissionLimited,
+  appendTianwenAttemptProvisioningFailed,
   appendTianwenAttemptSettled,
   appendTianwenAttemptStarted,
   appendTianwenTerminalDeliveryObserved,
@@ -873,6 +874,51 @@ describe('goal-first long Goal v2 records', () => {
     }
   })
 
+  it('durably interrupts the current running attempt when native child provisioning fails', () => {
+    const stateRoot = createStateRoot()
+    const workspaceRoot = resolve(stateRoot, 'workspace')
+    try {
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Retry rejected provisioning', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'control-provisioning-failure',
+      }, { goalSuffix: () => 'provisioning-failure', plannerSessionId: () => 'planner-provisioning-failure', now: () => 10 })
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Provision one native child' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000083', now: () => 11 })
+      const taskId = planned.tasks[0]!.id
+      appendTianwenAttemptStarted({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId,
+        epoch: 1, parentSessionId: 'planner-provisioning-failure', childSessionId: 'child-rejected-before-acceptance',
+        permissionFingerprint: 'sha256:provisioning-snapshot', startedAt: '2026-09-01T00:00:00.000Z',
+      })
+      const interrupted = appendTianwenAttemptProvisioningFailed({
+        stateRoot, longGoalId: record.id, expectedRevision: 3, taskId, epoch: 1,
+        terminalEventId: 'provisioning-failed:child-rejected-before-acceptance',
+      })
+
+      expect(interrupted.tasks[0]!.execution).toBeNull()
+      const reloaded = readLongGoal(stateRoot, record.id)
+      if (reloaded.schemaVersion !== 'tianwen.long-goal.v3') throw new Error('expected v3 record')
+      expect(reloaded.tianwenEvents?.map(event => event.type)).toEqual([
+        'attempt-started', 'attempt-provisioning-failed',
+      ])
+      expect(readTianwenTaskAttemptProjection(reloaded, taskId)).toEqual({
+        attempts: [{
+          epoch: 1,
+          parentSessionId: 'planner-provisioning-failure',
+          childSessionId: 'child-rejected-before-acceptance',
+          permissionFingerprint: 'sha256:provisioning-snapshot',
+          status: 'interrupted',
+          startedAt: '2026-09-01T00:00:00.000Z',
+          terminalEventId: 'provisioning-failed:child-rejected-before-acceptance',
+        }],
+      })
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
   it('rejects invalid native child attempt event histories at append and reload boundaries', () => {
     const stateRoot = createStateRoot()
     const workspaceRoot = resolve(stateRoot, 'workspace')
@@ -894,6 +940,10 @@ describe('goal-first long Goal v2 records', () => {
 
       expect(() => appendTianwenAttemptStarted({ ...base, expectedRevision: 2, epoch: 2 })).toThrow('epoch')
       const started = appendTianwenAttemptStarted({ ...base, expectedRevision: 2, epoch: 1 })
+      expect(() => appendTianwenAttemptProvisioningFailed({
+        stateRoot, longGoalId: record.id, expectedRevision: 3, taskId, epoch: 2,
+        terminalEventId: 'wrong-current-attempt',
+      })).toThrow('current running')
       expect(() => appendTianwenAttemptStarted({
         ...base, expectedRevision: 3, epoch: 2, childSessionId: 'child-invariant-2', permissionFingerprint: 'sha256:wider',
       })).toThrow('running')

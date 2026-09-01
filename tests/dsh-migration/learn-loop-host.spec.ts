@@ -26,6 +26,7 @@ import { runLongGoalPlannerTurn } from '../../packages/tianwen-runtime-bundle/sr
 import {
   createGoalFirstLongGoal,
   createContinuousLongGoal,
+  commitLongGoalPlan,
   LongGoalRevisionConflictError,
   readLongGoal,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
@@ -238,9 +239,11 @@ function taskFeedbackOperations(): TianwenGoalTaskFeedbackOperations {
 async function installPlannerSetup(
   setup: AgentSetup,
   register: (tool: ToolDefinition) => void,
+  agent?: Agent,
 ): Promise<void> {
   const result = await setup({
     tools: { register: (tool: ToolDefinition) => register(tool) },
+    ...(agent === undefined ? {} : { agent }),
   } as unknown as Context)
   result?.commit()
 }
@@ -289,6 +292,7 @@ describe('Tianwen Long Goal Web host', () => {
         agents: { list: () => [], get: () => undefined },
         goals: {},
         sessions: {},
+        subagents: { registerContinuableSetup: () => () => undefined },
         sessionPersistence: {},
         tianwenLearningIntake: {},
         tianwenEvolution: {},
@@ -1293,61 +1297,73 @@ describe('Tianwen Long Goal Web host', () => {
   })
 
   it('admits a v3 Task through the Goal-first binder in its frozen workspace and preset', async () => {
-    const record: LongGoalRecordV3 = {
-      schemaVersion: 'tianwen.long-goal.v3', id: 'tianwen-long-goal-v3-test', revision: 3,
-      objective: 'Ship continuous release', context: null, successCriteria: null,
-      workspaceRoot: 'D:/frozen-workspace', maxTaskRounds: 3,
-      planner: {
-        sessionId: 'planner-session', agentPreset: 'planner-preset', planRevision: 1,
-        phase: 'ready', consideredSettledTasks: 0,
-      },
-      guidance: [], createdAt: 1, updatedAt: 1,
-      control: { sessionId: 'control-session', autoProgress: 'running' },
-      tasks: [{ id: 'task-v3', objective: 'Prepare notes', execution: null, resolution: null }],
-    }
-    const base = goalFirstStatus(3)
-    const status: LongGoalStatusProjectionV3 = {
-      ...base,
-      schemaVersion: 'tianwen.long-goal-status.v3',
-      goal: { ...base.goal, id: record.id, phase: 'active', totalTasks: 1 },
-      planner: { ...base.planner, phase: 'ready', planRevision: 1 },
-      control: record.control,
-      tasks: [{ id: 'task-v3', objective: 'Prepare notes', phase: 'pending', execution: null, resolution: null }],
-      currentTaskId: 'task-v3',
-    }
-    const execution = { goalId: 'goal-new', sessionId: 'session-new' }
-    const boundStatus: LongGoalStatusProjectionV3 = {
-      ...status,
-      goal: { ...status.goal, revision: 4 },
-      tasks: [{ ...status.tasks[0]!, phase: 'active', execution }],
-    }
-    const agent = fakeAgent('session-new', goalView({ id: 'goal-new' as GoalView['id'] }), {
-      header: { cwd: 'D:/frozen-workspace', agentPreset: 'planner-preset' },
-    })
-    const bindGoalFirstLongGoalTask = vi.fn(() => ({ ...record, revision: 4 }))
-    const dependencies = {
-      ...runDependencies(record as never, status as never),
-      readLongGoal: vi.fn(() => record),
-      readLongGoalStatus: vi.fn().mockResolvedValueOnce(status).mockResolvedValueOnce(boundStatus),
-      createSession: vi.fn(async () => 'session-new'),
-      attachedAgent: vi.fn(() => agent),
-      createGoal: vi.fn(() => goalView({ id: 'goal-new' as GoalView['id'] })),
-      bindGoalFirstLongGoalTask,
-    } as unknown as Parameters<typeof runCurrentWebTask>[1]
+    const fixture = createFixtureRoot()
+    try {
+      const stateRoot = join(fixture, 'state')
+      const created = createContinuousLongGoal({
+        stateRoot, objective: 'Ship continuous release', context: null, successCriteria: null,
+        workspaceRoot: fixture, agentPreset: 'planner-preset', controlSessionId: 'control-session',
+      }, { goalSuffix: () => 'v3-native-admission', plannerSessionId: () => 'planner-session', now: () => 1 })
+      const record = commitLongGoalPlan({
+        stateRoot, longGoalId: created.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Prepare notes' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000094', now: () => 2 }) as LongGoalRecordV3
+      const taskId = record.tasks[0]!.id
+      const base = goalFirstStatus(record.revision)
+      const status: LongGoalStatusProjectionV3 = {
+        ...base, schemaVersion: 'tianwen.long-goal-status.v3',
+        goal: { ...base.goal, id: record.id, phase: 'active', totalTasks: 1 },
+        planner: { ...base.planner, sessionId: 'planner-session', phase: 'ready', planRevision: 1 },
+        control: record.control,
+        tasks: [{ id: taskId, objective: 'Prepare notes', phase: 'pending', execution: null, resolution: null }],
+        currentTaskId: taskId,
+      }
+      const execution = { goalId: 'goal-new', sessionId: 'session-new' }
+      const boundStatus: LongGoalStatusProjectionV3 = {
+        ...status, goal: { ...status.goal, revision: record.revision + 2 },
+        tasks: [{ ...status.tasks[0]!, phase: 'active', execution }],
+      }
+      const planner = fakeAgent('planner-session', goalView())
+      const child = fakeAgent('session-new', goalView({ id: 'goal-new' as GoalView['id'] }), {
+        header: { cwd: fixture, agentPreset: 'planner-preset' },
+      })
+      let liveChild = false
+      const bindGoalFirstLongGoalTask = vi.fn(() => ({ ...record, revision: record.revision + 2 }))
+      const createSession = vi.fn(async () => { throw new Error('unexpected direct Session creation') })
+      const startNativeTaskChild = vi.fn(async (input: { readonly parent: Agent, readonly childId: string }) => {
+        expect(input.parent).toBe(planner)
+        liveChild = true
+        return { childId: input.childId, messageId: 'task-message' }
+      })
+      const dependencies = {
+        ...runDependencies(record as never, status as never),
+        readLongGoal: vi.fn(() => record),
+        readLongGoalStatus: vi.fn().mockResolvedValueOnce(status).mockResolvedValueOnce(boundStatus),
+        createSession,
+        reserveTaskSessionId: () => 'session-new',
+        startNativeTaskChild,
+        followupNativeTaskChild: vi.fn(),
+        nativeAgentOptions: { provider: 'provider', model: 'model' },
+        attachedAgent: vi.fn((sessionId: string) => sessionId === 'planner-session' ? planner : liveChild ? child : undefined),
+        createGoal: vi.fn(() => goalView({ id: 'goal-new' as GoalView['id'] })),
+        bindGoalFirstLongGoalTask,
+      } as unknown as Parameters<typeof runCurrentWebTask>[1]
 
-    await expect(runCurrentWebTask({
-      roots: ROOTS, longGoalId: record.id, expectedRevision: 3,
-    }, dependencies)).resolves.toEqual({ status: boundStatus, sessionId: 'session-new', action: 'started' })
-    expect(dependencies.createSession).toHaveBeenCalledWith({
-      cwd: 'D:/frozen-workspace', agentPreset: 'planner-preset',
-      parentSessionId: 'control-session',
-      label: 'Task 1: Prepare notes',
-    })
-    expect(bindGoalFirstLongGoalTask).toHaveBeenCalledWith({
-      stateRoot: ROOTS.stateRoot, longGoalId: record.id, expectedRevision: 3,
-      taskId: 'task-v3', execution,
-    })
-    expect(dependencies.bindLongGoalTask).not.toHaveBeenCalled()
+      await expect(runCurrentWebTask({
+        roots: { ...ROOTS, stateRoot }, longGoalId: record.id, expectedRevision: record.revision,
+      }, dependencies)).resolves.toEqual({ status: boundStatus, sessionId: 'session-new', action: 'started' })
+      expect(createSession).not.toHaveBeenCalled()
+      expect(startNativeTaskChild).toHaveBeenCalledWith(expect.objectContaining({
+        parent: planner, childId: 'session-new', label: 'Task 1: Prepare notes',
+      }))
+      expect(bindGoalFirstLongGoalTask).toHaveBeenCalledWith({
+        stateRoot, longGoalId: record.id, expectedRevision: record.revision + 1,
+        taskId, execution,
+      })
+      expect(dependencies.bindLongGoalTask).not.toHaveBeenCalled()
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
   })
 
   it('preserves a v2 bind revision conflict after cleaning up the created Goal', async () => {
@@ -1863,17 +1879,20 @@ describe('Long Goal DSH planner', () => {
       })
       let tool: ToolDefinition | undefined
       let pending = Promise.resolve<unknown>(undefined)
-      const owned = plannerHandle(record, () => {
+      const owned = plannerHandle(record)
+      vi.spyOn(owned.handle.agent, 'whenIdle').mockImplementation(async () => { await pending })
+      const control = { session: { id: 'control-session' } } as unknown as Agent
+      let setup: AgentSetup | undefined
+      const createAgent = vi.fn(async () => { throw new Error('unexpected direct create') })
+      const admitTaskFromPlanner = vi.fn(async () => undefined)
+      const startNativeChild = vi.fn(async input => {
+        await installPlannerSetup(setup!, definition => { tool = definition }, owned.handle.agent)
         pending = tool!.execute({
           expectedGoalRevision: 1,
           outcome: 'continue',
           tasks: [{ objective: 'Prepare notes' }],
         }, { concludeTurn: vi.fn() } as never)
-      })
-      vi.spyOn(owned.handle.agent, 'whenIdle').mockImplementation(async () => { await pending })
-      const createAgent = vi.fn(async input => {
-        await installPlannerSetup(input.setup, definition => { tool = definition })
-        return owned.handle
+        return { childId: input.childId, messageId: 'planner-message' }
       })
 
       await expect(runLongGoalPlannerTurn({
@@ -1885,12 +1904,20 @@ describe('Long Goal DSH planner', () => {
         inspectSession: vi.fn(async () => ({ exists: false })),
         createAgent,
         resumeAgent: vi.fn(async () => { throw new Error('unexpected resume') }),
+        getAgent: sessionId => sessionId === 'control-session' ? control : owned.handle.agent,
+        installNativeSetup: (_sessionId, value) => { setup = value },
+        startNativeChild,
+        followupNativeChild: vi.fn(),
+        nativeAgentOptions: { provider: 'provider', model: 'model' },
+        admitTaskFromPlanner,
         flushSession: vi.fn(async () => undefined),
         readSettledTaskResult: vi.fn(async () => undefined),
       })).resolves.toBe('submitted')
 
-      expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({
-        parentSessionId: 'control-session',
+      expect(createAgent).not.toHaveBeenCalled()
+      expect(startNativeChild).toHaveBeenCalledWith(expect.objectContaining({
+        parent: control,
+        childId: record.planner.sessionId,
         label: 'Long Goal Planner',
       }))
 
@@ -1900,7 +1927,11 @@ describe('Long Goal DSH planner', () => {
         planner: { phase: 'ready', planRevision: 1, consideredSettledTasks: 0 },
         tasks: [{ objective: 'Prepare notes' }],
       })
-      expect(JSON.stringify(owned.followup.mock.calls[0]![0])).toContain('Newly settled Task results')
+      expect(admitTaskFromPlanner).toHaveBeenCalledWith({
+        record: expect.objectContaining({ revision: 2, planner: expect.objectContaining({ phase: 'ready' }) }),
+        parent: owned.handle.agent,
+      })
+      expect(JSON.stringify(startNativeChild.mock.calls[0]![0].prompt)).toContain('Newly settled Task results')
     } finally {
       rmSync(fixture, { recursive: true, force: true })
     }

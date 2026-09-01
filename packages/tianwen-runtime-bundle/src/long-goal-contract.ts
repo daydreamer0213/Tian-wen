@@ -135,6 +135,12 @@ export type TianwenLongGoalEvent =
       readonly terminalEventId: string
     }
   | {
+      readonly type: 'attempt-provisioning-failed'
+      readonly taskId: string
+      readonly epoch: number
+      readonly terminalEventId: string
+    }
+  | {
       readonly type: 'terminal-delivery-observed'
       readonly taskId: string
       readonly delivery: TianwenTerminalDeliveryCursor
