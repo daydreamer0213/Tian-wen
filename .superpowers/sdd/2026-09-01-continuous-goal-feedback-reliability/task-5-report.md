@@ -47,3 +47,7 @@ Test-first evidence: adding the exact package to `tests/dsh-probe/install-closur
 Read-only diagnosis established that the 60-second child deadline elapsed during DSH `healProfilesModuleFallback()` dependency-closure traversal and temporary junction creation, before DSH boot and before the audit plugin's `loader.await()`.  The test is a correctness probe and its existing outer budget remains 180 seconds.
 
 Only the child `spawnSync` deadline was changed from 60 seconds to 120 seconds.  The exact test was then run alone with one worker and no file parallelism in the required D: environment: GREEN, 1 passed / 60 skipped, total duration 111.05 seconds and test duration 109.21 seconds.  This remains below the unchanged outer 180-second budget.
+
+## Final full repository gate
+
+The original `pnpm run check` process completed under the required D: environment without a restart.  Its final Vitest summary was GREEN: 79 passed / 5 skipped test files (84 total), 1162 passed / 18 skipped tests (1180 total), with a 601.92-second duration.  The same process had already completed `check:dsh-install`, the private-import check, and typecheck before Vitest; its stderr contains no failure or lifecycle error output.
