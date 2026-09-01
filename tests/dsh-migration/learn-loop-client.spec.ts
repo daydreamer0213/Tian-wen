@@ -432,6 +432,14 @@ describe('Learn Loop browser RPC client', () => {
     expect(await createLearnLoopClient(rpc as never).learningClues(signal)).toEqual(clueStatus)
     expect(rpc.call).toHaveBeenCalledWith('/tianwen', 'learning-clues', {}, signal)
 
+    const unsupported = {
+      ...clueStatus,
+      items: [{ ...clueStatus.items[0], status: 'unsupported' as const }],
+    }
+    const unsupportedRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: unsupported }) }
+    await expect(createLearnLoopClient(unsupportedRpc as never).learningClues())
+      .resolves.toEqual(unsupported)
+
     for (const analysis of [
       {
         phase: 'running' as const,
@@ -482,6 +490,8 @@ describe('Learn Loop browser RPC client', () => {
       { ...clueStatus, items: [{ ...clueStatus.items[0], problemFingerprint: 'private' }] },
       { ...clueStatus, items: [{ ...clueStatus.items[0], signalIds: ['private'] }] },
       { ...clueStatus, items: [{ ...clueStatus.items[0], occurrenceCount: 0 }] },
+      { ...clueStatus, items: [{ ...clueStatus.items[0], status: 'closed' }] },
+      { ...clueStatus, items: [{ ...clueStatus.items[0], status: 'retracted' }] },
       { ...reviewed, items: [{ ...reviewed.items[0], review: {
         reviewedAt: '2026-08-30T00:03:00Z', occurrenceCount: 2,
       } }] },

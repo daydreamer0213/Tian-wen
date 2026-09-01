@@ -394,7 +394,8 @@ function isLearningClueStatus(value: unknown): value is LearningClueStatus {
     if (!isRecord(item) || !hasExactKeys(item, [
       'ticketId', 'status', 'occurrenceCount', 'analysis', 'review', 'sources',
     ]) || typeof item.ticketId !== 'string' || !/^ticket:[a-f0-9]{64}$/.test(item.ticketId) ||
-      ticketIds.has(item.ticketId) || item.status !== 'open' ||
+      ticketIds.has(item.ticketId) ||
+      (item.status !== 'open' && item.status !== 'unsupported') ||
       (item.analysis !== null && !isLearningClueAnalysis(item.analysis)) ||
       (item.review !== null && !isLearningClueReview(item.review)) ||
       !isPositiveInteger(item.occurrenceCount) || !Array.isArray(item.sources) ||

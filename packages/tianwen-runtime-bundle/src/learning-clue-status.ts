@@ -13,7 +13,7 @@ export interface LearningClueSource {
 
 export interface LearningClueItem {
   readonly ticketId: string
-  readonly status: 'open'
+  readonly status: 'open' | 'unsupported'
   readonly occurrenceCount: number
   readonly analysis: null | {
     readonly phase: 'running' | 'complete' | 'failed'

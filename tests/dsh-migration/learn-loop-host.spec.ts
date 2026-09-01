@@ -19,7 +19,10 @@ import {
   type TianwenGoalFirstOperations,
   type TianwenGoalTaskFeedbackOperations,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
-import { readLearningClueAnalysisBinding } from '../../packages/tianwen-runtime-bundle/src/learning-clue-analysis.js'
+import {
+  createLearningClueAnalysisBinding,
+  readLearningClueAnalysisBinding,
+} from '../../packages/tianwen-runtime-bundle/src/learning-clue-analysis.js'
 import { readLearningClueReview } from '../../packages/tianwen-runtime-bundle/src/learning-clue-review.js'
 import { projectLearningClueStatus } from '../../packages/tianwen-runtime-bundle/src/learning-clue-status.js'
 import { runLongGoalPlannerTurn } from '../../packages/tianwen-runtime-bundle/src/long-goal-planner.js'
@@ -780,13 +783,16 @@ describe('Tianwen Long Goal Web host', () => {
           }, {
             taskId: 'task-b', rating: 'negative', decision: 'ticket-merged',
             recordedAt: '2026-08-30T03:00:00.000Z', ticketId: ticketA,
+          }, {
+            taskId: 'task-b', rating: 'negative', decision: 'ticket-created',
+            recordedAt: '2026-08-30T02:00:00.000Z', ticketId: ticketB,
           }],
         },
       }],
       tickets: [{
         ticketId: ticketB,
         problemFingerprint: `sha256:${'2'.repeat(64)}`,
-        status: 'open',
+        status: 'unsupported',
         signalIds: [`signal:${'3'.repeat(64)}`],
       }, {
         ticketId: ticketA,
@@ -816,6 +822,19 @@ describe('Tianwen Long Goal Web host', () => {
           taskId: 'task-a',
           taskObjective: 'Review the release notes',
           recordedAt: '2026-08-30T01:00:00.000Z',
+        }],
+      }, {
+        ticketId: ticketB,
+        status: 'unsupported',
+        occurrenceCount: 1,
+        analysis: null,
+        review: null,
+        sources: [{
+          longGoalId: 'goal-b',
+          goalObjective: 'Reduce support friction',
+          taskId: 'task-b',
+          taskObjective: 'Clarify the setup flow',
+          recordedAt: '2026-08-30T02:00:00.000Z',
         }],
       }],
     })
@@ -931,6 +950,78 @@ describe('Tianwen Long Goal Web host', () => {
         error: { code: 'internal', message: 'invalid-request', details: {} },
       })
     expect(learningClues.review).toHaveBeenCalledOnce()
+  })
+
+  it('rejects new, resumed, and reviewed analysis work for an unsupported clue', async () => {
+    const fixture = createFixtureRoot()
+    const ticketId = `ticket:${'e'.repeat(64)}`
+    const privateNote = 'Do not expose this private correction.'
+    const snapshot = {
+      goals: [],
+      status: {
+        schemaVersion: 'tianwen.learning-clue-status.v1' as const,
+        items: [{
+          ticketId,
+          status: 'unsupported' as const,
+          occurrenceCount: 1,
+          analysis: null,
+          review: null,
+          sources: [{
+            longGoalId: 'historical-goal',
+            goalObjective: 'Historical goal',
+            taskId: 'historical-task',
+            taskObjective: 'Historical task',
+            recordedAt: '2026-08-30T00:00:00.000Z',
+          }],
+        }],
+      },
+    }
+    const getFeedback = vi.fn(() => ({
+      scopeKey: 'workspace:D:/workspace',
+      latest: {
+        note: privateNote,
+        sessionId: 'source-session',
+        messageId: 'assistant-anchor',
+      },
+    }))
+    const openSession = vi.fn(async () => { throw new Error('must not open a Session') })
+    const createSession = vi.fn(async () => { throw new Error('must not create a Session') })
+    const flushSession = vi.fn(async () => undefined)
+    const operations = createLearningClueAnalysisOperations({
+      stateRoot: fixture,
+      clueSnapshot: async () => snapshot,
+      getFeedback,
+      openSession,
+      createSession,
+      flushSession,
+    })
+    const expectUnsupported = async (operation: Promise<unknown>) => {
+      await expect(operation).rejects.toThrow('Learning clue is unsupported')
+      await operation.catch(error => {
+        expect(String(error)).not.toContain(privateNote)
+      })
+    }
+    try {
+      await expectUnsupported(operations.analyze({ ticketId }))
+      createLearningClueAnalysisBinding({
+        stateRoot: fixture,
+        ticketId,
+        sessionId: 'historical-analysis-session',
+        messageId: 'historical-analysis-message',
+        startedAt: '2026-08-30T00:01:00.000Z',
+      })
+      await expectUnsupported(operations.analyze({ ticketId }))
+      await expectUnsupported(operations.review({ ticketId }))
+
+      expect(getFeedback).not.toHaveBeenCalled()
+      expect(openSession).not.toHaveBeenCalled()
+      expect(createSession).not.toHaveBeenCalled()
+      expect(flushSession).not.toHaveBeenCalled()
+      expect(readLearningClueAnalysisBinding(fixture, ticketId)).toBeDefined()
+      expect(readLearningClueReview(fixture, ticketId)).toBeUndefined()
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
   })
 
   it('analyzes one safe feedback source once without exposing its private evidence', async () => {
@@ -1326,7 +1417,9 @@ describe('Tianwen Long Goal Web host', () => {
         tasks: [{ ...status.tasks[0]!, phase: 'active', execution }],
       }
       const planner = fakeAgent('planner-session', goalView())
-      const child = fakeAgent('session-new', goalView({ id: 'goal-new' as GoalView['id'] }), {
+      const child = fakeAgent('session-new', goalView({
+        id: 'goal-new' as GoalView['id'], objective: 'Prepare notes',
+      }), {
         header: { cwd: fixture, agentPreset: 'planner-preset' },
       })
       let liveChild = false

@@ -1747,6 +1747,7 @@ export function createLearningClueAnalysisOperations(
       const snapshot = await dependencies.clueSnapshot()
       const clue = snapshot.status.items.find(item => item.ticketId === ticketId)
       if (clue === undefined) throw new Error('Learning clue is not visible')
+      if (clue.status !== 'open') throw new Error('Learning clue is unsupported')
       const existing = readLearningClueAnalysisBinding(dependencies.stateRoot, ticketId)
       if (existing !== undefined) {
         return {
@@ -1861,6 +1862,7 @@ export function createLearningClueAnalysisOperations(
       const snapshot = await dependencies.clueSnapshot()
       const clue = snapshot.status.items.find(item => item.ticketId === ticketId)
       if (clue === undefined) throw new Error('Learning clue is not visible')
+      if (clue.status !== 'open') throw new Error('Learning clue is unsupported')
       const binding = readLearningClueAnalysisBinding(dependencies.stateRoot, ticketId)
       if (binding === undefined) throw new Error('Learning clue has no analysis')
       const projected = await projectClue(clue)
