@@ -4,6 +4,7 @@ import {
   buildContinuousGoalAttentionNotice,
   buildContinuousGoalPlanningFailureNotice,
   buildContinuousGoalProgressNotice,
+  buildLongGoalProgressReport,
   buildContinuousGoalSettlementNotice,
 } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-feedback.js'
 import type { LongGoalStatusProjectionV3 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
@@ -269,6 +270,36 @@ describe('continuous Goal terminal settlement notice', () => {
 })
 
 describe('continuous Goal conversation progress notice', () => {
+  it('renders coalesced progress from only the four allowed persisted fact fields', () => {
+    const content = buildLongGoalProgressReport([
+      {
+        stage: 'Task 1 active',
+        lastCompletedAction: 'Plan persisted',
+        waitingFor: 'Task result',
+        nextAction: 'Verify Task 1',
+        changedAt: '2026-09-01T00:00:00.000Z',
+      },
+      {
+        stage: 'Task 2 active',
+        waitingFor: 'External check',
+        changedAt: '2026-09-01T00:00:01.000Z',
+      },
+    ]).map(block => block.text).join('\n')
+
+    expect(content).toBe([
+      'Stage: Task 1 active',
+      'Last completed action: Plan persisted',
+      'Waiting for: Task result',
+      'Next action: Verify Task 1',
+      '',
+      'Stage: Task 2 active',
+      'Waiting for: External check',
+    ].join('\n'))
+    expect(content).not.toContain('2026-09-01')
+    expect(content).not.toContain('Goal objective')
+    expect(content).not.toContain('percent')
+  })
+
   it('reports an initial planning failure without exposing the raw exception', () => {
     const message = buildContinuousGoalPlanningFailureNotice(status({
       goalPhase: 'planning',

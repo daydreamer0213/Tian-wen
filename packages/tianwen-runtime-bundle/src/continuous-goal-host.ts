@@ -4,6 +4,10 @@ import type { Session } from '@deepseek-ai/dsh-session'
 
 import type { ContinuousGoalAgentOperations } from './continuous-goal-agent.js'
 import { LongGoalIntegrityError } from './long-goal.js'
+import {
+  createLongGoalLiveness,
+  type DurableProgressFact,
+} from './long-goal-liveness.js'
 import type {
   ContinuousGoalControlAction,
   ContinuousGoalControlResult,
@@ -29,25 +33,11 @@ type CommandRegistration = {
   dispose(): void | Promise<void>
 }
 
-export interface ContinuousGoalAttention {
-  readonly approvalId: string
-  readonly sessionId: string
-  readonly toolName: string
-  readonly reason?: string
+export interface ContinuousGoalDeliveryIntent {
+  readonly longGoalId: string
+  readonly transition: 'complete' | 'block'
+  readonly status: LongGoalStatusProjectionV3
 }
-
-export type ContinuousGoalDeliveryIntent =
-  | {
-      readonly longGoalId: string
-      readonly transition: 'start' | 'advance' | 'complete' | 'block' | 'planning-failed'
-      readonly status: LongGoalStatusProjectionV3
-    }
-  | {
-    readonly longGoalId: string
-    readonly transition: 'attention'
-    readonly status: LongGoalStatusProjectionV3
-    readonly attention: ContinuousGoalAttention
-  }
 
 export interface ContinuousGoalHostDependencies {
   readonly roots: ContinuousGoalHostRoots
@@ -74,6 +64,15 @@ export interface ContinuousGoalHostDependencies {
   readonly pause: (input: GoalProgressInput) => unknown
   readonly flushSession: (agent: Agent) => Promise<void | boolean>
   readonly deliver?: (intent: ContinuousGoalDeliveryIntent) => Promise<void | boolean>
+  readonly reportProgress?: (input: {
+    readonly planner: Agent
+    readonly facts: readonly DurableProgressFact[]
+    readonly signal: AbortSignal
+  }) => Promise<void | boolean>
+  readonly recordTerminalAttempt?: (input: {
+    readonly longGoalId: string
+    readonly status: LongGoalStatusProjectionV3
+  }) => Promise<void>
   readonly reportError: (error: unknown) => void
   readonly installCommand: (
     agent: Agent,
@@ -178,6 +177,28 @@ function activeProgressTransition(
   return currentIndex === 0 ? 'start' : 'advance'
 }
 
+function durableProgressFact(
+  record: LongGoalRecordV3,
+  status: LongGoalStatusProjectionV3,
+): DurableProgressFact {
+  const currentIndex = status.tasks.findIndex(task => task.id === status.currentTaskId)
+  const current = currentIndex < 0 ? undefined : status.tasks[currentIndex]
+  const settled = (currentIndex < 0 ? status.tasks : status.tasks.slice(0, currentIndex))
+    .findLast(task => task.phase === 'complete' || task.phase === 'abandoned')
+  const next = status.tasks
+    .slice(Math.max(0, currentIndex + 1))
+    .find(task => task.phase === 'pending')
+  return {
+    stage: current === undefined
+      ? status.goal.phase
+      : `${status.goal.phase}: Task ${currentIndex + 1} of ${status.tasks.length}`,
+    ...(settled === undefined ? {} : { lastCompletedAction: settled.objective }),
+    ...(current?.phase === 'active' ? { waitingFor: `Task result: ${current.objective}` } : {}),
+    ...(next === undefined ? {} : { nextAction: next.objective }),
+    changedAt: new Date(record.updatedAt).toISOString(),
+  }
+}
+
 function isUserAbort(event: unknown): boolean {
   if (typeof event !== 'object' || event === null) return false
   const typed = event as {
@@ -187,21 +208,6 @@ function isUserAbort(event: unknown): boolean {
   return typed.type === 'turn/end'
     && typed.data?.reason?.kind === 'aborted'
     && typed.data.reason.reason?.kind === 'user'
-}
-
-function approvalAsked(event: unknown): Omit<ContinuousGoalAttention, 'sessionId'> | undefined {
-  if (typeof event !== 'object' || event === null) return undefined
-  const typed = event as { type?: unknown, data?: { id?: unknown, toolName?: unknown, reason?: unknown } }
-  if (
-    typed.type !== 'approval/asked'
-    || !isNonEmptyString(typed.data?.id)
-    || !isNonEmptyString(typed.data.toolName)
-  ) return undefined
-  return {
-    approvalId: typed.data.id,
-    toolName: typed.data.toolName,
-    ...(typeof typed.data.reason === 'string' ? { reason: typed.data.reason } : {}),
-  }
 }
 
 async function disposeRegistration(dispose: (() => void | Promise<void>) | undefined): Promise<void> {
@@ -238,6 +244,16 @@ export function mountContinuousGoalHost(
     controls?: () => void | Promise<void>
   }>()
   const creatingControlSessions = new Set<string>()
+  const liveness = createLongGoalLiveness<Agent>({
+    report: async report => {
+      await dependencies.reportProgress?.({
+        planner: report.reporter,
+        facts: report.facts,
+        signal: AbortSignal.timeout(30_000),
+      })
+    },
+    reportError: dependencies.reportError,
+  })
 
   const readStatus = (longGoalId: string) => dependencies.readStatus({
     stateRoot: dependencies.roots.stateRoot,
@@ -263,14 +279,12 @@ export function mountContinuousGoalHost(
       void task.finally(() => { deliveryTasks.delete(task) }).catch(() => undefined)
     }
   }
-  const deliveryKey = (intent: ContinuousGoalDeliveryIntent): string => intent.transition === 'attention'
-    ? [intent.longGoalId, intent.transition, intent.attention.sessionId, intent.attention.approvalId].join(':')
-    : [
-        intent.longGoalId,
-        intent.transition,
-        intent.status.goal.revision,
-        intent.status.currentTaskId ?? 'no-current-task',
-      ].join(':')
+  const deliveryKey = (intent: ContinuousGoalDeliveryIntent): string => [
+    intent.longGoalId,
+    intent.transition,
+    intent.status.goal.revision,
+    intent.status.currentTaskId ?? 'no-current-task',
+  ].join(':')
   const recordDelivery = (intent: ContinuousGoalDeliveryIntent): void => {
     const key = deliveryKey(intent)
     if (deliveryKeys.has(key)) return
@@ -279,18 +293,42 @@ export function mountContinuousGoalHost(
     intents.push(intent)
     pendingDeliveries.set(intent.longGoalId, intents)
   }
-  const recordProgressDelivery = (longGoalId: string, status: LongGoalStatusProjectionV3): void => {
-    const current = status.currentTaskId === null
-      ? undefined
-      : status.tasks.find(candidate => candidate.id === status.currentTaskId)
+  const recordProgressDelivery = (
+    longGoalId: string,
+    status: LongGoalStatusProjectionV3,
+    offlineRecovery = false,
+  ): void => {
+    const record = readV3(longGoalId)
+    if (record === undefined) return
     const transition = status.goal.phase === 'complete'
       ? 'complete'
       : status.goal.phase === 'blocked'
         ? 'block'
-        : status.goal.phase === 'active' && current?.phase === 'active'
-          ? 'advance'
-          : undefined
-    if (transition !== undefined) recordDelivery({ longGoalId, transition, status })
+        : activeProgressTransition(status)
+    if (transition === 'complete' || transition === 'block') {
+      const planner = ctx.agents.get(record.planner.sessionId as never)
+      if (planner !== undefined) {
+        liveness.observe({
+          parentKey: record.control.sessionId,
+          sourceKey: record.id,
+          reporter: planner,
+          state: transition === 'block' ? 'blocked' : 'terminal',
+          fact: durableProgressFact(record, status),
+        })
+      }
+      if (offlineRecovery) recordDelivery({ longGoalId, transition, status })
+      return
+    }
+    if (transition !== 'start' && transition !== 'advance') return
+    const planner = ctx.agents.get(record.planner.sessionId as never)
+    if (planner === undefined || String(planner.session.id) !== record.planner.sessionId) return
+    liveness.observe({
+      parentKey: record.control.sessionId,
+      sourceKey: record.id,
+      reporter: planner,
+      state: 'active',
+      fact: durableProgressFact(record, status),
+    })
   }
   const rememberLane = <T>(
     longGoalId: string,
@@ -404,21 +442,8 @@ export function mountContinuousGoalHost(
               : result.status.goal.phase === 'active' && current?.phase === 'active'
                 ? 'start'
                 : undefined
-          if (transition !== undefined) recordDelivery({ longGoalId: created.id, transition, status: result.status })
-        }, async error => {
-          try {
-            const failedStatus = await readStatus(created.id)
-            if (
-              failedStatus.goal.id === created.id
-              && failedStatus.control.sessionId === controlSessionId
-              && failedStatus.goal.phase === 'planning'
-              && failedStatus.currentTaskId === null
-            ) {
-              recordDelivery({ longGoalId: created.id, transition: 'planning-failed', status: failedStatus })
-            }
-          } catch (noticeError) {
-            try { dependencies.reportError(noticeError) } catch {}
-          }
+          if (transition !== undefined) recordProgressDelivery(created.id, result.status)
+        }, error => {
           throw error
         }))
         return { action: 'started' }
@@ -478,7 +503,10 @@ export function mountContinuousGoalHost(
     const status = await readStatus(longGoalId)
     const projected = status.tasks.find(candidate => candidate.id === task.id)
     if (projected?.phase !== 'complete' || settledTasks(status) <= record.planner.consideredSettledTasks) return
-    await dependencies.continueProgress({ longGoalId, expectedRevision: record.revision })
+    await dependencies.recordTerminalAttempt?.({ longGoalId, status })
+    const terminalRecord = readV3(longGoalId)
+    if (terminalRecord === undefined) return
+    await dependencies.continueProgress({ longGoalId, expectedRevision: terminalRecord.revision })
     recordProgressDelivery(longGoalId, await readStatus(longGoalId))
   }
 
@@ -502,11 +530,8 @@ export function mountContinuousGoalHost(
       || current.execution?.sessionId !== execution.sessionId
       || current.execution.goalId !== execution.goalId
     ) return
-    recordDelivery({
-      longGoalId,
-      transition: 'block',
-      status: blocked,
-    })
+    await dependencies.recordTerminalAttempt?.({ longGoalId, status: blocked })
+    recordProgressDelivery(longGoalId, blocked)
   }
 
   const reconcile = async (longGoalId: string): Promise<void> => {
@@ -515,7 +540,8 @@ export function mountContinuousGoalHost(
     if (record === undefined) return
     const status = await readStatus(longGoalId)
     if (status.goal.phase === 'blocked' || status.goal.phase === 'complete') {
-      recordProgressDelivery(longGoalId, status)
+      await dependencies.recordTerminalAttempt?.({ longGoalId, status })
+      recordProgressDelivery(longGoalId, status, true)
       return
     }
     if (record.control.autoProgress !== 'running' || record.planner.phase === 'complete') return
@@ -529,17 +555,23 @@ export function mountContinuousGoalHost(
       || hasNewSettledTask
       || !exactLiveArmedTask(ctx, record, status)
     if (requiresContinue) {
-      await dependencies.continueProgress({ longGoalId, expectedRevision: record.revision })
+      if (hasNewSettledTask) await dependencies.recordTerminalAttempt?.({ longGoalId, status })
+      const currentRecord = readV3(longGoalId)
+      if (currentRecord === undefined) return
+      await dependencies.continueProgress({ longGoalId, expectedRevision: currentRecord.revision })
       const recovered = await readStatus(longGoalId)
       if (recovered.goal.phase === 'complete' || recovered.goal.phase === 'blocked' || hasNewSettledTask) {
-        recordProgressDelivery(longGoalId, recovered)
+        if (recovered.goal.phase === 'complete' || recovered.goal.phase === 'blocked') {
+          await dependencies.recordTerminalAttempt?.({ longGoalId, status: recovered })
+        }
+        recordProgressDelivery(longGoalId, recovered, true)
       } else {
         const transition = activeProgressTransition(recovered)
-        if (transition !== undefined) recordDelivery({ longGoalId, transition, status: recovered })
+        if (transition !== undefined) recordProgressDelivery(longGoalId, recovered)
       }
     } else {
       const transition = activeProgressTransition(status)
-      if (transition !== undefined) recordDelivery({ longGoalId, transition, status })
+      if (transition !== undefined) recordProgressDelivery(longGoalId, status)
     }
   }
 
@@ -599,37 +631,6 @@ export function mountContinuousGoalHost(
     await readStatus(longGoalId)
   }
 
-  const recordApprovalAttention = async (
-    longGoalId: string,
-    sessionId: string,
-    attention: Omit<ContinuousGoalAttention, 'sessionId'>,
-  ): Promise<void> => {
-    const record = readV3(longGoalId)
-    if (
-      record === undefined
-      || record.control.autoProgress !== 'running'
-      || record.planner.phase === 'complete'
-    ) return
-    const status = await readStatus(longGoalId)
-    if (status.goal.phase !== 'active' || status.currentTaskId === null) return
-    const current = status.tasks.find(task => task.id === status.currentTaskId)
-    const execution = current?.execution
-    if (
-      current?.phase !== 'active'
-      || execution === null
-      || execution === undefined
-      || execution.sessionId !== sessionId
-    ) return
-    const bound = boundTask(record, execution.sessionId, execution.goalId)
-    if (bound?.id !== current.id) return
-    recordDelivery({
-      longGoalId,
-      transition: 'attention',
-      status,
-      attention: { ...attention, sessionId },
-    })
-  }
-
   for (const agent of ctx.agents.list()) install(agent)
   for (const record of dependencies.listLongGoals()) {
     if (isV3(record)) void joinOrStart(record.id, () => reconcile(record.id)).catch(() => undefined)
@@ -659,13 +660,12 @@ export function mountContinuousGoalHost(
     }
   })
   const offSession = ctx.on('session/event', (session, event) => {
-    const attention = approvalAsked(event)
     const userAbort = isUserAbort(event)
     const eventType = typeof event === 'object' && event !== null
       ? (event as { readonly type?: unknown }).type
       : undefined
     const permissionEvent = eventType === 'tool/result' || eventType === 'sandbox/mode'
-    if (!userAbort && attention === undefined && !permissionEvent) return
+    if (!userAbort && !permissionEvent) return
     const sessionId = String(session.id)
     for (const record of dependencies.listLongGoals()) {
       if (
@@ -683,8 +683,6 @@ export function mountContinuousGoalHost(
           session,
           event,
         })).catch(() => undefined)
-      } else if (attention !== undefined) {
-        void append(record.id, () => recordApprovalAttention(record.id, sessionId, attention)).catch(() => undefined)
       } else if (userAbort && record.control.sessionId === sessionId) {
         void append(record.id, () => pauseForControlStop(record.id)).catch(() => undefined)
       } else if (userAbort && boundTask(record, sessionId) !== undefined) {
@@ -720,6 +718,7 @@ export function mountContinuousGoalHost(
     }
     await Promise.allSettled([...lanes.values()])
     await Promise.allSettled([...deliveryTasks])
+    await liveness.dispose()
     if (failures.length > 0) throw new AggregateError(failures, 'Continuous Goal Host lane failures')
   }
 }

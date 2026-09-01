@@ -25,10 +25,11 @@ import {
 import type { LongGoalRecordV3, LongGoalStatusProjectionV3 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
 import type { ContinuousGoalControlAction } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-service.js'
 import { mountContinuousGoalHost, type ContinuousGoalHostDependencies } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-host.js'
-import { buildContinuousGoalSettlementNotice } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-feedback.js'
 import {
   createPermissionAttemptHost,
   deliverContinuousGoalSettlement,
+  recordContinuousGoalTerminalAttempt,
+  reportLongGoalProgress,
   runCurrentWebTask,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
 import { runLongGoalPlannerTurn } from '../../packages/tianwen-runtime-bundle/src/long-goal-planner.js'
@@ -73,6 +74,83 @@ function status(
       id: task.id, objective: task.objective, phase: phases[index]!, execution: task.execution, resolution: task.resolution,
     })),
     currentTaskId, runtime: { activation: 'not-loaded', modelRequests: 0, readOnly: true }, control: source.control,
+  }
+}
+
+function terminalFixture(label: string) {
+  const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
+  mkdirSync(base, { recursive: true })
+  const fixture = mkdtempSync(resolve(base, `${label}-`))
+  const stateRoot = resolve(fixture, 'state')
+  const created = createContinuousLongGoal({
+    stateRoot,
+    objective: 'Deliver one terminal result',
+    context: null,
+    successCriteria: null,
+    workspaceRoot: fixture,
+    agentPreset: 'planner-preset',
+    controlSessionId: 'control-session',
+  }, { goalSuffix: () => label, plannerSessionId: () => 'planner-session', now: () => 1 })
+  const planned = commitLongGoalPlan({
+    stateRoot, longGoalId: created.id, expectedRevision: created.revision,
+    outcome: 'continue', tasks: [{ objective: 'Publish once' }], consideredSettledTasks: 0,
+  }, { taskId: () => TASK_1, now: () => 2 }) as LongGoalRecordV3
+  const started = appendTianwenAttemptStarted({
+    stateRoot, longGoalId: planned.id, expectedRevision: planned.revision,
+    taskId: TASK_1, epoch: 1, parentSessionId: planned.planner.sessionId,
+    childSessionId: EXECUTION_1.sessionId, permissionFingerprint: `sha256:${label}`,
+    permissionMode: 'read-only', startedAt: '2026-09-01T00:00:00.000Z',
+  })
+  const bound = bindGoalFirstLongGoalTask({
+    stateRoot, longGoalId: started.id, expectedRevision: started.revision,
+    taskId: TASK_1, execution: EXECUTION_1,
+  }) as LongGoalRecordV3
+  const settled = appendTianwenAttemptSettled({
+    stateRoot, longGoalId: bound.id, expectedRevision: bound.revision,
+    taskId: TASK_1, epoch: 1,
+    terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
+  })
+  return {
+    fixture,
+    stateRoot,
+    record: settled,
+    status: status(settled, ['complete'], null),
+  }
+}
+
+function permissionLimitedFixture(label: string) {
+  const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
+  mkdirSync(base, { recursive: true })
+  const fixture = mkdtempSync(resolve(base, `${label}-`))
+  const stateRoot = resolve(fixture, 'state')
+  const created = createContinuousLongGoal({
+    stateRoot, objective: 'Remain permission-limited', context: null, successCriteria: null,
+    workspaceRoot: fixture, agentPreset: 'planner-preset', controlSessionId: 'control-session',
+  }, { goalSuffix: () => label, plannerSessionId: () => 'planner-session', now: () => 1 })
+  const planned = commitLongGoalPlan({
+    stateRoot, longGoalId: created.id, expectedRevision: created.revision,
+    outcome: 'continue', tasks: [{ objective: 'Needs wider permission' }], consideredSettledTasks: 0,
+  }, { taskId: () => TASK_1, now: () => 2 }) as LongGoalRecordV3
+  const started = appendTianwenAttemptStarted({
+    stateRoot, longGoalId: planned.id, expectedRevision: planned.revision,
+    taskId: TASK_1, epoch: 1, parentSessionId: 'planner-session', childSessionId: EXECUTION_1.sessionId,
+    permissionFingerprint: `sha256:${label}`, permissionMode: 'read-only',
+    startedAt: '2026-09-01T00:00:00.000Z',
+  })
+  const bound = bindGoalFirstLongGoalTask({
+    stateRoot, longGoalId: started.id, expectedRevision: started.revision,
+    taskId: TASK_1, execution: EXECUTION_1,
+  }) as LongGoalRecordV3
+  const limited = markTianwenAttemptPermissionLimited({
+    stateRoot, longGoalId: bound.id, expectedRevision: bound.revision,
+    taskId: TASK_1, epoch: 1, childSessionId: EXECUTION_1.sessionId,
+    terminalEventId: `permission-limited:${EXECUTION_1.sessionId}:9`,
+  })
+  return {
+    fixture,
+    stateRoot,
+    record: limited,
+    status: status(limited, ['blocked'], TASK_1, 'blocked'),
   }
 }
 
@@ -204,6 +282,8 @@ function harness(initial = record()) {
     control: vi.fn(async () => ({ action: 'paused' })), continueProgress,
     pause, flushSession: vi.fn(async () => { order.push('flush') }),
     deliver: vi.fn(async () => undefined),
+    reportProgress: vi.fn(async () => undefined),
+    recordTerminalAttempt: vi.fn(async () => undefined),
     reportError: vi.fn(),
     installCommand: vi.fn((controlAgent: Agent, operations) => {
       commands.set(controlAgent, operations as never)
@@ -249,6 +329,321 @@ function harness(initial = record()) {
 }
 
 describe('continuous Goal Host', () => {
+  it('reports coalesced durable facts from the exact Planner through the public DSH API', async () => {
+    const planner = { session: { id: 'planner-session' } } as unknown as Agent
+    const reportFrom = vi.fn(async () => 'main-report-message')
+    const signal = new AbortController().signal
+
+    await expect(reportLongGoalProgress({ subagents: { reportFrom } } as never, {
+      planner,
+      facts: [{
+        stage: 'Task 1 active',
+        lastCompletedAction: 'Plan persisted',
+        waitingFor: 'Task result',
+        nextAction: 'Verify Task 1',
+        changedAt: '2026-09-01T00:00:00.000Z',
+      }],
+      signal,
+    })).resolves.toBe('main-report-message')
+
+    expect(reportFrom).toHaveBeenCalledWith(
+      planner,
+      [{ type: 'text', text: [
+        'Stage: Task 1 active',
+        'Last completed action: Plan persisted',
+        'Waiting for: Task result',
+        'Next action: Verify Task 1',
+      ].join('\n') }],
+      { delivery: 'next-step', signal },
+    )
+  })
+
+  it('persists one offline main completion Turn before acknowledging delivery and never sends it twice', async () => {
+    const terminal = terminalFixture('offline-exact-once')
+    try {
+      const controlAgent = feedbackAgent()
+      let mainEvents: readonly SessionEvent[] = []
+      const taskEvents = [
+        { type: 'turn/start', seq: 10, time: 900, data: { turn: 4 } },
+        { type: 'user/message', seq: 11, time: 901, surfaceOp: 'append', data: {
+          id: 'task-input', role: 'user', content: [{ type: 'text', text: 'Publish once' }],
+          source: { kind: 'goal', goalId: EXECUTION_1.goalId, revision: 1, round: 1 },
+        } },
+        { type: 'assistant/message', seq: 12, time: 950, surfaceOp: 'append', data: {
+          turn: 4,
+          message: { id: 'task-result', role: 'assistant', content: [{ type: 'text', text: 'Published once.' }] },
+        } },
+        { type: 'turn/end', seq: 13, time: 951, data: { turn: 4, reason: { kind: 'completed' } } },
+        { type: 'goal/change', seq: 17, time: 1_000, data: {
+          operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+          goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+        } },
+      ] as unknown as readonly SessionEvent[]
+      const inspectSession = vi.fn(async (sessionId: string) => sessionId === EXECUTION_1.sessionId
+        ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+        : { meta: { id: sessionId }, events: mainEvents })
+      const flushSession = vi.fn(async () => {
+        const notice = controlAgent.followup.mock.calls[0]![0]
+        mainEvents = [
+          { type: 'turn/start', seq: 20, time: 1_100, data: { turn: 20 } },
+          { type: 'user/message', seq: 21, time: 1_101, surfaceOp: 'append', data: notice },
+          { type: 'assistant/message', seq: 22, time: 1_102, surfaceOp: 'append', data: {
+            turn: 20,
+            message: { id: 'main-result', role: 'assistant', content: [{ type: 'text', text: 'Delivery confirmed.' }] },
+          } },
+          { type: 'turn/end', seq: 23, time: 1_103, data: { turn: 20, reason: { kind: 'completed' } } },
+        ] as unknown as readonly SessionEvent[]
+        return true
+      })
+      const dependencies = {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => controlAgent,
+        readStatus: async () => terminal.status,
+        inspectSession,
+        flushSession,
+      }
+
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: terminal.record.id, transition: 'complete', status: terminal.status,
+      }, dependencies)).resolves.toBe(true)
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: terminal.record.id, transition: 'complete', status: terminal.status,
+      }, dependencies)).resolves.toBe(true)
+
+      expect(controlAgent.followup).toHaveBeenCalledOnce()
+      expect(flushSession).toHaveBeenCalledOnce()
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      ).terminalDelivery).toEqual({
+        terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
+        parentSessionId: 'planner-session',
+        completionTurnObserved: true,
+      })
+    } finally {
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('acknowledges an already-persisted native Planner completion Turn without sending fallback', async () => {
+    const terminal = terminalFixture('native-observed')
+    try {
+      const taskEvents = [{
+        type: 'goal/change', seq: 17, time: 1_000,
+        data: {
+          operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+          goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+        },
+      }] as unknown as readonly SessionEvent[]
+      const mainEvents = [
+        { type: 'turn/start', seq: 20, time: 1_100, data: { turn: 9 } },
+        { type: 'user/message', seq: 21, time: 1_101, surfaceOp: 'append', data: {
+          id: 'native-settlement', role: 'user', content: [{ type: 'text', text: 'Planner settled.' }],
+          source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
+        } },
+        { type: 'assistant/message', seq: 22, time: 1_102, surfaceOp: 'append', data: {
+          turn: 9,
+          message: { id: 'native-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Goal complete.' }] },
+        } },
+        { type: 'turn/end', seq: 23, time: 1_103, data: { turn: 9, reason: { kind: 'completed' } } },
+      ] as unknown as readonly SessionEvent[]
+      const followup = vi.fn()
+
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: terminal.record.id, transition: 'complete', status: terminal.status,
+      }, {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => ({ followup } as unknown as Agent),
+        readStatus: async () => terminal.status,
+        inspectSession: async sessionId => sessionId === EXECUTION_1.sessionId
+          ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+          : { meta: { id: sessionId }, events: mainEvents },
+        flushSession: vi.fn(async () => true),
+      })).resolves.toBe(true)
+
+      expect(followup).not.toHaveBeenCalled()
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      ).terminalDelivery?.completionTurnObserved).toBe(true)
+    } finally {
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('does not mistake a persisted Planner progress report for terminal settlement', async () => {
+    const terminal = terminalFixture('progress-is-not-settlement')
+    try {
+      const taskEvents = [{
+        type: 'goal/change', seq: 17, time: 1_000,
+        data: {
+          operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+          goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+        },
+      }] as unknown as readonly SessionEvent[]
+      const mainEvents = [
+        { type: 'turn/start', seq: 20, time: 1_100, data: { turn: 9 } },
+        { type: 'user/message', seq: 21, time: 1_101, surfaceOp: 'append', data: {
+          id: 'native-progress', role: 'user', content: [{ type: 'text', text: 'Progress only.' }],
+          source: { kind: 'subagent-report', form: 'notice', summary: 'progress', senderSessionId: 'planner-session' },
+        } },
+        { type: 'assistant/message', seq: 22, time: 1_102, surfaceOp: 'append', data: {
+          turn: 9,
+          message: { id: 'native-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Keep going.' }] },
+        } },
+        { type: 'turn/end', seq: 23, time: 1_103, data: { turn: 9, reason: { kind: 'completed' } } },
+      ] as unknown as readonly SessionEvent[]
+
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: terminal.record.id, transition: 'complete', status: terminal.status,
+      }, {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => undefined,
+        readStatus: async () => terminal.status,
+        inspectSession: async sessionId => sessionId === EXECUTION_1.sessionId
+          ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+          : { meta: { id: sessionId }, events: mainEvents },
+        flushSession: vi.fn(async () => true),
+      })).resolves.toBe(false)
+
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      ).terminalDelivery).toBeUndefined()
+    } finally {
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('does not acknowledge or rerun a Task when offline fallback delivery fails', async () => {
+    const terminal = terminalFixture('offline-failure')
+    try {
+      const controlAgent = feedbackAgent()
+      controlAgent.followup.mockImplementation(() => { throw new Error('main followup failed') })
+      const taskEvents = [{
+        type: 'goal/change', seq: 17, time: 1_000,
+        data: {
+          operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+          goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+        },
+      }] as unknown as readonly SessionEvent[]
+
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: terminal.record.id, transition: 'complete', status: terminal.status,
+      }, {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => controlAgent,
+        readStatus: async () => terminal.status,
+        inspectSession: async sessionId => sessionId === EXECUTION_1.sessionId
+          ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+          : { meta: { id: sessionId }, events: [] },
+        flushSession: vi.fn(async () => true),
+      })).rejects.toThrow('main followup failed')
+
+      const reloaded = readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3
+      expect(readTianwenTaskAttemptProjection(reloaded, TASK_1).terminalDelivery).toBeUndefined()
+      expect(readTianwenTaskAttemptProjection(reloaded, TASK_1).attempts).toHaveLength(1)
+      expect(reloaded.tasks[0]!.execution).toEqual(EXECUTION_1)
+    } finally {
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('does not turn a permission-limited attempt into settlement feedback or delivery acknowledgement', async () => {
+    const limited = permissionLimitedFixture('permission-limited-no-settlement')
+    try {
+      const main = feedbackAgent()
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: limited.record.id, transition: 'block', status: limited.status,
+      }, {
+        stateRoot: limited.stateRoot,
+        getAgent: () => main,
+        readStatus: async () => limited.status,
+        inspectSession: async sessionId => ({ meta: { id: sessionId }, events: [] }),
+        flushSession: vi.fn(async () => true),
+      })).resolves.toBe(false)
+
+      expect(main.followup).not.toHaveBeenCalled()
+      const projection = readTianwenTaskAttemptProjection(
+        readLongGoal(limited.stateRoot, limited.record.id) as LongGoalRecordV3,
+        TASK_1,
+      )
+      expect(projection.attempts).toMatchObject([{ status: 'permission-limited' }])
+      expect(projection.terminalDelivery).toBeUndefined()
+    } finally {
+      rmSync(limited.fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('folds a persisted child terminal event once after restart without starting the Task again', async () => {
+    const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
+    mkdirSync(base, { recursive: true })
+    const fixture = mkdtempSync(resolve(base, 'terminal-restart-'))
+    try {
+      const stateRoot = resolve(fixture, 'state')
+      const created = createContinuousLongGoal({
+        stateRoot,
+        objective: 'Record one child terminal event',
+        context: null,
+        successCriteria: null,
+        workspaceRoot: fixture,
+        agentPreset: 'planner-preset',
+        controlSessionId: 'main-control',
+      }, {
+        goalSuffix: () => 'terminal-restart', plannerSessionId: () => 'planner-terminal', now: () => 1,
+      })
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: created.id, expectedRevision: created.revision,
+        outcome: 'continue', tasks: [{ objective: 'Finish exact work once' }], consideredSettledTasks: 0,
+      }, { taskId: () => TASK_1, now: () => 2 }) as LongGoalRecordV3
+      const started = appendTianwenAttemptStarted({
+        stateRoot, longGoalId: planned.id, expectedRevision: planned.revision,
+        taskId: TASK_1, epoch: 1, parentSessionId: planned.planner.sessionId,
+        childSessionId: EXECUTION_1.sessionId, permissionFingerprint: 'sha256:terminal-restart',
+        permissionMode: 'read-only', startedAt: '2026-09-01T00:00:00.000Z',
+      })
+      const bound = bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: started.id, expectedRevision: started.revision,
+        taskId: TASK_1, execution: EXECUTION_1,
+      }) as LongGoalRecordV3
+      const completed = status(bound, ['complete'], null)
+      const inspectSession = vi.fn(async () => ({
+        meta: {
+          id: EXECUTION_1.sessionId,
+          parentSession: bound.planner.sessionId,
+        },
+        events: [{
+          type: 'goal/change', seq: 17, time: 1_000,
+          data: {
+            operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+            goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+          },
+        }] as unknown as readonly SessionEvent[],
+      }))
+
+      await recordContinuousGoalTerminalAttempt({
+        stateRoot, longGoalId: bound.id, status: completed,
+      }, { inspectSession })
+      await recordContinuousGoalTerminalAttempt({
+        stateRoot, longGoalId: bound.id, status: completed,
+      }, { inspectSession })
+
+      const reloaded = readLongGoal(stateRoot, bound.id) as LongGoalRecordV3
+      expect(readTianwenTaskAttemptProjection(reloaded, TASK_1)).toMatchObject({
+        attempts: [{
+          epoch: 1,
+          childSessionId: EXECUTION_1.sessionId,
+          status: 'settled',
+          terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
+        }],
+      })
+      expect(reloaded.tasks[0]!.execution).toEqual(EXECUTION_1)
+      expect(inspectSession).toHaveBeenCalledTimes(1)
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
   it('serializes a wider main sandbox event with exact Planner recovery on the same Goal lane', async () => {
     const source = record({
       tasks: [{ id: TASK_1, objective: 'Renew permission', execution: null, resolution: null }],
@@ -383,7 +778,7 @@ describe('continuous Goal Host', () => {
     }
   })
 
-  it('closes a reserved Task attempt as interrupted when native DSH rejects before inbox acceptance', async () => {
+  it('closes a pre-acceptance rejection, then cold-adopts the exact DSH-accepted child without another Task start', async () => {
     const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
     mkdirSync(base, { recursive: true })
     const fixture = mkdtempSync(resolve(base, 'native-task-rejection-'))
@@ -425,20 +820,39 @@ describe('continuous Goal Host', () => {
         expect(input.parent).toBe(planner)
         throw startFailure
       })
-      const pending = status(planned, ['pending'], taskId)
+      const adoptedGoal = {
+        id: 'adopted-task-goal', revision: 1, phase: 'active' as const, activation: 'armed' as const,
+        objective: 'Start exact child', maxGoalRounds: 3,
+      }
+      const adoptedChild = {
+        session: {
+          id: 'accepted-before-bind-child',
+          header: { cwd: fixture, agentPreset: 'planner-preset', parentSession: 'live-planner' },
+        },
+        ctx: { goals: { get: () => adoptedGoal } },
+      } as unknown as Agent
+      const live = new Map<string, Agent>([['live-planner', planner]])
+      const followupNativeTaskChild = vi.fn(async (_parent: Agent, childId: string) => {
+        expect(childId).toBe('accepted-before-bind-child')
+        live.set(childId, adoptedChild)
+        return 'cold-adopt-message'
+      })
       const dependencies = {
         readLongGoal,
-        readLongGoalStatus: vi.fn(async () => pending),
+        readLongGoalStatus: vi.fn(async () => {
+          const latest = readLongGoal(stateRoot, source.id) as LongGoalRecordV3
+          return status(latest, [latest.tasks[0]!.execution === null ? 'pending' : 'active'], taskId)
+        }),
         bindLongGoalTask: vi.fn(),
         bindGoalFirstLongGoalTask,
         listSessions: vi.fn(async () => []),
         createSession: directCreate,
         reserveTaskSessionId: () => reservedIds.shift()!,
         startNativeTaskChild,
-        followupNativeTaskChild: vi.fn(),
+        followupNativeTaskChild,
         nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
-        attachedAgent: (sessionId: string) => sessionId === 'live-planner' ? planner : undefined,
-        createGoal: vi.fn(),
+        attachedAgent: (sessionId: string) => live.get(sessionId),
+        createGoal: vi.fn(() => adoptedGoal),
         readGoalRef: vi.fn(),
         resumeColdGoal: vi.fn(),
         flushSession: vi.fn(),
@@ -477,13 +891,19 @@ describe('continuous Goal Host', () => {
         },
         longGoalId: source.id,
         expectedRevision: reloaded.revision,
-      }, dependencies as never)).rejects.toMatchObject({ code: 'DUPLICATE_CHILD' })
+      }, dependencies as never)).resolves.toMatchObject({
+        action: 'started', sessionId: 'accepted-before-bind-child',
+      })
       const acceptedBeforeBind = readLongGoal(stateRoot, source.id) as LongGoalRecordV3
       expect(readTianwenTaskAttemptProjection(acceptedBeforeBind, taskId).attempts).toMatchObject([
         { epoch: 1, childSessionId: 'reserved-task-child', status: 'interrupted' },
         { epoch: 2, childSessionId: 'accepted-before-bind-child', status: 'running' },
       ])
       expect(acceptedBeforeBind.tianwenEvents?.filter(event => event.type === 'attempt-provisioning-failed')).toHaveLength(1)
+      expect(acceptedBeforeBind.tasks[0]!.execution).toEqual({
+        sessionId: 'accepted-before-bind-child', goalId: 'adopted-task-goal',
+      })
+      expect(followupNativeTaskChild).toHaveBeenCalledOnce()
 
       await expect(runCurrentWebTask({
         roots: {
@@ -493,12 +913,15 @@ describe('continuous Goal Host', () => {
         },
         longGoalId: source.id,
         expectedRevision: acceptedBeforeBind.revision,
-      }, dependencies as never)).rejects.toMatchObject({ code: 'DUPLICATE_CHILD' })
+      }, dependencies as never)).resolves.toMatchObject({
+        action: 'already-running', sessionId: 'accepted-before-bind-child',
+      })
       const restarted = readLongGoal(stateRoot, source.id) as LongGoalRecordV3
       expect(readTianwenTaskAttemptProjection(restarted, taskId).attempts).toHaveLength(2)
       expect(startNativeTaskChild.mock.calls.slice(1).map(call => call[0].childId)).toEqual([
-        'accepted-before-bind-child', 'accepted-before-bind-child',
+        'accepted-before-bind-child',
       ])
+      expect(dependencies.createGoal).not.toHaveBeenCalled()
     } finally {
       rmSync(fixture, { recursive: true, force: true })
     }
@@ -540,6 +963,7 @@ describe('continuous Goal Host', () => {
       } as unknown as Agent
       const secondTask = {
         session: { id: 'reserved-task-child-2', header: { cwd: fixture, agentPreset: 'planner-preset' } },
+        ctx: { goals: { get: () => undefined } },
       } as unknown as Agent
       const live = new Map<string, Agent>([['live-planner', planner]])
       const reservedIds = ['reserved-task-child-1', 'reserved-task-child-2']
@@ -1583,7 +2007,7 @@ describe('continuous Goal Host', () => {
     expect(subject.order).toEqual(expect.arrayContaining(['read', 'flush', 'continue']))
   })
 
-  it('records one complete delivery after continuation reaches authoritative completion', async () => {
+  it('records one terminal attempt but leaves online completion delivery to native DSH settlement', async () => {
     const subject = harness()
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
     await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
@@ -1595,12 +2019,12 @@ describe('continuous Goal Host', () => {
     subject.complete()
     await dispose()
 
-    expect(subject.dependencies.deliver.mock.calls.filter(([intent]) => intent.transition === 'complete')).toHaveLength(1)
-    expect(subject.dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
+    expect(subject.dependencies.recordTerminalAttempt).toHaveBeenCalledOnce()
+    expect(subject.dependencies.recordTerminalAttempt).toHaveBeenCalledWith(expect.objectContaining({
       longGoalId: GOAL_ID,
-      transition: 'complete',
       status: completed,
     }))
+    expect(subject.dependencies.deliver.mock.calls.filter(([intent]) => intent.transition === 'complete')).toHaveLength(0)
   })
 
   it('records conversation progress after initial planning and after advancing to the next Task', async () => {
@@ -1613,6 +2037,8 @@ describe('continuous Goal Host', () => {
       control: { sessionId: 'control-session', autoProgress: 'running' },
     })
     const started = status(created, ['active'], TASK_1)
+    const planner = agent(created.planner.sessionId, 'planner-goal')
+    subject.live.set(created.planner.sessionId, planner)
     subject.dependencies.createProgress = vi.fn(async () => {
       subject.setRecords([previous, created])
       subject.setStatus(started)
@@ -1626,10 +2052,9 @@ describe('continuous Goal Host', () => {
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
 
     await expect(subject.create(controlAgent, 'Ship the actual Goal')).resolves.toMatchObject({ action: 'started' })
-    await vi.waitFor(() => expect(subject.dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
-      longGoalId: created.id,
-      transition: 'start',
-      status: started,
+    await vi.waitFor(() => expect(subject.dependencies.reportProgress).toHaveBeenCalledWith(expect.objectContaining({
+      planner,
+      facts: [expect.objectContaining({ stage: 'active: Task 1 of 1' })],
     })))
 
     const advancedRecord = record({
@@ -1651,14 +2076,13 @@ describe('continuous Goal Host', () => {
     subject.complete()
 
     await dispose()
-    expect(subject.dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
-      longGoalId: created.id,
-      transition: 'advance',
-      status: advanced,
-    }))
+    expect(subject.dependencies.reportProgress.mock.calls.some(([input]) =>
+      input.planner === planner
+      && input.facts.some(fact => fact.stage === 'active: Task 2 of 2'))).toBe(true)
+    expect(subject.dependencies.deliver).not.toHaveBeenCalled()
   })
 
-  it('flushes and rereads one exact block without continuing, then records one attention delivery', async () => {
+  it('flushes and rereads one exact block without continuing or online fallback delivery', async () => {
     const subject = harness()
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
     await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
@@ -1673,15 +2097,15 @@ describe('continuous Goal Host', () => {
     expect(subject.first.whenIdle).toHaveBeenCalledOnce()
     expect(subject.dependencies.flushSession).toHaveBeenCalledOnce()
     expect(subject.continueProgress).not.toHaveBeenCalled()
-    expect(subject.dependencies.deliver.mock.calls.filter(([intent]) => intent.transition === 'block')).toHaveLength(1)
-    expect(subject.dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
+    expect(subject.dependencies.recordTerminalAttempt).toHaveBeenCalledOnce()
+    expect(subject.dependencies.recordTerminalAttempt).toHaveBeenCalledWith(expect.objectContaining({
       longGoalId: GOAL_ID,
-      transition: 'block',
       status: blocked,
     }))
+    expect(subject.dependencies.deliver.mock.calls.filter(([intent]) => intent.transition === 'block')).toHaveLength(0)
   })
 
-  it('delivers distinct blocked Tasks even when their Goal revisions are equal', async () => {
+  it('records distinct blocked Tasks even when their Goal revisions are equal without online fallback', async () => {
     const firstRecord = record()
     const subject = harness(firstRecord)
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
@@ -1690,7 +2114,7 @@ describe('continuous Goal Host', () => {
     subject.first.setGoal('blocked')
     subject.setStatus(status(firstRecord, ['blocked'], TASK_1, 'blocked'))
     subject.block()
-    await vi.waitFor(() => expect(subject.dependencies.deliver).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(subject.dependencies.recordTerminalAttempt).toHaveBeenCalledOnce())
 
     const secondRecord = record({
       revision: 5,
@@ -1706,42 +2130,36 @@ describe('continuous Goal Host', () => {
     subject.block(EXECUTION_2.sessionId, EXECUTION_2.goalId)
     await dispose()
 
-    expect(subject.dependencies.deliver).toHaveBeenCalledTimes(2)
+    expect(subject.dependencies.recordTerminalAttempt).toHaveBeenCalledTimes(2)
+    expect(subject.dependencies.deliver).not.toHaveBeenCalled()
   })
 
-  it('releases the Goal lane before detached delivery waits', async () => {
+  it('keeps online terminal handling free of detached fallback delivery', async () => {
     const subject = harness()
     const controlAgent = agent('control-session', 'control-goal')
     subject.live.set('control-session', controlAgent)
-    let release!: () => void
-    const gate = new Promise<void>(resolve => { release = resolve })
-    subject.dependencies.deliver = vi.fn(async () => gate)
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
     await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
 
     subject.first.setGoal('complete')
     subject.setStatus(status(record(), ['complete'], null))
     subject.complete()
-    await vi.waitFor(() => expect(subject.dependencies.deliver).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(subject.dependencies.recordTerminalAttempt).toHaveBeenCalledOnce())
 
     await expect(subject.control(controlAgent)).resolves.toEqual({ action: 'paused' })
-    release()
     await dispose()
+    expect(subject.dependencies.deliver).not.toHaveBeenCalled()
   })
 
-  it('contains a rejected delivery without mutating or reclassifying durable state', async () => {
-    const subject = harness()
+  it('contains a rejected offline recovery delivery without mutating or reclassifying durable state', async () => {
+    const terminal = record({ planner: { ...record().planner, phase: 'complete' } })
+    const subject = harness(terminal)
+    subject.setStatus(status(terminal, ['complete'], null))
     const failure = new Error('notice delivery failed')
-    subject.dependencies.deliver = vi.fn()
-      .mockResolvedValueOnce(true)
-      .mockRejectedValueOnce(failure)
+    subject.dependencies.deliver = vi.fn(async () => { throw failure })
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
     await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
     await vi.waitFor(() => expect(subject.dependencies.deliver).toHaveBeenCalledOnce())
-
-    subject.first.setGoal('complete')
-    subject.setStatus(status(record(), ['complete'], null))
-    subject.complete()
     await expect(dispose()).resolves.toBeUndefined()
 
     expect(subject.pause).not.toHaveBeenCalled()
@@ -1818,7 +2236,7 @@ describe('continuous Goal Host', () => {
     expect(settledBeforePlanner).toBe(true)
   })
 
-  it('reports a background initial-planning failure back to the control conversation', async () => {
+  it('leaves background initial-planning settlement to native DSH without fallback delivery', async () => {
     const source = record({ control: { sessionId: 'another-control', autoProgress: 'running' } })
     const subject = harness(source)
     const controlAgent = agent('control-session', 'control-goal')
@@ -1846,13 +2264,9 @@ describe('continuous Goal Host', () => {
     await expect(subject.create(controlAgent, 'Start and report any planning failure')).resolves.toEqual({ action: 'started' })
     rejectPlanning()
 
-    await vi.waitFor(() => expect(subject.dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
-      longGoalId: created.id,
-      transition: 'planning-failed',
-      status: planningStatus,
-    })))
     await expect(dispose()).rejects.toThrow(AggregateError)
     expect(subject.dependencies.reportError).toHaveBeenCalledWith(failure)
+    expect(subject.dependencies.deliver).not.toHaveBeenCalled()
   })
 
   it('queues goal_control behind the Goal lane and rereads its latest durable revision', async () => {
@@ -2004,11 +2418,8 @@ describe('continuous Goal Host', () => {
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
 
     await expect(subject.create(controlAgent, 'Finish during initial planning')).resolves.toEqual({ action: 'started' })
-    await vi.waitFor(() => expect(subject.dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
-      longGoalId: created.id,
-      transition: 'complete',
-      status: status(created, [], null),
-    })))
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalled())
+    expect(subject.dependencies.deliver).not.toHaveBeenCalled()
     await expect(subject.control(controlAgent)).resolves.toMatchObject({ action: 'status' })
     expect(subject.dependencies.control).toHaveBeenCalledWith({
       longGoalId: created.id, expectedRevision: created.revision, action: { action: 'status' },
@@ -2041,7 +2452,7 @@ describe('continuous Goal Host', () => {
     expect(second.cancel).not.toHaveBeenCalled()
   })
 
-  it('routes one exact current Task approval as attention without changing Goal control', async () => {
+  it('leaves Task approval routing to native DSH without changing Goal control', async () => {
     const source = record({
       tasks: [
         { id: TASK_1, objective: 'Publish', execution: EXECUTION_1, resolution: null },
@@ -2056,8 +2467,7 @@ describe('continuous Goal Host', () => {
     subject.approval(EXECUTION_1.sessionId)
     subject.approval(EXECUTION_1.sessionId)
     subject.approval('unrelated-session')
-    await vi.waitFor(() => expect(subject.dependencies.deliver.mock.calls.filter(([intent]) =>
-      intent.transition === 'attention')).toHaveLength(1))
+    await Promise.resolve()
 
     const currentSecond = status(source, ['complete', 'active'], TASK_2)
     subject.setStatus(currentSecond)
@@ -2065,19 +2475,7 @@ describe('continuous Goal Host', () => {
     await Promise.resolve()
     await dispose()
 
-    expect(subject.dependencies.deliver.mock.calls.filter(([intent]) =>
-      intent.transition === 'attention')).toHaveLength(1)
-    expect(subject.dependencies.deliver).toHaveBeenCalledWith({
-      longGoalId: GOAL_ID,
-      transition: 'attention',
-      status: status(source, ['active', 'pending'], TASK_1),
-      attention: {
-        approvalId: 'approval-1',
-        sessionId: EXECUTION_1.sessionId,
-        toolName: 'pwsh',
-        reason: 'Run verification',
-      },
-    })
+    expect(subject.dependencies.deliver).not.toHaveBeenCalled()
     expect(subject.pause).not.toHaveBeenCalled()
     expect(subject.dependencies.control).not.toHaveBeenCalled()
     expect(subject.records()[0]?.control.autoProgress).toBe('running')
@@ -2267,7 +2665,7 @@ describe('continuous Goal Host', () => {
   it.each([
     [TASK_1, ['active'] as const, 'start'],
     [TASK_2, ['complete', 'active'] as const, 'advance'],
-  ] as const)('reconstructs %s progress for an already active bound Task', async (taskId, phases, transition) => {
+  ] as const)('reconstructs %s progress for an already active bound Task', async (taskId, phases, _transition) => {
     const source = taskId === TASK_1
       ? record()
       : record({
@@ -2279,6 +2677,8 @@ describe('continuous Goal Host', () => {
         })
     const active = status(source, phases, taskId)
     const subject = harness(source)
+    const planner = agent(source.planner.sessionId, 'planner-goal')
+    subject.live.set(source.planner.sessionId, planner)
     if (taskId === TASK_2) subject.live.set(EXECUTION_2.sessionId, agent(EXECUTION_2.sessionId, EXECUTION_2.goalId))
     subject.setStatus(active)
 
@@ -2286,100 +2686,26 @@ describe('continuous Goal Host', () => {
     await dispose()
 
     expect(subject.continueProgress).not.toHaveBeenCalled()
-    expect(subject.dependencies.deliver).toHaveBeenCalledWith({
-      longGoalId: GOAL_ID,
-      transition,
-      status: active,
-    })
+    expect(subject.dependencies.reportProgress).toHaveBeenCalledWith(expect.objectContaining({
+      planner,
+      facts: [expect.objectContaining({
+        stage: taskId === TASK_1 ? 'active: Task 1 of 1' : 'active: Task 2 of 2',
+      })],
+      signal: expect.any(AbortSignal),
+    }))
+    expect(subject.dependencies.reportProgress.mock.calls.at(-1)?.[0].facts[0]?.nextAction).toBeUndefined()
+    expect(subject.dependencies.deliver).not.toHaveBeenCalled()
   })
 
-  it.each(['start', 'advance'] as const)(
-    'persists one guarded ordinary conversation reply for a %s transition',
-    async transition => {
-      const source = transition === 'start'
-        ? record()
-        : record({
-            tasks: [
-              { id: TASK_1, objective: 'Published', execution: EXECUTION_1, resolution: null },
-              { id: TASK_2, objective: 'Verify', execution: EXECUTION_2, resolution: null },
-            ],
-          })
-      const progress = transition === 'start'
-        ? status(source, ['active'], TASK_1)
-        : status(source, ['complete', 'active'], TASK_2)
-      const preStepListeners: ((payload: unknown, next: () => Promise<unknown>) => Promise<unknown>)[] = []
-      const sessionListeners: ((session: unknown, event: unknown) => void)[] = []
-      const guards: ((execution: { name: string }) => string | undefined)[] = []
-      const denied: string[] = []
-      let finishTurn!: () => void
-      const turnFinished = new Promise<void>(resolve => { finishTurn = resolve })
-      const controlAgent = {
-        session: { id: 'control-session' },
-        ctx: {
-          tools: { guard: (guard: (execution: { name: string }) => string | undefined) => {
-            guards.push(guard)
-            return () => guards.splice(guards.indexOf(guard), 1)
-          } },
-          on(name: string, listener: never) {
-            const listeners = name === 'agent/pre-step' ? preStepListeners : sessionListeners
-            listeners.push(listener)
-            return () => listeners.splice(listeners.indexOf(listener), 1)
-          },
-        },
-        whenIdle: vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(async () => turnFinished),
-        followup: vi.fn(message => queueMicrotask(async () => {
-          for (const listener of preStepListeners) {
-            await listener(
-              { agent: controlAgent, messages: [message], turn: 9, step: 1, signal: new AbortController().signal },
-              async () => ({ kind: 'enter', messages: [message] }),
-            )
-          }
-          if (guards.some(guard => guard({ name: 'goal_control' }) !== undefined)) denied.push('goal_control')
-          for (const listener of sessionListeners) {
-            listener(controlAgent.session, { type: 'turn/end', data: { turn: 9, reason: { kind: 'completed' } } })
-          }
-          finishTurn()
-        })),
-      } as unknown as Agent
-      const inspectSession = vi.fn(async () => ({
-        meta: { id: EXECUTION_1.sessionId },
-        events: [
-          { seq: 0, time: 1, type: 'assistant/message', surfaceOp: 'append', data: {
-            turn: 1, step: 1,
-            message: { id: 'task-reply', role: 'assistant', content: [{ type: 'text', text: 'Published successfully' }] },
-          } },
-          { seq: 1, time: 2, type: 'goal/change', data: {
-            operation: 'complete',
-            ref: { id: EXECUTION_1.goalId, revision: 2 },
-            goal: { id: EXECUTION_1.goalId, revision: 2, phase: 'complete' },
-          } },
-        ] as never,
-      }))
-      const flushSession = vi.fn(async () => true)
-
-      await deliverContinuousGoalSettlement({ longGoalId: GOAL_ID, transition, status: progress }, {
-        getAgent: () => controlAgent,
-        readStatus: async () => progress,
-        inspectSession,
-        flushSession,
-      })
-
-      expect(controlAgent.followup).toHaveBeenCalledOnce()
-      expect(denied).toEqual(['goal_control'])
-      expect(flushSession).toHaveBeenCalledOnce()
-      expect(guards).toEqual([])
-      expect(inspectSession).toHaveBeenCalledTimes(transition === 'advance' ? 2 : 1)
-    },
-  )
-
   it('delivers one guarded followup for the exact notice Turn and releases the guard before later user work', async () => {
-    const source = record()
-    const completed = status(source, ['complete'], null)
+    const terminal = terminalFixture('offline-tool-guard')
+    const completed = terminal.status
     const preStepListeners: ((payload: unknown, next: () => Promise<unknown>) => Promise<unknown>)[] = []
     const sessionListeners: ((session: unknown, event: unknown) => void)[] = []
     const guards: ((execution: { name: string }) => string | undefined)[] = []
     const executed: string[] = []
     const denied: string[] = []
+    let mainEvents: readonly SessionEvent[] = []
     let finishDriver!: () => void
     const driverFinished = new Promise<void>(resolve => { finishDriver = resolve })
     let finishLaterTurn!: () => void
@@ -2412,6 +2738,17 @@ describe('continuous Goal Host', () => {
       for (const listener of sessionListeners) {
         listener(controlAgent.session, { type: 'turn/end', data: { turn, reason: { kind: 'completed' } } })
       }
+      if (turn === 7) {
+        mainEvents = [
+          { type: 'turn/start', seq: 20, time: 1_100, data: { turn } },
+          { type: 'user/message', seq: 21, time: 1_101, surfaceOp: 'append', data: message },
+          { type: 'assistant/message', seq: 22, time: 1_102, surfaceOp: 'append', data: {
+            turn,
+            message: { id: 'offline-result', role: 'assistant', content: [{ type: 'text', text: 'Delivery confirmed.' }] },
+          } },
+          { type: 'turn/end', seq: 23, time: 1_103, data: { turn, reason: { kind: 'completed' } } },
+        ] as unknown as readonly SessionEvent[]
+      }
     }
     const controlAgent = {
       session: { id: 'control-session' },
@@ -2428,25 +2765,26 @@ describe('continuous Goal Host', () => {
         })
       }),
     } as unknown as Agent
-    const inspectSession = vi.fn(async () => ({
-      meta: { id: EXECUTION_1.sessionId },
-      events: [
-        { seq: 0, time: 1, type: 'turn/start', data: { turn: 1 } },
-        { seq: 1, time: 2, type: 'user/message', data: { id: 'task-input', source: { kind: 'goal', goalId: EXECUTION_1.goalId }, content: [{ type: 'text', text: 'work' }] } },
-        { seq: 2, time: 3, type: 'assistant/message', surfaceOp: 'append', data: { turn: 1, step: 1, message: { id: 'task-reply', role: 'assistant', content: [{ type: 'text', text: 'Published successfully' }] } } },
-        { seq: 3, time: 4, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
-        { seq: 4, time: 5, type: 'goal/change', data: { operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 2 }, goal: { id: EXECUTION_1.goalId, revision: 2, phase: 'complete' } } },
-      ] as never,
-    }))
+    const inspectSession = vi.fn(async (sessionId: string) => sessionId === EXECUTION_1.sessionId
+      ? {
+          meta: { id: sessionId, parentSession: 'planner-session' },
+          events: [{
+            seq: 17, time: 1_000, type: 'goal/change', data: {
+              operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+              goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+            },
+          }] as never,
+        }
+      : { meta: { id: sessionId }, events: mainEvents })
     const flushSession = vi.fn(async () => true)
     const getAgent = vi.fn(() => controlAgent)
     const readStatus = vi.fn(async () => completed)
 
     await deliverContinuousGoalSettlement({
-      longGoalId: GOAL_ID,
+      longGoalId: terminal.record.id,
       transition: 'complete',
       status: completed,
-    }, { getAgent, readStatus, inspectSession, flushSession })
+    }, { stateRoot: terminal.stateRoot, getAgent, readStatus, inspectSession, flushSession })
 
     expect(controlAgent.followup).toHaveBeenCalledOnce()
     expect(inspectSession).toHaveBeenCalledWith(EXECUTION_1.sessionId)
@@ -2460,183 +2798,45 @@ describe('continuous Goal Host', () => {
     expect(controlAgent.followup).toHaveBeenCalledTimes(2)
     expect(denied).toEqual(['goal_control', 'read_file'])
     expect(executed).toEqual(['goal_control', 'read_file'])
+    rmSync(terminal.fixture, { recursive: true, force: true })
   })
 
-  it('does not repeat a settlement notice whose assistant Turn is already durable', async () => {
-    const source = record()
-    const completed = status(source, ['complete'], null)
-    const settledTaskResults = new Map<string, string>()
-    const notice = buildContinuousGoalSettlementNotice({ status: completed, settledTaskResults })
-    const controlAgent = {
-      session: { id: 'control-session' },
-      whenIdle: vi.fn(async () => undefined),
-      followup: vi.fn(),
-    } as unknown as Agent
-    const inspectSession = vi.fn(async (sessionId: string) => sessionId === EXECUTION_1.sessionId
-      ? {
-          meta: { id: sessionId },
-          events: [
-            { seq: 0, time: 1, type: 'assistant/message', surfaceOp: 'append', data: {
-              turn: 1, step: 1,
-              message: { id: 'task-reply', role: 'assistant', content: [{ type: 'text', text: 'Published successfully' }] },
-            } },
-            { seq: 1, time: 2, type: 'goal/change', data: {
-              operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 2 },
-              goal: { id: EXECUTION_1.goalId, revision: 2, phase: 'complete' },
-            } },
-          ] as never,
-        }
-      : {
-          meta: { id: sessionId },
-          events: [
-            { seq: 0, time: 3, type: 'turn/start', data: { turn: 8 } },
-            { seq: 1, time: 4, type: 'user/message', surfaceOp: 'append', data: notice },
-            { seq: 2, time: 5, type: 'assistant/message', surfaceOp: 'append', data: {
-              turn: 8, step: 1,
-              message: { id: 'settlement-reply', role: 'assistant', content: [{ type: 'text', text: 'Release complete' }] },
-            } },
-            { seq: 3, time: 6, type: 'turn/end', data: { turn: 8, reason: { kind: 'completed' } } },
-          ] as never,
-        })
-    const flushSession = vi.fn(async () => true)
+  it('contains an offline parent without acquiring it or acknowledging delivery', async () => {
+    const terminal = terminalFixture('offline-parent-stays-offline')
+    try {
+      const readStatus = vi.fn(async () => terminal.status)
+      const inspectSession = vi.fn(async (sessionId: string) => ({
+        meta: { id: sessionId, ...(sessionId === EXECUTION_1.sessionId ? { parentSession: 'planner-session' } : {}) },
+        events: sessionId === EXECUTION_1.sessionId
+          ? [{ type: 'goal/change', seq: 17, time: 1_000, data: {
+              operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+              goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+            } }] as never
+          : [],
+      }))
+      const flushSession = vi.fn(async () => true)
 
-    await deliverContinuousGoalSettlement({ longGoalId: GOAL_ID, transition: 'complete', status: completed }, {
-      getAgent: () => controlAgent,
-      readStatus: async () => completed,
-      inspectSession,
-      flushSession,
-    })
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: terminal.record.id,
+        transition: 'complete',
+        status: terminal.status,
+      }, {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => undefined,
+        readStatus,
+        inspectSession,
+        flushSession,
+      })).resolves.toBe(false)
 
-    expect(controlAgent.followup).not.toHaveBeenCalled()
-    expect(flushSession).not.toHaveBeenCalled()
-  })
-
-  it('delivers attention through a cold control Agent lease and releases after persistence', async () => {
-    const active = status(record(), ['active'], TASK_1)
-    const controlAgent = feedbackAgent()
-    let live: Agent | undefined
-    const release = vi.fn(async () => { live = undefined })
-    const acquireAgent = vi.fn(async () => {
-      live = controlAgent
-      return { agent: controlAgent, release }
-    })
-    const flushSession = vi.fn(async () => true)
-
-    await expect(deliverContinuousGoalSettlement({
-      longGoalId: GOAL_ID,
-      transition: 'attention',
-      status: active,
-      attention: {
-        approvalId: 'approval-1',
-        sessionId: EXECUTION_1.sessionId,
-        toolName: 'pwsh',
-        reason: 'Run verification',
-      },
-    }, {
-      getAgent: () => live,
-      acquireAgent,
-      readStatus: async () => active,
-      inspectSession: async sessionId => ({ meta: { id: sessionId }, events: [] }),
-      flushSession,
-    })).resolves.toBe(true)
-
-    expect(acquireAgent).toHaveBeenCalledWith('control-session')
-    expect(controlAgent.followup).toHaveBeenCalledOnce()
-    expect(flushSession).toHaveBeenCalledOnce()
-    expect(release).toHaveBeenCalledOnce()
-  })
-
-  it('releases a cold control Agent lease without starting feedback when authoritative state is stale', async () => {
-    const expected = status(record(), ['active'], TASK_1)
-    const stale = { ...expected, goal: { ...expected.goal, revision: expected.goal.revision + 1 } }
-    const controlAgent = feedbackAgent()
-    let live: Agent | undefined
-    const release = vi.fn(async () => { live = undefined })
-
-    await expect(deliverContinuousGoalSettlement({
-      longGoalId: GOAL_ID,
-      transition: 'attention',
-      status: expected,
-      attention: {
-        approvalId: 'approval-1',
-        sessionId: EXECUTION_1.sessionId,
-        toolName: 'pwsh',
-      },
-    }, {
-      getAgent: () => live,
-      acquireAgent: async () => {
-        live = controlAgent
-        return { agent: controlAgent, release }
-      },
-      readStatus: async () => stale,
-      inspectSession: async sessionId => ({ meta: { id: sessionId }, events: [] }),
-      flushSession: vi.fn(async () => true),
-    })).resolves.toBe(false)
-
-    expect(controlAgent.followup).not.toHaveBeenCalled()
-    expect(release).toHaveBeenCalledOnce()
-  })
-
-  it('matches durable attention by approvalId so only a new approval starts another feedback Turn', async () => {
-    const active = status(record(), ['active'], TASK_1)
-    const controlAgent = feedbackAgent()
-    let events: readonly unknown[] = []
-    const flushSession = vi.fn(async () => true)
-    const deliver = (approvalId: string) => deliverContinuousGoalSettlement({
-      longGoalId: GOAL_ID,
-      transition: 'attention',
-      status: active,
-      attention: {
-        approvalId,
-        sessionId: EXECUTION_1.sessionId,
-        toolName: 'pwsh',
-        reason: 'Run verification',
-      },
-    }, {
-      getAgent: () => controlAgent,
-      readStatus: async () => active,
-      inspectSession: async sessionId => ({ meta: { id: sessionId }, events: events as never }),
-      flushSession,
-    })
-
-    await expect(deliver('approval-1')).resolves.toBe(true)
-    const firstNotice = controlAgent.followup.mock.calls[0]![0]
-    events = [
-      { seq: 0, time: 1, type: 'turn/start', data: { turn: 20 } },
-      { seq: 1, time: 2, type: 'user/message', surfaceOp: 'append', data: firstNotice },
-      { seq: 2, time: 3, type: 'assistant/message', surfaceOp: 'append', data: {
-        turn: 20, step: 1,
-        message: { id: 'attention-reply', role: 'assistant', content: [{ type: 'text', text: 'Open the active Task to review the request.' }] },
-      } },
-      { seq: 3, time: 4, type: 'turn/end', data: { turn: 20, reason: { kind: 'completed' } } },
-    ]
-
-    await expect(deliver('approval-1')).resolves.toBe(true)
-    expect(controlAgent.followup).toHaveBeenCalledOnce()
-
-    await expect(deliver('approval-2')).resolves.toBe(true)
-    expect(controlAgent.followup).toHaveBeenCalledTimes(2)
-  })
-
-  it('contains a missing bound control Agent without attempting persistence or delivery', async () => {
-    const completed = status(record(), ['complete'], null)
-    const readStatus = vi.fn(async () => completed)
-    const inspectSession = vi.fn(async () => ({ meta: { id: 'unused' }, events: [] }))
-    const flushSession = vi.fn(async () => true)
-
-    await expect(deliverContinuousGoalSettlement({
-      longGoalId: GOAL_ID,
-      transition: 'complete',
-      status: completed,
-    }, {
-      getAgent: () => undefined,
-      readStatus,
-      inspectSession,
-      flushSession,
-    })).resolves.toBe(false)
-
-    expect(readStatus).not.toHaveBeenCalled()
-    expect(inspectSession).not.toHaveBeenCalled()
-    expect(flushSession).not.toHaveBeenCalled()
+      expect(readStatus).not.toHaveBeenCalled()
+      expect(inspectSession).toHaveBeenCalledWith('control-session')
+      expect(flushSession).not.toHaveBeenCalled()
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      ).terminalDelivery).toBeUndefined()
+    } finally {
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    }
   })
 })

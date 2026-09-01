@@ -1,11 +1,34 @@
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 import type { LongGoalStatusProjectionV3 } from './long-goal-contract.js'
+import type { DurableProgressFact } from './long-goal-liveness.js'
 
 const NOTICE_MAX_CHARS = 12_000
 const REPLY_MAX_CHARS = 2_000
 const GOAL_FIELD_MAX_CHARS = 2_000
 const TASK_OBJECTIVE_MAX_CHARS = 500
+
+function progressValue(value: string): string {
+  return truncate(value.replace(/\s+/gu, ' ').trim(), GOAL_FIELD_MAX_CHARS)
+}
+
+export function buildLongGoalProgressReport(facts: readonly DurableProgressFact[]) {
+  return [{
+    type: 'text' as const,
+    text: facts.map(fact => [
+      `Stage: ${progressValue(fact.stage)}`,
+      ...(fact.lastCompletedAction === undefined
+        ? []
+        : [`Last completed action: ${progressValue(fact.lastCompletedAction)}`]),
+      ...(fact.waitingFor === undefined
+        ? []
+        : [`Waiting for: ${progressValue(fact.waitingFor)}`]),
+      ...(fact.nextAction === undefined
+        ? []
+        : [`Next action: ${progressValue(fact.nextAction)}`]),
+    ].join('\n')).join('\n\n'),
+  }]
+}
 
 export interface ContinuousGoalSettlementNoticeInput {
   readonly status: LongGoalStatusProjectionV3
