@@ -24,10 +24,12 @@ import {
   listLongGoals,
   LongGoalIntegrityError,
   LongGoalRevisionConflictError,
+  markTianwenAttemptPermissionLimited,
   readLongGoal,
   readLongGoalStatus,
   readTianwenTaskAttemptProjection,
   redirectContinuousGoal,
+  reserveTianwenPermissionRenewal,
   setContinuousGoalMode,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
 import { runLongGoalTask } from '../../packages/tianwen-runtime-bundle/src/long-goal-run.js'
@@ -914,6 +916,125 @@ describe('goal-first long Goal v2 records', () => {
           terminalEventId: 'provisioning-failed:child-rejected-before-acceptance',
         }],
       })
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('atomically limits the exact bound attempt and leaves its Task pending without a resolution', () => {
+    const stateRoot = createStateRoot()
+    const workspaceRoot = resolve(stateRoot, 'workspace')
+    try {
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Renew denied work', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'control-permission-limit',
+      }, { goalSuffix: () => 'permission-limit', plannerSessionId: () => 'planner-permission-limit', now: () => 10 })
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Write outside the workspace' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000084', now: () => 11 })
+      const taskId = planned.tasks[0]!.id
+      appendTianwenAttemptStarted({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId,
+        epoch: 1, parentSessionId: 'planner-permission-limit', childSessionId: 'child-permission-limited',
+        permissionFingerprint: 'sha256:workspace-write', startedAt: '2026-09-01T00:00:00.000Z',
+      })
+      bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 3, taskId,
+        execution: { sessionId: 'child-permission-limited', goalId: 'goal-permission-limited' },
+      })
+
+      expect(() => markTianwenAttemptPermissionLimited({
+        stateRoot, longGoalId: record.id, expectedRevision: 4, taskId, epoch: 1,
+        childSessionId: 'different-child', terminalEventId: 'tool-result:7',
+      })).toThrow('exact bound execution')
+
+      const limited = markTianwenAttemptPermissionLimited({
+        stateRoot, longGoalId: record.id, expectedRevision: 4, taskId, epoch: 1,
+        childSessionId: 'child-permission-limited', terminalEventId: 'tool-result:7',
+      })
+
+      expect(limited.revision).toBe(5)
+      expect(limited.tasks[0]).toMatchObject({ execution: null, resolution: null })
+      expect(limited.planner.sessionId).toBe('planner-permission-limit')
+      expect(readTianwenTaskAttemptProjection(limited, taskId)).toEqual({
+        attempts: [{
+          epoch: 1,
+          parentSessionId: 'planner-permission-limit',
+          childSessionId: 'child-permission-limited',
+          permissionFingerprint: 'sha256:workspace-write',
+          status: 'permission-limited',
+          startedAt: '2026-09-01T00:00:00.000Z',
+          terminalEventId: 'tool-result:7',
+        }],
+      })
+      expect(readLongGoal(stateRoot, record.id)).toEqual(limited)
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('atomically currents a replacement Planner and reserves exactly one wider attempt', () => {
+    const stateRoot = createStateRoot()
+    const workspaceRoot = resolve(stateRoot, 'workspace')
+    try {
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Renew denied work', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'control-permission-renewal',
+      }, { goalSuffix: () => 'permission-renewal', plannerSessionId: () => 'planner-permission-old', now: () => 10 })
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Write with wider authority' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000085', now: () => 11 })
+      const taskId = planned.tasks[0]!.id
+      appendTianwenAttemptStarted({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId,
+        epoch: 1, parentSessionId: 'planner-permission-old', childSessionId: 'child-permission-old',
+        permissionFingerprint: 'sha256:workspace-write', startedAt: '2026-09-01T00:00:00.000Z',
+      })
+      bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: record.id, expectedRevision: 3, taskId,
+        execution: { sessionId: 'child-permission-old', goalId: 'goal-permission-old' },
+      })
+      markTianwenAttemptPermissionLimited({
+        stateRoot, longGoalId: record.id, expectedRevision: 4, taskId, epoch: 1,
+        childSessionId: 'child-permission-old', terminalEventId: 'tool-result:7',
+      })
+
+      expect(() => reserveTianwenPermissionRenewal({
+        stateRoot, longGoalId: record.id, expectedRevision: 5, taskId,
+        plannerSessionId: 'planner-permission-old', childSessionId: 'child-permission-new',
+        permissionFingerprint: 'sha256:danger-full-access', startedAt: '2026-09-01T00:01:00.000Z',
+      })).toThrow('new Planner')
+
+      const renewed = reserveTianwenPermissionRenewal({
+        stateRoot, longGoalId: record.id, expectedRevision: 5, taskId,
+        plannerSessionId: 'planner-permission-new', childSessionId: 'child-permission-new',
+        permissionFingerprint: 'sha256:danger-full-access', startedAt: '2026-09-01T00:01:00.000Z',
+      })
+
+      expect(renewed.revision).toBe(6)
+      expect(renewed.planner.sessionId).toBe('planner-permission-new')
+      expect(renewed.tasks[0]).toMatchObject({ execution: null, resolution: null })
+      expect(readTianwenTaskAttemptProjection(renewed, taskId)).toEqual({
+        attempts: [
+          expect.objectContaining({ epoch: 1, parentSessionId: 'planner-permission-old', status: 'permission-limited' }),
+          {
+            epoch: 2,
+            parentSessionId: 'planner-permission-new',
+            childSessionId: 'child-permission-new',
+            permissionFingerprint: 'sha256:danger-full-access',
+            status: 'running',
+            startedAt: '2026-09-01T00:01:00.000Z',
+          },
+        ],
+      })
+      expect(() => reserveTianwenPermissionRenewal({
+        stateRoot, longGoalId: record.id, expectedRevision: 6, taskId,
+        plannerSessionId: 'planner-permission-third', childSessionId: 'child-permission-third',
+        permissionFingerprint: 'sha256:danger-full-access', startedAt: '2026-09-01T00:02:00.000Z',
+      })).toThrow('permission-limited')
+      expect(readLongGoal(stateRoot, record.id)).toEqual(renewed)
     } finally {
       rmSync(stateRoot, { recursive: true, force: true })
     }

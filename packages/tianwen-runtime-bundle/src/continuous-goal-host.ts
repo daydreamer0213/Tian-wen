@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Session } from '@deepseek-ai/dsh-session'
 
 import type { ContinuousGoalAgentOperations } from './continuous-goal-agent.js'
 import { LongGoalIntegrityError } from './long-goal.js'
@@ -82,6 +83,14 @@ export interface ContinuousGoalHostDependencies {
     agent: Agent,
     operations: ContinuousGoalAgentOperations,
   ) => () => void | Promise<void>
+  readonly handlePermissionEvent?: (input: {
+    readonly longGoalId: string
+    readonly session: Session
+    readonly event: unknown
+  }) => Promise<void>
+  readonly reconcilePermissionAttempt?: (input: {
+    readonly longGoalId: string
+  }) => Promise<void>
 }
 
 type HostContext = Context & {
@@ -501,6 +510,7 @@ export function mountContinuousGoalHost(
   }
 
   const reconcile = async (longGoalId: string): Promise<void> => {
+    await dependencies.reconcilePermissionAttempt?.({ longGoalId })
     const record = readV3(longGoalId)
     if (record === undefined) return
     const status = await readStatus(longGoalId)
@@ -650,7 +660,12 @@ export function mountContinuousGoalHost(
   })
   const offSession = ctx.on('session/event', (session, event) => {
     const attention = approvalAsked(event)
-    if (!isUserAbort(event) && attention === undefined) return
+    const userAbort = isUserAbort(event)
+    const eventType = typeof event === 'object' && event !== null
+      ? (event as { readonly type?: unknown }).type
+      : undefined
+    const permissionEvent = eventType === 'tool/result' || eventType === 'sandbox/mode'
+    if (!userAbort && attention === undefined && !permissionEvent) return
     const sessionId = String(session.id)
     for (const record of dependencies.listLongGoals()) {
       if (
@@ -658,11 +673,21 @@ export function mountContinuousGoalHost(
         || record.control.autoProgress !== 'running'
         || record.planner.phase === 'complete'
       ) continue
-      if (attention !== undefined) {
+      const routePermissionEvent = dependencies.handlePermissionEvent !== undefined && (
+        (eventType === 'sandbox/mode' && record.control.sessionId === sessionId)
+        || (eventType === 'tool/result' && boundTask(record, sessionId) !== undefined)
+      )
+      if (routePermissionEvent) {
+        void append(record.id, () => dependencies.handlePermissionEvent!({
+          longGoalId: record.id,
+          session,
+          event,
+        })).catch(() => undefined)
+      } else if (attention !== undefined) {
         void append(record.id, () => recordApprovalAttention(record.id, sessionId, attention)).catch(() => undefined)
-      } else if (record.control.sessionId === sessionId) {
+      } else if (userAbort && record.control.sessionId === sessionId) {
         void append(record.id, () => pauseForControlStop(record.id)).catch(() => undefined)
-      } else if (boundTask(record, sessionId) !== undefined) {
+      } else if (userAbort && boundTask(record, sessionId) !== undefined) {
         void append(record.id, () => pauseForTaskStop(record.id, sessionId)).catch(() => undefined)
       }
     }
@@ -675,7 +700,10 @@ export function mountContinuousGoalHost(
         isV3(record)
         && (record.control.sessionId === sessionId || record.planner.sessionId === sessionId)
       ) {
-        void joinOrStart(record.id, () => reconcile(record.id)).catch(() => undefined)
+        const recovery = dependencies.reconcilePermissionAttempt === undefined
+          ? joinOrStart(record.id, () => reconcile(record.id))
+          : append(record.id, () => reconcile(record.id))
+        void recovery.catch(() => undefined)
       }
     }
   })

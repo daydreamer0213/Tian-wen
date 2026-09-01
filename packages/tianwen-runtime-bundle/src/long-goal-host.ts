@@ -6,11 +6,14 @@ import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentHandle, AgentSetup, ModelSelection } from '@deepseek-ai/dsh-agent'
 import type { AgentOptions } from '@deepseek-ai/dsh-agent'
+import { WIDER_MODES } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
 import { createUserMessage, freezeMessage, MessageId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import type { EvidenceRecord } from '@tianwen/evidence'
 
 import type {
   AnyLongGoalRecord,
@@ -23,6 +26,7 @@ import type {
   LongGoalGuidanceResultV2,
   LongGoalStatusProjection,
   LongGoalStatusProjectionV2,
+  LongGoalRecordV3,
   LongGoalSummary,
   LongGoalSummaryV2,
   LongGoalSummaryV3,
@@ -51,10 +55,12 @@ import {
   listLongGoals,
   LongGoalIntegrityError,
   LongGoalRevisionConflictError,
+  markTianwenAttemptPermissionLimited,
   readLongGoal,
   readLongGoalStatus,
   readTianwenTaskAttemptProjection,
   redirectContinuousGoal,
+  reserveTianwenPermissionRenewal,
   setContinuousGoalMode,
 } from './long-goal.js'
 import { runLongGoalPlannerTurn } from './long-goal-planner.js'
@@ -98,6 +104,11 @@ import {
 } from './learning-clue-review.js'
 import { readGoalStatus } from './status.js'
 import { NativeLongGoalChild } from './native-long-goal-child.js'
+import {
+  permissionLimitedEvidence,
+  permissionSnapshot,
+  type PermissionSnapshot,
+} from './permission-attempt.js'
 
 type RpcResult<T> =
   | { readonly ok: true, readonly value: T }
@@ -162,6 +173,10 @@ interface HostContext extends Context {
   }
   readonly agentPresets: {
     mount(agentCtx: Context, agentPreset: string): Promise<void>
+  }
+  readonly sandboxPolicy: {
+    readonly defaultMode: SandboxMode
+    overrideOf(session: Session): SandboxMode | undefined
   }
 }
 
@@ -253,6 +268,213 @@ export interface TianwenLongGoalRunDependencies {
     readonly revision: number
   }) => Promise<void>
   readonly flushSession: (agent: Agent) => Promise<void>
+  readonly readPermissionSnapshot?: (controlSessionId: string) => PermissionSnapshot
+}
+
+type PermissionAttemptSessionView = {
+  readonly events: readonly SessionEvent[]
+}
+
+export interface PermissionAttemptHostDependencies {
+  readonly roots: TianwenLongGoalHostRoots
+  readonly readLongGoal: typeof readLongGoal
+  readonly projectEvidence: (session: Session) => readonly EvidenceRecord[]
+  readonly inspectSession: (sessionId: string) => Promise<PermissionAttemptSessionView | undefined>
+  readonly effectiveMode: (session: Session) => SandboxMode
+  readonly attachedAgent: (sessionId: string) => Agent | undefined
+  readonly reserveSessionId: () => string
+  readonly startNativeChild: (input: {
+    readonly parent: Agent
+    readonly childId: string
+    readonly label: string
+    readonly prompt: { readonly type: 'text', readonly text: string }[]
+    readonly agentOptions: AgentOptions
+    readonly signal: AbortSignal
+  }) => Promise<{ readonly childId: unknown }>
+  readonly followupNativeChild: (
+    parent: Agent,
+    childId: string,
+    prompt: { readonly type: 'text', readonly text: string }[],
+    signal: AbortSignal,
+  ) => Promise<unknown>
+  readonly nativeAgentOptions: AgentOptions
+  readonly runCurrentTask: (input: {
+    readonly roots: TianwenLongGoalHostRoots
+    readonly longGoalId: string
+    readonly expectedRevision: number
+  }) => Promise<AnyRunCurrentTaskResult>
+  readonly notifyMain: (agent: Agent, message: ReturnType<typeof createUserMessage>) => void
+  readonly now?: () => string
+}
+
+function sandboxModeFromEvents(
+  events: readonly SessionEvent[],
+  delegatedOnly: boolean,
+): SandboxMode | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index] as unknown as {
+      readonly type?: unknown
+      readonly data?: { readonly mode?: unknown, readonly source?: unknown }
+    } | undefined
+    if (event?.type !== 'sandbox/mode') continue
+    if (delegatedOnly && event.data?.source !== 'delegation') continue
+    const mode = event.data?.mode
+    if (mode === 'read-only' || mode === 'workspace-write' || mode === 'danger-full-access') return mode
+  }
+  return undefined
+}
+
+function currentAttemptTask(record: LongGoalRecordV3) {
+  let active: {
+    readonly task: LongGoalRecordV3['tasks'][number]
+    readonly attempts: ReturnType<typeof readTianwenTaskAttemptProjection>['attempts']
+    readonly current: ReturnType<typeof readTianwenTaskAttemptProjection>['attempts'][number]
+  } | undefined
+  for (const task of record.tasks) {
+    const attempts = readTianwenTaskAttemptProjection(record, task.id).attempts
+    const current = attempts.at(-1)
+    if (current?.status !== 'running' && current?.status !== 'permission-limited') continue
+    if (active !== undefined) {
+      throw new LongGoalIntegrityError('Continuous Goal has multiple current Task attempts')
+    }
+    active = { task, attempts, current }
+  }
+  return active
+}
+
+export function createPermissionAttemptHost(
+  dependencies: PermissionAttemptHostDependencies,
+): {
+  readonly handlePermissionEvent: (input: {
+    readonly longGoalId: string
+    readonly session: Session
+    readonly event: unknown
+  }) => Promise<void>
+  readonly reconcilePermissionAttempt: (input: { readonly longGoalId: string }) => Promise<void>
+} {
+  const now = dependencies.now ?? (() => new Date().toISOString())
+  const reconcilePermissionAttempt = async (input: { readonly longGoalId: string }): Promise<void> => {
+    const record = dependencies.readLongGoal(dependencies.roots.stateRoot, input.longGoalId)
+    if (record.schemaVersion !== 'tianwen.long-goal.v3') return
+    const attemptTask = currentAttemptTask(record)
+    if (
+      attemptTask?.current.status !== 'running'
+      || attemptTask.task.execution !== null
+      || attemptTask.task.resolution !== null
+      || attemptTask.current.parentSessionId !== record.planner.sessionId
+    ) return
+    const main = dependencies.attachedAgent(record.control.sessionId)
+    if (main === undefined || String(main.session.id) !== record.control.sessionId) return
+    let planner = dependencies.attachedAgent(record.planner.sessionId)
+    if (planner === undefined) {
+      const prompt = [{
+        type: 'text' as const,
+        text: `Coordinate the already-reserved retry for Task: ${attemptTask.task.objective}`,
+      }]
+      const inspection = await dependencies.inspectSession(record.planner.sessionId)
+      if (inspection === undefined) {
+        const started = await dependencies.startNativeChild({
+          parent: main,
+          childId: record.planner.sessionId,
+          label: 'Long Goal Planner permission renewal',
+          prompt,
+          agentOptions: dependencies.nativeAgentOptions,
+          signal: AbortSignal.timeout(30_000),
+        })
+        if (String(started.childId) !== record.planner.sessionId) {
+          throw new LongGoalIntegrityError('Renewed Long Goal Planner Session identity mismatch')
+        }
+      } else {
+        await dependencies.followupNativeChild(
+          main,
+          record.planner.sessionId,
+          prompt,
+          AbortSignal.timeout(30_000),
+        )
+      }
+      planner = dependencies.attachedAgent(record.planner.sessionId)
+    }
+    if (planner === undefined || String(planner.session.id) !== record.planner.sessionId) return
+    const latest = dependencies.readLongGoal(dependencies.roots.stateRoot, input.longGoalId)
+    if (latest.schemaVersion !== 'tianwen.long-goal.v3') return
+    await dependencies.runCurrentTask({
+      roots: dependencies.roots,
+      longGoalId: latest.id,
+      expectedRevision: latest.revision,
+    })
+  }
+
+  const handlePermissionEvent = async (input: {
+    readonly longGoalId: string
+    readonly session: Session
+    readonly event: unknown
+  }): Promise<void> => {
+    const record = dependencies.readLongGoal(dependencies.roots.stateRoot, input.longGoalId)
+    if (record.schemaVersion !== 'tianwen.long-goal.v3') return
+    const attemptTask = currentAttemptTask(record)
+    const typedEvent = input.event as { readonly type?: unknown, readonly seq?: unknown }
+    if (
+      typedEvent.type === 'tool/result'
+      && attemptTask?.current.status === 'running'
+      && attemptTask.current.childSessionId === String(input.session.id)
+      && attemptTask.task.execution?.sessionId === String(input.session.id)
+    ) {
+      const mode = sandboxModeFromEvents(input.session.events, true)
+      if (mode === undefined) return
+      const evidence = permissionLimitedEvidence(
+        input.session.events,
+        dependencies.projectEvidence(input.session),
+        {
+          mode,
+          eventSeq: null,
+          fingerprint: attemptTask.current.permissionFingerprint,
+        },
+      )
+      if (evidence === undefined || evidence.source.resultSeq !== typedEvent.seq) return
+      const limited = markTianwenAttemptPermissionLimited({
+        stateRoot: dependencies.roots.stateRoot,
+        longGoalId: record.id,
+        expectedRevision: record.revision,
+        taskId: attemptTask.task.id,
+        epoch: attemptTask.current.epoch,
+        childSessionId: attemptTask.current.childSessionId,
+        terminalEventId: `permission-limited:${evidence.evidenceId}`,
+      })
+      const main = dependencies.attachedAgent(limited.control.sessionId)
+      if (main !== undefined && String(main.session.id) === limited.control.sessionId) {
+        dependencies.notifyMain(main, createUserMessage({
+          content: [{
+            type: 'text',
+            text: 'This Task reached the current sandbox limit. Change this main Session to Full access; Tianwen will start a new attempt without modifying the old child.',
+          }],
+          source: { kind: 'plugin', plugin: 'tianwen' },
+        }))
+      }
+      return
+    }
+    if (typedEvent.type !== 'sandbox/mode' || record.control.sessionId !== String(input.session.id)) return
+    if (attemptTask?.current.status !== 'permission-limited' || attemptTask.task.execution !== null) return
+    const oldChild = await dependencies.inspectSession(attemptTask.current.childSessionId)
+    const oldMode = oldChild === undefined
+      ? undefined
+      : sandboxModeFromEvents(oldChild.events, true)
+    if (oldMode === undefined) return
+    const snapshot = permissionSnapshot(input.session.events, dependencies.effectiveMode(input.session))
+    if (!(WIDER_MODES[oldMode] ?? []).includes(snapshot.mode)) return
+    reserveTianwenPermissionRenewal({
+      stateRoot: dependencies.roots.stateRoot,
+      longGoalId: record.id,
+      expectedRevision: record.revision,
+      taskId: attemptTask.task.id,
+      plannerSessionId: dependencies.reserveSessionId(),
+      childSessionId: dependencies.reserveSessionId(),
+      permissionFingerprint: snapshot.fingerprint,
+      startedAt: now(),
+    })
+    await reconcilePermissionAttempt({ longGoalId: record.id })
+  }
+
+  return { handlePermissionEvent, reconcilePermissionAttempt }
 }
 
 export interface TianwenGoalFirstOperations {
@@ -487,45 +709,57 @@ export async function runCurrentWebTask(input: {
         throw new LongGoalIntegrityError('Continuous Goal Planner parent Agent is not live')
       }
       const attempts = readTianwenTaskAttemptProjection(goalFirstRecord, task.id).attempts
-      const epoch = attempts.length + 1
-      const sessionId = reserveTaskSessionId()
-      const permissionFingerprint = `sha256:unclassified:${goalFirstRecord.control.sessionId}` as const
-      appendTianwenAttemptStarted({
-        stateRoot: input.roots.stateRoot,
-        longGoalId: input.longGoalId,
-        expectedRevision: input.expectedRevision!,
-        taskId: task.id,
-        epoch,
-        parentSessionId: goalFirstRecord.planner.sessionId,
-        childSessionId: sessionId,
-        permissionFingerprint,
-        startedAt: new Date().toISOString(),
-      })
-      let started: { readonly childId: unknown }
-      try {
-        started = await startNativeTaskChild({
-          parent,
-          childId: sessionId,
-          label: `Task ${taskIndex + 1}: ${task.objective}`,
-          prompt: [{ type: 'text', text: task.objective }],
-          agentOptions: nativeAgentOptions,
-          signal: AbortSignal.timeout(30_000),
-        })
-      } catch (cause) {
-        appendTianwenAttemptProvisioningFailed({
+      const reserved = attempts.at(-1)?.status === 'running' ? attempts.at(-1) : undefined
+      if (reserved !== undefined && reserved.parentSessionId !== goalFirstRecord.planner.sessionId) {
+        throw new LongGoalIntegrityError('Reserved native Long Goal Task Planner identity mismatch')
+      }
+      const epoch = reserved?.epoch ?? attempts.length + 1
+      const sessionId = reserved?.childSessionId ?? reserveTaskSessionId()
+      const permissionFingerprint = reserved?.permissionFingerprint
+        ?? dependencies.readPermissionSnapshot?.(goalFirstRecord.control.sessionId).fingerprint
+        ?? `sha256:unclassified:${goalFirstRecord.control.sessionId}` as const
+      const attemptRevision = input.expectedRevision! + (reserved === undefined ? 1 : 0)
+      if (reserved === undefined) {
+        appendTianwenAttemptStarted({
           stateRoot: input.roots.stateRoot,
           longGoalId: input.longGoalId,
-          expectedRevision: input.expectedRevision! + 1,
+          expectedRevision: input.expectedRevision!,
           taskId: task.id,
           epoch,
-          terminalEventId: `provisioning-failed:${sessionId}:${randomUUID()}`,
+          parentSessionId: goalFirstRecord.planner.sessionId,
+          childSessionId: sessionId,
+          permissionFingerprint,
+          startedAt: new Date().toISOString(),
         })
-        throw cause
       }
-      if (String(started.childId) !== sessionId) {
-        throw new LongGoalIntegrityError('Native Long Goal Task Session identity mismatch')
+      let agent = dependencies.attachedAgent(sessionId)
+      if (agent === undefined) {
+        let started: { readonly childId: unknown }
+        try {
+          started = await startNativeTaskChild({
+            parent,
+            childId: sessionId,
+            label: `Task ${taskIndex + 1}: ${task.objective}`,
+            prompt: [{ type: 'text', text: task.objective }],
+            agentOptions: nativeAgentOptions,
+            signal: AbortSignal.timeout(30_000),
+          })
+        } catch (cause) {
+          appendTianwenAttemptProvisioningFailed({
+            stateRoot: input.roots.stateRoot,
+            longGoalId: input.longGoalId,
+            expectedRevision: attemptRevision,
+            taskId: task.id,
+            epoch,
+            terminalEventId: `provisioning-failed:${sessionId}:${randomUUID()}`,
+          })
+          throw cause
+        }
+        if (String(started.childId) !== sessionId) {
+          throw new LongGoalIntegrityError('Native Long Goal Task Session identity mismatch')
+        }
+        agent = dependencies.attachedAgent(sessionId)
       }
-      const agent = dependencies.attachedAgent(sessionId)
       if (agent === undefined || String(agent.session.id) !== sessionId) {
         throw new LongGoalIntegrityError('New native Long Goal Task Session has no exact Agent')
       }
@@ -542,7 +776,7 @@ export async function runCurrentWebTask(input: {
       dependencies.bindGoalFirstLongGoalTask({
         stateRoot: input.roots.stateRoot,
         longGoalId: input.longGoalId,
-        expectedRevision: input.expectedRevision! + 1,
+        expectedRevision: attemptRevision,
         taskId: task.id,
         execution: { sessionId, goalId: String(goal.id) },
       })
@@ -1623,7 +1857,7 @@ export function mountTianwenLongGoalHost(
   ctx.inject([
     'connection', 'apiProxy', 'agents', 'goals', 'sessions', 'subagents',
     'agentDefaultModel', 'agentPresets', 'sessionPersistence',
-    'tianwenLearningIntake', 'tianwenEvolution',
+    'sandboxPolicy', 'tianwenEvidence', 'tianwenLearningIntake', 'tianwenEvolution',
   ], injected => {
     if (injected.baseUrl === undefined) throw new Error('Tianwen Long Goal Web host requires a Profile base URL')
     const roots = resolveTianwenLongGoalHostRoots({
@@ -1725,7 +1959,44 @@ export function mountTianwenLongGoalHost(
       flushSession: async agent => {
         await injected.sessions.flush(agent.session)
       },
+      readPermissionSnapshot: controlSessionId => {
+        const control = injected.agents.get(SessionId(controlSessionId))
+        if (control === undefined || String(control.session.id) !== controlSessionId) {
+          throw new LongGoalIntegrityError('Continuous Goal main permission Session is not live')
+        }
+        return permissionSnapshot(
+          control.session.events,
+          host.sandboxPolicy.overrideOf(control.session) ?? host.sandboxPolicy.defaultMode,
+        )
+      },
     }
+    const permissionAttemptHost = createPermissionAttemptHost({
+      roots,
+      readLongGoal,
+      projectEvidence: session => injected.tianwenEvidence.project(session),
+      inspectSession: async sessionId => {
+        const matches = (await runDependencies.listSessions())
+          .filter(candidate => candidate.sessionId === sessionId)
+        if (matches.length === 0) return undefined
+        if (matches.length !== 1) {
+          throw new LongGoalIntegrityError('Permission attempt Session identity is ambiguous')
+        }
+        return host.sessionPersistence.inspect(SessionId(sessionId))
+      },
+      effectiveMode: session =>
+        host.sandboxPolicy.overrideOf(session) ?? host.sandboxPolicy.defaultMode,
+      attachedAgent: sessionId => injected.agents.get(SessionId(sessionId)),
+      reserveSessionId: () => `session-${randomUUID()}`,
+      startNativeChild: input => nativeChild.start({
+        ...input,
+        childId: SessionId(input.childId),
+      }),
+      followupNativeChild: (parent, childId, prompt, signal) =>
+        nativeChild.followup(parent, SessionId(childId), prompt, signal),
+      nativeAgentOptions: host.agentDefaultModel.currentSelection(),
+      runCurrentTask: input => runCurrentWebTask(input, runDependencies),
+      notifyMain: (agent, message) => { agent.followup(message) },
+    })
     const dshStatusTarget = {
       sessionsRoot: roots.sessionsRoot,
       evolutionRoot: roots.evolutionRoot,
@@ -1979,6 +2250,8 @@ export function mountTianwenLongGoalHost(
       reportError: error => host.logger('tianwen-continuous-goal').error(error),
       installCommand: installContinuousGoalCommand,
       installBoundControls: installBoundContinuousGoalControls,
+      handlePermissionEvent: permissionAttemptHost.handlePermissionEvent,
+      reconcilePermissionAttempt: permissionAttemptHost.reconcilePermissionAttempt,
     })
     if (typeof injected.effect === 'function') {
       injected.effect(function* () {

@@ -294,6 +294,8 @@ describe('Tianwen Long Goal Web host', () => {
         sessions: {},
         subagents: { registerContinuableSetup: () => () => undefined },
         sessionPersistence: {},
+        sandboxPolicy: { defaultMode: 'workspace-write', overrideOf: () => undefined },
+        tianwenEvidence: { project: () => [] },
         tianwenLearningIntake: {},
         tianwenEvolution: {},
       })) {

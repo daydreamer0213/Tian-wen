@@ -4,19 +4,32 @@ import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Agent, AgentOptions, AgentSetup } from '@deepseek-ai/dsh-agent'
+import { sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
+import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import { CallId, createToolResultMessage } from '@deepseek-ai/dsh-llm'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { projectEvidence } from '../../packages/tianwen-evidence/src/index.js'
 import {
   LongGoalIntegrityError,
+  appendTianwenAttemptSettled,
+  appendTianwenAttemptStarted,
   bindGoalFirstLongGoalTask,
   commitLongGoalPlan,
   createContinuousLongGoal,
+  markTianwenAttemptPermissionLimited,
   readLongGoal,
   readTianwenTaskAttemptProjection,
+  reserveTianwenPermissionRenewal,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
 import type { LongGoalRecordV3, LongGoalStatusProjectionV3 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
 import type { ContinuousGoalControlAction } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-service.js'
 import { mountContinuousGoalHost, type ContinuousGoalHostDependencies } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-host.js'
 import { buildContinuousGoalSettlementNotice } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-feedback.js'
-import { deliverContinuousGoalSettlement, runCurrentWebTask } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
+import {
+  createPermissionAttemptHost,
+  deliverContinuousGoalSettlement,
+  runCurrentWebTask,
+} from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
 import { runLongGoalPlannerTurn } from '../../packages/tianwen-runtime-bundle/src/long-goal-planner.js'
 
 const GOAL_ID = 'tianwen-long-goal-00000000-0000-4000-8000-000000000001'
@@ -222,6 +235,9 @@ function harness(initial = record()) {
         data: { id: approvalId, toolName: 'pwsh', reason: 'Run verification' },
       })
     },
+    sessionEvent(sessionId: string, event: unknown) {
+      for (const listener of sessionListeners) listener({ id: sessionId }, event)
+    },
     created(created: Agent) { for (const listener of agentListeners) listener({ agent: created }) },
     create(controlAgent: Agent, objective: string) { return commands.get(controlAgent)!.create(controlAgent, objective) },
     control(controlAgent: Agent, action: ContinuousGoalControlAction = { action: 'status' }) {
@@ -231,6 +247,50 @@ function harness(initial = record()) {
 }
 
 describe('continuous Goal Host', () => {
+  it('serializes a wider main sandbox event with exact Planner recovery on the same Goal lane', async () => {
+    const source = record({
+      tasks: [{ id: TASK_1, objective: 'Renew permission', execution: null, resolution: null }],
+    })
+    const subject = harness(source)
+    subject.setStatus(status(source, ['pending'], TASK_1))
+    let reserved = false
+    let reservations = 0
+    let releaseEvent!: () => void
+    const eventHeld = new Promise<void>(resolve => { releaseEvent = resolve })
+    const enteredEvent = vi.fn()
+    const reserve = async (hold: boolean) => {
+      const observed = reserved
+      if (hold) {
+        enteredEvent()
+        await eventHeld
+      }
+      if (!observed) {
+        reserved = true
+        reservations += 1
+      }
+    }
+    const handlePermissionEvent = vi.fn(async () => reserve(true))
+    const reconcilePermissionAttempt = vi.fn(async () => reserve(false))
+    Object.assign(subject.dependencies, { handlePermissionEvent, reconcilePermissionAttempt })
+
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(reconcilePermissionAttempt).toHaveBeenCalledOnce())
+    reserved = false
+    reservations = 0
+
+    subject.sessionEvent('control-session', {
+      type: 'sandbox/mode', seq: 9, time: 9, data: { mode: 'danger-full-access' },
+    })
+    await vi.waitFor(() => expect(enteredEvent).toHaveBeenCalledOnce())
+    subject.created(agent('planner-session', 'planner-goal'))
+    releaseEvent()
+    await dispose()
+
+    expect(reservations).toBe(1)
+    expect(handlePermissionEvent).toHaveBeenCalledOnce()
+    expect(reconcilePermissionAttempt).toHaveBeenCalledTimes(2)
+  })
+
   it('starts and continues the Planner through native DSH with the exact live main Agent parent', async () => {
     const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
     mkdirSync(base, { recursive: true })
@@ -513,6 +573,375 @@ describe('continuous Goal Host', () => {
           { epoch: 2, childSessionId: 'reserved-task-child-2', status: 'running' },
         ],
       })
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('renews a structured limited attempt only through a wider main Session and preserves old child evidence', async () => {
+    const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
+    mkdirSync(base, { recursive: true })
+    const fixture = mkdtempSync(resolve(base, 'permission-renewal-'))
+    try {
+      const stateRoot = resolve(fixture, 'state')
+      const source = createContinuousLongGoal({
+        stateRoot,
+        objective: 'Renew only proven sandbox limits',
+        context: null,
+        successCriteria: null,
+        workspaceRoot: fixture,
+        agentPreset: 'planner-preset',
+        controlSessionId: 'main-control',
+      }, {
+        goalSuffix: () => 'permission-renewal',
+        plannerSessionId: () => 'planner-old',
+        now: () => 1,
+      })
+      const planned = commitLongGoalPlan({
+        stateRoot,
+        longGoalId: source.id,
+        expectedRevision: 1,
+        outcome: 'continue',
+        tasks: [{ objective: 'Write protected output' }],
+        consideredSettledTasks: 0,
+      }, {
+        taskId: () => '00000000-0000-4000-8000-000000000093',
+        now: () => 2,
+      }) as LongGoalRecordV3
+      const taskId = planned.tasks[0]!.id
+      appendTianwenAttemptStarted({
+        stateRoot,
+        longGoalId: source.id,
+        expectedRevision: 2,
+        taskId,
+        epoch: 1,
+        parentSessionId: 'planner-old',
+        childSessionId: 'task-old',
+        permissionFingerprint: 'sha256:old-main-snapshot',
+        startedAt: '2026-09-01T00:00:00.000Z',
+      })
+      bindGoalFirstLongGoalTask({
+        stateRoot,
+        longGoalId: source.id,
+        expectedRevision: 3,
+        taskId,
+        execution: { sessionId: 'task-old', goalId: 'goal-old' },
+      })
+
+      const mainEvents = [{
+        type: 'sandbox/mode', seq: 0, time: 0, data: { mode: 'workspace-write' },
+      }] as unknown as SessionEvent[]
+      const oldTaskEvents = [{
+        type: 'sandbox/mode', seq: 0, time: 0,
+        data: { mode: 'workspace-write', source: 'delegation' },
+      }, {
+        type: 'tool/call', seq: 1, time: 1, data: {
+          turn: 1, step: 1, callId: CallId('denied-call'), name: 'pwsh', arguments: '{"cmd":"write"}',
+        },
+      }, {
+        type: 'tool/result', seq: 2, time: 2, surfaceOp: 'append', sourceEventSeqs: [1], data: {
+          turn: 1,
+          step: 1,
+          message: createToolResultMessage({
+            callId: CallId('denied-call'),
+            content: [{ type: 'text', text: sandboxDenialMarker('workspace-write') }],
+            isError: true,
+          }),
+        },
+      }] as unknown as SessionEvent[]
+      const oldTaskLog = structuredClone(oldTaskEvents)
+      const sessions = new Map<string, { id: string, events: SessionEvent[] }>([
+        ['main-control', { id: 'main-control', events: mainEvents }],
+        ['planner-old', { id: 'planner-old', events: [{
+          type: 'sandbox/mode', seq: 0, time: 0,
+          data: { mode: 'workspace-write', source: 'delegation' },
+        }] as unknown as SessionEvent[] }],
+        ['task-old', { id: 'task-old', events: oldTaskEvents }],
+      ])
+      const main = {
+        session: sessions.get('main-control'),
+        followup: vi.fn(),
+      } as unknown as Agent
+      const live = new Map<string, Agent>([['main-control', main]])
+      const reservedIds = ['planner-new', 'task-new']
+      const startNativeChild = vi.fn(async (input: { readonly parent: Agent, readonly childId: string }) => {
+        const parentMode = (input.parent.session.events.findLast(event => event.type === 'sandbox/mode')?.data as { mode: string }).mode
+        const childSession = {
+          id: input.childId,
+          header: { cwd: fixture, agentPreset: 'planner-preset' },
+          events: [{
+            type: 'sandbox/mode', seq: 0, time: 0,
+            data: { mode: parentMode, source: 'delegation' },
+          }] as unknown as SessionEvent[],
+        }
+        sessions.set(input.childId, childSession)
+        const created = {
+          session: childSession,
+          ctx: { goals: { get: () => undefined } },
+        } as unknown as Agent
+        live.set(input.childId, created)
+        return { childId: input.childId }
+      })
+      const roots = {
+        stateRoot,
+        sessionsRoot: resolve(fixture, 'sessions'),
+        evolutionRoot: resolve(stateRoot, 'evolution'),
+      }
+      const runDependencies = {
+        readLongGoal,
+        readLongGoalStatus: vi.fn(async () => {
+          const current = readLongGoal(stateRoot, source.id)
+          if (current.schemaVersion !== 'tianwen.long-goal.v3') throw new Error('expected v3 record')
+          return status(current, [current.tasks[0]!.execution === null ? 'pending' : 'active'], taskId)
+        }),
+        bindLongGoalTask: vi.fn(),
+        bindGoalFirstLongGoalTask,
+        listSessions: vi.fn(async () => [...sessions.values()].map(session => ({ sessionId: session.id }))),
+        createSession: vi.fn(),
+        reserveTaskSessionId: () => { throw new Error('reserved attempt must reuse its child id') },
+        startNativeTaskChild: startNativeChild,
+        followupNativeTaskChild: vi.fn(),
+        nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
+        attachedAgent: (sessionId: string) => live.get(sessionId),
+        createGoal: vi.fn((_agent: Agent) => ({ id: 'goal-new' })),
+        readGoalRef: vi.fn(),
+        resumeColdGoal: vi.fn(),
+        flushSession: vi.fn(),
+      }
+      const permissionHost = createPermissionAttemptHost({
+        roots,
+        readLongGoal,
+        projectEvidence: session => projectEvidence(session.id, session.events),
+        inspectSession: async sessionId => sessions.get(sessionId)!,
+        effectiveMode: session => (session.events.findLast(event => event.type === 'sandbox/mode')!.data as { mode: 'workspace-write' | 'danger-full-access' }).mode,
+        attachedAgent: sessionId => live.get(sessionId),
+        reserveSessionId: () => reservedIds.shift()!,
+        startNativeChild,
+        followupNativeChild: vi.fn(),
+        nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
+        runCurrentTask: input => runCurrentWebTask(input, runDependencies as never),
+        notifyMain: (agent, message) => { agent.followup(message) },
+        now: () => '2026-09-01T00:01:00.000Z',
+      })
+
+      await permissionHost.handlePermissionEvent({
+        longGoalId: source.id,
+        session: sessions.get('task-old') as unknown as Session,
+        event: oldTaskEvents[2],
+      })
+      const limited = readLongGoal(stateRoot, source.id)
+      if (limited.schemaVersion !== 'tianwen.long-goal.v3') throw new Error('expected v3 record')
+      expect(limited.tasks[0]).toMatchObject({ execution: null, resolution: null })
+      expect(readTianwenTaskAttemptProjection(limited, taskId).attempts[0]).toMatchObject({
+        status: 'permission-limited',
+      })
+      expect(main.followup).toHaveBeenCalledWith(expect.objectContaining({
+        content: [expect.objectContaining({ text: expect.stringContaining('Full access') })],
+      }))
+
+      mainEvents.push({
+        type: 'sandbox/mode', seq: 1, time: 1, data: { mode: 'workspace-write' },
+      } as unknown as SessionEvent)
+      await permissionHost.handlePermissionEvent({
+        longGoalId: source.id,
+        session: sessions.get('main-control') as unknown as Session,
+        event: mainEvents[1],
+      })
+      mainEvents.push({
+        type: 'sandbox/mode', seq: 2, time: 2, data: { mode: 'read-only' },
+      } as unknown as SessionEvent)
+      await permissionHost.handlePermissionEvent({
+        longGoalId: source.id,
+        session: sessions.get('main-control') as unknown as Session,
+        event: mainEvents[2],
+      })
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(stateRoot, source.id) as LongGoalRecordV3,
+        taskId,
+      ).attempts).toHaveLength(1)
+      expect(reservedIds).toEqual(['planner-new', 'task-new'])
+
+      mainEvents.push({
+        type: 'sandbox/mode', seq: 3, time: 3, data: { mode: 'danger-full-access' },
+      } as unknown as SessionEvent)
+      const widerEvent = mainEvents[3]!
+      await permissionHost.handlePermissionEvent({
+        longGoalId: source.id,
+        session: sessions.get('main-control') as unknown as Session,
+        event: widerEvent,
+      })
+
+      const renewed = readLongGoal(stateRoot, source.id)
+      if (renewed.schemaVersion !== 'tianwen.long-goal.v3') throw new Error('expected v3 record')
+      expect(renewed.planner.sessionId).toBe('planner-new')
+      expect(renewed.tasks[0]).toMatchObject({
+        execution: { sessionId: 'task-new', goalId: 'goal-new' },
+        resolution: null,
+      })
+      expect(readTianwenTaskAttemptProjection(renewed, taskId).attempts).toMatchObject([
+        { epoch: 1, parentSessionId: 'planner-old', childSessionId: 'task-old', status: 'permission-limited' },
+        { epoch: 2, parentSessionId: 'planner-new', childSessionId: 'task-new', status: 'running' },
+      ])
+      expect(sessions.get('task-old')!.events).toEqual(oldTaskLog)
+      expect(sessions.get('planner-new')!.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'sandbox/mode', data: { mode: 'danger-full-access', source: 'delegation' } }),
+      ]))
+      expect(sessions.get('task-new')!.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'sandbox/mode', data: { mode: 'danger-full-access', source: 'delegation' } }),
+      ]))
+      expect(renewed.tianwenEvents?.some(event => event.type === 'attempt-settled')).toBe(false)
+
+      await permissionHost.handlePermissionEvent({
+        longGoalId: source.id,
+        session: sessions.get('main-control') as unknown as Session,
+        event: widerEvent,
+      })
+      await permissionHost.reconcilePermissionAttempt({ longGoalId: source.id })
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(stateRoot, source.id) as LongGoalRecordV3,
+        taskId,
+      ).attempts).toHaveLength(2)
+      expect(startNativeChild).toHaveBeenCalledTimes(2)
+      expect(reservedIds).toEqual([])
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('restarts with a new permission host and reuses the later Task exact reserved Planner and child ids', async () => {
+    const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
+    mkdirSync(base, { recursive: true })
+    const fixture = mkdtempSync(resolve(base, 'permission-restart-'))
+    try {
+      const stateRoot = resolve(fixture, 'state')
+      const source = createContinuousLongGoal({
+        stateRoot, objective: 'Recover reserved permission work', context: null, successCriteria: null,
+        workspaceRoot: fixture, agentPreset: 'planner-preset', controlSessionId: 'main-control',
+      }, { goalSuffix: () => 'permission-restart', plannerSessionId: () => 'planner-old', now: () => 1 })
+      const taskIds = [
+        '00000000-0000-4000-8000-000000000094',
+        '00000000-0000-4000-8000-000000000095',
+      ]
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: source.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Already completed' }, { objective: 'Recover exact reservation' }],
+        consideredSettledTasks: 0,
+      }, { taskId: () => taskIds.shift()!, now: () => 2 }) as LongGoalRecordV3
+      const firstTaskId = planned.tasks[0]!.id
+      const secondTaskId = planned.tasks[1]!.id
+      appendTianwenAttemptStarted({
+        stateRoot, longGoalId: source.id, expectedRevision: 2, taskId: firstTaskId,
+        epoch: 1, parentSessionId: 'planner-old', childSessionId: 'task-first',
+        permissionFingerprint: 'sha256:first', startedAt: '2026-09-01T00:00:00.000Z',
+      })
+      bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: source.id, expectedRevision: 3, taskId: firstTaskId,
+        execution: { sessionId: 'task-first', goalId: 'goal-first' },
+      })
+      appendTianwenAttemptSettled({
+        stateRoot, longGoalId: source.id, expectedRevision: 4, taskId: firstTaskId,
+        epoch: 1, terminalEventId: 'settled-first',
+      })
+      appendTianwenAttemptStarted({
+        stateRoot, longGoalId: source.id, expectedRevision: 5, taskId: secondTaskId,
+        epoch: 1, parentSessionId: 'planner-old', childSessionId: 'task-old',
+        permissionFingerprint: 'sha256:workspace-write', startedAt: '2026-09-01T00:01:00.000Z',
+      })
+      bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: source.id, expectedRevision: 6, taskId: secondTaskId,
+        execution: { sessionId: 'task-old', goalId: 'goal-old' },
+      })
+      markTianwenAttemptPermissionLimited({
+        stateRoot, longGoalId: source.id, expectedRevision: 7, taskId: secondTaskId, epoch: 1,
+        childSessionId: 'task-old', terminalEventId: 'limited-old',
+      })
+      reserveTianwenPermissionRenewal({
+        stateRoot, longGoalId: source.id, expectedRevision: 8, taskId: secondTaskId,
+        plannerSessionId: 'planner-reserved', childSessionId: 'task-reserved',
+        permissionFingerprint: 'sha256:danger-full-access', startedAt: '2026-09-01T00:02:00.000Z',
+      })
+
+      const mainSession = {
+        id: 'main-control', header: { cwd: fixture, agentPreset: 'planner-preset' },
+        events: [{ type: 'sandbox/mode', seq: 0, time: 0, data: { mode: 'danger-full-access' } }] as unknown as SessionEvent[],
+      }
+      const main = { session: mainSession, followup: vi.fn() } as unknown as Agent
+      const sessions = new Map<string, { id: string, header: { cwd: string, agentPreset: string }, events: SessionEvent[] }>([
+        ['main-control', mainSession],
+      ])
+      const live = new Map<string, Agent>([['main-control', main]])
+      const startNativeChild = vi.fn(async (input: { readonly parent: Agent, readonly childId: string }) => {
+        const childSession = {
+          id: input.childId,
+          header: { cwd: fixture, agentPreset: 'planner-preset' },
+          events: [{
+            type: 'sandbox/mode', seq: 0, time: 0,
+            data: { mode: 'danger-full-access', source: 'delegation' },
+          }] as unknown as SessionEvent[],
+        }
+        sessions.set(input.childId, childSession)
+        live.set(input.childId, { session: childSession, ctx: { goals: { get: () => undefined } } } as unknown as Agent)
+        return { childId: input.childId }
+      })
+      const roots = { stateRoot, sessionsRoot: resolve(fixture, 'sessions'), evolutionRoot: resolve(stateRoot, 'evolution') }
+      const baseDependencies = {
+        roots,
+        readLongGoal,
+        projectEvidence: (_session: Session) => [],
+        inspectSession: async (sessionId: string) => sessions.get(sessionId),
+        effectiveMode: () => 'danger-full-access' as const,
+        attachedAgent: (sessionId: string) => live.get(sessionId),
+        reserveSessionId: () => { throw new Error('restart must not reserve another id') },
+        startNativeChild,
+        nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
+        notifyMain: vi.fn(),
+      }
+      const firstHost = createPermissionAttemptHost({
+        ...baseDependencies,
+        followupNativeChild: vi.fn(),
+        runCurrentTask: vi.fn(async () => { throw new Error('process crashed before Task start') }),
+      })
+
+      await expect(firstHost.reconcilePermissionAttempt({ longGoalId: source.id }))
+        .rejects.toThrow('process crashed before Task start')
+      expect(startNativeChild).toHaveBeenCalledWith(expect.objectContaining({ childId: 'planner-reserved' }))
+      live.delete('planner-reserved')
+
+      const followupNativeChild = vi.fn(async (_parent: Agent, childId: string) => {
+        const childSession = sessions.get(childId)!
+        live.set(childId, { session: childSession, ctx: { goals: { get: () => undefined } } } as unknown as Agent)
+      })
+      const runDependencies = {
+        readLongGoal,
+        readLongGoalStatus: vi.fn(async () => {
+          const current = readLongGoal(stateRoot, source.id) as LongGoalRecordV3
+          return status(current, ['complete', current.tasks[1]!.execution === null ? 'pending' : 'active'], secondTaskId)
+        }),
+        bindLongGoalTask: vi.fn(), bindGoalFirstLongGoalTask,
+        listSessions: vi.fn(async () => [...sessions.values()].map(session => ({ sessionId: session.id }))),
+        createSession: vi.fn(), reserveTaskSessionId: () => { throw new Error('must reuse task-reserved') },
+        startNativeTaskChild: startNativeChild, followupNativeTaskChild: vi.fn(),
+        nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
+        attachedAgent: (sessionId: string) => live.get(sessionId),
+        createGoal: vi.fn(() => ({ id: 'goal-reserved' })), readGoalRef: vi.fn(), resumeColdGoal: vi.fn(), flushSession: vi.fn(),
+      }
+      const restartedHost = createPermissionAttemptHost({
+        ...baseDependencies,
+        followupNativeChild,
+        runCurrentTask: input => runCurrentWebTask(input, runDependencies as never),
+      })
+
+      await restartedHost.reconcilePermissionAttempt({ longGoalId: source.id })
+
+      const recovered = readLongGoal(stateRoot, source.id) as LongGoalRecordV3
+      expect(recovered.planner.sessionId).toBe('planner-reserved')
+      expect(recovered.tasks[1]!.execution).toEqual({ sessionId: 'task-reserved', goalId: 'goal-reserved' })
+      expect(readTianwenTaskAttemptProjection(recovered, firstTaskId).attempts).toHaveLength(1)
+      expect(readTianwenTaskAttemptProjection(recovered, secondTaskId).attempts).toHaveLength(2)
+      expect(followupNativeChild).toHaveBeenCalledWith(
+        main, 'planner-reserved', expect.any(Array), expect.any(AbortSignal),
+      )
+      expect(startNativeChild.mock.calls.map(call => call[0].childId)).toEqual(['planner-reserved', 'task-reserved'])
     } finally {
       rmSync(fixture, { recursive: true, force: true })
     }

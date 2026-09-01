@@ -986,6 +986,110 @@ export function appendTianwenAttemptPermissionLimited(input: TianwenAttemptEvent
   })
 }
 
+export function markTianwenAttemptPermissionLimited(input: TianwenAttemptEventInput & {
+  readonly epoch: number
+  readonly childSessionId: string
+  readonly terminalEventId: string
+}): LongGoalRecordV3 {
+  if (
+    !isPositiveInteger(input.epoch)
+    || !isNonEmptyString(input.childSessionId)
+    || !isNonEmptyString(input.terminalEventId)
+  ) throw new TypeError('Tianwen permission-limited attempt input is invalid')
+  const record = readContinuousLongGoal(input.stateRoot, input.longGoalId)
+  assertExpectedRevision(record, input.expectedRevision)
+  const taskIndex = record.tasks.findIndex(task => task.id === input.taskId)
+  const task = taskIndex < 0 ? undefined : record.tasks[taskIndex]
+  const current = readTianwenTaskAttemptProjection(record, input.taskId).attempts.at(-1)
+  if (
+    task === undefined
+    || task.execution?.sessionId !== input.childSessionId
+    || task.resolution !== null
+    || current?.status !== 'running'
+    || current.epoch !== input.epoch
+    || current.childSessionId !== input.childSessionId
+  ) throw new LongGoalIntegrityError('Tianwen permission limit requires the current exact bound execution')
+  const event: TianwenLongGoalEvent = {
+    type: 'attempt-permission-limited',
+    taskId: input.taskId,
+    epoch: input.epoch,
+    terminalEventId: input.terminalEventId,
+  }
+  const updated = parseLongGoalV3({
+    ...record,
+    revision: record.revision + 1,
+    updatedAt: nextV2UpdatedAt(record, Date.now()),
+    tasks: record.tasks.map((candidate, index) => index === taskIndex
+      ? { ...candidate, execution: null }
+      : candidate),
+    tianwenEvents: [...(record.tianwenEvents ?? []), event],
+  })
+  replaceRecordAtomically(recordPath(input.stateRoot, input.longGoalId), updated)
+  return updated
+}
+
+export function reserveTianwenPermissionRenewal(input: TianwenAttemptEventInput & {
+  readonly plannerSessionId: string
+  readonly childSessionId: string
+  readonly permissionFingerprint: `sha256:${string}`
+  readonly startedAt: string
+}): LongGoalRecordV3 {
+  if (
+    !isNonEmptyString(input.plannerSessionId)
+    || !isNonEmptyString(input.childSessionId)
+    || !isNonEmptyString(input.permissionFingerprint)
+    || !isNonEmptyString(input.startedAt)
+  ) throw new TypeError('Tianwen permission renewal input is invalid')
+  const record = readContinuousLongGoal(input.stateRoot, input.longGoalId)
+  assertExpectedRevision(record, input.expectedRevision)
+  const task = record.tasks.find(candidate => candidate.id === input.taskId)
+  const attempts = readTianwenTaskAttemptProjection(record, input.taskId).attempts
+  const current = attempts.at(-1)
+  if (
+    task === undefined
+    || task.execution !== null
+    || task.resolution !== null
+    || current?.status !== 'permission-limited'
+  ) throw new LongGoalIntegrityError('Tianwen permission renewal requires a current permission-limited pending Task')
+  const historicalSessionIds = new Set(record.tasks.flatMap(candidate =>
+    readTianwenTaskAttemptProjection(record, candidate.id).attempts
+      .flatMap(attempt => [attempt.parentSessionId, attempt.childSessionId])))
+  if (input.plannerSessionId === record.planner.sessionId) {
+    throw new LongGoalIntegrityError('Tianwen permission renewal requires a new Planner Session')
+  }
+  if (
+    input.plannerSessionId === record.control.sessionId
+    || input.childSessionId === record.control.sessionId
+    || input.childSessionId === input.plannerSessionId
+    || historicalSessionIds.has(input.plannerSessionId)
+    || historicalSessionIds.has(input.childSessionId)
+    || record.tasks.some(candidate =>
+      candidate.execution?.sessionId === input.plannerSessionId
+      || candidate.execution?.sessionId === input.childSessionId)
+  ) throw new LongGoalIntegrityError('Tianwen permission renewal Session identity is invalid')
+  const event: TianwenLongGoalEvent = {
+    type: 'attempt-started',
+    taskId: input.taskId,
+    attempt: {
+      epoch: current.epoch + 1,
+      parentSessionId: input.plannerSessionId,
+      childSessionId: input.childSessionId,
+      permissionFingerprint: input.permissionFingerprint,
+      status: 'running',
+      startedAt: input.startedAt,
+    },
+  }
+  const updated = parseLongGoalV3({
+    ...record,
+    revision: record.revision + 1,
+    updatedAt: nextV2UpdatedAt(record, Date.now()),
+    planner: { ...record.planner, sessionId: input.plannerSessionId },
+    tianwenEvents: [...(record.tianwenEvents ?? []), event],
+  })
+  replaceRecordAtomically(recordPath(input.stateRoot, input.longGoalId), updated)
+  return updated
+}
+
 export function appendTianwenAttemptSettled(input: TianwenAttemptEventInput & {
   readonly epoch: number
   readonly terminalEventId: string
