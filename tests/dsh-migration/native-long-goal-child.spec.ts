@@ -33,6 +33,10 @@ describe('NativeLongGoalChild', () => {
       request: { parent, prompt, agentOptions },
       signal,
     })
+    const [startSpec] = startContinuable.mock.calls[0]
+    expect(startSpec.request.parent).toBe(parent)
+    expect(startSpec.request.agentOptions).toBe(agentOptions)
+    expect(startSpec.signal).toBe(signal)
   })
 
   it('forwards follow-up source and signal unchanged', async () => {
@@ -53,6 +57,9 @@ describe('NativeLongGoalChild', () => {
       },
       signal,
     })
+    const [forwardedParent, , , followupOptions] = followup.mock.calls[0]
+    expect(forwardedParent).toBe(parent)
+    expect(followupOptions.signal).toBe(signal)
   })
 
   it('forwards the parent session authority and reserved child id to interrupt', () => {
