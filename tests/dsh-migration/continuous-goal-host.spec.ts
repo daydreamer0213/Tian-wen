@@ -627,6 +627,242 @@ describe('continuous Goal Host', () => {
     }
   })
 
+  it('checkpoints an exact public continuable Task before DSH disposes its live Session store', async () => {
+    const base = resolve('D:/DevData/tianwen-dsh-probe/terminal-checkpoint-race')
+    mkdirSync(base, { recursive: true })
+    const fixture = mkdtempSync(resolve(base, 'run-'))
+    const sessionsRoot = resolve(fixture, 'sessions')
+    const stateRoot = resolve(fixture, 'state')
+    const ctx = new DshContext()
+    let releasePlanner!: () => void
+    let releaseTask!: () => void
+    const plannerGate = new Promise<void>(resolveGate => { releasePlanner = resolveGate })
+    const taskGate = new Promise<void>(resolveGate => { releaseTask = resolveGate })
+    let operations: Parameters<ContinuousGoalHostDependencies['installCommand']>[1] | undefined
+    let current: LongGoalRecordV3 | undefined
+    let taskGoal: ReturnType<typeof ctx.goals.create> | undefined
+    let taskComplete = false
+    let plannerComplete = false
+    const checkpointOrder: string[] = []
+    const errors: unknown[] = []
+    let unmount: (() => Promise<void>) | undefined
+
+    ctx.provide('sessionProjections', probeProjectionRegistry())
+    ctx.provide('sandboxPolicy', {
+      overrideOf(session: { readonly events: readonly { readonly type: string, readonly data: unknown }[] }) {
+        const event = session.events.findLast(item => item.type === 'sandbox/mode')
+        return (event?.data as { readonly mode?: unknown } | undefined)?.mode
+      },
+    })
+    ctx.provide('approval', {})
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(GoalService)
+    await ctx.plugin(JsonlSessionPersistence, { root: sessionsRoot, compression: 'none' })
+    await ctx.plugin(SubagentRuntime)
+    ctx.llm.registerAdapter(['terminal-race-main'], new ScriptedAdapter([
+      textResponse('Main received the Planner settlement.'),
+    ]))
+    ctx.llm.registerAdapter(['terminal-race-planner'], new ScriptedAdapter([
+      toolCallResponse('planner-race-gate', 'terminal_race_planner_gate', {}),
+      textResponse('Planner settlement complete.'),
+    ]))
+    ctx.llm.registerAdapter(['terminal-race-task'], new ScriptedAdapter([
+      toolCallResponse('task-race-gate', 'terminal_race_task_gate', {}),
+      textResponse('Task settlement complete.'),
+    ]))
+    ctx.subagents.registerProvider(terminalBoundaryProbeProvider)
+    const disposePlannerGate = ctx.tools.register(defineTool({
+      name: 'terminal_race_planner_gate', description: 'Keep the exact Planner live.', parameters: {},
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute() { await plannerGate; return 'planner released' },
+    }))
+    const disposeTaskGate = ctx.tools.register(defineTool({
+      name: 'terminal_race_task_gate', description: 'Keep the exact Task live.', parameters: {},
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute() { await taskGate; return 'task released' },
+    }))
+
+    try {
+      const main = (await ctx.agents.create({
+        sessionId: SessionId('terminal-race-main'),
+        meta: { cwd: fixture, agentPreset: 'standard' },
+        agentOptions: { provider: 'terminal-race-main', model: 'scripted' },
+      })).agent
+      const continueProgress = vi.fn(async ({ expectedRevision }: { readonly expectedRevision: number }) => {
+        current = commitLongGoalPlan({
+          stateRoot,
+          longGoalId: current!.id,
+          expectedRevision,
+          outcome: 'complete',
+          tasks: [],
+          consideredSettledTasks: 1,
+        }, { now: () => 10 }) as LongGoalRecordV3
+        plannerComplete = true
+      })
+      const dependencies: ContinuousGoalHostDependencies = {
+        roots: { stateRoot, sessionsRoot, evolutionRoot: resolve(fixture, 'evolution') },
+        listLongGoals: () => current === undefined ? [] : [current],
+        readLongGoal,
+        readStatus: async () => status(
+          current!,
+          taskComplete ? ['complete'] : ['active'],
+          taskComplete ? null : TASK_1,
+          plannerComplete ? 'complete' : taskComplete ? 'planning' : 'active',
+        ),
+        createProgress: async input => {
+          current = createContinuousLongGoal({
+            stateRoot,
+            objective: input.objective,
+            context: input.context,
+            successCriteria: input.successCriteria,
+            workspaceRoot: input.workspaceRoot,
+            agentPreset: input.agentPreset,
+            controlSessionId: input.controlSessionId,
+          }, {
+            goalSuffix: () => 'terminal-checkpoint-race',
+            plannerSessionId: () => 'terminal-race-planner',
+            now: () => 1,
+          })
+          const plannerStart = await ctx.subagents.startContinuable({
+            provider: 'terminal-boundary-probe',
+            childId: SessionId('terminal-race-planner'),
+            label: 'Race Planner',
+            request: {
+              parent: main,
+              prompt: [{ type: 'text', text: 'Wait for the Task.' }],
+              agentOptions: { provider: 'terminal-race-planner', model: 'scripted' },
+            },
+            signal: AbortSignal.timeout(10_000),
+          })
+          await vi.waitFor(() => expect(ctx.agents.get(plannerStart.childId)?.session.events
+            .some(event => event.type === 'tool/call')).toBe(true))
+          const planner = ctx.agents.get(plannerStart.childId)!
+          const taskStart = await ctx.subagents.startContinuable({
+            provider: 'terminal-boundary-probe',
+            childId: SessionId('terminal-race-task'),
+            label: 'Race Task',
+            request: {
+              parent: planner,
+              prompt: [{ type: 'text', text: 'Finish the exact Task.' }],
+              agentOptions: { provider: 'terminal-race-task', model: 'scripted' },
+            },
+            signal: AbortSignal.timeout(10_000),
+          })
+          await vi.waitFor(() => expect(ctx.agents.get(taskStart.childId)?.session.events
+            .some(event => event.type === 'tool/call')).toBe(true))
+          const task = ctx.agents.get(taskStart.childId)!
+          taskGoal = ctx.goals.create(task, { objective: 'Finish the exact Task', maxGoalRounds: 1 })
+          const planned = commitLongGoalPlan({
+            stateRoot,
+            longGoalId: current.id,
+            expectedRevision: current.revision,
+            outcome: 'continue',
+            tasks: [{ objective: 'Finish the exact Task' }],
+            consideredSettledTasks: 0,
+          }, { taskId: () => TASK_1, now: () => 2 }) as LongGoalRecordV3
+          const started = appendTianwenAttemptStarted({
+            stateRoot,
+            longGoalId: planned.id,
+            expectedRevision: planned.revision,
+            taskId: TASK_1,
+            epoch: 1,
+            parentSessionId: String(planner.session.id),
+            childSessionId: String(task.session.id),
+            permissionFingerprint: 'sha256:terminal-checkpoint-race',
+            permissionMode: 'danger-full-access',
+            startedAt: '2026-09-02T00:00:00.000Z',
+          })
+          current = bindGoalFirstLongGoalTask({
+            stateRoot,
+            longGoalId: started.id,
+            expectedRevision: started.revision,
+            taskId: TASK_1,
+            execution: { sessionId: String(task.session.id), goalId: String(taskGoal.id) },
+          }) as LongGoalRecordV3
+          await vi.waitFor(() => expect(ctx.agents.get(taskStart.childId)).toBeUndefined(), { timeout: 10_000 })
+          const progressStatus = status(
+            current,
+            taskComplete ? ['complete'] : ['active'],
+            taskComplete ? null : TASK_1,
+            taskComplete ? 'planning' : 'active',
+          )
+          return {
+            schemaVersion: 'tianwen.continuous-goal-control-result.v1',
+            action: 'started',
+            status: progressStatus,
+            sessionId: String(task.session.id),
+          }
+        },
+        control: vi.fn(async () => ({ action: 'status' })),
+        continueProgress,
+        pause: vi.fn(),
+        flushSession: async exact => {
+          const sessionId = String(exact.session.id)
+          checkpointOrder.push(`${sessionId}:${ctx.agents.get(exact.session.id) === exact ? 'live' : 'detached'}`)
+          return await ctx.sessions.flush(exact.session)
+        },
+        recordTerminalAttempt: async input => {
+          const recorded = await recordContinuousGoalTerminalAttempt({ stateRoot, ...input }, {
+            inspectSession: sessionId => ctx.sessionPersistence.inspect(SessionId(sessionId)),
+          })
+          current = readLongGoal(stateRoot, current!.id) as LongGoalRecordV3
+          return recorded
+        },
+        reportError: error => { errors.push(error) },
+        installCommand: (_agent, installedOperations) => {
+          operations = installedOperations
+          return { dispose() {} }
+        },
+        installBoundControls: () => () => undefined,
+      }
+      unmount = mountContinuousGoalHost(ctx as never, dependencies)
+      await vi.waitFor(() => expect(operations).toBeDefined())
+
+      await expect(operations!.create(main, 'Finish one real Task')).resolves.toMatchObject({ action: 'started' })
+      await vi.waitFor(() => expect(current?.tasks[0]?.execution).toMatchObject({
+        sessionId: 'terminal-race-task',
+      }))
+      const task = ctx.agents.get(SessionId('terminal-race-task'))!
+      taskComplete = true
+      ctx.goals.complete(task, taskGoal!)
+      releaseTask()
+
+      await vi.waitFor(() => {
+        if (continueProgress.mock.calls.length === 0) {
+          throw new Error(JSON.stringify({
+            checkpointOrder,
+            errors: errors.map(error => String(error)),
+            taskLive: ctx.agents.get(SessionId('terminal-race-task')) !== undefined,
+          }))
+        }
+        expect(continueProgress).toHaveBeenCalledOnce()
+      }, { timeout: 10_000 })
+      expect(checkpointOrder.slice(0, 2)).toEqual([
+        'terminal-race-task:live',
+        'terminal-race-main:live',
+      ])
+      expect(readLongGoal(stateRoot, current!.id)).toMatchObject({
+        planner: { phase: 'complete', consideredSettledTasks: 1 },
+      })
+      expect(readTianwenTaskAttemptProjection(current!, TASK_1)).toMatchObject({
+        attempts: [expect.objectContaining({ status: 'settled' })],
+        terminalDeliveryBoundary: expect.objectContaining({
+          parentSessionId: 'terminal-race-planner',
+        }),
+      })
+      expect(errors).toEqual([])
+    } finally {
+      releaseTask?.()
+      releasePlanner?.()
+      await unmount?.()
+      disposeTaskGate()
+      disposePlannerGate()
+      await ctx.fiber.dispose()
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
   it('flushes the exact Task terminal source and captured main prefix before recording completion', async () => {
     const source = record({
       tianwenEvents: [{
@@ -658,7 +894,10 @@ describe('continuous Goal Host', () => {
       },
     })
 
-    expect(terminalOrder).toEqual([])
+    expect(terminalOrder).toEqual([
+      `flush:${EXECUTION_1.sessionId}`,
+      `flush:${source.control.sessionId}`,
+    ])
     expect(subject.dependencies.recordTerminalAttempt).not.toHaveBeenCalled()
     subject.first.setGoal('complete')
     subject.setStatus(status(source, ['complete'], null, 'complete'))
@@ -713,7 +952,7 @@ describe('continuous Goal Host', () => {
     await vi.waitFor(() => expect(subject.dependencies.reportError).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'Task persistence unavailable' }),
     ))
-    expect(subject.dependencies.flushSession).toHaveBeenCalledOnce()
+    expect(subject.dependencies.flushSession).toHaveBeenCalledTimes(2)
     expect(subject.dependencies.recordTerminalAttempt).not.toHaveBeenCalled()
     expect(subject.continueProgress).not.toHaveBeenCalled()
     await dispose()
@@ -3520,7 +3759,7 @@ describe('continuous Goal Host', () => {
     subject.live.set(source.control.sessionId, main)
     subject.dependencies.flushSession.mockImplementation(async (exact: Agent) => {
       if (String(exact.session.id) === source.control.sessionId) {
-        subject.live.delete(EXECUTION_1.sessionId)
+        queueMicrotask(() => subject.live.delete(EXECUTION_1.sessionId))
       }
     })
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)

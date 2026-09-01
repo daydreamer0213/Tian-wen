@@ -762,11 +762,12 @@ export function mountContinuousGoalHost(
           if (!terminalEvidence.has(key)) {
             const mainInboxBoundarySeq = main.session.events.at(-1)?.seq ?? -1
             const terminalEventId = `goal-change:${sessionId}:${terminal!.seq}:${terminalOperation}`
+            const checkpoint = Promise.all([flush(taskAgent), flush(main)])
+            void checkpoint.catch(() => undefined)
             terminalEvidence.set(key, append(record.id, async () => {
               try {
                 await taskAgent.whenIdle()
-                await flush(taskAgent)
-                await flush(main)
+                await checkpoint
                 return { mainInboxBoundarySeq, terminalEventId }
               } catch (error) {
                 try { dependencies.reportError(error) } catch {}
