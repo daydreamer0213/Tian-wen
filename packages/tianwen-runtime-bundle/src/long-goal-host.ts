@@ -1903,18 +1903,20 @@ export async function recordContinuousGoalTerminalAttempt(input: {
   readonly stateRoot: string
   readonly longGoalId: string
   readonly status: LongGoalStatusProjectionV3
+  readonly mainInboxBoundarySeq?: number
+  readonly terminalEventId?: string
 }, dependencies: {
   readonly inspectSession: (sessionId: string) => Promise<{
     readonly meta: { readonly id?: unknown, readonly parentSession?: unknown }
     readonly events: readonly SessionEvent[]
   }>
-}): Promise<void> {
+}): Promise<boolean> {
   const record = readLongGoal(input.stateRoot, input.longGoalId)
-  if (record.schemaVersion !== 'tianwen.long-goal.v3') return
+  if (record.schemaVersion !== 'tianwen.long-goal.v3') return false
   const terminalTask = input.status.goal.phase === 'blocked'
     ? input.status.tasks.find(task => task.id === input.status.currentTaskId && task.phase === 'blocked')
     : input.status.tasks.findLast(task => task.phase === 'complete' || task.phase === 'abandoned')
-  if (terminalTask?.execution === null || terminalTask?.execution === undefined) return
+  if (terminalTask?.execution === null || terminalTask?.execution === undefined) return false
   const durableTask = record.tasks.find(task => task.id === terminalTask.id)
   if (
     durableTask?.execution?.sessionId !== terminalTask.execution.sessionId
@@ -1922,7 +1924,8 @@ export async function recordContinuousGoalTerminalAttempt(input: {
   ) throw new LongGoalIntegrityError('Continuous Goal terminal Task binding mismatch')
   const projection = readTianwenTaskAttemptProjection(record, durableTask.id)
   const attempt = projection.attempts.at(-1)
-  if (attempt?.status !== 'running') return
+  if (attempt?.status === 'settled') return true
+  if (attempt?.status !== 'running') return false
   if (
     attempt.childSessionId !== durableTask.execution.sessionId
     || attempt.parentSessionId !== record.planner.sessionId
@@ -1942,19 +1945,60 @@ export async function recordContinuousGoalTerminalAttempt(input: {
       readonly ref?: { readonly id?: unknown }
       readonly goal?: { readonly id?: unknown }
     }
-    return data.operation === operation
+    const matchesTerminal = data.operation === operation
       && String(data.ref?.id ?? data.goal?.id) === durableTask.execution!.goalId
       && Number.isSafeInteger(event.seq)
+    return matchesTerminal && (
+      input.terminalEventId === undefined
+      || input.terminalEventId === `goal-change:${durableTask.execution!.sessionId}:${event.seq}:${operation}`
+    )
   })
-  if (terminalEvent === undefined) return
+  if (terminalEvent === undefined) return false
+  const terminalEventId = `goal-change:${durableTask.execution.sessionId}:${terminalEvent.seq}:${operation}`
+  const persistedMain = await dependencies.inspectSession(record.control.sessionId)
+  if (String(persistedMain.meta.id) !== record.control.sessionId) {
+    throw new LongGoalIntegrityError('Continuous Goal main Session identity mismatch')
+  }
+  const persistedMainTail = persistedMain.events.at(-1)?.seq ?? -1
+  const existingBoundary = projection.terminalDeliveryBoundary
+  if (
+    existingBoundary !== undefined
+    && (
+      existingBoundary.terminalEventId !== terminalEventId
+      || existingBoundary.parentSessionId !== attempt.parentSessionId
+      || persistedMainTail < existingBoundary.mainInboxBoundarySeq
+    )
+  ) return false
+  let currentRecord = record
+  if (existingBoundary === undefined) {
+    const boundarySeq = input.mainInboxBoundarySeq ?? persistedMainTail
+    if (persistedMainTail < boundarySeq) return false
+    const ambiguousSettlement = input.mainInboxBoundarySeq === undefined
+      && persistedMain.events.some(event => event.type === 'user/message'
+        ? isExactPlannerSettlementMessage(event.data, attempt.parentSessionId)
+        : event.type === 'agent/inbox/spliced'
+          && event.data.inserted.some(message => isExactPlannerSettlementMessage(message, attempt.parentSessionId)))
+    if (ambiguousSettlement) return false
+    currentRecord = appendTianwenTerminalDeliveryBoundary({
+      stateRoot: input.stateRoot,
+      longGoalId: record.id,
+      expectedRevision: record.revision,
+      taskId: durableTask.id,
+      epoch: attempt.epoch,
+      terminalEventId,
+      parentSessionId: attempt.parentSessionId,
+      mainInboxBoundarySeq: boundarySeq,
+    })
+  }
   appendTianwenAttemptSettled({
     stateRoot: input.stateRoot,
     longGoalId: record.id,
-    expectedRevision: record.revision,
+    expectedRevision: currentRecord.revision,
     taskId: durableTask.id,
     epoch: attempt.epoch,
-    terminalEventId: `goal-change:${durableTask.execution.sessionId}:${terminalEvent.seq}:${operation}`,
+    terminalEventId,
   })
+  return true
 }
 
 export function reportLongGoalProgress(
@@ -1971,27 +2015,111 @@ export function reportLongGoalProgress(
   })
 }
 
-function plannerSettlementAdmissions(
+function isExactPlannerSettlementMessage(
+  message: { readonly source?: unknown },
+  parentSessionId: string,
+): boolean {
+  const source = message.source as {
+    readonly kind?: unknown
+    readonly senderSessionId?: unknown
+  } | undefined
+  return source?.kind === 'subagent-settled'
+    && String(source.senderSessionId) === parentSessionId
+}
+
+type PlannerSettlementLifecycle = {
+  readonly admissionSeq: number
+  state: 'pending' | 'claimed' | 'canceled'
+  turn?: number
+  claimObserved?: true
+  visibleReply?: true
+  endReason?: string
+}
+
+function plannerSettlementLifecycles(
   events: readonly SessionEvent[],
   parentSessionId: string,
   afterSeq: number,
-): Map<string, number> {
-  const ids = new Map<string, number>()
+): Map<string, PlannerSettlementLifecycle> {
+  type Pending = { readonly id: string, readonly admissionSeq: number }
+  const inbox: Record<'next-turn' | 'next-step', Pending[]> = {
+    'next-turn': [],
+    'next-step': [],
+  }
+  const lifecycles = new Map<string, PlannerSettlementLifecycle>()
+  let openTurn: number | undefined
   for (const event of events) {
-    if (event.type !== 'agent/inbox/spliced' || event.seq <= afterSeq) continue
-    for (const message of event.data.inserted) {
-      const source = message.source as unknown as {
-        readonly kind?: unknown
-        readonly senderSessionId?: unknown
+    if (event.type === 'turn/start') {
+      openTurn = event.data.turn
+      continue
+    }
+    if (event.type === 'agent/inbox/spliced') {
+      const target = inbox[event.data.target]
+      const removed = target.slice(event.data.start, event.data.start + (event.data.removedCount ?? 0))
+      for (const message of removed) {
+        const current = lifecycles.get(message.id)
+        if (current?.admissionSeq !== message.admissionSeq) continue
+        if (event.data.outcome === 'canceled' || openTurn === undefined) {
+          lifecycles.set(message.id, { admissionSeq: message.admissionSeq, state: 'canceled' })
+        } else {
+          lifecycles.set(message.id, { admissionSeq: message.admissionSeq, state: 'claimed', turn: openTurn })
+        }
       }
+      const inserted = event.data.inserted.map(message => {
+        const id = String(message.id)
+        if (event.seq > afterSeq && isExactPlannerSettlementMessage(message, parentSessionId)) {
+          lifecycles.set(id, { admissionSeq: event.seq, state: 'pending' })
+        }
+        return { id, admissionSeq: event.seq }
+      })
+      target.splice(event.data.start, event.data.removedCount ?? 0, ...inserted)
+      continue
+    }
+    if (event.type === 'user/message') {
+      const lifecycle = lifecycles.get(String(event.data.id))
       if (
-        source.kind === 'subagent-settled'
-        && String(source.senderSessionId) === parentSessionId
-        && !ids.has(String(message.id))
-      ) ids.set(String(message.id), event.seq)
+        lifecycle?.state === 'claimed'
+        && lifecycle.turn === openTurn
+        && event.seq > lifecycle.admissionSeq
+        && isExactPlannerSettlementMessage(event.data, parentSessionId)
+      ) lifecycle.claimObserved = true
+      continue
+    }
+    if (event.type === 'assistant/message') {
+      for (const lifecycle of lifecycles.values()) {
+        if (
+          lifecycle.state === 'claimed'
+          && lifecycle.turn === event.data.turn
+          && event.data.message.content.some(block => block.type === 'text' && block.text.trim().length > 0)
+        ) lifecycle.visibleReply = true
+      }
+      continue
+    }
+    if (event.type === 'turn/end') {
+      for (const lifecycle of lifecycles.values()) {
+        if (lifecycle.state === 'claimed' && lifecycle.turn === event.data.turn) {
+          lifecycle.endReason = event.data.reason.kind
+        }
+      }
+      if (openTurn === event.data.turn) openTurn = undefined
     }
   }
-  return ids
+  return lifecycles
+}
+
+function plannerSettlementDecision(
+  events: readonly SessionEvent[],
+  parentSessionId: string,
+  afterSeq: number,
+): 'none' | 'wait' | 'fallback' | 'complete' {
+  const lifecycles = [...plannerSettlementLifecycles(events, parentSessionId, afterSeq).values()]
+  if (lifecycles.some(lifecycle => lifecycle.state === 'claimed'
+    && lifecycle.claimObserved
+    && lifecycle.visibleReply
+    && (lifecycle.endReason === 'completed' || lifecycle.endReason === 'max-tokens'))) return 'complete'
+  if (lifecycles.some(lifecycle => lifecycle.state === 'pending'
+    || (lifecycle.state === 'claimed' && lifecycle.endReason === undefined))) return 'wait'
+  return lifecycles.length === 0 ? 'none' : 'fallback'
 }
 
 function sameDeliveryState(
@@ -2172,60 +2300,23 @@ async function deliverContinuousGoalSettlementOnce(
   const hasExactBoundary = boundary !== undefined
     && boundary.terminalEventId === terminal.attempt.terminalEventId
     && boundary.parentSessionId === terminal.attempt.parentSessionId
-  const admittedSettlementIds = (events: readonly SessionEvent[]) => hasExactBoundary
-    ? plannerSettlementAdmissions(
+  const nativeDecision = (events: readonly SessionEvent[]) => hasExactBoundary
+    ? plannerSettlementDecision(
         events,
         terminal.attempt.parentSessionId,
         boundary.mainInboxBoundarySeq,
       )
-    : new Map<string, number>()
-  const hasNativeCompletion = (events: readonly SessionEvent[]): boolean => {
-    const admitted = admittedSettlementIds(events)
-    if (admitted.size === 0) return false
-    for (let index = 0; index < events.length; index += 1) {
-      const event = events[index]
-      if (event?.type !== 'user/message') continue
-      const admissionSeq = admitted.get(String(event.data.id))
-      if (admissionSeq === undefined || event.seq <= admissionSeq) continue
-      const source = event.data.source as unknown as {
-        readonly kind?: unknown
-        readonly senderSessionId?: unknown
-      }
-      if (
-        source.kind !== 'subagent-settled'
-        || String(source.senderSessionId) !== terminal.attempt.parentSessionId
-      ) continue
-      const turn = events.slice(0, index).findLast(candidate => candidate.type === 'turn/start')?.data.turn
-      if (turn === undefined) continue
-      const after = events.slice(index + 1)
-      const hasReply = after.some(candidate => candidate.type === 'assistant/message'
-        && candidate.data.turn === turn
-        && candidate.data.message.content.some(block => block.type === 'text' && block.text.trim().length > 0))
-      const end = after.find(candidate => candidate.type === 'turn/end' && candidate.data.turn === turn)
-      if (
-        hasReply
-        && end?.type === 'turn/end'
-        && (end.data.reason.kind === 'completed' || end.data.reason.kind === 'max-tokens')
-      ) return true
-    }
-    return false
-  }
-  const isExactPlannerSettlement = (message: { readonly source?: unknown }): boolean => {
-    const source = message.source as {
-      readonly kind?: unknown
-      readonly senderSessionId?: unknown
-    } | undefined
-    return source?.kind === 'subagent-settled'
-      && String(source.senderSessionId) === terminal.attempt.parentSessionId
-  }
+    : 'none'
+  const hasNativeCompletion = (events: readonly SessionEvent[]): boolean => nativeDecision(events) === 'complete'
   const hasUncorrelatedPlannerSettlement = (events: readonly SessionEvent[]): boolean =>
     !hasExactBoundary && events.some(event => event.type === 'user/message'
-      ? isExactPlannerSettlement(event.data)
+      ? isExactPlannerSettlementMessage(event.data, terminal.attempt.parentSessionId)
       : event.type === 'agent/inbox/spliced'
-        && event.data.inserted.some(isExactPlannerSettlement)
+        && event.data.inserted.some(message =>
+          isExactPlannerSettlementMessage(message, terminal.attempt.parentSessionId))
     )
   const hasCorrelatedPlannerAdmission = (events: readonly SessionEvent[]): boolean =>
-    admittedSettlementIds(events).size > 0
+    nativeDecision(events) === 'wait'
   const acknowledge = (): boolean => {
     const latest = readTerminal()
     if (latest === undefined || latest.attempt.terminalEventId !== terminal.attempt.terminalEventId) return false
@@ -2671,15 +2762,6 @@ export function mountTianwenLongGoalHost(
       }),
       flushSession: async agent => injected.sessions.flush(agent.session),
       reportProgress: async input => { await reportLongGoalProgress(injected, input) },
-      recordTerminalBoundary: input => {
-        const record = readLongGoal(roots.stateRoot, input.longGoalId)
-        if (record.schemaVersion !== 'tianwen.long-goal.v3') return
-        appendTianwenTerminalDeliveryBoundary({
-          stateRoot: roots.stateRoot,
-          expectedRevision: record.revision,
-          ...input,
-        })
-      },
       recordTerminalAttempt: input => recordContinuousGoalTerminalAttempt({
         stateRoot: roots.stateRoot,
         ...input,

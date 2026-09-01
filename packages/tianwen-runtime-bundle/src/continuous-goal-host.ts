@@ -69,18 +69,12 @@ export interface ContinuousGoalHostDependencies {
     readonly facts: readonly DurableProgressFact[]
     readonly signal: AbortSignal
   }) => Promise<void | boolean>
-  readonly recordTerminalBoundary?: (input: {
-    readonly longGoalId: string
-    readonly taskId: string
-    readonly epoch: number
-    readonly terminalEventId: string
-    readonly parentSessionId: string
-    readonly mainInboxBoundarySeq: number
-  }) => void
   readonly recordTerminalAttempt?: (input: {
     readonly longGoalId: string
     readonly status: LongGoalStatusProjectionV3
-  }) => Promise<void>
+    readonly mainInboxBoundarySeq?: number
+    readonly terminalEventId?: string
+  }) => Promise<boolean | void>
   readonly reportError: (error: unknown) => void
   readonly installCommand: (
     agent: Agent,
@@ -245,6 +239,10 @@ export function mountContinuousGoalHost(
   const pendingDeliveries = new Map<string, ContinuousGoalDeliveryIntent[]>()
   const deliveryKeys = new Set<string>()
   const observedTaskTransitions = new Set<string>()
+  const terminalEvidence = new Map<string, Promise<{
+    readonly mainInboxBoundarySeq: number
+    readonly terminalEventId: string
+  } | undefined>>()
   const deliveryTasks = new Set<Promise<void>>()
   const failures: unknown[] = []
   const installed = new Map<Agent, {
@@ -390,6 +388,17 @@ export function mountContinuousGoalHost(
   const flush = async (agent: Agent): Promise<void> => {
     if (await dependencies.flushSession(agent) === false) throw new Error('Session persistence is unavailable')
   }
+  const transitionKey = (transition: TaskTransition): string =>
+    `${transition.operation}:${transition.sessionId}:${transition.goalId}:${transition.revision}`
+  const capturedBoundary = async (transition: TaskTransition): Promise<{
+    readonly captured: boolean
+    readonly evidence?: { readonly mainInboxBoundarySeq: number, readonly terminalEventId: string }
+  }> => {
+    const evidence = terminalEvidence.get(transitionKey(transition))
+    if (evidence === undefined) return { captured: false }
+    const persisted = await evidence
+    return persisted === undefined ? { captured: true } : { captured: true, evidence: persisted }
+  }
 
   const operations: ContinuousGoalAgentOperations = {
     create: async (agent, objective) => {
@@ -490,8 +499,10 @@ export function mountContinuousGoalHost(
   }
 
   const continueAfterCompletion = async (longGoalId: string, execution: { sessionId: string, goalId: string, revision: number }): Promise<void> => {
+    const boundary = await capturedBoundary({ operation: 'complete', ...execution })
+    if (boundary.captured && boundary.evidence === undefined) return
     const taskAgent = ctx.agents.get(execution.sessionId as never)
-    if (taskAgent !== undefined) {
+    if (!boundary.captured && taskAgent !== undefined) {
       await taskAgent.whenIdle()
       await flush(taskAgent)
     }
@@ -506,7 +517,11 @@ export function mountContinuousGoalHost(
     const status = await readStatus(longGoalId)
     const projected = status.tasks.find(candidate => candidate.id === task.id)
     if (projected?.phase !== 'complete' || settledTasks(status) <= record.planner.consideredSettledTasks) return
-    await dependencies.recordTerminalAttempt?.({ longGoalId, status })
+    await dependencies.recordTerminalAttempt?.({
+      longGoalId,
+      status,
+      ...(boundary.evidence ?? {}),
+    })
     const terminalRecord = readV3(longGoalId)
     if (terminalRecord === undefined) return
     await dependencies.continueProgress({ longGoalId, expectedRevision: terminalRecord.revision })
@@ -514,10 +529,14 @@ export function mountContinuousGoalHost(
   }
 
   const recordAfterBlock = async (longGoalId: string, execution: { sessionId: string, goalId: string, revision: number }): Promise<void> => {
+    const boundary = await capturedBoundary({ operation: 'block', ...execution })
+    if (boundary.captured && boundary.evidence === undefined) return
     const taskAgent = ctx.agents.get(execution.sessionId as never)
-    if (taskAgent === undefined) return
-    await taskAgent.whenIdle()
-    await flush(taskAgent)
+    if (!boundary.captured) {
+      if (taskAgent === undefined) return
+      await taskAgent.whenIdle()
+      await flush(taskAgent)
+    }
     const record = readV3(longGoalId)
     if (record === undefined || record.control.autoProgress !== 'running' || record.planner.phase === 'complete') return
     const task = boundTask(record, execution.sessionId, execution.goalId)
@@ -533,7 +552,11 @@ export function mountContinuousGoalHost(
       || current.execution?.sessionId !== execution.sessionId
       || current.execution.goalId !== execution.goalId
     ) return
-    await dependencies.recordTerminalAttempt?.({ longGoalId, status: blocked })
+    await dependencies.recordTerminalAttempt?.({
+      longGoalId,
+      status: blocked,
+      ...(boundary.evidence ?? {}),
+    })
     recordProgressDelivery(longGoalId, blocked)
   }
 
@@ -543,8 +566,18 @@ export function mountContinuousGoalHost(
     if (record === undefined) return
     const status = await readStatus(longGoalId)
     if (status.goal.phase === 'blocked' || status.goal.phase === 'complete') {
-      await dependencies.recordTerminalAttempt?.({ longGoalId, status })
+      const folded = await dependencies.recordTerminalAttempt?.({ longGoalId, status })
+      if (folded === false) return
       recordProgressDelivery(longGoalId, await readStatus(longGoalId), true)
+      return
+    }
+    const pendingTerminalBoundary = record.tasks.some(task => {
+      const projection = readTianwenTaskAttemptProjection(record, task.id)
+      return projection.attempts.at(-1)?.status === 'running'
+        && projection.terminalDeliveryBoundary !== undefined
+    })
+    if (pendingTerminalBoundary) {
+      await dependencies.recordTerminalAttempt?.({ longGoalId, status })
       return
     }
     if (record.control.autoProgress !== 'running' || record.planner.phase === 'complete') return
@@ -558,14 +591,18 @@ export function mountContinuousGoalHost(
       || hasNewSettledTask
       || !exactLiveArmedTask(ctx, record, status)
     if (requiresContinue) {
-      if (hasNewSettledTask) await dependencies.recordTerminalAttempt?.({ longGoalId, status })
+      if (hasNewSettledTask) {
+        const folded = await dependencies.recordTerminalAttempt?.({ longGoalId, status })
+        if (folded === false) return
+      }
       const currentRecord = readV3(longGoalId)
       if (currentRecord === undefined) return
       await dependencies.continueProgress({ longGoalId, expectedRevision: currentRecord.revision })
       const recovered = await readStatus(longGoalId)
       if (recovered.goal.phase === 'complete' || recovered.goal.phase === 'blocked' || hasNewSettledTask) {
         if (recovered.goal.phase === 'complete' || recovered.goal.phase === 'blocked') {
-          await dependencies.recordTerminalAttempt?.({ longGoalId, status: recovered })
+          const folded = await dependencies.recordTerminalAttempt?.({ longGoalId, status: recovered })
+          if (folded === false) return
         }
         recordProgressDelivery(
           longGoalId,
@@ -679,8 +716,8 @@ export function mountContinuousGoalHost(
           readonly seq: number
           readonly data: {
             readonly operation?: unknown
-            readonly ref?: { readonly id?: unknown }
-            readonly goal?: { readonly id?: unknown }
+            readonly ref?: { readonly id?: unknown, readonly revision?: unknown }
+            readonly goal?: { readonly id?: unknown, readonly revision?: unknown }
           }
         }
       : undefined
@@ -695,33 +732,45 @@ export function mountContinuousGoalHost(
         || record.control.autoProgress !== 'running'
         || record.planner.phase === 'complete'
       ) continue
-      if (terminalOperation !== undefined && dependencies.recordTerminalBoundary !== undefined) {
+      if (terminalOperation !== undefined) {
         const goalId = String(terminal!.data.ref?.id ?? terminal!.data.goal?.id)
         const task = boundTask(record, sessionId, goalId)
         const attempt = task === undefined
           ? undefined
           : readTianwenTaskAttemptProjection(record, task.id).attempts.at(-1)
         const main = ctx.agents.get(record.control.sessionId as never)
+        const taskAgent = ctx.agents.get(sessionId as never)
         if (
           task !== undefined
           && attempt?.status === 'running'
           && attempt.parentSessionId === record.planner.sessionId
           && attempt.childSessionId === sessionId
+          && taskAgent !== undefined
+          && String(taskAgent.session.id) === sessionId
           && main !== undefined
           && String(main.session.id) === record.control.sessionId
           && Number.isSafeInteger(terminal!.seq)
         ) {
-          try {
-            dependencies.recordTerminalBoundary({
-              longGoalId: record.id,
-              taskId: task.id,
-              epoch: attempt.epoch,
-              terminalEventId: `goal-change:${sessionId}:${terminal!.seq}:${terminalOperation}`,
-              parentSessionId: attempt.parentSessionId,
-              mainInboxBoundarySeq: main.session.events.at(-1)?.seq ?? -1,
-            })
-          } catch (error) {
-            try { dependencies.reportError(error) } catch {}
+          const key = transitionKey({
+            operation: terminalOperation,
+            sessionId,
+            goalId,
+            revision: Number(terminal!.data.ref?.revision ?? terminal!.data.goal?.revision),
+          })
+          if (!terminalEvidence.has(key)) {
+            const mainInboxBoundarySeq = main.session.events.at(-1)?.seq ?? -1
+            const terminalEventId = `goal-change:${sessionId}:${terminal!.seq}:${terminalOperation}`
+            terminalEvidence.set(key, append(record.id, async () => {
+              try {
+                await taskAgent.whenIdle()
+                await flush(taskAgent)
+                await flush(main)
+                return { mainInboxBoundarySeq, terminalEventId }
+              } catch (error) {
+                try { dependencies.reportError(error) } catch {}
+                return undefined
+              }
+            }, false))
           }
         }
       }

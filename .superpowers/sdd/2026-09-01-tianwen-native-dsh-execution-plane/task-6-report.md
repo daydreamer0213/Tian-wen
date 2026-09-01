@@ -244,3 +244,103 @@ pnpm exec vitest run tests/dsh-migration/ordinary-long-goal.spec.ts tests/dsh-mi
 ```
 
 Result: 8 files passed, 152 tests passed. The original Task 6 focused gate passed 4 files and 102 tests. Runtime Bundle typecheck (`tsc -b --pretty false`) and `git diff --check` exited 0. Static inspection found no private DSH import, terminal-marker production symbol, second scheduler/provider, direct Task Agent factory, feedback/learning write, or restored `long-goal-subagent.ts`.
+
+## Fix round 3: flushed cross-store terminal evidence
+
+Independent review found that fix round 2 captured a live main-Session sequence and wrote it to the Long Goal store before proving that either the Task terminal source or that main prefix was durable. That crossed two persistence domains without an ordering barrier. Fix round 3 supersedes the round 2 claim that the boundary is appended synchronously: the synchronous listener now captures only in-memory evidence and queues the existing per-Goal lane. The lane must make the exact Task terminal and captured main prefix durable before it may append the boundary.
+
+### Cross-store ordering and crash recovery
+
+For an exact running Task `goal/change` complete/block event, the Host now performs this order:
+
+1. synchronously, with no `await`, capture the exact terminal event id and current live main tail `N`;
+2. on the existing Long Goal lane, wait for the exact Task Agent to become idle;
+3. flush the exact Task Session;
+4. flush the exact main Session;
+5. inspect both persisted Sessions in `recordContinuousGoalTerminalAttempt` and require the exact Task terminal id plus a persisted main tail at least `N`;
+6. append `terminal-delivery-boundary` with `N`;
+7. append the matching `attempt-settled` at the authoritative next revision.
+
+No new scheduler or delivery framework was added. The capture Promise is attached to the existing per-Goal lane. A Task or main flush failure returns no evidence, reports the error, and performs zero boundary append, zero terminal fold, and zero continue/rerun.
+
+Restart recovery distinguishes the durable evidence that actually exists:
+
+- exact Task terminal durable and boundary absent, with no exact Planner settlement evidence: use the persisted main tail as a safe recovery boundary, then fold one terminal attempt;
+- exact Task terminal durable and an existing matching boundary: reuse it and fold once;
+- historical boundary present but exact Task terminal missing: remain pending with zero cold resume, zero Task start, and zero invented terminal sequence;
+- live captured `N` ahead of the persisted main tail: remain pending and append nothing;
+- captured exact terminal id absent from the persisted Task Session: do not substitute another event with the same operation/Goal.
+
+The real public DSH probe now flushes both exact Sessions and inspects their public persistence projections before releasing the Planner gate. It proves that the exact Task `goal/change` and main prefix through `N` are durable, and that the later exact Planner settlement admission has sequence greater than `N`. The persisted surface still contains no Tianwen marker.
+
+### Public inbox lifecycle replay
+
+Native settlement correlation now replays the public `agent/inbox/spliced` stream exactly as an inbox splice: per `target`, it applies `start`, `removedCount`, `inserted`, and `outcome`, retaining the removed message ids from the replayed pre-splice array. No private DSH state or guessed removed id is used.
+
+For each exact post-boundary Planner `subagent-settled` message id, reconciliation folds the latest legal lifecycle:
+
+- pending admission or claimed message with an active Turn: wait for native DSH;
+- explicit cancellation/removal: allow the guarded offline fallback;
+- claimed Turn ending `aborted`, `error`, `interrupted`, or `blocked`: allow fallback;
+- claimed Turn ending `completed` without a non-empty visible assistant reply: allow fallback;
+- same-id claim plus non-empty reply and `completed` or `max-tokens`: acknowledge native delivery;
+- cancellation followed by reinsertion replaces the old lifecycle; a later removal of that reinsertion allows exactly one fallback.
+
+The decision is reevaluated after every durable inspection. Therefore a historical post-boundary admission no longer suppresses fallback forever, while pending native work is still never raced by fallback. Existing per-terminal singleflight, final exact Agent identity fence, flush/reinspect acknowledgement, and complete/block behavior remain intact.
+
+### Fix round 3 RED/GREEN evidence
+
+Cross-store ordering:
+
+- RED: live complete recorded a boundary after only the Task flush; it neither flushed the main prefix nor passed captured `N` into the fold.
+- GREEN: exact order is Task flush, main flush, boundary/attempt record; complete and block both carry the exact capture.
+- RED: persisted main tail `M=18` accepted live `N=19`; a targeted mutation of the persisted-prefix guard reproduced the unsafe append.
+- GREEN: `M<N` records nothing; `M>=N` folds normally and later exact admission is strictly post-boundary.
+- RED: the recorder substituted a different durable terminal event with the same operation/Goal for the captured event id.
+- GREEN: the exact captured `goal-change:<session>:<seq>:<operation>` must be present.
+- RED: removing the exact Task Agent after both flushes made block discard already durable evidence.
+- GREEN: block records from the flushed evidence without requiring a later live lookup.
+- RED: a Task flush failure mutation returned captured evidence and called the terminal recorder once.
+- GREEN: the controlled crash fixture reports the persistence failure and asserts zero boundary/attempt record and zero continuation.
+- GREEN: restart with durable Task terminal but no boundary writes a safe persisted-tail recovery boundary and folds once; a bad historical boundary without its Task terminal stays pending with zero cold resume/rerun.
+- RED: startup ignored the recorder's ambiguous/pending result and called `continueProgress` once.
+- GREEN: the recorder returns an explicit folded/pending result; pending startup performs zero continue, direct create, or direct resume.
+
+Inbox lifecycle:
+
+- RED: canceled admission stayed in the old admission-id set and waited forever.
+- GREEN: canceled/removed complete and block settlements each use one fallback and acknowledge once.
+- RED: a removal outside any claiming Turn, without an explicit outcome, was treated as an active claim and waited forever.
+- GREEN: removal outside a Turn is canceled recovery evidence and falls back once; removal inside an open Turn remains a claim.
+- RED: claimed Turns ending aborted/error/interrupted/blocked, and completed with no reply, all waited forever.
+- GREEN: all five terminal failure rows allow fallback; repeated reconciliation sends nothing after acknowledgement.
+- RED: mutations that treated pending or claimed-active work as fallback raced native delivery.
+- GREEN: both rows wait with zero fallback and zero acknowledgement.
+- RED: same-id cancel/reinsert/remove ignored the latest reinsertion lifecycle.
+- GREEN: it waits after reinsertion, then falls back exactly once after the final removal.
+- RED: a mutation excluding `max-tokens` failed the native-success row.
+- GREEN: completed and max-tokens with the exact claim and non-empty reply both acknowledge natively with zero fallback.
+
+### Fix round 3 verification
+
+Original Task 6 focused gate:
+
+```powershell
+pnpm exec vitest run tests/dsh-migration/long-goal-liveness.spec.ts tests/dsh-migration/continuous-goal-feedback.spec.ts tests/dsh-migration/continuous-goal-host.spec.ts tests/dsh-migration/settled-task-result.spec.ts
+```
+
+Result: 4 files passed, 120 tests passed.
+
+Combined Task 6, Task 5, contract compatibility, and public DSH regression gate:
+
+```powershell
+pnpm exec vitest run tests/dsh-migration/ordinary-long-goal.spec.ts tests/dsh-migration/long-goal-liveness.spec.ts tests/dsh-migration/continuous-goal-feedback.spec.ts tests/dsh-migration/continuous-goal-host.spec.ts tests/dsh-migration/settled-task-result.spec.ts tests/dsh-migration/permission-attempt.spec.ts tests/dsh-migration/native-long-goal-child.spec.ts tests/dsh-probe/dsh-public-reuse-surface.spec.ts
+```
+
+Result: 8 files passed, 170 tests passed. Full continuous Host suite: 1 file passed, 85 tests passed. Workspace typecheck (`pnpm run typecheck`) and `git diff --check` exited 0. Static inspection found no private DSH import, terminal-marker production symbol, second scheduler/provider, direct child Agent factory, feedback/learning write, or restored `long-goal-subagent.ts`.
+
+### Fix round 3 self-review and remaining concern
+
+The implementation stays inside the authorized Host and focused test ownership; no native adapter, scheduler, provider, UI, feedback, learning, or settled-result contract was changed. It reuses the existing per-Goal lane and public Session flush/inspect surfaces.
+
+Legacy or crash-created records that have no durable boundary but already contain exact Planner settlement evidence remain deliberately observable and pending. There is not enough causal evidence to choose native acknowledgement or fallback without risking a duplicate. New terminal paths close that ambiguity by flushing both stores before the boundary append; recovery only synthesizes a boundary from the persisted main tail when no exact Planner settlement evidence exists.
