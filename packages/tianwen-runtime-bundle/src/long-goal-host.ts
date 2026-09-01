@@ -683,24 +683,41 @@ export async function runCurrentWebTask(input: {
   if (goalFirstRecord !== undefined) {
     await requireGoalFirstTaskSessionHeader(goalFirstRecord, sessionId, dependencies)
   }
-  const resumed = agent.ctx.goals.resume(agent, { id: goal.id, revision: goal.revision })
-  if (String(resumed.id) !== goalId || resumed.phase !== 'active' || resumed.activation !== 'armed') {
-    throw new Error('Resumed Long Goal Task Goal mismatch')
-  }
+  let nativeParent: Agent | undefined
   if (goalFirstRecord?.schemaVersion === 'tianwen.long-goal.v3') {
     if (dependencies.followupNativeTaskChild === undefined) {
       throw new LongGoalIntegrityError('Continuous Goal native Task services are unavailable')
     }
-    const parent = dependencies.attachedAgent(goalFirstRecord.planner.sessionId)
-    if (parent === undefined || String(parent.session.id) !== goalFirstRecord.planner.sessionId) {
+    nativeParent = dependencies.attachedAgent(goalFirstRecord.planner.sessionId)
+    if (nativeParent === undefined || String(nativeParent.session.id) !== goalFirstRecord.planner.sessionId) {
       throw new LongGoalIntegrityError('Continuous Goal Planner parent Agent is not live')
     }
-    await dependencies.followupNativeTaskChild(
-      parent,
-      sessionId,
-      [{ type: 'text', text: `Continue Task: ${task.objective}` }],
-      AbortSignal.timeout(30_000),
-    )
+  }
+  const resumed = agent.ctx.goals.resume(agent, { id: goal.id, revision: goal.revision })
+  if (String(resumed.id) !== goalId || resumed.phase !== 'active' || resumed.activation !== 'armed') {
+    throw new Error('Resumed Long Goal Task Goal mismatch')
+  }
+  if (nativeParent !== undefined) {
+    try {
+      await dependencies.followupNativeTaskChild!(
+        nativeParent,
+        sessionId,
+        [{ type: 'text', text: `Continue Task: ${task.objective}` }],
+        AbortSignal.timeout(30_000),
+      )
+    } catch (cause) {
+      let cleanupCause: unknown
+      try {
+        agent.ctx.goals.disarm(agent)
+        await dependencies.flushSession(agent)
+      } catch (error) {
+        cleanupCause = error
+      }
+      if (cleanupCause !== undefined) {
+        throw new AggregateError([cause, cleanupCause], 'Native Long Goal Task followup cleanup failed')
+      }
+      throw cause
+    }
   }
   await dependencies.flushSession(agent)
   return { status: await readStatus(), sessionId, action: 'continued' }

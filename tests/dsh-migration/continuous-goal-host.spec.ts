@@ -77,6 +77,23 @@ function agent(sessionId: string, goalId: string, phase: 'active' | 'blocked' | 
   } as unknown as Agent & { readonly whenIdle: ReturnType<typeof vi.fn>, readonly cancel: ReturnType<typeof vi.fn>, setGoal(phase: 'active' | 'blocked' | 'complete'): void }
 }
 
+function disarmedTaskAgent(sessionId: string, goalId: string) {
+  let current = { id: goalId, revision: 1, phase: 'paused' as const, activation: 'disarmed' as const }
+  const resume = vi.fn(() => {
+    current = { ...current, phase: 'active', activation: 'armed' } as typeof current
+    return current
+  })
+  const disarm = vi.fn(() => {
+    current = { ...current, activation: 'disarmed' } as typeof current
+    return current
+  })
+  const value = {
+    session: { id: sessionId, header: { cwd: 'D:/workspace', agentPreset: 'planner' } },
+    ctx: { goals: { get: () => current, resume, disarm } },
+  } as unknown as Agent
+  return { value, resume, disarm, current: () => current }
+}
+
 function feedbackAgent(sessionId = 'control-session') {
   const preStepListeners: ((payload: unknown, next: () => Promise<unknown>) => Promise<unknown>)[] = []
   const sessionListeners: ((session: unknown, event: unknown) => void)[] = []
@@ -125,8 +142,10 @@ function harness(initial = record()) {
   const live = new Map<string, Agent>([[EXECUTION_1.sessionId, first]])
   const commands = new Map<Agent, { create(agent: Agent, objective: string): Promise<{ action: string }>, control(agent: Agent, action: ContinuousGoalControlAction): Promise<{ action: string }> }>()
   const order: string[] = []
+  const directCreate = vi.fn()
+  const directResume = vi.fn()
   const ctx = {
-    agents: { list: () => [...live.values()], get: (id: string) => live.get(id) },
+    agents: { list: () => [...live.values()], get: (id: string) => live.get(id), create: directCreate, resume: directResume },
     on(name: string, listener: (...args: never[]) => void) {
       const listeners = name === 'goal/changed' ? goalListeners : name === 'session/event' ? sessionListeners : agentListeners
       listeners.push(listener as never)
@@ -178,7 +197,7 @@ function harness(initial = record()) {
     installBoundControls: vi.fn(() => () => undefined),
   } satisfies ContinuousGoalHostDependencies
   return {
-    ctx, dependencies, first, live, commands, order, continueProgress, readStatus, pause,
+    ctx, dependencies, first, live, commands, order, continueProgress, readStatus, pause, directCreate, directResume,
     records: () => records,
     setStatus(next: LongGoalStatusProjectionV3) { currentStatus = next },
     setRecords(next: LongGoalRecordV3[]) { records = next },
@@ -390,6 +409,115 @@ describe('continuous Goal Host', () => {
     }
   })
 
+  it('retries rejected native Task provisioning with the unchanged permission snapshot', async () => {
+    const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
+    mkdirSync(base, { recursive: true })
+    const fixture = mkdtempSync(resolve(base, 'native-task-provisioning-retry-'))
+    try {
+      const stateRoot = resolve(fixture, 'state')
+      const source = createContinuousLongGoal({
+        stateRoot,
+        objective: 'Retry the exact provisioning request',
+        context: null,
+        successCriteria: null,
+        workspaceRoot: fixture,
+        agentPreset: 'planner-preset',
+        controlSessionId: 'main-control',
+      }, {
+        goalSuffix: () => 'native-task-provisioning-retry',
+        plannerSessionId: () => 'live-planner',
+        now: () => 1,
+      })
+      const planned = commitLongGoalPlan({
+        stateRoot,
+        longGoalId: source.id,
+        expectedRevision: 1,
+        outcome: 'continue',
+        tasks: [{ objective: 'Start exact child' }],
+        consideredSettledTasks: 0,
+      }, {
+        taskId: () => '00000000-0000-4000-8000-000000000092',
+        now: () => 2,
+      }) as LongGoalRecordV3
+      const taskId = planned.tasks[0]!.id
+      const planner = {
+        session: { id: 'live-planner', header: { cwd: fixture, agentPreset: 'planner-preset' } },
+      } as unknown as Agent
+      const secondTask = {
+        session: { id: 'reserved-task-child-2', header: { cwd: fixture, agentPreset: 'planner-preset' } },
+      } as unknown as Agent
+      const live = new Map<string, Agent>([['live-planner', planner]])
+      const reservedIds = ['reserved-task-child-1', 'reserved-task-child-2']
+      const directCreate = vi.fn(async () => { throw new Error('direct Task Session creation is forbidden') })
+      const directResume = vi.fn(async () => { throw new Error('agents.resume is forbidden for v3 Task') })
+      const startNativeTaskChild = vi.fn(async (input: { readonly parent: Agent, readonly childId: string }) => {
+        expect(input.parent).toBe(planner)
+        if (input.childId === 'reserved-task-child-1') {
+          throw new Error('native start rejected before acceptance')
+        }
+        live.set(input.childId, secondTask)
+        return { childId: input.childId }
+      })
+      const dependencies = {
+        readLongGoal,
+        readLongGoalStatus: vi.fn(async () => {
+          const current = readLongGoal(stateRoot, source.id)
+          if (current.schemaVersion !== 'tianwen.long-goal.v3') throw new Error('expected v3 record')
+          return status(current, ['active'], taskId)
+        }),
+        bindLongGoalTask: vi.fn(),
+        bindGoalFirstLongGoalTask,
+        listSessions: vi.fn(async () => []),
+        createSession: directCreate,
+        reserveTaskSessionId: () => reservedIds.shift()!,
+        startNativeTaskChild,
+        followupNativeTaskChild: vi.fn(),
+        nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
+        attachedAgent: (sessionId: string) => live.get(sessionId),
+        createGoal: vi.fn(() => ({ id: 'goal-epoch-2' })),
+        readGoalRef: vi.fn(),
+        resumeColdGoal: directResume,
+        flushSession: vi.fn(),
+      }
+      const roots = {
+        stateRoot,
+        sessionsRoot: resolve(fixture, 'sessions'),
+        evolutionRoot: resolve(stateRoot, 'evolution'),
+      }
+
+      await expect(runCurrentWebTask({
+        roots,
+        longGoalId: source.id,
+        expectedRevision: planned.revision,
+      }, dependencies as never)).rejects.toThrow('native start rejected before acceptance')
+      const interrupted = readLongGoal(stateRoot, source.id)
+
+      await expect(runCurrentWebTask({
+        roots,
+        longGoalId: source.id,
+        expectedRevision: interrupted.revision,
+      }, dependencies as never)).resolves.toMatchObject({
+        sessionId: 'reserved-task-child-2',
+        action: 'started',
+      })
+
+      expect(startNativeTaskChild).toHaveBeenCalledTimes(2)
+      expect(startNativeTaskChild.mock.calls[1]![0]).toMatchObject({ childId: 'reserved-task-child-2' })
+      expect(directCreate).not.toHaveBeenCalled()
+      expect(directResume).not.toHaveBeenCalled()
+      const reloaded = readLongGoal(stateRoot, source.id)
+      if (reloaded.schemaVersion !== 'tianwen.long-goal.v3') throw new Error('expected v3 record')
+      expect(readTianwenTaskAttemptProjection(reloaded, taskId)).toMatchObject({
+        attempts: [
+          { epoch: 1, status: 'interrupted' },
+          { epoch: 2, childSessionId: 'reserved-task-child-2', status: 'running' },
+        ],
+      })
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
   it('cold-continues a v3 Task through native followup with the exact live Planner parent', async () => {
     const execution = { sessionId: 'cold-task', goalId: 'cold-goal' }
     const source = record({
@@ -436,6 +564,112 @@ describe('continuous Goal Host', () => {
 
     expect(followupNativeTaskChild).toHaveBeenCalledOnce()
     expect(resumeColdGoal).not.toHaveBeenCalled()
+  })
+
+  it('keeps a disarmed v3 Task retryable until its exact Planner parent is live', async () => {
+    const execution = { sessionId: 'disarmed-task', goalId: 'disarmed-goal' }
+    const source = record({
+      planner: { ...record().planner, sessionId: 'live-planner' },
+      tasks: [{ id: TASK_1, objective: 'Continue disarmed Task', execution, resolution: null }],
+    })
+    const projected = status(source, ['paused'], TASK_1)
+    const task = disarmedTaskAgent(execution.sessionId, execution.goalId)
+    const planner = { session: { id: 'live-planner' } } as unknown as Agent
+    let plannerLive = false
+    const followupNativeTaskChild = vi.fn(async () => 'followup-message')
+    const dependencies = {
+      readLongGoal: vi.fn(() => source),
+      readLongGoalStatus: vi.fn(async () => projected),
+      bindLongGoalTask: vi.fn(),
+      bindGoalFirstLongGoalTask: vi.fn(),
+      listSessions: vi.fn(async () => [{
+        sessionId: execution.sessionId, cwd: source.workspaceRoot, agentPreset: source.planner.agentPreset,
+      }]),
+      createSession: vi.fn(),
+      attachedAgent: (sessionId: string) => sessionId === execution.sessionId
+        ? task.value
+        : sessionId === source.planner.sessionId && plannerLive
+          ? planner
+          : undefined,
+      createGoal: vi.fn(),
+      readGoalRef: vi.fn(),
+      resumeColdGoal: vi.fn(),
+      followupNativeTaskChild,
+      flushSession: vi.fn(async () => undefined),
+    }
+    const input = {
+      roots: { stateRoot: 'D:/state', sessionsRoot: 'D:/sessions', evolutionRoot: 'D:/evolution' },
+      longGoalId: source.id,
+      expectedRevision: source.revision,
+    }
+
+    await expect(runCurrentWebTask(input, dependencies as never)).rejects.toThrow(
+      'Continuous Goal Planner parent Agent is not live',
+    )
+    expect(task.resume).not.toHaveBeenCalled()
+    expect(followupNativeTaskChild).not.toHaveBeenCalled()
+    expect(task.current().activation).toBe('disarmed')
+
+    plannerLive = true
+    await expect(runCurrentWebTask(input, dependencies as never)).resolves.toMatchObject({
+      sessionId: execution.sessionId,
+      action: 'continued',
+    })
+    expect(task.resume).toHaveBeenCalledOnce()
+    expect(followupNativeTaskChild).toHaveBeenCalledOnce()
+    expect(followupNativeTaskChild).toHaveBeenCalledWith(
+      planner,
+      execution.sessionId,
+      expect.any(Array),
+      expect.any(AbortSignal),
+    )
+  })
+
+  it('restores a disarmed v3 Task when native followup rejects so a retry can continue it', async () => {
+    const execution = { sessionId: 'rejected-followup-task', goalId: 'rejected-followup-goal' }
+    const source = record({
+      planner: { ...record().planner, sessionId: 'live-planner' },
+      tasks: [{ id: TASK_1, objective: 'Retry rejected followup', execution, resolution: null }],
+    })
+    const projected = status(source, ['paused'], TASK_1)
+    const task = disarmedTaskAgent(execution.sessionId, execution.goalId)
+    const planner = { session: { id: 'live-planner' } } as unknown as Agent
+    const followupNativeTaskChild = vi.fn()
+      .mockRejectedValueOnce(new Error('native followup rejected'))
+      .mockResolvedValueOnce('followup-message')
+    const flushSession = vi.fn(async () => undefined)
+    const dependencies = {
+      readLongGoal: vi.fn(() => source),
+      readLongGoalStatus: vi.fn(async () => projected),
+      bindLongGoalTask: vi.fn(),
+      bindGoalFirstLongGoalTask: vi.fn(),
+      listSessions: vi.fn(async () => [{
+        sessionId: execution.sessionId, cwd: source.workspaceRoot, agentPreset: source.planner.agentPreset,
+      }]),
+      createSession: vi.fn(),
+      attachedAgent: (sessionId: string) => sessionId === execution.sessionId ? task.value : planner,
+      createGoal: vi.fn(),
+      readGoalRef: vi.fn(),
+      resumeColdGoal: vi.fn(),
+      followupNativeTaskChild,
+      flushSession,
+    }
+    const input = {
+      roots: { stateRoot: 'D:/state', sessionsRoot: 'D:/sessions', evolutionRoot: 'D:/evolution' },
+      longGoalId: source.id,
+      expectedRevision: source.revision,
+    }
+
+    await expect(runCurrentWebTask(input, dependencies as never)).rejects.toThrow('native followup rejected')
+    expect(task.current().activation).toBe('disarmed')
+    expect(task.disarm).toHaveBeenCalledOnce()
+
+    await expect(runCurrentWebTask(input, dependencies as never)).resolves.toMatchObject({
+      sessionId: execution.sessionId,
+      action: 'continued',
+    })
+    expect(task.resume).toHaveBeenCalledTimes(2)
+    expect(followupNativeTaskChild).toHaveBeenCalledTimes(2)
   })
 
   it('does not continue a live armed Task at startup, then continues once after its exact completion', async () => {
@@ -1096,6 +1330,31 @@ describe('continuous Goal Host', () => {
     await dispose()
 
     expect(subject.dependencies.deliver).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries one pending Task only when its exact Planner Session becomes live', async () => {
+    const source = record({
+      tasks: [{ id: TASK_1, objective: 'Publish', execution: null, resolution: null }],
+    })
+    const subject = harness(source)
+    subject.setStatus(status(source, ['pending'], TASK_1))
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(subject.continueProgress).toHaveBeenCalledOnce())
+
+    const unrelated = agent('unrelated-session', 'unrelated-goal')
+    subject.live.set('unrelated-session', unrelated)
+    subject.created(unrelated)
+    await Promise.resolve()
+    expect(subject.continueProgress).toHaveBeenCalledOnce()
+
+    const planner = agent(source.planner.sessionId, 'planner-goal')
+    subject.live.set(source.planner.sessionId, planner)
+    subject.created(planner)
+    await vi.waitFor(() => expect(subject.continueProgress).toHaveBeenCalledTimes(2))
+    await dispose()
+
+    expect(subject.directCreate).not.toHaveBeenCalled()
+    expect(subject.directResume).not.toHaveBeenCalled()
   })
 
   it('re-arms an unfinished current Task at startup without claiming it advanced', async () => {

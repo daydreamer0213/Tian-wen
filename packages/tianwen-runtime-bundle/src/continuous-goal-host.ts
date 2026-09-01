@@ -671,7 +671,10 @@ export function mountContinuousGoalHost(
     install(agent)
     const sessionId = String(agent.session.id)
     for (const record of dependencies.listLongGoals()) {
-      if (isV3(record) && record.control.sessionId === sessionId) {
+      if (
+        isV3(record)
+        && (record.control.sessionId === sessionId || record.planner.sessionId === sessionId)
+      ) {
         void joinOrStart(record.id, () => reconcile(record.id)).catch(() => undefined)
       }
     }

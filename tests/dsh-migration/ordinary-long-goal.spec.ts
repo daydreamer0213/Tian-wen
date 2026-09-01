@@ -968,6 +968,10 @@ describe('goal-first long Goal v2 records', () => {
       const settled = appendTianwenAttemptSettled({
         stateRoot, longGoalId: record.id, expectedRevision: 5, taskId, epoch: 2, terminalEventId: 'settled-2',
       })
+      expect(() => appendTianwenAttemptStarted({
+        ...base, expectedRevision: 6, epoch: 3, childSessionId: 'child-invariant-3', permissionFingerprint: 'sha256:wider',
+        startedAt: '2026-09-01T00:02:00.000Z',
+      })).toThrow('permission fingerprint')
       expect(() => appendTianwenTerminalDeliveryObserved({
         stateRoot, longGoalId: record.id, expectedRevision: 6, taskId,
         terminalEventId: 'limited-1', parentSessionId: 'planner-attempt-invariants', completionTurnObserved: true,

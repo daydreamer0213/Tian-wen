@@ -332,9 +332,13 @@ function parseTianwenEvents(value: unknown, tasks: readonly LongGoalTaskRecordV2
 }
 
 function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): void {
-  const projections = new Map<string, { attempts: TianwenExecutionAttempt[], terminalDelivery?: TianwenTerminalDeliveryCursor }>()
+  const projections = new Map<string, {
+    attempts: TianwenExecutionAttempt[]
+    provisioningFailedEpochs: Set<number>
+    terminalDelivery?: TianwenTerminalDeliveryCursor
+  }>()
   for (const event of events) {
-    const projection = projections.get(event.taskId) ?? { attempts: [] }
+    const projection = projections.get(event.taskId) ?? { attempts: [], provisioningFailedEpochs: new Set<number>() }
     projections.set(event.taskId, projection)
     if (event.type === 'attempt-started') {
       const previous = projection.attempts.at(-1)
@@ -347,7 +351,9 @@ function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): v
       if (projection.attempts.some(attempt => attempt.childSessionId === event.attempt.childSessionId)) {
         throw new LongGoalIntegrityError('Tianwen Task cannot reuse a child Session id')
       }
-      if (projection.attempts.some(attempt => attempt.permissionFingerprint === event.attempt.permissionFingerprint)) {
+      const matchingPermissionAttempts = projection.attempts
+        .filter(attempt => attempt.permissionFingerprint === event.attempt.permissionFingerprint)
+      if (matchingPermissionAttempts.some(attempt => !projection.provisioningFailedEpochs.has(attempt.epoch))) {
         throw new LongGoalIntegrityError('Tianwen Task cannot automatically reuse a permission fingerprint')
       }
       projection.attempts.push(event.attempt)
@@ -367,6 +373,7 @@ function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): v
             : 'interrupted',
         terminalEventId: event.terminalEventId,
       }
+      if (event.type === 'attempt-provisioning-failed') projection.provisioningFailedEpochs.add(event.epoch)
       continue
     }
     if (
