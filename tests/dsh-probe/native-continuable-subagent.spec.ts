@@ -113,6 +113,121 @@ function settlementNotices(events: readonly { readonly type: string, readonly da
 }
 
 describe('native continuable DSH subagents', () => {
+  it('drains the old Planner forest before a renewed Planner and Task can start', async () => {
+    const harness = await mountHarness([
+      textResponse('old Planner lifecycle reached main'),
+      textResponse('new Planner lifecycle reached main'),
+    ])
+    const plannerAdapter = new ScriptedAdapter([
+      toolCallResponse('old-planner-gate', 'planner_gate', {}),
+      toolCallResponse('forbidden-old-planner-side-effect', 'forbidden_side_effect', {}),
+    ])
+    const taskAdapter = new ScriptedAdapter([
+      toolCallResponse('old-task-denial', 'native_denial_probe', {}),
+      textResponse('FORBIDDEN_OLD_TASK_CONTINUATION'),
+    ])
+    const newPlannerAdapter = new ScriptedAdapter([
+      toolCallResponse('new-planner-gate', 'planner_gate', {}),
+    ])
+    const newTaskAdapter = new ScriptedAdapter([textResponse('new Task ran after old drain')])
+    harness.ctx.llm.registerAdapter(['old-planner-probe'], plannerAdapter)
+    harness.ctx.llm.registerAdapter(['old-task-probe'], taskAdapter)
+    harness.ctx.llm.registerAdapter(['new-planner-probe'], newPlannerAdapter)
+    harness.ctx.llm.registerAdapter(['new-task-probe'], newTaskAdapter)
+    const disposeGate = harness.ctx.tools.register(defineTool({
+      name: 'planner_gate', description: 'Stay active until the owning Planner is cancelled.', parameters: {},
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute(_args, exec) {
+        if (!exec.signal.aborted) {
+          await new Promise<void>(resolve => exec.signal.addEventListener('abort', () => resolve(), { once: true }))
+        }
+        return 'planner stopped'
+      },
+    }))
+    const disposeDenial = harness.ctx.tools.register(defineTool({
+      name: 'native_denial_probe', description: 'Produce one structured denial.', parameters: {},
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute() {
+        throw new SubagentError(sandboxDenialMarker('workspace-write'), 'SANDBOX_UNAVAILABLE')
+      },
+    }))
+    const disposeForbidden = harness.ctx.tools.register(defineTool({
+      name: 'forbidden_side_effect', description: 'Must never execute.', parameters: {},
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute() { throw new Error('old Planner executed after permission limit') },
+    }))
+    const nativeChild = new NativeLongGoalChild(harness.ctx)
+    const plannerId = SessionId('old-permission-planner')
+    const taskId = SessionId('old-permission-task')
+    let draining: Promise<void> | undefined
+    const off = harness.ctx.on('session/event', (session, event) => {
+      if (String(session.id) !== taskId || event.type !== 'tool/result' || draining !== undefined) return
+      const planner = harness.ctx.agents.get(plannerId)
+      const task = harness.ctx.agents.get(taskId)
+      if (planner === undefined || task === undefined) throw new Error('old native attempt is not live')
+      const plannerFlush = harness.ctx.sessions.flush(planner.session)
+      const taskFlush = harness.ctx.sessions.flush(task.session)
+      draining = harness.ctx.subagents.drainContinuableDescendants([planner])
+        .then(() => harness.ctx.subagents.drainContinuableChildren(harness.parent, [plannerId]))
+        .then(async () => {
+          expect(await Promise.all([plannerFlush, taskFlush])).toEqual([true, true])
+        })
+    })
+    try {
+      harness.parent.session.append('sandbox/mode', { mode: 'workspace-write', source: 'user' })
+      await nativeChild.start({
+        parent: harness.parent, childId: plannerId, label: 'Old Planner', prompt: [{ type: 'text', text: 'Wait.' }],
+        agentOptions: { provider: 'old-planner-probe', model: 'scripted' }, signal: AbortSignal.timeout(10_000),
+      })
+      await vi.waitFor(() => expect(harness.ctx.agents.get(plannerId)).toBeDefined())
+      const planner = harness.ctx.agents.get(plannerId)!
+      await vi.waitFor(() => expect(planner.session.events.some(event => event.type === 'tool/call')).toBe(true))
+      await nativeChild.start({
+        parent: planner, childId: taskId, label: 'Old Task', prompt: [{ type: 'text', text: 'Call denial, then continue.' }],
+        agentOptions: { provider: 'old-task-probe', model: 'scripted' }, signal: AbortSignal.timeout(10_000),
+      })
+      await vi.waitFor(() => expect(draining).toBeDefined())
+      await draining
+      expect(harness.ctx.agents.get(plannerId)).toBeUndefined()
+      expect(harness.ctx.agents.get(taskId)).toBeUndefined()
+      const frozenPlanner = await harness.ctx.sessionPersistence.inspect(plannerId)
+      const frozenTask = await harness.ctx.sessionPersistence.inspect(taskId)
+      expect(plannerAdapter.requests).toHaveLength(1)
+      expect(taskAdapter.requests).toHaveLength(1)
+      expect(harness.adapter.requests).toHaveLength(1)
+      expect(JSON.stringify(frozenPlanner.events)).not.toContain('forbidden-old-planner-side-effect')
+      expect(JSON.stringify(frozenTask.events)).not.toContain('FORBIDDEN_OLD_TASK_CONTINUATION')
+
+      const newPlannerId = SessionId('new-permission-planner')
+      const newTaskId = SessionId('new-permission-task')
+      await nativeChild.start({
+        parent: harness.parent, childId: newPlannerId, label: 'New Planner', prompt: [{ type: 'text', text: 'Wait.' }],
+        agentOptions: { provider: 'new-planner-probe', model: 'scripted' }, signal: AbortSignal.timeout(10_000),
+      })
+      await vi.waitFor(() => expect(harness.ctx.agents.get(newPlannerId)).toBeDefined())
+      const newPlanner = harness.ctx.agents.get(newPlannerId)!
+      await nativeChild.start({
+        parent: newPlanner, childId: newTaskId, label: 'New Task', prompt: [{ type: 'text', text: 'Run once.' }],
+        agentOptions: { provider: 'new-task-probe', model: 'scripted' }, signal: AbortSignal.timeout(10_000),
+      })
+      await vi.waitFor(async () => expect((await harness.ctx.sessionPersistence.inspect(newTaskId)).events
+        .some(event => event.type === 'turn/end')).toBe(true))
+      expect(newPlannerAdapter.requests).toHaveLength(1)
+      expect(newTaskAdapter.requests).toHaveLength(1)
+      expect(plannerAdapter.requests).toHaveLength(1)
+      expect(taskAdapter.requests).toHaveLength(1)
+      expect((await harness.ctx.sessionPersistence.inspect(plannerId)).events).toEqual(frozenPlanner.events)
+      expect((await harness.ctx.sessionPersistence.inspect(taskId)).events).toEqual(frozenTask.events)
+      await harness.ctx.subagents.drainContinuableChildren(harness.parent, [newPlannerId])
+    } finally {
+      off()
+      disposeForbidden()
+      disposeDenial()
+      disposeGate()
+      await harness.dispose()
+    }
+  })
+
   it('interrupts and freezes a continuable child before its model can continue after a denial result', async () => {
     const forbiddenContinuation = 'FORBIDDEN_CONTINUATION_AFTER_DENIAL'
     const harness = await mountHarness([

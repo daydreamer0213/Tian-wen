@@ -38,6 +38,7 @@ import {
   runCurrentWebTask,
   type TianwenLongGoalRunDependencies,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
+import type { LongGoalRecordV3 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-ordinary-long-goal-tests')
 const GOAL_ID = 'tianwen-long-goal-00000000-0000-4000-8000-000000000001'
@@ -879,6 +880,62 @@ describe('goal-first long Goal v2 records', () => {
     }
   })
 
+  it('reloads legacy six-key v3 attempts byte-for-byte without accepting unknown keys', () => {
+    const stateRoot = createStateRoot()
+    const workspaceRoot = resolve(stateRoot, 'workspace')
+    try {
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Read legacy attempts', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'control-legacy-attempts',
+      }, { goalSuffix: () => 'legacy-attempts', plannerSessionId: () => 'planner-legacy', now: () => 10 })
+      const taskIds = [
+        '00000000-0000-4000-8000-000000000181',
+        '00000000-0000-4000-8000-000000000182',
+        '00000000-0000-4000-8000-000000000183',
+      ]
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Running legacy' }, { objective: 'Limited legacy' }, { objective: 'Settled legacy' }],
+        consideredSettledTasks: 0,
+      }, { taskId: () => taskIds.shift()!, now: () => 11 }) as LongGoalRecordV3
+      const attempt = (childSessionId: string) => ({
+        epoch: 1, parentSessionId: 'planner-legacy', childSessionId,
+        permissionFingerprint: `sha256:${childSessionId}`, status: 'running',
+        startedAt: '2026-09-01T00:00:00.000Z',
+      })
+      const legacy = {
+        ...planned,
+        tianwenEvents: [
+          { type: 'attempt-started', taskId: planned.tasks[0]!.id, attempt: attempt('legacy-running') },
+          { type: 'attempt-started', taskId: planned.tasks[1]!.id, attempt: attempt('legacy-limited') },
+          { type: 'attempt-permission-limited', taskId: planned.tasks[1]!.id, epoch: 1, terminalEventId: 'limited-legacy' },
+          { type: 'attempt-started', taskId: planned.tasks[2]!.id, attempt: attempt('legacy-settled') },
+          { type: 'attempt-settled', taskId: planned.tasks[2]!.id, epoch: 1, terminalEventId: 'settled-legacy' },
+        ],
+      }
+      const bytes = `${JSON.stringify(legacy)}\n`
+      const path = longGoalPath(stateRoot, record.id)
+      writeFileSync(path, bytes, 'utf8')
+
+      const reloaded = readLongGoal(stateRoot, record.id) as LongGoalRecordV3
+      expect(reloaded.tasks.map(task => readTianwenTaskAttemptProjection(reloaded, task.id).attempts[0]?.status))
+        .toEqual(['running', 'permission-limited', 'settled'])
+      expect(reloaded.tasks.map(task => readTianwenTaskAttemptProjection(reloaded, task.id).attempts[0]?.permissionMode))
+        .toEqual([undefined, undefined, undefined])
+      expect(readFileSync(path, 'utf8')).toBe(bytes)
+
+      writeFileSync(path, `${JSON.stringify({
+        ...legacy,
+        tianwenEvents: legacy.tianwenEvents.map((event, index) => index === 0
+          ? { ...event, attempt: { ...event.attempt, unknownModeHint: 'workspace-write' } }
+          : event),
+      })}\n`, 'utf8')
+      expect(() => readLongGoal(stateRoot, record.id)).toThrow('attempt-started event is invalid')
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
   it('durably interrupts the current running attempt when native child provisioning fails', () => {
     const stateRoot = createStateRoot()
     const workspaceRoot = resolve(stateRoot, 'workspace')
@@ -1008,6 +1065,39 @@ describe('goal-first long Goal v2 records', () => {
 
       expect(() => reserveTianwenPermissionRenewal({
         stateRoot, longGoalId: record.id, expectedRevision: 5, taskId,
+        plannerSessionId: 'planner-permission-same', childSessionId: 'child-permission-same',
+        permissionFingerprint: 'sha256:same-mode', permissionMode: 'workspace-write',
+        startedAt: '2026-09-01T00:01:00.000Z',
+      })).toThrow('strictly wider')
+      expect(() => reserveTianwenPermissionRenewal({
+        stateRoot, longGoalId: record.id, expectedRevision: 5, taskId,
+        plannerSessionId: 'planner-permission-narrow', childSessionId: 'child-permission-narrow',
+        permissionFingerprint: 'sha256:narrow-mode', permissionMode: 'read-only',
+        startedAt: '2026-09-01T00:01:00.000Z',
+      })).toThrow('strictly wider')
+
+      const limitedRecord = readLongGoal(stateRoot, record.id) as LongGoalRecordV3
+      const limitedBytes = readFileSync(longGoalPath(stateRoot, record.id), 'utf8')
+      for (const [permissionMode, suffix] of [['workspace-write', 'same'], ['read-only', 'narrow']] as const) {
+        writeFileSync(longGoalPath(stateRoot, record.id), `${JSON.stringify({
+          ...limitedRecord,
+          revision: 6,
+          planner: { ...limitedRecord.planner, sessionId: `planner-replay-${suffix}` },
+          tianwenEvents: [...(limitedRecord.tianwenEvents ?? []), {
+            type: 'attempt-started', taskId,
+            attempt: {
+              epoch: 2, parentSessionId: `planner-replay-${suffix}`, childSessionId: `child-replay-${suffix}`,
+              permissionFingerprint: `sha256:replay-${suffix}`, permissionMode,
+              status: 'running', startedAt: '2026-09-01T00:01:00.000Z',
+            },
+          }],
+        })}\n`, 'utf8')
+        expect(() => readLongGoal(stateRoot, record.id)).toThrow('strictly wider')
+      }
+      writeFileSync(longGoalPath(stateRoot, record.id), limitedBytes, 'utf8')
+
+      expect(() => reserveTianwenPermissionRenewal({
+        stateRoot, longGoalId: record.id, expectedRevision: 5, taskId,
         plannerSessionId: 'planner-permission-old', childSessionId: 'child-permission-new',
         permissionFingerprint: 'sha256:danger-full-access', permissionMode: 'danger-full-access', startedAt: '2026-09-01T00:01:00.000Z',
       })).toThrow('new Planner')
@@ -1052,12 +1142,31 @@ describe('goal-first long Goal v2 records', () => {
         epoch: 2, parentSessionId: 'planner-permission-new', childSessionId: 'child-permission-new',
         permissionFingerprint: 'sha256:danger-full-access-new-event', permissionMode: 'danger-full-access', status: 'running',
       })
+      expect(() => rebaseTianwenPermissionReservation({
+        stateRoot, longGoalId: record.id, expectedRevision: 7, taskId, epoch: 2,
+        plannerSessionId: 'planner-permission-new', childSessionId: 'child-permission-new',
+        oldPermissionFingerprint: 'sha256:danger-full-access-new-event',
+        permissionFingerprint: 'sha256:danger-full-access',
+        permissionMode: 'danger-full-access', permissionEventSeq: 12,
+      })).toThrow('permission fingerprint')
       expect(() => reserveTianwenPermissionRenewal({
         stateRoot, longGoalId: record.id, expectedRevision: 7, taskId,
         plannerSessionId: 'planner-permission-third', childSessionId: 'child-permission-third',
         permissionFingerprint: 'sha256:danger-full-access', permissionMode: 'danger-full-access', startedAt: '2026-09-01T00:02:00.000Z',
       })).toThrow('permission-limited')
       expect(readLongGoal(stateRoot, record.id)).toEqual(rebased)
+
+      writeFileSync(longGoalPath(stateRoot, record.id), `${JSON.stringify({
+        ...rebased,
+        revision: 8,
+        tianwenEvents: [...(rebased.tianwenEvents ?? []), {
+          type: 'attempt-permission-reservation-rebased', taskId, epoch: 2,
+          oldPermissionFingerprint: 'sha256:danger-full-access-new-event',
+          permissionFingerprint: 'sha256:danger-full-access',
+          permissionMode: 'danger-full-access', permissionEventSeq: 12,
+        }],
+      })}\n`, 'utf8')
+      expect(() => readLongGoal(stateRoot, record.id)).toThrow('permission fingerprint')
     } finally {
       rmSync(stateRoot, { recursive: true, force: true })
     }
@@ -1100,10 +1209,12 @@ describe('goal-first long Goal v2 records', () => {
       })).toThrow('child Session id')
       expect(() => appendTianwenAttemptStarted({
         ...base, expectedRevision: 4, epoch: 2, childSessionId: 'child-invariant-2',
+        permissionMode: 'danger-full-access',
         startedAt: '2026-09-01T00:01:00.000Z',
       })).toThrow('permission fingerprint')
       const renewed = appendTianwenAttemptStarted({
         ...base, expectedRevision: 4, epoch: 2, childSessionId: 'child-invariant-2', permissionFingerprint: 'sha256:wider',
+        permissionMode: 'danger-full-access',
         startedAt: '2026-09-01T00:01:00.000Z',
       })
       expect(() => appendTianwenAttemptSettled({
@@ -1114,6 +1225,7 @@ describe('goal-first long Goal v2 records', () => {
       })
       expect(() => appendTianwenAttemptStarted({
         ...base, expectedRevision: 6, epoch: 3, childSessionId: 'child-invariant-3', permissionFingerprint: 'sha256:wider',
+        permissionMode: 'danger-full-access',
         startedAt: '2026-09-01T00:02:00.000Z',
       })).toThrow('permission fingerprint')
       expect(() => appendTianwenTerminalDeliveryObserved({

@@ -107,7 +107,7 @@ export interface TianwenExecutionAttempt {
   readonly parentSessionId: string
   readonly childSessionId: string
   readonly permissionFingerprint: `sha256:${string}`
-  readonly permissionMode: SandboxMode
+  readonly permissionMode?: SandboxMode
   readonly status: TianwenAttemptStatus
   readonly startedAt: string
   readonly terminalEventId?: string
@@ -130,6 +130,14 @@ export type TianwenLongGoalEvent =
       readonly taskId: string
       readonly epoch: number
       readonly terminalEventId: string
+    }
+  | {
+      readonly type: 'attempt-permission-mode-observed'
+      readonly taskId: string
+      readonly epoch: number
+      readonly childSessionId: string
+      readonly permissionMode: SandboxMode
+      readonly permissionEventSeq: number
     }
   | {
       readonly type: 'attempt-permission-reservation-rebased'
