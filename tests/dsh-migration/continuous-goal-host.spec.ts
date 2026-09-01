@@ -148,6 +148,12 @@ function harness(initial = record()) {
         type: 'turn/end', data: { reason: { kind: 'aborted', reason: { kind: 'user' } } },
       })
     },
+    approval(sessionId: string, approvalId = 'approval-1') {
+      for (const listener of sessionListeners) listener({ id: sessionId }, {
+        type: 'approval/asked',
+        data: { id: approvalId, toolName: 'pwsh', reason: 'Run verification' },
+      })
+    },
     created(created: Agent) { for (const listener of agentListeners) listener({ agent: created }) },
     create(controlAgent: Agent, objective: string) { return commands.get(controlAgent)!.create(controlAgent, objective) },
     control(controlAgent: Agent, action: ContinuousGoalControlAction = { action: 'status' }) {
@@ -188,7 +194,7 @@ describe('continuous Goal Host', () => {
     subject.complete()
     await dispose()
 
-    expect(subject.dependencies.deliver).toHaveBeenCalledOnce()
+    expect(subject.dependencies.deliver.mock.calls.filter(([intent]) => intent.transition === 'complete')).toHaveLength(1)
     expect(subject.dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
       longGoalId: GOAL_ID,
       transition: 'complete',
@@ -266,7 +272,7 @@ describe('continuous Goal Host', () => {
     expect(subject.first.whenIdle).toHaveBeenCalledOnce()
     expect(subject.dependencies.flushSession).toHaveBeenCalledOnce()
     expect(subject.continueProgress).not.toHaveBeenCalled()
-    expect(subject.dependencies.deliver).toHaveBeenCalledOnce()
+    expect(subject.dependencies.deliver.mock.calls.filter(([intent]) => intent.transition === 'block')).toHaveLength(1)
     expect(subject.dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
       longGoalId: GOAL_ID,
       transition: 'block',
@@ -325,9 +331,12 @@ describe('continuous Goal Host', () => {
   it('contains a rejected delivery without mutating or reclassifying durable state', async () => {
     const subject = harness()
     const failure = new Error('notice delivery failed')
-    subject.dependencies.deliver = vi.fn(async () => { throw failure })
+    subject.dependencies.deliver = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(failure)
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
     await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(subject.dependencies.deliver).toHaveBeenCalledOnce())
 
     subject.first.setGoal('complete')
     subject.setStatus(status(record(), ['complete'], null))
@@ -631,6 +640,48 @@ describe('continuous Goal Host', () => {
     expect(second.cancel).not.toHaveBeenCalled()
   })
 
+  it('routes one exact current Task approval as attention without changing Goal control', async () => {
+    const source = record({
+      tasks: [
+        { id: TASK_1, objective: 'Publish', execution: EXECUTION_1, resolution: null },
+        { id: TASK_2, objective: 'Verify', execution: EXECUTION_2, resolution: null },
+      ],
+    })
+    const subject = harness(source)
+    subject.setStatus(status(source, ['active', 'pending'], TASK_1))
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
+
+    subject.approval(EXECUTION_1.sessionId)
+    subject.approval(EXECUTION_1.sessionId)
+    subject.approval('unrelated-session')
+    await vi.waitFor(() => expect(subject.dependencies.deliver.mock.calls.filter(([intent]) =>
+      intent.transition === 'attention')).toHaveLength(1))
+
+    const currentSecond = status(source, ['complete', 'active'], TASK_2)
+    subject.setStatus(currentSecond)
+    subject.approval(EXECUTION_1.sessionId, 'approval-non-current')
+    await Promise.resolve()
+    await dispose()
+
+    expect(subject.dependencies.deliver.mock.calls.filter(([intent]) =>
+      intent.transition === 'attention')).toHaveLength(1)
+    expect(subject.dependencies.deliver).toHaveBeenCalledWith({
+      longGoalId: GOAL_ID,
+      transition: 'attention',
+      status: status(source, ['active', 'pending'], TASK_1),
+      attention: {
+        approvalId: 'approval-1',
+        sessionId: EXECUTION_1.sessionId,
+        toolName: 'pwsh',
+        reason: 'Run verification',
+      },
+    })
+    expect(subject.pause).not.toHaveBeenCalled()
+    expect(subject.dependencies.control).not.toHaveBeenCalled()
+    expect(subject.records()[0]?.control.autoProgress).toBe('running')
+  })
+
   it('reports a reconciliation failure and makes the async disposer reject after lanes settle', async () => {
     const subject = harness()
     const failure = new Error('flush failed')
@@ -785,6 +836,35 @@ describe('continuous Goal Host', () => {
 
     expect(subject.continueProgress).toHaveBeenCalledOnce()
     expect(subject.dependencies.deliver).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [TASK_1, ['active'] as const, 'start'],
+    [TASK_2, ['complete', 'active'] as const, 'advance'],
+  ] as const)('reconstructs %s progress for an already active bound Task', async (taskId, phases, transition) => {
+    const source = taskId === TASK_1
+      ? record()
+      : record({
+          planner: { ...record().planner, consideredSettledTasks: 1 },
+          tasks: [
+            { id: TASK_1, objective: 'Published', execution: EXECUTION_1, resolution: null },
+            { id: TASK_2, objective: 'Verify', execution: EXECUTION_2, resolution: null },
+          ],
+        })
+    const active = status(source, phases, taskId)
+    const subject = harness(source)
+    if (taskId === TASK_2) subject.live.set(EXECUTION_2.sessionId, agent(EXECUTION_2.sessionId, EXECUTION_2.goalId))
+    subject.setStatus(active)
+
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await dispose()
+
+    expect(subject.continueProgress).not.toHaveBeenCalled()
+    expect(subject.dependencies.deliver).toHaveBeenCalledWith({
+      longGoalId: GOAL_ID,
+      transition,
+      status: active,
+    })
   })
 
   it.each(['start', 'advance'] as const)(
