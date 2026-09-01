@@ -4,7 +4,7 @@
 
 Implemented in the Task 6 commit `feat: report Long Goal progress in the main chat`.
 
-The main conversation is now the only user-facing progress and settlement surface. Online progress uses the public DSH `reportFrom()` path from the exact Planner child. Online completion is left to native DSH settlement. Tianwen keeps only durable progress facts, a coalescing liveness lane, the existing attempt event history, and one terminal-delivery cursor for offline reconciliation.
+The main conversation is now the only user-facing progress and settlement surface. Online progress uses the public DSH `reportFrom()` path from the exact Planner child. Online completion is left to native DSH settlement. Tianwen keeps only durable progress facts, a coalescing liveness lane, the append-only attempt and terminal-boundary evidence, and one terminal-delivery cursor for offline reconciliation.
 
 ## Implementation
 
@@ -63,7 +63,7 @@ Offline reconciliation now accepts only an exact `settled` attempt and performs 
 
 1. reread the v3 terminal attempt and terminal-delivery cursor;
 2. inspect the exact main Session and exact terminal Task Session;
-3. if an exact persisted `subagent-settled` Planner Turn after the terminal event already has a completed assistant reply, append only `terminal-delivery-observed`;
+3. if an exact persisted Planner `subagent-settled` inbox admission occurred after the durable pre-terminal boundary, and that exact message id was later claimed in a completed main Turn, append only `terminal-delivery-observed`;
 4. otherwise, if the exact main Agent is now live and authoritative state is unchanged, send one deterministic guarded follow-up Turn with all tools disabled;
 5. flush and reinspect the main Session;
 6. append `terminal-delivery-observed` only after the exact notice id and completed reply Turn are durable.
@@ -139,7 +139,7 @@ Static gates:
 
 ## Self-review and concerns
 
-No contract, native adapter, scheduler, UI, routing, feedback, learning, or `settled-task-result.ts` change was required.
+No native adapter, scheduler, UI, routing, feedback, learning, or `settled-task-result.ts` change was required. Fix round 2 adds one authorized append-only event to the existing Long Goal v3 contract; legacy v3 records remain valid and are never rewritten.
 
 The offline fallback intentionally does not cold-resume the main Agent. If the main parent is still offline, reconciliation remains unacknowledged and waits for the ordinary public `agent/created` recovery trigger. This preserves user control and prevents hidden background model work.
 
@@ -156,21 +156,9 @@ Startup reconciliation previously passed the pre-fold status revision to offline
 - RED: a mounted running attempt plus persisted terminal `goal/change`, empty main Session, and live main Agent sent zero fallback Turns.
 - GREEN: the same single mount sends one fallback Turn and records one acknowledgement against the post-fold revision.
 
-### Causal native-settlement correlation
+### Causal native-settlement correlation (superseded in fix round 2)
 
-The public DSH settlement source identifies only the exact Planner Session. It exposes no Tianwen terminal event id, and a timestamp comparison cannot distinguish two activations of the same Planner Session. Tianwen now sends a deterministic, quiet marker from the exact live Planner through public `reportFrom()` when the Task terminal `goal/change` is observed. The marker contains only:
-
-```json
-{"schemaVersion":"tianwen.long-goal-terminal-marker.v1","terminalEventId":"goal-change:<Task Session>:<seq>:<operation>","mainBoundarySeq":<pre-marker main seq>}
-```
-
-It is not a progress report, does not wake the main Agent, and contains no objective or user/model content. Terminal recording awaits completion of the marker acceptance attempt, so there is no live event path that commits `attempt-settled` before marker delivery has been attempted. DSH owns the accepted inbox item; the native settlement wake projects the marker and settlement into the same main Session.
-
-Offline correlation now requires an exact Planner `subagent-report` marker for the exact terminal event and an exact Planner `subagent-settled` with `seq > mainBoundarySeq` in a completed main Turn. It uses neither timestamps nor settlement summaries. The parser accepts the causally valid persisted order whether settlement appears immediately before or after the marker, and rejects a boundary-before old settlement even when all timestamps are identical.
-
-The public DSH probe holds a real continuable Planner at a tool gate, reports the quiet marker, then releases the Planner. The persisted main Session proves marker `seq < subagent-settled seq` and a completed native main Turn. A crash-recovery test starts with the deterministic marker present but the attempt still `running`, folds the same Task `goal/change` after restart, and acknowledges the native Turn with one epoch and the same terminal event id.
-
-If a legacy/pre-fix Session contains an exact Planner settlement but no causal marker, delivery is ambiguous. Tianwen deliberately leaves it pending: zero acknowledgement and zero fallback send, because either action could falsely classify or duplicate an existing native Turn. A later explicit marker plus current settlement completes recovery. This ambiguous legacy state is not claimed as exact-once completion; the new live terminal path establishes the marker before terminal recording.
+Round 1 proved that timestamps and settlement summaries cannot correlate repeated settlements from the same Planner Session. Its quiet-report marker experiment was removed in full during fix round 2 because even a quiet `reportFrom()` item enters the main Session surface. The final implementation uses only a durable Long Goal boundary plus the public DSH inbox-admission event described below; no Tianwen marker content is sent to the main Session or model.
 
 ### Offline singleflight and final Agent fence
 
@@ -199,3 +187,60 @@ Focused Task 6 gate: 4 files passed, 102 tests passed.
 Combined Task 5/public DSH regression gate: 7 files passed, 117 tests passed.
 
 Runtime Bundle typecheck (`tsc -b --pretty false`) exited 0. `git diff --check` exited 0. Changed production imports use only public DSH package surfaces; no second scheduler/provider, direct child Agent factory, or private `/lib` or `/src` import was added.
+
+## Fix round 2: persisted terminal-delivery causality
+
+Independent review rejected the quiet-marker experiment because a marker was still a main-Session message. Fix round 2 removes that code and replaces it with one append-only Long Goal boundary event. No marker parser, marker `reportFrom()`, marker payload, or marker delivery wait remains in production.
+
+### Durable boundary contract
+
+On the exact Task `goal/change` complete/block callback, the Host synchronously reads the current public main Session event tail and appends `terminal-delivery-boundary` before returning from the callback. The event records only the exact Task, attempt epoch, terminal event id, Planner parent Session id, and `mainInboxBoundarySeq`. It is not a Session message and therefore never enters the main surface or model input.
+
+The append is accepted only for the exact current running attempt. A matching `attempt-settled` may follow it; permission-limited, provisioning-failed, a different terminal id, a different epoch/parent, or a second boundary is rejected. The event is append-only and optional, so existing six-key v3 records still load byte-for-byte without a rewrite.
+
+- RED: the append function and projection did not exist.
+- GREEN: the boundary persists once before the matching settled attempt and survives reload.
+- GREEN: the legacy six-key v3 compatibility test still passes.
+
+### Exact inbox admission correlation
+
+The final native-delivery check uses only public DSH event fields:
+
+1. find `agent/inbox/spliced` after the durable boundary;
+2. require an inserted message whose source is exact Planner `subagent-settled`;
+3. retain that admission event sequence and message id;
+4. require a later `user/message` claim with the same id and exact Planner source;
+5. require a non-empty assistant reply and completed/max-tokens end for that claim's Turn.
+
+An old admission with `seq <= mainInboxBoundarySeq` is rejected even if its claim is later and every timestamp is identical. A claim that precedes its matching admission is also rejected. No timestamp, summary, content text, or cross-Session guess participates.
+
+- RED: a current admission after the boundary was not recognized after marker removal.
+- GREEN: admission `seq > boundary`, same-id later claim, and completed Turn acknowledge with zero fallback.
+- GREEN: admission `seq == boundary` plus later claim remains unacknowledged at timestamp `1000`.
+- RED: a same-id claim placed before its admission was incorrectly accepted.
+- GREEN: the claim must have a greater event sequence than its exact admission.
+
+### Public ordering proof and crash matrix
+
+A real public DSH probe runs a continuable Planner through a tool gate and completes its real Goal. The synchronous Task `goal/change` listener observes the main tail first. Only after that callback returns does public DSH append the exact Planner `subagent-settled` through `agent/inbox/spliced`; the observed admission sequence is greater than the captured boundary. The persisted main Session contains no Tianwen marker payload. This proves the production capture point has no `await` window before settlement admission.
+
+The restart and fallback matrix is:
+
+- boundary durable, terminal fold absent: restart reuses the same boundary and exact terminal event, folds one settled attempt, recognizes the post-boundary native Turn, and appends one acknowledgement;
+- boundary absent, no exact Planner settlement evidence: the existing deterministic tool-disabled fallback may run, then flush/reinspect before acknowledgement;
+- boundary absent, exact Planner admission or claim present: the state is causally ambiguous and remains observable as a settled attempt with no boundary and no delivery cursor; reconciliation returns pending with zero fallback, zero acknowledgement, and zero Task rerun;
+- boundary present, exact post-boundary admission present but not yet claimed/completed: reconciliation remains pending and does not race a fallback against native DSH.
+
+The ambiguous legacy state is deliberately fail-closed. It is not reported as delivered and it is not silently consumed. New Task terminal paths always persist the boundary synchronously before public DSH can admit that Task's settlement.
+
+### Fix round 2 verification
+
+Admission/crash focused tests: 1 file passed, 5 tests passed.
+
+Combined Task 6, Task 5, and public DSH regression gate:
+
+```powershell
+pnpm exec vitest run tests/dsh-migration/ordinary-long-goal.spec.ts tests/dsh-migration/long-goal-liveness.spec.ts tests/dsh-migration/continuous-goal-feedback.spec.ts tests/dsh-migration/continuous-goal-host.spec.ts tests/dsh-migration/settled-task-result.spec.ts tests/dsh-migration/permission-attempt.spec.ts tests/dsh-migration/native-long-goal-child.spec.ts tests/dsh-probe/dsh-public-reuse-surface.spec.ts
+```
+
+Result: 8 files passed, 152 tests passed. The original Task 6 focused gate passed 4 files and 102 tests. Runtime Bundle typecheck (`tsc -b --pretty false`) and `git diff --check` exited 0. Static inspection found no private DSH import, terminal-marker production symbol, second scheduler/provider, direct Task Agent factory, feedback/learning write, or restored `long-goal-subagent.ts`.

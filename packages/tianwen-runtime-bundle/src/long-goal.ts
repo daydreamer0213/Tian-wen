@@ -26,6 +26,7 @@ import type {
   TianwenExecutionAttempt,
   TianwenLongGoalEvent,
   TianwenTaskAttemptProjection,
+  TianwenTerminalDeliveryBoundary,
   TianwenTerminalDeliveryCursor,
   AnyLongGoalRecord,
   AnyLongGoalStatusProjection,
@@ -47,6 +48,7 @@ export type {
   TianwenExecutionAttempt,
   TianwenLongGoalEvent,
   TianwenTaskAttemptProjection,
+  TianwenTerminalDeliveryBoundary,
   TianwenTerminalDeliveryCursor,
   AnyLongGoalRecord,
   AnyLongGoalStatusProjection,
@@ -360,6 +362,28 @@ function parseTianwenEvents(value: unknown, tasks: readonly LongGoalTaskRecordV2
       continue
     }
     if (
+      event.type === 'terminal-delivery-boundary'
+      && hasExactKeys(event, [
+        'type', 'taskId', 'epoch', 'terminalEventId', 'parentSessionId', 'mainInboxBoundarySeq',
+      ])
+      && isPositiveInteger(event.epoch)
+      && isNonEmptyString(event.terminalEventId)
+      && isNonEmptyString(event.parentSessionId)
+      && typeof event.mainInboxBoundarySeq === 'number'
+      && Number.isSafeInteger(event.mainInboxBoundarySeq)
+      && event.mainInboxBoundarySeq >= -1
+    ) {
+      events.push({
+        type: event.type,
+        taskId: event.taskId,
+        epoch: event.epoch,
+        terminalEventId: event.terminalEventId,
+        parentSessionId: event.parentSessionId,
+        mainInboxBoundarySeq: event.mainInboxBoundarySeq,
+      })
+      continue
+    }
+    if (
       event.type === 'terminal-delivery-observed' &&
       hasExactKeys(event, ['type', 'taskId', 'delivery']) &&
       isRecord(event.delivery) &&
@@ -390,6 +414,7 @@ function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): v
     attempts: TianwenExecutionAttempt[]
     provisioningFailedEpochs: Set<number>
     permissionFingerprintEpochs: Map<string, Set<number>>
+    terminalDeliveryBoundary?: TianwenTerminalDeliveryBoundary
     terminalDelivery?: TianwenTerminalDeliveryCursor
   }>()
   for (const event of events) {
@@ -425,6 +450,7 @@ function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): v
       usedEpochs.add(event.attempt.epoch)
       projection.permissionFingerprintEpochs.set(event.attempt.permissionFingerprint, usedEpochs)
       projection.attempts.push(event.attempt)
+      delete projection.terminalDeliveryBoundary
       continue
     }
     const current = projection.attempts.at(-1)
@@ -470,6 +496,13 @@ function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): v
       if (current === undefined || current.status !== 'running' || current.epoch !== event.epoch) {
         throw new LongGoalIntegrityError('Tianwen terminal attempt event requires the current running attempt')
       }
+      if (
+        projection.terminalDeliveryBoundary !== undefined
+        && (
+          event.type !== 'attempt-settled'
+          || projection.terminalDeliveryBoundary.terminalEventId !== event.terminalEventId
+        )
+      ) throw new LongGoalIntegrityError('Tianwen terminal attempt must match its delivery boundary')
       projection.attempts[projection.attempts.length - 1] = {
         ...current,
         status: event.type === 'attempt-permission-limited'
@@ -480,6 +513,21 @@ function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): v
         terminalEventId: event.terminalEventId,
       }
       if (event.type === 'attempt-provisioning-failed') projection.provisioningFailedEpochs.add(event.epoch)
+      continue
+    }
+    if (event.type === 'terminal-delivery-boundary') {
+      if (
+        current === undefined
+        || current.status !== 'running'
+        || current.epoch !== event.epoch
+        || current.parentSessionId !== event.parentSessionId
+        || projection.terminalDeliveryBoundary !== undefined
+      ) throw new LongGoalIntegrityError('Tianwen terminal delivery boundary requires the exact current running attempt')
+      projection.terminalDeliveryBoundary = {
+        terminalEventId: event.terminalEventId,
+        parentSessionId: event.parentSessionId,
+        mainInboxBoundarySeq: event.mainInboxBoundarySeq,
+      }
       continue
     }
     if (
@@ -500,11 +548,16 @@ function tianwenTaskAttemptProjection(
   taskId: string,
 ): TianwenTaskAttemptProjection {
   if (!tasks.some(task => task.id === taskId)) throw new LongGoalIntegrityError('Tianwen Long Goal event Task is invalid')
-  const projection = { attempts: [] as TianwenExecutionAttempt[], terminalDelivery: undefined as TianwenTerminalDeliveryCursor | undefined }
+  const projection = {
+    attempts: [] as TianwenExecutionAttempt[],
+    terminalDeliveryBoundary: undefined as TianwenTerminalDeliveryBoundary | undefined,
+    terminalDelivery: undefined as TianwenTerminalDeliveryCursor | undefined,
+  }
   for (const event of events ?? []) {
     if (event.taskId !== taskId) continue
     if (event.type === 'attempt-started') {
       projection.attempts.push(event.attempt)
+      projection.terminalDeliveryBoundary = undefined
     } else if (event.type === 'attempt-permission-mode-observed') {
       const current = projection.attempts.at(-1)
       if (current === undefined) throw new LongGoalIntegrityError('Tianwen attempt history is invalid')
@@ -529,13 +582,25 @@ function tianwenTaskAttemptProjection(
             : 'interrupted',
         terminalEventId: event.terminalEventId,
       }
+    } else if (event.type === 'terminal-delivery-boundary') {
+      projection.terminalDeliveryBoundary = {
+        terminalEventId: event.terminalEventId,
+        parentSessionId: event.parentSessionId,
+        mainInboxBoundarySeq: event.mainInboxBoundarySeq,
+      }
     } else {
       projection.terminalDelivery = event.delivery
     }
   }
-  return projection.terminalDelivery === undefined
-    ? { attempts: projection.attempts }
-    : { attempts: projection.attempts, terminalDelivery: projection.terminalDelivery }
+  return {
+    attempts: projection.attempts,
+    ...(projection.terminalDeliveryBoundary === undefined
+      ? {}
+      : { terminalDeliveryBoundary: projection.terminalDeliveryBoundary }),
+    ...(projection.terminalDelivery === undefined
+      ? {}
+      : { terminalDelivery: projection.terminalDelivery }),
+  }
 }
 
 function parseGoalFirstLongGoalFields(
@@ -1311,6 +1376,38 @@ export function appendTianwenAttemptSettled(input: TianwenAttemptEventInput & {
     taskId: input.taskId,
     epoch: input.epoch,
     terminalEventId: input.terminalEventId,
+  })
+}
+
+export function appendTianwenTerminalDeliveryBoundary(input: TianwenAttemptEventInput & {
+  readonly epoch: number
+  readonly terminalEventId: string
+  readonly parentSessionId: string
+  readonly mainInboxBoundarySeq: number
+}): LongGoalRecordV3 {
+  if (
+    !isPositiveInteger(input.epoch)
+    || !isNonEmptyString(input.terminalEventId)
+    || !isNonEmptyString(input.parentSessionId)
+    || !Number.isSafeInteger(input.mainInboxBoundarySeq)
+    || input.mainInboxBoundarySeq < -1
+  ) throw new TypeError('Tianwen terminal delivery boundary input is invalid')
+  const record = readContinuousLongGoal(input.stateRoot, input.longGoalId)
+  assertExpectedRevision(record, input.expectedRevision)
+  const current = readTianwenTaskAttemptProjection(record, input.taskId).attempts.at(-1)
+  if (
+    current?.status !== 'running'
+    || current.epoch !== input.epoch
+    || current.parentSessionId !== input.parentSessionId
+    || !input.terminalEventId.startsWith(`goal-change:${current.childSessionId}:`)
+  ) throw new LongGoalIntegrityError('Tianwen terminal delivery boundary requires the exact current running attempt')
+  return appendTianwenEvent(input, {
+    type: 'terminal-delivery-boundary',
+    taskId: input.taskId,
+    epoch: input.epoch,
+    terminalEventId: input.terminalEventId,
+    parentSessionId: input.parentSessionId,
+    mainInboxBoundarySeq: input.mainInboxBoundarySeq,
   })
 }
 

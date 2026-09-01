@@ -119,6 +119,12 @@ export interface TianwenTerminalDeliveryCursor {
   readonly completionTurnObserved: boolean
 }
 
+export interface TianwenTerminalDeliveryBoundary {
+  readonly terminalEventId: string
+  readonly parentSessionId: string
+  readonly mainInboxBoundarySeq: number
+}
+
 export type TianwenLongGoalEvent =
   | {
       readonly type: 'attempt-started'
@@ -155,6 +161,14 @@ export type TianwenLongGoalEvent =
       readonly terminalEventId: string
     }
   | {
+      readonly type: 'terminal-delivery-boundary'
+      readonly taskId: string
+      readonly epoch: number
+      readonly terminalEventId: string
+      readonly parentSessionId: string
+      readonly mainInboxBoundarySeq: number
+    }
+  | {
       readonly type: 'attempt-provisioning-failed'
       readonly taskId: string
       readonly epoch: number
@@ -168,6 +182,7 @@ export type TianwenLongGoalEvent =
 
 export interface TianwenTaskAttemptProjection {
   readonly attempts: readonly TianwenExecutionAttempt[]
+  readonly terminalDeliveryBoundary?: TianwenTerminalDeliveryBoundary
   readonly terminalDelivery?: TianwenTerminalDeliveryCursor
 }
 

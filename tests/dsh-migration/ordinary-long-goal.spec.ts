@@ -10,6 +10,7 @@ import {
   appendTianwenAttemptProvisioningFailed,
   appendTianwenAttemptSettled,
   appendTianwenAttemptStarted,
+  appendTianwenTerminalDeliveryBoundary,
   appendTianwenTerminalDeliveryObserved,
   appendLongGoalGuidance,
   appendContinuousGoalGuidance,
@@ -875,6 +876,50 @@ describe('goal-first long Goal v2 records', () => {
         ],
         terminalDelivery: { terminalEventId: 'settled-2', parentSessionId: 'planner-attempts', completionTurnObserved: true },
       })
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('persists one append-only main inbox boundary before the matching terminal attempt', () => {
+    const stateRoot = createStateRoot()
+    try {
+      const created = createContinuousLongGoal({
+        stateRoot, objective: 'Persist terminal causality', context: null, successCriteria: null,
+        workspaceRoot: resolve(stateRoot, 'workspace'), agentPreset: 'code', controlSessionId: 'main-boundary',
+      }, { goalSuffix: () => 'terminal-boundary', plannerSessionId: () => 'planner-boundary', now: () => 10 })
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: created.id, expectedRevision: created.revision,
+        outcome: 'continue', tasks: [{ objective: 'Complete once' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000091', now: () => 11 }) as LongGoalRecordV3
+      const taskId = planned.tasks[0]!.id
+      const started = appendTianwenAttemptStarted({
+        stateRoot, longGoalId: created.id, expectedRevision: planned.revision, taskId, epoch: 1,
+        parentSessionId: 'planner-boundary', childSessionId: 'task-boundary',
+        permissionFingerprint: 'sha256:boundary', permissionMode: 'read-only',
+        startedAt: '2026-09-01T00:00:00.000Z',
+      })
+      const boundary = appendTianwenTerminalDeliveryBoundary({
+        stateRoot, longGoalId: created.id, expectedRevision: started.revision, taskId, epoch: 1,
+        terminalEventId: 'goal-change:task-boundary:17:complete',
+        parentSessionId: 'planner-boundary', mainInboxBoundarySeq: 41,
+      })
+      const settled = appendTianwenAttemptSettled({
+        stateRoot, longGoalId: created.id, expectedRevision: boundary.revision, taskId, epoch: 1,
+        terminalEventId: 'goal-change:task-boundary:17:complete',
+      })
+
+      expect(readTianwenTaskAttemptProjection(settled, taskId)).toMatchObject({
+        attempts: [{ status: 'settled', terminalEventId: 'goal-change:task-boundary:17:complete' }],
+        terminalDeliveryBoundary: {
+          terminalEventId: 'goal-change:task-boundary:17:complete',
+          parentSessionId: 'planner-boundary',
+          mainInboxBoundarySeq: 41,
+        },
+      })
+      expect(settled.tianwenEvents?.map(event => event.type)).toEqual([
+        'attempt-started', 'terminal-delivery-boundary', 'attempt-settled',
+      ])
     } finally {
       rmSync(stateRoot, { recursive: true, force: true })
     }

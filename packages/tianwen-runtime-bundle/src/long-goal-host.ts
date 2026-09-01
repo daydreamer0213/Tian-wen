@@ -48,6 +48,7 @@ import {
   appendLongGoalGuidance,
   appendContinuousGoalGuidance,
   appendTianwenAttemptSettled,
+  appendTianwenTerminalDeliveryBoundary,
   appendTianwenTerminalDeliveryObserved,
   appendTianwenAttemptProvisioningFailed,
   appendTianwenAttemptStarted,
@@ -1970,69 +1971,27 @@ export function reportLongGoalProgress(
   })
 }
 
-const LONG_GOAL_TERMINAL_MARKER_SCHEMA = 'tianwen.long-goal-terminal-marker.v1'
-
-export function reportLongGoalTerminalMarker(
-  ctx: Pick<Context, 'subagents'>,
-  input: {
-    readonly planner: Agent
-    readonly terminalEventId: string
-    readonly mainBoundarySeq: number
-    readonly signal: AbortSignal
-  },
-) {
-  return ctx.subagents.reportFrom(input.planner, [{
-    type: 'text',
-    text: JSON.stringify({
-      schemaVersion: LONG_GOAL_TERMINAL_MARKER_SCHEMA,
-      terminalEventId: input.terminalEventId,
-      mainBoundarySeq: input.mainBoundarySeq,
-    }),
-  }], {
-    delivery: 'quiet',
-    signal: input.signal,
-  })
-}
-
-function terminalMarkerBoundary(
+function plannerSettlementAdmissions(
   events: readonly SessionEvent[],
   parentSessionId: string,
-  terminalEventId: string,
-): number | undefined {
+  afterSeq: number,
+): Map<string, number> {
+  const ids = new Map<string, number>()
   for (const event of events) {
-    if (event.type !== 'user/message') continue
-    const source = event.data.source as unknown as {
-      readonly kind?: unknown
-      readonly form?: unknown
-      readonly senderSessionId?: unknown
-    }
-    if (
-      source.kind !== 'subagent-report'
-      || source.form !== 'relay'
-      || String(source.senderSessionId) !== parentSessionId
-    ) continue
-    for (const block of event.data.content) {
-      if (block.type !== 'text') continue
-      let payload: unknown
-      try {
-        payload = JSON.parse(block.text)
-      } catch {
-        continue
+    if (event.type !== 'agent/inbox/spliced' || event.seq <= afterSeq) continue
+    for (const message of event.data.inserted) {
+      const source = message.source as unknown as {
+        readonly kind?: unknown
+        readonly senderSessionId?: unknown
       }
       if (
-        !isRecord(payload)
-        || !hasExactKeys(payload, ['schemaVersion', 'terminalEventId', 'mainBoundarySeq'])
-        || payload.schemaVersion !== LONG_GOAL_TERMINAL_MARKER_SCHEMA
-        || payload.terminalEventId !== terminalEventId
-        || typeof payload.mainBoundarySeq !== 'number'
-        || !Number.isSafeInteger(payload.mainBoundarySeq)
-        || payload.mainBoundarySeq < -1
-        || event.seq <= payload.mainBoundarySeq
-      ) continue
-      return payload.mainBoundarySeq
+        source.kind === 'subagent-settled'
+        && String(source.senderSessionId) === parentSessionId
+        && !ids.has(String(message.id))
+      ) ids.set(String(message.id), event.seq)
     }
   }
-  return undefined
+  return ids
 }
 
 function sameDeliveryState(
@@ -2209,16 +2168,25 @@ async function deliverContinuousGoalSettlementOnce(
     ...buildContinuousGoalSettlementNotice({ status: intent.status, settledTaskResults }),
     id: MessageId(`tianwen-terminal:${terminal.attempt.terminalEventId}`),
   })
+  const boundary = terminal.projection.terminalDeliveryBoundary
+  const hasExactBoundary = boundary !== undefined
+    && boundary.terminalEventId === terminal.attempt.terminalEventId
+    && boundary.parentSessionId === terminal.attempt.parentSessionId
+  const admittedSettlementIds = (events: readonly SessionEvent[]) => hasExactBoundary
+    ? plannerSettlementAdmissions(
+        events,
+        terminal.attempt.parentSessionId,
+        boundary.mainInboxBoundarySeq,
+      )
+    : new Map<string, number>()
   const hasNativeCompletion = (events: readonly SessionEvent[]): boolean => {
-    const boundary = terminalMarkerBoundary(
-      events,
-      terminal.attempt.parentSessionId,
-      terminal.attempt.terminalEventId!,
-    )
-    if (boundary === undefined) return false
+    const admitted = admittedSettlementIds(events)
+    if (admitted.size === 0) return false
     for (let index = 0; index < events.length; index += 1) {
       const event = events[index]
-      if (event?.type !== 'user/message' || event.seq <= boundary) continue
+      if (event?.type !== 'user/message') continue
+      const admissionSeq = admitted.get(String(event.data.id))
+      if (admissionSeq === undefined || event.seq <= admissionSeq) continue
       const source = event.data.source as unknown as {
         readonly kind?: unknown
         readonly senderSessionId?: unknown
@@ -2242,21 +2210,22 @@ async function deliverContinuousGoalSettlementOnce(
     }
     return false
   }
+  const isExactPlannerSettlement = (message: { readonly source?: unknown }): boolean => {
+    const source = message.source as {
+      readonly kind?: unknown
+      readonly senderSessionId?: unknown
+    } | undefined
+    return source?.kind === 'subagent-settled'
+      && String(source.senderSessionId) === terminal.attempt.parentSessionId
+  }
   const hasUncorrelatedPlannerSettlement = (events: readonly SessionEvent[]): boolean =>
-    terminalMarkerBoundary(
-      events,
-      terminal.attempt.parentSessionId,
-      terminal.attempt.terminalEventId!,
-    ) === undefined
-    && events.some(event => {
-      if (event.type !== 'user/message') return false
-      const source = event.data.source as unknown as {
-        readonly kind?: unknown
-        readonly senderSessionId?: unknown
-      }
-      return source.kind === 'subagent-settled'
-        && String(source.senderSessionId) === terminal.attempt.parentSessionId
-    })
+    !hasExactBoundary && events.some(event => event.type === 'user/message'
+      ? isExactPlannerSettlement(event.data)
+      : event.type === 'agent/inbox/spliced'
+        && event.data.inserted.some(isExactPlannerSettlement)
+    )
+  const hasCorrelatedPlannerAdmission = (events: readonly SessionEvent[]): boolean =>
+    admittedSettlementIds(events).size > 0
   const acknowledge = (): boolean => {
     const latest = readTerminal()
     if (latest === undefined || latest.attempt.terminalEventId !== terminal.attempt.terminalEventId) return false
@@ -2278,6 +2247,7 @@ async function deliverContinuousGoalSettlementOnce(
     return acknowledge()
   }
   if (hasUncorrelatedPlannerSettlement(inspectedMain.events)) return false
+  if (hasCorrelatedPlannerAdmission(inspectedMain.events)) return false
 
   const agent = dependencies.getAgent(mainSessionId)
   if (agent === undefined || String(agent.session.id) !== mainSessionId) return false
@@ -2291,6 +2261,7 @@ async function deliverContinuousGoalSettlementOnce(
     || hasNativeCompletion(recheckedMain.events)
   ) return acknowledge()
   if (hasUncorrelatedPlannerSettlement(recheckedMain.events)) return false
+  if (hasCorrelatedPlannerAdmission(recheckedMain.events)) return false
 
   const delivered = await runGuardedSettlementTurn(
     agent,
@@ -2700,10 +2671,13 @@ export function mountTianwenLongGoalHost(
       }),
       flushSession: async agent => injected.sessions.flush(agent.session),
       reportProgress: async input => { await reportLongGoalProgress(injected, input) },
-      reportTerminalMarker: async input => {
-        await reportLongGoalTerminalMarker(injected, {
+      recordTerminalBoundary: input => {
+        const record = readLongGoal(roots.stateRoot, input.longGoalId)
+        if (record.schemaVersion !== 'tianwen.long-goal.v3') return
+        appendTianwenTerminalDeliveryBoundary({
+          stateRoot: roots.stateRoot,
+          expectedRevision: record.revision,
           ...input,
-          signal: new AbortController().signal,
         })
       },
       recordTerminalAttempt: input => recordContinuousGoalTerminalAttempt({

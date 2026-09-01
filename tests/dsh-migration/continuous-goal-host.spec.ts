@@ -9,6 +9,7 @@ import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SubagentRuntime, { SubagentError, type SubagentProvider } from '@deepseek-ai/dsh-subagent'
 import { sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import GoalService from '@deepseek-ai/dsh-goal'
 import { CallId, createToolResultMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import {
@@ -22,6 +23,7 @@ import {
 import { projectEvidence } from '../../packages/tianwen-evidence/src/index.js'
 import {
   LongGoalIntegrityError,
+  appendTianwenTerminalDeliveryBoundary,
   appendTianwenAttemptSettled,
   appendTianwenAttemptStarted,
   bindGoalFirstLongGoalTask,
@@ -40,7 +42,6 @@ import {
   createPermissionAttemptHost,
   deliverContinuousGoalSettlement,
   recordContinuousGoalTerminalAttempt,
-  reportLongGoalTerminalMarker,
   reportLongGoalProgress,
   runCurrentWebTask,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
@@ -74,11 +75,11 @@ function probeProjectionRegistry() {
   }
 }
 
-const terminalMarkerProbeProvider: SubagentProvider = {
-  name: 'terminal-marker-probe',
+const terminalBoundaryProbeProvider: SubagentProvider = {
+  name: 'terminal-boundary-probe',
   inheritsParentContext: false,
   capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
-  async start() { throw new Error('terminal marker probe uses only continuable children') },
+  async start() { throw new Error('terminal boundary probe uses only continuable children') },
   async prepareContinuable() { return {} },
 }
 
@@ -118,7 +119,7 @@ function status(
   }
 }
 
-function terminalFixture(label: string, persistAttempt = true) {
+function terminalFixture(label: string, persistAttempt = true, persistBoundary = true) {
   const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
   mkdirSync(base, { recursive: true })
   const fixture = mkdtempSync(resolve(base, `${label}-`))
@@ -146,13 +147,21 @@ function terminalFixture(label: string, persistAttempt = true) {
     stateRoot, longGoalId: started.id, expectedRevision: started.revision,
     taskId: TASK_1, execution: EXECUTION_1,
   }) as LongGoalRecordV3
-  const settled = persistAttempt
-    ? appendTianwenAttemptSettled({
+  const bounded = persistBoundary
+    ? appendTianwenTerminalDeliveryBoundary({
         stateRoot, longGoalId: bound.id, expectedRevision: bound.revision,
         taskId: TASK_1, epoch: 1,
         terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
+        parentSessionId: 'planner-session', mainInboxBoundarySeq: 19,
       })
     : bound
+  const settled = persistAttempt
+    ? appendTianwenAttemptSettled({
+        stateRoot, longGoalId: bounded.id, expectedRevision: bounded.revision,
+        taskId: TASK_1, epoch: 1,
+        terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
+      })
+    : bounded
   return {
     fixture,
     stateRoot,
@@ -197,24 +206,17 @@ function permissionLimitedFixture(label: string) {
   }
 }
 
-function terminalMarkerEvent(
-  seq: number,
-  mainBoundarySeq: number,
-  terminalEventId = `goal-change:${EXECUTION_1.sessionId}:17:complete`,
-) {
+function plannerSettlementMessage(id: string) {
   return {
-    type: 'user/message', seq, time: 1_000, surfaceOp: 'append', data: {
-      id: `terminal-marker-${seq}`, role: 'user',
-      content: [
-        { type: 'text', text: 'Background subagent planner-session reported:' },
-        { type: 'text', text: JSON.stringify({
-          schemaVersion: 'tianwen.long-goal-terminal-marker.v1',
-          terminalEventId,
-          mainBoundarySeq,
-        }) },
-      ],
-      source: { kind: 'subagent-report', form: 'relay', senderSessionId: 'planner-session' },
-    },
+    id, role: 'user', content: [{ type: 'text', text: 'Planner settled.' }],
+    source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
+  }
+}
+
+function settlementAdmissionEvent(seq: number, messageId: string) {
+  return {
+    type: 'agent/inbox/spliced', seq, time: 1_000,
+    data: { target: 'next-turn', start: 0, inserted: [plannerSettlementMessage(messageId)] },
   } as unknown as SessionEvent
 }
 
@@ -347,7 +349,7 @@ function harness(initial = record()) {
     pause, flushSession: vi.fn(async () => { order.push('flush') }),
     deliver: vi.fn(async () => undefined),
     reportProgress: vi.fn(async () => undefined),
-    reportTerminalMarker: vi.fn(async () => undefined),
+    recordTerminalBoundary: vi.fn(() => undefined),
     recordTerminalAttempt: vi.fn(async () => undefined),
     reportError: vi.fn(),
     installCommand: vi.fn((controlAgent: Agent, operations) => {
@@ -394,31 +396,8 @@ function harness(initial = record()) {
 }
 
 describe('continuous Goal Host', () => {
-  it('persists a quiet terminal marker from the exact Planner with the pre-marker main boundary', async () => {
-    const planner = { session: { id: 'planner-session' } } as unknown as Agent
-    const reportFrom = vi.fn(async () => 'terminal-marker-message')
-    const signal = new AbortController().signal
-
-    await expect(reportLongGoalTerminalMarker({ subagents: { reportFrom } } as never, {
-      planner,
-      terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
-      mainBoundarySeq: 19,
-      signal,
-    })).resolves.toBe('terminal-marker-message')
-
-    expect(reportFrom).toHaveBeenCalledWith(
-      planner,
-      [{ type: 'text', text: JSON.stringify({
-        schemaVersion: 'tianwen.long-goal-terminal-marker.v1',
-        terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
-        mainBoundarySeq: 19,
-      }) }],
-      { delivery: 'quiet', signal },
-    )
-  })
-
-  it('public DSH persists the quiet marker before the exact Planner native settlement', async () => {
-    const base = resolve('D:/DevData/tianwen-dsh-probe/terminal-marker-order')
+  it('public DSH publishes Task terminal capture before Planner settlement admission without a model-facing marker', async () => {
+    const base = resolve('D:/DevData/tianwen-dsh-probe/terminal-boundary-order')
     mkdirSync(base, { recursive: true })
     const root = mkdtempSync(resolve(base, 'sessions-'))
     const ctx = new DshContext()
@@ -434,59 +413,78 @@ describe('continuous Goal Host', () => {
     ctx.provide('approval', {})
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(GoalService)
     await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
     await ctx.plugin(SubagentRuntime)
-    ctx.llm.registerAdapter(['terminal-marker-main'], new ScriptedAdapter([
+    ctx.llm.registerAdapter(['terminal-boundary-main'], new ScriptedAdapter([
       textResponse('Main observed the exact Planner settlement.'),
     ]))
-    ctx.llm.registerAdapter(['terminal-marker-planner'], new ScriptedAdapter([
-      toolCallResponse('terminal-gate-call', 'terminal_marker_gate', {}),
+    ctx.llm.registerAdapter(['terminal-boundary-planner'], new ScriptedAdapter([
+      toolCallResponse('terminal-gate-call', 'terminal_boundary_gate', {}),
       textResponse('Planner terminal result.'),
     ]))
-    ctx.subagents.registerProvider(terminalMarkerProbeProvider)
+    ctx.subagents.registerProvider(terminalBoundaryProbeProvider)
     const disposeGate = ctx.tools.register(defineTool({
-      name: 'terminal_marker_gate', description: 'Wait until the terminal marker is durable.', parameters: {},
+      name: 'terminal_boundary_gate', description: 'Wait until terminal capture is observed.', parameters: {},
       output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
       async execute() { await gate; return 'released' },
     }))
     try {
       const main = (await ctx.agents.create({
-        sessionId: SessionId('terminal-marker-main'),
-        agentOptions: { provider: 'terminal-marker-main', model: 'scripted' },
+        sessionId: SessionId('terminal-boundary-main'),
+        agentOptions: { provider: 'terminal-boundary-main', model: 'scripted' },
       })).agent
       const started = await ctx.subagents.startContinuable({
-        provider: 'terminal-marker-probe', label: 'Exact Planner',
+        provider: 'terminal-boundary-probe', label: 'Exact Planner',
         request: {
           parent: main,
           prompt: [{ type: 'text', text: 'Wait, then finish.' }],
-          agentOptions: { provider: 'terminal-marker-planner', model: 'scripted' },
+          agentOptions: { provider: 'terminal-boundary-planner', model: 'scripted' },
         },
         signal: AbortSignal.timeout(10_000),
       })
       await vi.waitFor(() => expect(ctx.agents.get(started.childId)?.session.events
         .some(event => event.type === 'tool/call')).toBe(true))
       const planner = ctx.agents.get(started.childId)!
-      const mainBoundarySeq = main.session.events.at(-1)?.seq ?? -1
-      await reportLongGoalTerminalMarker(ctx, {
-        planner,
-        terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
-        mainBoundarySeq,
-        signal: AbortSignal.timeout(10_000),
+      let mainBoundarySeq: number | undefined
+      let settlementAdmissionSeq: number | undefined
+      const order: string[] = []
+      const off = ctx.on('session/event', (session, event) => {
+        if (String(session.id) === String(planner.session.id) && event.type === 'goal/change') {
+          const data = event.data as unknown as { readonly operation?: unknown }
+          if (data.operation === 'complete') {
+            mainBoundarySeq = main.session.events.at(-1)?.seq ?? -1
+            order.push('boundary')
+          }
+        }
+        if (
+          String(session.id) === String(main.session.id)
+          && event.type === 'agent/inbox/spliced'
+          && event.data.inserted.some(message => {
+            const source = message.source as { readonly kind?: unknown, readonly senderSessionId?: unknown }
+            return source.kind === 'subagent-settled'
+              && String(source.senderSessionId) === String(planner.session.id)
+          })
+        ) {
+          settlementAdmissionSeq = event.seq
+          order.push('settlement')
+        }
       })
+      const goal = ctx.goals.create(planner, { objective: 'Finish after capture', maxGoalRounds: 1 })
+      ctx.goals.complete(planner, goal)
+      expect(order).toEqual(['boundary'])
+      expect(mainBoundarySeq).toBe(main.session.events.at(-1)?.seq ?? -1)
       releaseGate()
-      await vi.waitFor(() => expect(main.session.events.some(event => event.type === 'user/message'
-        && (event.data.source as { readonly kind?: unknown }).kind === 'subagent-settled')).toBe(true))
+      await vi.waitFor(() => expect(settlementAdmissionSeq).toBeDefined())
       await main.whenIdle()
       expect(await ctx.sessions.flush(main.session)).toBe(true)
       const persisted = await ctx.sessionPersistence.inspect(main.session.id)
-      const persistedMarker = persisted.events.find(event => event.type === 'user/message'
-        && (event.data.source as { readonly kind?: unknown }).kind === 'subagent-report')
-      const settled = persisted.events.find(event => event.type === 'user/message'
-        && (event.data.source as { readonly kind?: unknown }).kind === 'subagent-settled')
-      expect(persistedMarker?.seq).toBeGreaterThan(mainBoundarySeq)
-      expect(settled?.seq).toBeGreaterThan(persistedMarker!.seq)
+      expect(order).toEqual(['boundary', 'settlement'])
+      expect(settlementAdmissionSeq).toBeGreaterThan(mainBoundarySeq!)
+      expect(JSON.stringify(persisted.events)).not.toContain('tianwen.long-goal-terminal-marker')
       expect(persisted.events.some(event => event.type === 'turn/end'
         && event.data.reason.kind === 'completed')).toBe(true)
+      off()
     } finally {
       releaseGate()
       disposeGate()
@@ -495,12 +493,12 @@ describe('continuous Goal Host', () => {
     }
   })
 
-  it('attempts the deterministic terminal marker before terminal recording can be queued', async () => {
+  it('captures the durable inbox boundary synchronously before terminal recording can be queued', async () => {
     const source = record({
       tianwenEvents: [{
         type: 'attempt-started', taskId: TASK_1, attempt: {
           epoch: 1, parentSessionId: 'planner-session', childSessionId: EXECUTION_1.sessionId,
-          permissionFingerprint: 'sha256:marker-order', permissionMode: 'read-only', status: 'running',
+          permissionFingerprint: 'sha256:boundary-order', permissionMode: 'read-only', status: 'running',
           startedAt: '2026-09-01T00:00:00.000Z',
         },
       }],
@@ -513,9 +511,9 @@ describe('continuous Goal Host', () => {
     const planner = agent(source.planner.sessionId, 'planner-goal')
     subject.live.set(source.control.sessionId, main)
     subject.live.set(source.planner.sessionId, planner)
-    let releaseMarker!: () => void
-    const markerAccepted = new Promise<void>(resolve => { releaseMarker = resolve })
-    subject.dependencies.reportTerminalMarker.mockImplementation(async () => markerAccepted)
+    const terminalOrder: string[] = []
+    subject.dependencies.recordTerminalBoundary.mockImplementation(() => { terminalOrder.push('boundary') })
+    subject.dependencies.recordTerminalAttempt.mockImplementation(async () => { terminalOrder.push('attempt') })
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
     await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalled())
     await Promise.resolve()
@@ -529,19 +527,22 @@ describe('continuous Goal Host', () => {
       },
     })
 
-    expect(subject.dependencies.reportTerminalMarker).toHaveBeenCalledWith({
-      planner,
+    expect(subject.dependencies.recordTerminalBoundary).toHaveBeenCalledWith({
+      longGoalId: source.id,
+      taskId: TASK_1,
+      epoch: 1,
       terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
-      mainBoundarySeq: 19,
+      parentSessionId: source.planner.sessionId,
+      mainInboxBoundarySeq: 19,
     })
+    expect(terminalOrder).toEqual(['boundary'])
     expect(subject.dependencies.recordTerminalAttempt).not.toHaveBeenCalled()
     subject.first.setGoal('complete')
     subject.setStatus(status(source, ['complete'], null, 'complete'))
     subject.complete()
     await vi.waitFor(() => expect(subject.dependencies.flushSession).toHaveBeenCalled())
-    expect(subject.dependencies.recordTerminalAttempt).not.toHaveBeenCalled()
-    releaseMarker()
     await vi.waitFor(() => expect(subject.dependencies.recordTerminalAttempt).toHaveBeenCalledOnce())
+    expect(terminalOrder).toEqual(['boundary', 'attempt'])
     await dispose()
   })
 
@@ -575,7 +576,7 @@ describe('continuous Goal Host', () => {
   })
 
   it('persists one offline main completion Turn before acknowledging delivery and never sends it twice', async () => {
-    const terminal = terminalFixture('offline-exact-once')
+    const terminal = terminalFixture('offline-exact-once', true, false)
     try {
       const controlAgent = feedbackAgent()
       let mainEvents: readonly SessionEvent[] = []
@@ -743,12 +744,9 @@ describe('continuous Goal Host', () => {
         },
       }] as unknown as readonly SessionEvent[]
       const mainEvents = [
-        terminalMarkerEvent(20, 19),
+        settlementAdmissionEvent(20, 'native-settlement'),
         { type: 'turn/start', seq: 21, time: 1_000, data: { turn: 9 } },
-        { type: 'user/message', seq: 22, time: 1_000, surfaceOp: 'append', data: {
-          id: 'native-settlement', role: 'user', content: [{ type: 'text', text: 'Planner settled.' }],
-          source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
-        } },
+        { type: 'user/message', seq: 22, time: 1_000, surfaceOp: 'append', data: plannerSettlementMessage('native-settlement') },
         { type: 'assistant/message', seq: 23, time: 1_000, surfaceOp: 'append', data: {
           turn: 9,
           message: { id: 'native-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Goal complete.' }] },
@@ -779,8 +777,8 @@ describe('continuous Goal Host', () => {
     }
   })
 
-  it('reuses the deterministic marker after a crash before the terminal attempt was recorded', async () => {
-    const terminal = terminalFixture('marker-before-record-crash', false)
+  it('reuses the durable inbox boundary after a crash before the terminal attempt was recorded', async () => {
+    const terminal = terminalFixture('boundary-before-record-crash', false)
     try {
       const taskEvents = [{
         type: 'goal/change', seq: 17, time: 1_000,
@@ -790,12 +788,9 @@ describe('continuous Goal Host', () => {
         },
       }] as unknown as readonly SessionEvent[]
       const mainEvents = [
-        terminalMarkerEvent(20, 19),
+        settlementAdmissionEvent(20, 'native-settlement'),
         { type: 'turn/start', seq: 21, time: 1_000, data: { turn: 9 } },
-        { type: 'user/message', seq: 22, time: 1_000, surfaceOp: 'append', data: {
-          id: 'native-settlement', role: 'user', content: [{ type: 'text', text: 'Planner settled.' }],
-          source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
-        } },
+        { type: 'user/message', seq: 22, time: 1_000, surfaceOp: 'append', data: plannerSettlementMessage('native-settlement') },
         { type: 'assistant/message', seq: 23, time: 1_000, surfaceOp: 'append', data: {
           turn: 9,
           message: { id: 'native-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Goal complete.' }] },
@@ -846,8 +841,8 @@ describe('continuous Goal Host', () => {
     }
   })
 
-  it('accepts the exact Planner settlement after the boundary when persistence orders it before the marker', async () => {
-    const terminal = terminalFixture('native-before-marker')
+  it('accepts the exact Planner settlement admission after the durable boundary', async () => {
+    const terminal = terminalFixture('native-admission-after-boundary')
     try {
       const taskEvents = [{
         type: 'goal/change', seq: 17, time: 1_000,
@@ -857,17 +852,14 @@ describe('continuous Goal Host', () => {
         },
       }] as unknown as readonly SessionEvent[]
       const mainEvents = [
-        { type: 'turn/start', seq: 20, time: 1_000, data: { turn: 9 } },
-        { type: 'user/message', seq: 21, time: 1_000, surfaceOp: 'append', data: {
-          id: 'native-settlement', role: 'user', content: [{ type: 'text', text: 'Planner settled.' }],
-          source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
-        } },
-        { type: 'assistant/message', seq: 22, time: 1_000, surfaceOp: 'append', data: {
+        settlementAdmissionEvent(20, 'native-settlement'),
+        { type: 'turn/start', seq: 21, time: 1_000, data: { turn: 9 } },
+        { type: 'user/message', seq: 22, time: 1_000, surfaceOp: 'append', data: plannerSettlementMessage('native-settlement') },
+        { type: 'assistant/message', seq: 23, time: 1_000, surfaceOp: 'append', data: {
           turn: 9,
           message: { id: 'native-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Goal complete.' }] },
         } },
-        { type: 'turn/end', seq: 23, time: 1_000, data: { turn: 9, reason: { kind: 'completed' } } },
-        terminalMarkerEvent(24, 19),
+        { type: 'turn/end', seq: 24, time: 1_000, data: { turn: 9, reason: { kind: 'completed' } } },
       ] as unknown as readonly SessionEvent[]
 
       await expect(deliverContinuousGoalSettlement({
@@ -886,7 +878,44 @@ describe('continuous Goal Host', () => {
     }
   })
 
-  it('rejects an old exact-Planner settlement before the boundary even when every timestamp collides', async () => {
+  it('requires the claimed settlement message to follow its exact inbox admission', async () => {
+    const terminal = terminalFixture('native-claim-before-admission')
+    try {
+      const taskEvents = [{
+        type: 'goal/change', seq: 17, time: 1_000,
+        data: {
+          operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+          goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+        },
+      }] as unknown as readonly SessionEvent[]
+      const mainEvents = [
+        { type: 'turn/start', seq: 20, time: 1_000, data: { turn: 9 } },
+        { type: 'user/message', seq: 21, time: 1_000, surfaceOp: 'append', data: plannerSettlementMessage('out-of-order-settlement') },
+        { type: 'assistant/message', seq: 22, time: 1_000, surfaceOp: 'append', data: {
+          turn: 9,
+          message: { id: 'native-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Goal complete.' }] },
+        } },
+        { type: 'turn/end', seq: 23, time: 1_000, data: { turn: 9, reason: { kind: 'completed' } } },
+        settlementAdmissionEvent(24, 'out-of-order-settlement'),
+      ] as unknown as readonly SessionEvent[]
+
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: terminal.record.id, transition: 'complete', status: terminal.status,
+      }, {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => undefined,
+        readStatus: async () => terminal.status,
+        inspectSession: async sessionId => sessionId === EXECUTION_1.sessionId
+          ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+          : { meta: { id: sessionId }, events: mainEvents },
+        flushSession: vi.fn(async () => true),
+      })).resolves.toBe(false)
+    } finally {
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an old settlement admission at the boundary even when its later claim and every timestamp collide', async () => {
     const terminal = terminalFixture('native-old-collision')
     try {
       const taskEvents = [{
@@ -897,17 +926,14 @@ describe('continuous Goal Host', () => {
         },
       }] as unknown as readonly SessionEvent[]
       const mainEvents = [
-        { type: 'turn/start', seq: 5, time: 1_000, data: { turn: 8 } },
-        { type: 'user/message', seq: 6, time: 1_000, surfaceOp: 'append', data: {
-          id: 'old-native-settlement', role: 'user', content: [{ type: 'text', text: 'Old Planner settlement.' }],
-          source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
-        } },
-        { type: 'assistant/message', seq: 7, time: 1_000, surfaceOp: 'append', data: {
+        settlementAdmissionEvent(19, 'old-native-settlement'),
+        { type: 'turn/start', seq: 20, time: 1_000, data: { turn: 8 } },
+        { type: 'user/message', seq: 21, time: 1_000, surfaceOp: 'append', data: plannerSettlementMessage('old-native-settlement') },
+        { type: 'assistant/message', seq: 22, time: 1_000, surfaceOp: 'append', data: {
           turn: 8,
           message: { id: 'old-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Old completion.' }] },
         } },
-        { type: 'turn/end', seq: 8, time: 1_000, data: { turn: 8, reason: { kind: 'completed' } } },
-        terminalMarkerEvent(20, 19),
+        { type: 'turn/end', seq: 23, time: 1_000, data: { turn: 8, reason: { kind: 'completed' } } },
       ] as unknown as readonly SessionEvent[]
 
       await expect(deliverContinuousGoalSettlement({
@@ -932,8 +958,8 @@ describe('continuous Goal Host', () => {
     }
   })
 
-  it('fails closed instead of duplicating an exact Planner native Turn when no marker can correlate it', async () => {
-    const terminal = terminalFixture('native-without-marker')
+  it('leaves an observable pending cursor instead of duplicating an ambiguous settlement when the boundary is absent', async () => {
+    const terminal = terminalFixture('native-without-boundary', true, false)
     try {
       const main = feedbackAgent()
       main.followup.mockImplementation(() => { throw new Error('duplicate fallback') })
@@ -943,17 +969,15 @@ describe('continuous Goal Host', () => {
           goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
         },
       }] as unknown as readonly SessionEvent[]
-      let mainEvents: readonly SessionEvent[] = [
-        { type: 'turn/start', seq: 20, time: 1_000, data: { turn: 9 } },
-        { type: 'user/message', seq: 21, time: 1_000, surfaceOp: 'append', data: {
-          id: 'uncorrelated-native-settlement', role: 'user', content: [{ type: 'text', text: 'Planner settled.' }],
-          source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
-        } },
-        { type: 'assistant/message', seq: 22, time: 1_000, surfaceOp: 'append', data: {
+      const mainEvents: readonly SessionEvent[] = [
+        settlementAdmissionEvent(20, 'uncorrelated-native-settlement'),
+        { type: 'turn/start', seq: 21, time: 1_000, data: { turn: 9 } },
+        { type: 'user/message', seq: 22, time: 1_000, surfaceOp: 'append', data: plannerSettlementMessage('uncorrelated-native-settlement') },
+        { type: 'assistant/message', seq: 23, time: 1_000, surfaceOp: 'append', data: {
           turn: 9,
           message: { id: 'native-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Goal complete.' }] },
         } },
-        { type: 'turn/end', seq: 23, time: 1_000, data: { turn: 9, reason: { kind: 'completed' } } },
+        { type: 'turn/end', seq: 24, time: 1_000, data: { turn: 9, reason: { kind: 'completed' } } },
       ] as unknown as readonly SessionEvent[]
 
       await expect(deliverContinuousGoalSettlement({
@@ -969,40 +993,12 @@ describe('continuous Goal Host', () => {
       })).resolves.toBe(false)
 
       expect(main.followup).not.toHaveBeenCalled()
-      expect(readTianwenTaskAttemptProjection(
+      const pending = readTianwenTaskAttemptProjection(
         readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
         TASK_1,
-      ).terminalDelivery).toBeUndefined()
-
-      mainEvents = [
-        ...mainEvents,
-        terminalMarkerEvent(30, 29),
-        { type: 'turn/start', seq: 31, time: 1_000, data: { turn: 10 } },
-        { type: 'user/message', seq: 32, time: 1_000, surfaceOp: 'append', data: {
-          id: 'correlated-native-settlement', role: 'user', content: [{ type: 'text', text: 'Planner settled.' }],
-          source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
-        } },
-        { type: 'assistant/message', seq: 33, time: 1_000, surfaceOp: 'append', data: {
-          turn: 10,
-          message: { id: 'correlated-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Current goal complete.' }] },
-        } },
-        { type: 'turn/end', seq: 34, time: 1_000, data: { turn: 10, reason: { kind: 'completed' } } },
-      ] as unknown as readonly SessionEvent[]
-      await expect(deliverContinuousGoalSettlement({
-        longGoalId: terminal.record.id, transition: 'complete', status: terminal.status,
-      }, {
-        stateRoot: terminal.stateRoot,
-        getAgent: () => main,
-        readStatus: async () => terminal.status,
-        inspectSession: async sessionId => sessionId === EXECUTION_1.sessionId
-          ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
-          : { meta: { id: sessionId }, events: mainEvents },
-        flushSession: vi.fn(async () => true),
-      })).resolves.toBe(true)
-      expect(readTianwenTaskAttemptProjection(
-        readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
-        TASK_1,
-      ).terminalDelivery?.completionTurnObserved).toBe(true)
+      )
+      expect(pending.terminalDeliveryBoundary).toBeUndefined()
+      expect(pending.terminalDelivery).toBeUndefined()
     } finally {
       rmSync(terminal.fixture, { recursive: true, force: true })
     }

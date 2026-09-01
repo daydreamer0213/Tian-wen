@@ -69,11 +69,14 @@ export interface ContinuousGoalHostDependencies {
     readonly facts: readonly DurableProgressFact[]
     readonly signal: AbortSignal
   }) => Promise<void | boolean>
-  readonly reportTerminalMarker?: (input: {
-    readonly planner: Agent
+  readonly recordTerminalBoundary?: (input: {
+    readonly longGoalId: string
+    readonly taskId: string
+    readonly epoch: number
     readonly terminalEventId: string
-    readonly mainBoundarySeq: number
-  }) => Promise<void | boolean>
+    readonly parentSessionId: string
+    readonly mainInboxBoundarySeq: number
+  }) => void
   readonly recordTerminalAttempt?: (input: {
     readonly longGoalId: string
     readonly status: LongGoalStatusProjectionV3
@@ -242,7 +245,6 @@ export function mountContinuousGoalHost(
   const pendingDeliveries = new Map<string, ContinuousGoalDeliveryIntent[]>()
   const deliveryKeys = new Set<string>()
   const observedTaskTransitions = new Set<string>()
-  const terminalMarkerAttempts = new Map<string, Promise<void>>()
   const deliveryTasks = new Set<Promise<void>>()
   const failures: unknown[] = []
   const installed = new Map<Agent, {
@@ -270,12 +272,6 @@ export function mountContinuousGoalHost(
     const record = dependencies.readLongGoal(dependencies.roots.stateRoot, longGoalId)
     return isV3(record) ? record : undefined
   }
-  const terminalMarkerKey = (
-    longGoalId: string,
-    operation: 'complete' | 'block',
-    sessionId: string,
-    goalId: string,
-  ) => `${longGoalId}:${operation}:${sessionId}:${goalId}`
   const startPendingDeliveries = (longGoalId: string): void => {
     const intents = pendingDeliveries.get(longGoalId)
     pendingDeliveries.delete(longGoalId)
@@ -510,7 +506,6 @@ export function mountContinuousGoalHost(
     const status = await readStatus(longGoalId)
     const projected = status.tasks.find(candidate => candidate.id === task.id)
     if (projected?.phase !== 'complete' || settledTasks(status) <= record.planner.consideredSettledTasks) return
-    await terminalMarkerAttempts.get(terminalMarkerKey(longGoalId, 'complete', execution.sessionId, execution.goalId))
     await dependencies.recordTerminalAttempt?.({ longGoalId, status })
     const terminalRecord = readV3(longGoalId)
     if (terminalRecord === undefined) return
@@ -538,7 +533,6 @@ export function mountContinuousGoalHost(
       || current.execution?.sessionId !== execution.sessionId
       || current.execution.goalId !== execution.goalId
     ) return
-    await terminalMarkerAttempts.get(terminalMarkerKey(longGoalId, 'block', execution.sessionId, execution.goalId))
     await dependencies.recordTerminalAttempt?.({ longGoalId, status: blocked })
     recordProgressDelivery(longGoalId, blocked)
   }
@@ -701,41 +695,34 @@ export function mountContinuousGoalHost(
         || record.control.autoProgress !== 'running'
         || record.planner.phase === 'complete'
       ) continue
-      if (terminalOperation !== undefined && dependencies.reportTerminalMarker !== undefined) {
+      if (terminalOperation !== undefined && dependencies.recordTerminalBoundary !== undefined) {
         const goalId = String(terminal!.data.ref?.id ?? terminal!.data.goal?.id)
         const task = boundTask(record, sessionId, goalId)
         const attempt = task === undefined
           ? undefined
           : readTianwenTaskAttemptProjection(record, task.id).attempts.at(-1)
-        const planner = ctx.agents.get(record.planner.sessionId as never)
         const main = ctx.agents.get(record.control.sessionId as never)
         if (
           task !== undefined
           && attempt?.status === 'running'
           && attempt.parentSessionId === record.planner.sessionId
           && attempt.childSessionId === sessionId
-          && planner !== undefined
-          && String(planner.session.id) === record.planner.sessionId
           && main !== undefined
           && String(main.session.id) === record.control.sessionId
           && Number.isSafeInteger(terminal!.seq)
         ) {
-          const mainBoundarySeq = main.session.events.at(-1)?.seq ?? -1
-          const key = terminalMarkerKey(record.id, terminalOperation, sessionId, goalId)
-          let markerAttempt: Promise<void>
           try {
-            markerAttempt = dependencies.reportTerminalMarker({
-              planner,
+            dependencies.recordTerminalBoundary({
+              longGoalId: record.id,
+              taskId: task.id,
+              epoch: attempt.epoch,
               terminalEventId: `goal-change:${sessionId}:${terminal!.seq}:${terminalOperation}`,
-              mainBoundarySeq,
-            }).then(() => undefined, error => {
-              try { dependencies.reportError(error) } catch {}
+              parentSessionId: attempt.parentSessionId,
+              mainInboxBoundarySeq: main.session.events.at(-1)?.seq ?? -1,
             })
           } catch (error) {
             try { dependencies.reportError(error) } catch {}
-            markerAttempt = Promise.resolve()
           }
-          terminalMarkerAttempts.set(key, markerAttempt)
         }
       }
       const routePermissionEvent = dependencies.handlePermissionEvent !== undefined && (
