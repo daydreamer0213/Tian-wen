@@ -55,6 +55,7 @@ import {
 } from './long-goal.js'
 import { runLongGoalPlannerTurn } from './long-goal-planner.js'
 import type { LongGoalPlannerDependencies } from './long-goal-planner.js'
+import { installLongGoalSubagentDescriptor } from './long-goal-subagent.js'
 import {
   controlContinuousGoal,
   createContinuousGoalProgress,
@@ -209,6 +210,7 @@ export interface TianwenLongGoalRunDependencies {
     readonly cwd: string
     readonly agentPreset?: string
     readonly parentSessionId?: string
+    readonly label?: string
   }) => Promise<string>
   readonly attachedAgent: (sessionId: string) => Agent | undefined
   readonly createGoal: (agent: Agent, input: {
@@ -472,7 +474,10 @@ export async function runCurrentWebTask(input: {
       cwd,
       ...(agentPreset === undefined ? {} : { agentPreset }),
       ...(goalFirstRecord?.schemaVersion === 'tianwen.long-goal.v3'
-        ? { parentSessionId: goalFirstRecord.control.sessionId }
+        ? {
+            parentSessionId: goalFirstRecord.control.sessionId,
+            label: `Task ${taskIndex + 1}: ${task.objective}`,
+          }
         : {}),
     })
     const agent = dependencies.attachedAgent(sessionId)
@@ -1489,7 +1494,7 @@ export function mountTianwenLongGoalHost(
         ...(item.cwd === undefined ? {} : { cwd: item.cwd }),
         ...(item.agentPreset === undefined ? {} : { agentPreset: item.agentPreset }),
       })),
-      createSession: async ({ cwd, agentPreset, parentSessionId }) => {
+      createSession: async ({ cwd, agentPreset, parentSessionId, label }) => {
         if (parentSessionId === undefined) {
           return String(unwrapRpc(await host.apiProxy.sessions.create({
             rpcId: randomUUID(),
@@ -1508,7 +1513,9 @@ export function mountTianwenLongGoalHost(
             ...(agentPreset === undefined ? {} : { agentPreset }),
           },
           agentOptions: { provider: selection.provider, model: selection.model },
-          setup: agentSetup(selection, agentPreset, () => undefined),
+          setup: agentSetup(selection, agentPreset, agentCtx => {
+            if (label !== undefined) installLongGoalSubagentDescriptor(agentCtx, label)
+          }),
         })
         ownedTaskHandles.set(String(sessionId), handle)
         return String(sessionId)
@@ -1603,7 +1610,12 @@ export function mountTianwenLongGoalHost(
                 }),
           },
           agentOptions: { provider: selection.provider, model: selection.model },
-          setup: agentSetup(selection, input.agentPreset, input.setup),
+          setup: agentSetup(selection, input.agentPreset, agentCtx => {
+            if (input.label !== undefined) {
+              installLongGoalSubagentDescriptor(agentCtx, input.label)
+            }
+            return input.setup(agentCtx)
+          }),
         })
       },
       resumeAgent: async input => {

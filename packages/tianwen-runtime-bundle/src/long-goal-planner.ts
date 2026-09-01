@@ -23,6 +23,7 @@ export interface LongGoalPlannerDependencies {
     readonly cwd: string
     readonly agentPreset: string
     readonly parentSessionId?: string
+    readonly label?: string
     readonly setup: AgentSetup
   }) => Promise<AgentHandle>
   readonly resumeAgent: (input: {
@@ -192,7 +193,10 @@ export async function runLongGoalPlannerTurn(input: {
         cwd: input.record.workspaceRoot,
         agentPreset: input.record.planner.agentPreset,
         ...(input.record.schemaVersion === 'tianwen.long-goal.v3'
-          ? { parentSessionId: input.record.control.sessionId }
+          ? {
+              parentSessionId: input.record.control.sessionId,
+              label: 'Long Goal Planner',
+            }
           : {}),
         setup,
       })

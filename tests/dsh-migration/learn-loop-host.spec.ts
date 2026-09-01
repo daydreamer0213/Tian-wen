@@ -1341,6 +1341,7 @@ describe('Tianwen Long Goal Web host', () => {
     expect(dependencies.createSession).toHaveBeenCalledWith({
       cwd: 'D:/frozen-workspace', agentPreset: 'planner-preset',
       parentSessionId: 'control-session',
+      label: 'Task 1: Prepare notes',
     })
     expect(bindGoalFirstLongGoalTask).toHaveBeenCalledWith({
       stateRoot: ROOTS.stateRoot, longGoalId: record.id, expectedRevision: 3,
@@ -1890,6 +1891,7 @@ describe('Long Goal DSH planner', () => {
 
       expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({
         parentSessionId: 'control-session',
+        label: 'Long Goal Planner',
       }))
 
       expect(readLongGoal(stateRoot, record.id)).toMatchObject({
