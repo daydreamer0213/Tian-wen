@@ -312,6 +312,50 @@ describe('Tianwen append-only evolution ledger', () => {
     expect(publicApi).not.toHaveProperty('EvolutionLedger')
   })
 
+  it('reads the one Run binding for an exact DSH Session after reload', async () => {
+    const root = ledgerRoot('run-binding-by-session')
+    const first = await mountEvolution(root)
+    const bindingInput = {
+      goalRef: 'goal:session-index',
+      taskRef: 'task:session-index',
+      sessionId: 'session:session-index',
+      scopeKey: 'project:tianwen/capability:session-index',
+      acceptanceContract: {
+        source: 'dsh-tool-result' as const,
+        toolName: 'verify_session_index',
+        notMetErrorCode: 'SESSION_INDEX_NOT_MET',
+        gapDisposition: 'observe' as const,
+      },
+    }
+    const publicEventsBefore = first.ctx.tianwenEvolution.listEvents()
+    const receipt = first.ctx.tianwenEvolution.recordRunBinding(bindingInput)
+    const byRun = first.ctx.tianwenEvolution.getRunBinding(receipt.runId)
+    const bySession = first.ctx.tianwenEvolution
+      .getRunBindingBySessionId(bindingInput.sessionId)
+
+    expect(bySession).toEqual(byRun)
+    expect(bySession).not.toBe(byRun)
+    expect(bySession?.acceptanceContract).not.toBe(byRun?.acceptanceContract)
+    expect(first.ctx.tianwenEvolution.listEvents()).toEqual(publicEventsBefore)
+    expect(first.ctx.tianwenEvolution.getRunBindingBySessionId('session:unknown'))
+      .toBeUndefined()
+    expect(() => first.ctx.tianwenEvolution.recordRunBinding({
+      ...bindingInput,
+      taskRef: 'task:changed',
+    })).toThrow(/already bound to another Tianwen Run/i)
+
+    await first.ctx.fiber.dispose()
+    const second = await mountEvolution(root)
+    try {
+      expect(second.ctx.tianwenEvolution
+        .getRunBindingBySessionId(bindingInput.sessionId))
+        .toEqual(byRun)
+      expect(second.ctx.tianwenEvolution.listEvents()).toEqual(publicEventsBefore)
+    } finally {
+      await second.ctx.fiber.dispose()
+    }
+  })
+
   it('keeps internal Skill evaluation protocols out of runtime event reads', async () => {
     const root = ledgerRoot('private-skill-evaluation')
     const mounted = await mountEvolution(root)

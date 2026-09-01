@@ -291,6 +291,12 @@ export class TianwenEvolutionService extends Service {
     return this.state().ledger.getRunBinding(runId)
   }
 
+  getRunBindingBySessionId(
+    sessionId: string,
+  ): TianwenRunBinding | undefined {
+    return this.state().ledger.getRunBindingBySessionId(sessionId)
+  }
+
   recordOutcomeIntake(input: OutcomeIntakeInput): OutcomeIntakeReceipt {
     return this.formalWrite(() =>
       this.state().ledger.recordOutcomeIntake(input))

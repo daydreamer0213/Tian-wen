@@ -1971,6 +1971,13 @@ export class EvolutionLedger {
     return binding === undefined ? undefined : clone(binding)
   }
 
+  getRunBindingBySessionId(sessionId: string): TianwenRunBinding | undefined {
+    const runId = this.#runIdBySession.get(sessionId)
+    if (runId === undefined) return undefined
+    const binding = this.#runBindings.get(runId)
+    return binding === undefined ? undefined : clone(binding)
+  }
+
   recordRunSkillManifest(
     input: RunSkillManifestInput,
   ): RunSkillManifestReceipt {
