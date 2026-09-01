@@ -46,6 +46,7 @@ const serverPeerDependencies = {
   '@deepseek-ai/dsh-session': '0.1.1-rc.2',
   '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.1-rc.2',
   '@deepseek-ai/dsh-skill': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-subagent': '0.1.1-rc.2',
   '@deepseek-ai/dsh-system-prompt': '0.1.1-rc.2',
   '@deepseek-ai/dsh-tools': '0.1.1-rc.2',
 } as const
@@ -83,6 +84,7 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/learning-clue-status.ts',
     'src/long-goal-host.ts',
     'src/long-goal-planner.ts',
+    'src/long-goal-subagent.ts',
     'src/long-goal.ts',
     'src/settled-task-result.ts',
     'src/status.ts',
@@ -168,6 +170,7 @@ function isAllowedGoalFirstRunnerInput(input: string): boolean {
     'src/learning-clue-status.ts',
     'src/long-goal-host.ts',
     'src/long-goal-planner.ts',
+    'src/long-goal-subagent.ts',
     'src/long-goal.ts',
     'src/settled-task-result.ts',
   ].includes(path) || isAllowedStatusInput(path) || [
@@ -479,7 +482,7 @@ describe('@tianwen/runtime-bundle', () => {
       version: string
     }
     expect(runtimeManifest.name).toBe('@tianwen/runtime-bundle')
-    expect(runtimeManifest.version).toBe('0.1.9')
+    expect(runtimeManifest.version).toBe('0.1.10')
     expect(runtimeManifest).not.toHaveProperty('private')
     expect(runtimeManifest.bin).toEqual({ tianwen: 'dist/cli.js' })
     expect(runtimeManifest.dependencies ?? {}).toEqual({})
@@ -667,7 +670,7 @@ describe('@tianwen/runtime-bundle', () => {
         dependencies: {
           '@deepseek-ai/dsh-base': '0.1.1-rc.2',
           '@deepseek-ai/dsh-headless': '0.1.1-rc.2',
-          '@tianwen/runtime-bundle': '0.1.9',
+          '@tianwen/runtime-bundle': '0.1.10',
         },
         dsh: {
           profile: {
@@ -941,6 +944,7 @@ describe('@tianwen/runtime-bundle', () => {
       '@deepseek-ai/dsh-session',
       '@deepseek-ai/dsh-session-persistence-jsonl',
       '@deepseek-ai/dsh-skill',
+      '@deepseek-ai/dsh-subagent',
       '@deepseek-ai/dsh-tools',
     ])
     expect(Object.keys(metafile.inputs).filter(input =>
@@ -1144,7 +1148,7 @@ describe('@tianwen/runtime-bundle', () => {
   it('packs only the deployable runtime bundle files', () => {
     mkdirSync(packFixtureBase, { recursive: true })
     const packRoot = mkdtempSync(join(packFixtureBase, 'pack-'))
-    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.1.9.tgz')
+    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.1.10.tgz')
     const pnpmEntry = resolve(dirname(process.execPath), 'node_modules/corepack/dist/pnpm.js')
     try {
       execFileSync(process.execPath, [

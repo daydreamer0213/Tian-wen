@@ -103,7 +103,7 @@ export function preflightControlledLifecycle(
   const runtimeRoot = join(
     profileRoot, 'node_modules', '@tianwen', 'runtime-bundle',
   )
-  const archivePath = join(dataDir, 'packs', 'tianwen-runtime-bundle-0.1.9.tgz')
+  const archivePath = join(dataDir, 'packs', 'tianwen-runtime-bundle-0.1.10.tgz')
   const receiptPath = join(dataDir, 'receipts', 'tianwen-install.json')
   const cliPath = join(runtimeRoot, 'dist', 'cli.js')
   const runtimePath = join(runtimeRoot, 'dist', 'runtime.js')
@@ -112,7 +112,7 @@ export function preflightControlledLifecycle(
   ) as unknown)
   if (
     runtimeManifest.name !== '@tianwen/runtime-bundle' ||
-    runtimeManifest.version !== '0.1.9' ||
+    runtimeManifest.version !== '0.1.10' ||
     record(runtimeManifest.bin).tianwen !== 'dist/cli.js'
   ) throw new TypeError('installed Tianwen Runtime Bundle is invalid')
   for (const path of [cliPath, runtimePath, archivePath]) {
@@ -134,7 +134,7 @@ export function preflightControlledLifecycle(
   if (
     dependencies['@deepseek-ai/dsh-base'] !== '0.1.1-rc.2' ||
     dependencies['@deepseek-ai/dsh-headless'] !== '0.1.1-rc.2' ||
-    dependencies['@tianwen/runtime-bundle'] !== '0.1.9' ||
+    dependencies['@tianwen/runtime-bundle'] !== '0.1.10' ||
     !lstatSync(join(profileRoot, 'cordis.patch.yml')).isFile() ||
     !lstatSync(join(profileRoot, 'node_modules', '.bin')).isDirectory()
   ) throw new TypeError('installed Tianwen Profile is incomplete')
