@@ -900,6 +900,14 @@ describe('goal-first long Goal v2 records', () => {
       const limited = appendTianwenAttemptPermissionLimited({
         stateRoot, longGoalId: record.id, expectedRevision: 3, taskId, epoch: 1, terminalEventId: 'limited-1',
       })
+      expect(() => appendTianwenAttemptStarted({
+        ...base, expectedRevision: 4, epoch: 2, permissionFingerprint: 'sha256:wider',
+        startedAt: '2026-09-01T00:01:00.000Z',
+      })).toThrow('child Session id')
+      expect(() => appendTianwenAttemptStarted({
+        ...base, expectedRevision: 4, epoch: 2, childSessionId: 'child-invariant-2',
+        startedAt: '2026-09-01T00:01:00.000Z',
+      })).toThrow('permission fingerprint')
       const renewed = appendTianwenAttemptStarted({
         ...base, expectedRevision: 4, epoch: 2, childSessionId: 'child-invariant-2', permissionFingerprint: 'sha256:wider',
         startedAt: '2026-09-01T00:01:00.000Z',
