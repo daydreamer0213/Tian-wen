@@ -28,10 +28,13 @@ import type {
   TianwenRunId,
 } from './outcome-intake.js'
 import type {
+  LearningAnalysisConsent,
+  LearningAnalysisConsentInput,
+  LearningAnalysisConsentReceipt,
   LearningIntakeInput,
   LearningIntakeReceipt,
   LearningIntakeStatus,
-  LearningSignal,
+  LearningSignalStatus,
   LearningTicket,
   LearningTicketFeedback,
   LearningTicketId,
@@ -230,6 +233,35 @@ export class TianwenEvolutionService extends Service {
   recordLearningIntake(input: LearningIntakeInput): LearningIntakeReceipt {
     return this.formalWrite(() =>
       this.state().ledger.recordLearningIntake(input))
+  }
+
+  recordLearningFeedbackRevision(input: {
+    readonly intake: LearningIntakeInput
+    readonly supersedesFeedbackVersion?: string
+    readonly analysisConsentRevision?: number
+  }): LearningIntakeReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningFeedbackRevision(input))
+  }
+
+  recordLearningFeedbackRetraction(input: {
+    readonly sessionId: string
+    readonly messageId: string
+    readonly retractedFeedbackVersion: string
+  }): { readonly duplicate: boolean } {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningFeedbackRetraction(input))
+  }
+
+  recordLearningAnalysisConsent(
+    input: LearningAnalysisConsentInput,
+  ): LearningAnalysisConsentReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisConsent(input))
+  }
+
+  getLearningAnalysisConsent(): LearningAnalysisConsent | undefined {
+    return this.state().ledger.getLearningAnalysisConsent()
   }
 
   getLearningIntakeStatus(
@@ -568,7 +600,9 @@ export class TianwenEvolutionService extends Service {
     return this.state().ledger.listSkillCandidates()
   }
 
-  listLearningSignals(): readonly (LearningSignal | OutcomeLearningSignal)[] {
+  listLearningSignals(): readonly (
+    LearningSignalStatus | OutcomeLearningSignal
+  )[] {
     return this.state().ledger.listLearningSignals()
   }
 

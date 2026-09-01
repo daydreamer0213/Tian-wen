@@ -21,12 +21,18 @@ import {
   sha256,
 } from './learning-intake.js'
 import type {
+  LearningAnalysisConsent,
+  LearningAnalysisConsentInput,
+  LearningAnalysisConsentReceipt,
+  LearningAnalysisConsentRecordedEvent,
+  LearningFeedbackRetractedEvent,
   LearningIntakeInput,
+  LearningIntakeLedgerEvent,
   LearningIntakeReceipt,
-  LearningIntakeRecordedEvent,
   LearningIntakeStatus,
   LearningSignal,
   LearningSignalId,
+  LearningSignalStatus,
   LearningTicket,
   LearningTicketFeedback,
   LearningTicketId,
@@ -289,7 +295,9 @@ export interface RecoveryFailedEvent {
 }
 
 export type LedgerEvent =
-  | LearningIntakeRecordedEvent
+  | LearningIntakeLedgerEvent
+  | LearningFeedbackRetractedEvent
+  | LearningAnalysisConsentRecordedEvent
   | RunBindingRecordedEvent
   | OutcomeIntakeRecordedEvent
   | RunSkillManifestRecordedEvent
@@ -667,13 +675,16 @@ function parseLearningSignal(value: unknown): LearningSignal {
 function parseLearningEvent(
   value: Record<string, unknown>,
   at: string,
-): LearningIntakeRecordedEvent {
+): LearningIntakeLedgerEvent {
+  const v2 = value.schemaVersion === 'tianwen.learning-intake.v2'
   exactKeys(
     value,
     ['schemaVersion', 'type', 'at', 'input', 'inputDigest', 'receipt'],
-    ['signal'],
+    v2
+      ? ['supersedesFeedbackVersion', 'analysisConsentRevision', 'signal']
+      : ['signal'],
   )
-  if (value.schemaVersion !== 'tianwen.learning-intake.v1') {
+  if (!v2 && value.schemaVersion !== 'tianwen.learning-intake.v1') {
     throw new LedgerIntegrityError('invalid learning intake schema version')
   }
   const input = parseLearningInput(value.input)
@@ -716,14 +727,127 @@ function parseLearningEvent(
     }
   }
 
-  return {
-    schemaVersion: 'tianwen.learning-intake.v1',
-    type: 'learning-intake-recorded',
+  const base = {
+    type: 'learning-intake-recorded' as const,
     at,
     input,
     inputDigest,
     receipt,
     ...(signal === undefined ? {} : { signal }),
+  }
+  if (!v2) {
+    return {
+      schemaVersion: 'tianwen.learning-intake.v1',
+      ...base,
+    }
+  }
+  const supersedesFeedbackVersion = value.supersedesFeedbackVersion === undefined
+    ? undefined
+    : requireString(
+        value.supersedesFeedbackVersion,
+        'supersedesFeedbackVersion',
+      )
+  const analysisConsentRevision = value.analysisConsentRevision
+  if (
+    analysisConsentRevision !== undefined
+    && (
+      typeof analysisConsentRevision !== 'number'
+      || !Number.isInteger(analysisConsentRevision)
+      || analysisConsentRevision < 1
+    )
+  ) {
+    throw new LedgerIntegrityError(
+      'analysisConsentRevision must be a positive integer',
+    )
+  }
+  return {
+    schemaVersion: 'tianwen.learning-intake.v2',
+    ...base,
+    ...(supersedesFeedbackVersion === undefined
+      ? {}
+      : { supersedesFeedbackVersion }),
+    ...(analysisConsentRevision === undefined
+      ? {}
+      : { analysisConsentRevision }),
+  }
+}
+
+function parseLearningFeedbackRetractionEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningFeedbackRetractedEvent {
+  exactKeys(value, [
+    'schemaVersion',
+    'type',
+    'at',
+    'sessionId',
+    'messageId',
+    'retractedFeedbackVersion',
+  ])
+  if (value.schemaVersion !== 'tianwen.learning-feedback-retracted.v1') {
+    throw new LedgerIntegrityError('invalid learning retraction schema version')
+  }
+  return {
+    schemaVersion: 'tianwen.learning-feedback-retracted.v1',
+    type: 'learning-feedback-retracted',
+    at,
+    sessionId: requireString(value.sessionId, 'sessionId'),
+    messageId: requireString(value.messageId, 'messageId'),
+    retractedFeedbackVersion: requireString(
+      value.retractedFeedbackVersion,
+      'retractedFeedbackVersion',
+    ),
+  }
+}
+
+function parseLearningAnalysisConsent(
+  value: unknown,
+): LearningAnalysisConsent {
+  if (!isRecord(value)) {
+    throw new LedgerIntegrityError('learning analysis consent must be an object')
+  }
+  exactKeys(value, [
+    'revision',
+    'enabled',
+    'policyVersion',
+    'recordedAt',
+  ])
+  if (!Number.isInteger(value.revision) || Number(value.revision) < 1) {
+    throw new LedgerIntegrityError('consent revision must be a positive integer')
+  }
+  if (typeof value.enabled !== 'boolean') {
+    throw new LedgerIntegrityError('consent enabled must be a boolean')
+  }
+  if (value.policyVersion !== 'tianwen-auto-analysis.v1') {
+    throw new LedgerIntegrityError('invalid learning analysis consent policy')
+  }
+  return {
+    revision: Number(value.revision),
+    enabled: value.enabled,
+    policyVersion: 'tianwen-auto-analysis.v1',
+    recordedAt: requireTimestamp(value.recordedAt),
+  }
+}
+
+function parseLearningAnalysisConsentEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningAnalysisConsentRecordedEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'consent'])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-consent.v1') {
+    throw new LedgerIntegrityError('invalid learning analysis consent schema')
+  }
+  const consent = parseLearningAnalysisConsent(value.consent)
+  if (consent.recordedAt !== at) {
+    throw new LedgerIntegrityError(
+      'learning analysis consent timestamp disagrees with its event',
+    )
+  }
+  return {
+    schemaVersion: 'tianwen.learning-analysis-consent.v1',
+    type: 'learning-analysis-consent-recorded',
+    at,
+    consent,
   }
 }
 
@@ -877,6 +1001,12 @@ function parseEvent(value: unknown): LedgerEvent {
   const at = requireTimestamp(value.at)
   if (type === 'learning-intake-recorded') {
     return parseLearningEvent(value, at)
+  }
+  if (type === 'learning-feedback-retracted') {
+    return parseLearningFeedbackRetractionEvent(value, at)
+  }
+  if (type === 'learning-analysis-consent-recorded') {
+    return parseLearningAnalysisConsentEvent(value, at)
   }
   if (type === 'run-binding-recorded') {
     exactKeys(value, [
@@ -1625,6 +1755,26 @@ function isOutcomeSignal(
   return 'runId' in signal
 }
 
+function learningRetractionKey(input: {
+  readonly sessionId: string
+  readonly messageId: string
+  readonly retractedFeedbackVersion: string
+}): Sha256Digest {
+  return sha256({
+    sessionId: input.sessionId,
+    messageId: input.messageId,
+    retractedFeedbackVersion: input.retractedFeedbackVersion,
+  })
+}
+
+type LearningRevisionWrite =
+  | { readonly schemaVersion: 'tianwen.learning-intake.v1' }
+  | {
+    readonly schemaVersion: 'tianwen.learning-intake.v2'
+    readonly supersedesFeedbackVersion?: string
+    readonly analysisConsentRevision?: number
+  }
+
 export class EvolutionLedger {
   readonly #root: string
   readonly #artifactsRoot: string
@@ -1636,12 +1786,21 @@ export class EvolutionLedger {
   readonly #runIdBySession = new Map<string, TianwenRunId>()
   readonly #learningIntakes = new Map<
     Sha256Digest,
-    LearningIntakeRecordedEvent
+    LearningIntakeLedgerEvent
   >()
   readonly #learningIntakeStatuses = new Map<
     string,
     Map<string, LearningIntakeStatus>
   >()
+  readonly #learningRetractions = new Map<
+    Sha256Digest,
+    LearningFeedbackRetractedEvent
+  >()
+  readonly #learningAnalysisConsents = new Map<
+    number,
+    LearningAnalysisConsent
+  >()
+  #learningAnalysisConsent: LearningAnalysisConsent | undefined
   readonly #outcomeIntakes = new Map<
     Sha256Digest,
     OutcomeIntakeRecordedEvent
@@ -1754,6 +1913,7 @@ export class EvolutionLedger {
     LearningSignalId,
     LearningSignal | OutcomeLearningSignal
   >()
+  readonly #inactiveLearningSignals = new Set<LearningSignalId>()
   readonly #learningTickets = new Map<LearningTicketId, LearningTicket>()
   readonly #artifacts = new Map<ArtifactId, ArtifactVersion>()
   readonly #evaluations = new Map<ArtifactId, EvaluationRecord>()
@@ -3060,11 +3220,49 @@ export class EvolutionLedger {
   }
 
   recordLearningIntake(input: LearningIntakeInput): LearningIntakeReceipt {
+    return this.#recordLearningRevision(input, {
+      schemaVersion: 'tianwen.learning-intake.v1',
+    })
+  }
+
+  recordLearningFeedbackRevision(input: {
+    readonly intake: LearningIntakeInput
+    readonly supersedesFeedbackVersion?: string
+    readonly analysisConsentRevision?: number
+  }): LearningIntakeReceipt {
+    return this.#recordLearningRevision(input.intake, {
+      schemaVersion: 'tianwen.learning-intake.v2',
+      ...(input.supersedesFeedbackVersion === undefined
+        ? {}
+        : { supersedesFeedbackVersion: input.supersedesFeedbackVersion }),
+      ...(input.analysisConsentRevision === undefined
+        ? {}
+        : { analysisConsentRevision: input.analysisConsentRevision }),
+    })
+  }
+
+  #recordLearningRevision(
+    input: LearningIntakeInput,
+    revision: LearningRevisionWrite,
+  ): LearningIntakeReceipt {
     const parsedInput = parseLearningInput(input)
     const prepared = prepareLearningIntake(parsedInput)
     const existing = this.#learningIntakes.get(prepared.ingestionId)
     if (existing !== undefined) {
-      if (existing.inputDigest !== prepared.inputDigest) {
+      if (
+        existing.schemaVersion !== revision.schemaVersion
+        || existing.inputDigest !== prepared.inputDigest
+        || (
+          revision.schemaVersion === 'tianwen.learning-intake.v2'
+          && existing.schemaVersion === 'tianwen.learning-intake.v2'
+          && (
+            existing.supersedesFeedbackVersion
+              !== revision.supersedesFeedbackVersion
+            || existing.analysisConsentRevision
+              !== revision.analysisConsentRevision
+          )
+        )
+      ) {
         throw new LedgerIntegrityError(
           `learning ingestion replay changed content: ${prepared.ingestionId}`,
         )
@@ -3103,16 +3301,88 @@ export class EvolutionLedger {
           }
         : {}),
     }
-    this.#accept({
-      schemaVersion: 'tianwen.learning-intake.v1',
-      type: 'learning-intake-recorded',
+    const event = {
+      type: 'learning-intake-recorded' as const,
       at: this.#now(),
       input: parsedInput,
       inputDigest: prepared.inputDigest,
       receipt,
       ...(signal === undefined ? {} : { signal }),
-    })
+    }
+    this.#accept(revision.schemaVersion === 'tianwen.learning-intake.v1'
+      ? { schemaVersion: revision.schemaVersion, ...event }
+      : {
+          schemaVersion: revision.schemaVersion,
+          ...event,
+          ...(revision.supersedesFeedbackVersion === undefined
+            ? {}
+            : {
+                supersedesFeedbackVersion:
+                  revision.supersedesFeedbackVersion,
+              }),
+          ...(revision.analysisConsentRevision === undefined
+            ? {}
+            : { analysisConsentRevision: revision.analysisConsentRevision }),
+        })
     return { ...receipt, duplicate: false }
+  }
+
+  recordLearningFeedbackRetraction(input: {
+    readonly sessionId: string
+    readonly messageId: string
+    readonly retractedFeedbackVersion: string
+  }): { readonly duplicate: boolean } {
+    const parsed = {
+      sessionId: requireString(input.sessionId, 'sessionId'),
+      messageId: requireString(input.messageId, 'messageId'),
+      retractedFeedbackVersion: requireString(
+        input.retractedFeedbackVersion,
+        'retractedFeedbackVersion',
+      ),
+    }
+    const key = learningRetractionKey(parsed)
+    if (this.#learningRetractions.has(key)) {
+      return { duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-feedback-retracted.v1',
+      type: 'learning-feedback-retracted',
+      at: this.#now(),
+      ...parsed,
+    })
+    return { duplicate: false }
+  }
+
+  recordLearningAnalysisConsent(
+    input: LearningAnalysisConsentInput,
+  ): LearningAnalysisConsentReceipt {
+    const existing = this.#learningAnalysisConsents.get(input.revision)
+    if (existing !== undefined) {
+      if (
+        existing.enabled !== input.enabled
+        || existing.policyVersion !== input.policyVersion
+      ) {
+        throw new LedgerIntegrityError(
+          `learning analysis consent revision changed content: ${input.revision}`,
+        )
+      }
+      return { ...existing, duplicate: true }
+    }
+    const recordedAt = this.#now()
+    const consent = parseLearningAnalysisConsent({ ...input, recordedAt })
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-consent.v1',
+      type: 'learning-analysis-consent-recorded',
+      at: recordedAt,
+      consent,
+    })
+    return { ...consent, duplicate: false }
+  }
+
+  getLearningAnalysisConsent(): LearningAnalysisConsent | undefined {
+    return this.#learningAnalysisConsent === undefined
+      ? undefined
+      : clone(this.#learningAnalysisConsent)
   }
 
   getLearningIntakeStatus(
@@ -3145,6 +3415,7 @@ export class EvolutionLedger {
         throw new LedgerIntegrityError(`Learning Ticket Signal is invalid: ${signalId}`)
       }
       if (isOutcomeSignal(signal)) continue
+      if (this.#inactiveLearningSignals.has(signal.signalId)) continue
 
       const event = this.#learningIntakes.get(signal.ingestionId)
       const prepared = event === undefined ? undefined : prepareLearningIntake(event.input)
@@ -3181,8 +3452,16 @@ export class EvolutionLedger {
       : clone({ ticketId: ticket.ticketId, scopeKey, latest })
   }
 
-  listLearningSignals(): readonly (LearningSignal | OutcomeLearningSignal)[] {
-    return clone([...this.#learningSignals.values()])
+  listLearningSignals(): readonly (
+    LearningSignalStatus | OutcomeLearningSignal
+  )[] {
+    return clone([...this.#learningSignals.values()].map(signal =>
+      isOutcomeSignal(signal)
+        ? signal
+        : {
+            ...signal,
+            active: !this.#inactiveLearningSignals.has(signal.signalId),
+          }))
   }
 
   listLearningTickets(): readonly LearningTicket[] {
@@ -3468,6 +3747,22 @@ export class EvolutionLedger {
 
   #now(): string {
     return requireTimestamp(this.#clock())
+  }
+
+  #refreshLearningTicket(ticketId: LearningTicketId | undefined): void {
+    if (ticketId === undefined) return
+    const ticket = this.#learningTickets.get(ticketId)
+    if (ticket === undefined) return
+    const supported = ticket.signalIds.some(signalId => {
+      const signal = this.#learningSignals.get(signalId)
+      return signal !== undefined
+        && (isOutcomeSignal(signal)
+          || !this.#inactiveLearningSignals.has(signal.signalId))
+    })
+    this.#learningTickets.set(ticketId, {
+      ...ticket,
+      status: supported ? 'open' : 'unsupported',
+    })
   }
 
   #sourcePath(digest: Sha256Digest): string {
@@ -4788,6 +5083,31 @@ export class EvolutionLedger {
           `duplicate learning ingestion: ${event.receipt.ingestionId}`,
         )
       }
+      if (event.schemaVersion === 'tianwen.learning-intake.v2') {
+        const current = this.#learningIntakeStatuses
+          .get(event.input.sessionId)
+          ?.get(event.input.messageId)
+        const expectedPredecessor = current?.state === 'active'
+          ? current.feedbackVersion
+          : undefined
+        if (event.supersedesFeedbackVersion !== expectedPredecessor) {
+          throw new LedgerIntegrityError(
+            'learning feedback supersession disagrees with current revision',
+          )
+        }
+        if (
+          event.analysisConsentRevision !== undefined
+          && (
+            this.#learningAnalysisConsent?.revision
+              !== event.analysisConsentRevision
+            || !this.#learningAnalysisConsent.enabled
+          )
+        ) {
+          throw new LedgerIntegrityError(
+            'learning feedback references consent that is not currently enabled',
+          )
+        }
+      }
       if (event.signal === undefined) {
         return
       }
@@ -4810,6 +5130,42 @@ export class EvolutionLedger {
       ) {
         throw new LedgerIntegrityError(
           `LearningTicket merge disagrees with history: ${ticketId}`,
+        )
+      }
+      return
+    }
+    if (event.type === 'learning-feedback-retracted') {
+      const key = learningRetractionKey(event)
+      const current = this.#learningIntakeStatuses
+        .get(event.sessionId)
+        ?.get(event.messageId)
+      if (this.#learningRetractions.has(key)) {
+        throw new LedgerIntegrityError(
+          `duplicate learning feedback retraction: ${key}`,
+        )
+      }
+      if (
+        current?.state !== 'active'
+        || current.feedbackVersion !== event.retractedFeedbackVersion
+      ) {
+        throw new LedgerIntegrityError(
+          'learning feedback retraction disagrees with current revision',
+        )
+      }
+      return
+    }
+    if (event.type === 'learning-analysis-consent-recorded') {
+      if (this.#learningAnalysisConsents.has(event.consent.revision)) {
+        throw new LedgerIntegrityError(
+          `duplicate learning analysis consent revision: ${event.consent.revision}`,
+        )
+      }
+      if (
+        event.consent.revision
+          !== (this.#learningAnalysisConsent?.revision ?? 0) + 1
+      ) {
+        throw new LedgerIntegrityError(
+          'learning analysis consent revision must increment by one',
         )
       }
       return
@@ -5121,15 +5477,23 @@ export class EvolutionLedger {
           status: 'open',
           signalIds,
         })
+        this.#refreshLearningTicket(ticketId)
         return
       }
       this.#learningTickets.set(ticketId, {
         ...ticket!,
         signalIds: [...ticket!.signalIds, event.signal.signalId],
       })
+      this.#refreshLearningTicket(ticketId)
       return
     }
     if (event.type === 'learning-intake-recorded') {
+      const previous = this.#learningIntakeStatuses
+        .get(event.input.sessionId)
+        ?.get(event.input.messageId)
+      if (previous?.state === 'active' && previous.signalId !== undefined) {
+        this.#inactiveLearningSignals.add(previous.signalId)
+      }
       this.#learningIntakes.set(event.receipt.ingestionId, event)
       let statuses = this.#learningIntakeStatuses.get(event.input.sessionId)
       if (statuses === undefined) {
@@ -5137,8 +5501,10 @@ export class EvolutionLedger {
         this.#learningIntakeStatuses.set(event.input.sessionId, statuses)
       }
       statuses.set(event.input.messageId, {
+        state: 'active',
         sessionId: event.input.sessionId,
         messageId: event.input.messageId,
+        feedbackVersion: event.input.feedbackVersion,
         scopeKey: event.input.scopeKey,
         rating: event.input.rating,
         feedbackFingerprint: learningFeedbackFingerprint(
@@ -5149,9 +5515,11 @@ export class EvolutionLedger {
         ...event.receipt,
       })
       if (event.signal === undefined) {
+        this.#refreshLearningTicket(previous?.ticketId)
         return
       }
       this.#learningSignals.set(event.signal.signalId, event.signal)
+      this.#inactiveLearningSignals.delete(event.signal.signalId)
       const ticketId = event.receipt.ticketId!
       const ticket = this.#learningTickets.get(ticketId)
       this.#learningTickets.set(ticketId, ticket === undefined
@@ -5165,6 +5533,27 @@ export class EvolutionLedger {
             ...ticket,
             signalIds: [...ticket.signalIds, event.signal.signalId],
           })
+      this.#refreshLearningTicket(previous?.ticketId)
+      this.#refreshLearningTicket(ticketId)
+      return
+    }
+    if (event.type === 'learning-feedback-retracted') {
+      this.#learningRetractions.set(learningRetractionKey(event), event)
+      const statuses = this.#learningIntakeStatuses.get(event.sessionId)!
+      const current = statuses.get(event.messageId)!
+      statuses.set(event.messageId, { ...current, state: 'retracted' })
+      if (current.signalId !== undefined) {
+        this.#inactiveLearningSignals.add(current.signalId)
+      }
+      this.#refreshLearningTicket(current.ticketId)
+      return
+    }
+    if (event.type === 'learning-analysis-consent-recorded') {
+      this.#learningAnalysisConsents.set(
+        event.consent.revision,
+        event.consent,
+      )
+      this.#learningAnalysisConsent = event.consent
       return
     }
     if (event.type === 'artifact-recorded') {

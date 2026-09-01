@@ -51,10 +51,14 @@ export interface LearningSignal {
   readonly evidenceIds: readonly Sha256Digest[]
 }
 
+export interface LearningSignalStatus extends LearningSignal {
+  readonly active: boolean
+}
+
 export interface LearningTicket {
   readonly ticketId: LearningTicketId
   readonly problemFingerprint: Sha256Digest
-  readonly status: 'open'
+  readonly status: 'open' | 'unsupported'
   readonly signalIds: readonly LearningSignalId[]
 }
 
@@ -84,8 +88,10 @@ export interface LearningIntakeReceipt {
 /** Sanitized latest intake projection for product status surfaces. */
 export interface LearningIntakeStatus
   extends Omit<LearningIntakeReceipt, 'duplicate'> {
+  readonly state: 'active' | 'retracted'
   readonly sessionId: string
   readonly messageId: string
+  readonly feedbackVersion: string
   readonly scopeKey: string
   readonly rating: 'positive' | 'negative'
   readonly feedbackFingerprint: Sha256Digest
@@ -105,6 +111,52 @@ export interface LearningIntakeRecordedEvent {
   readonly inputDigest: Sha256Digest
   readonly receipt: Omit<LearningIntakeReceipt, 'duplicate'>
   readonly signal?: LearningSignal
+}
+
+export interface LearningIntakeRecordedV2Event {
+  readonly schemaVersion: 'tianwen.learning-intake.v2'
+  readonly type: 'learning-intake-recorded'
+  readonly at: string
+  readonly input: LearningIntakeInput
+  readonly inputDigest: Sha256Digest
+  readonly receipt: Omit<LearningIntakeReceipt, 'duplicate'>
+  readonly supersedesFeedbackVersion?: string
+  readonly analysisConsentRevision?: number
+  readonly signal?: LearningSignal
+}
+
+export type LearningIntakeLedgerEvent =
+  | LearningIntakeRecordedEvent
+  | LearningIntakeRecordedV2Event
+
+export interface LearningFeedbackRetractedEvent {
+  readonly schemaVersion: 'tianwen.learning-feedback-retracted.v1'
+  readonly type: 'learning-feedback-retracted'
+  readonly at: string
+  readonly sessionId: string
+  readonly messageId: string
+  readonly retractedFeedbackVersion: string
+}
+
+export interface LearningAnalysisConsentInput {
+  readonly revision: number
+  readonly enabled: boolean
+  readonly policyVersion: 'tianwen-auto-analysis.v1'
+}
+
+export interface LearningAnalysisConsent extends LearningAnalysisConsentInput {
+  readonly recordedAt: string
+}
+
+export interface LearningAnalysisConsentReceipt extends LearningAnalysisConsent {
+  readonly duplicate: boolean
+}
+
+export interface LearningAnalysisConsentRecordedEvent {
+  readonly schemaVersion: 'tianwen.learning-analysis-consent.v1'
+  readonly type: 'learning-analysis-consent-recorded'
+  readonly at: string
+  readonly consent: LearningAnalysisConsent
 }
 
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/

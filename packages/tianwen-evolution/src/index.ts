@@ -7,6 +7,8 @@ type PublicLedgerEventPrivacyContract = AssertNever<Extract<
   {
     type:
       | 'learning-intake-recorded'
+      | 'learning-feedback-retracted'
+      | 'learning-analysis-consent-recorded'
       | 'run-binding-recorded'
       | 'outcome-intake-recorded'
       | 'run-skill-manifest-recorded'
@@ -61,12 +63,16 @@ export {
   sha256,
 } from './learning-intake.js'
 export type {
+  LearningAnalysisConsent,
+  LearningAnalysisConsentInput,
+  LearningAnalysisConsentReceipt,
   LearningIntakeInput,
   LearningIntakeReceipt,
   LearningIntakeStatus,
   MessageLearningState,
   LearningSignal,
   LearningSignalId,
+  LearningSignalStatus,
   LearningTicket,
   LearningTicketFeedback,
   LearningTicketId,

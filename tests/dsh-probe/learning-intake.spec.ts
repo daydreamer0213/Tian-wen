@@ -119,6 +119,331 @@ describe('Tianwen learning intake domain', () => {
 })
 
 describe('Tianwen learning intake ledger', () => {
+  it('records an initial feedback revision as one active v2 snapshot', () => {
+    const root = ledgerRoot('revision-v2')
+    const ledger = new EvolutionLedger(root, {
+      clock: () => '2026-09-01T00:00:00.000Z',
+    })
+
+    const receipt = ledger.recordLearningFeedbackRevision({ intake: base })
+
+    expect(receipt).toMatchObject({
+      decision: 'ticket-created',
+      duplicate: false,
+    })
+    expect(ledger.getLearningIntakeStatus(base.sessionId, base.messageId))
+      .toMatchObject({
+        state: 'active',
+        feedbackVersion: base.feedbackVersion,
+        signalId: receipt.signalId,
+      })
+    const lines = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+      .trimEnd()
+      .split('\n')
+    expect(lines).toHaveLength(1)
+    expect(JSON.parse(lines[0]!)).toMatchObject({
+      schemaVersion: 'tianwen.learning-intake.v2',
+      type: 'learning-intake-recorded',
+      input: base,
+      receipt: {
+        ingestionId: receipt.ingestionId,
+      },
+    })
+  })
+
+  it('atomically supersedes a revision and rejects contradictory replay', () => {
+    const root = ledgerRoot('revision-supersedes')
+    const ledger = new EvolutionLedger(root, {
+      clock: () => '2026-09-01T00:00:00.000Z',
+    })
+    const first = ledger.recordLearningFeedbackRevision({ intake: base })
+    const changed = {
+      ...base,
+      feedbackVersion: '22222222-2222-4222-8222-222222222222',
+      note: 'Keep feedback attached to its exact message.',
+    }
+
+    const second = ledger.recordLearningFeedbackRevision({
+      intake: changed,
+      supersedesFeedbackVersion: base.feedbackVersion,
+    })
+
+    expect(second).toMatchObject({
+      decision: 'ticket-created',
+      duplicate: false,
+    })
+    expect(ledger.getLearningIntakeStatus(base.sessionId, base.messageId))
+      .toMatchObject({
+        state: 'active',
+        feedbackVersion: changed.feedbackVersion,
+        ingestionId: second.ingestionId,
+      })
+    expect(ledger.listLearningSignals()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ signalId: first.signalId, active: false }),
+      expect.objectContaining({ signalId: second.signalId, active: true }),
+    ]))
+    expect(ledger.listLearningTickets()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ticketId: first.ticketId, status: 'unsupported' }),
+      expect.objectContaining({ ticketId: second.ticketId, status: 'open' }),
+    ]))
+
+    const linesBeforeReplay = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+      .trimEnd()
+      .split('\n')
+    expect(linesBeforeReplay).toHaveLength(2)
+    expect(JSON.parse(linesBeforeReplay[1]!)).toMatchObject({
+      schemaVersion: 'tianwen.learning-intake.v2',
+      input: changed,
+      supersedesFeedbackVersion: base.feedbackVersion,
+    })
+    expect(ledger.recordLearningFeedbackRevision({
+      intake: changed,
+      supersedesFeedbackVersion: base.feedbackVersion,
+    })).toMatchObject({ duplicate: true })
+    expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+      .trimEnd()
+      .split('\n')).toHaveLength(2)
+    expect(() => ledger.recordLearningFeedbackRevision({
+      intake: { ...changed, note: 'Contradictory private note' },
+      supersedesFeedbackVersion: base.feedbackVersion,
+    })).toThrow(LedgerIntegrityError)
+    expect(() => ledger.recordLearningFeedbackRevision({
+      intake: changed,
+      supersedesFeedbackVersion: 'wrong-predecessor',
+    })).toThrow(LedgerIntegrityError)
+
+    const positive = {
+      ...base,
+      feedbackVersion: '33333333-3333-4333-8333-333333333333',
+      rating: 'positive' as const,
+      note: undefined,
+    }
+    expect(() => ledger.recordLearningFeedbackRevision({ intake: positive }))
+      .toThrow(LedgerIntegrityError)
+    ledger.recordLearningFeedbackRevision({
+      intake: positive,
+      supersedesFeedbackVersion: changed.feedbackVersion,
+    })
+    expect(ledger.getLearningIntakeStatus(base.sessionId, base.messageId))
+      .toMatchObject({
+        state: 'active',
+        rating: 'positive',
+        feedbackVersion: positive.feedbackVersion,
+      })
+    expect(ledger.listLearningTickets()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ticketId: second.ticketId, status: 'unsupported' }),
+    ]))
+  })
+
+  it('retracts only the exact current revision and recomputes active support', () => {
+    const root = ledgerRoot('revision-retraction')
+    const ledger = new EvolutionLedger(root, {
+      clock: () => '2026-09-01T00:00:00.000Z',
+    })
+    const first = ledger.recordLearningFeedbackRevision({ intake: base })
+    const other = {
+      ...base,
+      messageId: 'message-2',
+      feedbackVersion: '22222222-2222-4222-8222-222222222222',
+      note: 'PRESERVE tool feedback.',
+    }
+    const second = ledger.recordLearningFeedbackRevision({ intake: other })
+
+    expect(ledger.recordLearningFeedbackRetraction({
+      sessionId: base.sessionId,
+      messageId: base.messageId,
+      retractedFeedbackVersion: base.feedbackVersion,
+    })).toEqual({ duplicate: false })
+    expect(ledger.getLearningIntakeStatus(base.sessionId, base.messageId))
+      .toMatchObject({ state: 'retracted', feedbackVersion: base.feedbackVersion })
+    expect(ledger.listLearningSignals()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ signalId: first.signalId, active: false }),
+      expect.objectContaining({ signalId: second.signalId, active: true }),
+    ]))
+    expect(ledger.listLearningTickets()).toMatchObject([{
+      ticketId: first.ticketId,
+      status: 'open',
+      signalIds: [first.signalId, second.signalId],
+    }])
+
+    const lineCount = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+      .trimEnd()
+      .split('\n').length
+    expect(ledger.recordLearningFeedbackRetraction({
+      sessionId: base.sessionId,
+      messageId: base.messageId,
+      retractedFeedbackVersion: base.feedbackVersion,
+    })).toEqual({ duplicate: true })
+    expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+      .trimEnd()
+      .split('\n')).toHaveLength(lineCount)
+    expect(() => ledger.recordLearningFeedbackRetraction({
+      sessionId: base.sessionId,
+      messageId: other.messageId,
+      retractedFeedbackVersion: base.feedbackVersion,
+    })).toThrow(LedgerIntegrityError)
+
+    ledger.recordLearningFeedbackRetraction({
+      sessionId: base.sessionId,
+      messageId: other.messageId,
+      retractedFeedbackVersion: other.feedbackVersion,
+    })
+    expect(ledger.listLearningTickets()).toMatchObject([{
+      ticketId: first.ticketId,
+      status: 'unsupported',
+      signalIds: [first.signalId, second.signalId],
+    }])
+    expect(ledger.getLearningTicketFeedback(first.ticketId!)).toBeUndefined()
+
+    const reloaded = new EvolutionLedger(root)
+    expect(reloaded.listLearningSignals()).toEqual(ledger.listLearningSignals())
+    expect(reloaded.listLearningTickets()).toEqual(ledger.listLearningTickets())
+    expect(reloaded.listLearningIntakeStatuses(base.sessionId))
+      .toEqual(ledger.listLearningIntakeStatuses(base.sessionId))
+    expect(reloaded.listEvents().at(-1)).toMatchObject({
+      schemaVersion: 'tianwen.learning-feedback-retracted.v1',
+      type: 'learning-feedback-retracted',
+      retractedFeedbackVersion: other.feedbackVersion,
+    })
+  })
+
+  it('replays mixed v1 and v2 intakes in ledger order', () => {
+    const root = ledgerRoot('revision-mixed')
+    const ledger = new EvolutionLedger(root, {
+      clock: () => '2026-09-01T00:00:00.000Z',
+    })
+    ledger.recordLearningIntake(base)
+    ledger.recordLearningFeedbackRevision({
+      intake: {
+        ...base,
+        feedbackVersion: '22222222-2222-4222-8222-222222222222',
+        note: 'Second correction.',
+      },
+      supersedesFeedbackVersion: base.feedbackVersion,
+    })
+    ledger.recordLearningIntake({
+      ...base,
+      feedbackVersion: '33333333-3333-4333-8333-333333333333',
+      rating: 'positive',
+      note: undefined,
+    })
+    ledger.recordLearningFeedbackRevision({
+      intake: {
+        ...base,
+        feedbackVersion: '44444444-4444-4444-8444-444444444444',
+        note: 'Fourth correction.',
+      },
+      supersedesFeedbackVersion: '33333333-3333-4333-8333-333333333333',
+    })
+
+    expect(new EvolutionLedger(root).getLearningIntakeStatus(
+      base.sessionId,
+      base.messageId,
+    )).toMatchObject({
+      state: 'active',
+      feedbackVersion: '44444444-4444-4444-8444-444444444444',
+    })
+    expect(new EvolutionLedger(root).listEvents()
+      .map(event => 'schemaVersion' in event ? event.schemaVersion : undefined))
+      .toEqual([
+        'tianwen.learning-intake.v1',
+        'tianwen.learning-intake.v2',
+        'tianwen.learning-intake.v1',
+        'tianwen.learning-intake.v2',
+      ])
+  })
+
+  it('records profile consent revisions with exact replay and reload', () => {
+    const root = ledgerRoot('analysis-consent')
+    let tick = 0
+    const ledger = new EvolutionLedger(root, {
+      clock: () => new Date(Date.UTC(2026, 8, 1, 0, 0, tick++)).toISOString(),
+    })
+    const enabled = ledger.recordLearningAnalysisConsent({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    expect(enabled).toEqual({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+      recordedAt: '2026-09-01T00:00:00.000Z',
+      duplicate: false,
+    })
+    expect(ledger.recordLearningAnalysisConsent({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })).toEqual({ ...enabled, duplicate: true })
+    expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+      .trimEnd()
+      .split('\n')).toHaveLength(1)
+    const disabled = ledger.recordLearningAnalysisConsent({
+      revision: 2,
+      enabled: false,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    expect(ledger.getLearningAnalysisConsent()).toEqual({
+      revision: 2,
+      enabled: false,
+      policyVersion: 'tianwen-auto-analysis.v1',
+      recordedAt: disabled.recordedAt,
+    })
+    expect(() => ledger.recordLearningAnalysisConsent({
+      revision: 1,
+      enabled: false,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })).toThrow(LedgerIntegrityError)
+    expect(() => ledger.recordLearningAnalysisConsent({
+      revision: 4,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })).toThrow(LedgerIntegrityError)
+    expect(new EvolutionLedger(root).getLearningAnalysisConsent())
+      .toEqual(ledger.getLearningAnalysisConsent())
+    expect(JSON.stringify([
+      enabled,
+      disabled,
+      ledger.getLearningAnalysisConsent(),
+      ledger.getLearningIntakeStatus(base.sessionId, base.messageId),
+    ])).not.toContain(base.note)
+  })
+
+  it('accepts an analysis consent reference only while that revision is enabled', () => {
+    const ledger = new EvolutionLedger(ledgerRoot('analysis-consent-reference'), {
+      clock: () => '2026-09-01T00:00:00.000Z',
+    })
+    ledger.recordLearningAnalysisConsent({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    ledger.recordLearningFeedbackRevision({
+      intake: base,
+      analysisConsentRevision: 1,
+    })
+    expect(() => ledger.recordLearningFeedbackRevision({ intake: base }))
+      .toThrow(LedgerIntegrityError)
+    ledger.recordLearningAnalysisConsent({
+      revision: 2,
+      enabled: false,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    expect(() => ledger.recordLearningFeedbackRevision({
+      intake: {
+        ...base,
+        messageId: 'message-2',
+        feedbackVersion: '22222222-2222-4222-8222-222222222222',
+      },
+      analysisConsentRevision: 1,
+    })).toThrow(LedgerIntegrityError)
+    expect(JSON.stringify(ledger.listEvents().find(event =>
+      event.type === 'learning-intake-recorded'))).toContain(
+        '"analysisConsentRevision":1',
+      )
+  })
+
   it('writes one durable Signal and Ticket and treats replay as duplicate', () => {
     const root = ledgerRoot('replay')
     const ledger = new EvolutionLedger(root, {
@@ -216,8 +541,10 @@ describe('Tianwen learning intake ledger', () => {
     })
 
     expect(ledger.getLearningIntakeStatus(base.sessionId, base.messageId)).toEqual({
+      state: 'active',
       sessionId: base.sessionId,
       messageId: base.messageId,
+      feedbackVersion: '22222222-2222-4222-8222-222222222222',
       scopeKey: base.scopeKey,
       rating: 'negative',
       feedbackFingerprint: sha256({
