@@ -733,7 +733,7 @@ describe('@tianwen/runtime-bundle', () => {
         shell: false,
         // This is a correctness probe, not a cold-boot performance gate. The
         // isolated Windows Profile can spend tens of seconds preparing links.
-        timeout: 60_000,
+        timeout: 120_000,
         windowsHide: true,
       })
 

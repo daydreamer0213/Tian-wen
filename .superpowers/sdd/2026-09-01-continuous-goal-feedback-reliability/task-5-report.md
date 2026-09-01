@@ -35,3 +35,15 @@ pnpm run check
 Result: failed before typecheck or Vitest at `check:dsh-install`.
 
 Exact failure: `direct DSH dependencies differ from the probe contract`, whose actual direct-dependency list includes `@deepseek-ai/dsh-subagent`.  The root direct-dependency declaration/checker is outside Task 5's approved production-file boundary, so this task did not alter it.  The lockfile refresh command completed successfully using `D:\DevData\pnpm-store`; it produced no lockfile diff.
+
+## Follow-up: approved DSH subagent contract synchronization
+
+The Task 1-approved root devDependency `@deepseek-ai/dsh-subagent@0.1.1-rc.2` was absent from both the install-closure test expectation and `DSH_LIBRARY_PACKAGES` in `scripts/check-dsh-install.mjs`.
+
+Test-first evidence: adding the exact package to `tests/dsh-probe/install-closure.spec.ts` first produced RED (1 failed / 4 tests) because the checker still reported `direct DSH dependencies differ from the probe contract`.  Adding that one package to `DSH_LIBRARY_PACKAGES` then produced GREEN: install-closure 4 passed / 4 and `pnpm run check:dsh-install` exited 0 under the required D: environment.  No version ranges were changed.
+
+## Follow-up: Goal-first cold Profile budget
+
+Read-only diagnosis established that the 60-second child deadline elapsed during DSH `healProfilesModuleFallback()` dependency-closure traversal and temporary junction creation, before DSH boot and before the audit plugin's `loader.await()`.  The test is a correctness probe and its existing outer budget remains 180 seconds.
+
+Only the child `spawnSync` deadline was changed from 60 seconds to 120 seconds.  The exact test was then run alone with one worker and no file parallelism in the required D: environment: GREEN, 1 passed / 60 skipped, total duration 111.05 seconds and test duration 109.21 seconds.  This remains below the unchanged outer 180-second budget.

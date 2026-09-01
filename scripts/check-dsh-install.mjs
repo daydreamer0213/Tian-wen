@@ -30,6 +30,7 @@ const DSH_LIBRARY_PACKAGES = [
   '@deepseek-ai/dsh-session-query',
   '@deepseek-ai/dsh-session-query-sqlite',
   '@deepseek-ai/dsh-skill',
+  '@deepseek-ai/dsh-subagent',
   '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tool-goal',
   '@deepseek-ai/dsh-tools',
