@@ -427,9 +427,12 @@ export function createPermissionAttemptHost(
     const main = dependencies.attachedAgent(record.control.sessionId)
     if (main === undefined || String(main.session.id) !== record.control.sessionId) return
     const attempt = currentAttemptTask(record)?.current
-    const text = attempt?.permissionMode === undefined
+    const permissionMode = attempt?.permissionMode
+    const text = permissionMode === undefined
       ? 'This Task reached a sandbox limit, but Tianwen cannot verify the old permission mode. Changing this main Session to Full access will not automatically create a new attempt. The Task remains permission-limited while you decide the next step in this main Session.'
-      : 'This Task reached the current sandbox limit. Change this main Session to Full access; Tianwen will start a new attempt without modifying the old child.'
+      : (WIDER_MODES[permissionMode] ?? []).length === 0
+        ? 'This Task reached the highest available sandbox permission. There is no wider permission mode, so changing this main Session to Full access will not automatically create a new attempt. The Task remains permission-limited while you decide the next step in this main Session.'
+        : 'This Task reached the current sandbox limit. Change this main Session to Full access; Tianwen will start a new attempt without modifying the old child.'
     dependencies.notifyMain(main, createUserMessage({
       content: [{
         type: 'text',

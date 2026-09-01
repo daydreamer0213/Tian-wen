@@ -68,7 +68,6 @@ function privateSubagentImports(source: string): string[] {
       || pattern?.includes('dsh-subagent/') === true
       || (
         pattern?.includes('<dynamic>') === true
-        && /\/(?:lib|src)\//u.test(pattern)
         && source.includes('dsh-subagent')
       )
     ) violations.add(pattern)
@@ -76,7 +75,19 @@ function privateSubagentImports(source: string): string[] {
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
       inspect(node.moduleSpecifier)
-    } else if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+    } else if (
+      ts.isCallExpression(node)
+      && (
+        node.expression.kind === ts.SyntaxKind.ImportKeyword
+        || (ts.isIdentifier(node.expression) && node.expression.text === 'require')
+        || (
+          ts.isPropertyAccessExpression(node.expression)
+          && ts.isIdentifier(node.expression.expression)
+          && node.expression.expression.text === 'require'
+          && node.expression.name.text === 'resolve'
+        )
+      )
+    ) {
       inspect(node.arguments?.[0])
     } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
       inspect(node.argument.literal)
@@ -119,9 +130,14 @@ describe('DSH rc.2 reusable public seams', () => {
       'dynamic-template': "const path = 'src/private.js'\nvoid import(`@deepseek-ai/dsh-subagent/${path}`)\n",
       'dynamic-package-name': "const packageName = 'dsh-subagent'\nvoid import(`@deepseek-ai/${packageName}/lib/private.js`)\n",
       'combined-dynamic': "const packageName = 'dsh-subagent'\nconst privatePath = 'src/private.js'\nvoid import(`@deepseek-ai/${packageName}/${privatePath}`)\n",
+      'let-forwarded': "let packageName = 'dsh-subagent'\nlet privatePath = 'src/private.js'\nvoid import(`@deepseek-ai/${packageName}/${privatePath}`)\n",
+      'parameter-forwarded': "function load(packageName: string, privatePath: string) { return import(`@deepseek-ai/${packageName}/${privatePath}`) }\nvoid load('dsh-subagent', 'src/private.js')\n",
     })) expect(privateSubagentImports(source), name).not.toEqual([])
     expect(privateSubagentImports(
       "import { snapshotSubagentDescriptor } from '@deepseek-ai/dsh-subagent'\n",
+    )).toEqual([])
+    expect(privateSubagentImports(
+      "let packageName = 'dsh-subagent'\nlet privatePath = 'src/private.js'\nconst note = `not a loader: @deepseek-ai/${packageName}/${privatePath}`\nvoid note\n",
     )).toEqual([])
 
     expect(snapshotSubagentDescriptor({

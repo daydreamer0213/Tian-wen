@@ -886,10 +886,12 @@ describe('continuous Goal Host', () => {
   })
 
   it.each([
-    { direction: 'live', delegatedMode: false },
-    { direction: 'restart', delegatedMode: false },
-    { direction: 'live', delegatedMode: true },
-    { direction: 'restart', delegatedMode: true },
+    { direction: 'live', delegatedMode: undefined },
+    { direction: 'restart', delegatedMode: undefined },
+    { direction: 'live', delegatedMode: 'read-only' },
+    { direction: 'restart', delegatedMode: 'read-only' },
+    { direction: 'live', delegatedMode: 'workspace-write' },
+    { direction: 'live', delegatedMode: 'danger-full-access' },
   ] as const)(
     'limits a legacy running attempt from a structured denial on $direction consumption (delegated mode: $delegatedMode)',
     async ({ direction, delegatedMode }) => {
@@ -924,10 +926,10 @@ describe('continuous Goal Host', () => {
         delete legacy.tianwenEvents.find(event => event.type === 'attempt-started')?.attempt?.permissionMode
         writeFileSync(recordPath, `${JSON.stringify(legacy)}\n`, 'utf8')
 
-        const taskEvents = [...(delegatedMode ? [{
+        const taskEvents = [...(delegatedMode === undefined ? [] : [{
           type: 'sandbox/mode', seq: 0, time: 0,
-          data: { mode: 'read-only', source: 'delegation' },
-        }] : []), {
+          data: { mode: delegatedMode, source: 'delegation' },
+        }]), {
           type: 'tool/call', seq: 1, time: 1, data: {
             turn: 1, step: 1, callId: CallId('legacy-denial'), name: 'pwsh', arguments: '{"cmd":"write"}',
           },
@@ -946,11 +948,13 @@ describe('continuous Goal Host', () => {
         }
         const mainSession = {
           id: 'main-control', header: {}, meta: { id: 'main-control', seedLength: 0 },
-          events: [{ type: 'sandbox/mode', seq: 0, time: 0, data: { mode: 'read-only' } }] as unknown as SessionEvent[],
+          events: [{
+            type: 'sandbox/mode', seq: 0, time: 0, data: { mode: delegatedMode ?? 'read-only' },
+          }] as unknown as SessionEvent[],
         }
         const main = { session: mainSession, followup: vi.fn() } as unknown as Agent
         const quiesceNativeAttempt = vi.fn(async () => undefined)
-        const reserveSessionId = vi.fn(() => { throw new Error('unknown old mode must not renew') })
+        const reserveSessionId = vi.fn(() => { throw new Error('non-renewable old mode must not renew') })
         const notifyMain = vi.fn()
         const dependencies = {
           roots: { stateRoot, sessionsRoot: resolve(fixture, 'sessions'), evolutionRoot: resolve(stateRoot, 'evolution') },
@@ -980,11 +984,11 @@ describe('continuous Goal Host', () => {
         expect(limited.tasks[0]).toMatchObject({ execution: null, resolution: null })
         const limitedAttempt = readTianwenTaskAttemptProjection(limited, taskId).attempts.at(-1)
         expect(limitedAttempt?.status).toBe('permission-limited')
-        expect(limitedAttempt?.permissionMode).toBe(delegatedMode ? 'read-only' : undefined)
+        expect(limitedAttempt?.permissionMode).toBe(delegatedMode)
         expect(limited.tianwenEvents?.filter(event => event.type === 'attempt-permission-limited')).toHaveLength(1)
         expect(limited.tianwenEvents?.filter(event => event.type === 'attempt-permission-mode-observed'))
-          .toHaveLength(delegatedMode ? 1 : 0)
-        if (delegatedMode) {
+          .toHaveLength(delegatedMode === undefined ? 0 : 1)
+        if (delegatedMode !== undefined) {
           expect(limited.tianwenEvents?.findIndex(event => event.type === 'attempt-permission-mode-observed'))
             .toBeLessThan(limited.tianwenEvents?.findIndex(event => event.type === 'attempt-permission-limited') ?? -1)
         }
@@ -992,10 +996,15 @@ describe('continuous Goal Host', () => {
         expect(quiesceNativeAttempt).toHaveBeenCalledOnce()
         expect(reserveSessionId).not.toHaveBeenCalled()
         const noticeText = (notifyMain.mock.calls[0]?.[1].content[0] as { text?: string } | undefined)?.text
-        if (delegatedMode) {
+        if (delegatedMode === 'read-only' || delegatedMode === 'workspace-write') {
           expect(noticeText).toBe(
             'This Task reached the current sandbox limit. Change this main Session to Full access; Tianwen will start a new attempt without modifying the old child.',
           )
+        } else if (delegatedMode === 'danger-full-access') {
+          expect(noticeText).toContain('no wider permission mode')
+          expect(noticeText).toContain('will not automatically create a new attempt')
+          expect(noticeText).toContain('remains permission-limited')
+          expect(noticeText).not.toContain('will start a new attempt')
         } else {
           expect(noticeText).toContain('cannot verify the old permission mode')
           expect(noticeText).toContain('will not automatically create a new attempt')
@@ -1010,7 +1019,7 @@ describe('continuous Goal Host', () => {
         )).toHaveLength(1)
         expect(quiesceNativeAttempt).toHaveBeenCalledOnce()
         expect(reserveSessionId).not.toHaveBeenCalled()
-        if (!delegatedMode) {
+        if (delegatedMode === undefined || delegatedMode === 'danger-full-access') {
           mainSession.events.push({
             type: 'sandbox/mode', seq: 3, time: 3, data: { mode: 'danger-full-access' },
           } as unknown as SessionEvent)
