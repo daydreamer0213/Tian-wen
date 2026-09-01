@@ -7,7 +7,7 @@ import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentHandle, AgentSetup, ModelSelection } from '@deepseek-ai/dsh-agent'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, freezeMessage, MessageId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 
@@ -64,6 +64,7 @@ import type { ContinuousGoalServiceDependencies } from './continuous-goal-servic
 import { installBoundContinuousGoalControls, installContinuousGoalCommand } from './continuous-goal-agent.js'
 import { mountContinuousGoalHost, type ContinuousGoalDeliveryIntent } from './continuous-goal-host.js'
 import {
+  buildContinuousGoalAttentionNotice,
   buildContinuousGoalPlanningFailureNotice,
   buildContinuousGoalProgressNotice,
   buildContinuousGoalSettlementNotice,
@@ -1253,6 +1254,10 @@ export function createLearningClueAnalysisOperations(
 
 export interface ContinuousGoalSettlementDeliveryDependencies {
   readonly getAgent: (sessionId: string) => Agent | undefined
+  readonly acquireAgent?: (sessionId: string) => Promise<{
+    readonly agent: Agent
+    readonly release: () => void | Promise<void>
+  } | undefined>
   readonly readStatus: (longGoalId: string) => Promise<LongGoalStatusProjectionV3>
   readonly inspectSession: (sessionId: string) => Promise<{
     readonly meta: { readonly id: unknown }
@@ -1287,7 +1292,9 @@ function hasDurableNoticeReply(
   events: readonly SessionEvent[],
   notice: ReturnType<typeof buildContinuousGoalSettlementNotice>
     | ReturnType<typeof buildContinuousGoalProgressNotice>
-    | ReturnType<typeof buildContinuousGoalPlanningFailureNotice>,
+    | ReturnType<typeof buildContinuousGoalPlanningFailureNotice>
+    | ReturnType<typeof buildContinuousGoalAttentionNotice>,
+  matchNoticeId = false,
 ): boolean {
   const expectedSource = JSON.stringify(notice.source)
   const expectedContent = JSON.stringify(notice.content)
@@ -1295,6 +1302,7 @@ function hasDurableNoticeReply(
     const event = events[index]
     if (
       event?.type !== 'user/message'
+      || (matchNoticeId && String(event.data.id) !== String(notice.id))
       || JSON.stringify(event.data.source) !== expectedSource
       || JSON.stringify(event.data.content) !== expectedContent
     ) continue
@@ -1330,7 +1338,8 @@ async function runGuardedSettlementTurn(
   agent: Agent,
   notice: ReturnType<typeof buildContinuousGoalSettlementNotice>
     | ReturnType<typeof buildContinuousGoalProgressNotice>
-    | ReturnType<typeof buildContinuousGoalPlanningFailureNotice>,
+    | ReturnType<typeof buildContinuousGoalPlanningFailureNotice>
+    | ReturnType<typeof buildContinuousGoalAttentionNotice>,
   flushSession: (agent: Agent) => Promise<void | boolean>,
 ): Promise<void> {
   let noticeTurn: number | undefined
@@ -1384,6 +1393,9 @@ export async function deliverContinuousGoalSettlement(
   intent: ContinuousGoalDeliveryIntent,
   dependencies: ContinuousGoalSettlementDeliveryDependencies,
 ): Promise<boolean> {
+  const current = intent.status.currentTaskId === null
+    ? undefined
+    : intent.status.tasks.find(task => task.id === intent.status.currentTaskId)
   if (
     (intent.transition === 'complete' && intent.status.goal.phase !== 'complete')
     || (intent.transition === 'block' && intent.status.goal.phase !== 'blocked')
@@ -1391,55 +1403,80 @@ export async function deliverContinuousGoalSettlement(
       && intent.status.goal.phase !== 'active')
     || (intent.transition === 'planning-failed'
       && (intent.status.goal.phase !== 'planning' || intent.status.currentTaskId !== null))
+    || (intent.transition === 'attention' && (
+      intent.status.goal.phase !== 'active'
+      || current?.phase !== 'active'
+      || current.execution?.sessionId !== intent.attention.sessionId
+    ))
   ) return false
   const sessionId = intent.status.control.sessionId
-  const agent = dependencies.getAgent(sessionId)
-  if (agent === undefined || String(agent.session.id) !== sessionId) return false
-  await agent.whenIdle()
-  if (dependencies.getAgent(sessionId) !== agent) return false
-  const status = await dependencies.readStatus(intent.longGoalId)
-  if (!sameDeliveryState(intent.status, status, intent.transition)) return false
+  const attached = dependencies.getAgent(sessionId)
+  const lease = attached === undefined
+    ? await dependencies.acquireAgent?.(sessionId)
+    : { agent: attached, release: () => undefined }
+  if (lease === undefined) return false
+  const agent = lease.agent
+  try {
+    if (String(agent.session.id) !== sessionId) return false
+    await agent.whenIdle()
+    if (dependencies.getAgent(sessionId) !== agent) return false
+    const status = await dependencies.readStatus(intent.longGoalId)
+    if (!sameDeliveryState(intent.status, status, intent.transition)) return false
 
-  const settledTaskResults = new Map<string, string>()
-  const currentIndex = status.tasks.findIndex(task => task.id === status.currentTaskId)
-  const latestSettled = currentIndex < 0
-    ? undefined
-    : status.tasks.slice(0, currentIndex).findLast(task =>
-        task.phase === 'complete' || task.phase === 'abandoned')
-  const tasksToInspect = intent.transition === 'start' || intent.transition === 'planning-failed'
-    ? []
-    : intent.transition === 'advance'
-      ? (latestSettled === undefined ? [] : [latestSettled])
-      : status.tasks
-  for (const task of tasksToInspect) {
-    const representable = task.phase === 'complete'
-      || task.phase === 'abandoned'
-      || (task.id === status.currentTaskId && task.phase === 'blocked')
-    if (!representable || task.execution === null) continue
-    const result = await readSettledTaskResult({
-      sessionId: task.execution.sessionId,
-      goalId: task.execution.goalId,
-      phase: task.phase === 'complete' ? 'complete' : 'abandoned',
-    }, dependencies.inspectSession)
-    if (result !== undefined) settledTaskResults.set(task.id, result)
-  }
+    const settledTaskResults = new Map<string, string>()
+    const currentIndex = status.tasks.findIndex(task => task.id === status.currentTaskId)
+    const latestSettled = currentIndex < 0
+      ? undefined
+      : status.tasks.slice(0, currentIndex).findLast(task =>
+          task.phase === 'complete' || task.phase === 'abandoned')
+    const tasksToInspect = intent.transition === 'start'
+      || intent.transition === 'planning-failed'
+      || intent.transition === 'attention'
+      ? []
+      : intent.transition === 'advance'
+        ? (latestSettled === undefined ? [] : [latestSettled])
+        : status.tasks
+    for (const task of tasksToInspect) {
+      const representable = task.phase === 'complete'
+        || task.phase === 'abandoned'
+        || (task.id === status.currentTaskId && task.phase === 'blocked')
+      if (!representable || task.execution === null) continue
+      const result = await readSettledTaskResult({
+        sessionId: task.execution.sessionId,
+        goalId: task.execution.goalId,
+        phase: task.phase === 'complete' ? 'complete' : 'abandoned',
+      }, dependencies.inspectSession)
+      if (result !== undefined) settledTaskResults.set(task.id, result)
+    }
 
-  if (dependencies.getAgent(sessionId) !== agent) return false
-  const rechecked = await dependencies.readStatus(intent.longGoalId)
-  if (!sameDeliveryState(status, rechecked, intent.transition)) return false
-  const notice = intent.transition === 'planning-failed'
-    ? buildContinuousGoalPlanningFailureNotice(rechecked)
-    : intent.transition === 'start' || intent.transition === 'advance'
-      ? buildContinuousGoalProgressNotice({
-          transition: intent.transition,
-          status: rechecked,
-          settledTaskResults,
+    if (dependencies.getAgent(sessionId) !== agent) return false
+    const rechecked = await dependencies.readStatus(intent.longGoalId)
+    if (!sameDeliveryState(status, rechecked, intent.transition)) return false
+    const notice = intent.transition === 'attention'
+      ? freezeMessage({
+          ...buildContinuousGoalAttentionNotice({ status: rechecked, attention: intent.attention }),
+          id: MessageId([
+            'tianwen-continuous-goal-attention',
+            intent.attention.sessionId,
+            intent.attention.approvalId,
+          ].join(':')),
         })
-      : buildContinuousGoalSettlementNotice({ status: rechecked, settledTaskResults })
-  const controlSession = await dependencies.inspectSession(sessionId)
-  if (hasDurableNoticeReply(controlSession.events, notice)) return true
-  await runGuardedSettlementTurn(agent, notice, dependencies.flushSession)
-  return true
+      : intent.transition === 'planning-failed'
+        ? buildContinuousGoalPlanningFailureNotice(rechecked)
+        : intent.transition === 'start' || intent.transition === 'advance'
+          ? buildContinuousGoalProgressNotice({
+              transition: intent.transition,
+              status: rechecked,
+              settledTaskResults,
+            })
+          : buildContinuousGoalSettlementNotice({ status: rechecked, settledTaskResults })
+    const controlSession = await dependencies.inspectSession(sessionId)
+    if (hasDurableNoticeReply(controlSession.events, notice, intent.transition === 'attention')) return true
+    await runGuardedSettlementTurn(agent, notice, dependencies.flushSession)
+    return true
+  } finally {
+    await lease.release()
+  }
 }
 
 export function mountTianwenLongGoalHost(
@@ -1732,6 +1769,60 @@ export function mountTianwenLongGoalHost(
       }
       return status
     }
+    const acquireControlAgent = async (sessionId: string) => {
+      const exactSessionId = SessionId(sessionId)
+      const live = injected.agents.get(exactSessionId)
+      if (live !== undefined) {
+        if (String(live.session.id) !== sessionId) {
+          throw new LongGoalIntegrityError('Continuous Goal control Session identity mismatch')
+        }
+        return { agent: live, release: () => undefined }
+      }
+
+      const inspection = await host.sessionPersistence.inspect(exactSessionId)
+      if (String(inspection.meta.id) !== sessionId || !isNonEmptyString(inspection.meta.agentPreset)) {
+        throw new LongGoalIntegrityError('Continuous Goal control Session identity mismatch')
+      }
+      const selection = host.agentDefaultModel.currentSelection()
+      let handle: AgentHandle
+      try {
+        handle = await injected.agents.resume({
+          resumeSessionId: exactSessionId,
+          agentOptions: { provider: selection.provider, model: selection.model },
+          setup: agentSetup(selection, inspection.meta.agentPreset, () => undefined),
+        })
+      } catch (error) {
+        const winner = injected.agents.get(exactSessionId)
+        if (winner !== undefined && String(winner.session.id) === sessionId) {
+          return { agent: winner, release: () => undefined }
+        }
+        throw error
+      }
+
+      const release = async () => {
+        try {
+          await handle.agent.whenIdle()
+          if (!await injected.sessions.flush(handle.agent.session)) {
+            throw new Error('Session persistence is unavailable')
+          }
+        } finally {
+          await handle.dispose()
+        }
+      }
+      if (String(handle.agent.session.id) !== sessionId) {
+        await release()
+        throw new LongGoalIntegrityError('Continuous Goal control Session identity mismatch')
+      }
+      const winner = injected.agents.get(exactSessionId)
+      if (winner !== undefined && winner !== handle.agent) {
+        await release()
+        if (String(winner.session.id) === sessionId) {
+          return { agent: winner, release: () => undefined }
+        }
+        throw new LongGoalIntegrityError('Continuous Goal control Session identity mismatch')
+      }
+      return { agent: handle.agent, release }
+    }
     const disposeContinuousGoalHost = mountContinuousGoalHost(injected as unknown as Context & {
       readonly agents: {
         list(): Agent[]
@@ -1758,6 +1849,7 @@ export function mountTianwenLongGoalHost(
       flushSession: async agent => injected.sessions.flush(agent.session),
       deliver: intent => deliverContinuousGoalSettlement(intent, {
         getAgent: sessionId => injected.agents.get(SessionId(sessionId)),
+        acquireAgent: acquireControlAgent,
         readStatus: readContinuousStatus,
         inspectSession: sessionId => host.sessionPersistence.inspect(SessionId(sessionId)),
         flushSession: async agent => injected.sessions.flush(agent.session),

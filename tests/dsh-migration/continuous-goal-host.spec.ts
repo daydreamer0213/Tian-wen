@@ -66,6 +66,44 @@ function agent(sessionId: string, goalId: string, phase: 'active' | 'blocked' | 
   } as unknown as Agent & { readonly whenIdle: ReturnType<typeof vi.fn>, readonly cancel: ReturnType<typeof vi.fn>, setGoal(phase: 'active' | 'blocked' | 'complete'): void }
 }
 
+function feedbackAgent(sessionId = 'control-session') {
+  const preStepListeners: ((payload: unknown, next: () => Promise<unknown>) => Promise<unknown>)[] = []
+  const sessionListeners: ((session: unknown, event: unknown) => void)[] = []
+  let idle = Promise.resolve()
+  let nextTurn = 20
+  const controlAgent = {
+    session: { id: sessionId },
+    ctx: {
+      tools: { guard: () => () => undefined },
+      on(name: string, listener: never) {
+        const listeners = name === 'agent/pre-step' ? preStepListeners : sessionListeners
+        listeners.push(listener)
+        return () => listeners.splice(listeners.indexOf(listener), 1)
+      },
+    },
+    whenIdle: vi.fn(() => idle),
+    followup: vi.fn(message => {
+      idle = new Promise<void>(resolve => queueMicrotask(async () => {
+        const turn = nextTurn++
+        for (const listener of preStepListeners) {
+          await listener(
+            { agent: controlAgent, messages: [message], turn, step: 1, signal: new AbortController().signal },
+            async () => ({ kind: 'enter', messages: [message] }),
+          )
+        }
+        for (const listener of sessionListeners) {
+          listener(controlAgent.session, { type: 'turn/end', data: { turn, reason: { kind: 'completed' } } })
+        }
+        resolve()
+      }))
+    }),
+  } as unknown as Agent & {
+    readonly whenIdle: ReturnType<typeof vi.fn>
+    readonly followup: ReturnType<typeof vi.fn>
+  }
+  return controlAgent
+}
+
 function harness(initial = record()) {
   let records: LongGoalRecordV3[] = [initial]
   let currentStatus = status(initial, ['active'], TASK_1)
@@ -1083,6 +1121,113 @@ describe('continuous Goal Host', () => {
 
     expect(controlAgent.followup).not.toHaveBeenCalled()
     expect(flushSession).not.toHaveBeenCalled()
+  })
+
+  it('delivers attention through a cold control Agent lease and releases after persistence', async () => {
+    const active = status(record(), ['active'], TASK_1)
+    const controlAgent = feedbackAgent()
+    let live: Agent | undefined
+    const release = vi.fn(async () => { live = undefined })
+    const acquireAgent = vi.fn(async () => {
+      live = controlAgent
+      return { agent: controlAgent, release }
+    })
+    const flushSession = vi.fn(async () => true)
+
+    await expect(deliverContinuousGoalSettlement({
+      longGoalId: GOAL_ID,
+      transition: 'attention',
+      status: active,
+      attention: {
+        approvalId: 'approval-1',
+        sessionId: EXECUTION_1.sessionId,
+        toolName: 'pwsh',
+        reason: 'Run verification',
+      },
+    }, {
+      getAgent: () => live,
+      acquireAgent,
+      readStatus: async () => active,
+      inspectSession: async sessionId => ({ meta: { id: sessionId }, events: [] }),
+      flushSession,
+    })).resolves.toBe(true)
+
+    expect(acquireAgent).toHaveBeenCalledWith('control-session')
+    expect(controlAgent.followup).toHaveBeenCalledOnce()
+    expect(flushSession).toHaveBeenCalledOnce()
+    expect(release).toHaveBeenCalledOnce()
+  })
+
+  it('releases a cold control Agent lease without starting feedback when authoritative state is stale', async () => {
+    const expected = status(record(), ['active'], TASK_1)
+    const stale = { ...expected, goal: { ...expected.goal, revision: expected.goal.revision + 1 } }
+    const controlAgent = feedbackAgent()
+    let live: Agent | undefined
+    const release = vi.fn(async () => { live = undefined })
+
+    await expect(deliverContinuousGoalSettlement({
+      longGoalId: GOAL_ID,
+      transition: 'attention',
+      status: expected,
+      attention: {
+        approvalId: 'approval-1',
+        sessionId: EXECUTION_1.sessionId,
+        toolName: 'pwsh',
+      },
+    }, {
+      getAgent: () => live,
+      acquireAgent: async () => {
+        live = controlAgent
+        return { agent: controlAgent, release }
+      },
+      readStatus: async () => stale,
+      inspectSession: async sessionId => ({ meta: { id: sessionId }, events: [] }),
+      flushSession: vi.fn(async () => true),
+    })).resolves.toBe(false)
+
+    expect(controlAgent.followup).not.toHaveBeenCalled()
+    expect(release).toHaveBeenCalledOnce()
+  })
+
+  it('matches durable attention by approvalId so only a new approval starts another feedback Turn', async () => {
+    const active = status(record(), ['active'], TASK_1)
+    const controlAgent = feedbackAgent()
+    let events: readonly unknown[] = []
+    const flushSession = vi.fn(async () => true)
+    const deliver = (approvalId: string) => deliverContinuousGoalSettlement({
+      longGoalId: GOAL_ID,
+      transition: 'attention',
+      status: active,
+      attention: {
+        approvalId,
+        sessionId: EXECUTION_1.sessionId,
+        toolName: 'pwsh',
+        reason: 'Run verification',
+      },
+    }, {
+      getAgent: () => controlAgent,
+      readStatus: async () => active,
+      inspectSession: async sessionId => ({ meta: { id: sessionId }, events: events as never }),
+      flushSession,
+    })
+
+    await expect(deliver('approval-1')).resolves.toBe(true)
+    const firstNotice = controlAgent.followup.mock.calls[0]![0]
+    events = [
+      { seq: 0, time: 1, type: 'turn/start', data: { turn: 20 } },
+      { seq: 1, time: 2, type: 'user/message', surfaceOp: 'append', data: firstNotice },
+      { seq: 2, time: 3, type: 'assistant/message', surfaceOp: 'append', data: {
+        turn: 20, step: 1,
+        message: { id: 'attention-reply', role: 'assistant', content: [{ type: 'text', text: 'Open the active Task to review the request.' }] },
+      } },
+      { seq: 3, time: 4, type: 'turn/end', data: { turn: 20, reason: { kind: 'completed' } } },
+    ]
+
+    await expect(deliver('approval-1')).resolves.toBe(true)
+    expect(controlAgent.followup).toHaveBeenCalledOnce()
+
+    await expect(deliver('approval-2')).resolves.toBe(true)
+    expect(controlAgent.followup).toHaveBeenCalledTimes(2)
   })
 
   it('contains a missing bound control Agent without attempting persistence or delivery', async () => {
