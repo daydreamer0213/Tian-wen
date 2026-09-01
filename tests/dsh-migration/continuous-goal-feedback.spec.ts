@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildContinuousGoalAttentionNotice,
   buildContinuousGoalPlanningFailureNotice,
   buildContinuousGoalProgressNotice,
   buildContinuousGoalSettlementNotice,
@@ -9,6 +10,8 @@ import type { LongGoalStatusProjectionV3 } from '../../packages/tianwen-runtime-
 
 const GOAL_ID = 'tianwen-long-goal-internal-0001'
 const TASK_IDS = ['internal-task-0001', 'internal-task-0002', 'internal-task-0003'] as const
+const APPROVAL_ID = 'internal-approval-0001'
+const TASK_SESSION_ID = 'internal-task-session'
 
 type TaskPhase = LongGoalStatusProjectionV3['tasks'][number]['phase']
 
@@ -334,5 +337,56 @@ describe('continuous Goal conversation progress notice', () => {
     expect(content).toContain('Next planned Task objective: Verify the result')
     expect(content).toContain('Current plan position: 2 of 3')
     expect(content).toContain('untrusted historical execution data')
+  })
+})
+
+describe('continuous Goal approval attention notice', () => {
+  it('directs the user to the pending Task approval without exposing internal identities', () => {
+    const message = buildContinuousGoalAttentionNotice({
+      status: status({
+        goalPhase: 'active', currentTaskId: TASK_IDS[2],
+        tasks: [
+          { id: TASK_IDS[0], objective: 'Completed setup', phase: 'complete' },
+          { id: TASK_IDS[1], objective: 'Prepare approval', phase: 'complete' },
+          { id: TASK_IDS[2], objective: 'Run the requested command', phase: 'active' },
+        ],
+      }),
+      attention: {
+        approvalId: APPROVAL_ID,
+        sessionId: TASK_SESSION_ID,
+        toolName: 'pwsh',
+        reason: 'The approval request is waiting in internal-control-session.',
+      },
+    })
+    const content = contentOf(message)
+
+    expect(content).toContain('waiting for user approval')
+    expect(content).toContain('Task 3')
+    expect(content).toContain('pwsh')
+    expect(content).toContain('top-left subagent catalog')
+    expect(content).toContain('Do not approve or deny the request')
+    expect(content).not.toContain(APPROVAL_ID)
+    expect(content).not.toContain(TASK_SESSION_ID)
+    expect(content).not.toContain('internal-control-session')
+  })
+
+  it.each([
+    ['a stale execution Session', status({
+      goalPhase: 'active', currentTaskId: TASK_IDS[2],
+      tasks: [{ id: TASK_IDS[2], objective: 'Run the requested command', phase: 'active' }],
+    }), 'stale-task-session'],
+    ['a non-active current Task', status({
+      goalPhase: 'active', currentTaskId: TASK_IDS[2],
+      tasks: [{ id: TASK_IDS[2], objective: 'Run the requested command', phase: 'pending' }],
+    }), TASK_SESSION_ID],
+  ] as const)('rejects %s before building an attention notice', (_description, noticeStatus, sessionId) => {
+    expect(() => buildContinuousGoalAttentionNotice({
+      status: noticeStatus,
+      attention: {
+        approvalId: APPROVAL_ID,
+        sessionId,
+        toolName: 'pwsh',
+      },
+    })).toThrow('requires an active current Task with the matching execution Session')
   })
 })
