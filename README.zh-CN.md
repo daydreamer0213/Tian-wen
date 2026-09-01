@@ -18,6 +18,7 @@ Runtime 0.1.7 的独立紧凑卡片已删除，不再作为入口。
 “长期目标”面板仍只是可选历史和诊断，不是主要控制界面。
 
 判断一项能力当前是否已经实现时，以[架构总览的“当前状态”](docs/tianwen-architecture-overview-v2.md#当前状态2026-09-01)、
+[当前项目权威交接](docs/operations/tianwen-current-project-handoff.md)、
 [原生对话进度交接](docs/operations/tianwen-native-conversation-progress-handoff.md)和当前 `main` 源码为准。
 设计、实施计划及早期自然运行交接保留历史决策和证据；其中未勾选的步骤或当时的“下一道门”
 不得反向覆盖较新的发布状态。

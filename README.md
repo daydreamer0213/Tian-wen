@@ -25,6 +25,7 @@ history and diagnostics, not the primary control surface.
 
 To decide whether a capability is implemented now, use the
 [Current status](docs/tianwen-architecture-overview-v2.md#当前状态2026-09-01),
+the [current project handoff](docs/operations/tianwen-current-project-handoff.md),
 the [native conversation progress handoff](docs/operations/tianwen-native-conversation-progress-handoff.md),
 and current `main` source. Designs, implementation plans, and earlier natural-run
 handoffs preserve historical decisions and evidence; unchecked plan steps or a
