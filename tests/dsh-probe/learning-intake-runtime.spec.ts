@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   mkdtempSync,
   rmSync,
@@ -20,6 +20,7 @@ import {
   waitForIdle,
 } from '@tianwen/dsh-compat'
 import type {
+  Session,
   SessionEvent,
   SkillDefinition,
   SkillInvocationPolicy,
@@ -48,6 +49,12 @@ function feedback(messageId: string) {
   }
 }
 
+function digest(events: readonly SessionEvent[]): `sha256:${string}` {
+  return `sha256:${createHash('sha256')
+    .update(JSON.stringify(events), 'utf8')
+    .digest('hex')}`
+}
+
 function finalAssistant(
   events: readonly SessionEvent[],
 ): SessionEvent<'assistant/message'> {
@@ -59,6 +66,42 @@ function finalAssistant(
     throw new Error('scripted run did not produce a final assistant message')
   }
   return event
+}
+
+function finalAssistantForTurn(
+  events: readonly SessionEvent[],
+  turn: number,
+): SessionEvent<'assistant/message'> {
+  const turnEnd = events.find(event => event.type === 'turn/end'
+    && event.data.turn === turn
+    && event.data.reason.kind === 'completed')
+  const event = events.findLast(candidate =>
+    candidate.type === 'assistant/message'
+    && candidate.surfaceOp === 'append'
+    && candidate.data.turn === turn
+    && candidate.data.message.content.length > 0
+    && turnEnd?.type === 'turn/end'
+    && candidate.seq < turnEnd.seq)
+  if (event?.type !== 'assistant/message') {
+    throw new Error(`scripted run did not complete assistant turn ${turn}`)
+  }
+  return event
+}
+
+function replaceEvent(
+  session: Session,
+  original: SessionEvent,
+  replacement: SessionEvent,
+): Session {
+  const events = session.events.map(event =>
+    event.seq === original.seq ? replacement : event)
+  return new Proxy(session, {
+    get(target, property, receiver) {
+      return property === 'events'
+        ? events
+        : Reflect.get(target, property, receiver)
+    },
+  })
 }
 
 function registerEchoTool(
@@ -78,8 +121,8 @@ function registerEchoTool(
   }))
 }
 
-async function mountCompletedSessions(count = 1) {
-  const script = Array.from({ length: count }, (_, index) => [
+async function mountCompletedSessions(count = 1, turnsPerSession = 1) {
+  const script = Array.from({ length: count * turnsPerSession }, (_, index) => [
     toolCallResponse(`call-${index}`, 'echo', { text: `input-${index}` }),
     textResponse(`completed-${index}`),
   ]).flat()
@@ -94,11 +137,13 @@ async function mountCompletedSessions(count = 1) {
       sessionId: SessionId(`learning-intake-runtime-${randomUUID()}`),
       agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
     })
-    handle.agent.followup(createUserMessage({
-      content: [{ type: 'text', text: `run echo ${index}` }],
-      source: { kind: 'user' },
-    }))
-    await waitForIdle(harness.ctx, handle.agent)
+    for (let turn = 0; turn < turnsPerSession; turn += 1) {
+      handle.agent.followup(createUserMessage({
+        content: [{ type: 'text', text: `run echo ${index}:${turn}` }],
+        source: { kind: 'user' },
+      }))
+      await waitForIdle(harness.ctx, handle.agent)
+    }
     handles.push(handle)
   }
   return { harness, handles }
@@ -208,7 +253,7 @@ describe('Tianwen runtime learning intake', () => {
         target!.agent.session,
         'project:tianwen/capability:research-summary',
         feedback(String(otherFinal.data.message.id)),
-      )).toThrow(/final assistant message/i)
+      )).toThrow(/finalized append-origin assistant message/i)
       expect(mounted.harness.ctx.tianwenEvolution.listLearningSignals())
         .toEqual([])
       expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets())
@@ -218,35 +263,146 @@ describe('Tianwen runtime learning intake', () => {
     }
   })
 
-  it('rejects non-final and non-assistant message ids before ledger write', async () => {
+  it('consumes the first finalized assistant message after a later Turn exists without changing Session or Evidence', async () => {
+    const mounted = await mountCompletedSessions(1, 2)
+    const [handle] = mounted.handles
+    try {
+      const session = handle!.agent.session
+      const completedTurns = session.events
+        .filter(event => event.type === 'turn/end'
+          && event.data.reason.kind === 'completed')
+        .map(event => event.data.turn)
+      expect(completedTurns).toHaveLength(2)
+      const first = finalAssistantForTurn(session.events, completedTurns[0]!)
+      const second = finalAssistantForTurn(session.events, completedTurns[1]!)
+      expect(first.data.message.id).not.toBe(second.data.message.id)
+
+      const beforeDigest = digest(session.events)
+      const beforeEvidence = structuredClone(
+        mounted.harness.ctx.tianwenEvidence.project(session),
+      )
+      const snapshot = feedback(String(first.data.message.id))
+      const receipt = mounted.harness.ctx.tianwenLearningIntake.consume(
+        session,
+        'project:tianwen/capability:research-summary',
+        snapshot,
+      )
+
+      expect(receipt).toMatchObject({
+        decision: 'ticket-created',
+        duplicate: false,
+        sessionUnchanged: true,
+      })
+      expect(mounted.harness.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(session.id),
+        String(first.data.message.id),
+      )).toMatchObject({
+        messageId: String(first.data.message.id),
+        feedbackVersion: snapshot.version,
+        state: 'active',
+      })
+      expect(digest(session.events)).toBe(beforeDigest)
+      expect(mounted.harness.ctx.tianwenEvidence.project(session))
+        .toEqual(beforeEvidence)
+    } finally {
+      await disposeMounted(mounted)
+    }
+  })
+
+  it('rejects missing, non-assistant, empty, and replacement-origin targets before ledger write', async () => {
     const mounted = await mountCompletedSessions()
     const [handle] = mounted.handles
     try {
       const events = handle!.agent.session.events
       const finalMessage = finalAssistant(events)
-      const earlierAssistant = events.find(event =>
-        event.type === 'assistant/message'
-        && event.data.message.id !== finalMessage.data.message.id)
       const userMessage = events.find(event => event.type === 'user/message')
-      if (earlierAssistant?.type !== 'assistant/message'
-        || userMessage?.type !== 'user/message') {
+      if (userMessage?.type !== 'user/message') {
         throw new Error('scripted run did not produce comparison messages')
       }
 
       for (const messageId of [
-        String(earlierAssistant.data.message.id),
+        'missing-assistant-message',
         String(userMessage.data.id),
       ]) {
         expect(() => mounted.harness.ctx.tianwenLearningIntake.consume(
           handle!.agent.session,
           'project:tianwen/capability:research-summary',
           feedback(messageId),
-        )).toThrow(/final assistant message/i)
+        )).toThrow(/finalized append-origin assistant message/i)
+      }
+
+      const empty = structuredClone(finalMessage)
+      empty.data.message.content = []
+      const replacement = structuredClone(finalMessage)
+      replacement.surfaceOp = { op: 'replace', start: 0, end: 0 }
+      for (const candidate of [empty, replacement]) {
+        expect(() => mounted.harness.ctx.tianwenLearningIntake.consume(
+          replaceEvent(handle!.agent.session, finalMessage, candidate),
+          'project:tianwen/capability:research-summary',
+          feedback(String(finalMessage.data.message.id)),
+        )).toThrow(/finalized append-origin assistant message/i)
       }
       expect(mounted.harness.ctx.tianwenEvolution.listLearningSignals())
         .toEqual([])
       expect(mounted.harness.ctx.tianwenEvolution.listLearningTickets())
         .toEqual([])
+    } finally {
+      await disposeMounted(mounted)
+    }
+  })
+
+  it('passes exact supersession and captured consent revision to the v2 ledger write', async () => {
+    const mounted = await mountCompletedSessions()
+    const [handle] = mounted.handles
+    try {
+      const session = handle!.agent.session
+      const messageId = String(finalAssistant(session.events).data.message.id)
+      mounted.harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({
+        revision: 1,
+        enabled: true,
+        policyVersion: 'tianwen-auto-analysis.v1',
+      })
+      const first = {
+        ...feedback(messageId),
+        analysisConsentRevision: 1,
+      }
+      const second = {
+        ...first,
+        note: 'Use the exact persisted result.',
+        version: '22222222-2222-4222-8222-222222222222',
+        supersedesFeedbackVersion: first.version,
+      }
+
+      expect(mounted.harness.ctx.tianwenLearningIntake.consume(
+        session,
+        'project:tianwen/capability:research-summary',
+        first,
+      ).duplicate).toBe(false)
+      expect(mounted.harness.ctx.tianwenLearningIntake.consume(
+        session,
+        'project:tianwen/capability:research-summary',
+        second,
+      ).duplicate).toBe(false)
+      expect(mounted.harness.ctx.tianwenLearningIntake.consume(
+        session,
+        'project:tianwen/capability:research-summary',
+        second,
+      ).duplicate).toBe(true)
+      expect(() => mounted.harness.ctx.tianwenLearningIntake.consume(
+        session,
+        'project:tianwen/capability:research-summary',
+        {
+          ...second,
+          analysisConsentRevision: undefined,
+        },
+      )).toThrow(/replay changed content/i)
+      expect(mounted.harness.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(session.id),
+        messageId,
+      )).toMatchObject({
+        feedbackVersion: second.version,
+        state: 'active',
+      })
     } finally {
       await disposeMounted(mounted)
     }
@@ -258,7 +414,10 @@ describe('Tianwen runtime learning intake', () => {
     try {
       const finalMessage = finalAssistant(handle!.agent.session.events)
       const before = JSON.stringify(handle!.agent.session.events)
-      vi.spyOn(mounted.harness.ctx.tianwenEvolution, 'recordLearningIntake')
+      vi.spyOn(
+        mounted.harness.ctx.tianwenEvolution,
+        'recordLearningFeedbackRevision',
+      )
         .mockImplementation(() => {
           throw new Error('injected ledger write failure')
         })

@@ -31,6 +31,9 @@ export interface ExplicitCorrectionDemoResult {
   }
   readonly learning: {
     readonly decision: 'ticket-created'
+    readonly sessionId: string
+    readonly messageId: string
+    readonly feedbackVersion: string
     readonly signals: 1
     readonly openTickets: 1
     readonly candidateCreated: false
@@ -143,6 +146,10 @@ export async function runExplicitCorrectionDemo(): Promise<ExplicitCorrectionDem
       )
       const signals = harness.ctx.tianwenEvolution.listLearningSignals()
       const tickets = harness.ctx.tianwenEvolution.listLearningTickets()
+      const status = harness.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(handle.agent.session.id),
+        messageId,
+      )
       const candidateCreated = harness.ctx.tianwenEvolution.listEvents()
         .some(event => event.type === 'artifact-recorded')
       const afterDigest = sessionDigest(events)
@@ -152,6 +159,9 @@ export async function runExplicitCorrectionDemo(): Promise<ExplicitCorrectionDem
         || signals.length !== 1
         || tickets.length !== 1
         || !replay.duplicate
+        || status?.sessionId !== String(handle.agent.session.id)
+        || status.messageId !== messageId
+        || status.feedbackVersion !== String(item.version)
         || candidateCreated
         || beforeDigest !== afterDigest) {
         throw new Error('explicit correction demo invariant failed')
@@ -172,6 +182,9 @@ export async function runExplicitCorrectionDemo(): Promise<ExplicitCorrectionDem
         },
         learning: {
           decision: receipt.decision,
+          sessionId: status.sessionId,
+          messageId: status.messageId,
+          feedbackVersion: status.feedbackVersion,
           signals: 1,
           openTickets: 1,
           candidateCreated: false,

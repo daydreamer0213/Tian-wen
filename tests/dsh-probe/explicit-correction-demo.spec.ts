@@ -10,6 +10,9 @@ describe('Tianwen explicit-correction demo', () => {
       feedback: { rating: 'negative', stored: true },
       learning: {
         decision: 'ticket-created',
+        sessionId: 'explicit-correction-demo',
+        messageId: result.feedback.messageId,
+        feedbackVersion: result.feedback.version,
         signals: 1,
         openTickets: 1,
         candidateCreated: false,

@@ -26,6 +26,8 @@ export interface FeedbackSnapshot {
   readonly rating: 'positive' | 'negative'
   readonly note?: string
   readonly version: string
+  readonly supersedesFeedbackVersion?: string
+  readonly analysisConsentRevision?: number
 }
 
 export interface RuntimeLearningIntakeReceipt extends LearningIntakeReceipt {
@@ -97,19 +99,14 @@ function sessionDigest(events: readonly SessionEvent[]): Sha256Digest {
     .digest('hex')}`
 }
 
-function finalAssistant(
+function feedbackTarget(
   events: readonly SessionEvent[],
+  messageId: string,
 ): SessionEvent<'assistant/message'> | undefined {
-  const turnEnd = events.findLast(candidate => candidate.type === 'turn/end')
-  if (turnEnd?.type !== 'turn/end'
-    || turnEnd.data.reason.kind !== 'completed') {
-    return undefined
-  }
-  const event = events.findLast(candidate =>
+  const event = events.find(candidate =>
     candidate.type === 'assistant/message'
     && candidate.surfaceOp === 'append'
-    && candidate.data.turn === turnEnd.data.turn
-    && candidate.seq < turnEnd.seq
+    && String(candidate.data.message.id) === messageId
     && candidate.data.message.content.length > 0)
   return event?.type === 'assistant/message' ? event : undefined
 }
@@ -429,23 +426,32 @@ export class TianwenLearningIntakeService extends Service {
     feedback: FeedbackSnapshot,
   ): RuntimeLearningIntakeReceipt {
     const before = sessionDigest(session.events)
-    const finalMessage = finalAssistant(session.events)
-    if (finalMessage?.data.message.id !== feedback.messageId) {
+    if (feedbackTarget(session.events, feedback.messageId) === undefined) {
       throw new Error(
-        'feedback messageId must identify the Session final assistant message',
+        'feedback messageId must identify a finalized append-origin assistant message',
       )
     }
     const evidenceIds = this.ctx.tianwenEvidence.project(session)
       .map(record => record.evidenceId)
-    const receipt = this.ctx.tianwenEvolution.recordLearningIntake({
-      sessionId: String(session.id),
-      messageId: feedback.messageId,
-      feedbackVersion: feedback.version,
-      rating: feedback.rating,
-      ...(feedback.note === undefined ? {} : { note: feedback.note }),
-      scopeKey,
-      sessionDigest: before,
-      evidenceIds,
+    const receipt = this.ctx.tianwenEvolution.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: String(session.id),
+        messageId: feedback.messageId,
+        feedbackVersion: feedback.version,
+        rating: feedback.rating,
+        ...(feedback.note === undefined ? {} : { note: feedback.note }),
+        scopeKey,
+        sessionDigest: before,
+        evidenceIds,
+      },
+      ...(feedback.supersedesFeedbackVersion === undefined
+        ? {}
+        : {
+            supersedesFeedbackVersion: feedback.supersedesFeedbackVersion,
+          }),
+      ...(feedback.analysisConsentRevision === undefined
+        ? {}
+        : { analysisConsentRevision: feedback.analysisConsentRevision }),
     })
     if (sessionDigest(session.events) !== before) {
       throw new Error('learning intake changed the DSH Session')
