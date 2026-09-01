@@ -28,6 +28,7 @@ import {
   readLongGoal,
   readLongGoalStatus,
   readTianwenTaskAttemptProjection,
+  rebaseTianwenPermissionReservation,
   redirectContinuousGoal,
   reserveTianwenPermissionRenewal,
   setContinuousGoalMode,
@@ -829,7 +830,7 @@ describe('goal-first long Goal v2 records', () => {
       const first = appendTianwenAttemptStarted({
         stateRoot, longGoalId: record.id, expectedRevision: 2, taskId,
         epoch: 1, parentSessionId: 'planner-attempts', childSessionId: 'child-attempt-1',
-        permissionFingerprint: 'sha256:restricted', startedAt: '2026-09-01T00:00:00.000Z',
+        permissionFingerprint: 'sha256:restricted', permissionMode: 'workspace-write', startedAt: '2026-09-01T00:00:00.000Z',
       })
       const limited = appendTianwenAttemptPermissionLimited({
         stateRoot, longGoalId: record.id, expectedRevision: 3, taskId, epoch: 1,
@@ -838,7 +839,7 @@ describe('goal-first long Goal v2 records', () => {
       const second = appendTianwenAttemptStarted({
         stateRoot, longGoalId: record.id, expectedRevision: 4, taskId,
         epoch: 2, parentSessionId: 'planner-attempts', childSessionId: 'child-attempt-2',
-        permissionFingerprint: 'sha256:wider', startedAt: '2026-09-01T00:01:00.000Z',
+        permissionFingerprint: 'sha256:wider', permissionMode: 'danger-full-access', startedAt: '2026-09-01T00:01:00.000Z',
       })
       const settled = appendTianwenAttemptSettled({
         stateRoot, longGoalId: record.id, expectedRevision: 5, taskId, epoch: 2,
@@ -861,11 +862,13 @@ describe('goal-first long Goal v2 records', () => {
           {
             epoch: 1, parentSessionId: 'planner-attempts', childSessionId: 'child-attempt-1',
             permissionFingerprint: 'sha256:restricted', status: 'permission-limited',
+            permissionMode: 'workspace-write',
             startedAt: '2026-09-01T00:00:00.000Z', terminalEventId: 'permission-limited-1',
           },
           {
             epoch: 2, parentSessionId: 'planner-attempts', childSessionId: 'child-attempt-2',
             permissionFingerprint: 'sha256:wider', status: 'settled',
+            permissionMode: 'danger-full-access',
             startedAt: '2026-09-01T00:01:00.000Z', terminalEventId: 'settled-2',
           },
         ],
@@ -892,7 +895,7 @@ describe('goal-first long Goal v2 records', () => {
       appendTianwenAttemptStarted({
         stateRoot, longGoalId: record.id, expectedRevision: 2, taskId,
         epoch: 1, parentSessionId: 'planner-provisioning-failure', childSessionId: 'child-rejected-before-acceptance',
-        permissionFingerprint: 'sha256:provisioning-snapshot', startedAt: '2026-09-01T00:00:00.000Z',
+        permissionFingerprint: 'sha256:provisioning-snapshot', permissionMode: 'workspace-write', startedAt: '2026-09-01T00:00:00.000Z',
       })
       const interrupted = appendTianwenAttemptProvisioningFailed({
         stateRoot, longGoalId: record.id, expectedRevision: 3, taskId, epoch: 1,
@@ -911,6 +914,7 @@ describe('goal-first long Goal v2 records', () => {
           parentSessionId: 'planner-provisioning-failure',
           childSessionId: 'child-rejected-before-acceptance',
           permissionFingerprint: 'sha256:provisioning-snapshot',
+          permissionMode: 'workspace-write',
           status: 'interrupted',
           startedAt: '2026-09-01T00:00:00.000Z',
           terminalEventId: 'provisioning-failed:child-rejected-before-acceptance',
@@ -937,7 +941,7 @@ describe('goal-first long Goal v2 records', () => {
       appendTianwenAttemptStarted({
         stateRoot, longGoalId: record.id, expectedRevision: 2, taskId,
         epoch: 1, parentSessionId: 'planner-permission-limit', childSessionId: 'child-permission-limited',
-        permissionFingerprint: 'sha256:workspace-write', startedAt: '2026-09-01T00:00:00.000Z',
+        permissionFingerprint: 'sha256:workspace-write', permissionMode: 'workspace-write', startedAt: '2026-09-01T00:00:00.000Z',
       })
       bindGoalFirstLongGoalTask({
         stateRoot, longGoalId: record.id, expectedRevision: 3, taskId,
@@ -963,6 +967,7 @@ describe('goal-first long Goal v2 records', () => {
           parentSessionId: 'planner-permission-limit',
           childSessionId: 'child-permission-limited',
           permissionFingerprint: 'sha256:workspace-write',
+          permissionMode: 'workspace-write',
           status: 'permission-limited',
           startedAt: '2026-09-01T00:00:00.000Z',
           terminalEventId: 'tool-result:7',
@@ -990,7 +995,7 @@ describe('goal-first long Goal v2 records', () => {
       appendTianwenAttemptStarted({
         stateRoot, longGoalId: record.id, expectedRevision: 2, taskId,
         epoch: 1, parentSessionId: 'planner-permission-old', childSessionId: 'child-permission-old',
-        permissionFingerprint: 'sha256:workspace-write', startedAt: '2026-09-01T00:00:00.000Z',
+        permissionFingerprint: 'sha256:workspace-write', permissionMode: 'workspace-write', startedAt: '2026-09-01T00:00:00.000Z',
       })
       bindGoalFirstLongGoalTask({
         stateRoot, longGoalId: record.id, expectedRevision: 3, taskId,
@@ -1004,13 +1009,13 @@ describe('goal-first long Goal v2 records', () => {
       expect(() => reserveTianwenPermissionRenewal({
         stateRoot, longGoalId: record.id, expectedRevision: 5, taskId,
         plannerSessionId: 'planner-permission-old', childSessionId: 'child-permission-new',
-        permissionFingerprint: 'sha256:danger-full-access', startedAt: '2026-09-01T00:01:00.000Z',
+        permissionFingerprint: 'sha256:danger-full-access', permissionMode: 'danger-full-access', startedAt: '2026-09-01T00:01:00.000Z',
       })).toThrow('new Planner')
 
       const renewed = reserveTianwenPermissionRenewal({
         stateRoot, longGoalId: record.id, expectedRevision: 5, taskId,
         plannerSessionId: 'planner-permission-new', childSessionId: 'child-permission-new',
-        permissionFingerprint: 'sha256:danger-full-access', startedAt: '2026-09-01T00:01:00.000Z',
+        permissionFingerprint: 'sha256:danger-full-access', permissionMode: 'danger-full-access', startedAt: '2026-09-01T00:01:00.000Z',
       })
 
       expect(renewed.revision).toBe(6)
@@ -1024,17 +1029,35 @@ describe('goal-first long Goal v2 records', () => {
             parentSessionId: 'planner-permission-new',
             childSessionId: 'child-permission-new',
             permissionFingerprint: 'sha256:danger-full-access',
+            permissionMode: 'danger-full-access',
             status: 'running',
             startedAt: '2026-09-01T00:01:00.000Z',
           },
         ],
       })
+      const rebased = rebaseTianwenPermissionReservation({
+        stateRoot, longGoalId: record.id, expectedRevision: 6, taskId, epoch: 2,
+        plannerSessionId: 'planner-permission-new', childSessionId: 'child-permission-new',
+        oldPermissionFingerprint: 'sha256:danger-full-access',
+        permissionFingerprint: 'sha256:danger-full-access-new-event',
+        permissionMode: 'danger-full-access', permissionEventSeq: 11,
+      })
+      expect(rebased.tianwenEvents?.at(-1)).toMatchObject({
+        type: 'attempt-permission-reservation-rebased', epoch: 2,
+        oldPermissionFingerprint: 'sha256:danger-full-access',
+        permissionFingerprint: 'sha256:danger-full-access-new-event',
+        permissionMode: 'danger-full-access', permissionEventSeq: 11,
+      })
+      expect(readTianwenTaskAttemptProjection(rebased, taskId).attempts.at(-1)).toMatchObject({
+        epoch: 2, parentSessionId: 'planner-permission-new', childSessionId: 'child-permission-new',
+        permissionFingerprint: 'sha256:danger-full-access-new-event', permissionMode: 'danger-full-access', status: 'running',
+      })
       expect(() => reserveTianwenPermissionRenewal({
-        stateRoot, longGoalId: record.id, expectedRevision: 6, taskId,
+        stateRoot, longGoalId: record.id, expectedRevision: 7, taskId,
         plannerSessionId: 'planner-permission-third', childSessionId: 'child-permission-third',
-        permissionFingerprint: 'sha256:danger-full-access', startedAt: '2026-09-01T00:02:00.000Z',
+        permissionFingerprint: 'sha256:danger-full-access', permissionMode: 'danger-full-access', startedAt: '2026-09-01T00:02:00.000Z',
       })).toThrow('permission-limited')
-      expect(readLongGoal(stateRoot, record.id)).toEqual(renewed)
+      expect(readLongGoal(stateRoot, record.id)).toEqual(rebased)
     } finally {
       rmSync(stateRoot, { recursive: true, force: true })
     }
@@ -1055,7 +1078,7 @@ describe('goal-first long Goal v2 records', () => {
       const taskId = planned.tasks[0]!.id
       const base = {
         stateRoot, longGoalId: record.id, taskId, parentSessionId: 'planner-attempt-invariants',
-        childSessionId: 'child-invariant-1', permissionFingerprint: 'sha256:restricted',
+        childSessionId: 'child-invariant-1', permissionFingerprint: 'sha256:restricted', permissionMode: 'workspace-write',
         startedAt: '2026-09-01T00:00:00.000Z',
       } as const
 
@@ -1109,7 +1132,7 @@ describe('goal-first long Goal v2 records', () => {
             type: 'attempt-started', taskId,
             attempt: {
               epoch: 2, parentSessionId: 'planner-attempt-invariants', childSessionId: 'child-invariant-3',
-              permissionFingerprint: 'sha256:third', status: 'running', startedAt: '2026-09-01T00:02:00.000Z',
+              permissionFingerprint: 'sha256:third', permissionMode: 'workspace-write', status: 'running', startedAt: '2026-09-01T00:02:00.000Z',
             },
           },
         ],

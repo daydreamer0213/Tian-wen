@@ -4,14 +4,18 @@ import { describe, expect, it, vi } from 'vitest'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
-import type { SubagentProvider } from '@deepseek-ai/dsh-subagent'
+import { SubagentError, type SubagentProvider } from '@deepseek-ai/dsh-subagent'
+import { sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
 import {
   Context,
+  defineTool,
   ScriptedAdapter,
   SessionId,
   mountAgentLoopTestDependencies,
   textResponse,
+  toolCallResponse,
 } from '@tianwen/dsh-compat'
+import { NativeLongGoalChild } from '../../packages/tianwen-runtime-bundle/src/native-long-goal-child.js'
 
 const FIXTURE_BASE = resolve(
   process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-dsh-probe',
@@ -109,6 +113,89 @@ function settlementNotices(events: readonly { readonly type: string, readonly da
 }
 
 describe('native continuable DSH subagents', () => {
+  it('interrupts and freezes a continuable child before its model can continue after a denial result', async () => {
+    const forbiddenContinuation = 'FORBIDDEN_CONTINUATION_AFTER_DENIAL'
+    const harness = await mountHarness([
+      toolCallResponse('native-denial-call', 'native_denial_probe', {}),
+      textResponse(forbiddenContinuation),
+    ])
+    const childId = SessionId('permission-limited-native-child')
+    const nativeChild = new NativeLongGoalChild(harness.ctx)
+    let interruptedChild: ReturnType<typeof harness.ctx.agents.get>
+    let sourceFlush: Promise<boolean> | undefined
+    const disposeTool = harness.ctx.tools.register(defineTool({
+      name: 'native_denial_probe',
+      description: 'Produce one structured sandbox denial for quiescence testing.',
+      parameters: {},
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+      },
+      async execute() {
+        throw new SubagentError(sandboxDenialMarker('workspace-write'), 'SANDBOX_UNAVAILABLE')
+      },
+    }))
+    const off = harness.ctx.on('session/event', (session, event) => {
+      if (String(session.id) !== childId || event.type !== 'tool/result') return
+      interruptedChild = harness.ctx.agents.get(childId)
+      sourceFlush = harness.ctx.sessions.flush(session)
+      nativeChild.interrupt(harness.parent.session.id, childId)
+    })
+    try {
+      harness.parent.session.append('sandbox/mode', { mode: 'workspace-write', source: 'user' })
+      await nativeChild.start({
+        parent: harness.parent, childId, label: 'Permission-limited child',
+        prompt: [{ type: 'text', text: 'Call native_denial_probe, then continue with side effects.' }],
+        agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+        signal: AbortSignal.timeout(10_000),
+      })
+      await vi.waitFor(() => expect(interruptedChild).toBeDefined())
+      await interruptedChild!.whenIdle()
+      expect(await sourceFlush).toBe(true)
+      await vi.waitFor(() => expect(harness.ctx.agents.get(childId)).toBeUndefined())
+      const frozen = await harness.ctx.sessionPersistence.inspect(childId)
+      expect(frozen.events.some(event => event.type === 'tool/result')).toBe(true)
+      expect(JSON.stringify(frozen.events)).not.toContain(forbiddenContinuation)
+      expect(harness.adapter.requests).toHaveLength(2)
+      await harness.parent.whenIdle()
+      expect((await harness.ctx.sessionPersistence.inspect(childId)).events).toEqual(frozen.events)
+    } finally {
+      off()
+      disposeTool()
+      await harness.dispose()
+    }
+  })
+
+  it('reports public DUPLICATE_CHILD after DSH accepted an exact reserved child id', async () => {
+    const harness = await mountHarness([
+      textResponse('accepted child result'),
+      textResponse('accepted parent notice'),
+    ])
+    try {
+      const childId = SessionId('accepted-before-tianwen-bind')
+      const started = await harness.ctx.subagents.startContinuable({
+        provider: 'spawn', childId, label: 'Accepted before Tianwen bind',
+        request: {
+          parent: harness.parent,
+          prompt: [{ type: 'text', text: 'Return one short status.' }],
+        },
+        signal: AbortSignal.timeout(10_000),
+      })
+      expect(started.childId).toBe(childId)
+      await expect(harness.ctx.subagents.startContinuable({
+        provider: 'spawn', childId, label: 'Crash recovery duplicate',
+        request: {
+          parent: harness.parent,
+          prompt: [{ type: 'text', text: 'Must not execute twice.' }],
+        },
+        signal: AbortSignal.timeout(10_000),
+      })).rejects.toMatchObject<Partial<SubagentError>>({ code: 'DUPLICATE_CHILD' })
+      expect((await harness.ctx.sessionPersistence.inspect(childId)).meta.id).toBe(childId)
+    } finally {
+      await harness.dispose()
+    }
+  })
+
   it('persists immutable delegated policy snapshots and catalogs continuable children', async () => {
     const harness = await mountHarness([
       textResponse('first child finished'),

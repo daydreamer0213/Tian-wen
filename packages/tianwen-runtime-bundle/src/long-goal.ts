@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
+import { WIDER_MODES } from '@deepseek-ai/dsh-sandbox'
 
 import { readGoalStatus } from './status.js'
 import type {
@@ -259,12 +260,13 @@ function validateV2TaskBindings(tasks: readonly LongGoalTaskRecordV2[]): void {
 function parseTianwenAttempt(value: unknown): TianwenExecutionAttempt {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ['epoch', 'parentSessionId', 'childSessionId', 'permissionFingerprint', 'status', 'startedAt']) ||
+    !hasExactKeys(value, ['epoch', 'parentSessionId', 'childSessionId', 'permissionFingerprint', 'permissionMode', 'status', 'startedAt']) ||
     !isPositiveInteger(value.epoch) ||
     !isNonEmptyString(value.parentSessionId) ||
     !isNonEmptyString(value.childSessionId) ||
     !isNonEmptyString(value.permissionFingerprint) ||
     !/^sha256:\S+$/u.test(value.permissionFingerprint) ||
+    (value.permissionMode !== 'read-only' && value.permissionMode !== 'workspace-write' && value.permissionMode !== 'danger-full-access') ||
     value.status !== 'running' ||
     !isNonEmptyString(value.startedAt)
   ) {
@@ -275,6 +277,7 @@ function parseTianwenAttempt(value: unknown): TianwenExecutionAttempt {
     parentSessionId: value.parentSessionId,
     childSessionId: value.childSessionId,
     permissionFingerprint: value.permissionFingerprint as `sha256:${string}`,
+    permissionMode: value.permissionMode,
     status: 'running',
     startedAt: value.startedAt,
   }
@@ -290,6 +293,31 @@ function parseTianwenEvents(value: unknown, tasks: readonly LongGoalTaskRecordV2
     }
     if (event.type === 'attempt-started' && hasExactKeys(event, ['type', 'taskId', 'attempt'])) {
       events.push({ type: 'attempt-started', taskId: event.taskId, attempt: parseTianwenAttempt(event.attempt) })
+      continue
+    }
+    if (
+      event.type === 'attempt-permission-reservation-rebased'
+      && hasExactKeys(event, [
+        'type', 'taskId', 'epoch', 'oldPermissionFingerprint', 'permissionFingerprint',
+        'permissionMode', 'permissionEventSeq',
+      ])
+      && isPositiveInteger(event.epoch)
+      && isNonEmptyString(event.oldPermissionFingerprint)
+      && /^sha256:\S+$/u.test(event.oldPermissionFingerprint)
+      && isNonEmptyString(event.permissionFingerprint)
+      && /^sha256:\S+$/u.test(event.permissionFingerprint)
+      && (event.permissionMode === 'read-only' || event.permissionMode === 'workspace-write' || event.permissionMode === 'danger-full-access')
+      && isNonNegativeInteger(event.permissionEventSeq)
+    ) {
+      events.push({
+        type: event.type,
+        taskId: event.taskId,
+        epoch: event.epoch,
+        oldPermissionFingerprint: event.oldPermissionFingerprint as `sha256:${string}`,
+        permissionFingerprint: event.permissionFingerprint as `sha256:${string}`,
+        permissionMode: event.permissionMode,
+        permissionEventSeq: event.permissionEventSeq,
+      })
       continue
     }
     if (
@@ -360,6 +388,28 @@ function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): v
       continue
     }
     const current = projection.attempts.at(-1)
+    if (event.type === 'attempt-permission-reservation-rebased') {
+      const limited = projection.attempts.at(-2)
+      if (
+        current === undefined
+        || current.status !== 'running'
+        || current.epoch !== event.epoch
+        || current.permissionFingerprint !== event.oldPermissionFingerprint
+        || limited?.status !== 'permission-limited'
+        || !(WIDER_MODES[limited.permissionMode] ?? []).includes(event.permissionMode)
+      ) throw new LongGoalIntegrityError('Tianwen permission reservation rebase requires the current running attempt')
+      const matchingPermissionAttempts = projection.attempts.slice(0, -1)
+        .filter(attempt => attempt.permissionFingerprint === event.permissionFingerprint)
+      if (matchingPermissionAttempts.some(attempt => !projection.provisioningFailedEpochs.has(attempt.epoch))) {
+        throw new LongGoalIntegrityError('Tianwen Task cannot automatically reuse a permission fingerprint')
+      }
+      projection.attempts[projection.attempts.length - 1] = {
+        ...current,
+        permissionFingerprint: event.permissionFingerprint,
+        permissionMode: event.permissionMode,
+      }
+      continue
+    }
     if (event.type === 'attempt-permission-limited' || event.type === 'attempt-settled' || event.type === 'attempt-provisioning-failed') {
       if (current === undefined || current.status !== 'running' || current.epoch !== event.epoch) {
         throw new LongGoalIntegrityError('Tianwen terminal attempt event requires the current running attempt')
@@ -399,6 +449,14 @@ function tianwenTaskAttemptProjection(
     if (event.taskId !== taskId) continue
     if (event.type === 'attempt-started') {
       projection.attempts.push(event.attempt)
+    } else if (event.type === 'attempt-permission-reservation-rebased') {
+      const current = projection.attempts.at(-1)
+      if (current === undefined) throw new LongGoalIntegrityError('Tianwen attempt history is invalid')
+      projection.attempts[projection.attempts.length - 1] = {
+        ...current,
+        permissionFingerprint: event.permissionFingerprint,
+        permissionMode: event.permissionMode,
+      }
     } else if (event.type === 'attempt-permission-limited' || event.type === 'attempt-settled' || event.type === 'attempt-provisioning-failed') {
       const current = projection.attempts.at(-1)
       if (current === undefined) throw new LongGoalIntegrityError('Tianwen attempt history is invalid')
@@ -958,6 +1016,7 @@ export function appendTianwenAttemptStarted(input: TianwenAttemptEventInput & {
   readonly parentSessionId: string
   readonly childSessionId: string
   readonly permissionFingerprint: `sha256:${string}`
+  readonly permissionMode: TianwenExecutionAttempt['permissionMode']
   readonly startedAt: string
 }): LongGoalRecordV3 {
   return appendTianwenEvent(input, {
@@ -968,6 +1027,7 @@ export function appendTianwenAttemptStarted(input: TianwenAttemptEventInput & {
       parentSessionId: input.parentSessionId,
       childSessionId: input.childSessionId,
       permissionFingerprint: input.permissionFingerprint,
+      permissionMode: input.permissionMode,
       status: 'running',
       startedAt: input.startedAt,
     },
@@ -1032,12 +1092,14 @@ export function reserveTianwenPermissionRenewal(input: TianwenAttemptEventInput 
   readonly plannerSessionId: string
   readonly childSessionId: string
   readonly permissionFingerprint: `sha256:${string}`
+  readonly permissionMode: TianwenExecutionAttempt['permissionMode']
   readonly startedAt: string
 }): LongGoalRecordV3 {
   if (
     !isNonEmptyString(input.plannerSessionId)
     || !isNonEmptyString(input.childSessionId)
     || !isNonEmptyString(input.permissionFingerprint)
+    || (input.permissionMode !== 'read-only' && input.permissionMode !== 'workspace-write' && input.permissionMode !== 'danger-full-access')
     || !isNonEmptyString(input.startedAt)
   ) throw new TypeError('Tianwen permission renewal input is invalid')
   const record = readContinuousLongGoal(input.stateRoot, input.longGoalId)
@@ -1075,6 +1137,7 @@ export function reserveTianwenPermissionRenewal(input: TianwenAttemptEventInput 
       parentSessionId: input.plannerSessionId,
       childSessionId: input.childSessionId,
       permissionFingerprint: input.permissionFingerprint,
+      permissionMode: input.permissionMode,
       status: 'running',
       startedAt: input.startedAt,
     },
@@ -1088,6 +1151,54 @@ export function reserveTianwenPermissionRenewal(input: TianwenAttemptEventInput 
   })
   replaceRecordAtomically(recordPath(input.stateRoot, input.longGoalId), updated)
   return updated
+}
+
+export function rebaseTianwenPermissionReservation(input: TianwenAttemptEventInput & {
+  readonly epoch: number
+  readonly plannerSessionId: string
+  readonly childSessionId: string
+  readonly oldPermissionFingerprint: `sha256:${string}`
+  readonly permissionFingerprint: `sha256:${string}`
+  readonly permissionMode: TianwenExecutionAttempt['permissionMode']
+  readonly permissionEventSeq: number
+}): LongGoalRecordV3 {
+  if (
+    !isPositiveInteger(input.epoch)
+    || !isNonEmptyString(input.plannerSessionId)
+    || !isNonEmptyString(input.childSessionId)
+    || !isNonEmptyString(input.oldPermissionFingerprint)
+    || !isNonEmptyString(input.permissionFingerprint)
+    || !isNonNegativeInteger(input.permissionEventSeq)
+    || (input.permissionMode !== 'read-only' && input.permissionMode !== 'workspace-write' && input.permissionMode !== 'danger-full-access')
+  ) throw new TypeError('Tianwen permission reservation rebase input is invalid')
+  const record = readContinuousLongGoal(input.stateRoot, input.longGoalId)
+  assertExpectedRevision(record, input.expectedRevision)
+  const task = record.tasks.find(candidate => candidate.id === input.taskId)
+  const attempts = readTianwenTaskAttemptProjection(record, input.taskId).attempts
+  const limited = attempts.at(-2)
+  const current = attempts.at(-1)
+  if (
+    task === undefined
+    || task.execution !== null
+    || task.resolution !== null
+    || record.planner.sessionId !== input.plannerSessionId
+    || current?.status !== 'running'
+    || current.epoch !== input.epoch
+    || current.parentSessionId !== input.plannerSessionId
+    || current.childSessionId !== input.childSessionId
+    || current.permissionFingerprint !== input.oldPermissionFingerprint
+    || limited?.status !== 'permission-limited'
+    || !(WIDER_MODES[limited.permissionMode] ?? []).includes(input.permissionMode)
+  ) throw new LongGoalIntegrityError('Tianwen permission reservation rebase requires the exact unmaterialized wider reservation')
+  return appendTianwenEvent(input, {
+    type: 'attempt-permission-reservation-rebased',
+    taskId: input.taskId,
+    epoch: input.epoch,
+    oldPermissionFingerprint: input.oldPermissionFingerprint,
+    permissionFingerprint: input.permissionFingerprint,
+    permissionMode: input.permissionMode,
+    permissionEventSeq: input.permissionEventSeq,
+  })
 }
 
 export function appendTianwenAttemptSettled(input: TianwenAttemptEventInput & {

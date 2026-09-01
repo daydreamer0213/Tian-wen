@@ -1,3 +1,5 @@
+import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
+
 export interface TaskExecutionBinding {
   readonly goalId: string
   readonly sessionId: string
@@ -105,6 +107,7 @@ export interface TianwenExecutionAttempt {
   readonly parentSessionId: string
   readonly childSessionId: string
   readonly permissionFingerprint: `sha256:${string}`
+  readonly permissionMode: SandboxMode
   readonly status: TianwenAttemptStatus
   readonly startedAt: string
   readonly terminalEventId?: string
@@ -127,6 +130,15 @@ export type TianwenLongGoalEvent =
       readonly taskId: string
       readonly epoch: number
       readonly terminalEventId: string
+    }
+  | {
+      readonly type: 'attempt-permission-reservation-rebased'
+      readonly taskId: string
+      readonly epoch: number
+      readonly oldPermissionFingerprint: `sha256:${string}`
+      readonly permissionFingerprint: `sha256:${string}`
+      readonly permissionMode: SandboxMode
+      readonly permissionEventSeq: number
     }
   | {
       readonly type: 'attempt-settled'
