@@ -112,7 +112,7 @@ function installStockDshHost(): void {
   ].join('\n'), 'utf8')
   run('pnpm', [
     '--dir', hostRoot,
-    '--allow-build=koffi', 'add', '--save-exact',
+    '--allow-build=koffi', 'add', '--offline', '--save-exact',
     '@deepseek-ai/dsh@0.1.1-rc.2',
   ])
   const hostRequire = createRequire(join(hostRoot, 'package.json'))

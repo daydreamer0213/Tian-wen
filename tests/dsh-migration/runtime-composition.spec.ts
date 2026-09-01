@@ -1,7 +1,11 @@
 import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import GoalService from '@deepseek-ai/dsh-goal'
+import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import {
   AgentLoop,
   Context,
@@ -12,15 +16,22 @@ import {
   ToolRuntime,
   createUserMessage,
   defineTool,
+  goalRoundDriver,
   mountAgentLoopTestDependencies,
   textResponse,
   toolCallResponse,
 } from '@tianwen/dsh-compat'
+import type { GenerateOptions } from '@tianwen/dsh-compat'
 import { default as TimerService } from '@deepseek-ai/cordis-plugin-timer'
 import {
-  apply,
+  apply as applyCore,
   SUPPORTED_DSH_VERSION,
 } from '../../packages/tianwen-runtime/src/index.js'
+import { apply as applyRuntimeBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
+
+const runtimeBundleRequire = createRequire(resolve(
+  'packages/tianwen-runtime-bundle/package.json',
+))
 
 const roots: string[] = []
 
@@ -34,10 +45,111 @@ function stateRoot(): string {
   return root
 }
 
+type ProjectionDefinition = {
+  readonly key: string
+  init(): unknown
+  apply(state: unknown, event: unknown): unknown
+  readonly wire: { view(state: unknown): unknown }
+}
+
+function projectionRegistry() {
+  const definitions: ProjectionDefinition[] = []
+  const valuesFor = (events: readonly unknown[]) => Object.fromEntries(definitions.map(definition => {
+    let state = definition.init()
+    for (const event of events) state = definition.apply(state, event)
+    return [definition.key, definition.wire.view(state)]
+  }))
+  return {
+    register(definition: ProjectionDefinition): void { definitions.push(definition) },
+    snapshot(session: { readonly events: readonly unknown[] }) {
+      return { values: valuesFor(session.events) }
+    },
+    restore(_base: unknown, events: readonly unknown[]) {
+      return { snapshot: { values: valuesFor(events) } }
+    },
+  }
+}
+
+function sandboxPolicy() {
+  return {
+    defaultMode: 'read-only' as const,
+    overrideOf(session: { readonly events: readonly { readonly type: string, readonly data: unknown }[] }) {
+      const event = session.events.findLast(candidate => candidate.type === 'sandbox/mode')
+      const mode = (event?.data as { readonly mode?: unknown } | undefined)?.mode
+      return mode === 'read-only' || mode === 'workspace-write' || mode === 'danger-full-access'
+        ? mode
+        : undefined
+    },
+  }
+}
+
+async function mountPublicCommandRuntime(ctx: Context): Promise<void> {
+  const entry = runtimeBundleRequire.resolve('@deepseek-ai/dsh-commands')
+  const { default: CommandRuntime } = await import(pathToFileURL(entry).href) as {
+    readonly default: new (ctx: Context) => unknown
+  }
+  await ctx.plugin(CommandRuntime as never)
+}
+
+function normalizeRequest(request: GenerateOptions): unknown {
+  const clone = structuredClone(Object.fromEntries(
+    Object.entries(request).filter(([key]) => key !== 'signal'),
+  )) as Record<string, unknown>
+  clone.messages = request.messages.map((message, index) => ({
+    ...structuredClone(message),
+    id: `message-${index + 1}`,
+  }))
+  clone.system = request.system ?? null
+  clone.reasoningEffort = request.reasoningEffort ?? null
+  clone.tools = structuredClone(request.tools ?? [])
+  clone.toolChoice = (request as GenerateOptions & { readonly toolChoice?: unknown }).toolChoice ?? null
+  return clone
+}
+
 async function runOrdinaryDshSession(tianwenEnabled: boolean) {
   const ctx = new Context()
+  const profileRoot = stateRoot()
+  const sessionsRoot = join(profileRoot, 'sessions')
+  const evolutionRoot = join(profileRoot, 'evolution')
+  const longGoalStateRoot = join(profileRoot, 'long-goals')
+  const workspaceRoot = join(profileRoot, 'workspace')
+  mkdirSync(workspaceRoot, { recursive: true })
+  ctx.baseUrl = pathToFileURL(profileRoot).href
+  ctx.provide('sessionProjections', projectionRegistry())
+  ctx.provide('sandboxPolicy', sandboxPolicy())
+  ctx.provide('approval', {})
+  ctx.provide('connection', { rpc: { handle: () => undefined } })
+  ctx.provide('agentDefaultModel', {
+    currentSelection: () => ({ provider: 'ordinary-provider', model: 'ordinary-model' }),
+  })
+  const composedPreset = (agentCtx: { readonly agent?: { readonly session: {
+    readonly header: { readonly agentPreset?: string }
+  } } }) => agentCtx.agent?.session.header.agentPreset
+  ctx.provide('agentPresets', {
+    roots: [],
+    mount: async () => undefined,
+    composedPreset,
+    composeFrom: (childCtx: Context, parentCtx: Parameters<typeof composedPreset>[0]) => {
+      Object.defineProperty(childCtx, 'goals', { configurable: true, value: ctx.goals })
+      return composedPreset(parentCtx)
+    },
+  })
+  ctx.provide('apiProxy', {
+    sessions: {
+      async list() { return { result: { ok: true as const, value: { items: [] } } } },
+      async create() { throw new Error('ordinary non-interference run must not create a child') },
+    },
+    goals: {
+      async resume() { throw new Error('ordinary non-interference run must not resume a Goal') },
+    },
+  })
+  await mountPublicCommandRuntime(ctx)
   await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(JsonlSessionPersistence, { root: sessionsRoot, compression: 'none' })
+  await ctx.plugin(GoalService)
+  await ctx.plugin(goalRoundDriver)
   await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(SubagentRuntime)
   const adapter = new ScriptedAdapter([
     toolCallResponse('ordinary-call', 'ordinary_echo', { text: 'unchanged' }),
     textResponse('ordinary answer'),
@@ -57,9 +169,16 @@ async function runOrdinaryDshSession(tianwenEnabled: boolean) {
       return `echo:${args.text}`
     },
   }))
-  if (tianwenEnabled) await apply(ctx, { evolutionRoot: stateRoot() })
+  if (tianwenEnabled) {
+    await applyRuntimeBundle(ctx, {
+      stateRoot: longGoalStateRoot,
+      sessionsRoot,
+      evolutionRoot,
+    })
+  }
   const handle = await ctx.agents.create({
     sessionId: SessionId('ordinary-non-tianwen-session'),
+    meta: { cwd: workspaceRoot, agentPreset: 'standard' },
     agentOptions: { provider: 'ordinary-provider', model: 'ordinary-model' },
   })
   try {
@@ -71,32 +190,28 @@ async function runOrdinaryDshSession(tianwenEnabled: boolean) {
       source: { kind: 'user' },
     }))
     await handle.agent.whenIdle()
-    const requests = adapter.requests.map(request => ({
-      provider: request.provider,
-      model: request.model,
-      reasoningEffort: request.reasoningEffort,
-      tools: request.tools?.map(tool => ({
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters,
-      })),
-    }))
+    const requests = adapter.requests.map(normalizeRequest)
     const permissionEvents = handle.agent.session.events
-      .filter(event => event.type === 'sandbox/mode')
-      .map(event => event.data)
-    const assistantText = handle.agent.session.events
+      .filter(event => event.type === 'sandbox/mode' || event.type === 'approval/policy')
+      .map(event => ({ type: event.type, data: event.data }))
+    const assistantOutput = handle.agent.session.events
       .filter(event => event.type === 'assistant/message')
-      .flatMap(event => event.data.message.content)
-      .filter(block => block.type === 'text')
-      .map(block => block.text)
+      .map((event, index) => ({
+        turn: event.data.turn,
+        message: { ...structuredClone(event.data.message), id: `assistant-${index + 1}` },
+      }))
+    const commands = ctx.get('commands') as { list(agent: typeof handle.agent): readonly { name: string }[] }
     return {
-      requests,
-      permissionEvents,
-      assistantText,
-      toolRuns,
-      learningSignals: tianwenEnabled
-        ? ctx.tianwenEvolution.listLearningSignals()
-        : [],
+      behavior: {
+        requests,
+        permissionEvents,
+        assistantOutput,
+        toolRuns,
+        learningSignals: tianwenEnabled
+          ? ctx.tianwenEvolution.listLearningSignals()
+          : [],
+      },
+      hostMounted: commands.list(handle.agent).some(command => command.name === 'goal'),
     }
   } finally {
     await handle.dispose()
@@ -116,17 +231,43 @@ describe('@tianwen/runtime', () => {
     const disabled = await runOrdinaryDshSession(false)
     const enabled = await runOrdinaryDshSession(true)
 
-    expect(enabled).toEqual(disabled)
-    expect(enabled).toMatchObject({
+    expect(disabled.hostMounted).toBe(false)
+    expect(enabled.hostMounted).toBe(true)
+    expect(enabled.behavior).toEqual(disabled.behavior)
+    expect(enabled.behavior).toMatchObject({
       requests: [
-        { provider: 'ordinary-provider', model: 'ordinary-model' },
-        { provider: 'ordinary-provider', model: 'ordinary-model' },
+        {
+          provider: 'ordinary-provider', model: 'ordinary-model',
+          reasoningEffort: null, toolChoice: null,
+        },
+        {
+          provider: 'ordinary-provider', model: 'ordinary-model',
+          reasoningEffort: null, toolChoice: null,
+        },
       ],
-      permissionEvents: [{ mode: 'workspace-write', source: 'user' }],
-      assistantText: ['ordinary answer'],
+      permissionEvents: [{
+        type: 'sandbox/mode', data: { mode: 'workspace-write', source: 'user' },
+      }],
       toolRuns: 1,
       learningSignals: [],
     })
+    for (const request of enabled.behavior.requests as Array<{
+      readonly system: unknown
+      readonly messages: readonly { readonly role: string }[]
+      readonly tools: readonly unknown[]
+    }>) {
+      expect(typeof request.system).toBe('string')
+      expect(request.messages.length).toBeGreaterThan(0)
+      expect(request.tools).toContainEqual({
+        name: 'ordinary_echo',
+        description: 'Return an ordinary DSH result.',
+        parameters: {
+          type: 'object',
+          properties: { text: { type: 'string' } },
+        },
+      })
+    }
+    expect(enabled.behavior.assistantOutput).toHaveLength(2)
   })
 
   it('uses an explicit absolute Evolution root instead of the Profile default', async () => {
@@ -141,7 +282,7 @@ describe('@tianwen/runtime', () => {
       ctx.baseUrl = pathToFileURL(profileRoot).href
       expect(SUPPORTED_DSH_VERSION).toBe('0.1.1-rc.2')
       expect(DSH_VERSION).toBe(SUPPORTED_DSH_VERSION)
-      await apply(ctx, { evolutionRoot })
+      await applyCore(ctx, { evolutionRoot })
       expect(ctx.tianwenEvidence).toBeDefined()
       expect(ctx.tianwenEvolution).toBeDefined()
       expect('dynamicCordisRunner' in ctx).toBe(false)
@@ -163,7 +304,7 @@ describe('@tianwen/runtime', () => {
     try {
       const profileRoot = stateRoot()
       ctx.baseUrl = pathToFileURL(profileRoot).href
-      await apply(ctx)
+      await applyCore(ctx)
       expect(existsSync(
         join(profileRoot, 'state', 'evolution', 'artifacts'),
       )).toBe(true)
@@ -178,7 +319,7 @@ describe('@tianwen/runtime', () => {
     await ctx.plugin(SystemPrompt, {})
     await ctx.plugin(ToolRuntime, {})
     try {
-      await expect(apply(ctx, { evolutionRoot: 'relative/evolution' }))
+      await expect(applyCore(ctx, { evolutionRoot: 'relative/evolution' }))
         .rejects.toThrow(/evolutionRoot.*absolute/)
       expect('tianwenEvidence' in ctx).toBe(false)
       expect('tianwenEvolution' in ctx).toBe(false)

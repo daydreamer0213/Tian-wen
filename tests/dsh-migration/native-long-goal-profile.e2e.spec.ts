@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -19,32 +20,31 @@ import {
   textResponse,
   toolCallResponse,
 } from '@tianwen/dsh-compat'
-import { apply as applyCore } from '../../packages/tianwen-runtime/src/index.js'
+import { apply as applyRuntimeBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 import {
-  appendTianwenAttemptSettled,
-  appendTianwenAttemptStarted,
-  appendTianwenTerminalDeliveryBoundary,
-  bindGoalFirstLongGoalTask,
-  commitLongGoalPlan,
-  createContinuousLongGoal,
   listLongGoals,
   readLongGoal,
   readLongGoalStatus,
   readTianwenTaskAttemptProjection,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
-import type {
-  LongGoalRecordV3,
-  LongGoalStatusProjectionV3,
-} from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
-import {
-  deliverContinuousGoalSettlement,
-  mountTianwenLongGoalHost,
-} from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
+import type { LongGoalRecordV3 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
 
 const FIXTURE_BASE = resolve(
   process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-dsh-probe',
   'native-long-goal-profile',
 )
+
+const runtimeBundleRequire = createRequire(resolve(
+  'packages/tianwen-runtime-bundle/package.json',
+))
+
+async function mountPublicCommandRuntime(ctx: Context): Promise<void> {
+  const entry = runtimeBundleRequire.resolve('@deepseek-ai/dsh-commands')
+  const { default: CommandRuntime } = await import(pathToFileURL(entry).href) as {
+    readonly default: new (ctx: Context) => unknown
+  }
+  await ctx.plugin(CommandRuntime as never)
+}
 
 type ProjectionDefinition = {
   readonly key: string
@@ -173,23 +173,17 @@ class ProfileAdapter extends LlmAdapter {
   }
 }
 
-interface RegisteredCommand {
-  readonly name: string
-  readonly handler: (input: {
-    readonly agent: unknown
-    readonly rawInput: string
-    readonly attachments: readonly unknown[]
-    readonly signal: AbortSignal
-    readonly commandId: string
-  }) => Promise<{ readonly kind: string, readonly text: string }>
-}
-
 async function mountProfile(
   taskObjective = 'Produce one verified native result.',
-  options: { readonly permissionLimited?: boolean } = {},
+  options: {
+    readonly permissionLimited?: boolean
+    readonly root?: string
+    readonly resumeMain?: boolean
+  } = {},
 ) {
   mkdirSync(FIXTURE_BASE, { recursive: true })
-  const root = mkdtempSync(join(FIXTURE_BASE, 'profile-'))
+  const ownsRoot = options.root === undefined
+  const root = options.root ?? mkdtempSync(join(FIXTURE_BASE, 'profile-'))
   const sessionsRoot = join(root, 'sessions')
   const stateRoot = join(root, 'state')
   const evolutionRoot = join(root, 'evolution')
@@ -197,17 +191,10 @@ async function mountProfile(
   mkdirSync(workspaceRoot, { recursive: true })
   const ctx = new Context()
   ctx.baseUrl = pathToFileURL(root).href
-  const commands = new Map<string, RegisteredCommand>()
   const headers = new Map<string, { sessionId: string, cwd?: string, agentPreset?: string }>()
   ctx.provide('sessionProjections', projectionRegistry())
   ctx.provide('sandboxPolicy', sandboxPolicy())
   ctx.provide('approval', {})
-  ctx.provide('commands', {
-    register(definition: RegisteredCommand) {
-      commands.set(definition.name, definition)
-      return () => { commands.delete(definition.name) }
-    },
-  })
   ctx.provide('connection', { rpc: { handle: () => undefined } })
   ctx.provide('agentDefaultModel', {
     currentSelection: () => ({ provider: 'tianwen-profile', model: 'scripted' }),
@@ -230,7 +217,15 @@ async function mountProfile(
   const apiProxy = {
     sessions: {
       async list() {
-        return { result: { ok: true as const, value: { items: [...headers.values()] } } }
+        const items = new Map(headers)
+        for (const header of await ctx.sessionPersistence.list()) {
+          items.set(String(header.id), {
+            sessionId: String(header.id),
+            ...(header.cwd === undefined ? {} : { cwd: header.cwd }),
+            ...(header.agentPreset === undefined ? {} : { agentPreset: header.agentPreset }),
+          })
+        }
+        return { result: { ok: true as const, value: { items: [...items.values()] } } }
       },
       async create() { throw new Error('native profile must not create an ordinary child Session') },
     },
@@ -240,6 +235,7 @@ async function mountProfile(
   }
   ctx.provide('apiProxy', apiProxy)
 
+  await mountPublicCommandRuntime(ctx)
   await mountAgentLoopTestDependencies(ctx)
   await ctx.plugin(JsonlSessionPersistence, { root: sessionsRoot, compression: 'none' })
   await ctx.plugin(GoalService)
@@ -249,8 +245,7 @@ async function mountProfile(
   ctx.subagents.registerProvider(spawnProvider)
   const adapter = new ProfileAdapter(taskObjective)
   ctx.llm.registerAdapter(['tianwen-profile'], adapter)
-  await applyCore(ctx, { evolutionRoot })
-  mountTianwenLongGoalHost(ctx, { stateRoot, sessionsRoot, evolutionRoot })
+  await applyRuntimeBundle(ctx, { stateRoot, sessionsRoot, evolutionRoot })
 
   const offAgent = ctx.on('agent/created', ({ agent }) => {
     headers.set(String(agent.session.id), {
@@ -290,12 +285,20 @@ async function mountProfile(
       return 'profile Task completed'
     },
   }))
-  const main = (await ctx.agents.create({
-    sessionId: mainSessionId,
-    meta: { cwd: workspaceRoot, agentPreset: 'standard' },
-    agentOptions: { provider: 'tianwen-profile', model: 'scripted' },
-  })).agent
-  main.session.append('sandbox/mode', { mode: 'workspace-write', source: 'user' })
+  const mainHandle = options.resumeMain === true
+    ? await ctx.agents.resume({
+        resumeSessionId: mainSessionId,
+        agentOptions: { provider: 'tianwen-profile', model: 'scripted' },
+      })
+    : await ctx.agents.create({
+        sessionId: mainSessionId,
+        meta: { cwd: workspaceRoot, agentPreset: 'standard' },
+        agentOptions: { provider: 'tianwen-profile', model: 'scripted' },
+      })
+  const main = mainHandle.agent
+  if (options.resumeMain !== true) {
+    main.session.append('sandbox/mode', { mode: 'workspace-write', source: 'user' })
+  }
 
   return {
     ctx,
@@ -305,26 +308,35 @@ async function mountProfile(
     sessionsRoot,
     evolutionRoot,
     workspaceRoot,
+    root,
     taskRuns: () => taskRunSessions.length,
     taskRunSessions: () => [...taskRunSessions],
     releaseTask,
+    stopMain: () => mainHandle.dispose(),
     async startGoal() {
-      const command = commands.get('goal')
-      if (command === undefined) throw new Error('main Session has no /goal command')
-      return command.handler({
-        commandId: 'profile-command-1',
-        agent: main,
-        rawInput: ` ${taskObjective}`,
-        attachments: [],
-        signal: AbortSignal.timeout(30_000),
-      })
+      const commands = ctx.get('commands') as {
+        execute(
+          agent: typeof main,
+          line: string,
+          images: readonly never[],
+          signal: AbortSignal,
+        ): Promise<{ readonly result: { readonly kind: string, readonly text?: string } } | undefined>
+      }
+      const execution = await commands.execute(
+        main,
+        `/goal ${taskObjective}`,
+        [],
+        AbortSignal.timeout(30_000),
+      )
+      if (execution === undefined) throw new Error('main Session has no /goal command')
+      return execution.result
     },
-    async dispose() {
+    async dispose(removeRoot = ownsRoot) {
       releaseTask()
       disposeTask()
       offAgent()
       await ctx.fiber.dispose()
-      rmSync(root, { recursive: true, force: true })
+      if (removeRoot) rmSync(root, { recursive: true, force: true })
     },
   }
 }
@@ -368,6 +380,16 @@ describe('native Long Goal profile execution', () => {
     const profile = await mountProfile()
     try {
       await expect(profile.startGoal()).resolves.toMatchObject({ kind: 'success', text: 'started' })
+      const commandRun = profile.main.session.events.find(event => event.type === 'command/run')
+      expect(commandRun).toMatchObject({ data: { name: 'goal', source: { kind: 'user' } } })
+      expect(profile.main.session.events).toContainEqual(expect.objectContaining({
+        type: 'command/done',
+        data: expect.objectContaining({
+          commandId: commandRun?.type === 'command/run' ? commandRun.data.commandId : undefined,
+          kind: 'success',
+          text: 'started',
+        }),
+      }))
       await vi.waitFor(async () => {
         const record = listLongGoals(profile.stateRoot)[0]
         expect(record?.schemaVersion).toBe('tianwen.long-goal.v3')
@@ -407,6 +429,29 @@ describe('native Long Goal profile execution', () => {
       if (task === undefined) throw new Error('expected live native Task')
       const taskGoal = profile.ctx.goals.get(task)
       if (taskGoal === undefined) throw new Error('expected Task Goal')
+      await vi.waitFor(() => {
+        const progress = profile.main.session.events.filter(event => (
+          event.type === 'user/message'
+          && event.data.source.kind === 'subagent-report'
+          && String(event.data.source.senderSessionId) === running.planner.sessionId
+        ))
+        expect(progress).toHaveLength(1)
+        const text = progress[0]!.data.content
+          .filter(block => block.type === 'text')
+          .map(block => block.text)
+          .join('\n')
+        expect(text.split('\n')).toEqual([
+          `Background subagent ${running.planner.sessionId} reported:`,
+          'Stage: active: Task 1 of 1',
+          'Waiting for: Task result: Produce one verified native result.',
+        ])
+        expect(text).not.toMatch(/%|\bpercent\b/iu)
+      }, { timeout: 10_000 })
+      const progressSeq = profile.main.session.events.find(event => (
+        event.type === 'user/message'
+        && event.data.source.kind === 'subagent-report'
+        && String(event.data.source.senderSessionId) === running.planner.sessionId
+      ))!.seq
       profile.ctx.goals.complete(task, taskGoal)
       profile.releaseTask()
 
@@ -451,6 +496,7 @@ describe('native Long Goal profile execution', () => {
         && String(event.data.source.senderSessionId) === running.planner.sessionId
       ))
       expect(plannerSettlements.length).toBeGreaterThanOrEqual(2)
+      expect(plannerSettlements.some(event => event.seq > progressSeq)).toBe(true)
       expect(profile.main.session.events.some(event => event.type === 'assistant/message'
         && event.data.message.content.some(block => block.type === 'text'
           && (block.text.includes('Task result') || block.text.includes('Main received'))))).toBe(true)
@@ -568,175 +614,142 @@ describe('native Long Goal profile execution', () => {
     }
   }, 40_000)
 
-  it('settles once in the recovered main Session without rerunning an offline Task', async () => {
-    const profile = await mountProfile('Offline recovery must not rerun work.')
-    const taskId = SessionId('offline-recovery-task')
-    const taskGoalId = 'offline-recovery-goal'
-    const taskHandle = await profile.ctx.agents.create({
-      sessionId: taskId,
-      meta: {
-        cwd: profile.workspaceRoot,
-        agentPreset: 'standard',
-        parentSession: SessionId('offline-recovery-planner'),
-      },
-      agentOptions: { provider: 'tianwen-profile', model: 'scripted' },
-    })
+  it('rebuilds the real Host and delivers one offline terminal Turn without rerunning the Task', async () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const root = mkdtempSync(join(FIXTURE_BASE, 'offline-restart-'))
+    const objective = 'Offline recovery must not rerun work.'
+    let first: Awaited<ReturnType<typeof mountProfile>> | undefined
+    let recovered: Awaited<ReturnType<typeof mountProfile>> | undefined
     try {
-      const terminalEvent = taskHandle.agent.session.append('goal/change', {
-        operation: 'complete',
-        ref: { id: taskGoalId, revision: 3 },
-        goal: {
-          id: taskGoalId,
-          revision: 3,
-          objective: 'Already completed offline',
-          maxGoalRounds: 1,
-          phase: 'complete',
-          roundsStarted: 1,
-          activation: 'disarmed',
-        },
-      } as never)
-      await profile.ctx.sessions.flush(taskHandle.agent.session)
-      await profile.ctx.sessions.flush(profile.main.session)
-      await taskHandle.dispose()
+      first = await mountProfile(objective, { root })
+      await expect(first.startGoal()).resolves.toMatchObject({ kind: 'success', text: 'started' })
+      await vi.waitFor(() => {
+        const record = listLongGoals(first!.stateRoot)[0]
+        expect(record?.schemaVersion).toBe('tianwen.long-goal.v3')
+        expect(record?.schemaVersion === 'tianwen.long-goal.v3'
+          ? record.tasks[0]?.execution
+          : undefined).toEqual(expect.objectContaining({ sessionId: expect.any(String) }))
+      }, { timeout: 20_000 })
 
-      const created = createContinuousLongGoal({
-        stateRoot: profile.stateRoot,
-        objective: 'Recover one already completed Task.',
-        context: null,
-        successCriteria: null,
-        workspaceRoot: profile.workspaceRoot,
-        agentPreset: 'standard',
-        controlSessionId: String(profile.main.session.id),
-      }, {
-        goalSuffix: () => 'offline-recovery-profile',
-        plannerSessionId: () => 'offline-recovery-planner',
-        now: () => 1,
-      })
-      const taskUuid = '00000000-0000-4000-8000-000000000777'
-      const planned = commitLongGoalPlan({
-        stateRoot: profile.stateRoot,
-        longGoalId: created.id,
-        expectedRevision: created.revision,
-        outcome: 'continue',
-        tasks: [{ objective: 'Already completed offline' }],
-        consideredSettledTasks: 0,
-      }, { taskId: () => taskUuid, now: () => 2 }) as LongGoalRecordV3
-      const started = appendTianwenAttemptStarted({
-        stateRoot: profile.stateRoot,
-        longGoalId: planned.id,
-        expectedRevision: planned.revision,
-        taskId: taskUuid,
+      const running = listLongGoals(first.stateRoot)[0] as LongGoalRecordV3
+      const durableTask = running.tasks[0]!
+      const taskId = durableTask.execution!.sessionId
+      const task = first.ctx.agents.get(SessionId(taskId))
+      if (task === undefined) throw new Error('expected live native Task before offline settlement')
+      const taskGoal = first.ctx.goals.get(task)
+      if (taskGoal === undefined) throw new Error('expected live native Task Goal')
+      const before = structuredClone(readTianwenTaskAttemptProjection(running, durableTask.id))
+      expect(before.attempts).toHaveLength(1)
+      expect(before.attempts[0]).toMatchObject({
         epoch: 1,
-        parentSessionId: 'offline-recovery-planner',
-        childSessionId: String(taskId),
-        permissionFingerprint: `sha256:${'7'.repeat(64)}`,
-        permissionMode: 'workspace-write',
-        startedAt: '2026-09-01T00:00:00.000Z',
+        parentSessionId: running.planner.sessionId,
+        childSessionId: taskId,
+        status: 'running',
       })
-      const bound = bindGoalFirstLongGoalTask({
-        stateRoot: profile.stateRoot,
-        longGoalId: started.id,
-        expectedRevision: started.revision,
-        taskId: taskUuid,
-        execution: { sessionId: String(taskId), goalId: taskGoalId },
-      }) as LongGoalRecordV3
-      const terminalEventId = `goal-change:${String(taskId)}:${terminalEvent.seq}:complete`
-      const bounded = appendTianwenTerminalDeliveryBoundary({
-        stateRoot: profile.stateRoot,
-        longGoalId: bound.id,
-        expectedRevision: bound.revision,
-        taskId: taskUuid,
-        epoch: 1,
-        terminalEventId,
-        parentSessionId: 'offline-recovery-planner',
-        mainInboxBoundarySeq: profile.main.session.events.at(-1)?.seq ?? 0,
-      })
-      const settled = appendTianwenAttemptSettled({
-        stateRoot: profile.stateRoot,
-        longGoalId: bounded.id,
-        expectedRevision: bounded.revision,
-        taskId: taskUuid,
-        epoch: 1,
-        terminalEventId,
-      }) as LongGoalRecordV3
-      const status: LongGoalStatusProjectionV3 = {
-        schemaVersion: 'tianwen.long-goal-status.v3',
-        goal: {
-          id: settled.id,
-          objective: settled.objective,
-          context: null,
-          successCriteria: null,
-          phase: 'complete',
-          revision: settled.revision,
-          completedTasks: 1,
-          abandonedTasks: 0,
-          totalTasks: 1,
-        },
-        planner: {
-          sessionId: settled.planner.sessionId,
-          phase: settled.planner.phase,
-          planRevision: settled.planner.planRevision,
-        },
-        guidance: [],
-        tasks: [{
-          id: taskUuid,
-          objective: 'Already completed offline',
-          phase: 'complete',
-          execution: { sessionId: String(taskId), goalId: taskGoalId },
-          resolution: null,
-        }],
-        currentTaskId: null,
-        runtime: { activation: 'not-loaded', modelRequests: 0, readOnly: true },
-        control: settled.control,
-      }
-      const inspectSession = (sessionId: string) => (
-        profile.ctx.sessionPersistence.inspect(SessionId(sessionId))
+
+      first.ctx.goals.complete(task, taskGoal)
+      await first.stopMain()
+      expect(first.ctx.agents.get(first.main.session.id)).toBeUndefined()
+      first.releaseTask()
+
+      await vi.waitFor(() => {
+        const record = readLongGoal(first!.stateRoot, running.id) as LongGoalRecordV3
+        const projection = readTianwenTaskAttemptProjection(record, durableTask.id)
+        expect(projection.attempts[0]).toMatchObject({ status: 'settled' })
+        expect(projection.terminalDelivery).toBeUndefined()
+      }, { timeout: 20_000 })
+      const settled = readLongGoal(first.stateRoot, running.id) as LongGoalRecordV3
+      expect(settled.planner.phase).toBe('ready')
+      const settledProjection = structuredClone(
+        readTianwenTaskAttemptProjection(settled, durableTask.id),
       )
-      const intent = { longGoalId: settled.id, transition: 'complete' as const, status }
-      const taskRunsBeforeRecovery = profile.taskRuns()
+      expect(first.taskRunSessions()).toEqual([taskId])
+      const persistedBeforeRestart = await first.ctx.sessionPersistence.inspect(first.main.session.id)
+      expect(persistedBeforeRestart.events.filter(event => event.type === 'user/message'
+        && event.data.source.kind === 'subagent-settled'
+        && String(event.data.source.senderSessionId) === running.planner.sessionId)).toHaveLength(0)
 
-      await expect(deliverContinuousGoalSettlement(intent, {
-        stateRoot: profile.stateRoot,
-        getAgent: () => undefined,
-        readStatus: async () => status,
-        inspectSession,
-        flushSession: async agent => profile.ctx.sessions.flush(agent.session),
-      })).resolves.toBe(false)
-      expect(readTianwenTaskAttemptProjection(
-        readLongGoal(profile.stateRoot, settled.id) as LongGoalRecordV3,
-        taskUuid,
-      ).terminalDelivery).toBeUndefined()
+      await first.dispose(false)
+      first = undefined
+      recovered = await mountProfile(objective, { root, resumeMain: true })
+      expect(String(recovered.main.session.id)).toBe(running.control.sessionId)
 
-      const mainRequestsBeforeRecovery = profile.adapter.requests.filter(
-        request => String(request.sessionId) === String(profile.main.session.id),
-      ).length
-      const recoveredDependencies = {
-        stateRoot: profile.stateRoot,
-        getAgent: (sessionId: string) => sessionId === String(profile.main.session.id)
-          ? profile.main
-          : undefined,
-        readStatus: async () => status,
-        inspectSession,
-        flushSession: async (agent: typeof profile.main) => profile.ctx.sessions.flush(agent.session),
-      }
-      await expect(deliverContinuousGoalSettlement(intent, recoveredDependencies)).resolves.toBe(true)
-      await expect(deliverContinuousGoalSettlement(intent, recoveredDependencies)).resolves.toBe(true)
-
-      expect(profile.taskRuns()).toBe(taskRunsBeforeRecovery)
-      expect(profile.adapter.requests.filter(
-        request => String(request.sessionId) === String(profile.main.session.id),
-      )).toHaveLength(mainRequestsBeforeRecovery + 1)
-      expect(readTianwenTaskAttemptProjection(
-        readLongGoal(profile.stateRoot, settled.id) as LongGoalRecordV3,
-        taskUuid,
-      ).terminalDelivery).toEqual({
-        terminalEventId,
-        parentSessionId: 'offline-recovery-planner',
-        completionTurnObserved: true,
+      await vi.waitFor(() => {
+        const record = readLongGoal(recovered!.stateRoot, running.id) as LongGoalRecordV3
+        const projection = readTianwenTaskAttemptProjection(record, durableTask.id)
+        if (projection.terminalDelivery?.completionTurnObserved !== true) {
+          throw new Error(JSON.stringify({
+            record,
+            projection,
+            live: recovered!.ctx.agents.list().map(agent => ({
+              id: agent.session.id,
+              parent: agent.session.header.parentSession,
+            })),
+            requests: recovered!.adapter.requests.map(request => ({
+              sessionId: request.sessionId,
+              lastText: lastText(request),
+              allText: allText(request),
+            })),
+            mainEvents: recovered!.main.session.events,
+            logs: recovered!.ctx.logger.buffer.map(message => ({
+              name: message.name,
+              type: message.type,
+              args: message.args.map(String),
+            })),
+          }))
+        }
+      }, { timeout: 20_000 })
+      await recovered.main.whenIdle()
+      const after = readLongGoal(recovered.stateRoot, running.id) as LongGoalRecordV3
+      const afterProjection = readTianwenTaskAttemptProjection(after, durableTask.id)
+      expect(after.tianwenEvents.filter(event => event.type === 'terminal-delivery-observed'))
+        .toHaveLength(1)
+      expect(afterProjection.attempts).toEqual(settledProjection.attempts)
+      expect(afterProjection.terminalDeliveryBoundary)
+        .toEqual(settledProjection.terminalDeliveryBoundary)
+      expect(afterProjection.attempts[0]).toMatchObject({
+        epoch: 1,
+        parentSessionId: running.planner.sessionId,
+        childSessionId: taskId,
+        status: 'settled',
       })
+      expect(recovered.taskRuns()).toBe(0)
+      expect(recovered.taskRunSessions()).toEqual([])
+
+      const persistedAfterRestart = await recovered.ctx.sessionPersistence.inspect(
+        recovered.main.session.id,
+      )
+      const terminalNotices = persistedAfterRestart.events.filter(event => (
+        event.type === 'user/message'
+        && event.data.source.kind === 'subagent-settled'
+        && String(event.data.source.senderSessionId) === running.planner.sessionId
+      ))
+      expect(terminalNotices).toHaveLength(1)
+      const terminalNotice = terminalNotices[0]!
+      const terminalTurn = persistedAfterRestart.events.findLast(event => (
+        event.type === 'turn/start' && event.seq < terminalNotice.seq
+      ))
+      expect(terminalTurn?.type).toBe('turn/start')
+      expect(persistedAfterRestart.events).toContainEqual(expect.objectContaining({
+        type: 'turn/end',
+        data: expect.objectContaining({
+          turn: terminalTurn?.type === 'turn/start' ? terminalTurn.data.turn : undefined,
+          reason: expect.objectContaining({ kind: 'completed' }),
+        }),
+      }))
+      expect(recovered.adapter.requests.filter(request => (
+        String(request.sessionId) === String(recovered!.main.session.id)
+      ))).toHaveLength(1)
+      await expectNativeChild(
+        recovered.ctx,
+        running.planner.sessionId,
+        taskId,
+        'workspace-write',
+      )
     } finally {
-      await taskHandle.dispose()
-      await profile.dispose()
+      await first?.dispose(false)
+      await recovered?.dispose(false)
+      rmSync(root, { recursive: true, force: true })
     }
-  }, 30_000)
+  }, 60_000)
 })
