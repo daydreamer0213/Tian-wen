@@ -9,13 +9,18 @@ export interface DurableProgressFact {
   readonly changedAt: string
 }
 
-export interface LongGoalLivenessObservation<TReporter> {
+interface LongGoalLivenessObservationBase {
   readonly parentKey: string
   readonly sourceKey: string
-  readonly reporter: TReporter
-  readonly state: 'active' | 'blocked' | 'terminal'
-  readonly fact: DurableProgressFact
 }
+
+export type LongGoalLivenessObservation<TReporter> = LongGoalLivenessObservationBase & ({
+  readonly reporter: TReporter
+  readonly state: 'active'
+  readonly fact: DurableProgressFact
+} | {
+  readonly state: 'blocked' | 'terminal'
+})
 
 export interface LongGoalLivenessReport<TReporter> {
   readonly parentKey: string
@@ -29,8 +34,7 @@ export interface LongGoalLiveness<TReporter> {
 }
 
 type Lane<TReporter> = {
-  readonly sources: Map<string, DurableProgressFact>
-  reporter: TReporter
+  readonly sources: Map<string, { readonly fact: DurableProgressFact, reporter: TReporter }>
   timer: ReturnType<typeof setTimeout> | undefined
   queued: boolean
   running: Promise<void>
@@ -57,11 +61,21 @@ export function createLongGoalLiveness<TReporter>(options: {
     lane.running = lane.running.then(async () => {
       lane.queued = false
       if (disposed || lane.sources.size === 0) return
-      await options.report({ parentKey, reporter: lane.reporter, facts: [...lane.sources.values()] })
+      const sources = [...lane.sources.values()]
+      await options.report({
+        parentKey,
+        reporter: sources.at(-1)!.reporter,
+        facts: sources.map(source => source.fact),
+      })
     }, async () => {
       lane.queued = false
       if (disposed || lane.sources.size === 0) return
-      await options.report({ parentKey, reporter: lane.reporter, facts: [...lane.sources.values()] })
+      const sources = [...lane.sources.values()]
+      await options.report({
+        parentKey,
+        reporter: sources.at(-1)!.reporter,
+        facts: sources.map(source => source.fact),
+      })
     })
     void lane.running.catch(error => { options.reportError?.(error) })
   }
@@ -92,18 +106,18 @@ export function createLongGoalLiveness<TReporter>(options: {
       }
 
       const lane = existing ?? {
-        sources: new Map<string, DurableProgressFact>(),
-        reporter: observation.reporter,
+        sources: new Map<string, { readonly fact: DurableProgressFact, reporter: TReporter }>(),
         timer: undefined,
         queued: false,
         running: Promise.resolve(),
       }
-      if (sameFact(lane.sources.get(observation.sourceKey), observation.fact)) {
-        lane.reporter = observation.reporter
+      const previous = lane.sources.get(observation.sourceKey)
+      if (sameFact(previous?.fact, observation.fact)) {
+        previous!.reporter = observation.reporter
         return
       }
-      lane.sources.set(observation.sourceKey, observation.fact)
-      lane.reporter = observation.reporter
+      lane.sources.delete(observation.sourceKey)
+      lane.sources.set(observation.sourceKey, { fact: observation.fact, reporter: observation.reporter })
       lanes.set(observation.parentKey, lane)
       queueReport(observation.parentKey, lane)
       schedule(observation.parentKey, lane, FIRST_LIVENESS_MS)

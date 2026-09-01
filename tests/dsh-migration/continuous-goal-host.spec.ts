@@ -4,11 +4,21 @@ import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Agent, AgentOptions, AgentSetup } from '@deepseek-ai/dsh-agent'
-import { SubagentError } from '@deepseek-ai/dsh-subagent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import SubagentRuntime, { SubagentError, type SubagentProvider } from '@deepseek-ai/dsh-subagent'
 import { sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { CallId, createToolResultMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import {
+  Context as DshContext,
+  defineTool,
+  mountAgentLoopTestDependencies,
+  ScriptedAdapter,
+  textResponse,
+  toolCallResponse,
+} from '@tianwen/dsh-compat'
 import { projectEvidence } from '../../packages/tianwen-evidence/src/index.js'
 import {
   LongGoalIntegrityError,
@@ -25,10 +35,12 @@ import {
 import type { LongGoalRecordV3, LongGoalStatusProjectionV3 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
 import type { ContinuousGoalControlAction } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-service.js'
 import { mountContinuousGoalHost, type ContinuousGoalHostDependencies } from '../../packages/tianwen-runtime-bundle/src/continuous-goal-host.js'
+import { FIRST_LIVENESS_MS } from '../../packages/tianwen-runtime-bundle/src/long-goal-liveness.js'
 import {
   createPermissionAttemptHost,
   deliverContinuousGoalSettlement,
   recordContinuousGoalTerminalAttempt,
+  reportLongGoalTerminalMarker,
   reportLongGoalProgress,
   runCurrentWebTask,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
@@ -40,6 +52,35 @@ const TASK_1 = '00000000-0000-4000-8000-000000000002'
 const TASK_2 = '00000000-0000-4000-8000-000000000003'
 const EXECUTION_1 = { sessionId: 'task-session-1', goalId: 'task-goal-1' }
 const EXECUTION_2 = { sessionId: 'task-session-2', goalId: 'task-goal-2' }
+
+type ProbeProjection = {
+  readonly key: string
+  init(): unknown
+  apply(state: unknown, event: unknown): unknown
+  readonly wire: { view(state: unknown): unknown }
+}
+
+function probeProjectionRegistry() {
+  const definitions: ProbeProjection[] = []
+  const valuesFor = (events: readonly unknown[]) => Object.fromEntries(definitions.map(definition => {
+    let state = definition.init()
+    for (const event of events) state = definition.apply(state, event)
+    return [definition.key, definition.wire.view(state)]
+  }))
+  return {
+    register(definition: ProbeProjection) { definitions.push(definition) },
+    snapshot(session: { readonly events: readonly unknown[] }) { return { values: valuesFor(session.events) } },
+    restore(_base: unknown, events: readonly unknown[]) { return { snapshot: { values: valuesFor(events) } } },
+  }
+}
+
+const terminalMarkerProbeProvider: SubagentProvider = {
+  name: 'terminal-marker-probe',
+  inheritsParentContext: false,
+  capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+  async start() { throw new Error('terminal marker probe uses only continuable children') },
+  async prepareContinuable() { return {} },
+}
 
 function record(overrides: Partial<LongGoalRecordV3> = {}): LongGoalRecordV3 {
   return {
@@ -77,7 +118,7 @@ function status(
   }
 }
 
-function terminalFixture(label: string) {
+function terminalFixture(label: string, persistAttempt = true) {
   const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
   mkdirSync(base, { recursive: true })
   const fixture = mkdtempSync(resolve(base, `${label}-`))
@@ -105,11 +146,13 @@ function terminalFixture(label: string) {
     stateRoot, longGoalId: started.id, expectedRevision: started.revision,
     taskId: TASK_1, execution: EXECUTION_1,
   }) as LongGoalRecordV3
-  const settled = appendTianwenAttemptSettled({
-    stateRoot, longGoalId: bound.id, expectedRevision: bound.revision,
-    taskId: TASK_1, epoch: 1,
-    terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
-  })
+  const settled = persistAttempt
+    ? appendTianwenAttemptSettled({
+        stateRoot, longGoalId: bound.id, expectedRevision: bound.revision,
+        taskId: TASK_1, epoch: 1,
+        terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
+      })
+    : bound
   return {
     fixture,
     stateRoot,
@@ -152,6 +195,27 @@ function permissionLimitedFixture(label: string) {
     record: limited,
     status: status(limited, ['blocked'], TASK_1, 'blocked'),
   }
+}
+
+function terminalMarkerEvent(
+  seq: number,
+  mainBoundarySeq: number,
+  terminalEventId = `goal-change:${EXECUTION_1.sessionId}:17:complete`,
+) {
+  return {
+    type: 'user/message', seq, time: 1_000, surfaceOp: 'append', data: {
+      id: `terminal-marker-${seq}`, role: 'user',
+      content: [
+        { type: 'text', text: 'Background subagent planner-session reported:' },
+        { type: 'text', text: JSON.stringify({
+          schemaVersion: 'tianwen.long-goal-terminal-marker.v1',
+          terminalEventId,
+          mainBoundarySeq,
+        }) },
+      ],
+      source: { kind: 'subagent-report', form: 'relay', senderSessionId: 'planner-session' },
+    },
+  } as unknown as SessionEvent
 }
 
 function agent(sessionId: string, goalId: string, phase: 'active' | 'blocked' | 'complete' = 'active'): Agent & {
@@ -283,6 +347,7 @@ function harness(initial = record()) {
     pause, flushSession: vi.fn(async () => { order.push('flush') }),
     deliver: vi.fn(async () => undefined),
     reportProgress: vi.fn(async () => undefined),
+    reportTerminalMarker: vi.fn(async () => undefined),
     recordTerminalAttempt: vi.fn(async () => undefined),
     reportError: vi.fn(),
     installCommand: vi.fn((controlAgent: Agent, operations) => {
@@ -329,6 +394,157 @@ function harness(initial = record()) {
 }
 
 describe('continuous Goal Host', () => {
+  it('persists a quiet terminal marker from the exact Planner with the pre-marker main boundary', async () => {
+    const planner = { session: { id: 'planner-session' } } as unknown as Agent
+    const reportFrom = vi.fn(async () => 'terminal-marker-message')
+    const signal = new AbortController().signal
+
+    await expect(reportLongGoalTerminalMarker({ subagents: { reportFrom } } as never, {
+      planner,
+      terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
+      mainBoundarySeq: 19,
+      signal,
+    })).resolves.toBe('terminal-marker-message')
+
+    expect(reportFrom).toHaveBeenCalledWith(
+      planner,
+      [{ type: 'text', text: JSON.stringify({
+        schemaVersion: 'tianwen.long-goal-terminal-marker.v1',
+        terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
+        mainBoundarySeq: 19,
+      }) }],
+      { delivery: 'quiet', signal },
+    )
+  })
+
+  it('public DSH persists the quiet marker before the exact Planner native settlement', async () => {
+    const base = resolve('D:/DevData/tianwen-dsh-probe/terminal-marker-order')
+    mkdirSync(base, { recursive: true })
+    const root = mkdtempSync(resolve(base, 'sessions-'))
+    const ctx = new DshContext()
+    let releaseGate!: () => void
+    const gate = new Promise<void>(resolveGate => { releaseGate = resolveGate })
+    ctx.provide('sessionProjections', probeProjectionRegistry())
+    ctx.provide('sandboxPolicy', {
+      overrideOf(session: { readonly events: readonly { readonly type: string, readonly data: unknown }[] }) {
+        const event = session.events.findLast(item => item.type === 'sandbox/mode')
+        return (event?.data as { readonly mode?: unknown } | undefined)?.mode
+      },
+    })
+    ctx.provide('approval', {})
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+    await ctx.plugin(SubagentRuntime)
+    ctx.llm.registerAdapter(['terminal-marker-main'], new ScriptedAdapter([
+      textResponse('Main observed the exact Planner settlement.'),
+    ]))
+    ctx.llm.registerAdapter(['terminal-marker-planner'], new ScriptedAdapter([
+      toolCallResponse('terminal-gate-call', 'terminal_marker_gate', {}),
+      textResponse('Planner terminal result.'),
+    ]))
+    ctx.subagents.registerProvider(terminalMarkerProbeProvider)
+    const disposeGate = ctx.tools.register(defineTool({
+      name: 'terminal_marker_gate', description: 'Wait until the terminal marker is durable.', parameters: {},
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute() { await gate; return 'released' },
+    }))
+    try {
+      const main = (await ctx.agents.create({
+        sessionId: SessionId('terminal-marker-main'),
+        agentOptions: { provider: 'terminal-marker-main', model: 'scripted' },
+      })).agent
+      const started = await ctx.subagents.startContinuable({
+        provider: 'terminal-marker-probe', label: 'Exact Planner',
+        request: {
+          parent: main,
+          prompt: [{ type: 'text', text: 'Wait, then finish.' }],
+          agentOptions: { provider: 'terminal-marker-planner', model: 'scripted' },
+        },
+        signal: AbortSignal.timeout(10_000),
+      })
+      await vi.waitFor(() => expect(ctx.agents.get(started.childId)?.session.events
+        .some(event => event.type === 'tool/call')).toBe(true))
+      const planner = ctx.agents.get(started.childId)!
+      const mainBoundarySeq = main.session.events.at(-1)?.seq ?? -1
+      await reportLongGoalTerminalMarker(ctx, {
+        planner,
+        terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
+        mainBoundarySeq,
+        signal: AbortSignal.timeout(10_000),
+      })
+      releaseGate()
+      await vi.waitFor(() => expect(main.session.events.some(event => event.type === 'user/message'
+        && (event.data.source as { readonly kind?: unknown }).kind === 'subagent-settled')).toBe(true))
+      await main.whenIdle()
+      expect(await ctx.sessions.flush(main.session)).toBe(true)
+      const persisted = await ctx.sessionPersistence.inspect(main.session.id)
+      const persistedMarker = persisted.events.find(event => event.type === 'user/message'
+        && (event.data.source as { readonly kind?: unknown }).kind === 'subagent-report')
+      const settled = persisted.events.find(event => event.type === 'user/message'
+        && (event.data.source as { readonly kind?: unknown }).kind === 'subagent-settled')
+      expect(persistedMarker?.seq).toBeGreaterThan(mainBoundarySeq)
+      expect(settled?.seq).toBeGreaterThan(persistedMarker!.seq)
+      expect(persisted.events.some(event => event.type === 'turn/end'
+        && event.data.reason.kind === 'completed')).toBe(true)
+    } finally {
+      releaseGate()
+      disposeGate()
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('attempts the deterministic terminal marker before terminal recording can be queued', async () => {
+    const source = record({
+      tianwenEvents: [{
+        type: 'attempt-started', taskId: TASK_1, attempt: {
+          epoch: 1, parentSessionId: 'planner-session', childSessionId: EXECUTION_1.sessionId,
+          permissionFingerprint: 'sha256:marker-order', permissionMode: 'read-only', status: 'running',
+          startedAt: '2026-09-01T00:00:00.000Z',
+        },
+      }],
+    })
+    const subject = harness(source)
+    const main = agent(source.control.sessionId, 'main-goal')
+    Object.assign(main.session, {
+      events: [{ type: 'assistant/message', seq: 19, time: 1_000, data: {} }],
+    })
+    const planner = agent(source.planner.sessionId, 'planner-goal')
+    subject.live.set(source.control.sessionId, main)
+    subject.live.set(source.planner.sessionId, planner)
+    let releaseMarker!: () => void
+    const markerAccepted = new Promise<void>(resolve => { releaseMarker = resolve })
+    subject.dependencies.reportTerminalMarker.mockImplementation(async () => markerAccepted)
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalled())
+    await Promise.resolve()
+    subject.dependencies.flushSession.mockClear()
+    subject.dependencies.recordTerminalAttempt.mockClear()
+
+    subject.sessionEvent(EXECUTION_1.sessionId, {
+      type: 'goal/change', seq: 17, time: 1_000, data: {
+        operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+        goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+      },
+    })
+
+    expect(subject.dependencies.reportTerminalMarker).toHaveBeenCalledWith({
+      planner,
+      terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
+      mainBoundarySeq: 19,
+    })
+    expect(subject.dependencies.recordTerminalAttempt).not.toHaveBeenCalled()
+    subject.first.setGoal('complete')
+    subject.setStatus(status(source, ['complete'], null, 'complete'))
+    subject.complete()
+    await vi.waitFor(() => expect(subject.dependencies.flushSession).toHaveBeenCalled())
+    expect(subject.dependencies.recordTerminalAttempt).not.toHaveBeenCalled()
+    releaseMarker()
+    await vi.waitFor(() => expect(subject.dependencies.recordTerminalAttempt).toHaveBeenCalledOnce())
+    await dispose()
+  })
+
   it('reports coalesced durable facts from the exact Planner through the public DSH API', async () => {
     const planner = { session: { id: 'planner-session' } } as unknown as Agent
     const reportFrom = vi.fn(async () => 'main-report-message')
@@ -425,6 +641,97 @@ describe('continuous Goal Host', () => {
     }
   })
 
+  it('coalesces concurrent recovery of one terminal event into one fallback Turn', async () => {
+    const terminal = terminalFixture('offline-concurrent-singleflight')
+    try {
+      const main = feedbackAgent()
+      let mainEvents: readonly SessionEvent[] = []
+      const taskEvents = [{
+        type: 'goal/change', seq: 17, time: 1_000, data: {
+          operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+          goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+        },
+      }] as unknown as readonly SessionEvent[]
+      const inspectSession = vi.fn(async (sessionId: string) => sessionId === EXECUTION_1.sessionId
+        ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+        : { meta: { id: sessionId }, events: mainEvents })
+      const flushSession = vi.fn(async () => {
+        const notice = main.followup.mock.calls[0]![0]
+        mainEvents = [
+          { type: 'turn/start', seq: 20, time: 1_100, data: { turn: 20 } },
+          { type: 'user/message', seq: 21, time: 1_101, surfaceOp: 'append', data: notice },
+          { type: 'assistant/message', seq: 22, time: 1_102, surfaceOp: 'append', data: {
+            turn: 20,
+            message: { id: 'main-result', role: 'assistant', content: [{ type: 'text', text: 'Delivery confirmed.' }] },
+          } },
+          { type: 'turn/end', seq: 23, time: 1_103, data: { turn: 20, reason: { kind: 'completed' } } },
+        ] as unknown as readonly SessionEvent[]
+        return true
+      })
+      const dependencies = {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => main,
+        readStatus: async () => terminal.status,
+        inspectSession,
+        flushSession,
+      }
+      const intent = { longGoalId: terminal.record.id, transition: 'complete' as const, status: terminal.status }
+
+      await expect(Promise.all([
+        deliverContinuousGoalSettlement(intent, dependencies),
+        deliverContinuousGoalSettlement(intent, dependencies),
+      ])).resolves.toEqual([true, true])
+
+      expect(main.followup).toHaveBeenCalledOnce()
+      expect(flushSession).toHaveBeenCalledOnce()
+    } finally {
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('does not send or acknowledge after the exact main Agent changes during the final inspection', async () => {
+    const terminal = terminalFixture('offline-agent-swap')
+    try {
+      const stale = feedbackAgent()
+      stale.followup.mockImplementation(() => { throw new Error('stale Agent received fallback') })
+      const replacement = feedbackAgent()
+      let live: Agent = stale
+      let mainInspections = 0
+      const taskEvents = [{
+        type: 'goal/change', seq: 17, time: 1_000, data: {
+          operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+          goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+        },
+      }] as unknown as readonly SessionEvent[]
+
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: terminal.record.id, transition: 'complete', status: terminal.status,
+      }, {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => live,
+        readStatus: async () => terminal.status,
+        inspectSession: async sessionId => {
+          if (sessionId === EXECUTION_1.sessionId) {
+            return { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+          }
+          mainInspections += 1
+          if (mainInspections === 2) live = replacement
+          return { meta: { id: sessionId }, events: [] }
+        },
+        flushSession: vi.fn(async () => true),
+      })).resolves.toBe(false)
+
+      expect(stale.followup).not.toHaveBeenCalled()
+      expect(replacement.followup).not.toHaveBeenCalled()
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      ).terminalDelivery).toBeUndefined()
+    } finally {
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    }
+  })
+
   it('acknowledges an already-persisted native Planner completion Turn without sending fallback', async () => {
     const terminal = terminalFixture('native-observed')
     try {
@@ -436,16 +743,17 @@ describe('continuous Goal Host', () => {
         },
       }] as unknown as readonly SessionEvent[]
       const mainEvents = [
-        { type: 'turn/start', seq: 20, time: 1_100, data: { turn: 9 } },
-        { type: 'user/message', seq: 21, time: 1_101, surfaceOp: 'append', data: {
+        terminalMarkerEvent(20, 19),
+        { type: 'turn/start', seq: 21, time: 1_000, data: { turn: 9 } },
+        { type: 'user/message', seq: 22, time: 1_000, surfaceOp: 'append', data: {
           id: 'native-settlement', role: 'user', content: [{ type: 'text', text: 'Planner settled.' }],
           source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
         } },
-        { type: 'assistant/message', seq: 22, time: 1_102, surfaceOp: 'append', data: {
+        { type: 'assistant/message', seq: 23, time: 1_000, surfaceOp: 'append', data: {
           turn: 9,
           message: { id: 'native-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Goal complete.' }] },
         } },
-        { type: 'turn/end', seq: 23, time: 1_103, data: { turn: 9, reason: { kind: 'completed' } } },
+        { type: 'turn/end', seq: 24, time: 1_000, data: { turn: 9, reason: { kind: 'completed' } } },
       ] as unknown as readonly SessionEvent[]
       const followup = vi.fn()
 
@@ -462,6 +770,235 @@ describe('continuous Goal Host', () => {
       })).resolves.toBe(true)
 
       expect(followup).not.toHaveBeenCalled()
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      ).terminalDelivery?.completionTurnObserved).toBe(true)
+    } finally {
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('reuses the deterministic marker after a crash before the terminal attempt was recorded', async () => {
+    const terminal = terminalFixture('marker-before-record-crash', false)
+    try {
+      const taskEvents = [{
+        type: 'goal/change', seq: 17, time: 1_000,
+        data: {
+          operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+          goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+        },
+      }] as unknown as readonly SessionEvent[]
+      const mainEvents = [
+        terminalMarkerEvent(20, 19),
+        { type: 'turn/start', seq: 21, time: 1_000, data: { turn: 9 } },
+        { type: 'user/message', seq: 22, time: 1_000, surfaceOp: 'append', data: {
+          id: 'native-settlement', role: 'user', content: [{ type: 'text', text: 'Planner settled.' }],
+          source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
+        } },
+        { type: 'assistant/message', seq: 23, time: 1_000, surfaceOp: 'append', data: {
+          turn: 9,
+          message: { id: 'native-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Goal complete.' }] },
+        } },
+        { type: 'turn/end', seq: 24, time: 1_000, data: { turn: 9, reason: { kind: 'completed' } } },
+      ] as unknown as readonly SessionEvent[]
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      ).attempts.at(-1)?.status).toBe('running')
+
+      await recordContinuousGoalTerminalAttempt({
+        stateRoot: terminal.stateRoot,
+        longGoalId: terminal.record.id,
+        status: terminal.status,
+      }, {
+        inspectSession: async () => ({
+          meta: { id: EXECUTION_1.sessionId, parentSession: 'planner-session' }, events: taskEvents,
+        }),
+      })
+      const recoveredStatus = status(
+        readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
+        ['complete'], null, 'complete',
+      )
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: terminal.record.id, transition: 'complete', status: recoveredStatus,
+      }, {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => undefined,
+        readStatus: async () => recoveredStatus,
+        inspectSession: async sessionId => sessionId === EXECUTION_1.sessionId
+          ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+          : { meta: { id: sessionId }, events: mainEvents },
+        flushSession: vi.fn(async () => true),
+      })).resolves.toBe(true)
+
+      const recovered = readTianwenTaskAttemptProjection(
+        readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      )
+      expect(recovered.attempts).toHaveLength(1)
+      expect(recovered.attempts[0]).toMatchObject({
+        status: 'settled', terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
+      })
+      expect(recovered.terminalDelivery?.completionTurnObserved).toBe(true)
+    } finally {
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('accepts the exact Planner settlement after the boundary when persistence orders it before the marker', async () => {
+    const terminal = terminalFixture('native-before-marker')
+    try {
+      const taskEvents = [{
+        type: 'goal/change', seq: 17, time: 1_000,
+        data: {
+          operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+          goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+        },
+      }] as unknown as readonly SessionEvent[]
+      const mainEvents = [
+        { type: 'turn/start', seq: 20, time: 1_000, data: { turn: 9 } },
+        { type: 'user/message', seq: 21, time: 1_000, surfaceOp: 'append', data: {
+          id: 'native-settlement', role: 'user', content: [{ type: 'text', text: 'Planner settled.' }],
+          source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
+        } },
+        { type: 'assistant/message', seq: 22, time: 1_000, surfaceOp: 'append', data: {
+          turn: 9,
+          message: { id: 'native-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Goal complete.' }] },
+        } },
+        { type: 'turn/end', seq: 23, time: 1_000, data: { turn: 9, reason: { kind: 'completed' } } },
+        terminalMarkerEvent(24, 19),
+      ] as unknown as readonly SessionEvent[]
+
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: terminal.record.id, transition: 'complete', status: terminal.status,
+      }, {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => undefined,
+        readStatus: async () => terminal.status,
+        inspectSession: async sessionId => sessionId === EXECUTION_1.sessionId
+          ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+          : { meta: { id: sessionId }, events: mainEvents },
+        flushSession: vi.fn(async () => true),
+      })).resolves.toBe(true)
+    } finally {
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an old exact-Planner settlement before the boundary even when every timestamp collides', async () => {
+    const terminal = terminalFixture('native-old-collision')
+    try {
+      const taskEvents = [{
+        type: 'goal/change', seq: 17, time: 1_000,
+        data: {
+          operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+          goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+        },
+      }] as unknown as readonly SessionEvent[]
+      const mainEvents = [
+        { type: 'turn/start', seq: 5, time: 1_000, data: { turn: 8 } },
+        { type: 'user/message', seq: 6, time: 1_000, surfaceOp: 'append', data: {
+          id: 'old-native-settlement', role: 'user', content: [{ type: 'text', text: 'Old Planner settlement.' }],
+          source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
+        } },
+        { type: 'assistant/message', seq: 7, time: 1_000, surfaceOp: 'append', data: {
+          turn: 8,
+          message: { id: 'old-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Old completion.' }] },
+        } },
+        { type: 'turn/end', seq: 8, time: 1_000, data: { turn: 8, reason: { kind: 'completed' } } },
+        terminalMarkerEvent(20, 19),
+      ] as unknown as readonly SessionEvent[]
+
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: terminal.record.id, transition: 'complete', status: terminal.status,
+      }, {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => undefined,
+        readStatus: async () => terminal.status,
+        inspectSession: async sessionId => sessionId === EXECUTION_1.sessionId
+          ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+          : { meta: { id: sessionId }, events: mainEvents },
+        flushSession: vi.fn(async () => true),
+      })).resolves.toBe(false)
+
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      ).terminalDelivery).toBeUndefined()
+
+    } finally {
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('fails closed instead of duplicating an exact Planner native Turn when no marker can correlate it', async () => {
+    const terminal = terminalFixture('native-without-marker')
+    try {
+      const main = feedbackAgent()
+      main.followup.mockImplementation(() => { throw new Error('duplicate fallback') })
+      const taskEvents = [{
+        type: 'goal/change', seq: 17, time: 1_000, data: {
+          operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+          goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+        },
+      }] as unknown as readonly SessionEvent[]
+      let mainEvents: readonly SessionEvent[] = [
+        { type: 'turn/start', seq: 20, time: 1_000, data: { turn: 9 } },
+        { type: 'user/message', seq: 21, time: 1_000, surfaceOp: 'append', data: {
+          id: 'uncorrelated-native-settlement', role: 'user', content: [{ type: 'text', text: 'Planner settled.' }],
+          source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
+        } },
+        { type: 'assistant/message', seq: 22, time: 1_000, surfaceOp: 'append', data: {
+          turn: 9,
+          message: { id: 'native-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Goal complete.' }] },
+        } },
+        { type: 'turn/end', seq: 23, time: 1_000, data: { turn: 9, reason: { kind: 'completed' } } },
+      ] as unknown as readonly SessionEvent[]
+
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: terminal.record.id, transition: 'complete', status: terminal.status,
+      }, {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => main,
+        readStatus: async () => terminal.status,
+        inspectSession: async sessionId => sessionId === EXECUTION_1.sessionId
+          ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+          : { meta: { id: sessionId }, events: mainEvents },
+        flushSession: vi.fn(async () => true),
+      })).resolves.toBe(false)
+
+      expect(main.followup).not.toHaveBeenCalled()
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      ).terminalDelivery).toBeUndefined()
+
+      mainEvents = [
+        ...mainEvents,
+        terminalMarkerEvent(30, 29),
+        { type: 'turn/start', seq: 31, time: 1_000, data: { turn: 10 } },
+        { type: 'user/message', seq: 32, time: 1_000, surfaceOp: 'append', data: {
+          id: 'correlated-native-settlement', role: 'user', content: [{ type: 'text', text: 'Planner settled.' }],
+          source: { kind: 'subagent-settled', form: 'notice', summary: 'settled', senderSessionId: 'planner-session' },
+        } },
+        { type: 'assistant/message', seq: 33, time: 1_000, surfaceOp: 'append', data: {
+          turn: 10,
+          message: { id: 'correlated-main-reply', role: 'assistant', content: [{ type: 'text', text: 'Current goal complete.' }] },
+        } },
+        { type: 'turn/end', seq: 34, time: 1_000, data: { turn: 10, reason: { kind: 'completed' } } },
+      ] as unknown as readonly SessionEvent[]
+      await expect(deliverContinuousGoalSettlement({
+        longGoalId: terminal.record.id, transition: 'complete', status: terminal.status,
+      }, {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => main,
+        readStatus: async () => terminal.status,
+        inspectSession: async sessionId => sessionId === EXECUTION_1.sessionId
+          ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+          : { meta: { id: sessionId }, events: mainEvents },
+        flushSession: vi.fn(async () => true),
+      })).resolves.toBe(true)
       expect(readTianwenTaskAttemptProjection(
         readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
         TASK_1,
@@ -639,6 +1176,97 @@ describe('continuous Goal Host', () => {
       })
       expect(reloaded.tasks[0]!.execution).toEqual(EXECUTION_1)
       expect(inspectSession).toHaveBeenCalledTimes(1)
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('uses the authoritative post-fold revision for startup offline delivery in one mount', async () => {
+    const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
+    mkdirSync(base, { recursive: true })
+    const fixture = mkdtempSync(resolve(base, 'startup-post-fold-delivery-'))
+    try {
+      const stateRoot = resolve(fixture, 'state')
+      const created = createContinuousLongGoal({
+        stateRoot, objective: 'Deliver after startup fold', context: null, successCriteria: null,
+        workspaceRoot: fixture, agentPreset: 'planner-preset', controlSessionId: 'control-session',
+      }, { goalSuffix: () => 'startup-post-fold-delivery', plannerSessionId: () => 'planner-session', now: () => 1 })
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: created.id, expectedRevision: created.revision,
+        outcome: 'continue', tasks: [{ objective: 'Finish before restart' }], consideredSettledTasks: 0,
+      }, { taskId: () => TASK_1, now: () => 2 }) as LongGoalRecordV3
+      const started = appendTianwenAttemptStarted({
+        stateRoot, longGoalId: planned.id, expectedRevision: planned.revision,
+        taskId: TASK_1, epoch: 1, parentSessionId: 'planner-session', childSessionId: EXECUTION_1.sessionId,
+        permissionFingerprint: 'sha256:startup-post-fold', permissionMode: 'read-only',
+        startedAt: '2026-09-01T00:00:00.000Z',
+      })
+      const bound = bindGoalFirstLongGoalTask({
+        stateRoot, longGoalId: started.id, expectedRevision: started.revision,
+        taskId: TASK_1, execution: EXECUTION_1,
+      }) as LongGoalRecordV3
+      const taskEvents = [{
+        type: 'goal/change', seq: 17, time: 1_000, data: {
+          operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+          goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+        },
+      }] as unknown as readonly SessionEvent[]
+      const main = feedbackAgent()
+      let mainEvents: readonly SessionEvent[] = []
+      const subject = harness(bound)
+      subject.live.set('control-session', main)
+      const currentStatus = () => status(
+        readLongGoal(stateRoot, bound.id) as LongGoalRecordV3,
+        ['complete'],
+        null,
+      )
+      const inspectSession = vi.fn(async (sessionId: string) => sessionId === EXECUTION_1.sessionId
+        ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+        : { meta: { id: sessionId }, events: mainEvents })
+      const flushSession = vi.fn(async (agent: Agent) => {
+        if (agent !== main) return true
+        const notice = main.followup.mock.calls[0]![0]
+        mainEvents = [
+          { type: 'turn/start', seq: 20, time: 1_100, data: { turn: 20 } },
+          { type: 'user/message', seq: 21, time: 1_101, surfaceOp: 'append', data: notice },
+          { type: 'assistant/message', seq: 22, time: 1_102, surfaceOp: 'append', data: {
+            turn: 20,
+            message: { id: 'main-result', role: 'assistant', content: [{ type: 'text', text: 'Delivery confirmed.' }] },
+          } },
+          { type: 'turn/end', seq: 23, time: 1_103, data: { turn: 20, reason: { kind: 'completed' } } },
+        ] as unknown as readonly SessionEvent[]
+        return true
+      })
+      const recordTerminalAttempt = vi.fn(input => recordContinuousGoalTerminalAttempt({
+        stateRoot,
+        ...input,
+      }, { inspectSession }))
+      Object.assign(subject.dependencies, {
+        roots: { stateRoot, sessionsRoot: resolve(fixture, 'sessions'), evolutionRoot: resolve(stateRoot, 'evolution') },
+        listLongGoals: () => [readLongGoal(stateRoot, bound.id)],
+        readLongGoal,
+        readStatus: vi.fn(async () => currentStatus()),
+        recordTerminalAttempt,
+        flushSession,
+        deliver: (intent: Parameters<typeof deliverContinuousGoalSettlement>[0]) =>
+          deliverContinuousGoalSettlement(intent, {
+            stateRoot,
+            getAgent: sessionId => subject.live.get(sessionId),
+            readStatus: async () => currentStatus(),
+            inspectSession,
+            flushSession,
+          }),
+      })
+
+      const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+      await dispose()
+
+      expect(recordTerminalAttempt).toHaveBeenCalledOnce()
+      expect(main.followup).toHaveBeenCalledOnce()
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(stateRoot, bound.id) as LongGoalRecordV3,
+        TASK_1,
+      ).terminalDelivery?.completionTurnObserved).toBe(true)
     } finally {
       rmSync(fixture, { recursive: true, force: true })
     }
@@ -2158,7 +2786,7 @@ describe('continuous Goal Host', () => {
     const failure = new Error('notice delivery failed')
     subject.dependencies.deliver = vi.fn(async () => { throw failure })
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
-    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledTimes(2))
     await vi.waitFor(() => expect(subject.dependencies.deliver).toHaveBeenCalledOnce())
     await expect(dispose()).resolves.toBeUndefined()
 
@@ -2695,6 +3323,32 @@ describe('continuous Goal Host', () => {
     }))
     expect(subject.dependencies.reportProgress.mock.calls.at(-1)?.[0].facts[0]?.nextAction).toBeUndefined()
     expect(subject.dependencies.deliver).not.toHaveBeenCalled()
+  })
+
+  it('removes a terminal liveness source even when its Planner is no longer live', async () => {
+    vi.useFakeTimers()
+    try {
+      const source = record()
+      const subject = harness(source)
+      const planner = agent(source.planner.sessionId, 'planner-goal')
+      subject.live.set(source.planner.sessionId, planner)
+      subject.setStatus(status(source, ['active'], TASK_1))
+      const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(subject.dependencies.reportProgress).toHaveBeenCalledOnce()
+
+      subject.live.delete(source.planner.sessionId)
+      subject.first.setGoal('blocked')
+      subject.setStatus(status(source, ['blocked'], TASK_1, 'blocked'))
+      subject.block()
+      await vi.waitFor(() => expect(subject.dependencies.recordTerminalAttempt).toHaveBeenCalledOnce())
+      await vi.advanceTimersByTimeAsync(FIRST_LIVENESS_MS)
+      await dispose()
+
+      expect(subject.dependencies.reportProgress).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('delivers one guarded followup for the exact notice Turn and releases the guard before later user work', async () => {

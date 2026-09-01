@@ -1896,6 +1896,8 @@ export interface ContinuousGoalSettlementDeliveryDependencies {
   readonly flushSession: (agent: Agent) => Promise<void | boolean>
 }
 
+const continuousGoalSettlementFlights = new Map<string, Promise<boolean>>()
+
 export async function recordContinuousGoalTerminalAttempt(input: {
   readonly stateRoot: string
   readonly longGoalId: string
@@ -1968,6 +1970,71 @@ export function reportLongGoalProgress(
   })
 }
 
+const LONG_GOAL_TERMINAL_MARKER_SCHEMA = 'tianwen.long-goal-terminal-marker.v1'
+
+export function reportLongGoalTerminalMarker(
+  ctx: Pick<Context, 'subagents'>,
+  input: {
+    readonly planner: Agent
+    readonly terminalEventId: string
+    readonly mainBoundarySeq: number
+    readonly signal: AbortSignal
+  },
+) {
+  return ctx.subagents.reportFrom(input.planner, [{
+    type: 'text',
+    text: JSON.stringify({
+      schemaVersion: LONG_GOAL_TERMINAL_MARKER_SCHEMA,
+      terminalEventId: input.terminalEventId,
+      mainBoundarySeq: input.mainBoundarySeq,
+    }),
+  }], {
+    delivery: 'quiet',
+    signal: input.signal,
+  })
+}
+
+function terminalMarkerBoundary(
+  events: readonly SessionEvent[],
+  parentSessionId: string,
+  terminalEventId: string,
+): number | undefined {
+  for (const event of events) {
+    if (event.type !== 'user/message') continue
+    const source = event.data.source as unknown as {
+      readonly kind?: unknown
+      readonly form?: unknown
+      readonly senderSessionId?: unknown
+    }
+    if (
+      source.kind !== 'subagent-report'
+      || source.form !== 'relay'
+      || String(source.senderSessionId) !== parentSessionId
+    ) continue
+    for (const block of event.data.content) {
+      if (block.type !== 'text') continue
+      let payload: unknown
+      try {
+        payload = JSON.parse(block.text)
+      } catch {
+        continue
+      }
+      if (
+        !isRecord(payload)
+        || !hasExactKeys(payload, ['schemaVersion', 'terminalEventId', 'mainBoundarySeq'])
+        || payload.schemaVersion !== LONG_GOAL_TERMINAL_MARKER_SCHEMA
+        || payload.terminalEventId !== terminalEventId
+        || typeof payload.mainBoundarySeq !== 'number'
+        || !Number.isSafeInteger(payload.mainBoundarySeq)
+        || payload.mainBoundarySeq < -1
+        || event.seq <= payload.mainBoundarySeq
+      ) continue
+      return payload.mainBoundarySeq
+    }
+  }
+  return undefined
+}
+
 function sameDeliveryState(
   expected: LongGoalStatusProjectionV3,
   actual: LongGoalStatusProjectionV3,
@@ -2037,7 +2104,8 @@ async function runGuardedSettlementTurn(
   agent: Agent,
   notice: ReturnType<typeof buildContinuousGoalSettlementNotice>,
   flushSession: (agent: Agent) => Promise<void | boolean>,
-): Promise<void> {
+  claimAgent: () => boolean,
+): Promise<boolean> {
   let noticeTurn: number | undefined
   let active = false
   let ended = false
@@ -2071,12 +2139,14 @@ async function runGuardedSettlementTurn(
     ? 'Continuous Goal feedback notices are read-only; tools are disabled for this Turn.'
     : undefined)
   try {
+    if (!claimAgent()) return false
     agent.followup(notice)
     const becameIdle = agent.whenIdle().then(() => {
       if (!ended) throw new Error('Continuous Goal feedback notice Turn was not observed')
     })
     await Promise.race([turnEnded, becameIdle])
     if (await flushSession(agent) === false) throw new Error('Session persistence is unavailable')
+    return true
   } finally {
     active = false
     offGuard()
@@ -2085,7 +2155,7 @@ async function runGuardedSettlementTurn(
   }
 }
 
-export async function deliverContinuousGoalSettlement(
+async function deliverContinuousGoalSettlementOnce(
   intent: ContinuousGoalDeliveryIntent,
   dependencies: ContinuousGoalSettlementDeliveryDependencies,
 ): Promise<boolean> {
@@ -2122,14 +2192,12 @@ export async function deliverContinuousGoalSettlement(
     throw new LongGoalIntegrityError('Continuous Goal main Session identity mismatch')
   }
   const settledTaskResults = new Map<string, string>()
-  const inspectedTasks = new Map<string, Awaited<ReturnType<typeof dependencies.inspectSession>>>()
   for (const task of intent.status.tasks) {
     const representable = task.phase === 'complete'
       || task.phase === 'abandoned'
       || (task.id === intent.status.currentTaskId && task.phase === 'blocked')
     if (!representable || task.execution === null) continue
     const inspected = await dependencies.inspectSession(task.execution.sessionId)
-    inspectedTasks.set(task.execution.sessionId, inspected)
     const result = await readSettledTaskResult({
       sessionId: task.execution.sessionId,
       goalId: task.execution.goalId,
@@ -2141,20 +2209,16 @@ export async function deliverContinuousGoalSettlement(
     ...buildContinuousGoalSettlementNotice({ status: intent.status, settledTaskResults }),
     id: MessageId(`tianwen-terminal:${terminal.attempt.terminalEventId}`),
   })
-  const taskSession = terminal.terminalTask.execution === null
-    ? undefined
-    : inspectedTasks.get(terminal.terminalTask.execution.sessionId)
-  const terminalTime = taskSession?.events.find(event => {
-    if (event.type !== 'goal/change') return false
-    const data = event.data as unknown as { readonly operation?: unknown }
-    return `goal-change:${terminal.attempt.childSessionId}:${event.seq}:${String(data.operation)}`
-      === terminal.attempt.terminalEventId
-  })?.time
   const hasNativeCompletion = (events: readonly SessionEvent[]): boolean => {
-    if (terminalTime === undefined) return false
+    const boundary = terminalMarkerBoundary(
+      events,
+      terminal.attempt.parentSessionId,
+      terminal.attempt.terminalEventId!,
+    )
+    if (boundary === undefined) return false
     for (let index = 0; index < events.length; index += 1) {
       const event = events[index]
-      if (event?.type !== 'user/message' || event.time < terminalTime) continue
+      if (event?.type !== 'user/message' || event.seq <= boundary) continue
       const source = event.data.source as unknown as {
         readonly kind?: unknown
         readonly senderSessionId?: unknown
@@ -2178,6 +2242,21 @@ export async function deliverContinuousGoalSettlement(
     }
     return false
   }
+  const hasUncorrelatedPlannerSettlement = (events: readonly SessionEvent[]): boolean =>
+    terminalMarkerBoundary(
+      events,
+      terminal.attempt.parentSessionId,
+      terminal.attempt.terminalEventId!,
+    ) === undefined
+    && events.some(event => {
+      if (event.type !== 'user/message') return false
+      const source = event.data.source as unknown as {
+        readonly kind?: unknown
+        readonly senderSessionId?: unknown
+      }
+      return source.kind === 'subagent-settled'
+        && String(source.senderSessionId) === terminal.attempt.parentSessionId
+    })
   const acknowledge = (): boolean => {
     const latest = readTerminal()
     if (latest === undefined || latest.attempt.terminalEventId !== terminal.attempt.terminalEventId) return false
@@ -2198,6 +2277,7 @@ export async function deliverContinuousGoalSettlement(
   if (hasDurableNoticeReply(inspectedMain.events, notice, true) || hasNativeCompletion(inspectedMain.events)) {
     return acknowledge()
   }
+  if (hasUncorrelatedPlannerSettlement(inspectedMain.events)) return false
 
   const agent = dependencies.getAgent(mainSessionId)
   if (agent === undefined || String(agent.session.id) !== mainSessionId) return false
@@ -2210,13 +2290,43 @@ export async function deliverContinuousGoalSettlement(
     hasDurableNoticeReply(recheckedMain.events, notice, true)
     || hasNativeCompletion(recheckedMain.events)
   ) return acknowledge()
+  if (hasUncorrelatedPlannerSettlement(recheckedMain.events)) return false
 
-  await runGuardedSettlementTurn(agent, notice, dependencies.flushSession)
+  const delivered = await runGuardedSettlementTurn(
+    agent,
+    notice,
+    dependencies.flushSession,
+    () => dependencies.getAgent(mainSessionId) === agent && String(agent.session.id) === mainSessionId,
+  )
+  if (!delivered) return false
   const persistedMain = await dependencies.inspectSession(mainSessionId)
   if (!hasDurableNoticeReply(persistedMain.events, notice, true)) {
     throw new Error('Continuous Goal offline settlement Turn was not persisted')
   }
   return acknowledge()
+}
+
+export function deliverContinuousGoalSettlement(
+  intent: ContinuousGoalDeliveryIntent,
+  dependencies: ContinuousGoalSettlementDeliveryDependencies,
+): Promise<boolean> {
+  const key = [
+    dependencies.stateRoot,
+    intent.longGoalId,
+    intent.transition,
+    intent.status.goal.revision,
+    intent.status.currentTaskId ?? 'no-current-task',
+  ].join('\u0000')
+  const existing = continuousGoalSettlementFlights.get(key)
+  if (existing !== undefined) return existing
+  const flight = deliverContinuousGoalSettlementOnce(intent, dependencies)
+  continuousGoalSettlementFlights.set(key, flight)
+  void flight.finally(() => {
+    if (continuousGoalSettlementFlights.get(key) === flight) {
+      continuousGoalSettlementFlights.delete(key)
+    }
+  }).catch(() => undefined)
+  return flight
 }
 
 export function mountTianwenLongGoalHost(
@@ -2590,6 +2700,12 @@ export function mountTianwenLongGoalHost(
       }),
       flushSession: async agent => injected.sessions.flush(agent.session),
       reportProgress: async input => { await reportLongGoalProgress(injected, input) },
+      reportTerminalMarker: async input => {
+        await reportLongGoalTerminalMarker(injected, {
+          ...input,
+          signal: new AbortController().signal,
+        })
+      },
       recordTerminalAttempt: input => recordContinuousGoalTerminalAttempt({
         stateRoot: roots.stateRoot,
         ...input,

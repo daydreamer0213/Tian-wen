@@ -144,3 +144,58 @@ No contract, native adapter, scheduler, UI, routing, feedback, learning, or `set
 The offline fallback intentionally does not cold-resume the main Agent. If the main parent is still offline, reconciliation remains unacknowledged and waits for the ordinary public `agent/created` recovery trigger. This preserves user control and prevents hidden background model work.
 
 The deterministic fallback notice remains guarded and tool-disabled because it is the final recovery path after native DSH settlement is absent. It cannot execute tools or rerun a Task.
+
+## Fix round 1: serialized recovery and causal native settlement
+
+Independent review found four recovery races. All four were reproduced RED and fixed within the Task 6 production/test ownership; no contract, native adapter, scheduler, provider, UI, feedback, learning, or Task factory change was required.
+
+### Authoritative startup revision
+
+Startup reconciliation previously passed the pre-fold status revision to offline delivery after `recordTerminalAttempt()` had appended the terminal attempt at the next revision. The delivery state fence therefore rejected its own fresh write. Reconciliation now rereads the authoritative status after every startup terminal fold before it queues offline recovery.
+
+- RED: a mounted running attempt plus persisted terminal `goal/change`, empty main Session, and live main Agent sent zero fallback Turns.
+- GREEN: the same single mount sends one fallback Turn and records one acknowledgement against the post-fold revision.
+
+### Causal native-settlement correlation
+
+The public DSH settlement source identifies only the exact Planner Session. It exposes no Tianwen terminal event id, and a timestamp comparison cannot distinguish two activations of the same Planner Session. Tianwen now sends a deterministic, quiet marker from the exact live Planner through public `reportFrom()` when the Task terminal `goal/change` is observed. The marker contains only:
+
+```json
+{"schemaVersion":"tianwen.long-goal-terminal-marker.v1","terminalEventId":"goal-change:<Task Session>:<seq>:<operation>","mainBoundarySeq":<pre-marker main seq>}
+```
+
+It is not a progress report, does not wake the main Agent, and contains no objective or user/model content. Terminal recording awaits completion of the marker acceptance attempt, so there is no live event path that commits `attempt-settled` before marker delivery has been attempted. DSH owns the accepted inbox item; the native settlement wake projects the marker and settlement into the same main Session.
+
+Offline correlation now requires an exact Planner `subagent-report` marker for the exact terminal event and an exact Planner `subagent-settled` with `seq > mainBoundarySeq` in a completed main Turn. It uses neither timestamps nor settlement summaries. The parser accepts the causally valid persisted order whether settlement appears immediately before or after the marker, and rejects a boundary-before old settlement even when all timestamps are identical.
+
+The public DSH probe holds a real continuable Planner at a tool gate, reports the quiet marker, then releases the Planner. The persisted main Session proves marker `seq < subagent-settled seq` and a completed native main Turn. A crash-recovery test starts with the deterministic marker present but the attempt still `running`, folds the same Task `goal/change` after restart, and acknowledges the native Turn with one epoch and the same terminal event id.
+
+If a legacy/pre-fix Session contains an exact Planner settlement but no causal marker, delivery is ambiguous. Tianwen deliberately leaves it pending: zero acknowledgement and zero fallback send, because either action could falsely classify or duplicate an existing native Turn. A later explicit marker plus current settlement completes recovery. This ambiguous legacy state is not claimed as exact-once completion; the new live terminal path establishes the marker before terminal recording.
+
+### Offline singleflight and final Agent fence
+
+Offline recovery now reuses one in-flight Promise per exact terminal delivery key. Two concurrent callers therefore share one guarded main Turn. Immediately before `followup()`, the guarded path performs one final exact Agent object and Session identity claim with no intervening `await`.
+
+- RED: `Promise.all()` sent two fallback Turns for one terminal event.
+- GREEN: both callers resolve from one follow-up and one flush.
+- RED: replacing main Agent A with Agent B during the second inspection still sent through stale A.
+- GREEN: replacement yields zero send and zero acknowledgement.
+
+Acknowledgement still requires flush plus reinspection of the exact persisted notice/reply Turn. Send or persistence failure remains unacknowledged and never reruns the Task.
+
+### Source-owned liveness reporters
+
+Each active liveness source now stores its durable fact together with its exact Planner reporter. Coalescing still occurs per main parent, but when the newest source terminates the remaining source reports from its own exact Planner. Terminal removal uses only durable parent/source identity and state, so it does not depend on a Planner still being live.
+
+- RED: after P2 terminated, P1 liveness was sent through P2.
+- GREEN: P1 fact is sent through P1's reporter.
+- RED: a terminal source with a missing Planner remained scheduled and emitted another report.
+- GREEN: terminal observation removes it immediately without a live lookup.
+
+### Fix round 1 verification
+
+Focused Task 6 gate: 4 files passed, 102 tests passed.
+
+Combined Task 5/public DSH regression gate: 7 files passed, 117 tests passed.
+
+Runtime Bundle typecheck (`tsc -b --pretty false`) exited 0. `git diff --check` exited 0. Changed production imports use only public DSH package surfaces; no second scheduler/provider, direct child Agent factory, or private `/lib` or `/src` import was added.

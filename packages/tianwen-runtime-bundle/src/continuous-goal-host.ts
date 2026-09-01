@@ -3,7 +3,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session } from '@deepseek-ai/dsh-session'
 
 import type { ContinuousGoalAgentOperations } from './continuous-goal-agent.js'
-import { LongGoalIntegrityError } from './long-goal.js'
+import { LongGoalIntegrityError, readTianwenTaskAttemptProjection } from './long-goal.js'
 import {
   createLongGoalLiveness,
   type DurableProgressFact,
@@ -68,6 +68,11 @@ export interface ContinuousGoalHostDependencies {
     readonly planner: Agent
     readonly facts: readonly DurableProgressFact[]
     readonly signal: AbortSignal
+  }) => Promise<void | boolean>
+  readonly reportTerminalMarker?: (input: {
+    readonly planner: Agent
+    readonly terminalEventId: string
+    readonly mainBoundarySeq: number
   }) => Promise<void | boolean>
   readonly recordTerminalAttempt?: (input: {
     readonly longGoalId: string
@@ -237,6 +242,7 @@ export function mountContinuousGoalHost(
   const pendingDeliveries = new Map<string, ContinuousGoalDeliveryIntent[]>()
   const deliveryKeys = new Set<string>()
   const observedTaskTransitions = new Set<string>()
+  const terminalMarkerAttempts = new Map<string, Promise<void>>()
   const deliveryTasks = new Set<Promise<void>>()
   const failures: unknown[] = []
   const installed = new Map<Agent, {
@@ -264,6 +270,12 @@ export function mountContinuousGoalHost(
     const record = dependencies.readLongGoal(dependencies.roots.stateRoot, longGoalId)
     return isV3(record) ? record : undefined
   }
+  const terminalMarkerKey = (
+    longGoalId: string,
+    operation: 'complete' | 'block',
+    sessionId: string,
+    goalId: string,
+  ) => `${longGoalId}:${operation}:${sessionId}:${goalId}`
   const startPendingDeliveries = (longGoalId: string): void => {
     const intents = pendingDeliveries.get(longGoalId)
     pendingDeliveries.delete(longGoalId)
@@ -306,16 +318,11 @@ export function mountContinuousGoalHost(
         ? 'block'
         : activeProgressTransition(status)
     if (transition === 'complete' || transition === 'block') {
-      const planner = ctx.agents.get(record.planner.sessionId as never)
-      if (planner !== undefined) {
-        liveness.observe({
-          parentKey: record.control.sessionId,
-          sourceKey: record.id,
-          reporter: planner,
-          state: transition === 'block' ? 'blocked' : 'terminal',
-          fact: durableProgressFact(record, status),
-        })
-      }
+      liveness.observe({
+        parentKey: record.control.sessionId,
+        sourceKey: record.id,
+        state: transition === 'block' ? 'blocked' : 'terminal',
+      })
       if (offlineRecovery) recordDelivery({ longGoalId, transition, status })
       return
     }
@@ -503,6 +510,7 @@ export function mountContinuousGoalHost(
     const status = await readStatus(longGoalId)
     const projected = status.tasks.find(candidate => candidate.id === task.id)
     if (projected?.phase !== 'complete' || settledTasks(status) <= record.planner.consideredSettledTasks) return
+    await terminalMarkerAttempts.get(terminalMarkerKey(longGoalId, 'complete', execution.sessionId, execution.goalId))
     await dependencies.recordTerminalAttempt?.({ longGoalId, status })
     const terminalRecord = readV3(longGoalId)
     if (terminalRecord === undefined) return
@@ -530,6 +538,7 @@ export function mountContinuousGoalHost(
       || current.execution?.sessionId !== execution.sessionId
       || current.execution.goalId !== execution.goalId
     ) return
+    await terminalMarkerAttempts.get(terminalMarkerKey(longGoalId, 'block', execution.sessionId, execution.goalId))
     await dependencies.recordTerminalAttempt?.({ longGoalId, status: blocked })
     recordProgressDelivery(longGoalId, blocked)
   }
@@ -541,7 +550,7 @@ export function mountContinuousGoalHost(
     const status = await readStatus(longGoalId)
     if (status.goal.phase === 'blocked' || status.goal.phase === 'complete') {
       await dependencies.recordTerminalAttempt?.({ longGoalId, status })
-      recordProgressDelivery(longGoalId, status, true)
+      recordProgressDelivery(longGoalId, await readStatus(longGoalId), true)
       return
     }
     if (record.control.autoProgress !== 'running' || record.planner.phase === 'complete') return
@@ -564,7 +573,13 @@ export function mountContinuousGoalHost(
         if (recovered.goal.phase === 'complete' || recovered.goal.phase === 'blocked') {
           await dependencies.recordTerminalAttempt?.({ longGoalId, status: recovered })
         }
-        recordProgressDelivery(longGoalId, recovered, true)
+        recordProgressDelivery(
+          longGoalId,
+          recovered.goal.phase === 'complete' || recovered.goal.phase === 'blocked'
+            ? await readStatus(longGoalId)
+            : recovered,
+          true,
+        )
       } else {
         const transition = activeProgressTransition(recovered)
         if (transition !== undefined) recordProgressDelivery(longGoalId, recovered)
@@ -665,7 +680,20 @@ export function mountContinuousGoalHost(
       ? (event as { readonly type?: unknown }).type
       : undefined
     const permissionEvent = eventType === 'tool/result' || eventType === 'sandbox/mode'
-    if (!userAbort && !permissionEvent) return
+    const terminal = eventType === 'goal/change'
+      ? event as unknown as {
+          readonly seq: number
+          readonly data: {
+            readonly operation?: unknown
+            readonly ref?: { readonly id?: unknown }
+            readonly goal?: { readonly id?: unknown }
+          }
+        }
+      : undefined
+    const terminalOperation = terminal?.data.operation === 'complete' || terminal?.data.operation === 'block'
+      ? terminal.data.operation
+      : undefined
+    if (!userAbort && !permissionEvent && terminalOperation === undefined) return
     const sessionId = String(session.id)
     for (const record of dependencies.listLongGoals()) {
       if (
@@ -673,6 +701,43 @@ export function mountContinuousGoalHost(
         || record.control.autoProgress !== 'running'
         || record.planner.phase === 'complete'
       ) continue
+      if (terminalOperation !== undefined && dependencies.reportTerminalMarker !== undefined) {
+        const goalId = String(terminal!.data.ref?.id ?? terminal!.data.goal?.id)
+        const task = boundTask(record, sessionId, goalId)
+        const attempt = task === undefined
+          ? undefined
+          : readTianwenTaskAttemptProjection(record, task.id).attempts.at(-1)
+        const planner = ctx.agents.get(record.planner.sessionId as never)
+        const main = ctx.agents.get(record.control.sessionId as never)
+        if (
+          task !== undefined
+          && attempt?.status === 'running'
+          && attempt.parentSessionId === record.planner.sessionId
+          && attempt.childSessionId === sessionId
+          && planner !== undefined
+          && String(planner.session.id) === record.planner.sessionId
+          && main !== undefined
+          && String(main.session.id) === record.control.sessionId
+          && Number.isSafeInteger(terminal!.seq)
+        ) {
+          const mainBoundarySeq = main.session.events.at(-1)?.seq ?? -1
+          const key = terminalMarkerKey(record.id, terminalOperation, sessionId, goalId)
+          let markerAttempt: Promise<void>
+          try {
+            markerAttempt = dependencies.reportTerminalMarker({
+              planner,
+              terminalEventId: `goal-change:${sessionId}:${terminal!.seq}:${terminalOperation}`,
+              mainBoundarySeq,
+            }).then(() => undefined, error => {
+              try { dependencies.reportError(error) } catch {}
+            })
+          } catch (error) {
+            try { dependencies.reportError(error) } catch {}
+            markerAttempt = Promise.resolve()
+          }
+          terminalMarkerAttempts.set(key, markerAttempt)
+        }
+      }
       const routePermissionEvent = dependencies.handlePermissionEvent !== undefined && (
         (eventType === 'sandbox/mode' && record.control.sessionId === sessionId)
         || (eventType === 'tool/result' && boundTask(record, sessionId) !== undefined)

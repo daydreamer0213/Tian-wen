@@ -48,6 +48,32 @@ describe('Long Goal main-parent liveness', () => {
     await liveness.dispose()
   })
 
+  it('returns to the remaining source reporter after a newer sibling terminates', async () => {
+    const report = vi.fn(async () => undefined)
+    const liveness = createLongGoalLiveness<string>({ report })
+    const first = fact('implementation', '2026-09-01T00:00:00.000Z')
+    const second = fact('verification', '2026-09-01T00:00:01.000Z')
+
+    liveness.observe({
+      parentKey: 'main-1', sourceKey: 'goal-1', reporter: 'planner-1',
+      state: 'active', fact: first,
+    })
+    liveness.observe({
+      parentKey: 'main-1', sourceKey: 'goal-2', reporter: 'planner-2',
+      state: 'active', fact: second,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    liveness.observe({
+      parentKey: 'main-1', sourceKey: 'goal-2', state: 'terminal',
+    })
+    await vi.advanceTimersByTimeAsync(FIRST_LIVENESS_MS)
+
+    expect(report).toHaveBeenLastCalledWith({
+      parentKey: 'main-1', reporter: 'planner-1', facts: [first],
+    })
+    await liveness.dispose()
+  })
+
   it('sends first liveness at 120 seconds and later liveness no sooner than every 300 seconds', async () => {
     const report = vi.fn(async () => undefined)
     const liveness = createLongGoalLiveness<string>({ report })
@@ -129,9 +155,7 @@ describe('Long Goal main-parent liveness', () => {
     })
     await vi.advanceTimersByTimeAsync(0)
     liveness.observe({
-      parentKey: 'main-1', sourceKey: 'goal-1', reporter: 'planner-1',
-      state,
-      fact: fact(state, '2026-09-01T00:00:01.000Z'),
+      parentKey: 'main-1', sourceKey: 'goal-1', state,
     })
     await vi.advanceTimersByTimeAsync(FIRST_LIVENESS_MS + REPEAT_LIVENESS_MS)
 
