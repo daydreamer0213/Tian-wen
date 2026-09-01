@@ -411,6 +411,114 @@ function harness(initial = record()) {
   }
 }
 
+async function liveTerminalGateFixture(input: {
+  readonly label: string
+  readonly operation?: 'complete' | 'block'
+  readonly capture?: boolean
+  readonly liveTerminalSeq?: number
+  readonly persistedTerminalSeq?: number
+  readonly liveMainTail?: number
+  readonly persistedMainTail?: number
+  readonly persistBoundary?: boolean
+  readonly ambiguousSettlement?: boolean
+}) {
+  const operation = input.operation ?? 'complete'
+  const liveTerminalSeq = input.liveTerminalSeq ?? 17
+  const persistedTerminalSeq = input.persistedTerminalSeq ?? liveTerminalSeq
+  const terminal = terminalFixture(input.label, false, input.persistBoundary ?? false, operation)
+  const subject = harness(terminal.record)
+  const main = agent(terminal.record.control.sessionId, 'main-goal')
+  const planner = agent(terminal.record.planner.sessionId, 'planner-goal')
+  const liveMainEvents = input.liveMainTail === undefined
+    ? []
+    : [{ type: 'assistant/message', seq: input.liveMainTail, time: 999, data: {} }]
+  Object.assign(main.session, { events: liveMainEvents })
+  subject.live.set(terminal.record.control.sessionId, main)
+  subject.live.set(terminal.record.planner.sessionId, planner)
+
+  const taskEvents = [{
+    type: 'goal/change', seq: persistedTerminalSeq, time: 1_000, data: {
+      operation,
+      ref: { id: EXECUTION_1.goalId, revision: 99 },
+      goal: {
+        id: EXECUTION_1.goalId,
+        revision: 99,
+        phase: operation === 'complete' ? 'complete' : 'blocked',
+      },
+    },
+  }] as unknown as readonly SessionEvent[]
+  const mainEvents = input.ambiguousSettlement
+    ? [settlementAdmissionEvent(input.persistedMainTail ?? 20, 'ambiguous-live-settlement')]
+    : input.persistedMainTail === undefined
+      ? []
+      : [{ type: 'assistant/message', seq: input.persistedMainTail, time: 999, data: {} }] as unknown as readonly SessionEvent[]
+  const inspectSession = vi.fn(async (sessionId: string) => sessionId === EXECUTION_1.sessionId
+    ? { meta: { id: sessionId, parentSession: terminal.record.planner.sessionId }, events: taskEvents }
+    : { meta: { id: sessionId }, events: mainEvents })
+  const recordTerminalAttempt = vi.fn(recordInput => recordContinuousGoalTerminalAttempt({
+    stateRoot: terminal.stateRoot,
+    ...recordInput,
+  }, { inspectSession }))
+  Object.assign(subject.dependencies, {
+    roots: {
+      stateRoot: terminal.stateRoot,
+      sessionsRoot: resolve(terminal.fixture, 'sessions'),
+      evolutionRoot: resolve(terminal.fixture, 'evolution'),
+    },
+    listLongGoals: () => [readLongGoal(terminal.stateRoot, terminal.record.id)],
+    readLongGoal,
+    recordTerminalAttempt,
+    flushSession: vi.fn(async () => true),
+  })
+  const unmount = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+  await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalled())
+  const recordCallsBeforeTransition = recordTerminalAttempt.mock.calls.length
+  let disposed = false
+
+  return {
+    terminal,
+    subject,
+    recordTerminalAttempt,
+    recordCallsBeforeTransition,
+    before: readTianwenTaskAttemptProjection(
+      readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
+      TASK_1,
+    ),
+    trigger() {
+      const terminalEvent = {
+        type: 'goal/change', seq: liveTerminalSeq, time: 1_000, data: {
+          operation,
+          ref: { id: EXECUTION_1.goalId, revision: 99 },
+          goal: {
+            id: EXECUTION_1.goalId,
+            revision: 99,
+            phase: operation === 'complete' ? 'complete' : 'blocked',
+          },
+        },
+      }
+      subject.first.setGoal(operation === 'complete' ? 'complete' : 'blocked')
+      subject.setStatus(operation === 'complete'
+        ? status(terminal.record, ['complete'], null)
+        : status(terminal.record, ['blocked'], TASK_1, 'blocked'))
+      if (input.capture ?? true) subject.sessionEvent(EXECUTION_1.sessionId, terminalEvent)
+      if (operation === 'complete') subject.complete()
+      else subject.block()
+    },
+    async dispose() {
+      if (disposed) return
+      disposed = true
+      await unmount()
+    },
+    async cleanup() {
+      if (!disposed) {
+        disposed = true
+        await unmount()
+      }
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    },
+  }
+}
+
 describe('continuous Goal Host', () => {
   it('public DSH publishes Task terminal capture before Planner settlement admission without a model-facing marker', async () => {
     const base = resolve('D:/DevData/tianwen-dsh-probe/terminal-boundary-order')
@@ -1280,6 +1388,84 @@ describe('continuous Goal Host', () => {
       await expect(deliverContinuousGoalSettlement(intent, dependencies)).resolves.toBe(true)
       expect(main.followup).toHaveBeenCalledOnce()
       expect(flushSession).toHaveBeenCalledOnce()
+    } finally {
+      rmSync(terminal.fixture, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    {
+      title: 'the completed MessageId is reinserted pending',
+      nextMessageId: 'sticky-completed-settlement',
+      nextState: 'pending' as const,
+      reasonKind: 'completed' as const,
+    },
+    {
+      title: 'the max-tokens MessageId is reinserted canceled',
+      nextMessageId: 'sticky-completed-settlement',
+      nextState: 'canceled' as const,
+      reasonKind: 'max-tokens' as const,
+    },
+    {
+      title: 'another MessageId remains pending',
+      nextMessageId: 'later-native-settlement',
+      nextState: 'pending' as const,
+      reasonKind: 'completed' as const,
+    },
+    {
+      title: 'another MessageId is canceled',
+      nextMessageId: 'later-native-settlement',
+      nextState: 'canceled' as const,
+      reasonKind: 'max-tokens' as const,
+    },
+  ])('keeps a successful native settlement sticky when $title', async input => {
+    const terminal = terminalFixture(`native-sticky-${input.nextState}-${input.reasonKind}`)
+    try {
+      const main = feedbackAgent()
+      main.followup.mockImplementation(() => { throw new Error('duplicate fallback') })
+      const messageId = 'sticky-completed-settlement'
+      const taskEvents = [{
+        type: 'goal/change', seq: 17, time: 1_000, data: {
+          operation: 'complete', ref: { id: EXECUTION_1.goalId, revision: 3 },
+          goal: { id: EXECUTION_1.goalId, revision: 3, phase: 'complete' },
+        },
+      }] as unknown as readonly SessionEvent[]
+      const mainEvents = [
+        settlementAdmissionEvent(20, messageId),
+        { type: 'turn/start', seq: 21, time: 1_000, data: { turn: 9 } },
+        settlementRemovalEvent(22),
+        { type: 'user/message', seq: 23, time: 1_000, surfaceOp: 'append', data: plannerSettlementMessage(messageId) },
+        { type: 'assistant/message', seq: 24, time: 1_000, surfaceOp: 'append', data: {
+          turn: 9,
+          message: {
+            id: 'sticky-native-reply', role: 'assistant',
+            content: [{ type: 'text', text: 'Goal complete.' }],
+          },
+        } },
+        { type: 'turn/end', seq: 25, time: 1_000, data: { turn: 9, reason: { kind: input.reasonKind } } },
+        settlementAdmissionEvent(26, input.nextMessageId),
+        ...(input.nextState === 'canceled' ? [settlementRemovalEvent(27, 'canceled')] : []),
+      ] as unknown as readonly SessionEvent[]
+      const flushSession = vi.fn(async () => true)
+      const dependencies = {
+        stateRoot: terminal.stateRoot,
+        getAgent: () => main,
+        readStatus: async () => terminal.status,
+        inspectSession: async (sessionId: string) => sessionId === EXECUTION_1.sessionId
+          ? { meta: { id: sessionId, parentSession: 'planner-session' }, events: taskEvents }
+          : { meta: { id: sessionId }, events: mainEvents },
+        flushSession,
+      }
+      const intent = { longGoalId: terminal.record.id, transition: 'complete' as const, status: terminal.status }
+
+      await expect(deliverContinuousGoalSettlement(intent, dependencies)).resolves.toBe(true)
+      await expect(deliverContinuousGoalSettlement(intent, dependencies)).resolves.toBe(true)
+      expect(main.followup).not.toHaveBeenCalled()
+      expect(flushSession).not.toHaveBeenCalled()
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(terminal.stateRoot, terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      ).terminalDelivery?.completionTurnObserved).toBe(true)
     } finally {
       rmSync(terminal.fixture, { recursive: true, force: true })
     }
@@ -3055,6 +3241,119 @@ describe('continuous Goal Host', () => {
     })
     expect(task.resume).toHaveBeenCalledTimes(2)
     expect(followupNativeTaskChild).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    {
+      title: 'the persisted main prefix is behind the captured boundary',
+      label: 'live-gate-main-prefix-behind',
+      liveMainTail: 19,
+      persistedMainTail: 18,
+    },
+    {
+      title: 'the exact captured Task terminal event is missing',
+      label: 'live-gate-terminal-event-missing',
+      liveTerminalSeq: 18,
+      persistedTerminalSeq: 17,
+      liveMainTail: 19,
+      persistedMainTail: 19,
+    },
+    {
+      title: 'the existing durable boundary belongs to another terminal occurrence',
+      label: 'live-gate-boundary-mismatch',
+      liveTerminalSeq: 18,
+      persistedTerminalSeq: 18,
+      liveMainTail: 19,
+      persistedMainTail: 19,
+      persistBoundary: true,
+    },
+    {
+      title: 'legacy evidence has a Planner settlement but no durable boundary',
+      label: 'live-gate-legacy-ambiguity',
+      capture: false,
+      liveMainTail: 20,
+      persistedMainTail: 20,
+      ambiguousSettlement: true,
+    },
+  ])('does not advance live completion when $title', async input => {
+    const fixture = await liveTerminalGateFixture(input)
+    try {
+      fixture.trigger()
+      await fixture.dispose()
+
+      expect(fixture.recordTerminalAttempt.mock.calls.length)
+        .toBeGreaterThan(fixture.recordCallsBeforeTransition)
+      expect(fixture.subject.continueProgress).not.toHaveBeenCalled()
+      expect(fixture.subject.directCreate).not.toHaveBeenCalled()
+      expect(fixture.subject.directResume).not.toHaveBeenCalled()
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(fixture.terminal.stateRoot, fixture.terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      )).toEqual(fixture.before)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it('advances live completion exactly once only after the real terminal recorder folds it', async () => {
+    const fixture = await liveTerminalGateFixture({
+      label: 'live-gate-folded',
+      liveMainTail: 19,
+      persistedMainTail: 19,
+    })
+    try {
+      fixture.trigger()
+      fixture.trigger()
+      await fixture.dispose()
+
+      expect(fixture.recordTerminalAttempt).toHaveBeenCalledOnce()
+      expect(fixture.subject.continueProgress).toHaveBeenCalledOnce()
+      expect(fixture.subject.directCreate).not.toHaveBeenCalled()
+      expect(fixture.subject.directResume).not.toHaveBeenCalled()
+      const projection = readTianwenTaskAttemptProjection(
+        readLongGoal(fixture.terminal.stateRoot, fixture.terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      )
+      expect(projection).toMatchObject({
+        attempts: [{ status: 'settled' }],
+        terminalDeliveryBoundary: {
+          terminalEventId: `goal-change:${EXECUTION_1.sessionId}:17:complete`,
+          mainInboxBoundarySeq: 19,
+        },
+      })
+      expect(projection.terminalDelivery).toBeUndefined()
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it('does not apply blocked terminal bookkeeping when the real terminal recorder stays pending', async () => {
+    vi.useFakeTimers()
+    const fixture = await liveTerminalGateFixture({
+      label: 'live-block-gate-main-prefix-behind',
+      operation: 'block',
+      liveMainTail: 19,
+      persistedMainTail: 18,
+    })
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      expect(fixture.subject.dependencies.reportProgress).toHaveBeenCalledOnce()
+
+      fixture.trigger()
+      await vi.waitFor(() => expect(fixture.recordTerminalAttempt.mock.calls.length)
+        .toBeGreaterThan(fixture.recordCallsBeforeTransition))
+      await vi.advanceTimersByTimeAsync(FIRST_LIVENESS_MS)
+
+      expect(fixture.subject.dependencies.reportProgress).toHaveBeenCalledTimes(2)
+      expect(fixture.subject.continueProgress).not.toHaveBeenCalled()
+      expect(readTianwenTaskAttemptProjection(
+        readLongGoal(fixture.terminal.stateRoot, fixture.terminal.record.id) as LongGoalRecordV3,
+        TASK_1,
+      )).toEqual(fixture.before)
+    } finally {
+      await fixture.cleanup()
+      vi.useRealTimers()
+    }
   })
 
   it('does not continue a live armed Task at startup, then continues once after its exact completion', async () => {

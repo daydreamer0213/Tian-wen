@@ -517,11 +517,12 @@ export function mountContinuousGoalHost(
     const status = await readStatus(longGoalId)
     const projected = status.tasks.find(candidate => candidate.id === task.id)
     if (projected?.phase !== 'complete' || settledTasks(status) <= record.planner.consideredSettledTasks) return
-    await dependencies.recordTerminalAttempt?.({
+    const folded = await dependencies.recordTerminalAttempt?.({
       longGoalId,
       status,
       ...(boundary.evidence ?? {}),
     })
+    if (folded === false) return
     const terminalRecord = readV3(longGoalId)
     if (terminalRecord === undefined) return
     await dependencies.continueProgress({ longGoalId, expectedRevision: terminalRecord.revision })
@@ -552,11 +553,12 @@ export function mountContinuousGoalHost(
       || current.execution?.sessionId !== execution.sessionId
       || current.execution.goalId !== execution.goalId
     ) return
-    await dependencies.recordTerminalAttempt?.({
+    const folded = await dependencies.recordTerminalAttempt?.({
       longGoalId,
       status: blocked,
       ...(boundary.evidence ?? {}),
     })
+    if (folded === false) return
     recordProgressDelivery(longGoalId, blocked)
   }
 

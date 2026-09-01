@@ -344,3 +344,72 @@ Result: 8 files passed, 170 tests passed. Full continuous Host suite: 1 file pas
 The implementation stays inside the authorized Host and focused test ownership; no native adapter, scheduler, provider, UI, feedback, learning, or settled-result contract was changed. It reuses the existing per-Goal lane and public Session flush/inspect surfaces.
 
 Legacy or crash-created records that have no durable boundary but already contain exact Planner settlement evidence remain deliberately observable and pending. There is not enough causal evidence to choose native acknowledgement or fallback without risking a duplicate. New terminal paths close that ambiguity by flushing both stores before the boundary append; recovery only synthesizes a boundary from the persisted main tail when no exact Planner settlement evidence exists.
+
+## Fix round 4: terminal-fold gate and sticky native completion
+
+Independent review found that live terminal handling ignored the recorder's explicit pending result, and that the inbox replay kept only one lifecycle per MessageId. The first could advance after terminal evidence failed to fold. The second could erase an already completed native settlement when DSH legally reused its MessageId after the prior occurrence left the pending inbox.
+
+### Terminal fold is the live continuation gate
+
+`continueAfterCompletion()` and `recordAfterBlock()` now use the same boolean result from `recordContinuousGoalTerminalAttempt()`. A `false` result returns immediately. Completion therefore performs zero `continueProgress`, direct Agent creation, or direct Agent resume, while block performs no later terminal bookkeeping. A `true` completion result advances exactly once.
+
+The tests mount the real continuous Goal Host with the real terminal recorder and durable Long Goal files. They do not replace the recorder with a boolean-only mock. The fail-closed matrix covers:
+
+- captured main boundary `N=19` with persisted main tail `M=18`;
+- a captured exact terminal id absent from the persisted Task Session;
+- an existing boundary for a different terminal occurrence;
+- legacy evidence containing an exact Planner settlement but no durable boundary.
+
+All four rows retain the running attempt and their preexisting boundary/delivery cursor state. The block row additionally proves that failed folding does not remove the active liveness source. The success row folds one boundary plus one settled attempt and advances only once even when the live terminal notification is repeated.
+
+### Native completion survives MessageId reuse
+
+The public inbox replay now stores one lifecycle per admission occurrence instead of one mutable slot per MessageId. Each replayed inbox entry holds its exact lifecycle occurrence, so removal and claim update that admission without replacing earlier history. The existing decision order remains unchanged: any exact claimed occurrence with a non-empty reply and a `completed` or `max-tokens` Turn wins over later pending or canceled occurrences.
+
+The matrix proves:
+
+- completed `X`, then reinserted pending `X`: native acknowledgement, zero fallback;
+- max-tokens `X`, then reinserted canceled `X`: native acknowledgement, zero fallback;
+- completed `X` with pending `Y`: native acknowledgement, zero fallback;
+- max-tokens `X` with canceled `Y`: native acknowledgement, zero fallback.
+
+The existing canceled `X` -> reinserted pending `X` -> canceled `X` test remains green: the reinsertion waits while pending, and its later cancellation permits exactly one fallback. Thus completion is sticky without weakening the cancel/reinsert recovery rule.
+
+### Fix round 4 RED/GREEN evidence
+
+Live terminal gate:
+
+- RED: each of the four real-recorder pending rows called `continueProgress` once despite retaining a running attempt; the blocked `M<N` row also stopped liveness.
+- GREEN: all pending rows perform zero continuation/direct creation/direct resume and retain their exact attempt, boundary, and acknowledgement projections; block leaves liveness active.
+- GREEN: a true fold records the exact boundary and settled attempt, then advances once under repeated live notification.
+
+MessageId reuse:
+
+- RED: completed `X` followed by pending `X` returned pending instead of acknowledging native delivery.
+- RED: max-tokens `X` followed by canceled `X` entered the duplicate fallback path.
+- GREEN: lifecycle state is admission-occurrence scoped; same-id and different-id pending/canceled rows all acknowledge from the earlier successful occurrence with zero fallback.
+- GREEN: canceled/reinserted pending and canceled/reinserted canceled behavior remains unchanged.
+
+### Fix round 4 verification
+
+Original Task 6 focused gate:
+
+```powershell
+pnpm exec vitest run tests/dsh-migration/long-goal-liveness.spec.ts tests/dsh-migration/continuous-goal-feedback.spec.ts tests/dsh-migration/continuous-goal-host.spec.ts tests/dsh-migration/settled-task-result.spec.ts
+```
+
+Result: 4 files passed, 130 tests passed. Full continuous Host suite: 1 file passed, 95 tests passed.
+
+Combined Task 6, Task 5, contract compatibility, and public DSH regression gate:
+
+```powershell
+pnpm exec vitest run tests/dsh-migration/ordinary-long-goal.spec.ts tests/dsh-migration/long-goal-liveness.spec.ts tests/dsh-migration/continuous-goal-feedback.spec.ts tests/dsh-migration/continuous-goal-host.spec.ts tests/dsh-migration/settled-task-result.spec.ts tests/dsh-migration/permission-attempt.spec.ts tests/dsh-migration/native-long-goal-child.spec.ts tests/dsh-probe/dsh-public-reuse-surface.spec.ts
+```
+
+Result: 8 files passed, 180 tests passed. Runtime Bundle typecheck (`tsc -b --pretty false`) and `git diff --check` exited 0. Static inspection found no private DSH import, terminal marker, second scheduler/provider, direct child Agent factory, feedback/learning write, or restored `long-goal-subagent.ts`.
+
+### Fix round 4 self-review and remaining concern
+
+The production change stays in the authorized continuous Host and Long Goal Host. It adds no contract event, scheduler, provider, adapter, delivery framework, or private DSH dependency. The recorder remains the single source of truth for whether terminal evidence is durable enough to advance.
+
+MessageId reuse is deliberately scoped by durable admission occurrence rather than by content or timestamp. This keeps an already completed native delivery sticky while preserving the existing fail-closed and cancellation recovery behavior.

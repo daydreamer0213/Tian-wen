@@ -2028,6 +2028,7 @@ function isExactPlannerSettlementMessage(
 }
 
 type PlannerSettlementLifecycle = {
+  readonly id: string
   readonly admissionSeq: number
   state: 'pending' | 'claimed' | 'canceled'
   turn?: number
@@ -2040,13 +2041,17 @@ function plannerSettlementLifecycles(
   events: readonly SessionEvent[],
   parentSessionId: string,
   afterSeq: number,
-): Map<string, PlannerSettlementLifecycle> {
-  type Pending = { readonly id: string, readonly admissionSeq: number }
+): PlannerSettlementLifecycle[] {
+  type Pending = {
+    readonly id: string
+    readonly admissionSeq: number
+    readonly lifecycle?: PlannerSettlementLifecycle
+  }
   const inbox: Record<'next-turn' | 'next-step', Pending[]> = {
     'next-turn': [],
     'next-step': [],
   }
-  const lifecycles = new Map<string, PlannerSettlementLifecycle>()
+  const lifecycles: PlannerSettlementLifecycle[] = []
   let openTurn: number | undefined
   for (const event of events) {
     if (event.type === 'turn/start') {
@@ -2057,36 +2062,44 @@ function plannerSettlementLifecycles(
       const target = inbox[event.data.target]
       const removed = target.slice(event.data.start, event.data.start + (event.data.removedCount ?? 0))
       for (const message of removed) {
-        const current = lifecycles.get(message.id)
-        if (current?.admissionSeq !== message.admissionSeq) continue
+        const current = message.lifecycle
+        if (current === undefined) continue
         if (event.data.outcome === 'canceled' || openTurn === undefined) {
-          lifecycles.set(message.id, { admissionSeq: message.admissionSeq, state: 'canceled' })
+          current.state = 'canceled'
         } else {
-          lifecycles.set(message.id, { admissionSeq: message.admissionSeq, state: 'claimed', turn: openTurn })
+          current.state = 'claimed'
+          current.turn = openTurn
         }
       }
-      const inserted = event.data.inserted.map(message => {
+      const inserted: Pending[] = event.data.inserted.map(message => {
         const id = String(message.id)
+        let lifecycle: PlannerSettlementLifecycle | undefined
         if (event.seq > afterSeq && isExactPlannerSettlementMessage(message, parentSessionId)) {
-          lifecycles.set(id, { admissionSeq: event.seq, state: 'pending' })
+          lifecycle = { id, admissionSeq: event.seq, state: 'pending' }
+          lifecycles.push(lifecycle)
         }
-        return { id, admissionSeq: event.seq }
+        return lifecycle === undefined
+          ? { id, admissionSeq: event.seq }
+          : { id, admissionSeq: event.seq, lifecycle }
       })
       target.splice(event.data.start, event.data.removedCount ?? 0, ...inserted)
       continue
     }
     if (event.type === 'user/message') {
-      const lifecycle = lifecycles.get(String(event.data.id))
+      const lifecycle = lifecycles.findLast(candidate =>
+        candidate.id === String(event.data.id)
+        && candidate.state === 'claimed'
+        && candidate.turn === openTurn
+        && candidate.claimObserved !== true)
       if (
-        lifecycle?.state === 'claimed'
-        && lifecycle.turn === openTurn
+        lifecycle !== undefined
         && event.seq > lifecycle.admissionSeq
         && isExactPlannerSettlementMessage(event.data, parentSessionId)
       ) lifecycle.claimObserved = true
       continue
     }
     if (event.type === 'assistant/message') {
-      for (const lifecycle of lifecycles.values()) {
+      for (const lifecycle of lifecycles) {
         if (
           lifecycle.state === 'claimed'
           && lifecycle.turn === event.data.turn
@@ -2096,7 +2109,7 @@ function plannerSettlementLifecycles(
       continue
     }
     if (event.type === 'turn/end') {
-      for (const lifecycle of lifecycles.values()) {
+      for (const lifecycle of lifecycles) {
         if (lifecycle.state === 'claimed' && lifecycle.turn === event.data.turn) {
           lifecycle.endReason = event.data.reason.kind
         }
@@ -2112,7 +2125,7 @@ function plannerSettlementDecision(
   parentSessionId: string,
   afterSeq: number,
 ): 'none' | 'wait' | 'fallback' | 'complete' {
-  const lifecycles = [...plannerSettlementLifecycles(events, parentSessionId, afterSeq).values()]
+  const lifecycles = plannerSettlementLifecycles(events, parentSessionId, afterSeq)
   if (lifecycles.some(lifecycle => lifecycle.state === 'claimed'
     && lifecycle.claimObserved
     && lifecycle.visibleReply
