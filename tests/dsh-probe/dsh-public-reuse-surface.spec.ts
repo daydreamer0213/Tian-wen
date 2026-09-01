@@ -20,17 +20,21 @@ const RUNTIME_PUBLIC_CONSUMERS = [
 ].map(path => resolve(repositoryRoot, path))
 const DSH_SUBAGENT_ROOT = '@deepseek-ai/dsh-subagent'
 
-function modulePattern(node: ts.Expression | undefined): string | undefined {
+function modulePattern(
+  node: ts.Expression | undefined,
+  constants: ReadonlyMap<string, string>,
+): string | undefined {
   if (node === undefined) return undefined
   if (ts.isStringLiteralLike(node)) return node.text
-  if (ts.isParenthesizedExpression(node)) return modulePattern(node.expression)
+  if (ts.isIdentifier(node)) return constants.get(node.text) ?? '<dynamic>'
+  if (ts.isParenthesizedExpression(node)) return modulePattern(node.expression, constants)
   if (ts.isTemplateExpression(node)) {
     return node.head.text + node.templateSpans
-      .map(span => `${modulePattern(span.expression) ?? '<dynamic>'}${span.literal.text}`)
+      .map(span => `${modulePattern(span.expression, constants) ?? '<dynamic>'}${span.literal.text}`)
       .join('')
   }
   if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-    return `${modulePattern(node.left) ?? '<dynamic>'}${modulePattern(node.right) ?? '<dynamic>'}`
+    return `${modulePattern(node.left, constants) ?? '<dynamic>'}${modulePattern(node.right, constants) ?? '<dynamic>'}`
   }
   return undefined
 }
@@ -39,9 +43,26 @@ function privateSubagentImports(source: string): string[] {
   const sourceFile = ts.createSourceFile(
     'runtime-consumer.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS,
   )
+  const constants = new Map<string, string>()
+  const collectConstants = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node)
+      && ts.isIdentifier(node.name)
+      && node.initializer !== undefined
+      && ts.isStringLiteralLike(node.initializer)
+      && ts.isVariableDeclarationList(node.parent)
+      && (node.parent.flags & ts.NodeFlags.Const) !== 0
+    ) {
+      const existing = constants.get(node.name.text)
+      if (existing === undefined || existing === node.initializer.text) constants.set(node.name.text, node.initializer.text)
+      else constants.set(node.name.text, '<dynamic>')
+    }
+    ts.forEachChild(node, collectConstants)
+  }
+  collectConstants(sourceFile)
   const violations = new Set<string>()
   const inspect = (expression: ts.Expression | undefined): void => {
-    const pattern = modulePattern(expression)
+    const pattern = modulePattern(expression, constants)
     if (
       pattern?.startsWith(`${DSH_SUBAGENT_ROOT}/`) === true
       || pattern?.includes('dsh-subagent/') === true
@@ -97,6 +118,7 @@ describe('DSH rc.2 reusable public seams', () => {
       'dynamic-concatenated': "void import('@deepseek-ai/' + 'dsh-subagent/lib/private.js')\n",
       'dynamic-template': "const path = 'src/private.js'\nvoid import(`@deepseek-ai/dsh-subagent/${path}`)\n",
       'dynamic-package-name': "const packageName = 'dsh-subagent'\nvoid import(`@deepseek-ai/${packageName}/lib/private.js`)\n",
+      'combined-dynamic': "const packageName = 'dsh-subagent'\nconst privatePath = 'src/private.js'\nvoid import(`@deepseek-ai/${packageName}/${privatePath}`)\n",
     })) expect(privateSubagentImports(source), name).not.toEqual([])
     expect(privateSubagentImports(
       "import { snapshotSubagentDescriptor } from '@deepseek-ai/dsh-subagent'\n",

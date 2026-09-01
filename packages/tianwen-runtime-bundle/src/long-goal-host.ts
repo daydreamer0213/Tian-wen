@@ -335,20 +335,12 @@ function sandboxModeFromEvents(
 }
 
 function delegatedSandboxObservation(
-  sessionId: string,
-  parentSessionId: string,
   view: PermissionAttemptSessionView,
 ): {
   readonly mode: SandboxMode
   readonly seq: number
 } | undefined {
-  const meta = view.meta
-  if (
-    meta === undefined
-    || String(meta.id) !== sessionId
-    || String(meta.parentSession) !== parentSessionId
-  ) return undefined
-  const seedLength = meta.seedLength ?? 0
+  const seedLength = view.meta?.seedLength ?? 0
   if (!Number.isSafeInteger(seedLength) || (seedLength as number) < 0) return undefined
   for (let index = view.events.length - 1; index >= 0; index -= 1) {
     const event = view.events[index] as unknown as {
@@ -368,6 +360,18 @@ function delegatedSandboxObservation(
     }
   }
   return undefined
+}
+
+function assertPermissionAttemptAuthority(
+  childSessionId: string,
+  parentSessionId: string,
+  actual: { readonly id?: unknown, readonly parentSession?: unknown } | undefined,
+): void {
+  if (
+    actual === undefined
+    || String(actual.id) !== childSessionId
+    || String(actual.parentSession) !== parentSessionId
+  ) throw new LongGoalIntegrityError('Permission-limited Task lineage is not live and exact')
 }
 
 function explicitSandboxModeFromEvents(events: readonly SessionEvent[]): {
@@ -422,10 +426,14 @@ export function createPermissionAttemptHost(
   const notifyPermissionLimit = (record: LongGoalRecordV3): void => {
     const main = dependencies.attachedAgent(record.control.sessionId)
     if (main === undefined || String(main.session.id) !== record.control.sessionId) return
+    const attempt = currentAttemptTask(record)?.current
+    const text = attempt?.permissionMode === undefined
+      ? 'This Task reached a sandbox limit, but Tianwen cannot verify the old permission mode. Changing this main Session to Full access will not automatically create a new attempt. The Task remains permission-limited while you decide the next step in this main Session.'
+      : 'This Task reached the current sandbox limit. Change this main Session to Full access; Tianwen will start a new attempt without modifying the old child.'
     dependencies.notifyMain(main, createUserMessage({
       content: [{
         type: 'text',
-        text: 'This Task reached the current sandbox limit. Change this main Session to Full access; Tianwen will start a new attempt without modifying the old child.',
+        text,
       }],
       source: { kind: 'plugin', plugin: 'tianwen' },
     }))
@@ -436,13 +444,11 @@ export function createPermissionAttemptHost(
     attempt: NonNullable<ReturnType<typeof currentAttemptTask>>['current'],
   ): Promise<void> => {
     const liveTask = dependencies.attachedAgent(attempt.childSessionId)
-    if (
-      liveTask !== undefined
-      && (
-        String(liveTask.session.id) !== attempt.childSessionId
-        || String(liveTask.session.header.parentSession) !== attempt.parentSessionId
-      )
-    ) throw new LongGoalIntegrityError('Permission-limited Task lineage is not live and exact')
+    if (liveTask !== undefined) assertPermissionAttemptAuthority(
+      attempt.childSessionId,
+      attempt.parentSessionId,
+      { id: liveTask.session.id, parentSession: liveTask.session.header.parentSession },
+    )
     return dependencies.quiesceNativeAttempt({
       controlSessionId: record.control.sessionId,
       plannerSessionId: attempt.parentSessionId,
@@ -452,15 +458,15 @@ export function createPermissionAttemptHost(
 
   const observeCurrentAttemptMode = async (record: LongGoalRecordV3): Promise<LongGoalRecordV3> => {
     const attemptTask = currentAttemptTask(record)
-    if (attemptTask === undefined || attemptTask.current.permissionMode !== undefined) return record
+    if (attemptTask === undefined) return record
     const oldChild = await dependencies.inspectSession(attemptTask.current.childSessionId)
-    const observation = oldChild === undefined
-      ? undefined
-      : delegatedSandboxObservation(
-          attemptTask.current.childSessionId,
-          attemptTask.current.parentSessionId,
-          oldChild,
-        )
+    if (oldChild !== undefined) assertPermissionAttemptAuthority(
+      attemptTask.current.childSessionId,
+      attemptTask.current.parentSessionId,
+      oldChild.meta,
+    )
+    if (oldChild === undefined || attemptTask.current.permissionMode !== undefined) return record
+    const observation = delegatedSandboxObservation(oldChild)
     if (observation === undefined) return record
     return observeTianwenAttemptPermissionMode({
       stateRoot: dependencies.roots.stateRoot,
@@ -486,6 +492,11 @@ export function createPermissionAttemptHost(
     ) return record
     const persisted = await dependencies.inspectSession(attemptTask.current.childSessionId)
     if (persisted === undefined) return record
+    assertPermissionAttemptAuthority(
+      attemptTask.current.childSessionId,
+      attemptTask.current.parentSessionId,
+      persisted.meta,
+    )
     const snapshot = {
       ...(attemptTask.current.permissionMode === undefined ? {} : { mode: attemptTask.current.permissionMode }),
       eventSeq: null,
@@ -501,7 +512,13 @@ export function createPermissionAttemptHost(
       await quiesceAttempt(record, attemptTask.current)
     }
     const frozen = await dependencies.inspectSession(attemptTask.current.childSessionId)
-    if (frozen === undefined || permissionLimitedEvidence(
+    if (frozen === undefined) return record
+    assertPermissionAttemptAuthority(
+      attemptTask.current.childSessionId,
+      attemptTask.current.parentSessionId,
+      frozen.meta,
+    )
+    if (permissionLimitedEvidence(
       frozen.events,
       dependencies.projectEvidence(attemptTask.current.childSessionId, frozen.events),
       snapshot,
@@ -658,6 +675,11 @@ export function createPermissionAttemptHost(
       && record.control.sessionId === String(input.session.id)
     if (!relevantTaskResult && !relevantMainMode) return
     if (relevantTaskResult) {
+      assertPermissionAttemptAuthority(
+        attemptTask!.current.childSessionId,
+        attemptTask!.current.parentSessionId,
+        { id: input.session.id, parentSession: input.session.header.parentSession },
+      )
       const evidence = permissionLimitedEvidence(
         input.session.events,
         dependencies.projectEvidence(String(input.session.id), input.session.events),
@@ -2218,11 +2240,12 @@ export function mountTianwenLongGoalHost(
           || String(main.session.id) !== controlSessionId
           || planner === undefined
           || String(planner.session.header.parentSession) !== controlSessionId
-          || (task !== undefined && (
-            String(task.session.id) !== childSessionId
-            || String(task.session.header.parentSession) !== plannerSessionId
-          ))
         ) throw new LongGoalIntegrityError('Permission-limited Planner lineage is not live and exact')
+        if (task !== undefined) assertPermissionAttemptAuthority(
+          childSessionId,
+          plannerSessionId,
+          { id: task.session.id, parentSession: task.session.header.parentSession },
+        )
         const flushes = [planner, task]
           .filter((agent): agent is Agent => agent !== undefined)
           .map(agent => injected.sessions.flush(agent.session))
