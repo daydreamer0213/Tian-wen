@@ -6,6 +6,10 @@ import { SessionId, mountGoalHarness } from '@tianwen/dsh-compat'
 import {
   abandonBlockedLongGoalTask,
   abandonContinuousGoalTask,
+  appendTianwenAttemptPermissionLimited,
+  appendTianwenAttemptSettled,
+  appendTianwenAttemptStarted,
+  appendTianwenTerminalDeliveryObserved,
   appendLongGoalGuidance,
   appendContinuousGoalGuidance,
   bindGoalFirstLongGoalTask,
@@ -21,6 +25,7 @@ import {
   LongGoalRevisionConflictError,
   readLongGoal,
   readLongGoalStatus,
+  readTianwenTaskAttemptProjection,
   redirectContinuousGoal,
   setContinuousGoalMode,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
@@ -800,6 +805,133 @@ describe('goal-first long Goal v2 records', () => {
         stateRoot, longGoalId: record.id, expectedRevision: 3, taskId: planned.tasks[1]!.id, execution,
       })).toThrow('unique Goal and Session')
       expect(readLongGoal(stateRoot, record.id)).toEqual(bound)
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('persists immutable native child attempts and folds them again after restart', () => {
+    const stateRoot = createStateRoot()
+    const workspaceRoot = resolve(stateRoot, 'workspace')
+    try {
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Run native child attempts', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'control-attempts',
+      }, { goalSuffix: () => 'native-attempts', plannerSessionId: () => 'planner-attempts', now: () => 10 })
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Execute safely' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000081', now: () => 11 })
+      const taskId = planned.tasks[0]!.id
+      const first = appendTianwenAttemptStarted({
+        stateRoot, longGoalId: record.id, expectedRevision: 2, taskId,
+        epoch: 1, parentSessionId: 'planner-attempts', childSessionId: 'child-attempt-1',
+        permissionFingerprint: 'sha256:restricted', startedAt: '2026-09-01T00:00:00.000Z',
+      })
+      const limited = appendTianwenAttemptPermissionLimited({
+        stateRoot, longGoalId: record.id, expectedRevision: 3, taskId, epoch: 1,
+        terminalEventId: 'permission-limited-1',
+      })
+      const second = appendTianwenAttemptStarted({
+        stateRoot, longGoalId: record.id, expectedRevision: 4, taskId,
+        epoch: 2, parentSessionId: 'planner-attempts', childSessionId: 'child-attempt-2',
+        permissionFingerprint: 'sha256:wider', startedAt: '2026-09-01T00:01:00.000Z',
+      })
+      const settled = appendTianwenAttemptSettled({
+        stateRoot, longGoalId: record.id, expectedRevision: 5, taskId, epoch: 2,
+        terminalEventId: 'settled-2',
+      })
+      const delivered = appendTianwenTerminalDeliveryObserved({
+        stateRoot, longGoalId: record.id, expectedRevision: 6, taskId,
+        terminalEventId: 'settled-2', parentSessionId: 'planner-attempts', completionTurnObserved: true,
+      })
+
+      expect([first, limited, second, settled, delivered].map(item => item.revision)).toEqual([3, 4, 5, 6, 7])
+      const reloaded = readLongGoal(stateRoot, record.id)
+      expect(reloaded.schemaVersion).toBe('tianwen.long-goal.v3')
+      if (reloaded.schemaVersion !== 'tianwen.long-goal.v3') throw new Error('expected v3 record')
+      expect(reloaded.tianwenEvents?.map(event => event.type)).toEqual([
+        'attempt-started', 'attempt-permission-limited', 'attempt-started', 'attempt-settled', 'terminal-delivery-observed',
+      ])
+      expect(readTianwenTaskAttemptProjection(reloaded, taskId)).toEqual({
+        attempts: [
+          {
+            epoch: 1, parentSessionId: 'planner-attempts', childSessionId: 'child-attempt-1',
+            permissionFingerprint: 'sha256:restricted', status: 'permission-limited',
+            startedAt: '2026-09-01T00:00:00.000Z', terminalEventId: 'permission-limited-1',
+          },
+          {
+            epoch: 2, parentSessionId: 'planner-attempts', childSessionId: 'child-attempt-2',
+            permissionFingerprint: 'sha256:wider', status: 'settled',
+            startedAt: '2026-09-01T00:01:00.000Z', terminalEventId: 'settled-2',
+          },
+        ],
+        terminalDelivery: { terminalEventId: 'settled-2', parentSessionId: 'planner-attempts', completionTurnObserved: true },
+      })
+    } finally {
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects invalid native child attempt event histories at append and reload boundaries', () => {
+    const stateRoot = createStateRoot()
+    const workspaceRoot = resolve(stateRoot, 'workspace')
+    try {
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Protect attempt identity', context: null, successCriteria: null,
+        workspaceRoot, agentPreset: 'code', controlSessionId: 'control-attempt-invariants',
+      }, { goalSuffix: () => 'native-attempt-invariants', plannerSessionId: () => 'planner-attempt-invariants', now: () => 10 })
+      const planned = commitLongGoalPlan({
+        stateRoot, longGoalId: record.id, expectedRevision: 1, outcome: 'continue',
+        tasks: [{ objective: 'Execute once' }], consideredSettledTasks: 0,
+      }, { taskId: () => '00000000-0000-4000-8000-000000000082', now: () => 11 })
+      const taskId = planned.tasks[0]!.id
+      const base = {
+        stateRoot, longGoalId: record.id, taskId, parentSessionId: 'planner-attempt-invariants',
+        childSessionId: 'child-invariant-1', permissionFingerprint: 'sha256:restricted',
+        startedAt: '2026-09-01T00:00:00.000Z',
+      } as const
+
+      expect(() => appendTianwenAttemptStarted({ ...base, expectedRevision: 2, epoch: 2 })).toThrow('epoch')
+      const started = appendTianwenAttemptStarted({ ...base, expectedRevision: 2, epoch: 1 })
+      expect(() => appendTianwenAttemptStarted({
+        ...base, expectedRevision: 3, epoch: 2, childSessionId: 'child-invariant-2', permissionFingerprint: 'sha256:wider',
+      })).toThrow('running')
+      const limited = appendTianwenAttemptPermissionLimited({
+        stateRoot, longGoalId: record.id, expectedRevision: 3, taskId, epoch: 1, terminalEventId: 'limited-1',
+      })
+      const renewed = appendTianwenAttemptStarted({
+        ...base, expectedRevision: 4, epoch: 2, childSessionId: 'child-invariant-2', permissionFingerprint: 'sha256:wider',
+        startedAt: '2026-09-01T00:01:00.000Z',
+      })
+      expect(() => appendTianwenAttemptSettled({
+        stateRoot, longGoalId: record.id, expectedRevision: 5, taskId, epoch: 1, terminalEventId: 'late-1',
+      })).toThrow('current running')
+      const settled = appendTianwenAttemptSettled({
+        stateRoot, longGoalId: record.id, expectedRevision: 5, taskId, epoch: 2, terminalEventId: 'settled-2',
+      })
+      expect(() => appendTianwenTerminalDeliveryObserved({
+        stateRoot, longGoalId: record.id, expectedRevision: 6, taskId,
+        terminalEventId: 'limited-1', parentSessionId: 'planner-attempt-invariants', completionTurnObserved: true,
+      })).toThrow('current terminal event')
+      expect([started, limited, renewed, settled].map(item => item.revision)).toEqual([3, 4, 5, 6])
+
+      const persisted = readLongGoal(stateRoot, record.id)
+      if (persisted.schemaVersion !== 'tianwen.long-goal.v3') throw new Error('expected v3 record')
+      writeFileSync(longGoalPath(stateRoot, record.id), `${JSON.stringify({
+        ...persisted,
+        tianwenEvents: [
+          ...(persisted.tianwenEvents ?? []),
+          {
+            type: 'attempt-started', taskId,
+            attempt: {
+              epoch: 2, parentSessionId: 'planner-attempt-invariants', childSessionId: 'child-invariant-3',
+              permissionFingerprint: 'sha256:third', status: 'running', startedAt: '2026-09-01T00:02:00.000Z',
+            },
+          },
+        ],
+      })}\n`, 'utf8')
+      expect(() => readLongGoal(stateRoot, record.id)).toThrow('epoch')
     } finally {
       rmSync(stateRoot, { recursive: true, force: true })
     }

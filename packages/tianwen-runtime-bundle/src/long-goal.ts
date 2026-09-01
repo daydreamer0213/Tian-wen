@@ -21,6 +21,10 @@ import type {
   LongGoalTaskRecord,
   LongGoalTaskRecordV2,
   TaskExecutionBinding,
+  TianwenExecutionAttempt,
+  TianwenLongGoalEvent,
+  TianwenTaskAttemptProjection,
+  TianwenTerminalDeliveryCursor,
   AnyLongGoalRecord,
   AnyLongGoalStatusProjection,
   GoalFirstLongGoalRecord,
@@ -37,6 +41,11 @@ export type {
   LongGoalTaskRecord,
   LongGoalTaskRecordV2,
   TaskExecutionBinding,
+  TianwenAttemptStatus,
+  TianwenExecutionAttempt,
+  TianwenLongGoalEvent,
+  TianwenTaskAttemptProjection,
+  TianwenTerminalDeliveryCursor,
   AnyLongGoalRecord,
   AnyLongGoalStatusProjection,
   AnyLongGoalSummary,
@@ -247,18 +256,169 @@ function validateV2TaskBindings(tasks: readonly LongGoalTaskRecordV2[]): void {
   }
 }
 
+function parseTianwenAttempt(value: unknown): TianwenExecutionAttempt {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['epoch', 'parentSessionId', 'childSessionId', 'permissionFingerprint', 'status', 'startedAt']) ||
+    !isPositiveInteger(value.epoch) ||
+    !isNonEmptyString(value.parentSessionId) ||
+    !isNonEmptyString(value.childSessionId) ||
+    !isNonEmptyString(value.permissionFingerprint) ||
+    !/^sha256:\S+$/u.test(value.permissionFingerprint) ||
+    value.status !== 'running' ||
+    !isNonEmptyString(value.startedAt)
+  ) {
+    throw new LongGoalIntegrityError('Tianwen attempt-started event is invalid')
+  }
+  return {
+    epoch: value.epoch,
+    parentSessionId: value.parentSessionId,
+    childSessionId: value.childSessionId,
+    permissionFingerprint: value.permissionFingerprint as `sha256:${string}`,
+    status: 'running',
+    startedAt: value.startedAt,
+  }
+}
+
+function parseTianwenEvents(value: unknown, tasks: readonly LongGoalTaskRecordV2[]): readonly TianwenLongGoalEvent[] {
+  if (!Array.isArray(value)) throw new LongGoalIntegrityError('Tianwen Long Goal events are invalid')
+  const taskIds = new Set(tasks.map(task => task.id))
+  const events: TianwenLongGoalEvent[] = []
+  for (const event of value) {
+    if (!isRecord(event) || !isNonEmptyString(event.taskId) || !taskIds.has(event.taskId)) {
+      throw new LongGoalIntegrityError('Tianwen Long Goal event Task is invalid')
+    }
+    if (event.type === 'attempt-started' && hasExactKeys(event, ['type', 'taskId', 'attempt'])) {
+      events.push({ type: 'attempt-started', taskId: event.taskId, attempt: parseTianwenAttempt(event.attempt) })
+      continue
+    }
+    if (
+      (event.type === 'attempt-permission-limited' || event.type === 'attempt-settled') &&
+      hasExactKeys(event, ['type', 'taskId', 'epoch', 'terminalEventId']) &&
+      isPositiveInteger(event.epoch) && isNonEmptyString(event.terminalEventId)
+    ) {
+      events.push({
+        type: event.type,
+        taskId: event.taskId,
+        epoch: event.epoch,
+        terminalEventId: event.terminalEventId,
+      })
+      continue
+    }
+    if (
+      event.type === 'terminal-delivery-observed' &&
+      hasExactKeys(event, ['type', 'taskId', 'delivery']) &&
+      isRecord(event.delivery) &&
+      hasExactKeys(event.delivery, ['terminalEventId', 'parentSessionId', 'completionTurnObserved']) &&
+      isNonEmptyString(event.delivery.terminalEventId) &&
+      isNonEmptyString(event.delivery.parentSessionId) &&
+      typeof event.delivery.completionTurnObserved === 'boolean'
+    ) {
+      events.push({
+        type: 'terminal-delivery-observed',
+        taskId: event.taskId,
+        delivery: {
+          terminalEventId: event.delivery.terminalEventId,
+          parentSessionId: event.delivery.parentSessionId,
+          completionTurnObserved: event.delivery.completionTurnObserved,
+        },
+      })
+      continue
+    }
+    throw new LongGoalIntegrityError('Tianwen Long Goal event is invalid')
+  }
+  validateTianwenEventHistory(events)
+  return events
+}
+
+function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): void {
+  const projections = new Map<string, { attempts: TianwenExecutionAttempt[], terminalDelivery?: TianwenTerminalDeliveryCursor }>()
+  for (const event of events) {
+    const projection = projections.get(event.taskId) ?? { attempts: [] }
+    projections.set(event.taskId, projection)
+    if (event.type === 'attempt-started') {
+      const previous = projection.attempts.at(-1)
+      if (event.attempt.epoch !== projection.attempts.length + 1) {
+        throw new LongGoalIntegrityError('Tianwen attempt epoch must start at 1 and increase by exactly 1')
+      }
+      if (previous?.status === 'running') {
+        throw new LongGoalIntegrityError('Tianwen attempt-started requires no current running attempt')
+      }
+      if (projection.attempts.some(attempt => attempt.childSessionId === event.attempt.childSessionId)) {
+        throw new LongGoalIntegrityError('Tianwen Task cannot reuse a child Session id')
+      }
+      if (projection.attempts.some(attempt => attempt.permissionFingerprint === event.attempt.permissionFingerprint)) {
+        throw new LongGoalIntegrityError('Tianwen Task cannot automatically reuse a permission fingerprint')
+      }
+      projection.attempts.push(event.attempt)
+      continue
+    }
+    const current = projection.attempts.at(-1)
+    if (event.type === 'attempt-permission-limited' || event.type === 'attempt-settled') {
+      if (current === undefined || current.status !== 'running' || current.epoch !== event.epoch) {
+        throw new LongGoalIntegrityError('Tianwen terminal attempt event requires the current running attempt')
+      }
+      projection.attempts[projection.attempts.length - 1] = {
+        ...current,
+        status: event.type === 'attempt-permission-limited' ? 'permission-limited' : 'settled',
+        terminalEventId: event.terminalEventId,
+      }
+      continue
+    }
+    if (
+      current === undefined ||
+      (current.status !== 'permission-limited' && current.status !== 'settled' && current.status !== 'interrupted') ||
+      current.terminalEventId !== event.delivery.terminalEventId ||
+      current.parentSessionId !== event.delivery.parentSessionId
+    ) {
+      throw new LongGoalIntegrityError('Tianwen terminal delivery acknowledgement must name the current terminal event')
+    }
+    projection.terminalDelivery = event.delivery
+  }
+}
+
+function tianwenTaskAttemptProjection(
+  tasks: readonly LongGoalTaskRecordV2[],
+  events: readonly TianwenLongGoalEvent[] | undefined,
+  taskId: string,
+): TianwenTaskAttemptProjection {
+  if (!tasks.some(task => task.id === taskId)) throw new LongGoalIntegrityError('Tianwen Long Goal event Task is invalid')
+  const projection = { attempts: [] as TianwenExecutionAttempt[], terminalDelivery: undefined as TianwenTerminalDeliveryCursor | undefined }
+  for (const event of events ?? []) {
+    if (event.taskId !== taskId) continue
+    if (event.type === 'attempt-started') {
+      projection.attempts.push(event.attempt)
+    } else if (event.type === 'attempt-permission-limited' || event.type === 'attempt-settled') {
+      const current = projection.attempts.at(-1)
+      if (current === undefined) throw new LongGoalIntegrityError('Tianwen attempt history is invalid')
+      projection.attempts[projection.attempts.length - 1] = {
+        ...current,
+        status: event.type === 'attempt-permission-limited' ? 'permission-limited' : 'settled',
+        terminalEventId: event.terminalEventId,
+      }
+    } else {
+      projection.terminalDelivery = event.delivery
+    }
+  }
+  return projection.terminalDelivery === undefined
+    ? { attempts: projection.attempts }
+    : { attempts: projection.attempts, terminalDelivery: projection.terminalDelivery }
+}
+
 function parseGoalFirstLongGoalFields(
   value: unknown,
   hasControl: boolean,
   schemaVersion: 'v2' | 'v3',
 ): Omit<LongGoalRecordV2, 'schemaVersion'> {
+  const recordKeys = [
+    'schemaVersion', 'id', 'revision', 'objective', 'context', 'successCriteria',
+    'workspaceRoot', 'maxTaskRounds', 'planner', 'guidance', 'createdAt', 'updatedAt', 'tasks',
+    ...(hasControl ? ['control'] : []),
+    ...(hasControl && isRecord(value) && Object.hasOwn(value, 'tianwenEvents') ? ['tianwenEvents'] : []),
+  ]
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, [
-      'schemaVersion', 'id', 'revision', 'objective', 'context', 'successCriteria',
-      'workspaceRoot', 'maxTaskRounds', 'planner', 'guidance', 'createdAt', 'updatedAt', 'tasks',
-      ...(hasControl ? ['control'] : []),
-    ]) ||
+    !hasExactKeys(value, recordKeys) ||
     !isLongGoalId(value.id) ||
     !isPositiveInteger(value.revision) ||
     !isNonEmptyString(value.objective) ||
@@ -329,6 +489,9 @@ function parseLongGoalV3(value: unknown): LongGoalRecordV3 {
   }
   const controlSessionId = (value.control as { readonly sessionId: string }).sessionId
   const fields = parseGoalFirstLongGoalFields(value, true, 'v3')
+  const events = Object.hasOwn(value, 'tianwenEvents')
+    ? parseTianwenEvents(value.tianwenEvents, fields.tasks)
+    : undefined
   if (controlSessionId === fields.planner.sessionId) {
     throw new LongGoalIntegrityError('Continuous Goal control Session must differ from planner Session')
   }
@@ -339,6 +502,7 @@ function parseLongGoalV3(value: unknown): LongGoalRecordV3 {
     schemaVersion: 'tianwen.long-goal.v3',
     ...fields,
     control: { sessionId: value.control.sessionId, autoProgress: value.control.autoProgress },
+    ...(events === undefined ? {} : { tianwenEvents: events }),
   }
 }
 
@@ -745,6 +909,90 @@ export function setContinuousGoalMode(input: {
   }
   replaceRecordAtomically(recordPath(input.stateRoot, input.longGoalId), updated)
   return updated
+}
+
+export function readTianwenTaskAttemptProjection(
+  record: LongGoalRecordV3,
+  taskId: string,
+): TianwenTaskAttemptProjection {
+  return tianwenTaskAttemptProjection(record.tasks, record.tianwenEvents, taskId)
+}
+
+type TianwenAttemptEventInput = {
+  readonly stateRoot: string
+  readonly longGoalId: string
+  readonly expectedRevision: number
+  readonly taskId: string
+}
+
+function appendTianwenEvent(input: TianwenAttemptEventInput, event: TianwenLongGoalEvent): LongGoalRecordV3 {
+  const record = readContinuousLongGoal(input.stateRoot, input.longGoalId)
+  assertExpectedRevision(record, input.expectedRevision)
+  const updated = parseLongGoalV3({
+    ...record,
+    revision: record.revision + 1,
+    updatedAt: nextV2UpdatedAt(record, Date.now()),
+    tianwenEvents: [...(record.tianwenEvents ?? []), event],
+  })
+  replaceRecordAtomically(recordPath(input.stateRoot, input.longGoalId), updated)
+  return updated
+}
+
+export function appendTianwenAttemptStarted(input: TianwenAttemptEventInput & {
+  readonly epoch: number
+  readonly parentSessionId: string
+  readonly childSessionId: string
+  readonly permissionFingerprint: `sha256:${string}`
+  readonly startedAt: string
+}): LongGoalRecordV3 {
+  return appendTianwenEvent(input, {
+    type: 'attempt-started',
+    taskId: input.taskId,
+    attempt: {
+      epoch: input.epoch,
+      parentSessionId: input.parentSessionId,
+      childSessionId: input.childSessionId,
+      permissionFingerprint: input.permissionFingerprint,
+      status: 'running',
+      startedAt: input.startedAt,
+    },
+  })
+}
+
+export function appendTianwenAttemptPermissionLimited(input: TianwenAttemptEventInput & {
+  readonly epoch: number
+  readonly terminalEventId: string
+}): LongGoalRecordV3 {
+  return appendTianwenEvent(input, {
+    type: 'attempt-permission-limited',
+    taskId: input.taskId,
+    epoch: input.epoch,
+    terminalEventId: input.terminalEventId,
+  })
+}
+
+export function appendTianwenAttemptSettled(input: TianwenAttemptEventInput & {
+  readonly epoch: number
+  readonly terminalEventId: string
+}): LongGoalRecordV3 {
+  return appendTianwenEvent(input, {
+    type: 'attempt-settled',
+    taskId: input.taskId,
+    epoch: input.epoch,
+    terminalEventId: input.terminalEventId,
+  })
+}
+
+export function appendTianwenTerminalDeliveryObserved(input: TianwenAttemptEventInput & TianwenTerminalDeliveryCursor): LongGoalRecordV3 {
+  return appendTianwenEvent(input, {
+    type: 'terminal-delivery-observed',
+    taskId: input.taskId,
+    delivery: {
+      terminalEventId: input.terminalEventId,
+      parentSessionId: input.parentSessionId,
+      completionTurnObserved: input.completionTurnObserved,
+    },
+  })
 }
 
 export function commitLongGoalPlan(input: {

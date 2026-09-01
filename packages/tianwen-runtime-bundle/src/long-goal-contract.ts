@@ -91,6 +91,58 @@ export interface LongGoalRecordV3 extends Omit<LongGoalRecordV2, 'schemaVersion'
     readonly sessionId: string
     readonly autoProgress: 'running' | 'paused'
   }
+  readonly tianwenEvents?: readonly TianwenLongGoalEvent[]
+}
+
+export type TianwenAttemptStatus =
+  | 'running'
+  | 'permission-limited'
+  | 'settled'
+  | 'interrupted'
+
+export interface TianwenExecutionAttempt {
+  readonly epoch: number
+  readonly parentSessionId: string
+  readonly childSessionId: string
+  readonly permissionFingerprint: `sha256:${string}`
+  readonly status: TianwenAttemptStatus
+  readonly startedAt: string
+  readonly terminalEventId?: string
+}
+
+export interface TianwenTerminalDeliveryCursor {
+  readonly terminalEventId: string
+  readonly parentSessionId: string
+  readonly completionTurnObserved: boolean
+}
+
+export type TianwenLongGoalEvent =
+  | {
+      readonly type: 'attempt-started'
+      readonly taskId: string
+      readonly attempt: TianwenExecutionAttempt
+    }
+  | {
+      readonly type: 'attempt-permission-limited'
+      readonly taskId: string
+      readonly epoch: number
+      readonly terminalEventId: string
+    }
+  | {
+      readonly type: 'attempt-settled'
+      readonly taskId: string
+      readonly epoch: number
+      readonly terminalEventId: string
+    }
+  | {
+      readonly type: 'terminal-delivery-observed'
+      readonly taskId: string
+      readonly delivery: TianwenTerminalDeliveryCursor
+    }
+
+export interface TianwenTaskAttemptProjection {
+  readonly attempts: readonly TianwenExecutionAttempt[]
+  readonly terminalDelivery?: TianwenTerminalDeliveryCursor
 }
 
 export type GoalFirstLongGoalRecord = LongGoalRecordV2 | LongGoalRecordV3
