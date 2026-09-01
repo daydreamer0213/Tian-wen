@@ -60,8 +60,13 @@ interface ProfileManifest {
   readonly dsh?: { readonly profile?: { readonly bundles?: readonly string[] } }
 }
 
+interface RuntimeManifest {
+  readonly peerDependencies?: Record<string, string>
+}
+
 let fixtureRoot = ''
 let dshBin = ''
+let nativeSubagentManifestPath = ''
 let runtimeTarball = ''
 let probeTarball = ''
 let pnpmStore = ''
@@ -120,6 +125,13 @@ function installStockDshHost(): void {
   }
   expect(manifest.version).toBe('0.1.1-rc.2')
   dshBin = realpathSync(resolve(dirname(manifestPath), manifest.bin.dsh))
+  const dshRequire = createRequire(manifestPath)
+  const baseManifestPath = realpathSync(
+    dshRequire.resolve('@deepseek-ai/dsh-base/package.json'),
+  )
+  nativeSubagentManifestPath = realpathSync(
+    createRequire(baseManifestPath).resolve('@deepseek-ai/dsh-subagent/package.json'),
+  )
   expect(dshBin.startsWith(realpathSync(hostRoot))).toBe(true)
 }
 
@@ -206,10 +218,26 @@ function installProfile(profile: 'headless' | 'web'): InstalledProfile {
   expect(manifest.dsh?.profile?.bundles?.filter(
     name => name === '@tianwen/runtime-bundle',
   )).toHaveLength(1)
-  expect(realpathSync(join(
+  const runtimeManifestPath = realpathSync(join(
     profileRoot,
     'node_modules', '@tianwen', 'runtime-bundle', 'package.json',
-  )).startsWith(realpathSync(profileRoot))).toBe(true)
+  ))
+  expect(runtimeManifestPath.startsWith(realpathSync(profileRoot))).toBe(true)
+  const runtimeManifest = JSON.parse(
+    readFileSync(runtimeManifestPath, 'utf8'),
+  ) as RuntimeManifest
+  expect(runtimeManifest.peerDependencies).toMatchObject({
+    '@deepseek-ai/dsh-agent': '0.1.1-rc.2',
+    '@deepseek-ai/dsh-agent-presets': '0.1.1-rc.2',
+    '@deepseek-ai/dsh-goal': '0.1.1-rc.2',
+    '@deepseek-ai/dsh-sandbox': '0.1.1-rc.2',
+    '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.1-rc.2',
+    '@deepseek-ai/dsh-subagent': '0.1.1-rc.2',
+  })
+  const nativeSubagentManifest = JSON.parse(
+    readFileSync(nativeSubagentManifestPath, 'utf8'),
+  ) as { readonly version: string }
+  expect(nativeSubagentManifest.version).toBe('0.1.1-rc.2')
   return { home, profileRoot, environmentRoot }
 }
 
