@@ -41,6 +41,7 @@ type PublicLedgerEventPrivacyContract = AssertNever<Extract<
 
 export {
   EvolutionGovernanceError,
+  LedgerAppendNotCommittedError,
   LedgerCommitUnknownError,
   LedgerIntegrityError,
   PUBLIC_LEDGER_EVENT_TYPES,

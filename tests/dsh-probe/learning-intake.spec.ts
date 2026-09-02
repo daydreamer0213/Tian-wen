@@ -79,6 +79,7 @@ vi.mock('node:fs', async importOriginal => {
 })
 
 import {
+  LedgerAppendNotCommittedError,
   LedgerIntegrityError,
   learningSessionLifecycleFingerprint,
   prepareLearningIntake,
@@ -295,7 +296,7 @@ describe('Tianwen learning intake ledger', () => {
     appendFault.failLedgerWriteBeforeReal = 1
 
     expect(() => ledger.recordLearningFeedbackRevision(input))
-      .toThrow(/durable commit is unknown/u)
+      .toThrow(LedgerAppendNotCommittedError)
     expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe('')
 
     expect(ledger.recordLearningFeedbackRevision(input).duplicate).toBe(false)

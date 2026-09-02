@@ -390,6 +390,13 @@ export class LedgerCommitUnknownError extends LedgerIntegrityError {
   }
 }
 
+export class LedgerAppendNotCommittedError extends LedgerIntegrityError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'LedgerAppendNotCommittedError'
+  }
+}
+
 export class EvolutionGovernanceError extends Error {
   constructor(
     readonly code: GovernanceErrorCode,
@@ -4516,6 +4523,12 @@ export class EvolutionLedger {
         if (recovery === 'committed') {
           this.#apply(parsed)
           return
+        }
+        if (recovery === 'not-written') {
+          throw new LedgerAppendNotCommittedError(
+            'ledger append wrote no bytes; retry may proceed',
+            { cause: commitError },
+          )
         }
         this.#appendBlocked = recovery === 'unknown'
       }

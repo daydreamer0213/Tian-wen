@@ -21,6 +21,57 @@ import {
 } from '@deepseek-ai/dsh-session'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+const appendFault = vi.hoisted(() => ({
+  enabled: false,
+  failLedgerFsyncAfterReal: 0,
+  failLedgerWriteBeforeReal: 0,
+}))
+
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  const paths = new Map<number, string>()
+  return {
+    ...actual,
+    openSync(path: string, flags: string, mode?: number) {
+      const descriptor = actual.openSync(path, flags, mode)
+      if (appendFault.enabled) paths.set(descriptor, String(path))
+      return descriptor
+    },
+    writeSync(
+      descriptor: number,
+      buffer: Uint8Array,
+      offset: number,
+      length: number,
+      position?: number | null,
+    ) {
+      if (
+        appendFault.enabled
+        && appendFault.failLedgerWriteBeforeReal > 0
+        && paths.get(descriptor)?.endsWith('ledger.jsonl') === true
+      ) {
+        appendFault.failLedgerWriteBeforeReal -= 1
+        throw Object.assign(new Error('forced pre-write ledger failure'), {
+          code: 'EIO',
+        })
+      }
+      return actual.writeSync(descriptor, buffer, offset, length, position)
+    },
+    fsyncSync(descriptor: number) {
+      actual.fsyncSync(descriptor)
+      if (
+        appendFault.enabled
+        && appendFault.failLedgerFsyncAfterReal > 0
+        && paths.get(descriptor)?.endsWith('ledger.jsonl') === true
+      ) {
+        appendFault.failLedgerFsyncAfterReal -= 1
+        throw Object.assign(new Error('forced post-fsync ledger uncertainty'), {
+          code: 'EIO',
+        })
+      }
+    },
+  }
+})
+
 import { apply as applyCore } from '../../packages/tianwen-runtime/src/index.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import {
@@ -221,6 +272,9 @@ function emitFeedbackChange(ctx: Context, sessionId: string): void {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  appendFault.enabled = false
+  appendFault.failLedgerFsyncAfterReal = 0
+  appendFault.failLedgerWriteBeforeReal = 0
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true })
   }
@@ -340,6 +394,94 @@ describe('Tianwen DSH Message Feedback bridge', () => {
       expect(mounted.ctx.tianwenEvolution
         .getLearningIntakeStatus(String(session.id), 'message-1')?.state)
         .toBe('active')
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('retries a definitely uncommitted feedback ingestion and retraction without blocking Evolution', async () => {
+    const root = evolutionRoot('pre-write-retry')
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const session = completedSession('feedback-pre-write-retry', ['message-1'])
+    sessions.add(session)
+    sessions.listed = []
+    const mounted = await mountBridge(root, sessions, feedback)
+    feedback.set(String(session.id), [item({
+      messageId: 'message-1',
+      version: '43434343-4343-4434-8434-434343434343',
+      note: 'Retry only after the write is known not to have happened.',
+    })])
+
+    try {
+      appendFault.enabled = true
+      appendFault.failLedgerWriteBeforeReal = 1
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'pending' })
+      expect(mounted.ctx.tianwenEvolution.blocked).toBe(false)
+      expect(mounted.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(session.id),
+        'message-1',
+      )).toBeUndefined()
+      expect(feedback.rows.get(String(session.id))).toHaveLength(1)
+
+      appendFault.enabled = false
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'reconciled', active: 1 })
+      expect(mounted.ctx.tianwenEvolution.listLearningSignals()).toHaveLength(1)
+      expect(mounted.ctx.tianwenEvolution.listLearningTickets()).toHaveLength(1)
+
+      feedback.set(String(session.id), [])
+      appendFault.enabled = true
+      appendFault.failLedgerWriteBeforeReal = 1
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'pending' })
+      expect(mounted.ctx.tianwenEvolution.blocked).toBe(false)
+      expect(mounted.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(session.id),
+        'message-1',
+      )).toMatchObject({ state: 'active' })
+
+      appendFault.enabled = false
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'reconciled', retracted: 1 })
+      expect(mounted.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(session.id),
+        'message-1',
+      )).toMatchObject({ state: 'retracted' })
+      expect(mounted.ctx.tianwenEvolution.listLearningSignals()).toHaveLength(1)
+      expect(mounted.ctx.tianwenEvolution.listLearningTickets()).toHaveLength(1)
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('blocks a feedback reconciliation when a landed append cannot be re-fsynced', async () => {
+    const root = evolutionRoot('feedback-resync-failure')
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const session = completedSession('feedback-resync-failure', ['message-1'])
+    sessions.add(session)
+    sessions.listed = []
+    const mounted = await mountBridge(root, sessions, feedback)
+    feedback.set(String(session.id), [item({
+      messageId: 'message-1',
+      version: '45454545-4545-4454-8454-454545454545',
+      note: 'Do not retry a write whose durable state cannot be proven.',
+    })])
+
+    try {
+      appendFault.enabled = true
+      appendFault.failLedgerFsyncAfterReal = 2
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'pending' })
+      expect(mounted.ctx.tianwenEvolution.blocked).toBe(true)
+      expect(feedbackLedgerEvents(root)).toHaveLength(1)
+
+      appendFault.enabled = false
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'pending' })
+      expect(feedbackLedgerEvents(root)).toHaveLength(1)
     } finally {
       await mounted.ctx.fiber.dispose()
     }
