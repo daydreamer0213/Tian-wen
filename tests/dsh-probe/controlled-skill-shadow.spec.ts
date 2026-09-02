@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  learningSessionLifecycleFingerprint,
   prepareRunBinding,
   sha256,
   TianwenEvolutionService,
@@ -75,6 +76,14 @@ afterEach(() => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+function lifecycleFingerprint(sessionId: string) {
+  return learningSessionLifecycleFingerprint({
+    sessionId,
+    createdAt: 1,
+    cwd: 'D:/controlled-shadow-fixture',
+  })
+}
 
 function controlledProtocol() {
   return {
@@ -235,6 +244,7 @@ function seedPassingEvaluation(
         scopeKey: plan.scopeKey,
         acceptanceContract: task.acceptanceContract,
         acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+        sessionLifecycleFingerprint: lifecycleFingerprint(arm.sessionId),
       })
       const skill = arm.role === 'baseline'
         ? parentSkill
@@ -368,6 +378,7 @@ function recordShadowRunFacts(
   ledger: EvolutionLedger,
   plan: ControlledSkillShadowPlan,
   outcomes: readonly ('met' | 'not-met' | 'inconclusive')[],
+  options: { readonly legacyBindingIndex?: number } = {},
 ) {
   const candidate = ledger.getSkillCandidate(plan.candidateId)!
   return plan.tasks.slice(0, outcomes.length).map((task, index) => {
@@ -378,6 +389,9 @@ function recordShadowRunFacts(
       scopeKey: plan.scopeKey,
       acceptanceContract: task.acceptanceContract,
       acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+      ...(options.legacyBindingIndex === index
+        ? {}
+        : { sessionLifecycleFingerprint: lifecycleFingerprint(task.sessionId) }),
     })
     expect(binding.runId).toBe(task.runId)
     const manifest = ledger.recordRunSkillManifest({
@@ -761,6 +775,25 @@ describe('controlled Skill Shadow governance', () => {
       .join('\n')
     expect(serializedShadowEvents).not.toContain(parentSkill.content)
     expect(serializedShadowEvents).not.toMatch(/prompt|credential|workspaceRoot/u)
+  })
+
+  it('rejects a replayed Shadow result backed by a legacy v2 Run binding', () => {
+    const root = fixtureRoot('legacy-binding')
+    const seeded = seedPassingEvaluation(root)
+    const shadow = openShadow(seeded.ledger, seeded.plan.evaluationId)
+    const runs = recordShadowRunFacts(
+      seeded.ledger,
+      shadow,
+      ['not-met'],
+      { legacyBindingIndex: 0 },
+    )
+
+    const replay = new EvolutionLedger(root)
+    expect(() => replay.recordControlledSkillShadowResult({
+      shadowId: shadow.shadowId,
+      runs,
+    })).toThrow(/Run facts/u)
+    expect(replay.getControlledSkillShadowResult(shadow.shadowId)).toBeUndefined()
   })
 
   it('exposes the six controlled Shadow methods through the product service facade', async () => {

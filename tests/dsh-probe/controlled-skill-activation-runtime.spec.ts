@@ -245,6 +245,11 @@ function seedPassingLifecycle(
         scopeKey: evaluation.scopeKey,
         acceptanceContract: task.acceptanceContract,
         acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+        sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+          sessionId: arm.sessionId,
+          createdAt: 1,
+          cwd: 'D:/controlled-activation-runtime-evaluation-fixture',
+        }),
       })
       const skill = arm.role === 'baseline'
         ? parentSkill
@@ -343,6 +348,11 @@ function seedPassingLifecycle(
       scopeKey: shadow.scopeKey,
       acceptanceContract: task.acceptanceContract,
       acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+      sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+        sessionId: task.sessionId,
+        createdAt: 1,
+        cwd: 'D:/controlled-activation-runtime-shadow-fixture',
+      }),
     })
     const skill = { ...candidate.payload, provider: 'runtime' }
     const manifest = evolution.recordRunSkillManifest({ runId: binding.runId, skill })

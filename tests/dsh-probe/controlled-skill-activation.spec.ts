@@ -321,6 +321,11 @@ function seedPassingShadow(
         scopeKey: evaluation.scopeKey,
         acceptanceContract: task.acceptanceContract,
         acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+        sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+          sessionId: arm.sessionId,
+          createdAt: 1,
+          cwd: 'D:/controlled-activation-evaluation-fixture',
+        }),
       })
       const skill = arm.role === 'baseline'
         ? parentSkill
@@ -407,6 +412,11 @@ function seedPassingShadow(
       scopeKey: shadow.scopeKey,
       acceptanceContract: task.acceptanceContract,
       acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+      sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+        sessionId: task.sessionId,
+        createdAt: 1,
+        cwd: 'D:/controlled-activation-shadow-fixture',
+      }),
     })
     const manifest = ledger.recordRunSkillManifest({
       runId: binding.runId,
@@ -747,6 +757,28 @@ describe('controlled Skill activation governance', () => {
     })).toThrow(/changed/u)
     expect(ledger.listEvents()).toHaveLength(before)
     expect(ledger.getControlledSkillTransitionReceipt(promote.transitionId))
+      .toMatchObject({ state: 'pending-post-check' })
+  })
+
+  it('rejects a legacy v2 post-check binding before transition completion', () => {
+    const root = fixtureRoot('legacy-transition-binding')
+    const { ledger, shadow } = seedPassingShadow(root)
+    ledger.initializeControlledSkillScopePointer({ shadowId: shadow.shadowId })
+    const transition = begin(ledger, shadow.shadowId, 'promote', 1)
+    const planned = transition.runBinding
+    const legacy = {
+      goalRef: planned.goalRef,
+      taskRef: planned.taskRef,
+      sessionId: planned.sessionId,
+      scopeKey: planned.scopeKey,
+      acceptanceContract: planned.acceptanceContract,
+      acceptanceSubjectDigest: planned.acceptanceSubjectDigest,
+    }
+
+    expect(() => ledger.recordRunBinding(legacy)).toThrow(LedgerIntegrityError)
+    const replay = new EvolutionLedger(root)
+    expect(() => replay.recordRunBinding(legacy)).toThrow(LedgerIntegrityError)
+    expect(replay.getControlledSkillTransitionReceipt(transition.transitionId))
       .toMatchObject({ state: 'pending-post-check' })
   })
 

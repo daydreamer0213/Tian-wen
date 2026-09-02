@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -8,6 +8,7 @@ import type {
 } from '../../packages/tianwen-evolution/src/index.js'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  learningSessionLifecycleFingerprint,
   prepareControlledSkillEvaluationPlan,
   prepareControlledSkillEvalProtocol,
   prepareRunBinding,
@@ -88,6 +89,14 @@ afterEach(() => {
 
 function digest(value: string) {
   return sha256(value)
+}
+
+function lifecycleFingerprint(sessionId: string) {
+  return learningSessionLifecycleFingerprint({
+    sessionId,
+    createdAt: 1,
+    cwd: 'D:/controlled-evaluation-fixture',
+  })
 }
 
 function ticketFacts(scopeKey = 'project:tianwen/capability:research-summary') {
@@ -281,6 +290,7 @@ function recordControlledTaskFacts(
   },
   options: {
     readonly skipUseRole?: 'baseline' | 'candidate'
+    readonly legacyBindingRole?: 'baseline' | 'candidate'
   } = {},
 ) {
   const task = plan.tasks[taskIndex]!
@@ -309,6 +319,9 @@ function recordControlledTaskFacts(
       scopeKey: plan.scopeKey,
       acceptanceContract: task.acceptanceContract,
       acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+      ...(options.legacyBindingRole === arm.role
+        ? {}
+        : { sessionLifecycleFingerprint: lifecycleFingerprint(arm.sessionId) }),
     })
     expect(binding.runId).toBe(arm.runId)
     const skill = arm.role === 'baseline'
@@ -1384,6 +1397,53 @@ describe('controlled five-task Skill evaluation protocol', () => {
     )).toEqual(stored)
     expect(replay.recordControlledSkillEvaluationObjective(input).duplicate).toBe(true)
     expect(replay.listEvents().filter(isPublicLedgerEvent)).toEqual([])
+  })
+
+  it('rejects a replayed objective backed by a legacy v2 Run binding', () => {
+    const opened = openControlledObjectiveLedger('objective-legacy-binding')
+    const input = recordControlledTaskFacts(
+      opened.ledger,
+      opened.plan,
+      0,
+      { baseline: 'not-met', candidate: 'met' },
+      { legacyBindingRole: 'baseline' },
+    )
+
+    const replay = new EvolutionLedger(opened.path)
+    expect(() => replay.recordControlledSkillEvaluationObjective(input))
+      .toThrow(/Run facts/u)
+    expect(replay.getControlledSkillEvaluationObjective(
+      opened.plan.evaluationId,
+      opened.plan.tasks[0]!.taskId,
+    )).toBeUndefined()
+  })
+
+  it('fails closed when replay finds a historical objective backed by v2', () => {
+    const opened = openControlledObjectiveLedger('objective-legacy-terminal')
+    const input = recordControlledTaskFacts(opened.ledger, opened.plan, 0, {
+      baseline: 'not-met',
+      candidate: 'met',
+    })
+    opened.ledger.recordControlledSkillEvaluationObjective(input)
+
+    const events = readFileSync(join(opened.path, 'ledger.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line) as Record<string, unknown>)
+    const event = events.find(item =>
+      item.type === 'run-binding-recorded'
+      && (item.binding as { runId?: unknown }).runId === input.baseline.runId)!
+    const binding = event.binding as Record<string, unknown>
+    binding.schemaVersion = 'tianwen.run-binding.v2'
+    delete binding.sessionLifecycleFingerprint
+    event.inputDigest = sha256(binding)
+    writeFileSync(
+      join(opened.path, 'ledger.jsonl'),
+      `${events.map(item => JSON.stringify(item)).join('\n')}\n`,
+      'utf8',
+    )
+
+    expect(() => new EvolutionLedger(opened.path)).toThrow(/Run facts/u)
   })
 
   it('enforces protocol order, conflicting duplicates, and terminal objective stop', () => {

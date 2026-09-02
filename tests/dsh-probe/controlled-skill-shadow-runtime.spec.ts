@@ -19,6 +19,7 @@ import {
 import type { GenerateOptions, StreamChunk } from '@tianwen/dsh-compat'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  learningSessionLifecycleFingerprint,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
 import { apply } from '../../packages/tianwen-runtime/src/index.js'
@@ -257,6 +258,11 @@ function seedPassingEvaluation(
         scopeKey: plan.scopeKey,
         acceptanceContract: task.acceptanceContract,
         acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+        sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+          sessionId: arm.sessionId,
+          createdAt: 1,
+          cwd: 'D:/controlled-shadow-runtime-evaluation-fixture',
+        }),
       })
       const skill = arm.role === 'baseline'
         ? parentSkill

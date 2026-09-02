@@ -4025,27 +4025,20 @@ export class EvolutionLedger {
     const expectedContentDigest = candidateActive
       ? candidate === undefined ? undefined : sha256(candidate.payload.content)
       : parent?.contentDigest
-    const expectedBinding = prepareRunBinding({
-      goalRef: transition.runBinding.goalRef,
-      taskRef: transition.runBinding.taskRef,
-      sessionId: transition.runBinding.sessionId,
-      scopeKey: transition.runBinding.scopeKey,
-      acceptanceContract: transition.runBinding.acceptanceContract,
-      acceptanceSubjectDigest:
-        transition.runBinding.acceptanceSubjectDigest,
-      ...(binding?.schemaVersion === 'tianwen.run-binding.v3'
-        ? {
-            sessionLifecycleFingerprint:
-              binding.sessionLifecycleFingerprint,
-          }
-        : {}),
-    })
+    const expectedBinding = binding?.schemaVersion === 'tianwen.run-binding.v3'
+      ? prepareRunBinding({
+          goalRef: transition.runBinding.goalRef,
+          taskRef: transition.runBinding.taskRef,
+          sessionId: transition.runBinding.sessionId,
+          scopeKey: transition.runBinding.scopeKey,
+          acceptanceContract: transition.runBinding.acceptanceContract,
+          acceptanceSubjectDigest:
+            transition.runBinding.acceptanceSubjectDigest,
+          sessionLifecycleFingerprint: binding.sessionLifecycleFingerprint,
+        })
+      : undefined
     if (
-      binding === undefined
-      || (
-        binding.schemaVersion !== 'tianwen.run-binding.v2'
-        && binding.schemaVersion !== 'tianwen.run-binding.v3'
-      )
+      expectedBinding === undefined
       || canonicalJson(binding) !== canonicalJson(expectedBinding)
       || manifest === undefined
       || use === undefined
@@ -4182,26 +4175,19 @@ export class EvolutionLedger {
       const use = this.#runSkillUses.get(arm.runId)
       const outcome = [...this.#outcomeIntakes.values()]
         .find(value => value.input.runId === arm.runId)?.input
-      const expectedBinding = prepareRunBinding({
-        goalRef: `goal:controlled-skill-evaluation:${plan.protocolId}`,
-        taskRef: `task:${task.taskId}:${arm.role}`,
-        sessionId: armPlan.sessionId,
-        scopeKey: plan.scopeKey,
-        acceptanceContract: task.acceptanceContract,
-        acceptanceSubjectDigest: task.acceptanceSubjectDigest,
-        ...(binding?.schemaVersion === 'tianwen.run-binding.v3'
-          ? {
-              sessionLifecycleFingerprint:
-                binding.sessionLifecycleFingerprint,
-            }
-          : {}),
-      })
+      const expectedBinding = binding?.schemaVersion === 'tianwen.run-binding.v3'
+        ? prepareRunBinding({
+            goalRef: `goal:controlled-skill-evaluation:${plan.protocolId}`,
+            taskRef: `task:${task.taskId}:${arm.role}`,
+            sessionId: armPlan.sessionId,
+            scopeKey: plan.scopeKey,
+            acceptanceContract: task.acceptanceContract,
+            acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+            sessionLifecycleFingerprint: binding.sessionLifecycleFingerprint,
+          })
+        : undefined
       if (
-        binding === undefined
-        || (
-          binding.schemaVersion !== 'tianwen.run-binding.v2'
-          && binding.schemaVersion !== 'tianwen.run-binding.v3'
-        )
+        expectedBinding === undefined
         || canonicalJson(binding) !== canonicalJson(expectedBinding)
         || manifest === undefined
         || use === undefined
@@ -4269,26 +4255,19 @@ export class EvolutionLedger {
       const use = this.#runSkillUses.get(run.runId)
       const outcome = [...this.#outcomeIntakes.values()]
         .find(event => event.input.runId === run.runId)?.input
-      const expectedBinding = prepareRunBinding({
-        goalRef: `goal:controlled-skill-shadow:${plan.shadowId}`,
-        taskRef: `task:${task.taskId}:candidate`,
-        sessionId: task.sessionId,
-        scopeKey: plan.scopeKey,
-        acceptanceContract: task.acceptanceContract,
-        acceptanceSubjectDigest: task.acceptanceSubjectDigest,
-        ...(binding?.schemaVersion === 'tianwen.run-binding.v3'
-          ? {
-              sessionLifecycleFingerprint:
-                binding.sessionLifecycleFingerprint,
-            }
-          : {}),
-      })
+      const expectedBinding = binding?.schemaVersion === 'tianwen.run-binding.v3'
+        ? prepareRunBinding({
+            goalRef: `goal:controlled-skill-shadow:${plan.shadowId}`,
+            taskRef: `task:${task.taskId}:candidate`,
+            sessionId: task.sessionId,
+            scopeKey: plan.scopeKey,
+            acceptanceContract: task.acceptanceContract,
+            acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+            sessionLifecycleFingerprint: binding.sessionLifecycleFingerprint,
+          })
+        : undefined
       if (
-        binding === undefined
-        || (
-          binding.schemaVersion !== 'tianwen.run-binding.v2'
-          && binding.schemaVersion !== 'tianwen.run-binding.v3'
-        )
+        expectedBinding === undefined
         || canonicalJson(binding) !== canonicalJson(expectedBinding)
         || manifest === undefined
         || use === undefined
