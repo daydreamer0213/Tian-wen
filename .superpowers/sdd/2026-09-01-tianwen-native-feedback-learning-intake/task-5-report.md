@@ -86,3 +86,63 @@ the exactly-once delivery boundary.
 
 This report claims Task 5 only. Independent review and later stage tasks remain;
 Stage 2 completion is not claimed here.
+
+## Independent-review fix round 1: historical policy and profile admission
+
+Candidate baseline: `606257600ab6310a236524f194fdeb83d386bb87`
+
+Fix commit: this commit (`fix: bind consent notice to historical policy`)
+
+### Root causes and corrections
+
+- Reconciliation compared an old DSH revision only with the latest profile
+  consent. Evolution now exposes a read-only, strict-before timestamp query;
+  the bridge uses that historical fact for unseen revisions. The sanitized
+  exact message status durably retains only `analysisConsentRevision`, so an
+  already-ingested revision remains authoritative after later enable, disable,
+  failure recovery, or reload. Ledger validation accepts only an exact recorded
+  revision whose fact was enabled; it no longer requires that revision to still
+  be the latest profile state.
+- Main/root classification formerly checked only `origin`. One shared predicate
+  now defines a root as `parentSession === undefined && origin !== 'subagent'`.
+  Tool installation, execution, Agent-created recovery, persisted recovery, and
+  lineage resolution all use it. Any parent reference continues traversal;
+  parentless subagents, missing parents, cycles, identity mismatch, and a
+  parentSession-only child all fail closed.
+- Notice recovery was single-flight, but notice admission was not. One
+  profile-scoped serialized lane now covers status read, exact-root resolution,
+  durable intent admission, and recovery in call-entry order. Unload stops new
+  admissions and waits already-admitted work. An append error is accepted only
+  after rereading the same exact durable binding; a different binding remains a
+  conflict and fails closed.
+
+### TDD evidence
+
+- RED before production edits: 3 files ran with 7 expected failures and 61
+  passing tests. The failures independently proved the missing historical
+  query and projection, rejection of an old enabled consent after disable,
+  parentSession-only tool exposure, I/O-ordered cross-lineage intent choice,
+  and unload completing before admission settled. The unhandled conflicting
+  intent rejection was the old cross-Session race being reproduced.
+- GREEN after the minimal fixes: the three directly affected files passed 70
+  tests. The exact append-reread and parentless-orphan cases complete the review
+  matrix. Removing the exact-reread acceptance branch made its focused test fail
+  1/1 with the forced post-append error; restoring it passed 1/1, while the same
+  test continues to reject a different main-Session binding.
+
+### Fresh verification
+
+- Task 5 focused matrix: 4 files, 91 tests passed.
+- Broad Task 1-5 learning, Task 4 compatibility, and controlled lifecycle
+  regression union: 15 files, 289 tests passed.
+- Stage 1 main-chat and settlement critical regression: 8 files, 181 tests
+  passed.
+- Forced Evolution, Runtime, and Runtime Bundle TypeScript builds passed;
+  complete workspace typecheck passed.
+- Public DSH import scan reported zero private-import violations. Authorized
+  scope, added-line static scan, and `git diff --check` passed.
+- Public status and notice assertions continue to exclude feedback notes, raw
+  paths, internal delivery ids, and tool access during the five-fact notice.
+
+This section records fix round 1 only. Independent re-review remains the next
+gate; it does not claim Task 5 or Stage 2 completion.

@@ -22,6 +22,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { apply as applyCore } from '../../packages/tianwen-runtime/src/index.js'
+import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import {
   TianwenMessageFeedbackBridgeService,
 } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
@@ -1001,63 +1002,202 @@ describe('Tianwen DSH Message Feedback bridge', () => {
     }
   })
 
-  it('captures only consent enabled before the exact feedback revision', async () => {
-    const root = evolutionRoot('consent')
+  it('binds every revision to historical consent and preserves that decision across reload', async () => {
+    const root = evolutionRoot('historical-consent')
+    const consentTimes = [
+      '2026-09-01T00:00:00.000Z',
+      '2026-09-01T00:00:02.000Z',
+      '2026-09-01T00:00:04.000Z',
+    ]
+    let consentTick = 0
+    const seeded = new EvolutionLedger(root, {
+      clock: () => consentTimes[consentTick++]!,
+    })
+    seeded.recordLearningAnalysisConsent({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    seeded.recordLearningAnalysisConsent({
+      revision: 2,
+      enabled: false,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    seeded.recordLearningAnalysisConsent({
+      revision: 3,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
     const sessions = new SessionCatalog()
     const feedback = new FeedbackCatalog()
-    const later = completedSession('feedback-consent-later', ['message-later'])
-    const earlier = completedSession('feedback-consent-earlier', ['message-earlier'])
+    const enabledThenDisabled = completedSession(
+      'feedback-consent-enabled-then-disabled',
+      ['message-enabled-then-disabled'],
+    )
+    const disabledThenEnabled = completedSession(
+      'feedback-consent-disabled-then-enabled',
+      ['message-disabled-then-enabled'],
+    )
     const equal = completedSession('feedback-consent-equal', ['message-equal'])
-    sessions.add(later)
-    sessions.add(earlier)
+    const newlyEnabled = completedSession(
+      'feedback-consent-newly-enabled',
+      ['message-newly-enabled'],
+    )
+    sessions.add(enabledThenDisabled)
+    sessions.add(disabledThenEnabled)
     sessions.add(equal)
-    const mounted = await mountBridge(root, sessions, feedback)
+    sessions.add(newlyEnabled)
+    sessions.listed = []
+    feedback.set(String(enabledThenDisabled.id), [item({
+      messageId: 'message-enabled-then-disabled',
+      version: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      note: 'Revision while consent revision one was enabled.',
+      updatedAt: Date.parse('2026-09-01T00:00:01.000Z'),
+    })])
+    feedback.set(String(disabledThenEnabled.id), [item({
+      messageId: 'message-disabled-then-enabled',
+      version: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      note: 'Revision while consent was disabled.',
+      updatedAt: Date.parse('2026-09-01T00:00:03.000Z'),
+    })])
+    feedback.set(String(equal.id), [item({
+      messageId: 'message-equal',
+      version: '14141414-1414-4414-8414-141414141414',
+      note: 'Ambiguous equal-timestamp revision.',
+      updatedAt: Date.parse('2026-09-01T00:00:04.000Z'),
+    })])
+    feedback.set(String(newlyEnabled.id), [item({
+      messageId: 'message-newly-enabled',
+      version: '15151515-1515-4515-8515-151515151515',
+      note: 'Revision after consent revision three.',
+      updatedAt: Date.parse('2026-09-01T00:00:05.000Z'),
+    })])
+    const mounted = await mountBridge(root, sessions, feedback, {
+      learningConsent: true,
+    })
 
     try {
-      const consent = mounted.ctx.tianwenEvolution.recordLearningAnalysisConsent({
-        revision: 1,
-        enabled: true,
-        policyVersion: 'tianwen-auto-analysis.v1',
-      })
-      const consentAt = Date.parse(consent.recordedAt)
-      feedback.set(String(later.id), [item({
-        messageId: 'message-later',
-        version: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-        note: 'Revision after consent.',
-        updatedAt: consentAt + 1,
-      })])
-      feedback.set(String(earlier.id), [item({
-        messageId: 'message-earlier',
-        version: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
-        note: 'Historical revision.',
-        updatedAt: Math.max(0, consentAt - 1),
-      })])
-      feedback.set(String(equal.id), [item({
-        messageId: 'message-equal',
-        version: '14141414-1414-4414-8414-141414141414',
-        note: 'Ambiguous equal-timestamp revision.',
-        updatedAt: consentAt,
-      })])
-      await mounted.bridge.reconcileSession(String(later.id))
-      await mounted.bridge.reconcileSession(String(earlier.id))
+      await expect(mounted.bridge.reconcileSession(String(enabledThenDisabled.id)))
+        .resolves.toMatchObject({ state: 'reconciled' })
+      expect(mounted.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(enabledThenDisabled.id),
+        'message-enabled-then-disabled',
+      )).toMatchObject({ analysisConsentRevision: 1 })
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toBeUndefined()
+
+      await mounted.bridge.reconcileSession(String(disabledThenEnabled.id))
       await mounted.bridge.reconcileSession(String(equal.id))
+      await mounted.bridge.reconcileSession(String(newlyEnabled.id))
+      expect(mounted.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(disabledThenEnabled.id),
+        'message-disabled-then-enabled',
+      )).not.toHaveProperty('analysisConsentRevision')
+      expect(mounted.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(equal.id),
+        'message-equal',
+      )).not.toHaveProperty('analysisConsentRevision')
+      expect(mounted.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(newlyEnabled.id),
+        'message-newly-enabled',
+      )).toMatchObject({ analysisConsentRevision: 3 })
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toMatchObject({
+        state: 'pending',
+        mainSessionId: String(disabledThenEnabled.id),
+      })
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
 
-      const events = feedbackLedgerEvents(root)
-      const bySession = new Map(events.map(event => [
-        (event.input as { readonly sessionId: string }).sessionId,
-        event,
-      ]))
-      expect(bySession.get(String(later.id))?.analysisConsentRevision).toBe(1)
-      expect(bySession.get(String(earlier.id)))
-        .not.toHaveProperty('analysisConsentRevision')
-      expect(bySession.get(String(equal.id)))
-        .not.toHaveProperty('analysisConsentRevision')
-
-      await mounted.bridge.reconcileSession(String(earlier.id))
-      expect(feedbackLedgerEvents(root)).toHaveLength(3)
+    const reloaded = await mountBridge(root, sessions, feedback, {
+      learningConsent: true,
+    })
+    try {
+      await reloaded.bridge.reconcileSession(String(disabledThenEnabled.id))
+      expect(reloaded.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(disabledThenEnabled.id),
+        'message-disabled-then-enabled',
+      )).not.toHaveProperty('analysisConsentRevision')
+      expect(reloaded.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(enabledThenDisabled.id),
+        'message-enabled-then-disabled',
+      )).toMatchObject({ analysisConsentRevision: 1 })
+      expect(reloaded.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(newlyEnabled.id),
+        'message-newly-enabled',
+      )).toMatchObject({ analysisConsentRevision: 3 })
+      expect(reloaded.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toMatchObject({
+        state: 'pending',
+        mainSessionId: String(disabledThenEnabled.id),
+      })
+      expect(feedbackLedgerEvents(root)).toHaveLength(4)
       expect(feedbackLedgerEvents(root).find(event =>
-        (event.input as { readonly sessionId: string }).sessionId === String(earlier.id)))
+        (event.input as { readonly sessionId: string }).sessionId
+          === String(disabledThenEnabled.id)))
         .not.toHaveProperty('analysisConsentRevision')
+    } finally {
+      await reloaded.ctx.fiber.dispose()
+    }
+  })
+
+  it('recovers an Evolution write failure with consent from the revision timestamp', async () => {
+    const root = evolutionRoot('historical-consent-write-recovery')
+    let consentTick = 0
+    const seeded = new EvolutionLedger(root, {
+      clock: () => [
+        '2026-09-01T00:00:00.000Z',
+        '2026-09-01T00:00:02.000Z',
+      ][consentTick++]!,
+    })
+    seeded.recordLearningAnalysisConsent({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    seeded.recordLearningAnalysisConsent({
+      revision: 2,
+      enabled: false,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const session = completedSession(
+      'feedback-historical-consent-write-recovery',
+      ['message-recovery'],
+    )
+    sessions.add(session)
+    sessions.listed = []
+    feedback.set(String(session.id), [item({
+      messageId: 'message-recovery',
+      version: '16161616-1616-4616-8616-161616161616',
+      note: 'Revision before the later disable.',
+      updatedAt: Date.parse('2026-09-01T00:00:01.000Z'),
+    })])
+    const mounted = await mountBridge(root, sessions, feedback, {
+      learningConsent: true,
+    })
+    const consume = vi.spyOn(mounted.ctx.tianwenLearningIntake, 'consume')
+      .mockImplementationOnce(() => {
+        throw new Error('forced historical intake write failure')
+      })
+    try {
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'pending' })
+      consume.mockRestore()
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'reconciled' })
+      expect(mounted.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(session.id),
+        'message-recovery',
+      )).toMatchObject({ analysisConsentRevision: 1 })
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toBeUndefined()
     } finally {
       await mounted.ctx.fiber.dispose()
     }
@@ -1271,7 +1411,8 @@ describe('Tianwen DSH Message Feedback bridge', () => {
         (event.input as { readonly sessionId: string }).sessionId === String(enabled.id)))
         .toMatchObject({ analysisConsentRevision: 1 })
 
-      mounted.ctx.tianwenEvolution.recordLearningAnalysisConsent({
+      const disabledConsent = mounted.ctx.tianwenEvolution
+        .recordLearningAnalysisConsent({
         revision: 2,
         enabled: false,
         policyVersion: 'tianwen-auto-analysis.v1',
@@ -1280,7 +1421,7 @@ describe('Tianwen DSH Message Feedback bridge', () => {
         messageId: 'message-disabled',
         version: '37373737-3737-4737-8737-373737373737',
         note: 'Disabled correction.',
-        updatedAt: Date.parse(consent.recordedAt) + 2,
+        updatedAt: Date.parse(disabledConsent.recordedAt) + 1,
       })])
       await mounted.bridge.reconcileSession(String(disabled.id))
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(

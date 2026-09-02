@@ -3579,6 +3579,22 @@ export class EvolutionLedger {
       : clone(this.#learningAnalysisConsent)
   }
 
+  getLearningAnalysisConsentBefore(
+    timestamp: number,
+  ): LearningAnalysisConsent | undefined {
+    if (!Number.isFinite(timestamp)) {
+      throw new TypeError('learning analysis consent timestamp must be finite')
+    }
+    let latest: LearningAnalysisConsent | undefined
+    for (const consent of this.#learningAnalysisConsents.values()) {
+      if (
+        Date.parse(consent.recordedAt) < timestamp
+        && (latest === undefined || consent.revision > latest.revision)
+      ) latest = consent
+    }
+    return latest === undefined ? undefined : clone(latest)
+  }
+
   recordLearningConsentNoticeIntent(
     input: LearningConsentNoticeBinding,
   ): LearningConsentNoticeReceipt {
@@ -5397,13 +5413,12 @@ export class EvolutionLedger {
         if (
           event.analysisConsentRevision !== undefined
           && (
-            this.#learningAnalysisConsent?.revision
-              !== event.analysisConsentRevision
-            || !this.#learningAnalysisConsent.enabled
+            this.#learningAnalysisConsents
+              .get(event.analysisConsentRevision)?.enabled !== true
           )
         ) {
           throw new LedgerIntegrityError(
-            'learning feedback references consent that is not currently enabled',
+            'learning feedback references consent that was not enabled',
           )
         }
       }
@@ -5838,6 +5853,10 @@ export class EvolutionLedger {
               sessionLifecycleFingerprint:
                 event.sessionLifecycleFingerprint,
             }
+          : {}),
+        ...(event.schemaVersion === 'tianwen.learning-intake.v2'
+          && event.analysisConsentRevision !== undefined
+          ? { analysisConsentRevision: event.analysisConsentRevision }
           : {}),
         recordedAt: event.at,
         ...event.receipt,

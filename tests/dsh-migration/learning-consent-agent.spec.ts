@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -21,6 +21,19 @@ import {
 } from '../../packages/tianwen-runtime-bundle/src/learning-consent-agent.js'
 
 const roots: string[] = []
+
+function nextTurn(): Promise<void> {
+  return new Promise(resolveTurn => setImmediate(resolveTurn))
+}
+
+function deferred(): {
+  readonly promise: Promise<void>
+  readonly resolve: () => void
+} {
+  let resolvePromise!: () => void
+  const promise = new Promise<void>(resolve => { resolvePromise = resolve })
+  return { promise, resolve: resolvePromise }
+}
 
 function tempRoot(prefix: string): string {
   const base = process.platform === 'win32'
@@ -147,6 +160,55 @@ describe('Tianwen main-chat learning consent tool', () => {
       }
       expect(mounted.ctx.tianwenEvolution.getLearningAnalysisConsent())
         .toBeUndefined()
+    } finally {
+      await child.dispose()
+      await main.dispose()
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('treats a parentSession-only Agent as a child in installation, execution, and notice recovery', async () => {
+    const mounted = await mountConsentRuntime('parent-only', [
+      textResponse('Notice acknowledged.'),
+    ])
+    const main = await mounted.ctx.agents.create({
+      sessionId: SessionId(`consent-main-${randomUUID()}`),
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    const child = await mounted.ctx.agents.create({
+      sessionId: SessionId(`consent-parent-only-${randomUUID()}`),
+      meta: { parentSession: main.agent.session.id },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      expect(child.agent.session.header.parentSession)
+        .toBe(main.agent.session.id)
+      expect(child.agent.session.header.origin).toBeUndefined()
+      expect(mounted.ctx.tools.schemas(child.agent).some(tool =>
+        tool.name === 'tianwen_learning_consent')).toBe(false)
+
+      const definition = mounted.ctx.tools.get(
+        'tianwen_learning_consent',
+        main.agent,
+      )
+      await expect(definition!.execute(
+        { action: 'status' },
+        { agent: child.agent } as never,
+      )).rejects.toThrow(/only in a main Session/u)
+
+      await mounted.ctx.tianwenLearningConsentAgent
+        .observeFeedbackWithoutConsent(String(child.agent.session.id))
+      await main.agent.whenIdle()
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toMatchObject({
+        state: 'delivered',
+        mainSessionId: String(main.agent.session.id),
+      })
+      expect(child.agent.session.events.some(event =>
+        event.type === 'user/message'
+        && String(event.data.id) === LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID))
+        .toBe(false)
     } finally {
       await child.dispose()
       await main.dispose()
@@ -381,6 +443,205 @@ describe('Tianwen main-chat learning consent tool', () => {
     } finally {
       await orphan.dispose()
       await missing.ctx.fiber.dispose()
+    }
+  })
+
+  it('fails a parentless subagent orphan closed', async () => {
+    const mounted = await mountConsentRuntime('parentless-orphan')
+    const orphan = await mounted.ctx.agents.create({
+      sessionId: SessionId(`consent-parentless-orphan-${randomUUID()}`),
+      meta: {
+        origin: 'subagent',
+        delegationDepth: 1,
+      },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      expect(mounted.ctx.tools.schemas(orphan.agent).some(tool =>
+        tool.name === 'tianwen_learning_consent')).toBe(false)
+      await expect(mounted.ctx.tianwenLearningConsentAgent
+        .observeFeedbackWithoutConsent(String(orphan.agent.session.id)))
+        .resolves.toBe(false)
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toBeUndefined()
+    } finally {
+      await orphan.dispose()
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('rereads an exact committed intent after an append error and rejects a conflicting one', async () => {
+    const exact = await mountConsentRuntime('intent-append-reread')
+    const exactLineage = await createMainAndChild(exact.ctx)
+    const exactRecord = exact.ctx.tianwenEvolution
+      .recordLearningConsentNoticeIntent.bind(exact.ctx.tianwenEvolution)
+    vi.spyOn(exact.ctx.agents, 'get').mockReturnValue(undefined)
+    vi.spyOn(exact.ctx.tianwenEvolution, 'recordLearningConsentNoticeIntent')
+      .mockImplementationOnce(input => {
+        exactRecord(input)
+        throw new Error('forced error after exact intent append')
+      })
+    try {
+      await expect(exact.ctx.tianwenLearningConsentAgent
+        .observeFeedbackWithoutConsent(String(exactLineage.child.agent.session.id)))
+        .resolves.toBe(true)
+      expect(exact.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toMatchObject({
+        state: 'pending',
+        mainSessionId: String(exactLineage.main.agent.session.id),
+      })
+    } finally {
+      await exactLineage.child.dispose()
+      await exactLineage.main.dispose()
+      await exact.ctx.fiber.dispose()
+    }
+
+    vi.restoreAllMocks()
+    const conflict = await mountConsentRuntime('intent-append-conflict')
+    const first = await createMainAndChild(conflict.ctx)
+    const second = await createMainAndChild(conflict.ctx)
+    const conflictingRecord = conflict.ctx.tianwenEvolution
+      .recordLearningConsentNoticeIntent.bind(conflict.ctx.tianwenEvolution)
+    vi.spyOn(conflict.ctx.tianwenEvolution, 'recordLearningConsentNoticeIntent')
+      .mockImplementationOnce(input => {
+        conflictingRecord({
+          ...input,
+          mainSessionId: String(second.main.agent.session.id),
+        })
+        throw new Error('forced conflicting intent append')
+      })
+    try {
+      await expect(conflict.ctx.tianwenLearningConsentAgent
+        .observeFeedbackWithoutConsent(String(first.child.agent.session.id)))
+        .rejects.toThrow('forced conflicting intent append')
+      expect(conflict.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toMatchObject({
+        state: 'pending',
+        mainSessionId: String(second.main.agent.session.id),
+      })
+    } finally {
+      await second.child.dispose()
+      await second.main.dispose()
+      await first.child.dispose()
+      await first.main.dispose()
+      await conflict.ctx.fiber.dispose()
+    }
+  })
+
+  it('admits concurrent lineages in call-entry order and records one notice lifecycle across reload', async () => {
+    const mounted = await mountConsentRuntime('concurrent-admission', [
+      textResponse('Notice acknowledged.'),
+    ])
+    const first = await createMainAndChild(mounted.ctx)
+    const second = await createMainAndChild(mounted.ctx)
+    const gate = deferred()
+    const inspected: string[] = []
+    const inspect = mounted.ctx.sessionPersistence.inspect
+      .bind(mounted.ctx.sessionPersistence)
+    vi.spyOn(mounted.ctx.sessionPersistence, 'inspect')
+      .mockImplementation(async sessionId => {
+        const value = String(sessionId)
+        inspected.push(value)
+        if (value === String(first.child.agent.session.id)) await gate.promise
+        return inspect(sessionId)
+      })
+    try {
+      const firstObservation = mounted.ctx.tianwenLearningConsentAgent
+        .observeFeedbackWithoutConsent(String(first.child.agent.session.id))
+      await nextTurn()
+      const secondObservation = mounted.ctx.tianwenLearningConsentAgent
+        .observeFeedbackWithoutConsent(String(second.child.agent.session.id))
+      await nextTurn()
+
+      expect(inspected).not.toContain(String(second.child.agent.session.id))
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toBeUndefined()
+
+      gate.resolve()
+      await expect(Promise.all([firstObservation, secondObservation]))
+        .resolves.toEqual([true, true])
+      await first.main.agent.whenIdle()
+      await second.main.agent.whenIdle()
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toMatchObject({
+        state: 'delivered',
+        mainSessionId: String(first.main.agent.session.id),
+      })
+      expect(mounted.adapter.requests).toHaveLength(1)
+      const ledger = readFileSync(
+        join(mounted.root, 'evolution', 'ledger.jsonl'),
+        'utf8',
+      ).trim().split('\n').map(line => JSON.parse(line) as { readonly type: string })
+      expect(ledger.filter(event =>
+        event.type === 'learning-consent-notice-intent-recorded'))
+        .toHaveLength(1)
+      expect(ledger.filter(event =>
+        event.type === 'learning-consent-notice-delivered'))
+        .toHaveLength(1)
+
+      await mounted.consentFiber.dispose()
+      const reloaded = mounted.ctx.plugin(TianwenLearningConsentAgentService)
+      await reloaded
+      await expect(mounted.ctx.tianwenLearningConsentAgent
+        .observeFeedbackWithoutConsent(String(second.child.agent.session.id)))
+        .resolves.toBe(true)
+      expect(mounted.adapter.requests).toHaveLength(1)
+      await reloaded.dispose()
+    } finally {
+      gate.resolve()
+      await second.child.dispose()
+      await second.main.dispose()
+      await first.child.dispose()
+      await first.main.dispose()
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('waits an admitted lineage choice during unload and rejects later admissions', async () => {
+    const mounted = await mountConsentRuntime('admission-unload', [
+      textResponse('Notice acknowledged.'),
+    ])
+    const { main, child } = await createMainAndChild(mounted.ctx)
+    const service = mounted.ctx.tianwenLearningConsentAgent
+    const gate = deferred()
+    const inspect = mounted.ctx.sessionPersistence.inspect
+      .bind(mounted.ctx.sessionPersistence)
+    vi.spyOn(mounted.ctx.sessionPersistence, 'inspect')
+      .mockImplementation(async sessionId => {
+        if (String(sessionId) === String(child.agent.session.id)) {
+          await gate.promise
+        }
+        return inspect(sessionId)
+      })
+    try {
+      const observation = service
+        .observeFeedbackWithoutConsent(String(child.agent.session.id))
+      await nextTurn()
+      let disposed = false
+      const disposal = mounted.consentFiber.dispose().then(() => {
+        disposed = true
+      })
+      await nextTurn()
+      expect(disposed).toBe(false)
+      gate.resolve()
+      await expect(observation).resolves.toBe(true)
+      await disposal
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toMatchObject({ mainSessionId: String(main.agent.session.id) })
+      await expect(service
+        .observeFeedbackWithoutConsent(String(child.agent.session.id)))
+        .resolves.toBe(false)
+    } finally {
+      gate.resolve()
+      await child.dispose()
+      await main.dispose()
+      await mounted.ctx.fiber.dispose()
     }
   })
 })

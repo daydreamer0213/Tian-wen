@@ -271,6 +271,12 @@ export class TianwenEvolutionService extends Service {
     return this.state().ledger.getLearningAnalysisConsent()
   }
 
+  getLearningAnalysisConsentBefore(
+    timestamp: number,
+  ): LearningAnalysisConsent | undefined {
+    return this.state().ledger.getLearningAnalysisConsentBefore(timestamp)
+  }
+
   recordLearningConsentNoticeIntent(
     input: LearningConsentNoticeBinding,
   ): LearningConsentNoticeReceipt {

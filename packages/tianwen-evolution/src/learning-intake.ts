@@ -98,6 +98,8 @@ export interface LearningIntakeStatus
   readonly feedbackFingerprint: Sha256Digest
   /** Absent only for legacy history that cannot prove a Session lifecycle. */
   readonly sessionLifecycleFingerprint?: Sha256Digest
+  /** Enabled profile consent captured for this exact feedback revision. */
+  readonly analysisConsentRevision?: number
   readonly recordedAt: string
 }
 

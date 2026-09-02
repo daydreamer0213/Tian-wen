@@ -81,6 +81,13 @@ function noticeBinding(mainSessionId: string): LearningConsentNoticeBinding {
   }
 }
 
+function isRootSession(header: {
+  readonly origin?: string
+  readonly parentSession?: unknown
+}): boolean {
+  return header.parentSession === undefined && header.origin !== 'subagent'
+}
+
 function hasCompletedNotice(events: readonly SessionEvent[]): boolean {
   for (let index = 0; index < events.length; index += 1) {
     const event = events[index]
@@ -138,7 +145,9 @@ export class TianwenLearningConsentAgentService extends Service {
   ] as const
 
   private readonly installed = new Map<Agent, () => Promise<void>>()
+  private noticeAdmissionTail: Promise<void> = Promise.resolve()
   private noticeFlight: Promise<boolean> | undefined
+  private accepting = true
 
   constructor(ctx: Context) {
     super(ctx, 'tianwenLearningConsentAgent')
@@ -148,7 +157,7 @@ export class TianwenLearningConsentAgentService extends Service {
     for (const agent of this.ctx.agents.list()) this.install(agent)
     const offAgent = this.ctx.on('agent/created', ({ agent }) => {
       this.install(agent)
-      if (agent.session.header.origin !== 'subagent') {
+      if (isRootSession(agent.session.header)) {
         void this.recoverPendingNotice().catch(() => undefined)
       }
     })
@@ -158,8 +167,10 @@ export class TianwenLearningConsentAgentService extends Service {
       void dispose?.()
     })
     this.ctx.effect(() => async () => {
+      this.accepting = false
       offDisposed()
       offAgent()
+      await this.noticeAdmissionTail
       if (this.noticeFlight !== undefined) {
         await Promise.allSettled([this.noticeFlight])
       }
@@ -170,14 +181,38 @@ export class TianwenLearningConsentAgentService extends Service {
   }
 
   async observeFeedbackWithoutConsent(sourceSessionId: string): Promise<boolean> {
+    if (!this.accepting) return false
+    const operation = this.noticeAdmissionTail
+      .catch(() => undefined)
+      .then(() => this.observeFeedbackWithoutConsentOnce(sourceSessionId))
+    this.noticeAdmissionTail = operation.then(
+      () => undefined,
+      () => undefined,
+    )
+    return operation
+  }
+
+  private async observeFeedbackWithoutConsentOnce(
+    sourceSessionId: string,
+  ): Promise<boolean> {
     let status = this.ctx.tianwenEvolution
       .getLearningConsentNoticeStatus(POLICY_VERSION)
     if (status === undefined) {
       const mainSessionId = await this.resolveMainSessionId(sourceSessionId)
       if (mainSessionId === undefined) return false
-      this.ctx.tianwenEvolution.recordLearningConsentNoticeIntent(
-        noticeBinding(mainSessionId),
-      )
+      try {
+        this.ctx.tianwenEvolution.recordLearningConsentNoticeIntent(
+          noticeBinding(mainSessionId),
+        )
+      } catch (error) {
+        const raced = this.ctx.tianwenEvolution
+          .getLearningConsentNoticeStatus(POLICY_VERSION)
+        if (
+          raced?.mainSessionId !== mainSessionId
+          || raced.noticeSourceMessageId
+            !== LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID
+        ) throw error
+      }
       status = this.ctx.tianwenEvolution
         .getLearningConsentNoticeStatus(POLICY_VERSION)
     }
@@ -198,9 +233,11 @@ export class TianwenLearningConsentAgentService extends Service {
           SessionId(sessionId),
         )
         if (String(inspection.meta.id) !== sessionId) return undefined
-        if (inspection.meta.origin !== 'subagent') return sessionId
-        if (inspection.meta.parentSession === undefined) return undefined
-        sessionId = String(inspection.meta.parentSession)
+        if (inspection.meta.parentSession !== undefined) {
+          sessionId = String(inspection.meta.parentSession)
+          continue
+        }
+        return isRootSession(inspection.meta) ? sessionId : undefined
       }
     } catch {
       return undefined
@@ -234,7 +271,7 @@ export class TianwenLearningConsentAgentService extends Service {
     }
     if (
       String(inspection.meta.id) !== status.mainSessionId
-      || inspection.meta.origin === 'subagent'
+      || !isRootSession(inspection.meta)
     ) return false
     if (hasCompletedNotice(inspection.events)) {
       this.ctx.tianwenEvolution.recordLearningConsentNoticeDelivered(
@@ -248,7 +285,7 @@ export class TianwenLearningConsentAgentService extends Service {
     if (
       agent === undefined
       || String(agent.session.id) !== status.mainSessionId
-      || agent.session.header.origin === 'subagent'
+      || !isRootSession(agent.session.header)
     ) return false
     await agent.whenIdle()
     if (this.ctx.agents.get(agent.session.id) !== agent) return false
@@ -335,7 +372,7 @@ export class TianwenLearningConsentAgentService extends Service {
   }
 
   private install(agent: Agent): void {
-    if (agent.session.header.origin === 'subagent' || this.installed.has(agent)) return
+    if (!isRootSession(agent.session.header) || this.installed.has(agent)) return
     const service = this
     const dispose = agent.ctx.effect(function* () {
       yield agent.ctx.tools.register(defineTool({
@@ -364,7 +401,7 @@ export class TianwenLearningConsentAgentService extends Service {
         async execute(args, exec) {
           if (
             exec.agent === undefined
-            || exec.agent.session.header.origin === 'subagent'
+            || !isRootSession(exec.agent.session.header)
           ) {
             throw new Error('learning consent is available only in a main Session')
           }

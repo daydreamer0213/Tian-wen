@@ -78,17 +78,6 @@ function isFeedbackTarget(
   })
 }
 
-function consentRevision(
-  item: MessageFeedbackItem,
-  consent: ReturnType<Context['tianwenEvolution']['getLearningAnalysisConsent']>,
-): number | undefined {
-  if (consent?.enabled !== true) return undefined
-  const recordedAt = Date.parse(consent.recordedAt)
-  return Number.isFinite(recordedAt) && recordedAt < item.updatedAt
-    ? consent.revision
-    : undefined
-}
-
 export class TianwenMessageFeedbackBridgeService extends Service {
   static inject = [
     'messageFeedback',
@@ -231,7 +220,6 @@ export class TianwenMessageFeedbackBridgeService extends Service {
       lifecycleBefore,
       lifecycleAfter,
     )
-    const consent = this.ctx.tianwenEvolution.getLearningAnalysisConsent()
     const consentAgent = this.ctx.get('tianwenLearningConsentAgent')
     for (const [messageId, item] of byMessage) {
       const current = this.ctx.tianwenEvolution.getLearningIntakeStatus(
@@ -247,10 +235,19 @@ export class TianwenMessageFeedbackBridgeService extends Service {
         ) {
           throw new Error('feedback revision disagrees with learning history')
         }
-        await this.observeConsentNotice(consentAgent, sessionId, item, consent)
+        await this.observeConsentNotice(
+          consentAgent,
+          sessionId,
+          item,
+          current.analysisConsentRevision,
+        )
         continue
       }
-      const analysisConsentRevision = consentRevision(item, consent)
+      const historicalConsent = this.ctx.tianwenEvolution
+        .getLearningAnalysisConsentBefore(item.updatedAt)
+      const analysisConsentRevision = historicalConsent?.enabled === true
+        ? historicalConsent.revision
+        : undefined
       this.ctx.tianwenLearningIntake.consume(session, scopeKey, {
         messageId,
         rating: item.rating,
@@ -263,7 +260,19 @@ export class TianwenMessageFeedbackBridgeService extends Service {
           ? {}
           : { analysisConsentRevision }),
       })
-      await this.observeConsentNotice(consentAgent, sessionId, item, consent)
+      const recorded = this.ctx.tianwenEvolution.getLearningIntakeStatus(
+        sessionId,
+        messageId,
+      )
+      if (recorded?.feedbackVersion !== String(item.version)) {
+        throw new Error('feedback revision did not produce an exact learning status')
+      }
+      await this.observeConsentNotice(
+        consentAgent,
+        sessionId,
+        item,
+        recorded.analysisConsentRevision,
+      )
     }
 
     const currentMessageIds = new Set(byMessage.keys())
@@ -294,11 +303,11 @@ export class TianwenMessageFeedbackBridgeService extends Service {
     consentAgent: Context['tianwenLearningConsentAgent'] | undefined,
     sessionId: string,
     item: MessageFeedbackItem,
-    consent: ReturnType<Context['tianwenEvolution']['getLearningAnalysisConsent']>,
+    analysisConsentRevision: number | undefined,
   ): Promise<void> {
     if (
       consentAgent === undefined
-      || consent?.enabled === true
+      || analysisConsentRevision !== undefined
       || item.rating !== 'negative'
       || typeof item.note !== 'string'
       || item.note.trim().length === 0

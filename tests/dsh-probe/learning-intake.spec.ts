@@ -493,6 +493,25 @@ describe('Tianwen learning intake ledger', () => {
       enabled: false,
       policyVersion: 'tianwen-auto-analysis.v1',
     })
+    expect(ledger.getLearningAnalysisConsentBefore(
+      Date.parse(enabled.recordedAt),
+    )).toBeUndefined()
+    expect(ledger.getLearningAnalysisConsentBefore(
+      Date.parse(disabled.recordedAt),
+    )).toEqual({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+      recordedAt: enabled.recordedAt,
+    })
+    expect(ledger.getLearningAnalysisConsentBefore(
+      Date.parse(disabled.recordedAt) + 1,
+    )).toEqual({
+      revision: 2,
+      enabled: false,
+      policyVersion: 'tianwen-auto-analysis.v1',
+      recordedAt: disabled.recordedAt,
+    })
     expect(ledger.getLearningAnalysisConsent()).toEqual({
       revision: 2,
       enabled: false,
@@ -509,8 +528,14 @@ describe('Tianwen learning intake ledger', () => {
       enabled: true,
       policyVersion: 'tianwen-auto-analysis.v1',
     })).toThrow(LedgerIntegrityError)
-    expect(new EvolutionLedger(root).getLearningAnalysisConsent())
+    const reloaded = new EvolutionLedger(root)
+    expect(reloaded.getLearningAnalysisConsent())
       .toEqual(ledger.getLearningAnalysisConsent())
+    expect(reloaded.getLearningAnalysisConsentBefore(
+      Date.parse(disabled.recordedAt),
+    )).toEqual(ledger.getLearningAnalysisConsentBefore(
+      Date.parse(disabled.recordedAt),
+    ))
     expect(JSON.stringify([
       enabled,
       disabled,
@@ -596,8 +621,9 @@ describe('Tianwen learning intake ledger', () => {
     })).toThrow(LedgerIntegrityError)
   })
 
-  it('accepts an analysis consent reference only while that revision is enabled', () => {
-    const ledger = new EvolutionLedger(ledgerRoot('analysis-consent-reference'), {
+  it('accepts an exact enabled historical consent reference after a later disable', () => {
+    const root = ledgerRoot('analysis-consent-reference')
+    const ledger = new EvolutionLedger(root, {
       clock: () => '2026-09-01T00:00:00.000Z',
     })
     ledger.recordLearningAnalysisConsent({
@@ -605,21 +631,18 @@ describe('Tianwen learning intake ledger', () => {
       enabled: true,
       policyVersion: 'tianwen-auto-analysis.v1',
     })
-    ledger.recordLearningFeedbackRevision({
-      intake: base,
-      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
-      analysisConsentRevision: 1,
-    })
-    expect(() => ledger.recordLearningFeedbackRevision({
-      intake: base,
-      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
-    }))
-      .toThrow(LedgerIntegrityError)
     ledger.recordLearningAnalysisConsent({
       revision: 2,
       enabled: false,
       policyVersion: 'tianwen-auto-analysis.v1',
     })
+    ledger.recordLearningFeedbackRevision({
+      intake: base,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+      analysisConsentRevision: 1,
+    })
+    expect(ledger.getLearningIntakeStatus(base.sessionId, base.messageId))
+      .toMatchObject({ analysisConsentRevision: 1 })
     expect(() => ledger.recordLearningFeedbackRevision({
       intake: {
         ...base,
@@ -627,12 +650,25 @@ describe('Tianwen learning intake ledger', () => {
         feedbackVersion: '22222222-2222-4222-8222-222222222222',
       },
       sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
-      analysisConsentRevision: 1,
+      analysisConsentRevision: 2,
+    })).toThrow(LedgerIntegrityError)
+    expect(() => ledger.recordLearningFeedbackRevision({
+      intake: {
+        ...base,
+        messageId: 'message-3',
+        feedbackVersion: '33333333-3333-4333-8333-333333333333',
+      },
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+      analysisConsentRevision: 3,
     })).toThrow(LedgerIntegrityError)
     expect(JSON.stringify(ledger.listEvents().find(event =>
       event.type === 'learning-intake-recorded'))).toContain(
         '"analysisConsentRevision":1',
       )
+    expect(new EvolutionLedger(root).getLearningIntakeStatus(
+      base.sessionId,
+      base.messageId,
+    )).toEqual(ledger.getLearningIntakeStatus(base.sessionId, base.messageId))
   })
 
   it('writes one durable Signal and Ticket and treats replay as duplicate', () => {
