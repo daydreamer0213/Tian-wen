@@ -45,6 +45,13 @@ import type {
   LearningTicketId,
 } from './learning-intake.js'
 import type {
+  LearningAnalysisId,
+  LearningAnalysisReceipt,
+  LearningAnalysisStatus,
+  LearningAnalysisSubmission,
+  RequestLearningAnalysisInput,
+} from './learning-analysis.js'
+import type {
   RunSkillManifest,
   RunSkillManifestInput,
   RunSkillManifestReceipt,
@@ -258,6 +265,49 @@ export class TianwenEvolutionService extends Service {
   }): { readonly duplicate: boolean } {
     return this.formalWrite(() =>
       this.state().ledger.recordLearningFeedbackRetraction(input))
+  }
+
+  requestLearningAnalysis(
+    input: RequestLearningAnalysisInput,
+  ): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.requestLearningAnalysis(input))
+  }
+
+  recordLearningAnalysisChildStarted(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly parentSessionId: string
+    readonly childSessionId: string
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisChildStarted(input))
+  }
+
+  recordLearningAnalysisSubmission(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly childSessionId: string
+    readonly submission: LearningAnalysisSubmission
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisSubmission(input))
+  }
+
+  getLearningAnalysis(
+    analysisId: LearningAnalysisId,
+  ): LearningAnalysisStatus | undefined {
+    return this.state().ledger.getLearningAnalysis(analysisId)
+  }
+
+  getLearningAnalysisByChildSessionId(
+    childSessionId: string,
+  ): LearningAnalysisStatus | undefined {
+    return this.state().ledger.getLearningAnalysisByChildSessionId(
+      childSessionId,
+    )
+  }
+
+  listLearningAnalyses(): readonly LearningAnalysisStatus[] {
+    return this.state().ledger.listLearningAnalyses()
   }
 
   recordLearningAnalysisConsent(

@@ -87,6 +87,22 @@ export type {
   PreparedLearningIntake,
 } from './learning-intake.js'
 export {
+  assertLearningAnalysisEvidenceClosure,
+  learningAnalysisId,
+  learningAnalysisSubmissionPhase,
+  parseLearningAnalysisSubmission,
+  prepareLearningAnalysisRequest,
+} from './learning-analysis.js'
+export type {
+  LearningAnalysisBinding,
+  LearningAnalysisId,
+  LearningAnalysisPhase,
+  LearningAnalysisReceipt,
+  LearningAnalysisStatus,
+  LearningAnalysisSubmission,
+  RequestLearningAnalysisInput,
+} from './learning-analysis.js'
+export {
   prepareOutcomeIntake,
   prepareRunAcceptanceContract,
   prepareRunBinding,

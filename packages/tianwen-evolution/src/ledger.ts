@@ -43,6 +43,25 @@ import type {
   LearningTicketFeedback,
   LearningTicketId,
 } from './learning-intake.js'
+import {
+  assertLearningAnalysisEvidenceClosure,
+  learningAnalysisId,
+  learningAnalysisSubmissionPhase,
+  parseLearningAnalysisSubmission,
+  prepareLearningAnalysisRequest,
+} from './learning-analysis.js'
+import type {
+  LearningAnalysisChildStartedEvent,
+  LearningAnalysisId,
+  LearningAnalysisInvalidatedEvent,
+  LearningAnalysisLedgerEvent,
+  LearningAnalysisReceipt,
+  LearningAnalysisRequestedEvent,
+  LearningAnalysisStatus,
+  LearningAnalysisSubmittedEvent,
+  LearningAnalysisSubmission,
+  RequestLearningAnalysisInput,
+} from './learning-analysis.js'
 import { prepareOutcomeIntake, prepareRunBinding } from './outcome-intake.js'
 import type {
   OutcomeIntakeInput,
@@ -303,6 +322,7 @@ export interface RecoveryFailedEvent {
 export type LedgerEvent =
   | LearningIntakeLedgerEvent
   | LearningFeedbackRetractedEvent
+  | LearningAnalysisLedgerEvent
   | LearningAnalysisConsentRecordedEvent
   | LearningConsentNoticeIntentRecordedEvent
   | LearningConsentNoticeDeliveredEvent
@@ -856,6 +876,164 @@ function parseLearningFeedbackRetractionEvent(
       }
 }
 
+function parseLearningAnalysisRequestedEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningAnalysisRequestedEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'binding'])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-request.v1') {
+    throw new LedgerIntegrityError('invalid learning analysis request schema')
+  }
+  if (!isRecord(value.binding)) {
+    throw new LedgerIntegrityError('learning analysis binding must be an object')
+  }
+  exactKeys(value.binding, [
+    'analysisId',
+    'ticketId',
+    'sessionId',
+    'messageId',
+    'feedbackVersion',
+    'consentRevision',
+    'parentSessionId',
+    'childSessionId',
+    'phase',
+  ])
+  let binding
+  try {
+    binding = prepareLearningAnalysisRequest({
+      ticketId: requireTicketId(value.binding.ticketId),
+      sessionId: requireString(value.binding.sessionId, 'sessionId'),
+      messageId: requireString(value.binding.messageId, 'messageId'),
+      feedbackVersion: requireString(
+        value.binding.feedbackVersion,
+        'feedbackVersion',
+      ),
+      consentRevision: requireRevision(value.binding.consentRevision),
+      parentSessionId: requireString(
+        value.binding.parentSessionId,
+        'parentSessionId',
+      ),
+    })
+  } catch (error) {
+    throw new LedgerIntegrityError('learning analysis request is invalid', {
+      cause: error,
+    })
+  }
+  if (
+    value.binding.analysisId !== binding.analysisId
+    || value.binding.childSessionId !== binding.childSessionId
+    || value.binding.phase !== 'pending-parent'
+  ) throw new LedgerIntegrityError('learning analysis identity is invalid')
+  return {
+    schemaVersion: 'tianwen.learning-analysis-request.v1',
+    type: 'learning-analysis-requested',
+    at,
+    binding,
+  }
+}
+
+function parseLearningAnalysisChildStartedEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningAnalysisChildStartedEvent {
+  exactKeys(value, [
+    'schemaVersion',
+    'type',
+    'at',
+    'analysisId',
+    'parentSessionId',
+    'childSessionId',
+  ])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-child.v1') {
+    throw new LedgerIntegrityError('invalid learning analysis child schema')
+  }
+  try {
+    return {
+      schemaVersion: 'tianwen.learning-analysis-child.v1',
+      type: 'learning-analysis-child-started',
+      at,
+      analysisId: learningAnalysisId(value.analysisId),
+      parentSessionId: requireString(
+        value.parentSessionId,
+        'parentSessionId',
+      ),
+      childSessionId: requireString(value.childSessionId, 'childSessionId'),
+    }
+  } catch (error) {
+    throw new LedgerIntegrityError('learning analysis child binding is invalid', {
+      cause: error,
+    })
+  }
+}
+
+function parseLearningAnalysisSubmittedEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningAnalysisSubmittedEvent {
+  exactKeys(value, [
+    'schemaVersion',
+    'type',
+    'at',
+    'analysisId',
+    'childSessionId',
+    'submission',
+    'submissionDigest',
+  ])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-submission.v1') {
+    throw new LedgerIntegrityError('invalid learning analysis submission schema')
+  }
+  try {
+    const submission = parseLearningAnalysisSubmission(value.submission)
+    const submissionDigest = requireDigest(value.submissionDigest)
+    if (submissionDigest !== sha256(submission)) {
+      throw new TypeError('learning analysis submission digest changed')
+    }
+    return {
+      schemaVersion: 'tianwen.learning-analysis-submission.v1',
+      type: 'learning-analysis-submitted',
+      at,
+      analysisId: learningAnalysisId(value.analysisId),
+      childSessionId: requireString(value.childSessionId, 'childSessionId'),
+      submission,
+      submissionDigest,
+    }
+  } catch (error) {
+    throw new LedgerIntegrityError('learning analysis submission is invalid', {
+      cause: error,
+    })
+  }
+}
+
+function parseLearningAnalysisInvalidatedEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningAnalysisInvalidatedEvent {
+  exactKeys(value, [
+    'schemaVersion',
+    'type',
+    'at',
+    'analysisId',
+    'reason',
+  ])
+  if (
+    value.schemaVersion !== 'tianwen.learning-analysis-invalidation.v1'
+    || value.reason !== 'support-withdrawn'
+  ) throw new LedgerIntegrityError('invalid learning analysis invalidation')
+  try {
+    return {
+      schemaVersion: 'tianwen.learning-analysis-invalidation.v1',
+      type: 'learning-analysis-invalidated',
+      at,
+      analysisId: learningAnalysisId(value.analysisId),
+      reason: 'support-withdrawn',
+    }
+  } catch (error) {
+    throw new LedgerIntegrityError('learning analysis invalidation is invalid', {
+      cause: error,
+    })
+  }
+}
+
 function parseLearningAnalysisConsent(
   value: unknown,
 ): LearningAnalysisConsent {
@@ -1118,6 +1296,18 @@ function parseEvent(value: unknown): LedgerEvent {
   }
   if (type === 'learning-feedback-retracted') {
     return parseLearningFeedbackRetractionEvent(value, at)
+  }
+  if (type === 'learning-analysis-requested') {
+    return parseLearningAnalysisRequestedEvent(value, at)
+  }
+  if (type === 'learning-analysis-child-started') {
+    return parseLearningAnalysisChildStartedEvent(value, at)
+  }
+  if (type === 'learning-analysis-submitted') {
+    return parseLearningAnalysisSubmittedEvent(value, at)
+  }
+  if (type === 'learning-analysis-invalidated') {
+    return parseLearningAnalysisInvalidatedEvent(value, at)
   }
   if (type === 'learning-analysis-consent-recorded') {
     return parseLearningAnalysisConsentEvent(value, at)
@@ -1929,6 +2119,14 @@ export class EvolutionLedger {
     Sha256Digest,
     LearningFeedbackRetractedEvent
   >()
+  readonly #learningAnalyses = new Map<
+    LearningAnalysisId,
+    LearningAnalysisStatus
+  >()
+  readonly #learningAnalysisIdByChildSession = new Map<
+    string,
+    LearningAnalysisId
+  >()
   readonly #learningAnalysisConsents = new Map<
     number,
     LearningAnalysisConsent
@@ -2081,6 +2279,7 @@ export class EvolutionLedger {
       }
     }
     this.#verifyPointer(mode === 'mutation')
+    if (mode === 'mutation') this.#invalidateUnsupportedLearningAnalyses()
   }
 
   recordRunBinding(input: RunBindingInput): RunBindingReceipt {
@@ -3455,6 +3654,7 @@ export class EvolutionLedger {
           `learning ingestion replay changed content: ${prepared.ingestionId}`,
         )
       }
+      this.#invalidateUnsupportedLearningAnalyses()
       return { ...existing.receipt, duplicate: true }
     }
 
@@ -3513,6 +3713,7 @@ export class EvolutionLedger {
             ? {}
             : { analysisConsentRevision: revision.analysisConsentRevision }),
         })
+    this.#invalidateUnsupportedLearningAnalyses()
     return { ...receipt, duplicate: false }
   }
 
@@ -3545,6 +3746,7 @@ export class EvolutionLedger {
           'learning feedback retraction lifecycle is unknown or changed',
         )
       }
+      this.#invalidateUnsupportedLearningAnalyses()
       return { duplicate: true }
     }
     this.#accept({
@@ -3553,7 +3755,205 @@ export class EvolutionLedger {
       at: this.#now(),
       ...parsed,
     })
+    this.#invalidateUnsupportedLearningAnalyses()
     return { duplicate: false }
+  }
+
+  requestLearningAnalysis(
+    input: RequestLearningAnalysisInput,
+  ): LearningAnalysisReceipt {
+    let binding
+    try {
+      binding = prepareLearningAnalysisRequest(input)
+    } catch (error) {
+      throw new LedgerIntegrityError('learning analysis request is invalid', {
+        cause: error,
+      })
+    }
+    const existing = this.#learningAnalyses.get(binding.analysisId)
+    if (existing !== undefined) {
+      const { phase: _phase, ...expected } = binding
+      const {
+        phase: _existingPhase,
+        requestedAt: _requestedAt,
+        updatedAt: _updatedAt,
+        childStartedAt: _childStartedAt,
+        submittedAt: _submittedAt,
+        submissionDigest: _submissionDigest,
+        submission: _submission,
+        ...actual
+      } = existing
+      if (canonicalJson(actual) !== canonicalJson(expected)) {
+        throw new LedgerIntegrityError(
+          `learning analysis replay changed content: ${binding.analysisId}`,
+        )
+      }
+      return { ...clone(existing), duplicate: true }
+    }
+
+    const intake = this.#learningIntakeStatuses
+      .get(binding.sessionId)
+      ?.get(binding.messageId)
+    const consent = this.#learningAnalysisConsents.get(binding.consentRevision)
+    if (
+      intake?.state !== 'active'
+      || intake.ticketId !== binding.ticketId
+      || intake.feedbackVersion !== binding.feedbackVersion
+      || intake.analysisConsentRevision !== binding.consentRevision
+      || consent?.enabled !== true
+      || this.#learningTickets.get(binding.ticketId)?.status !== 'open'
+    ) {
+      throw new LedgerIntegrityError(
+        'learning analysis request disagrees with active consented feedback',
+      )
+    }
+    const signal = intake.signalId === undefined
+      ? undefined
+      : this.#learningSignals.get(intake.signalId)
+    const ticket = this.#learningTickets.get(binding.ticketId)!
+    if (
+      intake.signalId === undefined
+      || !ticket.signalIds.includes(intake.signalId)
+      || signal === undefined
+      || isOutcomeSignal(signal)
+      || this.#inactiveLearningSignals.has(signal.signalId)
+      || signal.sessionId !== binding.sessionId
+      || signal.messageId !== binding.messageId
+      || signal.feedbackVersion !== binding.feedbackVersion
+    ) {
+      throw new LedgerIntegrityError(
+        'learning analysis request has no exact active Signal support',
+      )
+    }
+    const childOwner = this.#learningAnalysisIdByChildSession
+      .get(binding.childSessionId)
+    if (childOwner !== undefined && childOwner !== binding.analysisId) {
+      throw new LedgerIntegrityError(
+        `learning analysis child Session is already reserved: ${binding.childSessionId}`,
+      )
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-request.v1',
+      type: 'learning-analysis-requested',
+      at: this.#now(),
+      binding,
+    })
+    return { ...clone(this.#learningAnalyses.get(binding.analysisId)!), duplicate: false }
+  }
+
+  recordLearningAnalysisChildStarted(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly parentSessionId: string
+    readonly childSessionId: string
+  }): LearningAnalysisReceipt {
+    let analysisId: LearningAnalysisId
+    try {
+      analysisId = learningAnalysisId(input.analysisId)
+    } catch (error) {
+      throw new LedgerIntegrityError('learning analysis identity is invalid', {
+        cause: error,
+      })
+    }
+    const status = this.#learningAnalyses.get(analysisId)
+    if (status === undefined) {
+      throw new LedgerIntegrityError(`unknown learning analysis: ${analysisId}`)
+    }
+    if (
+      input.parentSessionId !== status.parentSessionId
+      || input.childSessionId !== status.childSessionId
+    ) throw new LedgerIntegrityError('learning analysis child binding changed')
+    if (status.childStartedAt !== undefined) {
+      return { ...clone(status), duplicate: true }
+    }
+    if (status.phase !== 'pending-parent') {
+      throw new LedgerIntegrityError(
+        'learning analysis child can start only from pending-parent',
+      )
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-child.v1',
+      type: 'learning-analysis-child-started',
+      at: this.#now(),
+      analysisId,
+      parentSessionId: status.parentSessionId,
+      childSessionId: status.childSessionId,
+    })
+    return { ...clone(this.#learningAnalyses.get(analysisId)!), duplicate: false }
+  }
+
+  recordLearningAnalysisSubmission(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly childSessionId: string
+    readonly submission: LearningAnalysisSubmission
+  }): LearningAnalysisReceipt {
+    let analysisId: LearningAnalysisId
+    let submission: LearningAnalysisSubmission
+    try {
+      analysisId = learningAnalysisId(input.analysisId)
+      submission = parseLearningAnalysisSubmission(input.submission)
+    } catch (error) {
+      throw new LedgerIntegrityError('learning analysis submission is invalid', {
+        cause: error,
+      })
+    }
+    const status = this.#learningAnalyses.get(analysisId)
+    if (status === undefined) {
+      throw new LedgerIntegrityError(`unknown learning analysis: ${analysisId}`)
+    }
+    if (input.childSessionId !== status.childSessionId) {
+      throw new LedgerIntegrityError('learning analysis submission child changed')
+    }
+    const submissionDigest = sha256(submission)
+    if (status.submission !== undefined) {
+      if (status.submissionDigest !== submissionDigest) {
+        throw new LedgerIntegrityError('learning analysis submission changed')
+      }
+      return { ...clone(status), duplicate: true }
+    }
+    if (status.phase !== 'running' || status.childStartedAt === undefined) {
+      throw new LedgerIntegrityError(
+        'learning analysis submission requires a running child',
+      )
+    }
+    try {
+      assertLearningAnalysisEvidenceClosure(
+        submission,
+        this.#learningAnalysisEvidenceClosure(status),
+      )
+    } catch (error) {
+      throw new LedgerIntegrityError(
+        'learning analysis exceeded its Ticket/Session Evidence closure',
+        { cause: error },
+      )
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-submission.v1',
+      type: 'learning-analysis-submitted',
+      at: this.#now(),
+      analysisId,
+      childSessionId: status.childSessionId,
+      submission,
+      submissionDigest,
+    })
+    return { ...clone(this.#learningAnalyses.get(analysisId)!), duplicate: false }
+  }
+
+  getLearningAnalysis(
+    analysisId: LearningAnalysisId,
+  ): LearningAnalysisStatus | undefined {
+    const status = this.#learningAnalyses.get(analysisId)
+    return status === undefined ? undefined : clone(status)
+  }
+
+  getLearningAnalysisByChildSessionId(
+    childSessionId: string,
+  ): LearningAnalysisStatus | undefined {
+    const analysisId = this.#learningAnalysisIdByChildSession.get(childSessionId)
+    return analysisId === undefined ? undefined : this.getLearningAnalysis(analysisId)
+  }
+
+  listLearningAnalyses(): readonly LearningAnalysisStatus[] {
+    return clone([...this.#learningAnalyses.values()])
   }
 
   recordLearningAnalysisConsent(
@@ -4057,6 +4457,54 @@ export class EvolutionLedger {
     })
   }
 
+  #learningAnalysisEvidenceClosure(
+    status: LearningAnalysisStatus,
+  ): ReadonlySet<Sha256Digest> {
+    const ticket = this.#learningTickets.get(status.ticketId)
+    const evidenceIds = new Set<Sha256Digest>()
+    for (const signalId of ticket?.signalIds ?? []) {
+      const signal = this.#learningSignals.get(signalId)
+      if (
+        signal === undefined
+        || (!isOutcomeSignal(signal)
+          && this.#inactiveLearningSignals.has(signal.signalId))
+      ) continue
+      for (const evidenceId of signal.evidenceIds) evidenceIds.add(evidenceId)
+    }
+    return evidenceIds
+  }
+
+  #learningAnalysisHasActiveSupport(status: LearningAnalysisStatus): boolean {
+    const ticket = this.#learningTickets.get(status.ticketId)
+    return ticket?.signalIds.some(signalId => {
+      const signal = this.#learningSignals.get(signalId)
+      if (signal === undefined) return false
+      if (isOutcomeSignal(signal)) return true
+      if (this.#inactiveLearningSignals.has(signal.signalId)) return false
+      return signal.sessionId !== status.sessionId
+        || signal.messageId !== status.messageId
+        || signal.feedbackVersion === status.feedbackVersion
+    }) === true
+  }
+
+  #invalidateUnsupportedLearningAnalyses(): void {
+    for (const status of this.#learningAnalyses.values()) {
+      if (
+        this.#learningAnalysisHasActiveSupport(status)
+        || status.phase === 'invalidated'
+        || status.phase === 'promoted'
+        || status.phase === 'rolled-back'
+      ) continue
+      this.#accept({
+        schemaVersion: 'tianwen.learning-analysis-invalidation.v1',
+        type: 'learning-analysis-invalidated',
+        at: this.#now(),
+        analysisId: status.analysisId,
+        reason: 'support-withdrawn',
+      })
+    }
+  }
+
   #sourcePath(digest: Sha256Digest): string {
     return join(
       this.#artifactsRoot,
@@ -4518,6 +4966,10 @@ export class EvolutionLedger {
       if (
         parsed.type === 'learning-intake-recorded'
         || parsed.type === 'learning-feedback-retracted'
+        || parsed.type === 'learning-analysis-requested'
+        || parsed.type === 'learning-analysis-child-started'
+        || parsed.type === 'learning-analysis-submitted'
+        || parsed.type === 'learning-analysis-invalidated'
       ) {
         const recovery = this.#recoverLearningAppend(line, appendOffset)
         if (recovery === 'committed') {
@@ -5545,6 +5997,82 @@ export class EvolutionLedger {
       }
       return
     }
+    if (event.type === 'learning-analysis-requested') {
+      const binding = event.binding
+      const intake = this.#learningIntakeStatuses
+        .get(binding.sessionId)
+        ?.get(binding.messageId)
+      const ticket = this.#learningTickets.get(binding.ticketId)
+      const signal = intake?.signalId === undefined
+        ? undefined
+        : this.#learningSignals.get(intake.signalId)
+      if (
+        this.#learningAnalyses.has(binding.analysisId)
+        || this.#learningAnalysisIdByChildSession.has(binding.childSessionId)
+        || intake?.state !== 'active'
+        || intake.ticketId !== binding.ticketId
+        || intake.feedbackVersion !== binding.feedbackVersion
+        || intake.analysisConsentRevision !== binding.consentRevision
+        || this.#learningAnalysisConsents.get(binding.consentRevision)?.enabled
+          !== true
+        || ticket?.status !== 'open'
+        || intake.signalId === undefined
+        || !ticket.signalIds.includes(intake.signalId)
+        || signal === undefined
+        || isOutcomeSignal(signal)
+        || this.#inactiveLearningSignals.has(signal.signalId)
+        || signal.sessionId !== binding.sessionId
+        || signal.messageId !== binding.messageId
+        || signal.feedbackVersion !== binding.feedbackVersion
+      ) {
+        throw new LedgerIntegrityError(
+          'learning analysis request disagrees with active consented feedback',
+        )
+      }
+      return
+    }
+    if (event.type === 'learning-analysis-child-started') {
+      const status = this.#learningAnalyses.get(event.analysisId)
+      if (
+        status?.phase !== 'pending-parent'
+        || status.childStartedAt !== undefined
+        || event.parentSessionId !== status.parentSessionId
+        || event.childSessionId !== status.childSessionId
+      ) throw new LedgerIntegrityError('learning analysis child start disagrees with history')
+      return
+    }
+    if (event.type === 'learning-analysis-submitted') {
+      const status = this.#learningAnalyses.get(event.analysisId)
+      if (
+        status?.phase !== 'running'
+        || status.childStartedAt === undefined
+        || status.submission !== undefined
+        || event.childSessionId !== status.childSessionId
+      ) throw new LedgerIntegrityError('learning analysis submission disagrees with history')
+      try {
+        assertLearningAnalysisEvidenceClosure(
+          event.submission,
+          this.#learningAnalysisEvidenceClosure(status),
+        )
+      } catch (error) {
+        throw new LedgerIntegrityError(
+          'learning analysis submission exceeds its Evidence closure',
+          { cause: error },
+        )
+      }
+      return
+    }
+    if (event.type === 'learning-analysis-invalidated') {
+      const status = this.#learningAnalyses.get(event.analysisId)
+      if (
+        status === undefined
+        || this.#learningAnalysisHasActiveSupport(status)
+        || status.phase === 'invalidated'
+        || status.phase === 'promoted'
+        || status.phase === 'rolled-back'
+      ) throw new LedgerIntegrityError('learning analysis invalidation disagrees with support')
+      return
+    }
     if (event.type === 'learning-analysis-consent-recorded') {
       if (this.#learningAnalysisConsents.has(event.consent.revision)) {
         throw new LedgerIntegrityError(
@@ -5965,6 +6493,50 @@ export class EvolutionLedger {
         this.#inactiveLearningSignals.add(current.signalId)
       }
       this.#refreshLearningTicket(current.ticketId)
+      return
+    }
+    if (event.type === 'learning-analysis-requested') {
+      const status: LearningAnalysisStatus = {
+        ...event.binding,
+        requestedAt: event.at,
+        updatedAt: event.at,
+      }
+      this.#learningAnalyses.set(status.analysisId, status)
+      this.#learningAnalysisIdByChildSession.set(
+        status.childSessionId,
+        status.analysisId,
+      )
+      return
+    }
+    if (event.type === 'learning-analysis-child-started') {
+      const status = this.#learningAnalyses.get(event.analysisId)!
+      this.#learningAnalyses.set(event.analysisId, {
+        ...status,
+        phase: 'running',
+        childStartedAt: event.at,
+        updatedAt: event.at,
+      })
+      return
+    }
+    if (event.type === 'learning-analysis-submitted') {
+      const status = this.#learningAnalyses.get(event.analysisId)!
+      this.#learningAnalyses.set(event.analysisId, {
+        ...status,
+        phase: learningAnalysisSubmissionPhase(event.submission),
+        submittedAt: event.at,
+        submissionDigest: event.submissionDigest,
+        submission: event.submission,
+        updatedAt: event.at,
+      })
+      return
+    }
+    if (event.type === 'learning-analysis-invalidated') {
+      const status = this.#learningAnalyses.get(event.analysisId)!
+      this.#learningAnalyses.set(event.analysisId, {
+        ...status,
+        phase: 'invalidated',
+        updatedAt: event.at,
+      })
       return
     }
     if (event.type === 'learning-analysis-consent-recorded') {

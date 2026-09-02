@@ -1,0 +1,668 @@
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { join, resolve } from 'node:path'
+
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Context } from '@tianwen/dsh-compat'
+
+const appendFault = vi.hoisted(() => ({
+  enabled: false,
+  failLedgerFsyncAfterReal: 0,
+  failLedgerWriteAfterReal: 0,
+  failLedgerWriteBeforeReal: 0,
+}))
+
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  const paths = new Map<number, string>()
+  return {
+    ...actual,
+    openSync(path: string, flags: string, mode?: number) {
+      const descriptor = actual.openSync(path, flags, mode)
+      if (appendFault.enabled) paths.set(descriptor, String(path))
+      return descriptor
+    },
+    writeSync(
+      descriptor: number,
+      buffer: Uint8Array,
+      offset: number,
+      length: number,
+      position?: number | null,
+    ) {
+      if (
+        appendFault.enabled
+        && appendFault.failLedgerWriteBeforeReal > 0
+        && paths.get(descriptor)?.endsWith('ledger.jsonl') === true
+      ) {
+        appendFault.failLedgerWriteBeforeReal -= 1
+        throw Object.assign(new Error('forced pre-write ledger failure'), {
+          code: 'EIO',
+        })
+      }
+      const written = actual.writeSync(
+        descriptor,
+        buffer,
+        offset,
+        length,
+        position,
+      )
+      if (
+        appendFault.enabled
+        && appendFault.failLedgerWriteAfterReal > 0
+        && paths.get(descriptor)?.endsWith('ledger.jsonl') === true
+      ) {
+        appendFault.failLedgerWriteAfterReal -= 1
+        throw Object.assign(new Error('forced post-write ledger uncertainty'), {
+          code: 'EIO',
+        })
+      }
+      return written
+    },
+    fsyncSync(descriptor: number) {
+      actual.fsyncSync(descriptor)
+      if (
+        appendFault.enabled
+        && appendFault.failLedgerFsyncAfterReal > 0
+        && paths.get(descriptor)?.endsWith('ledger.jsonl') === true
+      ) {
+        appendFault.failLedgerFsyncAfterReal -= 1
+        throw Object.assign(new Error('forced post-fsync ledger uncertainty'), {
+          code: 'EIO',
+        })
+      }
+    },
+  }
+})
+
+import {
+  LedgerAppendNotCommittedError,
+  LedgerCommitUnknownError,
+  LedgerIntegrityError,
+  TianwenEvolutionService,
+  type LearningAnalysisSubmission,
+  type LearningTicketId,
+  type Sha256Digest,
+} from '../../packages/tianwen-evolution/src/index.js'
+import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
+
+const lifecycle = `sha256:${'a'.repeat(64)}` as const
+const evidenceA = `sha256:${'1'.repeat(64)}` as const
+const evidenceB = `sha256:${'2'.repeat(64)}` as const
+const roots: string[] = []
+
+function ledgerRoot(prefix: string): string {
+  const parent = resolve(
+    process.env.TIANWEN_DSH_PROBE_ROOT ?? '.dsh-probe',
+    'learning-analysis-ledgers',
+  )
+  mkdirSync(parent, { recursive: true })
+  const root = mkdtempSync(join(parent, `${prefix}-`))
+  roots.push(root)
+  return root
+}
+
+function seededLedger(prefix: string): {
+  readonly ledger: EvolutionLedger
+  readonly root: string
+  readonly ticketId: LearningTicketId
+} {
+  const root = ledgerRoot(prefix)
+  const ledger = new EvolutionLedger(root, {
+    clock: () => '2026-09-02T00:00:00.000Z',
+  })
+  ledger.recordLearningAnalysisConsent({
+    revision: 1,
+    enabled: true,
+    policyVersion: 'tianwen-auto-analysis.v1',
+  })
+  const receipt = ledger.recordLearningFeedbackRevision({
+    intake: {
+      sessionId: 'main-session',
+      messageId: 'assistant-message',
+      feedbackVersion: 'feedback-v1',
+      rating: 'negative',
+      note: 'Keep the answer concrete.',
+      scopeKey: 'project:tianwen/capability:research-summary',
+      sessionDigest: `sha256:${'0'.repeat(64)}`,
+      evidenceIds: [evidenceA, evidenceB],
+    },
+    sessionLifecycleFingerprint: lifecycle,
+    analysisConsentRevision: 1,
+  })
+  return { ledger, root, ticketId: receipt.ticketId! }
+}
+
+function requestInput(ticketId: LearningTicketId) {
+  return {
+    ticketId,
+    sessionId: 'main-session',
+    messageId: 'assistant-message',
+    feedbackVersion: 'feedback-v1',
+    consentRevision: 1,
+    parentSessionId: 'main-session',
+  } as const
+}
+
+function skillChange(
+  patch: Partial<LearningAnalysisSubmission> = {},
+): LearningAnalysisSubmission {
+  return {
+    verdict: 'skill-change',
+    hypothesis: 'The answer omitted a concrete verification step.',
+    lesson: {
+      claim: 'State the verification step.',
+      when: 'A task changes durable state.',
+      notWhen: 'The user asks only for an explanation.',
+    },
+    candidatePatch: {
+      description: 'Require concrete verification.',
+      whenToUse: 'Use after a durable change.',
+      content: 'Run the bounded check and report its observed result.',
+    },
+    supportingEvidenceIds: [evidenceA],
+    counterevidenceIds: [evidenceB],
+    ...patch,
+  }
+}
+
+afterEach(() => {
+  appendFault.enabled = false
+  appendFault.failLedgerFsyncAfterReal = 0
+  appendFault.failLedgerWriteAfterReal = 0
+  appendFault.failLedgerWriteBeforeReal = 0
+  for (const root of roots.splice(0)) {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+describe('durable explicit-correction analysis lifecycle', () => {
+  it('reserves deterministic analysis and child identities before child start', () => {
+    const { ledger, root, ticketId } = seededLedger('request')
+
+    const first = ledger.requestLearningAnalysis(requestInput(ticketId))
+    const replay = ledger.requestLearningAnalysis(requestInput(ticketId))
+
+    expect(first).toMatchObject({
+      analysisId: 'analysis:8c44888a7dd4961558fb94543c892d8c390d7917947ad64dc5d574fa47ee8dbb',
+      childSessionId: 'tianwen-analysis-8c44888a7dd4961558fb94543c892d8c390d7917947ad64dc5d574fa47ee8dbb',
+      phase: 'pending-parent',
+      duplicate: false,
+    })
+    expect(replay).toEqual({ ...first, duplicate: true })
+    expect(new EvolutionLedger(root).getLearningAnalysis(first.analysisId))
+      .toEqual(ledger.getLearningAnalysis(first.analysisId))
+    expect(ledger.listEvents().filter(event =>
+      event.type === 'learning-analysis-requested')).toHaveLength(1)
+  })
+
+  it('binds only the reserved native child and accepts one exact structured submission', () => {
+    const { ledger, root, ticketId } = seededLedger('submit')
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
+
+    expect(() => ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange(),
+    })).toThrow(/running/u)
+    expect(() => ledger.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: 'different-child',
+    })).toThrow(LedgerIntegrityError)
+
+    const started = ledger.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    })
+    expect(started).toMatchObject({ phase: 'running', duplicate: false })
+
+    const submitted = ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange(),
+    })
+    expect(submitted).toMatchObject({
+      phase: 'running',
+      submission: skillChange(),
+      submittedAt: '2026-09-02T00:00:00.000Z',
+      duplicate: false,
+    })
+    expect(ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange(),
+    })).toEqual({ ...submitted, duplicate: true })
+    expect(() => ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange({ hypothesis: 'Changed result.' }),
+    })).toThrow(/changed/u)
+    expect(new EvolutionLedger(root).getLearningAnalysisByChildSessionId(
+      requested.childSessionId,
+    )).toEqual(ledger.getLearningAnalysis(requested.analysisId))
+  })
+
+  it.each([
+    ['no-case', 'no-case'],
+    ['insufficient-evidence', 'insufficient-evidence'],
+  ] as const)('records %s as a terminal model result', (verdict, phase) => {
+    const { ledger, ticketId } = seededLedger(`terminal-${verdict}`)
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
+    ledger.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    })
+
+    expect(ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: {
+        verdict,
+        hypothesis: verdict === 'no-case'
+          ? 'The correction does not identify a reusable change.'
+          : 'The available evidence cannot support a safe change.',
+        supportingEvidenceIds: verdict === 'no-case' ? [] : [evidenceA],
+        counterevidenceIds: [],
+      },
+    })).toMatchObject({ phase, duplicate: false })
+  })
+
+  it('rejects untrusted submissions outside the exact schema, text, and Evidence closure', () => {
+    const { ledger, ticketId } = seededLedger('invalid-submission')
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
+    ledger.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    })
+    const submit = (submission: unknown) => ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: submission as LearningAnalysisSubmission,
+    })
+
+    expect(() => submit({ ...skillChange(), extra: true }))
+      .toThrow(LedgerIntegrityError)
+    expect(() => submit({ ...skillChange(), hypothesis: ' \n\t ' }))
+      .toThrow(LedgerIntegrityError)
+    expect(() => submit({ ...skillChange(), hypothesis: 'bad\0text' }))
+      .toThrow(LedgerIntegrityError)
+    expect(() => submit({ ...skillChange(), hypothesis: '\ud800' }))
+      .toThrow(LedgerIntegrityError)
+    expect(() => submit({ ...skillChange(), lesson: undefined }))
+      .toThrow(LedgerIntegrityError)
+    expect(() => submit({
+      verdict: 'no-case',
+      hypothesis: 'No reusable case.',
+      lesson: skillChange().lesson,
+      supportingEvidenceIds: [],
+      counterevidenceIds: [],
+    })).toThrow(LedgerIntegrityError)
+    expect(() => submit(skillChange({
+      supportingEvidenceIds: [`sha256:${'f'.repeat(64)}`],
+    }))).toThrow(/Evidence closure/u)
+    expect(() => submit(skillChange({
+      supportingEvidenceIds: [evidenceA, evidenceA],
+    }))).toThrow(LedgerIntegrityError)
+    expect(ledger.getLearningAnalysis(requested.analysisId)?.submission)
+      .toBeUndefined()
+  })
+
+  it('requires the exact active correction and its captured enabled consent', () => {
+    const { ledger, ticketId } = seededLedger('request-guards')
+
+    expect(() => ledger.requestLearningAnalysis({
+      ...requestInput(ticketId),
+      feedbackVersion: 'wrong-version',
+    })).toThrow(LedgerIntegrityError)
+    expect(() => ledger.requestLearningAnalysis({
+      ...requestInput(ticketId),
+      consentRevision: 2,
+    })).toThrow(LedgerIntegrityError)
+    expect(() => ledger.requestLearningAnalysis({
+      ...requestInput(ticketId),
+      parentSessionId: 'not-the-feedback-main-session',
+    })).toThrow(LedgerIntegrityError)
+
+    ledger.recordLearningAnalysisConsent({
+      revision: 2,
+      enabled: false,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    expect(ledger.requestLearningAnalysis(requestInput(ticketId))).toMatchObject({
+      phase: 'pending-parent',
+    })
+  })
+
+  it.each(['write', 'fsync'] as const)(
+    'reconciles a durably appended analysis request after %s uncertainty',
+    failure => {
+      const { ledger, root, ticketId } = seededLedger(`recover-${failure}`)
+      appendFault.enabled = true
+      if (failure === 'write') appendFault.failLedgerWriteAfterReal = 1
+      else appendFault.failLedgerFsyncAfterReal = 1
+
+      const receipt = ledger.requestLearningAnalysis(requestInput(ticketId))
+
+      expect(receipt.duplicate).toBe(false)
+      expect(new EvolutionLedger(root).requestLearningAnalysis(
+        requestInput(ticketId),
+      ).duplicate).toBe(true)
+      expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+        .split('\n').filter(line => line.includes('learning-analysis-requested')))
+        .toHaveLength(1)
+    },
+  )
+
+  it('resumes each missing lifecycle step after restart without another identity', () => {
+    const seeded = seededLedger('restart-steps')
+    const requested = seeded.ledger.requestLearningAnalysis(
+      requestInput(seeded.ticketId),
+    )
+    const afterRequest = new EvolutionLedger(seeded.root)
+    afterRequest.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    })
+    const afterStart = new EvolutionLedger(seeded.root)
+    afterStart.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange(),
+    })
+
+    const recovered = new EvolutionLedger(seeded.root)
+    expect(recovered.getLearningAnalysis(requested.analysisId)).toMatchObject({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange(),
+    })
+    expect(recovered.listEvents().filter(event => event.type.startsWith(
+      'learning-analysis-',
+    )).map(event => event.type)).toEqual([
+      'learning-analysis-consent-recorded',
+      'learning-analysis-requested',
+      'learning-analysis-child-started',
+      'learning-analysis-submitted',
+    ])
+  })
+
+  it('reconciles durable child-start and submission writes before returning', () => {
+    const seeded = seededLedger('later-write-recovery')
+    const requested = seeded.ledger.requestLearningAnalysis(
+      requestInput(seeded.ticketId),
+    )
+    appendFault.enabled = true
+    appendFault.failLedgerFsyncAfterReal = 1
+    expect(seeded.ledger.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    })).toMatchObject({ phase: 'running', duplicate: false })
+    appendFault.failLedgerFsyncAfterReal = 1
+    expect(seeded.ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange(),
+    })).toMatchObject({ submission: skillChange(), duplicate: false })
+
+    const replay = new EvolutionLedger(seeded.root)
+    expect(replay.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    }).duplicate).toBe(true)
+    expect(replay.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange(),
+    }).duplicate).toBe(true)
+  })
+
+  it('keeps analysis events off the public service event stream and preserves formalWrite recovery semantics', async () => {
+    const seeded = seededLedger('service-recovery')
+    const ctx = new Context()
+    await ctx.plugin(TianwenEvolutionService, { root: seeded.root })
+    try {
+      appendFault.enabled = true
+      appendFault.failLedgerFsyncAfterReal = 1
+      const requested = ctx.tianwenEvolution.requestLearningAnalysis(
+        requestInput(seeded.ticketId),
+      )
+      expect(requested.duplicate).toBe(false)
+      expect(ctx.tianwenEvolution.listEvents()).toEqual([])
+
+      appendFault.failLedgerWriteBeforeReal = 1
+      expect(() => ctx.tianwenEvolution.recordLearningAnalysisChildStarted({
+        analysisId: requested.analysisId,
+        parentSessionId: requested.parentSessionId,
+        childSessionId: requested.childSessionId,
+      })).toThrow(LedgerAppendNotCommittedError)
+      expect(ctx.tianwenEvolution.blocked).toBe(false)
+      ctx.tianwenEvolution.recordLearningAnalysisChildStarted({
+        analysisId: requested.analysisId,
+        parentSessionId: requested.parentSessionId,
+        childSessionId: requested.childSessionId,
+      })
+
+      appendFault.failLedgerFsyncAfterReal = 2
+      expect(() => ctx.tianwenEvolution.recordLearningAnalysisSubmission({
+        analysisId: requested.analysisId,
+        childSessionId: requested.childSessionId,
+        submission: skillChange(),
+      })).toThrow(LedgerCommitUnknownError)
+      expect(ctx.tianwenEvolution.blocked).toBe(true)
+      expect(ctx.tianwenEvolution.getLearningAnalysis(
+        requested.analysisId,
+      )?.submission).toBeUndefined()
+      expect(new EvolutionLedger(seeded.root).getLearningAnalysis(
+        requested.analysisId,
+      )?.submission).toEqual(skillChange())
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps a non-appended analysis write retryable and blocks true commit-unknown', () => {
+    const first = seededLedger('not-appended')
+    appendFault.enabled = true
+    appendFault.failLedgerWriteBeforeReal = 1
+    expect(() => first.ledger.requestLearningAnalysis(
+      requestInput(first.ticketId),
+    )).toThrow(LedgerAppendNotCommittedError)
+    expect(first.ledger.requestLearningAnalysis(requestInput(first.ticketId)).duplicate)
+      .toBe(false)
+
+    const uncertain = seededLedger('commit-unknown')
+    appendFault.failLedgerFsyncAfterReal = 2
+    expect(() => uncertain.ledger.requestLearningAnalysis(
+      requestInput(uncertain.ticketId),
+    )).toThrow(LedgerCommitUnknownError)
+    expect(() => uncertain.ledger.requestLearningAnalysis(
+      requestInput(uncertain.ticketId),
+    )).toThrow(/fresh replay/u)
+    expect(new EvolutionLedger(uncertain.root).requestLearningAnalysis(
+      requestInput(uncertain.ticketId),
+    ).duplicate).toBe(true)
+  })
+
+  it('invalidates an old analysis after unsupported supersession without deleting history', () => {
+    const { ledger, root, ticketId } = seededLedger('superseded')
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
+
+    ledger.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: 'main-session',
+        messageId: 'assistant-message',
+        feedbackVersion: 'feedback-v2',
+        rating: 'negative',
+        note: 'Use a completely different workflow.',
+        scopeKey: 'project:tianwen/capability:research-summary',
+        sessionDigest: `sha256:${'0'.repeat(64)}`,
+        evidenceIds: [evidenceA],
+      },
+      sessionLifecycleFingerprint: lifecycle,
+      supersedesFeedbackVersion: 'feedback-v1',
+      analysisConsentRevision: 1,
+    })
+
+    expect(ledger.getLearningAnalysis(requested.analysisId)?.phase)
+      .toBe('invalidated')
+    expect(ledger.listEvents().map(event => event.type)).toContain(
+      'learning-analysis-invalidated',
+    )
+    expect(new EvolutionLedger(root).getLearningAnalysis(requested.analysisId))
+      .toEqual(ledger.getLearningAnalysis(requested.analysisId))
+  })
+
+  it('does not treat a superseding revision in the same feedback lineage as independent support', () => {
+    const { ledger, ticketId } = seededLedger('same-lineage-superseded')
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
+
+    const replacement = ledger.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: 'main-session',
+        messageId: 'assistant-message',
+        feedbackVersion: 'feedback-v2',
+        rating: 'negative',
+        note: 'KEEP THE ANSWER CONCRETE.',
+        scopeKey: 'project:tianwen/capability:research-summary',
+        sessionDigest: `sha256:${'0'.repeat(64)}`,
+        evidenceIds: [evidenceB],
+      },
+      sessionLifecycleFingerprint: lifecycle,
+      supersedesFeedbackVersion: 'feedback-v1',
+      analysisConsentRevision: 1,
+    })
+
+    expect(replacement.ticketId).toBe(ticketId)
+    expect(ledger.listLearningTickets().find(ticket =>
+      ticket.ticketId === ticketId)?.status).toBe('open')
+    expect(ledger.getLearningAnalysis(requested.analysisId)?.phase)
+      .toBe('invalidated')
+  })
+
+  it('keeps an analysis when another active Signal independently supports its Ticket', () => {
+    const { ledger, ticketId } = seededLedger('independent-support')
+    ledger.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: 'second-session',
+        messageId: 'second-message',
+        feedbackVersion: 'feedback-second',
+        rating: 'negative',
+        note: 'KEEP THE ANSWER CONCRETE.',
+        scopeKey: 'project:tianwen/capability:research-summary',
+        sessionDigest: `sha256:${'3'.repeat(64)}`,
+        evidenceIds: [`sha256:${'4'.repeat(64)}`],
+      },
+      sessionLifecycleFingerprint: `sha256:${'b'.repeat(64)}`,
+      analysisConsentRevision: 1,
+    })
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
+
+    ledger.recordLearningFeedbackRetraction({
+      sessionId: 'main-session',
+      messageId: 'assistant-message',
+      retractedFeedbackVersion: 'feedback-v1',
+      sessionLifecycleFingerprint: lifecycle,
+    })
+
+    expect(ledger.getLearningAnalysis(requested.analysisId)?.phase)
+      .toBe('pending-parent')
+    expect(ledger.listLearningTickets().find(ticket =>
+      ticket.ticketId === ticketId)?.status).toBe('open')
+  })
+
+  it('invalidates the only-supported analysis on retraction and rejects later child start', () => {
+    const { ledger, ticketId } = seededLedger('retracted')
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
+
+    ledger.recordLearningFeedbackRetraction({
+      sessionId: 'main-session',
+      messageId: 'assistant-message',
+      retractedFeedbackVersion: 'feedback-v1',
+      sessionLifecycleFingerprint: lifecycle,
+    })
+
+    expect(ledger.getLearningAnalysis(requested.analysisId)?.phase)
+      .toBe('invalidated')
+    expect(() => ledger.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    })).toThrow(/pending-parent/u)
+  })
+
+  it('rejects a tampered analysis binding during cold replay', () => {
+    const { ledger, root, ticketId } = seededLedger('tampered-replay')
+    ledger.requestLearningAnalysis(requestInput(ticketId))
+    const path = join(root, 'ledger.jsonl')
+    const lines = readFileSync(path, 'utf8').trimEnd().split('\n')
+    const requestedIndex = lines.findIndex(line =>
+      line.includes('learning-analysis-requested'))
+    const event = JSON.parse(lines[requestedIndex]!) as {
+      binding: { childSessionId: string }
+    }
+    event.binding.childSessionId = 'attacker-reserved-child'
+    lines[requestedIndex] = JSON.stringify(event)
+    writeFileSync(path, `${lines.join('\n')}\n`, 'utf8')
+
+    expect(() => new EvolutionLedger(root)).toThrow(LedgerIntegrityError)
+  })
+
+  it('admits only Evidence from currently active Signals in the Ticket', () => {
+    const { ledger, ticketId } = seededLedger('active-evidence-closure')
+    const otherEvidence = `sha256:${'9'.repeat(64)}` as Sha256Digest
+    ledger.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: 'second-session',
+        messageId: 'second-message',
+        feedbackVersion: 'feedback-second',
+        rating: 'negative',
+        note: 'KEEP THE ANSWER CONCRETE.',
+        scopeKey: 'project:tianwen/capability:research-summary',
+        sessionDigest: `sha256:${'3'.repeat(64)}`,
+        evidenceIds: [otherEvidence],
+      },
+      sessionLifecycleFingerprint: `sha256:${'b'.repeat(64)}`,
+      analysisConsentRevision: 1,
+    })
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
+    ledger.recordLearningFeedbackRetraction({
+      sessionId: 'main-session',
+      messageId: 'assistant-message',
+      retractedFeedbackVersion: 'feedback-v1',
+      sessionLifecycleFingerprint: lifecycle,
+    })
+    ledger.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    })
+
+    expect(() => ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange({
+        supportingEvidenceIds: [evidenceA],
+        counterevidenceIds: [],
+      }),
+    })).toThrow(/Evidence closure/u)
+    expect(ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange({
+        supportingEvidenceIds: [otherEvidence],
+        counterevidenceIds: [],
+      }),
+    })).toMatchObject({ duplicate: false, phase: 'running' })
+  })
+})
