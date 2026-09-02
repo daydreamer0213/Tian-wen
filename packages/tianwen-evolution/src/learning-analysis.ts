@@ -52,6 +52,8 @@ export interface LearningAnalysisSubmission {
 
 export interface LearningAnalysisEvidenceSignal {
   readonly sessionId: string
+  readonly messageId?: string
+  readonly feedbackVersion?: string
   readonly sessionDigest: Sha256Digest
   readonly evidenceIds: readonly Sha256Digest[]
   readonly source: 'explicit-correction' | 'outcome'
@@ -362,6 +364,8 @@ export function assertLearningAnalysisEvidenceClosure(
 export function learningAnalysisEvidenceClosure(
   sessionId: string,
   signals: readonly LearningAnalysisEvidenceSignal[],
+  messageId?: string,
+  feedbackVersion?: string,
 ): ReadonlySet<Sha256Digest> {
   const evidenceIds = new Set<Sha256Digest>()
   for (const signal of signals) {
@@ -369,6 +373,8 @@ export function learningAnalysisEvidenceClosure(
       signal.source !== 'explicit-correction'
       || !signal.active
       || signal.sessionId !== sessionId
+      || (messageId !== undefined && signal.messageId !== messageId)
+      || (feedbackVersion !== undefined && signal.feedbackVersion !== feedbackVersion)
     ) continue
     for (const evidenceId of signal.evidenceIds) {
       if (evidenceId === signal.sessionDigest) continue

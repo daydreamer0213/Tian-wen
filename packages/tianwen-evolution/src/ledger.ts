@@ -4781,6 +4781,12 @@ export class EvolutionLedger {
         signal !== undefined)
       .map(signal => ({
         sessionId: signal.sessionId,
+        ...(!isOutcomeSignal(signal)
+          ? {
+              messageId: signal.messageId,
+              feedbackVersion: signal.feedbackVersion,
+            }
+          : {}),
         sessionDigest: signal.sessionDigest,
         evidenceIds: signal.evidenceIds,
         source: isOutcomeSignal(signal)
@@ -4788,7 +4794,7 @@ export class EvolutionLedger {
           : 'explicit-correction' as const,
         active: !isOutcomeSignal(signal)
           && !this.#inactiveLearningSignals.has(signal.signalId),
-      })))
+      })), status.messageId, status.feedbackVersion)
   }
 
   #learningAnalysisHasActiveSupport(status: LearningAnalysisStatus): boolean {

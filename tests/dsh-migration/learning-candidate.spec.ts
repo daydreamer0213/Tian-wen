@@ -11,6 +11,7 @@ const roots: string[] = []
 const lifecycle = `sha256:${'a'.repeat(64)}` as const
 const evidenceA = `sha256:${'1'.repeat(64)}` as const
 const evidenceB = `sha256:${'2'.repeat(64)}` as const
+const siblingEvidence = `sha256:${'3'.repeat(64)}` as const
 const parentSkill = {
   name: 'research-summary',
   description: 'Summarize one verified research observation.',
@@ -106,7 +107,7 @@ function seeded(prefix: string, options: { readonly manifest?: boolean } = {}) {
     parentSessionId: requested.parentSessionId,
     childSessionId: requested.childSessionId,
   })
-  return { ledger, requested }
+  return { ledger, requested, binding }
 }
 
 function submit(subject: ReturnType<typeof seeded>, value = submission()) {
@@ -114,6 +115,26 @@ function submit(subject: ReturnType<typeof seeded>, value = submission()) {
     analysisId: subject.requested.analysisId,
     childSessionId: subject.requested.childSessionId,
     submission: value,
+  })
+}
+
+function recordSiblingCorrection(
+  subject: ReturnType<typeof seeded>,
+  input: { readonly messageId: string; readonly feedbackVersion: string },
+) {
+  subject.ledger.recordLearningFeedbackRevision({
+    intake: {
+      sessionId: 'main-session',
+      messageId: input.messageId,
+      feedbackVersion: input.feedbackVersion,
+      rating: 'negative',
+      note: 'Keep the answer concrete.',
+      scopeKey: 'project:tianwen/capability:research-summary',
+      sessionDigest: `sha256:${'4'.repeat(64)}`,
+      evidenceIds: [siblingEvidence],
+    },
+    sessionLifecycleFingerprint: lifecycle,
+    analysisConsentRevision: 1,
   })
 }
 
@@ -158,6 +179,77 @@ describe('bounded explicit-correction Skill Candidate materialization', () => {
         content: 'Run the bounded check and report its observed result.',
       },
       evidenceIds: [evidenceA, evidenceB],
+    })
+  })
+
+  it('rejects a sibling message Evidence before it can lock the analysis running', () => {
+    const subject = seeded('sibling-message')
+    recordSiblingCorrection(subject, {
+      messageId: 'sibling-message',
+      feedbackVersion: 'feedback-v1',
+    })
+
+    expect(() => submit(subject, submission({
+      supportingEvidenceIds: [siblingEvidence],
+      counterevidenceIds: [],
+    }))).toThrow(/Evidence closure/u)
+
+    submit(subject)
+    expect(materializeLearningCandidate(subject.ledger, subject.requested.analysisId))
+      .toMatchObject({ phase: 'candidate-ready' })
+  })
+
+  it('rejects a sibling feedback-version Evidence before it can lock the analysis running', () => {
+    const subject = seeded('sibling-version')
+    recordSiblingCorrection(subject, {
+      messageId: 'sibling-version',
+      feedbackVersion: 'feedback-v2',
+    })
+
+    expect(() => submit(subject, submission({
+      supportingEvidenceIds: [siblingEvidence],
+      counterevidenceIds: [],
+    }))).toThrow(/Evidence closure/u)
+
+    submit(subject)
+    expect(materializeLearningCandidate(subject.ledger, subject.requested.analysisId))
+      .toMatchObject({ phase: 'candidate-ready' })
+  })
+
+  it('binds the Candidate to the exact Run manifest when an otherwise-equal provider differs', () => {
+    const subject = seeded('exact-manifest')
+    const other = subject.ledger.recordRunBinding({
+      goalRef: 'goal:other-research-summary',
+      taskRef: 'task:other-research-summary',
+      sessionId: 'other-session',
+      scopeKey: 'project:tianwen/capability:research-summary',
+      acceptanceContract: {
+        source: 'dsh-tool-result',
+        toolName: 'verify_summary',
+        notMetErrorCode: 'SUMMARY_REQUIREMENT_NOT_MET',
+        gapDisposition: 'reusable',
+        problemCategory: 'summary-omits-required-result',
+        severity: 2,
+        blocksGoal: false,
+      },
+      sessionLifecycleFingerprint: `sha256:${'5'.repeat(64)}`,
+    })
+    const otherManifest = subject.ledger.recordRunSkillManifest({
+      runId: other.runId,
+      skill: { ...parentSkill, provider: 'other-provider' },
+    })
+    const exactManifest = subject.ledger.getRunSkillManifest(subject.binding.runId)!
+    submit(subject)
+
+    const result = materializeLearningCandidate(subject.ledger, subject.requested.analysisId)
+    const candidate = subject.ledger.getSkillCandidate(result.candidateId!)!
+
+    expect(candidate.parentVersionId).toBe(exactManifest.parentVersionId)
+    expect(candidate.parentVersionId).not.toBe(otherManifest.parentVersionId)
+    expect(candidate.payload).toMatchObject({
+      name: parentSkill.name,
+      source: parentSkill.source,
+      invocation: parentSkill.invocation,
     })
   })
 
