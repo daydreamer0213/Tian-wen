@@ -83,4 +83,4 @@ pnpm run check:no-private-dsh-imports
 # privateImportViolations: []
 ```
 
-Final follow-up commit: pending
+Final follow-up commit: `6f153006564c443b22972f0b94286cab4ef0f162`
