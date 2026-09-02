@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionReferenceResolver from '@deepseek-ai/dsh-session-reference'
-import SubagentRuntime, { type SubagentProvider } from '@deepseek-ai/dsh-subagent'
+import SubagentRuntime, { SubagentError, type SubagentProvider } from '@deepseek-ai/dsh-subagent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import {
@@ -644,6 +644,55 @@ describe('native explicit-correction analysis child', () => {
     expect(subject.evolution.recordLearningAnalysisChildStarted).toHaveBeenCalledOnce()
   })
 
+  it('adopts the exact DSH child when concurrent starts lose with DUPLICATE_CHILD', async () => {
+    const subject = startContext()
+    const pendingInspections: Array<() => void> = []
+    let childInspectionCount = 0
+    let startCount = 0
+    subject.ctx.sessionPersistence.inspect.mockImplementation((id: string) => {
+      if (id !== childSessionId) {
+        return Promise.resolve({ meta: { id: 'main-session', createdAt: 1 }, events: [] })
+      }
+      childInspectionCount += 1
+      if (childInspectionCount <= 2) {
+        return new Promise((_, reject) => pendingInspections.push(() => {
+          reject(new Error('session not found'))
+        }))
+      }
+      return Promise.resolve({
+        meta: {
+          id: childSessionId,
+          parentSession: 'main-session',
+          origin: 'subagent',
+        },
+        events: [analysisDescriptorEvent()],
+      })
+    })
+    subject.startContinuable.mockImplementation(async () => {
+      startCount += 1
+      if (startCount === 1) {
+        return { childId: childSessionId, messageId: 'accepted-private-analysis' }
+      }
+      throw new SubagentError('same child id already accepted', 'DUPLICATE_CHILD')
+    })
+
+    const first = startLearningAnalysisChild(subject.ctx as never, {
+      analysisId, parent: subject.parent, signal: AbortSignal.timeout(10_000),
+    })
+    const second = startLearningAnalysisChild(subject.ctx as never, {
+      analysisId, parent: subject.parent, signal: AbortSignal.timeout(10_000),
+    })
+    await vi.waitFor(() => expect(pendingInspections).toHaveLength(2))
+    for (const release of pendingInspections) release()
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ phase: 'running' }),
+      expect.objectContaining({ phase: 'running' }),
+    ])
+    expect(subject.startContinuable).toHaveBeenCalledTimes(2)
+    expect(startCount).toBe(2)
+  })
+
   it('fails closed instead of adopting a persisted child with the wrong lineage', async () => {
     const subject = startContext()
     subject.ctx.sessionPersistence.inspect.mockImplementation((id: string) => {
@@ -692,6 +741,39 @@ describe('native explicit-correction analysis child', () => {
       signal: AbortSignal.timeout(10_000),
     })).rejects.toThrow(/exact bound native child/u)
     expect(subject.startContinuable).not.toHaveBeenCalled()
+  })
+
+  it('does not install the submission tool from a seeded ancestor descriptor', () => {
+    let setup: ((ctx: unknown) => () => void) | undefined
+    const running = status({ phase: 'running' })
+    const child = {
+      id: childSessionId,
+      session: {
+        id: childSessionId,
+        events: [analysisDescriptorEvent()],
+        header: {
+          parentSession: 'main-session', origin: 'subagent', seedLength: 1,
+        },
+      },
+    } as unknown as Agent
+    const register = vi.fn()
+    const root = {
+      subagents: {
+        registerContinuableSetup: vi.fn(contribution => {
+          setup = contribution
+          return () => undefined
+        }),
+      },
+      tianwenEvolution: {
+        getLearningAnalysisByChildSessionId: vi.fn(() => running),
+      },
+    }
+    registerLearningAnalysisContinuableSetup(root as never)
+    setup!({
+      agent: child,
+      tools: { presentAs: vi.fn(), guard: vi.fn(), register },
+    })
+    expect(register).not.toHaveBeenCalled()
   })
 
   it('resolves an unknown child-start commit from a fresh Evolution projection', async () => {
@@ -822,6 +904,9 @@ describe('native explicit-correction analysis child', () => {
     })
     const root = {
       agents: { get: vi.fn((id: string) => id === childSessionId ? child : undefined) },
+      sessionPersistence: {
+        inspect: vi.fn().mockResolvedValue({ meta: { id: 'main-session', createdAt: 1 }, events: [] }),
+      },
       subagents: {
         registerContinuableSetup: vi.fn(contribution => {
           setup = contribution
@@ -855,6 +940,14 @@ describe('native explicit-correction analysis child', () => {
           signalIds: [`signal:${'c'.repeat(64)}`],
         }]),
         recordLearningAnalysisSubmission,
+        recordLearningAnalysisReportIntent: vi.fn(input => ({
+          ...running,
+          reportDelivery: { ...input, state: 'pending', intentRecordedAt: '2026-09-02T00:00:01.000Z' },
+        })),
+        recordLearningAnalysisReportDelivered: vi.fn(input => ({
+          ...running,
+          reportDelivery: { ...input, state: 'delivered', intentRecordedAt: '2026-09-02T00:00:01.000Z', deliveredAt: '2026-09-02T00:00:02.000Z' },
+        })),
       },
     }
     const child = {
@@ -978,9 +1071,16 @@ describe('native explicit-correction analysis child', () => {
       ledger.recordLearningAnalysisSubmission(input)
       throw new LedgerCommitUnknownError('forced unknown commit result')
     })
+    const uncertainReportDelivered = vi.fn(input => {
+      ledger.recordLearningAnalysisReportDelivered(input)
+      throw new LedgerCommitUnknownError('forced report delivery commit unknown')
+    })
     const root = {
       agents: { get: vi.fn(() => child) },
       subagents: { reportFrom },
+      sessionPersistence: {
+        inspect: vi.fn().mockResolvedValue({ meta: { id: 'main-session', createdAt: 1 }, events: [] }),
+      },
       tianwenEvolution: {
         getLearningAnalysisByChildSessionId: (id: string) =>
           ledger.getLearningAnalysisByChildSessionId(id),
@@ -992,6 +1092,8 @@ describe('native explicit-correction analysis child', () => {
         listLearningSignals: () => ledger.listLearningSignals(),
         listLearningTickets: () => ledger.listLearningTickets(),
         recordLearningAnalysisSubmission: uncertainRecord,
+        recordLearningAnalysisReportIntent: (input: never) => ledger.recordLearningAnalysisReportIntent(input),
+        recordLearningAnalysisReportDelivered: uncertainReportDelivered,
       },
     }
     const definition = createLearningAnalysisTool(root as never, evolutionRoot)
@@ -1011,6 +1113,7 @@ describe('native explicit-correction analysis child', () => {
       requested.analysisId,
     )?.submission).toEqual(skillChange())
     expect(reportFrom).toHaveBeenCalledOnce()
+    expect(uncertainReportDelivered).toHaveBeenCalledOnce()
     expect(concludeTurn).toHaveBeenCalledOnce()
 
     const blockedRecord = vi.fn(() => {
@@ -1041,7 +1144,9 @@ describe('native explicit-correction analysis child', () => {
       nextStage: 'governed-candidate',
     })
     expect(blockedRecord).not.toHaveBeenCalled()
-    expect(blockedReport).toHaveBeenCalledOnce()
+    // The earlier run durably recorded both the submission and its delivery;
+    // replaying the stale projection must not emit a second main-chat report.
+    expect(blockedReport).not.toHaveBeenCalled()
     expect(blockedConclude).toHaveBeenCalledOnce()
   })
 
@@ -1077,6 +1182,9 @@ describe('native explicit-correction analysis child', () => {
         }),
         reportFrom,
       },
+      sessionPersistence: {
+        inspect: vi.fn().mockResolvedValue({ meta: { id: 'main-session', createdAt: 1 }, events: [] }),
+      },
       tianwenEvolution: {
         getLearningAnalysisByChildSessionId: vi.fn(() => current),
         getLearningAnalysis: vi.fn(() => current),
@@ -1097,6 +1205,16 @@ describe('native explicit-correction analysis child', () => {
           signalIds: [`signal:${'c'.repeat(64)}`],
         }]),
         recordLearningAnalysisSubmission: record,
+        recordLearningAnalysisReportIntent: vi.fn(input => {
+          if (current.reportDelivery !== undefined) return { ...current, duplicate: true }
+          current = { ...current, reportDelivery: { ...input, state: 'pending', intentRecordedAt: '2026-09-02T00:00:02.000Z' } }
+          return { ...current, duplicate: false }
+        }),
+        recordLearningAnalysisReportDelivered: vi.fn(input => {
+          if (current.reportDelivery?.state === 'delivered') return { ...current, duplicate: true }
+          current = { ...current, reportDelivery: { ...input, state: 'delivered', intentRecordedAt: '2026-09-02T00:00:02.000Z', deliveredAt: '2026-09-02T00:00:03.000Z' } }
+          return { ...current, duplicate: false }
+        }),
       },
     }
     registerLearningAnalysisContinuableSetup(root as never)
@@ -1136,6 +1254,10 @@ describe('native explicit-correction analysis child', () => {
     expect(record).toHaveBeenCalledOnce()
     expect(reportFrom).toHaveBeenCalledTimes(2)
     expect(exec.concludeTurn).toHaveBeenCalledOnce()
+
+    await expect(definition!.execute(retrySubmission, exec as never)).resolves
+      .toEqual({ verdict: 'no-case', nextStage: 'stopped-no-case' })
+    expect(reportFrom).toHaveBeenCalledTimes(2)
 
     await expect(definition!.execute({
       ...retrySubmission, hypothesis: 'A changed second submission.',

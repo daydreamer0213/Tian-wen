@@ -56,6 +56,9 @@ import type {
   LearningAnalysisId,
   LearningAnalysisInvalidatedEvent,
   LearningAnalysisLedgerEvent,
+  LearningAnalysisReportBinding,
+  LearningAnalysisReportDeliveredEvent,
+  LearningAnalysisReportIntentRecordedEvent,
   LearningAnalysisReceipt,
   LearningAnalysisRequestedEvent,
   LearningAnalysisStatus,
@@ -1035,6 +1038,64 @@ function parseLearningAnalysisInvalidatedEvent(
   }
 }
 
+function parseLearningAnalysisReport(
+  value: unknown,
+  delivered: boolean,
+): LearningAnalysisReportBinding & { readonly reportMessageId?: string } {
+  if (!isRecord(value)) throw new LedgerIntegrityError('learning analysis report must be an object')
+  exactKeys(value,
+    ['analysisId', 'parentSessionId', 'childSessionId', 'reportDigest'],
+    delivered ? ['reportMessageId'] : [],
+  )
+  return {
+    analysisId: learningAnalysisId(value.analysisId),
+    parentSessionId: requireString(value.parentSessionId, 'parentSessionId'),
+    childSessionId: requireString(value.childSessionId, 'childSessionId'),
+    reportDigest: requireDigest(value.reportDigest),
+    ...(delivered ? { reportMessageId: requireString(value.reportMessageId, 'reportMessageId') } : {}),
+  }
+}
+
+function sameLearningAnalysisReportBinding(
+  left: LearningAnalysisReportBinding,
+  right: LearningAnalysisReportBinding,
+): boolean {
+  return left.analysisId === right.analysisId
+    && left.parentSessionId === right.parentSessionId
+    && left.childSessionId === right.childSessionId
+    && left.reportDigest === right.reportDigest
+}
+
+function parseLearningAnalysisReportIntentEvent(
+  value: Record<string, unknown>, at: string,
+): LearningAnalysisReportIntentRecordedEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'report'])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-report-intent.v1') {
+    throw new LedgerIntegrityError('invalid learning analysis report intent schema')
+  }
+  return {
+    schemaVersion: 'tianwen.learning-analysis-report-intent.v1',
+    type: 'learning-analysis-report-intent-recorded', at,
+    report: parseLearningAnalysisReport(value.report, false),
+  }
+}
+
+function parseLearningAnalysisReportDeliveredEvent(
+  value: Record<string, unknown>, at: string,
+): LearningAnalysisReportDeliveredEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'report'])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-report-delivered.v1') {
+    throw new LedgerIntegrityError('invalid learning analysis report delivery schema')
+  }
+  const report = parseLearningAnalysisReport(value.report, true)
+  if (report.reportMessageId === undefined) throw new LedgerIntegrityError('learning analysis report message is missing')
+  return {
+    schemaVersion: 'tianwen.learning-analysis-report-delivered.v1',
+    type: 'learning-analysis-report-delivered', at,
+    report: { ...report, reportMessageId: report.reportMessageId },
+  }
+}
+
 function parseLearningAnalysisConsent(
   value: unknown,
 ): LearningAnalysisConsent {
@@ -1309,6 +1370,12 @@ function parseEvent(value: unknown): LedgerEvent {
   }
   if (type === 'learning-analysis-invalidated') {
     return parseLearningAnalysisInvalidatedEvent(value, at)
+  }
+  if (type === 'learning-analysis-report-intent-recorded') {
+    return parseLearningAnalysisReportIntentEvent(value, at)
+  }
+  if (type === 'learning-analysis-report-delivered') {
+    return parseLearningAnalysisReportDeliveredEvent(value, at)
   }
   if (type === 'learning-analysis-consent-recorded') {
     return parseLearningAnalysisConsentEvent(value, at)
@@ -3939,6 +4006,57 @@ export class EvolutionLedger {
     return { ...clone(this.#learningAnalyses.get(analysisId)!), duplicate: false }
   }
 
+  recordLearningAnalysisReportIntent(input: LearningAnalysisReportBinding): LearningAnalysisReceipt {
+    const report = parseLearningAnalysisReport(input, false)
+    const status = this.#learningAnalyses.get(report.analysisId)
+    if (
+      status === undefined
+      || status.submission === undefined
+      || status.parentSessionId !== report.parentSessionId
+      || status.childSessionId !== report.childSessionId
+    ) throw new LedgerIntegrityError('learning analysis report intent disagrees with analysis')
+    const existing = status.reportDelivery
+    if (existing !== undefined) {
+      if (!sameLearningAnalysisReportBinding(existing, report)) {
+        throw new LedgerIntegrityError('learning analysis report intent changed')
+      }
+      return { ...clone(status), duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-report-intent.v1',
+      type: 'learning-analysis-report-intent-recorded', at: this.#now(), report,
+    })
+    return { ...clone(this.#learningAnalyses.get(report.analysisId)!), duplicate: false }
+  }
+
+  recordLearningAnalysisReportDelivered(input: LearningAnalysisReportBinding & {
+    readonly reportMessageId: string
+  }): LearningAnalysisReceipt {
+    const report = parseLearningAnalysisReport(input, true)
+    const status = this.#learningAnalyses.get(report.analysisId)
+    const existing = status?.reportDelivery
+    if (
+      status === undefined
+      || existing === undefined
+      || existing.analysisId !== report.analysisId
+      || existing.parentSessionId !== report.parentSessionId
+      || existing.childSessionId !== report.childSessionId
+      || existing.reportDigest !== report.reportDigest
+    ) throw new LedgerIntegrityError('learning analysis report delivery disagrees with intent')
+    if (existing.state === 'delivered') {
+      if (existing.reportMessageId !== report.reportMessageId) {
+        throw new LedgerIntegrityError('learning analysis report delivery changed')
+      }
+      return { ...clone(status), duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-report-delivered.v1',
+      type: 'learning-analysis-report-delivered', at: this.#now(),
+      report: { ...report, reportMessageId: report.reportMessageId! },
+    })
+    return { ...clone(this.#learningAnalyses.get(report.analysisId)!), duplicate: false }
+  }
+
   getLearningAnalysis(
     analysisId: LearningAnalysisId,
   ): LearningAnalysisStatus | undefined {
@@ -4988,6 +5106,8 @@ export class EvolutionLedger {
         || parsed.type === 'learning-analysis-child-started'
         || parsed.type === 'learning-analysis-submitted'
         || parsed.type === 'learning-analysis-invalidated'
+        || parsed.type === 'learning-analysis-report-intent-recorded'
+        || parsed.type === 'learning-analysis-report-delivered'
       ) {
         const recovery = this.#recoverLearningAppend(line, appendOffset)
         if (recovery === 'committed') {
@@ -6094,6 +6214,29 @@ export class EvolutionLedger {
       this.#assertLearningAnalysisTimestamp(status, event.at)
       return
     }
+    if (event.type === 'learning-analysis-report-intent-recorded') {
+      const status = this.#learningAnalyses.get(event.report.analysisId)
+      if (
+        status?.submission === undefined
+        || status.reportDelivery !== undefined
+        || status.parentSessionId !== event.report.parentSessionId
+        || status.childSessionId !== event.report.childSessionId
+      ) throw new LedgerIntegrityError('learning analysis report intent disagrees with history')
+      this.#assertLearningAnalysisTimestamp(status, event.at)
+      return
+    }
+    if (event.type === 'learning-analysis-report-delivered') {
+      const status = this.#learningAnalyses.get(event.report.analysisId)
+      const report = status?.reportDelivery
+      if (
+        report?.state !== 'pending'
+        || report.parentSessionId !== event.report.parentSessionId
+        || report.childSessionId !== event.report.childSessionId
+        || report.reportDigest !== event.report.reportDigest
+      ) throw new LedgerIntegrityError('learning analysis report delivery disagrees with history')
+      this.#assertLearningAnalysisTimestamp(status!, event.at)
+      return
+    }
     if (event.type === 'learning-analysis-consent-recorded') {
       if (this.#learningAnalysisConsents.has(event.consent.revision)) {
         throw new LedgerIntegrityError(
@@ -6556,6 +6699,34 @@ export class EvolutionLedger {
       this.#learningAnalyses.set(event.analysisId, {
         ...status,
         phase: 'invalidated',
+        updatedAt: event.at,
+      })
+      return
+    }
+    if (event.type === 'learning-analysis-report-intent-recorded') {
+      const status = this.#learningAnalyses.get(event.report.analysisId)!
+      this.#learningAnalyses.set(event.report.analysisId, {
+        ...status,
+        reportDelivery: {
+          ...event.report,
+          state: 'pending',
+          intentRecordedAt: event.at,
+        },
+        updatedAt: event.at,
+      })
+      return
+    }
+    if (event.type === 'learning-analysis-report-delivered') {
+      const status = this.#learningAnalyses.get(event.report.analysisId)!
+      const delivery = status.reportDelivery!
+      this.#learningAnalyses.set(event.report.analysisId, {
+        ...status,
+        reportDelivery: {
+          ...delivery,
+          state: 'delivered',
+          deliveredAt: event.at,
+          reportMessageId: event.report.reportMessageId,
+        },
         updatedAt: event.at,
       })
       return

@@ -7,7 +7,7 @@ import type { AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { formatSessionReferenceMention } from '@deepseek-ai/dsh-session-reference'
-import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
+import { foldSubagentDescriptor, SubagentError } from '@deepseek-ai/dsh-subagent'
 import {
   LedgerAppendNotCommittedError,
   TianwenEvolutionService,
@@ -123,6 +123,35 @@ function isMissingSession(error: unknown): boolean {
   return error instanceof Error && /not found|unknown session|ENOENT/ui.test(error.message)
 }
 
+/**
+ * DSH owns child creation.  We only adopt a child after both its live header
+ * and its durable, child-owned descriptor prove it is our exact binding.
+ */
+async function hasExactExistingChild(
+  ctx: Context,
+  status: LearningAnalysisStatus,
+): Promise<boolean> {
+  const liveChild = ctx.agents.get(SessionId(status.childSessionId))
+  if (liveChild !== undefined && !exactLiveChild(status, liveChild)) {
+    throw new Error('learning analysis existing child is not the exact bound native child')
+  }
+  let persistedChild: Awaited<ReturnType<Context['sessionPersistence']['inspect']>> | undefined
+  try {
+    persistedChild = await ctx.sessionPersistence.inspect(SessionId(status.childSessionId))
+  } catch (error) {
+    if (!isMissingSession(error)) {
+      throw new Error('learning analysis child persistence is unavailable', { cause: error })
+    }
+  }
+  if (persistedChild !== undefined && !exactPersistedChild(status, persistedChild)) {
+    throw new Error('learning analysis existing child is not the exact bound native child')
+  }
+  if (liveChild !== undefined && persistedChild === undefined) {
+    throw new Error('learning analysis child live and durable facts disagree')
+  }
+  return persistedChild !== undefined
+}
+
 async function readDurableAnalysis(
   evolutionRoot: string | undefined,
   analysisId: LearningAnalysisId,
@@ -219,24 +248,7 @@ export async function startLearningAnalysisChild(
     || feedback.latest.messageId !== status.messageId
     || feedback.latest.recordedAt !== exactIntake?.recordedAt
   ) throw new Error('learning analysis private feedback is unavailable for the exact binding')
-  const liveChild = ctx.agents.get(SessionId(status.childSessionId))
-  if (liveChild !== undefined && !exactLiveChild(status, liveChild)) {
-    throw new Error('learning analysis existing child is not the exact bound native child')
-  }
-  let persistedChild: Awaited<ReturnType<Context['sessionPersistence']['inspect']>> | undefined
-  try {
-    persistedChild = await ctx.sessionPersistence.inspect(SessionId(status.childSessionId))
-  } catch (error) {
-    if (!isMissingSession(error)) {
-      throw new Error('learning analysis child persistence is unavailable', { cause: error })
-    }
-  }
-  if (persistedChild !== undefined && !exactPersistedChild(status, persistedChild)) {
-    throw new Error('learning analysis existing child is not the exact bound native child')
-  }
-  if (liveChild !== undefined && persistedChild === undefined) {
-    throw new Error('learning analysis child live and durable facts disagree')
-  }
+  const alreadyPersisted = await hasExactExistingChild(ctx, status)
   input.signal.throwIfAborted()
   const beforeStart = ctx.tianwenEvolution.getLearningAnalysis(status.analysisId)
   if (
@@ -266,25 +278,35 @@ export async function startLearningAnalysisChild(
   }]
   const selection = (ctx as LearningAnalysisChildContext)
     .agentDefaultModel.currentSelection()
-  if (persistedChild === undefined) {
-    const started = await ctx.subagents.startContinuable({
-      provider: 'spawn',
-      label: CHILD_LABEL,
-      childId: SessionId(status.childSessionId),
-      request: {
-        parent: input.parent,
-        prompt,
-        agentOptions: selection,
-        persona: READ_ONLY_PERSONA,
-        // rc.2 validates allow names against global tools. Emptying globals here
-        // lets the child-scoped setup below add the sole submission capability.
-        toolFilter: { allow: [] },
-      },
-      signal: input.signal,
-    })
-    if (String(started.childId) !== status.childSessionId) {
-      throw new Error('learning analysis native child identity mismatch')
+  if (!alreadyPersisted) {
+    let duplicateChild = false
+    try {
+      const started = await ctx.subagents.startContinuable({
+        provider: 'spawn',
+        label: CHILD_LABEL,
+        childId: SessionId(status.childSessionId),
+        request: {
+          parent: input.parent,
+          prompt,
+          agentOptions: selection,
+          persona: READ_ONLY_PERSONA,
+          // rc.2 validates allow names against global tools. Emptying globals here
+          // lets the child-scoped setup below add the sole submission capability.
+          toolFilter: { allow: [] },
+        },
+        signal: input.signal,
+      })
+      if (String(started.childId) !== status.childSessionId) {
+        throw new Error('learning analysis native child identity mismatch')
+      }
+    } catch (error) {
+      if (!(error instanceof SubagentError && error.code === 'DUPLICATE_CHILD')) throw error
+      if (!await hasExactExistingChild(ctx, status)) {
+        throw new Error('learning analysis duplicate child cannot be proven durable')
+      }
+      duplicateChild = true
     }
+    if (!duplicateChild) {
     try {
       const admitted = ctx.tianwenEvolution.getLearningAnalysis(status.analysisId)
       if (
@@ -297,6 +319,10 @@ export async function startLearningAnalysisChild(
     } catch (error) {
       interruptAcceptedChild(ctx, status)
       throw error
+    }
+    } else {
+      const raced = ctx.tianwenEvolution.getLearningAnalysis(status.analysisId)
+      if (exactRunning(raced, status)) return raced
     }
   }
   const recorded = await recordStarted(ctx, status, evolutionRoot)
@@ -316,7 +342,9 @@ export function registerLearningAnalysisContinuableSetup(
     const status = ctx.tianwenEvolution.getLearningAnalysisByChildSessionId(
       String(child.session.id),
     )
-    const descriptor = foldSubagentDescriptor(child.session.events)
+    const descriptor = foldSubagentDescriptor(
+      ownEvents(child.session.events, child.session.header) as never,
+    )
     if (
       status === undefined
       || status.submission !== undefined

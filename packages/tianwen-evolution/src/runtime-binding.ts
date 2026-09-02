@@ -47,6 +47,7 @@ import type {
 import type {
   LearningAnalysisId,
   LearningAnalysisReceipt,
+  LearningAnalysisReportBinding,
   LearningAnalysisStatus,
   LearningAnalysisSubmission,
   RequestLearningAnalysisInput,
@@ -290,6 +291,20 @@ export class TianwenEvolutionService extends Service {
   }): LearningAnalysisReceipt {
     return this.formalWrite(() =>
       this.state().ledger.recordLearningAnalysisSubmission(input))
+  }
+
+  recordLearningAnalysisReportIntent(
+    input: LearningAnalysisReportBinding,
+  ): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisReportIntent(input))
+  }
+
+  recordLearningAnalysisReportDelivered(input: LearningAnalysisReportBinding & {
+    readonly reportMessageId: string
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisReportDelivered(input))
   }
 
   getLearningAnalysis(

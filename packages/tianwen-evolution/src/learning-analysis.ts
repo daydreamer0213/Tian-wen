@@ -73,6 +73,7 @@ export interface LearningAnalysisStatus extends LearningAnalysisBinding {
   readonly submittedAt?: string
   readonly submissionDigest?: Sha256Digest
   readonly submission?: LearningAnalysisSubmission
+  readonly reportDelivery?: LearningAnalysisReportDelivery
 }
 
 export type LearningAnalysisReceipt = LearningAnalysisStatus & {
@@ -113,11 +114,44 @@ export interface LearningAnalysisInvalidatedEvent {
   readonly reason: 'support-withdrawn'
 }
 
+export interface LearningAnalysisReportBinding {
+  readonly analysisId: LearningAnalysisId
+  readonly parentSessionId: string
+  readonly childSessionId: string
+  readonly reportDigest: Sha256Digest
+}
+
+export type LearningAnalysisReportDelivery = LearningAnalysisReportBinding & (
+  | { readonly state: 'pending'; readonly intentRecordedAt: string }
+  | {
+      readonly state: 'delivered'
+      readonly intentRecordedAt: string
+      readonly deliveredAt: string
+      readonly reportMessageId: string
+    }
+)
+
+export interface LearningAnalysisReportIntentRecordedEvent {
+  readonly schemaVersion: 'tianwen.learning-analysis-report-intent.v1'
+  readonly type: 'learning-analysis-report-intent-recorded'
+  readonly at: string
+  readonly report: LearningAnalysisReportBinding
+}
+
+export interface LearningAnalysisReportDeliveredEvent {
+  readonly schemaVersion: 'tianwen.learning-analysis-report-delivered.v1'
+  readonly type: 'learning-analysis-report-delivered'
+  readonly at: string
+  readonly report: LearningAnalysisReportBinding & { readonly reportMessageId: string }
+}
+
 export type LearningAnalysisLedgerEvent =
   | LearningAnalysisRequestedEvent
   | LearningAnalysisChildStartedEvent
   | LearningAnalysisSubmittedEvent
   | LearningAnalysisInvalidatedEvent
+  | LearningAnalysisReportIntentRecordedEvent
+  | LearningAnalysisReportDeliveredEvent
 
 const ANALYSIS_ID = /^analysis:[a-f0-9]{64}$/
 const TICKET_ID = /^ticket:[a-f0-9]{64}$/

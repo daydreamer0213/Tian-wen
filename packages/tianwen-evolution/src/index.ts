@@ -98,6 +98,8 @@ export type {
   LearningAnalysisId,
   LearningAnalysisPhase,
   LearningAnalysisReceipt,
+  LearningAnalysisReportBinding,
+  LearningAnalysisReportDelivery,
   LearningAnalysisStatus,
   LearningAnalysisSubmission,
   RequestLearningAnalysisInput,

@@ -1,13 +1,16 @@
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import {
+  LedgerAppendNotCommittedError,
   LedgerCommitUnknownError,
   TianwenEvolutionService,
   assertLearningAnalysisEvidenceClosure,
   parseLearningAnalysisSubmission,
   sha256,
   type LearningAnalysisStatus,
+  type LearningAnalysisReportBinding,
   type LearningAnalysisSubmission,
 } from '@tianwen/evolution'
 
@@ -93,6 +96,95 @@ function nextStage(verdict: LearningAnalysisSubmission['verdict']): string {
     : verdict === 'insufficient-evidence'
       ? 'stopped-insufficient-evidence'
       : 'stopped-no-case'
+}
+
+function reportContent(submission: LearningAnalysisSubmission) {
+  const stage = nextStage(submission.verdict)
+  return [{
+    type: 'text' as const,
+    text: `Tianwen analysis verdict: ${submission.verdict}. Next governed stage: ${stage}.`,
+  }]
+}
+
+function reportBinding(
+  status: LearningAnalysisStatus,
+  content: ReturnType<typeof reportContent>,
+): LearningAnalysisReportBinding {
+  return {
+    analysisId: status.analysisId,
+    parentSessionId: status.parentSessionId,
+    childSessionId: status.childSessionId,
+    reportDigest: sha256(content),
+  }
+}
+
+function exactPersistedReport(
+  events: readonly unknown[],
+  status: LearningAnalysisStatus,
+  content: ReturnType<typeof reportContent>,
+): string | undefined {
+  for (const event of events) {
+    const data = event !== null && typeof event === 'object'
+      ? (event as { readonly type?: unknown, readonly data?: unknown }).data
+      : undefined
+    if (
+      (event as { readonly type?: unknown } | undefined)?.type !== 'user/message'
+      || data === null
+      || typeof data !== 'object'
+    ) continue
+    const message = data as {
+      readonly id?: unknown
+      readonly source?: { readonly kind?: unknown, readonly senderSessionId?: unknown }
+      readonly message?: { readonly content?: unknown }
+    }
+    if (
+      message.source?.kind === 'subagent-report'
+      && String(message.source.senderSessionId) === status.childSessionId
+      && sha256(message.message?.content) === sha256(content)
+      && typeof message.id === 'string'
+      && message.id.length > 0
+    ) return message.id
+  }
+  return undefined
+}
+
+async function reconcileReportDelivery(
+  ctx: Context,
+  status: LearningAnalysisStatus,
+  binding: LearningAnalysisReportBinding,
+  evolutionRoot: string | undefined,
+): Promise<LearningAnalysisStatus> {
+  try {
+    return ctx.tianwenEvolution.recordLearningAnalysisReportIntent(binding)
+  } catch (error) {
+    const durable = await readDurableAnalysis(evolutionRoot, status.analysisId)
+    if (durable?.reportDelivery?.reportDigest === binding.reportDigest) return durable
+    throw error
+  }
+}
+
+async function recordReportDelivered(
+  ctx: Context,
+  status: LearningAnalysisStatus,
+  binding: LearningAnalysisReportBinding,
+  reportMessageId: string,
+  evolutionRoot: string | undefined,
+): Promise<LearningAnalysisStatus> {
+  const input = { ...binding, reportMessageId }
+  try {
+    return ctx.tianwenEvolution.recordLearningAnalysisReportDelivered(input)
+  } catch (error) {
+    if (error instanceof LedgerAppendNotCommittedError) {
+      return ctx.tianwenEvolution.recordLearningAnalysisReportDelivered(input)
+    }
+    const durable = await readDurableAnalysis(evolutionRoot, status.analysisId)
+    if (
+      durable?.reportDelivery?.state === 'delivered'
+      && durable.reportDelivery.reportDigest === binding.reportDigest
+      && durable.reportDelivery.reportMessageId === reportMessageId
+    ) return durable
+    throw error
+  }
 }
 
 export function createLearningAnalysisTool(
@@ -207,13 +299,36 @@ export function createLearningAnalysisTool(
         throw new Error('learning analysis durable submission mismatch')
       }
 
-      const stage = nextStage(submission.verdict)
-      await ctx.subagents.reportFrom(exec.agent!, [{
-        type: 'text',
-        text: `Tianwen analysis verdict: ${submission.verdict}. Next governed stage: ${stage}.`,
-      }], { delivery: 'next-step', signal: exec.signal })
+      const content = reportContent(submission)
+      const binding = reportBinding(recorded, content)
+      recorded = await reconcileReportDelivery(ctx, recorded, binding, evolutionRoot)
+      if (recorded.reportDelivery?.state !== 'delivered') {
+        const inspection = await ctx.sessionPersistence.inspect(
+          SessionId(binding.parentSessionId),
+        )
+        if (
+          String(inspection.meta.id) !== binding.parentSessionId
+          || inspection.meta.parentSession !== undefined
+          || inspection.meta.origin === 'subagent'
+        ) throw new Error('learning analysis report parent evidence is unavailable')
+        const persistedMessageId = exactPersistedReport(
+          inspection.events,
+          recorded,
+          content,
+        )
+        const reportMessageId = persistedMessageId ?? await ctx.subagents.reportFrom(
+          exec.agent!, content, { delivery: 'next-step', signal: exec.signal },
+        )
+        recorded = await recordReportDelivered(
+          ctx,
+          recorded,
+          binding,
+          String(reportMessageId),
+          evolutionRoot,
+        )
+      }
       exec.concludeTurn()
-      return { verdict: submission.verdict, nextStage: stage }
+      return { verdict: submission.verdict, nextStage: nextStage(submission.verdict) }
     },
   })
 }
