@@ -1183,7 +1183,7 @@ describe('native explicit-correction analysis child', () => {
     expect(blockedConclude).toHaveBeenCalledOnce()
   })
 
-  it('redelivers one exact durable submission after its main-chat report failed', async () => {
+  it('redelivers a known failed report and adopts the exact accepted DSH report', async () => {
     let setup: ((ctx: unknown) => () => void) | undefined
     let definition: ToolDefinition | undefined
     let current = status({ phase: 'running' })
@@ -1288,9 +1288,36 @@ describe('native explicit-correction analysis child', () => {
     expect(reportFrom).toHaveBeenCalledTimes(2)
     expect(exec.concludeTurn).toHaveBeenCalledOnce()
 
+    // DSH persists a UserMessage directly in user/message.data. This models a
+    // crash after reportFrom synchronously accepted it but before ledger delivery.
+    current = {
+      ...current,
+      reportDelivery: {
+        ...current.reportDelivery!, state: 'pending',
+        intentRecordedAt: '2026-09-02T00:00:02.000Z',
+      },
+    }
+    root.sessionPersistence.inspect.mockResolvedValue({
+      meta: { id: 'main-session', createdAt: 1 },
+      events: [{
+        type: 'user/message',
+        data: {
+          id: 'report-message',
+          source: { kind: 'subagent-report', senderSessionId: childSessionId },
+          content: [{
+            type: 'text',
+            text: `Background subagent ${childSessionId} reported:`,
+          }, {
+            type: 'text',
+            text: 'Tianwen analysis verdict: no-case. Next governed stage: stopped-no-case.',
+          }],
+        },
+      }],
+    })
     await expect(definition!.execute(retrySubmission, exec as never)).resolves
       .toEqual({ verdict: 'no-case', nextStage: 'stopped-no-case' })
     expect(reportFrom).toHaveBeenCalledTimes(2)
+    expect(exec.concludeTurn).toHaveBeenCalledTimes(2)
 
     await expect(definition!.execute({
       ...retrySubmission, hypothesis: 'A changed second submission.',

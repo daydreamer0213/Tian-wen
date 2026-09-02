@@ -56,3 +56,31 @@ pnpm run check:no-private-dsh-imports
 - The duplicate-adoption path performs that same post-acceptance consent check before recording, so revocation while its durable proof is being read also interrupts rather than starts it.
 
 Commits: `4aebc980e586cba2fdeb0fbeecd019a271da49ac` plus pending follow-up
+
+## Repair round 2 follow-ups
+
+- `2b3a001f50216566a35617e8f0a1ceefc4208be9` rechecks current consent/admission after a `DUPLICATE_CHILD` adoption and interrupts instead of recording when it changed.
+- The final report-recovery repair verifies the actual rc.2 persisted UserMessage: `user/message.data` is the direct message, and `reportFrom()` frames content as `Background subagent <childId> reported:` followed by the concise report. It still checks `source.kind`, exact sender, id, and full framed content.
+
+### Final RED/GREEN
+
+With the pre-repair raw-content matcher temporarily restored, the real-shape regression failed as intended:
+
+```text
+expected reportFrom to be called 2 times, but got 3 times
+```
+
+The persisted DSH envelope was therefore not adopted. After restoring the framed `data.content` matcher:
+
+```powershell
+pnpm vitest run tests/dsh-migration/learning-analysis-child.spec.ts
+# 1 file passed, 18 tests passed
+
+pnpm -r --filter @tianwen/evolution --filter @tianwen/runtime-bundle typecheck
+# both packages passed
+
+pnpm run check:no-private-dsh-imports
+# privateImportViolations: []
+```
+
+Final follow-up commit: pending

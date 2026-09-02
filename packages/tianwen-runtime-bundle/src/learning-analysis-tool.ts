@@ -106,6 +106,16 @@ function reportContent(submission: LearningAnalysisSubmission) {
   }]
 }
 
+function deliveredReportContent(
+  status: LearningAnalysisStatus,
+  content: ReturnType<typeof reportContent>,
+) {
+  return [{
+    type: 'text' as const,
+    text: `Background subagent ${status.childSessionId} reported:`,
+  }, ...content]
+}
+
 function reportBinding(
   status: LearningAnalysisStatus,
   content: ReturnType<typeof reportContent>,
@@ -135,12 +145,12 @@ function exactPersistedReport(
     const message = data as {
       readonly id?: unknown
       readonly source?: { readonly kind?: unknown, readonly senderSessionId?: unknown }
-      readonly message?: { readonly content?: unknown }
+      readonly content?: unknown
     }
     if (
       message.source?.kind === 'subagent-report'
       && String(message.source.senderSessionId) === status.childSessionId
-      && sha256(message.message?.content) === sha256(content)
+      && sha256(message.content) === sha256(deliveredReportContent(status, content))
       && typeof message.id === 'string'
       && message.id.length > 0
     ) return message.id
