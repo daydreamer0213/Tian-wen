@@ -180,9 +180,28 @@ export class TianwenLearningIntakeService extends Service {
         `DSH Skill is not model-invocable: ${skillName}`,
       )
     }
+    // A controlled pointer changes only the manifest captured for a new Run;
+    // existing manifests stay immutable in Evolution.
+    const pointer = this.ctx.tianwenEvolution
+      .getControlledSkillScopePointer(input.scopeKey)
+    const candidate = pointer === undefined ? undefined
+      : this.ctx.tianwenEvolution.listSkillCandidates().find(value => {
+        if (value.payload.name !== skill.name) return false
+        return prepareRunSkillManifest({
+          runId: binding.runId,
+          skill: { ...skill, ...value.payload },
+        }).parentVersionId === pointer.activeVersionId
+      })
+    const resolvedSkill = candidate === undefined
+      ? skill
+      : { ...skill, ...candidate.payload }
     let manifest: ReturnType<typeof prepareRunSkillManifest>
     try {
-      manifest = prepareRunSkillManifest({ runId: binding.runId, skill })
+      manifest = prepareRunSkillManifest({ runId: binding.runId, skill: resolvedSkill })
+      if (
+        pointer !== undefined
+        && manifest.parentVersionId !== pointer.activeVersionId
+      ) throw new Error('controlled pointer does not resolve an exact Skill version')
     } catch (cause) {
       throw new RunSkillBindingError(
         'run-binding-precondition-failed',
@@ -207,7 +226,7 @@ export class TianwenLearningIntakeService extends Service {
       )
       receipt = this.ctx.tianwenEvolution.recordRunSkillManifest({
         runId: run.runId,
-        skill,
+        skill: resolvedSkill,
       })
     } catch (cause) {
       throw new RunSkillBindingError(
@@ -472,6 +491,23 @@ export class TianwenLearningIntakeService extends Service {
         ? {}
         : { analysisConsentRevision: feedback.analysisConsentRevision }),
     })
+    if (
+      feedback.rating === 'negative'
+      && feedback.analysisConsentRevision !== undefined
+      && receipt.ticketId !== undefined
+    ) {
+      const analysis = this.ctx.tianwenEvolution.requestLearningAnalysis({
+        ticketId: receipt.ticketId,
+        sessionId: String(session.id),
+        messageId: feedback.messageId,
+        feedbackVersion: feedback.version,
+        consentRevision: feedback.analysisConsentRevision,
+        parentSessionId: String(session.id),
+      })
+      void (this.ctx.get('tianwenLearningLoop') as {
+        schedule(analysisId: string): Promise<void>
+      } | undefined)?.schedule(analysis.analysisId)
+    }
     if (sessionDigest(session.events) !== before) {
       throw new Error('learning intake changed the DSH Session')
     }

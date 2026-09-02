@@ -6,7 +6,6 @@ import type {
 } from './learning-intake.js'
 import { prepareRunBinding } from './outcome-intake.js'
 import type {
-  OutcomeLearningSignal,
   OutcomeVerdict,
   RunAcceptanceContract,
   TianwenRunId,
@@ -587,9 +586,14 @@ function prepareProtocol(value: unknown): ControlledSkillEvalProtocol {
   }
 }
 
+export interface ControlledSkillEvalScopeFact {
+  readonly signalId: string
+  readonly scopeKey: string
+}
+
 function deriveScope(
   ticket: LearningTicket,
-  signals: readonly OutcomeLearningSignal[],
+  signals: readonly ControlledSkillEvalScopeFact[],
 ): string {
   const byId = new Map(signals.map(signal => [signal.signalId, signal]))
   const selected = ticket.signalIds.map(signalId => byId.get(signalId))
@@ -666,7 +670,7 @@ function prepareRecord(
 export function prepareControlledSkillEvalProtocol(
   input: FreezeControlledSkillEvalProtocolInput,
   ticket: LearningTicket,
-  signals: readonly OutcomeLearningSignal[],
+  signals: readonly ControlledSkillEvalScopeFact[],
   provenance: ControlledSkillEvalProtocolProvenance,
 ): ControlledSkillEvalProtocolRecord {
   if (!isRecord(input)) throw new TypeError('controlled evaluation protocol input must be an object')

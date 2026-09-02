@@ -289,6 +289,17 @@ export class TianwenMessageFeedbackBridgeService extends Service {
 
     const statuses = this.ctx.tianwenEvolution
       .listLearningIntakeStatuses(sessionId)
+    // Reconciliation owns only the wake-up.  The loop owns invalidation and
+    // verified rollback, including promoted analyses that the ledger leaves
+    // intact until a controlled rollback can restore their parent pointer.
+    const loop = this.ctx.get('tianwenLearningLoop') as {
+      schedule(analysisId: string): Promise<void>
+    } | undefined
+    if (loop !== undefined) {
+      for (const analysis of this.ctx.tianwenEvolution.listLearningAnalyses()) {
+        if (analysis.sessionId === sessionId) void loop.schedule(analysis.analysisId).catch(() => undefined)
+      }
+    }
     return {
       schemaVersion: 'tianwen.message-feedback-reconciliation.v1',
       sessionId,

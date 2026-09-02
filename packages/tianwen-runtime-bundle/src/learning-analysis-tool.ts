@@ -337,6 +337,13 @@ export function createLearningAnalysisTool(
           evolutionRoot,
         )
       }
+      // Submission and its parent report are durable before advancing the
+      // single analysis lane. The optional lookup keeps the child usable when
+      // this bundle is mounted without the loop service.
+      const loop = (ctx as { get?: (name: string) => unknown }).get?.('tianwenLearningLoop') as {
+        schedule(analysisId: string): Promise<void>
+      } | undefined
+      void loop?.schedule(recorded.analysisId).catch(() => undefined)
       exec.concludeTurn()
       return { verdict: submission.verdict, nextStage: nextStage(submission.verdict) }
     },

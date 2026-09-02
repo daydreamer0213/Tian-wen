@@ -1062,6 +1062,10 @@ function controlledFirstRequestDigest(
         ...message,
         id: `<controlled-evaluation-message:${index}>`,
         ...(entries === undefined ? {} : {
+          // DSH also renders catalog descriptions into this system reminder.
+          // Candidate descriptions are permitted to change, so normalize that
+          // generated prose with the entry metadata rather than comparing it.
+          content: [{ type: 'text' as const, text: '<controlled-skill-catalog>' }],
           source: {
             ...record(message.source),
             entries: entries.map(entry =>
@@ -1203,6 +1207,7 @@ function normalizeRequest(
         ...(entries === undefined
           ? {}
           : {
+              content: [{ type: 'text' as const, text: '<controlled-skill-catalog>' }],
               source: {
                 ...record(message.source),
                 entries: entries.map(entry =>

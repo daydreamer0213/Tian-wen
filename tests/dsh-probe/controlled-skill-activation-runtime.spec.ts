@@ -620,6 +620,53 @@ function structurallyValidInput(root: string) {
 }
 
 describe('controlled Skill activation Runtime', () => {
+  it('keeps current Run manifests frozen while a future Run resolves the promoted pointer', async () => {
+    const previousProbeRoot = process.env.TIANWEN_DSH_PROBE_ROOT
+    process.env.TIANWEN_DSH_PROBE_ROOT = resolve('.dsh-probe')
+    const mounted = await mountActivationRuntime(
+      'future-run-pointer',
+      successfulScript(['promote']),
+    )
+    try {
+      const current = mounted.harness.ctx.tianwenEvolution
+        .listRunSkillManifests()[0]!
+      const promoted = await mounted.harness.ctx.tianwenSkillEvaluation
+        .runControlledSkillTransition(mounted.input('promote', 1))
+      expect(promoted.state).toBe('terminal')
+      expect(mounted.harness.ctx.tianwenEvolution.getControlledSkillScopePointer(
+        mounted.seeded.shadow.scopeKey,
+      )?.activeVersionId).toBe(mounted.seeded.shadow.candidateVersionId)
+
+      const session = {
+        id: 'session:controlled-activation-runtime:future',
+        header: { createdAt: 1 },
+        events: [],
+      }
+      const receipt = await mounted.harness.ctx.tianwenLearningIntake.bindRunWithSkill(
+        { session } as never,
+        {
+          goalRef: 'goal:controlled-activation-runtime:future',
+          taskRef: 'task:controlled-activation-runtime:future',
+          scopeKey: mounted.seeded.shadow.scopeKey,
+          acceptanceContract: acceptance,
+        },
+        parentSkill.name,
+        { get: async () => parentSkill } as never,
+      )
+
+      expect(mounted.harness.ctx.tianwenEvolution.getRunSkillManifest(
+        current.runId,
+      )?.parentVersionId).toBe(current.parentVersionId)
+      expect(receipt.parentVersionId).toBe(mounted.seeded.shadow.candidateVersionId)
+    } finally {
+      mounted.disposeParent()
+      mounted.disposeVerifier()
+      await mounted.harness.ctx.fiber.dispose()
+      if (previousProbeRoot === undefined) delete process.env.TIANWEN_DSH_PROBE_ROOT
+      else process.env.TIANWEN_DSH_PROBE_ROOT = previousProbeRoot
+    }
+  })
+
   it('rejects an invalid transition package through the governed Runtime entry', async () => {
     const root = resolve(
       process.env.TIANWEN_DSH_PROBE_ROOT ?? '.dsh-probe',

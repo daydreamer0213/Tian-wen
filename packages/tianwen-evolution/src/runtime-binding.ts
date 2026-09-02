@@ -293,6 +293,26 @@ export class TianwenEvolutionService extends Service {
       this.state().ledger.recordLearningAnalysisSubmission(input))
   }
 
+  recordLearningAnalysisFailed(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly resumePhase: import('./learning-analysis.js').LearningAnalysisRetryPhase
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() => this.state().ledger.recordLearningAnalysisFailed(input))
+  }
+
+  recordLearningAnalysisResumed(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly resumePhase: import('./learning-analysis.js').LearningAnalysisRetryPhase
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() => this.state().ledger.recordLearningAnalysisResumed(input))
+  }
+
+  recordLearningAnalysisInvalidated(input: {
+    readonly analysisId: LearningAnalysisId
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() => this.state().ledger.recordLearningAnalysisInvalidated(input))
+  }
+
   recordLearningAnalysisReportIntent(
     input: LearningAnalysisReportBinding,
   ): LearningAnalysisReceipt {
@@ -307,10 +327,24 @@ export class TianwenEvolutionService extends Service {
       this.state().ledger.recordLearningAnalysisReportDelivered(input))
   }
 
+  recordLearningAnalysisTerminalReportIntent(input: LearningAnalysisReportBinding): LearningAnalysisReceipt {
+    return this.formalWrite(() => this.state().ledger.recordLearningAnalysisTerminalReportIntent(input))
+  }
+
+  recordLearningAnalysisTerminalReportDelivered(input: LearningAnalysisReportBinding & {
+    readonly reportMessageId: string
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() => this.state().ledger.recordLearningAnalysisTerminalReportDelivered(input))
+  }
+
   getLearningAnalysis(
     analysisId: LearningAnalysisId,
   ): LearningAnalysisStatus | undefined {
     return this.state().ledger.getLearningAnalysis(analysisId)
+  }
+
+  hasLearningAnalysisActiveSupport(analysisId: LearningAnalysisId): boolean {
+    return this.state().ledger.hasLearningAnalysisActiveSupport(analysisId)
   }
 
   getLearningAnalysisByChildSessionId(
@@ -711,6 +745,40 @@ export class TianwenEvolutionService extends Service {
   ): LearningAnalysisReceipt {
     return this.formalWrite(() =>
       this.state().ledger.recordLearningAnalysisProtocolUnavailable(analysisId))
+  }
+
+  recordLearningAnalysisCandidateRejected(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly evaluationId: ControlledSkillEvaluationId
+    readonly shadowId?: ControlledSkillShadowId
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisCandidateRejected(input))
+  }
+
+  recordLearningAnalysisShadowReady(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly evaluationId: ControlledSkillEvaluationId
+    readonly shadowId: ControlledSkillShadowId
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisShadowReady(input))
+  }
+
+  recordLearningAnalysisPromoted(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly transitionId: ControlledSkillTransitionId
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisPromoted(input))
+  }
+
+  recordLearningAnalysisRolledBack(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly transitionId: ControlledSkillTransitionId
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisRolledBack(input))
   }
 
   getSkillCandidate(

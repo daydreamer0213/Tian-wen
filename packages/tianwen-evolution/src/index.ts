@@ -95,11 +95,18 @@ export {
 } from './learning-analysis.js'
 export type {
   LearningAnalysisBinding,
+  LearningAnalysisFailedEvent,
+  LearningAnalysisGovernedOutcome,
+  LearningAnalysisGovernedOutcomeRecordedEvent,
   LearningAnalysisId,
   LearningAnalysisPhase,
   LearningAnalysisReceipt,
+  LearningAnalysisResumedEvent,
+  LearningAnalysisRetryPhase,
   LearningAnalysisReportBinding,
   LearningAnalysisReportDelivery,
+  LearningAnalysisTerminalReportDeliveredEvent,
+  LearningAnalysisTerminalReportIntentRecordedEvent,
   LearningAnalysisStatus,
   LearningAnalysisSubmission,
   RequestLearningAnalysisInput,

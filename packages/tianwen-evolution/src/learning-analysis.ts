@@ -4,6 +4,11 @@ import { sha256 } from './learning-intake.js'
 import type { LearningTicketId } from './learning-intake.js'
 import type { Sha256Digest } from './ledger.js'
 import type { GovernedSkillCandidateId } from './skill-governance.js'
+import type {
+  ControlledSkillEvaluationId,
+} from './controlled-skill-evaluation.js'
+import type { ControlledSkillShadowId } from './controlled-skill-shadow.js'
+import type { ControlledSkillTransitionId } from './controlled-skill-activation.js'
 
 export type LearningAnalysisId = `analysis:${string}`
 
@@ -20,6 +25,13 @@ export type LearningAnalysisPhase =
   | 'rolled-back'
   | 'invalidated'
   | 'failed'
+
+/** The last durable phase to resume after an infrastructure-only failure. */
+export type LearningAnalysisRetryPhase = Exclude<
+  LearningAnalysisPhase,
+  'failed' | 'invalidated' | 'no-case' | 'insufficient-evidence'
+    | 'protocol-unavailable' | 'candidate-rejected' | 'rolled-back'
+>
 
 export interface LearningAnalysisBinding {
   readonly analysisId: LearningAnalysisId
@@ -77,7 +89,21 @@ export interface LearningAnalysisStatus extends LearningAnalysisBinding {
   readonly submissionDigest?: Sha256Digest
   readonly submission?: LearningAnalysisSubmission
   readonly candidateId?: GovernedSkillCandidateId
+  readonly evaluationId?: ControlledSkillEvaluationId
+  readonly evaluationResultDigest?: Sha256Digest
+  readonly shadowId?: ControlledSkillShadowId
+  readonly shadowResultDigest?: Sha256Digest
+  readonly promotionRecommendationDigest?: Sha256Digest
+  readonly promotionTransitionId?: ControlledSkillTransitionId
+  readonly promotionTransitionReceiptDigest?: Sha256Digest
+  readonly rollbackTransitionId?: ControlledSkillTransitionId
+  readonly rollbackTransitionReceiptDigest?: Sha256Digest
+  readonly resumePhase?: LearningAnalysisRetryPhase
+  readonly resumedAt?: string
+  /** Preliminary child verdict; retained for Task 2 compatibility. */
   readonly reportDelivery?: LearningAnalysisReportDelivery
+  /** Final governed outcome, independently durable and exactly-once. */
+  readonly terminalReportDelivery?: LearningAnalysisReportDelivery
 }
 
 export type LearningAnalysisReceipt = LearningAnalysisStatus & {
@@ -133,6 +159,54 @@ export interface LearningAnalysisProtocolUnavailableEvent {
   readonly analysisId: LearningAnalysisId
 }
 
+export type LearningAnalysisGovernedOutcome =
+  | {
+      readonly phase: 'candidate-rejected'
+      readonly candidateId: GovernedSkillCandidateId
+      readonly evaluationId: ControlledSkillEvaluationId
+      readonly evaluationResultDigest: Sha256Digest
+      readonly shadowId?: ControlledSkillShadowId
+      readonly shadowResultDigest?: Sha256Digest
+    }
+  | {
+      readonly phase: 'shadow-ready'
+      readonly candidateId: GovernedSkillCandidateId
+      readonly evaluationId: ControlledSkillEvaluationId
+      readonly evaluationResultDigest: Sha256Digest
+      readonly shadowId: ControlledSkillShadowId
+      readonly shadowResultDigest: Sha256Digest
+      readonly promotionRecommendationDigest: Sha256Digest
+    }
+  | {
+      readonly phase: 'promoted' | 'rolled-back'
+      readonly transitionId: ControlledSkillTransitionId
+      readonly transitionReceiptDigest: Sha256Digest
+    }
+
+export interface LearningAnalysisGovernedOutcomeRecordedEvent {
+  readonly schemaVersion: 'tianwen.learning-analysis-governed-outcome.v1'
+  readonly type: 'learning-analysis-governed-outcome-recorded'
+  readonly at: string
+  readonly analysisId: LearningAnalysisId
+  readonly outcome: LearningAnalysisGovernedOutcome
+}
+
+export interface LearningAnalysisFailedEvent {
+  readonly schemaVersion: 'tianwen.learning-analysis-failed.v1'
+  readonly type: 'learning-analysis-failed'
+  readonly at: string
+  readonly analysisId: LearningAnalysisId
+  readonly resumePhase: LearningAnalysisRetryPhase
+}
+
+export interface LearningAnalysisResumedEvent {
+  readonly schemaVersion: 'tianwen.learning-analysis-resumed.v1'
+  readonly type: 'learning-analysis-resumed'
+  readonly at: string
+  readonly analysisId: LearningAnalysisId
+  readonly resumePhase: LearningAnalysisRetryPhase
+}
+
 export interface LearningAnalysisReportBinding {
   readonly analysisId: LearningAnalysisId
   readonly parentSessionId: string
@@ -164,6 +238,20 @@ export interface LearningAnalysisReportDeliveredEvent {
   readonly report: LearningAnalysisReportBinding & { readonly reportMessageId: string }
 }
 
+export interface LearningAnalysisTerminalReportIntentRecordedEvent {
+  readonly schemaVersion: 'tianwen.learning-analysis-terminal-report-intent.v1'
+  readonly type: 'learning-analysis-terminal-report-intent-recorded'
+  readonly at: string
+  readonly report: LearningAnalysisReportBinding
+}
+
+export interface LearningAnalysisTerminalReportDeliveredEvent {
+  readonly schemaVersion: 'tianwen.learning-analysis-terminal-report-delivered.v1'
+  readonly type: 'learning-analysis-terminal-report-delivered'
+  readonly at: string
+  readonly report: LearningAnalysisReportBinding & { readonly reportMessageId: string }
+}
+
 export type LearningAnalysisLedgerEvent =
   | LearningAnalysisRequestedEvent
   | LearningAnalysisChildStartedEvent
@@ -171,8 +259,13 @@ export type LearningAnalysisLedgerEvent =
   | LearningAnalysisInvalidatedEvent
   | LearningAnalysisCandidateReadyEvent
   | LearningAnalysisProtocolUnavailableEvent
+  | LearningAnalysisGovernedOutcomeRecordedEvent
+  | LearningAnalysisFailedEvent
+  | LearningAnalysisResumedEvent
   | LearningAnalysisReportIntentRecordedEvent
   | LearningAnalysisReportDeliveredEvent
+  | LearningAnalysisTerminalReportIntentRecordedEvent
+  | LearningAnalysisTerminalReportDeliveredEvent
 
 const ANALYSIS_ID = /^analysis:[a-f0-9]{64}$/
 const TICKET_ID = /^ticket:[a-f0-9]{64}$/

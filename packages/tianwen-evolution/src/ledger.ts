@@ -54,6 +54,9 @@ import {
 import type {
   LearningAnalysisChildStartedEvent,
   LearningAnalysisCandidateReadyEvent,
+  LearningAnalysisGovernedOutcome,
+  LearningAnalysisGovernedOutcomeRecordedEvent,
+  LearningAnalysisFailedEvent,
   LearningAnalysisId,
   LearningAnalysisInvalidatedEvent,
   LearningAnalysisLedgerEvent,
@@ -61,7 +64,11 @@ import type {
   LearningAnalysisReportBinding,
   LearningAnalysisReportDeliveredEvent,
   LearningAnalysisReportIntentRecordedEvent,
+  LearningAnalysisTerminalReportDeliveredEvent,
+  LearningAnalysisTerminalReportIntentRecordedEvent,
   LearningAnalysisReceipt,
+  LearningAnalysisResumedEvent,
+  LearningAnalysisRetryPhase,
   LearningAnalysisRequestedEvent,
   LearningAnalysisStatus,
   LearningAnalysisSubmittedEvent,
@@ -474,6 +481,9 @@ const ARTIFACT_ID = /^artifact:[a-f0-9]{64}$/
 const LEARNING_SIGNAL_ID = /^signal:[a-f0-9]{64}$/
 const LEARNING_TICKET_ID = /^ticket:[a-f0-9]{64}$/
 const GOVERNED_SKILL_CANDIDATE_ID = /^candidate:[a-f0-9]{64}$/
+const CONTROLLED_SKILL_EVALUATION_ID = /^evaluation:[a-f0-9]{64}$/
+const CONTROLLED_SKILL_SHADOW_ID = /^shadow:[a-f0-9]{64}$/
+const CONTROLLED_SKILL_TRANSITION_ID = /^transition:[a-f0-9]{64}$/
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/
 const UTF8 = new TextDecoder('utf-8', { fatal: true })
 
@@ -541,6 +551,30 @@ function requireGovernedSkillCandidateId(value: unknown): GovernedSkillCandidate
     throw new LedgerIntegrityError(`invalid GovernedSkillCandidateId: ${id}`)
   }
   return id as GovernedSkillCandidateId
+}
+
+function requireControlledSkillEvaluationId(value: unknown): ControlledSkillEvaluationId {
+  const id = requireString(value, 'evaluationId')
+  if (!CONTROLLED_SKILL_EVALUATION_ID.test(id)) {
+    throw new LedgerIntegrityError(`invalid ControlledSkillEvaluationId: ${id}`)
+  }
+  return id as ControlledSkillEvaluationId
+}
+
+function requireControlledSkillShadowId(value: unknown): ControlledSkillShadowId {
+  const id = requireString(value, 'shadowId')
+  if (!CONTROLLED_SKILL_SHADOW_ID.test(id)) {
+    throw new LedgerIntegrityError(`invalid ControlledSkillShadowId: ${id}`)
+  }
+  return id as ControlledSkillShadowId
+}
+
+function requireControlledSkillTransitionId(value: unknown): ControlledSkillTransitionId {
+  const id = requireString(value, 'transitionId')
+  if (!CONTROLLED_SKILL_TRANSITION_ID.test(id)) {
+    throw new LedgerIntegrityError(`invalid ControlledSkillTransitionId: ${id}`)
+  }
+  return id as ControlledSkillTransitionId
 }
 
 function requireTimestamp(value: unknown): string {
@@ -1083,6 +1117,114 @@ function parseLearningAnalysisProtocolUnavailableEvent(
   }
 }
 
+function parseLearningAnalysisGovernedOutcomeEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningAnalysisGovernedOutcomeRecordedEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'analysisId', 'outcome'])
+  if (
+    value.schemaVersion !== 'tianwen.learning-analysis-governed-outcome.v1'
+    || !isRecord(value.outcome)
+  ) throw new LedgerIntegrityError('invalid learning analysis governed outcome schema')
+  const outcome = value.outcome
+  let parsed: LearningAnalysisGovernedOutcome
+  if (outcome.phase === 'candidate-rejected') {
+    exactKeys(outcome, [
+      'phase', 'candidateId', 'evaluationId', 'evaluationResultDigest',
+    ], ['shadowId', 'shadowResultDigest'])
+    if ((outcome.shadowId === undefined) !== (outcome.shadowResultDigest === undefined)) {
+      throw new LedgerIntegrityError('invalid learning analysis rejected outcome')
+    }
+    parsed = {
+      phase: outcome.phase,
+      candidateId: requireGovernedSkillCandidateId(outcome.candidateId),
+      evaluationId: requireControlledSkillEvaluationId(outcome.evaluationId),
+      evaluationResultDigest: requireDigest(outcome.evaluationResultDigest),
+      ...(outcome.shadowId === undefined ? {} : {
+        shadowId: requireControlledSkillShadowId(outcome.shadowId),
+        shadowResultDigest: requireDigest(outcome.shadowResultDigest),
+      }),
+    }
+  } else if (outcome.phase === 'shadow-ready') {
+    exactKeys(outcome, [
+      'phase', 'candidateId', 'evaluationId', 'evaluationResultDigest',
+      'shadowId', 'shadowResultDigest', 'promotionRecommendationDigest',
+    ])
+    parsed = {
+      phase: outcome.phase,
+      candidateId: requireGovernedSkillCandidateId(outcome.candidateId),
+      evaluationId: requireControlledSkillEvaluationId(outcome.evaluationId),
+      evaluationResultDigest: requireDigest(outcome.evaluationResultDigest),
+      shadowId: requireControlledSkillShadowId(outcome.shadowId),
+      shadowResultDigest: requireDigest(outcome.shadowResultDigest),
+      promotionRecommendationDigest: requireDigest(outcome.promotionRecommendationDigest),
+    }
+  } else if (outcome.phase === 'promoted' || outcome.phase === 'rolled-back') {
+    exactKeys(outcome, ['phase', 'transitionId', 'transitionReceiptDigest'])
+    parsed = {
+      phase: outcome.phase,
+      transitionId: requireControlledSkillTransitionId(outcome.transitionId),
+      transitionReceiptDigest: requireDigest(outcome.transitionReceiptDigest),
+    }
+  } else {
+    throw new LedgerIntegrityError('invalid learning analysis governed outcome phase')
+  }
+  return {
+    schemaVersion: 'tianwen.learning-analysis-governed-outcome.v1',
+    type: 'learning-analysis-governed-outcome-recorded',
+    at,
+    analysisId: learningAnalysisId(value.analysisId),
+    outcome: parsed,
+  }
+}
+
+function parseLearningAnalysisFailedEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningAnalysisFailedEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'analysisId', 'resumePhase'])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-failed.v1') {
+    throw new LedgerIntegrityError('invalid learning analysis failed schema')
+  }
+  if (
+    value.resumePhase !== 'pending-parent'
+    && value.resumePhase !== 'running'
+    && value.resumePhase !== 'candidate-ready'
+    && value.resumePhase !== 'shadow-ready'
+    && value.resumePhase !== 'promoted'
+  ) throw new LedgerIntegrityError('invalid learning analysis retry phase')
+  return {
+    schemaVersion: 'tianwen.learning-analysis-failed.v1',
+    type: 'learning-analysis-failed',
+    at,
+    analysisId: learningAnalysisId(value.analysisId),
+    resumePhase: value.resumePhase,
+  }
+}
+
+function parseLearningAnalysisResumedEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningAnalysisResumedEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'analysisId', 'resumePhase'])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-resumed.v1') {
+    throw new LedgerIntegrityError('invalid learning analysis resumed schema')
+  }
+  if (
+    value.resumePhase !== 'pending-parent'
+    && value.resumePhase !== 'running'
+    && value.resumePhase !== 'candidate-ready'
+    && value.resumePhase !== 'shadow-ready'
+  ) throw new LedgerIntegrityError('invalid learning analysis retry phase')
+  return {
+    schemaVersion: 'tianwen.learning-analysis-resumed.v1',
+    type: 'learning-analysis-resumed',
+    at,
+    analysisId: learningAnalysisId(value.analysisId),
+    resumePhase: value.resumePhase,
+  }
+}
+
 function parseLearningAnalysisReport(
   value: unknown,
   delivered: boolean,
@@ -1139,6 +1281,20 @@ function parseLearningAnalysisReportDeliveredEvent(
     type: 'learning-analysis-report-delivered', at,
     report: { ...report, reportMessageId: report.reportMessageId },
   }
+}
+
+function parseLearningAnalysisTerminalReportIntentEvent(value: Record<string, unknown>, at: string): LearningAnalysisTerminalReportIntentRecordedEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'report'])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-terminal-report-intent.v1') throw new LedgerIntegrityError('invalid terminal report intent schema')
+  return { schemaVersion: 'tianwen.learning-analysis-terminal-report-intent.v1', type: 'learning-analysis-terminal-report-intent-recorded', at, report: parseLearningAnalysisReport(value.report, false) }
+}
+
+function parseLearningAnalysisTerminalReportDeliveredEvent(value: Record<string, unknown>, at: string): LearningAnalysisTerminalReportDeliveredEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'report'])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-terminal-report-delivered.v1') throw new LedgerIntegrityError('invalid terminal report delivery schema')
+  const report = parseLearningAnalysisReport(value.report, true)
+  if (report.reportMessageId === undefined) throw new LedgerIntegrityError('terminal report message is missing')
+  return { schemaVersion: 'tianwen.learning-analysis-terminal-report-delivered.v1', type: 'learning-analysis-terminal-report-delivered', at, report: { ...report, reportMessageId: report.reportMessageId } }
 }
 
 function parseLearningAnalysisConsent(
@@ -1422,12 +1578,23 @@ function parseEvent(value: unknown): LedgerEvent {
   if (type === 'learning-analysis-protocol-unavailable') {
     return parseLearningAnalysisProtocolUnavailableEvent(value, at)
   }
+  if (type === 'learning-analysis-governed-outcome-recorded') {
+    return parseLearningAnalysisGovernedOutcomeEvent(value, at)
+  }
+  if (type === 'learning-analysis-failed') {
+    return parseLearningAnalysisFailedEvent(value, at)
+  }
+  if (type === 'learning-analysis-resumed') {
+    return parseLearningAnalysisResumedEvent(value, at)
+  }
   if (type === 'learning-analysis-report-intent-recorded') {
     return parseLearningAnalysisReportIntentEvent(value, at)
   }
   if (type === 'learning-analysis-report-delivered') {
     return parseLearningAnalysisReportDeliveredEvent(value, at)
   }
+  if (type === 'learning-analysis-terminal-report-intent-recorded') return parseLearningAnalysisTerminalReportIntentEvent(value, at)
+  if (type === 'learning-analysis-terminal-report-delivered') return parseLearningAnalysisTerminalReportDeliveredEvent(value, at)
   if (type === 'learning-analysis-consent-recorded') {
     return parseLearningAnalysisConsentEvent(value, at)
   }
@@ -2566,9 +2733,10 @@ export class EvolutionLedger {
     if (ticket === undefined) {
       throw new LedgerIntegrityError(`unknown LearningTicket: ${input.ticketId}`)
     }
-    const signals = ticket.signalIds.map(id => this.#learningSignals.get(id))
-      .filter((signal): signal is OutcomeLearningSignal =>
-        signal !== undefined && isOutcomeSignal(signal))
+    // A scope fact is admitted only from an Outcome signal, or from the exact
+    // still-active explicit correction that owns this Ticket. Unknown/mixed or
+    // retracted history intentionally leaves a ticket signal unresolved.
+    const signals = this.#controlledSkillEvalScopeFacts(ticket)
     const provenance = this.#caseIdByTicket.has(ticket.ticketId)
       || (this.#controlledSkillEvalProtocolIdsByTicket.get(ticket.ticketId)?.length ?? 0) > 0
       ? 'retrospective'
@@ -4201,6 +4369,193 @@ export class EvolutionLedger {
     return { ...clone(this.#learningAnalyses.get(analysisId)!), duplicate: false }
   }
 
+  recordLearningAnalysisCandidateRejected(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly evaluationId: ControlledSkillEvaluationId
+    readonly shadowId?: ControlledSkillShadowId
+  }): LearningAnalysisReceipt {
+    const status = this.#learningAnalyses.get(input.analysisId)
+    if (status?.phase === 'candidate-rejected') {
+      if (
+        status.evaluationId !== input.evaluationId
+        || status.shadowId !== input.shadowId
+      ) throw new LedgerIntegrityError('learning analysis rejection binding changed')
+      return { ...clone(status), duplicate: true }
+    }
+    const evaluation = this.#controlledSkillEvaluationPlans.get(input.evaluationId)
+    const evaluationResult = this.#controlledSkillEvaluationResults.get(input.evaluationId)
+    const shadow = input.shadowId === undefined
+      ? undefined
+      : this.#controlledSkillShadowPlans.get(input.shadowId)
+    const shadowResult = input.shadowId === undefined
+      ? undefined
+      : this.#controlledSkillShadowResults.get(input.shadowId)
+    if (
+      status?.phase !== 'candidate-ready'
+      || status.candidateId === undefined
+      || evaluation?.candidateId !== status.candidateId
+      || evaluationResult?.evaluationId !== evaluation.evaluationId
+      || (input.shadowId === undefined
+        ? evaluationResult.mechanismVerdict === 'pass'
+          && evaluationResult.shadowEligibility !== 'ineligible'
+        : shadow?.candidateId !== status.candidateId
+          || shadow.evaluationId !== evaluation.evaluationId
+          || shadowResult?.shadowId !== shadow.shadowId
+          || shadowResult.promotionEligibility !== 'ineligible')
+    ) throw new LedgerIntegrityError('learning analysis rejection lacks an exact failed governed result')
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-governed-outcome.v1',
+      type: 'learning-analysis-governed-outcome-recorded',
+      at: this.#now(),
+      analysisId: status.analysisId,
+      outcome: {
+        phase: 'candidate-rejected',
+        candidateId: status.candidateId,
+        evaluationId: evaluation.evaluationId,
+        evaluationResultDigest: sha256(evaluationResult),
+        ...(shadow === undefined || shadowResult === undefined ? {} : {
+          shadowId: shadow.shadowId,
+          shadowResultDigest: sha256(shadowResult),
+        }),
+      },
+    })
+    return { ...clone(this.#learningAnalyses.get(status.analysisId)!), duplicate: false }
+  }
+
+  recordLearningAnalysisShadowReady(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly evaluationId: ControlledSkillEvaluationId
+    readonly shadowId: ControlledSkillShadowId
+  }): LearningAnalysisReceipt {
+    const status = this.#learningAnalyses.get(input.analysisId)
+    if (status?.phase === 'shadow-ready') {
+      if (
+        status.evaluationId !== input.evaluationId
+        || status.shadowId !== input.shadowId
+      ) throw new LedgerIntegrityError('learning analysis Shadow-ready binding changed')
+      return { ...clone(status), duplicate: true }
+    }
+    const evaluation = this.#controlledSkillEvaluationPlans.get(input.evaluationId)
+    const evaluationResult = this.#controlledSkillEvaluationResults.get(input.evaluationId)
+    const shadow = this.#controlledSkillShadowPlans.get(input.shadowId)
+    const shadowResult = this.#controlledSkillShadowResults.get(input.shadowId)
+    if (
+      status?.phase !== 'candidate-ready'
+      || status.candidateId === undefined
+      || evaluation?.candidateId !== status.candidateId
+      || evaluationResult?.evaluationId !== evaluation.evaluationId
+      || evaluationResult.mechanismVerdict !== 'pass'
+      || evaluationResult.shadowEligibility === 'ineligible'
+      || shadow?.candidateId !== status.candidateId
+      || shadow.evaluationId !== evaluation.evaluationId
+      || shadowResult?.shadowId !== shadow.shadowId
+      || shadowResult.mechanismVerdict !== 'pass'
+      || shadowResult.promotionEligibility === 'ineligible'
+    ) throw new LedgerIntegrityError('learning analysis Shadow-ready lacks exact passing governed results')
+    const recommendation = this.#controlledSkillPromotionRecommendation(shadow.shadowId)
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-governed-outcome.v1',
+      type: 'learning-analysis-governed-outcome-recorded',
+      at: this.#now(),
+      analysisId: status.analysisId,
+      outcome: {
+        phase: 'shadow-ready',
+        candidateId: status.candidateId,
+        evaluationId: evaluation.evaluationId,
+        evaluationResultDigest: sha256(evaluationResult),
+        shadowId: shadow.shadowId,
+        shadowResultDigest: sha256(shadowResult),
+        promotionRecommendationDigest: sha256(recommendation),
+      },
+    })
+    return { ...clone(this.#learningAnalyses.get(status.analysisId)!), duplicate: false }
+  }
+
+  recordLearningAnalysisPromoted(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly transitionId: ControlledSkillTransitionId
+  }): LearningAnalysisReceipt {
+    return this.#recordLearningAnalysisTransitionOutcome(input, 'promote')
+  }
+
+  recordLearningAnalysisRolledBack(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly transitionId: ControlledSkillTransitionId
+  }): LearningAnalysisReceipt {
+    return this.#recordLearningAnalysisTransitionOutcome(input, 'rollback')
+  }
+
+  /** Records withdrawal explicitly when a live lane observes it between writes. */
+  recordLearningAnalysisInvalidated(input: {
+    readonly analysisId: LearningAnalysisId
+  }): LearningAnalysisReceipt {
+    const status = this.#learningAnalyses.get(input.analysisId)
+    if (status === undefined) throw new LedgerIntegrityError(`unknown learning analysis: ${input.analysisId}`)
+    if (status.phase === 'invalidated') return { ...clone(status), duplicate: true }
+    if (status.phase === 'promoted' || status.phase === 'rolled-back') {
+      throw new LedgerIntegrityError('a promoted analysis must use verified rollback, not invalidation')
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-invalidation.v1',
+      type: 'learning-analysis-invalidated',
+      at: this.#now(),
+      analysisId: status.analysisId,
+      reason: 'support-withdrawn',
+    })
+    return { ...clone(this.#learningAnalyses.get(status.analysisId)!), duplicate: false }
+  }
+
+  recordLearningAnalysisFailed(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly resumePhase: LearningAnalysisRetryPhase
+  }): LearningAnalysisReceipt {
+    const status = this.#learningAnalyses.get(input.analysisId)
+    if (status === undefined) throw new LedgerIntegrityError(`unknown learning analysis: ${input.analysisId}`)
+    if (status.phase === 'failed') {
+      if (status.resumePhase !== input.resumePhase) {
+        throw new LedgerIntegrityError('learning analysis retry phase changed')
+      }
+      return { ...clone(status), duplicate: true }
+    }
+    if (status.phase !== input.resumePhase) {
+      throw new LedgerIntegrityError('learning analysis failure does not name its current durable phase')
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-failed.v1',
+      type: 'learning-analysis-failed',
+      at: this.#now(),
+      analysisId: status.analysisId,
+      resumePhase: input.resumePhase,
+    })
+    return { ...clone(this.#learningAnalyses.get(status.analysisId)!), duplicate: false }
+  }
+
+  recordLearningAnalysisResumed(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly resumePhase: LearningAnalysisRetryPhase
+  }): LearningAnalysisReceipt {
+    const status = this.#learningAnalyses.get(input.analysisId)
+    if (status === undefined) {
+      throw new LedgerIntegrityError(`unknown learning analysis: ${input.analysisId}`)
+    }
+    if (
+      status.phase === input.resumePhase
+      && status.resumePhase === undefined
+      && status.resumedAt !== undefined
+    ) return { ...clone(status), duplicate: true }
+    if (status.phase !== 'failed' || status.resumePhase !== input.resumePhase) {
+      throw new LedgerIntegrityError('learning analysis resume changed its retry phase')
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-resumed.v1',
+      type: 'learning-analysis-resumed',
+      at: this.#now(),
+      analysisId: status.analysisId,
+      resumePhase: input.resumePhase,
+    })
+    return { ...clone(this.#learningAnalyses.get(status.analysisId)!), duplicate: false }
+  }
+
   recordLearningAnalysisReportIntent(input: LearningAnalysisReportBinding): LearningAnalysisReceipt {
     const report = parseLearningAnalysisReport(input, false)
     const status = this.#learningAnalyses.get(report.analysisId)
@@ -4259,6 +4614,11 @@ export class EvolutionLedger {
     return status === undefined ? undefined : clone(status)
   }
 
+  hasLearningAnalysisActiveSupport(analysisId: LearningAnalysisId): boolean {
+    const status = this.#learningAnalyses.get(analysisId)
+    return status !== undefined && this.#learningAnalysisHasActiveSupport(status)
+  }
+
   getLearningAnalysisByChildSessionId(
     childSessionId: string,
   ): LearningAnalysisStatus | undefined {
@@ -4293,6 +4653,7 @@ export class EvolutionLedger {
       at: recordedAt,
       consent,
     })
+    this.#invalidateUnsupportedLearningAnalyses()
     return { ...consent, duplicate: false }
   }
 
@@ -4810,6 +5171,30 @@ export class EvolutionLedger {
     }) === true
   }
 
+  #controlledSkillEvalScopeFacts(ticket: LearningTicket): readonly {
+    readonly signalId: string
+    readonly scopeKey: string
+  }[] {
+    return ticket.signalIds.flatMap(signalId => {
+      const signal = this.#learningSignals.get(signalId)
+      if (signal === undefined) return []
+      if (isOutcomeSignal(signal)) return [{ signalId: signal.signalId, scopeKey: signal.scopeKey }]
+      const intake = this.#learningIntakeStatuses.get(signal.sessionId)
+        ?.get(signal.messageId)
+      if (
+        this.#inactiveLearningSignals.has(signal.signalId)
+        || intake?.state !== 'active'
+        || intake.ticketId !== ticket.ticketId
+        || intake.feedbackVersion !== signal.feedbackVersion
+        || intake.scopeKey !== signal.scopeKey
+        || intake.analysisConsentRevision === undefined
+        || this.#learningAnalysisConsents.get(intake.analysisConsentRevision)?.enabled !== true
+        || this.#learningAnalysisConsent?.enabled !== true
+      ) return []
+      return [{ signalId: signal.signalId, scopeKey: signal.scopeKey }]
+    })
+  }
+
   #hasExactExplicitCorrectionParent(status: LearningAnalysisStatus): boolean {
     const runId = this.#runIdBySession.get(status.sessionId)
     const binding = runId === undefined ? undefined : this.#runBindings.get(runId)
@@ -4842,9 +5227,7 @@ export class EvolutionLedger {
     status: LearningAnalysisStatus,
     timestamp: string,
   ): void {
-    const latest = status.submittedAt
-      ?? status.childStartedAt
-      ?? status.requestedAt
+    const latest = status.updatedAt
     if (Date.parse(timestamp) < Date.parse(latest)) {
       throw new LedgerIntegrityError(
         'learning analysis lifecycle timestamp goes backwards',
@@ -4852,10 +5235,138 @@ export class EvolutionLedger {
     }
   }
 
+  #recordLearningAnalysisTransitionOutcome(
+    input: {
+      readonly analysisId: LearningAnalysisId
+      readonly transitionId: ControlledSkillTransitionId
+    },
+    kind: 'promote' | 'rollback',
+  ): LearningAnalysisReceipt {
+    const status = this.#learningAnalyses.get(input.analysisId)
+    const finalPhase = kind === 'promote' ? 'promoted' : 'rolled-back'
+    const existingId = kind === 'promote'
+      ? status?.promotionTransitionId
+      : status?.rollbackTransitionId
+    if (status?.phase === finalPhase) {
+      if (existingId !== input.transitionId) {
+        throw new LedgerIntegrityError(`learning analysis ${finalPhase} binding changed`)
+      }
+      return { ...clone(status), duplicate: true }
+    }
+    const transition = this.#controlledSkillTransitions.get(input.transitionId)
+    const receipt = this.getControlledSkillTransitionReceipt(input.transitionId)
+    if (
+      status === undefined
+      || status.shadowId === undefined
+      || status.phase !== (kind === 'promote' ? 'shadow-ready' : 'promoted')
+      || transition?.shadowId !== status.shadowId
+      || transition.kind !== kind
+      || receipt?.state !== 'verified'
+    ) throw new LedgerIntegrityError(`learning analysis ${finalPhase} lacks an exact verified transition`)
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-governed-outcome.v1',
+      type: 'learning-analysis-governed-outcome-recorded',
+      at: this.#now(),
+      analysisId: status.analysisId,
+      outcome: {
+        phase: finalPhase,
+        transitionId: transition.transitionId,
+        transitionReceiptDigest: sha256(receipt),
+      },
+    })
+    return { ...clone(this.#learningAnalyses.get(status.analysisId)!), duplicate: false }
+  }
+
+  recordLearningAnalysisTerminalReportIntent(input: LearningAnalysisReportBinding): LearningAnalysisReceipt {
+    const report = parseLearningAnalysisReport(input, false)
+    const status = this.#learningAnalyses.get(report.analysisId)
+    if (status === undefined || status.submission === undefined
+      || status.parentSessionId !== report.parentSessionId || status.childSessionId !== report.childSessionId) {
+      throw new LedgerIntegrityError('learning analysis terminal report intent disagrees with analysis')
+    }
+    const existing = status.terminalReportDelivery
+    if (existing !== undefined) {
+      if (!sameLearningAnalysisReportBinding(existing, report)) throw new LedgerIntegrityError('learning analysis terminal report intent changed')
+      return { ...clone(status), duplicate: true }
+    }
+    this.#accept({ schemaVersion: 'tianwen.learning-analysis-terminal-report-intent.v1', type: 'learning-analysis-terminal-report-intent-recorded', at: this.#now(), report })
+    return { ...clone(this.#learningAnalyses.get(status.analysisId)!), duplicate: false }
+  }
+
+  recordLearningAnalysisTerminalReportDelivered(input: LearningAnalysisReportBinding & { readonly reportMessageId: string }): LearningAnalysisReceipt {
+    const report = parseLearningAnalysisReport(input, true)
+    const status = this.#learningAnalyses.get(report.analysisId)
+    const existing = status?.terminalReportDelivery
+    if (status === undefined || existing === undefined
+      || !sameLearningAnalysisReportBinding(existing, report)) {
+      throw new LedgerIntegrityError('learning analysis terminal report delivery disagrees with intent')
+    }
+    if (existing.state === 'delivered') {
+      if (existing.reportMessageId !== report.reportMessageId) throw new LedgerIntegrityError('learning analysis terminal report delivery changed')
+      return { ...clone(status), duplicate: true }
+    }
+    this.#accept({ schemaVersion: 'tianwen.learning-analysis-terminal-report-delivered.v1', type: 'learning-analysis-terminal-report-delivered', at: this.#now(), report: { ...report, reportMessageId: report.reportMessageId! } })
+    return { ...clone(this.#learningAnalyses.get(status.analysisId)!), duplicate: false }
+  }
+
+  #assertLearningAnalysisGovernedOutcome(
+    status: LearningAnalysisStatus,
+    outcome: LearningAnalysisGovernedOutcome,
+  ): void {
+    if (outcome.phase === 'candidate-rejected' || outcome.phase === 'shadow-ready') {
+      const evaluation = this.#controlledSkillEvaluationPlans.get(outcome.evaluationId)
+      const result = this.#controlledSkillEvaluationResults.get(outcome.evaluationId)
+      const shadow = outcome.shadowId === undefined
+        ? undefined
+        : this.#controlledSkillShadowPlans.get(outcome.shadowId)
+      const shadowResult = outcome.shadowId === undefined
+        ? undefined
+        : this.#controlledSkillShadowResults.get(outcome.shadowId)
+      const exact = status.phase === 'candidate-ready'
+        && status.candidateId === outcome.candidateId
+        && evaluation?.candidateId === outcome.candidateId
+        && result?.evaluationId === outcome.evaluationId
+        && sha256(result) === outcome.evaluationResultDigest
+        && (outcome.shadowId === undefined || (
+          shadow?.candidateId === outcome.candidateId
+          && shadow.evaluationId === outcome.evaluationId
+          && shadowResult?.shadowId === outcome.shadowId
+          && sha256(shadowResult) === outcome.shadowResultDigest
+        ))
+      const rejected = outcome.phase === 'candidate-rejected'
+        && (outcome.shadowId === undefined
+          ? result?.mechanismVerdict !== 'pass' || result.shadowEligibility === 'ineligible'
+          : shadowResult?.promotionEligibility === 'ineligible')
+      const ready = outcome.phase === 'shadow-ready'
+        && result?.mechanismVerdict === 'pass'
+        && result.shadowEligibility !== 'ineligible'
+        && shadowResult?.mechanismVerdict === 'pass'
+        && shadowResult.promotionEligibility !== 'ineligible'
+        && sha256(this.#controlledSkillPromotionRecommendation(outcome.shadowId))
+          === outcome.promotionRecommendationDigest
+      if (!exact || (!rejected && !ready)) {
+        throw new LedgerIntegrityError(`learning analysis ${outcome.phase} disagrees with governed results`)
+      }
+      return
+    }
+    const promoted = outcome.phase === 'promoted'
+    const transition = this.#controlledSkillTransitions.get(outcome.transitionId)
+    const receipt = this.getControlledSkillTransitionReceipt(outcome.transitionId)
+    if (
+      status.shadowId === undefined
+      || status.phase !== (promoted ? 'shadow-ready' : 'promoted')
+      || transition?.shadowId !== status.shadowId
+      || transition.kind !== (promoted ? 'promote' : 'rollback')
+      || receipt?.state !== 'verified'
+      || sha256(receipt) !== outcome.transitionReceiptDigest
+    ) throw new LedgerIntegrityError(`learning analysis ${outcome.phase} disagrees with verified transition`)
+  }
+
   #invalidateUnsupportedLearningAnalyses(): void {
     for (const status of this.#learningAnalyses.values()) {
       if (
-        this.#learningAnalysisHasActiveSupport(status)
+        (this.#learningAnalysisConsent?.enabled === true
+          && this.#learningAnalysisHasActiveSupport(status))
         || status.phase === 'invalidated'
         || status.phase === 'promoted'
         || status.phase === 'rolled-back'
@@ -5337,6 +5848,8 @@ export class EvolutionLedger {
         || parsed.type === 'learning-analysis-invalidated'
         || parsed.type === 'learning-analysis-candidate-ready'
         || parsed.type === 'learning-analysis-protocol-unavailable'
+        || parsed.type === 'learning-analysis-failed'
+        || parsed.type === 'learning-analysis-resumed'
         || parsed.type === 'learning-analysis-report-intent-recorded'
         || parsed.type === 'learning-analysis-report-delivered'
       ) {
@@ -5474,9 +5987,7 @@ export class EvolutionLedger {
       ) {
         throw new LedgerIntegrityError('controlled Skill evaluation protocol disagrees with history')
       }
-      const signals = ticket.signalIds.map(id => this.#learningSignals.get(id))
-        .filter((signal): signal is OutcomeLearningSignal =>
-          signal !== undefined && isOutcomeSignal(signal))
+      const signals = this.#controlledSkillEvalScopeFacts(ticket)
       const provenance = this.#caseIdByTicket.has(ticket.ticketId)
         || (this.#controlledSkillEvalProtocolIdsByTicket.get(ticket.ticketId)?.length ?? 0) > 0
         ? 'retrospective'
@@ -6523,6 +7034,32 @@ export class EvolutionLedger {
       this.#assertLearningAnalysisTimestamp(status, event.at)
       return
     }
+    if (event.type === 'learning-analysis-governed-outcome-recorded') {
+      const status = this.#learningAnalyses.get(event.analysisId)
+      if (status === undefined) {
+        throw new LedgerIntegrityError('learning analysis governed outcome has no analysis')
+      }
+      this.#assertLearningAnalysisGovernedOutcome(status, event.outcome)
+      this.#assertLearningAnalysisTimestamp(status, event.at)
+      return
+    }
+    if (event.type === 'learning-analysis-failed') {
+      const status = this.#learningAnalyses.get(event.analysisId)
+      if (status === undefined || status.phase !== event.resumePhase) {
+        throw new LedgerIntegrityError('learning analysis failure disagrees with history')
+      }
+      this.#assertLearningAnalysisTimestamp(status, event.at)
+      return
+    }
+    if (event.type === 'learning-analysis-resumed') {
+      const status = this.#learningAnalyses.get(event.analysisId)
+      if (
+        status?.phase !== 'failed'
+        || status.resumePhase !== event.resumePhase
+      ) throw new LedgerIntegrityError('learning analysis resume disagrees with history')
+      this.#assertLearningAnalysisTimestamp(status, event.at)
+      return
+    }
     if (event.type === 'learning-analysis-report-intent-recorded') {
       const status = this.#learningAnalyses.get(event.report.analysisId)
       if (
@@ -6543,6 +7080,24 @@ export class EvolutionLedger {
         || report.childSessionId !== event.report.childSessionId
         || report.reportDigest !== event.report.reportDigest
       ) throw new LedgerIntegrityError('learning analysis report delivery disagrees with history')
+      this.#assertLearningAnalysisTimestamp(status!, event.at)
+      return
+    }
+    if (event.type === 'learning-analysis-terminal-report-intent-recorded') {
+      const status = this.#learningAnalyses.get(event.report.analysisId)
+      if (status?.submission === undefined || status.terminalReportDelivery !== undefined
+        || status.parentSessionId !== event.report.parentSessionId || status.childSessionId !== event.report.childSessionId) {
+        throw new LedgerIntegrityError('learning analysis terminal report intent disagrees with history')
+      }
+      this.#assertLearningAnalysisTimestamp(status, event.at)
+      return
+    }
+    if (event.type === 'learning-analysis-terminal-report-delivered') {
+      const status = this.#learningAnalyses.get(event.report.analysisId)
+      const report = status?.terminalReportDelivery
+      if (report?.state !== 'pending' || !sameLearningAnalysisReportBinding(report, event.report)) {
+        throw new LedgerIntegrityError('learning analysis terminal report delivery disagrees with history')
+      }
       this.#assertLearningAnalysisTimestamp(status!, event.at)
       return
     }
@@ -7031,6 +7586,50 @@ export class EvolutionLedger {
       })
       return
     }
+    if (event.type === 'learning-analysis-governed-outcome-recorded') {
+      const status = this.#learningAnalyses.get(event.analysisId)!
+      const outcome = event.outcome
+      this.#learningAnalyses.set(event.analysisId, outcome.phase === 'candidate-rejected'
+        || outcome.phase === 'shadow-ready'
+        ? { ...status, ...outcome, updatedAt: event.at }
+        : outcome.phase === 'promoted'
+          ? {
+              ...status,
+              phase: outcome.phase,
+              promotionTransitionId: outcome.transitionId,
+              promotionTransitionReceiptDigest: outcome.transitionReceiptDigest,
+              updatedAt: event.at,
+            }
+          : {
+              ...status,
+              phase: outcome.phase,
+              rollbackTransitionId: outcome.transitionId,
+              rollbackTransitionReceiptDigest: outcome.transitionReceiptDigest,
+              updatedAt: event.at,
+            })
+      return
+    }
+    if (event.type === 'learning-analysis-failed') {
+      const status = this.#learningAnalyses.get(event.analysisId)!
+      this.#learningAnalyses.set(event.analysisId, {
+        ...status,
+        phase: 'failed',
+        resumePhase: event.resumePhase,
+        updatedAt: event.at,
+      })
+      return
+    }
+    if (event.type === 'learning-analysis-resumed') {
+      const status = this.#learningAnalyses.get(event.analysisId)!
+      const { resumePhase: _resumePhase, ...rest } = status
+      this.#learningAnalyses.set(event.analysisId, {
+        ...rest,
+        phase: event.resumePhase,
+        resumedAt: event.at,
+        updatedAt: event.at,
+      })
+      return
+    }
     if (event.type === 'learning-analysis-report-intent-recorded') {
       const status = this.#learningAnalyses.get(event.report.analysisId)!
       this.#learningAnalyses.set(event.report.analysisId, {
@@ -7055,6 +7654,25 @@ export class EvolutionLedger {
           deliveredAt: event.at,
           reportMessageId: event.report.reportMessageId,
         },
+        updatedAt: event.at,
+      })
+      return
+    }
+    if (event.type === 'learning-analysis-terminal-report-intent-recorded') {
+      const status = this.#learningAnalyses.get(event.report.analysisId)!
+      this.#learningAnalyses.set(event.report.analysisId, {
+        ...status,
+        terminalReportDelivery: { ...event.report, state: 'pending', intentRecordedAt: event.at },
+        updatedAt: event.at,
+      })
+      return
+    }
+    if (event.type === 'learning-analysis-terminal-report-delivered') {
+      const status = this.#learningAnalyses.get(event.report.analysisId)!
+      const delivery = status.terminalReportDelivery!
+      this.#learningAnalyses.set(event.report.analysisId, {
+        ...status,
+        terminalReportDelivery: { ...delivery, state: 'delivered', deliveredAt: event.at, reportMessageId: event.report.reportMessageId },
         updatedAt: event.at,
       })
       return

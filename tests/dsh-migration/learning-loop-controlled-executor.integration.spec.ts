@@ -126,6 +126,10 @@ afterEach(() => {
 
 describe('explicit-correction controlled learning-loop executor', () => {
   it('runs durable correction evidence through real arms, blind evaluation, Shadow, verified promotion, and one terminal report', async () => {
+    const previousProbeRoot = process.env.TIANWEN_DSH_PROBE_ROOT
+    process.env.TIANWEN_DSH_PROBE_ROOT = resolve(
+      previousProbeRoot ?? 'D:/DevData/tianwen-dsh-probe',
+    )
     const fixtureRoot = root('real-path')
     const harness = await mountPersistentHarness(join(fixtureRoot, 'sessions'), [])
     let disposeSkill: (() => void) | undefined
@@ -278,7 +282,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
       await executor.report(context())
       await executor.report(context())
       const terminal = harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)!
-      expect(reports).toEqual([`Tianwen governed analysis ${requested.analysisId}: promoted.`])
+      expect(reports).toEqual(['Tianwen 分析结论：候选 Skill 已通过验证；仅未来 Run 使用新版本。'])
       expect(terminal.terminalReportDelivery).toMatchObject({
         state: 'delivered', reportMessageId: 'main-chat-terminal-message',
       })
@@ -289,6 +293,8 @@ describe('explicit-correction controlled learning-loop executor', () => {
       disposeVerifier?.()
       disposeSkill?.()
       await harness.ctx.fiber.dispose()
+      if (previousProbeRoot === undefined) delete process.env.TIANWEN_DSH_PROBE_ROOT
+      else process.env.TIANWEN_DSH_PROBE_ROOT = previousProbeRoot
     }
   }, 120_000)
 })

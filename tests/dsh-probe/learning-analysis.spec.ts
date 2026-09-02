@@ -80,6 +80,7 @@ vi.mock('node:fs', async importOriginal => {
 })
 
 import {
+  CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   LedgerAppendNotCommittedError,
   LedgerCommitUnknownError,
   LedgerIntegrityError,
@@ -87,7 +88,9 @@ import {
   type LearningAnalysisSubmission,
   type LearningTicketId,
   type Sha256Digest,
+  sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
+import { resolveExplicitCorrectionProtocol } from '../../packages/tianwen-runtime-bundle/src/explicit-correction-protocol.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import {
   assertLearningAnalysisEvidenceClosure,
@@ -174,6 +177,23 @@ function skillChange(
   }
 }
 
+function explicitProtocolInput(root: string, ticketId: LearningTicketId) {
+  const protocol = resolveExplicitCorrectionProtocol('project:tianwen/capability:research-summary')!
+  const materializeWorkspace = (workspaceRoot: string, content: string) => {
+    mkdirSync(workspaceRoot, { recursive: true })
+    writeFileSync(join(workspaceRoot, 'brief.txt'), content, 'utf8')
+  }
+  const tasks = protocol.buildEvaluationTasks({
+    root: join(root, 'controlled-workspace'), materializeWorkspace,
+  })
+  const callConfig = { provider: 'controlled-test', model: 'controlled-test' }
+  const toolSchemas = [{ name: 'skill' }, { name: 'verify_lifecycle' }]
+  return protocol.buildProtocolInput({
+    ticketId, sha256, rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+    callConfig, retryPolicy: { attempts: 1 }, toolSchemaDigest: sha256(toolSchemas), tasks,
+  })
+}
+
 afterEach(() => {
   appendFault.enabled = false
   appendFault.failLedgerFsyncAfterReal = 0
@@ -185,6 +205,39 @@ afterEach(() => {
 })
 
 describe('durable explicit-correction analysis lifecycle', () => {
+  it('rejects direct protocol freezing without the exact enabled consent authority', () => {
+    const root = ledgerRoot('protocol-consent-authority')
+    const ledger = new EvolutionLedger(root, { clock: () => '2026-09-02T00:00:00.000Z' })
+    const withoutConsent = ledger.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: 'main-session', messageId: 'assistant-message', feedbackVersion: 'feedback-v1',
+        rating: 'negative', note: 'Keep the answer concrete.',
+        scopeKey: 'project:tianwen/capability:research-summary', sessionDigest: `sha256:${'0'.repeat(64)}`,
+        evidenceIds: [evidenceA],
+      },
+      sessionLifecycleFingerprint: lifecycle,
+    })
+    expect(() => ledger.freezeControlledSkillEvalProtocol(
+      explicitProtocolInput(root, withoutConsent.ticketId!),
+    )).toThrow(/controlled Skill evaluation protocol input is invalid/u)
+
+    const { ledger: consented, root: consentedRoot, ticketId } = seededLedger('protocol-consent-disabled')
+    expect(() => consented.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: 'other-session', messageId: 'other-message', feedbackVersion: 'feedback-wrong-revision',
+        rating: 'negative', note: 'Keep the answer concrete.',
+        scopeKey: 'project:tianwen/capability:research-summary', sessionDigest: `sha256:${'9'.repeat(64)}`,
+        evidenceIds: [evidenceA],
+      },
+      sessionLifecycleFingerprint: lifecycle, analysisConsentRevision: 99,
+    })).toThrow(/references consent that was not enabled/u)
+    consented.recordLearningAnalysisConsent({
+      revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    expect(() => consented.freezeControlledSkillEvalProtocol(
+      explicitProtocolInput(consentedRoot, ticketId),
+    )).toThrow(/controlled Skill evaluation protocol input is invalid/u)
+  })
   it('excludes cross-session, session-digest, Outcome, and retracted Evidence from analysis closure', () => {
     const sessionDigest = `sha256:${'0'.repeat(64)}` as Sha256Digest
     const outcomeEvidence = `sha256:${'7'.repeat(64)}` as Sha256Digest
@@ -894,5 +947,99 @@ describe('durable explicit-correction analysis lifecycle', () => {
     writeFileSync(path, `${lines.join('\n')}\n`, 'utf8')
 
     expect(() => new EvolutionLedger(root)).toThrow(/timestamp/u)
+  })
+
+  it('durably records an infrastructure failure with the exact retry phase', () => {
+    const { ledger, root, ticketId } = seededLedger('failed-retry-phase')
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
+
+    expect(ledger.recordLearningAnalysisFailed({
+      analysisId: requested.analysisId,
+      resumePhase: 'pending-parent',
+    })).toMatchObject({
+      phase: 'failed',
+      resumePhase: 'pending-parent',
+      duplicate: false,
+    })
+    expect(new EvolutionLedger(root).getLearningAnalysis(
+      requested.analysisId,
+    )).toMatchObject({ phase: 'failed', resumePhase: 'pending-parent' })
+  })
+
+  it('appends one exact resume before retrying the saved durable phase', () => {
+    const { ledger, root, ticketId } = seededLedger('failed-resume')
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
+    ledger.recordLearningAnalysisFailed({
+      analysisId: requested.analysisId,
+      resumePhase: 'pending-parent',
+    })
+
+    const restarted = new EvolutionLedger(root)
+    const resumed = restarted.recordLearningAnalysisResumed({
+      analysisId: requested.analysisId,
+      resumePhase: 'pending-parent',
+    })
+    expect(resumed).toMatchObject({
+      phase: 'pending-parent',
+      duplicate: false,
+    })
+    expect(resumed).not.toHaveProperty('resumePhase')
+    expect(restarted.recordLearningAnalysisResumed({
+      analysisId: requested.analysisId,
+      resumePhase: 'pending-parent',
+    })).toMatchObject({ phase: 'pending-parent', duplicate: true })
+    expect(restarted.listEvents().filter(event =>
+      event.type === 'learning-analysis-resumed')).toHaveLength(1)
+
+    expect(restarted.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    })).toMatchObject({ phase: 'running', duplicate: false })
+  })
+
+  it('rejects a resume that changes the durable retry phase', () => {
+    const { ledger, ticketId } = seededLedger('failed-resume-drift')
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
+    ledger.recordLearningAnalysisFailed({
+      analysisId: requested.analysisId,
+      resumePhase: 'pending-parent',
+    })
+
+    expect(() => ledger.recordLearningAnalysisResumed({
+      analysisId: requested.analysisId,
+      resumePhase: 'running',
+    })).toThrow(/retry phase/u)
+    expect(ledger.getLearningAnalysis(requested.analysisId))
+      .toMatchObject({ phase: 'failed', resumePhase: 'pending-parent' })
+  })
+
+  it('keeps the terminal governed report separate from the preliminary child report across restart', () => {
+    const { ledger, root, ticketId } = seededLedger('terminal-report')
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
+    ledger.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId, parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    })
+    ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId, childSessionId: requested.childSessionId,
+      submission: skillChange(),
+    })
+    const preliminary = {
+      analysisId: requested.analysisId, parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId, reportDigest: `sha256:${'1'.repeat(64)}` as Sha256Digest,
+    }
+    const terminal = { ...preliminary, reportDigest: `sha256:${'2'.repeat(64)}` as Sha256Digest }
+    ledger.recordLearningAnalysisReportIntent(preliminary)
+    ledger.recordLearningAnalysisReportDelivered({ ...preliminary, reportMessageId: 'preliminary-message' })
+    ledger.recordLearningAnalysisTerminalReportIntent(terminal)
+    const restarted = new EvolutionLedger(root)
+    expect(restarted.getLearningAnalysis(requested.analysisId)).toMatchObject({
+      reportDelivery: { state: 'delivered', reportMessageId: 'preliminary-message' },
+      terminalReportDelivery: { state: 'pending', reportDigest: terminal.reportDigest },
+    })
+    restarted.recordLearningAnalysisTerminalReportDelivered({ ...terminal, reportMessageId: 'terminal-message' })
+    expect(restarted.recordLearningAnalysisTerminalReportDelivered({ ...terminal, reportMessageId: 'terminal-message' }))
+      .toMatchObject({ duplicate: true, terminalReportDelivery: { state: 'delivered' } })
   })
 })

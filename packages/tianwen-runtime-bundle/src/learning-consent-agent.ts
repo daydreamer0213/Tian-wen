@@ -424,10 +424,19 @@ export class TianwenLearningConsentAgentService extends Service {
     if (action === 'status') return statusOf(current)
     const enabled = action === 'enable'
     if (current?.enabled === enabled) return statusOf(current)
-    return statusOf(this.ctx.tianwenEvolution.recordLearningAnalysisConsent({
+    const recorded = statusOf(this.ctx.tianwenEvolution.recordLearningAnalysisConsent({
       revision: (current?.revision ?? 0) + 1,
       enabled,
       policyVersion: POLICY_VERSION,
     }))
+    const loop = this.ctx.get('tianwenLearningLoop') as {
+      schedule(analysisId: string): Promise<void>
+    } | undefined
+    if (loop !== undefined) {
+      for (const analysis of this.ctx.tianwenEvolution.listLearningAnalyses()) {
+        void loop.schedule(analysis.analysisId).catch(() => undefined)
+      }
+    }
+    return recorded
   }
 }
