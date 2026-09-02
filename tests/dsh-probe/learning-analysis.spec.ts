@@ -759,6 +759,55 @@ describe('durable explicit-correction analysis lifecycle', () => {
     })).toMatchObject({ duplicate: false, phase: 'running' })
   })
 
+  it('rejects a session digest reused as its own analysis evidence at ledger level', () => {
+    const { ledger } = seededLedger('self-session-digest-evidence')
+    const sessionDigest = `sha256:${'d'.repeat(64)}` as Sha256Digest
+    const feedback = ledger.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: 'main-session',
+        messageId: 'assistant-self-digest',
+        feedbackVersion: 'feedback-self-digest',
+        rating: 'negative',
+        note: 'Keep the answer concrete.',
+        scopeKey: 'project:tianwen/capability:research-summary',
+        sessionDigest,
+        evidenceIds: [sessionDigest, evidenceA],
+      },
+      sessionLifecycleFingerprint: lifecycle,
+      analysisConsentRevision: 1,
+    })
+    const requested = ledger.requestLearningAnalysis({
+      ticketId: feedback.ticketId!,
+      sessionId: 'main-session',
+      messageId: 'assistant-self-digest',
+      feedbackVersion: 'feedback-self-digest',
+      consentRevision: 1,
+      parentSessionId: 'main-session',
+    })
+    ledger.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    })
+
+    expect(() => ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange({
+        supportingEvidenceIds: [sessionDigest],
+        counterevidenceIds: [],
+      }),
+    })).toThrow(/Evidence closure/u)
+    expect(ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange({
+        supportingEvidenceIds: [evidenceA],
+        counterevidenceIds: [],
+      }),
+    })).toMatchObject({ duplicate: false, phase: 'running' })
+  })
+
   it('rejects live lifecycle transitions whose timestamp goes backwards', () => {
     let now = '2026-09-02T00:00:00.000Z'
     const root = ledgerRoot('backwards-live')

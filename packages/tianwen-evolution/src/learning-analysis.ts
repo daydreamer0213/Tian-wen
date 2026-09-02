@@ -317,7 +317,10 @@ export function learningAnalysisEvidenceClosure(
       || !signal.active
       || signal.sessionId !== sessionId
     ) continue
-    for (const evidenceId of signal.evidenceIds) evidenceIds.add(evidenceId)
+    for (const evidenceId of signal.evidenceIds) {
+      if (evidenceId === signal.sessionDigest) continue
+      evidenceIds.add(evidenceId)
+    }
   }
   return evidenceIds
 }
