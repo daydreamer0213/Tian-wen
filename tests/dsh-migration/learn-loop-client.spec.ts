@@ -366,198 +366,31 @@ describe('Learn Loop browser RPC client', () => {
     ])
   })
 
-  it('reads the safe learning clue projection and rejects private or malformed fields', async () => {
-    const clueStatus = {
-      schemaVersion: 'tianwen.learning-clue-status.v1' as const,
+  it('reads a bounded read-only learning audit and rejects private content', async () => {
+    const audit = {
+      schemaVersion: 'tianwen.learning-audit.v1' as const,
       items: [{
-        ticketId: `ticket:${'a'.repeat(64)}`,
-        status: 'open' as const,
-        occurrenceCount: 2,
-        analysis: null,
-        review: null,
-        sources: [{
-          longGoalId: statusV2.goal.id,
-          goalObjective: statusV2.goal.objective,
-          taskId: statusV2.tasks[0].id,
-          taskObjective: statusV2.tasks[0].objective,
-          recordedAt: '2026-08-30T00:00:00.000Z',
-        }],
+        analysisId: `analysis:${'a'.repeat(64)}`,
+        ticketId: `ticket:${'b'.repeat(64)}`,
+        phase: 'promoted' as const,
+        requestedAt: '2026-09-02T00:00:00.000Z',
+        updatedAt: '2026-09-02T00:03:00.000Z',
+        evidenceDigests: [`sha256:${'c'.repeat(64)}`],
+        receipts: { candidateId: `candidate:${'d'.repeat(64)}` },
+        recovery: null,
       }],
     }
     const signal = new AbortController().signal
-    const rpc = { call: vi.fn().mockResolvedValue({ ok: true, value: clueStatus }) }
+    const rpc = { call: vi.fn().mockResolvedValue({ ok: true, value: audit }) }
 
-    expect(await createLearnLoopClient(rpc as never).learningClues(signal)).toEqual(clueStatus)
-    expect(rpc.call).toHaveBeenCalledWith('/tianwen', 'learning-clues', {}, signal)
+    await expect(createLearnLoopClient(rpc as never).learningAudit(signal)).resolves.toEqual(audit)
+    expect(rpc.call).toHaveBeenCalledWith('/tianwen', 'learning-audit', {}, signal)
 
-    const unsupported = {
-      ...clueStatus,
-      items: [{ ...clueStatus.items[0], status: 'unsupported' as const }],
-    }
-    const unsupportedRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: unsupported }) }
-    await expect(createLearnLoopClient(unsupportedRpc as never).learningClues())
-      .resolves.toEqual(unsupported)
-
-    for (const analysis of [
-      {
-        phase: 'running' as const,
-        sessionId: 'analysis-running',
-        startedAt: '2026-08-30T00:01:00.000Z',
-      },
-      {
-        phase: 'complete' as const,
-        sessionId: 'analysis-complete',
-        startedAt: '2026-08-30T00:01:00.000Z',
-        finishedAt: '2026-08-30T00:02:00.000Z',
-      },
-      {
-        phase: 'failed' as const,
-        sessionId: 'analysis-failed',
-        startedAt: '2026-08-30T00:01:00.000Z',
-        finishedAt: '2026-08-30T00:02:00.000Z',
-      },
-    ]) {
-      const analyzed = {
-        ...clueStatus,
-        items: [{ ...clueStatus.items[0], analysis }],
-      }
-      const analyzedRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: analyzed }) }
-      await expect(createLearnLoopClient(analyzedRpc as never).learningClues())
-        .resolves.toEqual(analyzed)
-    }
-
-    const terminalAnalysis = {
-      phase: 'complete' as const,
-      sessionId: 'analysis-complete',
-      startedAt: '2026-08-30T00:01:00.000Z',
-      finishedAt: '2026-08-30T00:02:00.000Z',
-    }
-    const reviewed = {
-      ...clueStatus,
-      items: [{ ...clueStatus.items[0], analysis: terminalAnalysis, review: {
-        reviewedAt: '2026-08-30T00:03:00.000Z',
-        occurrenceCount: 2,
-      } }],
-    }
-    const reviewedRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: reviewed }) }
-    await expect(createLearnLoopClient(reviewedRpc as never).learningClues())
-      .resolves.toEqual(reviewed)
-
-    for (const invalid of [
-      { ...clueStatus, extra: true },
-      { ...clueStatus, items: [{ ...clueStatus.items[0], problemFingerprint: 'private' }] },
-      { ...clueStatus, items: [{ ...clueStatus.items[0], signalIds: ['private'] }] },
-      { ...clueStatus, items: [{ ...clueStatus.items[0], occurrenceCount: 0 }] },
-      { ...clueStatus, items: [{ ...clueStatus.items[0], status: 'closed' }] },
-      { ...clueStatus, items: [{ ...clueStatus.items[0], status: 'retracted' }] },
-      { ...reviewed, items: [{ ...reviewed.items[0], review: {
-        reviewedAt: '2026-08-30T00:03:00Z', occurrenceCount: 2,
-      } }] },
-      { ...reviewed, items: [{ ...reviewed.items[0], review: {
-        reviewedAt: '2026-08-30T00:03:00.000Z', occurrenceCount: 0,
-      } }] },
-      { ...reviewed, items: [{ ...reviewed.items[0], review: {
-        reviewedAt: '2026-08-30T00:03:00.000Z', occurrenceCount: 2, note: 'private',
-      } }] },
-      { ...reviewed, items: [{ ...reviewed.items[0], analysis: null }] },
-      { ...reviewed, items: [{ ...reviewed.items[0], analysis: {
-        phase: 'running', sessionId: 'analysis', startedAt: '2026-08-30T00:01:00.000Z',
-      } }] },
-      { ...reviewed, items: [{ ...reviewed.items[0], review: {
-        reviewedAt: '2026-08-30T00:03:00.000Z', occurrenceCount: 1,
-      } }] },
-      { ...clueStatus, items: [{ ...clueStatus.items[0], analysis: {
-        phase: 'running', sessionId: 'analysis', startedAt: '2026-08-30T00:01:00.000Z',
-        finishedAt: '2026-08-30T00:02:00.000Z',
-      } }] },
-      { ...clueStatus, items: [{ ...clueStatus.items[0], analysis: {
-        phase: 'complete', sessionId: 'analysis', startedAt: '2026-08-30T00:01:00.000Z',
-      } }] },
-      { ...clueStatus, items: [{ ...clueStatus.items[0], analysis: {
-        phase: 'failed', sessionId: 'analysis', startedAt: '2026-08-30T00:01:00.000Z',
-      } }] },
-      { ...clueStatus, items: [{ ...clueStatus.items[0], analysis: {
-        phase: 'running', sessionId: 'analysis', startedAt: '2026-08-30T00:01:00Z',
-      } }] },
-      { ...clueStatus, items: [{ ...clueStatus.items[0], analysis: {
-        phase: 'complete', sessionId: 'analysis', startedAt: '2026-08-30T00:01:00.000Z',
-        finishedAt: '2026-08-30T00:02:00Z',
-      } }] },
-      { ...clueStatus, items: [{ ...clueStatus.items[0], analysis: {
-        phase: 'complete', sessionId: 'analysis', startedAt: 'now', privateNote: 'private',
-      } }] },
-      { ...clueStatus, items: [{ ...clueStatus.items[0], sources: [{
-        ...clueStatus.items[0].sources[0], note: 'private',
-      }] }] },
-      { ...clueStatus, items: [{ ...clueStatus.items[0], sources: [] }] },
-      { ...clueStatus, items: [clueStatus.items[0], clueStatus.items[0]] },
-      { ...clueStatus, items: [{
-        ...clueStatus.items[0],
-        sources: [clueStatus.items[0].sources[0], clueStatus.items[0].sources[0]],
-      }] },
-    ]) {
-      const invalidRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: invalid }) }
-      await expect(createLearnLoopClient(invalidRpc as never).learningClues())
-        .rejects.toThrow('invalid Tianwen RPC response')
-    }
-  })
-
-  it('starts one learning-clue analysis with exact request and response parsing', async () => {
-    const ticketId = `ticket:${'a'.repeat(64)}`
-    const start = {
-      schemaVersion: 'tianwen.learning-clue-analysis-start.v1' as const,
-      created: true,
-      sessionId: 'analysis-session',
-    }
-    const signal = new AbortController().signal
-    const rpc = { call: vi.fn().mockResolvedValue({ ok: true, value: start }) }
-    const client = createLearnLoopClient(rpc as never)
-
-    await expect(client.analyzeLearningClue(ticketId, signal)).resolves.toEqual(start)
-    expect(rpc.call).toHaveBeenCalledWith(
-      '/tianwen', 'analyze-learning-clue', { ticketId }, signal,
-    )
-
-    for (const invalid of [
-      { ...start, extra: true },
-      { ...start, schemaVersion: 'tianwen.learning-clue-analysis-start.v2' },
-      { ...start, created: 'yes' },
-      { ...start, sessionId: '' },
-    ]) {
-      const invalidRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: invalid }) }
-      await expect(createLearnLoopClient(invalidRpc as never).analyzeLearningClue(ticketId))
-        .rejects.toThrow('invalid Tianwen RPC response')
-    }
-  })
-
-  it('marks one terminal learning clue reviewed with exact request and response parsing', async () => {
-    const ticketId = `ticket:${'a'.repeat(64)}`
-    const result = {
-      schemaVersion: 'tianwen.learning-clue-review-result.v1' as const,
-      reviewed: true as const,
-      occurrenceCount: 2,
-      reviewedAt: '2026-08-30T00:03:00.000Z',
-    }
-    const signal = new AbortController().signal
-    const rpc = { call: vi.fn().mockResolvedValue({ ok: true, value: result }) }
-    const client = createLearnLoopClient(rpc as never)
-
-    await expect(client.reviewLearningClue(ticketId, signal)).resolves.toEqual(result)
-    expect(rpc.call).toHaveBeenCalledWith(
-      '/tianwen', 'review-learning-clue', { ticketId }, signal,
-    )
-
-    for (const invalid of [
-      { ...result, extra: true },
-      { ...result, schemaVersion: 'tianwen.learning-clue-review-result.v2' },
-      { ...result, reviewed: false },
-      { ...result, occurrenceCount: 0 },
-      { ...result, reviewedAt: '2026-08-30T00:03:00Z' },
-    ]) {
-      const invalidRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: invalid }) }
-      await expect(createLearnLoopClient(invalidRpc as never).reviewLearningClue(ticketId))
-        .rejects.toThrow('invalid Tianwen RPC response')
-    }
+    const privateRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: {
+      ...audit, items: [{ ...audit.items[0], privateNote: 'never expose' }],
+    } }) }
+    await expect(createLearnLoopClient(privateRpc as never).learningAudit())
+      .rejects.toThrow('invalid Tianwen RPC response')
   })
 
   it('preserves exact revision-conflict details for UI recovery', async () => {

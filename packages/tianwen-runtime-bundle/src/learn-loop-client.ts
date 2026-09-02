@@ -14,32 +14,11 @@ import type {
   LongGoalSummaryV3,
 } from './long-goal-contract.js'
 import type { RunCurrentTaskResult } from './long-goal-host.js'
-import type { LearningClueSource, LearningClueStatus } from './learning-clue-status.js'
-
-export interface LearningClueAnalysisStart {
-  readonly schemaVersion: 'tianwen.learning-clue-analysis-start.v1'
-  readonly created: boolean
-  readonly sessionId: string
-}
-
-export interface LearningClueReviewResult {
-  readonly schemaVersion: 'tianwen.learning-clue-review-result.v1'
-  readonly reviewed: true
-  readonly occurrenceCount: number
-  readonly reviewedAt: string
-}
+import type { LearningAudit } from './learning-clue-status.js'
 
 export interface LearnLoopClient {
   list(signal?: AbortSignal): Promise<readonly AnyLongGoalSummary[]>
-  learningClues(signal?: AbortSignal): Promise<LearningClueStatus>
-  analyzeLearningClue(
-    ticketId: string,
-    signal?: AbortSignal,
-  ): Promise<LearningClueAnalysisStart>
-  reviewLearningClue(
-    ticketId: string,
-    signal?: AbortSignal,
-  ): Promise<LearningClueReviewResult>
+  learningAudit(signal?: AbortSignal): Promise<LearningAudit>
   create(input: {
     readonly objective: string
     readonly tasks: readonly string[]
@@ -309,66 +288,46 @@ function isAbandonResult(value: unknown): value is LongGoalAbandonResultV2 {
     value.action === 'abandoned' && isStatusV2(value.status)
 }
 
-function isLearningClueSource(value: unknown): value is LearningClueSource {
-  return isRecord(value) && hasExactKeys(value, [
-    'longGoalId', 'goalObjective', 'taskId', 'taskObjective', 'recordedAt',
-  ]) && isNonEmptyString(value.longGoalId) && isNonEmptyString(value.goalObjective) &&
-    isNonEmptyString(value.taskId) && isNonEmptyString(value.taskObjective) &&
-    isNonEmptyString(value.recordedAt)
-}
-
 function isCanonicalIsoTimestamp(value: unknown): value is string {
   if (typeof value !== 'string') return false
   const timestamp = new Date(value)
   return !Number.isNaN(timestamp.getTime()) && timestamp.toISOString() === value
 }
 
-function isLearningClueAnalysis(value: unknown): boolean {
-  if (!isRecord(value) || !isNonEmptyString(value.sessionId) ||
-    !isCanonicalIsoTimestamp(value.startedAt)) return false
-  if (value.phase === 'running') {
-    return hasExactKeys(value, ['phase', 'sessionId', 'startedAt'])
-  }
-  return (value.phase === 'complete' || value.phase === 'failed') &&
-    hasExactKeys(value, ['phase', 'sessionId', 'startedAt', 'finishedAt']) &&
-    isCanonicalIsoTimestamp(value.finishedAt)
-}
+const auditPhases = new Set([
+  'pending-parent', 'running', 'no-case', 'insufficient-evidence', 'candidate-ready',
+  'protocol-unavailable', 'candidate-rejected', 'shadow-ready', 'promoted',
+  'rolled-back', 'invalidated', 'failed',
+])
+const digestPattern = /^sha256:[a-f0-9]{64}$/
 
-function isLearningClueReview(value: unknown): boolean {
-  return isRecord(value) && hasExactKeys(value, ['reviewedAt', 'occurrenceCount']) &&
-    isCanonicalIsoTimestamp(value.reviewedAt) && isPositiveInteger(value.occurrenceCount)
-}
-
-function isLearningClueStatus(value: unknown): value is LearningClueStatus {
+function isLearningAudit(value: unknown): value is LearningAudit {
   if (!isRecord(value) || !hasExactKeys(value, ['schemaVersion', 'items']) ||
-    value.schemaVersion !== 'tianwen.learning-clue-status.v1' || !Array.isArray(value.items)) {
-    return false
-  }
-  const ticketIds = new Set<string>()
+    value.schemaVersion !== 'tianwen.learning-audit.v1' || !Array.isArray(value.items)) return false
+  const analysisIds = new Set<string>()
   return value.items.every(item => {
     if (!isRecord(item) || !hasExactKeys(item, [
-      'ticketId', 'status', 'occurrenceCount', 'analysis', 'review', 'sources',
-    ]) || typeof item.ticketId !== 'string' || !/^ticket:[a-f0-9]{64}$/.test(item.ticketId) ||
-      ticketIds.has(item.ticketId) ||
-      (item.status !== 'open' && item.status !== 'unsupported') ||
-      (item.analysis !== null && !isLearningClueAnalysis(item.analysis)) ||
-      (item.review !== null && !isLearningClueReview(item.review)) ||
-      !isPositiveInteger(item.occurrenceCount) || !Array.isArray(item.sources) ||
-      item.sources.length === 0) return false
-    if (item.review !== null && (
-      !isRecord(item.review) || !isRecord(item.analysis) ||
-      (item.analysis.phase !== 'complete' && item.analysis.phase !== 'failed') ||
-      item.review.occurrenceCount !== item.occurrenceCount
-    )) return false
-    ticketIds.add(item.ticketId)
-    const sourceIds = new Set<string>()
-    return item.sources.every(source => {
-      if (!isLearningClueSource(source)) return false
-      const sourceId = `${source.longGoalId}\0${source.taskId}`
-      if (sourceIds.has(sourceId)) return false
-      sourceIds.add(sourceId)
-      return true
-    })
+      'analysisId', 'ticketId', 'phase', 'requestedAt', 'updatedAt', 'evidenceDigests', 'receipts', 'recovery',
+    ]) || !/^analysis:[a-f0-9]{64}$/.test(String(item.analysisId)) ||
+      !/^ticket:[a-f0-9]{64}$/.test(String(item.ticketId)) || analysisIds.has(String(item.analysisId)) ||
+      !auditPhases.has(String(item.phase)) || !isCanonicalIsoTimestamp(item.requestedAt) ||
+      !isCanonicalIsoTimestamp(item.updatedAt) || !Array.isArray(item.evidenceDigests) ||
+      !item.evidenceDigests.every(digest => typeof digest === 'string' && digestPattern.test(digest)) ||
+      new Set(item.evidenceDigests).size !== item.evidenceDigests.length || !isRecord(item.receipts)) return false
+    const receiptKeys = [
+      'candidateId', 'evaluationId', 'evaluationResultDigest', 'shadowId', 'shadowResultDigest',
+      'promotionRecommendationDigest', 'promotionTransitionId', 'promotionTransitionReceiptDigest',
+      'rollbackTransitionId', 'rollbackTransitionReceiptDigest', 'reportDigest', 'reportState',
+    ]
+    if (Object.keys(item.receipts).some(key => !receiptKeys.includes(key)) ||
+      Object.values(item.receipts).some(receipt => typeof receipt !== 'string' || receipt.length === 0) ||
+      (item.receipts.reportState !== undefined && item.receipts.reportState !== 'pending' && item.receipts.reportState !== 'delivered')) return false
+    if (item.recovery !== null && (!isRecord(item.recovery) || !hasExactKeys(item.recovery,
+      item.recovery.resumedAt === undefined ? ['resumePhase'] : ['resumePhase', 'resumedAt']) ||
+      !auditPhases.has(String(item.recovery.resumePhase)) ||
+      (item.recovery.resumedAt !== undefined && !isCanonicalIsoTimestamp(item.recovery.resumedAt)))) return false
+    analysisIds.add(String(item.analysisId))
+    return true
   })
 }
 
@@ -418,31 +377,10 @@ export function createLearnLoopClient(rpc: ClientConnectionRpc): LearnLoopClient
         !value.goals.every(isSummary)) invalidResponse()
       return value.goals
     },
-    async learningClues(signal) {
-      const value = await call(rpc, 'learning-clues', {}, signal)
-      if (!isLearningClueStatus(value)) invalidResponse()
+    async learningAudit(signal) {
+      const value = await call(rpc, 'learning-audit', {}, signal)
+      if (!isLearningAudit(value)) invalidResponse()
       return value
-    },
-    async analyzeLearningClue(ticketId, signal) {
-      const value = await call(rpc, 'analyze-learning-clue', { ticketId }, signal)
-      if (!isRecord(value) || !hasExactKeys(value, [
-        'schemaVersion', 'created', 'sessionId',
-      ]) || value.schemaVersion !== 'tianwen.learning-clue-analysis-start.v1' ||
-        typeof value.created !== 'boolean' || !isNonEmptyString(value.sessionId)) {
-        invalidResponse()
-      }
-      return value as unknown as LearningClueAnalysisStart
-    },
-    async reviewLearningClue(ticketId, signal) {
-      const value = await call(rpc, 'review-learning-clue', { ticketId }, signal)
-      if (!isRecord(value) || !hasExactKeys(value, [
-        'schemaVersion', 'reviewed', 'occurrenceCount', 'reviewedAt',
-      ]) || value.schemaVersion !== 'tianwen.learning-clue-review-result.v1' ||
-        value.reviewed !== true || !isPositiveInteger(value.occurrenceCount) ||
-        !isCanonicalIsoTimestamp(value.reviewedAt)) {
-        invalidResponse()
-      }
-      return value as unknown as LearningClueReviewResult
     },
     async create(input, signal) {
       const value = await call(rpc, 'create', input, signal)

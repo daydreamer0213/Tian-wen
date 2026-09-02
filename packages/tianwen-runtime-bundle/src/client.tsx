@@ -7,9 +7,9 @@ import type {
   LongGoalStatusProjectionV2,
 } from './long-goal-contract.js'
 import { createLearnLoopClient, LearnLoopRpcError } from './learn-loop-client.js'
-import type { LearningClueItem } from './learning-clue-status.js'
+import type { LearningAuditItem } from './learning-clue-status.js'
 
-type View = 'closed' | 'list' | 'create' | 'detail' | 'clues'
+type View = 'closed' | 'list' | 'create' | 'detail'
 
 const LOCALE_NAMESPACE = 'tianwen.learn-loop'
 
@@ -20,22 +20,8 @@ const zhMessages = {
   'common.loading': '加载中…',
   'list.refresh': '刷新长期目标',
   'list.create': '创建目标',
-  'clues.open': '改进线索（{count}）',
-  'clues.refresh': '刷新线索',
-  'clues.back': '返回目标列表',
-  'clues.empty': '还没有改进线索。',
-  'clues.pendingEmpty': '没有待处理的改进线索。',
-  'clues.occurrences': '出现 {count} 次',
-  'clues.reviewedCount': '已审阅（{count}）',
-  'clues.showReviewed': '显示已审阅',
-  'clues.hideReviewed': '隐藏已审阅',
-  'clues.markReviewed': '标记为已审阅',
-  'clues.analysisPrivacy': '会把私密反馈交给当前模型，仅用于分析；天问不会自动修改项目或安装 Skill。',
-  'clues.analyze': '分析一次',
-  'clues.analysisRunning': '正在分析',
-  'clues.analysisComplete': '分析完成',
-  'clues.analysisFailed': '分析未完成',
-  'clues.openAnalysis': '打开分析会话',
+  'audit.title': '高级审计（只读）',
+  'audit.empty': '还没有可显示的学习审计记录。',
   'list.empty': '还没有长期目标。',
   'list.empty.step1': '在 DSH 中打开或创建一个项目工作区。',
   'list.empty.step2': '创建一个长期目标，天问会规划并推进后续任务。',
@@ -81,7 +67,6 @@ const zhMessages = {
   'error.guidance': '无法提交补充信息。',
   'error.abandon': '无法放弃当前任务。',
   'error.analysis': '无法开始分析。',
-  'error.review': '无法标记为已审阅。',
   'error.revisionConflict': '该目标已在其他位置发生变化，已显示最新状态。请确认后重试。',
   'phase.planning': '规划中',
   'phase.abandoned': '已放弃',
@@ -102,22 +87,8 @@ const enMessages = {
   'common.loading': 'Loading…',
   'list.refresh': 'Refresh plans',
   'list.create': 'Create Goal',
-  'clues.open': 'Improvement clues ({count})',
-  'clues.refresh': 'Refresh clues',
-  'clues.back': 'Back to Goals',
-  'clues.empty': 'No improvement clues yet.',
-  'clues.pendingEmpty': 'No pending improvement clues.',
-  'clues.occurrences': '{count} occurrences',
-  'clues.reviewedCount': 'Reviewed ({count})',
-  'clues.showReviewed': 'Show reviewed',
-  'clues.hideReviewed': 'Hide reviewed',
-  'clues.markReviewed': 'Mark reviewed',
-  'clues.analysisPrivacy': 'Private feedback will be sent to the current model for analysis only. Tianwen will not automatically modify the project or install a Skill.',
-  'clues.analyze': 'Analyze once',
-  'clues.analysisRunning': 'Analyzing',
-  'clues.analysisComplete': 'Analysis complete',
-  'clues.analysisFailed': 'Analysis did not complete',
-  'clues.openAnalysis': 'Open analysis Session',
+  'audit.title': 'Advanced audit (read-only)',
+  'audit.empty': 'No learning audit records are available yet.',
   'list.empty': 'No Learn Loop plans yet.',
   'list.empty.step1': 'Open or create a project workspace in DSH.',
   'list.empty.step2': 'Create a long-term Goal; Tianwen will plan and progress the Tasks.',
@@ -163,7 +134,6 @@ const enMessages = {
   'error.guidance': 'Unable to add guidance.',
   'error.abandon': 'Unable to abandon the current Task.',
   'error.analysis': 'Unable to start analysis.',
-  'error.review': 'Unable to mark the clue reviewed.',
   'error.revisionConflict': 'This Goal changed elsewhere. The latest status is shown; review it before retrying.',
   'phase.planning': 'planning',
   'phase.abandoned': 'abandoned',
@@ -198,12 +168,6 @@ const phaseKeys: Readonly<Record<string, MessageKey>> = {
   complete: 'phase.complete',
   abandoned: 'phase.abandoned',
 }
-
-const analysisPhaseKeys = {
-  running: 'clues.analysisRunning',
-  complete: 'clues.analysisComplete',
-  failed: 'clues.analysisFailed',
-} as const satisfies Readonly<Record<string, MessageKey>>
 
 type VisibleError =
   | { readonly key: MessageKey }
@@ -519,9 +483,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   const client = createLearnLoopClient(ctx.connection.rpc)
   const [view, setView] = useState<View>('closed')
   const [goals, setGoals] = useState<readonly AnyLongGoalSummary[]>([])
-  const [clues, setClues] = useState<readonly LearningClueItem[]>([])
-  const [showReviewed, setShowReviewed] = useState(false)
-  const [focusedTicketId, setFocusedTicketId] = useState<string | undefined>()
+  const [audit, setAudit] = useState<readonly LearningAuditItem[]>([])
   const [detail, setDetail] = useState<AnyLongGoalStatusProjection | undefined>()
   const [objective, setObjective] = useState('')
   const [context, setContext] = useState('')
@@ -547,13 +509,13 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
     setLoading(true)
     setError(undefined)
     try {
-      const [nextGoals, nextClues] = await Promise.all([
+      const [nextGoals, nextAudit] = await Promise.all([
         client.list(request.signal),
-        client.learningClues(request.signal),
+        client.learningAudit(request.signal),
       ])
       if (request.isCurrent()) {
         setGoals(nextGoals)
-        setClues(nextClues.items)
+        setAudit(nextAudit.items)
       }
     } catch (cause) {
       if (request.isCurrent()) {
@@ -567,15 +529,7 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   const backToList = () => {
     requestGeneration.current.close()
     setLoading(false)
-    setFocusedTicketId(undefined)
     setView('list')
-    void refresh()
-  }
-
-  const openClues = (ticketId?: string) => {
-    setFocusedTicketId(ticketId)
-    setShowReviewed(false)
-    setView('clues')
     void refresh()
   }
 
@@ -802,38 +756,6 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
     }
   }
 
-  const analyzeClue = async (ticketId: string) => {
-    const request = requestGeneration.current.begin()
-    setLoading(true)
-    setError(undefined)
-    try {
-      const result = await client.analyzeLearningClue(ticketId, request.signal)
-      await openReturnedSession(result.sessionId, request)
-    } catch (cause) {
-      if (request.isCurrent()) {
-        setError(cause instanceof Error ? { message: cause.message } : { key: 'error.analysis' })
-      }
-    } finally {
-      if (request.isCurrent()) setLoading(false)
-    }
-  }
-
-  const reviewClue = async (ticketId: string) => {
-    const request = requestGeneration.current.begin()
-    setLoading(true)
-    setError(undefined)
-    try {
-      await client.reviewLearningClue(ticketId, request.signal)
-      if (request.isCurrent()) await refresh()
-    } catch (cause) {
-      if (request.isCurrent()) {
-        setError(cause instanceof Error ? { message: cause.message } : { key: 'error.review' })
-      }
-    } finally {
-      if (request.isCurrent()) setLoading(false)
-    }
-  }
-
   const openBoundSession = async (sessionId: string) => {
     const request = requestGeneration.current.begin()
     setLoading(true)
@@ -853,9 +775,6 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
     }
   }
 
-  const pendingClues = clues.filter(clue => clue.review === null)
-  const reviewedClueCount = clues.length - pendingClues.length
-  const visibleClues = showReviewed ? clues : pendingClues
   const action = detail?.schemaVersion === 'tianwen.long-goal-status.v1'
     ? taskAction(detail, sessionList)
     : undefined
@@ -915,7 +834,6 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '16px 0' }}>
                 <button type="button" onClick={() => void refresh()} style={buttonStyle}>{t('list.refresh')}</button>
                 <button type="button" onClick={() => setView('create')} style={buttonStyle}>{t('list.create')}</button>
-                <button type="button" onClick={() => openClues()} style={buttonStyle}>{t('clues.open', { count: pendingClues.length })}</button>
               </div>
               {goals.length === 0 && !loading ? <div>
                 <p>{t('list.empty')}</p>
@@ -941,52 +859,17 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
                   </li>)}
                 </ul>
               )}
+              <details style={{ marginTop: 16 }}>
+                <summary>{t('audit.title')}</summary>
+                {audit.length === 0 ? <p>{t('audit.empty')}</p> : <ul>
+                  {audit.map(item => <li key={item.analysisId}>
+                    <code>{item.analysisId}</code> — {item.phase} — <time dateTime={item.updatedAt}>{item.updatedAt}</time>
+                    {item.evidenceDigests.length > 0 && <div>{item.evidenceDigests.join(', ')}</div>}
+                    {item.recovery !== null && <div>{item.recovery.resumePhase}</div>}
+                  </li>)}
+                </ul>}
+              </details>
             </>}
-            {view === 'clues' && <div style={{ display: 'grid', gap: 10, marginTop: 16 }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                <button type="button" onClick={() => void refresh()} style={buttonStyle}>{t('clues.refresh')}</button>
-                <button type="button" onClick={backToList} style={buttonStyle}>{t('clues.back')}</button>
-                <span style={{ alignSelf: 'center' }}>{t('clues.reviewedCount', { count: reviewedClueCount })}</span>
-                {reviewedClueCount > 0 && <button type="button" onClick={() => setShowReviewed(current => !current)} style={buttonStyle}>
-                  {t(showReviewed ? 'clues.hideReviewed' : 'clues.showReviewed')}
-                </button>}
-              </div>
-              {clues.length === 0 && !loading
-                ? <p>{t('clues.empty')}</p>
-                : visibleClues.length === 0 && !loading
-                  ? <p>{t('clues.pendingEmpty')}</p>
-                : <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 8 }}>
-                    {visibleClues.map(clue => <li
-                      key={clue.ticketId}
-                      aria-current={clue.ticketId === focusedTicketId ? 'true' : undefined}
-                      style={{ border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8, padding: 10 }}
-                    >
-                      <strong>{t('clues.occurrences', { count: clue.occurrenceCount })}</strong>
-                      <ul style={{ margin: '8px 0 0', padding: 0, listStyle: 'none', display: 'grid', gap: 8 }}>
-                        {clue.sources.map(source => <li key={`${source.longGoalId}:${source.taskId}`}>
-                          <button type="button" onClick={() => void openDetail(source.longGoalId)} style={{ ...buttonStyle, width: '100%', textAlign: 'left' }}>
-                            <strong>{source.goalObjective}</strong><br />
-                            <span>{source.taskObjective}</span><br />
-                            <time dateTime={source.recordedAt}>{source.recordedAt}</time>
-                          </button>
-                        </li>)}
-                      </ul>
-                      {clue.analysis === null
-                        ? <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-                            <p style={{ margin: 0 }}>{t('clues.analysisPrivacy')}</p>
-                            <div>
-                              <button type="button" disabled={loading} onClick={() => void analyzeClue(clue.ticketId)} style={buttonStyle}>{t('clues.analyze')}</button>
-                            </div>
-                          </div>
-                        : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 8 }}>
-                            <span role="status">{t(analysisPhaseKeys[clue.analysis.phase])}</span>
-                            <button type="button" disabled={loading} onClick={() => void openBoundSession(clue.analysis!.sessionId)} style={buttonStyle}>{t('clues.openAnalysis')}</button>
-                            {clue.review === null && clue.analysis.phase !== 'running' &&
-                              <button type="button" disabled={loading} onClick={() => void reviewClue(clue.ticketId)} style={buttonStyle}>{t('clues.markReviewed')}</button>}
-                          </div>}
-                    </li>)}
-                  </ul>}
-            </div>}
             {view === 'create' && <form onSubmit={event => { event.preventDefault(); void createPlan() }} style={{ display: 'grid', gap: 10, marginTop: 16 }}>
               <label>{t('form.goal')}<textarea value={objective} onChange={event => setObjective(event.target.value)} required style={fieldStyle} /></label>
               <label>{t('form.context')}<textarea value={context} onChange={event => setContext(event.target.value)} style={fieldStyle} /></label>
