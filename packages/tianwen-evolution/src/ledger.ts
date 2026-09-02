@@ -45,6 +45,7 @@ import type {
 } from './learning-intake.js'
 import {
   assertLearningAnalysisEvidenceClosure,
+  learningAnalysisEvidenceClosure,
   learningAnalysisId,
   learningAnalysisSubmissionPhase,
   parseLearningAnalysisSubmission,
@@ -4461,17 +4462,20 @@ export class EvolutionLedger {
     status: LearningAnalysisStatus,
   ): ReadonlySet<Sha256Digest> {
     const ticket = this.#learningTickets.get(status.ticketId)
-    const evidenceIds = new Set<Sha256Digest>()
-    for (const signalId of ticket?.signalIds ?? []) {
-      const signal = this.#learningSignals.get(signalId)
-      if (
-        signal === undefined
-        || (!isOutcomeSignal(signal)
-          && this.#inactiveLearningSignals.has(signal.signalId))
-      ) continue
-      for (const evidenceId of signal.evidenceIds) evidenceIds.add(evidenceId)
-    }
-    return evidenceIds
+    return learningAnalysisEvidenceClosure(status.sessionId, (ticket?.signalIds ?? [])
+      .map(signalId => this.#learningSignals.get(signalId))
+      .filter((signal): signal is LearningSignal | OutcomeLearningSignal =>
+        signal !== undefined)
+      .map(signal => ({
+        sessionId: signal.sessionId,
+        sessionDigest: signal.sessionDigest,
+        evidenceIds: signal.evidenceIds,
+        source: isOutcomeSignal(signal)
+          ? 'outcome' as const
+          : 'explicit-correction' as const,
+        active: !isOutcomeSignal(signal)
+          && !this.#inactiveLearningSignals.has(signal.signalId),
+      })))
   }
 
   #learningAnalysisHasActiveSupport(status: LearningAnalysisStatus): boolean {
@@ -4479,12 +4483,26 @@ export class EvolutionLedger {
     return ticket?.signalIds.some(signalId => {
       const signal = this.#learningSignals.get(signalId)
       if (signal === undefined) return false
-      if (isOutcomeSignal(signal)) return true
+      if (isOutcomeSignal(signal)) return false
       if (this.#inactiveLearningSignals.has(signal.signalId)) return false
       return signal.sessionId !== status.sessionId
         || signal.messageId !== status.messageId
         || signal.feedbackVersion === status.feedbackVersion
     }) === true
+  }
+
+  #assertLearningAnalysisTimestamp(
+    status: LearningAnalysisStatus,
+    timestamp: string,
+  ): void {
+    const latest = status.submittedAt
+      ?? status.childStartedAt
+      ?? status.requestedAt
+    if (Date.parse(timestamp) < Date.parse(latest)) {
+      throw new LedgerIntegrityError(
+        'learning analysis lifecycle timestamp goes backwards',
+      )
+    }
   }
 
   #invalidateUnsupportedLearningAnalyses(): void {
@@ -6039,6 +6057,7 @@ export class EvolutionLedger {
         || event.parentSessionId !== status.parentSessionId
         || event.childSessionId !== status.childSessionId
       ) throw new LedgerIntegrityError('learning analysis child start disagrees with history')
+      this.#assertLearningAnalysisTimestamp(status, event.at)
       return
     }
     if (event.type === 'learning-analysis-submitted') {
@@ -6049,6 +6068,7 @@ export class EvolutionLedger {
         || status.submission !== undefined
         || event.childSessionId !== status.childSessionId
       ) throw new LedgerIntegrityError('learning analysis submission disagrees with history')
+      this.#assertLearningAnalysisTimestamp(status, event.at)
       try {
         assertLearningAnalysisEvidenceClosure(
           event.submission,
@@ -6071,6 +6091,7 @@ export class EvolutionLedger {
         || status.phase === 'promoted'
         || status.phase === 'rolled-back'
       ) throw new LedgerIntegrityError('learning analysis invalidation disagrees with support')
+      this.#assertLearningAnalysisTimestamp(status, event.at)
       return
     }
     if (event.type === 'learning-analysis-consent-recorded') {

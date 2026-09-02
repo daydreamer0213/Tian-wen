@@ -89,6 +89,10 @@ import {
   type Sha256Digest,
 } from '../../packages/tianwen-evolution/src/index.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
+import {
+  assertLearningAnalysisEvidenceClosure,
+  learningAnalysisEvidenceClosure,
+} from '../../packages/tianwen-evolution/src/learning-analysis.js'
 
 const lifecycle = `sha256:${'a'.repeat(64)}` as const
 const evidenceA = `sha256:${'1'.repeat(64)}` as const
@@ -181,6 +185,55 @@ afterEach(() => {
 })
 
 describe('durable explicit-correction analysis lifecycle', () => {
+  it('excludes cross-session, session-digest, Outcome, and retracted Evidence from analysis closure', () => {
+    const sessionDigest = `sha256:${'0'.repeat(64)}` as Sha256Digest
+    const outcomeEvidence = `sha256:${'7'.repeat(64)}` as Sha256Digest
+    const closure = learningAnalysisEvidenceClosure('main-session', [
+      {
+        sessionId: 'main-session',
+        sessionDigest,
+        evidenceIds: [evidenceA],
+        source: 'explicit-correction',
+        active: true,
+      },
+      {
+        sessionId: 'second-session',
+        sessionDigest: `sha256:${'3'.repeat(64)}`,
+        evidenceIds: [evidenceB],
+        source: 'explicit-correction',
+        active: true,
+      },
+      {
+        sessionId: 'main-session',
+        sessionDigest: `sha256:${'4'.repeat(64)}`,
+        evidenceIds: [`sha256:${'5'.repeat(64)}`],
+        source: 'explicit-correction',
+        active: false,
+      },
+      {
+        sessionId: 'main-session',
+        sessionDigest: `sha256:${'6'.repeat(64)}`,
+        evidenceIds: [outcomeEvidence],
+        source: 'outcome',
+        active: true,
+      },
+    ])
+
+    expect([...closure]).toEqual([evidenceA])
+    expect(() => assertLearningAnalysisEvidenceClosure(skillChange({
+      supportingEvidenceIds: [evidenceB],
+      counterevidenceIds: [],
+    }), closure)).toThrow(/Evidence closure/u)
+    expect(() => assertLearningAnalysisEvidenceClosure(skillChange({
+      supportingEvidenceIds: [sessionDigest],
+      counterevidenceIds: [],
+    }), closure)).toThrow(/Evidence closure/u)
+    expect(() => assertLearningAnalysisEvidenceClosure(skillChange({
+      supportingEvidenceIds: [outcomeEvidence],
+      counterevidenceIds: [],
+    }), closure)).toThrow(/Evidence closure/u)
+  })
+
   it('reserves deterministic analysis and child identities before child start', () => {
     const { ledger, root, ticketId } = seededLedger('request')
 
@@ -618,9 +671,11 @@ describe('durable explicit-correction analysis lifecycle', () => {
     expect(() => new EvolutionLedger(root)).toThrow(LedgerIntegrityError)
   })
 
-  it('admits only Evidence from currently active Signals in the Ticket', () => {
+  it('admits only Evidence from an active explicit correction in the analysis Session', () => {
     const { ledger, ticketId } = seededLedger('active-evidence-closure')
-    const otherEvidence = `sha256:${'9'.repeat(64)}` as Sha256Digest
+    const crossSessionEvidence = `sha256:${'9'.repeat(64)}` as Sha256Digest
+    const retractedEvidence = `sha256:${'8'.repeat(64)}` as Sha256Digest
+    const outcomeEvidence = `sha256:${'7'.repeat(64)}` as Sha256Digest
     ledger.recordLearningFeedbackRevision({
       intake: {
         sessionId: 'second-session',
@@ -630,18 +685,32 @@ describe('durable explicit-correction analysis lifecycle', () => {
         note: 'KEEP THE ANSWER CONCRETE.',
         scopeKey: 'project:tianwen/capability:research-summary',
         sessionDigest: `sha256:${'3'.repeat(64)}`,
-        evidenceIds: [otherEvidence],
+        evidenceIds: [crossSessionEvidence],
       },
       sessionLifecycleFingerprint: `sha256:${'b'.repeat(64)}`,
       analysisConsentRevision: 1,
     })
-    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
-    ledger.recordLearningFeedbackRetraction({
-      sessionId: 'main-session',
-      messageId: 'assistant-message',
-      retractedFeedbackVersion: 'feedback-v1',
-      sessionLifecycleFingerprint: lifecycle,
+    ledger.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: 'retracted-session',
+        messageId: 'retracted-message',
+        feedbackVersion: 'feedback-retracted',
+        rating: 'negative',
+        note: 'KEEP THE ANSWER CONCRETE.',
+        scopeKey: 'project:tianwen/capability:research-summary',
+        sessionDigest: `sha256:${'4'.repeat(64)}`,
+        evidenceIds: [retractedEvidence],
+      },
+      sessionLifecycleFingerprint: `sha256:${'c'.repeat(64)}`,
+      analysisConsentRevision: 1,
     })
+    ledger.recordLearningFeedbackRetraction({
+      sessionId: 'retracted-session',
+      messageId: 'retracted-message',
+      retractedFeedbackVersion: 'feedback-retracted',
+      sessionLifecycleFingerprint: `sha256:${'c'.repeat(64)}`,
+    })
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
     ledger.recordLearningAnalysisChildStarted({
       analysisId: requested.analysisId,
       parentSessionId: requested.parentSessionId,
@@ -652,7 +721,31 @@ describe('durable explicit-correction analysis lifecycle', () => {
       analysisId: requested.analysisId,
       childSessionId: requested.childSessionId,
       submission: skillChange({
-        supportingEvidenceIds: [evidenceA],
+        supportingEvidenceIds: [crossSessionEvidence],
+        counterevidenceIds: [],
+      }),
+    })).toThrow(/Evidence closure/u)
+    expect(() => ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange({
+        supportingEvidenceIds: [`sha256:${'0'.repeat(64)}`],
+        counterevidenceIds: [],
+      }),
+    })).toThrow(/Evidence closure/u)
+    expect(() => ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange({
+        supportingEvidenceIds: [retractedEvidence],
+        counterevidenceIds: [],
+      }),
+    })).toThrow(/Evidence closure/u)
+    expect(() => ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange({
+        supportingEvidenceIds: [outcomeEvidence],
         counterevidenceIds: [],
       }),
     })).toThrow(/Evidence closure/u)
@@ -660,9 +753,97 @@ describe('durable explicit-correction analysis lifecycle', () => {
       analysisId: requested.analysisId,
       childSessionId: requested.childSessionId,
       submission: skillChange({
-        supportingEvidenceIds: [otherEvidence],
+        supportingEvidenceIds: [evidenceA],
         counterevidenceIds: [],
       }),
     })).toMatchObject({ duplicate: false, phase: 'running' })
+  })
+
+  it('rejects live lifecycle transitions whose timestamp goes backwards', () => {
+    let now = '2026-09-02T00:00:00.000Z'
+    const root = ledgerRoot('backwards-live')
+    const ledger = new EvolutionLedger(root, { clock: () => now })
+    ledger.recordLearningAnalysisConsent({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    const feedback = ledger.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: 'main-session',
+        messageId: 'assistant-message',
+        feedbackVersion: 'feedback-v1',
+        rating: 'negative',
+        note: 'Keep the answer concrete.',
+        scopeKey: 'project:tianwen/capability:research-summary',
+        sessionDigest: `sha256:${'0'.repeat(64)}`,
+        evidenceIds: [evidenceA, evidenceB],
+      },
+      sessionLifecycleFingerprint: lifecycle,
+      analysisConsentRevision: 1,
+    })
+    const requested = ledger.requestLearningAnalysis(requestInput(feedback.ticketId!))
+
+    now = '2026-09-01T23:59:59.999Z'
+    expect(() => ledger.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    })).toThrow(/timestamp/u)
+
+    now = '2026-09-02T00:00:00.001Z'
+    ledger.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    })
+    now = '2026-09-02T00:00:00.000Z'
+    expect(() => ledger.recordLearningAnalysisSubmission({
+      analysisId: requested.analysisId,
+      childSessionId: requested.childSessionId,
+      submission: skillChange(),
+    })).toThrow(/timestamp/u)
+  })
+
+  it('rejects a cold-replayed lifecycle whose event timestamps go backwards', () => {
+    let now = '2026-09-02T00:00:00.000Z'
+    const root = ledgerRoot('backwards-cold-replay')
+    const ledger = new EvolutionLedger(root, { clock: () => now })
+    ledger.recordLearningAnalysisConsent({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    const feedback = ledger.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: 'main-session',
+        messageId: 'assistant-message',
+        feedbackVersion: 'feedback-v1',
+        rating: 'negative',
+        note: 'Keep the answer concrete.',
+        scopeKey: 'project:tianwen/capability:research-summary',
+        sessionDigest: `sha256:${'0'.repeat(64)}`,
+        evidenceIds: [evidenceA, evidenceB],
+      },
+      sessionLifecycleFingerprint: lifecycle,
+      analysisConsentRevision: 1,
+    })
+    const requested = ledger.requestLearningAnalysis(requestInput(feedback.ticketId!))
+    now = '2026-09-02T00:00:00.001Z'
+    ledger.recordLearningAnalysisChildStarted({
+      analysisId: requested.analysisId,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+    })
+    const path = join(root, 'ledger.jsonl')
+    const lines = readFileSync(path, 'utf8').trimEnd().split('\n')
+    const childIndex = lines.findIndex(line =>
+      line.includes('learning-analysis-child-started'))
+    const child = JSON.parse(lines[childIndex]!) as { at: string }
+    child.at = '2026-09-01T23:59:59.999Z'
+    lines[childIndex] = JSON.stringify(child)
+    writeFileSync(path, `${lines.join('\n')}\n`, 'utf8')
+
+    expect(() => new EvolutionLedger(root)).toThrow(/timestamp/u)
   })
 })

@@ -49,6 +49,14 @@ export interface LearningAnalysisSubmission {
   readonly counterevidenceIds: readonly Sha256Digest[]
 }
 
+export interface LearningAnalysisEvidenceSignal {
+  readonly sessionId: string
+  readonly sessionDigest: Sha256Digest
+  readonly evidenceIds: readonly Sha256Digest[]
+  readonly source: 'explicit-correction' | 'outcome'
+  readonly active: boolean
+}
+
 export interface RequestLearningAnalysisInput {
   readonly ticketId: LearningTicketId
   readonly sessionId: string
@@ -296,6 +304,22 @@ export function assertLearningAnalysisEvidenceClosure(
     [...submission.supportingEvidenceIds, ...submission.counterevidenceIds]
       .some(id => !allowedEvidenceIds.has(id))
   ) throw new TypeError('learning analysis Evidence closure was exceeded')
+}
+
+export function learningAnalysisEvidenceClosure(
+  sessionId: string,
+  signals: readonly LearningAnalysisEvidenceSignal[],
+): ReadonlySet<Sha256Digest> {
+  const evidenceIds = new Set<Sha256Digest>()
+  for (const signal of signals) {
+    if (
+      signal.source !== 'explicit-correction'
+      || !signal.active
+      || signal.sessionId !== sessionId
+    ) continue
+    for (const evidenceId of signal.evidenceIds) evidenceIds.add(evidenceId)
+  }
+  return evidenceIds
 }
 
 export function learningAnalysisSubmissionPhase(
