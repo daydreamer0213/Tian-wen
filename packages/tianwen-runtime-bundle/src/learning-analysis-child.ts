@@ -8,7 +8,12 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { formatSessionReferenceMention } from '@deepseek-ai/dsh-session-reference'
 import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
-import type { LearningAnalysisId, LearningAnalysisStatus } from '@tianwen/evolution'
+import {
+  LedgerAppendNotCommittedError,
+  TianwenEvolutionService,
+  type LearningAnalysisId,
+  type LearningAnalysisStatus,
+} from '@tianwen/evolution'
 
 import { installLearningAnalysisTool } from './learning-analysis-tool.js'
 
@@ -68,16 +73,123 @@ function requireActiveInput(
   return intake
 }
 
+function ownEvents(
+  events: readonly unknown[],
+  metadata: { readonly seedLength?: unknown },
+): readonly unknown[] {
+  const seedLength = metadata.seedLength
+  return events.slice(
+    typeof seedLength === 'number' && Number.isSafeInteger(seedLength) && seedLength >= 0
+      ? seedLength
+      : 0,
+  )
+}
+
+function exactDescriptor(events: readonly unknown[]): boolean {
+  const descriptor = foldSubagentDescriptor(events as never)
+  return descriptor?.mode === 'continuable'
+    && descriptor.provider === 'spawn'
+    && descriptor.label === CHILD_LABEL
+    && descriptor.persona === READ_ONLY_PERSONA
+    && JSON.stringify(descriptor.toolFilter) === JSON.stringify({ allow: [] })
+}
+
+function exactPersistedChild(
+  status: LearningAnalysisStatus,
+  child: {
+    readonly meta: {
+      readonly id: unknown
+      readonly parentSession?: unknown
+      readonly origin?: unknown
+      readonly seedLength?: unknown
+    }
+    readonly events: readonly unknown[]
+  },
+): boolean {
+  return String(child.meta.id) === status.childSessionId
+    && String(child.meta.parentSession) === status.parentSessionId
+    && child.meta.origin === 'subagent'
+    && exactDescriptor(ownEvents(child.events, child.meta))
+}
+
+function exactLiveChild(status: LearningAnalysisStatus, child: Agent): boolean {
+  return String(child.session.id) === status.childSessionId
+    && String(child.session.header.parentSession) === status.parentSessionId
+    && child.session.header.origin === 'subagent'
+    && exactDescriptor(ownEvents(child.session.events, child.session.header))
+}
+
+function isMissingSession(error: unknown): boolean {
+  return error instanceof Error && /not found|unknown session|ENOENT/ui.test(error.message)
+}
+
+async function readDurableAnalysis(
+  evolutionRoot: string | undefined,
+  analysisId: LearningAnalysisId,
+): Promise<LearningAnalysisStatus | undefined> {
+  if (evolutionRoot === undefined) return undefined
+  const probe = new Context()
+  try {
+    await probe.plugin(TianwenEvolutionService, { root: evolutionRoot })
+    return probe.tianwenEvolution.getLearningAnalysis(analysisId)
+  } finally {
+    await probe.fiber.dispose()
+  }
+}
+
+function exactRunning(
+  status: LearningAnalysisStatus | undefined,
+  expected: LearningAnalysisStatus,
+): status is LearningAnalysisStatus {
+  return status?.phase === 'running'
+    && status.parentSessionId === expected.parentSessionId
+    && status.childSessionId === expected.childSessionId
+}
+
+async function recordStarted(
+  ctx: Context,
+  status: LearningAnalysisStatus,
+  evolutionRoot: string | undefined,
+): Promise<LearningAnalysisStatus> {
+  const input = {
+    analysisId: status.analysisId,
+    parentSessionId: status.parentSessionId,
+    childSessionId: status.childSessionId,
+  }
+  try {
+    return ctx.tianwenEvolution.recordLearningAnalysisChildStarted(input)
+  } catch (error) {
+    if (error instanceof LedgerAppendNotCommittedError) {
+      return ctx.tianwenEvolution.recordLearningAnalysisChildStarted(input)
+    }
+    const durable = await readDurableAnalysis(evolutionRoot, status.analysisId)
+    if (exactRunning(durable, status)) return durable
+    throw error
+  }
+}
+
+function interruptAcceptedChild(
+  ctx: Context,
+  status: LearningAnalysisStatus,
+): void {
+  ctx.subagents.interrupt(SessionId(status.childSessionId), {
+    kind: 'user', parentSessionId: SessionId(status.parentSessionId),
+  })
+}
+
 export async function startLearningAnalysisChild(
   ctx: Context,
   input: StartLearningAnalysisChildInput,
+  evolutionRoot?: string,
 ): Promise<LearningAnalysisStatus> {
   input.signal.throwIfAborted()
-  if (ctx.tianwenEvolution.blocked) {
-    throw new Error('learning analysis requires a fresh Evolution replay')
-  }
   const status = ctx.tianwenEvolution.getLearningAnalysis(input.analysisId)
   if (status === undefined) throw new Error('unknown learning analysis')
+  if (ctx.tianwenEvolution.blocked) {
+    const durable = await readDurableAnalysis(evolutionRoot, status.analysisId)
+    if (exactRunning(durable, status)) return durable
+    throw new Error('learning analysis requires a fresh Evolution replay')
+  }
   if (!exactLiveMainParent(ctx, input.parent, status)) {
     throw new Error('learning analysis requires the exact live main parent')
   }
@@ -107,6 +219,24 @@ export async function startLearningAnalysisChild(
     || feedback.latest.messageId !== status.messageId
     || feedback.latest.recordedAt !== exactIntake?.recordedAt
   ) throw new Error('learning analysis private feedback is unavailable for the exact binding')
+  const liveChild = ctx.agents.get(SessionId(status.childSessionId))
+  if (liveChild !== undefined && !exactLiveChild(status, liveChild)) {
+    throw new Error('learning analysis existing child is not the exact bound native child')
+  }
+  let persistedChild: Awaited<ReturnType<Context['sessionPersistence']['inspect']>> | undefined
+  try {
+    persistedChild = await ctx.sessionPersistence.inspect(SessionId(status.childSessionId))
+  } catch (error) {
+    if (!isMissingSession(error)) {
+      throw new Error('learning analysis child persistence is unavailable', { cause: error })
+    }
+  }
+  if (persistedChild !== undefined && !exactPersistedChild(status, persistedChild)) {
+    throw new Error('learning analysis existing child is not the exact bound native child')
+  }
+  if (liveChild !== undefined && persistedChild === undefined) {
+    throw new Error('learning analysis child live and durable facts disagree')
+  }
   input.signal.throwIfAborted()
   const beforeStart = ctx.tianwenEvolution.getLearningAnalysis(status.analysisId)
   if (
@@ -136,31 +266,41 @@ export async function startLearningAnalysisChild(
   }]
   const selection = (ctx as LearningAnalysisChildContext)
     .agentDefaultModel.currentSelection()
-  const started = await ctx.subagents.startContinuable({
-    provider: 'spawn',
-    label: CHILD_LABEL,
-    childId: SessionId(status.childSessionId),
-    request: {
-      parent: input.parent,
-      prompt,
-      agentOptions: selection,
-      persona: READ_ONLY_PERSONA,
-      // rc.2 validates allow names against global tools. Emptying globals here
-      // lets the child-scoped setup below add the sole submission capability.
-      toolFilter: { allow: [] },
-    },
-    signal: input.signal,
-  })
-  if (String(started.childId) !== status.childSessionId) {
-    throw new Error('learning analysis native child identity mismatch')
+  if (persistedChild === undefined) {
+    const started = await ctx.subagents.startContinuable({
+      provider: 'spawn',
+      label: CHILD_LABEL,
+      childId: SessionId(status.childSessionId),
+      request: {
+        parent: input.parent,
+        prompt,
+        agentOptions: selection,
+        persona: READ_ONLY_PERSONA,
+        // rc.2 validates allow names against global tools. Emptying globals here
+        // lets the child-scoped setup below add the sole submission capability.
+        toolFilter: { allow: [] },
+      },
+      signal: input.signal,
+    })
+    if (String(started.childId) !== status.childSessionId) {
+      throw new Error('learning analysis native child identity mismatch')
+    }
+    try {
+      const admitted = ctx.tianwenEvolution.getLearningAnalysis(status.analysisId)
+      if (
+        admitted === undefined
+        || admitted.phase !== 'pending-parent'
+        || admitted.submission !== undefined
+        || !exactLiveMainParent(ctx, input.parent, admitted)
+      ) throw new Error('learning analysis admission changed after native child acceptance')
+      requireActiveInput(ctx, admitted)
+    } catch (error) {
+      interruptAcceptedChild(ctx, status)
+      throw error
+    }
   }
-  ctx.tianwenEvolution.recordLearningAnalysisChildStarted({
-    analysisId: status.analysisId,
-    parentSessionId: status.parentSessionId,
-    childSessionId: status.childSessionId,
-  })
-  const recorded = ctx.tianwenEvolution.getLearningAnalysis(status.analysisId)
-  if (recorded?.phase !== 'running') {
+  const recorded = await recordStarted(ctx, status, evolutionRoot)
+  if (!exactRunning(recorded, status)) {
     throw new Error('learning analysis child start is not durable')
   }
   return recorded
@@ -225,6 +365,6 @@ export class TianwenLearningAnalysisChildService extends Service {
   }
 
   start(input: StartLearningAnalysisChildInput): Promise<LearningAnalysisStatus> {
-    return startLearningAnalysisChild(this.ctx, input)
+    return startLearningAnalysisChild(this.ctx, input, this.evolutionRoot)
   }
 }

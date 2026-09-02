@@ -6,6 +6,7 @@ import {
   TianwenEvolutionService,
   assertLearningAnalysisEvidenceClosure,
   parseLearningAnalysisSubmission,
+  sha256,
   type LearningAnalysisStatus,
   type LearningAnalysisSubmission,
 } from '@tianwen/evolution'
@@ -16,7 +17,7 @@ function exactSubmission(
   actual: LearningAnalysisSubmission | undefined,
   expected: LearningAnalysisSubmission,
 ): boolean {
-  return actual !== undefined && JSON.stringify(actual) === JSON.stringify(expected)
+  return actual !== undefined && sha256(actual) === sha256(expected)
 }
 
 async function readDurableAnalysis(
@@ -151,60 +152,55 @@ export function createLearningAnalysisTool(
     async execute(args, exec) {
       exec.signal.throwIfAborted()
       let status = requireBoundChild(ctx, exec.agent)
-      assertActiveConsent(ctx, status)
-      if (status.submission !== undefined) {
-        throw new Error('learning analysis was already submitted')
-      }
-      if (status.phase === 'pending-parent') {
-        if (ctx.tianwenEvolution.blocked) {
-          throw new Error('learning analysis requires a fresh Evolution replay')
-        }
-        ctx.tianwenEvolution.recordLearningAnalysisChildStarted({
-          analysisId: status.analysisId,
-          parentSessionId: status.parentSessionId,
-          childSessionId: status.childSessionId,
-        })
-        status = ctx.tianwenEvolution.getLearningAnalysis(status.analysisId)!
-      }
-      if (status.phase !== 'running' || status.submission !== undefined) {
-        throw new Error('learning analysis submission is not in the running phase')
-      }
       const submission = parseLearningAnalysisSubmission(args)
-      assertLearningAnalysisEvidenceClosure(
-        submission,
-        evidenceClosure(ctx, status),
-      )
-
-      let recorded: LearningAnalysisStatus
-      if (ctx.tianwenEvolution.blocked) {
-        const durable = await readDurableAnalysis(evolutionRoot, status.analysisId)
-        if (
-          durable?.childSessionId !== status.childSessionId
-          || !exactSubmission(durable.submission, submission)
-        ) throw new Error('learning analysis requires a fresh Evolution replay')
-        recorded = durable
+      if (status.submission !== undefined) {
+        if (!exactSubmission(status.submission, submission)) {
+          throw new Error('learning analysis was already submitted')
+        }
       } else {
-        try {
-          const receipt = ctx.tianwenEvolution.recordLearningAnalysisSubmission({
-            analysisId: status.analysisId,
-            childSessionId: status.childSessionId,
-            submission,
-          })
-          if (receipt.duplicate) {
-            throw new Error('learning analysis was already submitted')
-          }
-          recorded = receipt
-        } catch (error) {
-          if (
-            !(error instanceof LedgerCommitUnknownError)
-            && !ctx.tianwenEvolution.blocked
-          ) throw error
+        assertActiveConsent(ctx, status)
+      }
+      if (status.submission === undefined) {
+        if (status.phase === 'pending-parent') {
+          throw new Error('learning analysis private delivery is not yet durable')
+        }
+        if (status.phase !== 'running') {
+          throw new Error('learning analysis submission is not in the running phase')
+        }
+      }
+
+      let recorded = status
+      if (status.submission === undefined) {
+        assertLearningAnalysisEvidenceClosure(
+          submission,
+          evidenceClosure(ctx, status),
+        )
+        if (ctx.tianwenEvolution.blocked) {
           const durable = await readDurableAnalysis(evolutionRoot, status.analysisId)
           if (
             durable?.childSessionId !== status.childSessionId
             || !exactSubmission(durable.submission, submission)
-          ) throw error
+          ) throw new Error('learning analysis requires a fresh Evolution replay')
           recorded = durable
+        } else {
+          try {
+            recorded = ctx.tianwenEvolution.recordLearningAnalysisSubmission({
+              analysisId: status.analysisId,
+              childSessionId: status.childSessionId,
+              submission,
+            })
+          } catch (error) {
+            if (
+              !(error instanceof LedgerCommitUnknownError)
+              && !ctx.tianwenEvolution.blocked
+            ) throw error
+            const durable = await readDurableAnalysis(evolutionRoot, status.analysisId)
+            if (
+              durable?.childSessionId !== status.childSessionId
+              || !exactSubmission(durable.submission, submission)
+            ) throw error
+            recorded = durable
+          }
         }
       }
       if (!exactSubmission(recorded.submission, submission)) {

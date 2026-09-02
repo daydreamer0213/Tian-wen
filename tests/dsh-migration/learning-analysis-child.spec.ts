@@ -20,7 +20,10 @@ import type {
   LearningAnalysisSubmission,
   LearningTicketId,
 } from '@tianwen/evolution'
-import { LedgerCommitUnknownError } from '../../packages/tianwen-evolution/dist/index.js'
+import {
+  LedgerAppendNotCommittedError,
+  LedgerCommitUnknownError,
+} from '../../packages/tianwen-evolution/dist/index.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 
 import {
@@ -209,7 +212,7 @@ function startContext(
   }
   const parent = parentAgent()
   const ctx = {
-    agents: { get: vi.fn(() => parent) },
+    agents: { get: vi.fn((id: string) => id === 'main-session' ? parent : undefined) },
     agentDefaultModel: {
       currentSelection: vi.fn(() => ({
         provider: 'deepseek-official',
@@ -217,12 +220,12 @@ function startContext(
       })),
     },
     sessionPersistence: {
-      inspect: vi.fn().mockResolvedValue({
-        meta: { id: 'main-session', createdAt: 1 },
-        events: [],
+      inspect: vi.fn((id: string) => {
+        if (id === childSessionId) return Promise.reject(new Error('session not found'))
+        return Promise.resolve({ meta: { id: 'main-session', createdAt: 1 }, events: [] })
       }),
     },
-    subagents: { startContinuable },
+    subagents: { startContinuable, followup: vi.fn(), interrupt: vi.fn() },
     tianwenEvolution: evolution,
     ...overrides,
   }
@@ -250,6 +253,15 @@ function skillChange(): LearningAnalysisSubmission {
       whenToUse: 'Use after a durable change.',
       content: 'Run the bounded check and report its observed result.',
     },
+    supportingEvidenceIds: [evidenceId],
+    counterevidenceIds: [],
+  }
+}
+
+function noCase(): LearningAnalysisSubmission {
+  return {
+    verdict: 'no-case',
+    hypothesis: 'The correction has no supported recurring defect.',
     supportingEvidenceIds: [evidenceId],
     counterevidenceIds: [],
   }
@@ -487,6 +499,33 @@ describe('native explicit-correction analysis child', () => {
     expect(unreadable.startContinuable).not.toHaveBeenCalled()
   })
 
+  it('rechecks consent after the Session Reference read before native start admits a model request', async () => {
+    const subject = startContext()
+    let resolveReference: ((value: { meta: { id: string, createdAt: number }, events: [] }) => void) | undefined
+    subject.ctx.sessionPersistence.inspect.mockImplementation((id: string) => {
+      if (id === childSessionId) return Promise.reject(new Error('session not found'))
+      return new Promise(resolve => { resolveReference = resolve })
+    })
+    const pending = startLearningAnalysisChild(subject.ctx as never, {
+      analysisId,
+      parent: subject.parent,
+      signal: AbortSignal.timeout(10_000),
+    })
+    await vi.waitFor(() => expect(subject.ctx.sessionPersistence.inspect)
+      .toHaveBeenCalledWith('main-session'))
+    subject.evolution.getLearningAnalysisConsent.mockReturnValue({
+      revision: 2,
+      enabled: false,
+      policyVersion: 'tianwen-auto-analysis.v1',
+      recordedAt: '2026-09-02T00:00:01.000Z',
+    })
+    resolveReference!({ meta: { id: 'main-session', createdAt: 1 }, events: [] })
+
+    await expect(pending).rejects.toThrow(/consent/u)
+    expect(subject.getLearningTicketFeedback).not.toHaveBeenCalled()
+    expect(subject.startContinuable).not.toHaveBeenCalled()
+  })
+
   it('binds a private note to the exact feedback revision even when revisions share a timestamp', async () => {
     const stale = startContext()
     stale.getLearningIntakeStatus.mockReturnValue({
@@ -555,6 +594,214 @@ describe('native explicit-correction analysis child', () => {
       signal: AbortSignal.timeout(10_000),
     })).rejects.toThrow(/live main parent/u)
     expect(childParent.startContinuable).not.toHaveBeenCalled()
+  })
+
+  it('retries only the child-start ledger append after native inbox acceptance', async () => {
+    const subject = startContext()
+    subject.evolution.recordLearningAnalysisChildStarted
+      .mockImplementationOnce(() => {
+        throw new LedgerAppendNotCommittedError('ledger append wrote no bytes; retry may proceed')
+      })
+      .mockImplementationOnce(() => ({
+        ...status({ phase: 'running', childStartedAt: '2026-09-02T00:00:00.001Z' }),
+        duplicate: false,
+      }))
+
+    await expect(startLearningAnalysisChild(subject.ctx as never, {
+      analysisId,
+      parent: subject.parent,
+      signal: AbortSignal.timeout(10_000),
+    })).resolves.toMatchObject({ phase: 'running' })
+
+    expect(subject.startContinuable).toHaveBeenCalledOnce()
+    expect(subject.evolution.recordLearningAnalysisChildStarted).toHaveBeenCalledTimes(2)
+  })
+
+  it('adopts one exact persisted child after a cold restart without another prompt', async () => {
+    const subject = startContext()
+    subject.ctx.sessionPersistence.inspect.mockImplementation((id: string) => {
+      if (id === childSessionId) {
+        return Promise.resolve({
+          meta: {
+            id: childSessionId,
+            parentSession: 'main-session',
+            origin: 'subagent',
+            seedLength: 1,
+          },
+          events: [{ type: 'ancestor/seed' }, analysisDescriptorEvent()],
+        })
+      }
+      return Promise.resolve({ meta: { id: 'main-session', createdAt: 1 }, events: [] })
+    })
+
+    await expect(startLearningAnalysisChild(subject.ctx as never, {
+      analysisId,
+      parent: subject.parent,
+      signal: AbortSignal.timeout(10_000),
+    })).resolves.toMatchObject({ phase: 'running' })
+
+    expect(subject.startContinuable).not.toHaveBeenCalled()
+    expect(subject.evolution.recordLearningAnalysisChildStarted).toHaveBeenCalledOnce()
+  })
+
+  it('fails closed instead of adopting a persisted child with the wrong lineage', async () => {
+    const subject = startContext()
+    subject.ctx.sessionPersistence.inspect.mockImplementation((id: string) => {
+      if (id === childSessionId) {
+        return Promise.resolve({
+          meta: {
+            id: childSessionId,
+            parentSession: 'other-main-session',
+            origin: 'subagent',
+          },
+          events: [analysisDescriptorEvent()],
+        })
+      }
+      return Promise.resolve({ meta: { id: 'main-session', createdAt: 1 }, events: [] })
+    })
+
+    await expect(startLearningAnalysisChild(subject.ctx as never, {
+      analysisId,
+      parent: subject.parent,
+      signal: AbortSignal.timeout(10_000),
+    })).rejects.toThrow(/exact bound native child/u)
+    expect(subject.startContinuable).not.toHaveBeenCalled()
+    expect(subject.evolution.recordLearningAnalysisChildStarted).not.toHaveBeenCalled()
+  })
+
+  it('does not treat a seeded ancestor descriptor as this child descriptor', async () => {
+    const subject = startContext()
+    subject.ctx.sessionPersistence.inspect.mockImplementation((id: string) => {
+      if (id === childSessionId) {
+        return Promise.resolve({
+          meta: {
+            id: childSessionId,
+            parentSession: 'main-session',
+            origin: 'subagent',
+            seedLength: 1,
+          },
+          events: [analysisDescriptorEvent()],
+        })
+      }
+      return Promise.resolve({ meta: { id: 'main-session', createdAt: 1 }, events: [] })
+    })
+
+    await expect(startLearningAnalysisChild(subject.ctx as never, {
+      analysisId,
+      parent: subject.parent,
+      signal: AbortSignal.timeout(10_000),
+    })).rejects.toThrow(/exact bound native child/u)
+    expect(subject.startContinuable).not.toHaveBeenCalled()
+  })
+
+  it('resolves an unknown child-start commit from a fresh Evolution projection', async () => {
+    const evolutionRoot = temporaryRoot('child-start-commit-unknown')
+    const ledger = new EvolutionLedger(evolutionRoot, {
+      clock: () => '2026-09-02T00:00:00.000Z',
+    })
+    ledger.recordLearningAnalysisConsent({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    const intake = ledger.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: 'main-session', messageId: 'assistant-message',
+        feedbackVersion: 'feedback-v1', rating: 'negative',
+        note: 'Keep the answer concrete.',
+        scopeKey: 'project:tianwen/capability:research-summary',
+        sessionDigest, evidenceIds: [evidenceId],
+      },
+      sessionLifecycleFingerprint: `sha256:${'3'.repeat(64)}`,
+      analysisConsentRevision: 1,
+    })
+    const requested = ledger.requestLearningAnalysis({
+      ticketId: intake.ticketId!, sessionId: 'main-session',
+      messageId: 'assistant-message', feedbackVersion: 'feedback-v1',
+      consentRevision: 1, parentSessionId: 'main-session',
+    })
+    const parent = parentAgent()
+    const startContinuable = vi.fn().mockResolvedValue({
+      childId: requested.childSessionId, messageId: 'accepted-private-analysis',
+    })
+    const record = vi.fn(input => {
+      ledger.recordLearningAnalysisChildStarted(input)
+      throw new LedgerCommitUnknownError('forced child-start commit unknown')
+    })
+    const ctx = {
+      agents: { get: (id: string) => id === 'main-session' ? parent : undefined },
+      agentDefaultModel: { currentSelection: () => ({ provider: 'probe', model: 'scripted' }) },
+      sessionPersistence: {
+        inspect: (id: string) => id === requested.childSessionId
+          ? Promise.reject(new Error('session not found'))
+          : Promise.resolve({ meta: { id: 'main-session', createdAt: 1 }, events: [] }),
+      },
+      subagents: { startContinuable, interrupt: vi.fn() },
+      tianwenEvolution: {
+        getLearningAnalysis: (id: typeof requested.analysisId) => ledger.getLearningAnalysis(id),
+        getLearningAnalysisConsent: () => ledger.getLearningAnalysisConsent(),
+        getLearningIntakeStatus: (sessionId: string, messageId: string) =>
+          ledger.getLearningIntakeStatus(sessionId, messageId),
+        getLearningTicketFeedback: (id: typeof requested.ticketId) =>
+          ledger.getLearningTicketFeedback(id),
+        recordLearningAnalysisChildStarted: record,
+      },
+    }
+
+    await expect(startLearningAnalysisChild(ctx as never, {
+      analysisId: requested.analysisId,
+      parent,
+      signal: AbortSignal.timeout(10_000),
+    }, evolutionRoot)).resolves.toMatchObject({ phase: 'running' })
+    expect(startContinuable).toHaveBeenCalledOnce()
+    expect(record).toHaveBeenCalledOnce()
+
+    await expect(startLearningAnalysisChild({
+      ...ctx,
+      tianwenEvolution: { ...ctx.tianwenEvolution, blocked: true },
+    } as never, {
+      analysisId: requested.analysisId,
+      parent,
+      signal: AbortSignal.timeout(10_000),
+    }, evolutionRoot)).resolves.toMatchObject({ phase: 'running' })
+    expect(startContinuable).toHaveBeenCalledOnce()
+    expect(record).toHaveBeenCalledOnce()
+  })
+
+  it('interrupts an accepted child when consent is revoked while native start is awaiting', async () => {
+    const subject = startContext()
+    let resolveStart: ((value: { childId: string, messageId: string }) => void) | undefined
+    subject.startContinuable.mockImplementationOnce(() => new Promise(resolve => {
+      resolveStart = resolve
+    }))
+    const followup = vi.fn()
+    const interrupt = vi.fn()
+    ;(subject.ctx as { subagents: Record<string, unknown> }).subagents = {
+      startContinuable: subject.startContinuable,
+      followup,
+      interrupt,
+    }
+
+    const pending = startLearningAnalysisChild(subject.ctx as never, {
+      analysisId,
+      parent: subject.parent,
+      signal: AbortSignal.timeout(10_000),
+    })
+    await vi.waitFor(() => expect(subject.startContinuable).toHaveBeenCalledOnce())
+    subject.evolution.getLearningAnalysisConsent.mockReturnValue({
+      revision: 2,
+      enabled: false,
+      policyVersion: 'tianwen-auto-analysis.v1',
+      recordedAt: '2026-09-02T00:00:01.000Z',
+    })
+    resolveStart!({ childId: childSessionId, messageId: 'accepted-private-analysis' })
+
+    await expect(pending).rejects.toThrow(/consent/u)
+    expect(followup).not.toHaveBeenCalled()
+    expect(interrupt).toHaveBeenCalledWith(childSessionId, {
+      kind: 'user', parentSessionId: 'main-session',
+    })
+    expect(subject.evolution.recordLearningAnalysisChildStarted).not.toHaveBeenCalled()
   })
 
   it('installs the same exact submission tool for a durable-bound cold child', async () => {
@@ -798,14 +1045,16 @@ describe('native explicit-correction analysis child', () => {
     expect(blockedConclude).toHaveBeenCalledOnce()
   })
 
-  it('fails closed on invalid Evidence and duplicate submission without a second report', async () => {
+  it('redelivers one exact durable submission after its main-chat report failed', async () => {
     let setup: ((ctx: unknown) => () => void) | undefined
     let definition: ToolDefinition | undefined
     let current = status({ phase: 'running' })
-    const reportFrom = vi.fn().mockResolvedValue('report-message')
+    const reportFrom = vi.fn()
+      .mockRejectedValueOnce(new Error('main parent delivery failed'))
+      .mockResolvedValueOnce('report-message')
     const record = vi.fn(input => {
       current = status({
-        phase: 'running',
+        phase: input.submission.verdict,
         submission: input.submission,
         submittedAt: '2026-09-02T00:00:01.000Z',
       })
@@ -875,10 +1124,21 @@ describe('native explicit-correction analysis child', () => {
     expect(record).not.toHaveBeenCalled()
     expect(reportFrom).not.toHaveBeenCalled()
 
-    await definition!.execute(skillChange(), exec as never)
-    await expect(definition!.execute(skillChange(), exec as never))
-      .rejects.toThrow(/already submitted/u)
+    const retrySubmission = noCase()
+    await expect(definition!.execute(retrySubmission, exec as never))
+      .rejects.toThrow(/main parent delivery failed/u)
     expect(record).toHaveBeenCalledOnce()
     expect(reportFrom).toHaveBeenCalledOnce()
+    expect(exec.concludeTurn).not.toHaveBeenCalled()
+
+    await expect(definition!.execute(retrySubmission, exec as never)).resolves
+      .toEqual({ verdict: 'no-case', nextStage: 'stopped-no-case' })
+    expect(record).toHaveBeenCalledOnce()
+    expect(reportFrom).toHaveBeenCalledTimes(2)
+    expect(exec.concludeTurn).toHaveBeenCalledOnce()
+
+    await expect(definition!.execute({
+      ...retrySubmission, hypothesis: 'A changed second submission.',
+    }, exec as never)).rejects.toThrow(/already submitted/u)
   })
 })
