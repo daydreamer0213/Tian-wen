@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const EXPLICIT_CORRECTION_PROTOCOL_SCOPE =
@@ -40,7 +40,7 @@ const allowedTools = ['skill', acceptance.toolName] as const
 type Digest = `sha256:${string}`
 type TransitionKind = 'promote' | 'rollback' | 'restore'
 
-interface WorkspaceSnapshot {
+export interface ExplicitCorrectionWorkspaceSnapshot {
   readonly schemaVersion: 'tianwen.controlled-workspace-snapshot.v1'
   readonly entries: readonly [{
     readonly relativePath: 'brief.txt'
@@ -57,7 +57,7 @@ export interface ExplicitCorrectionEvaluationTask {
   readonly input: string
   readonly baselineWorkspaceRoot: string
   readonly candidateWorkspaceRoot: string
-  readonly workspaceSnapshot: WorkspaceSnapshot
+  readonly workspaceSnapshot: ExplicitCorrectionWorkspaceSnapshot
   readonly authorization: { readonly mode: 'fixture-only', readonly task: string }
   readonly verifierArguments: { readonly subject: { readonly phase: 'evaluation', readonly task: string } }
   readonly verifierContract: {
@@ -89,20 +89,10 @@ function rawDigest(content: string): Digest {
   return `sha256:${createHash('sha256').update(content, 'utf8').digest('hex')}`
 }
 
-function writeWorkspace(root: string, content: string): WorkspaceSnapshot {
-  mkdirSync(root, { recursive: true })
-  writeFileSync(join(root, 'brief.txt'), content, 'utf8')
-  return {
-    schemaVersion: 'tianwen.controlled-workspace-snapshot.v1',
-    entries: [{
-      relativePath: 'brief.txt',
-      contentDigest: rawDigest(content),
-      size: Buffer.byteLength(content, 'utf8'),
-    }],
-  }
-}
-
-function assertWorkspaceSnapshot(root: string, snapshot: WorkspaceSnapshot): void {
+function assertWorkspaceSnapshot(
+  root: string,
+  snapshot: ExplicitCorrectionWorkspaceSnapshot,
+): void {
   try {
     const entries = readdirSync(root, { withFileTypes: true })
     const expected = snapshot.entries[0]
@@ -122,6 +112,19 @@ function assertWorkspaceSnapshot(root: string, snapshot: WorkspaceSnapshot): voi
   }
 }
 
+type CreateWorkspaceSnapshot = (
+  root: string,
+  content: string,
+) => ExplicitCorrectionWorkspaceSnapshot
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object') {
+    for (const child of Object.values(value)) deepFreeze(child)
+    Object.freeze(value)
+  }
+  return value
+}
+
 function assertFreshSessions(
   tasks: readonly ExplicitCorrectionEvaluationTask[],
   occupiedSessionIds: ReadonlySet<string>,
@@ -137,20 +140,19 @@ function assertFreshSessions(
   ) throw new Error('session-not-fresh')
 }
 
-export function buildResearchSummaryControlledProtocol() {
-  return {
+function buildResearchSummaryControlledProtocol() {
+  return deepFreeze({
     scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
     version: EXPLICIT_CORRECTION_PROTOCOL_VERSION,
     acceptance,
     parentSkill,
     allowedTools,
     evaluationTaskDefinitions,
-    writeWorkspace,
     assertWorkspaceSnapshot,
     assertFreshSessions,
     buildEvaluationTasks(input: {
       readonly root: string
-      readonly toolSchemaDigest: Digest
+      readonly createWorkspaceSnapshot: CreateWorkspaceSnapshot
     }): readonly ExplicitCorrectionEvaluationTask[] {
       return evaluationTaskDefinitions.map((definition, index) => {
         const content = `controlled evaluation workspace ${index}\n`
@@ -168,8 +170,8 @@ export function buildResearchSummaryControlledProtocol() {
           definition.semanticType,
           'candidate',
         )
-        const workspaceSnapshot = writeWorkspace(baselineWorkspaceRoot, content)
-        writeWorkspace(candidateWorkspaceRoot, content)
+        const workspaceSnapshot = input.createWorkspaceSnapshot(baselineWorkspaceRoot, content)
+        input.createWorkspaceSnapshot(candidateWorkspaceRoot, content)
         const goal = `Complete controlled lifecycle task ${index}.`
         const taskInput = `Use the available Skill, then verify lifecycle task ${index}.`
         const authorization = { mode: 'fixture-only', task: definition.semanticType } as const
@@ -280,11 +282,11 @@ export function buildResearchSummaryControlledProtocol() {
     },
     buildShadowTasks(input: {
       readonly root: string
-      readonly evaluationId: unknown
+      readonly createWorkspaceSnapshot: CreateWorkspaceSnapshot
     }) {
       return evaluationTaskDefinitions.map((definition, index) => {
         const workspaceRoot = join(input.root, 'workspaces', 'shadow', definition.semanticType)
-        const workspaceSnapshot = writeWorkspace(
+        const workspaceSnapshot = input.createWorkspaceSnapshot(
           workspaceRoot,
           `controlled isolated Shadow workspace ${index}\n`,
         )
@@ -310,9 +312,10 @@ export function buildResearchSummaryControlledProtocol() {
       readonly shadowId: unknown
       readonly kind: TransitionKind
       readonly expectedRevision: number
+      readonly createWorkspaceSnapshot: CreateWorkspaceSnapshot
     }) {
       const workspaceRoot = join(input.root, 'workspaces', 'transition', input.kind)
-      const workspaceSnapshot = writeWorkspace(
+      const workspaceSnapshot = input.createWorkspaceSnapshot(
         workspaceRoot,
         `controlled transition ${input.kind} workspace\n`,
       )
@@ -362,7 +365,7 @@ export function buildResearchSummaryControlledProtocol() {
         throw new Error('tool-surface-drift')
       }
     },
-  } as const
+  } as const)
 }
 
 export function resolveExplicitCorrectionProtocol(scopeKey: string) {

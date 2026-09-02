@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -126,6 +127,19 @@ class ControlledLifecycleScriptedAdapter extends ScriptedAdapter {
 
 function invariant(value: unknown, code: string): asserts value {
   if (!value) throw new Error(`controlled lifecycle invariant failed: ${code}`)
+}
+
+function writeWorkspace(root: string, content: string) {
+  mkdirSync(root, { recursive: true })
+  writeFileSync(join(root, 'brief.txt'), content, 'utf8')
+  return {
+    schemaVersion: 'tianwen.controlled-workspace-snapshot.v1' as const,
+    entries: [{
+      relativePath: 'brief.txt',
+      contentDigest: `sha256:${createHash('sha256').update(content, 'utf8').digest('hex')}` as const,
+      size: Buffer.byteLength(content, 'utf8'),
+    }],
+  }
 }
 
 function skillAndVerifierScript(
@@ -317,7 +331,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
     for (const [index, seed] of seedDefinitions.entries()) {
       const sessionId = `session:controlled-seed:fixture:${seed.kind}`
       const workspaceRoot = join(root, 'workspaces', 'seed', seed.kind)
-      explicitCorrectionProtocol.writeWorkspace(
+      writeWorkspace(
         workspaceRoot,
         `controlled seed workspace ${index}\n`,
       )
@@ -333,7 +347,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
         {
           goalRef: 'goal:controlled-skill-lifecycle-seed',
           taskRef: `task:controlled-skill-lifecycle-seed:${seed.kind}`,
-          scopeKey: 'project:tianwen/capability:controlled-lifecycle-summary',
+          scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
           acceptanceContract: acceptance,
           acceptanceSubjectDigest: sha256(acceptanceSubject),
         },
@@ -377,7 +391,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
     const retryPolicy = harness.ctx.llm.providerRetryPolicy(selection.provider)
     const evaluationTasks = explicitCorrectionProtocol.buildEvaluationTasks({
       root,
-      toolSchemaDigest: taskToolSchemaDigest,
+      createWorkspaceSnapshot: writeWorkspace,
     })
     const frozenExecution = explicitCorrectionProtocol.freezeExecution({
       callConfig,
@@ -415,6 +429,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
     const protocol = evolution.freezeControlledSkillEvalProtocol(protocolInput)
     const protocolRecord = evolution.getControlledSkillEvalProtocol(protocol.protocolId)
     invariant(protocolRecord?.provenance === 'pre-candidate', 'pre-candidate-protocol')
+    invariant(protocolRecord?.scopeKey === EXPLICIT_CORRECTION_PROTOCOL_SCOPE, 'protocol-scope')
 
     const openedCase = evolution.openLearningCase({
       ticketId,
@@ -422,6 +437,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
     })
     const learningCase = evolution.getLearningCase(openedCase.caseId)
     invariant(learningCase !== undefined, 'learning-case')
+    invariant(learningCase?.scopeKey === EXPLICIT_CORRECTION_PROTOCOL_SCOPE, 'learning-case-scope')
     const supportingEvidenceIds = learningCase.supportingEvidenceIds
     const counterevidenceIds = learningCase.counterevidence.flatMap(item => item.evidenceIds)
     const attribution = evolution.recordAttribution({
@@ -457,6 +473,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
     })
     const candidateRecord = evolution.getSkillCandidate(candidate.candidateId)
     invariant(candidateRecord?.status === 'recorded', 'candidate')
+    invariant(candidateRecord?.targetScope === EXPLICIT_CORRECTION_PROTOCOL_SCOPE, 'candidate-scope')
 
     const armsInput = explicitCorrectionProtocol.buildArmsInput(
       candidate.candidateId,
@@ -469,6 +486,8 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
       `evaluation-arms-${arms.state}-${arms.state === 'stopped' ? `${arms.stop.stage}-${arms.stop.role}-${arms.stop.reasonCode}` : 'closed'}-${adapter.requests.length}`,
     )
     const objectives = evolution.listControlledSkillEvaluationObjectives(arms.evaluationId)
+    const evaluation = evolution.getControlledSkillEvaluation(arms.evaluationId)
+    invariant(evaluation?.scopeKey === EXPLICIT_CORRECTION_PROTOCOL_SCOPE, 'evaluation-scope')
     invariant(objectives.length === 5, 'objectives')
     invariant(objectives.every(item => item.objectiveVerdict === 'pass'), 'objective-pass')
 
@@ -495,7 +514,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
 
     const shadowTasks = explicitCorrectionProtocol.buildShadowTasks({
       root,
-      evaluationId: arms.evaluationId,
+      createWorkspaceSnapshot: writeWorkspace,
     })
     const shadowInput = { evaluationId: arms.evaluationId, tasks: shadowTasks }
     const shadow = await harness.ctx.tianwenSkillEvaluation.runControlledShadow(shadowInput)
@@ -508,6 +527,10 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
     invariant(shadow.result.runs.length === 5, 'shadow-runs')
     const shadowPlan = evolution.getControlledSkillShadow(shadow.shadowId)
     invariant(shadowPlan?.mode === 'isolated-test', 'shadow-mode')
+    invariant(
+      shadowPlan?.sourceScopeKey === EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+      'shadow-source-scope',
+    )
     const initialized = evolution.initializeControlledSkillScopePointer({
       shadowId: shadow.shadowId,
     })
@@ -517,6 +540,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
       initialPointer?.activeVersionId === shadowPlan.parentVersionId,
       'initial-pointer-parent',
     )
+    invariant(initialPointer.scopeKey === shadowPlan.scopeKey, 'isolated-pointer-scope')
 
     const transitionInput = (
       kind: Parameters<typeof explicitCorrectionProtocol.buildTransitionInput>[0]['kind'],
@@ -526,6 +550,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
       shadowId: shadow.shadowId,
       kind,
       expectedRevision,
+      createWorkspaceSnapshot: writeWorkspace,
     })
     const promoteInput = transitionInput('promote', 1)
     const rollbackInput = transitionInput('rollback', 2)
@@ -664,7 +689,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
       task: {
         ...preflightBase.task,
         workspaceRoot: preflightWorkspaceRoot,
-        workspaceSnapshot: explicitCorrectionProtocol.writeWorkspace(
+        workspaceSnapshot: writeWorkspace(
           preflightWorkspaceRoot,
           'controlled preflight rejection workspace\n',
         ),
