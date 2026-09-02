@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -26,39 +25,26 @@ import {
   ControlledSkillActivationPreflightError,
   apply,
 } from '../packages/tianwen-runtime/src/index.js'
+import {
+  EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+  resolveExplicitCorrectionProtocol,
+} from '../packages/tianwen-runtime-bundle/src/explicit-correction-protocol.js'
 
 const CONTROLLED_PROVIDER = 'tianwen-controlled-scripted'
 const CONTROLLED_MODEL = 'scripted'
 
-const acceptance = {
-  source: 'dsh-tool-result',
-  toolName: 'verify_lifecycle',
-  notMetErrorCode: 'LIFECYCLE_REQUIREMENT_NOT_MET',
-  gapDisposition: 'reusable',
-  problemCategory: 'summary-omits-required-result',
-  severity: 4,
-  blocksGoal: true,
-} as const
-
-const parentSkill = {
-  name: 'controlled-lifecycle-summary',
-  description: 'Summarize one controlled observation.',
-  whenToUse: 'When a controlled task requests a concise verified summary.',
-  invocation: { modelInvocable: true, userInvocable: true },
-  source: 'runtime',
-  provider: 'runtime',
-  content: '# Controlled summary\n\nState the observation.',
-} as const
-
-const evaluationTaskDefinitions = [
-  { semanticType: 'original-defect', taskType: 'original-problem' },
-  { semanticType: 'adjacent-transfer', taskType: 'adjacent-transfer' },
-  { semanticType: 'preserved-regression', taskType: 'regression' },
-  { semanticType: 'raw-extraction-counterexample', taskType: 'counterexample' },
-  { semanticType: 'safety-boundary', taskType: 'safety-authorization' },
-] as const
-
-type TransitionKind = 'promote' | 'rollback' | 'restore'
+const explicitCorrectionProtocol = resolveExplicitCorrectionProtocol(
+  EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+)
+if (explicitCorrectionProtocol === undefined) {
+  throw new Error('explicit correction protocol is unavailable')
+}
+const {
+  acceptance,
+  allowedTools,
+  parentSkill,
+  evaluationTaskDefinitions,
+} = explicitCorrectionProtocol
 
 export interface ControlledSkillLifecycleDemoReceipt {
   readonly schemaVersion: 'tianwen.controlled-skill-lifecycle-demo.v1'
@@ -140,23 +126,6 @@ class ControlledLifecycleScriptedAdapter extends ScriptedAdapter {
 
 function invariant(value: unknown, code: string): asserts value {
   if (!value) throw new Error(`controlled lifecycle invariant failed: ${code}`)
-}
-
-function rawDigest(content: string): `sha256:${string}` {
-  return `sha256:${createHash('sha256').update(content, 'utf8').digest('hex')}`
-}
-
-function writeWorkspace(root: string, content: string) {
-  mkdirSync(root, { recursive: true })
-  writeFileSync(join(root, 'brief.txt'), content, 'utf8')
-  return {
-    schemaVersion: 'tianwen.controlled-workspace-snapshot.v1' as const,
-    entries: [{
-      relativePath: 'brief.txt',
-      contentDigest: rawDigest(content),
-      size: Buffer.byteLength(content, 'utf8'),
-    }],
-  }
 }
 
 function skillAndVerifierScript(
@@ -348,7 +317,10 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
     for (const [index, seed] of seedDefinitions.entries()) {
       const sessionId = `session:controlled-seed:fixture:${seed.kind}`
       const workspaceRoot = join(root, 'workspaces', 'seed', seed.kind)
-      writeWorkspace(workspaceRoot, `controlled seed workspace ${index}\n`)
+      explicitCorrectionProtocol.writeWorkspace(
+        workspaceRoot,
+        `controlled seed workspace ${index}\n`,
+      )
       const handle = await harness.ctx.agents.create({
         sessionId: SessionId(sessionId),
         meta: { cwd: workspaceRoot },
@@ -397,96 +369,49 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
     const counterevidenceRunId = seedRecords[1]?.binding.runId
     invariant(counterevidenceRunId !== undefined, 'seed-counterevidence')
 
-    const allowedTools = ['skill', acceptance.toolName] as const
     const toolSchemas = harness.ctx.tools.schemas()
       .filter(schema => allowedTools.includes(schema.name as typeof allowedTools[number]))
       .toSorted((left, right) => left.name.localeCompare(right.name))
     const taskToolSchemaDigest = sha256(toolSchemas)
     const callConfig = await harness.ctx.llm.resolveCallConfig(selection)
     const retryPolicy = harness.ctx.llm.providerRetryPolicy(selection.provider)
-    const evaluationTasks = evaluationTaskDefinitions.map((definition, index) => {
-      const content = `controlled evaluation workspace ${index}\n`
-      const baselineWorkspaceRoot = join(
-        root,
-        'workspaces',
-        'evaluation',
-        definition.semanticType,
-        'baseline',
-      )
-      const candidateWorkspaceRoot = join(
-        root,
-        'workspaces',
-        'evaluation',
-        definition.semanticType,
-        'candidate',
-      )
-      const workspaceSnapshot = writeWorkspace(baselineWorkspaceRoot, content)
-      writeWorkspace(candidateWorkspaceRoot, content)
-      const goal = `Complete controlled lifecycle task ${index}.`
-      const input = `Use the available Skill, then verify lifecycle task ${index}.`
-      const authorization = { mode: 'fixture-only', task: definition.semanticType }
-      const verifierArguments = {
-        subject: { phase: 'evaluation', task: definition.semanticType },
-      }
-      const verifierContract = { toolName: acceptance.toolName, arguments: verifierArguments }
-      const stopCondition = { terminal: 'completed-final-assistant-text' }
-      const evaluatorMaterialContract = {
-        schemaVersion: 'tianwen.controlled-evaluator-material-contract.v1' as const,
-        source: 'final-completed-assistant-text' as const,
-        maxUtf8Bytes: 4_096,
-      }
-      return {
-        ...definition,
-        taskId: `eval-task:lifecycle-${definition.semanticType}` as const,
-        goal,
-        input,
-        baselineWorkspaceRoot,
-        candidateWorkspaceRoot,
-        workspaceSnapshot,
-        authorization,
-        verifierArguments,
-        verifierContract,
-        stopCondition,
-        evaluatorMaterialContract,
-        baselineSessionId: `session:controlled-eval:fixture:lifecycle:${definition.semanticType}:baseline`,
-        candidateSessionId: `session:controlled-eval:fixture:lifecycle:${definition.semanticType}:candidate`,
-        evaluatorSessionId: `session:controlled-eval:fixture:lifecycle:${definition.semanticType}:evaluator`,
-      }
+    const evaluationTasks = explicitCorrectionProtocol.buildEvaluationTasks({
+      root,
+      toolSchemaDigest: taskToolSchemaDigest,
     })
-    const protocolInput = {
-      ticketId,
-      evidencePurpose: 'development-only-synthetic-defect' as const,
-      protocol: {
-        rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
-        tasks: evaluationTasks.map(task => ({
-          taskId: task.taskId,
-          taskType: task.taskType,
-          goalDigest: sha256(task.goal),
-          inputDigest: sha256(task.input),
-          workspaceSnapshotDigest: sha256(task.workspaceSnapshot),
-          toolSchemaDigest: taskToolSchemaDigest,
-          authorizationDigest: sha256(task.authorization),
-          verifierContractDigest: sha256(task.verifierContract),
-          stopConditionDigest: sha256(task.stopCondition),
-          evaluatorMaterialContractDigest: sha256(task.evaluatorMaterialContract),
-          acceptanceContract: acceptance,
-          acceptanceSubjectDigest: sha256(task.verifierArguments),
-          allowedTools,
-          stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
-        })),
-        execution: {
-          dshVersion: '0.1.1-rc.2' as const,
-          providerId: callConfig.provider,
-          modelId: callConfig.model,
-          callConfigDigest: sha256(callConfig),
-          toolSchemaDigest: sha256(evaluationTasks.map(task => ({
-            taskId: task.taskId,
-            toolSchemaDigest: taskToolSchemaDigest,
-          }))),
-          retryPolicyDigest: sha256(retryPolicy),
-        },
-      },
+    const frozenExecution = explicitCorrectionProtocol.freezeExecution({
+      callConfig,
+      retryPolicy,
+      toolSchemas,
+    })
+    explicitCorrectionProtocol.assertFrozenExecution(frozenExecution, {
+      callConfig,
+      retryPolicy,
+      toolSchemas,
+    })
+    explicitCorrectionProtocol.assertFreshSessions(
+      evaluationTasks,
+      new Set((await harness.ctx.sessionPersistence.list()).map(header => String(header.id))),
+    )
+    for (const task of evaluationTasks) {
+      explicitCorrectionProtocol.assertWorkspaceSnapshot(
+        task.baselineWorkspaceRoot,
+        task.workspaceSnapshot,
+      )
+      explicitCorrectionProtocol.assertWorkspaceSnapshot(
+        task.candidateWorkspaceRoot,
+        task.workspaceSnapshot,
+      )
     }
+    const protocolInput = explicitCorrectionProtocol.buildProtocolInput({
+      ticketId,
+      sha256,
+      rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+      callConfig,
+      retryPolicy,
+      toolSchemaDigest: taskToolSchemaDigest,
+      tasks: evaluationTasks,
+    })
     const protocol = evolution.freezeControlledSkillEvalProtocol(protocolInput)
     const protocolRecord = evolution.getControlledSkillEvalProtocol(protocol.protocolId)
     invariant(protocolRecord?.provenance === 'pre-candidate', 'pre-candidate-protocol')
@@ -533,25 +458,11 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
     const candidateRecord = evolution.getSkillCandidate(candidate.candidateId)
     invariant(candidateRecord?.status === 'recorded', 'candidate')
 
-    const armsInput = {
-      candidateId: candidate.candidateId,
-      protocolId: protocol.protocolId,
-      tasks: evaluationTasks.map(task => ({
-        taskId: task.taskId,
-        goal: task.goal,
-        input: task.input,
-        baselineWorkspaceRoot: task.baselineWorkspaceRoot,
-        candidateWorkspaceRoot: task.candidateWorkspaceRoot,
-        workspaceSnapshot: task.workspaceSnapshot,
-        authorization: task.authorization,
-        verifierContract: task.verifierContract,
-        stopCondition: task.stopCondition,
-        evaluatorMaterialContract: task.evaluatorMaterialContract,
-        baselineSessionId: task.baselineSessionId,
-        candidateSessionId: task.candidateSessionId,
-        evaluatorSessionId: task.evaluatorSessionId,
-      })),
-    }
+    const armsInput = explicitCorrectionProtocol.buildArmsInput(
+      candidate.candidateId,
+      protocol.protocolId,
+      evaluationTasks,
+    )
     const arms = await harness.ctx.tianwenSkillEvaluation.runControlledArms(armsInput)
     invariant(
       arms.state === 'awaiting-evaluator',
@@ -561,15 +472,10 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
     invariant(objectives.length === 5, 'objectives')
     invariant(objectives.every(item => item.objectiveVerdict === 'pass'), 'objective-pass')
 
-    const evaluatorsInput = {
-      evaluationId: arms.evaluationId,
-      tasks: evaluationTasks.map(task => ({
-        taskId: task.taskId,
-        goal: task.goal,
-        input: task.input,
-        evaluatorMaterialContract: task.evaluatorMaterialContract,
-      })),
-    }
+    const evaluatorsInput = explicitCorrectionProtocol.buildEvaluatorsInput(
+      arms.evaluationId,
+      evaluationTasks,
+    )
     const evaluators = await harness.ctx.tianwenSkillEvaluation
       .runControlledEvaluators(evaluatorsInput)
     invariant(evaluators.state === 'terminal', 'evaluators-terminal')
@@ -587,29 +493,9 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
       'evaluator-observations',
     )
 
-    const shadowTasks = evaluationTaskDefinitions.map((definition, index) => {
-      const workspaceRoot = join(root, 'workspaces', 'shadow', definition.semanticType)
-      const workspaceSnapshot = writeWorkspace(
-        workspaceRoot,
-        `controlled isolated Shadow workspace ${index}\n`,
-      )
-      return {
-        taskId: `shadow-task:lifecycle-${definition.semanticType}` as const,
-        goal: `Complete isolated lifecycle Shadow task ${index}.`,
-        input: `Use the available Skill, then verify isolated lifecycle task ${index}.`,
-        workspaceRoot,
-        workspaceSnapshot,
-        authorization: { mode: 'fixture-only', task: definition.semanticType },
-        verifierContract: { toolName: acceptance.toolName, phase: 'shadow' },
-        stopCondition: { terminal: 'completed-final-assistant-text' },
-        acceptanceContract: acceptance,
-        acceptanceSubject: {
-          subject: { phase: 'shadow', task: definition.semanticType },
-        },
-        allowedTools,
-        stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
-        sessionId: `session:controlled-shadow:fixture:lifecycle:${definition.semanticType}`,
-      }
+    const shadowTasks = explicitCorrectionProtocol.buildShadowTasks({
+      root,
+      evaluationId: arms.evaluationId,
     })
     const shadowInput = { evaluationId: arms.evaluationId, tasks: shadowTasks }
     const shadow = await harness.ctx.tianwenSkillEvaluation.runControlledShadow(shadowInput)
@@ -632,32 +518,15 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
       'initial-pointer-parent',
     )
 
-    const transitionInput = (kind: TransitionKind, expectedRevision: number) => {
-      const workspaceRoot = join(root, 'workspaces', 'transition', kind)
-      const workspaceSnapshot = writeWorkspace(
-        workspaceRoot,
-        `controlled transition ${kind} workspace\n`,
-      )
-      return {
-        shadowId: shadow.shadowId,
-        kind,
-        expectedRevision,
-        task: {
-          goal: `Verify the active lifecycle ${kind} pointer.`,
-          input: `Use the available Skill, then verify lifecycle ${kind}.`,
-          workspaceRoot,
-          workspaceSnapshot,
-          authorization: { mode: 'fixture-only', kind },
-          verifierContract: { toolName: acceptance.toolName, kind },
-          stopCondition: { terminal: 'completed-final-assistant-text' },
-          acceptanceContract: acceptance,
-          acceptanceSubject: { subject: { phase: 'transition', kind } },
-          allowedTools,
-          stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
-          sessionId: `session:controlled-activation:fixture:lifecycle:${kind}`,
-        },
-      }
-    }
+    const transitionInput = (
+      kind: Parameters<typeof explicitCorrectionProtocol.buildTransitionInput>[0]['kind'],
+      expectedRevision: number,
+    ) => explicitCorrectionProtocol.buildTransitionInput({
+      root,
+      shadowId: shadow.shadowId,
+      kind,
+      expectedRevision,
+    })
     const promoteInput = transitionInput('promote', 1)
     const rollbackInput = transitionInput('rollback', 2)
     const restoreInput = transitionInput('restore', 3)
@@ -795,7 +664,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
       task: {
         ...preflightBase.task,
         workspaceRoot: preflightWorkspaceRoot,
-        workspaceSnapshot: writeWorkspace(
+        workspaceSnapshot: explicitCorrectionProtocol.writeWorkspace(
           preflightWorkspaceRoot,
           'controlled preflight rejection workspace\n',
         ),
