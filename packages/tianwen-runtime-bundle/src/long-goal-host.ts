@@ -16,6 +16,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { EvidenceRecord } from '@tianwen/evidence'
 import { projectEvidence as projectPersistedEvidence } from '@tianwen/evidence/projector'
+import type { LearningIntakeStatus } from '@tianwen/evolution/learning-intake'
 
 import type {
   AnyLongGoalRecord,
@@ -1608,15 +1609,28 @@ type LearningTicketFeedback = {
   readonly scopeKey: string
   readonly latest: {
     readonly note: string
+    readonly recordedAt: string
     readonly sessionId: string
     readonly messageId: string
   }
 }
 
+type LearningFeedbackReconciliation = {
+  readonly sessionId: string
+  readonly state: 'reconciled' | 'session-not-found' | 'pending'
+}
+
 export interface LearningClueAnalysisDependencies {
   readonly stateRoot: string
   readonly clueSnapshot: () => Promise<LearningClueSnapshot>
+  readonly reconcileSession?: (
+    sessionId: string,
+  ) => Promise<LearningFeedbackReconciliation>
   readonly getFeedback: (ticketId: string) => LearningTicketFeedback | undefined
+  readonly getIntakeStatus?: (
+    sessionId: string,
+    messageId: string,
+  ) => LearningIntakeStatus | undefined
   readonly openSession: (sessionId: string) => Promise<{
     readonly session: Session
     readonly release: () => void
@@ -1681,7 +1695,22 @@ export function createLearningClueAnalysisOperations(
     }
   }
   const status = async (): Promise<LearningClueStatus> => {
-    const snapshot = await dependencies.clueSnapshot()
+    let snapshot = await dependencies.clueSnapshot()
+    const reconcileSession = dependencies.reconcileSession
+    if (reconcileSession !== undefined) {
+      const sessionIds = new Set<string>()
+      for (const goal of snapshot.goals) {
+        if (goal.status.schemaVersion === 'tianwen.long-goal-status.v1') continue
+        for (const task of goal.status.tasks) {
+          if (task.execution !== null) sessionIds.add(task.execution.sessionId)
+        }
+      }
+      const reconciliations = await Promise.all([...sessionIds].map(reconcileSession))
+      if (reconciliations.some(result => result.state !== 'reconciled')) {
+        throw new Error('Learning clue feedback reconciliation is incomplete')
+      }
+      if (sessionIds.size > 0) snapshot = await dependencies.clueSnapshot()
+    }
     const items = await Promise.all(snapshot.status.items.map(projectClue))
     return { schemaVersion: 'tianwen.learning-clue-status.v1', items }
   }
@@ -1702,6 +1731,21 @@ export function createLearningClueAnalysisOperations(
       }
       const feedback = dependencies.getFeedback(ticketId)
       if (feedback === undefined) throw new Error('Learning clue has no private feedback')
+      const intake = dependencies.getIntakeStatus?.(
+        feedback.latest.sessionId,
+        feedback.latest.messageId,
+      )
+      if (
+        intake?.state !== 'active'
+        || intake.ticketId !== ticketId
+        || intake.sessionId !== feedback.latest.sessionId
+        || intake.messageId !== feedback.latest.messageId
+        || intake.scopeKey !== feedback.scopeKey
+        || intake.recordedAt !== feedback.latest.recordedAt
+        || intake.analysisConsentRevision === undefined
+      ) {
+        throw new Error('Learning clue analysis requires a consented active feedback revision')
+      }
       let source: {
         readonly workspaceRoot: string
         readonly agentPreset: string
@@ -2785,7 +2829,15 @@ export function mountTianwenLongGoalHost(
     const learningClueOperations = createLearningClueAnalysisOperations({
       stateRoot: roots.stateRoot,
       clueSnapshot,
+      ...(host.get('tianwenMessageFeedbackBridge') === undefined
+        ? {}
+        : {
+            reconcileSession: (sessionId: string) =>
+              host.tianwenMessageFeedbackBridge.reconcileSession(sessionId),
+          }),
       getFeedback: ticketId => host.tianwenEvolution.getLearningTicketFeedback(ticketId as never),
+      getIntakeStatus: (sessionId, messageId) =>
+        host.tianwenEvolution.getLearningIntakeStatus(sessionId, messageId),
       openSession: openAnalysisSession,
       createSession: async source => {
         const createdSession = unwrapRpc(await host.apiProxy.sessions.create({

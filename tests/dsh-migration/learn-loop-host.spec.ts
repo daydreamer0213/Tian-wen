@@ -8,6 +8,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle, AgentSetup } from '@deepseek-ai/dsh-agent'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 
 import {
   createTianwenLongGoalRpcHandler,
@@ -849,6 +850,155 @@ describe('Tianwen Long Goal Web host', () => {
     expect(learningClues.status).toHaveBeenCalledOnce()
   })
 
+  it('recovers persisted DSH feedback through the bridge before projecting product status', async () => {
+    const fixture = createFixtureRoot()
+    const sessionId = 'clue-recovery-session'
+    const messageId = 'clue-recovery-message'
+    const goalStatus = {
+      schemaVersion: 'tianwen.long-goal-status.v2' as const,
+      goal: { id: 'clue-recovery-goal', objective: 'Recover feedback status' },
+      tasks: [{
+        id: 'clue-recovery-task',
+        objective: 'Project the recovered correction',
+        phase: 'complete' as const,
+        execution: { goalId: 'dsh-clue-recovery-goal', sessionId },
+      }],
+    } as unknown as LongGoalStatusProjectionV2
+    const goal = {
+      record: {
+        id: 'clue-recovery-goal',
+        schemaVersion: 'tianwen.long-goal.v2',
+        workspaceRoot: 'D:/workspace',
+        planner: { agentPreset: 'tianwen' },
+      } as unknown as LongGoalRecordV2,
+      status: goalStatus,
+    }
+    const ledger = new EvolutionLedger(join(fixture, 'evolution'), {
+      clock: () => '2026-09-02T00:00:00.000Z',
+    })
+    const persistFeedback = () => ledger.recordLearningFeedbackRevision({
+      intake: {
+        sessionId,
+        messageId,
+        feedbackVersion: '81818181-8181-4181-8181-818181818181',
+        rating: 'negative',
+        note: 'Use the persisted DSH correction.',
+        scopeKey: 'workspace:D:/workspace',
+        sessionDigest: `sha256:${'1'.repeat(64)}` as never,
+        evidenceIds: [],
+      },
+      sessionLifecycleFingerprint: `sha256:${'2'.repeat(64)}` as never,
+    })
+    let failFirstReconciliation = true
+    const reconcileSession = vi.fn(async (requestedSessionId: string) => {
+      expect(requestedSessionId).toBe(sessionId)
+      if (failFirstReconciliation) {
+        failFirstReconciliation = false
+        return {
+          schemaVersion: 'tianwen.message-feedback-reconciliation.v1' as const,
+          sessionId,
+          state: 'pending' as const,
+        }
+      }
+      persistFeedback()
+      return {
+        schemaVersion: 'tianwen.message-feedback-reconciliation.v1' as const,
+        sessionId,
+        state: 'reconciled' as const,
+        current: 1,
+        active: 1,
+        retracted: 0,
+      }
+    })
+    const clueSnapshot = async () => {
+      const intakeStatuses = ledger.listLearningIntakeStatuses(sessionId)
+      return {
+        goals: [goal],
+        status: projectLearningClueStatus({
+          goals: [{ status: goalStatus, intakeStatuses }],
+          tickets: ledger.listLearningTickets(),
+        }),
+      }
+    }
+    try {
+      await expect(reconcileSession(sessionId)).resolves.toMatchObject({ state: 'pending' })
+      expect(ledger.listLearningIntakeStatuses(sessionId)).toHaveLength(0)
+
+      const operations = createLearningClueAnalysisOperations({
+        stateRoot: fixture,
+        clueSnapshot,
+        reconcileSession,
+        getFeedback: () => undefined,
+        openSession: async () => { throw new Error('must not open a Session') },
+        createSession: async () => { throw new Error('must not create a Session') },
+        flushSession: async () => undefined,
+      })
+      await expect(operations.status()).resolves.toMatchObject({
+        items: [{
+          status: 'open',
+          occurrenceCount: 1,
+          sources: [{ longGoalId: 'clue-recovery-goal' }],
+        }],
+      })
+      await expect(operations.status()).resolves.toMatchObject({ items: [{ occurrenceCount: 1 }] })
+      expect(ledger.listLearningIntakeStatuses(sessionId)).toHaveLength(1)
+      expect(ledger.listLearningSignals()).toHaveLength(1)
+      expect(ledger.listLearningTickets()).toHaveLength(1)
+      expect(reconcileSession).toHaveBeenCalledTimes(3)
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('fails product status closed when bridge reconciliation is not complete', async () => {
+    const goalStatus = {
+      schemaVersion: 'tianwen.long-goal-status.v2' as const,
+      tasks: [{
+        id: 'task-1', phase: 'complete' as const,
+        execution: { goalId: 'goal-1', sessionId: 'pending-session' },
+      }],
+    } as unknown as LongGoalStatusProjectionV2
+    const operations = createLearningClueAnalysisOperations({
+      stateRoot: 'D:/state',
+      clueSnapshot: async () => ({
+        goals: [{ record: {} as never, status: goalStatus }],
+        status: { schemaVersion: 'tianwen.learning-clue-status.v1', items: [] },
+      }),
+      reconcileSession: async sessionId => ({
+        schemaVersion: 'tianwen.message-feedback-reconciliation.v1',
+        sessionId,
+        state: 'pending',
+      }),
+      getFeedback: () => undefined,
+      openSession: async () => { throw new Error('must not open a Session') },
+      createSession: async () => { throw new Error('must not create a Session') },
+      flushSession: async () => undefined,
+    })
+
+    await expect(operations.status()).rejects.toThrow('reconciliation is incomplete')
+  })
+
+  it('keeps legacy status projection compatible when the feedback bridge is absent', async () => {
+    const clueSnapshot = vi.fn(async () => ({
+      goals: [],
+      status: { schemaVersion: 'tianwen.learning-clue-status.v1' as const, items: [] },
+    }))
+    const operations = createLearningClueAnalysisOperations({
+      stateRoot: 'D:/state',
+      clueSnapshot,
+      getFeedback: () => undefined,
+      openSession: async () => { throw new Error('must not open a Session') },
+      createSession: async () => { throw new Error('must not create a Session') },
+      flushSession: async () => undefined,
+    })
+
+    await expect(operations.status()).resolves.toEqual({
+      schemaVersion: 'tianwen.learning-clue-status.v1',
+      items: [],
+    })
+    expect(clueSnapshot).toHaveBeenCalledOnce()
+  })
+
   it('starts one analysis only for an exact visible-clue Ticket payload', async () => {
     const ticketId = `ticket:${'a'.repeat(64)}`
     const learningClues = {
@@ -961,6 +1111,7 @@ describe('Tianwen Long Goal Web host', () => {
       scopeKey: 'workspace:D:/workspace',
       latest: {
         note: privateNote,
+        recordedAt: '2026-08-30T00:00:00.000Z',
         sessionId: 'source-session',
         messageId: 'assistant-anchor',
       },
@@ -1011,6 +1162,7 @@ describe('Tianwen Long Goal Web host', () => {
     const feedbackNote = '请用中文说明这个参数为什么无效。'
     const finalReply = '我会把参数直接传给启动脚本。'
     const sourceSessionId = 'source-session'
+    const feedbackRecordedAt = '2026-08-30T00:00:00.000Z'
     let analysisSessionId = ''
     const sourceEvents = [{ type: 'turn/start', seq: 1, data: { turn: 1 } }, {
       type: 'user/message', seq: 2, data: { source: { kind: 'goal', goalId: 'source-goal' } },
@@ -1068,19 +1220,69 @@ describe('Tianwen Long Goal Web host', () => {
       } as never,
       release: () => undefined,
     }))
+    let intakeStatus = {
+      state: 'active' as const,
+      sessionId: sourceSessionId,
+      messageId: 'assistant-anchor',
+      feedbackVersion: '71717171-7171-4171-8171-717171717171',
+      scopeKey: 'workspace:D:/workspace',
+      rating: 'negative' as const,
+      feedbackFingerprint: `sha256:${'7'.repeat(64)}` as const,
+      recordedAt: feedbackRecordedAt,
+      decision: 'ticket-created' as const,
+      ingestionId: `sha256:${'8'.repeat(64)}` as const,
+      signalId: `signal:${'9'.repeat(64)}` as const,
+      ticketId,
+    }
     const operations = createLearningClueAnalysisOperations({
       stateRoot: fixture,
       clueSnapshot: async () => snapshot,
       getFeedback: input => input === ticketId ? {
         scopeKey: 'workspace:D:/workspace',
-        latest: { note: feedbackNote, sessionId: sourceSessionId, messageId: 'assistant-anchor' },
+        latest: {
+          note: feedbackNote,
+          recordedAt: feedbackRecordedAt,
+          sessionId: sourceSessionId,
+          messageId: 'assistant-anchor',
+        },
       } : undefined,
+      getIntakeStatus: (sessionId, messageId) =>
+        sessionId === sourceSessionId && messageId === 'assistant-anchor'
+          ? intakeStatus
+          : undefined,
       openSession,
       createSession,
       flushSession,
     })
     const handler = createTianwenLongGoalRpcHandler(ROOTS, undefined, undefined, undefined, operations)
     try {
+      await expect(handler(
+        'analyze-learning-clue',
+        { ticketId },
+        AbortSignal.timeout(1_000),
+      )).rejects.toThrow('consented active feedback revision')
+      intakeStatus = { ...intakeStatus, state: 'retracted', analysisConsentRevision: 1 }
+      await expect(handler(
+        'analyze-learning-clue',
+        { ticketId },
+        AbortSignal.timeout(1_000),
+      )).rejects.toThrow('consented active feedback revision')
+      intakeStatus = {
+        ...intakeStatus,
+        state: 'active',
+        recordedAt: '2026-08-29T23:59:59.000Z',
+        analysisConsentRevision: 1,
+      }
+      await expect(handler(
+        'analyze-learning-clue',
+        { ticketId },
+        AbortSignal.timeout(1_000),
+      )).rejects.toThrow('consented active feedback revision')
+      intakeStatus = { ...intakeStatus, recordedAt: feedbackRecordedAt, analysisConsentRevision: 1 }
+      expect(createSession).not.toHaveBeenCalled()
+      expect(followup).not.toHaveBeenCalled()
+      expect(openSession).not.toHaveBeenCalled()
+
       const [first, concurrent] = await Promise.all([
         handler('analyze-learning-clue', { ticketId }, AbortSignal.timeout(1_000)),
         handler('analyze-learning-clue', { ticketId }, AbortSignal.timeout(1_000)),
@@ -1167,8 +1369,14 @@ describe('Tianwen Long Goal Web host', () => {
         clueSnapshot: async () => snapshot,
         getFeedback: input => input === ticketId ? {
           scopeKey: 'workspace:D:/workspace',
-          latest: { note: feedbackNote, sessionId: sourceSessionId, messageId: 'assistant-anchor' },
+          latest: {
+            note: feedbackNote,
+            recordedAt: feedbackRecordedAt,
+            sessionId: sourceSessionId,
+            messageId: 'assistant-anchor',
+          },
         } : undefined,
+        getIntakeStatus: () => intakeStatus,
         openSession,
         createSession: async input => ({
           sessionId: input.sessionId,
@@ -1191,8 +1399,14 @@ describe('Tianwen Long Goal Web host', () => {
         clueSnapshot: async () => snapshot,
         getFeedback: () => ({
           scopeKey: 'workspace:D:/workspace',
-          latest: { note: feedbackNote, sessionId: 'wrong-source', messageId: 'assistant-anchor' },
+          latest: {
+            note: feedbackNote,
+            recordedAt: feedbackRecordedAt,
+            sessionId: 'wrong-source',
+            messageId: 'assistant-anchor',
+          },
         }),
+        getIntakeStatus: () => ({ ...intakeStatus, sessionId: 'wrong-source' }),
         openSession,
         createSession,
         flushSession,
