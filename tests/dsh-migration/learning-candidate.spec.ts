@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import type { LearningAnalysisSubmission } from '@tianwen/evolution'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
+import { learningAnalysisEvidenceClosure } from '../../packages/tianwen-evolution/src/learning-analysis.js'
 import { materializeLearningCandidate } from '../../packages/tianwen-runtime-bundle/src/learning-candidate.js'
 
 const roots: string[] = []
@@ -199,21 +200,29 @@ describe('bounded explicit-correction Skill Candidate materialization', () => {
       .toMatchObject({ phase: 'candidate-ready' })
   })
 
-  it('rejects a sibling feedback-version Evidence before it can lock the analysis running', () => {
-    const subject = seeded('sibling-version')
-    recordSiblingCorrection(subject, {
-      messageId: 'sibling-version',
-      feedbackVersion: 'feedback-v2',
-    })
+  it('excludes a sibling feedback version for the exact same message', () => {
+    const closure = learningAnalysisEvidenceClosure('main-session', [
+      {
+        sessionId: 'main-session',
+        messageId: 'assistant-message',
+        feedbackVersion: 'feedback-v1',
+        sessionDigest: `sha256:${'0'.repeat(64)}`,
+        evidenceIds: [evidenceA, evidenceB],
+        source: 'explicit-correction',
+        active: true,
+      },
+      {
+        sessionId: 'main-session',
+        messageId: 'assistant-message',
+        feedbackVersion: 'feedback-v2',
+        sessionDigest: `sha256:${'4'.repeat(64)}`,
+        evidenceIds: [siblingEvidence],
+        source: 'explicit-correction',
+        active: true,
+      },
+    ], 'assistant-message', 'feedback-v1')
 
-    expect(() => submit(subject, submission({
-      supportingEvidenceIds: [siblingEvidence],
-      counterevidenceIds: [],
-    }))).toThrow(/Evidence closure/u)
-
-    submit(subject)
-    expect(materializeLearningCandidate(subject.ledger, subject.requested.analysisId))
-      .toMatchObject({ phase: 'candidate-ready' })
+    expect(closure).toEqual(new Set([evidenceA, evidenceB]))
   })
 
   it('binds the Candidate to the exact Run manifest when an otherwise-equal provider differs', () => {
