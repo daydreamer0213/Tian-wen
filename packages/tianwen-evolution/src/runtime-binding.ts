@@ -660,6 +660,10 @@ export class TianwenEvolutionService extends Service {
     return this.state().ledger.getLearningCase(caseId)
   }
 
+  openLearningAnalysisCase(analysisId: LearningAnalysisId): LearningCaseReceipt {
+    return this.formalWrite(() => this.state().ledger.openLearningAnalysisCase(analysisId))
+  }
+
   listLearningCases(): readonly LearningCase[] {
     return this.state().ledger.listLearningCases()
   }
@@ -692,6 +696,21 @@ export class TianwenEvolutionService extends Service {
   recordSkillCandidate(input: SkillCandidateInput): SkillCandidateReceipt {
     return this.formalWrite(() =>
       this.state().ledger.recordSkillCandidate(input))
+  }
+
+  recordLearningAnalysisCandidateReady(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly candidateId: GovernedSkillCandidateId
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisCandidateReady(input))
+  }
+
+  recordLearningAnalysisProtocolUnavailable(
+    analysisId: LearningAnalysisId,
+  ): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisProtocolUnavailable(analysisId))
   }
 
   getSkillCandidate(

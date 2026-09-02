@@ -53,9 +53,11 @@ import {
 } from './learning-analysis.js'
 import type {
   LearningAnalysisChildStartedEvent,
+  LearningAnalysisCandidateReadyEvent,
   LearningAnalysisId,
   LearningAnalysisInvalidatedEvent,
   LearningAnalysisLedgerEvent,
+  LearningAnalysisProtocolUnavailableEvent,
   LearningAnalysisReportBinding,
   LearningAnalysisReportDeliveredEvent,
   LearningAnalysisReportIntentRecordedEvent,
@@ -90,6 +92,7 @@ import {
   parseSkillCandidate,
   prepareAcceptedLesson,
   prepareAttribution,
+  prepareExplicitCorrectionLearningCase,
   prepareLearningCase,
   prepareSkillCandidate,
   prepareRunSkillManifest,
@@ -470,6 +473,7 @@ export interface ActivationFailure {
 const ARTIFACT_ID = /^artifact:[a-f0-9]{64}$/
 const LEARNING_SIGNAL_ID = /^signal:[a-f0-9]{64}$/
 const LEARNING_TICKET_ID = /^ticket:[a-f0-9]{64}$/
+const GOVERNED_SKILL_CANDIDATE_ID = /^candidate:[a-f0-9]{64}$/
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/
 const UTF8 = new TextDecoder('utf-8', { fatal: true })
 
@@ -529,6 +533,14 @@ function requireTicketId(value: unknown): LearningTicketId {
     throw new LedgerIntegrityError(`invalid LearningTicketId: ${id}`)
   }
   return id as LearningTicketId
+}
+
+function requireGovernedSkillCandidateId(value: unknown): GovernedSkillCandidateId {
+  const id = requireString(value, 'candidateId')
+  if (!GOVERNED_SKILL_CANDIDATE_ID.test(id)) {
+    throw new LedgerIntegrityError(`invalid GovernedSkillCandidateId: ${id}`)
+  }
+  return id as GovernedSkillCandidateId
 }
 
 function requireTimestamp(value: unknown): string {
@@ -1038,6 +1050,39 @@ function parseLearningAnalysisInvalidatedEvent(
   }
 }
 
+function parseLearningAnalysisCandidateReadyEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningAnalysisCandidateReadyEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'analysisId', 'candidateId'])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-candidate-ready.v1') {
+    throw new LedgerIntegrityError('invalid learning analysis Candidate-ready schema')
+  }
+  return {
+    schemaVersion: 'tianwen.learning-analysis-candidate-ready.v1',
+    type: 'learning-analysis-candidate-ready',
+    at,
+    analysisId: learningAnalysisId(value.analysisId),
+    candidateId: requireGovernedSkillCandidateId(value.candidateId),
+  }
+}
+
+function parseLearningAnalysisProtocolUnavailableEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningAnalysisProtocolUnavailableEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'analysisId'])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-protocol-unavailable.v1') {
+    throw new LedgerIntegrityError('invalid learning analysis protocol-unavailable schema')
+  }
+  return {
+    schemaVersion: 'tianwen.learning-analysis-protocol-unavailable.v1',
+    type: 'learning-analysis-protocol-unavailable',
+    at,
+    analysisId: learningAnalysisId(value.analysisId),
+  }
+}
+
 function parseLearningAnalysisReport(
   value: unknown,
   delivered: boolean,
@@ -1370,6 +1415,12 @@ function parseEvent(value: unknown): LedgerEvent {
   }
   if (type === 'learning-analysis-invalidated') {
     return parseLearningAnalysisInvalidatedEvent(value, at)
+  }
+  if (type === 'learning-analysis-candidate-ready') {
+    return parseLearningAnalysisCandidateReadyEvent(value, at)
+  }
+  if (type === 'learning-analysis-protocol-unavailable') {
+    return parseLearningAnalysisProtocolUnavailableEvent(value, at)
   }
   if (type === 'learning-analysis-report-intent-recorded') {
     return parseLearningAnalysisReportIntentEvent(value, at)
@@ -3439,6 +3490,77 @@ export class EvolutionLedger {
     return clone([...this.#learningCases.values()])
   }
 
+  openLearningAnalysisCase(analysisId: LearningAnalysisId): LearningCaseReceipt {
+    const status = this.#learningAnalyses.get(analysisId)
+    if (
+      status?.phase !== 'running'
+      || status.submission?.verdict !== 'skill-change'
+      || !this.#learningAnalysisHasActiveSupport(status)
+    ) throw new LedgerIntegrityError('learning analysis Case is not materializable')
+    const ticket = this.#learningTickets.get(status.ticketId)
+    const intake = this.#learningIntakeStatuses.get(status.sessionId)
+      ?.get(status.messageId)
+    const runId = this.#runIdBySession.get(status.sessionId)
+    const binding = runId === undefined ? undefined : this.#runBindings.get(runId)
+    const manifest = runId === undefined ? undefined : this.#runSkillManifests.get(runId)
+    const signals = (ticket?.signalIds ?? [])
+      .map(signalId => this.#learningSignals.get(signalId))
+      .filter((signal): signal is LearningSignal =>
+        signal !== undefined
+        && !isOutcomeSignal(signal)
+        && !this.#inactiveLearningSignals.has(signal.signalId)
+        && signal.sessionId === status.sessionId
+        && signal.messageId === status.messageId
+        && signal.feedbackVersion === status.feedbackVersion)
+    if (
+      ticket === undefined
+      || intake?.state !== 'active'
+      || intake.rating !== 'negative'
+      || intake.ticketId !== status.ticketId
+      || intake.feedbackVersion !== status.feedbackVersion
+      || intake.analysisConsentRevision !== status.consentRevision
+      || this.#learningAnalysisConsents.get(status.consentRevision)?.enabled !== true
+      || binding === undefined
+      || manifest === undefined
+      || binding.sessionId !== status.sessionId
+      || signals.length === 0
+    ) throw new LedgerIntegrityError('learning analysis parent Skill protocol is unavailable')
+    let learningCase: LearningCase
+    try {
+      learningCase = prepareExplicitCorrectionLearningCase({
+        ticket,
+        signals,
+        evidenceIds: [
+          ...status.submission.supportingEvidenceIds,
+          ...status.submission.counterevidenceIds,
+        ],
+        binding,
+        manifest,
+        uses: [...this.#runSkillUses.values()],
+      })
+    } catch (error) {
+      throw new LedgerIntegrityError('learning analysis explicit correction Case is invalid', {
+        cause: error,
+      })
+    }
+    const existingId = this.#caseIdByTicket.get(ticket.ticketId)
+    if (existingId !== undefined) {
+      const existing = this.#learningCases.get(existingId)!
+      if (canonicalJson(existing) !== canonicalJson(learningCase)) {
+        throw new LedgerIntegrityError(`Learning Case changed after open: ${existingId}`)
+      }
+      return { caseId: existingId, duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-case.v1',
+      type: 'learning-case-opened',
+      at: this.#now(),
+      case: learningCase,
+      inputDigest: sha256(learningCase),
+    })
+    return { caseId: learningCase.caseId, duplicate: false }
+  }
+
   recordAttribution(input: AttributionInput): AttributionReceipt {
     const learningCase = this.#learningCases.get(input.caseId)
     if (learningCase === undefined) {
@@ -4002,6 +4124,79 @@ export class EvolutionLedger {
       childSessionId: status.childSessionId,
       submission,
       submissionDigest,
+    })
+    return { ...clone(this.#learningAnalyses.get(analysisId)!), duplicate: false }
+  }
+
+  recordLearningAnalysisCandidateReady(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly candidateId: GovernedSkillCandidateId
+  }): LearningAnalysisReceipt {
+    const status = this.#learningAnalyses.get(input.analysisId)
+    const candidate = this.#skillCandidates.get(input.candidateId)
+    const patch = status?.submission?.candidatePatch
+    const requiredEvidence = status === undefined
+      ? []
+      : [...new Set([
+          ...(status.submission?.supportingEvidenceIds ?? []),
+          ...(status.submission?.counterevidenceIds ?? []),
+        ])]
+    if (
+      status === undefined
+      || candidate === undefined
+      || patch === undefined
+      || (status.phase === 'candidate-ready'
+        && status.candidateId !== input.candidateId)
+    ) throw new LedgerIntegrityError('learning analysis Candidate-ready binding is invalid')
+    if (status.phase === 'candidate-ready') return { ...clone(status), duplicate: true }
+    if (
+      status.phase !== 'running'
+      || status.submission?.verdict !== 'skill-change'
+      || candidate.ticketId !== status.ticketId
+      || candidate.payload.description !== patch.description
+      || candidate.payload.whenToUse !== patch.whenToUse
+      || candidate.payload.content !== patch.content
+      || candidate.evidenceIds.length !== requiredEvidence.length
+      || requiredEvidence.some(id => !candidate.evidenceIds.includes(id))
+      || !this.#learningAnalysisHasActiveSupport(status)
+    ) throw new LedgerIntegrityError('learning analysis Candidate is not durable or no longer supported')
+    try {
+      assertLearningAnalysisEvidenceClosure(
+        status.submission,
+        this.#learningAnalysisEvidenceClosure(status),
+      )
+    } catch (error) {
+      throw new LedgerIntegrityError('learning analysis Candidate exceeds active Evidence closure', {
+        cause: error,
+      })
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-candidate-ready.v1',
+      type: 'learning-analysis-candidate-ready',
+      at: this.#now(),
+      analysisId: status.analysisId,
+      candidateId: candidate.candidateId,
+    })
+    return { ...clone(this.#learningAnalyses.get(status.analysisId)!), duplicate: false }
+  }
+
+  recordLearningAnalysisProtocolUnavailable(
+    analysisId: LearningAnalysisId,
+  ): LearningAnalysisReceipt {
+    const status = this.#learningAnalyses.get(analysisId)
+    if (status === undefined) throw new LedgerIntegrityError(`unknown learning analysis: ${analysisId}`)
+    if (status.phase === 'protocol-unavailable') return { ...clone(status), duplicate: true }
+    if (
+      status.phase !== 'running'
+      || status.submission?.verdict !== 'skill-change'
+      || !this.#learningAnalysisHasActiveSupport(status)
+      || this.#hasExactExplicitCorrectionParent(status)
+    ) throw new LedgerIntegrityError('learning analysis protocol is available or no longer eligible')
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-protocol-unavailable.v1',
+      type: 'learning-analysis-protocol-unavailable',
+      at: this.#now(),
+      analysisId,
     })
     return { ...clone(this.#learningAnalyses.get(analysisId)!), duplicate: false }
   }
@@ -4609,6 +4804,34 @@ export class EvolutionLedger {
     }) === true
   }
 
+  #hasExactExplicitCorrectionParent(status: LearningAnalysisStatus): boolean {
+    const runId = this.#runIdBySession.get(status.sessionId)
+    const binding = runId === undefined ? undefined : this.#runBindings.get(runId)
+    const manifest = runId === undefined ? undefined : this.#runSkillManifests.get(runId)
+    const intake = this.#learningIntakeStatuses.get(status.sessionId)
+      ?.get(status.messageId)
+    const ticket = this.#learningTickets.get(status.ticketId)
+    const hasExactSignal = (ticket?.signalIds ?? []).some(signalId => {
+      const signal = this.#learningSignals.get(signalId)
+      return signal !== undefined
+        && !isOutcomeSignal(signal)
+        && !this.#inactiveLearningSignals.has(signal.signalId)
+        && signal.sessionId === status.sessionId
+        && signal.messageId === status.messageId
+        && signal.feedbackVersion === status.feedbackVersion
+        && signal.scopeKey === binding?.scopeKey
+    })
+    return binding?.sessionId === status.sessionId
+      && manifest?.runId === runId
+      && hasExactSignal
+      && intake?.state === 'active'
+      && intake.rating === 'negative'
+      && intake.ticketId === status.ticketId
+      && intake.feedbackVersion === status.feedbackVersion
+      && intake.analysisConsentRevision === status.consentRevision
+      && this.#learningAnalysisConsents.get(status.consentRevision)?.enabled === true
+  }
+
   #assertLearningAnalysisTimestamp(
     status: LearningAnalysisStatus,
     timestamp: string,
@@ -5106,6 +5329,8 @@ export class EvolutionLedger {
         || parsed.type === 'learning-analysis-child-started'
         || parsed.type === 'learning-analysis-submitted'
         || parsed.type === 'learning-analysis-invalidated'
+        || parsed.type === 'learning-analysis-candidate-ready'
+        || parsed.type === 'learning-analysis-protocol-unavailable'
         || parsed.type === 'learning-analysis-report-intent-recorded'
         || parsed.type === 'learning-analysis-report-delivered'
       ) {
@@ -5840,20 +6065,51 @@ export class EvolutionLedger {
       if (ticket === undefined || this.#caseIdByTicket.has(ticket.ticketId)) {
         throw new LedgerIntegrityError('Learning Case disagrees with history')
       }
-      const signals = ticket.signalIds.map(id => this.#learningSignals.get(id))
-        .filter((signal): signal is OutcomeLearningSignal =>
-          signal !== undefined && isOutcomeSignal(signal))
       let prepared
       try {
-        prepared = prepareLearningCase({
-          ticketId: ticket.ticketId,
-          counterevidenceRunIds: event.case.counterevidence.map(item => item.runId),
-        }, ticket, signals, {
-          bindings: [...this.#runBindings.values()],
-          manifests: [...this.#runSkillManifests.values()],
-          uses: [...this.#runSkillUses.values()],
-          outcomes: [...this.#outcomeIntakes.values()].map(value => value.input),
-        })
+        if (event.case.evidenceSource === 'explicit-correction') {
+          const status = [...this.#learningAnalyses.values()].find(value =>
+            value.ticketId === ticket.ticketId
+            && value.submission?.verdict === 'skill-change'
+            && value.sessionId === value.parentSessionId)
+          const runId = status === undefined
+            ? undefined
+            : this.#runIdBySession.get(status.sessionId)
+          const binding = runId === undefined ? undefined : this.#runBindings.get(runId)
+          const manifest = runId === undefined ? undefined : this.#runSkillManifests.get(runId)
+          if (status === undefined || binding === undefined || manifest === undefined) {
+            throw new TypeError('explicit correction Case has no exact parent')
+          }
+          const signals = ticket.signalIds.map(id => this.#learningSignals.get(id))
+            .filter((signal): signal is LearningSignal =>
+              signal !== undefined
+              && !isOutcomeSignal(signal)
+              && !this.#inactiveLearningSignals.has(signal.signalId)
+              && signal.sessionId === status.sessionId
+              && signal.messageId === status.messageId
+              && signal.feedbackVersion === status.feedbackVersion)
+          prepared = prepareExplicitCorrectionLearningCase({
+            ticket,
+            signals,
+            evidenceIds: event.case.supportingEvidenceIds,
+            binding,
+            manifest,
+            uses: [...this.#runSkillUses.values()],
+          })
+        } else {
+          const signals = ticket.signalIds.map(id => this.#learningSignals.get(id))
+            .filter((signal): signal is OutcomeLearningSignal =>
+              signal !== undefined && isOutcomeSignal(signal))
+          prepared = prepareLearningCase({
+            ticketId: ticket.ticketId,
+            counterevidenceRunIds: event.case.counterevidence.map(item => item.runId),
+          }, ticket, signals, {
+            bindings: [...this.#runBindings.values()],
+            manifests: [...this.#runSkillManifests.values()],
+            uses: [...this.#runSkillUses.values()],
+            outcomes: [...this.#outcomeIntakes.values()].map(value => value.input),
+          })
+        }
       } catch (error) {
         throw new LedgerIntegrityError('Learning Case event is invalid', {
           cause: error,
@@ -6211,6 +6467,53 @@ export class EvolutionLedger {
         || status.phase === 'promoted'
         || status.phase === 'rolled-back'
       ) throw new LedgerIntegrityError('learning analysis invalidation disagrees with support')
+      this.#assertLearningAnalysisTimestamp(status, event.at)
+      return
+    }
+    if (event.type === 'learning-analysis-candidate-ready') {
+      const status = this.#learningAnalyses.get(event.analysisId)
+      const candidate = this.#skillCandidates.get(event.candidateId)
+      const patch = status?.submission?.candidatePatch
+      const requiredEvidence = status === undefined
+        ? []
+        : [...new Set([
+            ...(status.submission?.supportingEvidenceIds ?? []),
+            ...(status.submission?.counterevidenceIds ?? []),
+          ])]
+      if (
+        status?.phase !== 'running'
+        || status.submission?.verdict !== 'skill-change'
+        || patch === undefined
+        || candidate === undefined
+        || candidate.ticketId !== status.ticketId
+        || candidate.payload.description !== patch.description
+        || candidate.payload.whenToUse !== patch.whenToUse
+        || candidate.payload.content !== patch.content
+        || candidate.evidenceIds.length !== requiredEvidence.length
+        || requiredEvidence.some(id => !candidate.evidenceIds.includes(id))
+        || !this.#learningAnalysisHasActiveSupport(status)
+      ) throw new LedgerIntegrityError('learning analysis Candidate-ready event disagrees with history')
+      try {
+        assertLearningAnalysisEvidenceClosure(
+          status.submission,
+          this.#learningAnalysisEvidenceClosure(status),
+        )
+      } catch (error) {
+        throw new LedgerIntegrityError('learning analysis Candidate-ready Evidence changed', {
+          cause: error,
+        })
+      }
+      this.#assertLearningAnalysisTimestamp(status, event.at)
+      return
+    }
+    if (event.type === 'learning-analysis-protocol-unavailable') {
+      const status = this.#learningAnalyses.get(event.analysisId)
+      if (
+        status?.phase !== 'running'
+        || status.submission?.verdict !== 'skill-change'
+        || !this.#learningAnalysisHasActiveSupport(status)
+        || this.#hasExactExplicitCorrectionParent(status)
+      ) throw new LedgerIntegrityError('learning analysis protocol-unavailable disagrees with history')
       this.#assertLearningAnalysisTimestamp(status, event.at)
       return
     }
@@ -6699,6 +7002,25 @@ export class EvolutionLedger {
       this.#learningAnalyses.set(event.analysisId, {
         ...status,
         phase: 'invalidated',
+        updatedAt: event.at,
+      })
+      return
+    }
+    if (event.type === 'learning-analysis-candidate-ready') {
+      const status = this.#learningAnalyses.get(event.analysisId)!
+      this.#learningAnalyses.set(event.analysisId, {
+        ...status,
+        phase: 'candidate-ready',
+        candidateId: event.candidateId,
+        updatedAt: event.at,
+      })
+      return
+    }
+    if (event.type === 'learning-analysis-protocol-unavailable') {
+      const status = this.#learningAnalyses.get(event.analysisId)!
+      this.#learningAnalyses.set(event.analysisId, {
+        ...status,
+        phase: 'protocol-unavailable',
         updatedAt: event.at,
       })
       return

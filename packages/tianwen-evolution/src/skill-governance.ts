@@ -14,6 +14,7 @@ import type {
   TianwenRunId,
 } from './outcome-intake.js'
 import type {
+  LearningSignal,
   LearningSignalId,
   LearningTicket,
   LearningTicketId,
@@ -376,6 +377,8 @@ export interface LearningCase {
   readonly acceptanceContractDigest: Sha256Digest
   readonly parentVersionId: SkillVersionId
   readonly parentSkillName: string
+  /** Present only for a consented explicit-correction Case. */
+  readonly evidenceSource?: 'explicit-correction'
   readonly learningMode: 'experience-consolidation'
   readonly schedule: 'background'
   readonly experimentLimit: 0
@@ -402,6 +405,15 @@ export interface LearningCaseFacts {
   readonly manifests: readonly RunSkillManifest[]
   readonly uses: readonly RunSkillUse[]
   readonly outcomes: readonly OutcomeIntakeInput[]
+}
+
+export interface ExplicitCorrectionLearningCaseInput {
+  readonly ticket: LearningTicket
+  readonly signals: readonly LearningSignal[]
+  readonly evidenceIds: readonly Sha256Digest[]
+  readonly binding: TianwenRunBinding
+  readonly manifest: RunSkillManifest
+  readonly uses: readonly RunSkillUse[]
 }
 
 export type AttributionRecord =
@@ -564,6 +576,58 @@ export function prepareLearningCase(
   return { caseId: `case:${digest.slice('sha256:'.length)}`, ...value }
 }
 
+/**
+ * A correction is only promoted into the existing Case authority when its
+ * exact Session already has a durable Run binding and frozen parent manifest.
+ * It deliberately does not synthesize an Outcome or create a second store.
+ */
+export function prepareExplicitCorrectionLearningCase(
+  input: ExplicitCorrectionLearningCaseInput,
+): LearningCase {
+  const { ticket, signals, evidenceIds, binding, manifest } = input
+  if (
+    ticket.status !== 'open'
+    || signals.length === 0
+    || manifest.runId !== binding.runId
+    || manifest.parentVersionId.length === 0
+    || signals.some(signal =>
+      signal.scopeKey !== binding.scopeKey || signal.sessionId !== binding.sessionId)
+  ) throw new TypeError('explicit correction Case lacks its exact governed Run')
+  const evidence = unique(evidenceIds.map(value =>
+    digestValue(value, 'explicit correction Evidence ID')))
+  if (
+    evidence.length === 0
+    || evidence.some(id => !signals.some(signal => signal.evidenceIds.includes(id)))
+  ) throw new TypeError('explicit correction Case Evidence is outside its active closure')
+  const uses = byRun(input.uses)
+  const value = {
+    ticketId: ticket.ticketId,
+    problemFingerprint: ticket.problemFingerprint,
+    problemCategory: 'explicit-correction',
+    scopeKey: binding.scopeKey,
+    signalIds: signals.map(signal => signal.signalId),
+    runIds: [binding.runId],
+    supportingEvidenceIds: evidence,
+    supporting: [relation(binding.runId, evidence, uses)],
+    counterevidence: [],
+    acceptanceContractDigest: binding.acceptanceContractDigest,
+    parentVersionId: manifest.parentVersionId,
+    parentSkillName: manifest.parent.name,
+    evidenceSource: 'explicit-correction' as const,
+    learningMode: 'experience-consolidation' as const,
+    schedule: 'background' as const,
+    experimentLimit: 0 as const,
+    candidateLimit: 1 as const,
+    stopConditions: [
+      'sufficient',
+      'insufficient-evidence',
+      'risk-boundary',
+    ] as const,
+  }
+  const digest = sha256(value)
+  return { caseId: `case:${digest.slice('sha256:'.length)}`, ...value }
+}
+
 function nonblank(value: unknown, label: string): string {
   return stringValue(value, label).trim()
 }
@@ -592,14 +656,20 @@ export function prepareAttribution(
       'caseId', 'resolution', 'targetSkillName', 'hypothesis',
       'supportingEvidenceIds', 'counterevidenceIds', 'alternatives',
     ])
+    const allCaseEvidence = learningCase.evidenceSource === 'explicit-correction'
+      ? new Set(learningCase.supportingEvidenceIds)
+      : undefined
     if (
       input.targetSkillName !== learningCase.parentSkillName
       || !Array.isArray(input.supportingEvidenceIds)
       || !Array.isArray(input.counterevidenceIds)
       || input.supportingEvidenceIds.length === 0
-      || input.counterevidenceIds.length === 0
-      || [...learningCase.supporting, ...learningCase.counterevidence]
+      || (learningCase.evidenceSource !== 'explicit-correction'
+        && input.counterevidenceIds.length === 0)
+      || (learningCase.evidenceSource !== 'explicit-correction'
+        && [...learningCase.supporting, ...learningCase.counterevidence]
         .some(item => item.skillUse?.parentVersionId !== learningCase.parentVersionId)
+      )
     ) {
       throw new TypeError('dsh-skill Attribution lacks governed Skill proof')
     }
@@ -610,8 +680,10 @@ export function prepareAttribution(
     const counterevidenceIds = unique(input.counterevidenceIds.map(value =>
       digestValue(value, 'counterevidenceId')))
     if (
-      supportingEvidenceIds.some(value => !supporting.has(value))
-      || counterevidenceIds.some(value => !counter.has(value))
+      supportingEvidenceIds.some(value =>
+        allCaseEvidence === undefined ? !supporting.has(value) : !allCaseEvidence.has(value))
+      || counterevidenceIds.some(value =>
+        allCaseEvidence === undefined ? !counter.has(value) : !allCaseEvidence.has(value))
     ) {
       throw new TypeError('Attribution Evidence is outside its Case')
     }
@@ -751,7 +823,7 @@ export function prepareAcceptedLesson(
     digestValue(value, 'counterevidenceId')))
   if (
     supporting.length === 0
-    || counter.length === 0
+    || (learningCase.evidenceSource !== 'explicit-correction' && counter.length === 0)
     || supporting.some(value => !attribution.supportingEvidenceIds.includes(value))
     || counter.some(value => !attribution.counterevidenceIds.includes(value))
   ) {

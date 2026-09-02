@@ -3,6 +3,7 @@ import { Buffer } from 'node:buffer'
 import { sha256 } from './learning-intake.js'
 import type { LearningTicketId } from './learning-intake.js'
 import type { Sha256Digest } from './ledger.js'
+import type { GovernedSkillCandidateId } from './skill-governance.js'
 
 export type LearningAnalysisId = `analysis:${string}`
 
@@ -73,6 +74,7 @@ export interface LearningAnalysisStatus extends LearningAnalysisBinding {
   readonly submittedAt?: string
   readonly submissionDigest?: Sha256Digest
   readonly submission?: LearningAnalysisSubmission
+  readonly candidateId?: GovernedSkillCandidateId
   readonly reportDelivery?: LearningAnalysisReportDelivery
 }
 
@@ -114,6 +116,21 @@ export interface LearningAnalysisInvalidatedEvent {
   readonly reason: 'support-withdrawn'
 }
 
+export interface LearningAnalysisCandidateReadyEvent {
+  readonly schemaVersion: 'tianwen.learning-analysis-candidate-ready.v1'
+  readonly type: 'learning-analysis-candidate-ready'
+  readonly at: string
+  readonly analysisId: LearningAnalysisId
+  readonly candidateId: GovernedSkillCandidateId
+}
+
+export interface LearningAnalysisProtocolUnavailableEvent {
+  readonly schemaVersion: 'tianwen.learning-analysis-protocol-unavailable.v1'
+  readonly type: 'learning-analysis-protocol-unavailable'
+  readonly at: string
+  readonly analysisId: LearningAnalysisId
+}
+
 export interface LearningAnalysisReportBinding {
   readonly analysisId: LearningAnalysisId
   readonly parentSessionId: string
@@ -150,6 +167,8 @@ export type LearningAnalysisLedgerEvent =
   | LearningAnalysisChildStartedEvent
   | LearningAnalysisSubmittedEvent
   | LearningAnalysisInvalidatedEvent
+  | LearningAnalysisCandidateReadyEvent
+  | LearningAnalysisProtocolUnavailableEvent
   | LearningAnalysisReportIntentRecordedEvent
   | LearningAnalysisReportDeliveredEvent
 
