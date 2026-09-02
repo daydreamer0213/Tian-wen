@@ -91,6 +91,7 @@ export interface LearningLoopControlledExecutor {
   materializeCandidate(context: LearningLoopExecutionContext): unknown | Promise<unknown>
   evaluate(context: LearningLoopExecutionContext): unknown | Promise<unknown>
   promote(context: LearningLoopExecutionContext): unknown | Promise<unknown>
+  recoverPromotion?(context: LearningLoopExecutionContext): boolean | Promise<boolean>
   rollback(context: LearningLoopExecutionContext): unknown | Promise<unknown>
   /** Sends a concise, deduplicated result to the exact main parent. */
   report(context: LearningLoopExecutionContext): unknown | Promise<unknown>
@@ -118,6 +119,11 @@ export interface ExplicitCorrectionLearningLoopExecutorConfig {
     readonly context: LearningLoopExecutionContext
     readonly text: string
   }) => string | Promise<string>
+  /** Reconciles reportFrom accepted-before-ledger-delivery after a restart. */
+  readonly findTerminalReport?: (input: {
+    readonly context: LearningLoopExecutionContext
+    readonly text: string
+  }) => string | undefined | Promise<string | undefined>
 }
 
 /**
@@ -169,6 +175,22 @@ export function createExplicitCorrectionLearningLoopExecutor(
       })))) {
       throw new Error('controlled protocol execution environment drifted')
     }
+  }
+  const recoverTransition = (context: LearningLoopExecutionContext, kind: 'promote' | 'rollback'): boolean => {
+    const shadowId = context.status.shadowId
+    if (shadowId === undefined) return false
+    const shadow = context.ctx.tianwenEvolution.getControlledSkillShadow(shadowId as never)
+    const pointer = shadow === undefined ? undefined : context.ctx.tianwenEvolution.getControlledSkillScopePointer(shadow.scopeKey)
+    const matching = context.ctx.tianwenEvolution.listControlledSkillTransitions().filter(transition => {
+      const receipt = context.ctx.tianwenEvolution.getControlledSkillTransitionReceipt(transition.transitionId)
+      return transition.shadowId === shadowId && transition.kind === kind && receipt?.state === 'verified'
+        && sha256(receipt.pointer) === sha256(pointer)
+    })
+    if (matching.length !== 1) return false
+    const input = { analysisId: context.status.analysisId as never, transitionId: matching[0]!.transitionId }
+    if (kind === 'promote') context.ctx.tianwenEvolution.recordLearningAnalysisPromoted(input)
+    else context.ctx.tianwenEvolution.recordLearningAnalysisRolledBack(input)
+    return true
   }
   return {
     async freezeProtocol(context) {
@@ -255,6 +277,7 @@ export function createExplicitCorrectionLearningLoopExecutor(
       })
     },
     async promote(context) {
+      if (recoverTransition(context, 'promote')) return
       const built = tasksFor(context)
       if (built === undefined || context.status.shadowId === undefined) throw new Error('controlled promotion lacks Shadow')
       await assertFrozenEnvironment(context)
@@ -274,7 +297,11 @@ export function createExplicitCorrectionLearningLoopExecutor(
         analysisId: context.status.analysisId as never, transitionId: transition.transition.transitionId as never,
       })
     },
+    recoverPromotion(context) {
+      return recoverTransition(context, 'promote')
+    },
     async rollback(context) {
+      if (recoverTransition(context, 'rollback')) return
       const built = tasksFor(context)
       if (built === undefined || context.status.shadowId === undefined) throw new Error('controlled rollback lacks Shadow')
       await assertFrozenEnvironment(context)
@@ -304,7 +331,8 @@ export function createExplicitCorrectionLearningLoopExecutor(
       }
       const recorded = context.ctx.tianwenEvolution.recordLearningAnalysisTerminalReportIntent(binding)
       if (recorded.terminalReportDelivery?.state === 'delivered') return
-      const reportMessageId = await config.deliverTerminalReport({ context, text })
+      const reportMessageId = await config.findTerminalReport?.({ context, text })
+        ?? await config.deliverTerminalReport({ context, text })
       context.ctx.tianwenEvolution.recordLearningAnalysisTerminalReportDelivered({
         ...binding, reportMessageId,
       })
@@ -418,6 +446,7 @@ export class TianwenLearningLoopService extends Service {
       materializeCandidate: current => executor === undefined ? unavailableExecutor() : executor.materializeCandidate(contextFor(current)),
       evaluate: current => executor === undefined ? unavailableExecutor() : executor.evaluate(contextFor(current)),
       promote: current => executor === undefined ? unavailableExecutor() : executor.promote(contextFor(current)),
+      recoverPromote: current => executor?.recoverPromotion?.(contextFor(current)) ?? false,
       rollback: current => executor === undefined ? unavailableExecutor() : executor.rollback(contextFor(current)),
       // The native tool reports its submitted verdict; configured executors report final governed outcomes.
       report: current => executor?.report(contextFor(current)),
@@ -516,6 +545,8 @@ export interface LearningLoopPhaseOperations {
   readonly materializeCandidate?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
   readonly evaluate?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
   readonly promote?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
+  /** Replays only an already verified promote transition; never starts one. */
+  readonly recoverPromote?: (status: LearningLoopPhaseStatus) => boolean | Promise<boolean>
   readonly rollback?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
   readonly report?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
   readonly interruptChild?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
@@ -533,6 +564,13 @@ export async function runLearningLoopPhase(input: LearningLoopPhaseOperations): 
   const status = input.status
   try {
     if (!await input.hasActiveSupport(status)) {
+      if (status.phase === 'failed' && status.resumePhase === 'promoted') {
+        await operation(input, 'resume')(status)
+        return
+      }
+      if (status.phase === 'shadow-ready' && input.recoverPromote !== undefined) {
+        if (await input.recoverPromote(status)) return
+      }
       if (status.phase === 'promoted') await operation(input, 'rollback')(status)
       else {
         if (input.invalidate !== undefined) await input.invalidate(status)

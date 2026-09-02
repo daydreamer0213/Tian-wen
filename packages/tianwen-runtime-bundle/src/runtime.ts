@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { SessionId } from '@tianwen/dsh-compat'
-import { CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST } from '@tianwen/evolution'
+import { CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST, sha256 } from '@tianwen/evolution'
 import {
   apply as applyCore,
   inject,
@@ -87,6 +87,34 @@ function configuredLearningLoopExecutor(
       return String(await ctx.subagents.reportFrom(child, [{ type: 'text', text }], {
         delivery: 'next-step', signal: AbortSignal.timeout(30_000),
       }))
+    },
+    async findTerminalReport({ context, text }) {
+      const childSessionId = String(context.status.childSessionId)
+      const parent = ctx.agents.get(SessionId(String(context.status.parentSessionId)))
+      if (parent === undefined || parent.session.header.parentSession !== undefined
+        || parent.session.header.origin === 'subagent') return undefined
+      const expected = [{ type: 'text' as const, text: `Background subagent ${childSessionId} reported:` }, {
+        type: 'text' as const, text,
+      }]
+      const exact = (event: unknown): string | undefined => {
+        if (event === null || typeof event !== 'object') return undefined
+        const typed = event as { readonly type?: unknown, readonly data?: unknown }
+        if (typed.type !== 'user/message' || typed.data === null || typeof typed.data !== 'object') return undefined
+        const message = typed.data as {
+          readonly id?: unknown
+          readonly source?: { readonly kind?: unknown, readonly senderSessionId?: unknown }
+          readonly content?: unknown
+        }
+        return message.source?.kind === 'subagent-report'
+          && String(message.source.senderSessionId) === childSessionId
+          && sha256(message.content) === sha256(expected)
+          && typeof message.id === 'string' && message.id.length > 0
+          ? message.id : undefined
+      }
+      const live = (parent.session as unknown as { readonly events?: readonly unknown[] }).events ?? []
+      const persisted = await ctx.sessionPersistence.inspect(parent.session.id)
+      return live.map(exact).find((id): id is string => id !== undefined)
+        ?? persisted.events.map(exact).find((id): id is string => id !== undefined)
     },
   })
 }

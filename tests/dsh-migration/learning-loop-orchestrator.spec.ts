@@ -177,6 +177,42 @@ describe('durable learning-loop phase table', () => {
     }))
   })
 
+  it('resumes a failed promoted outcome before a withdrawn-support rollback', async () => {
+    const resume = vi.fn()
+    const rollback = vi.fn()
+    const invalidate = vi.fn()
+    await runLearningLoopPhase({
+      status: { ...base, phase: 'failed', resumePhase: 'promoted' },
+      hasActiveSupport: async () => false,
+      resume, rollback, invalidate,
+    })
+    expect(resume).toHaveBeenCalledOnce()
+    expect(rollback).not.toHaveBeenCalled()
+    expect(invalidate).not.toHaveBeenCalled()
+
+    await runLearningLoopPhase({
+      status: { ...base, phase: 'promoted' },
+      hasActiveSupport: async () => false,
+      resume, rollback, invalidate,
+    })
+    expect(rollback).toHaveBeenCalledOnce()
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+
+  it('invalidates unsupported Shadow work when no verified promote can be recovered', async () => {
+    const recoverPromote = vi.fn(async () => false)
+    const invalidate = vi.fn()
+    await runLearningLoopPhase({
+      status: { ...base, phase: 'shadow-ready', shadowId: 'shadow:one' },
+      hasActiveSupport: async () => false,
+      recoverPromote,
+      invalidate,
+      interruptChild: vi.fn(),
+    })
+    expect(recoverPromote).toHaveBeenCalledOnce()
+    expect(invalidate).toHaveBeenCalledOnce()
+  })
+
   it('stops on a newly durable failure, then retries its exact phase on the next wake', async () => {
     let status = { ...base, phase: 'candidate-ready' }
     let evaluations = 0

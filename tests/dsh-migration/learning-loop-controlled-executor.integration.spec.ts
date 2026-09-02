@@ -117,6 +117,7 @@ function successfulControlledScript() {
     ...evaluators,
     ...shadows,
     ...verifiedScript('transition-promote', { phase: 'transition', kind: 'promote' }),
+    ...verifiedScript('transition-rollback', { phase: 'transition', kind: 'rollback' }),
   ]
 }
 
@@ -217,6 +218,9 @@ describe('explicit-correction controlled learning-loop executor', () => {
           return { callConfig, retryPolicy, toolSchemas, rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST }
         },
         async deliverTerminalReport({ text }) { reports.push(text); return 'main-chat-terminal-message' },
+        findTerminalReport({ text }) {
+          return reports.includes(text) ? 'main-chat-terminal-message' : undefined
+        },
       })
       const context = () => ({
         ctx: harness.ctx,
@@ -245,7 +249,25 @@ describe('explicit-correction controlled learning-loop executor', () => {
       expect(harness.ctx.tianwenEvolution.getControlledSkillShadow(shadowReady.shadowId!))
         .toMatchObject({ shadowId: shadowReady.shadowId })
 
+      // Simulate the narrow crash window: native verification has committed
+      // the pointer, but the following analysis outcome append is uncertain.
+      const evolution = harness.ctx.tianwenEvolution as unknown as {
+        recordLearningAnalysisPromoted: (input: unknown) => unknown
+      }
+      const recordPromoted = evolution.recordLearningAnalysisPromoted
+      let failOutcomeOnce = true
+      evolution.recordLearningAnalysisPromoted = input => {
+        if (failOutcomeOnce) {
+          failOutcomeOnce = false
+          throw new Error('forced outcome append uncertainty')
+        }
+        return recordPromoted.call(harness.ctx.tianwenEvolution, input)
+      }
+      await expect(executor.promote(context())).rejects.toThrow(/forced outcome append uncertainty/u)
+      evolution.recordLearningAnalysisPromoted = recordPromoted
+      const requestsAfterVerifiedTransition = adapter.requests.length
       await executor.promote(context())
+      expect(adapter.requests).toHaveLength(requestsAfterVerifiedTransition)
       const promoted = harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)!
       const promotedShadow = harness.ctx.tianwenEvolution.getControlledSkillShadow(shadowReady.shadowId!)!
       const pointer = harness.ctx.tianwenEvolution.getControlledSkillScopePointer(promotedShadow.scopeKey)
@@ -279,14 +301,53 @@ describe('explicit-correction controlled learning-loop executor', () => {
       expect(harness.ctx.tianwenEvolution.getRunSkillManifest(current.runId)?.parentVersionId)
         .toBe(currentManifest.parentVersionId)
 
-      await executor.report(context())
+      const recordTerminalDelivery = (harness.ctx.tianwenEvolution as unknown as {
+        recordLearningAnalysisTerminalReportDelivered: (input: unknown) => unknown
+      }).recordLearningAnalysisTerminalReportDelivered
+      let failTerminalDeliveryOnce = true
+      ;(harness.ctx.tianwenEvolution as unknown as {
+        recordLearningAnalysisTerminalReportDelivered: (input: unknown) => unknown
+      }).recordLearningAnalysisTerminalReportDelivered = input => {
+        if (failTerminalDeliveryOnce) {
+          failTerminalDeliveryOnce = false
+          throw new Error('forced terminal delivery append uncertainty')
+        }
+        return recordTerminalDelivery.call(harness.ctx.tianwenEvolution, input)
+      }
+      await expect(executor.report(context())).rejects.toThrow(/forced terminal delivery append uncertainty/u)
+      ;(harness.ctx.tianwenEvolution as unknown as {
+        recordLearningAnalysisTerminalReportDelivered: (input: unknown) => unknown
+      }).recordLearningAnalysisTerminalReportDelivered = recordTerminalDelivery
       await executor.report(context())
       const terminal = harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)!
       expect(reports).toEqual(['Tianwen 分析结论：候选 Skill 已通过验证；仅未来 Run 使用新版本。'])
       expect(terminal.terminalReportDelivery).toMatchObject({
         state: 'delivered', reportMessageId: 'main-chat-terminal-message',
       })
-      expect(adapter.requests).toHaveLength(53)
+      const recordRolledBack = (harness.ctx.tianwenEvolution as unknown as {
+        recordLearningAnalysisRolledBack: (input: unknown) => unknown
+      }).recordLearningAnalysisRolledBack
+      let failRollbackOutcomeOnce = true
+      ;(harness.ctx.tianwenEvolution as unknown as {
+        recordLearningAnalysisRolledBack: (input: unknown) => unknown
+      }).recordLearningAnalysisRolledBack = input => {
+        if (failRollbackOutcomeOnce) {
+          failRollbackOutcomeOnce = false
+          throw new Error('forced rollback outcome append uncertainty')
+        }
+        return recordRolledBack.call(harness.ctx.tianwenEvolution, input)
+      }
+      await expect(executor.rollback(context())).rejects.toThrow(/forced rollback outcome append uncertainty/u)
+      ;(harness.ctx.tianwenEvolution as unknown as {
+        recordLearningAnalysisRolledBack: (input: unknown) => unknown
+      }).recordLearningAnalysisRolledBack = recordRolledBack
+      const requestsAfterVerifiedRollback = adapter.requests.length
+      await executor.rollback(context())
+      expect(adapter.requests).toHaveLength(requestsAfterVerifiedRollback)
+      expect(harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)?.phase).toBe('rolled-back')
+      expect(harness.ctx.tianwenEvolution.getControlledSkillScopePointer(promotedShadow.scopeKey)?.activeVersionId)
+        .toBe(currentManifest.parentVersionId)
+      expect(adapter.requests).toHaveLength(56)
       expect(hash({ current: currentManifest.parentVersionId, future: pointer?.activeVersionId }))
         .toMatch(/^sha256:[a-f0-9]{64}$/u)
     } finally {
