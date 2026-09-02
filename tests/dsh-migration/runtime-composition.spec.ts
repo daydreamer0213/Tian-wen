@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import GoalService from '@deepseek-ai/dsh-goal'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
@@ -18,6 +18,7 @@ import {
   defineTool,
   goalRoundDriver,
   mountAgentLoopTestDependencies,
+  mountFeedbackHarness,
   textResponse,
   toolCallResponse,
 } from '@tianwen/dsh-compat'
@@ -227,13 +228,20 @@ afterEach(() => {
 })
 
 describe('@tianwen/runtime', () => {
-  it('leaves an ordinary DSH model, tool, and permission flow unchanged with zero learning writes', async () => {
+  it('preserves an ordinary DSH flow while adding only the main-chat consent control', async () => {
     const disabled = await runOrdinaryDshSession(false)
     const enabled = await runOrdinaryDshSession(true)
 
     expect(disabled.hostMounted).toBe(false)
     expect(enabled.hostMounted).toBe(true)
-    expect(enabled.behavior).toEqual(disabled.behavior)
+    const ordinaryEnabled = structuredClone(enabled.behavior)
+    for (const request of ordinaryEnabled.requests as Array<{
+      tools: Array<{ readonly name: string }>
+    }>) {
+      request.tools = request.tools.filter(tool =>
+        tool.name !== 'tianwen_learning_consent')
+    }
+    expect(ordinaryEnabled).toEqual(disabled.behavior)
     expect(enabled.behavior).toMatchObject({
       requests: [
         {
@@ -266,8 +274,39 @@ describe('@tianwen/runtime', () => {
           properties: { text: { type: 'string' } },
         },
       })
+      expect(request.tools).toContainEqual({
+        name: 'tianwen_learning_consent',
+        description: 'Enable, disable, or inspect Tianwen automatic feedback analysis for this profile.',
+        parameters: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['enable', 'disable', 'status'],
+            },
+          },
+          required: ['action'],
+        },
+      })
     }
     expect(enabled.behavior.assistantOutput).toHaveLength(2)
+  })
+
+  it('mounts the learning bridge against the real DSH Message Feedback profile services', async () => {
+    const profileRoot = stateRoot()
+    const mounted = await mountFeedbackHarness(profileRoot, [])
+    try {
+      await applyRuntimeBundle(mounted.ctx, {
+        stateRoot: join(profileRoot, 'state'),
+        sessionsRoot: join(profileRoot, 'sessions'),
+        evolutionRoot: join(profileRoot, 'evolution'),
+      })
+      await vi.waitFor(() => expect(
+        mounted.ctx.get('tianwenMessageFeedbackBridge'),
+      ).toBeDefined())
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
   })
 
   it('uses an explicit absolute Evolution root instead of the Profile default', async () => {

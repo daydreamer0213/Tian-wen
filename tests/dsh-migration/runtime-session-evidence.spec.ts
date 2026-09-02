@@ -145,6 +145,10 @@ describe('Tianwen runtime Session and Evidence recovery', () => {
       expect(sessionBytes).toContain('private argument')
       expect(sessionBytes).toContain('private result')
       expect(sessionBytes).toContain('create the migration goal')
+      expect(second.ctx.tianwenEvolution
+        .listLearningIntakeStatuses(String(sessionId))).toEqual([])
+      expect(second.ctx.tianwenEvolution.listLearningSignals()).toEqual([])
+      expect(second.ctx.tianwenEvolution.listLearningTickets()).toEqual([])
       expect(await second.ctx.sessions.flush(resumed.agent.session)).toBe(true)
       await second.ctx.fiber.dispose()
       second = undefined
@@ -166,6 +170,10 @@ describe('Tianwen runtime Session and Evidence recovery', () => {
       expect(JSON.stringify(
         third.ctx.tianwenEvidence.project(replayed.agent.session),
       )).toBe(beforeBytes)
+      expect(third.ctx.tianwenEvolution
+        .listLearningIntakeStatuses(String(sessionId))).toEqual([])
+      expect(third.ctx.tianwenEvolution.listLearningSignals()).toEqual([])
+      expect(third.ctx.tianwenEvolution.listLearningTickets()).toEqual([])
     } finally {
       if (third !== undefined) await third.ctx.fiber.dispose()
       if (second !== undefined) await second.ctx.fiber.dispose()

@@ -12,6 +12,7 @@ import {
 } from '@tianwen/dsh-compat'
 import type { Agent } from '@tianwen/dsh-compat'
 import { default as TimerService } from '@deepseek-ai/cordis-plugin-timer'
+import { MessageId } from '@deepseek-ai/dsh-llm'
 import { PythonA1Evaluator } from '../../packages/tianwen-evaluator-python/src/index.js'
 import { apply } from '../../packages/tianwen-runtime/src/index.js'
 
@@ -71,6 +72,43 @@ async function mountGovernance(root: string, id: string) {
 }
 
 describe('Tianwen runtime governance migration', () => {
+  it('keeps a feedback-derived learning Ticket inert until the governed loop acts', async () => {
+    const base = resolve(fixtureRoot, 'feedback-governance')
+    mkdirSync(base, { recursive: true })
+    const root = mkdtempSync(join(base, 'runtime-governance-'))
+    const mounted = await mountGovernance(root, 'feedback-governance-main')
+
+    try {
+      mounted.agent.session.append('assistant/message', {
+        turn: 1,
+        message: {
+          id: MessageId('feedback-governance-answer'),
+          role: 'assistant',
+          content: [{ type: 'text', text: 'An answer that can be corrected.' }],
+          source: { kind: 'model', provider: 'probe', model: 'scripted' },
+        },
+      }, { surfaceOp: 'append' })
+      expect(mounted.ctx.tianwenLearningIntake.consume(
+        mounted.agent.session,
+        'profile:tianwen',
+        {
+          messageId: 'feedback-governance-answer',
+          rating: 'negative',
+          note: 'Cite the governing evidence.',
+          version: 'feedback-governance-v1',
+        },
+      )).toMatchObject({ decision: 'ticket-created', duplicate: false })
+
+      expect(mounted.ctx.tianwenEvolution.listLearningSignals()).toHaveLength(1)
+      expect(mounted.ctx.tianwenEvolution.listLearningTickets()).toHaveLength(1)
+      expect(mounted.ctx.tianwenEvolution.getChampion()).toBeUndefined()
+      expect(mounted.ctx.dynamicCordisRunner.inventory()).toEqual([])
+    } finally {
+      await mounted.ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('keeps Python A1 as an independent repo-task evaluator', async () => {
     const stateRoot = resolve(fixtureRoot, 'migration-phase-1-a1')
     const pythonExecutable = process.env.TIANWEN_DSH_PROBE_PYTHON
