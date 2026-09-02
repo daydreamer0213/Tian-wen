@@ -20,6 +20,7 @@ import type { GenerateOptions, StreamChunk } from '@tianwen/dsh-compat'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   controlledSkillShadowExecutionManifestDigest,
+  learningSessionLifecycleFingerprint,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
 import { apply } from '../../packages/tianwen-runtime/src/index.js'
@@ -745,6 +746,24 @@ describe('controlled Skill activation Runtime', () => {
   it('does not resume a pending transition after any post-begin Run activity', async () => {
     const mounted = await mountActivationRuntime('pending-manifest-partial', successfulScript(['promote']))
     const { input, transition } = beginPendingTransition(mounted)
+    const session = mounted.harness.ctx.sessions.create(
+      SessionId(transition.postCheck.sessionId),
+      { meta: { cwd: input.task.workspaceRoot } },
+    )
+    mounted.harness.ctx.tianwenEvolution.recordRunBinding({
+      goalRef: transition.runBinding.goalRef,
+      taskRef: transition.runBinding.taskRef,
+      sessionId: transition.runBinding.sessionId,
+      scopeKey: transition.runBinding.scopeKey,
+      acceptanceContract: transition.runBinding.acceptanceContract,
+      acceptanceSubjectDigest:
+        transition.runBinding.acceptanceSubjectDigest,
+      sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+        sessionId: String(session.id),
+        createdAt: session.header.createdAt,
+        ...(session.header.cwd === undefined ? {} : { cwd: session.header.cwd }),
+      }),
+    })
     mounted.harness.ctx.tianwenEvolution.recordRunSkillManifest({
       runId: transition.postCheck.runId,
       skill: { ...mounted.seeded.candidate.payload, provider: 'runtime' },
@@ -984,6 +1003,15 @@ describe('controlled Skill activation Runtime', () => {
     try {
       const promote = await mounted.harness.ctx.tianwenSkillEvaluation
         .runControlledSkillTransition(mounted.input('promote', 1))
+      const promoteTransition = evolution.listControlledSkillTransitions()[0]!
+      expect(evolution.getRunBinding(promoteTransition.postCheck.runId))
+        .toMatchObject({
+          ...promoteTransition.runBinding,
+          schemaVersion: 'tianwen.run-binding.v3',
+          sessionLifecycleFingerprint: expect.stringMatching(
+            /^sha256:[0-9a-f]{64}$/u,
+          ),
+        })
       const rollback = await mounted.harness.ctx.tianwenSkillEvaluation
         .runControlledSkillTransition(mounted.input('rollback', 2))
       const restore = await mounted.harness.ctx.tianwenSkillEvaluation
@@ -1017,7 +1045,13 @@ describe('controlled Skill activation Runtime', () => {
         mounted.seeded.shadow.candidateVersionId,
       ])
       for (const transition of transitions) {
-        expect(evolution.getRunBinding(transition.postCheck.runId)).toEqual(transition.runBinding)
+        expect(evolution.getRunBinding(transition.postCheck.runId)).toMatchObject({
+          ...transition.runBinding,
+          schemaVersion: 'tianwen.run-binding.v3',
+          sessionLifecycleFingerprint: expect.stringMatching(
+            /^sha256:[0-9a-f]{64}$/u,
+          ),
+        })
         expect(evolution.getRunSkillManifest(transition.postCheck.runId)?.parentVersionId)
           .toBe(transition.targetPointer.activeVersionId)
         expect(evolution.getRunSkillUse(transition.postCheck.runId)?.parentVersionId)
@@ -1041,6 +1075,87 @@ describe('controlled Skill activation Runtime', () => {
       await mounted.harness.ctx.fiber.dispose()
     }
   })
+
+  it.each([
+    'missing',
+    'legacy-v1',
+    'legacy-v2',
+    'missing-fingerprint',
+    'tampered-fingerprint',
+    'plan-field-drift',
+  ] as const)(
+    'rejects a %s actual activation binding before model activity',
+    async fault => {
+      const mounted = await mountActivationRuntime(
+        `binding-${fault}`,
+        successfulScript(['promote']),
+      )
+      const input = mounted.input('promote', 1)
+      const evolution = mounted.harness.ctx.tianwenEvolution
+      const read = evolution.getRunBinding.bind(evolution)
+      vi.spyOn(evolution, 'getRunBinding').mockImplementation(runId => {
+        const binding = read(runId)
+        if (binding?.sessionId !== input.task.sessionId) return binding
+        if (fault === 'missing') return undefined
+        if (fault === 'legacy-v2') {
+          const {
+            sessionLifecycleFingerprint: _fingerprint,
+            schemaVersion: _schemaVersion,
+            ...legacy
+          } = binding as Extract<typeof binding, {
+            schemaVersion: 'tianwen.run-binding.v3'
+          }>
+          return {
+            ...legacy,
+            schemaVersion: 'tianwen.run-binding.v2',
+          }
+        }
+        if (fault === 'legacy-v1') {
+          const {
+            sessionLifecycleFingerprint: _fingerprint,
+            acceptanceSubjectDigest: _subject,
+            schemaVersion: _schemaVersion,
+            ...legacy
+          } = binding as Extract<typeof binding, {
+            schemaVersion: 'tianwen.run-binding.v3'
+          }>
+          return {
+            ...legacy,
+            schemaVersion: 'tianwen.run-binding.v1',
+          }
+        }
+        if (fault === 'missing-fingerprint') {
+          const {
+            sessionLifecycleFingerprint: _fingerprint,
+            ...malformed
+          } = binding as Extract<typeof binding, {
+            schemaVersion: 'tianwen.run-binding.v3'
+          }>
+          return malformed as typeof binding
+        }
+        if (fault === 'tampered-fingerprint') {
+          return {
+            ...binding,
+            sessionLifecycleFingerprint: `sha256:${'f'.repeat(64)}`,
+          }
+        }
+        return { ...binding, scopeKey: `${binding.scopeKey}:drift` }
+      })
+
+      try {
+        await expect(mounted.harness.ctx.tianwenSkillEvaluation
+          .runControlledSkillTransition(input)).resolves.toMatchObject({
+          state: 'stopped',
+          stop: { stage: 'postflight', reasonCode: 'run-fact-mismatch' },
+        })
+        expect(mounted.adapter.requests).toEqual([])
+      } finally {
+        mounted.disposeParent()
+        mounted.disposeVerifier()
+        await mounted.harness.ctx.fiber.dispose()
+      }
+    },
+  )
 
   it('atomically restores the previous pointer for every bounded post-begin failure class', async () => {
     const cases = [

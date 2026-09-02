@@ -37,7 +37,15 @@ export interface RunBindingInputV2 extends RunBindingInputV1 {
   readonly acceptanceSubjectDigest: Sha256Digest
 }
 
-export type RunBindingInput = RunBindingInputV1 | RunBindingInputV2
+export interface RunBindingInputV3 extends RunBindingInputV1 {
+  readonly acceptanceSubjectDigest?: Sha256Digest
+  readonly sessionLifecycleFingerprint: Sha256Digest
+}
+
+export type RunBindingInput =
+  | RunBindingInputV1
+  | RunBindingInputV2
+  | RunBindingInputV3
 
 export interface TianwenRunBindingV1 extends RunBindingInputV1 {
   readonly schemaVersion: 'tianwen.run-binding.v1'
@@ -51,7 +59,16 @@ export interface TianwenRunBindingV2 extends RunBindingInputV2 {
   readonly acceptanceContractDigest: Sha256Digest
 }
 
-export type TianwenRunBinding = TianwenRunBindingV1 | TianwenRunBindingV2
+export interface TianwenRunBindingV3 extends RunBindingInputV3 {
+  readonly schemaVersion: 'tianwen.run-binding.v3'
+  readonly runId: TianwenRunId
+  readonly acceptanceContractDigest: Sha256Digest
+}
+
+export type TianwenRunBinding =
+  | TianwenRunBindingV1
+  | TianwenRunBindingV2
+  | TianwenRunBindingV3
 
 export interface RunBindingReceipt {
   readonly runId: TianwenRunId
@@ -242,14 +259,16 @@ function validateRunBindingInput(input: RunBindingInput): RunBindingInput {
   if (!isRecord(input)) {
     throw new TypeError('Run binding input must be an object')
   }
-  const isV2 = 'acceptanceSubjectDigest' in input
+  const isV3 = 'sessionLifecycleFingerprint' in input
+  const hasAcceptanceSubject = 'acceptanceSubjectDigest' in input
   exactKeys(input, [
     'goalRef',
     'taskRef',
     'sessionId',
     'scopeKey',
     'acceptanceContract',
-    ...(isV2 ? ['acceptanceSubjectDigest'] : []),
+    ...(hasAcceptanceSubject ? ['acceptanceSubjectDigest'] : []),
+    ...(isV3 ? ['sessionLifecycleFingerprint'] : []),
   ])
   const common: RunBindingInputV1 = {
     goalRef: nonBlank(input.goalRef, 'goalRef'),
@@ -258,15 +277,26 @@ function validateRunBindingInput(input: RunBindingInput): RunBindingInput {
     scopeKey: nonBlank(input.scopeKey, 'scopeKey'),
     acceptanceContract: prepareRunAcceptanceContract(input.acceptanceContract),
   }
-  return isV2
+  const acceptanceSubject = hasAcceptanceSubject
     ? {
-        ...common,
         acceptanceSubjectDigest: requireDigest(
           input.acceptanceSubjectDigest,
           'acceptanceSubjectDigest',
         ),
       }
-    : common
+    : {}
+  return isV3
+    ? {
+        ...common,
+        ...acceptanceSubject,
+        sessionLifecycleFingerprint: requireDigest(
+          input.sessionLifecycleFingerprint,
+          'sessionLifecycleFingerprint',
+        ),
+      }
+    : hasAcceptanceSubject
+      ? { ...common, ...acceptanceSubject } as RunBindingInputV2
+      : common
 }
 
 export function prepareRunBinding(input: RunBindingInput): TianwenRunBinding {
@@ -283,7 +313,14 @@ export function prepareRunBinding(input: RunBindingInput): TianwenRunBinding {
     } : {}),
   })
   const runId = `run:${runDigest.slice('sha256:'.length)}` as TianwenRunId
-  return 'acceptanceSubjectDigest' in validated
+  return 'sessionLifecycleFingerprint' in validated
+    ? {
+        schemaVersion: 'tianwen.run-binding.v3',
+        runId,
+        ...validated,
+        acceptanceContractDigest,
+      }
+    : 'acceptanceSubjectDigest' in validated
     ? {
         schemaVersion: 'tianwen.run-binding.v2',
         runId,

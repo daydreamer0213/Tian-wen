@@ -89,15 +89,6 @@ function consentRevision(
     : undefined
 }
 
-function sameSessionLifecycle(
-  left: SessionInspection,
-  right: SessionInspection,
-): boolean {
-  return String(left.meta.id) === String(right.meta.id)
-    && left.meta.createdAt === right.meta.createdAt
-    && left.meta.cwd === right.meta.cwd
-}
-
 export class TianwenMessageFeedbackBridgeService extends Service {
   static inject = [
     'messageFeedback',
@@ -183,6 +174,13 @@ export class TianwenMessageFeedbackBridgeService extends Service {
       if (!listed.ok) return this.notFound(sessionId)
       throw new Error('persisted feedback Session inspection is unavailable')
     }
+    const lifecycleBefore = learningSessionLifecycleFingerprint({
+      sessionId: String(inspectionBefore.meta.id),
+      createdAt: inspectionBefore.meta.createdAt,
+      ...(inspectionBefore.meta.cwd === undefined
+        ? {}
+        : { cwd: inspectionBefore.meta.cwd }),
+    })
     const listed = await this.ctx.messageFeedback.list({
       sessionId: SessionId(sessionId),
     })
@@ -190,10 +188,15 @@ export class TianwenMessageFeedbackBridgeService extends Service {
     const inspection = await this.ctx.sessionPersistence.inspect(
       SessionId(sessionId),
     )
+    const lifecycleAfter = learningSessionLifecycleFingerprint({
+      sessionId: String(inspection.meta.id),
+      createdAt: inspection.meta.createdAt,
+      ...(inspection.meta.cwd === undefined ? {} : { cwd: inspection.meta.cwd }),
+    })
     if (
       String(inspectionBefore.meta.id) !== sessionId
       || String(inspection.meta.id) !== sessionId
-      || !sameSessionLifecycle(inspectionBefore, inspection)
+      || lifecycleBefore !== lifecycleAfter
     ) {
       throw new Error('feedback Session inspection identity mismatch')
     }
@@ -215,21 +218,20 @@ export class TianwenMessageFeedbackBridgeService extends Service {
     }
 
     const session = persistedSession(inspection)
-    const sessionLifecycleFingerprint = learningSessionLifecycleFingerprint({
-      sessionId,
-      createdAt: inspection.meta.createdAt,
-      ...(inspection.meta.cwd === undefined
-        ? {}
-        : { cwd: inspection.meta.cwd }),
-    })
+    const sessionLifecycleFingerprint = lifecycleAfter
     const existingStatuses = this.ctx.tianwenEvolution
       .listLearningIntakeStatuses(sessionId)
     if (existingStatuses.some(status =>
       status.sessionLifecycleFingerprint !== sessionLifecycleFingerprint)) {
       throw new Error('feedback Session lifecycle does not match learning history')
     }
+    const scopeKey = this.scopeKey(
+      sessionId,
+      inspection,
+      lifecycleBefore,
+      lifecycleAfter,
+    )
     const consent = this.ctx.tianwenEvolution.getLearningAnalysisConsent()
-    const scopeKey = this.scopeKey(sessionId, inspection)
     for (const [messageId, item] of byMessage) {
       const current = this.ctx.tianwenEvolution.getLearningIntakeStatus(
         sessionId,
@@ -288,16 +290,16 @@ export class TianwenMessageFeedbackBridgeService extends Service {
   private scopeKey(
     sessionId: string,
     inspection: SessionInspection,
+    lifecycleBefore: string,
+    lifecycleAfter: string,
   ): string {
     const binding = this.ctx.tianwenEvolution
       .getRunBindingBySessionId(sessionId)
     if (binding !== undefined) {
-      const recordedAt = Date.parse(binding.recordedAt)
       if (
-        !Number.isSafeInteger(inspection.meta.createdAt)
-        || inspection.meta.createdAt < 0
-        || !Number.isFinite(recordedAt)
-        || recordedAt <= inspection.meta.createdAt
+        !('sessionLifecycleFingerprint' in binding)
+        || binding.sessionLifecycleFingerprint !== lifecycleBefore
+        || binding.sessionLifecycleFingerprint !== lifecycleAfter
       ) {
         throw new Error('Run binding does not prove the current Session lifecycle')
       }

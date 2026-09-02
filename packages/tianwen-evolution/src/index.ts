@@ -96,10 +96,12 @@ export type {
   RunBindingInput,
   RunBindingInputV1,
   RunBindingInputV2,
+  RunBindingInputV3,
   RunBindingReceipt,
   TianwenRunBinding,
   TianwenRunBindingV1,
   TianwenRunBindingV2,
+  TianwenRunBindingV3,
   TianwenRunId,
 } from './outcome-intake.js'
 export {

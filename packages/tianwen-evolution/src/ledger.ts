@@ -1052,6 +1052,10 @@ function parseEvent(value: unknown): LedgerEvent {
       throw new LedgerIntegrityError('Run binding must be an object')
     }
     const isV2 = value.binding.schemaVersion === 'tianwen.run-binding.v2'
+    const isV3 = value.binding.schemaVersion === 'tianwen.run-binding.v3'
+    const hasAcceptanceSubject = isV2 || (
+      isV3 && 'acceptanceSubjectDigest' in value.binding
+    )
     exactKeys(value.binding, [
       'schemaVersion',
       'runId',
@@ -1061,11 +1065,13 @@ function parseEvent(value: unknown): LedgerEvent {
       'scopeKey',
       'acceptanceContract',
       'acceptanceContractDigest',
-      ...(isV2 ? ['acceptanceSubjectDigest'] : []),
+      ...(hasAcceptanceSubject ? ['acceptanceSubjectDigest'] : []),
+      ...(isV3 ? ['sessionLifecycleFingerprint'] : []),
     ])
     if (
       value.binding.schemaVersion !== 'tianwen.run-binding.v1'
       && !isV2
+      && !isV3
     ) {
       throw new LedgerIntegrityError('invalid stored Run binding version')
     }
@@ -1076,9 +1082,14 @@ function parseEvent(value: unknown): LedgerEvent {
       scopeKey: requireString(value.binding.scopeKey, 'scopeKey'),
       acceptanceContract:
         value.binding.acceptanceContract as RunAcceptanceContract,
-      ...(isV2 ? {
+      ...(hasAcceptanceSubject ? {
         acceptanceSubjectDigest: requireDigest(
           value.binding.acceptanceSubjectDigest,
+        ),
+      } : {}),
+      ...(isV3 ? {
+        sessionLifecycleFingerprint: requireDigest(
+          value.binding.sessionLifecycleFingerprint,
         ),
       } : {}),
     })
@@ -1980,12 +1991,26 @@ export class EvolutionLedger {
     const prepared = prepareRunBinding(input)
     const sessionRunId = this.#runIdBySession.get(prepared.sessionId)
     if (sessionRunId !== undefined) {
-      if (sessionRunId !== prepared.runId) {
+      const existing = this.#runBindings.get(sessionRunId)
+      if (existing !== undefined) {
+        if (
+          sessionRunId !== prepared.runId
+          || canonicalJson(existing) !== canonicalJson(prepared)
+        ) {
+          throw new LedgerIntegrityError(
+            `DSH Session is already bound to another Tianwen Run: ${prepared.sessionId}`,
+          )
+        }
+        return { runId: prepared.runId, duplicate: true }
+      }
+      if (
+        sessionRunId !== prepared.runId
+        || !this.#matchesControlledTransitionReservation(prepared)
+      ) {
         throw new LedgerIntegrityError(
           `DSH Session is already bound to another Tianwen Run: ${prepared.sessionId}`,
         )
       }
-      return { runId: prepared.runId, duplicate: true }
     }
     this.#accept({
       schemaVersion: 'tianwen.run-binding.v1',
@@ -1995,6 +2020,26 @@ export class EvolutionLedger {
       inputDigest: sha256(prepared),
     })
     return { runId: prepared.runId, duplicate: false }
+  }
+
+  #matchesControlledTransitionReservation(
+    binding: TianwenRunBinding,
+  ): boolean {
+    if (binding.schemaVersion !== 'tianwen.run-binding.v3') return false
+    const transition = [...this.#controlledSkillTransitions.values()]
+      .find(item => item.runBinding.runId === binding.runId)
+    if (transition === undefined) return false
+    const planned = transition.runBinding
+    const expected = prepareRunBinding({
+      goalRef: planned.goalRef,
+      taskRef: planned.taskRef,
+      sessionId: planned.sessionId,
+      scopeKey: planned.scopeKey,
+      acceptanceContract: planned.acceptanceContract,
+      acceptanceSubjectDigest: planned.acceptanceSubjectDigest,
+      sessionLifecycleFingerprint: binding.sessionLifecycleFingerprint,
+    })
+    return canonicalJson(binding) === canonicalJson(expected)
   }
 
   getRunBinding(runId: TianwenRunId): TianwenRunBinding | undefined {
@@ -3980,10 +4025,28 @@ export class EvolutionLedger {
     const expectedContentDigest = candidateActive
       ? candidate === undefined ? undefined : sha256(candidate.payload.content)
       : parent?.contentDigest
+    const expectedBinding = prepareRunBinding({
+      goalRef: transition.runBinding.goalRef,
+      taskRef: transition.runBinding.taskRef,
+      sessionId: transition.runBinding.sessionId,
+      scopeKey: transition.runBinding.scopeKey,
+      acceptanceContract: transition.runBinding.acceptanceContract,
+      acceptanceSubjectDigest:
+        transition.runBinding.acceptanceSubjectDigest,
+      ...(binding?.schemaVersion === 'tianwen.run-binding.v3'
+        ? {
+            sessionLifecycleFingerprint:
+              binding.sessionLifecycleFingerprint,
+          }
+        : {}),
+    })
     if (
       binding === undefined
-      || binding.schemaVersion !== 'tianwen.run-binding.v2'
-      || canonicalJson(binding) !== canonicalJson(transition.runBinding)
+      || (
+        binding.schemaVersion !== 'tianwen.run-binding.v2'
+        && binding.schemaVersion !== 'tianwen.run-binding.v3'
+      )
+      || canonicalJson(binding) !== canonicalJson(expectedBinding)
       || manifest === undefined
       || use === undefined
       || outcome === undefined
@@ -4126,10 +4189,19 @@ export class EvolutionLedger {
         scopeKey: plan.scopeKey,
         acceptanceContract: task.acceptanceContract,
         acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+        ...(binding?.schemaVersion === 'tianwen.run-binding.v3'
+          ? {
+              sessionLifecycleFingerprint:
+                binding.sessionLifecycleFingerprint,
+            }
+          : {}),
       })
       if (
         binding === undefined
-        || binding.schemaVersion !== 'tianwen.run-binding.v2'
+        || (
+          binding.schemaVersion !== 'tianwen.run-binding.v2'
+          && binding.schemaVersion !== 'tianwen.run-binding.v3'
+        )
         || canonicalJson(binding) !== canonicalJson(expectedBinding)
         || manifest === undefined
         || use === undefined
@@ -4204,10 +4276,19 @@ export class EvolutionLedger {
         scopeKey: plan.scopeKey,
         acceptanceContract: task.acceptanceContract,
         acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+        ...(binding?.schemaVersion === 'tianwen.run-binding.v3'
+          ? {
+              sessionLifecycleFingerprint:
+                binding.sessionLifecycleFingerprint,
+            }
+          : {}),
       })
       if (
         binding === undefined
-        || binding.schemaVersion !== 'tianwen.run-binding.v2'
+        || (
+          binding.schemaVersion !== 'tianwen.run-binding.v2'
+          && binding.schemaVersion !== 'tianwen.run-binding.v3'
+        )
         || canonicalJson(binding) !== canonicalJson(expectedBinding)
         || manifest === undefined
         || use === undefined
@@ -4279,7 +4360,14 @@ export class EvolutionLedger {
           `duplicate Tianwen Run: ${event.binding.runId}`,
         )
       }
-      if (this.#runIdBySession.has(event.binding.sessionId)) {
+      const sessionRunId = this.#runIdBySession.get(event.binding.sessionId)
+      if (
+        sessionRunId !== undefined
+        && (
+          sessionRunId !== event.binding.runId
+          || !this.#matchesControlledTransitionReservation(event.binding)
+        )
+      ) {
         throw new LedgerIntegrityError(
           `duplicate DSH Session binding: ${event.binding.sessionId}`,
         )
@@ -5462,7 +5550,6 @@ export class EvolutionLedger {
         transition.targetPointer.scopeKey,
         transition.targetPointer,
       )
-      this.#runBindings.set(transition.runBinding.runId, transition.runBinding)
       this.#runIdBySession.set(
         transition.runBinding.sessionId,
         transition.runBinding.runId,

@@ -21,6 +21,7 @@ import {
 import type { GenerateOptions, StreamChunk } from '@tianwen/dsh-compat'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  learningSessionLifecycleFingerprint,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
 import {
@@ -1688,27 +1689,43 @@ describe('controlled Skill evaluation Runtime', () => {
       })),
     })
     const [plan] = evolution.listControlledSkillEvaluations()
-    for (const task of plan!.tasks) {
-      for (const role of ['baseline', 'candidate'] as const) {
-        const arm = task[role]
-        const binding = evolution.recordRunBinding({
-          goalRef: `goal:controlled-skill-evaluation:${plan!.protocolId}`,
-          taskRef: `task:${task.taskId}:${role}`,
-          sessionId: arm.sessionId,
-          scopeKey: plan!.scopeKey,
-          acceptanceContract: task.acceptanceContract,
-          acceptanceSubjectDigest: task.acceptanceSubjectDigest,
-        })
-        expect(binding.runId).toBe(arm.runId)
-        evolution.recordRunSkillManifest({
-          runId: arm.runId,
-          skill: role === 'baseline'
-            ? { ...parent.parent, provider: parent.resolvedProvider }
-            : { ...candidate.payload, provider: parent.resolvedProvider },
-        })
-      }
-    }
     const manifestCount = evolution.listRunSkillManifests().length
+    const createAgent = mounted.harness.ctx.agents.create
+      .bind(mounted.harness.ctx.agents)
+    vi.spyOn(mounted.harness.ctx.agents, 'create')
+      .mockImplementation(async options => {
+        const handle = await createAgent(options)
+        const sessionId = String(handle.agent.session.id)
+        const found = plan!.tasks.flatMap(task => (
+          ['baseline', 'candidate'] as const
+        ).map(role => ({ task, role, arm: task[role] })))
+          .find(item => item.arm.sessionId === sessionId)
+        if (found !== undefined) {
+          const binding = evolution.recordRunBinding({
+            goalRef: `goal:controlled-skill-evaluation:${plan!.protocolId}`,
+            taskRef: `task:${found.task.taskId}:${found.role}`,
+            sessionId,
+            scopeKey: plan!.scopeKey,
+            acceptanceContract: found.task.acceptanceContract,
+            acceptanceSubjectDigest: found.task.acceptanceSubjectDigest,
+            sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+              sessionId,
+              createdAt: handle.agent.session.header.createdAt,
+              ...(handle.agent.session.header.cwd === undefined
+                ? {}
+                : { cwd: handle.agent.session.header.cwd }),
+            }),
+          })
+          expect(binding.runId).toBe(found.arm.runId)
+          evolution.recordRunSkillManifest({
+            runId: found.arm.runId,
+            skill: found.role === 'baseline'
+              ? { ...parent.parent, provider: parent.resolvedProvider }
+              : { ...candidate.payload, provider: parent.resolvedProvider },
+          })
+        }
+        return handle
+      })
     try {
       const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
         mounted.input,
@@ -1717,9 +1734,11 @@ describe('controlled Skill evaluation Runtime', () => {
         state: 'stopped',
         stop: { reasonCode: 'provider-failed', role: 'baseline' },
       })
+      expect(evolution.getRunBinding(plan!.tasks[0]!.baseline.runId))
+        .toMatchObject({ schemaVersion: 'tianwen.run-binding.v3' })
       expect(mounted.adapter.requests).toHaveLength(1)
       expect(evolution.listControlledSkillEvaluations()).toHaveLength(1)
-      expect(evolution.listRunSkillManifests()).toHaveLength(manifestCount)
+      expect(evolution.listRunSkillManifests()).toHaveLength(manifestCount + 1)
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()

@@ -42,6 +42,7 @@ import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   controlledSkillShadowExecutionManifestDigest,
   controlledSkillTransitionExecutionManifestDigest,
+  learningSessionLifecycleFingerprint,
   prepareControlledSkillPromotionRecommendation,
   prepareRunBinding,
   prepareRunSkillManifest,
@@ -81,6 +82,8 @@ import type {
   SkillEvaluationEnvironment,
   SkillEvaluationPlan,
   SkillEvaluationResult,
+  TianwenRunBinding,
+  TianwenRunBindingV2,
   TianwenRunId,
   OutcomeVerdict,
 } from '@tianwen/evolution'
@@ -88,6 +91,38 @@ import type {
 declare module '@deepseek-ai/cordis' {
   interface Context {
     tianwenSkillEvaluation: TianwenSkillEvaluationService
+  }
+}
+
+function matchesPlannedLifecycleBinding(
+  actual: TianwenRunBinding | undefined,
+  planned: TianwenRunBindingV2,
+  session: {
+    readonly id: unknown
+    readonly header: {
+      readonly createdAt: number
+      readonly cwd?: string
+    }
+  },
+): boolean {
+  if (actual?.schemaVersion !== 'tianwen.run-binding.v3') return false
+  try {
+    const expected = prepareRunBinding({
+      goalRef: planned.goalRef,
+      taskRef: planned.taskRef,
+      sessionId: planned.sessionId,
+      scopeKey: planned.scopeKey,
+      acceptanceContract: planned.acceptanceContract,
+      acceptanceSubjectDigest: planned.acceptanceSubjectDigest,
+      sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+        sessionId: String(session.id),
+        createdAt: session.header.createdAt,
+        ...(session.header.cwd === undefined ? {} : { cwd: session.header.cwd }),
+      }),
+    })
+    return sha256(actual) === sha256(expected)
+  } catch {
+    return false
   }
 }
 
@@ -1714,8 +1749,11 @@ export class TianwenSkillEvaluationService extends Service {
       const binding = evolution.getRunBinding(transition.postCheck.runId)
       const manifest = evolution.getRunSkillManifest(transition.postCheck.runId)
       if (boundRunId !== transition.postCheck.runId
-        || binding === undefined
-        || sha256(binding) !== sha256(transition.runBinding)
+        || !matchesPlannedLifecycleBinding(
+          binding,
+          transition.runBinding,
+          handle.agent.session,
+        )
         || manifest === undefined
         || manifest.parentVersionId !== transition.targetPointer.activeVersionId
         || manifest.contentDigest !== targetContentDigest) {
@@ -1785,8 +1823,11 @@ export class TianwenSkillEvaluationService extends Service {
             { stage: 'postflight', reasonCode: 'pointer-drift' },
           )
         }
-        if (finalBinding === undefined
-          || sha256(finalBinding) !== sha256(transition.runBinding)
+        if (!matchesPlannedLifecycleBinding(
+          finalBinding,
+          transition.runBinding,
+          handle.agent.session,
+        )
           || finalManifest === undefined
           || finalManifest.parentVersionId !== transition.targetPointer.activeVersionId
           || finalManifest.contentDigest !== targetContentDigest

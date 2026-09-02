@@ -1,4 +1,11 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -7,6 +14,7 @@ import {
   prepareRunBinding,
   type RunBindingInput,
   type RunBindingInputV2,
+  type RunBindingInputV3,
 } from '../../packages/tianwen-evolution/src/index.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 
@@ -129,6 +137,53 @@ describe('Tianwen Run binding', () => {
       ...v2,
       acceptanceSubjectDigest: subjectB,
     })).toThrow(LedgerIntegrityError)
+  })
+
+  it('persists and exactly replays a v3 Session lifecycle identity', () => {
+    const ledgerRoot = root('v3-binding')
+    const v3: RunBindingInputV3 = {
+      ...base,
+      acceptanceSubjectDigest: digest('a'),
+      sessionLifecycleFingerprint: digest('f'),
+    }
+    const prepared = prepareRunBinding(v3)
+    const ledger = new EvolutionLedger(ledgerRoot)
+
+    expect(prepared).toMatchObject({
+      schemaVersion: 'tianwen.run-binding.v3',
+      acceptanceSubjectDigest: digest('a'),
+      sessionLifecycleFingerprint: digest('f'),
+    })
+    expect(prepared.runId).toBe(prepareRunBinding({
+      ...base,
+      acceptanceSubjectDigest: digest('a'),
+    }).runId)
+    expect(ledger.recordRunBinding(v3)).toMatchObject({ duplicate: false })
+    expect(ledger.recordRunBinding(structuredClone(v3)))
+      .toMatchObject({ runId: prepared.runId, duplicate: true })
+    expect(new EvolutionLedger(ledgerRoot).getRunBinding(prepared.runId))
+      .toEqual(prepared)
+    expect(() => ledger.recordRunBinding({
+      ...v3,
+      sessionLifecycleFingerprint: digest('e'),
+    })).toThrow(LedgerIntegrityError)
+  })
+
+  it('rejects a tampered v3 lifecycle fingerprint on reload', () => {
+    const ledgerRoot = root('v3-binding-tamper')
+    const ledger = new EvolutionLedger(ledgerRoot)
+    ledger.recordRunBinding({
+      ...base,
+      sessionLifecycleFingerprint: digest('f'),
+    } satisfies RunBindingInputV3)
+    const path = join(ledgerRoot, 'ledger.jsonl')
+    const event = JSON.parse(readFileSync(path, 'utf8')) as {
+      binding: { sessionLifecycleFingerprint: string }
+    }
+    event.binding.sessionLifecycleFingerprint = digest('e')
+    writeFileSync(path, `${JSON.stringify(event)}\n`)
+
+    expect(() => new EvolutionLedger(ledgerRoot)).toThrow(LedgerIntegrityError)
   })
 
   it('keeps different v2 subjects in the same reusable recurrence group', () => {

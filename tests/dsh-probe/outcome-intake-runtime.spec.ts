@@ -14,6 +14,7 @@ import {
 } from '@tianwen/dsh-compat'
 import type { Session, SessionEvent } from '@tianwen/dsh-compat'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
+import { learningSessionLifecycleFingerprint } from '../../packages/tianwen-evolution/src/index.js'
 import { apply } from '../../packages/tianwen-runtime/src/index.js'
 
 const roots: string[] = []
@@ -73,7 +74,11 @@ async function mount(script: Parameters<typeof mountCoreHarness>[0]) {
 }
 
 function fakeSession(id: string): Session {
-  return { id: SessionId(id), events: [] } as unknown as Session
+  return {
+    id: SessionId(id),
+    header: { id: SessionId(id), createdAt: 1 },
+    events: [],
+  } as Session
 }
 
 function setEvents(session: Session, events: readonly SessionEvent[]): void {
@@ -98,6 +103,53 @@ afterEach(() => {
 })
 
 describe('Tianwen runtime Outcome intake', () => {
+  it('derives a v3 Run binding identity from the real Session header', async () => {
+    const harness = await mount([])
+    const rawCwd = 'D:/private/runtime-binding'
+    const handle = await harness.ctx.agents.create({
+      sessionId: SessionId(`outcome-binding-v3-${randomUUID()}`),
+      meta: { cwd: rawCwd },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    const write = vi.spyOn(harness.ctx.tianwenEvolution, 'recordRunBinding')
+    const callerFingerprint = `sha256:${'f'.repeat(64)}`
+
+    try {
+      const receipt = harness.ctx.tianwenLearningIntake.bindRun(
+        handle.agent.session,
+        {
+          ...bindingInput('v3-header'),
+          sessionLifecycleFingerprint: callerFingerprint,
+        } as Parameters<
+          typeof harness.ctx.tianwenLearningIntake.bindRun
+        >[1],
+      )
+      const expected = learningSessionLifecycleFingerprint({
+        sessionId: String(handle.agent.session.id),
+        createdAt: handle.agent.session.header.createdAt,
+        cwd: rawCwd,
+      })
+      const written = write.mock.calls[0]?.[0]
+
+      expect(written).toMatchObject({
+        sessionId: String(handle.agent.session.id),
+        sessionLifecycleFingerprint: expected,
+      })
+      expect(written).not.toHaveProperty('cwd')
+      expect(expected).not.toBe(callerFingerprint)
+      expect(harness.ctx.tianwenEvolution.getRunBinding(receipt.runId))
+        .toMatchObject({
+          schemaVersion: 'tianwen.run-binding.v3',
+          sessionLifecycleFingerprint: expected,
+        })
+      expect(JSON.stringify(harness.ctx.tianwenEvolution
+        .getRunBinding(receipt.runId))).not.toContain(rawCwd)
+    } finally {
+      await handle.dispose()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
   it('merges the same structured failure across two real DSH Runs', async () => {
     const harness = await mount([
       toolCallResponse('call-1', 'verify_summary', { text: 'first' }),

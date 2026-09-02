@@ -38,6 +38,7 @@ import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1,
   controlledSkillTransitionExecutionManifestDigest,
+  learningSessionLifecycleFingerprint,
   prepareControlledSkillPromotionRecommendation,
   prepareRunBinding,
   sha256,
@@ -503,6 +504,23 @@ function recordTransitionRunFacts(
   const skill = candidateActive
     ? { ...candidate.payload, provider: 'runtime' }
     : parentSkill
+  const planned = transition.runBinding
+  const binding = ledger.recordRunBinding({
+    goalRef: planned.goalRef,
+    taskRef: planned.taskRef,
+    sessionId: planned.sessionId,
+    scopeKey: planned.scopeKey,
+    acceptanceContract: planned.acceptanceContract,
+    acceptanceSubjectDigest: planned.acceptanceSubjectDigest,
+    sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+      sessionId: planned.sessionId,
+      createdAt: 1,
+      cwd: 'D:/controlled-activation-fixture',
+    }),
+  })
+  if (binding.runId !== transition.postCheck.runId) {
+    throw new Error('controlled transition fixture Run identity drifted')
+  }
   const manifest = ledger.recordRunSkillManifest({
     runId: transition.postCheck.runId,
     skill,
@@ -640,7 +658,7 @@ describe('controlled Skill activation governance', () => {
       })
       expect(transition.runBinding).toEqual(expectedBinding)
       expect(transition.postCheck.runId).toBe(expectedBinding.runId)
-      expect(ledger.getRunBinding(expectedBinding.runId)).toEqual(expectedBinding)
+      expect(ledger.getRunBinding(expectedBinding.runId)).toBeUndefined()
       expect(ledger.beginControlledSkillTransition(structuredClone(input))).toEqual({
         transitionId: transition.transitionId,
         duplicate: true,
@@ -649,6 +667,13 @@ describe('controlled Skill activation governance', () => {
         .toMatchObject({ state: 'pending-post-check', pointer: transition.targetPointer })
 
       const run = recordTransitionRunFacts(ledger, transition)
+      expect(ledger.getRunBinding(expectedBinding.runId)).toMatchObject({
+        ...expectedBinding,
+        schemaVersion: 'tianwen.run-binding.v3',
+        sessionLifecycleFingerprint: expect.stringMatching(
+          /^sha256:[0-9a-f]{64}$/u,
+        ),
+      })
       expect(ledger.completeControlledSkillTransition({
         transitionId: transition.transitionId,
         run,

@@ -520,23 +520,27 @@ describe('Tianwen DSH Message Feedback bridge', () => {
   })
 
   it.each([
-    ['the same millisecond', 0],
-    ['a later lifecycle', 1],
+    ['the same createdAt with another cwd', 100, 100, 'D:/private/new-run'],
+    ['a clock rollback', 100, 50, 'D:/private/old-run'],
   ] as const)(
-    'does not reuse an old Run scope for %s',
-    async (_label, createdAtOffset) => {
-      const root = evolutionRoot(`run-scope-lifecycle-${createdAtOffset}`)
+    'does not reuse an old Run scope after %s',
+    async (_label, firstCreatedAt, replacementCreatedAt, replacementCwd) => {
+      const root = evolutionRoot(`run-scope-lifecycle-${replacementCreatedAt}`)
       const sessions = new SessionCatalog()
       const feedback = new FeedbackCatalog()
-      const sessionId = `feedback-run-scope-lifecycle-${createdAtOffset}`
-      const first = completedSession(sessionId, [], 'D:/private/old-run', 1)
+      const sessionId = `feedback-run-scope-lifecycle-${replacementCreatedAt}`
+      const first = completedSession(
+        sessionId,
+        [],
+        'D:/private/old-run',
+        firstCreatedAt,
+      )
       sessions.add(first)
       sessions.listed = []
       const mounted = await mountBridge(root, sessions, feedback)
-      mounted.ctx.tianwenEvolution.recordRunBinding({
-        goalRef: `goal:scope-lifecycle-${createdAtOffset}`,
-        taskRef: `task:scope-lifecycle-${createdAtOffset}`,
-        sessionId,
+      mounted.ctx.tianwenLearningIntake.bindRun(first, {
+        goalRef: `goal:scope-lifecycle-${replacementCreatedAt}`,
+        taskRef: `task:scope-lifecycle-${replacementCreatedAt}`,
         scopeKey: 'project:tianwen/capability:old-run-scope',
         acceptanceContract: {
           source: 'dsh-tool-result',
@@ -545,26 +549,20 @@ describe('Tianwen DSH Message Feedback bridge', () => {
           gapDisposition: 'observe',
         },
       })
-      const bindingLine = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
-        .trimEnd()
-        .split('\n')
-        .map(line => JSON.parse(line) as Record<string, unknown>)
-        .find(event => event.type === 'run-binding-recorded')
-      const bindingAt = Date.parse(String(bindingLine?.at))
       const replacement = completedSession(
         sessionId,
         ['message-new'],
-        'D:/private/new-run',
-        bindingAt + createdAtOffset,
+        replacementCwd,
+        replacementCreatedAt,
       )
       sessions.add(replacement)
       feedback.set(sessionId, [item({
         messageId: 'message-new',
-        version: createdAtOffset === 0
+        version: replacementCreatedAt === firstCreatedAt
           ? '19191919-1919-4919-8919-191919191919'
           : '20202020-2020-4020-8020-202020202020',
         note: 'Must not inherit the old Run scope.',
-        updatedAt: bindingAt + createdAtOffset + 1,
+        updatedAt: 200,
       })])
 
       try {
@@ -578,6 +576,153 @@ describe('Tianwen DSH Message Feedback bridge', () => {
       }
     },
   )
+
+  it('fails closed for legacy v1 and v2 Run bindings instead of using workspace scope', async () => {
+    const root = evolutionRoot('legacy-run-bindings')
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const v1 = completedSession('feedback-run-v1', ['message-v1'], 'D:/legacy/v1')
+    const v2 = completedSession('feedback-run-v2', ['message-v2'], 'D:/legacy/v2')
+    sessions.add(v1)
+    sessions.add(v2)
+    sessions.listed = []
+    const mounted = await mountBridge(root, sessions, feedback)
+    mounted.ctx.tianwenEvolution.recordRunBinding({
+      goalRef: 'goal:legacy-v1',
+      taskRef: 'task:legacy-v1',
+      sessionId: String(v1.id),
+      scopeKey: 'project:tianwen/capability:legacy-v1',
+      acceptanceContract: {
+        source: 'dsh-tool-result',
+        toolName: 'verify_legacy_v1',
+        notMetErrorCode: 'LEGACY_V1_NOT_MET',
+        gapDisposition: 'observe',
+      },
+    })
+    mounted.ctx.tianwenEvolution.recordRunBinding({
+      goalRef: 'goal:legacy-v2',
+      taskRef: 'task:legacy-v2',
+      sessionId: String(v2.id),
+      scopeKey: 'project:tianwen/capability:legacy-v2',
+      acceptanceContract: {
+        source: 'dsh-tool-result',
+        toolName: 'verify_legacy_v2',
+        notMetErrorCode: 'LEGACY_V2_NOT_MET',
+        gapDisposition: 'observe',
+      },
+      acceptanceSubjectDigest: `sha256:${'2'.repeat(64)}`,
+    })
+    feedback.set(String(v1.id), [item({
+      messageId: 'message-v1',
+      version: '24242424-2424-4424-8424-242424242424',
+      note: 'Legacy v1 must not fall back.',
+    })])
+    feedback.set(String(v2.id), [item({
+      messageId: 'message-v2',
+      version: '25252525-2525-4525-8525-252525252525',
+      note: 'Legacy v2 must not fall back.',
+    })])
+
+    try {
+      await expect(mounted.bridge.reconcileSession(String(v1.id)))
+        .resolves.toMatchObject({ state: 'pending' })
+      await expect(mounted.bridge.reconcileSession(String(v2.id)))
+        .resolves.toMatchObject({ state: 'pending' })
+      expect(feedbackLedgerEvents(root)).toEqual([])
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('reuses an exact v3 Run binding after ledger reload', async () => {
+    const root = evolutionRoot('v3-run-binding-reload')
+    const session = completedSession(
+      'feedback-run-v3-reload',
+      ['message-v3'],
+      'D:/private/v3-reload',
+      77,
+    )
+    const firstSessions = new SessionCatalog()
+    const firstFeedback = new FeedbackCatalog()
+    firstSessions.add(session)
+    firstSessions.listed = []
+    const first = await mountBridge(root, firstSessions, firstFeedback)
+    first.ctx.tianwenLearningIntake.bindRun(session, {
+      goalRef: 'goal:v3-reload',
+      taskRef: 'task:v3-reload',
+      scopeKey: 'project:tianwen/capability:v3-reload',
+      acceptanceContract: {
+        source: 'dsh-tool-result',
+        toolName: 'verify_v3_reload',
+        notMetErrorCode: 'V3_RELOAD_NOT_MET',
+        gapDisposition: 'observe',
+      },
+    })
+    await first.ctx.fiber.dispose()
+
+    const secondSessions = new SessionCatalog()
+    const secondFeedback = new FeedbackCatalog()
+    secondSessions.add(session)
+    secondSessions.listed = []
+    secondFeedback.set(String(session.id), [item({
+      messageId: 'message-v3',
+      version: '26262626-2626-4626-8626-262626262626',
+      note: 'Exact v3 scope after reload.',
+    })])
+    const second = await mountBridge(root, secondSessions, secondFeedback)
+    try {
+      await expect(second.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'reconciled' })
+      expect(second.ctx.tianwenEvolution
+        .getLearningIntakeStatus(String(session.id), 'message-v3')?.scopeKey)
+        .toBe('project:tianwen/capability:v3-reload')
+      expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8'))
+        .not.toContain('D:/private/v3-reload')
+    } finally {
+      await second.ctx.fiber.dispose()
+    }
+  })
+
+  it('fails closed before writes when a v3 binding fingerprint is not current', async () => {
+    const root = evolutionRoot('v3-run-binding-mismatch')
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const session = completedSession(
+      'feedback-run-v3-mismatch',
+      ['message-v3'],
+      'D:/private/current-v3',
+      88,
+    )
+    sessions.add(session)
+    sessions.listed = []
+    const mounted = await mountBridge(root, sessions, feedback)
+    mounted.ctx.tianwenEvolution.recordRunBinding({
+      goalRef: 'goal:v3-mismatch',
+      taskRef: 'task:v3-mismatch',
+      sessionId: String(session.id),
+      scopeKey: 'project:tianwen/capability:wrong-lifecycle',
+      acceptanceContract: {
+        source: 'dsh-tool-result',
+        toolName: 'verify_v3_mismatch',
+        notMetErrorCode: 'V3_MISMATCH_NOT_MET',
+        gapDisposition: 'observe',
+      },
+      sessionLifecycleFingerprint: `sha256:${'f'.repeat(64)}`,
+    })
+    feedback.set(String(session.id), [item({
+      messageId: 'message-v3',
+      version: '27272727-2727-4727-8727-272727272727',
+      note: 'Do not ingest with a mismatched binding.',
+    })])
+
+    try {
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'pending' })
+      expect(feedbackLedgerEvents(root)).toEqual([])
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
 
   it('reconciles the exact created Agent and exposes a read-only status trigger', async () => {
     const root = evolutionRoot('agent-created')
@@ -780,10 +925,9 @@ describe('Tianwen DSH Message Feedback bridge', () => {
     const mounted = await mountBridge(root, sessions, feedback)
 
     try {
-      mounted.ctx.tianwenEvolution.recordRunBinding({
+      mounted.ctx.tianwenLearningIntake.bindRun(bound, {
         goalRef: 'goal:scope',
         taskRef: 'task:scope',
-        sessionId: String(bound.id),
         scopeKey: 'project:tianwen/capability:bound-scope',
         acceptanceContract: {
           source: 'dsh-tool-result',

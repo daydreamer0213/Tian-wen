@@ -11,6 +11,7 @@ import type {
   OutcomeIntakeReceipt,
   RunBindingInputV1,
   RunBindingInputV2,
+  RunBindingInputV3,
   RunBindingReceipt,
   Sha256Digest,
   TianwenRunId,
@@ -112,6 +113,21 @@ function feedbackTarget(
   return event?.type === 'assistant/message' ? event : undefined
 }
 
+function runBindingInput(
+  session: Session,
+  input: RuntimeRunBindingInput,
+): RunBindingInputV3 {
+  return {
+    ...input,
+    sessionId: String(session.id),
+    sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+      sessionId: String(session.id),
+      createdAt: session.header.createdAt,
+      ...(session.header.cwd === undefined ? {} : { cwd: session.header.cwd }),
+    }),
+  }
+}
+
 export class TianwenLearningIntakeService extends Service {
   static inject = ['tianwenEvidence', 'tianwenEvolution'] as const
 
@@ -127,10 +143,9 @@ export class TianwenLearningIntakeService extends Service {
     if (session.events.some(event => event.type === 'turn/start')) {
       throw new Error('Tianwen Run must be bound before the first DSH Turn')
     }
-    const receipt = this.ctx.tianwenEvolution.recordRunBinding({
-      ...input,
-      sessionId: String(session.id),
-    })
+    const receipt = this.ctx.tianwenEvolution.recordRunBinding(
+      runBindingInput(session, input),
+    )
     if (sessionDigest(session.events) !== before) {
       throw new Error('Run binding changed the DSH Session')
     }
@@ -151,10 +166,7 @@ export class TianwenLearningIntakeService extends Service {
         'Tianwen Run must be bound before the first DSH Turn',
       )
     }
-    const binding = prepareRunBinding({
-      ...input,
-      sessionId: String(session.id),
-    })
+    const binding = prepareRunBinding(runBindingInput(session, input))
     const skill = await skills.get(skillName, {
       cwd: session.header.cwd,
       scope: agent,
@@ -190,10 +202,9 @@ export class TianwenLearningIntakeService extends Service {
     let run: RunBindingReceipt
     let receipt: ReturnType<typeof this.ctx.tianwenEvolution.recordRunSkillManifest>
     try {
-      run = this.ctx.tianwenEvolution.recordRunBinding({
-        ...input,
-        sessionId: String(session.id),
-      })
+      run = this.ctx.tianwenEvolution.recordRunBinding(
+        runBindingInput(session, input),
+      )
       receipt = this.ctx.tianwenEvolution.recordRunSkillManifest({
         runId: run.runId,
         skill,
