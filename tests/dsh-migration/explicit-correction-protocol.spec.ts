@@ -57,11 +57,11 @@ describe('explicit correction controlled protocol', () => {
       task.candidateSessionId,
       task.evaluatorSessionId,
     ])).toEqual([
-      ['eval-task:lifecycle-original-defect', 'session:controlled-eval:fixture:lifecycle:original-defect:baseline', 'session:controlled-eval:fixture:lifecycle:original-defect:candidate', 'session:controlled-eval:fixture:lifecycle:original-defect:evaluator'],
-      ['eval-task:lifecycle-adjacent-transfer', 'session:controlled-eval:fixture:lifecycle:adjacent-transfer:baseline', 'session:controlled-eval:fixture:lifecycle:adjacent-transfer:candidate', 'session:controlled-eval:fixture:lifecycle:adjacent-transfer:evaluator'],
-      ['eval-task:lifecycle-preserved-regression', 'session:controlled-eval:fixture:lifecycle:preserved-regression:baseline', 'session:controlled-eval:fixture:lifecycle:preserved-regression:candidate', 'session:controlled-eval:fixture:lifecycle:preserved-regression:evaluator'],
-      ['eval-task:lifecycle-raw-extraction-counterexample', 'session:controlled-eval:fixture:lifecycle:raw-extraction-counterexample:baseline', 'session:controlled-eval:fixture:lifecycle:raw-extraction-counterexample:candidate', 'session:controlled-eval:fixture:lifecycle:raw-extraction-counterexample:evaluator'],
-      ['eval-task:lifecycle-safety-boundary', 'session:controlled-eval:fixture:lifecycle:safety-boundary:baseline', 'session:controlled-eval:fixture:lifecycle:safety-boundary:candidate', 'session:controlled-eval:fixture:lifecycle:safety-boundary:evaluator'],
+      ['eval-task:lifecycle-original-defect', expect.stringMatching(/^session:controlled-eval:fixture:lifecycle:original-defect:[a-f0-9]{64}:baseline$/u), expect.stringMatching(/^session:controlled-eval:fixture:lifecycle:original-defect:[a-f0-9]{64}:candidate$/u), expect.stringMatching(/^session:controlled-eval:fixture:lifecycle:original-defect:[a-f0-9]{64}:evaluator$/u)],
+      ['eval-task:lifecycle-adjacent-transfer', expect.any(String), expect.any(String), expect.any(String)],
+      ['eval-task:lifecycle-preserved-regression', expect.any(String), expect.any(String), expect.any(String)],
+      ['eval-task:lifecycle-raw-extraction-counterexample', expect.any(String), expect.any(String), expect.any(String)],
+      ['eval-task:lifecycle-safety-boundary', expect.any(String), expect.any(String), expect.any(String)],
     ])
   })
 
@@ -190,5 +190,55 @@ describe('explicit correction controlled protocol', () => {
       task.baselineWorkspaceRoot,
       task.workspaceSnapshot,
     )).toThrow('workspace-drift')
+  })
+
+  it('derives deterministic fresh controlled Session ids for each learning analysis', () => {
+    const protocol = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)!
+    const first = protocol.buildEvaluationTasks({
+      root: fixtureRoot(),
+      materializeWorkspace,
+      sessionNamespace: 'analysis:first',
+    })
+    const firstReplay = protocol.buildEvaluationTasks({
+      root: fixtureRoot(),
+      materializeWorkspace,
+      sessionNamespace: 'analysis:first',
+    })
+    const second = protocol.buildEvaluationTasks({
+      root: fixtureRoot(),
+      materializeWorkspace,
+      sessionNamespace: 'analysis:second',
+    })
+
+    const ids = (tasks: typeof first) => tasks.flatMap(task => [
+      task.baselineSessionId,
+      task.candidateSessionId,
+      task.evaluatorSessionId,
+    ])
+    expect(ids(firstReplay)).toEqual(ids(first))
+    expect(ids(second)).not.toEqual(ids(first))
+    expect(ids(first).every(id => id.startsWith('session:controlled-eval:fixture:lifecycle:')))
+      .toBe(true)
+
+    const firstShadow = protocol.buildShadowTasks({
+      root: fixtureRoot(), materializeWorkspace, sessionNamespace: 'candidate:first',
+    })
+    const secondShadow = protocol.buildShadowTasks({
+      root: fixtureRoot(), materializeWorkspace, sessionNamespace: 'candidate:second',
+    })
+    expect(firstShadow.map(task => task.sessionId))
+      .not.toEqual(secondShadow.map(task => task.sessionId))
+
+    const firstTransition = protocol.buildTransitionInput({
+      root: fixtureRoot(), shadowId: 'shadow:first', kind: 'promote',
+      expectedRevision: 1, materializeWorkspace,
+    })
+    const secondTransition = protocol.buildTransitionInput({
+      root: fixtureRoot(), shadowId: 'shadow:second', kind: 'promote',
+      expectedRevision: 1, materializeWorkspace,
+    })
+    expect(firstTransition.task.sessionId).not.toBe(secondTransition.task.sessionId)
+    expect(firstTransition.task.sessionId)
+      .toMatch(/^session:controlled-activation:fixture:lifecycle:promote:[a-f0-9]{64}$/u)
   })
 })

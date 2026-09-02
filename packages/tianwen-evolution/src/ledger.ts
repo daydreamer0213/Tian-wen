@@ -1215,6 +1215,7 @@ function parseLearningAnalysisResumedEvent(
     && value.resumePhase !== 'running'
     && value.resumePhase !== 'candidate-ready'
     && value.resumePhase !== 'shadow-ready'
+    && value.resumePhase !== 'promoted'
   ) throw new LedgerIntegrityError('invalid learning analysis retry phase')
   return {
     schemaVersion: 'tianwen.learning-analysis-resumed.v1',
@@ -4492,7 +4493,8 @@ export class EvolutionLedger {
     const status = this.#learningAnalyses.get(input.analysisId)
     if (status === undefined) throw new LedgerIntegrityError(`unknown learning analysis: ${input.analysisId}`)
     if (status.phase === 'invalidated') return { ...clone(status), duplicate: true }
-    if (status.phase === 'promoted' || status.phase === 'rolled-back') {
+    if (status.phase === 'promoted' || status.phase === 'rolled-back'
+      || (status.phase === 'failed' && status.resumePhase === 'promoted')) {
       throw new LedgerIntegrityError('a promoted analysis must use verified rollback, not invalidation')
     }
     this.#accept({
@@ -5286,8 +5288,10 @@ export class EvolutionLedger {
     }
     const existing = status.terminalReportDelivery
     if (existing !== undefined) {
-      if (!sameLearningAnalysisReportBinding(existing, report)) throw new LedgerIntegrityError('learning analysis terminal report intent changed')
-      return { ...clone(status), duplicate: true }
+      if (sameLearningAnalysisReportBinding(existing, report)) return { ...clone(status), duplicate: true }
+      if (status.phase !== 'rolled-back' || (status.terminalReportHistory?.length ?? 0) !== 0) {
+        throw new LedgerIntegrityError('learning analysis terminal report intent changed')
+      }
     }
     this.#accept({ schemaVersion: 'tianwen.learning-analysis-terminal-report-intent.v1', type: 'learning-analysis-terminal-report-intent-recorded', at: this.#now(), report })
     return { ...clone(this.#learningAnalyses.get(status.analysisId)!), duplicate: false }
@@ -5370,6 +5374,7 @@ export class EvolutionLedger {
         || status.phase === 'invalidated'
         || status.phase === 'promoted'
         || status.phase === 'rolled-back'
+        || (status.phase === 'failed' && status.resumePhase === 'promoted')
       ) continue
       this.#accept({
         schemaVersion: 'tianwen.learning-analysis-invalidation.v1',
@@ -6983,6 +6988,7 @@ export class EvolutionLedger {
         || status.phase === 'invalidated'
         || status.phase === 'promoted'
         || status.phase === 'rolled-back'
+        || (status.phase === 'failed' && status.resumePhase === 'promoted')
       ) throw new LedgerIntegrityError('learning analysis invalidation disagrees with support')
       this.#assertLearningAnalysisTimestamp(status, event.at)
       return
@@ -7085,7 +7091,13 @@ export class EvolutionLedger {
     }
     if (event.type === 'learning-analysis-terminal-report-intent-recorded') {
       const status = this.#learningAnalyses.get(event.report.analysisId)
-      if (status?.submission === undefined || status.terminalReportDelivery !== undefined
+      const existing = status?.terminalReportDelivery
+      const firstReport = existing === undefined
+      const rollbackReport = existing !== undefined
+        && status?.phase === 'rolled-back'
+        && (status.terminalReportHistory?.length ?? 0) === 0
+        && !sameLearningAnalysisReportBinding(existing, event.report)
+      if (status?.submission === undefined || (!firstReport && !rollbackReport)
         || status.parentSessionId !== event.report.parentSessionId || status.childSessionId !== event.report.childSessionId) {
         throw new LedgerIntegrityError('learning analysis terminal report intent disagrees with history')
       }
@@ -7660,8 +7672,12 @@ export class EvolutionLedger {
     }
     if (event.type === 'learning-analysis-terminal-report-intent-recorded') {
       const status = this.#learningAnalyses.get(event.report.analysisId)!
+      const existing = status.terminalReportDelivery
       this.#learningAnalyses.set(event.report.analysisId, {
         ...status,
+        ...(existing === undefined ? {} : {
+          terminalReportHistory: [...(status.terminalReportHistory ?? []), existing],
+        }),
         terminalReportDelivery: { ...event.report, state: 'pending', intentRecordedAt: event.at },
         updatedAt: event.at,
       })

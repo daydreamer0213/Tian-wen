@@ -144,7 +144,11 @@ export function createExplicitCorrectionLearningLoopExecutor(
   const tasksFor = (context: LearningLoopExecutionContext) => {
     const protocol = protocolFor(context)
     if (protocol === undefined) return undefined
-    const tasks = protocol.buildEvaluationTasks({ root: config.root, materializeWorkspace: config.materializeWorkspace })
+    const tasks = protocol.buildEvaluationTasks({
+      root: config.root,
+      materializeWorkspace: config.materializeWorkspace,
+      sessionNamespace: context.status.analysisId,
+    })
     for (const task of tasks) {
       protocol.assertWorkspaceSnapshot(task.baselineWorkspaceRoot, task.workspaceSnapshot)
       protocol.assertWorkspaceSnapshot(task.candidateWorkspaceRoot, task.workspaceSnapshot)
@@ -255,7 +259,11 @@ export function createExplicitCorrectionLearningLoopExecutor(
         return
       }
       if (evaluators.state !== 'terminal' || evaluators.result === undefined) throw new Error('controlled evaluators stopped before a governed verdict')
-      const shadowTasks = built.protocol.buildShadowTasks({ root: config.root, materializeWorkspace: config.materializeWorkspace })
+      const shadowTasks = built.protocol.buildShadowTasks({
+        root: config.root,
+        materializeWorkspace: config.materializeWorkspace,
+        sessionNamespace: evaluation.evaluationId,
+      })
       for (const task of shadowTasks) built.protocol.assertWorkspaceSnapshot(task.workspaceRoot, task.workspaceSnapshot)
       const shadow = await (context.ctx.tianwenSkillEvaluation as unknown as {
         runControlledShadow(input: unknown, resolver?: unknown): Promise<{ readonly state: string, readonly shadowId: string, readonly result?: { readonly mechanismVerdict: string, readonly promotionEligibility?: string } }>
@@ -526,12 +534,9 @@ export class TianwenLearningLoopService extends Service {
   }
 
   private hasActiveSupport(status: LearningLoopPhaseStatus): boolean {
-    const intake = this.intake(status)
     const consent = this.ctx.tianwenEvolution.getLearningAnalysisConsent()
     return this.ctx.tianwenEvolution.hasLearningAnalysisActiveSupport(status.analysisId as never)
-      && consent?.enabled === true && intake?.state === 'active' && intake.rating === 'negative'
-      && intake.ticketId === status.ticketId && intake.feedbackVersion === status.feedbackVersion
-      && intake.analysisConsentRevision === status.consentRevision
+      && consent?.enabled === true
   }
 }
 
@@ -572,6 +577,7 @@ export async function runLearningLoopPhase(input: LearningLoopPhaseOperations): 
         if (await input.recoverPromote(status)) return
       }
       if (status.phase === 'promoted') await operation(input, 'rollback')(status)
+      else if (status.phase === 'rolled-back') await operation(input, 'report')(status)
       else {
         if (input.invalidate !== undefined) await input.invalidate(status)
         if (status.phase === 'pending-parent' || status.phase === 'running') await operation(input, 'interruptChild')(status)

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
+import { Context } from '@tianwen/dsh-compat'
 
 import {
+  TianwenLearningLoopService,
   continueLearningLoop,
   drainLearningLoopLane,
   drainLearningLoopLaneWithWake,
@@ -197,6 +199,48 @@ describe('durable learning-loop phase table', () => {
     })
     expect(rollback).toHaveBeenCalledOnce()
     expect(invalidate).not.toHaveBeenCalled()
+  })
+
+  it('trusts Evolution ticket-level support after the original intake retracts', async () => {
+    const ctx = new Context()
+    let supported = true
+    let status = { ...base, phase: 'promoted' }
+    const rollback = vi.fn(() => { status = { ...base, phase: 'rolled-back' } })
+    const report = vi.fn()
+    ctx.provide('agents', { list: () => [], get: () => undefined } as never)
+    ctx.provide('tianwenLearningAnalysisChild', { start: vi.fn() } as never)
+    ctx.provide('tianwenEvolution', {
+      getLearningAnalysis: () => status,
+      listLearningAnalyses: () => [status],
+      hasLearningAnalysisActiveSupport: () => supported,
+      getLearningAnalysisConsent: () => ({ enabled: true, revision: 1 }),
+      // The exact original intake is retracted. Evolution still reports true
+      // while a different Session independently supports the same Ticket.
+      getLearningIntakeStatus: () => ({
+        state: 'retracted', rating: 'negative', ticketId: base.ticketId,
+        feedbackVersion: base.feedbackVersion, analysisConsentRevision: 1,
+      }),
+      recordLearningAnalysisInvalidated: vi.fn(() => { status = { ...base, phase: 'invalidated' } }),
+    } as never)
+    const service = new TianwenLearningLoopService(ctx, {
+      executor: {
+        freezeProtocol: vi.fn(), materializeCandidate: vi.fn(), evaluate: vi.fn(),
+        promote: vi.fn(), rollback, report,
+      },
+    })
+    try {
+      await service.schedule(base.analysisId)
+      expect(rollback).not.toHaveBeenCalled()
+      expect(report).toHaveBeenCalledOnce()
+      expect(status.phase).toBe('promoted')
+
+      supported = false // only the original/same-lineage Signal remains inactive
+      await service.schedule(base.analysisId)
+      expect(rollback).toHaveBeenCalledOnce()
+      expect(status.phase).toBe('rolled-back')
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('invalidates unsupported Shadow work when no verified promote can be recovered', async () => {

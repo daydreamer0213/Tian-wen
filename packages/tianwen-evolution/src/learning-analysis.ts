@@ -104,6 +104,8 @@ export interface LearningAnalysisStatus extends LearningAnalysisBinding {
   readonly reportDelivery?: LearningAnalysisReportDelivery
   /** Final governed outcome, independently durable and exactly-once. */
   readonly terminalReportDelivery?: LearningAnalysisReportDelivery
+  /** A prior promoted outcome retained when a later rollback needs its own report. */
+  readonly terminalReportHistory?: readonly LearningAnalysisReportDelivery[]
 }
 
 export type LearningAnalysisReceipt = LearningAnalysisStatus & {

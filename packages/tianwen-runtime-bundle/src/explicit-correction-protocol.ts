@@ -164,7 +164,9 @@ function buildResearchSummaryControlledProtocol() {
     buildEvaluationTasks(input: {
       readonly root: string
       readonly materializeWorkspace: MaterializeWorkspace
+      readonly sessionNamespace?: string
     }): readonly ExplicitCorrectionEvaluationTask[] {
+      const sessionNamespace = digest(input.sessionNamespace ?? 'legacy-single-run')
       return deepFreeze(evaluationTaskDefinitions.map((definition, index) => {
         const content = `controlled evaluation workspace ${index}\n`
         const baselineWorkspaceRoot = join(
@@ -208,11 +210,11 @@ function buildResearchSummaryControlledProtocol() {
             maxUtf8Bytes: 4_096 as const,
           },
           baselineSessionId:
-            `session:controlled-eval:fixture:lifecycle:${definition.semanticType}:baseline` as const,
+            `session:controlled-eval:fixture:lifecycle:${definition.semanticType}:${sessionNamespace}:baseline` as const,
           candidateSessionId:
-            `session:controlled-eval:fixture:lifecycle:${definition.semanticType}:candidate` as const,
+            `session:controlled-eval:fixture:lifecycle:${definition.semanticType}:${sessionNamespace}:candidate` as const,
           evaluatorSessionId:
-            `session:controlled-eval:fixture:lifecycle:${definition.semanticType}:evaluator` as const,
+            `session:controlled-eval:fixture:lifecycle:${definition.semanticType}:${sessionNamespace}:evaluator` as const,
         }
       }))
     },
@@ -295,7 +297,9 @@ function buildResearchSummaryControlledProtocol() {
     buildShadowTasks(input: {
       readonly root: string
       readonly materializeWorkspace: MaterializeWorkspace
+      readonly sessionNamespace?: string
     }) {
+      const sessionNamespace = digest(input.sessionNamespace ?? 'legacy-single-run')
       return deepFreeze(evaluationTaskDefinitions.map((definition, index) => {
         const workspaceRoot = join(input.root, 'workspaces', 'shadow', definition.semanticType)
         const content = `controlled isolated Shadow workspace ${index}\n`
@@ -314,7 +318,7 @@ function buildResearchSummaryControlledProtocol() {
           acceptanceSubject: { subject: { phase: 'shadow', task: definition.semanticType } },
           allowedTools,
           stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
-          sessionId: `session:controlled-shadow:fixture:lifecycle:${definition.semanticType}`,
+          sessionId: `session:controlled-shadow:fixture:lifecycle:${definition.semanticType}:${sessionNamespace}`,
         }
       }))
     },
@@ -345,7 +349,7 @@ function buildResearchSummaryControlledProtocol() {
           acceptanceSubject: { subject: { phase: 'transition', kind: input.kind } },
           allowedTools,
           stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
-          sessionId: `session:controlled-activation:fixture:lifecycle:${input.kind}`,
+          sessionId: `session:controlled-activation:fixture:lifecycle:${input.kind}:${digest(input.shadowId)}`,
         },
       })
     },
