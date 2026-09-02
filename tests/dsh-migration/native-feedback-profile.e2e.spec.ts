@@ -215,6 +215,9 @@ describe('native DSH Message Feedback profile learning intake', () => {
         .toBe(signalsBeforeRestart.length)
       expect(new Set(ticketsBeforeRestart.map(ticket => ticket.ticketId)).size)
         .toBe(ticketsBeforeRestart.length)
+      expect('goals' in first.ctx).toBe(false)
+      expect(first.ctx.tianwenEvolution
+        .getRunBindingBySessionId(String(sessionId))).toBeUndefined()
     } finally {
       await main.dispose()
       await first.ctx.fiber.dispose()
@@ -242,6 +245,9 @@ describe('native DSH Message Feedback profile learning intake', () => {
         .toBe(signals.length)
       expect(new Set(tickets.map(ticket => ticket.ticketId)).size)
         .toBe(tickets.length)
+      expect('goals' in restarted.ctx).toBe(false)
+      expect(restarted.ctx.tianwenEvolution
+        .getRunBindingBySessionId(String(sessionId))).toBeUndefined()
     } finally {
       await restarted.ctx.fiber.dispose()
     }
