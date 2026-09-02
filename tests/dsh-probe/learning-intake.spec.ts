@@ -7,7 +7,76 @@ import {
 } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const appendFault = vi.hoisted(() => ({
+  enabled: false,
+  failLedgerFsyncAfterReal: 0,
+  failLedgerWriteAfterReal: 0,
+  failLedgerWriteBeforeReal: 0,
+}))
+
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  const paths = new Map<number, string>()
+  return {
+    ...actual,
+    openSync(path: string, flags: string, mode?: number) {
+      const descriptor = actual.openSync(path, flags, mode)
+      if (appendFault.enabled) paths.set(descriptor, String(path))
+      return descriptor
+    },
+    writeSync(
+      descriptor: number,
+      buffer: Uint8Array,
+      offset: number,
+      length: number,
+      position?: number | null,
+    ) {
+      if (
+        appendFault.enabled
+        && appendFault.failLedgerWriteBeforeReal > 0
+        && paths.get(descriptor)?.endsWith('ledger.jsonl') === true
+      ) {
+        appendFault.failLedgerWriteBeforeReal -= 1
+        throw Object.assign(new Error('forced pre-write ledger failure'), {
+          code: 'EIO',
+        })
+      }
+      const written = actual.writeSync(
+        descriptor,
+        buffer,
+        offset,
+        length,
+        position,
+      )
+      if (
+        appendFault.enabled
+        && appendFault.failLedgerWriteAfterReal > 0
+        && paths.get(descriptor)?.endsWith('ledger.jsonl') === true
+      ) {
+        appendFault.failLedgerWriteAfterReal -= 1
+        throw Object.assign(new Error('forced post-write ledger uncertainty'), {
+          code: 'EIO',
+        })
+      }
+      return written
+    },
+    fsyncSync(descriptor: number) {
+      actual.fsyncSync(descriptor)
+      if (
+        appendFault.enabled
+        && appendFault.failLedgerFsyncAfterReal > 0
+        && paths.get(descriptor)?.endsWith('ledger.jsonl') === true
+      ) {
+        appendFault.failLedgerFsyncAfterReal -= 1
+        throw Object.assign(new Error('forced post-fsync ledger uncertainty'), {
+          code: 'EIO',
+        })
+      }
+    },
+  }
+})
 
 import {
   LedgerIntegrityError,
@@ -45,6 +114,10 @@ function ledgerRoot(prefix: string): string {
 }
 
 afterEach(() => {
+  appendFault.enabled = false
+  appendFault.failLedgerFsyncAfterReal = 0
+  appendFault.failLedgerWriteAfterReal = 0
+  appendFault.failLedgerWriteBeforeReal = 0
   for (const root of fixtureRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true })
   }
@@ -149,6 +222,109 @@ describe('Tianwen learning intake domain', () => {
 })
 
 describe('Tianwen learning intake ledger', () => {
+  it.each(['write', 'fsync'] as const)(
+    'reconciles a durably appended intake after %s reports uncertainty',
+    failure => {
+      const root = ledgerRoot(`intake-${failure}-commit-unknown`)
+      const ledger = new EvolutionLedger(root, {
+        clock: () => '2026-09-01T00:00:00.000Z',
+      })
+      const input = {
+        intake: base,
+        sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+      }
+      appendFault.enabled = true
+      if (failure === 'write') appendFault.failLedgerWriteAfterReal = 1
+      else appendFault.failLedgerFsyncAfterReal = 1
+
+      expect(ledger.recordLearningFeedbackRevision(input)).toMatchObject({
+        decision: 'ticket-created',
+        duplicate: false,
+      })
+      expect(ledger.recordLearningFeedbackRevision(input).duplicate).toBe(true)
+      expect(new EvolutionLedger(root).recordLearningFeedbackRevision(input).duplicate)
+        .toBe(true)
+      expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8').trimEnd().split('\n'))
+        .toHaveLength(1)
+    },
+  )
+
+  it('reconciles a durably appended retraction without duplicating it', () => {
+    const root = ledgerRoot('retraction-commit-unknown')
+    const ledger = new EvolutionLedger(root, {
+      clock: () => '2026-09-01T00:00:00.000Z',
+    })
+    ledger.recordLearningFeedbackRevision({
+      intake: base,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+    })
+    const input = {
+      sessionId: base.sessionId,
+      messageId: base.messageId,
+      retractedFeedbackVersion: base.feedbackVersion,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+    }
+    appendFault.enabled = true
+    appendFault.failLedgerFsyncAfterReal = 1
+
+    expect(ledger.recordLearningFeedbackRetraction(input)).toEqual({
+      duplicate: false,
+    })
+    expect(ledger.recordLearningFeedbackRetraction(input).duplicate).toBe(true)
+    const replay = new EvolutionLedger(root)
+    expect(replay.getLearningIntakeStatus(base.sessionId, base.messageId)?.state)
+      .toBe('retracted')
+    expect(replay.recordLearningFeedbackRetraction(input).duplicate).toBe(true)
+    expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+      .trimEnd()
+      .split('\n')
+      .filter(line => line.includes('learning-feedback-retracted')))
+      .toHaveLength(1)
+  })
+
+  it('keeps an intake retryable when the append wrote no bytes', () => {
+    const root = ledgerRoot('intake-not-appended')
+    const ledger = new EvolutionLedger(root, {
+      clock: () => '2026-09-01T00:00:00.000Z',
+    })
+    const input = {
+      intake: base,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+    }
+    appendFault.enabled = true
+    appendFault.failLedgerWriteBeforeReal = 1
+
+    expect(() => ledger.recordLearningFeedbackRevision(input))
+      .toThrow(/durable commit is unknown/u)
+    expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe('')
+
+    expect(ledger.recordLearningFeedbackRevision(input).duplicate).toBe(false)
+    expect(new EvolutionLedger(root).recordLearningFeedbackRevision(input).duplicate)
+      .toBe(true)
+  })
+
+  it('blocks a same-process retry when a landed append cannot be re-fsynced', () => {
+    const root = ledgerRoot('intake-resync-failed')
+    const ledger = new EvolutionLedger(root, {
+      clock: () => '2026-09-01T00:00:00.000Z',
+    })
+    const input = {
+      intake: base,
+      sessionLifecycleFingerprint: SESSION_LIFECYCLE_FINGERPRINT,
+    }
+    appendFault.enabled = true
+    appendFault.failLedgerFsyncAfterReal = 2
+
+    expect(() => ledger.recordLearningFeedbackRevision(input))
+      .toThrow(/durable commit is unknown/u)
+    expect(() => ledger.recordLearningFeedbackRevision(input))
+      .toThrow(/fresh replay/u)
+    expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8').trimEnd().split('\n'))
+      .toHaveLength(1)
+    expect(new EvolutionLedger(root).recordLearningFeedbackRevision(input).duplicate)
+      .toBe(true)
+  })
+
   it('records an initial feedback revision as one active v2 snapshot', () => {
     const root = ledgerRoot('revision-v2')
     const ledger = new EvolutionLedger(root, {

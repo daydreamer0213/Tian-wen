@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
   existsSync,
+  fstatSync,
   fsyncSync,
   mkdirSync,
   openSync,
@@ -2051,6 +2052,7 @@ export class EvolutionLedger {
   readonly #usedApprovals = new Set<string>()
   readonly #promoted = new Set<ArtifactId>()
   #champion: ChampionPointer | undefined
+  #appendBlocked = false
 
   constructor(
     root: string,
@@ -4484,9 +4486,15 @@ export class EvolutionLedger {
 
   #accept(event: LedgerEvent): void {
     const parsed = parseEvent(event)
+    if (this.#appendBlocked) {
+      throw new LedgerCommitUnknownError(
+        'ledger append state is unknown; fresh replay is required',
+      )
+    }
     this.#validateAgainstState(parsed)
     const line = canonicalLine(parsed)
     const descriptor = openSync(this.#ledgerPath, 'a')
+    const appendOffset = fstatSync(descriptor).size
     let commitError: unknown
     try {
       writeAllSync(descriptor, line)
@@ -4500,12 +4508,63 @@ export class EvolutionLedger {
       commitError ??= error
     }
     if (commitError !== undefined) {
+      if (
+        parsed.type === 'learning-intake-recorded'
+        || parsed.type === 'learning-feedback-retracted'
+      ) {
+        const recovery = this.#recoverLearningAppend(line, appendOffset)
+        if (recovery === 'committed') {
+          this.#apply(parsed)
+          return
+        }
+        this.#appendBlocked = recovery === 'unknown'
+      }
       throw new LedgerCommitUnknownError(
         'ledger append started but its durable commit is unknown',
         { cause: commitError },
       )
     }
     this.#apply(parsed)
+  }
+
+  #recoverLearningAppend(
+    line: string,
+    appendOffset: number,
+  ): 'committed' | 'not-written' | 'unknown' {
+    const expected = Buffer.from(line, 'utf8')
+    let persisted: Buffer
+    try {
+      persisted = readFileSync(this.#ledgerPath)
+    } catch {
+      return 'unknown'
+    }
+    if (persisted.length === appendOffset) return 'not-written'
+    if (
+      persisted.length !== appendOffset + expected.length
+      || !persisted.subarray(appendOffset).equals(expected)
+    ) {
+      return 'unknown'
+    }
+
+    let descriptor: number | undefined
+    let durable = false
+    try {
+      descriptor = openSync(this.#ledgerPath, 'r+')
+      if (fstatSync(descriptor).size !== persisted.length) return 'unknown'
+      fsyncSync(descriptor)
+      durable = true
+    } catch {
+      return 'unknown'
+    } finally {
+      if (descriptor !== undefined) {
+        try {
+          closeSync(descriptor)
+        } catch {
+          durable = false
+        }
+      }
+    }
+    return durable ? 'committed' : 'unknown'
   }
 
   #validateAgainstState(event: LedgerEvent): void {
