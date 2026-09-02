@@ -681,9 +681,10 @@ describe('Tianwen Long Goal Web host', () => {
     expect(legacy.record).not.toHaveBeenCalled()
   })
 
-  it('projects only safe settled Goal-first Ticket sources and sorts clues by latest source', () => {
+  it('projects only active settled Goal-first Ticket sources and sorts clues by latest active source', () => {
     const ticketA = `ticket:${'a'.repeat(64)}` as const
     const ticketB = `ticket:${'b'.repeat(64)}` as const
+    const ticketC = `ticket:${'c'.repeat(64)}` as const
     const statusA = {
       ...goalFirstStatus(4),
       goal: {
@@ -722,6 +723,7 @@ describe('Tianwen Long Goal Web host', () => {
       readonly ticketId: `ticket:${string}`
       readonly recordedAt: string
       readonly decision: 'ticket-created' | 'ticket-merged'
+      readonly signalId: `signal:${string}`
     }) => ({
       ...input,
       state: 'active' as const,
@@ -730,20 +732,34 @@ describe('Tianwen Long Goal Web host', () => {
       rating: 'negative' as const,
       feedbackFingerprint: `sha256:${'4'.repeat(64)}` as const,
       ingestionId: `sha256:${'5'.repeat(64)}` as const,
-      signalId: `signal:${'6'.repeat(64)}` as const,
+      signalId: input.signalId,
     })
     const statusForA = intake({
       sessionId: 'session-a', messageId: 'assistant-a', ticketId: ticketA,
       recordedAt: '2026-08-30T01:00:00.000Z', decision: 'ticket-created',
+      signalId: `signal:${'1'.repeat(64)}`,
     })
-    const statusForLatestA = intake({
-      sessionId: 'session-b', messageId: 'assistant-b-latest', ticketId: ticketA,
-      recordedAt: '2026-08-30T03:00:00.000Z', decision: 'ticket-merged',
-    })
+    const retractedStatusForLatestA = {
+      ...intake({
+        sessionId: 'session-b', messageId: 'assistant-b-latest', ticketId: ticketA,
+        recordedAt: '2026-08-30T03:00:00.000Z', decision: 'ticket-merged',
+        signalId: `signal:${'2'.repeat(64)}`,
+      }),
+      state: 'retracted' as const,
+    }
     const statusForB = intake({
       sessionId: 'session-b', messageId: 'assistant-b-earlier', ticketId: ticketB,
       recordedAt: '2026-08-30T02:00:00.000Z', decision: 'ticket-created',
+      signalId: `signal:${'3'.repeat(64)}`,
     })
+    const retractedOnlyStatus = {
+      ...intake({
+        sessionId: 'session-b', messageId: 'assistant-b-retracted-only', ticketId: ticketC,
+        recordedAt: '2026-08-30T04:00:00.000Z', decision: 'ticket-created',
+        signalId: `signal:${'4'.repeat(64)}`,
+      }),
+      state: 'retracted' as const,
+    }
 
     const result = projectLearningClueStatus({
       goals: [{
@@ -751,43 +767,34 @@ describe('Tianwen Long Goal Web host', () => {
         intakeStatuses: [statusForA],
       }, {
         status: statusB,
-        intakeStatuses: [statusForLatestA, statusForLatestA, statusForB],
+        intakeStatuses: [
+          retractedStatusForLatestA,
+          retractedStatusForLatestA,
+          statusForB,
+          retractedOnlyStatus,
+        ],
       }],
       tickets: [{
+        ticketId: ticketC,
+        problemFingerprint: `sha256:${'3'.repeat(64)}`,
+        status: 'unsupported',
+        signalIds: [retractedOnlyStatus.signalId],
+      }, {
         ticketId: ticketB,
         problemFingerprint: `sha256:${'2'.repeat(64)}`,
         status: 'unsupported',
-        signalIds: [`signal:${'3'.repeat(64)}`],
+        signalIds: [statusForB.signalId],
       }, {
         ticketId: ticketA,
         problemFingerprint: `sha256:${'1'.repeat(64)}`,
         status: 'open',
-        signalIds: [`signal:${'1'.repeat(64)}`, `signal:${'2'.repeat(64)}`],
+        signalIds: [statusForA.signalId, retractedStatusForLatestA.signalId],
       }],
     })
 
     expect(result).toEqual({
       schemaVersion: 'tianwen.learning-clue-status.v1',
       items: [{
-        ticketId: ticketA,
-        status: 'open',
-        occurrenceCount: 2,
-        analysis: null,
-        review: null,
-        sources: [{
-          longGoalId: 'goal-b',
-          goalObjective: 'Reduce support friction',
-          taskId: 'task-b',
-          taskObjective: 'Clarify the setup flow',
-          recordedAt: '2026-08-30T03:00:00.000Z',
-        }, {
-          longGoalId: 'goal-a',
-          goalObjective: 'Improve release quality',
-          taskId: 'task-a',
-          taskObjective: 'Review the release notes',
-          recordedAt: '2026-08-30T01:00:00.000Z',
-        }],
-      }, {
         ticketId: ticketB,
         status: 'unsupported',
         occurrenceCount: 1,
@@ -799,6 +806,19 @@ describe('Tianwen Long Goal Web host', () => {
           taskId: 'task-b',
           taskObjective: 'Clarify the setup flow',
           recordedAt: '2026-08-30T02:00:00.000Z',
+        }],
+      }, {
+        ticketId: ticketA,
+        status: 'open',
+        occurrenceCount: 2,
+        analysis: null,
+        review: null,
+        sources: [{
+          longGoalId: 'goal-a',
+          goalObjective: 'Improve release quality',
+          taskId: 'task-a',
+          taskObjective: 'Review the release notes',
+          recordedAt: '2026-08-30T01:00:00.000Z',
         }],
       }],
     })

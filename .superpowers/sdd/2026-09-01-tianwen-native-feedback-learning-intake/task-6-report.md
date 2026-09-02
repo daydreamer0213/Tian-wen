@@ -79,3 +79,34 @@ The remaining end-to-end execution belongs to the later acceptance gate.
 
 This report claims Task 6 only. Independent review and later stage tasks remain;
 Stage 2 completion is not claimed here.
+
+## Independent-review fix round 1: current-source retraction filtering
+
+Candidate baseline: `308e10745d5f39b8c98d3dcd75a14de86ab2b03f`
+
+### Root cause and correction
+
+Evolution preserves the original Ticket, Signal history, `ticketId`, and
+`recordedAt` when a Message Feedback revision is retracted, while changing the
+latest intake projection to `state: 'retracted'`. The new read-only Learning
+Clue projection joined intake records to settled Tasks only by Session and
+Ticket, so a retracted Task source could remain visible whenever another active
+Signal kept the Ticket current.
+
+The projection now accepts only `active` intake records before the Session and
+Ticket join. A mixed Ticket therefore retains its historical
+`occurrenceCount = ticket.signalIds.length` but shows and sorts only by current
+active sources. A Ticket with retracted-only sources is absent from the current
+Learning Clue product projection. Evolution audit history remains unchanged.
+
+### TDD and verification evidence
+
+- RED: the focused projection test failed 1/1. It exposed the retracted-only
+  Ticket as the newest item and retained the mixed Ticket's retracted source.
+- GREEN: the same focused test passed 1/1 after the single active-state guard.
+- Task 6 planned matrix passed 84 tests with the environment-gated real-profile
+  test skipped.
+- Task 5 compatibility matrix passed 91 tests.
+
+This section records fix round 1 only. Independent re-review and the broader
+Stage 2 completion gate remain outside this fix report.

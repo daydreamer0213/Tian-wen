@@ -47,7 +47,8 @@ export function projectLearningClueStatus(input: {
       if (task.execution === null ||
         (task.phase !== 'complete' && task.phase !== 'abandoned')) continue
       for (const intake of goal.intakeStatuses) {
-        if (intake.sessionId !== task.execution.sessionId || intake.ticketId === undefined) continue
+        if (intake.state !== 'active' ||
+          intake.sessionId !== task.execution.sessionId || intake.ticketId === undefined) continue
         const sources = sourcesByTicket.get(intake.ticketId) ?? new Map()
         const key = `${goal.status.goal.id}\0${task.id}`
         const source: LearningClueSource = {
