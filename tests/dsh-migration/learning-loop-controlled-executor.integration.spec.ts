@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
@@ -940,6 +940,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
 
   it('cold-resumes only the exact bound child to deliver a pending report without a model turn', async () => {
     const fixtureRoot = root('cold-terminal-report')
+    let recoveryRoot = fixtureRoot
     const spawnProvider = { ...nativeProvider, name: 'spawn' }
     const parentId = SessionId('cold-terminal-parent')
     let mounted = await mountControlledRuntime(fixtureRoot, [])
@@ -1102,15 +1103,94 @@ describe('explicit-correction controlled learning-loop executor', () => {
         status: mounted.harness.ctx.tianwenEvolution.getLearningAnalysis(wrongRequested.analysisId)!,
       })).rejects.toThrow(/exact bound native child/u)
       expect(coldChildAdapter.requests).toHaveLength(0)
+      const parentLocation = mounted.harness.ctx.sessionPersistence.locate(resumedParent.session.header)
+      if (parentLocation === undefined) throw new Error('test requires a per-session durable artifact')
+      const parentDirectory = dirname(parentLocation.path)
+      const unavailableParentDirectory = `${parentDirectory}.unavailable`
+      const readFrom = mounted.harness.ctx.sessionPersistence.readFrom.bind(
+        mounted.harness.ctx.sessionPersistence,
+      )
+      let parentMoved = false
+      const readSpy = vi.spyOn(mounted.harness.ctx.sessionPersistence, 'readFrom')
+        .mockImplementation(async (id, fromSeq, signal) => {
+          const result = await readFrom(id, fromSeq, signal)
+          if (!parentMoved && String(id) === String(parentId)) {
+            renameSync(parentDirectory, unavailableParentDirectory)
+            parentMoved = true
+          }
+          return result
+        })
+      try {
+        await expect(executor.report({
+          ctx: mounted.harness.ctx,
+          status: mounted.harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)!,
+        })).rejects.toBeInstanceOf(Error)
+      } finally {
+        readSpy.mockRestore()
+        if (parentMoved) renameSync(unavailableParentDirectory, parentDirectory)
+      }
+      expect(coldChildAdapter.requests).toHaveLength(0)
+      expect(mounted.harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId))
+        .toMatchObject({ terminalReportDelivery: { state: 'pending' } })
+      expect(resumedParent.session.events.filter(event =>
+        event.type === 'user/message'
+        && event.data.source?.kind === 'subagent-report'
+        && String(event.data.source.senderSessionId) === requested.childSessionId
+        && JSON.stringify(event.data.content).includes('未形成可学习案例'))).toHaveLength(1)
+      const liveOnlyInspection = await mounted.harness.ctx.sessionPersistence.readFrom(parentId, 0)
+      expect(liveOnlyInspection.events.filter(event =>
+        event.type === 'user/message'
+        && event.data.source?.kind === 'subagent-report'
+        && String(event.data.source.senderSessionId) === requested.childSessionId
+        && JSON.stringify(event.data.content).includes('未形成可学习案例'))).toHaveLength(0)
+      recoveryRoot = root('cold-terminal-report-crash-snapshot')
+      cpSync(fixtureRoot, recoveryRoot, { recursive: true })
+
+      await executor.report({
+        ctx: mounted.harness.ctx,
+        status: mounted.harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)!,
+      })
+      await resumedParent.whenIdle()
+      expect(resumedParent.session.events.filter(event =>
+        event.type === 'user/message'
+        && event.data.source?.kind === 'subagent-report'
+        && String(event.data.source.senderSessionId) === requested.childSessionId
+        && JSON.stringify(event.data.content).includes('未形成可学习案例'))).toHaveLength(1)
+      const sameProcessDurable = await mounted.harness.ctx.sessionPersistence.readFrom(parentId, 0)
+      expect(sameProcessDurable.events.filter(event =>
+        event.type === 'user/message'
+        && event.data.source?.kind === 'subagent-report'
+        && String(event.data.source.senderSessionId) === requested.childSessionId
+        && JSON.stringify(event.data.content).includes('未形成可学习案例'))).toHaveLength(1)
+      expect(mounted.harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId))
+        .toMatchObject({ terminalReportDelivery: { state: 'delivered' } })
+
+      await mounted.dispose()
+      mounted = await mountControlledRuntime(recoveryRoot, [])
+      await mounted.harness.ctx.plugin(SubagentRuntime)
+      mounted.harness.ctx.subagents.registerProvider(spawnProvider)
+      mounted.harness.ctx.llm.registerAdapter(['cold-terminal-parent'], new ScriptedAdapter([
+        textResponse('parent received the report after crash recovery'),
+      ]))
+      const recoveredChildAdapter = new ScriptedAdapter([])
+      mounted.harness.ctx.llm.registerAdapter(['cold-terminal-child'], recoveredChildAdapter)
+      const recoveredParent = (await mounted.harness.ctx.agents.resume({
+        resumeSessionId: parentId,
+        agentOptions: { provider: 'cold-terminal-parent', model: 'scripted' },
+      })).agent
+      const recoveredExecutor = createConfiguredLearningLoopExecutor(mounted.harness.ctx, {
+        stateRoot: recoveryRoot,
+        learningLoop: { enabled: true },
+      })!
       appendFault.mode = 'before-write'
       appendFault.eventType = 'learning-analysis-terminal-report-delivered'
-      await expect(executor.report({
+      await expect(recoveredExecutor.report({
         ctx: mounted.harness.ctx,
         status: mounted.harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)!,
       })).rejects.toBeInstanceOf(Error)
-      await resumedParent.whenIdle()
-      expect(await mounted.harness.ctx.sessions.flush(resumedParent.session)).toBe(true)
-      expect(coldChildAdapter.requests).toHaveLength(0)
+      await recoveredParent.whenIdle()
+      expect(await mounted.harness.ctx.sessions.flush(recoveredParent.session)).toBe(true)
+      expect(recoveredChildAdapter.requests).toHaveLength(0)
       const coldChild = await mounted.harness.ctx.sessionPersistence.inspect(
         SessionId(requested.childSessionId),
       )
@@ -1123,7 +1203,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
         && JSON.stringify(event.data.content).includes('未形成可学习案例'))).toHaveLength(1)
 
       await mounted.dispose()
-      mounted = await mountControlledRuntime(fixtureRoot, [])
+      mounted = await mountControlledRuntime(recoveryRoot, [])
       await mounted.harness.ctx.plugin(SubagentRuntime)
       mounted.harness.ctx.subagents.registerProvider(spawnProvider)
       mounted.harness.ctx.llm.registerAdapter(['cold-terminal-parent'], new ScriptedAdapter([
@@ -1136,7 +1216,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
         agentOptions: { provider: 'cold-terminal-parent', model: 'scripted' },
       })).agent
       const replayExecutor = createConfiguredLearningLoopExecutor(mounted.harness.ctx, {
-        stateRoot: fixtureRoot,
+        stateRoot: recoveryRoot,
         learningLoop: { enabled: true },
       })!
       await replayExecutor.report({

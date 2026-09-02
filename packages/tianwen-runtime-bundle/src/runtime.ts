@@ -65,6 +65,69 @@ function pendingTerminalReport(
   return status
 }
 
+function exactTerminalReportMessageId(
+  event: unknown,
+  childSessionId: string,
+  text: string,
+  expectedMessageId?: string,
+): string | undefined {
+  if (event === null || typeof event !== 'object') return undefined
+  const typed = event as { readonly type?: unknown, readonly data?: unknown }
+  if (typed.type !== 'user/message' || typed.data === null || typeof typed.data !== 'object') {
+    return undefined
+  }
+  const message = typed.data as {
+    readonly id?: unknown
+    readonly source?: { readonly kind?: unknown, readonly senderSessionId?: unknown }
+    readonly content?: unknown
+  }
+  const expected = [{ type: 'text' as const, text: `Background subagent ${childSessionId} reported:` }, {
+    type: 'text' as const, text,
+  }]
+  return message.source?.kind === 'subagent-report'
+    && String(message.source.senderSessionId) === childSessionId
+    && sha256(message.content) === sha256(expected)
+    && typeof message.id === 'string' && message.id.length > 0
+    && (expectedMessageId === undefined || message.id === expectedMessageId)
+    ? message.id : undefined
+}
+
+async function confirmTerminalReportPersisted(
+  ctx: Context,
+  input: { readonly context: LearningLoopExecutionContext, readonly text: string },
+  parent: NonNullable<ReturnType<Context['agents']['get']>>,
+  messageId: string,
+): Promise<string> {
+  const status = pendingTerminalReport(ctx, input.context.status, input.text)
+  if (ctx.agents.get(SessionId(status.parentSessionId)) !== parent
+    || !exactLearningAnalysisMainParent(ctx, parent, status)
+    || !await hasExactLearningAnalysisChild(ctx, status)
+    || !parent.session.events.some(event => exactTerminalReportMessageId(
+      event, status.childSessionId, input.text, messageId,
+    ) !== undefined)) {
+    throw new Error('terminal report accepted message lacks the exact live binding')
+  }
+  try {
+    if (!await ctx.sessions.flush(parent.session)) {
+      throw new Error('parent session flush was not durable')
+    }
+  } catch (error) {
+    throw new Error('terminal report parent persistence failed', { cause: error })
+  }
+  const persisted = await ctx.sessionPersistence.readFrom(parent.session.id, 0)
+  const persistedMessageId = persisted.events.map(event => exactTerminalReportMessageId(
+    event, status.childSessionId, input.text, messageId,
+  )).find((id): id is string => id !== undefined)
+  const rechecked = pendingTerminalReport(ctx, input.context.status, input.text)
+  if (persistedMessageId === undefined
+    || ctx.agents.get(SessionId(rechecked.parentSessionId)) !== parent
+    || !exactLearningAnalysisMainParent(ctx, parent, rechecked)
+    || !await hasExactLearningAnalysisChild(ctx, rechecked)) {
+    throw new Error('terminal report was not durably confirmed for the exact binding')
+  }
+  return persistedMessageId
+}
+
 async function deliverConfiguredTerminalReport(
   ctx: Context,
   input: { readonly context: LearningLoopExecutionContext, readonly text: string },
@@ -74,14 +137,21 @@ async function deliverConfiguredTerminalReport(
   if (parent === undefined || !exactLearningAnalysisMainParent(ctx, parent, status)) {
     throw new Error('terminal report requires the exact live native main parent')
   }
+  const liveMessageId = parent.session.events.map(event => exactTerminalReportMessageId(
+    event, status.childSessionId, input.text,
+  )).find((id): id is string => id !== undefined)
+  if (liveMessageId !== undefined) {
+    return confirmTerminalReportPersisted(ctx, input, parent, liveMessageId)
+  }
   const live = ctx.agents.get(SessionId(status.childSessionId))
   if (live !== undefined) {
     if (!exactLearningAnalysisLiveChild(status, live)) {
       throw new Error('terminal report requires the exact bound native child')
     }
-    return String(await ctx.subagents.reportFrom(live, [{ type: 'text', text: input.text }], {
+    const messageId = String(await ctx.subagents.reportFrom(live, [{ type: 'text', text: input.text }], {
       delivery: 'next-step', signal: AbortSignal.timeout(30_000),
     }))
+    return confirmTerminalReportPersisted(ctx, input, parent, messageId)
   }
   const recovery = new AbortController()
   const delivery = Promise.withResolvers<string>()
@@ -114,16 +184,20 @@ async function deliverConfiguredTerminalReport(
       if (!exactLearningAnalysisLiveChild(status, racedLive)) {
         throw new Error('terminal report requires the exact bound native child')
       }
-      return String(await ctx.subagents.reportFrom(
+      const messageId = String(await ctx.subagents.reportFrom(
         racedLive,
         [{ type: 'text', text: input.text }],
         { delivery: 'next-step', signal: AbortSignal.timeout(30_000) },
       ))
+      return confirmTerminalReportPersisted(ctx, input, parent, messageId)
     }
     if (!await hasExactLearningAnalysisChild(ctx, status)) {
       throw new Error('terminal report requires the exact durable native child')
     }
-    if (observed) return await delivery.promise
+    if (observed) {
+      const messageId = await delivery.promise
+      return await confirmTerminalReportPersisted(ctx, input, parent, messageId)
+    }
     try {
       await ctx.subagents.followup(
         parent,
@@ -140,7 +214,8 @@ async function deliverConfiguredTerminalReport(
     } catch (error) {
       if (!observed) delivery.reject(error)
     }
-    return await delivery.promise
+    const messageId = await delivery.promise
+    return await confirmTerminalReportPersisted(ctx, input, parent, messageId)
   } finally {
     offStart()
     recovery.abort(new Error('terminal report recovery finished'))
@@ -200,28 +275,10 @@ export function createConfiguredLearningLoopExecutor(
       if (!await hasExactLearningAnalysisChild(ctx, status)) {
         throw new Error('terminal report lookup requires the exact bound native child')
       }
-      const expected = [{ type: 'text' as const, text: `Background subagent ${childSessionId} reported:` }, {
-        type: 'text' as const, text,
-      }]
-      const exact = (event: unknown): string | undefined => {
-        if (event === null || typeof event !== 'object') return undefined
-        const typed = event as { readonly type?: unknown, readonly data?: unknown }
-        if (typed.type !== 'user/message' || typed.data === null || typeof typed.data !== 'object') return undefined
-        const message = typed.data as {
-          readonly id?: unknown
-          readonly source?: { readonly kind?: unknown, readonly senderSessionId?: unknown }
-          readonly content?: unknown
-        }
-        return message.source?.kind === 'subagent-report'
-          && String(message.source.senderSessionId) === childSessionId
-          && sha256(message.content) === sha256(expected)
-          && typeof message.id === 'string' && message.id.length > 0
-          ? message.id : undefined
-      }
-      const live = (parent.session as unknown as { readonly events?: readonly unknown[] }).events ?? []
-      const persisted = await ctx.sessionPersistence.inspect(parent.session.id)
-      const messageId = live.map(exact).find((id): id is string => id !== undefined)
-        ?? persisted.events.map(exact).find((id): id is string => id !== undefined)
+      const persisted = await ctx.sessionPersistence.readFrom(parent.session.id, 0)
+      const messageId = persisted.events.map(event => exactTerminalReportMessageId(
+        event, childSessionId, text,
+      )).find((id): id is string => id !== undefined)
       const rechecked = pendingTerminalReport(ctx, context.status, text)
       if (ctx.agents.get(SessionId(rechecked.parentSessionId)) !== parent
         || !exactLearningAnalysisMainParent(ctx, parent, rechecked)

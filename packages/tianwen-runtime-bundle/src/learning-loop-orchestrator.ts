@@ -116,12 +116,12 @@ export interface ExplicitCorrectionLearningLoopExecutorConfig {
   }>
   /** Existing controlled evaluation fixture's deterministic outcome resolver. */
   readonly resolveVerdict?: unknown
-  /** Delivery adapter only: durable terminal intent/deduplication stays here. */
+  /** Resolves only after the exact parent report message is durably persisted. */
   readonly deliverTerminalReport: (input: {
     readonly context: LearningLoopExecutionContext
     readonly text: string
   }) => string | Promise<string>
-  /** Reconciles reportFrom accepted-before-ledger-delivery after a restart. */
+  /** Finds only an exact durably persisted report after a restart. */
   readonly findTerminalReport?: (input: {
     readonly context: LearningLoopExecutionContext
     readonly text: string
