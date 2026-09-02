@@ -9,6 +9,7 @@ import {
 import { mountTianwenLongGoalHost } from './long-goal-host.js'
 import type { TianwenLongGoalHostConfig } from './long-goal-host.js'
 import { TianwenLearningConsentAgentService } from './learning-consent-agent.js'
+import { TianwenLearningAnalysisChildService } from './learning-analysis-child.js'
 import { TianwenMessageFeedbackBridgeService } from './message-feedback-bridge.js'
 
 export { inject, name, SUPPORTED_DSH_VERSION }
@@ -24,5 +25,6 @@ export async function apply(
   await applyCore(ctx, config.evolutionRoot === undefined ? {} : { evolutionRoot: config.evolutionRoot })
   ctx.plugin(TianwenLearningConsentAgentService)
   ctx.plugin(TianwenMessageFeedbackBridgeService)
+  ctx.plugin(TianwenLearningAnalysisChildService, config)
   mountTianwenLongGoalHost(ctx, config)
 }
