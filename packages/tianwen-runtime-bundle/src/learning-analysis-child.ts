@@ -41,7 +41,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-function exactLiveMainParent(
+export function exactLearningAnalysisMainParent(
   ctx: Context,
   parent: Agent,
   status: LearningAnalysisStatus,
@@ -112,7 +112,10 @@ function exactPersistedChild(
     && exactDescriptor(ownEvents(child.events, child.meta))
 }
 
-function exactLiveChild(status: LearningAnalysisStatus, child: Agent): boolean {
+export function exactLearningAnalysisLiveChild(
+  status: LearningAnalysisStatus,
+  child: Agent,
+): boolean {
   return String(child.session.id) === status.childSessionId
     && String(child.session.header.parentSession) === status.parentSessionId
     && child.session.header.origin === 'subagent'
@@ -127,12 +130,12 @@ function isMissingSession(error: unknown): boolean {
  * DSH owns child creation.  We only adopt a child after both its live header
  * and its durable, child-owned descriptor prove it is our exact binding.
  */
-async function hasExactExistingChild(
+export async function hasExactLearningAnalysisChild(
   ctx: Context,
   status: LearningAnalysisStatus,
 ): Promise<boolean> {
   const liveChild = ctx.agents.get(SessionId(status.childSessionId))
-  if (liveChild !== undefined && !exactLiveChild(status, liveChild)) {
+  if (liveChild !== undefined && !exactLearningAnalysisLiveChild(status, liveChild)) {
     throw new Error('learning analysis existing child is not the exact bound native child')
   }
   let persistedChild: Awaited<ReturnType<Context['sessionPersistence']['inspect']>> | undefined
@@ -219,7 +222,7 @@ export async function startLearningAnalysisChild(
     if (exactRunning(durable, status)) return durable
     throw new Error('learning analysis requires a fresh Evolution replay')
   }
-  if (!exactLiveMainParent(ctx, input.parent, status)) {
+  if (!exactLearningAnalysisMainParent(ctx, input.parent, status)) {
     throw new Error('learning analysis requires the exact live main parent')
   }
   if (status.submission !== undefined || status.phase !== 'pending-parent') {
@@ -239,7 +242,7 @@ export async function startLearningAnalysisChild(
     rechecked === undefined
     || rechecked.phase !== 'pending-parent'
     || rechecked.submission !== undefined
-    || !exactLiveMainParent(ctx, input.parent, rechecked)
+    || !exactLearningAnalysisMainParent(ctx, input.parent, rechecked)
   ) throw new Error('learning analysis admission changed while reading its Session Reference')
   const exactIntake = requireActiveInput(ctx, rechecked)
   const feedback = ctx.tianwenEvolution.getLearningTicketFeedback(status.ticketId)
@@ -248,14 +251,14 @@ export async function startLearningAnalysisChild(
     || feedback.latest.messageId !== status.messageId
     || feedback.latest.recordedAt !== exactIntake?.recordedAt
   ) throw new Error('learning analysis private feedback is unavailable for the exact binding')
-  const alreadyPersisted = await hasExactExistingChild(ctx, status)
+  const alreadyPersisted = await hasExactLearningAnalysisChild(ctx, status)
   input.signal.throwIfAborted()
   const beforeStart = ctx.tianwenEvolution.getLearningAnalysis(status.analysisId)
   if (
     beforeStart === undefined
     || beforeStart.phase !== 'pending-parent'
     || beforeStart.submission !== undefined
-    || !exactLiveMainParent(ctx, input.parent, beforeStart)
+    || !exactLearningAnalysisMainParent(ctx, input.parent, beforeStart)
   ) throw new Error('learning analysis admission changed before native child start')
   requireActiveInput(ctx, beforeStart)
   if (ctx.tianwenEvolution.blocked) {
@@ -301,7 +304,7 @@ export async function startLearningAnalysisChild(
       }
     } catch (error) {
       if (!(error instanceof SubagentError && error.code === 'DUPLICATE_CHILD')) throw error
-      if (!await hasExactExistingChild(ctx, status)) {
+      if (!await hasExactLearningAnalysisChild(ctx, status)) {
         throw new Error('learning analysis duplicate child cannot be proven durable')
       }
       duplicateChild = true
@@ -316,7 +319,7 @@ export async function startLearningAnalysisChild(
         admitted === undefined
         || admitted.phase !== 'pending-parent'
         || admitted.submission !== undefined
-        || !exactLiveMainParent(ctx, input.parent, admitted)
+        || !exactLearningAnalysisMainParent(ctx, input.parent, admitted)
       ) throw new Error('learning analysis admission changed after native child acceptance')
       requireActiveInput(ctx, admitted)
     } catch (error) {

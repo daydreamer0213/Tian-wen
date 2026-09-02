@@ -506,7 +506,7 @@ export class TianwenLearningIntakeService extends Service {
       })
       void (this.ctx.get('tianwenLearningLoop') as {
         schedule(analysisId: string): Promise<void>
-      } | undefined)?.schedule(analysis.analysisId)
+      } | undefined)?.schedule(analysis.analysisId).catch(() => undefined)
     }
     if (sessionDigest(session.events) !== before) {
       throw new Error('learning intake changed the DSH Session')

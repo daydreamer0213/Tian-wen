@@ -17,6 +17,8 @@ import {
 } from '@tianwen/evolution'
 import type {} from '@tianwen/runtime'
 
+import { learningLoopTerminalReport } from './learning-loop-orchestrator.js'
+
 const STARTUP_CONCURRENCY = 8
 const PROFILE_SCOPE = 'profile:tianwen'
 
@@ -82,8 +84,14 @@ function needsLearningLoopWake(
   analysis: ReturnType<Context['tianwenEvolution']['listLearningAnalyses']>[number],
 ): boolean {
   if (analysis.phase === 'rolled-back') {
-    return analysis.terminalReportHistory?.length !== 1
-      || analysis.terminalReportDelivery?.state !== 'delivered'
+    return analysis.terminalReportDelivery?.state !== 'delivered'
+      || analysis.terminalReportDelivery.reportDigest
+        !== learningLoopTerminalReport(analysis).digest
+  }
+  if (analysis.phase === 'transition-recovered') {
+    return analysis.terminalReportDelivery?.state !== 'delivered'
+      || analysis.terminalReportDelivery.reportDigest
+        !== learningLoopTerminalReport(analysis).digest
   }
   return analysis.phase === 'promoted'
     || analysis.phase === 'failed'
@@ -315,7 +323,7 @@ export class TianwenMessageFeedbackBridgeService extends Service {
     if (loop !== undefined) {
       for (const analysis of this.ctx.tianwenEvolution.listLearningAnalyses()) {
         if (needsLearningLoopWake(analysis)
-          && (analysis.sessionId === sessionId || affectedTicketIds.has(analysis.ticketId))) {
+          && affectedTicketIds.has(analysis.ticketId)) {
           void loop.schedule(analysis.analysisId).catch(() => undefined)
         }
       }

@@ -23,6 +23,7 @@ export type LearningAnalysisPhase =
   | 'shadow-ready'
   | 'promoted'
   | 'rolled-back'
+  | 'transition-recovered'
   | 'invalidated'
   | 'failed'
 
@@ -31,6 +32,7 @@ export type LearningAnalysisRetryPhase = Exclude<
   LearningAnalysisPhase,
   'failed' | 'invalidated' | 'no-case' | 'insufficient-evidence'
     | 'protocol-unavailable' | 'candidate-rejected' | 'rolled-back'
+    | 'transition-recovered'
 >
 
 export interface LearningAnalysisBinding {
@@ -98,6 +100,8 @@ export interface LearningAnalysisStatus extends LearningAnalysisBinding {
   readonly promotionTransitionReceiptDigest?: Sha256Digest
   readonly rollbackTransitionId?: ControlledSkillTransitionId
   readonly rollbackTransitionReceiptDigest?: Sha256Digest
+  readonly recoveredTransitionId?: ControlledSkillTransitionId
+  readonly recoveredTransitionReceiptDigest?: Sha256Digest
   readonly resumePhase?: LearningAnalysisRetryPhase
   readonly resumedAt?: string
   /** Preliminary child verdict; retained for Task 2 compatibility. */
@@ -181,6 +185,11 @@ export type LearningAnalysisGovernedOutcome =
     }
   | {
       readonly phase: 'promoted' | 'rolled-back'
+      readonly transitionId: ControlledSkillTransitionId
+      readonly transitionReceiptDigest: Sha256Digest
+    }
+  | {
+      readonly phase: 'transition-recovered'
       readonly transitionId: ControlledSkillTransitionId
       readonly transitionReceiptDigest: Sha256Digest
     }

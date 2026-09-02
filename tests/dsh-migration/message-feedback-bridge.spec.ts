@@ -74,6 +74,7 @@ vi.mock('node:fs', async importOriginal => {
 
 import { apply as applyCore } from '../../packages/tianwen-runtime/src/index.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
+import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import {
   TianwenMessageFeedbackBridgeService,
 } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
@@ -281,7 +282,7 @@ afterEach(() => {
 })
 
 describe('Tianwen DSH Message Feedback bridge', () => {
-  it('wakes only analyses for the exact changed Tickets while preserving the same-Session fallback', async () => {
+  it('wakes only analyses for the exact changed Tickets, including within one Session', async () => {
     const root = evolutionRoot('ticket-analysis-wake')
     const sessions = new SessionCatalog()
     const feedback = new FeedbackCatalog()
@@ -337,8 +338,8 @@ describe('Tianwen DSH Message Feedback bridge', () => {
       ...requested,
       analysisId: `analysis:${'e'.repeat(64)}` as const,
       ticketId: otherStatus.ticketId,
-      sessionId: String(noTicket.id),
-      parentSessionId: String(noTicket.id),
+      sessionId: String(second.id),
+      parentSessionId: String(second.id),
       phase: 'promoted' as const,
     }
     const priorDelivery = {
@@ -364,11 +365,50 @@ describe('Tianwen DSH Message Feedback bridge', () => {
       terminalReportDelivery: {
         ...priorDelivery,
         analysisId: `analysis:${'c'.repeat(64)}` as const,
-        reportDigest: `sha256:${'2'.repeat(64)}` as const,
+        reportDigest: sha256({
+          kind: 'terminal-governed-outcome',
+          text: 'Tianwen 分析结论：支持已撤回，已验证回滚至父版本。',
+        }),
         reportMessageId: 'rollback-report',
       },
     }
-    const analyses = [promoted, unrelated, rolledBackWithoutOutcomeReport, rolledBackWithOutcomeReport]
+    const rolledBackWithOnlyOutcomeReport = {
+      ...rolledBackWithOutcomeReport,
+      analysisId: `analysis:${'b'.repeat(64)}` as const,
+      terminalReportHistory: undefined,
+      terminalReportDelivery: {
+        ...rolledBackWithOutcomeReport.terminalReportDelivery,
+        analysisId: `analysis:${'b'.repeat(64)}` as const,
+      },
+    }
+    const recoveredWithoutOutcomeReport = {
+      ...rolledBackWithoutOutcomeReport,
+      analysisId: `analysis:${'a'.repeat(64)}` as const,
+      phase: 'transition-recovered' as const,
+      promotionTransitionId: `transition:${'a'.repeat(64)}` as const,
+    }
+    const recoveredWithOutcomeReport = {
+      ...recoveredWithoutOutcomeReport,
+      analysisId: `analysis:${'9'.repeat(64)}` as const,
+      terminalReportDelivery: {
+        ...priorDelivery,
+        analysisId: `analysis:${'9'.repeat(64)}` as const,
+        reportDigest: sha256({
+          kind: 'terminal-governed-outcome',
+          text: 'Tianwen 分析结论：撤回回滚检查未通过，已恢复尝试前的候选版本；本次不会自动重试，需要人工处理。',
+        }),
+        reportMessageId: 'recovered-rollback-report',
+      },
+    }
+    const analyses = [
+      promoted,
+      unrelated,
+      rolledBackWithoutOutcomeReport,
+      rolledBackWithOutcomeReport,
+      rolledBackWithOnlyOutcomeReport,
+      recoveredWithoutOutcomeReport,
+      recoveredWithOutcomeReport,
+    ]
     vi.spyOn(mounted.ctx.tianwenEvolution, 'listLearningAnalyses')
       .mockReturnValue(analyses as never)
     const schedule = vi.fn(async (_analysisId: string) => undefined)
@@ -389,6 +429,9 @@ describe('Tianwen DSH Message Feedback bridge', () => {
       await vi.waitFor(() => expect(schedule).toHaveBeenCalledWith(requested.analysisId))
       expect(schedule).toHaveBeenCalledWith(rolledBackWithoutOutcomeReport.analysisId)
       expect(schedule).not.toHaveBeenCalledWith(rolledBackWithOutcomeReport.analysisId)
+      expect(schedule).not.toHaveBeenCalledWith(rolledBackWithOnlyOutcomeReport.analysisId)
+      expect(schedule).toHaveBeenCalledWith(recoveredWithoutOutcomeReport.analysisId)
+      expect(schedule).not.toHaveBeenCalledWith(recoveredWithOutcomeReport.analysisId)
       expect(schedule).not.toHaveBeenCalledWith(unrelated.analysisId)
 
       schedule.mockClear()
@@ -416,8 +459,8 @@ describe('Tianwen DSH Message Feedback bridge', () => {
         rating: 'positive', updatedAt,
       })])
       await mounted.bridge.reconcileSession(String(noTicket.id))
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce())
-      expect(schedule).toHaveBeenLastCalledWith(unrelated.analysisId)
+      await new Promise(resolve => setImmediate(resolve))
+      expect(schedule).not.toHaveBeenCalled()
     } finally {
       await mounted.ctx.fiber.dispose()
     }

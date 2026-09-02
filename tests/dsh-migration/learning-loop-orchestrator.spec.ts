@@ -6,6 +6,7 @@ import {
   continueLearningLoop,
   drainLearningLoopLane,
   drainLearningLoopLaneWithWake,
+  learningLoopTerminalReport,
   runLearningLoopPhase,
 } from '../../packages/tianwen-runtime-bundle/src/learning-loop-orchestrator.js'
 
@@ -70,6 +71,7 @@ describe('durable learning-loop phase table', () => {
     ['candidate-rejected', 'report'],
     ['promoted', 'report'],
     ['rolled-back', 'report'],
+    ['transition-recovered', 'report'],
   ] as const)('resumes only the next missing work after durable %s', async (phase, expected) => {
     const calls: string[] = []
     const status = {
@@ -101,6 +103,37 @@ describe('durable learning-loop phase table', () => {
     expect(calls).toEqual(['support', expected === 'prepareCandidate'
       ? 'freezeProtocol'
       : expected, ...(expected === 'prepareCandidate' ? ['prepareCandidate'] : [])])
+  })
+
+  it('reports recovered promote and rollback attempts as distinct permanent blockers', () => {
+    const promoted = learningLoopTerminalReport({
+      ...base,
+      phase: 'transition-recovered',
+      recoveredTransitionId: 'transition:promote-recovered',
+    })
+    const rollback = learningLoopTerminalReport({
+      ...base,
+      phase: 'transition-recovered',
+      promotionTransitionId: 'transition:verified-promotion',
+      recoveredTransitionId: 'transition:rollback-recovered',
+    })
+    expect(promoted.text).toContain('候选启用检查未通过')
+    expect(rollback.text).toContain('撤回回滚检查未通过')
+    expect(rollback.text).toContain('需要人工处理')
+    expect(promoted.digest).not.toBe(rollback.digest)
+  })
+
+  it('keeps a recovered transition terminal when support is later unavailable', async () => {
+    const report = vi.fn()
+    const invalidate = vi.fn()
+    await runLearningLoopPhase({
+      status: { ...base, phase: 'transition-recovered' },
+      hasActiveSupport: async () => false,
+      report,
+      invalidate,
+    })
+    expect(report).toHaveBeenCalledOnce()
+    expect(invalidate).not.toHaveBeenCalled()
   })
 
   it('freezes an audited pre-Candidate protocol before materialization without Candidate input', async () => {

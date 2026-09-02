@@ -50,6 +50,8 @@ export interface LearningLoopPhaseStatus {
   readonly promotionTransitionReceiptDigest?: string
   readonly rollbackTransitionId?: string
   readonly rollbackTransitionReceiptDigest?: string
+  readonly recoveredTransitionId?: string
+  readonly recoveredTransitionReceiptDigest?: string
 }
 
 export interface LearningLoopLane {
@@ -185,15 +187,26 @@ export function createExplicitCorrectionLearningLoopExecutor(
     if (shadowId === undefined) return false
     const shadow = context.ctx.tianwenEvolution.getControlledSkillShadow(shadowId as never)
     const pointer = shadow === undefined ? undefined : context.ctx.tianwenEvolution.getControlledSkillScopePointer(shadow.scopeKey)
-    const matching = context.ctx.tianwenEvolution.listControlledSkillTransitions().filter(transition => {
+    const matching = context.ctx.tianwenEvolution.listControlledSkillTransitions().flatMap(transition => {
       const receipt = context.ctx.tianwenEvolution.getControlledSkillTransitionReceipt(transition.transitionId)
-      return transition.shadowId === shadowId && transition.kind === kind && receipt?.state === 'verified'
+      return transition.shadowId === shadowId && transition.kind === kind
+        && (receipt?.state === 'verified' || receipt?.state === 'recovered')
         && sha256(receipt.pointer) === sha256(pointer)
+        ? [{ transition, receipt }]
+        : []
     })
     if (matching.length !== 1) return false
-    const input = { analysisId: context.status.analysisId as never, transitionId: matching[0]!.transitionId }
-    if (kind === 'promote') context.ctx.tianwenEvolution.recordLearningAnalysisPromoted(input)
-    else context.ctx.tianwenEvolution.recordLearningAnalysisRolledBack(input)
+    const input = {
+      analysisId: context.status.analysisId as never,
+      transitionId: matching[0]!.transition.transitionId,
+    }
+    if (matching[0]!.receipt.state === 'recovered') {
+      context.ctx.tianwenEvolution.recordLearningAnalysisTransitionRecovered(input)
+    } else if (kind === 'promote') {
+      context.ctx.tianwenEvolution.recordLearningAnalysisPromoted(input)
+    } else {
+      context.ctx.tianwenEvolution.recordLearningAnalysisRolledBack(input)
+    }
     return true
   }
   return {
@@ -300,7 +313,17 @@ export function createExplicitCorrectionLearningLoopExecutor(
       const transition = await (context.ctx.tianwenSkillEvaluation as unknown as {
         runControlledSkillTransition(input: unknown, resolver?: unknown): Promise<{ readonly state: string, readonly transition: { readonly transitionId: string, readonly state: string } }>
       }).runControlledSkillTransition(transitionInput, config.resolveVerdict)
-      if (transition.state !== 'terminal' || transition.transition.state !== 'verified') throw new Error('controlled promotion was not verified')
+      if (transition.transition.state === 'recovered') {
+        if (transition.state !== 'stopped') throw new Error('controlled promotion recovery state is inconsistent')
+        context.ctx.tianwenEvolution.recordLearningAnalysisTransitionRecovered({
+          analysisId: context.status.analysisId as never,
+          transitionId: transition.transition.transitionId as never,
+        })
+        return
+      }
+      if (transition.state !== 'terminal' || transition.transition.state !== 'verified') {
+        throw new Error('controlled promotion was not verified')
+      }
       context.ctx.tianwenEvolution.recordLearningAnalysisPromoted({
         analysisId: context.status.analysisId as never, transitionId: transition.transition.transitionId as never,
       })
@@ -324,18 +347,28 @@ export function createExplicitCorrectionLearningLoopExecutor(
       const transition = await (context.ctx.tianwenSkillEvaluation as unknown as {
         runControlledSkillTransition(input: unknown, resolver?: unknown): Promise<{ readonly state: string, readonly transition: { readonly transitionId: string, readonly state: string } }>
       }).runControlledSkillTransition(transitionInput, config.resolveVerdict)
-      if (transition.state !== 'terminal' || transition.transition.state !== 'verified') throw new Error('controlled rollback was not verified')
+      if (transition.transition.state === 'recovered') {
+        if (transition.state !== 'stopped') throw new Error('controlled rollback recovery state is inconsistent')
+        context.ctx.tianwenEvolution.recordLearningAnalysisTransitionRecovered({
+          analysisId: context.status.analysisId as never,
+          transitionId: transition.transition.transitionId as never,
+        })
+        return
+      }
+      if (transition.state !== 'terminal' || transition.transition.state !== 'verified') {
+        throw new Error('controlled rollback was not verified')
+      }
       context.ctx.tianwenEvolution.recordLearningAnalysisRolledBack({
         analysisId: context.status.analysisId as never, transitionId: transition.transition.transitionId as never,
       })
     },
     async report(context) {
-      const text = terminalReportText(context.status)
+      const { text, digest: reportDigest } = learningLoopTerminalReport(context.status)
       const binding = {
         analysisId: context.status.analysisId as never,
         parentSessionId: String(context.status.parentSessionId),
         childSessionId: String(context.status.childSessionId),
-        reportDigest: sha256({ kind: 'terminal-governed-outcome', text }),
+        reportDigest,
       }
       const recorded = context.ctx.tianwenEvolution.recordLearningAnalysisTerminalReportIntent(binding)
       if (recorded.terminalReportDelivery?.state === 'delivered') return
@@ -360,7 +393,21 @@ function terminalReportText(status: LearningLoopPhaseStatus): string {
       : 'Tianwen 分析结论：候选 Skill 未通过 Shadow，未改变未来 Run。'
     case 'promoted': return 'Tianwen 分析结论：候选 Skill 已通过验证；仅未来 Run 使用新版本。'
     case 'rolled-back': return 'Tianwen 分析结论：支持已撤回，已验证回滚至父版本。'
+    case 'transition-recovered': return status.promotionTransitionId === undefined
+      ? 'Tianwen 分析结论：候选启用检查未通过，已恢复父版本；本次不会自动重试。'
+      : 'Tianwen 分析结论：撤回回滚检查未通过，已恢复尝试前的候选版本；本次不会自动重试，需要人工处理。'
     default: return `Tianwen 分析结论：${status.phase}。`
+  }
+}
+
+export function learningLoopTerminalReport(status: LearningLoopPhaseStatus): {
+  readonly text: string
+  readonly digest: ReturnType<typeof sha256>
+} {
+  const text = terminalReportText(status)
+  return {
+    text,
+    digest: sha256({ kind: 'terminal-governed-outcome', text }),
   }
 }
 
@@ -374,6 +421,8 @@ function preCandidateStatus(status: LearningLoopPhaseStatus): LearningLoopPhaseS
     promotionTransitionReceiptDigest: _promotionTransitionReceiptDigest,
     rollbackTransitionId: _rollbackTransitionId,
     rollbackTransitionReceiptDigest: _rollbackTransitionReceiptDigest,
+    recoveredTransitionId: _recoveredTransitionId,
+    recoveredTransitionReceiptDigest: _recoveredTransitionReceiptDigest,
     ...frozen
   } = status
   return frozen
@@ -550,7 +599,7 @@ export interface LearningLoopPhaseOperations {
   readonly materializeCandidate?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
   readonly evaluate?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
   readonly promote?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
-  /** Replays only an already verified promote transition; never starts one. */
+  /** Replays only an already terminal promote transition; never starts one. */
   readonly recoverPromote?: (status: LearningLoopPhaseStatus) => boolean | Promise<boolean>
   readonly rollback?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
   readonly report?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
@@ -571,6 +620,10 @@ export async function runLearningLoopPhase(input: LearningLoopPhaseOperations): 
     if (!await input.hasActiveSupport(status)) {
       if (status.phase === 'failed' && status.resumePhase === 'promoted') {
         await operation(input, 'resume')(status)
+        return
+      }
+      if (status.phase === 'transition-recovered') {
+        await operation(input, 'report')(status)
         return
       }
       if (status.phase === 'shadow-ready' && input.recoverPromote !== undefined) {
@@ -594,7 +647,7 @@ export async function runLearningLoopPhase(input: LearningLoopPhaseOperations): 
       await operation(input, 'materializeCandidate')(status)
     } else if (status.phase === 'candidate-ready') await operation(input, 'evaluate')(status)
     else if (status.phase === 'shadow-ready') await operation(input, 'promote')(status)
-    else if (['no-case', 'insufficient-evidence', 'protocol-unavailable', 'candidate-rejected', 'promoted', 'rolled-back'].includes(status.phase)) await operation(input, 'report')(status)
+    else if (['no-case', 'insufficient-evidence', 'protocol-unavailable', 'candidate-rejected', 'promoted', 'rolled-back', 'transition-recovered'].includes(status.phase)) await operation(input, 'report')(status)
   } catch (error) {
     if (status.phase === 'failed' || input.fail === undefined
       || !['pending-parent', 'running', 'candidate-ready', 'shadow-ready', 'promoted'].includes(status.phase)) throw error

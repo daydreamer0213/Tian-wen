@@ -1159,7 +1159,9 @@ function parseLearningAnalysisGovernedOutcomeEvent(
       shadowResultDigest: requireDigest(outcome.shadowResultDigest),
       promotionRecommendationDigest: requireDigest(outcome.promotionRecommendationDigest),
     }
-  } else if (outcome.phase === 'promoted' || outcome.phase === 'rolled-back') {
+  } else if (outcome.phase === 'promoted'
+    || outcome.phase === 'rolled-back'
+    || outcome.phase === 'transition-recovered') {
     exactKeys(outcome, ['phase', 'transitionId', 'transitionReceiptDigest'])
     parsed = {
       phase: outcome.phase,
@@ -4486,6 +4488,47 @@ export class EvolutionLedger {
     return this.#recordLearningAnalysisTransitionOutcome(input, 'rollback')
   }
 
+  recordLearningAnalysisTransitionRecovered(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly transitionId: ControlledSkillTransitionId
+  }): LearningAnalysisReceipt {
+    const status = this.#learningAnalyses.get(input.analysisId)
+    if (status?.phase === 'transition-recovered') {
+      if (status.recoveredTransitionId !== input.transitionId) {
+        throw new LedgerIntegrityError('learning analysis recovered transition binding changed')
+      }
+      return { ...clone(status), duplicate: true }
+    }
+    const transition = this.#controlledSkillTransitions.get(input.transitionId)
+    const receipt = this.getControlledSkillTransitionReceipt(input.transitionId)
+    const expectedPhase = transition?.kind === 'promote'
+      ? 'shadow-ready'
+      : transition?.kind === 'rollback'
+        ? 'promoted'
+        : undefined
+    if (
+      status === undefined
+      || status.shadowId === undefined
+      || status.phase !== expectedPhase
+      || transition?.shadowId !== status.shadowId
+      || receipt?.state !== 'recovered'
+    ) throw new LedgerIntegrityError(
+      'learning analysis recovered outcome lacks an exact recovered transition',
+    )
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-governed-outcome.v1',
+      type: 'learning-analysis-governed-outcome-recorded',
+      at: this.#now(),
+      analysisId: status.analysisId,
+      outcome: {
+        phase: 'transition-recovered',
+        transitionId: transition.transitionId,
+        transitionReceiptDigest: sha256(receipt),
+      },
+    })
+    return { ...clone(this.#learningAnalyses.get(status.analysisId)!), duplicate: false }
+  }
+
   /** Records withdrawal explicitly when a live lane observes it between writes. */
   recordLearningAnalysisInvalidated(input: {
     readonly analysisId: LearningAnalysisId
@@ -4494,6 +4537,7 @@ export class EvolutionLedger {
     if (status === undefined) throw new LedgerIntegrityError(`unknown learning analysis: ${input.analysisId}`)
     if (status.phase === 'invalidated') return { ...clone(status), duplicate: true }
     if (status.phase === 'promoted' || status.phase === 'rolled-back'
+      || status.phase === 'transition-recovered'
       || (status.phase === 'failed' && status.resumePhase === 'promoted')) {
       throw new LedgerIntegrityError('a promoted analysis must use verified rollback, not invalidation')
     }
@@ -5289,7 +5333,10 @@ export class EvolutionLedger {
     const existing = status.terminalReportDelivery
     if (existing !== undefined) {
       if (sameLearningAnalysisReportBinding(existing, report)) return { ...clone(status), duplicate: true }
-      if (status.phase !== 'rolled-back' || (status.terminalReportHistory?.length ?? 0) !== 0) {
+      const laterOutcome = status.phase === 'rolled-back'
+        || (status.phase === 'transition-recovered'
+          && status.promotionTransitionId !== undefined)
+      if (!laterOutcome || (status.terminalReportHistory?.length ?? 0) !== 0) {
         throw new LedgerIntegrityError('learning analysis terminal report intent changed')
       }
     }
@@ -5353,17 +5400,25 @@ export class EvolutionLedger {
       }
       return
     }
+    const recovered = outcome.phase === 'transition-recovered'
     const promoted = outcome.phase === 'promoted'
     const transition = this.#controlledSkillTransitions.get(outcome.transitionId)
     const receipt = this.getControlledSkillTransitionReceipt(outcome.transitionId)
+    const expectedKind = recovered
+      ? transition?.kind
+      : promoted ? 'promote' : 'rollback'
+    const expectedPhase = expectedKind === 'promote' ? 'shadow-ready' : 'promoted'
     if (
       status.shadowId === undefined
-      || status.phase !== (promoted ? 'shadow-ready' : 'promoted')
+      || (expectedKind !== 'promote' && expectedKind !== 'rollback')
+      || status.phase !== expectedPhase
       || transition?.shadowId !== status.shadowId
-      || transition.kind !== (promoted ? 'promote' : 'rollback')
-      || receipt?.state !== 'verified'
+      || transition.kind !== expectedKind
+      || receipt?.state !== (recovered ? 'recovered' : 'verified')
       || sha256(receipt) !== outcome.transitionReceiptDigest
-    ) throw new LedgerIntegrityError(`learning analysis ${outcome.phase} disagrees with verified transition`)
+    ) throw new LedgerIntegrityError(
+      `learning analysis ${outcome.phase} disagrees with controlled transition`,
+    )
   }
 
   #invalidateUnsupportedLearningAnalyses(): void {
@@ -5374,6 +5429,7 @@ export class EvolutionLedger {
         || status.phase === 'invalidated'
         || status.phase === 'promoted'
         || status.phase === 'rolled-back'
+        || status.phase === 'transition-recovered'
         || (status.phase === 'failed' && status.resumePhase === 'promoted')
       ) continue
       this.#accept({
@@ -6989,6 +7045,7 @@ export class EvolutionLedger {
         || status.phase === 'invalidated'
         || status.phase === 'promoted'
         || status.phase === 'rolled-back'
+        || status.phase === 'transition-recovered'
         || (status.phase === 'failed' && status.resumePhase === 'promoted')
       ) throw new LedgerIntegrityError('learning analysis invalidation disagrees with support')
       this.#assertLearningAnalysisTimestamp(status, event.at)
@@ -7095,7 +7152,9 @@ export class EvolutionLedger {
       const existing = status?.terminalReportDelivery
       const firstReport = existing === undefined
       const rollbackReport = existing !== undefined
-        && status?.phase === 'rolled-back'
+        && (status?.phase === 'rolled-back'
+          || (status?.phase === 'transition-recovered'
+            && status.promotionTransitionId !== undefined))
         && (status.terminalReportHistory?.length ?? 0) === 0
         && !sameLearningAnalysisReportBinding(existing, event.report)
       if (status?.submission === undefined || (!firstReport && !rollbackReport)
@@ -7613,13 +7672,21 @@ export class EvolutionLedger {
               promotionTransitionReceiptDigest: outcome.transitionReceiptDigest,
               updatedAt: event.at,
             }
-          : {
+          : outcome.phase === 'rolled-back'
+            ? {
               ...status,
               phase: outcome.phase,
               rollbackTransitionId: outcome.transitionId,
               rollbackTransitionReceiptDigest: outcome.transitionReceiptDigest,
               updatedAt: event.at,
-            })
+            }
+            : {
+                ...status,
+                phase: outcome.phase,
+                recoveredTransitionId: outcome.transitionId,
+                recoveredTransitionReceiptDigest: outcome.transitionReceiptDigest,
+                updatedAt: event.at,
+              })
       return
     }
     if (event.type === 'learning-analysis-failed') {

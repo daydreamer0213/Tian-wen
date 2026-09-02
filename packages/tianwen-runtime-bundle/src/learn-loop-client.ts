@@ -297,7 +297,7 @@ function isCanonicalIsoTimestamp(value: unknown): value is string {
 const auditPhases = new Set([
   'pending-parent', 'running', 'no-case', 'insufficient-evidence', 'candidate-ready',
   'protocol-unavailable', 'candidate-rejected', 'shadow-ready', 'promoted',
-  'rolled-back', 'invalidated', 'failed',
+  'rolled-back', 'transition-recovered', 'invalidated', 'failed',
 ])
 const digestPattern = /^sha256:[a-f0-9]{64}$/
 
@@ -318,6 +318,7 @@ function isLearningAudit(value: unknown): value is LearningAudit {
       'candidateId', 'evaluationId', 'evaluationResultDigest', 'shadowId', 'shadowResultDigest',
       'promotionRecommendationDigest', 'promotionTransitionId', 'promotionTransitionReceiptDigest',
       'rollbackTransitionId', 'rollbackTransitionReceiptDigest', 'reportDigest', 'reportState',
+      'recoveredTransitionId', 'recoveredTransitionReceiptDigest',
     ]
     if (Object.keys(item.receipts).some(key => !receiptKeys.includes(key)) ||
       Object.values(item.receipts).some(receipt => typeof receipt !== 'string' || receipt.length === 0) ||

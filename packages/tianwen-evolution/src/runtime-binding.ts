@@ -781,6 +781,14 @@ export class TianwenEvolutionService extends Service {
       this.state().ledger.recordLearningAnalysisRolledBack(input))
   }
 
+  recordLearningAnalysisTransitionRecovered(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly transitionId: ControlledSkillTransitionId
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisTransitionRecovered(input))
+  }
+
   getSkillCandidate(
     candidateId: GovernedSkillCandidateId,
   ): GovernedSkillCandidate | undefined {

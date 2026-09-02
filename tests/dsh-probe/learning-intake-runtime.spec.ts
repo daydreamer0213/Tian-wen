@@ -416,6 +416,39 @@ describe('Tianwen runtime learning intake', () => {
     }
   })
 
+  it('absorbs async loop scheduling failures after the intake is durable', async () => {
+    const mounted = await mountCompletedSessions()
+    const [handle] = mounted.handles
+    try {
+      const session = handle!.agent.session
+      const messageId = String(finalAssistant(session.events).data.message.id)
+      mounted.harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({
+        revision: 1,
+        enabled: true,
+        policyVersion: 'tianwen-auto-analysis.v1',
+      })
+      const rejected = Promise.reject(new Error('injected async scheduling failure'))
+      void rejected.catch(() => undefined)
+      const catchFailure = vi.spyOn(rejected, 'catch')
+      const schedule = vi.fn(() => rejected)
+      mounted.harness.ctx.provide('tianwenLearningLoop', { schedule } as never)
+
+      expect(() => mounted.harness.ctx.tianwenLearningIntake.consume(
+        session,
+        'project:tianwen/capability:research-summary',
+        {
+          ...feedback(messageId),
+          analysisConsentRevision: 1,
+        },
+      )).not.toThrow()
+      await new Promise(resolveTurn => setImmediate(resolveTurn))
+      expect(schedule).toHaveBeenCalledOnce()
+      expect(catchFailure).toHaveBeenCalledOnce()
+    } finally {
+      await disposeMounted(mounted)
+    }
+  })
+
   it('leaves the Session byte-for-byte unchanged when the ledger write fails', async () => {
     const mounted = await mountCompletedSessions()
     const [handle] = mounted.handles

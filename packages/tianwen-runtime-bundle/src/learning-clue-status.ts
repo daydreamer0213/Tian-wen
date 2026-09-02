@@ -19,6 +19,8 @@ export interface LearningAuditItem {
     readonly promotionTransitionReceiptDigest?: string
     readonly rollbackTransitionId?: string
     readonly rollbackTransitionReceiptDigest?: string
+    readonly recoveredTransitionId?: string
+    readonly recoveredTransitionReceiptDigest?: string
     readonly reportDigest?: string
     readonly reportState?: 'pending' | 'delivered'
   }
@@ -42,6 +44,8 @@ function receipts(status: LearningAnalysisStatus): LearningAuditItem['receipts']
     ...(status.promotionTransitionReceiptDigest === undefined ? {} : { promotionTransitionReceiptDigest: status.promotionTransitionReceiptDigest }),
     ...(status.rollbackTransitionId === undefined ? {} : { rollbackTransitionId: status.rollbackTransitionId }),
     ...(status.rollbackTransitionReceiptDigest === undefined ? {} : { rollbackTransitionReceiptDigest: status.rollbackTransitionReceiptDigest }),
+    ...(status.recoveredTransitionId === undefined ? {} : { recoveredTransitionId: status.recoveredTransitionId }),
+    ...(status.recoveredTransitionReceiptDigest === undefined ? {} : { recoveredTransitionReceiptDigest: status.recoveredTransitionReceiptDigest }),
     ...(status.reportDelivery === undefined ? {} : {
       reportDigest: status.reportDelivery.reportDigest,
       reportState: status.reportDelivery.state,
