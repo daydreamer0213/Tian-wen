@@ -6984,7 +6984,8 @@ export class EvolutionLedger {
       const status = this.#learningAnalyses.get(event.analysisId)
       if (
         status === undefined
-        || this.#learningAnalysisHasActiveSupport(status)
+        || (this.#learningAnalysisConsent?.enabled === true
+          && this.#learningAnalysisHasActiveSupport(status))
         || status.phase === 'invalidated'
         || status.phase === 'promoted'
         || status.phase === 'rolled-back'

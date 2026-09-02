@@ -50,8 +50,11 @@ vi.mock('node:fs', async importOriginal => {
 })
 
 import {
+  Context,
   DynamicCordisRunnerService,
+  SESSION_FORMAT_VERSION,
   ScriptedAdapter,
+  Session,
   SessionId,
   SkillRegistry,
   applySkillTool,
@@ -60,10 +63,11 @@ import {
   textResponse,
   toolCallResponse,
 } from '@tianwen/dsh-compat'
-import type { StreamChunk } from '@tianwen/dsh-compat'
+import type { MessageFeedbackItem, StreamChunk } from '@tianwen/dsh-compat'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   LedgerCommitUnknownError,
+  learningSessionLifecycleFingerprint,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
@@ -75,11 +79,11 @@ import {
   TianwenLearningLoopService,
   createExplicitCorrectionLearningLoopExecutor,
 } from '../../packages/tianwen-runtime-bundle/src/learning-loop-orchestrator.js'
+import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
 
 const roots: string[] = []
 const provider = 'tianwen-controlled-scripted'
 const model = 'scripted'
-const lifecycle = `sha256:${'a'.repeat(64)}` as const
 const evidenceA = `sha256:${'1'.repeat(64)}` as const
 const evidenceB = `sha256:${'2'.repeat(64)}` as const
 
@@ -219,6 +223,97 @@ async function mountControlledRuntime(
   }
 }
 
+function feedbackSession(id: string, messageId: string, createdAt: number): Session {
+  const sessionId = SessionId(id)
+  const session = Session.create(sessionId, [], {
+    version: SESSION_FORMAT_VERSION,
+    id: sessionId,
+    createdAt,
+  })
+  session.append('assistant/message', {
+    turn: 1,
+    message: {
+      id: messageId as never,
+      role: 'assistant',
+      content: [{ type: 'text', text: 'controlled answer' }],
+      source: { kind: 'model', provider: 'test-provider', model: 'test-model' },
+    },
+  }, { surfaceOp: 'append' })
+  return session
+}
+
+class FeedbackBridgeCatalogs {
+  readonly sessions = new Map<string, Session>()
+  readonly rows = new Map<string, readonly MessageFeedbackItem[]>()
+
+  readonly persistence = {
+    list: async () => [],
+    inspect: async (id: ReturnType<typeof SessionId>) => {
+      const session = this.sessions.get(String(id))
+      if (session === undefined) throw new Error('feedback bridge Session is unavailable')
+      return { meta: session.header, events: session.events }
+    },
+  }
+
+  readonly feedback = {
+    list: async (request: { readonly sessionId: ReturnType<typeof SessionId> }) => ({
+      ok: true as const,
+      value: { items: structuredClone(this.rows.get(String(request.sessionId)) ?? []) },
+    }),
+  }
+}
+
+function feedbackItem(input: {
+  readonly messageId: string
+  readonly version: string
+  readonly note: string
+  readonly updatedAt: number
+}): MessageFeedbackItem {
+  return {
+    messageId: input.messageId as never,
+    rating: 'negative',
+    note: input.note,
+    version: input.version as never,
+    createdAt: input.updatedAt,
+    updatedAt: input.updatedAt,
+  }
+}
+
+async function mountFeedbackBridge(
+  source: Awaited<ReturnType<typeof mountControlledRuntime>>['harness'],
+  loop: { readonly schedule: (analysisId: string) => Promise<void> },
+  catalogs: FeedbackBridgeCatalogs,
+) {
+  const ctx = new Context()
+  const evolution = source.ctx.tianwenEvolution
+  ctx.provide('sessionPersistence', catalogs.persistence as never)
+  ctx.provide('messageFeedback', catalogs.feedback as never)
+  ctx.provide('tianwenLearningIntake', {
+    consume: (...args: Parameters<typeof source.ctx.tianwenLearningIntake.consume>) =>
+      source.ctx.tianwenLearningIntake.consume(...args),
+  } as never)
+  ctx.provide('tianwenEvolution', {
+    listLearningIntakeStatuses: (...args: Parameters<typeof evolution.listLearningIntakeStatuses>) =>
+      evolution.listLearningIntakeStatuses(...args),
+    getLearningIntakeStatus: (...args: Parameters<typeof evolution.getLearningIntakeStatus>) =>
+      evolution.getLearningIntakeStatus(...args),
+    getLearningAnalysisConsentBefore: (...args: Parameters<typeof evolution.getLearningAnalysisConsentBefore>) =>
+      evolution.getLearningAnalysisConsentBefore(...args),
+    recordLearningFeedbackRetraction: (...args: Parameters<typeof evolution.recordLearningFeedbackRetraction>) =>
+      evolution.recordLearningFeedbackRetraction(...args),
+    listLearningAnalyses: (...args: Parameters<typeof evolution.listLearningAnalyses>) =>
+      evolution.listLearningAnalyses(...args),
+    getRunBindingBySessionId: (...args: Parameters<typeof evolution.getRunBindingBySessionId>) =>
+      evolution.getRunBindingBySessionId(...args),
+  } as never)
+  ctx.provide('tianwenLearningLoop', {
+    schedule: (analysisId: string) => loop.schedule(analysisId),
+  } as never)
+  const fiber = ctx.plugin(TianwenMessageFeedbackBridgeService)
+  await fiber
+  return { ctx, bridge: ctx.tianwenMessageFeedbackBridge }
+}
+
 afterEach(() => {
   appendFault.mode = 'none'
   appendFault.eventType = ''
@@ -233,6 +328,19 @@ describe('explicit-correction controlled learning-loop executor', () => {
       previousProbeRoot ?? 'D:/DevData/tianwen-dsh-probe',
     )
     const fixtureRoot = root('real-path')
+    const feedbackCatalogs = new FeedbackBridgeCatalogs()
+    const mainFeedbackSession = feedbackSession('main-session', 'assistant-message', 1)
+    const independentFeedbackSession = feedbackSession('independent-session', 'independent-message', 2)
+    feedbackCatalogs.sessions.set(String(mainFeedbackSession.id), mainFeedbackSession)
+    feedbackCatalogs.sessions.set(String(independentFeedbackSession.id), independentFeedbackSession)
+    const lifecycle = learningSessionLifecycleFingerprint({
+      sessionId: String(mainFeedbackSession.id),
+      createdAt: mainFeedbackSession.header.createdAt,
+    })
+    const independentLifecycle = learningSessionLifecycleFingerprint({
+      sessionId: String(independentFeedbackSession.id),
+      createdAt: independentFeedbackSession.header.createdAt,
+    })
     let mounted = await mountControlledRuntime(fixtureRoot, successfulControlledScript())
     let { harness, adapter, selection } = mounted
     try {
@@ -244,7 +352,13 @@ describe('explicit-correction controlled learning-loop executor', () => {
       const currentManifest = harness.ctx.tianwenEvolution.recordRunSkillManifest({
         runId: current.runId, skill: protocol.parentSkill,
       })
-      harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({
+      harness.ctx.tianwenEvolution.recordRunBinding({
+        goalRef: 'goal:independent-support', taskRef: 'task:independent-support',
+        sessionId: 'independent-session', scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+        acceptanceContract: protocol.acceptance,
+        sessionLifecycleFingerprint: independentLifecycle,
+      })
+      const consent = harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({
         revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v1',
       })
       const intake = harness.ctx.tianwenEvolution.recordLearningFeedbackRevision({
@@ -256,6 +370,11 @@ describe('explicit-correction controlled learning-loop executor', () => {
         },
         sessionLifecycleFingerprint: lifecycle, analysisConsentRevision: 1,
       })
+      const feedbackUpdatedAt = Date.parse(consent.recordedAt) + 1
+      feedbackCatalogs.rows.set(String(mainFeedbackSession.id), [feedbackItem({
+        messageId: 'assistant-message', version: 'feedback-v1',
+        note: 'Preserve the verified result in the answer.', updatedAt: feedbackUpdatedAt,
+      })])
       const requested = harness.ctx.tianwenEvolution.requestLearningAnalysis({
         ticketId: intake.ticketId!, sessionId: 'main-session', messageId: 'assistant-message',
         feedbackVersion: 'feedback-v1', consentRevision: 1, parentSessionId: 'main-session',
@@ -503,61 +622,75 @@ describe('explicit-correction controlled learning-loop executor', () => {
         && JSON.stringify(event.data.content).includes('候选 Skill 已通过验证')))
         .toHaveLength(1)
 
-      const independent = harness.ctx.tianwenEvolution.recordLearningFeedbackRevision({
-        intake: {
-          sessionId: 'independent-session', messageId: 'independent-message',
-          feedbackVersion: 'independent-v1', rating: 'negative',
-          note: 'PRESERVE THE VERIFIED RESULT IN THE ANSWER.',
-          scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
-          sessionDigest: `sha256:${'3'.repeat(64)}`,
-          evidenceIds: [`sha256:${'4'.repeat(64)}`],
-        },
-        sessionLifecycleFingerprint: `sha256:${'b'.repeat(64)}`,
-        analysisConsentRevision: 1,
-      })
+      let learningLoop = new TianwenLearningLoopService(harness.ctx, { executor })
+      let schedule = vi.spyOn(learningLoop, 'schedule')
+      let feedbackBridge = await mountFeedbackBridge(harness, learningLoop, feedbackCatalogs)
+      feedbackCatalogs.rows.set(String(independentFeedbackSession.id), [feedbackItem({
+        messageId: 'independent-message', version: 'independent-v1',
+        note: 'PRESERVE THE VERIFIED RESULT IN THE ANSWER.', updatedAt: feedbackUpdatedAt,
+      })])
+      const independentReconciliation = await feedbackBridge.bridge
+        .reconcileSession(String(independentFeedbackSession.id))
+      expect(independentReconciliation).toMatchObject({ state: 'reconciled' })
+      await Promise.allSettled(schedule.mock.results.map(result => result.value))
+      const independent = harness.ctx.tianwenEvolution
+        .getLearningIntakeStatus('independent-session', 'independent-message')!
       expect(independent.ticketId).toBe(intake.ticketId)
-      harness.ctx.tianwenEvolution.recordLearningFeedbackRetraction({
-        sessionId: 'main-session', messageId: 'assistant-message',
-        retractedFeedbackVersion: 'feedback-v1', sessionLifecycleFingerprint: lifecycle,
-      })
+
+      feedbackCatalogs.rows.set(String(mainFeedbackSession.id), [])
+      schedule.mockClear()
+      await feedbackBridge.bridge.reconcileSession(String(mainFeedbackSession.id))
+      await Promise.allSettled(schedule.mock.results.map(result => result.value))
       expect(harness.ctx.tianwenEvolution.hasLearningAnalysisActiveSupport(requested.analysisId)).toBe(true)
-      const service = new TianwenLearningLoopService(harness.ctx, { executor })
-      await service.schedule(requested.analysisId)
       expect(harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)?.phase).toBe('promoted')
       expect(harness.ctx.tianwenEvolution.listControlledSkillTransitions())
         .toHaveLength(transitionsAfterVerifiedPromotion)
 
-      harness.ctx.tianwenEvolution.recordLearningFeedbackRetraction({
-        sessionId: 'independent-session', messageId: 'independent-message',
-        retractedFeedbackVersion: 'independent-v1',
-        sessionLifecycleFingerprint: `sha256:${'b'.repeat(64)}`,
-      })
       appendFault.mode = 'before-write'
       appendFault.eventType = 'learning-analysis-governed-outcome-recorded'
       appendFault.phase = 'rolled-back'
-      await expect(executor.rollback(context())).rejects.toMatchObject({
-        name: LedgerCommitUnknownError.name,
+      feedbackCatalogs.rows.set(String(independentFeedbackSession.id), [])
+      schedule.mockClear()
+      await feedbackBridge.bridge.reconcileSession(String(independentFeedbackSession.id))
+      await Promise.allSettled(schedule.mock.results.map(result => result.value))
+      expect(harness.ctx.tianwenEvolution.hasLearningAnalysisActiveSupport(requested.analysisId)).toBe(false)
+      expect(schedule).toHaveBeenCalledWith(requested.analysisId)
+      await vi.waitFor(() => expect(harness.ctx.tianwenEvolution.blocked).toBe(true), {
+        timeout: 10_000,
       })
-      expect(harness.ctx.tianwenEvolution.blocked).toBe(true)
+      expect(harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId))
+        .toMatchObject({ phase: 'promoted' })
       const requestsAfterVerifiedRollback = adapter.requests.length
+      await feedbackBridge.ctx.fiber.dispose()
 
       await mounted.dispose()
       mounted = await mountControlledRuntime(fixtureRoot, [])
       ;({ harness, adapter, selection } = mounted)
       executor = makeExecutor()
-      await executor.rollback(context())
-      expect(adapter.requests).toHaveLength(0)
-      expect(harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)?.phase).toBe('rolled-back')
-      expect(harness.ctx.tianwenEvolution.getControlledSkillScopePointer(promotedShadow.scopeKey)?.activeVersionId)
-        .toBe(currentManifest.parentVersionId)
-      expect(requestsAfterVerifiedRollback).toBe(3)
-
       await harness.ctx.plugin(SubagentRuntime)
       harness.ctx.subagents.registerProvider(nativeProvider)
+      let releaseRollbackChild!: () => void
+      const rollbackChildGate = new Promise<void>(resolveGate => {
+        releaseRollbackChild = resolveGate
+      })
+      const disposeRollbackChildGate = harness.ctx.tools.register(defineTool({
+        name: 'rollback_report_gate',
+        description: 'Keep the native learning child resident until the rollback report is delivered.',
+        parameters: {},
+        output: {
+          schema: { type: 'string' },
+          render: (_args, value) => [{ type: 'text', text: value }],
+        },
+        async execute() {
+          await rollbackChildGate
+          return 'rollback report delivered'
+        },
+      }))
       harness.ctx.llm.registerAdapter(['terminal-parent'], new ScriptedAdapter([
         textResponse('parent received the rollback report'),
       ]))
       harness.ctx.llm.registerAdapter(['terminal-child'], new ScriptedAdapter([
+        toolCallResponse('rollback-report-gate-call', 'rollback_report_gate', {}),
         textResponse('child resumed for its rollback report'),
       ]))
       const rollbackParent = (await harness.ctx.agents.resume({
@@ -573,7 +706,8 @@ describe('explicit-correction controlled learning-loop executor', () => {
           signal: AbortSignal.timeout(10_000),
         },
       )
-      await harness.ctx.agents.get(SessionId(requested.childSessionId))!.whenIdle()
+      await vi.waitFor(() => expect(harness.ctx.agents.get(SessionId(requested.childSessionId))
+        ?.session.events.some(event => event.type === 'tool/call')).toBe(true))
       deliverTerminalReport = async ({ context: reportContext, text }: {
         readonly context: ReturnType<typeof context>
         readonly text: string
@@ -584,18 +718,36 @@ describe('explicit-correction controlled learning-loop executor', () => {
         }))
       }
       executor = makeExecutor()
-      await executor.report(context())
+      learningLoop = new TianwenLearningLoopService(harness.ctx, { executor })
+      schedule = vi.spyOn(learningLoop, 'schedule')
+      feedbackBridge = await mountFeedbackBridge(harness, learningLoop, feedbackCatalogs)
+      try {
+        await feedbackBridge.bridge.reconcileSession(String(independentFeedbackSession.id))
+        const replaySchedules = await Promise.allSettled(schedule.mock.results.map(result => result.value))
+        expect(replaySchedules.filter(result => result.status === 'rejected')).toEqual([])
+      } finally {
+        releaseRollbackChild()
+        disposeRollbackChildGate()
+        await feedbackBridge.ctx.fiber.dispose()
+      }
+      expect(adapter.requests).toHaveLength(0)
+      expect(harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)?.phase).toBe('rolled-back')
+      expect(harness.ctx.tianwenEvolution.getControlledSkillScopePointer(promotedShadow.scopeKey)?.activeVersionId)
+        .toBe(currentManifest.parentVersionId)
+      expect(requestsAfterVerifiedRollback).toBe(3)
       await rollbackParent.whenIdle()
       expect(await harness.ctx.sessions.flush(rollbackParent.session)).toBe(true)
+      const reportedRollback = harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)!
+      expect(reportedRollback).toMatchObject({
+        phase: 'rolled-back', terminalReportDelivery: { state: 'delivered' },
+      })
+      expect(reportedRollback.terminalReportHistory).toHaveLength(1)
       const afterRollbackReport = await harness.ctx.sessionPersistence.inspect(rollbackParent.session.id)
       expect(afterRollbackReport.events.filter(event =>
         event.type === 'user/message'
         && event.data.source?.kind === 'subagent-report'
         && JSON.stringify(event.data.content).includes('支持已撤回')))
         .toHaveLength(1)
-      const reportedRollback = harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)!
-      expect(reportedRollback.terminalReportDelivery).toMatchObject({ state: 'delivered' })
-      expect(reportedRollback.terminalReportHistory).toHaveLength(1)
 
       await mounted.dispose()
       mounted = await mountControlledRuntime(fixtureRoot, [])

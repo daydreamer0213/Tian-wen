@@ -78,6 +78,19 @@ function isFeedbackTarget(
   })
 }
 
+function needsLearningLoopWake(
+  analysis: ReturnType<Context['tianwenEvolution']['listLearningAnalyses']>[number],
+): boolean {
+  if (analysis.phase === 'rolled-back') {
+    return analysis.terminalReportHistory?.length !== 1
+      || analysis.terminalReportDelivery?.state !== 'delivered'
+  }
+  return analysis.phase === 'promoted'
+    || analysis.phase === 'failed'
+    || (analysis.phase !== 'invalidated'
+      && analysis.terminalReportDelivery?.state !== 'delivered')
+}
+
 export class TianwenMessageFeedbackBridgeService extends Service {
   static inject = [
     'messageFeedback',
@@ -289,6 +302,8 @@ export class TianwenMessageFeedbackBridgeService extends Service {
 
     const statuses = this.ctx.tianwenEvolution
       .listLearningIntakeStatuses(sessionId)
+    const affectedTicketIds = new Set([...existingStatuses, ...statuses]
+      .flatMap(status => status.ticketId === undefined ? [] : [status.ticketId]))
     // Reconciliation owns only the wake-up.  The loop owns invalidation and
     // verified rollback, including promoted analyses that the ledger leaves
     // intact until a controlled rollback can restore their parent pointer.
@@ -297,7 +312,10 @@ export class TianwenMessageFeedbackBridgeService extends Service {
     } | undefined
     if (loop !== undefined) {
       for (const analysis of this.ctx.tianwenEvolution.listLearningAnalyses()) {
-        if (analysis.sessionId === sessionId) void loop.schedule(analysis.analysisId).catch(() => undefined)
+        if (needsLearningLoopWake(analysis)
+          && (analysis.sessionId === sessionId || affectedTicketIds.has(analysis.ticketId))) {
+          void loop.schedule(analysis.analysisId).catch(() => undefined)
+        }
       }
     }
     return {

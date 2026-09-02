@@ -281,6 +281,131 @@ afterEach(() => {
 })
 
 describe('Tianwen DSH Message Feedback bridge', () => {
+  it('wakes only analyses for the exact changed Tickets while preserving the same-Session fallback', async () => {
+    const root = evolutionRoot('ticket-analysis-wake')
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const first = completedSession('ticket-wake-a', ['message-a'], 'D:/private/shared')
+    const second = completedSession('ticket-wake-b', ['message-b'], 'D:/private/shared')
+    const noTicket = completedSession('ticket-wake-no-ticket', ['message-positive'], 'D:/private/other')
+    sessions.add(first)
+    sessions.add(second)
+    sessions.add(noTicket)
+    sessions.listed = []
+    const mounted = await mountBridge(root, sessions, feedback)
+    const consent = mounted.ctx.tianwenEvolution.recordLearningAnalysisConsent({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    const updatedAt = Date.parse(consent.recordedAt) + 1
+    feedback.set(String(first.id), [item({
+      messageId: 'message-a', version: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      note: 'Keep the verified result concrete.', updatedAt,
+    })])
+    await mounted.bridge.reconcileSession(String(first.id))
+    const firstStatus = mounted.ctx.tianwenEvolution
+      .getLearningIntakeStatus(String(first.id), 'message-a')!
+    const requested = mounted.ctx.tianwenEvolution.requestLearningAnalysis({
+      ticketId: firstStatus.ticketId!, sessionId: String(first.id), messageId: 'message-a',
+      feedbackVersion: firstStatus.feedbackVersion, consentRevision: 1,
+      parentSessionId: String(first.id),
+    })
+    const unrelatedTicketId = `ticket:${'f'.repeat(64)}` as const
+    const promoted = { ...requested, phase: 'promoted' as const }
+    const unrelated = {
+      ...requested,
+      analysisId: `analysis:${'e'.repeat(64)}` as const,
+      ticketId: unrelatedTicketId,
+      sessionId: String(noTicket.id),
+      parentSessionId: String(noTicket.id),
+      phase: 'promoted' as const,
+    }
+    const priorDelivery = {
+      analysisId: `analysis:${'d'.repeat(64)}` as const,
+      parentSessionId: requested.parentSessionId,
+      childSessionId: requested.childSessionId,
+      reportDigest: `sha256:${'1'.repeat(64)}` as const,
+      state: 'delivered' as const,
+      intentRecordedAt: '2026-09-02T00:00:00.000Z',
+      deliveredAt: '2026-09-02T00:00:00.001Z',
+      reportMessageId: 'promoted-report',
+    }
+    const rolledBackWithoutOutcomeReport = {
+      ...requested,
+      analysisId: priorDelivery.analysisId,
+      phase: 'rolled-back' as const,
+      terminalReportDelivery: priorDelivery,
+    }
+    const rolledBackWithOutcomeReport = {
+      ...rolledBackWithoutOutcomeReport,
+      analysisId: `analysis:${'c'.repeat(64)}` as const,
+      terminalReportHistory: [priorDelivery],
+      terminalReportDelivery: {
+        ...priorDelivery,
+        analysisId: `analysis:${'c'.repeat(64)}` as const,
+        reportDigest: `sha256:${'2'.repeat(64)}` as const,
+        reportMessageId: 'rollback-report',
+      },
+    }
+    const analyses = [promoted, unrelated, rolledBackWithoutOutcomeReport, rolledBackWithOutcomeReport]
+    vi.spyOn(mounted.ctx.tianwenEvolution, 'listLearningAnalyses')
+      .mockReturnValue(analyses as never)
+    const schedule = vi.fn(async (_analysisId: string) => undefined)
+    mounted.ctx.provide('tianwenLearningLoop', { schedule } as never)
+
+    try {
+      feedback.set(String(second.id), [item({
+        messageId: 'message-b', version: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        note: 'KEEP THE VERIFIED RESULT CONCRETE.', updatedAt,
+      })])
+      await mounted.bridge.reconcileSession(String(second.id))
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledWith(requested.analysisId))
+      expect(schedule).toHaveBeenCalledWith(rolledBackWithoutOutcomeReport.analysisId)
+      expect(schedule).not.toHaveBeenCalledWith(rolledBackWithOutcomeReport.analysisId)
+      expect(schedule).not.toHaveBeenCalledWith(unrelated.analysisId)
+      expect(mounted.ctx.tianwenEvolution
+        .getLearningIntakeStatus(String(second.id), 'message-b')?.ticketId)
+        .toBe(firstStatus.ticketId)
+
+      schedule.mockClear()
+      feedback.set(String(second.id), [item({
+        messageId: 'message-b', version: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        note: 'Keep the verified result concrete.', updatedAt: updatedAt + 1,
+      })])
+      await mounted.bridge.reconcileSession(String(second.id))
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledWith(requested.analysisId))
+      expect(schedule).not.toHaveBeenCalledWith(unrelated.analysisId)
+
+      schedule.mockClear()
+      feedback.set(String(first.id), [])
+      await mounted.bridge.reconcileSession(String(first.id))
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledWith(requested.analysisId))
+      expect(schedule).not.toHaveBeenCalledWith(unrelated.analysisId)
+      expect(mounted.ctx.tianwenEvolution.hasLearningAnalysisActiveSupport(requested.analysisId))
+        .toBe(true)
+
+      schedule.mockClear()
+      feedback.set(String(second.id), [])
+      await mounted.bridge.reconcileSession(String(second.id))
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledWith(requested.analysisId))
+      expect(schedule).not.toHaveBeenCalledWith(unrelated.analysisId)
+      expect(mounted.ctx.tianwenEvolution.hasLearningAnalysisActiveSupport(requested.analysisId))
+        .toBe(false)
+
+      schedule.mockClear()
+      feedback.set(String(noTicket.id), [item({
+        messageId: 'message-positive', version: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        rating: 'positive', updatedAt,
+      })])
+      await mounted.bridge.reconcileSession(String(noTicket.id))
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce())
+      expect(schedule).toHaveBeenLastCalledWith(unrelated.analysisId)
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
   it('reconciles two messages, exact replay, supersession, and retraction from durable domain changes', async () => {
     const root = evolutionRoot('lifecycle')
     const sessions = new SessionCatalog()
