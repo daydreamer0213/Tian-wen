@@ -412,8 +412,22 @@ describe.skipIf(!enabled).sequential('Learn Loop assembled Web product', () => {
       }, 'the Web page')
       const clientGraphIds = parseClientGraph(html).entries.map(entry => entry.id)
       expect(clientGraphIds).toContain('@tianwen/runtime-bundle')
+      expect(clientGraphIds).toContain('@deepseek-ai/dsh-client-ui-message-feedback')
       expect(await fetch(`${origin}/plugins/@tianwen/runtime-bundle/client.js`)
         .then(response => response.ok)).toBe(true)
+
+      for (const [endpoint, payload] of [
+        [['feedback', 'status'].join('-'), { longGoalId: 'removed-goal-feedback' }],
+        [['record', 'task', 'feedback'].join('-'), {
+          longGoalId: 'removed-goal-feedback', taskId: 'task-1',
+          rating: 'negative', note: 'must stay native',
+        }],
+      ] as const) {
+        await expect(callConnectionRpc(origin, endpoint, payload)).resolves.toEqual({
+          ok: false,
+          error: { code: 'internal', message: 'invalid-request', details: {} },
+        })
+      }
 
       const workspaceSession = unwrap(await callConnectionRpc<{
         readonly sessionId: string

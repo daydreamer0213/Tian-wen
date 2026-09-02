@@ -86,15 +86,6 @@ import {
 import type { DurableProgressFact } from './long-goal-liveness.js'
 import { readSettledTaskResult } from './settled-task-result.js'
 import {
-  readGoalTaskFeedbackStatus,
-  recordGoalTaskFeedback,
-} from './goal-task-feedback.js'
-import type {
-  GoalTaskFeedbackDependencies,
-  GoalTaskFeedbackRecordResult,
-  GoalTaskFeedbackStatus,
-} from './goal-task-feedback.js'
-import {
   projectLearningClueStatus,
   type LearningClueItem,
   type LearningClueStatus,
@@ -747,18 +738,6 @@ function requireLegacyV2GoalFirstProgress(result: GoalFirstProgressResult): Goal
   }
 }
 
-export interface TianwenGoalTaskFeedbackOperations {
-  readonly status: (input: {
-    readonly longGoalId: string
-  }) => Promise<GoalTaskFeedbackStatus>
-  readonly record: (input: {
-    readonly longGoalId: string
-    readonly taskId: string
-    readonly rating: 'positive' | 'negative'
-    readonly note: string | null
-  }) => Promise<GoalTaskFeedbackRecordResult>
-}
-
 export interface TianwenLearningClueOperations {
   readonly status: () => Promise<LearningClueStatus>
   readonly analyze: (input: {
@@ -1325,7 +1304,6 @@ export function createTianwenLongGoalRpcHandler(
   },
   runDependencies?: TianwenLongGoalRunDependencies,
   goalFirstOperations?: TianwenGoalFirstOperations,
-  taskFeedbackOperations?: TianwenGoalTaskFeedbackOperations,
   learningClueOperations?: TianwenLearningClueOperations,
 ): ConnectionRpcHandler {
   const readStatus = async (longGoalId: string): Promise<AnyLongGoalStatusProjection> =>
@@ -1476,39 +1454,6 @@ export function createTianwenLongGoalRpcHandler(
       }))
     }
     if (
-      endpoint === 'feedback-status' &&
-      taskFeedbackOperations !== undefined &&
-      isRecord(payload) &&
-      hasExactKeys(payload, ['longGoalId']) &&
-      isNonEmptyString(payload.longGoalId)
-    ) {
-      return {
-        ok: true,
-        value: await taskFeedbackOperations.status({ longGoalId: payload.longGoalId }),
-      }
-    }
-    if (
-      endpoint === 'record-task-feedback' &&
-      taskFeedbackOperations !== undefined &&
-      isRecord(payload) &&
-      hasExactKeys(payload, ['longGoalId', 'taskId', 'rating', 'note']) &&
-      isNonEmptyString(payload.longGoalId) &&
-      isNonEmptyString(payload.taskId) &&
-      (payload.rating === 'positive' || payload.rating === 'negative') &&
-      isNullableNonEmptyString(payload.note) &&
-      (payload.rating === 'negative' || payload.note === null)
-    ) {
-      return {
-        ok: true,
-        value: await taskFeedbackOperations.record({
-          longGoalId: payload.longGoalId,
-          taskId: payload.taskId,
-          rating: payload.rating,
-          note: payload.note,
-        }),
-      }
-    }
-    if (
       endpoint === 'learning-clues' &&
       learningClueOperations !== undefined &&
       isRecord(payload) &&
@@ -1655,7 +1600,6 @@ type LearningClueSnapshot = {
   readonly goals: readonly {
     readonly record: AnyLongGoalRecord
     readonly status: AnyLongGoalStatusProjection
-    readonly feedback: GoalTaskFeedbackStatus
   }[]
   readonly status: LearningClueStatus
 }
@@ -2801,43 +2745,6 @@ export function mountTianwenLongGoalHost(
         yield disposeContinuousGoalHost
       })
     }
-    const taskFeedbackDependencies: GoalTaskFeedbackDependencies = {
-      readLongGoal,
-      readLongGoalStatus,
-      awaitSessionIdle: async sessionId => {
-        await injected.agents.get(SessionId(sessionId))?.whenIdle()
-      },
-      openSession: async sessionId => {
-        const live = injected.agents.get(SessionId(sessionId))
-        if (live !== undefined) {
-          if (!await injected.sessions.flush(live.session)) {
-            throw new Error('Session persistence is unavailable')
-          }
-          return { session: live.session, release: () => undefined }
-        }
-        const preparation = await host.sessionPersistence.prepare(SessionId(sessionId))
-        return {
-          session: preparation.session,
-          release: () => preparation[Symbol.dispose](),
-        }
-      },
-      consume: (session, scopeKey, feedback) =>
-        host.tianwenLearningIntake.consume(session, scopeKey, feedback),
-      getLearningIntakeStatus: (sessionId, messageId) =>
-        host.tianwenEvolution.getLearningIntakeStatus(sessionId, messageId),
-    }
-    const taskFeedbackOperations: TianwenGoalTaskFeedbackOperations = {
-      status: input => readGoalTaskFeedbackStatus({
-        stateRoot: roots.stateRoot,
-        dshStatusTarget,
-        ...input,
-      }, taskFeedbackDependencies),
-      record: input => recordGoalTaskFeedback({
-        stateRoot: roots.stateRoot,
-        dshStatusTarget,
-        ...input,
-      }, taskFeedbackDependencies),
-    }
     const openAnalysisSession = async (sessionId: string): Promise<{
       readonly session: Session
       readonly release: () => void
@@ -2849,19 +2756,28 @@ export function mountTianwenLongGoalHost(
     }
     const clueSnapshot = async () => {
       const records = listLongGoals(roots.stateRoot)
-      const goals = await Promise.all(records.map(async record => ({
-        record,
-        status: await readLongGoalStatus({
+      const goals = await Promise.all(records.map(async record => {
+        const status = await readLongGoalStatus({
           stateRoot: roots.stateRoot,
           longGoalId: record.id,
           dshStatusTarget,
-        }),
-        feedback: await taskFeedbackOperations.status({ longGoalId: record.id }),
-      })))
+        })
+        const sessionIds = new Set(status.schemaVersion === 'tianwen.long-goal-status.v1'
+          ? []
+          : status.tasks.flatMap(task => task.execution === null
+            ? []
+            : [task.execution.sessionId]))
+        return {
+          record,
+          status,
+          intakeStatuses: [...sessionIds].flatMap(sessionId =>
+            host.tianwenEvolution.listLearningIntakeStatuses(sessionId)),
+        }
+      }))
       return {
         goals,
         status: projectLearningClueStatus({
-          goals: goals.map(({ status, feedback }) => ({ status, feedback })),
+          goals: goals.map(({ status, intakeStatuses }) => ({ status, intakeStatuses })),
           tickets: host.tianwenEvolution.listLearningTickets(),
         }),
       }
@@ -2896,7 +2812,6 @@ export function mountTianwenLongGoalHost(
       undefined,
       runDependencies,
       goalFirstOperations,
-      taskFeedbackOperations,
       learningClueOperations,
     ), {
       authority: 'loopback',

@@ -7,7 +7,6 @@ import type {
   LongGoalStatusProjectionV2,
 } from './long-goal-contract.js'
 import { createLearnLoopClient, LearnLoopRpcError } from './learn-loop-client.js'
-import type { GoalTaskFeedbackItem } from './goal-task-feedback.js'
 import type { LearningClueItem } from './learning-clue-status.js'
 
 type View = 'closed' | 'list' | 'create' | 'detail' | 'clues'
@@ -68,14 +67,6 @@ const zhMessages = {
   'action.start': '开始任务',
   'action.continue': '继续任务',
   'action.openSession': '打开会话',
-  'feedback.positive': '有帮助',
-  'feedback.negative': '需要改进',
-  'feedback.note': '具体哪里需要改进？（可选）',
-  'feedback.submit': '记录反馈',
-  'feedback.cancel': '取消',
-  'feedback.noCase': '已记录为有效结果',
-  'feedback.observedGap': '已记下问题；补充具体说明可形成改进线索',
-  'feedback.ticket': '已形成改进线索',
   'action.planComplete': '长期任务已完成',
   'reason.sessionUnavailable': '已绑定的 DSH 会话不可用。',
   'reason.goalMismatch': '已绑定的 DSH 会话目标与当前任务不匹配。',
@@ -89,7 +80,6 @@ const zhMessages = {
   'error.run': '无法执行当前任务。',
   'error.guidance': '无法提交补充信息。',
   'error.abandon': '无法放弃当前任务。',
-  'error.feedback': '无法记录任务反馈。',
   'error.analysis': '无法开始分析。',
   'error.review': '无法标记为已审阅。',
   'error.revisionConflict': '该目标已在其他位置发生变化，已显示最新状态。请确认后重试。',
@@ -159,14 +149,6 @@ const enMessages = {
   'action.start': 'Start Task',
   'action.continue': 'Continue Task',
   'action.openSession': 'Open Session',
-  'feedback.positive': 'Helpful',
-  'feedback.negative': 'Needs improvement',
-  'feedback.note': 'What should improve? (optional)',
-  'feedback.submit': 'Record feedback',
-  'feedback.cancel': 'Cancel',
-  'feedback.noCase': 'Helpful result recorded',
-  'feedback.observedGap': 'Issue noted; add details to create an improvement clue',
-  'feedback.ticket': 'Improvement clue recorded',
   'action.planComplete': 'Plan complete',
   'reason.sessionUnavailable': 'The bound DSH Session is not available.',
   'reason.goalMismatch': 'The bound DSH Session Goal does not match this Task.',
@@ -180,7 +162,6 @@ const enMessages = {
   'error.run': 'Unable to run the current task.',
   'error.guidance': 'Unable to add guidance.',
   'error.abandon': 'Unable to abandon the current Task.',
-  'error.feedback': 'Unable to record Task feedback.',
   'error.analysis': 'Unable to start analysis.',
   'error.review': 'Unable to mark the clue reviewed.',
   'error.revisionConflict': 'This Goal changed elsewhere. The latest status is shown; review it before retrying.',
@@ -487,83 +468,6 @@ function GoalTaskGroup({
   )
 }
 
-function feedbackDecisionText(t: Translate, item: GoalTaskFeedbackItem): string {
-  if (item.decision === 'no-case') return t('feedback.noCase')
-  if (item.decision === 'observed-gap') return t('feedback.observedGap')
-  return t('feedback.ticket')
-}
-
-function SettledTaskGroup({
-  label,
-  tasks,
-  feedback,
-  feedbackTaskId,
-  feedbackNote,
-  loading,
-  t,
-  onPositive,
-  onNegative,
-  onNote,
-  onSubmit,
-  onCancel,
-  onOpenClue,
-}: {
-  readonly label: string
-  readonly tasks: LongGoalStatusProjectionV2['tasks']
-  readonly feedback: readonly GoalTaskFeedbackItem[]
-  readonly feedbackTaskId: string | undefined
-  readonly feedbackNote: string
-  readonly loading: boolean
-  readonly t: Translate
-  readonly onPositive: (taskId: string) => void
-  readonly onNegative: (taskId: string) => void
-  readonly onNote: (note: string) => void
-  readonly onSubmit: (taskId: string) => void
-  readonly onCancel: () => void
-  readonly onOpenClue: (ticketId: string) => void
-}): JSX.Element | null {
-  if (tasks.length === 0) return null
-  return (
-    <section aria-label={label}>
-      <h4 style={{ margin: '4px 0' }}>{label}</h4>
-      <ul style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 8 }}>
-        {tasks.map(task => {
-          const recorded = feedback.find(item => item.taskId === task.id)
-          const ticketId = recorded?.ticketId
-          return <li key={task.id}>
-            <div>{task.objective} — {translatePhase(t, task.phase)}</div>
-            {recorded !== undefined && <p role="status" style={{ margin: '4px 0' }}>
-              {ticketId === undefined
-                ? feedbackDecisionText(t, recorded)
-                : <button type="button" onClick={() => onOpenClue(ticketId)} style={buttonStyle}>
-                    {feedbackDecisionText(t, recorded)}
-                  </button>}
-            </p>}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-              <button type="button" disabled={loading} onClick={() => onPositive(task.id)} style={buttonStyle}>{t('feedback.positive')}</button>
-              <button type="button" disabled={loading} onClick={() => onNegative(task.id)} style={buttonStyle}>{t('feedback.negative')}</button>
-            </div>
-            {feedbackTaskId === task.id && <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-              <label>{t('feedback.note')}
-                <textarea
-                  aria-label={t('feedback.note')}
-                  value={feedbackNote}
-                  onChange={event => onNote(event.target.value)}
-                  style={fieldStyle}
-                />
-              </label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                <button type="button" disabled={loading} onClick={() => onSubmit(task.id)} style={buttonStyle}>{t('feedback.submit')}</button>
-                <button type="button" disabled={loading} onClick={onCancel} style={buttonStyle}>{t('feedback.cancel')}</button>
-              </div>
-            </div>}
-          </li>
-        })}
-      </ul>
-    </section>
-  )
-}
-
 function abortError(): Error {
   const error = new Error('Learn Loop request cancelled')
   error.name = 'AbortError'
@@ -623,9 +527,6 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   const [context, setContext] = useState('')
   const [successCriteria, setSuccessCriteria] = useState('')
   const [guidance, setGuidance] = useState('')
-  const [taskFeedback, setTaskFeedback] = useState<readonly GoalTaskFeedbackItem[]>([])
-  const [feedbackTaskId, setFeedbackTaskId] = useState<string | undefined>()
-  const [feedbackNote, setFeedbackNote] = useState('')
   const [operationSessionId, setOperationSessionId] = useState<string | undefined>()
   const [error, setError] = useState<VisibleError | undefined>()
   const [loading, setLoading] = useState(false)
@@ -701,20 +602,8 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
       if (request.isCurrent()) {
         setDetail(nextDetail)
         setGuidance('')
-        setTaskFeedback([])
-        setFeedbackTaskId(undefined)
-        setFeedbackNote('')
         setOperationSessionId(undefined)
         setView('detail')
-      }
-      if (
-        (nextDetail.schemaVersion === 'tianwen.long-goal-status.v2' ||
-          nextDetail.schemaVersion === 'tianwen.long-goal-status.v3') &&
-        nextDetail.tasks.some(task => task.phase === 'complete' || task.phase === 'abandoned')
-      ) {
-        void client.feedbackStatus(longGoalId, request.signal).then(nextFeedback => {
-          if (request.isCurrent()) setTaskFeedback(nextFeedback.items)
-        }).catch(() => undefined)
       }
     } catch (cause) {
       if (request.isCurrent()) {
@@ -755,9 +644,6 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
       if (request.isCurrent()) {
         setDetail(result.status)
         setGuidance('')
-        setTaskFeedback([])
-        setFeedbackTaskId(undefined)
-        setFeedbackNote('')
         setOperationSessionId(result.sessionId ?? undefined)
         setView('detail')
       }
@@ -911,39 +797,6 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
       }
     } catch (cause) {
       await handleMutationFailure(cause, request, failedDetail, 'error.abandon')
-    } finally {
-      if (request.isCurrent()) setLoading(false)
-    }
-  }
-
-  const recordTaskFeedback = async (
-    taskId: string,
-    rating: 'positive' | 'negative',
-  ) => {
-    if (detail === undefined || (detail.schemaVersion !== 'tianwen.long-goal-status.v2' &&
-      detail.schemaVersion !== 'tianwen.long-goal-status.v3')) return
-    const request = requestGeneration.current.begin()
-    setLoading(true)
-    setError(undefined)
-    try {
-      const result = await client.recordTaskFeedback({
-        longGoalId: detail.goal.id,
-        taskId,
-        rating,
-        note: rating === 'negative' ? feedbackNote.trim() || null : null,
-      }, request.signal)
-      if (request.isCurrent()) {
-        setTaskFeedback(current => [
-          ...current.filter(item => item.taskId !== result.item.taskId),
-          result.item,
-        ])
-        setFeedbackTaskId(undefined)
-        setFeedbackNote('')
-      }
-    } catch (cause) {
-      if (request.isCurrent()) {
-        setError(cause instanceof Error ? { message: cause.message } : { key: 'error.feedback' })
-      }
     } finally {
       if (request.isCurrent()) setLoading(false)
     }
@@ -1178,49 +1031,9 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
                       {goalFirstVisibleCurrentTask.blockedReason === undefined ? '' : `: ${goalFirstVisibleCurrentTask.blockedReason.message}`}
                     </li></ul>}
                 </section>
-                <SettledTaskGroup
-                  label={t('detail.completedWork')}
-                  tasks={goalFirstCompletedTasks}
-                  feedback={taskFeedback}
-                  feedbackTaskId={feedbackTaskId}
-                  feedbackNote={feedbackNote}
-                  loading={loading}
-                  t={t}
-                  onPositive={taskId => void recordTaskFeedback(taskId, 'positive')}
-                  onNegative={taskId => {
-                    setFeedbackTaskId(taskId)
-                    setFeedbackNote('')
-                  }}
-                  onNote={setFeedbackNote}
-                  onSubmit={taskId => void recordTaskFeedback(taskId, 'negative')}
-                  onCancel={() => {
-                    setFeedbackTaskId(undefined)
-                    setFeedbackNote('')
-                  }}
-                  onOpenClue={ticketId => openClues(ticketId)}
-                />
+                <GoalTaskGroup label={t('detail.completedWork')} tasks={goalFirstCompletedTasks} t={t} />
                 <GoalTaskGroup label={t('detail.nextSteps')} tasks={goalFirstNextTasks} t={t} />
-                <SettledTaskGroup
-                  label={t('detail.abandonedWork')}
-                  tasks={goalFirstAbandonedTasks}
-                  feedback={taskFeedback}
-                  feedbackTaskId={feedbackTaskId}
-                  feedbackNote={feedbackNote}
-                  loading={loading}
-                  t={t}
-                  onPositive={taskId => void recordTaskFeedback(taskId, 'positive')}
-                  onNegative={taskId => {
-                    setFeedbackTaskId(taskId)
-                    setFeedbackNote('')
-                  }}
-                  onNote={setFeedbackNote}
-                  onSubmit={taskId => void recordTaskFeedback(taskId, 'negative')}
-                  onCancel={() => {
-                    setFeedbackTaskId(undefined)
-                    setFeedbackNote('')
-                  }}
-                  onOpenClue={ticketId => openClues(ticketId)}
-                />
+                <GoalTaskGroup label={t('detail.abandonedWork')} tasks={goalFirstAbandonedTasks} t={t} />
                 {detail.guidance.length > 0 && <ul style={{ margin: 0, paddingLeft: 20 }}>
                   {detail.guidance.map((item, index) => <li key={index}>{item}</li>)}
                 </ul>}

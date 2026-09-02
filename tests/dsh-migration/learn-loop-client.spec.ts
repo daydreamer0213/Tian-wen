@@ -351,61 +351,19 @@ describe('Learn Loop browser RPC client', () => {
     })).rejects.toThrow('invalid Tianwen RPC response')
   })
 
-  it('reads and records settled Task feedback with strict response parsing', async () => {
-    const item = {
-      taskId: 'task-v2-1', rating: 'negative' as const,
-      decision: 'ticket-created' as const,
-      recordedAt: '2026-08-30T00:00:00.000Z',
-      ticketId: `ticket:${'a'.repeat(64)}`,
-    }
-    const feedbackStatus = {
-      schemaVersion: 'tianwen.goal-task-feedback-status.v1' as const,
-      items: [item],
-    }
-    const feedbackRecord = {
-      schemaVersion: 'tianwen.goal-task-feedback-record.v1' as const,
-      duplicate: false,
-      item,
-    }
-    const rpc = { call: vi.fn()
-      .mockResolvedValueOnce({ ok: true, value: feedbackStatus })
-      .mockResolvedValueOnce({ ok: true, value: feedbackRecord }) }
+  it('does not expose Tianwen Task feedback reads or writes', async () => {
+    const rpc = { call: vi.fn().mockResolvedValue({
+      ok: true,
+      value: { status: statusV2 },
+    }) }
     const client = createLearnLoopClient(rpc as never)
 
-    expect(await client.feedbackStatus(statusV2.goal.id)).toEqual(feedbackStatus)
-    expect(await client.recordTaskFeedback({
-      longGoalId: statusV2.goal.id,
-      taskId: item.taskId,
-      rating: 'negative',
-      note: 'Keep the result concrete.',
-    })).toEqual(feedbackRecord)
+    expect(client).not.toHaveProperty('feedbackStatus')
+    expect(client).not.toHaveProperty('recordTaskFeedback')
+    await expect(client.status(statusV2.goal.id)).resolves.toEqual(statusV2)
     expect(rpc.call.mock.calls).toEqual([
-      ['/tianwen', 'feedback-status', { longGoalId: statusV2.goal.id }, undefined],
-      ['/tianwen', 'record-task-feedback', {
-        longGoalId: statusV2.goal.id,
-        taskId: item.taskId,
-        rating: 'negative',
-        note: 'Keep the result concrete.',
-      }, undefined],
+      ['/tianwen', 'status', { longGoalId: statusV2.goal.id }, undefined],
     ])
-
-    for (const invalid of [
-      { ...feedbackStatus, extra: true },
-      { ...feedbackStatus, items: [{ ...item, note: 'private' }] },
-      { ...feedbackStatus, items: [{ ...item, rating: 'positive' }] },
-      { ...feedbackStatus, items: [{ ...item, decision: 'no-case', ticketId: undefined }] },
-      { ...feedbackRecord, duplicate: 'no' },
-    ]) {
-      const invalidRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: invalid }) }
-      const invalidClient = createLearnLoopClient(invalidRpc as never)
-      const operation = 'duplicate' in invalid
-        ? invalidClient.recordTaskFeedback({
-          longGoalId: statusV2.goal.id, taskId: item.taskId,
-          rating: 'negative', note: null,
-        })
-        : invalidClient.feedbackStatus(statusV2.goal.id)
-      await expect(operation).rejects.toThrow('invalid Tianwen RPC response')
-    }
   })
 
   it('reads the safe learning clue projection and rejects private or malformed fields', async () => {

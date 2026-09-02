@@ -17,7 +17,6 @@ import {
   resolveTianwenLongGoalHostRoots,
   runCurrentWebTask,
   type TianwenGoalFirstOperations,
-  type TianwenGoalTaskFeedbackOperations,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
 import {
   createLearningClueAnalysisBinding,
@@ -218,24 +217,6 @@ function longGoalHostDependencies(
     listLongGoals: vi.fn(() => []),
     createLongGoal: vi.fn(() => { throw new Error('unexpected create') }),
     readLongGoalStatus: vi.fn(async () => status),
-  }
-}
-
-function taskFeedbackOperations(): TianwenGoalTaskFeedbackOperations {
-  const item = {
-    taskId: 'task-1', rating: 'negative' as const,
-    decision: 'ticket-created' as const,
-    recordedAt: '2026-08-30T00:00:00.000Z',
-    ticketId: `ticket:${'a'.repeat(64)}` as const,
-  }
-  return {
-    status: vi.fn(async () => ({
-      schemaVersion: 'tianwen.goal-task-feedback-status.v1', items: [item],
-    })),
-    record: vi.fn(async () => ({
-      schemaVersion: 'tianwen.goal-task-feedback-record.v1',
-      duplicate: false, item,
-    })),
   }
 }
 
@@ -670,53 +651,25 @@ describe('Tianwen Long Goal Web host', () => {
     expect(operations.continueProgress).toHaveBeenCalledTimes(1)
   })
 
-  it('reads and records settled Task feedback through exact RPC payloads', async () => {
+  it('does not register Tianwen Task feedback RPC endpoints even when a legacy slot is supplied', async () => {
     const status = longGoalStatus(['complete'], [{ goalId: 'goal-1', sessionId: 'session-1' }])
-    const feedback = taskFeedbackOperations()
-    const handler = createTianwenLongGoalRpcHandler(
+    const legacy = {
+      status: vi.fn(async () => ({ legacy: true })),
+      record: vi.fn(async () => ({ legacy: true })),
+    }
+    const handler = Reflect.apply(createTianwenLongGoalRpcHandler, undefined, [
       ROOTS,
       undefined,
       runDependencies(longGoalRecord([status.tasks[0]!.execution]), status),
       goalFirstOperations(),
-      feedback,
-    )
+      legacy,
+    ]) as ReturnType<typeof createTianwenLongGoalRpcHandler>
     const signal = AbortSignal.timeout(1_000)
-
-    await expect(handler('feedback-status', {
-      longGoalId: 'tianwen-long-goal-v2-test',
-    }, signal)).resolves.toMatchObject({
-      ok: true,
-      value: { schemaVersion: 'tianwen.goal-task-feedback-status.v1' },
-    })
-    await expect(handler('record-task-feedback', {
-      longGoalId: 'tianwen-long-goal-v2-test',
-      taskId: 'task-1',
-      rating: 'negative',
-      note: 'Keep the result concrete.',
-    }, signal)).resolves.toMatchObject({
-      ok: true,
-      value: { schemaVersion: 'tianwen.goal-task-feedback-record.v1' },
-    })
-    expect(feedback.status).toHaveBeenCalledWith({
-      longGoalId: 'tianwen-long-goal-v2-test',
-    })
-    expect(feedback.record).toHaveBeenCalledWith({
-      longGoalId: 'tianwen-long-goal-v2-test',
-      taskId: 'task-1',
-      rating: 'negative',
-      note: 'Keep the result concrete.',
-    })
-
     for (const [endpoint, payload] of [
-      ['feedback-status', { longGoalId: 'goal', ignored: true }],
-      ['record-task-feedback', {
-        longGoalId: 'goal', taskId: 'task-1', rating: 'mixed', note: null,
-      }],
-      ['record-task-feedback', {
-        longGoalId: 'goal', taskId: 'task-1', rating: 'negative', note: ' ',
-      }],
-      ['record-task-feedback', {
-        longGoalId: 'goal', taskId: 'task-1', rating: 'positive', note: 'unexpected',
+      [['feedback', 'status'].join('-'), { longGoalId: 'tianwen-long-goal-v2-test' }],
+      [['record', 'task', 'feedback'].join('-'), {
+        longGoalId: 'tianwen-long-goal-v2-test', taskId: 'task-1',
+        rating: 'negative', note: 'Keep the result concrete.',
       }],
     ] as const) {
       await expect(handler(endpoint, payload, signal)).resolves.toEqual({
@@ -724,7 +677,8 @@ describe('Tianwen Long Goal Web host', () => {
         error: { code: 'internal', message: 'invalid-request', details: {} },
       })
     }
-    expect(feedback.record).toHaveBeenCalledTimes(1)
+    expect(legacy.status).not.toHaveBeenCalled()
+    expect(legacy.record).not.toHaveBeenCalled()
   })
 
   it('projects only safe settled Goal-first Ticket sources and sorts clues by latest source', () => {
@@ -762,32 +716,42 @@ describe('Tianwen Long Goal Web host', () => {
       }],
       control: { sessionId: 'control-b', autoProgress: 'running' as const },
     }
+    const intake = (input: {
+      readonly sessionId: string
+      readonly messageId: string
+      readonly ticketId: `ticket:${string}`
+      readonly recordedAt: string
+      readonly decision: 'ticket-created' | 'ticket-merged'
+    }) => ({
+      ...input,
+      state: 'active' as const,
+      feedbackVersion: `revision:${input.messageId}`,
+      scopeKey: 'workspace:D:/workspace',
+      rating: 'negative' as const,
+      feedbackFingerprint: `sha256:${'4'.repeat(64)}` as const,
+      ingestionId: `sha256:${'5'.repeat(64)}` as const,
+      signalId: `signal:${'6'.repeat(64)}` as const,
+    })
+    const statusForA = intake({
+      sessionId: 'session-a', messageId: 'assistant-a', ticketId: ticketA,
+      recordedAt: '2026-08-30T01:00:00.000Z', decision: 'ticket-created',
+    })
+    const statusForLatestA = intake({
+      sessionId: 'session-b', messageId: 'assistant-b-latest', ticketId: ticketA,
+      recordedAt: '2026-08-30T03:00:00.000Z', decision: 'ticket-merged',
+    })
+    const statusForB = intake({
+      sessionId: 'session-b', messageId: 'assistant-b-earlier', ticketId: ticketB,
+      recordedAt: '2026-08-30T02:00:00.000Z', decision: 'ticket-created',
+    })
 
     const result = projectLearningClueStatus({
       goals: [{
         status: statusA,
-        feedback: {
-          schemaVersion: 'tianwen.goal-task-feedback-status.v1',
-          items: [{
-            taskId: 'task-a', rating: 'negative', decision: 'ticket-created',
-            recordedAt: '2026-08-30T01:00:00.000Z', ticketId: ticketA,
-          }],
-        },
+        intakeStatuses: [statusForA],
       }, {
         status: statusB,
-        feedback: {
-          schemaVersion: 'tianwen.goal-task-feedback-status.v1',
-          items: [{
-            taskId: 'task-b', rating: 'negative', decision: 'ticket-merged',
-            recordedAt: '2026-08-30T03:00:00.000Z', ticketId: ticketA,
-          }, {
-            taskId: 'task-b', rating: 'negative', decision: 'ticket-merged',
-            recordedAt: '2026-08-30T03:00:00.000Z', ticketId: ticketA,
-          }, {
-            taskId: 'task-b', rating: 'negative', decision: 'ticket-created',
-            recordedAt: '2026-08-30T02:00:00.000Z', ticketId: ticketB,
-          }],
-        },
+        intakeStatuses: [statusForLatestA, statusForLatestA, statusForB],
       }],
       tickets: [{
         ticketId: ticketB,
@@ -852,7 +816,6 @@ describe('Tianwen Long Goal Web host', () => {
       undefined,
       runDependencies(longGoalRecord([status.tasks[0]!.execution]), status),
       goalFirstOperations(),
-      taskFeedbackOperations(),
       learningClues,
     )
 
@@ -885,7 +848,6 @@ describe('Tianwen Long Goal Web host', () => {
       undefined,
       runDependencies(longGoalRecord([status.tasks[0]!.execution]), status),
       goalFirstOperations(),
-      taskFeedbackOperations(),
       learningClues,
     )
     const signal = AbortSignal.timeout(1_000)
@@ -926,7 +888,6 @@ describe('Tianwen Long Goal Web host', () => {
     }
     const handler = createTianwenLongGoalRpcHandler(
       ROOTS,
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -1098,7 +1059,7 @@ describe('Tianwen Long Goal Web host', () => {
       createSession,
       flushSession,
     })
-    const handler = createTianwenLongGoalRpcHandler(ROOTS, undefined, undefined, undefined, undefined, operations)
+    const handler = createTianwenLongGoalRpcHandler(ROOTS, undefined, undefined, undefined, operations)
     try {
       const [first, concurrent] = await Promise.all([
         handler('analyze-learning-clue', { ticketId }, AbortSignal.timeout(1_000)),

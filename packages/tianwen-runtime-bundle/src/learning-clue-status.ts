@@ -1,7 +1,6 @@
-import type { LearningTicket } from '@tianwen/evolution/learning-intake'
+import type { LearningIntakeStatus, LearningTicket } from '@tianwen/evolution/learning-intake'
 
 import type { AnyLongGoalStatusProjection } from './long-goal-contract.js'
-import type { GoalTaskFeedbackStatus } from './goal-task-feedback.js'
 
 export interface LearningClueSource {
   readonly longGoalId: string
@@ -36,7 +35,7 @@ export interface LearningClueStatus {
 export function projectLearningClueStatus(input: {
   readonly goals: readonly {
     readonly status: AnyLongGoalStatusProjection
-    readonly feedback: GoalTaskFeedbackStatus
+    readonly intakeStatuses: readonly LearningIntakeStatus[]
   }[]
   readonly tickets: readonly LearningTicket[]
 }): LearningClueStatus {
@@ -44,22 +43,24 @@ export function projectLearningClueStatus(input: {
   for (const goal of input.goals) {
     if (goal.status.schemaVersion !== 'tianwen.long-goal-status.v2' &&
       goal.status.schemaVersion !== 'tianwen.long-goal-status.v3') continue
-    for (const feedback of goal.feedback.items) {
-      if (feedback.ticketId === undefined) continue
-      const task = goal.status.tasks.find(candidate => candidate.id === feedback.taskId)
-      if (task === undefined || (task.phase !== 'complete' && task.phase !== 'abandoned')) continue
-      const sources = sourcesByTicket.get(feedback.ticketId) ?? new Map()
-      const key = `${goal.status.goal.id}\0${task.id}`
-      const source: LearningClueSource = {
-        longGoalId: goal.status.goal.id,
-        goalObjective: goal.status.goal.objective,
-        taskId: task.id,
-        taskObjective: task.objective,
-        recordedAt: feedback.recordedAt,
+    for (const task of goal.status.tasks) {
+      if (task.execution === null ||
+        (task.phase !== 'complete' && task.phase !== 'abandoned')) continue
+      for (const intake of goal.intakeStatuses) {
+        if (intake.sessionId !== task.execution.sessionId || intake.ticketId === undefined) continue
+        const sources = sourcesByTicket.get(intake.ticketId) ?? new Map()
+        const key = `${goal.status.goal.id}\0${task.id}`
+        const source: LearningClueSource = {
+          longGoalId: goal.status.goal.id,
+          goalObjective: goal.status.goal.objective,
+          taskId: task.id,
+          taskObjective: task.objective,
+          recordedAt: intake.recordedAt,
+        }
+        const existing = sources.get(key)
+        if (existing === undefined || source.recordedAt > existing.recordedAt) sources.set(key, source)
+        sourcesByTicket.set(intake.ticketId, sources)
       }
-      const existing = sources.get(key)
-      if (existing === undefined || source.recordedAt > existing.recordedAt) sources.set(key, source)
-      sourcesByTicket.set(feedback.ticketId, sources)
     }
   }
 
