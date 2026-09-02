@@ -223,6 +223,7 @@ export class TianwenMessageFeedbackBridgeService extends Service {
     const sessionLifecycleFingerprint = lifecycleAfter
     const existingStatuses = this.ctx.tianwenEvolution
       .listLearningIntakeStatuses(sessionId)
+    const affectedTicketIds = new Set<string>()
     if (existingStatuses.some(status =>
       status.sessionLifecycleFingerprint !== sessionLifecycleFingerprint)) {
       throw new Error('feedback Session lifecycle does not match learning history')
@@ -280,6 +281,8 @@ export class TianwenMessageFeedbackBridgeService extends Service {
       if (recorded?.feedbackVersion !== String(item.version)) {
         throw new Error('feedback revision did not produce an exact learning status')
       }
+      if (current?.ticketId !== undefined) affectedTicketIds.add(current.ticketId)
+      if (recorded.ticketId !== undefined) affectedTicketIds.add(recorded.ticketId)
       await this.observeConsentNotice(
         consentAgent,
         sessionId,
@@ -297,13 +300,12 @@ export class TianwenMessageFeedbackBridgeService extends Service {
           retractedFeedbackVersion: status.feedbackVersion,
           sessionLifecycleFingerprint,
         })
+        if (status.ticketId !== undefined) affectedTicketIds.add(status.ticketId)
       }
     }
 
     const statuses = this.ctx.tianwenEvolution
       .listLearningIntakeStatuses(sessionId)
-    const affectedTicketIds = new Set([...existingStatuses, ...statuses]
-      .flatMap(status => status.ticketId === undefined ? [] : [status.ticketId]))
     // Reconciliation owns only the wake-up.  The loop owns invalidation and
     // verified rollback, including promoted analyses that the ledger leaves
     // intact until a controlled rollback can restore their parent pointer.

@@ -286,7 +286,11 @@ describe('Tianwen DSH Message Feedback bridge', () => {
     const sessions = new SessionCatalog()
     const feedback = new FeedbackCatalog()
     const first = completedSession('ticket-wake-a', ['message-a'], 'D:/private/shared')
-    const second = completedSession('ticket-wake-b', ['message-b'], 'D:/private/shared')
+    const second = completedSession(
+      'ticket-wake-b',
+      ['message-b', 'message-other'],
+      'D:/private/shared',
+    )
     const noTicket = completedSession('ticket-wake-no-ticket', ['message-positive'], 'D:/private/other')
     sessions.add(first)
     sessions.add(second)
@@ -311,12 +315,28 @@ describe('Tianwen DSH Message Feedback bridge', () => {
       feedbackVersion: firstStatus.feedbackVersion, consentRevision: 1,
       parentSessionId: String(first.id),
     })
-    const unrelatedTicketId = `ticket:${'f'.repeat(64)}` as const
+    feedback.set(String(second.id), [
+      item({
+        messageId: 'message-b', version: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        note: 'KEEP THE VERIFIED RESULT CONCRETE.', updatedAt,
+      }),
+      item({
+        messageId: 'message-other', version: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+        note: 'Keep citations in source order.', updatedAt,
+      }),
+    ])
+    await mounted.bridge.reconcileSession(String(second.id))
+    const secondStatus = mounted.ctx.tianwenEvolution
+      .getLearningIntakeStatus(String(second.id), 'message-b')!
+    const otherStatus = mounted.ctx.tianwenEvolution
+      .getLearningIntakeStatus(String(second.id), 'message-other')!
+    expect(secondStatus.ticketId).toBe(firstStatus.ticketId)
+    expect(otherStatus.ticketId).not.toBe(firstStatus.ticketId)
     const promoted = { ...requested, phase: 'promoted' as const }
     const unrelated = {
       ...requested,
       analysisId: `analysis:${'e'.repeat(64)}` as const,
-      ticketId: unrelatedTicketId,
+      ticketId: otherStatus.ticketId,
       sessionId: String(noTicket.id),
       parentSessionId: String(noTicket.id),
       phase: 'promoted' as const,
@@ -355,26 +375,20 @@ describe('Tianwen DSH Message Feedback bridge', () => {
     mounted.ctx.provide('tianwenLearningLoop', { schedule } as never)
 
     try {
-      feedback.set(String(second.id), [item({
-        messageId: 'message-b', version: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-        note: 'KEEP THE VERIFIED RESULT CONCRETE.', updatedAt,
-      })])
+      feedback.set(String(second.id), [
+        item({
+          messageId: 'message-b', version: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+          note: 'Keep the verified result concrete.', updatedAt: updatedAt + 1,
+        }),
+        item({
+          messageId: 'message-other', version: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+          note: 'Keep citations in source order.', updatedAt,
+        }),
+      ])
       await mounted.bridge.reconcileSession(String(second.id))
       await vi.waitFor(() => expect(schedule).toHaveBeenCalledWith(requested.analysisId))
       expect(schedule).toHaveBeenCalledWith(rolledBackWithoutOutcomeReport.analysisId)
       expect(schedule).not.toHaveBeenCalledWith(rolledBackWithOutcomeReport.analysisId)
-      expect(schedule).not.toHaveBeenCalledWith(unrelated.analysisId)
-      expect(mounted.ctx.tianwenEvolution
-        .getLearningIntakeStatus(String(second.id), 'message-b')?.ticketId)
-        .toBe(firstStatus.ticketId)
-
-      schedule.mockClear()
-      feedback.set(String(second.id), [item({
-        messageId: 'message-b', version: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-        note: 'Keep the verified result concrete.', updatedAt: updatedAt + 1,
-      })])
-      await mounted.bridge.reconcileSession(String(second.id))
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledWith(requested.analysisId))
       expect(schedule).not.toHaveBeenCalledWith(unrelated.analysisId)
 
       schedule.mockClear()
@@ -386,7 +400,10 @@ describe('Tianwen DSH Message Feedback bridge', () => {
         .toBe(true)
 
       schedule.mockClear()
-      feedback.set(String(second.id), [])
+      feedback.set(String(second.id), [item({
+        messageId: 'message-other', version: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+        note: 'Keep citations in source order.', updatedAt,
+      })])
       await mounted.bridge.reconcileSession(String(second.id))
       await vi.waitFor(() => expect(schedule).toHaveBeenCalledWith(requested.analysisId))
       expect(schedule).not.toHaveBeenCalledWith(unrelated.analysisId)

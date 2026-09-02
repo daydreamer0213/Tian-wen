@@ -722,9 +722,21 @@ describe('explicit-correction controlled learning-loop executor', () => {
       schedule = vi.spyOn(learningLoop, 'schedule')
       feedbackBridge = await mountFeedbackBridge(harness, learningLoop, feedbackCatalogs)
       try {
+        feedbackCatalogs.rows.set(String(independentFeedbackSession.id), [feedbackItem({
+          messageId: 'independent-message', version: 'independent-v2',
+          note: 'PRESERVE THE VERIFIED RESULT IN THE ANSWER.', updatedAt: feedbackUpdatedAt + 2,
+        })])
+        await feedbackBridge.bridge.reconcileSession(String(independentFeedbackSession.id))
+        await Promise.allSettled(schedule.mock.results.map(result => result.value))
+        expect(harness.ctx.tianwenEvolution.hasLearningAnalysisActiveSupport(requested.analysisId)).toBe(true)
+        expect(harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)?.phase).toBe('promoted')
+
+        feedbackCatalogs.rows.set(String(independentFeedbackSession.id), [])
+        schedule.mockClear()
         await feedbackBridge.bridge.reconcileSession(String(independentFeedbackSession.id))
         const replaySchedules = await Promise.allSettled(schedule.mock.results.map(result => result.value))
         expect(replaySchedules.filter(result => result.status === 'rejected')).toEqual([])
+        expect(schedule).toHaveBeenCalledWith(requested.analysisId)
       } finally {
         releaseRollbackChild()
         disposeRollbackChildGate()

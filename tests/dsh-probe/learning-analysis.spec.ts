@@ -687,6 +687,28 @@ describe('durable explicit-correction analysis lifecycle', () => {
       ticket.ticketId === ticketId)?.status).toBe('open')
   })
 
+  it('invalidates an actively supported analysis when global consent is disabled and replays it', () => {
+    const { ledger, root, ticketId } = seededLedger('global-consent-disabled')
+    const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
+
+    ledger.recordLearningAnalysisConsent({
+      revision: 2,
+      enabled: false,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+
+    expect(ledger.hasLearningAnalysisActiveSupport(requested.analysisId)).toBe(true)
+    expect(ledger.getLearningAnalysis(requested.analysisId)?.phase).toBe('invalidated')
+    const replayed = new EvolutionLedger(root)
+    expect(replayed.getLearningAnalysisConsent()).toMatchObject({
+      revision: 2,
+      enabled: false,
+    })
+    expect(replayed.hasLearningAnalysisActiveSupport(requested.analysisId)).toBe(true)
+    expect(replayed.getLearningAnalysis(requested.analysisId))
+      .toEqual(ledger.getLearningAnalysis(requested.analysisId))
+  })
+
   it('invalidates the only-supported analysis on retraction and rejects later child start', () => {
     const { ledger, ticketId } = seededLedger('retracted')
     const requested = ledger.requestLearningAnalysis(requestInput(ticketId))
