@@ -693,6 +693,39 @@ describe('native explicit-correction analysis child', () => {
     expect(startCount).toBe(2)
   })
 
+  it('interrupts a duplicate-adopted child when consent changes before it is recorded', async () => {
+    const subject = startContext()
+    let revoked = false
+    subject.ctx.sessionPersistence.inspect.mockImplementation((id: string) => {
+      if (id !== childSessionId) {
+        return Promise.resolve({ meta: { id: 'main-session', createdAt: 1 }, events: [] })
+      }
+      if (!revoked) return Promise.reject(new Error('session not found'))
+      return Promise.resolve({
+        meta: { id: childSessionId, parentSession: 'main-session', origin: 'subagent' },
+        events: [analysisDescriptorEvent()],
+      })
+    })
+    subject.startContinuable.mockImplementationOnce(() => {
+      revoked = true
+      throw new SubagentError('same child id already accepted', 'DUPLICATE_CHILD')
+    })
+    subject.evolution.getLearningAnalysisConsent.mockImplementation(() => ({
+      revision: revoked ? 2 : 1,
+      enabled: !revoked,
+      policyVersion: 'tianwen-auto-analysis.v1',
+      recordedAt: '2026-09-02T00:00:01.000Z',
+    }))
+
+    await expect(startLearningAnalysisChild(subject.ctx as never, {
+      analysisId, parent: subject.parent, signal: AbortSignal.timeout(10_000),
+    })).rejects.toThrow(/consent/u)
+    expect(subject.ctx.subagents.interrupt).toHaveBeenCalledWith(childSessionId, {
+      kind: 'user', parentSessionId: 'main-session',
+    })
+    expect(subject.evolution.recordLearningAnalysisChildStarted).not.toHaveBeenCalled()
+  })
+
   it('fails closed instead of adopting a persisted child with the wrong lineage', async () => {
     const subject = startContext()
     subject.ctx.sessionPersistence.inspect.mockImplementation((id: string) => {

@@ -25,7 +25,7 @@ The failures showed that the stale replay expected a second main-chat report and
 
 ```powershell
 pnpm vitest run tests/dsh-migration/learning-analysis-child.spec.ts
-# 1 file passed, 17 tests passed
+# 1 file passed, 18 tests passed
 
 pnpm vitest run tests/dsh-probe/learning-analysis.spec.ts tests/dsh-migration/message-feedback-bridge.spec.ts
 # 2 files passed, 50 tests passed
@@ -53,5 +53,6 @@ pnpm run check:no-private-dsh-imports
 - An unknown report-delivery append reads the durable ledger before returning; replay sees the delivered record and does not re-send.
 - A non-`DUPLICATE_CHILD` native start failure still propagates. A duplicate is adopted only after exact persisted child proof; wrong lineage/descriptor remains fail-closed.
 - Revocation after native acceptance still interrupts the native child and does not record it started. DSH cannot retract a prompt already accepted by `startContinuable`.
+- The duplicate-adoption path performs that same post-acceptance consent check before recording, so revocation while its durable proof is being read also interrupts rather than starts it.
 
-Commit: pending
+Commits: `4aebc980e586cba2fdeb0fbeecd019a271da49ac` plus pending follow-up

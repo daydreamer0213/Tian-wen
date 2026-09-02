@@ -306,7 +306,10 @@ export async function startLearningAnalysisChild(
       }
       duplicateChild = true
     }
-    if (!duplicateChild) {
+    if (duplicateChild) {
+      const raced = ctx.tianwenEvolution.getLearningAnalysis(status.analysisId)
+      if (exactRunning(raced, status)) return raced
+    }
     try {
       const admitted = ctx.tianwenEvolution.getLearningAnalysis(status.analysisId)
       if (
@@ -319,10 +322,6 @@ export async function startLearningAnalysisChild(
     } catch (error) {
       interruptAcceptedChild(ctx, status)
       throw error
-    }
-    } else {
-      const raced = ctx.tianwenEvolution.getLearningAnalysis(status.analysisId)
-      if (exactRunning(raced, status)) return raced
     }
   }
   const recorded = await recordStarted(ctx, status, evolutionRoot)
