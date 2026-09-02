@@ -19,17 +19,9 @@ function fixtureRoot(): string {
   return root
 }
 
-function writeWorkspace(root: string, content: string) {
+function materializeWorkspace(root: string, content: string): void {
   mkdirSync(root, { recursive: true })
   writeFileSync(join(root, 'brief.txt'), content, 'utf8')
-  return {
-    schemaVersion: 'tianwen.controlled-workspace-snapshot.v1' as const,
-    entries: [{
-      relativePath: 'brief.txt',
-      contentDigest: `sha256:${createHash('sha256').update(content, 'utf8').digest('hex')}` as const,
-      size: Buffer.byteLength(content, 'utf8'),
-    }],
-  }
 }
 
 afterEach(() => {
@@ -56,7 +48,7 @@ describe('explicit correction controlled protocol', () => {
     const root = fixtureRoot()
     const tasks = protocol!.buildEvaluationTasks({
       root,
-      createWorkspaceSnapshot: writeWorkspace,
+      materializeWorkspace,
     })
 
     expect(tasks.map(task => [
@@ -102,12 +94,74 @@ describe('explicit correction controlled protocol', () => {
     })
   })
 
+  it('freezes derived evaluation tasks and transition inputs', () => {
+    const protocol = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)!
+    const root = fixtureRoot()
+    const tasks = protocol.buildEvaluationTasks({ root, materializeWorkspace })
+    const transition = protocol.buildTransitionInput({
+      root,
+      shadowId: 'shadow:fixture',
+      kind: 'promote',
+      expectedRevision: 1,
+      materializeWorkspace,
+    })
+
+    expect(() => {
+      (tasks as unknown as Array<{ goal: string }>)[0]!.goal = 'changed task'
+    }).toThrow(TypeError)
+    expect(() => {
+      (transition as unknown as { task: { goal: string } }).task.goal = 'changed transition'
+    }).toThrow(TypeError)
+
+    const replayTasks = protocol.buildEvaluationTasks({ root: fixtureRoot(), materializeWorkspace })
+    const replayTransition = protocol.buildTransitionInput({
+      root: fixtureRoot(),
+      shadowId: 'shadow:fixture',
+      kind: 'promote',
+      expectedRevision: 1,
+      materializeWorkspace,
+    })
+    expect(replayTasks[0]?.goal).toBe('Complete controlled lifecycle task 0.')
+    expect(replayTransition.task.goal).toBe('Verify the active lifecycle promote pointer.')
+  })
+
+  it('derives the expected workspace snapshot despite a malicious materializer', () => {
+    const protocol = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)!
+    const root = fixtureRoot()
+    const tasks = protocol.buildEvaluationTasks({
+      root,
+      materializeWorkspace(workspaceRoot) {
+        mkdirSync(workspaceRoot, { recursive: true })
+        writeFileSync(join(workspaceRoot, 'brief.txt'), 'malicious workspace\n', 'utf8')
+        return {
+          schemaVersion: 'tianwen.controlled-workspace-snapshot.v1' as const,
+          entries: [{
+            relativePath: 'brief.txt',
+            contentDigest: 'sha256:malicious',
+            size: 0,
+          }],
+        }
+      },
+    })
+    const task = tasks[0]!
+
+    expect(task.workspaceSnapshot.entries[0]?.contentDigest).toBe(
+      `sha256:${createHash('sha256')
+        .update('controlled evaluation workspace 0\n', 'utf8')
+        .digest('hex')}`,
+    )
+    expect(() => protocol.assertWorkspaceSnapshot(
+      task.baselineWorkspaceRoot,
+      task.workspaceSnapshot,
+    )).toThrow('workspace-drift')
+  })
+
   it('fails closed when frozen execution inputs, sessions, or workspaces drift', () => {
     const protocol = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)!
     const root = fixtureRoot()
     const tasks = protocol.buildEvaluationTasks({
       root,
-      createWorkspaceSnapshot: writeWorkspace,
+      materializeWorkspace,
     })
     const task = tasks[0]!
     const execution = protocol.freezeExecution({

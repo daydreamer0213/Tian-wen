@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -129,17 +128,9 @@ function invariant(value: unknown, code: string): asserts value {
   if (!value) throw new Error(`controlled lifecycle invariant failed: ${code}`)
 }
 
-function writeWorkspace(root: string, content: string) {
+function materializeWorkspace(root: string, content: string): void {
   mkdirSync(root, { recursive: true })
   writeFileSync(join(root, 'brief.txt'), content, 'utf8')
-  return {
-    schemaVersion: 'tianwen.controlled-workspace-snapshot.v1' as const,
-    entries: [{
-      relativePath: 'brief.txt',
-      contentDigest: `sha256:${createHash('sha256').update(content, 'utf8').digest('hex')}` as const,
-      size: Buffer.byteLength(content, 'utf8'),
-    }],
-  }
 }
 
 function skillAndVerifierScript(
@@ -331,7 +322,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
     for (const [index, seed] of seedDefinitions.entries()) {
       const sessionId = `session:controlled-seed:fixture:${seed.kind}`
       const workspaceRoot = join(root, 'workspaces', 'seed', seed.kind)
-      writeWorkspace(
+      materializeWorkspace(
         workspaceRoot,
         `controlled seed workspace ${index}\n`,
       )
@@ -391,7 +382,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
     const retryPolicy = harness.ctx.llm.providerRetryPolicy(selection.provider)
     const evaluationTasks = explicitCorrectionProtocol.buildEvaluationTasks({
       root,
-      createWorkspaceSnapshot: writeWorkspace,
+      materializeWorkspace,
     })
     const frozenExecution = explicitCorrectionProtocol.freezeExecution({
       callConfig,
@@ -514,7 +505,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
 
     const shadowTasks = explicitCorrectionProtocol.buildShadowTasks({
       root,
-      createWorkspaceSnapshot: writeWorkspace,
+      materializeWorkspace,
     })
     const shadowInput = { evaluationId: arms.evaluationId, tasks: shadowTasks }
     const shadow = await harness.ctx.tianwenSkillEvaluation.runControlledShadow(shadowInput)
@@ -550,7 +541,7 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
       shadowId: shadow.shadowId,
       kind,
       expectedRevision,
-      createWorkspaceSnapshot: writeWorkspace,
+      materializeWorkspace,
     })
     const promoteInput = transitionInput('promote', 1)
     const rollbackInput = transitionInput('rollback', 2)
@@ -689,10 +680,18 @@ export async function runControlledSkillLifecycleDemo(): Promise<ControlledSkill
       task: {
         ...preflightBase.task,
         workspaceRoot: preflightWorkspaceRoot,
-        workspaceSnapshot: writeWorkspace(
-          preflightWorkspaceRoot,
-          'controlled preflight rejection workspace\n',
-        ),
+        workspaceSnapshot: (() => {
+          const content = 'controlled preflight rejection workspace\n'
+          materializeWorkspace(preflightWorkspaceRoot, content)
+          return {
+            schemaVersion: 'tianwen.controlled-workspace-snapshot.v1' as const,
+            entries: [{
+              relativePath: 'brief.txt',
+              contentDigest: sha256(content),
+              size: Buffer.byteLength(content, 'utf8'),
+            }],
+          }
+        })(),
         sessionId: 'session:controlled-activation:fixture:lifecycle:preflight-rejection',
       },
     }

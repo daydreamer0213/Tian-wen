@@ -89,6 +89,17 @@ function rawDigest(content: string): Digest {
   return `sha256:${createHash('sha256').update(content, 'utf8').digest('hex')}`
 }
 
+function workspaceSnapshot(content: string): ExplicitCorrectionWorkspaceSnapshot {
+  return {
+    schemaVersion: 'tianwen.controlled-workspace-snapshot.v1',
+    entries: [{
+      relativePath: 'brief.txt',
+      contentDigest: rawDigest(content),
+      size: Buffer.byteLength(content, 'utf8'),
+    }],
+  }
+}
+
 function assertWorkspaceSnapshot(
   root: string,
   snapshot: ExplicitCorrectionWorkspaceSnapshot,
@@ -112,10 +123,10 @@ function assertWorkspaceSnapshot(
   }
 }
 
-type CreateWorkspaceSnapshot = (
+type MaterializeWorkspace = (
   root: string,
   content: string,
-) => ExplicitCorrectionWorkspaceSnapshot
+) => void
 
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object') {
@@ -152,9 +163,9 @@ function buildResearchSummaryControlledProtocol() {
     assertFreshSessions,
     buildEvaluationTasks(input: {
       readonly root: string
-      readonly createWorkspaceSnapshot: CreateWorkspaceSnapshot
+      readonly materializeWorkspace: MaterializeWorkspace
     }): readonly ExplicitCorrectionEvaluationTask[] {
-      return evaluationTaskDefinitions.map((definition, index) => {
+      return deepFreeze(evaluationTaskDefinitions.map((definition, index) => {
         const content = `controlled evaluation workspace ${index}\n`
         const baselineWorkspaceRoot = join(
           input.root,
@@ -170,8 +181,9 @@ function buildResearchSummaryControlledProtocol() {
           definition.semanticType,
           'candidate',
         )
-        const workspaceSnapshot = input.createWorkspaceSnapshot(baselineWorkspaceRoot, content)
-        input.createWorkspaceSnapshot(candidateWorkspaceRoot, content)
+        const expectedWorkspaceSnapshot = workspaceSnapshot(content)
+        input.materializeWorkspace(baselineWorkspaceRoot, content)
+        input.materializeWorkspace(candidateWorkspaceRoot, content)
         const goal = `Complete controlled lifecycle task ${index}.`
         const taskInput = `Use the available Skill, then verify lifecycle task ${index}.`
         const authorization = { mode: 'fixture-only', task: definition.semanticType } as const
@@ -185,7 +197,7 @@ function buildResearchSummaryControlledProtocol() {
           input: taskInput,
           baselineWorkspaceRoot,
           candidateWorkspaceRoot,
-          workspaceSnapshot,
+          workspaceSnapshot: expectedWorkspaceSnapshot,
           authorization,
           verifierArguments,
           verifierContract: { toolName: acceptance.toolName, arguments: verifierArguments },
@@ -202,7 +214,7 @@ function buildResearchSummaryControlledProtocol() {
           evaluatorSessionId:
             `session:controlled-eval:fixture:lifecycle:${definition.semanticType}:evaluator` as const,
         }
-      })
+      }))
     },
     buildProtocolInput(input: {
       readonly ticketId: unknown
@@ -213,7 +225,7 @@ function buildResearchSummaryControlledProtocol() {
       readonly toolSchemaDigest: Digest
       readonly tasks: readonly ExplicitCorrectionEvaluationTask[]
     }) {
-      return {
+      return deepFreeze({
         ticketId: input.ticketId,
         evidencePurpose: 'development-only-synthetic-defect' as const,
         protocol: {
@@ -246,10 +258,10 @@ function buildResearchSummaryControlledProtocol() {
             retryPolicyDigest: input.sha256(input.retryPolicy),
           },
         },
-      }
+      })
     },
     buildArmsInput(candidateId: unknown, protocolId: unknown, tasks: readonly ExplicitCorrectionEvaluationTask[]) {
-      return {
+      return deepFreeze({
         candidateId,
         protocolId,
         tasks: tasks.map(task => ({
@@ -267,10 +279,10 @@ function buildResearchSummaryControlledProtocol() {
           candidateSessionId: task.candidateSessionId,
           evaluatorSessionId: task.evaluatorSessionId,
         })),
-      }
+      })
     },
     buildEvaluatorsInput(evaluationId: unknown, tasks: readonly ExplicitCorrectionEvaluationTask[]) {
-      return {
+      return deepFreeze({
         evaluationId,
         tasks: tasks.map(task => ({
           taskId: task.taskId,
@@ -278,24 +290,23 @@ function buildResearchSummaryControlledProtocol() {
           input: task.input,
           evaluatorMaterialContract: task.evaluatorMaterialContract,
         })),
-      }
+      })
     },
     buildShadowTasks(input: {
       readonly root: string
-      readonly createWorkspaceSnapshot: CreateWorkspaceSnapshot
+      readonly materializeWorkspace: MaterializeWorkspace
     }) {
-      return evaluationTaskDefinitions.map((definition, index) => {
+      return deepFreeze(evaluationTaskDefinitions.map((definition, index) => {
         const workspaceRoot = join(input.root, 'workspaces', 'shadow', definition.semanticType)
-        const workspaceSnapshot = input.createWorkspaceSnapshot(
-          workspaceRoot,
-          `controlled isolated Shadow workspace ${index}\n`,
-        )
+        const content = `controlled isolated Shadow workspace ${index}\n`
+        const expectedWorkspaceSnapshot = workspaceSnapshot(content)
+        input.materializeWorkspace(workspaceRoot, content)
         return {
           taskId: `shadow-task:lifecycle-${definition.semanticType}` as const,
           goal: `Complete isolated lifecycle Shadow task ${index}.`,
           input: `Use the available Skill, then verify isolated lifecycle task ${index}.`,
           workspaceRoot,
-          workspaceSnapshot,
+          workspaceSnapshot: expectedWorkspaceSnapshot,
           authorization: { mode: 'fixture-only', task: definition.semanticType },
           verifierContract: { toolName: acceptance.toolName, phase: 'shadow' },
           stopCondition: { terminal: 'completed-final-assistant-text' },
@@ -305,21 +316,20 @@ function buildResearchSummaryControlledProtocol() {
           stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
           sessionId: `session:controlled-shadow:fixture:lifecycle:${definition.semanticType}`,
         }
-      })
+      }))
     },
     buildTransitionInput(input: {
       readonly root: string
       readonly shadowId: unknown
       readonly kind: TransitionKind
       readonly expectedRevision: number
-      readonly createWorkspaceSnapshot: CreateWorkspaceSnapshot
+      readonly materializeWorkspace: MaterializeWorkspace
     }) {
       const workspaceRoot = join(input.root, 'workspaces', 'transition', input.kind)
-      const workspaceSnapshot = input.createWorkspaceSnapshot(
-        workspaceRoot,
-        `controlled transition ${input.kind} workspace\n`,
-      )
-      return {
+      const content = `controlled transition ${input.kind} workspace\n`
+      const expectedWorkspaceSnapshot = workspaceSnapshot(content)
+      input.materializeWorkspace(workspaceRoot, content)
+      return deepFreeze({
         shadowId: input.shadowId,
         kind: input.kind,
         expectedRevision: input.expectedRevision,
@@ -327,7 +337,7 @@ function buildResearchSummaryControlledProtocol() {
           goal: `Verify the active lifecycle ${input.kind} pointer.`,
           input: `Use the available Skill, then verify lifecycle ${input.kind}.`,
           workspaceRoot,
-          workspaceSnapshot,
+          workspaceSnapshot: expectedWorkspaceSnapshot,
           authorization: { mode: 'fixture-only', kind: input.kind },
           verifierContract: { toolName: acceptance.toolName, kind: input.kind },
           stopCondition: { terminal: 'completed-final-assistant-text' },
@@ -337,18 +347,18 @@ function buildResearchSummaryControlledProtocol() {
           stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
           sessionId: `session:controlled-activation:fixture:lifecycle:${input.kind}`,
         },
-      }
+      })
     },
     freezeExecution(input: {
       readonly callConfig: unknown
       readonly retryPolicy: unknown
       readonly toolSchemas: unknown
     }): FrozenExecution {
-      return {
+      return deepFreeze({
         callConfigDigest: digest(input.callConfig),
         retryPolicyDigest: digest(input.retryPolicy),
         toolSurfaceDigest: digest(input.toolSchemas),
-      }
+      })
     },
     assertFrozenExecution(frozen: FrozenExecution, input: {
       readonly callConfig: unknown
