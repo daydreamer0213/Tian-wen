@@ -1156,6 +1156,380 @@ describe('Tianwen Long Goal Web host', () => {
     }
   })
 
+  it('reconciles DSH feedback before analysis and rejects stale Evolution feedback without opening a Session', async () => {
+    const fixture = createFixtureRoot()
+    const ticketId = `ticket:${'d'.repeat(64)}`
+    const sourceSessionId = 'stale-feedback-source-session'
+    const feedbackRecordedAt = '2026-09-02T00:00:00.000Z'
+    const snapshot = {
+      goals: [{
+        record: {
+          id: 'stale-feedback-goal', schemaVersion: 'tianwen.long-goal.v2', workspaceRoot: 'D:/workspace',
+          planner: { agentPreset: 'tianwen' },
+        } as unknown as LongGoalRecordV2,
+        status: {
+          schemaVersion: 'tianwen.long-goal-status.v2',
+          tasks: [{ id: 'task-1', phase: 'complete', execution: { goalId: 'source-goal', sessionId: sourceSessionId } }],
+        } as unknown as LongGoalStatusProjectionV2,
+      }],
+      status: {
+        schemaVersion: 'tianwen.learning-clue-status.v1' as const,
+        items: [{
+          ticketId, status: 'open' as const, occurrenceCount: 1, analysis: null, review: null,
+          sources: [{
+            longGoalId: 'stale-feedback-goal', goalObjective: 'Correct stale feedback', taskId: 'task-1',
+            taskObjective: 'Use only the live DSH feedback', recordedAt: feedbackRecordedAt,
+          }],
+        }],
+      },
+    }
+    const feedback = {
+      scopeKey: 'workspace:D:/workspace',
+      latest: {
+        note: 'This stale note must never reach the analysis Session.',
+        recordedAt: feedbackRecordedAt,
+        sessionId: sourceSessionId,
+        messageId: 'assistant-anchor',
+      },
+    }
+    let intakeStatus = {
+      state: 'active' as const,
+      sessionId: sourceSessionId,
+      messageId: 'assistant-anchor',
+      feedbackVersion: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      scopeKey: feedback.scopeKey,
+      rating: 'negative' as const,
+      feedbackFingerprint: `sha256:${'d'.repeat(64)}` as const,
+      recordedAt: feedbackRecordedAt,
+      decision: 'ticket-created' as const,
+      ingestionId: `sha256:${'e'.repeat(64)}` as const,
+      signalId: `signal:${'f'.repeat(64)}` as const,
+      ticketId,
+      analysisConsentRevision: 1,
+    }
+    const reconcileSession = vi.fn(async () => {
+      intakeStatus = { ...intakeStatus, state: 'retracted' }
+      return {
+        schemaVersion: 'tianwen.message-feedback-reconciliation.v1' as const,
+        sessionId: sourceSessionId,
+        state: 'reconciled' as const,
+        current: 0,
+        active: 0,
+        retracted: 1,
+      }
+    })
+    const sourceEvents = [{ type: 'turn/start', seq: 1, data: { turn: 1 } }, {
+      type: 'user/message', seq: 2, data: { source: { kind: 'goal', goalId: 'source-goal' } },
+    }, {
+      type: 'assistant/message', seq: 3, surfaceOp: 'append', data: {
+        turn: 1, message: { id: 'assistant-anchor', content: [{ type: 'text', text: 'Old answer.' }] },
+      },
+    }, {
+      type: 'turn/end', seq: 4, time: 1_000, data: { turn: 1, reason: { kind: 'completed' } },
+    }, {
+      type: 'goal/change', seq: 5, data: {
+        operation: 'complete', goal: { id: 'source-goal', phase: 'complete' },
+      },
+    }]
+    const openSession = vi.fn(async () => ({
+      session: { events: sourceEvents } as never,
+      release: () => undefined,
+    }))
+    const followup = vi.fn()
+    const createSession = vi.fn(async (input: { readonly sessionId: string }) => ({
+      sessionId: input.sessionId,
+      agent: { followup, whenIdle: async () => undefined } as unknown as Agent,
+    }))
+    const operations = createLearningClueAnalysisOperations({
+      stateRoot: fixture,
+      clueSnapshot: async () => snapshot,
+      reconcileSession,
+      getFeedback: input => input === ticketId ? feedback : undefined,
+      getIntakeStatus: () => intakeStatus,
+      openSession,
+      createSession,
+      flushSession: async () => undefined,
+    })
+    const handler = createTianwenLongGoalRpcHandler(ROOTS, undefined, undefined, undefined, operations)
+    try {
+      await expect(handler(
+        'analyze-learning-clue',
+        { ticketId },
+        AbortSignal.timeout(1_000),
+      )).rejects.toThrow('consented active feedback revision')
+      expect(reconcileSession).toHaveBeenCalledOnce()
+      expect(reconcileSession.mock.calls[0]?.[0]).toBe(sourceSessionId)
+      expect(openSession).not.toHaveBeenCalled()
+      expect(createSession).not.toHaveBeenCalled()
+      expect(followup).not.toHaveBeenCalled()
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('abandons analysis when the feedback changes while opening its source Session', async () => {
+    const fixture = createFixtureRoot()
+    const ticketId = `ticket:${'c'.repeat(64)}`
+    const sourceSessionId = 'source-race-session'
+    const recordedAt = '2026-09-02T00:00:00.000Z'
+    const snapshot = {
+      goals: [{
+        record: {
+          id: 'source-race-goal', schemaVersion: 'tianwen.long-goal.v2', workspaceRoot: 'D:/workspace',
+          planner: { agentPreset: 'tianwen' },
+        } as unknown as LongGoalRecordV2,
+        status: {
+          schemaVersion: 'tianwen.long-goal-status.v2',
+          tasks: [{ id: 'task-1', phase: 'complete', execution: { goalId: 'source-goal', sessionId: sourceSessionId } }],
+        } as unknown as LongGoalStatusProjectionV2,
+      }],
+      status: {
+        schemaVersion: 'tianwen.learning-clue-status.v1' as const,
+        items: [{
+          ticketId, status: 'open' as const, occurrenceCount: 1, analysis: null, review: null,
+          sources: [{
+            longGoalId: 'source-race-goal', goalObjective: 'Guard source race', taskId: 'task-1',
+            taskObjective: 'Never analyze superseded feedback', recordedAt,
+          }],
+        }],
+      },
+    }
+    let feedback = {
+      scopeKey: 'workspace:D:/workspace',
+      latest: {
+        note: 'This note is superseded during source opening.', recordedAt,
+        sessionId: sourceSessionId, messageId: 'assistant-anchor',
+      },
+    }
+    let intakeStatus = {
+      state: 'active' as const, sessionId: sourceSessionId, messageId: 'assistant-anchor',
+      feedbackVersion: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', scopeKey: feedback.scopeKey,
+      rating: 'negative' as const, feedbackFingerprint: `sha256:${'c'.repeat(64)}` as const,
+      recordedAt, decision: 'ticket-created' as const, ingestionId: `sha256:${'d'.repeat(64)}` as const,
+      signalId: `signal:${'e'.repeat(64)}` as const, ticketId, analysisConsentRevision: 1,
+    }
+    let markSourceOpened!: () => void
+    const sourceOpened = new Promise<void>(resolveSource => { markSourceOpened = resolveSource })
+    let releaseSource!: () => void
+    const sourceGate = new Promise<void>(resolveGate => { releaseSource = resolveGate })
+    const sourceEvents = [{ type: 'turn/start', seq: 1, data: { turn: 1 } }, {
+      type: 'user/message', seq: 2, data: { source: { kind: 'goal', goalId: 'source-goal' } },
+    }, {
+      type: 'assistant/message', seq: 3, surfaceOp: 'append', data: {
+        turn: 1, message: { id: 'assistant-anchor', content: [{ type: 'text', text: 'Original answer.' }] },
+      },
+    }, {
+      type: 'turn/end', seq: 4, time: 1_000, data: { turn: 1, reason: { kind: 'completed' } },
+    }, {
+      type: 'goal/change', seq: 5, data: { operation: 'complete', goal: { id: 'source-goal', phase: 'complete' } },
+    }]
+    const followup = vi.fn()
+    const openSession = vi.fn(async () => {
+      markSourceOpened()
+      await sourceGate
+      return { session: { events: sourceEvents } as never, release: () => undefined }
+    })
+    const createSession = vi.fn(async (input: { readonly sessionId: string }) => ({
+      sessionId: input.sessionId,
+      agent: { followup, whenIdle: async () => undefined } as unknown as Agent,
+    }))
+    const operations = createLearningClueAnalysisOperations({
+      stateRoot: fixture,
+      clueSnapshot: async () => snapshot,
+      reconcileSession: async () => ({
+        schemaVersion: 'tianwen.message-feedback-reconciliation.v1' as const,
+        sessionId: sourceSessionId, state: 'reconciled' as const, current: 1, active: 1, retracted: 0,
+      }),
+      getFeedback: () => feedback,
+      getIntakeStatus: () => intakeStatus,
+      openSession,
+      createSession,
+      flushSession: async () => undefined,
+    })
+    const handler = createTianwenLongGoalRpcHandler(ROOTS, undefined, undefined, undefined, operations)
+    try {
+      const analysis = handler('analyze-learning-clue', { ticketId }, AbortSignal.timeout(1_000))
+      await sourceOpened
+      feedback = {
+        ...feedback,
+        latest: {
+          ...feedback.latest,
+          note: 'Replacement note written by DSH during source opening.',
+          recordedAt: '2026-09-02T00:00:01.000Z',
+        },
+      }
+      intakeStatus = {
+        ...intakeStatus,
+        feedbackVersion: 'cccccccc-cccc-4ccc-8ccc-cccccccccccd',
+        feedbackFingerprint: `sha256:${'f'.repeat(64)}` as const,
+        recordedAt: feedback.latest.recordedAt,
+      }
+      releaseSource()
+      await expect(analysis).rejects.toThrow('feedback revision changed during analysis admission')
+      expect(createSession).not.toHaveBeenCalled()
+      expect(followup).not.toHaveBeenCalled()
+      expect(readLearningClueAnalysisBinding(fixture, ticketId)).toBeUndefined()
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('leaves a changed feedback revision unbound when it changes while creating the analysis Session', async () => {
+    const fixture = createFixtureRoot()
+    const ticketId = `ticket:${'b'.repeat(64)}`
+    const sourceSessionId = 'create-race-session'
+    const recordedAt = '2026-09-02T00:00:00.000Z'
+    const snapshot = {
+      goals: [{
+        record: {
+          id: 'create-race-goal', schemaVersion: 'tianwen.long-goal.v2', workspaceRoot: 'D:/workspace',
+          planner: { agentPreset: 'tianwen' },
+        } as unknown as LongGoalRecordV2,
+        status: {
+          schemaVersion: 'tianwen.long-goal-status.v2',
+          tasks: [{ id: 'task-1', phase: 'complete', execution: { goalId: 'source-goal', sessionId: sourceSessionId } }],
+        } as unknown as LongGoalStatusProjectionV2,
+      }],
+      status: {
+        schemaVersion: 'tianwen.learning-clue-status.v1' as const,
+        items: [{
+          ticketId, status: 'open' as const, occurrenceCount: 1, analysis: null, review: null,
+          sources: [{
+            longGoalId: 'create-race-goal', goalObjective: 'Guard create race', taskId: 'task-1',
+            taskObjective: 'Do not bind a stale analysis session', recordedAt,
+          }],
+        }],
+      },
+    }
+    const feedback = {
+      scopeKey: 'workspace:D:/workspace',
+      latest: {
+        note: 'This note is retracted during analysis session creation.', recordedAt,
+        sessionId: sourceSessionId, messageId: 'assistant-anchor',
+      },
+    }
+    let intakeStatus = {
+      state: 'active' as const, sessionId: sourceSessionId, messageId: 'assistant-anchor',
+      feedbackVersion: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', scopeKey: feedback.scopeKey,
+      rating: 'negative' as const, feedbackFingerprint: `sha256:${'b'.repeat(64)}` as const,
+      recordedAt, decision: 'ticket-created' as const, ingestionId: `sha256:${'c'.repeat(64)}` as const,
+      signalId: `signal:${'d'.repeat(64)}` as const, ticketId, analysisConsentRevision: 1,
+    }
+    const sourceEvents = [{ type: 'turn/start', seq: 1, data: { turn: 1 } }, {
+      type: 'user/message', seq: 2, data: { source: { kind: 'goal', goalId: 'source-goal' } },
+    }, {
+      type: 'assistant/message', seq: 3, surfaceOp: 'append', data: {
+        turn: 1, message: { id: 'assistant-anchor', content: [{ type: 'text', text: 'Original answer.' }] },
+      },
+    }, {
+      type: 'turn/end', seq: 4, time: 1_000, data: { turn: 1, reason: { kind: 'completed' } },
+    }, {
+      type: 'goal/change', seq: 5, data: { operation: 'complete', goal: { id: 'source-goal', phase: 'complete' } },
+    }]
+    let markCreateStarted!: () => void
+    const createStarted = new Promise<void>(resolveStarted => { markCreateStarted = resolveStarted })
+    let releaseCreate!: () => void
+    const createGate = new Promise<void>(resolveGate => { releaseCreate = resolveGate })
+    const followup = vi.fn()
+    const createSession = vi.fn(async (input: { readonly sessionId: string }) => {
+      markCreateStarted()
+      await createGate
+      return {
+        sessionId: input.sessionId,
+        agent: { followup, whenIdle: async () => undefined } as unknown as Agent,
+      }
+    })
+    const operations = createLearningClueAnalysisOperations({
+      stateRoot: fixture,
+      clueSnapshot: async () => snapshot,
+      reconcileSession: async () => ({
+        schemaVersion: 'tianwen.message-feedback-reconciliation.v1' as const,
+        sessionId: sourceSessionId, state: 'reconciled' as const, current: 1, active: 1, retracted: 0,
+      }),
+      getFeedback: () => feedback,
+      getIntakeStatus: () => intakeStatus,
+      openSession: async () => ({ session: { events: sourceEvents } as never, release: () => undefined }),
+      createSession,
+      flushSession: async () => undefined,
+    })
+    const handler = createTianwenLongGoalRpcHandler(ROOTS, undefined, undefined, undefined, operations)
+    try {
+      const analysis = handler('analyze-learning-clue', { ticketId }, AbortSignal.timeout(1_000))
+      await createStarted
+      intakeStatus = { ...intakeStatus, state: 'retracted' }
+      releaseCreate()
+      await expect(analysis).rejects.toThrow('consented active feedback revision')
+      expect(createSession).toHaveBeenCalledOnce()
+      expect(followup).not.toHaveBeenCalled()
+      expect(readLearningClueAnalysisBinding(fixture, ticketId)).toBeUndefined()
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    ['pending', async () => ({ state: 'pending' as const })],
+    ['session-not-found', async () => ({ state: 'session-not-found' as const })],
+    ['error', async () => { throw new Error('bridge read failed') }],
+  ])('fails closed when DSH feedback reconciliation is %s', async (_name, reconcile) => {
+    const fixture = createFixtureRoot()
+    const ticketId = `ticket:${'a'.repeat(64)}`
+    const sourceSessionId = 'unreconciled-session'
+    const recordedAt = '2026-09-02T00:00:00.000Z'
+    const operations = createLearningClueAnalysisOperations({
+      stateRoot: fixture,
+      clueSnapshot: async () => ({
+        goals: [{
+          record: {
+            id: 'unreconciled-goal', schemaVersion: 'tianwen.long-goal.v2', workspaceRoot: 'D:/workspace',
+            planner: { agentPreset: 'tianwen' },
+          } as unknown as LongGoalRecordV2,
+          status: {
+            schemaVersion: 'tianwen.long-goal-status.v2',
+            tasks: [{ id: 'task-1', phase: 'complete', execution: { goalId: 'source-goal', sessionId: sourceSessionId } }],
+          } as unknown as LongGoalStatusProjectionV2,
+        }],
+        status: {
+          schemaVersion: 'tianwen.learning-clue-status.v1' as const,
+          items: [{
+            ticketId, status: 'open' as const, occurrenceCount: 1, analysis: null, review: null,
+            sources: [{
+              longGoalId: 'unreconciled-goal', goalObjective: 'Fail closed', taskId: 'task-1',
+              taskObjective: 'Do not inspect an unreconciled note', recordedAt,
+            }],
+          }],
+        },
+      }),
+      reconcileSession: async sessionId => {
+        const result = await reconcile()
+        return {
+          schemaVersion: 'tianwen.message-feedback-reconciliation.v1' as const,
+          sessionId,
+          ...result,
+        }
+      },
+      getFeedback: () => ({
+        scopeKey: 'workspace:D:/workspace',
+        latest: { note: 'must not inspect', recordedAt, sessionId: sourceSessionId, messageId: 'assistant-anchor' },
+      }),
+      getIntakeStatus: () => ({
+        state: 'active' as const, sessionId: sourceSessionId, messageId: 'assistant-anchor',
+        feedbackVersion: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', scopeKey: 'workspace:D:/workspace',
+        rating: 'negative' as const, feedbackFingerprint: `sha256:${'a'.repeat(64)}` as const,
+        recordedAt, decision: 'ticket-created' as const, ingestionId: `sha256:${'b'.repeat(64)}` as const,
+        signalId: `signal:${'c'.repeat(64)}` as const, ticketId, analysisConsentRevision: 1,
+      }),
+      openSession: async () => { throw new Error('must not open source Session') },
+      createSession: async () => { throw new Error('must not create analysis Session') },
+      flushSession: async () => undefined,
+    })
+    try {
+      await expect(operations.analyze({ ticketId })).rejects.toThrow('reconciliation is incomplete')
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
   it('analyzes one safe feedback source once without exposing its private evidence', async () => {
     const fixture = createFixtureRoot()
     const ticketId = `ticket:${'f'.repeat(64)}`

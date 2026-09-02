@@ -1620,6 +1620,13 @@ type LearningFeedbackReconciliation = {
   readonly state: 'reconciled' | 'session-not-found' | 'pending'
 }
 
+type ConsentedLearningClueFeedback = {
+  readonly snapshot: LearningClueSnapshot
+  readonly clue: LearningClueItem
+  readonly feedback: LearningTicketFeedback
+  readonly intake: LearningIntakeStatus
+}
+
 export interface LearningClueAnalysisDependencies {
   readonly stateRoot: string
   readonly clueSnapshot: () => Promise<LearningClueSnapshot>
@@ -1694,33 +1701,101 @@ export function createLearningClueAnalysisOperations(
         : null,
     }
   }
-  const status = async (): Promise<LearningClueStatus> => {
-    let snapshot = await dependencies.clueSnapshot()
+  const reconcileSessions = async (sessionIds: Iterable<string>): Promise<void> => {
     const reconcileSession = dependencies.reconcileSession
-    if (reconcileSession !== undefined) {
-      const sessionIds = new Set<string>()
-      for (const goal of snapshot.goals) {
-        if (goal.status.schemaVersion === 'tianwen.long-goal-status.v1') continue
-        for (const task of goal.status.tasks) {
-          if (task.execution !== null) sessionIds.add(task.execution.sessionId)
-        }
-      }
-      const reconciliations = await Promise.all([...sessionIds].map(reconcileSession))
-      if (reconciliations.some(result => result.state !== 'reconciled')) {
-        throw new Error('Learning clue feedback reconciliation is incomplete')
-      }
-      if (sessionIds.size > 0) snapshot = await dependencies.clueSnapshot()
+    if (reconcileSession === undefined) return
+    let reconciliations: readonly LearningFeedbackReconciliation[]
+    try {
+      reconciliations = await Promise.all([...new Set(sessionIds)].map(sessionId => reconcileSession(sessionId)))
+    } catch {
+      throw new Error('Learning clue feedback reconciliation is incomplete')
     }
+    if (reconciliations.some(result => result.state !== 'reconciled')) {
+      throw new Error('Learning clue feedback reconciliation is incomplete')
+    }
+  }
+  const goalTaskSessionIds = (snapshot: LearningClueSnapshot): readonly string[] => {
+    const sessionIds = new Set<string>()
+    for (const goal of snapshot.goals) {
+      if (goal.status.schemaVersion === 'tianwen.long-goal-status.v1') continue
+      for (const task of goal.status.tasks) {
+        if (task.execution !== null) sessionIds.add(task.execution.sessionId)
+      }
+    }
+    return [...sessionIds]
+  }
+  const refreshedSnapshot = async (): Promise<LearningClueSnapshot> => {
+    const snapshot = await dependencies.clueSnapshot()
+    if (dependencies.reconcileSession === undefined) return snapshot
+    const sessionIds = goalTaskSessionIds(snapshot)
+    if (sessionIds.length === 0) return snapshot
+    await reconcileSessions(sessionIds)
+    return dependencies.clueSnapshot()
+  }
+  const activeFeedback = (
+    snapshot: LearningClueSnapshot,
+    ticketId: string,
+  ): ConsentedLearningClueFeedback => {
+    const clue = snapshot.status.items.find(item => item.ticketId === ticketId)
+    if (clue === undefined) throw new Error('Learning clue is not visible')
+    if (clue.status !== 'open') throw new Error('Learning clue is unsupported')
+    const feedback = dependencies.getFeedback(ticketId)
+    if (feedback === undefined) throw new Error('Learning clue has no private feedback')
+    const intake = dependencies.getIntakeStatus?.(
+      feedback.latest.sessionId,
+      feedback.latest.messageId,
+    )
+    if (
+      intake?.state !== 'active'
+      || intake.ticketId !== ticketId
+      || intake.sessionId !== feedback.latest.sessionId
+      || intake.messageId !== feedback.latest.messageId
+      || intake.scopeKey !== feedback.scopeKey
+      || intake.recordedAt !== feedback.latest.recordedAt
+      || intake.analysisConsentRevision === undefined
+    ) {
+      throw new Error('Learning clue analysis requires a consented active feedback revision')
+    }
+    return { snapshot, clue, feedback, intake }
+  }
+  const sameFeedbackRevision = (
+    expected: ConsentedLearningClueFeedback,
+    actual: ConsentedLearningClueFeedback,
+  ): boolean => (
+    actual.clue.ticketId === expected.clue.ticketId
+    && actual.feedback.scopeKey === expected.feedback.scopeKey
+    && actual.feedback.latest.sessionId === expected.feedback.latest.sessionId
+    && actual.feedback.latest.messageId === expected.feedback.latest.messageId
+    && actual.feedback.latest.recordedAt === expected.feedback.latest.recordedAt
+    && actual.feedback.latest.note === expected.feedback.latest.note
+    && actual.intake.feedbackVersion === expected.intake.feedbackVersion
+    && actual.intake.feedbackFingerprint === expected.intake.feedbackFingerprint
+    && actual.intake.sessionLifecycleFingerprint === expected.intake.sessionLifecycleFingerprint
+    && actual.intake.analysisConsentRevision === expected.intake.analysisConsentRevision
+  )
+  const freshActiveFeedback = async (ticketId: string): Promise<ConsentedLearningClueFeedback> =>
+    activeFeedback(await refreshedSnapshot(), ticketId)
+  const confirmActiveFeedback = async (
+    ticketId: string,
+    expected: ConsentedLearningClueFeedback,
+  ): Promise<ConsentedLearningClueFeedback> => {
+    await reconcileSessions([expected.feedback.latest.sessionId])
+    const actual = activeFeedback(await dependencies.clueSnapshot(), ticketId)
+    if (!sameFeedbackRevision(expected, actual)) {
+      throw new Error('Learning clue feedback revision changed during analysis admission')
+    }
+    return actual
+  }
+  const status = async (): Promise<LearningClueStatus> => {
+    const snapshot = await refreshedSnapshot()
     const items = await Promise.all(snapshot.status.items.map(projectClue))
     return { schemaVersion: 'tianwen.learning-clue-status.v1', items }
   }
   return {
     status,
     analyze: async ({ ticketId }) => {
-      const snapshot = await dependencies.clueSnapshot()
-      const clue = snapshot.status.items.find(item => item.ticketId === ticketId)
-      if (clue === undefined) throw new Error('Learning clue is not visible')
-      if (clue.status !== 'open') throw new Error('Learning clue is unsupported')
+      const admitted = await freshActiveFeedback(ticketId)
+      const { snapshot, clue, feedback } = admitted
       const existing = readLearningClueAnalysisBinding(dependencies.stateRoot, ticketId)
       if (existing !== undefined) {
         return {
@@ -1728,23 +1803,6 @@ export function createLearningClueAnalysisOperations(
           created: false,
           sessionId: existing.sessionId,
         }
-      }
-      const feedback = dependencies.getFeedback(ticketId)
-      if (feedback === undefined) throw new Error('Learning clue has no private feedback')
-      const intake = dependencies.getIntakeStatus?.(
-        feedback.latest.sessionId,
-        feedback.latest.messageId,
-      )
-      if (
-        intake?.state !== 'active'
-        || intake.ticketId !== ticketId
-        || intake.sessionId !== feedback.latest.sessionId
-        || intake.messageId !== feedback.latest.messageId
-        || intake.scopeKey !== feedback.scopeKey
-        || intake.recordedAt !== feedback.latest.recordedAt
-        || intake.analysisConsentRevision === undefined
-      ) {
-        throw new Error('Learning clue analysis requires a consented active feedback revision')
       }
       let source: {
         readonly workspaceRoot: string
@@ -1786,6 +1844,7 @@ export function createLearningClueAnalysisOperations(
         }
       }
       if (source === undefined) throw new Error('Learning clue feedback source mismatch')
+      const confirmed = await confirmActiveFeedback(ticketId, admitted)
       const pending = pendingAnalyses.get(ticketId)
       if (pending !== undefined) return pending
       const result = (async () => {
@@ -1794,8 +1853,8 @@ export function createLearningClueAnalysisOperations(
           content: [{ type: 'text', text: analysisPrompt({
             goalObjective: source.goalObjective,
             taskObjective: source.taskObjective,
-            occurrenceCount: clue.occurrenceCount,
-            feedbackNote: feedback.latest.note,
+            occurrenceCount: confirmed.clue.occurrenceCount,
+            feedbackNote: confirmed.feedback.latest.note,
             finalAssistantReply: source.finalAssistantReply,
           }) }],
           source: { kind: 'user' },
@@ -1806,6 +1865,7 @@ export function createLearningClueAnalysisOperations(
           agentPreset: source.agentPreset,
         })
         if (created.sessionId !== sessionId) throw new Error('Learning clue analysis Session identity mismatch')
+        await confirmActiveFeedback(ticketId, admitted)
         const binding = createLearningClueAnalysisBinding({
           stateRoot: dependencies.stateRoot,
           ticketId,
