@@ -25,6 +25,11 @@ import type {
   LearningAnalysisConsentInput,
   LearningAnalysisConsentReceipt,
   LearningAnalysisConsentRecordedEvent,
+  LearningConsentNoticeBinding,
+  LearningConsentNoticeDeliveredEvent,
+  LearningConsentNoticeIntentRecordedEvent,
+  LearningConsentNoticeReceipt,
+  LearningConsentNoticeStatus,
   LearningFeedbackRetractedEvent,
   LearningIntakeInput,
   LearningIntakeLedgerEvent,
@@ -298,6 +303,8 @@ export type LedgerEvent =
   | LearningIntakeLedgerEvent
   | LearningFeedbackRetractedEvent
   | LearningAnalysisConsentRecordedEvent
+  | LearningConsentNoticeIntentRecordedEvent
+  | LearningConsentNoticeDeliveredEvent
   | RunBindingRecordedEvent
   | OutcomeIntakeRecordedEvent
   | RunSkillManifestRecordedEvent
@@ -404,6 +411,18 @@ export interface EvolutionLedgerOptions {
 }
 
 type EvolutionLedgerMode = 'mutation' | 'inspection'
+
+type StoredLearningConsentNotice = LearningConsentNoticeBinding & (
+  | {
+      readonly state: 'pending'
+      readonly intentRecordedAt: string
+    }
+  | {
+      readonly state: 'delivered'
+      readonly intentRecordedAt: string
+      readonly deliveredAt: string
+    }
+)
 
 export interface ActivationFailure {
   readonly artifactId: ArtifactId
@@ -880,6 +899,64 @@ function parseLearningAnalysisConsentEvent(
   }
 }
 
+function parseLearningConsentNoticeBinding(
+  value: unknown,
+): LearningConsentNoticeBinding {
+  if (!isRecord(value)) {
+    throw new LedgerIntegrityError('learning consent notice must be an object')
+  }
+  exactKeys(value, [
+    'policyVersion',
+    'mainSessionId',
+    'noticeSourceMessageId',
+    'deliveryId',
+  ])
+  if (value.policyVersion !== 'tianwen-auto-analysis.v1') {
+    throw new LedgerIntegrityError('invalid learning consent notice policy')
+  }
+  return {
+    policyVersion: 'tianwen-auto-analysis.v1',
+    mainSessionId: requireString(value.mainSessionId, 'mainSessionId'),
+    noticeSourceMessageId: requireString(
+      value.noticeSourceMessageId,
+      'noticeSourceMessageId',
+    ),
+    deliveryId: requireString(value.deliveryId, 'deliveryId'),
+  }
+}
+
+function parseLearningConsentNoticeIntentEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningConsentNoticeIntentRecordedEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'notice'])
+  if (value.schemaVersion !== 'tianwen.learning-consent-notice-intent.v1') {
+    throw new LedgerIntegrityError('invalid learning consent notice intent schema')
+  }
+  return {
+    schemaVersion: 'tianwen.learning-consent-notice-intent.v1',
+    type: 'learning-consent-notice-intent-recorded',
+    at,
+    notice: parseLearningConsentNoticeBinding(value.notice),
+  }
+}
+
+function parseLearningConsentNoticeDeliveredEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningConsentNoticeDeliveredEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'notice'])
+  if (value.schemaVersion !== 'tianwen.learning-consent-notice-delivered.v1') {
+    throw new LedgerIntegrityError('invalid learning consent notice delivery schema')
+  }
+  return {
+    schemaVersion: 'tianwen.learning-consent-notice-delivered.v1',
+    type: 'learning-consent-notice-delivered',
+    at,
+    notice: parseLearningConsentNoticeBinding(value.notice),
+  }
+}
+
 function parseOutcomeInput(value: unknown): OutcomeIntakeInput {
   if (!isRecord(value)) {
     throw new LedgerIntegrityError('Outcome input must be an object')
@@ -1036,6 +1113,12 @@ function parseEvent(value: unknown): LedgerEvent {
   }
   if (type === 'learning-analysis-consent-recorded') {
     return parseLearningAnalysisConsentEvent(value, at)
+  }
+  if (type === 'learning-consent-notice-intent-recorded') {
+    return parseLearningConsentNoticeIntentEvent(value, at)
+  }
+  if (type === 'learning-consent-notice-delivered') {
+    return parseLearningConsentNoticeDeliveredEvent(value, at)
   }
   if (type === 'run-binding-recorded') {
     exactKeys(value, [
@@ -1843,6 +1926,10 @@ export class EvolutionLedger {
     LearningAnalysisConsent
   >()
   #learningAnalysisConsent: LearningAnalysisConsent | undefined
+  readonly #learningConsentNotices = new Map<
+    LearningConsentNoticeBinding['policyVersion'],
+    StoredLearningConsentNotice
+  >()
   readonly #outcomeIntakes = new Map<
     Sha256Digest,
     OutcomeIntakeRecordedEvent
@@ -3490,6 +3577,79 @@ export class EvolutionLedger {
     return this.#learningAnalysisConsent === undefined
       ? undefined
       : clone(this.#learningAnalysisConsent)
+  }
+
+  recordLearningConsentNoticeIntent(
+    input: LearningConsentNoticeBinding,
+  ): LearningConsentNoticeReceipt {
+    const notice = parseLearningConsentNoticeBinding(input)
+    const existing = this.#learningConsentNotices.get(notice.policyVersion)
+    if (existing !== undefined) {
+      const { state: _state, intentRecordedAt: _intentAt, ...binding } = existing
+      const { deliveredAt: _deliveredAt, ...comparable } = binding as typeof binding & {
+        readonly deliveredAt?: string
+      }
+      if (canonicalJson(comparable) !== canonicalJson(notice)) {
+        throw new LedgerIntegrityError('learning consent notice intent changed')
+      }
+      return { ...existing, duplicate: true }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-consent-notice-intent.v1',
+      type: 'learning-consent-notice-intent-recorded',
+      at: this.#now(),
+      notice,
+    })
+    return { ...this.#learningConsentNotices.get(notice.policyVersion)!, duplicate: false }
+  }
+
+  recordLearningConsentNoticeDelivered(
+    input: LearningConsentNoticeBinding,
+  ): LearningConsentNoticeReceipt {
+    const notice = parseLearningConsentNoticeBinding(input)
+    const existing = this.#learningConsentNotices.get(notice.policyVersion)
+    if (existing === undefined) {
+      throw new LedgerIntegrityError('learning consent notice intent is missing')
+    }
+    const { state: _state, intentRecordedAt: _intentAt, ...binding } = existing
+    const { deliveredAt: _deliveredAt, ...comparable } = binding as typeof binding & {
+      readonly deliveredAt?: string
+    }
+    if (canonicalJson(comparable) !== canonicalJson(notice)) {
+      throw new LedgerIntegrityError('learning consent notice delivery changed')
+    }
+    if (existing.state === 'delivered') return { ...existing, duplicate: true }
+    this.#accept({
+      schemaVersion: 'tianwen.learning-consent-notice-delivered.v1',
+      type: 'learning-consent-notice-delivered',
+      at: this.#now(),
+      notice,
+    })
+    return { ...this.#learningConsentNotices.get(notice.policyVersion)!, duplicate: false }
+  }
+
+  getLearningConsentNoticeStatus(
+    policyVersion: LearningConsentNoticeBinding['policyVersion'],
+  ): LearningConsentNoticeStatus | undefined {
+    const status = this.#learningConsentNotices.get(policyVersion)
+    if (status === undefined) return undefined
+    const publicBinding = {
+      policyVersion: status.policyVersion,
+      mainSessionId: status.mainSessionId,
+      noticeSourceMessageId: status.noticeSourceMessageId,
+    }
+    return status.state === 'pending'
+      ? clone({
+          ...publicBinding,
+          state: status.state,
+          intentRecordedAt: status.intentRecordedAt,
+        })
+      : clone({
+          ...publicBinding,
+          state: status.state,
+          intentRecordedAt: status.intentRecordedAt,
+          deliveredAt: status.deliveredAt,
+        })
   }
 
   getLearningIntakeStatus(
@@ -5314,6 +5474,23 @@ export class EvolutionLedger {
       }
       return
     }
+    if (event.type === 'learning-consent-notice-intent-recorded') {
+      if (this.#learningConsentNotices.has(event.notice.policyVersion)) {
+        throw new LedgerIntegrityError('duplicate learning consent notice intent')
+      }
+      return
+    }
+    if (event.type === 'learning-consent-notice-delivered') {
+      const status = this.#learningConsentNotices.get(event.notice.policyVersion)
+      if (status === undefined || status.state !== 'pending') {
+        throw new LedgerIntegrityError('learning consent notice delivery disagrees with history')
+      }
+      const { state: _state, intentRecordedAt: _intentAt, ...binding } = status
+      if (canonicalJson(binding) !== canonicalJson(event.notice)) {
+        throw new LedgerIntegrityError('learning consent notice delivery changed')
+      }
+      return
+    }
     if (event.type === 'artifact-recorded') {
       if (this.#artifacts.has(event.artifact.artifactId)) {
         throw new LedgerIntegrityError(
@@ -5705,6 +5882,24 @@ export class EvolutionLedger {
         event.consent,
       )
       this.#learningAnalysisConsent = event.consent
+      return
+    }
+    if (event.type === 'learning-consent-notice-intent-recorded') {
+      this.#learningConsentNotices.set(event.notice.policyVersion, {
+        ...event.notice,
+        state: 'pending',
+        intentRecordedAt: event.at,
+      })
+      return
+    }
+    if (event.type === 'learning-consent-notice-delivered') {
+      const intent = this.#learningConsentNotices.get(event.notice.policyVersion)!
+      this.#learningConsentNotices.set(event.notice.policyVersion, {
+        ...event.notice,
+        state: 'delivered',
+        intentRecordedAt: intent.intentRecordedAt,
+        deliveredAt: event.at,
+      })
       return
     }
     if (event.type === 'artifact-recorded') {

@@ -178,6 +178,57 @@ export interface LearningAnalysisConsentRecordedEvent {
   readonly consent: LearningAnalysisConsent
 }
 
+export interface LearningConsentNoticeBinding {
+  readonly policyVersion: 'tianwen-auto-analysis.v1'
+  readonly mainSessionId: string
+  readonly noticeSourceMessageId: string
+  readonly deliveryId: string
+}
+
+type LearningConsentNoticeState = (
+  | {
+      readonly state: 'pending'
+      readonly intentRecordedAt: string
+    }
+  | {
+      readonly state: 'delivered'
+      readonly intentRecordedAt: string
+      readonly deliveredAt: string
+    }
+)
+
+export type LearningConsentNoticeStatus = Omit<
+  LearningConsentNoticeBinding,
+  'deliveryId'
+> & LearningConsentNoticeState
+
+export type LearningConsentNoticeReceipt =
+  | (LearningConsentNoticeBinding & {
+      readonly state: 'pending'
+      readonly intentRecordedAt: string
+      readonly duplicate: boolean
+    })
+  | (LearningConsentNoticeBinding & {
+      readonly state: 'delivered'
+      readonly intentRecordedAt: string
+      readonly deliveredAt: string
+      readonly duplicate: boolean
+    })
+
+export interface LearningConsentNoticeIntentRecordedEvent {
+  readonly schemaVersion: 'tianwen.learning-consent-notice-intent.v1'
+  readonly type: 'learning-consent-notice-intent-recorded'
+  readonly at: string
+  readonly notice: LearningConsentNoticeBinding
+}
+
+export interface LearningConsentNoticeDeliveredEvent {
+  readonly schemaVersion: 'tianwen.learning-consent-notice-delivered.v1'
+  readonly type: 'learning-consent-notice-delivered'
+  readonly at: string
+  readonly notice: LearningConsentNoticeBinding
+}
+
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/
 
 export function canonicalJson(value: unknown): string {

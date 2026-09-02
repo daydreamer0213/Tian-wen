@@ -232,6 +232,7 @@ export class TianwenMessageFeedbackBridgeService extends Service {
       lifecycleAfter,
     )
     const consent = this.ctx.tianwenEvolution.getLearningAnalysisConsent()
+    const consentAgent = this.ctx.get('tianwenLearningConsentAgent')
     for (const [messageId, item] of byMessage) {
       const current = this.ctx.tianwenEvolution.getLearningIntakeStatus(
         sessionId,
@@ -246,6 +247,7 @@ export class TianwenMessageFeedbackBridgeService extends Service {
         ) {
           throw new Error('feedback revision disagrees with learning history')
         }
+        await this.observeConsentNotice(consentAgent, sessionId, item, consent)
         continue
       }
       const analysisConsentRevision = consentRevision(item, consent)
@@ -261,6 +263,7 @@ export class TianwenMessageFeedbackBridgeService extends Service {
           ? {}
           : { analysisConsentRevision }),
       })
+      await this.observeConsentNotice(consentAgent, sessionId, item, consent)
     }
 
     const currentMessageIds = new Set(byMessage.keys())
@@ -284,6 +287,24 @@ export class TianwenMessageFeedbackBridgeService extends Service {
       current: byMessage.size,
       active: statuses.filter(status => status.state === 'active').length,
       retracted: statuses.filter(status => status.state === 'retracted').length,
+    }
+  }
+
+  private async observeConsentNotice(
+    consentAgent: Context['tianwenLearningConsentAgent'] | undefined,
+    sessionId: string,
+    item: MessageFeedbackItem,
+    consent: ReturnType<Context['tianwenEvolution']['getLearningAnalysisConsent']>,
+  ): Promise<void> {
+    if (
+      consentAgent === undefined
+      || consent?.enabled === true
+      || item.rating !== 'negative'
+      || typeof item.note !== 'string'
+      || item.note.trim().length === 0
+    ) return
+    if (!await consentAgent.observeFeedbackWithoutConsent(sessionId)) {
+      throw new Error('feedback notice main Session lineage is unavailable')
     }
   }
 

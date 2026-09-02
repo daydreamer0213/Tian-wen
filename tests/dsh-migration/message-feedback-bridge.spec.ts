@@ -25,6 +25,9 @@ import { apply as applyCore } from '../../packages/tianwen-runtime/src/index.js'
 import {
   TianwenMessageFeedbackBridgeService,
 } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
+import {
+  TianwenLearningConsentAgentService,
+} from '../../packages/tianwen-runtime-bundle/src/learning-consent-agent.js'
 import { apply as applyRuntimeBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 
 const roots: string[] = []
@@ -57,6 +60,11 @@ function completedSession(
   messageIds: readonly string[],
   cwd?: string,
   createdAt = 1,
+  lineage?: {
+    readonly origin: 'subagent'
+    readonly parentSession?: string
+    readonly delegationDepth?: number
+  },
 ): Session {
   const sessionId = SessionId(id)
   const session = Session.create(sessionId, [], {
@@ -64,6 +72,15 @@ function completedSession(
     id: sessionId,
     createdAt,
     ...(cwd === undefined ? {} : { cwd }),
+    ...(lineage === undefined ? {} : {
+      origin: lineage.origin,
+      ...(lineage.parentSession === undefined
+        ? {}
+        : { parentSession: SessionId(lineage.parentSession) }),
+      ...(lineage.delegationDepth === undefined
+        ? {}
+        : { delegationDepth: lineage.delegationDepth }),
+    }),
   })
   for (const [index, messageId] of messageIds.entries()) {
     session.append('assistant/message', {
@@ -155,11 +172,24 @@ async function mountBridge(
   root: string,
   sessions: SessionCatalog,
   feedback: FeedbackCatalog,
+  options: { readonly learningConsent?: boolean } = {},
 ) {
   const ctx = new Context()
   ctx.provide('sessionPersistence', sessions)
   ctx.provide('messageFeedback', feedback)
+  if (options.learningConsent === true) {
+    ctx.provide('agents', {
+      list: () => [],
+      get: () => undefined,
+    } as never)
+    ctx.provide('sessions', {
+      flush: async () => true,
+    } as never)
+  }
   await applyCore(ctx, { evolutionRoot: root })
+  if (options.learningConsent === true) {
+    await ctx.plugin(TianwenLearningConsentAgentService)
+  }
   const fiber = ctx.plugin(TianwenMessageFeedbackBridgeService)
   await fiber
   return {
@@ -1027,6 +1057,240 @@ describe('Tianwen DSH Message Feedback bridge', () => {
       expect(feedbackLedgerEvents(root)).toHaveLength(3)
       expect(feedbackLedgerEvents(root).find(event =>
         (event.input as { readonly sessionId: string }).sessionId === String(earlier.id)))
+        .not.toHaveProperty('analysisConsentRevision')
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('records an unconsented correction before binding one durable notice intent to its exact root main', async () => {
+    const root = evolutionRoot('consent-notice-lineage')
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const main = completedSession('feedback-notice-main', [])
+    const child = completedSession(
+      'feedback-notice-child',
+      ['message-child', 'message-child-2'],
+      undefined,
+      2,
+      {
+        origin: 'subagent',
+        parentSession: String(main.id),
+        delegationDepth: 1,
+      },
+    )
+    sessions.add(main)
+    sessions.add(child)
+    sessions.listed = []
+    feedback.set(String(child.id), [item({
+      messageId: 'message-child',
+      version: '31313131-3131-4131-8131-313131313131',
+      note: 'PRIVATE CORRECTION MUST NOT ENTER THE NOTICE',
+    })])
+    const mounted = await mountBridge(root, sessions, feedback, {
+      learningConsent: true,
+    })
+
+    try {
+      await expect(mounted.bridge.reconcileSession(String(child.id)))
+        .resolves.toMatchObject({ state: 'reconciled', current: 1 })
+      expect(mounted.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(child.id),
+        'message-child',
+      )).toMatchObject({ state: 'active' })
+      const notice = mounted.ctx.tianwenEvolution
+        .getLearningConsentNoticeStatus('tianwen-auto-analysis.v1')
+      expect(notice).toMatchObject({
+        state: 'pending',
+        mainSessionId: String(main.id),
+      })
+      expect(JSON.stringify(notice)).not.toContain('PRIVATE CORRECTION')
+      expect(JSON.stringify(notice)).not.toMatch(/[A-Z]:\//u)
+
+      feedback.set(String(child.id), [item({
+        messageId: 'message-child',
+        version: '32323232-3232-4232-8232-323232323232',
+        note: 'SECOND PRIVATE CORRECTION',
+        updatedAt: 3,
+      }), item({
+        messageId: 'message-child-2',
+        version: '38383838-3838-4838-8838-383838383838',
+        note: 'PRIVATE CORRECTION ON A NEW MESSAGE',
+        updatedAt: 3,
+      })])
+      await mounted.bridge.reconcileSession(String(child.id))
+      expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+        .split('\n')
+        .filter(line => line.includes('learning-consent-notice-intent-recorded')))
+        .toHaveLength(1)
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('fails the notice recovery closed after durable intake when child lineage cannot prove a main parent', async () => {
+    const root = evolutionRoot('consent-notice-orphan')
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const orphan = completedSession(
+      'feedback-notice-orphan',
+      ['message-orphan'],
+      undefined,
+      2,
+      {
+        origin: 'subagent',
+        parentSession: 'feedback-notice-missing-parent',
+        delegationDepth: 1,
+      },
+    )
+    sessions.add(orphan)
+    sessions.listed = []
+    feedback.set(String(orphan.id), [item({
+      messageId: 'message-orphan',
+      version: '33333333-3333-4333-8333-333333333330',
+      note: 'Private orphan correction.',
+    })])
+    const mounted = await mountBridge(root, sessions, feedback, {
+      learningConsent: true,
+    })
+
+    try {
+      await expect(mounted.bridge.reconcileSession(String(orphan.id)))
+        .resolves.toMatchObject({ state: 'pending' })
+      expect(mounted.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(orphan.id),
+        'message-orphan',
+      )).toMatchObject({ state: 'active' })
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toBeUndefined()
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('recovers after intake persistence when the first notice intent append fails', async () => {
+    const root = evolutionRoot('consent-notice-intent-recovery')
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const session = completedSession(
+      'feedback-notice-intent-recovery',
+      ['message-recovery'],
+    )
+    sessions.add(session)
+    sessions.listed = []
+    feedback.set(String(session.id), [item({
+      messageId: 'message-recovery',
+      version: '39393939-3939-4939-8939-393939393939',
+      note: 'Private correction survives an intent failure.',
+    })])
+    const mounted = await mountBridge(root, sessions, feedback, {
+      learningConsent: true,
+    })
+    const intent = vi.spyOn(
+      mounted.ctx.tianwenEvolution,
+      'recordLearningConsentNoticeIntent',
+    ).mockImplementationOnce(() => {
+      throw new Error('forced notice intent failure')
+    })
+
+    try {
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'pending' })
+      expect(mounted.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(session.id),
+        'message-recovery',
+      )).toMatchObject({ state: 'active' })
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toBeUndefined()
+
+      intent.mockRestore()
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'reconciled' })
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toMatchObject({
+        state: 'pending',
+        mainSessionId: String(session.id),
+      })
+      expect(feedbackLedgerEvents(root)).toHaveLength(1)
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('prompts only for a nonempty negative note while consent is not enabled', async () => {
+    const root = evolutionRoot('consent-notice-timing')
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const positive = completedSession('feedback-notice-positive', ['message-positive'])
+    const empty = completedSession('feedback-notice-empty', ['message-empty'])
+    const enabled = completedSession('feedback-notice-enabled', ['message-enabled'])
+    const disabled = completedSession('feedback-notice-disabled', ['message-disabled'])
+    for (const session of [positive, empty, enabled, disabled]) sessions.add(session)
+    sessions.listed = []
+    const mounted = await mountBridge(root, sessions, feedback, {
+      learningConsent: true,
+    })
+
+    try {
+      feedback.set(String(positive.id), [item({
+        messageId: 'message-positive',
+        version: '34343434-3434-4434-8434-343434343434',
+        rating: 'positive',
+        note: 'Positive detail.',
+      })])
+      feedback.set(String(empty.id), [item({
+        messageId: 'message-empty',
+        version: '35353535-3535-4535-8535-353535353535',
+        note: '   ',
+      })])
+      await mounted.bridge.reconcileSession(String(positive.id))
+      await mounted.bridge.reconcileSession(String(empty.id))
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toBeUndefined()
+
+      const consent = mounted.ctx.tianwenEvolution.recordLearningAnalysisConsent({
+        revision: 1,
+        enabled: true,
+        policyVersion: 'tianwen-auto-analysis.v1',
+      })
+      feedback.set(String(enabled.id), [item({
+        messageId: 'message-enabled',
+        version: '36363636-3636-4636-8636-363636363636',
+        note: 'Analyzable later revision.',
+        updatedAt: Date.parse(consent.recordedAt) + 1,
+      })])
+      await mounted.bridge.reconcileSession(String(enabled.id))
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toBeUndefined()
+      expect(feedbackLedgerEvents(root).find(event =>
+        (event.input as { readonly sessionId: string }).sessionId === String(enabled.id)))
+        .toMatchObject({ analysisConsentRevision: 1 })
+
+      mounted.ctx.tianwenEvolution.recordLearningAnalysisConsent({
+        revision: 2,
+        enabled: false,
+        policyVersion: 'tianwen-auto-analysis.v1',
+      })
+      feedback.set(String(disabled.id), [item({
+        messageId: 'message-disabled',
+        version: '37373737-3737-4737-8737-373737373737',
+        note: 'Disabled correction.',
+        updatedAt: Date.parse(consent.recordedAt) + 2,
+      })])
+      await mounted.bridge.reconcileSession(String(disabled.id))
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
+        'tianwen-auto-analysis.v1',
+      )).toMatchObject({
+        state: 'pending',
+        mainSessionId: String(disabled.id),
+      })
+      expect(feedbackLedgerEvents(root).find(event =>
+        (event.input as { readonly sessionId: string }).sessionId === String(disabled.id)))
         .not.toHaveProperty('analysisConsentRevision')
     } finally {
       await mounted.ctx.fiber.dispose()

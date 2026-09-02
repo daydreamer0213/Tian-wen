@@ -9,6 +9,8 @@ type PublicLedgerEventPrivacyContract = AssertNever<Extract<
       | 'learning-intake-recorded'
       | 'learning-feedback-retracted'
       | 'learning-analysis-consent-recorded'
+      | 'learning-consent-notice-intent-recorded'
+      | 'learning-consent-notice-delivered'
       | 'run-binding-recorded'
       | 'outcome-intake-recorded'
       | 'run-skill-manifest-recorded'
@@ -68,6 +70,9 @@ export type {
   LearningAnalysisConsent,
   LearningAnalysisConsentInput,
   LearningAnalysisConsentReceipt,
+  LearningConsentNoticeBinding,
+  LearningConsentNoticeReceipt,
+  LearningConsentNoticeStatus,
   LearningIntakeInput,
   LearningIntakeReceipt,
   LearningIntakeStatus,

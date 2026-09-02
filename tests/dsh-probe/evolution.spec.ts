@@ -713,6 +713,29 @@ describe('formal governance over process-local Dynamic Cordis versions', () => {
       })
       expect(JSON.stringify(evolution.listEvents()))
         .not.toContain('Keep the final result concrete.')
+
+      const notice = {
+        policyVersion: 'tianwen-auto-analysis.v1' as const,
+        mainSessionId: 'session:runner-optional',
+        noticeSourceMessageId: 'tianwen-learning-consent-notice:v1',
+        deliveryId: 'tianwen-learning-consent-delivery:v1',
+      }
+      expect(evolution.recordLearningConsentNoticeIntent(notice))
+        .toMatchObject({ ...notice, state: 'pending', duplicate: false })
+      expect(evolution.recordLearningConsentNoticeDelivered(notice))
+        .toMatchObject({ ...notice, state: 'delivered', duplicate: false })
+      expect(evolution.getLearningConsentNoticeStatus(notice.policyVersion))
+        .toEqual(expect.objectContaining({
+          policyVersion: notice.policyVersion,
+          mainSessionId: notice.mainSessionId,
+          noticeSourceMessageId: notice.noticeSourceMessageId,
+          state: 'delivered',
+        }))
+      expect(evolution.getLearningConsentNoticeStatus(notice.policyVersion))
+        .not.toHaveProperty('deliveryId')
+      expect(JSON.stringify(evolution.getLearningConsentNoticeStatus(
+        notice.policyVersion,
+      ))).not.toContain('Keep the final result concrete.')
       await expect(evolution.rehydrateChampion(mounted.agent))
         .resolves.toBeUndefined()
     } finally {

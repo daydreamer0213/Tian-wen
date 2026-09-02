@@ -33,6 +33,9 @@ import type {
   LearningAnalysisConsent,
   LearningAnalysisConsentInput,
   LearningAnalysisConsentReceipt,
+  LearningConsentNoticeBinding,
+  LearningConsentNoticeReceipt,
+  LearningConsentNoticeStatus,
   LearningIntakeInput,
   LearningIntakeReceipt,
   LearningIntakeStatus,
@@ -266,6 +269,26 @@ export class TianwenEvolutionService extends Service {
 
   getLearningAnalysisConsent(): LearningAnalysisConsent | undefined {
     return this.state().ledger.getLearningAnalysisConsent()
+  }
+
+  recordLearningConsentNoticeIntent(
+    input: LearningConsentNoticeBinding,
+  ): LearningConsentNoticeReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningConsentNoticeIntent(input))
+  }
+
+  recordLearningConsentNoticeDelivered(
+    input: LearningConsentNoticeBinding,
+  ): LearningConsentNoticeReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningConsentNoticeDelivered(input))
+  }
+
+  getLearningConsentNoticeStatus(
+    policyVersion: LearningConsentNoticeBinding['policyVersion'],
+  ): LearningConsentNoticeStatus | undefined {
+    return this.state().ledger.getLearningConsentNoticeStatus(policyVersion)
   }
 
   getLearningIntakeStatus(

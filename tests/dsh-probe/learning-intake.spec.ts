@@ -519,6 +519,83 @@ describe('Tianwen learning intake ledger', () => {
     ])).not.toContain(base.note)
   })
 
+  it('records one profile consent notice intent and delivered acknowledgement with exact replay and reload', () => {
+    const root = ledgerRoot('analysis-consent-notice')
+    let tick = 0
+    const ledger = new EvolutionLedger(root, {
+      clock: () => new Date(Date.UTC(2026, 8, 1, 1, 0, tick++)).toISOString(),
+    })
+    const intent = {
+      policyVersion: 'tianwen-auto-analysis.v1' as const,
+      mainSessionId: 'main-session-1',
+      noticeSourceMessageId: 'tianwen-learning-consent-notice:v1',
+      deliveryId: 'tianwen-learning-consent-delivery:v1',
+    }
+
+    expect(ledger.recordLearningConsentNoticeIntent(intent)).toEqual({
+      ...intent,
+      state: 'pending',
+      intentRecordedAt: '2026-09-01T01:00:00.000Z',
+      duplicate: false,
+    })
+    expect(ledger.recordLearningConsentNoticeIntent(intent)).toEqual({
+      ...intent,
+      state: 'pending',
+      intentRecordedAt: '2026-09-01T01:00:00.000Z',
+      duplicate: true,
+    })
+    expect(() => ledger.recordLearningConsentNoticeIntent({
+      ...intent,
+      mainSessionId: 'main-session-2',
+    })).toThrow(LedgerIntegrityError)
+    expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8').trimEnd().split('\n'))
+      .toHaveLength(1)
+
+    expect(ledger.recordLearningConsentNoticeDelivered(intent)).toEqual({
+      ...intent,
+      state: 'delivered',
+      intentRecordedAt: '2026-09-01T01:00:00.000Z',
+      deliveredAt: '2026-09-01T01:00:01.000Z',
+      duplicate: false,
+    })
+    expect(ledger.recordLearningConsentNoticeDelivered(intent)).toEqual({
+      ...intent,
+      state: 'delivered',
+      intentRecordedAt: '2026-09-01T01:00:00.000Z',
+      deliveredAt: '2026-09-01T01:00:01.000Z',
+      duplicate: true,
+    })
+    expect(() => ledger.recordLearningConsentNoticeDelivered({
+      ...intent,
+      noticeSourceMessageId: 'changed-message',
+    })).toThrow(LedgerIntegrityError)
+
+    const expected = {
+      policyVersion: intent.policyVersion,
+      mainSessionId: intent.mainSessionId,
+      noticeSourceMessageId: intent.noticeSourceMessageId,
+      state: 'delivered' as const,
+      intentRecordedAt: '2026-09-01T01:00:00.000Z',
+      deliveredAt: '2026-09-01T01:00:01.000Z',
+    }
+    expect(ledger.getLearningConsentNoticeStatus(intent.policyVersion))
+      .toEqual(expected)
+    expect(new EvolutionLedger(root)
+      .getLearningConsentNoticeStatus(intent.policyVersion)).toEqual(expected)
+    expect(JSON.stringify(expected)).not.toContain(base.note)
+    expect(JSON.stringify(expected)).not.toMatch(/[A-Z]:\//u)
+  })
+
+  it('rejects a consent notice acknowledgement without its exact durable intent', () => {
+    const ledger = new EvolutionLedger(ledgerRoot('analysis-consent-notice-order'))
+    expect(() => ledger.recordLearningConsentNoticeDelivered({
+      policyVersion: 'tianwen-auto-analysis.v1',
+      mainSessionId: 'main-session-1',
+      noticeSourceMessageId: 'tianwen-learning-consent-notice:v1',
+      deliveryId: 'tianwen-learning-consent-delivery:v1',
+    })).toThrow(LedgerIntegrityError)
+  })
+
   it('accepts an analysis consent reference only while that revision is enabled', () => {
     const ledger = new EvolutionLedger(ledgerRoot('analysis-consent-reference'), {
       clock: () => '2026-09-01T00:00:00.000Z',
