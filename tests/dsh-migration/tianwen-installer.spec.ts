@@ -393,6 +393,9 @@ function scriptedInstaller(
   evolutionRoot: ${paths.evolutionRoot.replaceAll('\\', '/')}
   stateRoot: ${paths.stateRoot.replaceAll('\\', '/')}
   sessionsRoot: ${paths.sessionsRoot.replaceAll('\\', '/')}
+  learningLoop:
+    enabled: true
+    workspaceRoot: ${paths.learningLoopRoot.replaceAll('\\', '/')}
 - id: tianwen-web-bridge
   name: '@tianwen/runtime-bundle'
 - id: tianwen-phase2-smoke
@@ -535,6 +538,7 @@ describe('Tianwen installer contract', () => {
       dataDir: 'D:\\DevData\\tianwen',
       dshHome: 'D:\\DevData\\tianwen\\dsh-home',
       evolutionRoot: 'D:\\DevData\\tianwen\\state\\evolution',
+      learningLoopRoot: 'D:\\DevData\\tianwen\\state\\learning-loop',
       stateRoot: 'D:\\DevData\\tianwen\\state',
       hostRoot: 'D:\\DevData\\tianwen\\dsh-host',
       profileRoot: 'D:\\DevData\\tianwen\\dsh-home\\profiles\\tianwen',
@@ -566,6 +570,8 @@ describe('Tianwen installer contract', () => {
     expect(patch).toMatch(/\n$/u)
     expect(patch).toContain("root: 'D:/DevData/custom-tianwen/dsh-home/sessions'")
     expect(patch).toContain("evolutionRoot: 'D:/DevData/custom-tianwen/state/evolution'")
+    expect(patch).toContain("workspaceRoot: 'D:/DevData/custom-tianwen/state/learning-loop'")
+    expect(patch).toContain('learningLoop:\n      enabled: true')
     expect(patch).toContain("stateRoot: 'D:/DevData/custom-tianwen/state'")
     expect(patch).toContain("sessionsRoot: 'D:/DevData/custom-tianwen/dsh-home/sessions'")
     expect(patch).toContain('- id: attachment-local\n  disabled: true')
@@ -1125,6 +1131,9 @@ describe('Tianwen installer contract', () => {
   evolutionRoot: D:/DevData/tianwen-live-goal-round/test-data/installed-e2e/state/evolution
   stateRoot: D:/DevData/tianwen-live-goal-round/test-data/installed-e2e/state
   sessionsRoot: D:/DevData/tianwen-live-goal-round/test-data/installed-e2e/dsh-home/sessions
+  learningLoop:
+    enabled: true
+    workspaceRoot: D:/DevData/tianwen-live-goal-round/test-data/installed-e2e/state/learning-loop
 - id: tianwen-web-bridge
   name: '@tianwen/runtime-bundle'
 - id: tianwen-phase2-smoke

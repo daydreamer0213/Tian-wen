@@ -231,13 +231,24 @@ export function parseRuntimePatch(source) {
     JSON.stringify(lines) === JSON.stringify([
       '- insert:', '    - id: tianwen-runtime',
       "      name: '@tianwen/runtime-bundle/runtime'",
+      '      config:',
+      '        learningLoop:',
+      '          enabled: true',
+      '          workspaceRoot: !!js process.env.TIANWEN_LEARNING_LOOP_ROOT',
       '    - id: tianwen-web-bridge',
       "      name: '@tianwen/runtime-bundle'",
     ]),
     'Runtime patch differs from the two authorized operations',
   )
   return {
-    insertedRuntime: { id: 'tianwen-runtime', name: runtimeSpecifier },
+    insertedRuntime: {
+      id: 'tianwen-runtime',
+      name: runtimeSpecifier,
+      learningLoop: {
+        enabled: true,
+        workspaceRoot: 'process.env.TIANWEN_LEARNING_LOOP_ROOT',
+      },
+    },
     insertedWebBridge: { id: 'tianwen-web-bridge', name: runtimeBundlePackage },
   }
 }
@@ -620,6 +631,7 @@ async function main() {
   )
   const runtimeTarball = childPath(packsRoot, runtimeTarballBasename)
   const profileRoot = childPath(dshHome, 'profiles', profileName)
+  const learningLoopRoot = childPath(probeRoot, 'state', 'learning-loop')
   const commands = []
 
   requireAssertion(
@@ -664,6 +676,7 @@ async function main() {
     true,
     childCorepackHome,
   )
+  profileEnv.TIANWEN_LEARNING_LOOP_ROOT = learningLoopRoot
   if (profileName === 'web') profileEnv.PNPM_CONFIG_IGNORE_SCRIPTS = 'false'
   let producedByCurrentRun = false
   let upstreamArgs
@@ -861,6 +874,9 @@ async function main() {
     const runtimeRow = dumpedRow(dump, 'tianwen-runtime')
     requireAssertion(
       rowValue(runtimeRow, /^ {2}name: (.+)$/u, 'name') === runtimeSpecifier
+      && rowValue(runtimeRow, /^ {6}enabled: (.+)$/u, 'learningLoop.enabled') === 'true'
+      && rowValue(runtimeRow, /^ {6}workspaceRoot: (.+)$/u, 'learningLoop.workspaceRoot') === '!!js process.env.TIANWEN_LEARNING_LOOP_ROOT'
+      && profileEnv.TIANWEN_LEARNING_LOOP_ROOT === learningLoopRoot
       && !runtimeRow.lines.some(line => /^ {4}evolutionRoot:/u.test(line)),
       'dumped Runtime row is wrong',
     )
@@ -870,11 +886,15 @@ async function main() {
       JSON.stringify(external) === JSON.stringify([
         '@deepseek-ai/cordis',
         '@deepseek-ai/dsh-agent',
+        '@deepseek-ai/dsh-commands',
         '@deepseek-ai/dsh-goal',
         '@deepseek-ai/dsh-llm',
+        '@deepseek-ai/dsh-sandbox',
         '@deepseek-ai/dsh-session',
         '@deepseek-ai/dsh-session-persistence-jsonl',
+        '@deepseek-ai/dsh-session-reference',
         '@deepseek-ai/dsh-skill',
+        '@deepseek-ai/dsh-subagent',
         '@deepseek-ai/dsh-tools',
       ])
       && external.every(specifier => runtimeBundle.externalSpecifiers.includes(specifier)),
@@ -998,6 +1018,7 @@ async function main() {
       probeRoot,
       dshHome,
       profileRoot,
+      learningLoopRoot,
       packsRoot,
       profileVirtualStore,
       workspaceVirtualStore,

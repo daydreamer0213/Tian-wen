@@ -1,6 +1,10 @@
 - insert:
     - id: tianwen-runtime
       name: '@tianwen/runtime-bundle/runtime'
+      config:
+        learningLoop:
+          enabled: true
+          workspaceRoot: !!js process.env.TIANWEN_LEARNING_LOOP_ROOT
 
     - id: tianwen-web-bridge
       name: '@tianwen/runtime-bundle'

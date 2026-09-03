@@ -242,6 +242,13 @@ function assertInstalledVersion(productRoot: string, version: string): string {
     archivePath: paths.archive,
     receiptPath: paths.receipt,
   })
+  if (version === currentDshVersion) {
+    const patch = readFileSync(join(paths.profileRoot, 'cordis.patch.yml'), 'utf8')
+    expect(patch).toContain('learningLoop:\n      enabled: true')
+    expect(patch).toContain(
+      `workspaceRoot: '${join(productRoot, 'state', 'learning-loop').replaceAll('\\', '/')}'`,
+    )
+  }
   const dshBin = resolve(dirname(paths.hostManifest), host.bin.dsh)
   requireFile(dshBin, 'installed DSH executable')
   return dshBin
@@ -428,6 +435,11 @@ function runUpgradeAcceptance({ oldAuthorityRoot, productRoot }: UpgradeInputs):
     { cwd: root, env: environment, timeout: 120_000 },
   )
   expect(dump.length).toBeGreaterThan(0)
+  expect(dump).toContain('learningLoop:')
+  expect(dump).toContain('enabled: true')
+  expect(dump).toContain(
+    join(productRoot, 'state', 'learning-loop').replaceAll('\\', '/'),
+  )
   expect(snapshotPersistentState(productRoot)).toEqual(persistentStateBeforeDump)
   const boot = runChecked(
     'current offline Profile boot',

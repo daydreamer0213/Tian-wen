@@ -1,1 +1,1 @@
-export { isSkillName } from '@deepseek-ai/dsh-skill'
+export { isSkillName, renderSkillContent } from '@deepseek-ai/dsh-skill'

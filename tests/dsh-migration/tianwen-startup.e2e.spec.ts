@@ -27,6 +27,7 @@ const dshHome = `${tianwenRoot}/dsh-home`
 const profileRoot = `${dshHome}/profiles/tianwen`
 const sessionsRoot = `${dshHome}/sessions`
 const evolutionRoot = `${tianwenRoot}/state/evolution`
+const learningLoopRoot = `${tianwenRoot}/state/learning-loop`
 const receiptPath = `${tianwenRoot}/receipts/phase2-startup-receipt.json`
 const statusReceiptPath = `${tianwenRoot}/receipts/phase3-goal-status-receipt.json`
 const listReceiptPath = `${tianwenRoot}/receipts/phase4-goal-list-receipt.json`
@@ -302,6 +303,7 @@ function childEnvironment(): NodeJS.ProcessEnv {
     profileRoot,
     sessionsRoot,
     evolutionRoot,
+    learningLoopRoot,
     receiptPath,
     statusReceiptPath,
     listReceiptPath,
@@ -556,6 +558,11 @@ async function start(): Promise<void> {
   const dshBin = requireDshBin()
   const profileManifestPath = `${profileRoot}/package.json`
   const installed = await assertInstalledBundle(profileManifestPath)
+  const managedPatch = readFileSync(`${profileRoot}/cordis.patch.yml`, 'utf8')
+  expect(managedPatch).toContain('learningLoop:\n      enabled: true')
+  expect(managedPatch).toContain(
+    `workspaceRoot: '${learningLoopRoot.replaceAll('\\', '/')}'`,
+  )
   expect(realpathSync(installReceipt.cliPath)).toBe(realpathSync(installed.cli))
   expectOutsideWorktree(installed.cli)
   expect(installReceipt.archiveDigest).toBe(

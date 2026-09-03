@@ -176,6 +176,7 @@ export function deriveInstallPaths(dataDir, platform = process.platform) {
     dataDir,
     dshHome,
     evolutionRoot: pathApi.join(dataDir, 'state', 'evolution'),
+    learningLoopRoot: pathApi.join(dataDir, 'state', 'learning-loop'),
     stateRoot: pathApi.join(dataDir, 'state'),
     hostRoot: pathApi.join(dataDir, 'dsh-host'),
     profileRoot,
@@ -205,6 +206,9 @@ export function renderProfilePatch(paths) {
     evolutionRoot: '${portable(paths.evolutionRoot)}'
     stateRoot: '${portable(paths.stateRoot)}'
     sessionsRoot: '${portable(paths.sessionsRoot)}'
+    learningLoop:
+      enabled: true
+      workspaceRoot: '${portable(paths.learningLoopRoot)}'
 
 - id: attachment-local
   disabled: true
@@ -525,6 +529,8 @@ export function validateDump(source, paths) {
     ['tianwen-runtime', 'evolutionRoot', portable(paths.evolutionRoot)],
     ['tianwen-runtime', 'stateRoot', portable(paths.stateRoot)],
     ['tianwen-runtime', 'sessionsRoot', portable(paths.sessionsRoot)],
+    ['tianwen-runtime', 'enabled', 'true'],
+    ['tianwen-runtime', 'workspaceRoot', portable(paths.learningLoopRoot)],
     ['tianwen-web-bridge', 'name', '@tianwen/runtime-bundle'],
     ['tianwen-phase2-smoke', 'name', '@tianwen/runtime-bundle/smoke'],
   ]

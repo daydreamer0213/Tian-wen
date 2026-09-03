@@ -21,7 +21,10 @@ import { default as TimerService } from '@deepseek-ai/cordis-plugin-timer'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { apply as applyBundledRuntime } from '../../packages/tianwen-runtime-bundle/dist/runtime.js'
-import { apply as applyRuntimeBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
+import {
+  apply as applyRuntimeBundle,
+  createConfiguredLearningLoopExecutor,
+} from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 import { deriveInstallPaths, renderProfilePatch } from '../../scripts/install-tianwen.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
@@ -79,6 +82,7 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/continuous-goal-feedback.ts',
     'src/continuous-goal-service.ts',
     'src/continuous-goal-host.ts',
+    'src/explicit-correction-protocol.ts',
     'src/runtime.ts',
     'src/goal-first-service.ts',
     'src/learning-clue-analysis.ts',
@@ -86,10 +90,19 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/learning-clue-status.ts',
     'src/learning-analysis-child.ts',
     'src/learning-analysis-tool.ts',
+    'src/learning-candidate.ts',
+    'src/learning-consent-agent.ts',
+    'src/learning-loop-orchestrator.ts',
+    'src/long-goal-liveness.ts',
     'src/long-goal-host.ts',
     'src/long-goal-planner.ts',
     'src/long-goal-subagent.ts',
     'src/long-goal.ts',
+    'src/materialize-learning-candidate.ts',
+    'src/message-feedback-bridge.ts',
+    'src/native-long-goal-child.ts',
+    'src/permission-attempt.ts',
+    'src/research-summary-admission.ts',
     'src/settled-task-result.ts',
     'src/status.ts',
   ].includes(path)
@@ -115,6 +128,7 @@ function isAllowedStatusInput(input: string): boolean {
       '../tianwen-evolution/dist/inspection.js',
       '../tianwen-evolution/dist/ledger.js',
       '../tianwen-evolution/dist/learning-intake.js',
+      '../tianwen-evolution/dist/learning-analysis.js',
       '../tianwen-evolution/dist/outcome-intake.js',
       '../tianwen-evolution/dist/controlled-skill-activation.js',
       '../tianwen-evolution/dist/controlled-skill-evaluation.js',
@@ -171,15 +185,19 @@ function isAllowedGoalFirstRunnerInput(input: string): boolean {
     'src/learning-clue-analysis.ts',
     'src/learning-clue-review.ts',
     'src/learning-clue-status.ts',
+    'src/long-goal-liveness.ts',
     'src/long-goal-host.ts',
     'src/long-goal-planner.ts',
     'src/long-goal-subagent.ts',
     'src/long-goal.ts',
+    'src/native-long-goal-child.ts',
+    'src/permission-attempt.ts',
     'src/settled-task-result.ts',
   ].includes(path) || isAllowedStatusInput(path) || [
     '../tianwen-dsh-compat/dist/runtime.js',
     '../tianwen-dsh-compat/dist/scripted-adapter.js',
     '../tianwen-evolution/dist/learning-intake.js',
+    '../tianwen-evidence/dist/index.js',
   ].includes(path)
 }
 
@@ -362,7 +380,7 @@ describe('CLI installed entry identity', () => {
 })
 
 describe('Skill-name compatibility subpath', () => {
-  it('exports only the public Skill-name validator', async () => {
+  it('exports only the public Skill helpers required by pure status inspection', async () => {
     const manifest = json(resolve(compatPackageRoot, 'package.json')) as {
       exports?: Record<string, unknown>
     }
@@ -374,8 +392,12 @@ describe('Skill-name compatibility subpath', () => {
       compatPackageRoot,
       'dist/skill-name.js',
     )).href) as Record<string, unknown>
-    expect(Object.keys(module)).toEqual(['isSkillName'])
+    expect(Object.keys(module).sort()).toEqual([
+      'isSkillName',
+      'renderSkillContent',
+    ])
     expect(module.isSkillName).toEqual(expect.any(Function))
+    expect(module.renderSkillContent).toEqual(expect.any(Function))
   })
 
   it('uses the production seam for runtime consumers and the narrow seam for status consumers', () => {
@@ -436,6 +458,8 @@ describe('@tianwen/runtime-bundle', () => {
           'agentDefaultModel',
           'agentPresets',
           'sessionPersistence',
+          'sandboxPolicy',
+          'tianwenEvidence',
           'tianwenLearningIntake',
           'tianwenEvolution',
         ],
@@ -560,11 +584,26 @@ describe('@tianwen/runtime-bundle', () => {
     expect(defaultPatch).toBe(`- insert:
     - id: tianwen-runtime
       name: '@tianwen/runtime-bundle/runtime'
+      config:
+        learningLoop:
+          enabled: true
+          workspaceRoot: !!js process.env.TIANWEN_LEARNING_LOOP_ROOT
 
     - id: tianwen-web-bridge
       name: '@tianwen/runtime-bundle'
 `)
     expect(defaultPatch).not.toMatch(/[A-Za-z]:[\\/]|file:\/\//u)
+    expect(defaultPatch).not.toContain('learningLoopExecutor')
+  })
+
+  it('keeps a supplied learning executor as a programmatic-only seam', () => {
+    const seam = {} as NonNullable<Parameters<
+      typeof createConfiguredLearningLoopExecutor
+    >[1]['learningLoopExecutor']>
+
+    expect(createConfiguredLearningLoopExecutor({} as Context, {
+      learningLoopExecutor: seam,
+    })).toBe(seam)
   })
 
   it('publishes the one-shot controlled lifecycle runner and patch', () => {
@@ -945,6 +984,7 @@ describe('@tianwen/runtime-bundle', () => {
       '@deepseek-ai/dsh-commands',
       '@deepseek-ai/dsh-goal',
       '@deepseek-ai/dsh-llm',
+      '@deepseek-ai/dsh-sandbox',
       '@deepseek-ai/dsh-session',
       '@deepseek-ai/dsh-session-persistence-jsonl',
       '@deepseek-ai/dsh-session-reference',
@@ -1020,6 +1060,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(externalPackages(output!.imports)).toEqual([
       '@deepseek-ai/cordis',
       '@deepseek-ai/dsh-goal',
+      ...(entry === 'cli' ? ['@deepseek-ai/dsh-sandbox'] : []),
       '@deepseek-ai/dsh-session',
       '@deepseek-ai/dsh-session-persistence-jsonl',
       '@deepseek-ai/dsh-skill',
@@ -1091,7 +1132,8 @@ describe('@tianwen/runtime-bundle', () => {
     expect(Object.keys(metafile.inputs).filter(input => !isAllowedGoalFirstRunnerInput(input)))
       .toEqual([])
     expect(Object.keys(metafile.inputs).some(path =>
-      /(?:^|[\\/])(index|test-harness)\.js$/u.test(path))).toBe(false)
+      /tianwen-dsh-compat[\\/]dist[\\/](?:index|test-harness)\.js$/u.test(path)
+      || /(?:^|[\\/])test-harness\.js$/u.test(path))).toBe(false)
     expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
     expect(source).not.toMatch(/from\s+["']@tianwen\//u)
     expect(source).not.toMatch(/agent-loop-testkit|test-harness/u)

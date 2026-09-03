@@ -12,6 +12,9 @@
 - id: tianwen-runtime
   config:
     evolutionRoot: 'D:/DevData/tianwen/state/evolution'
+    learningLoop:
+      enabled: true
+      workspaceRoot: 'D:/DevData/tianwen/state/learning-loop'
 
 - insert:
     - id: cordis-host-runner
