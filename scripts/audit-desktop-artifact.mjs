@@ -1,21 +1,49 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
-import { basename, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, isAbsolute, join, posix, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const RUNTIME_ARCHIVE_NAME = 'tianwen-runtime-bundle-0.1.11.tgz'
 
-function runtimeArchiveFiles(path) {
+function tarExecutable() {
   const candidate = process.platform === 'win32'
     ? resolve(process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows', 'System32', 'tar.exe')
     : (existsSync('/usr/bin/tar') ? '/usr/bin/tar' : '/bin/tar')
   const executable = realpathSync(candidate)
   if (!statSync(executable).isFile()) throw new Error('fixed tar executable is not a file')
-  const result = spawnSync(executable, ['-tzf', path], { encoding: 'utf8', shell: false })
+  return executable
+}
+
+function runtimeArchiveFiles(path) {
+  const result = spawnSync(tarExecutable(), ['-tzf', path], { encoding: 'utf8', shell: false })
   if (result.status !== 0) throw new Error('packaged Runtime archive cannot be listed')
   return result.stdout.replaceAll('\r\n', '\n').split('\n').filter(Boolean)
     .map(name => name.replace(/^package\//u, ''))
+}
+
+function runtimeArchiveText(path, name) {
+  const result = spawnSync(
+    tarExecutable(),
+    ['-xOf', path, `package/${name}`],
+    { encoding: 'utf8', shell: false },
+  )
+  if (result.status !== 0) throw new Error(`packaged Runtime entry cannot be read: ${name}`)
+  return result.stdout
+}
+
+function assertRuntimeModuleClosure(path, files) {
+  const entries = new Set(files)
+  const relativeModule = /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)["'](\.[^"']+)["']/gu
+  for (const source of files.filter(name => name.endsWith('.js'))) {
+    const contents = runtimeArchiveText(path, source)
+    for (const match of contents.matchAll(relativeModule)) {
+      const target = posix.normalize(posix.join(posix.dirname(source), match[1]))
+      if (target.startsWith('../') || posix.isAbsolute(target) || !entries.has(target)) {
+        throw new Error(`packaged Runtime module closure is missing ${target} imported by ${source}`)
+      }
+    }
+  }
 }
 
 const B1_RESOURCE_FILES = new Set([
@@ -91,9 +119,11 @@ export function auditDesktopArtifact(unpackedRoot, expectedRuntimeTarball) {
   if (digest(expectedRuntimeTarball) !== digest(packagedRuntime)) {
     throw new Error('Runtime SHA-256 digest does not match the source archive')
   }
-  if (!runtimeArchiveFiles(packagedRuntime).includes('dist/client.js')) {
+  const runtimeFiles = runtimeArchiveFiles(packagedRuntime)
+  if (!runtimeFiles.includes('dist/client.js')) {
     throw new Error('packaged Runtime archive is missing dist/client.js')
   }
+  assertRuntimeModuleClosure(packagedRuntime, runtimeFiles)
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

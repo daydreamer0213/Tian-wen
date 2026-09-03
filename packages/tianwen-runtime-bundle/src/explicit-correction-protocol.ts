@@ -9,7 +9,7 @@ import {
   parseResearchPacket,
   type ResearchPacket,
   type ResearchSummarySubmission,
-} from '@tianwen/runtime'
+} from '@tianwen/runtime/research-summary'
 
 export const EXPLICIT_CORRECTION_PROTOCOL_SCOPE =
   'project:tianwen/capability:research-summary' as const

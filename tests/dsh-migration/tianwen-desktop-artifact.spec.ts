@@ -55,7 +55,10 @@ function createRuntimeSource(contents: Buffer): string {
   return source
 }
 
-function createRuntimeArchive(includeClient: boolean): { source: string, bytes: Buffer } {
+function createRuntimeArchive(
+  includeClient: boolean,
+  indexSource?: string,
+): { source: string, bytes: Buffer } {
   const root = createTestRoot()
   const contents = join(root, 'contents')
   writeFixture(
@@ -63,6 +66,9 @@ function createRuntimeArchive(includeClient: boolean): { source: string, bytes: 
     includeClient ? 'package/dist/client.js' : 'package/dist/runtime.js',
     'fixture',
   )
+  if (indexSource !== undefined) {
+    writeFixture(contents, 'package/dist/index.js', indexSource)
+  }
   const source = join(root, 'tianwen-runtime-bundle-0.1.11.tgz')
   const executable = process.platform === 'win32'
     ? join(process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows', 'System32', 'tar.exe')
@@ -203,6 +209,17 @@ describe('Tianwen Desktop Runtime distribution', () => {
 
     expect(() => auditDesktopArtifact(unpackedRoot, source))
       .toThrow(/dist\/client\.js/iu)
+  })
+
+  it('rejects a Runtime archive whose JavaScript imports a missing packaged module', () => {
+    const { source, bytes } = createRuntimeArchive(
+      true,
+      "export { missing } from './missing-module.js'\n",
+    )
+    const unpackedRoot = createUnpackedRoot(bytes)
+
+    expect(() => auditDesktopArtifact(unpackedRoot, source))
+      .toThrow(/missing-module\.js|module closure/iu)
   })
 
   it('rejects a packaged Runtime whose SHA-256 no longer matches the source', () => {

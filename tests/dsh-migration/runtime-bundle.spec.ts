@@ -407,7 +407,7 @@ describe('Skill-name compatibility subpath', () => {
     const build = manifest.scripts?.build ?? ''
     expect(build.match(
       /--alias:@tianwen\/dsh-compat=@tianwen\/dsh-compat\/runtime/gu,
-    )).toHaveLength(2)
+    )).toHaveLength(3)
     expect(build.match(
       /--alias:@tianwen\/dsh-compat=@tianwen\/dsh-compat\/skill-name/gu,
     )).toHaveLength(2)
@@ -431,6 +431,31 @@ describe('archive credential literal detection', () => {
 })
 
 describe('@tianwen/runtime-bundle', () => {
+  it('bundles the package root through the narrow research-summary entry', () => {
+    const source = readFileSync(resolve(packageRoot, 'dist/index.js'), 'utf8')
+    const metafile = json(resolve(packageRoot, 'dist/index.meta.json')) as {
+      inputs: Record<string, unknown>
+      outputs: Record<string, { imports: { path: string; external?: boolean }[] }>
+    }
+    const output = Object.entries(metafile.outputs).find(([path]) =>
+      path.replaceAll('\\', '/').endsWith('dist/index.js'))?.[1]
+
+    expect(output).toBeDefined()
+    expect(externalPackages(output!.imports)).toEqual([
+      '@deepseek-ai/cordis',
+      '@deepseek-ai/dsh-agent',
+      '@deepseek-ai/dsh-llm',
+      '@deepseek-ai/dsh-session',
+      '@deepseek-ai/dsh-skill',
+      '@deepseek-ai/dsh-tools',
+    ])
+    expect(Object.keys(metafile.inputs)).toContain('../tianwen-runtime/dist/research-summary.js')
+    expect(Object.keys(metafile.inputs)).not.toContain('../tianwen-runtime/dist/index.js')
+    expect(Object.keys(metafile.inputs)).not.toContain('../tianwen-dsh-compat/dist/index.js')
+    expect(source).not.toMatch(/from\s+["']@tianwen\//u)
+    expect(source).not.toMatch(/dsh-tool-skill|test-harness/u)
+  })
+
   it('loads core services and defers the Web host when connection is unavailable', async () => {
     mkdirSync(packFixtureBase, { recursive: true })
     const profileRoot = mkdtempSync(join(packFixtureBase, 'headless-'))
