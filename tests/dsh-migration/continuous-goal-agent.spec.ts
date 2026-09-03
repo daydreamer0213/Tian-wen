@@ -306,6 +306,8 @@ describe('continuous Goal Agent controls', () => {
     expect(prompt).toContain('a null result must not be used to decide whether a continuous Goal exists')
     expect(prompt).toContain('first action must be goal_control')
     expect(prompt).toContain('Do not read from or write to the workspace before calling it')
+    expect(prompt).toContain('Do not execute the continuous Goal Task in this control chat')
+    expect(prompt).toContain('Treat Planner and Task subagent reports as progress only')
     expect(prompt).toContain('Unrelated conversation should proceed normally')
   })
 

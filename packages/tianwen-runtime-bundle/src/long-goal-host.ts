@@ -887,6 +887,18 @@ function currentGoal(agent: Agent, sessionId: string, goalId: string): GoalView 
   return goal
 }
 
+function nativeTaskPrompt(objective: string, continuation?: string): string {
+  return [
+    'Execute exactly one Tianwen Long Goal Task.',
+    `Task objective: ${objective}`,
+    'A native DSH Goal is already active in this Task Session.',
+    continuation,
+    'Before your final report, call get_goal, then call update_goal with its exact goal_id and revision and action complete only after the Task objective is achieved.',
+    'Do not create another Goal, replan the Long Goal, or ask the control chat to execute this Task.',
+    'Report the verified Task result to your parent after the Goal update succeeds.',
+  ].filter((line): line is string => line !== undefined).join('\n')
+}
+
 function blockedTaskError(taskId: string, reason?: { readonly message: string }): Error {
   return new Error(`Long Goal Task ${taskId} is blocked${
     reason === undefined ? '' : `: ${reason.message}`
@@ -1102,7 +1114,7 @@ export async function runCurrentWebTask(input: {
               parent,
               childId: sessionId,
               label: `Task ${taskIndex + 1}: ${task.objective}`,
-              prompt: [{ type: 'text', text: task.objective }],
+              prompt: [{ type: 'text', text: nativeTaskPrompt(task.objective) }],
               agentOptions: nativeAgentOptions,
               signal: AbortSignal.timeout(30_000),
             })
@@ -1118,7 +1130,10 @@ export async function runCurrentWebTask(input: {
                 sessionId,
                 [{
                   type: 'text',
-                  text: 'Cold-adopt the already accepted Task. Do not repeat completed work; continue only unfinished work from durable Session state.',
+                  text: nativeTaskPrompt(
+                    task.objective,
+                    'Cold-adopt the already accepted Task. Do not repeat completed work; continue only unfinished work from durable Session state.',
+                  ),
                 }],
                 AbortSignal.timeout(30_000),
               )
@@ -1263,7 +1278,7 @@ export async function runCurrentWebTask(input: {
         await dependencies.followupNativeTaskChild(
           parent,
           sessionId,
-          [{ type: 'text', text: `Continue Task: ${task.objective}` }],
+          [{ type: 'text', text: nativeTaskPrompt(task.objective, 'Continue only unfinished work from durable Session state.') }],
           AbortSignal.timeout(30_000),
         )
       } finally {
@@ -1315,7 +1330,7 @@ export async function runCurrentWebTask(input: {
         await dependencies.followupNativeTaskChild!(
           nativeParent,
           sessionId,
-          [{ type: 'text', text: `Continue Task: ${task.objective}` }],
+          [{ type: 'text', text: nativeTaskPrompt(task.objective, 'Continue only unfinished work from durable Session state.') }],
           AbortSignal.timeout(30_000),
         )
       } catch (cause) {

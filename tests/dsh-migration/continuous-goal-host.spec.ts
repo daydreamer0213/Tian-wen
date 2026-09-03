@@ -2331,9 +2331,17 @@ describe('continuous Goal Host', () => {
         return currentGoal
       })
       let promptObservedBoundGoal = false
-      const startNativeTaskChild = vi.fn(async (input: { readonly childId: string }) => {
+      const startNativeTaskChild = vi.fn(async (input: {
+        readonly childId: string
+        readonly prompt: readonly { readonly type: 'text', readonly text: string }[]
+      }) => {
         const setup = setups.get(input.childId)
         if (setup === undefined) throw new Error('native Task setup was not installed before start')
+        expect(input.prompt[0]?.text).toContain('Task objective: Write the release marker')
+        expect(input.prompt[0]?.text).toContain('A native DSH Goal is already active in this Task Session')
+        expect(input.prompt[0]?.text).toContain('call get_goal')
+        expect(input.prompt[0]?.text).toContain('call update_goal')
+        expect(input.prompt[0]?.text).toContain('Do not create another Goal')
         let announce: ((event: { readonly agent: Agent }) => void) | undefined
         const prepared = setup({
           agent: child,
