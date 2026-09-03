@@ -242,6 +242,7 @@ export interface TianwenLongGoalRunDependencies {
   readonly recoverNativeTaskParent?: (
     record: GoalFirstLongGoalRecord,
   ) => Promise<NativePlannerRecoveryLease | undefined>
+  readonly getGoal?: (agent: Agent) => GoalView | undefined
   readonly createGoal: (agent: Agent, input: {
     readonly objective: string
     readonly maxGoalRounds: number
@@ -1049,7 +1050,9 @@ export async function runCurrentWebTask(input: {
         ) {
           throw new LongGoalIntegrityError('New Goal-first Task Session header mismatch')
         }
-        const durableGoal = candidate.ctx.goals.get(candidate)
+        const durableGoal = dependencies.getGoal === undefined
+          ? candidate.ctx.goals.get(candidate)
+          : dependencies.getGoal(candidate)
         if (
           durableGoal !== undefined
           && (durableGoal.objective !== task.objective || durableGoal.maxGoalRounds !== record.maxTaskRounds)
@@ -2212,6 +2215,7 @@ export function mountTianwenLongGoalHost(
         followupNativeChild: (parent, childId, prompt, signal) =>
           nativeChild.followup(parent, SessionId(childId), prompt, signal),
       }),
+      getGoal: agent => injected.goals.get(agent),
       createGoal: (agent, goalInput) => injected.goals.create(agent, goalInput),
       readGoalRef: async (sessionId, goalId) => {
         const status = await readGoalStatus({

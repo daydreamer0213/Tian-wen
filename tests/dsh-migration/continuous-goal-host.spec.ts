@@ -2315,7 +2315,11 @@ describe('continuous Goal Host', () => {
           id: 'reserved-task-child',
           header: { cwd: fixture, agentPreset: 'planner-preset', parentSession: 'live-planner' },
         },
-        ctx: { goals: { get: () => currentGoal } },
+        ctx: {
+          get goals(): never {
+            throw new Error('cannot get property "goals" without inject')
+          },
+        },
       } as unknown as Agent
       const live = new Map<string, Agent>([['live-planner', planner]])
       const setups = new Map<string, AgentSetup>()
@@ -2345,7 +2349,7 @@ describe('continuous Goal Host', () => {
         if (announce === undefined) throw new Error('native Task setup did not subscribe to Agent publication')
         announce({ agent: child })
         const admitted = readLongGoal(stateRoot, source.id) as LongGoalRecordV3
-        expect(child.ctx.goals.get(child)).toBe(currentGoal)
+        expect(dependencies.getGoal(child)).toBe(currentGoal)
         expect(admitted.tasks[0]!.execution).toEqual({
           sessionId: 'reserved-task-child', goalId: 'task-goal-before-prompt',
         })
@@ -2368,6 +2372,7 @@ describe('continuous Goal Host', () => {
         followupNativeTaskChild: vi.fn(),
         nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
         attachedAgent: (sessionId: string) => live.get(sessionId),
+        getGoal: () => currentGoal,
         createGoal,
         readGoalRef: vi.fn(),
         resumeColdGoal: vi.fn(),
