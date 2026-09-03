@@ -48,6 +48,8 @@ const serverPeerDependencies = {
   '@deepseek-ai/dsh-llm': '0.1.1-rc.2',
   '@deepseek-ai/dsh-message-feedback': '0.1.1-rc.2',
   '@deepseek-ai/dsh-sandbox': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-scope': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-tool-skill': '0.1.1-rc.2',
   '@deepseek-ai/dsh-session': '0.1.1-rc.2',
   '@deepseek-ai/dsh-session-persistence-jsonl': '0.1.1-rc.2',
   '@deepseek-ai/dsh-session-reference': '0.1.1-rc.2',
@@ -1010,11 +1012,13 @@ describe('@tianwen/runtime-bundle', () => {
       '@deepseek-ai/dsh-goal',
       '@deepseek-ai/dsh-llm',
       '@deepseek-ai/dsh-sandbox',
+      '@deepseek-ai/dsh-scope',
       '@deepseek-ai/dsh-session',
       '@deepseek-ai/dsh-session-persistence-jsonl',
       '@deepseek-ai/dsh-session-reference',
       '@deepseek-ai/dsh-skill',
       '@deepseek-ai/dsh-subagent',
+      '@deepseek-ai/dsh-tool-skill',
       '@deepseek-ai/dsh-tools',
     ])
     expect(Object.keys(metafile.inputs).filter(input =>

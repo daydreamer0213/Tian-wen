@@ -234,7 +234,8 @@ function frozenProductToolSchemas(ctx: Context) {
     oracle: evaluateResearchSummarySubmission,
   })
   return [
-    ...ctx.tools.schemas().filter(schema => schema.name === 'skill'),
+    ...ctx.tools.schemas(ctx.agents.get(SessionId('native-skill-scope'))!)
+      .filter(schema => schema.name === 'skill'),
     {
       name: productTool.name,
       description: productTool.description,
@@ -249,7 +250,13 @@ async function mountControlledRuntime(
 ) {
   const harness = await mountPersistentHarness(join(fixtureRoot, 'sessions'), [])
   await harness.ctx.plugin(SkillRegistry)
-  await harness.ctx.plugin(applySkillTool)
+  // The shipped DSH preset owns this tool; the host/global layer does not.
+  await harness.ctx.agents.create({
+    sessionId: SessionId('native-skill-scope'),
+    agentOptions: { provider, model },
+    setup: async agentCtx => { await agentCtx.plugin(applySkillTool) },
+  })
+  expect(harness.ctx.tools.schemas().some(schema => schema.name === 'skill')).toBe(false)
   await harness.ctx.plugin(DynamicCordisRunnerService, {})
   const disposeSkill = harness.ctx.skills.register(protocol.parentSkill)
   const adapter = new ControlledAdapter(script)
@@ -800,7 +807,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
         && String(event.data.source.senderSessionId) === requested.childSessionId
         && JSON.stringify(event.data.content).includes('Tianwen 已开始分析'))).toHaveLength(1)
 
-      await executor.freezeProtocol(context())
+      await progressExecutor.freezeProtocol(context())
       const frozen = harness.ctx.tianwenEvolution.listControlledSkillEvalProtocols()
       expect(frozen).toHaveLength(1)
       expect(frozen[0]).toMatchObject({ ticketId: intake.ticketId })
@@ -834,6 +841,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
       expect(JSON.stringify(progressMessages)).not.toMatch(/打开|批准|feedback|workspace/iu)
 
       await executor.evaluate(context())
+      expect(harness.ctx.tools.schemas().some(schema => schema.name === 'skill')).toBe(false)
       const shadowReady = harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)!
       expect(shadowReady).toMatchObject({ phase: 'shadow-ready' })
       expect(shadowReady.evaluationId).toMatch(/^evaluation:/u)

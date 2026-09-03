@@ -98,11 +98,18 @@ function nextStage(verdict: LearningAnalysisSubmission['verdict']): string {
       : 'stopped-no-case'
 }
 
-function reportContent(submission: LearningAnalysisSubmission) {
+function reportContent(submission: LearningAnalysisSubmission, status: LearningAnalysisStatus) {
   const stage = nextStage(submission.verdict)
-  return [{
+  const legacy = [{
     type: 'text' as const,
     text: `Tianwen analysis verdict: ${submission.verdict}. Next governed stage: ${stage}.`,
+  }]
+  // Preserve the exact content of an already-durable delivery across upgrades.
+  if (submission.verdict !== 'skill-change'
+    || status.reportDelivery?.reportDigest === sha256(legacy)) return legacy
+  return [{
+    type: 'text' as const,
+    text: 'Tianwen analysis proposed a Skill improvement; it is not active. The learning loop will automatically evaluate it and, if it passes, activate it for future Runs. Progress and the final outcome will appear in this main conversation. No separate user approval or child-session action is pending.',
   }]
 }
 
@@ -312,7 +319,7 @@ export function createLearningAnalysisTool(
         throw new Error('learning analysis durable submission mismatch')
       }
 
-      const content = reportContent(submission)
+      const content = reportContent(submission, recorded)
       const binding = reportBinding(recorded, content)
       recorded = await reconcileReportDelivery(ctx, recorded, binding, evolutionRoot)
       if (recorded.reportDelivery?.state !== 'delivered') {

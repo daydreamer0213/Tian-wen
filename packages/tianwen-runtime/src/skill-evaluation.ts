@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 import { lstatSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path'
+import { createScope } from '@deepseek-ai/dsh-scope'
+import * as nativeSkillTool from '@deepseek-ai/dsh-tool-skill'
 import {
   Service,
   SessionId,
@@ -1624,7 +1626,7 @@ export class TianwenSkillEvaluationService extends Service {
         !== (parsed.task.acceptanceContract.toolName === RESEARCH_SUMMARY_TOOL_NAME)) {
         throw new Error('controlled product acceptance contract mismatch')
       }
-      schemas = [...controlledRootToolSchemas(
+      schemas = [...await controlledToolSchemas(
         this.ctx,
         parsed.task.allowedTools,
         researchSummaryTool,
@@ -1879,6 +1881,7 @@ export class TianwenSkillEvaluationService extends Service {
           agentOptions: requestAgentOptions(resolved),
           setup: async agentCtx => {
             installModelSelection(agentCtx, { current: selection, assembled: undefined })
+            if (this.ctx.tools.get('skill') === undefined) await agentCtx.plugin(nativeSkillTool)
             await agentCtx.inject(['skills', 'tools'], scopedCtx => {
               scopedCtx.skills.register(targetSkill)
               if (researchSummaryTool !== undefined) {
@@ -1887,7 +1890,7 @@ export class TianwenSkillEvaluationService extends Service {
               scopedCtx.tools.presentAs('native')
               scopedCtx.tools.restrict({
                 allow: transition!.postCheck.allowedTools.filter(name =>
-                  name !== researchSummaryTool?.name),
+                  scopedCtx.tools.get(name) !== undefined),
               })
               scopedCtx.tools.guard(execution => controlledArmGuard(execution, guard))
             })
@@ -2239,7 +2242,7 @@ export class TianwenSkillEvaluationService extends Service {
             !== (task.acceptanceContract.toolName === RESEARCH_SUMMARY_TOOL_NAME)) {
             throw new Error('controlled product acceptance contract mismatch')
           }
-          schemas = [...controlledRootToolSchemas(
+          schemas = [...await controlledToolSchemas(
             this.ctx,
             allowedTools,
             researchSummaryTool,
@@ -2416,6 +2419,7 @@ export class TianwenSkillEvaluationService extends Service {
               current: selection,
               assembled: undefined,
             })
+            if (this.ctx.tools.get('skill') === undefined) await agentCtx.plugin(nativeSkillTool)
             await agentCtx.inject(['skills', 'tools'], scopedCtx => {
               scopedCtx.skills.register(candidateSkill)
               if (researchSummaryTool !== undefined) {
@@ -2424,7 +2428,7 @@ export class TianwenSkillEvaluationService extends Service {
               scopedCtx.tools.presentAs('native')
               scopedCtx.tools.restrict({
                 allow: planned.allowedTools.filter(name =>
-                  name !== researchSummaryTool?.name),
+                  scopedCtx.tools.get(name) !== undefined),
               })
               scopedCtx.tools.guard(execution => controlledArmGuard(execution, guard))
             })
@@ -3255,7 +3259,7 @@ export class TianwenSkillEvaluationService extends Service {
 
     let toolRows: readonly { readonly taskId: ControlledSkillEvalTaskId; readonly toolSchemaDigest: Sha256Digest }[]
     try {
-      toolRows = parsed.tasks.map((task, index) => {
+      toolRows = await Promise.all(parsed.tasks.map(async (task, index) => {
         const frozen = protocolTasks[index]!
         const researchSummaryTool = controlledResearchSummaryTool(
           task.researchPacket,
@@ -3264,7 +3268,7 @@ export class TianwenSkillEvaluationService extends Service {
           !== (frozen.acceptanceContract.toolName === RESEARCH_SUMMARY_TOOL_NAME)) {
           throw new ControlledSkillEvaluationPreflightError('tool-surface-mismatch')
         }
-        const schemas = controlledRootToolSchemas(
+        const schemas = await controlledToolSchemas(
           this.ctx,
           frozen.allowedTools,
           researchSummaryTool,
@@ -3275,7 +3279,7 @@ export class TianwenSkillEvaluationService extends Service {
           || sha256(schemas) !== frozen.toolSchemaDigest
         ) throw new ControlledSkillEvaluationPreflightError('tool-surface-mismatch')
         return { taskId: task.taskId, toolSchemaDigest: sha256(schemas) }
-      })
+      }))
     } catch {
       throw new ControlledSkillEvaluationPreflightError('tool-surface-mismatch')
     }
@@ -3441,6 +3445,7 @@ export class TianwenSkillEvaluationService extends Service {
                 current: selection,
                 assembled: undefined,
               })
+              if (this.ctx.tools.get('skill') === undefined) await agentCtx.plugin(nativeSkillTool)
               await agentCtx.inject(['skills', 'tools'], scopedCtx => {
                 scopedCtx.skills.register(skill)
                 if (researchSummaryTool !== undefined) {
@@ -3449,7 +3454,7 @@ export class TianwenSkillEvaluationService extends Service {
                 scopedCtx.tools.presentAs('native')
                 scopedCtx.tools.restrict({
                   allow: planned.allowedTools.filter(name =>
-                    name !== researchSummaryTool?.name),
+                    scopedCtx.tools.get(name) !== undefined),
                 })
                 scopedCtx.tools.guard(execution => controlledArmGuard(execution, guard))
               })
@@ -4913,15 +4918,29 @@ function controlledResearchSummaryTool(researchPacket: string | undefined) {
       })
 }
 
-function controlledRootToolSchemas(
+export async function controlledToolSchemas(
   ctx: Context,
   allowedTools: readonly string[],
   researchTool?: ReturnType<typeof createResearchSummaryTool>,
-): readonly VisibleToolSchema[] {
+): Promise<readonly VisibleToolSchema[]> {
   const root = ctx.tools.schemas()
   if (researchTool !== undefined
     && root.some(schema => schema.name === RESEARCH_SUMMARY_TOOL_NAME)) {
     throw new Error('controlled product tool must not be registered globally')
+  }
+  // Shipped DSH owns the native Skill loader in Agent/preset scope, not globally.
+  // Resolve its schema without starting an Agent, Session, or model request.
+  if (allowedTools.includes('skill') && !root.some(schema => schema.name === 'skill')) {
+    const key = {}
+    const scope = createScope(ctx, key)
+    try {
+      await scope.ctx.plugin(nativeSkillTool)
+      const skill = ctx.tools.schemas(key).find(schema => schema.name === 'skill')
+      if (skill === undefined) throw new Error('native Skill tool is unavailable')
+      root.push(skill)
+    } finally {
+      await scope.dispose()
+    }
   }
   return [
     ...root.filter(schema => allowedTools.includes(schema.name)),

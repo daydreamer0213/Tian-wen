@@ -23,6 +23,7 @@ import type {
 import {
   LedgerAppendNotCommittedError,
   LedgerCommitUnknownError,
+  sha256,
 } from '../../packages/tianwen-evolution/dist/index.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 
@@ -945,10 +946,11 @@ describe('native explicit-correction analysis child', () => {
     expect(subject.evolution.recordLearningAnalysisChildStarted).not.toHaveBeenCalled()
   })
 
-  it('installs the same exact submission tool for a durable-bound cold child', async () => {
+  it.each([false, true])('installs the exact submission tool for a cold child (legacy report: %s)', async legacyReport => {
     let setup: ((ctx: unknown) => () => void) | undefined
     let definition: ToolDefinition | undefined
     const running = status({ phase: 'running' })
+    const legacyText = 'Tianwen analysis verdict: skill-change. Next governed stage: governed-candidate.'
     const recordLearningAnalysisSubmission = vi.fn(input => ({
       ...running,
       phase: 'running',
@@ -1051,6 +1053,15 @@ describe('native explicit-correction analysis child', () => {
       'counterevidenceIds',
     ])
 
+    if (legacyReport) Object.assign(running, {
+      submission: skillChange(),
+      reportDelivery: {
+        analysisId: running.analysisId, parentSessionId: running.parentSessionId,
+        childSessionId: running.childSessionId,
+        reportDigest: sha256([{ type: 'text', text: legacyText }]),
+        state: 'pending', intentRecordedAt: '2026-09-02T00:00:01.000Z',
+      },
+    })
     const result = await definition!.execute(skillChange(), {
       agent: child,
       signal: AbortSignal.timeout(10_000),
@@ -1061,10 +1072,10 @@ describe('native explicit-correction analysis child', () => {
       verdict: 'skill-change',
       nextStage: 'governed-candidate',
     })
-    expect(recordLearningAnalysisSubmission).toHaveBeenCalledOnce()
+    expect(recordLearningAnalysisSubmission).toHaveBeenCalledTimes(legacyReport ? 0 : 1)
     expect(reportFrom).toHaveBeenCalledWith(child, [{
       type: 'text',
-      text: 'Tianwen analysis verdict: skill-change. Next governed stage: governed-candidate.',
+      text: legacyReport ? legacyText : 'Tianwen analysis proposed a Skill improvement; it is not active. The learning loop will automatically evaluate it and, if it passes, activate it for future Runs. Progress and the final outcome will appear in this main conversation. No separate user approval or child-session action is pending.',
     }], {
       delivery: 'next-step',
       signal: expect.any(AbortSignal),

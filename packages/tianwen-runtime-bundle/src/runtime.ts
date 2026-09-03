@@ -12,6 +12,7 @@ import {
   RESEARCH_SUMMARY_TOOL_NAME,
   apply as applyCore,
   createResearchSummaryTool,
+  controlledToolSchemas,
   evaluateResearchSummarySubmission,
   inject,
   name,
@@ -415,25 +416,13 @@ export function createConfiguredLearningLoopExecutor(
       }).currentSelection()
       const callConfig = await ctx.llm.resolveCallConfig(selection)
       const retryPolicy = ctx.llm.providerRetryPolicy(selection.provider)
-      const rootSchemas = ctx.tools.schemas()
-      if (rootSchemas.some(schema => schema.name === RESEARCH_SUMMARY_TOOL_NAME)) {
-        throw new Error('controlled product submission tool must remain Agent-scoped')
-      }
       const productTool = createResearchSummaryTool(parseResearchPacket(`<research_packet>
 [F:schema|required] Freeze the product submission schema.
 </research_packet>`), {
         kind: 'controlled-enforce',
         oracle: evaluateResearchSummarySubmission,
       })
-      const toolSchemas = [
-        ...rootSchemas.filter(schema => schema.name === 'skill'),
-        {
-          name: productTool.name,
-          description: productTool.description,
-          parameters: structuredClone(productTool.parameters),
-        },
-      ]
-        .toSorted((left, right) => left.name.localeCompare(right.name))
+      const toolSchemas = await controlledToolSchemas(ctx, ['skill', RESEARCH_SUMMARY_TOOL_NAME], productTool)
       if (toolSchemas.length !== 2 || toolSchemas[0]?.name !== 'skill'
         || toolSchemas[1]?.name !== RESEARCH_SUMMARY_TOOL_NAME) {
         throw new Error('controlled protocol required tool surface is unavailable')
