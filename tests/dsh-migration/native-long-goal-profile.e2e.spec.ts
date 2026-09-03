@@ -294,8 +294,8 @@ async function mountProfile(
       const delegatedMode = sandboxPolicy().overrideOf(exec.agent.session)
       if (options.permissionLimited && delegatedMode !== 'danger-full-access') {
         throw new SubagentError(
-          sandboxDenialMarker('danger-full-access'),
-          'SANDBOX_UNAVAILABLE',
+          sandboxDenialMarker('workspace-write'),
+          'FS_SANDBOX_DENIED',
         )
       }
       taskRunSessions.push(String(exec.agent.session.id))

@@ -103,6 +103,19 @@ describe('permission-limited attempt classification', () => {
     expect(isPermissionLimited(result, evidenceFor([toolCall(1), result]), snapshot)).toBe(true)
   })
 
+  it('accepts the native filesystem denial code without inferring from rendered error text', () => {
+    const snapshot = permissionSnapshot([], 'workspace-write')
+    for (const text of [
+      `Error: ${sandboxDenialMarker('workspace-write')}\n[sandbox: escalation available]`,
+      'filesystem write was refused',
+    ]) {
+      const result = toolResult({ seq: 2, text, errorCode: 'FS_SANDBOX_DENIED' })
+      expect(permissionLimitedEvidence(
+        [toolCall(1), result], [evidenceFor([toolCall(1), result])], snapshot,
+      )).toBeDefined()
+    }
+  })
+
   it('classifies only structured SANDBOX_UNAVAILABLE when the legacy effective mode is unproven', () => {
     const unavailable = toolResult({
       seq: 2, text: 'sandbox runner could not start', errorCode: 'SANDBOX_UNAVAILABLE',

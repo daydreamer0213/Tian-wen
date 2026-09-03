@@ -50,7 +50,10 @@ export function isPermissionLimited(
   snapshot: PermissionClassificationSnapshot,
 ): boolean {
   if (evidence.outcome.status !== 'complete') return false
-  if (evidence.outcome.errorCode === SANDBOX_UNAVAILABLE) return true
+  if (
+    evidence.outcome.errorCode === SANDBOX_UNAVAILABLE
+    || evidence.outcome.errorCode === 'FS_SANDBOX_DENIED'
+  ) return true
   const mode = snapshot.mode
   if (mode === undefined) return false
   const block = result.data.message.content[0]

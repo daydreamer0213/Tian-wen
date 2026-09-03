@@ -170,7 +170,7 @@ export function installBoundContinuousGoalControls(
         try {
           return formatControlResult(await operations.control(controlAgent, action))
         } finally {
-          exec.concludeTurn()
+          if (action.action !== 'status') exec.concludeTurn()
         }
       },
     }))
@@ -184,7 +184,8 @@ export function installBoundContinuousGoalControls(
         'Do not read from or write to the workspace before calling it.',
         'When goal_control reports autoProgress "running", Tianwen-owned Task Sessions are still doing the work.',
         'Do not execute the continuous Goal Task in this control chat.',
-        'Treat Planner and Task subagent reports as progress only. Inspect goal_control status and give the user a concise progress update when useful.',
+        'Treat Planner and Task subagent reports as progress only. Inspect goal_control status.',
+        'After status returns, give one brief user-facing update in the user\'s language: completed stages, current stage, and whether user action is needed. Do not call other tools merely to re-check the same status.',
         'Report the Goal as complete only after goal_control reports phase "complete".',
         'Use exactly one of:',
         ...GOAL_CONTROL_SHAPES,

@@ -228,9 +228,12 @@ describe('continuous Goal Agent controls', () => {
     })
     installBoundContinuousGoalControls(subject.agent, ops)
 
+    const concludeTurn = vi.fn()
     const output = await subject.tools[0]!.execute({ action: 'status' }, {
-      agent: subject.agent, concludeTurn: vi.fn(),
+      agent: subject.agent, concludeTurn,
     })
+
+    expect(concludeTurn).not.toHaveBeenCalled()
 
     expect(JSON.parse(output)).toEqual({
       action: 'status',
@@ -308,6 +311,7 @@ describe('continuous Goal Agent controls', () => {
     expect(prompt).toContain('Do not read from or write to the workspace before calling it')
     expect(prompt).toContain('Do not execute the continuous Goal Task in this control chat')
     expect(prompt).toContain('Treat Planner and Task subagent reports as progress only')
+    expect(prompt).toContain('After status returns, give one brief user-facing update')
     expect(prompt).toContain('Unrelated conversation should proceed normally')
   })
 
