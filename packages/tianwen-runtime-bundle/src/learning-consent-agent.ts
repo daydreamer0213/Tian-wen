@@ -381,7 +381,10 @@ export class TianwenLearningConsentAgentService extends Service {
     const dispose = agent.ctx.effect(function* () {
       yield agent.ctx.tools.register(defineTool({
         name: 'tianwen_learning_consent',
-        description: 'Enable, disable, or inspect Tianwen automatic feedback analysis for this profile.',
+        description: [
+          'Enable, disable, or inspect Tianwen automatic feedback analysis for this profile.',
+          LEARNING_CONSENT_NOTICE_TEXT,
+        ].join('\n'),
         parameters: {
           action: {
             type: 'string',

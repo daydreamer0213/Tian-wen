@@ -112,7 +112,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         tool.name === 'tianwen_learning_consent')
       expect(mainSchema).toEqual({
         name: 'tianwen_learning_consent',
-        description: 'Enable, disable, or inspect Tianwen automatic feedback analysis for this profile.',
+        description: expect.stringContaining(LEARNING_CONSENT_NOTICE_TEXT),
         parameters: {
           type: 'object',
           properties: {
