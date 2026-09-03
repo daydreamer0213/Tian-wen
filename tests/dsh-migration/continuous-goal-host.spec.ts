@@ -46,6 +46,7 @@ import {
   recordContinuousGoalTerminalAttempt,
   reportLongGoalProgress,
   runCurrentWebTask,
+  type TianwenLongGoalRunDependencies,
 } from '../../packages/tianwen-runtime-bundle/src/long-goal-host.js'
 import { runLongGoalPlannerTurn } from '../../packages/tianwen-runtime-bundle/src/long-goal-planner.js'
 import { permissionSnapshot } from '../../packages/tianwen-runtime-bundle/src/permission-attempt.js'
@@ -2269,6 +2270,125 @@ describe('continuous Goal Host', () => {
       expect(directCreate).not.toHaveBeenCalled()
       expect(directResume).not.toHaveBeenCalled()
       expect(whenIdle).toHaveBeenCalledTimes(2)
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
+  it('binds the native Task Goal before its first work prompt can run', async () => {
+    const base = resolve('D:/DevData/tianwen-continuous-goal-host-tests')
+    mkdirSync(base, { recursive: true })
+    const fixture = mkdtempSync(resolve(base, 'native-task-goal-before-prompt-'))
+    try {
+      const stateRoot = resolve(fixture, 'state')
+      const source = createContinuousLongGoal({
+        stateRoot,
+        objective: 'Bind before work starts',
+        context: null,
+        successCriteria: null,
+        workspaceRoot: fixture,
+        agentPreset: 'planner-preset',
+        controlSessionId: 'main-control',
+      }, {
+        goalSuffix: () => 'native-task-goal-before-prompt',
+        plannerSessionId: () => 'live-planner',
+        now: () => 1,
+      })
+      const planned = commitLongGoalPlan({
+        stateRoot,
+        longGoalId: source.id,
+        expectedRevision: source.revision,
+        outcome: 'continue',
+        tasks: [{ objective: 'Write the release marker' }],
+        consideredSettledTasks: 0,
+      }, {
+        taskId: () => '00000000-0000-4000-8000-000000000090',
+        now: () => 2,
+      }) as LongGoalRecordV3
+      const taskId = planned.tasks[0]!.id
+      const planner = {
+        session: { id: 'live-planner', header: { cwd: fixture, agentPreset: 'planner-preset' } },
+      } as unknown as Agent
+      let currentGoal: ReturnType<TianwenLongGoalRunDependencies['createGoal']> | undefined
+      const child = {
+        session: {
+          id: 'reserved-task-child',
+          header: { cwd: fixture, agentPreset: 'planner-preset', parentSession: 'live-planner' },
+        },
+        ctx: { goals: { get: () => currentGoal } },
+      } as unknown as Agent
+      const live = new Map<string, Agent>([['live-planner', planner]])
+      const setups = new Map<string, AgentSetup>()
+      const createGoal = vi.fn((_agent: Agent, input: { readonly objective: string, readonly maxGoalRounds: number }) => {
+        currentGoal = {
+          id: 'task-goal-before-prompt', revision: 1, phase: 'active', activation: 'armed',
+          objective: input.objective, maxGoalRounds: input.maxGoalRounds,
+        }
+        return currentGoal
+      })
+      let promptObservedBoundGoal = false
+      const startNativeTaskChild = vi.fn(async (input: { readonly childId: string }) => {
+        const setup = setups.get(input.childId)
+        if (setup === undefined) throw new Error('native Task setup was not installed before start')
+        let announce: ((event: { readonly agent: Agent }) => void) | undefined
+        const prepared = setup({
+          agent: child,
+          on: (name: string, listener: (event: { readonly agent: Agent }) => void) => {
+            expect(name).toBe('agent/created')
+            announce = listener
+            return () => undefined
+          },
+        } as unknown as DshContext)
+        if (prepared instanceof Promise) throw new Error('native Task setup must be synchronous')
+        prepared?.commit()
+        live.set(input.childId, child)
+        if (announce === undefined) throw new Error('native Task setup did not subscribe to Agent publication')
+        announce({ agent: child })
+        const admitted = readLongGoal(stateRoot, source.id) as LongGoalRecordV3
+        expect(child.ctx.goals.get(child)).toBe(currentGoal)
+        expect(admitted.tasks[0]!.execution).toEqual({
+          sessionId: 'reserved-task-child', goalId: 'task-goal-before-prompt',
+        })
+        promptObservedBoundGoal = true
+        return { childId: input.childId }
+      })
+      const dependencies = {
+        readLongGoal,
+        readLongGoalStatus: vi.fn(async () => {
+          const latest = readLongGoal(stateRoot, source.id) as LongGoalRecordV3
+          return status(latest, [latest.tasks[0]!.execution === null ? 'pending' : 'active'], taskId)
+        }),
+        bindLongGoalTask: vi.fn(),
+        bindGoalFirstLongGoalTask,
+        listSessions: vi.fn(async () => []),
+        createSession: vi.fn(),
+        reserveTaskSessionId: () => 'reserved-task-child',
+        installNativeTaskSetup: (sessionId: string, setup: AgentSetup) => { setups.set(sessionId, setup) },
+        startNativeTaskChild,
+        followupNativeTaskChild: vi.fn(),
+        nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
+        attachedAgent: (sessionId: string) => live.get(sessionId),
+        createGoal,
+        readGoalRef: vi.fn(),
+        resumeColdGoal: vi.fn(),
+        flushSession: vi.fn(async () => undefined),
+      }
+
+      await expect(runCurrentWebTask({
+        roots: {
+          stateRoot,
+          sessionsRoot: resolve(fixture, 'sessions'),
+          evolutionRoot: resolve(stateRoot, 'evolution'),
+        },
+        longGoalId: source.id,
+        expectedRevision: planned.revision,
+      }, dependencies as never)).resolves.toMatchObject({
+        action: 'started', sessionId: 'reserved-task-child',
+      })
+
+      expect(promptObservedBoundGoal).toBe(true)
+      expect(createGoal).toHaveBeenCalledOnce()
+      expect(dependencies.flushSession).toHaveBeenCalledOnce()
     } finally {
       rmSync(fixture, { recursive: true, force: true })
     }

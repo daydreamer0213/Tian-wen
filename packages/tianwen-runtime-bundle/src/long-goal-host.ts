@@ -222,6 +222,7 @@ export interface TianwenLongGoalRunDependencies {
     readonly label?: string
   }) => Promise<string>
   readonly reserveTaskSessionId?: () => string
+  readonly installNativeTaskSetup?: (sessionId: string, setup: AgentSetup) => void
   readonly startNativeTaskChild?: (input: {
     readonly parent: Agent
     readonly childId: string
@@ -1037,6 +1038,59 @@ export async function runCurrentWebTask(input: {
         throw new LongGoalIntegrityError('Continuous Goal Planner parent Agent is not live')
       }
       let agent = dependencies.attachedAgent(sessionId)
+      let setupAgent: Agent | undefined
+      const admitNativeTaskAgent = (candidate: Agent): void => {
+        if (String(candidate.session.id) !== sessionId) {
+          throw new LongGoalIntegrityError('Native Long Goal Task Session identity mismatch')
+        }
+        if (
+          candidate.session.header.cwd !== goalFirstRecord.workspaceRoot ||
+          candidate.session.header.agentPreset !== goalFirstRecord.planner.agentPreset
+        ) {
+          throw new LongGoalIntegrityError('New Goal-first Task Session header mismatch')
+        }
+        const durableGoal = candidate.ctx.goals.get(candidate)
+        if (
+          durableGoal !== undefined
+          && (durableGoal.objective !== task.objective || durableGoal.maxGoalRounds !== record.maxTaskRounds)
+        ) throw new LongGoalIntegrityError('Accepted native Long Goal Task Goal mismatch')
+        const goal = durableGoal ?? dependencies.createGoal(candidate, {
+          objective: task.objective,
+          maxGoalRounds: record.maxTaskRounds,
+        })
+        const latest = dependencies.readLongGoal(input.roots.stateRoot, input.longGoalId)
+        if (latest.schemaVersion !== 'tianwen.long-goal.v3') {
+          throw new LongGoalIntegrityError('Continuous Goal Task record schema changed during admission')
+        }
+        const latestTask = latest.tasks.find(candidateTask => candidateTask.id === task.id)
+        if (latestTask === undefined) {
+          throw new LongGoalIntegrityError('Continuous Goal Task disappeared during admission')
+        }
+        if (latestTask.execution === null) {
+          dependencies.bindGoalFirstLongGoalTask({
+            stateRoot: input.roots.stateRoot,
+            longGoalId: input.longGoalId,
+            expectedRevision: attemptRevision,
+            taskId: task.id,
+            execution: { sessionId, goalId: String(goal.id) },
+          })
+        } else if (
+          latestTask.execution.sessionId !== sessionId ||
+          latestTask.execution.goalId !== String(goal.id)
+        ) {
+          throw new LongGoalIntegrityError('Continuous Goal Task execution changed during native admission')
+        }
+        setupAgent = candidate
+      }
+      dependencies.installNativeTaskSetup?.(sessionId, childCtx => {
+        const candidate = childCtx.agent
+        if (candidate === undefined) {
+          throw new LongGoalIntegrityError('Continuous Goal native Task Agent is unavailable during setup')
+        }
+        childCtx.on('agent/created', ({ agent: created }) => {
+          if (created === candidate) admitNativeTaskAgent(candidate)
+        })
+      })
       try {
         if (agent === undefined) {
           let started: { readonly childId: unknown }
@@ -1050,7 +1104,9 @@ export async function runCurrentWebTask(input: {
               signal: AbortSignal.timeout(30_000),
             })
           } catch (cause) {
-            if (cause instanceof SubagentError && cause.code === 'DUPLICATE_CHILD') {
+            if (setupAgent !== undefined) {
+              throw cause
+            } else if (cause instanceof SubagentError && cause.code === 'DUPLICATE_CHILD') {
               if (dependencies.followupNativeTaskChild === undefined) {
                 throw new LongGoalIntegrityError('Continuous Goal native Task services are unavailable')
               }
@@ -1079,7 +1135,7 @@ export async function runCurrentWebTask(input: {
           if (String(started.childId) !== sessionId) {
             throw new LongGoalIntegrityError('Native Long Goal Task Session identity mismatch')
           }
-          agent = dependencies.attachedAgent(sessionId)
+          agent = dependencies.attachedAgent(sessionId) ?? setupAgent
         }
       } finally {
         recoveredParent?.release()
@@ -1087,28 +1143,7 @@ export async function runCurrentWebTask(input: {
       if (agent === undefined || String(agent.session.id) !== sessionId) {
         throw new LongGoalIntegrityError('New native Long Goal Task Session has no exact Agent')
       }
-      if (
-        agent.session.header.cwd !== goalFirstRecord.workspaceRoot ||
-        agent.session.header.agentPreset !== goalFirstRecord.planner.agentPreset
-      ) {
-        throw new LongGoalIntegrityError('New Goal-first Task Session header mismatch')
-      }
-      const durableGoal = agent.ctx.goals.get(agent)
-      if (
-        durableGoal !== undefined
-        && (durableGoal.objective !== task.objective || durableGoal.maxGoalRounds !== record.maxTaskRounds)
-      ) throw new LongGoalIntegrityError('Accepted native Long Goal Task Goal mismatch')
-      const goal = durableGoal ?? dependencies.createGoal(agent, {
-        objective: task.objective,
-        maxGoalRounds: record.maxTaskRounds,
-      })
-      dependencies.bindGoalFirstLongGoalTask({
-        stateRoot: input.roots.stateRoot,
-        longGoalId: input.longGoalId,
-        expectedRevision: attemptRevision,
-        taskId: task.id,
-        execution: { sessionId, goalId: String(goal.id) },
-      })
+      admitNativeTaskAgent(agent)
       await dependencies.flushSession(agent)
       return { status: await readStatus(), sessionId, action: 'started' }
     }
@@ -2161,6 +2196,7 @@ export function mountTianwenLongGoalHost(
         payload: { cwd, ...(agentPreset === undefined ? {} : { agentPreset }) },
       })).sessionId),
       reserveTaskSessionId: () => `session-${randomUUID()}`,
+      installNativeTaskSetup: (sessionId, setup) => { nativeSetups.set(sessionId, setup) },
       startNativeTaskChild: input => nativeChild.start({
         ...input,
         childId: SessionId(input.childId),

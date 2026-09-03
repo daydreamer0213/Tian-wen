@@ -465,7 +465,9 @@ describe('native Long Goal profile execution', () => {
         && event.data.source.kind === 'subagent-report'
         && String(event.data.source.senderSessionId) === running.planner.sessionId
       ))!.seq
-      profile.ctx.goals.complete(task, taskGoal)
+      const currentTaskGoal = profile.ctx.goals.get(task)
+      if (currentTaskGoal === undefined) throw new Error('expected current Task Goal')
+      profile.ctx.goals.complete(task, currentTaskGoal)
       profile.releaseTask()
 
       await vi.waitFor(async () => {
