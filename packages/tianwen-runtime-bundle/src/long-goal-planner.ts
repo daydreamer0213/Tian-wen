@@ -60,6 +60,21 @@ export interface LongGoalPlannerDependencies {
   }) => Promise<string | undefined>
 }
 
+interface NativePlannerTurnState {
+  readonly stateRoot: string
+  readonly dshStatusTarget: Parameters<typeof readLongGoalStatus>[0]['dshStatusTarget']
+  readonly record: GoalFirstLongGoalRecord
+  readonly dependencies: LongGoalPlannerDependencies
+  readonly settledTasksAtTurnStart: number
+  submitted: boolean
+}
+
+const nativePlannerTurns = new Map<string, NativePlannerTurnState>()
+
+function nativePlannerTurnKey(stateRoot: string, record: GoalFirstLongGoalRecord): string {
+  return [stateRoot, record.id, record.planner.sessionId].join('\u0000')
+}
+
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(value).sort()
   const expected = [...keys].sort()
@@ -166,6 +181,17 @@ export async function runLongGoalPlannerTurn(input: {
         render: (_args, value) => [{ type: 'text', text: value }],
       },
       async execute(args, exec) {
+        const nativeTurn = input.record.schemaVersion === 'tianwen.long-goal.v3'
+          ? nativePlannerTurns.get(nativePlannerTurnKey(input.stateRoot, input.record))
+          : undefined
+        if (input.record.schemaVersion === 'tianwen.long-goal.v3' && nativeTurn === undefined) {
+          throw new LongGoalIntegrityError('Continuous Goal Planner Turn is not active')
+        }
+        const turnRecord = nativeTurn?.record ?? input.record
+        const turnStateRoot = nativeTurn?.stateRoot ?? input.stateRoot
+        const turnStatusTarget = nativeTurn?.dshStatusTarget ?? input.dshStatusTarget
+        const turnDependencies = nativeTurn?.dependencies ?? dependencies
+        const turnSettledTasks = nativeTurn?.settledTasksAtTurnStart ?? settledTasksAtTurnStart
         if (
           !hasExactKeys(args as Record<string, unknown>, [
             'expectedGoalRevision', 'outcome', 'tasks',
@@ -174,33 +200,34 @@ export async function runLongGoalPlannerTurn(input: {
         ) {
           throw new TypeError('Long Goal plan arguments require exact keys')
         }
-        if (args.expectedGoalRevision !== input.record.revision) {
+        if (args.expectedGoalRevision !== turnRecord.revision) {
           throw new LongGoalIntegrityError('Long Goal planner expected revision mismatch')
         }
         requireGoalFirstStatus(await readLongGoalStatus({
-          stateRoot: input.stateRoot,
-          longGoalId: input.record.id,
-          dshStatusTarget: input.dshStatusTarget,
-        }), input.record)
-        if (settledTasksAtTurnStart === undefined) {
+          stateRoot: turnStateRoot,
+          longGoalId: turnRecord.id,
+          dshStatusTarget: turnStatusTarget,
+        }), turnRecord)
+        if (turnSettledTasks === undefined) {
           throw new LongGoalIntegrityError('Long Goal planner settled Task snapshot is unavailable')
         }
         const committed = commitLongGoalPlan({
-          stateRoot: input.stateRoot,
-          longGoalId: input.record.id,
+          stateRoot: turnStateRoot,
+          longGoalId: turnRecord.id,
           expectedRevision: args.expectedGoalRevision,
           outcome: args.outcome,
           tasks: args.tasks,
-          consideredSettledTasks: settledTasksAtTurnStart,
+          consideredSettledTasks: turnSettledTasks,
         })
-        if (committed.schemaVersion === 'tianwen.long-goal.v3' && dependencies.admitTaskFromPlanner !== undefined) {
+        if (committed.schemaVersion === 'tianwen.long-goal.v3' && turnDependencies.admitTaskFromPlanner !== undefined) {
           if (currentPlanner === undefined) {
             throw new LongGoalIntegrityError('Continuous Goal Planner Agent is unavailable during Task admission')
           }
           requirePlannerAgent(currentPlanner, committed)
-          await dependencies.admitTaskFromPlanner({ record: committed, parent: currentPlanner })
+          await turnDependencies.admitTaskFromPlanner({ record: committed, parent: currentPlanner })
         }
-        submitted = true
+        if (nativeTurn === undefined) submitted = true
+        else nativeTurn.submitted = true
         exec.concludeTurn()
         return 'plan-submitted'
       },
@@ -252,28 +279,45 @@ export async function runLongGoalPlannerTurn(input: {
       text: plannerPrompt(input.record, status, input.reason, settledTaskResults),
     }]
     const signal = AbortSignal.timeout(30_000)
-    installNativeSetup(input.record.planner.sessionId, setup)
-    if (inspected.exists) {
-      await followupNativeChild(parent, input.record.planner.sessionId, prompt, signal)
-    } else {
-      const started = await startNativeChild({
-        parent,
-        childId: input.record.planner.sessionId,
-        label: 'Long Goal Planner',
-        prompt,
-        agentOptions: nativeAgentOptions,
-        signal,
-      })
-      if (String(started.childId) !== input.record.planner.sessionId) {
-        throw new LongGoalIntegrityError('Long Goal planner Session identity mismatch')
-      }
+    const turnKey = nativePlannerTurnKey(input.stateRoot, input.record)
+    if (nativePlannerTurns.has(turnKey)) {
+      throw new LongGoalIntegrityError('Continuous Goal Planner Turn is already active')
     }
-    const planner = getAgent(input.record.planner.sessionId)
-    if (planner === undefined) return 'not-submitted'
-    requirePlannerAgent(planner, input.record)
-    await planner.whenIdle()
-    await dependencies.flushSession(planner)
-    return submitted ? 'submitted' : 'not-submitted'
+    const nativeTurn: NativePlannerTurnState = {
+      stateRoot: input.stateRoot,
+      dshStatusTarget: input.dshStatusTarget,
+      record: input.record,
+      dependencies,
+      settledTasksAtTurnStart,
+      submitted: false,
+    }
+    nativePlannerTurns.set(turnKey, nativeTurn)
+    try {
+      installNativeSetup(input.record.planner.sessionId, setup)
+      if (inspected.exists) {
+        await followupNativeChild(parent, input.record.planner.sessionId, prompt, signal)
+      } else {
+        const started = await startNativeChild({
+          parent,
+          childId: input.record.planner.sessionId,
+          label: 'Long Goal Planner',
+          prompt,
+          agentOptions: nativeAgentOptions,
+          signal,
+        })
+        if (String(started.childId) !== input.record.planner.sessionId) {
+          throw new LongGoalIntegrityError('Long Goal planner Session identity mismatch')
+        }
+      }
+      const planner = getAgent(input.record.planner.sessionId)
+      if (planner === undefined) return 'not-submitted'
+      requirePlannerAgent(planner, input.record)
+      await planner.whenIdle()
+      await dependencies.flushSession(planner)
+      return nativeTurn.submitted ? 'submitted' : 'not-submitted'
+    } finally {
+      if (nativePlannerTurns.get(turnKey) === nativeTurn) nativePlannerTurns.delete(turnKey)
+    }
   }
 
   let handle: AgentHandle | undefined

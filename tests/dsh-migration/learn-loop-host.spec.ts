@@ -1501,6 +1501,76 @@ describe('Long Goal DSH planner', () => {
     }
   })
 
+  it('uses the current turn state when a resident v3 Planner receives a followup', async () => {
+    const fixture = createFixtureRoot()
+    try {
+      const stateRoot = join(fixture, 'state')
+      const created = createContinuousLongGoal({
+        stateRoot, objective: 'Ship continuous release', context: null, successCriteria: null,
+        workspaceRoot: fixture, agentPreset: 'planner-preset', controlSessionId: 'control-session',
+      })
+      const owned = plannerHandle(created)
+      const control = { session: { id: 'control-session' } } as unknown as Agent
+      let residentTool: ToolDefinition | undefined
+      let pending = Promise.resolve<unknown>(undefined)
+      let persisted = false
+      vi.spyOn(owned.handle.agent, 'whenIdle').mockImplementation(async () => { await pending })
+      const dependencies = {
+        inspectSession: vi.fn(async () => persisted
+          ? { exists: true, cwd: fixture, agentPreset: 'planner-preset' }
+          : { exists: false }),
+        createAgent: vi.fn(async () => { throw new Error('unexpected direct create') }),
+        resumeAgent: vi.fn(async () => { throw new Error('unexpected direct resume') }),
+        getAgent: (sessionId: string) => sessionId === 'control-session' ? control : owned.handle.agent,
+        installNativeSetup: vi.fn(),
+        startNativeChild: vi.fn(async (input: { readonly childId: string }) => {
+          const setup = dependencies.installNativeSetup.mock.calls.at(-1)![1]
+          await installPlannerSetup(setup, definition => { residentTool = definition }, owned.handle.agent)
+          pending = residentTool!.execute({
+            expectedGoalRevision: 1,
+            outcome: 'continue',
+            tasks: [{ objective: 'Prepare notes' }],
+          }, { concludeTurn: vi.fn() } as never)
+          persisted = true
+          return { childId: input.childId, messageId: 'initial-plan' }
+        }),
+        followupNativeChild: vi.fn(async () => {
+          pending = residentTool!.execute({
+            expectedGoalRevision: 2,
+            outcome: 'continue',
+            tasks: [{ objective: 'Publish release' }],
+          }, { concludeTurn: vi.fn() } as never)
+          return 'replacement-plan'
+        }),
+        nativeAgentOptions: { provider: 'provider', model: 'model' },
+        admitTaskFromPlanner: vi.fn(async () => undefined),
+        flushSession: vi.fn(async () => undefined),
+        readSettledTaskResult: vi.fn(async () => undefined),
+      }
+      const input = {
+        stateRoot,
+        dshStatusTarget: { sessionsRoot: join(fixture, 'sessions'), evolutionRoot: join(stateRoot, 'evolution') },
+        reason: 'create' as const,
+      }
+
+      await expect(runLongGoalPlannerTurn({ ...input, record: created }, dependencies))
+        .resolves.toBe('submitted')
+      const planned = readLongGoal(stateRoot, created.id)
+      expect(planned.revision).toBe(2)
+
+      await expect(runLongGoalPlannerTurn({ ...input, record: planned, reason: 'continue' }, dependencies))
+        .resolves.toBe('submitted')
+      expect(readLongGoal(stateRoot, created.id)).toMatchObject({
+        revision: 3,
+        tasks: [{ objective: 'Publish release' }],
+      })
+      expect(dependencies.startNativeChild).toHaveBeenCalledTimes(1)
+      expect(dependencies.followupNativeChild).toHaveBeenCalledTimes(1)
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
   it('rejects extra tool keys without writing a plan', async () => {
     const fixture = createFixtureRoot()
     try {
