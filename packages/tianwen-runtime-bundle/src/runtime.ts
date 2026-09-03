@@ -84,23 +84,30 @@ function exactLearningReportMessageId(
 ): string | undefined {
   if (event === null || typeof event !== 'object') return undefined
   const typed = event as { readonly type?: unknown, readonly data?: unknown }
-  if (typed.type !== 'user/message' || typed.data === null || typeof typed.data !== 'object') {
+  if (typed.data === null || typeof typed.data !== 'object') {
     return undefined
   }
-  const message = typed.data as {
+  type ReportMessage = {
     readonly id?: unknown
     readonly source?: { readonly kind?: unknown, readonly senderSessionId?: unknown }
     readonly content?: unknown
   }
+  // Native send acceptance is durable in the inbox before the next model step.
+  const inserted = (typed.data as { readonly inserted?: unknown }).inserted
+  const messages: ReportMessage[] = typed.type === 'user/message'
+    ? [typed.data]
+    : typed.type === 'agent/inbox/spliced' && Array.isArray(inserted)
+      ? inserted : []
   const expected = [{ type: 'text' as const, text: `Background subagent ${childSessionId} reported:` }, {
     type: 'text' as const, text,
   }]
-  return message.source?.kind === 'subagent-report'
+  const message = messages.find(message => message !== null && typeof message === 'object'
+    && message.source?.kind === 'subagent-report'
     && String(message.source.senderSessionId) === childSessionId
     && sha256(message.content) === sha256(expected)
     && typeof message.id === 'string' && message.id.length > 0
-    && (expectedMessageId === undefined || message.id === expectedMessageId)
-    ? message.id : undefined
+    && (expectedMessageId === undefined || message.id === expectedMessageId))
+  return message?.id as string | undefined
 }
 
 interface ConfiguredReportInput {
@@ -168,12 +175,16 @@ async function confirmConfiguredReportPersisted(
 ): Promise<string> {
   const status = input.resolve()
   if (ctx.agents.get(SessionId(status.parentSessionId)) !== parent
-    || !exactLearningAnalysisMainParent(ctx, parent, status)
-    || !await hasExactLearningAnalysisChild(ctx, status)
-    || !parent.session.events.some(event => exactLearningReportMessageId(
+    || !exactLearningAnalysisMainParent(ctx, parent, status)) {
+    throw new Error('report accepted message lost its exact live parent')
+  }
+  if (!await hasExactLearningAnalysisChild(ctx, status)) {
+    throw new Error('report accepted message lost its exact native child')
+  }
+  if (!parent.session.events.some(event => exactLearningReportMessageId(
       event, status.childSessionId, input.text, messageId,
     ) !== undefined)) {
-    throw new Error('report accepted message lacks the exact live binding')
+    throw new Error('report accepted message has not entered the parent Session')
   }
   try {
     if (!await ctx.sessions.flush(parent.session)) {
@@ -374,7 +385,7 @@ async function findConfiguredReport(
 }
 
 export function createConfiguredLearningLoopExecutor(
-  ctx: Context,
+  _ctx: Context,
   config: TianwenRuntimeBundleConfig,
 ): LearningLoopControlledExecutor | undefined {
   if (config.learningLoopExecutor !== undefined) return config.learningLoopExecutor
@@ -398,7 +409,7 @@ export function createConfiguredLearningLoopExecutor(
         throw new Error('controlled workspace drift')
       }
     },
-    async environment() {
+    async environment({ ctx }) {
       const selection = (ctx.get('agentDefaultModel') as {
         currentSelection(): { readonly provider: string, readonly model: string }
       }).currentSelection()
@@ -430,25 +441,25 @@ export function createConfiguredLearningLoopExecutor(
       return { callConfig, retryPolicy, toolSchemas, rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST }
     },
     async deliverTerminalReport({ context, text }) {
-      return deliverConfiguredTerminalReport(ctx, { context, text })
+      return deliverConfiguredTerminalReport(context.ctx, { context, text })
     },
     async deliverProgressReport({ context, text, progress }) {
-      return deliverConfiguredProgressReport(ctx, { context, text, progress })
+      return deliverConfiguredProgressReport(context.ctx, { context, text, progress })
     },
     async findProgressReport({ context, text, progress }) {
-      return findConfiguredReport(ctx, {
+      return findConfiguredReport(context.ctx, {
         context,
         text,
-        resolve: () => pendingProgressReport(ctx, context.status, text, progress),
+        resolve: () => pendingProgressReport(context.ctx, context.status, text, progress),
         recoveryPrompt: 'Recover only to inspect the persisted Tianwen progress update.',
         delivery: 'next-step',
       })
     },
     async findTerminalReport({ context, text }) {
-      return findConfiguredReport(ctx, {
+      return findConfiguredReport(context.ctx, {
         context,
         text,
-        resolve: () => pendingTerminalReport(ctx, context.status, text),
+        resolve: () => pendingTerminalReport(context.ctx, context.status, text),
         recoveryPrompt: 'Recover only to inspect the persisted Tianwen governed outcome.',
         delivery: 'next-step',
       })

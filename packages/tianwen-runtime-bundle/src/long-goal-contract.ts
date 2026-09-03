@@ -241,9 +241,14 @@ export interface LongGoalStatusProjectionV2 {
   }
 }
 
-export interface LongGoalStatusProjectionV3 extends Omit<LongGoalStatusProjectionV2, 'schemaVersion'> {
+export interface LongGoalStatusProjectionV3 extends Omit<LongGoalStatusProjectionV2, 'schemaVersion' | 'tasks'> {
   readonly schemaVersion: 'tianwen.long-goal-status.v3'
   readonly control: LongGoalRecordV3['control']
+  readonly tasks: readonly (LongGoalStatusProjectionV2['tasks'][number] & {
+    readonly attempt?: Pick<TianwenExecutionAttempt, 'epoch' | 'status' | 'permissionMode'> & {
+      readonly hadPermissionLimit: boolean
+    }
+  })[]
 }
 
 export type GoalFirstLongGoalStatusProjection = LongGoalStatusProjectionV2 | LongGoalStatusProjectionV3

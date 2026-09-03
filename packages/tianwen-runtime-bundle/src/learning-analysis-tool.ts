@@ -71,7 +71,7 @@ function assertActiveConsent(ctx: Context, status: LearningAnalysisStatus): void
   ) throw new Error('learning analysis consent or exact feedback support is unavailable')
 }
 
-function evidenceClosure(ctx: Context, status: LearningAnalysisStatus) {
+export function learningAnalysisEvidenceClosure(ctx: Context, status: LearningAnalysisStatus) {
   const result = new Set<`sha256:${string}`>()
   const ticket = ctx.tianwenEvolution.listLearningTickets()
     .find(item => item.ticketId === status.ticketId)
@@ -208,6 +208,7 @@ export function createLearningAnalysisTool(
       verdict: {
         type: 'string',
         enum: ['no-case', 'insufficient-evidence', 'skill-change'],
+        description: 'skill-change requires lesson, candidatePatch, and at least one supportingEvidenceId. Other verdicts must omit lesson and candidatePatch.',
         required: true,
       },
       hypothesis: { type: 'string', required: true },
@@ -231,9 +232,11 @@ export function createLearningAnalysisTool(
       },
       supportingEvidenceIds: {
         type: 'array', required: true, items: { type: 'string' },
+        description: 'Copy relevant sha256: IDs from the available evidence IDs in your task. Never invent IDs. At least one is required for skill-change.',
       },
       counterevidenceIds: {
         type: 'array', required: true, items: { type: 'string' },
+        description: 'Copy contrary evidence IDs from the same available list; do not reuse a supporting ID. Use [] when there is no counterevidence.',
       },
     },
     output: {
@@ -275,7 +278,7 @@ export function createLearningAnalysisTool(
       if (status.submission === undefined) {
         assertLearningAnalysisEvidenceClosure(
           submission,
-          evidenceClosure(ctx, status),
+          learningAnalysisEvidenceClosure(ctx, status),
         )
         if (ctx.tianwenEvolution.blocked) {
           const durable = await readDurableAnalysis(evolutionRoot, status.analysisId)

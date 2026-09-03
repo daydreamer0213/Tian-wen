@@ -797,6 +797,12 @@ function operation<T extends keyof LearningLoopPhaseOperations>(input: LearningL
 export async function runLearningLoopPhase(input: LearningLoopPhaseOperations): Promise<void> {
   const status = input.status
   try {
+    // Feedback reconciliation can persist withdrawal before this lane wakes.
+    // The native child still needs its stop signal even though no write remains.
+    if (status.phase === 'invalidated') {
+      await operation(input, 'interruptChild')(status)
+      return
+    }
     if (!await input.hasActiveSupport(status)) {
       if (status.phase === 'failed' && status.resumePhase === 'promoted') {
         await operation(input, 'resume')(status)

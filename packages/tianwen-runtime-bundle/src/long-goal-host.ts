@@ -97,6 +97,7 @@ import { NativeLongGoalChild } from './native-long-goal-child.js'
 import {
   permissionLimitedEvidence,
   permissionSnapshot,
+  sandboxModeFromEvents,
   type PermissionSnapshot,
 } from './permission-attempt.js'
 
@@ -408,23 +409,6 @@ export interface PermissionAttemptHostDependencies {
   readonly now?: () => string
 }
 
-function sandboxModeFromEvents(
-  events: readonly SessionEvent[],
-  delegatedOnly: boolean,
-): SandboxMode | undefined {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index] as unknown as {
-      readonly type?: unknown
-      readonly data?: { readonly mode?: unknown, readonly source?: unknown }
-    } | undefined
-    if (event?.type !== 'sandbox/mode') continue
-    if (delegatedOnly && event.data?.source !== 'delegation') continue
-    const mode = event.data?.mode
-    if (mode === 'read-only' || mode === 'workspace-write' || mode === 'danger-full-access') return mode
-  }
-  return undefined
-}
-
 function delegatedSandboxObservation(
   view: PermissionAttemptSessionView,
 ): {
@@ -520,16 +504,16 @@ export function createPermissionAttemptHost(
     const attempt = currentAttemptTask(record)?.current
     const permissionMode = attempt?.permissionMode
     const text = permissionMode === undefined
-      ? 'This Task reached a sandbox limit, but Tianwen cannot verify the old permission mode. Changing this main Session to Full access will not automatically create a new attempt. The Task remains permission-limited while you decide the next step in this main Session.'
+      ? 'A Task attempt reached a sandbox limit, but Tianwen cannot verify the old permission mode. Changing this main Session to Full access will not automatically create a new attempt. Read goal_control status before explaining the current state in this main Session.'
       : (WIDER_MODES[permissionMode] ?? []).length === 0
-        ? 'This Task reached the highest available sandbox permission. There is no wider permission mode, so changing this main Session to Full access will not automatically create a new attempt. The Task remains permission-limited while you decide the next step in this main Session.'
-        : 'This Task reached the current sandbox limit. Change this main Session to Full access; Tianwen will start a new attempt without modifying the old child.'
+        ? 'A Task attempt reached the highest available sandbox permission. There is no wider permission mode, so changing this main Session to Full access will not automatically create a new attempt. Read goal_control status before explaining the current state in this main Session.'
+        : 'An earlier Task attempt reached its sandbox limit. Read goal_control status first. Ask the user to change this main Session to Full access only if the current attempt is still permission-limited and mainPermissionMode is not danger-full-access. If recovery has started or completed, report that state instead of repeating the old permission request.'
     dependencies.notifyMain(main, createUserMessage({
       content: [{
         type: 'text',
         text,
       }],
-      source: { kind: 'plugin', plugin: 'tianwen' },
+      source: { kind: 'plugin', plugin: 'tianwen', form: 'notice', summary: 'Task permission status changed' },
     }))
   }
 

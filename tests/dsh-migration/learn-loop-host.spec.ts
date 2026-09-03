@@ -1503,6 +1503,64 @@ describe('Long Goal DSH planner', () => {
     }
   })
 
+  it('installs the submission tool on an already-live renewed or recovered Planner exactly once', async () => {
+    const fixture = createFixtureRoot()
+    try {
+      const stateRoot = join(fixture, 'state')
+      const record = createContinuousLongGoal({
+        stateRoot, objective: 'Finish recovered work', context: null, successCriteria: null,
+        workspaceRoot: fixture, agentPreset: 'planner-preset', controlSessionId: 'control-session',
+      })
+      const owned = plannerHandle(record)
+      const control = { session: { id: 'control-session' } } as unknown as Agent
+      const tools = new Map<string, ToolDefinition>()
+      const recoveryTool = { name: 'recover_long_goal_task' } as ToolDefinition
+      tools.set(recoveryTool.name, recoveryTool)
+      Object.assign(owned.handle.agent, { ctx: {
+        agent: owned.handle.agent,
+        tools: { register(tool: ToolDefinition) {
+          if (tools.has(tool.name)) throw new Error('duplicate Planner tool')
+          tools.set(tool.name, tool)
+          return () => tools.delete(tool.name)
+        } },
+      } })
+      const dependencies = {
+        inspectSession: async () => ({ exists: true, cwd: fixture, agentPreset: 'planner-preset' }),
+        createAgent: async () => { throw new Error('unexpected direct create') },
+        resumeAgent: async () => { throw new Error('unexpected direct resume') },
+        getAgent: (id: string) => id === 'control-session' ? control : owned.handle.agent,
+        installNativeSetup: vi.fn(), // native setup hooks do not replay for live Agents
+        startNativeChild: async () => { throw new Error('already live') },
+        followupNativeChild: async () => {
+          const tool = tools.get('submit_long_goal_plan')
+          if (tool === undefined) throw new Error('UNKNOWN_TOOL: submit_long_goal_plan')
+          const current = readLongGoal(stateRoot, record.id)
+          await tool.execute({
+            expectedGoalRevision: current.revision, outcome: 'complete', tasks: [],
+          }, { concludeTurn: vi.fn() } as never)
+        },
+        nativeAgentOptions: { provider: 'provider', model: 'model' },
+        flushSession: async () => undefined,
+        readSettledTaskResult: async () => undefined,
+      }
+      const input = {
+        stateRoot, record, reason: 'continue' as const,
+        dshStatusTarget: { sessionsRoot: join(fixture, 'sessions'), evolutionRoot: join(stateRoot, 'evolution') },
+      }
+      await expect(runLongGoalPlannerTurn(input, dependencies)).resolves.toBe('submitted')
+      const completed = readLongGoal(stateRoot, record.id) as LongGoalRecordV3
+      await expect(runLongGoalPlannerTurn({ ...input, record: completed }, dependencies))
+        .resolves.toBe('submitted')
+      expect(readLongGoal(stateRoot, record.id)).toMatchObject({
+        revision: 3, planner: { phase: 'complete', planRevision: 2 },
+      })
+      expect(tools.get(recoveryTool.name)).toBe(recoveryTool)
+      expect(tools.size).toBe(2)
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  })
+
   it('uses the current turn state when a resident v3 Planner receives a followup', async () => {
     const fixture = createFixtureRoot()
     try {

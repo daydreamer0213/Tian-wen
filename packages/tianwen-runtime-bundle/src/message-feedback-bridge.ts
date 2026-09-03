@@ -95,8 +95,9 @@ function needsLearningLoopWake(
   }
   return analysis.phase === 'promoted'
     || analysis.phase === 'failed'
-    || (analysis.phase !== 'invalidated'
-      && analysis.terminalReportDelivery?.state !== 'delivered')
+    // Retraction invalidates the ledger before the loop stops its native child.
+    || analysis.phase === 'invalidated'
+    || analysis.terminalReportDelivery?.state !== 'delivered'
 }
 
 export class TianwenMessageFeedbackBridgeService extends Service {

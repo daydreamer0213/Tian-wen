@@ -1,6 +1,7 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import '@deepseek-ai/dsh-commands'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { sandboxModeFromEvents } from './permission-attempt.js'
 
 import type {
   ContinuousGoalControlAction,
@@ -60,14 +61,16 @@ function parseControlAction(value: unknown): ContinuousGoalControlAction {
   throw new TypeError('Goal control arguments require exact keys')
 }
 
-function formatControlResult(result: ControlOperationResult): string {
+function formatControlResult(result: ControlOperationResult, agent: Agent): string {
   const status = result.status
   if (status === undefined) return result.action
   const currentTask = status.currentTaskId === null
     ? undefined
     : status.tasks.find(task => task.id === status.currentTaskId)
+  const mainPermissionMode = sandboxModeFromEvents(agent.session.events, false)
   return JSON.stringify({
     action: result.action,
+    ...(mainPermissionMode === undefined ? {} : { mainPermissionMode }),
     goal: {
       objective: status.goal.objective,
       phase: status.goal.phase,
@@ -76,7 +79,10 @@ function formatControlResult(result: ControlOperationResult): string {
       autoProgress: status.control.autoProgress,
       currentTask: currentTask === undefined
         ? null
-        : { objective: currentTask.objective, phase: currentTask.phase },
+        : {
+            objective: currentTask.objective, phase: currentTask.phase,
+            ...(currentTask.attempt === undefined ? {} : { attempt: currentTask.attempt }),
+          },
     },
   })
 }
@@ -168,7 +174,7 @@ export function installBoundContinuousGoalControls(
         if (controlAgent === undefined || controlSessionId === undefined) return NO_ACTIVE_GOAL
         const action = parseControlAction(args)
         try {
-          return formatControlResult(await operations.control(controlAgent, action))
+          return formatControlResult(await operations.control(controlAgent, action), controlAgent)
         } finally {
           if (action.action !== 'status') exec.concludeTurn()
         }
@@ -182,7 +188,7 @@ export function installBoundContinuousGoalControls(
         'The native DSH get_goal tool manages a separate Goal domain; a null result must not be used to decide whether a continuous Goal exists.',
         'When a user message is primarily guidance, correction, pause, resume, or status, the first action must be goal_control.',
         'Do not read from or write to the workspace before calling it.',
-        'When goal_control reports autoProgress "running", Tianwen-owned Task Sessions are still doing the work.',
+        'autoProgress "running" means automatic progression is enabled, not that a Task is executing. Use currentTask.phase and currentTask.attempt for the actual state.',
         'Do not execute the continuous Goal Task in this control chat.',
         'Treat Planner and Task subagent reports as progress only. Inspect goal_control status.',
         'After status returns, give one brief user-facing update in the user\'s language: completed stages, current stage, and whether user action is needed. Do not call other tools merely to re-check the same status.',

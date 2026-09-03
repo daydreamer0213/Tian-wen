@@ -576,6 +576,13 @@ describe('native Long Goal profile execution', () => {
         permissionMode: 'workspace-write',
         status: 'permission-limited',
       })
+      const limitedStatus = await readLongGoalStatus({
+        stateRoot: profile.stateRoot, longGoalId: limited.id,
+        dshStatusTarget: { sessionsRoot: profile.sessionsRoot, evolutionRoot: profile.evolutionRoot },
+      })
+      expect(limitedStatus.tasks[0]).toMatchObject({
+        attempt: { epoch: 1, status: 'permission-limited', permissionMode: 'workspace-write', hadPermissionLimit: true },
+      })
       await expectNativeChild(
         profile.ctx,
         String(profile.main.session.id),
@@ -591,7 +598,7 @@ describe('native Long Goal profile execution', () => {
       expect(profile.ctx.tianwenEvolution.listLearningSignals()).toEqual([])
       expect(profile.main.session.events.some(event => event.type === 'user/message'
         && event.data.content.some(block => block.type === 'text'
-          && block.text.includes('Change this main Session to Full access')))).toBe(true)
+          && block.text.includes('main Session to Full access')))).toBe(true)
 
       profile.main.session.append('sandbox/mode', {
         mode: 'danger-full-access', source: 'user',
@@ -645,6 +652,8 @@ describe('native Long Goal profile execution', () => {
           },
         })
         expect(status.goal.phase).toBe('complete')
+        const settled = readLongGoal(profile.stateRoot, renewed.id) as LongGoalRecordV3
+        expect(settled.planner).toMatchObject({ phase: 'complete', consideredSettledTasks: 1 })
       }, { timeout: 20_000 })
 
       const complete = readLongGoal(profile.stateRoot, renewed.id) as LongGoalRecordV3

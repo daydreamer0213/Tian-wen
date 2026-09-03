@@ -1715,7 +1715,20 @@ export async function readLongGoalStatus(input: {
 }): Promise<ReadLongGoalStatusProjection> {
   const record = readLongGoal(input.stateRoot, input.longGoalId)
   if (record.schemaVersion === 'tianwen.long-goal.v2' || record.schemaVersion === 'tianwen.long-goal.v3') {
-    const tasks = await Promise.all(record.tasks.map(task => projectV2Task(task, input.dshStatusTarget)))
+    const tasks = await Promise.all(record.tasks.map(async task => {
+      const projected = await projectV2Task(task, input.dshStatusTarget)
+      const attempts = record.schemaVersion === 'tianwen.long-goal.v3'
+        ? readTianwenTaskAttemptProjection(record, task.id).attempts : []
+      const current = attempts.at(-1)
+      return current === undefined ? projected : {
+        ...projected,
+        attempt: {
+          epoch: current.epoch, status: current.status,
+          ...(current.permissionMode === undefined ? {} : { permissionMode: current.permissionMode }),
+          hadPermissionLimit: attempts.some(attempt => attempt.status === 'permission-limited'),
+        },
+      }
+    }))
     const completedTasks = tasks.filter(task => task.phase === 'complete').length
     const abandonedTasks = tasks.filter(task => task.phase === 'abandoned').length
     const currentBound = tasks.find(task =>

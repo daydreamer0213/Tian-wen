@@ -212,6 +212,30 @@ describe('durable learning-loop phase table', () => {
     }))
   })
 
+  it('stops the bound native child even when feedback reconciliation has already invalidated the analysis', async () => {
+    const runningChildren = new Map([['child', 'main'], ['unrelated-child', 'main']])
+    const invalidate = vi.fn()
+    const rollback = vi.fn()
+    const operations = {
+      status: { ...base, phase: 'invalidated' },
+      hasActiveSupport: async () => false,
+      invalidate,
+      rollback,
+      interruptChild: async (current: { readonly childSessionId?: string, readonly parentSessionId?: string }) => {
+        if (runningChildren.get(current.childSessionId!) === current.parentSessionId) {
+          runningChildren.delete(current.childSessionId!)
+        }
+      },
+    }
+
+    await runLearningLoopPhase(operations)
+    await runLearningLoopPhase(operations)
+
+    expect([...runningChildren.keys()]).toEqual(['unrelated-child'])
+    expect(invalidate).not.toHaveBeenCalled()
+    expect(rollback).not.toHaveBeenCalled()
+  })
+
   it('resumes a failed promoted outcome before a withdrawn-support rollback', async () => {
     const resume = vi.fn()
     const rollback = vi.fn()

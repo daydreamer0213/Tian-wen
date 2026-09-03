@@ -86,6 +86,7 @@ interface NativePlannerTurnState {
 }
 
 const nativePlannerTurns = new Map<string, NativePlannerTurnState>()
+const nativePlannerToolsInstalled = new WeakSet<Agent>()
 
 function nativePlannerTurnKey(stateRoot: string, record: GoalFirstLongGoalRecord): string {
   return [stateRoot, record.id, record.planner.sessionId].join('\u0000')
@@ -174,8 +175,9 @@ export async function runLongGoalPlannerTurn(input: {
   let submitted = false
   let settledTasksAtTurnStart: number | undefined
   let currentPlanner: Agent | undefined
-  const setup: AgentSetup = agentCtx => {
+  const setup = (agentCtx: Parameters<AgentSetup>[0]) => {
     currentPlanner = agentCtx.agent
+    if (currentPlanner !== undefined && nativePlannerToolsInstalled.has(currentPlanner)) return
     agentCtx.tools.register(defineTool({
       name: 'submit_long_goal_plan',
       description: 'Commit the complete replacement suffix of unstarted Tasks for this Long Goal. When the tasks array is non-empty, outcome must be "continue"; outcome "complete" is allowed only with tasks: [].',
@@ -248,6 +250,9 @@ export async function runLongGoalPlannerTurn(input: {
         return 'plan-submitted'
       },
     }))
+    if (input.record.schemaVersion === 'tianwen.long-goal.v3' && currentPlanner !== undefined) {
+      nativePlannerToolsInstalled.add(currentPlanner)
+    }
   }
 
   const inspected = await dependencies.inspectSession(input.record.planner.sessionId)
@@ -311,6 +316,13 @@ export async function runLongGoalPlannerTurn(input: {
     try {
       installNativeSetup(input.record.planner.sessionId, setup)
       if (inspected.exists) {
+        // Permission renewal and restart recovery can create the native Planner
+        // before its first planning turn; creation hooks do not replay on followup.
+        const resident = getAgent(input.record.planner.sessionId)
+        if (resident !== undefined && !nativePlannerToolsInstalled.has(resident)) {
+          requirePlannerAgent(resident, input.record)
+          setup(resident.ctx)
+        }
         await followupNativeChild(parent, input.record.planner.sessionId, prompt, signal)
       } else {
         const started = await startNativeChild({

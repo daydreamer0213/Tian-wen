@@ -80,6 +80,7 @@ function controlsAgent() {
     session: {
       id: 'control-session-1',
       header: { cwd: 'D:/workspace', agentPreset: 'chat' },
+      events: [],
     },
     ctx: agentContext,
   } as unknown as Agent
@@ -205,6 +206,7 @@ describe('continuous Goal Agent controls', () => {
 
   it('returns compact redacted progress for status', async () => {
     const subject = controlsAgent()
+    Object.assign(subject.agent.session, { events: [{ type: 'sandbox/mode', data: { mode: 'danger-full-access', source: 'user' } }] })
     const ops = operations()
     ops.control.mockResolvedValue({
       schemaVersion: 'tianwen.continuous-goal-control-result.v1',
@@ -219,7 +221,8 @@ describe('continuous Goal Agent controls', () => {
         planner: { sessionId: 'internal-planner-session-id', phase: 'ready', planRevision: 3 },
         guidance: [],
         tasks: [
-          { id: 'internal-task-id', objective: 'Verify the release', phase: 'active', execution: { sessionId: 'internal-task-session-id' }, resolution: null },
+          { id: 'internal-task-id', objective: 'Verify the release', phase: 'active', execution: { sessionId: 'internal-task-session-id' }, resolution: null,
+            attempt: { epoch: 2, status: 'running', permissionMode: 'danger-full-access', hadPermissionLimit: true } },
         ],
         currentTaskId: 'internal-task-id',
         runtime: { activation: 'not-loaded', modelRequests: 0, readOnly: true },
@@ -237,9 +240,11 @@ describe('continuous Goal Agent controls', () => {
 
     expect(JSON.parse(output)).toEqual({
       action: 'status',
+      mainPermissionMode: 'danger-full-access',
       goal: {
         objective: 'Ship the migration', phase: 'active', completedTasks: 2, totalTasks: 4,
-        autoProgress: 'running', currentTask: { objective: 'Verify the release', phase: 'active' },
+        autoProgress: 'running', currentTask: { objective: 'Verify the release', phase: 'active',
+          attempt: { epoch: 2, status: 'running', permissionMode: 'danger-full-access', hadPermissionLimit: true } },
       },
     })
     for (const internalId of [

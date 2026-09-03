@@ -19,6 +19,23 @@ export type PermissionClassificationSnapshot = Omit<PermissionSnapshot, 'mode'> 
   readonly mode?: SandboxMode
 }
 
+export function sandboxModeFromEvents(
+  events: readonly SessionEvent[],
+  delegatedOnly: boolean,
+): SandboxMode | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index] as unknown as {
+      readonly type?: unknown
+      readonly data?: { readonly mode?: unknown, readonly source?: unknown }
+    } | undefined
+    if (event?.type !== 'sandbox/mode') continue
+    if (delegatedOnly && event.data?.source !== 'delegation') continue
+    const mode = event.data?.mode
+    if (mode === 'read-only' || mode === 'workspace-write' || mode === 'danger-full-access') return mode
+  }
+  return undefined
+}
+
 function explicitSandboxEventSeq(events: readonly SessionEvent[]): number | null {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index] as unknown as {

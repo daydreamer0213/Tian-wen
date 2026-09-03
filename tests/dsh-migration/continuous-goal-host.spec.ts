@@ -2211,6 +2211,11 @@ describe('continuous Goal Host', () => {
         session: { id: 'reserved-planner', header: { cwd: fixture, agentPreset: 'planner-preset' } },
         whenIdle,
       } as unknown as Agent
+      const plannerCtx = {
+        agent: planner,
+        tools: { register: vi.fn(() => () => undefined) },
+      } as unknown as Context
+      Object.assign(planner, { ctx: plannerCtx })
       const live = new Map<string, Agent>([['main-control', main]])
       const start = vi.fn(async (input: { readonly parent: Agent, readonly childId: string }) => {
         live.set(input.childId, planner)
@@ -2238,6 +2243,8 @@ describe('continuous Goal Host', () => {
           readonly signal: AbortSignal
         }) => {
           persisted = true
+          const prepared = await setups.get(input.childId)!(plannerCtx)
+          prepared?.commit()
           return start(input)
         },
         followupNativeChild: followup,
@@ -3052,18 +3059,17 @@ describe('continuous Goal Host', () => {
         expect(reserveSessionId).not.toHaveBeenCalled()
         const noticeText = (notifyMain.mock.calls[0]?.[1].content[0] as { text?: string } | undefined)?.text
         if (delegatedMode === 'read-only' || delegatedMode === 'workspace-write') {
-          expect(noticeText).toBe(
-            'This Task reached the current sandbox limit. Change this main Session to Full access; Tianwen will start a new attempt without modifying the old child.',
-          )
+          expect(noticeText).toContain('Read goal_control status first')
+          expect(noticeText).toContain('main Session to Full access only if')
         } else if (delegatedMode === 'danger-full-access') {
           expect(noticeText).toContain('no wider permission mode')
           expect(noticeText).toContain('will not automatically create a new attempt')
-          expect(noticeText).toContain('remains permission-limited')
+          expect(noticeText).toContain('Read goal_control status')
           expect(noticeText).not.toContain('will start a new attempt')
         } else {
           expect(noticeText).toContain('cannot verify the old permission mode')
           expect(noticeText).toContain('will not automatically create a new attempt')
-          expect(noticeText).toContain('remains permission-limited')
+          expect(noticeText).toContain('Read goal_control status')
           expect(noticeText).not.toContain('will start a new attempt')
         }
 
