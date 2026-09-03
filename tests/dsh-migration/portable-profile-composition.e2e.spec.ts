@@ -148,7 +148,7 @@ function buildAndPackBundles(): void {
     '--dir', 'packages/tianwen-dsh-probe-bundle',
     'pack', '--pack-destination', packRoot,
   ])
-  runtimeTarball = join(packRoot, 'tianwen-runtime-bundle-0.1.10.tgz')
+  runtimeTarball = join(packRoot, 'tianwen-runtime-bundle-0.1.11.tgz')
   probeTarball = join(packRoot, 'tianwen-dsh-probe-bundle-0.0.0.tgz')
   expect(existsSync(runtimeTarball)).toBe(true)
   expect(existsSync(probeTarball)).toBe(true)

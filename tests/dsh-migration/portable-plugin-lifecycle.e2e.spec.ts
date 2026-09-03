@@ -20,7 +20,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 const devDataRoot = 'D:\\DevData'
 const runtimePackage = '@tianwen/runtime-bundle'
-const runtimeVersion = '0.1.10'
+const runtimeVersion = '0.1.11'
 const dshPackage = '@deepseek-ai/dsh'
 const dshVersion = '0.1.1-rc.2'
 const pnpmEntry = 'D:\\DevData\\corepack-home\\v1\\pnpm\\11.20.0\\bin\\pnpm.mjs'
@@ -258,11 +258,11 @@ beforeAll(() => {
   if (!enabled) return
   lifecycleRoot = requireLifecycleRoot()
   packRoot = join(lifecycleRoot, 'packs')
-  runtimeTarball = join(packRoot, 'tianwen-runtime-bundle-0.1.10.tgz')
+  runtimeTarball = join(packRoot, 'tianwen-runtime-bundle-0.1.11.tgz')
   storeRoot = join(lifecycleRoot, 'pnpm-store')
   expect(dshManifest).toMatchObject({ name: dshPackage, version: dshVersion })
   expect(readdirSync(packRoot).filter(name => name.endsWith('.tgz'))).toEqual([
-    'tianwen-runtime-bundle-0.1.10.tgz',
+    'tianwen-runtime-bundle-0.1.11.tgz',
   ])
   expect(statSync(runtimeTarball).isFile()).toBe(true)
   expect(statSync(storeRoot).isDirectory()).toBe(true)

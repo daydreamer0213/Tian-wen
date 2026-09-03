@@ -17,7 +17,7 @@ import {
 
 const fixtureRoot = resolve('D:/DevData/tianwen-desktop-profile-prepare-tests')
 const runtimePackage = '@tianwen/runtime-bundle'
-const runtimeVersion = '0.1.10'
+const runtimeVersion = '0.1.11'
 const fixtures: string[] = []
 
 interface FakeChild extends EventEmitter {
@@ -77,7 +77,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
 
     const outdated = fixture()
     writeJson(join(profileRoot(outdated), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
-      name: runtimePackage, version: '0.1.9',
+      name: runtimePackage, version: '0.1.10',
     })
     expect(inspectWebProfile(outdated)).toEqual({ kind: 'outdated-runtime', profileRoot: profileRoot(outdated) })
 
@@ -136,7 +136,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     rmSync(profileRoot(target), { recursive: true })
     const child = fakeChild()
     const calls: unknown[] = []
-    const runtimeTarball = 'D:\\Runtime Packs\\tianwen-runtime-bundle-0.1.10.tgz'
+    const runtimeTarball = 'D:\\Runtime Packs\\tianwen-runtime-bundle-0.1.11.tgz'
     const preparation = prepareMissingWebProfile(target, runtimeTarball, {
       spawn: ((program, args, options) => {
         calls.push({ program, args, options })
@@ -158,7 +158,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
   it('updates the known-old Runtime exactly once with the embedded tarball and selected home', async () => {
     const target = fixture()
     writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
-      name: runtimePackage, version: '0.1.9',
+      name: runtimePackage, version: '0.1.10',
     })
     writeJson(join(profileRoot(target), 'node_modules', '.modules.yaml'), {
       packageManager: 'pnpm@11.20.0',
@@ -166,7 +166,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     })
     const child = fakeChild()
     const calls: unknown[] = []
-    const runtimeTarball = 'D:\\Runtime Packs\\tianwen-runtime-bundle-0.1.10.tgz'
+    const runtimeTarball = 'D:\\Runtime Packs\\tianwen-runtime-bundle-0.1.11.tgz'
     const update = updateOutdatedWebProfile(target, runtimeTarball, {
       spawn: ((program, args, options) => {
         calls.push({ program, args, options })
@@ -394,10 +394,10 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
   it('stops normally without update or validation when the known-old Runtime update is refused', async () => {
     const target = fixture()
     writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
-      name: runtimePackage, version: '0.1.9',
+      name: runtimePackage, version: '0.1.10',
     })
     const calls: string[] = []
-    const result = await resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.10.tgz', {
+    const result = await resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.11.tgz', {
       confirmCreateProfile: async () => { calls.push('create-confirm'); return true },
       confirmUpdateRuntime: async root => { calls.push(`update-confirm:${root}`); return false },
       showManualPreparation: async () => { calls.push('manual') },
@@ -413,10 +413,10 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
   it('updates once after acceptance and then strictly validates the current Runtime', async () => {
     const target = fixture()
     writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
-      name: runtimePackage, version: '0.1.9',
+      name: runtimePackage, version: '0.1.10',
     })
     const calls: string[] = []
-    const result = await resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.10.tgz', {
+    const result = await resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.11.tgz', {
       confirmCreateProfile: async () => { calls.push('create-confirm'); return true },
       confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
       showManualPreparation: async () => { calls.push('manual') },
@@ -436,11 +436,11 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
   it('preserves one Runtime update failure without validation or retry', async () => {
     const target = fixture()
     writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
-      name: runtimePackage, version: '0.1.9',
+      name: runtimePackage, version: '0.1.10',
     })
     const calls: string[] = []
     const failure = new ProfilePreparationError(12, profileRoot(target), 'update failed')
-    await expect(resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.10.tgz', {
+    await expect(resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.11.tgz', {
       confirmCreateProfile: async () => { calls.push('create-confirm'); return true },
       confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
       showManualPreparation: async () => { calls.push('manual') },
@@ -454,10 +454,10 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
   it('does not accept an update unless strict post-update validation sees the current Runtime', async () => {
     const target = fixture()
     writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
-      name: runtimePackage, version: '0.1.9',
+      name: runtimePackage, version: '0.1.10',
     })
     const calls: string[] = []
-    await expect(resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.10.tgz', {
+    await expect(resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.11.tgz', {
       confirmCreateProfile: async () => { calls.push('create-confirm'); return true },
       confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
       showManualPreparation: async () => { calls.push('manual') },
