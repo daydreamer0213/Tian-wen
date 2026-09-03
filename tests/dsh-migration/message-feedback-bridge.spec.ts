@@ -1823,6 +1823,64 @@ describe('Tianwen DSH Message Feedback bridge', () => {
     }
   })
 
+  it('reconciles exact Skill use before negative feedback and retries it on replay', async () => {
+    const root = evolutionRoot('skill-use-before-feedback')
+    const sessions = new SessionCatalog()
+    const feedback = new FeedbackCatalog()
+    const session = completedSession(
+      'feedback-skill-use-before-feedback',
+      ['message-1'],
+      'D:/private/research-summary',
+    )
+    sessions.add(session)
+    sessions.listed = []
+    const mounted = await mountBridge(root, sessions, feedback)
+    const binding = mounted.ctx.tianwenLearningIntake.bindRun(session, {
+      goalRef: 'goal:research-summary',
+      taskRef: 'task:research-summary',
+      scopeKey: 'project:tianwen/capability:research-summary',
+      acceptanceContract: {
+        source: 'dsh-tool-result',
+        toolName: 'submit_research_summary',
+        notMetErrorCode: 'RESEARCH_SUMMARY_NOT_MET',
+        gapDisposition: 'reusable',
+        problemCategory: 'research-summary-correction',
+        severity: 2,
+        blocksGoal: false,
+      },
+    })
+    const recordSkillUse = vi.spyOn(
+      mounted.ctx.tianwenLearningIntake,
+      'recordSkillUse',
+    )
+    const consume = vi.spyOn(mounted.ctx.tianwenLearningIntake, 'consume')
+    feedback.set(String(session.id), [item({
+      messageId: 'message-1',
+      version: '16161616-1616-4616-8616-161616161616',
+      note: 'Include the decision uncertainty.',
+    })])
+
+    try {
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'reconciled', current: 1 })
+      expect(recordSkillUse).toHaveBeenCalledOnce()
+      expect(recordSkillUse).toHaveBeenCalledWith(
+        expect.objectContaining({ id: session.id }),
+        binding.runId,
+      )
+      expect(consume).toHaveBeenCalledOnce()
+      expect(recordSkillUse.mock.invocationCallOrder[0])
+        .toBeLessThan(consume.mock.invocationCallOrder[0]!)
+
+      await expect(mounted.bridge.reconcileSession(String(session.id)))
+        .resolves.toMatchObject({ state: 'reconciled', current: 1 })
+      expect(recordSkillUse).toHaveBeenCalledTimes(2)
+      expect(consume).toHaveBeenCalledOnce()
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
   it('waits for an admitted lane during unload and removes its listeners', async () => {
     const root = evolutionRoot('dispose')
     const sessions = new SessionCatalog()

@@ -1,4 +1,4 @@
-import { isSkillName } from '@tianwen/dsh-compat'
+import { isSkillName, renderSkillContent } from '@tianwen/dsh-compat'
 import type {
   SkillDefinition,
   SkillInvocationPolicy,
@@ -50,7 +50,7 @@ export interface RunSkillManifest {
   readonly parent: GovernedSkillPayload
 }
 
-export interface RunSkillUse {
+export interface RunSkillUseV1 {
   readonly schemaVersion: 'tianwen.run-skill-use.v1'
   readonly runId: TianwenRunId
   readonly parentVersionId: SkillVersionId
@@ -65,7 +65,36 @@ export interface RunSkillUse {
   readonly acceptanceCallSeq: number
 }
 
-export type RunSkillUseInput = Omit<RunSkillUse, 'schemaVersion'>
+export type RunSkillUseV2Provenance =
+  | {
+      readonly kind: 'skill-tool'
+      readonly callSeq: number
+      readonly resultSeq: number
+    }
+  | {
+      readonly kind: 'direct-invocation'
+      readonly invocationMessageSeq: number
+      readonly sourceMessageId: string
+    }
+
+export interface RunSkillUseV2 {
+  readonly schemaVersion: 'tianwen.run-skill-use.v2'
+  readonly runId: TianwenRunId
+  readonly parentVersionId: SkillVersionId
+  readonly sessionId: string
+  readonly sessionDigest: Sha256Digest
+  readonly skillName: string
+  readonly contentDigest: Sha256Digest
+  readonly skillEvidenceId: Sha256Digest
+  readonly acceptanceEvidenceId: Sha256Digest
+  readonly provenance: RunSkillUseV2Provenance
+  readonly acceptanceCallSeq: number
+}
+
+export type RunSkillUse = RunSkillUseV1 | RunSkillUseV2
+export type RunSkillUseV1Input = Omit<RunSkillUseV1, 'schemaVersion'>
+export type RunSkillUseV2Input = Omit<RunSkillUseV2, 'schemaVersion'>
+export type RunSkillUseInput = RunSkillUseV1Input | RunSkillUseV2Input
 
 export interface RunSkillUseReceipt {
   readonly parentVersionId: SkillVersionId
@@ -213,7 +242,23 @@ export function prepareRunSkillManifest(
   }
 }
 
-function parseUseInput(value: unknown): RunSkillUseInput {
+function parseUseCommon(value: Record<string, unknown>) {
+  return {
+    runId: runIdValue(value.runId),
+    parentVersionId: skillVersionIdValue(value.parentVersionId),
+    sessionId: stringValue(value.sessionId, 'sessionId'),
+    sessionDigest: digestValue(value.sessionDigest, 'sessionDigest'),
+    skillName: stringValue(value.skillName, 'skillName'),
+    contentDigest: digestValue(value.contentDigest, 'contentDigest'),
+    skillEvidenceId: digestValue(value.skillEvidenceId, 'skillEvidenceId'),
+    acceptanceEvidenceId: digestValue(
+      value.acceptanceEvidenceId,
+      'acceptanceEvidenceId',
+    ),
+  }
+}
+
+function parseUseV1Input(value: unknown): RunSkillUseV1Input {
   if (!isRecord(value)) {
     throw new TypeError('Run Skill use input must be an object')
   }
@@ -240,21 +285,80 @@ function parseUseInput(value: unknown): RunSkillUseInput {
     throw new TypeError('Skill use sequences must precede final acceptance')
   }
   return {
-    runId: runIdValue(value.runId),
-    parentVersionId: skillVersionIdValue(value.parentVersionId),
-    sessionId: stringValue(value.sessionId, 'sessionId'),
-    sessionDigest: digestValue(value.sessionDigest, 'sessionDigest'),
-    skillName: stringValue(value.skillName, 'skillName'),
-    contentDigest: digestValue(value.contentDigest, 'contentDigest'),
-    skillEvidenceId: digestValue(value.skillEvidenceId, 'skillEvidenceId'),
-    acceptanceEvidenceId: digestValue(
-      value.acceptanceEvidenceId,
-      'acceptanceEvidenceId',
-    ),
+    ...parseUseCommon(value),
     skillCallSeq,
     skillResultSeq,
     acceptanceCallSeq,
   }
+}
+
+function parseUseV2Input(value: unknown): RunSkillUseV2Input {
+  if (!isRecord(value)) {
+    throw new TypeError('Run Skill use input must be an object')
+  }
+  exactKeys(value, [
+    'runId',
+    'parentVersionId',
+    'sessionId',
+    'sessionDigest',
+    'skillName',
+    'contentDigest',
+    'skillEvidenceId',
+    'acceptanceEvidenceId',
+    'provenance',
+    'acceptanceCallSeq',
+  ])
+  if (!isRecord(value.provenance)) {
+    throw new TypeError('Skill use provenance must be an object')
+  }
+  const acceptanceCallSeq = positiveInteger(
+    value.acceptanceCallSeq,
+    'acceptanceCallSeq',
+  )
+  let provenance: RunSkillUseV2Provenance
+  if (value.provenance.kind === 'skill-tool') {
+    exactKeys(value.provenance, ['kind', 'callSeq', 'resultSeq'])
+    const callSeq = positiveInteger(value.provenance.callSeq, 'callSeq')
+    const resultSeq = positiveInteger(value.provenance.resultSeq, 'resultSeq')
+    if (!(callSeq < resultSeq && resultSeq < acceptanceCallSeq)) {
+      throw new TypeError('Skill use sequences must precede final acceptance')
+    }
+    provenance = { kind: 'skill-tool', callSeq, resultSeq }
+  } else if (value.provenance.kind === 'direct-invocation') {
+    exactKeys(value.provenance, [
+      'kind',
+      'invocationMessageSeq',
+      'sourceMessageId',
+    ])
+    const invocationMessageSeq = positiveInteger(
+      value.provenance.invocationMessageSeq,
+      'invocationMessageSeq',
+    )
+    if (invocationMessageSeq >= acceptanceCallSeq) {
+      throw new TypeError('Skill use sequences must precede final acceptance')
+    }
+    provenance = {
+      kind: 'direct-invocation',
+      invocationMessageSeq,
+      sourceMessageId: stringValue(
+        value.provenance.sourceMessageId,
+        'sourceMessageId',
+      ),
+    }
+  } else {
+    throw new TypeError('Skill use provenance kind is invalid')
+  }
+  return {
+    ...parseUseCommon(value),
+    provenance,
+    acceptanceCallSeq,
+  }
+}
+
+function parseUseInput(value: unknown): RunSkillUseInput {
+  return isRecord(value) && 'provenance' in value
+    ? parseUseV2Input(value)
+    : parseUseV1Input(value)
 }
 
 export function prepareRunSkillUse(
@@ -277,10 +381,27 @@ export function prepareRunSkillUse(
   ) {
     throw new TypeError('Run Skill use disagrees with frozen Run facts')
   }
-  return {
-    schemaVersion: 'tianwen.run-skill-use.v1',
-    ...input,
+  if (
+    'provenance' in input
+    && input.provenance.kind === 'direct-invocation'
+    && input.skillEvidenceId !== sha256({
+      schemaVersion: 'tianwen.direct-skill-invocation-evidence.v1',
+      sessionId: input.sessionId,
+      invocationMessageSeq: input.provenance.invocationMessageSeq,
+      sourceMessageId: input.provenance.sourceMessageId,
+      skillName: input.skillName,
+      renderedContentDigest: sha256(renderSkillContent({
+        name: manifest.parent.name,
+        provider: manifest.resolvedProvider,
+        content: manifest.parent.content,
+      })),
+    })
+  ) {
+    throw new TypeError('direct Skill invocation Evidence is not canonical')
   }
+  return 'provenance' in input
+    ? { schemaVersion: 'tianwen.run-skill-use.v2', ...input }
+    : { schemaVersion: 'tianwen.run-skill-use.v1', ...input }
 }
 
 export function parseRunSkillManifest(value: unknown): RunSkillManifest {
@@ -322,39 +443,69 @@ export function parseRunSkillUse(value: unknown): RunSkillUse {
   if (!isRecord(value)) {
     throw new TypeError('Run Skill use must be an object')
   }
-  exactKeys(value, [
-    'schemaVersion',
-    'runId',
-    'parentVersionId',
-    'sessionId',
-    'sessionDigest',
-    'skillName',
-    'contentDigest',
-    'skillEvidenceId',
-    'acceptanceEvidenceId',
-    'skillCallSeq',
-    'skillResultSeq',
-    'acceptanceCallSeq',
-  ])
-  if (value.schemaVersion !== 'tianwen.run-skill-use.v1') {
-    throw new TypeError('invalid Run Skill use schema version')
+  if (value.schemaVersion === 'tianwen.run-skill-use.v1') {
+    exactKeys(value, [
+      'schemaVersion',
+      'runId',
+      'parentVersionId',
+      'sessionId',
+      'sessionDigest',
+      'skillName',
+      'contentDigest',
+      'skillEvidenceId',
+      'acceptanceEvidenceId',
+      'skillCallSeq',
+      'skillResultSeq',
+      'acceptanceCallSeq',
+    ])
+    return {
+      schemaVersion: 'tianwen.run-skill-use.v1',
+      ...parseUseV1Input({
+        runId: value.runId,
+        parentVersionId: value.parentVersionId,
+        sessionId: value.sessionId,
+        sessionDigest: value.sessionDigest,
+        skillName: value.skillName,
+        contentDigest: value.contentDigest,
+        skillEvidenceId: value.skillEvidenceId,
+        acceptanceEvidenceId: value.acceptanceEvidenceId,
+        skillCallSeq: value.skillCallSeq,
+        skillResultSeq: value.skillResultSeq,
+        acceptanceCallSeq: value.acceptanceCallSeq,
+      }),
+    }
   }
-  return {
-    schemaVersion: 'tianwen.run-skill-use.v1',
-    ...parseUseInput({
-      runId: value.runId,
-      parentVersionId: value.parentVersionId,
-      sessionId: value.sessionId,
-      sessionDigest: value.sessionDigest,
-      skillName: value.skillName,
-      contentDigest: value.contentDigest,
-      skillEvidenceId: value.skillEvidenceId,
-      acceptanceEvidenceId: value.acceptanceEvidenceId,
-      skillCallSeq: value.skillCallSeq,
-      skillResultSeq: value.skillResultSeq,
-      acceptanceCallSeq: value.acceptanceCallSeq,
-    }),
+  if (value.schemaVersion === 'tianwen.run-skill-use.v2') {
+    exactKeys(value, [
+      'schemaVersion',
+      'runId',
+      'parentVersionId',
+      'sessionId',
+      'sessionDigest',
+      'skillName',
+      'contentDigest',
+      'skillEvidenceId',
+      'acceptanceEvidenceId',
+      'provenance',
+      'acceptanceCallSeq',
+    ])
+    return {
+      schemaVersion: 'tianwen.run-skill-use.v2',
+      ...parseUseV2Input({
+        runId: value.runId,
+        parentVersionId: value.parentVersionId,
+        sessionId: value.sessionId,
+        sessionDigest: value.sessionDigest,
+        skillName: value.skillName,
+        contentDigest: value.contentDigest,
+        skillEvidenceId: value.skillEvidenceId,
+        acceptanceEvidenceId: value.acceptanceEvidenceId,
+        provenance: value.provenance,
+        acceptanceCallSeq: value.acceptanceCallSeq,
+      }),
+    }
   }
+  throw new TypeError('invalid Run Skill use schema version')
 }
 
 export interface CaseEvidenceRelation {
@@ -600,6 +751,15 @@ export function prepareExplicitCorrectionLearningCase(
     || evidence.some(id => !signals.some(signal => signal.evidenceIds.includes(id)))
   ) throw new TypeError('explicit correction Case Evidence is outside its active closure')
   const uses = byRun(input.uses)
+  const skillUse = uses.get(binding.runId)
+  if (
+    skillUse === undefined
+    || skillUse.runId !== binding.runId
+    || skillUse.parentVersionId !== manifest.parentVersionId
+    || skillUse.sessionId !== binding.sessionId
+    || skillUse.skillName !== manifest.parent.name
+    || skillUse.contentDigest !== manifest.contentDigest
+  ) throw new TypeError('explicit correction Case lacks exact Skill-use evidence')
   const value = {
     ticketId: ticket.ticketId,
     problemFingerprint: ticket.problemFingerprint,

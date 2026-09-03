@@ -9,11 +9,12 @@ import {
   createUserMessage,
   defineTool,
   mountCoreHarness,
+  renderSkillContent,
   textResponse,
   toolCallResponse,
   waitForIdle,
 } from '@tianwen/dsh-compat'
-import type { Session } from '@tianwen/dsh-compat'
+import type { Session, SessionEvent } from '@tianwen/dsh-compat'
 import * as TianwenRuntime from '../../packages/tianwen-runtime/src/index.js'
 
 const roots: string[] = []
@@ -83,6 +84,146 @@ afterEach(() => {
 })
 
 describe('Tianwen governed Skill runtime intake', () => {
+  it('records an exact main-chat direct research-summary invocation', async () => {
+    const packet = TianwenRuntime.parseResearchPacket(`<research_packet>
+[F:f1|required] The verified result is concrete.
+[U:u1|decision] The deployment region is undecided.
+</research_packet>`)
+    const harness = await mount([
+      toolCallResponse('submit-summary', TianwenRuntime.RESEARCH_SUMMARY_TOOL_NAME, {
+        summary: 'The verified result is concrete.',
+        confirmedFindingIds: ['f1'],
+        uncertaintyIds: [],
+      }),
+      textResponse('The verified result is concrete.'),
+    ])
+    const disposeParent = harness.ctx.skills.register(
+      TianwenRuntime.RESEARCH_SUMMARY_BASE_SKILL,
+    )
+    const summaryTool = TianwenRuntime.createResearchSummaryTool(
+      packet,
+      { kind: 'source-capture' },
+    )
+    const handle = await harness.ctx.agents.create({
+      sessionId: SessionId(`skill-direct-${randomUUID()}`),
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+      setup(agentCtx) {
+        agentCtx.tools.register(summaryTool)
+      },
+    })
+    try {
+      const binding = await harness.runtime.tianwenLearningIntake.bindRunWithSkill(
+        handle.agent,
+        {
+          goalRef: 'goal:research-preview',
+          taskRef: 'task:direct-research-summary',
+          scopeKey: TianwenRuntime.RESEARCH_SUMMARY_SCOPE,
+          acceptanceContract: {
+            ...acceptance,
+            toolName: TianwenRuntime.RESEARCH_SUMMARY_TOOL_NAME,
+          },
+        },
+        TianwenRuntime.RESEARCH_SUMMARY_SKILL_NAME,
+        harness.ctx.skills,
+      )
+      handle.agent.inject(createUserMessage({
+        content: [{
+          type: 'text',
+          text: renderSkillContent(TianwenRuntime.RESEARCH_SUMMARY_BASE_SKILL),
+        }],
+        source: {
+          kind: 'skill-invocation',
+          name: TianwenRuntime.RESEARCH_SUMMARY_SKILL_NAME,
+          form: 'instructions',
+        },
+      }))
+      handle.agent.followup(createUserMessage({
+        content: [{ type: 'text', text: packet.source }],
+        source: { kind: 'user' },
+      }))
+      await waitForIdle(harness.ctx, handle.agent)
+      harness.runtime.tianwenLearningIntake.consumeOutcome(
+        handle.agent.session,
+        binding.runId,
+      )
+      const directEvent = handle.agent.session.events.find(event =>
+        event.type === 'user/message'
+        && event.data.source.kind === 'skill-invocation')
+      const acceptanceCall = handle.agent.session.events.find(event =>
+        event.type === 'tool/call'
+        && event.data.name === TianwenRuntime.RESEARCH_SUMMARY_TOOL_NAME)
+      if (directEvent?.type !== 'user/message' || acceptanceCall?.type !== 'tool/call') {
+        throw new Error('missing direct invocation proof boundary')
+      }
+      const alteredSessions = [
+        (events: SessionEvent[]) => {
+          const event = events.find(candidate => candidate.seq === directEvent.seq)!
+          ;(event.data as { source: unknown }).source = { kind: 'user' }
+        },
+        (events: SessionEvent[]) => {
+          const event = events.find(candidate => candidate.seq === directEvent.seq)!
+          ;((event.data as { source: { name: string } }).source).name = 'other-skill'
+        },
+        (events: SessionEvent[]) => {
+          const event = events.find(candidate => candidate.seq === directEvent.seq)!
+          const block = (event.data as { content: SessionEvent<'user/message'>['data']['content'] })
+            .content[0]
+          if (block?.type === 'text') (block as { text: string }).text += '\naltered'
+        },
+        (events: SessionEvent[]) => {
+          const event = events.find(candidate => candidate.seq === directEvent.seq)!
+          ;(event as { seq: number }).seq = acceptanceCall.seq
+        },
+      ]
+      for (const alter of alteredSessions) {
+        const events = structuredClone(handle.agent.session.events) as SessionEvent[]
+        alter(events)
+        const altered = {
+          id: handle.agent.session.id,
+          header: handle.agent.session.header,
+          events,
+        } as unknown as Session
+        expect(harness.runtime.tianwenLearningIntake.recordSkillUse(
+          altered,
+          binding.runId,
+        )).toEqual({ decision: 'no-use-proof', sessionUnchanged: true })
+      }
+      const crossSession = {
+        id: SessionId(`other-${randomUUID()}`),
+        header: handle.agent.session.header,
+        events: handle.agent.session.events,
+      } as unknown as Session
+      expect(harness.runtime.tianwenLearningIntake.recordSkillUse(
+        crossSession,
+        binding.runId,
+      )).toEqual({ decision: 'no-use-proof', sessionUnchanged: true })
+      expect(harness.runtime.tianwenEvolution.listRunSkillUses()).toEqual([])
+
+      const receipt = harness.runtime.tianwenLearningIntake.recordSkillUse(
+        handle.agent.session,
+        binding.runId,
+      )
+      const stored = harness.runtime.tianwenEvolution.getRunSkillUse(binding.runId)
+      expect(receipt).toMatchObject({
+        decision: 'recorded',
+        provenance: { kind: 'direct-invocation' },
+        sessionUnchanged: true,
+      })
+      expect(stored).toMatchObject({
+        schemaVersion: 'tianwen.run-skill-use.v2',
+        provenance: {
+          kind: 'direct-invocation',
+          sourceMessageId: expect.any(String),
+        },
+      })
+      expect(JSON.stringify(stored)).not.toContain(packet.source)
+    } finally {
+      await handle.dispose()
+      disposeParent()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
   it('binds a real resolved parent and records the final matching DSH Skill use', async () => {
     const harness = await mount([
       toolCallResponse('load-parent-1', 'skill', { name: parent.name }),
@@ -124,9 +265,18 @@ describe('Tianwen governed Skill runtime intake', () => {
       expect(receipt).toMatchObject({
         decision: 'recorded',
         skillCallSeq: calls[1]!.seq,
+        provenance: {
+          kind: 'skill-tool',
+          callSeq: calls[1]!.seq,
+        },
         sessionUnchanged: true,
       })
       expect(harness.runtime.tianwenEvolution.listRunSkillUses()).toHaveLength(1)
+      expect(harness.runtime.tianwenEvolution.getRunSkillUse(binding.runId))
+        .toMatchObject({
+          schemaVersion: 'tianwen.run-skill-use.v2',
+          provenance: { kind: 'skill-tool' },
+        })
       expect('dynamicCordisRunner' in harness.runtime).toBe(false)
     } finally {
       await handle.dispose()

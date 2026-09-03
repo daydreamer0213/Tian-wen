@@ -53,7 +53,10 @@ function submission(
   }
 }
 
-function seeded(prefix: string, options: { readonly manifest?: boolean } = {}) {
+function seeded(
+  prefix: string,
+  options: { readonly manifest?: boolean; readonly skillUse?: boolean } = {},
+) {
   const ledger = new EvolutionLedger(root(prefix), {
     clock: () => '2026-09-02T00:00:00.000Z',
   })
@@ -79,7 +82,31 @@ function seeded(prefix: string, options: { readonly manifest?: boolean } = {}) {
     sessionLifecycleFingerprint: lifecycle,
   })
   if (options.manifest !== false) {
-    ledger.recordRunSkillManifest({ runId: binding.runId, skill: parentSkill })
+    const manifest = ledger.recordRunSkillManifest({
+      runId: binding.runId,
+      skill: parentSkill,
+    })
+    ledger.recordOutcomeIntake({
+      runId: binding.runId,
+      verdict: 'met',
+      sessionDigest: `sha256:${'0'.repeat(64)}`,
+      evidenceIds: [evidenceA],
+    })
+    if (options.skillUse !== false) {
+      ledger.recordRunSkillUse({
+        runId: binding.runId,
+        parentVersionId: manifest.parentVersionId,
+        sessionId: 'main-session',
+        sessionDigest: `sha256:${'0'.repeat(64)}`,
+        skillName: parentSkill.name,
+        contentDigest: ledger.getRunSkillManifest(binding.runId)!.contentDigest,
+        skillEvidenceId: `sha256:${'4'.repeat(64)}`,
+        acceptanceEvidenceId: evidenceA,
+        skillCallSeq: 10,
+        skillResultSeq: 11,
+        acceptanceCallSeq: 12,
+      })
+    }
   }
   const intake = ledger.recordLearningFeedbackRevision({
     intake: {
@@ -279,6 +306,17 @@ describe('bounded explicit-correction Skill Candidate materialization', () => {
 
     expect(materializeLearningCandidate(subject.ledger, subject.requested.analysisId))
       .toMatchObject({ phase: 'protocol-unavailable' })
+    expect(subject.ledger.listSkillCandidates()).toEqual([])
+  })
+
+  it('keeps feedback durable but stops before a Case when exact Skill use is absent', () => {
+    const subject = seeded('missing-use', { skillUse: false })
+    submit(subject)
+
+    expect(materializeLearningCandidate(subject.ledger, subject.requested.analysisId))
+      .toMatchObject({ phase: 'protocol-unavailable' })
+    expect(subject.ledger.listLearningSignals()).not.toEqual([])
+    expect(subject.ledger.listLearningCases()).toEqual([])
     expect(subject.ledger.listSkillCandidates()).toEqual([])
   })
 

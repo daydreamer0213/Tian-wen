@@ -243,7 +243,16 @@ export class TianwenMessageFeedbackBridgeService extends Service {
       lifecycleAfter,
     )
     const consentAgent = this.ctx.get('tianwenLearningConsentAgent')
+    let skillUseReconciled = false
     for (const [messageId, item] of byMessage) {
+      if (item.rating === 'negative' && !skillUseReconciled) {
+        const binding = this.ctx.tianwenEvolution
+          .getRunBindingBySessionId(sessionId)
+        if (binding !== undefined) {
+          this.ctx.tianwenLearningIntake.recordSkillUse(session, binding.runId)
+        }
+        skillUseReconciled = true
+      }
       const current = this.ctx.tianwenEvolution.getLearningIntakeStatus(
         sessionId,
         messageId,

@@ -7,10 +7,13 @@ import {
 } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { renderSkillContent } from '@tianwen/dsh-compat'
 import {
   LedgerIntegrityError,
+  sha256,
   type RunBindingInput,
   type RunSkillUseInput,
+  type RunSkillUseV2Input,
   type TianwenRunId,
 } from '../../packages/tianwen-evolution/src/index.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
@@ -101,6 +104,34 @@ function useInput(
     acceptanceEvidenceId: seeded.acceptanceEvidenceId,
     skillCallSeq: 10,
     skillResultSeq: 11,
+    acceptanceCallSeq: 12,
+  }
+}
+
+function directUseInput(
+  seeded: ReturnType<typeof seedMetOutcomeWithManifest>,
+): RunSkillUseV2Input {
+  return {
+    runId: seeded.runId,
+    parentVersionId: seeded.parentVersionId,
+    sessionId: seeded.sessionId,
+    sessionDigest: seeded.sessionDigest,
+    skillName: parent.name,
+    contentDigest: seeded.contentDigest,
+    skillEvidenceId: sha256({
+      schemaVersion: 'tianwen.direct-skill-invocation-evidence.v1',
+      sessionId: seeded.sessionId,
+      invocationMessageSeq: 10,
+      sourceMessageId: 'message:skill-invocation',
+      skillName: parent.name,
+      renderedContentDigest: sha256(renderSkillContent(parent)),
+    }),
+    acceptanceEvidenceId: seeded.acceptanceEvidenceId,
+    provenance: {
+      kind: 'direct-invocation',
+      invocationMessageSeq: 10,
+      sourceMessageId: 'message:skill-invocation',
+    },
     acceptanceCallSeq: 12,
   }
 }
@@ -249,6 +280,50 @@ describe('governed Skill evidence', () => {
       .toThrow(LedgerIntegrityError)
   })
 
+  it('records and replays direct invocation provenance without rewriting v1 uses', () => {
+    const directory = root('direct-use')
+    const ledger = new EvolutionLedger(directory)
+    const seeded = seedMetOutcomeWithManifest(ledger, 'session:direct-use')
+    const input = directUseInput(seeded)
+
+    expect(ledger.recordRunSkillUse(input)).toMatchObject({ duplicate: false })
+    expect(ledger.getRunSkillUse(seeded.runId)).toEqual({
+      schemaVersion: 'tianwen.run-skill-use.v2',
+      ...input,
+    })
+    expect(new EvolutionLedger(directory).getRunSkillUse(seeded.runId))
+      .toEqual(ledger.getRunSkillUse(seeded.runId))
+
+    const source = readFileSync(join(directory, 'ledger.jsonl'), 'utf8')
+    expect(source).toContain('"schemaVersion":"tianwen.run-skill-use.v2"')
+    expect(source).toContain('"schemaVersion":"tianwen.run-skill-use.v1","type":"run-skill-use-recorded"')
+  })
+
+  it('rejects altered direct invocation provenance and v1-v2 duplicate conflicts', () => {
+    const ledger = new EvolutionLedger(root('invalid-direct-use'))
+    const seeded = seedMetOutcomeWithManifest(ledger, 'session:invalid-direct-use')
+    const valid = directUseInput(seeded)
+    const invalid = [
+      { ...valid, acceptanceCallSeq: 10 },
+      { ...valid, provenance: { ...valid.provenance, invocationMessageSeq: 12 } },
+      { ...valid, provenance: { ...valid.provenance, sourceMessageId: ' ' } },
+      { ...valid, acceptanceEvidenceId: digest('d') },
+      {
+        ...valid,
+        provenance: { kind: 'skill-tool', callSeq: 10, resultSeq: 12 },
+        acceptanceCallSeq: 11,
+      },
+    ]
+    for (const input of invalid) {
+      expect(() => ledger.recordRunSkillUse(input as RunSkillUseV2Input))
+        .toThrow(LedgerIntegrityError)
+    }
+
+    expect(ledger.recordRunSkillUse(valid)).toMatchObject({ duplicate: false })
+    expect(() => ledger.recordRunSkillUse(useInput(seeded)))
+      .toThrow(LedgerIntegrityError)
+  })
+
   it('reads a defensive copy of one stored Run Skill use', () => {
     const ledger = new EvolutionLedger(root('get-use'))
     const seeded = seedMetOutcomeWithManifest(ledger, 'session:get-use')
@@ -314,11 +389,16 @@ describe('governed Skill evidence', () => {
     const ledger = new EvolutionLedger(directory)
     const seeded = seedMetOutcomeWithManifest(ledger, 'session:restart')
     ledger.recordRunSkillUse(useInput(seeded))
+    const beforeRestart = readFileSync(join(directory, 'ledger.jsonl'), 'utf8')
 
     const restarted = new EvolutionLedger(directory)
     expect(restarted.listRunSkillManifests())
       .toEqual(ledger.listRunSkillManifests())
     expect(restarted.listRunSkillUses()).toEqual(ledger.listRunSkillUses())
+    expect(readFileSync(join(directory, 'ledger.jsonl'), 'utf8'))
+      .toBe(beforeRestart)
+    expect(restarted.getRunSkillUse(seeded.runId)?.schemaVersion)
+      .toBe('tianwen.run-skill-use.v1')
   })
 
   it('derives one Case only from Ticket facts and a related met Run', () => {

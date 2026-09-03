@@ -167,6 +167,11 @@ export type {
   RunSkillUse,
   RunSkillUseInput,
   RunSkillUseReceipt,
+  RunSkillUseV1,
+  RunSkillUseV1Input,
+  RunSkillUseV2,
+  RunSkillUseV2Input,
+  RunSkillUseV2Provenance,
   OpenLearningCaseInput,
   SkillVersionId,
 } from './skill-governance.js'

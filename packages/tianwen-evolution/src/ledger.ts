@@ -3674,6 +3674,7 @@ export class EvolutionLedger {
     const runId = this.#runIdBySession.get(status.sessionId)
     const binding = runId === undefined ? undefined : this.#runBindings.get(runId)
     const manifest = runId === undefined ? undefined : this.#runSkillManifests.get(runId)
+    const skillUse = runId === undefined ? undefined : this.#runSkillUses.get(runId)
     const signals = (ticket?.signalIds ?? [])
       .map(signalId => this.#learningSignals.get(signalId))
       .filter((signal): signal is LearningSignal =>
@@ -3693,6 +3694,7 @@ export class EvolutionLedger {
       || this.#learningAnalysisConsents.get(status.consentRevision)?.enabled !== true
       || binding === undefined
       || manifest === undefined
+      || skillUse === undefined
       || binding.sessionId !== status.sessionId
       || signals.length === 0
     ) throw new LedgerIntegrityError('learning analysis parent Skill protocol is unavailable')
@@ -5245,6 +5247,7 @@ export class EvolutionLedger {
     const runId = this.#runIdBySession.get(status.sessionId)
     const binding = runId === undefined ? undefined : this.#runBindings.get(runId)
     const manifest = runId === undefined ? undefined : this.#runSkillManifests.get(runId)
+    const skillUse = runId === undefined ? undefined : this.#runSkillUses.get(runId)
     const intake = this.#learningIntakeStatuses.get(status.sessionId)
       ?.get(status.messageId)
     const ticket = this.#learningTickets.get(status.ticketId)
@@ -5260,6 +5263,12 @@ export class EvolutionLedger {
     })
     return binding?.sessionId === status.sessionId
       && manifest?.runId === runId
+      && skillUse !== undefined
+      && skillUse.runId === runId
+      && skillUse.parentVersionId === manifest?.parentVersionId
+      && skillUse.sessionId === status.sessionId
+      && skillUse.skillName === manifest?.parent.name
+      && skillUse.contentDigest === manifest?.contentDigest
       && hasExactSignal
       && intake?.state === 'active'
       && intake.rating === 'negative'

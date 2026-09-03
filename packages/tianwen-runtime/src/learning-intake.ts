@@ -16,12 +16,19 @@ import type {
   Sha256Digest,
   TianwenRunId,
   SkillVersionId,
+  RunSkillUseV2Provenance,
 } from '@tianwen/evolution'
 import {
   learningSessionLifecycleFingerprint,
   prepareRunBinding,
   prepareRunSkillManifest,
 } from '@tianwen/evolution'
+import { canonicalEvidenceDigest } from '@tianwen/evidence'
+
+import {
+  RESEARCH_SUMMARY_SKILL_NAME,
+  RESEARCH_SUMMARY_TOOL_NAME,
+} from './research-summary.js'
 
 export interface FeedbackSnapshot {
   readonly messageId: string
@@ -57,7 +64,8 @@ export type RuntimeSkillUseReceipt =
   | {
       readonly decision: 'recorded'
       readonly parentVersionId: SkillVersionId
-      readonly skillCallSeq: number
+      readonly provenance: RunSkillUseV2Provenance
+      readonly skillCallSeq?: number
       readonly duplicate: boolean
       readonly sessionUnchanged: true
     }
@@ -318,22 +326,67 @@ export class TianwenLearningIntakeService extends Service {
       })
       .sort((left, right) => right.seq - left.seq)
     const call = matches[0]
-    if (call === undefined) {
-      return undefined
+    if (call !== undefined) {
+      const skillEvidence = evidence.find(item =>
+        item.source.callSeq === call.seq
+        && item.action.toolName === 'skill'
+        && item.outcome.status === 'complete'
+        && item.outcome.isError === false)
+      const skillResultSeq = skillEvidence?.source.resultSeq
+      if (skillEvidence !== undefined && skillResultSeq !== undefined) {
+        return {
+          kind: 'skill-tool' as const,
+          before,
+          manifest,
+          acceptance,
+          skillEvidenceId: skillEvidence.evidenceId,
+          callSeq: skillEvidence.source.callSeq,
+          resultSeq: skillResultSeq,
+        }
+      }
     }
-    const skillEvidence = evidence.find(item =>
-      item.source.callSeq === call.seq
-      && item.action.toolName === 'skill'
-      && item.outcome.status === 'complete'
-      && item.outcome.isError === false)
-    if (skillEvidence === undefined) {
-      return undefined
+
+    if (
+      manifest.parent.name !== RESEARCH_SUMMARY_SKILL_NAME
+      || binding.acceptanceContract.toolName !== RESEARCH_SUMMARY_TOOL_NAME
+      || acceptance.outcome.isError !== false
+      || acceptance.outcome.errorCode !== undefined
+    ) return undefined
+    const invocation = session.events
+      .filter((event): event is SessionEvent<'user/message'> =>
+        event.type === 'user/message'
+        && event.seq < acceptance.source.callSeq)
+      .filter(event => {
+        const source = event.data.source
+        const content = event.data.content
+        return source.kind === 'skill-invocation'
+          && Object.keys(source).length === 3
+          && source.name === manifest.parent.name
+          && source.form === 'instructions'
+          && content.length === 1
+          && content[0]?.type === 'text'
+          && content[0].text === expected
+      })
+      .sort((left, right) => right.seq - left.seq)
+      .at(0)
+    if (invocation === undefined) return undefined
+    const sourceMessageId = String(invocation.data.id)
+    return {
+      kind: 'direct-invocation' as const,
+      before,
+      manifest,
+      acceptance,
+      invocationMessageSeq: invocation.seq,
+      sourceMessageId,
+      skillEvidenceId: canonicalEvidenceDigest({
+        schemaVersion: 'tianwen.direct-skill-invocation-evidence.v1',
+        sessionId: String(session.id),
+        invocationMessageSeq: invocation.seq,
+        sourceMessageId,
+        skillName: manifest.parent.name,
+        renderedContentDigest: canonicalEvidenceDigest(expected),
+      }),
     }
-    const skillResultSeq = skillEvidence.source.resultSeq
-    if (skillResultSeq === undefined) {
-      return undefined
-    }
-    return { before, manifest, acceptance, skillEvidence, skillResultSeq }
   }
 
   hasSkillUseProof(
@@ -351,27 +404,46 @@ export class TianwenLearningIntakeService extends Service {
     if (proof === undefined) {
       return { decision: 'no-use-proof', sessionUnchanged: true }
     }
-    const { before, manifest, acceptance, skillEvidence, skillResultSeq } = proof
-    const receipt = this.ctx.tianwenEvolution.recordRunSkillUse({
+    const { before, manifest, acceptance } = proof
+    const provenance: RunSkillUseV2Provenance = proof.kind === 'skill-tool'
+      ? {
+          kind: 'skill-tool',
+          callSeq: proof.callSeq,
+          resultSeq: proof.resultSeq,
+        }
+      : {
+          kind: 'direct-invocation',
+          invocationMessageSeq: proof.invocationMessageSeq,
+          sourceMessageId: proof.sourceMessageId,
+        }
+    const common = {
       runId,
       parentVersionId: manifest.parentVersionId,
       sessionId: String(session.id),
       sessionDigest: before,
       skillName: manifest.parent.name,
       contentDigest: manifest.contentDigest,
-      skillEvidenceId: skillEvidence.evidenceId,
+      skillEvidenceId: proof.skillEvidenceId,
       acceptanceEvidenceId: acceptance.evidenceId,
-      skillCallSeq: skillEvidence.source.callSeq,
-      skillResultSeq,
       acceptanceCallSeq: acceptance.source.callSeq,
-    })
+    }
+    const existing = this.ctx.tianwenEvolution.getRunSkillUse(runId)
+    const receipt = existing?.schemaVersion === 'tianwen.run-skill-use.v1'
+      && proof.kind === 'skill-tool'
+      ? this.ctx.tianwenEvolution.recordRunSkillUse({
+          ...common,
+          skillCallSeq: proof.callSeq,
+          skillResultSeq: proof.resultSeq,
+        })
+      : this.ctx.tianwenEvolution.recordRunSkillUse({ ...common, provenance })
     if (sessionDigest(session.events) !== before) {
       throw new Error('Skill use intake changed the DSH Session')
     }
     return {
       decision: 'recorded',
       parentVersionId: receipt.parentVersionId,
-      skillCallSeq: skillEvidence.source.callSeq,
+      provenance,
+      ...(proof.kind === 'skill-tool' ? { skillCallSeq: proof.callSeq } : {}),
       duplicate: receipt.duplicate,
       sessionUnchanged: true,
     }

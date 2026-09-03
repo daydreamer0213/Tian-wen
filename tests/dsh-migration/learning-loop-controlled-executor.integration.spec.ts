@@ -299,6 +299,9 @@ async function mountFeedbackBridge(
   ctx.provide('tianwenLearningIntake', {
     consume: (...args: Parameters<typeof source.ctx.tianwenLearningIntake.consume>) =>
       source.ctx.tianwenLearningIntake.consume(...args),
+    recordSkillUse: (
+      ...args: Parameters<typeof source.ctx.tianwenLearningIntake.recordSkillUse>
+    ) => source.ctx.tianwenLearningIntake.recordSkillUse(...args),
   } as never)
   ctx.provide('tianwenEvolution', {
     listLearningIntakeStatuses: (...args: Parameters<typeof evolution.listLearningIntakeStatuses>) =>
@@ -359,6 +362,21 @@ describe('explicit-correction controlled learning-loop executor', () => {
       })
       const currentManifest = harness.ctx.tianwenEvolution.recordRunSkillManifest({
         runId: current.runId, skill: protocol.parentSkill,
+      })
+      harness.ctx.tianwenEvolution.recordOutcomeIntake({
+        runId: current.runId, verdict: 'met', sessionDigest: lifecycle,
+        evidenceIds: [evidenceA],
+      })
+      harness.ctx.tianwenEvolution.recordRunSkillUse({
+        runId: current.runId, parentVersionId: currentManifest.parentVersionId,
+        sessionId: 'main-session', sessionDigest: lifecycle,
+        skillName: protocol.parentSkill.name,
+        contentDigest: harness.ctx.tianwenEvolution
+          .getRunSkillManifest(current.runId)!.contentDigest,
+        skillEvidenceId: `sha256:${'7'.repeat(64)}`,
+        acceptanceEvidenceId: evidenceA,
+        skillCallSeq: 10, skillResultSeq: 11,
+        acceptanceCallSeq: 12,
       })
       harness.ctx.tianwenEvolution.recordRunBinding({
         goalRef: 'goal:independent-support', taskRef: 'task:independent-support',
@@ -817,8 +835,26 @@ describe('explicit-correction controlled learning-loop executor', () => {
         acceptanceContract: protocol.acceptance,
         sessionLifecycleFingerprint: `sha256:${'c'.repeat(64)}`,
       })
-      harness.ctx.tianwenEvolution.recordRunSkillManifest({
+      const secondManifest = harness.ctx.tianwenEvolution.recordRunSkillManifest({
         runId: secondRun.runId, skill: protocol.parentSkill,
+      })
+      const secondEvidence = `sha256:${'5'.repeat(64)}` as const
+      harness.ctx.tianwenEvolution.recordOutcomeIntake({
+        runId: secondRun.runId, verdict: 'met',
+        sessionDigest: `sha256:${'c'.repeat(64)}`,
+        evidenceIds: [secondEvidence],
+      })
+      harness.ctx.tianwenEvolution.recordRunSkillUse({
+        runId: secondRun.runId, parentVersionId: secondManifest.parentVersionId,
+        sessionId: 'second-main-session',
+        sessionDigest: `sha256:${'c'.repeat(64)}`,
+        skillName: protocol.parentSkill.name,
+        contentDigest: harness.ctx.tianwenEvolution
+          .getRunSkillManifest(secondRun.runId)!.contentDigest,
+        skillEvidenceId: `sha256:${'8'.repeat(64)}`,
+        acceptanceEvidenceId: secondEvidence,
+        skillCallSeq: 10, skillResultSeq: 11,
+        acceptanceCallSeq: 12,
       })
       const secondIntake = harness.ctx.tianwenEvolution.recordLearningFeedbackRevision({
         intake: {
@@ -1263,6 +1299,21 @@ describe('explicit-correction controlled learning-loop executor', () => {
       })
       const manifest = mounted.harness.ctx.tianwenEvolution.recordRunSkillManifest({
         runId: current.runId, skill: protocol.parentSkill,
+      })
+      mounted.harness.ctx.tianwenEvolution.recordOutcomeIntake({
+        runId: current.runId, verdict: 'met', sessionDigest: lifecycle,
+        evidenceIds: [evidenceA],
+      })
+      mounted.harness.ctx.tianwenEvolution.recordRunSkillUse({
+        runId: current.runId, parentVersionId: manifest.parentVersionId,
+        sessionId: 'recovered-transition-parent', sessionDigest: lifecycle,
+        skillName: protocol.parentSkill.name,
+        contentDigest: mounted.harness.ctx.tianwenEvolution
+          .getRunSkillManifest(current.runId)!.contentDigest,
+        skillEvidenceId: `sha256:${'9'.repeat(64)}`,
+        acceptanceEvidenceId: evidenceA,
+        skillCallSeq: 10, skillResultSeq: 11,
+        acceptanceCallSeq: 12,
       })
       mounted.harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({
         revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v1',
