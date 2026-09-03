@@ -997,7 +997,7 @@ describe('Tianwen installer contract', () => {
     expect(bytes).not.toContain('commands')
   })
 
-  it('installs and replays the fixed sequence without touching durable state', () => {
+  it('installs the fixed sequence and replays the current install without mutation', () => {
     const root = testRoot('replay')
     const paths = deriveInstallPaths(root, 'win32')
     const session = join(paths.sessionsRoot, 'kept.jsonl')
@@ -1010,41 +1010,28 @@ describe('Tianwen installer contract', () => {
     const scripted = scriptedInstaller(paths)
 
     const first = installWindowsFixture({ dataDir: root, runner: scripted.runner })
-    const receiptBytes = readFileSync(paths.receiptPath)
-    const managedBytes = [
-      join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
-      paths.archivePath,
-      join(paths.profileRoot, 'package.json'),
-      join(paths.profileRoot, 'pnpm-workspace.yaml'),
-      join(paths.profileRoot, 'cordis.patch.yml'),
-    ].map(path => readFileSync(path))
+    const installedTree = snapshotTree(root)
+    const callCount = scripted.calls.length
     const replay = installWindowsFixture({ dataDir: root, runner: scripted.runner })
 
     expect(replay).toEqual(first)
-    expect(readFileSync(paths.receiptPath)).toEqual(receiptBytes)
-    expect([
-      join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
-      paths.archivePath,
-      join(paths.profileRoot, 'package.json'),
-      join(paths.profileRoot, 'pnpm-workspace.yaml'),
-      join(paths.profileRoot, 'cordis.patch.yml'),
-    ].map(path => readFileSync(path))).toEqual(managedBytes)
+    expect(snapshotTree(root)).toEqual(installedTree)
+    expect(scripted.calls).toHaveLength(callCount)
     expect([readFileSync(session), readFileSync(ledger)]).toEqual(before)
     expect(scripted.calls.filter(argv => argv.includes('deploy'))).toHaveLength(2)
     const packCalls = scripted.calls.filter(argv => argv.includes('pack'))
     expect(packCalls.map(argv =>
-      argv.filter(value => value === '--skip-manifest-obfuscation').length)).toEqual([1, 1, 1, 1])
+      argv.filter(value => value === '--skip-manifest-obfuscation').length)).toEqual([1, 1])
     expect(new Set(packCalls.map(argv =>
-      argv.at(argv.indexOf('--pack-destination') + 1))).size).toBe(4)
+      argv.at(argv.indexOf('--pack-destination') + 1))).size).toBe(2)
     expect(scripted.calls.filter(argv => argv.includes('build') || argv.includes('pack')).map(argv =>
       argv.includes('build') ? 'build' : 'pack')).toEqual([
-      'build', 'pack', 'build', 'pack', 'build', 'pack', 'build', 'pack',
+      'build', 'pack', 'build', 'pack',
     ])
     expect(scripted.calls.filter(argv => argv.includes('plugin'))).toHaveLength(0)
-    expect(scripted.calls.filter(argv => argv.includes('--dump-config'))).toHaveLength(2)
+    expect(scripted.calls.filter(argv => argv.includes('--dump-config'))).toHaveLength(1)
     const dshBin = join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
     expect(scripted.calls.filter(argv => argv[0]?.endsWith('bin.js'))).toEqual([
-      [dshBin, '--profile', 'tianwen', '--dump-config'],
       [dshBin, '--profile', 'tianwen', '--dump-config'],
     ])
     expect(scripted.executables.every(executable => executable === process.execPath)).toBe(true)
@@ -1098,14 +1085,16 @@ describe('Tianwen installer contract', () => {
     const root = testRoot('long-folded-root')
     const paths = deriveInstallPaths(root, 'win32')
     const accepted = scriptedInstaller(paths, undefined, undefined, { foldedSessionsRoot: true })
+    const rejectedRoot = testRoot('long-folded-root-rejected')
+    const rejectedPaths = deriveInstallPaths(rejectedRoot, 'win32')
 
     installWindowsFixture({ dataDir: root, runner: accepted.runner })
 
     expect(() => installWindowsFixture({
-      dataDir: root,
-      runner: scriptedInstaller(paths, undefined, undefined, {
+      dataDir: rejectedRoot,
+      runner: scriptedInstaller(rejectedPaths, undefined, undefined, {
         foldedSessionsRoot: true,
-        sessionsRoot: `${paths.sessionsRoot}\\unexpected`,
+        sessionsRoot: `${rejectedPaths.sessionsRoot}\\unexpected`,
       }).runner,
     })).toThrow(/session-persistence-jsonl\.root differs from Tianwen v1/u)
   })
@@ -1204,6 +1193,9 @@ describe('Tianwen installer contract', () => {
     const root = testRoot('failed-upgrade')
     const paths = deriveInstallPaths(root, 'win32')
     installWindowsFixture({ dataDir: root, runner: scriptedInstaller(paths).runner })
+    const invalidReceipt = JSON.parse(readFileSync(paths.receiptPath, 'utf8'))
+    invalidReceipt.pnpmVersion = 'invalid'
+    writeJson(paths.receiptPath, invalidReceipt)
     const archiveBefore = readFileSync(paths.archivePath)
     const receiptBefore = readFileSync(paths.receiptPath)
 
@@ -1228,6 +1220,9 @@ describe('Tianwen installer contract', () => {
       dataDir: root,
       runner: scriptedInstaller(paths, undefined, 'published runtime\n').runner,
     })
+    const invalidReceipt = JSON.parse(readFileSync(paths.receiptPath, 'utf8'))
+    invalidReceipt.pnpmVersion = 'invalid'
+    writeJson(paths.receiptPath, invalidReceipt)
     const publishedPaths = [
       join(paths.hostRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
       join(paths.profileRoot, 'package.json'),
@@ -1546,7 +1541,7 @@ describe('Tianwen installer contract', () => {
     expect(ordinaryChildren.every(({ env }) => env.UV_THREADPOOL_SIZE === undefined)).toBe(true)
   })
 
-  it('reinstalls the fixed Profile when the Runtime archive changes', () => {
+  it('keeps the immutable current release when worktree archive bytes would change', () => {
     const root = testRoot('upgrade')
     const paths = deriveInstallPaths(root, 'win32')
     const first = scriptedInstaller(paths, undefined, 'runtime v1\n')
@@ -1554,15 +1549,17 @@ describe('Tianwen installer contract', () => {
     const second = scriptedInstaller(paths, undefined, 'runtime v2\n')
     const receiptV2 = installWindowsFixture({ dataDir: root, runner: second.runner })
 
-    expect(receiptV2.archiveDigest).not.toBe(receiptV1.archiveDigest)
-    expect(second.calls.filter(argv => argv.includes('@tianwen/profile-host'))).toHaveLength(1)
-    expect(second.calls.filter(argv => argv.includes('plugin'))).toHaveLength(0)
+    expect(receiptV2).toEqual(receiptV1)
+    expect(second.calls).toEqual([])
   })
 
   it('keeps the previous Profile and receipt when a Profile upgrade fails', () => {
     const root = testRoot('failed-profile-upgrade')
     const paths = deriveInstallPaths(root, 'win32')
     installWindowsFixture({ dataDir: root, runner: scriptedInstaller(paths, undefined, 'runtime v1\n').runner })
+    const invalidReceipt = JSON.parse(readFileSync(paths.receiptPath, 'utf8'))
+    invalidReceipt.pnpmVersion = 'invalid'
+    writeJson(paths.receiptPath, invalidReceipt)
     const archiveBefore = readFileSync(paths.archivePath)
     const profileBefore = readFileSync(join(paths.profileRoot, 'package.json'))
     const receiptBefore = readFileSync(paths.receiptPath)
@@ -1586,6 +1583,9 @@ describe('Tianwen installer contract', () => {
     writeFileSync(session, 'session bytes\n', 'utf8')
     writeFileSync(ledger, 'ledger bytes\n', 'utf8')
     installWindowsFixture({ dataDir: root, runner: scriptedInstaller(paths, undefined, 'runtime v1\n').runner })
+    const invalidReceipt = JSON.parse(readFileSync(paths.receiptPath, 'utf8'))
+    invalidReceipt.pnpmVersion = 'invalid'
+    writeJson(paths.receiptPath, invalidReceipt)
     const archiveBefore = readFileSync(paths.archivePath)
     const profileBefore = readFileSync(join(paths.profileRoot, 'package.json'))
     const receiptBefore = readFileSync(paths.receiptPath)

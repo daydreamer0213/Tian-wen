@@ -843,6 +843,17 @@ export function installTianwen({
     mkdirSync(dirname(paths.receiptPath), { recursive: true })
   })
 
+  const currentReceipt = atInstallStage(INSTALLER_FAILURE_STAGE.MANAGED_LAYOUT_PREFLIGHT, () => {
+    if (installation !== 'current'
+      || !matchesPredecessorReceipt(paths, paths.archivePath, DSH_VERSION)
+      || hasSourceLinkedRuntimePublication(repoRoot, paths.profileRoot)) return undefined
+    return assertPlainObject(
+      JSON.parse(readFileSync(paths.receiptPath, 'utf8')),
+      'install receipt',
+    )
+  })
+  if (currentReceipt !== undefined) return currentReceipt
+
   const hostExists = existsSync(paths.hostRoot)
   const profileExists = existsSync(paths.profileRoot)
   const migratingDshPredecessor = installation === 'managed-predecessor'
