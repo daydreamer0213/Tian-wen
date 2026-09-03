@@ -17,16 +17,24 @@ export function extractSettledTaskResult(
     String(event.data.goal.id) === goalId &&
     event.data.goal.phase === terminalPhase)
   if (goalChange?.type !== 'goal/change') return undefined
+  const terminalTurnStart = events.findLast(event =>
+    event.type === 'turn/start' && event.seq < goalChange.seq)
+  const terminalTurnEnd = terminalTurnStart === undefined ? undefined : events.find(event =>
+    event.type === 'turn/end' && event.seq > terminalTurnStart.seq)
+  const completedInTurn = terminalTurnEnd !== undefined && terminalTurnEnd.seq > goalChange.seq
   const goalInput = events.findLast(event =>
     event.type === 'user/message' &&
     event.seq < goalChange.seq &&
     event.data.source.kind === 'goal' &&
     String(event.data.source.goalId) === goalId)
-  if (goalInput?.type !== 'user/message') return undefined
+  // Native Tasks may complete during their ordinary first prompt, before a
+  // Goal-round message is needed. The in-turn Goal change anchors that result.
+  const anchorSeq = completedInTurn ? goalChange.seq : goalInput?.seq
+  if (anchorSeq === undefined) return undefined
   const turnStart = events.findLast(event =>
-    event.type === 'turn/start' && event.seq < goalInput.seq)
+    event.type === 'turn/start' && event.seq < anchorSeq)
   const turnEnd = events.find(event =>
-    event.type === 'turn/end' && event.seq > goalInput.seq)
+    event.type === 'turn/end' && event.seq > anchorSeq)
   if (
     turnStart?.type !== 'turn/start' ||
     turnEnd?.type !== 'turn/end' ||
@@ -40,7 +48,7 @@ export function extractSettledTaskResult(
   const assistant = events.findLast(event =>
     event.type === 'assistant/message' &&
     event.surfaceOp === 'append' &&
-    event.seq > goalInput.seq &&
+    event.seq > (completedInTurn ? turnStart.seq : goalInput!.seq) &&
     event.seq < turnEnd.seq &&
     event.data.turn === turnStart.data.turn)
   if (assistant?.type !== 'assistant/message') return undefined

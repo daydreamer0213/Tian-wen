@@ -1483,6 +1483,8 @@ describe('Long Goal DSH planner', () => {
         parent: control,
         childId: record.planner.sessionId,
         label: 'Long Goal Planner',
+        persona: expect.stringContaining('not the main chat or a Task executor'),
+        toolFilter: { allow: [] },
       }))
 
       expect(readLongGoal(stateRoot, record.id)).toMatchObject({

@@ -15,6 +15,7 @@ import { createUserMessage, freezeMessage, MessageId } from '@deepseek-ai/dsh-ll
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 import type { EvidenceRecord } from '@tianwen/evidence'
 import { projectEvidence as projectPersistedEvidence } from '@tianwen/evidence/projector'
 import type { LearningIntakeStatus } from '@tianwen/evolution/learning-intake'
@@ -72,7 +73,7 @@ import {
   reserveTianwenPermissionRenewal,
   setContinuousGoalMode,
 } from './long-goal.js'
-import { runLongGoalPlannerTurn } from './long-goal-planner.js'
+import { NATIVE_LONG_GOAL_PLANNER_SCOPE, runLongGoalPlannerTurn } from './long-goal-planner.js'
 import type { LongGoalPlannerDependencies } from './long-goal-planner.js'
 import {
   controlContinuousGoal,
@@ -387,6 +388,8 @@ export interface PermissionAttemptHostDependencies {
     readonly label: string
     readonly prompt: { readonly type: 'text', readonly text: string }[]
     readonly agentOptions: AgentOptions
+    readonly persona?: string
+    readonly toolFilter?: ToolRestriction
     readonly signal: AbortSignal
   }) => Promise<{ readonly childId: unknown }>
   readonly followupNativeChild: (
@@ -715,6 +718,7 @@ export function createPermissionAttemptHost(
           label: 'Long Goal Planner permission renewal',
           prompt,
           agentOptions: dependencies.nativeAgentOptions,
+          ...NATIVE_LONG_GOAL_PLANNER_SCOPE,
           signal: AbortSignal.timeout(30_000),
         })
         const started = await starting
@@ -891,6 +895,8 @@ function nativeTaskPrompt(objective: string, continuation?: string): string {
   return [
     'Execute exactly one Tianwen Long Goal Task.',
     `Task objective: ${objective}`,
+    'Future steps mentioned in the objective are context, not additional work for this Task.',
+    'Do not create status-marker files merely to claim completion.',
     'A native DSH Goal is already active in this Task Session.',
     continuation,
     'Before your final report, call get_goal, then call update_goal with its exact goal_id and revision and action complete only after the Task objective is achieved.',

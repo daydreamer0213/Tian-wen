@@ -15,6 +15,8 @@ describe('NativeLongGoalChild', () => {
     const parent = { session: { id: sessionId('parent') } } as Agent
     const prompt = [{ type: 'text', text: 'start' }] as ContentBlock[]
     const agentOptions = { provider: 'model-provider', model: 'model-id', maxTokens: 17 } as AgentOptions
+    const persona = 'Plan only'
+    const toolFilter = { allow: [] }
     const signal = AbortSignal.timeout(10_000)
 
     await expect(adapter.start({
@@ -23,6 +25,8 @@ describe('NativeLongGoalChild', () => {
       label: 'child label',
       prompt,
       agentOptions,
+      persona,
+      toolFilter,
       signal,
     })).resolves.toEqual({ childId: sessionId('reserved-child') })
 
@@ -30,7 +34,7 @@ describe('NativeLongGoalChild', () => {
       provider: 'spawn',
       label: 'child label',
       childId: sessionId('reserved-child'),
-      request: { parent, prompt, agentOptions },
+      request: { parent, prompt, agentOptions, persona, toolFilter },
       signal,
     })
     const [startSpec] = startContinuable.mock.calls[0]

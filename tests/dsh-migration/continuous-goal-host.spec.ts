@@ -2342,6 +2342,8 @@ describe('continuous Goal Host', () => {
         expect(input.prompt[0]?.text).toContain('call get_goal')
         expect(input.prompt[0]?.text).toContain('call update_goal')
         expect(input.prompt[0]?.text).toContain('Do not create another Goal')
+        expect(input.prompt[0]?.text).toContain('Future steps mentioned in the objective are context, not additional work for this Task.')
+        expect(input.prompt[0]?.text).toContain('Do not create status-marker files merely to claim completion.')
         let announce: ((event: { readonly agent: Agent }) => void) | undefined
         const prepared = setup({
           agent: child,

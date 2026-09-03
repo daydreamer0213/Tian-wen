@@ -77,6 +77,30 @@ describe('settled Task result extraction', () => {
     })
   })
 
+  it('returns a native Task result when its ordinary first turn completes the Goal', () => {
+    const base = events()
+    const input = base[1] as Extract<SessionEvent, { type: 'user/message' }>
+    const native = [
+      base[0],
+      { ...input, data: { ...input.data, source: { kind: 'user' } } },
+      base[2],
+      { ...base[5], seq: 4 },
+      { ...base[3], seq: 5 },
+      { ...base[4], seq: 6 },
+    ] as unknown as readonly SessionEvent[]
+    expect(extractSettledTaskResult(native, 'goal-1', 'complete')).toEqual({
+      messageId: 'assistant-final',
+      text: 'Final finding\nNext fact',
+    })
+    const previousGoalRound = base.slice(0, 5).map(event => ({
+      ...event,
+      seq: event.seq - 10,
+      data: { ...event.data, ...('turn' in event.data ? { turn: 6 } : {}) },
+    })) as unknown as readonly SessionEvent[]
+    expect(extractSettledTaskResult([...previousGoalRound, ...native], 'goal-1', 'complete'))
+      .toEqual({ messageId: 'assistant-final', text: 'Final finding\nNext fact' })
+  })
+
   it('maps an abandoned Task to the anchored blocked Goal turn', () => {
     expect(extractSettledTaskResult(
       events({ terminalPhase: 'blocked' }),
