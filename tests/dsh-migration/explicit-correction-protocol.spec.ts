@@ -35,7 +35,8 @@ describe('explicit correction controlled protocol', () => {
     expect(protocol).toMatchObject({
       scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
       version: EXPLICIT_CORRECTION_PROTOCOL_VERSION,
-      allowedTools: ['skill', 'verify_lifecycle'],
+      parentSkill: { name: 'research-summary' },
+      allowedTools: ['skill', 'submit_research_summary'],
       evaluationTaskDefinitions: [
         { semanticType: 'original-defect', taskType: 'original-problem' },
         { semanticType: 'adjacent-transfer', taskType: 'adjacent-transfer' },
@@ -57,12 +58,18 @@ describe('explicit correction controlled protocol', () => {
       task.candidateSessionId,
       task.evaluatorSessionId,
     ])).toEqual([
-      ['eval-task:lifecycle-original-defect', expect.stringMatching(/^session:controlled-eval:fixture:lifecycle:original-defect:[a-f0-9]{64}:baseline$/u), expect.stringMatching(/^session:controlled-eval:fixture:lifecycle:original-defect:[a-f0-9]{64}:candidate$/u), expect.stringMatching(/^session:controlled-eval:fixture:lifecycle:original-defect:[a-f0-9]{64}:evaluator$/u)],
-      ['eval-task:lifecycle-adjacent-transfer', expect.any(String), expect.any(String), expect.any(String)],
-      ['eval-task:lifecycle-preserved-regression', expect.any(String), expect.any(String), expect.any(String)],
-      ['eval-task:lifecycle-raw-extraction-counterexample', expect.any(String), expect.any(String), expect.any(String)],
-      ['eval-task:lifecycle-safety-boundary', expect.any(String), expect.any(String), expect.any(String)],
+      ['eval-task:research-summary-original-defect', expect.stringMatching(/^session:controlled-eval:product:research-summary:original-defect:[a-f0-9]{64}:baseline$/u), expect.stringMatching(/^session:controlled-eval:product:research-summary:original-defect:[a-f0-9]{64}:candidate$/u), expect.stringMatching(/^session:controlled-eval:product:research-summary:original-defect:[a-f0-9]{64}:evaluator$/u)],
+      ['eval-task:research-summary-adjacent-transfer', expect.any(String), expect.any(String), expect.any(String)],
+      ['eval-task:research-summary-preserved-regression', expect.any(String), expect.any(String), expect.any(String)],
+      ['eval-task:research-summary-raw-extraction-counterexample', expect.any(String), expect.any(String), expect.any(String)],
+      ['eval-task:research-summary-safety-boundary', expect.any(String), expect.any(String), expect.any(String)],
     ])
+    expect(tasks.every(task => task.authorization.mode === 'read-only-product-evaluation'))
+      .toBe(true)
+    expect(tasks.every(task => task.stopCondition.terminal === 'accepted-product-submission'))
+      .toBe(true)
+    expect(tasks.every(task => task.evaluatorMaterialContract.source
+      === 'accepted-research-summary-submission')).toBe(true)
   })
 
   it('does not improvise a protocol for an unsupported scope', () => {
@@ -87,7 +94,7 @@ describe('explicit correction controlled protocol', () => {
     }).toThrow(TypeError)
 
     const laterProtocol = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)!
-    expect(laterProtocol.allowedTools).toEqual(['skill', 'verify_lifecycle'])
+    expect(laterProtocol.allowedTools).toEqual(['skill', 'submit_research_summary'])
     expect(laterProtocol.evaluationTaskDefinitions[0]).toEqual({
       semanticType: 'original-defect',
       taskType: 'original-problem',
@@ -121,8 +128,8 @@ describe('explicit correction controlled protocol', () => {
       expectedRevision: 1,
       materializeWorkspace,
     })
-    expect(replayTasks[0]?.goal).toBe('Complete controlled lifecycle task 0.')
-    expect(replayTransition.task.goal).toBe('Verify the active lifecycle promote pointer.')
+    expect(replayTasks[0]?.goal).toBe('Submit a faithful summary of research packet 0.')
+    expect(replayTransition.task.goal).toBe('Verify the active research-summary promote pointer.')
   })
 
   it('derives the expected workspace snapshot despite a malicious materializer', () => {
@@ -147,7 +154,7 @@ describe('explicit correction controlled protocol', () => {
 
     expect(task.workspaceSnapshot.entries[0]?.contentDigest).toBe(
       `sha256:${createHash('sha256')
-        .update('controlled evaluation workspace 0\n', 'utf8')
+        .update('controlled research-summary workspace 0\n', 'utf8')
         .digest('hex')}`,
     )
     expect(() => protocol.assertWorkspaceSnapshot(
@@ -167,13 +174,13 @@ describe('explicit correction controlled protocol', () => {
     const execution = protocol.freezeExecution({
       callConfig: { provider: 'tianwen-controlled-scripted', model: 'scripted' },
       retryPolicy: { mode: 'normal', maxRetries: 0 },
-      toolSchemas: [{ name: 'skill' }, { name: 'verify_lifecycle' }],
+      toolSchemas: [{ name: 'skill' }, { name: 'submit_research_summary' }],
     })
 
     expect(() => protocol.assertFrozenExecution(execution, {
       callConfig: { provider: 'other', model: 'scripted' },
       retryPolicy: { mode: 'normal', maxRetries: 0 },
-      toolSchemas: [{ name: 'skill' }, { name: 'verify_lifecycle' }],
+      toolSchemas: [{ name: 'skill' }, { name: 'submit_research_summary' }],
     })).toThrow('call-config-drift')
     expect(() => protocol.assertFrozenExecution(execution, {
       callConfig: { provider: 'tianwen-controlled-scripted', model: 'scripted' },
@@ -217,7 +224,7 @@ describe('explicit correction controlled protocol', () => {
     ])
     expect(ids(firstReplay)).toEqual(ids(first))
     expect(ids(second)).not.toEqual(ids(first))
-    expect(ids(first).every(id => id.startsWith('session:controlled-eval:fixture:lifecycle:')))
+    expect(ids(first).every(id => id.startsWith('session:controlled-eval:product:research-summary:')))
       .toBe(true)
 
     const firstShadow = protocol.buildShadowTasks({
@@ -239,6 +246,34 @@ describe('explicit correction controlled protocol', () => {
     })
     expect(firstTransition.task.sessionId).not.toBe(secondTransition.task.sessionId)
     expect(firstTransition.task.sessionId)
-      .toMatch(/^session:controlled-activation:fixture:lifecycle:promote:[a-f0-9]{64}$/u)
+      .toMatch(/^session:controlled-activation:product:research-summary:promote:[a-f0-9]{64}$/u)
+  })
+
+  it('uses only packet and canonical submission facts for deterministic verdicts', () => {
+    const protocol = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)!
+    const tasks = protocol.buildEvaluationTasks({ root: fixtureRoot(), materializeWorkspace })
+    const verdicts = tasks.map(task => ({
+      semanticType: task.semanticType,
+      base: protocol.oracle(task.packet, task.expectedSubmissions.base),
+      candidate: protocol.oracle(task.packet, task.expectedSubmissions.candidate),
+    }))
+
+    expect(verdicts).toEqual([
+      { semanticType: 'original-defect', base: 'not-met', candidate: 'met' },
+      { semanticType: 'adjacent-transfer', base: 'not-met', candidate: 'met' },
+      { semanticType: 'preserved-regression', base: 'met', candidate: 'met' },
+      { semanticType: 'raw-extraction-counterexample', base: 'met', candidate: 'met' },
+      { semanticType: 'safety-boundary', base: 'met', candidate: 'met' },
+    ])
+
+    const renamed = protocol.buildEvaluationTasks({
+      root: fixtureRoot(),
+      materializeWorkspace,
+      sessionNamespace: 'roles-swapped-and-renamed',
+    })
+    expect(renamed.map((task, index) => protocol.oracle(
+      task.packet,
+      tasks[index]!.expectedSubmissions.candidate,
+    ))).toEqual(['met', 'met', 'met', 'met', 'met'])
   })
 })

@@ -14,6 +14,7 @@ import type {
   TianwenRunId,
 } from '@tianwen/evolution'
 import type { ControlledWorkspaceSnapshot } from './skill-evaluation.js'
+import { parseResearchPacket } from './research-summary.js'
 
 export type ControlledSkillActivationPreflightCode =
   | 'shadow-not-eligible'
@@ -44,6 +45,7 @@ export interface RunControlledSkillTransitionInput {
 export interface RunControlledSkillTransitionTaskInput {
   readonly goal: string
   readonly input: string
+  readonly researchPacket?: string
   readonly workspaceRoot: string
   readonly workspaceSnapshot: ControlledWorkspaceSnapshot
   readonly authorization: unknown
@@ -169,6 +171,7 @@ function parseTask(value: unknown): RunControlledSkillTransitionTaskInput {
   if (task === undefined || !exactKeys(task, [
     'goal',
     'input',
+    ...('researchPacket' in task ? ['researchPacket'] : []),
     'workspaceRoot',
     'workspaceSnapshot',
     'authorization',
@@ -184,6 +187,7 @@ function parseTask(value: unknown): RunControlledSkillTransitionTaskInput {
     || task.goal.trim().length === 0
     || typeof task.input !== 'string'
     || task.input.trim().length === 0
+    || ('researchPacket' in task && typeof task.researchPacket !== 'string')
     || typeof task.workspaceRoot !== 'string'
     || !isAbsolute(task.workspaceRoot)
     || !isLosslessJson(task.authorization)
@@ -214,6 +218,7 @@ function parseTask(value: unknown): RunControlledSkillTransitionTaskInput {
   }
   let acceptanceContract: RunAcceptanceContract
   try {
+    if ('researchPacket' in task) parseResearchPacket(task.researchPacket as string)
     acceptanceContract = prepareRunBinding({
       goalRef: 'goal:controlled-skill-activation-input-validation',
       taskRef: 'task:controlled-skill-activation-input-validation',
@@ -227,6 +232,7 @@ function parseTask(value: unknown): RunControlledSkillTransitionTaskInput {
   return {
     goal: task.goal,
     input: task.input,
+    ...('researchPacket' in task ? { researchPacket: task.researchPacket as string } : {}),
     workspaceRoot: task.workspaceRoot,
     workspaceSnapshot: workspaceSnapshot(task.workspaceSnapshot),
     authorization: structuredClone(task.authorization),

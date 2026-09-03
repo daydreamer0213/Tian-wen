@@ -49,6 +49,27 @@ export type ResearchSummaryOracle = (
   submission: ResearchSummarySubmission,
 ) => ResearchSummaryVerdict
 
+/** Product oracle: it sees only the frozen packet and canonical submission. */
+export const evaluateResearchSummarySubmission: ResearchSummaryOracle = (
+  packet,
+  submission,
+) => {
+  const confirmed = new Set(submission.confirmedFindingIds)
+  const uncertainties = new Set(submission.uncertaintyIds)
+  const required = packet.items.filter(item =>
+    item.kind === 'finding' && item.priority === 'required')
+  const decision = packet.items.filter(item =>
+    item.kind === 'uncertainty' && item.priority === 'decision')
+  const forbidden = packet.items.filter(item =>
+    item.kind === 'unsupported'
+    || (item.kind === 'uncertainty' && item.priority === 'background'))
+  return required.every(item => confirmed.has(item.id))
+    && decision.every(item => uncertainties.has(item.id))
+    && forbidden.every(item => !confirmed.has(item.id) && !uncertainties.has(item.id))
+    ? 'met'
+    : 'not-met'
+}
+
 export type ResearchSummaryToolMode =
   | { readonly kind: 'source-capture' }
   | { readonly kind: 'controlled-enforce'; readonly oracle: ResearchSummaryOracle }

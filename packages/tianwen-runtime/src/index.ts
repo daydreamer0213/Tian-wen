@@ -17,6 +17,7 @@ export {
   RESEARCH_SUMMARY_SKILL_NAME,
   RESEARCH_SUMMARY_TOOL_NAME,
   createResearchSummaryTool,
+  evaluateResearchSummarySubmission,
   normalizeResearchSummarySubmission,
   parseResearchPacket,
 } from './research-summary.js'

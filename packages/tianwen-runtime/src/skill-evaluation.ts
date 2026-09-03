@@ -25,6 +25,14 @@ import type {
 } from '@tianwen/dsh-compat'
 import type { EvidenceRecord } from '@tianwen/evidence'
 import {
+  RESEARCH_SUMMARY_TOOL_NAME,
+  createResearchSummaryTool,
+  evaluateResearchSummarySubmission,
+  normalizeResearchSummarySubmission,
+  parseResearchPacket,
+  type ResearchSummarySubmission,
+} from './research-summary.js'
+import {
   ControlledSkillActivationPreflightError,
   controlledSkillActivationRecoveredStop,
   controlledSkillTransitionPostCheck,
@@ -220,7 +228,10 @@ export interface ControlledWorkspaceSnapshot {
 
 export interface ControlledEvaluatorMaterialContract {
   readonly schemaVersion: 'tianwen.controlled-evaluator-material-contract.v1'
-  readonly source: 'final-completed-assistant-text' | 'recorded-decision-submission'
+  readonly source:
+    | 'final-completed-assistant-text'
+    | 'recorded-decision-submission'
+    | 'accepted-research-summary-submission'
   readonly maxUtf8Bytes: number
 }
 
@@ -228,6 +239,7 @@ export interface RunControlledSkillEvaluationTaskInput {
   readonly taskId: ControlledSkillEvalTaskId
   readonly goal: string
   readonly input: string
+  readonly researchPacket?: string
   readonly baselineWorkspaceRoot: string
   readonly candidateWorkspaceRoot: string
   readonly workspaceSnapshot: ControlledWorkspaceSnapshot
@@ -250,6 +262,7 @@ export interface RunControlledSkillShadowTaskInput {
   readonly taskId: `shadow-task:${string}`
   readonly goal: string
   readonly input: string
+  readonly researchPacket?: string
   readonly workspaceRoot: string
   readonly workspaceSnapshot: ControlledWorkspaceSnapshot
   readonly authorization: unknown
@@ -326,6 +339,7 @@ export interface RunControlledSkillEvaluatorTaskInput {
   readonly taskId: ControlledSkillEvalTaskId
   readonly goal: string
   readonly input: string
+  readonly researchPacket?: string
   readonly evaluatorMaterialContract: ControlledEvaluatorMaterialContract
 }
 
@@ -517,7 +531,8 @@ function parseControlledMaterialContract(value: unknown): ControlledEvaluatorMat
     || !exactRuntimeKeys(source, ['schemaVersion', 'source', 'maxUtf8Bytes'])
     || source.schemaVersion !== 'tianwen.controlled-evaluator-material-contract.v1'
     || (source.source !== 'final-completed-assistant-text'
-      && source.source !== 'recorded-decision-submission')
+      && source.source !== 'recorded-decision-submission'
+      && source.source !== 'accepted-research-summary-submission')
     || !Number.isSafeInteger(source.maxUtf8Bytes)
     || Number(source.maxUtf8Bytes) < 1
     || Number(source.maxUtf8Bytes) > 65_536
@@ -549,6 +564,7 @@ function parseControlledArmsInput(input: unknown): RunControlledSkillEvaluationA
         'taskId',
         'goal',
         'input',
+        ...('researchPacket' in task ? ['researchPacket'] : []),
         'baselineWorkspaceRoot',
         'candidateWorkspaceRoot',
         'workspaceSnapshot',
@@ -566,6 +582,7 @@ function parseControlledArmsInput(input: unknown): RunControlledSkillEvaluationA
       || task.goal.trim().length === 0
       || typeof task.input !== 'string'
       || task.input.trim().length === 0
+      || ('researchPacket' in task && typeof task.researchPacket !== 'string')
       || typeof task.baselineWorkspaceRoot !== 'string'
       || typeof task.candidateWorkspaceRoot !== 'string'
       || !isAbsolute(task.baselineWorkspaceRoot)
@@ -577,6 +594,13 @@ function parseControlledArmsInput(input: unknown): RunControlledSkillEvaluationA
       || !isLosslessJson(task.verifierContract)
       || !isLosslessJson(task.stopCondition)
     ) throw new ControlledSkillEvaluationPreflightError('task-package-mismatch')
+    if ('researchPacket' in task) {
+      try {
+        parseResearchPacket(task.researchPacket as string)
+      } catch {
+        throw new ControlledSkillEvaluationPreflightError('task-package-mismatch')
+      }
+    }
     for (const workspaceRoot of [task.baselineWorkspaceRoot, task.candidateWorkspaceRoot]) {
       const identity = process.platform === 'win32'
         ? resolve(workspaceRoot).toLowerCase()
@@ -600,6 +624,7 @@ function parseControlledArmsInput(input: unknown): RunControlledSkillEvaluationA
       taskId: task.taskId as ControlledSkillEvalTaskId,
       goal: task.goal,
       input: task.input,
+      ...('researchPacket' in task ? { researchPacket: task.researchPacket as string } : {}),
       baselineWorkspaceRoot: task.baselineWorkspaceRoot,
       candidateWorkspaceRoot: task.candidateWorkspaceRoot,
       workspaceSnapshot: parseControlledWorkspaceSnapshot(task.workspaceSnapshot),
@@ -642,6 +667,7 @@ function parseControlledShadowInput(input: unknown): RunControlledSkillShadowInp
         'taskId',
         'goal',
         'input',
+        ...('researchPacket' in task ? ['researchPacket'] : []),
         'workspaceRoot',
         'workspaceSnapshot',
         'authorization',
@@ -660,6 +686,7 @@ function parseControlledShadowInput(input: unknown): RunControlledSkillShadowInp
       || task.goal.trim().length === 0
       || typeof task.input !== 'string'
       || task.input.trim().length === 0
+      || ('researchPacket' in task && typeof task.researchPacket !== 'string')
       || typeof task.workspaceRoot !== 'string'
       || !isAbsolute(task.workspaceRoot)
       || !isSafeSessionId(task.sessionId)
@@ -674,6 +701,13 @@ function parseControlledShadowInput(input: unknown): RunControlledSkillShadowInp
         typeof name !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/u.test(name))
       || new Set(task.allowedTools).size !== task.allowedTools.length
     ) throw new ControlledSkillShadowPreflightError('task-package-mismatch')
+    if ('researchPacket' in task) {
+      try {
+        parseResearchPacket(task.researchPacket as string)
+      } catch {
+        throw new ControlledSkillShadowPreflightError('task-package-mismatch')
+      }
+    }
     const workspaceIdentity = process.platform === 'win32'
       ? resolve(task.workspaceRoot).toLowerCase()
       : resolve(task.workspaceRoot)
@@ -712,6 +746,7 @@ function parseControlledShadowInput(input: unknown): RunControlledSkillShadowInp
       taskId: task.taskId as `shadow-task:${string}`,
       goal: task.goal,
       input: task.input,
+      ...('researchPacket' in task ? { researchPacket: task.researchPacket as string } : {}),
       workspaceRoot: task.workspaceRoot,
       workspaceSnapshot: workspaceManifest,
       authorization: structuredClone(task.authorization),
@@ -748,7 +783,13 @@ function parseControlledEvaluatorsInput(input: unknown): RunControlledSkillEvalu
     const task = record(item)
     if (
       task === undefined
-      || !exactRuntimeKeys(task, ['taskId', 'goal', 'input', 'evaluatorMaterialContract'])
+      || !exactRuntimeKeys(task, [
+        'taskId',
+        'goal',
+        'input',
+        ...('researchPacket' in task ? ['researchPacket'] : []),
+        'evaluatorMaterialContract',
+      ])
       || typeof task.taskId !== 'string'
       || !/^eval-task:[a-z0-9][a-z0-9._-]{0,96}$/u.test(task.taskId)
       || taskIds.has(task.taskId)
@@ -756,7 +797,15 @@ function parseControlledEvaluatorsInput(input: unknown): RunControlledSkillEvalu
       || task.goal.trim().length === 0
       || typeof task.input !== 'string'
       || task.input.trim().length === 0
+      || ('researchPacket' in task && typeof task.researchPacket !== 'string')
     ) throw new ControlledSkillEvaluatorPreflightError('task-package-mismatch')
+    if ('researchPacket' in task) {
+      try {
+        parseResearchPacket(task.researchPacket as string)
+      } catch {
+        throw new ControlledSkillEvaluatorPreflightError('task-package-mismatch')
+      }
+    }
     taskIds.add(task.taskId)
     let evaluatorMaterialContract: ControlledEvaluatorMaterialContract
     try {
@@ -768,6 +817,7 @@ function parseControlledEvaluatorsInput(input: unknown): RunControlledSkillEvalu
       taskId: task.taskId as ControlledSkillEvalTaskId,
       goal: task.goal,
       input: task.input,
+      ...('researchPacket' in task ? { researchPacket: task.researchPacket as string } : {}),
       evaluatorMaterialContract,
     }
   })
@@ -895,10 +945,14 @@ function controlledIdentityExposed(
 }
 
 function controlledEvaluatorForbiddenIdentities(
-  task: Pick<RunControlledSkillEvaluatorTaskInput, 'goal' | 'input'>,
+  task: Pick<RunControlledSkillEvaluatorTaskInput, 'taskId' | 'goal' | 'input'>,
   forbidden: ReadonlySet<string>,
 ): ReadonlySet<string> {
-  const commonContext = JSON.stringify({ goal: task.goal, input: task.input })
+  const commonContext = JSON.stringify({
+    taskId: task.taskId,
+    goal: task.goal,
+    input: task.input,
+  })
   return new Set([...forbidden].filter(identity =>
     !serializedContainsControlledIdentity(commonContext, identity)))
 }
@@ -1103,8 +1157,15 @@ function controlledExecutionManifestDigest(
 function controlledEvaluatorMaterial(
   events: readonly SessionEvent[],
   contract: ControlledEvaluatorMaterialContract,
+  taskId?: ControlledSkillEvalTaskId,
+  researchPacket?: string,
 ): Sha256Digest | undefined {
-  const text = controlledEvaluatorMaterialText(events, contract)
+  const text = controlledEvaluatorMaterialText(
+    events,
+    contract,
+    taskId,
+    researchPacket,
+  )
   return text === undefined
     ? undefined
     : sha256({
@@ -1116,13 +1177,56 @@ function controlledEvaluatorMaterial(
 function controlledEvaluatorMaterialText(
   events: readonly SessionEvent[],
   contract: ControlledEvaluatorMaterialContract,
+  taskId?: ControlledSkillEvalTaskId,
+  researchPacket?: string,
 ): string | undefined {
   const turnEnd = events.findLast(event => event.type === 'turn/end')
   if (turnEnd?.type !== 'turn/end' || turnEnd.data.reason.kind !== 'completed') {
     return undefined
   }
   let text: string | undefined
-  if (contract.source === 'final-completed-assistant-text') {
+  if (contract.source === 'accepted-research-summary-submission') {
+    if (taskId === undefined || researchPacket === undefined) return undefined
+    const calls = events.filter((event): event is SessionEvent<'tool/call'> =>
+      event.type === 'tool/call'
+      && event.data.name === RESEARCH_SUMMARY_TOOL_NAME
+      && event.seq < turnEnd.seq)
+    if (calls.length !== 1) return undefined
+    let submission: ResearchSummarySubmission
+    try {
+      submission = normalizeResearchSummarySubmission(
+        parseResearchPacket(researchPacket),
+        JSON.parse(calls[0]!.data.arguments) as unknown,
+      )
+    } catch {
+      return undefined
+    }
+    const result = events.find(event =>
+      event.type === 'tool/result'
+      && event.seq < turnEnd.seq
+      && String(event.data.message.content[0]?.toolCallId)
+        === String(calls[0]!.data.callId))
+    if (result?.type !== 'tool/result'
+      || result.data.message.content[0]?.isError === true) return undefined
+    const block = result.data.message.content[0]
+    const rendered = block?.type === 'tool-result'
+      && block.content.length === 1
+      && block.content[0]?.type === 'text'
+      ? block.content[0].text
+      : undefined
+    let projected: unknown
+    try {
+      projected = rendered === undefined ? undefined : JSON.parse(rendered)
+    } catch {
+      return undefined
+    }
+    const packet = parseResearchPacket(researchPacket)
+    if (sha256(projected) !== sha256({
+      verdict: evaluateResearchSummarySubmission(packet, submission),
+      submission,
+    })) return undefined
+    text = JSON.stringify({ taskId, submission })
+  } else if (contract.source === 'final-completed-assistant-text') {
     const message = events.findLast(event =>
       event.type === 'assistant/message'
       && event.surfaceOp === 'append'
@@ -1452,10 +1556,19 @@ export class TianwenSkillEvaluationService extends Service {
       throw new ControlledSkillActivationPreflightError('task-package-mismatch')
     }
     let schemas: ReturnType<typeof this.ctx.tools.schemas>
+    const researchSummaryTool = controlledResearchSummaryTool(
+      parsed.task.researchPacket,
+    )
     try {
-      schemas = this.ctx.tools.schemas()
-        .filter(schema => parsed.task.allowedTools.includes(schema.name))
-        .toSorted((left, right) => left.name.localeCompare(right.name))
+      if ((researchSummaryTool !== undefined)
+        !== (parsed.task.acceptanceContract.toolName === RESEARCH_SUMMARY_TOOL_NAME)) {
+        throw new Error('controlled product acceptance contract mismatch')
+      }
+      schemas = [...controlledRootToolSchemas(
+        this.ctx,
+        parsed.task.allowedTools,
+        researchSummaryTool,
+      )]
     } catch {
       throw new ControlledSkillActivationPreflightError('tool-surface-mismatch')
     }
@@ -1581,12 +1694,15 @@ export class TianwenSkillEvaluationService extends Service {
 
     if (resolved.provider === 'tianwen-controlled-scripted') {
       const fixtureRoot = process.env.TIANWEN_DSH_PROBE_ROOT
-      if (shadow.mode !== 'isolated-test'
-        || shadow.evidenceClaim !== 'controlled-synthetic-mechanism'
+      const product = shadow.evidenceClaim === 'controlled-product'
+      if ((product ? shadow.mode !== 'project' : shadow.mode !== 'isolated-test')
+        || (!product && shadow.evidenceClaim !== 'controlled-synthetic-mechanism')
         || fixtureRoot === undefined
         || !isAbsolute(fixtureRoot)
         || !isDedicatedChild(fixtureRoot, parsed.task.workspaceRoot)
-        || !parsed.task.sessionId.startsWith('session:controlled-activation:fixture:')) {
+        || !parsed.task.sessionId.startsWith(product
+          ? 'session:controlled-activation:product:'
+          : 'session:controlled-activation:fixture:')) {
         throw new ControlledSkillActivationPreflightError('scripted-boundary-mismatch')
       }
     }
@@ -1688,11 +1804,17 @@ export class TianwenSkillEvaluationService extends Service {
           agentOptions: requestAgentOptions(resolved),
           setup: async agentCtx => {
             installModelSelection(agentCtx, { current: selection, assembled: undefined })
-            agentCtx.tools.presentAs('native')
-            agentCtx.tools.restrict({ allow: transition!.postCheck.allowedTools })
-            agentCtx.tools.guard(execution => controlledArmGuard(execution, guard))
-            await agentCtx.inject(['skills'], scopedCtx => {
+            await agentCtx.inject(['skills', 'tools'], scopedCtx => {
               scopedCtx.skills.register(targetSkill)
+              if (researchSummaryTool !== undefined) {
+                scopedCtx.tools.register(researchSummaryTool)
+              }
+              scopedCtx.tools.presentAs('native')
+              scopedCtx.tools.restrict({
+                allow: transition!.postCheck.allowedTools.filter(name =>
+                  name !== researchSummaryTool?.name),
+              })
+              scopedCtx.tools.guard(execution => controlledArmGuard(execution, guard))
             })
           },
         })
@@ -1774,6 +1896,7 @@ export class TianwenSkillEvaluationService extends Service {
         skill: targetSkill,
         handle,
         guard,
+        ...(researchSummaryTool === undefined ? {} : { researchSummaryTool }),
       }, transition.postCheck.runId, resolved, parsed.task.workspaceRoot, resolveVerdict)
       if (activity.activity === undefined) {
         return this.recoverControlledSkillTransition(transition, {
@@ -2020,6 +2143,10 @@ export class TianwenSkillEvaluationService extends Service {
     ) throw new ControlledSkillShadowPreflightError('retry-policy-mismatch')
 
     const plannedTasks: ControlledSkillShadowTaskInput[] = []
+    const researchSummaryTools = new Map<
+      ControlledSkillShadowTaskId,
+      ReturnType<typeof createResearchSummaryTool>
+    >()
     try {
       for (const task of parsed.tasks) {
         if (task.stopContract.maxToolCalls < 2
@@ -2029,11 +2156,20 @@ export class TianwenSkillEvaluationService extends Service {
         }
         const allowedTools = [...task.allowedTools]
           .sort((left, right) => left.localeCompare(right))
+        const researchSummaryTool = controlledResearchSummaryTool(
+          task.researchPacket,
+        )
         let schemas: ReturnType<typeof this.ctx.tools.schemas>
         try {
-          schemas = this.ctx.tools.schemas()
-            .filter(schema => allowedTools.includes(schema.name))
-            .toSorted((left, right) => left.name.localeCompare(right.name))
+          if ((researchSummaryTool !== undefined)
+            !== (task.acceptanceContract.toolName === RESEARCH_SUMMARY_TOOL_NAME)) {
+            throw new Error('controlled product acceptance contract mismatch')
+          }
+          schemas = [...controlledRootToolSchemas(
+            this.ctx,
+            allowedTools,
+            researchSummaryTool,
+          )]
         } catch {
           throw new ControlledSkillShadowPreflightError('tool-surface-mismatch')
         }
@@ -2043,6 +2179,9 @@ export class TianwenSkillEvaluationService extends Service {
           || schemas.length !== allowedTools.length
           || schemas.some((schema, index) => schema.name !== allowedTools[index])
         ) throw new ControlledSkillShadowPreflightError('tool-surface-mismatch')
+        if (researchSummaryTool !== undefined) {
+          researchSummaryTools.set(task.taskId, researchSummaryTool)
+        }
         plannedTasks.push({
           taskId: task.taskId,
           goalDigest: sha256(task.goal),
@@ -2160,14 +2299,17 @@ export class TianwenSkillEvaluationService extends Service {
 
     if (resolved.provider === 'tianwen-controlled-scripted') {
       const fixtureRoot = process.env.TIANWEN_DSH_PROBE_ROOT
+      const product = expectedPlan.evidenceClaim === 'controlled-product'
       if (
-        expectedPlan.mode !== 'isolated-test'
-        || expectedPlan.evidenceClaim !== 'controlled-synthetic-mechanism'
+        (product ? expectedPlan.mode !== 'project' : expectedPlan.mode !== 'isolated-test')
+        || (!product && expectedPlan.evidenceClaim !== 'controlled-synthetic-mechanism')
         || fixtureRoot === undefined
         || !isAbsolute(fixtureRoot)
         || parsed.tasks.some(task =>
           !isDedicatedChild(fixtureRoot, task.workspaceRoot)
-          || !task.sessionId.startsWith('session:controlled-shadow:fixture:'))
+          || !task.sessionId.startsWith(product
+            ? 'session:controlled-shadow:product:'
+            : 'session:controlled-shadow:fixture:'))
       ) throw new ControlledSkillShadowPreflightError('scripted-boundary-mismatch')
     }
 
@@ -2178,6 +2320,7 @@ export class TianwenSkillEvaluationService extends Service {
     try {
       for (const [index, task] of parsed.tasks.entries()) {
         const planned = expectedPlan.tasks[index]!
+        const researchSummaryTool = researchSummaryTools.get(task.taskId)
         const guard: ControlledArmGuardState = {
           sessionId: planned.sessionId,
           allowedTools: new Set(planned.allowedTools),
@@ -2196,16 +2339,29 @@ export class TianwenSkillEvaluationService extends Service {
               current: selection,
               assembled: undefined,
             })
-            agentCtx.tools.presentAs('native')
-            agentCtx.tools.restrict({ allow: planned.allowedTools })
-            agentCtx.tools.guard(execution => controlledArmGuard(execution, guard))
-            await agentCtx.inject(['skills'], scopedCtx => {
+            await agentCtx.inject(['skills', 'tools'], scopedCtx => {
               scopedCtx.skills.register(candidateSkill)
+              if (researchSummaryTool !== undefined) {
+                scopedCtx.tools.register(researchSummaryTool)
+              }
+              scopedCtx.tools.presentAs('native')
+              scopedCtx.tools.restrict({
+                allow: planned.allowedTools.filter(name =>
+                  name !== researchSummaryTool?.name),
+              })
+              scopedCtx.tools.guard(execution => controlledArmGuard(execution, guard))
             })
           },
         })
         guard.agent = handle.agent
-        prepared.push({ task, planned, skill: candidateSkill, handle, guard })
+        prepared.push({
+          task,
+          planned,
+          skill: candidateSkill,
+          handle,
+          guard,
+          ...(researchSummaryTool === undefined ? {} : { researchSummaryTool }),
+        })
       }
 
       for (const item of prepared) {
@@ -2573,6 +2729,8 @@ export class TianwenSkillEvaluationService extends Service {
         const text = controlledEvaluatorMaterialText(
           inspection.events,
           task.evaluatorMaterialContract,
+          task.taskId,
+          task.researchPacket,
         )
         if (String(inspection.meta.id) !== arm.sessionId
           || inspection.meta.cwd === undefined
@@ -2982,9 +3140,18 @@ export class TianwenSkillEvaluationService extends Service {
     try {
       toolRows = parsed.tasks.map((task, index) => {
         const frozen = protocolTasks[index]!
-        const schemas = this.ctx.tools.schemas()
-          .filter(schema => frozen.allowedTools.includes(schema.name))
-          .toSorted((left, right) => left.name.localeCompare(right.name))
+        const researchSummaryTool = controlledResearchSummaryTool(
+          task.researchPacket,
+        )
+        if ((researchSummaryTool !== undefined)
+          !== (frozen.acceptanceContract.toolName === RESEARCH_SUMMARY_TOOL_NAME)) {
+          throw new ControlledSkillEvaluationPreflightError('tool-surface-mismatch')
+        }
+        const schemas = controlledRootToolSchemas(
+          this.ctx,
+          frozen.allowedTools,
+          researchSummaryTool,
+        )
         if (
           schemas.length !== frozen.allowedTools.length
           || schemas.some((schema, schemaIndex) => schema.name !== frozen.allowedTools[schemaIndex])
@@ -3080,16 +3247,22 @@ export class TianwenSkillEvaluationService extends Service {
 
     if (resolved.provider === 'tianwen-controlled-scripted') {
       const fixtureRoot = process.env.TIANWEN_DSH_PROBE_ROOT
+      const product = protocol.evidencePurpose === 'controlled-product'
       if (
-        protocol.evidencePurpose !== 'development-only-synthetic-defect'
-        || fixtureRoot === undefined
+        fixtureRoot === undefined
         || !isAbsolute(fixtureRoot)
         || parsed.tasks.some(task =>
           !isDedicatedChild(fixtureRoot, task.baselineWorkspaceRoot)
           || !isDedicatedChild(fixtureRoot, task.candidateWorkspaceRoot)
-          || !task.baselineSessionId.startsWith('session:controlled-eval:fixture:')
-          || !task.candidateSessionId.startsWith('session:controlled-eval:fixture:')
-          || !task.evaluatorSessionId.startsWith('session:controlled-eval:fixture:'))
+          || !task.baselineSessionId.startsWith(product
+            ? 'session:controlled-eval:product:'
+            : 'session:controlled-eval:fixture:')
+          || !task.candidateSessionId.startsWith(product
+            ? 'session:controlled-eval:product:'
+            : 'session:controlled-eval:fixture:')
+          || !task.evaluatorSessionId.startsWith(product
+            ? 'session:controlled-eval:product:'
+            : 'session:controlled-eval:fixture:'))
       ) throw new ControlledSkillEvaluationPreflightError('scripted-boundary-mismatch')
     }
 
@@ -3128,6 +3301,9 @@ export class TianwenSkillEvaluationService extends Service {
         const cwd = role === 'baseline'
           ? task.baselineWorkspaceRoot
           : task.candidateWorkspaceRoot
+        const researchSummaryTool = controlledResearchSummaryTool(
+          task.researchPacket,
+        )
         const guard: ControlledArmGuardState = {
           sessionId: planArm.sessionId,
           allowedTools: new Set(planned.allowedTools),
@@ -3148,11 +3324,17 @@ export class TianwenSkillEvaluationService extends Service {
                 current: selection,
                 assembled: undefined,
               })
-              agentCtx.tools.presentAs('native')
-              agentCtx.tools.restrict({ allow: planned.allowedTools })
-              agentCtx.tools.guard(execution => controlledArmGuard(execution, guard))
-              await agentCtx.inject(['skills'], scopedCtx => {
+              await agentCtx.inject(['skills', 'tools'], scopedCtx => {
                 scopedCtx.skills.register(skill)
+                if (researchSummaryTool !== undefined) {
+                  scopedCtx.tools.register(researchSummaryTool)
+                }
+                scopedCtx.tools.presentAs('native')
+                scopedCtx.tools.restrict({
+                  allow: planned.allowedTools.filter(name =>
+                    name !== researchSummaryTool?.name),
+                })
+                scopedCtx.tools.guard(execution => controlledArmGuard(execution, guard))
               })
             },
           })
@@ -3170,6 +3352,7 @@ export class TianwenSkillEvaluationService extends Service {
             skill,
             handle: armHandle,
             guard,
+            ...(researchSummaryTool === undefined ? {} : { researchSummaryTool }),
           }
           let actualSkill: SkillDefinition | undefined
           let expectedVersionId: SkillEvaluationPlan['parentVersionId'] | undefined
@@ -3381,6 +3564,8 @@ export class TianwenSkillEvaluationService extends Service {
     const evaluatorMaterialDigest = controlledEvaluatorMaterial(
       prepared.handle.agent.session.events,
       prepared.task.evaluatorMaterialContract,
+      prepared.task.taskId,
+      prepared.task.researchPacket,
     )
     if (evaluatorMaterialDigest === undefined) {
       return { reasonCode: 'evaluator-material-invalid' }
@@ -3463,13 +3648,71 @@ export class TianwenSkillEvaluationService extends Service {
 
     let outcome: OutcomeVerdict
     let acceptanceEvidenceId: Sha256Digest | undefined
+    let productEvidenceVerified = false
     try {
-      const evidence = this.ctx.tianwenEvidence.project(session)
+      const evidenceRows = this.ctx.tianwenEvidence.project(session)
         .filter(item => item.action.toolName
           === prepared.planned.acceptanceContract.toolName)
         .sort((left, right) => left.source.callSeq - right.source.callSeq)
-        .at(-1)
-      const controlledVerdict = resolveVerdict?.(String(session.id))
+      const evidence = evidenceRows.at(-1)
+      let controlledVerdict = resolveVerdict?.(String(session.id))
+      if (prepared.researchSummaryTool !== undefined) {
+        if (resolveVerdict !== undefined
+          || prepared.task.researchPacket === undefined
+          || evidenceRows.length !== 1
+          || evidence?.outcome.status !== 'complete'
+          || evidence.outcome.isError
+          || prepared.planned.acceptanceSubjectDigest !== sha256(
+            parseResearchPacket(prepared.task.researchPacket),
+          )) return { reasonCode: 'run-fact-mismatch' }
+        const result = prepared.researchSummaryTool.resultFor(
+          prepared.handle.agent,
+          terminal.data.turn,
+        )
+        const calls = session.events.filter((event): event is SessionEvent<'tool/call'> =>
+          event.type === 'tool/call'
+          && event.data.turn === terminal.data.turn
+          && event.data.name === RESEARCH_SUMMARY_TOOL_NAME)
+        if (result === undefined || result.verdict === 'not-evaluated'
+          || calls.length !== 1
+          || evidence.source.callSeq !== calls[0]!.seq) {
+          return { reasonCode: 'run-fact-mismatch' }
+        }
+        let submitted: ResearchSummarySubmission
+        try {
+          submitted = normalizeResearchSummarySubmission(
+            parseResearchPacket(prepared.task.researchPacket),
+            JSON.parse(calls[0]!.data.arguments) as unknown,
+          )
+        } catch {
+          return { reasonCode: 'run-fact-mismatch' }
+        }
+        const persisted = session.events.find(event =>
+          event.type === 'tool/result'
+          && String(event.data.message.content[0]?.toolCallId)
+            === String(calls[0]!.data.callId))
+        const block = persisted?.type === 'tool/result'
+          ? persisted.data.message.content[0]
+          : undefined
+        const rendered = block?.type === 'tool-result'
+          && block.isError !== true
+          && block.content.length === 1
+          && block.content[0]?.type === 'text'
+          ? block.content[0].text
+          : undefined
+        let projected: unknown
+        try {
+          projected = rendered === undefined ? undefined : JSON.parse(rendered)
+        } catch {
+          return { reasonCode: 'run-fact-mismatch' }
+        }
+        if (sha256(submitted) !== sha256(result.submission)
+          || sha256(projected) !== sha256(result)) {
+          return { reasonCode: 'run-fact-mismatch' }
+        }
+        controlledVerdict = result.verdict
+        productEvidenceVerified = true
+      }
       if (resolveVerdict !== undefined
         && (controlledVerdict === undefined || evidence === undefined)) {
         return { reasonCode: 'run-fact-mismatch' }
@@ -3523,7 +3766,8 @@ export class TianwenSkillEvaluationService extends Service {
     if (
       evidence === undefined
       || acceptanceEvidenceId !== evidence.evidenceId
-      || evidence.action.argumentsDigest !== prepared.planned.acceptanceSubjectDigest
+      || (!productEvidenceVerified
+        && evidence.action.argumentsDigest !== prepared.planned.acceptanceSubjectDigest)
       || use.acceptanceEvidenceId !== evidence.evidenceId
     ) return { reasonCode: 'acceptance-subject-mismatch' }
     const usedToolNames = [...prepared.guard.usedToolNames]
@@ -4231,6 +4475,7 @@ interface PreparedControlledSkillEvaluationArm {
   readonly skill: SkillDefinition
   readonly handle: AgentHandle
   readonly guard: ControlledArmGuardState
+  readonly researchSummaryTool?: ReturnType<typeof createResearchSummaryTool>
 }
 
 interface PreparedControlledSkillShadowRun {
@@ -4239,10 +4484,11 @@ interface PreparedControlledSkillShadowRun {
   readonly skill: SkillDefinition
   readonly handle: AgentHandle
   readonly guard: ControlledArmGuardState
+  readonly researchSummaryTool?: ReturnType<typeof createResearchSummaryTool>
 }
 
 interface PreparedControlledActivity {
-  readonly task: { readonly input: string }
+  readonly task: { readonly input: string; readonly researchPacket?: string }
   readonly planned: {
     readonly acceptanceContract: RunAcceptanceContract
     readonly acceptanceSubjectDigest: Sha256Digest
@@ -4251,6 +4497,7 @@ interface PreparedControlledActivity {
   readonly skill: SkillDefinition
   readonly handle: AgentHandle
   readonly guard: ControlledArmGuardState
+  readonly researchSummaryTool?: ReturnType<typeof createResearchSummaryTool>
 }
 
 interface ControlledArmGuardState {
@@ -4495,6 +4742,43 @@ function requestAgentOptions(config: LlmCallConfig) {
     model: config.model,
     ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
   }
+}
+
+type VisibleToolSchema = ReturnType<Context['tools']['schemas']>[number]
+
+function visibleToolSchema(
+  tool: ReturnType<typeof createResearchSummaryTool>,
+): VisibleToolSchema {
+  return {
+    name: tool.name,
+    description: tool.description,
+    parameters: structuredClone(tool.parameters),
+  }
+}
+
+function controlledResearchSummaryTool(researchPacket: string | undefined) {
+  return researchPacket === undefined
+    ? undefined
+    : createResearchSummaryTool(parseResearchPacket(researchPacket), {
+        kind: 'controlled-enforce',
+        oracle: evaluateResearchSummarySubmission,
+      })
+}
+
+function controlledRootToolSchemas(
+  ctx: Context,
+  allowedTools: readonly string[],
+  researchTool?: ReturnType<typeof createResearchSummaryTool>,
+): readonly VisibleToolSchema[] {
+  const root = ctx.tools.schemas()
+  if (researchTool !== undefined
+    && root.some(schema => schema.name === RESEARCH_SUMMARY_TOOL_NAME)) {
+    throw new Error('controlled product tool must not be registered globally')
+  }
+  return [
+    ...root.filter(schema => allowedTools.includes(schema.name)),
+    ...(researchTool === undefined ? [] : [visibleToolSchema(researchTool)]),
+  ].toSorted((left, right) => left.name.localeCompare(right.name))
 }
 
 function evaluationSessionId(

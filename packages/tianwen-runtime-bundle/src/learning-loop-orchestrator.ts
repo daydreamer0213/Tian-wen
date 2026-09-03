@@ -114,8 +114,6 @@ export interface ExplicitCorrectionLearningLoopExecutorConfig {
     readonly toolSchemas: unknown
     readonly rubricDigest: `sha256:${string}`
   }>
-  /** Existing controlled evaluation fixture's deterministic outcome resolver. */
-  readonly resolveVerdict?: unknown
   /** Resolves only after the exact parent report message is durably persisted. */
   readonly deliverTerminalReport: (input: {
     readonly context: LearningLoopExecutionContext
@@ -251,7 +249,7 @@ export function createExplicitCorrectionLearningLoopExecutor(
       const evaluation = await (context.ctx.tianwenSkillEvaluation as unknown as {
         runControlledArms(input: unknown, resolver?: unknown): Promise<{ readonly state: string, readonly evaluationId: string, readonly result?: { readonly mechanismVerdict: string } }>
       }).runControlledArms(
-        built.protocol.buildArmsInput(candidateId, protocolId, built.tasks), config.resolveVerdict,
+        built.protocol.buildArmsInput(candidateId, protocolId, built.tasks),
       )
       if (evaluation.state === 'terminal') {
         context.ctx.tianwenEvolution.recordLearningAnalysisCandidateRejected({
@@ -263,7 +261,7 @@ export function createExplicitCorrectionLearningLoopExecutor(
       const evaluators = await (context.ctx.tianwenSkillEvaluation as unknown as {
         runControlledEvaluators(input: unknown, resolver?: unknown): Promise<{ readonly state: string, readonly evaluationId: string, readonly result?: { readonly mechanismVerdict: string } }>
       }).runControlledEvaluators(
-        built.protocol.buildEvaluatorsInput(evaluation.evaluationId, built.tasks), config.resolveVerdict,
+        built.protocol.buildEvaluatorsInput(evaluation.evaluationId, built.tasks),
       )
       if (evaluators.state === 'terminal' && evaluators.result?.mechanismVerdict !== 'pass') {
         context.ctx.tianwenEvolution.recordLearningAnalysisCandidateRejected({
@@ -283,7 +281,7 @@ export function createExplicitCorrectionLearningLoopExecutor(
       }).runControlledShadow({
         evaluationId: evaluation.evaluationId,
         tasks: shadowTasks,
-      }, config.resolveVerdict)
+      })
       if (shadow.state === 'terminal' && (shadow.result?.mechanismVerdict !== 'pass' || shadow.result.promotionEligibility === 'ineligible')) {
         context.ctx.tianwenEvolution.recordLearningAnalysisCandidateRejected({
           analysisId: context.status.analysisId as never, evaluationId: evaluation.evaluationId as never,
@@ -312,7 +310,7 @@ export function createExplicitCorrectionLearningLoopExecutor(
       built.protocol.assertWorkspaceSnapshot(transitionInput.task.workspaceRoot, transitionInput.task.workspaceSnapshot)
       const transition = await (context.ctx.tianwenSkillEvaluation as unknown as {
         runControlledSkillTransition(input: unknown, resolver?: unknown): Promise<{ readonly state: string, readonly transition: { readonly transitionId: string, readonly state: string } }>
-      }).runControlledSkillTransition(transitionInput, config.resolveVerdict)
+      }).runControlledSkillTransition(transitionInput)
       if (transition.transition.state === 'recovered') {
         if (transition.state !== 'stopped') throw new Error('controlled promotion recovery state is inconsistent')
         context.ctx.tianwenEvolution.recordLearningAnalysisTransitionRecovered({
@@ -346,7 +344,7 @@ export function createExplicitCorrectionLearningLoopExecutor(
       built.protocol.assertWorkspaceSnapshot(transitionInput.task.workspaceRoot, transitionInput.task.workspaceSnapshot)
       const transition = await (context.ctx.tianwenSkillEvaluation as unknown as {
         runControlledSkillTransition(input: unknown, resolver?: unknown): Promise<{ readonly state: string, readonly transition: { readonly transitionId: string, readonly state: string } }>
-      }).runControlledSkillTransition(transitionInput, config.resolveVerdict)
+      }).runControlledSkillTransition(transitionInput)
       if (transition.transition.state === 'recovered') {
         if (transition.state !== 'stopped') throw new Error('controlled rollback recovery state is inconsistent')
         context.ctx.tianwenEvolution.recordLearningAnalysisTransitionRecovered({
