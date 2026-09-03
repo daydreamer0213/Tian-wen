@@ -53,6 +53,8 @@ import type {
   RequestLearningAnalysisInput,
 } from './learning-analysis.js'
 import type {
+  InitialRunSkillBindingInput,
+  InitialRunSkillBindingReceipt,
   RunSkillManifest,
   RunSkillManifestInput,
   RunSkillManifestReceipt,
@@ -447,6 +449,13 @@ export class TianwenEvolutionService extends Service {
 
   listRunSkillManifests(): readonly RunSkillManifest[] {
     return this.state().ledger.listRunSkillManifests()
+  }
+
+  recordInitialRunSkillBinding(
+    input: InitialRunSkillBindingInput,
+  ): InitialRunSkillBindingReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordInitialRunSkillBinding(input))
   }
 
   recordRunSkillUse(input: RunSkillUseInput): RunSkillUseReceipt {

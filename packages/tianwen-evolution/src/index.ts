@@ -139,11 +139,15 @@ export {
   prepareAttribution,
   prepareAcceptedLesson,
   prepareLearningCase,
+  prepareInitialRunSkillBinding,
   prepareRunSkillManifest,
   prepareRunSkillUse,
   prepareSkillCandidate,
 } from './skill-governance.js'
 export type {
+  InitialRunSkillBindingInput,
+  InitialRunSkillBindingReceipt,
+  InitialRunSkillBindingRecordedEvent,
   AttributionInput,
   AcceptedLesson,
   AcceptedLessonInput,

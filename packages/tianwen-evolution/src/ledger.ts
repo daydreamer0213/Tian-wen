@@ -102,10 +102,14 @@ import {
   prepareExplicitCorrectionLearningCase,
   prepareLearningCase,
   prepareSkillCandidate,
+  prepareInitialRunSkillBinding,
   prepareRunSkillManifest,
   prepareRunSkillUse,
 } from './skill-governance.js'
 import type {
+  InitialRunSkillBindingInput,
+  InitialRunSkillBindingReceipt,
+  InitialRunSkillBindingRecordedEvent,
   RunSkillManifest,
   RunSkillManifestInput,
   RunSkillManifestReceipt,
@@ -341,6 +345,7 @@ export type LedgerEvent =
   | LearningConsentNoticeIntentRecordedEvent
   | LearningConsentNoticeDeliveredEvent
   | RunBindingRecordedEvent
+  | InitialRunSkillBindingRecordedEvent
   | OutcomeIntakeRecordedEvent
   | RunSkillManifestRecordedEvent
   | RunSkillUseRecordedEvent
@@ -1551,6 +1556,58 @@ function parseOutcomeEvent(
   }
 }
 
+function parseStoredRunBinding(value: unknown): TianwenRunBinding {
+  if (!isRecord(value)) {
+    throw new LedgerIntegrityError('Run binding must be an object')
+  }
+  const isV2 = value.schemaVersion === 'tianwen.run-binding.v2'
+  const isV3 = value.schemaVersion === 'tianwen.run-binding.v3'
+  const hasAcceptanceSubject = isV2 || (
+    isV3 && 'acceptanceSubjectDigest' in value
+  )
+  exactKeys(value, [
+    'schemaVersion',
+    'runId',
+    'goalRef',
+    'taskRef',
+    'sessionId',
+    'scopeKey',
+    'acceptanceContract',
+    'acceptanceContractDigest',
+    ...(hasAcceptanceSubject ? ['acceptanceSubjectDigest'] : []),
+    ...(isV3 ? ['sessionLifecycleFingerprint'] : []),
+  ])
+  if (
+    value.schemaVersion !== 'tianwen.run-binding.v1'
+    && !isV2
+    && !isV3
+  ) {
+    throw new LedgerIntegrityError('invalid stored Run binding version')
+  }
+  const binding = prepareRunBinding({
+    goalRef: requireString(value.goalRef, 'goalRef'),
+    taskRef: requireString(value.taskRef, 'taskRef'),
+    sessionId: requireString(value.sessionId, 'sessionId'),
+    scopeKey: requireString(value.scopeKey, 'scopeKey'),
+    acceptanceContract: value.acceptanceContract as RunAcceptanceContract,
+    ...(hasAcceptanceSubject ? {
+      acceptanceSubjectDigest: requireDigest(value.acceptanceSubjectDigest),
+    } : {}),
+    ...(isV3 ? {
+      sessionLifecycleFingerprint: requireDigest(
+        value.sessionLifecycleFingerprint,
+      ),
+    } : {}),
+  })
+  if (
+    value.runId !== binding.runId
+    || value.acceptanceContractDigest !== binding.acceptanceContractDigest
+  ) {
+    throw new LedgerIntegrityError('Run binding event disagrees with input')
+  }
+  return binding
+}
+
 function parseEvent(value: unknown): LedgerEvent {
   if (!isRecord(value)) {
     throw new LedgerIntegrityError('ledger event must be an object')
@@ -1618,55 +1675,8 @@ function parseEvent(value: unknown): LedgerEvent {
     if (value.schemaVersion !== 'tianwen.run-binding.v1') {
       throw new LedgerIntegrityError('invalid Run binding schema version')
     }
-    if (!isRecord(value.binding)) {
-      throw new LedgerIntegrityError('Run binding must be an object')
-    }
-    const isV2 = value.binding.schemaVersion === 'tianwen.run-binding.v2'
-    const isV3 = value.binding.schemaVersion === 'tianwen.run-binding.v3'
-    const hasAcceptanceSubject = isV2 || (
-      isV3 && 'acceptanceSubjectDigest' in value.binding
-    )
-    exactKeys(value.binding, [
-      'schemaVersion',
-      'runId',
-      'goalRef',
-      'taskRef',
-      'sessionId',
-      'scopeKey',
-      'acceptanceContract',
-      'acceptanceContractDigest',
-      ...(hasAcceptanceSubject ? ['acceptanceSubjectDigest'] : []),
-      ...(isV3 ? ['sessionLifecycleFingerprint'] : []),
-    ])
+    const binding = parseStoredRunBinding(value.binding)
     if (
-      value.binding.schemaVersion !== 'tianwen.run-binding.v1'
-      && !isV2
-      && !isV3
-    ) {
-      throw new LedgerIntegrityError('invalid stored Run binding version')
-    }
-    const binding = prepareRunBinding({
-      goalRef: requireString(value.binding.goalRef, 'goalRef'),
-      taskRef: requireString(value.binding.taskRef, 'taskRef'),
-      sessionId: requireString(value.binding.sessionId, 'sessionId'),
-      scopeKey: requireString(value.binding.scopeKey, 'scopeKey'),
-      acceptanceContract:
-        value.binding.acceptanceContract as RunAcceptanceContract,
-      ...(hasAcceptanceSubject ? {
-        acceptanceSubjectDigest: requireDigest(
-          value.binding.acceptanceSubjectDigest,
-        ),
-      } : {}),
-      ...(isV3 ? {
-        sessionLifecycleFingerprint: requireDigest(
-          value.binding.sessionLifecycleFingerprint,
-        ),
-      } : {}),
-    })
-    if (
-      value.binding.runId !== binding.runId ||
-      value.binding.acceptanceContractDigest !==
-        binding.acceptanceContractDigest ||
       requireDigest(value.inputDigest) !== sha256(binding)
     ) {
       throw new LedgerIntegrityError('Run binding event disagrees with input')
@@ -1677,6 +1687,43 @@ function parseEvent(value: unknown): LedgerEvent {
       at,
       binding,
       inputDigest: sha256(binding),
+    }
+  }
+  if (type === 'initial-run-skill-binding-recorded') {
+    exactKeys(value, [
+      'schemaVersion',
+      'type',
+      'at',
+      'binding',
+      'manifest',
+      'inputDigest',
+    ])
+    if (value.schemaVersion !== 'tianwen.initial-run-skill-binding.v1') {
+      throw new LedgerIntegrityError('invalid initial Run Skill binding version')
+    }
+    const binding = parseStoredRunBinding(value.binding)
+    if (binding.schemaVersion !== 'tianwen.run-binding.v3') {
+      throw new LedgerIntegrityError('initial Run Skill binding requires v3')
+    }
+    let manifest
+    try {
+      manifest = parseRunSkillManifest(value.manifest)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid initial Run Skill manifest', {
+        cause: error,
+      })
+    }
+    const pair = { binding, manifest }
+    if (
+      binding.runId !== manifest.runId
+      || requireDigest(value.inputDigest) !== sha256(pair)
+    ) throw new LedgerIntegrityError('initial Run Skill binding pair disagrees')
+    return {
+      schemaVersion: 'tianwen.initial-run-skill-binding.v1',
+      type,
+      at,
+      ...pair,
+      inputDigest: sha256(pair),
     }
   }
   if (type === 'outcome-intake-recorded') {
@@ -2604,6 +2651,57 @@ export class EvolutionLedger {
       inputDigest: sha256(prepared),
     })
     return { runId: prepared.runId, duplicate: false }
+  }
+
+  recordInitialRunSkillBinding(
+    input: InitialRunSkillBindingInput,
+  ): InitialRunSkillBindingReceipt {
+    let pair
+    try {
+      pair = prepareInitialRunSkillBinding(input)
+    } catch (error) {
+      throw new LedgerIntegrityError(
+        'Initial Run Skill binding input is invalid',
+        { cause: error },
+      )
+    }
+    const existingRunId = this.#runIdBySession.get(pair.binding.sessionId)
+    const existingBinding = existingRunId === undefined
+      ? undefined
+      : this.#runBindings.get(existingRunId)
+    const existingManifest = existingRunId === undefined
+      ? undefined
+      : this.#runSkillManifests.get(existingRunId)
+    if (existingBinding !== undefined || existingManifest !== undefined) {
+      if (
+        existingRunId !== pair.binding.runId
+        || existingBinding === undefined
+        || existingManifest === undefined
+        || canonicalJson(existingBinding) !== canonicalJson(pair.binding)
+        || canonicalJson(existingManifest) !== canonicalJson(pair.manifest)
+      ) {
+        throw new LedgerIntegrityError(
+          `Initial Run Skill binding changed after freeze: ${pair.binding.sessionId}`,
+        )
+      }
+      return {
+        runId: pair.binding.runId,
+        parentVersionId: pair.manifest.parentVersionId,
+        duplicate: true,
+      }
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.initial-run-skill-binding.v1',
+      type: 'initial-run-skill-binding-recorded',
+      at: this.#now(),
+      ...pair,
+      inputDigest: sha256(pair),
+    })
+    return {
+      runId: pair.binding.runId,
+      parentVersionId: pair.manifest.parentVersionId,
+      duplicate: false,
+    }
   }
 
   #matchesControlledTransitionReservation(
@@ -5910,7 +6008,8 @@ export class EvolutionLedger {
     }
     if (commitError !== undefined) {
       if (
-        parsed.type === 'learning-intake-recorded'
+        parsed.type === 'initial-run-skill-binding-recorded'
+        || parsed.type === 'learning-intake-recorded'
         || parsed.type === 'learning-feedback-retracted'
         || parsed.type === 'learning-analysis-requested'
         || parsed.type === 'learning-analysis-child-started'
@@ -5985,6 +6084,23 @@ export class EvolutionLedger {
   }
 
   #validateAgainstState(event: LedgerEvent): void {
+    if (event.type === 'initial-run-skill-binding-recorded') {
+      if (
+        event.binding.runId !== event.manifest.runId
+        || this.#runBindings.has(event.binding.runId)
+        || this.#runSkillManifests.has(event.binding.runId)
+        || this.#runIdBySession.has(event.binding.sessionId)
+        || event.inputDigest !== sha256({
+          binding: event.binding,
+          manifest: event.manifest,
+        })
+      ) {
+        throw new LedgerIntegrityError(
+          'Initial Run Skill binding disagrees with history',
+        )
+      }
+      return
+    }
     if (event.type === 'run-binding-recorded') {
       if (this.#runBindings.has(event.binding.runId)) {
         throw new LedgerIntegrityError(
@@ -7334,6 +7450,13 @@ export class EvolutionLedger {
       this.#runBindings.set(event.binding.runId, event.binding)
       this.#runIdBySession.set(event.binding.sessionId, event.binding.runId)
       this.#runBindingRecordedAt.set(event.binding.runId, event.at)
+      return
+    }
+    if (event.type === 'initial-run-skill-binding-recorded') {
+      this.#runBindings.set(event.binding.runId, event.binding)
+      this.#runIdBySession.set(event.binding.sessionId, event.binding.runId)
+      this.#runBindingRecordedAt.set(event.binding.runId, event.at)
+      this.#runSkillManifests.set(event.manifest.runId, event.manifest)
       return
     }
     if (event.type === 'run-skill-manifest-recorded') {

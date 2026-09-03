@@ -10,9 +10,12 @@ import { canonicalJson, sha256 } from './learning-intake.js'
 import type {
   OutcomeIntakeInput,
   OutcomeLearningSignal,
+  RunBindingInputV3,
   TianwenRunBinding,
+  TianwenRunBindingV3,
   TianwenRunId,
 } from './outcome-intake.js'
+import { prepareRunBinding } from './outcome-intake.js'
 import type {
   LearningSignal,
   LearningSignalId,
@@ -48,6 +51,26 @@ export interface RunSkillManifest {
   readonly contentDigest: Sha256Digest
   readonly resolvedProvider: string
   readonly parent: GovernedSkillPayload
+}
+
+export interface InitialRunSkillBindingInput {
+  readonly binding: RunBindingInputV3
+  readonly skill: SkillDefinition
+}
+
+export interface InitialRunSkillBindingReceipt {
+  readonly runId: TianwenRunId
+  readonly parentVersionId: SkillVersionId
+  readonly duplicate: boolean
+}
+
+export interface InitialRunSkillBindingRecordedEvent {
+  readonly schemaVersion: 'tianwen.initial-run-skill-binding.v1'
+  readonly type: 'initial-run-skill-binding-recorded'
+  readonly at: string
+  readonly binding: TianwenRunBindingV3
+  readonly manifest: RunSkillManifest
+  readonly inputDigest: Sha256Digest
 }
 
 export interface RunSkillUseV1 {
@@ -240,6 +263,30 @@ export function prepareRunSkillManifest(
     resolvedProvider,
     parent,
   }
+}
+
+export function prepareInitialRunSkillBinding(
+  input: InitialRunSkillBindingInput,
+): {
+  readonly binding: TianwenRunBindingV3
+  readonly manifest: RunSkillManifest
+} {
+  if (!isRecord(input)) {
+    throw new TypeError('Initial Run Skill binding input must be an object')
+  }
+  exactKeys(input, ['binding', 'skill'])
+  const binding = prepareRunBinding(input.binding)
+  if (binding.schemaVersion !== 'tianwen.run-binding.v3') {
+    throw new TypeError('Initial Run Skill binding requires a v3 Run binding')
+  }
+  const manifest = prepareRunSkillManifest({
+    runId: binding.runId,
+    skill: input.skill,
+  })
+  if (manifest.runId !== binding.runId) {
+    throw new TypeError('Initial Run Skill binding pair disagrees')
+  }
+  return { binding, manifest }
 }
 
 function parseUseCommon(value: Record<string, unknown>) {

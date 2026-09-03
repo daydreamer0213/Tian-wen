@@ -5,6 +5,7 @@ import type {
   Context,
   Session,
   SessionEvent,
+  SkillDefinition,
 } from '@tianwen/dsh-compat'
 import type {
   LearningIntakeReceipt,
@@ -156,6 +157,44 @@ export class TianwenLearningIntakeService extends Service {
     )
     if (sessionDigest(session.events) !== before) {
       throw new Error('Run binding changed the DSH Session')
+    }
+    return { ...receipt, sessionUnchanged: true }
+  }
+
+  bindInitialStepWithSkill(
+    session: Session,
+    input: RuntimeRunBindingInput,
+    skill: SkillDefinition,
+  ): RuntimeGovernedRunBindingReceipt {
+    const before = sessionDigest(session.events)
+    const turns = session.events.filter(event => event.type === 'turn/start')
+    if (
+      turns.length !== 1
+      || turns[0]?.type !== 'turn/start'
+      || turns[0].data.turn !== 1
+      || session.events.some(event => event.type === 'turn/end')
+    ) {
+      throw new RunSkillBindingError(
+        'run-binding-precondition-failed',
+        'Initial Run binding requires the first opened DSH Turn',
+      )
+    }
+    if (session.events.some(event =>
+      event.type === 'step/start' || event.type === 'request/header')) {
+      throw new RunSkillBindingError(
+        'run-binding-precondition-failed',
+        'Initial Run binding must happen before the first DSH step or model request',
+      )
+    }
+    const receipt = this.ctx.tianwenEvolution.recordInitialRunSkillBinding({
+      binding: runBindingInput(session, input),
+      skill,
+    })
+    if (sessionDigest(session.events) !== before) {
+      throw new RunSkillBindingError(
+        'run-binding-precondition-failed',
+        'Initial Run binding changed the DSH Session',
+      )
     }
     return { ...receipt, sessionUnchanged: true }
   }

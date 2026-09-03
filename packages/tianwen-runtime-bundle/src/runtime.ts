@@ -26,6 +26,7 @@ import {
   type LearningLoopControlledExecutor,
 } from './learning-loop-orchestrator.js'
 import { TianwenMessageFeedbackBridgeService } from './message-feedback-bridge.js'
+import { TianwenResearchSummaryAdmissionService } from './research-summary-admission.js'
 
 export { inject, name, SUPPORTED_DSH_VERSION }
 
@@ -295,6 +296,7 @@ export async function apply(
   config: TianwenRuntimeBundleConfig = {},
 ): Promise<void> {
   await applyCore(ctx, config.evolutionRoot === undefined ? {} : { evolutionRoot: config.evolutionRoot })
+  ctx.plugin(TianwenResearchSummaryAdmissionService)
   ctx.plugin(TianwenLearningConsentAgentService)
   ctx.plugin(TianwenMessageFeedbackBridgeService)
   ctx.plugin(TianwenLearningAnalysisChildService, config)

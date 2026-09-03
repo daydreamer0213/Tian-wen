@@ -148,6 +148,11 @@ import type {
 import {
   EvolutionLedger,
 } from '../../packages/tianwen-evolution/src/ledger.js'
+import {
+  RESEARCH_SUMMARY_BASE_SKILL,
+  RESEARCH_SUMMARY_SCOPE,
+  RESEARCH_SUMMARY_TOOL_NAME,
+} from '../../packages/tianwen-runtime/src/research-summary.js'
 
 const V1 = 'return { name: "v1", apply() {} }'
 const V2 = 'return { name: "v2", apply() {} }'
@@ -359,6 +364,62 @@ describe('Tianwen append-only evolution ledger', () => {
       expect(second.ctx.tianwenEvolution.listEvents()).toEqual(publicEventsBefore)
     } finally {
       await second.ctx.fiber.dispose()
+    }
+  })
+
+  it('recovers the complete initial binding pair after an uncertain ledger commit', async () => {
+    const root = ledgerRoot('initial-binding-commit-unknown')
+    const mounted = await mountEvolution(root)
+    const evolution = mounted.ctx.tianwenEvolution
+    const input = {
+      binding: {
+        goalRef: 'goal:research-summary-source',
+        taskRef: 'task:research-summary-source',
+        sessionId: 'session:initial-binding-commit-unknown',
+        scopeKey: RESEARCH_SUMMARY_SCOPE,
+        acceptanceContract: {
+          source: 'dsh-tool-result' as const,
+          toolName: RESEARCH_SUMMARY_TOOL_NAME,
+          notMetErrorCode: 'RESEARCH_SUMMARY_NOT_MET',
+          gapDisposition: 'reusable' as const,
+          problemCategory: 'research-summary-correction',
+          severity: 2 as const,
+          blocksGoal: false,
+        },
+        acceptanceSubjectDigest: RECEIPT_A,
+        sessionLifecycleFingerprint: RECEIPT_B,
+      },
+      skill: RESEARCH_SUMMARY_BASE_SKILL,
+    }
+
+    try {
+      syncAudit.enabled = true
+      syncAudit.failLedgerFsyncAfterReal = 1
+      const receipt = evolution.recordInitialRunSkillBinding(input)
+
+      expect(receipt).toMatchObject({
+        duplicate: false,
+        runId: expect.stringMatching(/^run:/u),
+        parentVersionId: expect.stringMatching(/^skill-version:/u),
+      })
+      expect(evolution.getRunBinding(receipt.runId)).toMatchObject({
+        sessionId: input.binding.sessionId,
+      })
+      expect(evolution.getRunSkillManifest(receipt.runId)).toMatchObject({
+        parentVersionId: receipt.parentVersionId,
+      })
+      expect(evolution.recordInitialRunSkillBinding(input))
+        .toMatchObject({ duplicate: true, runId: receipt.runId })
+
+      const replayed = new EvolutionLedger(root)
+      expect(replayed.getRunBinding(receipt.runId))
+        .toEqual(evolution.getRunBinding(receipt.runId))
+      expect(replayed.getRunSkillManifest(receipt.runId))
+        .toEqual(evolution.getRunSkillManifest(receipt.runId))
+      expect(replayed.listEvents().filter(event =>
+        event.type === 'initial-run-skill-binding-recorded')).toHaveLength(1)
+    } finally {
+      await mounted.ctx.fiber.dispose()
     }
   })
 
