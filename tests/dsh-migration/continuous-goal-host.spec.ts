@@ -12,6 +12,7 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import GoalService from '@deepseek-ai/dsh-goal'
 import { CallId, createToolResultMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import {
   Context as DshContext,
   defineTool,
@@ -41,6 +42,7 @@ import { FIRST_LIVENESS_MS } from '../../packages/tianwen-runtime-bundle/src/lon
 import {
   createPermissionAttemptHost,
   deliverContinuousGoalSettlement,
+  recoverNativeLongGoalPlannerParent,
   recordContinuousGoalTerminalAttempt,
   reportLongGoalProgress,
   runCurrentWebTask,
@@ -3374,6 +3376,123 @@ describe('continuous Goal Host', () => {
 
     expect(followupNativeTaskChild).toHaveBeenCalledOnce()
     expect(resumeColdGoal).not.toHaveBeenCalled()
+  })
+
+  it('rehydrates the exact native Planner parent without replanning before Task recovery', async () => {
+    const source = record({
+      planner: { ...record().planner, sessionId: 'cold-planner' },
+      control: { sessionId: 'live-main', autoProgress: 'running' },
+    })
+    const main = { session: { id: 'live-main' } } as unknown as Agent
+    const planner = {
+      id: 'cold-planner',
+      session: {
+        id: 'cold-planner',
+        header: {
+          cwd: source.workspaceRoot,
+          agentPreset: source.planner.agentPreset,
+          parentSession: 'live-main',
+        },
+      },
+    } as unknown as Agent
+    const live = new Map<string, Agent>([['live-main', main]])
+    const setups = new Map<string, AgentSetup>()
+    let recoveryTool: ToolDefinition | undefined
+    let recoveryExecution: Promise<unknown> | undefined
+    const followupNativeChild = vi.fn(async (_parent: Agent, childId: string) => {
+      live.set(childId, planner)
+      const setup = setups.get(childId)
+      if (setup === undefined) throw new Error('missing Planner recovery setup')
+      await setup({
+        agent: planner,
+        tools: { register: (tool: ToolDefinition) => { recoveryTool = tool } },
+      } as unknown as DshContext)
+      recoveryExecution = recoveryTool!.execute({}, { concludeTurn: vi.fn() } as never)
+      return 'planner-recovery-message'
+    })
+
+    const lease = await recoverNativeLongGoalPlannerParent(source, {
+      listSessions: vi.fn(async () => [{
+        sessionId: 'cold-planner',
+        cwd: source.workspaceRoot,
+        agentPreset: source.planner.agentPreset,
+      }]),
+      attachedAgent: sessionId => live.get(sessionId),
+      installNativeSetup: (sessionId, setup) => { setups.set(sessionId, setup) },
+      followupNativeChild,
+    })
+
+    expect(lease?.parent).toBe(planner)
+    expect(recoveryTool?.name).toBe('recover_long_goal_task')
+    lease?.release()
+    await recoveryExecution
+
+    expect(setups.get('cold-planner')).toBeTypeOf('function')
+    expect(followupNativeChild).toHaveBeenCalledWith(
+      main,
+      'cold-planner',
+      [expect.objectContaining({
+        type: 'text',
+        text: expect.stringContaining('Do not replan, start another Task'),
+      })],
+      expect.any(AbortSignal),
+    )
+  })
+
+  it('uses recovered native Planner ownership to cold-continue the same Task', async () => {
+    const execution = { sessionId: 'restart-task', goalId: 'restart-goal' }
+    const source = record({
+      planner: { ...record().planner, sessionId: 'restart-planner' },
+      tasks: [{ id: TASK_1, objective: 'Continue after Host restart', execution, resolution: null }],
+    })
+    const projected = status(source, ['active'], TASK_1)
+    const planner = { session: { id: 'restart-planner' } } as unknown as Agent
+    const task = agent(execution.sessionId, execution.goalId)
+    let taskLive = false
+    const releaseRecovery = vi.fn()
+    const recoverNativeTaskParent = vi.fn(async () => ({ parent: planner, release: releaseRecovery }))
+    const followupNativeTaskChild = vi.fn(async () => {
+      taskLive = true
+      return 'task-recovery-message'
+    })
+    const dependencies = {
+      readLongGoal: vi.fn(() => source),
+      readLongGoalStatus: vi.fn(async () => projected),
+      bindLongGoalTask: vi.fn(),
+      bindGoalFirstLongGoalTask: vi.fn(),
+      listSessions: vi.fn(async () => [{
+        sessionId: execution.sessionId,
+        cwd: source.workspaceRoot,
+        agentPreset: source.planner.agentPreset,
+      }]),
+      createSession: vi.fn(),
+      attachedAgent: (sessionId: string) => taskLive && sessionId === execution.sessionId
+        ? task
+        : undefined,
+      recoverNativeTaskParent,
+      createGoal: vi.fn(),
+      readGoalRef: vi.fn(async () => ({ id: execution.goalId, revision: 1, phase: 'active' as const })),
+      resumeColdGoal: vi.fn(),
+      followupNativeTaskChild,
+      flushSession: vi.fn(async () => undefined),
+    }
+
+    await expect(runCurrentWebTask({
+      roots: { stateRoot: 'D:/state', sessionsRoot: 'D:/sessions', evolutionRoot: 'D:/evolution' },
+      longGoalId: source.id,
+      expectedRevision: source.revision,
+    }, dependencies as never)).resolves.toMatchObject({
+      action: 'continued', sessionId: execution.sessionId,
+    })
+
+    expect(recoverNativeTaskParent).toHaveBeenCalledOnce()
+    expect(releaseRecovery).toHaveBeenCalledOnce()
+    expect(followupNativeTaskChild).toHaveBeenCalledWith(
+      planner,
+      execution.sessionId,
+      expect.any(Array),
+      expect.any(AbortSignal),
+    )
   })
 
   it('keeps a disarmed v3 Task retryable until its exact Planner parent is live', async () => {
