@@ -371,51 +371,13 @@ git commit -m "refactor: make learning audit read only"
 
 ### Task 7: Prove the first complete product learning story
 
-**Files:**
-- Create: `tests/dsh-migration/explicit-correction-product.e2e.spec.ts`
-- Modify: `tests/dsh-migration/native-feedback-profile.e2e.spec.ts`
-- Modify: `tests/dsh-migration/runtime-governance.spec.ts`
-- Modify: `tests/dsh-migration/runtime-session-evidence.spec.ts`
+The old test-only Task 7 description is superseded. Implement the complete production wiring and proof in:
 
-- [ ] In the real web composition, run the supported Skill in a main Session, record a DSH negative feedback note with existing consent, and never navigate to a child.
+`docs/superpowers/plans/2026-09-03-tianwen-production-learning-vertical.md`
 
-- [ ] Assert the complete durable chain:
-
-```ts
-expect(chain).toMatchObject({
-  intake: 'ticket-created',
-  analysis: 'candidate-ready',
-  attribution: 1,
-  cases: 1,
-  lessons: 1,
-  candidates: 1,
-  evaluation: 'pass',
-  shadow: 'pass',
-  promotion: 'verified',
-})
-```
-
-- [ ] Prove the current Run kept its original Skill version and a newly created future Run resolved the promoted pointer.
-
-- [ ] Inject a governed regression, prove automatic Shadow/transition recovery rolls back to the parent pointer, and report that rollback in the main Session.
-
-- [ ] Update then retract the feedback. Prove an unpromoted Candidate invalidates, a solely-supported promoted Candidate rolls back, and independent active support prevents mechanical Ticket deletion.
-
-- [ ] Prove unsupported scope ends at `protocol-unavailable` with no Candidate activation and a truthful main-chat result.
-
-- [ ] Run rollout-stage gate 3.
-
-```powershell
-pnpm vitest run tests/dsh-probe/learning-analysis.spec.ts tests/dsh-migration/learning-analysis-child.spec.ts tests/dsh-migration/learning-candidate.spec.ts tests/dsh-migration/explicit-correction-protocol.spec.ts tests/dsh-migration/learning-loop-orchestrator.spec.ts tests/dsh-migration/explicit-correction-product.e2e.spec.ts tests/dsh-migration/native-feedback-profile.e2e.spec.ts tests/dsh-migration/runtime-governance.spec.ts tests/dsh-migration/runtime-session-evidence.spec.ts
-pnpm run typecheck
-```
-
-- [ ] Commit.
-
-```powershell
-git add tests/dsh-migration/explicit-correction-product.e2e.spec.ts tests/dsh-migration/native-feedback-profile.e2e.spec.ts tests/dsh-migration/runtime-governance.spec.ts tests/dsh-migration/runtime-session-evidence.spec.ts
-git commit -m "test: prove explicit correction product closure"
-```
+- [ ] Complete Tasks 7.1 through 7.7 in that plan in order.
+- [ ] Do not treat the earlier controlled executor integration test as product closure.
+- [ ] Do not enter Stage 4 until the replacement plan's Stage 3 Task 7 completion gate and `pnpm run check` both pass.
 
 ## Stage 3 Completion Gate
 

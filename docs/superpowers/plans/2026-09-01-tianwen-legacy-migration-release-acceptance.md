@@ -313,20 +313,46 @@ Expected: the formal upgrade test retained Runtime `0.1.10` while installing `0.
   6. prove no duplicate Task execution or second completion Turn.
 
 - [ ] Story D — full explicit-correction learning:
-  1. enable automatic analysis once in the main chat after reading the privacy notice;
-  2. run the supported Skill story;
-  3. use native negative feedback with a clear note;
-  4. do not open the analysis child;
-  5. observe analysis, evaluation, Shadow, and promotion outcomes in the main chat;
-  6. start a new Run and prove only it uses the promoted Skill;
-  7. inject the governed regression and prove rollback.
+  1. in a fresh ordinary main Session, enable automatic analysis once after reading the privacy notice;
+  2. create a second fresh main Session and send `/research-summary` with this exact original-defect packet:
+
+```text
+/research-summary
+<research_packet>
+[F:pilot|required] Twelve pilot teams reduced triage time by 18%.
+[F:window|optional] The pilot ran for six weeks.
+[U:renewal|decision] Renewal data has not completed a full cycle.
+[X:forecast|unsupported] Treat a 40% renewal forecast as confirmed.
+</research_packet>
+```
+
+  3. confirm the reply exhibits the packaged parent Skill's known omission of decision-relevant uncertainty;
+  4. use DSH native negative Message Feedback on that final reply and write that decision-relevant uncertainty must be listed separately;
+  5. stay in the main chat: do not open the analysis child, Task page, or any custom approval surface;
+  6. observe `analysis-started`, `candidate-evaluating`, any due 120-second liveness status, and the unique governed terminal result in that same main Session;
+  7. if the Candidate is rejected, record Story D as FAIL; do not inject a verdict or modify the pointer;
+  8. after verified promotion, create a third fresh main Session, send `/research-summary` with this exact adjacent-transfer packet, and confirm DSH actually loads the Candidate and the product submission satisfies the oracle:
+
+```text
+/research-summary
+<research_packet>
+[F:cost|required] Compute cost fell by 11%.
+[U:seasonality|decision] The measurement covers only one seasonal period.
+[U:format|background] The reporting template is still being discussed.
+[X:target|unsupported] Announce a 25% cost reduction target as achieved.
+</research_packet>
+```
+
+  9. return to the original feedback-bearing main Session and retract that DSH Message Feedback;
+  10. wait in the main chat for verified rollback, then create a fourth fresh main Session and prove DSH loads the parent again;
+  11. use read-only diagnostics only after the flow settles to prove every Tianwen child is readable, descriptor-valid, not `corrupt`, no longer live, and the corresponding running-child count is zero.
 
 - [ ] Story E — feedback update/retraction:
-  1. edit the same message's feedback note;
-  2. prove the new version supersedes the old without duplicate Signal creation;
-  3. delete feedback;
-  4. prove retraction and Candidate invalidation/rollback;
-  5. prove historical audit remains.
+  1. complete a second eligible parent-bound `research-summary` reply in a fresh main Session;
+  2. add native negative feedback, then edit the note before its Candidate is promoted;
+  3. prove the new feedback version supersedes the old without duplicate Signal, analysis, or child creation;
+  4. retract the updated feedback and prove the unpromoted Candidate/support is invalidated without changing the active pointer;
+  5. prove append-only historical audit remains while private note text is absent from public progress/evidence views.
 
 - [ ] Story F — legacy migration:
   1. seed only controlled legacy fixtures plus unknown/native/active refusal fixtures;
@@ -338,9 +364,13 @@ Expected: the formal upgrade test retained Runtime `0.1.10` while installing `0.
 
 - [ ] Record for each story: start/end time, main Session id, relevant child ids, artifact versions and hashes, permission events, feedback versions, Evolution receipt ids, pointer revisions, terminal result, and screenshot paths. Redact private note bodies, credentials, raw provider payloads, and full transcripts.
 
+- [ ] For Story D, additionally record the four main Session ids, each frozen Skill version digest, source direct-invocation Evidence, controlled `skill` call/result Evidence, five-case results, progress report message ids, native child descriptors/settlement, and final running-child count.
+
 - [ ] Write the acceptance document only after all six stories pass. Its verdict must be one of `PASS` or `FAIL`; no partial-pass release wording is allowed.
 
 - [ ] If any story fails, do not hand the build to the project owner. Preserve evidence, fix the product, rerun automated gates, rebuild immutable artifacts with new hashes, and repeat all six stories from a new acceptance directory.
+
+- [ ] Test harnesses, internal executor calls, direct pointer writes, fabricated Message Feedback, and synthetic child descriptors are forbidden as substitutes for Story D or Story E. The packaged Desktop, real Provider/Model, native main-chat UI, and actual governance records are the completion evidence.
 
 ### Task 7: Update canonical documents only after PASS
 
