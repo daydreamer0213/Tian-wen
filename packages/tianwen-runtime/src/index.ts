@@ -9,6 +9,28 @@ import { TianwenLearningIntakeService } from './learning-intake.js'
 import { TianwenSkillEvaluationService } from './skill-evaluation.js'
 
 export {
+  RESEARCH_PACKET_MAX_BYTES,
+  RESEARCH_PACKET_MAX_ITEMS,
+  RESEARCH_SUMMARY_BASE_SKILL,
+  RESEARCH_SUMMARY_PROTOCOL_VERSION,
+  RESEARCH_SUMMARY_SCOPE,
+  RESEARCH_SUMMARY_SKILL_NAME,
+  RESEARCH_SUMMARY_TOOL_NAME,
+  createResearchSummaryTool,
+  normalizeResearchSummarySubmission,
+  parseResearchPacket,
+} from './research-summary.js'
+export type {
+  ResearchPacket,
+  ResearchPacketItem,
+  ResearchSummaryOracle,
+  ResearchSummarySubmission,
+  ResearchSummaryToolMode,
+  ResearchSummaryToolResult,
+  ResearchSummaryVerdict,
+} from './research-summary.js'
+
+export {
   ControlledSkillActivationPreflightError,
 } from './controlled-skill-activation.js'
 export type {
