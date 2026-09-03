@@ -21,9 +21,9 @@ export const LEARNING_CONSENT_NOTICE_DELIVERY_ID =
   'tianwen-learning-consent-delivery:tianwen-auto-analysis.v1'
 export const LEARNING_CONSENT_NOTICE_TEXT = [
   'Native feedback normally does not enter the model.',
-  'Enabling Tianwen sends the feedback note and referenced reply to the configured model for internal analysis.',
-  'Analysis cannot edit the current project, install a Skill, or expand permission.',
-  'Only evaluated changes may affect future Runs.',
+  'Enabling Tianwen sends the feedback note and a bounded text snapshot of its source Session (including the referenced reply and retained conversation context) to the configured model for internal analysis.',
+  'The analysis child itself is read-only: it cannot edit the current project, directly install a Skill, or expand permission.',
+  'After a proposed Skill change passes evaluation, Tianwen can activate the updated Skill for future Runs; already-started Runs keep their frozen Skill version. Read-only analysis does not mean Skill updates are disabled.',
   'You can disable automatic analysis later.',
 ].join('\n')
 
