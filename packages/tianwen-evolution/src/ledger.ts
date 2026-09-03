@@ -47,6 +47,7 @@ import {
   assertLearningAnalysisEvidenceClosure,
   learningAnalysisEvidenceClosure,
   learningAnalysisId,
+  learningAnalysisPhase,
   learningAnalysisSubmissionPhase,
   parseLearningAnalysisSubmission,
   prepareLearningAnalysisRequest,
@@ -61,6 +62,10 @@ import type {
   LearningAnalysisInvalidatedEvent,
   LearningAnalysisLedgerEvent,
   LearningAnalysisProtocolUnavailableEvent,
+  LearningAnalysisProgressBinding,
+  LearningAnalysisProgressCursor,
+  LearningAnalysisProgressDeliveredEvent,
+  LearningAnalysisProgressIntentRecordedEvent,
   LearningAnalysisReportBinding,
   LearningAnalysisReportDeliveredEvent,
   LearningAnalysisReportIntentRecordedEvent,
@@ -1306,6 +1311,114 @@ function parseLearningAnalysisTerminalReportDeliveredEvent(value: Record<string,
   return { schemaVersion: 'tianwen.learning-analysis-terminal-report-delivered.v1', type: 'learning-analysis-terminal-report-delivered', at, report: { ...report, reportMessageId: report.reportMessageId } }
 }
 
+function parseLearningAnalysisProgress(
+  value: unknown,
+  delivered: boolean,
+): LearningAnalysisProgressBinding & { readonly reportMessageId?: string } {
+  if (!isRecord(value)) {
+    throw new LedgerIntegrityError('learning analysis progress must be an object')
+  }
+  exactKeys(
+    value,
+    ['analysisId', 'kind', 'phase', 'elapsedBucket', 'reportDigest'],
+    delivered ? ['reportMessageId'] : [],
+  )
+  if (
+    value.kind !== 'analysis-started'
+    && value.kind !== 'candidate-evaluating'
+    && value.kind !== 'liveness'
+  ) throw new LedgerIntegrityError('learning analysis progress kind is invalid')
+  const elapsedBucket = Number(value.elapsedBucket)
+  if (!Number.isSafeInteger(elapsedBucket) || elapsedBucket < 0) {
+    throw new LedgerIntegrityError('learning analysis progress bucket is invalid')
+  }
+  if (
+    (value.kind === 'liveness' && elapsedBucket < 1)
+    || (value.kind !== 'liveness' && elapsedBucket !== 0)
+  ) throw new LedgerIntegrityError('learning analysis progress bucket disagrees with kind')
+  const reportMessageId = delivered
+    ? requireString(value.reportMessageId, 'reportMessageId')
+    : undefined
+  if (reportMessageId !== undefined && (
+    reportMessageId.length > 256 || /[\u0000-\u001f\u007f]/u.test(reportMessageId)
+  )) throw new LedgerIntegrityError('learning analysis progress message id is invalid')
+  return {
+    analysisId: learningAnalysisId(value.analysisId),
+    kind: value.kind,
+    phase: learningAnalysisPhase(value.phase),
+    elapsedBucket,
+    reportDigest: requireDigest(value.reportDigest),
+    ...(reportMessageId === undefined ? {} : { reportMessageId }),
+  }
+}
+
+function parseLearningAnalysisProgressIntentEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningAnalysisProgressIntentRecordedEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'progress'])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-progress-intent.v1') {
+    throw new LedgerIntegrityError('invalid learning analysis progress intent schema')
+  }
+  return {
+    schemaVersion: 'tianwen.learning-analysis-progress-intent.v1',
+    type: 'learning-analysis-progress-intent-recorded',
+    at,
+    progress: parseLearningAnalysisProgress(value.progress, false),
+  }
+}
+
+function parseLearningAnalysisProgressDeliveredEvent(
+  value: Record<string, unknown>,
+  at: string,
+): LearningAnalysisProgressDeliveredEvent {
+  exactKeys(value, ['schemaVersion', 'type', 'at', 'progress'])
+  if (value.schemaVersion !== 'tianwen.learning-analysis-progress-delivered.v1') {
+    throw new LedgerIntegrityError('invalid learning analysis progress delivery schema')
+  }
+  const progress = parseLearningAnalysisProgress(value.progress, true)
+  if (progress.reportMessageId === undefined) {
+    throw new LedgerIntegrityError('learning analysis progress message is missing')
+  }
+  return {
+    schemaVersion: 'tianwen.learning-analysis-progress-delivered.v1',
+    type: 'learning-analysis-progress-delivered',
+    at,
+    progress: { ...progress, reportMessageId: progress.reportMessageId },
+  }
+}
+
+function sameLearningAnalysisProgressBinding(
+  left: LearningAnalysisProgressBinding,
+  right: LearningAnalysisProgressBinding,
+): boolean {
+  return left.analysisId === right.analysisId
+    && left.kind === right.kind
+    && left.phase === right.phase
+    && left.elapsedBucket === right.elapsedBucket
+    && left.reportDigest === right.reportDigest
+}
+
+function terminalLearningAnalysisPhase(phase: LearningAnalysisStatus['phase']): boolean {
+  return phase === 'no-case'
+    || phase === 'insufficient-evidence'
+    || phase === 'protocol-unavailable'
+    || phase === 'candidate-rejected'
+    || phase === 'promoted'
+    || phase === 'rolled-back'
+    || phase === 'transition-recovered'
+    || phase === 'invalidated'
+}
+
+function replaceLearningAnalysisProgressCursor(
+  cursors: readonly LearningAnalysisProgressCursor[] | undefined,
+  cursor: LearningAnalysisProgressCursor,
+): readonly LearningAnalysisProgressCursor[] {
+  const withoutKind = (cursors ?? []).filter(item => item.kind !== cursor.kind)
+  return [...withoutKind, cursor].toSorted((left, right) =>
+    left.kind.localeCompare(right.kind))
+}
+
 function parseLearningAnalysisConsent(
   value: unknown,
 ): LearningAnalysisConsent {
@@ -1656,6 +1769,12 @@ function parseEvent(value: unknown): LedgerEvent {
   }
   if (type === 'learning-analysis-terminal-report-intent-recorded') return parseLearningAnalysisTerminalReportIntentEvent(value, at)
   if (type === 'learning-analysis-terminal-report-delivered') return parseLearningAnalysisTerminalReportDeliveredEvent(value, at)
+  if (type === 'learning-analysis-progress-intent-recorded') {
+    return parseLearningAnalysisProgressIntentEvent(value, at)
+  }
+  if (type === 'learning-analysis-progress-delivered') {
+    return parseLearningAnalysisProgressDeliveredEvent(value, at)
+  }
   if (type === 'learning-analysis-consent-recorded') {
     return parseLearningAnalysisConsentEvent(value, at)
   }
@@ -4240,6 +4359,8 @@ export class EvolutionLedger {
         submittedAt: _submittedAt,
         submissionDigest: _submissionDigest,
         submission: _submission,
+        progressCursors: _progressCursors,
+        progressUpdatedAt: _progressUpdatedAt,
         ...actual
       } = existing
       if (canonicalJson(actual) !== canonicalJson(expected)) {
@@ -5465,6 +5586,66 @@ export class EvolutionLedger {
     return { ...clone(this.#learningAnalyses.get(status.analysisId)!), duplicate: false }
   }
 
+  recordLearningAnalysisProgressIntent(
+    input: LearningAnalysisProgressBinding,
+  ): LearningAnalysisReceipt {
+    const progress = parseLearningAnalysisProgress(input, false)
+    const status = this.#learningAnalyses.get(progress.analysisId)
+    const existing = status?.progressCursors?.find(item => item.kind === progress.kind)
+    if (existing !== undefined && sameLearningAnalysisProgressBinding(existing, progress)) {
+      return { ...clone(status!), duplicate: true }
+    }
+    if (
+      status === undefined
+      || status.childStartedAt === undefined
+      || terminalLearningAnalysisPhase(status.phase)
+      || status.phase !== progress.phase
+      || existing?.state === 'pending'
+      || (progress.kind === 'analysis-started' && progress.phase !== 'running')
+      || (progress.kind === 'candidate-evaluating' && progress.phase !== 'candidate-ready')
+      || (progress.kind !== 'liveness' && existing !== undefined)
+      || (progress.kind === 'liveness' && existing !== undefined
+        && progress.elapsedBucket < existing.elapsedBucket)
+    ) throw new LedgerIntegrityError('learning analysis progress intent disagrees with active phase')
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-progress-intent.v1',
+      type: 'learning-analysis-progress-intent-recorded',
+      at: this.#now(),
+      progress,
+    })
+    return { ...clone(this.#learningAnalyses.get(progress.analysisId)!), duplicate: false }
+  }
+
+  recordLearningAnalysisProgressDelivered(
+    input: LearningAnalysisProgressBinding & { readonly reportMessageId: string },
+  ): LearningAnalysisReceipt {
+    const progress = parseLearningAnalysisProgress(input, true)
+    const status = this.#learningAnalyses.get(progress.analysisId)
+    const existing = status?.progressCursors?.find(item => item.kind === progress.kind)
+    if (existing?.state === 'delivered') {
+      if (
+        sameLearningAnalysisProgressBinding(existing, progress)
+        && existing.reportMessageId === progress.reportMessageId
+      ) return { ...clone(status!), duplicate: true }
+      throw new LedgerIntegrityError('learning analysis progress delivery changed')
+    }
+    if (status !== undefined && terminalLearningAnalysisPhase(status.phase)) {
+      throw new LedgerIntegrityError('learning analysis progress delivery lost terminal race')
+    }
+    if (
+      status === undefined
+      || existing?.state !== 'pending'
+      || !sameLearningAnalysisProgressBinding(existing, progress)
+    ) throw new LedgerIntegrityError('learning analysis progress delivery disagrees with intent')
+    this.#accept({
+      schemaVersion: 'tianwen.learning-analysis-progress-delivered.v1',
+      type: 'learning-analysis-progress-delivered',
+      at: this.#now(),
+      progress: { ...progress, reportMessageId: progress.reportMessageId! },
+    })
+    return { ...clone(this.#learningAnalyses.get(progress.analysisId)!), duplicate: false }
+  }
+
   #assertLearningAnalysisGovernedOutcome(
     status: LearningAnalysisStatus,
     outcome: LearningAnalysisGovernedOutcome,
@@ -6024,6 +6205,8 @@ export class EvolutionLedger {
         || parsed.type === 'learning-analysis-resumed'
         || parsed.type === 'learning-analysis-report-intent-recorded'
         || parsed.type === 'learning-analysis-report-delivered'
+        || parsed.type === 'learning-analysis-progress-intent-recorded'
+        || parsed.type === 'learning-analysis-progress-delivered'
       ) {
         const recovery = this.#recoverLearningAppend(line, appendOffset)
         if (recovery === 'committed') {
@@ -7301,6 +7484,42 @@ export class EvolutionLedger {
       this.#assertLearningAnalysisTimestamp(status!, event.at)
       return
     }
+    if (event.type === 'learning-analysis-progress-intent-recorded') {
+      const status = this.#learningAnalyses.get(event.progress.analysisId)
+      const existing = status?.progressCursors?.find(item =>
+        item.kind === event.progress.kind)
+      if (
+        status === undefined
+        || status.childStartedAt === undefined
+        || terminalLearningAnalysisPhase(status.phase)
+        || status.phase !== event.progress.phase
+        || existing?.state === 'pending'
+        || (existing !== undefined
+          && sameLearningAnalysisProgressBinding(existing, event.progress))
+        || (event.progress.kind === 'analysis-started'
+          && event.progress.phase !== 'running')
+        || (event.progress.kind === 'candidate-evaluating'
+          && event.progress.phase !== 'candidate-ready')
+        || (event.progress.kind !== 'liveness' && existing !== undefined)
+        || (event.progress.kind === 'liveness' && existing !== undefined
+          && event.progress.elapsedBucket < existing.elapsedBucket)
+      ) throw new LedgerIntegrityError('learning analysis progress intent disagrees with history')
+      this.#assertLearningAnalysisTimestamp(status, event.at)
+      return
+    }
+    if (event.type === 'learning-analysis-progress-delivered') {
+      const status = this.#learningAnalyses.get(event.progress.analysisId)
+      const existing = status?.progressCursors?.find(item =>
+        item.kind === event.progress.kind)
+      if (
+        status === undefined
+        || terminalLearningAnalysisPhase(status.phase)
+        || existing?.state !== 'pending'
+        || !sameLearningAnalysisProgressBinding(existing, event.progress)
+      ) throw new LedgerIntegrityError('learning analysis progress delivery disagrees with history')
+      this.#assertLearningAnalysisTimestamp(status, event.at)
+      return
+    }
     if (event.type === 'learning-analysis-consent-recorded') {
       if (this.#learningAnalysisConsents.has(event.consent.revision)) {
         throw new LedgerIntegrityError(
@@ -7892,6 +8111,35 @@ export class EvolutionLedger {
       this.#learningAnalyses.set(event.report.analysisId, {
         ...status,
         terminalReportDelivery: { ...delivery, state: 'delivered', deliveredAt: event.at, reportMessageId: event.report.reportMessageId },
+        updatedAt: event.at,
+      })
+      return
+    }
+    if (event.type === 'learning-analysis-progress-intent-recorded') {
+      const status = this.#learningAnalyses.get(event.progress.analysisId)!
+      this.#learningAnalyses.set(event.progress.analysisId, {
+        ...status,
+        progressCursors: replaceLearningAnalysisProgressCursor(
+          status.progressCursors,
+          { ...event.progress, state: 'pending' },
+        ),
+        updatedAt: event.at,
+      })
+      return
+    }
+    if (event.type === 'learning-analysis-progress-delivered') {
+      const status = this.#learningAnalyses.get(event.progress.analysisId)!
+      this.#learningAnalyses.set(event.progress.analysisId, {
+        ...status,
+        progressCursors: replaceLearningAnalysisProgressCursor(
+          status.progressCursors,
+          {
+            ...event.progress,
+            state: 'delivered',
+            reportMessageId: event.progress.reportMessageId,
+          },
+        ),
+        progressUpdatedAt: event.at,
         updatedAt: event.at,
       })
       return

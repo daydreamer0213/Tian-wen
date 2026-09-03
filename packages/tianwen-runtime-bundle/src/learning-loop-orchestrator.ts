@@ -1,7 +1,12 @@
 /** The durable Evolution record is the queue; this service owns no jobs. */
 import { Service, SessionId } from '@tianwen/dsh-compat'
 import type { Context } from '@tianwen/dsh-compat'
-import { sha256, type LearningAnalysisRetryPhase } from '@tianwen/evolution'
+import {
+  sha256,
+  type LearningAnalysisProgressCursor,
+  type LearningAnalysisProgressKind,
+  type LearningAnalysisRetryPhase,
+} from '@tianwen/evolution'
 
 import { resolveExplicitCorrectionProtocol } from './explicit-correction-protocol.js'
 import { materializeLearningCandidate } from './learning-candidate.js'
@@ -31,6 +36,10 @@ export async function continueLearningLoop(input: LearningLoopAdmission): Promis
 export interface LearningLoopPhaseStatus {
   readonly analysisId: string
   readonly phase: string
+  readonly requestedAt?: string
+  readonly childStartedAt?: string
+  readonly progressUpdatedAt?: string
+  readonly progressCursors?: readonly LearningAnalysisProgressCursor[]
   readonly resumePhase?: string
   readonly submission?: { readonly verdict: string }
   readonly ticketId?: string
@@ -95,10 +104,25 @@ export interface LearningLoopControlledExecutor {
   promote(context: LearningLoopExecutionContext): unknown | Promise<unknown>
   recoverPromotion?(context: LearningLoopExecutionContext): boolean | Promise<boolean>
   rollback(context: LearningLoopExecutionContext): unknown | Promise<unknown>
+  /** Delivers a bounded, non-terminal update through the exact native child. */
+  progress?(context: LearningLoopExecutionContext, input: {
+    readonly kind: LearningAnalysisProgressKind
+    readonly phase: string
+    readonly elapsedBucket: number
+    readonly reportDigest?: string
+  }): unknown | Promise<unknown>
   /** Sends a concise, deduplicated result to the exact main parent. */
   report(context: LearningLoopExecutionContext): unknown | Promise<unknown>
 }
-export interface TianwenLearningLoopConfig { readonly executor?: LearningLoopControlledExecutor }
+export interface LearningLoopTimer {
+  readonly now: () => number
+  readonly setTimeout: (callback: () => void, delayMs: number) => unknown
+  readonly clearTimeout: (handle: unknown) => void
+}
+export interface TianwenLearningLoopConfig {
+  readonly executor?: LearningLoopControlledExecutor
+  readonly timer?: LearningLoopTimer
+}
 
 /**
  * Explicit fixture/protocol adapter.  All environment-specific authority is
@@ -123,6 +147,16 @@ export interface ExplicitCorrectionLearningLoopExecutorConfig {
   readonly findTerminalReport?: (input: {
     readonly context: LearningLoopExecutionContext
     readonly text: string
+  }) => string | undefined | Promise<string | undefined>
+  readonly deliverProgressReport?: (input: {
+    readonly context: LearningLoopExecutionContext
+    readonly text: string
+    readonly progress: LearningAnalysisProgressCursor
+  }) => string | Promise<string>
+  readonly findProgressReport?: (input: {
+    readonly context: LearningLoopExecutionContext
+    readonly text: string
+    readonly progress: LearningAnalysisProgressCursor
   }) => string | undefined | Promise<string | undefined>
 }
 
@@ -361,6 +395,41 @@ export function createExplicitCorrectionLearningLoopExecutor(
         analysisId: context.status.analysisId as never, transitionId: transition.transition.transitionId as never,
       })
     },
+    async progress(context, input) {
+      if (config.deliverProgressReport === undefined) return
+      const progressStatus = { ...context.status, phase: input.phase }
+      const { text, digest: reportDigest } = learningLoopProgressReport(
+        progressStatus,
+        input.kind,
+        input.elapsedBucket,
+      )
+      if (input.reportDigest !== undefined && input.reportDigest !== reportDigest) {
+        throw new Error('learning progress durable digest changed')
+      }
+      const binding = {
+        analysisId: context.status.analysisId as never,
+        kind: input.kind,
+        phase: input.phase as never,
+        elapsedBucket: input.elapsedBucket,
+        reportDigest,
+      }
+      const recorded = context.ctx.tianwenEvolution
+        .recordLearningAnalysisProgressIntent(binding)
+      const cursor = recorded.progressCursors?.find(item => item.kind === input.kind)
+      if (cursor === undefined || cursor.reportDigest !== reportDigest) {
+        throw new Error('learning progress durable cursor is unavailable')
+      }
+      if (cursor.state === 'delivered') return
+      const reportMessageId = await config.findProgressReport?.({
+        context,
+        text,
+        progress: cursor,
+      }) ?? await config.deliverProgressReport({ context, text, progress: cursor })
+      context.ctx.tianwenEvolution.recordLearningAnalysisProgressDelivered({
+        ...binding,
+        reportMessageId,
+      })
+    },
     async report(context) {
       const { text, digest: reportDigest } = learningLoopTerminalReport(context.status)
       const binding = {
@@ -410,6 +479,126 @@ export function learningLoopTerminalReport(status: LearningLoopPhaseStatus): {
   }
 }
 
+function learningProgressStage(status: LearningLoopPhaseStatus): {
+  readonly completed: number
+  readonly activity: string
+} {
+  const phase = status.phase === 'failed' ? status.resumePhase : status.phase
+  if (phase === 'shadow-ready') {
+    return { completed: 3, activity: '验证启用结果' }
+  }
+  if (phase === 'candidate-ready') {
+    return { completed: 1, activity: '运行受控验证' }
+  }
+  return { completed: 0, activity: '分析反馈与证据' }
+}
+
+export function learningLoopProgressReport(
+  status: LearningLoopPhaseStatus,
+  kind: LearningAnalysisProgressKind,
+  elapsedBucket: number,
+): { readonly text: string, readonly digest: ReturnType<typeof sha256> } {
+  const text = kind === 'liveness' && status.phase === 'failed'
+    ? status.resumePhase === 'promoted'
+      ? 'Tianwen 学习暂时中断：回滚验证尚未完成，当前启用状态未继续改变；将在下一次可用时自动重试。'
+      : 'Tianwen 学习暂时中断：受控环境暂不可用，候选改进尚未启用；将在下一次可用时自动重试。'
+    : kind === 'analysis-started'
+    ? 'Tianwen 已开始分析这条反馈，后续进度会继续在当前对话更新。'
+    : kind === 'candidate-evaluating'
+      ? 'Tianwen 已形成候选改进，正在进行受控验证。'
+      : (() => {
+          const stage = learningProgressStage(status)
+          return `Tianwen 学习仍在进行：已完成 ${stage.completed}/4 个阶段，正在${stage.activity}。`
+        })()
+  return {
+    text,
+    digest: sha256({
+      kind: 'learning-progress',
+      analysisId: status.analysisId,
+      progressKind: kind,
+      phase: status.phase,
+      elapsedBucket,
+      text,
+    }),
+  }
+}
+
+const LEARNING_LIVENESS_INTERVAL_MS = 120_000
+
+function progressActive(status: LearningLoopPhaseStatus): boolean {
+  return status.childStartedAt !== undefined && (
+    status.phase === 'running'
+    || status.phase === 'candidate-ready'
+    || status.phase === 'shadow-ready'
+    || status.phase === 'failed'
+  )
+}
+
+export function nextLearningLoopProgress(
+  status: LearningLoopPhaseStatus,
+  now: number,
+): {
+  readonly kind: LearningAnalysisProgressKind
+  readonly phase: string
+  readonly elapsedBucket: number
+  readonly reportDigest?: string
+} | undefined {
+  if (!progressActive(status)) return undefined
+  const pending = status.progressCursors?.find(item => item.state === 'pending')
+  if (pending !== undefined) {
+    return {
+      kind: pending.kind,
+      phase: pending.phase,
+      elapsedBucket: pending.elapsedBucket,
+      reportDigest: pending.reportDigest,
+    }
+  }
+  const requestedAt = Date.parse(status.requestedAt ?? '')
+  if (status.phase === 'failed') {
+    const elapsedBucket = Number.isFinite(requestedAt)
+      ? Math.max(1, Math.floor((now - requestedAt) / LEARNING_LIVENESS_INTERVAL_MS))
+      : 1
+    const existing = status.progressCursors?.find(item => item.kind === 'liveness')
+    if (existing?.phase !== 'failed' || existing.elapsedBucket !== elapsedBucket) {
+      return { kind: 'liveness', phase: status.phase, elapsedBucket }
+    }
+  }
+  if (status.phase === 'running'
+    && !status.progressCursors?.some(item => item.kind === 'analysis-started')) {
+    return { kind: 'analysis-started', phase: status.phase, elapsedBucket: 0 }
+  }
+  if (status.phase === 'candidate-ready'
+    && !status.progressCursors?.some(item => item.kind === 'candidate-evaluating')) {
+    return { kind: 'candidate-evaluating', phase: status.phase, elapsedBucket: 0 }
+  }
+  const lastVisibleAt = Date.parse(
+    status.progressUpdatedAt ?? status.childStartedAt ?? status.requestedAt ?? '',
+  )
+  if (!Number.isFinite(requestedAt) || !Number.isFinite(lastVisibleAt)
+    || now - lastVisibleAt < LEARNING_LIVENESS_INTERVAL_MS) return undefined
+  const elapsedBucket = Math.floor((now - requestedAt) / LEARNING_LIVENESS_INTERVAL_MS)
+  if (elapsedBucket < 1) return undefined
+  const existing = status.progressCursors?.find(item => item.kind === 'liveness')
+  if (existing?.phase === status.phase && existing.elapsedBucket === elapsedBucket) {
+    return undefined
+  }
+  return { kind: 'liveness', phase: status.phase, elapsedBucket }
+}
+
+function defaultLearningLoopTimer(): LearningLoopTimer {
+  return {
+    now: () => Date.now(),
+    setTimeout(callback, delayMs) {
+      const handle = setTimeout(callback, delayMs)
+      handle.unref?.()
+      return handle
+    },
+    clearTimeout(handle) {
+      clearTimeout(handle as ReturnType<typeof setTimeout>)
+    },
+  }
+}
+
 /** Never let a Candidate, receipt, or pointer influence protocol construction. */
 function preCandidateStatus(status: LearningLoopPhaseStatus): LearningLoopPhaseStatus {
   const {
@@ -431,12 +620,15 @@ function preCandidateStatus(status: LearningLoopPhaseStatus): LearningLoopPhaseS
 export class TianwenLearningLoopService extends Service {
   static inject = ['agents', 'tianwenEvolution', 'tianwenLearningAnalysisChild'] as const
   readonly #executor: LearningLoopControlledExecutor | undefined
+  readonly #timer: LearningLoopTimer
   readonly #activeAnalysisIds = new Set<string>()
   readonly #rerunAnalysisIds = new Set<string>()
+  #livenessTimer: unknown | undefined
 
   constructor(ctx: Context, config: TianwenLearningLoopConfig = {}) {
     super(ctx, 'tianwenLearningLoop')
     this.#executor = config.executor
+    this.#timer = config.timer ?? defaultLearningLoopTimer()
   }
 
   protected [Service.init](): void {
@@ -449,6 +641,13 @@ export class TianwenLearningLoopService extends Service {
       }
     })
     this.ctx.effect(() => offAgent, 'tianwen-learning-loop.agent-wake.dispose')
+    this.ctx.effect(() => () => {
+      if (this.#livenessTimer !== undefined) {
+        this.#timer.clearTimeout(this.#livenessTimer)
+        this.#livenessTimer = undefined
+      }
+    }, 'tianwen-learning-loop.liveness.dispose')
+    this.#armLiveness()
   }
 
   async schedule(analysisId: string): Promise<void> {
@@ -471,13 +670,14 @@ export class TianwenLearningLoopService extends Service {
     } finally {
       this.#activeAnalysisIds.delete(analysisId)
       this.#rerunAnalysisIds.delete(analysisId)
+      this.#armLiveness()
     }
   }
 
   private async advance(status: LearningLoopPhaseStatus): Promise<void> {
     const executor = this.#executor
     const contextFor = (current: LearningLoopPhaseStatus): LearningLoopExecutionContext => ({ ctx: this.ctx, status: current })
-    if (status.phase === 'failed') await this.reportFailure(status)
+    await this.#reportProgress(status)
     await runLearningLoopPhase({
       status,
       hasActiveSupport: current => this.hasActiveSupport(current),
@@ -514,61 +714,31 @@ export class TianwenLearningLoopService extends Service {
         this.ctx.tianwenEvolution.recordLearningAnalysisFailed({
           analysisId: current.analysisId as never, resumePhase: current.phase as LearningAnalysisRetryPhase,
         })
-        const failed = this.ctx.tianwenEvolution.getLearningAnalysis(current.analysisId as never)
-        if (failed !== undefined) await this.reportFailure(failed as unknown as LearningLoopPhaseStatus)
       },
     })
   }
 
-  /**
-   * A failed record is the retry authority.  This is only a human-visible
-   * progress notice, deliberately outside the terminal-report delivery slot:
-   * a later successful retry must still be able to deliver its outcome.
-   */
-  private async reportFailure(status: LearningLoopPhaseStatus): Promise<void> {
-    if (status.phase !== 'failed' || status.resumePhase === undefined) return
+  async #reportProgress(status: LearningLoopPhaseStatus): Promise<void> {
+    const progress = nextLearningLoopProgress(status, this.#timer.now())
+    if (progress === undefined || this.#executor?.progress === undefined) return
     try {
-      const child = this.ctx.agents.get(SessionId(String(status.childSessionId)))
-      const parent = this.ctx.agents.get(SessionId(String(status.parentSessionId)))
-      if (child === undefined || parent === undefined
-        || String(child.session.header.parentSession) !== String(parent.session.id)
-        || parent.session.header.parentSession !== undefined
-        || parent.session.header.origin === 'subagent') return
-      const content = [{
-        type: 'text' as const,
-        text: status.resumePhase === 'promoted'
-          ? 'Tianwen 学习流程停在 promoted：回滚验证暂未完成，当前指针状态未被进一步改变；系统将在下一次有效唤醒重试。'
-          : `Tianwen 学习流程停在 ${status.resumePhase}：受控环境暂不可用，未启用候选；系统将在下一次有效唤醒重试。`,
-      }]
-      const delivered = [{
-        type: 'text' as const,
-        text: `Background subagent ${status.childSessionId} reported:`,
-      }, ...content]
-      const isExactFailureReport = (event: unknown): boolean => {
-        if (event === null || typeof event !== 'object') return false
-        const typed = event as { readonly type?: unknown, readonly data?: unknown }
-        if (typed.type !== 'user/message' || typed.data === null || typeof typed.data !== 'object') return false
-        const message = typed.data as {
-          readonly source?: { readonly kind?: unknown, readonly senderSessionId?: unknown }
-          readonly content?: unknown
-        }
-        return message.source?.kind === 'subagent-report'
-          && String(message.source.senderSessionId) === String(status.childSessionId)
-          && sha256(message.content) === sha256(delivered)
-      }
-      // reportFrom inserts the UserMessage into the live parent before its
-      // persistence flush.  Check both representations so a crash-free
-      // immediate re-wake cannot duplicate this non-terminal notice.
-      const liveEvents = (parent.session as unknown as { readonly events?: readonly unknown[] }).events ?? []
-      const inspection = await this.ctx.sessionPersistence.inspect(parent.session.id)
-      const known = liveEvents.some(isExactFailureReport) || inspection.events.some(isExactFailureReport)
-      if (!known) await this.ctx.subagents.reportFrom(child, content, {
-        delivery: 'next-step', signal: AbortSignal.timeout(30_000),
-      })
+      await this.#executor.progress({ ctx: this.ctx, status }, progress)
     } catch {
-      // The durable failed record remains the retry source if either native
-      // session is offline or a report delivery crashes.
+      // Progress is best-effort and never becomes authority for evaluation.
+      // A durable pending cursor is retried on the next ordinary or timer wake.
     }
+  }
+
+  #armLiveness(): void {
+    if (this.#livenessTimer !== undefined) return
+    if (!this.ctx.tianwenEvolution.listLearningAnalyses().some(progressActive)) return
+    this.#livenessTimer = this.#timer.setTimeout(() => {
+      this.#livenessTimer = undefined
+      const active = this.ctx.tianwenEvolution.listLearningAnalyses()
+        .filter(progressActive)
+      void Promise.all(active.map(status => this.schedule(status.analysisId)))
+        .finally(() => this.#armLiveness())
+    }, LEARNING_LIVENESS_INTERVAL_MS)
   }
 
   private intake(status: LearningLoopPhaseStatus): LearningLoopAdmission['intake'] {

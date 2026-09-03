@@ -2,7 +2,12 @@ import type { Context } from '@deepseek-ai/cordis'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { SessionId } from '@tianwen/dsh-compat'
-import { CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST, sha256 } from '@tianwen/evolution'
+import {
+  CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  sha256,
+  type LearningAnalysisProgressCursor,
+  type LearningAnalysisStatus,
+} from '@tianwen/evolution'
 import {
   RESEARCH_SUMMARY_TOOL_NAME,
   apply as applyCore,
@@ -26,6 +31,7 @@ import {
 import {
   TianwenLearningLoopService,
   createExplicitCorrectionLearningLoopExecutor,
+  learningLoopProgressReport,
   type LearningLoopExecutionContext,
   type LearningLoopControlledExecutor,
 } from './learning-loop-orchestrator.js'
@@ -70,7 +76,7 @@ function pendingTerminalReport(
   return status
 }
 
-function exactTerminalReportMessageId(
+function exactLearningReportMessageId(
   event: unknown,
   childSessionId: string,
   text: string,
@@ -97,66 +103,74 @@ function exactTerminalReportMessageId(
     ? message.id : undefined
 }
 
-async function confirmTerminalReportPersisted(
+interface ConfiguredReportInput {
+  readonly context: LearningLoopExecutionContext
+  readonly text: string
+  readonly resolve: () => LearningAnalysisStatus
+  readonly recoveryPrompt: string
+  readonly delivery: 'quiet' | 'next-step'
+}
+
+async function confirmConfiguredReportPersisted(
   ctx: Context,
-  input: { readonly context: LearningLoopExecutionContext, readonly text: string },
+  input: ConfiguredReportInput,
   parent: NonNullable<ReturnType<Context['agents']['get']>>,
   messageId: string,
 ): Promise<string> {
-  const status = pendingTerminalReport(ctx, input.context.status, input.text)
+  const status = input.resolve()
   if (ctx.agents.get(SessionId(status.parentSessionId)) !== parent
     || !exactLearningAnalysisMainParent(ctx, parent, status)
     || !await hasExactLearningAnalysisChild(ctx, status)
-    || !parent.session.events.some(event => exactTerminalReportMessageId(
+    || !parent.session.events.some(event => exactLearningReportMessageId(
       event, status.childSessionId, input.text, messageId,
     ) !== undefined)) {
-    throw new Error('terminal report accepted message lacks the exact live binding')
+    throw new Error('report accepted message lacks the exact live binding')
   }
   try {
     if (!await ctx.sessions.flush(parent.session)) {
       throw new Error('parent session flush was not durable')
     }
   } catch (error) {
-    throw new Error('terminal report parent persistence failed', { cause: error })
+      throw new Error('report parent persistence failed', { cause: error })
   }
   const persisted = await ctx.sessionPersistence.readFrom(parent.session.id, 0)
-  const persistedMessageId = persisted.events.map(event => exactTerminalReportMessageId(
+  const persistedMessageId = persisted.events.map(event => exactLearningReportMessageId(
     event, status.childSessionId, input.text, messageId,
   )).find((id): id is string => id !== undefined)
-  const rechecked = pendingTerminalReport(ctx, input.context.status, input.text)
+  const rechecked = input.resolve()
   if (persistedMessageId === undefined
     || ctx.agents.get(SessionId(rechecked.parentSessionId)) !== parent
     || !exactLearningAnalysisMainParent(ctx, parent, rechecked)
     || !await hasExactLearningAnalysisChild(ctx, rechecked)) {
-    throw new Error('terminal report was not durably confirmed for the exact binding')
+    throw new Error('report was not durably confirmed for the exact binding')
   }
   return persistedMessageId
 }
 
-async function deliverConfiguredTerminalReport(
+async function deliverConfiguredReport(
   ctx: Context,
-  input: { readonly context: LearningLoopExecutionContext, readonly text: string },
+  input: ConfiguredReportInput,
 ): Promise<string> {
-  const status = pendingTerminalReport(ctx, input.context.status, input.text)
+  const status = input.resolve()
   const parent = ctx.agents.get(SessionId(status.parentSessionId))
   if (parent === undefined || !exactLearningAnalysisMainParent(ctx, parent, status)) {
-    throw new Error('terminal report requires the exact live native main parent')
+    throw new Error('report requires the exact live native main parent')
   }
-  const liveMessageId = parent.session.events.map(event => exactTerminalReportMessageId(
+  const liveMessageId = parent.session.events.map(event => exactLearningReportMessageId(
     event, status.childSessionId, input.text,
   )).find((id): id is string => id !== undefined)
   if (liveMessageId !== undefined) {
-    return confirmTerminalReportPersisted(ctx, input, parent, liveMessageId)
+    return confirmConfiguredReportPersisted(ctx, input, parent, liveMessageId)
   }
   const live = ctx.agents.get(SessionId(status.childSessionId))
   if (live !== undefined) {
     if (!exactLearningAnalysisLiveChild(status, live)) {
-      throw new Error('terminal report requires the exact bound native child')
+      throw new Error('report requires the exact bound native child')
     }
     const messageId = String(await ctx.subagents.reportFrom(live, [{ type: 'text', text: input.text }], {
-      delivery: 'next-step', signal: AbortSignal.timeout(30_000),
+      delivery: input.delivery, signal: AbortSignal.timeout(30_000),
     }))
-    return confirmTerminalReportPersisted(ctx, input, parent, messageId)
+    return confirmConfiguredReportPersisted(ctx, input, parent, messageId)
   }
   const recovery = new AbortController()
   const delivery = Promise.withResolvers<string>()
@@ -165,49 +179,49 @@ async function deliverConfiguredTerminalReport(
     if (String(info.id) !== status.childSessionId) return
     observed = true
     try {
-      const current = pendingTerminalReport(ctx, input.context.status, input.text)
+      const current = input.resolve()
       const currentParent = ctx.agents.get(SessionId(current.parentSessionId))
       const child = ctx.agents.get(SessionId(current.childSessionId))
       if (currentParent !== parent
         || !exactLearningAnalysisMainParent(ctx, parent, current)
         || child === undefined
         || !exactLearningAnalysisLiveChild(current, child)) {
-        throw new Error('terminal report recovery binding changed during child materialization')
+        throw new Error('report recovery binding changed during child materialization')
       }
       void ctx.subagents.reportFrom(child, [{ type: 'text', text: input.text }], {
-        delivery: 'next-step', signal: AbortSignal.timeout(30_000),
+        delivery: input.delivery, signal: AbortSignal.timeout(30_000),
       }).then(messageId => delivery.resolve(String(messageId)), delivery.reject)
     } catch (error) {
       delivery.reject(error)
     } finally {
-      recovery.abort(new Error('terminal report recovery prompt is not executable work'))
+      recovery.abort(new Error('report recovery prompt is not executable work'))
     }
   })
   try {
     const racedLive = ctx.agents.get(SessionId(status.childSessionId))
     if (racedLive !== undefined) {
       if (!exactLearningAnalysisLiveChild(status, racedLive)) {
-        throw new Error('terminal report requires the exact bound native child')
+        throw new Error('report requires the exact bound native child')
       }
       const messageId = String(await ctx.subagents.reportFrom(
         racedLive,
         [{ type: 'text', text: input.text }],
-        { delivery: 'next-step', signal: AbortSignal.timeout(30_000) },
+        { delivery: input.delivery, signal: AbortSignal.timeout(30_000) },
       ))
-      return confirmTerminalReportPersisted(ctx, input, parent, messageId)
+      return confirmConfiguredReportPersisted(ctx, input, parent, messageId)
     }
     if (!await hasExactLearningAnalysisChild(ctx, status)) {
-      throw new Error('terminal report requires the exact durable native child')
+      throw new Error('report requires the exact durable native child')
     }
     if (observed) {
       const messageId = await delivery.promise
-      return await confirmTerminalReportPersisted(ctx, input, parent, messageId)
+      return await confirmConfiguredReportPersisted(ctx, input, parent, messageId)
     }
     try {
       await ctx.subagents.followup(
         parent,
         SessionId(status.childSessionId),
-        [{ type: 'text', text: 'Recover only to deliver the already-persisted Tianwen governed outcome.' }],
+        [{ type: 'text', text: input.recoveryPrompt }],
         {
           source: {
             kind: 'coordinator', form: 'relay', senderSessionId: parent.session.id,
@@ -215,16 +229,111 @@ async function deliverConfiguredTerminalReport(
           signal: AbortSignal.any([recovery.signal, AbortSignal.timeout(30_000)]),
         },
       )
-      if (!observed) delivery.reject(new Error('terminal report child recovery was not observed'))
+      if (!observed) delivery.reject(new Error('report child recovery was not observed'))
     } catch (error) {
       if (!observed) delivery.reject(error)
     }
     const messageId = await delivery.promise
-    return await confirmTerminalReportPersisted(ctx, input, parent, messageId)
+    return await confirmConfiguredReportPersisted(ctx, input, parent, messageId)
   } finally {
     offStart()
-    recovery.abort(new Error('terminal report recovery finished'))
+    recovery.abort(new Error('report recovery finished'))
   }
+}
+
+async function deliverConfiguredTerminalReport(
+  ctx: Context,
+  input: { readonly context: LearningLoopExecutionContext, readonly text: string },
+): Promise<string> {
+  return deliverConfiguredReport(ctx, {
+    ...input,
+    resolve: () => pendingTerminalReport(ctx, input.context.status, input.text),
+    recoveryPrompt: 'Recover only to deliver the already-persisted Tianwen governed outcome.',
+    delivery: 'next-step',
+  })
+}
+
+function pendingProgressReport(
+  ctx: Context,
+  expected: LearningLoopExecutionContext['status'],
+  text: string,
+  progress: LearningAnalysisProgressCursor,
+): LearningAnalysisStatus {
+  const status = ctx.tianwenEvolution.getLearningAnalysis(expected.analysisId as never)
+  const byChild = expected.childSessionId === undefined
+    ? undefined
+    : ctx.tianwenEvolution.getLearningAnalysisByChildSessionId(
+        String(expected.childSessionId),
+      )
+  if (status === undefined) {
+    throw new Error('learning progress durable binding changed before delivery')
+  }
+  const cursor = status.progressCursors?.find(item => item.kind === progress.kind)
+  const report = learningLoopProgressReport(
+    { ...status, phase: progress.phase },
+    progress.kind,
+    progress.elapsedBucket,
+  )
+  if (!['running', 'candidate-ready', 'shadow-ready', 'failed'].includes(status.phase)
+    || status.parentSessionId !== expected.parentSessionId
+    || status.childSessionId !== expected.childSessionId
+    || byChild?.analysisId !== status.analysisId
+    || cursor?.state !== 'pending'
+    || JSON.stringify(cursor) !== JSON.stringify(progress)
+    || report.text !== text
+    || report.digest !== progress.reportDigest) {
+    throw new Error('learning progress durable binding changed before delivery')
+  }
+  return status
+}
+
+async function deliverConfiguredProgressReport(
+  ctx: Context,
+  input: {
+    readonly context: LearningLoopExecutionContext
+    readonly text: string
+    readonly progress: LearningAnalysisProgressCursor
+  },
+): Promise<string> {
+  return deliverConfiguredReport(ctx, {
+    context: input.context,
+    text: input.text,
+    resolve: () => pendingProgressReport(
+      ctx,
+      input.context.status,
+      input.text,
+      input.progress,
+    ),
+    recoveryPrompt: 'Recover only to deliver the already-persisted Tianwen progress update.',
+    delivery: 'next-step',
+  })
+}
+
+async function findConfiguredReport(
+  ctx: Context,
+  input: ConfiguredReportInput,
+): Promise<string | undefined> {
+  const status = input.resolve()
+  const parent = ctx.agents.get(SessionId(status.parentSessionId))
+  if (parent === undefined || !exactLearningAnalysisMainParent(ctx, parent, status)) {
+    throw new Error('report lookup requires the exact live native main parent')
+  }
+  if (!await hasExactLearningAnalysisChild(ctx, status)) {
+    throw new Error('report lookup requires the exact bound native child')
+  }
+  const persisted = await ctx.sessionPersistence.readFrom(parent.session.id, 0)
+  const messageId = persisted.events.map(event => exactLearningReportMessageId(
+    event,
+    status.childSessionId,
+    input.text,
+  )).find((id): id is string => id !== undefined)
+  const rechecked = input.resolve()
+  if (ctx.agents.get(SessionId(rechecked.parentSessionId)) !== parent
+    || !exactLearningAnalysisMainParent(ctx, parent, rechecked)
+    || !await hasExactLearningAnalysisChild(ctx, rechecked)) {
+    throw new Error('report lookup binding changed during recovery')
+  }
+  return messageId
 }
 
 export function createConfiguredLearningLoopExecutor(
@@ -286,27 +395,26 @@ export function createConfiguredLearningLoopExecutor(
     async deliverTerminalReport({ context, text }) {
       return deliverConfiguredTerminalReport(ctx, { context, text })
     },
+    async deliverProgressReport({ context, text, progress }) {
+      return deliverConfiguredProgressReport(ctx, { context, text, progress })
+    },
+    async findProgressReport({ context, text, progress }) {
+      return findConfiguredReport(ctx, {
+        context,
+        text,
+        resolve: () => pendingProgressReport(ctx, context.status, text, progress),
+        recoveryPrompt: 'Recover only to inspect the persisted Tianwen progress update.',
+        delivery: 'next-step',
+      })
+    },
     async findTerminalReport({ context, text }) {
-      const status = pendingTerminalReport(ctx, context.status, text)
-      const childSessionId = status.childSessionId
-      const parent = ctx.agents.get(SessionId(status.parentSessionId))
-      if (parent === undefined || !exactLearningAnalysisMainParent(ctx, parent, status)) {
-        throw new Error('terminal report lookup requires the exact live native main parent')
-      }
-      if (!await hasExactLearningAnalysisChild(ctx, status)) {
-        throw new Error('terminal report lookup requires the exact bound native child')
-      }
-      const persisted = await ctx.sessionPersistence.readFrom(parent.session.id, 0)
-      const messageId = persisted.events.map(event => exactTerminalReportMessageId(
-        event, childSessionId, text,
-      )).find((id): id is string => id !== undefined)
-      const rechecked = pendingTerminalReport(ctx, context.status, text)
-      if (ctx.agents.get(SessionId(rechecked.parentSessionId)) !== parent
-        || !exactLearningAnalysisMainParent(ctx, parent, rechecked)
-        || !await hasExactLearningAnalysisChild(ctx, rechecked)) {
-        throw new Error('terminal report lookup binding changed during recovery')
-      }
-      return messageId
+      return findConfiguredReport(ctx, {
+        context,
+        text,
+        resolve: () => pendingTerminalReport(ctx, context.status, text),
+        recoveryPrompt: 'Recover only to inspect the persisted Tianwen governed outcome.',
+        delivery: 'next-step',
+      })
     },
   })
 }

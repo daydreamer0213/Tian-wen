@@ -110,6 +110,9 @@ export interface LearningAnalysisStatus extends LearningAnalysisBinding {
   readonly terminalReportDelivery?: LearningAnalysisReportDelivery
   /** A prior promoted outcome retained when a later rollback needs its own report. */
   readonly terminalReportHistory?: readonly LearningAnalysisReportDelivery[]
+  /** At most one durable cursor per public progress kind. */
+  readonly progressCursors?: readonly LearningAnalysisProgressCursor[]
+  readonly progressUpdatedAt?: string
 }
 
 export type LearningAnalysisReceipt = LearningAnalysisStatus & {
@@ -263,6 +266,38 @@ export interface LearningAnalysisTerminalReportDeliveredEvent {
   readonly report: LearningAnalysisReportBinding & { readonly reportMessageId: string }
 }
 
+export type LearningAnalysisProgressKind =
+  | 'analysis-started'
+  | 'candidate-evaluating'
+  | 'liveness'
+
+export interface LearningAnalysisProgressBinding {
+  readonly analysisId: LearningAnalysisId
+  readonly kind: LearningAnalysisProgressKind
+  readonly phase: LearningAnalysisPhase
+  readonly elapsedBucket: number
+  readonly reportDigest: Sha256Digest
+}
+
+export type LearningAnalysisProgressCursor = LearningAnalysisProgressBinding & (
+  | { readonly state: 'pending' }
+  | { readonly state: 'delivered', readonly reportMessageId: string }
+)
+
+export interface LearningAnalysisProgressIntentRecordedEvent {
+  readonly schemaVersion: 'tianwen.learning-analysis-progress-intent.v1'
+  readonly type: 'learning-analysis-progress-intent-recorded'
+  readonly at: string
+  readonly progress: LearningAnalysisProgressBinding
+}
+
+export interface LearningAnalysisProgressDeliveredEvent {
+  readonly schemaVersion: 'tianwen.learning-analysis-progress-delivered.v1'
+  readonly type: 'learning-analysis-progress-delivered'
+  readonly at: string
+  readonly progress: LearningAnalysisProgressBinding & { readonly reportMessageId: string }
+}
+
 export type LearningAnalysisLedgerEvent =
   | LearningAnalysisRequestedEvent
   | LearningAnalysisChildStartedEvent
@@ -277,12 +312,29 @@ export type LearningAnalysisLedgerEvent =
   | LearningAnalysisReportDeliveredEvent
   | LearningAnalysisTerminalReportIntentRecordedEvent
   | LearningAnalysisTerminalReportDeliveredEvent
+  | LearningAnalysisProgressIntentRecordedEvent
+  | LearningAnalysisProgressDeliveredEvent
 
 const ANALYSIS_ID = /^analysis:[a-f0-9]{64}$/
 const TICKET_ID = /^ticket:[a-f0-9]{64}$/
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/
 const MAX_TEXT_BYTES = 16 * 1024
 const MAX_PATCH_BYTES = 32 * 1024
+const LEARNING_ANALYSIS_PHASES = new Set<LearningAnalysisPhase>([
+  'pending-parent',
+  'running',
+  'no-case',
+  'insufficient-evidence',
+  'candidate-ready',
+  'protocol-unavailable',
+  'candidate-rejected',
+  'shadow-ready',
+  'promoted',
+  'rolled-back',
+  'transition-recovered',
+  'invalidated',
+  'failed',
+])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -346,6 +398,13 @@ export function learningAnalysisId(value: unknown): LearningAnalysisId {
   const result = nonEmpty(value, 'analysisId')
   if (!ANALYSIS_ID.test(result)) throw new TypeError('invalid LearningAnalysisId')
   return result as LearningAnalysisId
+}
+
+export function learningAnalysisPhase(value: unknown): LearningAnalysisPhase {
+  if (typeof value !== 'string' || !LEARNING_ANALYSIS_PHASES.has(
+    value as LearningAnalysisPhase,
+  )) throw new TypeError('invalid LearningAnalysisPhase')
+  return value as LearningAnalysisPhase
 }
 
 export function prepareLearningAnalysisRequest(

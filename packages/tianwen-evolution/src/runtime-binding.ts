@@ -46,6 +46,7 @@ import type {
 } from './learning-intake.js'
 import type {
   LearningAnalysisId,
+  LearningAnalysisProgressBinding,
   LearningAnalysisReceipt,
   LearningAnalysisReportBinding,
   LearningAnalysisStatus,
@@ -337,6 +338,20 @@ export class TianwenEvolutionService extends Service {
     readonly reportMessageId: string
   }): LearningAnalysisReceipt {
     return this.formalWrite(() => this.state().ledger.recordLearningAnalysisTerminalReportDelivered(input))
+  }
+
+  recordLearningAnalysisProgressIntent(
+    input: LearningAnalysisProgressBinding,
+  ): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisProgressIntent(input))
+  }
+
+  recordLearningAnalysisProgressDelivered(input: LearningAnalysisProgressBinding & {
+    readonly reportMessageId: string
+  }): LearningAnalysisReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordLearningAnalysisProgressDelivered(input))
   }
 
   getLearningAnalysis(
