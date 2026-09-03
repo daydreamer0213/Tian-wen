@@ -275,6 +275,7 @@ describe('Tianwen Desktop Web host contract', () => {
     })
     expect((spawned as { options: { env: NodeJS.ProcessEnv } }).options.env).toMatchObject({
       ...process.env, DSH_HOME: target.dshHome, DSH_TELEMETRY_DISABLED: '1',
+      TIANWEN_LEARNING_LOOP_ROOT: join(target.dshHome, '..', 'state', 'learning-loop'),
     })
     expect(host.url.href).toBe('http://127.0.0.1:4312/')
     await host.stop()

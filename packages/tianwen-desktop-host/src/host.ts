@@ -234,7 +234,12 @@ export function startDesktopWebHost(target: DesktopTarget, dependencies: Desktop
   const setTimer = dependencies.setTimeout ?? globalThis.setTimeout
   const clearTimer = dependencies.clearTimeout ?? globalThis.clearTimeout
   const options: SpawnOptions = {
-    env: { ...process.env, DSH_HOME: target.dshHome, DSH_TELEMETRY_DISABLED: '1' },
+    env: {
+      ...process.env,
+      DSH_HOME: target.dshHome,
+      DSH_TELEMETRY_DISABLED: '1',
+      TIANWEN_LEARNING_LOOP_ROOT: join(target.dshHome, '..', 'state', 'learning-loop'),
+    },
     shell: false,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
