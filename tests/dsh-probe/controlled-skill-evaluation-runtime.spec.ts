@@ -238,6 +238,7 @@ async function mountControlledRuntime(
     readonly includeReviewedCommonIdentityContext?: boolean
     readonly includeWorkspacePolicyContext?: boolean
     readonly includeRoleSpecificPromptDrift?: boolean
+    readonly aggregateEvaluatorSession?: boolean
   } = {},
 ) {
   const root = fixtureRoot(name)
@@ -386,7 +387,9 @@ async function mountControlledRuntime(
       evaluatorMaterialContract,
       baselineSessionId: `session:controlled-eval:fixture:${taskType}:baseline`,
       candidateSessionId: `session:controlled-eval:fixture:${taskType}:candidate`,
-      evaluatorSessionId: `session:controlled-eval:fixture:${taskType}:evaluator`,
+      evaluatorSessionId: options.aggregateEvaluatorSession === true
+        ? 'session:controlled-eval:fixture:aggregate:evaluator'
+        : `session:controlled-eval:fixture:${taskType}:evaluator`,
       toolSchemaDigest,
     }
   })
@@ -496,6 +499,41 @@ function successfulEvaluatorScript() {
     },
   ))
 }
+
+function aggregateEvaluatorSubmission() {
+  const dimensions = {
+    relevance: 3,
+    correctnessReasoning: 3,
+    clarityUsability: 3,
+    scopeRestraint: 3,
+  }
+  return {
+    evaluations: taskTypes.map(taskType => ({
+      taskId: `eval-task:${taskType}`,
+      status: 'scored',
+      insufficientMaterial: false,
+      reasonCode: 'score-submitted',
+      scores: { x: dimensions, y: dimensions },
+    })),
+  }
+}
+
+const invalidAggregateSubmissions = [
+  ['missing', (submission: ReturnType<typeof aggregateEvaluatorSubmission>) => ({
+    evaluations: submission.evaluations.slice(0, -1),
+  })],
+  ['duplicated', (submission: ReturnType<typeof aggregateEvaluatorSubmission>) => ({
+    evaluations: [submission.evaluations[0], submission.evaluations[0],
+      ...submission.evaluations.slice(2)],
+  })],
+  ['reordered', (submission: ReturnType<typeof aggregateEvaluatorSubmission>) => ({
+    evaluations: [submission.evaluations[1], submission.evaluations[0],
+      ...submission.evaluations.slice(2)],
+  })],
+  ['extra', (submission: ReturnType<typeof aggregateEvaluatorSubmission>) => ({
+    evaluations: [...submission.evaluations, submission.evaluations[0]],
+  })],
+] as const
 
 function evaluatorSubmission(
   status: 'scored' | 'inconclusive' = 'scored',
@@ -835,6 +873,85 @@ describe('controlled Skill evaluation Runtime', () => {
       await mounted.harness.ctx.fiber.dispose()
     }
   })
+
+  it('records five observations from one aggregate evaluator Run', async () => {
+    const mounted = await mountControlledRuntime(
+      'aggregate-blind-evaluator',
+      [
+        ...blindSafeArmScript(),
+        toolCallResponse(
+          'aggregate-blind-score',
+          'submit_blind_evaluation',
+          aggregateEvaluatorSubmission(),
+        ),
+      ],
+      { aggregateEvaluatorSession: true },
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state).toBe('awaiting-evaluator')
+      const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )
+      expect(receipt).toMatchObject({
+        state: 'terminal',
+        completedTaskIds: mounted.input.tasks.map(task => task.taskId),
+        result: { mechanismVerdict: 'pass', reasonCode: 'all-gates-passed' },
+      })
+      expect(create).toHaveBeenCalledTimes(1)
+      expect(mounted.adapter.requests).toHaveLength(31)
+      const observations = mounted.harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluatorObservations(arms.evaluationId)
+      expect(observations).toHaveLength(5)
+      expect(new Set(observations.map(item => item.evaluatorSessionId)).size).toBe(1)
+      expect(new Set(observations.map(item => item.requestDigest)).size).toBe(1)
+      expect(new Set(observations.map(item => item.evidenceId)).size).toBe(1)
+      expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(11)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it.each(invalidAggregateSubmissions)(
+    'rejects an aggregate evaluator submission with %s task identities atomically',
+    async (name, mutate) => {
+      const mounted = await mountControlledRuntime(
+        `aggregate-blind-evaluator-${name}`,
+        [
+          ...blindSafeArmScript(),
+          toolCallResponse(
+            `aggregate-blind-score-${name}`,
+            'submit_blind_evaluation',
+            mutate(aggregateEvaluatorSubmission()),
+          ),
+        ],
+        { aggregateEvaluatorSession: true },
+      )
+      try {
+        const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+          mounted.input,
+        )
+        const receipt = await mounted.harness.ctx.tianwenSkillEvaluation
+          .runControlledEvaluators(evaluatorInput(mounted.input, arms.evaluationId))
+
+        expect(receipt).toMatchObject({
+          state: 'stopped',
+          completedTaskIds: [],
+          stop: { stage: 'evaluator' },
+        })
+        expect(mounted.harness.ctx.tianwenEvolution
+          .listControlledSkillEvaluatorObservations(arms.evaluationId)).toEqual([])
+      } finally {
+        mounted.disposeParent()
+        await mounted.harness.ctx.fiber.dispose()
+      }
+    },
+  )
 
   it('keeps reviewed common task identity visible while blinding arm material', async () => {
     const mounted = await mountControlledRuntime(

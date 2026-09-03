@@ -768,7 +768,7 @@ function preparePlanTasks(
   }
   const runIds = new Set<string>()
   const sessionIds = new Set<string>()
-  return value.map((row, index) => {
+  const tasks = value.map((row, index) => {
     if (!isRecord(row)) throw new TypeError('controlled evaluation Session allocation must be an object')
     exactKeys(row, [
       'taskId',
@@ -799,7 +799,7 @@ function preparePlanTasks(
       sessionIds,
     )
     const evaluatorSessionId = safeSessionId(row.evaluatorSessionId)
-    if (!sessionIds.add(evaluatorSessionId)) {
+    if (sessionIds.has(evaluatorSessionId)) {
       throw new TypeError('controlled evaluation requires distinct execution and evaluator Sessions')
     }
     return {
@@ -809,6 +809,14 @@ function preparePlanTasks(
       evaluatorSessionId,
     }
   })
+  const evaluatorSessionIds = tasks.map(task => task.evaluatorSessionId)
+  const distinctEvaluatorSessionIds = new Set(evaluatorSessionIds)
+  if ([...distinctEvaluatorSessionIds].some(sessionId => sessionIds.has(sessionId))
+    || (distinctEvaluatorSessionIds.size !== 1
+      && distinctEvaluatorSessionIds.size !== tasks.length)) {
+    throw new TypeError('controlled evaluation evaluator Sessions must be shared or task-distinct')
+  }
+  return tasks
 }
 
 function preparePlanRecord(input: {

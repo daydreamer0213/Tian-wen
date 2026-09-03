@@ -3,7 +3,6 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, write
 import { dirname, join, resolve } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { HarnessError } from '@deepseek-ai/dsh-llm'
 import SubagentRuntime, { type SubagentProvider } from '@deepseek-ai/dsh-subagent'
 
 const appendFault = vi.hoisted(() => ({
@@ -70,7 +69,13 @@ import {
   learningSessionLifecycleFingerprint,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
-import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
+import {
+  apply as applyRuntime,
+  createResearchSummaryTool,
+  evaluateResearchSummarySubmission,
+  parseResearchPacket,
+  type ResearchSummarySubmission,
+} from '../../packages/tianwen-runtime/src/index.js'
 import {
   EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
   resolveExplicitCorrectionProtocol,
@@ -98,12 +103,6 @@ const nativeProvider: SubagentProvider = {
 
 const protocol = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)
 if (protocol === undefined) throw new Error('explicit correction protocol is unavailable')
-
-class LifecycleNotMet extends HarnessError {
-  constructor() {
-    super('controlled lifecycle requirement was not met', protocol.acceptance.notMetErrorCode)
-  }
-}
 
 class ControlledAdapter extends ScriptedAdapter {
   constructor(script: readonly (readonly StreamChunk[] | Error)[]) {
@@ -145,75 +144,115 @@ function materializeWorkspace(workspaceRoot: string, content: string): void {
   }
 }
 
-function verifiedScript(id: string, subject: Readonly<Record<string, unknown>>) {
+function validSubmission(source: string): ResearchSummarySubmission {
+  const packet = parseResearchPacket(source)
+  const findings = packet.items.filter(item =>
+    item.kind === 'finding' && item.priority === 'required')
+  const uncertainties = packet.items.filter(item =>
+    item.kind === 'uncertainty' && item.priority === 'decision')
+  return {
+    summary: [...findings, ...uncertainties].map(item => item.text).join(' '),
+    confirmedFindingIds: findings.map(item => item.id),
+    uncertaintyIds: uncertainties.map(item => item.id),
+  }
+}
+
+function rejectedSubmission(source: string): ResearchSummarySubmission {
+  const packet = parseResearchPacket(source)
+  const submission = validSubmission(source)
+  const forbidden = packet.items.find(item =>
+    item.kind === 'uncertainty' && item.priority === 'background')
+  if (forbidden === undefined) throw new Error('transition rejection packet is invalid')
+  return {
+    ...submission,
+    uncertaintyIds: [...submission.uncertaintyIds, forbidden.id],
+  }
+}
+
+function submittedScript(id: string, submission: ResearchSummarySubmission) {
   return [
     toolCallResponse(`${id}-skill`, 'skill', { name: protocol.parentSkill.name }),
-    toolCallResponse(`${id}-verify`, protocol.acceptance.toolName, { subject }),
-    textResponse(`completed ${id}`),
+    toolCallResponse(`${id}-submit`, protocol.acceptance.toolName, submission),
   ]
 }
 
-function successfulControlledScript() {
-  const arms = protocol.evaluationTaskDefinitions.flatMap(task =>
-    (['baseline', 'candidate'] as const).flatMap(role => verifiedScript(
+function successfulControlledScript(
+  rejectTransitionKind?: 'promote' | 'rollback',
+) {
+  const tasks = protocol.buildEvaluationTasks({
+    root: 'D:/DevData/tianwen-probe-task7/script-fixtures',
+    materializeWorkspace() {},
+    sessionNamespace: 'script-fixtures',
+  })
+  const shadow = protocol.buildShadowTasks({
+    root: 'D:/DevData/tianwen-probe-task7/script-fixtures',
+    materializeWorkspace() {},
+    sessionNamespace: 'script-fixtures',
+  })[0]!
+  const transition = (kind: 'promote' | 'rollback') => protocol.buildTransitionInput({
+    root: 'D:/DevData/tianwen-probe-task7/script-fixtures',
+    shadowId: `shadow:${kind}`,
+    kind,
+    expectedRevision: 1,
+    materializeWorkspace() {},
+  }).task.researchPacket!
+  const arms = tasks.flatMap(task =>
+    (['base', 'candidate'] as const).flatMap(role => submittedScript(
       `arm-${task.semanticType}-${role}`,
-      { phase: 'evaluation', task: task.semanticType },
+      task.expectedSubmissions[role],
     )))
-  const evaluators = protocol.evaluationTaskDefinitions.map(task => toolCallResponse(
-    `evaluator-${task.semanticType}`,
-    'submit_blind_evaluation',
-    {
+  const dimensions = {
+    relevance: 3, correctnessReasoning: 3, clarityUsability: 3, scopeRestraint: 3,
+  }
+  const evaluator = toolCallResponse('aggregate-evaluator', 'submit_blind_evaluation', {
+    evaluations: tasks.map(task => ({
+      taskId: task.taskId,
       status: 'scored', insufficientMaterial: false, reasonCode: 'score-submitted',
-      scores: {
-        x: { relevance: 3, correctnessReasoning: 3, clarityUsability: 3, scopeRestraint: 3 },
-        y: { relevance: 3, correctnessReasoning: 3, clarityUsability: 3, scopeRestraint: 3 },
-      },
-    },
-  ))
-  const shadows = protocol.evaluationTaskDefinitions.flatMap(task => verifiedScript(
-    `shadow-${task.semanticType}`,
-    { phase: 'shadow', task: task.semanticType },
-  ))
+      scores: { x: dimensions, y: dimensions },
+    })),
+  })
   return [
     ...arms,
-    ...evaluators,
-    ...shadows,
-    ...verifiedScript('transition-promote', { phase: 'transition', kind: 'promote' }),
-    ...verifiedScript('transition-rollback', { phase: 'transition', kind: 'rollback' }),
+    evaluator,
+    ...submittedScript('shadow-unseen-holdout', validSubmission(shadow.researchPacket)),
+    ...submittedScript('transition-promote', rejectTransitionKind === 'promote'
+      ? rejectedSubmission(transition('promote'))
+      : validSubmission(transition('promote'))),
+    ...submittedScript('transition-rollback', rejectTransitionKind === 'rollback'
+      ? rejectedSubmission(transition('rollback'))
+      : validSubmission(transition('rollback'))),
   ]
+}
+
+function frozenProductToolSchemas(ctx: Context) {
+  const task = protocol.buildEvaluationTasks({
+    root: 'D:/DevData/tianwen-probe-task7/schema-fixture',
+    materializeWorkspace() {},
+    sessionNamespace: 'schema-fixture',
+  })[0]!
+  const productTool = createResearchSummaryTool(task.packet, {
+    kind: 'controlled-enforce',
+    oracle: evaluateResearchSummarySubmission,
+  })
+  return [
+    ...ctx.tools.schemas().filter(schema => schema.name === 'skill'),
+    {
+      name: productTool.name,
+      description: productTool.description,
+      parameters: structuredClone(productTool.parameters),
+    },
+  ].toSorted((left, right) => left.name.localeCompare(right.name))
 }
 
 async function mountControlledRuntime(
   fixtureRoot: string,
   script: readonly (readonly StreamChunk[] | Error)[],
-  options: { readonly rejectTransitionKind?: 'promote' | 'rollback' } = {},
 ) {
   const harness = await mountPersistentHarness(join(fixtureRoot, 'sessions'), [])
   await harness.ctx.plugin(SkillRegistry)
   await harness.ctx.plugin(applySkillTool)
   await harness.ctx.plugin(DynamicCordisRunnerService, {})
   const disposeSkill = harness.ctx.skills.register(protocol.parentSkill)
-  const disposeVerifier = harness.ctx.tools.register(defineTool({
-    name: protocol.acceptance.toolName,
-    description: 'Verify one controlled lifecycle observation.',
-    parameters: { subject: { type: 'object', additionalProperties: true, required: true } },
-    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
-    async execute(args, exec) {
-      const subject = (args as {
-        subject?: { phase?: unknown, task?: unknown, kind?: unknown }
-      }).subject
-      if (subject?.phase === 'evaluation'
-        && String(exec.agent?.id).endsWith(':baseline')
-        && (subject.task === 'original-defect' || subject.task === 'adjacent-transfer')) {
-        throw new LifecycleNotMet()
-      }
-      if (subject?.phase === 'transition'
-        && subject.kind === options.rejectTransitionKind) {
-        throw new LifecycleNotMet()
-      }
-      return 'verified'
-    },
-  }))
   const adapter = new ControlledAdapter(script)
   harness.ctx.llm.registerAdapter([provider], adapter)
   const selection = { provider, model }
@@ -224,7 +263,6 @@ async function mountControlledRuntime(
     adapter,
     selection,
     async dispose() {
-      disposeVerifier()
       disposeSkill()
       await harness.ctx.fiber.dispose()
     },
@@ -496,9 +534,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
         async environment() {
           const callConfig = await harness.ctx.llm.resolveCallConfig(selection)
           const retryPolicy = harness.ctx.llm.providerRetryPolicy(selection.provider)
-          const toolSchemas = harness.ctx.tools.schemas()
-            .filter(schema => schema.name === 'skill' || schema.name === protocol.acceptance.toolName)
-            .toSorted((left, right) => left.name.localeCompare(right.name))
+          const toolSchemas = frozenProductToolSchemas(harness.ctx)
           return { callConfig, retryPolicy, toolSchemas, rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST }
         },
         deliverTerminalReport: input => deliverTerminalReport(input as never),
@@ -626,7 +662,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
       const reportMessageId = String(terminalMessages[0]!.data.id)
 
       await mounted.dispose()
-      mounted = await mountControlledRuntime(fixtureRoot, successfulControlledScript().slice(-3))
+      mounted = await mountControlledRuntime(fixtureRoot, successfulControlledScript().slice(-2))
       ;({ harness, adapter, selection } = mounted)
       const replayedParent = (await harness.ctx.agents.resume({
         resumeSessionId: SessionId('main-session'),
@@ -772,7 +808,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
       expect(harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)?.phase).toBe('rolled-back')
       expect(harness.ctx.tianwenEvolution.getControlledSkillScopePointer(promotedShadow.scopeKey)?.activeVersionId)
         .toBe(currentManifest.parentVersionId)
-      expect(requestsAfterVerifiedRollback).toBe(3)
+      expect(requestsAfterVerifiedRollback).toBe(2)
       await rollbackParent.whenIdle()
       expect(await harness.ctx.sessions.flush(rollbackParent.session)).toBe(true)
       const reportedRollback = harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)!
@@ -1285,8 +1321,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
     })
     let mounted = await mountControlledRuntime(
       fixtureRoot,
-      successfulControlledScript(),
-      { rejectTransitionKind: 'promote' },
+      successfulControlledScript('promote'),
     )
     let analysisId: string | undefined
     try {
@@ -1365,9 +1400,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
         async environment() {
           const callConfig = await mounted.harness.ctx.llm.resolveCallConfig(mounted.selection)
           const retryPolicy = mounted.harness.ctx.llm.providerRetryPolicy(mounted.selection.provider)
-          const toolSchemas = mounted.harness.ctx.tools.schemas()
-            .filter(schema => schema.name === 'skill' || schema.name === protocol.acceptance.toolName)
-            .toSorted((left, right) => left.name.localeCompare(right.name))
+          const toolSchemas = frozenProductToolSchemas(mounted.harness.ctx)
           return {
             callConfig, retryPolicy, toolSchemas,
             rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,

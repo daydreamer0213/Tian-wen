@@ -58,7 +58,7 @@ describe('explicit correction controlled protocol', () => {
       task.candidateSessionId,
       task.evaluatorSessionId,
     ])).toEqual([
-      ['eval-task:research-summary-original-defect', expect.stringMatching(/^session:controlled-eval:product:research-summary:original-defect:[a-f0-9]{64}:baseline$/u), expect.stringMatching(/^session:controlled-eval:product:research-summary:original-defect:[a-f0-9]{64}:candidate$/u), expect.stringMatching(/^session:controlled-eval:product:research-summary:original-defect:[a-f0-9]{64}:evaluator$/u)],
+      ['eval-task:research-summary-original-defect', expect.stringMatching(/^session:controlled-eval:product:research-summary:original-defect:[a-f0-9]{64}:baseline$/u), expect.stringMatching(/^session:controlled-eval:product:research-summary:original-defect:[a-f0-9]{64}:candidate$/u), expect.stringMatching(/^session:controlled-eval:product:research-summary:aggregate:[a-f0-9]{64}:evaluator$/u)],
       ['eval-task:research-summary-adjacent-transfer', expect.any(String), expect.any(String), expect.any(String)],
       ['eval-task:research-summary-preserved-regression', expect.any(String), expect.any(String), expect.any(String)],
       ['eval-task:research-summary-raw-extraction-counterexample', expect.any(String), expect.any(String), expect.any(String)],
@@ -70,6 +70,7 @@ describe('explicit correction controlled protocol', () => {
       .toBe(true)
     expect(tasks.every(task => task.evaluatorMaterialContract.source
       === 'accepted-research-summary-submission')).toBe(true)
+    expect(new Set(tasks.map(task => task.evaluatorSessionId)).size).toBe(1)
   })
 
   it('does not improvise a protocol for an unsupported scope', () => {

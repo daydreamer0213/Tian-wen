@@ -610,11 +610,7 @@ function parseControlledArmsInput(input: unknown): RunControlledSkillEvaluationA
       }
       workspaceRoots.add(identity)
     }
-    for (const sessionId of [
-      task.baselineSessionId,
-      task.candidateSessionId,
-      task.evaluatorSessionId,
-    ]) {
+    for (const sessionId of [task.baselineSessionId, task.candidateSessionId]) {
       if (sessionIds.has(sessionId)) {
         throw new ControlledSkillEvaluationPreflightError('task-package-mismatch')
       }
@@ -639,6 +635,11 @@ function parseControlledArmsInput(input: unknown): RunControlledSkillEvaluationA
       evaluatorSessionId: task.evaluatorSessionId,
     }
   })
+  const evaluatorSessionIds = new Set(tasks.map(task => task.evaluatorSessionId))
+  if ([...evaluatorSessionIds].some(sessionId => sessionIds.has(sessionId))
+    || (evaluatorSessionIds.size !== 1 && evaluatorSessionIds.size !== tasks.length)) {
+    throw new ControlledSkillEvaluationPreflightError('task-package-mismatch')
+  }
   return {
     candidateId: source.candidateId as GovernedSkillCandidateId,
     protocolId: source.protocolId as SkillEvalProtocolId,
@@ -654,7 +655,7 @@ function parseControlledShadowInput(input: unknown): RunControlledSkillShadowInp
     || typeof source.evaluationId !== 'string'
     || !/^evaluation:[a-f0-9]{64}$/u.test(source.evaluationId)
     || !Array.isArray(source.tasks)
-    || source.tasks.length !== 5
+    || (source.tasks.length !== 1 && source.tasks.length !== 5)
   ) throw new ControlledSkillShadowPreflightError('task-package-mismatch')
   const taskIds = new Set<string>()
   const sessionIds = new Set<string>()
@@ -852,6 +853,12 @@ type ControlledEvaluatorSubmission =
       readonly reasonCode: ControlledSkillEvaluatorInconclusiveReasonCode
     }
 
+type ControlledAggregateEvaluatorSubmission = {
+  readonly evaluations: readonly (ControlledEvaluatorSubmission & {
+    readonly taskId: ControlledSkillEvalTaskId
+  })[]
+}
+
 function evaluatorDimensionScores(value: unknown) {
   const scores = record(value)
   if (scores === undefined || !exactRuntimeKeys(scores, CONTROLLED_EVALUATOR_DIMENSIONS)) {
@@ -919,6 +926,32 @@ function parseControlledEvaluatorSubmission(value: unknown): ControlledEvaluator
   }
 }
 
+function parseControlledAggregateEvaluatorSubmission(
+  value: unknown,
+  expectedTaskIds: readonly ControlledSkillEvalTaskId[],
+): ControlledAggregateEvaluatorSubmission {
+  const submission = record(value)
+  if (submission === undefined
+    || !exactRuntimeKeys(submission, ['evaluations'])
+    || !Array.isArray(submission.evaluations)
+    || submission.evaluations.length !== expectedTaskIds.length) {
+    throw new TypeError('invalid controlled aggregate evaluator submission')
+  }
+  return {
+    evaluations: submission.evaluations.map((value, index) => {
+      const row = record(value)
+      if (row === undefined || row.taskId !== expectedTaskIds[index]) {
+        throw new TypeError('invalid controlled aggregate evaluator task order')
+      }
+      const { taskId: _taskId, ...single } = row
+      return {
+        taskId: expectedTaskIds[index]!,
+        ...parseControlledEvaluatorSubmission(single),
+      }
+    }),
+  }
+}
+
 function serializedContainsControlledIdentity(
   serialized: string,
   identity: string,
@@ -957,6 +990,22 @@ function controlledEvaluatorForbiddenIdentities(
     !serializedContainsControlledIdentity(commonContext, identity)))
 }
 
+function controlledEvaluatorForbiddenIdentitiesForTasks(
+  tasks: readonly Pick<
+    RunControlledSkillEvaluatorTaskInput,
+    'taskId' | 'goal' | 'input'
+  >[],
+  forbidden: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const commonContext = JSON.stringify(tasks.map(task => ({
+    taskId: task.taskId,
+    goal: task.goal,
+    input: task.input,
+  })))
+  return new Set([...forbidden].filter(identity =>
+    !serializedContainsControlledIdentity(commonContext, identity)))
+}
+
 function redactControlledEvaluatorCommonContext(
   value: unknown,
   context: Pick<RunControlledSkillEvaluatorTaskInput, 'goal' | 'input'>,
@@ -977,6 +1026,16 @@ function redactControlledEvaluatorCommonContext(
     key,
     redactControlledEvaluatorCommonContext(item, context),
   ]))
+}
+
+function redactControlledEvaluatorCommonContexts(
+  value: unknown,
+  contexts: readonly Pick<RunControlledSkillEvaluatorTaskInput, 'goal' | 'input'>[],
+): unknown {
+  return contexts.reduce(
+    (redacted, context) => redactControlledEvaluatorCommonContext(redacted, context),
+    value,
+  )
 }
 
 function evaluatorVisibleRequest(request: GenerateOptions) {
@@ -1002,9 +1061,9 @@ function evaluatorRequestReason(
   }
   if (request.messages.some(message => record(message.source)?.kind === 'skill-catalog')
     || controlledIdentityExposed(
-      redactControlledEvaluatorCommonContext(
+      redactControlledEvaluatorCommonContexts(
         evaluatorVisibleRequest(request),
-        state.commonContext,
+        state.commonContexts,
       ),
       state.forbidden,
     )) {
@@ -1627,7 +1686,6 @@ export class TianwenSkillEvaluationService extends Service {
       throw new ControlledSkillActivationPreflightError('task-package-mismatch')
     }
     const pointer = evolution.getControlledSkillScopePointer(shadow.scopeKey)
-    const expectedRevision = parsed.kind === 'promote' ? 1 : parsed.kind === 'rollback' ? 2 : 3
     const expectedPriorKinds = parsed.kind === 'promote'
       ? []
       : parsed.kind === 'rollback'
@@ -1637,16 +1695,29 @@ export class TianwenSkillEvaluationService extends Service {
       .filter(transition => transition.previousPointer.revision < parsed.expectedRevision)
       .toSorted((left, right) =>
         left.previousPointer.revision - right.previousPointer.revision)
-    if (parsed.expectedRevision !== expectedRevision
+    const previousPointer = existing?.previousPointer ?? pointer
+    const firstPriorRevision = parsed.expectedRevision - expectedPriorKinds.length
+    if (previousPointer === undefined
+      || (existing === undefined && pointer?.revision !== parsed.expectedRevision)
+      || firstPriorRevision < 1
       || prior.length !== expectedPriorKinds.length
       || prior.some((transition, index) =>
         transition.kind !== expectedPriorKinds[index]
+        || transition.previousPointer.revision !== firstPriorRevision + index
         || evolution.getControlledSkillTransitionReceipt(transition.transitionId)?.state
-          !== 'verified')) {
+          !== 'verified')
+      || (prior.length > 0
+        && sha256(prior.at(-1)!.targetPointer) !== sha256(previousPointer))) {
       throw new ControlledSkillActivationPreflightError('pointer-mismatch')
     }
-    const previousPointer = existing?.previousPointer ?? pointer
-    if (previousPointer === undefined) {
+    const expectedPreviousVersionId = parsed.kind === 'rollback'
+      ? shadow.candidateVersionId
+      : shadow.parentVersionId
+    const expectedPreviousPayloadDigest = parsed.kind === 'rollback'
+      ? shadow.candidatePayloadDigest
+      : shadow.parentPayloadDigest
+    if (previousPointer.activeVersionId !== expectedPreviousVersionId
+      || previousPointer.payloadDigest !== expectedPreviousPayloadDigest) {
       throw new ControlledSkillActivationPreflightError('pointer-mismatch')
     }
     if (existing !== undefined) {
@@ -2416,6 +2487,7 @@ export class TianwenSkillEvaluationService extends Service {
             },
             item.skill.name,
             scopedCtx.skills,
+            'exact-skill',
           )
           boundRunId = binding.runId
         })
@@ -2809,7 +2881,7 @@ export class TianwenSkillEvaluationService extends Service {
     const inheritedTools = this.ctx.tools.schemas().map(schema => schema.name)
     const agentOptions = requestAgentOptions(resolved)
     try {
-      for (const [index, task] of parsed.tasks.entries()) {
+      const entries = parsed.tasks.map((task, index) => {
         const planned = plan.tasks[index]!
         const objective = objectives[index]!
         const assignment = blindMap.assignments[index]!
@@ -2817,31 +2889,53 @@ export class TianwenSkillEvaluationService extends Service {
         if (assignment.taskId !== task.taskId
           || assignment.evaluatorSessionId !== planned.evaluatorSessionId
           || assignment.envelopeDigest !== controlledBlindEnvelopeDigest(objective, assignment)) {
-          return stoppedControlledEvaluatorsReceipt(plan, completedTaskIds, {
-            taskId: task.taskId,
-            stage: 'postflight',
-            reasonCode: 'run-fact-mismatch',
-          })
+          throw new Error('controlled evaluator frozen facts mismatch')
         }
-        const envelope = controlledEvaluatorEnvelope(
+        return {
           task,
-          objective,
+          planned,
           assignment,
           material,
-        )
+          envelope: controlledEvaluatorEnvelope(task, objective, assignment, material),
+        }
+      })
+      const groups = new Map<string, typeof entries>()
+      for (const entry of entries) {
+        const group = groups.get(entry.planned.evaluatorSessionId) ?? []
+        group.push(entry)
+        groups.set(entry.planned.evaluatorSessionId, group)
+      }
+
+      for (const group of groups.values()) {
+        const first = group[0]!
+        const aggregate = group.length > 1
+        const workspaceRoot = aggregate
+          ? dirname(first.material.workspaceRoot)
+          : first.material.workspaceRoot
+        if (aggregate && group.some(entry =>
+          dirname(entry.material.workspaceRoot) !== workspaceRoot)) {
+          throw new Error('controlled aggregate evaluator workspace mismatch')
+        }
+        const groupTasks = group.map(entry => entry.task)
         const state: ControlledEvaluatorState = {
-          sessionId: planned.evaluatorSessionId,
+          sessionId: first.planned.evaluatorSessionId,
           config: resolved,
-          forbidden: controlledEvaluatorForbiddenIdentities(task, forbidden),
-          commonContext: { goal: task.goal, input: task.input },
+          forbidden: aggregate
+            ? controlledEvaluatorForbiddenIdentitiesForTasks(groupTasks, forbidden)
+            : controlledEvaluatorForbiddenIdentities(first.task, forbidden),
+          commonContexts: groupTasks.map(task => ({
+            goal: task.goal,
+            input: task.input,
+          })),
+          ...(aggregate ? { expectedTaskIds: groupTasks.map(task => task.taskId) } : {}),
           requests: [],
           active: false,
           deadline: 0,
           bodyCalls: 0,
         }
         const handle = await this.ctx.agents.create({
-          sessionId: SessionId(planned.evaluatorSessionId),
-          meta: { cwd: material.workspaceRoot },
+          sessionId: SessionId(state.sessionId),
+          meta: { cwd: workspaceRoot },
           agentOptions,
           setup: agentCtx => {
             installModelSelection(agentCtx, { current: selection, assembled: undefined })
@@ -2853,23 +2947,21 @@ export class TianwenSkillEvaluationService extends Service {
         })
         state.agent = handle.agent
         const schemas = handle.agent.ctx.tools.schemas(handle.agent)
-        if (handle.agent.session.header.cwd !== material.workspaceRoot
+        if (handle.agent.session.header.cwd !== workspaceRoot
           || sha256(handle.agent.options) !== sha256(agentOptions)
           || schemas.length !== 1
           || schemas[0]?.name !== 'submit_blind_evaluation') {
           await handle.dispose()
-          return stoppedControlledEvaluatorsReceipt(plan, completedTaskIds, {
-            taskId: task.taskId,
-            stage: 'postflight',
-            reasonCode: 'run-fact-mismatch',
-          })
+          throw new Error('controlled evaluator Agent facts mismatch')
         }
         prepared.push({
           evaluationId: plan.evaluationId,
-          task,
-          planned,
-          assignment,
-          envelope,
+          tasks: groupTasks,
+          planned: group.map(entry => entry.planned),
+          assignments: group.map(entry => entry.assignment),
+          envelope: aggregate
+            ? { evaluations: group.map(entry => entry.envelope) }
+            : first.envelope,
           handle,
           state,
         })
@@ -2877,36 +2969,38 @@ export class TianwenSkillEvaluationService extends Service {
 
       for (const evaluator of prepared) {
         const run = await this.runControlledEvaluator(evaluator)
-        if (run.observation === undefined) {
+        if (run.observations === undefined) {
           return stoppedControlledEvaluatorsReceipt(plan, completedTaskIds, {
-            taskId: evaluator.task.taskId,
+            taskId: evaluator.tasks[0]!.taskId,
             stage: 'evaluator',
             reasonCode: run.reasonCode,
           })
         }
-        try {
-          this.ctx.tianwenEvolution.recordControlledSkillEvaluatorObservation(
-            run.observation,
-          )
-        } catch {
-          return stoppedControlledEvaluatorsReceipt(plan, completedTaskIds, {
-            taskId: evaluator.task.taskId,
-            stage: 'postflight',
-            reasonCode: 'run-fact-mismatch',
-          })
+        for (const observation of run.observations) {
+          try {
+            this.ctx.tianwenEvolution.recordControlledSkillEvaluatorObservation(
+              observation,
+            )
+          } catch {
+            return stoppedControlledEvaluatorsReceipt(plan, completedTaskIds, {
+              taskId: observation.taskId,
+              stage: 'postflight',
+              reasonCode: 'run-fact-mismatch',
+            })
+          }
+          observations = this.ctx.tianwenEvolution
+            .listControlledSkillEvaluatorObservations(plan.evaluationId)
+          const durable = observations.find(item => item.taskId === observation.taskId)
+          if (durable === undefined) {
+            return stoppedControlledEvaluatorsReceipt(plan, completedTaskIds, {
+              taskId: observation.taskId,
+              stage: 'postflight',
+              reasonCode: 'run-fact-mismatch',
+            })
+          }
+          completedTaskIds.push(observation.taskId)
         }
-        observations = this.ctx.tianwenEvolution
-          .listControlledSkillEvaluatorObservations(plan.evaluationId)
-        const durable = observations.at(-1)
-        if (durable?.taskId !== evaluator.task.taskId) {
-          return stoppedControlledEvaluatorsReceipt(plan, completedTaskIds, {
-            taskId: evaluator.task.taskId,
-            stage: 'postflight',
-            reasonCode: 'run-fact-mismatch',
-          })
-        }
-        completedTaskIds.push(evaluator.task.taskId)
-        if (durable.status === 'inconclusive') {
+        if (run.observations.some(observation => observation.status === 'inconclusive')) {
           this.ctx.tianwenEvolution.recordControlledSkillEvaluationResult({
             evaluationId: plan.evaluationId,
           })
@@ -2915,7 +3009,7 @@ export class TianwenSkillEvaluationService extends Service {
           )
           if (terminal === undefined) {
             return stoppedControlledEvaluatorsReceipt(plan, completedTaskIds, {
-              taskId: evaluator.task.taskId,
+              taskId: evaluator.tasks.at(-1)!.taskId,
               stage: 'postflight',
               reasonCode: 'run-fact-mismatch',
             })
@@ -2971,10 +3065,12 @@ export class TianwenSkillEvaluationService extends Service {
     this.evaluators.set(state.sessionId, state)
     const startedAt = Date.now()
     state.active = true
-    state.deadline = startedAt + prepared.planned.stopContract.maxElapsedMs
+    const maxElapsedMs = Math.min(...prepared.planned.map(item =>
+      item.stopContract.maxElapsedMs))
+    state.deadline = startedAt + maxElapsedMs
     const timer = setTimeout(() => {
       if (state.active) cancelControlledEvaluator(state, 'timeout')
-    }, prepared.planned.stopContract.maxElapsedMs)
+    }, maxElapsedMs)
     let idleFailed = false
     try {
       prepared.handle.agent.followup(createUserMessage({
@@ -3006,7 +3102,9 @@ export class TianwenSkillEvaluationService extends Service {
       return { reasonCode: state.bodyCalls > 0 ? 'submission-invalid' : 'score-not-submitted' }
     }
     const request = state.requests[0]
-    if (request === undefined) return { reasonCode: 'request-contract-mismatch' }
+    if (request === undefined || state.requests.length !== 1) {
+      return { reasonCode: 'request-contract-mismatch' }
+    }
     const evidence = this.ctx.tianwenEvidence.project(session)
       .filter(item => item.action.toolName === 'submit_blind_evaluation')
       .sort((left, right) => left.source.callSeq - right.source.callSeq)
@@ -3017,16 +3115,28 @@ export class TianwenSkillEvaluationService extends Service {
       || evidence.action.argumentsDigest !== state.submissionDigest) {
       return { reasonCode: 'evidence-mismatch' }
     }
+    const submissions = 'evaluations' in state.submission
+      ? state.submission.evaluations
+      : [{ taskId: prepared.tasks[0]!.taskId, ...state.submission }]
+    if (submissions.length !== prepared.tasks.length) {
+      return { reasonCode: 'submission-invalid' }
+    }
     return {
-      observation: {
-        evaluationId: prepared.evaluationId,
-        taskId: prepared.task.taskId,
-        evaluatorSessionId: state.sessionId,
-        envelopeDigest: prepared.assignment.envelopeDigest,
-        requestDigest: sha256(request),
-        evidenceId: evidence.evidenceId,
-        ...state.submission,
-      },
+      observations: submissions.map((submission, index) => {
+        const { taskId, ...observation } = submission
+        if (taskId !== prepared.tasks[index]?.taskId) {
+          throw new Error('controlled evaluator submission task mismatch')
+        }
+        return {
+          evaluationId: prepared.evaluationId,
+          taskId,
+          evaluatorSessionId: state.sessionId,
+          envelopeDigest: prepared.assignments[index]!.envelopeDigest,
+          requestDigest: sha256(request),
+          evidenceId: evidence.evidenceId,
+          ...observation,
+        }
+      }),
     }
   }
 
@@ -3409,6 +3519,7 @@ export class TianwenSkillEvaluationService extends Service {
                   },
                   skill.name,
                   scopedCtx.skills,
+                  'exact-skill',
                 )
                 boundRunId = binding.runId
               })
@@ -4286,31 +4397,37 @@ interface ControlledEvaluatorState {
   readonly sessionId: string
   readonly config: LlmCallConfig
   readonly forbidden: ReadonlySet<string>
-  readonly commonContext: Pick<RunControlledSkillEvaluatorTaskInput, 'goal' | 'input'>
+  readonly commonContexts: readonly Pick<
+    RunControlledSkillEvaluatorTaskInput,
+    'goal' | 'input'
+  >[]
+  readonly expectedTaskIds?: readonly ControlledSkillEvalTaskId[]
   readonly requests: GenerateOptions[]
   agent?: AgentHandle['agent']
   active: boolean
   deadline: number
   bodyCalls: number
-  pendingSubmission?: ControlledEvaluatorSubmission
-  submission?: ControlledEvaluatorSubmission
+  pendingSubmission?: ControlledEvaluatorSubmission | ControlledAggregateEvaluatorSubmission
+  submission?: ControlledEvaluatorSubmission | ControlledAggregateEvaluatorSubmission
   submissionDigest?: Sha256Digest
   reasonCode?: 'timeout' | 'request-contract-mismatch' | 'identity-exposed' | 'submission-invalid'
 }
 
 interface PreparedControlledEvaluator {
   readonly evaluationId: ControlledSkillEvaluationId
-  readonly task: RunControlledSkillEvaluatorTaskInput
-  readonly planned: ControlledSkillEvaluationPlan['tasks'][number]
-  readonly assignment: ControlledSkillEvaluationBlindMap['assignments'][number]
-  readonly envelope: ControlledEvaluatorEnvelope
+  readonly tasks: readonly RunControlledSkillEvaluatorTaskInput[]
+  readonly planned: readonly ControlledSkillEvaluationPlan['tasks'][number][]
+  readonly assignments: readonly ControlledSkillEvaluationBlindMap['assignments'][number][]
+  readonly envelope: ControlledEvaluatorEnvelope | {
+    readonly evaluations: readonly ControlledEvaluatorEnvelope[]
+  }
   readonly handle: AgentHandle
   readonly state: ControlledEvaluatorState
 }
 
 type ControlledEvaluatorRunResult =
-  | { readonly observation: RecordControlledSkillEvaluatorObservationInput; readonly reasonCode?: never }
-  | { readonly observation?: never; readonly reasonCode: ControlledSkillEvaluatorsStopReasonCode }
+  | { readonly observations: readonly RecordControlledSkillEvaluatorObservationInput[]; readonly reasonCode?: never }
+  | { readonly observations?: never; readonly reasonCode: ControlledSkillEvaluatorsStopReasonCode }
 
 function controlledBlindEnvelopeDigest(
   objective: ControlledSkillEvaluationObjective,
@@ -4376,34 +4493,53 @@ function controlledEvaluatorTool(state: ControlledEvaluatorState) {
       },
     },
   }
-  return defineTool({
-    name: 'submit_blind_evaluation',
-    description: 'Submit one blind X/Y score or an allowed insufficient-material result.',
-    parameters: {
-      status: { type: 'string', enum: ['scored', 'inconclusive'], required: true },
-      insufficientMaterial: { type: 'boolean', required: true },
-      reasonCode: {
-        type: 'string',
-        enum: [
-          'score-submitted',
-          'material-missing',
-          'identity-exposed',
-          'objective-facts-incomplete',
-          'provider-failed',
-          'timeout',
-          'score-not-submitted',
-        ],
-        required: true,
-      },
-      scores: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          x: { ...dimension, required: true },
-          y: { ...dimension, required: true },
-        },
+  const submissionProperties = {
+    status: { type: 'string' as const, enum: ['scored', 'inconclusive'], required: true as const },
+    insufficientMaterial: { type: 'boolean' as const, required: true as const },
+    reasonCode: {
+      type: 'string' as const,
+      enum: [
+        'score-submitted',
+        'material-missing',
+        'identity-exposed',
+        'objective-facts-incomplete',
+        'provider-failed',
+        'timeout',
+        'score-not-submitted',
+      ],
+      required: true as const,
+    },
+    scores: {
+      type: 'object' as const,
+      additionalProperties: false,
+      properties: {
+        x: { ...dimension, required: true as const },
+        y: { ...dimension, required: true as const },
       },
     },
+  }
+  const parameters = state.expectedTaskIds === undefined
+    ? submissionProperties
+    : {
+        evaluations: {
+          type: 'array' as const,
+          required: true as const,
+          items: {
+            type: 'object' as const,
+            additionalProperties: false,
+            properties: {
+              taskId: { type: 'string' as const, required: true as const },
+              ...submissionProperties,
+            },
+          },
+        },
+      }
+  return defineTool({
+    name: 'submit_blind_evaluation',
+    description: state.expectedTaskIds === undefined
+      ? 'Submit one blind X/Y score or an allowed insufficient-material result.'
+      : 'Submit the ordered blind X/Y scores for every provided evaluation.',
+    parameters,
     output: {
       schema: { type: 'string', enum: ['evaluation-submitted'] },
       render: (_args, value) => [{ type: 'text', text: value }],
@@ -4445,7 +4581,12 @@ function controlledEvaluatorGuard(
     return 'controlled evaluator already submitted'
   }
   try {
-    state.pendingSubmission = parseControlledEvaluatorSubmission(execution.arguments)
+    state.pendingSubmission = state.expectedTaskIds === undefined
+      ? parseControlledEvaluatorSubmission(execution.arguments)
+      : parseControlledAggregateEvaluatorSubmission(
+          execution.arguments,
+          state.expectedTaskIds,
+        )
   } catch {
     cancelControlledEvaluator(state, 'submission-invalid')
     return 'controlled evaluator submission invalid'

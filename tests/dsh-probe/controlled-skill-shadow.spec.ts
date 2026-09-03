@@ -345,7 +345,13 @@ function openShadow(
   ledger: EvolutionLedger,
   evaluationId: string,
 ): ControlledSkillShadowPlan {
-  const input = { evaluationId, tasks: shadowTasks() }
+  const evaluation = ledger.getControlledSkillEvaluation(evaluationId as never)!
+  const input = {
+    evaluationId,
+    tasks: evaluation.evidencePurpose === 'controlled-product'
+      ? shadowTasks().slice(0, 1)
+      : shadowTasks(),
+  }
   const receipt = (ledger as unknown as {
     openControlledSkillShadow(input: typeof input): { shadowId: string; duplicate: boolean }
   }).openControlledSkillShadow(input)

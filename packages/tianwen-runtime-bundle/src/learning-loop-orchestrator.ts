@@ -302,7 +302,8 @@ export function createExplicitCorrectionLearningLoopExecutor(
       await assertFrozenEnvironment(context)
       const shadow = context.ctx.tianwenEvolution.getControlledSkillShadow(context.status.shadowId as never)
       if (shadow === undefined) throw new Error('controlled promotion Shadow is unavailable')
-      const pointer = context.ctx.tianwenEvolution.initializeControlledSkillScopePointer({ shadowId: shadow.shadowId })
+      const pointer = context.ctx.tianwenEvolution.getControlledSkillScopePointer(shadow.scopeKey)
+        ?? context.ctx.tianwenEvolution.initializeControlledSkillScopePointer({ shadowId: shadow.shadowId })
       const transitionInput = built.protocol.buildTransitionInput({
         root: config.root, shadowId: shadow.shadowId, kind: 'promote', expectedRevision: pointer.revision,
         materializeWorkspace: config.materializeWorkspace,

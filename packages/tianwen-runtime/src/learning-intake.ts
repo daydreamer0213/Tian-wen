@@ -204,6 +204,7 @@ export class TianwenLearningIntakeService extends Service {
     input: RuntimeRunBindingInput,
     skillName: string,
     skills: Pick<Context['skills'], 'get'>,
+    resolution: 'active-pointer' | 'exact-skill' = 'active-pointer',
   ): Promise<RuntimeGovernedRunBindingReceipt> {
     const session = agent.session
     const before = sessionDigest(session.events)
@@ -229,8 +230,9 @@ export class TianwenLearningIntakeService extends Service {
     }
     // A controlled pointer changes only the manifest captured for a new Run;
     // existing manifests stay immutable in Evolution.
-    const pointer = this.ctx.tianwenEvolution
-      .getControlledSkillScopePointer(input.scopeKey)
+    const pointer = resolution === 'active-pointer'
+      ? this.ctx.tianwenEvolution.getControlledSkillScopePointer(input.scopeKey)
+      : undefined
     const candidate = pointer === undefined ? undefined
       : this.ctx.tianwenEvolution.listSkillCandidates().find(value => {
         if (value.payload.name !== skill.name) return false

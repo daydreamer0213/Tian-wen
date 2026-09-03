@@ -293,8 +293,9 @@ function prepareTasks(
   value: unknown,
   evaluation: ControlledSkillEvaluationPlan,
 ): readonly ControlledSkillShadowTaskInput[] {
-  if (!Array.isArray(value) || value.length !== 5) {
-    throw new TypeError('controlled Skill Shadow requires exactly five tasks')
+  const expectedCount = evaluation.evidencePurpose === 'controlled-product' ? 1 : 5
+  if (!Array.isArray(value) || value.length !== expectedCount) {
+    throw new TypeError(`controlled Skill Shadow requires exactly ${expectedCount} tasks`)
   }
   const tasks = value.map(prepareTask)
   if (
@@ -760,9 +761,10 @@ export function parseControlledSkillShadowResult(value: unknown): ControlledSkil
     throw new TypeError('controlled Skill Shadow result is invalid')
   }
   const runs = value.runs.map(item => prepareRun(item))
+  const expectedCount = value.evidenceClaim === 'controlled-product' ? 1 : 5
   const terminalIndex = runs.findIndex(run => run.outcome !== 'met')
   const verdict = terminalIndex < 0
-    ? runs.length === 5 ? 'pass' : undefined
+    ? runs.length === expectedCount ? 'pass' : undefined
     : runs[terminalIndex]!.outcome === 'not-met' ? 'rejected' : 'inconclusive'
   const reason = verdict === 'pass'
     ? 'all-shadow-runs-qualified'

@@ -79,18 +79,21 @@ function validSubmission(source: string) {
   }
 }
 
-function blindScore(taskId: string) {
+function aggregateBlindScore(taskIds: readonly string[]) {
   const dimensions = {
     relevance: 3,
     correctnessReasoning: 3,
     clarityUsability: 3,
     scopeRestraint: 3,
   }
-  return toolCallResponse(`${taskId}-blind-score`, 'submit_blind_evaluation', {
-    status: 'scored',
-    insufficientMaterial: false,
-    reasonCode: 'score-submitted',
-    scores: { x: dimensions, y: dimensions },
+  return toolCallResponse('aggregate-blind-score', 'submit_blind_evaluation', {
+    evaluations: taskIds.map(taskId => ({
+      taskId,
+      status: 'scored',
+      insufficientMaterial: false,
+      reasonCode: 'score-submitted',
+      scores: { x: dimensions, y: dimensions },
+    })),
   })
 }
 
@@ -128,7 +131,7 @@ describe('research-summary controlled product Runtime', () => {
           task.expectedSubmissions[role],
         ),
       ])),
-      ...tasks.map(task => blindScore(task.taskId)),
+      aggregateBlindScore(tasks.map(task => task.taskId)),
       ...shadowTasks.flatMap(task => [
         toolCallResponse(`${task.taskId}-skill`, 'skill', {
           name: protocol.parentSkill.name,
@@ -293,6 +296,12 @@ describe('research-summary controlled product Runtime', () => {
         ))
       expect(evaluators.state).toBe('terminal')
       expect(evaluators.result?.mechanismVerdict).toBe('pass')
+      const observations = harness.ctx.tianwenEvolution
+        .listControlledSkillEvaluatorObservations(receipt.evaluationId)
+      expect(observations).toHaveLength(5)
+      expect(new Set(observations.map(item => item.evaluatorSessionId)).size).toBe(1)
+      expect(new Set(observations.map(item => item.requestDigest)).size).toBe(1)
+      expect(new Set(observations.map(item => item.evidenceId)).size).toBe(1)
       const shadow = await harness.ctx.tianwenSkillEvaluation.runControlledShadow({
         evaluationId: receipt.evaluationId,
         tasks: shadowTasks,
@@ -315,6 +324,31 @@ describe('research-summary controlled product Runtime', () => {
       expect(transition.transition.state).toBe('verified')
       expect(harness.ctx.tools.schemas().map(schema => schema.name))
         .not.toContain(RESEARCH_SUMMARY_TOOL_NAME)
+
+      const sessionIds = (await harness.ctx.sessionPersistence.list())
+        .map(header => String(header.id))
+      const runCounts = {
+        arms: sessionIds.filter(id => id.startsWith(
+          'session:controlled-eval:product:',
+        ) && !id.includes(':aggregate:')).length,
+        evaluators: sessionIds.filter(id => id.startsWith(
+          'session:controlled-eval:product:',
+        ) && id.includes(':aggregate:')).length,
+        shadow: sessionIds.filter(id => id.startsWith(
+          'session:controlled-shadow:product:',
+        )).length,
+        activation: sessionIds.filter(id => id.startsWith(
+          'session:controlled-activation:product:',
+        )).length,
+      }
+      expect(runCounts).toEqual({
+        arms: 10,
+        evaluators: 1,
+        shadow: 1,
+        activation: 1,
+      })
+      expect(Object.values(runCounts).reduce((sum, count) => sum + count, 0))
+        .toBe(13)
 
       const firstBaseline = await harness.ctx.sessionPersistence.inspect(
         tasks[0]!.baselineSessionId as never,

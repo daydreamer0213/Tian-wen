@@ -121,7 +121,10 @@ afterEach(() => {
   }
 })
 
-function controlledProtocol() {
+function controlledProtocol(
+  acceptanceContract: Parameters<EvolutionLedger['recordRunBinding']>[0]['acceptanceContract'] =
+    acceptance,
+) {
   return {
     rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
     tasks: taskTypes.map((taskType, index) => ({
@@ -135,7 +138,7 @@ function controlledProtocol() {
       verifierContractDigest: sha256(`activation-evaluation-verifier:${index}`),
       stopConditionDigest: sha256(`activation-evaluation-stop:${index}`),
       evaluatorMaterialContractDigest: sha256(`activation-evaluation-material:${index}`),
-      acceptanceContract: acceptance,
+      acceptanceContract,
       acceptanceSubjectDigest: sha256(`activation-evaluation-subject:${index}`),
       allowedTools: ['skill', 'verify_summary'],
       stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
@@ -151,7 +154,11 @@ function controlledProtocol() {
   }
 }
 
-function shadowTasks() {
+function shadowTasks(
+  namespace = 'default',
+  acceptanceContract: Parameters<EvolutionLedger['recordRunBinding']>[0]['acceptanceContract'] =
+    acceptance,
+) {
   return taskTypes.map((taskType, index) => ({
     taskId: `shadow-task:${taskType}` as const,
     goalDigest: sha256(`activation-shadow-goal:${index}`),
@@ -161,11 +168,11 @@ function shadowTasks() {
     authorizationDigest: sha256(`activation-shadow-authorization:${index}`),
     verifierContractDigest: sha256(`activation-shadow-verifier:${index}`),
     stopConditionDigest: sha256(`activation-shadow-stop:${index}`),
-    acceptanceContract: acceptance,
+    acceptanceContract,
     acceptanceSubjectDigest: sha256(`activation-shadow-subject:${index}`),
     allowedTools: ['skill', 'verify_summary'],
     stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
-    sessionId: `session:controlled-activation-shadow:${taskType}`,
+    sessionId: `session:controlled-activation-shadow:${namespace}:${taskType}`,
   }))
 }
 
@@ -193,30 +200,41 @@ function seedPassingShadow(
   root: string,
   evidencePurpose: 'controlled-product' | 'development-only-synthetic-defect' =
     'development-only-synthetic-defect',
+  options: {
+    readonly ledger?: EvolutionLedger
+    readonly namespace?: string
+    readonly parent?: Parameters<EvolutionLedger['recordRunSkillManifest']>[0]['skill']
+    readonly candidateContent?: string
+  } = {},
 ) {
-  const ledger = new EvolutionLedger(root, {
+  const ledger = options.ledger ?? new EvolutionLedger(root, {
     clock: () => '2026-08-23T06:00:00.000Z',
   })
+  const namespace = options.namespace ?? 'default'
+  const fixtureParent = options.parent ?? parentSkill
+  const fixtureAcceptance = namespace === 'default'
+    ? acceptance
+    : { ...acceptance, problemCategory: `${acceptance.problemCategory}-${namespace}` }
   const seeded = [
     ['first', 'not-met', 'a'],
     ['second', 'not-met', 'b'],
     ['counterexample', 'met', 'c'],
   ] as const
   const runs = seeded.map(([suffix, verdict, marker]) => {
-    const sessionId = `session:activation-seed:${suffix}`
+    const sessionId = `session:activation-seed:${namespace}:${suffix}`
     const binding = ledger.recordRunBinding({
       goalRef: 'goal:controlled-activation-seed',
-      taskRef: `task:controlled-activation-seed:${suffix}`,
+      taskRef: `task:controlled-activation-seed:${namespace}:${suffix}`,
       sessionId,
       scopeKey: 'project:tianwen/capability:controlled-activation-summary',
-      acceptanceContract: acceptance,
+      acceptanceContract: fixtureAcceptance,
     })
     const manifest = ledger.recordRunSkillManifest({
       runId: binding.runId,
-      skill: parentSkill,
+      skill: fixtureParent,
     })
-    const sessionDigest = sha256(`activation-seed-session:${marker}`)
-    const evidenceId = sha256(`activation-seed-evidence:${marker}`)
+    const sessionDigest = sha256(`activation-seed-session:${namespace}:${marker}`)
+    const evidenceId = sha256(`activation-seed-evidence:${namespace}:${marker}`)
     const outcome = ledger.recordOutcomeIntake({
       runId: binding.runId,
       verdict,
@@ -228,9 +246,9 @@ function seedPassingShadow(
       parentVersionId: manifest.parentVersionId,
       sessionId,
       sessionDigest,
-      skillName: parentSkill.name,
-      contentDigest: sha256(parentSkill.content),
-      skillEvidenceId: sha256(`activation-seed-skill-evidence:${marker}`),
+      skillName: fixtureParent.name,
+      contentDigest: sha256(fixtureParent.content),
+      skillEvidenceId: sha256(`activation-seed-skill-evidence:${namespace}:${marker}`),
       acceptanceEvidenceId: evidenceId,
       skillCallSeq: 10,
       skillResultSeq: 11,
@@ -242,7 +260,7 @@ function seedPassingShadow(
   const protocol = ledger.freezeControlledSkillEvalProtocol({
     ticketId,
     evidencePurpose,
-    protocol: controlledProtocol(),
+    protocol: controlledProtocol(fixtureAcceptance),
   })
   const openedCase = ledger.openLearningCase({
     ticketId,
@@ -252,7 +270,7 @@ function seedPassingShadow(
   const attribution = ledger.recordAttribution({
     caseId: learningCase.caseId,
     resolution: 'dsh-skill',
-    targetSkillName: parentSkill.name,
+    targetSkillName: fixtureParent.name,
     hypothesis: 'The parent omits verified result-first ordering.',
     supportingEvidenceIds: learningCase.supportingEvidenceIds,
     counterevidenceIds: learningCase.counterevidence.flatMap(item => item.evidenceIds),
@@ -271,12 +289,13 @@ function seedPassingShadow(
   const candidateReceipt = ledger.recordSkillCandidate({
     lessonId: lesson.lessonId,
     payload: {
-      name: parentSkill.name,
+      name: fixtureParent.name,
       description: 'Summarize one verified controlled observation.',
-      whenToUse: parentSkill.whenToUse,
-      invocation: parentSkill.invocation,
-      source: parentSkill.source,
-      content: '# Controlled activation summary\n\nState the verified result before interpretation.',
+      whenToUse: fixtureParent.whenToUse,
+      invocation: fixtureParent.invocation,
+      source: fixtureParent.source,
+      content: options.candidateContent
+        ?? '# Controlled activation summary\n\nState the verified result before interpretation.',
     },
     evidenceIds: [
       ...learningCase.supportingEvidenceIds,
@@ -286,11 +305,11 @@ function seedPassingShadow(
   const evaluationReceipt = ledger.openControlledSkillEvaluation({
     candidateId: candidateReceipt.candidateId,
     protocolId: protocol.protocolId,
-    sessionAllocations: controlledProtocol().tasks.map(task => ({
+    sessionAllocations: controlledProtocol(fixtureAcceptance).tasks.map(task => ({
       taskId: task.taskId,
-      baselineSessionId: `session:activation-evaluation:${task.taskType}:baseline`,
-      candidateSessionId: `session:activation-evaluation:${task.taskType}:candidate`,
-      evaluatorSessionId: `session:activation-evaluation:${task.taskType}:evaluator`,
+      baselineSessionId: `session:activation-evaluation:${namespace}:${task.taskType}:baseline`,
+      candidateSessionId: `session:activation-evaluation:${namespace}:${task.taskType}:candidate`,
+      evaluatorSessionId: `session:activation-evaluation:${namespace}:${task.taskType}:evaluator`,
     })),
   })
   const evaluation = ledger.getControlledSkillEvaluation(
@@ -328,7 +347,7 @@ function seedPassingShadow(
         }),
       })
       const skill = arm.role === 'baseline'
-        ? parentSkill
+        ? fixtureParent
         : { ...candidate.payload, provider: 'runtime' }
       const manifest = ledger.recordRunSkillManifest({ runId: binding.runId, skill })
       const outcome = arm.role === 'baseline' && index === 0 ? 'not-met' : 'met'
@@ -345,9 +364,11 @@ function seedPassingShadow(
         parentVersionId: manifest.parentVersionId,
         sessionId: arm.sessionId,
         sessionDigest,
-        skillName: parentSkill.name,
+        skillName: fixtureParent.name,
         contentDigest: sha256(skill.content),
-        skillEvidenceId: sha256(`activation-evaluation-skill:${task.taskId}:${arm.role}`),
+        skillEvidenceId: sha256(
+          `activation-evaluation-skill:${namespace}:${task.taskId}:${arm.role}`,
+        ),
         acceptanceEvidenceId: evidenceId,
         skillCallSeq: 10,
         skillResultSeq: 11,
@@ -387,8 +408,8 @@ function seedPassingShadow(
       taskId: task.taskId,
       evaluatorSessionId: task.evaluatorSessionId,
       envelopeDigest: assignment.envelopeDigest,
-      requestDigest: sha256(`activation-evaluator-request:${task.taskId}`),
-      evidenceId: sha256(`activation-evaluator-evidence:${task.taskId}`),
+      requestDigest: sha256(`activation-evaluator-request:${namespace}:${task.taskId}`),
+      evidenceId: sha256(`activation-evaluator-evidence:${namespace}:${task.taskId}`),
       status: 'scored',
       insufficientMaterial: false,
       reasonCode: 'score-submitted',
@@ -401,7 +422,9 @@ function seedPassingShadow(
   ledger.recordControlledSkillEvaluationResult({ evaluationId: evaluation.evaluationId })
   const shadowReceipt = ledger.openControlledSkillShadow({
     evaluationId: evaluation.evaluationId,
-    tasks: shadowTasks(),
+    tasks: evidencePurpose === 'controlled-product'
+      ? shadowTasks(namespace, fixtureAcceptance).slice(0, 1)
+      : shadowTasks(namespace, fixtureAcceptance),
   })
   const shadow = ledger.getControlledSkillShadow(shadowReceipt.shadowId)!
   const shadowRuns = shadow.tasks.map(task => {
@@ -422,8 +445,8 @@ function seedPassingShadow(
       runId: binding.runId,
       skill: { ...candidate.payload, provider: 'runtime' },
     })
-    const sessionDigest = sha256(`activation-shadow-session:${task.taskId}`)
-    const evidenceId = sha256(`activation-shadow-evidence:${task.taskId}`)
+    const sessionDigest = sha256(`activation-shadow-session:${namespace}:${task.taskId}`)
+    const evidenceId = sha256(`activation-shadow-evidence:${namespace}:${task.taskId}`)
     ledger.recordOutcomeIntake({
       runId: binding.runId,
       verdict: 'met',
@@ -437,7 +460,7 @@ function seedPassingShadow(
       sessionDigest,
       skillName: candidate.payload.name,
       contentDigest: sha256(candidate.payload.content),
-      skillEvidenceId: sha256(`activation-shadow-skill:${task.taskId}`),
+      skillEvidenceId: sha256(`activation-shadow-skill:${namespace}:${task.taskId}`),
       acceptanceEvidenceId: evidenceId,
       skillCallSeq: 10,
       skillResultSeq: 11,
@@ -758,6 +781,37 @@ describe('controlled Skill activation governance', () => {
     expect(ledger.listEvents()).toHaveLength(before)
     expect(ledger.getControlledSkillTransitionReceipt(promote.transitionId))
       .toMatchObject({ state: 'pending-post-check' })
+  })
+
+  it('blocks a later same-scope shadow while an earlier transition is pending', () => {
+    const root = fixtureRoot('cross-shadow-pending-transition')
+    const first = seedPassingShadow(root, 'controlled-product')
+    first.ledger.initializeControlledSkillScopePointer({ shadowId: first.shadow.shadowId })
+    const pending = begin(first.ledger, first.shadow.shadowId, 'promote', 1)
+    const second = seedPassingShadow(root, 'controlled-product', {
+      ledger: first.ledger,
+      namespace: 'second-shadow',
+      parent: { ...first.candidate.payload, provider: 'runtime' },
+      candidateContent: [
+        '# Controlled activation summary',
+        '',
+        'State the verified result and preserve evidence order before interpretation.',
+      ].join('\n'),
+    })
+
+    expect(second.shadow.scopeKey).toBe(first.shadow.scopeKey)
+    expect(second.shadow.parentVersionId).toBe(first.shadow.candidateVersionId)
+    expect(first.ledger.getControlledSkillScopePointer(first.shadow.scopeKey))
+      .toEqual(pending.targetPointer)
+    expect(() => first.ledger.beginControlledSkillTransition({
+      shadowId: second.shadow.shadowId,
+      kind: 'promote',
+      expectedRevision: pending.targetPointer.revision,
+      postCheck: postCheck('promote', pending.targetPointer.revision),
+    })).toThrow(/compare-and-set/u)
+    expect(first.ledger.getControlledSkillScopePointer(first.shadow.scopeKey))
+      .toEqual(pending.targetPointer)
+    expect(first.ledger.listControlledSkillTransitions()).toHaveLength(1)
   })
 
   it('rejects a legacy v2 post-check binding before transition completion', () => {

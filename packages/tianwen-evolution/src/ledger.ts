@@ -223,6 +223,7 @@ import type {
   RecordControlledSkillEvaluatorObservationInput,
 } from './controlled-skill-evaluation.js'
 import {
+  CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1,
   parseControlledSkillActivationFailure,
   parseControlledSkillPointerInitialization,
   parseControlledSkillTransition,
@@ -3394,11 +3395,8 @@ export class EvolutionLedger {
       return { transitionId: existingId, duplicate: true }
     }
     const initialization = this.#controlledSkillPointerInitializations.get(shadowId)
-    if (initialization === undefined) {
-      throw new LedgerIntegrityError(`controlled Skill pointer is not initialized: ${shadowId}`)
-    }
     const previousPointer = this.#controlledSkillScopePointers.get(
-      initialization.pointer.scopeKey,
+      initialization?.pointer.scopeKey ?? recommendation.source.scopeKey,
     )
     if (previousPointer === undefined) {
       throw new LedgerIntegrityError('controlled Skill scope pointer is unavailable')
@@ -5635,15 +5633,23 @@ export class EvolutionLedger {
   #validateControlledSkillTransitionOrder(
     transition: ControlledSkillTransition,
   ): void {
-    const initialization = this.#controlledSkillPointerInitializations
-      .get(transition.shadowId)
     const pointer = this.#controlledSkillScopePointers.get(transition.source.scopeKey)
+    const recommendation = this.#controlledSkillPromotionRecommendation(
+      transition.shadowId,
+    )
+    const anotherPendingTransition = [...this.#controlledSkillTransitions.values()]
+      .some(item => item.source.scopeKey === transition.source.scopeKey
+        && item.transitionId !== transition.transitionId
+        && item.shadowId !== transition.shadowId
+        && !this.#controlledSkillTransitionVerifications.has(item.transitionId)
+        && !this.#controlledSkillActivationFailures.has(item.transitionId))
     if (
-      initialization === undefined
-      || pointer === undefined
+      pointer === undefined
+      || anotherPendingTransition
       || canonicalJson(pointer) !== canonicalJson(transition.previousPointer)
-      || transition.recommendationDigest !== initialization.recommendationDigest
-      || transition.authorizationDigest !== initialization.authorizationDigest
+      || transition.recommendationDigest !== sha256(recommendation)
+      || transition.authorizationDigest
+        !== sha256(CONTROLLED_SKILL_LIFECYCLE_AUTHORIZATION_V1)
     ) {
       throw new LedgerIntegrityError('controlled Skill transition failed compare-and-set')
     }
@@ -5657,7 +5663,6 @@ export class EvolutionLedger {
     if (transition.kind === 'promote') {
       if (
         prior.length !== 0
-        || pointer.revision !== 1
         || pointer.activeVersionId !== transition.source.parentVersionId
         || pointer.payloadDigest !== transition.source.parentPayloadDigest
       ) throw new LedgerIntegrityError('controlled Skill promote is out of order')
@@ -5673,14 +5678,12 @@ export class EvolutionLedger {
       if (
         prior.length !== 1
         || previous.kind !== 'promote'
-        || pointer.revision !== 2
       ) throw new LedgerIntegrityError('controlled Skill rollback is out of order')
       return
     }
     if (
       prior.length !== 2
       || previous.kind !== 'rollback'
-      || pointer.revision !== 3
     ) throw new LedgerIntegrityError('controlled Skill restore is out of order')
   }
 

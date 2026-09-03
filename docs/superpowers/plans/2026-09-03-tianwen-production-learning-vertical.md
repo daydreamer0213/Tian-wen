@@ -414,14 +414,14 @@ git commit -m "feat: evaluate research summaries with product protocol"
 
 **Interfaces:**
 - Consumes: five completed paired objectives whose canonical materials contain no role, Session, Candidate, or version identity.
-- Produces: five existing `ControlledSkillEvaluatorObservation` facts from one shared evaluator Session and one aggregate submission Evidence record; one holdout `ControlledSkillShadowRun`; a maximum normal-path count of 13 model requests.
+- Produces: five existing `ControlledSkillEvaluatorObservation` facts from one shared evaluator Session and one aggregate submission Evidence record; one holdout `ControlledSkillShadowRun`; a maximum normal-path count of 13 controlled Runs. A Run may contain the bounded native Skill call followed by its product submission tool call, so raw Provider request count is not the acceptance metric.
 
-- [ ] Write failing count and gate-independence tests first. Assert that one learning promotion creates 10 arm requests, one aggregate evaluator request, one unseen Shadow request, and one activation request. Assert that the Shadow packet digest is absent from all paired packet digests.
+- [ ] Write failing count and gate-independence tests first. Assert that one learning promotion creates 10 arm Runs, one aggregate evaluator Run, one unseen Shadow Run, and one activation Run. Assert that the Shadow packet digest is absent from all paired packet digests.
 
 ```ts
-expect(requestCounts).toEqual({ arms: 10, evaluators: 1, shadow: 1, activation: 1 })
+expect(runCounts).toEqual({ arms: 10, evaluators: 1, shadow: 1, activation: 1 })
 expect(new Set(pairedPacketDigests)).not.toContain(holdoutPacketDigest)
-expect(totalModelRequests).toBe(13)
+expect(totalControlledRuns).toBe(13)
 ```
 
 - [ ] Add a mutation table with exactly five named faults and one expected owner for each. Do not add runtime flags. Tests directly mutate fixture Skill output, evaluator output, holdout output, or pointer resolution.
@@ -491,7 +491,7 @@ pnpm run typecheck
 git diff --check
 ```
 
-Expected: PASS; request count is 13, the holdout is unseen, and each retained gate owns at least one fault mutation.
+Expected: PASS; controlled Run count is 13, the holdout is unseen, and each retained gate owns at least one fault mutation.
 
 - [ ] Commit.
 
