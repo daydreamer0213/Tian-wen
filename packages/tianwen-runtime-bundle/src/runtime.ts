@@ -111,6 +111,55 @@ interface ConfiguredReportInput {
   readonly delivery: 'quiet' | 'next-step'
 }
 
+type LiveAgent = NonNullable<ReturnType<Context['agents']['get']>>
+
+function isActivationClosing(error: unknown): boolean {
+  return error instanceof Error
+    && 'code' in error
+    && error.code === 'ACTIVATION_CLOSING'
+}
+
+async function waitForAgentDisposed(ctx: Context, agent: LiveAgent): Promise<void> {
+  if (ctx.agents.get(agent.session.id) !== agent) return
+  const settled = Promise.withResolvers<void>()
+  const timeout = AbortSignal.timeout(30_000)
+  const offDisposed = ctx.on('agent/disposed', ({ agent: disposed }) => {
+    if (disposed === agent) settled.resolve()
+  })
+  const onTimeout = () => settled.reject(timeout.reason)
+  timeout.addEventListener('abort', onTimeout, { once: true })
+  try {
+    if (ctx.agents.get(agent.session.id) === agent) await settled.promise
+  } finally {
+    offDisposed()
+    timeout.removeEventListener('abort', onTimeout)
+  }
+}
+
+async function reportFromLiveChild(
+  ctx: Context,
+  input: ConfiguredReportInput,
+  parent: LiveAgent,
+  live: LiveAgent,
+): Promise<string | undefined> {
+  const status = input.resolve()
+  if (!exactLearningAnalysisLiveChild(status, live)) {
+    throw new Error('report requires the exact bound native child')
+  }
+  try {
+    const messageId = String(await ctx.subagents.reportFrom(
+      live,
+      [{ type: 'text', text: input.text }],
+      { delivery: input.delivery, signal: AbortSignal.timeout(30_000) },
+    ))
+    return confirmConfiguredReportPersisted(ctx, input, parent, messageId)
+  } catch (error) {
+    if (!isActivationClosing(error)) throw error
+    await waitForAgentDisposed(ctx, live)
+    return undefined
+  }
+}
+
 async function confirmConfiguredReportPersisted(
   ctx: Context,
   input: ConfiguredReportInput,
@@ -164,13 +213,8 @@ async function deliverConfiguredReport(
   }
   const live = ctx.agents.get(SessionId(status.childSessionId))
   if (live !== undefined) {
-    if (!exactLearningAnalysisLiveChild(status, live)) {
-      throw new Error('report requires the exact bound native child')
-    }
-    const messageId = String(await ctx.subagents.reportFrom(live, [{ type: 'text', text: input.text }], {
-      delivery: input.delivery, signal: AbortSignal.timeout(30_000),
-    }))
-    return confirmConfiguredReportPersisted(ctx, input, parent, messageId)
+    const messageId = await reportFromLiveChild(ctx, input, parent, live)
+    if (messageId !== undefined) return messageId
   }
   const recovery = new AbortController()
   const delivery = Promise.withResolvers<string>()
@@ -200,15 +244,8 @@ async function deliverConfiguredReport(
   try {
     const racedLive = ctx.agents.get(SessionId(status.childSessionId))
     if (racedLive !== undefined) {
-      if (!exactLearningAnalysisLiveChild(status, racedLive)) {
-        throw new Error('report requires the exact bound native child')
-      }
-      const messageId = String(await ctx.subagents.reportFrom(
-        racedLive,
-        [{ type: 'text', text: input.text }],
-        { delivery: input.delivery, signal: AbortSignal.timeout(30_000) },
-      ))
-      return confirmConfiguredReportPersisted(ctx, input, parent, messageId)
+      const messageId = await reportFromLiveChild(ctx, input, parent, racedLive)
+      if (messageId !== undefined) return messageId
     }
     if (!await hasExactLearningAnalysisChild(ctx, status)) {
       throw new Error('report requires the exact durable native child')

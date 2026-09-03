@@ -776,7 +776,7 @@ describe('@tianwen/runtime-bundle', () => {
         shell: false,
         // This is a correctness probe, not a cold-boot performance gate. The
         // isolated Windows Profile can spend tens of seconds preparing links.
-        timeout: 120_000,
+        timeout: 180_000,
         windowsHide: true,
       })
 
@@ -789,7 +789,7 @@ describe('@tianwen/runtime-bundle', () => {
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true })
     }
-  }, 180_000)
+  }, 240_000)
 
   it('ships one fixed offline smoke entry', async () => {
     const manifest = json(resolve(packageRoot, 'package.json')) as {

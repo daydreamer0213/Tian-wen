@@ -12,6 +12,7 @@ import {
 } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { LearningConsentNoticeBinding } from '@tianwen/evolution'
+import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 
 const POLICY_VERSION = 'tianwen-auto-analysis.v1' as const
 export const LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID =
@@ -84,8 +85,11 @@ function noticeBinding(mainSessionId: string): LearningConsentNoticeBinding {
 function isRootSession(header: {
   readonly origin?: string
   readonly parentSession?: unknown
+  readonly agentPreset?: string
 }): boolean {
-  return header.parentSession === undefined && header.origin !== 'subagent'
+  return header.parentSession === undefined
+    && header.origin !== 'subagent'
+    && header.agentPreset !== TIANWEN_CONTROLLED_AGENT_PRESET
 }
 
 function hasCompletedNotice(events: readonly SessionEvent[]): boolean {

@@ -17,6 +17,7 @@ import {
   RESEARCH_SUMMARY_SCOPE,
   RESEARCH_SUMMARY_SKILL_NAME,
   RESEARCH_SUMMARY_TOOL_NAME,
+  TIANWEN_CONTROLLED_AGENT_PRESET,
   createResearchSummaryTool,
   parseResearchPacket,
   type ResearchPacket,
@@ -74,7 +75,9 @@ declare module '@deepseek-ai/cordis' {
 
 function isRootSession(agent: Agent): boolean {
   const header = agent.session.header
-  return header.parentSession === undefined && header.origin !== 'subagent'
+  return header.parentSession === undefined
+    && header.origin !== 'subagent'
+    && header.agentPreset !== TIANWEN_CONTROLLED_AGENT_PRESET
 }
 
 function exactObject(value: unknown, expected: unknown): boolean {

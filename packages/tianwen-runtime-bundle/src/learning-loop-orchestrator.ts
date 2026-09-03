@@ -618,17 +618,28 @@ function preCandidateStatus(status: LearningLoopPhaseStatus): LearningLoopPhaseS
 
 /** One live-parent admission lane per durable analysis id; no in-memory queue. */
 export class TianwenLearningLoopService extends Service {
-  static inject = ['agents', 'tianwenEvolution', 'tianwenLearningAnalysisChild'] as const
-  readonly #executor: LearningLoopControlledExecutor | undefined
-  readonly #timer: LearningLoopTimer
-  readonly #activeAnalysisIds = new Set<string>()
-  readonly #rerunAnalysisIds = new Set<string>()
-  #livenessTimer: unknown | undefined
+  static inject = [
+    'agentDefaultModel',
+    'agents',
+    'llm',
+    'sessionPersistence',
+    'sessions',
+    'subagents',
+    'tianwenEvolution',
+    'tianwenLearningAnalysisChild',
+    'tianwenSkillEvaluation',
+    'tools',
+  ] as const
+  private readonly executor: LearningLoopControlledExecutor | undefined
+  private readonly timer: LearningLoopTimer
+  private readonly activeAnalysisIds = new Set<string>()
+  private readonly rerunAnalysisIds = new Set<string>()
+  private livenessTimer: unknown | undefined
 
   constructor(ctx: Context, config: TianwenLearningLoopConfig = {}) {
     super(ctx, 'tianwenLearningLoop')
-    this.#executor = config.executor
-    this.#timer = config.timer ?? defaultLearningLoopTimer()
+    this.executor = config.executor
+    this.timer = config.timer ?? defaultLearningLoopTimer()
   }
 
   protected [Service.init](): void {
@@ -642,25 +653,25 @@ export class TianwenLearningLoopService extends Service {
     })
     this.ctx.effect(() => offAgent, 'tianwen-learning-loop.agent-wake.dispose')
     this.ctx.effect(() => () => {
-      if (this.#livenessTimer !== undefined) {
-        this.#timer.clearTimeout(this.#livenessTimer)
-        this.#livenessTimer = undefined
+      if (this.livenessTimer !== undefined) {
+        this.timer.clearTimeout(this.livenessTimer)
+        this.livenessTimer = undefined
       }
     }, 'tianwen-learning-loop.liveness.dispose')
-    this.#armLiveness()
+    this.armLiveness()
   }
 
   async schedule(analysisId: string): Promise<void> {
-    if (this.#activeAnalysisIds.has(analysisId)) {
+    if (this.activeAnalysisIds.has(analysisId)) {
       // A reconciliation can arrive after the lane's last support check. Keep
       // one exact rerun marker; it is not a general queue.
-      this.#rerunAnalysisIds.add(analysisId)
+      this.rerunAnalysisIds.add(analysisId)
       return
     }
-    this.#activeAnalysisIds.add(analysisId)
+    this.activeAnalysisIds.add(analysisId)
     try {
       await drainLearningLoopLaneWithWake({
-        takeWake: () => this.#rerunAnalysisIds.delete(analysisId),
+        takeWake: () => this.rerunAnalysisIds.delete(analysisId),
         read: () => {
           const current = this.ctx.tianwenEvolution.getLearningAnalysis(analysisId as never)
           return current as unknown as LearningLoopPhaseStatus | undefined
@@ -668,16 +679,16 @@ export class TianwenLearningLoopService extends Service {
         advance: status => this.advance(status),
       })
     } finally {
-      this.#activeAnalysisIds.delete(analysisId)
-      this.#rerunAnalysisIds.delete(analysisId)
-      this.#armLiveness()
+      this.activeAnalysisIds.delete(analysisId)
+      this.rerunAnalysisIds.delete(analysisId)
+      this.armLiveness()
     }
   }
 
   private async advance(status: LearningLoopPhaseStatus): Promise<void> {
-    const executor = this.#executor
+    const executor = this.executor
     const contextFor = (current: LearningLoopPhaseStatus): LearningLoopExecutionContext => ({ ctx: this.ctx, status: current })
-    await this.#reportProgress(status)
+    await this.reportProgress(status)
     await runLearningLoopPhase({
       status,
       hasActiveSupport: current => this.hasActiveSupport(current),
@@ -718,26 +729,26 @@ export class TianwenLearningLoopService extends Service {
     })
   }
 
-  async #reportProgress(status: LearningLoopPhaseStatus): Promise<void> {
-    const progress = nextLearningLoopProgress(status, this.#timer.now())
-    if (progress === undefined || this.#executor?.progress === undefined) return
+  private async reportProgress(status: LearningLoopPhaseStatus): Promise<void> {
+    const progress = nextLearningLoopProgress(status, this.timer.now())
+    if (progress === undefined || this.executor?.progress === undefined) return
     try {
-      await this.#executor.progress({ ctx: this.ctx, status }, progress)
+      await this.executor.progress({ ctx: this.ctx, status }, progress)
     } catch {
       // Progress is best-effort and never becomes authority for evaluation.
       // A durable pending cursor is retried on the next ordinary or timer wake.
     }
   }
 
-  #armLiveness(): void {
-    if (this.#livenessTimer !== undefined) return
+  private armLiveness(): void {
+    if (this.livenessTimer !== undefined) return
     if (!this.ctx.tianwenEvolution.listLearningAnalyses().some(progressActive)) return
-    this.#livenessTimer = this.#timer.setTimeout(() => {
-      this.#livenessTimer = undefined
+    this.livenessTimer = this.timer.setTimeout(() => {
+      this.livenessTimer = undefined
       const active = this.ctx.tianwenEvolution.listLearningAnalyses()
         .filter(progressActive)
       void Promise.all(active.map(status => this.schedule(status.analysisId)))
-        .finally(() => this.#armLiveness())
+        .finally(() => this.armLiveness())
     }, LEARNING_LIVENESS_INTERVAL_MS)
   }
 

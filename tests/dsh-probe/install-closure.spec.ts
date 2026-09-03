@@ -29,6 +29,7 @@ const expectedLibraries = [
   '@deepseek-ai/dsh-session-persistence-jsonl',
   '@deepseek-ai/dsh-session-query',
   '@deepseek-ai/dsh-session-query-sqlite',
+  '@deepseek-ai/dsh-session-reference',
   '@deepseek-ai/dsh-skill',
   '@deepseek-ai/dsh-subagent',
   '@deepseek-ai/dsh-system-prompt',

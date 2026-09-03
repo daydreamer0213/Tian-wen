@@ -38,7 +38,7 @@ export interface NaturalRunEvidenceDemoResult {
     readonly goal: { readonly phase: 'complete' }
     readonly run: {
       readonly id: `run:${string}`
-      readonly bindingVersion: 'v2'
+      readonly bindingVersion: 'v3'
       readonly parentManifestRecorded: true
       readonly skillUse: 'recorded'
     }
@@ -119,7 +119,7 @@ export async function runNaturalRunEvidenceDemo(): Promise<NaturalRunEvidenceDem
         const active = harness
         const manifest = active?.ctx.tianwenEvolution.listRunSkillManifests()[0]
         boundBeforeFirstRequest = manifest !== undefined
-          && active.ctx.tianwenEvolution.getRunBinding(manifest.runId)?.schemaVersion === 'tianwen.run-binding.v2'
+          && active.ctx.tianwenEvolution.getRunBinding(manifest.runId)?.schemaVersion === 'tianwen.run-binding.v3'
           && active.ctx.tianwenEvolution.getRunSkillUse(manifest.runId) === undefined
         return toolCallResponse('load-parent', 'skill', { name: parentSkill.name })
       },
@@ -203,7 +203,7 @@ export async function runNaturalRunEvidenceDemo(): Promise<NaturalRunEvidenceDem
       || receipt.usage.toolCalls !== 2
       || harness.adapter.requests.length !== 3
       || !boundBeforeFirstRequest
-      || binding?.schemaVersion !== 'tianwen.run-binding.v2'
+      || binding?.schemaVersion !== 'tianwen.run-binding.v3'
       || runManifest === undefined
       || skillUse === undefined
       || outcomeInput?.verdict !== 'met'
@@ -221,7 +221,7 @@ export async function runNaturalRunEvidenceDemo(): Promise<NaturalRunEvidenceDem
         goal: { phase: 'complete' },
         run: {
           id: receipt.run.runId,
-          bindingVersion: 'v2',
+          bindingVersion: 'v3',
           parentManifestRecorded: true,
           skillUse: 'recorded',
         },

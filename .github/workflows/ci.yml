@@ -41,7 +41,7 @@ jobs:
       - run: pnpm run check:no-private-dsh-imports
       - run: pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts tests/dsh-probe/skill-governance.spec.ts tests/dsh-probe/skill-governance-runtime.spec.ts tests/dsh-probe/governed-skill-candidate-demo.spec.ts tests/dsh-probe/skill-evaluation.spec.ts tests/dsh-probe/skill-evaluation-runtime.spec.ts tests/dsh-probe/paired-skill-evaluation-demo.spec.ts tests/dsh-probe/skill-shadow.spec.ts tests/dsh-probe/skill-shadow-eligibility-demo.spec.ts tests/dsh-probe/skill-promotion.spec.ts tests/dsh-probe/skill-promotion-readiness-demo.spec.ts tests/dsh-probe/natural-run-evidence-runtime.spec.ts tests/dsh-probe/natural-run-evidence-demo.spec.ts tests/dsh-migration/goal-status.spec.ts
       - run: pnpm exec vitest run tests/dsh-migration/goal-task-feedback.spec.ts tests/dsh-migration/learn-loop-client.spec.ts tests/dsh-migration/learn-loop-client-module.spec.ts
-      - run: pnpm exec vitest run tests/dsh-probe/controlled-skill-evaluation.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-probe/controlled-skill-shadow.spec.ts tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts tests/dsh-probe/controlled-skill-activation.spec.ts tests/dsh-probe/controlled-skill-activation-runtime.spec.ts tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts tests/dsh-migration/controlled-lifecycle-profile.spec.ts
+      - run: pnpm exec vitest run tests/dsh-probe/controlled-skill-evaluation.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-probe/controlled-skill-shadow.spec.ts tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts tests/dsh-probe/controlled-skill-activation.spec.ts tests/dsh-probe/controlled-skill-activation-runtime.spec.ts tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts tests/dsh-migration/controlled-lifecycle-profile.spec.ts tests/dsh-migration/explicit-correction-product.e2e.spec.ts
         env:
           TIANWEN_DSH_PROBE_ROOT: ${{ runner.temp }}/tianwen-v0.1-eval-fixtures
       - run: pnpm demo:research-preview
@@ -52,10 +52,6 @@ jobs:
       - run: pnpm demo:shadow-eligibility
       - run: pnpm demo:promotion-readiness
       - run: pnpm demo:natural-run-evidence
-      - run: pnpm demo:controlled-skill-lifecycle
-        env:
-          TIANWEN_DSH_PROBE_ROOT: ${{ runner.temp }}/tianwen-v0.1-eval-fixtures
-
   installer-windows:
     runs-on: windows-latest
     steps:

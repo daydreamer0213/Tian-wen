@@ -48,6 +48,7 @@ export {
   ControlledSkillEvaluatorPreflightError,
   ControlledSkillEvaluationPreflightError,
   ControlledSkillShadowPreflightError,
+  TIANWEN_CONTROLLED_AGENT_PRESET,
   normalizeSkillEvaluationRequest,
   observeSkillEvaluationRequest,
 } from './skill-evaluation.js'

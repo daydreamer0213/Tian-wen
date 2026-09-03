@@ -54,7 +54,7 @@ def test_required_public_surface_and_positioning() -> None:
     assert "paired B/C evaluation yet." in readme_en
     assert "isolated Shadow" in readme_en
     assert "standing authorization" in readme_en
-    assert "Promotion, Rollback, and Restore" in readme_en
+    assert "Promotion, Rollback, and progress in the main" in readme_en
     assert "Explicit negative feedback with a concrete note can create a durable Signal/Ticket." in readme_en
     assert "Positive and note-free negative feedback create no Ticket." in readme_en
     assert "Candidate status is only `recorded`" in readme_en
@@ -84,11 +84,11 @@ def test_bilingual_documents_share_the_proven_preview_facts() -> None:
     assert "read-only Evidence projection" in readme_en
     assert "Stage 7 remains complete" in readme_en
     assert "single-user product evidence" in readme_en
-    assert "0-external-Provider scripted full-chain fixture" in readme_en
+    assert "product-wired E2E with no injected verdict" in readme_en
     assert "Evidence 只读投影" in readme_zh
     assert "Stage 7 仍已完成" in readme_zh
     assert "单用户产品证据" in readme_zh
-    assert "0-external-Provider scripted 全链夹具" in readme_zh
+    assert "不注入 verdict 的产品接线 E2E" in readme_zh
     assert "带有具体说明的显式负面反馈可以创建持久化 Signal/Ticket。" in readme_zh
     assert "正面反馈和没有说明的负面反馈都不会创建 Ticket。" in readme_zh
     assert "Candidate 状态仅为 `recorded`（已记录）" in readme_zh
@@ -308,26 +308,26 @@ def test_controlled_skill_lifecycle_public_evidence_boundaries() -> None:
         "The Stage 7 project-owner natural task and official installer/status proof remain complete.",
         (
             "The five-task B/C, blind evaluator, isolated Shadow, and "
-            "Promotion/Rollback/Restore product mechanisms are implemented and covered "
-            "by a 0-external-Provider scripted full-chain fixture."
+            "Promotion/Rollback product mechanisms are implemented and covered "
+            "by a product-wired E2E with no injected verdict."
         ),
         "A fresh official installed configured-DeepSeek controlled lifecycle has now returned `passed`.",
         "`naturalUserEvidence=not-claimed`",
         "`externalUserEvidence=not-claimed`",
-        "pnpm demo:controlled-skill-lifecycle",
+        "pnpm vitest run tests/dsh-migration/explicit-correction-product.e2e.spec.ts",
     ):
         assert fact in readme_en
 
     for fact in (
         "Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成。",
         (
-            "五任务 B/C、盲态 evaluator、隔离 Shadow 与 Promotion/Rollback/Restore "
-            "产品机制已经实现，并由 0-external-Provider scripted 全链夹具覆盖。"
+            "五任务 B/C、盲态 evaluator、隔离 Shadow 与 Promotion/Rollback "
+            "产品机制已经实现，并由不注入 verdict 的产品接线 E2E 覆盖。"
         ),
         "一个全新的官方已安装 configured-DeepSeek 受控生命周期现已返回 `passed`。",
         "`naturalUserEvidence=not-claimed`",
         "`externalUserEvidence=not-claimed`",
-        "pnpm demo:controlled-skill-lifecycle",
+        "pnpm vitest run tests/dsh-migration/explicit-correction-product.e2e.spec.ts",
     ):
         assert fact in readme_zh
 
@@ -674,9 +674,9 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         "tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts "
         "tests/dsh-probe/controlled-skill-activation.spec.ts "
         "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts "
-        "tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts "
         "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts "
-        "tests/dsh-migration/controlled-lifecycle-profile.spec.ts"
+        "tests/dsh-migration/controlled-lifecycle-profile.spec.ts "
+        "tests/dsh-migration/explicit-correction-product.e2e.spec.ts"
     )
 
     violations: list[str] = []
@@ -687,10 +687,9 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         "tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts",
         "tests/dsh-probe/controlled-skill-activation.spec.ts",
         "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts",
-        "tests/dsh-probe/controlled-skill-lifecycle-demo.spec.ts",
         "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts",
         "tests/dsh-migration/controlled-lifecycle-profile.spec.ts",
-        "pnpm demo:controlled-skill-lifecycle",
+        "tests/dsh-migration/explicit-correction-product.e2e.spec.ts",
     ):
         if command not in typescript_job:
             violations.append(f"missing Ubuntu controlled contract: {command}")
@@ -715,7 +714,7 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
     fixture_root = "${{ runner.temp }}/tianwen-v0.1-eval-fixtures"
     if "TIANWEN_DSH_PROBE_ROOT" in job_prelude or "runner.temp" in job_prelude:
         violations.append("controlled fixture root remains at TypeScript job level")
-    for command in (controlled_vitest, "pnpm demo:controlled-skill-lifecycle"):
+    for command in (controlled_vitest,):
         expected_step = (
             f"      - run: {command}\n"
             "        env:\n"

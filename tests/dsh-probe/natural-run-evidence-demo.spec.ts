@@ -27,7 +27,7 @@ describe('natural DSH Run evidence demo', () => {
           goal: { phase: 'complete' },
           run: {
             id: expect.stringMatching(/^run:/),
-            bindingVersion: 'v2',
+            bindingVersion: 'v3',
             parentManifestRecorded: true,
             skillUse: 'recorded',
           },

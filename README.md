@@ -50,7 +50,7 @@ project-owner, single-user product evidence—not external-user validation or
 proof of general efficacy.
 
 The Stage 7 project-owner natural task and official installer/status proof remain complete.
-The five-task B/C, blind evaluator, isolated Shadow, and Promotion/Rollback/Restore product mechanisms are implemented and covered by a 0-external-Provider scripted full-chain fixture.
+The five-task B/C, blind evaluator, isolated Shadow, and Promotion/Rollback product mechanisms are implemented and covered by a product-wired E2E with no injected verdict.
 A fresh official installed configured-DeepSeek controlled lifecycle has now returned `passed`.
 Activity-22 closed all 25 formal roles, including five evaluators, five Shadow runs, and three
 transitions, then restored the product to offline. Its evidence remains
@@ -212,13 +212,12 @@ Evidence records were complete, and the successful parent Skill use was
 recorded. Because no qualifying learning problem occurred, no Ticket, Case,
 Lesson, Candidate, Evaluation, Shadow, or Promotion was created from that run.
 
-The controlled lifecycle demo separately proves the product mechanics for a
-permanently development-only synthetic defect. It freezes five task types before
-Candidate creation, runs ten B/C arms, five blind evaluators, five isolated
-Shadow Runs, and three governed pointer checks through ordinary DSH Agents. It
-finishes at C@rev4 after Promotion, Rollback, and Restore under the existing
-standing authorization. This local scripted fixture proves mechanics and stop
-lines only; it is not evidence of natural user improvement or external efficacy.
+The product-wired explicit-correction E2E exercises the current installed
+composition through public DSH surfaces. The scripted adapter supplies model
+responses only; product code owns feedback intake, child execution, five paired
+cases, blind evaluation, Shadow, Promotion, Rollback, and progress in the main
+chat. The test never opens a child or injects a verdict. This is still mechanism
+evidence, not evidence of natural user improvement or external efficacy.
 
 ## Zero-cost demos
 
@@ -231,7 +230,6 @@ pnpm demo:explicit-correction
 pnpm demo:repeated-outcome
 pnpm demo:governed-skill-candidate
 pnpm demo:paired-skill-evaluation
-pnpm demo:controlled-skill-lifecycle
 ```
 
 Each demo prints one formatted JSON object. They use no network or external Provider, token
@@ -249,12 +247,9 @@ demo adds one frozen pre-Candidate protocol, eight isolated B/C arms, one privat
 Evaluation result, replay/restart checks, and an explicit `INCONCLUSIVE`
 scripted-mechanism outcome. It keeps the root Skill registry and ordinary fresh
 Agent unchanged.
-The controlled-lifecycle demo reports one privacy-bounded receipt for 25 formal
-Sessions, 65 local scripted requests, 45 tool bodies, 0 external Provider
-requests, the five-task Evaluation and isolated Shadow passes, and the
-B@rev1→C@rev2→B@rev3→C@rev4 pointer sequence. Its terminal replay adds no
-activity, a conflicting task package stops with `task-package-mismatch` before
-activity, and its dedicated fixture root is empty after cleanup.
+The current full-chain regression is an E2E test rather than a second demo. It
+replaces the retired 65-request development fixture so the repository has one
+current product-level authority for the explicit-correction lifecycle.
 
 ## Current limitations
 
@@ -277,8 +272,8 @@ activity, and its dedicated fixture root is empty after cleanup.
   contains the explicit-feedback intake demo; [`scripts/run-repeated-outcome-demo.ts`](scripts/run-repeated-outcome-demo.ts)
   contains the repeated structured Outcome demo; [`scripts/run-governed-skill-candidate-demo.ts`](scripts/run-governed-skill-candidate-demo.ts)
   contains the governed Skill Candidate demo; [`scripts/run-paired-skill-evaluation-demo.ts`](scripts/run-paired-skill-evaluation-demo.ts)
-  contains the paired B/C Skill Evaluation demo; [`scripts/run-controlled-skill-lifecycle-demo.ts`](scripts/run-controlled-skill-lifecycle-demo.ts)
-  contains the 0-external-Provider controlled full-chain fixture.
+  contains the paired B/C Skill Evaluation demo; [`tests/dsh-migration/explicit-correction-product.e2e.spec.ts`](tests/dsh-migration/explicit-correction-product.e2e.spec.ts)
+  contains the product-wired explicit-correction full-chain regression.
 - [`packages/tianwen-dsh-compat`](packages/tianwen-dsh-compat) is the public DSH
   compatibility seam.
 - [`packages/tianwen-evidence`](packages/tianwen-evidence) performs the read-only
@@ -310,7 +305,7 @@ pnpm run typecheck
 pnpm run check:dsh-install
 pnpm run check:no-private-dsh-imports
 pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts tests/dsh-probe/skill-governance.spec.ts tests/dsh-probe/skill-governance-runtime.spec.ts tests/dsh-probe/governed-skill-candidate-demo.spec.ts tests/dsh-probe/skill-evaluation.spec.ts tests/dsh-probe/skill-evaluation-runtime.spec.ts tests/dsh-probe/paired-skill-evaluation-demo.spec.ts
-pnpm demo:controlled-skill-lifecycle
+pnpm vitest run tests/dsh-migration/explicit-correction-product.e2e.spec.ts
 uv sync --frozen --dev
 uv run ruff check .
 uv run pytest

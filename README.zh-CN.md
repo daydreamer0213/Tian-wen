@@ -35,7 +35,7 @@ Runtime 0.1.7 的独立紧凑卡片已删除，不再作为入口。
 也不证明普遍效能。
 
 Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成。
-五任务 B/C、盲态 evaluator、隔离 Shadow 与 Promotion/Rollback/Restore 产品机制已经实现，并由 0-external-Provider scripted 全链夹具覆盖。
+五任务 B/C、盲态 evaluator、隔离 Shadow 与 Promotion/Rollback 产品机制已经实现，并由不注入 verdict 的产品接线 E2E 覆盖。
 一个全新的官方已安装 configured-DeepSeek 受控生命周期现已返回 `passed`。Activity-22
 闭合了全部 25 个正式角色，包括 5 个 evaluator、5 个 Shadow 和 3 次 transition，随后恢复
 offline。证据仍固定为
@@ -164,11 +164,10 @@ Skill 差异后的归一化请求一致，并冻结可见的模型工具表面�
 任务完成，45 条投影 Evidence 全部完整，父 Skill 的成功使用得到记录。因为没有合格学习
 问题，这个 Run 没有产生 Ticket、Case、Lesson、Candidate、Evaluation、Shadow 或 Promotion。
 
-受控生命周期演示则独立证明一个永久标记为 development-only 的合成缺陷机制。
-它在 Candidate 产生前冻结五类任务，通过普通 DSH Agent 运行 10 个 B/C 臂、5 个
-盲态 evaluator、5 个隔离 Shadow Run 和 3 个受治理指针检查，并在现有 standing
-authorization 下完成 Promotion、Rollback 和 Restore，最终为 C@rev4。这个本地
-scripted 夹具只证明机制和停止线，不是自然用户改善或外部效能证据。
+产品接线的显式纠正 E2E 通过 DSH 公共表面运行当前已安装组合。scripted adapter 只提供
+模型回复；反馈接入、child 执行、五组配对 case、盲态评测、Shadow、Promotion、Rollback
+以及主对话进度全部由产品代码负责。测试全程不打开 child，也不注入 verdict。这仍是机制
+证据，不是自然用户改善或外部效能证据。
 
 ## 零成本演示
 
@@ -181,7 +180,6 @@ pnpm demo:explicit-correction
 pnpm demo:repeated-outcome
 pnpm demo:governed-skill-candidate
 pnpm demo:paired-skill-evaluation
-pnpm demo:controlled-skill-lifecycle
 ```
 
 每个演示只输出一个格式化 JSON 对象，不使用网络或外部 Provider、token 预算、付费模型、
@@ -194,10 +192,8 @@ Candidate。所有演示的 Session 前后摘要都相同。不同 Run 的摘要
 数据而不同；承重事实是同一次 Run 内前后相等。paired-skill-evaluation 演示额外报告一个
 Candidate 之前冻结的协议、八个隔离的 B/C 臂、一条私有 Evaluation 结果、回放/重启检查和
 明确的 `INCONCLUSIVE` 脚本化机制结论；根 Skill registry 与新建普通 Agent 保持不变。
-受控生命周期演示用一份受隐私约束的 receipt 报告 25 个正式 Session、65 次本地
-scripted 请求、45 次工具主体执行、0 次外部 Provider 请求、五任务 Evaluation 和隔离
-Shadow 通过，以及 B@rev1→C@rev2→B@rev3→C@rev4 指针序列。终态回放不增加活动，
-冲突的任务包会在活动前以 `task-package-mismatch` 停止，清理后专用 fixture root 为空。
+当前全链回归是一条 E2E 测试，而不是第二个演示。它替代已经退役的 65 请求开发夹具，
+使仓库对显式纠正生命周期只保留一个当前产品级权威。
 
 ## 当前限制
 
@@ -216,8 +212,8 @@ Shadow 通过，以及 B@rev1→C@rev2→B@rev3→C@rev4 指针序列。终态�
   是显式反馈学习入口演示；[`scripts/run-repeated-outcome-demo.ts`](scripts/run-repeated-outcome-demo.ts)
   是结构化 Outcome 重复失败演示；[`scripts/run-governed-skill-candidate-demo.ts`](scripts/run-governed-skill-candidate-demo.ts)
   是受治理 Skill Candidate 演示；[`scripts/run-paired-skill-evaluation-demo.ts`](scripts/run-paired-skill-evaluation-demo.ts)
-  是成对 B/C Skill Evaluation 演示；[`scripts/run-controlled-skill-lifecycle-demo.ts`](scripts/run-controlled-skill-lifecycle-demo.ts)
-  是 0-external-Provider 受控全链夹具。
+  是成对 B/C Skill Evaluation 演示；[`tests/dsh-migration/explicit-correction-product.e2e.spec.ts`](tests/dsh-migration/explicit-correction-product.e2e.spec.ts)
+  是产品接线的显式纠正全链回归。
 - [`packages/tianwen-dsh-compat`](packages/tianwen-dsh-compat) 是 DSH 公共兼容接缝。
 - [`packages/tianwen-evidence`](packages/tianwen-evidence) 实现 Evidence 只读投影。
 - [`docs/tianwen-architecture-overview-v2.md`](docs/tianwen-architecture-overview-v2.md)
@@ -246,7 +242,7 @@ pnpm run typecheck
 pnpm run check:dsh-install
 pnpm run check:no-private-dsh-imports
 pnpm exec vitest run tests/dsh-probe/evidence.spec.ts tests/dsh-probe/research-preview-demo.spec.ts tests/dsh-probe/learning-intake.spec.ts tests/dsh-probe/learning-intake-runtime.spec.ts tests/dsh-probe/explicit-correction-demo.spec.ts tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/outcome-intake-runtime.spec.ts tests/dsh-probe/repeated-outcome-demo.spec.ts tests/dsh-probe/skill-governance.spec.ts tests/dsh-probe/skill-governance-runtime.spec.ts tests/dsh-probe/governed-skill-candidate-demo.spec.ts tests/dsh-probe/skill-evaluation.spec.ts tests/dsh-probe/skill-evaluation-runtime.spec.ts tests/dsh-probe/paired-skill-evaluation-demo.spec.ts
-pnpm demo:controlled-skill-lifecycle
+pnpm vitest run tests/dsh-migration/explicit-correction-product.e2e.spec.ts
 uv sync --frozen --dev
 uv run ruff check .
 uv run pytest

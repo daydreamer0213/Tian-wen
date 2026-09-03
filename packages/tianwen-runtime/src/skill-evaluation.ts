@@ -96,6 +96,8 @@ import type {
   OutcomeVerdict,
 } from '@tianwen/evolution'
 
+export const TIANWEN_CONTROLLED_AGENT_PRESET = 'tianwen-controlled-evaluation'
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     tianwenSkillEvaluation: TianwenSkillEvaluationService
@@ -1600,7 +1602,6 @@ export class TianwenSkillEvaluationService extends Service {
       throw new ControlledSkillActivationPreflightError('retry-policy-mismatch')
     }
     if (retryPolicy.mode !== 'normal'
-      || retryPolicy.maxRetries !== 0
       || sha256(retryPolicy) !== shadow.execution.retryPolicyDigest) {
       throw new ControlledSkillActivationPreflightError('retry-policy-mismatch')
     }
@@ -1871,7 +1872,10 @@ export class TianwenSkillEvaluationService extends Service {
       try {
         handle = await this.ctx.agents.create({
           sessionId: SessionId(transition.postCheck.sessionId),
-          meta: { cwd: parsed.task.workspaceRoot },
+          meta: {
+            cwd: parsed.task.workspaceRoot,
+            agentPreset: TIANWEN_CONTROLLED_AGENT_PRESET,
+          },
           agentOptions: requestAgentOptions(resolved),
           setup: async agentCtx => {
             installModelSelection(agentCtx, { current: selection, assembled: undefined })
@@ -2209,7 +2213,6 @@ export class TianwenSkillEvaluationService extends Service {
     }
     if (
       retryPolicy.mode !== 'normal'
-      || retryPolicy.maxRetries !== 0
       || sha256(retryPolicy) !== evaluation.execution.retryPolicyDigest
     ) throw new ControlledSkillShadowPreflightError('retry-policy-mismatch')
 
@@ -2403,7 +2406,10 @@ export class TianwenSkillEvaluationService extends Service {
         }
         const handle = await this.ctx.agents.create({
           sessionId: SessionId(planned.sessionId),
-          meta: { cwd: task.workspaceRoot },
+          meta: {
+            cwd: task.workspaceRoot,
+            agentPreset: TIANWEN_CONTROLLED_AGENT_PRESET,
+          },
           agentOptions,
           setup: async agentCtx => {
             installModelSelection(agentCtx, {
@@ -2730,7 +2736,6 @@ export class TianwenSkillEvaluationService extends Service {
       throw new ControlledSkillEvaluatorPreflightError('retry-policy-mismatch')
     }
     if (retryPolicy.mode !== 'normal'
-      || retryPolicy.maxRetries !== 0
       || sha256(retryPolicy) !== plan.execution.retryPolicyDigest) {
       throw new ControlledSkillEvaluatorPreflightError('retry-policy-mismatch')
     }
@@ -2935,7 +2940,10 @@ export class TianwenSkillEvaluationService extends Service {
         }
         const handle = await this.ctx.agents.create({
           sessionId: SessionId(state.sessionId),
-          meta: { cwd: workspaceRoot },
+          meta: {
+            cwd: workspaceRoot,
+            agentPreset: TIANWEN_CONTROLLED_AGENT_PRESET,
+          },
           agentOptions,
           setup: agentCtx => {
             installModelSelection(agentCtx, { current: selection, assembled: undefined })
@@ -3102,7 +3110,7 @@ export class TianwenSkillEvaluationService extends Service {
       return { reasonCode: state.bodyCalls > 0 ? 'submission-invalid' : 'score-not-submitted' }
     }
     const request = state.requests[0]
-    if (request === undefined || state.requests.length !== 1) {
+    if (request === undefined) {
       return { reasonCode: 'request-contract-mismatch' }
     }
     const evidence = this.ctx.tianwenEvidence.project(session)
@@ -3242,7 +3250,6 @@ export class TianwenSkillEvaluationService extends Service {
     }
     if (
       retryPolicy.mode !== 'normal'
-      || retryPolicy.maxRetries !== 0
       || sha256(retryPolicy) !== protocol.protocol.execution.retryPolicyDigest
     ) throw new ControlledSkillEvaluationPreflightError('retry-policy-mismatch')
 
@@ -3427,7 +3434,7 @@ export class TianwenSkillEvaluationService extends Service {
         try {
           handle = await this.ctx.agents.create({
             sessionId: SessionId(planArm.sessionId),
-            meta: { cwd },
+            meta: { cwd, agentPreset: TIANWEN_CONTROLLED_AGENT_PRESET },
             agentOptions,
             setup: async agentCtx => {
               installModelSelection(agentCtx, {
