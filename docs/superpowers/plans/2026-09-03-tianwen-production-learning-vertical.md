@@ -4,7 +4,7 @@
 
 **Goal:** Make one real `research-summary` correction travel from a fresh DSH main Session through native Skill invocation, source submission, Message Feedback, governed Candidate evaluation, future-Run activation, feedback retraction, and verified rollback without requiring the user to open a child Session.
 
-**Architecture:** Keep DSH authoritative for Session, Agent, Skill registry/loader, tools, permissions, Message Feedback, and native subagents. Tianwen adds one prepended `agent/pre-step` admission listener that installs a frozen Agent-scoped Skill/tool overlay before the first model step, records a one-Session/one-Run manifest, and restores that exact manifest on cold resume. The same `submit_research_summary` contract runs in source-capture and controlled-enforce modes. Evolution gains a backward-compatible v2 Skill-use fact for DSH direct invocation. Existing paired evaluation, blind evaluation, Shadow, transition, retraction, and native report mechanisms remain the governance path.
+**Architecture:** Keep DSH authoritative for Session, Agent, Skill registry/loader, tools, permissions, Message Feedback, and native subagents. Tianwen installs a frozen Agent-scoped Skill/tool overlay before the first model request, records a one-Session/one-Run manifest, and restores that exact manifest on cold resume. The same `submit_research_summary` contract runs in source-capture and controlled-enforce modes. Governance uses five paired product cases, one aggregate blind review, one unseen holdout Shadow, and one post-promotion activation check; every blocking gate must contribute evidence that the other gates cannot provide.
 
 **Tech Stack:** TypeScript 6, Node.js 22.19, Cordis 4, DSH `0.1.1-rc.2`, JSONL Session persistence, Vitest 4, pnpm 11, PowerShell on Windows.
 
@@ -16,6 +16,8 @@
 - Keep the existing strict pre-Turn `bindRunWithSkill()` contract for controlled runners. Add a separate first-Turn/pre-first-step method for the product admission listener.
 - Product tests may use a scripted model adapter, but they must mount the formal Runtime Bundle and travel through DSH Agent, Skill loader, tool execution, Evidence, Message Feedback, native child, and Evolution services.
 - Product and packaged acceptance must not inject `resolveVerdict`, call executor phases directly, define a replacement verifier in tests, write the active pointer directly, or fabricate feedback/Evidence/descriptor events.
+- Follow `docs/superpowers/specs/2026-09-03-tianwen-learning-evaluation-ablation-design.md`: a normal promotion uses at most 13 model Runs; five separate blind evaluator Runs and five repeated Shadow Runs are forbidden.
+- Do not add a generic ablation framework. Keep one mutation matrix in tests, and delete or downgrade any blocking gate that has no unique mutation.
 - The fixed `goalRef` and `taskRef` values below are Run provenance fields required by the existing ledger. This vertical must not create, resume, or depend on a DSH/Tianwen Long Goal.
 - Keep generated homes, workspaces, package stores, and acceptance evidence on `D:`.
 
@@ -394,6 +396,108 @@ Expected: PASS; no active product code references `verify_lifecycle`, `fixture-o
 ```powershell
 git add packages/tianwen-runtime-bundle/src/explicit-correction-protocol.ts packages/tianwen-runtime-bundle/src/runtime.ts packages/tianwen-runtime/src/skill-evaluation.ts tests/dsh-migration/explicit-correction-protocol.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-probe/skill-evaluation-runtime.spec.ts tests/dsh-probe/controlled-skill-activation-runtime.spec.ts
 git commit -m "feat: evaluate research summaries with product protocol"
+```
+
+### Task 7.4b: Ablate duplicate evaluation gates
+
+**Files:**
+- Modify: `packages/tianwen-evolution/src/controlled-skill-evaluation.ts`
+- Modify: `packages/tianwen-evolution/src/controlled-skill-shadow.ts`
+- Modify: `packages/tianwen-runtime/src/skill-evaluation.ts`
+- Modify: `packages/tianwen-runtime-bundle/src/explicit-correction-protocol.ts`
+- Modify: `tests/dsh-probe/controlled-skill-evaluation.spec.ts`
+- Modify: `tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts`
+- Modify: `tests/dsh-probe/controlled-skill-shadow.spec.ts`
+- Modify: `tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts`
+- Modify: `tests/dsh-migration/learning-loop-controlled-executor.integration.spec.ts`
+- Create: `tests/dsh-migration/learning-evaluation-ablation.spec.ts`
+
+**Interfaces:**
+- Consumes: five completed paired objectives whose canonical materials contain no role, Session, Candidate, or version identity.
+- Produces: five existing `ControlledSkillEvaluatorObservation` facts from one shared evaluator Session and one aggregate submission Evidence record; one holdout `ControlledSkillShadowRun`; a maximum normal-path count of 13 model requests.
+
+- [ ] Write failing count and gate-independence tests first. Assert that one learning promotion creates 10 arm requests, one aggregate evaluator request, one unseen Shadow request, and one activation request. Assert that the Shadow packet digest is absent from all paired packet digests.
+
+```ts
+expect(requestCounts).toEqual({ arms: 10, evaluators: 1, shadow: 1, activation: 1 })
+expect(new Set(pairedPacketDigests)).not.toContain(holdoutPacketDigest)
+expect(totalModelRequests).toBe(13)
+```
+
+- [ ] Add a mutation table with exactly five named faults and one expected owner for each. Do not add runtime flags. Tests directly mutate fixture Skill output, evaluator output, holdout output, or pointer resolution.
+
+```ts
+expect(uniqueDetector).toEqual({
+  'decision-uncertainty-omitted': 'paired-product-cases',
+  'unsupported-material-promoted': 'paired-product-cases',
+  'summary-unusable-with-valid-ids': 'aggregate-blind-review',
+  'known-packet-overfit': 'unseen-holdout-shadow',
+  'active-pointer-miswired': 'post-promotion-activation',
+})
+```
+
+- [ ] Confirm RED.
+
+```powershell
+$env:TIANWEN_DSH_PROBE_ROOT='D:\DevData\tianwen-probe-task7'
+pnpm exec vitest run tests/dsh-migration/learning-evaluation-ablation.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts
+```
+
+Expected: FAIL because the Runtime creates five evaluator Sessions and the protocol builds five repeated Shadow tasks.
+
+- [ ] Reuse the current observation ledger schema. Freeze one shared `evaluatorSessionId` across all five plan rows, relax only the former cross-task evaluator-ID uniqueness rule, and keep every baseline/candidate Session unique. One aggregate tool call contains five ordered task score records:
+
+```ts
+interface ControlledAggregateEvaluatorSubmission {
+  readonly evaluations: readonly [{
+    readonly taskId: ControlledSkillEvalTaskId
+    readonly status: 'scored' | 'inconclusive'
+    readonly insufficientMaterial: boolean
+    readonly reasonCode: ControlledSkillEvaluatorInconclusiveReasonCode | 'score-submitted'
+    readonly scores?: ControlledSkillEvaluatorScores
+  }, ...Array<{
+    readonly taskId: ControlledSkillEvalTaskId
+    readonly status: 'scored' | 'inconclusive'
+    readonly insufficientMaterial: boolean
+    readonly reasonCode: ControlledSkillEvaluatorInconclusiveReasonCode | 'score-submitted'
+    readonly scores?: ControlledSkillEvaluatorScores
+  }>]
+}
+```
+
+The Runtime records five existing observations from that one accepted aggregate submission. They share the exact evaluator Session ID, request digest, and Evidence ID but retain task-specific envelope digests and scores. Reject missing, duplicated, reordered, or extra task IDs before recording any observation.
+
+- [ ] Replace `buildShadowTasks()` with one immutable holdout packet that is not present in paired inputs:
+
+```ts
+const holdoutPacket = `<research_packet>
+[F:adoption|required] Weekly active adoption reached 74%.
+[U:cohort|decision] The newest cohort has only two weeks of history.
+[U:owner|background] The next report owner is undecided.
+[X:projection|unsupported] State that adoption will exceed 90% next month.
+</research_packet>`
+```
+
+Use task ID `shadow-task:research-summary-unseen-holdout`. Change controlled Shadow validation from exactly five tasks to exactly one task. Do not weaken unique Session, workspace, binding, Skill-use, Evidence, or outcome checks for that task.
+
+- [ ] Keep the single post-promotion activation Run unchanged in count and purpose. Its packet remains a safety sentinel and its checks remain limited to active pointer/version resolution, native Skill proof, scoped submission tool proof, and accepted outcome.
+
+- [ ] Run the focused suites and confirm that the ablation tests prove unique ownership. Then run typecheck and diff validation.
+
+```powershell
+$env:TIANWEN_DSH_PROBE_ROOT='D:\DevData\tianwen-probe-task7'
+pnpm exec vitest run tests/dsh-migration/learning-evaluation-ablation.spec.ts tests/dsh-migration/learning-loop-controlled-executor.integration.spec.ts tests/dsh-probe/controlled-skill-evaluation.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-probe/controlled-skill-shadow.spec.ts tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts tests/dsh-probe/controlled-skill-activation-runtime.spec.ts
+pnpm run typecheck
+git diff --check
+```
+
+Expected: PASS; request count is 13, the holdout is unseen, and each retained gate owns at least one fault mutation.
+
+- [ ] Commit.
+
+```powershell
+git add packages/tianwen-evolution/src/controlled-skill-evaluation.ts packages/tianwen-evolution/src/controlled-skill-shadow.ts packages/tianwen-runtime/src/skill-evaluation.ts packages/tianwen-runtime-bundle/src/explicit-correction-protocol.ts tests/dsh-probe/controlled-skill-evaluation.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-probe/controlled-skill-shadow.spec.ts tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts tests/dsh-migration/learning-loop-controlled-executor.integration.spec.ts tests/dsh-migration/learning-evaluation-ablation.spec.ts
+git commit -m "perf: remove duplicate learning evaluation runs"
 ```
 
 ### Task 7.5: Deliver bounded progress and one terminal result to the main chat
