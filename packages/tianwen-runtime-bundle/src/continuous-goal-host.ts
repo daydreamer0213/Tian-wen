@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { GoalView } from '@deepseek-ai/dsh-goal'
 import type { Session } from '@deepseek-ai/dsh-session'
 
 import type { ContinuousGoalAgentOperations } from './continuous-goal-agent.js'
@@ -63,6 +64,7 @@ export interface ContinuousGoalHostDependencies {
   /** Persist only the v3 control mode; cancellation is owned by this Host. */
   readonly pause: (input: GoalProgressInput) => unknown
   readonly flushSession: (agent: Agent) => Promise<void | boolean>
+  readonly getGoal?: (agent: Agent) => GoalView | undefined
   readonly deliver?: (intent: ContinuousGoalDeliveryIntent) => Promise<void | boolean>
   readonly reportProgress?: (input: {
     readonly planner: Agent
@@ -152,16 +154,20 @@ function settledTasks(status: LongGoalStatusProjectionV3): number {
   return status.tasks.filter(task => task.phase === 'complete' || task.phase === 'abandoned').length
 }
 
-function exactLiveArmedTask(ctx: HostContext, record: LongGoalRecordV3, status: LongGoalStatusProjectionV3): boolean {
+function exactLiveRunningTask(
+  ctx: HostContext,
+  status: LongGoalStatusProjectionV3,
+  getGoal?: ContinuousGoalHostDependencies['getGoal'],
+): boolean {
   if (status.currentTaskId === null) return false
   const task = status.tasks.find(candidate => candidate.id === status.currentTaskId)
   if (task?.execution === null || task?.execution === undefined || task.phase !== 'active') return false
   const agent = ctx.agents.get(task.execution.sessionId as never)
-  const goal = agent?.ctx.goals.get(agent)
+  const goal = agent === undefined ? undefined : getGoal === undefined ? agent.ctx.goals.get(agent) : getGoal(agent)
   return goal !== undefined
     && String(goal.id) === task.execution.goalId
     && goal.phase === 'active'
-    && goal.activation === 'armed'
+    && (goal.activation === 'armed' || agent?.status === 'running')
 }
 
 function activeProgressTransition(
@@ -591,7 +597,7 @@ export function mountContinuousGoalHost(
       || status.goal.phase === 'planning'
       || current?.execution === null
       || hasNewSettledTask
-      || !exactLiveArmedTask(ctx, record, status)
+      || !exactLiveRunningTask(ctx, status, dependencies.getGoal)
     if (requiresContinue) {
       if (hasNewSettledTask) {
         const folded = await dependencies.recordTerminalAttempt?.({ longGoalId, status })

@@ -880,11 +880,16 @@ function unwrapRpc<T>(response: { readonly result: RpcResult<T> }): T {
   return response.result.value
 }
 
-function currentGoal(agent: Agent, sessionId: string, goalId: string): GoalView {
+function currentGoal(
+  agent: Agent,
+  sessionId: string,
+  goalId: string,
+  getGoal?: TianwenLongGoalRunDependencies['getGoal'],
+): GoalView {
   if (String(agent.session.id) !== sessionId) {
     throw new Error('Long Goal Task bound Session mismatch')
   }
-  const goal = agent.ctx.goals.get(agent)
+  const goal = getGoal === undefined ? agent.ctx.goals.get(agent) : getGoal(agent)
   if (goal === undefined || String(goal.id) !== goalId) {
     throw new Error('Long Goal Task bound Goal mismatch')
   }
@@ -1295,16 +1300,25 @@ export async function runCurrentWebTask(input: {
     }
     agent = dependencies.attachedAgent(sessionId)
     if (agent === undefined) throw new Error('Resumed Long Goal Task Session has no attached Agent')
-    const resumed = currentGoal(agent, sessionId, goalId)
-    if (resumed.phase !== 'active' || resumed.activation !== 'armed') {
+    const resumed = currentGoal(agent, sessionId, goalId, dependencies.getGoal)
+    // Native followup owns this turn; it need not arm the separate Goal-round driver.
+    // The turn may also finish before native admission returns to this caller.
+    const nativeFollowup = goalFirstRecord?.schemaVersion === 'tianwen.long-goal.v3'
+    if (nativeFollowup && resumed.phase === 'blocked') throw blockedTaskError(task.id, resumed.blockedReason)
+    if (nativeFollowup
+      ? resumed.phase !== 'active' && resumed.phase !== 'complete'
+      : resumed.phase !== 'active' || resumed.activation !== 'armed') {
       throw new Error('Resumed Long Goal Task Goal mismatch')
     }
     await dependencies.flushSession(agent)
     return { status: await readStatus(), sessionId, action: 'continued' }
   }
 
-  const goal = currentGoal(agent, sessionId, goalId)
-  if (goal.phase === 'active' && goal.activation === 'armed') {
+  const goal = currentGoal(agent, sessionId, goalId, dependencies.getGoal)
+  if (goal.phase === 'active' && (
+    goal.activation === 'armed'
+    || (goalFirstRecord?.schemaVersion === 'tianwen.long-goal.v3' && agent.status === 'running')
+  )) {
     return { status, sessionId, action: 'already-running' }
   }
   if (goal.phase === 'blocked') throw blockedTaskError(task.id, goal.blockedReason)
@@ -2530,6 +2544,7 @@ export function mountTianwenLongGoalHost(
         expectedRevision: input.expectedRevision, mode: 'paused',
       }),
       flushSession: async agent => injected.sessions.flush(agent.session),
+      getGoal: agent => injected.goals.get(agent),
       reportProgress: async input => { await reportLongGoalProgress(injected, input) },
       recordTerminalAttempt: input => recordContinuousGoalTerminalAttempt({
         stateRoot: roots.stateRoot,

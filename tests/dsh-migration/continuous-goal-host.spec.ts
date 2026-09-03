@@ -3465,7 +3465,8 @@ describe('continuous Goal Host', () => {
     }
   })
 
-  it('cold-continues a v3 Task through native followup with the exact live Planner parent', async () => {
+  it.each(['armed', 'disarmed', 'completed-before-admission-return'] as const)(
+    'cold-continues a v3 Task through native followup with %s Goal state', async nativeState => {
     const execution = { sessionId: 'cold-task', goalId: 'cold-goal' }
     const source = record({
       planner: { ...record().planner, sessionId: 'live-planner' },
@@ -3474,6 +3475,12 @@ describe('continuous Goal Host', () => {
     const projected = status(source, ['active'], TASK_1)
     const planner = { session: { id: 'live-planner' } } as unknown as Agent
     const task = agent('cold-task', 'cold-goal')
+    const getGoal = vi.fn(() => ({
+      id: execution.goalId, revision: 1,
+      phase: nativeState === 'completed-before-admission-return' ? 'complete' : 'active',
+      activation: nativeState === 'armed' ? 'armed' : 'disarmed',
+    }))
+    Object.defineProperty(task.ctx, 'goals', { get() { throw new Error('uninjected Goal service') } })
     let resumed = false
     const followupNativeTaskChild = vi.fn(async (parent: Agent, childId: string) => {
       expect(parent).toBe(planner)
@@ -3493,6 +3500,7 @@ describe('continuous Goal Host', () => {
       createSession: vi.fn(),
       attachedAgent: (sessionId: string) => sessionId === 'live-planner' ? planner : resumed ? task : undefined,
       createGoal: vi.fn(),
+      getGoal,
       readGoalRef: vi.fn(async () => ({ id: 'cold-goal', revision: 1, phase: 'active' as const })),
       resumeColdGoal,
       followupNativeTaskChild,
@@ -3849,8 +3857,17 @@ describe('continuous Goal Host', () => {
     }
   })
 
-  it('does not continue a live armed Task at startup, then continues once after its exact completion', async () => {
+  it.each(['goal-driver', 'native-turn'] as const)(
+    'does not continue an active %s Task at startup, then continues once after completion', async driver => {
     const subject = harness()
+    if (driver === 'native-turn') {
+      Object.defineProperty(subject.first, 'status', { value: 'running' })
+      const get = subject.first.ctx.goals.get.bind(subject.first.ctx.goals)
+      Object.assign(subject.dependencies, { getGoal: (task: Agent) => ({
+        ...get(task)!, activation: 'disarmed',
+      }) })
+      Object.defineProperty(subject.first.ctx, 'goals', { get() { throw new Error('uninjected Goal service') } })
+    }
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
     await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
     expect(subject.continueProgress).not.toHaveBeenCalled()

@@ -129,7 +129,11 @@ class ProfileAdapter extends LlmAdapter {
       }))))
     }
     const lastAssistant = options.messages.findLastIndex(message => message.role === 'assistant')
-    const turnMessages = options.messages.slice(lastAssistant + 1)
+    const lastCoordinator = options.messages.findLastIndex(message =>
+      message.role === 'user' && message.source.kind === 'coordinator')
+    // A cold followup follows the interrupted turn's tool result; that old result
+    // must not make this scripted model ignore the new coordinator request.
+    const turnMessages = options.messages.slice(Math.max(lastAssistant + 1, lastCoordinator))
     const text = turnMessages.flatMap(message => message.content)
       .filter(block => block.type === 'text')
       .map(block => block.text)
@@ -911,6 +915,11 @@ describe('native Long Goal profile execution', () => {
         status: 'settled',
       }])
       expect(recovered.taskRunSessions()).toEqual([taskSessionId])
+      const recoveredLog = await recovered.ctx.sessionPersistence.inspect(SessionId(taskSessionId))
+      expect(recoveredLog.events.filter(event => event.type === 'turn/start'), JSON.stringify(
+        recoveredLog.events.filter(event => ['turn/start', 'turn/end', 'user/message', 'tool/call'].includes(event.type))
+          .map(event => ({ type: event.type, seq: event.seq, data: JSON.stringify(event.data).slice(0, 450) })),
+      )).toHaveLength(2)
     } finally {
       await first?.dispose(false)
       await recovered?.dispose(false)
