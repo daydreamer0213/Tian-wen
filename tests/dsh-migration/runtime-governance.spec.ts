@@ -112,13 +112,10 @@ describe('Tianwen runtime governance migration', () => {
   it('keeps Python A1 as an independent repo-task evaluator', async () => {
     const stateRoot = resolve(fixtureRoot, 'migration-phase-1-a1')
     const pythonExecutable = process.env.TIANWEN_DSH_PROBE_PYTHON
-    if (pythonExecutable === undefined) {
-      throw new Error('TIANWEN_DSH_PROBE_PYTHON is required')
-    }
     const evaluator = new PythonA1Evaluator({
       repoRoot,
       stateRoot,
-      pythonExecutable,
+      ...(pythonExecutable === undefined ? {} : { pythonExecutable }),
       authorityRoot: probeRoot,
     })
     const nop1 = await evaluator.evaluateA1('nop')
