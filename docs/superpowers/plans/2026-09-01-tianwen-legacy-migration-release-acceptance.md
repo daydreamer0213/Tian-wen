@@ -304,7 +304,7 @@ Expected: the formal upgrade test retained Runtime `0.1.10` while installing `0.
   5. observe a new attempt finish;
   6. prove the old attempt produced no Learning Signal.
 
-- [ ] Story C — user-triggered continuation after restart (user correction, 2026-09-04):
+- [x] Story C — user-triggered continuation after restart (user correction, 2026-09-04):
   1. begin delegated work;
   2. close/restart Desktop while the child is active;
   3. reopen the main Session; merely opening it is not the user-requested continuation action;
@@ -319,7 +319,7 @@ Expected: the formal upgrade test retained Runtime `0.1.10` while installing `0.
   - [x] Keep startup reconciliation limited to durable facts and already-terminal delivery; preserve live completion chaining in `continuous-goal-host.ts`.
   - [x] Observe permission evidence on startup without admitting a renewed Task; reuse the existing main `goal_control` resume and live native permission-change path in `long-goal-host.ts`.
   - [x] Update the real native profile test to send main-chat `继续`, verify the interrupted Task keeps its identity, and verify completed work is not rerun. Four related files: 135 tests passed; package typecheck passed.
-  - [ ] Package the reviewed source and run one bounded normal main-chat restart/continue story. Do not rerun the already-proven learning evaluation loop for this lifecycle-only change.
+  - [x] Package the reviewed source and run one bounded normal main-chat restart/continue story. Real6b23f4f run exposed status-only handling of ordinary `继续`;37690f1 makes the existing control instructions require resume. Upgrading the same interrupted task and sending one `继续` in main completed2/2, preserved first-file hash/mtime, and reused the second Task's identity. Evidence: `D:\DevData\tianwen-0.1.11-acceptance-7e2c292-story-c\evidence\user-triggered-continuation.md`. This is bounded same-task recovery/upgrade acceptance, not a whole-release claim. No repeat of the already-proven learning evaluation loop for this lifecycle-only change.
 
 - [ ] Story D — full explicit-correction learning:
   1. in a fresh ordinary main Session, enable automatic analysis once after reading the privacy notice;
