@@ -1237,6 +1237,33 @@ function controlledEvaluatorMaterial(
       })
 }
 
+function acceptedResearchSummaryCall(
+  events: readonly SessionEvent[],
+  turnEnd: SessionEvent<'turn/end'>,
+): SessionEvent<'tool/call'> | undefined {
+  const calls = events.filter((event): event is SessionEvent<'tool/call'> =>
+    event.type === 'tool/call'
+    && event.data.name === RESEARCH_SUMMARY_TOOL_NAME
+    && event.seq < turnEnd.seq)
+  for (const [index, call] of calls.entries()) {
+    const results = events.filter((event): event is SessionEvent<'tool/result'> =>
+      event.type === 'tool/result'
+      && event.data.turn === call.data.turn
+      && event.seq > call.seq && event.seq < turnEnd.seq
+      && String(event.data.message.content[0]?.toolCallId) === String(call.data.callId))
+    if (results.length !== 1) return undefined
+    const block = results[0]!.data.message.content[0]
+    if (block?.type !== 'tool-result') return undefined
+    // Rejected input is not an accepted submission. Every attempt must have
+    // a result, and the sole accepted call across the Session must be the
+    // final attempt in the completed turn.
+    if (block.isError === true) continue
+    return index === calls.length - 1 && call.data.turn === turnEnd.data.turn
+      ? call : undefined
+  }
+  return undefined
+}
+
 function controlledEvaluatorMaterialText(
   events: readonly SessionEvent[],
   contract: ControlledEvaluatorMaterialContract,
@@ -1250,16 +1277,13 @@ function controlledEvaluatorMaterialText(
   let text: string | undefined
   if (contract.source === 'accepted-research-summary-submission') {
     if (taskId === undefined || researchPacket === undefined) return undefined
-    const calls = events.filter((event): event is SessionEvent<'tool/call'> =>
-      event.type === 'tool/call'
-      && event.data.name === RESEARCH_SUMMARY_TOOL_NAME
-      && event.seq < turnEnd.seq)
-    if (calls.length !== 1) return undefined
+    const call = acceptedResearchSummaryCall(events, turnEnd)
+    if (call === undefined) return undefined
     let submission: ResearchSummarySubmission
     try {
       submission = normalizeResearchSummarySubmission(
         parseResearchPacket(researchPacket),
-        JSON.parse(calls[0]!.data.arguments) as unknown,
+        JSON.parse(call.data.arguments) as unknown,
       )
     } catch {
       return undefined
@@ -1268,7 +1292,7 @@ function controlledEvaluatorMaterialText(
       event.type === 'tool/result'
       && event.seq < turnEnd.seq
       && String(event.data.message.content[0]?.toolCallId)
-        === String(calls[0]!.data.callId))
+        === String(call.data.callId))
     if (result?.type !== 'tool/result'
       || result.data.message.content[0]?.isError === true) return undefined
     const block = result.data.message.content[0]
@@ -3782,7 +3806,8 @@ export class TianwenSkillEvaluationService extends Service {
       if (prepared.researchSummaryTool !== undefined) {
         if (resolveVerdict !== undefined
           || prepared.task.researchPacket === undefined
-          || evidenceRows.length !== 1
+          || evidenceRows.filter(row => row.outcome.status === 'complete'
+            && !row.outcome.isError).length !== 1
           || evidence?.outcome.status !== 'complete'
           || evidence.outcome.isError
           || prepared.planned.acceptanceSubjectDigest !== sha256(
@@ -3792,20 +3817,17 @@ export class TianwenSkillEvaluationService extends Service {
           prepared.handle.agent,
           terminal.data.turn,
         )
-        const calls = session.events.filter((event): event is SessionEvent<'tool/call'> =>
-          event.type === 'tool/call'
-          && event.data.turn === terminal.data.turn
-          && event.data.name === RESEARCH_SUMMARY_TOOL_NAME)
+        const call = acceptedResearchSummaryCall(session.events, terminal)
         if (result === undefined || result.verdict === 'not-evaluated'
-          || calls.length !== 1
-          || evidence.source.callSeq !== calls[0]!.seq) {
+          || call === undefined
+          || evidence.source.callSeq !== call.seq) {
           return { reasonCode: 'run-fact-mismatch' }
         }
         let submitted: ResearchSummarySubmission
         try {
           submitted = normalizeResearchSummarySubmission(
             parseResearchPacket(prepared.task.researchPacket),
-            JSON.parse(calls[0]!.data.arguments) as unknown,
+            JSON.parse(call.data.arguments) as unknown,
           )
         } catch {
           return { reasonCode: 'run-fact-mismatch' }
@@ -3813,7 +3835,7 @@ export class TianwenSkillEvaluationService extends Service {
         const persisted = session.events.find(event =>
           event.type === 'tool/result'
           && String(event.data.message.content[0]?.toolCallId)
-            === String(calls[0]!.data.callId))
+            === String(call.data.callId))
         const block = persisted?.type === 'tool/result'
           ? persisted.data.message.content[0]
           : undefined

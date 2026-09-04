@@ -291,6 +291,8 @@ describe('research summary product contract', () => {
         'confirmedFindingIds',
         'uncertaintyIds',
       ])
+      expect(source.parameters.properties?.confirmedFindingIds?.description).toContain('without the F: prefix')
+      expect(source.parameters.properties?.uncertaintyIds?.description).toContain('without the U: prefix')
       expect(source.output.schema).toEqual(controlled.output.schema)
       expect(JSON.stringify(source.parameters)).not.toMatch(
         /path|shell|network|permission|arm|session|candidate|expected.?winner/i,

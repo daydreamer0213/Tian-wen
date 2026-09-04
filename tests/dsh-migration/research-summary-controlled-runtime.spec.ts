@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   DynamicCordisRunnerService,
@@ -21,6 +21,7 @@ import {
   createResearchSummaryTool,
   evaluateResearchSummarySubmission,
   parseResearchPacket,
+  type ResearchSummarySubmission,
 } from '../../packages/tianwen-runtime/src/index.js'
 import {
   EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
@@ -98,12 +99,15 @@ function aggregateBlindScore(taskIds: readonly string[]) {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
 describe('research-summary controlled product Runtime', () => {
-  it('derives every arm verdict from one scoped accepted product submission', async () => {
-    const root = rootFor('paired-product-verdicts')
+  it.each(['clean', 'input-correction', 'duplicate-turn'] as const)(
+    'checks accepted product submissions: %s', async mode => {
+    const retryInvalidIds = mode === 'input-correction'
+    const root = rootFor(`paired-product-verdicts-${mode}`)
     const protocol = resolveExplicitCorrectionProtocol(
       EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
     )!
@@ -119,15 +123,21 @@ describe('research-summary controlled product Runtime', () => {
     })
     const transitionSubmission = validSubmission(tasks.find(task =>
       task.semanticType === 'safety-boundary')!.packet.source)
+    const submit = (id: string, submission: ResearchSummarySubmission) => [
+      ...(retryInvalidIds ? [toolCallResponse(`${id}-invalid`, RESEARCH_SUMMARY_TOOL_NAME, {
+        ...submission,
+        confirmedFindingIds: submission.confirmedFindingIds.map(value => `F:${value}`),
+      })] : []),
+      toolCallResponse(id, RESEARCH_SUMMARY_TOOL_NAME, submission),
+    ]
     const script = [
       ...tasks.flatMap(task =>
       (['base', 'candidate'] as const).flatMap(role => [
         toolCallResponse(`${task.semanticType}-${role}-skill`, 'skill', {
           name: protocol.parentSkill.name,
         }),
-        toolCallResponse(
+        ...submit(
           `${task.semanticType}-${role}-submit`,
-          RESEARCH_SUMMARY_TOOL_NAME,
           task.expectedSubmissions[role],
         ),
       ])),
@@ -136,13 +146,13 @@ describe('research-summary controlled product Runtime', () => {
         toolCallResponse(`${task.taskId}-skill`, 'skill', {
           name: protocol.parentSkill.name,
         }),
-        toolCallResponse(`${task.taskId}-submit`, RESEARCH_SUMMARY_TOOL_NAME,
+        ...submit(`${task.taskId}-submit`,
           validSubmission(task.researchPacket)),
       ]),
       toolCallResponse('transition-skill', 'skill', {
         name: protocol.parentSkill.name,
       }),
-      toolCallResponse('transition-submit', RESEARCH_SUMMARY_TOOL_NAME,
+      ...submit('transition-submit',
         transitionSubmission),
     ]
     const harness = await mountPersistentHarness(join(root, 'sessions'), [])
@@ -272,7 +282,7 @@ describe('research-summary controlled product Runtime', () => {
       const receipt = await harness.ctx.tianwenSkillEvaluation.runControlledArms(
         protocol.buildArmsInput(candidate.candidateId, frozen.protocolId, tasks),
       )
-      expect(receipt.state).toBe('awaiting-evaluator')
+      expect(receipt.state, JSON.stringify(receipt)).toBe('awaiting-evaluator')
       const objectives = harness.ctx.tianwenEvolution
         .listControlledSkillEvaluationObjectives(receipt.evaluationId)
       expect(objectives.map(objective => objective.baseline.outcome))
@@ -288,6 +298,43 @@ describe('research-summary controlled product Runtime', () => {
       ]))
       expect(harness.ctx.tools.schemas().map(schema => schema.name))
         .not.toContain(RESEARCH_SUMMARY_TOOL_NAME)
+
+      if (mode === 'duplicate-turn') {
+        const inspect = harness.ctx.sessionPersistence.inspect.bind(
+          harness.ctx.sessionPersistence,
+        )
+        vi.spyOn(harness.ctx.sessionPersistence, 'inspect')
+          .mockImplementation(async sessionId => {
+            const inspection = await inspect(sessionId)
+            if (String(sessionId) !== tasks[0]!.baselineSessionId) return inspection
+            const call = inspection.events.findLast(event => event.type === 'tool/call'
+              && event.data.name === RESEARCH_SUMMARY_TOOL_NAME)
+            const result = inspection.events.findLast(event => event.type === 'tool/result')
+            const terminal = inspection.events.findLast(event => event.type === 'turn/end')
+            if (call?.type !== 'tool/call' || result?.type !== 'tool/result'
+              || terminal?.type !== 'turn/end') throw new Error('Missing product submission')
+            const seq = inspection.events.at(-1)!.seq
+            const repeated = [call, result, terminal].map((event, index) => {
+              const copy = structuredClone(event)
+              copy.seq = seq + index + 1
+              copy.data.turn = terminal.data.turn + 1
+              if (copy.type === 'tool/call') {
+                copy.data.callId = `${call.data.callId}-repeated` as typeof copy.data.callId
+              } else if (copy.type === 'tool/result') {
+                const block = copy.data.message.content[0]!
+                block.toolCallId = `${call.data.callId}-repeated` as typeof block.toolCallId
+              }
+              return copy
+            })
+            return { ...inspection, events: [...inspection.events, ...repeated] }
+          })
+        const create = vi.spyOn(harness.ctx.agents, 'create')
+        await expect(harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+          protocol.buildEvaluatorsInput(receipt.evaluationId, tasks),
+        )).rejects.toMatchObject({ code: 'material-mismatch' })
+        expect(create).not.toHaveBeenCalled()
+        return
+      }
 
       const evaluators = await harness.ctx.tianwenSkillEvaluation
         .runControlledEvaluators(protocol.buildEvaluatorsInput(
@@ -353,7 +400,7 @@ describe('research-summary controlled product Runtime', () => {
       const firstBaseline = await harness.ctx.sessionPersistence.inspect(
         tasks[0]!.baselineSessionId as never,
       )
-      const submissionCall = firstBaseline.events.find(event =>
+      const submissionCall = firstBaseline.events.findLast(event =>
         event.type === 'tool/call'
         && event.data.name === RESEARCH_SUMMARY_TOOL_NAME)
       const submissionResult = submissionCall?.type === 'tool/call'
@@ -365,6 +412,8 @@ describe('research-summary controlled product Runtime', () => {
       expect(submissionResult).toBeDefined()
       expect(submissionResult?.type === 'tool/result'
         && submissionResult.data.message.content[0]?.isError).toBe(false)
+      expect(firstBaseline.events.filter(event => event.type === 'tool/call'
+        && event.data.name === RESEARCH_SUMMARY_TOOL_NAME)).toHaveLength(retryInvalidIds ? 2 : 1)
       expect(JSON.stringify(firstBaseline.events)).not.toContain(
         'final-completed-assistant-text',
       )

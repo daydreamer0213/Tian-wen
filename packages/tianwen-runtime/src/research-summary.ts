@@ -295,11 +295,13 @@ export function createResearchSummaryTool(
       summary: { type: 'string', required: true },
       confirmedFindingIds: {
         type: 'array',
+        description: 'Finding IDs from the packet, without the F: prefix (for [F:result|required], use "result").',
         required: true,
         items: { type: 'string' },
       },
       uncertaintyIds: {
         type: 'array',
+        description: 'Uncertainty IDs from the packet, without the U: prefix (for [U:timing|decision], use "timing").',
         required: true,
         items: { type: 'string' },
       },
