@@ -4,10 +4,15 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Context } from '@deepseek-ai/cordis'
 import { NativeLongGoalChild } from '../../packages/tianwen-runtime-bundle/src/native-long-goal-child.js'
+import { NATIVE_LONG_GOAL_PLANNER_SCOPE } from '../../packages/tianwen-runtime-bundle/src/long-goal-planner.js'
 
 const sessionId = (value: string) => value as SessionId
 
 describe('NativeLongGoalChild', () => {
+  it('distinguishes each Task native Goal from the continuous Goal for the Planner', () => {
+    expect(NATIVE_LONG_GOAL_PLANNER_SCOPE.persona).toContain('Completing a Task\'s native Goal does not complete the continuous Goal')
+    expect(NATIVE_LONG_GOAL_PLANNER_SCOPE.persona).toContain('Do not infer permission from a filename')
+  })
   it('forwards start arguments to the public continuable DSH service unchanged', async () => {
     const startContinuable = vi.fn().mockResolvedValue({ childId: sessionId('reserved-child') })
     const ctx = { subagents: { startContinuable } } as unknown as Context

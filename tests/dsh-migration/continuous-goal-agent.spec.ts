@@ -280,6 +280,32 @@ describe('continuous Goal Agent controls', () => {
     })
   })
 
+  it.each([
+    ['permission-limited', 'workspace-write', 'workspace-write', true],
+    ['running', 'workspace-write', 'workspace-write', false],
+    ['permission-limited', 'workspace-write', 'danger-full-access', false],
+    ['permission-limited', 'danger-full-access', 'danger-full-access', false],
+    ['permission-limited', undefined, 'workspace-write', false],
+    ['permission-limited', 'workspace-write', 'workspace-write', false, 'paused'],
+  ] as const)('explains the native main permission action only for %s/%s/%s', async (attemptStatus, attemptMode, mainMode, expected, autoProgress = 'running') => {
+    const subject = controlsAgent()
+    Object.assign(subject.agent.session, { events: [{ type: 'sandbox/mode', data: { mode: mainMode, source: 'user' } }] })
+    const ops = operations()
+    ops.control.mockResolvedValue({ action: 'status', status: {
+      goal: { objective: 'Write the requested file', phase: 'active', completedTasks: 0, totalTasks: 1 },
+      tasks: [{ id: 'task', objective: 'Write the file', phase: 'pending',
+        attempt: { epoch: 1, status: attemptStatus, permissionMode: attemptMode } }],
+      currentTaskId: 'task', control: { autoProgress },
+    } })
+    installBoundContinuousGoalControls(subject.agent, ops)
+    const output = JSON.parse(await subject.tools[0]!.execute({ action: 'status' }, { agent: subject.agent }))
+    if (expected) {
+      expect(output.requiredUserAction).toContain('main Session')
+      expect(output.requiredUserAction).toContain('Full access')
+      expect(output.requiredUserAction).toContain('not a one-time approval')
+    } else expect(output.requiredUserAction).toBeUndefined()
+  })
+
   it('advertises every exact goal_control action shape to the model before execution', () => {
     const subject = controlsAgent()
     installBoundContinuousGoalControls(subject.agent, operations())
@@ -317,6 +343,8 @@ describe('continuous Goal Agent controls', () => {
     expect(prompt).toContain('Do not execute the continuous Goal Task in this control chat')
     expect(prompt).toContain('Treat Planner and Task subagent reports as progress only')
     expect(prompt).toContain('After status returns, give one brief user-facing update')
+    expect(prompt).toContain('requiredUserAction')
+    expect(prompt).toContain('Do not use request_user_input to invent an approval')
     expect(prompt).toContain('Unrelated conversation should proceed normally')
   })
 

@@ -3061,6 +3061,7 @@ describe('continuous Goal Host', () => {
         if (delegatedMode === 'read-only' || delegatedMode === 'workspace-write') {
           expect(noticeText).toContain('Read goal_control status first')
           expect(noticeText).toContain('main Session to Full access only if')
+          expect(noticeText).toContain('requiredUserAction')
         } else if (delegatedMode === 'danger-full-access') {
           expect(noticeText).toContain('no wider permission mode')
           expect(noticeText).toContain('will not automatically create a new attempt')

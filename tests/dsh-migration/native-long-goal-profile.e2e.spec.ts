@@ -572,8 +572,9 @@ describe('native Long Goal profile execution', () => {
   it('renews only after the user changes the main Session to Full access', async () => {
     const profile = await mountProfile(
       'Complete one Task that requires Full access.',
-      { permissionLimited: true },
+      { permissionLimited: true, completeTaskThroughTool: true },
     )
+    const steer = vi.spyOn(profile.main, 'steer')
     try {
       await expect(profile.startGoal()).resolves.toMatchObject({ kind: 'success', text: 'started' })
       await vi.waitFor(() => {
@@ -615,6 +616,9 @@ describe('native Long Goal profile execution', () => {
         'workspace-write',
       )
       expect(profile.ctx.tianwenEvolution.listLearningSignals()).toEqual([])
+      expect(steer.mock.calls.some(([message]) => message.source.kind === 'plugin'
+        && message.content.some(block => block.type === 'text'
+          && block.text.includes('main Session to Full access')))).toBe(true)
       expect(profile.main.session.events.some(event => event.type === 'user/message'
         && event.data.content.some(block => block.type === 'text'
           && block.text.includes('main Session to Full access')))).toBe(true)
@@ -659,7 +663,6 @@ describe('native Long Goal profile execution', () => {
         'danger-full-access',
       )
 
-      profile.ctx.goals.complete(renewedTask, renewedGoal)
       profile.releaseTask()
       await vi.waitFor(async () => {
         const status = await readLongGoalStatus({

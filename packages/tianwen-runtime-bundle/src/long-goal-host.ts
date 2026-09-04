@@ -508,7 +508,7 @@ export function createPermissionAttemptHost(
       ? 'A Task attempt reached a sandbox limit, but Tianwen cannot verify the old permission mode. Changing this main Session to Full access will not automatically create a new attempt. Read goal_control status before explaining the current state in this main Session.'
       : (WIDER_MODES[permissionMode] ?? []).length === 0
         ? 'A Task attempt reached the highest available sandbox permission. There is no wider permission mode, so changing this main Session to Full access will not automatically create a new attempt. Read goal_control status before explaining the current state in this main Session.'
-        : 'An earlier Task attempt reached its sandbox limit. Read goal_control status first. Ask the user to change this main Session to Full access only if the current attempt is still permission-limited and mainPermissionMode is not danger-full-access. If recovery has started or completed, report that state instead of repeating the old permission request.'
+        : 'An earlier Task attempt reached its sandbox limit. Read goal_control status first. Ask the user to change this main Session to Full access only if the latest status includes requiredUserAction; explain that native setting without creating a separate approval question. Otherwise report the current state instead of repeating the old permission request.'
     dependencies.notifyMain(main, createUserMessage({
       content: [{
         type: 'text',
@@ -2344,7 +2344,7 @@ export function mountTianwenLongGoalHost(
         nativeChild.followup(parent, SessionId(childId), prompt, signal),
       nativeAgentOptions: host.agentDefaultModel.currentSelection(),
       runCurrentTask: input => runCurrentWebTask(input, runDependencies),
-      notifyMain: (agent, message) => { agent.followup(message) },
+      notifyMain: (agent, message) => { agent.steer(message) },
     })
     const dshStatusTarget = {
       sessionsRoot: roots.sessionsRoot,

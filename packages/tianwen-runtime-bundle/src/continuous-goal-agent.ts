@@ -68,9 +68,17 @@ function formatControlResult(result: ControlOperationResult, agent: Agent): stri
     ? undefined
     : status.tasks.find(task => task.id === status.currentTaskId)
   const mainPermissionMode = sandboxModeFromEvents(agent.session.events, false)
+  const attempt = currentTask?.attempt
+  const needsMainPermission = attempt?.status === 'permission-limited'
+    && status.control.autoProgress === 'running'
+    && (attempt.permissionMode === 'read-only' || attempt.permissionMode === 'workspace-write')
+    && mainPermissionMode !== 'danger-full-access'
   return JSON.stringify({
     action: result.action,
     ...(mainPermissionMode === undefined ? {} : { mainPermissionMode }),
+    ...(needsMainPermission ? {
+      requiredUserAction: 'Change this main Session permission using the control below its input box: select Full access (完全访问). This is the native Session setting, not a one-time approval. Tianwen then starts a new attempt automatically; do not open a child Session or ask for a separate approve/reject choice.',
+    } : {}),
     goal: {
       objective: status.goal.objective,
       phase: status.goal.phase,
@@ -192,6 +200,8 @@ export function installBoundContinuousGoalControls(
         'Do not execute the continuous Goal Task in this control chat.',
         'Treat Planner and Task subagent reports as progress only. Inspect goal_control status.',
         'After status returns, give one brief user-facing update in the user\'s language: completed stages, current stage, and whether user action is needed. Do not call other tools merely to re-check the same status.',
+        'If status includes requiredUserAction, explain that native main Session setting in plain language and end your reply. Do not use request_user_input to invent an approval or promise one-time elevated execution.',
+        'Each Task owns a separate native Goal. A Task reporting its Goal complete is normal Task completion, not premature completion of the continuous Goal; do not investigate it with get_goal.',
         'Report the Goal as complete only after goal_control reports phase "complete".',
         'Use exactly one of:',
         ...GOAL_CONTROL_SHAPES,
