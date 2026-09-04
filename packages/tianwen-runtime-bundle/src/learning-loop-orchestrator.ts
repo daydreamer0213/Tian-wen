@@ -61,6 +61,7 @@ export interface LearningLoopPhaseStatus {
   readonly rollbackTransitionReceiptDigest?: string
   readonly recoveredTransitionId?: string
   readonly recoveredTransitionReceiptDigest?: string
+  readonly terminalReportDelivery?: { readonly reportDigest: string; readonly state: string }
 }
 
 export interface LearningLoopLane {
@@ -457,7 +458,7 @@ function terminalReportText(status: LearningLoopPhaseStatus): string {
     case 'insufficient-evidence': return 'Tianwen 分析结论：证据不足，未改变任何 Skill。'
     case 'protocol-unavailable': return 'Tianwen 分析结论：受控评测协议不可用，未改变任何 Skill。'
     case 'candidate-rejected': return status.shadowId === undefined
-      ? 'Tianwen 分析结论：候选 Skill 未通过盲评，未改变未来 Run。'
+      ? 'Tianwen 分析结论：候选 Skill 未通过评估，未改变未来 Run。'
       : 'Tianwen 分析结论：候选 Skill 未通过 Shadow，未改变未来 Run。'
     case 'promoted': return 'Tianwen 分析结论：候选 Skill 已通过验证；仅未来 Run 使用新版本。'
     case 'rolled-back': return 'Tianwen 分析结论：支持已撤回，已验证回滚至父版本。'
@@ -472,7 +473,11 @@ export function learningLoopTerminalReport(status: LearningLoopPhaseStatus): {
   readonly text: string
   readonly digest: ReturnType<typeof sha256>
 } {
-  const text = terminalReportText(status)
+  const legacyRejection = 'Tianwen 分析结论：候选 Skill 未通过盲评，未改变未来 Run。'
+  // Resume an already-durable delivery with its exact text and identity.
+  const text = status.phase === 'candidate-rejected' && status.shadowId === undefined
+    && status.terminalReportDelivery?.reportDigest === sha256({ kind: 'terminal-governed-outcome', text: legacyRejection })
+    ? legacyRejection : terminalReportText(status)
   return {
     text,
     digest: sha256({ kind: 'terminal-governed-outcome', text }),

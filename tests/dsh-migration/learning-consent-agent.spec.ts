@@ -322,6 +322,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         text: LEARNING_CONSENT_NOTICE_TEXT,
       }])
       expect(LEARNING_CONSENT_NOTICE_TEXT.split('\n')).toHaveLength(5)
+      expect(LEARNING_CONSENT_NOTICE_TEXT).toContain('frozen Skill text')
       expect(LEARNING_CONSENT_NOTICE_TEXT).not.toContain('PRIVATE CORRECTION')
       expect(child.agent.session.events.some(event =>
         event.type === 'user/message'

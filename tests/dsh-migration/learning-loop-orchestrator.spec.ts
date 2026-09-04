@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@tianwen/dsh-compat'
+import { sha256 } from '../../packages/tianwen-evolution/dist/index.js'
 
 import {
   TianwenLearningLoopService,
@@ -121,6 +122,22 @@ describe('durable learning-loop phase table', () => {
     expect(rollback.text).toContain('撤回回滚检查未通过')
     expect(rollback.text).toContain('需要人工处理')
     expect(promoted.digest).not.toBe(rollback.digest)
+  })
+
+  it('does not claim blind evaluation ran for an objective rejection', () => {
+    const report = learningLoopTerminalReport({ ...base, phase: 'candidate-rejected' })
+    expect(report.text).toContain('未通过评估')
+    expect(report.text).not.toContain('盲评')
+    expect(report.digest).toBe(sha256({ kind: 'terminal-governed-outcome', text: report.text }))
+  })
+
+  it.each(['pending', 'delivered'] as const)('preserves a durable legacy rejection report when %s', state => {
+    const text = 'Tianwen 分析结论：候选 Skill 未通过盲评，未改变未来 Run。'
+    const reportDigest = sha256({ kind: 'terminal-governed-outcome', text })
+    const report = learningLoopTerminalReport({
+      ...base, phase: 'candidate-rejected', terminalReportDelivery: { state, reportDigest },
+    })
+    expect(report).toEqual({ text, digest: reportDigest })
   })
 
   it('keeps a recovered transition terminal when support is later unavailable', async () => {

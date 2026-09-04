@@ -230,6 +230,7 @@ export function createLearningAnalysisTool(
       },
       candidatePatch: {
         type: 'object',
+        description: 'A complete replacement of the frozen source Skill fields, not a diff. Preserve everything unrelated to the supported correction.',
         properties: {
           description: { type: 'string', required: true },
           whenToUse: { type: 'string', required: true },
