@@ -147,7 +147,7 @@ class ProfileAdapter extends LlmAdapter {
     const plannerPrompt = text.slice(text.lastIndexOf('Plan the next short ordered Task suffix'))
     const revision = [...plannerPrompt.matchAll(/Expected Goal revision: (\d+)/gu)].at(-1)?.[1]
     if (
-      lastText(options).includes('Call recover_long_goal_task exactly once')
+      text.includes('Call recover_long_goal_task exactly once')
       && options.tools?.some(tool => tool.name === 'recover_long_goal_task')
     ) {
       chunks = toolCallResponse('profile-planner-recovery', 'recover_long_goal_task', {})
@@ -183,8 +183,6 @@ class ProfileAdapter extends LlmAdapter {
               tasks: [{ objective: this.taskObjective }],
           },
       )
-    } else if (text.includes('Coordinate the already-reserved retry for Task:')) {
-      chunks = toolCallResponse('profile-retry-planner-gate', 'profile_planner_wait', {})
     } else if (
       text.includes(this.taskObjective)
       && options.tools?.some(tool => tool.name === 'profile_task')
@@ -289,22 +287,6 @@ async function mountProfile(
   const taskGate = new Promise<void>(resolveGate => { releaseTask = resolveGate })
   const taskRunSessions: string[] = []
   const mainSessionId = SessionId('native-profile-main')
-  const disposePlannerGate = ctx.subagents.registerContinuableSetup(childCtx => {
-    if (String(childCtx.agent.session.header.parentSession) !== String(mainSessionId)) return () => undefined
-    return childCtx.tools.register(defineTool({
-      name: 'profile_planner_wait',
-      description: 'Keep the renewed Planner attached until the fixture observes its Task.',
-      parameters: {},
-      output: {
-        schema: { type: 'string' },
-        render: (_args, value) => [{ type: 'text', text: value }],
-      },
-      async execute() {
-        await taskGate
-        return 'Planner kept the renewed Task attached.'
-      },
-    }))
-  })
   const disposeTask = ctx.tools.register(defineTool({
     name: 'profile_task',
     description: 'Complete the profile Task once the test observes its native Goal.',
@@ -381,7 +363,6 @@ async function mountProfile(
     },
     async dispose(removeRoot = ownsRoot, releasePendingTask = true) {
       if (releasePendingTask) releaseTask()
-      disposePlannerGate()
       disposeTask()
       offAgent()
       await ctx.fiber.dispose()
@@ -642,6 +623,12 @@ describe('native Long Goal profile execution', () => {
       const renewed = listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3
       const renewedProjection = readTianwenTaskAttemptProjection(renewed, taskId)
       const renewedAttempt = renewedProjection.attempts[1]!
+      const renewalRequest = profile.adapter.requests.find(request =>
+        String(request.sessionId) === renewedAttempt.parentSessionId)
+      expect(renewalRequest).toBeDefined()
+      expect(allText(renewalRequest!)).toContain('Restore only the Planner parent after a main-session permission change.')
+      expect(allText(renewalRequest!)).toContain('Do not execute the Task or submit a plan in this turn.')
+      expect(allText(renewalRequest!)).not.toContain('Coordinate the already-reserved retry for Task:')
       expect(renewedProjection.attempts[0]).toEqual(limitedAttempt)
       expect(renewedAttempt.childSessionId).not.toBe(limitedAttempt?.childSessionId)
       expect(renewedAttempt.parentSessionId).not.toBe(limitedAttempt?.parentSessionId)

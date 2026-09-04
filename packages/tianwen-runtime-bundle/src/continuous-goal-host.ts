@@ -478,7 +478,7 @@ export function mountContinuousGoalHost(
       }
       const record = bindings[0] ?? allControlRecords(records, controlSessionId)[0]
       if (record === undefined) throw new Error('No active continuous Goal is bound to this Agent.')
-      return await append(record.id, async () => {
+      const execute = async () => {
         const latest = readV3(record.id)
         if (latest === undefined || latest.control.sessionId !== controlSessionId) {
           throw new Error('No active continuous Goal is bound to this Agent.')
@@ -487,7 +487,9 @@ export function mountContinuousGoalHost(
           longGoalId: latest.id, expectedRevision: latest.revision,
           action: latest.planner.phase === 'complete' ? { action: 'status' } : action,
         }) as Pick<ContinuousGoalControlResult, 'action'>
-      }, false)
+      }
+      // Reading progress must not wait for an unrelated Planner/model turn.
+      return action.action === 'status' ? execute() : append(record.id, execute, false)
     },
   }
 

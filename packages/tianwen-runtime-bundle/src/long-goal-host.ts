@@ -280,6 +280,30 @@ export interface NativePlannerRecoveryLease {
   readonly release: () => void
 }
 
+function installPlannerTaskAdmission(agentCtx: Context, admit: (planner: Agent) => Promise<void>): void {
+  const planner = agentCtx.agent
+  if (planner === undefined) {
+    throw new LongGoalIntegrityError('Continuous Goal Planner recovery Agent is unavailable')
+  }
+  let claimed = false
+  agentCtx.tools.register(defineTool({
+    name: 'recover_long_goal_task',
+    description: 'Let Tianwen attach the already-reserved Task while this Planner turn remains active. Call exactly once.',
+    parameters: {},
+    output: {
+      schema: { type: 'string', const: 'task-recovery-admitted' },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    async execute(_args, exec) {
+      if (claimed) throw new LongGoalIntegrityError('Continuous Goal Planner recovery was already claimed')
+      claimed = true
+      await admit(planner)
+      exec.concludeTurn()
+      return 'task-recovery-admitted'
+    },
+  }))
+}
+
 export async function recoverNativeLongGoalPlannerParent(
   record: GoalFirstLongGoalRecord,
   dependencies: NativePlannerRecoveryDependencies,
@@ -300,29 +324,11 @@ export async function recoverNativeLongGoalPlannerParent(
   }
   const claimed = Promise.withResolvers<Agent>()
   const released = Promise.withResolvers<void>()
-  let claimedOnce = false
   dependencies.installNativeSetup(record.planner.sessionId, agentCtx => {
-    const planner = agentCtx.agent
-    if (planner === undefined) {
-      throw new LongGoalIntegrityError('Continuous Goal Planner recovery Agent is unavailable')
-    }
-    agentCtx.tools.register(defineTool({
-      name: 'recover_long_goal_task',
-      description: 'Hold this recovered Planner turn while Tianwen reconnects its already-started Task. Call exactly once.',
-      parameters: {},
-      output: {
-        schema: { type: 'string', const: 'task-recovery-admitted' },
-        render: (_args, value) => [{ type: 'text', text: value }],
-      },
-      async execute(_args, exec) {
-        if (claimedOnce) throw new LongGoalIntegrityError('Continuous Goal Planner recovery was already claimed')
-        claimedOnce = true
-        claimed.resolve(planner)
-        await released.promise
-        exec.concludeTurn()
-        return 'task-recovery-admitted'
-      },
-    }))
+    installPlannerTaskAdmission(agentCtx, async planner => {
+      claimed.resolve(planner)
+      await released.promise
+    })
   })
   try {
     await dependencies.followupNativeChild(
@@ -383,6 +389,7 @@ export interface PermissionAttemptHostDependencies {
     readonly childSessionId: string
   }) => Promise<void>
   readonly attachedAgent: (sessionId: string) => Agent | undefined
+  readonly installNativeSetup: (sessionId: string, setup: AgentSetup) => void
   readonly reserveSessionId: () => string
   readonly startNativeChild: (input: {
     readonly parent: Agent
@@ -662,14 +669,37 @@ export function createPermissionAttemptHost(
     let planner = dependencies.attachedAgent(record.planner.sessionId)
     if (
       planner !== undefined
-      && sandboxModeFromEvents(planner.session.events, true) !== attemptTask.current.permissionMode
+      && (sandboxModeFromEvents(planner.session.events, true) !== attemptTask.current.permissionMode
+        || String(planner.session.id) !== record.planner.sessionId
+        || String(planner.session.header.parentSession) !== record.control.sessionId)
     ) return
+    const plannerSessionId = record.planner.sessionId
+    const admitTask = async (parent: Agent): Promise<void> => {
+      if (
+        String(parent.session.id) !== plannerSessionId
+        || String(parent.session.header.parentSession) !== String(main.session.id)
+      ) throw new LongGoalIntegrityError('Renewed Long Goal Planner lineage mismatch')
+      const latest = dependencies.readLongGoal(dependencies.roots.stateRoot, input.longGoalId)
+      if (latest.schemaVersion !== 'tianwen.long-goal.v3') return
+      await dependencies.runCurrentTask({
+        roots: dependencies.roots,
+        longGoalId: latest.id,
+        expectedRevision: latest.revision,
+      })
+    }
     if (planner === undefined) {
       const prompt = [{
         type: 'text' as const,
-        text: `Coordinate the already-reserved retry for Task: ${attemptTask.task.objective}`,
+        text: 'Restore only the Planner parent after a main-session permission change. Call recover_long_goal_task exactly once so Tianwen can attach the already-reserved Task. Do not execute the Task or submit a plan in this turn. Later planning requests provide the exact Goal revision.',
       }]
       const inspection = await dependencies.inspectSession(record.planner.sessionId)
+      let admitted = false
+      dependencies.installNativeSetup(record.planner.sessionId, agentCtx => {
+        installPlannerTaskAdmission(agentCtx, async parent => {
+          await admitTask(parent)
+          admitted = true
+        })
+      })
       if (inspection === undefined) {
         const finalExplicit = explicitSandboxModeFromEvents(main.session.events)
         if (
@@ -722,19 +752,11 @@ export function createPermissionAttemptHost(
         await following
       }
       planner = dependencies.attachedAgent(record.planner.sessionId)
+      await planner?.whenIdle()
+      if (!admitted) throw new LongGoalIntegrityError('Renewed Long Goal Task admission was not confirmed')
+      return
     }
-    if (
-      planner === undefined
-      || String(planner.session.id) !== record.planner.sessionId
-      || String(planner.session.header.parentSession) !== record.control.sessionId
-    ) return
-    const latest = dependencies.readLongGoal(dependencies.roots.stateRoot, input.longGoalId)
-    if (latest.schemaVersion !== 'tianwen.long-goal.v3') return
-    await dependencies.runCurrentTask({
-      roots: dependencies.roots,
-      longGoalId: latest.id,
-      expectedRevision: latest.revision,
-    })
+    await admitTask(planner)
   }
 
   const handlePermissionEvent = async (input: {
@@ -2288,6 +2310,7 @@ export function mountTianwenLongGoalHost(
     const permissionAttemptHost = createPermissionAttemptHost({
       roots,
       readLongGoal,
+      installNativeSetup: (sessionId, setup) => { nativeSetups.set(sessionId, setup) },
       projectEvidence: (sessionId, events) => projectPersistedEvidence(SessionId(sessionId), events),
       inspectSession: async sessionId => {
         const matches = (await runDependencies.listSessions())

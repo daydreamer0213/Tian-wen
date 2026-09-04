@@ -2765,6 +2765,8 @@ describe('continuous Goal Host', () => {
       } as unknown as Agent
       const live = new Map<string, Agent>([['main-control', main]])
       const reservedIds = ['planner-new', 'task-new']
+      const nativeSetups = new Map<string, AgentSetup>()
+      const admissionOrder: string[] = []
       const startNativeChild = vi.fn(async (input: { readonly parent: Agent, readonly childId: string }) => {
         const parentMode = (input.parent.session.events.findLast(event => event.type === 'sandbox/mode')?.data as { mode: string }).mode
         const childSession = {
@@ -2779,11 +2781,28 @@ describe('continuous Goal Host', () => {
           }] as unknown as SessionEvent[],
         }
         sessions.set(input.childId, childSession)
+        let admissionExecution: Promise<unknown> | undefined
         const created = {
+          id: input.childId,
           session: childSession,
           ctx: { goals: { get: () => undefined } },
+          whenIdle: async () => { await admissionExecution },
         } as unknown as Agent
         live.set(input.childId, created)
+        admissionOrder.push(`admit:${input.childId}`)
+        const setup = nativeSetups.get(input.childId)
+        if (setup !== undefined) {
+          let recoveryTool: ToolDefinition | undefined
+          await setup({
+            agent: created,
+            tools: { register: (tool: ToolDefinition) => { recoveryTool = tool; return () => undefined } },
+          } as unknown as DshContext)
+          if (recoveryTool?.name !== 'recover_long_goal_task') throw new Error('missing Planner admission tool')
+          admissionExecution = recoveryTool.execute({}, {
+            agent: created,
+            concludeTurn: () => { admissionOrder.push(`conclude:${input.childId}`) },
+          } as never)
+        }
         return { childId: input.childId }
       })
       const roots = {
@@ -2834,6 +2853,7 @@ describe('continuous Goal Host', () => {
         quiesceNativeAttempt,
         attachedAgent: sessionId => live.get(sessionId),
         reserveSessionId: () => reservedIds.shift()!,
+        installNativeSetup: (sessionId, setup) => { nativeSetups.set(sessionId, setup) },
         startNativeChild,
         followupNativeChild: vi.fn(),
         nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
@@ -2929,6 +2949,7 @@ describe('continuous Goal Host', () => {
         expect.objectContaining({ type: 'sandbox/mode', data: { mode: 'danger-full-access', source: 'delegation' } }),
       ]))
       expect(renewed.tianwenEvents?.some(event => event.type === 'attempt-settled')).toBe(false)
+      expect(admissionOrder).toEqual(['admit:planner-new', 'admit:task-new', 'conclude:planner-new'])
 
       await permissionHost.handlePermissionEvent({
         longGoalId: source.id,
@@ -3027,6 +3048,7 @@ describe('continuous Goal Host', () => {
           quiesceNativeAttempt,
           attachedAgent: (sessionId: string) => sessionId === 'main-control' ? main : undefined,
           reserveSessionId,
+          installNativeSetup: vi.fn(),
           startNativeChild: vi.fn(), followupNativeChild: vi.fn(),
           nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
           runCurrentTask: vi.fn(), notifyMain,
@@ -3149,6 +3171,7 @@ describe('continuous Goal Host', () => {
       quiesceNativeAttempt: vi.fn(),
       attachedAgent: sessionId => sessionId === source.control.sessionId ? main : sessionId === source.planner.sessionId ? planner : undefined,
       reserveSessionId: vi.fn(), startNativeChild: vi.fn(), followupNativeChild: vi.fn(),
+      installNativeSetup: vi.fn(),
       nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
       runCurrentTask, notifyMain: vi.fn(),
     })
@@ -3209,6 +3232,7 @@ describe('continuous Goal Host', () => {
         readLongGoal,
         projectEvidence: (sessionId: string, events: readonly SessionEvent[]) => projectEvidence(SessionId(sessionId), events),
         flushSession: vi.fn(), quiesceNativeAttempt, reserveSessionId,
+        installNativeSetup: vi.fn(),
         startNativeChild: vi.fn(), followupNativeChild: vi.fn(),
         nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
         runCurrentTask: vi.fn(), notifyMain: vi.fn(),
@@ -3333,6 +3357,8 @@ describe('continuous Goal Host', () => {
       const live = new Map<string, Agent>([['main-control', main]])
       let shrinkBeforePlannerCapture = true
       const reservedIds = ['planner-reserved', 'task-reserved']
+      const nativeSetups = new Map<string, AgentSetup>()
+      const admissionOrder: string[] = []
       const startNativeChild = vi.fn(async (input: { readonly parent: Agent, readonly childId: string }) => {
         const childSession = {
           id: input.childId,
@@ -3343,7 +3369,28 @@ describe('continuous Goal Host', () => {
           }] as unknown as SessionEvent[],
         }
         sessions.set(input.childId, childSession)
-        live.set(input.childId, { session: childSession, ctx: { goals: { get: () => undefined } } } as unknown as Agent)
+        let admissionExecution: Promise<unknown> | undefined
+        const created = {
+          id: input.childId,
+          session: childSession,
+          ctx: { goals: { get: () => undefined } },
+          whenIdle: async () => { await admissionExecution },
+        } as unknown as Agent
+        live.set(input.childId, created)
+        admissionOrder.push(`admit:${input.childId}`)
+        const setup = nativeSetups.get(input.childId)
+        if (setup !== undefined) {
+          let recoveryTool: ToolDefinition | undefined
+          await setup({
+            agent: created,
+            tools: { register: (tool: ToolDefinition) => { recoveryTool = tool; return () => undefined } },
+          } as unknown as DshContext)
+          if (recoveryTool?.name !== 'recover_long_goal_task') throw new Error('missing Planner admission tool')
+          admissionExecution = recoveryTool.execute({}, {
+            agent: created,
+            concludeTurn: () => { admissionOrder.push(`conclude:${input.childId}`) },
+          } as never)
+        }
         return { childId: input.childId }
       })
       const roots = { stateRoot, sessionsRoot: resolve(fixture, 'sessions'), evolutionRoot: resolve(stateRoot, 'evolution') }
@@ -3367,6 +3414,7 @@ describe('continuous Goal Host', () => {
           if (reserved === undefined) throw new Error('restart must not reserve another id')
           return reserved
         },
+        installNativeSetup: (sessionId: string, setup: AgentSetup) => { nativeSetups.set(sessionId, setup) },
         startNativeChild,
         nativeAgentOptions: { provider: 'provider', model: 'model' } as AgentOptions,
         notifyMain: vi.fn(),
@@ -3467,6 +3515,7 @@ describe('continuous Goal Host', () => {
       expect(readTianwenTaskAttemptProjection(recovered, secondTaskId).attempts).toHaveLength(2)
       expect(followupNativeChild).not.toHaveBeenCalled()
       expect(startNativeChild.mock.calls.map(call => call[0].childId)).toEqual(['planner-reserved', 'task-reserved'])
+      expect(admissionOrder).toEqual(['admit:planner-reserved', 'admit:task-reserved', 'conclude:planner-reserved'])
     } finally {
       rmSync(fixture, { recursive: true, force: true })
     }
@@ -3557,7 +3606,7 @@ describe('continuous Goal Host', () => {
         agent: planner,
         tools: { register: (tool: ToolDefinition) => { recoveryTool = tool } },
       } as unknown as DshContext)
-      recoveryExecution = recoveryTool!.execute({}, { concludeTurn: vi.fn() } as never)
+      recoveryExecution = recoveryTool!.execute({}, { agent: planner, concludeTurn: vi.fn() } as never)
       return 'planner-recovery-message'
     })
 
@@ -4243,7 +4292,35 @@ describe('continuous Goal Host', () => {
     expect(subject.dependencies.deliver).not.toHaveBeenCalled()
   })
 
-  it('queues goal_control behind the Goal lane and rereads its latest durable revision', async () => {
+  it('reads durable status without waiting for the background Goal lane', async () => {
+    const source = record()
+    const subject = harness(source)
+    const controlAgent = agent('control-session', 'control-goal')
+    subject.live.set('control-session', controlAgent)
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    subject.dependencies.readStatus = vi.fn(async () => {
+      await gate
+      return status(source, ['active'], TASK_1)
+    })
+    subject.dependencies.control.mockResolvedValue({ action: 'status' })
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    try {
+      await vi.waitFor(() => expect(subject.dependencies.readStatus).toHaveBeenCalledOnce())
+      const pending = subject.control(controlAgent)
+      await vi.waitFor(() => expect(subject.dependencies.control).toHaveBeenCalledOnce())
+      await expect(pending).resolves.toEqual({ action: 'status' })
+      expect(subject.dependencies.control).toHaveBeenCalledWith({
+        longGoalId: GOAL_ID, expectedRevision: 4, action: { action: 'status' },
+      })
+      expect(subject.dependencies.continueProgress).not.toHaveBeenCalled()
+    } finally {
+      release()
+      await dispose()
+    }
+  })
+
+  it('queues control mutations behind the Goal lane and rereads its latest durable revision', async () => {
     const source = record()
     const subject = harness(source)
     const controlAgent = agent('control-session', 'control-goal')
@@ -4257,7 +4334,7 @@ describe('continuous Goal Host', () => {
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
     await vi.waitFor(() => expect(subject.dependencies.readStatus).toHaveBeenCalledOnce())
 
-    const pending = subject.control(controlAgent)
+    const pending = subject.control(controlAgent, { action: 'pause' })
     await Promise.resolve()
     const callsBeforeRelease = subject.dependencies.control.mock.calls.length
     subject.setRecords([{ ...source, revision: 5 }])
@@ -4266,7 +4343,7 @@ describe('continuous Goal Host', () => {
     await expect(pending).resolves.toEqual({ action: 'paused' })
     expect(callsBeforeRelease).toBe(0)
     expect(subject.dependencies.control).toHaveBeenCalledWith({
-      longGoalId: GOAL_ID, expectedRevision: 5, action: { action: 'status' },
+      longGoalId: GOAL_ID, expectedRevision: 5, action: { action: 'pause' },
     })
     await dispose()
   })
@@ -4304,7 +4381,7 @@ describe('continuous Goal Host', () => {
     subject.setStatus(status(record(), ['complete'], null))
     subject.complete()
     await vi.waitFor(() => expect(subject.dependencies.continueProgress).toHaveBeenCalledOnce())
-    const pendingControl = subject.control(controlAgent)
+    const pendingControl = subject.control(controlAgent, { action: 'pause' })
     subject.complete()
     release()
 
