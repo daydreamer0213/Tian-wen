@@ -2170,7 +2170,9 @@ export class TianwenSkillEvaluationService extends Service {
   async runControlledShadow(
     input: RunControlledSkillShadowInput,
     resolveVerdict?: ControlledOutcomeVerdictResolver,
+    signal?: AbortSignal,
   ): Promise<ControlledSkillShadowRuntimeReceipt> {
+    signal?.throwIfAborted()
     const parsed = parseControlledShadowInput(input)
     const evaluation = this.ctx.tianwenEvolution.getControlledSkillEvaluation(
       parsed.evaluationId,
@@ -2545,7 +2547,9 @@ export class TianwenSkillEvaluationService extends Service {
           resolved,
           item.task.workspaceRoot,
           resolveVerdict,
+          signal,
         )
+        signal?.throwIfAborted()
         if (activity.activity === undefined) {
           return stoppedControlledShadowReceipt(plan, completedTaskIds, {
             taskId: item.planned.taskId,
@@ -2648,7 +2652,9 @@ export class TianwenSkillEvaluationService extends Service {
 
   async runControlledEvaluators(
     input: RunControlledSkillEvaluatorsInput,
+    signal?: AbortSignal,
   ): Promise<ControlledSkillEvaluatorsReceipt> {
+    signal?.throwIfAborted()
     const parsed = parseControlledEvaluatorsInput(input)
     const plan = this.ctx.tianwenEvolution.getControlledSkillEvaluation(parsed.evaluationId)
     if (plan === undefined) {
@@ -3007,7 +3013,8 @@ export class TianwenSkillEvaluationService extends Service {
       }
 
       for (const evaluator of prepared) {
-        const run = await this.runControlledEvaluator(evaluator)
+        const run = await this.runControlledEvaluator(evaluator, signal)
+        signal?.throwIfAborted()
         if (run.observations === undefined) {
           return stoppedControlledEvaluatorsReceipt(plan, completedTaskIds, {
             taskId: evaluator.tasks[0]!.taskId,
@@ -3098,7 +3105,9 @@ export class TianwenSkillEvaluationService extends Service {
 
   private async runControlledEvaluator(
     prepared: PreparedControlledEvaluator,
+    signal?: AbortSignal,
   ): Promise<ControlledEvaluatorRunResult> {
+    signal?.throwIfAborted()
     const state = prepared.state
     const session = prepared.handle.agent.session
     this.evaluators.set(state.sessionId, state)
@@ -3112,17 +3121,14 @@ export class TianwenSkillEvaluationService extends Service {
     }, maxElapsedMs)
     let idleFailed = false
     try {
-      prepared.handle.agent.followup(createUserMessage({
-        content: [{ type: 'text', text: JSON.stringify(prepared.envelope) }],
-        source: { kind: 'user' },
-      }))
-      await prepared.handle.agent.whenIdle()
+      await runControlledTurn(prepared.handle.agent, JSON.stringify(prepared.envelope), signal)
     } catch {
       idleFailed = true
     } finally {
       state.active = false
       clearTimeout(timer)
     }
+    signal?.throwIfAborted()
     try {
       if (!await this.ctx.sessions.flush(session)) {
         return { reasonCode: 'persistence-unavailable' }
@@ -3182,7 +3188,9 @@ export class TianwenSkillEvaluationService extends Service {
   async runControlledArms(
     input: RunControlledSkillEvaluationArmsInput,
     resolveVerdict?: ControlledOutcomeVerdictResolver,
+    signal?: AbortSignal,
   ): Promise<ControlledSkillEvaluationArmsReceipt> {
+    signal?.throwIfAborted()
     const parsed = parseControlledArmsInput(input)
     const candidate = this.ctx.tianwenEvolution.getSkillCandidate(parsed.candidateId)
     const protocol = this.ctx.tianwenEvolution.getControlledSkillEvalProtocol(
@@ -3445,6 +3453,7 @@ export class TianwenSkillEvaluationService extends Service {
         role: 'baseline' | 'candidate',
         skill: SkillDefinition,
       ): Promise<ControlledArmRunResult> => {
+        signal?.throwIfAborted()
         const planArm = planned[role]
         const cwd = role === 'baseline'
           ? task.baselineWorkspaceRoot
@@ -3571,7 +3580,7 @@ export class TianwenSkillEvaluationService extends Service {
           }
           if (result === undefined) {
             try {
-              result = await this.runControlledArm(prepared, plan, resolved, resolveVerdict)
+              result = await this.runControlledArm(prepared, plan, resolved, resolveVerdict, signal)
             } catch {
               result = { reasonCode: 'run-fact-mismatch' }
             }
@@ -3597,6 +3606,7 @@ export class TianwenSkillEvaluationService extends Service {
       for (const [index, planned] of plan.tasks.entries()) {
         const task = parsed.tasks[index]!
         const baselineResult = await runArm(task, planned, 'baseline', baselineSkill)
+        signal?.throwIfAborted()
         if (baselineResult.arm === undefined) {
           return stoppedControlledReceipt(plan, completedTaskIds, {
             stage: 'baseline',
@@ -3625,6 +3635,7 @@ export class TianwenSkillEvaluationService extends Service {
           })
         }
         const candidateResult = await runArm(task, planned, 'candidate', candidateSkill)
+        signal?.throwIfAborted()
         if (candidateResult.arm === undefined) {
           return stoppedControlledReceipt(plan, completedTaskIds, {
             stage: 'candidate',
@@ -3699,6 +3710,7 @@ export class TianwenSkillEvaluationService extends Service {
     plan: ControlledSkillEvaluationPlan,
     config: LlmCallConfig,
     resolveVerdict?: ControlledOutcomeVerdictResolver,
+    signal?: AbortSignal,
   ): Promise<ControlledArmRunResult> {
     const runId = prepared.planned[prepared.role].runId
     const result = await this.runControlledActivity(
@@ -3709,6 +3721,7 @@ export class TianwenSkillEvaluationService extends Service {
         ? prepared.task.baselineWorkspaceRoot
         : prepared.task.candidateWorkspaceRoot,
       resolveVerdict,
+      signal,
     )
     if (result.activity === undefined) return result
     const evaluatorMaterialDigest = controlledEvaluatorMaterial(
@@ -3739,7 +3752,9 @@ export class TianwenSkillEvaluationService extends Service {
     config: LlmCallConfig,
     workspaceRoot: string,
     resolveVerdict?: ControlledOutcomeVerdictResolver,
+    signal?: AbortSignal,
   ): Promise<ControlledActivityRunResult> {
+    signal?.throwIfAborted()
     const session = prepared.handle.agent.session
     const requests: GenerateOptions[] = []
     this.requests.set(String(session.id), requests)
@@ -3753,17 +3768,14 @@ export class TianwenSkillEvaluationService extends Service {
     }, prepared.planned.stopContract.maxElapsedMs)
     let idleFailed = false
     try {
-      prepared.handle.agent.followup(createUserMessage({
-        content: [{ type: 'text', text: prepared.task.input }],
-        source: { kind: 'user' },
-      }))
-      await prepared.handle.agent.whenIdle()
+      await runControlledTurn(prepared.handle.agent, prepared.task.input, signal)
     } catch {
       idleFailed = true
     } finally {
       prepared.guard.active = false
       clearTimeout(timer)
     }
+    signal?.throwIfAborted()
     const elapsedMs = Math.min(
       (prepared.guard.cancelledAt ?? Date.now()) - startedAt,
       prepared.planned.stopContract.maxElapsedMs,
@@ -4630,6 +4642,26 @@ function controlledEvaluatorGuard(
   }
   state.bodyCalls = 1
   return undefined
+}
+
+/** Relay caller cancellation to DSH's existing model-turn cancellation. */
+async function runControlledTurn(
+  agent: AgentHandle['agent'],
+  input: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted()
+  const cancel = () => agent.cancel({ kind: 'hook', reason: 'tianwen-controlled-cancelled' })
+  signal?.addEventListener('abort', cancel, { once: true })
+  try {
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: input }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+  } finally {
+    signal?.removeEventListener('abort', cancel)
+  }
 }
 
 function cancelControlledEvaluator(

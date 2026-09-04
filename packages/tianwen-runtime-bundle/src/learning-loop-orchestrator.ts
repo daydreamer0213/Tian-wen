@@ -95,7 +95,11 @@ export async function drainLearningLoopLaneWithWake(
     await drainLearningLoopLane(input)
   } while (input.takeWake())
 }
-export interface LearningLoopExecutionContext { readonly ctx: Context, readonly status: LearningLoopPhaseStatus }
+export interface LearningLoopExecutionContext {
+  readonly ctx: Context
+  readonly status: LearningLoopPhaseStatus
+  readonly signal?: AbortSignal
+}
 
 /** Injected production protocol/verifier. Ordinary runtime deliberately has none. */
 export interface LearningLoopControlledExecutor {
@@ -274,6 +278,7 @@ export function createExplicitCorrectionLearningLoopExecutor(
       materializeLearningCandidate(context.ctx.tianwenEvolution as never, context.status.analysisId as never)
     },
     async evaluate(context) {
+      context.signal?.throwIfAborted()
       const built = tasksFor(context)
       const candidateId = context.status.candidateId
       const protocolId = protocolIdFor(context)
@@ -282,10 +287,12 @@ export function createExplicitCorrectionLearningLoopExecutor(
       }
       await assertFrozenEnvironment(context)
       const evaluation = await (context.ctx.tianwenSkillEvaluation as unknown as {
-        runControlledArms(input: unknown, resolver?: unknown): Promise<{ readonly state: string, readonly evaluationId: string, readonly result?: { readonly mechanismVerdict: string } }>
+        runControlledArms(input: unknown, resolver?: unknown, signal?: AbortSignal): Promise<{ readonly state: string, readonly evaluationId: string, readonly result?: { readonly mechanismVerdict: string } }>
       }).runControlledArms(
         built.protocol.buildArmsInput(candidateId, protocolId, built.tasks),
+        undefined, context.signal,
       )
+      context.signal?.throwIfAborted()
       if (evaluation.state === 'terminal') {
         context.ctx.tianwenEvolution.recordLearningAnalysisCandidateRejected({
           analysisId: context.status.analysisId as never, evaluationId: evaluation.evaluationId as never,
@@ -294,10 +301,12 @@ export function createExplicitCorrectionLearningLoopExecutor(
       }
       if (evaluation.state !== 'awaiting-evaluator') throw new Error('controlled arms stopped before blind evaluation')
       const evaluators = await (context.ctx.tianwenSkillEvaluation as unknown as {
-        runControlledEvaluators(input: unknown, resolver?: unknown): Promise<{ readonly state: string, readonly evaluationId: string, readonly result?: { readonly mechanismVerdict: string } }>
+        runControlledEvaluators(input: unknown, signal?: AbortSignal): Promise<{ readonly state: string, readonly evaluationId: string, readonly result?: { readonly mechanismVerdict: string } }>
       }).runControlledEvaluators(
         built.protocol.buildEvaluatorsInput(evaluation.evaluationId, built.tasks),
+        context.signal,
       )
+      context.signal?.throwIfAborted()
       if (evaluators.state === 'terminal' && evaluators.result?.mechanismVerdict !== 'pass') {
         context.ctx.tianwenEvolution.recordLearningAnalysisCandidateRejected({
           analysisId: context.status.analysisId as never, evaluationId: evaluation.evaluationId as never,
@@ -312,11 +321,12 @@ export function createExplicitCorrectionLearningLoopExecutor(
       })
       for (const task of shadowTasks) built.protocol.assertWorkspaceSnapshot(task.workspaceRoot, task.workspaceSnapshot)
       const shadow = await (context.ctx.tianwenSkillEvaluation as unknown as {
-        runControlledShadow(input: unknown, resolver?: unknown): Promise<{ readonly state: string, readonly shadowId: string, readonly result?: { readonly mechanismVerdict: string, readonly promotionEligibility?: string } }>
+        runControlledShadow(input: unknown, resolver?: unknown, signal?: AbortSignal): Promise<{ readonly state: string, readonly shadowId: string, readonly result?: { readonly mechanismVerdict: string, readonly promotionEligibility?: string } }>
       }).runControlledShadow({
         evaluationId: evaluation.evaluationId,
         tasks: shadowTasks,
-      })
+      }, undefined, context.signal)
+      context.signal?.throwIfAborted()
       if (shadow.state === 'terminal' && (shadow.result?.mechanismVerdict !== 'pass' || shadow.result.promotionEligibility === 'ineligible')) {
         context.ctx.tianwenEvolution.recordLearningAnalysisCandidateRejected({
           analysisId: context.status.analysisId as never, evaluationId: evaluation.evaluationId as never,
@@ -639,6 +649,7 @@ export class TianwenLearningLoopService extends Service {
   private readonly timer: LearningLoopTimer
   private readonly activeAnalysisIds = new Set<string>()
   private readonly rerunAnalysisIds = new Set<string>()
+  private readonly evaluations = new Map<string, AbortController>()
   private livenessTimer: unknown | undefined
 
   constructor(ctx: Context, config: TianwenLearningLoopConfig = {}) {
@@ -658,6 +669,7 @@ export class TianwenLearningLoopService extends Service {
     })
     this.ctx.effect(() => offAgent, 'tianwen-learning-loop.agent-wake.dispose')
     this.ctx.effect(() => () => {
+      for (const controller of this.evaluations.values()) controller.abort()
       if (this.livenessTimer !== undefined) {
         this.timer.clearTimeout(this.livenessTimer)
         this.livenessTimer = undefined
@@ -667,6 +679,11 @@ export class TianwenLearningLoopService extends Service {
   }
 
   async schedule(analysisId: string): Promise<void> {
+    const evaluation = this.evaluations.get(analysisId)
+    if (evaluation !== undefined) {
+      const current = this.ctx.tianwenEvolution.getLearningAnalysis(analysisId as never)
+      if (current === undefined || !this.hasActiveSupport(current)) evaluation.abort()
+    }
     if (this.activeAnalysisIds.has(analysisId)) {
       // A reconciliation can arrive after the lane's last support check. Keep
       // one exact rerun marker; it is not a general queue.
@@ -716,7 +733,20 @@ export class TianwenLearningLoopService extends Service {
       waitForSubmission: () => undefined,
       freezeProtocol: current => executor === undefined ? unavailableExecutor() : executor.freezeProtocol({ ctx: this.ctx, status: preCandidateStatus(current) }),
       materializeCandidate: current => executor === undefined ? unavailableExecutor() : executor.materializeCandidate(contextFor(current)),
-      evaluate: current => executor === undefined ? unavailableExecutor() : executor.evaluate(contextFor(current)),
+      evaluate: async current => {
+        if (executor === undefined) return unavailableExecutor()
+        const controller = new AbortController()
+        this.evaluations.set(current.analysisId, controller)
+        try {
+          if (!this.hasActiveSupport(current)) controller.abort()
+          await executor.evaluate({ ...contextFor(current), signal: controller.signal })
+        } catch (error) {
+          // Withdrawal is not an environment failure or a retryable evaluation.
+          if (!controller.signal.aborted) throw error
+        } finally {
+          this.evaluations.delete(current.analysisId)
+        }
+      },
       promote: current => executor === undefined ? unavailableExecutor() : executor.promote(contextFor(current)),
       recoverPromote: current => executor?.recoverPromotion?.(contextFor(current)) ?? false,
       rollback: current => executor === undefined ? unavailableExecutor() : executor.rollback(contextFor(current)),

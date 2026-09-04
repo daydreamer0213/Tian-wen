@@ -246,7 +246,7 @@ function frozenProductToolSchemas(ctx: Context) {
 
 async function mountControlledRuntime(
   fixtureRoot: string,
-  script: readonly (readonly StreamChunk[] | Error)[],
+  script: readonly (readonly StreamChunk[] | Error)[] | ControlledAdapter,
 ) {
   const harness = await mountPersistentHarness(join(fixtureRoot, 'sessions'), [])
   await harness.ctx.plugin(SkillRegistry)
@@ -259,7 +259,7 @@ async function mountControlledRuntime(
   expect(harness.ctx.tools.schemas().some(schema => schema.name === 'skill')).toBe(false)
   await harness.ctx.plugin(DynamicCordisRunnerService, {})
   const disposeSkill = harness.ctx.skills.register(protocol.parentSkill)
-  const adapter = new ControlledAdapter(script)
+  const adapter = script instanceof ControlledAdapter ? script : new ControlledAdapter(script)
   harness.ctx.llm.registerAdapter([provider], adapter)
   const selection = { provider, model }
   harness.ctx.provide('agentDefaultModel', { currentSelection: () => ({ ...selection }) })
@@ -379,6 +379,130 @@ afterEach(() => {
 })
 
 describe('explicit-correction controlled learning-loop executor', () => {
+  it.each([
+    ['arms', 0, 'withdrawal'], ['evaluator', 20, 'withdrawal'], ['shadow', 21, 'withdrawal'],
+    ['arms', 0, 'replacement'], ['evaluator', 20, 'disable'],
+  ] as const)('cancels obsolete %s generation at request %i on %s without starting later work', async (stage, requestIndex, change) => {
+    const fixtureRoot = root(`cancel-${stage}`)
+    const started = Promise.withResolvers<AbortSignal>()
+    const release = Promise.withResolvers<void>()
+    let calls = 0
+    class PendingEvaluationAdapter extends ControlledAdapter {
+      override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        if (calls++ === requestIndex) {
+          if (options.signal === undefined) throw new Error('native generation must have a cancellation signal')
+          started.resolve(options.signal)
+          await Promise.race([
+            release.promise,
+            new Promise<void>(resolve => options.signal!.addEventListener('abort', () => resolve(), { once: true })),
+          ])
+          if (options.signal.aborted) return
+        }
+        yield* super.stream(options)
+      }
+    }
+    const mounted = await mountControlledRuntime(fixtureRoot, new PendingEvaluationAdapter(successfulControlledScript()))
+    const { ctx } = mounted.harness
+    let bridge: Awaited<ReturnType<typeof mountFeedbackBridge>> | undefined
+    let lane: Promise<void> | undefined
+    try {
+      await ctx.plugin(SubagentRuntime)
+      const session = feedbackSession(`cancel-${stage}-main`, 'reply', 1)
+      const sessionId = String(session.id)
+      const lifecycle = learningSessionLifecycleFingerprint({ sessionId, createdAt: 1 })
+      const binding = ctx.tianwenEvolution.recordRunBinding({
+        goalRef: 'goal:cancel', taskRef: 'task:cancel', sessionId,
+        scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+        acceptanceContract: protocol.acceptance, sessionLifecycleFingerprint: lifecycle,
+      })
+      const manifest = ctx.tianwenEvolution.recordRunSkillManifest({ runId: binding.runId, skill: protocol.parentSkill })
+      ctx.tianwenEvolution.recordOutcomeIntake({
+        runId: binding.runId, verdict: 'met', sessionDigest: lifecycle, evidenceIds: [evidenceA],
+      })
+      ctx.tianwenEvolution.recordRunSkillUse({
+        runId: binding.runId, parentVersionId: manifest.parentVersionId, sessionId,
+        sessionDigest: lifecycle, skillName: protocol.parentSkill.name,
+        contentDigest: ctx.tianwenEvolution.getRunSkillManifest(binding.runId)!.contentDigest,
+        skillEvidenceId: `sha256:${'7'.repeat(64)}`,
+        acceptanceEvidenceId: evidenceA, skillCallSeq: 10, skillResultSeq: 11, acceptanceCallSeq: 12,
+      })
+      ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v1' })
+      const intake = ctx.tianwenEvolution.recordLearningFeedbackRevision({
+        intake: {
+          sessionId, messageId: 'reply', feedbackVersion: 'v1', rating: 'negative',
+          note: 'Keep verified findings and decision uncertainties separate.',
+          scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE, sessionDigest: lifecycle, evidenceIds: [evidenceA, evidenceB],
+        },
+        sessionLifecycleFingerprint: lifecycle, analysisConsentRevision: 1,
+      })
+      const analysis = ctx.tianwenEvolution.requestLearningAnalysis({
+        ticketId: intake.ticketId!, sessionId, messageId: 'reply', feedbackVersion: 'v1',
+        consentRevision: 1, parentSessionId: sessionId,
+      })
+      ctx.tianwenEvolution.recordLearningAnalysisChildStarted({
+        analysisId: analysis.analysisId, parentSessionId: sessionId, childSessionId: analysis.childSessionId,
+      })
+      ctx.tianwenEvolution.recordLearningAnalysisSubmission({
+        analysisId: analysis.analysisId, childSessionId: analysis.childSessionId,
+        submission: {
+          verdict: 'skill-change', hypothesis: 'Decision uncertainties were omitted.',
+          lesson: { claim: 'Separate decision uncertainties.', when: 'Summarizing research.', notWhen: 'Raw extraction.' },
+          candidatePatch: { description: 'Research summary.', whenToUse: 'Research packets.', content: '# Summary\nSeparate decision uncertainties.' },
+          supportingEvidenceIds: [evidenceA], counterevidenceIds: [evidenceB],
+        },
+      })
+      const executor = createExplicitCorrectionLearningLoopExecutor({
+        root: join(fixtureRoot, 'workspaces'), materializeWorkspace,
+        async environment() {
+          return {
+            callConfig: await ctx.llm.resolveCallConfig(mounted.selection),
+            retryPolicy: ctx.llm.providerRetryPolicy(provider),
+            toolSchemas: frozenProductToolSchemas(ctx), rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+          }
+        },
+        async deliverTerminalReport() { throw new Error('withdrawn evaluation must not report a verdict') },
+      })
+      const loop = new TianwenLearningLoopService(ctx, { executor })
+      const catalogs = new FeedbackBridgeCatalogs()
+      catalogs.sessions.set(sessionId, session)
+      bridge = await mountFeedbackBridge(mounted.harness, loop, catalogs)
+      lane = loop.schedule(analysis.analysisId)
+      const generationSignal = await started.promise
+      // An ordinary repeated wake must not cancel supported work.
+      await loop.schedule(analysis.analysisId)
+      expect(generationSignal.aborted).toBe(false)
+      if (change === 'disable') {
+        ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v1' })
+        await loop.schedule(analysis.analysisId)
+      } else {
+        if (change === 'replacement') catalogs.rows.set(sessionId, [feedbackItem({
+          messageId: 'reply', version: 'v2', note: 'Keep decision uncertainties separate and omit background-only details.',
+          updatedAt: Date.now() + 1,
+        })])
+        expect(await bridge.bridge.reconcileSession(sessionId)).toMatchObject({
+          state: 'reconciled', retracted: change === 'withdrawal' ? 1 : 0,
+        })
+      }
+      await vi.waitFor(() => expect(generationSignal.aborted).toBe(true), { timeout: 1_000 })
+      await lane
+      expect(calls).toBe(requestIndex + 1)
+      expect(ctx.tianwenEvolution.getLearningAnalysis(analysis.analysisId)?.phase).toBe('invalidated')
+      const events = readFileSync(join(fixtureRoot, 'evolution', 'ledger.jsonl'), 'utf8')
+        .trim().split('\n').map(line => JSON.parse(line) as { type: string; analysisId?: string })
+      // Replacement also admits a new analyst; this fixture has no live main
+      // for that separate lane. Only the obsolete evaluation is under test.
+      expect(events.filter(event => event.type === 'learning-analysis-failed'
+        && event.analysisId === analysis.analysisId)).toEqual([])
+      expect(events.filter(event => event.type === 'learning-analysis-promoted')).toEqual([])
+      expect(events.filter(event => event.type === 'controlled-skill-scope-pointer-initialized')).toEqual([])
+    } finally {
+      release.resolve()
+      await lane?.catch(() => undefined)
+      await bridge?.ctx.fiber.dispose()
+      await mounted.dispose()
+    }
+  }, 20_000)
+
   it('stops the live native analyst when feedback reconciliation invalidates its idle lane', async () => {
     const mounted = await mountControlledRuntime(root('native-feedback-withdrawal'), [])
     const { ctx } = mounted.harness
