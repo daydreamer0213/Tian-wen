@@ -93,6 +93,7 @@ export interface ContinuousGoalHostDependencies {
   }) => Promise<void>
   readonly reconcilePermissionAttempt?: (input: {
     readonly longGoalId: string
+    readonly resume?: boolean
   }) => Promise<void>
 }
 
@@ -479,6 +480,9 @@ export function mountContinuousGoalHost(
       const record = bindings[0] ?? allControlRecords(records, controlSessionId)[0]
       if (record === undefined) throw new Error('No active continuous Goal is bound to this Agent.')
       const execute = async () => {
+        if (action.action === 'resume') {
+          await dependencies.reconcilePermissionAttempt?.({ longGoalId: record.id })
+        }
         const latest = readV3(record.id)
         if (latest === undefined || latest.control.sessionId !== controlSessionId) {
           throw new Error('No active continuous Goal is bound to this Agent.')
@@ -571,7 +575,7 @@ export function mountContinuousGoalHost(
   }
 
   const reconcile = async (longGoalId: string): Promise<void> => {
-    await dependencies.reconcilePermissionAttempt?.({ longGoalId })
+    await dependencies.reconcilePermissionAttempt?.({ longGoalId, resume: false })
     const record = readV3(longGoalId)
     if (record === undefined) return
     const status = await readStatus(longGoalId)
@@ -592,43 +596,17 @@ export function mountContinuousGoalHost(
     }
     if (record.control.autoProgress !== 'running' || record.planner.phase === 'complete') return
     if (lanes.get(longGoalId)?.transition !== undefined) return
-    const current = status.currentTaskId === null ? undefined : status.tasks.find(task => task.id === status.currentTaskId)
     const hasNewSettledTask = settledTasks(status) > record.planner.consideredSettledTasks
-    const requiresContinue = record.planner.phase === 'unplanned'
-      || record.planner.phase === 'needs-replan'
-      || status.goal.phase === 'planning'
-      || current?.execution === null
-      || hasNewSettledTask
-      || !exactLiveRunningTask(ctx, status, dependencies.getGoal)
-    if (requiresContinue) {
-      if (hasNewSettledTask) {
-        const folded = await dependencies.recordTerminalAttempt?.({ longGoalId, status })
-        if (folded === false) return
-      }
-      const currentRecord = readV3(longGoalId)
-      if (currentRecord === undefined) return
-      await dependencies.continueProgress({ longGoalId, expectedRevision: currentRecord.revision })
-      const recovered = await readStatus(longGoalId)
-      if (recovered.goal.phase === 'complete' || recovered.goal.phase === 'blocked' || hasNewSettledTask) {
-        if (recovered.goal.phase === 'complete' || recovered.goal.phase === 'blocked') {
-          const folded = await dependencies.recordTerminalAttempt?.({ longGoalId, status: recovered })
-          if (folded === false) return
-        }
-        recordProgressDelivery(
-          longGoalId,
-          recovered.goal.phase === 'complete' || recovered.goal.phase === 'blocked'
-            ? await readStatus(longGoalId)
-            : recovered,
-          true,
-        )
-      } else {
-        const transition = activeProgressTransition(recovered)
-        if (transition !== undefined) recordProgressDelivery(longGoalId, recovered)
-      }
-    } else {
-      const transition = activeProgressTransition(status)
-      if (transition !== undefined) recordProgressDelivery(longGoalId, status)
+    // Opening a Session restores facts, not permission to start more work.
+    // The existing main-session resume control continues interrupted progress;
+    // live completion events still advance the normal running Task chain.
+    if (hasNewSettledTask) {
+      await dependencies.recordTerminalAttempt?.({ longGoalId, status })
+      return
     }
+    if (!exactLiveRunningTask(ctx, status, dependencies.getGoal)) return
+    const transition = activeProgressTransition(status)
+    if (transition !== undefined) recordProgressDelivery(longGoalId, status)
   }
 
   const pauseForControlStop = async (longGoalId: string): Promise<void> => {

@@ -304,13 +304,22 @@ Expected: the formal upgrade test retained Runtime `0.1.10` while installing `0.
   5. observe a new attempt finish;
   6. prove the old attempt produced no Learning Signal.
 
-- [ ] Story C — restart and offline delivery:
+- [ ] Story C — user-triggered continuation after restart (user correction, 2026-09-04):
   1. begin delegated work;
   2. close/restart Desktop while the child is active;
-  3. let the child settle with the main parent offline;
-  4. reopen the main Session;
-  5. receive one completion summary;
-  6. prove no duplicate Task execution or second completion Turn.
+  3. reopen the main Session; merely opening it is not the user-requested continuation action;
+  4. use the existing native continue/play action if available, or send one ordinary `继续` message in the main chat; do not add a custom button solely for acceptance;
+  5. continue from the interrupted progress, without repeating already completed work or navigating into a child Session;
+  6. receive progress and the final result in the main chat, with no duplicate Task execution or completion Turn.
+
+  This replaces the previous automatic/offline-resume acceptance assumption. Test the normal user workflow, not an invented requirement to keep executing while the main Agent is offline. Reuse a bounded normal task; add forced waits or broader lifecycle checks only when needed to reproduce a concrete remaining defect.
+
+  Narrow implementation follow-through (2026-09-04):
+  - [x] Reproduce startup/Session-open incorrectly starting unfinished or pending work in `continuous-goal-host.spec.ts`.
+  - [x] Keep startup reconciliation limited to durable facts and already-terminal delivery; preserve live completion chaining in `continuous-goal-host.ts`.
+  - [x] Observe permission evidence on startup without admitting a renewed Task; reuse the existing main `goal_control` resume and live native permission-change path in `long-goal-host.ts`.
+  - [x] Update the real native profile test to send main-chat `继续`, verify the interrupted Task keeps its identity, and verify completed work is not rerun. Four related files: 135 tests passed; package typecheck passed.
+  - [ ] Package the reviewed source and run one bounded normal main-chat restart/continue story. Do not rerun the already-proven learning evaluation loop for this lifecycle-only change.
 
 - [ ] Story D — full explicit-correction learning:
   1. in a fresh ordinary main Session, enable automatic analysis once after reading the privacy notice;

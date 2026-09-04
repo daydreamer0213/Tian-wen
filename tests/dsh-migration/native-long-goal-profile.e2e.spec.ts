@@ -15,6 +15,7 @@ import { sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
 import {
   Context,
   CallId,
+  createUserMessage,
   defineTool,
   goalRoundDriver,
   mountAgentLoopTestDependencies,
@@ -146,7 +147,12 @@ class ProfileAdapter extends LlmAdapter {
     let chunks: readonly StreamChunk[]
     const plannerPrompt = text.slice(text.lastIndexOf('Plan the next short ordered Task suffix'))
     const revision = [...plannerPrompt.matchAll(/Expected Goal revision: (\d+)/gu)].at(-1)?.[1]
-    if (
+    const last = options.messages.at(-1)
+    if (last?.role === 'user' && last.source.kind === 'user'
+      && last.content.some(block => block.type === 'text' && block.text === '继续')
+      && options.tools?.some(tool => tool.name === 'goal_control')) {
+      chunks = toolCallResponse('profile-main-resume', 'goal_control', { action: 'resume' })
+    } else if (
       text.includes('Call recover_long_goal_task exactly once')
       && options.tools?.some(tool => tool.name === 'recover_long_goal_task')
     ) {
@@ -677,7 +683,7 @@ describe('native Long Goal profile execution', () => {
     }
   }, 40_000)
 
-  it('rebuilds the real Host and delivers one offline terminal Turn without rerunning the Task', async () => {
+  it('finishes offline settlement after main-chat continuation without rerunning the completed Task', async () => {
     mkdirSync(FIXTURE_BASE, { recursive: true })
     const root = mkdtempSync(join(FIXTURE_BASE, 'offline-restart-'))
     const objective = 'Offline recovery must not rerun work.'
@@ -736,6 +742,9 @@ describe('native Long Goal profile execution', () => {
       first = undefined
       recovered = await mountProfile(objective, { root, resumeMain: true })
       expect(String(recovered.main.session.id)).toBe(running.control.sessionId)
+      recovered.main.followup(createUserMessage({
+        content: [{ type: 'text', text: '继续' }], source: { kind: 'user' },
+      }))
 
       await vi.waitFor(() => {
         const record = readLongGoal(recovered!.stateRoot, running.id) as LongGoalRecordV3
@@ -802,7 +811,7 @@ describe('native Long Goal profile execution', () => {
       }))
       expect(recovered.adapter.requests.filter(request => (
         String(request.sessionId) === String(recovered!.main.session.id)
-      ))).toHaveLength(1)
+      ))).toHaveLength(2)
       await expectNativeChild(
         recovered.ctx,
         running.planner.sessionId,
@@ -816,7 +825,7 @@ describe('native Long Goal profile execution', () => {
     }
   }, 60_000)
 
-  it('cold-recovers the same Planner and Task after the Host stops during Task execution', async () => {
+  it('continues the same interrupted Task only after the user says continue in the restored main chat', async () => {
     mkdirSync(FIXTURE_BASE, { recursive: true })
     const root = mkdtempSync(join(FIXTURE_BASE, 'active-restart-'))
     const objective = 'Continue the same active Task after Host restart.'
@@ -846,6 +855,13 @@ describe('native Long Goal profile execution', () => {
       await first.dispose(false, false)
       first = undefined
       recovered = await mountProfile(objective, { root, resumeMain: true, completeTaskThroughTool: true })
+
+      await recovered.main.whenIdle()
+      expect(recovered.taskRunSessions()).toEqual([])
+      expect(recovered.ctx.agents.get(SessionId(taskSessionId))).toBeUndefined()
+      recovered.main.followup(createUserMessage({
+        content: [{ type: 'text', text: '继续' }], source: { kind: 'user' },
+      }))
 
       await vi.waitFor(() => {
         if (
@@ -961,6 +977,8 @@ describe('native Long Goal profile execution', () => {
         status: 'settled',
       }])
       expect(recovered.taskRunSessions()).toEqual([taskSessionId])
+      expect(recovered.main.session.events.filter(event => event.type === 'tool/call'
+        && event.data.name === 'goal_control')).toHaveLength(1)
       const recoveredLog = await recovered.ctx.sessionPersistence.inspect(SessionId(taskSessionId))
       const completion = recoveredLog.events.find(event => event.type === 'tool/result'
         && event.data.message.source.kind === 'tool'

@@ -3506,6 +3506,10 @@ describe('continuous Goal Host', () => {
         runCurrentTask: input => runCurrentWebTask(input, runDependencies as never),
       })
 
+      await restartedHost.reconcilePermissionAttempt({ longGoalId: source.id, resume: false })
+      expect((readLongGoal(stateRoot, source.id) as LongGoalRecordV3).tasks[1]!.execution).toBeNull()
+      expect(startNativeChild).not.toHaveBeenCalled()
+
       await restartedHost.reconcilePermissionAttempt({ longGoalId: source.id })
 
       const recovered = readLongGoal(stateRoot, source.id) as LongGoalRecordV3
@@ -4629,7 +4633,7 @@ describe('continuous Goal Host', () => {
     expect(subject.continueProgress).toHaveBeenCalledTimes(1)
   })
 
-  it('continues a settled Task recovered at startup even when its completion event was missed', async () => {
+  it('folds a settled Task at startup without planning more work before user continuation', async () => {
     const subject = harness()
     const completed = status(record(), ['complete'], null)
     subject.dependencies.readStatus = vi.fn(async () => {
@@ -4643,12 +4647,9 @@ describe('continuous Goal Host', () => {
     await dispose()
     expect(subject.first.whenIdle).not.toHaveBeenCalled()
     expect(subject.dependencies.flushSession).not.toHaveBeenCalled()
-    expect(subject.continueProgress).toHaveBeenCalledTimes(1)
-    expect(subject.dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
-      longGoalId: GOAL_ID,
-      transition: 'complete',
-      status: completed,
-    }))
+    expect(subject.continueProgress).not.toHaveBeenCalled()
+    expect(subject.dependencies.recordTerminalAttempt).toHaveBeenCalledOnce()
+    expect(subject.dependencies.deliver).not.toHaveBeenCalled()
   })
 
   it('recovers a missing terminal delivery from durable Goal state at startup', async () => {
@@ -4692,32 +4693,36 @@ describe('continuous Goal Host', () => {
     expect(subject.dependencies.deliver).toHaveBeenCalledTimes(2)
   })
 
-  it('retries one pending Task only when its exact Planner Session becomes live', async () => {
+  it('leaves a pending Task untouched when its main or Planner Session is only opened', async () => {
     const source = record({
       tasks: [{ id: TASK_1, objective: 'Publish', execution: null, resolution: null }],
     })
     const subject = harness(source)
     subject.setStatus(status(source, ['pending'], TASK_1))
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
-    await vi.waitFor(() => expect(subject.continueProgress).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalled())
 
     const unrelated = agent('unrelated-session', 'unrelated-goal')
     subject.live.set('unrelated-session', unrelated)
     subject.created(unrelated)
     await Promise.resolve()
-    expect(subject.continueProgress).toHaveBeenCalledOnce()
+    expect(subject.continueProgress).not.toHaveBeenCalled()
+
+    const main = agent(source.control.sessionId, 'main-goal')
+    subject.live.set(source.control.sessionId, main)
+    subject.created(main)
 
     const planner = agent(source.planner.sessionId, 'planner-goal')
     subject.live.set(source.planner.sessionId, planner)
     subject.created(planner)
-    await vi.waitFor(() => expect(subject.continueProgress).toHaveBeenCalledTimes(2))
     await dispose()
 
+    expect(subject.continueProgress).not.toHaveBeenCalled()
     expect(subject.directCreate).not.toHaveBeenCalled()
     expect(subject.directResume).not.toHaveBeenCalled()
   })
 
-  it('re-arms an unfinished current Task at startup without claiming it advanced', async () => {
+  it('leaves an unfinished current Task stopped at startup until user continuation', async () => {
     const source = record({
       tasks: [{ id: TASK_1, objective: 'Publish', execution: null, resolution: null }],
     })
@@ -4728,7 +4733,7 @@ describe('continuous Goal Host', () => {
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
     await dispose()
 
-    expect(subject.continueProgress).toHaveBeenCalledOnce()
+    expect(subject.continueProgress).not.toHaveBeenCalled()
     expect(subject.dependencies.deliver).not.toHaveBeenCalled()
   })
 

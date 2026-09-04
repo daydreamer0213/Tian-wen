@@ -503,7 +503,7 @@ export function createPermissionAttemptHost(
     readonly session: Session
     readonly event: unknown
   }) => Promise<void>
-  readonly reconcilePermissionAttempt: (input: { readonly longGoalId: string }) => Promise<void>
+  readonly reconcilePermissionAttempt: (input: { readonly longGoalId: string, readonly resume?: boolean }) => Promise<void>
 } {
   const now = dependencies.now ?? (() => new Date().toISOString())
   const notifyPermissionLimit = (record: LongGoalRecordV3): void => {
@@ -623,13 +623,16 @@ export function createPermissionAttemptHost(
   }
 
   const reconcilePermissionAttemptInternal = async (
-    input: { readonly longGoalId: string },
+    input: { readonly longGoalId: string, readonly resume?: boolean },
     quiescedChildSessionId?: string,
   ): Promise<void> => {
     let record = dependencies.readLongGoal(dependencies.roots.stateRoot, input.longGoalId)
     if (record.schemaVersion !== 'tianwen.long-goal.v3') return
     record = await observeCurrentAttemptMode(record)
     record = await consumePersistedPermissionLimit(record, quiescedChildSessionId)
+    // Startup observes persisted denial evidence; only user continuation or a
+    // live main-session permission change may admit the renewed Task.
+    if (input.resume === false) return
     let attemptTask = currentAttemptTask(record)
     if (
       attemptTask?.current.status === 'permission-limited'
