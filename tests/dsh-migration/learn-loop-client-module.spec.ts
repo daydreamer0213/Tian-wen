@@ -496,6 +496,8 @@ describe('Learn Loop compiled DSH client module', () => {
       const running = client.renderDock('main')
       expect(text(running)).toContain('验证中')
       expect(elements(running).some(element => element.props.role === 'status')).toBe(true)
+      expect(findElement(running, element => element.props.role === 'status').props.style)
+        .toMatchObject({ background: 'var(--dsw-alias-button-elevated-fill)' })
       expect(elements(running).some(element => element.type === 'button')).toBe(false)
       expect(learningAudit.mock.calls[0]?.[2]).toEqual({ sessionId: 'main' })
       callbacks.shift()!()

@@ -1018,6 +1018,7 @@ function LearningStatus({ ctx, sessionId }: { readonly ctx: ClientContext; reado
   return <div role="status" aria-live="polite" lang={locale.active} style={{
     display: 'flex', flexWrap: 'wrap', gap: '4px 12px', padding: '6px 10px',
     color: 'var(--dsw-alias-label-primary)', fontSize: 13, lineHeight: 1.5,
+    background: 'var(--dsw-alias-button-elevated-fill)',
     borderLeft: '2px solid var(--dsw-alias-border-l2)',
   }}>
     {snapshot.unavailable ? t('learning.unavailable') : <>
