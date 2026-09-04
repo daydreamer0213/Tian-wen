@@ -7,8 +7,11 @@ import {
   ScriptedAdapter,
   SkillRegistry,
   applySkillTool,
+  createUserMessage,
   mountPersistentHarness,
+  textResponse,
   toolCallResponse,
+  type GenerateOptions,
   type StreamChunk,
 } from '@tianwen/dsh-compat'
 import {
@@ -35,6 +38,14 @@ const roots: string[] = []
 class ProductAdapter extends ScriptedAdapter {
   constructor(script: readonly (readonly StreamChunk[] | Error)[]) {
     super(script.map(entry => Array.isArray(entry) ? [...entry] : entry))
+  }
+
+  override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    if (options.purpose === 'session-title') {
+      yield* textResponse('Research summary')
+      return
+    }
+    yield* super.stream(options)
   }
 
   override providerRetryPolicy() {
@@ -104,7 +115,7 @@ afterEach(() => {
 })
 
 describe('research-summary controlled product Runtime', () => {
-  it.each(['clean', 'input-correction', 'duplicate-turn'] as const)(
+  it.each(['clean', 'input-correction', 'duplicate-turn', 'native-title'] as const)(
     'checks accepted product submissions: %s', async mode => {
     const retryInvalidIds = mode === 'input-correction'
     const root = rootFor(`paired-product-verdicts-${mode}`)
@@ -166,6 +177,28 @@ describe('research-summary controlled product Runtime', () => {
     harness.ctx.provide('agentDefaultModel', {
       currentSelection: () => ({ ...selection }),
     })
+    const titledSessions = new Set<string>()
+    if (mode === 'native-title') {
+      harness.ctx.on('llm/stream', async function* (request, next) {
+        const sessionId = String(request.sessionId)
+        if (request.purpose === undefined && !titledSessions.has(sessionId)) {
+          titledSessions.add(sessionId)
+          // Native dsh-session-title-llm uses the same Session id with its own
+          // purpose and output budget; it is not a controlled Agent request.
+          for await (const _chunk of harness.ctx.llm.stream({
+            ...selection,
+            sessionId: request.sessionId,
+            purpose: 'session-title',
+            maxTokens: 128,
+            messages: [createUserMessage({
+              content: [{ type: 'text', text: 'Give this Session a short title.' }],
+              source: { kind: 'plugin', plugin: 'dsh-session-title-llm' },
+            })],
+          })) { /* consume the independent title stream */ }
+        }
+        yield* next()
+      })
+    }
     await apply(harness.ctx, { evolutionRoot: join(root, 'evolution') })
 
     try {
@@ -396,6 +429,7 @@ describe('research-summary controlled product Runtime', () => {
       })
       expect(Object.values(runCounts).reduce((sum, count) => sum + count, 0))
         .toBe(13)
+      if (mode === 'native-title') expect(titledSessions.size).toBe(13)
 
       const firstBaseline = await harness.ctx.sessionPersistence.inspect(
         tasks[0]!.baselineSessionId as never,

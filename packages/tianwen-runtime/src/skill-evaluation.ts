@@ -1536,6 +1536,9 @@ export class TianwenSkillEvaluationService extends Service {
   constructor(ctx: Context) {
     super(ctx, 'tianwenSkillEvaluation')
     ctx.on('llm/stream', (request, next) => {
+      // DSH generates titles through an independent call on the same Session.
+      // Its route/budget are not part of the controlled Agent execution.
+      if (request.purpose === 'session-title') return next()
       const sessionId = String(request.sessionId)
       const evaluator = this.evaluators.get(sessionId)
       if (evaluator !== undefined) {
