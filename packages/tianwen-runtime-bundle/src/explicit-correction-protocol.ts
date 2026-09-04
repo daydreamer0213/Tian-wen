@@ -37,6 +37,8 @@ const evaluationTaskDefinitions = [
 ] as const
 
 const allowedTools = ['skill', acceptance.toolName] as const
+// Real reasoning-model calls need room for ordinary latency while remaining bounded.
+const stopContract = { maxToolCalls: 4, maxElapsedMs: 60_000 } as const
 
 const packetSources = {
   originalDefect: `<research_packet>
@@ -332,7 +334,7 @@ function buildResearchSummaryControlledProtocol() {
             acceptanceContract: acceptance,
             acceptanceSubjectDigest: input.sha256(task.packet),
             allowedTools,
-            stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
+            stopContract,
           })),
           execution: {
             dshVersion: '0.1.1-rc.2' as const,
@@ -412,7 +414,7 @@ function buildResearchSummaryControlledProtocol() {
         acceptanceContract: acceptance,
         acceptanceSubject: holdoutPacket,
         allowedTools,
-        stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
+        stopContract,
         sessionId: `session:controlled-shadow:product:research-summary:unseen-holdout:${sessionNamespace}`,
       }])
     },
@@ -448,7 +450,7 @@ function buildResearchSummaryControlledProtocol() {
           acceptanceContract: acceptance,
           acceptanceSubject: packet,
           allowedTools,
-          stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
+          stopContract,
           sessionId: `session:controlled-activation:product:research-summary:${input.kind}:${digest(input.shadowId)}`,
         },
       })

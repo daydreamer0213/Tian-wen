@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import * as runtimeBundle from '../../packages/tianwen-runtime-bundle/src/index.js'
+import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
 import {
   EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
   EXPLICIT_CORRECTION_PROTOCOL_VERSION,
@@ -75,6 +76,27 @@ describe('explicit correction controlled protocol', () => {
 
   it('does not improvise a protocol for an unsupported scope', () => {
     expect(resolveExplicitCorrectionProtocol('project:tianwen/capability:other')).toBeUndefined()
+  })
+
+  it('keeps bounded real-model time and tool budgets across evaluation and transitions', () => {
+    const protocol = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)!
+    const root = fixtureRoot()
+    const tasks = protocol.buildEvaluationTasks({ root, materializeWorkspace })
+    const frozen = protocol.buildProtocolInput({
+      ticketId: 'ticket:budget-fixture', sha256,
+      rubricDigest: sha256('rubric'), toolSchemaDigest: sha256('tools'),
+      callConfig: { provider: 'fixture', model: 'fixture' }, retryPolicy: {}, tasks,
+    })
+    const contracts = [
+      ...frozen.protocol.tasks.map(task => task.stopContract),
+      ...protocol.buildShadowTasks({ root, materializeWorkspace }).map(task => task.stopContract),
+      ...(['promote', 'rollback'] as const).map(kind => protocol.buildTransitionInput({
+        root, shadowId: 'shadow:budget-fixture', kind, expectedRevision: 1, materializeWorkspace,
+      }).task.stopContract),
+    ]
+    expect(contracts).toEqual(Array.from({ length: 8 }, () => ({
+      maxToolCalls: 4, maxElapsedMs: 60_000,
+    })))
   })
 
   it('has no public fixture writer or direct factory bypass', () => {

@@ -36,7 +36,10 @@ const MODEL = 'scripted'
 const roots: string[] = []
 
 class ProductAdapter extends ScriptedAdapter {
-  constructor(script: readonly (readonly StreamChunk[] | Error)[]) {
+  constructor(
+    script: readonly (readonly StreamChunk[] | Error)[],
+    private readonly submissionDelayMs = 0,
+  ) {
     super(script.map(entry => Array.isArray(entry) ? [...entry] : entry))
   }
 
@@ -44,6 +47,9 @@ class ProductAdapter extends ScriptedAdapter {
     if (options.purpose === 'session-title') {
       yield* textResponse('Research summary')
       return
+    }
+    if (this.requests.length === 1 && this.submissionDelayMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, this.submissionDelayMs))
     }
     yield* super.stream(options)
   }
@@ -115,7 +121,7 @@ afterEach(() => {
 })
 
 describe('research-summary controlled product Runtime', () => {
-  it.each(['clean', 'input-correction', 'duplicate-turn', 'native-title'] as const)(
+  it.each(['clean', 'input-correction', 'duplicate-turn', 'native-title', 'slow-model'] as const)(
     'checks accepted product submissions: %s', async mode => {
     const retryInvalidIds = mode === 'input-correction'
     const root = rootFor(`paired-product-verdicts-${mode}`)
@@ -171,7 +177,7 @@ describe('research-summary controlled product Runtime', () => {
     await harness.ctx.plugin(applySkillTool)
     await harness.ctx.plugin(DynamicCordisRunnerService, {})
     const disposeParent = harness.ctx.skills.register(protocol.parentSkill)
-    const adapter = new ProductAdapter(script)
+    const adapter = new ProductAdapter(script, mode === 'slow-model' ? 10_100 : 0)
     harness.ctx.llm.registerAdapter([PROVIDER], adapter)
     const selection = { provider: PROVIDER, model: MODEL }
     harness.ctx.provide('agentDefaultModel', {
