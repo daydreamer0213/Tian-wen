@@ -53,8 +53,13 @@ function receipts(status: LearningAnalysisStatus): LearningAuditItem['receipts']
   }
 }
 
-export function projectLearningAudit(input: { readonly analyses: readonly LearningAnalysisStatus[] }): LearningAudit {
-  const items = input.analyses.map(status => ({
+export function projectLearningAudit(input: {
+  readonly analyses: readonly LearningAnalysisStatus[]
+  readonly sessionId?: string
+}): LearningAudit {
+  const analyses = input.analyses.filter(status =>
+    input.sessionId === undefined || status.parentSessionId === input.sessionId)
+  const items = analyses.map(status => ({
     analysisId: status.analysisId,
     ticketId: status.ticketId,
     phase: status.phase,

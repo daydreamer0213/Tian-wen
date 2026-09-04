@@ -18,7 +18,7 @@ import type { LearningAudit } from './learning-clue-status.js'
 
 export interface LearnLoopClient {
   list(signal?: AbortSignal): Promise<readonly AnyLongGoalSummary[]>
-  learningAudit(signal?: AbortSignal): Promise<LearningAudit>
+  learningAudit(signal?: AbortSignal, sessionId?: string): Promise<LearningAudit>
   create(input: {
     readonly objective: string
     readonly tasks: readonly string[]
@@ -378,8 +378,8 @@ export function createLearnLoopClient(rpc: ClientConnectionRpc): LearnLoopClient
         !value.goals.every(isSummary)) invalidResponse()
       return value.goals
     },
-    async learningAudit(signal) {
-      const value = await call(rpc, 'learning-audit', {}, signal)
+    async learningAudit(signal, sessionId) {
+      const value = await call(rpc, 'learning-audit', sessionId === undefined ? {} : { sessionId }, signal)
       if (!isLearningAudit(value)) invalidResponse()
       return value
     },

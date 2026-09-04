@@ -385,6 +385,8 @@ describe('Learn Loop browser RPC client', () => {
 
     await expect(createLearnLoopClient(rpc as never).learningAudit(signal)).resolves.toEqual(audit)
     expect(rpc.call).toHaveBeenCalledWith('/tianwen', 'learning-audit', {}, signal)
+    await expect(createLearnLoopClient(rpc as never).learningAudit(signal, 'main-session')).resolves.toEqual(audit)
+    expect(rpc.call).toHaveBeenLastCalledWith('/tianwen', 'learning-audit', { sessionId: 'main-session' }, signal)
 
     const privateRpc = { call: vi.fn().mockResolvedValue({ ok: true, value: {
       ...audit, items: [{ ...audit.items[0], privateNote: 'never expose' }],
@@ -559,18 +561,20 @@ describe('Learn Loop sidebar slot', () => {
     expect(applied).toEqual([])
   })
 
-  it('keeps the optional history action without registering a separate conversation dock', () => {
-    let dispose: (() => void) | undefined
+  it('keeps optional history and adds only a read-only learning seat in the native main chat', () => {
+    const disposers: Array<() => void> = []
     const unregisterSlot = vi.fn()
+    const unregisterLearningStatus = vi.fn()
     const unregisterZh = vi.fn()
     const unregisterEn = vi.fn()
-    const register = vi.fn().mockReturnValueOnce(unregisterSlot)
+    const register = vi.fn().mockReturnValueOnce(unregisterLearningStatus).mockReturnValueOnce(unregisterSlot)
     const registerLocale = vi.fn()
       .mockReturnValueOnce(unregisterZh)
       .mockReturnValueOnce(unregisterEn)
     const slots = {
       inject: vi.fn((_name: string, callback: () => (() => void)) => {
-        dispose = callback()
+        const dispose = callback()
+        disposers.push(dispose)
         return dispose
       }),
       register,
@@ -601,14 +605,20 @@ describe('Learn Loop sidebar slot', () => {
     expect(Object.keys(registerLocale.mock.calls[0]![2] as object).sort()).toEqual(
       Object.keys(registerLocale.mock.calls[1]![2] as object).sort(),
     )
-    expect(register).toHaveBeenCalledOnce()
+    expect(register).toHaveBeenCalledTimes(2)
     expect(register).toHaveBeenNthCalledWith(1, {
+      name: 'conversation.input.dock',
+      id: 'tianwen-learning-status',
+      order: 20,
+    }, expect.any(Function))
+    expect(register).toHaveBeenNthCalledWith(2, {
       name: 'sidebar.footer.action',
       id: 'tianwen-learn-loop',
       order: 20,
     }, expect.any(Function))
 
-    dispose?.()
+    for (const dispose of disposers) dispose()
+    expect(unregisterLearningStatus).toHaveBeenCalledOnce()
     expect(unregisterSlot).toHaveBeenCalledOnce()
     expect(unregisterZh).toHaveBeenCalledOnce()
     expect(unregisterEn).toHaveBeenCalledOnce()

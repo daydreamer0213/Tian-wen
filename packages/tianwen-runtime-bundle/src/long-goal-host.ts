@@ -822,7 +822,7 @@ function requireLegacyV2GoalFirstProgress(result: GoalFirstProgressResult): Goal
 }
 
 export interface TianwenLearningAuditOperations {
-  readonly status: () => Promise<LearningAudit>
+  readonly status: (sessionId?: string) => Promise<LearningAudit>
 }
 
 export class LongGoalTaskAdmissionError extends Error {
@@ -1622,9 +1622,9 @@ export function createTianwenLongGoalRpcHandler(
       endpoint === 'learning-audit' &&
       learningAuditOperations !== undefined &&
       isRecord(payload) &&
-      hasExactKeys(payload, [])
+      (hasExactKeys(payload, []) || (hasExactKeys(payload, ['sessionId']) && isNonEmptyString(payload.sessionId)))
     ) {
-      return { ok: true, value: await learningAuditOperations.status() }
+      return { ok: true, value: await learningAuditOperations.status(payload.sessionId as string | undefined) }
     }
     return invalidRequest()
   }
@@ -2555,8 +2555,9 @@ export function mountTianwenLongGoalHost(
       })
     }
     const learningAuditOperations: TianwenLearningAuditOperations = {
-      status: async () => projectLearningAudit({
+      status: async sessionId => projectLearningAudit({
         analyses: host.tianwenEvolution.listLearningAnalyses(),
+        ...(sessionId === undefined ? {} : { sessionId }),
       }),
     }
     host.connection.rpc.handle('/tianwen', createTianwenLongGoalRpcHandler(

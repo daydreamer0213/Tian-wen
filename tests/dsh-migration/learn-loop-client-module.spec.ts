@@ -413,6 +413,7 @@ function loadClientModule(input: {
     open,
     render: () => runtime.render(sidebarSlot!({ wide: true })),
     hasConversationDock: () => dockSlot !== undefined,
+    renderDock: (sessionId: string) => runtime.render(dockSlot?.({ session: { sessionId }, input: {} })),
     unmount: () => runtime.unmount(),
   }
 }
@@ -457,16 +458,62 @@ async function openListedGoal(render: () => unknown, objective: string): Promise
 }
 
 describe('Learn Loop compiled DSH client module', () => {
-  it('does not register or query a separate conversation Goal dock', async () => {
+  it('does not query Goal controls from the read-only learning status dock', async () => {
     const rpc = { call: vi.fn(async () => ({ ok: true, value: { goals: [] } })) }
     const client = loadClientModule({
       list: createSessionList({ current: 'control-session', byId: {} }),
       rpc,
     })
 
-    expect(client.hasConversationDock()).toBe(false)
+    expect(client.hasConversationDock()).toBe(true)
+    expect(text(client.renderDock('control-session'))).not.toContain('Goal')
     await flushClient()
     expect(rpc.call).not.toHaveBeenCalled()
+    client.unmount()
+  })
+
+  it('updates main learning status from live records, handles disconnect, and does not leak across sessions', async () => {
+    const callbacks: Array<() => void> = []
+    const item = (phase: string) => ({
+      analysisId: `analysis:${'a'.repeat(64)}`, ticketId: `ticket:${'b'.repeat(64)}`,
+      phase, requestedAt: '2026-09-04T00:00:00.000Z', updatedAt: '2026-09-04T00:01:00.000Z',
+      evidenceDigests: [], receipts: {}, recovery: null,
+    })
+    const learningAudit = vi.fn()
+      .mockResolvedValueOnce({ ok: true, value: { schemaVersion: 'tianwen.learning-audit.v1', items: [item('candidate-ready')] } })
+      .mockResolvedValueOnce({ ok: true, value: { schemaVersion: 'tianwen.learning-audit.v1', items: [item('invalidated')] } })
+      .mockRejectedValueOnce(new Error('disconnected'))
+      .mockResolvedValueOnce({ ok: true, value: { schemaVersion: 'tianwen.learning-audit.v1', items: [] } })
+    const rpc = { call: vi.fn() }
+    const client = loadClientModule({
+      list: createSessionList({ current: 'main', byId: {} }), rpc, learningAudit,
+      locale: new TestLocale('zh'),
+      setTimeout: ((callback: () => void) => { callbacks.push(callback); return 1 }) as never,
+    })
+    try {
+      client.renderDock('main')
+      await flushClient()
+      const running = client.renderDock('main')
+      expect(text(running)).toContain('验证中')
+      expect(elements(running).some(element => element.props.role === 'status')).toBe(true)
+      expect(elements(running).some(element => element.type === 'button')).toBe(false)
+      expect(learningAudit.mock.calls[0]?.[2]).toEqual({ sessionId: 'main' })
+      callbacks.shift()!()
+      await flushClient()
+      expect(text(client.renderDock('main'))).toContain('已停止')
+      expect(text(client.renderDock('main'))).not.toContain('验证中')
+      callbacks.shift()!()
+      await flushClient()
+      expect(text(client.renderDock('main'))).toContain('状态暂不可用')
+      expect(text(client.renderDock('main'))).not.toContain('已停止')
+      expect(text(client.renderDock('other-main'))).not.toContain('已停止')
+      await flushClient()
+      expect(text(client.renderDock('other-main'))).toBe('')
+      expect(learningAudit.mock.calls.at(-1)?.[2]).toEqual({ sessionId: 'other-main' })
+      expect(rpc.call).not.toHaveBeenCalled()
+    } finally {
+      client.unmount()
+    }
   })
   it('renders one active locale and switches copy without another RPC', async () => {
     const list = createSessionList({ current: undefined, byId: {} })

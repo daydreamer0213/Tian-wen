@@ -675,7 +675,7 @@ describe('Tianwen Long Goal Web host', () => {
     expect(legacy.record).not.toHaveBeenCalled()
   })
 
-  it('serves a read-only learning audit only for an exact empty payload', async () => {
+  it('serves the existing read-only audit globally or for the exact main session', async () => {
     const expected = { schemaVersion: 'tianwen.learning-audit.v1' as const, items: [] }
     const audit = { status: vi.fn(async () => expected) }
     const status = longGoalStatus(['complete'], [{ goalId: 'goal-1', sessionId: 'session-1' }])
@@ -689,9 +689,14 @@ describe('Tianwen Long Goal Web host', () => {
 
     await expect(handler('learning-audit', {}, AbortSignal.timeout(1_000)))
       .resolves.toEqual({ ok: true, value: expected })
+    await expect(handler('learning-audit', { sessionId: 'main-session' }, AbortSignal.timeout(1_000)))
+      .resolves.toEqual({ ok: true, value: expected })
+    expect(audit.status).toHaveBeenLastCalledWith('main-session')
     await expect(handler('learning-audit', { ignored: true }, AbortSignal.timeout(1_000)))
       .resolves.toEqual({ ok: false, error: { code: 'internal', message: 'invalid-request', details: {} } })
-    expect(audit.status).toHaveBeenCalledOnce()
+    await expect(handler('learning-audit', { sessionId: '' }, AbortSignal.timeout(1_000)))
+      .resolves.toEqual({ ok: false, error: { code: 'internal', message: 'invalid-request', details: {} } })
+    expect(audit.status).toHaveBeenCalledTimes(2)
   })
   it('keeps the v1 create payload and result unchanged when goal-first operations are installed', async () => {
     const fixture = createFixtureRoot()

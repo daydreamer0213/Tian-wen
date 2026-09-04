@@ -22,6 +22,21 @@ const zhMessages = {
   'list.create': '创建目标',
   'audit.title': '高级审计（只读）',
   'audit.empty': '还没有可显示的学习审计记录。',
+  'learning.title': '学习状态',
+  'learning.unavailable': '学习状态暂不可用，连接恢复后自动更新；不能据此判定已完成。',
+  'learning.phase.pending-parent': '等待主对话恢复',
+  'learning.phase.running': '分析中',
+  'learning.phase.candidate-ready': '验证中',
+  'learning.phase.shadow-ready': '启用验证中',
+  'learning.phase.failed': '暂时中断',
+  'learning.phase.no-case': '无需改进',
+  'learning.phase.insufficient-evidence': '证据不足，未启用',
+  'learning.phase.protocol-unavailable': '当前场景尚不支持验证',
+  'learning.phase.candidate-rejected': '评估未通过',
+  'learning.phase.promoted': '已验证启用',
+  'learning.phase.rolled-back': '已回滚',
+  'learning.phase.transition-recovered': '切换异常已恢复',
+  'learning.phase.invalidated': '已停止',
   'list.empty': '还没有长期目标。',
   'list.empty.step1': '在 DSH 中打开或创建一个项目工作区。',
   'list.empty.step2': '创建一个长期目标，天问会规划并推进后续任务。',
@@ -89,6 +104,21 @@ const enMessages = {
   'list.create': 'Create Goal',
   'audit.title': 'Advanced audit (read-only)',
   'audit.empty': 'No learning audit records are available yet.',
+  'learning.title': 'Learning status',
+  'learning.unavailable': 'Learning status unavailable. Updates resume after reconnect; completion is not confirmed.',
+  'learning.phase.pending-parent': 'Waiting for main chat',
+  'learning.phase.running': 'Analyzing',
+  'learning.phase.candidate-ready': 'Validating',
+  'learning.phase.shadow-ready': 'Verifying activation',
+  'learning.phase.failed': 'Interrupted',
+  'learning.phase.no-case': 'No change needed',
+  'learning.phase.insufficient-evidence': 'Insufficient evidence; not activated',
+  'learning.phase.protocol-unavailable': 'Validation unavailable for this task',
+  'learning.phase.candidate-rejected': 'Evaluation not passed',
+  'learning.phase.promoted': 'Activation verified',
+  'learning.phase.rolled-back': 'Rolled back',
+  'learning.phase.transition-recovered': 'Transition recovered',
+  'learning.phase.invalidated': 'Stopped',
   'list.empty': 'No Learn Loop plans yet.',
   'list.empty.step1': 'Open or create a project workspace in DSH.',
   'list.empty.step2': 'Create a long-term Goal; Tianwen will plan and progress the Tasks.',
@@ -254,7 +284,7 @@ export interface ClientContext {
   }
   readonly slots: {
     inject(
-      name: 'sidebar.footer.action',
+      name: 'sidebar.footer.action' | 'conversation.input.dock',
       callback: () => (() => void),
     ): () => void
     register(
@@ -264,6 +294,10 @@ export interface ClientContext {
         readonly order: 20
       },
       component: (props: { readonly wide: boolean }) => JSX.Element,
+    ): () => void
+    register(
+      options: { readonly name: 'conversation.input.dock'; readonly id: 'tianwen-learning-status'; readonly order: 20 },
+      component: (props: { readonly session: { readonly sessionId: string } }) => JSX.Element,
     ): () => void
   }
 }
@@ -943,9 +977,62 @@ function LearnLoopEntry({ wide, ctx }: { readonly wide: boolean } & {
   )
 }
 
+/** Read-only live status in DSH's additive main-chat seat; no model or control RPC. */
+function LearningStatus({ ctx, sessionId }: { readonly ctx: ClientContext; readonly sessionId: string }): JSX.Element | null {
+  const locale = useSyncExternalStore(ctx.locale.subscribe.bind(ctx.locale), ctx.locale.getSnapshot.bind(ctx.locale))
+  const t = ctx.locale.bind(LOCALE_NAMESPACE)
+  const [snapshot, setSnapshot] = useState<{
+    readonly sessionId: string
+    readonly items: readonly LearningAuditItem[]
+    readonly unavailable: boolean
+  } | undefined>(undefined)
+  useEffect(() => {
+    const lifetime = new AbortController()
+    const client = createLearnLoopClient(ctx.connection.rpc)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = async () => {
+      try {
+        const audit = await client.learningAudit(
+          AbortSignal.any([lifetime.signal, AbortSignal.timeout(10_000)]), sessionId,
+        )
+        if (!lifetime.signal.aborted) setSnapshot({ sessionId, items: audit.items, unavailable: false })
+      } catch {
+        if (!lifetime.signal.aborted) setSnapshot({ sessionId, items: [], unavailable: true })
+      } finally {
+        // One read at a time, only while this main-chat seat is mounted.
+        if (!lifetime.signal.aborted) timer = setTimeout(refresh, 2_000)
+      }
+    }
+    void refresh()
+    return () => { lifetime.abort(); clearTimeout(timer) }
+  }, [ctx, sessionId])
+  if (snapshot?.sessionId !== sessionId) return null
+  const counts = new Map<string, number>()
+  for (const item of snapshot.items) counts.set(item.phase, (counts.get(item.phase) ?? 0) + 1)
+  if (!snapshot.unavailable && counts.size === 0) return null
+  const order = ['pending-parent', 'running', 'candidate-ready', 'shadow-ready', 'failed']
+  const phases = [...counts].sort(([left], [right]) => {
+    const rank = (phase: string) => order.includes(phase) ? order.indexOf(phase) : order.length
+    return rank(left) - rank(right)
+  })
+  return <div role="status" aria-live="polite" lang={locale.active} style={{
+    display: 'flex', flexWrap: 'wrap', gap: '4px 12px', padding: '6px 10px',
+    color: 'var(--dsw-alias-label-primary)', fontSize: 13, lineHeight: 1.5,
+    borderLeft: '2px solid var(--dsw-alias-border-l2)',
+  }}>
+    {snapshot.unavailable ? t('learning.unavailable') : <>
+      <span>{t('learning.title')}</span>
+      {phases.map(([phase, count]) => <span key={phase}>{t(`learning.phase.${phase}`)} · {count}</span>)}
+    </>}
+  </div>
+}
+
 export const inject = ['slots', 'sessions', 'connection', 'locale'] as const
 
 export function apply(ctx: ClientContext): void {
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock', id: 'tianwen-learning-status', order: 20,
+  }, props => <LearningStatus ctx={ctx} sessionId={props.session.sessionId} />))
   ctx.slots.inject('sidebar.footer.action', () => {
     const unregisterZh = ctx.locale.register(LOCALE_NAMESPACE, 'zh', zhMessages)
     const unregisterEn = ctx.locale.register(LOCALE_NAMESPACE, 'en', enMessages)
