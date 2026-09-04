@@ -3654,7 +3654,10 @@ describe('continuous Goal Host', () => {
     const task = disarmedTaskAgent(execution.sessionId, execution.goalId)
     const planner = { session: { id: 'live-planner' } } as unknown as Agent
     let plannerLive = false
-    const followupNativeTaskChild = vi.fn(async () => 'followup-message')
+    const followupNativeTaskChild = vi.fn(async () => {
+      expect(task.current().activation).toBe('disarmed')
+      return 'followup-message'
+    })
     const dependencies = {
       readLongGoal: vi.fn(() => source),
       readLongGoalStatus: vi.fn(async () => projected),
@@ -3740,7 +3743,7 @@ describe('continuous Goal Host', () => {
 
     await expect(runCurrentWebTask(input, dependencies as never)).rejects.toThrow('native followup rejected')
     expect(task.current().activation).toBe('disarmed')
-    expect(task.disarm).toHaveBeenCalledOnce()
+    expect(task.disarm).toHaveBeenCalledTimes(2)
 
     await expect(runCurrentWebTask(input, dependencies as never)).resolves.toMatchObject({
       sessionId: execution.sessionId,

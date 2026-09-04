@@ -14,12 +14,14 @@ import SubagentRuntime, { SubagentError, type SubagentProvider } from '@deepseek
 import { sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
 import {
   Context,
+  CallId,
   defineTool,
   goalRoundDriver,
   mountAgentLoopTestDependencies,
   SessionId,
   textResponse,
   toolCallResponse,
+  toolGoal,
 } from '@tianwen/dsh-compat'
 import { apply as applyRuntimeBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 import {
@@ -117,7 +119,10 @@ class ProfileAdapter extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
   private readonly taskSessions = new Set<string>()
 
-  constructor(private readonly taskObjective: string) { super() }
+  constructor(
+    private readonly taskObjective: string,
+    private readonly completeTaskThroughTool = false,
+  ) { super() }
 
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options)
@@ -146,6 +151,23 @@ class ProfileAdapter extends LlmAdapter {
       && options.tools?.some(tool => tool.name === 'recover_long_goal_task')
     ) {
       chunks = toolCallResponse('profile-planner-recovery', 'recover_long_goal_task', {})
+    } else if (this.completeTaskThroughTool && this.taskSessions.has(String(options.sessionId))
+      && options.messages.at(-1)?.source.kind === 'tool') {
+      const last = options.messages.at(-1)!
+      if (last.source.kind === 'tool' && last.source.callId === 'profile-get-goal') {
+        const output = last.content.find(block => block.type === 'tool-result')
+        const value = JSON.parse(output?.type === 'tool-result'
+          ? output.content.filter(block => block.type === 'text').map(block => block.text).join('')
+          : '') as { goal: { id: string, revision: number } }
+        const scoped = options.tools?.some(tool => tool.name === 'complete_long_goal_task')
+        chunks = toolCallResponse('profile-complete-goal', scoped ? 'complete_long_goal_task' : 'update_goal', {
+          goal_id: value.goal.id, revision: value.goal.revision, ...(scoped ? {} : { action: 'complete' }),
+        })
+      } else if (last.source.kind === 'tool' && last.source.callId === 'profile-complete-goal') {
+        chunks = textResponse('Task completion tool returned; no fallback state mutation.')
+      } else {
+        chunks = toolCallResponse('profile-get-goal', 'get_goal', {})
+      }
     } else if (turnMessages.some(message => message.content.some(block => block.type === 'tool-result'))) {
       chunks = textResponse('Task result: native execution completed.')
     } else if (revision !== undefined) {
@@ -189,6 +211,7 @@ async function mountProfile(
     readonly permissionLimited?: boolean
     readonly root?: string
     readonly resumeMain?: boolean
+    readonly completeTaskThroughTool?: boolean
   } = {},
 ) {
   mkdirSync(FIXTURE_BASE, { recursive: true })
@@ -249,11 +272,12 @@ async function mountProfile(
   await mountAgentLoopTestDependencies(ctx)
   await ctx.plugin(JsonlSessionPersistence, { root: sessionsRoot, compression: 'none' })
   await ctx.plugin(GoalService)
+  if (options.completeTaskThroughTool) await ctx.plugin(toolGoal)
   await ctx.plugin(goalRoundDriver)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(SubagentRuntime)
   ctx.subagents.registerProvider(spawnProvider)
-  const adapter = new ProfileAdapter(taskObjective)
+  const adapter = new ProfileAdapter(taskObjective, options.completeTaskThroughTool)
   ctx.llm.registerAdapter(['tianwen-profile'], adapter)
   await applyRuntimeBundle(ctx, { stateRoot, sessionsRoot, evolutionRoot })
 
@@ -836,7 +860,7 @@ describe('native Long Goal profile execution', () => {
 
       await first.dispose(false, false)
       first = undefined
-      recovered = await mountProfile(objective, { root, resumeMain: true })
+      recovered = await mountProfile(objective, { root, resumeMain: true, completeTaskThroughTool: true })
 
       await vi.waitFor(() => {
         if (
@@ -871,8 +895,36 @@ describe('native Long Goal profile execution', () => {
       if (recoveredTask === undefined) throw new Error('expected recovered native Task')
       const recoveredTaskGoal = recovered.ctx.goals.get(recoveredTask)
       if (recoveredTaskGoal === undefined) throw new Error('expected recovered native Task Goal')
-      recovered.ctx.goals.complete(recoveredTask, recoveredTaskGoal)
+      expect(recoveredTask.ctx.tools.schemas(recoveredTask).some(tool => tool.name === 'complete_long_goal_task'))
+        .toBe(true)
+      expect(recovered.main.ctx.tools.schemas(recovered.main).some(tool => tool.name === 'complete_long_goal_task'))
+        .toBe(false)
+      for (const invalid of [
+        { agent: recoveredTask, goal_id: 'unrelated-goal', revision: recoveredTaskGoal.revision },
+        { agent: recoveredTask, goal_id: recoveredTaskGoal.id, revision: recoveredTaskGoal.revision + 1 },
+        { agent: recovered.main, goal_id: recoveredTaskGoal.id, revision: recoveredTaskGoal.revision },
+      ]) {
+        const rejected = await recoveredTask.ctx.tools.execute({
+          callId: CallId(randomUUID()), name: 'complete_long_goal_task', agent: invalid.agent,
+          arguments: { goal_id: invalid.goal_id, revision: invalid.revision },
+          signal: AbortSignal.timeout(5_000),
+        })
+        expect(rejected.isError).toBe(true)
+        expect(recovered.ctx.goals.get(recoveredTask)).toMatchObject({
+          id: recoveredTaskGoal.id, revision: recoveredTaskGoal.revision, phase: 'active',
+        })
+      }
       recovered.releaseTask()
+      await vi.waitFor(() => {
+        expect(recoveredTask.session.events.some(event => event.type === 'tool/result'
+          && event.data.message.source.kind === 'tool'
+          && event.data.message.source.callId === 'profile-complete-goal')).toBe(true)
+      }, { timeout: 10_000 })
+      const completedThroughTool = recoveredTask.session.events.find(event => event.type === 'tool/result'
+        && event.data.message.source.kind === 'tool'
+        && event.data.message.source.callId === 'profile-complete-goal')
+      expect(completedThroughTool?.type === 'tool/result' ? completedThroughTool.data.error : undefined)
+        .toBeUndefined()
       await vi.waitFor(async () => {
         const status = await readLongGoalStatus({
           stateRoot: recovered!.stateRoot,
@@ -925,6 +977,17 @@ describe('native Long Goal profile execution', () => {
       }])
       expect(recovered.taskRunSessions()).toEqual([taskSessionId])
       const recoveredLog = await recovered.ctx.sessionPersistence.inspect(SessionId(taskSessionId))
+      const completion = recoveredLog.events.find(event => event.type === 'tool/result'
+        && event.data.message.source.kind === 'tool'
+        && event.data.message.source.callId === 'profile-complete-goal')
+      expect(completion).toBeDefined()
+      expect(completion?.type === 'tool/result' ? completion.data.error : undefined).toBeUndefined()
+      const resumeStart = recoveredLog.events.filter(event => event.type === 'turn/start')[1]!
+      const recoveredSources = recoveredLog.events.filter(event => event.type === 'user/message'
+        && event.seq > resumeStart.seq).map(event => event.type === 'user/message' ? event.data.source.kind : undefined)
+      expect(recoveredSources).toContain('coordinator')
+      expect(recoveredSources).not.toContain('user')
+      expect(recoveredSources).not.toContain('goal')
       expect(recoveredLog.events.filter(event => event.type === 'turn/start'), JSON.stringify(
         recoveredLog.events.filter(event => ['turn/start', 'turn/end', 'user/message', 'tool/call'].includes(event.type))
           .map(event => ({ type: event.type, seq: event.seq, data: JSON.stringify(event.data).slice(0, 450) })),

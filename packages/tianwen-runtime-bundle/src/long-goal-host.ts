@@ -888,7 +888,9 @@ function nativeTaskPrompt(objective: string, continuation?: string): string {
     'Do not create status-marker files merely to claim completion.',
     'A native DSH Goal is already active in this Task Session.',
     continuation,
-    'Before your final report, call get_goal, then call update_goal with its exact goal_id and revision and action complete only after the Task objective is achieved.',
+    continuation === undefined
+      ? 'Before your final report, call get_goal, then call update_goal with its exact goal_id and revision and action complete only after the Task objective is achieved.'
+      : 'Before your final report, call get_goal, then complete_long_goal_task with its exact goal_id and revision only after the Task objective is achieved. This recovered Task has a scoped completion tool; do not use update_goal to complete or resume it.',
     'Do not create another Goal, replan the Long Goal, or ask the control chat to execute this Task.',
     'Report the verified Task result to your parent after the Goal update succeeds.',
   ].filter((line): line is string => line !== undefined).join('\n')
@@ -1330,6 +1332,8 @@ export async function runCurrentWebTask(input: {
       if (String(resumed.id) !== goalId || resumed.phase !== 'active' || resumed.activation !== 'armed') {
         throw new Error('Resumed Long Goal Task Goal mismatch')
       }
+      // The native child followup owns execution, not a second Goal-round driver.
+      agent.ctx.goals.disarm(agent)
       try {
         await dependencies.followupNativeTaskChild!(
           nativeParent,
@@ -2224,7 +2228,7 @@ export function mountTianwenLongGoalHost(
         childId: SessionId(input.childId),
       }),
       followupNativeTaskChild: (parent, childId, prompt, signal) =>
-        nativeChild.followup(parent, SessionId(childId), prompt, signal),
+        nativeChild.followupTask(parent, SessionId(childId), prompt, signal),
       nativeAgentOptions: host.agentDefaultModel.currentSelection(),
       attachedAgent: sessionId => injected.agents.get(SessionId(sessionId)),
       recoverNativeTaskParent: record => recoverNativeLongGoalPlannerParent(record, {
