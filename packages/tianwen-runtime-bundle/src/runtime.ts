@@ -38,6 +38,7 @@ import {
 } from './learning-loop-orchestrator.js'
 import { TianwenMessageFeedbackBridgeService } from './message-feedback-bridge.js'
 import { TianwenResearchSummaryAdmissionService } from './research-summary-admission.js'
+import * as controlledSessionArchive from './controlled-session-archive.js'
 
 export { inject, name, SUPPORTED_DSH_VERSION }
 
@@ -461,6 +462,7 @@ export async function apply(
   config: TianwenRuntimeBundleConfig = {},
 ): Promise<void> {
   await applyCore(ctx, config.evolutionRoot === undefined ? {} : { evolutionRoot: config.evolutionRoot })
+  ctx.plugin(controlledSessionArchive)
   ctx.plugin(TianwenResearchSummaryAdmissionService)
   ctx.plugin(TianwenLearningConsentAgentService)
   ctx.plugin(TianwenMessageFeedbackBridgeService)

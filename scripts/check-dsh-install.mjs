@@ -36,6 +36,7 @@ const DSH_LIBRARY_PACKAGES = [
   '@deepseek-ai/dsh-tool-goal',
   '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-workflow-worker-thread',
+  '@deepseek-ai/dsh-workspace',
 ]
 const EXPECTED_DIRECT_DSH_PACKAGES = [
   DSH_CLI_PACKAGE,

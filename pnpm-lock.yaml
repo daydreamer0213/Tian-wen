@@ -97,6 +97,9 @@ importers:
       '@deepseek-ai/dsh-workflow-worker-thread':
         specifier: 0.1.1-rc.2
         version: 0.1.1-rc.2(7ff539779842715217130c18ca64c09c)
+      '@deepseek-ai/dsh-workspace':
+        specifier: 0.1.1-rc.2
+        version: 0.1.1-rc.2(ca1aef6913f66bb64a14405a8170db89)
       '@tianwen/dsh-compat':
         specifier: workspace:*
         version: link:packages/tianwen-dsh-compat
@@ -321,6 +324,9 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: 0.1.1-rc.2
         version: 0.1.1-rc.2(119bc70f73f8eddebfaa6b47561adeb3)
+      '@deepseek-ai/dsh-workspace':
+        specifier: 0.1.1-rc.2
+        version: 0.1.1-rc.2(ca1aef6913f66bb64a14405a8170db89)
       '@tianwen/evidence':
         specifier: workspace:*
         version: link:../tianwen-evidence

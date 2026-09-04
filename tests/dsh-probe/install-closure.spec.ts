@@ -36,6 +36,7 @@ const expectedLibraries = [
   '@deepseek-ai/dsh-tool-goal',
   '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-workflow-worker-thread',
+  '@deepseek-ai/dsh-workspace',
 ] as const
 
 function pnpmVersionCommand(): { executable: string; args: string[] } {

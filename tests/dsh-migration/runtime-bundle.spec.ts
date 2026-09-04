@@ -84,6 +84,7 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/continuous-goal-feedback.ts',
     'src/continuous-goal-service.ts',
     'src/continuous-goal-host.ts',
+    'src/controlled-session-archive.ts',
     'src/explicit-correction-protocol.ts',
     'src/runtime.ts',
     'src/goal-first-service.ts',
@@ -550,6 +551,7 @@ describe('@tianwen/runtime-bundle', () => {
       '@deepseek-ai/dsh-client-locale': '0.1.1-rc.2',
       '@deepseek-ai/dsh-client-runtime': '0.1.1-rc.2',
       '@deepseek-ai/dsh-client-ui-sidebar': '0.1.1-rc.2',
+      '@deepseek-ai/dsh-workspace': '0.1.1-rc.2',
       react: '18.2.0',
     })
     expect(runtimeManifest.peerDependenciesMeta).toEqual({
@@ -557,6 +559,7 @@ describe('@tianwen/runtime-bundle', () => {
       '@deepseek-ai/dsh-client-locale': { optional: true },
       '@deepseek-ai/dsh-client-runtime': { optional: true },
       '@deepseek-ai/dsh-client-ui-sidebar': { optional: true },
+      '@deepseek-ai/dsh-workspace': { optional: true },
       react: { optional: true },
     })
     expect(json(resolve(hostPackageRoot, 'package.json'))).toMatchObject({
