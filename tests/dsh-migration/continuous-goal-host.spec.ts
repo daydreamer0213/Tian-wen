@@ -3652,6 +3652,8 @@ describe('continuous Goal Host', () => {
     })
     const projected = status(source, ['paused'], TASK_1)
     const task = disarmedTaskAgent(execution.sessionId, execution.goalId)
+    const nativeGoalService = task.value.ctx.goals
+    Object.defineProperty(task.value.ctx, 'goals', { get() { throw new Error('uninjected Goal service') } })
     const planner = { session: { id: 'live-planner' } } as unknown as Agent
     let plannerLive = false
     const followupNativeTaskChild = vi.fn(async () => {
@@ -3673,6 +3675,8 @@ describe('continuous Goal Host', () => {
           ? planner
           : undefined,
       createGoal: vi.fn(),
+      nativeGoalService,
+      getGoal: () => task.current(),
       readGoalRef: vi.fn(),
       resumeColdGoal: vi.fn(),
       followupNativeTaskChild,
@@ -3714,6 +3718,8 @@ describe('continuous Goal Host', () => {
     })
     const projected = status(source, ['paused'], TASK_1)
     const task = disarmedTaskAgent(execution.sessionId, execution.goalId)
+    const nativeGoalService = task.value.ctx.goals
+    Object.defineProperty(task.value.ctx, 'goals', { get() { throw new Error('uninjected Goal service') } })
     const planner = { session: { id: 'live-planner' } } as unknown as Agent
     const followupNativeTaskChild = vi.fn()
       .mockRejectedValueOnce(new Error('native followup rejected'))
@@ -3730,6 +3736,8 @@ describe('continuous Goal Host', () => {
       createSession: vi.fn(),
       attachedAgent: (sessionId: string) => sessionId === execution.sessionId ? task.value : planner,
       createGoal: vi.fn(),
+      nativeGoalService,
+      getGoal: () => task.current(),
       readGoalRef: vi.fn(),
       resumeColdGoal: vi.fn(),
       followupNativeTaskChild,
@@ -4392,6 +4400,22 @@ describe('continuous Goal Host', () => {
     await dispose()
   })
 
+  it('stops the current native Task from the main chat without an injected child Goal service', async () => {
+    const subject = harness()
+    const getGoal = subject.first.ctx.goals.get.bind(subject.first.ctx.goals)
+    Object.assign(subject.dependencies, { getGoal })
+    Object.defineProperty(subject.first.ctx, 'goals', { get() { throw new Error('uninjected Goal service') } })
+    const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)
+    await vi.waitFor(() => expect(subject.readStatus).toHaveBeenCalledOnce())
+
+    subject.abort('control-session')
+    await dispose()
+
+    expect(subject.pause).toHaveBeenCalledOnce()
+    expect(subject.first.cancel).toHaveBeenCalledExactlyOnceWith({ kind: 'parent' })
+    expect(subject.first.whenIdle).toHaveBeenCalledOnce()
+  })
+
   it('ignores a historical Task Session abort but pauses and flushes the exact current Task without cancelling it again', async () => {
     const source = record({
       tasks: [
@@ -4401,6 +4425,9 @@ describe('continuous Goal Host', () => {
     })
     const subject = harness(source)
     const second = agent(EXECUTION_2.sessionId, EXECUTION_2.goalId)
+    const getGoal = second.ctx.goals.get.bind(second.ctx.goals)
+    Object.assign(subject.dependencies, { getGoal })
+    Object.defineProperty(second.ctx, 'goals', { get() { throw new Error('uninjected Goal service') } })
     subject.live.set(EXECUTION_2.sessionId, second)
     subject.setStatus(status(source, ['complete', 'active'], TASK_2))
     const dispose = mountContinuousGoalHost(subject.ctx as never, subject.dependencies)

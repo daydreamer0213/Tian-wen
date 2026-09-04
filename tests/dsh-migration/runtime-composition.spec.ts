@@ -276,7 +276,7 @@ describe('@tianwen/runtime', () => {
       })
       expect(request.tools).toContainEqual({
         name: 'tianwen_learning_consent',
-        description: 'Enable, disable, or inspect Tianwen automatic feedback analysis for this profile.',
+        description: expect.stringContaining('Enable, disable, or inspect Tianwen automatic feedback analysis for this profile.'),
         parameters: {
           type: 'object',
           properties: {

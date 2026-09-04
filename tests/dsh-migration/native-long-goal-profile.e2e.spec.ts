@@ -239,13 +239,8 @@ async function mountProfile(
     roots: [],
     mount: async () => undefined,
     composedPreset,
-    composeFrom: (childCtx: Context, parentCtx: Parameters<typeof composedPreset>[0]) => {
-      Object.defineProperty(childCtx, 'goals', {
-        configurable: true,
-        value: ctx.goals,
-      })
-      return composedPreset(parentCtx)
-    },
+    // Child scopes do not implicitly inject GoalService in the real profile.
+    composeFrom: (_childCtx: Context, parentCtx: Parameters<typeof composedPreset>[0]) => composedPreset(parentCtx),
   })
   const apiProxy = {
     sessions: {

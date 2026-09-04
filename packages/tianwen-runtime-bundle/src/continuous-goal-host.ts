@@ -648,7 +648,7 @@ export function mountContinuousGoalHost(
     if (exact === undefined || taskAgent === undefined) {
       throw new LongGoalIntegrityError('Continuous Goal active Task cancellation could not be confirmed')
     }
-    const goal = taskAgent.ctx.goals.get(taskAgent)
+    const goal = dependencies.getGoal === undefined ? taskAgent.ctx.goals.get(taskAgent) : dependencies.getGoal(taskAgent)
     if (goal === undefined || String(goal.id) !== execution.goalId) {
       throw new LongGoalIntegrityError('Continuous Goal active Task cancellation could not be confirmed')
     }
@@ -672,7 +672,7 @@ export function mountContinuousGoalHost(
     const exact = boundTask(record, execution.sessionId, execution.goalId)
     const taskAgent = ctx.agents.get(sessionId as never)
     if (taskAgent === undefined) return
-    const goal = taskAgent.ctx.goals.get(taskAgent)
+    const goal = dependencies.getGoal === undefined ? taskAgent.ctx.goals.get(taskAgent) : dependencies.getGoal(taskAgent)
     if (
       exact === undefined
       || exact.id !== current?.id

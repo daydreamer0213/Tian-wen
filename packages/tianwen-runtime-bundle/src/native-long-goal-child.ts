@@ -38,12 +38,13 @@ export class NativeLongGoalChild {
   // Coordinator recovery is not a human/Goal-driver turn. Give only this Task
   // an explicit completion capability; keep native attribution and revision checks.
   async followupTask(parent: Agent, childId: SessionId, prompt: ContentBlock[], signal: AbortSignal) {
+    const goals = this.ctx.goals
     const install = (agent: Agent) => {
       if (agent.session.header.parentSession !== parent.session.id) {
         throw new Error('Recovered Task parent changed')
       }
       if (this.completionTools.has(agent)) return
-      const bound = agent.ctx.goals.get(agent)
+      const bound = goals.get(agent)
       if (bound === undefined) throw new Error('Native Task recovery has no Goal')
       agent.ctx.tools.register(defineTool({
         name: 'complete_long_goal_task',
@@ -55,10 +56,10 @@ export class NativeLongGoalChild {
         output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
         async execute(args, exec) {
           if (exec.agent !== agent || args.goal_id !== bound.id
-            || agent.ctx.goals.get(agent)?.id !== bound.id) {
+            || goals.get(agent)?.id !== bound.id) {
             throw new Error('Recovered Task completion binding changed')
           }
-          agent.ctx.goals.complete(agent, { id: bound.id, revision: args.revision })
+          goals.complete(agent, { id: bound.id, revision: args.revision })
           return 'Recovered Task marked complete.'
         },
       }))

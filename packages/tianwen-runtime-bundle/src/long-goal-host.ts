@@ -245,6 +245,7 @@ export interface TianwenLongGoalRunDependencies {
     record: GoalFirstLongGoalRecord,
   ) => Promise<NativePlannerRecoveryLease | undefined>
   readonly getGoal?: (agent: Agent) => GoalView | undefined
+  readonly nativeGoalService?: Pick<Context['goals'], 'resume' | 'disarm'>
   readonly createGoal: (agent: Agent, input: {
     readonly objective: string
     readonly maxGoalRounds: number
@@ -1328,12 +1329,13 @@ export async function runCurrentWebTask(input: {
       throw new LongGoalIntegrityError('Continuous Goal Planner parent Agent is not live')
     }
     try {
-      const resumed = agent.ctx.goals.resume(agent, { id: goal.id, revision: goal.revision })
+      const nativeGoals = dependencies.nativeGoalService ?? agent.ctx.goals
+      const resumed = nativeGoals.resume(agent, { id: goal.id, revision: goal.revision })
       if (String(resumed.id) !== goalId || resumed.phase !== 'active' || resumed.activation !== 'armed') {
         throw new Error('Resumed Long Goal Task Goal mismatch')
       }
       // The native child followup owns execution, not a second Goal-round driver.
-      agent.ctx.goals.disarm(agent)
+      nativeGoals.disarm(agent)
       try {
         await dependencies.followupNativeTaskChild!(
           nativeParent,
@@ -1344,7 +1346,7 @@ export async function runCurrentWebTask(input: {
       } catch (cause) {
         let cleanupCause: unknown
         try {
-          agent.ctx.goals.disarm(agent)
+          nativeGoals.disarm(agent)
           await dependencies.flushSession(agent)
         } catch (error) {
           cleanupCause = error
@@ -2239,6 +2241,7 @@ export function mountTianwenLongGoalHost(
           nativeChild.followup(parent, SessionId(childId), prompt, signal),
       }),
       getGoal: agent => injected.goals.get(agent),
+      nativeGoalService: injected.goals,
       createGoal: (agent, goalInput) => injected.goals.create(agent, goalInput),
       readGoalRef: async (sessionId, goalId) => {
         const status = await readGoalStatus({
