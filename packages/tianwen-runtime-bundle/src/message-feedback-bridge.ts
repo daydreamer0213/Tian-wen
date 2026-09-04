@@ -249,7 +249,10 @@ export class TianwenMessageFeedbackBridgeService extends Service {
       if (item.rating === 'negative' && !skillUseReconciled) {
         const binding = this.ctx.tianwenEvolution
           .getRunBindingBySessionId(sessionId)
-        if (binding !== undefined) {
+        // Main-chat progress appends do not create a new use of the frozen Skill.
+        // Re-recording it would bind its old outcome to a different Session digest.
+        if (binding !== undefined
+          && this.ctx.tianwenEvolution.getRunSkillUse(binding.runId) === undefined) {
           this.ctx.tianwenLearningIntake.recordSkillUse(session, binding.runId)
         }
         skillUseReconciled = true

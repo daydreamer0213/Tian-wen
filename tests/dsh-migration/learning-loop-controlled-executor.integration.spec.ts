@@ -360,6 +360,8 @@ async function mountFeedbackBridge(
       evolution.listLearningAnalyses(...args),
     getRunBindingBySessionId: (...args: Parameters<typeof evolution.getRunBindingBySessionId>) =>
       evolution.getRunBindingBySessionId(...args),
+    getRunSkillUse: (...args: Parameters<typeof evolution.getRunSkillUse>) =>
+      evolution.getRunSkillUse(...args),
   } as never)
   ctx.provide('tianwenLearningLoop', {
     schedule: (analysisId: string) => loop.schedule(analysisId),

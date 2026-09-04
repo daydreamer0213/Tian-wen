@@ -217,6 +217,13 @@ describe('Tianwen governed Skill runtime intake', () => {
         },
       })
       expect(JSON.stringify(stored)).not.toContain(packet.source)
+      handle.agent.session.append('user/message', createUserMessage([
+        { type: 'text', text: 'A later main-chat progress message does not change the original Skill use.' },
+      ]), { surfaceOp: 'append' })
+      expect(() => harness.runtime.tianwenLearningIntake.recordSkillUse(
+        handle.agent.session, binding.runId,
+      )).toThrow('Run Skill use input is invalid')
+      expect(harness.runtime.tianwenEvolution.getRunSkillUse(binding.runId)).toEqual(stored)
     } finally {
       await handle.dispose()
       disposeParent()

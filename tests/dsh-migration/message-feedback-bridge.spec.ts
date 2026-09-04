@@ -1823,7 +1823,7 @@ describe('Tianwen DSH Message Feedback bridge', () => {
     }
   })
 
-  it('reconciles exact Skill use before negative feedback and retries it on replay', async () => {
+  it.each([false, true])('reconciles missing Skill use but reuses frozen proof after progress (frozen=%s)', async frozen => {
     const root = evolutionRoot('skill-use-before-feedback')
     const sessions = new SessionCatalog()
     const feedback = new FeedbackCatalog()
@@ -1872,10 +1872,39 @@ describe('Tianwen DSH Message Feedback bridge', () => {
       expect(recordSkillUse.mock.invocationCallOrder[0])
         .toBeLessThan(consume.mock.invocationCallOrder[0]!)
 
+      if (frozen) {
+        // The Runtime proof is immutable; appended main-chat progress is not a new use.
+        vi.spyOn(mounted.ctx.tianwenEvolution, 'getRunSkillUse')
+          .mockReturnValue({ runId: binding.runId } as never)
+        recordSkillUse.mockImplementation(() => { throw new Error('Run Skill use input is invalid') })
+        session.append('assistant/message', {
+          turn: 2,
+          message: {
+            id: MessageId('main-progress'), role: 'assistant',
+            content: [{ type: 'text', text: 'Analysis is running.' }],
+            source: { kind: 'model', provider: 'test-provider', model: 'test-model' },
+          },
+        }, { surfaceOp: 'append' })
+        feedback.set(String(session.id), [item({
+          messageId: 'message-1',
+          version: '17171717-1717-4717-8717-171717171717',
+          note: 'List decision uncertainties separately; keep background material excluded.',
+        })])
+      }
       await expect(mounted.bridge.reconcileSession(String(session.id)))
         .resolves.toMatchObject({ state: 'reconciled', current: 1 })
-      expect(recordSkillUse).toHaveBeenCalledTimes(2)
-      expect(consume).toHaveBeenCalledOnce()
+      expect(recordSkillUse).toHaveBeenCalledTimes(frozen ? 1 : 2)
+      expect(consume).toHaveBeenCalledTimes(frozen ? 2 : 1)
+      if (frozen) {
+        expect(mounted.ctx.tianwenEvolution.getLearningIntakeStatus(String(session.id), 'message-1'))
+          .toMatchObject({ feedbackVersion: '17171717-1717-4717-8717-171717171717' })
+        await mounted.bridge.reconcileSession(String(session.id))
+        expect(consume).toHaveBeenCalledTimes(2)
+        feedback.set(String(session.id), [])
+        await mounted.bridge.reconcileSession(String(session.id))
+        expect(mounted.ctx.tianwenEvolution.getLearningIntakeStatus(String(session.id), 'message-1'))
+          .toMatchObject({ state: 'retracted' })
+      }
     } finally {
       await mounted.ctx.fiber.dispose()
     }
