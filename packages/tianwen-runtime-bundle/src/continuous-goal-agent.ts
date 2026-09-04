@@ -153,6 +153,7 @@ export function installBoundContinuousGoalControls(
       name: 'goal_control',
       description: [
         'Guide, pause, resume, replan, or inspect the continuous Goal bound to this Agent.',
+        'For a user request to continue/resume (including 继续), choose action "resume", not "status", even if saved progress says running.',
         'Use exactly one of:',
         ...GOAL_CONTROL_SHAPES,
       ].join('\n'),
@@ -195,8 +196,9 @@ export function installBoundContinuousGoalControls(
         'goal_control is the authority for whether an active continuous Goal exists for this chat.',
         'The native DSH get_goal tool manages a separate Goal domain; a null result must not be used to decide whether a continuous Goal exists.',
         'When a user message is primarily guidance, correction, pause, resume, or status, the first action must be goal_control.',
+        'When the user asks to continue/resume (for example 继续), call goal_control with action "resume" first. A status-only reply does not resume interrupted work. This existing resume operation also handles an already-running Task without duplicating it.',
         'Do not read from or write to the workspace before calling it.',
-        'autoProgress "running" means automatic progression is enabled, not that a Task is executing. Use currentTask.phase and currentTask.attempt for the actual state.',
+        'autoProgress "running" means automatic progression is enabled, not that a Task is executing. currentTask.phase and currentTask.attempt describe saved progress and may still say active/running after a restart; they are not proof of live execution and must not replace a requested resume.',
         'Do not execute the continuous Goal Task in this control chat.',
         'Treat Planner and Task subagent reports as progress only. Inspect goal_control status.',
         'After status returns, give one brief user-facing update in the user\'s language: completed stages, current stage, and whether user action is needed. Do not call other tools merely to re-check the same status.',
