@@ -141,9 +141,11 @@ describe('Tianwen main-chat learning consent tool', () => {
       expect(mainSchema).toMatchObject({
         name: 'tianwen_learning_status',
         parameters: { type: 'object', properties: {} },
-        description: expect.stringContaining('current learning history'),
-        description: expect.stringContaining('filesystem verification'),
+        description: expect.any(String),
       })
+      expect(mainSchema?.description).toContain('current learning history')
+      expect(mainSchema?.description).toContain('filesystem verification')
+      expect(mainSchema?.description).toContain('current consent')
       expect(mounted.ctx.tools.schemas(child.agent).some(tool =>
         tool.name === 'tianwen_learning_status')).toBe(false)
       const beforeConsent = mounted.ctx.tianwenEvolution.getLearningAnalysisConsent()
@@ -157,10 +159,15 @@ describe('Tianwen main-chat learning consent tool', () => {
           value: {
             guidance: expect.stringContaining('bounded snapshot is sufficient'),
             consent: { policyVersion: 'tianwen-auto-analysis.v2', enabled: false, revision: 0 },
-            currentSession: { hasFrozenGovernedBinding: false },
+            currentSession: {
+              hasFrozenGovernedBinding: false,
+              scope: expect.stringContaining('does not prevent explicit-feedback analysis'),
+            },
             history: {
               scope: expect.stringContaining('Skill-bound Runs'),
+              analysisScope: expect.stringContaining('explicit-feedback analyses'),
               skillBoundRuns: 0, recordedOutcomes: 0, recordedAnalyses: 0,
+              analysesBySource: { outcome: 0, explicitFeedback: 0 },
             },
             nativeSkills: { available: false, skills: [] },
             learningSources: {
@@ -214,12 +221,19 @@ describe('Tianwen main-chat learning consent tool', () => {
         noticeSourceMessageId: LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID,
         deliveryId: 'tianwen-learning-consent-delivery:tianwen-auto-analysis.v2',
       })
+      vi.spyOn(mounted.ctx.tianwenEvolution, 'listLearningAnalyses').mockReturnValue([
+        { source: 'outcome' }, { source: undefined },
+      ] as never)
       const snapshots = vi.spyOn(mounted.ctx.skills, 'snapshot')
       await expect(executeLearningStatus(mounted.ctx, main.agent)).resolves.toMatchObject({
         value: {
           consent: { policyVersion: 'tianwen-auto-analysis.v2', enabled: false, revision: 0 },
           currentSession: { hasFrozenGovernedBinding: true },
-          history: { skillBoundRuns: 1, recordedOutcomes: 1, recordedAnalyses: 0 },
+          history: {
+            skillBoundRuns: 1, recordedOutcomes: 1, recordedAnalyses: 2,
+            analysesBySource: { outcome: 1, explicitFeedback: 1 },
+            analysisScope: expect.stringContaining('do not establish causality'),
+          },
           nativeSkills: { available: true, skills: [{ name: skill.name, description: skill.description }] },
           learningSources: {
             scope: expect.stringContaining('not feedback or Outcome input'),
