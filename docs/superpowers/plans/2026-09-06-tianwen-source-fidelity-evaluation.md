@@ -163,6 +163,8 @@ source recovery check preserves the old result but does not prove v3 efficacy.
 **Owned files:**
 - `packages/tianwen-runtime/src/skill-evaluation.ts`
 - `packages/tianwen-runtime/src/index.ts` only if required for the public seam.
+- `packages/tianwen-evolution/src/runtime-binding.ts` only to expose the reviewed
+  Shadow review observation read/write methods through the existing service.
 - `packages/tianwen-runtime-bundle/src/learning-loop-orchestrator.ts`
 - `packages/tianwen-runtime-bundle/src/explicit-correction-protocol.ts` only for
   native input/output integration with the reviewed builder.
@@ -171,6 +173,8 @@ source recovery check preserves the old result but does not prove v3 efficacy.
 - `tests/dsh-probe/controlled-skill-activation-runtime.spec.ts`
 - `tests/dsh-migration/learning-loop-orchestrator.spec.ts`
 - `tests/dsh-migration/learning-loop-controlled-executor.integration.spec.ts`
+- `tests/dsh-migration/runtime-bundle.spec.ts` only for exact packaging-boundary
+  registration and covering tests for the reviewed new local modules.
 
 **Contract:**
 - Honor policy-specific pre-blind gates in Runtime as well as Evolution. Provide
@@ -182,23 +186,36 @@ source recovery check preserves the old result but does not prove v3 efficacy.
 - Reuse existing evaluator permissions/config/retry/Evidence checks; no generic
   evaluator abstraction. Persist exact quality observation before Shadow result.
   Fail/inconclusive ends honestly without activation or alternate-model retries.
+- Forward the domain's Shadow review observation methods through the ordinary
+  Evolution service, using its existing write/commit-unknown handling. Cover the
+  actual service in native Runtime tests; direct ledger access is not a substitute.
 - Reuse completed product/review receipts on restart. Do not duplicate completed
   Runs; partial unsupported recovery remains retained and inconclusive. Preserve
   main-session progress/ownership and native activation verification.
 
-- [ ] RED: source-fidelity clean ID ties reach one real native evaluator boundary;
+- [x] RED: source-fidelity clean ID ties reach one real native evaluator boundary;
   false improvement is rejected; semantically bad holdout with correct IDs cannot
   activate; missing/swapped/stale accepted material or reviewer evidence fails.
-- [ ] Implement the narrow native path and retained-version dispatch integration.
-- [ ] Verify successful-path accounting is 14 Runs for new / 13 for old, no
+- [x] Implement the narrow native path and retained-version dispatch integration.
+- [x] Verify successful-path accounting is 14 Runs for new / 13 for old, no
   repeated completed work, no leakage of X/Y/patch/feedback into holdout reviewer,
   no fifth gate, and incomplete quality cannot produce Shadow readiness.
   Add new-v3 native execution coverage alongside Task 2's retained-v2 integration
   fixtures; do not reinterpret those legacy fixtures as proof of the new path.
-- [ ] Run covering runtime/domain/migration regressions, root typecheck, build,
+- [x] Run covering runtime/domain/migration regressions, root typecheck, build,
   public-API guard and diff check. Include the previously deferred cheap
   research-tool-presence detail test when touching this preflight suite. Commit
   only owned files and provide exact report for independent review.
+  Exercise the Runtime/status artifact input allowlists after building. Register
+  only evidenced new local modules, with existing foreign/native/private-import
+  rejection tests retained; do not broaden allowed directory roots.
+
+Completed at `87f09d1` after `95642de`: 374 original covering checks; fix round
+passed 207 native checks plus 64 artifact checks after forced type rebuild then
+bundle rebuild. Independent full review's native envelope/schema binding finding
+is fixed and scoped re-review approved. Native Context close/reopen coverage is a
+deferred Minor for final review; same-Context retry is not that proof. These are
+mechanism gates, not new real-model efficacy or a deployed product.
 
 ## Controller closure (not delegated implementation)
 

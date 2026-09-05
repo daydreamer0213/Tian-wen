@@ -381,3 +381,19 @@ The covering gate passed 96 tests and both type checks. Independent scoped
 re-review marked both findings addressed with no new breakage. Task 2 is complete;
 Task 3 now owns native blind and holdout-review execution. No deployment or new
 real-model improvement is implied by this engineering checkpoint.
+
+Task 3 is complete at `87f09d1` after `95642de`, with independent task and scoped
+fix review closed. New-v3 native mechanism integration covers fourteen distinct
+controlled Sessions, while legacy remains thirteen. The independent holdout
+reviewer sees only its packet, newly accepted summary and rubric; native request
+material and complete tool schema must exactly match before durable review proof
+and Shadow result. Three native request-mutation negatives are retained.
+
+Original covering tests passed 374 checks. The fix gate passed 207 native checks;
+three stale artifact failures were resolved by ordering forced package type build
+before bundle rebuild, then the artifact suite passed 64/64. Actual native Context
+close/reopen coverage remains a deferred Minor for final review, distinct from
+same-Context retry and existing cold ledger replay. Separate trusted-parent work,
+whole-branch regression/review and isolated final artifact gates remain. No new
+genuine Candidate, source adoption, learning efficacy or daily deployment is
+claimed; the bounded A–D results and old B rejection remain unchanged.

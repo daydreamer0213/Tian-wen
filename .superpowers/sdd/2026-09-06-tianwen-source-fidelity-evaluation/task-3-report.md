@@ -267,14 +267,18 @@ The six-suite covering run passed all five Runtime/Shadow/activation/orchestrato
 native integration suites but initially found three stale built-artifact failures:
 
 ```text
+D:\hermes\node\node.exe D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs exec vitest run tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts tests/dsh-probe/controlled-skill-activation-runtime.spec.ts tests/dsh-migration/learning-loop-orchestrator.spec.ts tests/dsh-migration/learning-loop-controlled-executor.integration.spec.ts tests/dsh-migration/runtime-bundle.spec.ts --reporter=dot
 Test Files 1 failed | 5 passed (6)
 Tests 3 failed | 268 passed (271)
+Native suites: 5 files passed; 207 tests passed.
+Artifact suite: runtime-bundle.spec.ts failed; 61 tests passed and 3 failed.
 Failures: runtime and status outputs still contained workspace imports, and the
 package tarball was missing one declaration from the stale dist tree.
 ```
 
-After the required force build and runtime-bundle rebuild, the artifact suite was
-clean:
+The recovery order matters: the forced eight-package `tsc` build first overwrote
+the previously bundled `dist` outputs, the runtime-bundle build then regenerated
+the deployable bundles, and only then did the artifact check pass:
 
 ```text
 D:\hermes\node\node.exe D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs exec tsc -b packages/tianwen-desktop-host/tsconfig.json packages/tianwen-dsh-compat/tsconfig.json packages/tianwen-dsh-probe-bundle/tsconfig.json packages/tianwen-evaluator-python/tsconfig.json packages/tianwen-evidence/tsconfig.json packages/tianwen-evolution/tsconfig.json packages/tianwen-runtime-bundle/tsconfig.json packages/tianwen-runtime/tsconfig.json --pretty false --force
