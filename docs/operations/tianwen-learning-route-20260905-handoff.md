@@ -1,5 +1,18 @@
 # 2026-09-05 learning-route handoff
 
+## Latest bugfix acceptance and delivery checkpoint
+
+See [the real-user repair and retest record](tianwen-real-user-retest-20260905.md)
+for the subsequent source `8707090`, Runtime `0.1.12` / Desktop
+`0.1.0-preview.13` candidate. Final local tests and independent review are clean;
+the genuine 0.1.11 predecessor upgrade passed. Exact-main CI and current-user
+delivery are tracked separately in that record. The 0.1.11 installation facts
+below describe the previous delivery, not this patch's final identity.
+
+Real-model feedback closure and the final bounded status query passed for the
+observed cases. Bounded exploration, admitted-source adoption and natural
+improvement remain unobserved; scripted coverage is not real-model acceptance.
+
 ## Later real-user acceptance correction
 
 The subsequent [real-user browser acceptance](tianwen-real-user-acceptance-20260905.md)

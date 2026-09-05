@@ -4,6 +4,12 @@
 
 **Design:** Reuse DSH native tools, Skill registry and Sessions. Keep Tianwen's current research-summary learning boundary. Correct the existing analysis report's meaning and expose a small read-only current-status projection; do not add a new runtime, dashboard, datastore or filesystem search.
 
+**Execution checkpoint:** Tasks 1–4 complete. Task 5 source review, full local gates,
+genuine UI retests and actual disposable predecessor upgrade complete at
+`8707090`; exact-main CI and actual-user delivery remain pending. Observed results
+and untriggered real-model branches are recorded in
+[the retest record](../../operations/tianwen-real-user-retest-20260905.md).
+
 ## Global Constraints
 
 - DSH owns model execution, tools, Skills and Session lifecycle. Tianwen owns learning evidence and governance.
