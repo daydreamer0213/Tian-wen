@@ -201,9 +201,10 @@ describe('Tianwen main-chat learning consent tool', () => {
     const mounted = await mountConsentRuntime('learning-status-records', [], {
       nativeSkills: [skill], learningSkillSources: [admission],
     })
+    const cwd = join(mounted.root, 'status-workspace')
     const main = await mounted.ctx.agents.create({
       sessionId: SessionId(`consent-main-${randomUUID()}`),
-      meta: { cwd: 'D:/status-workspace' },
+      meta: { cwd },
       agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
     })
     const ordinary = await mounted.ctx.agents.create({
@@ -284,7 +285,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         readonly cwd?: string
         readonly scope?: unknown
       })
-      expect(lookups.some(lookup => lookup.cwd === 'D:/status-workspace')).toBe(true)
+      expect(lookups.some(lookup => lookup.cwd === cwd)).toBe(true)
       expect(lookups.some(lookup => lookup.scope === main.agent)).toBe(true)
       await expect(executeLearningStatus(mounted.ctx, ordinary.agent)).resolves.toMatchObject({
         value: {
@@ -326,9 +327,10 @@ describe('Tianwen main-chat learning consent tool', () => {
     const mounted = await mountConsentRuntime('learning-status-incomplete-sources', [], {
       nativeSkills: [skill], learningSkillSources: [admission],
     })
+    const cwd = join(mounted.root, 'status-workspace')
     const main = await mounted.ctx.agents.create({
       sessionId: SessionId(`consent-main-${randomUUID()}`),
-      meta: { cwd: 'D:/status-workspace' },
+      meta: { cwd },
       agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
     })
     try {
@@ -347,8 +349,8 @@ describe('Tianwen main-chat learning consent tool', () => {
       })
       expect(status.value?.learningSources).not.toHaveProperty('eligible')
       expect(snapshots.mock.calls).toEqual([
-        [{ cwd: 'D:/status-workspace', scope: main.agent, signal }],
-        [{ cwd: 'D:/status-workspace', scope: main.agent, signal }],
+        [{ cwd, scope: main.agent, signal }],
+        [{ cwd, scope: main.agent, signal }],
       ])
       expect(mounted.adapter.requests).toHaveLength(0)
     } finally {
