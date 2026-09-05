@@ -1582,6 +1582,18 @@ function sameSkillVersion(
   }).parentVersionId === expectedVersionId
 }
 
+function parentManifestForScope(
+  ctx: Context,
+  parentVersionId: SkillVersionId,
+  scopeKey: string,
+): RunSkillManifest | undefined {
+  const matching = ctx.tianwenEvolution.listRunSkillManifests()
+    .filter(manifest => manifest.parentVersionId === parentVersionId)
+  return matching.find(manifest =>
+    ctx.tianwenEvolution.getRunBinding(manifest.runId)?.scopeKey === scopeKey)
+    ?? matching[0]
+}
+
 async function trustedParentRootVersion(
   ctx: Context,
   parentManifest: RunSkillManifest,
@@ -1745,8 +1757,7 @@ export class TianwenSkillEvaluationService extends Service {
       : evolution.getSkillCandidate(shadow.candidateId)
     const parentManifest = shadow === undefined
       ? undefined
-      : evolution.listRunSkillManifests()
-          .find(manifest => manifest.parentVersionId === shadow.parentVersionId)
+      : parentManifestForScope(this.ctx, shadow.parentVersionId, shadow.scopeKey)
     if (shadow === undefined
       || shadowResult === undefined
       || evaluation === undefined
@@ -2367,8 +2378,11 @@ export class TianwenSkillEvaluationService extends Service {
       throw new ControlledSkillShadowPreflightError('task-package-mismatch')
     }
     const candidate = this.ctx.tianwenEvolution.getSkillCandidate(evaluation.candidateId)
-    const parentManifest = this.ctx.tianwenEvolution.listRunSkillManifests()
-      .find(manifest => manifest.parentVersionId === evaluation.parentVersionId)
+    const parentManifest = parentManifestForScope(
+      this.ctx,
+      evaluation.parentVersionId,
+      evaluation.scopeKey,
+    )
     if (
       candidate === undefined
       || parentManifest === undefined
@@ -3726,8 +3740,7 @@ export class TianwenSkillEvaluationService extends Service {
       : this.ctx.tianwenEvolution.getLearningCase(candidate.caseId)
     const parentManifest = candidate === undefined
       ? undefined
-      : this.ctx.tianwenEvolution.listRunSkillManifests()
-          .find(manifest => manifest.parentVersionId === candidate.parentVersionId)
+      : parentManifestForScope(this.ctx, candidate.parentVersionId, candidate.targetScope)
     if (
       candidate === undefined
       || protocol === undefined

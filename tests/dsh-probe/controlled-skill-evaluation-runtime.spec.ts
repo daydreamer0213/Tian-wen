@@ -2111,6 +2111,14 @@ describe('controlled Skill evaluation Runtime', () => {
         ...first.payload,
         provider: parentSkill.provider,
       } as SkillDefinition
+      const foreignBinding = evolution.recordRunBinding({
+        goalRef: 'goal:controlled-evaluation-runtime:foreign-parent',
+        taskRef: 'task:controlled-evaluation-runtime:foreign-parent',
+        sessionId: 'session:controlled-evaluation-runtime:foreign-parent',
+        scopeKey: 'project:foreign/capability:controlled-summary',
+        acceptanceContract: acceptance,
+      })
+      evolution.recordRunSkillManifest({ runId: foreignBinding.runId, skill: learnedParent })
       const secondAcceptance = {
         ...acceptance,
         problemCategory: 'summary-omits-evidence-order',
@@ -2134,6 +2142,11 @@ describe('controlled Skill evaluation Runtime', () => {
         },
       )
       const second = evolution.getSkillCandidate(secondIds.candidateId)!
+      const learnedManifests = evolution.listRunSkillManifests()
+        .filter(item => item.parentVersionId === second.parentVersionId)
+      expect(learnedManifests[0]?.runId).toBe(foreignBinding.runId)
+      expect(learnedManifests.some(item =>
+        evolution.getRunBinding(item.runId)?.scopeKey === second.targetScope)).toBe(true)
       const rootManifest = evolution.listRunSkillManifests()
         .find(item => item.parentVersionId === first.parentVersionId)!
       const previousPointer = {

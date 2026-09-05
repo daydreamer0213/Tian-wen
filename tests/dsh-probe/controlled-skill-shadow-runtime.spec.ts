@@ -155,6 +155,7 @@ function seedPassingEvaluation(
     readonly acceptanceContract?: typeof acceptance
     readonly candidateContent?: string
     readonly evidencePurpose?: 'controlled-product' | 'development-only-synthetic-defect'
+    readonly foreignCandidateScopeKey?: string
   } = {},
 ) {
   const sourceFidelity = 'sourceFidelity' in protocol
@@ -320,6 +321,22 @@ function seedPassingEvaluation(
       ...learningCase.counterevidence.flatMap(item => item.evidenceIds),
     ],
   })
+  let foreignParentRunId: typeof runs[number]['binding']['runId'] | undefined
+  if (options.foreignCandidateScopeKey !== undefined) {
+    const recordedCandidate = evolution.getSkillCandidate(candidate.candidateId)!
+    const foreignBinding = evolution.recordRunBinding({
+      goalRef: 'goal:controlled-shadow-runtime:foreign-parent',
+      taskRef: 'task:controlled-shadow-runtime:foreign-parent',
+      sessionId: 'session:controlled-shadow-runtime:foreign-parent',
+      scopeKey: options.foreignCandidateScopeKey,
+      acceptanceContract: frozenAcceptance,
+    })
+    evolution.recordRunSkillManifest({
+      runId: foreignBinding.runId,
+      skill: { ...recordedCandidate.payload, provider: frozenParent.provider },
+    })
+    foreignParentRunId = foreignBinding.runId
+  }
   const openedEvaluation = evolution.openControlledSkillEvaluation({
     candidateId: candidate.candidateId,
     protocolId: frozen.protocolId,
@@ -437,7 +454,7 @@ function seedPassingEvaluation(
     })
   }
   evolution.recordControlledSkillEvaluationResult({ evaluationId: plan.evaluationId })
-  return { candidate, plan }
+  return { candidate, foreignParentRunId, plan }
 }
 
 async function mountShadowRuntime(
@@ -604,6 +621,7 @@ async function mountSourceFidelityShadowRuntime(
   name: string,
   reviewSourceFidelity = 2,
   reviewRequestMutation?: 'packet' | 'submission' | 'schema',
+  foreignCandidateScopeKey?: string,
 ) {
   const root = fixtureRoot(name)
   const harness = await mountPersistentHarness(join(root, 'sessions'), [])
@@ -819,7 +837,9 @@ async function mountSourceFidelityShadowRuntime(
       },
     },
   }
-  const seeded = seedPassingEvaluation(harness.ctx.tianwenEvolution, protocol)
+  const seeded = seedPassingEvaluation(harness.ctx.tianwenEvolution, protocol, {
+    ...(foreignCandidateScopeKey === undefined ? {} : { foreignCandidateScopeKey }),
+  })
   return {
     adapter,
     disposeParent,
@@ -1868,6 +1888,8 @@ describe('controlled Skill Shadow Runtime', () => {
     const mounted = await mountSourceFidelityShadowRuntime(
       'trusted-parent-second-generation',
       3,
+      undefined,
+      'project:foreign/capability:controlled-summary',
     )
     const evolution = mounted.harness.ctx.tianwenEvolution
     try {
@@ -1900,6 +1922,11 @@ describe('controlled Skill Shadow Runtime', () => {
         generation: 'second',
         candidateContent: '# Controlled summary\n\nState the result, then its evidence.',
       })
+      const learnedManifests = evolution.listRunSkillManifests()
+        .filter(item => item.parentVersionId === second.plan.parentVersionId)
+      expect(learnedManifests[0]?.runId).toBe(mounted.seeded.foreignParentRunId)
+      expect(learnedManifests.some(item =>
+        evolution.getRunBinding(item.runId)?.scopeKey === second.plan.scopeKey)).toBe(true)
       const rootManifest = evolution.listRunSkillManifests()
         .find(item => item.parentVersionId === first.parentVersionId)!
       const previousPointer = {
