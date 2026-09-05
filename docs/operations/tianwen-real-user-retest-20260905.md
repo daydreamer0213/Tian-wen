@@ -1,12 +1,12 @@
 # 2026-09-05 真实用户验收修复与复测
 
-状态：代码修复、独立复核、最终本地回归和最终候选真实状态查询已完成；主线集成与现用安装交付见文末最新记录。本文件按时间保留失败和修正，不宣称所有学习分支已真实触发。
+状态：本轮修复主线与现用安装交付已完成，准确安装放行提交的四项 CI 全绿，实际桌面启动／退出及历史保全验证通过。仍未触发的真实学习分支另行列明。本文件按时间保留失败和修正，不宣称所有学习分支已真实触发。
 
 ## 本轮范围
 
 用户要求持续完成本轮主线，并明确真实验收必须是通过 DSH 界面像普通用户一样使用功能、实际调用模型；不接受预设答案、虚构历史或要求分析子任务照测试脚本行动。
 
-基线为 `7028449ca3cb17381d2a70b72e3c3737fc8ba97f`，工作分支 `codex/learning-browser-acceptance`。现用安装仍为 Runtime 0.1.11 / Desktop 0.1.0-preview.12；下面的修复首先在隔离环境验证，不能据此称现用安装已更新。
+基线为 `7028449ca3cb17381d2a70b72e3c3737fc8ba97f`，工作分支 `codex/learning-browser-acceptance`。本轮开始时现用安装为 Runtime 0.1.11 / Desktop 0.1.0-preview.12；先在隔离环境验证，随后按文末放行证据升级现用安装。
 
 当前计划：[修复与真实复测](../superpowers/plans/2026-09-05-tianwen-real-acceptance-fixes.md)。前一轮原始结果：[首次真实验收](tianwen-real-user-acceptance-20260905.md)。被用户否定的预设历史草稿已移出产品目录，完整保留于 `D:\DevData\tianwen-real-user-acceptance-20260905\evidence\superseded-learning-browser-fixture.spec.ts`，未执行来关闭本轮验收。
 
@@ -150,3 +150,19 @@ Task 2 初版 `c2aefd6`、首轮修正 `dac0cf9`；21 项聚焦测试／类型�
 `ec9eecdc465766f74c78d46f051cdefa9476403f` 已正常快进合入并推送主线。[CI 33968088165](https://github.com/daydreamer0213/Tian-wen/actions/runs/33968088165) 的 Linux 学习测试发现两个新案例把 Session cwd 写死为 `D:/status-workspace`；Linux 按原生绝对路径规则拒绝，在状态工具执行前就失败。Windows 本地通过不能替代该检查。
 
 最小修正只令两个测试使用自身临时根下的本机绝对路径，保留准确 cwd／scope／signal、真实学习记录、不可用分支及只读断言；没有修改产品路径校验或程序字节。修后状态及组合两文件 22 项、类型检查通过；完整学习能力组 12 文件／198 项通过，26.17 秒。限定范围独立复核通过，133 文件产品摘要原样不变。现用安装仍等待修正提交四项 CI 全绿。
+
+## 最终主线放行与现用交付
+
+安装放行提交 `62e84eef855e72fde89647129022d4ababb59233` 的 [CI 33968423484](https://github.com/daydreamer0213/Tian-wen/actions/runs/33968423484) 全部完成：Python、TypeScript、Windows installer、Windows Desktop 四项均 success。此后才开始现用升级；后续交接文档不改变产品源码或归档身份。
+
+唯一现用安装 `D:\DevData\tianwen-experience` 的正常受管安装器返回 ready，归档摘要严格匹配 `d61323fed7efd58676d0f2c0e8dd8d1747c2a5b2726094b727dc351b620394d7`。原生 Web plugin add 完成，桌面宿主检查 Web Profile 为 ready。受管与 Web 两处实际 Runtime 均为 0.1.12，runtime/client 字节都匹配已验收候选。旧 0.1.11 归档保留且摘要 `134c8715a070845840e959882ba64000a3b4e0cf417147b02bd14a3995d8dee1` 不变。
+
+Desktop 0.1.0-preview.13 已切换到桌面原 `deepseek.lnk` 所指向的原目录，快捷方式目标、参数和 DSH home 全部不变。旧 preview.12 程序完整保存在 `D:\DevData\tianwen-real-user-retest-20260905\delivery\desktop-replaced-preview.12`，配置清单和原回执保存在同目录的 `user-profile-before`；没有删除旧程序，也没有声称已验证自动降级。安装位置再次通过严格资源和嵌入归档审计。
+
+实际打包 Desktop 的启动／退出验收：1 项通过、4 项无关用例按筛选跳过，14.38 秒。页面真实加载到临时地址 `http://127.0.0.1:62585/`；桌面成功退出，它拥有的 DSH 进程 11368 已退出，之后三次 HTTP 检查均确认服务关闭。临时地址不是固定入口。启动检查最初把 DSH 包根填成了部署父目录，宿主按原规则拒绝；改用原快捷方式已有的准确包根后通过，未修改产品规则。
+
+升级前、受管升级后、Web 升级后以及桌面启动／退出后，30 个现有会话／状态文件的汇总摘要始终为 `F533F1AE67D28EB2CC65871888A9BAAF65D01A7DBC55865140E9B609AC6734E8`，没有增加、删除或改写。未为现用安装验收提交新的模型任务。原始业务工作树 `D:\Guo\zuochong\AGi` 未修改。
+
+可以直接继续使用桌面原 `deepseek` 快捷方式。本轮有限修复与本机交付完成；有界探索／来源采用真实端到端及长期改善仍按前述边界待证。没有 npm 发布、标签、GitHub Release、安装包上传或上游 DSH 推送。
+
+本地完整交付记录：`D:\DevData\tianwen-real-user-retest-20260905\delivery\final-integration-record.md`。本计划临时复核文件已完整移至该目录的 `review-records-sdd`，其他计划文件未动；保留当前工作树，因为现用快捷方式仍指向它的桌面程序。

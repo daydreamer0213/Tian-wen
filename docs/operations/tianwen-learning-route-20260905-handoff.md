@@ -1,13 +1,17 @@
 # 2026-09-05 learning-route handoff
 
-## Latest bugfix acceptance and delivery checkpoint
+## Latest bugfix acceptance and completed delivery
 
 See [the real-user repair and retest record](tianwen-real-user-retest-20260905.md)
 for the subsequent source `8707090`, Runtime `0.1.12` / Desktop
-`0.1.0-preview.13` candidate. Final local tests and independent review are clean;
-the genuine 0.1.11 predecessor upgrade passed. Exact-main CI and current-user
-delivery are tracked separately in that record. The 0.1.11 installation facts
-below describe the previous delivery, not this patch's final identity.
+`0.1.0-preview.13` delivery. Final local tests and independent review are clean;
+the genuine 0.1.11 predecessor upgrade passed. Installation-gate main commit
+`62e84eef855e72fde89647129022d4ababb59233` passed all four jobs in
+[CI 33968423484](https://github.com/daydreamer0213/Tian-wen/actions/runs/33968423484).
+Both actual user Runtimes and the existing Desktop shortcut target are upgraded;
+packaged Desktop boot/exit and preservation of all 30 user Session/state files
+passed. The original shortcut remains the entry point. The 0.1.11 facts below
+describe the previous delivery, not this patch's final identity.
 
 Real-model feedback closure and the final bounded status query passed for the
 observed cases. Bounded exploration, admitted-source adoption and natural

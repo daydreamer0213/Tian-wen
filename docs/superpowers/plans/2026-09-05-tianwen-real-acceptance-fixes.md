@@ -4,10 +4,12 @@
 
 **Design:** Reuse DSH native tools, Skill registry and Sessions. Keep Tianwen's current research-summary learning boundary. Correct the existing analysis report's meaning and expose a small read-only current-status projection; do not add a new runtime, dashboard, datastore or filesystem search.
 
-**Execution checkpoint:** Tasks 1–4 complete. Task 5 source review, full local gates,
-genuine UI retests and actual disposable predecessor upgrade complete at
-`8707090`; exact-main CI and actual-user delivery remain pending. Observed results
-and untriggered real-model branches are recorded in
+**Execution complete:** Tasks 1–5 complete. Product source `8707090` passed full
+local gates, independent review and genuine UI retests; the actual predecessor
+upgrade passed. The test-only cross-platform correction and exact-main CI at
+`62e84eef855e72fde89647129022d4ababb59233` passed all four jobs. Actual-user Runtime
+and Desktop upgrades, packaged boot/exit and unchanged historical data were
+verified. Observed results and untriggered real-model branches are recorded in
 [the retest record](../../operations/tianwen-real-user-retest-20260905.md).
 
 ## Global Constraints
