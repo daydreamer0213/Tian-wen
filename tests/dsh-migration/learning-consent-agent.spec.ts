@@ -6,6 +6,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import {
   CallId,
   SessionId,
+  SkillRegistry,
   defineTool,
   mountGoalHarness,
   textResponse,
@@ -14,6 +15,8 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { apply as applyCore } from '../../packages/tianwen-runtime/src/index.js'
+import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
+import { RESEARCH_SUMMARY_SCOPE } from '../../packages/tianwen-runtime/src/index.js'
 import {
   LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID,
   LEARNING_CONSENT_NOTICE_TEXT,
@@ -48,12 +51,22 @@ function tempRoot(prefix: string): string {
 async function mountConsentRuntimeAt(
   root: string,
   responses: Parameters<typeof mountGoalHarness>[1] = [],
+  options: {
+    readonly nativeSkills?: readonly object[]
+    readonly learningSkillSources?: readonly object[]
+  } = {},
 ) {
   const harness = await mountGoalHarness(join(root, 'sessions'), responses, {
     goalRoundDriver: false,
   })
   await applyCore(harness.ctx, { evolutionRoot: join(root, 'evolution') })
-  const consentFiber = harness.ctx.plugin(TianwenLearningConsentAgentService)
+  if (options.nativeSkills !== undefined) {
+    await harness.ctx.plugin(SkillRegistry)
+    for (const skill of options.nativeSkills) harness.ctx.skills.register(skill as never)
+  }
+  const consentFiber = harness.ctx.plugin(TianwenLearningConsentAgentService, options.learningSkillSources === undefined
+    ? {}
+    : { learningSkillSources: options.learningSkillSources as never })
   await consentFiber
   return { ...harness, root, consentFiber }
 }
@@ -61,8 +74,9 @@ async function mountConsentRuntimeAt(
 async function mountConsentRuntime(
   prefix: string,
   responses: Parameters<typeof mountGoalHarness>[1] = [],
+  options: Parameters<typeof mountConsentRuntimeAt>[2] = {},
 ) {
-  return mountConsentRuntimeAt(tempRoot(prefix), responses)
+  return mountConsentRuntimeAt(tempRoot(prefix), responses, options)
 }
 
 async function createMainAndChild(ctx: Awaited<ReturnType<typeof mountConsentRuntime>>['ctx']) {
@@ -135,20 +149,118 @@ describe('Tianwen main-chat learning consent tool', () => {
       const beforeRequests = mounted.adapter.requests.length
       await expect(executeLearningStatus(mounted.ctx, child.agent)).resolves
         .toMatchObject({ isError: true })
-      await expect(executeLearningStatus(mounted.ctx, main.agent)).resolves
-        .toMatchObject({
+      const status = await executeLearningStatus(mounted.ctx, main.agent)
+      expect(status).toMatchObject(
+        {
           isError: false,
           value: {
             currentSession: { hasFrozenGovernedBinding: false },
-            history: { skillBoundRuns: 0, recordedOutcomes: 0, analyses: 0 },
+            history: {
+              scope: expect.stringContaining('Skill-bound Runs'),
+              skillBoundRuns: 0, recordedOutcomes: 0, recordedAnalyses: 0,
+            },
             nativeSkills: { available: false, skills: [] },
-            learningSources: { configured: 0, eligible: 0, skills: [], available: false },
+            learningSources: {
+              scope: expect.stringContaining('Optional host-reviewed reusable external Skill sources'),
+              configured: 0, skills: [], available: false,
+            },
           },
         })
+      expect(status.value?.learningSources).not.toHaveProperty('eligible')
       expect(mounted.ctx.tianwenEvolution.getLearningAnalysisConsent()).toBe(beforeConsent)
       expect(mounted.adapter.requests).toHaveLength(beforeRequests)
     } finally {
       await child.dispose()
+      await main.dispose()
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('reports a bound Run, current native bytes, and pending notice without writing', async () => {
+    const skill = {
+      name: 'reviewed-native', description: 'Review one bounded fact.', content: 'Use only the supplied fact.',
+      source: 'test', provider: 'test-reviewed', invocation: { modelInvocable: true, userInvocable: true },
+    }
+    const admission = {
+      name: skill.name, provider: skill.provider, digest: sha256(skill),
+      origin: 'https://example.invalid/reviewed-native', revision: 'v1', license: 'MIT' as const,
+      reviewedAt: '2026-09-05T00:00:00.000Z', kind: 'self-contained-text' as const,
+      runtime: '0.1.1-rc.2' as const, scopeKey: RESEARCH_SUMMARY_SCOPE,
+      toolName: 'submit_research_summary',
+    }
+    const mounted = await mountConsentRuntime('learning-status-records', [], {
+      nativeSkills: [skill], learningSkillSources: [admission],
+    })
+    const main = await mounted.ctx.agents.create({
+      sessionId: SessionId(`consent-main-${randomUUID()}`),
+      meta: { cwd: 'D:/status-workspace' },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      const binding = mounted.ctx.tianwenEvolution.recordRunBinding({
+        goalRef: 'goal:status', taskRef: 'task:status', sessionId: String(main.agent.session.id),
+        scopeKey: RESEARCH_SUMMARY_SCOPE, sessionLifecycleFingerprint: sha256('status-lifecycle'),
+        acceptanceContract: { source: 'dsh-tool-result', toolName: 'status_check', notMetErrorCode: 'STATUS_NOT_MET', gapDisposition: 'reusable', problemCategory: 'status', severity: 1, blocksGoal: false },
+      })
+      mounted.ctx.tianwenEvolution.recordRunSkillManifest({ runId: binding.runId, skill })
+      mounted.ctx.tianwenEvolution.recordOutcomeIntake({
+        runId: binding.runId, verdict: 'met', sessionDigest: sha256('status-session'), evidenceIds: [sha256('status-evidence')],
+      })
+      mounted.ctx.tianwenEvolution.recordLearningConsentNoticeIntent({
+        policyVersion: 'tianwen-auto-analysis.v2', mainSessionId: String(main.agent.session.id),
+        noticeSourceMessageId: LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID,
+        deliveryId: 'tianwen-learning-consent-delivery:tianwen-auto-analysis.v2',
+      })
+      const snapshots = vi.spyOn(mounted.ctx.skills, 'snapshot')
+      await expect(executeLearningStatus(mounted.ctx, main.agent)).resolves.toMatchObject({
+        value: {
+          currentSession: { hasFrozenGovernedBinding: true },
+          history: { skillBoundRuns: 1, recordedOutcomes: 1, recordedAnalyses: 0 },
+          nativeSkills: { available: true, skills: [{ name: skill.name, description: skill.description }] },
+          learningSources: {
+            scope: expect.stringContaining('not feedback or Outcome input'),
+            configured: 1, eligible: 1, available: true, skills: [{ name: skill.name, description: skill.description }],
+          },
+        },
+      })
+      const lookups = snapshots.mock.calls.map(([lookup]) => lookup as {
+        readonly cwd?: string
+        readonly scope?: unknown
+      })
+      expect(lookups.some(lookup => lookup.cwd === 'D:/status-workspace')).toBe(true)
+      expect(lookups.some(lookup => lookup.scope === main.agent)).toBe(true)
+      expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus('tianwen-auto-analysis.v2'))
+        .toMatchObject({ state: 'pending' })
+      expect(mounted.adapter.requests).toHaveLength(0)
+
+      const aborted = new AbortController()
+      aborted.abort()
+      await expect(executeLearningStatus(mounted.ctx, main.agent, aborted.signal)).resolves
+        .toMatchObject({ isError: true })
+    } finally {
+      await main.dispose()
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps an available empty admission list distinct from an unavailable catalog', async () => {
+    const skill = {
+      name: 'native-only', description: 'Native but not admitted.', content: 'Read one fact.',
+      source: 'test', provider: 'test-native', invocation: { modelInvocable: true, userInvocable: true },
+    }
+    const mounted = await mountConsentRuntime('learning-status-empty-admissions', [], { nativeSkills: [skill] })
+    const main = await mounted.ctx.agents.create({
+      sessionId: SessionId(`consent-main-${randomUUID()}`),
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      await expect(executeLearningStatus(mounted.ctx, main.agent)).resolves.toMatchObject({
+        value: {
+          nativeSkills: { available: true, skills: [{ name: skill.name }] },
+          learningSources: { configured: 0, eligible: 0, available: true, skills: [] },
+        },
+      })
+    } finally {
       await main.dispose()
       await mounted.ctx.fiber.dispose()
     }

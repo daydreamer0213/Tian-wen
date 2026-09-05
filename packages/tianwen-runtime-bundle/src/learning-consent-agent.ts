@@ -51,6 +51,8 @@ export interface TianwenLearningConsentAgentConfig {
 }
 
 const STATUS_CATALOG_LIMIT = 8
+const LEARNING_HISTORY_SCOPE = 'This profile\'s Skill-bound Runs only; ordinary DSH chats are not included.'
+const LEARNING_SOURCES_SCOPE = 'Optional host-reviewed reusable external Skill sources; not feedback or Outcome input and not required for automatic analysis.'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -478,10 +480,11 @@ export class TianwenLearningConsentAgentService extends Service {
       ? undefined
       : this.ctx.tianwenEvolution.getRunSkillManifest(current.runId)
     const history = {
+      scope: LEARNING_HISTORY_SCOPE,
       skillBoundRuns: runs.length,
       recordedOutcomes: runs.filter(run =>
         this.ctx.tianwenEvolution.getOutcomeIntake(run.runId) !== undefined).length,
-      analyses: this.ctx.tianwenEvolution.listLearningAnalyses().length,
+      recordedAnalyses: this.ctx.tianwenEvolution.listLearningAnalyses().length,
     }
     const registry = this.ctx.get('skills') as Pick<SkillRegistry, 'snapshot' | 'get'> | undefined
     if (registry === undefined) {
@@ -490,8 +493,8 @@ export class TianwenLearningConsentAgentService extends Service {
         history,
         nativeSkills: { available: false, skills: [] },
         learningSources: {
+          scope: LEARNING_SOURCES_SCOPE,
           configured: this.learningSkillSources.length,
-          eligible: 0,
           skills: [],
           available: false,
         },
@@ -507,7 +510,7 @@ export class TianwenLearningConsentAgentService extends Service {
         currentSession: { hasFrozenGovernedBinding: currentManifest !== undefined },
         history,
         nativeSkills: { available: false, skills: [] },
-        learningSources: { configured: this.learningSkillSources.length, eligible: 0, skills: [], available: false },
+        learningSources: { scope: LEARNING_SOURCES_SCOPE, configured: this.learningSkillSources.length, skills: [], available: false },
       }
     }
     signal?.throwIfAborted()
@@ -526,7 +529,7 @@ export class TianwenLearningConsentAgentService extends Service {
         currentSession: { hasFrozenGovernedBinding: currentManifest !== undefined },
         history,
         nativeSkills,
-        learningSources: { configured: this.learningSkillSources.length, eligible: 0, skills: [], available: false },
+        learningSources: { scope: LEARNING_SOURCES_SCOPE, configured: this.learningSkillSources.length, skills: [], available: false },
       }
     }
     let eligible: Awaited<ReturnType<typeof inspectLearningSkills>>['skills'] = []
@@ -544,7 +547,7 @@ export class TianwenLearningConsentAgentService extends Service {
         currentSession: { hasFrozenGovernedBinding: currentManifest !== undefined },
         history,
         nativeSkills,
-        learningSources: { configured: this.learningSkillSources.length, eligible: 0, skills: [], available: false },
+        learningSources: { scope: LEARNING_SOURCES_SCOPE, configured: this.learningSkillSources.length, skills: [], available: false },
       }
     }
     signal?.throwIfAborted()
@@ -553,6 +556,7 @@ export class TianwenLearningConsentAgentService extends Service {
       history,
       nativeSkills,
       learningSources: {
+        scope: LEARNING_SOURCES_SCOPE,
         configured: this.learningSkillSources.length,
         eligible: eligible.length,
         skills: eligible.slice(0, STATUS_CATALOG_LIMIT).map(skill => ({
