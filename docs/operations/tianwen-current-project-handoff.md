@@ -2,7 +2,7 @@
 
 ## 2026-09-05 学习路线交付候选（不改写下方历史发布事实）
 
-会话接续提示：当前学习补丁位于 `D:\DevData\tianwen-worktrees\tianwen-architecture-overview-v2-merge` 的既有开发分支，不在旧架构会话的 checkout 或历史 main 中。交接/上下文重置时先核对真实工作目录、HEAD 和未提交文件。本轮已推进到现有 Skill 发现与窄范围适配，不能再把探索 B/C 当作未实现入口。最新验收和未完成边界见 [`本轮路线交接`](tianwen-learning-route-20260905-handoff.md)。
+会话接续提示：本轮工作目录为 `D:\DevData\tianwen-worktrees\tianwen-architecture-overview-v2-merge`，源码已通过 `2d3d8a7` 合入主分支，不在旧架构会话的 checkout 中。交接/上下文重置时先核对真实工作目录、HEAD 和未提交文件。本轮已推进到现有 Skill 发现与窄范围适配，不能再把探索 B/C 当作未实现入口。最新验收和未完成边界见 [`本轮路线交接`](tianwen-learning-route-20260905-handoff.md)。
 
 本轮普通 Outcome 学习、有界探索和已准入 Skill 复用的工程起点为 `93e341e4da8c9a24693bb22e817935cd22385dbb`；交付候选版本为 Runtime `0.1.11`。最终本地回归通过 1,575 项运行测试和 608 项 Python 测试，独立审查无遗留问题。集成与现用产品升级已获用户确认，准确源码、安装包和后续收据位置见 [`本轮路线交接`](tianwen-learning-route-20260905-handoff.md)。三次历史真实模型主对话试用均为 `met/no-case`，见 [`普通 Outcome 学习交接`](tianwen-outcome-experience-loop-handoff.md)。新源码、隔离验收安装、现用产品和 main 是不同状态，不得相互代替。
 
