@@ -514,7 +514,7 @@ export class TianwenLearningConsentAgentService extends Service {
     const currentSession = {
       hasFrozenGovernedBinding: currentManifest !== undefined,
       scope: currentManifest === undefined
-        ? 'No current frozen governed binding limits evidence for governed Skill changes; it does not prevent explicit-feedback analysis.'
+        ? 'When hasFrozenGovernedBinding is false, the absence of a frozen governed binding limits the evidence available to support governed Skill changes; it does not prevent explicit-feedback analysis.'
         : 'Current Session has a frozen governed binding.',
     }
     const registry = this.ctx.get('skills') as Pick<SkillRegistry, 'snapshot' | 'get'> | undefined

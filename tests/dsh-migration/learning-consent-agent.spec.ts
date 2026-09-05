@@ -161,7 +161,7 @@ describe('Tianwen main-chat learning consent tool', () => {
             consent: { policyVersion: 'tianwen-auto-analysis.v2', enabled: false, revision: 0 },
             currentSession: {
               hasFrozenGovernedBinding: false,
-              scope: expect.stringContaining('does not prevent explicit-feedback analysis'),
+              scope: expect.stringMatching(/hasFrozenGovernedBinding is false.*absence of a frozen governed binding limits the evidence.*does not prevent explicit-feedback analysis/u),
             },
             history: {
               scope: expect.stringContaining('Skill-bound Runs'),
@@ -186,7 +186,7 @@ describe('Tianwen main-chat learning consent tool', () => {
     }
   })
 
-  it('reports a bound Run, current native bytes, and pending notice without writing', async () => {
+  it('reports real outcome and ordinary-feedback analyses, native bytes, and a pending notice without writing', async () => {
     const skill = {
       name: 'reviewed-native', description: 'Review one bounded fact.', content: 'Use only the supplied fact.',
       source: 'test', provider: 'test-reviewed', invocation: { modelInvocable: true, userInvocable: true },
@@ -206,31 +206,70 @@ describe('Tianwen main-chat learning consent tool', () => {
       meta: { cwd: 'D:/status-workspace' },
       agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
     })
+    const ordinary = await mounted.ctx.agents.create({
+      sessionId: SessionId(`consent-ordinary-${randomUUID()}`),
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
     try {
-      const binding = mounted.ctx.tianwenEvolution.recordRunBinding({
-        goalRef: 'goal:status', taskRef: 'task:status', sessionId: String(main.agent.session.id),
-        scopeKey: RESEARCH_SUMMARY_SCOPE, sessionLifecycleFingerprint: sha256('status-lifecycle'),
-        acceptanceContract: { source: 'dsh-tool-result', toolName: 'status_check', notMetErrorCode: 'STATUS_NOT_MET', gapDisposition: 'reusable', problemCategory: 'status', severity: 1, blocksGoal: false },
+      const evolution = mounted.ctx.tianwenEvolution
+      evolution.recordLearningAnalysisConsent({
+        revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v2',
       })
-      mounted.ctx.tianwenEvolution.recordRunSkillManifest({ runId: binding.runId, skill })
-      mounted.ctx.tianwenEvolution.recordOutcomeIntake({
-        runId: binding.runId, verdict: 'met', sessionDigest: sha256('status-session'), evidenceIds: [sha256('status-evidence')],
+      function recordRun(sessionId: string, verdict: 'met' | 'not-met') {
+        const binding = evolution.recordRunBinding({
+          goalRef: 'goal:status', taskRef: 'task:status', sessionId,
+          scopeKey: RESEARCH_SUMMARY_SCOPE, sessionLifecycleFingerprint: sha256(`lifecycle:${sessionId}`),
+          acceptanceContract: { source: 'dsh-tool-result', toolName: 'status_check', notMetErrorCode: 'STATUS_NOT_MET', gapDisposition: 'reusable', problemCategory: 'status', severity: 1, blocksGoal: false },
+        })
+        const manifest = evolution.recordRunSkillManifest({ runId: binding.runId, skill })
+        const sessionDigest = sha256(sessionId)
+        const evidenceId = sha256(`acceptance:${sessionId}`)
+        const outcome = evolution.recordOutcomeIntake({
+          runId: binding.runId, verdict, sessionDigest, evidenceIds: [evidenceId],
+        })
+        evolution.recordRunSkillUse({
+          runId: binding.runId, parentVersionId: manifest.parentVersionId, sessionId, sessionDigest,
+          skillName: skill.name, contentDigest: sha256(skill.content),
+          skillEvidenceId: sha256(`skill:${sessionId}`), acceptanceEvidenceId: evidenceId,
+          skillCallSeq: 1, skillResultSeq: 2, acceptanceCallSeq: 3,
+        })
+        return { binding, outcome }
+      }
+      const counter = recordRun(String(main.agent.session.id), 'met')
+      recordRun('status-failed-first', 'not-met')
+      const failed = recordRun('status-failed-second', 'not-met')
+      evolution.requestOutcomeLearningAnalysis({
+        ticketId: failed.outcome.ticketId!, sessionId: 'status-failed-second',
+        parentSessionId: 'status-failed-second', consentRevision: 1,
+        counterevidenceRunIds: [counter.binding.runId],
       })
-      mounted.ctx.tianwenEvolution.recordLearningConsentNoticeIntent({
+      const ordinarySessionId = String(ordinary.agent.session.id)
+      const feedback = evolution.recordLearningFeedbackRevision({
+        intake: {
+          sessionId: ordinarySessionId, messageId: 'ordinary-reply', feedbackVersion: 'feedback-v1',
+          rating: 'negative', note: 'Keep the answer concrete.', scopeKey: RESEARCH_SUMMARY_SCOPE,
+          sessionDigest: sha256(ordinarySessionId), evidenceIds: [sha256('ordinary-feedback-evidence')],
+        },
+        sessionLifecycleFingerprint: sha256(`lifecycle:${ordinarySessionId}`), analysisConsentRevision: 1,
+      })
+      evolution.requestLearningAnalysis({
+        ticketId: feedback.ticketId!, sessionId: ordinarySessionId, messageId: 'ordinary-reply',
+        feedbackVersion: 'feedback-v1', consentRevision: 1, parentSessionId: ordinarySessionId,
+      })
+      evolution.recordLearningConsentNoticeIntent({
         policyVersion: 'tianwen-auto-analysis.v2', mainSessionId: String(main.agent.session.id),
         noticeSourceMessageId: LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID,
         deliveryId: 'tianwen-learning-consent-delivery:tianwen-auto-analysis.v2',
       })
-      vi.spyOn(mounted.ctx.tianwenEvolution, 'listLearningAnalyses').mockReturnValue([
-        { source: 'outcome' }, { source: undefined },
-      ] as never)
+      const ledgerPath = join(mounted.root, 'evolution', 'ledger.jsonl')
+      const beforeLedger = readFileSync(ledgerPath, 'utf8')
       const snapshots = vi.spyOn(mounted.ctx.skills, 'snapshot')
       await expect(executeLearningStatus(mounted.ctx, main.agent)).resolves.toMatchObject({
         value: {
-          consent: { policyVersion: 'tianwen-auto-analysis.v2', enabled: false, revision: 0 },
+          consent: { policyVersion: 'tianwen-auto-analysis.v2', enabled: true, revision: 1 },
           currentSession: { hasFrozenGovernedBinding: true },
           history: {
-            skillBoundRuns: 1, recordedOutcomes: 1, recordedAnalyses: 2,
+            skillBoundRuns: 3, recordedOutcomes: 3, recordedAnalyses: 2,
             analysesBySource: { outcome: 1, explicitFeedback: 1 },
             analysisScope: expect.stringContaining('do not establish causality'),
           },
@@ -247,6 +286,15 @@ describe('Tianwen main-chat learning consent tool', () => {
       })
       expect(lookups.some(lookup => lookup.cwd === 'D:/status-workspace')).toBe(true)
       expect(lookups.some(lookup => lookup.scope === main.agent)).toBe(true)
+      await expect(executeLearningStatus(mounted.ctx, ordinary.agent)).resolves.toMatchObject({
+        value: {
+          currentSession: { hasFrozenGovernedBinding: false },
+          history: {
+            skillBoundRuns: 3, recordedOutcomes: 3, recordedAnalyses: 2,
+            analysesBySource: { outcome: 1, explicitFeedback: 1 },
+          },
+        },
+      })
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus('tianwen-auto-analysis.v2'))
         .toMatchObject({ state: 'pending' })
       expect(mounted.adapter.requests).toHaveLength(0)
@@ -255,7 +303,9 @@ describe('Tianwen main-chat learning consent tool', () => {
       aborted.abort()
       await expect(executeLearningStatus(mounted.ctx, main.agent, aborted.signal)).resolves
         .toMatchObject({ isError: true })
+      expect(readFileSync(ledgerPath, 'utf8')).toBe(beforeLedger)
     } finally {
+      await ordinary.dispose()
       await main.dispose()
       await mounted.ctx.fiber.dispose()
     }
