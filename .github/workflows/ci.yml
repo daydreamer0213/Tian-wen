@@ -105,7 +105,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter '@tianwen/runtime-bundle...' build
       - run: pnpm --filter '@tianwen/runtime-bundle' pack --pack-destination "${{ runner.temp }}/tianwen-runtime-pack"
-      - run: node scripts/stage-desktop-runtime.mjs "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.11.tgz"
+      - run: node scripts/stage-desktop-runtime.mjs "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.12.tgz"
       - run: pnpm --filter @tianwen/desktop-host build
       - name: Run deterministic Desktop tests
         shell: pwsh
@@ -133,7 +133,7 @@ jobs:
         env:
           ELECTRON_CACHE: ${{ runner.temp }}\electron
           ELECTRON_BUILDER_CACHE: ${{ runner.temp }}\electron-builder
-      - run: node scripts/audit-desktop-artifact.mjs dist/tianwen-desktop/win-unpacked "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.11.tgz"
+      - run: node scripts/audit-desktop-artifact.mjs dist/tianwen-desktop/win-unpacked "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.12.tgz"
       - name: Assert one Desktop installer
         shell: pwsh
         run: |

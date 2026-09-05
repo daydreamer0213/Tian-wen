@@ -69,7 +69,7 @@ function portableFixture() {
   })}\n`)
   writeFileSync(join(runtimeRoot, 'package.json'), `${JSON.stringify({
     name: '@tianwen/runtime-bundle',
-    version: '0.1.11',
+    version: '0.1.12',
     bin: { tianwen: 'dist/cli.js' },
     dsh: { bundle: { patch: './cordis.patch.yml' } },
   })}\n`)

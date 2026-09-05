@@ -113,7 +113,7 @@ describe('controlled lifecycle Profile policy', () => {
         dependencies: {
           '@deepseek-ai/dsh-base': '0.1.1-rc.2',
           '@deepseek-ai/dsh-headless': '0.1.1-rc.2',
-          '@tianwen/runtime-bundle': '0.1.11',
+          '@tianwen/runtime-bundle': '0.1.12',
         },
         dsh: {
           profile: {

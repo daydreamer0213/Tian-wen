@@ -4,7 +4,7 @@
 
 Tianwen is an auditable learning control plane for long-running agents.
 
-**Current delivery candidate: Runtime 0.1.11; historical Stage 7 remains complete.** DSH 0.1.1-rc.2 is
+**Current delivery candidate: Runtime 0.1.12; historical Stage 7 remains complete.** DSH 0.1.1-rc.2 is
 the exact supported Agent Runtime. The ordinary entry is now inside a DSH
 Web/Desktop conversation: `/goal <objective>` starts long-running work without
 opening a Tianwen panel or asking the user to author Tasks or round counts.
@@ -31,7 +31,7 @@ and current `main` source. Designs, implementation plans, and earlier natural-ru
 handoffs preserve historical decisions and evidence; unchecked plan steps or a
 historical "next gate" do not override a later release closure.
 
-Runtime 0.1.11 adds consent-bound repeated-outcome learning, optional bounded
+Runtime 0.1.12 retains consent-bound repeated-outcome learning, optional bounded
 exploration, and reuse of explicitly host-admitted self-contained Skills.
 Ordinary tasks do not require a Goal. Opening a session does not resume stopped
 model work; use the main conversation's explicit continue action. Mechanism
@@ -119,7 +119,7 @@ into the Profile selected by the user:
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.11.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.12.tgz
 ```
 
 `--allow-build=koffi` is an explicit pnpm approval recorded in that Profile; it
@@ -152,7 +152,7 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
 The optional Tianwen Desktop reuses the user's existing DSH and Web Profile. It
 is not a second Runtime and does not require the managed Tianwen installation.
 Desktop opens the same Goal-first UI. With confirmation, it can update the exact
-known Runtime `0.1.10` predecessor to its embedded `0.1.11`; unknown or damaged
+known Runtime `0.1.10` or `0.1.11` predecessor to its embedded `0.1.12`; unknown or damaged
 versions are never overwritten automatically.
 
 After installation, enter `/goal <objective>` in an ordinary DSH Web or Tianwen

@@ -5,8 +5,8 @@ import type { SpawnOptions } from 'node:child_process'
 
 const dshVersion = '0.1.1-rc.2'
 const runtimePackage = '@tianwen/runtime-bundle'
-const runtimeVersion = '0.1.11'
-const knownOldRuntimeVersion = '0.1.10'
+const runtimeVersion = '0.1.12'
+const knownOldRuntimeVersions = ['0.1.11', '0.1.10'] as const
 const maxStartupOutputBytes = 64 * 1024
 const readinessTimeoutMs = 120_000
 const gracefulStopTimeoutMs = 5_000
@@ -204,7 +204,15 @@ export function resolveDesktopTarget(input: DesktopTargetInput): DesktopTarget {
 }
 
 export function resolveKnownOldDesktopTarget(input: DesktopTargetInput): DesktopTarget {
-  return resolveDesktopTargetAtRuntimeVersion(input, knownOldRuntimeVersion)
+  let failure: unknown
+  for (const version of knownOldRuntimeVersions) {
+    try {
+      return resolveDesktopTargetAtRuntimeVersion(input, version)
+    } catch (error) {
+      failure = error
+    }
+  }
+  throw failure
 }
 
 function defaultStopTree(pid: number): Promise<void> {

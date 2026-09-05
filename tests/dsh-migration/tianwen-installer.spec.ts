@@ -118,6 +118,51 @@ function historicalLockedProfilePatchFixture(paths: ReturnType<typeof deriveInst
 `
 }
 
+function historicalRuntime011ProfilePatchFixture(paths: ReturnType<typeof deriveInstallPaths>): string {
+  return `- id: agent-default-model
+  config:
+    provider: tianwen-offline
+    model: phase2-smoke
+
+- id: session-persistence-jsonl
+  config:
+    root: '${paths.sessionsRoot.replaceAll('\\', '/')}'
+    compression: none
+    packChunks: false
+
+- id: tianwen-runtime
+  config:
+    evolutionRoot: '${paths.evolutionRoot.replaceAll('\\', '/')}'
+    stateRoot: '${paths.stateRoot.replaceAll('\\', '/')}'
+    sessionsRoot: '${paths.sessionsRoot.replaceAll('\\', '/')}'
+    learningLoop:
+      enabled: true
+      workspaceRoot: '${paths.learningLoopRoot.replaceAll('\\', '/')}'
+
+- id: attachment-local
+  disabled: true
+
+- id: sandbox
+  disabled: true
+
+- id: pwsh-sandbox
+  disabled: true
+
+- id: permission
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true
+
+- insert:
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+
+    - id: tianwen-phase2-smoke
+      name: '@tianwen/runtime-bundle/smoke'
+`
+}
+
 function testRoot(name: string): string {
   const root = `D:\\DevData\\tianwen-installer-tests\\${name}-${crypto.randomUUID()}`
   testRoots.push(root)
@@ -143,7 +188,7 @@ function writeRuntimePublication(runtimeRoot: string, label = 'runtime'): void {
     files: [...RUNTIME_FILES],
     name: '@tianwen/runtime-bundle',
     type: 'module',
-    version: '0.1.11',
+    version: '0.1.12',
   })
 }
 
@@ -203,7 +248,7 @@ function writeManagedPredecessor(
 ): void {
   installWindowsFixture({ dataDir: paths.dataDir, runner: scriptedInstaller(paths).runner })
   const predecessorArchivePath = paths.archivePath.replace(
-    'tianwen-runtime-bundle-0.1.11.tgz',
+    'tianwen-runtime-bundle-0.1.12.tgz',
     'tianwen-runtime-bundle-0.0.0.tgz',
   )
   renameSync(paths.archivePath, predecessorArchivePath)
@@ -240,9 +285,40 @@ function writeManagedPredecessor(
 
 function runtimePredecessorArchivePath(paths: ReturnType<typeof deriveInstallPaths>): string {
   return paths.archivePath.replace(
-    'tianwen-runtime-bundle-0.1.11.tgz',
+    'tianwen-runtime-bundle-0.1.12.tgz',
     'tianwen-runtime-bundle-0.1.10.tgz',
   )
+}
+
+function runtime011PredecessorArchivePath(paths: ReturnType<typeof deriveInstallPaths>): string {
+  return paths.archivePath.replace(
+    'tianwen-runtime-bundle-0.1.12.tgz',
+    'tianwen-runtime-bundle-0.1.11.tgz',
+  )
+}
+
+function writeManagedRuntime011Predecessor(paths: ReturnType<typeof deriveInstallPaths>): void {
+  installWindowsFixture({ dataDir: paths.dataDir, runner: scriptedInstaller(paths).runner })
+  const archivePath = runtime011PredecessorArchivePath(paths)
+  renameSync(paths.archivePath, archivePath)
+  const profileManifestPath = join(paths.profileRoot, 'package.json')
+  const profile = JSON.parse(readFileSync(profileManifestPath, 'utf8'))
+  profile.dependencies['@tianwen/runtime-bundle'] = '0.1.11'
+  writeFileSync(join(paths.profileRoot, 'cordis.patch.yml'), historicalRuntime011ProfilePatchFixture(paths), 'utf8')
+  writeJson(profileManifestPath, profile)
+  const runtimeManifestPath = join(
+    paths.profileRoot,
+    'node_modules',
+    '@tianwen',
+    'runtime-bundle',
+    'package.json',
+  )
+  const runtime = JSON.parse(readFileSync(runtimeManifestPath, 'utf8'))
+  runtime.version = '0.1.11'
+  writeJson(runtimeManifestPath, runtime)
+  const receipt = JSON.parse(readFileSync(paths.receiptPath, 'utf8'))
+  receipt.archivePath = archivePath
+  writeJson(paths.receiptPath, receipt)
 }
 
 function writeManagedRuntimePredecessor(paths: ReturnType<typeof deriveInstallPaths>): void {
@@ -337,7 +413,7 @@ function scriptedInstaller(
       expect(destination).toBeTypeOf('string')
       expect(bytes).toBeTypeOf('string')
       mkdirSync(destination!, { recursive: true })
-      const archive = join(destination!, 'tianwen-runtime-bundle-0.1.11.tgz')
+      const archive = join(destination!, 'tianwen-runtime-bundle-0.1.12.tgz')
       packedArchives.push(archive)
       writeFileSync(archive, bytes!, 'utf8')
     }
@@ -347,7 +423,7 @@ function scriptedInstaller(
         dependencies: {
           '@deepseek-ai/dsh-base': CURRENT_DSH_VERSION,
           '@deepseek-ai/dsh-headless': CURRENT_DSH_VERSION,
-          '@tianwen/runtime-bundle': '0.1.11',
+          '@tianwen/runtime-bundle': '0.1.12',
         },
         dsh: {
           profile: {
@@ -542,7 +618,7 @@ describe('Tianwen installer contract', () => {
   it('derives the complete fixed Windows installation surface', () => {
     const paths = deriveInstallPaths('D:\\DevData\\tianwen', 'win32')
     expect(paths).toEqual({
-      archivePath: 'D:\\DevData\\tianwen\\packs\\tianwen-runtime-bundle-0.1.11.tgz',
+      archivePath: 'D:\\DevData\\tianwen\\packs\\tianwen-runtime-bundle-0.1.12.tgz',
       binDir: 'D:\\DevData\\tianwen\\dsh-home\\profiles\\tianwen\\node_modules\\.bin',
       dataDir: 'D:\\DevData\\tianwen',
       dshHome: 'D:\\DevData\\tianwen\\dsh-home',
@@ -667,7 +743,7 @@ describe('Tianwen installer contract', () => {
       (() => {
         const paths = deriveInstallPaths(testRoot('archive-directory'), 'win32')
         writeManagedPredecessor(paths, 'original-archive')
-        const archivePath = paths.archivePath.replace('0.1.11.tgz', '0.0.0.tgz')
+        const archivePath = paths.archivePath.replace('0.1.12.tgz', '0.0.0.tgz')
         rmSync(archivePath)
         mkdirSync(archivePath)
         return paths
@@ -675,7 +751,7 @@ describe('Tianwen installer contract', () => {
       (() => {
         const paths = deriveInstallPaths(testRoot('archive-digest'), 'win32')
         writeManagedPredecessor(paths, 'original-archive')
-        const archivePath = paths.archivePath.replace('0.1.11.tgz', '0.0.0.tgz')
+        const archivePath = paths.archivePath.replace('0.1.12.tgz', '0.0.0.tgz')
         writeFileSync(archivePath, 'tampered archive\n', 'utf8')
         return paths
       })(),
@@ -741,6 +817,43 @@ describe('Tianwen installer contract', () => {
       (() => {
         const paths = deriveInstallPaths(testRoot('runtime-predecessor-tampered-profile'), 'win32')
         writeManagedRuntimePredecessor(paths)
+        writeFileSync(join(paths.profileRoot, 'cordis.patch.yml'), 'tampered\n', 'utf8')
+        return paths
+      })(),
+    ]
+
+    for (const paths of incompatible) {
+      const before = snapshotTree(paths.dataDir)
+      const scripted = scriptedInstaller(paths)
+      expect(classifyManagedInstallation(paths)).toBe('incompatible')
+      expect(() => installWindowsFixture({ dataDir: paths.dataDir, runner: scripted.runner })).toThrow()
+      expect(scripted.calls).toEqual([])
+      expect(snapshotTree(paths.dataDir)).toEqual(before)
+    }
+  })
+
+  it('recognizes only a complete same-DSH Runtime 0.1.11 predecessor before child effects', () => {
+    const complete = deriveInstallPaths(testRoot('runtime-011-predecessor'), 'win32')
+    writeManagedRuntime011Predecessor(complete)
+
+    expect(classifyManagedInstallation(complete)).toBe('managed-runtime-predecessor')
+
+    const incompatible = [
+      (() => {
+        const paths = deriveInstallPaths(testRoot('runtime-011-predecessor-missing-archive'), 'win32')
+        writeManagedRuntime011Predecessor(paths)
+        rmSync(runtime011PredecessorArchivePath(paths))
+        return paths
+      })(),
+      (() => {
+        const paths = deriveInstallPaths(testRoot('runtime-011-predecessor-tampered-archive'), 'win32')
+        writeManagedRuntime011Predecessor(paths)
+        writeFileSync(runtime011PredecessorArchivePath(paths), 'tampered archive\n', 'utf8')
+        return paths
+      })(),
+      (() => {
+        const paths = deriveInstallPaths(testRoot('runtime-011-predecessor-tampered-profile'), 'win32')
+        writeManagedRuntime011Predecessor(paths)
         writeFileSync(join(paths.profileRoot, 'cordis.patch.yml'), 'tampered\n', 'utf8')
         return paths
       })(),
@@ -885,7 +998,7 @@ describe('Tianwen installer contract', () => {
     'migrates the complete %s predecessor to the current version and replays without deploys',
     (encoding) => {
       const paths = deriveInstallPaths(testRoot(`migrate-${encoding}`), 'win32')
-      const predecessorArchive = paths.archivePath.replace('0.1.11.tgz', '0.0.0.tgz')
+      const predecessorArchive = paths.archivePath.replace('0.1.12.tgz', '0.0.0.tgz')
       writeManagedPredecessor(paths, encoding)
       const session = join(paths.sessionsRoot, 'kept.jsonl')
       const ledger = join(paths.evolutionRoot, 'ledger.jsonl')
@@ -914,8 +1027,8 @@ describe('Tianwen installer contract', () => {
   it('migrates Runtime 0.1.10 while retaining older archives without redeploying the same DSH host', () => {
     const paths = deriveInstallPaths(testRoot('migrate-runtime-predecessor'), 'win32')
     const predecessorArchive = runtimePredecessorArchivePath(paths)
-    const historicalArchive = paths.archivePath.replace('0.1.11.tgz', '0.0.0.tgz')
-    const historicalRuntimeArchive = paths.archivePath.replace('0.1.11.tgz', '0.1.1.tgz')
+    const historicalArchive = paths.archivePath.replace('0.1.12.tgz', '0.0.0.tgz')
+    const historicalRuntimeArchive = paths.archivePath.replace('0.1.12.tgz', '0.1.1.tgz')
     writeManagedRuntimePredecessor(paths)
     writeFileSync(historicalArchive, 'retained rc7 archive\n', 'utf8')
     writeFileSync(historicalRuntimeArchive, 'retained Runtime 0.1.1 archive\n', 'utf8')
@@ -932,20 +1045,47 @@ describe('Tianwen installer contract', () => {
     expect(existsSync(predecessorArchive)).toBe(true)
     expect(existsSync(paths.archivePath)).toBe(true)
     expect(JSON.parse(readFileSync(join(paths.profileRoot, 'package.json'), 'utf8')))
-      .toMatchObject({ dependencies: { '@tianwen/runtime-bundle': '0.1.11' } })
+      .toMatchObject({ dependencies: { '@tianwen/runtime-bundle': '0.1.12' } })
     expect(JSON.parse(readFileSync(join(
       paths.profileRoot,
       'node_modules',
       '@tianwen',
       'runtime-bundle',
       'package.json',
-    ), 'utf8'))).toMatchObject({ version: '0.1.11' })
+    ), 'utf8'))).toMatchObject({ version: '0.1.12' })
     expect(JSON.parse(readFileSync(paths.receiptPath, 'utf8'))).toEqual(migrated)
     expect(migrated).toMatchObject({
       archivePath: paths.archivePath,
       dshVersion: CURRENT_DSH_VERSION,
       status: 'ready',
     })
+  })
+
+  it('migrates Runtime 0.1.11 while retaining its archive, Session and state bytes without redeploying the same DSH host', () => {
+    const paths = deriveInstallPaths(testRoot('migrate-runtime-011-predecessor'), 'win32')
+    const predecessorArchive = runtime011PredecessorArchivePath(paths)
+    writeManagedRuntime011Predecessor(paths)
+    const session = join(paths.sessionsRoot, 'kept.jsonl')
+    const ledger = join(paths.evolutionRoot, 'ledger.jsonl')
+    mkdirSync(paths.sessionsRoot, { recursive: true })
+    mkdirSync(paths.evolutionRoot, { recursive: true })
+    writeFileSync(session, 'session bytes\n', 'utf8')
+    writeFileSync(ledger, 'state bytes\n', 'utf8')
+    const durableBefore = [readFileSync(session), readFileSync(ledger)]
+    const scripted = scriptedInstaller(paths)
+
+    const migrated = installWindowsFixture({ dataDir: paths.dataDir, runner: scripted.runner })
+
+    expect(classifyManagedInstallation(paths)).toBe('current')
+    expect(scripted.calls.filter(argv => argv.includes('@tianwen/dsh-host'))).toHaveLength(0)
+    expect(scripted.calls.filter(argv => argv.includes('@tianwen/profile-host'))).toHaveLength(1)
+    expect(existsSync(predecessorArchive)).toBe(true)
+    expect([readFileSync(session), readFileSync(ledger)]).toEqual(durableBefore)
+    expect(JSON.parse(readFileSync(paths.receiptPath, 'utf8'))).toEqual(migrated)
+    expect(migrated).toMatchObject({ archivePath: paths.archivePath, dshVersion: CURRENT_DSH_VERSION, status: 'ready' })
+    const childEffects = scripted.calls.length
+    expect(installWindowsFixture({ dataDir: paths.dataDir, runner: scripted.runner })).toEqual(migrated)
+    expect(scripted.calls).toHaveLength(childEffects)
   })
 
   it('restores the complete Runtime 0.1.10 predecessor after a pre-commit failure', () => {
@@ -959,6 +1099,20 @@ describe('Tianwen installer contract', () => {
     expect(scripted.calls.filter(argv => argv.includes('@tianwen/dsh-host'))).toHaveLength(0)
     expect(snapshotTree(paths.dataDir)).toEqual(before)
     expect(existsSync(runtimePredecessorArchivePath(paths))).toBe(true)
+    expect(existsSync(paths.archivePath)).toBe(false)
+  })
+
+  it('restores the complete Runtime 0.1.11 predecessor after a pre-commit failure', () => {
+    const paths = deriveInstallPaths(testRoot('runtime-011-predecessor-rollback'), 'win32')
+    writeManagedRuntime011Predecessor(paths)
+    const before = snapshotTree(paths.dataDir)
+    const scripted = scriptedInstaller(paths, '@tianwen/profile-host')
+
+    expect(() => installWindowsFixture({ dataDir: paths.dataDir, runner: scripted.runner }))
+      .toThrow(/scripted failure/u)
+    expect(scripted.calls.filter(argv => argv.includes('@tianwen/dsh-host'))).toHaveLength(0)
+    expect(snapshotTree(paths.dataDir)).toEqual(before)
+    expect(existsSync(runtime011PredecessorArchivePath(paths))).toBe(true)
     expect(existsSync(paths.archivePath)).toBe(false)
   })
 
