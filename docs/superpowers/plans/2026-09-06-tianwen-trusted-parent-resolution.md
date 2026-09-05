@@ -37,27 +37,34 @@ preflight without removing root drift, scope, provider or transition protections
   may be retired once a public-preflight regression supersedes it; retain its
   diagnostic report under `.superpowers/diagnostics/second-generation-parent`.
 
-- [ ] RED: establish verified A -> B through actual ledger APIs, freeze a B-based
+- [x] RED: establish verified A -> B through actual ledger APIs, freeze a B-based
   next Candidate C, and fail at the actual controlled root preflight on unchanged
   packaged A. Keep the diagnostic's proof boundary distinct; no mock pointer as
   the only proof of the authorized chain.
-- [ ] Inspect actual recovered-activation pointer/revision behavior in a focused
+- [x] Inspect actual recovered-activation pointer/revision behavior in a focused
   fixture before implementing ancestry handling. Recovered != verified promotion.
-- [ ] Add one small file-local check using existing readers. Reuse it in initial
+- [x] Add one small file-local check using existing readers. Reuse it in initial
   Evaluation/Shadow/Activation root checks and relevant later drift rechecks.
   Return/retain only the anchor needed to detect root drift; keep exact scoped
   Skill and existing phase-specific pointer checks. No generic lineage framework.
-- [ ] GREEN: first-generation unchanged; verified B -> C accepted through the
+- [x] GREEN: first-generation unchanged; verified B -> C accepted through the
   actual evaluation/holdout/activation seams; own B/C rollback/restore and supported
   pending-activation recovery work without duplicate completed model attempts.
-- [ ] Mutate foreign scope, wrong payload/provider, unverified ancestor, stale
+- [x] Mutate foreign scope, wrong payload/provider, unverified ancestor, stale
   pointer revision and changed root. Each must refuse before unauthorized model
   execution. Old A/B Shadow cannot act on C.
-- [ ] Run the three owned Runtime suites and covering activation/domain tests,
+- [x] Run the three owned Runtime suites and covering activation/domain tests,
   root typecheck/build, public-API guard and diff check. Self-review and commit
   only owned files; report exact RED/GREEN and retained limitations for review.
 
 ## Controller closure
+
+Task review closed at `c6d5f23` after `747b815`: actual persisted Activation
+establishes A-to-B-to-C plus rollback/restore/replay; Evaluation and Shadow execute
+their public native seams with precise ancestry-reader fixtures. Foreign-before-
+local Manifest selection was fixed in one reviewed round. Final six-suite gate
+passed 191/191. Earlier 82/82 artifact evidence belongs to `747b815`, not the fix;
+final delivery must rebuild. All of this is mechanism proof, not real-model efficacy.
 
 - [ ] Independently review the task; rerun the full branch gates at final source
   SHA, then update genuine acceptance/delivery records without claiming efficacy

@@ -7,8 +7,10 @@ the original procurement Candidate completed its one real paired evaluation and
 was rejected on five met/met ties. Scenario C passed normal UI and prose checks.
 Scenario D also passed once, completing this four-task tranche; no new feedback
 case was manufactured from these successes. The independently reviewed [source-fidelity revision](../superpowers/specs/2026-09-06-tianwen-source-fidelity-evaluation-design.md)
-is being implemented for new protocols only. Its complete successful path is at
-most 14 Runs, while old v2 remains 13. No new activation or daily upgrade occurred.
+has completed its three independent task reviews for new protocols only. Its
+complete successful path is at most 14 Runs, while old v2 remains 13. The bounded
+trusted-parent repair is also reviewed at c6d5f23; immutable 0.1.13 delivery
+preparation follows. No new activation or daily upgrade occurred.
 
 The user's continuation mandate covers the four-stage route, not only the
 previous finite repair/delivery round. Execution follows
@@ -397,3 +399,20 @@ same-Context retry and existing cold ledger replay. Separate trusted-parent work
 whole-branch regression/review and isolated final artifact gates remain. No new
 genuine Candidate, source adoption, learning efficacy or daily deployment is
 claimed; the bounded A–D results and old B rejection remain unchanged.
+
+## Trusted-parent repair reviewed
+
+The public native Activation regression now establishes an actual persisted
+verified A-to-B before the next B-based C preflight, then tests pending resume,
+idempotent replay, rollback and restore. Evaluation/Shadow execute their public
+native seams with exact ancestry-reader substitutes; this distribution was
+explicitly accepted by the independent task reviewer, not mislabeled as three
+fully dynamic ledger histories. Recovered/pending targets do not authorize ancestry.
+
+Initial implementation `747b815` passed 191 core checks and 82 artifact checks.
+Review then found first-global Manifest selection could let an earlier foreign
+project's identical B mask a valid local B. The three native entry regressions
+reproduced this and `c6d5f23` fixes it with scope-preferred selection. Final fix
+coverage passed 191/191; scoped review marks the finding addressed with no new
+breakage. The 82 artifact results predate the fix; delivery must rebuild them.
+No real second-generation Candidate, model efficacy or daily upgrade is claimed.
