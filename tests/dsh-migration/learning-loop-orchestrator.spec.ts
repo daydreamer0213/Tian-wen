@@ -35,10 +35,17 @@ function controlledExecutorFixture(input: {
   readonly records?: readonly Record<string, unknown>[]
   readonly scopeKey?: string
   readonly environmentModel?: string
+  readonly runtime?: {
+    readonly runControlledArms: (input: unknown) => Promise<unknown>
+    readonly runControlledEvaluators: (input: unknown) => Promise<unknown>
+    readonly runControlledShadow: (input: unknown) => Promise<unknown>
+  }
 }) {
   const root = mkdtempSync(join('D:/DevData/tianwen-dsh-probe', 'task-2-orchestrator-'))
   const frozen: unknown[] = []
   const unavailable: unknown[] = []
+  const rejected: unknown[] = []
+  const ready: unknown[] = []
   const ctx = {
     sessionPersistence: { list: vi.fn(async () => []) },
     agents: { list: () => [] },
@@ -55,7 +62,14 @@ function controlledExecutorFixture(input: {
       recordLearningAnalysisProtocolUnavailable: vi.fn((value: unknown) => {
         unavailable.push(value)
       }),
+      recordLearningAnalysisCandidateRejected: vi.fn((value: unknown) => {
+        rejected.push(value)
+      }),
+      recordLearningAnalysisShadowReady: vi.fn((value: unknown) => {
+        ready.push(value)
+      }),
     },
+    ...(input.runtime === undefined ? {} : { tianwenSkillEvaluation: input.runtime }),
   }
   const executor = createExplicitCorrectionLearningLoopExecutor({
     root,
@@ -71,8 +85,9 @@ function controlledExecutorFixture(input: {
     deliverTerminalReport: () => 'report',
   })
   return {
-    root, frozen, unavailable,
+    root, frozen, unavailable, rejected, ready,
     run: () => executor.freezeProtocol({ ctx: ctx as never, status: input.status as never }),
+    evaluate: () => executor.evaluate({ ctx: ctx as never, status: input.status as never }),
     dispose: () => rmSync(root, { recursive: true, force: true }),
   }
 }
@@ -193,6 +208,97 @@ describe('learning-loop orchestrator', () => {
       recovery.mockRestore()
       first.dispose()
       second.dispose()
+    }
+  })
+
+  it('routes retained v3 evaluation into one reviewed holdout and never readies a rejected Shadow', async () => {
+    const packet = parseResearchPacket(`<research_packet>
+[F:source|required] The native source result is 18%.
+[U:window|decision] The source covers six weeks.
+</research_packet>`)
+    const recovered = {
+      source: {
+        signalId: `signal:${'1'.repeat(64)}`, sessionId: 'main', messageId: 'reply',
+        feedbackVersion: 'v1', sessionLifecycleFingerprint: sha256('lifecycle'),
+        sessionDigest: sha256('session'), evidenceSetDigest: sha256('evidence'),
+        acceptanceSubjectDigest: sha256(packet), packetDigest: sha256(packet.source),
+      },
+      packet,
+      submission: { summary: 'Historical answer.', confirmedFindingIds: ['source'], uncertaintyIds: [] },
+      targetTurn: 4,
+      acceptanceEvidenceId: sha256('accepted'),
+    } as const
+    const recovery = vi.spyOn(sourceCases, 'recoverResearchSummarySourceCase')
+      .mockResolvedValue(recovered)
+    const common = {
+      analysisId: `analysis:${'a'.repeat(64)}`, ticketId: `ticket:${'b'.repeat(64)}`,
+      sessionId: 'main', messageId: 'reply', feedbackVersion: 'v1', consentRevision: 1,
+      parentSessionId: 'main', childSessionId: 'child', phase: 'candidate-ready',
+      candidateId: `candidate:${'c'.repeat(64)}`,
+      submission: { verdict: 'skill-change' }, submissionDigest: sha256('submission'),
+    }
+    const frozen = controlledExecutorFixture({ status: common })
+    let routedShadow: unknown
+    const runtime = {
+      runControlledArms: vi.fn(async () => ({
+        state: 'awaiting-evaluator', evaluationId: `evaluation:${'d'.repeat(64)}`,
+      })),
+      runControlledEvaluators: vi.fn(async () => ({
+        state: 'terminal', evaluationId: `evaluation:${'d'.repeat(64)}`,
+        result: { mechanismVerdict: 'pass' },
+      })),
+      runControlledShadow: vi.fn(async input => {
+        routedShadow = input
+        return {
+          state: 'terminal', shadowId: `shadow:${'e'.repeat(64)}`,
+          result: { mechanismVerdict: 'rejected', promotionEligibility: 'ineligible' },
+        }
+      }),
+    }
+    let routed: ReturnType<typeof controlledExecutorFixture> | undefined
+    try {
+      await frozen.run()
+      const input = frozen.frozen[0] as {
+        ticketId: string
+        evidencePurpose: string
+        protocol: Record<string, unknown>
+      }
+      routed = controlledExecutorFixture({
+        status: common,
+        records: [{
+          schemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+          protocolId: `eval-protocol:${'f'.repeat(64)}`,
+          scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+          provenance: 'pre-candidate',
+          evidenceLabels: [],
+          ...input,
+        }],
+        runtime,
+      })
+
+      await routed.evaluate()
+
+      expect(routedShadow).toMatchObject({
+        evaluationId: `evaluation:${'d'.repeat(64)}`,
+        tasks: [{
+          taskId: 'shadow-task:research-summary-source-fidelity-holdout',
+          evaluatorMaterialContract: expect.any(Object),
+          reviewConfiguration: expect.any(Object),
+          reviewMaterialContract: expect.any(Object),
+          reviewEvidenceContract: expect.any(Object),
+          reviewSessionId: expect.stringContaining('unseen-holdout-review'),
+          sessionId: expect.stringContaining('unseen-holdout:'),
+        }],
+      })
+      const task = (routedShadow as { tasks: Array<{ sessionId: string, reviewSessionId: string }> })
+        .tasks[0]!
+      expect(task.reviewSessionId).not.toBe(task.sessionId)
+      expect(routed.rejected).toHaveLength(1)
+      expect(routed.ready).toEqual([])
+    } finally {
+      recovery.mockRestore()
+      frozen.dispose()
+      routed?.dispose()
     }
   })
 

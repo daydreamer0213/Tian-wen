@@ -50,6 +50,9 @@ import type {
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC,
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_SCORE_KEYS,
   controlledSkillShadowExecutionManifestDigest,
   controlledSkillTransitionExecutionManifestDigest,
   learningSessionLifecycleFingerprint,
@@ -75,15 +78,20 @@ import type {
   ControlledSkillEvalTaskId,
   ControlledSkillShadowId,
   ControlledSkillShadowPlan,
+  ControlledSkillShadowPlanV3,
+  ControlledSkillShadowReviewInconclusiveReasonCode,
   ControlledSkillShadowResult,
   ControlledSkillShadowRun,
+  ControlledSkillShadowRunV3,
   ControlledSkillShadowTaskId,
   ControlledSkillShadowTaskInput,
   ControlledSkillTransition,
   ControlledSkillEvaluatorInconclusiveReasonCode,
+  ControlledSkillEvaluatorDimensionScoresV3,
   ControlledSkillEvaluatorObservation,
   ControlledSkillEvaluatorScores,
   RecordControlledSkillEvaluatorObservationInput,
+  RecordControlledSkillShadowReviewObservationInput,
   RunAcceptanceContract,
   Sha256Digest,
   SkillEvalCaseId,
@@ -293,6 +301,11 @@ export interface RunControlledSkillShadowTaskInput {
   readonly allowedTools: readonly string[]
   readonly stopContract: ControlledSkillEvalStopContract
   readonly sessionId: string
+  readonly evaluatorMaterialContract?: Readonly<Record<string, unknown>>
+  readonly reviewConfiguration?: Readonly<Record<string, unknown>>
+  readonly reviewMaterialContract?: Readonly<Record<string, unknown>>
+  readonly reviewEvidenceContract?: Readonly<Record<string, unknown>>
+  readonly reviewSessionId?: string
 }
 
 export interface RunControlledSkillShadowInput {
@@ -311,6 +324,10 @@ export type ControlledSkillShadowStopReasonCode =
   | 'timeout'
   | 'tool-limit-exceeded'
   | 'request-contract-mismatch'
+  | 'identity-exposed'
+  | 'score-not-submitted'
+  | 'submission-invalid'
+  | 'evidence-mismatch'
   | 'skill-use-missing'
   | 'acceptance-subject-mismatch'
   | 'root-skill-drift'
@@ -318,7 +335,7 @@ export type ControlledSkillShadowStopReasonCode =
 
 export interface ControlledSkillShadowStop {
   readonly taskId: ControlledSkillShadowTaskId
-  readonly stage: 'candidate' | 'postflight'
+  readonly stage: 'candidate' | 'reviewer' | 'postflight'
   readonly reasonCode: ControlledSkillShadowStopReasonCode
 }
 
@@ -682,6 +699,7 @@ function parseControlledShadowInput(input: unknown): RunControlledSkillShadowInp
   const workspaceRoots = new Set<string>()
   const tasks = source.tasks.map(item => {
     const task = record(item)
+    const sourceFidelity = task !== undefined && 'reviewSessionId' in task
     if (
       task === undefined
       || !exactRuntimeKeys(task, [
@@ -699,6 +717,15 @@ function parseControlledShadowInput(input: unknown): RunControlledSkillShadowInp
         'allowedTools',
         'stopContract',
         'sessionId',
+        ...(sourceFidelity
+          ? [
+              'evaluatorMaterialContract',
+              'reviewConfiguration',
+              'reviewMaterialContract',
+              'reviewEvidenceContract',
+              'reviewSessionId',
+            ]
+          : []),
       ])
       || typeof task.taskId !== 'string'
       || !/^shadow-task:[a-z0-9][a-z0-9._-]{0,96}$/u.test(task.taskId)
@@ -712,6 +739,9 @@ function parseControlledShadowInput(input: unknown): RunControlledSkillShadowInp
       || !isAbsolute(task.workspaceRoot)
       || !isSafeSessionId(task.sessionId)
       || sessionIds.has(task.sessionId)
+      || (sourceFidelity && (!isSafeSessionId(task.reviewSessionId)
+        || task.reviewSessionId === task.sessionId
+        || sessionIds.has(task.reviewSessionId as string)))
       || !isLosslessJson(task.authorization)
       || !isLosslessJson(task.verifierContract)
       || !isLosslessJson(task.stopCondition)
@@ -721,6 +751,12 @@ function parseControlledShadowInput(input: unknown): RunControlledSkillShadowInp
       || task.allowedTools.some(name =>
         typeof name !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/u.test(name))
       || new Set(task.allowedTools).size !== task.allowedTools.length
+      || (sourceFidelity && [
+        task.evaluatorMaterialContract,
+        task.reviewConfiguration,
+        task.reviewMaterialContract,
+        task.reviewEvidenceContract,
+      ].some(value => !isLosslessJson(value)))
     ) throw new ControlledSkillShadowPreflightError('task-package-mismatch')
     if ('researchPacket' in task) {
       try {
@@ -762,6 +798,7 @@ function parseControlledShadowInput(input: unknown): RunControlledSkillShadowInp
     }
     taskIds.add(task.taskId)
     sessionIds.add(task.sessionId)
+    if (sourceFidelity) sessionIds.add(task.reviewSessionId as string)
     workspaceRoots.add(workspaceIdentity)
     return {
       taskId: task.taskId as `shadow-task:${string}`,
@@ -781,6 +818,23 @@ function parseControlledShadowInput(input: unknown): RunControlledSkillShadowInp
         maxElapsedMs: Number(stopContract.maxElapsedMs),
       },
       sessionId: task.sessionId,
+      ...(sourceFidelity
+        ? {
+            evaluatorMaterialContract: structuredClone(
+              task.evaluatorMaterialContract as Readonly<Record<string, unknown>>,
+            ),
+            reviewConfiguration: structuredClone(
+              task.reviewConfiguration as Readonly<Record<string, unknown>>,
+            ),
+            reviewMaterialContract: structuredClone(
+              task.reviewMaterialContract as Readonly<Record<string, unknown>>,
+            ),
+            reviewEvidenceContract: structuredClone(
+              task.reviewEvidenceContract as Readonly<Record<string, unknown>>,
+            ),
+            reviewSessionId: task.reviewSessionId as string,
+          }
+        : {}),
     }
   })
   return {
@@ -855,9 +909,14 @@ const CONTROLLED_EVALUATOR_DIMENSIONS = Object.freeze([
   'scopeRestraint',
 ] as const)
 
-const CONTROLLED_EVALUATOR_RUBRIC = Object.freeze({
+const CONTROLLED_EVALUATOR_RUBRIC_V2 = Object.freeze({
   scoreAnchors: CONTROLLED_SKILL_EVAL_RUBRIC.scoreAnchors,
   dimensions: CONTROLLED_EVALUATOR_DIMENSIONS,
+})
+
+const CONTROLLED_EVALUATOR_RUBRIC_V3 = Object.freeze({
+  scoreAnchors: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC.scoreAnchors,
+  dimensions: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC.dimensions,
 })
 
 type ControlledEvaluatorSubmission =
@@ -879,9 +938,12 @@ type ControlledAggregateEvaluatorSubmission = {
   })[]
 }
 
-function evaluatorDimensionScores(value: unknown) {
+function evaluatorDimensionScores(value: unknown, requiresSourceFidelity: boolean) {
   const scores = record(value)
-  if (scores === undefined || !exactRuntimeKeys(scores, CONTROLLED_EVALUATOR_DIMENSIONS)) {
+  const dimensions = requiresSourceFidelity
+    ? CONTROLLED_SKILL_SOURCE_FIDELITY_SCORE_KEYS
+    : CONTROLLED_EVALUATOR_DIMENSIONS
+  if (scores === undefined || !exactRuntimeKeys(scores, dimensions)) {
     throw new TypeError('invalid controlled evaluator scores')
   }
   const result = {
@@ -889,6 +951,9 @@ function evaluatorDimensionScores(value: unknown) {
     correctnessReasoning: Number(scores.correctnessReasoning),
     clarityUsability: Number(scores.clarityUsability),
     scopeRestraint: Number(scores.scopeRestraint),
+    ...(requiresSourceFidelity
+      ? { sourceFidelity: Number(scores.sourceFidelity) }
+      : {}),
   }
   if (Object.values(result).some(score => !Number.isSafeInteger(score) || score < 0 || score > 4)) {
     throw new TypeError('invalid controlled evaluator scores')
@@ -896,7 +961,10 @@ function evaluatorDimensionScores(value: unknown) {
   return result
 }
 
-function parseControlledEvaluatorSubmission(value: unknown): ControlledEvaluatorSubmission {
+function parseControlledEvaluatorSubmission(
+  value: unknown,
+  requiresSourceFidelity: boolean,
+): ControlledEvaluatorSubmission {
   const submission = record(value)
   if (submission === undefined) throw new TypeError('invalid controlled evaluator submission')
   if (submission.status === 'scored') {
@@ -918,8 +986,8 @@ function parseControlledEvaluatorSubmission(value: unknown): ControlledEvaluator
       insufficientMaterial: false,
       reasonCode: 'score-submitted',
       scores: {
-        x: evaluatorDimensionScores(scores.x),
-        y: evaluatorDimensionScores(scores.y),
+        x: evaluatorDimensionScores(scores.x, requiresSourceFidelity),
+        y: evaluatorDimensionScores(scores.y, requiresSourceFidelity),
       },
     }
   }
@@ -949,6 +1017,7 @@ function parseControlledEvaluatorSubmission(value: unknown): ControlledEvaluator
 function parseControlledAggregateEvaluatorSubmission(
   value: unknown,
   expectedTaskIds: readonly ControlledSkillEvalTaskId[],
+  requiresSourceFidelity: boolean,
 ): ControlledAggregateEvaluatorSubmission {
   const submission = record(value)
   if (submission === undefined
@@ -966,7 +1035,7 @@ function parseControlledAggregateEvaluatorSubmission(
       const { taskId: _taskId, ...single } = row
       return {
         taskId: expectedTaskIds[index]!,
-        ...parseControlledEvaluatorSubmission(single),
+        ...parseControlledEvaluatorSubmission(single, requiresSourceFidelity),
       }
     }),
   }
@@ -1556,6 +1625,15 @@ export class TianwenSkillEvaluationService extends Service {
       // Its route/budget are not part of the controlled Agent execution.
       if (request.purpose === 'session-title') return next()
       const sessionId = String(request.sessionId)
+      const reviewer = this.shadowReviewers.get(sessionId)
+      if (reviewer !== undefined) {
+        const reasonCode = controlledShadowReviewRequestReason(request, reviewer)
+        if (reasonCode !== undefined) {
+          reviewer.reasonCode = reasonCode
+          throw new Error('controlled Shadow reviewer request rejected')
+        }
+        reviewer.requests.push(request)
+      }
       const evaluator = this.evaluators.get(sessionId)
       if (evaluator !== undefined) {
         const reasonCode = evaluatorRequestReason(request, evaluator)
@@ -1573,6 +1651,7 @@ export class TianwenSkillEvaluationService extends Service {
 
   private readonly requests = new Map<string, GenerateOptions[]>()
   private readonly evaluators = new Map<string, ControlledEvaluatorState>()
+  private readonly shadowReviewers = new Map<string, ControlledShadowReviewState>()
 
   async runControlledSkillTransition(
     input: RunControlledSkillTransitionInput,
@@ -2204,6 +2283,12 @@ export class TianwenSkillEvaluationService extends Service {
     ) {
       throw new ControlledSkillShadowPreflightError('evaluation-not-eligible')
     }
+    const sourceFidelity = evaluation.schemaVersion
+      === 'tianwen.controlled-skill-evaluation-plan.v3'
+    if ((sourceFidelity && parsed.tasks.length !== 1)
+      || parsed.tasks.some(task => ('reviewSessionId' in task) !== sourceFidelity)) {
+      throw new ControlledSkillShadowPreflightError('task-package-mismatch')
+    }
     const candidate = this.ctx.tianwenEvolution.getSkillCandidate(evaluation.candidateId)
     const parentManifest = this.ctx.tianwenEvolution.listRunSkillManifests()
       .find(manifest => manifest.parentVersionId === evaluation.parentVersionId)
@@ -2318,6 +2403,13 @@ export class TianwenSkillEvaluationService extends Service {
           allowedTools,
           stopContract: task.stopContract,
           sessionId: task.sessionId,
+          ...(sourceFidelity
+            ? {
+                evaluatorMaterialContractDigest: sha256(
+                  task.evaluatorMaterialContract,
+                ),
+              }
+            : {}),
         })
       }
     } catch (error) {
@@ -2325,10 +2417,28 @@ export class TianwenSkillEvaluationService extends Service {
       throw new ControlledSkillShadowPreflightError('task-package-mismatch')
     }
 
-    const openInput = {
-      evaluationId: evaluation.evaluationId,
-      tasks: plannedTasks,
+    if (sourceFidelity) {
+      const task = parsed.tasks[0]!
+      const frozen = evaluation.sourceFidelity.holdout
+      const { sessionId: _sessionId, ...plannedTask } = plannedTasks[0]!
+      if (sha256(plannedTask) !== sha256(frozen.task)
+        || task.reviewSessionId === undefined
+        || sha256(task.reviewConfiguration) !== frozen.review.configurationDigest
+        || sha256(task.reviewMaterialContract) !== frozen.review.materialContractDigest
+        || sha256(task.reviewEvidenceContract) !== frozen.review.evidenceContractDigest) {
+        throw new ControlledSkillShadowPreflightError('task-package-mismatch')
+      }
     }
+    const openInput = sourceFidelity
+      ? {
+          evaluationId: evaluation.evaluationId,
+          holdoutSessionId: parsed.tasks[0]!.sessionId,
+          reviewSessionId: parsed.tasks[0]!.reviewSessionId!,
+        }
+      : {
+          evaluationId: evaluation.evaluationId,
+          tasks: plannedTasks,
+        }
     let expectedPlan: ControlledSkillShadowPlan
     try {
       expectedPlan = prepareControlledSkillShadowPlan(
@@ -2356,7 +2466,10 @@ export class TianwenSkillEvaluationService extends Service {
     } catch {
       throw new ControlledSkillShadowPreflightError('persistence-unavailable')
     }
-    const sessionIds = parsed.tasks.map(task => task.sessionId)
+    const sessionIds = parsed.tasks.flatMap(task => [
+      task.sessionId,
+      ...(task.reviewSessionId === undefined ? [] : [task.reviewSessionId]),
+    ])
     const targets = new Set(sessionIds)
     const occupied = persisted.some(header => targets.has(String(header.id)))
       || sessionIds.some(id =>
@@ -2377,6 +2490,31 @@ export class TianwenSkillEvaluationService extends Service {
         existingResult.runs.map(run => run.taskId),
         existingResult,
       )
+    }
+    const existingReview = sourceFidelity
+      ? this.ctx.tianwenEvolution.getControlledSkillShadowReviewObservation(
+          expectedPlan.shadowId,
+        )
+      : undefined
+    if (existingReview !== undefined) {
+      try {
+        this.ctx.tianwenEvolution.recordControlledSkillShadowResult({
+          shadowId: expectedPlan.shadowId,
+          runs: [existingReview.reviewedRun],
+        })
+      } catch {
+        // Resolve a completed reviewer receipt without repeating either native Run.
+      }
+      const completed = this.ctx.tianwenEvolution.getControlledSkillShadowResult(
+        expectedPlan.shadowId,
+      )
+      if (completed !== undefined) {
+        return terminalControlledShadowReceipt(
+          expectedPlan,
+          [existingReview.taskId],
+          completed,
+        )
+      }
     }
     const hasRunActivity = expectedPlan.tasks.some(task =>
       this.ctx.tianwenEvolution.getRunBinding(task.runId) !== undefined
@@ -2431,7 +2569,11 @@ export class TianwenSkillEvaluationService extends Service {
           !isDedicatedChild(fixtureRoot, task.workspaceRoot)
           || !task.sessionId.startsWith(product
             ? 'session:controlled-shadow:product:'
-            : 'session:controlled-shadow:fixture:'))
+            : 'session:controlled-shadow:fixture:')
+          || (task.reviewSessionId !== undefined
+            && !task.reviewSessionId.startsWith(
+              'session:controlled-shadow:product:',
+            )))
       ) throw new ControlledSkillShadowPreflightError('scripted-boundary-mismatch')
     }
 
@@ -2599,6 +2741,21 @@ export class TianwenSkillEvaluationService extends Service {
             reasonCode: 'root-skill-drift',
           })
         }
+        const materialText = sourceFidelity
+          ? controlledEvaluatorMaterialText(
+              item.handle.agent.session.events,
+              item.task.evaluatorMaterialContract as unknown as ControlledEvaluatorMaterialContract,
+              item.planned.taskId as ControlledSkillEvalTaskId,
+              item.task.researchPacket,
+            )
+          : undefined
+        if (sourceFidelity && materialText === undefined) {
+          return stoppedControlledShadowReceipt(plan, completedTaskIds, {
+            taskId: item.planned.taskId,
+            stage: 'postflight',
+            reasonCode: 'acceptance-subject-mismatch',
+          })
+        }
         const run: ControlledSkillShadowRun = {
           taskId: item.planned.taskId,
           ...activity.activity,
@@ -2606,10 +2763,113 @@ export class TianwenSkillEvaluationService extends Service {
             plan,
             item.planned,
           ),
+          ...(sourceFidelity
+            ? {
+                evaluatorMaterialDigest: sha256({
+                  schemaVersion: 'tianwen.controlled-evaluator-material.v1',
+                  text: materialText,
+                }),
+              }
+            : {}),
         }
         runs.push(run)
         completedTaskIds.push(item.planned.taskId)
-        if (run.outcome !== 'met' || runs.length === plan.tasks.length) {
+        if (run.outcome !== 'met') {
+          try {
+            this.ctx.tianwenEvolution.recordControlledSkillShadowResult({
+              shadowId: plan.shadowId,
+              runs,
+            })
+          } catch {
+            // Resolve an exact result commit without a second model attempt.
+          }
+          const result = this.ctx.tianwenEvolution.getControlledSkillShadowResult(
+            plan.shadowId,
+          )
+          if (result === undefined) {
+            return stoppedControlledShadowReceipt(plan, completedTaskIds, {
+              taskId: item.planned.taskId,
+              stage: 'postflight',
+              reasonCode: 'run-fact-mismatch',
+            })
+          }
+          return terminalControlledShadowReceipt(plan, completedTaskIds, result)
+        }
+        if (sourceFidelity) {
+          const reviewer = await this.runControlledShadowReviewer({
+            plan: plan as ControlledSkillShadowPlanV3,
+            task: item.task,
+            run: run as ControlledSkillShadowRunV3,
+            materialText: materialText!,
+            config: resolved,
+            selection,
+            forbidden: new Set([
+              evaluation.evaluationId,
+              evaluation.protocolId,
+              evaluation.candidateId,
+              evaluation.parentVersionId,
+              evaluation.parentPayloadDigest,
+              evaluation.candidatePayloadDigest,
+              candidate.payload.name,
+              candidate.payload.content,
+              parentManifest.parent.name,
+              parentManifest.parent.content,
+              ...evaluation.tasks.flatMap(task => [
+                task.taskId,
+                task.baseline.sessionId,
+                task.candidate.sessionId,
+                task.evaluatorSessionId,
+              ]),
+              ...Object.values(evaluation.sourceFidelity.source).filter(
+                (value): value is string => typeof value === 'string',
+              ),
+            ]),
+            ...(signal === undefined ? {} : { signal }),
+          })
+          if (reviewer.observation === undefined) {
+            return stoppedControlledShadowReceipt(plan, completedTaskIds, {
+              taskId: item.planned.taskId,
+              stage: 'reviewer',
+              reasonCode: reviewer.reasonCode,
+            })
+          }
+          try {
+            this.ctx.tianwenEvolution.recordControlledSkillShadowReviewObservation(
+              reviewer.observation,
+            )
+          } catch {
+            // Resolve an exact observation commit before considering recovery.
+          }
+          const observation = this.ctx.tianwenEvolution
+            .getControlledSkillShadowReviewObservation(plan.shadowId)
+          if (observation === undefined) {
+            return stoppedControlledShadowReceipt(plan, completedTaskIds, {
+              taskId: item.planned.taskId,
+              stage: 'postflight',
+              reasonCode: 'run-fact-mismatch',
+            })
+          }
+          try {
+            this.ctx.tianwenEvolution.recordControlledSkillShadowResult({
+              shadowId: plan.shadowId,
+              runs,
+            })
+          } catch {
+            // Resolve an exact result commit without repeating completed Runs.
+          }
+          const result = this.ctx.tianwenEvolution.getControlledSkillShadowResult(
+            plan.shadowId,
+          )
+          if (result === undefined) {
+            return stoppedControlledShadowReceipt(plan, completedTaskIds, {
+              taskId: item.planned.taskId,
+              stage: 'postflight',
+              reasonCode: 'run-fact-mismatch',
+            })
+          }
+          return terminalControlledShadowReceipt(plan, completedTaskIds, result)
+        }
+        if (runs.length === plan.tasks.length) {
           try {
             this.ctx.tianwenEvolution.recordControlledSkillShadowResult({
               shadowId: plan.shadowId,
@@ -2666,6 +2926,155 @@ export class TianwenSkillEvaluationService extends Service {
     }
   }
 
+  private async runControlledShadowReviewer(input: {
+    readonly plan: ControlledSkillShadowPlanV3
+    readonly task: RunControlledSkillShadowTaskInput
+    readonly run: ControlledSkillShadowRunV3
+    readonly materialText: string
+    readonly config: LlmCallConfig
+    readonly selection: ModelSelection
+    readonly forbidden: ReadonlySet<string>
+    readonly signal?: AbortSignal
+  }): Promise<ControlledShadowReviewRunResult> {
+    input.signal?.throwIfAborted()
+    if (input.task.researchPacket === undefined) return { reasonCode: 'run-fact-mismatch' }
+    let accepted: unknown
+    try {
+      const material = record(JSON.parse(input.materialText) as unknown)
+      if (material === undefined
+        || !exactRuntimeKeys(material, ['taskId', 'submission'])
+        || material.taskId !== input.task.taskId) return { reasonCode: 'run-fact-mismatch' }
+      accepted = structuredClone(material.submission)
+    } catch {
+      return { reasonCode: 'run-fact-mismatch' }
+    }
+    const reviewMaterial = record(input.task.reviewMaterialContract)
+    const material = {
+      packet: input.task.researchPacket,
+      submission: accepted,
+    }
+    if (!Number.isSafeInteger(reviewMaterial?.maxUtf8Bytes)
+      || Number(reviewMaterial?.maxUtf8Bytes) < 1
+      || Buffer.byteLength(JSON.stringify(material), 'utf8')
+        > Number(reviewMaterial?.maxUtf8Bytes)) {
+      return { reasonCode: 'run-fact-mismatch' }
+    }
+    const envelope = {
+      rubricDigest: input.plan.review.rubricDigest,
+      rubric: CONTROLLED_EVALUATOR_RUBRIC_V3,
+      ...material,
+    }
+    if (controlledIdentityExposed(envelope, input.forbidden)) {
+      return { reasonCode: 'identity-exposed' }
+    }
+    const state: ControlledShadowReviewState = {
+      sessionId: input.plan.review.sessionId,
+      config: input.config,
+      forbidden: input.forbidden,
+      requests: [],
+      active: false,
+      deadline: 0,
+      bodyCalls: 0,
+    }
+    const inheritedTools = this.ctx.tools.schemas().map(schema => schema.name)
+    let handle: AgentHandle | undefined
+    try {
+      handle = await this.ctx.agents.create({
+        sessionId: SessionId(state.sessionId),
+        meta: {
+          cwd: input.task.workspaceRoot,
+          agentPreset: TIANWEN_CONTROLLED_AGENT_PRESET,
+        },
+        agentOptions: requestAgentOptions(input.config),
+        setup: agentCtx => {
+          installModelSelection(agentCtx, {
+            current: input.selection,
+            assembled: undefined,
+          })
+          agentCtx.tools.presentAs('native')
+          if (inheritedTools.length > 0) agentCtx.tools.restrict({ deny: inheritedTools })
+          agentCtx.tools.register(controlledShadowReviewTool(state))
+          agentCtx.tools.guard(execution => controlledShadowReviewGuard(execution, state))
+        },
+      })
+      state.agent = handle.agent
+      const schemas = handle.agent.ctx.tools.schemas(handle.agent)
+      if (handle.agent.session.header.cwd !== input.task.workspaceRoot
+        || sha256(handle.agent.options) !== sha256(requestAgentOptions(input.config))
+        || schemas.length !== 1
+        || schemas[0]?.name !== 'submit_holdout_review') {
+        return { reasonCode: 'request-contract-mismatch' }
+      }
+      this.shadowReviewers.set(state.sessionId, state)
+      const startedAt = Date.now()
+      state.active = true
+      state.deadline = startedAt + input.plan.tasks[0].stopContract.maxElapsedMs
+      const timer = setTimeout(() => {
+        if (state.active) cancelControlledShadowReview(state, 'timeout')
+      }, input.plan.tasks[0].stopContract.maxElapsedMs)
+      let idleFailed = false
+      try {
+        await runControlledTurn(handle.agent, JSON.stringify(envelope), input.signal)
+      } catch {
+        idleFailed = true
+      } finally {
+        state.active = false
+        clearTimeout(timer)
+      }
+      input.signal?.throwIfAborted()
+      try {
+        if (!await this.ctx.sessions.flush(handle.agent.session)) {
+          return { reasonCode: 'persistence-unavailable' }
+        }
+      } catch {
+        return { reasonCode: 'persistence-unavailable' }
+      }
+      if (state.reasonCode !== undefined) return { reasonCode: state.reasonCode }
+      const terminal = handle.agent.session.events.findLast(event =>
+        event.type === 'turn/start' || event.type === 'turn/end')
+      if (idleFailed || terminal?.type !== 'turn/end'
+        || terminal.data.reason.kind !== 'completed') return { reasonCode: 'provider-failed' }
+      if (state.submission === undefined || state.submissionDigest === undefined) {
+        return { reasonCode: state.bodyCalls > 0 ? 'submission-invalid' : 'score-not-submitted' }
+      }
+      const request = state.requests[0]
+      if (request === undefined || state.requests.length !== 1) {
+        return { reasonCode: 'request-contract-mismatch' }
+      }
+      const evidence = this.ctx.tianwenEvidence.project(handle.agent.session)
+        .filter(item => item.action.toolName === 'submit_holdout_review')
+        .sort((left, right) => left.source.callSeq - right.source.callSeq)
+        .at(-1)
+      if (evidence === undefined
+        || evidence.outcome.status !== 'complete'
+        || evidence.outcome.isError !== false
+        || evidence.action.argumentsDigest !== state.submissionDigest) {
+        return { reasonCode: 'evidence-mismatch' }
+      }
+      const common = {
+        shadowId: input.plan.shadowId,
+        reviewerSessionId: input.plan.review.sessionId,
+        requestDigest: sha256(request),
+        evidenceId: evidence.evidenceId,
+        acceptanceEvidenceId: input.run.evidenceIds[0]!,
+        acceptedMaterialDigest: input.run.evaluatorMaterialDigest,
+        reviewedRun: input.run,
+      }
+      return { observation: { ...common, ...state.submission } }
+    } catch {
+      return { reasonCode: 'run-fact-mismatch' }
+    } finally {
+      this.shadowReviewers.delete(state.sessionId)
+      if (handle !== undefined) {
+        try {
+          await handle.dispose()
+        } catch {
+          return { reasonCode: 'run-fact-mismatch' }
+        }
+      }
+    }
+  }
+
   async runControlledEvaluators(
     input: RunControlledSkillEvaluatorsInput,
     signal?: AbortSignal,
@@ -2699,7 +3108,8 @@ export class TianwenSkillEvaluationService extends Service {
     const objectives = this.ctx.tianwenEvolution
       .listControlledSkillEvaluationObjectives(plan.evaluationId)
     const objectiveTerminal = objectives.some(objective => objective.objectiveVerdict !== 'pass')
-      || (objectives.length === plan.tasks.length
+      || (plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v2'
+        && objectives.length === plan.tasks.length
         && objectives.slice(0, 2).every(objective =>
           objective.comparison !== 'candidate-better'))
     if (objectiveTerminal) {
@@ -2722,8 +3132,9 @@ export class TianwenSkillEvaluationService extends Service {
       || objectives.some((objective, index) =>
         objective.taskId !== plan.tasks[index]?.taskId
         || objective.objectiveVerdict !== 'pass')
-      || objectives.slice(0, 2).every(objective =>
-        objective.comparison !== 'candidate-better')) {
+      || (plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v2'
+        && objectives.slice(0, 2).every(objective =>
+          objective.comparison !== 'candidate-better'))) {
       throw new ControlledSkillEvaluatorPreflightError('evaluation-not-ready')
     }
 
@@ -2946,7 +3357,11 @@ export class TianwenSkillEvaluationService extends Service {
         const material = materials.get(task.taskId)!
         if (assignment.taskId !== task.taskId
           || assignment.evaluatorSessionId !== planned.evaluatorSessionId
-          || assignment.envelopeDigest !== controlledBlindEnvelopeDigest(objective, assignment)) {
+          || assignment.envelopeDigest !== controlledBlindEnvelopeDigest(
+            plan,
+            objective,
+            assignment,
+          )) {
           throw new Error('controlled evaluator frozen facts mismatch')
         }
         return {
@@ -2954,7 +3369,13 @@ export class TianwenSkillEvaluationService extends Service {
           planned,
           assignment,
           material,
-          envelope: controlledEvaluatorEnvelope(task, objective, assignment, material),
+          envelope: controlledEvaluatorEnvelope(
+            plan,
+            task,
+            objective,
+            assignment,
+            material,
+          ),
         }
       })
       const groups = new Map<string, typeof entries>()
@@ -2986,6 +3407,8 @@ export class TianwenSkillEvaluationService extends Service {
             input: task.input,
           })),
           ...(aggregate ? { expectedTaskIds: groupTasks.map(task => task.taskId) } : {}),
+          requiresSourceFidelity: plan.schemaVersion
+            === 'tianwen.controlled-skill-evaluation-plan.v3',
           requests: [],
           active: false,
           deadline: 0,
@@ -3712,7 +4135,9 @@ export class TianwenSkillEvaluationService extends Service {
           .listControlledSkillEvaluationObjectives(plan.evaluationId)
         const objective = objectives.at(-1)!
         const earlyTerminal = objective.objectiveVerdict !== 'pass'
-        const noImprovement = objectives.length === plan.tasks.length
+        const noImprovement = plan.schemaVersion
+          === 'tianwen.controlled-skill-evaluation-plan.v2'
+          && objectives.length === plan.tasks.length
           && objectives.slice(0, 2).every(item =>
             item.comparison !== 'candidate-better')
         if (earlyTerminal || noImprovement) {
@@ -4476,7 +4901,9 @@ interface ControlledEvaluatorEnvelope {
   readonly goal: string
   readonly input: string
   readonly rubricDigest: Sha256Digest
-  readonly rubric: typeof CONTROLLED_EVALUATOR_RUBRIC
+  readonly rubric:
+    | typeof CONTROLLED_EVALUATOR_RUBRIC_V2
+    | typeof CONTROLLED_EVALUATOR_RUBRIC_V3
   readonly x: ControlledEvaluatorEnvelopeArm
   readonly y: ControlledEvaluatorEnvelopeArm
 }
@@ -4490,6 +4917,7 @@ interface ControlledEvaluatorState {
     'goal' | 'input'
   >[]
   readonly expectedTaskIds?: readonly ControlledSkillEvalTaskId[]
+  readonly requiresSourceFidelity: boolean
   readonly requests: GenerateOptions[]
   agent?: AgentHandle['agent']
   active: boolean
@@ -4500,6 +4928,213 @@ interface ControlledEvaluatorState {
   submissionDigest?: Sha256Digest
   reasonCode?: 'timeout' | 'request-contract-mismatch' | 'identity-exposed' | 'submission-invalid'
 }
+
+type ControlledShadowReviewSubmission =
+  | {
+      readonly status: 'scored'
+      readonly insufficientMaterial: false
+      readonly reasonCode: 'score-submitted'
+      readonly scores: ControlledSkillEvaluatorDimensionScoresV3
+    }
+  | {
+      readonly status: 'inconclusive'
+      readonly insufficientMaterial: true
+      readonly reasonCode:
+        | 'material-missing'
+        | 'identity-exposed'
+        | 'provider-failed'
+        | 'timeout'
+        | 'score-not-submitted'
+        | 'evidence-mismatch'
+    }
+
+interface ControlledShadowReviewState {
+  readonly sessionId: string
+  readonly config: LlmCallConfig
+  readonly forbidden: ReadonlySet<string>
+  readonly requests: GenerateOptions[]
+  agent?: AgentHandle['agent']
+  active: boolean
+  deadline: number
+  bodyCalls: number
+  pendingSubmission?: ControlledShadowReviewSubmission
+  submission?: ControlledShadowReviewSubmission
+  submissionDigest?: Sha256Digest
+  reasonCode?: 'timeout' | 'request-contract-mismatch' | 'identity-exposed' | 'submission-invalid'
+}
+
+function parseControlledShadowReviewSubmission(
+  value: unknown,
+): ControlledShadowReviewSubmission {
+  const submission = record(value)
+  if (submission === undefined) {
+    throw new TypeError('invalid controlled Shadow review submission')
+  }
+  if (submission.status === 'scored') {
+    if (!exactRuntimeKeys(submission, [
+      'status',
+      'insufficientMaterial',
+      'reasonCode',
+      'scores',
+    ]) || submission.insufficientMaterial !== false
+      || submission.reasonCode !== 'score-submitted') {
+      throw new TypeError('invalid controlled Shadow scored submission')
+    }
+    return {
+      status: 'scored',
+      insufficientMaterial: false,
+      reasonCode: 'score-submitted',
+      scores: evaluatorDimensionScores(
+        submission.scores,
+        true,
+      ) as ControlledSkillEvaluatorDimensionScoresV3,
+    }
+  }
+  if (!exactRuntimeKeys(submission, [
+    'status',
+    'insufficientMaterial',
+    'reasonCode',
+  ]) || submission.status !== 'inconclusive'
+    || submission.insufficientMaterial !== true
+    || ![
+      'material-missing',
+      'identity-exposed',
+      'provider-failed',
+      'timeout',
+      'score-not-submitted',
+      'evidence-mismatch',
+    ].includes(submission.reasonCode as string)) {
+    throw new TypeError('invalid controlled Shadow inconclusive submission')
+  }
+  return {
+    status: 'inconclusive',
+    insufficientMaterial: true,
+    reasonCode: submission.reasonCode as ControlledSkillShadowReviewInconclusiveReasonCode,
+  }
+}
+
+function controlledShadowReviewRequestReason(
+  request: GenerateOptions,
+  state: ControlledShadowReviewState,
+): 'request-contract-mismatch' | 'identity-exposed' | undefined {
+  if (String(request.sessionId) !== state.sessionId
+    || request.purpose !== undefined
+    || !callConfigEquals(requestConfig(request), state.config)
+    || request.tools?.length !== 1
+    || request.tools[0]?.name !== 'submit_holdout_review') {
+    return 'request-contract-mismatch'
+  }
+  if (request.messages.some(message => record(message.source)?.kind === 'skill-catalog')
+    || controlledIdentityExposed(evaluatorVisibleRequest(request), state.forbidden)) {
+    return 'identity-exposed'
+  }
+  return undefined
+}
+
+function controlledShadowReviewTool(state: ControlledShadowReviewState) {
+  const scoreProperties = Object.fromEntries(
+    CONTROLLED_SKILL_SOURCE_FIDELITY_SCORE_KEYS.map(key => [key, {
+      type: 'integer' as const,
+      enum: [0, 1, 2, 3, 4],
+      required: true as const,
+    }]),
+  )
+  return defineTool({
+    name: 'submit_holdout_review',
+    description: 'Submit one independent holdout quality review.',
+    parameters: {
+      status: { type: 'string', enum: ['scored', 'inconclusive'], required: true },
+      insufficientMaterial: { type: 'boolean', required: true },
+      reasonCode: {
+        type: 'string',
+        enum: [
+          'score-submitted',
+          'material-missing',
+          'identity-exposed',
+          'provider-failed',
+          'timeout',
+          'score-not-submitted',
+          'evidence-mismatch',
+        ],
+        required: true,
+      },
+      scores: {
+        type: 'object',
+        additionalProperties: false,
+        properties: scoreProperties,
+      },
+    },
+    output: {
+      schema: { type: 'string', enum: ['review-submitted'] },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    async execute(args, exec) {
+      const submission = state.pendingSubmission
+      if (submission === undefined || sha256(args) !== sha256(submission)) {
+        cancelControlledShadowReview(state, 'submission-invalid')
+        throw new Error('controlled Shadow review submission rejected')
+      }
+      state.submission = submission
+      state.submissionDigest = sha256(submission)
+      exec.concludeTurn()
+      return 'review-submitted'
+    },
+  })
+}
+
+function controlledShadowReviewGuard(
+  execution: Readonly<{
+    readonly agent?: AgentHandle['agent']
+    readonly name: string
+    readonly arguments: unknown
+  }>,
+  state: ControlledShadowReviewState,
+): string | undefined {
+  if (execution.agent !== state.agent
+    || String(execution.agent?.id) !== state.sessionId
+    || execution.name !== 'submit_holdout_review'
+    || !state.active) return 'controlled Shadow reviewer tool unavailable'
+  if (Date.now() >= state.deadline) {
+    cancelControlledShadowReview(state, 'timeout')
+    return 'controlled Shadow reviewer deadline exceeded'
+  }
+  if (state.bodyCalls >= 1) {
+    cancelControlledShadowReview(state, 'submission-invalid')
+    return 'controlled Shadow reviewer already submitted'
+  }
+  try {
+    state.pendingSubmission = parseControlledShadowReviewSubmission(execution.arguments)
+  } catch {
+    cancelControlledShadowReview(state, 'submission-invalid')
+    return 'controlled Shadow reviewer submission invalid'
+  }
+  state.bodyCalls = 1
+  return undefined
+}
+
+function cancelControlledShadowReview(
+  state: ControlledShadowReviewState,
+  reasonCode: 'timeout' | 'submission-invalid',
+): void {
+  if (state.reasonCode !== undefined || !state.active) return
+  state.reasonCode = reasonCode
+  state.agent?.cancel({
+    kind: 'hook',
+    reason: reasonCode === 'timeout'
+      ? 'tianwen-controlled-shadow-review-timeout'
+      : 'tianwen-controlled-shadow-review-submission-invalid',
+  })
+}
+
+type ControlledShadowReviewRunResult =
+  | {
+      readonly observation: RecordControlledSkillShadowReviewObservationInput
+      readonly reasonCode?: never
+    }
+  | {
+      readonly observation?: never
+      readonly reasonCode: ControlledSkillShadowStopReasonCode
+    }
 
 interface PreparedControlledEvaluator {
   readonly evaluationId: ControlledSkillEvaluationId
@@ -4518,6 +5153,7 @@ type ControlledEvaluatorRunResult =
   | { readonly observations?: never; readonly reasonCode: ControlledSkillEvaluatorsStopReasonCode }
 
 function controlledBlindEnvelopeDigest(
+  plan: ControlledSkillEvaluationPlan,
   objective: ControlledSkillEvaluationObjective,
   assignment: ControlledSkillEvaluationBlindMap['assignments'][number],
 ): Sha256Digest {
@@ -4527,15 +5163,20 @@ function controlledBlindEnvelopeDigest(
     evidenceSetDigest: sha256(objective[role].evidenceIds),
   })
   return sha256({
-    domain: 'tianwen.controlled-blind-envelope.v1',
+    domain: plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+      ? 'tianwen.controlled-blind-envelope.v2'
+      : 'tianwen.controlled-blind-envelope.v1',
     taskId: objective.taskId,
-    rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+    rubricDigest: plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+      ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+      : CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
     x: arm(assignment.xRole),
     y: arm(assignment.yRole),
   })
 }
 
 function controlledEvaluatorEnvelope(
+  plan: ControlledSkillEvaluationPlan,
   task: RunControlledSkillEvaluatorTaskInput,
   objective: ControlledSkillEvaluationObjective,
   assignment: ControlledSkillEvaluationBlindMap['assignments'][number],
@@ -4551,8 +5192,12 @@ function controlledEvaluatorEnvelope(
     taskId: task.taskId,
     goal: task.goal,
     input: task.input,
-    rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
-    rubric: CONTROLLED_EVALUATOR_RUBRIC,
+    rubricDigest: plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+      ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+      : CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+    rubric: plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+      ? CONTROLLED_EVALUATOR_RUBRIC_V3
+      : CONTROLLED_EVALUATOR_RUBRIC_V2,
     x: arm(assignment.xRole),
     y: arm(assignment.yRole),
   }
@@ -4579,6 +5224,15 @@ function controlledEvaluatorTool(state: ControlledEvaluatorState) {
         enum: [0, 1, 2, 3, 4],
         required: true as const,
       },
+      ...(state.requiresSourceFidelity
+        ? {
+            sourceFidelity: {
+              type: 'integer' as const,
+              enum: [0, 1, 2, 3, 4],
+              required: true as const,
+            },
+          }
+        : {}),
     },
   }
   const submissionProperties = {
@@ -4670,10 +5324,14 @@ function controlledEvaluatorGuard(
   }
   try {
     state.pendingSubmission = state.expectedTaskIds === undefined
-      ? parseControlledEvaluatorSubmission(execution.arguments)
+      ? parseControlledEvaluatorSubmission(
+          execution.arguments,
+          state.requiresSourceFidelity,
+        )
       : parseControlledAggregateEvaluatorSubmission(
           execution.arguments,
           state.expectedTaskIds,
+          state.requiresSourceFidelity,
         )
   } catch {
     cancelControlledEvaluator(state, 'submission-invalid')
@@ -4815,7 +5473,10 @@ type ControlledActivityRunResult =
   | { readonly activity: ControlledActivityRun; readonly reasonCode?: never }
   | {
       readonly activity?: never
-      readonly reasonCode: ControlledSkillShadowStopReasonCode
+      readonly reasonCode: Exclude<
+        ControlledSkillShadowStopReasonCode,
+        'identity-exposed' | 'score-not-submitted' | 'submission-invalid' | 'evidence-mismatch'
+      >
     }
 
 type ControlledArmRunResult =

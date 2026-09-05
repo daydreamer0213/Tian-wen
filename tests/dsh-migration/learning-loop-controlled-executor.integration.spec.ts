@@ -65,8 +65,11 @@ import {
 import type { GenerateOptions, MessageFeedbackItem, StreamChunk } from '@tianwen/dsh-compat'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
   LedgerCommitUnknownError,
   learningSessionLifecycleFingerprint,
+  prepareLearningIntake,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
 import {
@@ -84,6 +87,7 @@ import {
   TianwenLearningLoopService,
   createExplicitCorrectionLearningLoopExecutor,
 } from '../../packages/tianwen-runtime-bundle/src/learning-loop-orchestrator.js'
+import * as sourceCases from '../../packages/tianwen-runtime-bundle/src/research-summary-source-case.js'
 import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
 import { createConfiguredLearningLoopExecutor } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 
@@ -105,7 +109,11 @@ const protocol = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_
 if (protocol === undefined) throw new Error('explicit correction protocol is unavailable')
 
 class ControlledAdapter extends ScriptedAdapter {
-  constructor(script: readonly (readonly StreamChunk[] | Error)[]) {
+  constructor(script: readonly (
+    | readonly StreamChunk[]
+    | Error
+    | ((request: GenerateOptions) => readonly StreamChunk[])
+  )[]) {
     super(script.map(entry => Array.isArray(entry) ? [...entry] : entry))
   }
 
@@ -221,6 +229,86 @@ function successfulControlledScript(
     ...submittedScript('transition-rollback', rejectTransitionKind === 'rollback'
       ? rejectedSubmission(transition('rollback'))
       : validSubmission(transition('rollback'))),
+  ]
+}
+
+function successfulSourceFidelityScript(
+  sourceProtocol: NonNullable<ReturnType<typeof resolveExplicitCorrectionProtocol>>,
+) {
+  const tasks = sourceProtocol.buildEvaluationTasks({
+    root: 'D:/DevData/tianwen-probe-task3/source-fidelity-script-fixtures',
+    materializeWorkspace() {},
+    sessionNamespace: 'source-fidelity-script-fixtures',
+  })
+  const shadow = sourceProtocol.buildShadowTasks({
+    root: 'D:/DevData/tianwen-probe-task3/source-fidelity-script-fixtures',
+    materializeWorkspace() {},
+    sessionNamespace: 'source-fidelity-script-fixtures',
+  })[0]!
+  const transition = sourceProtocol.buildTransitionInput({
+    root: 'D:/DevData/tianwen-probe-task3/source-fidelity-script-fixtures',
+    shadowId: 'shadow:source-fidelity-script-fixtures',
+    kind: 'promote',
+    expectedRevision: 1,
+    materializeWorkspace() {},
+  }).task.researchPacket!
+  const arms = tasks.flatMap(task => (['base', 'candidate'] as const).flatMap(role =>
+    submittedScript(
+      `source-fidelity-arm-${task.semanticType}-${role}`,
+      task.expectedSubmissions[role],
+    )))
+  const evaluator = (request: GenerateOptions) => {
+    const block = request.messages.findLast(message => message.role === 'user')
+      ?.content.find(item => item.type === 'text')
+    const envelope = JSON.parse(block?.type === 'text' ? block.text : '') as {
+      evaluations: Array<{
+        taskId: string
+        x: { materialText: string }
+        y: { materialText: string }
+      }>
+    }
+    const dimensions = (taskId: string, materialText: string) => {
+      const task = tasks.find(item => item.taskId === taskId)!
+      const material = JSON.parse(materialText) as { submission: ResearchSummarySubmission }
+      const isCandidate = sha256(material.submission) === sha256(task.expectedSubmissions.candidate)
+      return {
+        relevance: 3,
+        correctnessReasoning: 3,
+        clarityUsability: 3,
+        scopeRestraint: 3,
+        sourceFidelity: task.semanticType === 'original-defect' && isCandidate ? 4 : 3,
+      }
+    }
+    return toolCallResponse('source-fidelity-aggregate-evaluator', 'submit_blind_evaluation', {
+      evaluations: envelope.evaluations.map(item => ({
+        taskId: item.taskId,
+        status: 'scored',
+        insufficientMaterial: false,
+        reasonCode: 'score-submitted',
+        scores: {
+          x: dimensions(item.taskId, item.x.materialText),
+          y: dimensions(item.taskId, item.y.materialText),
+        },
+      })),
+    })
+  }
+  return [
+    ...arms,
+    evaluator,
+    ...submittedScript('source-fidelity-shadow', validSubmission(shadow.researchPacket)),
+    toolCallResponse('source-fidelity-holdout-review', 'submit_holdout_review', {
+      status: 'scored',
+      insufficientMaterial: false,
+      reasonCode: 'score-submitted',
+      scores: {
+        relevance: 3,
+        correctnessReasoning: 3,
+        clarityUsability: 3,
+        scopeRestraint: 3,
+        sourceFidelity: 3,
+      },
+    }),
+    ...submittedScript('source-fidelity-transition-promote', validSubmission(transition)),
   ]
 }
 
@@ -847,6 +935,176 @@ describe('explicit-correction controlled learning-loop executor', () => {
     }
   })
 
+  it('executes the retained v3 evaluator, reviewed holdout, and activation as 14 native Runs', async () => {
+    const fixtureRoot = root('source-fidelity-native-route')
+    const packet = parseResearchPacket(`<research_packet>
+[F:retention|required] Verified six-week retention reached 18%.
+[U:window|decision] The observation window remains short.
+[U:owner|background] The next report owner is undecided.
+[X:projection|unsupported] State that retention will exceed 40% next month.
+</research_packet>`)
+    const lifecycle = learningSessionLifecycleFingerprint({
+      sessionId: 'source-fidelity-main', createdAt: 1,
+    })
+    const sourceIntake = {
+      sessionId: 'source-fidelity-main',
+      messageId: 'source-fidelity-message',
+      feedbackVersion: 'source-fidelity-feedback-v1',
+      rating: 'negative' as const,
+      note: 'Keep each claim faithful to the supplied source.',
+      scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+      sessionDigest: lifecycle,
+      evidenceIds: [evidenceA, evidenceB],
+    }
+    const preparedSource = prepareLearningIntake(sourceIntake)
+    if (preparedSource.kind !== 'explicit-correction') {
+      throw new Error('source-fidelity fixture must create an explicit correction')
+    }
+    let sourceProtocol: NonNullable<ReturnType<typeof resolveExplicitCorrectionProtocol>>
+    const source = {
+      signalId: preparedSource.signalId,
+      sessionId: 'source-fidelity-main',
+      messageId: 'source-fidelity-message',
+      feedbackVersion: 'source-fidelity-feedback-v1',
+      sessionLifecycleFingerprint: lifecycle,
+      sessionDigest: lifecycle,
+      evidenceSetDigest: sha256([evidenceA, evidenceB]),
+      acceptanceSubjectDigest: sha256(packet),
+      packetDigest: sha256(packet.source),
+    } as const
+    sourceProtocol = resolveExplicitCorrectionProtocol({
+      scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+      protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+      packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+      source,
+      packet,
+    })!
+    const mounted = await mountControlledRuntime(
+      fixtureRoot,
+      successfulSourceFidelityScript(sourceProtocol),
+    )
+    const recovery = vi.spyOn(sourceCases, 'recoverResearchSummarySourceCase')
+      .mockResolvedValue({
+        source,
+        packet,
+        submission: validSubmission(packet.source),
+        targetTurn: 1,
+        acceptanceEvidenceId: evidenceA,
+      })
+    const { ctx } = mounted.harness
+    try {
+      const binding = ctx.tianwenEvolution.recordRunBinding({
+        goalRef: 'goal:source-fidelity-native-route',
+        taskRef: 'task:source-fidelity-native-route',
+        sessionId: source.sessionId,
+        scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+        acceptanceContract: sourceProtocol.acceptance,
+        acceptanceSubjectDigest: source.acceptanceSubjectDigest,
+        sessionLifecycleFingerprint: lifecycle,
+      })
+      const manifest = ctx.tianwenEvolution.recordRunSkillManifest({
+        runId: binding.runId, skill: sourceProtocol.parentSkill,
+      })
+      ctx.tianwenEvolution.recordOutcomeIntake({
+        runId: binding.runId,
+        verdict: 'met',
+        sessionDigest: lifecycle,
+        evidenceIds: [evidenceA],
+      })
+      ctx.tianwenEvolution.recordRunSkillUse({
+        runId: binding.runId,
+        parentVersionId: manifest.parentVersionId,
+        sessionId: source.sessionId,
+        sessionDigest: lifecycle,
+        skillName: sourceProtocol.parentSkill.name,
+        contentDigest: ctx.tianwenEvolution.getRunSkillManifest(binding.runId)!.contentDigest,
+        skillEvidenceId: `sha256:${'7'.repeat(64)}`,
+        acceptanceEvidenceId: evidenceA,
+        skillCallSeq: 10,
+        skillResultSeq: 11,
+        acceptanceCallSeq: 12,
+      })
+      ctx.tianwenEvolution.recordLearningAnalysisConsent({
+        revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v1',
+      })
+      const intake = ctx.tianwenEvolution.recordLearningFeedbackRevision({
+        intake: sourceIntake,
+        sessionLifecycleFingerprint: lifecycle,
+        analysisConsentRevision: 1,
+      })
+      expect(intake.signalId).toBe(source.signalId)
+      const requested = ctx.tianwenEvolution.requestLearningAnalysis({
+        ticketId: intake.ticketId!,
+        sessionId: source.sessionId,
+        messageId: source.messageId,
+        feedbackVersion: source.feedbackVersion,
+        consentRevision: 1,
+        parentSessionId: source.sessionId,
+      })
+      ctx.tianwenEvolution.recordLearningAnalysisChildStarted({
+        analysisId: requested.analysisId,
+        parentSessionId: requested.parentSessionId,
+        childSessionId: requested.childSessionId,
+      })
+      ctx.tianwenEvolution.recordLearningAnalysisSubmission({
+        analysisId: requested.analysisId,
+        childSessionId: requested.childSessionId,
+        submission: {
+          verdict: 'skill-change',
+          hypothesis: 'The answer crossed the source boundary.',
+          lesson: {
+            claim: 'Keep every summary claim grounded in the packet.',
+            when: 'Summarizing bounded source material.',
+            notWhen: 'The user requests raw extraction only.',
+          },
+          candidatePatch: {
+            description: 'Summarize only verified packet content.',
+            whenToUse: 'When a response must stay within a supplied research packet.',
+            content: '# Source-faithful summary\n\nKeep every claim grounded in the packet.',
+          },
+          supportingEvidenceIds: [evidenceA],
+          counterevidenceIds: [evidenceB],
+        },
+      })
+      const executor = createExplicitCorrectionLearningLoopExecutor({
+        root: join(fixtureRoot, 'workspaces'),
+        materializeWorkspace,
+        async environment() {
+          const callConfig = await ctx.llm.resolveCallConfig(mounted.selection)
+          const retryPolicy = ctx.llm.providerRetryPolicy(mounted.selection.provider)
+          return {
+            callConfig,
+            retryPolicy,
+            toolSchemas: frozenProductToolSchemas(ctx),
+            rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+          }
+        },
+        deliverTerminalReport: () => 'source-fidelity-report',
+      })
+      const context = () => ({
+        ctx,
+        status: ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)!,
+      })
+
+      await executor.freezeProtocol(context())
+      await executor.materializeCandidate(context())
+      await executor.evaluate(context())
+      expect(context().status).toMatchObject({ phase: 'shadow-ready' })
+      await executor.promote(context())
+
+      expect(context().status).toMatchObject({ phase: 'promoted' })
+      const controlledSessions = (await ctx.sessionPersistence.list()).filter(item =>
+        String(item.id).startsWith('session:controlled-'))
+      expect(controlledSessions).toHaveLength(14)
+      expect(new Set(controlledSessions.map(item => String(item.id))).size).toBe(14)
+      const review = controlledSessions.find(item => String(item.id).includes('holdout-review'))
+      expect(review).toBeDefined()
+    } finally {
+      recovery.mockRestore()
+      await mounted.dispose()
+    }
+  }, 60_000)
+
   it('recovers durable promote, report, rollback, and repeated-learning boundaries across fresh Contexts', async () => {
     const previousProbeRoot = process.env.TIANWEN_DSH_PROBE_ROOT
     process.env.TIANWEN_DSH_PROBE_ROOT = resolve(
@@ -1143,6 +1401,8 @@ describe('explicit-correction controlled learning-loop executor', () => {
         name: LedgerCommitUnknownError.name,
       })
       expect(harness.ctx.tianwenEvolution.blocked).toBe(true)
+      expect((await harness.ctx.sessionPersistence.list()).filter(item =>
+        String(item.id).startsWith('session:controlled-'))).toHaveLength(13)
       const requestsAfterVerifiedTransition = adapter.requests.length
       const transitionsAfterVerifiedPromotion = harness.ctx.tianwenEvolution
         .listControlledSkillTransitions().length

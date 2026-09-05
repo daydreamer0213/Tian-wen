@@ -110,6 +110,7 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/native-long-goal-child.ts',
     'src/permission-attempt.ts',
     'src/research-summary-admission.ts',
+    'src/research-summary-source-case.ts',
     'src/settled-task-result.ts',
     'src/status.ts',
   ].includes(path)
@@ -141,6 +142,7 @@ function isAllowedStatusInput(input: string): boolean {
       '../tianwen-evolution/dist/controlled-skill-activation.js',
       '../tianwen-evolution/dist/controlled-skill-evaluation.js',
       '../tianwen-evolution/dist/controlled-skill-shadow.js',
+      '../tianwen-evolution/dist/controlled-skill-source-fidelity.js',
       '../tianwen-evolution/dist/skill-evaluation.js',
       '../tianwen-evolution/dist/skill-governance.js',
     ].includes(path)
@@ -217,6 +219,7 @@ function isAllowedControlledLifecycleRunnerInput(input: string): boolean {
     '../tianwen-evidence/dist/projector.js',
     '../tianwen-evolution/dist/controlled-skill-activation.js',
     '../tianwen-evolution/dist/controlled-skill-evaluation.js',
+    '../tianwen-evolution/dist/controlled-skill-source-fidelity.js',
     '../tianwen-evolution/dist/learning-intake.js',
     '../tianwen-evolution/dist/outcome-intake.js',
   ].includes(path)
@@ -234,6 +237,17 @@ function containsCredentialLiteral(text: string): boolean {
 }
 
 describe('runtime metafile input allowlist', () => {
+  it('permits only the reviewed source-fidelity runtime and status inputs', () => {
+    expect(isAllowedRuntimeInput('src/research-summary-source-case.ts')).toBe(true)
+    expect(isAllowedStatusInput(
+      '../tianwen-evolution/dist/controlled-skill-source-fidelity.js',
+    )).toBe(true)
+    expect(isAllowedRuntimeInput('src/research-summary-source-store.ts')).toBe(false)
+    expect(isAllowedStatusInput(
+      '../tianwen-evolution/dist/controlled-skill-source-fidelity-runtime.js',
+    )).toBe(false)
+  })
+
   it.each([
     'src/continuous-goal-agent.ts',
     'src/continuous-goal-feedback.ts',

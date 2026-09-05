@@ -19,10 +19,20 @@ import {
 import type { GenerateOptions, StreamChunk } from '@tianwen/dsh-compat'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
   learningSessionLifecycleFingerprint,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
-import { apply } from '../../packages/tianwen-runtime/src/index.js'
+import {
+  RESEARCH_SUMMARY_TOOL_NAME,
+  apply,
+  controlledToolSchemas,
+  createResearchSummaryTool,
+  evaluateResearchSummarySubmission,
+  parseResearchPacket,
+} from '../../packages/tianwen-runtime/src/index.js'
 
 const CONTROLLED_PROVIDER = 'tianwen-controlled-scripted'
 const CONTROLLED_MODEL = 'scripted'
@@ -140,19 +150,27 @@ function seedPassingEvaluation(
   evolution: Awaited<ReturnType<typeof mountPersistentHarness>>['ctx']['tianwenEvolution'],
   protocol: Parameters<typeof evolution.freezeControlledSkillEvalProtocol>[0]['protocol'],
 ) {
+  const sourceFidelity = 'sourceFidelity' in protocol
   const seeded = [
     ['first', 'not-met', 'a'],
     ['second', 'not-met', 'b'],
     ['counterexample', 'met', 'c'],
   ] as const
-  const runs = seeded.map(([suffix, verdict, marker]) => {
+  const runs = seeded.map(([suffix, verdict, marker], index) => {
     const sessionId = `session:controlled-shadow-runtime-seed:${suffix}`
+    const lifecycle = learningSessionLifecycleFingerprint({ sessionId, createdAt: index + 1 })
     const binding = evolution.recordRunBinding({
       goalRef: 'goal:controlled-shadow-runtime-seed',
       taskRef: `task:controlled-shadow-runtime-seed:${suffix}`,
       sessionId,
       scopeKey: 'project:tianwen/capability:controlled-shadow-runtime-summary',
       acceptanceContract: acceptance,
+      ...(sourceFidelity && index === 1
+        ? {
+            acceptanceSubjectDigest: protocol.tasks[0]!.acceptanceSubjectDigest,
+            sessionLifecycleFingerprint: lifecycle,
+          }
+        : {}),
     })
     const manifest = evolution.recordRunSkillManifest({ runId: binding.runId, skill: parentSkill })
     const sessionDigest = sha256(`shadow-runtime-seed-session:${marker}`)
@@ -176,18 +194,80 @@ function seedPassingEvaluation(
       skillResultSeq: 11,
       acceptanceCallSeq: 12,
     })
-    return { binding, outcome }
+    return { binding, outcome, evidenceId, lifecycle, sessionDigest }
   })
-  const ticketId = runs[1]!.outcome.ticketId!
+  let ticketId = runs[1]!.outcome.ticketId!
+  let analysisId: string | undefined
+  if (sourceFidelity) {
+    evolution.recordLearningAnalysisConsent({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    const sourceSessionId = 'session:controlled-shadow-runtime-seed:second'
+    const feedback = evolution.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: sourceSessionId,
+        messageId: 'controlled-shadow-source-message',
+        feedbackVersion: 'controlled-shadow-source-feedback-v1',
+        rating: 'negative',
+        note: 'Keep each claim faithful to the supplied packet.',
+        scopeKey: 'project:tianwen/capability:controlled-shadow-runtime-summary',
+        sessionDigest: runs[1]!.sessionDigest,
+        evidenceIds: [runs[1]!.evidenceId],
+      },
+      sessionLifecycleFingerprint: runs[1]!.lifecycle,
+      analysisConsentRevision: 1,
+    })
+    ;(protocol as { sourceFidelity: { source: { signalId: string } } })
+      .sourceFidelity.source.signalId = feedback.signalId!
+    ticketId = feedback.ticketId!
+    const analysis = evolution.requestLearningAnalysis({
+      ticketId,
+      sessionId: sourceSessionId,
+      messageId: 'controlled-shadow-source-message',
+      feedbackVersion: 'controlled-shadow-source-feedback-v1',
+      consentRevision: 1,
+      parentSessionId: sourceSessionId,
+    })
+    analysisId = analysis.analysisId
+    evolution.recordLearningAnalysisChildStarted({
+      analysisId,
+      parentSessionId: analysis.parentSessionId,
+      childSessionId: analysis.childSessionId,
+    })
+    evolution.recordLearningAnalysisSubmission({
+      analysisId,
+      childSessionId: analysis.childSessionId,
+      submission: {
+        verdict: 'skill-change',
+        hypothesis: 'The parent loses source boundaries.',
+        lesson: {
+          claim: 'Keep claims faithful to the packet.',
+          when: 'Summarizing bounded packet material.',
+          notWhen: 'Performing raw extraction only.',
+        },
+        candidatePatch: {
+          description: 'Summarize one packet faithfully.',
+          whenToUse: parentSkill.whenToUse,
+          content: '# Controlled summary\n\nState only packet-supported claims.',
+        },
+        supportingEvidenceIds: [runs[1]!.evidenceId],
+        counterevidenceIds: [],
+      },
+    })
+  }
   const frozen = evolution.freezeControlledSkillEvalProtocol({
     ticketId,
-    evidencePurpose: 'development-only-synthetic-defect',
+    evidencePurpose: sourceFidelity ? 'controlled-product' : 'development-only-synthetic-defect',
     protocol,
   })
-  const opened = evolution.openLearningCase({
-    ticketId,
-    counterevidenceRunIds: [runs[2]!.binding.runId],
-  })
+  const opened = sourceFidelity
+    ? evolution.openLearningAnalysisCase(analysisId!)
+    : evolution.openLearningCase({
+        ticketId,
+        counterevidenceRunIds: [runs[2]!.binding.runId],
+      })
   const learningCase = evolution.getLearningCase(opened.caseId)!
   const attribution = evolution.recordAttribution({
     caseId: learningCase.caseId,
@@ -328,8 +408,14 @@ function seedPassingEvaluation(
       insufficientMaterial: false,
       reasonCode: 'score-submitted',
       scores: {
-        x: { relevance: 3, correctnessReasoning: 3, clarityUsability: 3, scopeRestraint: 3 },
-        y: { relevance: 3, correctnessReasoning: 3, clarityUsability: 3, scopeRestraint: 3 },
+        x: {
+          relevance: 3, correctnessReasoning: 3, clarityUsability: 3, scopeRestraint: 3,
+          ...(sourceFidelity ? { sourceFidelity: assignment.xRole === 'candidate' && index === 0 ? 4 : 3 } : {}),
+        },
+        y: {
+          relevance: 3, correctnessReasoning: 3, clarityUsability: 3, scopeRestraint: 3,
+          ...(sourceFidelity ? { sourceFidelity: assignment.yRole === 'candidate' && index === 0 ? 4 : 3 } : {}),
+        },
       },
     })
   }
@@ -479,6 +565,214 @@ async function mountShadowRuntime(
     verifierBodies,
     requestWasTampered: () => requestWasTampered,
     input: { evaluationId: seeded.plan.evaluationId, tasks },
+  }
+}
+
+async function mountSourceFidelityShadowRuntime(
+  name: string,
+  reviewSourceFidelity = 2,
+) {
+  const root = fixtureRoot(name)
+  const harness = await mountPersistentHarness(join(root, 'sessions'), [])
+  await harness.ctx.plugin(SkillRegistry)
+  await harness.ctx.plugin(applySkillTool)
+  await harness.ctx.plugin(DynamicCordisRunnerService, {})
+  const disposeParent = harness.ctx.skills.register(parentSkill)
+  const packetSource = `<research_packet>
+[F:adoption|required] Weekly active adoption reached 74%.
+[U:cohort|decision] The newest cohort has only two weeks of history.
+[U:owner|background] The next report owner is undecided.
+[X:projection|unsupported] State that adoption will exceed 90% next month.
+</research_packet>`
+  const packet = parseResearchPacket(packetSource)
+  const submission = {
+    summary: 'Weekly active adoption reached 74%. The newest cohort has only two weeks of history.',
+    confirmedFindingIds: ['adoption'],
+    uncertaintyIds: ['cohort'],
+  }
+  const adapter = new ControlledShadowScriptedAdapter([
+    toolCallResponse('source-fidelity-holdout-skill', 'skill', { name: parentSkill.name }),
+    toolCallResponse('source-fidelity-holdout-submit', RESEARCH_SUMMARY_TOOL_NAME, submission),
+    toolCallResponse('source-fidelity-holdout-review', 'submit_holdout_review', {
+      status: 'scored',
+      insufficientMaterial: false,
+      reasonCode: 'score-submitted',
+      scores: {
+        relevance: 3,
+        correctnessReasoning: 3,
+        clarityUsability: 3,
+        scopeRestraint: 3,
+        sourceFidelity: reviewSourceFidelity,
+      },
+    }),
+  ])
+  harness.ctx.llm.registerAdapter([CONTROLLED_PROVIDER], adapter)
+  const selection = { provider: CONTROLLED_PROVIDER, model: CONTROLLED_MODEL }
+  harness.ctx.provide('agentDefaultModel', { currentSelection: () => ({ ...selection }) })
+  await apply(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+
+  const productAcceptance = {
+    source: 'dsh-tool-result',
+    toolName: RESEARCH_SUMMARY_TOOL_NAME,
+    notMetErrorCode: 'RESEARCH_SUMMARY_NOT_MET',
+    gapDisposition: 'reusable',
+    problemCategory: 'research-summary-correction',
+    severity: 2,
+    blocksGoal: false,
+  } as const
+  const allowedTools = ['skill', RESEARCH_SUMMARY_TOOL_NAME] as const
+  const productTool = createResearchSummaryTool(packet, {
+    kind: 'controlled-enforce',
+    oracle: evaluateResearchSummarySubmission,
+  })
+  const schemas = await controlledToolSchemas(harness.ctx, allowedTools, productTool)
+  const toolSchemaDigest = sha256(schemas)
+  const callConfig = await harness.ctx.llm.resolveCallConfig(selection)
+  const retryPolicy = harness.ctx.llm.providerRetryPolicy(selection.provider)
+  const workspaceRoot = join(root, 'workspaces', 'source-fidelity-holdout')
+  const workspaceContent = 'controlled source-fidelity holdout workspace\n'
+  mkdirSync(workspaceRoot, { recursive: true })
+  writeFileSync(join(workspaceRoot, 'brief.txt'), workspaceContent, 'utf8')
+  const workspaceSnapshot = {
+    schemaVersion: 'tianwen.controlled-workspace-snapshot.v1' as const,
+    entries: [{
+      relativePath: 'brief.txt',
+      contentDigest: rawDigest(workspaceContent),
+      size: Buffer.byteLength(workspaceContent, 'utf8'),
+    }],
+  }
+  const goal = 'Submit a faithful summary of one unseen research packet.'
+  const authorization = { mode: 'read-only-product-evaluation', task: 'unseen-holdout' }
+  const verifierContract = {
+    toolName: RESEARCH_SUMMARY_TOOL_NAME,
+    source: 'accepted-product-submission',
+    packetDigest: rawDigest(packetSource),
+  }
+  const stopCondition = { terminal: 'accepted-product-submission' }
+  const evaluatorMaterialContract = {
+    schemaVersion: 'tianwen.controlled-source-fidelity-holdout-material.v1',
+    source: 'accepted-research-summary-submission',
+    packet: 'exact-frozen-holdout',
+    maxUtf8Bytes: 4_096,
+  }
+  const reviewConfiguration = {
+    schemaVersion: 'tianwen.controlled-source-fidelity-review-config.v1',
+    scoreKeys: ['relevance', 'correctnessReasoning', 'clarityUsability', 'scopeRestraint', 'sourceFidelity'],
+    minimumDimensionScore: 3,
+  }
+  const reviewMaterialContract = {
+    schemaVersion: 'tianwen.controlled-source-fidelity-review-material.v1',
+    inputs: ['frozen-packet', 'accepted-canonical-submission'],
+    excludes: ['xy-pair', 'candidate-patch', 'feedback', 'historical-answer', 'role', 'version'],
+    maxUtf8Bytes: 8_192,
+  }
+  const reviewEvidenceContract = {
+    schemaVersion: 'tianwen.controlled-source-fidelity-review-evidence.v1',
+    source: 'accepted-native-product-submission',
+    requiresCompleteEvidence: true,
+  }
+  const sourceTasks = taskTypes.map((taskType, index) => ({
+    taskId: `eval-task:${taskType}` as const,
+    taskType,
+    goalDigest: sha256(`source-goal:${index}`),
+    inputDigest: index === 0 ? sha256('controlled-source-input') : sha256(`source-input:${index}`),
+    workspaceSnapshotDigest: sha256(`source-workspace:${index}`),
+    toolSchemaDigest,
+    authorizationDigest: sha256(`source-authorization:${index}`),
+    verifierContractDigest: sha256(`source-verifier:${index}`),
+    stopConditionDigest: sha256(`source-stop:${index}`),
+    evaluatorMaterialContractDigest: sha256(`source-material:${index}`),
+    acceptanceContract: acceptance,
+    acceptanceSubjectDigest: sha256(`source-subject:${index}`),
+    allowedTools: ['skill', 'verify_summary'] as const,
+    stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
+  }))
+  const protocol = {
+    rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+    tasks: sourceTasks,
+    execution: {
+      dshVersion: '0.1.1-rc.2' as const,
+      providerId: callConfig.provider,
+      modelId: callConfig.model,
+      callConfigDigest: sha256(callConfig),
+      toolSchemaDigest: sha256(sourceTasks.map(task => ({
+        taskId: task.taskId,
+        toolSchemaDigest: task.toolSchemaDigest,
+      }))),
+      retryPolicyDigest: sha256(retryPolicy),
+    },
+    sourceFidelity: {
+      policyVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion,
+      policyDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+      packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+      source: {
+        signalId: `signal:${'0'.repeat(64)}`,
+        sessionId: 'session:controlled-shadow-runtime-seed:second',
+        messageId: 'controlled-shadow-source-message',
+        feedbackVersion: 'controlled-shadow-source-feedback-v1',
+        sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+          sessionId: 'session:controlled-shadow-runtime-seed:second',
+          createdAt: 2,
+        }),
+        sessionDigest: sha256('shadow-runtime-seed-session:b'),
+        evidenceSetDigest: sha256([sha256('shadow-runtime-seed-evidence:b')]),
+        acceptanceSubjectDigest: sourceTasks[0]!.acceptanceSubjectDigest,
+        packetDigest: sourceTasks[0]!.inputDigest,
+      },
+      holdout: {
+        task: {
+          taskId: 'shadow-task:research-summary-source-fidelity-holdout',
+          goalDigest: sha256(goal),
+          inputDigest: sha256(packetSource),
+          workspaceSnapshotDigest: sha256(workspaceSnapshot),
+          toolSchemaDigest,
+          authorizationDigest: sha256(authorization),
+          verifierContractDigest: sha256(verifierContract),
+          stopConditionDigest: sha256(stopCondition),
+          evaluatorMaterialContractDigest: sha256(evaluatorMaterialContract),
+          acceptanceContract: productAcceptance,
+          acceptanceSubjectDigest: sha256(packet),
+          allowedTools,
+          stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
+        },
+        review: {
+          rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+          configurationDigest: sha256(reviewConfiguration),
+          materialContractDigest: sha256(reviewMaterialContract),
+          evidenceContractDigest: sha256(reviewEvidenceContract),
+        },
+      },
+    },
+  }
+  const seeded = seedPassingEvaluation(harness.ctx.tianwenEvolution, protocol)
+  return {
+    adapter,
+    disposeParent,
+    harness,
+    input: {
+      evaluationId: seeded.plan.evaluationId,
+      tasks: [{
+        taskId: 'shadow-task:research-summary-source-fidelity-holdout' as const,
+        goal,
+        input: packetSource,
+        researchPacket: packetSource,
+        workspaceRoot,
+        workspaceSnapshot,
+        authorization,
+        verifierContract,
+        stopCondition,
+        acceptanceContract: productAcceptance,
+        acceptanceSubject: packet,
+        allowedTools,
+        stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
+        evaluatorMaterialContract,
+        reviewConfiguration,
+        reviewMaterialContract,
+        reviewEvidenceContract,
+        reviewSessionId: 'session:controlled-shadow:product:research-summary:holdout-review',
+        sessionId: 'session:controlled-shadow:product:research-summary:holdout',
+      }],
+    },
   }
 }
 
@@ -653,6 +947,178 @@ describe('controlled Skill Shadow Runtime', () => {
     } finally {
       mounted.disposeParent()
       mounted.disposeVerifier()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('runs one native v3 holdout and an independent reviewer before rejecting bad semantics', async () => {
+    const mounted = await mountSourceFidelityShadowRuntime(
+      'source-fidelity-semantic-rejection',
+      2,
+    )
+    const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledShadow(
+        mounted.input,
+      )
+
+      expect(receipt).toMatchObject({
+        state: 'terminal',
+        completedTaskIds: ['shadow-task:research-summary-source-fidelity-holdout'],
+        result: {
+          schemaVersion: 'tianwen.controlled-skill-shadow-result.v3',
+          mechanismVerdict: 'rejected',
+          reasonCode: 'holdout-quality-threshold-failed',
+          promotionEligibility: 'ineligible',
+          reviewObservationDigest: expect.stringMatching(/^sha256:/u),
+        },
+      })
+      expect(create).toHaveBeenCalledTimes(2)
+      expect(mounted.adapter.requests.map(request => String(request.sessionId))).toEqual([
+        mounted.input.tasks[0]!.sessionId,
+        mounted.input.tasks[0]!.sessionId,
+        mounted.input.tasks[0]!.reviewSessionId,
+      ])
+      const reviewRequest = mounted.adapter.requests.at(-1)!
+      expect(reviewRequest.tools?.map(tool => tool.name)).toEqual(['submit_holdout_review'])
+      const serializedReview = JSON.stringify(reviewRequest)
+      expect(serializedReview).toContain('Weekly active adoption reached 74%.')
+      expect(serializedReview).toContain('confirmedFindingIds')
+      expect(serializedReview).not.toMatch(/"x"|"y"|candidatePatch|feedback|historical-answer|baseline|candidateVersionId/iu)
+      const shadow = mounted.harness.ctx.tianwenEvolution.listControlledSkillShadows()[0]!
+      const observation = mounted.harness.ctx.tianwenEvolution
+        .getControlledSkillShadowReviewObservation(shadow.shadowId)
+      expect(observation).toMatchObject({
+        reviewerSessionId: mounted.input.tasks[0]!.reviewSessionId,
+        status: 'scored',
+        scores: { sourceFidelity: 2 },
+        reviewedRun: {
+          taskId: mounted.input.tasks[0]!.taskId,
+          evaluatorMaterialDigest: expect.stringMatching(/^sha256:/u),
+        },
+      })
+      expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(2)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('fails closed when the native holdout reviewer Evidence is missing', async () => {
+    const mounted = await mountSourceFidelityShadowRuntime(
+      'source-fidelity-review-evidence-missing',
+      3,
+    )
+    const project = mounted.harness.ctx.tianwenEvidence.project.bind(
+      mounted.harness.ctx.tianwenEvidence,
+    )
+    vi.spyOn(mounted.harness.ctx.tianwenEvidence, 'project').mockImplementation(session =>
+      String(session.id) === mounted.input.tasks[0]!.reviewSessionId
+        ? []
+        : project(session))
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledShadow(
+        mounted.input,
+      )
+
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        stop: { stage: 'reviewer', reasonCode: 'evidence-mismatch' },
+      })
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillShadowResults())
+        .toEqual([])
+      const shadow = mounted.harness.ctx.tianwenEvolution.listControlledSkillShadows()[0]!
+      expect(mounted.harness.ctx.tianwenEvolution
+        .getControlledSkillShadowReviewObservation(shadow.shadowId)).toBeUndefined()
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects a swapped accepted-material binding before recording a v3 Shadow result', async () => {
+    const mounted = await mountSourceFidelityShadowRuntime(
+      'source-fidelity-swapped-accepted-material',
+      3,
+    )
+    const write = mounted.harness.ctx.tianwenEvolution
+      .recordControlledSkillShadowReviewObservation.bind(
+        mounted.harness.ctx.tianwenEvolution,
+      )
+    vi.spyOn(
+      mounted.harness.ctx.tianwenEvolution,
+      'recordControlledSkillShadowReviewObservation',
+    ).mockImplementation(input => write({
+      ...input,
+      acceptedMaterialDigest: sha256('stale accepted material'),
+    }))
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledShadow(
+        mounted.input,
+      )
+
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        stop: { stage: 'postflight', reasonCode: 'run-fact-mismatch' },
+      })
+      const shadow = mounted.harness.ctx.tianwenEvolution.listControlledSkillShadows()[0]!
+      expect(mounted.harness.ctx.tianwenEvolution
+        .getControlledSkillShadowReviewObservation(shadow.shadowId)).toBeUndefined()
+      expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillShadowResults())
+        .toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('resumes from a durable v3 review observation without repeating native Runs', async () => {
+    const mounted = await mountSourceFidelityShadowRuntime(
+      'source-fidelity-review-recovery',
+      3,
+    )
+    const write = mounted.harness.ctx.tianwenEvolution.recordControlledSkillShadowResult.bind(
+      mounted.harness.ctx.tianwenEvolution,
+    )
+    let failFirstWrite = true
+    vi.spyOn(
+      mounted.harness.ctx.tianwenEvolution,
+      'recordControlledSkillShadowResult',
+    ).mockImplementation(input => {
+      if (failFirstWrite) {
+        failFirstWrite = false
+        throw new Error('controlled result write unavailable')
+      }
+      return write(input)
+    })
+    try {
+      const first = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledShadow(
+        mounted.input,
+      )
+      expect(first).toMatchObject({
+        state: 'stopped',
+        stop: { stage: 'postflight', reasonCode: 'run-fact-mismatch' },
+      })
+      const requestCount = mounted.adapter.requests.length
+      const shadow = mounted.harness.ctx.tianwenEvolution.listControlledSkillShadows()[0]!
+      expect(mounted.harness.ctx.tianwenEvolution
+        .getControlledSkillShadowReviewObservation(shadow.shadowId)).toBeDefined()
+
+      const replay = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledShadow(
+        mounted.input,
+      )
+
+      expect(replay).toMatchObject({
+        state: 'terminal',
+        result: {
+          schemaVersion: 'tianwen.controlled-skill-shadow-result.v3',
+          mechanismVerdict: 'pass',
+          promotionEligibility: 'eligible-for-project-promotion',
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(requestCount)
+    } finally {
+      mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()
     }
   })

@@ -126,10 +126,13 @@ import type {
   ControlledSkillShadowId,
   ControlledSkillShadowPlan,
   ControlledSkillShadowReceipt,
+  ControlledSkillShadowReviewObservation,
+  ControlledSkillShadowReviewObservationReceipt,
   ControlledSkillShadowResult,
   ControlledSkillShadowResultReceipt,
   OpenControlledSkillShadowInput,
   RecordControlledSkillShadowResultInput,
+  RecordControlledSkillShadowReviewObservationInput,
 } from './controlled-skill-shadow.js'
 import type {
   BeginControlledSkillTransitionInput,
@@ -690,6 +693,19 @@ export class TianwenEvolutionService extends Service {
 
   listControlledSkillShadows(): readonly ControlledSkillShadowPlan[] {
     return this.state().ledger.listControlledSkillShadows()
+  }
+
+  recordControlledSkillShadowReviewObservation(
+    input: RecordControlledSkillShadowReviewObservationInput,
+  ): ControlledSkillShadowReviewObservationReceipt {
+    return this.formalWrite(() =>
+      this.state().ledger.recordControlledSkillShadowReviewObservation(input))
+  }
+
+  getControlledSkillShadowReviewObservation(
+    shadowId: ControlledSkillShadowId,
+  ): ControlledSkillShadowReviewObservation | undefined {
+    return this.state().ledger.getControlledSkillShadowReviewObservation(shadowId)
   }
 
   recordControlledSkillShadowResult(

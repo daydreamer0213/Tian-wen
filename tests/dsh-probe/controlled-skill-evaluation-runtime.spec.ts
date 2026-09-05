@@ -21,6 +21,9 @@ import {
 import type { GenerateOptions, StreamChunk } from '@tianwen/dsh-compat'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
   learningSessionLifecycleFingerprint,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
@@ -134,20 +137,31 @@ class ControlledScriptedAdapter extends ScriptedAdapter {
 function seedControlledCandidate(
   evolution: Awaited<ReturnType<typeof mountPersistentHarness>>['ctx']['tianwenEvolution'],
   protocol: Parameters<typeof evolution.freezeControlledSkillEvalProtocol>[0]['protocol'],
+  sourceFidelity = false,
 ) {
   const seeded = [
     ['first', 'not-met', 'a'],
     ['second', 'not-met', 'b'],
     ['counterexample', 'met', 'c'],
   ] as const
-  const runs = seeded.map(([suffix, verdict, marker]) => {
+  const runs = seeded.map(([suffix, verdict, marker], index) => {
     const sessionId = `session:controlled-runtime-seed:${suffix}`
+    const lifecycle = learningSessionLifecycleFingerprint({
+      sessionId,
+      createdAt: index + 1,
+    })
     const binding = evolution.recordRunBinding({
       goalRef: 'goal:controlled-runtime-seed',
       taskRef: `task:controlled-runtime-seed:${suffix}`,
       sessionId,
       scopeKey: 'project:tianwen/capability:controlled-runtime-summary',
       acceptanceContract: acceptance,
+      ...(sourceFidelity && index === 1
+        ? {
+            acceptanceSubjectDigest: protocol.tasks[0]!.acceptanceSubjectDigest,
+            sessionLifecycleFingerprint: lifecycle,
+          }
+        : {}),
     })
     const manifest = evolution.recordRunSkillManifest({ runId: binding.runId, skill: parentSkill })
     const sessionDigest = sha256(`seed-session:${marker}`)
@@ -171,18 +185,80 @@ function seedControlledCandidate(
       skillResultSeq: 11,
       acceptanceCallSeq: 12,
     })
-    return { binding, outcome }
+    return { binding, outcome, lifecycle, evidenceId, sessionDigest }
   })
-  const ticketId = runs[1]!.outcome.ticketId!
+  let ticketId = runs[1]!.outcome.ticketId!
+  let analysisId: string | undefined
+  if (sourceFidelity) {
+    const sourceSessionId = 'session:controlled-runtime-seed:second'
+    evolution.recordLearningAnalysisConsent({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    const feedback = evolution.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: sourceSessionId,
+        messageId: 'controlled-runtime-source-message',
+        feedbackVersion: 'controlled-runtime-source-feedback-v1',
+        rating: 'negative',
+        note: 'Keep each claim faithful to the supplied source.',
+        scopeKey: 'project:tianwen/capability:controlled-runtime-summary',
+        sessionDigest: runs[1]!.sessionDigest,
+        evidenceIds: [runs[1]!.evidenceId],
+      },
+      sessionLifecycleFingerprint: runs[1]!.lifecycle,
+      analysisConsentRevision: 1,
+    })
+    ;(protocol as { sourceFidelity: { source: { signalId: string } } })
+      .sourceFidelity.source.signalId = feedback.signalId!
+    ticketId = feedback.ticketId!
+    const analysis = evolution.requestLearningAnalysis({
+      ticketId,
+      sessionId: sourceSessionId,
+      messageId: 'controlled-runtime-source-message',
+      feedbackVersion: 'controlled-runtime-source-feedback-v1',
+      consentRevision: 1,
+      parentSessionId: sourceSessionId,
+    })
+    analysisId = analysis.analysisId
+    evolution.recordLearningAnalysisChildStarted({
+      analysisId,
+      parentSessionId: analysis.parentSessionId,
+      childSessionId: analysis.childSessionId,
+    })
+    evolution.recordLearningAnalysisSubmission({
+      analysisId,
+      childSessionId: analysis.childSessionId,
+      submission: {
+        verdict: 'skill-change',
+        hypothesis: 'The parent loses source boundaries.',
+        lesson: {
+          claim: 'Keep each claim faithful to the source.',
+          when: 'Summarizing bounded source material.',
+          notWhen: 'Performing raw extraction only.',
+        },
+        candidatePatch: {
+          description: parentSkill.description,
+          whenToUse: parentSkill.whenToUse,
+          content: '# Controlled summary\n\nState the verified result before interpretation.',
+        },
+        supportingEvidenceIds: [runs[1]!.evidenceId],
+        counterevidenceIds: [],
+      },
+    })
+  }
   const frozen = evolution.freezeControlledSkillEvalProtocol({
     ticketId,
-    evidencePurpose: 'development-only-synthetic-defect',
+    evidencePurpose: sourceFidelity ? 'controlled-product' : 'development-only-synthetic-defect',
     protocol,
   })
-  const opened = evolution.openLearningCase({
-    ticketId,
-    counterevidenceRunIds: [runs[2]!.binding.runId],
-  })
+  const opened = sourceFidelity
+    ? evolution.openLearningAnalysisCase(analysisId!)
+    : evolution.openLearningCase({
+        ticketId,
+        counterevidenceRunIds: [runs[2]!.binding.runId],
+      })
   const learningCase = evolution.getLearningCase(opened.caseId)!
   const attribution = evolution.recordAttribution({
     caseId: learningCase.caseId,
@@ -240,6 +316,7 @@ async function mountControlledRuntime(
     readonly includeWorkspacePolicyContext?: boolean
     readonly includeRoleSpecificPromptDrift?: boolean
     readonly aggregateEvaluatorSession?: boolean
+    readonly sourceFidelity?: boolean
   } = {},
 ) {
   const root = fixtureRoot(name)
@@ -386,16 +463,18 @@ async function mountControlledRuntime(
       verifierArguments,
       stopCondition,
       evaluatorMaterialContract,
-      baselineSessionId: `session:controlled-eval:fixture:${taskType}:baseline`,
-      candidateSessionId: `session:controlled-eval:fixture:${taskType}:candidate`,
+      baselineSessionId: `session:controlled-eval:${options.sourceFidelity === true ? 'product' : 'fixture'}:${taskType}:baseline`,
+      candidateSessionId: `session:controlled-eval:${options.sourceFidelity === true ? 'product' : 'fixture'}:${taskType}:candidate`,
       evaluatorSessionId: options.aggregateEvaluatorSession === true
-        ? 'session:controlled-eval:fixture:aggregate:evaluator'
-        : `session:controlled-eval:fixture:${taskType}:evaluator`,
+        ? `session:controlled-eval:${options.sourceFidelity === true ? 'product' : 'fixture'}:aggregate:evaluator`
+        : `session:controlled-eval:${options.sourceFidelity === true ? 'product' : 'fixture'}:${taskType}:evaluator`,
       toolSchemaDigest,
     }
   })
   const protocol = {
-    rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+    rubricDigest: options.sourceFidelity === true
+      ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+      : CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
     tasks: tasks.map(task => ({
       taskId: task.taskId,
       taskType: task.taskType,
@@ -426,8 +505,58 @@ async function mountControlledRuntime(
       }))),
       retryPolicyDigest: sha256(retryPolicy),
     },
+    ...(options.sourceFidelity === true
+      ? {
+          sourceFidelity: {
+            policyVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion,
+            policyDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+            packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+            source: {
+              signalId: `signal:${'0'.repeat(64)}`,
+              sessionId: 'session:controlled-runtime-seed:second',
+              messageId: 'controlled-runtime-source-message',
+              feedbackVersion: 'controlled-runtime-source-feedback-v1',
+              sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+                sessionId: 'session:controlled-runtime-seed:second',
+                createdAt: 2,
+              }),
+              sessionDigest: sha256('seed-session:b'),
+              evidenceSetDigest: sha256([sha256('seed-evidence:b')]),
+              acceptanceSubjectDigest: sha256(tasks[0]!.verifierArguments),
+              packetDigest: sha256(tasks[0]!.input),
+            },
+            holdout: {
+              task: {
+                taskId: 'shadow-task:controlled-runtime-source-fidelity-holdout',
+                goalDigest: sha256('controlled-runtime-holdout-goal'),
+                inputDigest: sha256('controlled-runtime-holdout-input'),
+                workspaceSnapshotDigest: sha256('controlled-runtime-holdout-workspace'),
+                toolSchemaDigest,
+                authorizationDigest: sha256('controlled-runtime-holdout-authorization'),
+                verifierContractDigest: sha256('controlled-runtime-holdout-verifier'),
+                stopConditionDigest: sha256('controlled-runtime-holdout-stop'),
+                evaluatorMaterialContractDigest: sha256('controlled-runtime-holdout-material'),
+                acceptanceContract: acceptance,
+                acceptanceSubjectDigest: sha256('controlled-runtime-holdout-subject'),
+                allowedTools,
+                stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
+              },
+              review: {
+                rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+                configurationDigest: sha256('controlled-runtime-review-configuration'),
+                materialContractDigest: sha256('controlled-runtime-review-material'),
+                evidenceContractDigest: sha256('controlled-runtime-review-evidence'),
+              },
+            },
+          },
+        }
+      : {}),
   }
-  const seeded = seedControlledCandidate(harness.ctx.tianwenEvolution, protocol)
+  const seeded = seedControlledCandidate(
+    harness.ctx.tianwenEvolution,
+    protocol,
+    options.sourceFidelity === true,
+  )
   return {
     adapter,
     disposeParent,
@@ -501,12 +630,13 @@ function successfulEvaluatorScript() {
   ))
 }
 
-function aggregateEvaluatorSubmission() {
+function aggregateEvaluatorSubmission(sourceFidelity = false) {
   const dimensions = {
     relevance: 3,
     correctnessReasoning: 3,
     clarityUsability: 3,
     scopeRestraint: 3,
+    ...(sourceFidelity ? { sourceFidelity: 3 } : {}),
   }
   return {
     evaluations: taskTypes.map(taskType => ({
@@ -671,6 +801,31 @@ describe('controlled Skill evaluation Runtime', () => {
       expect(harness.ctx.tianwenEvolution.listControlledSkillEvaluations()).toEqual([])
     } finally {
       await harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('reports research-tool-presence when packet input disagrees with the frozen tool surface', async () => {
+    const mounted = await mountControlledRuntime('research-tool-presence-detail')
+    const input = structuredClone(mounted.input) as unknown as {
+      tasks: Array<Record<string, unknown>>
+    }
+    input.tasks[0]!.researchPacket = `<research_packet>
+[F:fact|required] The verified result is stable.
+</research_packet>`
+    const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        input as never,
+      )).rejects.toMatchObject({
+        code: 'tool-surface-mismatch',
+        detail: 'research-tool-presence',
+      })
+      expect(create).not.toHaveBeenCalled()
+      expect(mounted.adapter.requests).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      mounted.disposeVerifier()
+      await mounted.harness.ctx.fiber.dispose()
     }
   })
 
@@ -912,6 +1067,73 @@ describe('controlled Skill evaluation Runtime', () => {
       expect(new Set(observations.map(item => item.requestDigest)).size).toBe(1)
       expect(new Set(observations.map(item => item.evidenceId)).size).toBe(1)
       expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(11)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('sends clean v3 ID ties to one native aggregate evaluator and rejects false fidelity improvement', async () => {
+    const mounted = await mountControlledRuntime(
+      'source-fidelity-id-tie',
+      [
+        ...blindSafeArmScript(),
+        toolCallResponse(
+          'source-fidelity-aggregate-score',
+          'submit_blind_evaluation',
+          aggregateEvaluatorSubmission(true),
+        ),
+      ],
+      {
+        aggregateEvaluatorSession: true,
+        baselineImprovementRequired: false,
+        sourceFidelity: true,
+      },
+    )
+    try {
+      const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )
+      expect(arms.state, JSON.stringify(arms)).toBe('awaiting-evaluator')
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+        evaluatorInput(mounted.input, arms.evaluationId),
+      )
+
+      expect(receipt).toMatchObject({
+        state: 'terminal',
+        completedTaskIds: mounted.input.tasks.map(task => task.taskId),
+        result: {
+          schemaVersion: 'tianwen.controlled-skill-evaluation-result.v3',
+          mechanismVerdict: 'rejected',
+          reasonCode: 'original-source-fidelity-not-improved',
+        },
+      })
+      expect(mounted.adapter.requests).toHaveLength(31)
+      const [request] = mounted.adapter.requests.slice(30)
+      expect(request?.tools?.[0]?.parameters).toMatchObject({
+        properties: {
+          evaluations: {
+            items: {
+              properties: {
+                scores: {
+                  properties: {
+                    x: { properties: { sourceFidelity: { enum: [0, 1, 2, 3, 4] } } },
+                    y: { properties: { sourceFidelity: { enum: [0, 1, 2, 3, 4] } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      })
+      const envelopeText = request?.messages.findLast(message => message.role === 'user')
+        ?.content.find(block => block.type === 'text')
+      const envelope = JSON.parse(envelopeText?.type === 'text' ? envelopeText.text : '')
+      expect(envelope.evaluations[0]).toMatchObject({
+        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        rubric: { dimensions: expect.arrayContaining(['source-fidelity']) },
+      })
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()
