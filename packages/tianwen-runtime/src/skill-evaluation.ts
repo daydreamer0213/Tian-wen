@@ -2971,6 +2971,7 @@ export class TianwenSkillEvaluationService extends Service {
       sessionId: input.plan.review.sessionId,
       config: input.config,
       forbidden: input.forbidden,
+      expectedEnvelopeDigest: sha256(envelope),
       requests: [],
       active: false,
       deadline: 0,
@@ -3005,6 +3006,7 @@ export class TianwenSkillEvaluationService extends Service {
         || schemas[0]?.name !== 'submit_holdout_review') {
         return { reasonCode: 'request-contract-mismatch' }
       }
+      state.expectedToolSchemaDigest = sha256(schemas)
       this.shadowReviewers.set(state.sessionId, state)
       const startedAt = Date.now()
       state.active = true
@@ -4952,7 +4954,9 @@ interface ControlledShadowReviewState {
   readonly sessionId: string
   readonly config: LlmCallConfig
   readonly forbidden: ReadonlySet<string>
+  readonly expectedEnvelopeDigest: Sha256Digest
   readonly requests: GenerateOptions[]
+  expectedToolSchemaDigest?: Sha256Digest
   agent?: AgentHandle['agent']
   active: boolean
   deadline: number
@@ -5021,7 +5025,9 @@ function controlledShadowReviewRequestReason(
     || request.purpose !== undefined
     || !callConfigEquals(requestConfig(request), state.config)
     || request.tools?.length !== 1
-    || request.tools[0]?.name !== 'submit_holdout_review') {
+    || request.tools[0]?.name !== 'submit_holdout_review'
+    || sha256(request.tools) !== state.expectedToolSchemaDigest
+    || controlledShadowReviewEnvelopeDigest(request) !== state.expectedEnvelopeDigest) {
     return 'request-contract-mismatch'
   }
   if (request.messages.some(message => record(message.source)?.kind === 'skill-catalog')
@@ -5029,6 +5035,21 @@ function controlledShadowReviewRequestReason(
     return 'identity-exposed'
   }
   return undefined
+}
+
+function controlledShadowReviewEnvelopeDigest(
+  request: GenerateOptions,
+): Sha256Digest | undefined {
+  const messages = request.messages.filter(message => message.role === 'user')
+  const content = messages[0]?.content
+  if (messages.length !== 1 || content?.length !== 1 || content[0]?.type !== 'text') {
+    return undefined
+  }
+  try {
+    return sha256(JSON.parse(content[0].text) as unknown)
+  } catch {
+    return undefined
+  }
 }
 
 function controlledShadowReviewTool(state: ControlledShadowReviewState) {

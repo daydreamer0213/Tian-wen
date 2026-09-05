@@ -571,6 +571,7 @@ async function mountShadowRuntime(
 async function mountSourceFidelityShadowRuntime(
   name: string,
   reviewSourceFidelity = 2,
+  reviewRequestMutation?: 'packet' | 'submission' | 'schema',
 ) {
   const root = fixtureRoot(name)
   const harness = await mountPersistentHarness(join(root, 'sessions'), [])
@@ -609,7 +610,49 @@ async function mountSourceFidelityShadowRuntime(
   harness.ctx.llm.registerAdapter([CONTROLLED_PROVIDER], adapter)
   const selection = { provider: CONTROLLED_PROVIDER, model: CONTROLLED_MODEL }
   harness.ctx.provide('agentDefaultModel', { currentSelection: () => ({ ...selection }) })
+  let reviewRequestWasMutated = false
   await apply(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+  if (reviewRequestMutation !== undefined) {
+    const createAgent = harness.ctx.agents.create.bind(harness.ctx.agents)
+    vi.spyOn(harness.ctx.agents, 'create').mockImplementation(async options => {
+      const handle = await createAgent(options)
+      if (!String(handle.agent.id).includes('holdout-review')) return handle
+      const followup = handle.agent.followup.bind(handle.agent)
+      vi.spyOn(handle.agent, 'followup').mockImplementation(message => {
+        reviewRequestWasMutated = true
+        if (reviewRequestMutation === 'schema') {
+          const assemble = handle.agent.ctx.systemPrompt.assemble
+            .bind(handle.agent.ctx.systemPrompt)
+          vi.spyOn(handle.agent.ctx.systemPrompt, 'assemble').mockImplementation(async context => {
+            const assembly = await assemble(context)
+            return {
+              ...assembly,
+              tools: assembly.tools.map((schema, index) => index === 0
+                ? { ...schema, description: 'Changed review schema.' }
+                : schema),
+            }
+          })
+          return followup(message)
+        }
+        const changed = structuredClone(message)
+        const block = changed.content.find(item => item.type === 'text')
+        if (block?.type === 'text') {
+          const envelope = JSON.parse(block.text) as {
+            packet: string
+            submission: { summary: string }
+          }
+          if (reviewRequestMutation === 'packet') {
+            envelope.packet = '<research_packet>changed packet</research_packet>'
+          } else {
+            envelope.submission.summary = 'Changed accepted submission.'
+          }
+          block.text = JSON.stringify(envelope)
+        }
+        return followup(changed)
+      })
+      return handle
+    })
+  }
 
   const productAcceptance = {
     source: 'dsh-tool-result',
@@ -749,6 +792,7 @@ async function mountSourceFidelityShadowRuntime(
     adapter,
     disposeParent,
     harness,
+    reviewRequestWasMutated: () => reviewRequestWasMutated,
     input: {
       evaluationId: seeded.plan.evaluationId,
       tasks: [{
@@ -1003,6 +1047,35 @@ describe('controlled Skill Shadow Runtime', () => {
       await mounted.harness.ctx.fiber.dispose()
     }
   })
+
+  it.each(['packet', 'submission', 'schema'] as const)(
+    'rejects native reviewer %s drift before recording governed facts',
+    async mutation => {
+      const mounted = await mountSourceFidelityShadowRuntime(
+        `source-fidelity-review-request-${mutation}-drift`,
+        3,
+        mutation,
+      )
+      try {
+        const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledShadow(
+          mounted.input,
+        )
+        expect(mounted.reviewRequestWasMutated()).toBe(true)
+        expect(receipt).toMatchObject({
+          state: 'stopped',
+          stop: { stage: 'reviewer', reasonCode: 'request-contract-mismatch' },
+        })
+        const shadow = mounted.harness.ctx.tianwenEvolution.listControlledSkillShadows()[0]!
+        expect(mounted.harness.ctx.tianwenEvolution
+          .getControlledSkillShadowReviewObservation(shadow.shadowId)).toBeUndefined()
+        expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillShadowResults())
+          .toEqual([])
+      } finally {
+        mounted.disposeParent()
+        await mounted.harness.ctx.fiber.dispose()
+      }
+    },
+  )
 
   it('fails closed when the native holdout reviewer Evidence is missing', async () => {
     const mounted = await mountSourceFidelityShadowRuntime(

@@ -218,3 +218,101 @@ left untouched and are excluded from this task's commit.
   authenticity complexity, so the controller's planned whole-task most-capable
   review should scrutinize request/evidence/material recovery before any genuine
   UI acceptance. Real-model efficacy and promotion remain deliberately unclaimed.
+
+## Fix round 1 — exact native reviewer request binding
+
+The independent review found that the reviewer request guard bound the Session,
+route and tool name but not the exact material or tool schema. That allowed a
+different non-forbidden packet/submission/rubric envelope, or a same-name changed
+tool, to be scored while the observation retained the original Run and accepted
+material digest.
+
+The repair keeps two expected digests in the existing ephemeral reviewer state:
+the canonical envelope constructed from the frozen packet, accepted canonical
+submission and v3 rubric, plus the sole tool schema projected from the created
+reviewer Agent. The existing `llm/stream` guard now hashes the actual native
+request's single user envelope and full tool array and rejects any mismatch before
+recording the request. No persisted schema, retry/history path, v2 path, provider,
+permission or material limit changed.
+
+The three tests mutate the independent reviewer immediately before DSH builds its
+frozen `GenerateOptions`: packet and submission through the reviewer follow-up,
+and the tool description through native prompt assembly after the production
+precheck. This exercises the actual request boundary while leaving model config
+and tool name unchanged.
+
+### RED
+
+```text
+D:\hermes\node\node.exe D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs exec vitest run tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts -t "rejects native reviewer .* drift" --reporter=dot
+Test Files 1 failed (1)
+Tests 3 failed | 32 skipped (35)
+All packet, submission and schema cases received state: terminal instead of the
+required reviewer/request-contract-mismatch stop.
+```
+
+### GREEN and covering gates
+
+```text
+D:\hermes\node\node.exe D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs exec vitest run tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts -t "rejects native reviewer .* drift" --reporter=dot
+Test Files 1 passed (1)
+Tests 3 passed | 32 skipped (35)
+
+D:\hermes\node\node.exe D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs exec vitest run tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts --reporter=dot
+Test Files 1 passed (1)
+Tests 35 passed (35)
+```
+
+The six-suite covering run passed all five Runtime/Shadow/activation/orchestrator/
+native integration suites but initially found three stale built-artifact failures:
+
+```text
+Test Files 1 failed | 5 passed (6)
+Tests 3 failed | 268 passed (271)
+Failures: runtime and status outputs still contained workspace imports, and the
+package tarball was missing one declaration from the stale dist tree.
+```
+
+After the required force build and runtime-bundle rebuild, the artifact suite was
+clean:
+
+```text
+D:\hermes\node\node.exe D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs exec tsc -b packages/tianwen-desktop-host/tsconfig.json packages/tianwen-dsh-compat/tsconfig.json packages/tianwen-dsh-probe-bundle/tsconfig.json packages/tianwen-evaluator-python/tsconfig.json packages/tianwen-evidence/tsconfig.json packages/tianwen-evolution/tsconfig.json packages/tianwen-runtime-bundle/tsconfig.json packages/tianwen-runtime/tsconfig.json --pretty false --force
+exit 0, no diagnostics
+
+D:\hermes\node\node.exe D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs --filter @tianwen/runtime-bundle run build
+exit 0; Runtime, status and controlled-lifecycle artifacts rebuilt successfully
+
+D:\hermes\node\node.exe D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs exec vitest run tests/dsh-migration/runtime-bundle.spec.ts --reporter=dot
+Test Files 1 passed (1)
+Tests 64 passed (64)
+```
+
+Final type/public API/diff gates:
+
+```text
+PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false D:\hermes\node\node.exe scripts/typecheck-packages.mjs
+exit 0, no diagnostics
+
+D:\hermes\node\node.exe D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs run check:no-private-dsh-imports
+privateImportViolations: []
+
+git diff --check
+exit 0, no output
+```
+
+One first root typecheck invocation omitted the required
+`PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false`; pnpm aborted before changing or
+installing dependencies with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`. The
+corrected command above passed.
+
+### Fix self-review and residual concern
+
+- Packet, submission and rubric are bound together by the exact canonical
+  envelope digest; the complete single visible tool array is bound independently.
+- Each drift case stops before a review observation and before any Shadow result,
+  so no passing or other governed Shadow effect can be produced.
+- The test seam changes only the native reviewer request construction and retains
+  the ordinary Agent, provider, route, tool execution and Evidence path.
+- The reviewer's cold-restart coverage suggestion remains a deferred Minor. This
+  fix does not call a same-Context retry a cold restart and adds no such claim.
