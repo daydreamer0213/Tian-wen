@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@tianwen/dsh-compat'
 import { sha256 } from '../../packages/tianwen-evolution/dist/index.js'
+import { ControlledSkillEvaluationPreflightError } from '../../packages/tianwen-runtime/dist/index.js'
 import { LearningExplorationInterruptedError } from '../../packages/tianwen-runtime-bundle/src/learning-exploration.js'
 
 import {
@@ -310,17 +311,102 @@ describe('durable learning-loop phase table', () => {
   })
 
   it('records an infrastructure failure at the current durable phase instead of bypassing a gate', async () => {
+    const failure = new Error('private diagnostic detail must not be logged')
     const fail = vi.fn()
     await expect(runLearningLoopPhase({
       status: { ...base, phase: 'candidate-ready' },
       hasActiveSupport: async () => true,
-      evaluate: async () => { throw new Error('verification fixture unavailable') },
+      evaluate: async () => { throw failure },
       fail,
     })).resolves.toBeUndefined()
     expect(fail).toHaveBeenCalledWith(expect.objectContaining({
       analysisId: base.analysisId,
       phase: 'candidate-ready',
-    }))
+    }), failure)
+  })
+
+  it.each([
+    ['allowlisted preflight error', Object.assign(
+      new ControlledSkillEvaluationPreflightError('task-package-mismatch'),
+      { message: 'secret-like evaluator detail', cause: 'secret-like evaluator cause' },
+    ), 'task-package-mismatch'],
+    ['ordinary error', new Error('secret-like ordinary detail'), 'unclassified'],
+    ['plain coded object', { code: 'task-package-mismatch', message: 'secret-like plain detail' }, 'unclassified'],
+    ['non-allowlisted preflight error', Object.assign(
+      new ControlledSkillEvaluationPreflightError('task-package-mismatch'),
+      { code: 'secret-like-non-allowlisted-code' },
+    ), 'unclassified'],
+  ])('records the durable Candidate failure and logs only a safe code for %s', async (_name, failure, expectedCode) => {
+    const ctx = new Context()
+    const diagnostics: string[] = []
+    const recordLearningAnalysisFailed = vi.fn()
+    const evaluate = vi.fn(async () => { throw failure })
+    const promote = vi.fn()
+    ctx.provide('tianwenEvolution', {
+      getLearningAnalysis: () => ({ ...base, phase: 'candidate-ready' }),
+      listLearningAnalyses: () => [],
+      hasLearningAnalysisActiveSupport: () => true,
+      getLearningAnalysisConsent: () => ({ enabled: true, revision: 1 }),
+      recordLearningAnalysisFailed,
+    } as never)
+    ctx.logger.exporter({
+      levels: { default: 2 },
+      export: message => { diagnostics.push(message.args.map(String).join(' ')) },
+    })
+    const service = new TianwenLearningLoopService(ctx, {
+      executor: {
+        freezeProtocol: vi.fn(), materializeCandidate: vi.fn(), evaluate,
+        promote, rollback: vi.fn(), report: vi.fn(),
+      },
+    })
+
+    try {
+      await service.schedule(base.analysisId)
+      expect(recordLearningAnalysisFailed).toHaveBeenCalledWith({
+        analysisId: base.analysisId,
+        resumePhase: 'candidate-ready',
+      })
+      expect(evaluate).toHaveBeenCalledOnce()
+      expect(promote).not.toHaveBeenCalled()
+      const diagnostic = diagnostics.join(' ')
+      expect(diagnostic).toContain(expectedCode)
+      expect(diagnostic).not.toContain('secret-like')
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps the durable Candidate failure when safe diagnostic logging fails', async () => {
+    const ctx = new Context()
+    const recordLearningAnalysisFailed = vi.fn()
+    ctx.provide('tianwenEvolution', {
+      getLearningAnalysis: () => ({ ...base, phase: 'candidate-ready' }),
+      listLearningAnalyses: () => [],
+      hasLearningAnalysisActiveSupport: () => true,
+      getLearningAnalysisConsent: () => ({ enabled: true, revision: 1 }),
+      recordLearningAnalysisFailed,
+    } as never)
+    ctx.logger.exporter({
+      levels: { default: 2 },
+      export: () => { throw new Error('logger unavailable') },
+    })
+    const service = new TianwenLearningLoopService(ctx, {
+      executor: {
+        freezeProtocol: vi.fn(), materializeCandidate: vi.fn(),
+        evaluate: async () => { throw new ControlledSkillEvaluationPreflightError('task-package-mismatch') },
+        promote: vi.fn(), rollback: vi.fn(), report: vi.fn(),
+      },
+    })
+
+    try {
+      await expect(service.schedule(base.analysisId)).resolves.toBeUndefined()
+      expect(recordLearningAnalysisFailed).toHaveBeenCalledWith({
+        analysisId: base.analysisId,
+        resumePhase: 'candidate-ready',
+      })
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('stops the bound native child even when feedback reconciliation has already invalidated the analysis', async () => {

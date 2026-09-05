@@ -1,6 +1,7 @@
 /** The durable Evolution record is the queue; this service owns no jobs. */
 import { Service, SessionId } from '@tianwen/dsh-compat'
 import type { Agent, Context } from '@tianwen/dsh-compat'
+import { ControlledSkillEvaluationPreflightError } from '@tianwen/runtime'
 import {
   sha256,
   type LearningExplorationStatus,
@@ -707,6 +708,20 @@ function preCandidateStatus(status: LearningLoopPhaseStatus): LearningLoopPhaseS
   return frozen
 }
 
+const preflightCodes = [
+  'candidate-chain-mismatch', 'task-package-mismatch',
+  'configured-route-mismatch', 'retry-policy-mismatch',
+  'tool-surface-mismatch', 'session-not-empty',
+  'persistence-unavailable', 'scripted-boundary-mismatch',
+  'root-skill-mismatch',
+] as const
+
+function safePreflightCode(error: unknown): typeof preflightCodes[number] | 'unclassified' {
+  return error instanceof ControlledSkillEvaluationPreflightError
+    && preflightCodes.includes(error.code)
+    ? error.code : 'unclassified'
+}
+
 /** One live-parent admission lane per durable analysis id; no in-memory queue. */
 export class TianwenLearningLoopService extends Service {
   static inject = [
@@ -877,10 +892,17 @@ export class TianwenLearningLoopService extends Service {
         kind: 'user', parentSessionId: SessionId(String(current.parentSessionId)),
       }),
       invalidate: current => this.ctx.tianwenEvolution.recordLearningAnalysisInvalidated({ analysisId: current.analysisId as never }),
-      fail: async current => {
+      fail: async (current, error) => {
         this.ctx.tianwenEvolution.recordLearningAnalysisFailed({
           analysisId: current.analysisId as never, resumePhase: current.phase as LearningAnalysisRetryPhase,
         })
+        try {
+          this.ctx.logger('tianwen-learning').warn(
+            `Learning loop failure diagnostic: ${safePreflightCode(error)}`,
+          )
+        } catch {
+          // Diagnostics are best-effort; the durable failure is authoritative.
+        }
       },
     })
   }
@@ -1004,7 +1026,7 @@ export interface LearningLoopPhaseOperations {
   readonly rollback?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
   readonly report?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
   readonly interruptChild?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
-  readonly fail?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
+  readonly fail?: (status: LearningLoopPhaseStatus, error: unknown) => unknown | Promise<unknown>
   readonly invalidate?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
 }
 function operation<T extends keyof LearningLoopPhaseOperations>(input: LearningLoopPhaseOperations, name: T): Exclude<LearningLoopPhaseOperations[T], undefined> {
@@ -1061,6 +1083,6 @@ export async function runLearningLoopPhase(input: LearningLoopPhaseOperations): 
   } catch (error) {
     if (status.phase === 'failed' || input.fail === undefined
       || !['pending-parent', 'running', 'candidate-ready', 'shadow-ready', 'promoted'].includes(status.phase)) throw error
-    await input.fail(status)
+    await input.fail(status, error)
   }
 }
