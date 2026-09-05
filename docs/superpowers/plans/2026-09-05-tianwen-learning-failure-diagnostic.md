@@ -32,7 +32,7 @@
 - Produces: `runLearningLoopPhase` fail callback `(status: LearningLoopPhaseStatus, error: unknown) => unknown | Promise<unknown>`, plus a safe diagnostic in the normal service fail handler.
 - Existing one-argument callback implementations remain source-compatible.
 
-- [ ] **Step 1: Write the failing forwarding regression.** Extend the existing infrastructure-failure case so a specific Error from `evaluate` must reach `fail` unchanged, without allowing the gate to continue:
+- [x] **Step 1: Write the failing forwarding regression.** Extend the existing infrastructure-failure case so a specific Error from `evaluate` must reach `fail` unchanged, without allowing the gate to continue:
 
 ```ts
 const failure = new Error('private diagnostic detail must not be logged')
@@ -48,9 +48,9 @@ expect(fail).toHaveBeenCalledWith(expect.objectContaining({
 }), failure)
 ```
 
-- [ ] **Step 2: Add a service-boundary regression using the existing service/context test setup.** Throw `new ControlledSkillEvaluationPreflightError('task-package-mismatch')` from the evaluator, with an additional secret-like message/cause property. Assert the existing durable `recordLearningAnalysisFailed` receives the unchanged candidate-ready resume phase, no promote/evaluator-success path executes, and the collected host diagnostic contains `task-package-mismatch` but no secret-like sentinel. Test an ordinary Error, a plain object with `code: 'task-package-mismatch'`, and an actual error instance with a non-allowlisted code: they must log only `unclassified`. Make logger failure leave the durable failure intact. No source-text grep tests or production test-only cleanup APIs.
+- [x] **Step 2: Add a service-boundary regression using the existing service/context test setup.** Throw `new ControlledSkillEvaluationPreflightError('task-package-mismatch')` from the evaluator, with an additional secret-like message/cause property. Assert the existing durable `recordLearningAnalysisFailed` receives the unchanged candidate-ready resume phase, no promote/evaluator-success path executes, and the collected host diagnostic contains `task-package-mismatch` but no secret-like sentinel. Test an ordinary Error, a plain object with `code: 'task-package-mismatch'`, and an actual error instance with a non-allowlisted code: they must log only `unclassified`. Make logger failure leave the durable failure intact. No source-text grep tests or production test-only cleanup APIs.
 
-- [ ] **Step 3: Run the focused suite and preserve RED evidence.** From the project root, use the prepared Node/pnpm paths and D: probe root:
+- [x] **Step 3: Run the focused suite and preserve RED evidence.** From the project root, use the prepared Node/pnpm paths and D: probe root:
 
 ```powershell
 $env:PATH='D:\hermes\node;'+$env:PATH
@@ -60,7 +60,7 @@ $env:TIANWEN_DSH_PROBE_ROOT='D:/DevData/tianwen-dsh-probe'
 & 'D:\hermes\node\node.exe' 'D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs' exec vitest run tests/dsh-migration/learning-loop-orchestrator.spec.ts
 ```
 
-- [ ] **Step 4: Implement the smallest boundary repair.** Add the second error argument to the fail callback contract and use `await input.fail(status, error)` in the existing catch. In the standard fail handler, record the existing durable failure first, then perform a best-effort logger warning. Recognize only an actual `ControlledSkillEvaluationPreflightError` with one of these codes:
+- [x] **Step 4: Implement the smallest boundary repair.** Add the second error argument to the fail callback contract and use `await input.fail(status, error)` in the existing catch. In the standard fail handler, record the existing durable failure first, then perform a best-effort logger warning. Recognize only an actual `ControlledSkillEvaluationPreflightError` with one of these codes:
 
 ```ts
 const preflightCodes = [
@@ -74,5 +74,5 @@ const preflightCodes = [
 
 Use a private small classifier if it improves clarity; test through the real service boundary, not an export created only for tests. Do not pass `error` as a logger formatting argument.
 
-- [ ] **Step 5: Verify GREEN and compatibility.** Rerun the focused suite, root typecheck, and `git diff --check`. Update any existing callback assertion affected by the added argument while preserving what it originally proved. Do not run the full several-minute suite for this diagnostic-only increment.
-- [ ] **Step 6: Self-review and commit only the owned source/test files.** Report the RED/GREEN commands and output, unchanged gate behavior, commit SHA and any concerns. The controller owns the design/plan/operation records and actual acceptance resumption.
+- [x] **Step 5: Verify GREEN and compatibility.** Rerun the focused suite, root typecheck, and `git diff --check`. Update any existing callback assertion affected by the added argument while preserving what it originally proved. Do not run the full several-minute suite for this diagnostic-only increment.
+- [x] **Step 6: Self-review and commit only the owned source/test files.** Report the RED/GREEN commands and output, unchanged gate behavior, commit SHA and any concerns. The controller owns the design/plan/operation records and actual acceptance resumption.

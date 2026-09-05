@@ -37,10 +37,10 @@
 
 - [x] Verify the clean main baseline, existing worktree and delivered Runtime hash; switch the existing worktree to `codex/learning-total-route-real-acceptance`.
 - [x] Read-only trace Outcome exploration and Candidate evaluation/activation independently. Record fixed-evaluation coverage separately from actual model behavior.
-- [ ] Start the retained isolated profile on loopback; check default flash/high and re-enable learning through an ordinary main conversation.
+- [x] Start the retained isolated profile on loopback; check default flash/high and re-enable learning through an ordinary main conversation.
 - [ ] Freeze a small tranche of up to four distinct, useful source-summary tasks. Begin with the actual project handoff; later controlled scenarios may probe provisional-vs-contradicted evidence, nested source quotations, or high-density cross-item attribution. Do not prewrite model answers.
 - [ ] Submit each selected packet as the first message of a new ordinary task, once. Inspect the actual summary and canonical submission; retain successful as well as failed results.
-- [ ] On an actual defect, submit accurate native feedback against the completed answer. Check that the analyzer receives the frozen Skill and real source evidence; do not direct its verdict or Candidate text.
+- [x] On an actual defect, submit accurate native feedback against the completed answer. Check that the analyzer receives the frozen Skill and real source evidence; do not direct its verdict or Candidate text.
 - [ ] Record the outcome and the next decision. If the tranche passes, diagnose the route's evidence/acceptance coverage instead of looping for a lucky failure.
 
 ## Task 2: Real exploration and source-reuse evidence
@@ -55,7 +55,7 @@
 
 - [ ] For qualifying Outcome evidence, observe automatic analysis. If the model requests an experiment, verify equal packet/parent/config, real control and treatment Sessions, completed observations and return to the original analyst.
 - [ ] If the model can decide directly, retain that valid result; do not order an unnecessary experiment. Investigate any current design-to-user-work mismatch before changing the exploration contract.
-- [ ] Review existing first-party/native Skill sources for relevant, self-contained text and license. If no in-scope source qualifies, identify one exact external source and the narrow admission decision instead of silently expanding trust.
+- [x] Review existing first-party/native Skill sources for relevant, self-contained text and license. If no in-scope source qualifies, identify one exact external source and the narrow admission decision instead of silently expanding trust.
 - [ ] If a source is admitted, freeze its native definition, digest, license, scope and tool before analysis; leave its bytes unchanged. Observe native inspection and model-chosen adaptation through the normal learning path.
 - [ ] Compare accepted source references with persisted inspection results, and verify original source and Candidate parent/scope preservation. Synthetic branch coverage remains separately labelled.
 
