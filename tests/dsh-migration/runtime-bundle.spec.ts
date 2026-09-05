@@ -12,6 +12,7 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, posix, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
+import ts from 'typescript'
 import {
   Context,
   SystemPrompt,
@@ -93,6 +94,9 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/learning-clue-status.ts',
     'src/learning-analysis-child.ts',
     'src/learning-analysis-tool.ts',
+    'src/learning-skill-reuse.ts',
+    'src/learning-exploration.ts',
+    'src/outcome-learning-intake.ts',
     'src/learning-candidate.ts',
     'src/learning-consent-agent.ts',
     'src/learning-loop-orchestrator.ts',
@@ -132,6 +136,7 @@ function isAllowedStatusInput(input: string): boolean {
       '../tianwen-evolution/dist/ledger.js',
       '../tianwen-evolution/dist/learning-intake.js',
       '../tianwen-evolution/dist/learning-analysis.js',
+      '../tianwen-evolution/dist/learning-exploration.js',
       '../tianwen-evolution/dist/outcome-intake.js',
       '../tianwen-evolution/dist/controlled-skill-activation.js',
       '../tianwen-evolution/dist/controlled-skill-evaluation.js',
@@ -1290,7 +1295,20 @@ describe('@tianwen/runtime-bundle', () => {
         const archiveText = execFileSync(tar, ['-xOf', archive, entry], {
           encoding: 'utf8',
           shell: false,
+          maxBuffer: 4 * 1024 * 1024,
         })
+        if (entry.endsWith('.d.ts')) {
+          const peers = Object.keys(JSON.parse(readFileSync(resolve(packageRoot, 'package.json'), 'utf8')).peerDependencies)
+          for (const imported of ts.preProcessFile(archiveText).importedFiles) {
+            if (imported.fileName.startsWith('.')) {
+              const target = posix.normalize(posix.join(posix.dirname(entry), imported.fileName))
+                .replace(/\.js$/u, '.d.ts')
+              expect(entries, `missing published declaration: ${target}`).toContain(target)
+            } else {
+              expect(peers, `unpublished type dependency: ${imported.fileName}`).toContain(imported.fileName)
+            }
+          }
+        }
         expect(archiveText).not.toContain(root)
         expect(archiveText).not.toContain(root.replaceAll('\\', '/'))
         expect(archiveText).not.toMatch(/C:[\\/]Users[\\/]|fixtures[\\/]deepseek-goal-round-fetch|@deepseek-ai[\\/][^\\/]+[\\/]src[\\/]/u)

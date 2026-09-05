@@ -3,6 +3,7 @@ import type {
   LearningAnalysisId,
   LearningAnalysisPhase,
   TianwenRunId,
+  LearningAnalysisSubmission,
 } from '@tianwen/evolution'
 
 type LearningCandidateHost = {
@@ -25,6 +26,7 @@ type LearningCandidateHost = {
       }
       readonly supportingEvidenceIds: readonly `sha256:${string}`[]
       readonly counterevidenceIds: readonly `sha256:${string}`[]
+      readonly reuseSource?: LearningAnalysisSubmission['reuseSource']
     }
   } | undefined
   openLearningAnalysisCase(analysisId: LearningAnalysisId): {
@@ -164,7 +166,9 @@ export function materializeLearningCandidate(
     hypothesis: submission.hypothesis,
     supportingEvidenceIds: submission.supportingEvidenceIds,
     counterevidenceIds: submission.counterevidenceIds,
-    alternatives: 'No non-Skill cause is accepted by this bounded analysis.',
+    alternatives: submission.reuseSource === undefined
+      ? 'No non-Skill cause is accepted by this bounded analysis.'
+      : `Narrow adaptation of an inspected source; original parent and scope preserved. ${JSON.stringify(submission.reuseSource)}`,
   })
   const accepted = host.recordAcceptedLesson({
     caseId: learningCase.caseId,

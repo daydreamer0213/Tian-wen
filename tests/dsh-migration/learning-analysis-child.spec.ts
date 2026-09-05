@@ -28,6 +28,7 @@ import {
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 
 import {
+  outcomeExplorationGuidance,
   registerLearningAnalysisContinuableSetup,
   startLearningAnalysisChild,
 } from '../../packages/tianwen-runtime-bundle/src/learning-analysis-child.js'
@@ -204,6 +205,7 @@ function startContext(
     getLearningIntakeStatus,
     getLearningTicketFeedback,
     listLearningTickets: vi.fn(() => [{ ticketId, signalIds: ['correction-signal'] }]),
+    getLearningAnalysisEvidenceIds: vi.fn(() => [evidenceId]),
     listLearningSignals: vi.fn(() => [{
       signalId: 'correction-signal', sessionId: 'main-session',
       sessionDigest, evidenceIds: [sessionDigest, evidenceId], active: true,
@@ -276,6 +278,15 @@ function noCase(): LearningAnalysisSubmission {
 }
 
 describe('native explicit-correction analysis child', () => {
+  it('permits at most one outcome exploration and otherwise requires direct final analysis', () => {
+    const guidance = outcomeExplorationGuidance().join('\n')
+    expect(guidance).toContain('If the frozen evidence is sufficient')
+    expect(guidance).toContain('request_tianwen_exploration once')
+    expect(guidance).toContain('ends this Turn')
+    expect(guidance).toContain('same analysis child')
+    expect(guidance).toContain('Do not invent evidence')
+  })
+
   it('supplies the source Run frozen Skill as editable evidence and requires a complete minimal replacement', async () => {
     const { ctx, parent, evolution, startContinuable } = startContext()
     const sourceSkill = {
@@ -307,27 +318,12 @@ describe('native explicit-correction analysis child', () => {
     expect(startContinuable.mock.calls[0]![0].request.prompt[0].text)
       .toContain('Frozen source Skill unavailable; do not invent a replacement.')
   })
-  it('gives the analyst only the active ticket evidence IDs accepted by its submission tool', async () => {
+  it('gives the analyst the authoritative ledger evidence projection', async () => {
     const { ctx, parent, evolution, startContinuable } = startContext()
-    const excludedId = `sha256:${'9'.repeat(64)}`
-    const otherSignal = {
-      signalId: 'other-signal', sessionId: 'main-session',
-      sessionDigest, evidenceIds: [excludedId], active: true,
-    }
-    evolution.listLearningTickets.mockReturnValue([{
-      ticketId, signalIds: ['correction-signal', 'inactive-signal', 'other-session-signal'],
-    }])
-    evolution.listLearningSignals.mockReturnValue([
-      ...evolution.listLearningSignals(),
-      otherSignal,
-      { ...otherSignal, signalId: 'inactive-signal', active: false },
-      { ...otherSignal, signalId: 'other-session-signal', sessionId: 'other-session' },
-    ])
-
     await startLearningAnalysisChild(ctx as never, {
       analysisId, parent, signal: AbortSignal.timeout(10_000),
     })
-
+    expect(evolution.getLearningAnalysisEvidenceIds).toHaveBeenCalledWith(analysisId)
     const prompt = JSON.stringify(startContinuable.mock.calls[0]![0].request.prompt)
     expect(prompt.match(/sha256:[a-f0-9]{64}/gu)).toEqual([evidenceId])
   })
@@ -401,6 +397,7 @@ describe('native explicit-correction analysis child', () => {
           messageId: 'assistant-message',
         },
       })),
+      getLearningAnalysisEvidenceIds: vi.fn(() => []),
       listLearningSignals: vi.fn(() => []),
       listLearningTickets: vi.fn(() => [{ ticketId, signalIds: [] }]),
       recordLearningAnalysisChildStarted: vi.fn(() => {
@@ -920,6 +917,7 @@ describe('native explicit-correction analysis child', () => {
         getLearningTicketFeedback: (id: typeof requested.ticketId) =>
           ledger.getLearningTicketFeedback(id),
         listLearningTickets: () => ledger.listLearningTickets(),
+        getLearningAnalysisEvidenceIds: (id: LearningAnalysisStatus['analysisId']) => ledger.getLearningAnalysisEvidenceIds(id),
         listLearningSignals: () => ledger.listLearningSignals(),
         recordLearningAnalysisChildStarted: record,
       },
@@ -1018,6 +1016,7 @@ describe('native explicit-correction analysis child', () => {
           state: 'active', feedbackVersion: 'feedback-v1',
           analysisConsentRevision: 1, rating: 'negative', ticketId,
         })),
+        getLearningAnalysisEvidenceIds: vi.fn(() => [evidenceId]),
         listLearningSignals: vi.fn(() => [{
           signalId: `signal:${'c'.repeat(64)}`,
           ingestionId: `sha256:${'3'.repeat(64)}`,
@@ -1194,6 +1193,7 @@ describe('native explicit-correction analysis child', () => {
         getLearningAnalysisConsent: () => ledger.getLearningAnalysisConsent(),
         getLearningIntakeStatus: (sessionId: string, messageId: string) =>
           ledger.getLearningIntakeStatus(sessionId, messageId),
+        getLearningAnalysisEvidenceIds: (id: LearningAnalysisStatus['analysisId']) => ledger.getLearningAnalysisEvidenceIds(id),
         listLearningSignals: () => ledger.listLearningSignals(),
         listLearningTickets: () => ledger.listLearningTickets(),
         recordLearningAnalysisSubmission: uncertainRecord,
@@ -1298,6 +1298,7 @@ describe('native explicit-correction analysis child', () => {
           state: 'active', feedbackVersion: 'feedback-v1',
           analysisConsentRevision: 1, rating: 'negative', ticketId,
         })),
+        getLearningAnalysisEvidenceIds: vi.fn(() => [evidenceId]),
         listLearningSignals: vi.fn(() => [{
           signalId: `signal:${'c'.repeat(64)}`,
           ingestionId: `sha256:${'3'.repeat(64)}`,

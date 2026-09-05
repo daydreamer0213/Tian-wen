@@ -1,15 +1,74 @@
 /** The durable Evolution record is the queue; this service owns no jobs. */
 import { Service, SessionId } from '@tianwen/dsh-compat'
-import type { Context } from '@tianwen/dsh-compat'
+import type { Agent, Context } from '@tianwen/dsh-compat'
 import {
   sha256,
+  type LearningExplorationStatus,
   type LearningAnalysisProgressCursor,
   type LearningAnalysisProgressKind,
   type LearningAnalysisRetryPhase,
+  type TianwenRunId,
 } from '@tianwen/evolution'
 
 import { resolveExplicitCorrectionProtocol } from './explicit-correction-protocol.js'
 import { materializeLearningCandidate } from './learning-candidate.js'
+import { admitOutcomeLearningAnalysis } from './outcome-learning-intake.js'
+import { LearningExplorationInterruptedError } from './learning-exploration.js'
+import { exactLearningAnalysisMainParent, hasExactLearningAnalysisChild } from './learning-analysis-child.js'
+
+type LearningObservationContent = [{ readonly type: 'text', readonly text: string }]
+
+function explorationEvidence(status: LearningExplorationStatus): readonly string[] {
+  return [...new Set(Object.values(status.arms).flatMap(receipt => {
+    if (receipt === undefined || !('acceptanceEvidenceId' in receipt)) return []
+    return [receipt.acceptanceEvidenceId, receipt.skillEvidenceId]
+      .filter((id): id is Exclude<typeof id, undefined> => id !== undefined)
+  }))]
+}
+
+export function learningExplorationObservationContent(
+  status: LearningExplorationStatus,
+): LearningObservationContent {
+  if (status.result === undefined) throw new Error('learning exploration observation is incomplete')
+  return [{
+    type: 'text',
+    text: [
+      'Tianwen temporary exploration completed.',
+      `classification: ${status.result.classification}`,
+      `observations: ${JSON.stringify(status.result.observation)}`,
+      `experimental evidence IDs: ${JSON.stringify(explorationEvidence(status))}`,
+      'These are experimental observations, separate from the original supporting and counterevidence closure.',
+      'Do not copy experimental evidence IDs into supportingEvidenceIds or counterevidenceIds. Use the observations only to update the hypothesis, then submit the final result with submit_tianwen_analysis.',
+    ].join('\n'),
+  }]
+}
+
+function hasExactExplorationObservation(
+  events: readonly unknown[],
+  content: LearningObservationContent,
+): boolean {
+  const expected = sha256(content)
+  return events.some(event => {
+    if (event === null || typeof event !== 'object') return false
+    const typed = event as { readonly type?: unknown, readonly data?: unknown }
+    if (typed.data === null || typeof typed.data !== 'object') return false
+    const inserted = (typed.data as { readonly inserted?: unknown }).inserted
+    const messages = typed.type === 'user/message'
+      ? [typed.data]
+      : typed.type === 'agent/inbox/spliced' && Array.isArray(inserted)
+        ? inserted : []
+    return messages.some(message => {
+      if (message === null || typeof message !== 'object') return false
+      const candidate = message as {
+        readonly source?: { readonly kind?: unknown, readonly plugin?: unknown }
+        readonly content?: unknown
+      }
+      return candidate.source?.kind === 'plugin'
+        && candidate.source.plugin === 'tianwen'
+        && sha256(candidate.content) === expected
+    })
+  })
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context { tianwenLearningLoop: TianwenLearningLoopService }
@@ -34,6 +93,7 @@ export async function continueLearningLoop(input: LearningLoopAdmission): Promis
 }
 
 export interface LearningLoopPhaseStatus {
+  readonly source?: 'outcome' | undefined
   readonly analysisId: string
   readonly phase: string
   readonly requestedAt?: string
@@ -518,7 +578,9 @@ export function learningLoopProgressReport(
       ? 'Tianwen 学习暂时中断：回滚验证尚未完成，当前启用状态未继续改变；将在下一次可用时自动重试。'
       : 'Tianwen 学习暂时中断：受控环境暂不可用，候选改进尚未启用；将在下一次可用时自动重试。'
     : kind === 'analysis-started'
-    ? 'Tianwen 已开始分析这条反馈，后续进度会继续在当前对话更新。'
+    ? status.source === 'outcome'
+      ? 'Tianwen 发现多个任务出现同类问题，已开始结合成功案例分析；后续进度会继续在当前对话更新。'
+      : 'Tianwen 已开始分析这条反馈，后续进度会继续在当前对话更新。'
     : kind === 'candidate-evaluating'
       ? 'Tianwen 已形成候选改进，正在进行受控验证。'
       : (() => {
@@ -642,6 +704,8 @@ export class TianwenLearningLoopService extends Service {
     'subagents',
     'tianwenEvolution',
     'tianwenLearningAnalysisChild',
+    'tianwenLearningConsentAgent',
+    'tianwenLearningExploration',
     'tianwenSkillEvaluation',
     'tools',
   ] as const
@@ -650,6 +714,9 @@ export class TianwenLearningLoopService extends Service {
   private readonly activeAnalysisIds = new Set<string>()
   private readonly rerunAnalysisIds = new Set<string>()
   private readonly evaluations = new Map<string, AbortController>()
+  // Process-local admission only; Evolution remains the sole durable work record.
+  private readonly suspended = new Set<string>()
+  private readonly resumeRequests = new Set<string>()
   private livenessTimer: unknown | undefined
 
   constructor(ctx: Context, config: TianwenLearningLoopConfig = {}) {
@@ -659,6 +726,19 @@ export class TianwenLearningLoopService extends Service {
   }
 
   protected [Service.init](): void {
+    for (const analysis of this.ctx.tianwenEvolution.listLearningAnalyses()) {
+      if (['pending-parent', 'running', 'candidate-ready', 'shadow-ready', 'failed'].includes(analysis.phase)) {
+        this.suspended.add(analysis.analysisId)
+      }
+    }
+    const offContinue = this.ctx.on('agent/inbox/claimed', ({ agent, message }) => {
+      if (message.source.kind !== 'user') return
+      const text = message.content.map(block => block.type === 'text' ? block.text : '').join('').trim()
+      if (/^(?:继续(?:执行|任务|学习|吧)?|接着(?:执行|任务|学习)?|continue|resume)[。.!！\s]*$/iu.test(text)) this.continueFromMain(agent)
+    })
+    const offGoalResume = this.ctx.on('goal/changed', ({ agent, change }) => {
+      if (change.operation === 'resume') this.continueFromMain(agent)
+    })
     const offAgent = this.ctx.on('agent/created', ({ agent }) => {
       const sessionId = String(agent.session.id)
       for (const analysis of this.ctx.tianwenEvolution.listLearningAnalyses()) {
@@ -667,7 +747,7 @@ export class TianwenLearningLoopService extends Service {
         }
       }
     })
-    this.ctx.effect(() => offAgent, 'tianwen-learning-loop.agent-wake.dispose')
+    this.ctx.effect(() => () => { offAgent(); offContinue(); offGoalResume() }, 'tianwen-learning-loop.agent-wake.dispose')
     this.ctx.effect(() => () => {
       for (const controller of this.evaluations.values()) controller.abort()
       if (this.livenessTimer !== undefined) {
@@ -678,7 +758,13 @@ export class TianwenLearningLoopService extends Service {
     this.armLiveness()
   }
 
+  async observeOutcome(parent: Agent, runId: TianwenRunId): Promise<void> {
+    const analysis = await admitOutcomeLearningAnalysis(this.ctx, parent, runId)
+    if (analysis !== undefined) await this.schedule(analysis.analysisId)
+  }
+
   async schedule(analysisId: string): Promise<void> {
+    if (this.suspended.has(analysisId)) return
     const evaluation = this.evaluations.get(analysisId)
     if (evaluation !== undefined) {
       const current = this.ctx.tianwenEvolution.getLearningAnalysis(analysisId as never)
@@ -720,6 +806,11 @@ export class TianwenLearningLoopService extends Service {
       startChild: async current => {
         const parent = this.ctx.agents.get(SessionId(String(current.parentSessionId)))
         if (parent === undefined) throw new Error('learning analysis requires the exact live main parent')
+        if (current.source === 'outcome') {
+          if (!this.hasActiveSupport(current)) return this.ctx.tianwenEvolution.recordLearningAnalysisInvalidated({ analysisId: current.analysisId as never })
+          await this.ctx.tianwenLearningAnalysisChild.start({ analysisId: current.analysisId as never, parent, signal: AbortSignal.timeout(30_000) })
+          return
+        }
         const admitted = await continueLearningLoop({
           analysis: current as LearningLoopAdmission['analysis'],
           consent: this.ctx.tianwenEvolution.getLearningAnalysisConsent(),
@@ -730,7 +821,23 @@ export class TianwenLearningLoopService extends Service {
         })
         if (admitted.state === 'invalidated') this.ctx.tianwenEvolution.recordLearningAnalysisInvalidated({ analysisId: current.analysisId as never })
       },
-      waitForSubmission: () => undefined,
+      runExploration: current => this.runExploration(current),
+      waitForSubmission: async current => {
+        if (!this.resumeRequests.has(current.analysisId)) return
+        const status = this.ctx.tianwenEvolution.getLearningAnalysis(current.analysisId as never)
+        const parent = status === undefined ? undefined : this.ctx.agents.get(SessionId(status.parentSessionId))
+        if (status === undefined || parent === undefined || status.phase !== 'running' || status.submission !== undefined
+          || !exactLearningAnalysisMainParent(this.ctx, parent, status) || !this.hasActiveSupport(status)) return
+        if (this.ctx.agents.get(SessionId(status.childSessionId)) !== undefined) {
+          this.resumeRequests.delete(current.analysisId)
+          return
+        }
+        if (!await hasExactLearningAnalysisChild(this.ctx, status)) throw new Error('interrupted analysis child is unavailable')
+        await this.ctx.subagents.followup(parent, SessionId(status.childSessionId), [{
+          type: 'text', text: 'Continue the interrupted analysis using its existing frozen evidence and submit the result with submit_tianwen_analysis. Do not restart completed work.',
+        }], { source: { kind: 'plugin', plugin: 'tianwen' }, signal: AbortSignal.timeout(30_000) })
+        this.resumeRequests.delete(current.analysisId)
+      },
       freezeProtocol: current => executor === undefined ? unavailableExecutor() : executor.freezeProtocol({ ctx: this.ctx, status: preCandidateStatus(current) }),
       materializeCandidate: current => executor === undefined ? unavailableExecutor() : executor.materializeCandidate(contextFor(current)),
       evaluate: async current => {
@@ -764,6 +871,57 @@ export class TianwenLearningLoopService extends Service {
     })
   }
 
+  private async runExploration(current: LearningLoopPhaseStatus): Promise<boolean> {
+    if (current.source !== 'outcome') return false
+    let exploration = this.ctx.tianwenEvolution.getLearningExploration(current.analysisId as never)
+    if (exploration === undefined) return false
+    const status = this.ctx.tianwenEvolution.getLearningAnalysis(current.analysisId as never)
+    const parent = status === undefined
+      ? undefined
+      : this.ctx.agents.get(SessionId(status.parentSessionId))
+    if (status?.source !== 'outcome'
+      || status.phase !== 'running'
+      || status.submission !== undefined
+      || parent === undefined
+      || !this.hasActiveSupport(status)
+      || !exactLearningAnalysisMainParent(this.ctx, parent, status)) return false
+    if (exploration.result === undefined) {
+      const controller = new AbortController()
+      this.evaluations.set(current.analysisId, controller)
+      try {
+        if (!this.hasActiveSupport(status)) controller.abort()
+        exploration = await this.ctx.tianwenLearningExploration.run({
+          analysisId: status.analysisId, parent, proposal: exploration.proposal,
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]),
+        })
+      } catch (error) {
+        if (controller.signal.aborted) return true
+        if (error instanceof LearningExplorationInterruptedError) {
+          this.suspended.add(current.analysisId)
+          return true
+        }
+        throw error
+      } finally {
+        this.evaluations.delete(current.analysisId)
+      }
+      if (exploration.result === undefined) return true
+    }
+    const content = learningExplorationObservationContent(exploration)
+    if (!await hasExactLearningAnalysisChild(this.ctx, status)) {
+      throw new Error('learning exploration analyst child is unavailable')
+    }
+    const persisted = await this.ctx.sessionPersistence.inspect(SessionId(status.childSessionId))
+    if (hasExactExplorationObservation(persisted.events, content)) return false
+    const latest = this.ctx.tianwenEvolution.getLearningAnalysis(status.analysisId)
+    if (latest?.phase !== 'running' || latest.submission !== undefined
+      || !this.hasActiveSupport(latest) || !exactLearningAnalysisMainParent(this.ctx, parent, latest)) return false
+    await this.ctx.subagents.followup(parent, SessionId(status.childSessionId), content, {
+      source: { kind: 'plugin', plugin: 'tianwen' },
+      signal: AbortSignal.timeout(30_000),
+    })
+    return true
+  }
+
   private async reportProgress(status: LearningLoopPhaseStatus): Promise<void> {
     const progress = nextLearningLoopProgress(status, this.timer.now())
     if (progress === undefined || this.executor?.progress === undefined) return
@@ -777,14 +935,25 @@ export class TianwenLearningLoopService extends Service {
 
   private armLiveness(): void {
     if (this.livenessTimer !== undefined) return
-    if (!this.ctx.tianwenEvolution.listLearningAnalyses().some(progressActive)) return
+    if (!this.ctx.tianwenEvolution.listLearningAnalyses().some(status => !this.suspended.has(status.analysisId) && progressActive(status))) return
     this.livenessTimer = this.timer.setTimeout(() => {
       this.livenessTimer = undefined
       const active = this.ctx.tianwenEvolution.listLearningAnalyses()
-        .filter(progressActive)
+        .filter(status => !this.suspended.has(status.analysisId) && progressActive(status))
       void Promise.all(active.map(status => this.schedule(status.analysisId)))
         .finally(() => this.armLiveness())
     }, LEARNING_LIVENESS_INTERVAL_MS)
+  }
+
+  private continueFromMain(parent: Agent): void {
+    for (const status of this.ctx.tianwenEvolution.listLearningAnalyses()) {
+      if (!exactLearningAnalysisMainParent(this.ctx, parent, status)) continue
+      this.suspended.delete(status.analysisId)
+      if (status.submission === undefined && ['pending-parent', 'running'].includes(status.resumePhase ?? status.phase)) {
+        this.resumeRequests.add(status.analysisId)
+      }
+      void this.schedule(status.analysisId).catch(() => undefined)
+    }
   }
 
   private intake(status: LearningLoopPhaseStatus): LearningLoopAdmission['intake'] {
@@ -809,6 +978,8 @@ export interface LearningLoopPhaseOperations {
   readonly hasActiveSupport: (status: LearningLoopPhaseStatus) => boolean | Promise<boolean>
   readonly resume?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
   readonly startChild?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
+  /** Returns true only when this pass advanced or delivered exploration work. */
+  readonly runExploration?: (status: LearningLoopPhaseStatus) => boolean | Promise<boolean>
   readonly waitForSubmission?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
   readonly freezeProtocol?: (status: LearningLoopPhaseStatus) => { readonly provenance: 'pre-candidate' | 'retrospective' } | Promise<{ readonly provenance: 'pre-candidate' | 'retrospective' }>
   readonly materializeCandidate?: (status: LearningLoopPhaseStatus) => unknown | Promise<unknown>
@@ -861,7 +1032,11 @@ export async function runLearningLoopPhase(input: LearningLoopPhaseOperations): 
     if (status.phase === 'failed') await operation(input, 'resume')(status)
     else if (status.phase === 'pending-parent') await operation(input, 'startChild')(status)
     else if (status.phase === 'running') {
-      if (status.submission === undefined) { await operation(input, 'waitForSubmission')(status); return }
+      if (status.submission === undefined) {
+        if (input.runExploration !== undefined && await input.runExploration(status)) return
+        await operation(input, 'waitForSubmission')(status)
+        return
+      }
       if (status.submission.verdict !== 'skill-change') { await operation(input, 'report')(status); return }
       const protocol = await operation(input, 'freezeProtocol')(status)
       if (protocol.provenance !== 'pre-candidate') throw new Error('learning loop requires a pre-candidate protocol')

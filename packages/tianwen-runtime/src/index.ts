@@ -95,6 +95,7 @@ export type {
   FeedbackSnapshot,
   RuntimeLearningIntakeReceipt,
   RuntimeOutcomeIntakeReceipt,
+  RuntimeOutcomeVerdictAttestation,
   RuntimeGovernedRunBindingReceipt,
   RuntimeSkillUseReceipt,
   RuntimeRunBindingInput,

@@ -222,6 +222,16 @@ describe('Tianwen Desktop Runtime distribution', () => {
       .toThrow(/missing-module\.js|module closure/iu)
   })
 
+  it('checks the complete module closure of a bundle larger than one MiB', () => {
+    const padding = `/*${'x'.repeat(1100 * 1024)}*/\n`
+    const valid = createRuntimeArchive(true, `${padding}export const ready = true\n`)
+    expect(() => auditDesktopArtifact(createUnpackedRoot(valid.bytes), valid.source)).not.toThrow()
+
+    const broken = createRuntimeArchive(true, `${padding}export { missing } from './missing-module.js'\n`)
+    expect(() => auditDesktopArtifact(createUnpackedRoot(broken.bytes), broken.source))
+      .toThrow(/missing-module\.js|module closure/iu)
+  })
+
   it('rejects a packaged Runtime whose SHA-256 no longer matches the source', () => {
     const bytes = Buffer.from('source Runtime archive bytes')
     const source = createRuntimeSource(bytes)

@@ -9,6 +9,8 @@ import type {
 } from './controlled-skill-evaluation.js'
 import type { ControlledSkillShadowId } from './controlled-skill-shadow.js'
 import type { ControlledSkillTransitionId } from './controlled-skill-activation.js'
+import type { TianwenRunId } from './outcome-intake.js'
+import type { LearningSignalId } from './learning-intake.js'
 
 export type LearningAnalysisId = `analysis:${string}`
 
@@ -35,16 +37,53 @@ export type LearningAnalysisRetryPhase = Exclude<
     | 'transition-recovered'
 >
 
-export interface LearningAnalysisBinding {
+interface LearningAnalysisCommonBinding {
   readonly analysisId: LearningAnalysisId
   readonly ticketId: LearningTicketId
   readonly sessionId: string
-  readonly messageId: string
-  readonly feedbackVersion: string
   readonly consentRevision: number
   readonly parentSessionId: string
   readonly childSessionId: string
   readonly phase: LearningAnalysisPhase
+}
+
+export interface FeedbackLearningAnalysisBinding extends LearningAnalysisCommonBinding {
+  readonly source?: undefined
+  readonly messageId: string
+  readonly feedbackVersion: string
+}
+
+export interface OutcomeLearningAnalysisBinding extends LearningAnalysisCommonBinding {
+  readonly source: 'outcome'
+  readonly signalIds: readonly LearningSignalId[]
+  readonly counterevidenceRunIds: readonly TianwenRunId[]
+  readonly messageId?: never
+  readonly feedbackVersion?: never
+}
+
+export type LearningAnalysisBinding = FeedbackLearningAnalysisBinding | OutcomeLearningAnalysisBinding
+
+export interface RequestOutcomeLearningAnalysisInput {
+  readonly ticketId: LearningTicketId
+  readonly sessionId: string
+  readonly parentSessionId: string
+  readonly consentRevision: number
+  readonly counterevidenceRunIds: readonly TianwenRunId[]
+}
+
+/** Host-reviewed source identity; not an instruction or an activation grant. */
+export interface LearningSkillAdmission {
+  readonly name: string
+  readonly provider: string
+  readonly digest: Sha256Digest
+  readonly origin: string
+  readonly revision: string
+  readonly license: 'MIT' | 'Apache-2.0' | 'BSD-2-Clause' | 'BSD-3-Clause' | 'ISC'
+  readonly reviewedAt: string
+  readonly kind: 'self-contained-text'
+  readonly runtime: '0.1.1-rc.2'
+  readonly scopeKey: string
+  readonly toolName: string
 }
 
 export interface LearningAnalysisSubmission {
@@ -62,6 +101,10 @@ export interface LearningAnalysisSubmission {
   }
   readonly supportingEvidenceIds: readonly Sha256Digest[]
   readonly counterevidenceIds: readonly Sha256Digest[]
+  readonly reuseSource?: {
+    readonly reference: LearningSkillAdmission
+    readonly rationale: string
+  }
 }
 
 export interface LearningAnalysisEvidenceSignal {
@@ -83,7 +126,7 @@ export interface RequestLearningAnalysisInput {
   readonly parentSessionId: string
 }
 
-export interface LearningAnalysisStatus extends LearningAnalysisBinding {
+export type LearningAnalysisStatus = LearningAnalysisBinding & {
   readonly requestedAt: string
   readonly updatedAt: string
   readonly childStartedAt?: string
@@ -120,7 +163,7 @@ export type LearningAnalysisReceipt = LearningAnalysisStatus & {
 }
 
 export interface LearningAnalysisRequestedEvent {
-  readonly schemaVersion: 'tianwen.learning-analysis-request.v1'
+  readonly schemaVersion: 'tianwen.learning-analysis-request.v1' | 'tianwen.learning-analysis-request.v2'
   readonly type: 'learning-analysis-requested'
   readonly at: string
   readonly binding: LearningAnalysisBinding & { readonly phase: 'pending-parent' }
@@ -409,7 +452,7 @@ export function learningAnalysisPhase(value: unknown): LearningAnalysisPhase {
 
 export function prepareLearningAnalysisRequest(
   input: RequestLearningAnalysisInput,
-): LearningAnalysisBinding & { readonly phase: 'pending-parent' } {
+): FeedbackLearningAnalysisBinding & { readonly phase: 'pending-parent' } {
   const parsed = {
     ticketId: ticketId(input.ticketId),
     sessionId: nonEmpty(input.sessionId, 'sessionId'),
@@ -435,6 +478,31 @@ export function prepareLearningAnalysisRequest(
     childSessionId: `tianwen-analysis-${identity}`,
     phase: 'pending-parent',
   }
+}
+
+export function prepareOutcomeLearningAnalysisRequest(
+  input: RequestOutcomeLearningAnalysisInput & { readonly signalIds: readonly LearningSignalId[] },
+): OutcomeLearningAnalysisBinding & { readonly phase: 'pending-parent' } {
+  const sessionId = nonEmpty(input.sessionId, 'sessionId')
+  if (input.parentSessionId !== sessionId || !Number.isSafeInteger(input.consentRevision) || input.consentRevision < 1) {
+    throw new TypeError('outcome analysis requires its main Session and consent revision')
+  }
+  const parseIds = <T extends string>(ids: readonly T[], prefix: string): readonly T[] => {
+    if (!Array.isArray(ids) || new Set(ids).size !== ids.length
+      || ids.some(id => typeof id !== 'string' || !new RegExp(`^${prefix}:[a-f0-9]{64}$`).test(id))) {
+      throw new TypeError(`invalid ${prefix} identities`)
+    }
+    return [...ids].sort()
+  }
+  const signalIds = parseIds(input.signalIds, 'signal')
+  if (signalIds.length < 2) throw new TypeError('outcome analysis requires repeated task results')
+  const counterevidenceRunIds = parseIds(input.counterevidenceRunIds, 'run')
+  if (signalIds.length > 2 || counterevidenceRunIds.length > 1) throw new TypeError('outcome analysis exceeds its two-task, one-counterexample batch')
+  const id = ticketId(input.ticketId)
+  const identity = sha256({ ticketId: id, kind: 'tianwen.outcome-learning-analysis.v1' }).slice('sha256:'.length)
+  return { analysisId: `analysis:${identity}`, source: 'outcome', ticketId: id, sessionId, parentSessionId: sessionId,
+    consentRevision: input.consentRevision, signalIds, counterevidenceRunIds,
+    childSessionId: `tianwen-analysis-${identity}`, phase: 'pending-parent' }
 }
 
 function parseLesson(value: unknown): NonNullable<LearningAnalysisSubmission['lesson']> {
@@ -463,6 +531,33 @@ function parseCandidatePatch(
   return result
 }
 
+export function parseLearningSkillAdmission(value: unknown): LearningSkillAdmission {
+  if (!isRecord(value)) throw new TypeError('Skill admission must be an object')
+  exactKeys(value, ['name', 'provider', 'digest', 'origin', 'revision', 'license',
+    'reviewedAt', 'kind', 'runtime', 'scopeKey', 'toolName'])
+  if (value.kind !== 'self-contained-text' || value.runtime !== '0.1.1-rc.2'
+    || !['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC'].includes(String(value.license))
+    || typeof value.digest !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(value.digest)
+    || typeof value.name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value.name)
+    || typeof value.reviewedAt !== 'string' || !Number.isFinite(Date.parse(value.reviewedAt))) {
+    throw new TypeError('invalid reviewed Skill reference')
+  }
+  return {
+    name: value.name, provider: safeText(value.provider, 'source provider'),
+    digest: value.digest as Sha256Digest,
+    origin: safeText(value.origin, 'source origin'), revision: safeText(value.revision, 'source revision'),
+    license: value.license as LearningSkillAdmission['license'], reviewedAt: value.reviewedAt,
+    kind: value.kind, runtime: value.runtime,
+    scopeKey: safeText(value.scopeKey, 'source scope'), toolName: safeText(value.toolName, 'source tool'),
+  }
+}
+
+function parseSkillReuse(value: unknown): NonNullable<LearningAnalysisSubmission['reuseSource']> {
+  if (!isRecord(value)) throw new TypeError('reuseSource must be an object')
+  exactKeys(value, ['reference', 'rationale'])
+  return { reference: parseLearningSkillAdmission(value.reference), rationale: safeText(value.rationale, 'reuse rationale') }
+}
+
 export function parseLearningAnalysisSubmission(
   value: unknown,
 ): LearningAnalysisSubmission {
@@ -475,7 +570,7 @@ export function parseLearningAnalysisSubmission(
       'supportingEvidenceIds',
       'counterevidenceIds',
     ],
-    ['lesson', 'candidatePatch'],
+    ['lesson', 'candidatePatch', 'reuseSource'],
   )
   if (
     value.verdict !== 'no-case'
@@ -497,18 +592,20 @@ export function parseLearningAnalysisSubmission(
   const candidatePatch = value.candidatePatch === undefined
     ? undefined
     : parseCandidatePatch(value.candidatePatch)
+  const reuseSource = value.reuseSource === undefined ? undefined : parseSkillReuse(value.reuseSource)
   if (
     value.verdict === 'skill-change'
       ? lesson === undefined
         || candidatePatch === undefined
         || supportingEvidenceIds.length === 0
-      : lesson !== undefined || candidatePatch !== undefined
+      : lesson !== undefined || candidatePatch !== undefined || reuseSource !== undefined
   ) throw new TypeError('learning analysis fields disagree with its verdict')
   return {
     verdict: value.verdict,
     hypothesis: safeText(value.hypothesis, 'hypothesis'),
     ...(lesson === undefined ? {} : { lesson }),
     ...(candidatePatch === undefined ? {} : { candidatePatch }),
+    ...(reuseSource === undefined ? {} : { reuseSource }),
     supportingEvidenceIds,
     counterevidenceIds,
   }

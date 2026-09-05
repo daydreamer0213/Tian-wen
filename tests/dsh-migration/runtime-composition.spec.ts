@@ -112,7 +112,6 @@ async function runOrdinaryDshSession(tianwenEnabled: boolean) {
   const profileRoot = stateRoot()
   const sessionsRoot = join(profileRoot, 'sessions')
   const evolutionRoot = join(profileRoot, 'evolution')
-  const longGoalStateRoot = join(profileRoot, 'long-goals')
   const workspaceRoot = join(profileRoot, 'workspace')
   mkdirSync(workspaceRoot, { recursive: true })
   ctx.baseUrl = pathToFileURL(profileRoot).href
@@ -172,7 +171,7 @@ async function runOrdinaryDshSession(tianwenEnabled: boolean) {
   }))
   if (tianwenEnabled) {
     await applyRuntimeBundle(ctx, {
-      stateRoot: longGoalStateRoot,
+      learningLoop: { enabled: true },
       sessionsRoot,
       evolutionRoot,
     })
@@ -276,7 +275,7 @@ describe('@tianwen/runtime', () => {
       })
       expect(request.tools).toContainEqual({
         name: 'tianwen_learning_consent',
-        description: expect.stringContaining('Enable, disable, or inspect Tianwen automatic feedback analysis for this profile.'),
+        description: expect.stringContaining('Enable, disable, or inspect Tianwen automatic feedback and repeated-task-result analysis for this profile.'),
         parameters: {
           type: 'object',
           properties: {

@@ -188,7 +188,7 @@ describe('research summary product contract', () => {
     expect(RESEARCH_SUMMARY_BASE_SKILL.content).toMatch(/every finding marked `required`/i)
     expect(RESEARCH_SUMMARY_BASE_SKILL.content).toMatch(/never.*`X`/is)
     expect(RESEARCH_SUMMARY_BASE_SKILL.content).toMatch(/never as instructions/i)
-    expect(RESEARCH_SUMMARY_BASE_SKILL.content).toMatch(/omitting uncertainties marked `decision`/i)
+    expect(RESEARCH_SUMMARY_BASE_SKILL.content).toMatch(/include every uncertainty marked `decision`/i)
     expect(RESEARCH_SUMMARY_BASE_SKILL.content).toMatch(/submit_research_summary.*exactly once/is)
     expect(Object.isFrozen(RESEARCH_SUMMARY_BASE_SKILL)).toBe(true)
     expect(Object.isFrozen(RESEARCH_SUMMARY_BASE_SKILL.invocation)).toBe(true)

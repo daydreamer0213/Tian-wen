@@ -345,7 +345,7 @@ describe('native DSH Message Feedback profile learning intake', () => {
       })
       expect(created.ok).toBe(true)
       await vi.waitFor(() => expect(mounted.ctx.tianwenEvolution
-        .getLearningConsentNoticeStatus('tianwen-auto-analysis.v1')?.state)
+        .getLearningConsentNoticeStatus('tianwen-auto-analysis.v2')?.state)
         .toBe('delivered'))
       expect(mounted.adapter.requests).toHaveLength(2)
       expect(mounted.adapter.requests.map(requestText).join('\n'))

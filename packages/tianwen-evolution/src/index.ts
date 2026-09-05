@@ -92,6 +92,7 @@ export {
   learningAnalysisPhase,
   learningAnalysisSubmissionPhase,
   parseLearningAnalysisSubmission,
+  parseLearningSkillAdmission,
   prepareLearningAnalysisRequest,
 } from './learning-analysis.js'
 export type {
@@ -115,7 +116,10 @@ export type {
   LearningAnalysisTerminalReportIntentRecordedEvent,
   LearningAnalysisStatus,
   LearningAnalysisSubmission,
+  LearningSkillAdmission,
   RequestLearningAnalysisInput,
+  RequestOutcomeLearningAnalysisInput,
+  OutcomeLearningAnalysisBinding,
 } from './learning-analysis.js'
 export {
   prepareOutcomeIntake,
@@ -124,6 +128,7 @@ export {
 } from './outcome-intake.js'
 export type {
   OutcomeIntakeInput,
+  OutcomeIntakeRecordedEvent,
   OutcomeIntakeReceipt,
   OutcomeLearningSignal,
   OutcomeSeverity,
@@ -351,4 +356,25 @@ export type {
   SkillPromotionReadinessInput,
   SkillPromotionReadinessReason,
 } from './skill-promotion.js'
+export {
+  classifyLearningExploration,
+  parseLearningExplorationArmReceipt,
+  parseLearningExplorationRequest,
+  prepareLearningExploration,
+} from './learning-exploration.js'
+export type {
+  ExplorationPrediction,
+  LearningExplorationArm,
+  LearningExplorationArmReceipt,
+  LearningExplorationClassification,
+  LearningExplorationContext,
+  LearningExplorationInconclusiveReason,
+  LearningExplorationLedgerEvent,
+  LearningExplorationObservation,
+  LearningExplorationProposal,
+  LearningExplorationReceipt,
+  LearningExplorationRequest,
+  LearningExplorationResult,
+  LearningExplorationStatus,
+} from './learning-exploration.js'
 export * from './runtime-binding.js'

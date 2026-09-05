@@ -14,14 +14,15 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { LearningConsentNoticeBinding } from '@tianwen/evolution'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 
-const POLICY_VERSION = 'tianwen-auto-analysis.v1' as const
+const POLICY_VERSION = 'tianwen-auto-analysis.v2' as const
 export const LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID =
-  'tianwen-learning-consent-notice:tianwen-auto-analysis.v1'
+  'tianwen-learning-consent-notice:tianwen-auto-analysis.v2'
 export const LEARNING_CONSENT_NOTICE_DELIVERY_ID =
-  'tianwen-learning-consent-delivery:tianwen-auto-analysis.v1'
+  'tianwen-learning-consent-delivery:tianwen-auto-analysis.v2'
 export const LEARNING_CONSENT_NOTICE_TEXT = [
   'Native feedback normally does not enter the model.',
   'Enabling Tianwen sends the feedback note, a bounded text snapshot of its source Session (including the referenced reply and retained conversation context), and that Run\'s frozen Skill text to the configured model for internal analysis.',
+  'It also analyzes repeated research-summary task failures using at most two failed task packets/submissions and one successful counterexample, plus the frozen Skill. Only results recorded after this consent are eligible; unrelated conversations are not sent for this outcome analysis.',
   'The analysis child itself is read-only: it cannot edit the current project, directly install a Skill, or expand permission.',
   'After a proposed Skill change passes evaluation, Tianwen can activate the updated Skill for future Runs; already-started Runs keep their frozen Skill version. Read-only analysis does not mean Skill updates are disabled.',
   'You can disable automatic analysis later.',
@@ -30,7 +31,7 @@ export const LEARNING_CONSENT_NOTICE_TEXT = [
 type ConsentAction = 'enable' | 'disable' | 'status'
 
 export interface LearningConsentStatus {
-  readonly policyVersion: typeof POLICY_VERSION
+  readonly policyVersion: 'tianwen-auto-analysis.v1' | typeof POLICY_VERSION
   readonly enabled: boolean
   readonly revision: number
   readonly recordedAt?: string
@@ -382,7 +383,7 @@ export class TianwenLearningConsentAgentService extends Service {
       yield agent.ctx.tools.register(defineTool({
         name: 'tianwen_learning_consent',
         description: [
-          'Enable, disable, or inspect Tianwen automatic feedback analysis for this profile.',
+          'Enable, disable, or inspect Tianwen automatic feedback and repeated-task-result analysis for this profile.',
           LEARNING_CONSENT_NOTICE_TEXT,
         ].join('\n'),
         parameters: {
@@ -396,7 +397,7 @@ export class TianwenLearningConsentAgentService extends Service {
           schema: {
             type: 'object',
             properties: {
-              policyVersion: { type: 'string', const: POLICY_VERSION, required: true },
+              policyVersion: { type: 'string', enum: ['tianwen-auto-analysis.v1', POLICY_VERSION], required: true },
               enabled: { type: 'boolean', required: true },
               revision: { type: 'integer', required: true },
               recordedAt: { type: 'string' },
@@ -430,7 +431,7 @@ export class TianwenLearningConsentAgentService extends Service {
     const current = this.ctx.tianwenEvolution.getLearningAnalysisConsent()
     if (action === 'status') return statusOf(current)
     const enabled = action === 'enable'
-    if (current?.enabled === enabled) return statusOf(current)
+    if (current?.enabled === enabled && (!enabled || current.policyVersion === POLICY_VERSION)) return statusOf(current)
     const recorded = statusOf(this.ctx.tianwenEvolution.recordLearningAnalysisConsent({
       revision: (current?.revision ?? 0) + 1,
       enabled,

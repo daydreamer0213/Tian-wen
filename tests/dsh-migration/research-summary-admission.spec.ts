@@ -130,6 +130,41 @@ function candidateFixture(content = '# Candidate research summary\n\nUse the imp
 }
 
 describe('research summary first-step admission', () => {
+  it('freezes the first task result when an ordinary follow-up is already queued', async () => {
+    const directory = root('queued-followup')
+    const harness = await mount(directory, [
+      toolCallResponse('first-submit', RESEARCH_SUMMARY_TOOL_NAME, {
+        summary: 'Verified result.', confirmedFindingIds: ['f1'], uncertaintyIds: [],
+      }), textResponse('Verified result.'), textResponse('You are welcome.'),
+    ])
+    let queued = false
+    const off = harness.ctx.on('agent/turn-stopping', ({ agent, turn }) => {
+      if (turn === 1) {
+        queued = true
+        agent.followup(direct('谢谢'))
+      }
+    })
+    const handle = await harness.ctx.agents.create({
+      sessionId: SessionId(`queued-${randomUUID()}`), meta: { cwd: directory },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      handle.agent.followup(direct(invocation))
+      await waitForIdle(harness.ctx, handle.agent)
+      await harness.ctx.tianwenResearchSummaryAdmission.whenIdle()
+      const binding = harness.ctx.tianwenEvolution.getRunBindingBySessionId(String(handle.agent.session.id))!
+      expect(queued).toBe(true)
+      expect(handle.agent.session.events.filter(event => event.type === 'turn/end')).toHaveLength(2)
+      expect(harness.ctx.tianwenEvolution.getOutcomeIntake(binding.runId)?.input.verdict).toBe('not-met')
+      expect(harness.ctx.tianwenEvolution.getRunSkillUse(binding.runId)).toBeDefined()
+      expect(harness.ctx.tianwenEvolution.listLearningSignals()).toHaveLength(1)
+    } finally {
+      off()
+      await handle.dispose()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
   it('binds and exposes one frozen source tool before the first main-chat model request', async () => {
     const directory = root('fresh-root')
     const harness = await mount(directory, [
@@ -186,9 +221,132 @@ describe('research summary first-step admission', () => {
           schemaVersion: 'tianwen.run-skill-use.v2',
           provenance: { kind: 'direct-invocation' },
         })
+      // An accepted tool call is not a successful task: the decision uncertainty
+      // is missing. One synthetic failure records a Signal, not a learning Case.
+      expect(harness.ctx.tianwenEvolution.listLearningSignals()).toMatchObject([{
+        runId: binding!.runId,
+      }])
+      expect(harness.ctx.tianwenEvolution.listLearningTickets()).toEqual([])
     } finally {
       await handle.dispose()
       await harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('groups two missing requirements, excludes success, and separates frozen Skill parents', async () => {
+    const directory = root('ordinary-outcomes')
+    const summaries = [[], ['u1'], [], []]
+    const harness = await mount(directory, summaries.flatMap((uncertaintyIds, index) => [
+      toolCallResponse(`ordinary-submit-${index}`, RESEARCH_SUMMARY_TOOL_NAME, {
+        summary: uncertaintyIds.length ? 'Verified result; deployment region undecided.' : 'Verified result.',
+        confirmedFindingIds: ['f1'], uncertaintyIds,
+      }),
+      textResponse('Submitted summary.'),
+    ]))
+    const writes = vi.spyOn(harness.ctx.tianwenEvolution, 'recordOutcomeIntake')
+    const fixture = candidateFixture()
+    let pointer: ControlledSkillScopePointer | undefined
+    vi.spyOn(harness.ctx.tianwenEvolution, 'getControlledSkillScopePointer').mockImplementation(() => pointer)
+    vi.spyOn(harness.ctx.tianwenEvolution, 'listSkillCandidates').mockReturnValue([fixture.candidate])
+    try {
+      for (let index = 0; index < summaries.length; index++) {
+        if (index === 3) pointer = fixture.promoted
+        const handle = await harness.ctx.agents.create({
+          sessionId: SessionId(`outcome-source-${randomUUID()}`), meta: { cwd: directory },
+          agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+        })
+        try {
+          // Different real task subjects may share the same frozen acceptance contract.
+          handle.agent.followup(direct(invocation.replace('concrete.', `concrete in task ${index}.`)))
+          await waitForIdle(harness.ctx, handle.agent)
+          await harness.ctx.tianwenResearchSummaryAdmission.whenIdle()
+          const binding = harness.ctx.tianwenEvolution.getRunBindingBySessionId(String(handle.agent.session.id))!
+          expect(harness.ctx.tianwenEvolution.getOutcomeIntake(binding.runId)?.input.verdict)
+            .toBe(summaries[index]!.length ? 'met' : 'not-met')
+          expect(harness.ctx.tianwenEvolution.listLearningTickets()).toHaveLength(index < 2 ? 0 : 1)
+        } finally { await handle.dispose() }
+      }
+      expect(writes.mock.calls.map(([input]) => input.verdict)).toEqual(['not-met', 'met', 'not-met', 'not-met'])
+      expect(harness.ctx.tianwenEvolution.listLearningSignals()).toHaveLength(3)
+      expect(harness.ctx.tianwenEvolution.listLearningTickets()[0]?.signalIds).toHaveLength(2)
+      expect(harness.ctx.tianwenEvolution.listLearningCases()).toEqual([])
+    } finally { await harness.ctx.fiber.dispose() }
+  })
+
+  it('honors an exact stored historical parent after the packaged base changes', async () => {
+    const directory = root('historical-parent')
+    const harness = await mount(directory, [textResponse('Historical frozen rule remains in use.')])
+    const fixture = candidateFixture('# Historical packaged parent')
+    // The pointer is only a selection seam here; the immutable manifest itself is real.
+    const historical = prepareRunSkillManifest({ runId: `run:${'9'.repeat(64)}`, skill: fixture.skill })
+    vi.spyOn(harness.ctx.tianwenEvolution, 'getControlledSkillScopePointer').mockReturnValue({
+      ...fixture.promoted, activeVersionId: historical.parentVersionId, payloadDigest: sha256(historical.parent),
+    })
+    vi.spyOn(harness.ctx.tianwenEvolution, 'listRunSkillManifests').mockReturnValue([historical])
+    const getBinding = harness.ctx.tianwenEvolution.getRunBinding.bind(harness.ctx.tianwenEvolution)
+    vi.spyOn(harness.ctx.tianwenEvolution, 'getRunBinding').mockImplementation(runId =>
+      runId === historical.runId
+        ? { scopeKey: fixture.candidate.targetScope } as ReturnType<typeof getBinding>
+        : getBinding(runId))
+    const handle = await harness.ctx.agents.create({
+      sessionId: SessionId(`historical-parent-${randomUUID()}`), meta: { cwd: directory },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      handle.agent.followup(direct(invocation))
+      await waitForIdle(harness.ctx, handle.agent)
+      expect(invokedContent(harness.adapter.requests[0]!)).toBe(renderSkillContent(fixture.skill))
+      const binding = harness.ctx.tianwenEvolution.getRunBindingBySessionId(String(handle.agent.session.id))!
+      expect(harness.ctx.tianwenEvolution.getRunSkillManifest(binding.runId)?.parentVersionId)
+        .toBe(historical.parentVersionId)
+    } finally {
+      await handle.dispose()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps a historical capture-only Outcome unchanged after restart', async () => {
+    const directory = root('legacy-outcome')
+    const harness = await mount(directory, [
+      toolCallResponse('legacy-submit', RESEARCH_SUMMARY_TOOL_NAME, {
+        summary: 'Verified result.', confirmedFindingIds: ['f1'], uncertaintyIds: [],
+      }),
+      textResponse('Verified result.'),
+    ])
+    const bind = harness.ctx.tianwenLearningIntake.bindInitialStepWithSkill.bind(harness.ctx.tianwenLearningIntake)
+    // Reproduce the prior release's persisted contract, not a new evaluated Run.
+    vi.spyOn(harness.ctx.tianwenLearningIntake, 'bindInitialStepWithSkill').mockImplementation((session, input, skill) =>
+      bind(session, { ...input, acceptanceContract: {
+        ...input.acceptanceContract, gapDisposition: 'reusable', problemCategory: 'research-summary-correction',
+        severity: 2, blocksGoal: false,
+      } }, skill))
+    const sessionId = SessionId(`legacy-outcome-${randomUUID()}`)
+    const handle = await harness.ctx.agents.create({
+      sessionId, meta: { cwd: directory }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    handle.agent.followup(direct(invocation))
+    await waitForIdle(harness.ctx, handle.agent)
+    await harness.ctx.tianwenResearchSummaryAdmission.whenIdle()
+    const binding = harness.ctx.tianwenEvolution.getRunBindingBySessionId(String(sessionId))!
+    const legacy = harness.ctx.tianwenEvolution.getOutcomeIntake(binding.runId)!
+    expect(legacy.input.verdict).toBe('met') // Legacy capture receipt, not content-quality evidence.
+    await handle.dispose()
+    await harness.ctx.fiber.dispose()
+
+    const reopened = await mount(directory, [textResponse('Continued normally.')])
+    const resumed = await reopened.ctx.agents.resume({
+      resumeSessionId: sessionId, agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      resumed.agent.followup(direct('继续'))
+      await waitForIdle(reopened.ctx, resumed.agent)
+      await reopened.ctx.tianwenResearchSummaryAdmission.whenIdle()
+      expect(reopened.ctx.tianwenEvolution.getOutcomeIntake(binding.runId)).toEqual(legacy)
+      expect(reopened.ctx.tianwenEvolution.listLearningSignals()).toEqual([])
+      expect(reopened.adapter.requests).toHaveLength(1)
+    } finally {
+      await resumed.dispose()
+      await reopened.ctx.fiber.dispose()
     }
   })
 

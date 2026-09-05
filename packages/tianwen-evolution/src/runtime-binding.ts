@@ -22,6 +22,7 @@ import type {
 } from './ledger.js'
 import type {
   OutcomeIntakeInput,
+  OutcomeIntakeRecordedEvent,
   OutcomeIntakeReceipt,
   OutcomeLearningSignal,
   RunBindingInput,
@@ -52,7 +53,14 @@ import type {
   LearningAnalysisStatus,
   LearningAnalysisSubmission,
   RequestLearningAnalysisInput,
+  RequestOutcomeLearningAnalysisInput,
 } from './learning-analysis.js'
+import type {
+  LearningExplorationArm,
+  LearningExplorationProposal,
+  LearningExplorationReceipt,
+  LearningExplorationStatus,
+} from './learning-exploration.js'
 import type {
   InitialRunSkillBindingInput,
   InitialRunSkillBindingReceipt,
@@ -271,6 +279,47 @@ export class TianwenEvolutionService extends Service {
       this.state().ledger.recordLearningFeedbackRetraction(input))
   }
 
+  requestOutcomeLearningAnalysis(input: RequestOutcomeLearningAnalysisInput): LearningAnalysisReceipt {
+    return this.formalWrite(() => this.state().ledger.requestOutcomeLearningAnalysis(input))
+  }
+
+  getLearningAnalysisEvidenceIds(analysisId: LearningAnalysisId): Sha256Digest[] {
+    return this.state().ledger.getLearningAnalysisEvidenceIds(analysisId)
+  }
+
+  requestLearningExploration(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly proposal: LearningExplorationProposal
+    readonly environmentDigest: Sha256Digest
+  }): LearningExplorationReceipt {
+    return this.formalWrite(() => this.state().ledger.requestLearningExploration(input))
+  }
+
+  recordLearningExplorationArm(input: {
+    readonly analysisId: LearningAnalysisId
+    readonly arm: LearningExplorationArm
+    readonly sessionId: string
+    readonly runId?: TianwenRunId
+    readonly acceptanceEvidenceId?: Sha256Digest
+    readonly inconclusiveReason?: 'no-product-output' | 'infrastructure-failure'
+  }): LearningExplorationReceipt {
+    return this.formalWrite(() => this.state().ledger.recordLearningExplorationArm(input))
+  }
+
+  getLearningExploration(analysisId: LearningAnalysisId): LearningExplorationStatus | undefined {
+    return this.state().ledger.getLearningExploration(analysisId)
+  }
+
+  getLearningExplorationEvidenceIds(analysisId: LearningAnalysisId): Sha256Digest[] {
+    return this.state().ledger.getLearningExplorationEvidenceIds(analysisId)
+  }
+
+  getLearningExplorationByChildSessionId(
+    childSessionId: string,
+  ): LearningExplorationStatus | undefined {
+    return this.state().ledger.getLearningExplorationByChildSessionId(childSessionId)
+  }
+
   requestLearningAnalysis(
     input: RequestLearningAnalysisInput,
   ): LearningAnalysisReceipt {
@@ -444,6 +493,10 @@ export class TianwenEvolutionService extends Service {
     sessionId: string,
   ): RunBindingObservation | undefined {
     return this.state().ledger.getRunBindingBySessionId(sessionId)
+  }
+
+  getOutcomeIntake(runId: TianwenRunId): OutcomeIntakeRecordedEvent | undefined {
+    return this.state().ledger.getOutcomeIntake(runId)
   }
 
   recordOutcomeIntake(input: OutcomeIntakeInput): OutcomeIntakeReceipt {

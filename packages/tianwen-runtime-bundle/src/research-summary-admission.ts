@@ -19,14 +19,18 @@ import {
   RESEARCH_SUMMARY_TOOL_NAME,
   TIANWEN_CONTROLLED_AGENT_PRESET,
   createResearchSummaryTool,
+  evaluateResearchSummarySubmission,
+  normalizeResearchSummarySubmission,
   parseResearchPacket,
   type ResearchPacket,
+  type RuntimeOutcomeVerdictAttestation,
 } from '@tianwen/runtime'
 import { renderSkillContent } from '@deepseek-ai/dsh-skill'
 
 const GOAL_REF = 'goal:research-summary-source'
 const TASK_REF = 'task:research-summary-source'
 const NOT_MET_ERROR_CODE = 'RESEARCH_SUMMARY_NOT_MET'
+const OUTCOME_CATEGORY = 'research-summary-result.v1:'
 const VERSION_RUN_ID = `run:${'0'.repeat(64)}` as TianwenRunId
 const SKILL_GESTURE = /^\s*\/research-summary(?=\s|$)/u
 
@@ -155,7 +159,7 @@ function parseGesture(messages: readonly UserMessage[]): ParsedGesture | undefin
   }
 }
 
-function packetFromEvents(
+export function researchSummaryPacketFromEvents(
   events: readonly { readonly type: string, readonly data: unknown }[],
   expectedDigest: string,
 ): ParsedGesture | undefined {
@@ -229,6 +233,7 @@ export class TianwenResearchSummaryAdmissionService extends Service {
     'tools',
     'tianwenEvolution',
     'tianwenLearningIntake',
+    'tianwenEvidence',
   ] as const
 
   private readonly installed = new Map<Agent, InstalledAdmission>()
@@ -447,7 +452,7 @@ export class TianwenResearchSummaryAdmissionService extends Service {
             toolName: RESEARCH_SUMMARY_TOOL_NAME,
             notMetErrorCode: NOT_MET_ERROR_CODE,
             gapDisposition: 'reusable',
-            problemCategory: 'research-summary-correction',
+            problemCategory: `${OUTCOME_CATEGORY}${versionOf(selection.skill)}`,
             severity: 2,
             blocksGoal: false,
           },
@@ -504,13 +509,28 @@ export class TianwenResearchSummaryAdmissionService extends Service {
     }
     const candidates = this.ctx.tianwenEvolution.listSkillCandidates()
       .filter(candidate => this.matchesPointer(candidate, pointer, base))
-    if (candidates.length !== 1) {
-      throw new Error('controlled research summary pointer lacks one exact Candidate')
+    if (candidates.length === 1) {
+      return {
+        skill: freezeSkill({ ...candidates[0]!.payload, provider: base.provider }),
+        pointer,
+      }
     }
-    return {
-      skill: freezeSkill({ ...candidates[0]!.payload, provider: base.provider }),
-      pointer,
+    // A rollback pointer may select a packaged parent from before an app update.
+    // Its exact frozen payload remains authoritative; never replace it with the
+    // newly shipped base merely because the in-memory constant has changed.
+    const historical = this.ctx.tianwenEvolution.listRunSkillManifests()
+      .filter(manifest => {
+        const binding = this.ctx.tianwenEvolution.getRunBinding(manifest.runId)
+        return binding?.scopeKey === RESEARCH_SUMMARY_SCOPE
+          && manifest.parent.name === base.name
+          && manifest.parent.source === base.source
+          && manifest.parentVersionId === pointer.activeVersionId
+          && sha256(manifest.parent) === pointer.payloadDigest
+      })
+    if (candidates.length === 0 && historical.length > 0) {
+      return { skill: skillFromManifest(historical[0]!), pointer }
     }
+    throw new Error('controlled research summary pointer lacks an exact stored payload')
   }
 
   private matchesPointer(
@@ -642,7 +662,7 @@ export class TianwenResearchSummaryAdmissionService extends Service {
       })) {
       throw new Error('persisted research summary Session identity drift')
     }
-    const gesture = packetFromEvents(persisted.events, binding.acceptanceSubjectDigest)
+    const gesture = researchSummaryPacketFromEvents(persisted.events, binding.acceptanceSubjectDigest)
     if (gesture === undefined) throw new Error('persisted research summary packet is unavailable')
     const skill = skillFromManifest(manifest)
     const installed = await this.install(agent, skill, gesture.packet, runId)
@@ -657,17 +677,59 @@ export class TianwenResearchSummaryAdmissionService extends Service {
 
   private reconcile(agent: Agent, installed: InstalledAdmission): void {
     if (installed.reconciliation !== undefined) return
+    // whenIdle follows queued turns too. Freeze this completed task boundary
+    // now, and use the same evidence view for verdict, Outcome and Skill use.
+    const taskSession = { id: agent.session.id, events: structuredClone(agent.session.events) }
     const work = agent.whenIdle()
       .then(async () => {
         if (this.installed.get(agent) !== installed) return
         if (!await this.ctx.sessions.flush(agent.session)) return
-        this.ctx.tianwenLearningIntake.consumeOutcome(agent.session, installed.runId)
-        this.ctx.tianwenLearningIntake.recordSkillUse(agent.session, installed.runId)
+        this.ctx.tianwenLearningIntake.consumeOutcome(
+          taskSession, installed.runId, this.outcomeAttestation(taskSession, installed),
+        )
+        this.ctx.tianwenLearningIntake.recordSkillUse(taskSession, installed.runId)
+        await this.ctx.get('tianwenLearningLoop')?.observeOutcome(agent, installed.runId)
       })
       .catch(() => undefined)
       .finally(() => this.pending.delete(work))
     installed.reconciliation = work
     this.pending.add(work)
+  }
+
+  private outcomeAttestation(
+    session: Pick<Agent['session'], 'id' | 'events'>,
+    installed: InstalledAdmission,
+  ): RuntimeOutcomeVerdictAttestation | undefined {
+    const contract = this.ctx.tianwenEvolution.getRunBinding(installed.runId)?.acceptanceContract
+    // Capture-only historical bindings retain their original interpretation.
+    if (contract?.gapDisposition !== 'reusable'
+      || contract.problemCategory !== `${OUTCOME_CATEGORY}${versionOf(installed.skill)}`) return undefined
+    const events = session.events
+    const boundary = events.findLast(event => event.type === 'turn/start' || event.type === 'turn/end')
+    const evidence = this.ctx.tianwenEvidence.project(session)
+      .filter(item => item.action.toolName === RESEARCH_SUMMARY_TOOL_NAME)
+      .sort((left, right) => left.source.callSeq - right.source.callSeq).at(-1)
+    if (boundary?.type !== 'turn/end' || boundary.data.reason.kind !== 'completed'
+      || evidence?.outcome.status !== 'complete') return undefined
+    // An incomplete or malformed accepted submission is inconclusive, not met.
+    let verdict: RuntimeOutcomeVerdictAttestation['verdict'] = 'inconclusive'
+    const call = events.find(event => event.seq === evidence.source.callSeq)
+    const result = events.find(event => event.seq === evidence.source.resultSeq)
+    if (call?.type === 'tool/call' && result?.type === 'tool/result'
+      && call.data.turn === boundary.data.turn && result.seq < boundary.seq
+      && !evidence.outcome.isError && evidence.outcome.errorCode === undefined) {
+      try {
+        const submission = normalizeResearchSummarySubmission(
+          installed.packet, JSON.parse(call.data.arguments) as unknown,
+        )
+        const blocks = result.data.message.content[0].content
+        if (blocks.length === 1 && blocks[0]?.type === 'text'
+          && exactObject(JSON.parse(blocks[0].text), { verdict: 'not-evaluated', submission })) {
+          verdict = evaluateResearchSummarySubmission(installed.packet, submission)
+        }
+      } catch { /* Invalid persisted material cannot establish task success. */ }
+    }
+    return { verdict, acceptanceEvidenceId: evidence.evidenceId }
   }
 }
 

@@ -77,7 +77,7 @@ export interface RuntimeOutcomeIntakeReceipt extends OutcomeIntakeReceipt {
 }
 
 export interface RuntimeOutcomeVerdictAttestation {
-  readonly verdict: 'met' | 'not-met'
+  readonly verdict: 'met' | 'not-met' | 'inconclusive'
   readonly acceptanceEvidenceId: Sha256Digest
 }
 
@@ -199,6 +199,88 @@ export class TianwenLearningIntakeService extends Service {
     return { ...receipt, sessionUnchanged: true }
   }
 
+  bindRunWithResolvedSkill(
+    agent: Agent,
+    input: RuntimeRunBindingInput,
+    skill: SkillDefinition,
+    resolution: 'active-pointer' | 'exact-skill' = 'exact-skill',
+  ): RuntimeGovernedRunBindingReceipt {
+    const session = agent.session
+    const before = sessionDigest(session.events)
+    if (session.events.some(event => event.type === 'turn/start')) {
+      throw new RunSkillBindingError(
+        'run-binding-precondition-failed',
+        'Tianwen Run must be bound before the first DSH Turn',
+      )
+    }
+    if (skill.invocation.modelInvocable !== true) {
+      throw new RunSkillBindingError(
+        'skill-not-model-invocable',
+        `DSH Skill is not model-invocable: ${skill.name}`,
+      )
+    }
+    let resolvedSkill: SkillDefinition
+    try {
+      const binding = prepareRunBinding(runBindingInput(session, input))
+      const pointer = resolution === 'active-pointer'
+        ? this.ctx.tianwenEvolution.getControlledSkillScopePointer(input.scopeKey)
+        : undefined
+      const candidate = pointer === undefined ? undefined
+        : this.ctx.tianwenEvolution.listSkillCandidates().find(value => {
+          if (value.payload.name !== skill.name) return false
+          return prepareRunSkillManifest({
+            runId: binding.runId,
+            skill: { ...skill, ...value.payload },
+          }).parentVersionId === pointer.activeVersionId
+        })
+      resolvedSkill = candidate === undefined
+        ? skill
+        : { ...skill, ...candidate.payload }
+      const manifest = prepareRunSkillManifest({
+        runId: binding.runId,
+        skill: resolvedSkill,
+      })
+      if (pointer !== undefined && manifest.parentVersionId !== pointer.activeVersionId) {
+        throw new Error('controlled pointer does not resolve an exact Skill version')
+      }
+    } catch (cause) {
+      throw new RunSkillBindingError(
+        'run-binding-precondition-failed',
+        cause instanceof Error ? cause.message : 'DSH Skill manifest precondition failed',
+        { cause },
+      )
+    }
+    if (
+      session.events.some(event => event.type === 'turn/start')
+      || sessionDigest(session.events) !== before
+    ) {
+      throw new RunSkillBindingError(
+        'run-binding-precondition-failed',
+        'Tianwen Run must be bound before the first DSH Turn',
+      )
+    }
+    try {
+      const receipt = this.ctx.tianwenEvolution.recordInitialRunSkillBinding({
+        binding: runBindingInput(session, input),
+        skill: resolvedSkill,
+      })
+      if (sessionDigest(session.events) !== before) {
+        throw new RunSkillBindingError(
+          'run-binding-precondition-failed',
+          'governed Run binding changed the DSH Session',
+        )
+      }
+      return { ...receipt, sessionUnchanged: true }
+    } catch (cause) {
+      if (cause instanceof RunSkillBindingError) throw cause
+      throw new RunSkillBindingError(
+        'run-binding-persistence-failed',
+        'governed Run binding persistence failed',
+        { cause },
+      )
+    }
+  }
+
   async bindRunWithSkill(
     agent: Agent,
     input: RuntimeRunBindingInput,
@@ -304,7 +386,7 @@ export class TianwenLearningIntakeService extends Service {
   }
 
   private skillUseProof(
-    session: Session,
+    session: Pick<Session, 'id' | 'events'>,
     runId: TianwenRunId,
   ) {
     const before = sessionDigest(session.events)
@@ -438,7 +520,7 @@ export class TianwenLearningIntakeService extends Service {
   }
 
   recordSkillUse(
-    session: Session,
+    session: Pick<Session, 'id' | 'events'>,
     runId: TianwenRunId,
   ): RuntimeSkillUseReceipt {
     const proof = this.skillUseProof(session, runId)
@@ -491,7 +573,7 @@ export class TianwenLearningIntakeService extends Service {
   }
 
   consumeOutcome(
-    session: Session,
+    session: Pick<Session, 'id' | 'events'>,
     runId: TianwenRunId,
     attestation?: RuntimeOutcomeVerdictAttestation,
   ): RuntimeOutcomeIntakeReceipt {
@@ -531,7 +613,7 @@ export class TianwenLearningIntakeService extends Service {
         && finalEvidence !== undefined
         && finalEvidence.evidenceId === attestation.acceptanceEvidenceId
         && finalEvidence.outcome.status === 'complete'
-        && (attestation.verdict === 'met'
+        && (attestation.verdict === 'inconclusive' || (attestation.verdict === 'met'
           ? finalEvidence.outcome.isError === false
             && finalEvidence.outcome.errorCode === undefined
           : (finalEvidence.outcome.isError === false
@@ -541,7 +623,7 @@ export class TianwenLearningIntakeService extends Service {
                 finalEvidence.outcome.errorCode === undefined
                 || finalEvidence.outcome.errorCode
                   === binding.acceptanceContract.notMetErrorCode
-              )))
+              ))))
       if (!agrees) throw new Error('Outcome verdict attestation does not match Evidence')
       verdict = attestation.verdict
     }

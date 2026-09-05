@@ -339,6 +339,9 @@ importers:
       '@types/react':
         specifier: 18.2.79
         version: 18.2.79
+      dts-bundle-generator:
+        specifier: 9.5.1
+        version: 9.5.1
       esbuild:
         specifier: 0.28.2
         version: 0.28.2
@@ -3738,6 +3741,11 @@ packages:
   dotenv@16.4.5:
     resolution: {integrity: sha512-ZmdL2rui+eB2YwhsWzjInR8LldtZHGDoQ1ugH85ppHKwpUHL7j7rN0Ti9NCnGiQbhaZ11FpR+7ao1dNsmduNUg==}
     engines: {node: '>=12'}
+
+  dts-bundle-generator@9.5.1:
+    resolution: {integrity: sha512-DxpJOb2FNnEyOzMkG11sxO2dmxPjthoVWxfKqWYJ/bI/rT1rvTMktF5EKjAYrRZu6Z6t3NhOUZ0sZ5ZXevOfbA==}
+    engines: {node: '>=14.0.0'}
+    hasBin: true
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -8988,6 +8996,11 @@ snapshots:
       dotenv: 16.4.5
 
   dotenv@16.4.5: {}
+
+  dts-bundle-generator@9.5.1:
+    dependencies:
+      typescript: 6.0.3
+      yargs: 17.7.3
 
   dunder-proto@1.0.1:
     dependencies:

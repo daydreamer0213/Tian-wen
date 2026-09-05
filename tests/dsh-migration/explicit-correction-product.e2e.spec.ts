@@ -27,6 +27,9 @@ import type {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { apply as applyRuntimeBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
+import { RESEARCH_SUMMARY_BASE_SKILL } from '../../packages/tianwen-runtime/src/research-summary.js'
+import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
+import { hasLearningSkillObservation, LEARNING_SKILL_INSPECTION_TOOL } from '../../packages/tianwen-runtime-bundle/src/learning-skill-reuse.js'
 import {
   deriveInstallPaths,
   renderProfilePatch,
@@ -42,6 +45,7 @@ const model = 'scripted'
 const skillName = 'research-summary'
 const submissionTool = 'submit_research_summary'
 const analysisTool = 'submit_tianwen_analysis'
+const explorationTool = 'request_tianwen_exploration'
 const evaluatorTool = 'submit_blind_evaluation'
 
 const originalPacket = `<research_packet>
@@ -60,6 +64,21 @@ const adjacentPacket = `<research_packet>
 
 const improvedSkillMarker =
   'Include every decision uncertainty, while omitting background uncertainty and unsupported material.'
+
+type OutcomeMode = 'skill-change' | 'no-case' | 'interrupted' | 'explore-insufficient' | 'explore-skill-change' | 'reuse-skill' | 'reuse-drift'
+// Test-only admitted existing Skill, not a product default or real improvement claim.
+const reviewedSource = {
+  name: 'research-uncertainty-audit', provider: 'reviewed-test-source', source: 'bundled',
+  description: 'Audit decision-critical uncertainty in bounded research packets.',
+  content: improvedSkillMarker,
+  invocation: { modelInvocable: true, userInvocable: true },
+}
+const reviewedAdmission = {
+  name: reviewedSource.name, provider: reviewedSource.provider, digest: sha256(reviewedSource),
+  origin: 'test-fixture:reviewed-uncertainty-audit', revision: 'fixture-v1', license: 'MIT' as const,
+  reviewedAt: '2026-09-05T00:00:00.000Z', kind: 'self-contained-text' as const, runtime: '0.1.1-rc.2' as const,
+  scopeKey: 'project:tianwen/capability:research-summary', toolName: submissionTool,
+}
 
 function fixtureRoot(): string {
   mkdirSync(fixtureBase, { recursive: true })
@@ -116,8 +135,10 @@ function latestMessage(request: GenerateOptions): string {
 function productResponder(
   ctx: () => Context,
   observed: Array<{ sessionId: string, tools: readonly string[], text: string }>,
+  outcomeVerdict: OutcomeMode = 'skill-change',
 ) {
   let call = 0
+  let drifted = false
   return (request: GenerateOptions): readonly StreamChunk[] => {
     call += 1
     const tools = visibleTools(request)
@@ -125,9 +146,13 @@ function productResponder(
     const latest = latestMessage(request)
     observed.push({ sessionId: String(request.sessionId), tools, text })
 
+    if (text.includes('Native feedback normally does not enter the model.')) {
+      return textResponse('Automatic learning is optional; enable it in this main conversation after reviewing the disclosed sources.')
+    }
     if (latest.includes('INSPECT_FROZEN_ONLY')) {
       return textResponse('The frozen Skill was inspected in the main conversation.')
     }
+    if (latest.trim() === '继续') return textResponse('Continuing the interrupted learning in this main conversation.')
     if (latest.includes('Background subagent') || latest.includes('Tianwen 学习')) {
       return textResponse('The background update is visible in this main conversation.')
     }
@@ -136,15 +161,68 @@ function productResponder(
       const analysis = evolution.listLearningAnalyses().find(item =>
         item.phase === 'running' && item.submission === undefined)
       if (analysis === undefined) throw new Error('analysis model has no running product case')
+      const reuse = outcomeVerdict === 'reuse-skill' || outcomeVerdict === 'reuse-drift'
+      if (reuse && !text.includes(reviewedAdmission.digest)) {
+        return toolCallResponse(`inspect-source-${call}`, LEARNING_SKILL_INSPECTION_TOOL, { name: reviewedSource.name })
+      }
+      if (outcomeVerdict === 'reuse-drift') {
+        if (drifted) return toolCallResponse(`stop-drift-${call}`, analysisTool, {
+          verdict: 'insufficient-evidence', hypothesis: 'The inspected source changed before acceptance.',
+          supportingEvidenceIds: evolution.getLearningAnalysisEvidenceIds(analysis.analysisId), counterevidenceIds: [],
+        })
+        const child = ctx().agents.get(SessionId(String(request.sessionId)))!
+        const registry = child.ctx.get('skills') as Context['skills']
+        registry.register({ ...reviewedSource, content: 'Changed after inspection.' })
+        drifted = true
+      }
+      if (analysis.source === 'outcome' && outcomeVerdict === 'interrupted') {
+        return [{ type: 'finish', reason: { kind: 'error', failure: { message: 'Scripted provider interrupted before submission.', code: 'UNKNOWN' } } }]
+      }
+      if (analysis.source === 'outcome' && (outcomeVerdict === 'explore-insufficient' || outcomeVerdict === 'explore-skill-change')) {
+        const exploration = evolution.getLearningExploration(analysis.analysisId)
+        if (exploration === undefined) {
+          const source = evolution.listLearningSignals().find(signal =>
+            analysis.signalIds.includes(signal.signalId) && 'runId' in signal)
+          if (source === undefined || !('runId' in source)) {
+            throw new Error('exploration analysis has no frozen failed source Run')
+          }
+          return toolCallResponse(`product-exploration-${call}`, explorationTool, {
+            sourceRunId: source.runId,
+            hypothesis: 'A temporary completeness reminder changes decision-uncertainty coverage.',
+            alternative: 'The omission is unrelated to that temporary reminder.',
+            temporaryInstruction: outcomeVerdict === 'explore-skill-change' ? improvedSkillMarker : 'Re-check the packet once before submitting the summary.',
+            expectedIfHypothesis: { control: 'not-met', treatment: 'met' },
+            expectedIfAlternative: { control: 'not-met', treatment: 'not-met' },
+          })
+        }
+        if (exploration.result === undefined) {
+          throw new Error('analyst resumed before the experimental observation was durable')
+        }
+        if (outcomeVerdict === 'explore-insufficient') return toolCallResponse(`product-analysis-${call}`, analysisTool, {
+          verdict: 'insufficient-evidence',
+          hypothesis: 'The one paired observation did not distinguish the two explanations.',
+          supportingEvidenceIds: evolution.getLearningAnalysisEvidenceIds(analysis.analysisId),
+          counterevidenceIds: [],
+        })
+      }
       const ticket = evolution.listLearningTickets().find(item =>
         item.ticketId === analysis.ticketId)
       const signalIds = new Set(ticket?.signalIds ?? [])
       const evidenceIds = [...new Set(evolution.listLearningSignals()
-        .filter(signal => 'active' in signal && signal.active && signalIds.has(signal.signalId))
+        .filter(signal => analysis.source === 'outcome' ? analysis.signalIds.includes(signal.signalId) : 'active' in signal && signal.active && signalIds.has(signal.signalId))
         .flatMap(signal => signal.evidenceIds.filter(id => id !== signal.sessionDigest)))]
       if (evidenceIds.length === 0) throw new Error('analysis model has no product evidence')
+      if (analysis.source === 'outcome' && outcomeVerdict === 'no-case') {
+        return toolCallResponse(`product-analysis-${call}`, analysisTool, {
+          verdict: 'no-case', hypothesis: 'The failures do not establish a reusable Skill defect.',
+          supportingEvidenceIds: evidenceIds,
+          counterevidenceIds: analysis.counterevidenceRunIds.flatMap(runId => evolution.getOutcomeIntake(runId)!.input.evidenceIds),
+        })
+      }
       return toolCallResponse(`product-analysis-${call}`, analysisTool, {
         verdict: 'skill-change',
+        ...(reuse ? { reuseSource: { reference: reviewedAdmission,
+          rationale: 'Reuse only the uncertainty-audit rule within the original research-summary scope.' } } : {}),
         hypothesis: 'The base summary omitted a decision-critical uncertainty.',
         lesson: {
           claim: 'Include decision-critical uncertainty in a faithful research summary.',
@@ -163,7 +241,9 @@ Include every required finding. ${improvedSkillMarker}
 Call submit_research_summary exactly once with the selected IDs, then report the accepted summary.`,
         },
         supportingEvidenceIds: evidenceIds,
-        counterevidenceIds: [],
+        counterevidenceIds: analysis.source === 'outcome'
+          ? analysis.counterevidenceRunIds.flatMap(runId => evolution.getOutcomeIntake(runId)!.input.evidenceIds)
+          : [],
       })
     }
     if (tools.includes(evaluatorTool)) {
@@ -236,7 +316,10 @@ function sandboxPolicy() {
   }
 }
 
-async function mountProduct(root: string) {
+async function mountProduct(
+  root: string,
+  outcomeVerdict: OutcomeMode = 'skill-change',
+) {
   const paths = deriveInstallPaths(root)
   mkdirSync(paths.profileRoot, { recursive: true })
   const workspaceRoot = join(root, 'workspace')
@@ -249,7 +332,7 @@ async function mountProduct(root: string) {
       throw new Error('product Runtime is not mounted')
     }
     return runtimeContext
-  }, observed)
+  }, observed, outcomeVerdict)
   const harness = await mountFeedbackHarness(
     paths.dshHome,
     Array.from({ length: 160 }, () => responder),
@@ -263,6 +346,7 @@ async function mountProduct(root: string) {
   ctx.provide('sandboxPolicy', sandboxPolicy())
   ctx.provide('approval', {})
   await ctx.plugin(SkillRegistry)
+  if (outcomeVerdict.startsWith('reuse-')) ctx.skills.register(reviewedSource)
   await ctx.plugin(applySkillTool)
   await ctx.plugin(SessionQueryEngine)
   await ctx.plugin(SessionReferenceResolver)
@@ -275,6 +359,7 @@ async function mountProduct(root: string) {
     `workspaceRoot: '${paths.learningLoopRoot.replaceAll('\\', '/')}'`,
   )
   await applyRuntimeBundle(ctx, {
+    ...(outcomeVerdict.startsWith('reuse-') ? { learningSkillSources: [reviewedAdmission] } : {}),
     stateRoot: paths.stateRoot,
     sessionsRoot: paths.sessionsRoot,
     evolutionRoot: paths.evolutionRoot,
@@ -348,6 +433,221 @@ afterEach(() => {
 })
 
 describe('installed explicit-correction product story', () => {
+  it.each(['skill-change', 'reuse-skill', 'reuse-drift', 'explore-skill-change'] as const)('processes ordinary repeated outcomes via %s without feedback clicks', async mode => {
+    const product = await mountProduct(fixtureRoot(), mode)
+    const explorationErrors: string[] = []
+    if (mode === 'explore-skill-change') {
+      const service = product.ctx.tianwenLearningExploration
+      const run = service.run.bind(service)
+      vi.spyOn(service, 'run').mockImplementation(async input => {
+        try { return await run(input) } catch (error) {
+          explorationErrors.push(error instanceof Error ? error.message : String(error))
+          throw error
+        }
+      })
+    }
+    const handles: Array<Awaited<ReturnType<typeof createMain>>> = []
+    try {
+      const consentMain = await createMain(product.ctx, 'outcome-consent-main', product.workspaceRoot)
+      handles.push(consentMain)
+      expect(await product.ctx.tools.execute({ callId: CallId('outcome-consent'), name: 'tianwen_learning_consent',
+        arguments: { action: 'enable' }, agent: consentMain.agent, signal: AbortSignal.timeout(10_000) }))
+        .toMatchObject({ isError: false, value: { policyVersion: 'tianwen-auto-analysis.v2', enabled: true } })
+      const packets = [
+        '<research_packet>\n[F:verified|required] The measured result is verified.\n</research_packet>',
+        originalPacket, adjacentPacket,
+      ]
+      for (const [index, packet] of packets.entries()) {
+        const main = await createMain(product.ctx, `outcome-source-${index}`, product.workspaceRoot)
+        handles.push(main)
+        await ask(main.agent, `/research-summary\n${packet}`)
+        await product.ctx.tianwenResearchSummaryAdmission.whenIdle()
+        if (index < 2) expect(product.ctx.tianwenEvolution.listLearningAnalyses()).toEqual([])
+        if (index === 1) await ask(main.agent, `/research-summary\n${packet}`)
+      }
+      await vi.waitFor(() => expect(product.ctx.tianwenEvolution.listLearningAnalyses()[0]?.phase)
+        .toMatch(/^(promoted|failed|insufficient-evidence|rejected|invalidated|no-case)$/u), { timeout: 30_000, interval: 20 })
+      const analysis = product.ctx.tianwenEvolution.listLearningAnalyses()[0]!
+      if (mode === 'reuse-drift') {
+        expect(analysis.phase, JSON.stringify(analysis)).toBe('insufficient-evidence')
+        expect(product.ctx.tianwenEvolution.listSkillCandidates()).toHaveLength(0)
+        const child = await product.ctx.sessionPersistence.inspect(SessionId(analysis.childSessionId))
+        expect(JSON.stringify(child.events)).toContain('reuse source admission or reviewed bytes changed')
+        return
+      }
+      expect(analysis.phase, JSON.stringify({ analysis, explorationErrors })).toBe('promoted')
+      expect(analysis).toMatchObject({ source: 'outcome', parentSessionId: 'outcome-source-2' })
+      expect(analysis).not.toHaveProperty('feedbackVersion')
+      expect(product.ctx.tianwenEvolution.listLearningCases()[0]?.supporting).toHaveLength(2)
+      expect(product.ctx.tianwenEvolution.listLearningCases()[0]?.counterevidence).toHaveLength(1)
+      expect(product.ctx.tianwenEvolution.listSkillCandidates()).toHaveLength(1)
+      const childRequest = product.observed.find(item => item.sessionId === analysis.childSessionId && item.tools.includes(analysisTool))!
+      expect(childRequest.text).toContain('Frozen ordinary task evidence:')
+      expect(childRequest.text).not.toContain('User correction:')
+      expect(childRequest.text).toContain('request_tianwen_exploration once')
+      expect(childRequest.tools).toEqual(mode === 'reuse-skill'
+        ? [LEARNING_SKILL_INSPECTION_TOOL, explorationTool, analysisTool] : [explorationTool, analysisTool])
+      if (mode === 'explore-skill-change') {
+        expect(product.ctx.tianwenEvolution.getLearningExploration(analysis.analysisId)?.result).toEqual({
+          observation: { control: 'not-met', treatment: 'met' }, classification: 'matches-hypothesis-prediction',
+        })
+        const experimentIds = product.ctx.tianwenEvolution.getLearningExplorationEvidenceIds(analysis.analysisId)
+        expect(analysis.submission?.supportingEvidenceIds.some(id => experimentIds.includes(id))).toBe(false)
+      } else expect(product.ctx.tianwenEvolution.getLearningExploration(analysis.analysisId)).toBeUndefined()
+      if (mode === 'reuse-skill') {
+        expect(analysis.submission?.reuseSource?.reference).toEqual(reviewedAdmission)
+        expect(product.ctx.tianwenEvolution.listAttributions()[0]?.alternatives).toContain(reviewedAdmission.digest)
+        expect(product.ctx.tianwenEvolution.listSkillCandidates()[0]?.targetScope).toBe(reviewedAdmission.scopeKey)
+        expect(product.ctx.tianwenEvolution.listSkillCandidates()[0]?.payload.name).toBe(skillName)
+        expect(await product.ctx.skills.get(reviewedSource.name)).toEqual(reviewedSource)
+        const durableChild = await product.ctx.sessionPersistence.inspect(SessionId(analysis.childSessionId))
+        expect(hasLearningSkillObservation(durableChild.events, reviewedAdmission)).toBe(true)
+      }
+      await vi.waitFor(() => expect(product.ctx.tianwenEvolution.getLearningAnalysis(analysis.analysisId)?.terminalReportDelivery?.state).toBe('delivered'))
+      expect(mainReportText(handles.at(-1)!.agent)).toContain('多个任务出现同类问题')
+    } finally {
+      for (const handle of handles.reverse()) await handle.dispose()
+      await product.ctx.fiber.dispose()
+    }
+  }, 45_000)
+
+  it('waits for post-consent failures and an ordinary success, and accepts no-change analysis', async () => {
+    const product = await mountProduct(fixtureRoot(), 'no-case')
+    const handles: Array<Awaited<ReturnType<typeof createMain>>> = []
+    async function task(id: string, packet: string) {
+      const main = await createMain(product.ctx, id, product.workspaceRoot)
+      handles.push(main)
+      await ask(main.agent, `/research-summary\n${packet}`)
+      await product.ctx.tianwenResearchSummaryAdmission.whenIdle()
+      return main
+    }
+    try {
+      await task('before-consent-1', originalPacket)
+      const consentMain = await task('before-consent-2', adjacentPacket)
+      expect(product.ctx.tianwenEvolution.listLearningAnalyses()).toEqual([])
+      expect(product.ctx.tianwenEvolution.getLearningConsentNoticeStatus('tianwen-auto-analysis.v2')?.state).toBe('delivered')
+      expect(await product.ctx.tools.execute({ callId: CallId('outcome-enable-later'), name: 'tianwen_learning_consent',
+        arguments: { action: 'enable' }, agent: consentMain.agent, signal: AbortSignal.timeout(10_000) }))
+        .toMatchObject({ isError: false })
+      await task('after-consent-1', originalPacket)
+      expect(product.ctx.tianwenEvolution.listLearningAnalyses()).toEqual([])
+      await task('after-consent-2', adjacentPacket)
+      expect(product.ctx.tianwenEvolution.listLearningAnalyses()).toEqual([])
+      const successful = await task('counter-last', '<research_packet>\n[F:verified|required] The measured result is verified.\n</research_packet>')
+      await vi.waitFor(() => expect(product.ctx.tianwenEvolution.listLearningAnalyses()[0]?.phase).toBe('no-case'))
+      const analysis = product.ctx.tianwenEvolution.listLearningAnalyses()[0]!
+      expect(analysis).toMatchObject({ source: 'outcome', parentSessionId: String(successful.agent.session.id) })
+      const request = product.observed.find(item => item.sessionId === analysis.childSessionId && item.tools.includes(analysisTool))!
+      expect(request.text).toContain('Frozen ordinary task evidence:')
+      expect(product.ctx.tianwenEvolution.listLearningCases()).toEqual([])
+      expect(product.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
+      expect(product.observed.some(item => item.tools.includes(evaluatorTool))).toBe(false)
+      expect(product.ctx.tianwenEvolution.getLearningExploration(analysis.analysisId)).toBeUndefined()
+      await vi.waitFor(() => expect(product.ctx.tianwenEvolution.getLearningAnalysis(analysis.analysisId)?.terminalReportDelivery?.state).toBe('delivered'))
+    } finally {
+      for (const handle of handles.reverse()) await handle.dispose()
+      await product.ctx.fiber.dispose()
+    }
+  })
+
+  it('returns one indistinguishable native exploration pair to the same analyst and stops without a Candidate', async () => {
+    const product = await mountProduct(fixtureRoot(), 'explore-insufficient')
+    const handles: Array<Awaited<ReturnType<typeof createMain>>> = []
+    async function task(id: string, packet: string) {
+      const main = await createMain(product.ctx, id, product.workspaceRoot)
+      handles.push(main)
+      await ask(main.agent, `/research-summary\n${packet}`)
+      await product.ctx.tianwenResearchSummaryAdmission.whenIdle()
+      return main
+    }
+    try {
+      const consent = await task('exploration-before-consent', '<research_packet>\n[F:verified|required] The measured result is verified.\n</research_packet>')
+      await product.ctx.tools.execute({
+        callId: CallId('exploration-consent'), name: 'tianwen_learning_consent',
+        arguments: { action: 'enable' }, agent: consent.agent,
+        signal: AbortSignal.timeout(10_000),
+      })
+      await task('exploration-failure-1', originalPacket)
+      await task('exploration-failure-2', adjacentPacket)
+      await task('exploration-counter', '<research_packet>\n[F:verified|required] The measured result is verified.\n</research_packet>')
+
+      await vi.waitFor(() => {
+        const current = product.ctx.tianwenEvolution.listLearningAnalyses()[0]
+        expect(current?.phase, JSON.stringify({
+          analysis: current,
+          exploration: current === undefined ? undefined
+            : product.ctx.tianwenEvolution.getLearningExploration(current.analysisId),
+          observed: product.observed.map(item => ({
+            sessionId: item.sessionId,
+            tools: item.tools,
+          })),
+        })).toBe('insufficient-evidence')
+      }, { timeout: 30_000, interval: 20 })
+      const analysis = product.ctx.tianwenEvolution.listLearningAnalyses()[0]!
+      const exploration = product.ctx.tianwenEvolution.getLearningExploration(analysis.analysisId)!
+      expect(exploration.result).toEqual({
+        observation: { control: 'not-met', treatment: 'not-met' },
+        classification: 'matches-alternative-prediction',
+      })
+      expect(product.observed.filter(item =>
+        item.sessionId === analysis.childSessionId && item.tools.includes(analysisTool)))
+        .toHaveLength(2)
+      expect(product.ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
+      expect(product.observed.some(item => item.tools.includes(evaluatorTool))).toBe(false)
+      const originalEvidence = product.ctx.tianwenEvolution.getLearningAnalysisEvidenceIds(analysis.analysisId)
+      const experimentalEvidence = product.ctx.tianwenEvolution.getLearningExplorationEvidenceIds(analysis.analysisId)
+      expect(experimentalEvidence.length).toBeGreaterThan(0)
+      expect(experimentalEvidence.some(id => originalEvidence.includes(id))).toBe(false)
+    } finally {
+      for (const handle of handles.reverse()) await handle.dispose()
+      await product.ctx.fiber.dispose()
+    }
+  }, 45_000)
+
+  it('resumes the same interrupted analysis only after continuing in the main conversation', async () => {
+    const root = fixtureRoot()
+    const first = await mountProduct(root, 'interrupted')
+    const handles: Array<Awaited<ReturnType<typeof createMain>>> = []
+    let saved: ReturnType<typeof first.ctx.tianwenEvolution.listLearningAnalyses>[number]
+    try {
+      const consent = await createMain(first.ctx, 'resume-consent', first.workspaceRoot)
+      handles.push(consent)
+      await first.ctx.tools.execute({ callId: CallId('resume-consent'), name: 'tianwen_learning_consent',
+        arguments: { action: 'enable' }, agent: consent.agent, signal: AbortSignal.timeout(10_000) })
+      for (const [index, packet] of [
+        '<research_packet>\n[F:verified|required] The measured result is verified.\n</research_packet>',
+        originalPacket, adjacentPacket,
+      ].entries()) {
+        const main = await createMain(first.ctx, `resume-source-${index}`, first.workspaceRoot)
+        handles.push(main)
+        await ask(main.agent, `/research-summary\n${packet}`)
+        await first.ctx.tianwenResearchSummaryAdmission.whenIdle()
+      }
+      await vi.waitFor(() => expect(first.ctx.tianwenEvolution.listLearningAnalyses()[0]?.phase).toBe('running'))
+      saved = first.ctx.tianwenEvolution.listLearningAnalyses()[0]!
+      await vi.waitFor(() => expect(first.ctx.agents.get(SessionId(saved.childSessionId))).toBeUndefined())
+      expect(saved.submission).toBeUndefined()
+    } finally {
+      for (const handle of handles.reverse()) await handle.dispose()
+      await first.ctx.fiber.dispose()
+    }
+    const second = await mountProduct(root)
+    const main = await second.ctx.agents.resume({ resumeSessionId: SessionId(saved!.parentSessionId), agentOptions: { provider, model } })
+    try {
+      await second.ctx.tianwenLearningLoop.schedule(saved!.analysisId)
+      await main.agent.whenIdle()
+      expect(second.observed).toEqual([])
+      await ask(main.agent, '继续')
+      await vi.waitFor(() => expect(second.ctx.tianwenEvolution.getLearningAnalysis(saved!.analysisId)?.phase).toBe('promoted'), { timeout: 30_000 })
+      expect(second.ctx.tianwenEvolution.listLearningAnalyses()).toHaveLength(1)
+      expect(second.ctx.tianwenEvolution.listSkillCandidates()).toHaveLength(1)
+      expect(second.observed.filter(item => item.tools.includes(analysisTool)).map(item => item.sessionId)).toEqual([saved!.childSessionId])
+    } finally {
+      await main.dispose()
+      await second.ctx.fiber.dispose()
+    }
+  }, 45_000)
+
   it('contains no test-owned evaluation or pointer authority', () => {
     const source = readFileSync(import.meta.filename, 'utf8')
     const forbiddenCalls = [
@@ -411,7 +711,9 @@ describe('installed explicit-correction product story', () => {
       const sourceManifest = sourceBinding === undefined
         ? undefined
         : product.ctx.tianwenEvolution.getRunSkillManifest(sourceBinding.runId)
-      expect(sourceManifest?.parent.content).toContain('For this base version')
+      // The scripted provider supplies the failure, not a deliberately defective
+      // production Skill. This story proves mechanics, not natural efficacy.
+      expect(sourceManifest?.parent.content).toBe(RESEARCH_SUMMARY_BASE_SKILL.content)
       expect(product.ctx.tianwenEvolution.getRunSkillUse(sourceBinding!.runId))
         .toMatchObject({
           schemaVersion: 'tianwen.run-skill-use.v2',
@@ -486,7 +788,7 @@ describe('installed explicit-correction product story', () => {
         .matchAll(/<skill_instructions>([\s\S]*?)<\/skill_instructions>/gu)]
         .map(match => match[1]!)
       expect(frozenSkillBodies).toHaveLength(1)
-      expect(frozenSkillBodies[0]).toContain('For this base version')
+      expect(frozenSkillBodies[0]?.trim()).toBe(sourceManifest!.parent.content)
       expect(frozenSkillBodies[0]).not.toContain(improvedSkillMarker)
 
       const removed = await product.ctx.messageFeedback.delete({
@@ -516,7 +818,7 @@ describe('installed explicit-correction product story', () => {
         .getRunBindingBySessionId(String(afterRollback.agent.session.id))!
       const rollbackManifest = product.ctx.tianwenEvolution
         .getRunSkillManifest(rollbackBinding.runId)!
-      expect(rollbackManifest.parent.content).toContain('For this base version')
+      expect(rollbackManifest.parentVersionId).toBe(sourceManifest!.parentVersionId)
       expect(rollbackManifest.parent.content).not.toContain(improvedSkillMarker)
 
       const reports = mainReportText(resumedSource.agent)

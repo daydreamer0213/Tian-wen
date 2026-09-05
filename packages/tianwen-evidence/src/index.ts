@@ -18,7 +18,7 @@ export class TianwenEvidenceService extends Service {
     super(ctx, 'tianwenEvidence')
   }
 
-  project(session: Session): readonly EvidenceRecord[] {
+  project(session: Pick<Session, 'id' | 'events'>): readonly EvidenceRecord[] {
     return projectEvidence(session.id, session.events)
   }
 }

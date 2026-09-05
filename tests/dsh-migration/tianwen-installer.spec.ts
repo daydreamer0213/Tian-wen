@@ -252,6 +252,15 @@ function writeManagedRuntimePredecessor(paths: ReturnType<typeof deriveInstallPa
   const profileManifestPath = join(paths.profileRoot, 'package.json')
   const profile = JSON.parse(readFileSync(profileManifestPath, 'utf8'))
   profile.dependencies['@tianwen/runtime-bundle'] = '0.1.10'
+  // Frozen 0.1.10 configuration predates the learningLoop block; do not derive
+  // the predecessor's bytes from the current production renderer.
+  writeFileSync(join(paths.profileRoot, 'cordis.patch.yml'),
+    historicalLockedProfilePatchFixture(paths).replace(
+      `    evolutionRoot: '${paths.evolutionRoot.replaceAll('\\', '/')}'\n`,
+      `    evolutionRoot: '${paths.evolutionRoot.replaceAll('\\', '/')}'\n`
+        + `    stateRoot: '${paths.stateRoot.replaceAll('\\', '/')}'\n`
+        + `    sessionsRoot: '${paths.sessionsRoot.replaceAll('\\', '/')}'\n`,
+    ), 'utf8')
   writeJson(profileManifestPath, profile)
   const runtimeManifestPath = join(
     paths.profileRoot,

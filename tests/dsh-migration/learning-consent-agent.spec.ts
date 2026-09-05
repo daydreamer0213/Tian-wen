@@ -200,7 +200,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         .observeFeedbackWithoutConsent(String(child.agent.session.id))
       await main.agent.whenIdle()
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v1',
+        'tianwen-auto-analysis.v2',
       )).toMatchObject({
         state: 'delivered',
         mainSessionId: String(main.agent.session.id),
@@ -227,7 +227,7 @@ describe('Tianwen main-chat learning consent tool', () => {
       expect(initial).toMatchObject({
         isError: false,
         value: {
-          policyVersion: 'tianwen-auto-analysis.v1',
+          policyVersion: 'tianwen-auto-analysis.v2',
           enabled: false,
           revision: 0,
         },
@@ -236,7 +236,7 @@ describe('Tianwen main-chat learning consent tool', () => {
       expect(enabled).toMatchObject({
         isError: false,
         value: {
-          policyVersion: 'tianwen-auto-analysis.v1',
+          policyVersion: 'tianwen-auto-analysis.v2',
           enabled: true,
           revision: 1,
         },
@@ -256,6 +256,26 @@ describe('Tianwen main-chat learning consent tool', () => {
       expect(serialized).not.toContain('scope')
       expect(serialized).not.toMatch(/[A-Z]:\//u)
     } finally {
+      await main.dispose()
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps feedback-only consent readable and upgrades it once through the main tool', async () => {
+    const mounted = await mountConsentRuntime('policy-upgrade')
+    const { main, child } = await createMainAndChild(mounted.ctx)
+    try {
+      mounted.ctx.tianwenEvolution.recordLearningAnalysisConsent({
+        revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v1',
+      })
+      expect(await executeConsent(mounted.ctx, main.agent, { action: 'status' }))
+        .toMatchObject({ value: { enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v1' } })
+      expect(await executeConsent(mounted.ctx, main.agent, { action: 'enable' }))
+        .toMatchObject({ value: { enabled: true, revision: 2, policyVersion: 'tianwen-auto-analysis.v2' } })
+      expect(await executeConsent(mounted.ctx, main.agent, { action: 'enable' }))
+        .toMatchObject({ value: { enabled: true, revision: 2, policyVersion: 'tianwen-auto-analysis.v2' } })
+    } finally {
+      await child.dispose()
       await main.dispose()
       await mounted.ctx.fiber.dispose()
     }
@@ -285,7 +305,7 @@ describe('Tianwen main-chat learning consent tool', () => {
     }
   })
 
-  it('delivers the five-fact tool-disabled notice once to the exact main parent of child feedback', async () => {
+  it('delivers the source-disclosing tool-disabled notice once to the exact main parent of child feedback', async () => {
     const mounted = await mountConsentRuntime('notice', [
       toolCallResponse('notice-tool-call', 'notice_probe', {}),
       textResponse('Notice acknowledged.'),
@@ -321,7 +341,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         type: 'text',
         text: LEARNING_CONSENT_NOTICE_TEXT,
       }])
-      expect(LEARNING_CONSENT_NOTICE_TEXT.split('\n')).toHaveLength(5)
+      expect(LEARNING_CONSENT_NOTICE_TEXT).toContain('at most two failed task packets/submissions and one successful counterexample')
       expect(LEARNING_CONSENT_NOTICE_TEXT).toContain('frozen Skill text')
       expect(LEARNING_CONSENT_NOTICE_TEXT).not.toContain('PRIVATE CORRECTION')
       expect(child.agent.session.events.some(event =>
@@ -329,7 +349,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         && String(event.data.id) === LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID))
         .toBe(false)
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v1',
+        'tianwen-auto-analysis.v2',
       )).toMatchObject({
         state: 'delivered',
         mainSessionId: String(main.agent.session.id),
@@ -366,7 +386,7 @@ describe('Tianwen main-chat learning consent tool', () => {
       .observeFeedbackWithoutConsent(String(child.agent.session.id)))
       .rejects.toThrow('forced acknowledgement failure')
     expect(first.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-      'tianwen-auto-analysis.v1',
+      'tianwen-auto-analysis.v2',
     )?.state).toBe('pending')
     expect(first.adapter.requests).toHaveLength(1)
     await child.dispose()
@@ -380,7 +400,7 @@ describe('Tianwen main-chat learning consent tool', () => {
     })
     try {
       await expect.poll(() => recovered.ctx.tianwenEvolution
-        .getLearningConsentNoticeStatus('tianwen-auto-analysis.v1')?.state)
+        .getLearningConsentNoticeStatus('tianwen-auto-analysis.v2')?.state)
         .toBe('delivered')
       expect(recovered.adapter.requests).toHaveLength(0)
       expect(resumed.agent.session.events.filter(event =>
@@ -403,7 +423,7 @@ describe('Tianwen main-chat learning consent tool', () => {
     await mounted.ctx.tianwenLearningConsentAgent
       .observeFeedbackWithoutConsent(String(childSessionId))
     expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-      'tianwen-auto-analysis.v1',
+      'tianwen-auto-analysis.v2',
     )).toMatchObject({
       state: 'pending',
       mainSessionId: String(mainSessionId),
@@ -414,7 +434,7 @@ describe('Tianwen main-chat learning consent tool', () => {
     try {
       await executeConsent(mounted.ctx, main.agent, { action: 'status' })
       await expect.poll(() => mounted.ctx.tianwenEvolution
-        .getLearningConsentNoticeStatus('tianwen-auto-analysis.v1')?.state)
+        .getLearningConsentNoticeStatus('tianwen-auto-analysis.v2')?.state)
         .toBe('delivered')
       expect(mounted.adapter.requests).toHaveLength(1)
     } finally {
@@ -438,7 +458,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         .observeFeedbackWithoutConsent(String(orphan.agent.session.id)))
         .resolves.toBe(false)
       expect(missing.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v1',
+        'tianwen-auto-analysis.v2',
       )).toBeUndefined()
       expect(missing.adapter.requests).toHaveLength(0)
     } finally {
@@ -464,7 +484,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         .observeFeedbackWithoutConsent(String(orphan.agent.session.id)))
         .resolves.toBe(false)
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v1',
+        'tianwen-auto-analysis.v2',
       )).toBeUndefined()
     } finally {
       await orphan.dispose()
@@ -488,7 +508,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         .observeFeedbackWithoutConsent(String(exactLineage.child.agent.session.id)))
         .resolves.toBe(true)
       expect(exact.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v1',
+        'tianwen-auto-analysis.v2',
       )).toMatchObject({
         state: 'pending',
         mainSessionId: String(exactLineage.main.agent.session.id),
@@ -518,7 +538,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         .observeFeedbackWithoutConsent(String(first.child.agent.session.id)))
         .rejects.toThrow('forced conflicting intent append')
       expect(conflict.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v1',
+        'tianwen-auto-analysis.v2',
       )).toMatchObject({
         state: 'pending',
         mainSessionId: String(second.main.agent.session.id),
@@ -559,7 +579,7 @@ describe('Tianwen main-chat learning consent tool', () => {
 
       expect(inspected).not.toContain(String(second.child.agent.session.id))
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v1',
+        'tianwen-auto-analysis.v2',
       )).toBeUndefined()
 
       gate.resolve()
@@ -568,7 +588,7 @@ describe('Tianwen main-chat learning consent tool', () => {
       await first.main.agent.whenIdle()
       await second.main.agent.whenIdle()
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v1',
+        'tianwen-auto-analysis.v2',
       )).toMatchObject({
         state: 'delivered',
         mainSessionId: String(first.main.agent.session.id),
@@ -633,7 +653,7 @@ describe('Tianwen main-chat learning consent tool', () => {
       await expect(observation).resolves.toBe(true)
       await disposal
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v1',
+        'tianwen-auto-analysis.v2',
       )).toMatchObject({ mainSessionId: String(main.agent.session.id) })
       await expect(service
         .observeFeedbackWithoutConsent(String(child.agent.session.id)))

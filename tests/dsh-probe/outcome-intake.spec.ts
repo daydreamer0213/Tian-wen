@@ -79,6 +79,26 @@ afterEach(() => {
   }
 })
 
+describe('Outcome read projection', () => {
+  it('reads the immutable result after restart without exposing mutable ledger state', () => {
+    const directory = root('read-projection')
+    const ledger = new EvolutionLedger(directory)
+    const runId = bind(ledger, 'outcome-projection')
+    expect(ledger.getOutcomeIntake(runId)).toBeUndefined()
+    record(ledger, runId, 'met')
+    const result = ledger.getOutcomeIntake(runId)!
+    expect(result.input).toEqual({
+      runId, verdict: 'met', sessionDigest: digest('1'), evidenceIds: [digest('e')],
+    })
+    const before = ledger.listEvents()
+    ;(result.input.evidenceIds as string[]).push(digest('b'))
+    expect(ledger.getOutcomeIntake(runId)?.input.evidenceIds).toEqual([digest('e')])
+    const reopened = new EvolutionLedger(directory)
+    expect(reopened.getOutcomeIntake(runId)).toEqual(ledger.getOutcomeIntake(runId))
+    expect(ledger.listEvents()).toEqual(before)
+  })
+})
+
 describe('Tianwen Run binding', () => {
   it('prepares a stable immutable Run identity', () => {
     const first = prepareRunBinding(base)

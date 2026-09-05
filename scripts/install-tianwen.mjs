@@ -259,6 +259,50 @@ function renderPredecessorProfilePatch(paths) {
 `
 }
 
+// Frozen Runtime 0.1.10 managed configuration, before learningLoop was added.
+// Never validate an installed predecessor against the evolving current patch.
+function renderRuntimePredecessorProfilePatch(paths) {
+  return `- id: agent-default-model
+  config:
+    provider: tianwen-offline
+    model: phase2-smoke
+
+- id: session-persistence-jsonl
+  config:
+    root: '${portable(paths.sessionsRoot)}'
+    compression: none
+    packChunks: false
+
+- id: tianwen-runtime
+  config:
+    evolutionRoot: '${portable(paths.evolutionRoot)}'
+    stateRoot: '${portable(paths.stateRoot)}'
+    sessionsRoot: '${portable(paths.sessionsRoot)}'
+
+- id: attachment-local
+  disabled: true
+
+- id: sandbox
+  disabled: true
+
+- id: pwsh-sandbox
+  disabled: true
+
+- id: permission
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true
+
+- insert:
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+
+    - id: tianwen-phase2-smoke
+      name: '@tianwen/runtime-bundle/smoke'
+`
+}
+
 function renderLockedPredecessorProfilePatch(paths) {
   return `- id: agent-default-model
   config:
@@ -450,7 +494,7 @@ export function classifyManagedInstallation(paths) {
     if (host.version === DSH_VERSION) {
       return existsSync(runtimeArchivePath)
         && statSync(runtimeArchivePath).isFile()
-        && matchesProfile(profile, DSH_VERSION, '0.1.10', renderProfilePatch(paths))
+        && matchesProfile(profile, DSH_VERSION, '0.1.10', renderRuntimePredecessorProfilePatch(paths))
         && matchesPredecessorReceipt(paths, runtimeArchivePath, DSH_VERSION)
         ? 'managed-runtime-predecessor'
         : 'incompatible'

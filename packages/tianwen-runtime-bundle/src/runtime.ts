@@ -1,12 +1,14 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { isAbsolute, join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { SessionId } from '@tianwen/dsh-compat'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   sha256,
   type LearningAnalysisProgressCursor,
   type LearningAnalysisStatus,
+  type LearningSkillAdmission,
 } from '@tianwen/evolution'
 import {
   RESEARCH_SUMMARY_TOOL_NAME,
@@ -23,6 +25,7 @@ import {
 import { mountTianwenLongGoalHost } from './long-goal-host.js'
 import type { TianwenLongGoalHostConfig } from './long-goal-host.js'
 import { TianwenLearningConsentAgentService } from './learning-consent-agent.js'
+import { TianwenLearningExplorationService } from './learning-exploration.js'
 import {
   TianwenLearningAnalysisChildService,
   exactLearningAnalysisLiveChild,
@@ -44,12 +47,14 @@ export { inject, name, SUPPORTED_DSH_VERSION }
 
 export interface TianwenRuntimeBundleConfig extends TianwenLongGoalHostConfig {
   readonly evolutionRoot?: string
+  /** Exact host-reviewed self-contained sources; omitted means no discovery tool. */
+  readonly learningSkillSources?: readonly LearningSkillAdmission[]
   /** Test/programmatic seam; desktop profiles use learningLoop instead. */
   readonly learningLoopExecutor?: LearningLoopControlledExecutor
   /** Serializable desktop activation for the sole audited explicit-correction protocol. */
   readonly learningLoop?: {
     readonly enabled: true
-    /** Must be an absolute persistent state root. Defaults to stateRoot/learning-loop. */
+    /** Absolute persistent root; defaults to stateRoot/learning-loop or native Profile state. */
     readonly workspaceRoot?: string
   }
 }
@@ -387,12 +392,13 @@ async function findConfiguredReport(
 }
 
 export function createConfiguredLearningLoopExecutor(
-  _ctx: Context,
+  ctx: Context,
   config: TianwenRuntimeBundleConfig,
 ): LearningLoopControlledExecutor | undefined {
   if (config.learningLoopExecutor !== undefined) return config.learningLoopExecutor
   if (config.learningLoop?.enabled !== true) return undefined
   const configuredRoot = config.learningLoop.workspaceRoot ?? config.stateRoot
+    ?? (ctx.baseUrl === undefined ? undefined : resolve(fileURLToPath(ctx.baseUrl), 'state'))
   if (configuredRoot === undefined || !isAbsolute(configuredRoot)) {
     throw new Error('learningLoop.enabled requires an absolute workspaceRoot or stateRoot')
   }
@@ -466,6 +472,7 @@ export async function apply(
   ctx.plugin(TianwenResearchSummaryAdmissionService)
   ctx.plugin(TianwenLearningConsentAgentService)
   ctx.plugin(TianwenMessageFeedbackBridgeService)
+  ctx.plugin(TianwenLearningExplorationService)
   ctx.plugin(TianwenLearningAnalysisChildService, config)
   const executor = createConfiguredLearningLoopExecutor(ctx, config)
   ctx.plugin(TianwenLearningLoopService, executor === undefined

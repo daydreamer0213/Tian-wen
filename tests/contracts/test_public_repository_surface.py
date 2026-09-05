@@ -977,7 +977,7 @@ def test_architecture_lists_current_controlled_lifecycle_evidence_first() -> Non
     raw_architecture = architecture_path.read_text(encoding="utf-8")
     architecture = " ".join(raw_architecture.split())
 
-    assert "## 当前状态（2026-09-01）" in raw_architecture
+    assert "## 历史产品状态（2026-09-01）" in raw_architecture
     current_handoff = "tianwen-v0.1-controlled-real-activity-22-handoff.md"
     historical_activity_authorities = "Activity-01、Activity-02 和 Activity-03"
     assert current_handoff in architecture

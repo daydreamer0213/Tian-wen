@@ -84,6 +84,61 @@ afterEach(() => {
 })
 
 describe('Tianwen governed Skill runtime intake', () => {
+  it('atomically binds an already-resolved exact Skill before the first Turn', async () => {
+    const harness = await mount([textResponse('unused')])
+    const handle = await harness.ctx.agents.create({
+      sessionId: SessionId(`skill-exact-sync-${randomUUID()}`),
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    const atomicWrite = vi.spyOn(
+      harness.runtime.tianwenEvolution,
+      'recordInitialRunSkillBinding',
+    )
+    const splitRunWrite = vi.spyOn(
+      harness.runtime.tianwenEvolution,
+      'recordRunBinding',
+    )
+    const splitManifestWrite = vi.spyOn(
+      harness.runtime.tianwenEvolution,
+      'recordRunSkillManifest',
+    )
+    try {
+      const before = structuredClone(handle.agent.session.events)
+      const receipt = harness.runtime.tianwenLearningIntake.bindRunWithResolvedSkill(
+        handle.agent,
+        input('exact-sync'),
+        parent,
+        'exact-skill',
+      )
+
+      expect(receipt).toMatchObject({
+        duplicate: false,
+        parentVersionId: expect.stringMatching(/^skill-version:[a-f0-9]{64}$/u),
+        sessionUnchanged: true,
+      })
+      expect(atomicWrite).toHaveBeenCalledOnce()
+      expect(splitRunWrite).not.toHaveBeenCalled()
+      expect(splitManifestWrite).not.toHaveBeenCalled()
+      expect(handle.agent.session.events).toEqual(before)
+      expect(harness.runtime.tianwenEvolution.getRunBinding(receipt.runId))
+        .toBeDefined()
+      expect(harness.runtime.tianwenEvolution.getRunSkillManifest(receipt.runId))
+        .toMatchObject({ parent: { name: parent.name } })
+
+      handle.agent.session.append('turn/start', { turn: 1 })
+      expect(() => harness.runtime.tianwenLearningIntake.bindRunWithResolvedSkill(
+        handle.agent,
+        input('exact-sync-late'),
+        parent,
+        'exact-skill',
+      )).toThrow(/before the first DSH Turn/i)
+      expect(atomicWrite).toHaveBeenCalledOnce()
+    } finally {
+      await handle.dispose()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
   it('records an exact main-chat direct research-summary invocation', async () => {
     const packet = TianwenRuntime.parseResearchPacket(`<research_packet>
 [F:f1|required] The verified result is concrete.

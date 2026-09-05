@@ -26,7 +26,7 @@ function runtimeArchiveText(path, name) {
   const result = spawnSync(
     tarExecutable(),
     ['-xOf', path, `package/${name}`],
-    { encoding: 'utf8', shell: false },
+    { encoding: 'utf8', shell: false, maxBuffer: 4 * 1024 * 1024 },
   )
   if (result.status !== 0) throw new Error(`packaged Runtime entry cannot be read: ${name}`)
   return result.stdout

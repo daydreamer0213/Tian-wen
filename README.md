@@ -4,7 +4,7 @@
 
 Tianwen is an auditable learning control plane for long-running agents.
 
-**Current product snapshot: Runtime 0.1.9; Stage 7 remains complete.** DSH 0.1.1-rc.2 is
+**Current delivery candidate: Runtime 0.1.11; historical Stage 7 remains complete.** DSH 0.1.1-rc.2 is
 the exact supported Agent Runtime. The ordinary entry is now inside a DSH
 Web/Desktop conversation: `/goal <objective>` starts long-running work without
 opening a Tianwen panel or asking the user to author Tasks or round counts.
@@ -14,7 +14,7 @@ or resume from the same conversation, and DSH's native stop control also pauses
 the continuous Goal. Tianwen reuses DSH models, tools, and runtime; it does not
 replace or hot-swap the running Agent.
 
-Runtime 0.1.9 puts feedback in the real transcript. The original control chat
+Since Runtime 0.1.9, feedback is part of the real transcript. The original control chat
 receives an ordinary assistant reply when the first Task starts, work advances
 to the next Task, execution blocks, or the Goal completes. Progress includes the
 current plan position, the newest settled result, current work, and the known next
@@ -24,12 +24,20 @@ card from Runtime 0.1.7 is removed. The optional Long-running goals panel remain
 history and diagnostics, not the primary control surface.
 
 To decide whether a capability is implemented now, use the
-[Current status](docs/tianwen-architecture-overview-v2.md#当前状态2026-09-01),
+[Current status](docs/tianwen-architecture-overview-v2.md),
 the [current project handoff](docs/operations/tianwen-current-project-handoff.md),
 the [native conversation progress handoff](docs/operations/tianwen-native-conversation-progress-handoff.md),
 and current `main` source. Designs, implementation plans, and earlier natural-run
 handoffs preserve historical decisions and evidence; unchecked plan steps or a
 historical "next gate" do not override a later release closure.
+
+Runtime 0.1.11 adds consent-bound repeated-outcome learning, optional bounded
+exploration, and reuse of explicitly host-admitted self-contained Skills.
+Ordinary tasks do not require a Goal. Opening a session does not resume stopped
+model work; use the main conversation's explicit continue action. Mechanism
+tests are not evidence of improvement on real tasks. See the
+[current learning-route acceptance](docs/operations/tianwen-learning-route-20260905-handoff.md)
+for integration, installation and remaining effectiveness boundaries.
 
 The same Learn Loop dialog summarizes improvement clues created from Task
 feedback, including source Goal, Task, time, and recurrence count. A clue is
@@ -111,7 +119,7 @@ into the Profile selected by the user:
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.9.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.11.tgz
 ```
 
 `--allow-build=koffi` is an explicit pnpm approval recorded in that Profile; it
@@ -144,7 +152,7 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
 The optional Tianwen Desktop reuses the user's existing DSH and Web Profile. It
 is not a second Runtime and does not require the managed Tianwen installation.
 Desktop opens the same Goal-first UI. With confirmation, it can update the exact
-known Runtime `0.1.8` predecessor to its embedded `0.1.9`; unknown or damaged
+known Runtime `0.1.10` predecessor to its embedded `0.1.11`; unknown or damaged
 versions are never overwritten automatically.
 
 After installation, enter `/goal <objective>` in an ordinary DSH Web or Tianwen

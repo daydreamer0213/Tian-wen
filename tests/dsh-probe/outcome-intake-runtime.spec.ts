@@ -419,7 +419,7 @@ describe('Tianwen runtime Outcome intake', () => {
     }
   })
 
-  it('accepts an attested not-met verdict from a successful terminal verifier result', async () => {
+  it.each(['not-met', 'inconclusive'] as const)('accepts an attested %s verdict from a successful terminal verifier result', async verdict => {
     const harness = await mount([
       toolCallResponse('call-terminal-not-met', 'verify_summary', { text: 'not met' }),
       textResponse('terminal verifier completed'),
@@ -451,9 +451,9 @@ describe('Tianwen runtime Outcome intake', () => {
       expect(harness.ctx.tianwenLearningIntake.consumeOutcome(
         session,
         binding.runId,
-        { verdict: 'not-met', acceptanceEvidenceId: evidence.evidenceId },
+        { verdict, acceptanceEvidenceId: evidence.evidenceId },
       )).toMatchObject({
-        decision: 'signal-recorded',
+        decision: verdict === 'not-met' ? 'signal-recorded' : 'continue-observing',
         acceptanceEvidenceId: evidence.evidenceId,
         sessionUnchanged: true,
       })

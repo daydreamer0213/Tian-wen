@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import SubagentRuntime, { type SubagentProvider } from '@deepseek-ai/dsh-subagent'
@@ -379,6 +380,28 @@ afterEach(() => {
 })
 
 describe('explicit-correction controlled learning-loop executor', () => {
+  it('uses native Profile state for learning work when no desktop root is supplied', async () => {
+    const profileRoot = root('portable-learning-root')
+    const ctx = new Context()
+    ctx.baseUrl = pathToFileURL(profileRoot).href
+    const executor = createConfiguredLearningLoopExecutor(ctx, { learningLoop: { enabled: true } })!
+    const context = {
+      ctx: { tianwenEvolution: {
+        getRunBindingBySessionId: () => ({ scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE }),
+        listControlledSkillEvalProtocols: () => [],
+      } },
+      status: { sessionId: 'source', analysisId: 'portable-root-test' },
+    } as unknown as Parameters<NonNullable<typeof executor.evaluate>>[0]
+
+    await expect(executor.evaluate(context)).rejects.toThrow(/lacks its frozen protocol or Candidate/u)
+    expect(readFileSync(join(profileRoot, 'state', 'learning-loop', 'workspaces', 'evaluation',
+      'original-defect', 'baseline', 'brief.txt'), 'utf8')).toBe('controlled research-summary workspace 0\n')
+    expect(() => createConfiguredLearningLoopExecutor(ctx, {
+      learningLoop: { enabled: true, workspaceRoot: 'relative-path' },
+    })).toThrow(/absolute/u)
+    await ctx.fiber.dispose()
+  })
+
   it.each([
     ['arms', 0, 'withdrawal'], ['evaluator', 20, 'withdrawal'], ['shadow', 21, 'withdrawal'],
     ['arms', 0, 'replacement'], ['evaluator', 20, 'disable'],
@@ -467,7 +490,13 @@ describe('explicit-correction controlled learning-loop executor', () => {
       catalogs.sessions.set(sessionId, session)
       bridge = await mountFeedbackBridge(mounted.harness, loop, catalogs)
       lane = loop.schedule(analysis.analysisId)
-      const generationSignal = await started.promise
+      const generationSignal = await Promise.race([
+        started.promise,
+        lane.then(() => {
+          const phase = ctx.tianwenEvolution.getLearningAnalysis(analysis.analysisId)?.phase
+          throw new Error(`evaluation ended before ${stage} generation (phase: ${phase}); check the fixture environment and preflight`)
+        }),
+      ])
       // An ordinary repeated wake must not cancel supported work.
       await loop.schedule(analysis.analysisId)
       expect(generationSignal.aborted).toBe(false)

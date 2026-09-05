@@ -162,7 +162,7 @@ export type LearningFeedbackRetractedEvent =
 export interface LearningAnalysisConsentInput {
   readonly revision: number
   readonly enabled: boolean
-  readonly policyVersion: 'tianwen-auto-analysis.v1'
+  readonly policyVersion: 'tianwen-auto-analysis.v1' | 'tianwen-auto-analysis.v2'
 }
 
 export interface LearningAnalysisConsent extends LearningAnalysisConsentInput {
@@ -181,7 +181,7 @@ export interface LearningAnalysisConsentRecordedEvent {
 }
 
 export interface LearningConsentNoticeBinding {
-  readonly policyVersion: 'tianwen-auto-analysis.v1'
+  readonly policyVersion: 'tianwen-auto-analysis.v1' | 'tianwen-auto-analysis.v2'
   readonly mainSessionId: string
   readonly noticeSourceMessageId: string
   readonly deliveryId: string
