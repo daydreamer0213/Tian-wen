@@ -1,6 +1,40 @@
 # 2026-09-05 learning-route handoff
 
-## Integration continuation
+## Final integration and local-upgrade acceptance
+
+The finite engineering route is complete. The installation-gate main commit
+`1e4135e90fd80f746f9f2b4917d6008706ee2b14` passed all four jobs in
+[CI run 33950376148](https://github.com/daydreamer0213/Tian-wen/actions/runs/33950376148).
+The final Linux failures were Windows-only Session fixture paths; the test helper
+now supplies native absolute paths, without changing product validation. The
+focused four-file suite passed 88 tests and the twelve-file learning suite passed
+161 tests. Follow-up review found no blocker. Later handoff-only commits do not
+change the product source or artifact identities listed below.
+
+Both actual managed and Web Runtime under `D:\DevData\tianwen-experience` are
+now `0.1.11`, with the exact archive/runtime/client hashes below. The actual
+installer returned `ready`; the native Web plugin upgrade returned a ready
+Profile. The audited Desktop `0.1.0-preview.12` replaced the existing shortcut's
+unpacked target, without changing the shortcut or its DSH home. The previous
+directory is retained as `desktop-replaced` in the integration evidence folder.
+
+The real packaged Desktop test passed: Web loaded, Desktop exited successfully,
+its owned DSH process exited, and three subsequent HTTP checks confirmed closure.
+The 30 existing user Session/state files have the same aggregate digest before
+upgrade, after both Runtime upgrades and after Desktop boot:
+`F533F1AE67D28EB2CC65871888A9BAAF65D01A7DBC55865140E9B609AC6734E8`.
+There were no changed, deleted or added files in those checked roots. No new
+model task was submitted for this acceptance.
+
+The local consolidated record is
+`D:\DevData\tianwen-learning-route-20260905-integration\final-integration-record.md`;
+the actual managed receipt is
+`D:\DevData\tianwen-experience\receipts\tianwen-install.json`.
+Stages 1–3 engineering and local delivery are complete. Stage 4 natural
+effectiveness remains unproven and awaits genuine work; no public package,
+tag, GitHub Release, installer upload or upstream DSH push was performed.
+
+## Earlier integration candidate checkpoint
 
 The user subsequently authorized continuing formal integration and local
 upgrade, without external package publication, tag, GitHub Release or installer
