@@ -1,5 +1,19 @@
 # 2026-09-05 learning-route handoff
 
+## Later real-user acceptance correction
+
+The subsequent [real-user browser acceptance](tianwen-real-user-acceptance-20260905.md)
+used empty Sessions and genuine DeepSeek-V4-Flash/High responses, with task and
+feedback actions through native DSH UI. Ordinary feedback triggered a real
+analysis and current-answer correction, but no Skill change. Two formal summary
+tasks passed; stop/refresh/continue and consent disable passed. General-task
+evidence binding, misleading learning-status explanations and an over-broad
+source search remain usability gaps. Bounded exploration and admitted-source
+reuse did not execute, so Stage 2/3 real-user end-to-end acceptance remains open.
+The engineering/install completion below must not be read as that acceptance or
+as proof of ongoing improvement. The earlier synthetic-history browser plan is
+superseded and excluded from this evidence.
+
 ## Final integration and local-upgrade acceptance
 
 The finite engineering route is complete. The installation-gate main commit
