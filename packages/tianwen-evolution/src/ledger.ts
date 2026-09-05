@@ -204,8 +204,10 @@ import {
 } from './controlled-skill-evaluation.js'
 import {
   parseControlledSkillShadowPlan,
+  parseControlledSkillShadowReviewObservation,
   parseControlledSkillShadowResult,
   prepareControlledSkillShadowPlan,
+  prepareControlledSkillShadowReviewObservation,
   prepareControlledSkillShadowResult,
 } from './controlled-skill-shadow.js'
 import type {
@@ -213,10 +215,14 @@ import type {
   ControlledSkillShadowOpenedEvent,
   ControlledSkillShadowPlan,
   ControlledSkillShadowReceipt,
+  ControlledSkillShadowReviewObservation,
+  ControlledSkillShadowReviewObservationReceipt,
+  ControlledSkillShadowReviewObservationRecordedEvent,
   ControlledSkillShadowResult,
   ControlledSkillShadowResultReceipt,
   ControlledSkillShadowResultRecordedEvent,
   OpenControlledSkillShadowInput,
+  RecordControlledSkillShadowReviewObservationInput,
   RecordControlledSkillShadowResultInput,
 } from './controlled-skill-shadow.js'
 import type {
@@ -390,6 +396,7 @@ export type LedgerEvent =
   | ControlledSkillEvaluatorObservationRecordedEvent
   | ControlledSkillEvaluationResultRecordedEvent
   | ControlledSkillShadowOpenedEvent
+  | ControlledSkillShadowReviewObservationRecordedEvent
   | ControlledSkillShadowResultRecordedEvent
   | ControlledSkillPointerInitializedEvent
   | ControlledSkillTransitionStartedEvent
@@ -1940,7 +1947,8 @@ function parseEvent(value: unknown): LedgerEvent {
     exactKeys(value, [
       'schemaVersion', 'type', 'at', 'protocol', 'inputDigest',
     ])
-    if (value.schemaVersion !== 'tianwen.controlled-skill-eval-protocol.v2') {
+    if (value.schemaVersion !== 'tianwen.controlled-skill-eval-protocol.v2'
+      && value.schemaVersion !== 'tianwen.controlled-skill-eval-protocol.v3') {
       throw new LedgerIntegrityError('invalid controlled Skill evaluation protocol event version')
     }
     let protocol
@@ -1952,11 +1960,11 @@ function parseEvent(value: unknown): LedgerEvent {
       })
     }
     const inputDigest = requireDigest(value.inputDigest)
-    if (inputDigest !== sha256(protocol)) {
+    if (value.schemaVersion !== protocol.schemaVersion || inputDigest !== sha256(protocol)) {
       throw new LedgerIntegrityError('controlled Skill evaluation protocol digest mismatch')
     }
     return {
-      schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+      schemaVersion: protocol.schemaVersion,
       type,
       at,
       protocol,
@@ -1965,7 +1973,8 @@ function parseEvent(value: unknown): LedgerEvent {
   }
   if (type === 'controlled-skill-evaluation-opened') {
     exactKeys(value, ['schemaVersion', 'type', 'at', 'plan', 'inputDigest'])
-    if (value.schemaVersion !== 'tianwen.controlled-skill-evaluation-plan.v2') {
+    if (value.schemaVersion !== 'tianwen.controlled-skill-evaluation-plan.v2'
+      && value.schemaVersion !== 'tianwen.controlled-skill-evaluation-plan.v3') {
       throw new LedgerIntegrityError('invalid controlled Skill evaluation plan event version')
     }
     let plan
@@ -1977,11 +1986,11 @@ function parseEvent(value: unknown): LedgerEvent {
       })
     }
     const inputDigest = requireDigest(value.inputDigest)
-    if (inputDigest !== sha256(plan)) {
+    if (value.schemaVersion !== plan.schemaVersion || inputDigest !== sha256(plan)) {
       throw new LedgerIntegrityError('controlled Skill evaluation plan digest mismatch')
     }
     return {
-      schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v2',
+      schemaVersion: plan.schemaVersion,
       type,
       at,
       plan,
@@ -2015,7 +2024,8 @@ function parseEvent(value: unknown): LedgerEvent {
   }
   if (type === 'controlled-skill-evaluation-blind-map-frozen') {
     exactKeys(value, ['schemaVersion', 'type', 'at', 'blindMap', 'inputDigest'])
-    if (value.schemaVersion !== 'tianwen.controlled-skill-evaluation-blind-map.v2') {
+    if (value.schemaVersion !== 'tianwen.controlled-skill-evaluation-blind-map.v2'
+      && value.schemaVersion !== 'tianwen.controlled-skill-evaluation-blind-map.v3') {
       throw new LedgerIntegrityError('invalid controlled Skill evaluation blind map event version')
     }
     let blindMap
@@ -2027,11 +2037,11 @@ function parseEvent(value: unknown): LedgerEvent {
       })
     }
     const inputDigest = requireDigest(value.inputDigest)
-    if (inputDigest !== sha256(blindMap)) {
+    if (value.schemaVersion !== blindMap.schemaVersion || inputDigest !== sha256(blindMap)) {
       throw new LedgerIntegrityError('controlled Skill evaluation blind map digest mismatch')
     }
     return {
-      schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2',
+      schemaVersion: blindMap.schemaVersion,
       type,
       at,
       blindMap,
@@ -2040,7 +2050,8 @@ function parseEvent(value: unknown): LedgerEvent {
   }
   if (type === 'controlled-skill-evaluator-observation-recorded') {
     exactKeys(value, ['schemaVersion', 'type', 'at', 'observation', 'inputDigest'])
-    if (value.schemaVersion !== 'tianwen.controlled-skill-evaluator-observation.v2') {
+    if (value.schemaVersion !== 'tianwen.controlled-skill-evaluator-observation.v2'
+      && value.schemaVersion !== 'tianwen.controlled-skill-evaluator-observation.v3') {
       throw new LedgerIntegrityError('invalid controlled Skill evaluator observation event version')
     }
     let observation
@@ -2052,11 +2063,11 @@ function parseEvent(value: unknown): LedgerEvent {
       })
     }
     const inputDigest = requireDigest(value.inputDigest)
-    if (inputDigest !== sha256(observation)) {
+    if (value.schemaVersion !== observation.schemaVersion || inputDigest !== sha256(observation)) {
       throw new LedgerIntegrityError('controlled Skill evaluator observation digest mismatch')
     }
     return {
-      schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2',
+      schemaVersion: observation.schemaVersion,
       type,
       at,
       observation,
@@ -2065,7 +2076,8 @@ function parseEvent(value: unknown): LedgerEvent {
   }
   if (type === 'controlled-skill-evaluation-result-recorded') {
     exactKeys(value, ['schemaVersion', 'type', 'at', 'result', 'inputDigest'])
-    if (value.schemaVersion !== 'tianwen.controlled-skill-evaluation-result.v2') {
+    if (value.schemaVersion !== 'tianwen.controlled-skill-evaluation-result.v2'
+      && value.schemaVersion !== 'tianwen.controlled-skill-evaluation-result.v3') {
       throw new LedgerIntegrityError('invalid controlled Skill evaluation result event version')
     }
     let result
@@ -2077,11 +2089,11 @@ function parseEvent(value: unknown): LedgerEvent {
       })
     }
     const inputDigest = requireDigest(value.inputDigest)
-    if (inputDigest !== sha256(result)) {
+    if (value.schemaVersion !== result.schemaVersion || inputDigest !== sha256(result)) {
       throw new LedgerIntegrityError('controlled Skill evaluation result digest mismatch')
     }
     return {
-      schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2',
+      schemaVersion: result.schemaVersion,
       type,
       at,
       result,
@@ -2090,7 +2102,8 @@ function parseEvent(value: unknown): LedgerEvent {
   }
   if (type === 'controlled-skill-shadow-opened') {
     exactKeys(value, ['schemaVersion', 'type', 'at', 'plan', 'inputDigest'])
-    if (value.schemaVersion !== 'tianwen.controlled-skill-shadow-plan.v2') {
+    if (value.schemaVersion !== 'tianwen.controlled-skill-shadow-plan.v2'
+      && value.schemaVersion !== 'tianwen.controlled-skill-shadow-plan.v3') {
       throw new LedgerIntegrityError('invalid controlled Skill Shadow plan event version')
     }
     let plan
@@ -2102,20 +2115,46 @@ function parseEvent(value: unknown): LedgerEvent {
       })
     }
     const inputDigest = requireDigest(value.inputDigest)
-    if (inputDigest !== sha256(plan)) {
+    if (value.schemaVersion !== plan.schemaVersion || inputDigest !== sha256(plan)) {
       throw new LedgerIntegrityError('controlled Skill Shadow plan digest mismatch')
     }
     return {
-      schemaVersion: 'tianwen.controlled-skill-shadow-plan.v2',
+      schemaVersion: plan.schemaVersion,
       type,
       at,
       plan,
       inputDigest,
     }
   }
+  if (type === 'controlled-skill-shadow-review-observation-recorded') {
+    exactKeys(value, ['schemaVersion', 'type', 'at', 'observation', 'inputDigest'])
+    if (value.schemaVersion !== 'tianwen.controlled-skill-shadow-review-observation.v1') {
+      throw new LedgerIntegrityError('invalid controlled Skill Shadow review event version')
+    }
+    let observation
+    try {
+      observation = parseControlledSkillShadowReviewObservation(value.observation)
+    } catch (error) {
+      throw new LedgerIntegrityError('invalid controlled Skill Shadow review event', {
+        cause: error,
+      })
+    }
+    const inputDigest = requireDigest(value.inputDigest)
+    if (inputDigest !== sha256(observation)) {
+      throw new LedgerIntegrityError('controlled Skill Shadow review digest mismatch')
+    }
+    return {
+      schemaVersion: 'tianwen.controlled-skill-shadow-review-observation.v1',
+      type,
+      at,
+      observation,
+      inputDigest,
+    }
+  }
   if (type === 'controlled-skill-shadow-result-recorded') {
     exactKeys(value, ['schemaVersion', 'type', 'at', 'result', 'inputDigest'])
-    if (value.schemaVersion !== 'tianwen.controlled-skill-shadow-result.v2') {
+    if (value.schemaVersion !== 'tianwen.controlled-skill-shadow-result.v2'
+      && value.schemaVersion !== 'tianwen.controlled-skill-shadow-result.v3') {
       throw new LedgerIntegrityError('invalid controlled Skill Shadow result event version')
     }
     let result
@@ -2127,11 +2166,11 @@ function parseEvent(value: unknown): LedgerEvent {
       })
     }
     const inputDigest = requireDigest(value.inputDigest)
-    if (inputDigest !== sha256(result)) {
+    if (value.schemaVersion !== result.schemaVersion || inputDigest !== sha256(result)) {
       throw new LedgerIntegrityError('controlled Skill Shadow result digest mismatch')
     }
     return {
-      schemaVersion: 'tianwen.controlled-skill-shadow-result.v2',
+      schemaVersion: result.schemaVersion,
       type,
       at,
       result,
@@ -2747,6 +2786,10 @@ export class EvolutionLedger {
     ControlledSkillEvaluationId,
     ControlledSkillShadowId
   >()
+  readonly #controlledSkillShadowReviewObservations = new Map<
+    ControlledSkillShadowId,
+    ControlledSkillShadowReviewObservation
+  >()
   readonly #controlledSkillShadowResults = new Map<
     ControlledSkillShadowId,
     ControlledSkillShadowResult
@@ -3049,8 +3092,10 @@ export class EvolutionLedger {
     // still-active explicit correction that owns this Ticket. Unknown/mixed or
     // retracted history intentionally leaves a ticket signal unresolved.
     const signals = this.#controlledSkillEvalScopeFacts(ticket)
+    const sourceFidelity = isRecord(input.protocol) && 'sourceFidelity' in input.protocol
     const provenance = this.#caseIdByTicket.has(ticket.ticketId)
-      || (this.#controlledSkillEvalProtocolIdsByTicket.get(ticket.ticketId)?.length ?? 0) > 0
+      || (!sourceFidelity
+        && (this.#controlledSkillEvalProtocolIdsByTicket.get(ticket.ticketId)?.length ?? 0) > 0)
       ? 'retrospective'
       : 'pre-candidate'
     let protocol
@@ -3070,7 +3115,7 @@ export class EvolutionLedger {
       }
     }
     this.#accept({
-      schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+      schemaVersion: protocol.schemaVersion,
       type: 'controlled-skill-eval-protocol-frozen',
       at: this.#now(),
       protocol,
@@ -3143,7 +3188,7 @@ export class EvolutionLedger {
       return { evaluationId: existing.evaluationId, duplicate: true }
     }
     this.#accept({
-      schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v2',
+      schemaVersion: plan.schemaVersion,
       type: 'controlled-skill-evaluation-opened',
       at: this.#now(),
       plan,
@@ -3257,7 +3302,7 @@ export class EvolutionLedger {
       )
     }
     this.#accept({
-      schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2',
+      schemaVersion: blindMap.schemaVersion,
       type: 'controlled-skill-evaluation-blind-map-frozen',
       at: this.#now(),
       blindMap,
@@ -3312,7 +3357,7 @@ export class EvolutionLedger {
       throw new LedgerIntegrityError('controlled Skill evaluation is already terminal')
     }
     this.#accept({
-      schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2',
+      schemaVersion: observation.schemaVersion,
       type: 'controlled-skill-evaluator-observation-recorded',
       at: this.#now(),
       observation,
@@ -3370,7 +3415,7 @@ export class EvolutionLedger {
       )
     }
     this.#accept({
-      schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2',
+      schemaVersion: result.schemaVersion,
       type: 'controlled-skill-evaluation-result-recorded',
       at: this.#now(),
       result,
@@ -3392,7 +3437,6 @@ export class EvolutionLedger {
     if (!isRecord(input)) {
       throw new LedgerIntegrityError('controlled Skill Shadow input is invalid')
     }
-    exactKeys(input, ['evaluationId', 'tasks'])
     const evaluationId = requireString(
       input.evaluationId,
       'evaluationId',
@@ -3440,11 +3484,15 @@ export class EvolutionLedger {
       }
       return { shadowId: existingId, duplicate: true }
     }
-    if (plan.tasks.some(task => this.#runIdBySession.has(task.sessionId))) {
+    if (
+      plan.tasks.some(task => this.#runIdBySession.has(task.sessionId))
+      || (plan.schemaVersion === 'tianwen.controlled-skill-shadow-plan.v3'
+        && this.#runIdBySession.has(plan.review.sessionId))
+    ) {
       throw new LedgerIntegrityError('controlled Skill Shadow requires fresh Sessions')
     }
     this.#accept({
-      schemaVersion: 'tianwen.controlled-skill-shadow-plan.v2',
+      schemaVersion: plan.schemaVersion,
       type: 'controlled-skill-shadow-opened',
       at: this.#now(),
       plan,
@@ -3464,6 +3512,64 @@ export class EvolutionLedger {
     return clone([...this.#controlledSkillShadowPlans.values()])
   }
 
+  recordControlledSkillShadowReviewObservation(
+    input: RecordControlledSkillShadowReviewObservationInput,
+  ): ControlledSkillShadowReviewObservationReceipt {
+    if (!isRecord(input)) {
+      throw new LedgerIntegrityError('controlled Skill Shadow review input is invalid')
+    }
+    const shadowId = requireString(input.shadowId, 'shadowId') as ControlledSkillShadowId
+    const plan = this.#controlledSkillShadowPlans.get(shadowId)
+    if (plan === undefined) {
+      throw new LedgerIntegrityError(`unknown controlled Skill Shadow: ${shadowId}`)
+    }
+    let observation
+    try {
+      observation = prepareControlledSkillShadowReviewObservation(input, plan)
+    } catch (error) {
+      throw new LedgerIntegrityError(
+        error instanceof Error ? error.message : 'controlled Skill Shadow review input is invalid',
+        { cause: error },
+      )
+    }
+    const existing = this.#controlledSkillShadowReviewObservations.get(shadowId)
+    if (existing !== undefined) {
+      if (canonicalJson(existing) !== canonicalJson(observation)) {
+        throw new LedgerIntegrityError(`controlled Skill Shadow review changed: ${shadowId}`)
+      }
+      return { shadowId, duplicate: true }
+    }
+    if (this.#controlledSkillShadowResults.has(shadowId)) {
+      throw new LedgerIntegrityError('controlled Skill Shadow is already terminal')
+    }
+    const provisional = prepareControlledSkillShadowResult({
+      shadowId,
+      runs: [observation.reviewedRun],
+    }, plan, observation)
+    this.#validateControlledSkillShadowRunFacts(plan, provisional)
+    const use = this.#runSkillUses.get(observation.runId)
+    if (use?.acceptanceEvidenceId !== observation.acceptanceEvidenceId) {
+      throw new LedgerIntegrityError(
+        'controlled Skill Shadow review disagrees with accepted Run evidence',
+      )
+    }
+    this.#accept({
+      schemaVersion: 'tianwen.controlled-skill-shadow-review-observation.v1',
+      type: 'controlled-skill-shadow-review-observation-recorded',
+      at: this.#now(),
+      observation,
+      inputDigest: sha256(observation),
+    })
+    return { shadowId, duplicate: false }
+  }
+
+  getControlledSkillShadowReviewObservation(
+    shadowId: ControlledSkillShadowId,
+  ): ControlledSkillShadowReviewObservation | undefined {
+    const observation = this.#controlledSkillShadowReviewObservations.get(shadowId)
+    return observation === undefined ? undefined : clone(observation)
+  }
+
   recordControlledSkillShadowResult(
     input: RecordControlledSkillShadowResultInput,
   ): ControlledSkillShadowResultReceipt {
@@ -3478,7 +3584,11 @@ export class EvolutionLedger {
     }
     let result
     try {
-      result = prepareControlledSkillShadowResult(input, plan)
+      result = prepareControlledSkillShadowResult(
+        input,
+        plan,
+        this.#controlledSkillShadowReviewObservations.get(shadowId),
+      )
     } catch (error) {
       throw new LedgerIntegrityError(
         error instanceof Error ? error.message : 'controlled Skill Shadow result input is invalid',
@@ -3494,7 +3604,7 @@ export class EvolutionLedger {
     }
     this.#validateControlledSkillShadowRunFacts(plan, result)
     this.#accept({
-      schemaVersion: 'tianwen.controlled-skill-shadow-result.v2',
+      schemaVersion: result.schemaVersion,
       type: 'controlled-skill-shadow-result-recorded',
       at: this.#now(),
       result,
@@ -5899,6 +6009,13 @@ export class EvolutionLedger {
   #controlledSkillEvalScopeFacts(ticket: LearningTicket): readonly {
     readonly signalId: string
     readonly scopeKey: string
+    readonly sessionId?: string
+    readonly messageId?: string
+    readonly feedbackVersion?: string
+    readonly sessionLifecycleFingerprint?: Sha256Digest
+    readonly sessionDigest?: Sha256Digest
+    readonly evidenceSetDigest?: Sha256Digest
+    readonly acceptanceSubjectDigest?: Sha256Digest
   }[] {
     return ticket.signalIds.flatMap(signalId => {
       const signal = this.#learningSignals.get(signalId)
@@ -5916,7 +6033,28 @@ export class EvolutionLedger {
         || this.#learningAnalysisConsents.get(intake.analysisConsentRevision)?.enabled !== true
         || this.#learningAnalysisConsent?.enabled !== true
       ) return []
-      return [{ signalId: signal.signalId, scopeKey: signal.scopeKey }]
+      const runId = this.#runIdBySession.get(signal.sessionId)
+      const binding = runId === undefined ? undefined : this.#runBindings.get(runId)
+      const use = runId === undefined ? undefined : this.#runSkillUses.get(runId)
+      if (
+        binding?.schemaVersion !== 'tianwen.run-binding.v3'
+        || use === undefined
+        || use.sessionId !== signal.sessionId
+        || use.sessionDigest !== signal.sessionDigest
+        || !signal.evidenceIds.includes(use.acceptanceEvidenceId)
+        || intake.sessionLifecycleFingerprint !== binding.sessionLifecycleFingerprint
+      ) return [{ signalId: signal.signalId, scopeKey: signal.scopeKey }]
+      return [{
+        signalId: signal.signalId,
+        scopeKey: signal.scopeKey,
+        sessionId: signal.sessionId,
+        messageId: signal.messageId,
+        feedbackVersion: signal.feedbackVersion,
+        sessionLifecycleFingerprint: binding.sessionLifecycleFingerprint,
+        sessionDigest: signal.sessionDigest,
+        evidenceSetDigest: sha256(signal.evidenceIds),
+        acceptanceSubjectDigest: binding.acceptanceSubjectDigest,
+      }]
     })
   }
 
@@ -6825,8 +6963,10 @@ export class EvolutionLedger {
         throw new LedgerIntegrityError('controlled Skill evaluation protocol disagrees with history')
       }
       const signals = this.#controlledSkillEvalScopeFacts(ticket)
+      const sourceFidelity = 'sourceFidelity' in event.protocol.protocol
       const provenance = this.#caseIdByTicket.has(ticket.ticketId)
-        || (this.#controlledSkillEvalProtocolIdsByTicket.get(ticket.ticketId)?.length ?? 0) > 0
+        || (!sourceFidelity
+          && (this.#controlledSkillEvalProtocolIdsByTicket.get(ticket.ticketId)?.length ?? 0) > 0)
         ? 'retrospective'
         : 'pre-candidate'
       let prepared
@@ -7095,6 +7235,8 @@ export class EvolutionLedger {
         || this.#controlledSkillShadowPlans.has(event.plan.shadowId)
         || this.#controlledSkillShadowIdByEvaluation.has(event.plan.evaluationId)
         || event.plan.tasks.some(task => this.#runIdBySession.has(task.sessionId))
+        || (event.plan.schemaVersion === 'tianwen.controlled-skill-shadow-plan.v3'
+          && this.#runIdBySession.has(event.plan.review.sessionId))
       ) {
         throw new LedgerIntegrityError('controlled Skill Shadow plan disagrees with history')
       }
@@ -7108,13 +7250,29 @@ export class EvolutionLedger {
       ]
       let prepared
       try {
-        prepared = prepareControlledSkillShadowPlan({
-          evaluationId: event.plan.evaluationId,
-          tasks: event.plan.tasks.map(task => {
-            const { runId: _runId, ...input } = task
-            return input
-          }),
-        }, evaluation, result, candidate, sha256(parent.parent), objectives, observations)
+        const input: OpenControlledSkillShadowInput = event.plan.schemaVersion
+          === 'tianwen.controlled-skill-shadow-plan.v3'
+          ? {
+              evaluationId: event.plan.evaluationId,
+              holdoutSessionId: event.plan.tasks[0].sessionId,
+              reviewSessionId: event.plan.review.sessionId,
+            }
+          : {
+              evaluationId: event.plan.evaluationId,
+              tasks: event.plan.tasks.map(task => {
+                const { runId: _runId, ...taskInput } = task
+                return taskInput
+              }),
+            }
+        prepared = prepareControlledSkillShadowPlan(
+          input,
+          evaluation,
+          result,
+          candidate,
+          sha256(parent.parent),
+          objectives,
+          observations,
+        )
       } catch (error) {
         throw new LedgerIntegrityError('controlled Skill Shadow plan event is invalid', {
           cause: error,
@@ -7128,6 +7286,66 @@ export class EvolutionLedger {
       }
       return
     }
+    if (event.type === 'controlled-skill-shadow-review-observation-recorded') {
+      const observation = event.observation
+      const plan = this.#controlledSkillShadowPlans.get(observation.shadowId)
+      if (
+        plan === undefined
+        || this.#controlledSkillShadowReviewObservations.has(observation.shadowId)
+        || this.#controlledSkillShadowResults.has(observation.shadowId)
+      ) {
+        throw new LedgerIntegrityError('controlled Skill Shadow review disagrees with history')
+      }
+      let prepared
+      try {
+        const common = {
+          shadowId: observation.shadowId,
+          reviewerSessionId: observation.reviewerSessionId,
+          requestDigest: observation.requestDigest,
+          evidenceId: observation.evidenceId,
+          acceptanceEvidenceId: observation.acceptanceEvidenceId,
+          acceptedMaterialDigest: observation.acceptedMaterialDigest,
+          reviewedRun: observation.reviewedRun,
+        }
+        prepared = prepareControlledSkillShadowReviewObservation(
+          observation.status === 'scored'
+            ? {
+                ...common,
+                status: 'scored',
+                insufficientMaterial: false,
+                reasonCode: 'score-submitted',
+                scores: observation.scores,
+              }
+            : {
+                ...common,
+                status: 'inconclusive',
+                insufficientMaterial: true,
+                reasonCode: observation.reasonCode,
+              },
+          plan,
+        )
+      } catch (error) {
+        throw new LedgerIntegrityError('controlled Skill Shadow review event is invalid', {
+          cause: error,
+        })
+      }
+      const provisional = prepareControlledSkillShadowResult({
+        shadowId: observation.shadowId,
+        runs: [prepared.reviewedRun],
+      }, plan, prepared)
+      this.#validateControlledSkillShadowRunFacts(plan, provisional)
+      if (
+        this.#runSkillUses.get(prepared.runId)?.acceptanceEvidenceId
+          !== prepared.acceptanceEvidenceId
+        || canonicalJson(prepared) !== canonicalJson(observation)
+        || event.inputDigest !== sha256(observation)
+      ) {
+        throw new LedgerIntegrityError(
+          'controlled Skill Shadow review disagrees with frozen facts',
+        )
+      }
+      return
+    }
     if (event.type === 'controlled-skill-shadow-result-recorded') {
       const plan = this.#controlledSkillShadowPlans.get(event.result.shadowId)
       if (plan === undefined || this.#controlledSkillShadowResults.has(event.result.shadowId)) {
@@ -7138,7 +7356,7 @@ export class EvolutionLedger {
         prepared = prepareControlledSkillShadowResult({
           shadowId: event.result.shadowId,
           runs: event.result.runs,
-        }, plan)
+        }, plan, this.#controlledSkillShadowReviewObservations.get(event.result.shadowId))
       } catch (error) {
         throw new LedgerIntegrityError('controlled Skill Shadow result event is invalid', {
           cause: error,
@@ -8255,6 +8473,13 @@ export class EvolutionLedger {
       this.#controlledSkillShadowIdByEvaluation.set(
         event.plan.evaluationId,
         event.plan.shadowId,
+      )
+      return
+    }
+    if (event.type === 'controlled-skill-shadow-review-observation-recorded') {
+      this.#controlledSkillShadowReviewObservations.set(
+        event.observation.shadowId,
+        event.observation,
       )
       return
     }

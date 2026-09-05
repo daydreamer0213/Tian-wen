@@ -29,6 +29,7 @@ type PublicLedgerEventPrivacyContract = AssertNever<Extract<
       | 'controlled-skill-evaluator-observation-recorded'
       | 'controlled-skill-evaluation-result-recorded'
       | 'controlled-skill-shadow-opened'
+      | 'controlled-skill-shadow-review-observation-recorded'
       | 'controlled-skill-shadow-result-recorded'
       | 'controlled-skill-pointer-initialized'
       | 'controlled-skill-promoted'
@@ -251,8 +252,17 @@ export {
   prepareControlledSkillEvaluatorObservation,
 } from './controlled-skill-evaluation.js'
 export {
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_SCORE_KEYS,
+} from './controlled-skill-source-fidelity.js'
+export {
   controlledSkillShadowExecutionManifestDigest,
+  parseControlledSkillShadowReviewObservation,
   prepareControlledSkillShadowPlan,
+  prepareControlledSkillShadowReviewObservation,
   prepareControlledSkillShadowResult,
 } from './controlled-skill-shadow.js'
 export {
@@ -288,17 +298,31 @@ export type {
   ControlledSkillShadowMechanismVerdict,
   ControlledSkillShadowMode,
   ControlledSkillShadowPlan,
+  ControlledSkillShadowPlanV2,
+  ControlledSkillShadowPlanV3,
   ControlledSkillShadowPromotionEligibility,
   ControlledSkillShadowReceipt,
+  ControlledSkillShadowReviewInconclusiveReasonCode,
+  ControlledSkillShadowReviewObservation,
+  ControlledSkillShadowReviewObservationReceipt,
+  ControlledSkillShadowReviewPlan,
   ControlledSkillShadowResult,
+  ControlledSkillShadowResultV2,
+  ControlledSkillShadowResultV3,
   ControlledSkillShadowResultReasonCode,
   ControlledSkillShadowResultReceipt,
   ControlledSkillShadowRun,
+  ControlledSkillShadowRunV2,
+  ControlledSkillShadowRunV3,
   ControlledSkillShadowTaskId,
   ControlledSkillShadowTaskInput,
   ControlledSkillShadowTaskPlan,
+  ControlledSkillShadowTaskPlanV3,
   ControlledSkillShadowUsage,
   OpenControlledSkillShadowInput,
+  OpenControlledSkillShadowInputV2,
+  OpenControlledSkillShadowInputV3,
+  RecordControlledSkillShadowReviewObservationInput,
   RecordControlledSkillShadowResultInput,
 } from './controlled-skill-shadow.js'
 export type {
@@ -307,8 +331,12 @@ export type {
   ControlledSkillEvalExecution,
   ControlledSkillEvalPlanArm,
   ControlledSkillEvalProtocol,
+  ControlledSkillEvalProtocolV2,
+  ControlledSkillEvalProtocolV3,
   ControlledSkillEvalProtocolProvenance,
   ControlledSkillEvalProtocolRecord,
+  ControlledSkillEvalProtocolRecordV2,
+  ControlledSkillEvalProtocolRecordV3,
   ControlledSkillEvalSessionAllocation,
   ControlledSkillEvalStopContract,
   ControlledSkillEvalTask,
@@ -319,6 +347,8 @@ export type {
   ControlledSkillEvaluationCandidateHardGate,
   ControlledSkillEvaluationBlindAssignment,
   ControlledSkillEvaluationBlindMap,
+  ControlledSkillEvaluationBlindMapV2,
+  ControlledSkillEvaluationBlindMapV3,
   ControlledSkillEvaluationBlindMapReceipt,
   ControlledSkillEvaluationComparison,
   ControlledSkillEvaluationEvidenceClaim,
@@ -328,17 +358,27 @@ export type {
   ControlledSkillEvaluationObjectiveReceipt,
   ControlledSkillEvaluationObjectiveVerdict,
   ControlledSkillEvaluationPlan,
+  ControlledSkillEvaluationPlanV2,
+  ControlledSkillEvaluationPlanV3,
   ControlledSkillEvaluationReceipt,
   ControlledSkillEvaluationResult,
+  ControlledSkillEvaluationResultV2,
+  ControlledSkillEvaluationResultV3,
   ControlledSkillEvaluationResultReasonCode,
   ControlledSkillEvaluationResultReceipt,
   ControlledSkillEvaluationShadowEligibility,
   ControlledSkillEvaluationUsage,
   ControlledSkillEvaluatorDimensionScores,
+  ControlledSkillEvaluatorDimensionScoresV2,
+  ControlledSkillEvaluatorDimensionScoresV3,
   ControlledSkillEvaluatorInconclusiveReasonCode,
   ControlledSkillEvaluatorObservation,
   ControlledSkillEvaluatorObservationReceipt,
   ControlledSkillEvaluatorScores,
+  ControlledSkillSourceFidelityContract,
+  ControlledSkillSourceFidelityHoldoutTask,
+  ControlledSkillSourceFidelityReviewContract,
+  ControlledSkillSourceIdentity,
   FreezeControlledSkillEvalProtocolInput,
   FreezeControlledSkillEvaluationBlindMapInput,
   OpenControlledSkillEvaluationInput,

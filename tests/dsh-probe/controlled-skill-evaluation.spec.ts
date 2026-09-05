@@ -8,9 +8,16 @@ import type {
 } from '../../packages/tianwen-evolution/src/index.js'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
   learningSessionLifecycleFingerprint,
+  prepareControlledSkillEvaluationBlindMap,
+  prepareControlledSkillEvaluationObjective,
   prepareControlledSkillEvaluationPlan,
+  prepareControlledSkillEvaluationResult,
   prepareControlledSkillEvalProtocol,
+  prepareControlledSkillEvaluatorObservation,
   prepareRunBinding,
   TianwenEvolutionService,
 } from '../../packages/tianwen-evolution/src/index.js'
@@ -156,6 +163,156 @@ function controlledProtocol(
       retryPolicyDigest: digest('no-retry'),
     },
   } as const
+}
+
+function sourceFidelityProtocol() {
+  const protocol = structuredClone(controlledProtocol())
+  const sourcePacketDigest = digest('source-packet:original')
+  protocol.rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+  protocol.tasks[0]!.inputDigest = sourcePacketDigest
+  return {
+    ...protocol,
+    sourceFidelity: {
+      policyVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion,
+      policyDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+      packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+      source: {
+        signalId: 'signal:source-feedback',
+        sessionId: 'session:source-feedback',
+        messageId: 'message:source-feedback',
+        feedbackVersion: 'feedback:source-fidelity-v1',
+        sessionLifecycleFingerprint: digest('source-session-lifecycle'),
+        sessionDigest: digest('source-session'),
+        evidenceSetDigest: digest([digest('source-evidence')].join(',')),
+        acceptanceSubjectDigest: protocol.tasks[0]!.acceptanceSubjectDigest,
+        packetDigest: sourcePacketDigest,
+      },
+      holdout: {
+        task: {
+          taskId: 'shadow-task:source-fidelity-holdout',
+          goalDigest: digest('holdout-goal'),
+          inputDigest: digest('holdout-input'),
+          workspaceSnapshotDigest: digest('holdout-workspace'),
+          toolSchemaDigest: digest('holdout-tools'),
+          authorizationDigest: digest('holdout-authorization'),
+          verifierContractDigest: digest('holdout-verifier'),
+          stopConditionDigest: digest('holdout-stop'),
+          evaluatorMaterialContractDigest: digest('holdout-evaluator-material'),
+          acceptanceContract: acceptance,
+          acceptanceSubjectDigest: digest('holdout-subject'),
+          allowedTools: ['skill', 'verify_summary'],
+          stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
+        },
+        review: {
+          rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+          configurationDigest: digest('holdout-review-config'),
+          materialContractDigest: digest('holdout-review-material-contract'),
+          evidenceContractDigest: digest('holdout-review-evidence-contract'),
+        },
+      },
+    },
+  } as const
+}
+
+function sourceFidelityRecord() {
+  const protocol = sourceFidelityProtocol()
+  const { ticket } = ticketFacts()
+  const source = protocol.sourceFidelity.source
+  return prepareControlledSkillEvalProtocol({
+    ticketId: ticket.ticketId,
+    evidencePurpose: 'development-only-synthetic-defect',
+    protocol,
+  }, {
+    ...ticket,
+    signalIds: [source.signalId],
+  }, [{
+    signalId: source.signalId,
+    scopeKey: 'project:tianwen/capability:research-summary',
+    sessionId: source.sessionId,
+    messageId: source.messageId,
+    feedbackVersion: source.feedbackVersion,
+    sessionLifecycleFingerprint: source.sessionLifecycleFingerprint,
+    sessionDigest: source.sessionDigest,
+    evidenceSetDigest: source.evidenceSetDigest,
+    acceptanceSubjectDigest: source.acceptanceSubjectDigest,
+  }], 'pre-candidate')
+}
+
+function sourceFidelityPlan() {
+  const record = sourceFidelityRecord()
+  const candidate = {
+    candidateId: `candidate:${'1'.repeat(64)}`,
+    ticketId: record.ticketId,
+    caseId: `case:${'2'.repeat(64)}`,
+    lessonId: `lesson:${'3'.repeat(64)}`,
+    attributionId: `attribution:${'4'.repeat(64)}`,
+    parentVersionId: `skill-version:${'5'.repeat(64)}`,
+    targetScope: record.scopeKey,
+    payloadDigest: digest('source-fidelity-candidate-payload'),
+    payload: { ...parent, content: 'source-fidelity candidate' },
+    evidenceIds: [digest('source-evidence')],
+  } as const
+  const learningCase = {
+    caseId: candidate.caseId,
+    parentVersionId: candidate.parentVersionId,
+    scopeKey: record.scopeKey,
+  }
+  const plan = prepareControlledSkillEvaluationPlan({
+    candidateId: candidate.candidateId,
+    protocolId: record.protocolId,
+    sessionAllocations: record.protocol.tasks.map(task => ({
+      taskId: task.taskId,
+      baselineSessionId: `session:source-fidelity:${task.taskType}:baseline`,
+      candidateSessionId: `session:source-fidelity:${task.taskType}:candidate`,
+      evaluatorSessionId: 'session:source-fidelity:aggregate-review',
+    })),
+  }, candidate as never, learningCase as never, record, digest('source-fidelity-parent'))
+  return { candidate, plan }
+}
+
+function sourceFidelityObjectiveInputs(
+  plan: ReturnType<typeof sourceFidelityPlan>['plan'],
+) {
+  return plan.tasks.map(task => {
+    const executionManifestDigest = sha256({
+      execution: plan.execution,
+      goalDigest: task.goalDigest,
+      inputDigest: task.inputDigest,
+      workspaceSnapshotDigest: task.workspaceSnapshotDigest,
+      toolSchemaDigest: task.toolSchemaDigest,
+      authorizationDigest: task.authorizationDigest,
+      verifierContractDigest: task.verifierContractDigest,
+      stopConditionDigest: task.stopConditionDigest,
+      evaluatorMaterialContractDigest: task.evaluatorMaterialContractDigest,
+      acceptanceContract: task.acceptanceContract,
+      acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+      allowedTools: task.allowedTools,
+      stopContract: task.stopContract,
+    })
+    const arm = (role: 'baseline' | 'candidate') => ({
+      role,
+      runId: task[role].runId,
+      sessionId: task[role].sessionId,
+      skillVersionId: role === 'baseline'
+        ? plan.parentVersionId
+        : `skill-version:${'6'.repeat(64)}` as const,
+      contentDigest: digest(`source-fidelity-content:${role}`),
+      executionManifestDigest,
+      normalizedFirstRequestDigest: digest(`source-fidelity-request:${task.taskId}`),
+      outcome: 'met' as const,
+      evidenceIds: [digest(`source-fidelity-evidence:${task.taskId}:${role}`)],
+      acceptanceSubjectDigest: task.acceptanceSubjectDigest,
+      evaluatorMaterialDigest: digest(`source-fidelity-material:${task.taskId}:${role}`),
+      usedToolNames: ['skill', 'verify_summary'],
+      usage: { modelRequests: 1, toolCalls: 2, elapsedMs: 500 },
+    })
+    return {
+      evaluationId: plan.evaluationId,
+      taskId: task.taskId,
+      baseline: arm('baseline'),
+      candidate: arm('candidate'),
+    }
+  })
 }
 
 function seedOpenTicket(ledger: EvolutionLedger) {
@@ -1143,6 +1300,86 @@ describe('controlled five-task Skill evaluation protocol', () => {
     expect(replay.listEvents().filter(isPublicLedgerEvent)).toEqual([])
   })
 
+  it('freezes and replays v3 only from the exact accepted explicit source', () => {
+    const path = fixtureRoot('source-fidelity-protocol')
+    const ledger = new EvolutionLedger(path, {
+      clock: () => '2026-09-06T00:00:00.000Z',
+    })
+    const protocol = structuredClone(sourceFidelityProtocol())
+    const source = protocol.sourceFidelity.source
+    const binding = ledger.recordRunBinding({
+      goalRef: 'goal:source-fidelity-source',
+      taskRef: 'task:source-fidelity-source',
+      sessionId: source.sessionId,
+      scopeKey: 'project:tianwen/capability:research-summary',
+      acceptanceContract: acceptance,
+      acceptanceSubjectDigest: source.acceptanceSubjectDigest,
+      sessionLifecycleFingerprint: source.sessionLifecycleFingerprint,
+    })
+    const manifest = ledger.recordRunSkillManifest({
+      runId: binding.runId,
+      skill: parent,
+    })
+    ledger.recordOutcomeIntake({
+      runId: binding.runId,
+      verdict: 'met',
+      sessionDigest: source.sessionDigest,
+      evidenceIds: [digest('source-evidence')],
+    })
+    ledger.recordRunSkillUse({
+      runId: binding.runId,
+      parentVersionId: manifest.parentVersionId,
+      sessionId: source.sessionId,
+      sessionDigest: source.sessionDigest,
+      skillName: parent.name,
+      contentDigest: digest(parent.content),
+      skillEvidenceId: digest('source-skill-evidence'),
+      acceptanceEvidenceId: digest('source-evidence'),
+      skillCallSeq: 10,
+      skillResultSeq: 11,
+      acceptanceCallSeq: 12,
+    })
+    ledger.recordLearningAnalysisConsent({
+      revision: 1,
+      enabled: true,
+      policyVersion: 'tianwen-auto-analysis.v1',
+    })
+    const feedback = ledger.recordLearningFeedbackRevision({
+      intake: {
+        sessionId: source.sessionId,
+        messageId: source.messageId,
+        feedbackVersion: source.feedbackVersion,
+        rating: 'negative',
+        note: 'Keep every research claim tied to the supplied source.',
+        scopeKey: 'project:tianwen/capability:research-summary',
+        sessionDigest: source.sessionDigest,
+        evidenceIds: [digest('source-evidence')],
+      },
+      sessionLifecycleFingerprint: source.sessionLifecycleFingerprint,
+      analysisConsentRevision: 1,
+    })
+    protocol.sourceFidelity.source.signalId = feedback.signalId!
+    protocol.sourceFidelity.source.evidenceSetDigest = sha256([digest('source-evidence')])
+    const input = {
+      ticketId: feedback.ticketId!,
+      evidencePurpose: 'controlled-product' as const,
+      protocol,
+    }
+
+    const first = ledger.freezeControlledSkillEvalProtocol(input)
+    expect(first).toMatchObject({ duplicate: false, provenance: 'pre-candidate' })
+    const stored = ledger.getControlledSkillEvalProtocol(first.protocolId)!
+    expect(stored.schemaVersion).toBe('tianwen.controlled-skill-eval-protocol.v3')
+    expect(ledger.freezeControlledSkillEvalProtocol(input).duplicate).toBe(true)
+    expect(new EvolutionLedger(path).getControlledSkillEvalProtocol(first.protocolId))
+      .toEqual(stored)
+
+    const stale = structuredClone(input)
+    stale.protocol.sourceFidelity.source.sessionDigest = digest('stale-source-session')
+    expect(() => ledger.freezeControlledSkillEvalProtocol(stale))
+      .toThrow(LedgerIntegrityError)
+  })
+
   it('replays a persisted DSH 0.1.0-rc.7 execution without rewriting it', () => {
     const path = fixtureRoot('legacy-rc7-protocol')
     const ledger = new EvolutionLedger(path)
@@ -1669,6 +1906,196 @@ describe('controlled five-task Skill evaluation protocol', () => {
     )
     expect(() => missingUse.ledger.recordControlledSkillEvaluationObjective(missingUseInput))
       .toThrow(/Run facts/i)
+  })
+
+  it('keeps the legacy v2 protocol identity and bytes unchanged', () => {
+    const { ticket, signals } = ticketFacts()
+    const record = prepareControlledSkillEvalProtocol({
+      ticketId: ticket.ticketId,
+      evidencePurpose: 'development-only-synthetic-defect',
+      protocol: controlledProtocol(),
+    }, ticket, signals, 'pre-candidate')
+
+    expect(record.schemaVersion).toBe('tianwen.controlled-skill-eval-protocol.v2')
+    expect(record.protocolId).toBe(
+      'eval-protocol:9493071682afc593f7402860b1c400326be741869865a5f55aa9033999f41caf',
+    )
+    expect(sha256(record)).toBe(
+      'sha256:b939a96396136c8c99f47075d64cb971cce97ed8c7f330110039fb15a7857000',
+    )
+    expect(record).not.toHaveProperty('sourceFidelity')
+  })
+
+  it('freezes the source identity, packet version, holdout and review contract in v3', () => {
+    const record = sourceFidelityRecord()
+
+    expect(record).toMatchObject({
+      schemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+      protocol: {
+        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        sourceFidelity: sourceFidelityProtocol().sourceFidelity,
+      },
+    })
+    expect(record.protocol.tasks.map(task => task.taskType)).toEqual(taskTypes)
+    expect(record.protocol.tasks[0]!.inputDigest)
+      .toBe(record.protocol.sourceFidelity.source.packetDigest)
+    expect(record.protocol.sourceFidelity.holdout.task.inputDigest)
+      .not.toBe(record.protocol.tasks[0]!.inputDigest)
+
+    const source = sourceFidelityProtocol().sourceFidelity.source
+    const invalid = structuredClone(sourceFidelityProtocol())
+    delete (invalid.sourceFidelity.source as { sessionDigest?: string }).sessionDigest
+    expect(() => prepareControlledSkillEvalProtocol({
+      ticketId: 'ticket:controlled-evaluation',
+      evidencePurpose: 'development-only-synthetic-defect',
+      protocol: invalid as never,
+    }, {
+      ...ticketFacts().ticket,
+      signalIds: [source.signalId],
+    }, [{
+      signalId: source.signalId,
+      scopeKey: 'project:tianwen/capability:research-summary',
+      sessionId: source.sessionId,
+      messageId: source.messageId,
+      feedbackVersion: source.feedbackVersion,
+      sessionLifecycleFingerprint: source.sessionLifecycleFingerprint,
+      sessionDigest: source.sessionDigest,
+      evidenceSetDigest: source.evidenceSetDigest,
+      acceptanceSubjectDigest: source.acceptanceSubjectDigest,
+    }], 'pre-candidate')).toThrow(/missing field: sessionDigest/i)
+  })
+
+  it('lets clean ID ties reach v3 blind quality and requires real source-fidelity improvement', () => {
+    const { plan } = sourceFidelityPlan()
+    const objectives = sourceFidelityObjectiveInputs(plan)
+      .map(input => prepareControlledSkillEvaluationObjective(input, plan))
+    expect(objectives.every(objective => objective.comparison === 'tie')).toBe(true)
+
+    const blindMap = prepareControlledSkillEvaluationBlindMap({
+      evaluationId: plan.evaluationId,
+    }, plan, objectives)
+    expect(blindMap.schemaVersion)
+      .toBe('tianwen.controlled-skill-evaluation-blind-map.v3')
+    const observations = plan.tasks.map((task, index) => {
+      const assignment = blindMap.assignments[index]!
+      const roleScores = {
+        baseline: {
+          ...evaluatorDimensionScores(3),
+          sourceFidelity: 3,
+        },
+        candidate: {
+          ...evaluatorDimensionScores(3),
+          sourceFidelity: index === 0 ? 4 : 3,
+        },
+      }
+      return prepareControlledSkillEvaluatorObservation({
+        evaluationId: plan.evaluationId,
+        taskId: task.taskId,
+        evaluatorSessionId: task.evaluatorSessionId,
+        envelopeDigest: assignment.envelopeDigest,
+        requestDigest: digest(`source-fidelity-review:${task.taskId}`),
+        evidenceId: digest(`source-fidelity-review-evidence:${task.taskId}`),
+        status: 'scored',
+        insufficientMaterial: false,
+        reasonCode: 'score-submitted',
+        scores: {
+          x: roleScores[assignment.xRole],
+          y: roleScores[assignment.yRole],
+        },
+      }, plan, blindMap)
+    })
+    const result = prepareControlledSkillEvaluationResult({
+      evaluationId: plan.evaluationId,
+    }, plan, objectives, blindMap, observations)
+
+    expect(result).toMatchObject({
+      schemaVersion: 'tianwen.controlled-skill-evaluation-result.v3',
+      mechanismVerdict: 'pass',
+      reasonCode: 'all-gates-passed',
+      baselineTotal: 60,
+      candidateTotal: 60,
+      baselineSourceFidelityTotal: 15,
+      candidateSourceFidelityTotal: 16,
+    })
+  })
+
+  it('rejects missing fidelity scores, fake original improvement and paired role regressions', () => {
+    const { plan } = sourceFidelityPlan()
+    const objectives = sourceFidelityObjectiveInputs(plan)
+      .map(input => prepareControlledSkillEvaluationObjective(input, plan))
+    const blindMap = prepareControlledSkillEvaluationBlindMap({
+      evaluationId: plan.evaluationId,
+    }, plan, objectives)
+    const observation = (index: number, baselineFidelity: number, candidateFidelity: number) => {
+      const task = plan.tasks[index]!
+      const assignment = blindMap.assignments[index]!
+      const roleScores = {
+        baseline: { ...evaluatorDimensionScores(3), sourceFidelity: baselineFidelity },
+        candidate: { ...evaluatorDimensionScores(3), sourceFidelity: candidateFidelity },
+      }
+      return prepareControlledSkillEvaluatorObservation({
+        evaluationId: plan.evaluationId,
+        taskId: task.taskId,
+        evaluatorSessionId: task.evaluatorSessionId,
+        envelopeDigest: assignment.envelopeDigest,
+        requestDigest: digest(`fidelity-rejection-request:${index}`),
+        evidenceId: digest(`fidelity-rejection-evidence:${index}`),
+        status: 'scored',
+        insufficientMaterial: false,
+        reasonCode: 'score-submitted',
+        scores: {
+          x: roleScores[assignment.xRole],
+          y: roleScores[assignment.yRole],
+        },
+      }, plan, blindMap)
+    }
+    const firstAssignment = blindMap.assignments[0]!
+    expect(() => prepareControlledSkillEvaluatorObservation({
+      evaluationId: plan.evaluationId,
+      taskId: plan.tasks[0]!.taskId,
+      evaluatorSessionId: plan.tasks[0]!.evaluatorSessionId,
+      envelopeDigest: firstAssignment.envelopeDigest,
+      requestDigest: digest('missing-fidelity-request'),
+      evidenceId: digest('missing-fidelity-evidence'),
+      status: 'scored',
+      insufficientMaterial: false,
+      reasonCode: 'score-submitted',
+      scores: {
+        x: evaluatorDimensionScores(3),
+        y: evaluatorDimensionScores(3),
+      },
+    } as never, plan, blindMap)).toThrow(/sourceFidelity/i)
+
+    const noImprovement = plan.tasks.map((_, index) => observation(index, 3, 3))
+    expect(prepareControlledSkillEvaluationResult({
+      evaluationId: plan.evaluationId,
+    }, plan, objectives, blindMap, noImprovement)).toMatchObject({
+      mechanismVerdict: 'rejected',
+      reasonCode: 'original-source-fidelity-not-improved',
+    })
+
+    const swappedOriginal = [
+      observation(0, 4, 3),
+      ...plan.tasks.slice(1).map((_, offset) => observation(offset + 1, 3, 3)),
+    ]
+    expect(prepareControlledSkillEvaluationResult({
+      evaluationId: plan.evaluationId,
+    }, plan, objectives, blindMap, swappedOriginal)).toMatchObject({
+      mechanismVerdict: 'rejected',
+      reasonCode: 'original-source-fidelity-not-improved',
+    })
+
+    const pairedRegression = [
+      observation(0, 3, 4),
+      observation(1, 4, 3),
+      ...plan.tasks.slice(2).map((_, offset) => observation(offset + 2, 3, 3)),
+    ]
+    expect(prepareControlledSkillEvaluationResult({
+      evaluationId: plan.evaluationId,
+    }, plan, objectives, blindMap, pairedRegression)).toMatchObject({
+      mechanismVerdict: 'rejected',
+      reasonCode: 'paired-source-fidelity-regression',
+    })
   })
 
 })

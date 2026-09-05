@@ -16,6 +16,12 @@ import type {
   SkillVersionId,
 } from './skill-governance.js'
 import type { SkillEvalProtocolId } from './skill-evaluation.js'
+import {
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_SCORE_KEYS,
+} from './controlled-skill-source-fidelity.js'
 
 export const CONTROLLED_SKILL_EVAL_TASK_TYPES = Object.freeze([
   'original-problem',
@@ -98,11 +104,57 @@ export interface ControlledSkillEvalExecution {
   readonly retryPolicyDigest: Sha256Digest
 }
 
-export interface ControlledSkillEvalProtocol {
+export interface ControlledSkillEvalProtocolV2 {
   readonly rubricDigest: Sha256Digest
   readonly tasks: readonly ControlledSkillEvalTask[]
   readonly execution: ControlledSkillEvalExecution
 }
+
+export interface ControlledSkillSourceIdentity {
+  readonly signalId: string
+  readonly sessionId: string
+  readonly messageId: string
+  readonly feedbackVersion: string
+  readonly sessionLifecycleFingerprint: Sha256Digest
+  readonly sessionDigest: Sha256Digest
+  readonly evidenceSetDigest: Sha256Digest
+  readonly acceptanceSubjectDigest: Sha256Digest
+  readonly packetDigest: Sha256Digest
+}
+
+export interface ControlledSkillSourceFidelityHoldoutTask
+  extends Omit<ControlledSkillEvalTask, 'taskId' | 'taskType'> {
+  readonly taskId: `shadow-task:${string}`
+}
+
+export interface ControlledSkillSourceFidelityReviewContract {
+  readonly rubricDigest: Sha256Digest
+  readonly configurationDigest: Sha256Digest
+  readonly materialContractDigest: Sha256Digest
+  readonly evidenceContractDigest: Sha256Digest
+}
+
+export interface ControlledSkillSourceFidelityContract {
+  readonly policyVersion: typeof CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion
+  readonly policyDigest: Sha256Digest
+  readonly packetVersion: typeof CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion
+  readonly source: ControlledSkillSourceIdentity
+  readonly holdout: {
+    readonly task: ControlledSkillSourceFidelityHoldoutTask
+    readonly review: ControlledSkillSourceFidelityReviewContract
+  }
+}
+
+export interface ControlledSkillEvalProtocolV3 {
+  readonly rubricDigest: Sha256Digest
+  readonly tasks: readonly ControlledSkillEvalTask[]
+  readonly execution: ControlledSkillEvalExecution
+  readonly sourceFidelity: ControlledSkillSourceFidelityContract
+}
+
+export type ControlledSkillEvalProtocol =
+  | ControlledSkillEvalProtocolV2
+  | ControlledSkillEvalProtocolV3
 
 export interface FreezeControlledSkillEvalProtocolInput {
   readonly ticketId: LearningTicketId
@@ -110,7 +162,7 @@ export interface FreezeControlledSkillEvalProtocolInput {
   readonly protocol: ControlledSkillEvalProtocol
 }
 
-export interface ControlledSkillEvalProtocolRecord {
+export interface ControlledSkillEvalProtocolRecordV2 {
   readonly schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2'
   readonly protocolId: SkillEvalProtocolId
   readonly ticketId: LearningTicketId
@@ -118,8 +170,23 @@ export interface ControlledSkillEvalProtocolRecord {
   readonly provenance: ControlledSkillEvalProtocolProvenance
   readonly evidencePurpose: ControlledSkillEvalEvidencePurpose
   readonly evidenceLabels: readonly ControlledSkillEvalEvidenceLabel[]
-  readonly protocol: ControlledSkillEvalProtocol
+  readonly protocol: ControlledSkillEvalProtocolV2
 }
+
+export interface ControlledSkillEvalProtocolRecordV3 {
+  readonly schemaVersion: 'tianwen.controlled-skill-eval-protocol.v3'
+  readonly protocolId: SkillEvalProtocolId
+  readonly ticketId: LearningTicketId
+  readonly scopeKey: string
+  readonly provenance: ControlledSkillEvalProtocolProvenance
+  readonly evidencePurpose: ControlledSkillEvalEvidencePurpose
+  readonly evidenceLabels: readonly ControlledSkillEvalEvidenceLabel[]
+  readonly protocol: ControlledSkillEvalProtocolV3
+}
+
+export type ControlledSkillEvalProtocolRecord =
+  | ControlledSkillEvalProtocolRecordV2
+  | ControlledSkillEvalProtocolRecordV3
 
 export interface ControlledSkillEvalProtocolReceipt {
   readonly protocolId: SkillEvalProtocolId
@@ -128,7 +195,9 @@ export interface ControlledSkillEvalProtocolReceipt {
 }
 
 export interface ControlledSkillEvalProtocolFrozenEvent {
-  readonly schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2'
+  readonly schemaVersion:
+    | 'tianwen.controlled-skill-eval-protocol.v2'
+    | 'tianwen.controlled-skill-eval-protocol.v3'
   readonly type: 'controlled-skill-eval-protocol-frozen'
   readonly at: string
   readonly protocol: ControlledSkillEvalProtocolRecord
@@ -162,8 +231,7 @@ export interface ControlledSkillEvalTaskPlan extends ControlledSkillEvalTask {
   readonly evaluatorSessionId: string
 }
 
-export interface ControlledSkillEvaluationPlan {
-  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v2'
+interface ControlledSkillEvaluationPlanCommon {
   readonly evaluationId: ControlledSkillEvaluationId
   readonly protocolId: SkillEvalProtocolId
   readonly candidateId: GovernedSkillCandidate['candidateId']
@@ -178,13 +246,30 @@ export interface ControlledSkillEvaluationPlan {
   readonly tasks: readonly ControlledSkillEvalTaskPlan[]
 }
 
+export interface ControlledSkillEvaluationPlanV2
+  extends ControlledSkillEvaluationPlanCommon {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v2'
+}
+
+export interface ControlledSkillEvaluationPlanV3
+  extends ControlledSkillEvaluationPlanCommon {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v3'
+  readonly sourceFidelity: ControlledSkillSourceFidelityContract
+}
+
+export type ControlledSkillEvaluationPlan =
+  | ControlledSkillEvaluationPlanV2
+  | ControlledSkillEvaluationPlanV3
+
 export interface ControlledSkillEvaluationReceipt {
   readonly evaluationId: ControlledSkillEvaluationId
   readonly duplicate: boolean
 }
 
 export interface ControlledSkillEvaluationOpenedEvent {
-  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v2'
+  readonly schemaVersion:
+    | 'tianwen.controlled-skill-evaluation-plan.v2'
+    | 'tianwen.controlled-skill-evaluation-plan.v3'
   readonly type: 'controlled-skill-evaluation-opened'
   readonly at: string
   readonly plan: ControlledSkillEvaluationPlan
@@ -268,12 +353,25 @@ export interface ControlledSkillEvaluationBlindAssignment {
   readonly envelopeDigest: Sha256Digest
 }
 
-export interface ControlledSkillEvaluationBlindMap {
-  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2'
+interface ControlledSkillEvaluationBlindMapCommon {
   readonly evaluationId: ControlledSkillEvaluationId
   readonly objectiveSetDigest: Sha256Digest
   readonly assignments: readonly ControlledSkillEvaluationBlindAssignment[]
 }
+
+export interface ControlledSkillEvaluationBlindMapV2
+  extends ControlledSkillEvaluationBlindMapCommon {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2'
+}
+
+export interface ControlledSkillEvaluationBlindMapV3
+  extends ControlledSkillEvaluationBlindMapCommon {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v3'
+}
+
+export type ControlledSkillEvaluationBlindMap =
+  | ControlledSkillEvaluationBlindMapV2
+  | ControlledSkillEvaluationBlindMapV3
 
 export interface ControlledSkillEvaluationBlindMapReceipt {
   readonly evaluationId: ControlledSkillEvaluationId
@@ -281,7 +379,9 @@ export interface ControlledSkillEvaluationBlindMapReceipt {
 }
 
 export interface ControlledSkillEvaluationBlindMapFrozenEvent {
-  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2'
+  readonly schemaVersion:
+    | 'tianwen.controlled-skill-evaluation-blind-map.v2'
+    | 'tianwen.controlled-skill-evaluation-blind-map.v3'
   readonly type: 'controlled-skill-evaluation-blind-map-frozen'
   readonly at: string
   readonly blindMap: ControlledSkillEvaluationBlindMap
@@ -313,14 +413,25 @@ export type ControlledSkillEvaluationResultReasonCode =
   | ControlledSkillEvaluatorInconclusiveReasonCode
   | 'candidate-subjective-total-lower'
   | 'candidate-dimension-regression'
+  | 'original-source-fidelity-not-improved'
+  | 'paired-source-fidelity-regression'
   | 'all-gates-passed'
 
-export interface ControlledSkillEvaluatorDimensionScores {
+export interface ControlledSkillEvaluatorDimensionScoresV2 {
   readonly relevance: number
   readonly correctnessReasoning: number
   readonly clarityUsability: number
   readonly scopeRestraint: number
 }
+
+export interface ControlledSkillEvaluatorDimensionScoresV3
+  extends ControlledSkillEvaluatorDimensionScoresV2 {
+  readonly sourceFidelity: number
+}
+
+export type ControlledSkillEvaluatorDimensionScores =
+  | ControlledSkillEvaluatorDimensionScoresV2
+  | ControlledSkillEvaluatorDimensionScoresV3
 
 export interface ControlledSkillEvaluatorScores {
   readonly x: ControlledSkillEvaluatorDimensionScores
@@ -351,7 +462,9 @@ export type RecordControlledSkillEvaluatorObservationInput =
 
 export type ControlledSkillEvaluatorObservation =
   RecordControlledSkillEvaluatorObservationInput & {
-    readonly schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2'
+    readonly schemaVersion:
+      | 'tianwen.controlled-skill-evaluator-observation.v2'
+      | 'tianwen.controlled-skill-evaluator-observation.v3'
   }
 
 export interface ControlledSkillEvaluatorObservationReceipt {
@@ -361,7 +474,9 @@ export interface ControlledSkillEvaluatorObservationReceipt {
 }
 
 export interface ControlledSkillEvaluatorObservationRecordedEvent {
-  readonly schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2'
+  readonly schemaVersion:
+    | 'tianwen.controlled-skill-evaluator-observation.v2'
+    | 'tianwen.controlled-skill-evaluator-observation.v3'
   readonly type: 'controlled-skill-evaluator-observation-recorded'
   readonly at: string
   readonly observation: ControlledSkillEvaluatorObservation
@@ -372,8 +487,7 @@ export interface RecordControlledSkillEvaluationResultInput {
   readonly evaluationId: ControlledSkillEvaluationId
 }
 
-export interface ControlledSkillEvaluationResult {
-  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2'
+interface ControlledSkillEvaluationResultCommon {
   readonly evaluationId: ControlledSkillEvaluationId
   readonly planDigest: Sha256Digest
   readonly objectiveSetDigest: Sha256Digest | null
@@ -388,13 +502,31 @@ export interface ControlledSkillEvaluationResult {
   readonly candidateTotal: number | null
 }
 
+export interface ControlledSkillEvaluationResultV2
+  extends ControlledSkillEvaluationResultCommon {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2'
+}
+
+export interface ControlledSkillEvaluationResultV3
+  extends ControlledSkillEvaluationResultCommon {
+  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-result.v3'
+  readonly baselineSourceFidelityTotal: number | null
+  readonly candidateSourceFidelityTotal: number | null
+}
+
+export type ControlledSkillEvaluationResult =
+  | ControlledSkillEvaluationResultV2
+  | ControlledSkillEvaluationResultV3
+
 export interface ControlledSkillEvaluationResultReceipt {
   readonly evaluationId: ControlledSkillEvaluationId
   readonly duplicate: boolean
 }
 
 export interface ControlledSkillEvaluationResultRecordedEvent {
-  readonly schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2'
+  readonly schemaVersion:
+    | 'tianwen.controlled-skill-evaluation-result.v2'
+    | 'tianwen.controlled-skill-evaluation-result.v3'
   readonly type: 'controlled-skill-evaluation-result-recorded'
   readonly at: string
   readonly result: ControlledSkillEvaluationResult
@@ -540,6 +672,119 @@ function prepareTask(value: unknown): ControlledSkillEvalTask {
   }
 }
 
+function nonEmptyString(value: unknown, label: string, maximum = 256): string {
+  if (
+    typeof value !== 'string'
+    || value.trim().length === 0
+    || value.length > maximum
+    || /[\u0000-\u001f\u007f]/u.test(value)
+  ) throw new TypeError(`${label} is invalid`)
+  return value
+}
+
+function prepareHoldoutTask(value: unknown): ControlledSkillSourceFidelityHoldoutTask {
+  if (!isRecord(value)) throw new TypeError('source-fidelity holdout task must be an object')
+  const { taskId, ...task } = value
+  if (typeof taskId !== 'string' || !/^shadow-task:[a-z0-9][a-z0-9._-]{0,96}$/u.test(taskId)) {
+    throw new TypeError('source-fidelity holdout taskId is invalid')
+  }
+  const prepared = prepareTask({
+    ...task,
+    taskId: 'eval-task:source-fidelity-holdout',
+    taskType: 'original-problem',
+  })
+  const { taskType: _taskType, taskId: _taskId, ...fields } = prepared
+  return { taskId: taskId as `shadow-task:${string}`, ...fields }
+}
+
+function prepareSourceIdentity(value: unknown): ControlledSkillSourceIdentity {
+  if (!isRecord(value)) throw new TypeError('source-fidelity source identity must be an object')
+  exactKeys(value, [
+    'signalId',
+    'sessionId',
+    'messageId',
+    'feedbackVersion',
+    'sessionLifecycleFingerprint',
+    'sessionDigest',
+    'evidenceSetDigest',
+    'acceptanceSubjectDigest',
+    'packetDigest',
+  ])
+  return {
+    signalId: nonEmptyString(value.signalId, 'source signalId'),
+    sessionId: safeSessionId(value.sessionId),
+    messageId: nonEmptyString(value.messageId, 'source messageId'),
+    feedbackVersion: nonEmptyString(value.feedbackVersion, 'source feedbackVersion'),
+    sessionLifecycleFingerprint: digest(
+      value.sessionLifecycleFingerprint,
+      'source sessionLifecycleFingerprint',
+    ),
+    sessionDigest: digest(value.sessionDigest, 'source sessionDigest'),
+    evidenceSetDigest: digest(value.evidenceSetDigest, 'source evidenceSetDigest'),
+    acceptanceSubjectDigest: digest(
+      value.acceptanceSubjectDigest,
+      'source acceptanceSubjectDigest',
+    ),
+    packetDigest: digest(value.packetDigest, 'source packetDigest'),
+  }
+}
+
+function prepareSourceFidelityContract(
+  value: unknown,
+): ControlledSkillSourceFidelityContract {
+  if (!isRecord(value)) throw new TypeError('source-fidelity contract must be an object')
+  exactKeys(value, [
+    'policyVersion',
+    'policyDigest',
+    'packetVersion',
+    'source',
+    'holdout',
+  ])
+  if (
+    value.policyVersion !== CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion
+    || value.policyDigest !== CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST
+    || value.packetVersion !== CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion
+    || !isRecord(value.holdout)
+  ) throw new TypeError('source-fidelity policy identity is invalid')
+  exactKeys(value.holdout, ['task', 'review'])
+  if (!isRecord(value.holdout.review)) {
+    throw new TypeError('source-fidelity holdout review contract must be an object')
+  }
+  exactKeys(value.holdout.review, [
+    'rubricDigest',
+    'configurationDigest',
+    'materialContractDigest',
+    'evidenceContractDigest',
+  ])
+  if (value.holdout.review.rubricDigest !== CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST) {
+    throw new TypeError('source-fidelity holdout review rubric is invalid')
+  }
+  return {
+    policyVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion,
+    policyDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+    packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+    source: prepareSourceIdentity(value.source),
+    holdout: {
+      task: prepareHoldoutTask(value.holdout.task),
+      review: {
+        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        configurationDigest: digest(
+          value.holdout.review.configurationDigest,
+          'source-fidelity review configurationDigest',
+        ),
+        materialContractDigest: digest(
+          value.holdout.review.materialContractDigest,
+          'source-fidelity review materialContractDigest',
+        ),
+        evidenceContractDigest: digest(
+          value.holdout.review.evidenceContractDigest,
+          'source-fidelity review evidenceContractDigest',
+        ),
+      },
+    },
+  }
+}
+
 function prepareExecution(value: unknown): ControlledSkillEvalExecution {
   if (!isRecord(value)) throw new TypeError('controlled evaluation execution must be an object')
   exactKeys(value, [
@@ -565,8 +810,17 @@ function prepareExecution(value: unknown): ControlledSkillEvalExecution {
 
 function prepareProtocol(value: unknown): ControlledSkillEvalProtocol {
   if (!isRecord(value)) throw new TypeError('controlled evaluation protocol must be an object')
-  exactKeys(value, ['rubricDigest', 'tasks', 'execution'])
-  if (value.rubricDigest !== CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST) {
+  const sourceFidelity = 'sourceFidelity' in value
+  exactKeys(value, [
+    'rubricDigest',
+    'tasks',
+    'execution',
+    ...(sourceFidelity ? ['sourceFidelity'] : []),
+  ])
+  const expectedRubric = sourceFidelity
+    ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+    : CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST
+  if (value.rubricDigest !== expectedRubric) {
     throw new TypeError('controlled evaluation rubric is not the frozen rubric')
   }
   if (!Array.isArray(value.tasks) || value.tasks.length !== CONTROLLED_SKILL_EVAL_TASK_TYPES.length) {
@@ -579,16 +833,36 @@ function prepareProtocol(value: unknown): ControlledSkillEvalProtocol {
   ) {
     throw new TypeError('controlled evaluation five tasks must cover each task type once in order')
   }
-  return {
-    rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  const common = {
+    rubricDigest: expectedRubric,
     tasks,
     execution: prepareExecution(value.execution),
   }
+  if (!sourceFidelity) return common
+  const contract = prepareSourceFidelityContract(value.sourceFidelity)
+  if (
+    tasks[0]!.inputDigest !== contract.source.packetDigest
+    || tasks[0]!.acceptanceSubjectDigest !== contract.source.acceptanceSubjectDigest
+    || tasks.some(task => task.inputDigest === contract.holdout.task.inputDigest)
+    || tasks.some(task =>
+      task.workspaceSnapshotDigest === contract.holdout.task.workspaceSnapshotDigest)
+    || tasks.some(task =>
+      task.evaluatorMaterialContractDigest
+        === contract.holdout.task.evaluatorMaterialContractDigest)
+  ) throw new TypeError('source-fidelity source or holdout material is not independently frozen')
+  return { ...common, sourceFidelity: contract }
 }
 
 export interface ControlledSkillEvalScopeFact {
   readonly signalId: string
   readonly scopeKey: string
+  readonly sessionId?: string
+  readonly messageId?: string
+  readonly feedbackVersion?: string
+  readonly sessionLifecycleFingerprint?: Sha256Digest
+  readonly sessionDigest?: Sha256Digest
+  readonly evidenceSetDigest?: Sha256Digest
+  readonly acceptanceSubjectDigest?: Sha256Digest
 }
 
 function deriveScope(
@@ -655,16 +929,44 @@ function prepareRecord(
     evidenceLabels: labels,
     protocol,
   })
-  return {
-    schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+  const common: Omit<ControlledSkillEvalProtocolRecordV2, 'schemaVersion' | 'protocol'> = {
     protocolId: `eval-protocol:${identity.slice('sha256:'.length)}`,
     ticketId: ticketId as LearningTicketId,
     scopeKey,
     provenance,
     evidencePurpose: purpose,
     evidenceLabels: labels,
-    protocol,
   }
+  return 'sourceFidelity' in protocol
+    ? {
+        schemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+        ...common,
+        protocol,
+      }
+    : {
+        schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+        ...common,
+        protocol,
+      }
+}
+
+function assertSourceIdentity(
+  protocol: ControlledSkillEvalProtocol,
+  signals: readonly ControlledSkillEvalScopeFact[],
+): void {
+  if (!('sourceFidelity' in protocol)) return
+  const source = protocol.sourceFidelity.source
+  const fact = signals.find(signal => signal.signalId === source.signalId)
+  if (
+    fact === undefined
+    || fact.sessionId !== source.sessionId
+    || fact.messageId !== source.messageId
+    || fact.feedbackVersion !== source.feedbackVersion
+    || fact.sessionLifecycleFingerprint !== source.sessionLifecycleFingerprint
+    || fact.sessionDigest !== source.sessionDigest
+    || fact.evidenceSetDigest !== source.evidenceSetDigest
+    || fact.acceptanceSubjectDigest !== source.acceptanceSubjectDigest
+  ) throw new TypeError('source-fidelity source identity disagrees with Ticket history')
 }
 
 export function prepareControlledSkillEvalProtocol(
@@ -679,12 +981,17 @@ export function prepareControlledSkillEvalProtocol(
     throw new TypeError('controlled evaluation protocol references another Ticket')
   }
   const scopeKey = deriveScope(ticket, signals)
+  const protocol = prepareProtocol(input.protocol)
+  if ('sourceFidelity' in protocol && provenance !== 'pre-candidate') {
+    throw new TypeError('source-fidelity protocol must be frozen before Candidate creation')
+  }
+  assertSourceIdentity(protocol, signals)
   return prepareRecord(
     input.ticketId,
     scopeKey,
     provenance,
     input.evidencePurpose,
-    input.protocol,
+    protocol,
   )
 }
 
@@ -702,7 +1009,10 @@ export function parseControlledSkillEvalProtocol(
     'evidenceLabels',
     'protocol',
   ])
-  if (value.schemaVersion !== 'tianwen.controlled-skill-eval-protocol.v2') {
+  if (
+    value.schemaVersion !== 'tianwen.controlled-skill-eval-protocol.v2'
+    && value.schemaVersion !== 'tianwen.controlled-skill-eval-protocol.v3'
+  ) {
     throw new TypeError('controlled evaluation protocol has an invalid schema version')
   }
   const prepared = prepareRecord(
@@ -712,7 +1022,10 @@ export function parseControlledSkillEvalProtocol(
     value.evidencePurpose,
     value.protocol,
   )
-  if (canonicalJson(prepared) !== canonicalJson(value)) {
+  if (
+    prepared.schemaVersion !== value.schemaVersion
+    || canonicalJson(prepared) !== canonicalJson(value)
+  ) {
     throw new TypeError('controlled evaluation protocol identity or labels are not canonical')
   }
   return prepared
@@ -874,7 +1187,7 @@ function preparePlanRecord(input: {
     input.protocolId as SkillEvalProtocolId,
     input.scopeKey,
   )
-  const body = {
+  const common = {
     protocolId: input.protocolId as SkillEvalProtocolId,
     candidateId: input.candidateId as GovernedSkillCandidate['candidateId'],
     parentVersionId: input.parentVersionId as SkillVersionId,
@@ -887,11 +1200,20 @@ function preparePlanRecord(input: {
     execution: protocol.execution,
     tasks,
   } as const
-  const identity = sha256(body)
+  if ('sourceFidelity' in protocol) {
+    const body = { ...common, sourceFidelity: protocol.sourceFidelity }
+    const identity = sha256(body)
+    return {
+      schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v3',
+      evaluationId: `evaluation:${identity.slice('sha256:'.length)}`,
+      ...body,
+    }
+  }
+  const identity = sha256(common)
   return {
     schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v2',
     evaluationId: `evaluation:${identity.slice('sha256:'.length)}`,
-    ...body,
+    ...common,
   }
 }
 
@@ -937,6 +1259,7 @@ export function parseControlledSkillEvaluationPlan(
   value: unknown,
 ): ControlledSkillEvaluationPlan {
   if (!isRecord(value)) throw new TypeError('controlled evaluation plan must be an object')
+  const isV3 = value.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
   exactKeys(value, [
     'schemaVersion',
     'evaluationId',
@@ -951,8 +1274,9 @@ export function parseControlledSkillEvaluationPlan(
     'evidenceLabels',
     'execution',
     'tasks',
+    ...(isV3 ? ['sourceFidelity'] : []),
   ])
-  if (value.schemaVersion !== 'tianwen.controlled-skill-evaluation-plan.v2') {
+  if (value.schemaVersion !== 'tianwen.controlled-skill-evaluation-plan.v2' && !isV3) {
     throw new TypeError('controlled evaluation plan has an invalid schema version')
   }
   if (typeof value.evaluationId !== 'string' || !EVALUATION_ID.test(value.evaluationId)) {
@@ -960,7 +1284,9 @@ export function parseControlledSkillEvaluationPlan(
   }
   if (!Array.isArray(value.tasks)) throw new TypeError('controlled evaluation plan tasks must be an array')
   const protocol = prepareProtocol({
-    rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+    rubricDigest: isV3
+      ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+      : CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
     tasks: value.tasks.map(task => {
       if (!isRecord(task)) throw new TypeError('controlled evaluation plan task must be an object')
       const copy = { ...task }
@@ -970,6 +1296,7 @@ export function parseControlledSkillEvaluationPlan(
       return copy
     }),
     execution: value.execution,
+    ...(isV3 ? { sourceFidelity: value.sourceFidelity } : {}),
   })
   const prepared = preparePlanRecord({
     protocolId: value.protocolId,
@@ -1271,19 +1598,25 @@ export function prepareControlledSkillEvaluationBlindMap(
   const complete = objectives
   if (
     complete.some(objective => objective.objectiveVerdict !== 'pass')
-    || complete.slice(0, 2).every(objective => objective.comparison !== 'candidate-better')
+    || (plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v2'
+      && complete.slice(0, 2).every(objective =>
+        objective.comparison !== 'candidate-better'))
   ) {
     throw new TypeError('controlled evaluation objective aggregate did not pass')
   }
   const objectiveSetDigest = sha256(complete)
   return {
-    schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2',
+    schemaVersion: plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+      ? 'tianwen.controlled-skill-evaluation-blind-map.v3'
+      : 'tianwen.controlled-skill-evaluation-blind-map.v2',
     evaluationId: plan.evaluationId,
     objectiveSetDigest,
     assignments: plan.tasks.map((task, index) => {
       const objective = complete[index]!
       const assignmentDigest = sha256({
-        domain: 'tianwen.controlled-blind-map.v1',
+        domain: plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+          ? 'tianwen.controlled-blind-map.v2'
+          : 'tianwen.controlled-blind-map.v1',
         evaluationId: plan.evaluationId,
         objectiveSetDigest,
         taskId: task.taskId,
@@ -1299,9 +1632,13 @@ export function prepareControlledSkillEvaluationBlindMap(
         yRole,
         evaluatorSessionId: task.evaluatorSessionId,
         envelopeDigest: sha256({
-          domain: 'tianwen.controlled-blind-envelope.v1',
+          domain: plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+            ? 'tianwen.controlled-blind-envelope.v2'
+            : 'tianwen.controlled-blind-envelope.v1',
           taskId: task.taskId,
-          rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+          rubricDigest: plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+            ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+            : CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
           x: blindEnvelopeArm(objective[xRole]),
           y: blindEnvelopeArm(objective[yRole]),
         }),
@@ -1317,6 +1654,7 @@ export function parseControlledSkillEvaluationBlindMap(
   exactKeys(value, ['schemaVersion', 'evaluationId', 'objectiveSetDigest', 'assignments'])
   if (
     value.schemaVersion !== 'tianwen.controlled-skill-evaluation-blind-map.v2'
+    && value.schemaVersion !== 'tianwen.controlled-skill-evaluation-blind-map.v3'
     || typeof value.evaluationId !== 'string'
     || !EVALUATION_ID.test(value.evaluationId)
     || !Array.isArray(value.assignments)
@@ -1324,7 +1662,7 @@ export function parseControlledSkillEvaluationBlindMap(
     throw new TypeError('controlled evaluation blind map is invalid')
   }
   const prepared: ControlledSkillEvaluationBlindMap = {
-    schemaVersion: 'tianwen.controlled-skill-evaluation-blind-map.v2',
+    schemaVersion: value.schemaVersion,
     evaluationId: value.evaluationId as ControlledSkillEvaluationId,
     objectiveSetDigest: digest(value.objectiveSetDigest, 'objectiveSetDigest'),
     assignments: value.assignments.map(item => {
@@ -1362,6 +1700,7 @@ export function parseControlledSkillEvaluationBlindMap(
 
 function prepareDimensionScores(
   value: unknown,
+  requiresSourceFidelity: boolean,
 ): ControlledSkillEvaluatorDimensionScores {
   if (!isRecord(value)) throw new TypeError('controlled evaluator dimension scores must be an object')
   exactKeys(value, [
@@ -1369,8 +1708,9 @@ function prepareDimensionScores(
     'correctnessReasoning',
     'clarityUsability',
     'scopeRestraint',
+    ...(requiresSourceFidelity ? ['sourceFidelity'] : []),
   ])
-  return {
+  const common = {
     relevance: boundedInteger(value.relevance, 'relevance', 0, 4),
     correctnessReasoning: boundedInteger(
       value.correctnessReasoning,
@@ -1381,19 +1721,29 @@ function prepareDimensionScores(
     clarityUsability: boundedInteger(value.clarityUsability, 'clarityUsability', 0, 4),
     scopeRestraint: boundedInteger(value.scopeRestraint, 'scopeRestraint', 0, 4),
   }
+  return requiresSourceFidelity
+    ? {
+        ...common,
+        sourceFidelity: boundedInteger(value.sourceFidelity, 'sourceFidelity', 0, 4),
+      }
+    : common
 }
 
-function prepareEvaluatorScores(value: unknown): ControlledSkillEvaluatorScores {
+function prepareEvaluatorScores(
+  value: unknown,
+  requiresSourceFidelity: boolean,
+): ControlledSkillEvaluatorScores {
   if (!isRecord(value)) throw new TypeError('controlled evaluator scores must be an object')
   exactKeys(value, ['x', 'y'])
   return {
-    x: prepareDimensionScores(value.x),
-    y: prepareDimensionScores(value.y),
+    x: prepareDimensionScores(value.x, requiresSourceFidelity),
+    y: prepareDimensionScores(value.y, requiresSourceFidelity),
   }
 }
 
 function prepareObservationInput(
   value: unknown,
+  requiresSourceFidelity: boolean,
 ): RecordControlledSkillEvaluatorObservationInput {
   if (!isRecord(value)) throw new TypeError('controlled evaluator observation input must be an object')
   const commonKeys = [
@@ -1439,7 +1789,7 @@ function prepareObservationInput(
       status: 'scored',
       insufficientMaterial: false,
       reasonCode: 'score-submitted',
-      scores: prepareEvaluatorScores(value.scores),
+      scores: prepareEvaluatorScores(value.scores, requiresSourceFidelity),
     }
   }
   if (
@@ -1468,13 +1818,18 @@ export function prepareControlledSkillEvaluatorObservation(
   plan: ControlledSkillEvaluationPlan,
   blindMap: ControlledSkillEvaluationBlindMap,
 ): ControlledSkillEvaluatorObservation {
-  const prepared = prepareObservationInput(input)
+  const requiresSourceFidelity =
+    plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+  const prepared = prepareObservationInput(input, requiresSourceFidelity)
   const taskIndex = plan.tasks.findIndex(task => task.taskId === prepared.taskId)
   const task = plan.tasks[taskIndex]
   const assignment = blindMap.assignments[taskIndex]
   if (
     prepared.evaluationId !== plan.evaluationId
     || blindMap.evaluationId !== plan.evaluationId
+    || (requiresSourceFidelity
+      ? blindMap.schemaVersion !== 'tianwen.controlled-skill-evaluation-blind-map.v3'
+      : blindMap.schemaVersion !== 'tianwen.controlled-skill-evaluation-blind-map.v2')
     || task === undefined
     || assignment?.taskId !== task.taskId
     || prepared.evaluatorSessionId !== task.evaluatorSessionId
@@ -1484,7 +1839,9 @@ export function prepareControlledSkillEvaluatorObservation(
     throw new TypeError('controlled evaluator observation disagrees with frozen facts')
   }
   return {
-    schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2',
+    schemaVersion: requiresSourceFidelity
+      ? 'tianwen.controlled-skill-evaluator-observation.v3'
+      : 'tianwen.controlled-skill-evaluator-observation.v2',
     ...prepared,
   }
 }
@@ -1494,12 +1851,18 @@ export function parseControlledSkillEvaluatorObservation(
 ): ControlledSkillEvaluatorObservation {
   if (!isRecord(value)) throw new TypeError('controlled evaluator observation must be an object')
   const { schemaVersion, ...input } = value
-  if (schemaVersion !== 'tianwen.controlled-skill-evaluator-observation.v2') {
+  if (
+    schemaVersion !== 'tianwen.controlled-skill-evaluator-observation.v2'
+    && schemaVersion !== 'tianwen.controlled-skill-evaluator-observation.v3'
+  ) {
     throw new TypeError('controlled evaluator observation schema version is invalid')
   }
   const prepared: ControlledSkillEvaluatorObservation = {
-    schemaVersion: 'tianwen.controlled-skill-evaluator-observation.v2',
-    ...prepareObservationInput(input as unknown as RecordControlledSkillEvaluatorObservationInput),
+    schemaVersion,
+    ...prepareObservationInput(
+      input as unknown as RecordControlledSkillEvaluatorObservationInput,
+      schemaVersion === 'tianwen.controlled-skill-evaluator-observation.v3',
+    ),
   }
   if (canonicalJson(prepared) !== canonicalJson(value)) {
     throw new TypeError('controlled evaluator observation is not canonical')
@@ -1518,7 +1881,7 @@ function resultEvidenceClaim(
 function prepareResultRecord(
   plan: ControlledSkillEvaluationPlan,
   fields: Pick<
-    ControlledSkillEvaluationResult,
+    ControlledSkillEvaluationResultV2,
     | 'objectiveSetDigest'
     | 'blindMapDigest'
     | 'evaluatorSetDigest'
@@ -1526,23 +1889,41 @@ function prepareResultRecord(
     | 'reasonCode'
     | 'baselineTotal'
     | 'candidateTotal'
-  >,
+  > & {
+    readonly baselineSourceFidelityTotal?: number | null
+    readonly candidateSourceFidelityTotal?: number | null
+  },
 ): ControlledSkillEvaluationResult {
+  const {
+    baselineSourceFidelityTotal,
+    candidateSourceFidelityTotal,
+    ...serializedFields
+  } = fields
   const shadowEligibility: ControlledSkillEvaluationShadowEligibility =
     fields.mechanismVerdict !== 'pass'
       ? 'ineligible'
       : plan.evidencePurpose === 'controlled-product'
         ? 'eligible-for-project-shadow'
         : 'eligible-for-isolated-test-shadow'
-  return {
-    schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2',
+  const common: ControlledSkillEvaluationResultCommon = {
     evaluationId: plan.evaluationId,
     planDigest: sha256(plan),
-    ...fields,
+    ...serializedFields,
     evidenceClaim: resultEvidenceClaim(plan),
     naturalUserEvidence: 'not-claimed',
     shadowEligibility,
   }
+  return plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+    ? {
+        schemaVersion: 'tianwen.controlled-skill-evaluation-result.v3',
+        ...common,
+        baselineSourceFidelityTotal: baselineSourceFidelityTotal ?? null,
+        candidateSourceFidelityTotal: candidateSourceFidelityTotal ?? null,
+      }
+    : {
+        schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2',
+        ...common,
+      }
 }
 
 const EVALUATOR_SCORE_DIMENSIONS = [
@@ -1598,7 +1979,11 @@ export function prepareControlledSkillEvaluationResult(
     throw new TypeError('controlled evaluation incomplete')
   }
   const complete = objectives
-  if (complete.slice(0, 2).every(objective => objective.comparison !== 'candidate-better')) {
+  if (
+    plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v2'
+    && complete.slice(0, 2).every(objective =>
+      objective.comparison !== 'candidate-better')
+  ) {
     return prepareResultRecord(plan, {
       objectiveSetDigest,
       blindMapDigest: null,
@@ -1613,6 +1998,9 @@ export function prepareControlledSkillEvaluationResult(
     blindMap === undefined
     || blindMap.evaluationId !== plan.evaluationId
     || blindMap.objectiveSetDigest !== objectiveSetDigest
+    || (plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+      ? blindMap.schemaVersion !== 'tianwen.controlled-skill-evaluation-blind-map.v3'
+      : blindMap.schemaVersion !== 'tianwen.controlled-skill-evaluation-blind-map.v2')
   ) {
     throw new TypeError('controlled evaluation incomplete')
   }
@@ -1638,6 +2026,10 @@ export function prepareControlledSkillEvaluationResult(
   if (
     observations.length !== plan.tasks.length
     || observations.some(observation => observation.status !== 'scored')
+    || observations.some(observation =>
+      plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+        ? observation.schemaVersion !== 'tianwen.controlled-skill-evaluator-observation.v3'
+        : observation.schemaVersion !== 'tianwen.controlled-skill-evaluator-observation.v2')
   ) {
     throw new TypeError('controlled evaluation incomplete')
   }
@@ -1647,7 +2039,11 @@ export function prepareControlledSkillEvaluationResult(
   })[]
   let baselineTotal = 0
   let candidateTotal = 0
+  let baselineSourceFidelityTotal = 0
+  let candidateSourceFidelityTotal = 0
   let dimensionRegression = false
+  let pairedSourceFidelityRegression = false
+  let originalSourceFidelityImprovement = 0
   for (const [index, observation] of scored.entries()) {
     const assignment = blindMap.assignments[index]!
     const baseline = assignment.xRole === 'baseline'
@@ -1661,6 +2057,19 @@ export function prepareControlledSkillEvaluationResult(
       candidateTotal += candidate[dimension]
       dimensionRegression ||= candidate[dimension] - baseline[dimension] <= -2
     }
+    if (plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3') {
+      const baselineFidelity = (baseline as ControlledSkillEvaluatorDimensionScoresV3)
+        .sourceFidelity
+      const candidateFidelity = (candidate as ControlledSkillEvaluatorDimensionScoresV3)
+        .sourceFidelity
+      baselineSourceFidelityTotal += baselineFidelity
+      candidateSourceFidelityTotal += candidateFidelity
+      if (index === 0) {
+        originalSourceFidelityImprovement = candidateFidelity - baselineFidelity
+      } else {
+        pairedSourceFidelityRegression ||= candidateFidelity < baselineFidelity
+      }
+    }
   }
   const evaluatorSetDigest = sha256(scored)
   if (candidateTotal < baselineTotal) {
@@ -1672,6 +2081,8 @@ export function prepareControlledSkillEvaluationResult(
       reasonCode: 'candidate-subjective-total-lower',
       baselineTotal,
       candidateTotal,
+      baselineSourceFidelityTotal,
+      candidateSourceFidelityTotal,
     })
   }
   if (dimensionRegression) {
@@ -1683,6 +2094,41 @@ export function prepareControlledSkillEvaluationResult(
       reasonCode: 'candidate-dimension-regression',
       baselineTotal,
       candidateTotal,
+      baselineSourceFidelityTotal,
+      candidateSourceFidelityTotal,
+    })
+  }
+  if (
+    plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+    && originalSourceFidelityImprovement
+      < CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.originalTaskMinimumImprovement
+  ) {
+    return prepareResultRecord(plan, {
+      objectiveSetDigest,
+      blindMapDigest,
+      evaluatorSetDigest,
+      mechanismVerdict: 'rejected',
+      reasonCode: 'original-source-fidelity-not-improved',
+      baselineTotal,
+      candidateTotal,
+      baselineSourceFidelityTotal,
+      candidateSourceFidelityTotal,
+    })
+  }
+  if (
+    plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+    && pairedSourceFidelityRegression
+  ) {
+    return prepareResultRecord(plan, {
+      objectiveSetDigest,
+      blindMapDigest,
+      evaluatorSetDigest,
+      mechanismVerdict: 'rejected',
+      reasonCode: 'paired-source-fidelity-regression',
+      baselineTotal,
+      candidateTotal,
+      baselineSourceFidelityTotal,
+      candidateSourceFidelityTotal,
     })
   }
   return prepareResultRecord(plan, {
@@ -1693,6 +2139,8 @@ export function prepareControlledSkillEvaluationResult(
     reasonCode: 'all-gates-passed',
     baselineTotal,
     candidateTotal,
+    baselineSourceFidelityTotal,
+    candidateSourceFidelityTotal,
   })
 }
 
@@ -1700,6 +2148,7 @@ export function parseControlledSkillEvaluationResult(
   value: unknown,
 ): ControlledSkillEvaluationResult {
   if (!isRecord(value)) throw new TypeError('controlled evaluation result must be an object')
+  const isV3 = value.schemaVersion === 'tianwen.controlled-skill-evaluation-result.v3'
   exactKeys(value, [
     'schemaVersion',
     'evaluationId',
@@ -1714,9 +2163,13 @@ export function parseControlledSkillEvaluationResult(
     'reasonCode',
     'baselineTotal',
     'candidateTotal',
+    ...(isV3
+      ? ['baselineSourceFidelityTotal', 'candidateSourceFidelityTotal']
+      : []),
   ])
   if (
     value.schemaVersion !== 'tianwen.controlled-skill-evaluation-result.v2'
+    && !isV3
     || typeof value.evaluationId !== 'string'
     || !EVALUATION_ID.test(value.evaluationId)
     || (value.mechanismVerdict !== 'pass'
@@ -1740,6 +2193,8 @@ export function parseControlledSkillEvaluationResult(
       'score-not-submitted',
       'candidate-subjective-total-lower',
       'candidate-dimension-regression',
+      'original-source-fidelity-not-improved',
+      'paired-source-fidelity-regression',
       'all-gates-passed',
     ].includes(value.reasonCode as string)
   ) {
@@ -1754,19 +2209,42 @@ export function parseControlledSkillEvaluationResult(
   if ((baselineTotal === null) !== (candidateTotal === null)) {
     throw new TypeError('controlled evaluation result totals must both be present or absent')
   }
-  return {
-    schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2',
+  const sourceTotal = (item: unknown, label: string) =>
+    item === null ? null : boundedInteger(item, label, 0, 20)
+  const baselineSourceFidelityTotal = isV3
+    ? sourceTotal(value.baselineSourceFidelityTotal, 'baselineSourceFidelityTotal')
+    : undefined
+  const candidateSourceFidelityTotal = isV3
+    ? sourceTotal(value.candidateSourceFidelityTotal, 'candidateSourceFidelityTotal')
+    : undefined
+  if (
+    isV3
+    && ((baselineSourceFidelityTotal === null) !==
+      (candidateSourceFidelityTotal === null))
+  ) throw new TypeError('controlled evaluation source-fidelity totals must both be present or absent')
+  const common: ControlledSkillEvaluationResultCommon = {
     evaluationId: value.evaluationId as ControlledSkillEvaluationId,
     planDigest: digest(value.planDigest, 'planDigest'),
     objectiveSetDigest: nullableDigest(value.objectiveSetDigest, 'objectiveSetDigest'),
     blindMapDigest: nullableDigest(value.blindMapDigest, 'blindMapDigest'),
     evaluatorSetDigest: nullableDigest(value.evaluatorSetDigest, 'evaluatorSetDigest'),
-    mechanismVerdict: value.mechanismVerdict,
-    evidenceClaim: value.evidenceClaim,
+    mechanismVerdict: value.mechanismVerdict as ControlledSkillEvaluationMechanismVerdict,
+    evidenceClaim: value.evidenceClaim as ControlledSkillEvaluationEvidenceClaim,
     naturalUserEvidence: 'not-claimed',
-    shadowEligibility: value.shadowEligibility,
+    shadowEligibility: value.shadowEligibility as ControlledSkillEvaluationShadowEligibility,
     reasonCode: value.reasonCode as ControlledSkillEvaluationResultReasonCode,
     baselineTotal,
     candidateTotal,
   }
+  return isV3
+    ? {
+        schemaVersion: 'tianwen.controlled-skill-evaluation-result.v3',
+        ...common,
+        baselineSourceFidelityTotal: baselineSourceFidelityTotal!,
+        candidateSourceFidelityTotal: candidateSourceFidelityTotal!,
+      }
+    : {
+        schemaVersion: 'tianwen.controlled-skill-evaluation-result.v2',
+        ...common,
+      }
 }
