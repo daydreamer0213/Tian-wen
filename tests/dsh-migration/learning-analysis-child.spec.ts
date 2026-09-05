@@ -992,12 +992,18 @@ describe('native explicit-correction analysis child', () => {
     {
       name: 'a new no-case preliminary report',
       submission: noCase(),
-      expectedText: "Tianwen analysis verdict: no-case for a reusable Skill change. This does not establish whether the current answer is correct and does not block correcting the current answer from the user's feedback. No Skill changed.",
+      expectedText: 'Tianwen received and analyzed this feedback: no reusable Skill change was formed. This learning process did not rewrite the current answer, does not judge whether it is correct, and is not a business-evidence verdict. No Skill changed; no user approval or repeat-feedback step is pending. Do not ask the user to submit this feedback again. The user may still independently request an edit in ordinary chat.',
     },
     {
       name: 'a new insufficient-evidence preliminary report',
       submission: insufficientEvidence(),
-      expectedText: "Tianwen analysis verdict: insufficient-evidence for a reusable Skill change. This does not establish whether the current answer is correct and does not block correcting the current answer from the user's feedback. No Skill changed.",
+      expectedText: 'Tianwen received and analyzed this feedback: evidence was insufficient for a reusable Skill change. This learning process did not rewrite the current answer, does not judge whether it is correct, and is not a business-evidence verdict. No Skill changed; no user approval or repeat-feedback step is pending. Do not ask the user to submit this feedback again. The user may still independently request an edit in ordinary chat.',
+    },
+    {
+      name: 'a new Outcome no-case preliminary report',
+      submission: noCase(),
+      statusPatch: { source: 'outcome' as const },
+      expectedText: 'Tianwen completed this Outcome learning analysis: no reusable Skill change was formed. This learning process did not rewrite the current answer, does not judge whether it is correct, and is not a business-evidence verdict. No Skill changed; no user approval or repeat-input step is pending. The user may still independently request an edit in ordinary chat.',
     },
     {
       name: 'a new skill-change report',
@@ -1011,10 +1017,17 @@ describe('native explicit-correction analysis child', () => {
         legacyState: state,
         expectedText: `Tianwen analysis verdict: ${verdict}. Next governed stage: ${verdict === 'no-case' ? 'stopped-no-case' : 'stopped-insufficient-evidence'}.`,
       }))),
-  ])('installs the exact submission tool for a cold child with %s', async ({ submission, expectedText, legacyState }) => {
+    ...(['no-case', 'insufficient-evidence'] as const).flatMap(verdict =>
+      (['pending', 'delivered'] as const).map(state => ({
+        name: `a ${state} durable Task-1 ${verdict} report`,
+        submission: verdict === 'no-case' ? noCase() : insufficientEvidence(),
+        legacyState: state,
+        expectedText: `Tianwen analysis verdict: ${verdict} for a reusable Skill change. This does not establish whether the current answer is correct and does not block correcting the current answer from the user's feedback. No Skill changed.`,
+      }))),
+  ])('installs the exact submission tool for a cold child with %s', async ({ submission, expectedText, legacyState, statusPatch }) => {
     let setup: ((ctx: unknown) => () => void) | undefined
     let definition: ToolDefinition | undefined
-    const running = status({ phase: 'running' })
+    const running = status({ phase: 'running', ...statusPatch })
     const recordLearningAnalysisSubmission = vi.fn(input => ({
       ...running,
       phase: 'running',
@@ -1053,6 +1066,7 @@ describe('native explicit-correction analysis child', () => {
         getLearningAnalysisByChildSessionId: vi.fn(() => running),
         getLearningAnalysis: vi.fn(() => running),
         getLearningAnalysisConsent: vi.fn(() => ({ enabled: true })),
+        hasLearningAnalysisActiveSupport: vi.fn(() => true),
         getLearningIntakeStatus: vi.fn(() => ({
           state: 'active', feedbackVersion: 'feedback-v1',
           analysisConsentRevision: 1, rating: 'negative', ticketId,
@@ -1098,7 +1112,7 @@ describe('native explicit-correction analysis child', () => {
         presentAs: vi.fn(() => () => undefined),
         guard: vi.fn(() => () => undefined),
         register: vi.fn(tool => {
-          definition = tool
+          if (tool.name === 'submit_tianwen_analysis') definition = tool
           return () => undefined
         }),
         schemas: vi.fn(() => definition === undefined ? [] : [definition]),

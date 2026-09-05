@@ -524,8 +524,8 @@ function unavailableExecutor(): never { throw new Error('controlled learning-loo
 
 function terminalReportText(status: LearningLoopPhaseStatus): string {
   switch (status.phase) {
-    case 'no-case': return 'Tianwen 分析结论：未形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'
-    case 'insufficient-evidence': return 'Tianwen 分析结论：证据不足以形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'
+    case 'no-case': return `${status.source === 'outcome' ? 'Tianwen 已完成这次 Outcome 学习分析：未形成可复用的 Skill 变更。本次学习过程未改写当前回答，不判断它是否正确，也不是业务证据结论。未改变任何 Skill；没有待用户批准或重复输入的步骤。' : 'Tianwen 已接收并分析这条反馈：未形成可复用的 Skill 变更。本次学习过程未改写当前回答，不判断它是否正确，也不是业务证据结论。未改变任何 Skill；没有待用户批准或重复提交反馈的步骤。请勿要求用户再次提交这条反馈。'}用户仍可在普通对话中独立请求修改当前回答。`
+    case 'insufficient-evidence': return `${status.source === 'outcome' ? 'Tianwen 已完成这次 Outcome 学习分析：证据不足以形成可复用的 Skill 变更。本次学习过程未改写当前回答，不判断它是否正确，也不是业务证据结论。未改变任何 Skill；没有待用户批准或重复输入的步骤。' : 'Tianwen 已接收并分析这条反馈：证据不足以形成可复用的 Skill 变更。本次学习过程未改写当前回答，不判断它是否正确，也不是业务证据结论。未改变任何 Skill；没有待用户批准或重复提交反馈的步骤。请勿要求用户再次提交这条反馈。'}用户仍可在普通对话中独立请求修改当前回答。`
     case 'protocol-unavailable': return 'Tianwen 分析结论：受控评测协议不可用，未改变任何 Skill。'
     case 'candidate-rejected': return status.shadowId === undefined
       ? 'Tianwen 分析结论：候选 Skill 未通过评估，未改变未来 Run。'
@@ -549,12 +549,19 @@ export function learningLoopTerminalReport(status: LearningLoopPhaseStatus): {
     : status.phase === 'insufficient-evidence'
       ? 'Tianwen 分析结论：证据不足，未改变任何 Skill。'
       : undefined
+  const taskOneText = status.phase === 'no-case'
+    ? 'Tianwen 分析结论：未形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'
+    : status.phase === 'insufficient-evidence'
+      ? 'Tianwen 分析结论：证据不足以形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'
+      : undefined
   // Resume an already-durable delivery with its exact text and identity.
   const text = legacyText !== undefined
     && status.terminalReportDelivery?.reportDigest === sha256({ kind: 'terminal-governed-outcome', text: legacyText })
     ? legacyText : status.phase === 'candidate-rejected' && status.shadowId === undefined
     && status.terminalReportDelivery?.reportDigest === sha256({ kind: 'terminal-governed-outcome', text: legacyRejection })
-    ? legacyRejection : terminalReportText(status)
+    ? legacyRejection : taskOneText !== undefined
+    && status.terminalReportDelivery?.reportDigest === sha256({ kind: 'terminal-governed-outcome', text: taskOneText })
+      ? taskOneText : terminalReportText(status)
   return {
     text,
     digest: sha256({ kind: 'terminal-governed-outcome', text }),

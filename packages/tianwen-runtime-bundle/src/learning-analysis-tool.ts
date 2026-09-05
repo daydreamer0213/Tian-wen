@@ -200,11 +200,18 @@ function reportContent(submission: LearningAnalysisSubmission, status: LearningA
     type: 'text' as const,
     text: `Tianwen analysis verdict: ${submission.verdict}. Next governed stage: ${stage}.`,
   }]
-  // Preserve the exact content of an already-durable delivery across upgrades.
-  if (status.reportDelivery?.reportDigest === sha256(legacy)) return legacy
-  if (submission.verdict !== 'skill-change') return [{
+  const taskOne = [{
     type: 'text' as const,
     text: `Tianwen analysis verdict: ${submission.verdict} for a reusable Skill change. This does not establish whether the current answer is correct and does not block correcting the current answer from the user's feedback. No Skill changed.`,
+  }]
+  // Preserve the exact content of an already-durable delivery across upgrades.
+  if (status.reportDelivery?.reportDigest === sha256(legacy)) return legacy
+  if (status.reportDelivery?.reportDigest === sha256(taskOne)) return taskOne
+  if (submission.verdict !== 'skill-change') return [{
+    type: 'text' as const,
+    text: status.source === 'outcome'
+      ? `Tianwen completed this Outcome learning analysis: ${submission.verdict === 'no-case' ? 'no reusable Skill change was formed' : 'evidence was insufficient for a reusable Skill change'}. This learning process did not rewrite the current answer, does not judge whether it is correct, and is not a business-evidence verdict. No Skill changed; no user approval or repeat-input step is pending. The user may still independently request an edit in ordinary chat.`
+      : `Tianwen received and analyzed this feedback: ${submission.verdict === 'no-case' ? 'no reusable Skill change was formed' : 'evidence was insufficient for a reusable Skill change'}. This learning process did not rewrite the current answer, does not judge whether it is correct, and is not a business-evidence verdict. No Skill changed; no user approval or repeat-feedback step is pending. Do not ask the user to submit this feedback again. The user may still independently request an edit in ordinary chat.`,
   }]
   return [{
     type: 'text' as const,

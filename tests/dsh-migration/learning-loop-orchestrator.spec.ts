@@ -143,9 +143,9 @@ describe('durable learning-loop phase table', () => {
   })
 
   it.each([
-    ['no-case', 'Tianwen 分析结论：未形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'],
-    ['insufficient-evidence', 'Tianwen 分析结论：证据不足以形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'],
-  ] as const)('makes a new %s terminal report distinguish reusable-Skill evidence from the current answer', (phase, text) => {
+    ['no-case', 'Tianwen 已接收并分析这条反馈：未形成可复用的 Skill 变更。本次学习过程未改写当前回答，不判断它是否正确，也不是业务证据结论。未改变任何 Skill；没有待用户批准或重复提交反馈的步骤。请勿要求用户再次提交这条反馈。用户仍可在普通对话中独立请求修改当前回答。'],
+    ['insufficient-evidence', 'Tianwen 已接收并分析这条反馈：证据不足以形成可复用的 Skill 变更。本次学习过程未改写当前回答，不判断它是否正确，也不是业务证据结论。未改变任何 Skill；没有待用户批准或重复提交反馈的步骤。请勿要求用户再次提交这条反馈。用户仍可在普通对话中独立请求修改当前回答。'],
+  ] as const)('makes a new explicit-feedback %s terminal report complete without requesting duplicate input', (phase, text) => {
     const report = learningLoopTerminalReport({ ...base, phase })
     expect(report).toEqual({
       text,
@@ -154,11 +154,25 @@ describe('durable learning-loop phase table', () => {
   })
 
   it.each([
+    ['no-case', 'Tianwen 已完成这次 Outcome 学习分析：未形成可复用的 Skill 变更。本次学习过程未改写当前回答，不判断它是否正确，也不是业务证据结论。未改变任何 Skill；没有待用户批准或重复输入的步骤。用户仍可在普通对话中独立请求修改当前回答。'],
+    ['insufficient-evidence', 'Tianwen 已完成这次 Outcome 学习分析：证据不足以形成可复用的 Skill 变更。本次学习过程未改写当前回答，不判断它是否正确，也不是业务证据结论。未改变任何 Skill；没有待用户批准或重复输入的步骤。用户仍可在普通对话中独立请求修改当前回答。'],
+  ] as const)('does not claim a user submitted feedback for a new Outcome %s terminal report', (phase, text) => {
+    const report = learningLoopTerminalReport({ ...base, source: 'outcome', phase })
+    expect(report).toEqual({
+      text,
+      digest: sha256({ kind: 'terminal-governed-outcome', text }),
+    })
+    expect(report.text).not.toContain('接收并分析这条反馈')
+  })
+
+  it.each([
     ['no-case', 'Tianwen 分析结论：未形成可学习案例，未改变任何 Skill。'],
     ['insufficient-evidence', 'Tianwen 分析结论：证据不足，未改变任何 Skill。'],
+    ['no-case', 'Tianwen 分析结论：未形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'],
+    ['insufficient-evidence', 'Tianwen 分析结论：证据不足以形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'],
   ].flatMap(([phase, text]) =>
     (['pending', 'delivered'] as const).map(state => [phase, state, text] as const),
-  ))('preserves a %s durable legacy terminal report when %s', (phase, state, text) => {
+  ))('preserves a %s durable pre-Task-1 or Task-1 terminal report when %s', (phase, state, text) => {
     const reportDigest = sha256({ kind: 'terminal-governed-outcome', text })
     expect(learningLoopTerminalReport({
       ...base, phase, terminalReportDelivery: { state, reportDigest },
@@ -168,9 +182,11 @@ describe('durable learning-loop phase table', () => {
   it.each([
     ['no-case', 'Tianwen 分析结论：未形成可学习案例，未改变任何 Skill。'],
     ['insufficient-evidence', 'Tianwen 分析结论：证据不足，未改变任何 Skill。'],
+    ['no-case', 'Tianwen 分析结论：未形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'],
+    ['insufficient-evidence', 'Tianwen 分析结论：证据不足以形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'],
   ].flatMap(([phase, text]) =>
     (['pending', 'delivered'] as const).map(state => [phase, state, text] as const),
-  ))('replays a %s legacy terminal report through the executor when %s', async (phase, state, text) => {
+  ))('replays a %s durable pre-Task-1 or Task-1 terminal report through the executor when %s', async (phase, state, text) => {
     const reportDigest = sha256({ kind: 'terminal-governed-outcome', text })
     const recordIntent = vi.fn(binding => ({
       terminalReportDelivery: { state, reportDigest: binding.reportDigest },
