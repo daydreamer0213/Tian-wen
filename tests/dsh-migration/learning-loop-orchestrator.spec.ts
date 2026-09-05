@@ -370,6 +370,8 @@ describe('durable learning-loop phase table', () => {
       expect(promote).not.toHaveBeenCalled()
       const diagnostic = diagnostics.join(' ')
       expect(diagnostic).toContain(expectedCode)
+      expect(diagnostic).toContain('candidate-ready')
+      expect(diagnostic).toContain(base.analysisId)
       expect(diagnostic).not.toContain('secret-like')
     } finally {
       await ctx.fiber.dispose()

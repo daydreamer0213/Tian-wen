@@ -898,7 +898,7 @@ export class TianwenLearningLoopService extends Service {
         })
         try {
           this.ctx.logger('tianwen-learning').warn(
-            `Learning loop failure diagnostic: ${safePreflightCode(error)}`,
+            `Learning loop failure diagnostic: phase=${current.phase} analysisId=${current.analysisId} code=${safePreflightCode(error)}`,
           )
         } catch {
           // Diagnostics are best-effort; the durable failure is authoritative.
