@@ -10,7 +10,7 @@ import {
   isAppendSurfaceEvent,
   type SessionEvent,
 } from '@deepseek-ai/dsh-session'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
 import type { SkillRegistry } from '@deepseek-ai/dsh-skill'
 import {
   parseLearningSkillAdmission,
@@ -90,6 +90,18 @@ function statusOf(
         revision: consent.revision,
         recordedAt: consent.recordedAt,
       }
+}
+
+function statusSnapshot(
+  consent: ReturnType<Context['tianwenEvolution']['getLearningAnalysisConsent']>,
+): JsonValue {
+  const status = statusOf(consent)
+  return {
+    policyVersion: status.policyVersion,
+    enabled: status.enabled,
+    revision: status.revision,
+    ...(status.recordedAt === undefined ? {} : { recordedAt: status.recordedAt }),
+  }
 }
 
 function noticeBinding(mainSessionId: string): LearningConsentNoticeBinding {
@@ -472,9 +484,9 @@ export class TianwenLearningConsentAgentService extends Service {
 
   private async learningStatus(agent: Agent, signal?: AbortSignal) {
     signal?.throwIfAborted()
-    const snapshot = {
+    const snapshot: Record<string, JsonValue> = {
       guidance: LEARNING_STATUS_GUIDANCE,
-      consent: statusOf(this.ctx.tianwenEvolution.getLearningAnalysisConsent()),
+      consent: statusSnapshot(this.ctx.tianwenEvolution.getLearningAnalysisConsent()),
     }
     const runs = this.ctx.tianwenEvolution.listRunSkillManifests()
       .filter(manifest => this.ctx.tianwenEvolution.getRunBinding(manifest.runId) !== undefined)
