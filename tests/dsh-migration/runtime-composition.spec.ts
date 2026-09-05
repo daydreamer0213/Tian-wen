@@ -227,7 +227,7 @@ afterEach(() => {
 })
 
 describe('@tianwen/runtime', () => {
-  it('preserves an ordinary DSH flow while adding only the main-chat consent control', async () => {
+  it('preserves an ordinary DSH flow while adding only the main-chat learning controls', async () => {
     const disabled = await runOrdinaryDshSession(false)
     const enabled = await runOrdinaryDshSession(true)
 
@@ -238,7 +238,8 @@ describe('@tianwen/runtime', () => {
       tools: Array<{ readonly name: string }>
     }>) {
       request.tools = request.tools.filter(tool =>
-        tool.name !== 'tianwen_learning_consent')
+        tool.name !== 'tianwen_learning_consent'
+        && tool.name !== 'tianwen_learning_status')
     }
     expect(ordinaryEnabled).toEqual(disabled.behavior)
     expect(enabled.behavior).toMatchObject({
@@ -286,6 +287,11 @@ describe('@tianwen/runtime', () => {
           },
           required: ['action'],
         },
+      })
+      expect(request.tools).toContainEqual({
+        name: 'tianwen_learning_status',
+        description: expect.stringContaining('current learning history'),
+        parameters: { type: 'object', properties: {} },
       })
     }
     expect(enabled.behavior.assistantOutput).toHaveLength(2)

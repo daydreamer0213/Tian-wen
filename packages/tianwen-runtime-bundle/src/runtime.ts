@@ -470,7 +470,9 @@ export async function apply(
   await applyCore(ctx, config.evolutionRoot === undefined ? {} : { evolutionRoot: config.evolutionRoot })
   ctx.plugin(controlledSessionArchive)
   ctx.plugin(TianwenResearchSummaryAdmissionService)
-  ctx.plugin(TianwenLearningConsentAgentService)
+  ctx.plugin(TianwenLearningConsentAgentService, config.learningSkillSources === undefined
+    ? {}
+    : { learningSkillSources: config.learningSkillSources })
   ctx.plugin(TianwenMessageFeedbackBridgeService)
   ctx.plugin(TianwenLearningExplorationService)
   ctx.plugin(TianwenLearningAnalysisChildService, config)

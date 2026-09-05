@@ -96,6 +96,20 @@ async function executeConsent(
   })
 }
 
+async function executeLearningStatus(
+  ctx: Awaited<ReturnType<typeof mountConsentRuntime>>['ctx'],
+  agent: Agent | undefined,
+  signal = new AbortController().signal,
+) {
+  return ctx.tools.execute({
+    callId: CallId(`learning-status-${randomUUID()}`),
+    name: 'tianwen_learning_status',
+    arguments: {},
+    ...(agent === undefined ? {} : { agent }),
+    signal,
+  })
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
   for (const root of roots.splice(0)) {
@@ -104,6 +118,42 @@ afterEach(() => {
 })
 
 describe('Tianwen main-chat learning consent tool', () => {
+  it('reports bounded read-only learning status only for a main Session', async () => {
+    const mounted = await mountConsentRuntime('learning-status')
+    const { main, child } = await createMainAndChild(mounted.ctx)
+    try {
+      const mainSchema = mounted.ctx.tools.schemas(main.agent).find(tool =>
+        tool.name === 'tianwen_learning_status')
+      expect(mainSchema).toMatchObject({
+        name: 'tianwen_learning_status',
+        parameters: { type: 'object', properties: {} },
+        description: expect.stringContaining('current learning history'),
+      })
+      expect(mounted.ctx.tools.schemas(child.agent).some(tool =>
+        tool.name === 'tianwen_learning_status')).toBe(false)
+      const beforeConsent = mounted.ctx.tianwenEvolution.getLearningAnalysisConsent()
+      const beforeRequests = mounted.adapter.requests.length
+      await expect(executeLearningStatus(mounted.ctx, child.agent)).resolves
+        .toMatchObject({ isError: true })
+      await expect(executeLearningStatus(mounted.ctx, main.agent)).resolves
+        .toMatchObject({
+          isError: false,
+          value: {
+            currentSession: { hasFrozenGovernedBinding: false },
+            history: { skillBoundRuns: 0, recordedOutcomes: 0, analyses: 0 },
+            nativeSkills: { available: false, skills: [] },
+            learningSources: { configured: 0, eligible: 0, skills: [], available: false },
+          },
+        })
+      expect(mounted.ctx.tianwenEvolution.getLearningAnalysisConsent()).toBe(beforeConsent)
+      expect(mounted.adapter.requests).toHaveLength(beforeRequests)
+    } finally {
+      await child.dispose()
+      await main.dispose()
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
   it('installs the strict action-only tool for the main Agent and not its subagent', async () => {
     const mounted = await mountConsentRuntime('installation')
     const { main, child } = await createMainAndChild(mounted.ctx)
