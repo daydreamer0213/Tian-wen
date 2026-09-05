@@ -115,6 +115,27 @@ describe('explicit correction controlled protocol', () => {
     expect(tasks.every(task => !task.input.includes(holdout.researchPacket))).toBe(true)
     expect(input.protocol.tasks.every(task =>
       task.inputDigest !== input.protocol.sourceFidelity.holdout.task.inputDigest)).toBe(true)
+    expect({
+      taskId: holdout.taskId,
+      goalDigest: sha256(holdout.goal),
+      inputDigest: sha256(holdout.input),
+      workspaceSnapshotDigest: sha256(holdout.workspaceSnapshot),
+      toolSchemaDigest: sha256('tools'),
+      authorizationDigest: sha256(holdout.authorization),
+      verifierContractDigest: sha256(holdout.verifierContract),
+      stopConditionDigest: sha256(holdout.stopCondition),
+      evaluatorMaterialContractDigest: sha256(holdout.evaluatorMaterialContract),
+      acceptanceContract: holdout.acceptanceContract,
+      acceptanceSubjectDigest: sha256(holdout.acceptanceSubject),
+      allowedTools: holdout.allowedTools,
+      stopContract: holdout.stopContract,
+    }).toEqual(input.protocol.sourceFidelity.holdout.task)
+    expect({
+      rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+      configurationDigest: sha256(holdout.reviewConfiguration),
+      materialContractDigest: sha256(holdout.reviewMaterialContract),
+      evidenceContractDigest: sha256(holdout.reviewEvidenceContract),
+    }).toEqual(input.protocol.sourceFidelity.holdout.review)
     const source = input.protocol.sourceFidelity.source
     const ticket = {
       ticketId: input.ticketId, problemFingerprint: sha256('problem'),
@@ -157,6 +178,9 @@ describe('explicit correction controlled protocol', () => {
     expect(tasks[0]!.packet.source).toContain('Twelve pilot teams reduced triage time by 18%.')
     expect(input.protocol.rubricDigest).toBe(CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST)
     expect(input.protocol).not.toHaveProperty('sourceFidelity')
+    expect(legacy.buildShadowTasks({
+      root: fixtureRoot(), materializeWorkspace, sessionNamespace: 'v2-fixture',
+    })[0]!.taskId).toBe('shadow-task:research-summary-unseen-holdout')
   })
 
   it('rejects candidate or analyst content at the v3 builder boundary', () => {

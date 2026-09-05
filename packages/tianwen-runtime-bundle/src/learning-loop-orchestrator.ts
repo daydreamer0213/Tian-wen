@@ -381,17 +381,24 @@ export function createExplicitCorrectionLearningLoopExecutor(
       built.protocol.freezeExecution({
         callConfig: environment.callConfig, retryPolicy: environment.retryPolicy, toolSchemas: environment.toolSchemas,
       })
-      context.ctx.tianwenEvolution.freezeControlledSkillEvalProtocol(
-        built.protocol.buildProtocolInput({
-          ticketId: context.status.ticketId, sha256,
-          rubricDigest: built.protocolSchemaVersion
-            === 'tianwen.controlled-skill-eval-protocol.v3'
-            ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
-            : environment.rubricDigest,
-          callConfig: environment.callConfig, retryPolicy: environment.retryPolicy,
-          toolSchemaDigest: sha256(environment.toolSchemas), tasks: built.tasks,
-        }) as never,
-      )
+      const protocolInput = built.protocol.buildProtocolInput({
+        ticketId: context.status.ticketId, sha256,
+        rubricDigest: built.protocolSchemaVersion
+          === 'tianwen.controlled-skill-eval-protocol.v3'
+          ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+          : environment.rubricDigest,
+        callConfig: environment.callConfig, retryPolicy: environment.retryPolicy,
+        toolSchemaDigest: sha256(environment.toolSchemas), tasks: built.tasks,
+      })
+      if (built.record !== undefined) {
+        if (sha256(protocolInput) !== sha256({
+          ticketId: built.record.ticketId,
+          evidencePurpose: built.record.evidencePurpose,
+          protocol: built.record.protocol,
+        })) throw new Error('retained controlled protocol reconstruction drifted')
+        return { provenance: built.record.provenance }
+      }
+      context.ctx.tianwenEvolution.freezeControlledSkillEvalProtocol(protocolInput as never)
       return { provenance: 'pre-candidate' }
     },
     async materializeCandidate(context) {

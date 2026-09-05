@@ -492,7 +492,9 @@ function buildResearchSummaryControlledProtocol(
       const expectedWorkspaceSnapshot = workspaceSnapshot(content)
       input.materializeWorkspace(workspaceRoot, content)
       return deepFreeze([{
-        taskId: 'shadow-task:research-summary-unseen-holdout' as const,
+        taskId: sourceFidelity === undefined
+          ? 'shadow-task:research-summary-unseen-holdout' as const
+          : 'shadow-task:research-summary-source-fidelity-holdout' as const,
         goal: 'Submit a faithful summary of one unseen research packet.',
         input: sourceFidelity === undefined
           ? `Use the available Skill and submit exactly one isolated Shadow summary.\n\n${holdoutPacket.source}`

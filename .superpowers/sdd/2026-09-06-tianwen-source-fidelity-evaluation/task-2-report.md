@@ -205,3 +205,72 @@ The other listed Runtime bundle modules were not changed because their existing 
 ## Issues or concerns
 
 No known Task 2 correctness blocker remains. The genuine probe proves exact source recovery and performance only; Task 3 runtime execution and a future genuine v3 evaluation are deliberately not claimed here.
+
+## Fix round 1 — independent review
+
+### Findings addressed
+
+- Retained pre-Candidate protocols now rebuild the complete freeze input with the current task, material, rubric and execution configuration and compare it to the exact retained input. An exact match reuses the retained record and performs no ledger freeze. Any drift fails before another protocol-history effect.
+- The executable v3 holdout now uses the exact frozen ID `shadow-task:research-summary-source-fidelity-holdout`. Legacy v2 continues returning `shadow-task:research-summary-unseen-holdout` unchanged.
+- The v3 protocol regression hashes every returned holdout task/review material and asserts equality with its frozen descriptor, including task ID, goal/input/workspace/tool schema, authorization, verifier, stop condition, evaluator material, acceptance subject, review configuration/material/evidence and policy rubric.
+
+### TDD RED
+
+Command:
+
+```text
+D:\hermes\node\node.exe D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs exec vitest run tests/dsh-migration/explicit-correction-protocol.spec.ts tests/dsh-migration/learning-loop-orchestrator.spec.ts
+```
+
+Relevant output before the fix:
+
+```text
+Test Files 2 failed (2)
+Tests 3 failed | 81 passed
+v3 returned shadow-task:research-summary-unseen-holdout instead of the frozen source-fidelity ID
+retained exact v2 appended another freeze input
+retained v2 with changed model resolved instead of rejecting drift
+```
+
+### Focused GREEN
+
+The same command after the minimal production changes produced:
+
+```text
+Test Files 2 passed (2)
+Tests 84 passed (84)
+Duration 3.54s
+```
+
+The existing real-ledger executor integration was also rerun:
+
+```text
+D:\hermes\node\node.exe D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs exec vitest run tests/dsh-migration/learning-loop-controlled-executor.integration.spec.ts
+
+Test Files 1 passed (1)
+Tests 12 passed (12)
+Duration 13.07s
+```
+
+### Fix self-review
+
+- The retained comparison uses the already reconstructed complete freeze input and the existing retained record; it adds no state, version, schema, or configuration mechanism.
+- Exact retained recovery returns the retained provenance and does not call `freezeControlledSkillEvalProtocol`. New protocols still take the existing freeze path.
+- Only the v3 runtime holdout ID changes; v2 serialization and executable ID remain covered unchanged.
+- No Task 3 execution, model, deployment, Profile, old procurement data, root documentation, or untracked diagnostic was changed.
+
+### Final fix verification
+
+```text
+D:\hermes\node\node.exe D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs exec vitest run tests/dsh-migration/explicit-correction-protocol.spec.ts tests/dsh-migration/learning-loop-orchestrator.spec.ts tests/dsh-migration/learning-loop-controlled-executor.integration.spec.ts
+Test Files 3 passed (3); Tests 96 passed (96); Duration 15.42s
+
+D:\hermes\node\node.exe D:\DevData\corepack-home\v1\pnpm\11.20.0\bin\pnpm.mjs exec tsc -b packages/tianwen-desktop-host/tsconfig.json packages/tianwen-dsh-compat/tsconfig.json packages/tianwen-dsh-probe-bundle/tsconfig.json packages/tianwen-evaluator-python/tsconfig.json packages/tianwen-evidence/tsconfig.json packages/tianwen-evolution/tsconfig.json packages/tianwen-runtime-bundle/tsconfig.json packages/tianwen-runtime/tsconfig.json --pretty false --force
+exit 0, no diagnostics
+
+D:\hermes\node\node.exe scripts/typecheck-packages.mjs
+exit 0, no diagnostics
+
+git diff --check
+exit 0, no output
+```

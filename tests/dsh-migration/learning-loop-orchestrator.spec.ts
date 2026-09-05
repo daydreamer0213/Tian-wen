@@ -34,6 +34,7 @@ function controlledExecutorFixture(input: {
   readonly status: Record<string, unknown>
   readonly records?: readonly Record<string, unknown>[]
   readonly scopeKey?: string
+  readonly environmentModel?: string
 }) {
   const root = mkdtempSync(join('D:/DevData/tianwen-dsh-probe', 'task-2-orchestrator-'))
   const frozen: unknown[] = []
@@ -63,7 +64,7 @@ function controlledExecutorFixture(input: {
       writeFileSync(join(workspaceRoot, 'brief.txt'), content, 'utf8')
     },
     environment: async () => ({
-      callConfig: { provider: 'fixture', model: 'fixture' },
+      callConfig: { provider: 'fixture', model: input.environmentModel ?? 'fixture' },
       retryPolicy: {}, toolSchemas: [{ name: 'skill' }, { name: 'submit_research_summary' }],
       rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
     }),
@@ -74,6 +75,37 @@ function controlledExecutorFixture(input: {
     run: () => executor.freezeProtocol({ ctx: ctx as never, status: input.status as never }),
     dispose: () => rmSync(root, { recursive: true, force: true }),
   }
+}
+
+function retainedV2ProtocolRecord() {
+  const legacy = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)!
+  const root = mkdtempSync(join('D:/DevData/tianwen-dsh-probe', 'task-2-retained-v2-'))
+  const tasks = legacy.buildEvaluationTasks({
+    root,
+    materializeWorkspace(workspaceRoot, content) {
+      mkdirSync(workspaceRoot, { recursive: true })
+      writeFileSync(join(workspaceRoot, 'brief.txt'), content, 'utf8')
+    },
+    sessionNamespace: `analysis:${'a'.repeat(64)}`,
+  })
+  const frozen = legacy.buildProtocolInput({
+    ticketId: `ticket:${'b'.repeat(64)}`, sha256,
+    rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+    callConfig: { provider: 'fixture', model: 'fixture' }, retryPolicy: {},
+    toolSchemaDigest: sha256([{ name: 'skill' }, { name: 'submit_research_summary' }]),
+    tasks,
+  })
+  rmSync(root, { recursive: true, force: true })
+  return {
+    schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+    protocolId: `eval-protocol:${'c'.repeat(64)}`,
+    ticketId: `ticket:${'b'.repeat(64)}`,
+    scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+    provenance: 'pre-candidate',
+    evidencePurpose: frozen.evidencePurpose,
+    evidenceLabels: [],
+    protocol: frozen.protocol,
+  } as const
 }
 
 describe('learning-loop orchestrator', () => {
@@ -165,24 +197,6 @@ describe('learning-loop orchestrator', () => {
   })
 
   it('uses the retained v2 protocol in the pre-Candidate crash window', async () => {
-    const legacy = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)!
-    const root = mkdtempSync(join('D:/DevData/tianwen-dsh-probe', 'task-2-retained-v2-'))
-    const tasks = legacy.buildEvaluationTasks({
-      root,
-      materializeWorkspace(workspaceRoot, content) {
-        mkdirSync(workspaceRoot, { recursive: true })
-        writeFileSync(join(workspaceRoot, 'brief.txt'), content, 'utf8')
-      },
-      sessionNamespace: `analysis:${'a'.repeat(64)}`,
-    })
-    const frozen = legacy.buildProtocolInput({
-      ticketId: `ticket:${'b'.repeat(64)}`, sha256,
-      rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
-      callConfig: { provider: 'fixture', model: 'fixture' }, retryPolicy: {},
-      toolSchemaDigest: sha256([{ name: 'skill' }, { name: 'submit_research_summary' }]),
-      tasks,
-    })
-    rmSync(root, { recursive: true, force: true })
     const recovery = vi.spyOn(sourceCases, 'recoverResearchSummarySourceCase')
       .mockRejectedValue(new Error('must not recover a new source'))
     recovery.mockClear()
@@ -193,17 +207,34 @@ describe('learning-loop orchestrator', () => {
         parentSessionId: 'main', childSessionId: 'child', phase: 'running',
         submission: { verdict: 'skill-change' }, submissionDigest: sha256('submission'),
       },
-      records: [{
-        schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
-        protocolId: `eval-protocol:${'c'.repeat(64)}`,
-        ticketId: `ticket:${'b'.repeat(64)}`,
-        protocol: frozen.protocol,
-      }],
+      records: [retainedV2ProtocolRecord()],
     })
     try {
-      await fixture.run()
+      await expect(fixture.run()).resolves.toEqual({ provenance: 'pre-candidate' })
       expect(recovery).not.toHaveBeenCalled()
-      expect((fixture.frozen[0] as any).protocol).not.toHaveProperty('sourceFidelity')
+      expect(fixture.frozen).toEqual([])
+    } finally {
+      recovery.mockRestore()
+      fixture.dispose()
+    }
+  })
+
+  it('refuses retained pre-Candidate v2 configuration drift without freezing new history', async () => {
+    const recovery = vi.spyOn(sourceCases, 'recoverResearchSummarySourceCase')
+    const fixture = controlledExecutorFixture({
+      environmentModel: 'drifted-model',
+      status: {
+        analysisId: `analysis:${'a'.repeat(64)}`, ticketId: `ticket:${'b'.repeat(64)}`,
+        sessionId: 'main', messageId: 'reply', feedbackVersion: 'v1', consentRevision: 1,
+        parentSessionId: 'main', childSessionId: 'child', phase: 'running',
+        submission: { verdict: 'skill-change' }, submissionDigest: sha256('submission'),
+      },
+      records: [retainedV2ProtocolRecord()],
+    })
+    try {
+      await expect(fixture.run()).rejects.toThrow(/drift/u)
+      expect(fixture.frozen).toEqual([])
+      expect(recovery).not.toHaveBeenCalled()
     } finally {
       recovery.mockRestore()
       fixture.dispose()
