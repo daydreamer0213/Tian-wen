@@ -339,3 +339,45 @@ The sole procurement evaluation retains its `17:03:18.850Z` terminal rejection,
 and isolated bundle bytes remain unchanged. No completed Candidate was rerun or
 regraded. The additional parent-resolution design is separately bounded and
 scheduled only after the three source-fidelity tasks.
+
+Task 2 is implemented at `f11bee5` and is in independent review. Its five focused
+suites passed 136 checks; the root type gate and a forced rebuild of all package
+types passed. New explicit feedback recovers its exact native source before
+freezing v3; Outcome and retained v2 remain legacy. Recovery also covers a v2
+protocol frozen before Candidate creation. Missing source interrupts the existing
+analysis without a new protocol/Candidate/model call, rather than attempting an
+invalid `protocol-unavailable` terminal write. The old demo receipt keeps its v1
+schema and maps the two new evaluation-only failure reasons at its adapter.
+
+A read-only compatibility check used the retained procurement Session, not a new
+evaluation. Native storage decoding expands its 1,303 stored event rows into
+19,291 events (3.82 MB). Initial repeated whole-prefix hashing consumed more than
+160 CPU seconds; only the diagnostic process was stopped. Incremental exact-array
+hashing then recovered the real source in 1.93 seconds total process time at
+`2026-09-05T19:16:51.981Z`, with a 20,000-appended-event regression also passing.
+The exact message/version/snapshot, 21-item packet, completed first turn and
+2,177-byte accepted canonical summary matched. Ledger and Session file hashes
+were unchanged, the old evaluation remained rejected, and no model was called.
+
+The audit's initial raw-row attempt was not a native Session projection: DSH packs
+streaming chunks and its public decoder must expand them. This does not change
+earlier model/final-answer/tool/turn evidence: those five event arrays are exactly
+identical before and after expansion in the retained procurement Session. Raw
+rows are insufficient only for reconstructing the full frozen Session digest.
+Task 3 native blind/holdout execution and new-policy real efficacy are still not
+proven by this source-compatibility check. No partial Runtime was deployed.
+
+Independent Task 2 review found two concrete contract gaps: retained pre-Candidate
+recovery did not compare the complete frozen environment before another freeze,
+and the new executable holdout task ID differed from its frozen descriptor. Both
+are being fixed with regressions before Task 3 can consume the interfaces. The
+source-compatibility probe and its preserved historical evidence remain valid;
+the task's implementation is not marked complete until the fix review passes.
+
+At `9bf66f4`, both findings are fixed: recovery compares the complete reconstructed
+input against the retained freeze and returns that record without another write;
+v3 holdout executable identity and all material digests match its descriptor.
+The covering gate passed 96 tests and both type checks. Independent scoped
+re-review marked both findings addressed with no new breakage. Task 2 is complete;
+Task 3 now owns native blind and holdout-review execution. No deployment or new
+real-model improvement is implied by this engineering checkpoint.

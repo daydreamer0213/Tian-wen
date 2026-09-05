@@ -101,6 +101,10 @@ authenticity remains Task 3's explicit responsibility; this is mechanism proof.
 - `tests/dsh-migration/explicit-correction-protocol.spec.ts`
 - `tests/dsh-migration/learning-loop-orchestrator.spec.ts`
 - `tests/dsh-migration/research-summary-admission.spec.ts`
+- `tests/dsh-migration/learning-loop-controlled-executor.integration.spec.ts`
+- Narrow transitive legacy-compatibility repair only:
+  `packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.ts` and its
+  existing `tests/dsh-migration/controlled-lifecycle-command.spec.ts` coverage.
 
 **Contract:**
 - Recover exactly one frozen source packet and accepted canonical submission
@@ -114,21 +118,45 @@ authenticity remains Task 3's explicit responsibility; this is mechanism proof.
 - For retained protocols, resolve the exact frozen legacy/new version first;
   scope-only selection of the latest builder is prohibited. Reconstruct the same
   task/material/config digests and reuse existing workspaces and Session IDs.
+  Include the pre-Candidate crash window with an already frozen legacy protocol;
+  absence of Candidate/evaluation IDs does not make that protocol new.
 - Select new source fidelity only for explicit-feedback analyses before their
   first freeze. New Outcome-origin analyses continue the legacy builder unchanged.
   Cover that route so a missing feedback target cannot disable Outcome learning.
 - Supply Task 1's policy/rubric/holdout-review fields through the existing executor
   seams; no new external setting/feature-flag matrix. Do not deploy before Task 3.
+- Keep the legacy one-lifecycle v1 receipt schema unchanged. Its stopping adapter
+  maps new v3-only evaluation rejection codes to existing `evaluation-failed`;
+  ordinary source-fidelity reporting retains the precise reasons. This closes a
+  transitive type mismatch exposed by Task 2, without adding a new demo path.
+- Missing/stale native source must stop before new formal effects through the
+  existing interrupted/failed path. Do not reinterpret it as the old domain
+  `protocol-unavailable` condition or weaken that ledger guard. Retain unsupported
+  scope behavior. Cover the exact-parent case with the real ledger, not only mocks.
+- Preserve existing native executor integration scenarios as explicitly retained
+  legacy-v2 fixtures; new v3 native evaluation/holdout integration is Task 3.
+- Source prefix recovery must process a normally appended long Session without
+  repeatedly serializing all preceding events. A retained genuine 19,291-event
+  Session reproduced excessive CPU time; preserve the exact existing JSON-array
+  digest and ambiguity checks with the native incremental hash operation.
 
-- [ ] RED: exact source changes original task; Candidate-text changes cannot change
+- [x] RED: exact source changes original task; Candidate-text changes cannot change
   tasks; target-turn mismatch/stale source fails; old v2 recovery still uses old
   packets/rubric after the new builder exists; holdout is absent from paired inputs.
-- [ ] Implement source recovery and deterministic version dispatch, with raw
+- [x] Implement source recovery and deterministic version dispatch, with raw
   content retained only in existing native/Runtime materials.
-- [ ] Cover missing source truthful interruption, no synthetic fallback, old
+- [x] Cover missing source truthful interruption, no synthetic fallback, old
   completed Candidate terminal behavior and fixed schema/order/digests.
-- [ ] Run owned focused suites, root typecheck and diff check; report exact TDD
+- [x] Run owned focused suites, root typecheck and diff check; report exact TDD
   evidence and new input/API contract; commit only owned files for task review.
+  Include a forced package type build so an incremental cache cannot hide the
+  changed evaluation-reason union in an unchanged legacy consumer.
+
+Completed at `9bf66f4` after `f11bee5`: 136 original focused checks and 96 covering
+fix checks, forced all-package/root typechecks and diff check passed. Independent
+review's retained-environment and holdout-identity findings were both addressed
+in one fix round; scoped re-review found no new breakage. The read-only genuine
+source recovery check preserves the old result but does not prove v3 efficacy.
 
 ## Task 3: Native blind/holdout semantic execution and complete route integration
 
@@ -142,6 +170,7 @@ authenticity remains Task 3's explicit responsibility; this is mechanism proof.
 - `tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts`
 - `tests/dsh-probe/controlled-skill-activation-runtime.spec.ts`
 - `tests/dsh-migration/learning-loop-orchestrator.spec.ts`
+- `tests/dsh-migration/learning-loop-controlled-executor.integration.spec.ts`
 
 **Contract:**
 - Honor policy-specific pre-blind gates in Runtime as well as Evolution. Provide
@@ -164,6 +193,8 @@ authenticity remains Task 3's explicit responsibility; this is mechanism proof.
 - [ ] Verify successful-path accounting is 14 Runs for new / 13 for old, no
   repeated completed work, no leakage of X/Y/patch/feedback into holdout reviewer,
   no fifth gate, and incomplete quality cannot produce Shadow readiness.
+  Add new-v3 native execution coverage alongside Task 2's retained-v2 integration
+  fixtures; do not reinterpret those legacy fixtures as proof of the new path.
 - [ ] Run covering runtime/domain/migration regressions, root typecheck, build,
   public-API guard and diff check. Include the previously deferred cheap
   research-tool-presence detail test when touching this preflight suite. Commit
