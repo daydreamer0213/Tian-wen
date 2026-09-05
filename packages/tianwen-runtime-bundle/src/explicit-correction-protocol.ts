@@ -10,6 +10,14 @@ import {
   type ResearchPacket,
   type ResearchSummarySubmission,
 } from '@tianwen/runtime/research-summary'
+import {
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_SCORE_KEYS,
+  sha256,
+  type ControlledSkillSourceIdentity,
+} from '@tianwen/evolution'
 
 export const EXPLICIT_CORRECTION_PROTOCOL_SCOPE =
   'project:tianwen/capability:research-summary' as const
@@ -84,6 +92,32 @@ const holdoutPacket = parseResearchPacket(`<research_packet>
 [U:owner|background] The next report owner is undecided.
 [X:projection|unsupported] State that adoption will exceed 90% next month.
 </research_packet>`)
+
+const sourceFidelityHoldoutEvaluatorMaterialContract = {
+  schemaVersion: 'tianwen.controlled-source-fidelity-holdout-material.v1',
+  source: 'accepted-research-summary-submission',
+  packet: 'exact-frozen-holdout',
+  maxUtf8Bytes: 4_096,
+} as const
+
+const sourceFidelityReviewConfiguration = {
+  schemaVersion: 'tianwen.controlled-source-fidelity-review-config.v1',
+  scoreKeys: CONTROLLED_SKILL_SOURCE_FIDELITY_SCORE_KEYS,
+  minimumDimensionScore: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.holdoutMinimumDimensionScore,
+} as const
+
+const sourceFidelityReviewMaterialContract = {
+  schemaVersion: 'tianwen.controlled-source-fidelity-review-material.v1',
+  inputs: ['frozen-packet', 'accepted-canonical-submission'],
+  excludes: ['xy-pair', 'candidate-patch', 'feedback', 'historical-answer', 'role', 'version'],
+  maxUtf8Bytes: 8_192,
+} as const
+
+const sourceFidelityReviewEvidenceContract = {
+  schemaVersion: 'tianwen.controlled-source-fidelity-review-evidence.v1',
+  source: 'accepted-native-product-submission',
+  requiresCompleteEvidence: true,
+} as const
 
 function expectedSubmission(
   packet: ResearchPacket,
@@ -228,7 +262,15 @@ function assertFreshSessions(
   ) throw new Error('session-not-fresh')
 }
 
-function buildResearchSummaryControlledProtocol() {
+function buildResearchSummaryControlledProtocol(
+  sourceFidelity?: {
+    readonly source: ControlledSkillSourceIdentity
+    readonly packet: ResearchPacket
+  },
+) {
+  const sourcePackets = sourceFidelity === undefined
+    ? packets
+    : { ...packets, 'original-defect': sourceFidelity.packet }
   return deepFreeze({
     scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
     version: EXPLICIT_CORRECTION_PROTOCOL_VERSION,
@@ -264,9 +306,11 @@ function buildResearchSummaryControlledProtocol() {
         const expectedWorkspaceSnapshot = workspaceSnapshot(content)
         input.materializeWorkspace(baselineWorkspaceRoot, content)
         input.materializeWorkspace(candidateWorkspaceRoot, content)
-        const packet = packets[definition.semanticType]
+        const packet = sourcePackets[definition.semanticType]
         const goal = `Submit a faithful summary of research packet ${index}.`
-        const taskInput = `Use the available Skill and submit exactly one summary.\n\n${packet.source}`
+        const taskInput = sourceFidelity !== undefined && definition.semanticType === 'original-defect'
+          ? packet.source
+          : `Use the available Skill and submit exactly one summary.\n\n${packet.source}`
         const authorization = {
           mode: 'read-only-product-evaluation' as const,
           task: definition.semanticType,
@@ -315,7 +359,7 @@ function buildResearchSummaryControlledProtocol() {
       readonly toolSchemaDigest: Digest
       readonly tasks: readonly ExplicitCorrectionEvaluationTask[]
     }) {
-      return deepFreeze({
+      const protocol = {
         ticketId: input.ticketId,
         evidencePurpose: 'controlled-product' as const,
         protocol: {
@@ -346,6 +390,59 @@ function buildResearchSummaryControlledProtocol() {
               toolSchemaDigest: input.toolSchemaDigest,
             }))),
             retryPolicyDigest: input.sha256(input.retryPolicy),
+          },
+        },
+      }
+      if (sourceFidelity === undefined) return deepFreeze(protocol)
+      const holdoutGoal = 'Submit a faithful summary of one unseen research packet.'
+      const holdoutInput = holdoutPacket.source
+      const holdoutWorkspace = workspaceSnapshot(
+        'controlled isolated research-summary unseen holdout workspace\n',
+      )
+      const holdoutAuthorization = {
+        mode: 'read-only-product-evaluation' as const,
+        task: 'unseen-holdout' as const,
+      }
+      const holdoutVerifierContract = {
+        toolName: acceptance.toolName,
+        source: 'accepted-product-submission' as const,
+        packetDigest: rawDigest(holdoutPacket.source),
+      }
+      const holdoutStopCondition = { terminal: 'accepted-product-submission' as const }
+      return deepFreeze({
+        ...protocol,
+        protocol: {
+          ...protocol.protocol,
+          sourceFidelity: {
+            policyVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion,
+            policyDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+            packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+            source: sourceFidelity.source,
+            holdout: {
+              task: {
+                taskId: 'shadow-task:research-summary-source-fidelity-holdout' as const,
+                goalDigest: input.sha256(holdoutGoal),
+                inputDigest: input.sha256(holdoutInput),
+                workspaceSnapshotDigest: input.sha256(holdoutWorkspace),
+                toolSchemaDigest: input.toolSchemaDigest,
+                authorizationDigest: input.sha256(holdoutAuthorization),
+                verifierContractDigest: input.sha256(holdoutVerifierContract),
+                stopConditionDigest: input.sha256(holdoutStopCondition),
+                evaluatorMaterialContractDigest: input.sha256(
+                  sourceFidelityHoldoutEvaluatorMaterialContract,
+                ),
+                acceptanceContract: acceptance,
+                acceptanceSubjectDigest: input.sha256(holdoutPacket),
+                allowedTools,
+                stopContract,
+              },
+              review: {
+                rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+                configurationDigest: input.sha256(sourceFidelityReviewConfiguration),
+                materialContractDigest: input.sha256(sourceFidelityReviewMaterialContract),
+                evidenceContractDigest: input.sha256(sourceFidelityReviewEvidenceContract),
+              },
+            },
           },
         },
       })
@@ -397,7 +494,9 @@ function buildResearchSummaryControlledProtocol() {
       return deepFreeze([{
         taskId: 'shadow-task:research-summary-unseen-holdout' as const,
         goal: 'Submit a faithful summary of one unseen research packet.',
-        input: `Use the available Skill and submit exactly one isolated Shadow summary.\n\n${holdoutPacket.source}`,
+        input: sourceFidelity === undefined
+          ? `Use the available Skill and submit exactly one isolated Shadow summary.\n\n${holdoutPacket.source}`
+          : holdoutPacket.source,
         researchPacket: holdoutPacket.source,
         workspaceRoot,
         workspaceSnapshot: expectedWorkspaceSnapshot,
@@ -415,6 +514,13 @@ function buildResearchSummaryControlledProtocol() {
         acceptanceSubject: holdoutPacket,
         allowedTools,
         stopContract,
+        ...(sourceFidelity === undefined ? {} : {
+          evaluatorMaterialContract: sourceFidelityHoldoutEvaluatorMaterialContract,
+          reviewConfiguration: sourceFidelityReviewConfiguration,
+          reviewMaterialContract: sourceFidelityReviewMaterialContract,
+          reviewEvidenceContract: sourceFidelityReviewEvidenceContract,
+          reviewSessionId: `session:controlled-shadow:product:research-summary:unseen-holdout-review:${sessionNamespace}`,
+        }),
         sessionId: `session:controlled-shadow:product:research-summary:unseen-holdout:${sessionNamespace}`,
       }])
     },
@@ -484,8 +590,52 @@ function buildResearchSummaryControlledProtocol() {
   } as const)
 }
 
-export function resolveExplicitCorrectionProtocol(scopeKey: string) {
-  return scopeKey === EXPLICIT_CORRECTION_PROTOCOL_SCOPE
-    ? buildResearchSummaryControlledProtocol()
-    : undefined
+type ExplicitCorrectionProtocolResolution =
+  | {
+      readonly scopeKey: string
+      readonly protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v2'
+    }
+  | {
+      readonly scopeKey: string
+      readonly protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v3'
+      readonly packetVersion: typeof CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion
+      readonly source: ControlledSkillSourceIdentity
+      readonly packet: ResearchPacket
+    }
+
+function exactKeys(value: object, expected: readonly string[]): void {
+  const keys = Object.keys(value)
+  if (keys.length !== expected.length || keys.some(key => !expected.includes(key))) {
+    throw new TypeError('explicit correction protocol resolution input has unsupported fields')
+  }
+}
+
+export function resolveExplicitCorrectionProtocol(
+  input: string | ExplicitCorrectionProtocolResolution,
+) {
+  if (typeof input === 'string') {
+    return input === EXPLICIT_CORRECTION_PROTOCOL_SCOPE
+      ? buildResearchSummaryControlledProtocol()
+      : undefined
+  }
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    throw new TypeError('explicit correction protocol resolution input is invalid')
+  }
+  if (input.protocolSchemaVersion === 'tianwen.controlled-skill-eval-protocol.v2') {
+    exactKeys(input, ['scopeKey', 'protocolSchemaVersion'])
+    return input.scopeKey === EXPLICIT_CORRECTION_PROTOCOL_SCOPE
+      ? buildResearchSummaryControlledProtocol()
+      : undefined
+  }
+  exactKeys(input, ['scopeKey', 'protocolSchemaVersion', 'packetVersion', 'source', 'packet'])
+  if (input.scopeKey !== EXPLICIT_CORRECTION_PROTOCOL_SCOPE) return undefined
+  if (input.packetVersion !== CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion
+    || input.source.packetDigest !== sha256(input.packet.source)
+    || input.source.acceptanceSubjectDigest !== sha256(input.packet)) {
+    throw new TypeError('explicit correction source-fidelity input is invalid')
+  }
+  return buildResearchSummaryControlledProtocol({
+    source: structuredClone(input.source),
+    packet: parseResearchPacket(input.packet.source),
+  })
 }

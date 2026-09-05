@@ -5,7 +5,15 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import * as runtimeBundle from '../../packages/tianwen-runtime-bundle/src/index.js'
-import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
+import {
+  CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  prepareControlledSkillEvalProtocol,
+  sha256,
+} from '../../packages/tianwen-evolution/src/index.js'
+import { parseResearchPacket } from '../../packages/tianwen-runtime/src/research-summary.js'
 import {
   EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
   EXPLICIT_CORRECTION_PROTOCOL_VERSION,
@@ -25,11 +33,154 @@ function materializeWorkspace(root: string, content: string): void {
   writeFileSync(join(root, 'brief.txt'), content, 'utf8')
 }
 
+function sourceFidelityProtocol(sourceText: string) {
+  const packet = parseResearchPacket(sourceText)
+  const source = {
+    signalId: `signal:${'1'.repeat(64)}`,
+    sessionId: 'source-main',
+    messageId: 'source-reply',
+    feedbackVersion: 'feedback-v1',
+    sessionLifecycleFingerprint: sha256('lifecycle'),
+    sessionDigest: sha256('session'),
+    evidenceSetDigest: sha256('evidence'),
+    acceptanceSubjectDigest: sha256(packet),
+    packetDigest: sha256(packet.source),
+  } as const
+  return resolveExplicitCorrectionProtocol({
+    scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+    protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+    packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+    source,
+    packet,
+  })!
+}
+
 afterEach(() => {
   for (const root of fixtureRoots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
 describe('explicit correction controlled protocol', () => {
+  it('builds the v3 original task from only the verified native packet', () => {
+    const firstSource = `<research_packet>
+[F:actual|required] The actual source finding is first.
+[U:limit|decision] The first finding has a local limit.
+</research_packet>`
+    const secondSource = firstSource.replace('first.', 'second.')
+    const first = sourceFidelityProtocol(firstSource)
+    const second = sourceFidelityProtocol(secondSource)
+    const firstTasks = first.buildEvaluationTasks({ root: fixtureRoot(), materializeWorkspace })
+    const secondTasks = second.buildEvaluationTasks({ root: fixtureRoot(), materializeWorkspace })
+
+    expect(firstTasks.map(task => task.semanticType)).toEqual([
+      'original-defect', 'adjacent-transfer', 'preserved-regression',
+      'raw-extraction-counterexample', 'safety-boundary',
+    ])
+    expect(firstTasks[0]!.input).toBe(firstSource)
+    expect(firstTasks[0]!.packet).toEqual(parseResearchPacket(firstSource))
+    expect(secondTasks[0]!.input).toBe(secondSource)
+    expect(secondTasks.slice(1).map(task => task.input))
+      .toEqual(firstTasks.slice(1).map(task => task.input))
+  })
+
+  it('freezes a separate unseen holdout and all Task 1 v3 policy bindings', () => {
+    const protocol = sourceFidelityProtocol(`<research_packet>
+[F:actual|required] The source result is 18%.
+[U:window|decision] The source covers six weeks.
+</research_packet>`)
+    const tasks = protocol.buildEvaluationTasks({ root: fixtureRoot(), materializeWorkspace })
+    const input = protocol.buildProtocolInput({
+      ticketId: 'ticket:v3-fixture', sha256,
+      rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+      callConfig: { provider: 'fixture', model: 'fixture' }, retryPolicy: {},
+      toolSchemaDigest: sha256('tools'), tasks,
+    })
+    const holdout = protocol.buildShadowTasks({
+      root: fixtureRoot(), materializeWorkspace, sessionNamespace: 'v3-fixture',
+    })[0]!
+
+    expect(input.protocol).toMatchObject({
+      rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+      sourceFidelity: {
+        policyVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion,
+        policyDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+        packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+        holdout: {
+          review: { rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST },
+        },
+      },
+    })
+    expect(input.protocol.tasks[0]!.inputDigest).toBe(sha256(tasks[0]!.input))
+    expect(input.protocol.tasks[0]!.inputDigest)
+      .toBe(input.protocol.sourceFidelity.source.packetDigest)
+    expect(tasks.every(task => !task.input.includes(holdout.researchPacket))).toBe(true)
+    expect(input.protocol.tasks.every(task =>
+      task.inputDigest !== input.protocol.sourceFidelity.holdout.task.inputDigest)).toBe(true)
+    const source = input.protocol.sourceFidelity.source
+    const ticket = {
+      ticketId: input.ticketId, problemFingerprint: sha256('problem'),
+      status: 'open', signalIds: [source.signalId],
+    } as const
+    const signals = [{
+      signalId: source.signalId,
+      scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+      sessionId: source.sessionId,
+      messageId: source.messageId,
+      feedbackVersion: source.feedbackVersion,
+      sessionLifecycleFingerprint: source.sessionLifecycleFingerprint,
+      sessionDigest: source.sessionDigest,
+      evidenceSetDigest: source.evidenceSetDigest,
+      acceptanceSubjectDigest: source.acceptanceSubjectDigest,
+    }] as const
+    const prepared = prepareControlledSkillEvalProtocol(input, ticket, signals, 'pre-candidate')
+    expect(prepared.schemaVersion).toBe('tianwen.controlled-skill-eval-protocol.v3')
+    expect(prepareControlledSkillEvalProtocol(
+      structuredClone(input), structuredClone(ticket), structuredClone(signals), 'pre-candidate',
+    )).toEqual(prepared)
+  })
+
+  it('dispatches retained v2 exactly even after a v3 builder exists', () => {
+    sourceFidelityProtocol(`<research_packet>
+[F:new|required] This packet selects v3.
+</research_packet>`)
+    const legacy = resolveExplicitCorrectionProtocol({
+      scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+      protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+    })!
+    const tasks = legacy.buildEvaluationTasks({ root: fixtureRoot(), materializeWorkspace })
+    const input = legacy.buildProtocolInput({
+      ticketId: 'ticket:v2-fixture', sha256,
+      rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+      callConfig: { provider: 'fixture', model: 'fixture' }, retryPolicy: {},
+      toolSchemaDigest: sha256('tools'), tasks,
+    })
+
+    expect(tasks[0]!.packet.source).toContain('Twelve pilot teams reduced triage time by 18%.')
+    expect(input.protocol.rubricDigest).toBe(CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST)
+    expect(input.protocol).not.toHaveProperty('sourceFidelity')
+  })
+
+  it('rejects candidate or analyst content at the v3 builder boundary', () => {
+    const packet = parseResearchPacket(`<research_packet>
+[F:actual|required] Only native source material is accepted.
+</research_packet>`)
+    const source = {
+      signalId: `signal:${'1'.repeat(64)}`, sessionId: 'source-main',
+      messageId: 'source-reply', feedbackVersion: 'feedback-v1',
+      sessionLifecycleFingerprint: sha256('lifecycle'), sessionDigest: sha256('session'),
+      evidenceSetDigest: sha256('evidence'), acceptanceSubjectDigest: sha256(packet),
+      packetDigest: sha256(packet.source),
+    }
+
+    expect(() => resolveExplicitCorrectionProtocol({
+      scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+      protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+      packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+      source,
+      packet,
+      candidatePatch: 'make the answer win',
+    } as never)).toThrow(/unsupported|input/u)
+  })
+
   it('replays the one audited five-case protocol exactly', () => {
     const protocol = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)
 

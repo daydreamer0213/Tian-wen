@@ -31,6 +31,10 @@ import {
   parseControlledLifecycleChildReceipt,
   readControlledLifecycleManifest,
 } from '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-contract.js'
+import {
+  apply as applyControlledLifecycleRunner,
+  ControlledLifecycleRunnerError,
+} from '../../packages/tianwen-runtime-bundle/src/controlled-lifecycle-runner.js'
 
 const FIXTURE_BASE = resolve('D:/DevData/tianwen-controlled-lifecycle-command-tests')
 const DIGEST_A = `sha256:${'a'.repeat(64)}`
@@ -354,6 +358,52 @@ afterAll(() => {
 })
 
 describe('tianwen controlled-lifecycle', () => {
+  it('maps evaluation adapter errors into the unchanged v1 stopped receipt vocabulary', async () => {
+    mkdirSync(FIXTURE_BASE, { recursive: true })
+    const dataDir = mkdtempSync(join(FIXTURE_BASE, 'adapter-error-'))
+    const operationRoot = join(dataDir, 'controlled-operation', 'activity-01')
+    const manifestPath = join(operationRoot, 'manifest.json')
+    mkdirSync(operationRoot, { recursive: true })
+    writeFileSync(manifestPath, `${JSON.stringify(validManifest(dataDir, operationRoot))}\n`, 'utf8')
+    const prepared = readControlledLifecycleManifest(manifestPath)
+    try {
+      for (const [code, expected] of [
+        ['original-source-fidelity-not-improved', 'evaluation-failed'],
+        ['paired-source-fidelity-regression', 'evaluation-failed'],
+        ['retry-policy-mismatch', 'selection-mismatch'],
+        ['evidence-mismatch', 'evidence-mismatch'],
+      ] as const) {
+        let finish!: () => void
+        const exited = new Promise<void>(resolve => { finish = resolve })
+        const exit = vi.fn(() => { finish() })
+        const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+        const ctx = {
+          get(name: string) {
+            if (name === 'appExit') return exit
+            if (name === 'loader') throw new ControlledLifecycleRunnerError(code)
+            return {}
+          },
+        }
+        applyControlledLifecycleRunner(ctx as never, {
+          manifestPath,
+          manifestDigest: prepared.manifestDigest,
+        })
+        await exited
+        expect(exit).toHaveBeenCalledWith(1)
+        expect(write).toHaveBeenCalledOnce()
+        const stdout = String(write.mock.calls[0]![0])
+        const receipt = parseControlledLifecycleChildReceipt(stdout, '', {
+          manifestDigest: prepared.manifestDigest,
+          installedArchiveDigest: DIGEST_A as `sha256:${string}`,
+        })
+        expect(receipt).toMatchObject({ status: 'stopped', reasonCode: expected })
+        write.mockRestore()
+      }
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
   it('forwards one exact child receipt after exit and both stream ends without child close', async () => {
     const expected = {
       manifestDigest: DIGEST_B as `sha256:${string}`,

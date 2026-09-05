@@ -6,6 +6,8 @@ import {
   TIANWEN_CONTROLLED_AGENT_PRESET,
 } from '@tianwen/runtime'
 import {
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
   sha256,
   type LearningExplorationStatus,
   type LearningAnalysisProgressCursor,
@@ -19,6 +21,7 @@ import { materializeLearningCandidate } from './learning-candidate.js'
 import { admitOutcomeLearningAnalysis } from './outcome-learning-intake.js'
 import { LearningExplorationInterruptedError } from './learning-exploration.js'
 import { exactLearningAnalysisMainParent, hasExactLearningAnalysisChild } from './learning-analysis-child.js'
+import { recoverResearchSummarySourceCase } from './research-summary-source-case.js'
 
 type LearningObservationContent = [{ readonly type: 'text', readonly text: string }]
 
@@ -238,14 +241,67 @@ export interface ExplicitCorrectionLearningLoopExecutorConfig {
 export function createExplicitCorrectionLearningLoopExecutor(
   config: ExplicitCorrectionLearningLoopExecutorConfig,
 ): LearningLoopControlledExecutor {
-  const protocolFor = (context: LearningLoopExecutionContext) => {
+  const scopeFor = (context: LearningLoopExecutionContext) => {
     const binding = context.ctx.tianwenEvolution.getRunBindingBySessionId(
       String(context.status.sessionId),
     )
-    return binding === undefined ? undefined : resolveExplicitCorrectionProtocol(binding.scopeKey)
+    return binding?.scopeKey
   }
-  const tasksFor = (context: LearningLoopExecutionContext) => {
-    const protocol = protocolFor(context)
+  const recordsFor = (context: LearningLoopExecutionContext) =>
+    context.ctx.tianwenEvolution.listControlledSkillEvalProtocols()
+      .filter(value => value.ticketId === context.status.ticketId)
+  const tasksFor = async (context: LearningLoopExecutionContext) => {
+    const scopeKey = scopeFor(context)
+    if (scopeKey === undefined || resolveExplicitCorrectionProtocol(scopeKey) === undefined) {
+      return undefined
+    }
+    const records = recordsFor(context)
+    const matchingV3 = context.status.source === 'outcome' ? [] : records.filter(record =>
+      record.schemaVersion === 'tianwen.controlled-skill-eval-protocol.v3'
+      && record.protocol.sourceFidelity.source.sessionId === context.status.sessionId
+      && record.protocol.sourceFidelity.source.messageId === context.status.messageId
+      && record.protocol.sourceFidelity.source.feedbackVersion === context.status.feedbackVersion)
+    if (matchingV3.length > 1) throw new Error('controlled protocol history is ambiguous')
+    const onlyRecord = records.length === 1 ? records[0] : undefined
+    const retained = matchingV3[0]
+      ?? (onlyRecord?.schemaVersion === 'tianwen.controlled-skill-eval-protocol.v2'
+        ? onlyRecord : undefined)
+    if (retained === undefined && records.length > 0) {
+      throw new Error('controlled protocol history cannot be resolved exactly')
+    }
+    let protocol
+    let protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v2'
+      | 'tianwen.controlled-skill-eval-protocol.v3'
+    if (retained?.schemaVersion === 'tianwen.controlled-skill-eval-protocol.v2'
+      || context.status.source === 'outcome') {
+      protocol = resolveExplicitCorrectionProtocol({
+        scopeKey,
+        protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+      })
+      protocolSchemaVersion = 'tianwen.controlled-skill-eval-protocol.v2'
+    } else {
+      let sourceCase
+      try {
+        sourceCase = await recoverResearchSummarySourceCase(
+          context.ctx,
+          context.status as never,
+        )
+      } catch {
+        throw new Error('research summary feedback source recovery is unavailable')
+      }
+      if (retained !== undefined
+        && sha256(sourceCase.source) !== sha256(retained.protocol.sourceFidelity.source)) {
+        throw new Error('retained source-fidelity protocol source changed')
+      }
+      protocol = resolveExplicitCorrectionProtocol({
+        scopeKey,
+        protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+        packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+        source: retained?.protocol.sourceFidelity.source ?? sourceCase.source,
+        packet: sourceCase.packet,
+      })
+      protocolSchemaVersion = 'tianwen.controlled-skill-eval-protocol.v3'
+    }
     if (protocol === undefined) return undefined
     const tasks = protocol.buildEvaluationTasks({
       root: config.root,
@@ -258,20 +314,17 @@ export function createExplicitCorrectionLearningLoopExecutor(
     }
     return {
       protocol,
+      protocolSchemaVersion,
       tasks,
+      ...(retained === undefined ? {} : { record: retained }),
     }
   }
-  const protocolIdFor = (context: LearningLoopExecutionContext): string | undefined => {
-    const existing = context.ctx.tianwenEvolution.listControlledSkillEvalProtocols()
-      .filter(value => value.ticketId === context.status.ticketId)
-    return existing.length === 1 ? existing[0]!.protocolId : undefined
-  }
-  const assertFrozenEnvironment = async (context: LearningLoopExecutionContext): Promise<void> => {
-    const built = tasksFor(context)
-    const protocolId = protocolIdFor(context)
-    const record = protocolId === undefined
-      ? undefined
-      : context.ctx.tianwenEvolution.getControlledSkillEvalProtocol(protocolId as never)
+  const assertFrozenEnvironment = async (
+    context: LearningLoopExecutionContext,
+    prepared?: Awaited<ReturnType<typeof tasksFor>>,
+  ): Promise<void> => {
+    const built = prepared ?? await tasksFor(context)
+    const record = built?.record
     if (record === undefined || built === undefined) throw new Error('controlled protocol record is unavailable')
     const environment = await config.environment(context)
     const execution = record.protocol.execution
@@ -312,7 +365,7 @@ export function createExplicitCorrectionLearningLoopExecutor(
   }
   return {
     async freezeProtocol(context) {
-      const built = tasksFor(context)
+      const built = await tasksFor(context)
       if (built === undefined) {
         context.ctx.tianwenEvolution.recordLearningAnalysisProtocolUnavailable(context.status.analysisId as never)
         return { provenance: 'pre-candidate' }
@@ -330,26 +383,30 @@ export function createExplicitCorrectionLearningLoopExecutor(
       })
       context.ctx.tianwenEvolution.freezeControlledSkillEvalProtocol(
         built.protocol.buildProtocolInput({
-          ticketId: context.status.ticketId, sha256, rubricDigest: environment.rubricDigest,
+          ticketId: context.status.ticketId, sha256,
+          rubricDigest: built.protocolSchemaVersion
+            === 'tianwen.controlled-skill-eval-protocol.v3'
+            ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+            : environment.rubricDigest,
           callConfig: environment.callConfig, retryPolicy: environment.retryPolicy,
           toolSchemaDigest: sha256(environment.toolSchemas), tasks: built.tasks,
         }) as never,
       )
       return { provenance: 'pre-candidate' }
     },
-    materializeCandidate(context) {
-      if (protocolFor(context) === undefined) return
+    async materializeCandidate(context) {
+      if (await tasksFor(context) === undefined) return
       materializeLearningCandidate(context.ctx.tianwenEvolution as never, context.status.analysisId as never)
     },
     async evaluate(context) {
       context.signal?.throwIfAborted()
-      const built = tasksFor(context)
+      const built = await tasksFor(context)
       const candidateId = context.status.candidateId
-      const protocolId = protocolIdFor(context)
+      const protocolId = built?.record?.protocolId
       if (built === undefined || candidateId === undefined || protocolId === undefined) {
         throw new Error('controlled evaluation lacks its frozen protocol or Candidate')
       }
-      await assertFrozenEnvironment(context)
+      await assertFrozenEnvironment(context, built)
       const evaluation = await (context.ctx.tianwenSkillEvaluation as unknown as {
         runControlledArms(input: unknown, resolver?: unknown, signal?: AbortSignal): Promise<{ readonly state: string, readonly evaluationId: string, readonly result?: { readonly mechanismVerdict: string } }>
       }).runControlledArms(
@@ -406,9 +463,9 @@ export function createExplicitCorrectionLearningLoopExecutor(
     },
     async promote(context) {
       if (recoverTransition(context, 'promote')) return
-      const built = tasksFor(context)
+      const built = await tasksFor(context)
       if (built === undefined || context.status.shadowId === undefined) throw new Error('controlled promotion lacks Shadow')
-      await assertFrozenEnvironment(context)
+      await assertFrozenEnvironment(context, built)
       const shadow = context.ctx.tianwenEvolution.getControlledSkillShadow(context.status.shadowId as never)
       if (shadow === undefined) throw new Error('controlled promotion Shadow is unavailable')
       const pointer = context.ctx.tianwenEvolution.getControlledSkillScopePointer(shadow.scopeKey)
@@ -441,9 +498,9 @@ export function createExplicitCorrectionLearningLoopExecutor(
     },
     async rollback(context) {
       if (recoverTransition(context, 'rollback')) return
-      const built = tasksFor(context)
+      const built = await tasksFor(context)
       if (built === undefined || context.status.shadowId === undefined) throw new Error('controlled rollback lacks Shadow')
-      await assertFrozenEnvironment(context)
+      await assertFrozenEnvironment(context, built)
       const shadow = context.ctx.tianwenEvolution.getControlledSkillShadow(context.status.shadowId as never)
       const pointer = shadow === undefined ? undefined : context.ctx.tianwenEvolution.getControlledSkillScopePointer(shadow.scopeKey)
       if (shadow === undefined || pointer === undefined) throw new Error('controlled rollback pointer is unavailable')

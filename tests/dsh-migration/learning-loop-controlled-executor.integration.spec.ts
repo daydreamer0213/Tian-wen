@@ -245,6 +245,33 @@ function frozenProductToolSchemas(ctx: Context) {
   ].toSorted((left, right) => left.name.localeCompare(right.name))
 }
 
+async function freezeRetainedLegacyProtocol(input: {
+  readonly ctx: Context
+  readonly ticketId: string
+  readonly workspaceRoot: string
+  readonly selection: { readonly provider: string, readonly model: string }
+}) {
+  const tasks = protocol.buildEvaluationTasks({
+    root: input.workspaceRoot,
+    materializeWorkspace,
+    sessionNamespace: 'retained-v2',
+  })
+  const callConfig = await input.ctx.llm.resolveCallConfig(input.selection)
+  const retryPolicy = input.ctx.llm.providerRetryPolicy(input.selection.provider)
+  const toolSchemas = frozenProductToolSchemas(input.ctx)
+  return input.ctx.tianwenEvolution.freezeControlledSkillEvalProtocol(
+    protocol.buildProtocolInput({
+      ticketId: input.ticketId,
+      sha256,
+      rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+      callConfig,
+      retryPolicy,
+      toolSchemaDigest: sha256(toolSchemas),
+      tasks,
+    }),
+  )
+}
+
 async function mountControlledRuntime(
   fixtureRoot: string,
   script: readonly (readonly StreamChunk[] | Error)[] | ControlledAdapter,
@@ -385,12 +412,27 @@ describe('explicit-correction controlled learning-loop executor', () => {
     const ctx = new Context()
     ctx.baseUrl = pathToFileURL(profileRoot).href
     const executor = createConfiguredLearningLoopExecutor(ctx, { learningLoop: { enabled: true } })!
+    const tasks = protocol.buildEvaluationTasks({
+      root: profileRoot, materializeWorkspace() {}, sessionNamespace: 'portable-v2',
+    })
+    const retained = protocol.buildProtocolInput({
+      ticketId: 'portable-ticket', sha256,
+      rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+      callConfig: { provider, model }, retryPolicy: {},
+      toolSchemaDigest: sha256('portable-tools'), tasks,
+    })
     const context = {
       ctx: { tianwenEvolution: {
         getRunBindingBySessionId: () => ({ scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE }),
-        listControlledSkillEvalProtocols: () => [],
+        listControlledSkillEvalProtocols: () => [{
+          schemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+          protocolId: `eval-protocol:${'1'.repeat(64)}`,
+          ticketId: 'portable-ticket', protocol: retained.protocol,
+        }],
       } },
-      status: { sessionId: 'source', analysisId: 'portable-root-test' },
+      status: {
+        ticketId: 'portable-ticket', sessionId: 'source', analysisId: 'portable-root-test',
+      },
     } as unknown as Parameters<NonNullable<typeof executor.evaluate>>[0]
 
     await expect(executor.evaluate(context)).rejects.toThrow(/lacks its frozen protocol or Candidate/u)
@@ -400,6 +442,86 @@ describe('explicit-correction controlled learning-loop executor', () => {
       learningLoop: { enabled: true, workspaceRoot: 'relative-path' },
     })).toThrow(/absolute/u)
     await ctx.fiber.dispose()
+  })
+
+  it('records a retryable failure when an exact active parent has no recoverable native source', async () => {
+    const fixtureRoot = root('unavailable-v3-source')
+    const mounted = await mountControlledRuntime(fixtureRoot, [])
+    const { ctx } = mounted.harness
+    try {
+      const sessionId = 'unavailable-source-main'
+      const lifecycle = learningSessionLifecycleFingerprint({ sessionId, createdAt: 1 })
+      const binding = ctx.tianwenEvolution.recordRunBinding({
+        goalRef: 'goal:unavailable-source', taskRef: 'task:unavailable-source', sessionId,
+        scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+        acceptanceContract: protocol.acceptance, sessionLifecycleFingerprint: lifecycle,
+      })
+      const manifest = ctx.tianwenEvolution.recordRunSkillManifest({
+        runId: binding.runId, skill: protocol.parentSkill,
+      })
+      ctx.tianwenEvolution.recordOutcomeIntake({
+        runId: binding.runId, verdict: 'met', sessionDigest: lifecycle,
+        evidenceIds: [evidenceA],
+      })
+      ctx.tianwenEvolution.recordRunSkillUse({
+        runId: binding.runId, parentVersionId: manifest.parentVersionId, sessionId,
+        sessionDigest: lifecycle, skillName: protocol.parentSkill.name,
+        contentDigest: ctx.tianwenEvolution.getRunSkillManifest(binding.runId)!.contentDigest,
+        skillEvidenceId: `sha256:${'7'.repeat(64)}`, acceptanceEvidenceId: evidenceA,
+        skillCallSeq: 10, skillResultSeq: 11, acceptanceCallSeq: 12,
+      })
+      ctx.tianwenEvolution.recordLearningAnalysisConsent({
+        revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v1',
+      })
+      const intake = ctx.tianwenEvolution.recordLearningFeedbackRevision({
+        intake: {
+          sessionId, messageId: 'missing-native-message', feedbackVersion: 'v1',
+          rating: 'negative', note: 'Keep the verified source.',
+          scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE, sessionDigest: lifecycle,
+          evidenceIds: [evidenceA, evidenceB],
+        },
+        sessionLifecycleFingerprint: lifecycle, analysisConsentRevision: 1,
+      })
+      const analysis = ctx.tianwenEvolution.requestLearningAnalysis({
+        ticketId: intake.ticketId!, sessionId, messageId: 'missing-native-message',
+        feedbackVersion: 'v1', consentRevision: 1, parentSessionId: sessionId,
+      })
+      ctx.tianwenEvolution.recordLearningAnalysisChildStarted({
+        analysisId: analysis.analysisId, parentSessionId: sessionId,
+        childSessionId: analysis.childSessionId,
+      })
+      ctx.tianwenEvolution.recordLearningAnalysisSubmission({
+        analysisId: analysis.analysisId, childSessionId: analysis.childSessionId,
+        submission: {
+          verdict: 'skill-change', hypothesis: 'The answer omitted its source.',
+          lesson: { claim: 'Keep the source.', when: 'Summarizing.', notWhen: 'Extracting.' },
+          candidatePatch: {
+            description: 'Keep source fidelity.', whenToUse: 'When summarizing.',
+            content: '# Summary\nKeep the verified source.',
+          },
+          supportingEvidenceIds: [evidenceA], counterevidenceIds: [evidenceB],
+        },
+      })
+      expect(() => ctx.tianwenEvolution.recordLearningAnalysisProtocolUnavailable(
+        analysis.analysisId,
+      )).toThrow(/available or no longer eligible/u)
+      const executor = createExplicitCorrectionLearningLoopExecutor({
+        root: join(fixtureRoot, 'workspaces'), materializeWorkspace,
+        async environment() { throw new Error('source interruption must precede environment access') },
+        async deliverTerminalReport() { throw new Error('source interruption must not report') },
+      })
+      const loop = new TianwenLearningLoopService(ctx, { executor })
+
+      await loop.schedule(analysis.analysisId)
+
+      expect(ctx.tianwenEvolution.getLearningAnalysis(analysis.analysisId))
+        .toMatchObject({ phase: 'failed', resumePhase: 'running' })
+      expect(ctx.tianwenEvolution.listControlledSkillEvalProtocols()).toEqual([])
+      expect(ctx.tianwenEvolution.listSkillCandidates()).toEqual([])
+      expect(mounted.adapter.requests).toEqual([])
+    } finally {
+      await mounted.dispose()
+    }
   })
 
   it.each([
@@ -473,6 +595,10 @@ describe('explicit-correction controlled learning-loop executor', () => {
           candidatePatch: { description: 'Research summary.', whenToUse: 'Research packets.', content: '# Summary\nSeparate decision uncertainties.' },
           supportingEvidenceIds: [evidenceA], counterevidenceIds: [evidenceB],
         },
+      })
+      await freezeRetainedLegacyProtocol({
+        ctx, ticketId: analysis.ticketId,
+        workspaceRoot: join(fixtureRoot, 'workspaces'), selection: mounted.selection,
       })
       const executor = createExplicitCorrectionLearningLoopExecutor({
         root: join(fixtureRoot, 'workspaces'), materializeWorkspace,
@@ -813,6 +939,10 @@ describe('explicit-correction controlled learning-loop executor', () => {
           },
           supportingEvidenceIds: [evidenceA], counterevidenceIds: [evidenceB],
         },
+      })
+      await freezeRetainedLegacyProtocol({
+        ctx: harness.ctx, ticketId: requested.ticketId,
+        workspaceRoot: join(fixtureRoot, 'workspaces'), selection,
       })
 
       await harness.ctx.plugin(SubagentRuntime)
@@ -1366,6 +1496,10 @@ describe('explicit-correction controlled learning-loop executor', () => {
           counterevidenceIds: [`sha256:${'6'.repeat(64)}`],
         },
       })
+      await freezeRetainedLegacyProtocol({
+        ctx: harness.ctx, ticketId: secondRequested.ticketId,
+        workspaceRoot: join(fixtureRoot, 'workspaces'), selection,
+      })
       const secondContext = () => ({
         ctx: harness.ctx,
         status: harness.ctx.tianwenEvolution.getLearningAnalysis(secondRequested.analysisId)!,
@@ -1827,6 +1961,10 @@ describe('explicit-correction controlled learning-loop executor', () => {
           },
           supportingEvidenceIds: [evidenceA], counterevidenceIds: [evidenceB],
         },
+      })
+      await freezeRetainedLegacyProtocol({
+        ctx: mounted.harness.ctx, ticketId: requested.ticketId,
+        workspaceRoot: join(fixtureRoot, 'workspaces'), selection: mounted.selection,
       })
       const reports: string[] = []
       const makeExecutor = () => createExplicitCorrectionLearningLoopExecutor({

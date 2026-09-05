@@ -1,9 +1,10 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  CallId,
   SessionId,
   SkillRegistry,
   applySkillTool,
@@ -13,21 +14,27 @@ import {
   textResponse,
   toolCallResponse,
   waitForIdle,
+  type SessionEvent,
 } from '@tianwen/dsh-compat'
+import { createToolResultMessage } from '@deepseek-ai/dsh-llm'
 import { renderSkillContent } from '@deepseek-ai/dsh-skill'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import {
   RESEARCH_SUMMARY_BASE_SKILL,
   RESEARCH_SUMMARY_SKILL_NAME,
   RESEARCH_SUMMARY_TOOL_NAME,
+  parseResearchPacket,
 } from '../../packages/tianwen-runtime/src/research-summary.js'
 import { TianwenResearchSummaryAdmissionService } from '../../packages/tianwen-runtime-bundle/src/research-summary-admission.js'
+import { recoverResearchSummarySourceCase } from '../../packages/tianwen-runtime-bundle/src/research-summary-source-case.js'
 import {
+  learningSessionLifecycleFingerprint,
   prepareRunSkillManifest,
   sha256,
   type ControlledSkillScopePointer,
   type GovernedSkillCandidate,
 } from '../../packages/tianwen-evolution/src/index.js'
+import { projectEvidence } from '../../packages/tianwen-evidence/src/index.js'
 
 const roots: string[] = []
 const packet = `<research_packet>
@@ -64,6 +71,118 @@ function direct(text: string) {
     content: [{ type: 'text' as const, text }],
     source: { kind: 'user' as const },
   })
+}
+
+function sourceCaseFixture() {
+  const sessionId = 'main-source-session'
+  const messageId = 'assistant-target'
+  const feedbackVersion = 'feedback-v1'
+  const signalId = `signal:${'1'.repeat(64)}`
+  const ticketId = `ticket:${'2'.repeat(64)}`
+  const runId = `run:${'3'.repeat(64)}`
+  const submission = {
+    summary: 'The verified result is concrete. The deployment region is undecided.',
+    confirmedFindingIds: ['f1'],
+    uncertaintyIds: ['u1'],
+  }
+  const frozenEvents = [
+    { type: 'turn/start', seq: 10, time: 10, data: { turn: 4 } },
+    {
+      type: 'user/message', seq: 11, time: 11, surfaceOp: 'append',
+      data: createUserMessage({
+        content: [{ type: 'text', text: invocation }],
+        source: { kind: 'user' },
+      }),
+    },
+    {
+      type: 'tool/call', seq: 12, time: 12,
+      data: {
+        turn: 4, step: 1, callId: CallId('accepted-summary'),
+        name: RESEARCH_SUMMARY_TOOL_NAME, arguments: JSON.stringify(submission),
+      },
+    },
+    {
+      type: 'tool/result', seq: 13, time: 13, surfaceOp: 'append', sourceEventSeqs: [12],
+      data: {
+        turn: 4, step: 1,
+        message: createToolResultMessage({
+          callId: CallId('accepted-summary'),
+          content: [{ type: 'text', text: JSON.stringify({ verdict: 'not-evaluated', submission }) }],
+          isError: false,
+        }),
+      },
+    },
+    {
+      type: 'assistant/message', seq: 14, time: 14, surfaceOp: 'append',
+      data: {
+        turn: 4,
+        message: {
+          id: messageId, role: 'assistant',
+          content: [{ type: 'text', text: 'The verified result is concrete.' }],
+        },
+      },
+    },
+    { type: 'turn/end', seq: 15, time: 15, data: { turn: 4, reason: { kind: 'completed' } } },
+  ] as unknown as readonly SessionEvent[]
+  const laterEvents = [
+    { type: 'turn/start', seq: 16, time: 16, data: { turn: 5 } },
+    {
+      type: 'user/message', seq: 17, time: 17, surfaceOp: 'append',
+      data: createUserMessage({ content: [{ type: 'text', text: 'Thanks' }], source: { kind: 'user' } }),
+    },
+    { type: 'turn/end', seq: 18, time: 18, data: { turn: 5, reason: { kind: 'completed' } } },
+  ] as unknown as readonly SessionEvent[]
+  const sessionDigest = `sha256:${createHash('sha256')
+    .update(JSON.stringify(frozenEvents), 'utf8').digest('hex')}` as const
+  const evidence = projectEvidence(SessionId(sessionId), frozenEvents)
+  const acceptanceEvidenceId = evidence[0]!.evidenceId
+  const sessionLifecycleFingerprint = learningSessionLifecycleFingerprint({
+    sessionId, createdAt: 1, cwd: 'D:/source',
+  })
+  const signal = {
+    signalId, active: true, ingestionId: sha256('intake'), sessionId, messageId,
+    feedbackVersion, scopeKey: 'project:tianwen/capability:research-summary',
+    problemFingerprint: sha256('problem'), noteDigest: sha256('note'),
+    sessionDigest, evidenceIds: evidence.map(item => item.evidenceId),
+  }
+  const use = { runId, sessionId, sessionDigest, acceptanceEvidenceId }
+  const binding = {
+    schemaVersion: 'tianwen.run-binding.v3', runId, sessionId,
+    scopeKey: 'project:tianwen/capability:research-summary',
+    sessionLifecycleFingerprint,
+    acceptanceSubjectDigest: sha256(parseResearchPacket(packet)),
+    acceptanceContract: { toolName: RESEARCH_SUMMARY_TOOL_NAME },
+  }
+  const ctx = {
+    sessionPersistence: {
+      inspect: vi.fn(async () => ({
+        meta: { id: sessionId, createdAt: 1, cwd: 'D:/source' },
+        events: [...frozenEvents, ...laterEvents],
+      })),
+    },
+    tianwenEvidence: {
+      project: ({ id, events }: { id: string, events: readonly SessionEvent[] }) =>
+        projectEvidence(SessionId(String(id)), events),
+    },
+    tianwenEvolution: {
+      getLearningIntakeStatus: () => ({
+        state: 'active', sessionId, messageId, feedbackVersion,
+        scopeKey: 'project:tianwen/capability:research-summary', rating: 'negative',
+        feedbackFingerprint: sha256('feedback'), sessionLifecycleFingerprint,
+        analysisConsentRevision: 1, recordedAt: '2026-09-06T00:00:00.000Z',
+        decision: 'ticket-created', ingestionId: sha256('intake'), signalId, ticketId,
+      }),
+      listLearningTickets: () => [{ ticketId, status: 'open', signalIds: [signalId] }],
+      listLearningSignals: () => [signal],
+      getRunBindingBySessionId: () => binding,
+      getRunSkillUse: () => use,
+    },
+  }
+  return {
+    ctx, frozenEvents, laterEvents, messageId, feedbackVersion, signalId, ticketId,
+    sessionId, sessionDigest, sessionLifecycleFingerprint, acceptanceEvidenceId, submission,
+    signal, use, binding,
+  }
 }
 
 function invokedContent(request: { readonly messages: readonly ReturnType<typeof direct>[] }) {
@@ -128,6 +247,112 @@ function candidateFixture(content = '# Candidate research summary\n\nUse the imp
   } as ControlledSkillScopePointer
   return { base, baseManifest, candidate, skill, candidateManifest, promoted, rolledBack }
 }
+
+describe('research summary feedback source recovery', () => {
+  it('recovers the exact target turn and accepted canonical submission from its frozen prefix', async () => {
+    const fixture = sourceCaseFixture()
+
+    await expect(recoverResearchSummarySourceCase(fixture.ctx as never, {
+      analysisId: `analysis:${'4'.repeat(64)}`,
+      ticketId: fixture.ticketId,
+      sessionId: fixture.sessionId,
+      messageId: fixture.messageId,
+      feedbackVersion: fixture.feedbackVersion,
+      consentRevision: 1,
+      parentSessionId: fixture.sessionId,
+      childSessionId: 'analysis-child',
+      phase: 'running',
+    })).resolves.toMatchObject({
+      targetTurn: 4,
+      acceptanceEvidenceId: fixture.acceptanceEvidenceId,
+      packet: parseResearchPacket(packet),
+      submission: fixture.submission,
+      source: {
+        signalId: fixture.signalId,
+        sessionId: fixture.sessionId,
+        messageId: fixture.messageId,
+        feedbackVersion: fixture.feedbackVersion,
+        sessionLifecycleFingerprint: fixture.sessionLifecycleFingerprint,
+        sessionDigest: fixture.sessionDigest,
+        acceptanceSubjectDigest: sha256(parseResearchPacket(packet)),
+        packetDigest: sha256(packet),
+      },
+    })
+  })
+
+  it('allows legitimate Session progress after the frozen feedback snapshot', async () => {
+    const fixture = sourceCaseFixture()
+    fixture.ctx.sessionPersistence.inspect.mockResolvedValue({
+      meta: { id: fixture.sessionId, createdAt: 1, cwd: 'D:/source' },
+      events: [...fixture.frozenEvents, ...fixture.laterEvents, {
+        type: 'user/message', seq: 19, time: 19, surfaceOp: 'append',
+        data: createUserMessage({ content: [{ type: 'text', text: invocation }], source: { kind: 'user' } }),
+      }],
+    })
+
+    await expect(recoverResearchSummarySourceCase(fixture.ctx as never, {
+      analysisId: `analysis:${'4'.repeat(64)}`, ticketId: fixture.ticketId,
+      sessionId: fixture.sessionId, messageId: fixture.messageId,
+      feedbackVersion: fixture.feedbackVersion, consentRevision: 1,
+      parentSessionId: fixture.sessionId, childSessionId: 'analysis-child', phase: 'running',
+    })).resolves.toMatchObject({ targetTurn: 4, packet: parseResearchPacket(packet) })
+  })
+
+  it('recovers a small frozen prefix from a large appended native history', async () => {
+    const fixture = sourceCaseFixture()
+    const appended = Array.from({ length: 20_000 }, (_, index) => ({
+      type: 'sandbox/mode', seq: 19 + index, time: 19 + index,
+      data: { mode: `workspace-write-${'x'.repeat(128)}` },
+    })) as unknown as readonly SessionEvent[]
+    fixture.ctx.sessionPersistence.inspect.mockResolvedValue({
+      meta: { id: fixture.sessionId, createdAt: 1, cwd: 'D:/source' },
+      events: [...fixture.frozenEvents, ...fixture.laterEvents, ...appended],
+    })
+
+    await expect(recoverResearchSummarySourceCase(fixture.ctx as never, {
+      analysisId: `analysis:${'4'.repeat(64)}`, ticketId: fixture.ticketId,
+      sessionId: fixture.sessionId, messageId: fixture.messageId,
+      feedbackVersion: fixture.feedbackVersion, consentRevision: 1,
+      parentSessionId: fixture.sessionId, childSessionId: 'analysis-child', phase: 'running',
+    })).resolves.toMatchObject({ targetTurn: 4, packet: parseResearchPacket(packet) })
+  })
+
+  it.each([
+    ['stale snapshot digest', (fixture: ReturnType<typeof sourceCaseFixture>) => {
+      fixture.signal.sessionDigest = sha256('stale')
+    }],
+    ['wrong feedback target turn', (fixture: ReturnType<typeof sourceCaseFixture>) => {
+      const target = fixture.frozenEvents.find(event => event.type === 'assistant/message') as any
+      target.data.turn = 5
+      const digest = `sha256:${createHash('sha256')
+        .update(JSON.stringify(fixture.frozenEvents), 'utf8').digest('hex')}` as const
+      fixture.signal.sessionDigest = digest
+      fixture.use.sessionDigest = digest
+    }],
+    ['changed accepted evidence', (fixture: ReturnType<typeof sourceCaseFixture>) => {
+      fixture.ctx.tianwenEvolution.getRunSkillUse = () => ({
+        runId: `run:${'3'.repeat(64)}`, sessionId: fixture.sessionId,
+        sessionDigest: fixture.sessionDigest, acceptanceEvidenceId: sha256('foreign'),
+      })
+    }],
+    ['foreign signal scope', (fixture: ReturnType<typeof sourceCaseFixture>) => {
+      fixture.signal.scopeKey = 'project:foreign/capability:research-summary'
+    }],
+    ['stale acceptance subject', (fixture: ReturnType<typeof sourceCaseFixture>) => {
+      fixture.binding.acceptanceSubjectDigest = sha256('stale-subject')
+    }],
+  ])('rejects %s without falling back to a fixture packet', async (_name, mutate) => {
+    const fixture = sourceCaseFixture()
+    mutate(fixture)
+
+    await expect(recoverResearchSummarySourceCase(fixture.ctx as never, {
+      analysisId: `analysis:${'4'.repeat(64)}`, ticketId: fixture.ticketId,
+      sessionId: fixture.sessionId, messageId: fixture.messageId,
+      feedbackVersion: fixture.feedbackVersion, consentRevision: 1,
+      parentSessionId: fixture.sessionId, childSessionId: 'analysis-child', phase: 'running',
+    })).rejects.toThrow(/source|turn|evidence|snapshot|packet/u)
+  })
+})
 
 describe('research summary first-step admission', () => {
   it('freezes the first task result when an ordinary follow-up is already queued', async () => {

@@ -920,7 +920,13 @@ function refreshCompletedRunRoles(
 
 function stoppedReason(code: ControlledLifecycleRunnerFailureCode):
   Extract<ControlledLifecycleReceipt, { readonly status: 'stopped' }>['reasonCode'] {
-  return code === 'retry-policy-mismatch' ? 'selection-mismatch' : code
+  switch (code) {
+    case 'retry-policy-mismatch': return 'selection-mismatch'
+    case 'original-source-fidelity-not-improved':
+    case 'paired-source-fidelity-regression':
+      return 'evaluation-failed'
+    default: return code
+  }
 }
 
 function evaluationStoppedReason(
