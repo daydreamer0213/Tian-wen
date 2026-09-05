@@ -566,15 +566,15 @@ export class TianwenLearningConsentAgentService extends Service {
         learningSources: { scope: LEARNING_SOURCES_SCOPE, configured: this.learningSkillSources.length, skills: [], available: false },
       }
     }
-    let eligible: Awaited<ReturnType<typeof inspectLearningSkills>>['skills'] = []
+    let inspection: Awaited<ReturnType<typeof inspectLearningSkills>>
     try {
-      eligible = (await inspectLearningSkills(
+      inspection = await inspectLearningSkills(
         registry,
         this.learningSkillSources,
         RESEARCH_SUMMARY_SCOPE,
         undefined,
         lookup,
-      )).skills
+      )
     } catch (error) {
       signal?.throwIfAborted()
       return {
@@ -586,6 +586,16 @@ export class TianwenLearningConsentAgentService extends Service {
       }
     }
     signal?.throwIfAborted()
+    if (!inspection.complete) {
+      return {
+        ...snapshot,
+        currentSession,
+        history,
+        nativeSkills,
+        learningSources: { scope: LEARNING_SOURCES_SCOPE, configured: this.learningSkillSources.length, skills: [], available: false },
+      }
+    }
+    const eligible = inspection.skills
     return {
       ...snapshot,
       currentSession,

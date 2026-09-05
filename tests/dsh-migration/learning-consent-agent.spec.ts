@@ -311,6 +311,52 @@ describe('Tianwen main-chat learning consent tool', () => {
     }
   })
 
+  it('keeps native Skills available when the subsequent learning-source snapshot is incomplete', async () => {
+    const skill = {
+      name: 'reviewed-native', description: 'Review one bounded fact.', content: 'Use only the supplied fact.',
+      source: 'test', provider: 'test-reviewed', invocation: { modelInvocable: true, userInvocable: true },
+    }
+    const admission = {
+      name: skill.name, provider: skill.provider, digest: sha256(skill),
+      origin: 'https://example.invalid/reviewed-native', revision: 'v1', license: 'MIT' as const,
+      reviewedAt: '2026-09-05T00:00:00.000Z', kind: 'self-contained-text' as const,
+      runtime: '0.1.1-rc.2' as const, scopeKey: RESEARCH_SUMMARY_SCOPE,
+      toolName: 'submit_research_summary',
+    }
+    const mounted = await mountConsentRuntime('learning-status-incomplete-sources', [], {
+      nativeSkills: [skill], learningSkillSources: [admission],
+    })
+    const main = await mounted.ctx.agents.create({
+      sessionId: SessionId(`consent-main-${randomUUID()}`),
+      meta: { cwd: 'D:/status-workspace' },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      const snapshot = mounted.ctx.skills.snapshot.bind(mounted.ctx.skills)
+      const snapshots = vi.spyOn(mounted.ctx.skills, 'snapshot')
+        .mockImplementationOnce(snapshot)
+        .mockImplementationOnce(async options => ({ ...await snapshot(options), complete: false }))
+      const signal = new AbortController().signal
+      const status = await executeLearningStatus(mounted.ctx, main.agent, signal)
+      expect(status).toMatchObject({
+        isError: false,
+        value: {
+          nativeSkills: { available: true, skills: [{ name: skill.name, description: skill.description }] },
+          learningSources: { configured: 1, skills: [], available: false },
+        },
+      })
+      expect(status.value?.learningSources).not.toHaveProperty('eligible')
+      expect(snapshots.mock.calls).toEqual([
+        [{ cwd: 'D:/status-workspace', scope: main.agent, signal }],
+        [{ cwd: 'D:/status-workspace', scope: main.agent, signal }],
+      ])
+      expect(mounted.adapter.requests).toHaveLength(0)
+    } finally {
+      await main.dispose()
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
   it('keeps an available empty admission list distinct from an unavailable catalog', async () => {
     const skill = {
       name: 'native-only', description: 'Native but not admitted.', content: 'Read one fact.',

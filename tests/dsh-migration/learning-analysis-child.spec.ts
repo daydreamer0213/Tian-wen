@@ -1006,10 +1006,22 @@ describe('native explicit-correction analysis child', () => {
       expectedText: 'Tianwen completed this Outcome learning analysis: no reusable Skill change was formed. This learning process did not rewrite the current answer, does not judge whether it is correct, and is not a business-evidence verdict. No Skill changed; no user approval or repeat-input step is pending. The user may still independently request an edit in ordinary chat.',
     },
     {
+      name: 'a new Outcome insufficient-evidence preliminary report',
+      submission: insufficientEvidence(),
+      statusPatch: { source: 'outcome' as const },
+      expectedText: 'Tianwen completed this Outcome learning analysis: evidence was insufficient for a reusable Skill change. This learning process did not rewrite the current answer, does not judge whether it is correct, and is not a business-evidence verdict. No Skill changed; no user approval or repeat-input step is pending. The user may still independently request an edit in ordinary chat.',
+    },
+    {
       name: 'a new skill-change report',
       submission: skillChange(),
       expectedText: 'Tianwen analysis proposed a Skill improvement; it is not active. The learning loop will automatically evaluate it and, if it passes, activate it for future Runs. Progress and the final outcome will appear in this main conversation. No separate user approval or child-session action is pending.',
     },
+    ...(['pending', 'delivered'] as const).map(state => ({
+      name: `a ${state} durable legacy skill-change report`,
+      submission: skillChange(),
+      legacyState: state,
+      expectedText: 'Tianwen analysis verdict: skill-change. Next governed stage: governed-candidate.',
+    })),
     ...(['no-case', 'insufficient-evidence'] as const).flatMap(verdict =>
       (['pending', 'delivered'] as const).map(state => ({
         name: `a ${state} durable legacy ${verdict} report`,

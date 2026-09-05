@@ -1445,6 +1445,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
   }, 120_000)
 
   it('cold-resumes only the exact bound child to deliver a pending report without a model turn', async () => {
+    const expectedReportText = 'Tianwen 已接收并分析这条反馈：未形成可复用的 Skill 变更。本次学习过程未改写当前回答，不判断它是否正确，也不是业务证据结论。未改变任何 Skill；没有待用户批准或重复提交反馈的步骤。请勿要求用户再次提交这条反馈。用户仍可在普通对话中独立请求修改当前回答。'
     const fixtureRoot = root('cold-terminal-report')
     let recoveryRoot = fixtureRoot
     const spawnProvider = { ...nativeProvider, name: 'spawn' }
@@ -1642,13 +1643,13 @@ describe('explicit-correction controlled learning-loop executor', () => {
         event.type === 'user/message'
         && event.data.source?.kind === 'subagent-report'
         && String(event.data.source.senderSessionId) === requested.childSessionId
-        && JSON.stringify(event.data.content).includes('未形成可学习案例'))).toHaveLength(1)
+        && event.data.content.some(block => block.type === 'text' && block.text === expectedReportText))).toHaveLength(1)
       const liveOnlyInspection = await mounted.harness.ctx.sessionPersistence.readFrom(parentId, 0)
       expect(liveOnlyInspection.events.filter(event =>
         event.type === 'user/message'
         && event.data.source?.kind === 'subagent-report'
         && String(event.data.source.senderSessionId) === requested.childSessionId
-        && JSON.stringify(event.data.content).includes('未形成可学习案例'))).toHaveLength(0)
+        && event.data.content.some(block => block.type === 'text' && block.text === expectedReportText))).toHaveLength(0)
       recoveryRoot = root('cold-terminal-report-crash-snapshot')
       cpSync(fixtureRoot, recoveryRoot, { recursive: true })
 
@@ -1661,13 +1662,13 @@ describe('explicit-correction controlled learning-loop executor', () => {
         event.type === 'user/message'
         && event.data.source?.kind === 'subagent-report'
         && String(event.data.source.senderSessionId) === requested.childSessionId
-        && JSON.stringify(event.data.content).includes('未形成可学习案例'))).toHaveLength(1)
+        && event.data.content.some(block => block.type === 'text' && block.text === expectedReportText))).toHaveLength(1)
       const sameProcessDurable = await mounted.harness.ctx.sessionPersistence.readFrom(parentId, 0)
       expect(sameProcessDurable.events.filter(event =>
         event.type === 'user/message'
         && event.data.source?.kind === 'subagent-report'
         && String(event.data.source.senderSessionId) === requested.childSessionId
-        && JSON.stringify(event.data.content).includes('未形成可学习案例'))).toHaveLength(1)
+        && event.data.content.some(block => block.type === 'text' && block.text === expectedReportText))).toHaveLength(1)
       expect(mounted.harness.ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId))
         .toMatchObject({ terminalReportDelivery: { state: 'delivered' } })
 
@@ -1706,7 +1707,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
         event.type === 'user/message'
         && event.data.source?.kind === 'subagent-report'
         && String(event.data.source.senderSessionId) === requested.childSessionId
-        && JSON.stringify(event.data.content).includes('未形成可学习案例'))).toHaveLength(1)
+        && event.data.content.some(block => block.type === 'text' && block.text === expectedReportText))).toHaveLength(1)
 
       await mounted.dispose()
       mounted = await mountControlledRuntime(recoveryRoot, [])
@@ -1737,7 +1738,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
         event.type === 'user/message'
         && event.data.source?.kind === 'subagent-report'
         && String(event.data.source.senderSessionId) === requested.childSessionId
-        && JSON.stringify(event.data.content).includes('未形成可学习案例'))).toHaveLength(1)
+        && event.data.content.some(block => block.type === 'text' && block.text === expectedReportText))).toHaveLength(1)
     } finally {
       if (analysisId !== undefined) expect(analysisId).toMatch(/^analysis:/u)
       await mounted.dispose()

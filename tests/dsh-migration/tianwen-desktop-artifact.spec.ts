@@ -131,7 +131,7 @@ describe('Tianwen Desktop B1 artifact audit', () => {
 })
 
 describe('Tianwen Desktop Runtime distribution', () => {
-  it('pins preview.12 to the exact embedded Runtime 0.1.12 resource', () => {
+  it('pins preview.13 to the exact embedded Runtime 0.1.12 resource', () => {
     const desktopManifest = JSON.parse(readFileSync(resolve(
       'packages/tianwen-desktop-host/package.json',
     ), 'utf8')) as {
