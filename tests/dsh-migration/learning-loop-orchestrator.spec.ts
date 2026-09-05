@@ -141,6 +141,29 @@ describe('durable learning-loop phase table', () => {
     expect(report).toEqual({ text, digest: reportDigest })
   })
 
+  it.each([
+    ['no-case', 'Tianwen 分析结论：未形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'],
+    ['insufficient-evidence', 'Tianwen 分析结论：证据不足以形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'],
+  ] as const)('makes a new %s terminal report distinguish reusable-Skill evidence from the current answer', (phase, text) => {
+    const report = learningLoopTerminalReport({ ...base, phase })
+    expect(report).toEqual({
+      text,
+      digest: sha256({ kind: 'terminal-governed-outcome', text }),
+    })
+  })
+
+  it.each([
+    ['no-case', 'Tianwen 分析结论：未形成可学习案例，未改变任何 Skill。'],
+    ['insufficient-evidence', 'Tianwen 分析结论：证据不足，未改变任何 Skill。'],
+  ].flatMap(([phase, text]) =>
+    (['pending', 'delivered'] as const).map(state => [phase, state, text] as const),
+  ))('preserves a %s durable legacy terminal report when %s', (phase, state, text) => {
+    const reportDigest = sha256({ kind: 'terminal-governed-outcome', text })
+    expect(learningLoopTerminalReport({
+      ...base, phase, terminalReportDelivery: { state, reportDigest },
+    })).toEqual({ text, digest: reportDigest })
+  })
+
   it('keeps a recovered transition terminal when support is later unavailable', async () => {
     const report = vi.fn()
     const invalidate = vi.fn()

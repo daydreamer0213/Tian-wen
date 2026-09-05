@@ -524,8 +524,8 @@ function unavailableExecutor(): never { throw new Error('controlled learning-loo
 
 function terminalReportText(status: LearningLoopPhaseStatus): string {
   switch (status.phase) {
-    case 'no-case': return 'Tianwen 分析结论：未形成可学习案例，未改变任何 Skill。'
-    case 'insufficient-evidence': return 'Tianwen 分析结论：证据不足，未改变任何 Skill。'
+    case 'no-case': return 'Tianwen 分析结论：未形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'
+    case 'insufficient-evidence': return 'Tianwen 分析结论：证据不足以形成可复用的 Skill 变更；这不代表当前回答正确，也不阻止根据用户反馈更正当前回答。未改变任何 Skill。'
     case 'protocol-unavailable': return 'Tianwen 分析结论：受控评测协议不可用，未改变任何 Skill。'
     case 'candidate-rejected': return status.shadowId === undefined
       ? 'Tianwen 分析结论：候选 Skill 未通过评估，未改变未来 Run。'
@@ -544,8 +544,15 @@ export function learningLoopTerminalReport(status: LearningLoopPhaseStatus): {
   readonly digest: ReturnType<typeof sha256>
 } {
   const legacyRejection = 'Tianwen 分析结论：候选 Skill 未通过盲评，未改变未来 Run。'
+  const legacyText = status.phase === 'no-case'
+    ? 'Tianwen 分析结论：未形成可学习案例，未改变任何 Skill。'
+    : status.phase === 'insufficient-evidence'
+      ? 'Tianwen 分析结论：证据不足，未改变任何 Skill。'
+      : undefined
   // Resume an already-durable delivery with its exact text and identity.
-  const text = status.phase === 'candidate-rejected' && status.shadowId === undefined
+  const text = legacyText !== undefined
+    && status.terminalReportDelivery?.reportDigest === sha256({ kind: 'terminal-governed-outcome', text: legacyText })
+    ? legacyText : status.phase === 'candidate-rejected' && status.shadowId === undefined
     && status.terminalReportDelivery?.reportDigest === sha256({ kind: 'terminal-governed-outcome', text: legacyRejection })
     ? legacyRejection : terminalReportText(status)
   return {

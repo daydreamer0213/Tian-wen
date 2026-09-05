@@ -201,8 +201,11 @@ function reportContent(submission: LearningAnalysisSubmission, status: LearningA
     text: `Tianwen analysis verdict: ${submission.verdict}. Next governed stage: ${stage}.`,
   }]
   // Preserve the exact content of an already-durable delivery across upgrades.
-  if (submission.verdict !== 'skill-change'
-    || status.reportDelivery?.reportDigest === sha256(legacy)) return legacy
+  if (status.reportDelivery?.reportDigest === sha256(legacy)) return legacy
+  if (submission.verdict !== 'skill-change') return [{
+    type: 'text' as const,
+    text: `Tianwen analysis verdict: ${submission.verdict} for a reusable Skill change. This does not establish whether the current answer is correct and does not block correcting the current answer from the user's feedback. No Skill changed.`,
+  }]
   return [{
     type: 'text' as const,
     text: 'Tianwen analysis proposed a Skill improvement; it is not active. The learning loop will automatically evaluate it and, if it passes, activate it for future Runs. Progress and the final outcome will appear in this main conversation. No separate user approval or child-session action is pending.',

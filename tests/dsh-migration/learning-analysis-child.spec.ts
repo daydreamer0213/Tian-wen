@@ -277,6 +277,15 @@ function noCase(): LearningAnalysisSubmission {
   }
 }
 
+function insufficientEvidence(): LearningAnalysisSubmission {
+  return {
+    verdict: 'insufficient-evidence',
+    hypothesis: 'The correction needs more evidence before a reusable change.',
+    supportingEvidenceIds: [evidenceId],
+    counterevidenceIds: [],
+  }
+}
+
 describe('native explicit-correction analysis child', () => {
   it('permits at most one outcome exploration and otherwise requires direct final analysis', () => {
     const guidance = outcomeExplorationGuidance().join('\n')
@@ -979,11 +988,33 @@ describe('native explicit-correction analysis child', () => {
     expect(subject.evolution.recordLearningAnalysisChildStarted).not.toHaveBeenCalled()
   })
 
-  it.each([false, true])('installs the exact submission tool for a cold child (legacy report: %s)', async legacyReport => {
+  it.each([
+    {
+      name: 'a new no-case preliminary report',
+      submission: noCase(),
+      expectedText: "Tianwen analysis verdict: no-case for a reusable Skill change. This does not establish whether the current answer is correct and does not block correcting the current answer from the user's feedback. No Skill changed.",
+    },
+    {
+      name: 'a new insufficient-evidence preliminary report',
+      submission: insufficientEvidence(),
+      expectedText: "Tianwen analysis verdict: insufficient-evidence for a reusable Skill change. This does not establish whether the current answer is correct and does not block correcting the current answer from the user's feedback. No Skill changed.",
+    },
+    {
+      name: 'a new skill-change report',
+      submission: skillChange(),
+      expectedText: 'Tianwen analysis proposed a Skill improvement; it is not active. The learning loop will automatically evaluate it and, if it passes, activate it for future Runs. Progress and the final outcome will appear in this main conversation. No separate user approval or child-session action is pending.',
+    },
+    ...(['no-case', 'insufficient-evidence'] as const).flatMap(verdict =>
+      (['pending', 'delivered'] as const).map(state => ({
+        name: `a ${state} durable legacy ${verdict} report`,
+        submission: verdict === 'no-case' ? noCase() : insufficientEvidence(),
+        legacyState: state,
+        expectedText: `Tianwen analysis verdict: ${verdict}. Next governed stage: ${verdict === 'no-case' ? 'stopped-no-case' : 'stopped-insufficient-evidence'}.`,
+      }))),
+  ])('installs the exact submission tool for a cold child with %s', async ({ submission, expectedText, legacyState }) => {
     let setup: ((ctx: unknown) => () => void) | undefined
     let definition: ToolDefinition | undefined
     const running = status({ phase: 'running' })
-    const legacyText = 'Tianwen analysis verdict: skill-change. Next governed stage: governed-candidate.'
     const recordLearningAnalysisSubmission = vi.fn(input => ({
       ...running,
       phase: 'running',
@@ -1087,35 +1118,38 @@ describe('native explicit-correction analysis child', () => {
       'counterevidenceIds',
     ])
 
-    if (legacyReport) Object.assign(running, {
-      submission: skillChange(),
+    if (legacyState !== undefined) Object.assign(running, {
+      submission,
       reportDelivery: {
         analysisId: running.analysisId, parentSessionId: running.parentSessionId,
         childSessionId: running.childSessionId,
-        reportDigest: sha256([{ type: 'text', text: legacyText }]),
-        state: 'pending', intentRecordedAt: '2026-09-02T00:00:01.000Z',
+        reportDigest: sha256([{ type: 'text', text: expectedText }]),
+        state: legacyState, intentRecordedAt: '2026-09-02T00:00:01.000Z',
       },
     })
-    const result = await definition!.execute(skillChange(), {
+    const result = await definition!.execute(submission, {
       agent: child,
       signal: AbortSignal.timeout(10_000),
       concludeTurn,
     } as never)
 
     expect(result).toEqual({
-      verdict: 'skill-change',
-      nextStage: 'governed-candidate',
+      verdict: submission.verdict,
+      nextStage: submission.verdict === 'skill-change'
+        ? 'governed-candidate'
+        : submission.verdict === 'no-case' ? 'stopped-no-case' : 'stopped-insufficient-evidence',
     })
-    expect(recordLearningAnalysisSubmission).toHaveBeenCalledTimes(legacyReport ? 0 : 1)
+    expect(recordLearningAnalysisSubmission).toHaveBeenCalledTimes(legacyState === undefined ? 1 : 0)
     expect(reportFrom).toHaveBeenCalledWith(child, [{
       type: 'text',
-      text: legacyReport ? legacyText : 'Tianwen analysis proposed a Skill improvement; it is not active. The learning loop will automatically evaluate it and, if it passes, activate it for future Runs. Progress and the final outcome will appear in this main conversation. No separate user approval or child-session action is pending.',
+      text: expectedText,
     }], {
       delivery: 'next-step',
       signal: expect.any(AbortSignal),
     })
     expect(JSON.stringify(reportFrom.mock.calls)).not.toContain('Keep the answer concrete')
     expect(JSON.stringify(reportFrom.mock.calls)).not.toContain('omitted a concrete')
+    expect(JSON.stringify(reportFrom.mock.calls)).not.toContain(submission.hypothesis)
     expect(concludeTurn).toHaveBeenCalledOnce()
     dispose()
   })
@@ -1367,6 +1401,10 @@ describe('native explicit-correction analysis child', () => {
       ...current,
       reportDelivery: {
         ...current.reportDelivery!, state: 'pending',
+        reportDigest: sha256([{
+          type: 'text',
+          text: 'Tianwen analysis verdict: no-case. Next governed stage: stopped-no-case.',
+        }]),
         intentRecordedAt: '2026-09-02T00:00:02.000Z',
       },
     }
