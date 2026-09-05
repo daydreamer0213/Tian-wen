@@ -1,7 +1,10 @@
 /** The durable Evolution record is the queue; this service owns no jobs. */
 import { Service, SessionId } from '@tianwen/dsh-compat'
 import type { Agent, Context } from '@tianwen/dsh-compat'
-import { ControlledSkillEvaluationPreflightError } from '@tianwen/runtime'
+import {
+  ControlledSkillEvaluationPreflightError,
+  TIANWEN_CONTROLLED_AGENT_PRESET,
+} from '@tianwen/runtime'
 import {
   sha256,
   type LearningExplorationStatus,
@@ -989,6 +992,7 @@ export class TianwenLearningLoopService extends Service {
   }
 
   continueFromMain(parent: Agent): number {
+    if (parent.session.header.agentPreset === TIANWEN_CONTROLLED_AGENT_PRESET) return 0
     let scheduled = 0
     for (const status of this.ctx.tianwenEvolution.listLearningAnalyses()) {
       if (!exactLearningAnalysisMainParent(this.ctx, parent, status)) continue

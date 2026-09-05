@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@tianwen/dsh-compat'
 import { sha256 } from '../../packages/tianwen-evolution/dist/index.js'
-import { ControlledSkillEvaluationPreflightError } from '../../packages/tianwen-runtime/dist/index.js'
+import {
+  ControlledSkillEvaluationPreflightError,
+  TIANWEN_CONTROLLED_AGENT_PRESET,
+} from '../../packages/tianwen-runtime/dist/index.js'
 import { LearningExplorationInterruptedError } from '../../packages/tianwen-runtime-bundle/src/learning-exploration.js'
 
 import {
@@ -580,6 +583,13 @@ describe('durable learning-loop phase table', () => {
     const staleParent = {
       session: { id: 'main', header: { origin: 'user' }, events: [] },
     } as never
+    const controlledParent = {
+      session: {
+        id: 'controlled-main',
+        header: { origin: 'user', agentPreset: TIANWEN_CONTROLLED_AGENT_PRESET },
+        events: [],
+      },
+    } as never
     const statuses = [
       { ...base, analysisId: `analysis:${'1'.repeat(64)}`, phase: 'candidate-ready' },
       { ...base, analysisId: `analysis:${'2'.repeat(64)}`, phase: 'failed', resumePhase: 'candidate-ready' },
@@ -590,11 +600,20 @@ describe('durable learning-loop phase table', () => {
       { ...base, analysisId: `analysis:${'7'.repeat(64)}`, phase: 'pending-parent' },
       { ...base, analysisId: `analysis:${'8'.repeat(64)}`, phase: 'running' },
       { ...base, analysisId: `analysis:${'9'.repeat(64)}`, phase: 'shadow-ready' },
+      {
+        ...base,
+        analysisId: `analysis:${'a'.repeat(64)}`,
+        phase: 'candidate-ready',
+        sessionId: 'controlled-main',
+        parentSessionId: 'controlled-main',
+      },
     ]
     let consentEnabled = true
     ctx.provide('agents', {
-      get: (id: string) => String(id) === 'main' ? parent : undefined,
-      list: () => [parent],
+      get: (id: string) => String(id) === 'main'
+        ? parent
+        : String(id) === 'controlled-main' ? controlledParent : undefined,
+      list: () => [parent, controlledParent],
     } as never)
     ctx.provide('tianwenEvolution', {
       listLearningAnalyses: () => statuses,
@@ -617,6 +636,8 @@ describe('durable learning-loop phase table', () => {
       ])
 
       expect(service.continueFromMain(staleParent)).toBe(0)
+      expect(service.continueFromMain(controlledParent)).toBe(0)
+      expect(schedule).toHaveBeenCalledTimes(5)
       consentEnabled = false
       expect(service.continueFromMain(parent)).toBe(0)
       expect(schedule).toHaveBeenCalledTimes(5)

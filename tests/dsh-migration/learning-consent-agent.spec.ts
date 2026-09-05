@@ -16,7 +16,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { apply as applyCore } from '../../packages/tianwen-runtime/src/index.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
-import { RESEARCH_SUMMARY_SCOPE } from '../../packages/tianwen-runtime/src/index.js'
+import {
+  RESEARCH_SUMMARY_SCOPE,
+  TIANWEN_CONTROLLED_AGENT_PRESET,
+} from '../../packages/tianwen-runtime/src/index.js'
 import {
   LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID,
   LEARNING_CONSENT_NOTICE_TEXT,
@@ -427,6 +430,11 @@ describe('Tianwen main-chat learning consent tool', () => {
   it('offers an exact-empty main continuation tool with bounded acknowledgements', async () => {
     const mounted = await mountConsentRuntime('learning-continue-tool')
     const { main, child } = await createMainAndChild(mounted.ctx)
+    const controlled = await mounted.ctx.agents.create({
+      sessionId: SessionId(`consent-controlled-${randomUUID()}`),
+      meta: { agentPreset: TIANWEN_CONTROLLED_AGENT_PRESET },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
     try {
       const schema = mounted.ctx.tools.schemas(main.agent).find(tool =>
         tool.name === 'tianwen_learning_continue')
@@ -439,12 +447,16 @@ describe('Tianwen main-chat learning consent tool', () => {
       expect(JSON.stringify(schema)).not.toContain('sessionId')
       expect(mounted.ctx.tools.schemas(child.agent).some(tool =>
         tool.name === 'tianwen_learning_continue')).toBe(false)
+      expect(mounted.ctx.tools.schemas(controlled.agent).some(tool =>
+        tool.name === 'tianwen_learning_continue')).toBe(false)
 
       const definition = mounted.ctx.tools.get('tianwen_learning_continue', main.agent)
       expect(definition).toBeDefined()
       await expect(definition!.execute({}, { agent: undefined } as never))
         .rejects.toThrow(/only in a main Session/u)
       await expect(definition!.execute({}, { agent: child.agent } as never))
+        .rejects.toThrow(/only in a main Session/u)
+      await expect(definition!.execute({}, { agent: controlled.agent } as never))
         .rejects.toThrow(/only in a main Session/u)
       await expect(executeLearningContinue(mounted.ctx, main.agent, { analysisId: 'private-target' }))
         .resolves.toMatchObject({ isError: true })
@@ -468,6 +480,7 @@ describe('Tianwen main-chat learning consent tool', () => {
       expect(continueFromMain).toHaveBeenLastCalledWith(main.agent)
       expect(mounted.adapter.requests).toHaveLength(0)
     } finally {
+      await controlled.dispose()
       await child.dispose()
       await main.dispose()
       await mounted.ctx.fiber.dispose()
