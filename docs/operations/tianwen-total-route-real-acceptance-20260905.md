@@ -140,6 +140,26 @@ independent evaluation, promotion or demonstrated future-task improvement.
   [main-session recovery repair](../superpowers/specs/2026-09-05-tianwen-main-learning-recovery-design.md)
   addresses the actual progress/ownership confusion without analyst expansion.
 
+### Main recovery repair checkpoint (2026-09-06 local time)
+
+Main-session recovery source `916fb54` passed 83 focused tests and typecheck.
+Independent review identified a missing controlled-Agent exclusion in the newly
+public service entry. Test-first fix `30726e0` reproduced the defect (one failed,
+77 passed), then passed all 78 covering tests plus typecheck/diff check. Scoped
+re-review confirmed both the service guard and direct-service/tool tests; no open
+finding remains for this task. The new native continuation action delegates to
+the retained exact-parent lane and the status includes a bounded safe current-main
+audit, rather than exposing private analysis text or inferring progress from counts.
+It is not yet deployed into either the isolated server or daily installation.
+
+Further [fixed tool-preflight substage diagnosis](../superpowers/specs/2026-09-05-tianwen-tool-preflight-detail-design.md)
+is in progress because the existing primary code still folds several failing
+boundaries together. No guessed parallelism/Context repair has been applied.
+The actual managed and Web Runtime files were rechecked at the retained delivered
+hash `7f7f6b42f6293a8d2c2a0513417bb6ff7157fc825146f54a3344f836c2e9a07b`;
+both installed versions are `0.1.12`, and the original 30 user data files retain
+their recorded aggregate hash.
+
 ## Existing-source review
 
 The repository's `repo-task` and the installed official DSH package's two Cordis

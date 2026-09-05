@@ -34,8 +34,8 @@
 - Consider resumable only `pending-parent`, `running`, `candidate-ready`, `shadow-ready`, or `failed` with a valid retry phase. Terminal, unrelated or inactive-support work is not resumed.
 - Acknowledge `{ state: 'scheduled', scheduledAnalyses: number }` if valid work was scheduled, `{ state: 'no-resumable-work', scheduledAnalyses: 0 }` otherwise, and `{ state: 'unavailable', scheduledAnalyses: 0 }` if the loop service is absent. The response must explicitly say scheduling does not imply evaluation success.
 
-- [ ] Add focused failing tests for a failed/candidate-ready audit with existing candidate/evaluation receipts and recovery phase; current-main isolation, newest-first cap/truncation, and ledger/model-call immutability.
-- [ ] Add focused failing tests for empty arguments, main-only registration/direct-call protection, retained-work scheduling, missing service, terminal/revoked/unrelated/recycled-lifecycle no-op, and repeated scheduling coalescing. Reuse existing mounted public service fixtures; do not test only a mock matcher.
-- [ ] Implement the smallest changes above. Do not expand the regex or add analyst tools.
-- [ ] Run both focused migration suites plus any modified composition suite, root typecheck and `git diff --check`. Do not run the full repository suite in this bounded task; the route's final gate owns that.
-- [ ] Commit only owned files, self-review, and write complete RED/GREEN evidence in the task report. Return commit IDs, concise test summary and concerns for independent review.
+- [x] Add focused failing tests for a failed/candidate-ready audit with existing candidate/evaluation receipts and recovery phase; current-main isolation, newest-first cap/truncation, and ledger/model-call immutability.
+- [x] Add focused failing tests for empty arguments, main-only registration/direct-call protection, retained-work scheduling, missing service, terminal/revoked/unrelated/recycled-lifecycle no-op, and repeated scheduling coalescing. Reuse existing mounted public service fixtures; do not test only a mock matcher.
+- [x] Implement the smallest changes above. Do not expand the regex or add analyst tools.
+- [x] Run both focused migration suites plus any modified composition suite, root typecheck and `git diff --check`. Do not run the full repository suite in this bounded task; the route's final gate owns that.
+- [x] Commit only owned files, self-review, and write complete RED/GREEN evidence in the task report. Return commit IDs, concise test summary and concerns for independent review.

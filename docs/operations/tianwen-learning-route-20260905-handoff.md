@@ -1,5 +1,19 @@
 # 2026-09-05 learning-route handoff
 
+## Total-route genuine acceptance is still in progress
+
+The user's subsequent instruction is to finish the full four-stage route, not
+only the finite delivery below. Read [the current total-route record](tianwen-total-route-real-acceptance-20260905.md)
+and its plan first. Additional genuine browser use has produced a real Candidate
+from accurate native feedback, but it stops at tool preflight before evaluation
+model calls. Retained source, feedback, Candidate and protocol are not regenerated.
+Reviewed main-session status/recovery repairs and further diagnostics are on the
+development branch, not in the daily installation. A precisely reviewed external
+summary source is approved only for isolated read-only acceptance and prepared,
+but not yet admitted or model-adapted. Genuine exploration, source adoption, full
+evaluation/activation and future-task improvement remain open. Historical finite
+engineering completion below must not be read as total-route completion.
+
 ## Latest bugfix acceptance and completed delivery
 
 See [the real-user repair and retest record](tianwen-real-user-retest-20260905.md)
