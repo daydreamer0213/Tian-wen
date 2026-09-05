@@ -105,7 +105,7 @@ afterEach(() => {
 describe('Tianwen runtime Outcome intake', () => {
   it('derives a v3 Run binding identity from the real Session header', async () => {
     const harness = await mount([])
-    const rawCwd = 'D:/private/runtime-binding'
+    const rawCwd = join(evolutionRoot(), 'private-runtime-binding')
     const handle = await harness.ctx.agents.create({
       sessionId: SessionId(`outcome-binding-v3-${randomUUID()}`),
       meta: { cwd: rawCwd },
