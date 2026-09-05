@@ -124,7 +124,7 @@ function completedSession(
     version: SESSION_FORMAT_VERSION,
     id: sessionId,
     createdAt,
-    ...(cwd === undefined ? {} : { cwd }),
+    ...(cwd === undefined ? {} : { cwd: resolve(cwd) }),
     ...(lineage === undefined ? {} : {
       origin: lineage.origin,
       ...(lineage.parentSession === undefined
@@ -564,6 +564,7 @@ describe('Tianwen DSH Message Feedback bridge', () => {
       const pending = await mounted.bridge.reconcileSession(String(session.id))
       expect(pending).toMatchObject({ state: 'pending', sessionId: String(session.id) })
       expect(JSON.stringify(pending)).not.toContain(rawCwd)
+      expect(JSON.stringify(pending)).not.toContain(resolve(rawCwd))
       expect(JSON.stringify(pending)).not.toContain(privateNote)
       expect(feedback.rows.get(String(session.id))).toHaveLength(1)
       expect(mounted.ctx.tianwenEvolution
@@ -1319,10 +1320,12 @@ describe('Tianwen DSH Message Feedback bridge', () => {
         .getLearningIntakeStatus(String(workspace.id), 'message-workspace')?.scopeKey
       expect(workspaceScope).toMatch(/^workspace:sha256:[0-9a-f]{64}$/u)
       expect(workspaceScope).not.toContain(rawCwd)
+      expect(workspaceScope).not.toContain(resolve(rawCwd))
       expect(mounted.ctx.tianwenEvolution
         .getLearningIntakeStatus(String(profile.id), 'message-profile')?.scopeKey)
         .toBe('profile:tianwen')
       expect(JSON.stringify(results)).not.toContain(rawCwd)
+      expect(JSON.stringify(results)).not.toContain(resolve(rawCwd))
       expect(JSON.stringify(results)).not.toContain('Workspace note.')
     } finally {
       await mounted.ctx.fiber.dispose()
