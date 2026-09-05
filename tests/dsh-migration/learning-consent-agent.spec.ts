@@ -124,6 +124,20 @@ async function executeLearningStatus(
   })
 }
 
+async function executeLearningContinue(
+  ctx: Awaited<ReturnType<typeof mountConsentRuntime>>['ctx'],
+  agent: Agent | undefined,
+  args: unknown = {},
+) {
+  return ctx.tools.execute({
+    callId: CallId(`learning-continue-${randomUUID()}`),
+    name: 'tianwen_learning_continue',
+    arguments: args,
+    ...(agent === undefined ? {} : { agent }),
+    signal: new AbortController().signal,
+  })
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
   for (const root of roots.splice(0)) {
@@ -307,6 +321,154 @@ describe('Tianwen main-chat learning consent tool', () => {
       expect(readFileSync(ledgerPath, 'utf8')).toBe(beforeLedger)
     } finally {
       await ordinary.dispose()
+      await main.dispose()
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('projects only the current main learning audit newest-first with a bounded safe ledger', async () => {
+    const mounted = await mountConsentRuntime('learning-status-current-audit')
+    const { main, child } = await createMainAndChild(mounted.ctx)
+    try {
+      const mainSessionId = String(main.agent.session.id)
+      mounted.ctx.tianwenEvolution.recordLearningAnalysisConsent({
+        revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v2',
+      })
+      const analyses = Array.from({ length: 10 }, (_, index) => ({
+        analysisId: `analysis:${String(index).padStart(64, '0')}`,
+        ticketId: `ticket:${String(index).padStart(64, '0')}`,
+        sessionId: mainSessionId,
+        messageId: `reply-${index}`,
+        feedbackVersion: `feedback-${index}`,
+        consentRevision: 1,
+        parentSessionId: mainSessionId,
+        childSessionId: `child-${index}`,
+        phase: index === 9 ? 'failed' : index === 8 ? 'candidate-ready' : 'running',
+        requestedAt: `2026-09-05T00:00:${String(index).padStart(2, '0')}.000Z`,
+        updatedAt: `2026-09-05T00:00:${String(index).padStart(2, '0')}.000Z`,
+        submission: {
+          verdict: 'skill-change',
+          rationale: `PRIVATE RATIONALE ${index}`,
+          candidatePatch: { content: `PRIVATE CORRECTION ${index}` },
+          supportingEvidenceIds: [`sha256:${String(index).padStart(64, 'a')}`],
+          counterevidenceIds: [],
+        },
+        submissionDigest: `sha256:${String(index).padStart(64, 'b')}`,
+        ...(index < 8 ? {} : {
+          candidateId: `candidate:${index}`,
+          evaluationId: `evaluation:${index}`,
+          evaluationResultDigest: `sha256:${String(index).padStart(64, 'c')}`,
+        }),
+        ...(index === 9 ? { resumePhase: 'candidate-ready' } : {}),
+      }))
+      analyses.push({
+        ...analyses[9]!,
+        analysisId: `analysis:${'f'.repeat(64)}`,
+        ticketId: `ticket:${'f'.repeat(64)}`,
+        sessionId: 'unrelated-main', parentSessionId: 'unrelated-main',
+        updatedAt: '2026-09-05T01:00:00.000Z',
+      })
+      vi.spyOn(mounted.ctx.tianwenEvolution, 'listLearningAnalyses')
+        .mockReturnValue(analyses as never)
+      const ledgerPath = join(mounted.root, 'evolution', 'ledger.jsonl')
+      const beforeLedger = readFileSync(ledgerPath, 'utf8')
+      const beforeRequests = mounted.adapter.requests.length
+
+      const result = await executeLearningStatus(mounted.ctx, main.agent)
+
+      expect(result).toMatchObject({
+        isError: false,
+        value: {
+          guidance: expect.stringMatching(/Runtime owns evaluation and activation.*unchanged counts do not prove unchanged evaluation.*tianwen_learning_continue/isu),
+          currentSession: {
+            learning: {
+              owner: 'tianwen-runtime',
+              truncated: true,
+            },
+          },
+        },
+      })
+      const learning = (result.value?.currentSession as any).learning
+      expect(learning.items).toHaveLength(8)
+      expect(learning.items[0]).toMatchObject({
+        analysisId: analyses[9]!.analysisId,
+        phase: 'failed',
+        receipts: {
+          candidateId: 'candidate:9',
+          evaluationId: 'evaluation:9',
+          evaluationResultDigest: `sha256:${'9'.padStart(64, 'c')}`,
+        },
+        recovery: { resumePhase: 'candidate-ready' },
+      })
+      expect(learning.items[1]).toMatchObject({
+        analysisId: analyses[8]!.analysisId,
+        phase: 'candidate-ready',
+        receipts: {
+          candidateId: 'candidate:8',
+          evaluationId: 'evaluation:8',
+          evaluationResultDigest: `sha256:${'8'.padStart(64, 'c')}`,
+        },
+        recovery: null,
+      })
+      expect(learning.items.map((item: { readonly analysisId: string }) => item.analysisId))
+        .toEqual(analyses.slice(2, 10).reverse().map(item => item.analysisId))
+      expect(JSON.stringify(learning)).not.toContain('PRIVATE')
+      expect(JSON.stringify(learning)).not.toContain('candidatePatch')
+      expect(JSON.stringify(learning)).not.toContain('rationale')
+      expect(readFileSync(ledgerPath, 'utf8')).toBe(beforeLedger)
+      expect(mounted.adapter.requests).toHaveLength(beforeRequests)
+    } finally {
+      await child.dispose()
+      await main.dispose()
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('offers an exact-empty main continuation tool with bounded acknowledgements', async () => {
+    const mounted = await mountConsentRuntime('learning-continue-tool')
+    const { main, child } = await createMainAndChild(mounted.ctx)
+    try {
+      const schema = mounted.ctx.tools.schemas(main.agent).find(tool =>
+        tool.name === 'tianwen_learning_continue')
+      expect(schema).toMatchObject({
+        name: 'tianwen_learning_continue',
+        parameters: { type: 'object', properties: {} },
+        description: expect.stringMatching(/natural continuation request.*does not imply evaluation success/su),
+      })
+      expect(JSON.stringify(schema)).not.toContain('analysisId')
+      expect(JSON.stringify(schema)).not.toContain('sessionId')
+      expect(mounted.ctx.tools.schemas(child.agent).some(tool =>
+        tool.name === 'tianwen_learning_continue')).toBe(false)
+
+      const definition = mounted.ctx.tools.get('tianwen_learning_continue', main.agent)
+      expect(definition).toBeDefined()
+      await expect(definition!.execute({}, { agent: undefined } as never))
+        .rejects.toThrow(/only in a main Session/u)
+      await expect(definition!.execute({}, { agent: child.agent } as never))
+        .rejects.toThrow(/only in a main Session/u)
+      await expect(executeLearningContinue(mounted.ctx, main.agent, { analysisId: 'private-target' }))
+        .resolves.toMatchObject({ isError: true })
+      await expect(executeLearningContinue(mounted.ctx, main.agent)).resolves.toMatchObject({
+        isError: false,
+        value: {
+          state: 'unavailable', scheduledAnalyses: 0,
+          guidance: expect.stringContaining('Scheduling does not imply evaluation success.'),
+        },
+      })
+
+      const continueFromMain = vi.fn(() => 0)
+      mounted.ctx.provide('tianwenLearningLoop', { continueFromMain } as never)
+      await expect(executeLearningContinue(mounted.ctx, main.agent)).resolves.toMatchObject({
+        value: { state: 'no-resumable-work', scheduledAnalyses: 0 },
+      })
+      continueFromMain.mockReturnValueOnce(2)
+      await expect(executeLearningContinue(mounted.ctx, main.agent)).resolves.toMatchObject({
+        value: { state: 'scheduled', scheduledAnalyses: 2 },
+      })
+      expect(continueFromMain).toHaveBeenLastCalledWith(main.agent)
+      expect(mounted.adapter.requests).toHaveLength(0)
+    } finally {
+      await child.dispose()
       await main.dispose()
       await mounted.ctx.fiber.dispose()
     }

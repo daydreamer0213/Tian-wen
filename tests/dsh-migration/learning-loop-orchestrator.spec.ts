@@ -572,6 +572,105 @@ describe('durable learning-loop phase table', () => {
     expect(phase).toBe('rolled-back')
   })
 
+  it('continues only retained resumable work for the exact live main lifecycle', async () => {
+    const ctx = new Context()
+    const parent = {
+      session: { id: 'main', header: { origin: 'user' }, events: [] },
+    } as never
+    const staleParent = {
+      session: { id: 'main', header: { origin: 'user' }, events: [] },
+    } as never
+    const statuses = [
+      { ...base, analysisId: `analysis:${'1'.repeat(64)}`, phase: 'candidate-ready' },
+      { ...base, analysisId: `analysis:${'2'.repeat(64)}`, phase: 'failed', resumePhase: 'candidate-ready' },
+      { ...base, analysisId: `analysis:${'3'.repeat(64)}`, phase: 'candidate-rejected' },
+      { ...base, analysisId: `analysis:${'4'.repeat(64)}`, phase: 'shadow-ready' },
+      { ...base, analysisId: `analysis:${'5'.repeat(64)}`, phase: 'running', sessionId: 'other', parentSessionId: 'other' },
+      { ...base, analysisId: `analysis:${'6'.repeat(64)}`, phase: 'failed', resumePhase: 'not-a-retry-phase' },
+      { ...base, analysisId: `analysis:${'7'.repeat(64)}`, phase: 'pending-parent' },
+      { ...base, analysisId: `analysis:${'8'.repeat(64)}`, phase: 'running' },
+      { ...base, analysisId: `analysis:${'9'.repeat(64)}`, phase: 'shadow-ready' },
+    ]
+    let consentEnabled = true
+    ctx.provide('agents', {
+      get: (id: string) => String(id) === 'main' ? parent : undefined,
+      list: () => [parent],
+    } as never)
+    ctx.provide('tianwenEvolution', {
+      listLearningAnalyses: () => statuses,
+      getLearningAnalysis: (id: string) => statuses.find(status => status.analysisId === id),
+      hasLearningAnalysisActiveSupport: (id: string) => id !== statuses[3]!.analysisId,
+      getLearningAnalysisConsent: () => ({ enabled: consentEnabled, revision: 1 }),
+    } as never)
+    const service = new TianwenLearningLoopService(ctx, {
+      timer: { now: () => 0, setTimeout: vi.fn(), clearTimeout: vi.fn() },
+    })
+    const schedule = vi.spyOn(service, 'schedule').mockResolvedValue()
+    try {
+      expect(service.continueFromMain(parent)).toBe(5)
+      expect(schedule.mock.calls.map(([analysisId]) => analysisId)).toEqual([
+        statuses[0]!.analysisId,
+        statuses[1]!.analysisId,
+        statuses[6]!.analysisId,
+        statuses[7]!.analysisId,
+        statuses[8]!.analysisId,
+      ])
+
+      expect(service.continueFromMain(staleParent)).toBe(0)
+      consentEnabled = false
+      expect(service.continueFromMain(parent)).toBe(0)
+      expect(schedule).toHaveBeenCalledTimes(5)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('coalesces repeated exact-main continuation scheduling into one live lane and one rerun', async () => {
+    const ctx = new Context()
+    const parent = {
+      session: { id: 'main', header: { origin: 'user' }, events: [] },
+    } as never
+    const status = { ...base, phase: 'candidate-ready' }
+    ctx.provide('agents', { get: () => parent, list: () => [parent] } as never)
+    ctx.provide('tianwenEvolution', {
+      listLearningAnalyses: () => [status],
+      getLearningAnalysis: () => status,
+      hasLearningAnalysisActiveSupport: () => true,
+      getLearningAnalysisConsent: () => ({ enabled: true, revision: 1 }),
+    } as never)
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>(resolve => { releaseFirst = resolve })
+    let concurrent = 0
+    let maxConcurrent = 0
+    const evaluate = vi.fn(async () => {
+      concurrent += 1
+      maxConcurrent = Math.max(maxConcurrent, concurrent)
+      if (evaluate.mock.calls.length === 1) await firstGate
+      concurrent -= 1
+    })
+    const service = new TianwenLearningLoopService(ctx, {
+      executor: {
+        freezeProtocol: vi.fn(), materializeCandidate: vi.fn(), evaluate,
+        promote: vi.fn(), rollback: vi.fn(), report: vi.fn(),
+      },
+      timer: { now: () => 0, setTimeout: vi.fn(), clearTimeout: vi.fn() },
+    })
+    try {
+      expect(service.continueFromMain(parent)).toBe(1)
+      await vi.waitFor(() => expect(evaluate).toHaveBeenCalledOnce())
+      expect(service.continueFromMain(parent)).toBe(1)
+      expect(service.continueFromMain(parent)).toBe(1)
+      releaseFirst()
+      await vi.waitFor(() => expect(evaluate).toHaveBeenCalledTimes(2))
+      await new Promise(resolve => setImmediate(resolve))
+      expect(maxConcurrent).toBe(1)
+      expect(evaluate).toHaveBeenCalledTimes(2)
+    } finally {
+      releaseFirst()
+      await ctx.fiber.dispose()
+    }
+  })
+
   it.each(['complete', 'withdraw', 'interrupt'])('runs one durable exploration, mode=%s, without an unauthorized observation', async mode => {
     const ctx = new Context()
     const parent = {

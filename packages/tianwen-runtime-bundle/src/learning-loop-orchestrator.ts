@@ -716,6 +716,13 @@ const preflightCodes = [
   'root-skill-mismatch',
 ] as const
 
+const resumableLearningPhases = new Set([
+  'pending-parent', 'running', 'candidate-ready', 'shadow-ready',
+])
+const learningRetryPhases = new Set([
+  ...resumableLearningPhases, 'promoted',
+])
+
 function safePreflightCode(error: unknown): typeof preflightCodes[number] | 'unclassified' {
   return error instanceof ControlledSkillEvaluationPreflightError
     && preflightCodes.includes(error.code)
@@ -981,15 +988,22 @@ export class TianwenLearningLoopService extends Service {
     }, LEARNING_LIVENESS_INTERVAL_MS)
   }
 
-  private continueFromMain(parent: Agent): void {
+  continueFromMain(parent: Agent): number {
+    let scheduled = 0
     for (const status of this.ctx.tianwenEvolution.listLearningAnalyses()) {
       if (!exactLearningAnalysisMainParent(this.ctx, parent, status)) continue
+      if (!this.hasActiveSupport(status)) continue
+      if (status.phase === 'failed'
+        ? !learningRetryPhases.has(status.resumePhase ?? '')
+        : !resumableLearningPhases.has(status.phase)) continue
       this.suspended.delete(status.analysisId)
       if (status.submission === undefined && ['pending-parent', 'running'].includes(status.resumePhase ?? status.phase)) {
         this.resumeRequests.add(status.analysisId)
       }
       void this.schedule(status.analysisId).catch(() => undefined)
+      scheduled += 1
     }
+    return scheduled
   }
 
   private intake(status: LearningLoopPhaseStatus): LearningLoopAdmission['intake'] {

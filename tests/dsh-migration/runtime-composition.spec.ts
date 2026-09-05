@@ -239,7 +239,8 @@ describe('@tianwen/runtime', () => {
     }>) {
       request.tools = request.tools.filter(tool =>
         tool.name !== 'tianwen_learning_consent'
-        && tool.name !== 'tianwen_learning_status')
+        && tool.name !== 'tianwen_learning_status'
+        && tool.name !== 'tianwen_learning_continue')
     }
     expect(ordinaryEnabled).toEqual(disabled.behavior)
     expect(enabled.behavior).toMatchObject({
@@ -291,6 +292,11 @@ describe('@tianwen/runtime', () => {
       expect(request.tools).toContainEqual({
         name: 'tianwen_learning_status',
         description: expect.stringContaining('current learning history'),
+        parameters: { type: 'object', properties: {} },
+      })
+      expect(request.tools).toContainEqual({
+        name: 'tianwen_learning_continue',
+        description: expect.stringContaining('natural continuation request'),
         parameters: { type: 'object', properties: {} },
       })
     }
