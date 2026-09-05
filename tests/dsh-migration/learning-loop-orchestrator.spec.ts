@@ -333,8 +333,29 @@ describe('durable learning-loop phase table', () => {
       new ControlledSkillEvaluationPreflightError('task-package-mismatch'),
       { message: 'secret-like evaluator detail', cause: 'secret-like evaluator cause' },
     ), 'task-package-mismatch'],
+    ['allowlisted tool detail', Object.assign(
+      new ControlledSkillEvaluationPreflightError('tool-surface-mismatch'),
+      {
+        detail: 'native-skill-load',
+        message: 'secret-like evaluator detail',
+        cause: 'secret-like evaluator cause',
+      },
+    ), 'tool-surface-mismatch:native-skill-load'],
+    ['detail on a different primary code', Object.assign(
+      new ControlledSkillEvaluationPreflightError('task-package-mismatch'),
+      { detail: 'native-skill-load' },
+    ), 'task-package-mismatch'],
+    ['unknown tool detail', Object.assign(
+      new ControlledSkillEvaluationPreflightError('tool-surface-mismatch'),
+      { detail: 'secret-like-unknown-detail' },
+    ), 'tool-surface-mismatch'],
     ['ordinary error', new Error('secret-like ordinary detail'), 'unclassified'],
     ['plain coded object', { code: 'task-package-mismatch', message: 'secret-like plain detail' }, 'unclassified'],
+    ['forged detailed object', {
+      code: 'tool-surface-mismatch',
+      detail: 'native-skill-load',
+      message: 'secret-like forged detail',
+    }, 'unclassified'],
     ['non-allowlisted preflight error', Object.assign(
       new ControlledSkillEvaluationPreflightError('task-package-mismatch'),
       { code: 'secret-like-non-allowlisted-code' },

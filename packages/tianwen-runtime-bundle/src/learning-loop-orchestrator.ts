@@ -719,6 +719,15 @@ const preflightCodes = [
   'root-skill-mismatch',
 ] as const
 
+const toolPreflightDetails = [
+  'research-tool-construction', 'research-tool-presence',
+  'root-schema-read', 'global-product-tool',
+  'native-skill-scope', 'native-skill-load',
+  'native-skill-missing', 'native-skill-dispose',
+  'visible-schema-shape', 'task-schema-digest',
+  'aggregate-schema-digest',
+] as const
+
 const resumableLearningPhases = new Set([
   'pending-parent', 'running', 'candidate-ready', 'shadow-ready',
 ])
@@ -726,10 +735,18 @@ const learningRetryPhases = new Set([
   ...resumableLearningPhases, 'promoted',
 ])
 
-function safePreflightCode(error: unknown): typeof preflightCodes[number] | 'unclassified' {
-  return error instanceof ControlledSkillEvaluationPreflightError
-    && preflightCodes.includes(error.code)
-    ? error.code : 'unclassified'
+function safePreflightCode(error: unknown): string {
+  if (!(error instanceof ControlledSkillEvaluationPreflightError)
+    || !preflightCodes.includes(error.code)) return 'unclassified'
+  const detail = (error as ControlledSkillEvaluationPreflightError & {
+    readonly detail?: unknown
+  }).detail
+  if (error.code === 'tool-surface-mismatch'
+    && typeof detail === 'string'
+    && (toolPreflightDetails as readonly string[]).includes(detail)) {
+    return `${error.code}:${detail}`
+  }
+  return error.code
 }
 
 /** One live-parent admission lane per durable analysis id; no in-memory queue. */

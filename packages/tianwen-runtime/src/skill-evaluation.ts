@@ -193,8 +193,24 @@ export type ControlledSkillEvaluationPreflightCode =
   | 'scripted-boundary-mismatch'
   | 'root-skill-mismatch'
 
+export type ControlledSkillEvaluationPreflightDetail =
+  | 'research-tool-construction'
+  | 'research-tool-presence'
+  | 'root-schema-read'
+  | 'global-product-tool'
+  | 'native-skill-scope'
+  | 'native-skill-load'
+  | 'native-skill-missing'
+  | 'native-skill-dispose'
+  | 'visible-schema-shape'
+  | 'task-schema-digest'
+  | 'aggregate-schema-digest'
+
 export class ControlledSkillEvaluationPreflightError extends Error {
-  constructor(readonly code: ControlledSkillEvaluationPreflightCode) {
+  constructor(
+    readonly code: ControlledSkillEvaluationPreflightCode,
+    readonly detail?: ControlledSkillEvaluationPreflightDetail,
+  ) {
     super(`controlled Skill evaluation preflight failed: ${code}`)
     this.name = 'ControlledSkillEvaluationPreflightError'
   }
@@ -3296,12 +3312,21 @@ export class TianwenSkillEvaluationService extends Service {
     try {
       toolRows = await Promise.all(parsed.tasks.map(async (task, index) => {
         const frozen = protocolTasks[index]!
-        const researchSummaryTool = controlledResearchSummaryTool(
-          task.researchPacket,
-        )
+        let researchSummaryTool: ReturnType<typeof controlledResearchSummaryTool>
+        try {
+          researchSummaryTool = controlledResearchSummaryTool(task.researchPacket)
+        } catch {
+          throw new ControlledSkillEvaluationPreflightError(
+            'tool-surface-mismatch',
+            'research-tool-construction',
+          )
+        }
         if ((researchSummaryTool !== undefined)
           !== (frozen.acceptanceContract.toolName === RESEARCH_SUMMARY_TOOL_NAME)) {
-          throw new ControlledSkillEvaluationPreflightError('tool-surface-mismatch')
+          throw new ControlledSkillEvaluationPreflightError(
+            'tool-surface-mismatch',
+            'research-tool-presence',
+          )
         }
         const schemas = await controlledToolSchemas(
           this.ctx,
@@ -3311,15 +3336,29 @@ export class TianwenSkillEvaluationService extends Service {
         if (
           schemas.length !== frozen.allowedTools.length
           || schemas.some((schema, schemaIndex) => schema.name !== frozen.allowedTools[schemaIndex])
-          || sha256(schemas) !== frozen.toolSchemaDigest
-        ) throw new ControlledSkillEvaluationPreflightError('tool-surface-mismatch')
+        ) throw new ControlledSkillEvaluationPreflightError(
+          'tool-surface-mismatch',
+          'visible-schema-shape',
+        )
+        if (sha256(schemas) !== frozen.toolSchemaDigest) {
+          throw new ControlledSkillEvaluationPreflightError(
+            'tool-surface-mismatch',
+            'task-schema-digest',
+          )
+        }
         return { taskId: task.taskId, toolSchemaDigest: sha256(schemas) }
       }))
-    } catch {
+    } catch (error) {
+      if (error instanceof ControlledSkillEvaluationPreflightError
+        && error.code === 'tool-surface-mismatch'
+        && error.detail !== undefined) throw error
       throw new ControlledSkillEvaluationPreflightError('tool-surface-mismatch')
     }
     if (sha256(toolRows) !== protocol.protocol.execution.toolSchemaDigest) {
-      throw new ControlledSkillEvaluationPreflightError('tool-surface-mismatch')
+      throw new ControlledSkillEvaluationPreflightError(
+        'tool-surface-mismatch',
+        'aggregate-schema-digest',
+      )
     }
 
     const persistence = this.ctx.get('sessionPersistence') as {
@@ -4980,23 +5019,69 @@ export async function controlledToolSchemas(
   allowedTools: readonly string[],
   researchTool?: ReturnType<typeof createResearchSummaryTool>,
 ): Promise<readonly VisibleToolSchema[]> {
-  const root = ctx.tools.schemas()
+  let root: VisibleToolSchema[]
+  try {
+    root = ctx.tools.schemas()
+  } catch {
+    throw new ControlledSkillEvaluationPreflightError(
+      'tool-surface-mismatch',
+      'root-schema-read',
+    )
+  }
   if (researchTool !== undefined
     && root.some(schema => schema.name === RESEARCH_SUMMARY_TOOL_NAME)) {
-    throw new Error('controlled product tool must not be registered globally')
+    throw new ControlledSkillEvaluationPreflightError(
+      'tool-surface-mismatch',
+      'global-product-tool',
+    )
   }
   // Shipped DSH owns the native Skill loader in Agent/preset scope, not globally.
   // Resolve its schema without starting an Agent, Session, or model request.
   if (allowedTools.includes('skill') && !root.some(schema => schema.name === 'skill')) {
     const key = {}
-    const scope = createScope(ctx, key)
+    let scope: ReturnType<typeof createScope>
     try {
-      await scope.ctx.plugin(nativeSkillTool)
-      const skill = ctx.tools.schemas(key).find(schema => schema.name === 'skill')
-      if (skill === undefined) throw new Error('native Skill tool is unavailable')
+      scope = createScope(ctx, key)
+    } catch {
+      throw new ControlledSkillEvaluationPreflightError(
+        'tool-surface-mismatch',
+        'native-skill-scope',
+      )
+    }
+    try {
+      try {
+        await scope.ctx.plugin(nativeSkillTool)
+      } catch {
+        throw new ControlledSkillEvaluationPreflightError(
+          'tool-surface-mismatch',
+          'native-skill-load',
+        )
+      }
+      let skill: VisibleToolSchema | undefined
+      try {
+        skill = ctx.tools.schemas(key).find(schema => schema.name === 'skill')
+      } catch {
+        throw new ControlledSkillEvaluationPreflightError(
+          'tool-surface-mismatch',
+          'native-skill-missing',
+        )
+      }
+      if (skill === undefined) {
+        throw new ControlledSkillEvaluationPreflightError(
+          'tool-surface-mismatch',
+          'native-skill-missing',
+        )
+      }
       root.push(skill)
     } finally {
-      await scope.dispose()
+      try {
+        await scope.dispose()
+      } catch {
+        throw new ControlledSkillEvaluationPreflightError(
+          'tool-surface-mismatch',
+          'native-skill-dispose',
+        )
+      }
     }
   }
   return [

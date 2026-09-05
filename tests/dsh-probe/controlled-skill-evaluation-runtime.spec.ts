@@ -28,6 +28,7 @@ import {
   ControlledSkillEvaluatorPreflightError,
   TianwenSkillEvaluationService,
   apply,
+  controlledToolSchemas,
 } from '../../packages/tianwen-runtime/src/index.js'
 
 const CONTROLLED_PROVIDER = 'tianwen-controlled-scripted'
@@ -1669,7 +1670,10 @@ describe('controlled Skill evaluation Runtime', () => {
     try {
       await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
         mounted.input,
-      )).rejects.toMatchObject({ code: 'tool-surface-mismatch' })
+      )).rejects.toMatchObject({
+        code: 'tool-surface-mismatch',
+        detail: 'visible-schema-shape',
+      })
       expect(mounted.harness.ctx.agents.list()).toEqual([])
       expect(mounted.harness.ctx.sessions.list()).toEqual([])
       expect(mounted.adapter.requests).toEqual([])
@@ -1679,6 +1683,149 @@ describe('controlled Skill evaluation Runtime', () => {
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('distinguishes per-task tool schema digest drift before model activity', async () => {
+    const mounted = await mountControlledRuntime('tool-task-digest-drift')
+    const originalSchemas = mounted.harness.ctx.tools.schemas.bind(mounted.harness.ctx.tools)
+    vi.spyOn(mounted.harness.ctx.tools, 'schemas').mockImplementation(scope =>
+      originalSchemas(scope).map(schema => schema.name === acceptance.toolName
+        ? { ...schema, description: 'changed verifier description' }
+        : schema))
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )).rejects.toMatchObject({
+        code: 'tool-surface-mismatch',
+        detail: 'task-schema-digest',
+      })
+      expect(mounted.adapter.requests).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('distinguishes aggregate tool schema digest drift before model activity', async () => {
+    const mounted = await mountControlledRuntime('tool-aggregate-digest-drift')
+    const getProtocol = mounted.harness.ctx.tianwenEvolution
+      .getControlledSkillEvalProtocol.bind(mounted.harness.ctx.tianwenEvolution)
+    vi.spyOn(mounted.harness.ctx.tianwenEvolution, 'getControlledSkillEvalProtocol')
+      .mockImplementation(protocolId => {
+        const frozen = getProtocol(protocolId)!
+        return {
+          ...frozen,
+          protocol: {
+            ...frozen.protocol,
+            execution: {
+              ...frozen.protocol.execution,
+              toolSchemaDigest: `sha256:${'f'.repeat(64)}`,
+            },
+          },
+        }
+      })
+    try {
+      await expect(mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+        mounted.input,
+      )).rejects.toMatchObject({
+        code: 'tool-surface-mismatch',
+        detail: 'aggregate-schema-digest',
+      })
+      expect(mounted.adapter.requests).toEqual([])
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('classifies root schema read failure without leaking the original error', async () => {
+    const harness = await mountCoreHarness([])
+    const schemas = vi.spyOn(harness.ctx.tools, 'schemas')
+      .mockImplementation(() => { throw new Error('D:/private/root-schema-sentinel') })
+    try {
+      const operation = controlledToolSchemas(harness.ctx, [])
+      await expect(operation).rejects.toMatchObject({
+        code: 'tool-surface-mismatch',
+        detail: 'root-schema-read',
+      })
+      await expect(operation).rejects.not.toHaveProperty(
+        'message',
+        expect.stringContaining('root-schema-sentinel'),
+      )
+    } finally {
+      schemas.mockRestore()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('classifies a globally registered product tool without leaking its implementation', async () => {
+    const harness = await mountCoreHarness([])
+    const researchTool = defineTool({
+      name: 'submit_research_summary',
+      description: 'private product verifier sentinel',
+      parameters: {},
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+      },
+      async execute() { return 'unused' },
+    })
+    const dispose = harness.ctx.tools.register(researchTool)
+    try {
+      const operation = controlledToolSchemas(harness.ctx, [], researchTool as never)
+      await expect(operation).rejects.toMatchObject({
+        code: 'tool-surface-mismatch',
+        detail: 'global-product-tool',
+      })
+      await expect(operation).rejects.not.toHaveProperty(
+        'message',
+        expect.stringContaining('private product verifier sentinel'),
+      )
+    } finally {
+      dispose()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('cleans the native Skill scope when its schema is missing', async () => {
+    const harness = await mountCoreHarness([])
+    await harness.ctx.plugin(SkillRegistry)
+    const originalSchemas = harness.ctx.tools.schemas.bind(harness.ctx.tools)
+    let scopeKey: object | undefined
+    const schemas = vi.spyOn(harness.ctx.tools, 'schemas').mockImplementation(scope => {
+      if (scope === undefined) return originalSchemas()
+      scopeKey = scope
+      return []
+    })
+    try {
+      await expect(controlledToolSchemas(harness.ctx, ['skill'])).rejects.toMatchObject({
+        code: 'tool-surface-mismatch',
+        detail: 'native-skill-missing',
+      })
+      schemas.mockRestore()
+      expect(scopeKey).toBeDefined()
+      expect(originalSchemas(scopeKey).map(schema => schema.name)).not.toContain('skill')
+    } finally {
+      schemas.mockRestore()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('returns the native Skill schema byte-equivalently and cleans its temporary scope', async () => {
+    const harness = await mountCoreHarness([])
+    await harness.ctx.plugin(SkillRegistry)
+    const globalSkill = await harness.ctx.plugin(applySkillTool)
+    try {
+      const expected = harness.ctx.tools.schemas()
+        .filter(schema => schema.name === 'skill')
+      await globalSkill.dispose()
+      const actual = await controlledToolSchemas(harness.ctx, ['skill'])
+      expect(JSON.stringify(actual)).toBe(JSON.stringify(expected))
+      expect(harness.ctx.tools.schemas().map(schema => schema.name)).not.toContain('skill')
+    } finally {
+      await globalSkill.dispose()
+      await harness.ctx.fiber.dispose()
     }
   })
 
