@@ -18,13 +18,14 @@ import {
   textResponse,
   toolCallResponse,
 } from '@tianwen/dsh-compat'
-import type { GenerateOptions, StreamChunk } from '@tianwen/dsh-compat'
+import type { GenerateOptions, SkillDefinition, StreamChunk } from '@tianwen/dsh-compat'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
   learningSessionLifecycleFingerprint,
+  prepareRunSkillManifest,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
 import {
@@ -138,14 +139,23 @@ function seedControlledCandidate(
   evolution: Awaited<ReturnType<typeof mountPersistentHarness>>['ctx']['tianwenEvolution'],
   protocol: Parameters<typeof evolution.freezeControlledSkillEvalProtocol>[0]['protocol'],
   sourceFidelity = false,
+  options: {
+    readonly parent?: SkillDefinition
+    readonly generation?: string
+    readonly acceptanceContract?: typeof acceptance
+    readonly candidateContent?: string
+  } = {},
 ) {
+  const frozenParent = options.parent ?? parentSkill
+  const frozenAcceptance = options.acceptanceContract ?? acceptance
+  const generation = options.generation === undefined ? '' : `:${options.generation}`
   const seeded = [
     ['first', 'not-met', 'a'],
     ['second', 'not-met', 'b'],
     ['counterexample', 'met', 'c'],
   ] as const
   const runs = seeded.map(([suffix, verdict, marker], index) => {
-    const sessionId = `session:controlled-runtime-seed:${suffix}`
+    const sessionId = `session:controlled-runtime-seed${generation}:${suffix}`
     const lifecycle = learningSessionLifecycleFingerprint({
       sessionId,
       createdAt: index + 1,
@@ -155,7 +165,7 @@ function seedControlledCandidate(
       taskRef: `task:controlled-runtime-seed:${suffix}`,
       sessionId,
       scopeKey: 'project:tianwen/capability:controlled-runtime-summary',
-      acceptanceContract: acceptance,
+      acceptanceContract: frozenAcceptance,
       ...(sourceFidelity && index === 1
         ? {
             acceptanceSubjectDigest: protocol.tasks[0]!.acceptanceSubjectDigest,
@@ -163,7 +173,7 @@ function seedControlledCandidate(
           }
         : {}),
     })
-    const manifest = evolution.recordRunSkillManifest({ runId: binding.runId, skill: parentSkill })
+    const manifest = evolution.recordRunSkillManifest({ runId: binding.runId, skill: frozenParent })
     const sessionDigest = sha256(`seed-session:${marker}`)
     const evidenceId = sha256(`seed-evidence:${marker}`)
     const outcome = evolution.recordOutcomeIntake({
@@ -177,8 +187,8 @@ function seedControlledCandidate(
       parentVersionId: manifest.parentVersionId,
       sessionId,
       sessionDigest,
-      skillName: parentSkill.name,
-      contentDigest: sha256(parentSkill.content),
+      skillName: frozenParent.name,
+      contentDigest: sha256(frozenParent.content),
       skillEvidenceId: sha256(`seed-skill-evidence:${marker}`),
       acceptanceEvidenceId: evidenceId,
       skillCallSeq: 10,
@@ -263,7 +273,7 @@ function seedControlledCandidate(
   const attribution = evolution.recordAttribution({
     caseId: learningCase.caseId,
     resolution: 'dsh-skill',
-    targetSkillName: parentSkill.name,
+    targetSkillName: frozenParent.name,
     hypothesis: 'The parent omits verified result-first ordering.',
     supportingEvidenceIds: learningCase.supportingEvidenceIds,
     counterevidenceIds: learningCase.counterevidence.flatMap(item => item.evidenceIds),
@@ -282,12 +292,13 @@ function seedControlledCandidate(
   const candidate = evolution.recordSkillCandidate({
     lessonId: lesson.lessonId,
     payload: {
-      name: parentSkill.name,
-      description: parentSkill.description,
-      whenToUse: parentSkill.whenToUse,
-      invocation: parentSkill.invocation,
-      source: parentSkill.source,
-      content: '# Controlled summary\n\nState the verified result before interpretation.',
+      name: frozenParent.name,
+      description: frozenParent.description,
+      whenToUse: frozenParent.whenToUse,
+      invocation: frozenParent.invocation,
+      source: frozenParent.source,
+      content: options.candidateContent
+        ?? '# Controlled summary\n\nState the verified result before interpretation.',
     },
     evidenceIds: [
       ...learningCase.supportingEvidenceIds,
@@ -574,6 +585,7 @@ async function mountControlledRuntime(
         ...task
       }) => task),
     },
+    protocol,
     setSelection(value: { provider: string; model: string }) { selection = value },
   }
 }
@@ -2083,6 +2095,92 @@ describe('controlled Skill evaluation Runtime', () => {
       expect(mounted.harness.ctx.tianwenEvolution.listControlledSkillEvaluations())
         .toEqual([])
     } finally {
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('accepts a ledger-verified learned parent through the public evaluation preflight', async () => {
+    const mounted = await mountControlledRuntime(
+      'trusted-parent-second-generation',
+      [new Error('stop after trusted-parent preflight')],
+    )
+    const evolution = mounted.harness.ctx.tianwenEvolution
+    try {
+      const first = evolution.getSkillCandidate(mounted.input.candidateId)!
+      const learnedParent = {
+        ...first.payload,
+        provider: parentSkill.provider,
+      } as SkillDefinition
+      const secondAcceptance = {
+        ...acceptance,
+        problemCategory: 'summary-omits-evidence-order',
+      } as const
+      const secondProtocol = {
+        ...mounted.protocol,
+        tasks: mounted.protocol.tasks.map(task => ({
+          ...task,
+          acceptanceContract: secondAcceptance,
+        })),
+      }
+      const secondIds = seedControlledCandidate(
+        evolution,
+        secondProtocol,
+        false,
+        {
+          parent: learnedParent,
+          generation: 'second',
+          acceptanceContract: secondAcceptance,
+          candidateContent: '# Controlled summary\n\nState the result, then its evidence.',
+        },
+      )
+      const second = evolution.getSkillCandidate(secondIds.candidateId)!
+      const rootManifest = evolution.listRunSkillManifests()
+        .find(item => item.parentVersionId === first.parentVersionId)!
+      const previousPointer = {
+        schemaVersion: 'tianwen.controlled-skill-scope-pointer.v2' as const,
+        scopeKey: second.targetScope,
+        activeVersionId: rootManifest.parentVersionId,
+        payloadDigest: sha256(rootManifest.parent),
+        revision: 1,
+      }
+      const targetPointer = {
+        ...previousPointer,
+        activeVersionId: second.parentVersionId,
+        payloadDigest: first.payloadDigest,
+        revision: 2,
+      }
+      const transition = {
+        transitionId: `transition:${'a'.repeat(64)}`,
+        source: { scopeKey: second.targetScope },
+        previousPointer,
+        targetPointer,
+      }
+      vi.spyOn(evolution, 'listControlledSkillTransitions')
+        .mockReturnValue([transition] as never)
+      vi.spyOn(evolution, 'getControlledSkillTransitionReceipt').mockReturnValue({
+        transitionId: transition.transitionId,
+        state: 'verified',
+        pointer: targetPointer,
+        reasonCode: null,
+      } as never)
+      vi.spyOn(evolution, 'getControlledSkillScopePointer').mockReturnValue(targetPointer)
+
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms({
+        ...mounted.input,
+        candidateId: secondIds.candidateId,
+        protocolId: secondIds.protocolId,
+      })
+      expect(receipt).toMatchObject({
+        state: 'stopped',
+        stop: { stage: 'baseline', reasonCode: 'provider-failed' },
+      })
+      expect(mounted.adapter.requests).toHaveLength(1)
+      expect(prepareRunSkillManifest({
+        runId: rootManifest.runId,
+        skill: learnedParent,
+      }).parentVersionId).toBe(second.parentVersionId)
+    } finally {
+      mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()
     }
   })

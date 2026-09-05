@@ -93,7 +93,9 @@ import type {
   RecordControlledSkillEvaluatorObservationInput,
   RecordControlledSkillShadowReviewObservationInput,
   RunAcceptanceContract,
+  RunSkillManifest,
   Sha256Digest,
+  SkillVersionId,
   SkillEvalCaseId,
   SkillEvalProtocolId,
   SkillEvaluationArmObservation,
@@ -1580,6 +1582,77 @@ function sameSkillVersion(
   }).parentVersionId === expectedVersionId
 }
 
+async function trustedParentRootVersion(
+  ctx: Context,
+  parentManifest: RunSkillManifest,
+  scopeKey: string,
+  cwd: string,
+  allowedPendingTransitionId?: string,
+): Promise<SkillVersionId | undefined> {
+  const root = await ctx.skills.get(parentManifest.parent.name, { cwd })
+  if (root === undefined || !isSkillDefinition(root)) return undefined
+  const rootManifest = prepareRunSkillManifest({ runId: parentManifest.runId, skill: root })
+  const frozenParent = prepareRunSkillManifest({
+    runId: parentManifest.runId,
+    skill: {
+      ...parentManifest.parent,
+      provider: parentManifest.resolvedProvider,
+    } as SkillDefinition,
+  })
+  if (sha256(frozenParent) !== sha256(parentManifest)) return undefined
+  if (rootManifest.parentVersionId === parentManifest.parentVersionId) {
+    return rootManifest.parentVersionId
+  }
+
+  const binding = ctx.tianwenEvolution.getRunBinding(parentManifest.runId)
+  if (binding?.scopeKey !== scopeKey) return undefined
+
+  const transitions = ctx.tianwenEvolution.listControlledSkillTransitions()
+    .filter(transition => transition.source.scopeKey === scopeKey)
+    .toSorted((left, right) =>
+      left.previousPointer.revision - right.previousPointer.revision)
+  const first = transitions[0]
+  if (first === undefined) return undefined
+
+  let pointer = first.previousPointer
+  const trusted = new Map<SkillVersionId, Sha256Digest>([[
+    rootManifest.parentVersionId,
+    sha256(rootManifest.parent),
+  ]])
+  if (pointer.activeVersionId !== rootManifest.parentVersionId
+    || pointer.payloadDigest !== sha256(rootManifest.parent)) return undefined
+
+  for (const transition of transitions) {
+    if (sha256(transition.previousPointer) !== sha256(pointer)
+      || trusted.get(transition.previousPointer.activeVersionId)
+        !== transition.previousPointer.payloadDigest) return undefined
+    const receipt = ctx.tianwenEvolution
+      .getControlledSkillTransitionReceipt(transition.transitionId)
+    if (receipt?.state === 'verified') {
+      trusted.set(transition.targetPointer.activeVersionId, transition.targetPointer.payloadDigest)
+      pointer = transition.targetPointer
+    } else if (receipt?.state === 'recovered') {
+      if (receipt.pointer.activeVersionId !== transition.previousPointer.activeVersionId
+        || receipt.pointer.payloadDigest !== transition.previousPointer.payloadDigest) {
+        return undefined
+      }
+      pointer = receipt.pointer
+    } else if (receipt?.state === 'pending-post-check'
+      && transition.transitionId === allowedPendingTransitionId) {
+      pointer = transition.targetPointer
+    } else {
+      return undefined
+    }
+  }
+
+  const current = ctx.tianwenEvolution.getControlledSkillScopePointer(scopeKey)
+  return current !== undefined
+    && sha256(current) === sha256(pointer)
+    && trusted.get(parentManifest.parentVersionId) === sha256(parentManifest.parent)
+    ? rootManifest.parentVersionId
+    : undefined
+}
+
 export function observeSkillEvaluationRequest(
   input: ObserveSkillEvaluationRequestInput,
 ): SkillEvaluationRequestObservation {
@@ -1853,15 +1926,19 @@ export class TianwenSkillEvaluationService extends Service {
       }
     }
 
-    let rootSkill: SkillRegistration | undefined
+    let rootVersionId: SkillVersionId | undefined
     try {
-      rootSkill = await this.ctx.skills.get(parentManifest.parent.name, {
-        cwd: parsed.task.workspaceRoot,
-      })
+      rootVersionId = await trustedParentRootVersion(
+        this.ctx,
+        parentManifest,
+        shadow.scopeKey,
+        parsed.task.workspaceRoot,
+        existing?.transitionId,
+      )
     } catch {
       throw new ControlledSkillActivationPreflightError('root-skill-mismatch')
     }
-    if (rootSkill === undefined || !sameSkillVersion(rootSkill, shadow.parentVersionId)) {
+    if (rootVersionId === undefined) {
       throw new ControlledSkillActivationPreflightError('root-skill-mismatch')
     }
     const targetVersionId = parsed.kind === 'rollback'
@@ -2040,7 +2117,7 @@ export class TianwenSkillEvaluationService extends Service {
       if (scopedSkill === undefined
         || !sameSkillVersion(scopedSkill, transition.targetPointer.activeVersionId)
         || currentRoot === undefined
-        || !sameSkillVersion(currentRoot, shadow.parentVersionId)
+        || !sameSkillVersion(currentRoot, rootVersionId)
         || sha256(scopedSchemas) !== transition.postCheck.toolSchemaDigest
         || handle.agent.session.header.cwd !== parsed.task.workspaceRoot
         || sha256(handle.agent.options) !== sha256(requestAgentOptions(resolved))) {
@@ -2136,7 +2213,7 @@ export class TianwenSkillEvaluationService extends Service {
           )
         }
         if (finalRoot === undefined
-          || !sameSkillVersion(finalRoot, shadow.parentVersionId)
+          || !sameSkillVersion(finalRoot, rootVersionId)
           || finalScoped === undefined
           || !sameSkillVersion(finalScoped, transition.targetPointer.activeVersionId)) {
           return this.recoverControlledSkillTransition(
@@ -2535,6 +2612,7 @@ export class TianwenSkillEvaluationService extends Service {
       ...candidate.payload,
       provider: parentManifest.resolvedProvider,
     } as SkillDefinition
+    let rootVersionId: SkillVersionId | undefined
     try {
       const manifest = prepareRunSkillManifest({
         runId: expectedPlan.tasks[0]!.runId,
@@ -2544,13 +2622,17 @@ export class TianwenSkillEvaluationService extends Service {
         throw new ControlledSkillShadowPreflightError('candidate-chain-mismatch')
       }
       for (const task of parsed.tasks) {
-        const rootSkill = await this.ctx.skills.get(parentManifest.parent.name, {
-          cwd: task.workspaceRoot,
-        })
-        if (rootSkill === undefined
-          || !sameSkillVersion(rootSkill, candidate.parentVersionId)) {
+        const taskRootVersionId = await trustedParentRootVersion(
+          this.ctx,
+          parentManifest,
+          expectedPlan.scopeKey,
+          task.workspaceRoot,
+        )
+        if (taskRootVersionId === undefined
+          || (rootVersionId !== undefined && rootVersionId !== taskRootVersionId)) {
           throw new ControlledSkillShadowPreflightError('root-skill-mismatch')
         }
+        rootVersionId = taskRootVersionId
       }
     } catch (error) {
       if (error instanceof ControlledSkillShadowPreflightError) throw error
@@ -2649,7 +2731,8 @@ export class TianwenSkillEvaluationService extends Service {
           scopedSkill === undefined
           || !sameSkillVersion(scopedSkill, expectedPlan.candidateVersionId)
           || rootSkill === undefined
-          || !sameSkillVersion(rootSkill, expectedPlan.parentVersionId)
+          || rootVersionId === undefined
+          || !sameSkillVersion(rootSkill, rootVersionId)
           || sha256(schemas) !== item.planned.toolSchemaDigest
           || item.handle.agent.session.header.cwd !== item.task.workspaceRoot
           || sha256(item.handle.agent.options) !== sha256(agentOptions)
@@ -2730,7 +2813,8 @@ export class TianwenSkillEvaluationService extends Service {
             sha256(workspaceSnapshot(item.task.workspaceRoot))
               !== item.planned.workspaceSnapshotDigest
             || rootSkill === undefined
-            || !sameSkillVersion(rootSkill, plan.parentVersionId)
+            || rootVersionId === undefined
+            || !sameSkillVersion(rootSkill, rootVersionId)
             || scopedSkill === undefined
             || !sameSkillVersion(scopedSkill, plan.candidateVersionId)
           ) throw new Error('controlled Shadow root drift')
@@ -3854,8 +3938,12 @@ export class TianwenSkillEvaluationService extends Service {
       })
       for (const task of parsed.tasks) {
         for (const cwd of [task.baselineWorkspaceRoot, task.candidateWorkspaceRoot]) {
-          const skill = await this.ctx.skills.get(parentManifest.parent.name, { cwd })
-          if (skill === undefined || !sameSkillVersion(skill, candidate.parentVersionId)) {
+          if (await trustedParentRootVersion(
+            this.ctx,
+            parentManifest,
+            expectedPlan.scopeKey,
+            cwd,
+          ) === undefined) {
             throw new ControlledSkillEvaluationPreflightError('root-skill-mismatch')
           }
         }
