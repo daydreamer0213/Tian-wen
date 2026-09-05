@@ -10,7 +10,7 @@ The thirteen-Run model below remains the legacy protocol. Real procurement
 acceptance subsequently demonstrated a prose-fidelity blind spot that the ID
 oracle cannot measure, including on unseen holdout material. The
 [source-fidelity revision](2026-09-06-tianwen-source-fidelity-evaluation-design.md)
-uses fourteen Runs: the same ten pairs and one aggregate blind review, then one
+uses fourteen Runs: the same ten paired product Runs and one aggregate blind review, then one
 holdout product Run plus one independent semantic review, then one activation
 Run. This extends the existing holdout gate, not the number of gates. Independent
 architecture review preferred the extra unique judgment to a new pre-blind

@@ -38,10 +38,10 @@
 - [x] Verify the clean main baseline, existing worktree and delivered Runtime hash; switch the existing worktree to `codex/learning-total-route-real-acceptance`.
 - [x] Read-only trace Outcome exploration and Candidate evaluation/activation independently. Record fixed-evaluation coverage separately from actual model behavior.
 - [x] Start the retained isolated profile on loopback; check default flash/high and re-enable learning through an ordinary main conversation.
-- [ ] Freeze a small tranche of up to four distinct, useful source-summary tasks. Begin with the actual project handoff; later controlled scenarios may probe provisional-vs-contradicted evidence, nested source quotations, or high-density cross-item attribution. Do not prewrite model answers.
-- [ ] Submit each selected packet as the first message of a new ordinary task, once. Inspect the actual summary and canonical submission; retain successful as well as failed results.
+- [x] Freeze a small tranche of up to four distinct, useful source-summary tasks. Begin with the actual project handoff; later controlled scenarios may probe provisional-vs-contradicted evidence, nested source quotations, or high-density cross-item attribution. Do not prewrite model answers. A–D were all frozen before their single attempts.
+- [x] Submit each selected packet as the first message of a new ordinary task, once. Inspect the actual summary and canonical submission; retain successful as well as failed results. A/C/D prose passed, B had a genuine prose defect; all four ID Outcomes met.
 - [x] On an actual defect, submit accurate native feedback against the completed answer. Check that the analyzer receives the frozen Skill and real source evidence; do not direct its verdict or Candidate text.
-- [ ] Record the outcome and the next decision. If the tranche passes, diagnose the route's evidence/acceptance coverage instead of looping for a lucky failure.
+- [x] Record the outcome and the next decision. If the tranche passes, diagnose the route's evidence/acceptance coverage instead of looping for a lucky failure. The demonstrated source-fit gap is under bounded repair; no new feedback case or qualifying Outcome pair was fabricated.
 
 ## Task 2: Real exploration and source-reuse evidence
 
@@ -70,10 +70,10 @@
 - Consumes: a genuine analyst-created Candidate and frozen source-defect evidence.
 - Produces: independently reviewed source-relevant evaluation, holdout, verified activation and a new ordinary task receipt, without claims of universal/statistical improvement.
 
-- [ ] Reconcile the proven fixed-old-question evaluation gap with Task 1 evidence. The present resolver takes no source Case and requires at least one of two fixed old tasks to show baseline not-met / Candidate met; current base already includes decision uncertainties.
-- [ ] Before changing that contract, write a bounded design and test-first implementation plan rooted in the observed defect. Preserve objective validity, regression/safety, blind independent judgment, unseen holdout and exact parent/config identity. Do not introduce a generic benchmark platform.
-- [ ] Run one formal evaluation on the frozen Candidate after required focused/regression gates. Retain failed/inconclusive results; never rerun completed arms for a nicer outcome.
-- [ ] Verify the successful control chain's actual model Sessions and tool evidence: ten paired runs, one aggregate blind review, one holdout and one activation. Additional source/analysis/exploration and ordinary post-activation tasks are counted separately.
+- [x] Reconcile the proven fixed-old-question evaluation gap with Task 1 evidence. The old resolver takes no source Case and requires at least one of two fixed old tasks to show baseline not-met / Candidate met; current base already includes decision uncertainties. The retained procurement evaluation completed ten real Runs with five met/met ties and terminal rejection.
+- [x] Before changing that contract, write a bounded design and test-first implementation plan rooted in the observed defect. Preserve objective validity, regression/safety, blind independent judgment, unseen holdout and exact parent/config identity. Do not introduce a generic benchmark platform. See the independently reviewed 2026-09-06 source-fidelity design and plan; implementation is in progress.
+- [x] Run one formal evaluation on the frozen Candidate after required focused/regression gates. Retain failed/inconclusive results; never rerun completed arms for a nicer outcome. The original Candidate's rejection is final; a new protocol requires a new genuine Candidate, not regrading this result.
+- [ ] Verify the successful control chain's actual model Sessions and tool evidence: ten paired runs, one aggregate blind review, one holdout and one activation for old v2. The explicit source-fidelity revision adds one independent semantic holdout review (14 total Runs for new protocols, 13 legacy). Additional source/analysis/exploration and ordinary post-activation tasks are counted separately.
 - [ ] Open a new ordinary task and verify its native frozen manifest and real submission use the promoted version; old Sessions keep their old version. Demonstrate the targeted real capability on a separately frozen future task.
 - [ ] Test the statically identified second-generation parent-resolution risk before claiming ongoing multi-generation learning; reproduce it before implementing any repair.
 

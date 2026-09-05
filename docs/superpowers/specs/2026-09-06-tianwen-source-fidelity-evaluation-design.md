@@ -40,6 +40,13 @@ research-summary contract. Old protocols/results/Shadow records retain their
 original exact bytes, digests, interpretation and replay behavior. No migration or
 regrading of the completed procurement Candidate is allowed.
 
+The new source-fidelity policy is scoped to newly frozen explicit-feedback
+analyses, which have the exact message/feedback-version identity demonstrated by
+this defect. Outcome-origin analyses have no feedback target and retain the
+existing legacy product protocol; do not invent feedback or make that previously
+working route protocol-unavailable. A future Outcome semantic-policy revision
+requires its own demonstrated need and source-binding design.
+
 Before materializing a new Candidate, recover a transient source-case from the
 exact native main Session and feedback target. Reuse the existing packet recovery
 by acceptanceSubjectDigest and canonical accepted-submission projection. Verify

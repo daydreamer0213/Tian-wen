@@ -38,6 +38,9 @@ activation Run: fourteen, while legacy remains thirteen.
 - No pre-blind store/state, generic evaluator framework, scheduler, extra provider
   or direct promotion shortcut. Reuse existing public/native execution seams.
 - Every worker is not alone: preserve other edits and commit only owned files.
+- The new policy is for new explicit-feedback analyses only. Outcome-origin
+  analyses have no feedback target and keep the existing legacy product path;
+  never fabricate feedback or make that route unavailable as a side effect.
 
 ## Task 1: Versioned domain contracts, reducers and replay
 
@@ -68,18 +71,22 @@ activation Run: fourteen, while legacy remains thirteen.
 - Existing transition construction must require the complete new Shadow proof;
   retain old v2 behavior. Completed results are idempotent; drift is rejected.
 
-- [ ] Write RED tests for ID ties plus actual prose-quality score differences,
+- [x] Write RED tests for ID ties plus actual prose-quality score differences,
   missing source-fidelity scores, fake improvement/role swaps, and holdout ID-met
   with quality failure. Include old-v2 unchanged rejection/replay assertions.
-- [ ] Implement minimal versioned contracts/reducers/ledger integration, including
+- [x] Implement minimal versioned contracts/reducers/ledger integration, including
   strict validation of source/protocol/evidence/config identity and no defaults
   that would change an old record's hash.
-- [ ] Prove incomplete Shadow cannot activate; prove matching complete evidence
+- [x] Prove incomplete Shadow cannot activate; prove matching complete evidence
   can proceed through existing readiness/transition construction. Keep fixtures
   deterministic and explicitly mechanism-only.
-- [ ] Run both owned domain suites, relevant existing ledger replay tests, root
+- [x] Run both owned domain suites, relevant existing ledger replay tests, root
   typecheck and diff check. Report exact RED/GREEN commands, outputs, API additions
   and any integration obligation; commit only owned files for task review.
+
+Completed at `9efcf87`: 51 focused/domain replay checks, root typecheck and diff
+check passed; independent spec/quality review Approved. Native reviewer/material
+authenticity remains Task 3's explicit responsibility; this is mechanism proof.
 
 ## Task 2: Exact native source recovery and deterministic protocol construction
 
@@ -107,6 +114,9 @@ activation Run: fourteen, while legacy remains thirteen.
 - For retained protocols, resolve the exact frozen legacy/new version first;
   scope-only selection of the latest builder is prohibited. Reconstruct the same
   task/material/config digests and reuse existing workspaces and Session IDs.
+- Select new source fidelity only for explicit-feedback analyses before their
+  first freeze. New Outcome-origin analyses continue the legacy builder unchanged.
+  Cover that route so a missing feedback target cannot disable Outcome learning.
 - Supply Task 1's policy/rubric/holdout-review fields through the existing executor
   seams; no new external setting/feature-flag matrix. Do not deploy before Task 3.
 

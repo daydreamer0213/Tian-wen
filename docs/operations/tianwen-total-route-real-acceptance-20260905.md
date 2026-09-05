@@ -2,6 +2,14 @@
 
 Status: **in progress; the total route is not complete**.
 
+Current checkpoint (2026-09-06): isolated native-module identity is repaired;
+the original procurement Candidate completed its one real paired evaluation and
+was rejected on five met/met ties. Scenario C passed normal UI and prose checks.
+Scenario D also passed once, completing this four-task tranche; no new feedback
+case was manufactured from these successes. The independently reviewed [source-fidelity revision](../superpowers/specs/2026-09-06-tianwen-source-fidelity-evaluation-design.md)
+is being implemented for new protocols only. Its complete successful path is at
+most 14 Runs, while old v2 remains 13. No new activation or daily upgrade occurred.
+
 The user's continuation mandate covers the four-stage route, not only the
 previous finite repair/delivery round. Execution follows
 [the total-route plan](../superpowers/plans/2026-09-05-tianwen-total-route-real-acceptance.md).
@@ -19,7 +27,8 @@ previous finite repair/delivery round. Execution follows
 
 ## Read-only route findings
 
-These are current-code findings, not claims of new real-model failures:
+These are starting-point code findings, not claims of new real-model failures;
+the later source-fidelity revision is tracked separately above:
 
 1. Formal source intake requires a new root Session's first message to use
    `/research-summary` with one valid bounded packet. Only this route freezes
@@ -273,3 +282,60 @@ official flash/high and `met / no-case`. The answer preserved the exercise
 context, attribution, observation time windows, causal uncertainty, unmonitored
 scope and approval boundary. No genuine new defect warrants feedback; the
 successful result is retained and no new Candidate is presumed.
+
+Scenario D, the fourth and last task in this bounded tranche, is now frozen in
+the same evidence file: fictional pilot handoff material with nested quotations,
+revised participation records, different sample denominators, one narrow
+independent count check and conditional approval. It has not been submitted.
+After implementation gates, its first normal UI result will be retained as-is;
+success does not warrant fabricated feedback or an assumed new Candidate.
+
+Before D's first attempt, launch timing was clarified without changing its
+packet, criteria or model: ordinary unchanged-Runtime baseline use can proceed
+while new evaluation implementation runs; any warranted learning feedback would
+wait for its new reviewed path. At `17:57Z`, D was submitted once through normal
+UI in Session `fd10197e-0e44-45f6-92ad-f3e34757788a`, Run
+`426d126d004ae6aae73213bb4c2e0709dd843260187983956e8f6cd9a056b7d9`.
+The 25-item / 4,203-byte source produced one accepted canonical submission and
+completed Turn 1, with two native official flash/high requests. Outcome is
+`met / no-case`; both actual prose surfaces preserve the frozen distinctions.
+No feedback is warranted. The fallback slash-command title is a minor UI
+presentation limitation, not evidence of a summary defect.
+
+The four-task tranche is complete: A/C/D prose pass, B genuine prose defect and
+retained rejected Candidate; all four source ID Outcomes met. Thus Outcome
+exploration prerequisites and a new genuine source-fidelity Candidate remain
+absent. Finish repairs for demonstrated gaps, but do not invent missing failure
+evidence, keep sampling for a preferred answer, or label unobserved learning
+efficacy complete.
+
+## Second-generation parent diagnostic
+
+The previously static risk now has a minimal native no-model probe, kept separate
+from genuine acceptance. Production admission's selection/installation was
+exercised with a synthetic first-Candidate/pointer fixture in a disposable test
+host. The Agent-scoped version matched the promoted payload while the unscoped
+root remained the packaged base, so the current preflight version-equality
+predicate was false. One diagnostic test passed with zero model requests.
+Static tracing maps that predicate to `root-skill-mismatch` in Evaluation,
+Shadow and Activation before their controlled Agent creation. This is not a real
+two-promotion history or direct execution of the entire controlled preflight.
+It justifies a separate narrow regression/repair for trusted parent resolution;
+it does not justify removing root/provider/scope/evidence drift checks. No
+production repair or real second-generation Candidate has occurred yet.
+
+## Source-fidelity implementation checkpoint
+
+Domain Task 1 is implemented at `9efcf87`, with 51 focused/replay checks and root
+typecheck passing. Independent spec/quality review approved without findings.
+The new Shadow domain cannot pass with missing review, low quality scores or
+changed observation, including after cold replay. Native reviewer execution and
+authenticity are still Task 3 obligations; caller-supplied domain facts are not
+presented as genuine model evidence. Exact source recovery/builder is Task 2.
+
+At `18:34:59Z`, read-only reconstruction still matched every field digest for the
+original five frozen tasks and prepared the original old-v2 plan successfully.
+The sole procurement evaluation retains its `17:03:18.850Z` terminal rejection,
+and isolated bundle bytes remain unchanged. No completed Candidate was rerun or
+regraded. The additional parent-resolution design is separately bounded and
+scheduled only after the three source-fidelity tasks.

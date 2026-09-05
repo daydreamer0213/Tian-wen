@@ -4,15 +4,21 @@
 
 The user's subsequent instruction is to finish the full four-stage route, not
 only the finite delivery below. Read [the current total-route record](tianwen-total-route-real-acceptance-20260905.md)
-and its plan first. Additional genuine browser use has produced a real Candidate
-from accurate native feedback, but it stops at tool preflight before evaluation
-model calls. Retained source, feedback, Candidate and protocol are not regenerated.
-Reviewed main-session status/recovery repairs and further diagnostics are on the
-development branch, not in the daily installation. A precisely reviewed external
-summary source is approved only for isolated read-only acceptance and prepared,
-but not yet admitted or model-adapted. Genuine exploration, source adoption, full
-evaluation/activation and future-task improvement remain open. Historical finite
-engineering completion below must not be read as total-route completion.
+and its plan first. The isolated native-module identity mismatch that blocked
+preflight has been repaired without changing daily installation or product scope
+mechanics. The original feedback-created Candidate completed its sole genuine
+ten-Run paired evaluation and was rejected on five met/met ties; no blind review,
+holdout or activation followed. The completed result is not regenerated/regraded.
+Reviewed main-session status/recovery repairs work in actual UI. Scenario C passed
+normal task/prose acceptance; D also passed once, completing the four-task tranche
+without a fabricated new feedback case. A bounded versioned
+source-fidelity evaluation revision is now being implemented after independent
+design review (14 successful-path Runs for new protocols, 13 legacy).
+The exact approved external summary source is admitted read-only only in the
+isolated profile and visible to main status, not yet analyst-inspected/adapted.
+No development-branch changes are delivered to daily installation. Genuine
+exploration, source adoption, full activation and future-task improvement remain
+open. Historical finite engineering completion below is not total-route completion.
 
 ## Latest bugfix acceptance and completed delivery
 
