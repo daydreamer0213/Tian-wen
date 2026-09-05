@@ -142,6 +142,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         name: 'tianwen_learning_status',
         parameters: { type: 'object', properties: {} },
         description: expect.stringContaining('current learning history'),
+        description: expect.stringContaining('filesystem verification'),
       })
       expect(mounted.ctx.tools.schemas(child.agent).some(tool =>
         tool.name === 'tianwen_learning_status')).toBe(false)
@@ -154,6 +155,8 @@ describe('Tianwen main-chat learning consent tool', () => {
         {
           isError: false,
           value: {
+            guidance: expect.stringContaining('bounded snapshot is sufficient'),
+            consent: { policyVersion: 'tianwen-auto-analysis.v2', enabled: false, revision: 0 },
             currentSession: { hasFrozenGovernedBinding: false },
             history: {
               scope: expect.stringContaining('Skill-bound Runs'),
@@ -214,6 +217,7 @@ describe('Tianwen main-chat learning consent tool', () => {
       const snapshots = vi.spyOn(mounted.ctx.skills, 'snapshot')
       await expect(executeLearningStatus(mounted.ctx, main.agent)).resolves.toMatchObject({
         value: {
+          consent: { policyVersion: 'tianwen-auto-analysis.v2', enabled: false, revision: 0 },
           currentSession: { hasFrozenGovernedBinding: true },
           history: { skillBoundRuns: 1, recordedOutcomes: 1, recordedAnalyses: 0 },
           nativeSkills: { available: true, skills: [{ name: skill.name, description: skill.description }] },
