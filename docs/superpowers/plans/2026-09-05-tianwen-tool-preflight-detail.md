@@ -29,7 +29,12 @@
 - The host classifier renders a valid tool mismatch as `tool-surface-mismatch:<detail>`. Without a recognized detail, retain `tool-surface-mismatch`. Ignore detail on every other primary code and on forged objects. Keep the warning's other fields phase and analysisId unchanged.
 - The isolated exporter will be updated separately by the controller only after review; do not edit that environment.
 
-- [ ] Add failing public-boundary tests for expected substage propagation, no raw data leakage, forged/unknown detail suppression and guaranteed cleanup. Preserve tests for the original primary code and no model requests before preflight acceptance.
-- [ ] Implement only fixed diagnostic metadata at the existing boundaries; no speculative behavior fix.
-- [ ] Run the covering preflight/host focused suites, root typecheck and diff check. The full route gate is downstream; do not run the full repository suite for this diagnostic increment.
-- [ ] Commit only owned files and write the exact RED/GREEN commands, output, changed files, self-review and concerns in the task report. Return concise status and commit IDs for independent task review.
+- [x] Add failing public-boundary tests for expected substage propagation, no raw data leakage, forged/unknown detail suppression and guaranteed cleanup. Preserve tests for the original primary code and no model requests before preflight acceptance.
+- [x] Implement only fixed diagnostic metadata at the existing boundaries; no speculative behavior fix.
+- [x] Run the covering preflight/host focused suites, root typecheck and diff check. The full route gate is downstream; do not run the full repository suite for this diagnostic increment.
+- [x] Commit only owned files and write the exact RED/GREEN commands, output, changed files, self-review and concerns in the task report. Return concise status and commit IDs for independent task review.
+
+Reviewed implementation: `23a1409`; 177 affected tests, root typecheck and diff
+check passed. Independent review approved with one nonblocking coverage note for
+the `research-tool-presence` branch. Isolated deployment identified the actual
+failure as `native-skill-load`; functional diagnosis remains separate.

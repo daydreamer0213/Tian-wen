@@ -160,6 +160,30 @@ hash `7f7f6b42f6293a8d2c2a0513417bb6ff7157fc825146f54a3344f836c2e9a07b`;
 both installed versions are `0.1.12`, and the original 30 user data files retain
 their recorded aggregate hash.
 
+### Reviewed diagnosis and genuine continuation (16:38-16:41Z)
+
+Fixed-detail implementation `23a1409` passed 177 affected tests, typecheck and
+independent review (no blocking findings; one deferred narrow coverage note).
+The isolated exporter accepts only the eleven known tool-detail suffixes; its
+test first failed, then both tests passed. A separately built Runtime with SHA256
+`ee3496d49df549063054a23906769872f9cb38c240c8bc7b138e81eec9b93d39` was deployed only
+to the isolated profile, including the reviewed main-session recovery repair.
+
+The retained procurement conversation received the same natural request:
+`继续这次学习验证，保留已有候选和记录，不要从头重做。`
+The actual DeepSeek main model called `tianwen_learning_continue`, received one
+scheduled analysis, and correctly distinguished scheduling from evaluation
+success. It did not send another continuation to the completed analyst. Native
+audit verified official flash/high and completed main Turn 9.
+
+The retained Candidate again stopped before opening any evaluation arm. This
+time the safe host diagnostic identified `tool-surface-mismatch:native-skill-load`:
+failure occurs while loading the native Skill tool into the temporary schema
+scope, not at schema digest comparison. This is a located failure boundary, not
+yet a diagnosed root cause or completed repair. The owned server was stopped
+while idle to avoid repeated failed liveness retries. Original feedback,
+Candidate and frozen protocol remain unchanged; daily installation is untouched.
+
 ## Existing-source review
 
 The repository's `repo-task` and the installed official DSH package's two Cordis
