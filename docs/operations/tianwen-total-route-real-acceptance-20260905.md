@@ -264,3 +264,12 @@ ordinary status use, not yet an analyst's named inspection or adaptation.
 Scenario C's exact fictional incident-exercise packet and prose criteria are
 frozen in the existing scenario evidence file before any attempt. It has not been
 submitted while the bounded source-relevant evaluation repair is designed.
+
+At `17:19Z`, Scenario C was submitted once as a new ordinary UI task while the
+evaluation design was investigated independently. Session
+`72f5d639-5e90-47a1-9c93-48aee164968e`, Run
+`02725d2450663a7299f72a3c4226216be54615a460932095058277c46feff6c4` completed with
+official flash/high and `met / no-case`. The answer preserved the exercise
+context, attribution, observation time windows, causal uncertainty, unmonitored
+scope and approval boundary. No genuine new defect warrants feedback; the
+successful result is retained and no new Candidate is presumed.
