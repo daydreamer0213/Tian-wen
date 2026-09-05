@@ -184,6 +184,49 @@ yet a diagnosed root cause or completed repair. The owned server was stopped
 while idle to avoid repeated failed liveness retries. Original feedback,
 Candidate and frozen protocol remain unchanged; daily installation is untouched.
 
+### Dependency identity repair and first formal evaluation (16:55-17:03Z)
+
+One loopback Node inspector capture, restricted to fixed exception classes and
+native source locations, found `dsh-scope NamedEntries.insert:29` immediately
+before the Runtime's native Skill load catch. No raw exception message, stack,
+locals, model data or credentials were emitted. This is the native duplicate
+entry boundary. A two-arm no-model harness reproduced the failure when Runtime's
+`createScope` and the host ToolRuntime came from different physical module copies;
+the same-source control succeeded. The native scope tag uses a module-private
+Symbol, so another copy cannot identify the temporary scope correctly.
+
+The isolated root dependency junction pointed through an older acceptance setup
+to repository dependencies, while Web used its separately installed host.
+The repair adds a nearer Runtime-only dependency junction to the actual host's
+complete native dependency directory. It does not change product code, schema,
+source bytes, Candidate, protocol, or the old root junction. A read-only gate first
+failed all 14 external native identities and then passed all 14; both installed
+daily profiles already matched the host on all 14 and were not changed. The
+no-model reproduction also succeeds from the corrected Runtime resolution path.
+The diagnostic bundle hash remains unchanged. Inspector was detached and its
+temporary loopback listener was removed by restarting without debugging.
+
+The same natural continuation in the retained procurement conversation then
+opened the original frozen evaluation exactly once. Ten genuine paired Runs
+completed, using native `skill` and `submit_research_summary`; every first request
+and model source audited as official flash/high. Each task's baseline/Candidate
+manifest and normalized first-request digests match. Five objective comparisons
+are ties, with baseline and Candidate both `met` and all Candidate hard gates
+passing. This is 10 Runs / 20 recorded model requests, not 13 completed gates.
+
+Evaluation `evaluation:91783db782a43c9e9fc1f052a887dcaf7d55c0671a96e579dbf295bb33f1db58`
+finished at `17:03:18.850Z`, rejected for `original-or-adjacent-not-improved`.
+The retained analysis is now `candidate-rejected`, with no recovery point and no
+activation. No blind evaluator, holdout or activation Run was opened because the
+unchanged objective improvement gate stopped first. The main UI received the
+terminal report, queried native status and correctly explained the rejection.
+This formal result is retained and will not be rerun or retroactively regraded.
+
+This result confirms the source-fit gap already recorded above: the fixed old
+packets and ID oracle cannot establish the observed new prose-fidelity repair.
+Source-relevant evaluation design is the next bounded product task, not permission
+to weaken or bypass the old Candidate's completed gate.
+
 ## Existing-source review
 
 The repository's `repo-task` and the installed official DSH package's two Cordis
@@ -207,3 +250,17 @@ filesystem Skill provider discovers exactly this source with default roots and
 watchers disabled. Its parsed body is 4,763 bytes; complete native definition
 digest is `sha256:e02031325b7f18f9e9dd424c4790ad411ca029ec70471e040568185344b2b4f6`.
 This preparation is not an analyst inspection, host admission or model reuse.
+
+At `17:08Z`, after the original Candidate had reached its retained terminal
+rejection, the exact prepared admission and installed native filesystem provider
+were enabled only in the isolated profile. Source and license hashes remain
+unchanged, default roots and watchers remain disabled, and no package/code was
+downloaded or executed. An ordinary UI question about reviewed sources and the
+previous result caused the real main model to query native learning status. It
+reported `configured: 1`, `eligible: 1`, `summarization available: true`, and the
+correct terminal Candidate rejection. This verifies live host admission and
+ordinary status use, not yet an analyst's named inspection or adaptation.
+
+Scenario C's exact fictional incident-exercise packet and prose criteria are
+frozen in the existing scenario evidence file before any attempt. It has not been
+submitted while the bounded source-relevant evaluation repair is designed.
