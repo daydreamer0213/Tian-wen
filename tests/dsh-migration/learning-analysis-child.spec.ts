@@ -1027,6 +1027,16 @@ describe('native explicit-correction analysis child', () => {
       expect(concludeTurn).not.toHaveBeenCalled()
       return 'report-message'
     })
+    const recordLearningAnalysisReportIntent = vi.fn(input => legacyState === 'delivered'
+      ? { ...running, reportDelivery: running.reportDelivery! }
+      : {
+          ...running,
+          reportDelivery: { ...input, state: 'pending', intentRecordedAt: '2026-09-02T00:00:01.000Z' },
+        })
+    const recordLearningAnalysisReportDelivered = vi.fn(input => ({
+      ...running,
+      reportDelivery: { ...input, state: 'delivered', intentRecordedAt: '2026-09-02T00:00:01.000Z', deliveredAt: '2026-09-02T00:00:02.000Z' },
+    }))
     const root = {
       agents: { get: vi.fn((id: string) => id === childSessionId ? child : undefined) },
       sessionPersistence: {
@@ -1066,14 +1076,8 @@ describe('native explicit-correction analysis child', () => {
           signalIds: [`signal:${'c'.repeat(64)}`],
         }]),
         recordLearningAnalysisSubmission,
-        recordLearningAnalysisReportIntent: vi.fn(input => ({
-          ...running,
-          reportDelivery: { ...input, state: 'pending', intentRecordedAt: '2026-09-02T00:00:01.000Z' },
-        })),
-        recordLearningAnalysisReportDelivered: vi.fn(input => ({
-          ...running,
-          reportDelivery: { ...input, state: 'delivered', intentRecordedAt: '2026-09-02T00:00:01.000Z', deliveredAt: '2026-09-02T00:00:02.000Z' },
-        })),
+        recordLearningAnalysisReportIntent,
+        recordLearningAnalysisReportDelivered,
       },
     }
     const child = {
@@ -1140,7 +1144,11 @@ describe('native explicit-correction analysis child', () => {
         : submission.verdict === 'no-case' ? 'stopped-no-case' : 'stopped-insufficient-evidence',
     })
     expect(recordLearningAnalysisSubmission).toHaveBeenCalledTimes(legacyState === undefined ? 1 : 0)
-    expect(reportFrom).toHaveBeenCalledWith(child, [{
+    expect(recordLearningAnalysisReportIntent).toHaveBeenCalledWith(expect.objectContaining({
+      reportDigest: sha256([{ type: 'text', text: expectedText }]),
+    }))
+    if (legacyState === 'delivered') expect(reportFrom).not.toHaveBeenCalled()
+    else expect(reportFrom).toHaveBeenCalledWith(child, [{
       type: 'text',
       text: expectedText,
     }], {
@@ -1150,6 +1158,7 @@ describe('native explicit-correction analysis child', () => {
     expect(JSON.stringify(reportFrom.mock.calls)).not.toContain('Keep the answer concrete')
     expect(JSON.stringify(reportFrom.mock.calls)).not.toContain('omitted a concrete')
     expect(JSON.stringify(reportFrom.mock.calls)).not.toContain(submission.hypothesis)
+    expect(recordLearningAnalysisReportDelivered).toHaveBeenCalledTimes(legacyState === 'delivered' ? 0 : 1)
     expect(concludeTurn).toHaveBeenCalledOnce()
     dispose()
   })

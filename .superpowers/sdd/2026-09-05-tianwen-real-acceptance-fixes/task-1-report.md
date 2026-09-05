@@ -41,3 +41,23 @@ Output: focused suite passed: 2 files, 66 tests. Typecheck completed with exit c
 ## Concerns
 
 None. Full-suite and real UI acceptance remain intentionally owned by the controller.
+
+## Review fix round 1
+
+The initial replay tests selected legacy content and digest but did not model the delivered branch of the submission report-intent result, and terminal replay did not enter the reporting executor. The production behavior was already correct; only test coverage changed.
+
+RED command:
+
+```powershell
+$env:COREPACK_HOME='D:\DevData\corepack-home'; $env:PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN='false'; $env:TIANWEN_DSH_PROBE_ROOT='D:\DevData\tianwen-dsh-probe'; & 'D:\hermes\node\node.exe' 'D:\hermes\node\node_modules\corepack\dist\pnpm.js' exec vitest run tests/dsh-migration/learning-analysis-child.spec.ts
+```
+
+Output: the two delivered legacy submission-report cases failed because the old mock incorrectly returned `pending` and invoked delivery once. This confirmed the coverage gap.
+
+GREEN command:
+
+```powershell
+$env:COREPACK_HOME='D:\DevData\corepack-home'; $env:PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN='false'; $env:TIANWEN_DSH_PROBE_ROOT='D:\DevData\tianwen-dsh-probe'; & 'D:\hermes\node\node.exe' 'D:\hermes\node\node_modules\corepack\dist\pnpm.js' exec vitest run tests/dsh-migration/learning-analysis-child.spec.ts tests/dsh-migration/learning-loop-orchestrator.spec.ts; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; & 'D:\hermes\node\node.exe' 'D:\hermes\node\node_modules\corepack\dist\pnpm.js' run typecheck; exit $LASTEXITCODE
+```
+
+Output: focused suite passed: 2 files, 70 tests. Typecheck completed with exit code 0. The new executor-level cases prove that pending legacy no-case and insufficient-evidence records deliver their exact old text/digest, while delivered records do not redeliver.

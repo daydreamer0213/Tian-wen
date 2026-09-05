@@ -6,6 +6,7 @@ import { LearningExplorationInterruptedError } from '../../packages/tianwen-runt
 import {
   TianwenLearningLoopService,
   continueLearningLoop,
+  createExplicitCorrectionLearningLoopExecutor,
   drainLearningLoopLane,
   drainLearningLoopLaneWithWake,
   learningLoopTerminalReport,
@@ -162,6 +163,35 @@ describe('durable learning-loop phase table', () => {
     expect(learningLoopTerminalReport({
       ...base, phase, terminalReportDelivery: { state, reportDigest },
     })).toEqual({ text, digest: reportDigest })
+  })
+
+  it.each([
+    ['no-case', 'Tianwen 分析结论：未形成可学习案例，未改变任何 Skill。'],
+    ['insufficient-evidence', 'Tianwen 分析结论：证据不足，未改变任何 Skill。'],
+  ].flatMap(([phase, text]) =>
+    (['pending', 'delivered'] as const).map(state => [phase, state, text] as const),
+  ))('replays a %s legacy terminal report through the executor when %s', async (phase, state, text) => {
+    const reportDigest = sha256({ kind: 'terminal-governed-outcome', text })
+    const recordIntent = vi.fn(binding => ({
+      terminalReportDelivery: { state, reportDigest: binding.reportDigest },
+    }))
+    const recordDelivered = vi.fn()
+    const deliverTerminalReport = vi.fn(async () => 'terminal-report-message')
+    const executor = createExplicitCorrectionLearningLoopExecutor({ deliverTerminalReport } as never)
+
+    await executor.report({
+      status: { ...base, phase, terminalReportDelivery: { state, reportDigest } },
+      ctx: { tianwenEvolution: { recordLearningAnalysisTerminalReportIntent: recordIntent, recordLearningAnalysisTerminalReportDelivered: recordDelivered } },
+    } as never)
+
+    expect(recordIntent).toHaveBeenCalledWith(expect.objectContaining({ reportDigest }))
+    if (state === 'pending') {
+      expect(deliverTerminalReport).toHaveBeenCalledWith(expect.objectContaining({ text }))
+      expect(recordDelivered).toHaveBeenCalledWith(expect.objectContaining({ reportDigest, reportMessageId: 'terminal-report-message' }))
+    } else {
+      expect(deliverTerminalReport).not.toHaveBeenCalled()
+      expect(recordDelivered).not.toHaveBeenCalled()
+    }
   })
 
   it('keeps a recovered transition terminal when support is later unavailable', async () => {
