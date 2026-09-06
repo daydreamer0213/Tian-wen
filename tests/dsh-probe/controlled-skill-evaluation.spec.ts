@@ -9,8 +9,9 @@ import type {
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
-  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
+  resolveControlledSkillSourceFidelityFamily,
   learningSessionLifecycleFingerprint,
   prepareControlledSkillEvaluationBlindMap,
   prepareControlledSkillEvaluationObjective,
@@ -165,16 +166,17 @@ function controlledProtocol(
   } as const
 }
 
-function sourceFidelityProtocol() {
+function sourceFidelityProtocol(rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST) {
+  const family = resolveControlledSkillSourceFidelityFamily(rubricDigest)!
   const protocol = structuredClone(controlledProtocol())
   const sourcePacketDigest = digest('source-packet:original')
-  protocol.rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+  protocol.rubricDigest = rubricDigest
   protocol.tasks[0]!.inputDigest = sourcePacketDigest
   return {
     ...protocol,
     sourceFidelity: {
-      policyVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion,
-      policyDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+      policyVersion: family.policy.schemaVersion,
+      policyDigest: family.policyDigest,
       packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
       source: {
         signalId: 'signal:source-feedback',
@@ -204,7 +206,7 @@ function sourceFidelityProtocol() {
           stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
         },
         review: {
-          rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+          rubricDigest,
           configurationDigest: digest('holdout-review-config'),
           materialContractDigest: digest('holdout-review-material-contract'),
           evidenceContractDigest: digest('holdout-review-evidence-contract'),
@@ -214,8 +216,8 @@ function sourceFidelityProtocol() {
   } as const
 }
 
-function sourceFidelityRecord() {
-  const protocol = sourceFidelityProtocol()
+function sourceFidelityRecord(rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST) {
+  const protocol = sourceFidelityProtocol(rubricDigest)
   const { ticket } = ticketFacts()
   const source = protocol.sourceFidelity.source
   return prepareControlledSkillEvalProtocol({
@@ -238,8 +240,8 @@ function sourceFidelityRecord() {
   }], 'pre-candidate')
 }
 
-function sourceFidelityPlan() {
-  const record = sourceFidelityRecord()
+function sourceFidelityPlan(rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST) {
+  const record = sourceFidelityRecord(rubricDigest)
   const candidate = {
     candidateId: `candidate:${'1'.repeat(64)}`,
     ticketId: record.ticketId,
@@ -2115,8 +2117,9 @@ describe('controlled five-task Skill evaluation protocol', () => {
     }], 'pre-candidate')).toThrow(/unexpected field: messageId/i)
   })
 
-  it('lets clean ID ties reach v3 blind quality and requires real source-fidelity improvement', () => {
-    const { plan } = sourceFidelityPlan()
+  it.each([CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST, CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST])('lets clean ID ties reach blind quality and requires fidelity improvement for %s', rubricDigest => {
+    const { plan } = sourceFidelityPlan(rubricDigest)
+    expect(plan.sourceFidelity.holdout.review.rubricDigest).toBe(rubricDigest)
     const objectives = sourceFidelityObjectiveInputs(plan)
       .map(input => prepareControlledSkillEvaluationObjective(input, plan))
     expect(objectives.every(objective => objective.comparison === 'tie')).toBe(true)

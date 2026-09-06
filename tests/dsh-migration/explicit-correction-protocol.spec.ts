@@ -10,6 +10,9 @@ import {
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_POLICY,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_POLICY_DIGEST,
   prepareControlledSkillEvalProtocol,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
@@ -58,12 +61,14 @@ function sourceFidelityProtocol(
   sourceText: string,
   executionWindowMs?: 60_000 | 300_000,
   materialMaxUtf8Bytes?: 4_096 | 32_768,
+  rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
 ) {
   const { packet, source } = sourceFidelityInput(sourceText)
   return resolveExplicitCorrectionProtocol({
     scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
     protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
     packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+    rubricDigest,
     source,
     packet,
     ...(executionWindowMs === undefined ? {} : { executionWindowMs }),
@@ -76,6 +81,37 @@ afterEach(() => {
 })
 
 describe('explicit correction controlled protocol', () => {
+  it.each([60_000, 300_000] as const)('retains either complete grading family at %i ms and either capacity', executionWindowMs => {
+    for (const materialMaxUtf8Bytes of [4_096, 32_768] as const) {
+      for (const rubricDigest of [CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST, CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST]) {
+        const sourceText = '<research_packet>\n[F:f|required] Frozen fact.\n</research_packet>'
+        const protocol = sourceFidelityProtocol(sourceText, executionWindowMs, materialMaxUtf8Bytes, rubricDigest)
+        const tasks = protocol.buildEvaluationTasks({ root: fixtureRoot(), materializeWorkspace })
+        const input = { ticketId: 'ticket:family', sha256, rubricDigest, callConfig: { provider: 'fixture', model: 'fixture' }, retryPolicy: {}, toolSchemaDigest: sha256('tools'), tasks }
+        const frozen = protocol.buildProtocolInput(input)
+        const policy = rubricDigest === CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+          ? CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY : CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_POLICY
+        expect(frozen.protocol.sourceFidelity).toMatchObject({
+          policyVersion: policy.schemaVersion,
+          policyDigest: rubricDigest === CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST ? CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST : CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_POLICY_DIGEST,
+          holdout: { review: { rubricDigest }, task: { stopContract: { maxToolCalls: 4, maxElapsedMs: executionWindowMs } } },
+        })
+        expect(sourceFidelityProtocol(sourceText, executionWindowMs, materialMaxUtf8Bytes, rubricDigest).buildProtocolInput(input)).toEqual(frozen)
+        expect(() => protocol.buildProtocolInput({ ...input, rubricDigest: rubricDigest === CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST ? CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST : CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST })).toThrow()
+      }
+    }
+  })
+
+  it('defaults fresh v3 to complete and rejects unknown or own undefined rubric selection', () => {
+    const source = sourceFidelityInput('<research_packet>\n[F:f|required] Frozen fact.\n</research_packet>')
+    const input = { ...source, scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE, protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v3' as const, packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion }
+    for (const rubricDigest of [undefined, sha256('unknown')]) {
+      expect(() => resolveExplicitCorrectionProtocol({ ...input, rubricDigest } as never)).toThrow()
+    }
+    const protocol = resolveExplicitCorrectionProtocol(input)!
+    const tasks = protocol.buildEvaluationTasks({ root: fixtureRoot(), materializeWorkspace })
+    expect(protocol.buildProtocolInput({ ticketId: 'ticket:fresh', sha256, rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST, callConfig: { provider: 'fixture', model: 'fixture' }, retryPolicy: {}, toolSchemaDigest: sha256('tools'), tasks }).protocol.sourceFidelity.policyVersion).toBe('tianwen.controlled-skill-source-fidelity-policy.v2')
+  })
   it('builds the v3 original task from only the verified native packet', () => {
     const firstSource = `<research_packet>
 [F:actual|required] The actual source finding is first.
@@ -173,6 +209,7 @@ describe('explicit correction controlled protocol', () => {
       acceptanceSubjectDigest: source.acceptanceSubjectDigest,
     }] as const
     const prepared = prepareControlledSkillEvalProtocol(input, ticket, signals, 'pre-candidate')
+    expect(sha256(input)).toBe('sha256:04a59af0ef92dca087f51cb92c5595e363981034b743fb37d42700867bd24045')
     expect(prepared.schemaVersion).toBe('tianwen.controlled-skill-eval-protocol.v3')
     expect(prepareControlledSkillEvalProtocol(
       structuredClone(input), structuredClone(ticket), structuredClone(signals), 'pre-candidate',

@@ -33,6 +33,7 @@ export interface LearningExplorationContext {
 export type LearningExplorationMetric =
   | 'research-summary-required-id-coverage.v1'
   | 'research-summary-source-fidelity.v1'
+  | 'research-summary-source-fidelity.v2'
 
 export interface LearningExplorationRequest extends LearningExplorationContext {
   readonly explorationId: `exploration:${string}`
@@ -188,7 +189,8 @@ export function prepareLearningExploration(
   })
   const metric = context.metric ?? 'research-summary-required-id-coverage.v1'
   if (metric !== 'research-summary-required-id-coverage.v1'
-    && metric !== 'research-summary-source-fidelity.v1') {
+    && metric !== 'research-summary-source-fidelity.v1'
+    && metric !== 'research-summary-source-fidelity.v2') {
     throw new TypeError('invalid exploration metric')
   }
   const body = {

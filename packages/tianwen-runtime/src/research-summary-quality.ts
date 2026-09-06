@@ -18,8 +18,8 @@ import {
   type SessionHeader,
 } from '@deepseek-ai/dsh-session'
 import {
-  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC,
-  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_REVIEW_RUBRIC,
+  resolveControlledSkillSourceFidelityFamily,
   CONTROLLED_SKILL_SOURCE_FIDELITY_SCORE_KEYS,
   learningSessionLifecycleFingerprint,
   prepareResearchSummarySemanticReview,
@@ -51,6 +51,7 @@ Use only the supplied packet, canonical submission, and frozen rubric. Do not in
 For sourceFidelity, judge faithful coverage of required findings and decision uncertainties with their original attribution, scope, and time. Penalize material omissions, invented certainty, and treating contradicted claims as merely unknown or unknown claims as contradicted. IDs are metadata, not a substitute for faithful prose.`
 
 interface PreparedSourceReview {
+  readonly rubricDigest: Sha256Digest
   readonly parentSessionId: SessionId
   readonly parentCwd?: string
   readonly parentDelegationDepth: number
@@ -219,7 +220,7 @@ function prepareRunSource(
   const quality = runQualityContract(run)
   if (!parentMatchesRun(ctx, input.parentAgent, run)
     || quality?.schemaVersion !== 'tianwen.research-summary-semantic-contract.v1'
-    || quality.rubricDigest !== CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+    || resolveControlledSkillSourceFidelityFamily(quality.rubricDigest) === undefined
     || run.acceptanceSubjectDigest !== sha256(material.packet)) {
     throw new Error('native source Run binding is invalid')
   }
@@ -249,6 +250,7 @@ function prepareRunSource(
     reviewerSessionId: reviewerSessionId(run.runId, call.data.turn),
     acceptanceSubjectDigest: run.acceptanceSubjectDigest,
     sourceArgumentsDigest: source.sourceArgumentsDigest,
+    rubricDigest: quality.rubricDigest,
     submissionDigest: sha256(material.submission),
   }
 }
@@ -364,7 +366,10 @@ function expectedEnvelope(source: PersistedSourceReview): string {
   return JSON.stringify({
     packet: source.packet,
     submission: source.submission,
-    rubric: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC,
+    rubric: resolveControlledSkillSourceFidelityFamily(source.rubricDigest)!.metric
+      === 'research-summary-source-fidelity.v2'
+      ? CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_REVIEW_RUBRIC
+      : resolveControlledSkillSourceFidelityFamily(source.rubricDigest)!.rubric,
   })
 }
 
@@ -436,13 +441,13 @@ function requestMatches(
 
 function attempt(
   source: Pick<PreparedSourceReview,
-    'acceptanceSubjectDigest' | 'submissionDigest' | 'reviewerSessionId'>,
+    'acceptanceSubjectDigest' | 'submissionDigest' | 'reviewerSessionId' | 'rubricDigest'>,
   requestDigest: Sha256Digest,
 ) {
   return {
     acceptanceSubjectDigest: source.acceptanceSubjectDigest,
     submissionDigest: source.submissionDigest,
-    rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+    rubricDigest: source.rubricDigest,
     reviewerSessionId: source.reviewerSessionId,
     requestDigest,
     reviewerSessionDigest: null,
@@ -452,7 +457,7 @@ function attempt(
 function inconclusive(
   reasonCode: 'no-canonical-submission' | 'review-not-completed' | 'review-invalid',
   source?: Pick<PreparedSourceReview,
-    'acceptanceSubjectDigest' | 'submissionDigest' | 'reviewerSessionId'>,
+    'acceptanceSubjectDigest' | 'submissionDigest' | 'reviewerSessionId' | 'rubricDigest'>,
   requestDigest?: Sha256Digest,
 ): ResearchSummarySemanticReview {
   return prepareResearchSummarySemanticReview({
@@ -562,7 +567,7 @@ function completedReviewFromInspection(
     status: 'completed',
     acceptanceSubjectDigest: source.acceptanceSubjectDigest,
     submissionDigest: source.submissionDigest,
-    rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+    rubricDigest: source.rubricDigest,
     reviewerSessionId: source.reviewerSessionId,
     reviewerSessionDigest: sha256(completed),
     requestDigest,
@@ -765,7 +770,7 @@ function sourceReviewFromPersistence(
       ...(inspection.meta.cwd === undefined ? {} : { cwd: inspection.meta.cwd }),
     })
     || quality?.schemaVersion !== 'tianwen.research-summary-semantic-contract.v1'
-    || quality.rubricDigest !== CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+    || resolveControlledSkillSourceFidelityFamily(quality.rubricDigest) === undefined
     || run.acceptanceSubjectDigest !== sha256(material.packet)) return undefined
   const evidence = ctx.tianwenEvidence.project({
     id: SessionId(run.sessionId),
@@ -821,6 +826,7 @@ function sourceReviewFromPersistence(
     reviewerSessionId: reviewerSessionId(run.runId, match.call.data.turn),
     acceptanceSubjectDigest: run.acceptanceSubjectDigest,
     sourceArgumentsDigest: match.sourceArgumentsDigest,
+    rubricDigest: quality.rubricDigest,
     submissionDigest: sha256(material.submission),
   }
 }

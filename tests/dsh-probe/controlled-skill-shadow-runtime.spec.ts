@@ -20,8 +20,10 @@ import type { GenerateOptions, SkillDefinition, StreamChunk } from '@tianwen/dsh
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
-  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_REVIEW_RUBRIC,
+  resolveControlledSkillSourceFidelityFamily,
   learningSessionLifecycleFingerprint,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
@@ -688,7 +690,9 @@ async function mountSourceFidelityShadowRuntime(
   foreignCandidateScopeKey?: string,
   outcomeSource = false,
   identityLeak = false,
+  rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
 ) {
+  const family = resolveControlledSkillSourceFidelityFamily(rubricDigest)!
   const root = fixtureRoot(name)
   const harness = await mountPersistentHarness(join(root, 'sessions'), [])
   await harness.ctx.plugin(SkillRegistry)
@@ -852,7 +856,7 @@ async function mountSourceFidelityShadowRuntime(
     stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
   }))
   const protocol = {
-    rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+    rubricDigest,
     tasks: sourceTasks,
     execution: {
       dshVersion: '0.1.1-rc.2' as const,
@@ -866,8 +870,8 @@ async function mountSourceFidelityShadowRuntime(
       retryPolicyDigest: sha256(retryPolicy),
     },
     sourceFidelity: {
-      policyVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion,
-      policyDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+      policyVersion: family.policy.schemaVersion,
+      policyDigest: family.policyDigest,
       packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
       source: {
         signalId: `signal:${'0'.repeat(64)}`,
@@ -900,7 +904,7 @@ async function mountSourceFidelityShadowRuntime(
           stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
         },
         review: {
-          rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+          rubricDigest,
           configurationDigest: sha256(reviewConfiguration),
           materialContractDigest: sha256(reviewMaterialContract),
           evidenceContractDigest: sha256(reviewEvidenceContract),
@@ -1121,10 +1125,10 @@ describe('controlled Skill Shadow Runtime', () => {
     }
   })
 
-  it('runs one native v3 holdout and an independent reviewer before rejecting bad semantics', async () => {
+  it.each([CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST, CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST])('runs one native holdout and an independent reviewer before semantic rejection for %s', async rubricDigest => {
     const mounted = await mountSourceFidelityShadowRuntime(
       'source-fidelity-semantic-rejection',
-      2,
+      2, undefined, undefined, false, false, rubricDigest,
     )
     const create = vi.spyOn(mounted.harness.ctx.agents, 'create')
     try {
@@ -1150,6 +1154,13 @@ describe('controlled Skill Shadow Runtime', () => {
         mounted.input.tasks[0]!.reviewSessionId,
       ])
       const reviewRequest = mounted.adapter.requests.at(-1)!
+      const material = JSON.parse((reviewRequest.messages[0]!.content[0] as { text: string }).text)
+      expect(material.rubricDigest).toBe(rubricDigest)
+      if (rubricDigest === CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST) {
+        expect(material.rubric).toEqual(CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_REVIEW_RUBRIC)
+      } else {
+        expect(Object.keys(material.rubric).sort()).toEqual(['dimensions', 'scoreAnchors'])
+      }
       expect(reviewRequest.tools?.map(tool => tool.name)).toEqual(['submit_holdout_review'])
       const serializedReview = JSON.stringify(reviewRequest)
       expect(serializedReview).toContain('Weekly active adoption reached 74%.')

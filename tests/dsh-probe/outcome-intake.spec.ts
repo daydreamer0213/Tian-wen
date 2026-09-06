@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
   LedgerIntegrityError,
   prepareResearchSummarySemanticReview,
   prepareRunAcceptanceContract,
@@ -81,11 +82,12 @@ function bind(
 function bindSemantic(
   ledger: EvolutionLedger,
   sessionId: string,
+  rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
 ) {
   return ledger.recordRunBinding({
     ...base,
     sessionId,
-    acceptanceContract: semanticAcceptance,
+    acceptanceContract: { ...semanticAcceptance, qualityContract: { ...qualityContract, rubricDigest } },
     acceptanceSubjectDigest: digest('a'),
   } as unknown as RunBindingInput).runId
 }
@@ -142,6 +144,24 @@ describe('Outcome read projection', () => {
 })
 
 describe('Research-summary semantic Outcome', () => {
+  it.each([
+    CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+    CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
+  ])('keeps ordinary gates and rejects crossed proof family for %s before ledger writes', rubricDigest => {
+    const directory = root('family-gates')
+    const ledger = new EvolutionLedger(directory)
+    for (const [scopeRestraint, sourceFidelity, verdict] of [[2, 4, 'met'], [4, 2, 'not-met']] as const) {
+      const runId = bindSemantic(ledger, `session:family-${sourceFidelity}`, rubricDigest)
+      const review = completedSemanticReview({ rubricDigest, scores: { relevance: 4, correctnessReasoning: 4, clarityUsability: 4, scopeRestraint, sourceFidelity } })
+      const input = { runId, verdict, sessionDigest: digest('1'), evidenceIds: [digest('2')], semanticReview: review }
+      const before = readFileSync(join(directory, 'ledger.jsonl'), 'utf8')
+      const crossed = rubricDigest === CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST ? CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST : CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+      expect(() => ledger.recordOutcomeIntake({ ...input, semanticReview: { ...review, rubricDigest: crossed } } as never)).toThrow(LedgerIntegrityError)
+      expect(readFileSync(join(directory, 'ledger.jsonl'), 'utf8')).toBe(before)
+      ledger.recordOutcomeIntake(input as never)
+      expect(ledger.getOutcomeIntake(runId)?.input.verdict).toBe(verdict)
+    }
+  })
   it('requires independent proof bound to the subject, rubric, and fixed verdict', () => {
     const ledger = new EvolutionLedger(root('semantic-invalid'))
     const runId = bindSemantic(ledger, 'session:semantic-invalid')

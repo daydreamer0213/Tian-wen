@@ -12,8 +12,8 @@ import {
 } from '@tianwen/runtime/research-summary'
 import {
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
-  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
-  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
+  resolveControlledSkillSourceFidelityFamily,
   CONTROLLED_SKILL_SOURCE_FIDELITY_SCORE_KEYS,
   sha256,
   type ControlledSkillSourceIdentity,
@@ -329,6 +329,7 @@ function assertFreshSessions(
 
 function buildResearchSummaryControlledProtocol(
   sourceFidelity?: {
+    readonly family: NonNullable<ReturnType<typeof resolveControlledSkillSourceFidelityFamily>>
     readonly source: ControlledSkillSourceIdentity
     readonly packet: ResearchPacket
   },
@@ -345,6 +346,7 @@ function buildResearchSummaryControlledProtocol(
   return deepFreeze({
     scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
     version: EXPLICIT_CORRECTION_PROTOCOL_VERSION,
+    ...(sourceFidelity === undefined ? {} : { rubricDigest: sourceFidelity.family.rubricDigest }),
     acceptance,
     parentSkill,
     allowedTools,
@@ -426,6 +428,9 @@ function buildResearchSummaryControlledProtocol(
       readonly toolSchemaDigest: Digest
       readonly tasks: readonly ExplicitCorrectionEvaluationTask[]
     }) {
+      if (sourceFidelity !== undefined && input.rubricDigest !== sourceFidelity.family.rubricDigest) {
+        throw new TypeError('explicit correction protocol rubric family drift')
+      }
       const protocol = {
         ticketId: input.ticketId,
         evidencePurpose: 'controlled-product' as const,
@@ -481,9 +486,9 @@ function buildResearchSummaryControlledProtocol(
         protocol: {
           ...protocol.protocol,
           sourceFidelity: {
-            policyVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion,
-            policyDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
-            packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+            policyVersion: sourceFidelity.family.policy.schemaVersion,
+            policyDigest: sourceFidelity.family.policyDigest,
+            packetVersion: sourceFidelity.family.policy.packetVersion,
             source: sourceFidelity.source,
             holdout: {
               task: {
@@ -504,7 +509,7 @@ function buildResearchSummaryControlledProtocol(
                 stopContract: selectedStopContract,
               },
               review: {
-                rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+                rubricDigest: sourceFidelity.family.rubricDigest,
                 configurationDigest: input.sha256(sourceFidelityReviewConfiguration),
                 materialContractDigest: input.sha256(materialContracts.review),
                 evidenceContractDigest: input.sha256(sourceFidelityReviewEvidenceContract),
@@ -631,6 +636,7 @@ type ExplicitCorrectionProtocolResolution =
   | {
       readonly scopeKey: string
       readonly protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v3'
+      readonly rubricDigest?: Digest
       readonly packetVersion: typeof CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion
       readonly source: ControlledSkillSourceIdentity
       readonly packet: ResearchPacket
@@ -664,11 +670,17 @@ export function resolveExplicitCorrectionProtocol(
   }
   const hasExecutionWindow = Object.prototype.hasOwnProperty.call(input, 'executionWindowMs')
   const hasMaterialCapacity = Object.prototype.hasOwnProperty.call(input, 'materialMaxUtf8Bytes')
+  const hasRubric = Object.prototype.hasOwnProperty.call(input, 'rubricDigest')
   exactKeys(input, [
     'scopeKey', 'protocolSchemaVersion', 'packetVersion', 'source', 'packet',
     ...(hasExecutionWindow ? ['executionWindowMs'] : []),
     ...(hasMaterialCapacity ? ['materialMaxUtf8Bytes'] : []),
+    ...(hasRubric ? ['rubricDigest'] : []),
   ])
+  const selectedRubric = hasRubric ? input.rubricDigest : CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST
+  const family = typeof selectedRubric === 'string'
+    ? resolveControlledSkillSourceFidelityFamily(selectedRubric) : undefined
+  if (family === undefined) throw new TypeError('explicit correction rubric family is invalid')
   const selectedWindow = hasExecutionWindow ? input.executionWindowMs : 300_000
   if (selectedWindow !== 60_000 && selectedWindow !== 300_000) {
     throw new TypeError('explicit correction execution window is invalid')
@@ -684,6 +696,7 @@ export function resolveExplicitCorrectionProtocol(
     throw new TypeError('explicit correction source-fidelity input is invalid')
   }
   return buildResearchSummaryControlledProtocol({
+    family,
     source: structuredClone(input.source),
     packet: parseResearchPacket(input.packet.source),
   }, selectedWindow, selectedMaterialCapacity)

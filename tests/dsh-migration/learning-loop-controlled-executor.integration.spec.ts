@@ -67,6 +67,8 @@ import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_REVIEW_RUBRIC,
   LedgerCommitUnknownError,
   learningSessionLifecycleFingerprint,
   prepareLearningIntake,
@@ -947,11 +949,13 @@ describe('explicit-correction controlled learning-loop executor', () => {
   })
 
   it.each([
-    [4_096, 'stopped'],
-    [32_768, 'awaiting-evaluator'],
+    [4_096, 'stopped', CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST],
+    [32_768, 'awaiting-evaluator', CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST],
+    [4_096, 'stopped', CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST],
+    [32_768, 'awaiting-evaluator', CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST],
   ] as const)(
     'executes retained v3 capacity %i through the native evaluator route',
-    async (materialMaxUtf8Bytes, expectedArmsState) => {
+    async (materialMaxUtf8Bytes, expectedArmsState, rubricDigest) => {
     const fixtureRoot = root(`source-fidelity-native-route-${materialMaxUtf8Bytes}`)
     const packetText = `<research_packet>\n${Array.from({ length: 32 }, (_, index) =>
       `[F:${String(index).padStart(2, '0')}${'a'.repeat(62)}|required] fact ${index}`,
@@ -998,6 +1002,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
       source,
       packet,
       materialMaxUtf8Bytes,
+      rubricDigest,
     })!
     const observedEvaluatorMaterial: string[] = []
     const mounted = await mountControlledRuntime(
@@ -1121,7 +1126,7 @@ describe('explicit-correction controlled learning-loop executor', () => {
         sourceProtocol.buildProtocolInput({
           ticketId: requested.ticketId,
           sha256,
-          rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+          rubricDigest,
           callConfig,
           retryPolicy,
           toolSchemaDigest: sha256(frozenProductToolSchemas(ctx)),
@@ -1164,6 +1169,22 @@ describe('explicit-correction controlled learning-loop executor', () => {
       expect(new Set(controlledSessions.map(item => String(item.id))).size).toBe(14)
       const review = controlledSessions.find(item => String(item.id).includes('holdout-review'))
       expect(review).toBeDefined()
+      const graders = mounted.adapter.requests.filter(request => request.tools?.some(tool =>
+        tool.name === 'submit_blind_evaluation' || tool.name === 'submit_holdout_review'))
+      expect(graders).toHaveLength(2)
+      for (const request of graders) {
+        const envelope = JSON.parse((request.messages[0]!.content[0] as { text: string }).text)
+        const materials = 'evaluations' in envelope ? envelope.evaluations : [envelope]
+        for (const material of materials) {
+          expect(material.rubricDigest).toBe(rubricDigest)
+          if (rubricDigest === CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST) {
+            expect(material.rubric).toEqual(CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_REVIEW_RUBRIC)
+          } else {
+            expect(Object.keys(material.rubric).sort()).toEqual(['dimensions', 'scoreAnchors'])
+          }
+          expect(JSON.stringify(material)).not.toMatch(/candidatePassRules|xRole|yRole|expectedWinner|candidatePatch/)
+        }
+      }
     } finally {
       recovery.mockRestore()
       await mounted.dispose()

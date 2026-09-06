@@ -16,6 +16,7 @@ import type { Session, SessionEvent } from '@tianwen/dsh-compat'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import {
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
   learningSessionLifecycleFingerprint,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
@@ -113,7 +114,7 @@ afterEach(() => {
 })
 
 describe('Tianwen runtime Outcome intake', () => {
-  it('binds a trusted canonical review to the raw source Evidence arguments', async () => {
+  it.each([CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST, CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST])('binds a trusted canonical review to raw source arguments for %s', async rubricDigest => {
     const packet = parseResearchPacket(`<research_packet>
 [F:f1|required] Required finding one.
 [F:f2|optional] Optional finding two.
@@ -148,7 +149,7 @@ describe('Tianwen runtime Outcome intake', () => {
         toolName: RESEARCH_SUMMARY_TOOL_NAME,
         qualityContract: {
           schemaVersion: 'tianwen.research-summary-semantic-contract.v1',
-          rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+          rubricDigest,
         },
       },
       acceptanceSubjectDigest: sha256(packet),
@@ -166,7 +167,7 @@ describe('Tianwen runtime Outcome intake', () => {
         status: 'completed',
         acceptanceSubjectDigest: sha256(packet),
         submissionDigest: sha256(canonicalSubmission),
-        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        rubricDigest,
         reviewerSessionId: 'session:canonical-reviewer',
         reviewerSessionDigest: sha256('canonical reviewer session'),
         requestDigest: sha256('canonical reviewer request'),

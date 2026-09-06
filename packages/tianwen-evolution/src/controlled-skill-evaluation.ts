@@ -18,8 +18,8 @@ import type {
 import type { SkillEvalProtocolId } from './skill-evaluation.js'
 import {
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
-  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
-  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_POLICY,
+  resolveControlledSkillSourceFidelityFamily,
   CONTROLLED_SKILL_SOURCE_FIDELITY_SCORE_KEYS,
 } from './controlled-skill-source-fidelity.js'
 
@@ -154,6 +154,7 @@ export interface ControlledSkillSourceFidelityReviewContract {
 
 export interface ControlledSkillSourceFidelityContract {
   readonly policyVersion: typeof CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion
+    | typeof CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_POLICY.schemaVersion
   readonly policyDigest: Sha256Digest
   readonly packetVersion: typeof CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion
   readonly source: ControlledSkillSourceIdentity
@@ -790,9 +791,7 @@ function prepareSourceFidelityContract(
     'holdout',
   ])
   if (
-    value.policyVersion !== CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion
-    || value.policyDigest !== CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST
-    || value.packetVersion !== CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion
+    value.packetVersion !== CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion
     || !isRecord(value.holdout)
   ) throw new TypeError('source-fidelity policy identity is invalid')
   exactKeys(value.holdout, ['task', 'review'])
@@ -805,18 +804,23 @@ function prepareSourceFidelityContract(
     'materialContractDigest',
     'evidenceContractDigest',
   ])
-  if (value.holdout.review.rubricDigest !== CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST) {
+  const family = resolveControlledSkillSourceFidelityFamily(
+    digest(value.holdout.review.rubricDigest, 'source-fidelity holdout rubricDigest'),
+  )
+  if (family === undefined
+    || value.policyVersion !== family.policy.schemaVersion
+    || value.policyDigest !== family.policyDigest) {
     throw new TypeError('source-fidelity holdout review rubric is invalid')
   }
   return {
-    policyVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion,
-    policyDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
-    packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+    policyVersion: family.policy.schemaVersion,
+    policyDigest: family.policyDigest,
+    packetVersion: family.policy.packetVersion,
     source: prepareSourceIdentity(value.source),
     holdout: {
       task: prepareHoldoutTask(value.holdout.task),
       review: {
-        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        rubricDigest: family.rubricDigest,
         configurationDigest: digest(
           value.holdout.review.configurationDigest,
           'source-fidelity review configurationDigest',
@@ -867,9 +871,9 @@ function prepareProtocol(value: unknown): ControlledSkillEvalProtocol {
     ...(sourceFidelity ? ['sourceFidelity'] : []),
   ])
   const expectedRubric = sourceFidelity
-    ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+    ? resolveControlledSkillSourceFidelityFamily(digest(value.rubricDigest, 'rubricDigest'))?.rubricDigest
     : CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST
-  if (value.rubricDigest !== expectedRubric) {
+  if (expectedRubric === undefined || value.rubricDigest !== expectedRubric) {
     throw new TypeError('controlled evaluation rubric is not the frozen rubric')
   }
   if (!Array.isArray(value.tasks) || value.tasks.length !== CONTROLLED_SKILL_EVAL_TASK_TYPES.length) {
@@ -890,7 +894,8 @@ function prepareProtocol(value: unknown): ControlledSkillEvalProtocol {
   if (!sourceFidelity) return common
   const contract = prepareSourceFidelityContract(value.sourceFidelity)
   if (
-    tasks[0]!.inputDigest !== contract.source.packetDigest
+    contract.holdout.review.rubricDigest !== expectedRubric
+    || tasks[0]!.inputDigest !== contract.source.packetDigest
     || tasks[0]!.acceptanceSubjectDigest !== contract.source.acceptanceSubjectDigest
     || tasks.some(task => task.inputDigest === contract.holdout.task.inputDigest)
     || tasks.some(task =>
@@ -1355,7 +1360,7 @@ export function parseControlledSkillEvaluationPlan(
   if (!Array.isArray(value.tasks)) throw new TypeError('controlled evaluation plan tasks must be an array')
   const protocol = prepareProtocol({
     rubricDigest: isV3
-      ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+      ? prepareSourceFidelityContract(value.sourceFidelity).holdout.review.rubricDigest
       : CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
     tasks: value.tasks.map(task => {
       if (!isRecord(task)) throw new TypeError('controlled evaluation plan task must be an object')
@@ -1707,7 +1712,7 @@ export function prepareControlledSkillEvaluationBlindMap(
             : 'tianwen.controlled-blind-envelope.v1',
           taskId: task.taskId,
           rubricDigest: plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
-            ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+            ? plan.sourceFidelity.holdout.review.rubricDigest
             : CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
           x: blindEnvelopeArm(objective[xRole]),
           y: blindEnvelopeArm(objective[yRole]),

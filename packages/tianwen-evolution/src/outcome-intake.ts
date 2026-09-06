@@ -5,7 +5,7 @@ import type {
   LearningTicketId,
 } from './learning-intake.js'
 import type { ControlledSkillEvaluatorDimensionScoresV3 } from './controlled-skill-evaluation.js'
-import { CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST } from './controlled-skill-source-fidelity.js'
+import { resolveControlledSkillSourceFidelityFamily } from './controlled-skill-source-fidelity.js'
 
 export type TianwenRunId = `run:${string}`
 export type OutcomeSeverity = 1 | 2 | 3 | 4 | 5
@@ -258,12 +258,14 @@ function prepareResearchSummaryQualityContract(
   if (value.schemaVersion !== 'tianwen.research-summary-semantic-contract.v1') {
     throw new TypeError('qualityContract has an invalid schema version')
   }
-  if (value.rubricDigest !== CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST) {
+  const family = typeof value.rubricDigest === 'string'
+    ? resolveControlledSkillSourceFidelityFamily(value.rubricDigest) : undefined
+  if (family === undefined) {
     throw new TypeError('qualityContract rubric is not the frozen rubric')
   }
   return {
     schemaVersion: 'tianwen.research-summary-semantic-contract.v1',
-    rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+    rubricDigest: family.rubricDigest,
   }
 }
 

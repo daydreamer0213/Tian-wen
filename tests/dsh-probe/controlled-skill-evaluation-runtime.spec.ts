@@ -22,8 +22,10 @@ import type { GenerateOptions, SkillDefinition, StreamChunk } from '@tianwen/dsh
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
-  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_REVIEW_RUBRIC,
+  resolveControlledSkillSourceFidelityFamily,
   learningSessionLifecycleFingerprint,
   prepareRunSkillManifest,
   sha256,
@@ -329,9 +331,11 @@ async function mountControlledRuntime(
     readonly aggregateEvaluatorSession?: boolean
     readonly aggregateEvaluatorRequestMutation?: 'packet-input' | 'material' | 'schema'
     readonly sourceFidelity?: boolean
+    readonly rubricDigest?: `sha256:${string}`
   } = {},
 ) {
   const root = fixtureRoot(name)
+  const family = resolveControlledSkillSourceFidelityFamily(options.rubricDigest ?? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST)!
   const harness = await mountPersistentHarness(join(root, 'sessions'), [])
   await harness.ctx.plugin(SkillRegistry)
   await harness.ctx.plugin(applySkillTool)
@@ -529,7 +533,7 @@ async function mountControlledRuntime(
   })
   const protocol = {
     rubricDigest: options.sourceFidelity === true
-      ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+      ? family.rubricDigest
       : CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
     tasks: tasks.map(task => ({
       taskId: task.taskId,
@@ -564,8 +568,8 @@ async function mountControlledRuntime(
     ...(options.sourceFidelity === true
       ? {
           sourceFidelity: {
-            policyVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion,
-            policyDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+            policyVersion: family.policy.schemaVersion,
+            policyDigest: family.policyDigest,
             packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
             source: {
               signalId: `signal:${'0'.repeat(64)}`,
@@ -598,7 +602,7 @@ async function mountControlledRuntime(
                 stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
               },
               review: {
-                rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+                rubricDigest: family.rubricDigest,
                 configurationDigest: sha256('controlled-runtime-review-configuration'),
                 materialContractDigest: sha256('controlled-runtime-review-material'),
                 evidenceContractDigest: sha256('controlled-runtime-review-evidence'),
@@ -1131,7 +1135,7 @@ describe('controlled Skill evaluation Runtime', () => {
     }
   })
 
-  it('sends clean v3 ID ties to one native aggregate evaluator and rejects false fidelity improvement', async () => {
+  it.each([CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST, CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST])('sends ID ties to one native aggregate evaluator and rejects false improvement for %s', async rubricDigest => {
     const mounted = await mountControlledRuntime(
       'source-fidelity-id-tie',
       [
@@ -1146,6 +1150,7 @@ describe('controlled Skill evaluation Runtime', () => {
         aggregateEvaluatorSession: true,
         baselineImprovementRequired: false,
         sourceFidelity: true,
+        rubricDigest,
       },
     )
     try {
@@ -1189,9 +1194,14 @@ describe('controlled Skill evaluation Runtime', () => {
         ?.content.find(block => block.type === 'text')
       const envelope = JSON.parse(envelopeText?.type === 'text' ? envelopeText.text : '')
       expect(envelope.evaluations[0]).toMatchObject({
-        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        rubricDigest,
         rubric: { dimensions: expect.arrayContaining(['source-fidelity']) },
       })
+      if (rubricDigest === CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST) {
+        const envelope = JSON.parse((request!.messages[0]!.content[0] as { text: string }).text)
+        expect(envelope.evaluations).toHaveLength(5)
+        for (const material of envelope.evaluations) expect(material.rubric).toEqual(CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_REVIEW_RUBRIC)
+      }
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()

@@ -7,7 +7,7 @@ import {
 } from '@tianwen/runtime'
 import {
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
-  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  resolveControlledSkillSourceFidelityFamily,
   sha256,
   type LearningExplorationStatus,
   type LearningAnalysisProgressCursor,
@@ -302,6 +302,13 @@ export function createExplicitCorrectionLearningLoopExecutor(
     let retainedExecutionWindowMs: 60_000 | 300_000 | undefined
     let retainedMaterialMaxUtf8Bytes: 4_096 | 32_768 | undefined
     if (retained?.schemaVersion === 'tianwen.controlled-skill-eval-protocol.v3') {
+      const family = resolveControlledSkillSourceFidelityFamily(retained.protocol.rubricDigest)
+      if (family === undefined
+        || retained.protocol.sourceFidelity.policyVersion !== family.policy.schemaVersion
+        || retained.protocol.sourceFidelity.policyDigest !== family.policyDigest
+        || retained.protocol.sourceFidelity.holdout.review.rubricDigest !== family.rubricDigest) {
+        throw new Error('retained controlled protocol grading family is invalid')
+      }
       const taskContracts = retained.protocol.tasks.map(task => task.stopContract)
       const holdoutContract = retained.protocol.sourceFidelity.holdout.task.stopContract
       const contracts = [...taskContracts, holdoutContract]
@@ -352,6 +359,7 @@ export function createExplicitCorrectionLearningLoopExecutor(
         packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
         source: retained?.protocol.sourceFidelity.source ?? sourceCase.source,
         packet: sourceCase.packet,
+        ...(retained === undefined ? {} : { rubricDigest: retained.protocol.rubricDigest }),
         ...(retainedExecutionWindowMs === undefined
           ? {}
           : { executionWindowMs: retainedExecutionWindowMs }),
@@ -528,7 +536,7 @@ export function createExplicitCorrectionLearningLoopExecutor(
         ticketId: context.status.ticketId, sha256,
         rubricDigest: built.protocolSchemaVersion
           === 'tianwen.controlled-skill-eval-protocol.v3'
-          ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+          ? built.protocol.rubricDigest!
           : environment.rubricDigest,
         callConfig: environment.callConfig, retryPolicy: environment.retryPolicy,
         toolSchemaDigest: sha256(environment.toolSchemas), tasks: built.tasks,

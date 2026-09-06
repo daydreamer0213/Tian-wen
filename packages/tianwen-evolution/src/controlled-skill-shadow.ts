@@ -25,6 +25,7 @@ import type {
 } from './controlled-skill-evaluation.js'
 import {
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
+  resolveControlledSkillSourceFidelityFamily,
   CONTROLLED_SKILL_SOURCE_FIDELITY_SCORE_KEYS,
 } from './controlled-skill-source-fidelity.js'
 
@@ -668,7 +669,7 @@ function preparePlanRecord(input: {
   if (
     tasks.length !== 1
     || review.sessionId === tasks[0]!.sessionId
-    || review.rubricDigest !== CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.rubricDigest
+    || resolveControlledSkillSourceFidelityFamily(review.rubricDigest) === undefined
     || review.sourcePacketDigest !== tasks[0]!.inputDigest
     || !('evaluatorMaterialContractDigest' in tasks[0]!)
   ) throw new TypeError('controlled Skill Shadow v3 review contract is invalid')

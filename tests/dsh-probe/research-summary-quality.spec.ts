@@ -18,6 +18,8 @@ import {
 } from '@tianwen/dsh-compat'
 import {
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC,
   sha256,
   type ResearchSummarySemanticReview,
 } from '../../packages/tianwen-evolution/src/index.js'
@@ -77,10 +79,11 @@ const highScores = {
 } as const
 
 interface FixtureOptions {
+  readonly rubricDigest?: `sha256:${string}`
   readonly packet?: ResearchPacket
   readonly sourceArguments?: ResearchSummarySubmission
   readonly submission?: ResearchSummarySubmission
-  readonly scores?: typeof highScores
+  readonly scores?: { readonly [K in keyof typeof highScores]: number }
   readonly reviewerResponse?: Error | ReturnType<typeof toolCallResponse>
   readonly concurrent?: boolean
   readonly tamperRequest?: 'system' | 'config' | 'material' | 'schema'
@@ -225,7 +228,7 @@ async function runFixture(options: FixtureOptions = {}) {
       blocksGoal: false,
       qualityContract: {
         schemaVersion: 'tianwen.research-summary-semantic-contract.v1',
-        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        rubricDigest: options.rubricDigest ?? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
       },
     },
     acceptanceSubjectDigest: sha256(boundPacket),
@@ -236,7 +239,7 @@ async function runFixture(options: FixtureOptions = {}) {
     acceptanceContract: {
       qualityContract: {
         schemaVersion: 'tianwen.research-summary-semantic-contract.v1',
-        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        rubricDigest: options.rubricDigest ?? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
       },
     },
   })
@@ -274,6 +277,40 @@ afterEach(() => {
 })
 
 describe('native research-summary quality review', () => {
+  it.each([{ scopeRestraint: 2, sourceFidelity: 4 }, { scopeRestraint: 4, sourceFidelity: 2 }])(
+    'uses the complete neutral material and retains scores %j through native proof recovery', async scores => {
+      expect(CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST).toBeDefined()
+      const fixture = await runFixture({ rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST, scores: { ...highScores, ...scores } })
+      try {
+        expect(fixture.recovered).toMatchObject({ status: 'completed', rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST, scores })
+        const request = fixture.harness.adapter.requests[1]!
+        const material = JSON.parse((request.messages[0]!.content[0] as { text: string }).text)
+        expect(material.rubric).toEqual({
+          scoreAnchors: CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC.scoreAnchors,
+          dimensions: CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC.dimensions,
+          criteria: CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC.criteria,
+        })
+        expect(JSON.stringify(material)).not.toMatch(/candidatePassRules|xRole|yRole|expectedWinner|feedback/)
+        const sourceEvidence = fixture.harness.ctx.tianwenEvidence.project(fixture.parent.agent.session)
+          .find(item => item.action.toolName === RESEARCH_SUMMARY_TOOL_NAME)!
+        const verdict = scores.sourceFidelity >= 3 ? 'met' : 'not-met'
+        fixture.harness.ctx.tianwenLearningIntake.consumeOutcome(fixture.parent.agent.session, fixture.run.runId, {
+          verdict, acceptanceEvidenceId: sourceEvidence.evidenceId, semanticReview: fixture.recovered,
+        })
+        expect(fixture.harness.ctx.tianwenEvolution.getOutcomeIntake(fixture.run.runId)?.input.verdict).toBe(verdict)
+        const before = fixture.harness.adapter.requests.length
+        const crossed = { ...fixture.recovered, rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST }
+        await expect(recoverResearchSummaryQualityReview(fixture.harness.ctx, {
+          run: fixture.run, packet, submission: fixture.submission, expectedReview: crossed,
+          signal: new AbortController().signal,
+        })).resolves.toMatchObject({ status: 'inconclusive' })
+        expect(fixture.harness.adapter.requests).toHaveLength(before)
+      } finally {
+        await fixture.parent.dispose()
+        await fixture.harness.ctx.fiber.dispose()
+      }
+    },
+  )
   it('reviews and recovers canonical content while preserving raw source arguments', async () => {
     const boundPacket = parseResearchPacket(`<research_packet>
 [F:f1|required] Required finding one.
@@ -321,6 +358,7 @@ describe('native research-summary quality review', () => {
       })
       expect(fixture.harness.adapter.requests).toHaveLength(3)
       const reviewRequest = fixture.harness.adapter.requests[1]!
+      expect(sha256({ system: reviewRequest.system, tools: reviewRequest.tools, content: reviewRequest.messages[0]!.content })).toBe('sha256:a2cbddc2a72e77523a95b5429cc4e89806bb2f4dfe1a953350375c4e68ee1c19')
       expect({
         provider: reviewRequest.provider,
         model: reviewRequest.model,
@@ -355,8 +393,8 @@ describe('native research-summary quality review', () => {
     }
   })
 
-  it('recovers an exact completed proof after full Context remount without live Agents or a provider request', async () => {
-    const fixture = await runFixture()
+  it.each([CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST, CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST])('recovers a completed %s proof after full Context remount without a provider request', async rubricDigest => {
+    const fixture = await runFixture({ rubricDigest })
     const expected = fixture.recovered
     expect(expected.status).toBe('completed')
     await fixture.parent.dispose()

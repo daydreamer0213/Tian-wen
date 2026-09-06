@@ -36,7 +36,7 @@ import {
 import { resolveExplicitCorrectionProtocol } from '../../packages/tianwen-runtime-bundle/src/explicit-correction-protocol.js'
 import {
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
-  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
   learningSessionLifecycleFingerprint,
   prepareRunSkillManifest,
   sha256,
@@ -520,7 +520,7 @@ describe('research summary first-step admission', () => {
           problemCategory: expect.stringMatching(/^research-summary-result\.v2:/u),
           qualityContract: {
             schemaVersion: 'tianwen.research-summary-semantic-contract.v1',
-            rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+            rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
           },
         },
       })
@@ -638,7 +638,7 @@ describe('research summary first-step admission', () => {
         protocol.buildProtocolInput({
           ticketId: ticket.ticketId,
           sha256,
-          rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+          rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
           callConfig: { provider: 'tianwen-probe', model: 'scripted' },
           retryPolicy: {},
           toolSchemaDigest: sha256('source-case-tools'),

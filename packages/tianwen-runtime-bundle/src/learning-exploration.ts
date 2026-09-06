@@ -6,6 +6,8 @@ import type { SkillDefinition, SkillRegistration } from '@deepseek-ai/dsh-skill'
 import { foldSubagentDescriptor, SubagentError } from '@deepseek-ai/dsh-subagent'
 import {
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
+  resolveControlledSkillSourceFidelityFamily,
   sha256,
   type LearningAnalysisId,
   type LearningExplorationArm,
@@ -119,7 +121,15 @@ function armFor(
   return undefined
 }
 
+function rubricForMetric(metric: LearningExplorationStatus['metric']) {
+  if (metric === 'research-summary-required-id-coverage.v1') return undefined
+  if (metric === 'research-summary-source-fidelity.v1') return CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+  if (metric === 'research-summary-source-fidelity.v2') return CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST
+  throw new TypeError('unknown learning exploration metric')
+}
+
 function taskInput(exploration: LearningExplorationStatus, arm: LearningExplorationArm) {
+  const rubricDigest = rubricForMetric(exploration.metric)
   return {
     goalRef: `learning-analysis:${exploration.analysisId}`,
     taskRef: `learning-exploration:${exploration.explorationId}:${arm}`,
@@ -129,10 +139,10 @@ function taskInput(exploration: LearningExplorationStatus, arm: LearningExplorat
       toolName: RESEARCH_SUMMARY_TOOL_NAME,
       notMetErrorCode: NOT_MET_ERROR_CODE,
       gapDisposition: 'observe' as const,
-      ...(exploration.metric === 'research-summary-source-fidelity.v1'
+      ...(rubricDigest !== undefined
         ? { qualityContract: {
             schemaVersion: 'tianwen.research-summary-semantic-contract.v1' as const,
-            rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+            rubricDigest,
           } }
         : {}),
     },
@@ -155,11 +165,11 @@ function exactRunBinding(
     && binding.acceptanceContract.toolName === RESEARCH_SUMMARY_TOOL_NAME
     && binding.acceptanceContract.notMetErrorCode === NOT_MET_ERROR_CODE
     && binding.acceptanceContract.gapDisposition === 'observe'
-    && (spec.exploration.metric === 'research-summary-source-fidelity.v1'
+    && (rubricForMetric(spec.exploration.metric) !== undefined
       ? binding.acceptanceContract.qualityContract?.schemaVersion
           === 'tianwen.research-summary-semantic-contract.v1'
         && binding.acceptanceContract.qualityContract.rubricDigest
-          === CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+          === rubricForMetric(spec.exploration.metric)
       : binding.acceptanceContract.qualityContract === undefined)
     && manifest?.parentVersionId === spec.exploration.parentVersionId
     && sha256(manifest.parent) === sha256({
@@ -224,12 +234,12 @@ export function registerLearningExplorationContinuableSetup(
     const disposeModel = installModelSelection(childCtx, { current: spec.selection, assembled: undefined })
     const disposePresentation = childCtx.tools.presentAs('native')
     const disposeSkill = skills.register(spec.skill)
-    const sourceTool = spec.exploration.metric === 'research-summary-source-fidelity.v1'
+    const sourceTool = rubricForMetric(spec.exploration.metric) !== undefined
       ? createResearchSummaryTool(spec.packet, { kind: 'source-capture' })
       : createResearchSummaryTool(spec.packet, {
           kind: 'controlled-enforce', oracle: evaluateResearchSummarySubmission,
         })
-    if (spec.exploration.metric === 'research-summary-source-fidelity.v1') {
+    if (rubricForMetric(spec.exploration.metric) !== undefined) {
       const execute = sourceTool.execute.bind(sourceTool)
       sourceTool.execute = async (args, execution) => {
         const result = await execute(args, execution)
@@ -355,7 +365,7 @@ function productObservation(
       packet,
       JSON.parse(call.data.arguments) as unknown,
     )
-    const verdict = exploration.metric === 'research-summary-source-fidelity.v1'
+    const verdict = rubricForMetric(exploration.metric) !== undefined
       ? 'not-evaluated'
       : evaluateResearchSummarySubmission(packet, submission)
     const blocks = result.data.message.content[0].content
@@ -381,7 +391,7 @@ async function reconcileArm(
   const hasObservedVerdict = observation !== undefined && 'verdict' in observation
   const hasSkillUse = hasObservedVerdict
     && ctx.tianwenLearningIntake.hasSkillUseProof(session as never, binding.runId)
-  const semanticReview = exploration.metric === 'research-summary-source-fidelity.v1'
+  const semanticReview = rubricForMetric(exploration.metric) !== undefined
     && hasObservedVerdict && hasSkillUse && 'submission' in observation
     ? await recoverResearchSummaryQualityReview(ctx, {
         run: binding,
@@ -505,6 +515,15 @@ async function runExplorationArmUntilIdle(
     ? exploration.controlSessionId
     : exploration.treatmentSessionId
   const current = ctx.tianwenEvolution.getLearningExploration(exploration.analysisId)
+  if (current === undefined || current.requestDigest !== exploration.requestDigest
+    || current.metric !== exploration.metric) {
+    throw new Error('learning exploration frozen grading family drift')
+  }
+  const bound = ctx.tianwenEvolution.getRunBindingBySessionId(sessionId)
+  if (bound !== undefined
+    && bound.acceptanceContract.qualityContract?.rubricDigest !== rubricForMetric(current.metric)) {
+    throw new Error('learning exploration Run grading family drift')
+  }
   if (current?.arms[arm] !== undefined) return current
 
   const persisted = await inspectOptional(ctx, sessionId)
@@ -626,13 +645,13 @@ export class TianwenLearningExplorationService extends Service {
     const selection = (this.ctx as LearningExplorationContext)
       .agentDefaultModel.currentSelection()
     const source = this.ctx.tianwenEvolution.getRunBinding(input.proposal.sourceRunId)
-    const metric = source?.schemaVersion === 'tianwen.run-binding.v3'
-      && source.acceptanceContract.qualityContract?.schemaVersion
-        === 'tianwen.research-summary-semantic-contract.v1'
-      && source.acceptanceContract.qualityContract.rubricDigest
-        === CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
-      ? 'research-summary-source-fidelity.v1' as const
-      : 'research-summary-required-id-coverage.v1' as const
+    const quality = source?.acceptanceContract.qualityContract
+    const family = quality === undefined ? undefined
+      : resolveControlledSkillSourceFidelityFamily(quality.rubricDigest)
+    if (quality !== undefined && family === undefined) {
+      throw new TypeError('unknown learning exploration source rubric')
+    }
+    const metric = family?.metric ?? 'research-summary-required-id-coverage.v1'
     return this.ctx.tianwenEvolution.requestLearningExploration({
       analysisId: input.analysisId,
       proposal: input.proposal,

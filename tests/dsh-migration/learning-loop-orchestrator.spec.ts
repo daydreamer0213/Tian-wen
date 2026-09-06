@@ -7,6 +7,8 @@ import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_POLICY_DIGEST,
   sha256,
 } from '../../packages/tianwen-evolution/dist/index.js'
 import {
@@ -238,6 +240,7 @@ function retainedV2ProtocolRecord() {
 function retainedV3ProtocolRecord(
   executionWindowMs: 60_000 | 300_000,
   materialMaxUtf8Bytes: 4_096 | 32_768,
+  rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
 ) {
   const packet = parseResearchPacket(`<research_packet>
 [F:source|required] The native source result is 18%.
@@ -262,6 +265,7 @@ function retainedV3ProtocolRecord(
     packet,
     executionWindowMs,
     materialMaxUtf8Bytes,
+    rubricDigest,
   })!
   const root = fixtureRoot('task-1-retained-v3')
   const tasks = protocol.buildEvaluationTasks({
@@ -275,7 +279,7 @@ function retainedV3ProtocolRecord(
   const frozen = protocol.buildProtocolInput({
     ticketId: `ticket:${'b'.repeat(64)}`,
     sha256,
-    rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+    rubricDigest,
     callConfig: { provider: 'fixture', model: 'fixture' },
     retryPolicy: {},
     toolSchemaDigest: sha256([{ name: 'skill' }, { name: 'submit_research_summary' }]),
@@ -436,7 +440,7 @@ describe('learning-loop orchestrator', () => {
       await second.run()
       expect(first.frozen).toHaveLength(1)
       const protocol = (first.frozen[0] as any).protocol
-      expect(protocol.rubricDigest).toBe(CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST)
+      expect(protocol.rubricDigest).toBe(CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST)
       expect(protocol.sourceFidelity.packetVersion)
         .toBe(CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion)
       expect(protocol.tasks[0].inputDigest).toBe(sha256(packet.source))
@@ -543,16 +547,21 @@ describe('learning-loop orchestrator', () => {
   })
 
   it.each([
-    [60_000, 4_096],
-    [300_000, 4_096],
-    [60_000, 32_768],
-    [300_000, 32_768],
+    [60_000, 4_096, CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST],
+    [300_000, 4_096, CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST],
+    [60_000, 32_768, CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST],
+    [300_000, 32_768, CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST],
+    [60_000, 4_096, CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST],
+    [300_000, 4_096, CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST],
+    [60_000, 32_768, CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST],
+    [300_000, 32_768, CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST],
   ] as const)(
     'reconstructs a retained v3 %i ms / %i byte protocol without freezing duplicate history',
-    async (executionWindowMs, materialMaxUtf8Bytes) => {
+    async (executionWindowMs, materialMaxUtf8Bytes, rubricDigest) => {
       const { record, recovered } = retainedV3ProtocolRecord(
         executionWindowMs,
         materialMaxUtf8Bytes,
+        rubricDigest,
       )
       const recovery = vi.spyOn(sourceCases, 'recoverResearchSummarySourceCase')
         .mockResolvedValue(recovered)
@@ -581,6 +590,10 @@ describe('learning-loop orchestrator', () => {
     'mismatched review material digest',
     'unknown material digest',
     'missing paired task',
+    'crossed rubric',
+    'crossed policy',
+    'crossed holdout',
+    'unknown rubric',
   ] as const)('refuses retained v3 %s before controlled provider work', async name => {
     const retained = retainedV3ProtocolRecord(60_000, 4_096)
     const record = structuredClone(retained.record) as any
@@ -615,6 +628,14 @@ describe('learning-loop orchestrator', () => {
         sha256('unknown-material-contract')
       record.protocol.sourceFidelity.holdout.review.materialContractDigest =
         sha256('unknown-material-contract')
+    } else if (name === 'crossed rubric') {
+      record.protocol.rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST
+    } else if (name === 'crossed policy') {
+      record.protocol.sourceFidelity.policyDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_POLICY_DIGEST
+    } else if (name === 'crossed holdout') {
+      record.protocol.sourceFidelity.holdout.review.rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST
+    } else if (name === 'unknown rubric') {
+      record.protocol.rubricDigest = sha256('unknown')
     } else {
       record.protocol.tasks.pop()
     }
@@ -632,7 +653,7 @@ describe('learning-loop orchestrator', () => {
     })
     try {
       await expect(fixture.evaluate()).rejects.toThrow(
-        /retained.*(?:execution|material)|window|tool|task|contract/u,
+        /retained.*(?:execution|material|grading)|window|tool|task|contract/u,
       )
       expect(fixture.frozen).toEqual([])
       expect(runtime.runControlledArms).not.toHaveBeenCalled()

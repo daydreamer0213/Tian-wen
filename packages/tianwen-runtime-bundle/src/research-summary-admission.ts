@@ -8,7 +8,7 @@ import {
   prepareResearchSummarySemanticReview,
   prepareRunSkillManifest,
   sha256,
-  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
   type ControlledSkillScopePointer,
   type GovernedSkillCandidate,
   type RunSkillManifest,
@@ -487,7 +487,7 @@ export class TianwenResearchSummaryAdmissionService extends Service {
             blocksGoal: false,
             qualityContract: {
               schemaVersion: 'tianwen.research-summary-semantic-contract.v1',
-              rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+              rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
             },
           },
           acceptanceSubjectDigest: sha256(gesture.packet),

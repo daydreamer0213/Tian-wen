@@ -51,7 +51,8 @@ import {
   CONTROLLED_SKILL_EVAL_RUBRIC,
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC,
-  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_REVIEW_RUBRIC,
+  resolveControlledSkillSourceFidelityFamily,
   CONTROLLED_SKILL_SOURCE_FIDELITY_SCORE_KEYS,
   controlledSkillShadowExecutionManifestDigest,
   controlledSkillTransitionExecutionManifestDigest,
@@ -920,6 +921,14 @@ const CONTROLLED_EVALUATOR_RUBRIC_V3 = Object.freeze({
   scoreAnchors: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC.scoreAnchors,
   dimensions: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC.dimensions,
 })
+
+function sourceFidelityReviewRubric(rubricDigest: Sha256Digest) {
+  const family = resolveControlledSkillSourceFidelityFamily(rubricDigest)
+  if (family === undefined) throw new TypeError('unknown source-fidelity review rubric')
+  return family.metric === 'research-summary-source-fidelity.v2'
+    ? CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_REVIEW_RUBRIC
+    : CONTROLLED_EVALUATOR_RUBRIC_V3
+}
 
 type ControlledEvaluatorSubmission =
   | {
@@ -3061,7 +3070,7 @@ export class TianwenSkillEvaluationService extends Service {
     }
     const envelope = {
       rubricDigest: input.plan.review.rubricDigest,
-      rubric: CONTROLLED_EVALUATOR_RUBRIC_V3,
+      rubric: sourceFidelityReviewRubric(input.plan.review.rubricDigest),
       ...material,
     }
     if (controlledIdentityExposed(envelope, input.forbidden)) {
@@ -5298,7 +5307,7 @@ function controlledBlindEnvelopeDigest(
       : 'tianwen.controlled-blind-envelope.v1',
     taskId: objective.taskId,
     rubricDigest: plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
-      ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+      ? plan.sourceFidelity.holdout.review.rubricDigest
       : CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
     x: arm(assignment.xRole),
     y: arm(assignment.yRole),
@@ -5323,10 +5332,10 @@ function controlledEvaluatorEnvelope(
     goal: task.goal,
     input: task.input,
     rubricDigest: plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
-      ? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+      ? plan.sourceFidelity.holdout.review.rubricDigest
       : CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
     rubric: plan.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
-      ? CONTROLLED_EVALUATOR_RUBRIC_V3
+      ? sourceFidelityReviewRubric(plan.sourceFidelity.holdout.review.rubricDigest)
       : CONTROLLED_EVALUATOR_RUBRIC_V2,
     x: arm(assignment.xRole),
     y: arm(assignment.yRole),

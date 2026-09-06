@@ -14,6 +14,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { TextDecoder } from 'node:util'
+import { resolveControlledSkillSourceFidelityFamily } from './controlled-skill-source-fidelity.js'
 
 import {
   canonicalJson,
@@ -5898,7 +5899,9 @@ export class EvolutionLedger {
       environmentDigest: input.environmentDigest,
       ...(sourceRun.acceptanceContract.qualityContract === undefined
         ? {}
-        : { metric: 'research-summary-source-fidelity.v1' as const }),
+        : { metric: resolveControlledSkillSourceFidelityFamily(
+            sourceRun.acceptanceContract.qualityContract.rubricDigest,
+          )!.metric }),
     })
   }
 
@@ -5954,6 +5957,10 @@ export class EvolutionLedger {
       || binding.acceptanceContract.toolName !== 'submit_research_summary'
       || binding.acceptanceContract.notMetErrorCode !== 'RESEARCH_SUMMARY_NOT_MET'
       || binding.acceptanceContract.gapDisposition !== 'observe'
+      || (binding.acceptanceContract.qualityContract === undefined
+        ? exploration.metric !== 'research-summary-required-id-coverage.v1'
+        : resolveControlledSkillSourceFidelityFamily(binding.acceptanceContract.qualityContract.rubricDigest)?.metric
+          !== exploration.metric)
       || manifest === undefined
       || sourceManifest === undefined
       || manifest.parentVersionId !== exploration.parentVersionId

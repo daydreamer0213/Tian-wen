@@ -44,15 +44,18 @@ describe('bounded learning exploration contract', () => {
     expect(request.requestDigest).toBe('sha256:042240f48341928ead9798a81826db11ab93b57525c218bc9fa7c8505283e500')
   })
 
-  it('freezes the semantic source-fidelity metric into only new request digests', () => {
+  it.each(['research-summary-source-fidelity.v1', 'research-summary-source-fidelity.v2'] as const)('freezes %s into only new request digests', metric => {
     const legacy = prepareLearningExploration(proposal(), context)
     const semantic = prepareLearningExploration(proposal(), {
       ...context,
-      metric: 'research-summary-source-fidelity.v1',
+      metric,
     })
-    expect(semantic.metric).toBe('research-summary-source-fidelity.v1')
+    expect(semantic.metric).toBe(metric)
     expect(semantic.requestDigest).not.toBe(legacy.requestDigest)
     expect(semantic.explorationId).toBe(legacy.explorationId)
+    const other = prepareLearningExploration(proposal(), { ...context, metric: metric === 'research-summary-source-fidelity.v1' ? 'research-summary-source-fidelity.v2' : 'research-summary-source-fidelity.v1' })
+    expect(other.requestDigest).not.toBe(semantic.requestDigest)
+    expect(() => prepareLearningExploration(proposal(), { ...context, metric: 'research-summary-source-fidelity.v99' as never })).toThrow(/metric/)
   })
 
   it('requires a source-bound, distinguishable proposal', () => {

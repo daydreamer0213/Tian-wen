@@ -7,6 +7,8 @@ import {
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
   CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
+  resolveControlledSkillSourceFidelityFamily,
   learningSessionLifecycleFingerprint,
   prepareControlledSkillEvaluationBlindMap,
   prepareControlledSkillEvaluationObjective,
@@ -463,7 +465,8 @@ function recordShadowRunFacts(
   })
 }
 
-function sourceFidelityEvaluation() {
+function sourceFidelityEvaluation(rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST) {
+  const family = resolveControlledSkillSourceFidelityFamily(rubricDigest)!
   const sourcePacketDigest = sha256('shadow-source-packet')
   const source = {
     signalId: 'signal:shadow-source',
@@ -480,10 +483,10 @@ function sourceFidelityEvaluation() {
   protocolInput.tasks[0]!.inputDigest = sourcePacketDigest
   const protocol = {
     ...protocolInput,
-    rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+    rubricDigest,
     sourceFidelity: {
-      policyVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.schemaVersion,
-      policyDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY_DIGEST,
+      policyVersion: family.policy.schemaVersion,
+      policyDigest: family.policyDigest,
       packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
       source,
       holdout: {
@@ -503,7 +506,7 @@ function sourceFidelityEvaluation() {
           stopContract: { maxToolCalls: 4, maxElapsedMs: 10_000 },
         },
         review: {
-          rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+          rubricDigest,
           configurationDigest: sha256('source-fidelity-review-config'),
           materialContractDigest: sha256('source-fidelity-review-material-contract'),
           evidenceContractDigest: sha256('source-fidelity-review-evidence-contract'),
@@ -621,8 +624,8 @@ function sourceFidelityEvaluation() {
   return { candidate, evaluation, result, objectives, observations }
 }
 
-function sourceFidelityShadow() {
-  const seeded = sourceFidelityEvaluation()
+function sourceFidelityShadow(rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST) {
+  const seeded = sourceFidelityEvaluation(rubricDigest)
   const plan = prepareControlledSkillShadowPlan({
     evaluationId: seeded.evaluation.evaluationId,
     holdoutSessionId: 'session:source-fidelity:holdout',
@@ -1357,8 +1360,9 @@ describe('controlled Skill Shadow governance', () => {
       .toThrow(/independent holdout Sessions/i)
   })
 
-  it('blocks a met holdout until an exact independent observation passes all five scores', () => {
-    const seeded = sourceFidelityShadow()
+  it.each([CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST, CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST])('blocks a met holdout until all five scores pass for %s', rubricDigest => {
+    const seeded = sourceFidelityShadow(rubricDigest)
+    expect(seeded.plan.review.rubricDigest).toBe(rubricDigest)
     expect(() => prepareControlledSkillShadowResult({
       shadowId: seeded.plan.shadowId,
       runs: [seeded.run],

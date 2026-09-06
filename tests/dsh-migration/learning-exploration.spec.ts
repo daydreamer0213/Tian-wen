@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -20,6 +20,8 @@ import {
 
 import {
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_REVIEW_RUBRIC,
   learningSessionLifecycleFingerprint,
   sha256,
   type LearningAnalysisId,
@@ -197,7 +199,7 @@ function seedRunningOutcomeAnalysis(root: string) {
   return { ledger, requested, first, second, counter, root }
 }
 
-function seedRunningSemanticOutcomeAnalysis(root: string) {
+function seedRunningSemanticOutcomeAnalysis(root: string, rubricDigest = CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST) {
   const ledger = new EvolutionLedger(root, { clock: () => '2026-09-05T00:00:00.000Z' })
   ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v2' })
   const add = (suffix: string, verdict: 'met' | 'not-met') => {
@@ -208,7 +210,7 @@ function seedRunningSemanticOutcomeAnalysis(root: string) {
       acceptanceContract: { source: 'dsh-tool-result', toolName: RESEARCH_SUMMARY_TOOL_NAME,
         notMetErrorCode: 'RESEARCH_SUMMARY_NOT_MET', gapDisposition: 'reusable',
         problemCategory: 'research-summary-result.v2:test-parent', severity: 2, blocksGoal: false,
-        qualityContract: { schemaVersion: 'tianwen.research-summary-semantic-contract.v1', rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST } },
+        qualityContract: { schemaVersion: 'tianwen.research-summary-semantic-contract.v1', rubricDigest } },
       acceptanceSubjectDigest: sourceSubjectDigest,
       sessionLifecycleFingerprint: sha256(`semantic-lifecycle:${suffix}`),
     })
@@ -220,7 +222,7 @@ function seedRunningSemanticOutcomeAnalysis(root: string) {
       status: 'completed' as const,
       acceptanceSubjectDigest: sourceSubjectDigest,
       submissionDigest: sha256(`semantic-submission:${suffix}`),
-      rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+      rubricDigest,
       reviewerSessionId: `semantic-reviewer:${suffix}`,
       reviewerSessionDigest: sha256(`semantic-reviewer-session:${suffix}`),
       requestDigest: sha256(`semantic-review-request:${suffix}`),
@@ -268,6 +270,7 @@ function seedNativeOutcomeRun(
     readonly subjectDigest: ReturnType<typeof sha256>
     readonly sessionLifecycleFingerprint: ReturnType<typeof sha256>
     readonly semantic?: boolean
+    readonly rubricDigest?: `sha256:${string}`
   },
 ) {
   const binding = ctx.tianwenEvolution.recordRunBinding({
@@ -287,7 +290,7 @@ function seedNativeOutcomeRun(
       blocksGoal: false,
       ...(input.semantic ? { qualityContract: {
         schemaVersion: 'tianwen.research-summary-semantic-contract.v1' as const,
-        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        rubricDigest: input.rubricDigest ?? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
       } } : {}),
     },
     acceptanceSubjectDigest: input.subjectDigest,
@@ -309,7 +312,7 @@ function seedNativeOutcomeRun(
       status: 'completed' as const,
       acceptanceSubjectDigest: input.subjectDigest,
       submissionDigest: sha256(`native-submission:${input.suffix}`),
-      rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+      rubricDigest: input.rubricDigest ?? CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
       reviewerSessionId: `native-reviewer:${input.suffix}`,
       reviewerSessionDigest: sha256(`native-reviewer-session:${input.suffix}`),
       requestDigest: sha256(`native-review-request:${input.suffix}`),
@@ -344,6 +347,7 @@ function seedExplorationArm(
     readonly arm: 'control' | 'treatment'
     readonly sessionId: string
     readonly verdict: 'met' | 'not-met'
+    readonly rubricDigest?: `sha256:${string}`
   },
 ) {
   const binding = ledger.recordRunBinding({
@@ -356,6 +360,10 @@ function seedExplorationArm(
       toolName: 'submit_research_summary',
       notMetErrorCode: 'RESEARCH_SUMMARY_NOT_MET',
       gapDisposition: 'observe',
+      ...(input.rubricDigest === undefined ? {} : { qualityContract: {
+        schemaVersion: 'tianwen.research-summary-semantic-contract.v1' as const,
+        rubricDigest: input.rubricDigest,
+      } }),
     },
     acceptanceSubjectDigest: sourceSubjectDigest,
     sessionLifecycleFingerprint: sha256(`lifecycle:${input.sessionId}`),
@@ -371,6 +379,13 @@ function seedExplorationArm(
     verdict: input.verdict,
     sessionDigest,
     evidenceIds: [acceptanceEvidenceId],
+    ...(input.rubricDigest === undefined ? {} : { semanticReview: {
+      schemaVersion: 'tianwen.research-summary-semantic-review.v1' as const, status: 'completed' as const,
+      acceptanceSubjectDigest: sourceSubjectDigest, submissionDigest: sha256('arm-submission'),
+      rubricDigest: input.rubricDigest, reviewerSessionId: 'arm-reviewer', reviewerSessionDigest: sha256('arm-reviewer'),
+      requestDigest: sha256('arm-request'), reviewEvidenceId: sha256('arm-review-evidence'), idGateVerdict: 'met' as const,
+      scores: { relevance: 4, correctnessReasoning: 4, clarityUsability: 4, scopeRestraint: 4, sourceFidelity: input.verdict === 'met' ? 4 : 2 },
+    } }),
   })
   ledger.recordRunSkillUse({
     runId: binding.runId,
@@ -424,6 +439,19 @@ function seedInconclusiveArm(
 }
 
 describe('durable bounded learning exploration', () => {
+  it.each([
+    [CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST, undefined],
+    [CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST, undefined],
+    [CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST, CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST],
+    [CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST, CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST],
+  ] as const)('rejects exploration rubric %s crossing to arm rubric %s before recording a receipt', (sourceRubric, armRubric) => {
+    const seeded = seedRunningSemanticOutcomeAnalysis(rootFor('crossed-arm'), sourceRubric)
+    const exploration = seeded.ledger.requestLearningExploration({ analysisId: seeded.requested.analysisId, proposal: proposal(seeded.second.runId), environmentDigest }).exploration
+    const arm = seedExplorationArm(seeded.ledger, { analysisId: seeded.requested.analysisId, arm: 'control', sessionId: exploration.controlSessionId, verdict: 'met', ...(armRubric === undefined ? {} : { rubricDigest: armRubric }) })
+    const before = readFileSync(join(seeded.root, 'ledger.jsonl'), 'utf8')
+    expect(() => seeded.ledger.recordLearningExplorationArm({ analysisId: seeded.requested.analysisId, arm: 'control', sessionId: exploration.controlSessionId, ...arm })).toThrow(/frozen Run/)
+    expect(readFileSync(join(seeded.root, 'ledger.jsonl'), 'utf8')).toBe(before)
+  })
   it('lets only the exact outcome analyst request exploration without final submission', async () => {
     const seeded = seedRunningOutcomeAnalysis(rootFor('analyst-request'))
     const running = seeded.ledger.getLearningAnalysis(seeded.requested.analysisId)!
@@ -846,7 +874,7 @@ describe('durable bounded learning exploration', () => {
       tianwenEvolution: {
         getLearningExploration: vi.fn(() => requested),
         getLearningAnalysis: vi.fn(() => ({ parentSessionId: 'main-session' })),
-        getRunBindingBySessionId: vi.fn(() => ({ runId: `run:${'f'.repeat(64)}` })),
+        getRunBindingBySessionId: vi.fn(() => ({ runId: `run:${'f'.repeat(64)}`, acceptanceContract: { source: 'dsh-tool-result', toolName: 'submit_research_summary', notMetErrorCode: 'RESEARCH_SUMMARY_NOT_MET', gapDisposition: 'observe' } })),
         recordLearningExplorationArm: recordArm,
       },
     }
@@ -1065,7 +1093,10 @@ describe('durable bounded learning exploration', () => {
     }
   })
 
-  it('reviews semantic native arms independently and keeps source output unevaluated', async () => {
+  it.each([
+    [CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST, 'research-summary-source-fidelity.v1'],
+    [CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_RUBRIC_DIGEST, 'research-summary-source-fidelity.v2'],
+  ] as const)('reviews semantic native arms independently for %s / %s', async (rubricDigest, metric) => {
     const root = rootFor('native-semantic-pair')
     const packet = parseResearchPacket(`<research_packet>
 [F:verified|required] The verified result is concrete.
@@ -1140,16 +1171,16 @@ describe('durable bounded learning exploration', () => {
         revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v2',
       })
       const subjectDigest = sha256(packet)
-      seedNativeOutcomeRun(ctx, { suffix: 'semantic-first', semantic: true,
+      seedNativeOutcomeRun(ctx, { suffix: 'semantic-first', semantic: true, rubricDigest,
         sessionId: 'session:native-semantic-learning-exploration-source:first', verdict: 'not-met',
         subjectDigest, sessionLifecycleFingerprint: sha256('native-semantic-lifecycle:first') })
-      const second = seedNativeOutcomeRun(ctx, { suffix: 'semantic-second', semantic: true,
+      const second = seedNativeOutcomeRun(ctx, { suffix: 'semantic-second', semantic: true, rubricDigest,
         sessionId: String(parentId), verdict: 'not-met', subjectDigest,
         sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
           sessionId: String(parent.session.id), createdAt: parent.session.header.createdAt,
           ...(parent.session.header.cwd === undefined ? {} : { cwd: parent.session.header.cwd }),
         }) })
-      const counter = seedNativeOutcomeRun(ctx, { suffix: 'semantic-counter', semantic: true,
+      const counter = seedNativeOutcomeRun(ctx, { suffix: 'semantic-counter', semantic: true, rubricDigest,
         sessionId: 'session:native-semantic-learning-exploration-source:counter', verdict: 'met',
         subjectDigest, sessionLifecycleFingerprint: sha256('native-semantic-lifecycle:counter') })
       const analysis = ctx.tianwenEvolution.requestOutcomeLearningAnalysis({
@@ -1165,7 +1196,12 @@ describe('durable bounded learning exploration', () => {
         analysisId: analysis.analysisId, parent, proposal: proposal(second.binding.runId),
         signal: AbortSignal.timeout(10_000),
       })
-      expect(completed.metric).toBe('research-summary-source-fidelity.v1')
+      expect(completed.metric).toBe(metric)
+      const beforeCrossed = adapter.requests.length
+      await expect(runLearningExplorationArm(ctx, {
+        ...completed, metric: metric === 'research-summary-source-fidelity.v1' ? 'research-summary-source-fidelity.v2' : 'research-summary-source-fidelity.v1',
+      }, 'control', parent, packet, { provider: 'tianwen-semantic-exploration-probe', model: 'scripted' }, new AbortController().signal)).rejects.toThrow(/grading|frozen/)
+      expect(adapter.requests).toHaveLength(beforeCrossed)
       expect(completed.result).toEqual({
         observation: { control: 'not-met', treatment: 'met' },
         classification: 'matches-hypothesis-prediction',
@@ -1175,6 +1211,10 @@ describe('durable bounded learning exploration', () => {
         request.tools?.some(tool => tool.name === RESEARCH_SUMMARY_QUALITY_TOOL_NAME))
       expect(reviewRequests).toHaveLength(2)
       for (const request of reviewRequests) {
+        if (metric === 'research-summary-source-fidelity.v2') {
+          const envelope = JSON.parse((request.messages[0]!.content[0] as { text: string }).text)
+          expect(envelope.rubric).toEqual(CONTROLLED_SKILL_SOURCE_FIDELITY_COMPLETE_REVIEW_RUBRIC)
+        }
         expect(JSON.stringify(request.messages)).toContain('source-fidelity')
         expect(JSON.stringify(request)).not.toContain('Temporary task-local instruction')
         expect(JSON.stringify(request)).not.toContain(completed.proposal.hypothesis)
@@ -1191,7 +1231,7 @@ describe('durable bounded learning exploration', () => {
           : undefined).toEqual({ verdict: 'not-evaluated', submission })
         const outcome = ctx.tianwenEvolution.getOutcomeIntake(receipt.runId)
         expect(outcome?.input.semanticReview).toMatchObject({
-          status: 'completed', idGateVerdict: 'met',
+          status: 'completed', idGateVerdict: 'met', rubricDigest,
           scores: { sourceFidelity: arm === 'control' ? 2 : 3 },
         })
         const review = await ctx.sessionPersistence.inspect(
