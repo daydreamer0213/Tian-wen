@@ -7,7 +7,11 @@ final review, full1830/18conditional skips and all four exact-maincbceec3 CI job
 Normal014 upgrade, repeated install, exact82-file Desktop copy, actual daily
 lifecycle and unchanged30 user files/shortcut passed. See the
 [current delivery](tianwen-complete-criteria-delivery-20260907.md).
-Fresh L/M/N real UI acceptance is next; no old B/G/J/K regrading. Stage3 source
+L/M/N each completed one real UI task with the frozen complete rubric: all met,
+no-case, one accepted submission and no errors; human substantive boundary checks
+pass. Exact source/reviewer and preserved history are in the
+[real-use record](tianwen-complete-criteria-real-use-20260907.md).
+This tranche is closed without a manufactured failure. No old B/G/J/K regrading. Stage3 source
 reading/adaptation remains observed, while Outcome exploration and activation/
 future efficacy remain open. The following capacity checkpoint is historical.
 

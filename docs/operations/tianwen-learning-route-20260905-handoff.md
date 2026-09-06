@@ -6,7 +6,10 @@ Current2026-09-07: daily015/preview16 is delivered after complete-criteria final
 review and exact-maincbceec3 CI(all4success). Normal upgrade, artifact identity,
 repeat install, actual daily lifecycle and original data/shortcut preservation
 pass; see [the current delivery](tianwen-complete-criteria-delivery-20260907.md).
-Continue fresh frozen L/M/N real UI tasks. Prior B/G/J/K are terminal; H reserved.
+Frozen L/M/N real UI tasks now each completed once with met/no-case and no tool
+errors; complete criteria verified in actual reviewer envelopes. See the
+[real-use record](tianwen-complete-criteria-real-use-20260907.md).
+The tranche is closed. Prior B/G/J/K are terminal; H reserved.
 Unobserved Outcome exploration and genuine activation/future efficacy stay open.
 
 Latest2026-09-06: daily014/preview15 is delivered at product6820a19/main0641095

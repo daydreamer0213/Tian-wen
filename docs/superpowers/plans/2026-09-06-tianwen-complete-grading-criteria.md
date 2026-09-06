@@ -208,5 +208,8 @@ $env:TIANWEN_DSH_PROBE_PYTHON = 'D:/DevData/tianwen-worktrees/tianwen-architectu
 - [x] Integrate reviewed branch, verify exact-main CI, normal daily015 and Web
   upgrade/repeated-install with original data/shortcut preservation, recoverable
   previous program and exact identity receipt.
-- [ ] Resume fresh real-user UI acceptance without rerunning/regrading B/G/J/K;
+- [x] Resume fresh real-user UI acceptance without rerunning/regrading B/G/J/K;
   retain all met/failure/tie/rejection evidence. Close route only at original gates.
+  L/M/N each completed once with all met/no-case, full actual reviewer criteria
+  verified. Repair implementation/delivery/real-use follow-through is complete;
+  the parent total-route efficacy gates remain open, not waived.

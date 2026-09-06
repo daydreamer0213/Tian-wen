@@ -8,8 +8,10 @@
 daily015/preview16 after all four exact-maincbceec3 CI jobs passed. Full1830/18,
 normal upgrade, exact artifacts, actual daily lifecycle and preservation are in
 the [delivery record](../../operations/tianwen-complete-criteria-delivery-20260907.md).
-Next freeze the whole new L/M/N tranche and use ordinary UI with real DeepSeek.
-All outcomes count; B/G/J/K stay terminal and H stays reserved. Engineering
+L/M/N were frozen together and each completed once in ordinary UI with real
+DeepSeek: all met/no-case, no tool errors, complete actual reviewer criteria
+verified; see [real-use record](../../operations/tianwen-complete-criteria-real-use-20260907.md).
+This tranche is closed without hunting failure; B/G/J/K stay terminal and H stays reserved. Engineering
 delivery does not close Outcome exploration or successful future-task efficacy.
 
 **Current continuation:** source6820a19 is reviewed, merged and delivered as daily
