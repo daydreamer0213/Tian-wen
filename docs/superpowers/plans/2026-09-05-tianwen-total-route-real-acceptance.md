@@ -4,6 +4,14 @@
 
 **Goal:** Complete the four-stage learning route with genuine DSH use and defensible evidence of future-task improvement, not merely delivery of its mechanisms.
 
+**Current2026-09-07:** complete-criteria repair is reviewed and delivered as
+daily015/preview16 after all four exact-maincbceec3 CI jobs passed. Full1830/18,
+normal upgrade, exact artifacts, actual daily lifecycle and preservation are in
+the [delivery record](../../operations/tianwen-complete-criteria-delivery-20260907.md).
+Next freeze the whole new L/M/N tranche and use ordinary UI with real DeepSeek.
+All outcomes count; B/G/J/K stay terminal and H stays reserved. Engineering
+delivery does not close Outcome exploration or successful future-task efficacy.
+
 **Current continuation:** source6820a19 is reviewed, merged and delivered as daily
 014/preview15 after four successful exact-main0641095 CI jobs. Fresh local/full,
 artifact/native, real upgrade, packaged lifecycle and data/shortcut preservation

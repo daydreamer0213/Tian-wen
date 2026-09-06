@@ -205,7 +205,7 @@ $env:TIANWEN_DSH_PROBE_PYTHON = 'D:/DevData/tianwen-worktrees/tianwen-architectu
 - [x] Task-scoped review after each task, then final whole-branch independent review.
 - [x] Final full Vitest/typecheck/public-surface verification on final source; exact
   runtime/Desktop candidate artifact/native/real packaged lifecycle gates.
-- [ ] Integrate reviewed branch, verify exact-main CI, normal daily015 and Web
+- [x] Integrate reviewed branch, verify exact-main CI, normal daily015 and Web
   upgrade/repeated-install with original data/shortcut preservation, recoverable
   previous program and exact identity receipt.
 - [ ] Resume fresh real-user UI acceptance without rerunning/regrading B/G/J/K;

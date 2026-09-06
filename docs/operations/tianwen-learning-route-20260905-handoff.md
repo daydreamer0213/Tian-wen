@@ -2,6 +2,13 @@
 
 ## Total-route genuine acceptance is still in progress
 
+Current2026-09-07: daily015/preview16 is delivered after complete-criteria final
+review and exact-maincbceec3 CI(all4success). Normal upgrade, artifact identity,
+repeat install, actual daily lifecycle and original data/shortcut preservation
+pass; see [the current delivery](tianwen-complete-criteria-delivery-20260907.md).
+Continue fresh frozen L/M/N real UI tasks. Prior B/G/J/K are terminal; H reserved.
+Unobserved Outcome exploration and genuine activation/future efficacy stay open.
+
 Latest2026-09-06: daily014/preview15 is delivered at product6820a19/main0641095
 after all four CI34038125754 jobs passed. Exact artifacts, actual normal upgrade,
 daily packaged startup/exit, repeat install and unchanged30 user files/shortcut

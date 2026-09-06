@@ -2,6 +2,15 @@
 
 Status: **in progress; the total route is not complete**.
 
+Current2026-09-07: complete criteria are delivered as daily015/preview16 after
+final review, full1830/18conditional skips and all four exact-maincbceec3 CI jobs.
+Normal014 upgrade, repeated install, exact82-file Desktop copy, actual daily
+lifecycle and unchanged30 user files/shortcut passed. See the
+[current delivery](tianwen-complete-criteria-delivery-20260907.md).
+Fresh L/M/N real UI acceptance is next; no old B/G/J/K regrading. Stage3 source
+reading/adaptation remains observed, while Outcome exploration and activation/
+future efficacy remain open. The following capacity checkpoint is historical.
+
 Latest capacity checkpoint: source6820a19 is independently approved and delivered
 as daily014/preview15 after all four exact-main CI34038125754 jobs passed on0641095.
 Focused139, full1787/18conditional skips, artifact68/3opt-in skips, native14/14,
