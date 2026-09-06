@@ -79,11 +79,16 @@ const verdict = review.idGateVerdict === 'met' && review.scores.sourceFidelity >
   ? 'met' : 'not-met'
 ```
 
-- [ ] Write RED tests through real Evolution ledger APIs: semantic contract rejects absent proof/plain met/not-met, wrong subject/rubric, forged verdict and malformed scores; score 2 produces failure, score 3 plus IDs produces success, ID failure remains failure; explicit canonical inconclusive proof (including attempt:null) permits only inconclusive, while malformed completed proof is rejected. Completed proof may downgrade to inconclusive when source failed. Old input/event digest and replay stay exact; no semantic proof in v1 event/legacy contract. Same Run input cannot replace reviewer proof. Skill-use still consumes original source Evidence and digest.
-- [ ] Run the focused tests before implementation; record named assertions failing for missing behavior, not setup/import accidents. Use existing real ledger fixture helpers, no mock-only proof.
-- [ ] Implement strict contract/proof parsers and central prepareOutcomeIntake binding/verdict checks. Require acceptanceSubjectDigest for semantic contracts. Keep v1 event parser exact and add v2 parsing; record correct event version and verify replay through the same preparation. Existing inputDigest includes proof; do not add a new ledger entity.
-- [ ] Run `pnpm exec vitest run tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/skill-governance.spec.ts` and `pnpm run typecheck`. Add live/replay tampering coverage where the existing event harness permits it.
-- [ ] Self-review and commit; report exact interfaces, RED/GREEN commands/results and changed files for independent task review. Do not change Runtime yet.
+- [x] Write RED tests through real Evolution ledger APIs: semantic contract rejects absent proof/plain met/not-met, wrong subject/rubric, forged verdict and malformed scores; score 2 produces failure, score 3 plus IDs produces success, ID failure remains failure; explicit canonical inconclusive proof (including attempt:null) permits only inconclusive, while malformed completed proof is rejected. Completed proof may downgrade to inconclusive when source failed. Old input/event digest and replay stay exact; no semantic proof in v1 event/legacy contract. Same Run input cannot replace reviewer proof. Skill-use still consumes original source Evidence and digest.
+- [x] Run the focused tests before implementation; record named assertions failing for missing behavior, not setup/import accidents. Use existing real ledger fixture helpers, no mock-only proof.
+- [x] Implement strict contract/proof parsers and central prepareOutcomeIntake binding/verdict checks. Require acceptanceSubjectDigest for semantic contracts. Keep v1 event parser exact and add v2 parsing; record correct event version and verify replay through the same preparation. Existing inputDigest includes proof; do not add a new ledger entity.
+- [x] Run `pnpm exec vitest run tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/skill-governance.spec.ts` and `pnpm run typecheck`. Add live/replay tampering coverage where the existing event harness permits it.
+- [x] Self-review and commit; report exact interfaces, RED/GREEN commands/results and changed files for independent task review. Do not change Runtime yet.
+
+Task 1 completed at product commit `d5b2836`, independently spec compliant and
+quality Approved with no findings. Focused 39/39, full 1715 passed/18 conditional
+skips and typecheck exit 0 cover that Task 1 source, not later Task 2 work. `fe5c1bb`
+only removes an accidentally tracked local report from Git; product bytes match.
 
 ### Task 2: Native independent reviewer and ordinary admission
 
@@ -113,25 +118,37 @@ sourceTool.execute = async (args, execution) => {
 // Completed native proof's grade determines verdict; unavailable proof is inconclusive.
 ```
 
-- [ ] Write RED actual native-agent/provider-harness tests: IDs met but prose low score=>not-met; score >=3=>met; grade remains invisible in source submit result; missing submission/review, abort/provider error, invalid receipt, altered request/config/material/schema, extra inherited tools/Skill context and forged/mismatched native proof cannot produce conclusive Outcome. One valid source submission and one deterministic child only, including concurrent calls and recovery. Legacy Run restoration must keep ID oracle and never initiate semantic review.
-- [ ] Record failing tests, then implement native agents.create controlled child with no seed, source parent metadata, sole strict grade tool, existing model-selection/call-config APIs, pre-provider actual-request guard, persistence/Evidence checks and disposal. Relay source ToolRunContext.signal to native cancellation. Freeze actual source configuration before review; no resource budget or provider SDK.
-- [ ] Use a deterministic child identity per frozen source Run/turn; persisted complete exact child is reusable without a model call, invalid/incomplete prior attempt is inconclusive, not replaced. Recovery authenticates native parent/session lifecycle/material/request/submission Evidence, not only a caller-provided proof object. Pure Evolution verifies structure; trusted runtime validates provenance before attestation.
-- [ ] Bind fresh ordinary summaries to research-summary-result.v2:<skillVersion> plus qualityContract. Preserve old bindings exactly. Reconciliation keeps source Evidence/source sessionDigest, validates proof, consumes Outcome, records native Skill use and observes Outcome in existing order. Do not create a post-turn queue. Source tool review is active work cancellable with native Stop.
-- [ ] Run focused native reviewer/admission/intake/Skill-use suites and root TypeScript check. Confirm no provider request on rejected guard/recovery and no fabricated failure on infrastructure errors.
-- [ ] Self-review and commit; report exact public helper signatures and request/material proof definition for Task 3 plus full RED/GREEN evidence.
+- [x] Write RED actual native-agent/provider-harness tests: IDs met but prose low score=>not-met; score >=3=>met; grade remains invisible in source submit result; missing submission/review, abort/provider error, invalid receipt, altered request/config/material/schema, extra inherited tools/Skill context and forged/mismatched native proof cannot produce conclusive Outcome. One valid source submission and one deterministic child only, including concurrent calls and recovery. Legacy Run restoration must keep ID oracle and never initiate semantic review.
+- [x] Record failing tests, then implement native agents.create controlled child with no seed, source parent metadata, sole strict grade tool, existing model-selection/call-config APIs, pre-provider actual-request guard, persistence/Evidence checks and disposal. Relay source ToolRunContext.signal to native cancellation. Freeze actual source configuration before review; no resource budget or provider SDK.
+- [x] Use a deterministic child identity per frozen source Run/turn; persisted complete exact child is reusable without a model call, invalid/incomplete prior attempt is inconclusive, not replaced. Recovery authenticates native parent/session lifecycle/material/request/submission Evidence, not only a caller-provided proof object. Pure Evolution verifies structure; trusted runtime validates provenance before attestation.
+- [x] Bind fresh ordinary summaries to research-summary-result.v2:<skillVersion> plus qualityContract. Preserve old bindings exactly. Reconciliation keeps source Evidence/source sessionDigest, validates proof, consumes Outcome, records native Skill use and observes Outcome in existing order. Do not create a post-turn queue. Source tool review is active work cancellable with native Stop.
+- [x] Run focused native reviewer/admission/intake/Skill-use suites and root TypeScript check. Confirm no provider request on rejected guard/recovery and no fabricated failure on infrastructure errors.
+- [x] Self-review and commit; report exact public helper signatures and request/material proof definition for Task 3 plus full RED/GREEN evidence.
+
+Task 2 completed at `8cef6e8` after independently verified normalization repair
+over `a016f8f`. Focused fix coverage 44/44 and typecheck pass. The earlier full
+run remains 1718 passed / 8 failed / 18 skipped: Task 3 owns the concrete downstream
+failures. Task 2 recovery evidence is same-Context durable rereading; full
+dispose/remount coverage is explicitly carried into Task 3, not claimed here.
 
 ### Task 3: Semantic analysis, exploration and real Outcome v3 source lineage
 
 **Files:**
 - Modify: packages/tianwen-runtime-bundle/src/outcome-learning-intake.ts, learning-analysis-child.ts only for exact added source observation, learning-exploration.ts, learning-loop-orchestrator.ts, research-summary-source-case.ts, explicit-correction-protocol.ts
 - Modify: packages/tianwen-evolution/src/learning-exploration.ts, controlled-skill-evaluation.ts, ledger.ts
+- Modify: packages/tianwen-runtime/src/skill-evaluation.ts only to distinguish the new source union's structural discriminator from opaque forbidden source identities
+- Modify: packages/tianwen-runtime/src/research-summary-quality.ts and its input type exports only for the narrow persisted-source recovery interface needed by completed exploration arms; keep one reviewer implementation
 - Test: tests/dsh-probe/outcome-learning-analysis.spec.ts, tests/dsh-migration/learning-loop-orchestrator.spec.ts, tests/dsh-probe/controlled-skill-evaluation.spec.ts, tests/dsh-probe/learning-exploration.spec.ts, tests/dsh-migration/learning-exploration.spec.ts
+- Test: tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts for new Outcome source identity collection and preserved identity exclusion
+- Test: tests/dsh-migration/explicit-correction-product.e2e.spec.ts for the real native ordinary-summary-to-analysis/exploration/resume assembly and role-specific child counts
+- Test: tests/dsh-probe/research-summary-quality.spec.ts for full Context disposal/remount and persisted source recovery with no live source Agent and zero new provider requests
 
 **Interfaces:**
 - Consumes strict semantic Outcome event/proof and Task 2 native review run/recover helpers.
 - Adds real Outcome source identity branch to existing ControlledSkillSourceFidelityContract source; explicit-feedback source remains unchanged. Freeze facts from actual ledger Run/Outcome/Signals, never manufacture messageId/feedbackVersion.
 - Source identity binds selected failed Run, source Session/material and semanticReview digest. Reuse deterministic first sorted failed signal member used by learning-candidate.ts, not analysis status.sessionId.
 - New exploration semantic metric is selected from frozen source qualityContract, present in existing request/environment digests; legacy request shape/digests retain existing metric.
+- New semantic arms use the existing source-capture tool mode and keep its unchanged `not-evaluated` result, as required by Task 2 proof recovery; legacy arms keep controlled-enforce. For fully cold completed arms, recover by inspecting `run.sessionId` and deriving authoritative source metadata from the native persisted header, not by fabricating an Agent or executing a model turn. The warm reviewer input continues to require the actual source Agent.
 
 ```ts
 // Select from already-frozen supporting facts, before Candidate creation.
@@ -144,9 +161,39 @@ const sourceSignalId = [...analysis.signalIds].sort()[0]
 - [ ] Write RED tests through real Evolution facts: two semantic failures plus valid success counterexample form native analysis; mixed legacy/semantic contract or incomplete proof cannot substitute. Analysis material includes exact completed review observation and source. Existing legacy cases still behave identically.
 - [ ] Extend ordinary intake category/material, source recovery and ledger freeze/replay facts. Introduce exact Outcome source union parser; reject invented explicit feedback IDs, wrong Run/source/material/review digest, success-as-original and Candidate-dependent selection. Validate both live protocol freeze and replay.
 - [ ] Extend orchestrator version selection: fresh semantic Outcome=>v3 with real source packet; legacy Outcome=>v2; existing explicit-feedback=>v3 unchanged. Missing semantic proof is no protocol, never fallback to weaker v2. Preserve original fixed other evaluation tasks and v3 14-run rules.
+- [ ] When adding an Outcome source discriminator, update Shadow review's source identity collection so a structural value such as `source: 'outcome'` is not treated as a secret identity substring. Add a native regression whose legitimate holdout text contains `outcome`, while actual opaque source Run/Session/proof identities still trigger refusal. Legacy identity collection and material rules stay unchanged.
 - [ ] Write and run RED exploration native-arm tests before extending execution: semantic metric frozen on new requests, same review and threshold on both arms, inconclusive remains inconclusive, child material contains no arm role/hypothesis, cancellation and native source Evidence preserved. Old request digests and ID oracle remain unchanged.
 - [ ] Implement versioned metric selection and reuse Task 2 native review for both arms. Avoid separate semantic graders, task queues or changing inputs after outcomes are known.
+- [ ] Narrow the existing recover helper input to allow cold source recovery directly from the stored Run and native persistence. Validate stored Run equality, lifecycle and exact native source/reviewer material using persisted metadata; do not trust caller-supplied parent depth/cwd. Add a test that disposes the original Context, remounts the same native persistence, has no live source/reviewer Agent, and recovers/reconciles without a provider call. Also retain invalid/incomplete refusal and the normalized-submission/raw-Evidence separation repaired in Task 2.
+- [ ] Resolve the concrete downstream failures recorded by Task 2's full regression in `explicit-correction-product.e2e.spec.ts`: preserve native semantic-review fixtures for fresh summaries, verify actual analysis/consent/exploration/resume causes, and distinguish quality-review children from analysis children in role-specific assertions. Do not blindly change expected results or assume all failures are merely fixture drift; trace and test each failed interface. Mechanism provider fixtures remain separate from genuine model acceptance.
 - [ ] Run all focused analysis/source/protocol/exploration suites and root TypeScript check; self-review and commit with exact RED/GREEN reports for independent review.
+
+### Task 4: Immutable next-version delivery compatibility
+
+**Files:**
+- Modify: packages/tianwen-runtime-bundle/package.json, src/portable-profile.ts, src/controlled-lifecycle.ts
+- Modify: packages/tianwen-desktop-host/package.json, src/host.ts, src/main.ts, src/locale.ts, src/profile-prepare.ts only where version readiness requires it
+- Modify: scripts/install-tianwen.mjs, scripts/stage-desktop-runtime.mjs, scripts/verify-dsh-profile.mjs, scripts/audit-desktop-artifact.mjs, .github/workflows/ci.yml, README.md
+- Test/update current-version assertions: tests/dsh-migration/controlled-lifecycle-command.spec.ts, controlled-lifecycle-profile.spec.ts, one-shot-profile-lifecycle.spec.ts, ordinary-long-goal-cli.spec.ts, portable-goal-cli.spec.ts, portable-plugin-lifecycle.e2e.spec.ts, portable-profile-composition.e2e.spec.ts, runtime-bundle.spec.ts, runtime-profile.spec.ts, tianwen-desktop-artifact.spec.ts, tianwen-desktop-distribution.e2e.spec.ts, tianwen-desktop-host.spec.ts, tianwen-desktop-profile-prepare.spec.ts, tianwen-installer.spec.ts, tianwen-startup.e2e.spec.ts, tianwen-version-upgrade.e2e.spec.ts
+
+**Interfaces:**
+- Advances current Runtime from `0.1.13` to `0.1.14`, Desktop from `0.1.0-preview.14` to `0.1.0-preview.15`; DSH stays `0.1.1-rc.2`.
+- Adds exact known Runtime `0.1.13` predecessor to existing managed/Web update paths, keeping `0.1.12`, `0.1.11`, `0.1.10` and original DSH rc.7 support. New archive is `tianwen-runtime-bundle-0.1.14.tgz`.
+- Existing independently reviewed delivery increment c576d7b is a reference for paths and tests, not permission to replay/overwrite old artifacts.
+
+```ts
+const CURRENT_RUNTIME_VERSION = '0.1.14'
+const LEARNING_LOOP_PREDECESSOR_VERSIONS = ['0.1.13', '0.1.12', '0.1.11'] as const
+// Existing classifier must recognize exact intact 0.1.13 as predecessor,
+// then become current after ordinary installer upgrade; identical second install
+// returns the same receipt. Damaged/mixed/source-linked predecessor remains refused.
+```
+
+- [ ] Write RED exact `0.1.13` managed/Web predecessor tests, preserved Session/state/archive and repeat-install identity assertions using existing retained predecessor fixture pattern. Freeze the old profile patch independently of evolving renderProfilePatch; verify actual old `0.1.13` patch matches the retained learning-loop predecessor template before reuse.
+- [ ] Run focused installer and Desktop profile/host tests and record failures for the missing successor/old-version readiness, not nonexistent files or missing dependencies.
+- [ ] Update current version/package/archive/runtime readiness/CI artifact paths consistently and add narrowly recognized `0.1.13` migration. Add the new native `tests/dsh-probe/research-summary-quality.spec.ts` to the existing CI ordinary-learning check (the workflow enumerates files explicitly). Preserve old checks and immutable historical examples; do not globally replace every old version string. README describes a current candidate, not an already completed user delivery or genuine effect.
+- [ ] Run focused version/lifecycle/install/artifact checks and typecheck. Rebuild Runtime declarations/bundle in the existing project output before artifact checks, maintaining current exact native module identity. Do not package Desktop into the active `dist/tianwen-desktop/win-unpacked`, install into daily state, or publish externally; root owns physical candidate packaging and delivery after final gates.
+- [ ] Self-review and commit only owned source/tests/docs, not SDD scratch. Report precise RED/GREEN and current-version/predecessor handling for independent task review. Known optional E2E skips and build warnings remain explicit.
 
 ## Post-implementation route (controller-owned, not a claim of completion)
 
