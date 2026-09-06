@@ -4,6 +4,17 @@
 
 **Goal:** Complete the four-stage learning route with genuine DSH use and defensible evidence of future-task improvement, not merely delivery of its mechanisms.
 
+**Latest continuation, 2026-09-06 after I/J:** execution-window repair3b2caac and
+docs1c1e1f5 are integrated with final review, separate physical Desktop gate and
+four successful exact-main CI jobs. I/J each passed final content acceptance in
+one real UI attempt; J had native length-error recovery and accurate feedback.
+Its genuine Candidate628c677f stopped after one completed baseline because the
+legal3,946-byte summary became4,411-byte evaluator material against a4,096-byte
+cap. Continue the [bounded capacity repair](2026-09-06-tianwen-summary-material-capacity.md).
+Daily013 remains unchanged; no J/G/B regrading. I/J content tranche is closed;
+no qualifying ordinary failed-Outcome pair, chosen source adaptation, promotion
+or future improvement is claimed.
+
 **Current continuation, 2026-09-06:** Original A–D and013 delivery remain completed
 historical evidence. [Ordinary semantic Outcome repair](2026-09-06-tianwen-ordinary-summary-semantic-outcome.md)
 and final cold-reconciliation fix are independently Approved at `dc33583`, with

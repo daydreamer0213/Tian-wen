@@ -2,7 +2,26 @@
 
 Status: **in progress; the total route is not complete**.
 
-Latest continuation (2026-09-06): the [ordinary semantic Outcome
+Latest continuation (2026-09-06, after I/J): source3b2caac passed final independent
+review, separate Desktop audit/physical lifecycle, and all four exact-main jobs
+in [CI34034047173](https://github.com/daydreamer0213/Tian-wen/actions/runs/34034047173)
+at1c1e1f5. I/J each completed one prospectively frozen32-row real DeepSeek UI task;
+both final content reviews and human inspections passed. J self-recovered from
+an initial4,299-byte refused summary to2,655bytes within its original turn.
+Accurate native feedback independently yielded Candidate628c677f and protocol
+815ca767. Its only completed controlled baseline accepted3,946bytes of text,
+but the full4,411-byte evaluator projection exceeded its frozen4,096-byte limit.
+No pair/aggregate/holdout/promotion completed. The bounded
+[future material-capacity repair](../superpowers/plans/2026-09-06-tianwen-summary-material-capacity.md)
+addresses this demonstrated contract mismatch without changing text acceptance or
+grading. No J/G/B retries or historical reinterpretation. The owned isolated host
+is stopped with evidence retained; daily013/preview14 is unchanged and not upgraded.
+I/J content tranche is closed, not extended to hunt a failed Outcome. H remains
+reserved and the unobserved efficacy/exploration/adaptation branches remain open.
+Detailed native records are in isolated evidence/semantic-final-gates-3b2caac/,
+including I-J-real-acceptance.md and exact input/accepted-submission checks.
+
+Previous continuation (2026-09-06): the [ordinary semantic Outcome
 repair](../superpowers/plans/2026-09-06-tianwen-ordinary-summary-semantic-outcome.md)
 and its sole final cold-reconciliation fix are independently Approved at product
 `dc33583`. Fresh full Vitest passes1751/18 conditional skips, rebuilt artifact

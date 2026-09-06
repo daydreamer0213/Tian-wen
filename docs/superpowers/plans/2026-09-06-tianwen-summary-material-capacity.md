@@ -26,7 +26,7 @@
 - Modify: `packages/tianwen-runtime-bundle/src/learning-loop-orchestrator.ts`.
 - Test: `tests/dsh-migration/explicit-correction-protocol.spec.ts`.
 - Test: `tests/dsh-migration/learning-loop-orchestrator.spec.ts`.
-- Test: `tests/dsh-migration/research-summary-controlled-runtime.spec.ts` (or the existing source-fidelity native-runtime suite if its fixture provides the exact v3 flow; tell controller the file first).
+- Test: `tests/dsh-migration/learning-loop-controlled-executor.integration.spec.ts` (confirmed existing v3 source-fidelity native fixture; controller-approved replacement of the originally proposed test file).
 
 **Interfaces:**
 - Consumes `resolveExplicitCorrectionProtocol`, its built tasks/protocol/shadow input,
@@ -68,7 +68,7 @@ $env:TEMP = 'D:/DevData/tianwen-dsh-probe/temp'
 $env:TMP = $env:TEMP
 $env:TIANWEN_DSH_PROBE_ROOT = 'D:/DevData/tianwen-dsh-probe'
 $env:PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN = 'false'
-& 'D:/hermes/node/node.exe' 'D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs' exec vitest run tests/dsh-migration/explicit-correction-protocol.spec.ts tests/dsh-migration/learning-loop-orchestrator.spec.ts tests/dsh-migration/research-summary-controlled-runtime.spec.ts
+& 'D:/hermes/node/node.exe' 'D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs' exec vitest run tests/dsh-migration/explicit-correction-protocol.spec.ts tests/dsh-migration/learning-loop-orchestrator.spec.ts tests/dsh-migration/learning-loop-controlled-executor.integration.spec.ts
 ```
 
 - [ ] Implement the minimal selector and consistent contract family. The three

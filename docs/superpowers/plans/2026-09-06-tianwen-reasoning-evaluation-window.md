@@ -64,6 +64,15 @@ const selectedStopContract = { maxToolCalls: 4, maxElapsedMs: selectedWindow } a
 
 ## Controller continuation
 
+Closed implementation checkpoint: final independent incremental review Approved,
+records archived under isolated delivery/review-records-sdd-014/. Source3b2caac
+and docs1c1e1f5 are onmain; exact-main CI34034047173 all four jobs passed. New
+separate Desktop passed strict audit and actual native Web lifecycle. I/J genuine
+UI inputs each completed once with content success; accurate J feedback exercised
+the new300-second protocol and exposed a different material-capacity mismatch.
+Continue only the [new bounded capacity plan](2026-09-06-tianwen-summary-material-capacity.md),
+not another execution-window repair. Daily013 remains unchanged pending that repair.
+
 Task1 implementation completed in3b2caac38297e0d546a51b5b5922a39f6fc552c2.
 Valid RED reproduced both legacy pending-report digest failures; final focused
 122/native86/typecheck0/full1772pass18skip475.83s. First full's stale-copy failure
@@ -73,6 +82,6 @@ one Minor on restore/legacy digest test coverage goes to final review. Root
 rebuilt exact source: bundle/profile68pass3skip, native14/14; no daily upgrade or
 new real model input yet. The checkbox work below remains controller-owned.
 
-- [ ] Independent task and final incremental review, preserving the already completed dc33583 whole-branch review as the base dependency.
-- [ ] Rebuild a separate candidate, verify unchanged daily data, exact native module identity and physical Desktop/installer gates before normal integration/delivery.
-- [ ] Keep G's timeout and all original records. Resume only independently justified new genuine tasks, not an answer-fitting retry; unobserved exploration/adoption/promotion remain open.
+- [x] Independent task and final incremental review, preserving the already completed dc33583 whole-branch review as the base dependency.
+- [x] Rebuild a separate candidate, verify unchanged daily data, exact native module identity and physical Desktop gates; integrate reviewed source and verify exact-main CI. Existing healthy014 retained install was a no-op, not proof of upgrading to3b2caac.
+- [x] Keep G's timeout and all original records. Execute independently frozen I/J once; unobserved exploration/adoption/promotion remain open. Daily delivery is carried into the new capacity repair's final gates.
