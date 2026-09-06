@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { Context } from '@tianwen/dsh-compat'
 import {
   CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
@@ -30,6 +31,16 @@ import {
   runLearningLoopPhase,
 } from '../../packages/tianwen-runtime-bundle/src/learning-loop-orchestrator.js'
 
+function fixtureRoot(prefix: string): string {
+  const parent = resolve(
+    process.env.TIANWEN_DSH_PROBE_ROOT
+      ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-dsh-probe' : tmpdir()),
+    'learning-loop-orchestrator',
+  )
+  mkdirSync(parent, { recursive: true })
+  return mkdtempSync(join(parent, `${prefix}-`))
+}
+
 function controlledExecutorFixture(input: {
   readonly status: Record<string, unknown>
   readonly records?: readonly Record<string, unknown>[]
@@ -45,7 +56,7 @@ function controlledExecutorFixture(input: {
     readonly runControlledSkillTransition?: (input: unknown) => Promise<unknown>
   }
 }) {
-  const root = mkdtempSync(join('D:/DevData/tianwen-dsh-probe', 'task-2-orchestrator-'))
+  const root = fixtureRoot('task-2-orchestrator')
   const frozen: unknown[] = []
   const unavailable: unknown[] = []
   const rejected: unknown[] = []
@@ -192,7 +203,7 @@ function retainedRollbackFixture(input: {
 
 function retainedV2ProtocolRecord() {
   const legacy = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)!
-  const root = mkdtempSync(join('D:/DevData/tianwen-dsh-probe', 'task-2-retained-v2-'))
+  const root = fixtureRoot('task-2-retained-v2')
   const tasks = legacy.buildEvaluationTasks({
     root,
     materializeWorkspace(workspaceRoot, content) {
