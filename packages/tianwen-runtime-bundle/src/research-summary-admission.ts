@@ -52,6 +52,7 @@ interface InstalledAdmission {
   readonly skill: SkillDefinition
   readonly tool: ToolDefinition
   readonly dispose: () => Promise<void>
+  readonly restoredTaskSession?: Pick<Agent['session'], 'id' | 'events'>
   semanticReview?: RuntimeOutcomeVerdictAttestation['semanticReview']
   reconciliation?: Promise<void>
 }
@@ -182,6 +183,16 @@ export function researchSummaryPacketFromEvents(
   return matches.length === 1 ? matches[0] : undefined
 }
 
+function firstTurnPrefix(
+  session: Pick<Agent['session'], 'id' | 'events'>,
+): Pick<Agent['session'], 'id' | 'events'> | undefined {
+  const boundary = session.events.findIndex(event =>
+    event.type === 'turn/end' && event.data.turn === 1)
+  return boundary < 0
+    ? undefined
+    : { id: session.id, events: structuredClone(session.events.slice(0, boundary + 1)) }
+}
+
 function catalogEntry(message: UserMessage, name: string): unknown {
   const source = message.source as unknown as {
     readonly kind?: unknown
@@ -248,6 +259,7 @@ export class TianwenResearchSummaryAdmissionService extends Service {
   private readonly claimed = new Map<Agent, UserMessage[]>()
   private readonly prepared = new Map<Agent, StepPreparation>()
   private readonly pending = new Set<Promise<void>>()
+  private readonly restoring = new Map<Agent, Promise<void>>()
 
   constructor(ctx: Context) {
     super(ctx, 'tianwenResearchSummaryAdmission')
@@ -298,6 +310,9 @@ export class TianwenResearchSummaryAdmissionService extends Service {
     }, { prepend: true })
     const offPreStep = this.ctx.on('agent/pre-step', (payload, next) =>
       this.admit(payload, next), { prepend: true })
+    const offCreated = this.ctx.on('agent/created', ({ agent }) => {
+      this.restoreCompleted(agent)
+    })
     const offSession = this.ctx.on('session/event', (session, event) => {
       if (event.type !== 'turn/end') return
       const agent = this.ctx.agents.get(session.id)
@@ -322,10 +337,11 @@ export class TianwenResearchSummaryAdmissionService extends Service {
     this.ctx.effect(() => async () => {
       offDisposed()
       offSession()
+      offCreated()
       offPreStep()
       offAssembly()
       offClaimed()
-      await Promise.allSettled([...this.pending])
+      await this.whenIdle()
       await Promise.allSettled([...this.prepared.values()].flatMap(value =>
         value.kind === 'fresh' || value.kind === 'restore'
           ? [value.installed.dispose()]
@@ -339,7 +355,9 @@ export class TianwenResearchSummaryAdmissionService extends Service {
   }
 
   async whenIdle(): Promise<void> {
-    await Promise.allSettled([...this.pending])
+    while (this.pending.size > 0) {
+      await Promise.allSettled([...this.pending])
+    }
   }
 
   private async prepareAssembly(
@@ -347,6 +365,7 @@ export class TianwenResearchSummaryAdmissionService extends Service {
     messages: readonly UserMessage[],
     signal?: AbortSignal,
   ): Promise<StepPreparation> {
+    await this.restoring.get(agent)
     const live = this.installed.get(agent)
     if (live !== undefined) {
       return this.verifyBoundFacts(agent, live)
@@ -433,6 +452,9 @@ export class TianwenResearchSummaryAdmissionService extends Service {
             false,
           )) throw new Error('restored research summary native layer drift')
         this.installed.set(agent, installed)
+        if (installed.restoredTaskSession !== undefined) {
+          this.reconcile(agent, installed, installed.restoredTaskSession, false)
+        }
         return decision
       } catch {
         await installed.dispose()
@@ -699,7 +721,11 @@ export class TianwenResearchSummaryAdmissionService extends Service {
       })) {
       throw new Error('persisted research summary Session identity drift')
     }
-    const gesture = researchSummaryPacketFromEvents(persisted.events, binding.acceptanceSubjectDigest)
+    const prefix = firstTurnPrefix({ id: agent.session.id, events: persisted.events })
+    const gesture = researchSummaryPacketFromEvents(
+      prefix?.events ?? persisted.events,
+      binding.acceptanceSubjectDigest,
+    )
     if (gesture === undefined) throw new Error('persisted research summary packet is unavailable')
     const skill = skillFromManifest(manifest)
     const installed = await this.install(agent, skill, gesture.packet, runId)
@@ -709,14 +735,48 @@ export class TianwenResearchSummaryAdmissionService extends Service {
       await installed.dispose()
       throw new Error('restored research summary admission layer drift')
     }
-    return installed
+    const terminal = prefix?.events.at(-1)
+    return prefix !== undefined
+      && terminal?.type === 'turn/end'
+      && terminal.data.reason.kind === 'completed'
+      ? { ...installed, restoredTaskSession: prefix }
+      : installed
   }
 
-  private reconcile(agent: Agent, installed: InstalledAdmission): void {
-    if (installed.reconciliation !== undefined) return
+  private restoreCompleted(agent: Agent): void {
+    if (!isRootSession(agent) || this.restoring.has(agent)) return
+    const binding = this.ctx.tianwenEvolution.getRunBindingBySessionId(String(agent.session.id))
+    if (binding === undefined) return
+    const work = this.restore({ agent, signal: new AbortController().signal }, binding.runId)
+      .then(async installed => {
+        if (installed.restoredTaskSession === undefined
+          || this.ctx.agents.get(agent.session.id) !== agent) {
+          await installed.dispose()
+          return
+        }
+        this.installed.set(agent, installed)
+        this.reconcile(agent, installed, installed.restoredTaskSession, false)
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.restoring.delete(agent)
+        this.pending.delete(work)
+      })
+    this.restoring.set(agent, work)
+    this.pending.add(work)
+  }
+
+  private reconcile(
+    agent: Agent,
+    installed: InstalledAdmission,
+    frozenTaskSession?: Pick<Agent['session'], 'id' | 'events'>,
+    wakeLearning = true,
+  ): Promise<void> {
+    if (installed.reconciliation !== undefined) return installed.reconciliation
     // whenIdle follows queued turns too. Freeze this completed task boundary
     // now, and use the same evidence view for verdict, Outcome and Skill use.
-    const taskSession = { id: agent.session.id, events: structuredClone(agent.session.events) }
+    const taskSession = frozenTaskSession
+      ?? { id: agent.session.id, events: structuredClone(agent.session.events) }
     const work = agent.whenIdle()
       .then(async () => {
         if (this.installed.get(agent) !== installed) return
@@ -728,12 +788,15 @@ export class TianwenResearchSummaryAdmissionService extends Service {
           attestation,
         )
         this.ctx.tianwenLearningIntake.recordSkillUse(taskSession, installed.runId)
-        await this.ctx.get('tianwenLearningLoop')?.observeOutcome(agent, installed.runId)
+        if (wakeLearning) {
+          await this.ctx.get('tianwenLearningLoop')?.observeOutcome(agent, installed.runId)
+        }
       })
       .catch(() => undefined)
       .finally(() => this.pending.delete(work))
     installed.reconciliation = work
     this.pending.add(work)
+    return work
   }
 
   private async outcomeAttestation(

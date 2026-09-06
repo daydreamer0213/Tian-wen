@@ -1074,6 +1074,84 @@ describe('research summary first-step admission', () => {
     }
   })
 
+  it('reconciles the completed first task on cold resume without another provider request', async () => {
+    const directory = root('cold-reconcile')
+    const sessionId = SessionId(`cold-reconcile-${randomUUID()}`)
+    const first = await mount(directory, [
+      toolCallResponse('cold-submit', RESEARCH_SUMMARY_TOOL_NAME, {
+        summary: 'The verified result is concrete. The deployment region is undecided.',
+        confirmedFindingIds: ['f1'], uncertaintyIds: ['u1'],
+      }),
+      qualityResponse('cold-review'),
+      textResponse('Submitted summary.'),
+      textResponse('Later continuation.'),
+    ])
+    vi.spyOn(first.ctx.tianwenEvolution, 'recordOutcomeIntake')
+      .mockImplementationOnce(() => { throw new Error('interrupt before Outcome intake') })
+    const initial = await first.ctx.agents.create({
+      sessionId, meta: { cwd: directory },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    initial.agent.followup(direct(invocation))
+    await waitForIdle(first.ctx, initial.agent)
+    await first.ctx.tianwenResearchSummaryAdmission.whenIdle()
+    const binding = first.ctx.tianwenEvolution.getRunBindingBySessionId(String(sessionId))!
+    expect(first.ctx.tianwenEvolution.getOutcomeIntake(binding.runId)).toBeUndefined()
+    expect(first.ctx.tianwenEvolution.getRunSkillUse(binding.runId)).toBeUndefined()
+
+    initial.agent.followup(direct('继续'))
+    await waitForIdle(first.ctx, initial.agent)
+    const boundary = initial.agent.session.events.findIndex(event =>
+      event.type === 'turn/end' && event.data.turn === 1)
+    const firstTaskEvents = initial.agent.session.events.slice(0, boundary + 1)
+    const expectedSessionDigest = `sha256:${createHash('sha256')
+      .update(JSON.stringify(firstTaskEvents), 'utf8').digest('hex')}`
+    const expectedEvidence = projectEvidence(sessionId, firstTaskEvents)
+      .find(item => item.action.toolName === RESEARCH_SUMMARY_TOOL_NAME)!
+    expect(first.adapter.requests).toHaveLength(4)
+    await initial.dispose()
+    await first.ctx.fiber.dispose()
+
+    const second = await mount(directory, [])
+    const resumed = await second.ctx.agents.resume({
+      resumeSessionId: sessionId,
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    await second.ctx.tianwenResearchSummaryAdmission.whenIdle()
+    const outcome = second.ctx.tianwenEvolution.getOutcomeIntake(binding.runId)!
+    const use = second.ctx.tianwenEvolution.getRunSkillUse(binding.runId)!
+    expect(outcome.input).toMatchObject({
+      verdict: 'met',
+      sessionDigest: expectedSessionDigest,
+      evidenceIds: [expectedEvidence.evidenceId],
+      semanticReview: { status: 'completed' },
+    })
+    expect(use).toMatchObject({
+      sessionDigest: expectedSessionDigest,
+      acceptanceEvidenceId: expectedEvidence.evidenceId,
+    })
+    expect(second.adapter.requests).toEqual([])
+    const evolutionEvents = second.ctx.tianwenEvolution.listEvents()
+    await resumed.dispose()
+    await second.ctx.fiber.dispose()
+
+    const third = await mount(directory, [])
+    const resumedAgain = await third.ctx.agents.resume({
+      resumeSessionId: sessionId,
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      await third.ctx.tianwenResearchSummaryAdmission.whenIdle()
+      expect(third.ctx.tianwenEvolution.getOutcomeIntake(binding.runId)).toEqual(outcome)
+      expect(third.ctx.tianwenEvolution.getRunSkillUse(binding.runId)).toEqual(use)
+      expect(third.ctx.tianwenEvolution.listEvents()).toEqual(evolutionEvents)
+      expect(third.adapter.requests).toEqual([])
+    } finally {
+      await resumedAgain.dispose()
+      await third.ctx.fiber.dispose()
+    }
+  })
+
   it('fails closed before a request on loader, snapshot, catalog, schema, or persistence drift', async () => {
     const directory = root('drift')
     const cases: readonly {
