@@ -141,7 +141,7 @@ is made for that subset. Task1 is complete; no redispatch.
 new version0.1.15 archive identity, Desktop0.1.0-preview.16, same normal install and
 Webupdate paths; known old versions0.1.10 through0.1.14 all stay recognized.
 
-- [ ] Add RED assertions for current015/preview16 and014→015 normal Web upgrade.
+- [x] Add RED assertions for current015/preview16 and014→015 normal Web upgrade.
   Preserve existing010–013 compatibility and unknown-version rejection cases.
 
 ```ts
@@ -150,7 +150,7 @@ expect(desktopManifest.version).toBe('0.1.0-preview.16')
 // Extend the existing outdated-version table with 0.1.14; do not drop 0.1.10.
 ```
 
-- [ ] Run installer/Desktop profile focused tests and record expected RED. Update
+- [x] Run installer/Desktop profile focused tests and record expected RED. Update
   only current identities and explicit knownOldRuntimeVersions:
 
 ```ts
@@ -167,7 +167,7 @@ const knownOldRuntimeVersions = ['0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10
   missing/tampered/mixed/source-linked refusals and rollback/idempotency checks.
   Add the new pure source-fidelity test to CI's explicit test list if Task1 creates
   it; native ordinary/controlled/shadow/exploration suites are already listed.
-- [ ] Rebuild existing Runtime dependencies/declarations/bundle and Desktop
+- [x] Rebuild existing Runtime dependencies/declarations/bundle and Desktop
   declarations before artifact/version assertions, so old generated014 bytes
   cannot mask an015 packaging defect. Use the existing package build scripts;
   do not package Desktop into its active directory. Run touched focused suites
@@ -194,6 +194,11 @@ $env:TIANWEN_DSH_PROBE_PYTHON = 'D:/DevData/tianwen-worktrees/tianwen-architectu
 
 ## Controller follow-through
 
+- [ ] Resolve the fresh full-suite regression at productionbe1a28c: four existing
+  explicit-correction-product stories receive candidate-rejected instead of
+  expected promotion. Diagnose actual rejection evidence, fix narrowly with
+  covering RED/GREEN and independent review; preserve promotion assertions and
+  product gates. Initial full run1822pass/4fail/18skip is retained, not green.
 - [ ] Task-scoped review after each task, then final whole-branch independent review.
 - [ ] Final full Vitest/typecheck/public-surface verification on final source; exact
   runtime/Desktop candidate artifact/native/real packaged lifecycle gates.
