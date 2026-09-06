@@ -4,19 +4,22 @@
 
 **Goal:** Complete the four-stage learning route with genuine DSH use and defensible evidence of future-task improvement, not merely delivery of its mechanisms.
 
-**Current continuation, 2026-09-06:** The original tranche and013 delivery below
-remain completed historical evidence. The bounded [ordinary semantic Outcome
-repair](2026-09-06-tianwen-ordinary-summary-semantic-outcome.md) has implemented
-learning integration at `82db3f7` after independently reviewed contract/native-review
-commits through `8cef6e8`. Integration has1740 automatic checks passed/18 conditional
-skips; the review's native Skill-Evidence source mismatch is repaired and
-independently re-reviewed at `c990398`, with113 covering checks passed. Next-version
-upgrade support is now independently reviewed at `0170113` (295 focused checks
-passed/13 opt-in skips). Wholebranch review and final gates remain; full Vitest is
-running on this fixed product. Its future inputs are frozen but not yet submitted; no new genuine
-Candidate, activation or future-task improvement is claimed. Continue that
-repair from its own ledger, then return to the still-open genuine tasks here;
-do not replay completed tasks or regrade the rejected B Candidate.
+**Current continuation, 2026-09-06:** Original A–D and013 delivery remain completed
+historical evidence. [Ordinary semantic Outcome repair](2026-09-06-tianwen-ordinary-summary-semantic-outcome.md)
+and final cold-reconciliation fix are independently Approved at `dc33583`, with
+fresh full1751/18 conditional skips, artifact68/3 opt-in skips and actual native
+identity14/14. Its implementation SDD is archived/closed. E/F/G each completed
+one prospectively frozen real DeepSeek UI task; all semantic Outcomes met, E/F
+human prose passed, G had a real background-omission defect. Actual E cold UI
+recovery passed without reexecution. Accurate G feedback yielded a new Candidate
+and ten completed v3 paired arms, but aggregate review was cut off at60seconds
+while still streaming. No grade/holdout/promotion completed; do not retry or
+regrade that frozen attempt. Continue the bounded [future execution-window
+repair](2026-09-06-tianwen-reasoning-evaluation-window.md), then revised artifact/
+delivery and independently justified genuine tasks. H remains reserved; external
+directory inspection is observed, full source adoption is not. Separate014/
+preview15 candidate packaging/audit and actual retained013→014 install pass, but
+daily013 remains unchanged and the total route stays open.
 
 **Architecture:** Retain native DSH Sessions, model calls, Skills and feedback; Tianwen owns evidence binding, independent evaluation and future-Run activation. First obtain normal-task evidence on the unchanged delivered Runtime. A demonstrated implementation or evaluation gap receives its own bounded design/test-first repair before acceptance resumes; a successful baseline is never deliberately degraded.
 

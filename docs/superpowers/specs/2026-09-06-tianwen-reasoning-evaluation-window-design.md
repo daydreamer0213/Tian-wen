@@ -60,6 +60,25 @@ Alternatives considered:
 
 ## Verification and delivery
 
+The same genuine failure exposed one adjacent user-visible correctness issue:
+the existing generic failed-progress text asserts the environment is temporarily
+unavailable and promises automatic retry. The G browser actually repeated that
+claim, although this incomplete evaluator is not safely rerunnable. In the existing
+progress renderer only, use neutral incomplete-state wording, preserve whether
+the Candidate is unactivated or rollback remains unresolved, and state that
+recovery first verifies retained records and cannot blindly rerun unsafe partial
+attempts. Do not classify every failure as timeout or environment failure, change
+the phase machine, add a failure entity, disable valid recovery, or rewrite old
+delivered messages/cursors. Verify the new exact text and digest plus unchanged
+deduplication/recovery behavior in the existing orchestrator tests.
+
+In particular, an old failed-liveness pending intent already binds the prior
+text digest. Recover its exact old text/digest, analogously to the existing
+terminal-report historical text matching, including the crash window after its
+native message was sent but before delivery was recorded. New intents use neutral
+text; an unknown digest still fails closed. Do not replace the pending digest,
+redeliver an already present old native message, or replay learning/model work.
+
 Test the new freeze, legacy exact reconstruction, retained old/new v3 freeze and
 holdout identity, and inconsistent/unsupported-window refusal. Tests assert
 actual builder/ledger inputs and the executor's recovery route, not just helpers.

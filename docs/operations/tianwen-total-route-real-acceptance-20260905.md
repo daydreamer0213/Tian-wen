@@ -2,20 +2,24 @@
 
 Status: **in progress; the total route is not complete**.
 
-Latest continuation (2026-09-06): the bounded [ordinary semantic Outcome
+Latest continuation (2026-09-06): the [ordinary semantic Outcome
 repair](../superpowers/plans/2026-09-06-tianwen-ordinary-summary-semantic-outcome.md)
-is in progress on `codex/ordinary-summary-semantic-outcome`. Its versioned result
-contract and independent native review are independently reviewed through
-`8cef6e8`; learning/source lineage and full restart recovery are implemented at
-`82db3f7`, with1740 automatic checks passed/18 conditional skips. Independent
-review's native Skill-Evidence source mismatch is repaired and independently
-re-reviewed at `c990398`, with113 covering checks passed. Next-version upgrade
-support is independently reviewed at `0170113` (295 focused checks passed/13 opt-in
-skips, native quality10/10). Wholebranch review and final full/artifact gates remain
-open; full Vitest is running on the fixed candidate. New E/F/G inputs and reserved future H were frozen before execution,
-but have not been submitted. These engineering checks are not new genuine model
-results and do not close any unobserved route branch below. Daily013/preview14,
-the original A–D observations and the rejected B Candidate remain unchanged.
+and its sole final cold-reconciliation fix are independently Approved at product
+`dc33583`. Fresh full Vitest passes1751/18 conditional skips, rebuilt artifact
+checks68/3 opt-in skips, and actual isolated native identity14/14. E/F/G were
+frozen prospectively and each executed once through the in-app browser with real
+official flash/high. All three semantic Outcomes are met/no-case, reviewer scores
+all4. E/F human prose passes; G preserves factual boundaries but repeats background
+text under “未纳入”. E also passes actual cold UI recovery without new model work
+or duplicate intake. G's accurate native feedback created a genuine new v3
+Candidate and completed ten paired arms, but aggregate review was aborted at its
+fixed60-second deadline while still streaming. No grade, holdout or activation
+completed. The [future-only execution-window repair](../superpowers/plans/2026-09-06-tianwen-reasoning-evaluation-window.md)
+is now in progress; G will not be retried or regraded. H remains reserved.
+Runtime014/Desktoppreview15 dc33583 artifacts are separately built/audited, and
+the actual retained013 predecessor installed014 with the same archive digest.
+They are not daily delivery; revised source/artifact/main-CI gates remain.
+Daily013/preview14, original A–D and rejected B remain unchanged.
 Routine development, testing and configured DeepSeek calls proceed under the
 user's standing delegation, with no additional call/cost quota or repeated
 approval. Major strategy or genuinely new authority remains a separate decision.
@@ -90,6 +94,52 @@ the later source-fidelity revision is tracked separately above:
    complete replay and partial refusal are different from exploration recovery.
 
 ## Genuine continuation evidence
+
+### E/F/G: semantic Outcome and real new v3 evaluation
+
+Frozen input file SHA256 F33349E1328C6A3DF1A50AC50B489C739A6E29FDBA57CA2F7B351E3DA47C1884
+is retained at the isolated evidence/semantic-outcome-scenarios-20260906.md.
+These are constructed, explicitly fictional real-model acceptance tasks, not
+organic efficacy claims. Actual Runtime SHA256
+5509b463f764fc8d4355a37c71c1349d44fc29329ea16a0bf489fba26cd9d4a7.
+
+- E Session9b3ba8f9-33b3-4145-86aa-5dfde13578cb completed23seconds; F
+  Sessionf978fb84-2299-436c-89cd-22b0e6526e1d completed25seconds; G
+  Session92d9975b-de69-4e37-b97c-6dc7ef476aef completed33seconds. Each actual
+  source/reviewer uses official flash/high and its native accepted submission.
+- After E, the owned Web host was stopped and restarted, then the browser
+  reloaded and recovered E. No request/intake duplicate; reviewer and ledger
+  whole hashes unchanged, original source prefix preserved with only83bytes of
+  native session/end-seed appended. This is actual cold UI restoration, distinct
+  from the automated crash-before-intake test.
+- G's completed answer was truthfully marked problematic and given one precise
+  background-omission comment at11:29:22.059Z. Native analysis0f43d6f0dead71b52f757e3584bda2860ac460575baab70ff95b2e3555874caf
+  inspected the approved source directory, chose a packet-specific local Skill
+  edit, and did not load/adapt the external source.
+- New Candidatef7959219b764c8868ea30521e9e5b48259d82012306b4f5e1ac402295bf26bc3
+  entered evaluation7f0a959f5edb4302c10dba2ea530d04fb5f7cab9f70a01a4e6c0bf77f69cbb4c
+  under frozen v3 protocol59c61a5697c492cb94b454eef0bc8ed42b71a412d592fa0aa45ce861050397bf.
+  Ten real paired arms each completed once, yielding five ID-gate met/met ties.
+  One independent aggregate request then streamed7196chunks before the native
+  timeout aborted it at11:31:34.099Z, without a score submission. Two automatic
+  recovery attempts refused that incomplete Session without another review call.
+- This result is incomplete/non-promoted, not rejected or successful. The native
+  semantic G Outcome remains met. No qualifying ordinary-failure pair, real
+  exploration, external adoption, holdout or promotion is manufactured from it.
+  H has not been submitted. Per-task native snapshots and human reports live in
+  evidence/semantic-final-gates-dc33583; the after-G ledger snapshot SHA256 is
+  40C944C3933C43B32A3798A2828F16041043C7D92A409AE53800ADD5184B30E2.
+
+Later before stopping the owned host, nine automatic recovery attempts had been
+recorded in total, each refusing the same incomplete evaluator; the evaluator's
+file stayed byte-identical with one aborted request. Stop-ledger snapshot SHA256
+2CA9C2633C842E9C40FAB0152C99CFD6CB4962A521F1CE2CD2216522A85A39D8 preserves
+them. The UI's promise of an automatic retry was traced to generic progress text;
+the same bounded repair adds neutral incomplete/recovery-verification wording,
+without changing recovery behavior or rewriting old messages.
+
+The paragraphs below retain the earlier A–D chronology; their counts/statuses
+are historical snapshots, not a replacement for this latest E/F/G checkpoint.
 
 The original isolated profile was reopened without resetting history. Ordinary
 main Session `61c1848d-5da1-4c46-ba7e-44b7c4445a10` re-enabled v2 learning through

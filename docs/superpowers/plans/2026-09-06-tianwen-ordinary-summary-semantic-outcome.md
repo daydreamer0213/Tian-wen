@@ -208,13 +208,28 @@ opt-in skips198.51s, native quality10/10, rebuilt Runtime/types and root typeche
 build pass. Existing declaration-generator warning is retained. The artifact
 allowlist correction names one unchanged pre-branch source-fidelity module,
 not a new dependency or wildcard. Physical delivery and genuine effect are not
-claimed. Controller full Vitest is running on fixed product0170113 alongside
-read-only review; any later product fix requires revalidation on its own bytes.
+claimed. Controller full Vitest on fixed product0170113 completed1750 passed/18
+conditional skips in474.21s. Wholebranch review at e94007f identified one Important
+missing native-restoration reconciliation owner for completed ordinary first turns
+whose Outcome was not yet consumed. The bounded fix `dc33583` passes124 covering
+checks and typecheck; scoped re-review confirms all findings addressed/no new
+breakage. Fresh full regression ondc33583 passes1751/18conditional skips531.82s;
+rebuilt bundle/profile68pass3opt-in skips and actual isolated artifact native
+identity14/14 pass. It reuses exact persisted source/reviewer proof without model
+work or changing immutable records. Genuine acceptance and delivery remain below.
 
 ## Post-implementation route (controller-owned, not a claim of completion)
 
-- [ ] After task reviews, obtain broad exact-SHA independent review of this branch and resolve findings, then run current full automated gates and artifact/native identity checks.
-- [ ] Build separately versioned isolated runtime artifact; never overwrite delivered 0.1.13 bytes or the active Desktop dist output. Verify metadata/SHA and preserve old source records.
-- [ ] Freeze new genuine user scenarios before execution, use Codex in-app browser and real DeepSeek once per scenario, retain all results and inspect actual user-visible friction, cancellation and status. Mechanism fixtures are not genuine acceptance.
+- [x] After task reviews, obtain broad exact-SHA independent review of this branch and resolve findings, then run current full automated gates and artifact/native identity checks.
+- [x] Build separately versioned isolated runtime artifact; never overwrite delivered 0.1.13 bytes or the active Desktop dist output. Verify metadata/SHA and preserve old source records.
+- [x] Freeze new genuine user scenarios before execution, use Codex in-app browser and real DeepSeek once per scenario, retain all results and inspect actual user-visible friction, cancellation and status. E/F/G completed once; all semantic met, E/F human prose passed, G truthfully flagged background repetition. Actual E cold UI restoration passed without new requests. G feedback produced a new v3 Candidate, ten completed paired arms and one aggregate timeout; no passing evaluation/activation is claimed. Mechanism fixtures are not genuine acceptance; reserved H remains unsubmitted.
 - [ ] Observe actual ordinary content-quality Outcomes, analysis/exploration, genuine Candidate, v3 evaluation, holdout/activation and later active-Skill use as required by the canonical total route. Do not weaken gates, plant answers or repeat attempts for a lucky failure/success. Keep honest terminal rejection/inconclusive evidence and continue only with independently justified next work.
 - [ ] Deliver reviewed/versioned repair through normal installation after exact-SHA gates, preserve daily data and rollback artifacts, and update canonical route/handoff with actual results and remaining limitations. Use existing authorized integration workflow; no new external publication or authority inferred.
+
+Controller checkpoint: dc33583 Runtime014 archive and Desktoppreview15 built
+separately and audited; actual retained013→014 normal install matches archive
+9cb12b46b18c9a5c2a40a0b30709be80dc8c2847e4aa90ff55d5137747edfacd.
+Daily013 remains unchanged. G's still-streaming aggregate was aborted at its
+frozen60-second deadline; the new [future-only execution-window repair](2026-09-06-tianwen-reasoning-evaluation-window.md)
+has its own task/review ledger. Do not reopen this plan's completed implementation
+or rewrite G/B history. Final revised artifact, main CI and daily delivery remain.
