@@ -194,11 +194,14 @@ $env:TIANWEN_DSH_PROBE_PYTHON = 'D:/DevData/tianwen-worktrees/tianwen-architectu
 
 ## Controller follow-through
 
-- [ ] Resolve the fresh full-suite regression at productionbe1a28c: four existing
+- [x] Resolve the fresh full-suite regression at productionbe1a28c: four existing
   explicit-correction-product stories receive candidate-rejected instead of
   expected promotion. Diagnose actual rejection evidence, fix narrowly with
   covering RED/GREEN and independent review; preserve promotion assertions and
   product gates. Initial full run1822pass/4fail/18skip is retained, not green.
+  Test-onlyfixf308f1d uses each blind envelope's actual source packet; original
+  9stories plus4newregressions and64relatedchecks pass. Independent scopedreview
+  confirms addressed/no new Critical or Important issue; finalfullrerun pending.
 - [ ] Task-scoped review after each task, then final whole-branch independent review.
 - [ ] Final full Vitest/typecheck/public-surface verification on final source; exact
   runtime/Desktop candidate artifact/native/real packaged lifecycle gates.
