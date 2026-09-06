@@ -10,7 +10,8 @@ case was manufactured from these successes. The independently reviewed [source-f
 has completed its three independent task reviews for new protocols only. Its
 complete successful path is at most 14 Runs, while old v2 remains 13. The bounded
 trusted-parent repair is also reviewed at c6d5f23; immutable 0.1.13 delivery
-preparation follows. No new activation or daily upgrade occurred.
+compatibility is reviewed at c576d7b. Whole-branch and final artifact gates follow.
+No new activation or daily upgrade occurred.
 
 The user's continuation mandate covers the four-stage route, not only the
 previous finite repair/delivery round. Execution follows
@@ -416,3 +417,22 @@ reproduced this and `c6d5f23` fixes it with scope-preferred selection. Final fix
 coverage passed 191/191; scoped review marks the finding addressed with no new
 breakage. The 82 artifact results predate the fix; delivery must rebuild them.
 No real second-generation Candidate, model efficacy or daily upgrade is claimed.
+
+## Immutable delivery compatibility reviewed
+
+Runtime `0.1.13` / Desktop `0.1.0-preview.14` source and exact `0.1.12` predecessor
+support are committed at `c576d7b` and independently approved without Important
+findings. Existing `0.1.11`, `0.1.10` and old rc.7 migration remain. The frozen
+historical patch is reused unchanged; no receipt deletion or same-version byte
+replacement forces an upgrade. Focused upgrade checks passed 24; the final owned
+covering run passed 286 with 13 existing opt-in skips. Forced all-package type
+build preceded Runtime rebuild and artifact tests. The existing declaration-tool
+composite warning remains explicit, not a pristine-output claim.
+
+An execution-agent usage interruption stopped this task after saved edits and
+before GREEN; it resumed from that same state once live limits were available.
+No reset credit was consumed by this task. The daily original 30-file hash still
+matched at 00:30Z. At 00:49Z the new installer read-only classifier recognized both
+actual installed old roots as managed-runtime-predecessor. No real upgrade or
+new model call occurred. Old isolated server and browser tab are no longer active;
+the final frozen status scenario remains unsubmitted until final artifact gates.

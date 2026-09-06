@@ -71,7 +71,7 @@ real upgrades, genuine acceptance, final whole-branch review, full gates and CI.
 same public schemas with exact new release identity, using existing
 `managed-runtime-predecessor` and `outdated-runtime` results. No new public API.
 
-- [ ] RED: add `0.1.12` cases alongside existing `0.1.11` historical fixtures,
+- [x] RED: add `0.1.12` cases alongside existing `0.1.11` historical fixtures,
   preserving their independent frozen patch. A small parameter on existing
   learning-loop fixture helpers may avoid copying their entire setup. Check the
   new current archive basename and demonstrate missing predecessor support before
@@ -86,7 +86,7 @@ same public schemas with exact new release identity, using existing
 
   Run installer/Desktop focused cases; retain command, expected failing output and
   cause. A missing file or fixture exception is not the intended RED.
-- [ ] Update current identities, archive basenames, README and CI arguments.
+- [x] Update current identities, archive basenames, README and CI arguments.
   Do not globally rewrite historical `0.1.12` evidence or new predecessor cases.
   Desktop's exact old-version list becomes:
 
@@ -94,12 +94,12 @@ same public schemas with exact new release identity, using existing
   const knownOldRuntimeVersions = ['0.1.12', '0.1.11', '0.1.10'] as const
   ```
 
-- [ ] Installer recognizes the new exact old archive with the independently
+- [x] Installer recognizes the new exact old archive with the independently
   frozen learning-loop patch and existing receipt checks. Reuse/rename the frozen
   `renderRuntime011PredecessorProfilePatch` as appropriate for the two proven
   identical historical releases; preserve its body. Add the `0.1.12` archive to
   the existing old-DSH mixed-install refusal. Do not alter the current patch.
-- [ ] GREEN: run both learning-loop predecessors through real installer logic
+- [x] GREEN: run both learning-loop predecessors through real installer logic
   using existing isolated fixture runner. Assert archive/Session/state bytes are
   retained, no same-DSH host redeploy, one Profile deploy, ready receipt, repeat
   returns identical receipt without child effects, and failure restores the
@@ -114,24 +114,31 @@ same public schemas with exact new release identity, using existing
   expect(scripted.calls).toHaveLength(childEffects)
   ```
 
-- [ ] Negative fixtures: missing/tampered old archive, wrong receipt or changed
+- [x] Negative fixtures: missing/tampered old archive, wrong receipt or changed
   frozen Profile, source-linked publication and unknown version refuse before
   child effects, with before/after snapshot equality. Keep current-version archive
   immutability checks. Desktop covers exact old recognition, cancellation, one
   plugin-add, selected DSH home/store and strict `0.1.13` post-update validation.
-- [ ] Update only current-version fixture expectations across the owned release
+- [x] Update only current-version fixture expectations across the owned release
   suites. Old rc.7-to-rc.2 real E2E stays labeled as that test, not new upgrade
   proof. No model-dependent optional E2E activation by worker.
-- [ ] Run the owned covering suites with existing opt-in skips, root typecheck,
+- [x] Run the owned covering suites with existing opt-in skips, root typecheck,
   forced all-package type build followed by Runtime bundle rebuild, then built
   artifact checks, public-import guard and diff check. Preserve first failures;
   forced tsc after bundle would make artifact evidence stale. Run no full repo
   regression or real installation; controller owns those once code is stable.
-- [ ] Self-review and commit only owned files. Write report with exact RED/GREEN,
+- [x] Self-review and commit only owned files. Write report with exact RED/GREEN,
   test commands/output, changed files, immutable predecessor evidence and remaining
   limits; independent task review is required before controller final gates.
 
 ## Controller closure
+
+Task 1 is independently approved at `c576d7b`: exact release/predecessor identities,
+unchanged frozen patch, retained state, idempotence, rollback and strict refusal.
+Covering tests: 286 passed / 13 existing opt-in skips after forced type build and
+bundle rebuild. Existing nonfatal dts composite warning is retained for final
+review. Read-only real-layout preflight recognizes both current installed 0.1.12
+roots as eligible predecessors; no actual upgrade or efficacy is implied.
 
 - [ ] One whole-branch review and full exact-source gates after parent and delivery
   task reviews. Carry deferred minors and actual-vs-mechanism proof boundaries.
