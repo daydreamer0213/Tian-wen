@@ -164,7 +164,24 @@ const knownOldRuntimeVersions = ['0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10
   declarations before artifact/version assertions, so old generated014 bytes
   cannot mask an015 packaging defect. Use the existing package build scripts;
   do not package Desktop into its active directory. Run touched focused suites
-  and typecheck using Task1's environment. Report
+  and typecheck using this complete environment:
+
+```powershell
+$env:PATH = 'D:/hermes/node;D:/hermes/git/bin;' + $env:PATH
+$env:COREPACK_HOME = 'D:/DevData/corepack-home'
+$env:PNPM_CONFIG_STORE_DIR = 'D:/DevData/pnpm-store'
+$env:PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN = 'false'
+$env:TEMP = 'D:/DevData/tianwen-dsh-probe/temp'
+$env:TMP = $env:TEMP
+$env:TIANWEN_DSH_PROBE_ROOT = 'D:/DevData/tianwen-dsh-probe'
+$env:TIANWEN_DSH_PROBE_PYTHON = 'D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge/.venv/Scripts/python.exe'
+& 'D:/hermes/node/node.exe' 'D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs' --filter '@tianwen/runtime-bundle...' build
+& 'D:/hermes/node/node.exe' 'D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs' run typecheck
+& 'D:/hermes/node/node.exe' 'D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs' exec vitest run tests/dsh-migration/tianwen-installer.spec.ts tests/dsh-migration/tianwen-desktop-host.spec.ts tests/dsh-migration/tianwen-desktop-profile-prepare.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/tianwen-desktop-artifact.spec.ts
+```
+
+  Include the other touched version-assertion test files in the final focused run.
+  Report
   and commit only owned version/test files. Do not build over active Desktop,
   install daily, run real models, merge or publish.
 
