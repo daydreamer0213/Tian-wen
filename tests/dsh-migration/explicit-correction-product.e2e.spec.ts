@@ -254,23 +254,28 @@ Call submit_research_summary exactly once with the selected IDs, then report the
       const envelope = JSON.parse(block?.type === 'text' ? block.text : '') as {
         evaluations: Array<{
           taskId: string
+          input: string
           x: { materialText: string }
           y: { materialText: string }
         }>
       }
       const includesSourceFidelity = JSON.stringify(request.tools)
         .includes('sourceFidelity')
-      const dimensions = (materialText: string) => {
+      const dimensions = (materialText: string, input: string) => {
         const material = JSON.parse(materialText) as {
           submission: { uncertaintyIds: readonly string[] }
         }
+        // The frozen source can be either packet; grade its decision IDs without arm roles.
+        const decisionIds = [...input.matchAll(/^\[U:([^|]+)\|decision\]/gmu)]
+          .map(match => match[1]!)
         return {
           relevance: 3,
           correctnessReasoning: 3,
           clarityUsability: 3,
           scopeRestraint: 3,
           ...(includesSourceFidelity ? {
-            sourceFidelity: material.submission.uncertaintyIds.includes('renewal') ? 4 : 3,
+            sourceFidelity: decisionIds.length > 0
+              && decisionIds.every(id => material.submission.uncertaintyIds.includes(id)) ? 4 : 3,
           } : {}),
         }
       }
@@ -281,8 +286,8 @@ Call submit_research_summary exactly once with the selected IDs, then report the
           insufficientMaterial: false,
           reasonCode: 'score-submitted',
           scores: {
-            x: dimensions(item.x.materialText),
-            y: dimensions(item.y.materialText),
+            x: dimensions(item.x.materialText, item.input),
+            y: dimensions(item.y.materialText, item.input),
           },
         })),
       })
@@ -476,6 +481,29 @@ afterEach(() => {
 })
 
 describe('installed explicit-correction product story', () => {
+  it.each([
+    [originalPacket, 'renewal', false],
+    [originalPacket, 'renewal', true],
+    [adjacentPacket, 'seasonality', false],
+    [adjacentPacket, 'seasonality', true],
+  ] as const)('scores scripted decision coverage from the actual packet %s / %s with swapped arms=%s', (input, decisionId, swapped) => {
+    const included = { materialText: JSON.stringify({ submission: { uncertaintyIds: [decisionId] } }) }
+    const omitted = { materialText: JSON.stringify({ submission: { uncertaintyIds: [] } }) }
+    const envelope = { evaluations: [{ taskId: 'fixture-task', input, x: swapped ? included : omitted, y: swapped ? omitted : included }] }
+    const respond = productResponder(() => { throw new Error('grader must not read product state') }, [])
+    const response = respond({
+      sessionId: SessionId('fixture-grader'),
+      tools: [{ name: evaluatorTool, parameters: { sourceFidelity: { type: 'integer' } } }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: JSON.stringify(envelope) }] }],
+    } as never)
+    const lower = { relevance: 3, correctnessReasoning: 3, clarityUsability: 3, scopeRestraint: 3, sourceFidelity: 3 }
+    const higher = { ...lower, sourceFidelity: 4 }
+    expect(response).toEqual(toolCallResponse('product-evaluator-1', evaluatorTool, {
+      evaluations: [{ taskId: 'fixture-task', status: 'scored', insufficientMaterial: false,
+        reasonCode: 'score-submitted', scores: { x: swapped ? higher : lower, y: swapped ? lower : higher } }],
+    }))
+  })
+
   it.each(['skill-change', 'reuse-skill', 'reuse-drift', 'explore-skill-change'] as const)('processes ordinary repeated outcomes via %s without feedback clicks', async mode => {
     const product = await mountProduct(fixtureRoot(), mode)
     const explorationErrors: string[] = []
