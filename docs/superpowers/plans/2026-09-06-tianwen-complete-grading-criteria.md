@@ -201,9 +201,9 @@ $env:TIANWEN_DSH_PROBE_PYTHON = 'D:/DevData/tianwen-worktrees/tianwen-architectu
   product gates. Initial full run1822pass/4fail/18skip is retained, not green.
   Test-onlyfixf308f1d uses each blind envelope's actual source packet; original
   9stories plus4newregressions and64relatedchecks pass. Independent scopedreview
-  confirms addressed/no new Critical or Important issue; finalfullrerun pending.
-- [ ] Task-scoped review after each task, then final whole-branch independent review.
-- [ ] Final full Vitest/typecheck/public-surface verification on final source; exact
+  confirms addressed/no new Critical or Important issue; finalfull1830pass/18skip.
+- [x] Task-scoped review after each task, then final whole-branch independent review.
+- [x] Final full Vitest/typecheck/public-surface verification on final source; exact
   runtime/Desktop candidate artifact/native/real packaged lifecycle gates.
 - [ ] Integrate reviewed branch, verify exact-main CI, normal daily015 and Web
   upgrade/repeated-install with original data/shortcut preservation, recoverable
