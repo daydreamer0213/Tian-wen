@@ -22,6 +22,8 @@ const PREDECESSOR_DSH_VERSION = '0.1.0-rc.7'
 const PNPM_VERSION = '11.20.0'
 const PROFILE = 'tianwen'
 const RUNTIME_PACKAGE = '@tianwen/runtime-bundle'
+const RUNTIME_VERSION = '0.1.13'
+const RUNTIME_ARCHIVE_BASENAME = `tianwen-runtime-bundle-${RUNTIME_VERSION}.tgz`
 const INSTALLER_FAILURE_SCHEMA_VERSION = 'tianwen.install-failure.v1'
 const INSTALLER_FAILURE_STAGE = Object.freeze({
   ARCHIVE_PUBLICATION: 'archive-publication',
@@ -171,7 +173,7 @@ export function deriveInstallPaths(dataDir, platform = process.platform) {
   const dshHome = pathApi.join(dataDir, 'dsh-home')
   const profileRoot = pathApi.join(dshHome, 'profiles', PROFILE)
   return {
-    archivePath: pathApi.join(dataDir, 'packs', 'tianwen-runtime-bundle-0.1.12.tgz'),
+    archivePath: pathApi.join(dataDir, 'packs', RUNTIME_ARCHIVE_BASENAME),
     binDir: pathApi.join(profileRoot, 'node_modules', '.bin'),
     dataDir,
     dshHome,
@@ -303,9 +305,9 @@ function renderRuntimePredecessorProfilePatch(paths) {
 `
 }
 
-// Frozen Runtime 0.1.11 managed configuration, including the enabled learning loop.
+// Frozen Runtime 0.1.11/0.1.12 managed configuration, including the enabled learning loop.
 // Never validate an installed predecessor against the evolving current patch.
-function renderRuntime011PredecessorProfilePatch(paths) {
+function renderRuntimeLearningLoopPredecessorProfilePatch(paths) {
   return `- id: agent-default-model
   config:
     provider: tianwen-offline
@@ -454,8 +456,8 @@ function validateProfile(paths, profileRoot = paths.profileRoot) {
     || profile.dependencies['@deepseek-ai/dsh-headless'] !== DSH_VERSION) {
     throw new Error(`managed Profile must use DSH ${DSH_VERSION}`)
   }
-  if (profile.dependencies[RUNTIME_PACKAGE] !== '0.1.12') {
-    throw new Error('managed Profile must use Tianwen Runtime 0.1.12')
+  if (profile.dependencies[RUNTIME_PACKAGE] !== RUNTIME_VERSION) {
+    throw new Error(`managed Profile must use Tianwen Runtime ${RUNTIME_VERSION}`)
   }
   return profile.manifestPath
 }
@@ -473,19 +475,17 @@ function isFreshDataDirectory(paths) {
 }
 
 function predecessorArchivePath(paths) {
-  const currentBasename = 'tianwen-runtime-bundle-0.1.12.tgz'
-  if (!paths.archivePath.endsWith(currentBasename)) {
+  if (!paths.archivePath.endsWith(RUNTIME_ARCHIVE_BASENAME)) {
     throw new Error('current Runtime archive path is invalid')
   }
-  return `${paths.archivePath.slice(0, -currentBasename.length)}tianwen-runtime-bundle-0.0.0.tgz`
+  return `${paths.archivePath.slice(0, -RUNTIME_ARCHIVE_BASENAME.length)}tianwen-runtime-bundle-0.0.0.tgz`
 }
 
 function runtimePredecessorArchivePath(paths, version) {
-  const currentBasename = 'tianwen-runtime-bundle-0.1.12.tgz'
-  if (!paths.archivePath.endsWith(currentBasename)) {
+  if (!paths.archivePath.endsWith(RUNTIME_ARCHIVE_BASENAME)) {
     throw new Error('current Runtime archive path is invalid')
   }
-  return `${paths.archivePath.slice(0, -currentBasename.length)}tianwen-runtime-bundle-${version}.tgz`
+  return `${paths.archivePath.slice(0, -RUNTIME_ARCHIVE_BASENAME.length)}tianwen-runtime-bundle-${version}.tgz`
 }
 
 function matchesPredecessorReceipt(paths, archivePath, dshVersion) {
@@ -532,17 +532,22 @@ export function classifyManagedInstallation(paths) {
     if (host.version === DSH_VERSION
       && existsSync(paths.archivePath)
       && statSync(paths.archivePath).isFile()
-      && matchesProfile(profile, DSH_VERSION, '0.1.12', renderProfilePatch(paths))) {
+      && matchesProfile(profile, DSH_VERSION, RUNTIME_VERSION, renderProfilePatch(paths))) {
       return 'current'
     }
     if (existsSync(paths.archivePath)) return 'incompatible'
     const archivePath = predecessorArchivePath(paths)
+    const runtime012ArchivePath = runtimePredecessorArchivePath(paths, '0.1.12')
     const runtime011ArchivePath = runtimePredecessorArchivePath(paths, '0.1.11')
     const runtime010ArchivePath = runtimePredecessorArchivePath(paths, '0.1.10')
     if (host.version === DSH_VERSION) {
-      return (existsSync(runtime011ArchivePath)
+      return (existsSync(runtime012ArchivePath)
+        && statSync(runtime012ArchivePath).isFile()
+        && matchesProfile(profile, DSH_VERSION, '0.1.12', renderRuntimeLearningLoopPredecessorProfilePatch(paths))
+        && matchesPredecessorReceipt(paths, runtime012ArchivePath, DSH_VERSION))
+        || (existsSync(runtime011ArchivePath)
         && statSync(runtime011ArchivePath).isFile()
-        && matchesProfile(profile, DSH_VERSION, '0.1.11', renderRuntime011PredecessorProfilePatch(paths))
+        && matchesProfile(profile, DSH_VERSION, '0.1.11', renderRuntimeLearningLoopPredecessorProfilePatch(paths))
         && matchesPredecessorReceipt(paths, runtime011ArchivePath, DSH_VERSION))
         || (existsSync(runtime010ArchivePath)
         && statSync(runtime010ArchivePath).isFile()
@@ -551,7 +556,8 @@ export function classifyManagedInstallation(paths) {
         ? 'managed-runtime-predecessor'
         : 'incompatible'
     }
-    if (existsSync(runtime011ArchivePath)
+    if (existsSync(runtime012ArchivePath)
+      || existsSync(runtime011ArchivePath)
       || existsSync(runtime010ArchivePath)
       || !existsSync(archivePath)
       || !statSync(archivePath).isFile()) return 'incompatible'
@@ -583,7 +589,7 @@ function normalizeDeployedProfile(paths, profileRoot) {
   manifest.dependencies = {
     '@deepseek-ai/dsh-base': DSH_VERSION,
     '@deepseek-ai/dsh-headless': DSH_VERSION,
-    [RUNTIME_PACKAGE]: '0.1.12',
+    [RUNTIME_PACKAGE]: RUNTIME_VERSION,
   }
   manifest.dsh = { profile: { bundles: [...PROFILE_BUNDLES] } }
   writeFileSync(manifestPath, canonicalJson(manifest), 'utf8')
