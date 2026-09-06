@@ -4,6 +4,14 @@
 
 **Goal:** Complete the four-stage learning route with genuine DSH use and defensible evidence of future-task improvement, not merely delivery of its mechanisms.
 
+**Capacity-repair continuation:** source6820a19 is implemented and independently
+approved with full1787/18conditional skips, rebuilt artifacts/native identity and
+fresh packaged Desktop gate. Complete its integration/CI/daily delivery, then
+record the separately frozen ordinary final-candidate usability task K. K checks
+the actual project-checkpoint summary path after repair; it is not an extension
+of I/J to seek failures, a forced adaptation/promotion, or a reuse of reserved H.
+All still-unobserved genuine efficacy conditions below remain open.
+
 **Latest continuation, 2026-09-06 after I/J:** execution-window repair3b2caac and
 docs1c1e1f5 are integrated with final review, separate physical Desktop gate and
 four successful exact-main CI jobs. I/J each passed final content acceptance in

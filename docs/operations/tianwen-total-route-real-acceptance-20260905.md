@@ -2,6 +2,15 @@
 
 Status: **in progress; the total route is not complete**.
 
+Capacity repair checkpoint: source6820a19 is implemented, independently approved
+at task and whole-branch levels, with focused139, full1787/18conditional skips,
+artifact68/3opt-in skips, native identity14/14 and exact fresh-profile packaged
+Desktop startup/exit checks passing. Daily013 and old real trials remain unchanged.
+Continue integration, exact-main CI, normal daily upgrade and one separately
+frozen ordinary final-candidate usability task (K); this is not a new tranche to
+hunt failure and is not post-promotion efficacy. Two existing UX/diagnostic minors
+remain explicitly deferred; the capacity repair does not claim to fix them.
+
 Latest continuation (2026-09-06, after I/J): source3b2caac passed final independent
 review, separate Desktop audit/physical lifecycle, and all four exact-main jobs
 in [CI34034047173](https://github.com/daydreamer0213/Tian-wen/actions/runs/34034047173)

@@ -8,6 +8,12 @@
 
 **Tech Stack:** TypeScript, existing Vitest/native DSH harness, Node22.23.1/pnpm11.20.0.
 
+**Implementation checkpoint:** completed at6820a19 with task and final whole-branch
+reviews approved. Focused139, typecheck, full1787/18conditional skips and exact
+artifact/native/physical gates pass. Initial full-run environment failure remains
+recorded; no source fix was needed. Integration, exact-main CI and daily upgrade
+remain controller work below. Do not redispatch completed Task1.
+
 ## Global Constraints
 
 - Work only in `D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge`, branch `codex/research-summary-material-capacity`; baseline `1c1e1f5fb5177641916d7ec82c217c522feaa375`.
@@ -36,11 +42,11 @@
   construction used by both builder and retained-record recognition. Keep helpers
   local to the existing protocol module; no general registry/framework.
 
-- [ ] Read the bounded spec and the complete touched code paths. Reuse existing
+- [x] Read the bounded spec and the complete touched code paths. Reuse existing
   native test fixtures. Record the source baseline and exact initial legacy
   protocol/transition snapshots before production edits.
 
-- [ ] Add RED tests for fresh capacities and a valid summary whose JSON material
+- [x] Add RED tests for fresh capacities and a valid summary whose JSON material
   exceeds4,096. Cover worst-case escaping with a compact generated fixture:
 
 ```ts
@@ -60,7 +66,7 @@ const packetText = `<research_packet>\n${Array.from({ length: 32 }, (_, index) =
   to test them and do not duplicate the whole harness. Existing v3 source-fidelity
   integration is preferred over a newly invented seed flow.
 
-- [ ] Run focused tests, retain their exact expected failure before production edits.
+- [x] Run focused tests, retain their exact expected failure before production edits.
 
 ```powershell
 $env:PATH = 'D:/hermes/node;' + $env:PATH
@@ -71,7 +77,7 @@ $env:PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN = 'false'
 & 'D:/hermes/node/node.exe' 'D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs' exec vitest run tests/dsh-migration/explicit-correction-protocol.spec.ts tests/dsh-migration/learning-loop-orchestrator.spec.ts tests/dsh-migration/learning-loop-controlled-executor.integration.spec.ts
 ```
 
-- [ ] Implement the minimal selector and consistent contract family. The three
+- [x] Implement the minimal selector and consistent contract family. The three
   selected capacities are one known set, not independently configurable values:
 
 ```ts
@@ -82,7 +88,7 @@ $env:PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN = 'false'
 // v2/scope-only remain on the existing legacy builder defaults.
 ```
 
-- [ ] Recover retained selection using shared known contract construction and
+- [x] Recover retained selection using shared known contract construction and
   digests. Test both capacity sets across both existing execution windows;
   `freezeControlledSkillEvalProtocol` sees the identical saved full protocol.
   Test mixed paired digests, mismatched holdout, mismatched review, unknown digest,
@@ -91,7 +97,7 @@ $env:PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN = 'false'
   relabel new defaults as legacy. Pin meaningful complete legacy build outputs
   or digest snapshots (including restore) with path normalization if needed.
 
-- [ ] Run GREEN focused tests, native covering suite, package typecheck; then one
+- [x] Run GREEN focused tests, native covering suite, package typecheck; then one
   full Vitest run on final product code. Controller will not run concurrent builds.
 
 ```powershell
@@ -99,18 +105,18 @@ $env:PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN = 'false'
 & 'D:/hermes/node/node.exe' 'D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs' exec vitest run
 ```
 
-- [ ] Self-review scope, compatibility and the maximum-size bound. Commit only
+- [x] Self-review scope, compatibility and the maximum-size bound. Commit only
   owned files. Report RED/GREEN commands/results, full log paths, source SHA,
   any deviations and deferred concerns in the assigned report file. No real-model
   acceptance, installer run, version bump, merge or publication belongs to worker.
 
 ## Controller follow-through
 
-- [ ] Task-scoped independent spec/quality review; fix loop only for actionable findings.
-- [ ] Final whole-branch review against1c1e1f5; carry both deferred UX/diagnostic concerns.
+- [x] Task-scoped independent spec/quality review; fix loop only for actionable findings.
+- [x] Final whole-branch review against1c1e1f5; carry both deferred UX/diagnostic concerns.
 - [ ] Rebuild/copy exact runtime and separate Desktop candidate; rerun artifact/native
   checks, integrate reviewed branch, confirm exact-main CI and perform normal daily
   upgrade with original30-file/shortcut preservation and recoverable old program.
-- [ ] Update current handoff and I/J evidence. Close their one-attempt tranche as
+- [x] Update current handoff and I/J evidence. Close their one-attempt tranche as
   content-success with J native recovery; never classify invalid transport as a
   qualifying failed ordinary Outcome or re-evaluate frozen B/G/J for a better result.
