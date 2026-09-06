@@ -371,6 +371,63 @@ describe('research summary feedback source recovery', () => {
 })
 
 describe('research summary first-step admission', () => {
+  it('admits a native semantic review when source arguments normalize whitespace, newlines, and ID order', async () => {
+    const directory = root('normalized-source')
+    const sourcePacket = `<research_packet>
+[F:f1|required] Required finding one.
+[F:f2|optional] Optional finding two.
+[U:u1|decision] Decision uncertainty one.
+[U:u2|decision] Decision uncertainty two.
+</research_packet>`
+    const sourceArguments = {
+      summary: '  Required finding one.\r\nDecision uncertainty one.  ',
+      confirmedFindingIds: ['f2', 'f1'],
+      uncertaintyIds: ['u2', 'u1'],
+    }
+    const canonicalSubmission = {
+      summary: 'Required finding one.\nDecision uncertainty one.',
+      confirmedFindingIds: ['f1', 'f2'],
+      uncertaintyIds: ['u1', 'u2'],
+    }
+    const harness = await mount(directory, [
+      toolCallResponse('normalized-submit', RESEARCH_SUMMARY_TOOL_NAME, sourceArguments),
+      qualityResponse('normalized-review'),
+      textResponse('Required finding one. Decision uncertainty one.'),
+    ])
+    const handle = await harness.ctx.agents.create({
+      sessionId: SessionId(`research-normalized-${randomUUID()}`),
+      meta: { cwd: directory },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      handle.agent.followup(direct(`/research-summary\n${sourcePacket}`))
+      await waitForIdle(harness.ctx, handle.agent)
+      await harness.ctx.tianwenResearchSummaryAdmission.whenIdle()
+
+      const binding = harness.ctx.tianwenEvolution
+        .getRunBindingBySessionId(String(handle.agent.session.id))!
+      const outcome = harness.ctx.tianwenEvolution.getOutcomeIntake(binding.runId)?.input
+      const sourceEvidence = harness.ctx.tianwenEvidence.project(handle.agent.session)
+        .find(item => item.action.toolName === RESEARCH_SUMMARY_TOOL_NAME)!
+      expect(outcome).toMatchObject({
+        verdict: 'met',
+        evidenceIds: [sourceEvidence.evidenceId],
+        semanticReview: {
+          status: 'completed',
+          submissionDigest: sha256(canonicalSubmission),
+        },
+      })
+      expect(sourceEvidence.action.argumentsDigest).toBe(sha256(sourceArguments))
+      expect(sourceEvidence.action.argumentsDigest).not.toBe(sha256(canonicalSubmission))
+      expect(outcome?.evidenceIds).not.toContain(outcome?.semanticReview?.status === 'completed'
+        ? outcome.semanticReview.reviewEvidenceId
+        : undefined)
+    } finally {
+      await handle.dispose()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
   it('freezes the first task result when an ordinary follow-up is already queued', async () => {
     const directory = root('queued-followup')
     const harness = await mount(directory, [

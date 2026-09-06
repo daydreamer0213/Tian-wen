@@ -19,7 +19,13 @@ import {
   learningSessionLifecycleFingerprint,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
-import { apply } from '../../packages/tianwen-runtime/src/index.js'
+import {
+  RESEARCH_SUMMARY_SCOPE,
+  RESEARCH_SUMMARY_TOOL_NAME,
+  apply,
+  createResearchSummaryTool,
+  parseResearchPacket,
+} from '../../packages/tianwen-runtime/src/index.js'
 
 const roots: string[] = []
 const acceptance = {
@@ -107,6 +113,91 @@ afterEach(() => {
 })
 
 describe('Tianwen runtime Outcome intake', () => {
+  it('binds a trusted canonical review to the raw source Evidence arguments', async () => {
+    const packet = parseResearchPacket(`<research_packet>
+[F:f1|required] Required finding one.
+[F:f2|optional] Optional finding two.
+[U:u1|decision] Decision uncertainty one.
+[U:u2|decision] Decision uncertainty two.
+</research_packet>`)
+    const sourceArguments = {
+      summary: '  Required finding one.\r\nDecision uncertainty one.  ',
+      confirmedFindingIds: ['f2', 'f1'],
+      uncertaintyIds: ['u2', 'u1'],
+    }
+    const canonicalSubmission = {
+      summary: 'Required finding one.\nDecision uncertainty one.',
+      confirmedFindingIds: ['f1', 'f2'],
+      uncertaintyIds: ['u1', 'u2'],
+    }
+    const harness = await mount([
+      toolCallResponse('canonical-source', RESEARCH_SUMMARY_TOOL_NAME, sourceArguments),
+      textResponse('canonical source completed'),
+    ])
+    harness.ctx.tools.register(createResearchSummaryTool(packet, { kind: 'source-capture' }))
+    const handle = await harness.ctx.agents.create({
+      sessionId: SessionId(`outcome-canonical-review-${randomUUID()}`),
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    const binding = harness.ctx.tianwenLearningIntake.bindRun(handle.agent.session, {
+      goalRef: 'goal:canonical-review',
+      taskRef: 'task:canonical-review',
+      scopeKey: RESEARCH_SUMMARY_SCOPE,
+      acceptanceContract: {
+        ...acceptance,
+        toolName: RESEARCH_SUMMARY_TOOL_NAME,
+        qualityContract: {
+          schemaVersion: 'tianwen.research-summary-semantic-contract.v1',
+          rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        },
+      },
+      acceptanceSubjectDigest: sha256(packet),
+    })
+    try {
+      handle.agent.followup(createUserMessage({
+        content: [{ type: 'text', text: 'summarize the packet' }],
+        source: { kind: 'user' },
+      }))
+      await waitForIdle(harness.ctx, handle.agent)
+      const evidence = harness.ctx.tianwenEvidence.project(handle.agent.session)
+        .find(item => item.action.toolName === RESEARCH_SUMMARY_TOOL_NAME)!
+      const review = {
+        schemaVersion: 'tianwen.research-summary-semantic-review.v1',
+        status: 'completed',
+        acceptanceSubjectDigest: sha256(packet),
+        submissionDigest: sha256(canonicalSubmission),
+        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        reviewerSessionId: 'session:canonical-reviewer',
+        reviewerSessionDigest: sha256('canonical reviewer session'),
+        requestDigest: sha256('canonical reviewer request'),
+        reviewEvidenceId: sha256('canonical reviewer evidence'),
+        idGateVerdict: 'met',
+        scores: {
+          relevance: 4, correctnessReasoning: 4, clarityUsability: 4,
+          scopeRestraint: 4, sourceFidelity: 4,
+        },
+      } as const
+
+      harness.ctx.tianwenLearningIntake.trustRecoveredResearchSummaryReview(
+        binding.runId,
+        review,
+        evidence.action.argumentsDigest,
+      )
+      expect(harness.ctx.tianwenLearningIntake.consumeOutcome(
+        handle.agent.session,
+        binding.runId,
+        { verdict: 'met', acceptanceEvidenceId: evidence.evidenceId, semanticReview: review },
+      )).toMatchObject({ decision: 'no-case' })
+      expect(evidence.action.argumentsDigest).toBe(sha256(sourceArguments))
+      expect(evidence.action.argumentsDigest).not.toBe(review.submissionDigest)
+      expect(harness.ctx.tianwenEvolution.getOutcomeIntake(binding.runId)?.input)
+        .toMatchObject({ verdict: 'met', semanticReview: review })
+    } finally {
+      await handle.dispose()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
   it('cannot turn a caller-forged completed semantic review into a conclusive Outcome', async () => {
     const harness = await mount([
       toolCallResponse('quality-source', 'verify_summary_ok', { text: 'source' }),

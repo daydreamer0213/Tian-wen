@@ -58,6 +58,7 @@ interface PreparedSourceReview {
   readonly sourceCallConfig: LlmCallConfig
   readonly reviewerSessionId: string
   readonly acceptanceSubjectDigest: Sha256Digest
+  readonly sourceArgumentsDigest: Sha256Digest
   readonly submissionDigest: Sha256Digest
 }
 
@@ -173,6 +174,7 @@ function reviewerSessionId(runId: string, sourceTurn: number): string {
 }
 
 function sourceCall(
+  packet: ResearchPacket,
   events: readonly SessionEvent[],
   sourceCallId: string,
   submission: ResearchSummarySubmission,
@@ -190,8 +192,10 @@ function sourceCall(
   } catch {
     throw new Error('native source call arguments are invalid')
   }
-  if (!exact(args, submission)) throw new Error('native source submission drift')
-  return call
+  if (!exact(normalizeResearchSummarySubmission(packet, args), submission)) {
+    throw new Error('native source submission drift')
+  }
+  return { call, sourceArgumentsDigest: sha256(args) }
 }
 
 function prepareRunSource(
@@ -210,11 +214,13 @@ function prepareRunSource(
     || run.acceptanceSubjectDigest !== sha256(material.packet)) {
     throw new Error('native source Run binding is invalid')
   }
-  const call = sourceCall(
+  const source = sourceCall(
+    material.packet,
     input.parentAgent.session.events,
     input.sourceCallId,
     material.submission,
   )
+  const call = source.call
   const prefix = input.parentAgent.session.events.filter(event => event.seq <= call.seq)
   const header = foldRequestHeader(prefix)
   if (header === undefined
@@ -229,6 +235,7 @@ function prepareRunSource(
     sourceCallConfig: cloneConfig(input.sourceCallConfig),
     reviewerSessionId: reviewerSessionId(run.runId, call.data.turn),
     acceptanceSubjectDigest: run.acceptanceSubjectDigest,
+    sourceArgumentsDigest: source.sourceArgumentsDigest,
     submissionDigest: sha256(material.submission),
   }
 }
@@ -762,8 +769,10 @@ function sourceReviewFromPersistence(
     if (call?.type !== 'tool/call' || result?.type !== 'tool/result') return []
     let args: unknown
     let rendered: unknown
+    let accepted: ResearchSummarySubmission
     try {
       args = JSON.parse(call.data.arguments) as unknown
+      accepted = normalizeResearchSummarySubmission(material.packet, args)
       const block = result.data.message.content[0]
       if (block.content.length !== 1 || block.content[0]?.type !== 'text') return []
       rendered = JSON.parse(block.content[0].text) as unknown
@@ -777,11 +786,15 @@ function sourceReviewFromPersistence(
     const header = foldRequestHeader(
       inspection.events.filter(event => event.seq <= call.seq),
     )
-    if (!exact(args, material.submission)
+    if (!exact(accepted, material.submission)
       || !exact(rendered, { verdict: 'not-evaluated', submission: material.submission })
       || terminal?.type !== 'turn/end'
       || terminal.data.reason.kind !== 'completed') return []
-    return header === undefined ? [] : [{ call, header }]
+    return header === undefined ? [] : [{
+      call,
+      header,
+      sourceArgumentsDigest: sha256(args),
+    }]
   })
   if (matches.length !== 1) return undefined
   const match = matches[0]!
@@ -793,6 +806,7 @@ function sourceReviewFromPersistence(
     sourceCallConfig: cloneConfig(match.header.config),
     reviewerSessionId: reviewerSessionId(run.runId, match.call.data.turn),
     acceptanceSubjectDigest: run.acceptanceSubjectDigest,
+    sourceArgumentsDigest: match.sourceArgumentsDigest,
     submissionDigest: sha256(material.submission),
   }
 }
@@ -819,7 +833,11 @@ export async function recoverResearchSummaryQualityReview(
         review.status === 'completed' ? review.requestDigest : review.attempt?.requestDigest)
     }
     if (review.status === 'completed') {
-      ctx.tianwenLearningIntake.trustRecoveredResearchSummaryReview(input.run.runId, review)
+      ctx.tianwenLearningIntake.trustRecoveredResearchSummaryReview(
+        input.run.runId,
+        review,
+        source.sourceArgumentsDigest,
+      )
     }
     return review
   } catch {

@@ -32,6 +32,7 @@ import {
   RESEARCH_SUMMARY_TOOL_NAME,
   createResearchSummaryTool,
   parseResearchPacket,
+  type ResearchPacket,
   type ResearchSummarySubmission,
 } from '../../packages/tianwen-runtime/src/research-summary.js'
 
@@ -76,6 +77,9 @@ const highScores = {
 } as const
 
 interface FixtureOptions {
+  readonly packet?: ResearchPacket
+  readonly sourceArguments?: ResearchSummarySubmission
+  readonly submission?: ResearchSummarySubmission
   readonly scores?: typeof highScores
   readonly reviewerResponse?: Error | ReturnType<typeof toolCallResponse>
   readonly concurrent?: boolean
@@ -86,11 +90,13 @@ interface FixtureOptions {
 
 async function runFixture(options: FixtureOptions = {}) {
   const directory = root('native')
-  const submission: ResearchSummarySubmission = {
+  const boundPacket = options.packet ?? packet
+  const submission: ResearchSummarySubmission = options.submission ?? {
     summary: 'The verified result is concrete. The deployment region is undecided.',
     confirmedFindingIds: ['f1'],
     uncertaintyIds: ['u1'],
   }
+  const sourceArguments = options.sourceArguments ?? submission
   const reviewerResponse = options.reviewerResponse ?? toolCallResponse(
     'quality-grade',
     RESEARCH_SUMMARY_QUALITY_TOOL_NAME,
@@ -98,11 +104,11 @@ async function runFixture(options: FixtureOptions = {}) {
   )
   const harness = await mountPersistentHarness(join(directory, 'sessions'), options.tamperRequest
     ? [
-        toolCallResponse('source-submit', RESEARCH_SUMMARY_TOOL_NAME, submission),
+        toolCallResponse('source-submit', RESEARCH_SUMMARY_TOOL_NAME, sourceArguments),
         textResponse('The verified result is concrete.'),
       ]
     : [
-        toolCallResponse('source-submit', RESEARCH_SUMMARY_TOOL_NAME, submission),
+        toolCallResponse('source-submit', RESEARCH_SUMMARY_TOOL_NAME, sourceArguments),
         reviewerResponse,
         textResponse('The verified result is concrete.'),
       ])
@@ -148,7 +154,7 @@ async function runFixture(options: FixtureOptions = {}) {
   let warm: ResearchSummarySemanticReview | undefined
   let lastInput: Parameters<typeof runResearchSummaryQualityReview>[1] | undefined
   let sourceSelection: Parameters<typeof installModelSelection>[1] | undefined
-  const sourceTool = createResearchSummaryTool(packet, { kind: 'source-capture' })
+  const sourceTool = createResearchSummaryTool(boundPacket, { kind: 'source-capture' })
   const originalExecute = sourceTool.execute.bind(sourceTool)
   sourceTool.execute = async (args, execution) => {
     const result = await originalExecute(args, execution)
@@ -159,7 +165,7 @@ async function runFixture(options: FixtureOptions = {}) {
     const input = {
       parentAgent,
       run,
-      packet,
+      packet: boundPacket,
       submission: result.submission,
       sourceCallId: String(execution.callId),
       sourceCallConfig: callConfig,
@@ -222,11 +228,11 @@ async function runFixture(options: FixtureOptions = {}) {
         rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
       },
     },
-    acceptanceSubjectDigest: sha256(packet),
+    acceptanceSubjectDigest: sha256(boundPacket),
   } as never)
   expect(harness.ctx.tianwenEvolution.getRunBinding(binding.runId)).toMatchObject({
     schemaVersion: 'tianwen.run-binding.v3',
-    acceptanceSubjectDigest: sha256(packet),
+    acceptanceSubjectDigest: sha256(boundPacket),
     acceptanceContract: {
       qualityContract: {
         schemaVersion: 'tianwen.research-summary-semantic-contract.v1',
@@ -251,14 +257,17 @@ async function runFixture(options: FixtureOptions = {}) {
   const recovered = await recoverResearchSummaryQualityReview(harness.ctx, {
     parentAgent: parent.agent,
     run,
-    packet,
+    packet: boundPacket,
     submission,
     expectedReview: warm,
     signal: new AbortController().signal,
   })
   offCancel()
   offTamper()
-  return { directory, harness, parent, run, submission, warm: warm!, recovered, input: lastInput! }
+  return {
+    directory, harness, parent, run, packet: boundPacket, sourceArguments,
+    submission, warm: warm!, recovered, input: lastInput!,
+  }
 }
 
 afterEach(() => {
@@ -266,6 +275,42 @@ afterEach(() => {
 })
 
 describe('native research-summary quality review', () => {
+  it('reviews and recovers canonical content while preserving raw source arguments', async () => {
+    const boundPacket = parseResearchPacket(`<research_packet>
+[F:f1|required] Required finding one.
+[F:f2|optional] Optional finding two.
+[U:u1|decision] Decision uncertainty one.
+[U:u2|decision] Decision uncertainty two.
+</research_packet>`)
+    const sourceArguments = {
+      summary: '  Required finding one.\r\nDecision uncertainty one.  ',
+      confirmedFindingIds: ['f2', 'f1'],
+      uncertaintyIds: ['u2', 'u1'],
+    }
+    const submission = {
+      summary: 'Required finding one.\nDecision uncertainty one.',
+      confirmedFindingIds: ['f1', 'f2'],
+      uncertaintyIds: ['u1', 'u2'],
+    }
+    const fixture = await runFixture({ packet: boundPacket, sourceArguments, submission })
+    try {
+      expect(fixture.warm).toMatchObject({ status: 'completed' })
+      expect(fixture.recovered).toEqual(fixture.warm)
+      expect(fixture.recovered).toMatchObject({
+        status: 'completed',
+        submissionDigest: sha256(submission),
+      })
+      const sourceEvidence = fixture.harness.ctx.tianwenEvidence
+        .project(fixture.parent.agent.session)
+        .find(item => item.action.toolName === RESEARCH_SUMMARY_TOOL_NAME)!
+      expect(sourceEvidence.action.argumentsDigest).toBe(sha256(sourceArguments))
+      expect(sourceEvidence.action.argumentsDigest).not.toBe(sha256(submission))
+    } finally {
+      await fixture.parent.dispose()
+      await fixture.harness.ctx.fiber.dispose()
+    }
+  })
+
   it('uses one deterministic native child and recovers its exact completed proof without a model call', async () => {
     const fixture = await runFixture({ concurrent: true, changeGlobalSelection: true })
     try {

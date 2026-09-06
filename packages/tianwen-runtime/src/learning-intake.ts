@@ -143,7 +143,10 @@ function runBindingInput(
 
 export class TianwenLearningIntakeService extends Service {
   static inject = ['tianwenEvidence', 'tianwenEvolution'] as const
-  private readonly trustedResearchSummaryReviews = new Map<Sha256Digest, TianwenRunId>()
+  private readonly trustedResearchSummaryReviews = new Map<Sha256Digest, {
+    readonly runId: TianwenRunId
+    readonly sourceArgumentsDigest: Sha256Digest
+  }>()
 
   constructor(ctx: Context) {
     super(ctx, 'tianwenLearningIntake')
@@ -152,11 +155,15 @@ export class TianwenLearningIntakeService extends Service {
   trustRecoveredResearchSummaryReview(
     runId: TianwenRunId,
     review: ResearchSummarySemanticReview,
+    sourceArgumentsDigest: Sha256Digest,
   ): void {
     if (review.status !== 'completed') {
       throw new Error('only completed research summary reviews can be trusted')
     }
-    this.trustedResearchSummaryReviews.set(sha256(review), runId)
+    this.trustedResearchSummaryReviews.set(sha256(review), {
+      runId,
+      sourceArgumentsDigest,
+    })
   }
 
   bindRun(
@@ -629,14 +636,18 @@ export class TianwenLearningIntakeService extends Service {
       : 'inconclusive'
     if (qualityContract !== undefined) {
       const supplied = attestation?.semanticReview
+      const trusted = supplied?.status === 'completed'
+        ? this.trustedResearchSummaryReviews.get(sha256(supplied))
+        : undefined
       if (supplied !== undefined
         && (supplied.status === 'inconclusive'
           || (supplied.status === 'completed'
             && binding.schemaVersion === 'tianwen.run-binding.v3'
-            && this.trustedResearchSummaryReviews.get(sha256(supplied)) === runId
+            && trusted?.runId === runId
+            && trusted.sourceArgumentsDigest === finalEvidence?.action.argumentsDigest
             && supplied.acceptanceSubjectDigest === binding.acceptanceSubjectDigest
             && supplied.rubricDigest === qualityContract.rubricDigest
-            && supplied.submissionDigest === finalEvidence?.action.argumentsDigest))) {
+          ))) {
         try {
           semanticReview = prepareResearchSummarySemanticReview(supplied)
         } catch { /* A malformed review cannot establish a semantic verdict. */ }
