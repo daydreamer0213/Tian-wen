@@ -44,6 +44,7 @@ D:/DevData/tianwen-real-user-retest-20260905/delivery/ordinary-summary-quality-c
 - Produces `ResearchSummaryQualityContract`, `ResearchSummarySemanticReview`, and `prepareResearchSummarySemanticReview(value: unknown)` from Evolution.
 - Existing `RunAcceptanceContract` gains optional explicit qualityContract with exact version `tianwen.research-summary-semantic-contract.v1` and rubricDigest fixed to CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST. Legacy shape remains exact when absent.
 - Existing `OutcomeIntakeInput` becomes a legacy/new union; semantic input adds semanticReview. Outcome event v1 remains legacy; semantic event is `tianwen.outcome-intake.v2`.
+- `prepareResearchSummarySemanticReview` is strict: null/undefined/malformed/incomplete completed objects throw. Runtime converts unavailable native attempts into explicit canonical inconclusive proof; this parser never coerces bad input. Semantic Outcome always requires semanticReview, including outer inconclusive. A completed proof may conservatively have outer inconclusive; native source state justifies that downgrade at Runtime, not a fabricated domain source flag.
 
 ```ts
 type ResearchSummarySemanticReview =
@@ -78,7 +79,7 @@ const verdict = review.idGateVerdict === 'met' && review.scores.sourceFidelity >
   ? 'met' : 'not-met'
 ```
 
-- [ ] Write RED tests through real Evolution ledger APIs: semantic contract rejects absent proof/plain met/not-met, wrong subject/rubric, forged verdict and malformed scores; score 2 produces failure, score 3 plus IDs produces success, ID failure remains failure; incomplete/null/invalid review only inconclusive. Completed proof may downgrade to inconclusive when source failed. Old input/event digest and replay stay exact; no semantic proof in v1 event/legacy contract. Same Run input cannot replace reviewer proof. Skill-use still consumes original source Evidence and digest.
+- [ ] Write RED tests through real Evolution ledger APIs: semantic contract rejects absent proof/plain met/not-met, wrong subject/rubric, forged verdict and malformed scores; score 2 produces failure, score 3 plus IDs produces success, ID failure remains failure; explicit canonical inconclusive proof (including attempt:null) permits only inconclusive, while malformed completed proof is rejected. Completed proof may downgrade to inconclusive when source failed. Old input/event digest and replay stay exact; no semantic proof in v1 event/legacy contract. Same Run input cannot replace reviewer proof. Skill-use still consumes original source Evidence and digest.
 - [ ] Run the focused tests before implementation; record named assertions failing for missing behavior, not setup/import accidents. Use existing real ledger fixture helpers, no mock-only proof.
 - [ ] Implement strict contract/proof parsers and central prepareOutcomeIntake binding/verdict checks. Require acceptanceSubjectDigest for semantic contracts. Keep v1 event parser exact and add v2 parsing; record correct event version and verify replay through the same preparation. Existing inputDigest includes proof; do not add a new ledger entity.
 - [ ] Run `pnpm exec vitest run tests/dsh-probe/outcome-intake.spec.ts tests/dsh-probe/skill-governance.spec.ts` and `pnpm run typecheck`. Add live/replay tampering coverage where the existing event harness permits it.
