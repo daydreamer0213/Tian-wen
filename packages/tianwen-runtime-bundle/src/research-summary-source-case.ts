@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import { renderSkillContent } from '@deepseek-ai/dsh-skill'
 import { SessionId, type Context, type SessionEvent } from '@tianwen/dsh-compat'
 import {
   learningSessionLifecycleFingerprint,
@@ -8,6 +9,8 @@ import {
   type LearningAnalysisBinding,
   type LearningSignalStatus,
   type OutcomeLearningSignal,
+  type RunSkillManifest,
+  type RunSkillUse,
 } from '@tianwen/evolution'
 import {
   normalizeResearchSummarySubmission,
@@ -78,6 +81,85 @@ function acceptedResultSubmission(
     packet,
     (value as { readonly submission: unknown }).submission,
   )
+}
+
+function hasExactSkillUseEvidence(
+  events: readonly SessionEvent[],
+  evidence: ReturnType<Context['tianwenEvidence']['project']>,
+  use: RunSkillUse,
+  manifest: RunSkillManifest,
+): boolean {
+  if (use.parentVersionId !== manifest.parentVersionId
+    || use.skillName !== manifest.parent.name
+    || use.contentDigest !== manifest.contentDigest) return false
+  const expected = renderSkillContent({
+    name: manifest.parent.name,
+    provider: manifest.resolvedProvider,
+    content: manifest.parent.content,
+  })
+  const toolUse = use.schemaVersion === 'tianwen.run-skill-use.v1'
+    ? { callSeq: use.skillCallSeq, resultSeq: use.skillResultSeq }
+    : use.provenance.kind === 'skill-tool'
+      ? use.provenance
+      : undefined
+  if (toolUse !== undefined) {
+    const skillEvidence = evidence.filter(item => item.evidenceId === use.skillEvidenceId
+      && item.source.callSeq === toolUse.callSeq
+      && item.source.resultSeq === toolUse.resultSeq
+      && item.action.toolName === 'skill'
+      && item.outcome.status === 'complete'
+      && item.outcome.isError === false
+      && item.outcome.errorCode === undefined)
+    const call = events.find(event => event.seq === toolUse.callSeq)
+    const result = events.find(event => event.seq === toolUse.resultSeq)
+    let argumentsValue: unknown
+    try {
+      argumentsValue = call?.type === 'tool/call'
+        ? JSON.parse(call.data.arguments) as unknown
+        : undefined
+    } catch {
+      return false
+    }
+    const block = result?.type === 'tool/result'
+      ? result.data.message.content[0]
+      : undefined
+    return skillEvidence.length === 1
+      && call?.type === 'tool/call'
+      && call.data.name === 'skill'
+      && argumentsValue !== null
+      && typeof argumentsValue === 'object'
+      && !Array.isArray(argumentsValue)
+      && Object.keys(argumentsValue).length === 1
+      && (argumentsValue as { readonly name?: unknown }).name === use.skillName
+      && block?.type === 'tool-result'
+      && block.isError !== true
+      && block.content.length === 1
+      && block.content[0]?.type === 'text'
+      && block.content[0].text === expected
+  }
+  const provenance = use.schemaVersion === 'tianwen.run-skill-use.v2'
+    ? use.provenance
+    : undefined
+  if (provenance?.kind !== 'direct-invocation') return false
+  const invocation = events.filter((event): event is SessionEvent<'user/message'> =>
+    event.type === 'user/message'
+    && event.seq === provenance.invocationMessageSeq
+    && String(event.data.id) === provenance.sourceMessageId
+    && event.data.source.kind === 'skill-invocation'
+    && Object.keys(event.data.source).length === 3
+    && event.data.source.name === use.skillName
+    && event.data.source.form === 'instructions'
+    && event.data.content.length === 1
+    && event.data.content[0]?.type === 'text'
+    && event.data.content[0].text === expected)
+  return invocation.length === 1 && use.skillEvidenceId === sha256({
+    schemaVersion: 'tianwen.direct-skill-invocation-evidence.v1',
+    sessionId: use.sessionId,
+    invocationMessageSeq: provenance.invocationMessageSeq,
+    sourceMessageId: provenance.sourceMessageId,
+    skillName: use.skillName,
+    renderedContentDigest: sha256(expected),
+  })
 }
 
 /** Recover only the native source frozen by the exact explicit-feedback revision. */
@@ -250,6 +332,9 @@ export async function recoverOutcomeResearchSummarySourceCase(
   const use = signal === undefined
     ? undefined
     : ctx.tianwenEvolution.getRunSkillUse(signal.runId)
+  const manifest = signal === undefined
+    ? undefined
+    : ctx.tianwenEvolution.getRunSkillManifest(signal.runId)
   if (
     sourceSignalId === undefined
     || status.parentSessionId !== status.sessionId
@@ -275,6 +360,7 @@ export async function recoverOutcomeResearchSummarySourceCase(
     || use?.sessionId !== signal.sessionId
     || use.sessionDigest !== signal.sessionDigest
     || !signal.evidenceIds.includes(use.acceptanceEvidenceId)
+    || manifest === undefined
   ) throw new Error('research summary Outcome source binding is unavailable')
 
   const inspection = await ctx.sessionPersistence.inspect(SessionId(signal.sessionId))
@@ -291,11 +377,19 @@ export async function recoverOutcomeResearchSummarySourceCase(
   }
   const events = frozenEvents(inspection.events, signal.sessionDigest)
   const evidence = ctx.tianwenEvidence.project({ id: inspection.meta.id, events } as never)
-  if (sha256(evidence.map(item => item.evidenceId)) !== sha256(signal.evidenceIds)) {
+  const outcomeEvidence = signal.evidenceIds.flatMap(evidenceId =>
+    evidence.filter(item => item.evidenceId === evidenceId))
+  if (sha256(outcome.input.evidenceIds) !== sha256(signal.evidenceIds)
+    || outcomeEvidence.length !== signal.evidenceIds.length
+    || sha256(outcomeEvidence.map(item => item.evidenceId)) !== sha256(signal.evidenceIds)) {
     throw new Error('research summary Outcome evidence snapshot changed')
+  }
+  if (!hasExactSkillUseEvidence(events, evidence, use, manifest)) {
+    throw new Error('research summary Outcome Skill use evidence is unavailable')
   }
   const accepted = evidence.filter(item =>
     item.evidenceId === use.acceptanceEvidenceId
+    && item.source.callSeq === use.acceptanceCallSeq
     && item.action.toolName === RESEARCH_SUMMARY_TOOL_NAME
     && item.outcome.status === 'complete'
     && item.outcome.isError === false

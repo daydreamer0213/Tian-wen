@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -29,8 +29,13 @@ import {
   parseResearchPacket,
 } from '../../packages/tianwen-runtime/src/research-summary.js'
 import { TianwenResearchSummaryAdmissionService } from '../../packages/tianwen-runtime-bundle/src/research-summary-admission.js'
-import { recoverResearchSummarySourceCase } from '../../packages/tianwen-runtime-bundle/src/research-summary-source-case.js'
 import {
+  recoverOutcomeResearchSummarySourceCase,
+  recoverResearchSummarySourceCase,
+} from '../../packages/tianwen-runtime-bundle/src/research-summary-source-case.js'
+import { resolveExplicitCorrectionProtocol } from '../../packages/tianwen-runtime-bundle/src/explicit-correction-protocol.js'
+import {
+  CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY,
   CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
   learningSessionLifecycleFingerprint,
   prepareRunSkillManifest,
@@ -551,6 +556,110 @@ describe('research summary first-step admission', () => {
       expect(harness.ctx.tianwenEvolution.listLearningTickets()).toEqual([])
     } finally {
       await handle.dispose()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('recovers a semantic Outcome source with native Skill Evidence and freezes its v3 protocol', async () => {
+    const directory = root('outcome-source-skill-evidence')
+    const submissions = [
+      { summary: 'The verified result is concrete.', confirmedFindingIds: ['f1'], uncertaintyIds: [] },
+      { summary: 'The verified result is concrete.', confirmedFindingIds: ['f1'], uncertaintyIds: [] },
+      { summary: 'The verified result is concrete. The deployment region is undecided.', confirmedFindingIds: ['f1'], uncertaintyIds: ['u1'] },
+    ]
+    const harness = await mount(directory, submissions.flatMap((submission, index) => [
+      toolCallResponse(`source-skill-${index}`, 'skill', { name: RESEARCH_SUMMARY_SKILL_NAME }),
+      toolCallResponse(`source-submit-${index}`, RESEARCH_SUMMARY_TOOL_NAME, submission),
+      qualityResponse(`source-review-${index}`, index < 2 ? 2 : 3),
+      textResponse('Submitted summary.'),
+    ]))
+    const handles: Array<Awaited<ReturnType<typeof harness.ctx.agents.create>>> = []
+    harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({
+      revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v2',
+    })
+    try {
+      const runs = []
+      for (let index = 0; index < submissions.length; index += 1) {
+        const handle = await harness.ctx.agents.create({
+          sessionId: SessionId(`outcome-source-skill-${index}-${randomUUID()}`),
+          meta: { cwd: directory },
+          agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+        })
+        handles.push(handle)
+        handle.agent.followup(direct(invocation))
+        await waitForIdle(harness.ctx, handle.agent)
+        await harness.ctx.tianwenResearchSummaryAdmission.whenIdle()
+        const binding = harness.ctx.tianwenEvolution
+          .getRunBindingBySessionId(String(handle.agent.session.id))!
+        runs.push({ handle, binding })
+      }
+      const ticket = harness.ctx.tianwenEvolution.listLearningTickets()[0]!
+      const analysis = harness.ctx.tianwenEvolution.requestOutcomeLearningAnalysis({
+        ticketId: ticket.ticketId,
+        sessionId: String(runs[2]!.handle.agent.session.id),
+        parentSessionId: String(runs[2]!.handle.agent.session.id),
+        consentRevision: 1,
+        counterevidenceRunIds: [runs[2]!.binding.runId],
+      })
+      expect(harness.ctx.tianwenEvolution.getLearningAnalysis(analysis.analysisId))
+        .toMatchObject({ source: 'outcome', ticketId: ticket.ticketId })
+      const sourceSignalId = [...analysis.signalIds].sort()[0]!
+      const sourceSignal = harness.ctx.tianwenEvolution.listLearningSignals()
+        .find(signal => signal.signalId === sourceSignalId)!
+      if (!('runId' in sourceSignal)) throw new Error('expected Outcome source Signal')
+      const sourceUse = harness.ctx.tianwenEvolution.getRunSkillUse(sourceSignal.runId)!
+      const sourceOutcome = harness.ctx.tianwenEvolution.getOutcomeIntake(sourceSignal.runId)!
+      expect(sourceUse).toMatchObject({
+        schemaVersion: 'tianwen.run-skill-use.v2',
+        provenance: { kind: 'skill-tool' },
+      })
+      expect(sourceOutcome.input.evidenceIds).toEqual([sourceUse.acceptanceEvidenceId])
+      expect(harness.ctx.tianwenEvidence.project(
+        runs.find(run => run.binding.runId === sourceSignal.runId)!.handle.agent.session,
+      ).map(item => item.action.toolName)).toEqual(['skill', RESEARCH_SUMMARY_TOOL_NAME])
+
+      const sourceCase = await recoverOutcomeResearchSummarySourceCase(harness.ctx, analysis)
+      const protocol = resolveExplicitCorrectionProtocol({
+        scopeKey: 'project:tianwen/capability:research-summary',
+        protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+        packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+        source: sourceCase.source,
+        packet: sourceCase.packet,
+      })!
+      const tasks = protocol.buildEvaluationTasks({
+        root: join(directory, 'controlled'),
+        materializeWorkspace(workspaceRoot, content) {
+          mkdirSync(workspaceRoot, { recursive: true })
+          writeFileSync(join(workspaceRoot, 'brief.txt'), content, 'utf8')
+        },
+        sessionNamespace: analysis.analysisId,
+      })
+      const frozen = harness.ctx.tianwenEvolution.freezeControlledSkillEvalProtocol(
+        protocol.buildProtocolInput({
+          ticketId: ticket.ticketId,
+          sha256,
+          rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+          callConfig: { provider: 'tianwen-probe', model: 'scripted' },
+          retryPolicy: {},
+          toolSchemaDigest: sha256('source-case-tools'),
+          tasks,
+        }),
+      )
+      expect(harness.ctx.tianwenEvolution.listControlledSkillEvalProtocols()[0])
+        .toMatchObject({
+          protocolId: frozen.protocolId,
+          schemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+          protocol: { sourceFidelity: { source: { source: 'outcome' } } },
+        })
+
+      vi.spyOn(harness.ctx.tianwenEvolution, 'getRunSkillUse').mockReturnValue({
+        ...sourceUse,
+        acceptanceEvidenceId: sourceUse.skillEvidenceId,
+      })
+      await expect(recoverOutcomeResearchSummarySourceCase(harness.ctx, analysis))
+        .rejects.toThrow('research summary Outcome source binding is unavailable')
+    } finally {
+      for (const handle of handles.reverse()) await handle.dispose()
       await harness.ctx.fiber.dispose()
     }
   })
