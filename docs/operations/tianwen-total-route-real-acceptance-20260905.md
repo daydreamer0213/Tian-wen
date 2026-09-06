@@ -2,7 +2,23 @@
 
 Status: **in progress; the total route is not complete**.
 
-Current checkpoint (2026-09-06): isolated native-module identity is repaired;
+Latest continuation (2026-09-06): the bounded [ordinary semantic Outcome
+repair](../superpowers/plans/2026-09-06-tianwen-ordinary-summary-semantic-outcome.md)
+is in progress on `codex/ordinary-summary-semantic-outcome`. Its versioned result
+contract and independent native review are independently reviewed through
+`8cef6e8`; learning/source lineage and full restart recovery are implemented at
+`82db3f7`, with1740 automatic checks passed/18 conditional skips. Independent
+review's native Skill-Evidence source mismatch is repaired and independently
+re-reviewed at `c990398`, with113 covering checks passed. Next-version upgrade
+support is next; final full/artifact gates remain open. New E/F/G inputs and reserved future H were frozen before execution,
+but have not been submitted. These engineering checks are not new genuine model
+results and do not close any unobserved route branch below. Daily013/preview14,
+the original A–D observations and the rejected B Candidate remain unchanged.
+Routine development, testing and configured DeepSeek calls proceed under the
+user's standing delegation, with no additional call/cost quota or repeated
+approval. Major strategy or genuinely new authority remains a separate decision.
+
+Previous delivery checkpoint (2026-09-06): isolated native-module identity is repaired;
 the original procurement Candidate completed its one real paired evaluation and
 was rejected on five met/met ties. Scenario C passed normal UI and prose checks.
 Scenario D also passed once, completing this four-task tranche; no new feedback
