@@ -74,11 +74,11 @@ Run bindings retain their old review contract. Newly frozen protocols default ne
 no existing protocol is converted. Fresh admission selects complete. Exploration
 mapping must explicitly distinguish the two semantic families from ID-only.
 
-- [ ] Read the binding spec, owned call paths and existing fixture entrypoints.
+- [x] Read the binding spec, owned call paths and existing fixture entrypoints.
   Pin legacy rubric digest (67d59c1ab275a180539b092adb83026e3f5813620ece21f91341b64829b317a6)
   and current policy/whole legacy protocol/request snapshots before edits. Record
   task BASE. Do not treat unpinned new defaults as legacy tests.
-- [ ] Add focused RED tests for new constants/projection and known-family selection:
+- [x] Add focused RED tests for new constants/projection and known-family selection:
 
 ```ts
 expect(CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST).toBe(
@@ -98,7 +98,7 @@ expect(resolveControlledSkillSourceFidelityFamily('sha256:' + '0'.repeat(64))).t
   extra model calls. Add crossed old/new proof/envelope/metric and policy rejection.
   In one new-family ordinary fixture return scope2/fidelity4 and confirm no new
   failure threshold; return fidelity2 and confirm existing not-met semantics.
-- [ ] Run the focused tests before production edits; retain expected failures and
+- [x] Run the focused tests before production edits; retain expected failures and
   exact log path. Then implement the exported family, validators and all native
   propagation paths, with current record ownership and exact field validation.
 
@@ -114,18 +114,24 @@ $env:TIANWEN_DSH_PROBE_PYTHON = 'D:/DevData/tianwen-worktrees/tianwen-architectu
 & 'D:/hermes/node/node.exe' 'D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs' exec vitest run tests/dsh-probe/research-summary-quality.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts tests/dsh-migration/learning-loop-controlled-executor.integration.spec.ts tests/dsh-migration/learning-exploration.spec.ts
 ```
 
-- [ ] Run GREEN on all touched test files and typecheck. Add explicit retained
+- [x] Run GREEN on all touched test files and typecheck. Add explicit retained
   old/new family ×60,000/300,000ms ×old/new capacity recovery checks and mixed
   rubric/holdout/policy rejection before writes/provider calls. Preserve existing
   v2/transition/restore snapshots. Native new controlled successful path still
   uses10 paired+1aggregate+1holdout+1holdout-review+1promotion transition, not
   extra rounds. Source/analysis/exploration Sessions are counted separately.
-- [ ] Self-review full owned diff for fixed-old constants, semantic downgrade and
+- [x] Self-review full owned diff for fixed-old constants, semantic downgrade and
   blind material leaks. Commit only owned code/tests. Report RED/GREEN commands,
   evidence logs, compatibility pins, deviations and concerns. Controller runs the
   final full suite once after Task2; worker does not run it or model acceptance.
 
 ## Task 2: Immutable normal-delivery015 version
+
+Task1 source30b351a is independently Approved for spec and quality, with429 focused
+tests and later14 test-only refinements passing. Legacy/new identities and exact
+native requests/recovery are covered. Supplemental aggregate/holdout criteria
+checks used disclosed mutationRED after initial propagation; no initialTDD claim
+is made for that subset. Task1 is complete; no redispatch.
 
 **Ownership:**
 - Modify current-version references in `packages/tianwen-runtime-bundle/package.json`, `src/controlled-lifecycle.ts`, `src/portable-profile.ts`; `packages/tianwen-desktop-host/package.json`, `src/main.ts`, `src/host.ts`, `src/locale.ts`; `scripts/install-tianwen.mjs`, `stage-desktop-runtime.mjs`, `audit-desktop-artifact.mjs`, `verify-dsh-profile.mjs`; `.github/workflows/ci.yml`.
