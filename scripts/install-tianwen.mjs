@@ -22,7 +22,7 @@ const PREDECESSOR_DSH_VERSION = '0.1.0-rc.7'
 const PNPM_VERSION = '11.20.0'
 const PROFILE = 'tianwen'
 const RUNTIME_PACKAGE = '@tianwen/runtime-bundle'
-const RUNTIME_VERSION = '0.1.13'
+const RUNTIME_VERSION = '0.1.14'
 const RUNTIME_ARCHIVE_BASENAME = `tianwen-runtime-bundle-${RUNTIME_VERSION}.tgz`
 const INSTALLER_FAILURE_SCHEMA_VERSION = 'tianwen.install-failure.v1'
 const INSTALLER_FAILURE_STAGE = Object.freeze({
@@ -305,7 +305,7 @@ function renderRuntimePredecessorProfilePatch(paths) {
 `
 }
 
-// Frozen Runtime 0.1.11/0.1.12 managed configuration, including the enabled learning loop.
+// Frozen Runtime 0.1.11/0.1.12/0.1.13 managed configuration, including the enabled learning loop.
 // Never validate an installed predecessor against the evolving current patch.
 function renderRuntimeLearningLoopPredecessorProfilePatch(paths) {
   return `- id: agent-default-model
@@ -537,11 +537,16 @@ export function classifyManagedInstallation(paths) {
     }
     if (existsSync(paths.archivePath)) return 'incompatible'
     const archivePath = predecessorArchivePath(paths)
+    const runtime013ArchivePath = runtimePredecessorArchivePath(paths, '0.1.13')
     const runtime012ArchivePath = runtimePredecessorArchivePath(paths, '0.1.12')
     const runtime011ArchivePath = runtimePredecessorArchivePath(paths, '0.1.11')
     const runtime010ArchivePath = runtimePredecessorArchivePath(paths, '0.1.10')
     if (host.version === DSH_VERSION) {
-      return (existsSync(runtime012ArchivePath)
+      return (existsSync(runtime013ArchivePath)
+        && statSync(runtime013ArchivePath).isFile()
+        && matchesProfile(profile, DSH_VERSION, '0.1.13', renderRuntimeLearningLoopPredecessorProfilePatch(paths))
+        && matchesPredecessorReceipt(paths, runtime013ArchivePath, DSH_VERSION))
+        || (existsSync(runtime012ArchivePath)
         && statSync(runtime012ArchivePath).isFile()
         && matchesProfile(profile, DSH_VERSION, '0.1.12', renderRuntimeLearningLoopPredecessorProfilePatch(paths))
         && matchesPredecessorReceipt(paths, runtime012ArchivePath, DSH_VERSION))
@@ -556,7 +561,8 @@ export function classifyManagedInstallation(paths) {
         ? 'managed-runtime-predecessor'
         : 'incompatible'
     }
-    if (existsSync(runtime012ArchivePath)
+    if (existsSync(runtime013ArchivePath)
+      || existsSync(runtime012ArchivePath)
       || existsSync(runtime011ArchivePath)
       || existsSync(runtime010ArchivePath)
       || !existsSync(archivePath)
