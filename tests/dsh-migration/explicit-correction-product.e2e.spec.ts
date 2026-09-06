@@ -47,6 +47,7 @@ const submissionTool = 'submit_research_summary'
 const analysisTool = 'submit_tianwen_analysis'
 const explorationTool = 'request_tianwen_exploration'
 const evaluatorTool = 'submit_blind_evaluation'
+const holdoutReviewerTool = 'submit_holdout_review'
 
 const originalPacket = `<research_packet>
 [F:pilot|required] Twelve pilot teams reduced triage time by 18%.
@@ -247,26 +248,56 @@ Call submit_research_summary exactly once with the selected IDs, then report the
       })
     }
     if (tools.includes(evaluatorTool)) {
-      const dimensions = {
-        relevance: 3,
-        correctnessReasoning: 3,
-        clarityUsability: 3,
-        scopeRestraint: 3,
+      const block = request.messages.findLast(message => message.role === 'user')
+        ?.content.find(item => item.type === 'text')
+      const envelope = JSON.parse(block?.type === 'text' ? block.text : '') as {
+        evaluations: Array<{
+          taskId: string
+          x: { materialText: string }
+          y: { materialText: string }
+        }>
+      }
+      const includesSourceFidelity = JSON.stringify(request.tools)
+        .includes('sourceFidelity')
+      const dimensions = (materialText: string) => {
+        const material = JSON.parse(materialText) as {
+          submission: { uncertaintyIds: readonly string[] }
+        }
+        return {
+          relevance: 3,
+          correctnessReasoning: 3,
+          clarityUsability: 3,
+          scopeRestraint: 3,
+          ...(includesSourceFidelity ? {
+            sourceFidelity: material.submission.uncertaintyIds.includes('renewal') ? 4 : 3,
+          } : {}),
+        }
       }
       return toolCallResponse(`product-evaluator-${call}`, evaluatorTool, {
-        evaluations: [
-          'original-defect',
-          'adjacent-transfer',
-          'preserved-regression',
-          'raw-extraction-counterexample',
-          'safety-boundary',
-        ].map(name => ({
-          taskId: `eval-task:research-summary-${name}`,
+        evaluations: envelope.evaluations.map(item => ({
+          taskId: item.taskId,
           status: 'scored',
           insufficientMaterial: false,
           reasonCode: 'score-submitted',
-          scores: { x: dimensions, y: dimensions },
+          scores: {
+            x: dimensions(item.x.materialText),
+            y: dimensions(item.y.materialText),
+          },
         })),
+      })
+    }
+    if (tools.includes(holdoutReviewerTool)) {
+      return toolCallResponse(`product-holdout-review-${call}`, holdoutReviewerTool, {
+        status: 'scored',
+        insufficientMaterial: false,
+        reasonCode: 'score-submitted',
+        scores: {
+          relevance: 3,
+          correctnessReasoning: 3,
+          clarityUsability: 3,
+          scopeRestraint: 3,
+          sourceFidelity: 3,
+        },
       })
     }
     if (tools.includes(submissionTool)) {
@@ -735,7 +766,13 @@ describe('installed explicit-correction product story', () => {
       ).toHaveLength(1))
       await vi.waitFor(() => {
         const [analysis] = product.ctx.tianwenEvolution.listLearningAnalyses()
-        expect(analysis?.phase).toBe('promoted')
+        expect(analysis?.phase, JSON.stringify({
+          analysis,
+          observed: product.observed.map(item => ({
+            sessionId: item.sessionId,
+            tools: item.tools,
+          })),
+        })).toBe('promoted')
       }, { timeout: 30_000, interval: 20 })
       const [promoted] = product.ctx.tianwenEvolution.listLearningAnalyses()
       expect(promoted).toBeDefined()
@@ -747,8 +784,26 @@ describe('installed explicit-correction product story', () => {
       expect(product.ctx.tianwenEvolution.listLearningCases()).toHaveLength(1)
       expect(product.ctx.tianwenEvolution.listAcceptedLessons()).toHaveLength(1)
       expect(product.ctx.tianwenEvolution.listSkillCandidates()).toHaveLength(1)
+      const protocols = product.ctx.tianwenEvolution.listControlledSkillEvalProtocols()
+      expect(protocols).toHaveLength(1)
+      expect(protocols[0]).toMatchObject({
+        schemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+        protocol: {
+          sourceFidelity: {
+            source: {
+              sessionId: 'product-source-main',
+              messageId: sourceAnswerId,
+              feedbackVersion: feedback.value.version,
+            },
+            holdout: {
+              task: { taskId: 'shadow-task:research-summary-source-fidelity-holdout' },
+            },
+          },
+        },
+      })
       expect(product.ctx.tianwenEvolution.listControlledSkillEvaluations()).toHaveLength(1)
       const evaluation = product.ctx.tianwenEvolution.listControlledSkillEvaluations()[0]!
+      expect(evaluation.schemaVersion).toBe('tianwen.controlled-skill-evaluation-plan.v3')
       expect(product.ctx.tianwenEvolution
         .getControlledSkillEvaluationResult(evaluation.evaluationId))
         .toMatchObject({ mechanismVerdict: 'pass' })
@@ -760,9 +815,31 @@ describe('installed explicit-correction product story', () => {
         .toEqual(['met', 'met', 'met', 'met', 'met'])
       expect(objectives.map(item => item.comparison))
         .toEqual(['candidate-better', 'candidate-better', 'tie', 'tie', 'tie'])
-      expect(product.ctx.tianwenEvolution.listControlledSkillShadows()).toHaveLength(1)
+      const shadows = product.ctx.tianwenEvolution.listControlledSkillShadows()
+      expect(shadows).toHaveLength(1)
+      expect(shadows[0]).toMatchObject({
+        schemaVersion: 'tianwen.controlled-skill-shadow-plan.v3',
+        review: { sessionId: expect.stringContaining('unseen-holdout-review') },
+      })
+      expect(shadows[0]!.review.sessionId).not.toBe(shadows[0]!.tasks[0]!.sessionId)
+      expect(product.ctx.tianwenEvolution
+        .getControlledSkillShadowReviewObservation(shadows[0]!.shadowId))
+        .toMatchObject({
+          status: 'scored',
+          insufficientMaterial: false,
+          reasonCode: 'score-submitted',
+          reviewerSessionId: shadows[0]!.review.sessionId,
+          reviewedRun: { sessionId: shadows[0]!.tasks[0]!.sessionId },
+        })
       expect(product.ctx.tianwenEvolution.listControlledSkillTransitions().map(item => item.kind))
         .toEqual(['promote'])
+
+      const promotedControlledSessions = (await product.ctx.sessionPersistence.list())
+        .filter(header => String(header.id).startsWith('session:controlled-'))
+      expect(promotedControlledSessions).toHaveLength(14)
+      expect(new Set(promotedControlledSessions.map(header => String(header.id))).size).toBe(14)
+      expect(promotedControlledSessions.some(header =>
+        String(header.id) === shadows[0]!.review.sessionId)).toBe(true)
 
       const adjacent = await createMain(
         product.ctx, 'product-adjacent-main', product.workspaceRoot,
@@ -798,8 +875,16 @@ describe('installed explicit-correction product story', () => {
       })
       expect(removed).toEqual({ ok: true, value: { absent: true } })
       await vi.waitFor(() => {
-        expect(product.ctx.tianwenEvolution
-          .getLearningAnalysis(promoted!.analysisId)?.phase).toBe('rolled-back')
+        const status = product.ctx.tianwenEvolution
+          .getLearningAnalysis(promoted!.analysisId)
+        expect(status?.phase, JSON.stringify({
+          status,
+          controlledSessions: product.observed.filter(item =>
+            item.sessionId.startsWith('session:controlled-')).map(item => ({
+              sessionId: item.sessionId,
+              tools: item.tools,
+            })),
+        })).toBe('rolled-back')
       }, { timeout: 30_000, interval: 20 })
       await vi.waitFor(() => {
         const status = product.ctx.tianwenEvolution.getLearningAnalysis(promoted!.analysisId)

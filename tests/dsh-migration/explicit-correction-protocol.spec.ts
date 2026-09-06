@@ -15,6 +15,8 @@ import {
 } from '../../packages/tianwen-evolution/src/index.js'
 import { parseResearchPacket } from '../../packages/tianwen-runtime/src/research-summary.js'
 import {
+  assertExplicitCorrectionWorkspaceSnapshot,
+  buildExplicitCorrectionTransitionInput,
   EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
   EXPLICIT_CORRECTION_PROTOCOL_VERSION,
   resolveExplicitCorrectionProtocol,
@@ -181,6 +183,43 @@ describe('explicit correction controlled protocol', () => {
     expect(legacy.buildShadowTasks({
       root: fixtureRoot(), materializeWorkspace, sessionNamespace: 'v2-fixture',
     })[0]!.taskId).toBe('shadow-task:research-summary-unseen-holdout')
+  })
+
+  it('keeps the shared rollback task identical for retained v2 and v3', () => {
+    const root = fixtureRoot()
+    const input = {
+      root,
+      shadowId: 'shadow:retained-fixture',
+      kind: 'rollback' as const,
+      expectedRevision: 2,
+      materializeWorkspace,
+    }
+    const legacy = resolveExplicitCorrectionProtocol({
+      scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+      protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+    })!
+    const current = sourceFidelityProtocol(`<research_packet>
+[F:actual|required] This source must not be needed to construct rollback.
+</research_packet>`)
+    const shared = buildExplicitCorrectionTransitionInput(input)
+
+    expect(shared).toEqual(legacy.buildTransitionInput(input))
+    expect(shared).toEqual(current.buildTransitionInput(input))
+    expect(shared).toMatchObject({
+      shadowId: input.shadowId,
+      kind: 'rollback',
+      expectedRevision: 2,
+      task: {
+        goal: 'Verify the active research-summary rollback pointer.',
+        sessionId: expect.stringMatching(
+          /^session:controlled-activation:product:research-summary:rollback:[a-f0-9]{64}$/u,
+        ),
+      },
+    })
+    expect(() => assertExplicitCorrectionWorkspaceSnapshot(
+      shared.task.workspaceRoot,
+      shared.task.workspaceSnapshot,
+    )).not.toThrow()
   })
 
   it('rejects candidate or analyst content at the v3 builder boundary', () => {

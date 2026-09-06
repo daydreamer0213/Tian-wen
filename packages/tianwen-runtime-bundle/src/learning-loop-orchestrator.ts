@@ -16,7 +16,11 @@ import {
   type TianwenRunId,
 } from '@tianwen/evolution'
 
-import { resolveExplicitCorrectionProtocol } from './explicit-correction-protocol.js'
+import {
+  assertExplicitCorrectionWorkspaceSnapshot,
+  buildExplicitCorrectionTransitionInput,
+  resolveExplicitCorrectionProtocol,
+} from './explicit-correction-protocol.js'
 import { materializeLearningCandidate } from './learning-candidate.js'
 import { admitOutcomeLearningAnalysis } from './outcome-learning-intake.js'
 import { LearningExplorationInterruptedError } from './learning-exploration.js'
@@ -336,6 +340,90 @@ export function createExplicitCorrectionLearningLoopExecutor(
       throw new Error('controlled protocol execution environment drifted')
     }
   }
+  const retainedRollbackFor = (context: LearningLoopExecutionContext) => {
+    const status = context.status
+    const scopeKey = scopeFor(context)
+    const shadow = status.shadowId === undefined ? undefined
+      : context.ctx.tianwenEvolution.getControlledSkillShadow(status.shadowId as never)
+    const evaluation = status.evaluationId === undefined ? undefined
+      : context.ctx.tianwenEvolution.getControlledSkillEvaluation(status.evaluationId as never)
+    const candidate = status.candidateId === undefined ? undefined
+      : context.ctx.tianwenEvolution.getSkillCandidate(status.candidateId as never)
+    const matchingRecords = evaluation === undefined ? [] : recordsFor(context)
+      .filter(record => record.protocolId === evaluation.protocolId)
+    const record = matchingRecords.length === 1 ? matchingRecords[0] : undefined
+    const pointer = shadow === undefined ? undefined
+      : context.ctx.tianwenEvolution.getControlledSkillScopePointer(shadow.scopeKey)
+    const promotion = status.promotionTransitionId === undefined ? undefined
+      : context.ctx.tianwenEvolution.getControlledSkillTransition(
+          status.promotionTransitionId as never,
+        )
+    const promotionReceipt = status.promotionTransitionId === undefined ? undefined
+      : context.ctx.tianwenEvolution.getControlledSkillTransitionReceipt(
+          status.promotionTransitionId as never,
+        )
+    const versionsMatch = record?.schemaVersion === 'tianwen.controlled-skill-eval-protocol.v2'
+      ? evaluation?.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v2'
+        && shadow?.schemaVersion === 'tianwen.controlled-skill-shadow-plan.v2'
+      : record?.schemaVersion === 'tianwen.controlled-skill-eval-protocol.v3'
+        && evaluation?.schemaVersion === 'tianwen.controlled-skill-evaluation-plan.v3'
+        && shadow?.schemaVersion === 'tianwen.controlled-skill-shadow-plan.v3'
+    if (
+      scopeKey === undefined
+      || shadow === undefined
+      || evaluation === undefined
+      || candidate === undefined
+      || record === undefined
+      || pointer === undefined
+      || promotion === undefined
+      || promotionReceipt === undefined
+      || !versionsMatch
+      || record.ticketId !== status.ticketId
+      || record.scopeKey !== scopeKey
+      || evaluation.evaluationId !== status.evaluationId
+      || evaluation.candidateId !== status.candidateId
+      || evaluation.scopeKey !== scopeKey
+      || shadow.shadowId !== status.shadowId
+      || shadow.evaluationId !== evaluation.evaluationId
+      || shadow.evaluationPlanDigest !== sha256(evaluation)
+      || shadow.candidateId !== candidate.candidateId
+      || shadow.parentVersionId !== evaluation.parentVersionId
+      || shadow.parentPayloadDigest !== evaluation.parentPayloadDigest
+      || shadow.candidatePayloadDigest !== evaluation.candidatePayloadDigest
+      || shadow.sourceScopeKey !== scopeKey
+      || shadow.scopeKey !== scopeKey
+      || candidate.ticketId !== status.ticketId
+      || candidate.targetScope !== scopeKey
+      || candidate.parentVersionId !== shadow.parentVersionId
+      || candidate.payloadDigest !== shadow.candidatePayloadDigest
+      || pointer.scopeKey !== shadow.scopeKey
+      || pointer.activeVersionId !== shadow.candidateVersionId
+      || pointer.payloadDigest !== shadow.candidatePayloadDigest
+      || promotion.transitionId !== status.promotionTransitionId
+      || promotion.shadowId !== shadow.shadowId
+      || promotion.kind !== 'promote'
+      || sha256(promotion.targetPointer) !== sha256(pointer)
+      || promotionReceipt.state !== 'verified'
+      || sha256(promotionReceipt.pointer) !== sha256(pointer)
+      || status.promotionTransitionReceiptDigest !== sha256(promotionReceipt)
+    ) throw new Error('controlled rollback governed chain is unavailable')
+    return { record, shadow, pointer }
+  }
+  const assertRetainedRollbackEnvironment = async (
+    context: LearningLoopExecutionContext,
+    record: ReturnType<typeof retainedRollbackFor>['record'],
+  ): Promise<void> => {
+    const environment = await config.environment(context)
+    const execution = record.protocol.execution
+    if (execution.callConfigDigest !== sha256(environment.callConfig)
+      || execution.retryPolicyDigest !== sha256(environment.retryPolicy)
+      || execution.toolSchemaDigest !== sha256(record.protocol.tasks.map(task => ({
+        taskId: task.taskId,
+        toolSchemaDigest: sha256(environment.toolSchemas),
+      })))) {
+      throw new Error('controlled protocol execution environment drifted')
+    }
+  }
   const recoverTransition = (context: LearningLoopExecutionContext, kind: 'promote' | 'rollback'): boolean => {
     const shadowId = context.status.shadowId
     if (shadowId === undefined) return false
@@ -505,17 +593,16 @@ export function createExplicitCorrectionLearningLoopExecutor(
     },
     async rollback(context) {
       if (recoverTransition(context, 'rollback')) return
-      const built = await tasksFor(context)
-      if (built === undefined || context.status.shadowId === undefined) throw new Error('controlled rollback lacks Shadow')
-      await assertFrozenEnvironment(context, built)
-      const shadow = context.ctx.tianwenEvolution.getControlledSkillShadow(context.status.shadowId as never)
-      const pointer = shadow === undefined ? undefined : context.ctx.tianwenEvolution.getControlledSkillScopePointer(shadow.scopeKey)
-      if (shadow === undefined || pointer === undefined) throw new Error('controlled rollback pointer is unavailable')
-      const transitionInput = built.protocol.buildTransitionInput({
+      const { record, shadow, pointer } = retainedRollbackFor(context)
+      await assertRetainedRollbackEnvironment(context, record)
+      const transitionInput = buildExplicitCorrectionTransitionInput({
         root: config.root, shadowId: shadow.shadowId, kind: 'rollback', expectedRevision: pointer.revision,
         materializeWorkspace: config.materializeWorkspace,
       })
-      built.protocol.assertWorkspaceSnapshot(transitionInput.task.workspaceRoot, transitionInput.task.workspaceSnapshot)
+      assertExplicitCorrectionWorkspaceSnapshot(
+        transitionInput.task.workspaceRoot,
+        transitionInput.task.workspaceSnapshot,
+      )
       const transition = await (context.ctx.tianwenSkillEvaluation as unknown as {
         runControlledSkillTransition(input: unknown, resolver?: unknown): Promise<{ readonly state: string, readonly transition: { readonly transitionId: string, readonly state: string } }>
       }).runControlledSkillTransition(transitionInput)
@@ -822,6 +909,7 @@ export class TianwenLearningLoopService extends Service {
     'sessionPersistence',
     'sessions',
     'subagents',
+    'tianwenEvidence',
     'tianwenEvolution',
     'tianwenLearningAnalysisChild',
     'tianwenLearningConsentAgent',

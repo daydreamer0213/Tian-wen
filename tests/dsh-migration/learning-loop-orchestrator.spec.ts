@@ -35,10 +35,14 @@ function controlledExecutorFixture(input: {
   readonly records?: readonly Record<string, unknown>[]
   readonly scopeKey?: string
   readonly environmentModel?: string
+  readonly environmentRetryPolicy?: Readonly<Record<string, unknown>>
+  readonly environmentToolSchemas?: readonly Readonly<Record<string, unknown>>[]
+  readonly evolution?: Readonly<Record<string, unknown>>
   readonly runtime?: {
     readonly runControlledArms: (input: unknown) => Promise<unknown>
     readonly runControlledEvaluators: (input: unknown) => Promise<unknown>
     readonly runControlledShadow: (input: unknown) => Promise<unknown>
+    readonly runControlledSkillTransition?: (input: unknown) => Promise<unknown>
   }
 }) {
   const root = mkdtempSync(join('D:/DevData/tianwen-dsh-probe', 'task-2-orchestrator-'))
@@ -68,6 +72,7 @@ function controlledExecutorFixture(input: {
       recordLearningAnalysisShadowReady: vi.fn((value: unknown) => {
         ready.push(value)
       }),
+      ...input.evolution,
     },
     ...(input.runtime === undefined ? {} : { tianwenSkillEvaluation: input.runtime }),
   }
@@ -79,7 +84,9 @@ function controlledExecutorFixture(input: {
     },
     environment: async () => ({
       callConfig: { provider: 'fixture', model: input.environmentModel ?? 'fixture' },
-      retryPolicy: {}, toolSchemas: [{ name: 'skill' }, { name: 'submit_research_summary' }],
+      retryPolicy: input.environmentRetryPolicy ?? {},
+      toolSchemas: input.environmentToolSchemas
+        ?? [{ name: 'skill' }, { name: 'submit_research_summary' }],
       rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
     }),
     deliverTerminalReport: () => 'report',
@@ -88,7 +95,98 @@ function controlledExecutorFixture(input: {
     root, frozen, unavailable, rejected, ready,
     run: () => executor.freezeProtocol({ ctx: ctx as never, status: input.status as never }),
     evaluate: () => executor.evaluate({ ctx: ctx as never, status: input.status as never }),
+    rollback: () => executor.rollback({ ctx: ctx as never, status: input.status as never }),
     dispose: () => rmSync(root, { recursive: true, force: true }),
+  }
+}
+
+function retainedRollbackFixture(input: {
+  readonly recordSchemaVersion?: string
+  readonly environmentModel?: string
+  readonly environmentRetryPolicy?: Readonly<Record<string, unknown>>
+  readonly environmentToolSchemas?: readonly Readonly<Record<string, unknown>>[]
+  readonly pointerActiveVersionId?: string
+  readonly receiptPointerActiveVersionId?: string
+}) {
+  const record = {
+    ...retainedV2ProtocolRecord(),
+    schemaVersion: input.recordSchemaVersion
+      ?? 'tianwen.controlled-skill-eval-protocol.v2',
+  }
+  const scopeKey = EXPLICIT_CORRECTION_PROTOCOL_SCOPE
+  const candidateId = `candidate:${'c'.repeat(64)}`
+  const evaluationId = `evaluation:${'d'.repeat(64)}`
+  const shadowId = `shadow:${'e'.repeat(64)}`
+  const promotionTransitionId = `transition:${'f'.repeat(64)}`
+  const parentVersionId = `skill-version:${'1'.repeat(64)}`
+  const candidateVersionId = `skill-version:${'2'.repeat(64)}`
+  const parentPayloadDigest = sha256('parent-payload')
+  const candidatePayloadDigest = sha256('candidate-payload')
+  const evaluation = {
+    schemaVersion: 'tianwen.controlled-skill-evaluation-plan.v2',
+    evaluationId, protocolId: record.protocolId, candidateId, scopeKey,
+    parentVersionId, parentPayloadDigest, candidatePayloadDigest,
+  }
+  const shadow = {
+    schemaVersion: 'tianwen.controlled-skill-shadow-plan.v2',
+    shadowId, evaluationId, evaluationPlanDigest: sha256(evaluation), candidateId,
+    parentVersionId, parentPayloadDigest, candidatePayloadDigest,
+    sourceScopeKey: scopeKey, scopeKey, candidateVersionId,
+  }
+  const pointer = {
+    scopeKey,
+    activeVersionId: input.pointerActiveVersionId ?? candidateVersionId,
+    payloadDigest: candidatePayloadDigest,
+    revision: 2,
+  }
+  const receiptPointer = {
+    ...pointer,
+    activeVersionId: input.receiptPointerActiveVersionId ?? pointer.activeVersionId,
+  }
+  const promotionReceipt = {
+    transitionId: promotionTransitionId,
+    state: 'verified',
+    pointer: receiptPointer,
+  }
+  const runControlledSkillTransition = vi.fn(async () => ({
+    state: 'terminal', transition: { transitionId: 'transition:unexpected', state: 'verified' },
+  }))
+  return {
+    runControlledSkillTransition,
+    fixture: controlledExecutorFixture({
+      environmentModel: input.environmentModel,
+      environmentRetryPolicy: input.environmentRetryPolicy,
+      environmentToolSchemas: input.environmentToolSchemas,
+      status: {
+        analysisId: `analysis:${'a'.repeat(64)}`,
+        ticketId: record.ticketId,
+        sessionId: 'main', messageId: 'reply', feedbackVersion: 'v1', consentRevision: 1,
+        parentSessionId: 'main', childSessionId: 'child', phase: 'promoted',
+        candidateId, evaluationId, shadowId, promotionTransitionId,
+        promotionTransitionReceiptDigest: sha256(promotionReceipt),
+      },
+      records: [record],
+      evolution: {
+        getControlledSkillShadow: () => shadow,
+        getControlledSkillEvaluation: () => evaluation,
+        getSkillCandidate: () => ({
+          candidateId, ticketId: record.ticketId, targetScope: scopeKey,
+          parentVersionId, payloadDigest: candidatePayloadDigest,
+        }),
+        getControlledSkillScopePointer: () => pointer,
+        getControlledSkillTransition: () => ({
+          transitionId: promotionTransitionId, shadowId, kind: 'promote', targetPointer: pointer,
+        }),
+        getControlledSkillTransitionReceipt: () => promotionReceipt,
+        listControlledSkillTransitions: () => [],
+      },
+      runtime: {
+        runControlledArms: vi.fn(),
+        runControlledEvaluators: vi.fn(),
+        runControlledShadow: vi.fn(),
+        runControlledSkillTransition,
+      },
+    }),
   }
 }
 
@@ -321,6 +419,64 @@ describe('learning-loop orchestrator', () => {
       expect(fixture.frozen).toEqual([])
     } finally {
       recovery.mockRestore()
+      fixture.dispose()
+    }
+  })
+
+  it('rejects an unknown retained rollback contract before provider activity', async () => {
+    const { fixture, runControlledSkillTransition } = retainedRollbackFixture({
+      recordSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v4',
+    })
+    try {
+      await expect(fixture.rollback()).rejects.toThrow(
+        'controlled rollback governed chain is unavailable',
+      )
+      expect(runControlledSkillTransition).not.toHaveBeenCalled()
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it.each([
+    ['call config', { environmentModel: 'drifted-model' }],
+    ['retry policy', { environmentRetryPolicy: { maxRetries: 1 } }],
+    ['tool config', { environmentToolSchemas: [{ name: 'skill' }, { name: 'other-tool' }] }],
+  ] as const)('rejects retained rollback %s drift before provider activity', async (_kind, drift) => {
+    const { fixture, runControlledSkillTransition } = retainedRollbackFixture(drift)
+    try {
+      await expect(fixture.rollback()).rejects.toThrow(
+        'controlled protocol execution environment drifted',
+      )
+      expect(runControlledSkillTransition).not.toHaveBeenCalled()
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it('rejects a retained rollback whose current pointer no longer names the promoted Candidate', async () => {
+    const { fixture, runControlledSkillTransition } = retainedRollbackFixture({
+      pointerActiveVersionId: `skill-version:${'3'.repeat(64)}`,
+    })
+    try {
+      await expect(fixture.rollback()).rejects.toThrow(
+        'controlled rollback governed chain is unavailable',
+      )
+      expect(runControlledSkillTransition).not.toHaveBeenCalled()
+    } finally {
+      fixture.dispose()
+    }
+  })
+
+  it('rejects a retained rollback whose verified promotion receipt names another pointer', async () => {
+    const { fixture, runControlledSkillTransition } = retainedRollbackFixture({
+      receiptPointerActiveVersionId: `skill-version:${'3'.repeat(64)}`,
+    })
+    try {
+      await expect(fixture.rollback()).rejects.toThrow(
+        'controlled rollback governed chain is unavailable',
+      )
+      expect(runControlledSkillTransition).not.toHaveBeenCalled()
+    } finally {
       fixture.dispose()
     }
   })

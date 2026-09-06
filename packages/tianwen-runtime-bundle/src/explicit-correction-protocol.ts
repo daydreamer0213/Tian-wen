@@ -208,7 +208,7 @@ function workspaceSnapshot(content: string): ExplicitCorrectionWorkspaceSnapshot
   }
 }
 
-function assertWorkspaceSnapshot(
+export function assertExplicitCorrectionWorkspaceSnapshot(
   root: string,
   snapshot: ExplicitCorrectionWorkspaceSnapshot,
 ): void {
@@ -242,6 +242,44 @@ function deepFreeze<T>(value: T): T {
     Object.freeze(value)
   }
   return value
+}
+
+export function buildExplicitCorrectionTransitionInput(input: {
+  readonly root: string
+  readonly shadowId: unknown
+  readonly kind: TransitionKind
+  readonly expectedRevision: number
+  readonly materializeWorkspace: MaterializeWorkspace
+}) {
+  const workspaceRoot = join(input.root, 'workspaces', 'transition', input.kind)
+  const content = `controlled research-summary transition ${input.kind} workspace\n`
+  const expectedWorkspaceSnapshot = workspaceSnapshot(content)
+  input.materializeWorkspace(workspaceRoot, content)
+  const packet = packets['safety-boundary']
+  return deepFreeze({
+    shadowId: input.shadowId,
+    kind: input.kind,
+    expectedRevision: input.expectedRevision,
+    task: {
+      goal: `Verify the active research-summary ${input.kind} pointer.`,
+      input: `Use the active Skill and submit exactly one ${input.kind} transition summary.\n\n${packet.source}`,
+      researchPacket: packet.source,
+      workspaceRoot,
+      workspaceSnapshot: expectedWorkspaceSnapshot,
+      authorization: { mode: 'read-only-product-evaluation', kind: input.kind },
+      verifierContract: {
+        toolName: acceptance.toolName,
+        source: 'accepted-product-submission',
+        packetDigest: rawDigest(packet.source),
+      },
+      stopCondition: { terminal: 'accepted-product-submission' },
+      acceptanceContract: acceptance,
+      acceptanceSubject: packet,
+      allowedTools,
+      stopContract,
+      sessionId: `session:controlled-activation:product:research-summary:${input.kind}:${digest(input.shadowId)}`,
+    },
+  })
 }
 
 function assertFreshSessions(
@@ -279,7 +317,7 @@ function buildResearchSummaryControlledProtocol(
     allowedTools,
     oracle: evaluateResearchSummarySubmission,
     evaluationTaskDefinitions,
-    assertWorkspaceSnapshot,
+    assertWorkspaceSnapshot: assertExplicitCorrectionWorkspaceSnapshot,
     assertFreshSessions,
     buildEvaluationTasks(input: {
       readonly root: string
@@ -526,43 +564,7 @@ function buildResearchSummaryControlledProtocol(
         sessionId: `session:controlled-shadow:product:research-summary:unseen-holdout:${sessionNamespace}`,
       }])
     },
-    buildTransitionInput(input: {
-      readonly root: string
-      readonly shadowId: unknown
-      readonly kind: TransitionKind
-      readonly expectedRevision: number
-      readonly materializeWorkspace: MaterializeWorkspace
-    }) {
-      const workspaceRoot = join(input.root, 'workspaces', 'transition', input.kind)
-      const content = `controlled research-summary transition ${input.kind} workspace\n`
-      const expectedWorkspaceSnapshot = workspaceSnapshot(content)
-      input.materializeWorkspace(workspaceRoot, content)
-      const packet = packets['safety-boundary']
-      return deepFreeze({
-        shadowId: input.shadowId,
-        kind: input.kind,
-        expectedRevision: input.expectedRevision,
-        task: {
-          goal: `Verify the active research-summary ${input.kind} pointer.`,
-          input: `Use the active Skill and submit exactly one ${input.kind} transition summary.\n\n${packet.source}`,
-          researchPacket: packet.source,
-          workspaceRoot,
-          workspaceSnapshot: expectedWorkspaceSnapshot,
-          authorization: { mode: 'read-only-product-evaluation', kind: input.kind },
-          verifierContract: {
-            toolName: acceptance.toolName,
-            source: 'accepted-product-submission',
-            packetDigest: rawDigest(packet.source),
-          },
-          stopCondition: { terminal: 'accepted-product-submission' },
-          acceptanceContract: acceptance,
-          acceptanceSubject: packet,
-          allowedTools,
-          stopContract,
-          sessionId: `session:controlled-activation:product:research-summary:${input.kind}:${digest(input.shadowId)}`,
-        },
-      })
-    },
+    buildTransitionInput: buildExplicitCorrectionTransitionInput,
     freezeExecution(input: {
       readonly callConfig: unknown
       readonly retryPolicy: unknown
