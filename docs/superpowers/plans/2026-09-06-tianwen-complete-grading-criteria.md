@@ -160,7 +160,11 @@ const knownOldRuntimeVersions = ['0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10
   missing/tampered/mixed/source-linked refusals and rollback/idempotency checks.
   Add the new pure source-fidelity test to CI's explicit test list if Task1 creates
   it; native ordinary/controlled/shadow/exploration suites are already listed.
-- [ ] Run touched focused suites and typecheck using Task1's environment. Report
+- [ ] Rebuild existing Runtime dependencies/declarations/bundle and Desktop
+  declarations before artifact/version assertions, so old generated014 bytes
+  cannot mask an015 packaging defect. Use the existing package build scripts;
+  do not package Desktop into its active directory. Run touched focused suites
+  and typecheck using Task1's environment. Report
   and commit only owned version/test files. Do not build over active Desktop,
   install daily, run real models, merge or publish.
 
