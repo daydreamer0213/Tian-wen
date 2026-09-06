@@ -4,6 +4,8 @@ import type {
   LearningSignalId,
   LearningTicketId,
 } from './learning-intake.js'
+import type { ControlledSkillEvaluatorDimensionScoresV3 } from './controlled-skill-evaluation.js'
+import { CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST } from './controlled-skill-source-fidelity.js'
 
 export type TianwenRunId = `run:${string}`
 export type OutcomeSeverity = 1 | 2 | 3 | 4 | 5
@@ -12,7 +14,44 @@ interface ToolAcceptanceBase {
   readonly source: 'dsh-tool-result'
   readonly toolName: string
   readonly notMetErrorCode: string
+  readonly qualityContract?: ResearchSummaryQualityContract
 }
+
+export interface ResearchSummaryQualityContract {
+  readonly schemaVersion: 'tianwen.research-summary-semantic-contract.v1'
+  readonly rubricDigest: Sha256Digest
+}
+
+export type ResearchSummarySemanticReview =
+  | {
+      readonly schemaVersion: 'tianwen.research-summary-semantic-review.v1'
+      readonly status: 'completed'
+      readonly acceptanceSubjectDigest: Sha256Digest
+      readonly submissionDigest: Sha256Digest
+      readonly rubricDigest: Sha256Digest
+      readonly reviewerSessionId: string
+      readonly reviewerSessionDigest: Sha256Digest
+      readonly requestDigest: Sha256Digest
+      readonly reviewEvidenceId: Sha256Digest
+      readonly idGateVerdict: 'met' | 'not-met'
+      readonly scores: ControlledSkillEvaluatorDimensionScoresV3
+    }
+  | {
+      readonly schemaVersion: 'tianwen.research-summary-semantic-review.v1'
+      readonly status: 'inconclusive'
+      readonly reasonCode:
+        | 'no-canonical-submission'
+        | 'review-not-completed'
+        | 'review-invalid'
+      readonly attempt: null | {
+        readonly acceptanceSubjectDigest: Sha256Digest
+        readonly submissionDigest: Sha256Digest
+        readonly rubricDigest: Sha256Digest
+        readonly reviewerSessionId: string
+        readonly requestDigest: Sha256Digest
+        readonly reviewerSessionDigest: Sha256Digest | null
+      }
+    }
 
 export type RunAcceptanceContract =
   | (ToolAcceptanceBase & {
@@ -85,12 +124,22 @@ export interface RunBindingRecordedEvent {
 
 export type OutcomeVerdict = 'met' | 'not-met' | 'inconclusive'
 
-export interface OutcomeIntakeInput {
+interface OutcomeIntakeBase {
   readonly runId: TianwenRunId
   readonly verdict: OutcomeVerdict
   readonly sessionDigest: Sha256Digest
   readonly evidenceIds: readonly Sha256Digest[]
 }
+
+export type LegacyOutcomeIntakeInput = OutcomeIntakeBase
+
+export interface SemanticOutcomeIntakeInput extends OutcomeIntakeBase {
+  readonly semanticReview: ResearchSummarySemanticReview
+}
+
+export type OutcomeIntakeInput =
+  | LegacyOutcomeIntakeInput
+  | SemanticOutcomeIntakeInput
 
 export interface OutcomeLearningSignal {
   readonly signalId: LearningSignalId
@@ -121,15 +170,29 @@ export interface OutcomeIntakeReceipt {
   readonly duplicate: boolean
 }
 
-export interface OutcomeIntakeRecordedEvent {
-  readonly schemaVersion: 'tianwen.outcome-intake.v1'
+interface OutcomeIntakeRecordedEventBase {
   readonly type: 'outcome-intake-recorded'
   readonly at: string
-  readonly input: OutcomeIntakeInput
   readonly inputDigest: Sha256Digest
   readonly receipt: Omit<OutcomeIntakeReceipt, 'duplicate'>
   readonly signal?: OutcomeLearningSignal
 }
+
+export interface LegacyOutcomeIntakeRecordedEvent
+  extends OutcomeIntakeRecordedEventBase {
+  readonly schemaVersion: 'tianwen.outcome-intake.v1'
+  readonly input: LegacyOutcomeIntakeInput
+}
+
+export interface SemanticOutcomeIntakeRecordedEvent
+  extends OutcomeIntakeRecordedEventBase {
+  readonly schemaVersion: 'tianwen.outcome-intake.v2'
+  readonly input: SemanticOutcomeIntakeInput
+}
+
+export type OutcomeIntakeRecordedEvent =
+  | LegacyOutcomeIntakeRecordedEvent
+  | SemanticOutcomeIntakeRecordedEvent
 
 export type PreparedOutcomeIntake =
   | {
@@ -185,6 +248,169 @@ function requireDigest(value: unknown, label: string): Sha256Digest {
   return value as Sha256Digest
 }
 
+function prepareResearchSummaryQualityContract(
+  value: unknown,
+): ResearchSummaryQualityContract {
+  if (!isRecord(value)) {
+    throw new TypeError('qualityContract must be an object')
+  }
+  exactKeys(value, ['schemaVersion', 'rubricDigest'])
+  if (value.schemaVersion !== 'tianwen.research-summary-semantic-contract.v1') {
+    throw new TypeError('qualityContract has an invalid schema version')
+  }
+  if (value.rubricDigest !== CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST) {
+    throw new TypeError('qualityContract rubric is not the frozen rubric')
+  }
+  return {
+    schemaVersion: 'tianwen.research-summary-semantic-contract.v1',
+    rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  }
+}
+
+function prepareResearchSummaryScores(
+  value: unknown,
+): ControlledSkillEvaluatorDimensionScoresV3 {
+  if (!isRecord(value)) {
+    throw new TypeError('semantic review scores must be an object')
+  }
+  exactKeys(value, [
+    'relevance',
+    'correctnessReasoning',
+    'clarityUsability',
+    'scopeRestraint',
+    'sourceFidelity',
+  ])
+  const score = (item: unknown, label: string): number => {
+    if (!Number.isInteger(item) || (item as number) < 0 || (item as number) > 4) {
+      throw new TypeError(`${label} must be an integer from 0 to 4`)
+    }
+    return item as number
+  }
+  return {
+    relevance: score(value.relevance, 'relevance'),
+    correctnessReasoning: score(value.correctnessReasoning, 'correctnessReasoning'),
+    clarityUsability: score(value.clarityUsability, 'clarityUsability'),
+    scopeRestraint: score(value.scopeRestraint, 'scopeRestraint'),
+    sourceFidelity: score(value.sourceFidelity, 'sourceFidelity'),
+  }
+}
+
+export function prepareResearchSummarySemanticReview(
+  value: unknown,
+): ResearchSummarySemanticReview {
+  if (!isRecord(value)) {
+    throw new TypeError('semanticReview must be an object')
+  }
+  if (value.schemaVersion !== 'tianwen.research-summary-semantic-review.v1') {
+    throw new TypeError('semanticReview has an invalid schema version')
+  }
+  if (value.status === 'completed') {
+    exactKeys(value, [
+      'schemaVersion',
+      'status',
+      'acceptanceSubjectDigest',
+      'submissionDigest',
+      'rubricDigest',
+      'reviewerSessionId',
+      'reviewerSessionDigest',
+      'requestDigest',
+      'reviewEvidenceId',
+      'idGateVerdict',
+      'scores',
+    ])
+    if (value.idGateVerdict !== 'met' && value.idGateVerdict !== 'not-met') {
+      throw new TypeError('semanticReview idGateVerdict is invalid')
+    }
+    return {
+      schemaVersion: 'tianwen.research-summary-semantic-review.v1',
+      status: 'completed',
+      acceptanceSubjectDigest: requireDigest(
+        value.acceptanceSubjectDigest,
+        'semanticReview acceptanceSubjectDigest',
+      ),
+      submissionDigest: requireDigest(
+        value.submissionDigest,
+        'semanticReview submissionDigest',
+      ),
+      rubricDigest: requireDigest(value.rubricDigest, 'semanticReview rubricDigest'),
+      reviewerSessionId: nonBlank(value.reviewerSessionId, 'reviewerSessionId'),
+      reviewerSessionDigest: requireDigest(
+        value.reviewerSessionDigest,
+        'semanticReview reviewerSessionDigest',
+      ),
+      requestDigest: requireDigest(value.requestDigest, 'semanticReview requestDigest'),
+      reviewEvidenceId: requireDigest(
+        value.reviewEvidenceId,
+        'semanticReview reviewEvidenceId',
+      ),
+      idGateVerdict: value.idGateVerdict,
+      scores: prepareResearchSummaryScores(value.scores),
+    }
+  }
+  if (value.status !== 'inconclusive') {
+    throw new TypeError('semanticReview status is invalid')
+  }
+  exactKeys(value, ['schemaVersion', 'status', 'reasonCode', 'attempt'])
+  if (
+    value.reasonCode !== 'no-canonical-submission'
+    && value.reasonCode !== 'review-not-completed'
+    && value.reasonCode !== 'review-invalid'
+  ) {
+    throw new TypeError('semanticReview inconclusive reasonCode is invalid')
+  }
+  let attempt: Extract<
+    ResearchSummarySemanticReview,
+    { readonly status: 'inconclusive' }
+  >['attempt'] = null
+  if (value.attempt !== null) {
+    if (!isRecord(value.attempt)) {
+      throw new TypeError('semanticReview attempt must be an object or null')
+    }
+    exactKeys(value.attempt, [
+      'acceptanceSubjectDigest',
+      'submissionDigest',
+      'rubricDigest',
+      'reviewerSessionId',
+      'requestDigest',
+      'reviewerSessionDigest',
+    ])
+    attempt = {
+      acceptanceSubjectDigest: requireDigest(
+        value.attempt.acceptanceSubjectDigest,
+        'semanticReview attempt acceptanceSubjectDigest',
+      ),
+      submissionDigest: requireDigest(
+        value.attempt.submissionDigest,
+        'semanticReview attempt submissionDigest',
+      ),
+      rubricDigest: requireDigest(
+        value.attempt.rubricDigest,
+        'semanticReview attempt rubricDigest',
+      ),
+      reviewerSessionId: nonBlank(
+        value.attempt.reviewerSessionId,
+        'semanticReview attempt reviewerSessionId',
+      ),
+      requestDigest: requireDigest(
+        value.attempt.requestDigest,
+        'semanticReview attempt requestDigest',
+      ),
+      reviewerSessionDigest: value.attempt.reviewerSessionDigest === null
+        ? null
+        : requireDigest(
+            value.attempt.reviewerSessionDigest,
+            'semanticReview attempt reviewerSessionDigest',
+          ),
+    }
+  }
+  return {
+    schemaVersion: 'tianwen.research-summary-semantic-review.v1',
+    status: 'inconclusive',
+    reasonCode: value.reasonCode,
+    attempt,
+  }
+}
+
 export function prepareRunAcceptanceContract(
   value: unknown,
 ): RunAcceptanceContract {
@@ -200,6 +426,9 @@ export function prepareRunAcceptanceContract(
     'notMetErrorCode',
   )
   const gapDisposition = value.gapDisposition
+  const qualityContract = 'qualityContract' in value
+    ? prepareResearchSummaryQualityContract(value.qualityContract)
+    : undefined
   let acceptanceContract: RunAcceptanceContract
   if (
     gapDisposition === 'observe' ||
@@ -210,12 +439,14 @@ export function prepareRunAcceptanceContract(
       'toolName',
       'notMetErrorCode',
       'gapDisposition',
+      ...(qualityContract === undefined ? [] : ['qualityContract']),
     ])
     acceptanceContract = {
       source: 'dsh-tool-result',
       toolName,
       notMetErrorCode,
       gapDisposition,
+      ...(qualityContract === undefined ? {} : { qualityContract }),
     }
   } else if (gapDisposition === 'reusable') {
     exactKeys(value, [
@@ -226,6 +457,7 @@ export function prepareRunAcceptanceContract(
       'problemCategory',
       'severity',
       'blocksGoal',
+      ...(qualityContract === undefined ? [] : ['qualityContract']),
     ])
     const problemCategory = normalizeLearningText(
       nonBlank(value.problemCategory, 'problemCategory'),
@@ -248,6 +480,7 @@ export function prepareRunAcceptanceContract(
       problemCategory,
       severity: value.severity as OutcomeSeverity,
       blocksGoal: value.blocksGoal,
+      ...(qualityContract === undefined ? {} : { qualityContract }),
     }
   } else {
     throw new TypeError('acceptanceContract has an invalid gapDisposition')
@@ -270,12 +503,16 @@ function validateRunBindingInput(input: RunBindingInput): RunBindingInput {
     ...(hasAcceptanceSubject ? ['acceptanceSubjectDigest'] : []),
     ...(isV3 ? ['sessionLifecycleFingerprint'] : []),
   ])
+  const acceptanceContract = prepareRunAcceptanceContract(input.acceptanceContract)
+  if (acceptanceContract.qualityContract !== undefined && !hasAcceptanceSubject) {
+    throw new TypeError('semantic acceptanceContract requires acceptanceSubjectDigest')
+  }
   const common: RunBindingInputV1 = {
     goalRef: nonBlank(input.goalRef, 'goalRef'),
     taskRef: nonBlank(input.taskRef, 'taskRef'),
     sessionId: nonBlank(input.sessionId, 'sessionId'),
     scopeKey: nonBlank(input.scopeKey, 'scopeKey'),
-    acceptanceContract: prepareRunAcceptanceContract(input.acceptanceContract),
+    acceptanceContract,
   }
   const acceptanceSubject = hasAcceptanceSubject
     ? {
@@ -335,11 +572,20 @@ export function prepareRunBinding(input: RunBindingInput): TianwenRunBinding {
       }
 }
 
-function validateOutcomeInput(input: OutcomeIntakeInput): OutcomeIntakeInput {
+function validateOutcomeInput(
+  input: OutcomeIntakeInput,
+  semantic: boolean,
+): OutcomeIntakeInput {
   if (!isRecord(input)) {
     throw new TypeError('Outcome intake input must be an object')
   }
-  exactKeys(input, ['runId', 'verdict', 'sessionDigest', 'evidenceIds'])
+  exactKeys(input, [
+    'runId',
+    'verdict',
+    'sessionDigest',
+    'evidenceIds',
+    ...(semantic ? ['semanticReview'] : []),
+  ])
   if (typeof input.runId !== 'string' || !/^run:[a-f0-9]{64}$/u.test(input.runId)) {
     throw new TypeError('runId must be a Tianwen Run ID')
   }
@@ -363,21 +609,73 @@ function validateOutcomeInput(input: OutcomeIntakeInput): OutcomeIntakeInput {
       `${input.verdict} Outcome has invalid Evidence cardinality`,
     )
   }
-  return {
+  const common: LegacyOutcomeIntakeInput = {
     runId: input.runId,
     verdict: input.verdict,
     sessionDigest: requireDigest(input.sessionDigest, 'sessionDigest'),
     evidenceIds,
   }
+  return semantic
+    ? {
+        ...common,
+        semanticReview: prepareResearchSummarySemanticReview(
+          input.semanticReview,
+        ),
+      }
+    : common
 }
 
 export function prepareOutcomeIntake(
   binding: TianwenRunBinding,
   candidate: OutcomeIntakeInput,
 ): PreparedOutcomeIntake {
-  const input = validateOutcomeInput(candidate)
+  const qualityContract = binding.acceptanceContract.qualityContract
+  const input = validateOutcomeInput(candidate, qualityContract !== undefined)
   if (input.runId !== binding.runId) {
     throw new TypeError('Outcome Run does not match the binding')
+  }
+  if (qualityContract !== undefined) {
+    if (!('semanticReview' in input)) {
+      throw new TypeError('semantic Outcome requires semanticReview')
+    }
+    const review = input.semanticReview
+    const subjectDigest = 'acceptanceSubjectDigest' in binding
+      ? binding.acceptanceSubjectDigest
+      : undefined
+    const attempted = review.status === 'completed' ? review : review.attempt
+    if (
+      subjectDigest === undefined
+      || (
+        attempted !== null
+        && (
+          attempted.acceptanceSubjectDigest !== subjectDigest
+          || attempted.rubricDigest !== qualityContract.rubricDigest
+          || attempted.reviewerSessionId === binding.sessionId
+          || (
+            attempted.reviewerSessionDigest !== null
+            && attempted.reviewerSessionDigest === input.sessionDigest
+          )
+        )
+      )
+    ) {
+      throw new TypeError('semanticReview disagrees with frozen Run facts')
+    }
+    if (review.status === 'inconclusive') {
+      if (input.verdict !== 'inconclusive') {
+        throw new TypeError('inconclusive semanticReview requires inconclusive Outcome')
+      }
+    } else {
+      if (input.evidenceIds.includes(review.reviewEvidenceId)) {
+        throw new TypeError('semantic review Evidence cannot replace source Evidence')
+      }
+      const fixedVerdict = review.idGateVerdict === 'met'
+        && review.scores.sourceFidelity >= 3
+        ? 'met'
+        : 'not-met'
+      if (input.verdict !== fixedVerdict && input.verdict !== 'inconclusive') {
+        throw new TypeError('Outcome verdict disagrees with semanticReview')
+      }
+    }
   }
   const ingestionId = sha256({
     runId: binding.runId,

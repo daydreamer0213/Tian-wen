@@ -124,6 +124,7 @@ export type {
 } from './learning-analysis.js'
 export {
   prepareOutcomeIntake,
+  prepareResearchSummarySemanticReview,
   prepareRunAcceptanceContract,
   prepareRunBinding,
 } from './outcome-intake.js'
@@ -135,6 +136,8 @@ export type {
   OutcomeSeverity,
   OutcomeVerdict,
   PreparedOutcomeIntake,
+  ResearchSummaryQualityContract,
+  ResearchSummarySemanticReview,
   RunAcceptanceContract,
   RunBindingInput,
   RunBindingInputV1,

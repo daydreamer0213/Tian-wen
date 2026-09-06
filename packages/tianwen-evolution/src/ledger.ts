@@ -100,8 +100,13 @@ import type {
   LearningExplorationRequest,
   LearningExplorationStatus,
 } from './learning-exploration.js'
-import { prepareOutcomeIntake, prepareRunBinding } from './outcome-intake.js'
+import {
+  prepareOutcomeIntake,
+  prepareResearchSummarySemanticReview,
+  prepareRunBinding,
+} from './outcome-intake.js'
 import type {
+  LegacyOutcomeIntakeInput,
   OutcomeIntakeInput,
   OutcomeIntakeReceipt,
   OutcomeIntakeRecordedEvent,
@@ -112,6 +117,7 @@ import type {
   RunBindingInput,
   RunBindingReceipt,
   RunBindingRecordedEvent,
+  SemanticOutcomeIntakeInput,
   TianwenRunBinding,
   TianwenRunId,
 } from './outcome-intake.js'
@@ -1616,11 +1622,28 @@ function parseLearningConsentNoticeDeliveredEvent(
   }
 }
 
-function parseOutcomeInput(value: unknown): OutcomeIntakeInput {
+function parseOutcomeInput(
+  value: unknown,
+  semantic: false,
+): LegacyOutcomeIntakeInput
+function parseOutcomeInput(
+  value: unknown,
+  semantic: true,
+): SemanticOutcomeIntakeInput
+function parseOutcomeInput(
+  value: unknown,
+  semantic: boolean,
+): OutcomeIntakeInput {
   if (!isRecord(value)) {
     throw new LedgerIntegrityError('Outcome input must be an object')
   }
-  exactKeys(value, ['runId', 'verdict', 'sessionDigest', 'evidenceIds'])
+  exactKeys(value, [
+    'runId',
+    'verdict',
+    'sessionDigest',
+    'evidenceIds',
+    ...(semantic ? ['semanticReview'] : []),
+  ])
   if (
     value.verdict !== 'met'
     && value.verdict !== 'not-met'
@@ -1631,11 +1654,24 @@ function parseOutcomeInput(value: unknown): OutcomeIntakeInput {
   if (!Array.isArray(value.evidenceIds)) {
     throw new LedgerIntegrityError('Outcome evidenceIds must be an array')
   }
-  return {
+  const common: LegacyOutcomeIntakeInput = {
     runId: requireString(value.runId, 'runId') as TianwenRunId,
     verdict: value.verdict as OutcomeVerdict,
     sessionDigest: requireDigest(value.sessionDigest),
     evidenceIds: value.evidenceIds.map(requireDigest),
+  }
+  if (!semantic) return common
+  try {
+    return {
+      ...common,
+      semanticReview: prepareResearchSummarySemanticReview(
+        value.semanticReview,
+      ),
+    }
+  } catch (error) {
+    throw new LedgerIntegrityError('invalid semantic Outcome review', {
+      cause: error,
+    })
   }
 }
 
@@ -1739,23 +1775,32 @@ function parseOutcomeEvent(
     ['schemaVersion', 'type', 'at', 'input', 'inputDigest', 'receipt'],
     ['signal'],
   )
-  if (value.schemaVersion !== 'tianwen.outcome-intake.v1') {
+  const semantic = value.schemaVersion === 'tianwen.outcome-intake.v2'
+  if (value.schemaVersion !== 'tianwen.outcome-intake.v1' && !semantic) {
     throw new LedgerIntegrityError('invalid Outcome intake schema version')
   }
-  const input = parseOutcomeInput(value.input)
   const receipt = parseOutcomeReceipt(value.receipt)
   const signal = value.signal === undefined
     ? undefined
     : parseOutcomeSignal(value.signal)
-  return {
-    schemaVersion: 'tianwen.outcome-intake.v1',
-    type: 'outcome-intake-recorded',
+  const common = {
+    type: 'outcome-intake-recorded' as const,
     at,
-    input,
     inputDigest: requireDigest(value.inputDigest),
     receipt,
     ...(signal === undefined ? {} : { signal }),
   }
+  return semantic
+    ? {
+        schemaVersion: 'tianwen.outcome-intake.v2',
+        ...common,
+        input: parseOutcomeInput(value.input, true),
+      }
+    : {
+        schemaVersion: 'tianwen.outcome-intake.v1',
+        ...common,
+        input: parseOutcomeInput(value.input, false),
+      }
 }
 
 function parseStoredRunBinding(value: unknown): TianwenRunBinding {
@@ -4385,15 +4430,32 @@ export class EvolutionLedger {
           }
         : {}),
     }
-    this.#accept({
-      schemaVersion: 'tianwen.outcome-intake.v1',
-      type: 'outcome-intake-recorded',
+    const commonEvent = {
+      type: 'outcome-intake-recorded' as const,
       at: this.#now(),
-      input: clone(input),
       inputDigest: prepared.inputDigest,
       receipt,
       ...(signal === undefined ? {} : { signal }),
-    })
+    }
+    const storedInput = 'semanticReview' in input
+      ? {
+          ...input,
+          semanticReview: prepareResearchSummarySemanticReview(
+            input.semanticReview,
+          ),
+        }
+      : input
+    this.#accept('semanticReview' in input
+      ? {
+          schemaVersion: 'tianwen.outcome-intake.v2',
+          ...commonEvent,
+          input: clone(storedInput as SemanticOutcomeIntakeInput),
+        }
+      : {
+          schemaVersion: 'tianwen.outcome-intake.v1',
+          ...commonEvent,
+          input: clone(storedInput as LegacyOutcomeIntakeInput),
+        })
     return { ...receipt, duplicate: false }
   }
 

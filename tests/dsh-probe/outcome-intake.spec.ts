@@ -9,7 +9,9 @@ import {
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
   LedgerIntegrityError,
+  prepareResearchSummarySemanticReview,
   prepareRunAcceptanceContract,
   prepareRunBinding,
   type RunBindingInput,
@@ -29,6 +31,13 @@ const acceptance = {
   blocksGoal: false,
 } as const
 
+const qualityContract = {
+  schemaVersion: 'tianwen.research-summary-semantic-contract.v1',
+  rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+} as const
+
+const semanticAcceptance = { ...acceptance, qualityContract } as const
+
 const base: RunBindingInput = {
   goalRef: 'goal:research-preview',
   taskRef: 'task:summarize-observation',
@@ -40,12 +49,45 @@ const base: RunBindingInput = {
 const digest = (character: string) =>
   `sha256:${character.repeat(64)}` as const
 
+const completedSemanticReview = (patch: Record<string, unknown> = {}) => ({
+  schemaVersion: 'tianwen.research-summary-semantic-review.v1',
+  status: 'completed',
+  acceptanceSubjectDigest: digest('a'),
+  submissionDigest: digest('b'),
+  rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  reviewerSessionId: 'session:semantic-reviewer',
+  reviewerSessionDigest: digest('c'),
+  requestDigest: digest('d'),
+  reviewEvidenceId: digest('f'),
+  idGateVerdict: 'met',
+  scores: {
+    relevance: 3,
+    correctnessReasoning: 3,
+    clarityUsability: 3,
+    scopeRestraint: 3,
+    sourceFidelity: 3,
+  },
+  ...patch,
+})
+
 function bind(
   ledger: EvolutionLedger,
   sessionId: string,
   patch: Partial<RunBindingInput> = {},
 ) {
   return ledger.recordRunBinding({ ...base, sessionId, ...patch }).runId
+}
+
+function bindSemantic(
+  ledger: EvolutionLedger,
+  sessionId: string,
+) {
+  return ledger.recordRunBinding({
+    ...base,
+    sessionId,
+    acceptanceContract: semanticAcceptance,
+    acceptanceSubjectDigest: digest('a'),
+  } as unknown as RunBindingInput).runId
 }
 
 function record(
@@ -99,7 +141,267 @@ describe('Outcome read projection', () => {
   })
 })
 
+describe('Research-summary semantic Outcome', () => {
+  it('requires independent proof bound to the subject, rubric, and fixed verdict', () => {
+    const ledger = new EvolutionLedger(root('semantic-invalid'))
+    const runId = bindSemantic(ledger, 'session:semantic-invalid')
+    const source = {
+      runId,
+      sessionDigest: digest('1'),
+      evidenceIds: [digest('e')],
+    }
+    for (const verdict of ['met', 'not-met', 'inconclusive'] as const) {
+      expect(() => ledger.recordOutcomeIntake({
+        ...source,
+        verdict,
+      } as Parameters<EvolutionLedger['recordOutcomeIntake']>[0]))
+        .toThrow(LedgerIntegrityError)
+    }
+
+    const valid = completedSemanticReview()
+    const invalid = [
+      { ...source, verdict: 'met', semanticReview: { ...valid, acceptanceSubjectDigest: digest('9') } },
+      { ...source, verdict: 'met', semanticReview: { ...valid, rubricDigest: digest('9') } },
+      { ...source, verdict: 'not-met', semanticReview: valid },
+      {
+        ...source,
+        verdict: 'met',
+        semanticReview: {
+          ...valid,
+          scores: { ...valid.scores, sourceFidelity: 2 },
+        },
+      },
+      {
+        ...source,
+        verdict: 'met',
+        semanticReview: { ...valid, idGateVerdict: 'not-met' },
+      },
+      {
+        ...source,
+        verdict: 'met',
+        semanticReview: { ...valid, scores: { ...valid.scores, sourceFidelity: 2.5 } },
+      },
+      {
+        ...source,
+        verdict: 'met',
+        semanticReview: {
+          ...valid,
+          reviewerSessionId: 'session:semantic-invalid',
+        },
+      },
+      {
+        ...source,
+        verdict: 'met',
+        semanticReview: {
+          ...valid,
+          reviewerSessionDigest: source.sessionDigest,
+        },
+      },
+      {
+        ...source,
+        verdict: 'met',
+        semanticReview: {
+          ...valid,
+          reviewEvidenceId: source.evidenceIds[0],
+        },
+      },
+    ]
+    for (const input of invalid) {
+      expect(() => ledger.recordOutcomeIntake(
+        input as Parameters<EvolutionLedger['recordOutcomeIntake']>[0],
+      )).toThrow(LedgerIntegrityError)
+    }
+  })
+
+  it('uses the five-dimension semantic grade without weakening ID gates', () => {
+    const ledger = new EvolutionLedger(root('semantic-grade'))
+    const cases = [
+      {
+        sessionId: 'session:semantic-score-2',
+        verdict: 'not-met',
+        review: completedSemanticReview({
+          scores: {
+            relevance: 3,
+            correctnessReasoning: 3,
+            clarityUsability: 3,
+            scopeRestraint: 3,
+            sourceFidelity: 2,
+          },
+        }),
+        decision: 'signal-recorded',
+      },
+      {
+        sessionId: 'session:semantic-score-3',
+        verdict: 'met',
+        review: completedSemanticReview(),
+        decision: 'no-case',
+      },
+      {
+        sessionId: 'session:semantic-id-failure',
+        verdict: 'not-met',
+        review: completedSemanticReview({ idGateVerdict: 'not-met' }),
+        decision: 'ticket-created',
+      },
+      {
+        sessionId: 'session:semantic-downgrade',
+        verdict: 'inconclusive',
+        review: completedSemanticReview(),
+        decision: 'continue-observing',
+      },
+    ] as const
+
+    for (const item of cases) {
+      const runId = bindSemantic(ledger, item.sessionId)
+      expect(ledger.recordOutcomeIntake({
+        runId,
+        verdict: item.verdict,
+        sessionDigest: digest('1'),
+        evidenceIds: item.verdict === 'inconclusive' ? [] : [digest('e')],
+        semanticReview: item.review,
+      } as Parameters<EvolutionLedger['recordOutcomeIntake']>[0]))
+        .toMatchObject({ decision: item.decision })
+      expect(ledger.getOutcomeIntake(runId)).toMatchObject({
+        schemaVersion: 'tianwen.outcome-intake.v2',
+        input: { verdict: item.verdict, semanticReview: item.review },
+      })
+    }
+  })
+
+  it('allows only outer inconclusive for an explicit inconclusive proof', () => {
+    const ledger = new EvolutionLedger(root('semantic-inconclusive'))
+    const semanticReview = {
+      schemaVersion: 'tianwen.research-summary-semantic-review.v1',
+      status: 'inconclusive',
+      reasonCode: 'review-not-completed',
+      attempt: null,
+    } as const
+    const firstRun = bindSemantic(ledger, 'session:semantic-inconclusive-ok')
+    expect(ledger.recordOutcomeIntake({
+      runId: firstRun,
+      verdict: 'inconclusive',
+      sessionDigest: digest('1'),
+      evidenceIds: [],
+      semanticReview,
+    } as Parameters<EvolutionLedger['recordOutcomeIntake']>[0]))
+      .toMatchObject({ decision: 'continue-observing' })
+
+    const secondRun = bindSemantic(ledger, 'session:semantic-inconclusive-fail')
+    expect(() => ledger.recordOutcomeIntake({
+      runId: secondRun,
+      verdict: 'not-met',
+      sessionDigest: digest('2'),
+      evidenceIds: [digest('e')],
+      semanticReview,
+    } as Parameters<EvolutionLedger['recordOutcomeIntake']>[0]))
+      .toThrow(LedgerIntegrityError)
+    expect(ledger.listLearningSignals()).toEqual([])
+  })
+
+  it('replays v2 proof exactly and rejects proof tampering', () => {
+    const directory = root('semantic-replay')
+    const ledger = new EvolutionLedger(directory)
+    const runId = bindSemantic(ledger, 'session:semantic-replay')
+    const input = {
+      runId,
+      verdict: 'met' as const,
+      sessionDigest: digest('1'),
+      evidenceIds: [digest('e')],
+      semanticReview: completedSemanticReview(),
+    } as Parameters<EvolutionLedger['recordOutcomeIntake']>[0]
+    ledger.recordOutcomeIntake(input)
+    expect(ledger.recordOutcomeIntake(structuredClone(input)))
+      .toMatchObject({ duplicate: true })
+    for (const semanticReview of [
+      { ...input.semanticReview, requestDigest: digest('9') },
+      { ...input.semanticReview, reviewerSessionId: 'session:another-reviewer' },
+      {
+        ...input.semanticReview,
+        scores: { ...input.semanticReview.scores, relevance: 4 },
+      },
+    ]) {
+      expect(() => ledger.recordOutcomeIntake({ ...input, semanticReview }))
+        .toThrow(LedgerIntegrityError)
+    }
+    expect(new EvolutionLedger(directory).getOutcomeIntake(runId))
+      .toEqual(ledger.getOutcomeIntake(runId))
+
+    const path = join(directory, 'ledger.jsonl')
+    const lines = readFileSync(path, 'utf8').trimEnd().split('\n')
+    const event = JSON.parse(lines.at(-1)!) as {
+      input: { semanticReview: { requestDigest: string } }
+    }
+    event.input.semanticReview.requestDigest = digest('9')
+    lines[lines.length - 1] = JSON.stringify(event)
+    writeFileSync(path, `${lines.join('\n')}\n`)
+    expect(() => new EvolutionLedger(directory)).toThrow(LedgerIntegrityError)
+  })
+})
+
 describe('Tianwen Run binding', () => {
+  it('prepares the explicit research-summary quality contract and requires its subject', () => {
+    expect(prepareRunAcceptanceContract(semanticAcceptance))
+      .toEqual(semanticAcceptance)
+    expect(() => prepareRunAcceptanceContract({
+      ...semanticAcceptance,
+      qualityContract: {
+        ...qualityContract,
+        rubricDigest: digest('0'),
+      },
+    })).toThrow(/rubric/i)
+    expect(() => prepareRunBinding({
+      ...base,
+      acceptanceContract: semanticAcceptance,
+    } as unknown as RunBindingInput)).toThrow(/acceptanceSubjectDigest/i)
+
+    const prepared = prepareRunBinding({
+      ...base,
+      acceptanceContract: semanticAcceptance,
+      acceptanceSubjectDigest: digest('a'),
+    } as unknown as RunBindingInput)
+    expect(prepared).toMatchObject({
+      schemaVersion: 'tianwen.run-binding.v2',
+      acceptanceContract: semanticAcceptance,
+      acceptanceSubjectDigest: digest('a'),
+    })
+  })
+
+  it('strictly prepares completed and explicit inconclusive semantic reviews', () => {
+    const completed = completedSemanticReview()
+    expect(prepareResearchSummarySemanticReview(completed)).toEqual(completed)
+    const noAttempt = {
+      schemaVersion: 'tianwen.research-summary-semantic-review.v1',
+      status: 'inconclusive',
+      reasonCode: 'review-not-completed',
+      attempt: null,
+    }
+    expect(prepareResearchSummarySemanticReview(noAttempt)).toEqual(noAttempt)
+    const incompleteAttempt = {
+      ...noAttempt,
+      reasonCode: 'review-invalid',
+      attempt: {
+        acceptanceSubjectDigest: digest('a'),
+        submissionDigest: digest('b'),
+        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        reviewerSessionId: 'session:semantic-reviewer',
+        requestDigest: digest('d'),
+        reviewerSessionDigest: null,
+      },
+    }
+    expect(prepareResearchSummarySemanticReview(incompleteAttempt))
+      .toEqual(incompleteAttempt)
+
+    for (const malformed of [
+      null,
+      undefined,
+      { ...completed, submissionDigest: undefined },
+      { ...completed, scores: { ...completed.scores, sourceFidelity: 5 } },
+      { ...completed, scores: { ...completed.scores, relevance: 2.5 } },
+      { ...completed, unexpected: true },
+    ]) {
+      expect(() => prepareResearchSummarySemanticReview(malformed)).toThrow()
+    }
+  })
+
   it('prepares a stable immutable Run identity', () => {
     const first = prepareRunBinding(base)
     expect(prepareRunBinding(structuredClone(base))).toEqual(first)
@@ -116,6 +418,24 @@ describe('Tianwen Run binding', () => {
       .toMatch(/^sha256:[a-f0-9]{64}$/u)
     expect(first.runId)
       .toBe('run:651b90b41f091d26d593a60659738d971b37b667f7788a462ff21362c9cc0af2')
+  })
+
+  it('keeps the legacy Outcome event and digest byte-for-byte compatible', () => {
+    const directory = root('legacy-event')
+    const ledger = new EvolutionLedger(directory)
+    const runId = bind(ledger, base.sessionId)
+    record(ledger, runId, 'met')
+    const event = ledger.getOutcomeIntake(runId)!
+
+    expect(event.schemaVersion).toBe('tianwen.outcome-intake.v1')
+    expect(event.inputDigest)
+      .toBe('sha256:2d8088b98cd17ee94c60edf5485971516b2f54a9b1631e69bcb86c25e77f30f7')
+    expect(Object.keys(event.input)).toEqual([
+      'runId', 'verdict', 'sessionDigest', 'evidenceIds',
+    ])
+    expect(prepareRunBinding(base).runId)
+      .toBe('run:651b90b41f091d26d593a60659738d971b37b667f7788a462ff21362c9cc0af2')
+    expect(new EvolutionLedger(directory).getOutcomeIntake(runId)).toEqual(event)
   })
 
   it('binds a v2 verifier subject outside the reusable acceptance contract', () => {

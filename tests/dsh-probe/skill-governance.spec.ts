@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { renderSkillContent } from '@tianwen/dsh-compat'
 import {
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
   LedgerIntegrityError,
   sha256,
   type RunBindingInput,
@@ -278,6 +279,79 @@ describe('governed Skill evidence', () => {
       .toMatchObject({ duplicate: true })
     expect(() => ledger.recordRunSkillUse({ ...input, skillCallSeq: 9 }))
       .toThrow(LedgerIntegrityError)
+  })
+
+  it('keeps source Outcome Evidence separate from inline semantic review proof', () => {
+    const ledger = new EvolutionLedger(root('semantic-use'))
+    const sessionId = 'session:semantic-use'
+    const acceptanceSubjectDigest = digest('c')
+    const { runId } = ledger.recordRunBinding({
+      goalRef: 'goal:research-preview',
+      taskRef: `task:${sessionId}`,
+      sessionId,
+      scopeKey: 'project:tianwen/capability:research-summary',
+      acceptanceContract: {
+        ...acceptance,
+        qualityContract: {
+          schemaVersion: 'tianwen.research-summary-semantic-contract.v1',
+          rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        },
+      },
+      acceptanceSubjectDigest,
+    } as unknown as RunBindingInput)
+    const manifest = ledger.recordRunSkillManifest({ runId, skill: parent })
+    const sessionDigest = digest('1')
+    const acceptanceEvidenceId = digest('a')
+    const reviewEvidenceId = digest('f')
+    ledger.recordOutcomeIntake({
+      runId,
+      verdict: 'met',
+      sessionDigest,
+      evidenceIds: [acceptanceEvidenceId],
+      semanticReview: {
+        schemaVersion: 'tianwen.research-summary-semantic-review.v1',
+        status: 'completed',
+        acceptanceSubjectDigest,
+        submissionDigest: digest('d'),
+        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        reviewerSessionId: 'session:semantic-reviewer',
+        reviewerSessionDigest: digest('e'),
+        requestDigest: digest('2'),
+        reviewEvidenceId,
+        idGateVerdict: 'met',
+        scores: {
+          relevance: 3,
+          correctnessReasoning: 3,
+          clarityUsability: 3,
+          scopeRestraint: 3,
+          sourceFidelity: 3,
+        },
+      },
+    } as Parameters<EvolutionLedger['recordOutcomeIntake']>[0])
+    const sourceUse = {
+      runId,
+      parentVersionId: manifest.parentVersionId,
+      sessionId,
+      sessionDigest,
+      skillName: parent.name,
+      contentDigest: ledger.getRunSkillManifest(runId)!.contentDigest,
+      skillEvidenceId: digest('b'),
+      acceptanceEvidenceId,
+      skillCallSeq: 10,
+      skillResultSeq: 11,
+      acceptanceCallSeq: 12,
+    } satisfies RunSkillUseInput
+
+    expect(ledger.recordRunSkillUse(sourceUse))
+      .toMatchObject({ duplicate: false })
+    expect(() => ledger.recordRunSkillUse({
+      ...sourceUse,
+      acceptanceEvidenceId: reviewEvidenceId,
+    })).toThrow(LedgerIntegrityError)
+    expect(() => ledger.recordRunSkillUse({
+      ...sourceUse,
+      sessionDigest: digest('e'),
+    })).toThrow(LedgerIntegrityError)
   })
 
   it('records and replays direct invocation provenance without rewriting v1 uses', () => {
