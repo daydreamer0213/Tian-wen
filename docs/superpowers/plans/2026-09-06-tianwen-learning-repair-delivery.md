@@ -133,6 +133,46 @@ same public schemas with exact new release identity, using existing
 
 ## Controller closure
 
+### Full-gate verification repair (separate from release metadata)
+
+The first complete gate at `ff078bb` found one actual native integration failure
+(1699 passed /1 failed /18 skipped). The new source reader accesses
+`tianwenEvidence` through `TianwenLearningLoopService`, whose native inject list
+does not declare that existing service. Diagnostic evidence shows failure before
+Candidate or evaluator. The aggregate request fix's sole scoped review is clean;
+this separate execution defect still prevents delivery.
+
+- [x] Reproduce the native product story and add the missing existing service to
+  `packages/tianwen-runtime-bundle/src/learning-loop-orchestrator.ts` inject list.
+  No new tools, services, permissions, Context escape or weaker source checks.
+- [x] Synchronize `tests/dsh-migration/explicit-correction-product.e2e.spec.ts`
+  with current explicit-feedback v3, preserving ordinary Outcome v2, public
+  Candidate/evaluation/holdout/activation/transfer/rollback/report assertions and
+  its no-test-owned-authority guard. Distinguish 14 total controlled Sessions
+  from 13 Skill-using product Sessions; do not mechanically change both counts.
+- [x] Focused native RED/GREEN and covering tests, build before artifact checks,
+  independent scoped task review, then controller final full regression. No real
+  model/history/installation mutation or reopened broad evaluation design.
+
+Follow-through found a second existing native assembly defect: the declaration
+repair reaches verified v3 promotion, but withdrawal rollback re-enters strict
+active-feedback recovery and fails after feedback is withdrawn. Repair rollback
+from its exact persisted governed chain and frozen execution configuration through
+the existing native transition path, without reading revoked feedback as new
+positive authority or changing source creation/evaluation/promotion gates. If
+needed, extract the existing shared transition builder in the protocol module and
+add focused protocol/orchestrator tests; preserve version/task identity, pointer
+revision checks, rollback post-check, ordinary future-task and report assertions.
+
+Implemented at `530d338`: 141 covering tests and 71 artifact/interface tests pass,
+with root typecheck and forced eight-project build followed by bundle rebuild.
+The complete native story includes withdrawal rollback and future root reuse;
+six negative binding/config/version cases reject before provider execution.
+Independent task review is Approved; controller full regression passes1707 with
+18 conditional skips. Scripted mechanism checks are not real-model acceptance.
+The separate final frozen status-only real-model UI turn subsequently passes;
+it does not demonstrate new exploration, source adaptation or promotion.
+
 Task 1 is independently approved at `c576d7b`: exact release/predecessor identities,
 unchanged frozen patch, retained state, idempotence, rollback and strict refusal.
 Covering tests: 286 passed / 13 existing opt-in skips after forced type build and
@@ -140,10 +180,14 @@ bundle rebuild. Existing nonfatal dts composite warning is retained for final
 review. Read-only real-layout preflight recognizes both current installed 0.1.12
 roots as eligible predecessors; no actual upgrade or efficacy is implied.
 
-- [ ] One whole-branch review and full exact-source gates after parent and delivery
+- [x] One whole-branch review and full exact-source gates after parent and delivery
   task reviews. Carry deferred minors and actual-vs-mechanism proof boundaries.
-- [ ] Distinct isolated candidate with native module identity gate; actual retained
+- [x] Distinct isolated candidate with native module identity gate; actual retained
   `0.1.12` predecessor upgrade and preserved records, no acceptance-history edits.
+  Normal installer upgraded the actual retained012 installation to013, repeat
+  preserved the ready receipt, old archive stayed unchanged, installed Runtime
+  matched the genuine final UI candidate. Correct Profile module identity14/14,
+  actual native cold boot/help exit0, separate Desktop candidate audit passed.
 - [ ] Reviewed main integration, exact-main CI, then authorized daily upgrade and
   Desktop startup/exit using existing preservation and rollback boundaries.
 - [ ] Honest route handoff: engineering delivery is not genuine learning efficacy.

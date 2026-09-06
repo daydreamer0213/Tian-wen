@@ -10,8 +10,13 @@ case was manufactured from these successes. The independently reviewed [source-f
 has completed its three independent task reviews for new protocols only. Its
 complete successful path is at most 14 Runs, while old v2 remains 13. The bounded
 trusted-parent repair is also reviewed at c6d5f23; immutable 0.1.13 delivery
-compatibility is reviewed at c576d7b. Whole-branch and final artifact gates follow.
-No new activation or daily upgrade occurred.
+compatibility is reviewed at c576d7b. The whole-branch aggregate-request finding
+was fixed and independently re-reviewed at ff078bb. Its full regression exposed
+a separate native service/withdrawal-rollback assembly defect; bounded repair
+530d338 passes 141 covering and 71 artifact checks. Scoped review is approved and
+the final complete regression passes1707 with18 conditional skips. A final genuine
+status UI turn passes the frozen read-only criteria. Actual predecessor upgrade,
+main integration/CI and daily delivery remain. No new genuine activation occurred.
 
 The user's continuation mandate covers the four-stage route, not only the
 previous finite repair/delivery round. Execution follows
@@ -436,3 +441,93 @@ matched at 00:30Z. At 00:49Z the new installer read-only classifier recognized b
 actual installed old roots as managed-runtime-predecessor. No real upgrade or
 new model call occurred. Old isolated server and browser tab are no longer active;
 the final frozen status scenario remains unsubmitted until final artifact gates.
+
+## Final review fix and full-gate native assembly failure
+
+The whole-branch review at c4149d0 identified one Important aggregate request
+binding gap. Its sole bounded fix ff078bb is independently re-reviewed: expected
+native envelope and complete tool schema must match the actual request before
+provider execution. Three pre-freeze mutations were first reproduced; 246 covering
+checks and 71 rebuilt-artifact/interface checks passed after correcting native
+user-message selection without dropping plugin-context identity checks.
+
+The controller's complete gate then reported 1699 passed /1 failed /18 skipped,
+100 files passed /1 failed /5 skipped, 366.86 seconds. The full explicit-feedback
+product story stopped at failed before Candidate/evaluator instead of promoted.
+A read-only diagnostic of the existing recovery catch identifies the actual
+missing native tianwenEvidence injection in the learning-loop Service. This is
+not introduced by ff078bb; its caller and source reader are unchanged in that
+two-file fix range. The initially attempted prior-source comparison did not load
+the old module and is not valid evidence. The current error is directly observed.
+
+The native assembly declaration and existing product fixture are being repaired
+within the original source-fidelity design. The fixture's legacy score/task and
+holdout assumptions must follow v3 while ordinary Outcome stays v2; fourteen
+controlled Sessions do not imply fourteen research-summary Skill-use records.
+No new tools/permissions, old-Candidate regrade, actual model submission, merge,
+installation or second broad review was performed. The ff078bb isolated artifact
+passed 14 native-module identity checks but is not delivery-ready. All 39 existing
+isolated Session/state files, 30 daily data files and approved source bytes remain
+unchanged. Full current gates and final real usage must follow this repair.
+
+## Final repaired-source and genuine status gate (2026-09-06)
+
+Native service declaration and verified withdrawal rollback are repaired at
+`530d338b123fabc45d338ba0fded5435750085b7`. Independent task review is spec compliant
+and quality Approved, with no Critical/Important findings. Positive source gates
+remain strict; rollback uses verified retained v2/v3 records and frozen config
+through the existing native transition. Full native story preserves14 controlled
+Sessions versus13 Skill uses, old Session freezing, future root reuse after
+withdrawal and exactly-once reports. Six negative config/binding/version cases pass.
+
+Final complete Vitest:1707 passed/18 conditional skips,101 files passed/5 skipped,
+332.94s,exit0. Public docs25 passed. Full Python608 passed/4 skipped was run at
+c4149d0; Python code has not changed since. Known dts composite warning and absent
+actual native Context dispose/remount test remain explicit. New nonblocking
+coverage suggestions are independent fixed expected transition bytes and a
+revision-only pointer-negative case; actual production checks remain intact.
+
+Distinct isolated Runtime SHA256:
+`1dd42cb635c6489ad1b2c16090a62784e01f7114a88b6cb4fc3a4cc49f1013c2`,
+native physical-module identity14/14. Once these gates passed, the frozen final
+status question was submitted exactly once through Codex's in-app browser at
+02:29:41.721Z. Session `session-50d2c3b4-9652-4987-8f7b-3c6226317fe0` completed
+Turn1 at02:29:49.603Z. Both dialogue request headers are official flash/high;
+one separate title request is not counted as a dialogue request or billing total.
+The sole tool is `tianwen_learning_status`. The answer respects current-Session
+scope and says activation details are unavailable; it does not infer global
+activation from counts, start learning, change configuration or inspect files.
+The frozen status criterion passes; source adoption/promotion/efficacy do not.
+
+Browser restoration touched the old D Session before new-chat navigation. Its
+whole-file hash therefore changed, but the complete original66,624-byte prefix
+retains its original digest; the only addition is83 bytes encoding one native
+`session/end-seed` marker with empty data. The other38 original files, including
+B and the learning ledger, are wholly unchanged. No historical answer, feedback,
+Outcome or evaluation was edited/re-executed. The new ordinary status Session is
+additional evidence, not a Candidate. The temporary tab and owned Web process
+were closed; port55132 no longer listens. Daily30 files remain unchanged.
+
+Exact local evidence is retained under the independent acceptance root in
+`evidence/final-gates-530d338` and `evidence/final-runtime-status-scenario.md`.
+Real old-install upgrade and exact-main delivery gates follow; no package/tag/
+Release publication or genuine new learning efficacy is implied.
+
+## Real retained predecessor and Desktop candidate
+
+The genuinely installed disposable012 predecessor was upgraded by the normal
+installer to013/ready; repeating returned the same receipt without rebuilding.
+Old012 archive digest remains unchanged. New stable archive SHA256 is
+`fb2a31c4c8304b6964ddb3fb87cda5325c812760f17aa3ea56a671d67b76ebc4`;
+installed Runtime bytes equal the final real-UI candidate above. The retained
+predecessor had no nonempty user history, so this does not replace daily30-file
+preservation. A diagnostic incorrectly looked for a nonpublished build metafile,
+then compared the Profile with the separate CLI tree. Those failures are retained,
+not product failures or passes. Correct installed Profile comparison passes14/14;
+the actual native cold boot/help exits0. No install dependency was manually changed.
+
+Desktop preview.14 was packaged into a distinct candidate directory, not the
+active shortcut target. Strict resource/archive audit passes. Existing builder
+warnings remain visible (metadata defaults, disabled asar, default icon).
+Reviewed main integration/exact-main CI and daily upgrade are next; no external
+package, tag, release or installer upload has been performed.

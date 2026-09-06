@@ -11,9 +11,19 @@ ten-Run paired evaluation and was rejected on five met/met ties; no blind review
 holdout or activation followed. The completed result is not regenerated/regraded.
 Reviewed main-session status/recovery repairs work in actual UI. Scenario C passed
 normal task/prose acceptance; D also passed once, completing the four-task tranche
-without a fabricated new feedback case. A bounded versioned
-source-fidelity evaluation revision is now being implemented after independent
-design review (14 successful-path Runs for new protocols, 13 legacy).
+without a fabricated new feedback case. The bounded versioned source-fidelity
+evaluation revision is implemented and task-reviewed (14 successful-path Runs
+for new protocols, 13 legacy). Trusted-parent and immutable 0.1.13 / preview.14
+delivery compatibility are also task-reviewed. The aggregate request binding fix
+is approved at ff078bb. Full regression then reported 1699 passed /1 failed /18
+skips: native source recovery lacks the existing evidence-service declaration.
+That narrow assembly repair, verified withdrawal rollback and product-fixture
+synchronization are implemented at 530d338, with 141 covering and 71 artifact
+checks passed. Independent scoped review is approved and the final full run
+passes1707 with18 conditional skips. One final genuine status UI turn also passes:
+exact official flash/high, sole read-only native status tool, no new learning or
+activation claim. Actual retained predecessor upgrade and exact-main/daily delivery
+remain; engineering checks do not close the still-open genuine learning paths.
 The exact approved external summary source is admitted read-only only in the
 isolated profile and visible to main status, not yet analyst-inspected/adapted.
 No development-branch changes are delivered to daily installation. Genuine
