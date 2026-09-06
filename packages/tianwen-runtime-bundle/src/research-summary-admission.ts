@@ -5,8 +5,10 @@ import type { SkillDefinition, SkillRegistration } from '@deepseek-ai/dsh-skill'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import {
   learningSessionLifecycleFingerprint,
+  prepareResearchSummarySemanticReview,
   prepareRunSkillManifest,
   sha256,
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
   type ControlledSkillScopePointer,
   type GovernedSkillCandidate,
   type RunSkillManifest,
@@ -17,6 +19,8 @@ import {
   RESEARCH_SUMMARY_SCOPE,
   RESEARCH_SUMMARY_SKILL_NAME,
   RESEARCH_SUMMARY_TOOL_NAME,
+  recoverResearchSummaryQualityReview,
+  runResearchSummaryQualityReview,
   TIANWEN_CONTROLLED_AGENT_PRESET,
   createResearchSummaryTool,
   evaluateResearchSummarySubmission,
@@ -24,13 +28,16 @@ import {
   parseResearchPacket,
   type ResearchPacket,
   type RuntimeOutcomeVerdictAttestation,
+  type ResearchSummarySubmission,
+  type ResearchSummaryToolResult,
 } from '@tianwen/runtime'
 import { renderSkillContent } from '@deepseek-ai/dsh-skill'
 
 const GOAL_REF = 'goal:research-summary-source'
 const TASK_REF = 'task:research-summary-source'
 const NOT_MET_ERROR_CODE = 'RESEARCH_SUMMARY_NOT_MET'
-const OUTCOME_CATEGORY = 'research-summary-result.v1:'
+const OUTCOME_CATEGORY = 'research-summary-result.v2:'
+const LEGACY_OUTCOME_CATEGORY = 'research-summary-result.v1:'
 const VERSION_RUN_ID = `run:${'0'.repeat(64)}` as TianwenRunId
 const SKILL_GESTURE = /^\s*\/research-summary(?=\s|$)/u
 
@@ -45,6 +52,7 @@ interface InstalledAdmission {
   readonly skill: SkillDefinition
   readonly tool: ToolDefinition
   readonly dispose: () => Promise<void>
+  semanticReview?: RuntimeOutcomeVerdictAttestation['semanticReview']
   reconciliation?: Promise<void>
 }
 
@@ -455,6 +463,10 @@ export class TianwenResearchSummaryAdmissionService extends Service {
             problemCategory: `${OUTCOME_CATEGORY}${versionOf(selection.skill)}`,
             severity: 2,
             blocksGoal: false,
+            qualityContract: {
+              schemaVersion: 'tianwen.research-summary-semantic-contract.v1',
+              rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+            },
           },
           acceptanceSubjectDigest: sha256(gesture.packet),
         },
@@ -557,6 +569,31 @@ export class TianwenResearchSummaryAdmissionService extends Service {
     runId: TianwenRunId,
   ): Promise<InstalledAdmission> {
     const tool = createResearchSummaryTool(packet, { kind: 'source-capture' })
+    const originalExecute = tool.execute.bind(tool)
+    tool.execute = async (args, execution) => {
+      const result = await originalExecute(args, execution) as ResearchSummaryToolResult
+      if (execution.agent === agent && result.verdict === 'not-evaluated') {
+        const current = this.installed.get(agent)
+        const binding = current === undefined
+          ? undefined
+          : this.ctx.tianwenEvolution.getRunBinding(current.runId)
+        const header = agent.session.requestHeader()
+        if (current !== undefined
+          && binding?.acceptanceContract.qualityContract !== undefined
+          && header !== undefined) {
+          current.semanticReview = await runResearchSummaryQualityReview(this.ctx, {
+            parentAgent: agent,
+            run: binding,
+            packet: current.packet,
+            submission: result.submission,
+            sourceCallId: String(execution.callId),
+            sourceCallConfig: header.config,
+            signal: execution.signal,
+          })
+        }
+      }
+      return result
+    }
     let disposeSkill: (() => void) | undefined
     let disposeTool: (() => void) | undefined
     try {
@@ -684,8 +721,11 @@ export class TianwenResearchSummaryAdmissionService extends Service {
       .then(async () => {
         if (this.installed.get(agent) !== installed) return
         if (!await this.ctx.sessions.flush(agent.session)) return
+        const attestation = await this.outcomeAttestation(agent, taskSession, installed)
         this.ctx.tianwenLearningIntake.consumeOutcome(
-          taskSession, installed.runId, this.outcomeAttestation(taskSession, installed),
+          taskSession,
+          installed.runId,
+          attestation,
         )
         this.ctx.tianwenLearningIntake.recordSkillUse(taskSession, installed.runId)
         await this.ctx.get('tianwenLearningLoop')?.observeOutcome(agent, installed.runId)
@@ -696,14 +736,17 @@ export class TianwenResearchSummaryAdmissionService extends Service {
     this.pending.add(work)
   }
 
-  private outcomeAttestation(
+  private async outcomeAttestation(
+    agent: Agent,
     session: Pick<Agent['session'], 'id' | 'events'>,
     installed: InstalledAdmission,
-  ): RuntimeOutcomeVerdictAttestation | undefined {
+  ): Promise<RuntimeOutcomeVerdictAttestation | undefined> {
     const contract = this.ctx.tianwenEvolution.getRunBinding(installed.runId)?.acceptanceContract
     // Capture-only historical bindings retain their original interpretation.
     if (contract?.gapDisposition !== 'reusable'
-      || contract.problemCategory !== `${OUTCOME_CATEGORY}${versionOf(installed.skill)}`) return undefined
+      || (contract.problemCategory !== `${OUTCOME_CATEGORY}${versionOf(installed.skill)}`
+        && contract.problemCategory
+          !== `${LEGACY_OUTCOME_CATEGORY}${versionOf(installed.skill)}`)) return undefined
     const events = session.events
     const boundary = events.findLast(event => event.type === 'turn/start' || event.type === 'turn/end')
     const evidence = this.ctx.tianwenEvidence.project(session)
@@ -713,23 +756,56 @@ export class TianwenResearchSummaryAdmissionService extends Service {
       || evidence?.outcome.status !== 'complete') return undefined
     // An incomplete or malformed accepted submission is inconclusive, not met.
     let verdict: RuntimeOutcomeVerdictAttestation['verdict'] = 'inconclusive'
+    let submission: ResearchSummarySubmission | undefined
     const call = events.find(event => event.seq === evidence.source.callSeq)
     const result = events.find(event => event.seq === evidence.source.resultSeq)
     if (call?.type === 'tool/call' && result?.type === 'tool/result'
       && call.data.turn === boundary.data.turn && result.seq < boundary.seq
       && !evidence.outcome.isError && evidence.outcome.errorCode === undefined) {
       try {
-        const submission = normalizeResearchSummarySubmission(
+        const accepted = normalizeResearchSummarySubmission(
           installed.packet, JSON.parse(call.data.arguments) as unknown,
         )
         const blocks = result.data.message.content[0].content
         if (blocks.length === 1 && blocks[0]?.type === 'text'
-          && exactObject(JSON.parse(blocks[0].text), { verdict: 'not-evaluated', submission })) {
-          verdict = evaluateResearchSummarySubmission(installed.packet, submission)
+          && exactObject(JSON.parse(blocks[0].text), {
+            verdict: 'not-evaluated', submission: accepted,
+          })) {
+          submission = accepted
+          verdict = evaluateResearchSummarySubmission(installed.packet, accepted)
         }
       } catch { /* Invalid persisted material cannot establish task success. */ }
     }
-    return { verdict, acceptanceEvidenceId: evidence.evidenceId }
+    if (contract.qualityContract === undefined) {
+      return { verdict, acceptanceEvidenceId: evidence.evidenceId }
+    }
+    const semanticReview = submission === undefined
+      ? prepareResearchSummarySemanticReview({
+          schemaVersion: 'tianwen.research-summary-semantic-review.v1',
+          status: 'inconclusive',
+          reasonCode: 'no-canonical-submission',
+          attempt: null,
+        })
+      : await recoverResearchSummaryQualityReview(this.ctx, {
+          parentAgent: agent,
+          run: this.ctx.tianwenEvolution.getRunBinding(installed.runId)!,
+          packet: installed.packet,
+          submission,
+          ...(installed.semanticReview === undefined
+            ? {} : { expectedReview: installed.semanticReview }),
+          signal: new AbortController().signal,
+        })
+    const semanticVerdict = semanticReview.status === 'completed'
+      ? semanticReview.idGateVerdict === 'met'
+          && semanticReview.scores.sourceFidelity >= 3
+        ? 'met'
+        : 'not-met'
+      : 'inconclusive'
+    return {
+      verdict: semanticVerdict,
+      acceptanceEvidenceId: evidence.evidenceId,
+      semanticReview,
+    }
   }
 }
 

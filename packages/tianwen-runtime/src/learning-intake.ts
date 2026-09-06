@@ -18,11 +18,14 @@ import type {
   TianwenRunId,
   SkillVersionId,
   RunSkillUseV2Provenance,
+  ResearchSummarySemanticReview,
 } from '@tianwen/evolution'
 import {
   learningSessionLifecycleFingerprint,
+  prepareResearchSummarySemanticReview,
   prepareRunBinding,
   prepareRunSkillManifest,
+  sha256,
 } from '@tianwen/evolution'
 import { canonicalEvidenceDigest } from '@tianwen/evidence'
 
@@ -79,6 +82,7 @@ export interface RuntimeOutcomeIntakeReceipt extends OutcomeIntakeReceipt {
 export interface RuntimeOutcomeVerdictAttestation {
   readonly verdict: 'met' | 'not-met' | 'inconclusive'
   readonly acceptanceEvidenceId: Sha256Digest
+  readonly semanticReview?: ResearchSummarySemanticReview
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -139,9 +143,20 @@ function runBindingInput(
 
 export class TianwenLearningIntakeService extends Service {
   static inject = ['tianwenEvidence', 'tianwenEvolution'] as const
+  private readonly trustedResearchSummaryReviews = new Map<Sha256Digest, TianwenRunId>()
 
   constructor(ctx: Context) {
     super(ctx, 'tianwenLearningIntake')
+  }
+
+  trustRecoveredResearchSummaryReview(
+    runId: TianwenRunId,
+    review: ResearchSummarySemanticReview,
+  ): void {
+    if (review.status !== 'completed') {
+      throw new Error('only completed research summary reviews can be trusted')
+    }
+    this.trustedResearchSummaryReviews.set(sha256(review), runId)
   }
 
   bindRun(
@@ -607,13 +622,58 @@ export class TianwenLearningIntakeService extends Service {
             === binding.acceptanceContract.notMetErrorCode
           ? 'not-met'
           : 'inconclusive'
-    let verdict: 'met' | 'not-met' | 'inconclusive' = evidenceVerdict
+    const qualityContract = binding.acceptanceContract.qualityContract
+    let semanticReview: ResearchSummarySemanticReview | undefined
+    let verdict: 'met' | 'not-met' | 'inconclusive' = qualityContract === undefined
+      ? evidenceVerdict
+      : 'inconclusive'
+    if (qualityContract !== undefined) {
+      const supplied = attestation?.semanticReview
+      if (supplied !== undefined
+        && (supplied.status === 'inconclusive'
+          || (supplied.status === 'completed'
+            && binding.schemaVersion === 'tianwen.run-binding.v3'
+            && this.trustedResearchSummaryReviews.get(sha256(supplied)) === runId
+            && supplied.acceptanceSubjectDigest === binding.acceptanceSubjectDigest
+            && supplied.rubricDigest === qualityContract.rubricDigest
+            && supplied.submissionDigest === finalEvidence?.action.argumentsDigest))) {
+        try {
+          semanticReview = prepareResearchSummarySemanticReview(supplied)
+        } catch { /* A malformed review cannot establish a semantic verdict. */ }
+      }
+      if (supplied?.status === 'completed') {
+        this.trustedResearchSummaryReviews.delete(sha256(supplied))
+      }
+      if (semanticReview === undefined) {
+        semanticReview = prepareResearchSummarySemanticReview({
+          schemaVersion: 'tianwen.research-summary-semantic-review.v1',
+          status: 'inconclusive',
+          reasonCode: supplied === undefined
+            ? finalEvidence === undefined || finalEvidence.outcome.status !== 'complete'
+                || finalEvidence.outcome.isError
+              ? 'no-canonical-submission'
+              : 'review-not-completed'
+            : 'review-invalid',
+          attempt: null,
+        })
+      }
+      verdict = semanticReview.status === 'completed'
+        ? semanticReview.idGateVerdict === 'met'
+            && semanticReview.scores.sourceFidelity >= 3
+          ? 'met'
+          : 'not-met'
+        : 'inconclusive'
+    } else if (attestation?.semanticReview !== undefined) {
+      throw new Error('legacy Outcome verdict attestation cannot include semantic review')
+    }
     if (attestation !== undefined) {
       const agrees = finalBoundary.data.reason.kind === 'completed'
         && finalEvidence !== undefined
         && finalEvidence.evidenceId === attestation.acceptanceEvidenceId
         && finalEvidence.outcome.status === 'complete'
-        && (attestation.verdict === 'inconclusive' || (attestation.verdict === 'met'
+        && (qualityContract !== undefined
+          ? true
+          : attestation.verdict === 'inconclusive' || (attestation.verdict === 'met'
           ? finalEvidence.outcome.isError === false
             && finalEvidence.outcome.errorCode === undefined
           : (finalEvidence.outcome.isError === false
@@ -625,7 +685,7 @@ export class TianwenLearningIntakeService extends Service {
                   === binding.acceptanceContract.notMetErrorCode
               ))))
       if (!agrees) throw new Error('Outcome verdict attestation does not match Evidence')
-      verdict = attestation.verdict
+      if (qualityContract === undefined) verdict = attestation.verdict
     }
 
     const receipt = this.ctx.tianwenEvolution.recordOutcomeIntake({
@@ -633,6 +693,7 @@ export class TianwenLearningIntakeService extends Service {
       verdict,
       sessionDigest: before,
       evidenceIds: finalEvidence === undefined ? [] : [finalEvidence.evidenceId],
+      ...(semanticReview === undefined ? {} : { semanticReview }),
     })
     if (sessionDigest(session.events) !== before) {
       throw new Error('Outcome intake changed the DSH Session')

@@ -32,6 +32,17 @@ export type {
 } from './research-summary.js'
 
 export {
+  RESEARCH_SUMMARY_QUALITY_AGENT_PRESET,
+  RESEARCH_SUMMARY_QUALITY_TOOL_NAME,
+  recoverResearchSummaryQualityReview,
+  runResearchSummaryQualityReview,
+} from './research-summary-quality.js'
+export type {
+  RecoverResearchSummaryQualityReviewInput,
+  RunResearchSummaryQualityReviewInput,
+} from './research-summary-quality.js'
+
+export {
   ControlledSkillActivationPreflightError,
 } from './controlled-skill-activation.js'
 export type {

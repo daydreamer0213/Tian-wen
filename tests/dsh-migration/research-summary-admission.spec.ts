@@ -20,6 +20,9 @@ import { createToolResultMessage } from '@deepseek-ai/dsh-llm'
 import { renderSkillContent } from '@deepseek-ai/dsh-skill'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import {
+  RESEARCH_SUMMARY_QUALITY_TOOL_NAME,
+} from '../../packages/tianwen-runtime/src/research-summary-quality.js'
+import {
   RESEARCH_SUMMARY_BASE_SKILL,
   RESEARCH_SUMMARY_SKILL_NAME,
   RESEARCH_SUMMARY_TOOL_NAME,
@@ -28,6 +31,7 @@ import {
 import { TianwenResearchSummaryAdmissionService } from '../../packages/tianwen-runtime-bundle/src/research-summary-admission.js'
 import { recoverResearchSummarySourceCase } from '../../packages/tianwen-runtime-bundle/src/research-summary-source-case.js'
 import {
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
   learningSessionLifecycleFingerprint,
   prepareRunSkillManifest,
   sha256,
@@ -70,6 +74,18 @@ function direct(text: string) {
   return createUserMessage({
     content: [{ type: 'text' as const, text }],
     source: { kind: 'user' as const },
+  })
+}
+
+function qualityResponse(callId: string, sourceFidelity = 3) {
+  return toolCallResponse(callId, RESEARCH_SUMMARY_QUALITY_TOOL_NAME, {
+    scores: {
+      relevance: 3,
+      correctnessReasoning: 3,
+      clarityUsability: 3,
+      scopeRestraint: 3,
+      sourceFidelity,
+    },
   })
 }
 
@@ -360,16 +376,18 @@ describe('research summary first-step admission', () => {
     const harness = await mount(directory, [
       toolCallResponse('first-submit', RESEARCH_SUMMARY_TOOL_NAME, {
         summary: 'Verified result.', confirmedFindingIds: ['f1'], uncertaintyIds: [],
-      }), textResponse('Verified result.'), textResponse('You are welcome.'),
+      }), qualityResponse('first-review'), textResponse('Verified result.'),
+      textResponse('You are welcome.'),
     ])
     let queued = false
+    let handle: Awaited<ReturnType<typeof harness.ctx.agents.create>> | undefined
     const off = harness.ctx.on('agent/turn-stopping', ({ agent, turn }) => {
-      if (turn === 1) {
+      if (agent === handle?.agent && turn === 1) {
         queued = true
         agent.followup(direct('谢谢'))
       }
     })
-    const handle = await harness.ctx.agents.create({
+    handle = await harness.ctx.agents.create({
       sessionId: SessionId(`queued-${randomUUID()}`), meta: { cwd: directory },
       agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
     })
@@ -380,7 +398,8 @@ describe('research summary first-step admission', () => {
       const binding = harness.ctx.tianwenEvolution.getRunBindingBySessionId(String(handle.agent.session.id))!
       expect(queued).toBe(true)
       expect(handle.agent.session.events.filter(event => event.type === 'turn/end')).toHaveLength(2)
-      expect(harness.ctx.tianwenEvolution.getOutcomeIntake(binding.runId)?.input.verdict).toBe('not-met')
+      expect(harness.ctx.tianwenEvolution.getOutcomeIntake(binding.runId)?.input.verdict)
+        .toBe('not-met')
       expect(harness.ctx.tianwenEvolution.getRunSkillUse(binding.runId)).toBeDefined()
       expect(harness.ctx.tianwenEvolution.listLearningSignals()).toHaveLength(1)
     } finally {
@@ -396,8 +415,9 @@ describe('research summary first-step admission', () => {
       toolCallResponse('submit-source', RESEARCH_SUMMARY_TOOL_NAME, {
         summary: 'The verified result is concrete.',
         confirmedFindingIds: ['f1'],
-        uncertaintyIds: [],
+        uncertaintyIds: ['u1'],
       }),
+      qualityResponse('review-source', 2),
       textResponse('The verified result is concrete.'),
     ])
     const handle = await harness.ctx.agents.create({
@@ -413,7 +433,7 @@ describe('research summary first-step admission', () => {
       expect(
         harness.adapter.requests,
         JSON.stringify(handle.agent.session.events),
-      ).toHaveLength(2)
+      ).toHaveLength(3)
       expect(harness.adapter.requests[0]!.tools?.map(tool => tool.name))
         .toContain(RESEARCH_SUMMARY_TOOL_NAME)
       const firstMessages = harness.adapter.requests[0]!.messages
@@ -434,6 +454,13 @@ describe('research summary first-step admission', () => {
         schemaVersion: 'tianwen.run-binding.v3',
         goalRef: 'goal:research-summary-source',
         taskRef: 'task:research-summary-source',
+        acceptanceContract: {
+          problemCategory: expect.stringMatching(/^research-summary-result\.v2:/u),
+          qualityContract: {
+            schemaVersion: 'tianwen.research-summary-semantic-contract.v1',
+            rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+          },
+        },
       })
       expect(binding === undefined
         ? undefined
@@ -451,7 +478,78 @@ describe('research summary first-step admission', () => {
       expect(harness.ctx.tianwenEvolution.listLearningSignals()).toMatchObject([{
         runId: binding!.runId,
       }])
+      const outcome = harness.ctx.tianwenEvolution.getOutcomeIntake(binding!.runId)?.input
+      expect(outcome).toMatchObject({
+          verdict: 'not-met',
+          semanticReview: {
+            status: 'completed',
+            idGateVerdict: 'met',
+            scores: { sourceFidelity: 2 },
+          },
+        })
+      expect(outcome?.evidenceIds).toHaveLength(1)
+      expect(outcome?.evidenceIds).not.toContain(outcome?.semanticReview?.status === 'completed'
+        ? outcome.semanticReview.reviewEvidenceId
+        : undefined)
       expect(harness.ctx.tianwenEvolution.listLearningTickets()).toEqual([])
+    } finally {
+      await handle.dispose()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps an unavailable native review inconclusive and does not admit a failure Signal', async () => {
+    const directory = root('review-unavailable')
+    const harness = await mount(directory, [
+      toolCallResponse('unavailable-submit', RESEARCH_SUMMARY_TOOL_NAME, {
+        summary: 'Verified result; deployment region undecided.',
+        confirmedFindingIds: ['f1'], uncertaintyIds: ['u1'],
+      }),
+      new Error('fixture reviewer provider unavailable'),
+      textResponse('Submitted summary.'),
+    ])
+    const handle = await harness.ctx.agents.create({
+      sessionId: SessionId(`review-unavailable-${randomUUID()}`), meta: { cwd: directory },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      handle.agent.followup(direct(invocation))
+      await waitForIdle(harness.ctx, handle.agent)
+      await harness.ctx.tianwenResearchSummaryAdmission.whenIdle()
+      const binding = harness.ctx.tianwenEvolution
+        .getRunBindingBySessionId(String(handle.agent.session.id))!
+      expect(harness.ctx.tianwenEvolution.getOutcomeIntake(binding.runId)?.input)
+        .toMatchObject({
+          verdict: 'inconclusive',
+          semanticReview: { status: 'inconclusive' },
+        })
+      expect(harness.ctx.tianwenEvolution.listLearningSignals()).toEqual([])
+    } finally {
+      await handle.dispose()
+      await harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps a turn without a canonical source submission inconclusive without starting a reviewer', async () => {
+    const directory = root('missing-submission')
+    const harness = await mount(directory, [textResponse('No submission was made.')])
+    const handle = await harness.ctx.agents.create({
+      sessionId: SessionId(`missing-submission-${randomUUID()}`), meta: { cwd: directory },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
+    })
+    try {
+      handle.agent.followup(direct(invocation))
+      await waitForIdle(harness.ctx, handle.agent)
+      await harness.ctx.tianwenResearchSummaryAdmission.whenIdle()
+      const binding = harness.ctx.tianwenEvolution
+        .getRunBindingBySessionId(String(handle.agent.session.id))!
+      expect(harness.ctx.tianwenEvolution.getOutcomeIntake(binding.runId)?.input)
+        .toMatchObject({
+          verdict: 'inconclusive',
+          semanticReview: { status: 'inconclusive', reasonCode: 'no-canonical-submission' },
+        })
+      expect(harness.adapter.requests).toHaveLength(1)
+      expect(harness.ctx.tianwenEvolution.listLearningSignals()).toEqual([])
     } finally {
       await handle.dispose()
       await harness.ctx.fiber.dispose()
@@ -466,6 +564,7 @@ describe('research summary first-step admission', () => {
         summary: uncertaintyIds.length ? 'Verified result; deployment region undecided.' : 'Verified result.',
         confirmedFindingIds: ['f1'], uncertaintyIds,
       }),
+      qualityResponse(`ordinary-review-${index}`),
       textResponse('Submitted summary.'),
     ]))
     const writes = vi.spyOn(harness.ctx.tianwenEvolution, 'recordOutcomeIntake')
@@ -540,11 +639,13 @@ describe('research summary first-step admission', () => {
     ])
     const bind = harness.ctx.tianwenLearningIntake.bindInitialStepWithSkill.bind(harness.ctx.tianwenLearningIntake)
     // Reproduce the prior release's persisted contract, not a new evaluated Run.
-    vi.spyOn(harness.ctx.tianwenLearningIntake, 'bindInitialStepWithSkill').mockImplementation((session, input, skill) =>
-      bind(session, { ...input, acceptanceContract: {
-        ...input.acceptanceContract, gapDisposition: 'reusable', problemCategory: 'research-summary-correction',
+    vi.spyOn(harness.ctx.tianwenLearningIntake, 'bindInitialStepWithSkill').mockImplementation((session, input, skill) => {
+      const { qualityContract: _qualityContract, ...legacyContract } = input.acceptanceContract
+      return bind(session, { ...input, acceptanceContract: {
+        ...legacyContract, gapDisposition: 'reusable', problemCategory: 'research-summary-correction',
         severity: 2, blocksGoal: false,
-      } }, skill))
+      } }, skill)
+    })
     const sessionId = SessionId(`legacy-outcome-${randomUUID()}`)
     const handle = await harness.ctx.agents.create({
       sessionId, meta: { cwd: directory }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
