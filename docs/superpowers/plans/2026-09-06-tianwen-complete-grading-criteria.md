@@ -118,7 +118,8 @@ $env:TIANWEN_DSH_PROBE_PYTHON = 'D:/DevData/tianwen-worktrees/tianwen-architectu
   old/new family ×60,000/300,000ms ×old/new capacity recovery checks and mixed
   rubric/holdout/policy rejection before writes/provider calls. Preserve existing
   v2/transition/restore snapshots. Native new controlled successful path still
-  uses10 paired+1aggregate+1holdout+1holdout-review plus1analysis, not extra rounds.
+  uses10 paired+1aggregate+1holdout+1holdout-review+1promotion transition, not
+  extra rounds. Source/analysis/exploration Sessions are counted separately.
 - [ ] Self-review full owned diff for fixed-old constants, semantic downgrade and
   blind material leaks. Commit only owned code/tests. Report RED/GREEN commands,
   evidence logs, compatibility pins, deviations and concerns. Controller runs the
