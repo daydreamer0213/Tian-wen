@@ -1147,7 +1147,9 @@ function evaluatorRequestReason(
     || request.purpose !== undefined
     || !callConfigEquals(requestConfig(request), state.config)
     || request.tools?.length !== 1
-    || request.tools[0]?.name !== 'submit_blind_evaluation') {
+    || request.tools[0]?.name !== 'submit_blind_evaluation'
+    || sha256(request.tools) !== state.expectedToolSchemaDigest
+    || controlledEvaluatorEnvelopeDigest(request) !== state.expectedEnvelopeDigest) {
     return 'request-contract-mismatch'
   }
   if (request.messages.some(message => record(message.source)?.kind === 'skill-catalog')
@@ -3496,6 +3498,9 @@ export class TianwenSkillEvaluationService extends Service {
           throw new Error('controlled aggregate evaluator workspace mismatch')
         }
         const groupTasks = group.map(entry => entry.task)
+        const envelope = aggregate
+          ? { evaluations: group.map(entry => entry.envelope) }
+          : first.envelope
         const state: ControlledEvaluatorState = {
           sessionId: first.planned.evaluatorSessionId,
           config: resolved,
@@ -3506,6 +3511,7 @@ export class TianwenSkillEvaluationService extends Service {
             goal: task.goal,
             input: task.input,
           })),
+          expectedEnvelopeDigest: sha256(envelope),
           ...(aggregate ? { expectedTaskIds: groupTasks.map(task => task.taskId) } : {}),
           requiresSourceFidelity: plan.schemaVersion
             === 'tianwen.controlled-skill-evaluation-plan.v3',
@@ -3538,14 +3544,13 @@ export class TianwenSkillEvaluationService extends Service {
           await handle.dispose()
           throw new Error('controlled evaluator Agent facts mismatch')
         }
+        state.expectedToolSchemaDigest = sha256(schemas)
         prepared.push({
           evaluationId: plan.evaluationId,
           tasks: groupTasks,
           planned: group.map(entry => entry.planned),
           assignments: group.map(entry => entry.assignment),
-          envelope: aggregate
-            ? { evaluations: group.map(entry => entry.envelope) }
-            : first.envelope,
+          envelope,
           handle,
           state,
         })
@@ -5019,9 +5024,11 @@ interface ControlledEvaluatorState {
     RunControlledSkillEvaluatorTaskInput,
     'goal' | 'input'
   >[]
+  readonly expectedEnvelopeDigest: Sha256Digest
   readonly expectedTaskIds?: readonly ControlledSkillEvalTaskId[]
   readonly requiresSourceFidelity: boolean
   readonly requests: GenerateOptions[]
+  expectedToolSchemaDigest?: Sha256Digest
   agent?: AgentHandle['agent']
   active: boolean
   deadline: number
@@ -5128,7 +5135,7 @@ function controlledShadowReviewRequestReason(
     || request.tools?.length !== 1
     || request.tools[0]?.name !== 'submit_holdout_review'
     || sha256(request.tools) !== state.expectedToolSchemaDigest
-    || controlledShadowReviewEnvelopeDigest(request) !== state.expectedEnvelopeDigest) {
+    || controlledEvaluatorEnvelopeDigest(request) !== state.expectedEnvelopeDigest) {
     return 'request-contract-mismatch'
   }
   if (request.messages.some(message => record(message.source)?.kind === 'skill-catalog')
@@ -5138,10 +5145,11 @@ function controlledShadowReviewRequestReason(
   return undefined
 }
 
-function controlledShadowReviewEnvelopeDigest(
+function controlledEvaluatorEnvelopeDigest(
   request: GenerateOptions,
 ): Sha256Digest | undefined {
-  const messages = request.messages.filter(message => message.role === 'user')
+  const messages = request.messages.filter(message =>
+    message.role === 'user' && record(message.source)?.kind === 'user')
   const content = messages[0]?.content
   if (messages.length !== 1 || content?.length !== 1 || content[0]?.type !== 'text') {
     return undefined

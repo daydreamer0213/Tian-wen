@@ -327,6 +327,7 @@ async function mountControlledRuntime(
     readonly includeWorkspacePolicyContext?: boolean
     readonly includeRoleSpecificPromptDrift?: boolean
     readonly aggregateEvaluatorSession?: boolean
+    readonly aggregateEvaluatorRequestMutation?: 'packet-input' | 'material' | 'schema'
     readonly sourceFidelity?: boolean
   } = {},
 ) {
@@ -406,6 +407,50 @@ async function mountControlledRuntime(
     })
   }
   await apply(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+  let aggregateEvaluatorRequestWasMutated = false
+  if (options.aggregateEvaluatorRequestMutation !== undefined) {
+    const createAgent = harness.ctx.agents.create.bind(harness.ctx.agents)
+    vi.spyOn(harness.ctx.agents, 'create').mockImplementation(async agentOptions => {
+      const handle = await createAgent(agentOptions)
+      if (!String(handle.agent.id).includes(':aggregate:evaluator')) return handle
+      const followup = handle.agent.followup.bind(handle.agent)
+      vi.spyOn(handle.agent, 'followup').mockImplementation(message => {
+        aggregateEvaluatorRequestWasMutated = true
+        if (options.aggregateEvaluatorRequestMutation === 'schema') {
+          const assemble = handle.agent.ctx.systemPrompt.assemble
+            .bind(handle.agent.ctx.systemPrompt)
+          vi.spyOn(handle.agent.ctx.systemPrompt, 'assemble').mockImplementation(async context => {
+            const assembly = await assemble(context)
+            return {
+              ...assembly,
+              tools: assembly.tools.map((schema, index) => index === 0
+                ? { ...schema, description: 'Changed aggregate evaluator schema.' }
+                : schema),
+            }
+          })
+          return followup(message)
+        }
+        const changed = structuredClone(message)
+        const block = changed.content.find(item => item.type === 'text')
+        if (block?.type === 'text') {
+          const envelope = JSON.parse(block.text) as {
+            evaluations: {
+              input: string
+              x: { materialText: string }
+            }[]
+          }
+          if (options.aggregateEvaluatorRequestMutation === 'packet-input') {
+            envelope.evaluations[0]!.input = 'Changed aggregate packet input.'
+          } else {
+            envelope.evaluations[0]!.x.materialText = 'Changed accepted material.'
+          }
+          block.text = JSON.stringify(envelope)
+        }
+        return followup(changed)
+      })
+      return handle
+    })
+  }
   if (options.tamperEvaluatorRequestIdentity === true) {
     harness.ctx.systemPrompt.section({
       name: 'test:controlled-evaluator-identity-leak',
@@ -575,6 +620,7 @@ async function mountControlledRuntime(
     harness,
     verifierBodies,
     requestWasTampered: () => requestTampered,
+    aggregateEvaluatorRequestWasMutated: () => aggregateEvaluatorRequestWasMutated,
     input: {
       candidateId: seeded.candidateId,
       protocolId: seeded.protocolId,
@@ -1151,6 +1197,53 @@ describe('controlled Skill evaluation Runtime', () => {
       await mounted.harness.ctx.fiber.dispose()
     }
   })
+
+  it.each(['packet-input', 'material', 'schema'] as const)(
+    'rejects native v3 aggregate evaluator %s drift before evaluator provider activity',
+    async mutation => {
+      const mounted = await mountControlledRuntime(
+        `source-fidelity-aggregate-request-${mutation}-drift`,
+        [
+          ...blindSafeArmScript(),
+          toolCallResponse(
+            `source-fidelity-aggregate-score-${mutation}`,
+            'submit_blind_evaluation',
+            aggregateEvaluatorSubmission(true),
+          ),
+        ],
+        {
+          aggregateEvaluatorSession: true,
+          aggregateEvaluatorRequestMutation: mutation,
+          baselineImprovementRequired: false,
+          sourceFidelity: true,
+        },
+      )
+      try {
+        const arms = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledArms(
+          mounted.input,
+        )
+        expect(arms.state, JSON.stringify(arms)).toBe('awaiting-evaluator')
+
+        const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledEvaluators(
+          evaluatorInput(mounted.input, arms.evaluationId),
+        )
+
+        expect(mounted.aggregateEvaluatorRequestWasMutated()).toBe(true)
+        expect(receipt).toMatchObject({
+          state: 'stopped',
+          stop: { stage: 'evaluator', reasonCode: 'request-contract-mismatch' },
+        })
+        expect(mounted.adapter.requests).toHaveLength(30)
+        expect(mounted.harness.ctx.tianwenEvolution
+          .listControlledSkillEvaluatorObservations(arms.evaluationId)).toEqual([])
+        expect(mounted.harness.ctx.tianwenEvolution
+          .getControlledSkillEvaluationResult(arms.evaluationId)).toBeUndefined()
+      } finally {
+        mounted.disposeParent()
+        await mounted.harness.ctx.fiber.dispose()
+      }
+    },
+  )
 
   it.each(invalidAggregateSubmissions)(
     'rejects an aggregate evaluator submission with %s task identities atomically',
