@@ -188,6 +188,23 @@ roots as eligible predecessors; no actual upgrade or efficacy is implied.
   preserved the ready receipt, old archive stayed unchanged, installed Runtime
   matched the genuine final UI candidate. Correct Profile module identity14/14,
   actual native cold boot/help exit0, separate Desktop candidate audit passed.
-- [ ] Reviewed main integration, exact-main CI, then authorized daily upgrade and
-  Desktop startup/exit using existing preservation and rollback boundaries.
-- [ ] Honest route handoff: engineering delivery is not genuine learning efficacy.
+- [x] Reviewed main integration and exact-main CI. Initial `2d15f75` CI failed
+  before product activity because two test fixtures hardcoded a Windows parent
+  path on Linux. Bounded test-only fix `4ac0b3f` creates the configured/native
+  parent, preserves all assertions and cleanup, passes77 owned/235 covering
+  checks, root typecheck and independent spec/quality review. All four jobs in
+  [CI34008379420](https://github.com/daydreamer0213/Tian-wen/actions/runs/34008379420)
+  pass on exact main `4ac0b3f4048f6cc53991842cc1bd6aa91e5af12a`. Product source
+  and immutable final artifact remain `530d338`; the failed CI log is retained.
+- [x] Authorized daily upgrade and Desktop startup/exit using existing
+  preservation and rollback boundaries. Normal managed012→013 and native Web
+  update passed, exact accepted artifact bytes and ready receipt verified.
+  Repeat installer returns the identical receipt. The original shortcut remains
+  byte-identical; old preview13 program is recoverably retained, preview14 passes
+  actual packaged startup/page-load/exit/owned-DSH-cleanup (1 passed/4 filtered,
+  5.59s). All30 original data files match after every boundary. Two GPU log
+  messages are retained; no warning-free graphics claim.
+- [x] Honest route handoff: engineering delivery is not genuine learning efficacy.
+  See [the exact delivery record](../../operations/tianwen-learning-repairs-delivery-20260906.md).
+  A–D remain closed, old B rejection unchanged; genuine exploration, source
+  adoption, new v3 promotion and future-task improvement remain unobserved.

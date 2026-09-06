@@ -15,8 +15,15 @@ was fixed and independently re-reviewed at ff078bb. Its full regression exposed
 a separate native service/withdrawal-rollback assembly defect; bounded repair
 530d338 passes 141 covering and 71 artifact checks. Scoped review is approved and
 the final complete regression passes1707 with18 conditional skips. A final genuine
-status UI turn passes the frozen read-only criteria. Actual predecessor upgrade,
-main integration/CI and daily delivery remain. No new genuine activation occurred.
+status UI turn passes the frozen read-only criteria. Actual retained predecessor
+upgrade, main integration and daily013/preview14 delivery are complete after all
+four [CI34008379420](https://github.com/daydreamer0213/Tian-wen/actions/runs/34008379420)
+jobs passed on exact4ac0b3f. The intervening Linux-only fixture defect was fixed
+in one test file, independently reviewed and locally checked77/235; it did not
+change the product artifact. Original daily shortcut and30 Session/state files
+are unchanged, actual packaged Desktop startup/exit passes, and old program and
+archive are retained. See [the exact delivery record](tianwen-learning-repairs-delivery-20260906.md).
+No new genuine activation occurred; engineering delivery does not close this route.
 
 The user's continuation mandate covers the four-stage route, not only the
 previous finite repair/delivery round. Execution follows

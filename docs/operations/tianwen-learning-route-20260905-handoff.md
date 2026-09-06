@@ -22,15 +22,18 @@ synchronization are implemented at 530d338, with 141 covering and 71 artifact
 checks passed. Independent scoped review is approved and the final full run
 passes1707 with18 conditional skips. One final genuine status UI turn also passes:
 exact official flash/high, sole read-only native status tool, no new learning or
-activation claim. Actual retained predecessor upgrade and exact-main/daily delivery
-remain; engineering checks do not close the still-open genuine learning paths.
+activation claim. Actual retained012 predecessor upgrade and daily013/preview14
+delivery are complete after all four exact-main CI jobs passed at4ac0b3f.
+See [the current delivery record](tianwen-learning-repairs-delivery-20260906.md)
+for immutable artifacts, unchanged30 user files, original shortcut and actual
+packaged Desktop startup/exit. Engineering delivery does not close genuine learning paths.
 The exact approved external summary source is admitted read-only only in the
 isolated profile and visible to main status, not yet analyst-inspected/adapted.
-No development-branch changes are delivered to daily installation. Genuine
+The reviewed repairs are now delivered to the daily installation. Genuine
 exploration, source adoption, full activation and future-task improvement remain
 open. Historical finite engineering completion below is not total-route completion.
 
-## Latest bugfix acceptance and completed delivery
+## Historical 0.1.12 bugfix acceptance and completed delivery
 
 See [the real-user repair and retest record](tianwen-real-user-retest-20260905.md)
 for the subsequent source `8707090`, Runtime `0.1.12` / Desktop
