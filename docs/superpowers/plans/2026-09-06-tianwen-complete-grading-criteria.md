@@ -153,6 +153,13 @@ const knownOldRuntimeVersions = ['0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10
 
   Include localized upgrade copy and immutable archive names in staging/audit/CI.
   Use targeted edits, never a blanket whole-repo replacement of historical014.
+  `scripts/install-tianwen.mjs` also needs an explicit014 predecessor branch in
+  `classifyManagedInstallation`: exact014 archive, unchanged frozen learning-loop
+  predecessor patch, matching DSH/profile/receipt and existing mixed-archive
+  refusal. Add014 to the existing installer predecessor test table, preserving
+  missing/tampered/mixed/source-linked refusals and rollback/idempotency checks.
+  Add the new pure source-fidelity test to CI's explicit test list if Task1 creates
+  it; native ordinary/controlled/shadow/exploration suites are already listed.
 - [ ] Run touched focused suites and typecheck using Task1's environment. Report
   and commit only owned version/test files. Do not build over active Desktop,
   install daily, run real models, merge or publish.
