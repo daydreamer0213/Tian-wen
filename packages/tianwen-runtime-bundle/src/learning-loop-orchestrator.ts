@@ -25,7 +25,10 @@ import { materializeLearningCandidate } from './learning-candidate.js'
 import { admitOutcomeLearningAnalysis } from './outcome-learning-intake.js'
 import { LearningExplorationInterruptedError } from './learning-exploration.js'
 import { exactLearningAnalysisMainParent, hasExactLearningAnalysisChild } from './learning-analysis-child.js'
-import { recoverResearchSummarySourceCase } from './research-summary-source-case.js'
+import {
+  recoverOutcomeResearchSummarySourceCase,
+  recoverResearchSummarySourceCase,
+} from './research-summary-source-case.js'
 
 type LearningObservationContent = [{ readonly type: 'text', readonly text: string }]
 
@@ -105,6 +108,8 @@ export async function continueLearningLoop(input: LearningLoopAdmission): Promis
 
 export interface LearningLoopPhaseStatus {
   readonly source?: 'outcome' | undefined
+  readonly signalIds?: readonly string[]
+  readonly counterevidenceRunIds?: readonly TianwenRunId[]
   readonly analysisId: string
   readonly phase: string
   readonly requestedAt?: string
@@ -260,11 +265,31 @@ export function createExplicitCorrectionLearningLoopExecutor(
       return undefined
     }
     const records = recordsFor(context)
-    const matchingV3 = context.status.source === 'outcome' ? [] : records.filter(record =>
-      record.schemaVersion === 'tianwen.controlled-skill-eval-protocol.v3'
-      && record.protocol.sourceFidelity.source.sessionId === context.status.sessionId
-      && record.protocol.sourceFidelity.source.messageId === context.status.messageId
-      && record.protocol.sourceFidelity.source.feedbackVersion === context.status.feedbackVersion)
+    const outcomeSourceSignalId = context.status.source === 'outcome'
+      ? [...(context.status.signalIds ?? [])].sort()[0]
+      : undefined
+    const outcomeSourceSignal = outcomeSourceSignalId === undefined
+      ? undefined
+      : context.ctx.tianwenEvolution.listLearningSignals()
+          .filter((signal): signal is Extract<typeof signal, { readonly runId: unknown }> =>
+            'runId' in signal)
+          .find(signal => signal.signalId === outcomeSourceSignalId)
+    const outcomeSourceRun = outcomeSourceSignal === undefined
+      ? undefined
+      : context.ctx.tianwenEvolution.getRunBinding(outcomeSourceSignal.runId)
+    const semanticOutcome = context.status.source === 'outcome'
+      && outcomeSourceRun?.acceptanceContract.qualityContract !== undefined
+    const matchingV3 = records.filter(record => {
+      if (record.schemaVersion !== 'tianwen.controlled-skill-eval-protocol.v3') return false
+      const source = record.protocol.sourceFidelity.source
+      return context.status.source === 'outcome'
+        ? semanticOutcome && 'source' in source && source.source === 'outcome'
+          && source.signalId === outcomeSourceSignalId
+        : !('source' in source)
+          && source.sessionId === context.status.sessionId
+          && source.messageId === context.status.messageId
+          && source.feedbackVersion === context.status.feedbackVersion
+    })
     if (matchingV3.length > 1) throw new Error('controlled protocol history is ambiguous')
     const onlyRecord = records.length === 1 ? records[0] : undefined
     const retained = matchingV3[0]
@@ -277,7 +302,7 @@ export function createExplicitCorrectionLearningLoopExecutor(
     let protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v2'
       | 'tianwen.controlled-skill-eval-protocol.v3'
     if (retained?.schemaVersion === 'tianwen.controlled-skill-eval-protocol.v2'
-      || context.status.source === 'outcome') {
+      || (context.status.source === 'outcome' && !semanticOutcome)) {
       protocol = resolveExplicitCorrectionProtocol({
         scopeKey,
         protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
@@ -286,12 +311,11 @@ export function createExplicitCorrectionLearningLoopExecutor(
     } else {
       let sourceCase
       try {
-        sourceCase = await recoverResearchSummarySourceCase(
-          context.ctx,
-          context.status as never,
-        )
+        sourceCase = context.status.source === 'outcome'
+          ? await recoverOutcomeResearchSummarySourceCase(context.ctx, context.status as never)
+          : await recoverResearchSummarySourceCase(context.ctx, context.status as never)
       } catch {
-        throw new Error('research summary feedback source recovery is unavailable')
+        throw new Error('research summary source recovery is unavailable')
       }
       if (retained !== undefined
         && sha256(sourceCase.source) !== sha256(retained.protocol.sourceFidelity.source)) {

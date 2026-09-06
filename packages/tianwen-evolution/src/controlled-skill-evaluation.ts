@@ -110,7 +110,7 @@ export interface ControlledSkillEvalProtocolV2 {
   readonly execution: ControlledSkillEvalExecution
 }
 
-export interface ControlledSkillSourceIdentity {
+export interface ControlledSkillExplicitFeedbackSourceIdentity {
   readonly signalId: string
   readonly sessionId: string
   readonly messageId: string
@@ -121,6 +121,24 @@ export interface ControlledSkillSourceIdentity {
   readonly acceptanceSubjectDigest: Sha256Digest
   readonly packetDigest: Sha256Digest
 }
+
+export interface ControlledSkillOutcomeSourceIdentity {
+  readonly source: 'outcome'
+  readonly signalId: string
+  readonly runId: TianwenRunId
+  readonly sessionId: string
+  readonly outcomeIngestionId: Sha256Digest
+  readonly sessionLifecycleFingerprint: Sha256Digest
+  readonly sessionDigest: Sha256Digest
+  readonly evidenceSetDigest: Sha256Digest
+  readonly acceptanceSubjectDigest: Sha256Digest
+  readonly packetDigest: Sha256Digest
+  readonly semanticReviewDigest: Sha256Digest
+}
+
+export type ControlledSkillSourceIdentity =
+  | ControlledSkillExplicitFeedbackSourceIdentity
+  | ControlledSkillOutcomeSourceIdentity
 
 export interface ControlledSkillSourceFidelityHoldoutTask
   extends Omit<ControlledSkillEvalTask, 'taskId' | 'taskType'> {
@@ -699,6 +717,37 @@ function prepareHoldoutTask(value: unknown): ControlledSkillSourceFidelityHoldou
 
 function prepareSourceIdentity(value: unknown): ControlledSkillSourceIdentity {
   if (!isRecord(value)) throw new TypeError('source-fidelity source identity must be an object')
+  if (value.source === 'outcome') {
+    exactKeys(value, [
+      'source',
+      'signalId',
+      'runId',
+      'sessionId',
+      'outcomeIngestionId',
+      'sessionLifecycleFingerprint',
+      'sessionDigest',
+      'evidenceSetDigest',
+      'acceptanceSubjectDigest',
+      'packetDigest',
+      'semanticReviewDigest',
+    ])
+    if (typeof value.runId !== 'string' || !/^run:[a-f0-9]{64}$/u.test(value.runId)) {
+      throw new TypeError('source runId is invalid')
+    }
+    return {
+      source: 'outcome',
+      signalId: nonEmptyString(value.signalId, 'source signalId'),
+      runId: value.runId as TianwenRunId,
+      sessionId: safeSessionId(value.sessionId),
+      outcomeIngestionId: digest(value.outcomeIngestionId, 'source outcomeIngestionId'),
+      sessionLifecycleFingerprint: digest(value.sessionLifecycleFingerprint, 'source sessionLifecycleFingerprint'),
+      sessionDigest: digest(value.sessionDigest, 'source sessionDigest'),
+      evidenceSetDigest: digest(value.evidenceSetDigest, 'source evidenceSetDigest'),
+      acceptanceSubjectDigest: digest(value.acceptanceSubjectDigest, 'source acceptanceSubjectDigest'),
+      packetDigest: digest(value.packetDigest, 'source packetDigest'),
+      semanticReviewDigest: digest(value.semanticReviewDigest, 'source semanticReviewDigest'),
+    }
+  }
   exactKeys(value, [
     'signalId',
     'sessionId',
@@ -863,6 +912,11 @@ export interface ControlledSkillEvalScopeFact {
   readonly sessionDigest?: Sha256Digest
   readonly evidenceSetDigest?: Sha256Digest
   readonly acceptanceSubjectDigest?: Sha256Digest
+  readonly source?: 'outcome'
+  readonly runId?: TianwenRunId
+  readonly outcomeIngestionId?: Sha256Digest
+  readonly semanticReviewDigest?: Sha256Digest
+  readonly selectedOutcomeSource?: true
 }
 
 function deriveScope(
@@ -957,6 +1011,22 @@ function assertSourceIdentity(
   if (!('sourceFidelity' in protocol)) return
   const source = protocol.sourceFidelity.source
   const fact = signals.find(signal => signal.signalId === source.signalId)
+  if ('source' in source) {
+    if (
+      fact === undefined
+      || fact.source !== 'outcome'
+      || fact.selectedOutcomeSource !== true
+      || fact.runId !== source.runId
+      || fact.sessionId !== source.sessionId
+      || fact.outcomeIngestionId !== source.outcomeIngestionId
+      || fact.sessionLifecycleFingerprint !== source.sessionLifecycleFingerprint
+      || fact.sessionDigest !== source.sessionDigest
+      || fact.evidenceSetDigest !== source.evidenceSetDigest
+      || fact.acceptanceSubjectDigest !== source.acceptanceSubjectDigest
+      || fact.semanticReviewDigest !== source.semanticReviewDigest
+    ) throw new TypeError('source-fidelity source identity disagrees with Ticket history')
+    return
+  }
   if (
     fact === undefined
     || fact.sessionId !== source.sessionId

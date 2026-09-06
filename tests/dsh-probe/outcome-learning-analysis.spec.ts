@@ -2,8 +2,13 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
-import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
+import {
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+  learningSessionLifecycleFingerprint,
+  sha256,
+} from '../../packages/tianwen-evolution/src/index.js'
 import { RESEARCH_SUMMARY_BASE_SKILL } from '../../packages/tianwen-runtime/src/research-summary.js'
+import { admitOutcomeLearningAnalysis } from '../../packages/tianwen-runtime-bundle/src/outcome-learning-intake.js'
 
 const roots: string[] = []
 afterEach(() => { for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }) })
@@ -33,7 +38,101 @@ function fixture() {
   return { ledger, root, run }
 }
 
+function semanticFixture() {
+  const parent = 'D:/DevData/tianwen-dsh-probe/outcome-learning-analysis'
+  mkdirSync(parent, { recursive: true })
+  const root = mkdtempSync(join(parent, 'semantic-ledger-'))
+  roots.push(root)
+  const ledger = new EvolutionLedger(root)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v2' })
+  function run(sessionId: string, verdict: 'met' | 'not-met') {
+    const acceptanceSubjectDigest = sha256({ packet: sessionId })
+    const { runId } = ledger.recordRunBinding({
+      sessionId, goalRef: 'goal:summary', taskRef: 'task:summary',
+      scopeKey: 'project:tianwen/capability:research-summary',
+      acceptanceContract: { source: 'dsh-tool-result', toolName: 'submit_research_summary', notMetErrorCode: 'NOT_MET',
+        gapDisposition: 'reusable', problemCategory: 'research-summary-result.v2:test-parent', severity: 2, blocksGoal: false,
+        qualityContract: { schemaVersion: 'tianwen.research-summary-semantic-contract.v1', rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST } },
+      acceptanceSubjectDigest,
+      sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({ sessionId, createdAt: 1 }),
+    })
+    const manifest = ledger.recordRunSkillManifest({ runId, skill: RESEARCH_SUMMARY_BASE_SKILL })
+    const evidenceId = sha256({ sessionId, kind: 'acceptance' })
+    const semanticReview = {
+      schemaVersion: 'tianwen.research-summary-semantic-review.v1' as const,
+      status: 'completed' as const,
+      acceptanceSubjectDigest,
+      submissionDigest: sha256({ submission: sessionId }),
+      rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+      reviewerSessionId: `reviewer:${sessionId}`,
+      reviewerSessionDigest: sha256({ reviewer: sessionId }),
+      requestDigest: sha256({ request: sessionId }),
+      reviewEvidenceId: sha256({ reviewEvidence: sessionId }),
+      idGateVerdict: 'met' as const,
+      scores: { relevance: 4, correctnessReasoning: 4, clarityUsability: 4, scopeRestraint: 4, sourceFidelity: verdict === 'met' ? 4 : 2 },
+    }
+    const receipt = ledger.recordOutcomeIntake({ runId, verdict, sessionDigest: sha256(sessionId), evidenceIds: [evidenceId], semanticReview })
+    ledger.recordRunSkillUse({ runId, parentVersionId: manifest.parentVersionId, sessionId, sessionDigest: sha256(sessionId),
+      skillName: RESEARCH_SUMMARY_BASE_SKILL.name, contentDigest: ledger.getRunSkillManifest(runId)!.contentDigest,
+      skillEvidenceId: sha256({ sessionId, kind: 'skill' }), acceptanceEvidenceId: evidenceId,
+      skillCallSeq: 1, skillResultSeq: 2, acceptanceCallSeq: 3 })
+    return { runId, receipt }
+  }
+  function legacyRun(sessionId: string) {
+    const { runId } = ledger.recordRunBinding({
+      sessionId, goalRef: 'goal:summary', taskRef: 'task:summary',
+      scopeKey: 'project:tianwen/capability:research-summary',
+      acceptanceContract: { source: 'dsh-tool-result', toolName: 'submit_research_summary',
+        notMetErrorCode: 'NOT_MET', gapDisposition: 'reusable',
+        problemCategory: 'research-summary-result.v1:test-parent', severity: 2, blocksGoal: false },
+    })
+    const manifest = ledger.recordRunSkillManifest({ runId, skill: RESEARCH_SUMMARY_BASE_SKILL })
+    const evidenceId = sha256({ sessionId, kind: 'legacy-acceptance' })
+    const receipt = ledger.recordOutcomeIntake({ runId, verdict: 'not-met',
+      sessionDigest: sha256(sessionId), evidenceIds: [evidenceId] })
+    ledger.recordRunSkillUse({ runId, parentVersionId: manifest.parentVersionId, sessionId,
+      sessionDigest: sha256(sessionId), skillName: RESEARCH_SUMMARY_BASE_SKILL.name,
+      contentDigest: ledger.getRunSkillManifest(runId)!.contentDigest,
+      skillEvidenceId: sha256({ sessionId, kind: 'legacy-skill' }), acceptanceEvidenceId: evidenceId,
+      skillCallSeq: 1, skillResultSeq: 2, acceptanceCallSeq: 3 })
+    return { runId, receipt }
+  }
+  return { ledger, run, legacyRun }
+}
+
 describe('outcome-origin learning analysis', () => {
+  it('admits two completed semantic failures and a completed semantic success without feedback identities', async () => {
+    const { ledger, run } = semanticFixture()
+    run('semantic-failure-a', 'not-met')
+    const second = run('semantic-failure-b', 'not-met')
+    const success = run('semantic-success', 'met')
+    const status = await admitOutcomeLearningAnalysis({
+      tianwenEvolution: ledger,
+    } as never, {
+      session: { id: 'semantic-success', header: {} },
+    } as never, success.runId)
+    expect(status).toMatchObject({
+      source: 'outcome',
+      ticketId: second.receipt.ticketId,
+      parentSessionId: 'semantic-success',
+      counterevidenceRunIds: [success.runId],
+    })
+    expect(status).not.toHaveProperty('messageId')
+    expect(status).not.toHaveProperty('feedbackVersion')
+  })
+
+  it('does not use legacy failures as missing semantic support', async () => {
+    const { ledger, run, legacyRun } = semanticFixture()
+    run('semantic-only-failure', 'not-met')
+    legacyRun('legacy-failure-a')
+    legacyRun('legacy-failure-b')
+    const success = run('semantic-success-after-mixed-history', 'met')
+    await expect(admitOutcomeLearningAnalysis({ tianwenEvolution: ledger } as never, {
+      session: { id: 'semantic-success-after-mixed-history', header: {} },
+    } as never, success.runId)).resolves.toBeUndefined()
+    expect(ledger.listLearningAnalyses()).toEqual([])
+  })
+
   it('freezes repeated support and a successful counterexample without fabricating feedback', () => {
     const { ledger, root, run } = fixture()
     const a = run('main-a', 'not-met')

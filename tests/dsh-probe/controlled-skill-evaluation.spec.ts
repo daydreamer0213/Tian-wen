@@ -1380,6 +1380,110 @@ describe('controlled five-task Skill evaluation protocol', () => {
       .toThrow(LedgerIntegrityError)
   })
 
+  it('freezes and replays v3 from the deterministic failed semantic Outcome source', () => {
+    const path = fixtureRoot('semantic-outcome-source-fidelity')
+    const ledger = new EvolutionLedger(path, { clock: () => '2026-09-06T01:00:00.000Z' })
+    ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v2' })
+    const packetByRun = new Map<string, { packetDigest: `sha256:${string}`, subjectDigest: `sha256:${string}` }>()
+    const reviews = new Map<string, Record<string, unknown>>()
+    const add = (suffix: string, verdict: 'met' | 'not-met') => {
+      const sessionId = `semantic-outcome-${suffix}`
+      const source = `<research_packet>[F:${suffix}|required] ${suffix}</research_packet>`
+      const subjectDigest = digest(`parsed:${source}`)
+      const binding = ledger.recordRunBinding({
+        goalRef: 'goal:semantic-source', taskRef: 'task:semantic-source', sessionId,
+        scopeKey: 'project:tianwen/capability:research-summary',
+        acceptanceContract: {
+          ...acceptance,
+          problemCategory: 'research-summary-result.v2:semantic-parent',
+          qualityContract: { schemaVersion: 'tianwen.research-summary-semantic-contract.v1', rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST },
+        },
+        acceptanceSubjectDigest: subjectDigest,
+        sessionLifecycleFingerprint: lifecycleFingerprint(sessionId),
+      })
+      const manifest = ledger.recordRunSkillManifest({ runId: binding.runId, skill: parent })
+      const evidenceId = digest(`semantic-source-evidence:${suffix}`)
+      const review = {
+        schemaVersion: 'tianwen.research-summary-semantic-review.v1' as const,
+        status: 'completed' as const,
+        acceptanceSubjectDigest: subjectDigest,
+        submissionDigest: digest(`semantic-submission:${suffix}`),
+        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+        reviewerSessionId: `semantic-reviewer-${suffix}`,
+        reviewerSessionDigest: digest(`semantic-reviewer-session:${suffix}`),
+        requestDigest: digest(`semantic-review-request:${suffix}`),
+        reviewEvidenceId: digest(`semantic-review-evidence:${suffix}`),
+        idGateVerdict: 'met' as const,
+        scores: { relevance: 4, correctnessReasoning: 4, clarityUsability: 4, scopeRestraint: 4, sourceFidelity: verdict === 'met' ? 4 : 2 },
+      }
+      const outcome = ledger.recordOutcomeIntake({ runId: binding.runId, verdict,
+        sessionDigest: digest(`semantic-source-session:${suffix}`), evidenceIds: [evidenceId], semanticReview: review })
+      ledger.recordRunSkillUse({ runId: binding.runId, parentVersionId: manifest.parentVersionId,
+        sessionId, sessionDigest: digest(`semantic-source-session:${suffix}`), skillName: parent.name,
+        contentDigest: ledger.getRunSkillManifest(binding.runId)!.contentDigest,
+        skillEvidenceId: digest(`semantic-source-skill:${suffix}`), acceptanceEvidenceId: evidenceId,
+        skillCallSeq: 1, skillResultSeq: 2, acceptanceCallSeq: 3 })
+      packetByRun.set(binding.runId, { packetDigest: digest(source), subjectDigest })
+      reviews.set(binding.runId, review)
+      return { binding, outcome, evidenceId, sessionId }
+    }
+    const first = add('first', 'not-met')
+    const second = add('second', 'not-met')
+    const success = add('success', 'met')
+    const analysis = ledger.requestOutcomeLearningAnalysis({ ticketId: second.outcome.ticketId!,
+      sessionId: success.sessionId, parentSessionId: success.sessionId,
+      consentRevision: 1, counterevidenceRunIds: [success.binding.runId] })
+    const selectedSignalId = [...analysis.signalIds].sort()[0]!
+    const selectedSignal = ledger.listLearningSignals().find(signal =>
+      'runId' in signal && signal.signalId === selectedSignalId) as OutcomeLearningSignal
+    const selectedRun = selectedSignal.runId === first.binding.runId ? first : second
+    const selectedPacket = packetByRun.get(selectedSignal.runId)!
+    const protocol = structuredClone(sourceFidelityProtocol())
+    protocol.tasks[0]!.inputDigest = selectedPacket.packetDigest
+    protocol.tasks[0]!.acceptanceSubjectDigest = selectedPacket.subjectDigest
+    protocol.sourceFidelity.source = {
+      source: 'outcome',
+      signalId: selectedSignal.signalId,
+      runId: selectedSignal.runId,
+      sessionId: selectedSignal.sessionId,
+      outcomeIngestionId: selectedSignal.ingestionId,
+      sessionLifecycleFingerprint: lifecycleFingerprint(selectedSignal.sessionId),
+      sessionDigest: selectedSignal.sessionDigest,
+      evidenceSetDigest: sha256(selectedSignal.evidenceIds),
+      acceptanceSubjectDigest: selectedPacket.subjectDigest,
+      packetDigest: selectedPacket.packetDigest,
+      semanticReviewDigest: sha256(reviews.get(selectedSignal.runId)),
+    } as never
+    const input = { ticketId: second.outcome.ticketId!, evidencePurpose: 'controlled-product' as const, protocol }
+    const frozen = ledger.freezeControlledSkillEvalProtocol(input)
+    expect(frozen).toMatchObject({ duplicate: false, provenance: 'pre-candidate' })
+    expect(new EvolutionLedger(path).getControlledSkillEvalProtocol(frozen.protocolId))
+      .toEqual(ledger.getControlledSkillEvalProtocol(frozen.protocolId))
+
+    const changedReview = structuredClone(input)
+    changedReview.protocol.sourceFidelity.source.semanticReviewDigest = digest('changed-review')
+    expect(() => ledger.freezeControlledSkillEvalProtocol(changedReview)).toThrow(LedgerIntegrityError)
+    const other = selectedRun === first ? second : first
+    const otherSignal = ledger.listLearningSignals().find(signal =>
+      'runId' in signal && signal.runId === other.binding.runId) as OutcomeLearningSignal
+    const swapped = structuredClone(input)
+    Object.assign(swapped.protocol.sourceFidelity.source, {
+      signalId: otherSignal.signalId,
+      runId: otherSignal.runId,
+      sessionId: otherSignal.sessionId,
+      outcomeIngestionId: otherSignal.ingestionId,
+      sessionLifecycleFingerprint: lifecycleFingerprint(otherSignal.sessionId),
+      sessionDigest: otherSignal.sessionDigest,
+      evidenceSetDigest: sha256(otherSignal.evidenceIds),
+      acceptanceSubjectDigest: packetByRun.get(otherSignal.runId)!.subjectDigest,
+      packetDigest: packetByRun.get(otherSignal.runId)!.packetDigest,
+      semanticReviewDigest: sha256(reviews.get(otherSignal.runId)),
+    })
+    swapped.protocol.tasks[0]!.inputDigest = packetByRun.get(otherSignal.runId)!.packetDigest
+    swapped.protocol.tasks[0]!.acceptanceSubjectDigest = packetByRun.get(otherSignal.runId)!.subjectDigest
+    expect(() => ledger.freezeControlledSkillEvalProtocol(swapped)).toThrow(LedgerIntegrityError)
+  })
+
   it('replays a persisted DSH 0.1.0-rc.7 execution without rewriting it', () => {
     const path = fixtureRoot('legacy-rc7-protocol')
     const ledger = new EvolutionLedger(path)
@@ -1963,6 +2067,52 @@ describe('controlled five-task Skill evaluation protocol', () => {
       evidenceSetDigest: source.evidenceSetDigest,
       acceptanceSubjectDigest: source.acceptanceSubjectDigest,
     }], 'pre-candidate')).toThrow(/missing field: sessionDigest/i)
+  })
+
+  it('freezes a genuine Outcome source without inventing explicit-feedback identities', () => {
+    const protocol = structuredClone(sourceFidelityProtocol())
+    const source = {
+      source: 'outcome' as const,
+      signalId: `signal:${'1'.repeat(64)}`,
+      runId: `run:${'2'.repeat(64)}`,
+      sessionId: 'session:ordinary-summary-source',
+      outcomeIngestionId: digest('semantic-outcome-ingestion'),
+      sessionLifecycleFingerprint: digest('semantic-source-lifecycle'),
+      sessionDigest: digest('semantic-source-session'),
+      evidenceSetDigest: digest('semantic-source-evidence-set'),
+      acceptanceSubjectDigest: protocol.tasks[0]!.acceptanceSubjectDigest,
+      packetDigest: protocol.tasks[0]!.inputDigest,
+      semanticReviewDigest: digest('semantic-source-review'),
+    }
+    protocol.sourceFidelity.source = source as never
+    const record = prepareControlledSkillEvalProtocol({
+      ticketId: 'ticket:controlled-evaluation',
+      evidencePurpose: 'controlled-product',
+      protocol,
+    }, {
+      ...ticketFacts().ticket,
+      signalIds: [source.signalId],
+    }, [{
+      ...source,
+      scopeKey: 'project:tianwen/capability:research-summary',
+      selectedOutcomeSource: true,
+    }], 'pre-candidate')
+
+    expect(record.protocol.sourceFidelity.source).toEqual(source)
+    expect(record.protocol.sourceFidelity.source).not.toHaveProperty('messageId')
+    expect(record.protocol.sourceFidelity.source).not.toHaveProperty('feedbackVersion')
+
+    const invented = structuredClone(protocol) as any
+    invented.sourceFidelity.source.messageId = 'invented-feedback-target'
+    expect(() => prepareControlledSkillEvalProtocol({
+      ticketId: 'ticket:controlled-evaluation',
+      evidencePurpose: 'controlled-product',
+      protocol: invented,
+    }, { ...ticketFacts().ticket, signalIds: [source.signalId] }, [{
+      ...source,
+      scopeKey: 'project:tianwen/capability:research-summary',
+      selectedOutcomeSource: true,
+    }], 'pre-candidate')).toThrow(/unexpected field: messageId/i)
   })
 
   it('lets clean ID ties reach v3 blind quality and requires real source-fidelity improvement', () => {

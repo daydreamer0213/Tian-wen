@@ -48,6 +48,7 @@ const analysisTool = 'submit_tianwen_analysis'
 const explorationTool = 'request_tianwen_exploration'
 const evaluatorTool = 'submit_blind_evaluation'
 const holdoutReviewerTool = 'submit_holdout_review'
+const researchSummaryQualityTool = 'submit_research_summary_quality_review'
 
 const originalPacket = `<research_packet>
 [F:pilot|required] Twelve pilot teams reduced triage time by 18%.
@@ -284,6 +285,17 @@ Call submit_research_summary exactly once with the selected IDs, then report the
             y: dimensions(item.y.materialText),
           },
         })),
+      })
+    }
+    if (tools.includes(researchSummaryQualityTool)) {
+      return toolCallResponse(`product-research-summary-quality-${call}`, researchSummaryQualityTool, {
+        scores: {
+          relevance: 3,
+          correctnessReasoning: 3,
+          clarityUsability: 3,
+          scopeRestraint: 3,
+          sourceFidelity: 3,
+        },
       })
     }
     if (tools.includes(holdoutReviewerTool)) {
@@ -934,9 +946,14 @@ describe('installed explicit-correction product story', () => {
         expect(skillResults, use.sessionId).toHaveLength(1)
       }
 
-      const childSessions = (await product.ctx.sessionPersistence.list())
+      const sourceChildren = (await product.ctx.sessionPersistence.list())
         .filter(header => header.parentSession === SessionId('product-source-main'))
+      const childSessions = sourceChildren.filter(header =>
+        header.agentPreset !== 'tianwen-research-summary-quality-review')
+      const qualitySessions = sourceChildren.filter(header =>
+        header.agentPreset === 'tianwen-research-summary-quality-review')
       expect(childSessions).toHaveLength(1)
+      expect(qualitySessions).toHaveLength(1)
       for (const header of childSessions) {
         const child = await product.ctx.sessionPersistence.inspect(header.id)
         const ownEvents = child.events.slice(

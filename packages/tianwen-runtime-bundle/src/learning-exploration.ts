@@ -5,6 +5,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SkillDefinition, SkillRegistration } from '@deepseek-ai/dsh-skill'
 import { foldSubagentDescriptor, SubagentError } from '@deepseek-ai/dsh-subagent'
 import {
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
   sha256,
   type LearningAnalysisId,
   type LearningExplorationArm,
@@ -21,6 +22,8 @@ import {
   evaluateResearchSummarySubmission,
   normalizeResearchSummarySubmission,
   parseResearchPacket,
+  recoverResearchSummaryQualityReview,
+  runResearchSummaryQualityReview,
   type ResearchPacket,
 } from '@tianwen/runtime'
 
@@ -126,6 +129,12 @@ function taskInput(exploration: LearningExplorationStatus, arm: LearningExplorat
       toolName: RESEARCH_SUMMARY_TOOL_NAME,
       notMetErrorCode: NOT_MET_ERROR_CODE,
       gapDisposition: 'observe' as const,
+      ...(exploration.metric === 'research-summary-source-fidelity.v1'
+        ? { qualityContract: {
+            schemaVersion: 'tianwen.research-summary-semantic-contract.v1' as const,
+            rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+          } }
+        : {}),
     },
     acceptanceSubjectDigest: exploration.sourceSubjectDigest,
   }
@@ -146,6 +155,12 @@ function exactRunBinding(
     && binding.acceptanceContract.toolName === RESEARCH_SUMMARY_TOOL_NAME
     && binding.acceptanceContract.notMetErrorCode === NOT_MET_ERROR_CODE
     && binding.acceptanceContract.gapDisposition === 'observe'
+    && (spec.exploration.metric === 'research-summary-source-fidelity.v1'
+      ? binding.acceptanceContract.qualityContract?.schemaVersion
+          === 'tianwen.research-summary-semantic-contract.v1'
+        && binding.acceptanceContract.qualityContract.rubricDigest
+          === CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+      : binding.acceptanceContract.qualityContract === undefined)
     && manifest?.parentVersionId === spec.exploration.parentVersionId
     && sha256(manifest.parent) === sha256({
       name: spec.skill.name,
@@ -209,10 +224,35 @@ export function registerLearningExplorationContinuableSetup(
     const disposeModel = installModelSelection(childCtx, { current: spec.selection, assembled: undefined })
     const disposePresentation = childCtx.tools.presentAs('native')
     const disposeSkill = skills.register(spec.skill)
-    const disposeTool = childCtx.tools.register(createResearchSummaryTool(spec.packet, {
-      kind: 'controlled-enforce',
-      oracle: evaluateResearchSummarySubmission,
-    }))
+    const sourceTool = spec.exploration.metric === 'research-summary-source-fidelity.v1'
+      ? createResearchSummaryTool(spec.packet, { kind: 'source-capture' })
+      : createResearchSummaryTool(spec.packet, {
+          kind: 'controlled-enforce', oracle: evaluateResearchSummarySubmission,
+        })
+    if (spec.exploration.metric === 'research-summary-source-fidelity.v1') {
+      const execute = sourceTool.execute.bind(sourceTool)
+      sourceTool.execute = async (args, execution) => {
+        const result = await execute(args, execution)
+        const submission = normalizeResearchSummarySubmission(spec.packet, args)
+        const parentAgent = execution.agent
+        const run = parentAgent === undefined ? undefined
+          : ctx.tianwenEvolution.getRunBindingBySessionId(String(parentAgent.session.id))
+        const sourceCallConfig = parentAgent?.session.requestHeader()?.config
+        if (parentAgent !== undefined && run !== undefined && sourceCallConfig !== undefined) {
+          await runResearchSummaryQualityReview(ctx, {
+            parentAgent,
+            run,
+            packet: spec.packet,
+            submission,
+            sourceCallId: String(execution.callId),
+            sourceCallConfig,
+            signal: execution.signal,
+          })
+        }
+        return result
+      }
+    }
+    const disposeTool = childCtx.tools.register(sourceTool)
     const disposeGuard = childCtx.tools.guard(exec =>
       exec.agent === child
         && (exec.name === 'skill' || exec.name === RESEARCH_SUMMARY_TOOL_NAME)
@@ -228,7 +268,10 @@ export function registerLearningExplorationContinuableSetup(
   })
 }
 
-function environmentDigest(selection: ModelSelection): Sha256Digest {
+function environmentDigest(
+  selection: ModelSelection,
+  metric: LearningExplorationStatus['metric'],
+): Sha256Digest {
   return sha256({
     kind: 'tianwen.learning-exploration-environment.v1',
     selection,
@@ -238,7 +281,7 @@ function environmentDigest(selection: ModelSelection): Sha256Digest {
     toolFilter: EXPLORATION_TOOL_FILTER,
     skillName: RESEARCH_SUMMARY_SKILL_NAME,
     toolName: RESEARCH_SUMMARY_TOOL_NAME,
-    metric: 'research-summary-required-id-coverage.v1',
+    metric,
   })
 }
 
@@ -285,6 +328,7 @@ function exactPersistedChild(
 
 function productObservation(
   ctx: Context,
+  exploration: LearningExplorationStatus,
   session: { readonly id: SessionId, readonly events: readonly any[] },
   packet: ResearchPacket,
 ) {
@@ -311,32 +355,50 @@ function productObservation(
       packet,
       JSON.parse(call.data.arguments) as unknown,
     )
-    const verdict = evaluateResearchSummarySubmission(packet, submission)
+    const verdict = exploration.metric === 'research-summary-source-fidelity.v1'
+      ? 'not-evaluated'
+      : evaluateResearchSummarySubmission(packet, submission)
     const blocks = result.data.message.content[0].content
     if (blocks.length !== 1 || blocks[0]?.type !== 'text'
       || sha256(JSON.parse(blocks[0].text)) !== sha256({ verdict, submission })) return projected
-    return { ...projected, verdict }
+    return { ...projected, verdict, submission }
   } catch {
     return projected
   }
 }
 
-function reconcileArm(
+async function reconcileArm(
   ctx: Context,
   exploration: LearningExplorationStatus,
   arm: LearningExplorationArm,
   session: { readonly id: SessionId, readonly events: readonly any[] },
   packet: ResearchPacket,
-): LearningExplorationStatus {
+  signal: AbortSignal,
+): Promise<LearningExplorationStatus> {
   const binding = ctx.tianwenEvolution.getRunBindingBySessionId(String(session.id))
   if (binding === undefined) throw new Error('learning exploration child has no exact Run binding')
-  const observation = productObservation(ctx, session, packet)
+  const observation = productObservation(ctx, exploration, session, packet)
   const hasObservedVerdict = observation !== undefined && 'verdict' in observation
   const hasSkillUse = hasObservedVerdict
     && ctx.tianwenLearningIntake.hasSkillUseProof(session as never, binding.runId)
-  const verdict = hasObservedVerdict && hasSkillUse
-    ? observation.verdict
-    : 'inconclusive'
+  const semanticReview = exploration.metric === 'research-summary-source-fidelity.v1'
+    && hasObservedVerdict && hasSkillUse && 'submission' in observation
+    ? await recoverResearchSummaryQualityReview(ctx, {
+        run: binding,
+        packet,
+        submission: observation.submission,
+        signal,
+      })
+    : undefined
+  const verdict: 'met' | 'not-met' | 'inconclusive' = semanticReview !== undefined
+    ? semanticReview.status !== 'completed'
+      ? 'inconclusive'
+      : semanticReview.idGateVerdict === 'met'
+        && semanticReview.scores.sourceFidelity >= 3 ? 'met' : 'not-met'
+    : hasObservedVerdict && hasSkillUse
+      ? observation.verdict === 'met' || observation.verdict === 'not-met'
+        ? observation.verdict : 'inconclusive'
+      : 'inconclusive'
   const acceptanceEvidenceId = observation?.acceptanceEvidenceId
   const outcome = ctx.tianwenLearningIntake.consumeOutcome(
     session as never,
@@ -346,6 +408,7 @@ function reconcileArm(
       : {
           verdict,
           acceptanceEvidenceId: observation.acceptanceEvidenceId,
+          ...(semanticReview === undefined ? {} : { semanticReview }),
         },
   )
   if (hasSkillUse) {
@@ -457,7 +520,7 @@ async function runExplorationArmUntilIdle(
     && existingTerminal.data.reason.kind !== 'aborted') {
     return reconcileArm(ctx, exploration, arm, {
       id: SessionId(sessionId), events: persisted.events as any[],
-    }, packet)
+    }, packet, signal)
   }
 
   if (persisted === undefined) {
@@ -514,7 +577,7 @@ async function runExplorationArmUntilIdle(
     throw new LearningExplorationInterruptedError()
   }
   signal.throwIfAborted()
-  return reconcileArm(ctx, exploration, arm, session, packet)
+  return reconcileArm(ctx, exploration, arm, session, packet, signal)
 }
 
 export class TianwenLearningExplorationService extends Service {
@@ -525,6 +588,7 @@ export class TianwenLearningExplorationService extends Service {
     'sessions',
     'skills',
     'subagents',
+    'tools',
     'tianwenEvidence',
     'tianwenEvolution',
     'tianwenLearningIntake',
@@ -561,10 +625,18 @@ export class TianwenLearningExplorationService extends Service {
     }
     const selection = (this.ctx as LearningExplorationContext)
       .agentDefaultModel.currentSelection()
+    const source = this.ctx.tianwenEvolution.getRunBinding(input.proposal.sourceRunId)
+    const metric = source?.schemaVersion === 'tianwen.run-binding.v3'
+      && source.acceptanceContract.qualityContract?.schemaVersion
+        === 'tianwen.research-summary-semantic-contract.v1'
+      && source.acceptanceContract.qualityContract.rubricDigest
+        === CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST
+      ? 'research-summary-source-fidelity.v1' as const
+      : 'research-summary-required-id-coverage.v1' as const
     return this.ctx.tianwenEvolution.requestLearningExploration({
       analysisId: input.analysisId,
       proposal: input.proposal,
-      environmentDigest: environmentDigest(selection),
+      environmentDigest: environmentDigest(selection, metric),
     }).exploration
   }
 

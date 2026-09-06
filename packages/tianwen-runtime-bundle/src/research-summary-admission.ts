@@ -787,7 +787,6 @@ export class TianwenResearchSummaryAdmissionService extends Service {
           attempt: null,
         })
       : await recoverResearchSummaryQualityReview(this.ctx, {
-          parentAgent: agent,
           run: this.ctx.tianwenEvolution.getRunBinding(installed.runId)!,
           packet: installed.packet,
           submission,

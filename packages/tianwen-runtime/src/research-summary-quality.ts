@@ -51,6 +51,9 @@ Use only the supplied packet, canonical submission, and frozen rubric. Do not in
 For sourceFidelity, judge faithful coverage of required findings and decision uncertainties with their original attribution, scope, and time. Penalize material omissions, invented certainty, and treating contradicted claims as merely unknown or unknown claims as contradicted. IDs are metadata, not a substitute for faithful prose.`
 
 interface PreparedSourceReview {
+  readonly parentSessionId: SessionId
+  readonly parentCwd?: string
+  readonly parentDelegationDepth: number
   readonly parentAgent: Agent
   readonly packet: ResearchPacket
   readonly submission: ResearchSummarySubmission
@@ -61,6 +64,8 @@ interface PreparedSourceReview {
   readonly sourceArgumentsDigest: Sha256Digest
   readonly submissionDigest: Sha256Digest
 }
+
+type PersistedSourceReview = Omit<PreparedSourceReview, 'parentAgent'>
 
 export interface RunResearchSummaryQualityReviewInput {
   readonly parentAgent: Agent
@@ -73,7 +78,6 @@ export interface RunResearchSummaryQualityReviewInput {
 }
 
 export interface RecoverResearchSummaryQualityReviewInput {
-  readonly parentAgent: Agent
   readonly run: TianwenRunBinding
   readonly packet: ResearchPacket
   readonly submission: ResearchSummarySubmission
@@ -129,11 +133,11 @@ function runQualityContract(run: TianwenRunBinding) {
   return run.acceptanceContract.qualityContract
 }
 
-function parentMatchesRun(ctx: Context, parent: Agent, run: TianwenRunBinding): boolean {
+function storedRunMatches(ctx: Context, run: TianwenRunBinding): boolean {
   const stored = ctx.tianwenEvolution.getRunBinding(run.runId)
-  return run.schemaVersion === 'tianwen.run-binding.v3'
-    && stored?.schemaVersion === 'tianwen.run-binding.v3'
-    && stored.schemaVersion === run.schemaVersion
+  if (run.schemaVersion !== 'tianwen.run-binding.v3'
+    || stored?.schemaVersion !== 'tianwen.run-binding.v3') return false
+  return stored.schemaVersion === run.schemaVersion
     && stored.runId === run.runId
     && stored.goalRef === run.goalRef
     && stored.taskRef === run.taskRef
@@ -143,6 +147,11 @@ function parentMatchesRun(ctx: Context, parent: Agent, run: TianwenRunBinding): 
     && exact(stored.acceptanceContract, run.acceptanceContract)
     && stored.acceptanceSubjectDigest === run.acceptanceSubjectDigest
     && stored.sessionLifecycleFingerprint === run.sessionLifecycleFingerprint
+}
+
+function parentMatchesRun(ctx: Context, parent: Agent, run: TianwenRunBinding): boolean {
+  return run.schemaVersion === 'tianwen.run-binding.v3'
+    && storedRunMatches(ctx, run)
     && String(parent.id) === run.sessionId
     && parent.session.id === parent.id
     && run.sessionLifecycleFingerprint === learningSessionLifecycleFingerprint({
@@ -228,6 +237,10 @@ function prepareRunSource(
     throw new Error('native source call configuration drift')
   }
   return {
+    parentSessionId: input.parentAgent.session.id,
+    ...(input.parentAgent.session.header.cwd === undefined
+      ? {} : { parentCwd: input.parentAgent.session.header.cwd }),
+    parentDelegationDepth: input.parentAgent.session.header.delegationDepth ?? 0,
     parentAgent: input.parentAgent,
     packet: material.packet,
     submission: material.submission,
@@ -347,7 +360,7 @@ function qualityToolGuard(
   return undefined
 }
 
-function expectedEnvelope(source: PreparedSourceReview): string {
+function expectedEnvelope(source: PersistedSourceReview): string {
   return JSON.stringify({
     packet: source.packet,
     submission: source.submission,
@@ -453,21 +466,20 @@ function inconclusive(
 
 function validReviewerHeader(
   header: SessionHeader,
-  source: PreparedSourceReview,
+  source: PersistedSourceReview,
 ): boolean {
-  const parentDepth = source.parentAgent.session.header.delegationDepth ?? 0
   return String(header.id) === source.reviewerSessionId
-    && header.parentSession === source.parentAgent.session.id
+    && header.parentSession === source.parentSessionId
     && header.origin === 'subagent'
-    && header.delegationDepth === parentDepth + 1
+    && header.delegationDepth === source.parentDelegationDepth + 1
     && header.agentPreset === RESEARCH_SUMMARY_QUALITY_AGENT_PRESET
-    && header.cwd === source.parentAgent.session.header.cwd
+    && header.cwd === source.parentCwd
     && (header.seedLength === undefined || header.seedLength === 0)
 }
 
 function completedReviewFromInspection(
   ctx: Context,
-  source: PreparedSourceReview,
+  source: PersistedSourceReview,
   inspection: { readonly meta: SessionHeader; readonly events: readonly SessionEvent[] },
 ): ResearchSummarySemanticReview {
   if (!validReviewerHeader(inspection.meta, source)) {
@@ -740,12 +752,12 @@ function sourceReviewFromPersistence(
   ctx: Context,
   input: RecoverResearchSummaryQualityReviewInput,
   inspection: { readonly meta: SessionHeader; readonly events: readonly SessionEvent[] },
-): PreparedSourceReview | undefined {
+): PersistedSourceReview | undefined {
   const material = canonicalMaterial(input.packet, input.submission)
   if (input.run.schemaVersion !== 'tianwen.run-binding.v3') return undefined
   const run = input.run
   const quality = runQualityContract(run)
-  if (!parentMatchesRun(ctx, input.parentAgent, run)
+  if (!storedRunMatches(ctx, run)
     || String(inspection.meta.id) !== run.sessionId
     || run.sessionLifecycleFingerprint !== learningSessionLifecycleFingerprint({
       sessionId: String(inspection.meta.id),
@@ -799,7 +811,9 @@ function sourceReviewFromPersistence(
   if (matches.length !== 1) return undefined
   const match = matches[0]!
   return {
-    parentAgent: input.parentAgent,
+    parentSessionId: SessionId(String(inspection.meta.id)),
+    ...(inspection.meta.cwd === undefined ? {} : { parentCwd: inspection.meta.cwd }),
+    parentDelegationDepth: inspection.meta.delegationDepth ?? 0,
     packet: material.packet,
     submission: material.submission,
     sourceTurn: match.call.data.turn,
@@ -818,7 +832,7 @@ export async function recoverResearchSummaryQualityReview(
   try {
     input.signal.throwIfAborted()
     const sourceInspection = await ctx.sessionPersistence.inspect(
-      input.parentAgent.session.id,
+      SessionId(input.run.sessionId),
       input.signal,
     )
     const source = sourceReviewFromPersistence(ctx, input, sourceInspection)

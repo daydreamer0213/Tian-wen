@@ -3,6 +3,14 @@ import { type LearningAnalysisStatus, type OutcomeLearningAnalysisBinding, type 
 import { normalizeResearchSummarySubmission, RESEARCH_SUMMARY_SCOPE, RESEARCH_SUMMARY_TOOL_NAME } from '@tianwen/runtime'
 import { researchSummaryPacketFromEvents } from './research-summary-admission.js'
 
+const LEGACY_OUTCOME_CATEGORY = 'research-summary-result.v1:'
+const SEMANTIC_OUTCOME_CATEGORY = 'research-summary-result.v2:'
+
+function hasCompletedSemanticReview(value: ReturnType<Context['tianwenEvolution']['getOutcomeIntake']>): boolean {
+  return value?.schemaVersion === 'tianwen.outcome-intake.v2'
+    && value.input.semanticReview.status === 'completed'
+}
+
 /** Select evidence from already-finished ordinary tasks; this does not run a judge. */
 export async function admitOutcomeLearningAnalysis(ctx: Context, parent: Agent, runId: TianwenRunId): Promise<LearningAnalysisStatus | undefined> {
   const evolution = ctx.tianwenEvolution
@@ -11,8 +19,11 @@ export async function admitOutcomeLearningAnalysis(ctx: Context, parent: Agent, 
   if (run?.sessionId !== String(parent.session.id) || parent.session.header.parentSession !== undefined
     || parent.session.header.origin === 'subagent' || run.scopeKey !== RESEARCH_SUMMARY_SCOPE
     || run.acceptanceContract.gapDisposition !== 'reusable'
-    || !run.acceptanceContract.problemCategory.startsWith('research-summary-result.v1:')
+    || (!run.acceptanceContract.problemCategory.startsWith(LEGACY_OUTCOME_CATEGORY)
+      && !run.acceptanceContract.problemCategory.startsWith(SEMANTIC_OUTCOME_CATEGORY))
     || outcome === undefined || outcome.input.verdict === 'inconclusive' || evolution.getRunSkillUse(runId) === undefined) return undefined
+  const semantic = run.acceptanceContract.problemCategory.startsWith(SEMANTIC_OUTCOME_CATEGORY)
+  if (semantic && !hasCompletedSemanticReview(outcome)) return undefined
 
   const consent = evolution.getLearningAnalysisConsent()
   if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v2') {
@@ -31,7 +42,8 @@ export async function admitOutcomeLearningAnalysis(ctx: Context, parent: Agent, 
     }))
   if (ticket === undefined || evolution.listLearningAnalyses().some(analysis => analysis.source === 'outcome' && analysis.ticketId === ticket.ticketId)) return undefined
   const eligible = signals.filter(signal => ticket.signalIds.includes(signal.signalId)
-    && (evolution.getOutcomeIntake(signal.runId)?.at ?? '') >= consent.recordedAt)
+    && (evolution.getOutcomeIntake(signal.runId)?.at ?? '') >= consent.recordedAt
+    && (!semantic || hasCompletedSemanticReview(evolution.getOutcomeIntake(signal.runId))))
   if (eligible.length < 2) return undefined
   const counter = evolution.listRunSkillManifests().find(manifest => {
     const binding = evolution.getRunBinding(manifest.runId)
@@ -39,6 +51,7 @@ export async function admitOutcomeLearningAnalysis(ctx: Context, parent: Agent, 
     return (outcome.input.verdict !== 'met' || manifest.runId === runId)
       && binding?.scopeKey === run.scopeKey && binding.acceptanceContractDigest === run.acceptanceContractDigest
       && result?.input.verdict === 'met' && result.at >= consent.recordedAt
+      && (!semantic || hasCompletedSemanticReview(result))
       && evolution.getRunSkillUse(manifest.runId) !== undefined
   })
   // Outcome-derived Skill attribution already needs a successful counterexample.
@@ -72,7 +85,21 @@ export async function outcomeAnalysisMaterial(ctx: Context, status: OutcomeLearn
     const call = events.find(event => event.seq === evidence[0]?.source.callSeq)
     if (packet === undefined || evidence.length !== 1 || call?.type !== 'tool/call') throw new Error('outcome source no longer matches frozen evidence')
     const submission = normalizeResearchSummarySubmission(packet, JSON.parse(call.data.arguments) as unknown)
-    material.push({ runId, evidenceId: evidence[0]!.evidenceId, verdict: outcome.input.verdict, packet: packet.source, submission })
+    const semantic = binding.acceptanceContract.gapDisposition === 'reusable'
+      && binding.acceptanceContract.problemCategory.startsWith(SEMANTIC_OUTCOME_CATEGORY)
+    if (semantic && !hasCompletedSemanticReview(outcome)) {
+      throw new Error('outcome analysis semantic review is unavailable')
+    }
+    material.push({
+      runId,
+      evidenceId: evidence[0]!.evidenceId,
+      verdict: outcome.input.verdict,
+      packet: packet.source,
+      submission,
+      ...(semantic && outcome.schemaVersion === 'tianwen.outcome-intake.v2'
+        ? { semanticReview: outcome.input.semanticReview }
+        : {}),
+    })
   }
   return JSON.stringify(material)
 }

@@ -27,12 +27,17 @@ export interface LearningExplorationContext {
   readonly parentVersionId: SkillVersionId
   readonly sourceSubjectDigest: Sha256Digest
   readonly environmentDigest: Sha256Digest
+  readonly metric?: LearningExplorationMetric
 }
+
+export type LearningExplorationMetric =
+  | 'research-summary-required-id-coverage.v1'
+  | 'research-summary-source-fidelity.v1'
 
 export interface LearningExplorationRequest extends LearningExplorationContext {
   readonly explorationId: `exploration:${string}`
   readonly requestDigest: Sha256Digest
-  readonly metric: 'research-summary-required-id-coverage.v1'
+  readonly metric: LearningExplorationMetric
   readonly proposal: LearningExplorationProposal
   readonly controlSessionId: string
   readonly treatmentSessionId: string
@@ -181,13 +186,18 @@ export function prepareLearningExploration(
     temporaryInstruction: text(value.temporaryInstruction, 'temporaryInstruction'),
     expectedIfHypothesis, expectedIfAlternative,
   })
+  const metric = context.metric ?? 'research-summary-required-id-coverage.v1'
+  if (metric !== 'research-summary-required-id-coverage.v1'
+    && metric !== 'research-summary-source-fidelity.v1') {
+    throw new TypeError('invalid exploration metric')
+  }
   const body = {
     analysisId: identity(context.analysisId, 'analysis', 'analysisId') as LearningAnalysisId,
     sourceRunId,
     parentVersionId: identity(context.parentVersionId, 'skill-version', 'parentVersionId') as SkillVersionId,
     sourceSubjectDigest: identity(context.sourceSubjectDigest, 'sha256', 'sourceSubjectDigest') as Sha256Digest,
     environmentDigest: identity(context.environmentDigest, 'sha256', 'environmentDigest') as Sha256Digest,
-    metric: 'research-summary-required-id-coverage.v1' as const,
+    metric,
     proposal,
   }
   // One pair per analysis in this slice; a changed proposal changes its digest,
@@ -226,6 +236,7 @@ export function parseLearningExplorationRequest(value: unknown): LearningExplora
     parentVersionId: request.parentVersionId as SkillVersionId,
     sourceSubjectDigest: request.sourceSubjectDigest as Sha256Digest,
     environmentDigest: request.environmentDigest as Sha256Digest,
+    metric: request.metric as LearningExplorationMetric,
   })
   if (sha256(request) !== sha256(parsed)) {
     throw new TypeError('persisted learning exploration request changed')

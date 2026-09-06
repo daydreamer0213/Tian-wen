@@ -19,6 +19,7 @@ import {
 } from '@tianwen/dsh-compat'
 
 import {
+  CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
   learningSessionLifecycleFingerprint,
   sha256,
   type LearningAnalysisId,
@@ -29,6 +30,8 @@ import {
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import {
   RESEARCH_SUMMARY_BASE_SKILL,
+  RESEARCH_SUMMARY_QUALITY_AGENT_PRESET,
+  RESEARCH_SUMMARY_QUALITY_TOOL_NAME,
   RESEARCH_SUMMARY_TOOL_NAME,
   apply as applyRuntime,
   parseResearchPacket,
@@ -191,7 +194,58 @@ function seedRunningOutcomeAnalysis(root: string) {
     parentSessionId: requested.parentSessionId,
     childSessionId: requested.childSessionId,
   })
-  return { ledger, requested, first, second, counter }
+  return { ledger, requested, first, second, counter, root }
+}
+
+function seedRunningSemanticOutcomeAnalysis(root: string) {
+  const ledger = new EvolutionLedger(root, { clock: () => '2026-09-05T00:00:00.000Z' })
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v2' })
+  const add = (suffix: string, verdict: 'met' | 'not-met') => {
+    const sessionId = `session:semantic-exploration-source:${suffix}`
+    const binding = ledger.recordRunBinding({
+      goalRef: 'goal:semantic-exploration-source', taskRef: `task:semantic-exploration-source:${suffix}`,
+      sessionId, scopeKey,
+      acceptanceContract: { source: 'dsh-tool-result', toolName: RESEARCH_SUMMARY_TOOL_NAME,
+        notMetErrorCode: 'RESEARCH_SUMMARY_NOT_MET', gapDisposition: 'reusable',
+        problemCategory: 'research-summary-result.v2:test-parent', severity: 2, blocksGoal: false,
+        qualityContract: { schemaVersion: 'tianwen.research-summary-semantic-contract.v1', rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST } },
+      acceptanceSubjectDigest: sourceSubjectDigest,
+      sessionLifecycleFingerprint: sha256(`semantic-lifecycle:${suffix}`),
+    })
+    const manifest = ledger.recordRunSkillManifest({ runId: binding.runId, skill: RESEARCH_SUMMARY_BASE_SKILL })
+    const sessionDigest = sha256(`semantic-session:${suffix}`)
+    const evidenceId = sha256(`semantic-acceptance:${suffix}`)
+    const semanticReview = {
+      schemaVersion: 'tianwen.research-summary-semantic-review.v1' as const,
+      status: 'completed' as const,
+      acceptanceSubjectDigest: sourceSubjectDigest,
+      submissionDigest: sha256(`semantic-submission:${suffix}`),
+      rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+      reviewerSessionId: `semantic-reviewer:${suffix}`,
+      reviewerSessionDigest: sha256(`semantic-reviewer-session:${suffix}`),
+      requestDigest: sha256(`semantic-review-request:${suffix}`),
+      reviewEvidenceId: sha256(`semantic-review-evidence:${suffix}`),
+      idGateVerdict: 'met' as const,
+      scores: { relevance: 4, correctnessReasoning: 4, clarityUsability: 4, scopeRestraint: 4, sourceFidelity: verdict === 'met' ? 4 : 2 },
+    }
+    const outcome = ledger.recordOutcomeIntake({ runId: binding.runId, verdict, sessionDigest,
+      evidenceIds: [evidenceId], semanticReview })
+    ledger.recordRunSkillUse({ runId: binding.runId, parentVersionId: manifest.parentVersionId,
+      sessionId, sessionDigest, skillName: RESEARCH_SUMMARY_BASE_SKILL.name,
+      contentDigest: sha256(RESEARCH_SUMMARY_BASE_SKILL.content),
+      skillEvidenceId: sha256(`semantic-skill:${suffix}`), acceptanceEvidenceId: evidenceId,
+      skillCallSeq: 1, skillResultSeq: 2, acceptanceCallSeq: 3 })
+    return { runId: binding.runId, ticketId: outcome.ticketId }
+  }
+  const first = add('first', 'not-met')
+  const second = add('second', 'not-met')
+  const counter = add('counter', 'met')
+  const requested = ledger.requestOutcomeLearningAnalysis({ ticketId: second.ticketId as LearningTicketId,
+    sessionId: 'session:semantic-exploration-source:counter', parentSessionId: 'session:semantic-exploration-source:counter',
+    consentRevision: 1, counterevidenceRunIds: [counter.runId] })
+  ledger.recordLearningAnalysisChildStarted({ analysisId: requested.analysisId,
+    parentSessionId: requested.parentSessionId, childSessionId: requested.childSessionId })
+  return { ledger, requested, first, second, counter, root }
 }
 
 function proposal(sourceRunId: TianwenRunId): LearningExplorationProposal {
@@ -213,6 +267,7 @@ function seedNativeOutcomeRun(
     readonly verdict: 'met' | 'not-met'
     readonly subjectDigest: ReturnType<typeof sha256>
     readonly sessionLifecycleFingerprint: ReturnType<typeof sha256>
+    readonly semantic?: boolean
   },
 ) {
   const binding = ctx.tianwenEvolution.recordRunBinding({
@@ -225,9 +280,15 @@ function seedNativeOutcomeRun(
       toolName: RESEARCH_SUMMARY_TOOL_NAME,
       notMetErrorCode: 'RESEARCH_SUMMARY_NOT_MET',
       gapDisposition: 'reusable',
-      problemCategory: 'research-summary-result.v1:native-exploration-parent',
+      problemCategory: input.semantic
+        ? 'research-summary-result.v2:native-exploration-parent'
+        : 'research-summary-result.v1:native-exploration-parent',
       severity: 2,
       blocksGoal: false,
+      ...(input.semantic ? { qualityContract: {
+        schemaVersion: 'tianwen.research-summary-semantic-contract.v1' as const,
+        rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+      } } : {}),
     },
     acceptanceSubjectDigest: input.subjectDigest,
     sessionLifecycleFingerprint: input.sessionLifecycleFingerprint,
@@ -243,6 +304,22 @@ function seedNativeOutcomeRun(
     verdict: input.verdict,
     sessionDigest,
     evidenceIds: [acceptanceEvidenceId],
+    ...(input.semantic ? { semanticReview: {
+      schemaVersion: 'tianwen.research-summary-semantic-review.v1' as const,
+      status: 'completed' as const,
+      acceptanceSubjectDigest: input.subjectDigest,
+      submissionDigest: sha256(`native-submission:${input.suffix}`),
+      rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+      reviewerSessionId: `native-reviewer:${input.suffix}`,
+      reviewerSessionDigest: sha256(`native-reviewer-session:${input.suffix}`),
+      requestDigest: sha256(`native-review-request:${input.suffix}`),
+      reviewEvidenceId: sha256(`native-review-evidence:${input.suffix}`),
+      idGateVerdict: 'met' as const,
+      scores: {
+        relevance: 4, correctnessReasoning: 4, clarityUsability: 4, scopeRestraint: 4,
+        sourceFidelity: input.verdict === 'met' ? 4 : 2,
+      },
+    } } : {}),
   })
   ctx.tianwenEvolution.recordRunSkillUse({
     runId: binding.runId,
@@ -489,6 +566,18 @@ describe('durable bounded learning exploration', () => {
       },
       environmentDigest,
     })).toThrow(/replacement|changed|intent/i)
+  })
+
+  it('selects the frozen semantic source-fidelity metric for a reviewed ordinary source', () => {
+    const seeded = seedRunningSemanticOutcomeAnalysis(rootFor('semantic-intent'))
+    const request = seeded.ledger.requestLearningExploration({
+      analysisId: seeded.requested.analysisId,
+      proposal: proposal(seeded.second.runId),
+      environmentDigest,
+    }).exploration
+    expect(request.metric).toBe('research-summary-source-fidelity.v1')
+    expect(new EvolutionLedger(seeded.root).getLearningExploration(seeded.requested.analysisId)?.metric)
+      .toBe('research-summary-source-fidelity.v1')
   })
 
   it('rejects a non-failure source, a late request, and revoked consent', () => {
@@ -971,6 +1060,145 @@ describe('durable bounded learning exploration', () => {
       expect(ctx.tianwenEvolution.listSkillCandidates()).toHaveLength(0)
       expect(ctx.tianwenEvolution.listControlledSkillEvaluations()).toHaveLength(0)
       expect(ctx.tianwenEvolution.getControlledSkillScopePointer(scopeKey)).toBeUndefined()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('reviews semantic native arms independently and keeps source output unevaluated', async () => {
+    const root = rootFor('native-semantic-pair')
+    const packet = parseResearchPacket(`<research_packet>
+[F:verified|required] The verified result is concrete.
+[U:decision|decision] The deployment region remains undecided.
+</research_packet>`)
+    const submission = {
+      summary: 'The verified result is concrete. The deployment region remains undecided.',
+      confirmedFindingIds: ['verified'],
+      uncertaintyIds: ['decision'],
+    }
+    class SemanticAdapter extends ScriptedAdapter {
+      override async resolveModel(provider: string, model: string) {
+        return { provider, id: model, name: model, reasoning: { efforts: [{ id: 'high', name: 'High' }] } }
+      }
+    }
+    const adapter = new SemanticAdapter([
+      toolCallResponse('control-skill', 'skill', { name: RESEARCH_SUMMARY_BASE_SKILL.name }),
+      toolCallResponse('control-submit', RESEARCH_SUMMARY_TOOL_NAME, submission),
+      toolCallResponse('control-review', RESEARCH_SUMMARY_QUALITY_TOOL_NAME, { scores: {
+        relevance: 4, correctnessReasoning: 4, clarityUsability: 4, scopeRestraint: 4,
+        sourceFidelity: 2,
+      } }),
+      textResponse('Control source captured.'),
+      toolCallResponse('treatment-skill', 'skill', { name: RESEARCH_SUMMARY_BASE_SKILL.name }),
+      toolCallResponse('treatment-submit', RESEARCH_SUMMARY_TOOL_NAME, submission),
+      toolCallResponse('treatment-review', RESEARCH_SUMMARY_QUALITY_TOOL_NAME, { scores: {
+        relevance: 4, correctnessReasoning: 4, clarityUsability: 4, scopeRestraint: 4,
+        sourceFidelity: 3,
+      } }),
+      textResponse('Treatment source captured.'),
+    ])
+    const parentAdapter = new ScriptedAdapter([
+      textResponse('Control observation received.'),
+      textResponse('Treatment observation received.'),
+    ])
+    const ctx = new Context()
+    ctx.provide('sessionProjections', projectionRegistry() as never)
+    ctx.provide('sandboxPolicy', delegatedSandboxPolicy() as never)
+    ctx.provide('approval', {} as never)
+    ctx.provide('sessionQuery', {
+      readSurface: async () => ({ messages: [] }), listSessions: async () => [],
+      readTitleSnapshots: async () => [],
+    } as never)
+    ctx.provide('agentDefaultModel', {
+      currentSelection: () => ({ provider: 'tianwen-semantic-exploration-probe', model: 'scripted', reasoningEffort: 'high' }),
+    } as never)
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(SkillRegistry)
+    await ctx.plugin(applySkillTool)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(JsonlSessionPersistence, { root: join(root, 'sessions'), compression: 'none' })
+    await ctx.plugin(SubagentRuntime)
+    ctx.subagents.registerProvider(nativeProvider)
+    ctx.llm.registerAdapter(['tianwen-semantic-exploration-probe'], adapter)
+    ctx.llm.registerAdapter(['tianwen-semantic-exploration-parent-probe'], parentAdapter)
+    await applyRuntime(ctx, { evolutionRoot: join(root, 'evolution') })
+    await ctx.plugin(TianwenLearningExplorationService)
+    const parentId = SessionId('session:native-semantic-learning-exploration-source:second')
+    const parent = (await ctx.agents.create({
+      sessionId: parentId,
+      agentOptions: { provider: 'tianwen-semantic-exploration-parent-probe', model: 'scripted' },
+    })).agent
+    try {
+      parent.session.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: `/research-summary\n${packet.source}` }],
+        source: { kind: 'user' },
+      }), { surfaceOp: 'append' })
+      parent.session.append('turn/start', { turn: 1 })
+      parent.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+      expect(await ctx.sessions.flush(parent.session)).toBe(true)
+      ctx.tianwenEvolution.recordLearningAnalysisConsent({
+        revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v2',
+      })
+      const subjectDigest = sha256(packet)
+      seedNativeOutcomeRun(ctx, { suffix: 'semantic-first', semantic: true,
+        sessionId: 'session:native-semantic-learning-exploration-source:first', verdict: 'not-met',
+        subjectDigest, sessionLifecycleFingerprint: sha256('native-semantic-lifecycle:first') })
+      const second = seedNativeOutcomeRun(ctx, { suffix: 'semantic-second', semantic: true,
+        sessionId: String(parentId), verdict: 'not-met', subjectDigest,
+        sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+          sessionId: String(parent.session.id), createdAt: parent.session.header.createdAt,
+          ...(parent.session.header.cwd === undefined ? {} : { cwd: parent.session.header.cwd }),
+        }) })
+      const counter = seedNativeOutcomeRun(ctx, { suffix: 'semantic-counter', semantic: true,
+        sessionId: 'session:native-semantic-learning-exploration-source:counter', verdict: 'met',
+        subjectDigest, sessionLifecycleFingerprint: sha256('native-semantic-lifecycle:counter') })
+      const analysis = ctx.tianwenEvolution.requestOutcomeLearningAnalysis({
+        ticketId: second.outcome.ticketId!, sessionId: String(parentId), parentSessionId: String(parentId),
+        consentRevision: 1, counterevidenceRunIds: [counter.binding.runId],
+      })
+      ctx.tianwenEvolution.recordLearningAnalysisChildStarted({
+        analysisId: analysis.analysisId, parentSessionId: analysis.parentSessionId,
+        childSessionId: analysis.childSessionId,
+      })
+
+      const completed = await ctx.tianwenLearningExploration.run({
+        analysisId: analysis.analysisId, parent, proposal: proposal(second.binding.runId),
+        signal: AbortSignal.timeout(10_000),
+      })
+      expect(completed.metric).toBe('research-summary-source-fidelity.v1')
+      expect(completed.result).toEqual({
+        observation: { control: 'not-met', treatment: 'met' },
+        classification: 'matches-hypothesis-prediction',
+      })
+      expect(adapter.requests).toHaveLength(8)
+      const reviewRequests = adapter.requests.filter(request =>
+        request.tools?.some(tool => tool.name === RESEARCH_SUMMARY_QUALITY_TOOL_NAME))
+      expect(reviewRequests).toHaveLength(2)
+      for (const request of reviewRequests) {
+        expect(JSON.stringify(request.messages)).toContain('source-fidelity')
+        expect(JSON.stringify(request)).not.toContain('Temporary task-local instruction')
+        expect(JSON.stringify(request)).not.toContain(completed.proposal.hypothesis)
+      }
+      for (const arm of ['control', 'treatment'] as const) {
+        const receipt = completed.arms[arm]!
+        const child = await ctx.sessionPersistence.inspect(SessionId(receipt.sessionId))
+        const result = child.events.find(event => event.type === 'tool/result'
+          && event.data.message.source.kind === 'tool'
+          && String(event.data.message.source.callId).endsWith('-submit'))
+        expect(result?.type === 'tool/result'
+          ? JSON.parse(result.data.message.content[0].content[0]?.type === 'text'
+            ? result.data.message.content[0].content[0].text : '')
+          : undefined).toEqual({ verdict: 'not-evaluated', submission })
+        const outcome = ctx.tianwenEvolution.getOutcomeIntake(receipt.runId)
+        expect(outcome?.input.semanticReview).toMatchObject({
+          status: 'completed', idGateVerdict: 'met',
+          scores: { sourceFidelity: arm === 'control' ? 2 : 3 },
+        })
+        const review = await ctx.sessionPersistence.inspect(
+          SessionId(outcome!.input.semanticReview!.reviewerSessionId),
+        )
+        expect(review.meta.agentPreset).toBe(RESEARCH_SUMMARY_QUALITY_AGENT_PRESET)
+      }
     } finally {
       await ctx.fiber.dispose()
     }

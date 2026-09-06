@@ -7,6 +7,7 @@ import {
   type ControlledSkillSourceIdentity,
   type LearningAnalysisBinding,
   type LearningSignalStatus,
+  type OutcomeLearningSignal,
 } from '@tianwen/evolution'
 import {
   normalizeResearchSummarySubmission,
@@ -29,6 +30,11 @@ export interface ResearchSummarySourceCase {
 export type ResearchSummaryFeedbackSourceBinding = Extract<
   LearningAnalysisBinding,
   { readonly source?: undefined }
+>
+
+export type ResearchSummaryOutcomeSourceBinding = Extract<
+  LearningAnalysisBinding,
+  { readonly source: 'outcome' }
 >
 
 function frozenEvents(
@@ -219,6 +225,128 @@ export async function recoverResearchSummarySourceCase(
     packet,
     submission: submitted,
     targetTurn,
+    acceptanceEvidenceId: use.acceptanceEvidenceId,
+  })
+}
+
+/** Recover the deterministic first failed semantic Outcome frozen by its analysis. */
+export async function recoverOutcomeResearchSummarySourceCase(
+  ctx: Context,
+  status: ResearchSummaryOutcomeSourceBinding,
+): Promise<ResearchSummarySourceCase> {
+  const sourceSignalId = [...status.signalIds].sort()[0]
+  const ticket = ctx.tianwenEvolution.listLearningTickets()
+    .find(value => value.ticketId === status.ticketId)
+  const signal = ctx.tianwenEvolution.listLearningSignals()
+    .filter((value): value is OutcomeLearningSignal => 'runId' in value)
+    .find(value => value.signalId === sourceSignalId
+      && ticket?.signalIds.includes(value.signalId) === true)
+  const binding = signal === undefined
+    ? undefined
+    : ctx.tianwenEvolution.getRunBinding(signal.runId)
+  const outcome = signal === undefined
+    ? undefined
+    : ctx.tianwenEvolution.getOutcomeIntake(signal.runId)
+  const use = signal === undefined
+    ? undefined
+    : ctx.tianwenEvolution.getRunSkillUse(signal.runId)
+  if (
+    sourceSignalId === undefined
+    || status.parentSessionId !== status.sessionId
+    || ticket?.status !== 'open'
+    || signal === undefined
+    || binding?.schemaVersion !== 'tianwen.run-binding.v3'
+    || binding.sessionId !== signal.sessionId
+    || binding.scopeKey !== RESEARCH_SUMMARY_SCOPE
+    || binding.acceptanceContract.toolName !== RESEARCH_SUMMARY_TOOL_NAME
+    || binding.acceptanceContract.gapDisposition !== 'reusable'
+    || !binding.acceptanceContract.problemCategory.startsWith('research-summary-result.v2:')
+    || binding.acceptanceContract.qualityContract?.schemaVersion
+      !== 'tianwen.research-summary-semantic-contract.v1'
+    || binding.acceptanceSubjectDigest === undefined
+    || outcome?.schemaVersion !== 'tianwen.outcome-intake.v2'
+    || outcome.receipt.ingestionId !== signal.ingestionId
+    || outcome.input.verdict !== 'not-met'
+    || outcome.input.semanticReview.status !== 'completed'
+    || outcome.input.semanticReview.acceptanceSubjectDigest
+      !== binding.acceptanceSubjectDigest
+    || outcome.input.semanticReview.rubricDigest
+      !== binding.acceptanceContract.qualityContract.rubricDigest
+    || use?.sessionId !== signal.sessionId
+    || use.sessionDigest !== signal.sessionDigest
+    || !signal.evidenceIds.includes(use.acceptanceEvidenceId)
+  ) throw new Error('research summary Outcome source binding is unavailable')
+
+  const inspection = await ctx.sessionPersistence.inspect(SessionId(signal.sessionId))
+  const lifecycle = learningSessionLifecycleFingerprint({
+    sessionId: String(inspection.meta.id),
+    createdAt: inspection.meta.createdAt,
+    ...(inspection.meta.cwd === undefined ? {} : { cwd: inspection.meta.cwd }),
+  })
+  if (String(inspection.meta.id) !== signal.sessionId
+    || inspection.meta.parentSession !== undefined
+    || inspection.meta.origin === 'subagent'
+    || binding.sessionLifecycleFingerprint !== lifecycle) {
+    throw new Error('research summary Outcome source Session identity is unavailable')
+  }
+  const events = frozenEvents(inspection.events, signal.sessionDigest)
+  const evidence = ctx.tianwenEvidence.project({ id: inspection.meta.id, events } as never)
+  if (sha256(evidence.map(item => item.evidenceId)) !== sha256(signal.evidenceIds)) {
+    throw new Error('research summary Outcome evidence snapshot changed')
+  }
+  const accepted = evidence.filter(item =>
+    item.evidenceId === use.acceptanceEvidenceId
+    && item.action.toolName === RESEARCH_SUMMARY_TOOL_NAME
+    && item.outcome.status === 'complete'
+    && item.outcome.isError === false
+    && item.outcome.errorCode === undefined)
+  if (accepted.length !== 1 || accepted[0]!.source.resultSeq === undefined) {
+    throw new Error('research summary Outcome accepted evidence is unavailable or ambiguous')
+  }
+  const packet = researchSummaryPacketFromEvents(events as never, binding.acceptanceSubjectDigest)?.packet
+  const call = events.find(event => event.seq === accepted[0]!.source.callSeq)
+  const result = events.find(event => event.seq === accepted[0]!.source.resultSeq)
+  const terminal = call?.type === 'tool/call'
+    ? events.find(event => event.type === 'turn/end'
+        && event.data.turn === call.data.turn && event.seq > (result?.seq ?? Number.MAX_SAFE_INTEGER))
+    : undefined
+  if (packet === undefined
+    || call?.type !== 'tool/call'
+    || result?.type !== 'tool/result'
+    || call.data.name !== RESEARCH_SUMMARY_TOOL_NAME
+    || call.data.turn !== 1
+    || result.data.turn !== call.data.turn
+    || result.seq >= (terminal?.seq ?? -1)
+    || terminal?.type !== 'turn/end'
+    || terminal.data.reason.kind !== 'completed') {
+    throw new Error('research summary Outcome source turn or accepted evidence is invalid')
+  }
+  let submission: ResearchSummarySubmission
+  try {
+    submission = normalizeResearchSummarySubmission(packet, JSON.parse(call.data.arguments) as unknown)
+  } catch {
+    throw new Error('research summary Outcome accepted call is not a canonical submission')
+  }
+  if (sha256(submission) !== sha256(acceptedResultSubmission(packet, result))) {
+    throw new Error('research summary Outcome accepted call and result disagree')
+  }
+  return Object.freeze({
+    source: Object.freeze({
+      source: 'outcome' as const,
+      signalId: signal.signalId,
+      runId: signal.runId,
+      sessionId: signal.sessionId,
+      outcomeIngestionId: signal.ingestionId,
+      sessionLifecycleFingerprint: lifecycle,
+      sessionDigest: signal.sessionDigest,
+      evidenceSetDigest: sha256(signal.evidenceIds),
+      acceptanceSubjectDigest: binding.acceptanceSubjectDigest,
+      packetDigest: sha256(packet.source),
+      semanticReviewDigest: sha256(outcome.input.semanticReview),
+    }),
+    packet,
+    submission,
+    targetTurn: call.data.turn,
     acceptanceEvidenceId: use.acceptanceEvidenceId,
   })
 }

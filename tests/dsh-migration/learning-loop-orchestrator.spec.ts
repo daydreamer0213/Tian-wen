@@ -69,6 +69,8 @@ function controlledExecutorFixture(input: {
       getRunBindingBySessionId: () => ({
         scopeKey: input.scopeKey ?? EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
       }),
+      getRunBinding: () => undefined,
+      listLearningSignals: () => [],
       listControlledSkillEvalProtocols: () => input.records ?? [],
       freezeControlledSkillEvalProtocol: vi.fn((value: unknown) => {
         frozen.push(value)
@@ -548,6 +550,7 @@ describe('learning-loop orchestrator', () => {
       status: {
         source: 'outcome', analysisId: `analysis:${'a'.repeat(64)}`,
         ticketId: `ticket:${'b'.repeat(64)}`, sessionId: 'main', consentRevision: 1,
+        signalIds: [`signal:${'1'.repeat(64)}`], counterevidenceRunIds: [],
         parentSessionId: 'main', childSessionId: 'child', phase: 'running',
         submission: { verdict: 'skill-change' }, submissionDigest: sha256('submission'),
       },
@@ -558,6 +561,67 @@ describe('learning-loop orchestrator', () => {
       expect((fixture.frozen[0] as any).protocol).not.toHaveProperty('sourceFidelity')
       expect((fixture.frozen[0] as any).protocol.rubricDigest)
         .toBe(CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST)
+    } finally {
+      recovery.mockRestore()
+      fixture.dispose()
+    }
+  })
+
+  it('selects v3 for a fresh semantic Outcome and refuses missing semantic source proof', async () => {
+    const packet = parseResearchPacket(`<research_packet>
+[F:source|required] The native outcome result is 18%.
+[U:window|decision] The source covers six weeks.
+</research_packet>`)
+    const signalId = `signal:${'1'.repeat(64)}`
+    const runId = `run:${'2'.repeat(64)}`
+    const source = {
+      source: 'outcome' as const,
+      signalId,
+      runId,
+      sessionId: 'semantic-source',
+      outcomeIngestionId: sha256('semantic-ingestion'),
+      sessionLifecycleFingerprint: sha256('semantic-lifecycle'),
+      sessionDigest: sha256('semantic-session'),
+      evidenceSetDigest: sha256('semantic-evidence'),
+      acceptanceSubjectDigest: sha256(packet),
+      packetDigest: sha256(packet.source),
+      semanticReviewDigest: sha256('semantic-review'),
+    }
+    const recovery = vi.spyOn(sourceCases, 'recoverOutcomeResearchSummarySourceCase')
+      .mockResolvedValue({
+        source,
+        packet,
+        submission: { summary: 'Historical semantic outcome.', confirmedFindingIds: ['source'], uncertaintyIds: [] },
+        targetTurn: 1,
+        acceptanceEvidenceId: sha256('accepted'),
+      })
+    const evolution = {
+      listLearningSignals: () => [{ signalId, runId }],
+      getRunBinding: () => ({
+        acceptanceContract: {
+          qualityContract: { schemaVersion: 'tianwen.research-summary-semantic-contract.v1' },
+        },
+      }),
+    }
+    const status = {
+      source: 'outcome', analysisId: `analysis:${'a'.repeat(64)}`,
+      ticketId: `ticket:${'b'.repeat(64)}`, sessionId: 'main', consentRevision: 1,
+      signalIds: [signalId], counterevidenceRunIds: [`run:${'3'.repeat(64)}`],
+      parentSessionId: 'main', childSessionId: 'child', phase: 'running',
+      submission: { verdict: 'skill-change' }, submissionDigest: sha256('submission'),
+    }
+    const fixture = controlledExecutorFixture({ status, evolution })
+    try {
+      await fixture.run()
+      expect((fixture.frozen[0] as any).protocol.sourceFidelity.source).toEqual(source)
+      recovery.mockRejectedValueOnce(new Error('semantic proof missing'))
+      const missing = controlledExecutorFixture({ status, evolution })
+      try {
+        await expect(missing.run()).rejects.toThrow(/source recovery is unavailable/i)
+        expect(missing.frozen).toEqual([])
+      } finally {
+        missing.dispose()
+      }
     } finally {
       recovery.mockRestore()
       fixture.dispose()

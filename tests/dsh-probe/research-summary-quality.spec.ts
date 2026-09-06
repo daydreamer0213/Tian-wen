@@ -255,7 +255,6 @@ async function runFixture(options: FixtureOptions = {}) {
   await harness.ctx.sessions.flush(parent.agent.session)
   const run = harness.ctx.tianwenEvolution.getRunBinding(binding.runId)!
   const recovered = await recoverResearchSummaryQualityReview(harness.ctx, {
-    parentAgent: parent.agent,
     run,
     packet: boundPacket,
     submission,
@@ -337,7 +336,6 @@ describe('native research-summary quality review', () => {
 
       const before = fixture.harness.adapter.requests.length
       await expect(recoverResearchSummaryQualityReview(fixture.harness.ctx, {
-        parentAgent: fixture.parent.agent,
         run: fixture.run,
         packet,
         submission: fixture.submission,
@@ -354,6 +352,36 @@ describe('native research-summary quality review', () => {
     } finally {
       await fixture.parent.dispose()
       await fixture.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('recovers an exact completed proof after full Context remount without live Agents or a provider request', async () => {
+    const fixture = await runFixture()
+    const expected = fixture.recovered
+    expect(expected.status).toBe('completed')
+    await fixture.parent.dispose()
+    await fixture.harness.ctx.fiber.dispose()
+
+    const remounted = await mountPersistentHarness(join(fixture.directory, 'sessions'), [])
+    try {
+      await remounted.ctx.plugin(SkillRegistry)
+      await remounted.ctx.plugin(applySkillTool)
+      await applyRuntime(remounted.ctx, { evolutionRoot: join(fixture.directory, 'evolution') })
+      expect(remounted.ctx.agents.get(SessionId(fixture.run.sessionId))).toBeUndefined()
+      if (expected.status === 'completed') {
+        expect(remounted.ctx.agents.get(SessionId(expected.reviewerSessionId))).toBeUndefined()
+      }
+      const before = remounted.adapter.requests.length
+      await expect(recoverResearchSummaryQualityReview(remounted.ctx, {
+        run: fixture.run,
+        packet,
+        submission: fixture.submission,
+        expectedReview: expected,
+        signal: new AbortController().signal,
+      })).resolves.toEqual(expected)
+      expect(remounted.adapter.requests).toHaveLength(before)
+    } finally {
+      await remounted.ctx.fiber.dispose()
     }
   })
 
@@ -432,7 +460,6 @@ describe('native research-summary quality review', () => {
         : completed.recovered
       const before = completed.harness.adapter.requests.length
       await expect(recoverResearchSummaryQualityReview(completed.harness.ctx, {
-        parentAgent: completed.parent.agent,
         run: completed.run,
         packet,
         submission: completed.submission,

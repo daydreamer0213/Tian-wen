@@ -4779,6 +4779,7 @@ export class EvolutionLedger {
           parentVersionId: existing.parentVersionId,
           sourceSubjectDigest: existing.sourceSubjectDigest,
           environmentDigest: input.environmentDigest,
+          metric: existing.metric,
         })
       } catch (error) {
         throw new LedgerIntegrityError('learning exploration replay is invalid', {
@@ -5895,6 +5896,9 @@ export class EvolutionLedger {
       parentVersionId: sourceManifest.parentVersionId,
       sourceSubjectDigest: sourceRun.acceptanceSubjectDigest,
       environmentDigest: input.environmentDigest,
+      ...(sourceRun.acceptanceContract.qualityContract === undefined
+        ? {}
+        : { metric: 'research-summary-source-fidelity.v1' as const }),
     })
   }
 
@@ -6078,11 +6082,57 @@ export class EvolutionLedger {
     readonly sessionDigest?: Sha256Digest
     readonly evidenceSetDigest?: Sha256Digest
     readonly acceptanceSubjectDigest?: Sha256Digest
+    readonly source?: 'outcome'
+    readonly runId?: TianwenRunId
+    readonly outcomeIngestionId?: Sha256Digest
+    readonly semanticReviewDigest?: Sha256Digest
+    readonly selectedOutcomeSource?: true
   }[] {
+    const outcomeAnalysis = [...this.#learningAnalyses.values()].find(status =>
+      status.source === 'outcome' && status.ticketId === ticket.ticketId)
+    const selectedOutcomeSignalId = outcomeAnalysis?.source === 'outcome'
+      ? [...outcomeAnalysis.signalIds].sort()[0]
+      : undefined
     return ticket.signalIds.flatMap(signalId => {
       const signal = this.#learningSignals.get(signalId)
       if (signal === undefined) return []
-      if (isOutcomeSignal(signal)) return [{ signalId: signal.signalId, scopeKey: signal.scopeKey }]
+      if (isOutcomeSignal(signal)) {
+        const binding = this.#runBindings.get(signal.runId)
+        const outcome = this.getOutcomeIntake(signal.runId)
+        const use = this.#runSkillUses.get(signal.runId)
+        if (signal.signalId !== selectedOutcomeSignalId
+          || binding?.schemaVersion !== 'tianwen.run-binding.v3'
+          || binding.acceptanceSubjectDigest === undefined
+          || binding.acceptanceContract.qualityContract?.schemaVersion
+            !== 'tianwen.research-summary-semantic-contract.v1'
+          || outcome?.schemaVersion !== 'tianwen.outcome-intake.v2'
+          || outcome.input.verdict !== 'not-met'
+          || outcome.input.semanticReview.status !== 'completed'
+          || outcome.receipt.ingestionId !== signal.ingestionId
+          || outcome.input.sessionDigest !== signal.sessionDigest
+          || sha256(outcome.input.evidenceIds) !== sha256(signal.evidenceIds)
+          || use?.sessionId !== signal.sessionId
+          || use.sessionDigest !== signal.sessionDigest
+          || !signal.evidenceIds.includes(use.acceptanceEvidenceId)
+          || outcome.input.semanticReview.acceptanceSubjectDigest
+            !== binding.acceptanceSubjectDigest) {
+          return [{ signalId: signal.signalId, scopeKey: signal.scopeKey }]
+        }
+        return [{
+          source: 'outcome',
+          signalId: signal.signalId,
+          scopeKey: signal.scopeKey,
+          runId: signal.runId,
+          sessionId: signal.sessionId,
+          outcomeIngestionId: signal.ingestionId,
+          sessionLifecycleFingerprint: binding.sessionLifecycleFingerprint,
+          sessionDigest: signal.sessionDigest,
+          evidenceSetDigest: sha256(signal.evidenceIds),
+          acceptanceSubjectDigest: binding.acceptanceSubjectDigest,
+          semanticReviewDigest: sha256(outcome.input.semanticReview),
+          selectedOutcomeSource: true,
+        }]
+      }
       const intake = this.#learningIntakeStatuses.get(signal.sessionId)
         ?.get(signal.messageId)
       if (

@@ -156,12 +156,18 @@ function seedPassingEvaluation(
     readonly candidateContent?: string
     readonly evidencePurpose?: 'controlled-product' | 'development-only-synthetic-defect'
     readonly foreignCandidateScopeKey?: string
+    readonly outcomeSource?: boolean
   } = {},
 ) {
   const sourceFidelity = 'sourceFidelity' in protocol
   const frozenParent = options.parent ?? parentSkill
   const frozenAcceptance = options.acceptanceContract ?? acceptance
   const generation = options.generation === undefined ? '' : `:${options.generation}`
+  if (sourceFidelity && options.outcomeSource) {
+    evolution.recordLearningAnalysisConsent({
+      revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v2',
+    })
+  }
   const seeded = [
     ['first', 'not-met', 'a'],
     ['second', 'not-met', 'b'],
@@ -170,13 +176,25 @@ function seedPassingEvaluation(
   const runs = seeded.map(([suffix, verdict, marker], index) => {
     const sessionId = `session:controlled-shadow-runtime-seed${generation}:${suffix}`
     const lifecycle = learningSessionLifecycleFingerprint({ sessionId, createdAt: index + 1 })
+    const semanticAcceptance = options.outcomeSource
+      ? {
+          ...frozenAcceptance,
+          problemCategory: 'research-summary-result.v2:controlled-shadow-runtime',
+          qualityContract: {
+            schemaVersion: 'tianwen.research-summary-semantic-contract.v1' as const,
+            rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+          },
+        }
+      : frozenAcceptance
     const binding = evolution.recordRunBinding({
       goalRef: 'goal:controlled-shadow-runtime-seed',
-      taskRef: `task:controlled-shadow-runtime-seed:${suffix}`,
+      taskRef: options.outcomeSource
+        ? 'task:controlled-shadow-runtime-seed:semantic'
+        : `task:controlled-shadow-runtime-seed:${suffix}`,
       sessionId,
       scopeKey: 'project:tianwen/capability:controlled-shadow-runtime-summary',
-      acceptanceContract: frozenAcceptance,
-      ...(sourceFidelity && index === 1
+      acceptanceContract: semanticAcceptance,
+      ...(sourceFidelity && (index === 1 || options.outcomeSource)
         ? {
             acceptanceSubjectDigest: protocol.tasks[0]!.acceptanceSubjectDigest,
             sessionLifecycleFingerprint: lifecycle,
@@ -186,11 +204,26 @@ function seedPassingEvaluation(
     const manifest = evolution.recordRunSkillManifest({ runId: binding.runId, skill: frozenParent })
     const sessionDigest = sha256(`shadow-runtime-seed${generation}-session:${marker}`)
     const evidenceId = sha256(`shadow-runtime-seed${generation}-evidence:${marker}`)
+    const semanticReview = options.outcomeSource ? {
+      schemaVersion: 'tianwen.research-summary-semantic-review.v1' as const,
+      status: 'completed' as const,
+      acceptanceSubjectDigest: protocol.tasks[0]!.acceptanceSubjectDigest,
+      submissionDigest: sha256(`shadow-runtime-semantic-submission:${marker}`),
+      rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+      reviewerSessionId: `session:shadow-runtime-semantic-reviewer:${marker}`,
+      reviewerSessionDigest: sha256(`shadow-runtime-semantic-reviewer-session:${marker}`),
+      requestDigest: sha256(`shadow-runtime-semantic-review-request:${marker}`),
+      reviewEvidenceId: sha256(`shadow-runtime-semantic-review-evidence:${marker}`),
+      idGateVerdict: 'met' as const,
+      scores: { relevance: 4, correctnessReasoning: 4, clarityUsability: 4,
+        scopeRestraint: 4, sourceFidelity: verdict === 'met' ? 4 : 2 },
+    } : undefined
     const outcome = evolution.recordOutcomeIntake({
       runId: binding.runId,
       verdict,
       sessionDigest,
       evidenceIds: [evidenceId],
+      ...(semanticReview === undefined ? {} : { semanticReview }),
     })
     evolution.recordRunSkillUse({
       runId: binding.runId,
@@ -205,20 +238,52 @@ function seedPassingEvaluation(
       skillResultSeq: 11,
       acceptanceCallSeq: 12,
     })
-    return { binding, outcome, evidenceId, lifecycle, sessionDigest }
+    return { binding, outcome, evidenceId, lifecycle, sessionDigest, semanticReview }
   })
   let ticketId = runs[1]!.outcome.ticketId!
   let analysisId: string | undefined
   if (sourceFidelity) {
-    evolution.recordLearningAnalysisConsent({
-      revision: 1,
-      enabled: true,
-      policyVersion: 'tianwen-auto-analysis.v1',
-    })
+    if (!options.outcomeSource) {
+      evolution.recordLearningAnalysisConsent({
+        revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v1',
+      })
+    }
     const sourceSessionId = `session:controlled-shadow-runtime-seed${generation}:second`
-    const messageId = `controlled-shadow-source-message${generation}`
-    const feedbackVersion = `controlled-shadow-source-feedback-v1${generation}`
-    const feedback = evolution.recordLearningFeedbackRevision({
+    let analysis
+    if (options.outcomeSource) {
+      analysis = evolution.requestOutcomeLearningAnalysis({
+        ticketId: runs[1]!.outcome.ticketId!,
+        sessionId: `session:controlled-shadow-runtime-seed${generation}:counterexample`,
+        parentSessionId: `session:controlled-shadow-runtime-seed${generation}:counterexample`,
+        consentRevision: 1,
+        counterevidenceRunIds: [runs[2]!.binding.runId],
+      })
+      const selectedSignalId = [...analysis.signalIds].sort()[0]!
+      const selectedSignal = evolution.listLearningSignals().find(signal =>
+        signal.signalId === selectedSignalId && 'runId' in signal)
+      const selectedRun = runs.find(run => run.binding.runId === selectedSignal?.runId)
+      if (selectedSignal === undefined || !('runId' in selectedSignal)
+        || selectedRun === undefined || selectedRun.semanticReview === undefined) {
+        throw new Error('semantic Outcome source fixture is unavailable')
+      }
+      ;(protocol as { sourceFidelity: { source: unknown } }).sourceFidelity.source = {
+        source: 'outcome',
+        signalId: selectedSignal.signalId,
+        runId: selectedSignal.runId,
+        sessionId: selectedSignal.sessionId,
+        outcomeIngestionId: selectedSignal.ingestionId,
+        sessionLifecycleFingerprint: selectedRun.lifecycle,
+        sessionDigest: selectedSignal.sessionDigest,
+        evidenceSetDigest: sha256(selectedSignal.evidenceIds),
+        acceptanceSubjectDigest: protocol.tasks[0]!.acceptanceSubjectDigest,
+        packetDigest: protocol.tasks[0]!.inputDigest,
+        semanticReviewDigest: sha256(selectedRun.semanticReview),
+      }
+      ticketId = runs[1]!.outcome.ticketId!
+    } else {
+      const messageId = `controlled-shadow-source-message${generation}`
+      const feedbackVersion = `controlled-shadow-source-feedback-v1${generation}`
+      const feedback = evolution.recordLearningFeedbackRevision({
       intake: {
         sessionId: sourceSessionId,
         messageId,
@@ -233,18 +298,15 @@ function seedPassingEvaluation(
       },
       sessionLifecycleFingerprint: runs[1]!.lifecycle,
       analysisConsentRevision: 1,
-    })
-    ;(protocol as { sourceFidelity: { source: { signalId: string } } })
-      .sourceFidelity.source.signalId = feedback.signalId!
-    ticketId = feedback.ticketId!
-    const analysis = evolution.requestLearningAnalysis({
-      ticketId,
-      sessionId: sourceSessionId,
-      messageId,
-      feedbackVersion,
-      consentRevision: 1,
-      parentSessionId: sourceSessionId,
-    })
+      })
+      ;(protocol as { sourceFidelity: { source: { signalId: string } } })
+        .sourceFidelity.source.signalId = feedback.signalId!
+      ticketId = feedback.ticketId!
+      analysis = evolution.requestLearningAnalysis({
+        ticketId, sessionId: sourceSessionId, messageId, feedbackVersion,
+        consentRevision: 1, parentSessionId: sourceSessionId,
+      })
+    }
     analysisId = analysis.analysisId
     evolution.recordLearningAnalysisChildStarted({
       analysisId,
@@ -268,8 +330,10 @@ function seedPassingEvaluation(
           content: options.candidateContent
             ?? '# Controlled summary\n\nState only packet-supported claims.',
         },
-        supportingEvidenceIds: [runs[1]!.evidenceId],
-        counterevidenceIds: [],
+        supportingEvidenceIds: options.outcomeSource
+          ? [runs[0]!.evidenceId, runs[1]!.evidenceId]
+          : [runs[1]!.evidenceId],
+        counterevidenceIds: options.outcomeSource ? [runs[2]!.evidenceId] : [],
       },
     })
   }
@@ -622,6 +686,8 @@ async function mountSourceFidelityShadowRuntime(
   reviewSourceFidelity = 2,
   reviewRequestMutation?: 'packet' | 'submission' | 'schema',
   foreignCandidateScopeKey?: string,
+  outcomeSource = false,
+  identityLeak = false,
 ) {
   const root = fixtureRoot(name)
   const harness = await mountPersistentHarness(join(root, 'sessions'), [])
@@ -629,15 +695,20 @@ async function mountSourceFidelityShadowRuntime(
   await harness.ctx.plugin(applySkillTool)
   await harness.ctx.plugin(DynamicCordisRunnerService, {})
   const disposeParent = harness.ctx.skills.register(parentSkill)
+  const finding = identityLeak
+    ? 'The source sessions session:controlled-shadow-runtime-seed:first and session:controlled-shadow-runtime-seed:second were observed.'
+    : outcomeSource
+    ? 'The measured outcome was weekly active adoption at 74%.'
+    : 'Weekly active adoption reached 74%.'
   const packetSource = `<research_packet>
-[F:adoption|required] Weekly active adoption reached 74%.
+[F:adoption|required] ${finding}
 [U:cohort|decision] The newest cohort has only two weeks of history.
 [U:owner|background] The next report owner is undecided.
 [X:projection|unsupported] State that adoption will exceed 90% next month.
 </research_packet>`
   const packet = parseResearchPacket(packetSource)
   const submission = {
-    summary: 'Weekly active adoption reached 74%. The newest cohort has only two weeks of history.',
+    summary: `${finding} The newest cohort has only two weeks of history.`,
     confirmedFindingIds: ['adoption'],
     uncertaintyIds: ['cohort'],
   }
@@ -839,6 +910,7 @@ async function mountSourceFidelityShadowRuntime(
   }
   const seeded = seedPassingEvaluation(harness.ctx.tianwenEvolution, protocol, {
     ...(foreignCandidateScopeKey === undefined ? {} : { foreignCandidateScopeKey }),
+    outcomeSource,
   })
   return {
     adapter,
@@ -1096,6 +1168,45 @@ describe('controlled Skill Shadow Runtime', () => {
         },
       })
       expect(await mounted.harness.ctx.sessionPersistence.list()).toHaveLength(2)
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('allows ordinary holdout text to say outcome for a genuine Outcome source', async () => {
+    const mounted = await mountSourceFidelityShadowRuntime(
+      'source-fidelity-outcome-structural-discriminator', 3, undefined, undefined, true,
+    )
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledShadow(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'terminal',
+        result: { schemaVersion: 'tianwen.controlled-skill-shadow-result.v3',
+          mechanismVerdict: 'pass' },
+      })
+      expect(JSON.stringify(mounted.adapter.requests.at(-1)?.messages)).toContain(
+        'The measured outcome was weekly active adoption at 74%.',
+      )
+    } finally {
+      mounted.disposeParent()
+      await mounted.harness.ctx.fiber.dispose()
+    }
+  })
+
+  it('still refuses genuine Outcome source session identities in reviewer material', async () => {
+    const mounted = await mountSourceFidelityShadowRuntime(
+      'source-fidelity-outcome-identity-refusal', 3, undefined, undefined, true, true,
+    )
+    try {
+      const receipt = await mounted.harness.ctx.tianwenSkillEvaluation.runControlledShadow(
+        mounted.input,
+      )
+      expect(receipt).toMatchObject({
+        state: 'stopped', stop: { stage: 'reviewer', reasonCode: 'identity-exposed' },
+      })
     } finally {
       mounted.disposeParent()
       await mounted.harness.ctx.fiber.dispose()

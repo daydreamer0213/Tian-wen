@@ -2920,8 +2920,8 @@ export class TianwenSkillEvaluationService extends Service {
                 task.candidate.sessionId,
                 task.evaluatorSessionId,
               ]),
-              ...Object.values(evaluation.sourceFidelity.source).filter(
-                (value): value is string => typeof value === 'string',
+              ...Object.entries(evaluation.sourceFidelity.source).flatMap(
+                ([key, value]) => key !== 'source' && typeof value === 'string' ? [value] : [],
               ),
             ]),
             ...(signal === undefined ? {} : { signal }),
