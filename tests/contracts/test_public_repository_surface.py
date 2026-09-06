@@ -674,6 +674,7 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         "tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts "
         "tests/dsh-probe/controlled-skill-activation.spec.ts "
         "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts "
+        "tests/dsh-probe/controlled-skill-source-fidelity.spec.ts "
         "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts "
         "tests/dsh-migration/controlled-lifecycle-profile.spec.ts "
         "tests/dsh-migration/explicit-correction-product.e2e.spec.ts"
@@ -687,6 +688,7 @@ def test_controlled_skill_lifecycle_ci_contract() -> None:
         "tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts",
         "tests/dsh-probe/controlled-skill-activation.spec.ts",
         "tests/dsh-probe/controlled-skill-activation-runtime.spec.ts",
+        "tests/dsh-probe/controlled-skill-source-fidelity.spec.ts",
         "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts",
         "tests/dsh-migration/controlled-lifecycle-profile.spec.ts",
         "tests/dsh-migration/explicit-correction-product.e2e.spec.ts",
