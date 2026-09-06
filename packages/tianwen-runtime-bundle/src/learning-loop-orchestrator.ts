@@ -298,6 +298,21 @@ export function createExplicitCorrectionLearningLoopExecutor(
     if (retained === undefined && records.length > 0) {
       throw new Error('controlled protocol history cannot be resolved exactly')
     }
+    let retainedExecutionWindowMs: 60_000 | 300_000 | undefined
+    if (retained?.schemaVersion === 'tianwen.controlled-skill-eval-protocol.v3') {
+      const taskContracts = retained.protocol.tasks.map(task => task.stopContract)
+      const holdoutContract = retained.protocol.sourceFidelity.holdout.task.stopContract
+      const contracts = [...taskContracts, holdoutContract]
+      const windows = new Set(contracts.map(contract => contract.maxElapsedMs))
+      if (
+        taskContracts.length !== 5
+        || contracts.some(contract => contract.maxToolCalls !== 4)
+        || contracts.some(contract => contract.maxElapsedMs !== 60_000
+          && contract.maxElapsedMs !== 300_000)
+        || windows.size !== 1
+      ) throw new Error('retained controlled protocol execution window is invalid')
+      retainedExecutionWindowMs = [...windows][0] as 60_000 | 300_000
+    }
     let protocol
     let protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v2'
       | 'tianwen.controlled-skill-eval-protocol.v3'
@@ -327,6 +342,9 @@ export function createExplicitCorrectionLearningLoopExecutor(
         packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
         source: retained?.protocol.sourceFidelity.source ?? sourceCase.source,
         packet: sourceCase.packet,
+        ...(retainedExecutionWindowMs === undefined
+          ? {}
+          : { executionWindowMs: retainedExecutionWindowMs }),
       })
       protocolSchemaVersion = 'tianwen.controlled-skill-eval-protocol.v3'
     }
@@ -648,11 +666,22 @@ export function createExplicitCorrectionLearningLoopExecutor(
     async progress(context, input) {
       if (config.deliverProgressReport === undefined) return
       const progressStatus = { ...context.status, phase: input.phase }
-      const { text, digest: reportDigest } = learningLoopProgressReport(
+      const currentReport = learningLoopProgressReport(
         progressStatus,
         input.kind,
         input.elapsedBucket,
       )
+      const legacyReport = input.reportDigest === undefined
+        ? undefined
+        : legacyFailedLearningLoopProgressReport(
+            progressStatus,
+            input.kind,
+            input.elapsedBucket,
+          )
+      const { text, digest: reportDigest } = legacyReport !== undefined
+        && input.reportDigest === legacyReport.digest
+        ? legacyReport
+        : currentReport
       if (input.reportDigest !== undefined && input.reportDigest !== reportDigest) {
         throw new Error('learning progress durable digest changed')
       }
@@ -761,6 +790,34 @@ function learningProgressStage(status: LearningLoopPhaseStatus): {
   return { completed: 0, activity: '分析反馈与证据' }
 }
 
+function learningProgressDigest(
+  status: LearningLoopPhaseStatus,
+  kind: LearningAnalysisProgressKind,
+  elapsedBucket: number,
+  text: string,
+): ReturnType<typeof sha256> {
+  return sha256({
+    kind: 'learning-progress',
+    analysisId: status.analysisId,
+    progressKind: kind,
+    phase: status.phase,
+    elapsedBucket,
+    text,
+  })
+}
+
+function legacyFailedLearningLoopProgressReport(
+  status: LearningLoopPhaseStatus,
+  kind: LearningAnalysisProgressKind,
+  elapsedBucket: number,
+): { readonly text: string, readonly digest: ReturnType<typeof sha256> } | undefined {
+  if (kind !== 'liveness' || status.phase !== 'failed') return undefined
+  const text = status.resumePhase === 'promoted'
+    ? 'Tianwen 学习暂时中断：回滚验证尚未完成，当前启用状态未继续改变；将在下一次可用时自动重试。'
+    : 'Tianwen 学习暂时中断：受控环境暂不可用，候选改进尚未启用；将在下一次可用时自动重试。'
+  return { text, digest: learningProgressDigest(status, kind, elapsedBucket, text) }
+}
+
 export function learningLoopProgressReport(
   status: LearningLoopPhaseStatus,
   kind: LearningAnalysisProgressKind,
@@ -768,8 +825,8 @@ export function learningLoopProgressReport(
 ): { readonly text: string, readonly digest: ReturnType<typeof sha256> } {
   const text = kind === 'liveness' && status.phase === 'failed'
     ? status.resumePhase === 'promoted'
-      ? 'Tianwen 学习暂时中断：回滚验证尚未完成，当前启用状态未继续改变；将在下一次可用时自动重试。'
-      : 'Tianwen 学习暂时中断：受控环境暂不可用，候选改进尚未启用；将在下一次可用时自动重试。'
+      ? 'Tianwen 学习中断：回滚验证尚未完成，当前启用状态未继续改变；恢复时会先核验已保存记录，无法安全续接的尝试不会直接重跑。'
+      : 'Tianwen 学习中断：分析或受控验证尚未完成，候选改进尚未启用；恢复时会先核验已保存记录，无法安全续接的尝试不会直接重跑。'
     : kind === 'analysis-started'
     ? status.source === 'outcome'
       ? 'Tianwen 发现多个任务出现同类问题，已开始结合成功案例分析；后续进度会继续在当前对话更新。'
@@ -782,14 +839,7 @@ export function learningLoopProgressReport(
         })()
   return {
     text,
-    digest: sha256({
-      kind: 'learning-progress',
-      analysisId: status.analysisId,
-      progressKind: kind,
-      phase: status.phase,
-      elapsedBucket,
-      text,
-    }),
+    digest: learningProgressDigest(status, kind, elapsedBucket, text),
   }
 }
 

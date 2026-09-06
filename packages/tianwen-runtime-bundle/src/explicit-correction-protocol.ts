@@ -305,7 +305,11 @@ function buildResearchSummaryControlledProtocol(
     readonly source: ControlledSkillSourceIdentity
     readonly packet: ResearchPacket
   },
+  executionWindowMs?: 60_000 | 300_000,
 ) {
+  const selectedStopContract = executionWindowMs === undefined
+    ? stopContract
+    : { maxToolCalls: 4, maxElapsedMs: executionWindowMs } as const
   const sourcePackets = sourceFidelity === undefined
     ? packets
     : { ...packets, 'original-defect': sourceFidelity.packet }
@@ -416,7 +420,7 @@ function buildResearchSummaryControlledProtocol(
             acceptanceContract: acceptance,
             acceptanceSubjectDigest: input.sha256(task.packet),
             allowedTools,
-            stopContract,
+            stopContract: selectedStopContract,
           })),
           execution: {
             dshVersion: '0.1.1-rc.2' as const,
@@ -472,7 +476,7 @@ function buildResearchSummaryControlledProtocol(
                 acceptanceContract: acceptance,
                 acceptanceSubjectDigest: input.sha256(holdoutPacket),
                 allowedTools,
-                stopContract,
+                stopContract: selectedStopContract,
               },
               review: {
                 rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
@@ -553,7 +557,7 @@ function buildResearchSummaryControlledProtocol(
         acceptanceContract: acceptance,
         acceptanceSubject: holdoutPacket,
         allowedTools,
-        stopContract,
+        stopContract: selectedStopContract,
         ...(sourceFidelity === undefined ? {} : {
           evaluatorMaterialContract: sourceFidelityHoldoutEvaluatorMaterialContract,
           reviewConfiguration: sourceFidelityReviewConfiguration,
@@ -605,6 +609,7 @@ type ExplicitCorrectionProtocolResolution =
       readonly packetVersion: typeof CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion
       readonly source: ControlledSkillSourceIdentity
       readonly packet: ResearchPacket
+      readonly executionWindowMs?: 60_000 | 300_000
     }
 
 function exactKeys(value: object, expected: readonly string[]): void {
@@ -631,7 +636,15 @@ export function resolveExplicitCorrectionProtocol(
       ? buildResearchSummaryControlledProtocol()
       : undefined
   }
-  exactKeys(input, ['scopeKey', 'protocolSchemaVersion', 'packetVersion', 'source', 'packet'])
+  const hasExecutionWindow = Object.prototype.hasOwnProperty.call(input, 'executionWindowMs')
+  exactKeys(input, [
+    'scopeKey', 'protocolSchemaVersion', 'packetVersion', 'source', 'packet',
+    ...(hasExecutionWindow ? ['executionWindowMs'] : []),
+  ])
+  const selectedWindow = hasExecutionWindow ? input.executionWindowMs : 300_000
+  if (selectedWindow !== 60_000 && selectedWindow !== 300_000) {
+    throw new TypeError('explicit correction execution window is invalid')
+  }
   if (input.scopeKey !== EXPLICIT_CORRECTION_PROTOCOL_SCOPE) return undefined
   if (input.packetVersion !== CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion
     || input.source.packetDigest !== sha256(input.packet.source)
@@ -641,5 +654,5 @@ export function resolveExplicitCorrectionProtocol(
   return buildResearchSummaryControlledProtocol({
     source: structuredClone(input.source),
     packet: parseResearchPacket(input.packet.source),
-  })
+  }, selectedWindow)
 }

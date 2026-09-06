@@ -35,7 +35,7 @@ function materializeWorkspace(root: string, content: string): void {
   writeFileSync(join(root, 'brief.txt'), content, 'utf8')
 }
 
-function sourceFidelityProtocol(sourceText: string) {
+function sourceFidelityInput(sourceText: string) {
   const packet = parseResearchPacket(sourceText)
   const source = {
     signalId: `signal:${'1'.repeat(64)}`,
@@ -48,12 +48,21 @@ function sourceFidelityProtocol(sourceText: string) {
     acceptanceSubjectDigest: sha256(packet),
     packetDigest: sha256(packet.source),
   } as const
+  return { packet, source }
+}
+
+function sourceFidelityProtocol(
+  sourceText: string,
+  executionWindowMs?: 60_000 | 300_000,
+) {
+  const { packet, source } = sourceFidelityInput(sourceText)
   return resolveExplicitCorrectionProtocol({
     scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
     protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
     packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
     source,
     packet,
+    ...(executionWindowMs === undefined ? {} : { executionWindowMs }),
   })!
 }
 
@@ -117,6 +126,10 @@ describe('explicit correction controlled protocol', () => {
     expect(tasks.every(task => !task.input.includes(holdout.researchPacket))).toBe(true)
     expect(input.protocol.tasks.every(task =>
       task.inputDigest !== input.protocol.sourceFidelity.holdout.task.inputDigest)).toBe(true)
+    expect(input.protocol.tasks.map(task => task.stopContract)).toEqual(
+      Array.from({ length: 5 }, () => ({ maxToolCalls: 4, maxElapsedMs: 300_000 })),
+    )
+    expect(holdout.stopContract).toEqual({ maxToolCalls: 4, maxElapsedMs: 300_000 })
     expect({
       taskId: holdout.taskId,
       goalDigest: sha256(holdout.goal),
@@ -244,6 +257,68 @@ describe('explicit correction controlled protocol', () => {
     } as never)).toThrow(/unsupported|input/u)
   })
 
+  it.each([
+    ['explicit undefined', undefined],
+    ['string', '60000'],
+    ['fractional', 60_000.5],
+    ['zero', 0],
+    ['unsupported positive', 120_000],
+  ])('rejects an invalid v3 execution window: %s', (_name, executionWindowMs) => {
+    const { packet, source } = sourceFidelityInput(`<research_packet>
+[F:actual|required] Only supported integer windows are accepted.
+</research_packet>`)
+
+    expect(() => resolveExplicitCorrectionProtocol({
+      scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+      protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+      packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+      source,
+      packet,
+      executionWindowMs,
+    } as never)).toThrow(/execution window|input/u)
+  })
+
+  it.each([
+    [60_000, 'sha256:546d9146a97a751e589b5544077cc6400eef690a0fd9707ff25041a52cd29719'],
+    [300_000, 'sha256:e20a7b316757fb49e77427cd6dbffb0aa69b5369c6e3a99f69b5bca1a66fe124'],
+  ] as const)('reconstructs a retained v3 %i ms protocol exactly', (
+    executionWindowMs,
+    expectedProtocolDigest,
+  ) => {
+    const protocol = sourceFidelityProtocol(`<research_packet>
+[F:actual|required] The source result is 18%.
+[U:window|decision] The source covers six weeks.
+</research_packet>`, executionWindowMs)
+    const root = fixtureRoot()
+    const tasks = protocol.buildEvaluationTasks({
+      root,
+      materializeWorkspace,
+      sessionNamespace: 'retained-v3-fixture',
+    })
+    const input = protocol.buildProtocolInput({
+      ticketId: 'ticket:retained-v3-fixture',
+      sha256,
+      rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+      callConfig: { provider: 'fixture', model: 'fixture' },
+      retryPolicy: {},
+      toolSchemaDigest: sha256('tools'),
+      tasks,
+    })
+    const holdout = protocol.buildShadowTasks({
+      root,
+      materializeWorkspace,
+      sessionNamespace: 'retained-v3-shadow-fixture',
+    })[0]!
+    const expectedStopContract = { maxToolCalls: 4, maxElapsedMs: executionWindowMs }
+
+    expect(input.protocol.tasks.map(task => task.stopContract)).toEqual(
+      Array.from({ length: 5 }, () => expectedStopContract),
+    )
+    expect(input.protocol.sourceFidelity.holdout.task.stopContract).toEqual(expectedStopContract)
+    expect(holdout.stopContract).toEqual(expectedStopContract)
+    expect(sha256(input)).toBe(expectedProtocolDigest)
+  })
+
   it('replays the one audited five-case protocol exactly', () => {
     const protocol = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)
 
@@ -292,8 +367,11 @@ describe('explicit correction controlled protocol', () => {
     expect(resolveExplicitCorrectionProtocol('project:tianwen/capability:other')).toBeUndefined()
   })
 
-  it('keeps bounded real-model time and tool budgets across evaluation and transitions', () => {
-    const protocol = resolveExplicitCorrectionProtocol(EXPLICIT_CORRECTION_PROTOCOL_SCOPE)!
+  it('keeps legacy v2 evaluation, holdout and shared transitions at the exact 60-second snapshot', () => {
+    const protocol = resolveExplicitCorrectionProtocol({
+      scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+      protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+    })!
     const root = fixtureRoot()
     const tasks = protocol.buildEvaluationTasks({ root, materializeWorkspace })
     const frozen = protocol.buildProtocolInput({
@@ -311,6 +389,33 @@ describe('explicit correction controlled protocol', () => {
     expect(contracts).toEqual(Array.from({ length: 8 }, () => ({
       maxToolCalls: 4, maxElapsedMs: 60_000,
     })))
+  })
+
+  it('uses 300 seconds for fresh v3 evaluation and holdout but not shared transitions', () => {
+    const protocol = sourceFidelityProtocol(`<research_packet>
+[F:actual|required] A fresh v3 protocol gets the longer reasoning window.
+</research_packet>`)
+    const root = fixtureRoot()
+    const tasks = protocol.buildEvaluationTasks({ root, materializeWorkspace })
+    const frozen = protocol.buildProtocolInput({
+      ticketId: 'ticket:fresh-v3-budget-fixture', sha256,
+      rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+      toolSchemaDigest: sha256('tools'),
+      callConfig: { provider: 'fixture', model: 'fixture' }, retryPolicy: {}, tasks,
+    })
+    const holdout = protocol.buildShadowTasks({ root, materializeWorkspace })[0]!
+    const transition = protocol.buildTransitionInput({
+      root, shadowId: 'shadow:fresh-v3-budget-fixture', kind: 'promote',
+      expectedRevision: 1, materializeWorkspace,
+    })
+
+    expect(frozen.protocol.tasks.map(task => task.stopContract)).toEqual(
+      Array.from({ length: 5 }, () => ({ maxToolCalls: 4, maxElapsedMs: 300_000 })),
+    )
+    expect(frozen.protocol.sourceFidelity.holdout.task.stopContract)
+      .toEqual({ maxToolCalls: 4, maxElapsedMs: 300_000 })
+    expect(holdout.stopContract).toEqual({ maxToolCalls: 4, maxElapsedMs: 300_000 })
+    expect(transition.task.stopContract).toEqual({ maxToolCalls: 4, maxElapsedMs: 60_000 })
   })
 
   it('has no public fixture writer or direct factory bypass', () => {

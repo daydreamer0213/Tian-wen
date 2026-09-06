@@ -27,6 +27,7 @@ import {
   createExplicitCorrectionLearningLoopExecutor,
   drainLearningLoopLane,
   drainLearningLoopLaneWithWake,
+  learningLoopProgressReport,
   learningLoopTerminalReport,
   runLearningLoopPhase,
 } from '../../packages/tianwen-runtime-bundle/src/learning-loop-orchestrator.js'
@@ -234,7 +235,131 @@ function retainedV2ProtocolRecord() {
   } as const
 }
 
+function retainedV3ProtocolRecord(executionWindowMs: 60_000 | 300_000) {
+  const packet = parseResearchPacket(`<research_packet>
+[F:source|required] The native source result is 18%.
+[U:window|decision] The source covers six weeks.
+</research_packet>`)
+  const source = {
+    signalId: `signal:${'1'.repeat(64)}`,
+    sessionId: 'main',
+    messageId: 'reply',
+    feedbackVersion: 'v1',
+    sessionLifecycleFingerprint: sha256('lifecycle'),
+    sessionDigest: sha256('session'),
+    evidenceSetDigest: sha256('evidence'),
+    acceptanceSubjectDigest: sha256(packet),
+    packetDigest: sha256(packet.source),
+  } as const
+  const protocol = resolveExplicitCorrectionProtocol({
+    scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+    protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+    packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+    source,
+    packet,
+    executionWindowMs,
+  })!
+  const root = fixtureRoot('task-1-retained-v3')
+  const tasks = protocol.buildEvaluationTasks({
+    root,
+    materializeWorkspace(workspaceRoot, content) {
+      mkdirSync(workspaceRoot, { recursive: true })
+      writeFileSync(join(workspaceRoot, 'brief.txt'), content, 'utf8')
+    },
+    sessionNamespace: `analysis:${'a'.repeat(64)}`,
+  })
+  const frozen = protocol.buildProtocolInput({
+    ticketId: `ticket:${'b'.repeat(64)}`,
+    sha256,
+    rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+    callConfig: { provider: 'fixture', model: 'fixture' },
+    retryPolicy: {},
+    toolSchemaDigest: sha256([{ name: 'skill' }, { name: 'submit_research_summary' }]),
+    tasks,
+  })
+  rmSync(root, { recursive: true, force: true })
+  return {
+    recovered: {
+      source,
+      packet,
+      submission: {
+        summary: 'Historical answer.',
+        confirmedFindingIds: ['source'],
+        uncertaintyIds: [],
+      },
+      targetTurn: 4,
+      acceptanceEvidenceId: sha256('accepted'),
+    } as const,
+    record: {
+      schemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+      protocolId: `eval-protocol:${'c'.repeat(64)}`,
+      ticketId: `ticket:${'b'.repeat(64)}`,
+      scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+      provenance: 'pre-candidate',
+      evidenceLabels: [],
+      ...frozen,
+    } as const,
+  }
+}
+
+function retainedV3Status(phase: 'running' | 'candidate-ready' = 'running') {
+  return {
+    analysisId: `analysis:${'a'.repeat(64)}`,
+    ticketId: `ticket:${'b'.repeat(64)}`,
+    sessionId: 'main',
+    messageId: 'reply',
+    feedbackVersion: 'v1',
+    consentRevision: 1,
+    parentSessionId: 'main',
+    childSessionId: 'child',
+    phase,
+    submission: { verdict: 'skill-change' },
+    submissionDigest: sha256('submission'),
+    ...(phase === 'candidate-ready' ? { candidateId: `candidate:${'d'.repeat(64)}` } : {}),
+  }
+}
+
 describe('learning-loop orchestrator', () => {
+  it.each([
+    [
+      'candidate-ready',
+      'Tianwen 学习中断：分析或受控验证尚未完成，候选改进尚未启用；恢复时会先核验已保存记录，无法安全续接的尝试不会直接重跑。',
+      '候选改进尚未启用',
+      '当前启用状态未继续改变',
+    ],
+    [
+      'promoted',
+      'Tianwen 学习中断：回滚验证尚未完成，当前启用状态未继续改变；恢复时会先核验已保存记录，无法安全续接的尝试不会直接重跑。',
+      '当前启用状态未继续改变',
+      '候选改进尚未启用',
+    ],
+  ] as const)('renders a neutral failed liveness report for %s', (
+    resumePhase,
+    expectedText,
+    includedState,
+    excludedState,
+  ) => {
+    const status = {
+      analysisId: `analysis:${'a'.repeat(64)}`,
+      phase: 'failed',
+      resumePhase,
+    }
+    const report = learningLoopProgressReport(status, 'liveness', 3)
+
+    expect(report.text).toBe(expectedText)
+    expect(report.text).toContain(includedState)
+    expect(report.text).not.toContain(excludedState)
+    expect(report.text).not.toMatch(/环境|自动重试|下一次可用/u)
+    expect(report.digest).toBe(sha256({
+      kind: 'learning-progress',
+      analysisId: status.analysisId,
+      progressKind: 'liveness',
+      phase: status.phase,
+      elapsedBucket: 3,
+      text: expectedText,
+    }))
+  })
+
   it('admits only the exact active consented correction before starting its child', async () => {
     const start = vi.fn()
     await expect(continueLearningLoop({
@@ -410,6 +535,100 @@ describe('learning-loop orchestrator', () => {
       recovery.mockRestore()
       frozen.dispose()
       routed?.dispose()
+    }
+  })
+
+  it.each([60_000, 300_000] as const)(
+    'reconstructs a retained v3 %i ms protocol without freezing duplicate history',
+    async executionWindowMs => {
+      const { record, recovered } = retainedV3ProtocolRecord(executionWindowMs)
+      const recovery = vi.spyOn(sourceCases, 'recoverResearchSummarySourceCase')
+        .mockResolvedValue(recovered)
+      const fixture = controlledExecutorFixture({
+        status: retainedV3Status(),
+        records: [record],
+      })
+      try {
+        await expect(fixture.run()).resolves.toEqual({ provenance: 'pre-candidate' })
+        expect(fixture.frozen).toEqual([])
+        expect(recovery).toHaveBeenCalledOnce()
+      } finally {
+        recovery.mockRestore()
+        fixture.dispose()
+      }
+    },
+  )
+
+  it.each([
+    ['mixed paired task windows', (record: any) => {
+      record.protocol.tasks[4].stopContract = { maxToolCalls: 4, maxElapsedMs: 300_000 }
+    }],
+    ['mismatched holdout window', (record: any) => {
+      record.protocol.sourceFidelity.holdout.task.stopContract = {
+        maxToolCalls: 4,
+        maxElapsedMs: 300_000,
+      }
+    }],
+    ['unsupported window', (record: any) => {
+      for (const task of record.protocol.tasks) task.stopContract.maxElapsedMs = 120_000
+      record.protocol.sourceFidelity.holdout.task.stopContract.maxElapsedMs = 120_000
+    }],
+    ['wrong tool cap', (record: any) => {
+      for (const task of record.protocol.tasks) task.stopContract.maxToolCalls = 3
+      record.protocol.sourceFidelity.holdout.task.stopContract.maxToolCalls = 3
+    }],
+    ['missing paired task', (record: any) => {
+      record.protocol.tasks.pop()
+    }],
+  ] as const)('refuses retained v3 %s before controlled provider work', async (_name, mutate) => {
+    const retained = retainedV3ProtocolRecord(60_000)
+    const record = structuredClone(retained.record) as any
+    mutate(record)
+    const recovery = vi.spyOn(sourceCases, 'recoverResearchSummarySourceCase')
+      .mockResolvedValue(retained.recovered)
+    const runtime = {
+      runControlledArms: vi.fn(),
+      runControlledEvaluators: vi.fn(),
+      runControlledShadow: vi.fn(),
+    }
+    const fixture = controlledExecutorFixture({
+      status: retainedV3Status('candidate-ready'),
+      records: [record],
+      runtime,
+    })
+    try {
+      await expect(fixture.evaluate()).rejects.toThrow(/retained.*execution|window|tool|task/u)
+      expect(runtime.runControlledArms).not.toHaveBeenCalled()
+      expect(runtime.runControlledEvaluators).not.toHaveBeenCalled()
+      expect(runtime.runControlledShadow).not.toHaveBeenCalled()
+    } finally {
+      recovery.mockRestore()
+      fixture.dispose()
+    }
+  })
+
+  it('preserves the exact retained v3 source identity check before controlled provider work', async () => {
+    const retained = retainedV3ProtocolRecord(60_000)
+    const record = structuredClone(retained.record) as any
+    record.protocol.sourceFidelity.source.sessionDigest = sha256('another-session')
+    const recovery = vi.spyOn(sourceCases, 'recoverResearchSummarySourceCase')
+      .mockResolvedValue(retained.recovered)
+    const runtime = {
+      runControlledArms: vi.fn(),
+      runControlledEvaluators: vi.fn(),
+      runControlledShadow: vi.fn(),
+    }
+    const fixture = controlledExecutorFixture({
+      status: retainedV3Status('candidate-ready'),
+      records: [record],
+      runtime,
+    })
+    try {
+      await expect(fixture.evaluate()).rejects.toThrow('retained source-fidelity protocol source changed')
+      expect(runtime.runControlledArms).not.toHaveBeenCalled()
+    } finally {
+      recovery.mockRestore()
+      fixture.dispose()
     }
   })
 

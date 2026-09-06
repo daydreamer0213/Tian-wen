@@ -206,7 +206,7 @@ describe('main-chat learning progress', () => {
       'Tianwen 已开始分析这条反馈，后续进度会继续在当前对话更新。',
       'Tianwen 已形成候选改进，正在进行受控验证。',
       'Tianwen 学习仍在进行：已完成 3/4 个阶段，正在验证启用结果。',
-      'Tianwen 学习暂时中断：受控环境暂不可用，候选改进尚未启用；将在下一次可用时自动重试。',
+      'Tianwen 学习中断：分析或受控验证尚未完成，候选改进尚未启用；恢复时会先核验已保存记录，无法安全续接的尝试不会直接重跑。',
     ])
     expect(JSON.stringify(statuses)).not.toMatch(/child|task|approve|批准|打开|路径|feedback note/iu)
   })
@@ -305,6 +305,146 @@ describe('main-chat learning progress', () => {
     })
     expect(replay.getLearningAnalysis(seeded.requested.analysisId)?.progressCursors)
       .toMatchObject([{ state: 'delivered', reportMessageId: 'persisted-progress-message' }])
+  })
+
+  it.each([
+    [
+      'candidate-ready',
+      'Tianwen 学习暂时中断：受控环境暂不可用，候选改进尚未启用；将在下一次可用时自动重试。',
+      true,
+    ],
+    [
+      'promoted',
+      'Tianwen 学习暂时中断：回滚验证尚未完成，当前启用状态未继续改变；将在下一次可用时自动重试。',
+      false,
+    ],
+  ] as const)('recovers an exact legacy failed %s progress intent without changing its digest', async (
+    resumePhase,
+    legacyText,
+    alreadySent,
+  ) => {
+    const analysisId = `analysis:${'1'.repeat(64)}` as const
+    const legacy = {
+      analysisId,
+      kind: 'liveness' as const,
+      phase: 'failed' as const,
+      elapsedBucket: 1,
+      reportDigest: sha256({
+        kind: 'learning-progress',
+        analysisId,
+        progressKind: 'liveness',
+        phase: 'failed',
+        elapsedBucket: 1,
+        text: legacyText,
+      }),
+    }
+    let cursor = { ...legacy, state: 'pending' as const }
+    const recordIntent = vi.fn((input: LearningAnalysisProgressBinding) => {
+      expect(input).toEqual(legacy)
+      return { progressCursors: [cursor] }
+    })
+    const recordDelivered = vi.fn((input: LearningAnalysisProgressBinding & {
+      readonly reportMessageId: string
+    }) => {
+      cursor = { ...legacy, state: 'delivered' as const, reportMessageId: input.reportMessageId }
+      return { progressCursors: [cursor] }
+    })
+    const findProgressReport = vi.fn(async (input: { readonly text: string }) => {
+      expect(input.text).toBe(legacyText)
+      return alreadySent ? 'persisted-legacy-message' : undefined
+    })
+    const deliverProgressReport = vi.fn(async (input: { readonly text: string }) => {
+      expect(input.text).toBe(legacyText)
+      return 'newly-sent-legacy-message'
+    })
+    const executor = createExplicitCorrectionLearningLoopExecutor({
+      root: root(`legacy-failed-${resumePhase}-workspace`),
+      materializeWorkspace() {},
+      async environment() { throw new Error('not used by progress') },
+      async deliverTerminalReport() { throw new Error('not used by progress') },
+      findProgressReport,
+      deliverProgressReport,
+    })
+    const context = {
+      ctx: {
+        tianwenEvolution: {
+          recordLearningAnalysisProgressIntent: recordIntent,
+          recordLearningAnalysisProgressDelivered: recordDelivered,
+        },
+      } as never,
+      status: { analysisId, phase: 'failed', resumePhase, progressCursors: [cursor] },
+    }
+
+    await executor.progress?.(context, {
+      kind: legacy.kind,
+      phase: legacy.phase,
+      elapsedBucket: legacy.elapsedBucket,
+      reportDigest: legacy.reportDigest,
+    })
+
+    expect(findProgressReport).toHaveBeenCalledOnce()
+    expect(deliverProgressReport).toHaveBeenCalledTimes(alreadySent ? 0 : 1)
+    expect(cursor).toEqual({
+      ...legacy,
+      state: 'delivered',
+      reportMessageId: alreadySent
+        ? 'persisted-legacy-message'
+        : 'newly-sent-legacy-message',
+    })
+  })
+
+  it('uses neutral text for a new failed progress intent and refuses an unknown retained digest', async () => {
+    const analysisId = `analysis:${'1'.repeat(64)}` as const
+    let cursor: (LearningAnalysisProgressBinding & {
+      readonly state: 'pending' | 'delivered'
+      readonly reportMessageId?: string
+    }) | undefined
+    const recordIntent = vi.fn((input: LearningAnalysisProgressBinding) => {
+      cursor = { ...input, state: 'pending' }
+      return { progressCursors: [cursor] }
+    })
+    const recordDelivered = vi.fn((input: LearningAnalysisProgressBinding & {
+      readonly reportMessageId: string
+    }) => {
+      cursor = { ...input, state: 'delivered' }
+      return { progressCursors: [cursor] }
+    })
+    const delivered: string[] = []
+    const executor = createExplicitCorrectionLearningLoopExecutor({
+      root: root('new-failed-progress-workspace'),
+      materializeWorkspace() {},
+      async environment() { throw new Error('not used by progress') },
+      async deliverTerminalReport() { throw new Error('not used by progress') },
+      async deliverProgressReport({ text }) { delivered.push(text); return 'new-neutral-message' },
+    })
+    const context = {
+      ctx: {
+        tianwenEvolution: {
+          recordLearningAnalysisProgressIntent: recordIntent,
+          recordLearningAnalysisProgressDelivered: recordDelivered,
+        },
+      } as never,
+      status: { analysisId, phase: 'failed', resumePhase: 'candidate-ready' },
+    }
+
+    await executor.progress?.(context, {
+      kind: 'liveness',
+      phase: 'failed',
+      elapsedBucket: 1,
+    })
+    expect(delivered).toEqual([
+      'Tianwen 学习中断：分析或受控验证尚未完成，候选改进尚未启用；恢复时会先核验已保存记录，无法安全续接的尝试不会直接重跑。',
+    ])
+    const beforeUnknown = cursor
+    const callsBeforeUnknown = recordIntent.mock.calls.length
+    await expect(executor.progress?.(context, {
+      kind: 'liveness',
+      phase: 'failed',
+      elapsedBucket: 2,
+      reportDigest: sha256('unknown-progress-digest'),
+    })).rejects.toThrow('learning progress durable digest changed')
+    expect(recordIntent).toHaveBeenCalledTimes(callsBeforeUnknown)
+    expect(cursor).toEqual(beforeUnknown)
   })
 
   it('uses the timer only to wake active liveness reporting and stops at terminal', async () => {
