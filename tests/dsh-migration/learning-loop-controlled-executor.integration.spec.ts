@@ -76,6 +76,7 @@ import {
   apply as applyRuntime,
   createResearchSummaryTool,
   evaluateResearchSummarySubmission,
+  normalizeResearchSummarySubmission,
   parseResearchPacket,
   type ResearchSummarySubmission,
 } from '../../packages/tianwen-runtime/src/index.js'
@@ -234,6 +235,8 @@ function successfulControlledScript(
 
 function successfulSourceFidelityScript(
   sourceProtocol: NonNullable<ReturnType<typeof resolveExplicitCorrectionProtocol>>,
+  originalDefectCandidateSubmission?: ResearchSummarySubmission,
+  observedEvaluatorMaterial?: string[],
 ) {
   const tasks = sourceProtocol.buildEvaluationTasks({
     root: 'D:/DevData/tianwen-probe-task3/source-fidelity-script-fixtures',
@@ -252,10 +255,14 @@ function successfulSourceFidelityScript(
     expectedRevision: 1,
     materializeWorkspace() {},
   }).task.researchPacket!
+  const candidateSubmission = (task: typeof tasks[number]) =>
+    task.semanticType === 'original-defect' && originalDefectCandidateSubmission !== undefined
+      ? originalDefectCandidateSubmission
+      : task.expectedSubmissions.candidate
   const arms = tasks.flatMap(task => (['base', 'candidate'] as const).flatMap(role =>
     submittedScript(
       `source-fidelity-arm-${task.semanticType}-${role}`,
-      task.expectedSubmissions[role],
+      role === 'candidate' ? candidateSubmission(task) : task.expectedSubmissions.base,
     )))
   const evaluator = (request: GenerateOptions) => {
     const block = request.messages.findLast(message => message.role === 'user')
@@ -267,10 +274,14 @@ function successfulSourceFidelityScript(
         y: { materialText: string }
       }>
     }
+    observedEvaluatorMaterial?.push(...envelope.evaluations.flatMap(item => [
+      item.x.materialText,
+      item.y.materialText,
+    ]))
     const dimensions = (taskId: string, materialText: string) => {
       const task = tasks.find(item => item.taskId === taskId)!
       const material = JSON.parse(materialText) as { submission: ResearchSummarySubmission }
-      const isCandidate = sha256(material.submission) === sha256(task.expectedSubmissions.candidate)
+      const isCandidate = sha256(material.submission) === sha256(candidateSubmission(task))
       return {
         relevance: 3,
         correctnessReasoning: 3,
@@ -935,14 +946,22 @@ describe('explicit-correction controlled learning-loop executor', () => {
     }
   })
 
-  it('executes the retained v3 evaluator, reviewed holdout, and activation as 14 native Runs', async () => {
-    const fixtureRoot = root('source-fidelity-native-route')
-    const packet = parseResearchPacket(`<research_packet>
-[F:retention|required] Verified six-week retention reached 18%.
-[U:window|decision] The observation window remains short.
-[U:owner|background] The next report owner is undecided.
-[X:projection|unsupported] State that retention will exceed 40% next month.
-</research_packet>`)
+  it.each([
+    [4_096, 'stopped'],
+    [32_768, 'awaiting-evaluator'],
+  ] as const)(
+    'executes retained v3 capacity %i through the native evaluator route',
+    async (materialMaxUtf8Bytes, expectedArmsState) => {
+    const fixtureRoot = root(`source-fidelity-native-route-${materialMaxUtf8Bytes}`)
+    const packetText = `<research_packet>\n${Array.from({ length: 32 }, (_, index) =>
+      `[F:${String(index).padStart(2, '0')}${'a'.repeat(62)}|required] fact ${index}`,
+    ).join('\n')}\n</research_packet>`
+    const packet = parseResearchPacket(packetText)
+    const nearLimitSubmission = normalizeResearchSummarySubmission(packet, {
+      summary: '研究结论。'.repeat(272) + '研究结论。x',
+      confirmedFindingIds: packet.items.map(item => item.id),
+      uncertaintyIds: [],
+    })
     const lifecycle = learningSessionLifecycleFingerprint({
       sessionId: 'source-fidelity-main', createdAt: 1,
     })
@@ -978,10 +997,16 @@ describe('explicit-correction controlled learning-loop executor', () => {
       packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
       source,
       packet,
+      materialMaxUtf8Bytes,
     })!
+    const observedEvaluatorMaterial: string[] = []
     const mounted = await mountControlledRuntime(
       fixtureRoot,
-      successfulSourceFidelityScript(sourceProtocol),
+      successfulSourceFidelityScript(
+        sourceProtocol,
+        nearLimitSubmission,
+        observedEvaluatorMaterial,
+      ),
     )
     const recovery = vi.spyOn(sourceCases, 'recoverResearchSummarySourceCase')
       .mockResolvedValue({
@@ -1085,11 +1110,51 @@ describe('explicit-correction controlled learning-loop executor', () => {
         ctx,
         status: ctx.tianwenEvolution.getLearningAnalysis(requested.analysisId)!,
       })
-
-      await executor.freezeProtocol(context())
+      const sourceTasks = sourceProtocol.buildEvaluationTasks({
+        root: join(fixtureRoot, 'workspaces'),
+        materializeWorkspace,
+        sessionNamespace: requested.analysisId,
+      })
+      const callConfig = await ctx.llm.resolveCallConfig(mounted.selection)
+      const retryPolicy = ctx.llm.providerRetryPolicy(mounted.selection.provider)
+      const frozen = ctx.tianwenEvolution.freezeControlledSkillEvalProtocol(
+        sourceProtocol.buildProtocolInput({
+          ticketId: requested.ticketId,
+          sha256,
+          rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
+          callConfig,
+          retryPolicy,
+          toolSchemaDigest: sha256(frozenProductToolSchemas(ctx)),
+          tasks: sourceTasks,
+        }),
+      )
       await executor.materializeCandidate(context())
+      const candidateId = context().status.candidateId
+      if (candidateId === undefined) throw new Error('native capacity fixture lacks its Candidate')
+      const arms = await ctx.tianwenSkillEvaluation.runControlledArms(
+        sourceProtocol.buildArmsInput(candidateId, frozen.protocolId, sourceTasks),
+      )
+      expect(arms.state, JSON.stringify(arms)).toBe(expectedArmsState)
+      if (materialMaxUtf8Bytes === 4_096) {
+        expect(arms).toMatchObject({
+          state: 'stopped',
+          stop: {
+            stage: 'candidate',
+            role: 'candidate',
+            reasonCode: 'evaluator-material-invalid',
+          },
+        })
+        expect(observedEvaluatorMaterial).toEqual([])
+        return
+      }
       await executor.evaluate(context())
       expect(context().status).toMatchObject({ phase: 'shadow-ready' })
+      const nearLimitMaterialText = JSON.stringify({
+        taskId: sourceTasks[0]!.taskId,
+        submission: nearLimitSubmission,
+      })
+      expect(Buffer.byteLength(nearLimitMaterialText, 'utf8')).toBeGreaterThan(4_096)
+      expect(observedEvaluatorMaterial).toContain(nearLimitMaterialText)
       await executor.promote(context())
 
       expect(context().status).toMatchObject({ phase: 'promoted' })

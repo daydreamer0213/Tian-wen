@@ -93,24 +93,51 @@ const holdoutPacket = parseResearchPacket(`<research_packet>
 [X:projection|unsupported] State that adoption will exceed 90% next month.
 </research_packet>`)
 
-const sourceFidelityHoldoutEvaluatorMaterialContract = {
-  schemaVersion: 'tianwen.controlled-source-fidelity-holdout-material.v1',
-  source: 'accepted-research-summary-submission',
-  packet: 'exact-frozen-holdout',
-  maxUtf8Bytes: 4_096,
-} as const
+export type ExplicitCorrectionMaterialMaxUtf8Bytes = 4_096 | 32_768
+
+function explicitCorrectionMaterialContracts(
+  materialMaxUtf8Bytes: ExplicitCorrectionMaterialMaxUtf8Bytes,
+) {
+  return {
+    evaluation: {
+      schemaVersion: 'tianwen.controlled-evaluator-material-contract.v1',
+      source: 'accepted-research-summary-submission',
+      maxUtf8Bytes: materialMaxUtf8Bytes,
+    },
+    holdout: {
+      schemaVersion: 'tianwen.controlled-source-fidelity-holdout-material.v1',
+      source: 'accepted-research-summary-submission',
+      packet: 'exact-frozen-holdout',
+      maxUtf8Bytes: materialMaxUtf8Bytes,
+    },
+    review: {
+      schemaVersion: 'tianwen.controlled-source-fidelity-review-material.v1',
+      inputs: ['frozen-packet', 'accepted-canonical-submission'],
+      excludes: ['xy-pair', 'candidate-patch', 'feedback', 'historical-answer', 'role', 'version'],
+      maxUtf8Bytes: materialMaxUtf8Bytes === 4_096 ? 8_192 : 32_768,
+    },
+  } as const
+}
+
+export function resolveExplicitCorrectionMaterialMaxUtf8BytesFromDigests(input: {
+  readonly paired: readonly unknown[]
+  readonly holdout: unknown
+  readonly review: unknown
+}): ExplicitCorrectionMaterialMaxUtf8Bytes | undefined {
+  if (input.paired.length !== evaluationTaskDefinitions.length) return undefined
+  for (const capacity of [4_096, 32_768] as const) {
+    const contracts = explicitCorrectionMaterialContracts(capacity)
+    if (input.paired.every(value => value === sha256(contracts.evaluation))
+      && input.holdout === sha256(contracts.holdout)
+      && input.review === sha256(contracts.review)) return capacity
+  }
+  return undefined
+}
 
 const sourceFidelityReviewConfiguration = {
   schemaVersion: 'tianwen.controlled-source-fidelity-review-config.v1',
   scoreKeys: CONTROLLED_SKILL_SOURCE_FIDELITY_SCORE_KEYS,
   minimumDimensionScore: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.holdoutMinimumDimensionScore,
-} as const
-
-const sourceFidelityReviewMaterialContract = {
-  schemaVersion: 'tianwen.controlled-source-fidelity-review-material.v1',
-  inputs: ['frozen-packet', 'accepted-canonical-submission'],
-  excludes: ['xy-pair', 'candidate-patch', 'feedback', 'historical-answer', 'role', 'version'],
-  maxUtf8Bytes: 8_192,
 } as const
 
 const sourceFidelityReviewEvidenceContract = {
@@ -176,7 +203,7 @@ export interface ExplicitCorrectionEvaluationTask {
   readonly evaluatorMaterialContract: {
     readonly schemaVersion: 'tianwen.controlled-evaluator-material-contract.v1'
     readonly source: 'accepted-research-summary-submission'
-    readonly maxUtf8Bytes: 4_096
+    readonly maxUtf8Bytes: ExplicitCorrectionMaterialMaxUtf8Bytes
   }
   readonly baselineSessionId: `session:controlled-eval:product:research-summary:${string}:baseline`
   readonly candidateSessionId: `session:controlled-eval:product:research-summary:${string}:candidate`
@@ -306,6 +333,7 @@ function buildResearchSummaryControlledProtocol(
     readonly packet: ResearchPacket
   },
   executionWindowMs?: 60_000 | 300_000,
+  materialMaxUtf8Bytes: ExplicitCorrectionMaterialMaxUtf8Bytes = 4_096,
 ) {
   const selectedStopContract = executionWindowMs === undefined
     ? stopContract
@@ -313,6 +341,7 @@ function buildResearchSummaryControlledProtocol(
   const sourcePackets = sourceFidelity === undefined
     ? packets
     : { ...packets, 'original-defect': sourceFidelity.packet }
+  const materialContracts = explicitCorrectionMaterialContracts(materialMaxUtf8Bytes)
   return deepFreeze({
     scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
     version: EXPLICIT_CORRECTION_PROTOCOL_VERSION,
@@ -378,11 +407,7 @@ function buildResearchSummaryControlledProtocol(
           authorization,
           verifierContract,
           stopCondition: { terminal: 'accepted-product-submission' as const },
-          evaluatorMaterialContract: {
-            schemaVersion: 'tianwen.controlled-evaluator-material-contract.v1' as const,
-            source: 'accepted-research-summary-submission' as const,
-            maxUtf8Bytes: 4_096 as const,
-          },
+          evaluatorMaterialContract: materialContracts.evaluation,
           baselineSessionId:
             `session:controlled-eval:product:research-summary:${definition.semanticType}:${sessionNamespace}:baseline` as const,
           candidateSessionId:
@@ -471,7 +496,7 @@ function buildResearchSummaryControlledProtocol(
                 verifierContractDigest: input.sha256(holdoutVerifierContract),
                 stopConditionDigest: input.sha256(holdoutStopCondition),
                 evaluatorMaterialContractDigest: input.sha256(
-                  sourceFidelityHoldoutEvaluatorMaterialContract,
+                  materialContracts.holdout,
                 ),
                 acceptanceContract: acceptance,
                 acceptanceSubjectDigest: input.sha256(holdoutPacket),
@@ -481,7 +506,7 @@ function buildResearchSummaryControlledProtocol(
               review: {
                 rubricDigest: CONTROLLED_SKILL_SOURCE_FIDELITY_RUBRIC_DIGEST,
                 configurationDigest: input.sha256(sourceFidelityReviewConfiguration),
-                materialContractDigest: input.sha256(sourceFidelityReviewMaterialContract),
+                materialContractDigest: input.sha256(materialContracts.review),
                 evidenceContractDigest: input.sha256(sourceFidelityReviewEvidenceContract),
               },
             },
@@ -559,9 +584,9 @@ function buildResearchSummaryControlledProtocol(
         allowedTools,
         stopContract: selectedStopContract,
         ...(sourceFidelity === undefined ? {} : {
-          evaluatorMaterialContract: sourceFidelityHoldoutEvaluatorMaterialContract,
+          evaluatorMaterialContract: materialContracts.holdout,
           reviewConfiguration: sourceFidelityReviewConfiguration,
-          reviewMaterialContract: sourceFidelityReviewMaterialContract,
+          reviewMaterialContract: materialContracts.review,
           reviewEvidenceContract: sourceFidelityReviewEvidenceContract,
           reviewSessionId: `session:controlled-shadow:product:research-summary:unseen-holdout-review:${sessionNamespace}`,
         }),
@@ -610,6 +635,7 @@ type ExplicitCorrectionProtocolResolution =
       readonly source: ControlledSkillSourceIdentity
       readonly packet: ResearchPacket
       readonly executionWindowMs?: 60_000 | 300_000
+      readonly materialMaxUtf8Bytes?: ExplicitCorrectionMaterialMaxUtf8Bytes
     }
 
 function exactKeys(value: object, expected: readonly string[]): void {
@@ -637,13 +663,19 @@ export function resolveExplicitCorrectionProtocol(
       : undefined
   }
   const hasExecutionWindow = Object.prototype.hasOwnProperty.call(input, 'executionWindowMs')
+  const hasMaterialCapacity = Object.prototype.hasOwnProperty.call(input, 'materialMaxUtf8Bytes')
   exactKeys(input, [
     'scopeKey', 'protocolSchemaVersion', 'packetVersion', 'source', 'packet',
     ...(hasExecutionWindow ? ['executionWindowMs'] : []),
+    ...(hasMaterialCapacity ? ['materialMaxUtf8Bytes'] : []),
   ])
   const selectedWindow = hasExecutionWindow ? input.executionWindowMs : 300_000
   if (selectedWindow !== 60_000 && selectedWindow !== 300_000) {
     throw new TypeError('explicit correction execution window is invalid')
+  }
+  const selectedMaterialCapacity = hasMaterialCapacity ? input.materialMaxUtf8Bytes : 32_768
+  if (selectedMaterialCapacity !== 4_096 && selectedMaterialCapacity !== 32_768) {
+    throw new TypeError('explicit correction material capacity is invalid')
   }
   if (input.scopeKey !== EXPLICIT_CORRECTION_PROTOCOL_SCOPE) return undefined
   if (input.packetVersion !== CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion
@@ -654,5 +686,5 @@ export function resolveExplicitCorrectionProtocol(
   return buildResearchSummaryControlledProtocol({
     source: structuredClone(input.source),
     packet: parseResearchPacket(input.packet.source),
-  }, selectedWindow)
+  }, selectedWindow, selectedMaterialCapacity)
 }

@@ -235,7 +235,10 @@ function retainedV2ProtocolRecord() {
   } as const
 }
 
-function retainedV3ProtocolRecord(executionWindowMs: 60_000 | 300_000) {
+function retainedV3ProtocolRecord(
+  executionWindowMs: 60_000 | 300_000,
+  materialMaxUtf8Bytes: 4_096 | 32_768,
+) {
   const packet = parseResearchPacket(`<research_packet>
 [F:source|required] The native source result is 18%.
 [U:window|decision] The source covers six weeks.
@@ -258,6 +261,7 @@ function retainedV3ProtocolRecord(executionWindowMs: 60_000 | 300_000) {
     source,
     packet,
     executionWindowMs,
+    materialMaxUtf8Bytes,
   })!
   const root = fixtureRoot('task-1-retained-v3')
   const tasks = protocol.buildEvaluationTasks({
@@ -538,10 +542,18 @@ describe('learning-loop orchestrator', () => {
     }
   })
 
-  it.each([60_000, 300_000] as const)(
-    'reconstructs a retained v3 %i ms protocol without freezing duplicate history',
-    async executionWindowMs => {
-      const { record, recovered } = retainedV3ProtocolRecord(executionWindowMs)
+  it.each([
+    [60_000, 4_096],
+    [300_000, 4_096],
+    [60_000, 32_768],
+    [300_000, 32_768],
+  ] as const)(
+    'reconstructs a retained v3 %i ms / %i byte protocol without freezing duplicate history',
+    async (executionWindowMs, materialMaxUtf8Bytes) => {
+      const { record, recovered } = retainedV3ProtocolRecord(
+        executionWindowMs,
+        materialMaxUtf8Bytes,
+      )
       const recovery = vi.spyOn(sourceCases, 'recoverResearchSummarySourceCase')
         .mockResolvedValue(recovered)
       const fixture = controlledExecutorFixture({
@@ -560,30 +572,52 @@ describe('learning-loop orchestrator', () => {
   )
 
   it.each([
-    ['mixed paired task windows', (record: any) => {
+    'mixed paired task windows',
+    'mismatched holdout window',
+    'unsupported window',
+    'wrong tool cap',
+    'mixed paired material digests',
+    'mismatched holdout material digest',
+    'mismatched review material digest',
+    'unknown material digest',
+    'missing paired task',
+  ] as const)('refuses retained v3 %s before controlled provider work', async name => {
+    const retained = retainedV3ProtocolRecord(60_000, 4_096)
+    const record = structuredClone(retained.record) as any
+    const current = retainedV3ProtocolRecord(60_000, 32_768).record
+    if (name === 'mixed paired task windows') {
       record.protocol.tasks[4].stopContract = { maxToolCalls: 4, maxElapsedMs: 300_000 }
-    }],
-    ['mismatched holdout window', (record: any) => {
+    } else if (name === 'mismatched holdout window') {
       record.protocol.sourceFidelity.holdout.task.stopContract = {
         maxToolCalls: 4,
         maxElapsedMs: 300_000,
       }
-    }],
-    ['unsupported window', (record: any) => {
+    } else if (name === 'unsupported window') {
       for (const task of record.protocol.tasks) task.stopContract.maxElapsedMs = 120_000
       record.protocol.sourceFidelity.holdout.task.stopContract.maxElapsedMs = 120_000
-    }],
-    ['wrong tool cap', (record: any) => {
+    } else if (name === 'wrong tool cap') {
       for (const task of record.protocol.tasks) task.stopContract.maxToolCalls = 3
       record.protocol.sourceFidelity.holdout.task.stopContract.maxToolCalls = 3
-    }],
-    ['missing paired task', (record: any) => {
+    } else if (name === 'mixed paired material digests') {
+      record.protocol.tasks[4].evaluatorMaterialContractDigest =
+        current.protocol.tasks[4]!.evaluatorMaterialContractDigest
+    } else if (name === 'mismatched holdout material digest') {
+      record.protocol.sourceFidelity.holdout.task.evaluatorMaterialContractDigest =
+        current.protocol.sourceFidelity.holdout.task.evaluatorMaterialContractDigest
+    } else if (name === 'mismatched review material digest') {
+      record.protocol.sourceFidelity.holdout.review.materialContractDigest =
+        current.protocol.sourceFidelity.holdout.review.materialContractDigest
+    } else if (name === 'unknown material digest') {
+      for (const task of record.protocol.tasks) {
+        task.evaluatorMaterialContractDigest = sha256('unknown-material-contract')
+      }
+      record.protocol.sourceFidelity.holdout.task.evaluatorMaterialContractDigest =
+        sha256('unknown-material-contract')
+      record.protocol.sourceFidelity.holdout.review.materialContractDigest =
+        sha256('unknown-material-contract')
+    } else {
       record.protocol.tasks.pop()
-    }],
-  ] as const)('refuses retained v3 %s before controlled provider work', async (_name, mutate) => {
-    const retained = retainedV3ProtocolRecord(60_000)
-    const record = structuredClone(retained.record) as any
-    mutate(record)
+    }
     const recovery = vi.spyOn(sourceCases, 'recoverResearchSummarySourceCase')
       .mockResolvedValue(retained.recovered)
     const runtime = {
@@ -597,7 +631,10 @@ describe('learning-loop orchestrator', () => {
       runtime,
     })
     try {
-      await expect(fixture.evaluate()).rejects.toThrow(/retained.*execution|window|tool|task/u)
+      await expect(fixture.evaluate()).rejects.toThrow(
+        /retained.*(?:execution|material)|window|tool|task|contract/u,
+      )
+      expect(fixture.frozen).toEqual([])
       expect(runtime.runControlledArms).not.toHaveBeenCalled()
       expect(runtime.runControlledEvaluators).not.toHaveBeenCalled()
       expect(runtime.runControlledShadow).not.toHaveBeenCalled()
@@ -608,7 +645,7 @@ describe('learning-loop orchestrator', () => {
   })
 
   it('preserves the exact retained v3 source identity check before controlled provider work', async () => {
-    const retained = retainedV3ProtocolRecord(60_000)
+    const retained = retainedV3ProtocolRecord(60_000, 4_096)
     const record = structuredClone(retained.record) as any
     record.protocol.sourceFidelity.source.sessionDigest = sha256('another-session')
     const recovery = vi.spyOn(sourceCases, 'recoverResearchSummarySourceCase')

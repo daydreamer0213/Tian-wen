@@ -13,7 +13,10 @@ import {
   prepareControlledSkillEvalProtocol,
   sha256,
 } from '../../packages/tianwen-evolution/src/index.js'
-import { parseResearchPacket } from '../../packages/tianwen-runtime/src/research-summary.js'
+import {
+  normalizeResearchSummarySubmission,
+  parseResearchPacket,
+} from '../../packages/tianwen-runtime/src/research-summary.js'
 import {
   assertExplicitCorrectionWorkspaceSnapshot,
   buildExplicitCorrectionTransitionInput,
@@ -54,6 +57,7 @@ function sourceFidelityInput(sourceText: string) {
 function sourceFidelityProtocol(
   sourceText: string,
   executionWindowMs?: 60_000 | 300_000,
+  materialMaxUtf8Bytes?: 4_096 | 32_768,
 ) {
   const { packet, source } = sourceFidelityInput(sourceText)
   return resolveExplicitCorrectionProtocol({
@@ -63,6 +67,7 @@ function sourceFidelityProtocol(
     source,
     packet,
     ...(executionWindowMs === undefined ? {} : { executionWindowMs }),
+    ...(materialMaxUtf8Bytes === undefined ? {} : { materialMaxUtf8Bytes }),
   })!
 }
 
@@ -279,6 +284,89 @@ describe('explicit correction controlled protocol', () => {
   })
 
   it.each([
+    ['explicit undefined', undefined],
+    ['string', '32768'],
+    ['legacy review size', 8_192],
+    ['zero', 0],
+    ['unsupported positive', 65_536],
+  ])('rejects an invalid v3 material capacity: %s', (_name, materialMaxUtf8Bytes) => {
+    const { packet, source } = sourceFidelityInput(`<research_packet>
+[F:actual|required] Only the two known material-capacity families are accepted.
+</research_packet>`)
+
+    expect(() => resolveExplicitCorrectionProtocol({
+      scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+      protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v3',
+      packetVersion: CONTROLLED_SKILL_SOURCE_FIDELITY_POLICY.packetVersion,
+      source,
+      packet,
+      materialMaxUtf8Bytes,
+    } as never)).toThrow(/material capacity|input/u)
+  })
+
+  it('selects one complete material-contract family for fresh and retained v3', () => {
+    const source = `<research_packet>
+[F:actual|required] The material family is selected as one unit.
+</research_packet>`
+    const capacities = (protocol: ReturnType<typeof sourceFidelityProtocol>) => {
+      const tasks = protocol.buildEvaluationTasks({ root: fixtureRoot(), materializeWorkspace })
+      const holdout = protocol.buildShadowTasks({
+        root: fixtureRoot(), materializeWorkspace, sessionNamespace: 'material-family',
+      })[0]!
+      return {
+        paired: tasks.map(task => task.evaluatorMaterialContract.maxUtf8Bytes),
+        holdout: holdout.evaluatorMaterialContract.maxUtf8Bytes,
+        review: holdout.reviewMaterialContract.maxUtf8Bytes,
+      }
+    }
+
+    expect(capacities(sourceFidelityProtocol(source))).toEqual({
+      paired: Array.from({ length: 5 }, () => 32_768),
+      holdout: 32_768,
+      review: 32_768,
+    })
+    expect(capacities(sourceFidelityProtocol(source, 300_000, 4_096))).toEqual({
+      paired: Array.from({ length: 5 }, () => 4_096),
+      holdout: 4_096,
+      review: 8_192,
+    })
+  })
+
+  it('bounds maximally escaped and near-limit multilingual submission material', () => {
+    const text = '\u0000'.repeat(4_095) + 'x'
+    const packetText = `<research_packet>\n${Array.from({ length: 32 }, (_, index) =>
+      `[F:${String(index).padStart(2, '0')}${'a'.repeat(62)}|required] fact ${index}`,
+    ).join('\n')}\n</research_packet>`
+    const packet = parseResearchPacket(packetText)
+    const protocol = sourceFidelityProtocol(packetText)
+    const task = protocol.buildEvaluationTasks({
+      root: fixtureRoot(), materializeWorkspace, sessionNamespace: 'escaped-material',
+    })[0]!
+    const normalized = normalizeResearchSummarySubmission(packet, {
+      summary: text,
+      confirmedFindingIds: packet.items.map(item => item.id),
+      uncertaintyIds: [],
+    })
+    const materialText = JSON.stringify({ taskId: task.taskId, submission: normalized })
+    const chinese = normalizeResearchSummarySubmission(packet, {
+      summary: '研究结论。'.repeat(272) + '研究结论。x',
+      confirmedFindingIds: packet.items.map(item => item.id),
+      uncertaintyIds: [],
+    })
+    const chineseMaterialText = JSON.stringify({ taskId: task.taskId, submission: chinese })
+
+    expect(protocol.oracle(packet, normalized)).toBe('met')
+    expect(Buffer.byteLength(text, 'utf8')).toBe(4_096)
+    expect(Buffer.byteLength(materialText, 'utf8')).toBeGreaterThan(4_096)
+    expect(Buffer.byteLength(materialText, 'utf8'))
+      .toBeLessThanOrEqual(task.evaluatorMaterialContract.maxUtf8Bytes)
+    expect(Buffer.byteLength(chinese.summary, 'utf8')).toBe(4_096)
+    expect(Buffer.byteLength(chineseMaterialText, 'utf8')).toBeGreaterThan(4_096)
+    expect(Buffer.byteLength(chineseMaterialText, 'utf8'))
+      .toBeLessThanOrEqual(task.evaluatorMaterialContract.maxUtf8Bytes)
+  })
+
+  it.each([
     [60_000, 'sha256:546d9146a97a751e589b5544077cc6400eef690a0fd9707ff25041a52cd29719'],
     [300_000, 'sha256:e20a7b316757fb49e77427cd6dbffb0aa69b5369c6e3a99f69b5bca1a66fe124'],
   ] as const)('reconstructs a retained v3 %i ms protocol exactly', (
@@ -288,7 +376,7 @@ describe('explicit correction controlled protocol', () => {
     const protocol = sourceFidelityProtocol(`<research_packet>
 [F:actual|required] The source result is 18%.
 [U:window|decision] The source covers six weeks.
-</research_packet>`, executionWindowMs)
+</research_packet>`, executionWindowMs, 4_096)
     const root = fixtureRoot()
     const tasks = protocol.buildEvaluationTasks({
       root,
@@ -389,6 +477,46 @@ describe('explicit correction controlled protocol', () => {
     expect(contracts).toEqual(Array.from({ length: 8 }, () => ({
       maxToolCalls: 4, maxElapsedMs: 60_000,
     })))
+  })
+
+  it('pins complete legacy v2 protocol, task, holdout, and transition digests', () => {
+    const protocol = resolveExplicitCorrectionProtocol({
+      scopeKey: EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
+      protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v2',
+    })!
+    const root = 'D:/SNAPSHOT_ROOT'
+    const tasks = protocol.buildEvaluationTasks({
+      root, materializeWorkspace() {}, sessionNamespace: 'legacy-snapshot',
+    })
+    const frozen = protocol.buildProtocolInput({
+      ticketId: 'ticket:legacy-snapshot', sha256,
+      rubricDigest: CONTROLLED_SKILL_EVAL_RUBRIC_DIGEST,
+      callConfig: { provider: 'fixture', model: 'fixture' }, retryPolicy: {},
+      toolSchemaDigest: sha256('tools'), tasks,
+    })
+    const shadow = protocol.buildShadowTasks({
+      root, materializeWorkspace() {}, sessionNamespace: 'legacy-snapshot',
+    })
+    const transitions = (['promote', 'rollback', 'restore'] as const).map(kind =>
+      protocol.buildTransitionInput({
+        root, shadowId: 'shadow:legacy-snapshot', kind, expectedRevision: 7,
+        materializeWorkspace() {},
+      }))
+    const normalizePaths = (value: unknown) => JSON.parse(
+      JSON.stringify(value).replaceAll(root, '<ROOT>').replaceAll('\\\\', '/'),
+    ) as unknown
+
+    expect(sha256(normalizePaths(frozen)))
+      .toBe('sha256:1190df4df6f3f5455d64b04975c80544284d229d92b3fdce031d67c32d741441')
+    expect(sha256(normalizePaths(tasks)))
+      .toBe('sha256:5bb18492a2708de360be83e51d78b01a958485034b6363ef4de496266f5a0dd8')
+    expect(sha256(normalizePaths(shadow)))
+      .toBe('sha256:9bd904341e2f7de25ffa319df26a1daf579632d416d15014fae2a70a3ca8a3e7')
+    expect(transitions.map(value => sha256(normalizePaths(value)))).toEqual([
+      'sha256:8858aae63f40a095802859b5071688c6e11a6aea2de918bba4c8a8d0b5fd7084',
+      'sha256:e01b2f0ea34c6f681c08760ab6c9bdbc5ac45e43fd9fc047f165ab9588d4e341',
+      'sha256:58569669618b5ff870cf17b60d64d2d7e987db945d21a7e93cafaa5572eef76f',
+    ])
   })
 
   it('uses 300 seconds for fresh v3 evaluation and holdout but not shared transitions', () => {

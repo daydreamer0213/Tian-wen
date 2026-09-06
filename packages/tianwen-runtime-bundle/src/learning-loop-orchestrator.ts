@@ -19,6 +19,7 @@ import {
 import {
   assertExplicitCorrectionWorkspaceSnapshot,
   buildExplicitCorrectionTransitionInput,
+  resolveExplicitCorrectionMaterialMaxUtf8BytesFromDigests,
   resolveExplicitCorrectionProtocol,
 } from './explicit-correction-protocol.js'
 import { materializeLearningCandidate } from './learning-candidate.js'
@@ -299,6 +300,7 @@ export function createExplicitCorrectionLearningLoopExecutor(
       throw new Error('controlled protocol history cannot be resolved exactly')
     }
     let retainedExecutionWindowMs: 60_000 | 300_000 | undefined
+    let retainedMaterialMaxUtf8Bytes: 4_096 | 32_768 | undefined
     if (retained?.schemaVersion === 'tianwen.controlled-skill-eval-protocol.v3') {
       const taskContracts = retained.protocol.tasks.map(task => task.stopContract)
       const holdoutContract = retained.protocol.sourceFidelity.holdout.task.stopContract
@@ -312,6 +314,14 @@ export function createExplicitCorrectionLearningLoopExecutor(
         || windows.size !== 1
       ) throw new Error('retained controlled protocol execution window is invalid')
       retainedExecutionWindowMs = [...windows][0] as 60_000 | 300_000
+      retainedMaterialMaxUtf8Bytes = resolveExplicitCorrectionMaterialMaxUtf8BytesFromDigests({
+        paired: retained.protocol.tasks.map(task => task.evaluatorMaterialContractDigest),
+        holdout: retained.protocol.sourceFidelity.holdout.task.evaluatorMaterialContractDigest,
+        review: retained.protocol.sourceFidelity.holdout.review.materialContractDigest,
+      })
+      if (retainedMaterialMaxUtf8Bytes === undefined) {
+        throw new Error('retained controlled protocol material contracts are invalid')
+      }
     }
     let protocol
     let protocolSchemaVersion: 'tianwen.controlled-skill-eval-protocol.v2'
@@ -345,6 +355,9 @@ export function createExplicitCorrectionLearningLoopExecutor(
         ...(retainedExecutionWindowMs === undefined
           ? {}
           : { executionWindowMs: retainedExecutionWindowMs }),
+        ...(retainedMaterialMaxUtf8Bytes === undefined
+          ? {}
+          : { materialMaxUtf8Bytes: retainedMaterialMaxUtf8Bytes }),
       })
       protocolSchemaVersion = 'tianwen.controlled-skill-eval-protocol.v3'
     }
