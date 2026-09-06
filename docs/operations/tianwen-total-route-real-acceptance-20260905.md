@@ -10,7 +10,9 @@ contract and independent native review are independently reviewed through
 `82db3f7`, with1740 automatic checks passed/18 conditional skips. Independent
 review's native Skill-Evidence source mismatch is repaired and independently
 re-reviewed at `c990398`, with113 covering checks passed. Next-version upgrade
-support is next; final full/artifact gates remain open. New E/F/G inputs and reserved future H were frozen before execution,
+support is independently reviewed at `0170113` (295 focused checks passed/13 opt-in
+skips, native quality10/10). Wholebranch review and final full/artifact gates remain
+open; full Vitest is running on the fixed candidate. New E/F/G inputs and reserved future H were frozen before execution,
 but have not been submitted. These engineering checks are not new genuine model
 results and do not close any unobserved route branch below. Daily013/preview14,
 the original A–D observations and the rejected B Candidate remain unchanged.

@@ -197,11 +197,19 @@ const LEARNING_LOOP_PREDECESSOR_VERSIONS = ['0.1.13', '0.1.12', '0.1.11'] as con
 // returns the same receipt. Damaged/mixed/source-linked predecessor remains refused.
 ```
 
-- [ ] Write RED exact `0.1.13` managed/Web predecessor tests, preserved Session/state/archive and repeat-install identity assertions using existing retained predecessor fixture pattern. Freeze the old profile patch independently of evolving renderProfilePatch; verify actual old `0.1.13` patch matches the retained learning-loop predecessor template before reuse.
-- [ ] Run focused installer and Desktop profile/host tests and record failures for the missing successor/old-version readiness, not nonexistent files or missing dependencies.
-- [ ] Update current version/package/archive/runtime readiness/CI artifact paths consistently and add narrowly recognized `0.1.13` migration. Add the new native `tests/dsh-probe/research-summary-quality.spec.ts` to the existing CI ordinary-learning check (the workflow enumerates files explicitly). Preserve old checks and immutable historical examples; do not globally replace every old version string. README describes a current candidate, not an already completed user delivery or genuine effect.
-- [ ] Run focused version/lifecycle/install/artifact checks and typecheck. Rebuild Runtime declarations/bundle in the existing project output before artifact checks, maintaining current exact native module identity. Do not package Desktop into the active `dist/tianwen-desktop/win-unpacked`, install into daily state, or publish externally; root owns physical candidate packaging and delivery after final gates.
-- [ ] Self-review and commit only owned source/tests/docs, not SDD scratch. Report precise RED/GREEN and current-version/predecessor handling for independent task review. Known optional E2E skips and build warnings remain explicit.
+- [x] Write RED exact `0.1.13` managed/Web predecessor tests, preserved Session/state/archive and repeat-install identity assertions using existing retained predecessor fixture pattern. Freeze the old profile patch independently of evolving renderProfilePatch; verify actual old `0.1.13` patch matches the retained learning-loop predecessor template before reuse.
+- [x] Run focused installer and Desktop profile/host tests and record failures for the missing successor/old-version readiness, not nonexistent files or missing dependencies.
+- [x] Update current version/package/archive/runtime readiness/CI artifact paths consistently and add narrowly recognized `0.1.13` migration. Add the new native `tests/dsh-probe/research-summary-quality.spec.ts` to the existing CI ordinary-learning check (the workflow enumerates files explicitly). Preserve old checks and immutable historical examples; do not globally replace every old version string. README describes a current candidate, not an already completed user delivery or genuine effect.
+- [x] Run focused version/lifecycle/install/artifact checks and typecheck. Rebuild Runtime declarations/bundle in the existing project output before artifact checks, maintaining current exact native module identity. Do not package Desktop into the active `dist/tianwen-desktop/win-unpacked`, install into daily state, or publish externally; root owns physical candidate packaging and delivery after final gates.
+- [x] Self-review and commit only owned source/tests/docs, not SDD scratch. Report precise RED/GREEN and current-version/predecessor handling for independent task review. Known optional E2E skips and build warnings remain explicit.
+
+Task 4 completed and independently Approved at `0170113`. Focused295 passed/13
+opt-in skips198.51s, native quality10/10, rebuilt Runtime/types and root typecheck/
+build pass. Existing declaration-generator warning is retained. The artifact
+allowlist correction names one unchanged pre-branch source-fidelity module,
+not a new dependency or wildcard. Physical delivery and genuine effect are not
+claimed. Controller full Vitest is running on fixed product0170113 alongside
+read-only review; any later product fix requires revalidation on its own bytes.
 
 ## Post-implementation route (controller-owned, not a claim of completion)
 

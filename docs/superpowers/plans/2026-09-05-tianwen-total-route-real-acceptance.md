@@ -11,7 +11,9 @@ learning integration at `82db3f7` after independently reviewed contract/native-r
 commits through `8cef6e8`. Integration has1740 automatic checks passed/18 conditional
 skips; the review's native Skill-Evidence source mismatch is repaired and
 independently re-reviewed at `c990398`, with113 covering checks passed. Next-version
-upgrade support and final gates remain. Its future inputs are frozen but not yet submitted; no new genuine
+upgrade support is now independently reviewed at `0170113` (295 focused checks
+passed/13 opt-in skips). Wholebranch review and final gates remain; full Vitest is
+running on this fixed product. Its future inputs are frozen but not yet submitted; no new genuine
 Candidate, activation or future-task improvement is claimed. Continue that
 repair from its own ledger, then return to the still-open genuine tasks here;
 do not replay completed tasks or regrade the rejected B Candidate.
