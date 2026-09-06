@@ -114,9 +114,12 @@ $env:PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN = 'false'
 
 - [x] Task-scoped independent spec/quality review; fix loop only for actionable findings.
 - [x] Final whole-branch review against1c1e1f5; carry both deferred UX/diagnostic concerns.
-- [ ] Rebuild/copy exact runtime and separate Desktop candidate; rerun artifact/native
+- [x] Rebuild/copy exact runtime and separate Desktop candidate; rerun artifact/native
   checks, integrate reviewed branch, confirm exact-main CI and perform normal daily
   upgrade with original30-file/shortcut preservation and recoverable old program.
+  Completed at product6820a19/main0641095 with four passing CI jobs; normal daily
+  013→014/preview15, repeat install and real packaged lifecycle pass. See
+  [the delivery receipt](../../operations/tianwen-material-capacity-delivery-20260906.md).
 - [x] Update current handoff and I/J evidence. Close their one-attempt tranche as
   content-success with J native recovery; never classify invalid transport as a
   qualifying failed ordinary Outcome or re-evaluate frozen B/G/J for a better result.

@@ -2,14 +2,35 @@
 
 Status: **in progress; the total route is not complete**.
 
-Capacity repair checkpoint: source6820a19 is implemented, independently approved
-at task and whole-branch levels, with focused139, full1787/18conditional skips,
-artifact68/3opt-in skips, native identity14/14 and exact fresh-profile packaged
-Desktop startup/exit checks passing. Daily013 and old real trials remain unchanged.
-Continue integration, exact-main CI, normal daily upgrade and one separately
-frozen ordinary final-candidate usability task (K); this is not a new tranche to
-hunt failure and is not post-promotion efficacy. Two existing UX/diagnostic minors
-remain explicitly deferred; the capacity repair does not claim to fix them.
+Latest capacity checkpoint: source6820a19 is independently approved and delivered
+as daily014/preview15 after all four exact-main CI34038125754 jobs passed on0641095.
+Focused139, full1787/18conditional skips, artifact68/3opt-in skips, native14/14,
+separate fresh-profile physical checks, normal daily013→014 upgrade, exact bytes,
+repeat-install idempotence and actual daily packaged lifecycle all pass.
+Original30 user files and shortcut remain unchanged; old program is recoverable.
+See [the delivery record](tianwen-material-capacity-delivery-20260906.md).
+
+K was prospectively frozen and submitted once in normal UI with real official
+flash/high. Native Outcome remains met/no-case/all4, while human inspection found
+an omitted environment-authorization qualifier. One accurate native feedback
+caused actual full-body inspection of the admitted summarization source and a
+model-chosen narrow adaptation, Candidate738ef643. Source definition digest,
+origin/revision/license/scope/tool and unchanged original bytes are retained.
+This establishes genuine stage3 reading/adaptation, not installation or activation.
+
+K evaluationb070bf85 completed all ten paired Sessions and one aggregate; five
+pairs scored4 in all dimensions, existing totals80/80 and fidelity20/20.
+It ended rejected/original-source-fidelity-not-improved, with no holdout/activation.
+Both original-pair summaries preserve the original omitted qualifier; the source
+omission alone does not imply that the controlled baseline must fail. Separately,
+some prose repeats background despite full scores; investigate reviewer criterion
+coverage prospectively, never regrade K. Parent final rejection was visible and
+all four turns completed before owned host shutdown. Native audits and full final
+record live under isolated evidence/material-final-gates-6820a19/.
+The final ledger snapshot SHA is140b3b5f6e8696a4a0e929a575868cdf39dec0ec5d00e37d650513ae1cac787d.
+B/G/J/K are closed historical results; H is still reserved. Stage2 exploration,
+successful activation and future-task efficacy remain open. Two UX/diagnostic
+minors remain deferred. The following checkpoints are historical, not current delivery.
 
 Latest continuation (2026-09-06, after I/J): source3b2caac passed final independent
 review, separate Desktop audit/physical lifecycle, and all four exact-main jobs

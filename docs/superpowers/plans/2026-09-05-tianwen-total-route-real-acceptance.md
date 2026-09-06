@@ -4,13 +4,16 @@
 
 **Goal:** Complete the four-stage learning route with genuine DSH use and defensible evidence of future-task improvement, not merely delivery of its mechanisms.
 
-**Capacity-repair continuation:** source6820a19 is implemented and independently
-approved with full1787/18conditional skips, rebuilt artifacts/native identity and
-fresh packaged Desktop gate. Complete its integration/CI/daily delivery, then
-record the separately frozen ordinary final-candidate usability task K. K checks
-the actual project-checkpoint summary path after repair; it is not an extension
-of I/J to seek failures, a forced adaptation/promotion, or a reuse of reserved H.
-All still-unobserved genuine efficacy conditions below remain open.
+**Current continuation:** source6820a19 is reviewed, merged and delivered as daily
+014/preview15 after four successful exact-main0641095 CI jobs. Fresh local/full,
+artifact/native, real upgrade, packaged lifecycle and data/shortcut preservation
+gates are recorded in the [delivery record](../../operations/tianwen-material-capacity-delivery-20260906.md).
+K completed one frozen real UI task. Its accurate feedback led the model to read
+the approved external source body and propose traceable adaptation. Candidate738ef643
+completed ten paired Sessions plus aggregate and was rejected on five full-score
+ties; no holdout/activation. B/G/J/K remain closed, H remains reserved.
+Next investigate genuine reviewer criterion omissions; never change old grades
+or seek a lucky failure. Stage2 exploration and stage4 efficacy stay open.
 
 **Latest continuation, 2026-09-06 after I/J:** execution-window repair3b2caac and
 docs1c1e1f5 are integrated with final review, separate physical Desktop gate and
@@ -92,8 +95,8 @@ daily013 remains unchanged and the total route stays open.
 - [ ] For qualifying Outcome evidence, observe automatic analysis. If the model requests an experiment, verify equal packet/parent/config, real control and treatment Sessions, completed observations and return to the original analyst.
 - [ ] If the model can decide directly, retain that valid result; do not order an unnecessary experiment. Investigate any current design-to-user-work mismatch before changing the exploration contract.
 - [x] Review existing first-party/native Skill sources for relevant, self-contained text and license. If no in-scope source qualifies, identify one exact external source and the narrow admission decision instead of silently expanding trust.
-- [ ] If a source is admitted, freeze its native definition, digest, license, scope and tool before analysis; leave its bytes unchanged. Observe native inspection and model-chosen adaptation through the normal learning path.
-- [ ] Compare accepted source references with persisted inspection results, and verify original source and Candidate parent/scope preservation. Synthetic branch coverage remains separately labelled.
+- [x] If a source is admitted, freeze its native definition, digest, license, scope and tool before analysis; leave its bytes unchanged. K analysis4b7e9893 read full summarization body atseq2402 and independently adapted its condition-preservation principle through the normal learning path.
+- [x] Compare accepted source references with persisted inspection results, and verify original source and Candidate parent/scope preservation. K retains exact e0203132 definition digest, source5223b745/MIT, unchanged source-file hashes and parent22510630/scope. Candidate738ef643 was rejected; no source activation is claimed. Synthetic branch coverage remains separately labelled.
 
 ## Task 3: Source-relevant independent evaluation and future-task efficacy
 

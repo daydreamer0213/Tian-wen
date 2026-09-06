@@ -2,6 +2,16 @@
 
 ## Total-route genuine acceptance is still in progress
 
+Latest2026-09-06: daily014/preview15 is delivered at product6820a19/main0641095
+after all four CI34038125754 jobs passed. Exact artifacts, actual normal upgrade,
+daily packaged startup/exit, repeat install and unchanged30 user files/shortcut
+are recorded in [the current delivery](tianwen-material-capacity-delivery-20260906.md).
+K genuinely read the admitted source body and proposed traceable adaptation;
+ten paired Sessions plus aggregate completed with terminal rejection/no activation.
+Stage3 reading/adaptation is now observed. Stage2 exploration and stage4 future
+efficacy remain open; old B/G/J/K are not regraded. Diagnose actual reviewer
+criterion coverage next. The following paragraph is the earlier013 checkpoint.
+
 The user's subsequent instruction is to finish the full four-stage route, not
 only the finite delivery below. Read [the current total-route record](tianwen-total-route-real-acceptance-20260905.md)
 and its plan first. The isolated native-module identity mismatch that blocked
