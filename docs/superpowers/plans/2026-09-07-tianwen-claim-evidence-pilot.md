@@ -18,7 +18,7 @@
 - No word blacklist or permanent prohibition on specific R6 phrases.
 - Failure ends this frozen comparison; no revision/retry against its answers to manufacture a pass.
 - Work in `D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge` on `codex/conversation-claim-evidence`; preserve the daily executable, linked worktree and unrelated edits.
-- All generated pilot artifacts go under `D:/DevData/tianwen-claim-evidence-pilot-20260907`. The pilot is evaluator diagnostics, not natural acceptance or study support.
+- Task2 generated pilot artifacts go under `D:/DevData/tianwen-claim-evidence-pilot-20260907`; later separately authorized cohort tasks use their explicitly named independent D: roots and never modify older frozen cohorts. Every such pilot is evaluator diagnostics, not natural acceptance or study support.
 
 ---
 
