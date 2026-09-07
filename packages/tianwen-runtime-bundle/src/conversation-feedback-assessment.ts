@@ -9,7 +9,7 @@ import {
   type ConversationFeedbackStarted, type ConversationTask, type ConversationUnavailable,
 } from '@tianwen/evolution'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
-import { CONVERSATION_FEEDBACK_SCHEMA, runConversationJudgment } from './conversation-judgment.js'
+import { conversationEvidenceSchema, CONVERSATION_FEEDBACK_SCHEMA, runConversationJudgment } from './conversation-judgment.js'
 import { conversationEvidenceTexts, conversationMessages, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
 
 const ASSESSMENT_INSTRUCTION = `Independently assess user feedback about an exact earlier answer. Do not solve the task, propose guidance, or change the original review or pre-answer criteria. Return exactly {"classification":"attributable-problem|positive|requirement-change|preference|inconclusive","category":null,"supplementalCriteria":[],"explanation":"brief evidence-led explanation","evidenceQuotes":[]} through structured_output.
@@ -211,8 +211,12 @@ export class TianwenConversationFeedbackService extends Service {
     const controller = new AbortController(); this.analyses.set(controller, String(agent.session.id))
     const signal = AbortSignal.any([this.shutdown.signal, controller.signal])
     try {
+      const answers = material.answer.flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : []))
+      const evidence = [...conversationEvidenceTexts(material.original, answers, material.toolEvidence),
+        ...conversationEvidenceTexts({ request: material.feedback.request ?? [], context: [] },
+          material.feedback.note === undefined ? [] : [material.feedback.note])]
       const output = await runConversationJudgment(this.ctx, agent, {
-        outputSchema: CONVERSATION_FEEDBACK_SCHEMA,
+        outputSchema: conversationEvidenceSchema(CONVERSATION_FEEDBACK_SCHEMA, evidence),
         label: `Tianwen feedback ${assessmentId}`, instruction: ASSESSMENT_INSTRUCTION, material, signal,
       })
       const assessment = { started, startedAt: '' }
@@ -221,10 +225,6 @@ export class TianwenConversationFeedbackService extends Service {
       const result = parseConversationFeedbackRecord({ ...output.value, kind: 'feedback-assessed', assessmentId,
         taskId: binding.taskId, proof: output.proof, unavailableReason: null })
       if (result.kind !== 'feedback-assessed') throw new TypeError('invalid feedback judgment kind')
-      const answers = material.answer.flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : []))
-      const evidence = [...conversationEvidenceTexts(material.original, answers, material.toolEvidence),
-        ...conversationEvidenceTexts({ request: material.feedback.request ?? [], context: [] },
-          material.feedback.note === undefined ? [] : [material.feedback.note])]
       if (result.evidenceQuotes.some(quote => !evidence.some(text => text.includes(quote)))) throw new TypeError('feedback judgment quote is absent from its source')
       this.ctx.tianwenEvolution.recordConversationFeedback(result)
     } catch (error) {

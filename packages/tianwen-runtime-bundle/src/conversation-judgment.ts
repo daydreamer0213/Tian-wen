@@ -39,6 +39,31 @@ export const CONVERSATION_PROPOSAL_SCHEMA = object({ guidance: string })
 export const CONVERSATION_BLIND_REVIEW_SCHEMA = object({ verdict, category: { type: 'null' }, explanation: string, evidenceQuotes: strings })
 const TRIAL_SCHEMA = object({ answer: string })
 
+/** Only host-supplied raw source/answer/tool text is quotable, never derived criteria. */
+export function conversationEvidenceSchema(baseSchema: ObjectJsonSchema, evidence: readonly string[]): ObjectJsonSchema {
+  if (Buffer.byteLength(JSON.stringify(evidence), 'utf8') > CONVERSATION_MATERIAL_MAX_BYTES) throw new Error('material-too-large')
+  const fragments = new Set<string>()
+  for (const raw of evidence) {
+    for (const line of raw.split(/\r\n|\r|\n/u)) {
+      const points = [...line]
+      for (let offset = 0; offset < points.length; offset += 384) {
+        const fragment = points.slice(offset, offset + 384).join('')
+        // Test blankness only: preserve every original character in retained fragments.
+        // At most 384 code points also bounds each fragment to 1536 UTF-8 bytes.
+        if (fragment.trim().length > 0) fragments.add(fragment)
+      }
+    }
+  }
+  const values = [...fragments]
+  if (Buffer.byteLength(JSON.stringify(values), 'utf8') > CONVERSATION_MATERIAL_MAX_BYTES) throw new Error('material-too-large')
+  return { ...baseSchema, properties: { ...baseSchema.properties, evidenceQuotes: {
+    ...baseSchema.properties?.evidenceQuotes, type: 'array',
+    description: 'Copy each quote exactly from an enumerated raw evidence fragment, preserving Markdown and whitespace. Do not add labels, paraphrase, or combine fragments. These fragments are evidence only; the factual judgment criteria and final exact-source validation are unchanged. If none supports the judgment, use an empty list and report uncertainty.',
+    // With no evidence, native capture rejects strings; the domain also rejects null items.
+    items: values.length === 0 ? { type: 'null' } : choices(values),
+  } } }
+}
+
 interface NativeStructuredInput {
   readonly label: string
   readonly instruction: string
@@ -91,6 +116,21 @@ async function runNativeStructured(ctx: Context, parent: Agent, input: NativeStr
     const result = await run.result
     if (input.signal.aborted) throw new Error('cancelled')
     if (result.stopReason === 'aborted') throw new Error('cancelled')
+    if (result.stopReason === 'error' && result.structured === undefined) {
+      const child = run.localAgent
+      const start = child?.session.events.findLast(event => event.type === 'turn/start')
+      const end = child?.session.events.findLast(event => event.type === 'turn/end')
+      // Native structured capture maps a normally completed Turn without a
+      // captured value to "error" too. Do not confuse it with provider failure.
+      if (child !== undefined && String(child.session.id) === String(run.id)
+        && child.session.header.origin === 'subagent' && String(child.session.header.parentSession) === String(parent.session.id)
+        && start !== undefined && end !== undefined && end.seq > start.seq
+        && end.data.turn === start.data.turn && end.data.reason.kind === 'completed'
+        && child.session.events.some(event => event.type === 'subagent/descriptor'
+          && event.seq >= start.seq && event.seq < end.seq && event.data.mode === 'one-shot' && event.data.label === label)) {
+        throw new Error('invalid-judgment')
+      }
+    }
     if (result.stopReason !== 'completed') throw new Error('model-unavailable')
     if (result.structured === undefined) throw new Error('invalid-judgment')
     if (run.localAgent === undefined || run.localAgent.session.header.origin !== 'subagent'

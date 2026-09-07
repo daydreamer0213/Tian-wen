@@ -8,7 +8,7 @@ import {
   type ConversationTask, type ConversationTaskSource, type ConversationUnavailable,
 } from '@tianwen/evolution'
 import { RESEARCH_SUMMARY_SCOPE, RESEARCH_SUMMARY_TOOL_NAME, TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
-import { conversationAdmissionSchema, CONVERSATION_REVIEW_SCHEMA, runConversationJudgment } from './conversation-judgment.js'
+import { conversationAdmissionSchema, conversationEvidenceSchema, CONVERSATION_REVIEW_SCHEMA, runConversationJudgment } from './conversation-judgment.js'
 import { conversationContext, conversationEvidenceTexts, conversationMessages as visible, recoverConversationTaskMaterial } from './conversation-task-material.js'
 
 const ADMISSION_INSTRUCTION = `Identify what the direct user is asking BEFORE any answer is produced. Return a JSON object with exactly these fields through structured_output:
@@ -232,13 +232,13 @@ export class TianwenConversationObserverService extends Service {
       if (material.conversation.some(message => message.role === 'user' && !task.source.userMessageIds.includes(message.id))) throw new TypeError('user request changed after criteria were frozen')
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-review-started', taskId, materialDigest: sha256(material) })
       const judge = async () => {
-        const result = await runConversationJudgment(this.ctx, agent, { label: `Tianwen review ${taskId}`, instruction: REVIEW_INSTRUCTION, outputSchema: CONVERSATION_REVIEW_SCHEMA, material, signal })
+        const evidence = conversationEvidenceTexts(source, material.conversation.filter(message => message.role === 'assistant')
+          .flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])), material.toolEvidence)
+        const result = await runConversationJudgment(this.ctx, agent, { label: `Tianwen review ${taskId}`, instruction: REVIEW_INSTRUCTION, outputSchema: conversationEvidenceSchema(CONVERSATION_REVIEW_SCHEMA, evidence), material, signal })
         if (!this.authorized(task.source.consentRevision)) throw new Error('cancelled')
         if (result.value === null || typeof result.value !== 'object') throw new TypeError('invalid review')
         const review = parseConversationLearningRecord({ ...result.value, ...base, proof: result.proof, unavailableReason: null })
         if (review.kind !== 'task-reviewed') throw new TypeError('invalid review kind')
-        const evidence = conversationEvidenceTexts(source, material.conversation.filter(message => message.role === 'assistant')
-          .flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])), material.toolEvidence)
         if (review.evidenceQuotes.some(quote => !evidence.some(text => text.includes(quote)))) throw new TypeError('review quote is absent from task evidence')
         if (material.evaluationMode !== 'text' && review.verdict === 'met') {
           this.ctx.tianwenEvolution.recordConversationLearning({ ...review, verdict: 'inconclusive', explanation: 'The model judged the response satisfactory, but external verification or user satisfaction is not established.' })

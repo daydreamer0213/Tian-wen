@@ -246,3 +246,35 @@ passed; independent review found no Critical/Important issue. A full fresh suite
 is running separately, not yet claimed green. The [finite R2 protocol](../../operations/tianwen-natural-conversation-acceptance-r2-20260907.md)
 keeps R1 inputs unchanged: one explicit interface-repair replay and the seven
 still-unattempted prospective inputs. No candidate evaluation is repeated to pass.
+
+### R2 completed and raw-evidence contract repair
+
+The exact `4d1db6b` full TypeScript gate passed 1955 /18 conditional skips,
+111 passed files /5 skipped, 404.39 seconds. R2 Desktop resource audit and actual
+prepared-profile lifecycle passed (1/1, 7.96 seconds); native physical module
+identity was 14/14. R2 Q1–Q8 all completed with actual model outputs. Both durable
+preferences were assessed automatically; changed purpose and quoted translation
+were not misattributed. Four review outputs had unusable nonverbatim evidence,
+so no summarization counterexample and no study/activation existed. Q6 was
+correctly not-met and Q8 met. R2's terminal receipt and every attempt are retained.
+
+The narrow repair makes native review evidence selectable only from raw source,
+answer or tool text fragments. Derived criteria remain unquotable, size limits
+remain, and the final exact-source guard is unchanged. The native schema/helper
+regression failed 7 tests first, then passed 10/10, including rejection and legal
+capture in one native Turn. Three caller suites are being verified separately.
+The [finite R3 protocol](../../operations/tianwen-natural-conversation-acceptance-r3-20260907.md)
+explicitly repeats the fixed inputs once to verify this interface; it is not new
+organic-user evidence and does not permit rerunning a guidance study to pass.
+
+Final affected checks passed **52/52**, four files, 14.95 seconds, exit0. The
+three caller suites first had 29 failures after the stricter native contract;
+valid scripted fixtures were adapted only to choose existing raw evidence, while
+all five invalid-quote negative cases retained their original invalid strings and
+now assert the native error before ending without capture. A native completed
+Turn with missing structured capture was previously mislabeled model-unavailable;
+the exact current-child completed lineage now reports invalid-judgment instead.
+That narrow regression failed 1/13 first, then 13/13 passed, with provider-error
+and cancellation controls unchanged. No proof or learning result is fabricated.
+Fresh typecheck and Runtime build passed. Full fresh regression, R3 model
+outcomes, integration, exact-main CI and daily delivery remain separate gates.
