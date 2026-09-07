@@ -1,5 +1,6 @@
 import { sha256 } from './learning-intake.js'
 import type { Sha256Digest } from './ledger.js'
+import { parseClaimAudit, type ClaimAudit } from './conversation-claim-audit.js'
 
 export const CONVERSATION_FAMILIES = ['summarization', 'writing', 'planning', 'code', 'other'] as const
 export const CONVERSATION_FAILURES = ['source-fidelity', 'instruction-following', 'task-understanding', 'verification', 'tool-use', 'user-preference'] as const
@@ -9,7 +10,7 @@ export type ConversationUnavailable = 'model-unavailable' | 'material-too-large'
 
 /** Host policy, not a model-authored criterion or a reinterpretation of old proof. */
 export interface ConversationQualityContract {
-  readonly schemaVersion: 'tianwen.conversation-quality.v1' | 'tianwen.conversation-quality.v2' | 'tianwen.conversation-quality.v3'
+  readonly schemaVersion: 'tianwen.conversation-quality.v1' | 'tianwen.conversation-quality.v2' | 'tianwen.conversation-quality.v3' | 'tianwen.conversation-quality.v4'
   readonly source: 'host'
   readonly criterion: string
 }
@@ -19,13 +20,17 @@ function legacyConversationQualityContract(): ConversationQualityContract {
 function legacyDualConversationQualityContract(): ConversationQualityContract {
   return { schemaVersion: 'tianwen.conversation-quality.v2', source: 'host', criterion: `${legacyConversationQualityContract().criterion} The original direct-user instructions remain authoritative even if extracted criteria omit or weaken an explicit requirement. Preserve output-only restrictions, exclusions, conditions, uncertainty and who may decide or act. Distinguish the user's instructions from quoted source content. Evaluate the complete answer, including introductions, alternatives and closing offers. Two independent native checks must agree before a conclusive review; neither check may see the other's result.` }
 }
-export function conversationQualityContract(): ConversationQualityContract {
+function legacyV3ConversationQualityContract(): ConversationQualityContract {
   return { schemaVersion: 'tianwen.conversation-quality.v3', source: 'host', criterion: `${legacyDualConversationQualityContract().criterion} Original-result reviews use only requirements applicable when that task ran. For newly generated method-study answers, separately identified host-frozen feedback standards apply prospectively; they do not regrade the old answer or override an explicit instruction in the evaluated user request.` }
+}
+export function conversationQualityContract(): ConversationQualityContract {
+  return { ...legacyV3ConversationQualityContract(), schemaVersion: 'tianwen.conversation-quality.v4' }
 }
 export function parseConversationQualityContract(value: unknown): ConversationQualityContract {
   const input = object(value, ['schemaVersion', 'source', 'criterion'])
   const contract = input.schemaVersion === 'tianwen.conversation-quality.v1' ? legacyConversationQualityContract()
-    : input.schemaVersion === 'tianwen.conversation-quality.v2' ? legacyDualConversationQualityContract() : conversationQualityContract()
+    : input.schemaVersion === 'tianwen.conversation-quality.v2' ? legacyDualConversationQualityContract()
+      : input.schemaVersion === 'tianwen.conversation-quality.v3' ? legacyV3ConversationQualityContract() : conversationQualityContract()
   if (input.schemaVersion !== contract.schemaVersion || input.source !== contract.source || input.criterion !== contract.criterion) throw new TypeError('conversation quality contract is invalid')
   return contract
 }
@@ -49,6 +54,9 @@ export interface ConversationReviewCheck {
   readonly proof: ConversationJudgmentProof
 }
 export type ConversationReviewChecks = readonly [ConversationReviewCheck, ConversationReviewCheck]
+export interface ConversationAuditedReviewCheck extends ConversationReviewCheck { readonly audit: ClaimAudit }
+export type ConversationAuditedReviewChecks = readonly [ConversationAuditedReviewCheck, ConversationAuditedReviewCheck]
+export type ConversationStoredReviewChecks = ConversationReviewChecks | ConversationAuditedReviewChecks
 
 export function parseConversationReviewChecks(value: unknown): ConversationReviewChecks {
   const checks = list(value, item => {
@@ -68,8 +76,30 @@ export function parseConversationReviewChecks(value: unknown): ConversationRevie
   return checks as unknown as ConversationReviewChecks
 }
 
-export function conversationReviewConsensus(checks: ConversationReviewChecks) {
-  const [first, second] = parseConversationReviewChecks(checks)
+export function parseConversationAuditedReviewChecks(value: unknown): ConversationAuditedReviewChecks {
+  if (!Array.isArray(value) || value.length !== 2) throw new TypeError('audited review checks require two checks')
+  const summaries = value.map(item => {
+    if (item === null || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).length !== 7 || !Object.hasOwn(item, 'audit')) throw new TypeError('audited review check is invalid')
+    const { audit: _audit, ...summary } = item as Record<string, unknown>
+    return summary
+  })
+  const parsed = parseConversationReviewChecks(summaries)
+  const checks = parsed.map((check, index) => ({ ...check, audit: parseClaimAudit((value[index] as Record<string, unknown>).audit, check.verdict) })) as unknown as ConversationAuditedReviewChecks
+  if (checks[0].audit.evidenceDigest !== checks[1].audit.evidenceDigest) throw new TypeError('audited review checks require matching evidence digests')
+  return checks
+}
+
+export function parseStoredConversationReviewChecks(value: unknown): ConversationStoredReviewChecks {
+  const audited = Array.isArray(value) && value.some(item => item !== null && typeof item === 'object' && Object.hasOwn(item, 'audit'))
+  return audited ? parseConversationAuditedReviewChecks(value) : parseConversationReviewChecks(value)
+}
+
+export function parseConversationQualityReviewChecks(value: unknown, quality: ConversationQualityContract | undefined): ConversationStoredReviewChecks {
+  return quality?.schemaVersion === 'tianwen.conversation-quality.v4' ? parseConversationAuditedReviewChecks(value) : parseConversationReviewChecks(value)
+}
+
+export function conversationReviewConsensus(checks: ConversationStoredReviewChecks) {
+  const [first, second] = parseStoredConversationReviewChecks(checks)
   const verdict = first.verdict === second.verdict ? first.verdict : 'inconclusive'
   return { verdict, category: verdict === 'not-met' ? first.category : null,
     explanation: `Requirements check (${first.verdict}): ${first.explanation}\nGrounding check (${second.verdict}): ${second.explanation}`,
@@ -145,7 +175,7 @@ export interface ConversationTaskReview {
   readonly proof: ConversationJudgmentProof | null
   readonly unavailableReason: ConversationUnavailable | null
   /** Absent on historical single-judge reviews. */
-  readonly reviewChecks?: ConversationReviewChecks
+  readonly reviewChecks?: ConversationStoredReviewChecks
 }
 
 export interface ConversationTaskReviewIntent {
@@ -273,7 +303,7 @@ export function parseConversationLearningRecord(value: unknown): ConversationLea
       kind: 'task-reviewed', taskId: text(input.taskId, 512), admissionDigest: digest(input.admissionDigest), resultDigest: digest(input.resultDigest),
       verdict: oneOf(input.verdict, ['met', 'not-met', 'inconclusive']), category: input.category === null ? null : oneOf(input.category, CONVERSATION_FAILURES),
       explanation: text(input.explanation), evidenceQuotes: list(input.evidenceQuotes, item => text(item, 2048), 12), proof: nullableProof(input.proof), unavailableReason: unavailable(input.unavailableReason),
-      ...(Object.hasOwn(input, 'reviewChecks') ? { reviewChecks: parseConversationReviewChecks(input.reviewChecks) } : {}),
+      ...(Object.hasOwn(input, 'reviewChecks') ? { reviewChecks: parseStoredConversationReviewChecks(input.reviewChecks) } : {}),
     }
     if (review.verdict !== 'inconclusive' && (review.proof === null || review.unavailableReason !== null)) throw new TypeError('a conclusive review requires completed native proof')
     if (review.verdict === 'not-met' && (review.category === null || review.evidenceQuotes.length === 0)) throw new TypeError('a failed task requires attributable evidence')
@@ -338,8 +368,9 @@ export class ConversationLearningState {
     if (record.verdict !== 'inconclusive' && (task.admission.decision?.kind !== 'task' || task.completion.status !== 'completed')) throw new Error('incomplete task cannot establish a conclusive review')
     if (record.verdict === 'met' && task.admission.decision?.evaluationMode === 'subjective') throw new Error('a subjective review cannot establish user satisfaction')
     if (record.verdict === 'met' && task.admission.decision?.evaluationMode === 'external') throw new Error('external effects require an independent external evaluator, not a text judgment')
-    if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3'].includes(task.admission.qualityContract?.schemaVersion ?? '') && record.proof !== null && record.reviewChecks === undefined) throw new Error('v2/v3 task reviews require two independent review checks')
+    if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4'].includes(task.admission.qualityContract?.schemaVersion ?? '') && record.proof !== null && record.reviewChecks === undefined) throw new Error('v2/v3/v4 task reviews require two independent review checks')
     if (record.reviewChecks !== undefined) {
+      parseConversationQualityReviewChecks(record.reviewChecks, task.admission.qualityContract)
       const expected = conversationReviewConsensus(record.reviewChecks)
       const mode = task.admission.decision?.evaluationMode
       const verdict = expected.verdict === 'met' && mode !== 'text' ? 'inconclusive' : expected.verdict

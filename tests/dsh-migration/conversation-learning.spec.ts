@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { EvolutionLedger, isPublicLedgerEvent } from '../../packages/tianwen-evolution/src/ledger.js'
 import { canonicalJson, sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { baselineGuidanceSnapshot, guidanceVersion } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
-import { conversationQualityContract, parseConversationLearningRecord, conversationReviewConsensus, parseConversationReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
+import { conversationQualityContract, parseConversationAuditedReviewChecks, parseConversationLearningRecord, conversationReviewConsensus, parseConversationReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 
 const roots: string[] = []
 function root() {
@@ -47,9 +47,10 @@ describe('natural conversation task evidence', () => {
   it('rejects missing or forged v2 consensus and preserves a real disagreement as inconclusive', () => {
     const ledger = ledgerWithConsent(), source = start(), admitted = admission(source.taskId)
     ledger.recordConversationLearning(source); ledger.recordConversationLearning(admitted); ledger.recordConversationLearning(finish(source.taskId))
-    const reviewChecks = parseConversationReviewChecks(['requirements', 'grounding'].map((focus, index) => ({ focus,
+    const reviewChecks = parseConversationAuditedReviewChecks(['requirements', 'grounding'].map((focus, index) => ({ focus,
       verdict: index === 0 ? 'met' : 'not-met', category: index === 0 ? null : 'instruction-following', explanation: 'Original output restriction checked.', evidenceQuotes: ['only output'],
-      proof: { sessionId: focus, sessionDigest: sha256(focus), requestDigest: sha256(`input:${focus}`) } })))
+      proof: { sessionId: focus, sessionDigest: sha256(focus), requestDigest: sha256(`input:${focus}`) },
+      audit: { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: sha256('task evidence'), units: [{ answerId: 'answer-1', claims: [{ quote: 'only output', kind: 'source-fact', status: index === 0 ? 'supported' : 'unsupported', sourceIds: ['request-1'], explanation: 'Checked against the request.' }] }] } })))
     const review = { kind: 'task-reviewed' as const, taskId: source.taskId, admissionDigest: sha256(admitted), resultDigest: sha256('answer'),
       ...conversationReviewConsensus(reviewChecks), unavailableReason: null }
     expect(() => ledger.recordConversationLearning(review)).toThrow(/two independent/i)

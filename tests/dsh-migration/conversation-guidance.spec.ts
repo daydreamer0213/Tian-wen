@@ -14,7 +14,7 @@ import {
   type GuidanceStudyOpened,
 } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
-import { conversationQualityContract, parseConversationReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
+import { conversationQualityContract, parseConversationAuditedReviewChecks, parseConversationReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 
 const scope = 'workspace:guidance-test'
 const proof = (id: string) => ({ sessionId: id, sessionDigest: sha256(id), requestDigest: sha256(`request:${id}`) })
@@ -115,8 +115,9 @@ describe('natural guidance domain governance', () => {
     append(state, opened); append(state, proposed)
     const arm = arms(opened, proposed)[0]!
     expect(() => append(state, arm)).toThrow(/two independent/i)
-    const reviewChecks = parseConversationReviewChecks(['requirements', 'grounding'].map(focus => ({ focus, verdict: 'not-met', category: 'instruction-following',
-      explanation: 'Output constraint violated.', evidenceQuotes: ['extra output'], proof: focus === 'requirements' ? arm.judgeProof : proof('separate-grounding') })))
+    const reviewChecks = parseConversationAuditedReviewChecks(['requirements', 'grounding'].map(focus => ({ focus, verdict: 'not-met', category: 'instruction-following',
+      explanation: 'Output constraint violated.', evidenceQuotes: ['extra output'], proof: focus === 'requirements' ? arm.judgeProof : proof('separate-grounding'),
+      audit: { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: sha256('arm evidence'), units: [{ answerId: 'answer-1', claims: [{ quote: 'extra output', kind: 'source-fact', status: 'unsupported', sourceIds: [], explanation: 'The requested restriction was violated.' }] }] } })))
     expect(() => append(state, { ...arm, reviewChecks, verdict: 'met' })).toThrow(/consensus/i)
     append(state, { ...arm, reviewChecks })
     expect(state.listStudies()[0]?.arms[0]?.reviewChecks).toEqual(reviewChecks)

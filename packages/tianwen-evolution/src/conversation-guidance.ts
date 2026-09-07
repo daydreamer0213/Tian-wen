@@ -1,5 +1,5 @@
 import { sha256 } from './learning-intake.js'
-import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, parseConversationQualityContract, parseConversationReviewChecks, conversationReviewConsensus, type ConversationReviewChecks, type ConversationQualityContract, type ConversationFamily, type ConversationFailure, type ConversationJudgmentProof } from './conversation-learning.js'
+import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, parseConversationQualityContract, parseConversationQualityReviewChecks, parseStoredConversationReviewChecks, conversationReviewConsensus, type ConversationStoredReviewChecks, type ConversationQualityContract, type ConversationFamily, type ConversationFailure, type ConversationJudgmentProof } from './conversation-learning.js'
 import type { Sha256Digest } from './ledger.js'
 
 /** Data only: the host reads these strings as guidance, never as executable source. */
@@ -66,7 +66,7 @@ export interface GuidanceArmRecord {
   readonly judgeProof: GuidanceProof
   readonly outputDigest: Sha256Digest
   readonly verdict: 'met' | 'not-met' | 'inconclusive'
-  readonly reviewChecks?: ConversationReviewChecks
+  readonly reviewChecks?: ConversationStoredReviewChecks
 }
 export interface GuidanceDecisionRecord {
   readonly kind: 'study-decided'
@@ -209,7 +209,7 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
     return { kind: input.kind, studyId, caseId: text(input.caseId, 512), role: oneOf(input.role, ['baseline', 'candidate']),
       materialDigest: digest(input.materialDigest), behaviorVersion: digest(input.behaviorVersion), executionProof: proof(input.executionProof),
       judgeProof: proof(input.judgeProof), outputDigest: digest(input.outputDigest), verdict: oneOf(input.verdict, ['met', 'not-met', 'inconclusive']),
-      ...(Object.hasOwn(input, 'reviewChecks') ? { reviewChecks: parseConversationReviewChecks(input.reviewChecks) } : {}) }
+      ...(Object.hasOwn(input, 'reviewChecks') ? { reviewChecks: parseStoredConversationReviewChecks(input.reviewChecks) } : {}) }
   }
   if (input.kind === 'study-decided') {
     object(input, ['kind', 'studyId', 'armsDigest', 'verdict'])
@@ -315,8 +315,9 @@ export class ConversationGuidanceState {
       if (item === undefined || item.materialDigest !== record.materialDigest) throw new Error('guidance arm does not match its frozen case material')
       const expected = record.role === 'baseline' ? opened.parentVersion : guidanceVersion(study.candidate.candidateSnapshot)
       if (record.behaviorVersion !== expected) throw new Error('guidance arm behavior version disagrees with its frozen role')
-      if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3'].includes(opened.qualityContract?.schemaVersion ?? '') && record.reviewChecks === undefined) throw new Error('v2/v3 guidance arms require two independent review checks')
+      if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4'].includes(opened.qualityContract?.schemaVersion ?? '') && record.reviewChecks === undefined) throw new Error('v2/v3/v4 guidance arms require two independent review checks')
       if (record.reviewChecks !== undefined) {
+        parseConversationQualityReviewChecks(record.reviewChecks, opened.qualityContract)
         const expected = conversationReviewConsensus(record.reviewChecks)
         if (record.verdict !== expected.verdict || sha256(record.judgeProof) !== sha256(expected.proof)) throw new Error('guidance arm disagrees with its independent check consensus')
       }
