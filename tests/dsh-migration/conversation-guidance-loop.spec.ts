@@ -235,6 +235,35 @@ it.each(['accepted', 'recover', 'recover-missing-check', 'recover-changed-check'
     expect(tasks.at(-1)?.source.behaviorVersion).not.toBe(tasks[0]?.source.behaviorVersion)
     expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toHaveLength(1)
     expect(harness.adapter.requests).toHaveLength(48)
+    if (scenario === 'recover') {
+      const candidate = study!.candidate!.candidateSnapshot
+      const activationCount = () => readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8').trim().split('\n')
+        .map(line => JSON.parse(line))
+        .filter(event => event.type === 'conversation-guidance-recorded'
+          && event.record.kind === 'guidance-activated'
+          && event.record.studyId === study.opened.studyId).length
+      expect(activationCount()).toBe(1)
+      const requests = harness.adapter.requests.length
+      await handle.dispose(); await harness.ctx.fiber.dispose()
+      const restarted = await mountFeedbackHarness(join(root, 'sessions'), [])
+      try {
+        await restarted.ctx.plugin(SubagentRuntime); await restarted.ctx.plugin(spawn, { providerName: 'spawn' })
+        await applyRuntime(restarted.ctx, { evolutionRoot: join(root, 'evolution') })
+        const parent = await restarted.ctx.agents.create({ sessionId: SessionId('natural-learning-main'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+        await restarted.ctx.plugin(TianwenConversationGuidanceLoopService)
+        await restarted.ctx.tianwenConversationGuidanceLoop.schedule(parent.agent)
+        await restarted.ctx.tianwenConversationGuidanceLoop.whenIdle()
+        const recovered = restarted.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+        expect(recovered.opened.studyId).toBe(study.opened.studyId)
+        expect(recovered.activation).toEqual(study.activation)
+        expect(restarted.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey)).toEqual(candidate)
+        expect(activationCount()).toBe(1)
+        expect(harness.adapter.requests).toHaveLength(requests)
+        expect(restarted.adapter.requests).toHaveLength(0)
+        await parent.dispose()
+      } finally { await restarted.ctx.fiber.dispose() }
+      return
+    }
     if (scenario === 'contradict-source' || scenario === 'contradict-counter') {
       const target = oldTasks[scenario === 'contradict-source' ? 0 : 2]!
       const result = await harness.ctx.messageFeedback.put({ sessionId: handle.agent.session.id, messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!),
