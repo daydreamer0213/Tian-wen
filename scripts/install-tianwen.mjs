@@ -305,7 +305,7 @@ function renderRuntimePredecessorProfilePatch(paths) {
 `
 }
 
-// Frozen Runtime 0.1.11/0.1.12/0.1.13/0.1.14/0.1.15 managed configuration, including the enabled learning loop.
+// Frozen Runtime 0.1.11 through 0.1.16 managed configuration, including the enabled learning loop.
 // Never validate an installed predecessor against the evolving current patch.
 function renderRuntimeLearningLoopPredecessorProfilePatch(paths) {
   return `- id: agent-default-model
@@ -537,6 +537,7 @@ export function classifyManagedInstallation(paths) {
     }
     if (existsSync(paths.archivePath)) return 'incompatible'
     const archivePath = predecessorArchivePath(paths)
+    const runtime016ArchivePath = runtimePredecessorArchivePath(paths, '0.1.16')
     const runtime015ArchivePath = runtimePredecessorArchivePath(paths, '0.1.15')
     const runtime014ArchivePath = runtimePredecessorArchivePath(paths, '0.1.14')
     const runtime013ArchivePath = runtimePredecessorArchivePath(paths, '0.1.13')
@@ -544,7 +545,11 @@ export function classifyManagedInstallation(paths) {
     const runtime011ArchivePath = runtimePredecessorArchivePath(paths, '0.1.11')
     const runtime010ArchivePath = runtimePredecessorArchivePath(paths, '0.1.10')
     if (host.version === DSH_VERSION) {
-      return (existsSync(runtime015ArchivePath)
+      return (existsSync(runtime016ArchivePath)
+        && statSync(runtime016ArchivePath).isFile()
+        && matchesProfile(profile, DSH_VERSION, '0.1.16', renderRuntimeLearningLoopPredecessorProfilePatch(paths))
+        && matchesPredecessorReceipt(paths, runtime016ArchivePath, DSH_VERSION))
+        || (existsSync(runtime015ArchivePath)
         && statSync(runtime015ArchivePath).isFile()
         && matchesProfile(profile, DSH_VERSION, '0.1.15', renderRuntimeLearningLoopPredecessorProfilePatch(paths))
         && matchesPredecessorReceipt(paths, runtime015ArchivePath, DSH_VERSION))
@@ -571,7 +576,8 @@ export function classifyManagedInstallation(paths) {
         ? 'managed-runtime-predecessor'
         : 'incompatible'
     }
-    if (existsSync(runtime015ArchivePath)
+    if (existsSync(runtime016ArchivePath)
+      || existsSync(runtime015ArchivePath)
       || existsSync(runtime014ArchivePath)
       || existsSync(runtime013ArchivePath)
       || existsSync(runtime012ArchivePath)

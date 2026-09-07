@@ -22,5 +22,6 @@ Old task reviews and studies are never rewritten, regraded or credited as v2. Ex
 
 ## Progress
 
-- Investigation and design: complete; implementation not yet started.
-- No daily installation, historical cohort or model behavior changed by this document.
+- Core implementation: committed as `2730e49`. Native and domain checks pass, including exact-v1 replay, dual-result proof binding, disagreement, missing/changed second check and no-retry recovery. Full repository gates are in progress.
+- Independent review found the normal managed installer's missing 0.1.16 predecessor entry; a failing 0.1.16 migration matrix reproduces it. Corrective work adds only the exact predecessor path and extends the existing migration checks.
+- Candidate 0.1.17 / Desktop preview.18 is isolated on D:. No daily installation or historical cohort has been changed. No real-model acceptance has started yet.

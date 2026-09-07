@@ -32,7 +32,7 @@ const CURRENT_DSH_VERSION = '0.1.1-rc.2'
 const PREDECESSOR_DSH_VERSION = '0.1.0-rc.7'
 const CURRENT_RUNTIME_VERSION = '0.1.17'
 const CURRENT_RUNTIME_ARCHIVE = `tianwen-runtime-bundle-${CURRENT_RUNTIME_VERSION}.tgz`
-const LEARNING_LOOP_PREDECESSOR_VERSIONS = ['0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11'] as const
+const LEARNING_LOOP_PREDECESSOR_VERSIONS = ['0.1.16', '0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11'] as const
 const RUNTIME_FILES = [
   'dist/index.js',
   'dist/index.d.ts',
