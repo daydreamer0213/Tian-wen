@@ -1414,7 +1414,7 @@ describe('Tianwen DSH Message Feedback bridge', () => {
         'message-enabled-then-disabled',
       )).toMatchObject({ analysisConsentRevision: 1 })
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v2',
+        'tianwen-auto-analysis.v3',
       )).toBeUndefined()
 
       await mounted.bridge.reconcileSession(String(disabledThenEnabled.id))
@@ -1433,7 +1433,7 @@ describe('Tianwen DSH Message Feedback bridge', () => {
         'message-newly-enabled',
       )).toMatchObject({ analysisConsentRevision: 3 })
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v2',
+        'tianwen-auto-analysis.v3',
       )).toMatchObject({
         state: 'pending',
         mainSessionId: String(disabledThenEnabled.id),
@@ -1460,7 +1460,7 @@ describe('Tianwen DSH Message Feedback bridge', () => {
         'message-newly-enabled',
       )).toMatchObject({ analysisConsentRevision: 3 })
       expect(reloaded.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v2',
+        'tianwen-auto-analysis.v3',
       )).toMatchObject({
         state: 'pending',
         mainSessionId: String(disabledThenEnabled.id),
@@ -1526,7 +1526,7 @@ describe('Tianwen DSH Message Feedback bridge', () => {
         'message-recovery',
       )).toMatchObject({ analysisConsentRevision: 1 })
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v2',
+        'tianwen-auto-analysis.v3',
       )).toBeUndefined()
     } finally {
       await mounted.ctx.fiber.dispose()
@@ -1569,7 +1569,7 @@ describe('Tianwen DSH Message Feedback bridge', () => {
         'message-child',
       )).toMatchObject({ state: 'active' })
       const notice = mounted.ctx.tianwenEvolution
-        .getLearningConsentNoticeStatus('tianwen-auto-analysis.v2')
+        .getLearningConsentNoticeStatus('tianwen-auto-analysis.v3')
       expect(notice).toMatchObject({
         state: 'pending',
         mainSessionId: String(main.id),
@@ -1632,7 +1632,7 @@ describe('Tianwen DSH Message Feedback bridge', () => {
         'message-orphan',
       )).toMatchObject({ state: 'active' })
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v2',
+        'tianwen-auto-analysis.v3',
       )).toBeUndefined()
     } finally {
       await mounted.ctx.fiber.dispose()
@@ -1672,14 +1672,14 @@ describe('Tianwen DSH Message Feedback bridge', () => {
         'message-recovery',
       )).toMatchObject({ state: 'active' })
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v2',
+        'tianwen-auto-analysis.v3',
       )).toBeUndefined()
 
       intent.mockRestore()
       await expect(mounted.bridge.reconcileSession(String(session.id)))
         .resolves.toMatchObject({ state: 'reconciled' })
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v2',
+        'tianwen-auto-analysis.v3',
       )).toMatchObject({
         state: 'pending',
         mainSessionId: String(session.id),
@@ -1719,7 +1719,7 @@ describe('Tianwen DSH Message Feedback bridge', () => {
       await mounted.bridge.reconcileSession(String(positive.id))
       await mounted.bridge.reconcileSession(String(empty.id))
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v2',
+        'tianwen-auto-analysis.v3',
       )).toBeUndefined()
 
       const consent = mounted.ctx.tianwenEvolution.recordLearningAnalysisConsent({
@@ -1735,7 +1735,7 @@ describe('Tianwen DSH Message Feedback bridge', () => {
       })])
       await mounted.bridge.reconcileSession(String(enabled.id))
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v2',
+        'tianwen-auto-analysis.v3',
       )).toBeUndefined()
       expect(feedbackLedgerEvents(root).find(event =>
         (event.input as { readonly sessionId: string }).sessionId === String(enabled.id)))
@@ -1755,7 +1755,7 @@ describe('Tianwen DSH Message Feedback bridge', () => {
       })])
       await mounted.bridge.reconcileSession(String(disabled.id))
       expect(mounted.ctx.tianwenEvolution.getLearningConsentNoticeStatus(
-        'tianwen-auto-analysis.v2',
+        'tianwen-auto-analysis.v3',
       )).toMatchObject({
         state: 'pending',
         mainSessionId: String(disabled.id),

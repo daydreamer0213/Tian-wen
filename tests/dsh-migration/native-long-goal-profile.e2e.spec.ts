@@ -25,6 +25,7 @@ import {
   toolGoal,
 } from '@tianwen/dsh-compat'
 import { apply as applyRuntimeBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
+import { LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID } from '../../packages/tianwen-runtime-bundle/src/learning-consent-agent.js'
 import {
   listLongGoals,
   readLongGoal,
@@ -772,6 +773,12 @@ describe('native Long Goal profile execution', () => {
         }
       }, { timeout: 20_000 })
       await recovered.main.whenIdle()
+      // Ordinary continuation also delivers the separate one-time disclosure;
+      // it must not be mistaken for another execution or settlement attempt.
+      await vi.waitFor(() => {
+        expect(recovered!.ctx.tianwenEvolution.getLearningConsentNoticeStatus('tianwen-auto-analysis.v3'))
+          .toMatchObject({ state: 'delivered', mainSessionId: String(recovered!.main.session.id) })
+      }, { timeout: 20_000 })
       const after = readLongGoal(recovered.stateRoot, running.id) as LongGoalRecordV3
       const afterProjection = readTianwenTaskAttemptProjection(after, durableTask.id)
       expect(after.tianwenEvents.filter(event => event.type === 'terminal-delivery-observed'))
@@ -809,9 +816,15 @@ describe('native Long Goal profile execution', () => {
           reason: expect.objectContaining({ kind: 'completed' }),
         }),
       }))
-      expect(recovered.adapter.requests.filter(request => (
+      const mainRequests = recovered.adapter.requests.filter(request => (
         String(request.sessionId) === String(recovered!.main.session.id)
-      ))).toHaveLength(2)
+      ))
+      const consentRequests = mainRequests.filter(request =>
+        String(request.messages.at(-1)?.id) === LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID)
+      expect(consentRequests).toHaveLength(1)
+      expect(mainRequests.filter(request => !consentRequests.includes(request))
+        .map(request => request.messages.at(-1)?.source.kind)).toEqual(['user', 'subagent-settled'])
+      expect(recovered.ctx.tianwenEvolution.getLearningAnalysisConsent()).toBeUndefined()
       await expectNativeChild(
         recovered.ctx,
         running.planner.sessionId,

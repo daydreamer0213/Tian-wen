@@ -125,7 +125,7 @@ export function inspectWebProfile(target: DesktopBaseTarget): WebProfileState {
     try {
       return { kind: 'outdated-runtime', profileRoot: resolveKnownOldDesktopTarget(target).profileRoot }
     } catch {
-      // Only the four strictly matched predecessor Runtimes are eligible for the embedded update path.
+      // Only strictly matched known predecessor Runtimes are eligible for the embedded update path.
     }
     if (!profileEntryExists(profileRoot) && missingProfileParentResolvesWithinHome(target, profileRoot)) {
       return { kind: 'missing-profile', profileRoot }

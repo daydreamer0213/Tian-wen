@@ -41,6 +41,9 @@ import {
 } from './learning-loop-orchestrator.js'
 import { TianwenMessageFeedbackBridgeService } from './message-feedback-bridge.js'
 import { TianwenResearchSummaryAdmissionService } from './research-summary-admission.js'
+import { TianwenConversationObserverService } from './conversation-observer.js'
+import { TianwenConversationGuidanceLoopService } from './conversation-guidance-loop.js'
+import { TianwenConversationFeedbackService } from './conversation-feedback-assessment.js'
 import * as controlledSessionArchive from './controlled-session-archive.js'
 
 export { inject, name, SUPPORTED_DSH_VERSION }
@@ -474,6 +477,9 @@ export async function apply(
     ? {}
     : { learningSkillSources: config.learningSkillSources })
   ctx.plugin(TianwenMessageFeedbackBridgeService)
+  ctx.plugin(TianwenConversationObserverService)
+  ctx.plugin(TianwenConversationFeedbackService)
+  ctx.plugin(TianwenConversationGuidanceLoopService)
   ctx.plugin(TianwenLearningExplorationService)
   ctx.plugin(TianwenLearningAnalysisChildService, config)
   const executor = createConfiguredLearningLoopExecutor(ctx, config)

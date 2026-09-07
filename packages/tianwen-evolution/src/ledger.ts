@@ -15,6 +15,9 @@ import {
 import { join } from 'node:path'
 import { TextDecoder } from 'node:util'
 import { resolveControlledSkillSourceFidelityFamily } from './controlled-skill-source-fidelity.js'
+import { ConversationLearningState, parseConversationLearningRecord, type ConversationLearningEvent, type ConversationLearningRecord, type ConversationTask } from './conversation-learning.js'
+import { ConversationGuidanceState, guidanceVersion, parseConversationGuidanceRecord, type ConversationGuidanceRecord, type GuidanceSnapshot, type GuidanceStudy, type GuidanceStudyOpened, type GuidanceDecisionRecord } from './conversation-guidance.js'
+import { ConversationFeedbackState, parseConversationFeedbackRecord, type ConversationFeedbackRecord, type ConversationFeedbackAssessment } from './conversation-feedback.js'
 
 import {
   canonicalJson,
@@ -377,6 +380,9 @@ export interface RecoveryFailedEvent {
 }
 
 export type LedgerEvent =
+  | ConversationLearningEvent
+  | { readonly type: 'conversation-guidance-recorded', readonly schemaVersion: 'tianwen.conversation-guidance-record.v1', readonly at: string, readonly record: ConversationGuidanceRecord }
+  | { readonly type: 'conversation-feedback-recorded', readonly schemaVersion: 'tianwen.conversation-feedback.v1', readonly at: string, readonly record: ConversationFeedbackRecord }
   | LearningIntakeLedgerEvent
   | LearningFeedbackRetractedEvent
   | LearningAnalysisLedgerEvent
@@ -1532,7 +1538,7 @@ function parseLearningAnalysisConsent(
   if (typeof value.enabled !== 'boolean') {
     throw new LedgerIntegrityError('consent enabled must be a boolean')
   }
-  if (value.policyVersion !== 'tianwen-auto-analysis.v1' && value.policyVersion !== 'tianwen-auto-analysis.v2') {
+  if (value.policyVersion !== 'tianwen-auto-analysis.v1' && value.policyVersion !== 'tianwen-auto-analysis.v2' && value.policyVersion !== 'tianwen-auto-analysis.v3') {
     throw new LedgerIntegrityError('invalid learning analysis consent policy')
   }
   return {
@@ -1577,7 +1583,7 @@ function parseLearningConsentNoticeBinding(
     'noticeSourceMessageId',
     'deliveryId',
   ])
-  if (value.policyVersion !== 'tianwen-auto-analysis.v1' && value.policyVersion !== 'tianwen-auto-analysis.v2') {
+  if (value.policyVersion !== 'tianwen-auto-analysis.v1' && value.policyVersion !== 'tianwen-auto-analysis.v2' && value.policyVersion !== 'tianwen-auto-analysis.v3') {
     throw new LedgerIntegrityError('invalid learning consent notice policy')
   }
   return {
@@ -1862,6 +1868,21 @@ function parseEvent(value: unknown): LedgerEvent {
   }
   const type = requireString(value.type, 'event type')
   const at = requireTimestamp(value.at)
+  if (type === 'conversation-learning-recorded') {
+    exactKeys(value, ['type', 'schemaVersion', 'at', 'record'])
+    if (value.schemaVersion !== 'tianwen.conversation-learning.v1') throw new LedgerIntegrityError('unknown conversation learning schema')
+    return { type, schemaVersion: value.schemaVersion, at, record: parseConversationLearningRecord(value.record) }
+  }
+  if (type === 'conversation-guidance-recorded') {
+    exactKeys(value, ['type', 'schemaVersion', 'at', 'record'])
+    if (value.schemaVersion !== 'tianwen.conversation-guidance-record.v1') throw new LedgerIntegrityError('invalid conversation guidance schema')
+    return { type, schemaVersion: value.schemaVersion, at, record: parseConversationGuidanceRecord(value.record) }
+  }
+  if (type === 'conversation-feedback-recorded') {
+    exactKeys(value, ['type', 'schemaVersion', 'at', 'record'])
+    if (value.schemaVersion !== 'tianwen.conversation-feedback.v1') throw new LedgerIntegrityError('invalid conversation feedback schema')
+    return { type, schemaVersion: value.schemaVersion, at, record: parseConversationFeedbackRecord(value.record) }
+  }
   if (type === 'learning-intake-recorded') {
     return parseLearningEvent(value, at)
   }
@@ -2733,6 +2754,9 @@ export class EvolutionLedger {
   readonly #clock: () => string
   readonly #events: LedgerEvent[] = []
   readonly #runBindings = new Map<TianwenRunId, TianwenRunBinding>()
+  readonly #conversationLearning = new ConversationLearningState()
+  readonly #conversationGuidance = new ConversationGuidanceState()
+  readonly #conversationFeedback = new ConversationFeedbackState()
   readonly #runIdBySession = new Map<string, TianwenRunId>()
   readonly #runBindingRecordedAt = new Map<TianwenRunId, string>()
   readonly #learningIntakes = new Map<
@@ -2916,6 +2940,159 @@ export class EvolutionLedger {
     }
     this.#verifyPointer(mode === 'mutation')
     if (mode === 'mutation') this.#invalidateUnsupportedLearningAnalyses()
+  }
+
+  recordConversationLearning(input: ConversationLearningRecord): { readonly duplicate: boolean } {
+    const record = parseConversationLearningRecord(input)
+    const existing = this.#conversationLearning.existing(record)
+    if (existing !== undefined) {
+      if (sha256(existing) !== sha256(record)) throw new LedgerIntegrityError('conversation learning record changed after freeze')
+      return { duplicate: true }
+    }
+    if (record.kind === 'task-started') {
+      this.#requireConversationConsent(record.consentRevision)
+      const snapshot = this.getConversationGuidance(record.scopeKey)
+      if (record.behaviorVersion !== guidanceVersion(snapshot)) throw new LedgerIntegrityError('task must freeze the current conversation guidance')
+      this.recordArtifact(canonicalJson(snapshot))
+    }
+    this.#accept({ type: 'conversation-learning-recorded', schemaVersion: 'tianwen.conversation-learning.v1', at: this.#now(), record })
+    return { duplicate: false }
+  }
+
+  listConversationTasks(sessionId?: string): readonly ConversationTask[] {
+    return this.#conversationLearning.list(sessionId)
+  }
+
+  listConversationFeedbackAssessments(taskId?: string): readonly ConversationFeedbackAssessment[] { return this.#conversationFeedback.list(taskId) }
+  #requireConversationConsent(revision: number): void {
+    const consent = this.#learningAnalysisConsent
+    if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== revision) throw new LedgerIntegrityError('natural analysis requires current scoped v3 consent')
+  }
+  recordConversationFeedback(input: ConversationFeedbackRecord): { readonly duplicate: boolean } {
+    const record = parseConversationFeedbackRecord(input)
+    const previous = this.#conversationFeedback.existing(record)
+    if (previous !== undefined) {
+      if (sha256(previous) !== sha256(record)) throw new LedgerIntegrityError('feedback assessment changed after freeze')
+      return { duplicate: true }
+    }
+    this.#accept({ type: 'conversation-feedback-recorded', schemaVersion: 'tianwen.conversation-feedback.v1', at: this.#now(), record })
+    return { duplicate: false }
+  }
+  isConversationFeedbackAssessmentActive(assessmentId: string): boolean {
+    const assessment = this.#conversationFeedback.list().find(item => item.started.assessmentId === assessmentId)
+    return assessment !== undefined && this.#conversationFeedbackSourceActive(assessment.started.source)
+  }
+  #conversationFeedbackSourceActive(source: ConversationFeedbackAssessment['started']['source']): boolean {
+    if (source.kind === 'native') {
+      const status = this.getLearningIntakeStatus(source.sessionId, source.messageId)
+      return status?.state === 'active' && status.sessionLifecycleFingerprint === source.sessionLifecycleFingerprint
+        && status.feedbackVersion === source.feedbackVersion && status.feedbackFingerprint === source.feedbackFingerprint
+    }
+    const task = this.#conversationLearning.list().find(item => item.source.taskId === source.sourceTaskId)
+    return task?.admission !== undefined && sha256(task.admission) === source.sourceAdmissionDigest
+  }
+
+  getConversationGuidance(scopeKey: string): GuidanceSnapshot {
+    const snapshot = this.#conversationGuidance.snapshot(scopeKey)
+    const artifactId = `artifact:${guidanceVersion(snapshot).slice(7)}` as ArtifactId
+    if (this.#artifacts.has(artifactId)) {
+      if (this.readSource(artifactId) !== canonicalJson(snapshot)) throw new LedgerIntegrityError('conversation guidance source drift')
+    } else if (Object.keys(snapshot.rules).length > 0) throw new LedgerIntegrityError('active conversation guidance artifact is missing')
+    return snapshot
+  }
+
+  listConversationGuidanceStudies(scopeKey?: string): readonly GuidanceStudy[] {
+    return this.#conversationGuidance.listStudies(scopeKey)
+  }
+
+  conversationGuidanceDecision(studyId: string): GuidanceDecisionRecord {
+    return this.#conversationGuidance.decision(studyId)
+  }
+
+  recordConversationGuidance(input: ConversationGuidanceRecord): { readonly duplicate: boolean } {
+    const record = parseConversationGuidanceRecord(input)
+    const previous = this.#conversationGuidance.existing(record)
+    if (previous !== undefined) {
+      if (sha256(previous) !== sha256(record)) throw new LedgerIntegrityError('conversation guidance changed after freeze')
+      if (record.kind === 'study-decided') this.#ensureConversationGuidanceEvaluation(record)
+      return { duplicate: true }
+    }
+    this.#validateConversationGuidance(record)
+    // Shared content-addressed storage, never the executable plugin Champion.
+    if (record.kind === 'study-opened') this.recordArtifact(canonicalJson(record.parentSnapshot))
+    if (record.kind === 'candidate-recorded') this.recordArtifact(canonicalJson(record.candidateSnapshot))
+    this.#accept({ type: 'conversation-guidance-recorded', schemaVersion: 'tianwen.conversation-guidance-record.v1', at: this.#now(), record })
+    if (record.kind === 'study-decided') this.#ensureConversationGuidanceEvaluation(record)
+    return { duplicate: false }
+  }
+  #ensureConversationGuidanceEvaluation(record: GuidanceDecisionRecord): void {
+    const study = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)!
+    const evaluation: EvaluationRecord = { artifactId: `artifact:${guidanceVersion(study.candidate!.candidateSnapshot).slice(7)}`, receiptDigest: sha256(record), verdict: record.verdict === 'accepted' ? 'met' : record.verdict === 'rejected' ? 'not_met' : 'inconclusive' }
+    if (!this.#events.some(event => event.type === 'evaluation-recorded' && sha256(event.evaluation) === sha256(evaluation))) this.recordEvaluation(evaluation)
+  }
+
+  isConversationGuidanceSupported(studyId: string): boolean {
+    const study = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === studyId)
+    if (study === undefined) return false
+    try { this.#validateConversationGuidanceSupport(study.opened); return true }
+    catch (error) { if (error instanceof LedgerIntegrityError) return false; throw error }
+  }
+
+  #validateConversationGuidanceSupport(study: GuidanceStudyOpened): void {
+    const tasks = this.#conversationLearning.list()
+    for (const taskId of [...study.sourceTaskIds, study.counterexampleTaskId]) {
+      const task = tasks.find(item => item.source.taskId === taskId)
+      if (task?.source.scopeKey !== study.scopeKey || task.source.behaviorVersion !== study.parentVersion
+        || task.source.consentRevision !== study.consentRevision || task.completion?.status !== 'completed'
+        || task.admission?.decision?.family !== study.family || task.admission.decision.evaluationMode !== 'text') throw new LedgerIntegrityError('natural learning requires exact compatible task support and counterevidence')
+      if (task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)) throw new LedgerIntegrityError('natural learning requires the same frozen native model configuration for every source task')
+      const sourceCase = study.cases.find(item => 'sourceTaskId' in item && item.sourceTaskId === taskId)
+      const assessmentId = sourceCase !== undefined && 'feedbackAssessmentId' in sourceCase ? sourceCase.feedbackAssessmentId : undefined
+      const isCounterexample = taskId === study.counterexampleTaskId
+      const contradictingRating = isCounterexample ? 'negative' : 'positive'
+      if (assessmentId === undefined && this.listLearningIntakeStatuses(task.source.sessionId).some(status => status.state === 'active'
+        && status.rating === contradictingRating && status.sessionLifecycleFingerprint === task.source.sessionLifecycleFingerprint
+        && task.completion!.assistantMessageIds.includes(status.messageId))) throw new LedgerIntegrityError('natural learning support or counterevidence has contradictory active feedback')
+      const assessments = this.#conversationFeedback.list(taskId).filter(item => item.result?.proof != null && this.isConversationFeedbackAssessmentActive(item.started.assessmentId))
+      const latest = [...assessments].reverse().find(item => ['attributable-problem', 'preference', 'positive'].includes(item.result!.classification))
+      if (isCounterexample && latest !== undefined && latest.result!.classification !== 'positive') throw new LedgerIntegrityError('natural learning counterevidence has an attributable feedback problem')
+      if (!isCounterexample && latest?.result?.classification === 'positive') throw new LedgerIntegrityError('natural learning support has later positive feedback')
+      if (assessmentId !== undefined) {
+        const assessment = assessments.find(item => item.started.assessmentId === assessmentId)
+        if (assessment?.result?.proof == null || !['attributable-problem', 'preference'].includes(assessment.result.classification)
+          || assessment.result.category !== study.failureCategory || assessment.result.supplementalCriteria.length === 0) throw new LedgerIntegrityError('natural learning feedback support is absent or retracted')
+      } else if (task.review?.proof == null || (isCounterexample ? task.review.verdict !== 'met' : task.review.verdict !== 'not-met' || task.review.category !== study.failureCategory)) throw new LedgerIntegrityError('natural learning requires failed source reviews and a successful counterexample')
+    }
+    if (new Set(study.sourceTaskIds.map(id => tasks.find(task => task.source.taskId === id)!.source.requestDigest)).size !== 2) throw new LedgerIntegrityError('repeated natural learning requires distinct requests')
+  }
+
+  #validateConversationGuidance(record: ConversationGuidanceRecord): void {
+    this.#conversationGuidance.validate(record)
+    const study = record.kind === 'study-opened' ? record
+      : this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)!.opened
+    const consent = this.#learningAnalysisConsent
+    if (record.kind === 'study-opened' || record.kind === 'guidance-activated') {
+      if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== study.consentRevision) throw new LedgerIntegrityError('natural learning requires current v3 consent')
+      this.#validateConversationGuidanceSupport(study)
+    }
+    if (record.kind === 'guidance-activated') {
+      const full = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)!
+      const artifactId = `artifact:${guidanceVersion(full.candidate!.candidateSnapshot).slice(7)}` as ArtifactId
+      if (!this.#events.some(event => event.type === 'evaluation-recorded' && event.evaluation.artifactId === artifactId && event.evaluation.receiptDigest === record.decisionDigest && event.evaluation.verdict === 'met')) throw new LedgerIntegrityError('natural guidance activation requires its exact shared evaluation receipt')
+    }
+    if (record.kind === 'guidance-rolled-back') {
+      if (record.reason === 'consent-disabled' && consent?.enabled === true && consent.policyVersion === 'tianwen-auto-analysis.v3') throw new LedgerIntegrityError('enabled natural learning cannot claim disabled consent')
+      if (record.reason === 'regression') {
+        const full = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)!
+        const failures = record.evidenceTaskIds.map(id => this.#conversationLearning.list().find(task => task.source.taskId === id))
+        if (failures.length < 2 || failures.some(task => task === undefined || task.source.scopeKey !== study.scopeKey
+          || task.source.behaviorVersion !== record.expectedCurrentVersion || task.admission?.decision?.family !== study.family
+          || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)
+          || task.review?.verdict !== 'not-met' || task.recordedAt <= full.activatedAt!)
+          || new Set(failures.map(task => task!.source.requestDigest)).size !== failures.length) throw new LedgerIntegrityError('guidance regression requires distinct later failed tasks using the active version')
+      }
+      if (record.reason === 'support-retracted' && this.isConversationGuidanceSupported(study.studyId)) throw new LedgerIntegrityError('support rollback requires actually invalidated source or counterevidence')
+    }
   }
 
   recordRunBinding(input: RunBindingInput): RunBindingReceipt {
@@ -4633,7 +4810,7 @@ export class EvolutionLedger {
     const ticket = this.#learningTickets.get(input.ticketId)
     if (ticket === undefined) throw new LedgerIntegrityError('outcome analysis requires its Ticket')
     const consent = this.#learningAnalysisConsents.get(input.consentRevision)
-    if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v2') {
+    if (consent?.enabled !== true || (consent.policyVersion !== 'tianwen-auto-analysis.v2' && consent.policyVersion !== 'tianwen-auto-analysis.v3')) {
       throw new LedgerIntegrityError('outcome analysis requires cross-task consent')
     }
     const binding = prepareOutcomeLearningAnalysisRequest({ ...input, signalIds: this.#outcomeAnalysisSignalIds(ticket, consent.recordedAt) })
@@ -6063,8 +6240,8 @@ export class EvolutionLedger {
   #learningAnalysisHasActiveSupport(status: LearningAnalysisStatus): boolean {
     if (status.source === 'outcome') {
       const consent = this.#learningAnalysisConsents.get(status.consentRevision)
-      return consent?.enabled === true && consent.policyVersion === 'tianwen-auto-analysis.v2'
-        && this.#learningAnalysisConsent?.enabled === true && this.#learningAnalysisConsent.policyVersion === 'tianwen-auto-analysis.v2'
+      return consent?.enabled === true && (consent.policyVersion === 'tianwen-auto-analysis.v2' || consent.policyVersion === 'tianwen-auto-analysis.v3')
+        && this.#learningAnalysisConsent?.enabled === true && (this.#learningAnalysisConsent.policyVersion === 'tianwen-auto-analysis.v2' || this.#learningAnalysisConsent.policyVersion === 'tianwen-auto-analysis.v3')
         && this.#learningTickets.get(status.ticketId)?.status === 'open'
     }
     const ticket = this.#learningTickets.get(status.ticketId)
@@ -6912,7 +7089,10 @@ export class EvolutionLedger {
     }
     if (commitError !== undefined) {
       if (
-        parsed.type === 'initial-run-skill-binding-recorded'
+        parsed.type === 'conversation-learning-recorded'
+        || parsed.type === 'conversation-guidance-recorded'
+        || parsed.type === 'conversation-feedback-recorded'
+        || parsed.type === 'initial-run-skill-binding-recorded'
         || parsed.type === 'learning-intake-recorded'
         || parsed.type === 'learning-feedback-retracted'
         || parsed.type === 'learning-analysis-requested'
@@ -6992,6 +7172,31 @@ export class EvolutionLedger {
   }
 
   #validateAgainstState(event: LedgerEvent): void {
+    if (event.type === 'conversation-learning-recorded') {
+      this.#conversationLearning.validate(event.record)
+      if (event.record.kind === 'task-started') {
+        this.#requireConversationConsent(event.record.consentRevision)
+        if (event.record.behaviorVersion !== guidanceVersion(this.#conversationGuidance.snapshot(event.record.scopeKey))) throw new LedgerIntegrityError('replayed task guidance does not match its start-time version')
+      } else if ((event.record.kind === 'task-admitted' || event.record.kind === 'task-reviewed') && event.record.proof !== null) {
+        const taskId = event.record.taskId
+        this.#requireConversationConsent(this.#conversationLearning.list().find(task => task.source.taskId === taskId)!.source.consentRevision)
+      }
+      return
+    }
+    if (event.type === 'conversation-guidance-recorded') {
+      this.#validateConversationGuidance(event.record)
+      return
+    }
+    if (event.type === 'conversation-feedback-recorded') {
+      this.#conversationFeedback.validate(event.record, this.#conversationLearning.list())
+      if (event.record.kind === 'feedback-assessment-started' || event.record.proof !== null) {
+        const assessmentId = event.record.assessmentId
+        const started = event.record.kind === 'feedback-assessment-started' ? event.record : this.#conversationFeedback.list().find(item => item.started.assessmentId === assessmentId)!.started
+        this.#requireConversationConsent(started.consentRevision)
+        if (!this.#conversationFeedbackSourceActive(started.source)) throw new LedgerIntegrityError('feedback assessment requires current consent and exact active source')
+      }
+      return
+    }
     if (event.type === 'initial-run-skill-binding-recorded') {
       if (
         event.binding.runId !== event.manifest.runId
@@ -8094,7 +8299,7 @@ export class EvolutionLedger {
         const consent = this.#learningAnalysisConsents.get(binding.consentRevision)
         const ticket = this.#learningTickets.get(binding.ticketId)
         if (this.#learningAnalyses.has(binding.analysisId) || this.#learningAnalysisIdByChildSession.has(binding.childSessionId)
-          || consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v2'
+          || consent?.enabled !== true || (consent.policyVersion !== 'tianwen-auto-analysis.v2' && consent.policyVersion !== 'tianwen-auto-analysis.v3')
           || this.#learningAnalysisConsent?.revision !== binding.consentRevision
           || ticket === undefined
           || canonicalJson(this.#outcomeAnalysisSignalIds(ticket, consent.recordedAt)) !== canonicalJson(binding.signalIds)) {
@@ -8526,6 +8731,18 @@ export class EvolutionLedger {
 
   #apply(event: LedgerEvent): void {
     this.#events.push(event)
+    if (event.type === 'conversation-learning-recorded') {
+      this.#conversationLearning.apply(event.record, event.at)
+      return
+    }
+    if (event.type === 'conversation-guidance-recorded') {
+      this.#conversationGuidance.apply(event.record, event.at)
+      return
+    }
+    if (event.type === 'conversation-feedback-recorded') {
+      this.#conversationFeedback.apply(event.record, event.at)
+      return
+    }
     if (event.type === 'run-binding-recorded') {
       this.#runBindings.set(event.binding.runId, event.binding)
       this.#runIdBySession.set(event.binding.sessionId, event.binding.runId)

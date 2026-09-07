@@ -1,4 +1,10 @@
 import type { PublicLedgerEvent } from './ledger.js'
+export { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, conversationTaskId, parseConversationAdmission, parseConversationLearningRecord } from './conversation-learning.js'
+export type { ConversationAdmissionDecision, ConversationFailure, ConversationFamily, ConversationJudgmentProof, ConversationLearningRecord, ConversationTask, ConversationTaskAdmission, ConversationTaskCompletion, ConversationTaskModelObserved, ConversationTaskReview, ConversationTaskSource, ConversationUnavailable } from './conversation-learning.js'
+export { baselineGuidanceSnapshot, guidanceInputDigest, guidanceVersion, guidanceStudyId, parseGuidanceSnapshot, parseConversationGuidanceRecord } from './conversation-guidance.js'
+export type { GuidanceSnapshot, GuidanceStudyId, GuidanceStudyBody, GuidanceStudy, GuidanceCase, GuidanceSourceCase, GuidanceGeneratedCase, GuidanceStudyOpened, GuidanceCandidateRecord, GuidanceArmRecord, GuidanceDecisionRecord, GuidanceActivationRecord, GuidanceRollbackRecord, ConversationGuidanceRecord } from './conversation-guidance.js'
+export { parseConversationFeedbackRecord, conversationFeedbackAssessmentId } from './conversation-feedback.js'
+export type { ConversationFeedbackRecord, ConversationFeedbackAssessment, ConversationFeedbackSource, ConversationFeedbackStarted, ConversationFeedbackResult } from './conversation-feedback.js'
 
 export type LedgerEvent = PublicLedgerEvent
 type AssertNever<T extends never> = T

@@ -26,7 +26,7 @@ export async function admitOutcomeLearningAnalysis(ctx: Context, parent: Agent, 
   if (semantic && !hasCompletedSemanticReview(outcome)) return undefined
 
   const consent = evolution.getLearningAnalysisConsent()
-  if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v2') {
+  if (consent?.enabled !== true || (consent.policyVersion !== 'tianwen-auto-analysis.v2' && consent.policyVersion !== 'tianwen-auto-analysis.v3')) {
     // Reuse the existing one-time main-conversation disclosure, not per-Ticket approval.
     if (outcome.input.verdict === 'not-met') await ctx.tianwenLearningConsentAgent.observeFeedbackWithoutConsent(run.sessionId)
     return undefined

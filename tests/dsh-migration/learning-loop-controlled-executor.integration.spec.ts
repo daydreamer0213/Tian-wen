@@ -477,6 +477,8 @@ async function mountFeedbackBridge(
     ) => source.ctx.tianwenLearningIntake.recordSkillUse(...args),
   } as never)
   ctx.provide('tianwenEvolution', {
+    listConversationTasks: (...args: Parameters<typeof evolution.listConversationTasks>) =>
+      evolution.listConversationTasks(...args),
     listLearningIntakeStatuses: (...args: Parameters<typeof evolution.listLearningIntakeStatuses>) =>
       evolution.listLearningIntakeStatuses(...args),
     getLearningIntakeStatus: (...args: Parameters<typeof evolution.getLearningIntakeStatus>) =>

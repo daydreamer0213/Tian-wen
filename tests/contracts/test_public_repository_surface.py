@@ -828,6 +828,29 @@ def test_goal_status_spec_runs_in_typescript_focused_contract() -> None:
     assert "tests/dsh-migration/goal-status.spec.ts" in typescript_match.group("job")
 
 
+def test_natural_conversation_learning_ci_contract() -> None:
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    typescript_match = re.search(
+        r"(?ms)^  typescript:\n(?P<job>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+        ci,
+    )
+    assert typescript_match, "missing typescript job"
+    command = "pnpm exec vitest run " + " ".join(
+        f"tests/dsh-migration/conversation-{suite}.spec.ts"
+        for suite in (
+            "learning", "observer", "task-material", "judgment", "feedback",
+            "guidance", "guidance-loop", "guidance-ledger",
+        )
+    )
+    expected_step = (
+        "      - name: Check natural conversation learning and governed guidance\n"
+        f"        run: {command}\n"
+        "        env:\n"
+        "          TIANWEN_DSH_PROBE_ROOT: ${{ runner.temp }}/tianwen-conversation-fixtures\n"
+    )
+    assert expected_step in typescript_match.group("job")
+
+
 def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     job_match = re.search(

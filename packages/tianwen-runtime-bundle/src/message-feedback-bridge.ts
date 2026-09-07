@@ -244,9 +244,14 @@ export class TianwenMessageFeedbackBridgeService extends Service {
       lifecycleAfter,
     )
     const consentAgent = this.ctx.get('tianwenLearningConsentAgent')
+    const naturalTasks = this.ctx.tianwenEvolution.listConversationTasks(sessionId)
     let skillUseReconciled = false
     for (const [messageId, item] of byMessage) {
-      if (item.rating === 'negative' && !skillUseReconciled) {
+      const targets = naturalTasks.filter(task => task.source.sessionLifecycleFingerprint === sessionLifecycleFingerprint
+        && task.completion?.assistantMessageIds.includes(messageId))
+      if (targets.length > 1) throw new Error('native feedback matches multiple natural tasks')
+      const naturalTask = targets[0]
+      if (naturalTask === undefined && item.rating === 'negative' && !skillUseReconciled) {
         const binding = this.ctx.tianwenEvolution
           .getRunBindingBySessionId(sessionId)
         // Main-chat progress appends do not create a new use of the frozen Skill.
@@ -283,7 +288,7 @@ export class TianwenMessageFeedbackBridgeService extends Service {
       const analysisConsentRevision = historicalConsent?.enabled === true
         ? historicalConsent.revision
         : undefined
-      this.ctx.tianwenLearningIntake.consume(session, scopeKey, {
+      this.ctx.tianwenLearningIntake.consume(session, naturalTask?.source.scopeKey ?? scopeKey, {
         messageId,
         rating: item.rating,
         ...(item.note === undefined ? {} : { note: item.note }),
@@ -341,6 +346,7 @@ export class TianwenMessageFeedbackBridgeService extends Service {
         }
       }
     }
+    this.ctx.emit('tianwen/conversation-feedback-reconciled', sessionId)
     return {
       schemaVersion: 'tianwen.message-feedback-reconciliation.v1',
       sessionId,

@@ -148,7 +148,8 @@ function productResponder(
     const latest = latestMessage(request)
     observed.push({ sessionId: String(request.sessionId), tools, text })
 
-    if (text.includes('Native feedback normally does not enter the model.')) {
+    if (text.includes('Native feedback normally does not enter the model.')
+      || text.includes('Enabling Tianwen includes automatic analysis of new ordinary conversation turns by the configured model, without a slash command or a separate request to reflect.')) {
       return textResponse('Automatic learning is optional; enable it in this main conversation after reviewing the disclosed sources.')
     }
     if (latest.includes('INSPECT_FROZEN_ONLY')) {
@@ -523,7 +524,7 @@ describe('installed explicit-correction product story', () => {
       handles.push(consentMain)
       expect(await product.ctx.tools.execute({ callId: CallId('outcome-consent'), name: 'tianwen_learning_consent',
         arguments: { action: 'enable' }, agent: consentMain.agent, signal: AbortSignal.timeout(10_000) }))
-        .toMatchObject({ isError: false, value: { policyVersion: 'tianwen-auto-analysis.v2', enabled: true } })
+        .toMatchObject({ isError: false, value: { policyVersion: 'tianwen-auto-analysis.v3', enabled: true } })
       const packets = [
         '<research_packet>\n[F:verified|required] The measured result is verified.\n</research_packet>',
         originalPacket, adjacentPacket,
@@ -596,7 +597,7 @@ describe('installed explicit-correction product story', () => {
       await task('before-consent-1', originalPacket)
       const consentMain = await task('before-consent-2', adjacentPacket)
       expect(product.ctx.tianwenEvolution.listLearningAnalyses()).toEqual([])
-      expect(product.ctx.tianwenEvolution.getLearningConsentNoticeStatus('tianwen-auto-analysis.v2')?.state).toBe('delivered')
+      expect(product.ctx.tianwenEvolution.getLearningConsentNoticeStatus('tianwen-auto-analysis.v3')?.state).toBe('delivered')
       expect(await product.ctx.tools.execute({ callId: CallId('outcome-enable-later'), name: 'tianwen_learning_consent',
         arguments: { action: 'enable' }, agent: consentMain.agent, signal: AbortSignal.timeout(10_000) }))
         .toMatchObject({ isError: false })
@@ -776,6 +777,11 @@ describe('installed explicit-correction product story', () => {
       await ask(sourceMain.agent, `/research-summary\n${originalPacket}`)
       await product.ctx.tianwenResearchSummaryAdmission.whenIdle()
       const sourceAnswerId = lastTextAssistantMessageId(sourceMain.agent)
+      const sourceTurns = sourceMain.agent.session.events.flatMap(event =>
+        event.type === 'assistant/message' && event.surfaceOp === 'append'
+          && String(event.data.message.id) === sourceAnswerId
+          ? [event.data.turn] : [])
+      expect(sourceTurns).toHaveLength(1)
       const sourceBinding = product.ctx.tianwenEvolution
         .getRunBindingBySessionId(String(sourceMain.agent.session.id))
       expect(sourceBinding).toBeDefined()
@@ -804,10 +810,24 @@ describe('installed explicit-correction product story', () => {
       await vi.waitFor(() => expect(
         product.ctx.tianwenEvolution.listLearningAnalyses(),
       ).toHaveLength(1))
+      // An exactly admitted research-summary Turn retains its governed scope;
+      // the ordinary-conversation observer must not claim the same source Turn.
+      expect(product.ctx.tianwenEvolution.getLearningIntakeStatus(
+        String(sourceMain.agent.session.id), sourceAnswerId,
+      )).toMatchObject({ state: 'active', scopeKey: sourceBinding!.scopeKey })
+      const sourceSignals = product.ctx.tianwenEvolution.listLearningSignals().filter(signal =>
+        !('runId' in signal) && signal.active
+          && signal.sessionId === String(sourceMain!.agent.session.id)
+          && signal.messageId === sourceAnswerId
+          && signal.feedbackVersion === feedback.value.version)
+      expect(sourceSignals).toHaveLength(1)
+      expect(sourceSignals[0]?.scopeKey).toBe(sourceBinding!.scopeKey)
+      expect(product.ctx.tianwenEvolution
+        .listConversationTasks(String(sourceMain.agent.session.id))
+        .filter(task => task.source.turn === sourceTurns[0])).toEqual([])
       await vi.waitFor(() => {
         const [analysis] = product.ctx.tianwenEvolution.listLearningAnalyses()
         expect(analysis?.phase, JSON.stringify({
-          analysis,
           observed: product.observed.map(item => ({
             sessionId: item.sessionId,
             tools: item.tools,
