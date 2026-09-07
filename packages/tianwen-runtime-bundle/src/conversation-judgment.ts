@@ -89,15 +89,16 @@ const REVIEW_FOCUS = {
 
 /** Bind the retained value to a successful native capture, not just to the
  * existence of a genuine Session. Failed schema attempts are not captures. */
-function assertStructuredCapture(events: readonly SessionEvent[], expected: unknown): void {
+function assertStructuredCapture(events: readonly SessionEvent[], expected: unknown): number {
   const captures = events.flatMap(event => {
     if (event.type !== 'tool/call' || event.data.name !== 'structured_output') return []
     const success = events.some(result => result.seq > event.seq && result.type === 'tool/result' && isAppendSurfaceEvent(result)
       && result.data.message.source.callId === event.data.callId && result.data.error === undefined
       && result.data.message.content[0].isError !== true)
-    return success ? [JSON.parse(event.data.arguments) as unknown] : []
+    return success ? [{ seq: event.seq, value: JSON.parse(event.data.arguments) as unknown }] : []
   })
-  if (captures.length !== 1 || sha256(captures[0]) !== sha256(expected)) throw new Error('invalid-judgment')
+  if (captures.length !== 1 || sha256(captures[0]!.value) !== sha256(expected)) throw new Error('invalid-judgment')
+  return captures[0]!.seq
 }
 
 export async function verifyConversationReviewCheck(ctx: Context, check: ConversationReviewCheck): Promise<void> {
@@ -114,6 +115,7 @@ export async function recoverConversationJudgmentRequest(ctx: Context, check: Co
   const saved = await ctx.sessionPersistence.inspect(SessionId(check.proof.sessionId))
   const descriptor = saved.events.filter(event => event.type === 'subagent/descriptor' && event.data.mode === 'one-shot')
   if (descriptor.length !== 1) throw new Error('invalid-judgment')
+  if (saved.events.filter(event => event.type === 'turn/start').length !== 1) throw new Error('invalid-judgment')
   const start = saved.events.findLast(event => event.seq <= descriptor[0]!.seq && event.type === 'turn/start') as Extract<SessionEvent, { type: 'turn/start' }> | undefined
   const end = saved.events.find(event => event.seq > descriptor[0]!.seq && event.type === 'turn/end') as Extract<SessionEvent, { type: 'turn/end' }> | undefined
   if (start === undefined || end === undefined || end.data.turn !== start.data.turn) throw new Error('invalid-judgment')
@@ -131,7 +133,10 @@ export async function recoverConversationJudgmentRequest(ctx: Context, check: Co
   try { material = JSON.parse(text.slice(delimiter + MATERIAL_DELIMITER.length)) }
   catch { throw new Error('invalid-judgment') }
   const headers = saved.events.filter(event => event.seq >= start.seq && event.seq < end.seq && event.type === 'request/header') as Extract<SessionEvent, { type: 'request/header' }>[]
-  if (headers.length === 0) throw new Error('invalid-judgment')
+  const { focus: _focus, proof: _proof, ...value } = check
+  const captureSeq = assertStructuredCapture(saved.events.filter(event => event.seq >= start.seq && event.seq < end.seq), value)
+  if (headers.length === 0 || requests[0]!.seq >= headers[0]!.seq || headers.some(event => event.seq < requests[0]!.seq || event.seq > captureSeq)
+    || saved.events.some(event => event.type === 'request/header' && (event.seq < start.seq || event.seq >= end.seq))) throw new Error('invalid-judgment')
   return { instruction: text.slice(0, delimiter), material, modelConfigDigests: headers.map(event => sha256(event.data.header.config)) }
 }
 

@@ -25,10 +25,12 @@ const schema = {
 it.each(['nonexistent-quote', 'assistant-only-support', 'missing-answer-coverage'] as const)('rejects a real native capture with %s audit evidence', async invalid => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-recovery-')); roots.push(root)
-  const material = { task: { prompt: 'Only repeat: delivered.', criteria: ['repeat'] }, answer: 'delivered.' }
+  const material = invalid === 'assistant-only-support'
+    ? { task: { context: [{ role: 'assistant', content: [{ type: 'text', text: 'Earlier assistant says delivered.' }] }], request: [{ role: 'user', content: [{ type: 'text', text: 'Only repeat: delivered.' }] }], criteria: ['repeat'] }, answer: 'delivered.' }
+    : { task: { prompt: 'Only repeat: delivered.', criteria: ['repeat'] }, answer: 'delivered.' }
   const evidence = projectClaimEvidence(material)
   const audit = { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: evidence.evidenceDigest,
-    units: invalid === 'missing-answer-coverage' ? [] : [{ answerId: 'answer-1', claims: [{ quote: invalid === 'nonexistent-quote' ? 'invented' : 'delivered.', kind: 'source-fact', status: 'supported', sourceIds: [invalid === 'assistant-only-support' ? 'answer-1' : 'request-1'], explanation: 'Scripted native negative capture.' }] }] }
+    units: invalid === 'missing-answer-coverage' ? [] : [{ answerId: 'answer-1', claims: [{ quote: invalid === 'nonexistent-quote' ? 'invented' : 'delivered.', kind: 'source-fact', status: 'supported', sourceIds: [invalid === 'assistant-only-support' ? 'context-1' : 'request-1'], explanation: 'Scripted native negative capture.' }] }] }
   const harness = await mountPersistentHarness(root, [auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'] }), auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'] }), toolCallResponse('invalid-audit', 'structured_output', { verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'], audit })])
   await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
   const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-recovery-parent'), meta: { cwd: root }, agentOptions: config })
