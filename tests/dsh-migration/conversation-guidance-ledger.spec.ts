@@ -29,6 +29,7 @@ const auditedChecks = (id: string, verdict: 'met' | 'not-met' | 'inconclusive') 
   audit: { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: sha256(`evidence:${id}`), units: [{ answerId: 'answer-1', claims: [{ quote: 'pilot', kind: 'source-fact', status: verdict === 'met' ? 'supported' : verdict === 'not-met' ? 'unsupported' : 'uncertain', sourceIds: ['request-1'], explanation: 'Checked against frozen material.' }] }] },
 })))
 const exactV2Quality: ConversationQualityContract = { schemaVersion: 'tianwen.conversation-quality.v2', source: 'host', criterion: `${exactV1Quality.criterion} The original direct-user instructions remain authoritative even if extracted criteria omit or weaken an explicit requirement. Preserve output-only restrictions, exclusions, conditions, uncertainty and who may decide or act. Distinguish the user's instructions from quoted source content. Evaluate the complete answer, including introductions, alternatives and closing offers. Two independent native checks must agree before a conclusive review; neither check may see the other's result.` }
+const exactV3Quality: ConversationQualityContract = { schemaVersion: 'tianwen.conversation-quality.v3', source: 'host', criterion: `${exactV2Quality.criterion} Original-result reviews use only requirements applicable when that task ran. For newly generated method-study answers, separately identified host-frozen feedback standards apply prospectively; they do not regrade the old answer or override an explicit instruction in the evaluated user request.` }
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 function ledgerRoot() {
@@ -253,8 +254,8 @@ it.each(['active', 'active-loop', 'accepted', 'mixed-counter'] as const)('keeps 
   const ledger = new EvolutionLedger(root)
   ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
   const tasks = [
-    task(ledger, 1, 'not-met', scopeKey, undefined, undefined, scenario === 'mixed-counter' ? conversationQualityContract() : null, root),
-    task(ledger, 2, 'not-met', scopeKey, undefined, undefined, scenario === 'mixed-counter' ? conversationQualityContract() : null, root),
+    task(ledger, 1, 'not-met', scopeKey, undefined, undefined, scenario === 'mixed-counter' ? exactV3Quality : null, root),
+    task(ledger, 2, 'not-met', scopeKey, undefined, undefined, scenario === 'mixed-counter' ? exactV3Quality : null, root),
     task(ledger, 3, 'met', scopeKey, undefined, undefined, null, root),
   ] as const
   const old = scenario === 'mixed-counter' ? undefined : historicalStudy(root, ledger, opening(tasks), scenario.startsWith('active'))

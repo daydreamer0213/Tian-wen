@@ -20,7 +20,7 @@ import {
   guidanceVersion,
   conversationQualityContract,
   conversationReviewConsensus,
-  parseConversationReviewChecks,
+  parseConversationAuditedReviewChecks,
   sha256,
   type ConversationAdmissionDecision,
   type ConversationFeedbackAssessment,
@@ -447,10 +447,14 @@ describe('Tianwen main-chat learning consent tool', () => {
           status: options.completion ?? 'completed', assistantMessageIds: [`PRIVATE answer ${turn}`],
           resultDigest: sha256(`answer ${turn}`), evidenceIds: [],
         })
-        const reviewChecks = options.review === undefined || options.review === 'unavailable' ? undefined : parseConversationReviewChecks(['requirements', 'grounding'].map(focus => ({
+        const reviewChecks = options.review === undefined || options.review === 'unavailable' ? undefined : parseConversationAuditedReviewChecks(['requirements', 'grounding'].map(focus => ({
           focus, verdict: options.review, category: options.review === 'not-met' ? 'instruction-following' : null,
           explanation: 'PRIVATE review explanation', evidenceQuotes: ['PRIVATE answer quote'],
           proof: { sessionId: `${taskId}:${focus}`, sessionDigest: sha256(`${taskId}:${focus}`), requestDigest: sha256(`review:${taskId}:${focus}`) },
+          audit: { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: sha256(`evidence:${taskId}`), units: [{ answerId: 'answer-1', claims: [{
+            quote: 'PRIVATE answer quote', kind: 'source-fact', status: options.review === 'met' ? 'supported' : options.review === 'not-met' ? 'unsupported' : 'uncertain',
+            sourceIds: ['request-1'], explanation: 'PRIVATE claim explanation',
+          }] }] },
         })))
         if (options.review !== undefined) evolution.recordConversationLearning({
           kind: 'task-reviewed', taskId, admissionDigest: sha256(admitted), resultDigest: sha256(`answer ${turn}`),
