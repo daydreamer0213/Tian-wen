@@ -35,7 +35,7 @@ export function parseClaimAudit(value: unknown, verdict: 'met' | 'not-met' | 'in
   const answerIds = new Set<string>()
   let claimCount = 0
   for (const unit of value.units) {
-    if (!record(unit) || !exact(unit, ['answerId', 'claims']) || !Array.isArray(unit.claims) || unit.claims.length === 0) throw new TypeError('claim audit unit is invalid')
+    if (!record(unit) || !exact(unit, ['answerId', 'claims']) || !Array.isArray(unit.claims)) throw new TypeError('claim audit unit is invalid')
     const answerId = text(unit.answerId)
     if (answerIds.has(answerId)) throw new TypeError('claim audit answer identities must be unique')
     answerIds.add(answerId)
@@ -44,7 +44,9 @@ export function parseClaimAudit(value: unknown, verdict: 'met' | 'not-met' | 'in
     for (const claim of unit.claims) {
       if (!record(claim) || !exact(claim, ['quote', 'kind', 'status', 'sourceIds', 'explanation'])
         || !kinds.includes(claim.kind as never) || !statuses.includes(claim.status as never) || !Array.isArray(claim.sourceIds)) throw new TypeError('claim audit claim is invalid')
-      text(claim.quote); text(claim.explanation)
+      if (typeof claim.quote !== 'string' || claim.quote.length === 0) throw new TypeError('claim audit text is invalid')
+      if (claim.quote.trim() === '' && (claim.kind !== 'non-factual' || claim.status !== 'permitted' || claim.sourceIds.length !== 0)) throw new TypeError('claim audit formatting claim is invalid')
+      text(claim.explanation)
       const sourceIds = claim.sourceIds.map(text)
       if (new Set(sourceIds).size !== sourceIds.length) throw new TypeError('claim audit source identities must be unique')
       if (claim.kind === 'source-fact' ? claim.status === 'permitted' : claim.status === 'supported') throw new TypeError('claim audit kind and status disagree')

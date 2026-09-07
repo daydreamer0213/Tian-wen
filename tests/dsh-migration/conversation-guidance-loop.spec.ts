@@ -34,7 +34,7 @@ const reviewPair = (value: ReturnType<typeof verdict>) => [evidenceResponse(valu
 const admission = { kind: 'task', objective: 'Summarize supplied facts', criteria: ['Preserve source scope'], family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
 const verdict = (met: boolean, quote: string) => ({ verdict: met ? 'met' : 'not-met', category: met ? null : 'source-fidelity', explanation: met ? 'Source scope preserved.' : 'Scope expanded beyond source.', evidenceQuotes: [quote] })
 
-it.each(['accepted', 'recover', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-partial-coverage', 'mixed-models', 'copied-holdout', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
+it.each(['accepted', 'recover', 'recover-formatting', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-partial-coverage', 'mixed-models', 'copied-holdout', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'loop-'))
   const guidance = '保留局部样本的适用范围，不将局部结论扩大到总体。'
@@ -61,7 +61,7 @@ it.each(['accepted', 'recover', 'recover-missing-check', 'recover-changed-check'
     for (const role of ['baseline', 'candidate']) {
       script.push(request => {
         if (scenario === 'disabled') harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
-        return structured({ answer: `${role === 'candidate' ? '保留来源范围' : '任务回答'} ${index}${invalidAudit && index === 1 && role === 'candidate' ? '\n第二段仍保留范围。' : ''}` })
+        return structured({ answer: `${role === 'candidate' ? '保留来源范围' : '任务回答'} ${index}${scenario === 'recover-formatting' ? '\r\n\r\n第二段仍保留范围。\n \t\u00a0\n' : invalidAudit && index === 1 && role === 'candidate' ? '\n第二段仍保留范围。' : ''}` })
       })
       const judgment = { ...verdict(!(role === 'baseline' && index < 2) && !(scenario === 'regression' && role === 'candidate' && index === 4), scenario === 'derived-quote' ? 'Preserve source scope' : `${index}`) }
       if (scenario === 'derived-quote') {
@@ -187,7 +187,7 @@ it.each(['accepted', 'recover', 'recover-missing-check', 'recover-changed-check'
       }
       const secondProof = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!.arms[0]!.reviewChecks![1].proof
       const inspect = harness.ctx.sessionPersistence.inspect.bind(harness.ctx.sessionPersistence)
-      const proofFault = scenario === 'recover' ? undefined : vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockImplementation(async id => {
+      const proofFault = scenario === 'recover' || scenario === 'recover-formatting' ? undefined : vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockImplementation(async id => {
         if (String(id) !== secondProof.sessionId) return inspect(id)
         if (scenario === 'recover-missing-check') throw new Error('second check missing')
         const saved = await inspect(id)
@@ -235,7 +235,7 @@ it.each(['accepted', 'recover', 'recover-missing-check', 'recover-changed-check'
     expect(tasks.at(-1)?.source.behaviorVersion).not.toBe(tasks[0]?.source.behaviorVersion)
     expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toHaveLength(1)
     expect(harness.adapter.requests).toHaveLength(48)
-    if (scenario === 'recover') {
+    if (scenario === 'recover' || scenario === 'recover-formatting') {
       const candidate = study!.candidate!.candidateSnapshot
       const activationCount = () => readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8').trim().split('\n')
         .map(line => JSON.parse(line))
@@ -260,6 +260,11 @@ it.each(['accepted', 'recover', 'recover-missing-check', 'recover-changed-check'
         expect(activationCount()).toBe(1)
         expect(harness.adapter.requests).toHaveLength(requests)
         expect(restarted.adapter.requests).toHaveLength(0)
+        if (scenario === 'recover-formatting') {
+          const first = recovered.arms[0]!.reviewChecks![0]!
+          expect(first.audit.units.some(unit => unit.claims.length === 0)).toBe(true)
+          expect((await recoverConversationJudgmentRequest(restarted.ctx, first)).material).toEqual(expect.objectContaining({ original: expect.objectContaining({ answer: expect.stringContaining('\r\n\r\n') }) }))
+        }
         await parent.dispose()
       } finally { await restarted.ctx.fiber.dispose() }
       return

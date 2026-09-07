@@ -109,11 +109,12 @@ export function validateClaimAudit(audit: unknown, evidence: ClaimEvidence, verd
   for (const unit of units) {
     if (!record(unit)) invalid()
     const checkedUnit = unit as RecordValue
-    if (!exactKeys(checkedUnit, ['answerId', 'claims']) || typeof checkedUnit.answerId !== 'string' || !Array.isArray(checkedUnit.claims) || checkedUnit.claims.length === 0 || seen.has(checkedUnit.answerId)) invalid()
+    if (!exactKeys(checkedUnit, ['answerId', 'claims']) || typeof checkedUnit.answerId !== 'string' || !Array.isArray(checkedUnit.claims) || seen.has(checkedUnit.answerId)) invalid()
     const answerId = checkedUnit.answerId as string
     const claims = checkedUnit.claims as unknown[]
     const answer = answers.find(item => item.id === answerId)
-    if (answer === undefined) invalid()
+    if (answer === undefined) return invalid()
+    if (claims.length === 0 && answer.text.trim() !== '') invalid()
     seen.add(answerId)
     claimCount += claims.length
     if (claimCount > 512) invalid()
@@ -126,6 +127,7 @@ export function validateClaimAudit(audit: unknown, evidence: ClaimEvidence, verd
         || !Array.isArray(checkedClaim.sourceIds) || checkedClaim.sourceIds.some((id: unknown) => typeof id !== 'string' || !sources.has(id))
         || new Set(checkedClaim.sourceIds).size !== checkedClaim.sourceIds.length || typeof checkedClaim.explanation !== 'string' || checkedClaim.explanation.trim().length === 0) invalid()
       const sourceIds = checkedClaim.sourceIds as string[]
+      if ((checkedClaim.quote as string).trim() === '' && (answer.text.trim() !== '' || checkedClaim.kind !== 'non-factual' || checkedClaim.status !== 'permitted' || sourceIds.length !== 0)) invalid()
       if (checkedClaim.kind === 'source-fact') {
         if (checkedClaim.status === 'permitted') invalid()
         if (checkedClaim.status === 'supported' && !sourceIds.some(id => ['user', 'tool'].includes(sources.get(id)!.role))) invalid()

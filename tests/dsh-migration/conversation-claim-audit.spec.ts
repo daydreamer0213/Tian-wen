@@ -65,4 +65,15 @@ describe('conversation claim audit domain boundary', () => {
     expect(() => parseClaimAudit({ ...audit(), units: [{ answerId: 'answer-1', claims: Array.from({ length: 513 }, () => claim) }] }, 'not-met')).toThrow()
     expect(() => parseClaimAudit({ ...audit(), units: [{ answerId: 'answer-1', claims: [{ ...claim, explanation: 'x'.repeat(33_000) }] }] }, 'not-met')).toThrow()
   })
+
+  it('represents formatting-only units without deciding whether their bound answer is whitespace', () => {
+    expect(parseClaimAudit({ ...audit(), units: [{ answerId: 'answer-1', claims: [] }] }, 'met').units[0]?.claims).toEqual([])
+    for (const quote of ['\n', '\r\n', ' \t\u00a0', '\u3000', ' '.repeat(384)]) {
+      const formatting = { quote, kind: 'non-factual' as const, status: 'permitted' as const, sourceIds: [], explanation: 'Formatting-only answer unit.' }
+      expect(parseClaimAudit({ ...audit(), units: [{ answerId: 'answer-1', claims: [formatting] }] }, 'met').units[0]?.claims).toEqual([formatting])
+      for (const invalid of [{ ...formatting, quote: '' }, { ...formatting, kind: 'source-fact' }, { ...formatting, status: 'supported' }, { ...formatting, status: 'unsupported' }, { ...formatting, sourceIds: ['request-1'] }, { ...formatting, explanation: ' ' }]) {
+        expect(() => parseClaimAudit({ ...audit(), units: [{ answerId: 'answer-1', claims: [invalid] }] }, 'not-met')).toThrow()
+      }
+    }
+  })
 })

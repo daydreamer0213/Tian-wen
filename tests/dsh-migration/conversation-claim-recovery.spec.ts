@@ -22,6 +22,31 @@ const schema = {
   required: ['verdict', 'category', 'explanation', 'evidenceQuotes', 'audit'],
 }
 
+it('recovers persisted native checks for both deterministic formatting-unit representations without new requests', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-formatting-recovery-')); roots.push(root)
+  const material = { task: { prompt: '保留原段落与空行。', criteria: ['preserve formatting'] }, answer: '第一段。\r\n\r\n第二段。\n \t\u00a0\n第三段。' }
+  const harness = await mountPersistentHarness(root, [
+    auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['第一段。'] }, 'empty'),
+    auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['第三段。'] }, 'claim'),
+  ])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-formatting-parent'), meta: { cwd: root }, agentOptions: config })
+  try {
+    const reviewed = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Formatting recovery', material,
+      evidence: ['保留原段落与空行。', '第一段。', '第三段。'], purpose: 'method-study', signal: new AbortController().signal, callConfig: config })
+    expect(reviewed.verdict).toBe('met')
+    const formatting = reviewed.reviewChecks.map(check => check.audit.units.filter(unit => unit.claims.length === 0 || unit.claims[0]?.quote.trim() === ''))
+    expect(formatting[0]?.some(unit => unit.claims.length === 0)).toBe(true)
+    expect(formatting[1]?.some(unit => unit.claims[0]?.quote.trim() === '')).toBe(true)
+    const requestCount = harness.adapter.requests.length
+    for (const check of reviewed.reviewChecks) {
+      await expect(verifyConversationClaimReviewCheck(harness.ctx, check, { purpose: 'method-study', materialDigest: sha256(material.task), outputDigest: sha256(material.answer), modelConfigDigest: sha256(config) })).resolves.toBeUndefined()
+    }
+    expect(harness.adapter.requests).toHaveLength(requestCount)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it.each(['nonexistent-quote', 'assistant-only-support', 'missing-answer-coverage'] as const)('rejects a real native capture with %s audit evidence', async invalid => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-recovery-')); roots.push(root)

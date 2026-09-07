@@ -68,6 +68,19 @@ describe('claim evidence projection', () => {
     expect(items.map(item => item.text).join('')).toContain(`${'甲'.repeat(383)}😀乙\n`)
   })
 
+  it('preserves formatting-only bytes, boundaries, identifiers and digest across multiple answer blocks', () => {
+    const whitespace = `${' '.repeat(383)}\u00a0\r\n`
+    const material = { source: { context: [], request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '保留原格式。' }] })] },
+      conversation: [{ id: 'a1', role: 'assistant', content: [{ type: 'text', text: `第一段\r\n\r\n` }, { type: 'text', text: whitespace }] },
+        { id: 'a2', role: 'assistant', content: [{ type: 'text', text: '\t\u3000\n尾段' }] }], toolEvidence: [] }
+    const first = projectClaimEvidence(material)
+    const second = projectClaimEvidence(structuredClone(material))
+    expect(first).toEqual(second)
+    expect(first.evidenceDigest).toBe(sha256(first.items))
+    expect(first.items.filter(item => item.role === 'answer').map(item => item.text).join('')).toBe(`第一段\r\n\r\n${whitespace}\t\u3000\n尾段`)
+    expect(first.items.filter(item => item.role === 'answer' && item.text.trim() === '').map(item => item.text)).toEqual(['\r\n', ' '.repeat(383) + '\u00a0', '\r\n', '\t\u3000\n'])
+  })
+
   it('fails closed for unsupported shapes, nontext-only answers and retained byte/count bounds', () => {
     expect(() => projectClaimEvidence({ criteria: ['not material'] })).toThrow('invalid-judgment')
     expect(() => projectClaimEvidence({ task: { prompt: 'x' }, answer: 1 })).toThrow('invalid-judgment')
@@ -90,6 +103,30 @@ describe('claim audit validation', () => {
         : claim(text, kind, 'permitted'))
       expect(validateClaimAudit(audit, evidence, 'met')).toEqual(audit)
     }
+  })
+
+  it('accepts both formatting representations only for the exact bound whitespace unit', () => {
+    const formattingEvidence = projectClaimEvidence({ task: { prompt: '保留换行。' }, answer: ' 第一段。\r\n\r\n第二段。\n \t\u00a0\n' })
+    const answerUnits = formattingEvidence.items.filter(item => item.role === 'answer')
+    const substantive = (item: typeof answerUnits[number]) => ({ answerId: item.id, claims: [claim(item.text, 'source-fact', 'supported', ['request-1'])] })
+    const units = answerUnits.map(item => item.text.trim() === '' ? { answerId: item.id, claims: [] } : substantive(item))
+    const emptyAudit = { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: formattingEvidence.evidenceDigest, units }
+    expect(validateClaimAudit(emptyAudit, formattingEvidence, 'met')).toEqual(emptyAudit)
+    const claimAudit = { ...emptyAudit, units: answerUnits.map(item => item.text.trim() === ''
+      ? { answerId: item.id, claims: [claim(item.text, 'non-factual', 'permitted')] }
+      : substantive(item)) }
+    expect(validateClaimAudit(claimAudit, formattingEvidence, 'met')).toEqual(claimAudit)
+
+    const blankIndex = answerUnits.findIndex(item => item.text.trim() === '')
+    const nonblankIndex = answerUnits.findIndex(item => item.text.trim() !== '')
+    const mutate = (index: number, claims: unknown[]) => ({ ...claimAudit, units: claimAudit.units.map((unit, unitIndex) => unitIndex === index ? { ...unit, claims } : unit) })
+    expect(() => validateClaimAudit(mutate(nonblankIndex, []), formattingEvidence, 'met')).toThrow('invalid-judgment')
+    expect(() => validateClaimAudit(mutate(nonblankIndex, [claim(answerUnits[nonblankIndex]!.text[0]!, 'non-factual', 'permitted')]), formattingEvidence, 'met')).toThrow('invalid-judgment')
+    expect(() => validateClaimAudit(mutate(blankIndex, [claim('', 'non-factual', 'permitted')]), formattingEvidence, 'met')).toThrow('invalid-judgment')
+    expect(() => validateClaimAudit(mutate(blankIndex, [claim('\n\n', 'non-factual', 'permitted')]), formattingEvidence, 'met')).toThrow('invalid-judgment')
+    expect(() => validateClaimAudit(mutate(blankIndex, [claim(answerUnits[blankIndex]!.text, 'source-fact', 'supported', ['request-1'])]), formattingEvidence, 'met')).toThrow('invalid-judgment')
+    expect(() => validateClaimAudit(mutate(blankIndex, [claim(answerUnits[blankIndex]!.text, 'non-factual', 'unsupported')]), formattingEvidence, 'not-met')).toThrow('invalid-judgment')
+    expect(() => projectClaimEvidence({ task: { prompt: 'x' }, answer: '' })).toThrow('invalid-judgment')
   })
 
   it.each([
