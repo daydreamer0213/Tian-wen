@@ -40,7 +40,7 @@ function materialBytes(material: unknown): number {
   catch { throw new Error('invalid-judgment') }
 }
 
-/** Lossless, role-preserving projection for the opt-in claim review pilot. */
+/** Lossless, role-preserving projection for audited conversation review. */
 export function projectClaimEvidence(material: unknown): ClaimEvidence {
   if (materialBytes(material) > CONVERSATION_MATERIAL_MAX_BYTES) throw new Error('material-too-large')
   if (!record(material)) throw new Error('invalid-judgment')
@@ -171,7 +171,7 @@ type ClaimReviewInput = Omit<Parameters<typeof runConversationJudgment>[2], 'ins
 }
 type AuditedCheck = ConversationAuditedReviewCheck
 
-/** Experimental only: the production v3 caller remains unchanged. */
+/** Two isolated native audits for the shared production review path. */
 export async function runConversationClaimReview(ctx: Context, parent: Agent, input: ClaimReviewInput) {
   const evidence = projectClaimEvidence(input.material)
   const material = { original: structuredClone(input.material), claimEvidence: evidence }
