@@ -368,6 +368,8 @@ export class ConversationLearningState {
     if (record.verdict !== 'inconclusive' && (task.admission.decision?.kind !== 'task' || task.completion.status !== 'completed')) throw new Error('incomplete task cannot establish a conclusive review')
     if (record.verdict === 'met' && task.admission.decision?.evaluationMode === 'subjective') throw new Error('a subjective review cannot establish user satisfaction')
     if (record.verdict === 'met' && task.admission.decision?.evaluationMode === 'external') throw new Error('external effects require an independent external evaluator, not a text judgment')
+    if (task.admission.qualityContract?.schemaVersion === 'tianwen.conversation-quality.v4' && task.admission.decision?.kind === 'task'
+      && task.completion.status === 'completed' && record.proof === null && record.unavailableReason === null) throw new Error('a completed v4 task review requires audited proof or an explicit unavailable reason')
     if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4'].includes(task.admission.qualityContract?.schemaVersion ?? '') && record.proof !== null && record.reviewChecks === undefined) throw new Error('v2/v3/v4 task reviews require two independent review checks')
     if (record.reviewChecks !== undefined) {
       parseConversationQualityReviewChecks(record.reviewChecks, task.admission.qualityContract)

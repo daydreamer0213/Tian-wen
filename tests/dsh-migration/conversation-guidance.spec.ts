@@ -118,6 +118,10 @@ describe('natural guidance domain governance', () => {
     const reviewChecks = parseConversationAuditedReviewChecks(['requirements', 'grounding'].map(focus => ({ focus, verdict: 'not-met', category: 'instruction-following',
       explanation: 'Output constraint violated.', evidenceQuotes: ['extra output'], proof: focus === 'requirements' ? arm.judgeProof : proof('separate-grounding'),
       audit: { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: sha256('arm evidence'), units: [{ answerId: 'answer-1', claims: [{ quote: 'extra output', kind: 'source-fact', status: 'unsupported', sourceIds: [], explanation: 'The requested restriction was violated.' }] }] } })))
+    const legacyChecks = reviewChecks.map(({ audit: _audit, ...check }) => check)
+    expect(() => append(state, { ...arm, reviewChecks: legacyChecks })).toThrow(/audit/i)
+    expect(() => append(state, { ...arm, reviewChecks: [reviewChecks[0], legacyChecks[1]] })).toThrow(/audit/i)
+    expect(() => append(state, { ...arm, reviewChecks: [reviewChecks[0], { ...reviewChecks[1], audit: { ...reviewChecks[1].audit, evidenceDigest: sha256('other evidence') } }] })).toThrow(/digest/i)
     expect(() => append(state, { ...arm, reviewChecks, verdict: 'met' })).toThrow(/consensus/i)
     append(state, { ...arm, reviewChecks })
     expect(state.listStudies()[0]?.arms[0]?.reviewChecks).toEqual(reviewChecks)

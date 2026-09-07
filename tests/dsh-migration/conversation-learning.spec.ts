@@ -42,8 +42,64 @@ function ledgerWithConsent(directory = root()) {
   ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
   return ledger
 }
+function auditedChecks(verdict: 'met' | 'not-met' | 'inconclusive' = 'met') {
+  return parseConversationAuditedReviewChecks(['requirements', 'grounding'].map(focus => ({
+    focus, verdict, category: verdict === 'not-met' ? 'source-fidelity' : null,
+    explanation: 'Checked the frozen answer.', evidenceQuotes: ['answer'], proof: {
+      sessionId: `audit:${focus}`, sessionDigest: sha256(`session:${focus}`), requestDigest: sha256(`request:${focus}`),
+    }, audit: { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: sha256('frozen evidence'), units: [{ answerId: 'answer-1', claims: [{
+      quote: 'answer', kind: 'source-fact', status: verdict === 'met' ? 'supported' : verdict === 'not-met' ? 'unsupported' : 'uncertain',
+      sourceIds: ['request-1'], explanation: 'Checked against request-1.',
+    }] }] },
+  })))
+}
 
 describe('natural conversation task evidence', () => {
+  it('rejects silent proofless completed v4 task reviews but retains explicit unavailability', () => {
+    const ledger = ledgerWithConsent(), source = start(), admitted = admission(source.taskId)
+    ledger.recordConversationLearning(source); ledger.recordConversationLearning(admitted); ledger.recordConversationLearning(finish(source.taskId))
+    const silent = { kind: 'task-reviewed' as const, taskId: source.taskId, admissionDigest: sha256(admitted), resultDigest: sha256('answer'),
+      verdict: 'inconclusive' as const, category: null, explanation: 'No result.', evidenceQuotes: [], proof: null, unavailableReason: null }
+    expect(() => ledger.recordConversationLearning(silent)).toThrow(/unavailable|audit|proof|review checks/i)
+    const unavailable = { ...silent, unavailableReason: 'model-unavailable' as const }
+    expect(ledger.recordConversationLearning(unavailable)).toEqual({ duplicate: false })
+    expect(ledger.listConversationTasks()[0]?.review).toEqual(unavailable)
+
+    for (const [turn, decisionKind, status] of [[2, 'conversation', 'completed'], [3, 'task', 'interrupted']] as const) {
+      const next = start(turn), nextAdmission = { ...admission(next.taskId), decision: { ...admission(next.taskId).decision, kind: decisionKind } }
+      ledger.recordConversationLearning(next); ledger.recordConversationLearning(nextAdmission)
+      ledger.recordConversationLearning({ ...finish(next.taskId, turn * 10 + 8), status })
+      expect(ledger.recordConversationLearning({ ...silent, taskId: next.taskId, admissionDigest: sha256(nextAdmission) })).toEqual({ duplicate: false })
+    }
+
+    const directory = root(), replay = ledgerWithConsent(directory), replaySource = start(4), replayAdmission = admission(replaySource.taskId)
+    replay.recordConversationLearning(replaySource); replay.recordConversationLearning(replayAdmission); replay.recordConversationLearning(finish(replaySource.taskId, 48))
+    appendFileSync(join(directory, 'ledger.jsonl'), `${canonicalJson({ type: 'conversation-learning-recorded', schemaVersion: 'tianwen.conversation-learning.v1', at: '2026-09-07T00:00:00.000Z',
+      record: { ...silent, taskId: replaySource.taskId, admissionDigest: sha256(replayAdmission) } })}\n`)
+    expect(() => new EvolutionLedger(directory)).toThrow(/unavailable|audit|proof|review checks/i)
+  })
+
+  it('rejects malformed and wrong-format v4 checks through task state and serialized replay', () => {
+    const setup = (directory = root()) => {
+      const ledger = ledgerWithConsent(directory), source = start(), admitted = admission(source.taskId)
+      ledger.recordConversationLearning(source); ledger.recordConversationLearning(admitted); ledger.recordConversationLearning(finish(source.taskId))
+      return { directory, ledger, source, admitted }
+    }
+    const value = setup(), checks = auditedChecks()
+    const review = { kind: 'task-reviewed' as const, taskId: value.source.taskId, admissionDigest: sha256(value.admitted), resultDigest: sha256('answer'),
+      ...conversationReviewConsensus(checks), unavailableReason: null, reviewChecks: checks }
+    const legacy = checks.map(({ audit: _audit, ...check }) => check)
+    const malformed = [
+      { ...review, reviewChecks: legacy },
+      { ...review, reviewChecks: [checks[0], legacy[1]] },
+      { ...review, reviewChecks: [checks[0], { ...checks[1], audit: { ...checks[1].audit, schemaVersion: 'wrong' } }] },
+    ]
+    for (const record of malformed) expect(() => value.ledger.recordConversationLearning(record as never)).toThrow()
+
+    const replay = setup()
+    appendFileSync(join(replay.directory, 'ledger.jsonl'), `${canonicalJson({ type: 'conversation-learning-recorded', schemaVersion: 'tianwen.conversation-learning.v1', at: '2026-09-07T00:00:00.000Z', record: malformed[2] })}\n`)
+    expect(() => new EvolutionLedger(replay.directory)).toThrow()
+  })
   it('rejects missing or forged v2 consensus and preserves a real disagreement as inconclusive', () => {
     const ledger = ledgerWithConsent(), source = start(), admitted = admission(source.taskId)
     ledger.recordConversationLearning(source); ledger.recordConversationLearning(admitted); ledger.recordConversationLearning(finish(source.taskId))
