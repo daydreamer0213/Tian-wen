@@ -68,7 +68,7 @@ use was recorded before the model was restored to offline mode. This is
 project-owner, single-user product evidence—not external-user validation or
 proof of general efficacy.
 
-The Stage 7 project-owner natural task and official installer/status proof remain complete.
+Stage 7 remains complete as a historical project-owner natural-task and official installer/status proof.
 The five-task B/C, blind evaluator, isolated Shadow, and Promotion/Rollback product mechanisms are implemented and covered by a product-wired E2E with no injected verdict.
 A fresh official installed configured-DeepSeek controlled lifecycle has now returned `passed`.
 Activity-22 closed all 25 formal roles, including five evaluators, five Shadow runs, and three

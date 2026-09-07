@@ -48,7 +48,7 @@ Skill 复用。普通任务不要求先建立 Goal；打开会话不会恢复已
 随后模型恢复 offline。这是项目所有者实际使用形成的单用户产品证据，不是外部用户验证，
 也不证明普遍效能。
 
-Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成。
+Stage 7 仍已完成，保留为项目所有者自然任务和官方 installer/status 的历史证明。
 五任务 B/C、盲态 evaluator、隔离 Shadow 与 Promotion/Rollback 产品机制已经实现，并由不注入 verdict 的产品接线 E2E 覆盖。
 一个全新的官方已安装 configured-DeepSeek 受控生命周期现已返回 `passed`。Activity-22
 闭合了全部 25 个正式角色，包括 5 个 evaluator、5 个 Shadow 和 3 次 transition，随后恢复

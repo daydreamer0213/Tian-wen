@@ -305,7 +305,7 @@ def test_controlled_skill_lifecycle_public_evidence_boundaries() -> None:
     )
 
     for fact in (
-        "The Stage 7 project-owner natural task and official installer/status proof remain complete.",
+        "Stage 7 remains complete as a historical project-owner natural-task and official installer/status proof.",
         (
             "The five-task B/C, blind evaluator, isolated Shadow, and "
             "Promotion/Rollback product mechanisms are implemented and covered "
@@ -319,7 +319,7 @@ def test_controlled_skill_lifecycle_public_evidence_boundaries() -> None:
         assert fact in readme_en
 
     for fact in (
-        "Stage 7 项目所有者自然任务和官方 installer/status 证明仍已完成。",
+        "Stage 7 仍已完成，保留为项目所有者自然任务和官方 installer/status 的历史证明。",
         (
             "五任务 B/C、盲态 evaluator、隔离 Shadow 与 Promotion/Rollback "
             "产品机制已经实现，并由不注入 verdict 的产品接线 E2E 覆盖。"
