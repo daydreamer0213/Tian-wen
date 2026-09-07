@@ -19,6 +19,8 @@ import { apply as applyCore } from '../../packages/tianwen-runtime/src/index.js'
 import {
   guidanceVersion,
   conversationQualityContract,
+  conversationReviewConsensus,
+  parseConversationReviewChecks,
   sha256,
   type ConversationAdmissionDecision,
   type ConversationFeedbackAssessment,
@@ -445,6 +447,11 @@ describe('Tianwen main-chat learning consent tool', () => {
           status: options.completion ?? 'completed', assistantMessageIds: [`PRIVATE answer ${turn}`],
           resultDigest: sha256(`answer ${turn}`), evidenceIds: [],
         })
+        const reviewChecks = options.review === undefined || options.review === 'unavailable' ? undefined : parseConversationReviewChecks(['requirements', 'grounding'].map(focus => ({
+          focus, verdict: options.review, category: options.review === 'not-met' ? 'instruction-following' : null,
+          explanation: 'PRIVATE review explanation', evidenceQuotes: ['PRIVATE answer quote'],
+          proof: { sessionId: `${taskId}:${focus}`, sessionDigest: sha256(`${taskId}:${focus}`), requestDigest: sha256(`review:${taskId}:${focus}`) },
+        })))
         if (options.review !== undefined) evolution.recordConversationLearning({
           kind: 'task-reviewed', taskId, admissionDigest: sha256(admitted), resultDigest: sha256(`answer ${turn}`),
           verdict: options.review === 'unavailable' ? 'inconclusive' : options.review,
@@ -452,6 +459,7 @@ describe('Tianwen main-chat learning consent tool', () => {
           explanation: 'PRIVATE review explanation', evidenceQuotes: ['PRIVATE answer quote'],
           proof: options.review === 'unavailable' ? null : proof,
           unavailableReason: options.review === 'unavailable' ? 'model-unavailable' : null,
+          ...(reviewChecks === undefined ? {} : { ...conversationReviewConsensus(reviewChecks), reviewChecks }),
         })
         return taskId
       }
