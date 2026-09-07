@@ -83,3 +83,29 @@ const native = await runConversationJudgment(ctx, parent, { ...input, material: 
 ## Pre-flight self-review
 
 The design's production migration is deliberately conditional on Task2; this plan's deliverable is the testable opt-in pilot, not an unvalidated production release. Interfaces are identical across tasks; original and study materials are explicit. Existing native lifecycle/consensus is reused. No mandatory implementation conflicts found. Standing user authorization selects execution in this task without another execution-choice prompt.
+
+### Task 3: Restore the experiment's existing output contract for a future comparison
+
+Added after real first-attempt evidence, not a modification of the ongoing frozen pilot. P02 and P06 normal-answer experimental panels are unavailable because a native check returned `met` with a non-null failure category. P02's two native audits correctly support/permit its facts and courtesy. Independent read-only diagnosis matched this to a missing old output-field instruction in new COMMON; legacy parser correctly rejects the contradictory result. This pilot cannot pass and must keep all first outcomes. This narrow fix may be implemented while the immutable pilot bundle continues; it cannot become current-pilot evidence or production v4.
+
+**Files:**
+- Modify only `packages/tianwen-runtime-bundle/src/conversation-claim-review.ts` and `tests/dsh-migration/conversation-claim-review.spec.ts`.
+- Read existing `packages/tianwen-runtime-bundle/src/conversation-judgment.ts:81` and `packages/tianwen-evolution/src/conversation-learning.ts:53` for actual output contract.
+- No pilot artifact, caller, domain, version or legacy v3 implementation changes.
+
+**Interfaces:**
+- All Task1 public signatures and audit schema/semantics unchanged.
+- Only make the already enforced legacy field rules explicit in the experimental reviewer instruction. The receiving parser remains authoritative and contradictory results remain unavailable.
+
+- [ ] **Step 1: RED exact regression.** Extend the existing native harness test to assert the emitted reviewer prompt explicitly states: met requires null category; not-met requires a concrete violation and a non-null attributable failure category; conclusive reviews need evidenceQuotes; at most6 exact source/answer evidenceQuotes; explanation at most1536 UTF-8 bytes. Before the change these new instruction assertions must fail. Also exercise an actual mocked-LLM/native-capture `met` plus `source-fidelity` result and assert the panel still rejects it rather than normalizing it into success.
+
+```ts
+// Through the existing real native harness, not a fake native runtime:
+await expect(runConversationClaimReview(ctx, parent, input)).rejects.toThrow('successful review check cannot assert a failure category')
+// The prompt assertions protect the required interface description; they are
+// not evidence that a real model obeys it. A fresh model comparison is still required.
+```
+
+- [ ] **Step 2: Restore only the missing existing field contract in COMMON.** Keep all claim/source guidance, source roles, limits, purposes, native identity and consensus unchanged. Explicitly name UTF-8 bytes, not characters. Do not add conditional schema machinery: installed DSH supports a restricted schema subset and its object root cannot combine type with oneOf; existing host parsing already implements the correct invariant. Do not silently clear a non-null category or retry a failed check.
+- [ ] **Step 3: GREEN and self-review.** Run the new focused regression and all four Task1 test files; runtime typecheck. Use the verified absolute pnpm launcher `D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs` after loading the existing gate-env.ps1. Record expected RED and actual GREEN commands/output. No real model calls and no rebuilding/replacing the running pilot bundle.
+- [ ] **Step 4: Commit owned files and independent review.** Report exact commit/test evidence. Passing code tests do not release this revision. Only after current Task2 first outcomes and native audit finish may a new independent prospective cohort be designed/reviewed/frozen against this changed revision; do not reuse P01-P12 as formal acceptance answers, lower the gate or retrofit their labels. Integration remains conditional on a future passed gate.
