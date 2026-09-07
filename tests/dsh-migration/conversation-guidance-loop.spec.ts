@@ -143,6 +143,7 @@ it.each(['accepted', 'recover', 'recover-missing-check', 'recover-changed-check'
     }
     expect(warnings).toEqual([])
     expect(study?.arms).toHaveLength(10)
+    expect(study?.arms.every(arm => arm.reviewChecks?.every(check => 'audit' in check && check.audit.schemaVersion === 'tianwen.claim-audit.v1'))).toBe(true)
     if (scenario === 'regression') {
       expect(study?.decision?.verdict).toBe('rejected')
       expect(study?.activation).toBeUndefined()

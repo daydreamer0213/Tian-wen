@@ -96,6 +96,7 @@ it('captures ordinary requests in two native turns before each answer and review
     expect(tasks[1]?.models?.[0]?.headerSeq).toBe(tasks[0]?.models?.[0]?.headerSeq)
     expect(tasks.map(task => task.source.turn)).toEqual([1, 2])
     expect(tasks.map(task => task.review?.verdict)).toEqual(['met', 'met'])
+    expect(tasks.every(task => task.review?.reviewChecks?.every(check => 'audit' in check && check.audit.schemaVersion === 'tianwen.claim-audit.v1'))).toBe(true)
     const recovered = await recoverConversationTaskMaterial(harness.ctx, tasks[0]!)
     expect(recovered).toHaveProperty('qualityContract', tasks[0]!.admission!.qualityContract)
     expect(recovered.criteria).toEqual(admission.criteria)
