@@ -36,7 +36,7 @@ The angle-bracket argument above describes selecting the exact files listed per 
 **Files:**
 - Create: `packages/tianwen-evolution/src/conversation-claim-audit.ts`.
 - Modify: `packages/tianwen-evolution/src/conversation-learning.ts`, `conversation-guidance.ts`, `index.ts`.
-- Test: `tests/dsh-migration/conversation-review-panel.spec.ts`, `conversation-learning.spec.ts`, `conversation-guidance.spec.ts`, `conversation-guidance-ledger.spec.ts`; create `conversation-claim-audit.spec.ts` and a literal legacy-quality fixture if shared by these tests.
+- Test: `tests/dsh-migration/conversation-review-panel.spec.ts`, `conversation-learning.spec.ts`, `conversation-guidance.spec.ts`, `conversation-guidance-ledger.spec.ts`, `learning-consent-agent.spec.ts` (its manual current-quality status fixture at the natural task counts test); create `conversation-claim-audit.spec.ts` and a literal legacy-quality fixture if shared by these tests.
 
 **Interfaces:**
 - Consume the exact ClaimAudit shape/status rules from runtime `conversation-claim-review.ts` and the existing legacy summary parser.
@@ -62,7 +62,7 @@ expect(conversationReviewConsensus(auditedPair).verdict).toBe('met')
 
 Use real parser/state transitions for task and study replay, not mocked parser results. Include v4 missing audit, legacy audit injection, malformed audit, mixed pair, consensus disagreement and proof-null unavailable records. A syntax-valid audit needs nonempty units/claims/quotes/explanations, exact keys/version/digest format, unique unit IDs/source IDs, 128 units/512 claims/32KiB limits, known kind/status, no source-fact/permitted, no non-source-fact/supported and no met with unsupported/contradicted/uncertain. Role/quote/complete-coverage checks await actual runtime evidence; do not pretend syntax can prove them.
 
-- [ ] Step2: Run the five listed domain test files plus new audit file; preserve expected RED failures before implementation.
+- [ ] Step2: Run the listed existing domain/status test files plus new audit file; preserve expected RED failures before implementation.
 - [ ] Step3: Implement the smallest domain syntax module and reuse the existing summary parser by removing audit only in the audited-parser wrapper, then restoring the exact validated audit. No duplicate summary validation block. Both audits must have the same evidenceDigest. Stored parser may discriminate whole tuples by audit presence, but must reject mixed forms, including explicitly undefined/null audit fields. Keep the legacy v3 builder exact and make current v4 change only schemaVersion. Retain audited tuples in `task-reviewed` / `arm-recorded` record parsers; use actual admission/study quality at both aggregate validation sites to require the right form. Widen only these typed fields; no unknown audit fallback. Preserve current support/decision thresholds. Exercise the existing ledger append/replay paths to prove complete audited records survive and literal old records/arm material/study IDs remain unchanged; malformed v4 serialized records must fail replay as well as fresh input.
 - [ ] Step4: Run all domain files above plus evolution typecheck. Current native integration fixtures can remain v3-shaped until Task2; do not call that a full branch regression or alter runtime files in Task1. Update manual fixtures that intentionally represent new current v4 records while retaining separate literal old-format evidence.
 - [ ] Step5: Self-review, commit scoped files and report RED/GREEN commands/output, exact interfaces, all changed files and concerns. Root supplies the diff for independent task review before continuing.
@@ -71,7 +71,7 @@ Use real parser/state transitions for task and study replay, not mocked parser r
 
 **Files:**
 - Modify: `packages/tianwen-runtime-bundle/src/conversation-claim-review.ts`, `conversation-judgment.ts`, `conversation-observer.ts`, `conversation-guidance-loop.ts`.
-- Test: `tests/dsh-migration/conversation-claim-review.spec.ts`, `conversation-judgment.spec.ts`, `conversation-observer.spec.ts`, `conversation-feedback.spec.ts`, `conversation-guidance-loop.spec.ts`; create `conversation-claim-recovery.spec.ts` and one shared native audited-response fixture only if used by several tests.
+- Test: `tests/dsh-migration/conversation-claim-review.spec.ts`, `conversation-judgment.spec.ts`, `conversation-observer.spec.ts`, `conversation-feedback.spec.ts`, `conversation-guidance-loop.spec.ts`, and the native runtime cases inside `conversation-guidance-ledger.spec.ts`; create `conversation-claim-recovery.spec.ts` and one shared native audited-response fixture only if used by several tests.
 
 **Interfaces:**
 - Consume Task1 domain `ClaimAudit`, `parseClaimAudit`, `ConversationAuditedReviewCheck`, `parseConversationAuditedReviewChecks` and unchanged consensus.
