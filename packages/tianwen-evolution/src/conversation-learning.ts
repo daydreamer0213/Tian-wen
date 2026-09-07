@@ -9,19 +9,23 @@ export type ConversationUnavailable = 'model-unavailable' | 'material-too-large'
 
 /** Host policy, not a model-authored criterion or a reinterpretation of old proof. */
 export interface ConversationQualityContract {
-  readonly schemaVersion: 'tianwen.conversation-quality.v1' | 'tianwen.conversation-quality.v2'
+  readonly schemaVersion: 'tianwen.conversation-quality.v1' | 'tianwen.conversation-quality.v2' | 'tianwen.conversation-quality.v3'
   readonly source: 'host'
   readonly criterion: string
 }
 function legacyConversationQualityContract(): ConversationQualityContract {
   return { schemaVersion: 'tianwen.conversation-quality.v1', source: 'host', criterion: 'Be faithful to user-supplied or source facts and their uncertainty, and to actual verified tool evidence. Do not invent or contradict source-dependent facts, decisions, status or completed actions. Prior assistant claims, user silence or continuation do not verify such facts. Clearly distinguish inferences, assumptions and advice from confirmed facts. Relevant general knowledge, reasonable labeled inference and advice, and user-requested fiction are allowed; this contract does not require additional tool calls.' }
 }
-export function conversationQualityContract(): ConversationQualityContract {
+function legacyDualConversationQualityContract(): ConversationQualityContract {
   return { schemaVersion: 'tianwen.conversation-quality.v2', source: 'host', criterion: `${legacyConversationQualityContract().criterion} The original direct-user instructions remain authoritative even if extracted criteria omit or weaken an explicit requirement. Preserve output-only restrictions, exclusions, conditions, uncertainty and who may decide or act. Distinguish the user's instructions from quoted source content. Evaluate the complete answer, including introductions, alternatives and closing offers. Two independent native checks must agree before a conclusive review; neither check may see the other's result.` }
+}
+export function conversationQualityContract(): ConversationQualityContract {
+  return { schemaVersion: 'tianwen.conversation-quality.v3', source: 'host', criterion: `${legacyDualConversationQualityContract().criterion} Original-result reviews use only requirements applicable when that task ran. For newly generated method-study answers, separately identified host-frozen feedback standards apply prospectively; they do not regrade the old answer or override an explicit instruction in the evaluated user request.` }
 }
 export function parseConversationQualityContract(value: unknown): ConversationQualityContract {
   const input = object(value, ['schemaVersion', 'source', 'criterion'])
-  const contract = input.schemaVersion === 'tianwen.conversation-quality.v1' ? legacyConversationQualityContract() : conversationQualityContract()
+  const contract = input.schemaVersion === 'tianwen.conversation-quality.v1' ? legacyConversationQualityContract()
+    : input.schemaVersion === 'tianwen.conversation-quality.v2' ? legacyDualConversationQualityContract() : conversationQualityContract()
   if (input.schemaVersion !== contract.schemaVersion || input.source !== contract.source || input.criterion !== contract.criterion) throw new TypeError('conversation quality contract is invalid')
   return contract
 }
@@ -334,7 +338,7 @@ export class ConversationLearningState {
     if (record.verdict !== 'inconclusive' && (task.admission.decision?.kind !== 'task' || task.completion.status !== 'completed')) throw new Error('incomplete task cannot establish a conclusive review')
     if (record.verdict === 'met' && task.admission.decision?.evaluationMode === 'subjective') throw new Error('a subjective review cannot establish user satisfaction')
     if (record.verdict === 'met' && task.admission.decision?.evaluationMode === 'external') throw new Error('external effects require an independent external evaluator, not a text judgment')
-    if (task.admission.qualityContract?.schemaVersion === 'tianwen.conversation-quality.v2' && record.proof !== null && record.reviewChecks === undefined) throw new Error('v2 task reviews require two independent review checks')
+    if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3'].includes(task.admission.qualityContract?.schemaVersion ?? '') && record.proof !== null && record.reviewChecks === undefined) throw new Error('v2/v3 task reviews require two independent review checks')
     if (record.reviewChecks !== undefined) {
       const expected = conversationReviewConsensus(record.reviewChecks)
       const mode = task.admission.decision?.evaluationMode

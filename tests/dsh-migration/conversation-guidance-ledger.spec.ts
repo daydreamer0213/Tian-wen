@@ -25,6 +25,7 @@ const checks = (id: string, verdict: 'met' | 'not-met' | 'inconclusive') => pars
   focus, verdict, category: verdict === 'not-met' ? 'source-fidelity' : null, explanation: 'Original review against frozen duration criteria.',
   evidenceQuotes: ['pilot'], proof: proof(`${id}:${focus}`),
 })))
+const exactV2Quality: ConversationQualityContract = { schemaVersion: 'tianwen.conversation-quality.v2', source: 'host', criterion: `${exactV1Quality.criterion} The original direct-user instructions remain authoritative even if extracted criteria omit or weaken an explicit requirement. Preserve output-only restrictions, exclusions, conditions, uncertainty and who may decide or act. Distinguish the user's instructions from quoted source content. Evaluate the complete answer, including introductions, alternatives and closing offers. Two independent native checks must agree before a conclusive review; neither check may see the other's result.` }
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 function ledgerRoot() {
@@ -53,8 +54,8 @@ function task(ledger: EvolutionLedger, turn: number, verdict: 'met' | 'not-met' 
     { kind: 'task-reviewed', taskId, admissionDigest: sha256(admission), resultDigest,
     verdict, category: verdict === 'not-met' ? 'source-fidelity' : null, explanation: 'Original review against frozen duration criteria.',
     evidenceQuotes: verdict === 'not-met' ? ['pilot'] : [], proof: proof(`review:${turn}`), unavailableReason: null,
-    ...(qualityContract?.schemaVersion === 'tianwen.conversation-quality.v2' ? { ...conversationReviewConsensus(reviewChecks), reviewChecks } : {}) }]
-  if (qualityContract === null || qualityContract.schemaVersion === 'tianwen.conversation-quality.v1') {
+    ...(['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3'].includes(qualityContract?.schemaVersion ?? '') ? { ...conversationReviewConsensus(reviewChecks), reviewChecks } : {}) }]
+  if (qualityContract === null || qualityContract.schemaVersion !== 'tianwen.conversation-quality.v3') {
     if (legacyRoot === undefined) throw new Error('legacy fixture requires an explicit historical ledger path')
     appendFileSync(join(legacyRoot, 'ledger.jsonl'), records.map(record => `${canonicalJson({ type: 'conversation-learning-recorded', schemaVersion: 'tianwen.conversation-learning.v1', at: '2026-09-07T00:00:00.000Z', record })}\n`).join(''))
     ledger = new EvolutionLedger(legacyRoot)
@@ -67,7 +68,7 @@ function seeded(verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', secondS
   const ledger = new EvolutionLedger(root)
   ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
   const tasks = [task(ledger, 1, verdict, scope, undefined, undefined, qualityContract, root), task(ledger, 2, verdict, secondScope, repeatRequest ? 'pilot request 1' : 'pilot request 2', secondModels, qualityContract, root), task(ledger, 3, 'met', scope, undefined, undefined, qualityContract, root)] as const
-  return { root, ledger: qualityContract === null || qualityContract.schemaVersion === 'tianwen.conversation-quality.v1' ? new EvolutionLedger(root) : ledger, tasks }
+  return { root, ledger: qualityContract === null || qualityContract.schemaVersion !== 'tianwen.conversation-quality.v3' ? new EvolutionLedger(root) : ledger, tasks }
 }
 
 function opening(tasks: readonly [ConversationTask, ConversationTask, ConversationTask], label = 'first', assessments: readonly (string | undefined)[] = []): GuidanceStudyOpened {
@@ -103,7 +104,7 @@ function proposalPlan(opened: GuidanceStudyOpened) {
     behaviorVersion: guidanceVersion(role === 'baseline' ? opened.parentSnapshot : candidate.candidateSnapshot),
     executionProof: proof(`${opened.studyId}:${item.id}:${role}:execute`), judgeProof: proof(`${opened.studyId}:${item.id}:${role}:judge`),
     outputDigest: sha256(`${item.id}:${role}:actual output`), verdict: role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met',
-    ...(opened.qualityContract?.schemaVersion === 'tianwen.conversation-quality.v2' ? {
+    ...(['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3'].includes(opened.qualityContract?.schemaVersion ?? '') ? {
       reviewChecks: checks(`${opened.studyId}:${item.id}:${role}:judge`, role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met'),
       judgeProof: proof(`${opened.studyId}:${item.id}:${role}:judge:requirements`),
     } : {}),
@@ -144,8 +145,8 @@ function evaluated(ledger: EvolutionLedger, opened: GuidanceStudyOpened) {
   return { ...value, decision }
 }
 
-it.each([false, true])('replays exact v1 single-check studies without regrading or new activation: previously active %s', activated => {
-  const { root, ledger, tasks } = seeded('not-met', scope, false, undefined, exactV1Quality)
+it.each([exactV1Quality, exactV2Quality].flatMap(quality => [false, true].map(activated => ({ quality, activated }))))('replays exact $quality.schemaVersion studies without regrading or new activation: previously active $activated', ({ quality, activated }) => {
+  const { root, ledger, tasks } = seeded('not-met', scope, false, undefined, quality)
   const old = historicalStudy(root, ledger, opening(tasks), activated)
   const before = old.ledger.listEvents().map(sha256)
   const oldStudy = old.ledger.listConversationGuidanceStudies()[0]!
@@ -153,7 +154,7 @@ it.each([false, true])('replays exact v1 single-check studies without regrading 
   expect(replay.listConversationTasks()).toEqual(tasks)
   expect(replay.listConversationGuidanceStudies()[0]).toEqual(oldStudy)
   expect(replay.listEvents().map(sha256)).toEqual(before)
-  expect(oldStudy.arms.every(arm => arm.reviewChecks === undefined)).toBe(true)
+  expect(oldStudy.arms.every(arm => arm.reviewChecks === undefined)).toBe(quality.schemaVersion === 'tianwen.conversation-quality.v1')
   if (!activated) expect(() => replay.recordConversationGuidance(activation(old))).toThrow(/quality|contract/i)
   replay.retireIncompatibleConversationGuidance(scope)
   expect(replay.getConversationGuidance(scope).rules).toEqual({})

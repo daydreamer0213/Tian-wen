@@ -26,6 +26,8 @@ it.each(['met', 'not-met', 'inconclusive', 'unavailable'] as const)('keeps revie
   const script: Parameters<typeof mountPersistentHarness>[1] = [request => {
     requests.push(request.messages)
     expect(JSON.stringify(request.messages)).toContain('original direct-user instructions')
+    expect(JSON.stringify(request.messages)).toContain('Review purpose: original-result')
+    expect(JSON.stringify(request.messages)).toContain('Do not apply later feedback to an earlier result')
     return toolCallResponse('requirements-result', 'structured_output', first)
   }, second === 'unavailable' ? new Error('second check provider failure') : request => {
     requests.push(request.messages)

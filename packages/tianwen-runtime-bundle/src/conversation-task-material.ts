@@ -32,6 +32,12 @@ export interface ConversationTaskMaterial {
   readonly objective: string
   readonly criteria: readonly string[]
   readonly qualityContract?: ConversationQualityContract
+  /** Present only on fresh study material, never on the original task review. */
+  readonly feedbackStandard?: {
+    readonly assessmentId: string
+    readonly classification: string
+    readonly criteria: readonly string[]
+  }
 }
 
 /** Quotable source text, excluding judgment-derived fields and native metadata. */

@@ -194,8 +194,13 @@ export class TianwenConversationGuidanceLoopService extends Service {
       if (sourceConfigs.some(config => sha256(config) !== sha256(callConfig))) throw new Error('source native model configuration drift')
       const sources = await Promise.all(group.sources.map(async (task, index) => {
         const original = await recoverConversationTaskMaterial(this.ctx, task)
-        const supplemental = group.assessments[index]?.result?.supplementalCriteria ?? []
-        return { ...original, criteria: [...original.criteria, ...supplemental] }
+        const assessment = group.assessments[index]
+        // Preserve origin and timing: these standards evaluate newly generated
+        // trial answers, not the earlier answer or its original requirements.
+        return assessment?.result === undefined ? original : { ...original, feedbackStandard: {
+          assessmentId: assessment.started.assessmentId, classification: assessment.result.classification,
+          criteria: assessment.result.supplementalCriteria,
+        } }
       }))
       const counter = await recoverConversationTaskMaterial(this.ctx, group.counterexample)
       const generated = await runConversationJudgment(this.ctx, agent, {
@@ -241,6 +246,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
           const execution = await runConversationTrial(this.ctx, agent, { label: `Tianwen text trial ${opened.studyId}`, callConfig, signal, material: request, ...(snapshot.rules[body.family] === undefined ? {} : { guidance: snapshot.rules[body.family] }) })
           const evidence = 'request' in material ? conversationEvidenceTexts(material, [execution.answer]) : [material.prompt, execution.answer]
           const judged = await runConversationReview(this.ctx, agent, {
+            purpose: 'method-study',
             evidence,
             label: `Tianwen blind text review ${opened.studyId}`, callConfig, signal,
             material: { task: material, answer: execution.answer },
