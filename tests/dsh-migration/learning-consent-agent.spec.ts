@@ -1257,6 +1257,69 @@ describe('Tianwen main-chat learning consent tool', () => {
     }
   })
 
+  it('hides all tool schemas only in the notice Turn and waits for a real user Turn to enable', async () => {
+    const mounted = await mountConsentRuntime('notice-tool-visibility', [
+      toolCallResponse('ordinary-before', 'ordinary_probe', {}),
+      textResponse('The ordinary task is complete.'),
+      // A provider can still invent a hidden tool call; the guard must deny it.
+      toolCallResponse('notice-false-enable', 'tianwen_learning_consent', { action: 'enable' }),
+      textResponse('You can agree in your next message to enable analysis.'),
+      toolCallResponse('real-user-enable', 'tianwen_learning_consent', { action: 'enable' }),
+      toolCallResponse('ordinary-after', 'ordinary_probe', {}),
+      textResponse('Analysis is enabled and the ordinary task is complete.'),
+    ])
+    const { main, child } = await createMainAndChild(mounted.ctx)
+    let toolRuns = 0
+    const disposeProbe = main.agent.ctx.tools.register(defineTool({
+      name: 'ordinary_probe', description: 'Do ordinary work.', parameters: {},
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute() { toolRuns += 1; return 'finished' },
+    }))
+    const disposeGlobal = mounted.ctx.tools.register(defineTool({
+      name: 'ask_user_question', description: 'Ask the user a question.', parameters: {},
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      async execute() { throw new Error('The notice must not ask through a tool') },
+    }))
+    const beforeSchemas = mounted.ctx.tools.schemas(main.agent)
+    const childSchemas = mounted.ctx.tools.schemas(child.agent)
+    const permissionCalls: string[] = []
+    const disposePermission = main.agent.ctx.on('tools/pre-execute', async (execution, next) => {
+      permissionCalls.push(String(execution.callId))
+      return next()
+    })
+    try {
+      main.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Do ordinary work.' }], source: { kind: 'user' } }))
+      await main.agent.whenIdle()
+      await mounted.ctx.tianwenLearningConsentAgent.observeConversationWithoutConsent(String(main.agent.session.id))
+      await main.agent.whenIdle()
+      expect(mounted.adapter.requests).toHaveLength(4)
+      expect(mounted.adapter.requests.slice(2).map(request => request.tools ?? [])).toEqual([[], []])
+      expect(mounted.ctx.tianwenEvolution.getLearningAnalysisConsent()).toBeUndefined()
+      expect(toolRuns).toBe(1)
+      expect(main.agent.session.events.find(event => event.type === 'tool/result'
+        && String(event.data.message.content[0].toolCallId) === 'notice-false-enable')).toMatchObject({
+        data: { message: { content: [{ isError: true,
+          content: [{ type: 'text', text: expect.stringContaining('notices are read-only') }] }] } },
+      })
+      expect(mounted.ctx.tools.schemas(child.agent)).toEqual(childSchemas)
+      main.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Yes, enable analysis, then do ordinary work again.' }], source: { kind: 'user' } }))
+      await main.agent.whenIdle()
+      expect(mounted.ctx.tianwenEvolution.getLearningAnalysisConsent()).toMatchObject({ enabled: true, revision: 1 })
+      expect(toolRuns).toBe(2)
+      expect(mounted.adapter.requests).toHaveLength(7)
+      for (const request of [...mounted.adapter.requests.slice(0, 2), ...mounted.adapter.requests.slice(4)]) {
+        expect(request.tools).toEqual(beforeSchemas.toSorted((left, right) => left.name.localeCompare(right.name)))
+      }
+      expect(permissionCalls).toEqual(['ordinary-before', 'notice-false-enable', 'real-user-enable', 'ordinary-after'])
+      expect(mounted.ctx.tools.schemas(main.agent)).toEqual(beforeSchemas)
+      expect(main.agent.session.events.filter(event => event.type === 'user/message'
+        && String(event.data.id) === LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID)).toHaveLength(1)
+    } finally {
+      disposePermission(); disposeGlobal(); disposeProbe()
+      await child.dispose(); await main.dispose(); await mounted.ctx.fiber.dispose()
+    }
+  })
+
   it('delivers the source-disclosing tool-disabled notice once to the exact main parent of child feedback', async () => {
     const mounted = await mountConsentRuntime('notice', [
       toolCallResponse('notice-tool-call', 'notice_probe', {}),

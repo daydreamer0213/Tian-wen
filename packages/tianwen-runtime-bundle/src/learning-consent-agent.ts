@@ -472,9 +472,11 @@ export class TianwenLearningConsentAgentService extends Service {
 
   private async runGuardedNoticeTurn(agent: Agent, binding: LearningConsentNoticeBinding): Promise<void> {
     const consent = this.ctx.tianwenEvolution.getLearningAnalysisConsent()
-    const text = binding.policyVersion !== POLICY_VERSION ? LEGACY_CONSENT_NOTICE_TEXT
+    const disclosure = binding.policyVersion !== POLICY_VERSION ? LEGACY_CONSENT_NOTICE_TEXT
       : consent?.enabled === true && consent.policyVersion === POLICY_VERSION ? LEARNING_CONSENT_NOTICE_TEXT
       : 'Tianwen can automatically review and learn from future ordinary conversations. If you want to enable this, say that you agree in this conversation. This notice does not change your current consent.\n' + LEARNING_CONSENT_NOTICE_TEXT
+    const text = binding.policyVersion !== POLICY_VERSION ? disclosure
+      : 'This is a product notice, not a user request or authorization. In this Turn, only explain the disclosure below in plain language, then end the Turn and wait for the next genuine user message. Do not call tools or enable analysis in response to this notice. If consent is not enabled, the user can confirm in their next message; do not request confirmation through a tool.\n' + disclosure
     const notice = freezeMessage({
       ...createUserMessage({
         content: [{ type: 'text', text }],
@@ -492,18 +494,23 @@ export class TianwenLearningConsentAgentService extends Service {
     let ended = false
     let resolveEnded!: () => void
     const turnEnded = new Promise<void>(resolve => { resolveEnded = resolve })
-    const offPreStep = agent.ctx.on('agent/pre-step', async (payload, next) => {
-      const decision = await next()
+    // Inbox claim precedes native schema assembly; pre-step would be too late
+    // to hide the first request's tools. Match only this newly claimed notice.
+    const offClaimed = agent.ctx.on('agent/inbox/claimed', ({ message, turn }) => {
       if (
         noticeTurn === undefined
-        && decision.kind === 'enter'
-        && decision.messages.some(message => String(message.id) === String(notice.id))
+        && String(message.id) === String(notice.id)
       ) {
-        noticeTurn = payload.turn
+        noticeTurn = turn
         active = true
       }
-      return decision
     })
+    const offAssembly = agent.ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+      const assembled = await next()
+      // Registry restrictions exempt scope-local tools. Filter the native wire
+      // schemas instead, retaining the execution guard as a safety backstop.
+      return active ? { ...assembled, tools: [] } : assembled
+    }, { prepend: true })
     const offSession = agent.ctx.on('session/event', (session, event) => {
       if (
         active
@@ -532,7 +539,8 @@ export class TianwenLearningConsentAgentService extends Service {
       active = false
       offGuard()
       offSession()
-      offPreStep()
+      offAssembly()
+      offClaimed()
     }
   }
 

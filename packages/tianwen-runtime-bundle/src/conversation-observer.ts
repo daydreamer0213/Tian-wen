@@ -8,7 +8,7 @@ import {
   type ConversationTask, type ConversationTaskSource, type ConversationUnavailable,
 } from '@tianwen/evolution'
 import { RESEARCH_SUMMARY_SCOPE, RESEARCH_SUMMARY_TOOL_NAME, TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
-import { runConversationJudgment } from './conversation-judgment.js'
+import { CONVERSATION_ADMISSION_SCHEMA, CONVERSATION_REVIEW_SCHEMA, runConversationJudgment } from './conversation-judgment.js'
 import { conversationContext, conversationEvidenceTexts, conversationMessages as visible, recoverConversationTaskMaterial } from './conversation-task-material.js'
 
 const ADMISSION_INSTRUCTION = `Identify what the direct user is asking BEFORE any answer is produced. Return a JSON object with exactly these fields through structured_output:
@@ -193,7 +193,7 @@ export class TianwenConversationObserverService extends Service {
     const signal = AbortSignal.any([stepSignal, this.shutdown.signal, controller.signal])
     try {
       const result = await runConversationJudgment(this.ctx, agent, {
-        label: `Tianwen admission ${taskId}`, instruction: ADMISSION_INSTRUCTION,
+        label: `Tianwen admission ${taskId}`, instruction: ADMISSION_INSTRUCTION, outputSchema: CONVERSATION_ADMISSION_SCHEMA,
         material: { request: direct, context, priorTasks: earlier.map(task => ({ taskId: task.source.taskId, objective: task.admission?.decision?.objective, answerIds: task.completion!.assistantMessageIds })) }, signal,
       })
       if (!this.authorized(consent.revision)) throw new Error('cancelled')
@@ -231,7 +231,7 @@ export class TianwenConversationObserverService extends Service {
       if (material.conversation.some(message => message.role === 'user' && !task.source.userMessageIds.includes(message.id))) throw new TypeError('user request changed after criteria were frozen')
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-review-started', taskId, materialDigest: sha256(material) })
       const judge = async () => {
-        const result = await runConversationJudgment(this.ctx, agent, { label: `Tianwen review ${taskId}`, instruction: REVIEW_INSTRUCTION, material, signal })
+        const result = await runConversationJudgment(this.ctx, agent, { label: `Tianwen review ${taskId}`, instruction: REVIEW_INSTRUCTION, outputSchema: CONVERSATION_REVIEW_SCHEMA, material, signal })
         if (!this.authorized(task.source.consentRevision)) throw new Error('cancelled')
         if (result.value === null || typeof result.value !== 'object') throw new TypeError('invalid review')
         const review = parseConversationLearningRecord({ ...result.value, ...base, proof: result.proof, unavailableReason: null })

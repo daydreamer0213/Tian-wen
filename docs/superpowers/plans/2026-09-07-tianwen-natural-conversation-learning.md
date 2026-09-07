@@ -209,3 +209,27 @@ installation. Keep all of these unchecked until their own evidence exists.
   DeepSeek task, integration, CI success or daily 016 installation is claimed yet.
 - Evidence and all failed attempts remain under
   `D:/DevData/tianwen-natural-acceptance-20260907/evidence/`.
+
+### First actual UI defect and corrective candidate R1
+
+The original frozen candidate `62eaf09` completed real N0 consent and N1 main
+answer, but N1 admission returned schema metadata instead of the required kind;
+domain validation correctly left the review inconclusive. N0 also exposed a
+read-only tool rejection. All original outputs are retained; N2–N8 were not run.
+The separate prospective [R1 protocol](../../operations/tianwen-natural-conversation-acceptance-r1-20260907.md)
+uses new facts, a new isolated home and no prewritten answers or old regrading.
+
+Native structured capture now receives seven exact field schemas rather than an
+open object. Notice tools are hidden only for its precisely claimed native Turn,
+with the execution guard retained; the next genuine user Turn has normal tools.
+The reproduced schema regression failed 3 tests first, then 41 affected checks
+passed. Native wrong-field rejection/correction passed 3/3; notice suite 37/37.
+Independent schema review found no Critical/Important issue. Fresh types/build
+and import audit passed. Full TypeScript attempt 4: **1955 passed /18 conditional
+skips**, 111 passed files /5 skipped, 401.62 seconds, exit0.
+Python production and tests did not change after the 609/4 full Python gate.
+
+R1 Runtime is packed independently. Default Desktop packing hit a GitHub download
+timeout; the same already installed Electron 43.4.0 distribution was used through
+the builder's supported local-runtime setting. Final resource/lifecycle checks,
+R1 actual model outcomes and ordinary delivery are still separate pending gates.

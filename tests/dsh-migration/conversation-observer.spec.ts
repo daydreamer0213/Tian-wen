@@ -93,6 +93,11 @@ it('captures ordinary requests in two native turns before each answer and review
     expect(tasks.map(task => task.review?.verdict)).toEqual(['met', 'met'])
     expect(tasks[0]?.source.taskId).not.toBe(tasks[1]?.source.taskId)
     expect(harness.adapter.requests).toHaveLength(6)
+    expect(harness.adapter.requests[0]?.tools?.[0]?.parameters).toMatchObject({
+      type: 'object', additionalProperties: false,
+      required: ['kind', 'objective', 'criteria', 'family', 'evaluationMode', 'relatedTaskId', 'feedback'],
+      properties: { kind: { type: 'string', enum: ['task', 'conversation'] } },
+    })
     expect(harness.ctx.tianwenEvolution.listConversationTasks()).toHaveLength(2)
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })

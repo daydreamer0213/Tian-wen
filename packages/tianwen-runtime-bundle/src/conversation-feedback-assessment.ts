@@ -9,7 +9,7 @@ import {
   type ConversationFeedbackStarted, type ConversationTask, type ConversationUnavailable,
 } from '@tianwen/evolution'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
-import { runConversationJudgment } from './conversation-judgment.js'
+import { CONVERSATION_FEEDBACK_SCHEMA, runConversationJudgment } from './conversation-judgment.js'
 import { conversationEvidenceTexts, conversationMessages, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
 
 const ASSESSMENT_INSTRUCTION = `Independently assess user feedback about an exact earlier answer. Do not solve the task, propose guidance, or change the original review or pre-answer criteria. Return exactly {"classification":"attributable-problem|positive|requirement-change|preference|inconclusive","category":null,"supplementalCriteria":[],"explanation":"brief evidence-led explanation","evidenceQuotes":[]} through structured_output.
@@ -212,6 +212,7 @@ export class TianwenConversationFeedbackService extends Service {
     const signal = AbortSignal.any([this.shutdown.signal, controller.signal])
     try {
       const output = await runConversationJudgment(this.ctx, agent, {
+        outputSchema: CONVERSATION_FEEDBACK_SCHEMA,
         label: `Tianwen feedback ${assessmentId}`, instruction: ASSESSMENT_INSTRUCTION, material, signal,
       })
       const assessment = { started, startedAt: '' }
