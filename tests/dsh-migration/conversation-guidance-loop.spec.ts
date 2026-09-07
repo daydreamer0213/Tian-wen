@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -15,6 +15,11 @@ import { TianwenConversationFeedbackService } from '../../packages/tianwen-runti
 import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
 import { conversationQualityContract } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
+import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
+import { ConversationGuidanceState } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
+import { parseConversationAuditedReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
+import { recoverConversationJudgmentRequest, runConversationJudgment, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { projectClaimEvidence } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
@@ -29,11 +34,13 @@ const reviewPair = (value: ReturnType<typeof verdict>) => [evidenceResponse(valu
 const admission = { kind: 'task', objective: 'Summarize supplied facts', criteria: ['Preserve source scope'], family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
 const verdict = (met: boolean, quote: string) => ({ verdict: met ? 'met' : 'not-met', category: met ? null : 'source-fidelity', explanation: met ? 'Source scope preserved.' : 'Scope expanded beyond source.', evidenceQuotes: [quote] })
 
-it.each(['accepted', 'recover', 'recover-missing-check', 'recover-changed-check', 'mixed-models', 'copied-holdout', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
+it.each(['accepted', 'recover', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-partial-coverage', 'mixed-models', 'copied-holdout', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'loop-'))
   const guidance = '保留局部样本的适用范围，不将局部结论扩大到总体。'
   let rejectedRequest: GenerateOptions | undefined
+  const invalidAudit = ['recover-nonexistent-quote', 'recover-assistant-only', 'recover-partial-coverage'].includes(scenario)
+  let invalidValue: Record<string, unknown>
   const script: ScriptEntry[] = [
     structured(admission), textResponse('全国需要 5 天。'), ...reviewPair(verdict(false, '全国')),
     structured(admission), textResponse('公司整体增加 7%。'), ...reviewPair(verdict(false, '公司整体')),
@@ -54,7 +61,7 @@ it.each(['accepted', 'recover', 'recover-missing-check', 'recover-changed-check'
     for (const role of ['baseline', 'candidate']) {
       script.push(request => {
         if (scenario === 'disabled') harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
-        return structured({ answer: `${role === 'candidate' ? '保留来源范围' : '任务回答'} ${index}` })
+        return structured({ answer: `${role === 'candidate' ? '保留来源范围' : '任务回答'} ${index}${invalidAudit && index === 1 && role === 'candidate' ? '\n第二段仍保留范围。' : ''}` })
       })
       const judgment = { ...verdict(!(role === 'baseline' && index < 2) && !(scenario === 'regression' && role === 'candidate' && index === 4), scenario === 'derived-quote' ? 'Preserve source scope' : `${index}`) }
       if (scenario === 'derived-quote') {
@@ -73,6 +80,7 @@ it.each(['accepted', 'recover', 'recover-missing-check', 'recover-changed-check'
       })
     }
   }
+  if (invalidAudit) script.push(() => structured(invalidValue))
   script.push(structured(admission), request => {
     expect(JSON.stringify(request.messages)).toContain(guidance)
     return textResponse('仍是局部样本，需要 4 天。')
@@ -109,6 +117,74 @@ it.each(['accepted', 'recover', 'recover-missing-check', 'recover-changed-check'
       expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.activation).toBeUndefined()
       expect(warnings).toEqual(['simulated activation append failure'])
       warnings.splice(0); activationFault!.mockRestore()
+      if (invalidAudit) {
+        // Deterministic non-acceptance fixture: authentic invalid native output,
+        // inserted into an isolated accepted study without altering any Session.
+        const study = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+        const arm = study.arms[3]!
+        const originalCheck = arm.reviewChecks![1]
+        const recovered = await recoverConversationJudgmentRequest(harness.ctx, originalCheck)
+        const material = (recovered.material as { original: unknown }).original
+        const evidence = projectClaimEvidence(material)
+        const answers = evidence.items.filter(item => item.role === 'answer')
+        expect(answers).toHaveLength(2)
+        const assistant = evidence.items.find(item => item.origin === 'context' && item.role === 'assistant')!
+        expect(assistant.id).toMatch(/^context-/)
+        const source = evidence.items.find(item => item.origin === 'request')!
+        const audit = { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: evidence.evidenceDigest,
+          units: (scenario === 'recover-partial-coverage' ? answers.slice(0, 1) : answers).map(answer => ({ answerId: answer.id,
+            claims: [{ quote: scenario === 'recover-nonexistent-quote' ? 'This quote does not exist in the answer.' : answer.text,
+              kind: 'source-fact', status: 'supported', sourceIds: [scenario === 'recover-assistant-only' ? assistant.id : source.id], explanation: 'Scripted invalid evidence semantics.' }] })) }
+        const { focus, proof: _proof, ...summary } = originalCheck
+        invalidValue = { ...summary, audit }
+        const saved = await harness.ctx.sessionPersistence.inspect(SessionId(originalCheck.proof.sessionId))
+        const header = saved.events.find(event => event.type === 'request/header')!
+        if (header.type !== 'request/header') throw new Error('missing native model header')
+        const raw = await runConversationJudgment(harness.ctx, handle.agent, { label: 'Non-acceptance invalid audit restart',
+          instruction: recovered.instruction, material: recovered.material, signal: new AbortController().signal,
+          callConfig: header.data.header.config, outputSchema: { type: 'object', additionalProperties: true } })
+        const checks = parseConversationAuditedReviewChecks([arm.reviewChecks![0], { ...raw.value as object, focus, proof: raw.proof }])
+        await expect(verifyConversationReviewCheck(harness.ctx, checks[1])).resolves.toBeUndefined()
+        expect(checks[0].audit.evidenceDigest).toBe(checks[1].audit.evidenceDigest)
+        const replacement = { ...arm, reviewChecks: checks }
+        const state = new ConversationGuidanceState()
+        const records = [study.opened, study.candidate!, ...study.arms.map(item => item === arm ? replacement : item)]
+        for (const record of records) { state.validate(record); state.apply(record, '2026-09-07T00:00:00.000Z') }
+        const decision = state.decision(study.opened.studyId)
+        state.validate(decision)
+        expect(decision.verdict).toBe('accepted')
+        const path = join(root, 'evolution', 'ledger.jsonl')
+        const events = readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line))
+        for (const event of events) {
+          if (event.type === 'conversation-guidance-recorded' && event.record.studyId === study.opened.studyId) {
+            if (event.record.kind === 'arm-recorded' && event.record.caseId === arm.caseId && event.record.role === arm.role) event.record = replacement
+            if (event.record.kind === 'study-decided') event.record = decision
+          }
+          if (event.type === 'evaluation-recorded' && event.evaluation.receiptDigest === sha256(study.decision)) event.evaluation.receiptDigest = sha256(decision)
+        }
+        writeFileSync(path, events.map(event => JSON.stringify(event) + '\n').join(''))
+        const replay = new EvolutionLedger(join(root, 'evolution'))
+        expect(replay.hasRecoveryFailure()).toBe(false)
+        expect(replay.listConversationGuidanceStudies()[0]?.decision).toEqual(decision)
+        expect(replay.listConversationGuidanceStudies()[0]?.arms[3]).toEqual(replacement)
+        const before = harness.adapter.requests.length
+        await loopFiber.dispose(); await handle.dispose(); await harness.ctx.fiber.dispose()
+        const restarted = await mountFeedbackHarness(join(root, 'sessions'), [])
+        try {
+          await restarted.ctx.plugin(SubagentRuntime); await restarted.ctx.plugin(spawn, { providerName: 'spawn' })
+          await applyRuntime(restarted.ctx, { evolutionRoot: join(root, 'evolution') })
+          const parent = await restarted.ctx.agents.create({ sessionId: SessionId('natural-learning-main'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+          await restarted.ctx.plugin(TianwenConversationGuidanceLoopService)
+          await restarted.ctx.tianwenConversationGuidanceLoop.schedule(parent.agent)
+          await restarted.ctx.tianwenConversationGuidanceLoop.whenIdle()
+          expect(harness.adapter.requests).toHaveLength(before)
+          expect(restarted.adapter.requests).toHaveLength(0)
+          expect(restarted.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.activation).toBeUndefined()
+          expect(warnings).toEqual(['invalid-judgment'])
+          await parent.dispose()
+        } finally { await restarted.ctx.fiber.dispose() }
+        return
+      }
       const secondProof = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!.arms[0]!.reviewChecks![1].proof
       const inspect = harness.ctx.sessionPersistence.inspect.bind(harness.ctx.sessionPersistence)
       const proofFault = scenario === 'recover' ? undefined : vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockImplementation(async id => {
