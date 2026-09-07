@@ -4,8 +4,9 @@
 
 Status (2026-09-07): steps 1–4 implemented; full engineering regression and the
 finite actual DeepSeek U cohort are complete. The cohort retains semantic failures
-and a rejected study, not proof of general quality or benefit. Step 5 remains open
-for integration, exact-main CI and ordinary installation.
+and a rejected study, not proof of general quality or benefit. Step 5 engineering
+delivery is complete: merged payload CI, normal installation and actual daily
+lifecycle/data-preservation checks passed. Semantic reliability remains open.
 
 **Goal:** Ordinary natural conversation automatically produces attributable task
 observations, result reviews, feedback and evidence-led learning.
@@ -21,8 +22,9 @@ meaning; new natural-task sources are explicitly distinguished.
 
 ## Constraints
 
-- Use `D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge` on
-  `codex/natural-conversation-learning`; generated data stays on D:.
+- Implementation used `D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge`
+  on `codex/natural-conversation-learning`; delivery now uses `main`. Keep this
+  worktree because the daily shortcut targets it; generated data stays on D:.
 - User approved option 2 and continuous execution; no intermediate approval gate.
 - Main Agent/model/tool execution and Session lifecycle remain DSH-owned.
 - Task identity includes native Session lifecycle and task boundary.
@@ -152,7 +154,7 @@ support and consent, with no rerun of task trials or judges.
   commands, packets or instructions to call internal observation tools.
 - [x] Record every outcome, rectify reproduced product defects with focused
   tests, and retain earlier attempts unchanged.
-- [ ] Integrate and push under existing authorization; verify CI for the merged
+- [x] Integrate and push under existing authorization; verify CI for the merged
   commit before ordinary installation; update current handoff and release facts.
 
 ## Engineering verification checkpoint — 2026-09-07
@@ -332,3 +334,12 @@ facts, user-output restrictions or reviewer reliability passed in every answer.
 Remaining delivery work: integrate, exact-main CI, normal installation and data/
 shortcut preservation. Known semantic reliability and long-term benefit are not
 silently upgraded to completed by these engineering checks.
+
+Delivery completed after `326e9f0` passed all four exact-head CI jobs. Normal
+managed/Web upgrade and repeat installation passed; the installed archive matches
+the real acceptance archive. All 82 Desktop files match, actual daily lifecycle
+passed 1/1 in 7.77 s, its owned process/port closed, and original 30 Session/state
+files plus the shortcut remain byte-identical. The old program/archive are retained.
+See [016 delivery](../../operations/tianwen-natural-conversation-delivery-20260907.md).
+This closes the engineering delivery checklist, not the still-unproved efficacy
+and semantic-reliability objectives stated in the real-use report.

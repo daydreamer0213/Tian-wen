@@ -4,7 +4,7 @@
 
 天问是一个面向长时间运行 Agent、可审计的学习控制面。
 
-**当前源码候选：Runtime 0.1.16 / Desktop preview.17。** DSH 0.1.1-rc.2 是当前精确支持的
+**当前实现版本：Runtime 0.1.16 / Desktop preview.17。** DSH 0.1.1-rc.2 是当前精确支持的
 Agent Runtime。首次确认自动学习后，用户可以直接在 DSH Web/Desktop 中自然说出需求，
 包括同一会话里的后续任务和反馈；不需要 `/research-summary`、规定格式材料、Goal，
 也不需要主动要求总结经验，天问会自行观测和复盘。

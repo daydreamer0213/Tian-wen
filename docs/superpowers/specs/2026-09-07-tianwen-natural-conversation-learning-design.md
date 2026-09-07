@@ -4,7 +4,9 @@ Status: direction approved by the project owner on 2026-09-07 (option 2).
 Implementation steps 1–4 and final engineering gates are complete. The finite
 real DeepSeek U cohort is closed with a rejected automatic study and retained
 semantic errors, not full quality acceptance or efficacy. Integration and ordinary
-delivery remain separate pending gates at this checkpoint.
+016/preview.17 delivery are complete; the exact payload commit's four CI jobs and
+actual daily installation/lifecycle/data-preservation checks passed. See the
+[delivery record](../../operations/tianwen-natural-conversation-delivery-20260907.md).
 
 ## Product contract
 
