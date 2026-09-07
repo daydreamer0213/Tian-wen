@@ -66,7 +66,7 @@ export function parseClaimAudit(value: unknown, verdict: 'met' | 'not-met' | 'in
 
 Keep existing run/verify/project public signatures, widening only ClaimAudit's union as needed. `parseConversationAuditedReviewChecks` accepts wholly v1 or wholly v2 pairs, never mixed versions; `parseConversationQualityReviewChecks` maps v4→v1 and v5→v2 while pre-v4 remains strictly unaudited. Store the entire original audit shape in task and arm records, so unchanged native exact-value comparison still works.
 
-- [ ] Step1: Create the new fixture root, record BASE and capture literal v4 quality object/hash plus v1 records from BASE before changing the current builder. Add RED tests for v5/v2, malformed/mixed parent boundaries and v4 readability. Example assertions:
+- [x] Step1: Create the new fixture root, record BASE and capture literal v4 quality object/hash plus v1 records from BASE before changing the current builder. Add RED tests for v5/v2, malformed/mixed parent boundaries and v4 readability. Example assertions:
 
 ```ts
 expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v5')
@@ -80,11 +80,11 @@ expect(() => parseConversationAuditedReviewChecks([v1Pair[0], v2Pair[1]])).toThr
 
 `literalV4`, `v1Pair`, `v2Pair` are local named fixtures built from the exact spec types; the historical expected value must not come from the new current builder. Include actual ledger append/replay round trips and unchanged historic hashes, not only standalone parsing.
 
-- [ ] Step2: In the producer test, capture the actual structured_output.parameters supplied by runConversationClaimReview through the existing native harness. Feed it to public `assertSupportedJsonSchema` and `validateJsonSchemaValue`, not a hand-recreated schema. Use a three-unit original answer `正文。\n\n---\n`: first/nonblank and third/Markdown require firstClaim; the middle blank is null. Assert legal input passes and missing/extra unit, nonblank null, missing firstClaim, blank object/quote/source fail at the native schema layer. Keep a consumer-invalid empty/nonexact substantive quote to demonstrate the remaining defense. Add native same-one-shot capture rejection/correction tests and assert the rejected tool attempt is not counted as the successful capture; no extra parent turn or host retry.
+- [x] Step2: In the producer test, capture the actual structured_output.parameters supplied by runConversationClaimReview through the existing native harness. Feed it to public `assertSupportedJsonSchema` and `validateJsonSchemaValue`, not a hand-recreated schema. Use a three-unit original answer `正文。\n\n---\n`: first/nonblank and third/Markdown require firstClaim; the middle blank is null. Assert legal input passes and missing/extra unit, nonblank null, missing firstClaim, blank object/quote/source fail at the native schema layer. Keep a consumer-invalid empty/nonexact substantive quote to demonstrate the remaining defense. Add native same-one-shot capture rejection/correction tests and assert the rejected tool attempt is not counted as the successful capture; no extra parent turn or host retry.
 
-- [ ] Step3: Run affected focused RED tests and preserve actual failures. Implement smallest domain union dispatch with common claim syntax validation, preserving exact old v1 behavior. V2 fixed-unit keys must match `^answer-[1-9][0-9]*$`; reject unknown/extra unit-object keys, invalid null/object shapes, limits and statuses. Current v5 builder spreads an explicit legacy-v4 builder so old parse/hash cannot silently resolve to v5. Update both parent state-boundary checks, not only the union parser.
+- [x] Step3: Run affected focused RED tests and preserve actual failures. Implement smallest domain union dispatch with common claim syntax validation, preserving exact old v1 behavior. V2 fixed-unit keys must match `^answer-[1-9][0-9]*$`; reject unknown/extra unit-object keys, invalid null/object shapes, limits and statuses. Current v5 builder spreads an explicit legacy-v4 builder so old parse/hash cannot silently resolve to v5. Update both parent state-boundary checks, not only the union parser.
 
-- [ ] Step4: Build the v2 native schema using only supported properties:
+- [x] Step4: Build the v2 native schema using only supported properties:
 
 ```ts
 const unitProperties = Object.fromEntries(answerItems.map(item => [item.id,
@@ -98,9 +98,9 @@ const unitsSchema = object(unitProperties) // object() marks every property requ
 
 The local claim schema has the existing five required fields, existing enums and general descriptions of their already-required meaning. It does not include expected verdicts or actual R8 answer phrases. Store the exact native v2 result. Runtime validation requires exact projected keys/null eligibility and applies the existing claim/source/quote/digest guards to firstClaim and each additionalClaim; do not synthesize a claim or convert a saved record. Preserve the v1 evidence-validation path for historical proof verification. PURPOSE/COMMON/FOCUS remain byte-identical.
 
-- [ ] Step5: Update only current scripted fixtures to produce v2 from their actual supplied projection; keep explicit legacy-v1 fixture support for historic recovery tests. Run real persisted complete-runtime restart cases: valid v2 study activates once with0new requests and a second full restart still makes0requests/0duplicate activation; authentic v2 capture with a schema-valid nonexact quote/assistant-only source/substituted material fails recovery with0requests/no activation. Do not replace these with fixtures now rejected before persistence. Preserve old v1 positive/negative no-call recovery evidence tests and ensure old quality is not new support. Add a new ordinary turn while prior review remains pending.
+- [x] Step5: Update only current scripted fixtures to produce v2 from their actual supplied projection; keep explicit legacy-v1 fixture support for historic recovery tests. Run real persisted complete-runtime restart cases: valid v2 study activates once with0new requests and a second full restart still makes0requests/0duplicate activation; authentic v2 capture with a schema-valid nonexact quote/assistant-only source/substituted material fails recovery with0requests/no activation. Do not replace these with fixtures now rejected before persistence. Preserve old v1 positive/negative no-call recovery evidence tests and ensure old quality is not new support. Add a new ordinary turn while prior review remains pending.
 
-- [ ] Step6: Run all listed conversation tests, evolution/runtime dependency build and typechecks. Record exact commands/pass/fail/skip counts plus initial failures; self-review and commit only owned code/tests. Root generates BASE..HEAD review package; independent SPEC and QUALITY approval is required. Any genuine blocker gets one bounded fix/review loop, not unreviewed controller edits.
+- [x] Step6: Run all listed conversation tests, evolution/runtime dependency build and typechecks. Record exact commands/pass/fail/skip counts plus initial failures; self-review and commit only owned code/tests. Root generates BASE..HEAD review package; independent SPEC and QUALITY approval is required. Any genuine blocker gets one bounded fix/review loop, not unreviewed controller edits.
 
 ### Task 2: Runtime020 / Desktop preview.21 packaging identity
 
@@ -108,7 +108,7 @@ The local claim schema has the existing five required fields, existing enums and
 
 **Interfaces:** Exact archive `tianwen-runtime-bundle-0.1.20.tgz`; Desktop0.1.0-preview.21 embeds that archive; declared native dependency stays DSH0.1.1-rc.2;019 becomes an explicitly supported predecessor without dropping010–018.
 
-- [ ] Step1: Record BASE and add RED normal019→020 migration, embedded020/preview21 identity, unknown021 rejection, old data/config/shortcut preservation and exact CI suite-name assertions.
+- [x] Step1: Record BASE and add RED normal019→020 migration, embedded020/preview21 identity, unknown021 rejection, old data/config/shortcut preservation and exact CI suite-name assertions.
 
 ```ts
 expect(desktopManifest.version).toBe('0.1.0-preview.21')
@@ -118,8 +118,8 @@ expect(resolveKnownOldDesktopTarget(previous019Target).profileRoot).toBe(previou
 
 Use existing fixture builders and preserve all unknown/malformed target rejection tests.
 
-- [ ] Step2: Mechanically update current019/preview20 references only, distinguish predecessor/historical literals, add019 predecessor and the new CI suite name. No source build may overwrite the live Desktop output.
-- [ ] Step3: Run runtime-bundle, installer, portable/controlled/runtime-profile, Desktop artifact/host/bootstrap/profile-prepare and ordinary goal CLI tests plus the Python CI contract file; build/typecheck and report real counts. Self-review/commit; root provides the full task diff for independent scoped review.
+- [x] Step2: Mechanically update current019/preview20 references only, distinguish predecessor/historical literals, add019 predecessor and the new CI suite name. No source build may overwrite the live Desktop output.
+- [x] Step3: Run runtime-bundle, installer, portable/controlled/runtime-profile, Desktop artifact/host/bootstrap/profile-prepare and ordinary goal CLI tests plus the Python CI contract file; build/typecheck and report real counts. Self-review/commit; root provides the full task diff for independent scoped review.
 
 ### Task 3: Fresh final-source gates and R9 real use
 
