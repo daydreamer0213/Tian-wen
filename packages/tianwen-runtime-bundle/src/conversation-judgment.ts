@@ -17,12 +17,17 @@ const verdict = choices(['met', 'not-met', 'inconclusive'])
 // Describe the actual result fields to the native capture tool. An open object
 // let the real model emit schema metadata (`type`) instead of the required `kind`.
 // Native validation and the stricter evidence/domain checks both remain active.
-export const CONVERSATION_ADMISSION_SCHEMA = object({
+const CONVERSATION_ADMISSION_SCHEMA = object({
   kind: choices(['task', 'conversation']), objective: string, criteria: strings,
   family: choices(CONVERSATION_FAMILIES), evaluationMode: choices(['text', 'external', 'subjective']),
   relatedTaskId: nullable(string),
   feedback: nullable(object({ kind: choices(['correction', 'positive', 'preference', 'requirement-change']), quote: string, category })),
 })
+export function conversationAdmissionSchema(relatedTaskIds: readonly string[]): ObjectJsonSchema {
+  return { ...CONVERSATION_ADMISSION_SCHEMA, properties: { ...CONVERSATION_ADMISSION_SCHEMA.properties,
+    relatedTaskId: relatedTaskIds.length === 0 ? { type: 'null' } : nullable(choices(relatedTaskIds)),
+  } }
+}
 export const CONVERSATION_REVIEW_SCHEMA = object({ verdict, category, explanation: string, evidenceQuotes: strings })
 export const CONVERSATION_FEEDBACK_SCHEMA = object({
   classification: choices(['attributable-problem', 'positive', 'requirement-change', 'preference', 'inconclusive']),

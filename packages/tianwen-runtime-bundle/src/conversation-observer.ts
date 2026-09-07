@@ -8,7 +8,7 @@ import {
   type ConversationTask, type ConversationTaskSource, type ConversationUnavailable,
 } from '@tianwen/evolution'
 import { RESEARCH_SUMMARY_SCOPE, RESEARCH_SUMMARY_TOOL_NAME, TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
-import { CONVERSATION_ADMISSION_SCHEMA, CONVERSATION_REVIEW_SCHEMA, runConversationJudgment } from './conversation-judgment.js'
+import { conversationAdmissionSchema, CONVERSATION_REVIEW_SCHEMA, runConversationJudgment } from './conversation-judgment.js'
 import { conversationContext, conversationEvidenceTexts, conversationMessages as visible, recoverConversationTaskMaterial } from './conversation-task-material.js'
 
 const ADMISSION_INSTRUCTION = `Identify what the direct user is asking BEFORE any answer is produced. Return a JSON object with exactly these fields through structured_output:
@@ -193,11 +193,12 @@ export class TianwenConversationObserverService extends Service {
     const signal = AbortSignal.any([stepSignal, this.shutdown.signal, controller.signal])
     try {
       const result = await runConversationJudgment(this.ctx, agent, {
-        label: `Tianwen admission ${taskId}`, instruction: ADMISSION_INSTRUCTION, outputSchema: CONVERSATION_ADMISSION_SCHEMA,
+        label: `Tianwen admission ${taskId}`, instruction: ADMISSION_INSTRUCTION, outputSchema: conversationAdmissionSchema(earlier.map(task => task.source.taskId)),
         material: { request: direct, context, priorTasks: earlier.map(task => ({ taskId: task.source.taskId, objective: task.admission?.decision?.objective, answerIds: task.completion!.assistantMessageIds })) }, signal,
       })
       if (!this.authorized(consent.revision)) throw new Error('cancelled')
       const decision = parseConversationAdmission(result.value)
+      if (decision.relatedTaskId !== null && !earlier.some(task => task.source.taskId === decision.relatedTaskId)) throw new TypeError('feedback target is not an available earlier task')
       if (decision.feedback !== null && !directText(direct).includes(decision.feedback.quote)) throw new TypeError('feedback quote is not in current direct user input')
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-admitted', taskId, decision, proof: result.proof, unavailableReason: null })
       return decision.kind === 'task' ? snapshot.rules[decision.family] : undefined

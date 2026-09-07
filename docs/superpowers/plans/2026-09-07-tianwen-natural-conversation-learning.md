@@ -233,3 +233,16 @@ R1 Runtime is packed independently. Default Desktop packing hit a GitHub downloa
 timeout; the same already installed Electron 43.4.0 distribution was used through
 the builder's supported local-runtime setting. Final resource/lifecycle checks,
 R1 actual model outcomes and ordinary delivery are still separate pending gates.
+
+R1's normalized local-runtime Desktop passed the strict resource/archive audit
+and actual prepared-profile lifecycle (1/1, 8.06 seconds). Normal packaging's
+Electron demo/version files were moved recoverably to evidence, not shipped.
+Real R1 P0 notice/enable completed without tool failures. P1 used proper fields
+but returned string `"null"` as relatedTaskId; the ledger rejected the nonexistent
+reference. Its unavailable result is retained, not regraded. The narrow repair
+constrains the native field to actual bounded prior task IDs or null. Its new
+wire-schema regression failed first, then 42 affected checks, typecheck and build
+passed; independent review found no Critical/Important issue. A full fresh suite
+is running separately, not yet claimed green. The [finite R2 protocol](../../operations/tianwen-natural-conversation-acceptance-r2-20260907.md)
+keeps R1 inputs unchanged: one explicit interface-repair replay and the seven
+still-unattempted prospective inputs. No candidate evaluation is repeated to pass.

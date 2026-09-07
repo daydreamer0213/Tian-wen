@@ -96,7 +96,10 @@ it('captures ordinary requests in two native turns before each answer and review
     expect(harness.adapter.requests[0]?.tools?.[0]?.parameters).toMatchObject({
       type: 'object', additionalProperties: false,
       required: ['kind', 'objective', 'criteria', 'family', 'evaluationMode', 'relatedTaskId', 'feedback'],
-      properties: { kind: { type: 'string', enum: ['task', 'conversation'] } },
+      properties: { kind: { type: 'string', enum: ['task', 'conversation'] }, relatedTaskId: { type: 'null' } },
+    })
+    expect(harness.adapter.requests[3]?.tools?.[0]?.parameters).toMatchObject({
+      properties: { relatedTaskId: { oneOf: [{ type: 'string', enum: [tasks[0]!.source.taskId] }, { type: 'null' }] } },
     })
     expect(harness.ctx.tianwenEvolution.listConversationTasks()).toHaveLength(2)
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
