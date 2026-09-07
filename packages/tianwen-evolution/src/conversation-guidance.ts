@@ -315,7 +315,7 @@ export class ConversationGuidanceState {
       if (item === undefined || item.materialDigest !== record.materialDigest) throw new Error('guidance arm does not match its frozen case material')
       const expected = record.role === 'baseline' ? opened.parentVersion : guidanceVersion(study.candidate.candidateSnapshot)
       if (record.behaviorVersion !== expected) throw new Error('guidance arm behavior version disagrees with its frozen role')
-      if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4'].includes(opened.qualityContract?.schemaVersion ?? '') && record.reviewChecks === undefined) throw new Error('v2/v3/v4 guidance arms require two independent review checks')
+      if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5'].includes(opened.qualityContract?.schemaVersion ?? '') && record.reviewChecks === undefined) throw new Error('versioned guidance arms require two independent review checks')
       if (record.reviewChecks !== undefined) {
         parseConversationQualityReviewChecks(record.reviewChecks, opened.qualityContract)
         const expected = conversationReviewConsensus(record.reviewChecks)

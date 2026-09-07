@@ -22,13 +22,17 @@ const schema = {
   required: ['verdict', 'category', 'explanation', 'evidenceQuotes', 'audit'],
 }
 
-it('recovers persisted native checks for both deterministic formatting-unit representations without new requests', async () => {
+it('recovers current v2 null formatting units and an exact historical v1 capture without new requests', async () => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-formatting-recovery-')); roots.push(root)
   const material = { task: { prompt: '保留原段落与空行。', criteria: ['preserve formatting'] }, answer: '第一段。\r\n\r\n第二段。\n \t\u00a0\n第三段。' }
+  const evidence = projectClaimEvidence(material)
+  const historicalAudit = { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: evidence.evidenceDigest,
+    units: evidence.items.filter(item => item.role === 'answer').map(answer => ({ answerId: answer.id, claims: answer.text.trim() === '' ? [] : [{ quote: answer.text, kind: 'source-fact', status: 'supported', sourceIds: ['request-1'], explanation: 'Historical exact v1 capture.' }] })) }
   const harness = await mountPersistentHarness(root, [
     auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['第一段。'] }, 'empty'),
     auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['第三段。'] }, 'claim'),
+    toolCallResponse('historical-v1', 'structured_output', { verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['第一段。'], audit: historicalAudit }),
   ])
   await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
   const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-formatting-parent'), meta: { cwd: root }, agentOptions: config })
@@ -36,26 +40,32 @@ it('recovers persisted native checks for both deterministic formatting-unit repr
     const reviewed = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Formatting recovery', material,
       evidence: ['保留原段落与空行。', '第一段。', '第三段。'], purpose: 'method-study', signal: new AbortController().signal, callConfig: config })
     expect(reviewed.verdict).toBe('met')
-    const formatting = reviewed.reviewChecks.map(check => check.audit.units.filter(unit => unit.claims.length === 0 || unit.claims[0]?.quote.trim() === ''))
-    expect(formatting[0]?.some(unit => unit.claims.length === 0)).toBe(true)
-    expect(formatting[1]?.some(unit => unit.claims[0]?.quote.trim() === '')).toBe(true)
-    const requestCount = harness.adapter.requests.length
+    expect(reviewed.reviewChecks.every(check => check.audit.schemaVersion === 'tianwen.claim-audit.v2')).toBe(true)
     for (const check of reviewed.reviewChecks) {
+      if (check.audit.schemaVersion !== 'tianwen.claim-audit.v2') throw new Error('expected current v2 audit')
+      expect(Object.values(check.audit.units).some(unit => unit === null)).toBe(true)
+    }
+    const recovered = await recoverConversationJudgmentRequest(harness.ctx, reviewed.reviewChecks[0])
+    const raw = await runConversationJudgment(harness.ctx, handle.agent, { label: 'Historical v1 formatting recovery', instruction: recovered.instruction,
+      material: recovered.material, outputSchema: schema, signal: new AbortController().signal, callConfig: config })
+    const historical = { ...(raw.value as object), focus: 'requirements', proof: raw.proof } as ConversationAuditedReviewCheck
+    const requestCount = harness.adapter.requests.length
+    for (const check of [...reviewed.reviewChecks, historical]) {
       await expect(verifyConversationClaimReviewCheck(harness.ctx, check, { purpose: 'method-study', materialDigest: sha256(material.task), outputDigest: sha256(material.answer), modelConfigDigest: sha256(config) })).resolves.toBeUndefined()
     }
     expect(harness.adapter.requests).toHaveLength(requestCount)
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
-it.each(['nonexistent-quote', 'assistant-only-support', 'missing-answer-coverage'] as const)('rejects a real native capture with %s audit evidence', async invalid => {
+it.each(['nonexistent-quote', 'assistant-only-support'] as const)('rejects a real schema-valid v2 native capture with %s audit evidence', async invalid => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-recovery-')); roots.push(root)
   const material = invalid === 'assistant-only-support'
     ? { task: { context: [{ role: 'assistant', content: [{ type: 'text', text: 'Earlier assistant says delivered.' }] }], request: [{ role: 'user', content: [{ type: 'text', text: 'Only repeat: delivered.' }] }], criteria: ['repeat'] }, answer: 'delivered.' }
-    : { task: { prompt: 'Only repeat: delivered.', criteria: ['repeat'] }, answer: invalid === 'missing-answer-coverage' ? 'delivered.\nSecond answer unit.' : 'delivered.' }
+    : { task: { prompt: 'Only repeat: delivered.', criteria: ['repeat'] }, answer: 'delivered.' }
   const evidence = projectClaimEvidence(material)
-  const audit = { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: evidence.evidenceDigest,
-    units: [{ answerId: 'answer-1', claims: [{ quote: invalid === 'nonexistent-quote' ? 'invented' : invalid === 'missing-answer-coverage' ? 'delivered.\n' : 'delivered.', kind: 'source-fact', status: 'supported', sourceIds: [invalid === 'assistant-only-support' ? 'context-1' : 'request-1'], explanation: 'Scripted native negative capture.' }] }] }
+  const audit = { schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: evidence.evidenceDigest,
+    units: { 'answer-1': { firstClaim: { quote: invalid === 'nonexistent-quote' ? 'invented' : 'delivered.', kind: 'source-fact', status: 'supported', sourceIds: [invalid === 'assistant-only-support' ? 'context-1' : 'request-1'], explanation: 'Scripted native negative capture.' }, additionalClaims: [] } } }
   const harness = await mountPersistentHarness(root, [auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'] }), auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'] }), toolCallResponse('invalid-audit', 'structured_output', { verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'], audit })])
   await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
   const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-recovery-parent'), meta: { cwd: root }, agentOptions: config })
@@ -65,6 +75,33 @@ it.each(['nonexistent-quote', 'assistant-only-support', 'missing-answer-coverage
     const raw = await runConversationJudgment(harness.ctx, handle.agent, { label: 'Claim recovery invalid', instruction: recovered.instruction, material: recovered.material, outputSchema: schema, signal: new AbortController().signal, callConfig: config })
     const check = { ...(raw.value as object), focus: 'requirements', proof: raw.proof } as ConversationAuditedReviewCheck
     await expect(verifyConversationClaimReviewCheck(harness.ctx, check, { purpose: 'method-study', materialDigest: sha256(material.task), outputDigest: sha256(material.answer), modelConfigDigest: sha256(config) })).rejects.toThrow('invalid-judgment')
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('rejects a historical v1 native capture with missing answer coverage without new verification requests', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-v1-negative-recovery-')); roots.push(root)
+  const material = { task: { prompt: 'Only repeat both lines.', criteria: ['repeat'] }, answer: 'delivered.\nSecond answer unit.' }
+  const evidence = projectClaimEvidence(material)
+  const audit = { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: evidence.evidenceDigest,
+    units: [{ answerId: 'answer-1', claims: [{ quote: 'delivered.\n', kind: 'source-fact', status: 'supported', sourceIds: ['request-1'], explanation: 'Historical incomplete v1 capture.' }] }] }
+  const harness = await mountPersistentHarness(root, [
+    auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'] }),
+    auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'] }),
+    toolCallResponse('historical-v1-incomplete', 'structured_output', { verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'], audit }),
+  ])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-v1-negative-parent'), meta: { cwd: root }, agentOptions: config })
+  try {
+    const reviewed = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Current wrapper seed', material,
+      evidence: ['Only repeat both lines.', 'delivered.'], purpose: 'method-study', signal: new AbortController().signal, callConfig: config })
+    const recovered = await recoverConversationJudgmentRequest(harness.ctx, reviewed.reviewChecks[0])
+    const raw = await runConversationJudgment(harness.ctx, handle.agent, { label: 'Historical v1 incomplete capture', instruction: recovered.instruction,
+      material: recovered.material, outputSchema: schema, signal: new AbortController().signal, callConfig: config })
+    const check = { ...(raw.value as object), focus: 'requirements', proof: raw.proof } as ConversationAuditedReviewCheck
+    const requestCount = harness.adapter.requests.length
+    await expect(verifyConversationClaimReviewCheck(harness.ctx, check, { purpose: 'method-study', materialDigest: sha256(material.task), outputDigest: sha256(material.answer), modelConfigDigest: sha256(config) })).rejects.toThrow('invalid-judgment')
+    expect(harness.adapter.requests).toHaveLength(requestCount)
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
@@ -93,7 +130,7 @@ it('rejects a real native capture whose persisted wrapper substitutes the projec
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-recovery-projection-')); roots.push(root)
   const material = { task: { prompt: 'Only repeat: delivered.', criteria: ['repeat'] }, answer: 'delivered.' }
   const evidence = projectClaimEvidence(material)
-  const audit = { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: evidence.evidenceDigest, units: [{ answerId: 'answer-1', claims: [{ quote: 'delivered.', kind: 'source-fact', status: 'supported', sourceIds: ['request-1'], explanation: 'Captured before wrapper substitution.' }] }] }
+  const audit = { schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: evidence.evidenceDigest, units: { 'answer-1': { firstClaim: { quote: 'delivered.', kind: 'source-fact', status: 'supported', sourceIds: ['request-1'], explanation: 'Captured before wrapper substitution.' }, additionalClaims: [] } } }
   const harness = await mountPersistentHarness(root, [auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'] }), auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'] }), toolCallResponse('substituted-projection', 'structured_output', { verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'], audit })])
   await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
   const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-projection-parent'), meta: { cwd: root }, agentOptions: config })

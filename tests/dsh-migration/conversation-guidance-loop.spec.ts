@@ -34,12 +34,12 @@ const reviewPair = (value: ReturnType<typeof verdict>) => [evidenceResponse(valu
 const admission = { kind: 'task', objective: 'Summarize supplied facts', criteria: ['Preserve source scope'], family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
 const verdict = (met: boolean, quote: string) => ({ verdict: met ? 'met' : 'not-met', category: met ? null : 'source-fidelity', explanation: met ? 'Source scope preserved.' : 'Scope expanded beyond source.', evidenceQuotes: [quote] })
 
-it.each(['accepted', 'recover', 'recover-formatting', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-partial-coverage', 'mixed-models', 'copied-holdout', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
+it.each(['accepted', 'recover', 'recover-formatting', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-substituted-material', 'mixed-models', 'copied-holdout', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'loop-'))
   const guidance = '保留局部样本的适用范围，不将局部结论扩大到总体。'
   let rejectedRequest: GenerateOptions | undefined
-  const invalidAudit = ['recover-nonexistent-quote', 'recover-assistant-only', 'recover-partial-coverage'].includes(scenario)
+  const invalidAudit = ['recover-nonexistent-quote', 'recover-assistant-only', 'recover-substituted-material'].includes(scenario)
   let invalidValue: Record<string, unknown>
   const script: ScriptEntry[] = [
     structured(admission), textResponse('全国需要 5 天。'), ...reviewPair(verdict(false, '全国')),
@@ -131,17 +131,21 @@ it.each(['accepted', 'recover', 'recover-formatting', 'recover-missing-check', '
         const assistant = evidence.items.find(item => item.origin === 'context' && item.role === 'assistant')!
         expect(assistant.id).toMatch(/^context-/)
         const source = evidence.items.find(item => item.origin === 'request')!
-        const audit = { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: evidence.evidenceDigest,
-          units: (scenario === 'recover-partial-coverage' ? answers.slice(0, 1) : answers).map(answer => ({ answerId: answer.id,
-            claims: [{ quote: scenario === 'recover-nonexistent-quote' ? 'This quote does not exist in the answer.' : answer.text,
-              kind: 'source-fact', status: 'supported', sourceIds: [scenario === 'recover-assistant-only' ? assistant.id : source.id], explanation: 'Scripted invalid evidence semantics.' }] })) }
+        const audit = { schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: evidence.evidenceDigest,
+          units: Object.fromEntries(answers.map(answer => [answer.id, { firstClaim: {
+            quote: scenario === 'recover-nonexistent-quote' ? 'This quote does not exist in the answer.' : answer.text,
+            kind: 'source-fact', status: 'supported', sourceIds: [scenario === 'recover-assistant-only' ? assistant.id : source.id], explanation: 'Scripted invalid evidence semantics.',
+          }, additionalClaims: [] }])) }
         const { focus, proof: _proof, ...summary } = originalCheck
         invalidValue = { ...summary, audit }
         const saved = await harness.ctx.sessionPersistence.inspect(SessionId(originalCheck.proof.sessionId))
         const header = saved.events.find(event => event.type === 'request/header')!
         if (header.type !== 'request/header') throw new Error('missing native model header')
+        const capturedMaterial = scenario === 'recover-substituted-material'
+          ? { ...(recovered.material as Record<string, unknown>), original: { ...(material as Record<string, unknown>), task: { ...((material as { task: Record<string, unknown> }).task), prompt: 'Substituted after the study was frozen.' } } }
+          : recovered.material
         const raw = await runConversationJudgment(harness.ctx, handle.agent, { label: 'Non-acceptance invalid audit restart',
-          instruction: recovered.instruction, material: recovered.material, signal: new AbortController().signal,
+          instruction: recovered.instruction, material: capturedMaterial, signal: new AbortController().signal,
           callConfig: header.data.header.config, outputSchema: { type: 'object', additionalProperties: true } })
         const checks = parseConversationAuditedReviewChecks([arm.reviewChecks![0], { ...raw.value as object, focus, proof: raw.proof }])
         await expect(verifyConversationReviewCheck(harness.ctx, checks[1])).resolves.toBeUndefined()
@@ -219,7 +223,7 @@ it.each(['accepted', 'recover', 'recover-formatting', 'recover-missing-check', '
     }
     expect(warnings).toEqual([])
     expect(study?.arms).toHaveLength(10)
-    expect(study?.arms.every(arm => arm.reviewChecks?.every(check => 'audit' in check && check.audit.schemaVersion === 'tianwen.claim-audit.v1'))).toBe(true)
+    expect(study?.arms.every(arm => arm.reviewChecks?.every(check => 'audit' in check && check.audit.schemaVersion === 'tianwen.claim-audit.v2'))).toBe(true)
     if (scenario === 'regression') {
       expect(study?.decision?.verdict).toBe('rejected')
       expect(study?.activation).toBeUndefined()
@@ -262,11 +266,26 @@ it.each(['accepted', 'recover', 'recover-formatting', 'recover-missing-check', '
         expect(restarted.adapter.requests).toHaveLength(0)
         if (scenario === 'recover-formatting') {
           const first = recovered.arms[0]!.reviewChecks![0]!
-          expect(first.audit.units.some(unit => unit.claims.length === 0)).toBe(true)
+          expect(first.audit.schemaVersion).toBe('tianwen.claim-audit.v2')
+          if (first.audit.schemaVersion !== 'tianwen.claim-audit.v2') throw new Error('expected current v2 audit')
+          expect(Object.values(first.audit.units).some(unit => unit === null)).toBe(true)
           expect((await recoverConversationJudgmentRequest(restarted.ctx, first)).material).toEqual(expect.objectContaining({ original: expect.objectContaining({ answer: expect.stringContaining('\r\n\r\n') }) }))
         }
         await parent.dispose()
       } finally { await restarted.ctx.fiber.dispose() }
+      const restartedAgain = await mountFeedbackHarness(join(root, 'sessions'), [])
+      try {
+        await restartedAgain.ctx.plugin(SubagentRuntime); await restartedAgain.ctx.plugin(spawn, { providerName: 'spawn' })
+        await applyRuntime(restartedAgain.ctx, { evolutionRoot: join(root, 'evolution') })
+        const parent = await restartedAgain.ctx.agents.create({ sessionId: SessionId('natural-learning-main'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+        await restartedAgain.ctx.plugin(TianwenConversationGuidanceLoopService)
+        await restartedAgain.ctx.tianwenConversationGuidanceLoop.schedule(parent.agent)
+        await restartedAgain.ctx.tianwenConversationGuidanceLoop.whenIdle()
+        expect(restartedAgain.adapter.requests).toHaveLength(0)
+        expect(activationCount()).toBe(1)
+        expect(restartedAgain.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.activation).toEqual(study!.activation)
+        await parent.dispose()
+      } finally { await restartedAgain.ctx.fiber.dispose() }
       return
     }
     if (scenario === 'contradict-source' || scenario === 'contradict-counter') {

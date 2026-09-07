@@ -102,7 +102,7 @@ describe('natural guidance domain governance', () => {
     expect(parseConversationGuidanceRecord(legacy)).toEqual(legacy)
   })
 
-  it('requires both native checks for v2 arms and rejects a forged consensus', () => {
+  it('requires both native checks for v5 arms and rejects a forged consensus', () => {
     const { kind: _kind, studyId: _id, ...body } = opening()
     const qualityContract = conversationQualityContract()
     const currentBody = { ...body, qualityContract, cases: body.cases.map(item => {
@@ -117,7 +117,7 @@ describe('natural guidance domain governance', () => {
     expect(() => append(state, arm)).toThrow(/two independent/i)
     const reviewChecks = parseConversationAuditedReviewChecks(['requirements', 'grounding'].map(focus => ({ focus, verdict: 'not-met', category: 'instruction-following',
       explanation: 'Output constraint violated.', evidenceQuotes: ['extra output'], proof: focus === 'requirements' ? arm.judgeProof : proof('separate-grounding'),
-      audit: { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: sha256('arm evidence'), units: [{ answerId: 'answer-1', claims: [{ quote: 'extra output', kind: 'source-fact', status: 'unsupported', sourceIds: [], explanation: 'The requested restriction was violated.' }] }] } })))
+      audit: { schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: sha256('arm evidence'), units: { 'answer-1': { firstClaim: { quote: 'extra output', kind: 'source-fact', status: 'unsupported', sourceIds: [], explanation: 'The requested restriction was violated.' }, additionalClaims: [] } } } })))
     const legacyChecks = reviewChecks.map(({ audit: _audit, ...check }) => check)
     expect(() => append(state, { ...arm, reviewChecks: legacyChecks })).toThrow(/audit/i)
     expect(() => append(state, { ...arm, reviewChecks: [reviewChecks[0], legacyChecks[1]] })).toThrow(/audit/i)

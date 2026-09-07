@@ -47,15 +47,15 @@ function auditedChecks(verdict: 'met' | 'not-met' | 'inconclusive' = 'met') {
     focus, verdict, category: verdict === 'not-met' ? 'source-fidelity' : null,
     explanation: 'Checked the frozen answer.', evidenceQuotes: ['answer'], proof: {
       sessionId: `audit:${focus}`, sessionDigest: sha256(`session:${focus}`), requestDigest: sha256(`request:${focus}`),
-    }, audit: { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: sha256('frozen evidence'), units: [{ answerId: 'answer-1', claims: [{
+    }, audit: { schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: sha256('frozen evidence'), units: { 'answer-1': { firstClaim: {
       quote: 'answer', kind: 'source-fact', status: verdict === 'met' ? 'supported' : verdict === 'not-met' ? 'unsupported' : 'uncertain',
       sourceIds: ['request-1'], explanation: 'Checked against request-1.',
-    }] }] },
+    }, additionalClaims: [] } } },
   })))
 }
 
 describe('natural conversation task evidence', () => {
-  it('rejects silent proofless completed v4 task reviews but retains explicit unavailability', () => {
+  it('rejects silent proofless completed v5 task reviews but retains explicit unavailability', () => {
     const ledger = ledgerWithConsent(), source = start(), admitted = admission(source.taskId)
     ledger.recordConversationLearning(source); ledger.recordConversationLearning(admitted); ledger.recordConversationLearning(finish(source.taskId))
     const silent = { kind: 'task-reviewed' as const, taskId: source.taskId, admissionDigest: sha256(admitted), resultDigest: sha256('answer'),
@@ -79,7 +79,7 @@ describe('natural conversation task evidence', () => {
     expect(() => new EvolutionLedger(directory)).toThrow(/unavailable|audit|proof|review checks/i)
   })
 
-  it('rejects malformed and wrong-format v4 checks through task state and serialized replay', () => {
+  it('rejects malformed and wrong-format v5 checks through task state and serialized replay', () => {
     const setup = (directory = root()) => {
       const ledger = ledgerWithConsent(directory), source = start(), admitted = admission(source.taskId)
       ledger.recordConversationLearning(source); ledger.recordConversationLearning(admitted); ledger.recordConversationLearning(finish(source.taskId))
@@ -106,7 +106,7 @@ describe('natural conversation task evidence', () => {
     const reviewChecks = parseConversationAuditedReviewChecks(['requirements', 'grounding'].map((focus, index) => ({ focus,
       verdict: index === 0 ? 'met' : 'not-met', category: index === 0 ? null : 'instruction-following', explanation: 'Original output restriction checked.', evidenceQuotes: ['only output'],
       proof: { sessionId: focus, sessionDigest: sha256(focus), requestDigest: sha256(`input:${focus}`) },
-      audit: { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: sha256('task evidence'), units: [{ answerId: 'answer-1', claims: [{ quote: 'only output', kind: 'source-fact', status: index === 0 ? 'supported' : 'unsupported', sourceIds: ['request-1'], explanation: 'Checked against the request.' }] }] } })))
+      audit: { schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: sha256('task evidence'), units: { 'answer-1': { firstClaim: { quote: 'only output', kind: 'source-fact', status: index === 0 ? 'supported' : 'unsupported', sourceIds: ['request-1'], explanation: 'Checked against the request.' }, additionalClaims: [] } } } })))
     const review = { kind: 'task-reviewed' as const, taskId: source.taskId, admissionDigest: sha256(admitted), resultDigest: sha256('answer'),
       ...conversationReviewConsensus(reviewChecks), unavailableReason: null }
     expect(() => ledger.recordConversationLearning(review)).toThrow(/two independent/i)

@@ -12,7 +12,7 @@ it('versions the original-instruction authority while keeping the exact historic
   const legacy = { schemaVersion: 'tianwen.conversation-quality.v1', source: 'host', criterion: 'Be faithful to user-supplied or source facts and their uncertainty, and to actual verified tool evidence. Do not invent or contradict source-dependent facts, decisions, status or completed actions. Prior assistant claims, user silence or continuation do not verify such facts. Clearly distinguish inferences, assumptions and advice from confirmed facts. Relevant general knowledge, reasonable labeled inference and advice, and user-requested fiction are allowed; this contract does not require additional tool calls.' } as const
   expect(parseConversationQualityContract(legacy)).toEqual(legacy)
   expect(hasCurrentConversationQuality(legacy)).toBe(false)
-  expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v4')
+  expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v5')
   expect(conversationQualityContract().criterion).toContain('original direct-user instructions')
   expect(() => parseConversationQualityContract({ ...legacy, criterion: 'Accept everything.' })).toThrow()
 })

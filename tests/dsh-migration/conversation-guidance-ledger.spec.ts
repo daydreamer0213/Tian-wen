@@ -26,11 +26,14 @@ const checks = (id: string, verdict: 'met' | 'not-met' | 'inconclusive') => pars
   focus, verdict, category: verdict === 'not-met' ? 'source-fidelity' : null, explanation: 'Original review against frozen duration criteria.',
   evidenceQuotes: ['pilot'], proof: proof(`${id}:${focus}`),
 })))
-const auditedChecks = (id: string, verdict: 'met' | 'not-met' | 'inconclusive') => parseConversationAuditedReviewChecks(checks(id, verdict).map(check => ({ ...check,
-  audit: { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: sha256(`evidence:${id}`), units: [{ answerId: 'answer-1', claims: [{ quote: 'pilot', kind: 'source-fact', status: verdict === 'met' ? 'supported' : verdict === 'not-met' ? 'unsupported' : 'uncertain', sourceIds: ['request-1'], explanation: 'Checked against frozen material.' }] }] },
+const auditedChecks = (id: string, verdict: 'met' | 'not-met' | 'inconclusive', version: 'v1' | 'v2' = 'v2') => parseConversationAuditedReviewChecks(checks(id, verdict).map(check => ({ ...check,
+  audit: version === 'v1'
+    ? { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: sha256(`evidence:${id}`), units: [{ answerId: 'answer-1', claims: [{ quote: 'pilot', kind: 'source-fact', status: verdict === 'met' ? 'supported' : verdict === 'not-met' ? 'unsupported' : 'uncertain', sourceIds: ['request-1'], explanation: 'Checked against frozen material.' }] }] }
+    : { schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: sha256(`evidence:${id}`), units: { 'answer-1': { firstClaim: { quote: 'pilot', kind: 'source-fact', status: verdict === 'met' ? 'supported' : verdict === 'not-met' ? 'unsupported' : 'uncertain', sourceIds: ['request-1'], explanation: 'Checked against frozen material.' }, additionalClaims: [] } } },
 })))
 const exactV2Quality: ConversationQualityContract = { schemaVersion: 'tianwen.conversation-quality.v2', source: 'host', criterion: `${exactV1Quality.criterion} The original direct-user instructions remain authoritative even if extracted criteria omit or weaken an explicit requirement. Preserve output-only restrictions, exclusions, conditions, uncertainty and who may decide or act. Distinguish the user's instructions from quoted source content. Evaluate the complete answer, including introductions, alternatives and closing offers. Two independent native checks must agree before a conclusive review; neither check may see the other's result.` }
 const exactV3Quality: ConversationQualityContract = { schemaVersion: 'tianwen.conversation-quality.v3', source: 'host', criterion: `${exactV2Quality.criterion} Original-result reviews use only requirements applicable when that task ran. For newly generated method-study answers, separately identified host-frozen feedback standards apply prospectively; they do not regrade the old answer or override an explicit instruction in the evaluated user request.` }
+const exactV4Quality: ConversationQualityContract = { ...exactV3Quality, schemaVersion: 'tianwen.conversation-quality.v4' }
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 function ledgerRoot() {
@@ -52,15 +55,15 @@ function task(ledger: EvolutionLedger, turn: number, verdict: 'met' | 'not-met' 
     decision: { kind: 'task', objective: 'Summarize the supplied pilot result.', criteria: ['Preserve the supplied duration.'],
       family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null } }
   const resultDigest = sha256(`answer ${turn}`)
-  const reviewChecks = qualityContract?.schemaVersion === 'tianwen.conversation-quality.v4' ? auditedChecks(`review:${turn}`, verdict) : checks(`review:${turn}`, verdict)
+  const reviewChecks = qualityContract?.schemaVersion === 'tianwen.conversation-quality.v5' ? auditedChecks(`review:${turn}`, verdict) : qualityContract?.schemaVersion === 'tianwen.conversation-quality.v4' ? auditedChecks(`review:${turn}`, verdict, 'v1') : checks(`review:${turn}`, verdict)
   const records: ConversationLearningRecord[] = [source, admission,
     ...models.map((modelConfigDigest, index) => ({ kind: 'task-model-observed' as const, taskId, headerSeq: turn * 10 + index, modelConfigDigest })),
     { kind: 'task-finished', taskId, endSeq: turn * 10 + 8, status: 'completed', assistantMessageIds: [`answer-${turn}`], resultDigest, evidenceIds: [] },
     { kind: 'task-reviewed', taskId, admissionDigest: sha256(admission), resultDigest,
     verdict, category: verdict === 'not-met' ? 'source-fidelity' : null, explanation: 'Original review against frozen duration criteria.',
     evidenceQuotes: verdict === 'not-met' ? ['pilot'] : [], proof: proof(`review:${turn}`), unavailableReason: null,
-    ...(['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4'].includes(qualityContract?.schemaVersion ?? '') ? { ...conversationReviewConsensus(reviewChecks), reviewChecks } : {}) }]
-  if (qualityContract === null || qualityContract.schemaVersion !== 'tianwen.conversation-quality.v4') {
+    ...(['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5'].includes(qualityContract?.schemaVersion ?? '') ? { ...conversationReviewConsensus(reviewChecks), reviewChecks } : {}) }]
+  if (qualityContract === null || qualityContract.schemaVersion !== 'tianwen.conversation-quality.v5') {
     if (legacyRoot === undefined) throw new Error('legacy fixture requires an explicit historical ledger path')
     appendFileSync(join(legacyRoot, 'ledger.jsonl'), records.map(record => `${canonicalJson({ type: 'conversation-learning-recorded', schemaVersion: 'tianwen.conversation-learning.v1', at: '2026-09-07T00:00:00.000Z', record })}\n`).join(''))
     ledger = new EvolutionLedger(legacyRoot)
@@ -73,7 +76,7 @@ function seeded(verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', secondS
   const ledger = new EvolutionLedger(root)
   ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
   const tasks = [task(ledger, 1, verdict, scope, undefined, undefined, qualityContract, root), task(ledger, 2, verdict, secondScope, repeatRequest ? 'pilot request 1' : 'pilot request 2', secondModels, qualityContract, root), task(ledger, 3, 'met', scope, undefined, undefined, qualityContract, root)] as const
-  return { root, ledger: qualityContract === null || qualityContract.schemaVersion !== 'tianwen.conversation-quality.v4' ? new EvolutionLedger(root) : ledger, tasks }
+  return { root, ledger: qualityContract === null || qualityContract.schemaVersion !== 'tianwen.conversation-quality.v5' ? new EvolutionLedger(root) : ledger, tasks }
 }
 
 function opening(tasks: readonly [ConversationTask, ConversationTask, ConversationTask], label = 'first', assessments: readonly (string | undefined)[] = []): GuidanceStudyOpened {
@@ -109,9 +112,11 @@ function proposalPlan(opened: GuidanceStudyOpened) {
     behaviorVersion: guidanceVersion(role === 'baseline' ? opened.parentSnapshot : candidate.candidateSnapshot),
     executionProof: proof(`${opened.studyId}:${item.id}:${role}:execute`), judgeProof: proof(`${opened.studyId}:${item.id}:${role}:judge`),
     outputDigest: sha256(`${item.id}:${role}:actual output`), verdict: role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met',
-    ...(['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4'].includes(opened.qualityContract?.schemaVersion ?? '') ? {
+    ...(['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5'].includes(opened.qualityContract?.schemaVersion ?? '') ? {
       reviewChecks: opened.qualityContract?.schemaVersion === 'tianwen.conversation-quality.v4'
-        ? auditedChecks(`${opened.studyId}:${item.id}:${role}:judge`, role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met')
+        ? auditedChecks(`${opened.studyId}:${item.id}:${role}:judge`, role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met', 'v1')
+        : opened.qualityContract?.schemaVersion === 'tianwen.conversation-quality.v5'
+          ? auditedChecks(`${opened.studyId}:${item.id}:${role}:judge`, role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met')
         : checks(`${opened.studyId}:${item.id}:${role}:judge`, role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met'),
       judgeProof: proof(`${opened.studyId}:${item.id}:${role}:judge:requirements`),
     } : {}),
@@ -152,7 +157,7 @@ function evaluated(ledger: EvolutionLedger, opened: GuidanceStudyOpened) {
   return { ...value, decision }
 }
 
-it.each([exactV1Quality, exactV2Quality].flatMap(quality => [false, true].map(activated => ({ quality, activated }))))('replays exact $quality.schemaVersion studies without regrading or new activation: previously active $activated', ({ quality, activated }) => {
+it.each([exactV1Quality, exactV2Quality, exactV4Quality].flatMap(quality => [false, true].map(activated => ({ quality, activated }))))('replays exact $quality.schemaVersion studies without regrading or new activation: previously active $activated', ({ quality, activated }) => {
   const { root, ledger, tasks } = seeded('not-met', scope, false, undefined, quality)
   const old = historicalStudy(root, ledger, opening(tasks), activated)
   const before = old.ledger.listEvents().map(sha256)

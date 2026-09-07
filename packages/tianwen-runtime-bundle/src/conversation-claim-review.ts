@@ -100,9 +100,19 @@ export function validateClaimAudit(audit: unknown, evidence: ClaimEvidence, verd
   if (value === undefined) return invalid()
   const parsed = value
   if (parsed.evidenceDigest !== evidence.evidenceDigest) invalid()
-  const units = parsed.units as unknown[]
   const answers = evidence.items.filter(item => item.role === 'answer')
   const sources = new Map(evidence.items.filter(item => item.role !== 'answer').map(item => [item.id, item]))
+  if (parsed.schemaVersion === 'tianwen.claim-audit.v2' && Object.keys(parsed.units).length !== answers.length) invalid()
+  const units = parsed.schemaVersion === 'tianwen.claim-audit.v1' ? parsed.units : answers.map(answer => {
+    if (!Object.hasOwn(parsed.units, answer.id)) return invalid()
+    const unit = parsed.units[answer.id]
+    if (answer.text.trim() === '') {
+      if (unit !== null) return invalid()
+      return { answerId: answer.id, claims: [] }
+    }
+    if (unit === null || unit === undefined) return invalid()
+    return { answerId: answer.id, claims: [unit.firstClaim, ...unit.additionalClaims] }
+  })
   if (units.length !== answers.length || units.length > 128) invalid()
   const seen = new Set<string>()
   let claimCount = 0
@@ -145,14 +155,24 @@ const object = (properties: Record<string, JsonSchemaNode>): ObjectJsonSchema =>
 const array = (items: JsonSchemaNode): JsonSchemaNode => ({ type: 'array', items })
 
 function auditSchema(evidence: ClaimEvidence): JsonSchemaNode {
-  const answerIds = evidence.items.filter(item => item.role === 'answer').map(item => item.id)
+  const answers = evidence.items.filter(item => item.role === 'answer')
   const sourceIds = evidence.items.filter(item => item.role !== 'answer').map(item => item.id)
+  const claim = object({
+    quote: { type: 'string', description: 'Copy an exact non-empty substring from this answer unit. Preserve its original bytes and do not paraphrase or add a label.' },
+    kind: { ...choices(kinds), description: 'Classify the claim as source-fact, advice, inference, fiction, general-knowledge or non-factual.' },
+    status: { ...choices(statuses), description: 'Use supported only for a source-fact with authoritative supplied evidence; use permitted for task-compatible non-source-facts such as advice or fiction.' },
+    sourceIds: { ...array(sourceIds.length === 0 ? { type: 'null' } : choices(sourceIds)), description: 'List only exact supplied source IDs that support or inform this claim; answer IDs are not sources.' },
+    explanation: { type: 'string', description: 'Explain the scope, time, certainty, commitment and source-authority check for this claim.' },
+  })
+  const unitProperties: Record<string, JsonSchemaNode> = Object.fromEntries(answers.map(item => [item.id, item.text.trim() === ''
+    ? { type: 'null' as const, description: 'This entire answer unit is whitespace, so record it explicitly as null.' }
+    : { ...object({
+    firstClaim: claim,
+    additionalClaims: { ...array(claim), description: 'Additional assessments for this same answer unit; use an empty array when its first claim covers the whole nonblank unit.' },
+  }), description: 'Assess this complete nonblank answer unit with at least its required first claim.' }]))
   return object({
-    schemaVersion: choices(['tianwen.claim-audit.v1']), evidenceDigest: choices([evidence.evidenceDigest]),
-    units: array(object({ answerId: choices(answerIds), claims: array(object({
-      quote: string, kind: choices(kinds), status: choices(statuses),
-      sourceIds: array(sourceIds.length === 0 ? { type: 'null' } : choices(sourceIds)), explanation: string,
-    })) })),
+    schemaVersion: choices(['tianwen.claim-audit.v2']), evidenceDigest: choices([evidence.evidenceDigest]),
+    units: { ...object(unitProperties), description: 'Provide every listed answer ID exactly once; do not omit or add units.' },
   })
 }
 

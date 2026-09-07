@@ -451,10 +451,10 @@ describe('Tianwen main-chat learning consent tool', () => {
           focus, verdict: options.review, category: options.review === 'not-met' ? 'instruction-following' : null,
           explanation: 'PRIVATE review explanation', evidenceQuotes: ['PRIVATE answer quote'],
           proof: { sessionId: `${taskId}:${focus}`, sessionDigest: sha256(`${taskId}:${focus}`), requestDigest: sha256(`review:${taskId}:${focus}`) },
-          audit: { schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: sha256(`evidence:${taskId}`), units: [{ answerId: 'answer-1', claims: [{
+          audit: { schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: sha256(`evidence:${taskId}`), units: { 'answer-1': { firstClaim: {
             quote: 'PRIVATE answer quote', kind: 'source-fact', status: options.review === 'met' ? 'supported' : options.review === 'not-met' ? 'unsupported' : 'uncertain',
             sourceIds: ['request-1'], explanation: 'PRIVATE claim explanation',
-          }] }] },
+          }, additionalClaims: [] } } },
         })))
         if (options.review !== undefined) evolution.recordConversationLearning({
           kind: 'task-reviewed', taskId, admissionDigest: sha256(admitted), resultDigest: sha256(`answer ${turn}`),

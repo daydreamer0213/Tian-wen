@@ -19,8 +19,9 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 
 const claim = (quote: string, kind: 'source-fact' | 'advice' | 'inference' | 'fiction' | 'general-knowledge' | 'non-factual', status: 'supported' | 'unsupported' | 'contradicted' | 'permitted' | 'uncertain', sourceIds: string[] = []) => ({ quote, kind, status, sourceIds, explanation: 'Checked scope, time, certainty, commitment and source authority.' })
 const auditFor = (evidence: ReturnType<typeof projectClaimEvidence>, make = (text: string) => claim(text, 'source-fact', 'supported', ['request-1'])) => ({
-  schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: evidence.evidenceDigest,
-  units: evidence.items.filter(item => item.role === 'answer').map(item => ({ answerId: item.id, claims: [make(item.text)] })),
+  schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: evidence.evidenceDigest,
+  units: Object.fromEntries(evidence.items.filter(item => item.role === 'answer').map(item => [item.id,
+    item.text.trim() === '' ? null : { firstClaim: make(item.text), additionalClaims: [] }])),
 })
 
 describe('claim evidence projection', () => {
@@ -105,7 +106,7 @@ describe('claim audit validation', () => {
     }
   })
 
-  it('accepts both formatting representations only for the exact bound whitespace unit', () => {
+  it('keeps both historical v1 formatting representations only for the exact bound whitespace unit', () => {
     const formattingEvidence = projectClaimEvidence({ task: { prompt: '保留换行。' }, answer: ' 第一段。\r\n\r\n第二段。\n \t\u00a0\n' })
     const answerUnits = formattingEvidence.items.filter(item => item.role === 'answer')
     const substantive = (item: typeof answerUnits[number]) => ({ answerId: item.id, claims: [claim(item.text, 'source-fact', 'supported', ['request-1'])] })
@@ -131,16 +132,16 @@ describe('claim audit validation', () => {
 
   it.each([
     ['extra key', (audit: any) => ({ ...audit, extra: true })],
-    ['foreign source', (audit: any) => ({ ...audit, units: [{ ...audit.units[0], claims: [{ ...audit.units[0].claims[0], sourceIds: ['foreign-1'] }] }, ...audit.units.slice(1)] })],
-    ['answer source', (audit: any) => ({ ...audit, units: [{ ...audit.units[0], claims: [{ ...audit.units[0].claims[0], sourceIds: ['answer-1'] }] }, ...audit.units.slice(1)] })],
-    ['duplicate unit', (audit: any) => ({ ...audit, units: [...audit.units, audit.units[0]] })],
-    ['missing unit', (audit: any) => ({ ...audit, units: audit.units.slice(1) })],
-    ['nonexact quote', (audit: any) => ({ ...audit, units: [{ ...audit.units[0], claims: [{ ...audit.units[0].claims[0], quote: '不存在' }] }, ...audit.units.slice(1)] })],
+    ['foreign source', (audit: any) => changeFirst(audit, (first: any) => ({ ...first, sourceIds: ['foreign-1'] }))],
+    ['answer source', (audit: any) => changeFirst(audit, (first: any) => ({ ...first, sourceIds: ['answer-1'] }))],
+    ['extra unit', (audit: any) => ({ ...audit, units: { ...audit.units, 'answer-999': null } })],
+    ['missing unit', (audit: any) => ({ ...audit, units: Object.fromEntries(Object.entries(audit.units).slice(1)) })],
+    ['nonexact quote', (audit: any) => changeFirst(audit, (first: any) => ({ ...first, quote: '不存在' }))],
     ['digest tampering', (audit: any) => ({ ...audit, evidenceDigest: sha256('changed') })],
-    ['assistant-only supported fact', (audit: any) => ({ ...audit, units: [{ ...audit.units[0], claims: [{ ...audit.units[0].claims[0], sourceIds: ['context-1'] }] }, ...audit.units.slice(1)] })],
-    ['invalid source-fact status', (audit: any) => ({ ...audit, units: [{ ...audit.units[0], claims: [{ ...audit.units[0].claims[0], status: 'permitted' }] }, ...audit.units.slice(1)] })],
-    ['invalid advice status', (audit: any) => ({ ...audit, units: [{ ...audit.units[0], claims: [{ ...audit.units[0].claims[0], kind: 'advice', status: 'supported' }] }, ...audit.units.slice(1)] })],
-    ['unsupported passing claim', (audit: any) => ({ ...audit, units: [{ ...audit.units[0], claims: [{ ...audit.units[0].claims[0], status: 'unsupported' }] }, ...audit.units.slice(1)] })],
+    ['assistant-only supported fact', (audit: any) => changeFirst(audit, (first: any) => ({ ...first, sourceIds: ['context-1'] }))],
+    ['invalid source-fact status', (audit: any) => changeFirst(audit, (first: any) => ({ ...first, status: 'permitted' }))],
+    ['invalid advice status', (audit: any) => changeFirst(audit, (first: any) => ({ ...first, kind: 'advice', status: 'supported' }))],
+    ['unsupported passing claim', (audit: any) => changeFirst(audit, (first: any) => ({ ...first, status: 'unsupported' }))],
   ])('rejects %s', (_name, mutate) => {
     const withAssistant = projectClaimEvidence({ source: { context: [{ id: 'c', role: 'assistant', content: [{ type: 'text', text: '旧说法' }] }], request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '请求' }] })] }, conversation: [{ id: 'a', role: 'assistant', content: [{ type: 'text', text: '回答' }] }], toolEvidence: [] })
     const base = auditFor(withAssistant)
@@ -154,11 +155,11 @@ describe('claim audit validation', () => {
   })
 
   it('rejects excessive claim count and audit bytes', () => {
-    const many = auditFor(evidence)
-    many.units[0]!.claims = Array.from({ length: 513 }, () => claim('原料', 'source-fact', 'supported', ['request-1']))
+    const many: any = auditFor(evidence)
+    many.units['answer-1']!.additionalClaims = Array.from({ length: 512 }, () => claim('原料', 'source-fact', 'supported', ['request-1']))
     expect(() => validateClaimAudit(many, evidence, 'not-met')).toThrow('invalid-judgment')
     const large = auditFor(evidence)
-    large.units[0]!.claims[0]!.explanation = 'x'.repeat(32 * 1024)
+    large.units['answer-1']!.firstClaim.explanation = 'x'.repeat(32 * 1024)
     expect(() => validateClaimAudit(large, evidence, 'not-met')).toThrow('invalid-judgment')
   })
 })
@@ -200,13 +201,13 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-stat
       expect(result).toMatchObject({ verdict: mode === 'disagree' ? 'inconclusive' : verdicts[0], category: mode === 'not-met' ? 'source-fidelity' : null })
       const checks = (result as Awaited<ReturnType<typeof runConversationClaimReview>>).reviewChecks
       expect(checks).toHaveLength(2)
-      expect(checks.every(check => check.audit.schemaVersion === 'tianwen.claim-audit.v1')).toBe(true)
+      expect(checks.every(check => check.audit.schemaVersion === 'tianwen.claim-audit.v2')).toBe(true)
       const recovered = await recoverConversationJudgmentRequest(harness.ctx, checks[0]!)
       expect(recovered.material).toEqual({ original: material, claimEvidence: evidence })
       expect(recovered.instruction).toContain('Review purpose: method-study')
       expect(recovered.instruction).toContain('Independently reconstruct all original requirements')
       expect(recovered.modelConfigDigests).toEqual([sha256({ provider: 'tianwen-probe', model: 'scripted', temperature: 0.25, maxTokens: 2048 })])
-      if (mode === 'permitted-inference') expect(checks.map(check => check.audit.units[0]!.claims[0])).toEqual([
+      if (mode === 'permitted-inference') expect(checks.map(check => check.audit.schemaVersion === 'tianwen.claim-audit.v2' ? check.audit.units['answer-1']!.firstClaim : undefined)).toEqual([
         { quote: '原料已送达。', kind: 'inference', status: 'permitted', sourceIds: ['request-1'], explanation: 'Directly derived from request-1 and retained as a permitted inference.' },
         { quote: '原料已送达。', kind: 'inference', status: 'permitted', sourceIds: ['request-1'], explanation: 'Directly derived from request-1 and retained as a permitted inference.' },
       ])
@@ -233,3 +234,9 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-stat
     expect(harness.ctx.agents.list()).toHaveLength(1)
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
+
+function changeFirst(audit: any, change: (first: any) => unknown) {
+  const answerId = Object.keys(audit.units)[0]!
+  const unit = audit.units[answerId]
+  return { ...audit, units: { ...audit.units, [answerId]: { ...unit, firstClaim: change(unit.firstClaim) } } }
+}

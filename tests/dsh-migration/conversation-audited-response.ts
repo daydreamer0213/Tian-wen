@@ -14,12 +14,17 @@ export const auditedEvidenceResponse = (value: Record<string, unknown> & { evide
     claimEvidence: { evidenceDigest: string, items: readonly { id: string, role: string, text: string }[] }
   }
   const source = material.claimEvidence.items.find(item => item.role === 'user' || item.role === 'tool')
-  const audit = {
-    schemaVersion: 'tianwen.claim-audit.v1', evidenceDigest: material.claimEvidence.evidenceDigest,
-    units: material.claimEvidence.items.filter(item => item.role === 'answer').map(item => ({ answerId: item.id,
-      claims: item.text.trim() === '' && formatting === 'empty' ? [] : [{ quote: item.text,
-        kind: item.text.trim() === '' || source === undefined ? 'non-factual' : 'source-fact', status: item.text.trim() === '' || source === undefined ? 'permitted' : 'supported',
-        sourceIds: item.text.trim() === '' || source === undefined ? [] : [source.id], explanation: 'Deterministic fixture captures every answer unit.' }] })),
+  const answers = material.claimEvidence.items.filter(item => item.role === 'answer')
+  const assessment = (item: typeof answers[number]) => ({ quote: item.text,
+    kind: item.text.trim() === '' || source === undefined ? 'non-factual' : 'source-fact', status: item.text.trim() === '' || source === undefined ? 'permitted' : 'supported',
+    sourceIds: item.text.trim() === '' || source === undefined ? [] : [source.id], explanation: 'Deterministic fixture captures every answer unit.' })
+  const version = schema?.properties?.audit?.properties?.schemaVersion?.enum?.[0]
+  const audit = version === 'tianwen.claim-audit.v1' ? {
+    schemaVersion: version, evidenceDigest: material.claimEvidence.evidenceDigest,
+    units: answers.map(item => ({ answerId: item.id, claims: item.text.trim() === '' && formatting === 'empty' ? [] : [assessment(item)] })),
+  } : {
+    schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: material.claimEvidence.evidenceDigest,
+    units: Object.fromEntries(answers.map(item => [item.id, item.text.trim() === '' ? null : { firstClaim: assessment(item), additionalClaims: [] }])),
   }
   return toolCallResponse('judgment', 'structured_output', { ...value, evidenceQuotes: value.evidenceQuotes.map(quote => {
     const raw = choices.find(item => typeof item === 'string' && item.includes(quote))
