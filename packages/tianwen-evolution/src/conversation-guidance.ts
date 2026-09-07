@@ -1,5 +1,5 @@
 import { sha256 } from './learning-intake.js'
-import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, parseConversationQualityContract, type ConversationQualityContract, type ConversationFamily, type ConversationFailure, type ConversationJudgmentProof } from './conversation-learning.js'
+import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, parseConversationQualityContract, parseConversationReviewChecks, conversationReviewConsensus, type ConversationReviewChecks, type ConversationQualityContract, type ConversationFamily, type ConversationFailure, type ConversationJudgmentProof } from './conversation-learning.js'
 import type { Sha256Digest } from './ledger.js'
 
 /** Data only: the host reads these strings as guidance, never as executable source. */
@@ -66,6 +66,7 @@ export interface GuidanceArmRecord {
   readonly judgeProof: GuidanceProof
   readonly outputDigest: Sha256Digest
   readonly verdict: 'met' | 'not-met' | 'inconclusive'
+  readonly reviewChecks?: ConversationReviewChecks
 }
 export interface GuidanceDecisionRecord {
   readonly kind: 'study-decided'
@@ -204,10 +205,11 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
     return { kind: input.kind, studyId, candidateSnapshot: parseGuidanceSnapshot(input.candidateSnapshot), proposalProof: proof(input.proposalProof) }
   }
   if (input.kind === 'arm-recorded') {
-    object(input, ['kind', 'studyId', 'caseId', 'role', 'materialDigest', 'behaviorVersion', 'executionProof', 'judgeProof', 'outputDigest', 'verdict'])
+    object(input, ['kind', 'studyId', 'caseId', 'role', 'materialDigest', 'behaviorVersion', 'executionProof', 'judgeProof', 'outputDigest', 'verdict', ...(Object.hasOwn(input, 'reviewChecks') ? ['reviewChecks'] : [])])
     return { kind: input.kind, studyId, caseId: text(input.caseId, 512), role: oneOf(input.role, ['baseline', 'candidate']),
       materialDigest: digest(input.materialDigest), behaviorVersion: digest(input.behaviorVersion), executionProof: proof(input.executionProof),
-      judgeProof: proof(input.judgeProof), outputDigest: digest(input.outputDigest), verdict: oneOf(input.verdict, ['met', 'not-met', 'inconclusive']) }
+      judgeProof: proof(input.judgeProof), outputDigest: digest(input.outputDigest), verdict: oneOf(input.verdict, ['met', 'not-met', 'inconclusive']),
+      ...(Object.hasOwn(input, 'reviewChecks') ? { reviewChecks: parseConversationReviewChecks(input.reviewChecks) } : {}) }
   }
   if (input.kind === 'study-decided') {
     object(input, ['kind', 'studyId', 'armsDigest', 'verdict'])
@@ -313,8 +315,13 @@ export class ConversationGuidanceState {
       if (item === undefined || item.materialDigest !== record.materialDigest) throw new Error('guidance arm does not match its frozen case material')
       const expected = record.role === 'baseline' ? opened.parentVersion : guidanceVersion(study.candidate.candidateSnapshot)
       if (record.behaviorVersion !== expected) throw new Error('guidance arm behavior version disagrees with its frozen role')
-      const sessions = [record.executionProof.sessionId, record.judgeProof.sessionId]
-      if (new Set(sessions).size !== 2 || sessions.some(id => this.nativeSessions.has(id))) throw new Error('guidance execution and judge require distinct independent native Sessions')
+      if (opened.qualityContract?.schemaVersion === 'tianwen.conversation-quality.v2' && record.reviewChecks === undefined) throw new Error('v2 guidance arms require two independent review checks')
+      if (record.reviewChecks !== undefined) {
+        const expected = conversationReviewConsensus(record.reviewChecks)
+        if (record.verdict !== expected.verdict || sha256(record.judgeProof) !== sha256(expected.proof)) throw new Error('guidance arm disagrees with its independent check consensus')
+      }
+      const sessions = [record.executionProof.sessionId, ...(record.reviewChecks?.map(check => check.proof.sessionId) ?? [record.judgeProof.sessionId])]
+      if (new Set(sessions).size !== sessions.length || sessions.some(id => this.nativeSessions.has(id))) throw new Error('guidance execution and judge require distinct independent native Sessions')
       return
     }
     if (record.kind === 'study-decided') {
@@ -346,6 +353,7 @@ export class ConversationGuidanceState {
     } else if (record.kind === 'arm-recorded') {
       this.nativeSessions.add(record.executionProof.sessionId)
       this.nativeSessions.add(record.judgeProof.sessionId)
+      for (const check of record.reviewChecks ?? []) this.nativeSessions.add(check.proof.sessionId)
       this.studies.set(record.studyId, { ...study, arms: [...study.arms, record] })
     } else if (record.kind === 'study-decided') this.studies.set(record.studyId, { ...study, decision: record })
     else if (record.kind === 'guidance-activated') {

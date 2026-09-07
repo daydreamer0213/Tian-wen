@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { EvolutionLedger, isPublicLedgerEvent } from '../../packages/tianwen-evolution/src/ledger.js'
 import { canonicalJson, sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { baselineGuidanceSnapshot, guidanceVersion } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
-import { conversationQualityContract, parseConversationLearningRecord } from '../../packages/tianwen-evolution/src/conversation-learning.js'
+import { conversationQualityContract, parseConversationLearningRecord, conversationReviewConsensus, parseConversationReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 
 const roots: string[] = []
 function root() {
@@ -44,6 +44,19 @@ function ledgerWithConsent(directory = root()) {
 }
 
 describe('natural conversation task evidence', () => {
+  it('rejects missing or forged v2 consensus and preserves a real disagreement as inconclusive', () => {
+    const ledger = ledgerWithConsent(), source = start(), admitted = admission(source.taskId)
+    ledger.recordConversationLearning(source); ledger.recordConversationLearning(admitted); ledger.recordConversationLearning(finish(source.taskId))
+    const reviewChecks = parseConversationReviewChecks(['requirements', 'grounding'].map((focus, index) => ({ focus,
+      verdict: index === 0 ? 'met' : 'not-met', category: index === 0 ? null : 'instruction-following', explanation: 'Original output restriction checked.', evidenceQuotes: ['only output'],
+      proof: { sessionId: focus, sessionDigest: sha256(focus), requestDigest: sha256(`input:${focus}`) } })))
+    const review = { kind: 'task-reviewed' as const, taskId: source.taskId, admissionDigest: sha256(admitted), resultDigest: sha256('answer'),
+      ...conversationReviewConsensus(reviewChecks), unavailableReason: null }
+    expect(() => ledger.recordConversationLearning(review)).toThrow(/two independent/i)
+    expect(() => ledger.recordConversationLearning({ ...review, reviewChecks, verdict: 'met' })).toThrow(/consensus/i)
+    ledger.recordConversationLearning({ ...review, reviewChecks })
+    expect(ledger.listConversationTasks()[0]?.review).toMatchObject({ verdict: 'inconclusive', reviewChecks })
+  })
   it('rejects a newly appended task admission without the current host contract while retaining unavailable admissions', () => {
     const ledger = ledgerWithConsent()
     const source = start()
@@ -63,7 +76,8 @@ describe('natural conversation task evidence', () => {
     appendFileSync(join(directory, 'ledger.jsonl'), [legacy, finish(start().taskId)].map(record => `${canonicalJson({ type: 'conversation-learning-recorded', schemaVersion: 'tianwen.conversation-learning.v1', at: '2026-09-07T00:00:00.000Z', record })}\n`).join(''))
     ledger = new EvolutionLedger(directory)
     const qualityContract = { schemaVersion: 'tianwen.conversation-quality.v1', source: 'host', criterion: 'Be faithful to user-supplied or source facts and their uncertainty, and to actual verified tool evidence. Do not invent or contradict source-dependent facts, decisions, status or completed actions. Prior assistant claims, user silence or continuation do not verify such facts. Clearly distinguish inferences, assumptions and advice from confirmed facts. Relevant general knowledge, reasonable labeled inference and advice, and user-requested fiction are allowed; this contract does not require additional tool calls.' } as const
-    const current = { ...admission(start(2).taskId), qualityContract }
+    expect(parseConversationLearningRecord({ ...legacy, qualityContract })).toEqual({ ...legacy, qualityContract })
+    const current = admission(start(2).taskId)
     ledger.recordConversationLearning(start(2))
     ledger.recordConversationLearning(current)
     const replay = new EvolutionLedger(directory)

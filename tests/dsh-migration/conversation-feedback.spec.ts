@@ -167,7 +167,7 @@ async function mount(script: Parameters<typeof mountFeedbackHarness>[1]) {
 
 describe('native feedback assessment adapter', () => {
   it('uses exact native feedback after original met and marks its immutable assessment inactive after retraction', async () => {
-    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeAssessment)])
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeReview), evidenceResponse(nativeAssessment)])
     try {
       const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
       const before = structuredClone(target)
@@ -189,14 +189,14 @@ describe('native feedback assessment adapter', () => {
       await harness.ctx.tianwenConversationFeedback.whenIdle()
       await expect(harness.ctx.tianwenConversationFeedback.isAssessmentActive(assessment)).resolves.toBe(false)
       expect(harness.ctx.tianwenEvolution.listConversationFeedbackAssessments()).toEqual([assessment])
-      expect(harness.adapter.requests).toHaveLength(4)
+      expect(harness.adapter.requests).toHaveLength(5)
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 
   it('waits for a feedback-only direct turn to persist before assessing a natural correction', async () => {
     let harness: Awaited<ReturnType<typeof mount>>
     harness = await mount([
-      structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview),
+      structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeReview),
       () => structured({ ...nativeAdmission, kind: 'conversation', criteria: [],
         relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId,
         feedback: { kind: 'correction', quote: 'You omitted the pilot scope.', category: 'source-fidelity' } }),
@@ -215,13 +215,13 @@ describe('native feedback assessment adapter', () => {
         result: { classification: 'attributable-problem' } })
       expect(tasks[0]?.review?.verdict).toBe('met')
       await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
-      expect(harness.adapter.requests).toHaveLength(6)
+      expect(harness.adapter.requests).toHaveLength(7)
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 
   it('does not accept a quote that appears only in generated criteria as user evidence', async () => {
     let rejectedRequest: GenerateOptions | undefined
-    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview),
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeReview),
       structured({ ...nativeAssessment, evidenceQuotes: ['Preserve the five-day duration.'] }), request => {
         rejectedRequest = request
         return textResponse('No valid evidence quote is available.')
@@ -246,7 +246,7 @@ describe('native feedback assessment adapter', () => {
     let harness: Awaited<ReturnType<typeof mount>>
     const correction = direct('You omitted the pilot scope.')
     harness = await mount([
-      structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview),
+      structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeReview),
       () => structured({ ...nativeAdmission, kind: 'conversation', criteria: [],
         relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId,
         feedback: { kind: 'correction', quote: 'You omitted the pilot scope.', category: 'source-fidelity' } }),
@@ -278,13 +278,13 @@ describe('native feedback assessment adapter', () => {
       const material = await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment)
       expect(material.feedback.request).toEqual([correction])
       expect(JSON.stringify(material)).not.toContain('Unrelated')
-      expect(harness.adapter.requests).toHaveLength(6)
+      expect(harness.adapter.requests).toHaveLength(7)
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 
   it('cancels only the assessment child on disable and retains the original completed task', async () => {
     let harness: Awaited<ReturnType<typeof mount>>
-    harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), request => {
+    harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeReview), request => {
       expect(harness.ctx.tianwenEvolution.listConversationFeedbackAssessments()[0]?.result).toBeUndefined()
       expect(harness.ctx.tianwenEvolution.listConversationFeedbackAssessments()[0]?.started.materialDigest).toMatch(/^sha256:/)
       harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
@@ -305,7 +305,7 @@ describe('native feedback assessment adapter', () => {
   })
 
   it('recovers a started assessment without rerunning a lost native judgment result', async () => {
-    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeAssessment)])
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeReview), evidenceResponse(nativeAssessment)])
     try {
       const fiber = harness.ctx.plugin(TianwenConversationFeedbackService)
       await fiber
@@ -326,7 +326,7 @@ describe('native feedback assessment adapter', () => {
       await harness.ctx.tianwenConversationFeedback.whenIdle()
       expect(harness.ctx.tianwenEvolution.listConversationFeedbackAssessments()[0]?.result)
         .toMatchObject({ classification: 'inconclusive', unavailableReason: 'cancelled' })
-      expect(harness.adapter.requests).toHaveLength(4)
+      expect(harness.adapter.requests).toHaveLength(5)
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 })

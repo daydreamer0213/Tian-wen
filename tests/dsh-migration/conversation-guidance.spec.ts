@@ -14,7 +14,7 @@ import {
   type GuidanceStudyOpened,
 } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
-import { conversationQualityContract } from '../../packages/tianwen-evolution/src/conversation-learning.js'
+import { conversationQualityContract, parseConversationReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 
 const scope = 'workspace:guidance-test'
 const proof = (id: string) => ({ sessionId: id, sessionDigest: sha256(id), requestDigest: sha256(`request:${id}`) })
@@ -100,6 +100,26 @@ describe('natural guidance domain governance', () => {
     const mixed = { ...body, cases: [...cases.slice(0, 4), legacy.cases[4]!] }
     expect(() => parseConversationGuidanceRecord({ kind: 'study-opened', studyId: guidanceStudyId(mixed), ...mixed })).toThrow(/quality|contract/i)
     expect(parseConversationGuidanceRecord(legacy)).toEqual(legacy)
+  })
+
+  it('requires both native checks for v2 arms and rejects a forged consensus', () => {
+    const { kind: _kind, studyId: _id, ...body } = opening()
+    const qualityContract = conversationQualityContract()
+    const currentBody = { ...body, qualityContract, cases: body.cases.map(item => {
+      if ('sourceTaskId' in item) return item
+      const material = { prompt: item.prompt, criteria: item.criteria, qualityContract }
+      return { ...item, ...material, materialDigest: sha256(material) }
+    }) }
+    const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(currentBody), ...currentBody }
+    const state = new ConversationGuidanceState(), proposed = candidate(opened)
+    append(state, opened); append(state, proposed)
+    const arm = arms(opened, proposed)[0]!
+    expect(() => append(state, arm)).toThrow(/two independent/i)
+    const reviewChecks = parseConversationReviewChecks(['requirements', 'grounding'].map(focus => ({ focus, verdict: 'not-met', category: 'instruction-following',
+      explanation: 'Output constraint violated.', evidenceQuotes: ['extra output'], proof: focus === 'requirements' ? arm.judgeProof : proof('separate-grounding') })))
+    expect(() => append(state, { ...arm, reviewChecks, verdict: 'met' })).toThrow(/consensus/i)
+    append(state, { ...arm, reviewChecks })
+    expect(state.listStudies()[0]?.arms[0]?.reviewChecks).toEqual(reviewChecks)
   })
 
   it('records a policy migration rollback without claiming user withdrawal or new regression evidence', () => {
