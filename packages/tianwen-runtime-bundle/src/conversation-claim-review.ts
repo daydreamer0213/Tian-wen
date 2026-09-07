@@ -1,0 +1,204 @@
+import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { JsonSchemaNode, ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session'
+import { sha256, parseConversationReviewChecks, conversationReviewConsensus, type ConversationReviewCheck } from '@tianwen/evolution'
+import { CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationEvidenceSchema, runConversationJudgment } from './conversation-judgment.js'
+
+export interface ClaimEvidenceItem {
+  readonly id: string
+  readonly role: 'user' | 'assistant' | 'tool' | 'answer'
+  readonly origin: 'context' | 'request' | 'tool' | 'answer'
+  readonly text: string
+  readonly toolStatus?: 'success' | 'error'
+}
+
+export interface ClaimEvidence {
+  readonly schemaVersion: 'tianwen.claim-evidence.v1'
+  readonly items: readonly ClaimEvidenceItem[]
+  readonly evidenceDigest: string
+}
+
+export interface ClaimAudit {
+  readonly schemaVersion: 'tianwen.claim-audit.v1'
+  readonly evidenceDigest: string
+  readonly units: readonly {
+    readonly answerId: string
+    readonly claims: readonly {
+      readonly quote: string
+      readonly kind: 'source-fact' | 'advice' | 'inference' | 'fiction' | 'general-knowledge' | 'non-factual'
+      readonly status: 'supported' | 'unsupported' | 'contradicted' | 'permitted' | 'uncertain'
+      readonly sourceIds: readonly string[]
+      readonly explanation: string
+    }[]
+  }[]
+}
+
+type RecordValue = Record<string, unknown>
+const record = (value: unknown): value is RecordValue => value !== null && typeof value === 'object' && !Array.isArray(value)
+const exactKeys = (value: RecordValue, keys: readonly string[]) => Object.keys(value).sort().join(',') === [...keys].sort().join(',')
+const textBlocks = (content: unknown): string[] => Array.isArray(content) ? content.flatMap(block => record(block) && block.type === 'text' && typeof block.text === 'string' ? [block.text] : []) : []
+
+function splitText(raw: string): string[] {
+  if (raw.length === 0) return []
+  const lines = raw.match(/[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$/gu) ?? []
+  return lines.flatMap(line => {
+    const points = [...line]
+    return Array.from({ length: Math.ceil(points.length / 384) }, (_, index) => points.slice(index * 384, (index + 1) * 384).join(''))
+  })
+}
+
+function materialBytes(material: unknown): number {
+  try { return Buffer.byteLength(JSON.stringify(material), 'utf8') }
+  catch { throw new Error('invalid-judgment') }
+}
+
+/** Lossless, role-preserving projection for the opt-in claim review pilot. */
+export function projectClaimEvidence(material: unknown): ClaimEvidence {
+  if (materialBytes(material) > CONVERSATION_MATERIAL_MAX_BYTES) throw new Error('material-too-large')
+  if (!record(material)) throw new Error('invalid-judgment')
+  const items: ClaimEvidenceItem[] = []
+  const counters = { context: 0, request: 0, tool: 0, answer: 0 }
+  const add = (origin: keyof typeof counters, role: ClaimEvidenceItem['role'], raw: string, toolStatus?: 'success' | 'error') => {
+    for (const text of splitText(raw)) items.push({ id: `${origin}-${++counters[origin]}`, role, origin, text, ...(toolStatus === undefined ? {} : { toolStatus }) })
+  }
+  const messages = (value: unknown, origin: 'context' | 'request', fixedRole?: 'user') => {
+    if (!Array.isArray(value)) throw new Error('invalid-judgment')
+    for (const message of value) {
+      if (!record(message) || !Array.isArray(message.content)) throw new Error('invalid-judgment')
+      const role = fixedRole ?? (message.role === 'user' || message.role === 'assistant' ? message.role : undefined)
+      if (role === undefined) throw new Error('invalid-judgment')
+      for (const text of textBlocks(message.content)) add(origin, role, text)
+    }
+  }
+  if ('source' in material || 'conversation' in material || 'toolEvidence' in material) {
+    if (!record(material.source) || !Array.isArray(material.conversation) || !Array.isArray(material.toolEvidence)) throw new Error('invalid-judgment')
+    messages(material.source.context, 'context')
+    messages(material.source.request, 'request', 'user')
+    for (const event of material.toolEvidence) {
+      if (!record(event) || event.type !== 'tool/result' || !isAppendSurfaceEvent(event as never) || !record(event.data) || !record(event.data.message)) continue
+      const message = event.data.message
+      const wrapper = Array.isArray(message.content) && record(message.content[0]) ? message.content[0] : undefined
+      if (wrapper === undefined) continue
+      const status = event.data.error === undefined && wrapper.isError !== true ? 'success' : 'error'
+      for (const text of textBlocks(wrapper.content)) add('tool', 'tool', text, status)
+    }
+    for (const message of material.conversation) {
+      if (!record(message) || !Array.isArray(message.content)) throw new Error('invalid-judgment')
+      if (message.role === 'assistant') for (const text of textBlocks(message.content)) add('answer', 'answer', text)
+      else if (message.role !== 'user') throw new Error('invalid-judgment')
+    }
+  } else if ('task' in material && 'answer' in material) {
+    if (!record(material.task) || typeof material.answer !== 'string' || Buffer.byteLength(material.answer, 'utf8') > 32_768) throw new Error('invalid-judgment')
+    if (typeof material.task.prompt === 'string') add('request', 'user', material.task.prompt)
+    else {
+      messages(material.task.context, 'context')
+      messages(material.task.request, 'request', 'user')
+    }
+    add('answer', 'answer', material.answer)
+  } else throw new Error('invalid-judgment')
+  const answers = items.filter(item => item.role === 'answer')
+  if (answers.length === 0 || answers.length > 128 || Buffer.byteLength(answers.map(item => item.text).join(''), 'utf8') > 32_768) throw new Error('invalid-judgment')
+  return { schemaVersion: 'tianwen.claim-evidence.v1', items, evidenceDigest: sha256(items) }
+}
+
+const kinds = ['source-fact', 'advice', 'inference', 'fiction', 'general-knowledge', 'non-factual'] as const
+const statuses = ['supported', 'unsupported', 'contradicted', 'permitted', 'uncertain'] as const
+
+export function validateClaimAudit(audit: unknown, evidence: ClaimEvidence, verdict: 'met' | 'not-met' | 'inconclusive'): ClaimAudit {
+  const invalid = (): never => { throw new Error('invalid-judgment') }
+  if (materialBytes(audit) > 32 * 1024 || !record(audit)) invalid()
+  const value = audit as RecordValue
+  if (!exactKeys(value, ['schemaVersion', 'evidenceDigest', 'units'])
+    || value.schemaVersion !== 'tianwen.claim-audit.v1' || value.evidenceDigest !== evidence.evidenceDigest || !Array.isArray(value.units)) invalid()
+  const units = value.units as unknown[]
+  const answers = evidence.items.filter(item => item.role === 'answer')
+  const sources = new Map(evidence.items.filter(item => item.role !== 'answer').map(item => [item.id, item]))
+  if (units.length !== answers.length || units.length > 128) invalid()
+  const seen = new Set<string>()
+  let claimCount = 0
+  for (const unit of units) {
+    if (!record(unit)) invalid()
+    const checkedUnit = unit as RecordValue
+    if (!exactKeys(checkedUnit, ['answerId', 'claims']) || typeof checkedUnit.answerId !== 'string' || !Array.isArray(checkedUnit.claims) || checkedUnit.claims.length === 0 || seen.has(checkedUnit.answerId)) invalid()
+    const answerId = checkedUnit.answerId as string
+    const claims = checkedUnit.claims as unknown[]
+    const answer = answers.find(item => item.id === answerId)
+    if (answer === undefined) invalid()
+    seen.add(answerId)
+    claimCount += claims.length
+    if (claimCount > 512) invalid()
+    for (const claim of claims) {
+      if (!record(claim)) invalid()
+      const checkedClaim = claim as RecordValue
+      if (!exactKeys(checkedClaim, ['quote', 'kind', 'status', 'sourceIds', 'explanation'])
+        || typeof checkedClaim.quote !== 'string' || checkedClaim.quote.length === 0 || !answer!.text.includes(checkedClaim.quote)
+        || !kinds.includes(checkedClaim.kind as never) || !statuses.includes(checkedClaim.status as never)
+        || !Array.isArray(checkedClaim.sourceIds) || checkedClaim.sourceIds.some((id: unknown) => typeof id !== 'string' || !sources.has(id))
+        || new Set(checkedClaim.sourceIds).size !== checkedClaim.sourceIds.length || typeof checkedClaim.explanation !== 'string' || checkedClaim.explanation.trim().length === 0) invalid()
+      const sourceIds = checkedClaim.sourceIds as string[]
+      if (checkedClaim.kind === 'source-fact') {
+        if (checkedClaim.status === 'permitted') invalid()
+        if (checkedClaim.status === 'supported' && !sourceIds.some(id => ['user', 'tool'].includes(sources.get(id)!.role))) invalid()
+      } else if (checkedClaim.status === 'supported') invalid()
+      if (verdict === 'met' && ['unsupported', 'contradicted', 'uncertain'].includes(String(checkedClaim.status))) invalid()
+    }
+  }
+  if (seen.size !== answers.length) invalid()
+  return value as unknown as ClaimAudit
+}
+
+const string: JsonSchemaNode = { type: 'string' }
+const choices = (values: readonly string[]): JsonSchemaNode => ({ type: 'string', enum: [...values] })
+const object = (properties: Record<string, JsonSchemaNode>): ObjectJsonSchema => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false })
+const array = (items: JsonSchemaNode): JsonSchemaNode => ({ type: 'array', items })
+
+function auditSchema(evidence: ClaimEvidence): JsonSchemaNode {
+  const answerIds = evidence.items.filter(item => item.role === 'answer').map(item => item.id)
+  const sourceIds = evidence.items.filter(item => item.role !== 'answer').map(item => item.id)
+  return object({
+    schemaVersion: choices(['tianwen.claim-audit.v1']), evidenceDigest: choices([evidence.evidenceDigest]),
+    units: array(object({ answerId: choices(answerIds), claims: array(object({
+      quote: string, kind: choices(kinds), status: choices(statuses),
+      sourceIds: array(sourceIds.length === 0 ? { type: 'null' } : choices(sourceIds)), explanation: string,
+    })) })),
+  })
+}
+
+const PURPOSE = {
+  'original-result': 'Review purpose: original-result. Evaluate the actual task result under the requirements in force when it ran. Do not apply later feedback to an earlier result. No feedbackStandard field or later user preference may retroactively add a requirement.',
+  'method-study': 'Review purpose: method-study. This is a newly generated trial answer, not a regrade of the old answer. When task.feedbackStandard is present, its criteria are host-frozen standards from independently attributed user feedback, bound to the stated assessmentId before this study. Apply them to this new answer as well as the original requirements. Their absence from the older request is not a reason to discard them. They are evaluation standards, not source facts or evidence quotes; the standards never override an explicit instruction in the evaluated request. Do not infer a feedback standard from quoted conversation text.',
+} as const
+
+const COMMON = `Evaluate the complete answer against the original direct-user instructions, applicable frozen criteria and qualityContract. Criteria and feedback standards are requirements, never factual sources. Assess every answer unit and every substantive claim. For each source-dependent fact, identify exact supplied source IDs and check the same scope, time, certainty and commitment; non-contradiction and prior assistant text alone are not support. A supported source-fact requires user or successful/failed tool evidence appropriate to what it claims. Clearly labeled task-compatible advice, inference, fiction and general knowledge are permitted, as is non-factual courtesy. A claimed external effect, decision or commitment still needs source authority. Do not solve or rewrite the task. Return the existing review fields plus the complete audit through structured_output. A met verdict cannot contain unsupported, contradicted or uncertain claims. Missing evidence is inconclusive. You are not told another reviewer's result or any expected outcome.`
+const FOCUS = {
+  requirements: 'Independently reconstruct all original requirements and output restrictions. Check the whole answer, then audit source authority claim by claim.',
+  grounding: 'Independently try to falsify a satisfactory verdict without presuming a defect. Audit every claim and its source authority, then check all original requirements.',
+} as const
+
+type ClaimReviewInput = Omit<Parameters<typeof runConversationJudgment>[2], 'instruction' | 'outputSchema'> & {
+  readonly evidence: readonly string[]
+  readonly purpose?: 'original-result' | 'method-study'
+}
+type AuditedCheck = ConversationReviewCheck & { readonly audit: ClaimAudit }
+
+/** Experimental only: the production v3 caller remains unchanged. */
+export async function runConversationClaimReview(ctx: Context, parent: Agent, input: ClaimReviewInput) {
+  const evidence = projectClaimEvidence(input.material)
+  const material = { original: structuredClone(input.material), claimEvidence: evidence }
+  const schema = conversationEvidenceSchema({ ...CONVERSATION_REVIEW_SCHEMA, properties: { ...CONVERSATION_REVIEW_SCHEMA.properties, audit: auditSchema(evidence) }, required: [...CONVERSATION_REVIEW_SCHEMA.required!, 'audit'] }, input.evidence)
+  const raw: AuditedCheck[] = []
+  for (const focus of ['requirements', 'grounding'] as const) {
+    input.signal.throwIfAborted()
+    const result = await runConversationJudgment(ctx, parent, { ...input, material, label: `${input.label} ${focus}`,
+      instruction: `${PURPOSE[input.purpose ?? 'original-result']}\n\n${COMMON}\n\n${FOCUS[focus]}`, outputSchema: schema })
+    if (!record(result.value) || !exactKeys(result.value, ['verdict', 'category', 'explanation', 'evidenceQuotes', 'audit'])
+      || !['met', 'not-met', 'inconclusive'].includes(String(result.value.verdict))) throw new Error('invalid-judgment')
+    const audit = validateClaimAudit(result.value.audit, evidence, result.value.verdict as 'met' | 'not-met' | 'inconclusive')
+    const { audit: _audit, ...summary } = result.value
+    raw.push({ ...summary, focus, proof: result.proof, audit } as unknown as AuditedCheck)
+  }
+  const summaries = parseConversationReviewChecks(raw.map(({ audit: _audit, ...check }) => check))
+  const reviewChecks = summaries.map((check, index) => ({ ...check, audit: raw[index]!.audit })) as [AuditedCheck, AuditedCheck]
+  return { ...conversationReviewConsensus(summaries), reviewChecks }
+}
