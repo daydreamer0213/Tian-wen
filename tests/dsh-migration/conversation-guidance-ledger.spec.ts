@@ -15,6 +15,7 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import { SessionId, createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
+import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { TianwenConversationGuidanceLoopService } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
 
 const roots: string[] = []
@@ -275,8 +276,8 @@ it.each(['active', 'active-loop', 'accepted', 'mixed-counter'] as const)('keeps 
       observedBeforeAnswer = true
       return textResponse('The supplied pilot takes 5 days.')
     },
-    toolCallResponse('new-review', 'structured_output', { verdict: 'met', category: null, explanation: 'The supplied duration is preserved.', evidenceQuotes: ['The supplied pilot takes 5 days.'] }),
-    toolCallResponse('new-grounding', 'structured_output', { verdict: 'met', category: null, explanation: 'The supplied duration is preserved.', evidenceQuotes: ['The supplied pilot takes 5 days.'] }),
+    auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'The supplied duration is preserved.', evidenceQuotes: ['The supplied pilot takes 5 days.'] }),
+    auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'The supplied duration is preserved.', evidenceQuotes: ['The supplied pilot takes 5 days.'] }),
   ])
   const cli = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
   const spawn = await import(pathToFileURL(cli.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)

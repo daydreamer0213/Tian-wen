@@ -2,8 +2,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { JsonSchemaNode, ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session'
-import { sha256, parseConversationReviewChecks, conversationReviewConsensus, type ConversationReviewCheck } from '@tianwen/evolution'
-import { CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationEvidenceSchema, runConversationJudgment } from './conversation-judgment.js'
+import { sha256, parseClaimAudit, parseConversationAuditedReviewChecks, conversationReviewConsensus, type ClaimAudit, type ConversationAuditedReviewCheck } from '@tianwen/evolution'
+import { CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationEvidenceSchema, recoverConversationJudgmentRequest, runConversationJudgment } from './conversation-judgment.js'
+
+export type { ClaimAudit } from '@tianwen/evolution'
 
 export interface ClaimEvidenceItem {
   readonly id: string
@@ -17,21 +19,6 @@ export interface ClaimEvidence {
   readonly schemaVersion: 'tianwen.claim-evidence.v1'
   readonly items: readonly ClaimEvidenceItem[]
   readonly evidenceDigest: string
-}
-
-export interface ClaimAudit {
-  readonly schemaVersion: 'tianwen.claim-audit.v1'
-  readonly evidenceDigest: string
-  readonly units: readonly {
-    readonly answerId: string
-    readonly claims: readonly {
-      readonly quote: string
-      readonly kind: 'source-fact' | 'advice' | 'inference' | 'fiction' | 'general-knowledge' | 'non-factual'
-      readonly status: 'supported' | 'unsupported' | 'contradicted' | 'permitted' | 'uncertain'
-      readonly sourceIds: readonly string[]
-      readonly explanation: string
-    }[]
-  }[]
 }
 
 type RecordValue = Record<string, unknown>
@@ -107,11 +94,13 @@ const statuses = ['supported', 'unsupported', 'contradicted', 'permitted', 'unce
 
 export function validateClaimAudit(audit: unknown, evidence: ClaimEvidence, verdict: 'met' | 'not-met' | 'inconclusive'): ClaimAudit {
   const invalid = (): never => { throw new Error('invalid-judgment') }
-  if (materialBytes(audit) > 32 * 1024 || !record(audit)) invalid()
-  const value = audit as RecordValue
-  if (!exactKeys(value, ['schemaVersion', 'evidenceDigest', 'units'])
-    || value.schemaVersion !== 'tianwen.claim-audit.v1' || value.evidenceDigest !== evidence.evidenceDigest || !Array.isArray(value.units)) invalid()
-  const units = value.units as unknown[]
+  let value: ClaimAudit | undefined
+  try { value = parseClaimAudit(audit, verdict) }
+  catch { invalid() }
+  if (value === undefined) return invalid()
+  const parsed = value
+  if (parsed.evidenceDigest !== evidence.evidenceDigest) invalid()
+  const units = parsed.units as unknown[]
   const answers = evidence.items.filter(item => item.role === 'answer')
   const sources = new Map(evidence.items.filter(item => item.role !== 'answer').map(item => [item.id, item]))
   if (units.length !== answers.length || units.length > 128) invalid()
@@ -145,7 +134,7 @@ export function validateClaimAudit(audit: unknown, evidence: ClaimEvidence, verd
     }
   }
   if (seen.size !== answers.length) invalid()
-  return value as unknown as ClaimAudit
+  return parsed
 }
 
 const string: JsonSchemaNode = { type: 'string' }
@@ -180,7 +169,7 @@ type ClaimReviewInput = Omit<Parameters<typeof runConversationJudgment>[2], 'ins
   readonly evidence: readonly string[]
   readonly purpose?: 'original-result' | 'method-study'
 }
-type AuditedCheck = ConversationReviewCheck & { readonly audit: ClaimAudit }
+type AuditedCheck = ConversationAuditedReviewCheck
 
 /** Experimental only: the production v3 caller remains unchanged. */
 export async function runConversationClaimReview(ctx: Context, parent: Agent, input: ClaimReviewInput) {
@@ -198,7 +187,24 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
     const { audit: _audit, ...summary } = result.value
     raw.push({ ...summary, focus, proof: result.proof, audit } as unknown as AuditedCheck)
   }
-  const summaries = parseConversationReviewChecks(raw.map(({ audit: _audit, ...check }) => check))
-  const reviewChecks = summaries.map((check, index) => ({ ...check, audit: raw[index]!.audit })) as [AuditedCheck, AuditedCheck]
-  return { ...conversationReviewConsensus(summaries), reviewChecks }
+  const reviewChecks = parseConversationAuditedReviewChecks(raw)
+  return { ...conversationReviewConsensus(reviewChecks), reviewChecks }
+}
+
+export async function verifyConversationClaimReviewCheck(ctx: Context, check: ConversationAuditedReviewCheck, expected: {
+  readonly purpose: 'method-study'
+  readonly materialDigest: string
+  readonly outputDigest: string
+  readonly modelConfigDigest: string
+}): Promise<void> {
+  const recovered = await recoverConversationJudgmentRequest(ctx, check)
+  if (recovered.instruction !== `${PURPOSE[expected.purpose]}\n\n${COMMON}\n\n${FOCUS[check.focus]}`
+    || recovered.modelConfigDigests.some(digest => digest !== expected.modelConfigDigest)
+    || !record(recovered.material) || !exactKeys(recovered.material, ['original', 'claimEvidence']) || !record(recovered.material.original)) throw new Error('invalid-judgment')
+  const original = recovered.material.original
+  if (!('task' in original) || !('answer' in original) || sha256(original.task) !== expected.materialDigest || sha256(original.answer) !== expected.outputDigest) throw new Error('invalid-judgment')
+  const evidence = projectClaimEvidence(original)
+  if (sha256(recovered.material.claimEvidence) !== sha256(evidence)) throw new Error('invalid-judgment')
+  validateClaimAudit(check.audit, evidence, check.verdict)
+  if (check.evidenceQuotes.some(quote => !evidence.items.some(item => item.text.includes(quote)))) throw new Error('invalid-judgment')
 }

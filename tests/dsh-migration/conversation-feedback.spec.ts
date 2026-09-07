@@ -9,6 +9,7 @@ import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { SessionId, createUserMessage, mountFeedbackHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
+import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
 import { TianwenConversationFeedbackService } from '../../packages/tianwen-runtime-bundle/src/conversation-feedback-assessment.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
@@ -142,6 +143,7 @@ const evidenceResponse = (value: Record<string, unknown> & { evidenceQuotes: rea
     return raw
   }) })
 }
+const claimReviewResponse = auditedEvidenceResponse
 const nativeAdmission = { kind: 'task', objective: 'Summarize the supplied pilot result.', criteria: ['Preserve the five-day duration.'],
   family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
 const nativeReview = { verdict: 'met', category: null, explanation: 'The duration is preserved.', evidenceQuotes: ['5 days'] }
@@ -167,7 +169,7 @@ async function mount(script: Parameters<typeof mountFeedbackHarness>[1]) {
 
 describe('native feedback assessment adapter', () => {
   it('uses exact native feedback after original met and marks its immutable assessment inactive after retraction', async () => {
-    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeReview), evidenceResponse(nativeAssessment)])
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), evidenceResponse(nativeAssessment)])
     try {
       const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
       const before = structuredClone(target)
@@ -196,7 +198,7 @@ describe('native feedback assessment adapter', () => {
   it('waits for a feedback-only direct turn to persist before assessing a natural correction', async () => {
     let harness: Awaited<ReturnType<typeof mount>>
     harness = await mount([
-      structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeReview),
+      structured(nativeAdmission), textResponse('It took 5 days.'), claimReviewResponse(nativeReview), claimReviewResponse(nativeReview),
       () => structured({ ...nativeAdmission, kind: 'conversation', criteria: [],
         relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId,
         feedback: { kind: 'correction', quote: 'You omitted the pilot scope.', category: 'source-fidelity' } }),
@@ -221,7 +223,7 @@ describe('native feedback assessment adapter', () => {
 
   it('does not accept a quote that appears only in generated criteria as user evidence', async () => {
     let rejectedRequest: GenerateOptions | undefined
-    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeReview),
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), claimReviewResponse(nativeReview), claimReviewResponse(nativeReview),
       structured({ ...nativeAssessment, evidenceQuotes: ['Preserve the five-day duration.'] }), request => {
         rejectedRequest = request
         return textResponse('No valid evidence quote is available.')
@@ -246,7 +248,7 @@ describe('native feedback assessment adapter', () => {
     let harness: Awaited<ReturnType<typeof mount>>
     const correction = direct('You omitted the pilot scope.')
     harness = await mount([
-      structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeReview),
+      structured(nativeAdmission), textResponse('It took 5 days.'), claimReviewResponse(nativeReview), claimReviewResponse(nativeReview),
       () => structured({ ...nativeAdmission, kind: 'conversation', criteria: [],
         relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId,
         feedback: { kind: 'correction', quote: 'You omitted the pilot scope.', category: 'source-fidelity' } }),
@@ -284,7 +286,7 @@ describe('native feedback assessment adapter', () => {
 
   it('cancels only the assessment child on disable and retains the original completed task', async () => {
     let harness: Awaited<ReturnType<typeof mount>>
-    harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeReview), request => {
+    harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), request => {
       expect(harness.ctx.tianwenEvolution.listConversationFeedbackAssessments()[0]?.result).toBeUndefined()
       expect(harness.ctx.tianwenEvolution.listConversationFeedbackAssessments()[0]?.started.materialDigest).toMatch(/^sha256:/)
       harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
@@ -305,7 +307,7 @@ describe('native feedback assessment adapter', () => {
   })
 
   it('recovers a started assessment without rerunning a lost native judgment result', async () => {
-    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), evidenceResponse(nativeReview), evidenceResponse(nativeReview), evidenceResponse(nativeAssessment)])
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), evidenceResponse(nativeAssessment)])
     try {
       const fiber = harness.ctx.plugin(TianwenConversationFeedbackService)
       await fiber

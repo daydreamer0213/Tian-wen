@@ -8,7 +8,8 @@ import {
   type ConversationTask, type ConversationTaskSource, type ConversationUnavailable,
 } from '@tianwen/evolution'
 import { RESEARCH_SUMMARY_SCOPE, RESEARCH_SUMMARY_TOOL_NAME, TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
-import { conversationAdmissionSchema, runConversationJudgment, runConversationReview } from './conversation-judgment.js'
+import { conversationAdmissionSchema, runConversationJudgment } from './conversation-judgment.js'
+import { runConversationClaimReview } from './conversation-claim-review.js'
 import { conversationContext, conversationEvidenceTexts, conversationMessages as visible, recoverConversationTaskMaterial, recoverConversationTaskModel } from './conversation-task-material.js'
 
 const ADMISSION_INSTRUCTION = `Identify what the direct user is asking BEFORE any answer is produced. Return a JSON object with exactly these fields through structured_output:
@@ -245,7 +246,7 @@ export class TianwenConversationObserverService extends Service {
       const judge = async () => {
         const evidence = conversationEvidenceTexts(source, material.conversation.filter(message => message.role === 'assistant')
           .flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])), material.toolEvidence)
-        const result = await runConversationReview(this.ctx, agent, { label: `Tianwen review ${taskId}`, evidence, material, signal, callConfig })
+        const result = await runConversationClaimReview(this.ctx, agent, { label: `Tianwen review ${taskId}`, evidence, material, signal, callConfig })
         if (!this.authorized(task.source.consentRevision)) throw new Error('cancelled')
         const review = { ...result, ...base, unavailableReason: null }
         if (material.evaluationMode !== 'text' && review.verdict === 'met') {

@@ -4,7 +4,8 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { hasCurrentConversationQuality, guidanceInputDigest, guidanceStudyId, guidanceVersion, parseConversationGuidanceRecord, sha256, type ConversationQualityContract, type ConversationTask, type ConversationFeedbackAssessment, type ConversationFailure, type GuidanceCase, type GuidanceStudyBody, type GuidanceStudyOpened } from '@tianwen/evolution'
 import { conversationEvidenceTexts, conversationTaskModelDigest, recoverConversationTaskModel, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
-import { CONVERSATION_CASES_SCHEMA, CONVERSATION_PROPOSAL_SCHEMA, runConversationJudgment, runConversationTrial, runConversationReview, verifyConversationReviewCheck } from './conversation-judgment.js'
+import { CONVERSATION_CASES_SCHEMA, CONVERSATION_PROPOSAL_SCHEMA, runConversationJudgment, runConversationTrial } from './conversation-judgment.js'
+import { runConversationClaimReview, verifyConversationClaimReviewCheck } from './conversation-claim-review.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context { tianwenConversationGuidanceLoop: TianwenConversationGuidanceLoopService }
@@ -124,7 +125,14 @@ export class TianwenConversationGuidanceLoopService extends Service {
           const saved = await this.ctx.sessionPersistence.inspect(SessionId(proof.sessionId))
           if (saved.meta.origin !== 'subagent' || sha256({ meta: saved.meta, events: saved.events }) !== proof.sessionDigest) throw new Error('source-unavailable')
         }
-        for (const arm of study.arms) for (const check of arm.reviewChecks ?? []) await verifyConversationReviewCheck(this.ctx, check)
+        for (const arm of study.arms) {
+          if (arm.reviewChecks === undefined) throw new Error('source-unavailable')
+          for (const check of arm.reviewChecks) {
+            if (!('audit' in check)) throw new Error('source-unavailable')
+            await verifyConversationClaimReviewCheck(this.ctx, check, { purpose: 'method-study', materialDigest: arm.materialDigest,
+              outputDigest: arm.outputDigest, modelConfigDigest: study.opened.modelConfigDigest })
+          }
+        }
         await this.assertCurrent(study.opened, controller.signal)
         evolution.recordConversationGuidance(study.decision)
         evolution.recordConversationGuidance({ kind: 'guidance-activated', studyId: study.opened.studyId, expectedParentVersion: study.opened.parentVersion, decisionDigest: sha256(study.decision) })
@@ -245,7 +253,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
           const request = 'request' in material ? { request: material.request, context: material.context } : { prompt: material.prompt }
           const execution = await runConversationTrial(this.ctx, agent, { label: `Tianwen text trial ${opened.studyId}`, callConfig, signal, material: request, ...(snapshot.rules[body.family] === undefined ? {} : { guidance: snapshot.rules[body.family] }) })
           const evidence = 'request' in material ? conversationEvidenceTexts(material, [execution.answer]) : [material.prompt, execution.answer]
-          const judged = await runConversationReview(this.ctx, agent, {
+          const judged = await runConversationClaimReview(this.ctx, agent, {
             purpose: 'method-study',
             evidence,
             label: `Tianwen blind text review ${opened.studyId}`, callConfig, signal,

@@ -5,7 +5,6 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import { MessageId, type GenerateOptions } from '@deepseek-ai/dsh-llm'
-import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { SessionId, SkillRegistry, applySkillTool, createUserMessage, mountFeedbackHarness, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
@@ -13,6 +12,7 @@ import { recoverConversationTaskMaterial } from '../../packages/tianwen-runtime-
 import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
 import { TianwenResearchSummaryAdmissionService } from '../../packages/tianwen-runtime-bundle/src/research-summary-admission.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
+import { auditedEvidenceResponse } from './conversation-audited-response.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
@@ -22,15 +22,7 @@ const direct = (text: string) => createUserMessage({ content: [{ type: 'text', t
 const admission = { kind: 'task', objective: 'Summarize the supplied facts', criteria: ['Preserve all supplied facts'], family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
 const review = { verdict: 'met', category: null, explanation: 'The facts are preserved.', evidenceQuotes: ['5 天'] }
 const structured = (value: Record<string, unknown>) => toolCallResponse('judgment', 'structured_output', value)
-const evidenceResponse = (value: Record<string, unknown> & { evidenceQuotes: readonly string[] }) => (request: GenerateOptions) => {
-  const schema = request.tools?.find(tool => tool.name === 'structured_output')?.parameters as ObjectJsonSchema | undefined
-  const choices = schema?.properties?.evidenceQuotes?.items?.enum ?? []
-  return structured({ ...value, evidenceQuotes: value.evidenceQuotes.map(quote => {
-    const raw = choices.find(item => typeof item === 'string' && item.includes(quote))
-    expect(raw, `No raw evidence choice contains ${quote}`).toBeDefined()
-    return raw
-  }) })
-}
+const evidenceResponse = auditedEvidenceResponse
 
 const reviewPair = (value: typeof review) => [evidenceResponse(value), evidenceResponse(value)]
 
@@ -86,7 +78,7 @@ it('captures ordinary requests in two native turns before each answer and review
     () => {
       const tasks = harness.ctx.tianwenEvolution.listConversationTasks('ordinary-chat')
       expect(tasks).toHaveLength(1); expect(tasks[0]?.admission?.decision?.criteria).toEqual(admission.criteria)
-      expect(tasks[0]?.admission).toMatchObject({ qualityContract: { schemaVersion: 'tianwen.conversation-quality.v3', source: 'host' } })
+      expect(tasks[0]?.admission).toMatchObject({ qualityContract: { schemaVersion: 'tianwen.conversation-quality.v4', source: 'host' } })
       boundBeforeAnswer = tasks[0]?.models?.[0]?.modelConfigDigest === sha256({ provider: 'tianwen-probe', model: 'scripted' })
       return textResponse('预计 5 天完成。')
     }, ...reviewPair(review),
@@ -107,10 +99,10 @@ it('captures ordinary requests in two native turns before each answer and review
     const recovered = await recoverConversationTaskMaterial(harness.ctx, tasks[0]!)
     expect(recovered).toHaveProperty('qualityContract', tasks[0]!.admission!.qualityContract)
     expect(recovered.criteria).toEqual(admission.criteria)
-    expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('tianwen.conversation-quality.v3')
+    expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('tianwen.conversation-quality.v4')
     expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('self-contained summaries, translations and rewrites')
     expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('Writing is not automatically subjective')
-    expect(JSON.stringify(harness.adapter.requests[2]?.messages)).toContain('tianwen.conversation-quality.v3')
+    expect(JSON.stringify(harness.adapter.requests[2]?.messages)).toContain('tianwen.conversation-quality.v4')
     expect(tasks[0]?.source.taskId).not.toBe(tasks[1]?.source.taskId)
     expect(harness.adapter.requests).toHaveLength(8)
     expect(harness.adapter.requests[0]?.tools?.[0]?.parameters).toMatchObject({

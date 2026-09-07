@@ -9,7 +9,7 @@ import { CallId, createToolResultMessage, createUserMessage } from '@deepseek-ai
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
-import { verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { recoverConversationJudgmentRequest, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { projectClaimEvidence, runConversationClaimReview, validateClaimAudit } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
@@ -164,6 +164,11 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-stat
       const checks = (result as Awaited<ReturnType<typeof runConversationClaimReview>>).reviewChecks
       expect(checks).toHaveLength(2)
       expect(checks.every(check => check.audit.schemaVersion === 'tianwen.claim-audit.v1')).toBe(true)
+      const recovered = await recoverConversationJudgmentRequest(harness.ctx, checks[0]!)
+      expect(recovered.material).toEqual({ original: material, claimEvidence: evidence })
+      expect(recovered.instruction).toContain('Review purpose: method-study')
+      expect(recovered.instruction).toContain('Independently reconstruct all original requirements')
+      expect(recovered.modelConfigDigests).toEqual([sha256({ provider: 'tianwen-probe', model: 'scripted', temperature: 0.25, maxTokens: 2048 })])
       if (mode === 'permitted-inference') expect(checks.map(check => check.audit.units[0]!.claims[0])).toEqual([
         { quote: '原料已送达。', kind: 'inference', status: 'permitted', sourceIds: ['request-1'], explanation: 'Directly derived from request-1 and retained as a permitted inference.' },
         { quote: '原料已送达。', kind: 'inference', status: 'permitted', sourceIds: ['request-1'], explanation: 'Directly derived from request-1 and retained as a permitted inference.' },
