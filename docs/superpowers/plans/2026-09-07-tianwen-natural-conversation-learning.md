@@ -2,9 +2,10 @@
 
 > Execute inline using the approved design and the existing isolated D: worktree.
 
-Status (2026-09-07): steps 1–4 implemented and covered by focused engineering
-checks. Step 5 remains open; no claim of final regression, real DeepSeek
-acceptance, release, successful CI or installation is made.
+Status (2026-09-07): steps 1–4 implemented; full engineering regression and the
+finite actual DeepSeek U cohort are complete. The cohort retains semantic failures
+and a rejected study, not proof of general quality or benefit. Step 5 remains open
+for integration, exact-main CI and ordinary installation.
 
 **Goal:** Ordinary natural conversation automatically produces attributable task
 observations, result reviews, feedback and evidence-led learning.
@@ -146,10 +147,10 @@ support and consent, with no rerun of task trials or judges.
 - [x] Finish final-revision review of correctness, native ownership, actual
   reachability and complexity alongside the final regression evidence.
 - [x] Run affected regression, type/import checks and required delivery gates.
-- [ ] Build an immutable candidate on D: and start the isolated normal DSH UI.
-- [ ] Freeze and run natural-language real-model acceptance without slash
+- [x] Build an immutable candidate on D: and start the isolated normal DSH UI.
+- [x] Freeze and run natural-language real-model acceptance without slash
   commands, packets or instructions to call internal observation tools.
-- [ ] Record every outcome, rectify reproduced product defects with focused
+- [x] Record every outcome, rectify reproduced product defects with focused
   tests, and retain earlier attempts unchanged.
 - [ ] Integrate and push under existing authorization; verify CI for the merged
   commit before ordinary installation; update current handoff and release facts.
@@ -299,7 +300,7 @@ repair in the design addendum. The S cohort and study remain frozen and retained
   retire weaker active methods with an honest forward-only rollback reason.
 - [x] Verify old replay, before-answer timing, native proof preservation, case
   consistency, old/mixed success rejection, rollback and accepted recovery.
-- [ ] Run final full gates and a new prospectively frozen finite actual-UI cohort;
+- [x] Run final full gates and a new prospectively frozen finite actual-UI cohort;
   never relabel old S met as passing the new contract or rerun S's study to pass.
 
 R3 S1–S8 and its study are now closed: ten actual task trials and ten independent
@@ -314,3 +315,20 @@ Both were reproduced with failing checks and fixed. Final affected checks passed
 Critical/Important issue. Fresh full Runtime/dependency build, repository-wide
 typecheck and public-import audit passed. Full TS/Python gates and prospective
 R4 actual-model acceptance are running separately and are not yet claimed green.
+
+Final R4 engineering gates: TS **1978/18 conditional skips**, 539.80 s; Python
+**609/4 conditional skips**, 286.72 s; Ruff, compileall, types, full build and import
+audit passed. The first Python run retained two historical-document wording
+failures, repaired without changing runtime or frozen model inputs. Exact Desktop
+resource audit and actual lifecycle passed 1/1, 65.28 s; native identity 14/14.
+
+R4 U1–U8 completed actual ordinary browser use. The system opened and completed
+its own ten-trial/ten-blind-review study, correctly deriving rejection from its
+recorded arms; nothing activated. Independent audit matched all 21 native proofs
+and all ten outputs, but found semantic false positives despite complete evidence.
+The [R4 result](../../operations/tianwen-natural-conversation-r4-results-20260907.md)
+records these failures explicitly. Closing this finite cohort is not a claim that
+facts, user-output restrictions or reviewer reliability passed in every answer.
+Remaining delivery work: integrate, exact-main CI, normal installation and data/
+shortcut preservation. Known semantic reliability and long-term benefit are not
+silently upgraded to completed by these engineering checks.

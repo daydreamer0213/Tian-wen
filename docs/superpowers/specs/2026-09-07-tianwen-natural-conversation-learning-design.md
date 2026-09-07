@@ -1,8 +1,10 @@
 # Natural conversation learning
 
 Status: direction approved by the project owner on 2026-09-07 (option 2).
-Implementation steps 1–4 are complete at the engineering-check level. Final
-regression, real DeepSeek browser acceptance and delivery remain incomplete.
+Implementation steps 1–4 and final engineering gates are complete. The finite
+real DeepSeek U cohort is closed with a rejected automatic study and retained
+semantic errors, not full quality acceptance or efficacy. Integration and ordinary
+delivery remain separate pending gates at this checkpoint.
 
 ## Product contract
 
