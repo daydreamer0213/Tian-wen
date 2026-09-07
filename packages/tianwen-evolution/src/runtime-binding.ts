@@ -508,6 +508,7 @@ export class TianwenEvolutionService extends Service {
   }
 
   getConversationGuidance(scopeKey: string): GuidanceSnapshot { return this.state().ledger.getConversationGuidance(scopeKey) }
+  retireIncompatibleConversationGuidance(scopeKey: string): void { this.formalWrite(() => this.state().ledger.retireIncompatibleConversationGuidance(scopeKey)) }
   listConversationGuidanceStudies(scopeKey?: string): readonly GuidanceStudy[] { return this.state().ledger.listConversationGuidanceStudies(scopeKey) }
   isConversationGuidanceSupported(studyId: string): boolean { return this.state().ledger.isConversationGuidanceSupported(studyId) }
   conversationGuidanceDecision(studyId: string): GuidanceDecisionRecord { return this.state().ledger.conversationGuidanceDecision(studyId) }

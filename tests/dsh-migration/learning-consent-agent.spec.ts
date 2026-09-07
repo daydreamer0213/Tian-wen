@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply as applyCore } from '../../packages/tianwen-runtime/src/index.js'
 import {
   guidanceVersion,
+  conversationQualityContract,
   sha256,
   type ConversationAdmissionDecision,
   type ConversationFeedbackAssessment,
@@ -434,6 +435,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         }
         const admitted = {
           kind: 'task-admitted' as const, taskId, decision,
+          qualityContract: conversationQualityContract(),
           proof: decision === null ? null : proof,
           unavailableReason: decision === null ? 'model-unavailable' as const : null,
         }

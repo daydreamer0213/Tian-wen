@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { SessionId, isAppendSurfaceEvent, type SessionEvent, type UserMessage } from '@deepseek-ai/dsh-session'
-import { learningSessionLifecycleFingerprint, sha256, type ConversationTask } from '@tianwen/evolution'
+import { learningSessionLifecycleFingerprint, sha256, type ConversationTask, type ConversationQualityContract } from '@tianwen/evolution'
 
 export function conversationMessages(events: readonly SessionEvent[]) {
   return events.flatMap(event => {
@@ -31,6 +31,7 @@ export interface ConversationTaskMaterial {
   readonly context: ReturnType<typeof conversationMessages>
   readonly objective: string
   readonly criteria: readonly string[]
+  readonly qualityContract?: ConversationQualityContract
 }
 
 /** Quotable source text, excluding judgment-derived fields and native metadata. */
@@ -76,5 +77,6 @@ export async function recoverConversationTaskMaterial(ctx: Context, task: Conver
   if (sha256(requests) !== source.requestDigest || requests.length !== source.userMessageIds.length) throw new Error('natural task original request drift')
   const context = conversationContext(saved.events, source.startSeq)
   if (sha256(context) !== source.contextDigest) throw new Error('natural task prior context drift')
-  return { request: requests, context, objective: task.admission.decision.objective, criteria: task.admission.decision.criteria }
+  return { request: requests, context, objective: task.admission.decision.objective, criteria: task.admission.decision.criteria,
+    ...(task.admission.qualityContract === undefined ? {} : { qualityContract: task.admission.qualityContract }) }
 }

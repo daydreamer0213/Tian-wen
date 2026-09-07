@@ -2,6 +2,7 @@ import { expect, it } from 'vitest'
 import { CallId, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { conversationContext, conversationEvidenceTexts } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
+import { conversationQualityContract } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 
 it('bounds current-task context to eight earlier direct-user turns without pulling in the current answer', () => {
   const session = Session.create(SessionId('bounded-context'))
@@ -28,9 +29,10 @@ it('quotes original text and native tool content without exposing judgment or pr
   const source = {
     request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'original "request"\nwith newline' }] })],
     context: [{ id: 'context-message-identity', role: 'assistant', content: [{ type: 'text' as const, text: 'prior source context' }, { type: 'reasoning' as const, text: 'internal reasoning' }] }],
-    objective: 'derived objective', criteria: ['derived criterion'],
+    objective: 'derived objective', criteria: ['derived criterion'], qualityContract: conversationQualityContract(),
   }
   expect(conversationEvidenceTexts(source, ['current answer'], session.events)).toEqual([
     'original "request"\nwith newline', 'prior source context', 'current answer', 'native tool content',
   ])
+  expect(conversationEvidenceTexts(source, ['current answer'], session.events)).not.toContain(source.qualityContract.criterion)
 })

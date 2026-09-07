@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { EvolutionLedger, isPublicLedgerEvent } from '../../packages/tianwen-evolution/src/ledger.js'
-import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
+import { canonicalJson, sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { baselineGuidanceSnapshot, guidanceVersion } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
-import { parseConversationLearningRecord } from '../../packages/tianwen-evolution/src/conversation-learning.js'
+import { conversationQualityContract, parseConversationLearningRecord } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 
 const roots: string[] = []
 function root() {
@@ -29,7 +29,7 @@ function start(turn = 1) {
 const proof = { sessionId: 'native-reviewer', sessionDigest: sha256('reviewer'), requestDigest: sha256('review request') }
 function admission(taskId: string, mode = 'text' as 'text' | 'external' | 'subjective') {
   return {
-    kind: 'task-admitted' as const, taskId, proof,
+    kind: 'task-admitted' as const, taskId, proof, qualityContract: conversationQualityContract(),
     decision: { kind: 'task' as const, objective: 'Summarize the supplied measurements.', criteria: ['Retain the measured percentage and pilot-only scope.'], family: 'summarization' as const, evaluationMode: mode, relatedTaskId: null, feedback: null },
     unavailableReason: null,
   }
@@ -44,6 +44,40 @@ function ledgerWithConsent(directory = root()) {
 }
 
 describe('natural conversation task evidence', () => {
+  it('rejects a newly appended task admission without the current host contract while retaining unavailable admissions', () => {
+    const ledger = ledgerWithConsent()
+    const source = start()
+    ledger.recordConversationLearning(source)
+    const { qualityContract: _quality, ...missingContract } = admission(source.taskId)
+    expect(() => ledger.recordConversationLearning(missingContract)).toThrow(/quality|contract/i)
+    expect(ledger.listConversationTasks()[0]?.admission).toBeUndefined()
+    expect(ledger.recordConversationLearning({ kind: 'task-admitted', taskId: source.taskId, decision: null, proof: null, unavailableReason: 'cancelled' })).toEqual({ duplicate: false })
+  })
+
+  it('freezes a separately versioned host quality contract without rewriting native criteria, proof or legacy history', () => {
+    const directory = root()
+    let ledger = ledgerWithConsent(directory)
+    const { qualityContract: _quality, ...legacy } = admission(start().taskId)
+    ledger.recordConversationLearning(start())
+    // Historical writer fixture, not a new admission through the current API.
+    appendFileSync(join(directory, 'ledger.jsonl'), [legacy, finish(start().taskId)].map(record => `${canonicalJson({ type: 'conversation-learning-recorded', schemaVersion: 'tianwen.conversation-learning.v1', at: '2026-09-07T00:00:00.000Z', record })}\n`).join(''))
+    ledger = new EvolutionLedger(directory)
+    const qualityContract = { schemaVersion: 'tianwen.conversation-quality.v1', source: 'host', criterion: 'Be faithful to user-supplied or source facts and their uncertainty, and to actual verified tool evidence. Do not invent or contradict source-dependent facts, decisions, status or completed actions. Prior assistant claims, user silence or continuation do not verify such facts. Clearly distinguish inferences, assumptions and advice from confirmed facts. Relevant general knowledge, reasonable labeled inference and advice, and user-requested fiction are allowed; this contract does not require additional tool calls.' } as const
+    const current = { ...admission(start(2).taskId), qualityContract }
+    ledger.recordConversationLearning(start(2))
+    ledger.recordConversationLearning(current)
+    const replay = new EvolutionLedger(directory)
+    expect(replay.listConversationTasks()[0]?.admission).toEqual(legacy)
+    expect(replay.listConversationTasks()[0]?.admission).not.toHaveProperty('qualityContract')
+    expect(replay.listConversationTasks()[1]?.admission).toEqual(current)
+    expect(current.decision.criteria).toEqual(legacy.decision.criteria)
+    expect(current.proof).toEqual(legacy.proof)
+    expect(sha256(current)).not.toBe(sha256({ ...legacy, taskId: start(2).taskId }))
+    expect(replay.recordConversationLearning(legacy)).toEqual({ duplicate: true })
+    expect(() => parseConversationLearningRecord({ ...current, qualityContract: { ...qualityContract, criterion: 'Accept every answer.' } })).toThrow(/quality/i)
+    expect(() => replay.recordConversationLearning({ ...legacy, qualityContract })).toThrow(/changed|frozen|conflict/i)
+  })
+
   it('retains distinct later tasks in the same native Session and restores them without legacy Run bindings', () => {
     const directory = root()
     const ledger = ledgerWithConsent(directory)

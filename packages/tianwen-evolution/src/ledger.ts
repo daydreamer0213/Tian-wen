@@ -15,7 +15,7 @@ import {
 import { join } from 'node:path'
 import { TextDecoder } from 'node:util'
 import { resolveControlledSkillSourceFidelityFamily } from './controlled-skill-source-fidelity.js'
-import { ConversationLearningState, parseConversationLearningRecord, type ConversationLearningEvent, type ConversationLearningRecord, type ConversationTask } from './conversation-learning.js'
+import { ConversationLearningState, hasCurrentConversationQuality, parseConversationLearningRecord, type ConversationLearningEvent, type ConversationLearningRecord, type ConversationTask } from './conversation-learning.js'
 import { ConversationGuidanceState, guidanceVersion, parseConversationGuidanceRecord, type ConversationGuidanceRecord, type GuidanceSnapshot, type GuidanceStudy, type GuidanceStudyOpened, type GuidanceDecisionRecord } from './conversation-guidance.js'
 import { ConversationFeedbackState, parseConversationFeedbackRecord, type ConversationFeedbackRecord, type ConversationFeedbackAssessment } from './conversation-feedback.js'
 
@@ -2949,8 +2949,10 @@ export class EvolutionLedger {
       if (sha256(existing) !== sha256(record)) throw new LedgerIntegrityError('conversation learning record changed after freeze')
       return { duplicate: true }
     }
+    if (record.kind === 'task-admitted' && record.decision?.kind === 'task' && !hasCurrentConversationQuality(record.qualityContract)) throw new LedgerIntegrityError('new task admission requires the current host quality contract')
     if (record.kind === 'task-started') {
       this.#requireConversationConsent(record.consentRevision)
+      this.retireIncompatibleConversationGuidance(record.scopeKey)
       const snapshot = this.getConversationGuidance(record.scopeKey)
       if (record.behaviorVersion !== guidanceVersion(snapshot)) throw new LedgerIntegrityError('task must freeze the current conversation guidance')
       this.recordArtifact(canonicalJson(snapshot))
@@ -3005,6 +3007,17 @@ export class EvolutionLedger {
     return this.#conversationGuidance.listStudies(scopeKey)
   }
 
+  /** Future-only policy migration. Historical receipts and task verdicts stay
+   * unchanged; walk the exact active parent chain, never the plugin Champion. */
+  retireIncompatibleConversationGuidance(scopeKey: string): void {
+    let study = this.#conversationGuidance.activeStudy(scopeKey)
+    while (study !== undefined && !hasCurrentConversationQuality(study.opened.qualityContract)) {
+      this.recordConversationGuidance({ kind: 'guidance-rolled-back', studyId: study.opened.studyId,
+        expectedCurrentVersion: guidanceVersion(study.candidate!.candidateSnapshot), reason: 'quality-contract-changed', evidenceTaskIds: [] })
+      study = this.#conversationGuidance.activeStudy(scopeKey)
+    }
+  }
+
   conversationGuidanceDecision(studyId: string): GuidanceDecisionRecord {
     return this.#conversationGuidance.decision(studyId)
   }
@@ -3016,6 +3029,13 @@ export class EvolutionLedger {
       if (sha256(previous) !== sha256(record)) throw new LedgerIntegrityError('conversation guidance changed after freeze')
       if (record.kind === 'study-decided') this.#ensureConversationGuidanceEvaluation(record)
       return { duplicate: true }
+    }
+    // This gate is intentionally mutation-only: replay must retain the exact
+    // original meaning of pre-contract studies, decisions and activations.
+    if (record.kind === 'study-opened' || record.kind === 'guidance-activated') {
+      const opened = record.kind === 'study-opened' ? record : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)?.opened
+      if (!hasCurrentConversationQuality(opened?.qualityContract)) throw new LedgerIntegrityError('new natural studies and activation require the current quality contract')
+      this.retireIncompatibleConversationGuidance(opened!.scopeKey)
     }
     this.#validateConversationGuidance(record)
     // Shared content-addressed storage, never the executable plugin Champion.
@@ -3045,6 +3065,7 @@ export class EvolutionLedger {
       if (task?.source.scopeKey !== study.scopeKey || task.source.behaviorVersion !== study.parentVersion
         || task.source.consentRevision !== study.consentRevision || task.completion?.status !== 'completed'
         || task.admission?.decision?.family !== study.family || task.admission.decision.evaluationMode !== 'text') throw new LedgerIntegrityError('natural learning requires exact compatible task support and counterevidence')
+      if (sha256(task.admission.qualityContract ?? null) !== sha256(study.qualityContract ?? null)) throw new LedgerIntegrityError('natural learning sources and counterexample require the same frozen quality contract')
       if (task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)) throw new LedgerIntegrityError('natural learning requires the same frozen native model configuration for every source task')
       const sourceCase = study.cases.find(item => 'sourceTaskId' in item && item.sourceTaskId === taskId)
       const assessmentId = sourceCase !== undefined && 'feedbackAssessmentId' in sourceCase ? sourceCase.feedbackAssessmentId : undefined
@@ -3081,12 +3102,14 @@ export class EvolutionLedger {
       if (!this.#events.some(event => event.type === 'evaluation-recorded' && event.evaluation.artifactId === artifactId && event.evaluation.receiptDigest === record.decisionDigest && event.evaluation.verdict === 'met')) throw new LedgerIntegrityError('natural guidance activation requires its exact shared evaluation receipt')
     }
     if (record.kind === 'guidance-rolled-back') {
+      if (record.reason === 'quality-contract-changed' && hasCurrentConversationQuality(study.qualityContract)) throw new LedgerIntegrityError('quality contract rollback requires an incompatible historical contract')
       if (record.reason === 'consent-disabled' && consent?.enabled === true && consent.policyVersion === 'tianwen-auto-analysis.v3') throw new LedgerIntegrityError('enabled natural learning cannot claim disabled consent')
       if (record.reason === 'regression') {
         const full = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)!
         const failures = record.evidenceTaskIds.map(id => this.#conversationLearning.list().find(task => task.source.taskId === id))
         if (failures.length < 2 || failures.some(task => task === undefined || task.source.scopeKey !== study.scopeKey
           || task.source.behaviorVersion !== record.expectedCurrentVersion || task.admission?.decision?.family !== study.family
+          || sha256(task.admission.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
           || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)
           || task.review?.verdict !== 'not-met' || task.recordedAt <= full.activatedAt!)
           || new Set(failures.map(task => task!.source.requestDigest)).size !== failures.length) throw new LedgerIntegrityError('guidance regression requires distinct later failed tasks using the active version')

@@ -1,14 +1,21 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import { EvolutionLedger, isPublicLedgerEvent, type ArtifactId } from '../../packages/tianwen-evolution/src/ledger.js'
-import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
-import { conversationTaskId, type ConversationTask, type ConversationTaskAdmission } from '../../packages/tianwen-evolution/src/conversation-learning.js'
+import { canonicalJson, sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
+import { conversationQualityContract, conversationTaskId, type ConversationLearningRecord, type ConversationQualityContract, type ConversationTask, type ConversationTaskAdmission } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import {
-  baselineGuidanceSnapshot, guidanceInputDigest, guidanceStudyId, guidanceVersion,
-  type GuidanceStudyBody, type GuidanceStudyOpened, type GuidanceCandidateRecord, type GuidanceArmRecord,
+  ConversationGuidanceState, baselineGuidanceSnapshot, guidanceInputDigest, guidanceStudyId, guidanceVersion,
+  type ConversationGuidanceRecord, type GuidanceStudyBody, type GuidanceStudyOpened, type GuidanceCandidateRecord, type GuidanceArmRecord,
 } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { conversationFeedbackAssessmentId, type ConversationFeedbackSource, type ConversationFeedbackStarted } from '../../packages/tianwen-evolution/src/conversation-feedback.js'
+import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { SessionId, createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
+import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
+import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
+import { TianwenConversationGuidanceLoopService } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
 
 const roots: string[] = []
 const scope = 'workspace:guidance-ledger'
@@ -23,43 +30,49 @@ function ledgerRoot() {
 }
 
 // Synthetic native receipts exercise real ledger gates and disk replay; no model is run here.
-function task(ledger: EvolutionLedger, turn: number, verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', scopeKey = scope, request = `pilot request ${turn}`, models = [sha256('scripted ledger model configuration')]): ConversationTask {
+function task(ledger: EvolutionLedger, turn: number, verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', scopeKey = scope, request = `pilot request ${turn}`, models = [sha256('scripted ledger model configuration')], qualityContract: ConversationQualityContract | null = conversationQualityContract(), legacyRoot?: string): ConversationTask {
   const identity = { sessionId: 'ordinary-guidance', sessionLifecycleFingerprint: sha256('ordinary-guidance-lifecycle'), turn }
   const taskId = conversationTaskId(identity)
   const source = { kind: 'task-started' as const, taskId, ...identity, startSeq: turn * 10,
     userMessageIds: [`request-${turn}`], requestDigest: sha256(request), contextDigest: sha256([]),
     scopeKey, consentRevision: 1, behaviorVersion: guidanceVersion(ledger.getConversationGuidance(scopeKey)) }
   const admission: ConversationTaskAdmission = { kind: 'task-admitted', taskId, proof: proof(`admission:${turn}`), unavailableReason: null,
+    ...(qualityContract === null ? {} : { qualityContract }),
     decision: { kind: 'task', objective: 'Summarize the supplied pilot result.', criteria: ['Preserve the supplied duration.'],
       family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null } }
   const resultDigest = sha256(`answer ${turn}`)
-  ledger.recordConversationLearning(source)
-  ledger.recordConversationLearning(admission)
-  for (const [index, modelConfigDigest] of models.entries()) ledger.recordConversationLearning({ kind: 'task-model-observed', taskId, headerSeq: turn * 10 + index, modelConfigDigest })
-  ledger.recordConversationLearning({ kind: 'task-finished', taskId, endSeq: turn * 10 + 8, status: 'completed',
-    assistantMessageIds: [`answer-${turn}`], resultDigest, evidenceIds: [] })
-  ledger.recordConversationLearning({ kind: 'task-reviewed', taskId, admissionDigest: sha256(admission), resultDigest,
+  const records: ConversationLearningRecord[] = [source, admission,
+    ...models.map((modelConfigDigest, index) => ({ kind: 'task-model-observed' as const, taskId, headerSeq: turn * 10 + index, modelConfigDigest })),
+    { kind: 'task-finished', taskId, endSeq: turn * 10 + 8, status: 'completed', assistantMessageIds: [`answer-${turn}`], resultDigest, evidenceIds: [] },
+    { kind: 'task-reviewed', taskId, admissionDigest: sha256(admission), resultDigest,
     verdict, category: verdict === 'not-met' ? 'source-fidelity' : null, explanation: 'Original review against frozen duration criteria.',
-    evidenceQuotes: verdict === 'not-met' ? ['pilot'] : [], proof: proof(`review:${turn}`), unavailableReason: null })
+    evidenceQuotes: verdict === 'not-met' ? ['pilot'] : [], proof: proof(`review:${turn}`), unavailableReason: null }]
+  if (qualityContract === null) {
+    if (legacyRoot === undefined) throw new Error('legacy fixture requires an explicit historical ledger path')
+    appendFileSync(join(legacyRoot, 'ledger.jsonl'), records.map(record => `${canonicalJson({ type: 'conversation-learning-recorded', schemaVersion: 'tianwen.conversation-learning.v1', at: '2026-09-07T00:00:00.000Z', record })}\n`).join(''))
+    ledger = new EvolutionLedger(legacyRoot)
+  } else for (const record of records) ledger.recordConversationLearning(record)
   return ledger.listConversationTasks().find(item => item.source.taskId === taskId)!
 }
 
-function seeded(verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', secondScope = scope, repeatRequest = false, secondModels = [sha256('scripted ledger model configuration')]) {
+function seeded(verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', secondScope = scope, repeatRequest = false, secondModels = [sha256('scripted ledger model configuration')], qualityContract: ConversationQualityContract | null = conversationQualityContract()) {
   const root = ledgerRoot()
   const ledger = new EvolutionLedger(root)
   ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
-  const tasks = [task(ledger, 1, verdict), task(ledger, 2, verdict, secondScope, repeatRequest ? 'pilot request 1' : 'pilot request 2', secondModels), task(ledger, 3, 'met')] as const
-  return { root, ledger, tasks }
+  const tasks = [task(ledger, 1, verdict, scope, undefined, undefined, qualityContract, root), task(ledger, 2, verdict, secondScope, repeatRequest ? 'pilot request 1' : 'pilot request 2', secondModels, qualityContract, root), task(ledger, 3, 'met', scope, undefined, undefined, qualityContract, root)] as const
+  return { root, ledger: qualityContract === null ? new EvolutionLedger(root) : ledger, tasks }
 }
 
 function opening(tasks: readonly [ConversationTask, ConversationTask, ConversationTask], label = 'first', assessments: readonly (string | undefined)[] = []): GuidanceStudyOpened {
-  const parentSnapshot = baselineGuidanceSnapshot(scope)
+  const parentSnapshot = baselineGuidanceSnapshot(tasks[0].source.scopeKey)
+  const quality = tasks[0].admission!.qualityContract === undefined ? {} : { qualityContract: tasks[0].admission!.qualityContract }
   const generated = (kind: 'adjacent' | 'holdout') => {
-    const material = { prompt: `${label}: ${kind} pilot source`, criteria: ['Preserve the pilot-only qualification.'] }
+    const material = { prompt: `${label}: ${kind} pilot source`, criteria: ['Preserve the pilot-only qualification.'], ...quality }
     return { id: `${label}:${kind}`, kind, ...material, inputDigest: guidanceInputDigest(material.prompt), materialDigest: sha256(material) }
   }
   const body: GuidanceStudyBody = {
-    scopeKey: scope, family: 'summarization', failureCategory: 'source-fidelity', consentRevision: 1,
+    ...quality,
+    scopeKey: parentSnapshot.scopeKey, family: 'summarization', failureCategory: 'source-fidelity', consentRevision: 1,
     parentSnapshot, parentVersion: guidanceVersion(parentSnapshot), modelConfigDigest: sha256('scripted ledger model configuration'),
     sourceTaskIds: [tasks[0].source.taskId, tasks[1].source.taskId], counterexampleTaskId: tasks[2].source.taskId,
     cases: [
@@ -74,12 +87,10 @@ function opening(tasks: readonly [ConversationTask, ConversationTask, Conversati
   return { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
 }
 
-function proposed(ledger: EvolutionLedger, opened: GuidanceStudyOpened) {
-  ledger.recordConversationGuidance(opened)
+function proposalPlan(opened: GuidanceStudyOpened) {
   const candidate: GuidanceCandidateRecord = { kind: 'candidate-recorded', studyId: opened.studyId,
     candidateSnapshot: { ...opened.parentSnapshot, rules: { summarization: `Preserve the pilot qualification for ${opened.cases[0]!.id}.` } },
     proposalProof: proof(`${opened.studyId}:proposal`) }
-  ledger.recordConversationGuidance(candidate)
   const arms: GuidanceArmRecord[] = opened.cases.flatMap(item => (['baseline', 'candidate'] as const).map(role => ({
     kind: 'arm-recorded', studyId: opened.studyId, caseId: item.id, role, materialDigest: item.materialDigest,
     behaviorVersion: guidanceVersion(role === 'baseline' ? opened.parentSnapshot : candidate.candidateSnapshot),
@@ -87,6 +98,31 @@ function proposed(ledger: EvolutionLedger, opened: GuidanceStudyOpened) {
     outputDigest: sha256(`${item.id}:${role}:actual output`), verdict: role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met',
   })))
   return { opened, candidate, arms }
+}
+
+function proposed(ledger: EvolutionLedger, opened: GuidanceStudyOpened) {
+  const value = proposalPlan(opened)
+  ledger.recordConversationGuidance(opened)
+  ledger.recordConversationGuidance(value.candidate)
+  return value
+}
+
+/** Frozen old-writer fixture: emit historical records, then exercise current
+ * disk replay. Never ask the current mutation API to authorize old policy. */
+function historicalStudy(root: string, ledger: EvolutionLedger, opened: GuidanceStudyOpened, activated: boolean) {
+  const value = proposalPlan(opened)
+  const state = new ConversationGuidanceState()
+  const records: ConversationGuidanceRecord[] = []
+  const append = (record: ConversationGuidanceRecord) => { state.validate(record); state.apply(record, '2026-09-07T00:00:00.000Z'); records.push(record) }
+  append(opened); append(value.candidate)
+  for (const arm of value.arms) append(arm)
+  const decision = state.decision(opened.studyId); append(decision)
+  if (activated) append(activation({ ...value, decision }))
+  ledger.recordArtifact(canonicalJson(opened.parentSnapshot))
+  const artifact = ledger.recordArtifact(canonicalJson(value.candidate.candidateSnapshot))
+  ledger.recordEvaluation({ artifactId: artifact.artifactId, receiptDigest: sha256(decision), verdict: 'met' })
+  appendFileSync(join(root, 'ledger.jsonl'), records.map(record => `${canonicalJson({ type: 'conversation-guidance-recorded', schemaVersion: 'tianwen.conversation-guidance-record.v1', at: '2026-09-07T00:00:00.000Z', record })}\n`).join(''))
+  return { ...value, decision, ledger: new EvolutionLedger(root) }
 }
 
 function evaluated(ledger: EvolutionLedger, opened: GuidanceStudyOpened) {
@@ -133,6 +169,106 @@ function retract(ledger: EvolutionLedger, assessment: ReturnType<typeof nativeFe
   return ledger.recordLearningFeedbackRetraction({ sessionId: source.sessionId, messageId: source.messageId,
     retractedFeedbackVersion: source.feedbackVersion, sessionLifecycleFingerprint: source.sessionLifecycleFingerprint })
 }
+
+it('rejects an old met counterexample in a new-contract study and leaves its original proof untouched', () => {
+  const { root, ledger, tasks } = seeded()
+  const old = task(ledger, 4, 'met', scope, undefined, undefined, null, root)
+  const opened = opening([tasks[0], tasks[1], old])
+  expect(() => new EvolutionLedger(root).recordConversationGuidance(opened)).toThrow(/quality|contract/i)
+  expect(new EvolutionLedger(root).listConversationTasks().at(-1)).toEqual(old)
+})
+
+it.each([false, true])('replays immutable legacy evidence but prevents future old-policy activation (already active: %s)', active => {
+  const seededValue = seeded('not-met', scope, false, undefined, null)
+  const value = historicalStudy(seededValue.root, seededValue.ledger, opening(seededValue.tasks), active)
+  const ledger = value.ledger
+  const history = ledger.listEvents()
+  expect(ledger.listConversationTasks()).toEqual(seededValue.tasks)
+  expect(ledger.listConversationGuidanceStudies()[0]?.opened).not.toHaveProperty('qualityContract')
+  if (!active) {
+    expect(() => ledger.recordConversationGuidance(activation(value))).toThrow(/quality|contract/i)
+    expect(() => ledger.recordConversationGuidance(opening(seededValue.tasks, 'new-old-policy-study'))).toThrow(/quality|contract/i)
+  } else {
+    ledger.retireIncompatibleConversationGuidance(scope)
+    expect(ledger.getConversationGuidance(scope)).toEqual(value.opened.parentSnapshot)
+    expect(ledger.listConversationGuidanceStudies()[0]?.rollback).toMatchObject({ reason: 'quality-contract-changed', evidenceTaskIds: [] })
+    ledger.retireIncompatibleConversationGuidance(scope)
+  }
+  expect(ledger.listEvents().slice(0, history.length)).toEqual(history)
+  expect(ledger.listEvents()).toHaveLength(history.length + (active ? 1 : 0))
+  const replay = new EvolutionLedger(seededValue.root)
+  expect(replay.listConversationTasks()).toEqual(seededValue.tasks)
+  expect(replay.listConversationGuidanceStudies()).toEqual(ledger.listConversationGuidanceStudies())
+  expect(replay.getChampion()).toBeUndefined()
+})
+
+it('does not retire current-contract guidance or claim a quality migration for it', () => {
+  const { ledger, tasks } = seeded()
+  const value = evaluated(ledger, opening(tasks))
+  ledger.recordConversationGuidance(activation(value))
+  ledger.retireIncompatibleConversationGuidance(scope)
+  expect(ledger.getConversationGuidance(scope)).toEqual(value.candidate.candidateSnapshot)
+  expect(() => ledger.recordConversationGuidance({ kind: 'guidance-rolled-back', studyId: value.opened.studyId,
+    expectedCurrentVersion: guidanceVersion(value.candidate.candidateSnapshot), reason: 'quality-contract-changed', evidenceTaskIds: [] })).toThrow(/quality|contract/i)
+})
+
+it.each(['active', 'active-loop', 'accepted', 'mixed-counter'] as const)('keeps historical proof untouched and admits future native turns without obsolete guidance: %s', async scenario => {
+  const root = ledgerRoot()
+  const scopeKey = `conversation:${sha256({ cwd: root })}`
+  const ledger = new EvolutionLedger(root)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const tasks = [
+    task(ledger, 1, 'not-met', scopeKey, undefined, undefined, scenario === 'mixed-counter' ? conversationQualityContract() : null, root),
+    task(ledger, 2, 'not-met', scopeKey, undefined, undefined, scenario === 'mixed-counter' ? conversationQualityContract() : null, root),
+    task(ledger, 3, 'met', scopeKey, undefined, undefined, null, root),
+  ] as const
+  const old = scenario === 'mixed-counter' ? undefined : historicalStudy(root, ledger, opening(tasks), scenario.startsWith('active'))
+  let observedBeforeAnswer = false
+  const harness = await mountPersistentHarness(join(root, 'native-sessions'), [
+    () => {
+      expect(harness.ctx.tianwenEvolution.getConversationGuidance(scopeKey).rules).toEqual({})
+      return toolCallResponse('new-admission', 'structured_output', tasks[0].admission!.decision!)
+    },
+    () => {
+      // Disk, not merely in-memory state, already has the pre-answer contract
+      // and any necessary exact-parent migration.
+      const durable = new EvolutionLedger(root)
+      expect(durable.getConversationGuidance(scopeKey).rules).toEqual({})
+      expect(durable.listConversationTasks('new-native-conversation')[0]?.admission?.qualityContract).toEqual(conversationQualityContract())
+      if (scenario.startsWith('active')) expect(durable.listConversationGuidanceStudies()[0]?.rollback?.reason).toBe('quality-contract-changed')
+      observedBeforeAnswer = true
+      return textResponse('The supplied pilot takes 5 days.')
+    },
+    toolCallResponse('new-review', 'structured_output', { verdict: 'met', category: null, explanation: 'The supplied duration is preserved.', evidenceQuotes: ['The supplied pilot takes 5 days.'] }),
+  ])
+  const cli = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
+  const spawn = await import(pathToFileURL(cli.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  await applyRuntime(harness.ctx, { evolutionRoot: root })
+  await harness.ctx.plugin(TianwenConversationObserverService)
+  // Active migration must also work with only the admission observer, without
+  // waiting for the learning loop or a native idle event.
+  if (scenario !== 'active') await harness.ctx.plugin(TianwenConversationGuidanceLoopService)
+  if (scenario === 'active-loop') expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.rollback?.reason).toBe('quality-contract-changed')
+  const inspect = vi.spyOn(harness.ctx.sessionPersistence, 'inspect')
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('new-native-conversation'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    handle.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Summarize: the supplied pilot takes 5 days.' }] }))
+    await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    if (scenario !== 'active') await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+    expect(observedBeforeAnswer).toBe(true)
+    expect(harness.adapter.requests).toHaveLength(3)
+    expect(harness.ctx.tianwenEvolution.listConversationTasks().slice(0, 3)).toEqual(tasks)
+    const studies = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()
+    expect(studies).toHaveLength(old === undefined ? 0 : 1)
+    if (scenario === 'accepted') {
+      expect(studies[0]?.decision).toEqual(old!.decision)
+      expect(studies[0]?.activation).toBeUndefined()
+      const historicalProofIds = new Set([old!.candidate.proposalProof.sessionId, ...old!.arms.flatMap(arm => [arm.executionProof.sessionId, arm.judgeProof.sessionId])])
+      expect(inspect.mock.calls.some(([id]) => historicalProofIds.has(String(id)))).toBe(false)
+    }
+  } finally { inspect.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose() }
+}, 30_000)
 
 it('requires ten arms, activates their exact evaluation, and replays a data artifact without changing the plugin Champion', () => {
   const { root, ledger, tasks } = seeded()

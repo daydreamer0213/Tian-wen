@@ -7,6 +7,25 @@ export type ConversationFamily = typeof CONVERSATION_FAMILIES[number]
 export type ConversationFailure = typeof CONVERSATION_FAILURES[number]
 export type ConversationUnavailable = 'model-unavailable' | 'material-too-large' | 'cancelled' | 'invalid-judgment'
 
+/** Host policy, not a model-authored criterion or a reinterpretation of old proof. */
+export interface ConversationQualityContract {
+  readonly schemaVersion: 'tianwen.conversation-quality.v1'
+  readonly source: 'host'
+  readonly criterion: string
+}
+export function conversationQualityContract(): ConversationQualityContract {
+  return { schemaVersion: 'tianwen.conversation-quality.v1', source: 'host', criterion: 'Be faithful to user-supplied or source facts and their uncertainty, and to actual verified tool evidence. Do not invent or contradict source-dependent facts, decisions, status or completed actions. Prior assistant claims, user silence or continuation do not verify such facts. Clearly distinguish inferences, assumptions and advice from confirmed facts. Relevant general knowledge, reasonable labeled inference and advice, and user-requested fiction are allowed; this contract does not require additional tool calls.' }
+}
+export function parseConversationQualityContract(value: unknown): ConversationQualityContract {
+  const input = object(value, ['schemaVersion', 'source', 'criterion'])
+  const contract = conversationQualityContract()
+  if (input.schemaVersion !== contract.schemaVersion || input.source !== contract.source || input.criterion !== contract.criterion) throw new TypeError('conversation quality contract is invalid')
+  return contract
+}
+export function hasCurrentConversationQuality(value: ConversationQualityContract | undefined): boolean {
+  return value !== undefined && sha256(value) === sha256(conversationQualityContract())
+}
+
 export interface ConversationJudgmentProof {
   readonly sessionId: string
   readonly sessionDigest: Sha256Digest
@@ -48,6 +67,8 @@ export interface ConversationTaskAdmission {
   readonly decision: ConversationAdmissionDecision | null
   readonly proof: ConversationJudgmentProof | null
   readonly unavailableReason: ConversationUnavailable | null
+  /** Absent on legacy records; never backfilled during replay or recovery. */
+  readonly qualityContract?: ConversationQualityContract
 }
 
 export interface ConversationTaskCompletion {
@@ -184,12 +205,13 @@ export function parseConversationLearningRecord(value: unknown): ConversationLea
     return source
   }
   if (value.kind === 'task-admitted') {
-    const input = object(value, ['kind', 'taskId', 'decision', 'proof', 'unavailableReason'])
+    const input = object(value, ['kind', 'taskId', 'decision', 'proof', 'unavailableReason', ...(Object.hasOwn(value, 'qualityContract') ? ['qualityContract'] : [])])
     const decision = input.decision === null ? null : parseConversationAdmission(input.decision)
     const proof = nullableProof(input.proof)
     const reason = unavailable(input.unavailableReason)
     if ((decision !== null) !== (proof !== null && reason === null) || (decision === null && reason === null)) throw new TypeError('admission requires a judgment or an unavailable reason')
-    return { kind: 'task-admitted', taskId: text(input.taskId, 512), decision, proof, unavailableReason: reason }
+    return { kind: 'task-admitted', taskId: text(input.taskId, 512), decision, proof, unavailableReason: reason,
+      ...(Object.hasOwn(input, 'qualityContract') ? { qualityContract: parseConversationQualityContract(input.qualityContract) } : {}) }
   }
   if (value.kind === 'task-finished') {
     const input = object(value, ['kind', 'taskId', 'endSeq', 'status', 'assistantMessageIds', 'resultDigest', 'evidenceIds'])

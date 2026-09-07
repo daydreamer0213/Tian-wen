@@ -278,3 +278,39 @@ That narrow regression failed 1/13 first, then 13/13 passed, with provider-error
 and cancellation controls unchanged. No proof or learning result is fabricated.
 Fresh typecheck and Runtime build passed. Full fresh regression, R3 model
 outcomes, integration, exact-main CI and daily delivery remain separate gates.
+
+The exact `07dfeeb` full TypeScript gate passed **1965 /18 conditional skips**,
+111 passed files /5 skipped, 429.33 seconds. Its packaged Desktop resource audit
+and actual prepared-profile lifecycle passed (1/1, 7.90 seconds); owned PID25452
+and port51749 were confirmed gone. Public import audit had no private violations.
+R3 S1–S5 completed normal UI use and an automatic study began without a reflection
+request. S1 required unnecessary clarification (the question group was declined,
+no new facts supplied), then added unsupported claims. Its original review met
+only the four frozen coverage criteria, exposing the new prospective contract
+repair in the design addendum. The S cohort and study remain frozen and retained.
+
+### Prospective host-quality condition
+
+- [x] Add a separate durable/versioned host factual-integrity condition before
+  future task answers, preserving native criteria/proof and old record meaning.
+- [x] Carry the exact condition through recovery, original review and all five
+  study cases; independent cases freeze it before the method proposal.
+- [x] Exclude weaker/mixed-contract evidence from new studies and activation;
+  retire weaker active methods with an honest forward-only rollback reason.
+- [x] Verify old replay, before-answer timing, native proof preservation, case
+  consistency, old/mixed success rejection, rollback and accepted recovery.
+- [ ] Run final full gates and a new prospectively frozen finite actual-UI cohort;
+  never relabel old S met as passing the new contract or rerun S's study to pass.
+
+R3 S1–S8 and its study are now closed: ten actual task trials and ten independent
+blind reviews led to rejection, with no activation. The independent audit and
+semantic reviewer disagreements are retained in the [R3 result report](../../operations/tianwen-natural-conversation-r3-results-20260907.md).
+
+The prospective quality repair passed 11 standard suites (174/174). Review
+identified two additional Important gaps: new public admission could omit the
+contract, and a feedback status message could impersonate historical guidance.
+Both were reproduced with failing checks and fixed. Final affected checks passed
+6 suites (82/82); independent review found all findings addressed and no new
+Critical/Important issue. Fresh full Runtime/dependency build, repository-wide
+typecheck and public-import audit passed. Full TS/Python gates and prospective
+R4 actual-model acceptance are running separately and are not yet claimed green.

@@ -4,9 +4,20 @@
 
 Tianwen is an auditable learning control plane for long-running agents.
 
-**Current delivery candidate: Runtime 0.1.14; historical Stage 7 remains complete.** DSH 0.1.1-rc.2 is
-the exact supported Agent Runtime. The ordinary entry is now inside a DSH
-Web/Desktop conversation: `/goal <objective>` starts long-running work without
+**Current source candidate: Runtime 0.1.16 / Desktop preview.17.** DSH 0.1.1-rc.2 is
+the exact supported Agent Runtime. After one-time consent, ordinary unstructured
+DSH Web/Desktop conversation can be observed and reviewed automatically, including
+later turns and natural feedback. No `/research-summary`, formatted source packet,
+Goal or separate request to reflect is required for this natural learning path.
+
+Tasks freeze their acceptance conditions before answers. Attributable recurring
+problems or durable preferences can trigger an independent text-only comparison;
+only an accepted method affects future tasks. Receiving feedback does not mean a
+method has already activated. External effects and personal satisfaction remain
+unproven without the corresponding evidence. See the [current handoff](docs/operations/tianwen-current-project-handoff.md)
+for the separate source, actual-model acceptance and installed-delivery status.
+
+The optional `/goal <objective>` mode starts long-running work without
 opening a Tianwen panel or asking the user to author Tasks or round counts.
 Tianwen uses one stable Planner Session to maintain future Tasks, while each
 accepted Task runs in its own DSH Session. The user can guide, redirect, pause,
@@ -31,7 +42,7 @@ and current `main` source. Designs, implementation plans, and earlier natural-ru
 handoffs preserve historical decisions and evidence; unchecked plan steps or a
 historical "next gate" do not override a later release closure.
 
-Runtime 0.1.14 retains consent-bound repeated-outcome learning, optional bounded
+The Runtime also retains consent-bound repeated-outcome learning, optional bounded
 exploration, and reuse of explicitly host-admitted self-contained Skills.
 Ordinary tasks do not require a Goal. Opening a session does not resume stopped
 model work; use the main conversation's explicit continue action. Mechanism
@@ -119,7 +130,7 @@ into the Profile selected by the user:
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.14.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.16.tgz
 ```
 
 `--allow-build=koffi` is an explicit pnpm approval recorded in that Profile; it
@@ -151,12 +162,16 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
 
 The optional Tianwen Desktop reuses the user's existing DSH and Web Profile. It
 is not a second Runtime and does not require the managed Tianwen installation.
-Desktop opens the same Goal-first UI. With confirmation, it can update the exact
-known Runtime `0.1.10`, `0.1.11`, `0.1.12`, or `0.1.13` predecessor to its embedded `0.1.14`; unknown or damaged
+Desktop opens the same DSH conversation UI. With confirmation, it can update the exact
+known Runtime `0.1.10` through `0.1.15` predecessor to its embedded `0.1.16`; unknown or damaged
 versions are never overwritten automatically.
 
-After installation, enter `/goal <objective>` in an ordinary DSH Web or Tianwen
-Desktop conversation. Tianwen derives Tasks, runs each accepted Task in its own
+After installation, chat normally in DSH Web or Tianwen Desktop. Once learning is
+enabled, natural tasks and feedback can enter the learning path without commands
+or a prescribed input format.
+
+For sustained work on a long-running objective, optionally enter `/goal <objective>`.
+Tianwen derives Tasks, runs each accepted Task in its own
 DSH child Session, and continues at Task boundaries. Goal-relevant natural-language
 guidance stays in the control conversation; the native stop control pauses the
 Goal, and `/goal resume` continues it. The existing **Long-running goals** panel

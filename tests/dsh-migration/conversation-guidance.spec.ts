@@ -14,6 +14,7 @@ import {
   type GuidanceStudyOpened,
 } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
+import { conversationQualityContract } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 
 const scope = 'workspace:guidance-test'
 const proof = (id: string) => ({ sessionId: id, sessionDigest: sha256(id), requestDigest: sha256(`request:${id}`) })
@@ -82,6 +83,37 @@ function activate(state: ConversationGuidanceState, value: ReturnType<typeof eva
 }
 
 describe('natural guidance domain governance', () => {
+  it('binds both independent case contracts before proposal without changing legacy case hashes', () => {
+    const legacy = opening()
+    expect(parseConversationGuidanceRecord(legacy)).toEqual(legacy)
+    const { kind: _kind, studyId: _id, ...oldBody } = legacy
+    const qualityContract = conversationQualityContract()
+    const cases = legacy.cases.map(item => {
+      if ('sourceTaskId' in item) return item
+      const material = { prompt: item.prompt, criteria: item.criteria, qualityContract }
+      return { ...item, ...material, materialDigest: sha256(material) }
+    })
+    const body = { ...oldBody, qualityContract, cases }
+    const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(body), ...body }
+    expect(parseConversationGuidanceRecord(opened)).toEqual(opened)
+    expect(opened.studyId).not.toBe(legacy.studyId)
+    const mixed = { ...body, cases: [...cases.slice(0, 4), legacy.cases[4]!] }
+    expect(() => parseConversationGuidanceRecord({ kind: 'study-opened', studyId: guidanceStudyId(mixed), ...mixed })).toThrow(/quality|contract/i)
+    expect(parseConversationGuidanceRecord(legacy)).toEqual(legacy)
+  })
+
+  it('records a policy migration rollback without claiming user withdrawal or new regression evidence', () => {
+    const state = new ConversationGuidanceState()
+    const value = evaluated(state)
+    activate(state, value)
+    const rollback = { kind: 'guidance-rolled-back' as const, studyId: value.opened.studyId,
+      expectedCurrentVersion: guidanceVersion(value.proposed.candidateSnapshot), reason: 'quality-contract-changed' as const, evidenceTaskIds: [] }
+    append(state, rollback)
+    expect(state.snapshot(scope)).toEqual(value.opened.parentSnapshot)
+    expect(state.listStudies()[0]?.rollback).toEqual(rollback)
+    expect(() => parseConversationGuidanceRecord({ ...rollback, evidenceTaskIds: ['invented failure'] })).toThrow(/quality|contract|evidence/i)
+  })
+
   it('activates only an independently evaluated single-family improvement and leaves another scope untouched', () => {
     const state = new ConversationGuidanceState()
     const value = evaluated(state)

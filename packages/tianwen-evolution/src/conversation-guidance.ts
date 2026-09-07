@@ -1,5 +1,5 @@
 import { sha256 } from './learning-intake.js'
-import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, type ConversationFamily, type ConversationFailure, type ConversationJudgmentProof } from './conversation-learning.js'
+import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, parseConversationQualityContract, type ConversationQualityContract, type ConversationFamily, type ConversationFailure, type ConversationJudgmentProof } from './conversation-learning.js'
 import type { Sha256Digest } from './ledger.js'
 
 /** Data only: the host reads these strings as guidance, never as executable source. */
@@ -28,6 +28,7 @@ export interface GuidanceGeneratedCase {
   readonly criteria: readonly string[]
   readonly materialDigest: Sha256Digest
   readonly inputDigest: Sha256Digest
+  readonly qualityContract?: ConversationQualityContract
 }
 export type GuidanceCase = GuidanceSourceCase | GuidanceGeneratedCase
 export interface GuidanceStudyBody {
@@ -41,6 +42,8 @@ export interface GuidanceStudyBody {
   readonly counterexampleTaskId: string
   readonly cases: readonly GuidanceCase[]
   readonly modelConfigDigest: Sha256Digest
+  /** Absent only in historical studies; frozen before proposing a method. */
+  readonly qualityContract?: ConversationQualityContract
 }
 export interface GuidanceStudyOpened extends GuidanceStudyBody {
   readonly kind: 'study-opened'
@@ -80,7 +83,7 @@ export interface GuidanceRollbackRecord {
   readonly kind: 'guidance-rolled-back'
   readonly studyId: GuidanceStudyId
   readonly expectedCurrentVersion: Sha256Digest
-  readonly reason: 'support-retracted' | 'consent-disabled' | 'regression'
+  readonly reason: 'support-retracted' | 'consent-disabled' | 'regression' | 'quality-contract-changed'
   readonly evidenceTaskIds: readonly string[]
 }
 export interface GuidanceStoppedRecord {
@@ -157,20 +160,23 @@ function parseCase(value: unknown): GuidanceCase {
   const kind = oneOf(input.kind, CASE_KINDS)
   const generated = kind === 'adjacent' || kind === 'holdout'
   const assessed = !generated && kind !== 'counterexample' && Object.hasOwn(input, 'feedbackAssessmentId')
-  object(input, ['id', 'kind', 'materialDigest', 'inputDigest', ...(generated ? ['prompt', 'criteria'] : ['sourceTaskId']), ...(assessed ? ['feedbackAssessmentId'] : [])])
+  object(input, ['id', 'kind', 'materialDigest', 'inputDigest', ...(generated ? ['prompt', 'criteria'] : ['sourceTaskId']), ...(assessed ? ['feedbackAssessmentId'] : []), ...(generated && Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : [])])
   const common = { id: text(input.id, 512), materialDigest: digest(input.materialDigest), inputDigest: digest(input.inputDigest) }
   if (!generated) return { ...common, kind, sourceTaskId: text(input.sourceTaskId, 512), ...(assessed ? { feedbackAssessmentId: text(input.feedbackAssessmentId, 512) } : {}) }
-  const material = { prompt: text(input.prompt, 16384), criteria: list(input.criteria, item => text(item, 2048), 12) }
+  const material = { prompt: text(input.prompt, 16384), criteria: list(input.criteria, item => text(item, 2048), 12),
+    ...(Object.hasOwn(input, 'qualityContract') ? { qualityContract: parseConversationQualityContract(input.qualityContract) } : {}) }
   if (material.criteria.length === 0 || sha256(material) !== common.materialDigest) throw new TypeError('guidance generated material digest or criteria is invalid')
   if (guidanceInputDigest(material.prompt) !== common.inputDigest) throw new TypeError('guidance generated input digest is invalid')
   return { ...common, kind, ...material }
 }
 function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId): GuidanceStudyOpened {
-  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest'])
+  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : [])])
   const sourceTaskIds = uniqueIds(input.sourceTaskIds, 2)
   const counterexampleTaskId = text(input.counterexampleTaskId, 512)
   if (sourceTaskIds.length !== 2 || sourceTaskIds.includes(counterexampleTaskId)) throw new TypeError('guidance requires two distinct failure sources and a separate counterexample')
   const cases = list(input.cases, parseCase, 5)
+  const quality = Object.hasOwn(input, 'qualityContract') ? { qualityContract: parseConversationQualityContract(input.qualityContract) } : {}
+  if (cases.some(item => !('sourceTaskId' in item) && sha256(item.qualityContract ?? null) !== sha256(quality.qualityContract ?? null))) throw new TypeError('guidance generated cases must freeze the same quality contract as the study')
   if (cases.length !== 5 || cases.some((item, index) => item.kind !== CASE_KINDS[index])
     || new Set(cases.map(item => item.id)).size !== 5
     || cases.slice(3).some((item, index) => cases.slice(0, index + 3).some(prior => prior.inputDigest === item.inputDigest))
@@ -182,7 +188,7 @@ function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId):
     scopeKey: text(input.scopeKey, 512), family: oneOf(input.family, CONVERSATION_FAMILIES),
     failureCategory: oneOf(input.failureCategory, CONVERSATION_FAILURES), consentRevision: input.consentRevision as number,
     parentVersion: digest(input.parentVersion), parentSnapshot: parseGuidanceSnapshot(input.parentSnapshot),
-    sourceTaskIds: sourceTaskIds as [string, string], counterexampleTaskId, cases, modelConfigDigest: digest(input.modelConfigDigest),
+    sourceTaskIds: sourceTaskIds as [string, string], counterexampleTaskId, cases, modelConfigDigest: digest(input.modelConfigDigest), ...quality,
   }
   if (body.parentSnapshot.scopeKey !== body.scopeKey || guidanceVersion(body.parentSnapshot) !== body.parentVersion) throw new TypeError('guidance parent snapshot version or scope is invalid')
   if (guidanceStudyId(body) !== studyId) throw new TypeError('guidance study identity does not match its frozen body')
@@ -213,9 +219,10 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
   }
   if (input.kind === 'guidance-rolled-back') {
     object(input, ['kind', 'studyId', 'expectedCurrentVersion', 'reason', 'evidenceTaskIds'])
-    const reason = oneOf(input.reason, ['support-retracted', 'consent-disabled', 'regression'])
+    const reason = oneOf(input.reason, ['support-retracted', 'consent-disabled', 'regression', 'quality-contract-changed'])
     const evidenceTaskIds = uniqueIds(input.evidenceTaskIds, 64)
     if (reason === 'regression' && evidenceTaskIds.length === 0) throw new TypeError('guidance regression rollback requires task evidence')
+    if (reason === 'quality-contract-changed' && evidenceTaskIds.length !== 0) throw new TypeError('quality contract rollback must not claim task regression evidence')
     return { kind: input.kind, studyId, expectedCurrentVersion: digest(input.expectedCurrentVersion), reason, evidenceTaskIds }
   }
   if (input.kind === 'study-stopped') {
@@ -242,6 +249,10 @@ export class ConversationGuidanceState {
 
   snapshot(scopeKey: string): GuidanceSnapshot {
     return structuredClone(this.snapshots.get(scopeKey) ?? baselineGuidanceSnapshot(scopeKey))
+  }
+  activeStudy(scopeKey: string): GuidanceStudy | undefined {
+    const id = this.activeStudies.get(scopeKey)
+    return id === undefined ? undefined : structuredClone(this.studies.get(id))
   }
   listStudies(scopeKey?: string, limit?: number): readonly GuidanceStudy[] {
     if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000)) throw new TypeError('guidance study list limit must be between 1 and 1000')

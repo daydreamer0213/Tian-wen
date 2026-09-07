@@ -248,3 +248,34 @@ Full regression against the final revision, real DeepSeek browser acceptance,
 formal commit/push, resulting CI and ordinary installation are not complete.
 No deterministic fixture result is a claim of real-user improvement or release
 readiness.
+
+## Prospective quality-contract repair after R3 observation
+
+R3's frozen `07dfeeb6b9019eb82d959eff8c04e88ac1da0615` exercised real ordinary
+use, valid raw-evidence capture and automatic study startup. It also exposed a
+generic contract gap: S1's admission froze only four coverage criteria, and the
+review returned met despite unsupported factual assertions elsewhere in the
+complete answer. Raw quotation proves that text occurred, not that it is true.
+Neither that old review nor the ongoing S study is rewritten or regraded.
+
+For future tasks, freeze one explicitly host-provided factual-integrity condition
+before the main answer, separately from the model's own admitted criteria and
+native proof: factual assertions must preserve source certainty, must not turn
+unstated information into established fact, and must distinguish inference,
+assumption and advice without contradicting the source. User-requested fiction
+is not a factual assertion. This is one general condition, not a blacklist of
+the particular hardware/training claims seen in S1.
+
+The contract must be versioned and durable. Preserve every original user/model
+criterion rather than dropping one to make room. Original review and blind
+review check the complete answer under the same frozen condition; independent
+adjacent/holdout cases receive it before proposal creation, not after answers.
+Older records without this contract remain readable with their original meaning
+but cannot be used as successful counterexamples or combined with new-contract
+evidence. A weaker-contract accepted decision cannot be newly activated, and any
+already active weaker-contract method must stop affecting future tasks through
+an explicit accurately named rollback, without rewriting historical results.
+
+The existing native model, permissions, consent and evidence-led selection remain
+unchanged. A complete contract still does not guarantee a model never misjudges;
+actual answers and review reliability must continue to be checked independently.

@@ -84,6 +84,7 @@ it('captures ordinary requests in two native turns before each answer and review
     () => {
       const tasks = harness.ctx.tianwenEvolution.listConversationTasks('ordinary-chat')
       expect(tasks).toHaveLength(1); expect(tasks[0]?.admission?.decision?.criteria).toEqual(admission.criteria)
+      expect(tasks[0]?.admission).toMatchObject({ qualityContract: { schemaVersion: 'tianwen.conversation-quality.v1', source: 'host' } })
       boundBeforeAnswer = tasks[0]?.models?.[0]?.modelConfigDigest === sha256({ provider: 'tianwen-probe', model: 'scripted' })
       return textResponse('预计 5 天完成。')
     }, evidenceResponse(review),
@@ -101,6 +102,13 @@ it('captures ordinary requests in two native turns before each answer and review
     expect(tasks[1]?.models?.[0]?.headerSeq).toBe(tasks[0]?.models?.[0]?.headerSeq)
     expect(tasks.map(task => task.source.turn)).toEqual([1, 2])
     expect(tasks.map(task => task.review?.verdict)).toEqual(['met', 'met'])
+    const recovered = await recoverConversationTaskMaterial(harness.ctx, tasks[0]!)
+    expect(recovered).toHaveProperty('qualityContract', tasks[0]!.admission!.qualityContract)
+    expect(recovered.criteria).toEqual(admission.criteria)
+    expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('tianwen.conversation-quality.v1')
+    expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('self-contained summaries, translations and rewrites')
+    expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('Writing is not automatically subjective')
+    expect(JSON.stringify(harness.adapter.requests[2]?.messages)).toContain('tianwen.conversation-quality.v1')
     expect(tasks[0]?.source.taskId).not.toBe(tasks[1]?.source.taskId)
     expect(harness.adapter.requests).toHaveLength(6)
     expect(harness.adapter.requests[0]?.tools?.[0]?.parameters).toMatchObject({
@@ -125,22 +133,50 @@ it('does not analyze ordinary conversations under the earlier narrower consent',
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
-it('keeps a correction linked to the earlier answer while recording the next task separately', async () => {
+it.each(['correction', 'preference'] as const)('keeps %s linked to the earlier answer and states actual learning status before the main reply', async kind => {
   let harness: Awaited<ReturnType<typeof mount>>
+  const quote = kind === 'correction' ? '你漏了试点范围' : '以后都保留试点范围'
+  let statusBeforeAnswer = false
+  let feedbackMessages = ''
+  let feedbackPlugins: string[] = []
+  let nextTurnPlugins: string[] = []
+  const currentPlugins = () => {
+    const events = harness.handle.agent.session.events
+    const boundary = events.findLast(event => event.type === 'turn/start')!.seq
+    return events.flatMap(event => event.seq >= boundary && event.type === 'user/message' && event.data.source.kind === 'plugin' ? [event.data.source.plugin] : [])
+  }
   harness = await mount([
     structured(admission), textResponse('预计 5 天完成。'), evidenceResponse(review),
     () => structured({ ...admission, relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId,
-      feedback: { kind: 'correction', quote: '你漏了试点范围', category: 'source-fidelity' } }),
-    textResponse('试点预计 5 天完成。'), evidenceResponse(review),
+      feedback: { kind, quote, category: kind === 'preference' ? 'user-preference' : 'source-fidelity' } }),
+    request => {
+      const messages = JSON.stringify(request.messages)
+      expect(messages).toContain('Automatic evaluation is enabled under current consent')
+      expect(messages).toContain('do not ask again to enable learning or save this feedback')
+      expect(messages).toContain('acknowledging feedback is not proof of persistent memory or an activated future method')
+      feedbackMessages = messages
+      feedbackPlugins = currentPlugins()
+      expect(harness.ctx.tianwenEvolution.listConversationTasks()[1]?.admission?.decision?.feedback?.kind).toBe(kind)
+      expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+      statusBeforeAnswer = true
+      return textResponse('试点预计 5 天完成。')
+    }, evidenceResponse(review),
+    structured(admission), () => { nextTurnPlugins = currentPlugins(); return textResponse('下一项需要 5 天。') }, evidenceResponse(review),
   ])
   try {
-    for (const message of ['概括一下：试点预计 5 天完成。', '你漏了试点范围，补进去。']) {
+    for (const message of ['概括一下：试点预计 5 天完成。', `${quote}，补进去。`, '整理另一项：下一项需要 5 天。']) {
       harness.handle.agent.followup(direct(message)); await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
     }
     const tasks = harness.ctx.tianwenEvolution.listConversationTasks()
     expect(tasks[1]?.admission?.decision?.relatedTaskId).toBe(tasks[0]?.source.taskId)
-    expect(tasks[1]?.admission?.decision?.feedback?.kind).toBe('correction')
+    expect(tasks[1]?.admission?.decision?.feedback?.kind).toBe(kind)
     expect(tasks[1]?.completion?.assistantMessageIds).not.toEqual(tasks[0]?.completion?.assistantMessageIds)
+    expect(statusBeforeAnswer).toBe(true)
+    expect.soft(feedbackPlugins).toEqual(['tianwen-conversation-feedback-status'])
+    expect.soft(feedbackMessages).not.toContain('Earlier Tianwen task guidance no longer applies')
+    expect.soft(nextTurnPlugins).toEqual([])
+    expect(tasks[2]?.review?.verdict).toBe('met')
+    expect(JSON.stringify(harness.adapter.requests[1]?.messages)).not.toContain('Automatic evaluation is enabled under current consent')
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
