@@ -22,6 +22,12 @@
 - Standing authorization covers ordinary implementation, actual configured model use, normal integration and recoverably backed-up Daily delivery. A material strategy or authority expansion still requires user direction.
 
 Binding spec: `docs/superpowers/specs/2026-09-08-tianwen-feedback-source-semantics-design.md`.
+2026-09-08 user addition: before preparing another large acceptance environment,
+retire verified inactive leftovers to the existing E-drive migration area.
+Each future acceptance closeout follows
+`docs/operations/tianwen-acceptance-artifact-retention.md`. Historical bytes and
+verdicts remain immutable; a recorded physical archive relocation is allowed.
+Current worktree, shared dependencies, active data and Daily targets are excluded.
 R9 final evidence: `docs/operations/tianwen-natural-conversation-acceptance-r9-results-20260908.md`.
 Parent native-capture Tasks1–3 are closed (Task3 NO-GO); do not redispatch them.
 Fresh data root: `D:/DevData/tianwen-feedback-source-semantics-20260908`.
@@ -142,6 +148,7 @@ Use existing fixture names/builders for the actual modules; include exact020→0
 - [ ] Step3: Freeze one fresh finite natural-input R10 cohort with different topics/facts from R9, ordinary consent, two distinct naturally expressed continuing preferences, one counterexample and later current-instruction/advice/fiction checks. No command/packet/internal-tool instruction. Preserve the first-study terminal checkpoint before post-study ordinary inputs, whether accepted, rejected, stopped or absent. Inputs may be prewritten but model answers/rules are unknown and unedited; label it controlled real-model use, not external-user evidence.
 - [ ] Step4: Own the actual isolated service and fresh IAB tab; log send timestamps, first native text deltas and original first outcomes. Capture exact source/native data with reviewed read-only helpers. Independent answer reviewers are blind to product verdicts/arm identity until their first report and any blind calibration addendum are frozen. Verify all provenance separately, then compare semantics, learning, latency and actual guidance selection. No activation-seeking extra inputs.
 - [ ] Step5: Close only the owned service/tab if still present and verify unchanged terminal state. If already exited, report observed absence and retained state, not a claimed graceful shutdown. Record an explicit release decision. Proven blockers enter a specifically justified next decision; do not repeat the identical cohort to obtain green. Keep finite-evidence and long-term-benefit claims separate.
+- [ ] Step6: Apply the user's artifact-retention procedure to this closed cohort: keep necessary evidence and current delivery dependencies, archive inactive large leftovers to E with verified hashes and a relocation receipt, then report actual D-space recovery. Do not move the candidate Desktop/archive until any pending delivery no longer needs its current location or the reviewed delivery inputs explicitly bind the archived location.
 
 ### Task 4: Finish authorized integration and protected Daily delivery
 

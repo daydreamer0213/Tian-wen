@@ -1,5 +1,15 @@
 # R9 final result — native learning reached, release NO-GO
 
+Storage addendum, 2026-09-08: after this closed result, the owner requested
+inactive acceptance artifacts move to the existing E-drive migration area.
+The R9 `desktop` directory was byte-verified and archived at
+`E:/待清理/D盘迁移-2026-09-08/Tianwen-验收残余/DevData/tianwen-natural-acceptance-r9-20260908/desktop`.
+The batch manifest/receipt in its archive root records original and new paths.
+The original frozen manifest was not rewritten; its old Desktop location is
+now an archived location, not an online runnable cohort. Native Sessions,
+results, source/archive/runtime and audit records stayed in place. This does
+not alter any below pre-archive acceptance fact or authorize a rerun.
+
 Closed 2026-09-08. This is the result of the single frozen R9 cohort, not a
 replacement for R1–R8. Source `dc1b8ba71765de9382cf90da56bba2e46c05ac4c`,
 Runtime `0.1.20`, Desktop `0.1.0-preview.21`, DSH `0.1.1-rc.2`.
