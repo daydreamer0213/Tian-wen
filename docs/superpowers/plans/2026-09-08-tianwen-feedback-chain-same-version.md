@@ -1,5 +1,13 @@
 # Same-Version Feedback Chain Verification Plan
 
+**REMOVED from the active queue after coverage inventory, 2026-09-08.** Do not execute
+either task below. New controls stopped incomplete (12 files, 28,421 bytes),
+one offline RED only, no GREEN/review/startup/freeze/preflight/native Sessions
+or model calls. Existing raw-feedback tests already cover all three consumers;
+the [coverage inventory](../../operations/tianwen-verification-coverage-current.md)
+does not establish another full cohort as necessary. An absent R10 study is
+not sufficient justification. Preserve partial files; do not auto-resume.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Execute only the assigned task brief; no product implementation is authorized here.
 
 **Goal:** Run the scoped R11 real-model protocol against the unchanged reviewed Runtime021 and retain actual original-feedback consumer evidence.
