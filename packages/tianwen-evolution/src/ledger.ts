@@ -3037,6 +3037,13 @@ export class EvolutionLedger {
       if (!hasCurrentConversationQuality(opened?.qualityContract)) throw new LedgerIntegrityError('new natural studies and activation require the current quality contract')
       this.retireIncompatibleConversationGuidance(opened!.scopeKey)
     }
+    const existingStudy = record.kind === 'study-opened' ? undefined
+      : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)
+    const exploredMutation = record.kind === 'exploration-requested' || record.kind === 'exploration-arm-recorded'
+      || (record.kind === 'candidate-recorded' && existingStudy?.exploration !== undefined)
+    if (exploredMutation && !hasCurrentConversationQuality(existingStudy?.opened.qualityContract)) {
+      throw new LedgerIntegrityError('new natural exploration requires the current quality contract')
+    }
     this.#validateConversationGuidance(record)
     // Shared content-addressed storage, never the executable plugin Champion.
     if (record.kind === 'study-opened') this.recordArtifact(canonicalJson(record.parentSnapshot))
@@ -3101,7 +3108,6 @@ export class EvolutionLedger {
       this.#validateConversationGuidanceSupport(study)
     }
     if (exploredMutation) {
-      if (!hasCurrentConversationQuality(study.qualityContract)) throw new LedgerIntegrityError('new natural exploration requires the current quality contract')
       if (guidanceVersion(this.#conversationGuidance.snapshot(study.scopeKey)) !== study.parentVersion) throw new LedgerIntegrityError('natural exploration requires the current frozen parent guidance')
     }
     if (record.kind === 'guidance-activated') {

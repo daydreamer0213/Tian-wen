@@ -79,3 +79,54 @@ make a runtime automatically request or execute exploration, and an exploration
 observation remains neither acceptance evidence nor causal proof. The scoped
 tests and evolution-package typecheck were run; no whole-repository, live-model,
 or Desktop-packaging test was run by design.
+
+## Fix round 1 — replay and authorization boundaries
+
+The initial review found that the current-quality check for explored-study
+mutations lived in `#validateConversationGuidance`, which is also used by
+chronological disk replay. The check now lives only in
+`recordConversationGuidance`, after exact duplicate resolution. Replay retains
+the frozen historical contract; a new request, arm, or explored-study candidate
+still requires the current quality contract. Chronological consent, support, and
+current-parent checks remain in the shared validator.
+
+Covering files:
+
+- `packages/tianwen-evolution/src/ledger.ts`
+- `tests/dsh-migration/conversation-guidance.spec.ts`
+- `tests/dsh-migration/conversation-guidance-ledger.spec.ts`
+
+New RED command:
+
+```powershell
+. D:/DevData/tianwen-natural-acceptance-20260907/evidence/gate-env.ps1; D:/hermes/node/node.exe D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs exec vitest run tests/dsh-migration/conversation-guidance.spec.ts tests/dsh-migration/conversation-guidance-ledger.spec.ts
+```
+
+RED result: exit 1; 68 tests passed and 1 failed. The new actual disk-replay
+test failed as expected with `LedgerIntegrityError: new natural exploration
+requires the current quality contract` from replay-shared validation.
+
+GREEN command (same scoped command):
+
+```powershell
+. D:/DevData/tianwen-natural-acceptance-20260907/evidence/gate-env.ps1; D:/hermes/node/node.exe D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs exec vitest run tests/dsh-migration/conversation-guidance.spec.ts tests/dsh-migration/conversation-guidance-ledger.spec.ts
+```
+
+GREEN result: exit 0; 2 files passed, 72 tests passed, 0 failed.
+
+Additional typecheck command:
+
+```powershell
+. D:/DevData/tianwen-natural-acceptance-20260907/evidence/gate-env.ps1; D:/hermes/node/node.exe D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs --filter @tianwen/evolution typecheck
+```
+
+Typecheck result: exit 0 (`tsc -b --pretty false`); `git diff --check` was
+also exit 0.
+
+The added cases use recomputed valid requests to reach frozen-study binding,
+not parser-invalid edits. They cover wrong study/source/model/quality bindings,
+historical-quality replay plus mutation rejection, disabled/stale consent,
+withdrawn attributed support, stale current parent, cross-study native Session
+reuse, and completion of all ten formal arms after a natural observation.
+Self-review confirmed exact duplicates return before the mutation-only quality
+gate, and no current-quality rule remains in replay-shared validation.

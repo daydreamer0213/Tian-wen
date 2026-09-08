@@ -78,15 +78,24 @@ function explorationOpening(label = 'natural'): GuidanceStudyOpened {
   return { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
 }
 
-function explorationIntent(opened: GuidanceStudyOpened) {
+function explorationIntent(opened: GuidanceStudyOpened, overrides: {
+  readonly requestStudyId?: `guidance-study:${string}`
+  readonly sourceTaskId?: `conversation-task:${string}`
+  readonly sourceMaterialDigest?: ReturnType<typeof sha256>
+  readonly environmentDigest?: ReturnType<typeof sha256>
+  readonly qualityContractDigest?: ReturnType<typeof sha256>
+  readonly proposalProof?: ReturnType<typeof proof>
+} = {}) {
   const source = opened.cases[0]!
   if (!('sourceTaskId' in source)) throw new Error('fixture requires a source task')
+  const sourceTaskId = overrides.sourceTaskId ?? source.sourceTaskId as `conversation-task:${string}`
   return { kind: 'exploration-requested' as const, studyId: opened.studyId,
-    request: prepareConversationLearningExploration({ sourceTaskId: source.sourceTaskId as `conversation-task:${string}`,
+    request: prepareConversationLearningExploration({ sourceTaskId,
       hypothesis: 'The missing qualification follows from the absent temporary instruction.', alternative: 'The result is caused by another source condition.',
       temporaryInstruction: 'Preserve the frozen qualification.', expectedIfHypothesis: { control: 'not-met', treatment: 'met' }, expectedIfAlternative: { control: 'met', treatment: 'met' },
-    }, { studyId: opened.studyId, sourceTaskId: source.sourceTaskId as `conversation-task:${string}`, parentVersion: opened.parentVersion,
-      sourceMaterialDigest: source.materialDigest, environmentDigest: opened.modelConfigDigest, qualityContractDigest: sha256(opened.qualityContract ?? null), proposalProof: proof(`${opened.studyId}:natural-proposal`) }) }
+    }, { studyId: overrides.requestStudyId ?? opened.studyId, sourceTaskId, parentVersion: opened.parentVersion,
+      sourceMaterialDigest: overrides.sourceMaterialDigest ?? source.materialDigest, environmentDigest: overrides.environmentDigest ?? opened.modelConfigDigest,
+      qualityContractDigest: overrides.qualityContractDigest ?? sha256(opened.qualityContract ?? null), proposalProof: overrides.proposalProof ?? proof(`${opened.studyId}:natural-proposal`) }) }
 }
 
 function explorationArm(opened: GuidanceStudyOpened, arm: 'control' | 'treatment', verdict: 'met' | 'not-met') {
@@ -141,18 +150,37 @@ describe('natural guidance domain governance', () => {
     expect(state.listStudies()[0]?.arms).toEqual([])
   })
 
-  it('rejects replaced exploration slots, counterexamples and changed frozen request facts', () => {
+  it('rejects recomputed valid requests that bind the wrong study, source, model or quality', () => {
+    const wrong = [
+      (opened: GuidanceStudyOpened) => explorationIntent(opened, { requestStudyId: `guidance-study:${'a'.repeat(64)}` }),
+      (opened: GuidanceStudyOpened) => explorationIntent(opened, { sourceTaskId: `conversation-task:${'b'.repeat(64)}`, sourceMaterialDigest: sha256('other source material') }),
+      (opened: GuidanceStudyOpened) => explorationIntent(opened, { environmentDigest: sha256('other model configuration') }),
+      (opened: GuidanceStudyOpened) => explorationIntent(opened, { qualityContractDigest: sha256('other frozen quality') }),
+    ]
+    for (const make of wrong) {
+      const state = new ConversationGuidanceState()
+      const opened = explorationOpening(`frozen-natural-${wrong.indexOf(make)}`)
+      append(state, opened)
+      expect(() => append(state, make(opened))).toThrow(/request|source|frozen|study/i)
+    }
     const state = new ConversationGuidanceState()
-    const opened = explorationOpening('frozen-natural')
+    const opened = explorationOpening('replaced-natural')
     const intent = explorationIntent(opened)
-    append(state, opened)
-    expect(() => append(state, { ...intent, request: { ...intent.request, sourceTaskId: opened.counterexampleTaskId as `conversation-task:${string}` } })).toThrow(/request|source|frozen/i)
-    expect(() => append(state, { ...intent, request: { ...intent.request, sourceMaterialDigest: sha256('different material') } })).toThrow(/changed|persisted|frozen/i)
-    append(state, intent)
+    append(state, opened); append(state, intent)
     const control = explorationArm(opened, 'control', 'not-met')
     append(state, control)
     expect(() => append(state, { ...control, outputDigest: sha256('replacement receipt') })).toThrow(/immutable|history|conflicts/i)
     expect(() => append(state, { ...explorationArm(opened, 'treatment', 'met'), parentVersion: sha256('other parent') })).toThrow(/intent|frozen|parent/i)
+  })
+
+  it('reserves natural exploration Sessions across different studies', () => {
+    const state = new ConversationGuidanceState()
+    const first = explorationOpening('cross-study-first')
+    const second = explorationOpening('cross-study-second')
+    append(state, first); append(state, second)
+    const intent = explorationIntent(first)
+    append(state, intent)
+    expect(() => append(state, explorationIntent(second, { proposalProof: intent.request.proposalProof }))).toThrow(/independent|Session/i)
   })
 
   it('requires an independent proof for a stopped insufficient-evidence finding and reserves it', () => {

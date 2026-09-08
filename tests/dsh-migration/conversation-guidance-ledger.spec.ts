@@ -153,7 +153,7 @@ function explorationArm(opened: GuidanceStudyOpened, arm: 'control' | 'treatment
     materialDigest: source.materialDigest, parentVersion: opened.parentVersion,
     executionProof: proof(`${opened.studyId}:exploration:${arm}:execution`),
     outputDigest: sha256(`${opened.studyId}:exploration:${arm}:output`),
-    reviewChecks: auditedChecks(`${opened.studyId}:exploration:${arm}:review`, verdict),
+    reviewChecks: auditedChecks(`${opened.studyId}:exploration:${arm}:review`, verdict, opened.qualityContract?.schemaVersion === 'tianwen.conversation-quality.v4' ? 'v1' : 'v2'),
   }
 }
 
@@ -277,6 +277,48 @@ it.each([false, true])('replays immutable legacy evidence but prevents future ol
   expect(replay.getChampion()).toBeUndefined()
 })
 
+it('replays a historical-quality natural exploration but rejects its new mutation', () => {
+  const { root, ledger, tasks } = seeded('not-met', scope, false, undefined, exactV4Quality)
+  const opened = opening(tasks, 'historical-natural-exploration')
+  const intent = explorationIntent(opened)
+  const records: ConversationGuidanceRecord[] = []
+  const state = new ConversationGuidanceState()
+  const append = (record: ConversationGuidanceRecord) => { state.validate(record); state.apply(record, '2026-09-07T00:00:00.000Z'); records.push(record) }
+  append(opened); append(intent)
+  append(explorationArm(opened, 'control', 'not-met'))
+  append(explorationArm(opened, 'treatment', 'met'))
+  appendFileSync(join(root, 'ledger.jsonl'), records.map(record => `${canonicalJson({ type: 'conversation-guidance-recorded', schemaVersion: 'tianwen.conversation-guidance-record.v1', at: '2026-09-07T00:00:00.000Z', record })}\n`).join(''))
+  const replay = new EvolutionLedger(root)
+  expect(replay.listConversationGuidanceStudies()).toEqual(state.listStudies())
+  expect(() => replay.recordConversationGuidance(proposalPlan(opened).candidate)).toThrow(/quality|contract/i)
+  expect(replay.recordConversationGuidance(intent)).toEqual({ duplicate: true })
+  expect(ledger.listConversationGuidanceStudies()).toEqual([])
+})
+
+it('requires currently enabled matching consent and active support before requesting natural exploration', () => {
+  const disabled = seeded()
+  const disabledStudy = opening(disabled.tasks, 'disabled-natural-exploration')
+  disabled.ledger.recordConversationGuidance(disabledStudy)
+  disabled.ledger.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+  expect(() => disabled.ledger.recordConversationGuidance(explorationIntent(disabledStudy))).toThrow(/current v3 consent/i)
+
+  const withdrawn = seeded('met')
+  const assessments = [nativeFeedback(withdrawn.ledger, withdrawn.tasks[0]), nativeFeedback(withdrawn.ledger, withdrawn.tasks[1])]
+  const withdrawnStudy = opening(withdrawn.tasks, 'withdrawn-natural-exploration', assessments.map(item => item.started.assessmentId))
+  withdrawn.ledger.recordConversationGuidance(withdrawnStudy)
+  retract(withdrawn.ledger, assessments[0]!)
+  expect(() => withdrawn.ledger.recordConversationGuidance(explorationIntent(withdrawnStudy))).toThrow(/support.*absent|retracted/i)
+})
+
+it('rejects a natural exploration request after its opened parent is no longer current', () => {
+  const { ledger, tasks } = seeded()
+  const first = evaluated(ledger, opening(tasks, 'natural-parent-first'))
+  const stale = opening(tasks, 'natural-parent-stale')
+  ledger.recordConversationGuidance(stale)
+  ledger.recordConversationGuidance(activation(first))
+  expect(() => ledger.recordConversationGuidance(explorationIntent(stale))).toThrow(/current frozen parent|stale.*parent/i)
+})
+
 it('does not retire current-contract guidance or claim a quality migration for it', () => {
   const { ledger, tasks } = seeded()
   const value = evaluated(ledger, opening(tasks))
@@ -303,7 +345,13 @@ it('persists one natural control/treatment observation without changing the form
     arms: [explorationArm(opened, 'control', 'not-met'), explorationArm(opened, 'treatment', 'met')],
     result: { observation: { control: 'not-met', treatment: 'met' }, classification: 'matches-hypothesis-prediction' },
   })
-  ledger.recordConversationGuidance(proposalPlan(opened).candidate)
+  const plan = proposalPlan(opened)
+  ledger.recordConversationGuidance(plan.candidate)
+  for (const arm of plan.arms) ledger.recordConversationGuidance(arm)
+  const decision = ledger.conversationGuidanceDecision(opened.studyId)
+  expect(decision.verdict).toBe('accepted')
+  ledger.recordConversationGuidance(decision)
+  expect(ledger.listConversationGuidanceStudies()[0]?.arms).toHaveLength(10)
   const replay = new EvolutionLedger(root)
   expect(replay.listConversationGuidanceStudies()).toEqual(ledger.listConversationGuidanceStudies())
 })
