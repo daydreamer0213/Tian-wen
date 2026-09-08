@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer'
 import { sha256 } from './learning-intake.js'
 import type { LearningAnalysisId } from './learning-analysis.js'
+import type { GuidanceProof, GuidanceStudyId } from './conversation-guidance.js'
 import type { Sha256Digest } from './ledger.js'
 import type { TianwenRunId } from './outcome-intake.js'
 import type { SkillVersionId } from './skill-governance.js'
@@ -18,6 +19,35 @@ export interface LearningExplorationProposal {
   readonly temporaryInstruction: string
   readonly expectedIfHypothesis: ExplorationPrediction
   readonly expectedIfAlternative: ExplorationPrediction
+}
+
+export interface ConversationLearningExplorationProposal {
+  readonly sourceTaskId: `conversation-task:${string}`
+  readonly hypothesis: string
+  readonly alternative: string
+  readonly temporaryInstruction: string
+  readonly expectedIfHypothesis: ExplorationPrediction
+  readonly expectedIfAlternative: ExplorationPrediction
+}
+
+/** Host-frozen conversation inputs; preparation never authorizes execution. */
+export interface ConversationLearningExplorationContext {
+  readonly studyId: GuidanceStudyId
+  readonly sourceTaskId: `conversation-task:${string}`
+  readonly parentVersion: Sha256Digest
+  readonly sourceMaterialDigest: Sha256Digest
+  readonly environmentDigest: Sha256Digest
+  readonly qualityContractDigest: Sha256Digest
+  readonly proposalProof: GuidanceProof
+}
+
+export interface ConversationLearningExplorationRequest extends ConversationLearningExplorationContext {
+  readonly schemaVersion: 'tianwen.learning-exploration-request.v2'
+  readonly sourceKind: 'conversation-task'
+  readonly metric: 'conversation-task-quality.v1'
+  readonly proposal: ConversationLearningExplorationProposal
+  readonly explorationId: `exploration:${string}`
+  readonly requestDigest: Sha256Digest
 }
 
 /** Values supplied by the host from the eligible analysis and frozen source. */
@@ -159,6 +189,48 @@ function prediction(value: unknown): ExplorationPrediction {
   return Object.freeze({ control: pair.control, treatment: pair.treatment })
 }
 
+interface ValidatedExplorationProposal {
+  readonly source: unknown
+  readonly hypothesis: string
+  readonly alternative: string
+  readonly temporaryInstruction: string
+  readonly expectedIfHypothesis: ExplorationPrediction
+  readonly expectedIfAlternative: ExplorationPrediction
+}
+
+function explorationProposalInput(value: unknown, sourceField: string): Record<string, unknown> {
+  return object(value, [sourceField, 'hypothesis', 'alternative', 'temporaryInstruction', 'expectedIfHypothesis', 'expectedIfAlternative'])
+}
+
+function validateExplorationProposal(proposal: Record<string, unknown>, sourceField: string): ValidatedExplorationProposal {
+  const expectedIfHypothesis = prediction(proposal.expectedIfHypothesis)
+  const expectedIfAlternative = prediction(proposal.expectedIfAlternative)
+  if (samePair(expectedIfHypothesis, expectedIfAlternative)) {
+    throw new TypeError('exploration predictions do not distinguish the explanations')
+  }
+  const hypothesis = text(proposal.hypothesis, 'hypothesis')
+  const alternative = text(proposal.alternative, 'alternative')
+  if (hypothesis === alternative) throw new TypeError('exploration alternative must differ from its hypothesis')
+  return {
+    source: proposal[sourceField], hypothesis, alternative,
+    temporaryInstruction: text(proposal.temporaryInstruction, 'temporaryInstruction'),
+    expectedIfHypothesis, expectedIfAlternative,
+  }
+}
+
+function conversationProof(value: unknown): GuidanceProof {
+  const proof = object(value, ['sessionId', 'sessionDigest', 'requestDigest'])
+  if (typeof proof.sessionId !== 'string' || proof.sessionId.trim().length === 0
+    || proof.sessionId.includes('\0') || Buffer.byteLength(proof.sessionId, 'utf8') > 512) {
+    throw new TypeError('invalid exploration proposalProof sessionId')
+  }
+  return Object.freeze({
+    sessionId: proof.sessionId,
+    sessionDigest: identity(proof.sessionDigest, 'sha256', 'proposalProof sessionDigest') as Sha256Digest,
+    requestDigest: identity(proof.requestDigest, 'sha256', 'proposalProof requestDigest') as Sha256Digest,
+  })
+}
+
 function samePair(left: LearningExplorationObservation, right: ExplorationPrediction): boolean {
   return left.control === right.control && left.treatment === right.treatment
 }
@@ -168,24 +240,14 @@ export function prepareLearningExploration(
   input: unknown,
   context: LearningExplorationContext,
 ): LearningExplorationRequest {
-  const value = object(input, [
-    'sourceRunId', 'hypothesis', 'alternative', 'temporaryInstruction',
-    'expectedIfHypothesis', 'expectedIfAlternative',
-  ])
+  const value = explorationProposalInput(input, 'sourceRunId')
   const sourceRunId = identity(value.sourceRunId, 'run', 'sourceRunId') as TianwenRunId
   if (sourceRunId !== context.sourceRunId) throw new TypeError('exploration source differs from the frozen source')
-  const expectedIfHypothesis = prediction(value.expectedIfHypothesis)
-  const expectedIfAlternative = prediction(value.expectedIfAlternative)
-  if (samePair(expectedIfHypothesis, expectedIfAlternative)) {
-    throw new TypeError('exploration predictions do not distinguish the explanations')
-  }
-  const hypothesis = text(value.hypothesis, 'hypothesis')
-  const alternative = text(value.alternative, 'alternative')
-  if (hypothesis === alternative) throw new TypeError('exploration alternative must differ from its hypothesis')
+  const values = validateExplorationProposal(value, 'sourceRunId')
   const proposal = Object.freeze({
-    sourceRunId, hypothesis, alternative,
-    temporaryInstruction: text(value.temporaryInstruction, 'temporaryInstruction'),
-    expectedIfHypothesis, expectedIfAlternative,
+    sourceRunId, hypothesis: values.hypothesis, alternative: values.alternative,
+    temporaryInstruction: values.temporaryInstruction,
+    expectedIfHypothesis: values.expectedIfHypothesis, expectedIfAlternative: values.expectedIfAlternative,
   })
   const metric = context.metric ?? 'research-summary-required-id-coverage.v1'
   if (metric !== 'research-summary-required-id-coverage.v1'
@@ -214,9 +276,48 @@ export function prepareLearningExploration(
   })
 }
 
+/** Pure preparation for a natural conversation task; this does not execute an experiment. */
+export function prepareConversationLearningExploration(
+  input: unknown,
+  context: ConversationLearningExplorationContext,
+): ConversationLearningExplorationRequest {
+  const value = explorationProposalInput(input, 'sourceTaskId')
+  const sourceTaskId = identity(value.sourceTaskId, 'conversation-task', 'sourceTaskId') as ConversationLearningExplorationProposal['sourceTaskId']
+  const contextSourceTaskId = identity(context.sourceTaskId, 'conversation-task', 'sourceTaskId') as ConversationLearningExplorationContext['sourceTaskId']
+  if (sourceTaskId !== contextSourceTaskId) throw new TypeError('exploration source differs from the frozen source')
+  const values = validateExplorationProposal(value, 'sourceTaskId')
+  const proposal = Object.freeze({
+    sourceTaskId,
+    hypothesis: values.hypothesis,
+    alternative: values.alternative,
+    temporaryInstruction: values.temporaryInstruction,
+    expectedIfHypothesis: values.expectedIfHypothesis,
+    expectedIfAlternative: values.expectedIfAlternative,
+  })
+  const body = {
+    schemaVersion: 'tianwen.learning-exploration-request.v2' as const,
+    sourceKind: 'conversation-task' as const,
+    metric: 'conversation-task-quality.v1' as const,
+    studyId: identity(context.studyId, 'guidance-study', 'studyId') as GuidanceStudyId,
+    sourceTaskId,
+    parentVersion: identity(context.parentVersion, 'sha256', 'parentVersion') as Sha256Digest,
+    sourceMaterialDigest: identity(context.sourceMaterialDigest, 'sha256', 'sourceMaterialDigest') as Sha256Digest,
+    environmentDigest: identity(context.environmentDigest, 'sha256', 'environmentDigest') as Sha256Digest,
+    qualityContractDigest: identity(context.qualityContractDigest, 'sha256', 'qualityContractDigest') as Sha256Digest,
+    proposalProof: conversationProof(context.proposalProof),
+    proposal,
+  }
+  const id = sha256({ kind: 'tianwen.learning-exploration.v2', studyId: body.studyId }).slice('sha256:'.length)
+  return Object.freeze({
+    ...body,
+    explorationId: `exploration:${id}`,
+    requestDigest: sha256(body),
+  })
+}
+
 /** Matching a frozen prediction is an observation, not proof of causation. */
 export function classifyLearningExploration(
-  request: LearningExplorationRequest,
+  request: { readonly proposal: Pick<LearningExplorationProposal, 'expectedIfHypothesis' | 'expectedIfAlternative'> },
   observed: LearningExplorationObservation,
 ): LearningExplorationClassification {
   if (observed.control === 'inconclusive' || observed.treatment === 'inconclusive') return 'inconclusive'
@@ -242,6 +343,28 @@ export function parseLearningExplorationRequest(value: unknown): LearningExplora
   })
   if (sha256(request) !== sha256(parsed)) {
     throw new TypeError('persisted learning exploration request changed')
+  }
+  return parsed
+}
+
+/** Rebuild a persisted natural request through the same exact input boundary. */
+export function parseConversationLearningExplorationRequest(value: unknown): ConversationLearningExplorationRequest {
+  const request = object(value, [
+    'schemaVersion', 'sourceKind', 'metric', 'studyId', 'sourceTaskId', 'parentVersion',
+    'sourceMaterialDigest', 'environmentDigest', 'qualityContractDigest', 'proposalProof',
+    'proposal', 'explorationId', 'requestDigest',
+  ])
+  const parsed = prepareConversationLearningExploration(request.proposal, {
+    studyId: request.studyId as GuidanceStudyId,
+    sourceTaskId: request.sourceTaskId as ConversationLearningExplorationContext['sourceTaskId'],
+    parentVersion: request.parentVersion as Sha256Digest,
+    sourceMaterialDigest: request.sourceMaterialDigest as Sha256Digest,
+    environmentDigest: request.environmentDigest as Sha256Digest,
+    qualityContractDigest: request.qualityContractDigest as Sha256Digest,
+    proposalProof: request.proposalProof as GuidanceProof,
+  })
+  if (sha256(request) !== sha256(parsed)) {
+    throw new TypeError('persisted conversation learning exploration request changed')
   }
   return parsed
 }
