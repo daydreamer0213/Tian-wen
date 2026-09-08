@@ -1,5 +1,19 @@
 # Independent Feedback and Draft Authority Implementation Plan
 
+**WITHDRAWN after responsibility reassessment (2026-09-08).** None of the
+unchecked implementation tasks below is an active work item. Do not create v7,
+Runtime022/Desktoppreview23 or the proposed draft-diagnostic/R11 sequence from
+this plan. The implementer stopped before source/test changes. Retain this
+document as history; follow the [scope review](../../operations/tianwen-responsibility-and-acceptance-scope-review-20260908.md)
+for the remaining evidence gap in the existing v6 original-feedback repair.
+
+**Historical pause, now resolved by withdrawal.** The responsibility and
+release-scope review is complete. Task1 stopped with no source/test edits,
+commits or running tests/processes. All remaining worker instructions, goals
+and unchecked tasks are archived proposal text, not executable instructions.
+Existing first outcomes remain unchanged; no rollback or automatic release
+follows from this withdrawal.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Correct the two demonstrated R10 semantic decisions prospectively, then continue the existing evidence-gated integration/Daily route.

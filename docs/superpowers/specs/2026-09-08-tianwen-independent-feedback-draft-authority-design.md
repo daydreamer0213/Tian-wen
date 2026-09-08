@@ -1,5 +1,21 @@
 # Independent feedback classification and drafted-sender authority
 
+**Superseded, not an active design (2026-09-08).** Responsibility reassessment
+is complete: [current scope review](../../operations/tianwen-responsibility-and-acceptance-scope-review-20260908.md).
+The combined v7/draft-authority repair is withdrawn. Conversation classification
+does not mechanically exclude feedback; the observed null decision does not
+establish that causal explanation. Do not implement the proposal below or its
+version bump/diagnostic sequence. It remains here only as decision history.
+Current work returns to verifying the already implemented original-feedback
+consumer path under the existing v6 contract; no source rollback or release
+approval follows from this supersession.
+
+**Historical pause, now resolved by withdrawal:** The owner challenged
+conflating ordinary task execution quality with Tianwen's product
+responsibilities. No implementation source/tests were changed. The scope
+review above completed that pause by withdrawing this proposal, not by
+approving it. All remaining sections are historical proposal text only.
+
 Prospective correction under the owner's standing instruction to independently
 finish the existing route, without routine approval questions. This does not
 change strategy, model, permissions, or learning acceptance thresholds. R10

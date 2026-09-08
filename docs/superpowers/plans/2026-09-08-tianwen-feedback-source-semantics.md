@@ -154,6 +154,15 @@ Use existing fixture names/builders for the actual modules; include exact020→0
 
 ### Task 3: Prospective evidence and final release decision
 
+R10 and the first diagnostic are closed; their outcomes are retained in the
+[R10 result](../../operations/tianwen-natural-conversation-acceptance-r10-results-20260908.md).
+The six diagnostic cases failed in their own bootstrap, and R10 did not reach
+a study. Do not rerun the old sequence or treat incomplete semantic/consumer
+coverage as passed. The [2026-09-08 scope review](../../operations/tianwen-responsibility-and-acceptance-scope-review-20260908.md)
+now governs the remaining current-version consumer proof and release judgment;
+the proposed v7 follow-on has been withdrawn. Checkboxes below remain the
+historical plan checklist, not an instruction to replay completed runs.
+
 **Files:** Root-owned new diagnostic protocol, ordinary R10 protocol/results, isolated `D:/DevData/tianwen-natural-acceptance-r10-20260908`, and newly adapted reviewed controls. Reuse existing implementations by prospective path/version adaptation; R9 bytes remain immutable.
 
 **Interfaces:** Full clean final-source gates bind exact HEAD. Runtime021 repeated archives, full isolated Desktoppreview22, fresh installed profile and full model configuration are frozen before first candidate model call. `originalFeedback` is protected by the actual new case material digest and native request proof; current quality audit is v6/v2.
