@@ -1,6 +1,12 @@
 # Subsequent verification and delivery — preparation, not a passing result
 
-## Current checkpoint — 2026-09-08 20:24
+## Current checkpoint — 2026-09-08 21:03
+
+Baseline9499442 full gates are complete and unchanged-source (TS2262/18,Python609/4). Whole-branch review nevertheless found two uncovered source boundaries, fixed in one wave81ef5f6 (187focused pass/typecheck pass). One scoped re-review is in progress; final stable fixed-source complete gates come next, using fresh run-fixed-gates.ps1 and D:/DevData/tw022-finalfx-20260908, not the old existing fixture root. Both baseline receipts remain immutable. No final fixed-source pass, actual model observation, packaging or delivery is claimed.
+
+Preparation scripts are now corrected and main-scoped-reviewed; actual interface is two no-suite receipts with required name sets, not invented suite/runtime-typecheck fields. Restore owned-ready/resolver/OS/privateIPC → freeze actual inputs/profile/source/zero state → immediate second preflight → first request. Exact E native-use root remains absent. New source/exploration read-only audit adds to old inspector/raw feedback/formal checking, never supplies model answers. Preparation source/offline checks are not actual execution. User's existing one-isolated-source/current-model authority and Daily boundaries remain as real-use-scope.md.
+
+## Retained checkpoint — 2026-09-08 20:24
 
 Both source tasks and both exploration/source order paths are independently reviewed through735585a. Release identities are committed7686eed (022/preview23); initial required gates were incomplete/failed. Root correct runtime build resolved the unbundled imports/declaration failures and exposed one exact status-module allowlist omission; no runtime behavior change was needed for that cause. Worker957de88 corrected the exact input entry/report and reports64/64 runtime-bundle plus98/98 installer checks, empty stderr; scoped re-review pending. Preserve first failure/build diagnostic logs. Earlier sections below are preparation history, not current pending implementation claims.
 

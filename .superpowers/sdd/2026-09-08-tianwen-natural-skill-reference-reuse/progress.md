@@ -1,6 +1,14 @@
 # SDD ledger — plan: docs/superpowers/plans/2026-09-08-tianwen-natural-skill-reference-reuse.md
 
-## Latest checkpoint — 2026-09-08 20:24
+## Latest checkpoint — 2026-09-08 21:03
+
+Full baseline94994421a3dfeace967c9a8e4072d8569db7753b completed unchanged-source: TS2262passed/18skipped,117filespassed/5skipped,645.28s; Python609passed/4skipped,264.52s. All8 named build/static/test gates succeeded. Exact receipts are under E:/待清理/D盘迁移-2026-09-08/Tianwen-自然入口复用-022/final-{typescript,python}-94994421a3df-20260908-202937/receipt.json. These remain base-SHA results, not fixed-source results.
+
+Whole-branch review11a4a29..9499442 found2Important/0Critical: source-backed recovery authenticated mutually consistent proposer inputs without binding sources/parent to opened study; support withdrawal during requirements could start grounding before outer rejection. One bounded final wave81ef5f63e9b3b756e4283f8dbcf87b5bb4a2d19d adds exact opened source/feedback/parent/family/category checks and existing assertCurrent before each native review. MeaningfulRED13failed/104skipped; focusedGREEN187passed,98.95s; runtime typecheck/diffchecks0. Worker report committed. No domain/config/criteria/version/permission/framework change. Single scoped re-review dispatched to original final reviewer; not a broad review restart.
+
+Operational preparation correction is separate from product defects. Main read all scripts and independently ran actual historical receipt-interface mutations/pure guards and12syntaxchecks successfully; report E root/native-use-preparation-root-rereview.md. Exact E execution root still absent. A thin READ-ONLY audit adaptation reuses old native decoding/feedback/formal proofs and adds actual source/exploration records; no fake outputs or cohort. Main will finish stable-source full gates via run-fixed-gates.ps1 with fresh D:/DevData/tw022-finalfx-20260908 fixtures and E logs. No model/browser/package/remote/Daily changes yet.
+
+## Retained checkpoint — 2026-09-08 20:24
 
 Source/exploration adapter tasks are complete and independently reviewed through735585a. Release preparation7686eed initial review Needs fixes on incomplete/failed required gate evidence only, no version/upgrade code finding. Root full runtime build succeeded; initial3 bundle failures were unbundled tsc output/declaration artifacts (no prior real build). After correct build, two original cases passed and status failed on the exact allowlist missing the newly required pure conversation-skill-source parser. Actual metafile trace is status→inspection→ledger→conversation-guidance→source parser; parser imports only node:buffer and already allowed learning-intake/learning-analysis. No production adapter fix is justified. Original worker957de88 adds only this exact input entry and corrects the report; fresh focused64/64 runtime-bundle and98/98 installer pass, both stderr empty. Scoped independent re-review pending. First failures preserved under D:/DevData/t22p-20260908200004 and E:/待清理/D盘迁移-2026-09-08/Tianwen-自然入口复用-022/build-order-check-20260908-2017, followup logs under release-followup-20260908-2021.
 
