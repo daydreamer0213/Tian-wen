@@ -47,7 +47,7 @@ jobs:
         env:
           TIANWEN_DSH_PROBE_ROOT: ${{ runner.temp }}/tianwen-learning-fixtures
       - name: Check natural conversation learning and governed guidance
-        run: pnpm exec vitest run tests/dsh-migration/conversation-learning.spec.ts tests/dsh-migration/conversation-observer.spec.ts tests/dsh-migration/conversation-task-material.spec.ts tests/dsh-migration/conversation-judgment.spec.ts tests/dsh-migration/conversation-feedback.spec.ts tests/dsh-migration/conversation-guidance.spec.ts tests/dsh-migration/conversation-guidance-loop.spec.ts tests/dsh-migration/conversation-guidance-ledger.spec.ts tests/dsh-migration/conversation-review-panel.spec.ts tests/dsh-migration/conversation-claim-audit.spec.ts tests/dsh-migration/conversation-claim-review.spec.ts tests/dsh-migration/conversation-claim-recovery.spec.ts tests/dsh-migration/conversation-claim-capture.spec.ts
+        run: pnpm exec vitest run tests/dsh-migration/conversation-learning.spec.ts tests/dsh-migration/conversation-observer.spec.ts tests/dsh-migration/conversation-task-material.spec.ts tests/dsh-migration/conversation-judgment.spec.ts tests/dsh-migration/conversation-feedback.spec.ts tests/dsh-migration/conversation-guidance.spec.ts tests/dsh-migration/conversation-guidance-loop.spec.ts tests/dsh-migration/conversation-guidance-ledger.spec.ts tests/dsh-migration/conversation-review-panel.spec.ts tests/dsh-migration/conversation-claim-audit.spec.ts tests/dsh-migration/conversation-claim-review.spec.ts tests/dsh-migration/conversation-claim-recovery.spec.ts tests/dsh-migration/conversation-claim-capture.spec.ts tests/dsh-migration/conversation-skill-source.spec.ts
         env:
           TIANWEN_DSH_PROBE_ROOT: ${{ runner.temp }}/tianwen-conversation-fixtures
       - run: pnpm exec vitest run tests/dsh-probe/controlled-skill-evaluation.spec.ts tests/dsh-probe/controlled-skill-evaluation-runtime.spec.ts tests/dsh-probe/controlled-skill-shadow.spec.ts tests/dsh-probe/controlled-skill-shadow-runtime.spec.ts tests/dsh-probe/controlled-skill-activation.spec.ts tests/dsh-probe/controlled-skill-activation-runtime.spec.ts tests/dsh-probe/controlled-skill-source-fidelity.spec.ts tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts tests/dsh-migration/controlled-lifecycle-profile.spec.ts tests/dsh-migration/explicit-correction-product.e2e.spec.ts
@@ -109,7 +109,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter '@tianwen/runtime-bundle...' build
       - run: pnpm --filter '@tianwen/runtime-bundle' pack --pack-destination "${{ runner.temp }}/tianwen-runtime-pack"
-      - run: node scripts/stage-desktop-runtime.mjs "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.20.tgz"
+      - run: node scripts/stage-desktop-runtime.mjs "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.22.tgz"
       - run: pnpm --filter @tianwen/desktop-host build
       - name: Run deterministic Desktop tests
         shell: pwsh
@@ -137,7 +137,7 @@ jobs:
         env:
           ELECTRON_CACHE: ${{ runner.temp }}\electron
           ELECTRON_BUILDER_CACHE: ${{ runner.temp }}\electron-builder
-      - run: node scripts/audit-desktop-artifact.mjs dist/tianwen-desktop/win-unpacked "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.20.tgz"
+      - run: node scripts/audit-desktop-artifact.mjs dist/tianwen-desktop/win-unpacked "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.22.tgz"
       - name: Assert one Desktop installer
         shell: pwsh
         run: |

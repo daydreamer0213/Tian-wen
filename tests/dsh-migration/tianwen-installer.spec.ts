@@ -30,9 +30,9 @@ import {
 const testRoots: string[] = []
 const CURRENT_DSH_VERSION = '0.1.1-rc.2'
 const PREDECESSOR_DSH_VERSION = '0.1.0-rc.7'
-const CURRENT_RUNTIME_VERSION = '0.1.21'
+const CURRENT_RUNTIME_VERSION = '0.1.22'
 const CURRENT_RUNTIME_ARCHIVE = `tianwen-runtime-bundle-${CURRENT_RUNTIME_VERSION}.tgz`
-const LEARNING_LOOP_PREDECESSOR_VERSIONS = ['0.1.20', '0.1.19', '0.1.18', '0.1.17', '0.1.16', '0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11'] as const
+const LEARNING_LOOP_PREDECESSOR_VERSIONS = ['0.1.21', '0.1.20', '0.1.19', '0.1.18', '0.1.17', '0.1.16', '0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11'] as const
 const RUNTIME_FILES = [
   'dist/index.js',
   'dist/index.d.ts',
@@ -639,10 +639,10 @@ describe('Tianwen installer contract', () => {
 
   it('derives the complete fixed Windows installation surface', () => {
     expect(deriveInstallPaths('D:\\DevData\\version-gate', 'win32').archivePath)
-      .toBe('D:\\DevData\\version-gate\\packs\\tianwen-runtime-bundle-0.1.21.tgz')
+      .toBe('D:\\DevData\\version-gate\\packs\\tianwen-runtime-bundle-0.1.22.tgz')
     const paths = deriveInstallPaths('D:\\DevData\\tianwen', 'win32')
     expect(paths).toEqual({
-      archivePath: 'D:\\DevData\\tianwen\\packs\\tianwen-runtime-bundle-0.1.21.tgz',
+      archivePath: 'D:\\DevData\\tianwen\\packs\\tianwen-runtime-bundle-0.1.22.tgz',
       binDir: 'D:\\DevData\\tianwen\\dsh-home\\profiles\\tianwen\\node_modules\\.bin',
       dataDir: 'D:\\DevData\\tianwen',
       dshHome: 'D:\\DevData\\tianwen\\dsh-home',
@@ -767,7 +767,7 @@ describe('Tianwen installer contract', () => {
       (() => {
         const paths = deriveInstallPaths(testRoot('archive-directory'), 'win32')
         writeManagedPredecessor(paths, 'original-archive')
-        const archivePath = paths.archivePath.replace('0.1.21.tgz', '0.0.0.tgz')
+        const archivePath = paths.archivePath.replace('0.1.22.tgz', '0.0.0.tgz')
         rmSync(archivePath)
         mkdirSync(archivePath)
         return paths
@@ -775,7 +775,7 @@ describe('Tianwen installer contract', () => {
       (() => {
         const paths = deriveInstallPaths(testRoot('archive-digest'), 'win32')
         writeManagedPredecessor(paths, 'original-archive')
-        const archivePath = paths.archivePath.replace('0.1.21.tgz', '0.0.0.tgz')
+        const archivePath = paths.archivePath.replace('0.1.22.tgz', '0.0.0.tgz')
         writeFileSync(archivePath, 'tampered archive\n', 'utf8')
         return paths
       })(),
@@ -1087,7 +1087,7 @@ describe('Tianwen installer contract', () => {
     'migrates the complete %s predecessor to the current version and replays without deploys',
     (encoding) => {
       const paths = deriveInstallPaths(testRoot(`migrate-${encoding}`), 'win32')
-      const predecessorArchive = paths.archivePath.replace('0.1.21.tgz', '0.0.0.tgz')
+      const predecessorArchive = paths.archivePath.replace('0.1.22.tgz', '0.0.0.tgz')
       writeManagedPredecessor(paths, encoding)
       const session = join(paths.sessionsRoot, 'kept.jsonl')
       const ledger = join(paths.evolutionRoot, 'ledger.jsonl')
@@ -1116,8 +1116,8 @@ describe('Tianwen installer contract', () => {
   it('migrates Runtime 0.1.10 while retaining older archives without redeploying the same DSH host', () => {
     const paths = deriveInstallPaths(testRoot('migrate-runtime-predecessor'), 'win32')
     const predecessorArchive = runtimePredecessorArchivePath(paths)
-    const historicalArchive = paths.archivePath.replace('0.1.21.tgz', '0.0.0.tgz')
-    const historicalRuntimeArchive = paths.archivePath.replace('0.1.21.tgz', '0.1.1.tgz')
+    const historicalArchive = paths.archivePath.replace('0.1.22.tgz', '0.0.0.tgz')
+    const historicalRuntimeArchive = paths.archivePath.replace('0.1.22.tgz', '0.1.1.tgz')
     writeManagedRuntimePredecessor(paths)
     writeFileSync(historicalArchive, 'retained rc7 archive\n', 'utf8')
     writeFileSync(historicalRuntimeArchive, 'retained Runtime 0.1.1 archive\n', 'utf8')
@@ -1134,14 +1134,14 @@ describe('Tianwen installer contract', () => {
     expect(existsSync(predecessorArchive)).toBe(true)
     expect(existsSync(paths.archivePath)).toBe(true)
     expect(JSON.parse(readFileSync(join(paths.profileRoot, 'package.json'), 'utf8')))
-      .toMatchObject({ dependencies: { '@tianwen/runtime-bundle': '0.1.21' } })
+      .toMatchObject({ dependencies: { '@tianwen/runtime-bundle': '0.1.22' } })
     expect(JSON.parse(readFileSync(join(
       paths.profileRoot,
       'node_modules',
       '@tianwen',
       'runtime-bundle',
       'package.json',
-    ), 'utf8'))).toMatchObject({ version: '0.1.21' })
+    ), 'utf8'))).toMatchObject({ version: '0.1.22' })
     expect(JSON.parse(readFileSync(paths.receiptPath, 'utf8'))).toEqual(migrated)
     expect(migrated).toMatchObject({
       archivePath: paths.archivePath,

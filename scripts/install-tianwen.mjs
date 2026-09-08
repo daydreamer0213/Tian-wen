@@ -22,7 +22,7 @@ const PREDECESSOR_DSH_VERSION = '0.1.0-rc.7'
 const PNPM_VERSION = '11.20.0'
 const PROFILE = 'tianwen'
 const RUNTIME_PACKAGE = '@tianwen/runtime-bundle'
-const RUNTIME_VERSION = '0.1.21'
+const RUNTIME_VERSION = '0.1.22'
 const RUNTIME_ARCHIVE_BASENAME = `tianwen-runtime-bundle-${RUNTIME_VERSION}.tgz`
 const INSTALLER_FAILURE_SCHEMA_VERSION = 'tianwen.install-failure.v1'
 const INSTALLER_FAILURE_STAGE = Object.freeze({
@@ -305,7 +305,7 @@ function renderRuntimePredecessorProfilePatch(paths) {
 `
 }
 
-// Frozen Runtime 0.1.11 through 0.1.20 managed configuration, including the enabled learning loop.
+// Frozen Runtime 0.1.11 through 0.1.21 managed configuration, including the enabled learning loop.
 // Never validate an installed predecessor against the evolving current patch.
 function renderRuntimeLearningLoopPredecessorProfilePatch(paths) {
   return `- id: agent-default-model
@@ -537,6 +537,7 @@ export function classifyManagedInstallation(paths) {
     }
     if (existsSync(paths.archivePath)) return 'incompatible'
     const archivePath = predecessorArchivePath(paths)
+    const runtime021ArchivePath = runtimePredecessorArchivePath(paths, '0.1.21')
     const runtime020ArchivePath = runtimePredecessorArchivePath(paths, '0.1.20')
     const runtime019ArchivePath = runtimePredecessorArchivePath(paths, '0.1.19')
     const runtime018ArchivePath = runtimePredecessorArchivePath(paths, '0.1.18')
@@ -549,7 +550,11 @@ export function classifyManagedInstallation(paths) {
     const runtime011ArchivePath = runtimePredecessorArchivePath(paths, '0.1.11')
     const runtime010ArchivePath = runtimePredecessorArchivePath(paths, '0.1.10')
     if (host.version === DSH_VERSION) {
-      return (existsSync(runtime020ArchivePath)
+      return (existsSync(runtime021ArchivePath)
+        && statSync(runtime021ArchivePath).isFile()
+        && matchesProfile(profile, DSH_VERSION, '0.1.21', renderRuntimeLearningLoopPredecessorProfilePatch(paths))
+        && matchesPredecessorReceipt(paths, runtime021ArchivePath, DSH_VERSION))
+        || (existsSync(runtime020ArchivePath)
         && statSync(runtime020ArchivePath).isFile()
         && matchesProfile(profile, DSH_VERSION, '0.1.20', renderRuntimeLearningLoopPredecessorProfilePatch(paths))
         && matchesPredecessorReceipt(paths, runtime020ArchivePath, DSH_VERSION))

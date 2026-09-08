@@ -841,6 +841,7 @@ def test_natural_conversation_learning_ci_contract() -> None:
             "learning", "observer", "task-material", "judgment", "feedback",
             "guidance", "guidance-loop", "guidance-ledger",
             "review-panel", "claim-audit", "claim-review", "claim-recovery", "claim-capture",
+            "skill-source",
         )
     )
     expected_step = (
