@@ -4,7 +4,7 @@ export type { ConversationReviewCheck, ConversationReviewChecks, ConversationAud
 export { parseClaimAudit } from './conversation-claim-audit.js'
 export type { ClaimAssessment, ClaimAudit, ClaimAuditV1, ClaimAuditV2 } from './conversation-claim-audit.js'
 export { baselineGuidanceSnapshot, guidanceInputDigest, guidanceVersion, guidanceStudyId, parseGuidanceSnapshot, parseConversationGuidanceRecord } from './conversation-guidance.js'
-export type { GuidanceSnapshot, GuidanceStudyId, GuidanceProof, GuidanceStudyBody, GuidanceStudy, GuidanceCase, GuidanceSourceCase, GuidanceGeneratedCase, GuidanceStudyOpened, GuidanceCandidateRecord, GuidanceArmRecord, GuidanceDecisionRecord, GuidanceActivationRecord, GuidanceRollbackRecord, ConversationGuidanceRecord } from './conversation-guidance.js'
+export type { GuidanceSnapshot, GuidanceStudyId, GuidanceProof, GuidanceStudyBody, GuidanceStudy, GuidanceCase, GuidanceSourceCase, GuidanceGeneratedCase, GuidanceStudyOpened, GuidanceCandidateRecord, GuidanceArmRecord, GuidanceExploration, GuidanceExplorationIntentRecord, GuidanceExplorationArmRecord, GuidanceDecisionRecord, GuidanceActivationRecord, GuidanceRollbackRecord, GuidanceStoppedRecord, ConversationGuidanceRecord } from './conversation-guidance.js'
 export { parseConversationFeedbackRecord, conversationFeedbackAssessmentId } from './conversation-feedback.js'
 export type { ConversationFeedbackRecord, ConversationFeedbackAssessment, ConversationFeedbackSource, ConversationFeedbackStarted, ConversationFeedbackResult } from './conversation-feedback.js'
 

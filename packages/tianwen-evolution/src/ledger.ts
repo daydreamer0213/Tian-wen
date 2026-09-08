@@ -3092,9 +3092,17 @@ export class EvolutionLedger {
     const study = record.kind === 'study-opened' ? record
       : this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)!.opened
     const consent = this.#learningAnalysisConsent
-    if (record.kind === 'study-opened' || record.kind === 'guidance-activated') {
+    const full = record.kind === 'study-opened' ? undefined
+      : this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)
+    const exploredMutation = record.kind === 'exploration-requested' || record.kind === 'exploration-arm-recorded'
+      || (record.kind === 'candidate-recorded' && full?.exploration !== undefined)
+    if (record.kind === 'study-opened' || record.kind === 'guidance-activated' || exploredMutation) {
       if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== study.consentRevision) throw new LedgerIntegrityError('natural learning requires current v3 consent')
       this.#validateConversationGuidanceSupport(study)
+    }
+    if (exploredMutation) {
+      if (!hasCurrentConversationQuality(study.qualityContract)) throw new LedgerIntegrityError('new natural exploration requires the current quality contract')
+      if (guidanceVersion(this.#conversationGuidance.snapshot(study.scopeKey)) !== study.parentVersion) throw new LedgerIntegrityError('natural exploration requires the current frozen parent guidance')
     }
     if (record.kind === 'guidance-activated') {
       const full = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)!

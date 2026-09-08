@@ -1,5 +1,6 @@
 import { sha256 } from './learning-intake.js'
 import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, parseConversationQualityContract, parseConversationQualityReviewChecks, parseStoredConversationReviewChecks, conversationReviewConsensus, type ConversationStoredReviewChecks, type ConversationQualityContract, type ConversationFamily, type ConversationFailure, type ConversationJudgmentProof } from './conversation-learning.js'
+import { classifyLearningExploration, parseConversationLearningExplorationRequest, type ConversationLearningExplorationRequest, type LearningExplorationResult } from './learning-exploration.js'
 import type { Sha256Digest } from './ledger.js'
 
 /** Data only: the host reads these strings as guidance, never as executable source. */
@@ -68,6 +69,21 @@ export interface GuidanceArmRecord {
   readonly verdict: 'met' | 'not-met' | 'inconclusive'
   readonly reviewChecks?: ConversationStoredReviewChecks
 }
+export interface GuidanceExplorationIntentRecord {
+  readonly kind: 'exploration-requested'
+  readonly studyId: GuidanceStudyId
+  readonly request: ConversationLearningExplorationRequest
+}
+export interface GuidanceExplorationArmRecord {
+  readonly kind: 'exploration-arm-recorded'
+  readonly studyId: GuidanceStudyId
+  readonly arm: 'control' | 'treatment'
+  readonly materialDigest: Sha256Digest
+  readonly parentVersion: Sha256Digest
+  readonly executionProof: GuidanceProof
+  readonly outputDigest: Sha256Digest
+  readonly reviewChecks: ConversationStoredReviewChecks
+}
 export interface GuidanceDecisionRecord {
   readonly kind: 'study-decided'
   readonly studyId: GuidanceStudyId
@@ -87,17 +103,30 @@ export interface GuidanceRollbackRecord {
   readonly reason: 'support-retracted' | 'consent-disabled' | 'regression' | 'quality-contract-changed'
   readonly evidenceTaskIds: readonly string[]
 }
-export interface GuidanceStoppedRecord {
+export interface GuidanceHistoricalStoppedRecord {
   readonly kind: 'study-stopped'
   readonly studyId: GuidanceStudyId
   readonly reason: 'cancelled' | 'invalid-judgment' | 'model-unavailable' | 'source-unavailable' | 'scope-changed'
 }
-export type ConversationGuidanceRecord = GuidanceStudyOpened | GuidanceCandidateRecord | GuidanceArmRecord | GuidanceDecisionRecord | GuidanceActivationRecord | GuidanceRollbackRecord | GuidanceStoppedRecord
+export interface GuidanceInsufficientEvidenceStoppedRecord {
+  readonly kind: 'study-stopped'
+  readonly studyId: GuidanceStudyId
+  readonly reason: 'insufficient-evidence'
+  readonly proposalProof: GuidanceProof
+}
+export type GuidanceStoppedRecord = GuidanceHistoricalStoppedRecord | GuidanceInsufficientEvidenceStoppedRecord
+export type ConversationGuidanceRecord = GuidanceStudyOpened | GuidanceCandidateRecord | GuidanceArmRecord | GuidanceExplorationIntentRecord | GuidanceExplorationArmRecord | GuidanceDecisionRecord | GuidanceActivationRecord | GuidanceRollbackRecord | GuidanceStoppedRecord
+export interface GuidanceExploration {
+  readonly intent: GuidanceExplorationIntentRecord
+  readonly arms: readonly GuidanceExplorationArmRecord[]
+  readonly result?: LearningExplorationResult
+}
 export interface GuidanceStudy {
   readonly opened: GuidanceStudyOpened
   readonly openedAt: string
   readonly candidate?: GuidanceCandidateRecord
   readonly arms: readonly GuidanceArmRecord[]
+  readonly exploration?: GuidanceExploration
   readonly decision?: GuidanceDecisionRecord
   readonly activation?: GuidanceActivationRecord
   readonly activatedAt?: string
@@ -211,6 +240,16 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
       judgeProof: proof(input.judgeProof), outputDigest: digest(input.outputDigest), verdict: oneOf(input.verdict, ['met', 'not-met', 'inconclusive']),
       ...(Object.hasOwn(input, 'reviewChecks') ? { reviewChecks: parseStoredConversationReviewChecks(input.reviewChecks) } : {}) }
   }
+  if (input.kind === 'exploration-requested') {
+    object(input, ['kind', 'studyId', 'request'])
+    return { kind: input.kind, studyId, request: parseConversationLearningExplorationRequest(input.request) }
+  }
+  if (input.kind === 'exploration-arm-recorded') {
+    object(input, ['kind', 'studyId', 'arm', 'materialDigest', 'parentVersion', 'executionProof', 'outputDigest', 'reviewChecks'])
+    return { kind: input.kind, studyId, arm: oneOf(input.arm, ['control', 'treatment']), materialDigest: digest(input.materialDigest),
+      parentVersion: digest(input.parentVersion), executionProof: proof(input.executionProof), outputDigest: digest(input.outputDigest),
+      reviewChecks: parseStoredConversationReviewChecks(input.reviewChecks) }
+  }
   if (input.kind === 'study-decided') {
     object(input, ['kind', 'studyId', 'armsDigest', 'verdict'])
     return { kind: input.kind, studyId, armsDigest: digest(input.armsDigest), verdict: oneOf(input.verdict, ['accepted', 'rejected', 'inconclusive']) }
@@ -228,6 +267,10 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
     return { kind: input.kind, studyId, expectedCurrentVersion: digest(input.expectedCurrentVersion), reason, evidenceTaskIds }
   }
   if (input.kind === 'study-stopped') {
+    if (input.reason === 'insufficient-evidence') {
+      object(input, ['kind', 'studyId', 'reason', 'proposalProof'])
+      return { kind: input.kind, studyId, reason: input.reason, proposalProof: proof(input.proposalProof) }
+    }
     object(input, ['kind', 'studyId', 'reason'])
     return { kind: input.kind, studyId, reason: oneOf(input.reason, ['cancelled', 'invalid-judgment', 'model-unavailable', 'source-unavailable', 'scope-changed']) }
   }
@@ -266,6 +309,8 @@ export class ConversationGuidanceState {
     const value = record.kind === 'study-opened' ? study?.opened
       : record.kind === 'candidate-recorded' ? study?.candidate
       : record.kind === 'arm-recorded' ? study?.arms.find(arm => arm.caseId === record.caseId && arm.role === record.role)
+      : record.kind === 'exploration-requested' ? study?.exploration?.intent
+      : record.kind === 'exploration-arm-recorded' ? study?.exploration?.arms.find(arm => arm.arm === record.arm)
       : record.kind === 'study-decided' ? study?.decision
       : record.kind === 'guidance-activated' ? study?.activation
       : record.kind === 'guidance-rolled-back' ? study?.rollback : study?.stopped
@@ -298,10 +343,37 @@ export class ConversationGuidanceState {
     if (study.stopped !== undefined) throw new Error('guidance study is stopped; further results are prohibited')
     if (record.kind === 'study-stopped') {
       if (study.decision !== undefined || study.activation !== undefined) throw new Error('a decided guidance study cannot be stopped')
+      if (record.reason === 'insufficient-evidence') {
+        if (study.candidate !== undefined || this.nativeSessions.has(record.proposalProof.sessionId)) throw new Error('insufficient evidence requires an independent native proposal Session before any candidate')
+      }
       return
     }
     const opened = study.opened
+    if (record.kind === 'exploration-requested') {
+      const request = record.request
+      const source = opened.cases.find(item => item.kind === 'source1' && 'sourceTaskId' in item && item.sourceTaskId === request.sourceTaskId)
+        ?? opened.cases.find(item => item.kind === 'source2' && 'sourceTaskId' in item && item.sourceTaskId === request.sourceTaskId)
+      if (study.candidate !== undefined || study.decision !== undefined || study.exploration !== undefined
+        || request.studyId !== opened.studyId || source === undefined || request.parentVersion !== opened.parentVersion
+        || request.sourceMaterialDigest !== source.materialDigest || request.environmentDigest !== opened.modelConfigDigest
+        || request.qualityContractDigest !== sha256(opened.qualityContract ?? null)) {
+        throw new Error('guidance exploration request disagrees with its frozen opened study')
+      }
+      if (this.nativeSessions.has(request.proposalProof.sessionId)) throw new Error('guidance exploration proposal must use an independent native Session')
+      return
+    }
+    if (record.kind === 'exploration-arm-recorded') {
+      const exploration = study.exploration
+      if (exploration === undefined || study.candidate !== undefined || study.decision !== undefined
+        || exploration.arms.some(item => item.arm === record.arm) || record.materialDigest !== exploration.intent.request.sourceMaterialDigest
+        || record.parentVersion !== opened.parentVersion) throw new Error('guidance exploration arm disagrees with its frozen intent')
+      parseConversationQualityReviewChecks(record.reviewChecks, opened.qualityContract)
+      const sessions = [record.executionProof.sessionId, ...record.reviewChecks.map(check => check.proof.sessionId)]
+      if (new Set(sessions).size !== sessions.length || sessions.some(id => this.nativeSessions.has(id))) throw new Error('guidance exploration execution and reviews require distinct independent native Sessions')
+      return
+    }
     if (record.kind === 'candidate-recorded') {
+      if (study.exploration !== undefined && study.exploration.result === undefined) throw new Error('guidance candidate requires both exploration arms when exploration was initiated')
       const next = record.candidateSnapshot
       if (next.scopeKey !== opened.scopeKey || CONVERSATION_FAMILIES.some(family => family !== opened.family && next.rules[family] !== opened.parentSnapshot.rules[family])) throw new Error('guidance candidate changed another family or scope')
       if (next.rules[opened.family] === undefined || next.rules[opened.family] === opened.parentSnapshot.rules[opened.family]) throw new Error('guidance candidate requires a different nonempty family rule')
@@ -347,7 +419,10 @@ export class ConversationGuidanceState {
       return
     }
     const study = this.studies.get(record.studyId)!
-    if (record.kind === 'study-stopped') this.studies.set(record.studyId, { ...study, stopped: record, stoppedAt: at })
+    if (record.kind === 'study-stopped') {
+      if (record.reason === 'insufficient-evidence') this.nativeSessions.add(record.proposalProof.sessionId)
+      this.studies.set(record.studyId, { ...study, stopped: record, stoppedAt: at })
+    }
     else if (record.kind === 'candidate-recorded') {
       this.nativeSessions.add(record.proposalProof.sessionId)
       this.studies.set(record.studyId, { ...study, candidate: record })
@@ -356,6 +431,21 @@ export class ConversationGuidanceState {
       this.nativeSessions.add(record.judgeProof.sessionId)
       for (const check of record.reviewChecks ?? []) this.nativeSessions.add(check.proof.sessionId)
       this.studies.set(record.studyId, { ...study, arms: [...study.arms, record] })
+    } else if (record.kind === 'exploration-requested') {
+      this.nativeSessions.add(record.request.proposalProof.sessionId)
+      this.studies.set(record.studyId, { ...study, exploration: { intent: record, arms: [] } })
+    } else if (record.kind === 'exploration-arm-recorded') {
+      this.nativeSessions.add(record.executionProof.sessionId)
+      for (const check of record.reviewChecks) this.nativeSessions.add(check.proof.sessionId)
+      const exploration = study.exploration!
+      const arms = [...exploration.arms, record]
+      const control = arms.find(item => item.arm === 'control')
+      const treatment = arms.find(item => item.arm === 'treatment')
+      const result = control === undefined || treatment === undefined ? undefined : (() => {
+        const observation = { control: conversationReviewConsensus(control.reviewChecks).verdict, treatment: conversationReviewConsensus(treatment.reviewChecks).verdict }
+        return { observation, classification: classifyLearningExploration(exploration.intent.request, observation) }
+      })()
+      this.studies.set(record.studyId, { ...study, exploration: { ...exploration, arms, ...(result === undefined ? {} : { result }) } })
     } else if (record.kind === 'study-decided') this.studies.set(record.studyId, { ...study, decision: record })
     else if (record.kind === 'guidance-activated') {
       this.snapshots.set(study.opened.scopeKey, study.candidate!.candidateSnapshot)

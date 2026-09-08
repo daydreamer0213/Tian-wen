@@ -9,7 +9,9 @@ import { conversationQualityContract, conversationTaskId, conversationReviewCons
 import {
   ConversationGuidanceState, baselineGuidanceSnapshot, guidanceInputDigest, guidanceStudyId, guidanceVersion,
   type ConversationGuidanceRecord, type GuidanceStudyBody, type GuidanceStudyOpened, type GuidanceCandidateRecord, type GuidanceArmRecord,
+  type GuidanceExplorationIntentRecord, type GuidanceExplorationArmRecord,
 } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
+import { prepareConversationLearningExploration } from '../../packages/tianwen-evolution/src/learning-exploration.js'
 import { conversationFeedbackAssessmentId, type ConversationFeedbackSource, type ConversationFeedbackStarted } from '../../packages/tianwen-evolution/src/conversation-feedback.js'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import { SessionId, createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
@@ -122,6 +124,37 @@ function proposalPlan(opened: GuidanceStudyOpened) {
     } : {}),
   })))
   return { opened, candidate, arms }
+}
+
+function explorationIntent(opened: GuidanceStudyOpened): GuidanceExplorationIntentRecord {
+  const source = opened.cases[0]!
+  if (!('sourceTaskId' in source)) throw new Error('fixture requires a frozen source task')
+  return {
+    kind: 'exploration-requested', studyId: opened.studyId,
+    request: prepareConversationLearningExploration({
+      sourceTaskId: source.sourceTaskId,
+      hypothesis: 'The missing qualification is caused by the absent temporary instruction.',
+      alternative: 'The missing qualification is caused by an unrelated source condition.',
+      temporaryInstruction: 'Preserve the pilot-only qualification in the final answer.',
+      expectedIfHypothesis: { control: 'not-met', treatment: 'met' },
+      expectedIfAlternative: { control: 'met', treatment: 'met' },
+    }, {
+      studyId: opened.studyId, sourceTaskId: source.sourceTaskId, parentVersion: opened.parentVersion,
+      sourceMaterialDigest: source.materialDigest, environmentDigest: opened.modelConfigDigest,
+      qualityContractDigest: sha256(opened.qualityContract ?? null), proposalProof: proof(`${opened.studyId}:exploration-proposal`),
+    }),
+  }
+}
+
+function explorationArm(opened: GuidanceStudyOpened, arm: 'control' | 'treatment', verdict: 'met' | 'not-met'): GuidanceExplorationArmRecord {
+  const source = opened.cases[0]!
+  return {
+    kind: 'exploration-arm-recorded', studyId: opened.studyId, arm,
+    materialDigest: source.materialDigest, parentVersion: opened.parentVersion,
+    executionProof: proof(`${opened.studyId}:exploration:${arm}:execution`),
+    outputDigest: sha256(`${opened.studyId}:exploration:${arm}:output`),
+    reviewChecks: auditedChecks(`${opened.studyId}:exploration:${arm}:review`, verdict),
+  }
 }
 
 function proposed(ledger: EvolutionLedger, opened: GuidanceStudyOpened) {
@@ -252,6 +285,45 @@ it('does not retire current-contract guidance or claim a quality migration for i
   expect(ledger.getConversationGuidance(scope)).toEqual(value.candidate.candidateSnapshot)
   expect(() => ledger.recordConversationGuidance({ kind: 'guidance-rolled-back', studyId: value.opened.studyId,
     expectedCurrentVersion: guidanceVersion(value.candidate.candidateSnapshot), reason: 'quality-contract-changed', evidenceTaskIds: [] })).toThrow(/quality|contract/i)
+})
+
+it('persists one natural control/treatment observation without changing the formal ten-arm decision', () => {
+  const { root, ledger, tasks } = seeded()
+  const opened = opening(tasks, 'natural-exploration')
+  const intent = explorationIntent(opened)
+  ledger.recordConversationGuidance(opened)
+  ledger.recordConversationGuidance(intent)
+  expect(() => ledger.recordConversationGuidance(proposalPlan(opened).candidate)).toThrow(/exploration|both|complete/i)
+  ledger.recordConversationGuidance(explorationArm(opened, 'control', 'not-met'))
+  ledger.recordConversationGuidance(explorationArm(opened, 'treatment', 'met'))
+  const study = ledger.listConversationGuidanceStudies()[0]!
+  expect(study.arms).toEqual([])
+  expect(study.exploration).toMatchObject({
+    intent,
+    arms: [explorationArm(opened, 'control', 'not-met'), explorationArm(opened, 'treatment', 'met')],
+    result: { observation: { control: 'not-met', treatment: 'met' }, classification: 'matches-hypothesis-prediction' },
+  })
+  ledger.recordConversationGuidance(proposalPlan(opened).candidate)
+  const replay = new EvolutionLedger(root)
+  expect(replay.listConversationGuidanceStudies()).toEqual(ledger.listConversationGuidanceStudies())
+})
+
+it('keeps an exact natural exploration receipt idempotent after an evidence-limited stop', () => {
+  const { root, ledger, tasks } = seeded()
+  const opened = opening(tasks, 'stopped-natural-exploration')
+  const intent = explorationIntent(opened)
+  const control = explorationArm(opened, 'control', 'not-met')
+  ledger.recordConversationGuidance(opened)
+  ledger.recordConversationGuidance(intent)
+  ledger.recordConversationGuidance(control)
+  const stopped = { kind: 'study-stopped' as const, studyId: opened.studyId, reason: 'insufficient-evidence' as const,
+    proposalProof: proof(`${opened.studyId}:insufficient-evidence`) }
+  expect(() => ledger.recordConversationGuidance({ ...stopped, proposalProof: control.executionProof })).toThrow(/independent|session/i)
+  ledger.recordConversationGuidance(stopped)
+  expect(ledger.recordConversationGuidance(intent)).toEqual({ duplicate: true })
+  expect(ledger.recordConversationGuidance(control)).toEqual({ duplicate: true })
+  expect(() => ledger.recordConversationGuidance(explorationArm(opened, 'treatment', 'met'))).toThrow(/stopped/i)
+  expect(new EvolutionLedger(root).listConversationGuidanceStudies()).toEqual(ledger.listConversationGuidanceStudies())
 })
 
 it.each(['active', 'active-loop', 'accepted', 'mixed-counter'] as const)('keeps historical proof untouched and admits future native turns without obsolete guidance: %s', async scenario => {

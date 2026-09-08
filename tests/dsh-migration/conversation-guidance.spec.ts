@@ -15,6 +15,7 @@ import {
 } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { conversationQualityContract, parseConversationAuditedReviewChecks, parseConversationReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
+import { prepareConversationLearningExploration } from '../../packages/tianwen-evolution/src/learning-exploration.js'
 
 const scope = 'workspace:guidance-test'
 const proof = (id: string) => ({ sessionId: id, sessionDigest: sha256(id), requestDigest: sha256(`request:${id}`) })
@@ -58,6 +59,46 @@ function arms(opened: GuidanceStudyOpened, proposed: GuidanceCandidateRecord): G
   })))
 }
 
+function explorationOpening(label = 'natural'): GuidanceStudyOpened {
+  const parentSnapshot = baselineGuidanceSnapshot(scope)
+  const qualityContract = conversationQualityContract()
+  const sourceTaskIds = [`conversation-task:${sha256(`${label}:source-1`).slice(7)}`, `conversation-task:${sha256(`${label}:source-2`).slice(7)}`] as const
+  const counterexampleTaskId = `conversation-task:${sha256(`${label}:counterexample`).slice(7)}`
+  const source = (kind: 'source1' | 'source2' | 'counterexample', taskId: string, request: string) => ({
+    id: `${label}:${kind}`, kind, sourceTaskId: taskId, materialDigest: sha256(`${label}:${kind}:material`), inputDigest: guidanceInputDigest(request),
+  })
+  const generated = (kind: 'adjacent' | 'holdout') => {
+    const material = { prompt: `${label}:${kind}:prompt`, criteria: ['Preserve the frozen qualification.'], qualityContract }
+    return { id: `${label}:${kind}`, kind, ...material, materialDigest: sha256(material), inputDigest: guidanceInputDigest(material.prompt) }
+  }
+  const body: GuidanceStudyBody = { scopeKey: scope, family: 'writing', failureCategory: 'instruction-following', consentRevision: 1,
+    parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds, counterexampleTaskId,
+    modelConfigDigest: sha256(`${label}:model-config`), qualityContract,
+    cases: [source('source1', sourceTaskIds[0], `${label}:request-1`), source('source2', sourceTaskIds[1], `${label}:request-2`), source('counterexample', counterexampleTaskId, `${label}:request-success`), generated('adjacent'), generated('holdout')] }
+  return { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
+}
+
+function explorationIntent(opened: GuidanceStudyOpened) {
+  const source = opened.cases[0]!
+  if (!('sourceTaskId' in source)) throw new Error('fixture requires a source task')
+  return { kind: 'exploration-requested' as const, studyId: opened.studyId,
+    request: prepareConversationLearningExploration({ sourceTaskId: source.sourceTaskId as `conversation-task:${string}`,
+      hypothesis: 'The missing qualification follows from the absent temporary instruction.', alternative: 'The result is caused by another source condition.',
+      temporaryInstruction: 'Preserve the frozen qualification.', expectedIfHypothesis: { control: 'not-met', treatment: 'met' }, expectedIfAlternative: { control: 'met', treatment: 'met' },
+    }, { studyId: opened.studyId, sourceTaskId: source.sourceTaskId as `conversation-task:${string}`, parentVersion: opened.parentVersion,
+      sourceMaterialDigest: source.materialDigest, environmentDigest: opened.modelConfigDigest, qualityContractDigest: sha256(opened.qualityContract ?? null), proposalProof: proof(`${opened.studyId}:natural-proposal`) }) }
+}
+
+function explorationArm(opened: GuidanceStudyOpened, arm: 'control' | 'treatment', verdict: 'met' | 'not-met') {
+  const source = opened.cases[0]!
+  const reviewChecks = parseConversationAuditedReviewChecks(['requirements', 'grounding'].map(focus => ({ focus, verdict,
+    category: verdict === 'not-met' ? 'instruction-following' : null, explanation: 'Frozen quality review.', evidenceQuotes: ['pilot'],
+    proof: proof(`${opened.studyId}:${arm}:${focus}`), audit: { schemaVersion: 'tianwen.claim-audit.v2' as const, evidenceDigest: sha256(`${opened.studyId}:${arm}:evidence`),
+      units: { 'answer-1': { firstClaim: { quote: 'pilot', kind: 'source-fact' as const, status: verdict === 'met' ? 'supported' as const : 'unsupported' as const, sourceIds: ['request-1'], explanation: 'Frozen quality evidence.' }, additionalClaims: [] } } } })))
+  return { kind: 'exploration-arm-recorded' as const, studyId: opened.studyId, arm, materialDigest: source.materialDigest, parentVersion: opened.parentVersion,
+    executionProof: proof(`${opened.studyId}:${arm}:execution`), outputDigest: sha256(`${opened.studyId}:${arm}:output`), reviewChecks }
+}
+
 function append(state: ConversationGuidanceState, input: ConversationGuidanceRecord) {
   const record = parseConversationGuidanceRecord(input)
   state.validate(record)
@@ -83,6 +124,51 @@ function activate(state: ConversationGuidanceState, value: ReturnType<typeof eva
 }
 
 describe('natural guidance domain governance', () => {
+  it('derives a bounded exploration observation only from two independent frozen review receipts', () => {
+    const state = new ConversationGuidanceState()
+    const opened = explorationOpening()
+    const intent = explorationIntent(opened)
+    append(state, opened)
+    append(state, intent)
+    expect(() => append(state, candidate(opened))).toThrow(/exploration|both|arms/i)
+    const control = explorationArm(opened, 'control', 'not-met')
+    append(state, control)
+    expect(() => append(state, { ...control, arm: 'treatment', executionProof: control.executionProof })).toThrow(/independent|session/i)
+    append(state, explorationArm(opened, 'treatment', 'met'))
+    const exploration = state.listStudies()[0]!.exploration
+    expect(exploration?.result).toEqual({ observation: { control: 'not-met', treatment: 'met' }, classification: 'matches-hypothesis-prediction' })
+    append(state, candidate(opened))
+    expect(state.listStudies()[0]?.arms).toEqual([])
+  })
+
+  it('rejects replaced exploration slots, counterexamples and changed frozen request facts', () => {
+    const state = new ConversationGuidanceState()
+    const opened = explorationOpening('frozen-natural')
+    const intent = explorationIntent(opened)
+    append(state, opened)
+    expect(() => append(state, { ...intent, request: { ...intent.request, sourceTaskId: opened.counterexampleTaskId as `conversation-task:${string}` } })).toThrow(/request|source|frozen/i)
+    expect(() => append(state, { ...intent, request: { ...intent.request, sourceMaterialDigest: sha256('different material') } })).toThrow(/changed|persisted|frozen/i)
+    append(state, intent)
+    const control = explorationArm(opened, 'control', 'not-met')
+    append(state, control)
+    expect(() => append(state, { ...control, outputDigest: sha256('replacement receipt') })).toThrow(/immutable|history|conflicts/i)
+    expect(() => append(state, { ...explorationArm(opened, 'treatment', 'met'), parentVersion: sha256('other parent') })).toThrow(/intent|frozen|parent/i)
+  })
+
+  it('requires an independent proof for a stopped insufficient-evidence finding and reserves it', () => {
+    const state = new ConversationGuidanceState()
+    const opened = explorationOpening('insufficient-natural')
+    const intent = explorationIntent(opened)
+    append(state, opened)
+    expect(() => parseConversationGuidanceRecord({ kind: 'study-stopped', studyId: opened.studyId, reason: 'insufficient-evidence' })).toThrow(/fields/i)
+    append(state, intent)
+    const control = explorationArm(opened, 'control', 'not-met')
+    append(state, control)
+    expect(() => append(state, { kind: 'study-stopped', studyId: opened.studyId, reason: 'insufficient-evidence', proposalProof: control.executionProof })).toThrow(/independent|Session/i)
+    append(state, { kind: 'study-stopped', studyId: opened.studyId, reason: 'insufficient-evidence', proposalProof: proof(`${opened.studyId}:insufficient`) })
+    expect(() => append(state, explorationArm(opened, 'treatment', 'met'))).toThrow(/stopped/i)
+  })
+
   it('binds both independent case contracts before proposal without changing legacy case hashes', () => {
     const legacy = opening()
     expect(parseConversationGuidanceRecord(legacy)).toEqual(legacy)
