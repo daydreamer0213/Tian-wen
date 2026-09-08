@@ -438,3 +438,52 @@ it.each(['valid', 'missing', 'tampered'] as const)('handles %s natural correctio
     expect(warnings).toEqual([])
   } finally { inspectionFault?.mockRestore(); warningSpy.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
 }, 30_000)
+
+it('keeps an accepted oversize natural feedback request exact and unavailable before a study call', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-feedback-source-semantics-20260908/new-fix-tests' : '/tmp/tianwen-feedback-source-semantics'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'oversize-natural-feedback-'))
+  const marker = 'OVERSIZE-NATURAL-DIRECT-FEEDBACK-MARKER:'
+  // This remains below the admission-material limit with the short original
+  // turn, but the recovered feedback material adds its frozen source binding
+  // and crosses the judgment-material limit without a truncation path.
+  const directFeedback = `${marker}${'x'.repeat(93 * 1024 + 512)}`
+  let harness: Awaited<ReturnType<typeof mountFeedbackHarness>>
+  const script: ScriptEntry[] = [
+    structured({ ...admission, objective: 'Repeat the supplied word.', criteria: ['Repeat exactly.'] }), textResponse('base.'), ...reviewPair(verdict(true, 'base')),
+    () => structured({ ...admission, kind: 'conversation', objective: '', criteria: [], relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId,
+      feedback: { kind: 'correction', quote: marker, category: 'source-fidelity' } }), textResponse('Thanks for the feedback.'),
+  ]
+  harness = await mountFeedbackHarness(join(root, 'sessions'), script)
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+  harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  await harness.ctx.plugin(TianwenConversationObserverService)
+  await harness.ctx.plugin(TianwenMessageFeedbackBridgeService)
+  await harness.ctx.plugin(TianwenConversationFeedbackService)
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('oversize-natural-feedback-main'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  const direct = (text: string) => createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] })
+  const feedbackMessage = direct(directFeedback)
+  try {
+    handle.agent.followup(direct('Repeat: base.'))
+    await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const beforeFeedbackTurn = harness.adapter.requests.length
+    handle.agent.followup(feedbackMessage)
+    await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle(); await harness.ctx.tianwenConversationFeedback.whenIdle()
+    const [target, feedbackTask] = harness.ctx.tianwenEvolution.listConversationTasks()
+    expect(feedbackTask?.admission?.decision).toMatchObject({ kind: 'conversation', feedback: { quote: marker }, relatedTaskId: target?.source.taskId })
+    const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target?.source.taskId)[0]!
+    const recovered = await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment)
+    expect(recovered.feedback.request).toEqual([feedbackMessage])
+    expect(Buffer.byteLength(JSON.stringify(recovered), 'utf8')).toBeGreaterThan(96 * 1024)
+    expect(assessment.result).toMatchObject({ classification: 'inconclusive', unavailableReason: 'material-too-large', proof: null })
+    // The feedback turn needs its ordinary answer and admission only; a third
+    // request here would be a forbidden truncated/replacement assessment call.
+    expect(harness.adapter.requests).toHaveLength(beforeFeedbackTurn + 2)
+    const requestCount = harness.adapter.requests.length
+    await harness.ctx.plugin(TianwenConversationGuidanceLoopService)
+    await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
+    await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+    expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+    expect(harness.adapter.requests).toHaveLength(requestCount)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
+}, 30_000)
