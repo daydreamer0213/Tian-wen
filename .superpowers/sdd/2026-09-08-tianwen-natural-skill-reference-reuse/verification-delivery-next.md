@@ -16,6 +16,8 @@ Use a fresh isolated home/workspace/state; do not copy old Sessions/studies/feed
 
 After final code gate, build a small new runtime-candidate.js/metafile and current receipt verifier with the existing esbuild native externals/alias settings. Bind actual code SHA/tree, built inputs, lockfile/tool digests and file bytes. New verifier must understand actual exploration and source-read/declaration records and use the current native recovery helpers, not assume old R10 audit reports cover them. Freeze before first request, preserve first outcome and append later evidence instead of overwriting it.
 
+Local packaging HELP verified (no build): installed electron-builder26.15.3 supports dotted config overrides, --dir/--win/--x64 and --publish never; final call must explicitly override `--config.directories.output=<validated absolute E: output>` to avoid default Daily path. Installed pnpm11.20.0 help confirms --pack-destination/--out and filtering. Runtime has NO prepack script; package build is explicit and includes tsc/esbuild/client/types, so typecheck-only does not create a fresh deployable Runtime bundle. Stage script writes only packages/tianwen-desktop-host/dist/runtime/<version>.tgz, not the Daily win-unpacked; its archive name must match the final release. No pack command has run during preparation.
+
 ## Storage and daily boundaries
 
 2026-09-08 16:56 read-only space check: D14.76GiB free, E301.07GiB free. Future large packages/archives will be generated under a newly named E:/待清理/D盘迁移-2026-09-08 validation directory, reusing D dependencies; exact directory is not yet created or treated as disposable while active. Existing3.05GiB moved artifacts remain recoverable. Small committed code and receipts stay in the D worktree.
