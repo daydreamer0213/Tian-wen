@@ -1,5 +1,15 @@
 # Native Claim Capture Implementation Plan
 
+2026-09-08 closeout: Tasks1–2 and Task3's exact-source gates, packaging,
+single R9 run, independent assessment and release decision are complete.
+R9 is NO-GO: raw-feedback actor drift and semantic false-met judgments are
+confirmed. The service/tab had already disappeared when checked; terminal
+state was verified unchanged, but a graceful stop was not performed or proved.
+See [R9 results](../../operations/tianwen-natural-conversation-acceptance-r9-results-20260908.md).
+Task4 delivery was not executed. Its authorized route continues under the
+[prospective repair plan](2026-09-08-tianwen-feedback-source-semantics.md),
+not by repeating this plan's closed implementation or R9 cohort.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Repair the proven R8 model-output/consumer contract gap, then finish the existing integration release route on fresh evidence.
