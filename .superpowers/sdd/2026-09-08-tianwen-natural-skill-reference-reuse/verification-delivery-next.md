@@ -1,0 +1,33 @@
+# Subsequent verification and delivery — preparation, not a passing result
+
+## Reuse and current unknowns
+
+R0–R10 ordinary entrance/feedback/study/formal evaluation/future choice evidence and legacy K exact source reading/adaptation remain valid within their recorded scope. Natural exploration core/ledger/runtime tasks are reviewed through83b94dd; root fresh114/114 + runtime typecheck at16:32. The current source adapter is still being implemented.
+
+No new real input batch is frozen or launched. Before a real check, write the exact new runtime promise, why old evidence cannot show it, the new-code impact and the decision changed by the result. A real model must supply its actual responses; neither normal task outputs nor studies/feedback/candidates are prefilled. Honest non-occurrence remains non-occurrence; do not append near-duplicates to obtain a desired branch. Old K source adaptation/old R9 future guidance use do not automatically prove the new source/exploration connections or stable benefit.
+
+## Small native Web environment, only after exact source is stable
+
+Reuse READ-ONLY patterns from D:/DevData/tianwen-natural-acceptance-r10-20260908/evidence: build-verifiers.mjs, precall-contract.mjs, process-probe.mjs, native-module-identity.mjs, launch-r10.mjs, preflight.mjs and runtime/workspace-bootstrap.mjs. Do not launch these scripts unchanged: each binds R10 files/config/frozen state and some insist on old Desktop archive bytes. Do not repeat their force-all build and Desktop comparisons merely to validate a runtime-only connection.
+
+Actual native entry: D:/hermes/node/node.exe + D:/DevData/tianwen-real-user-retest-20260905/node_modules/@deepseek-ai/dsh/lib/bin.js web --host 127.0.0.1 --port 0 --no-open. Keep the launcher owner/private Node IPC and check actual OS process/executable/cwd/DSH_HOME/random local port/current native model resolver before any user request. Existing model configuration expectation is official DeepSeek flash/high, but verify the new process/config and every actual header; old configuration records are not new measurements.
+
+Use a fresh isolated home/workspace/state; do not copy old Sessions/studies/feedback/results or R11. Dependencies continue to resolve through the existing physical DSH installation. Native identity verifier must derive imports from the new runtime metafile and compare real physical modules for runtime, native host and new profile. Profile configuration/bundles and new Runtime path must be explicit; credentials use the existing native mechanism and must never appear in logs/output.
+
+After final code gate, build a small new runtime-candidate.js/metafile and current receipt verifier with the existing esbuild native externals/alias settings. Bind actual code SHA/tree, built inputs, lockfile/tool digests and file bytes. New verifier must understand actual exploration and source-read/declaration records and use the current native recovery helpers, not assume old R10 audit reports cover them. Freeze before first request, preserve first outcome and append later evidence instead of overwriting it.
+
+## Storage and daily boundaries
+
+2026-09-08 16:56 read-only space check: D14.76GiB free, E301.07GiB free. Future large packages/archives will be generated under a newly named E:/待清理/D盘迁移-2026-09-08 validation directory, reusing D dependencies; exact directory is not yet created or treated as disposable while active. Existing3.05GiB moved artifacts remain recoverable. Small committed code and receipts stay in the D worktree.
+
+Daily's last verified delivery is017/preview18. Worktree dist/tianwen-desktop/win-unpacked is the shortcut target: never overwrite it to make a candidate package. D:/DevData/tianwen-experience, credentials/active databases and shared dependency junction are protected. Actual new release requires fresh user-data/config/shortcut inventory, recoverable backup, exact candidate/main CI and normal upgrade/data/lifecycle verification; old017 success cannot substitute. No broad recursive move/delete.
+
+## Authority and current status
+
+The source implementation defaults empty and uses repository test fixtures only. Previous public summarization source permission is retained with its original independent acceptance boundary; this preparation does not enable it in Daily/new scope. No external skill, actual model, browser, server, package, remote mutation or Daily change has been executed by this preparation.
+
+Current local origin/main is a previously read local ref11a4a29, not freshly fetched. Final whole-branch review must include the new connections plus earlier claim/feedback work and its previous review receipts; run at final stable source, not repeatedly while the adapter changes. Release/version inventory is being checked read-only before a separate bounded release task. Do not declare the total route complete when only engineering gates pass.
+
+Later fresh remote check: git fetch origin succeeded; origin/main and merge-base remain11a4a293b176d63da726a1386477fdc6a0309d2e, with no incoming commits against the feature branch. The combined shell call's exit1 came from the last optional Get-Command gh lookup (not on PATH), not fetch; GitHubCLI is installed under D:/DevData/GitHubCLI and can be located there. No remote writes. Read-only release inventory also found CI Desktop staging/audit still0.1.20 while source candidate is0.1.21; synchronize with the next release identity, preserving actual017 predecessor. New CI inclusion of conversation-skill-source.spec.ts requires matching tests/contracts/test_public_repository_surface.py's fixed natural-suite tuple. Not yet changed/tested.
+
+GitHub access preflight: installed executable is D:/DevData/GitHubCLI/2.98.0/extracted/bin/gh.exe. Its own auth store was empty and anonymous API was rate-limited. Resolved using the EXISTING repo credential from configured Git Credential Manager noninteractively, retained only in shell memory and temporary child GH_TOKEN, restored/cleared in finally. No credential printed or stored and no login/scope mutation. Authenticated GET for daydreamer0213/Tian-wen succeeded (main default, push permission present). This resolves API access for future exact-SHA CI checks, not proof that a future CI passed. Do not ask user to log in again merely because the CLI-specific auth store is empty.
