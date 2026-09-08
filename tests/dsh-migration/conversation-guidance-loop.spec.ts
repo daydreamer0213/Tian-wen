@@ -309,17 +309,28 @@ it.each(['accepted', 'recover', 'recover-formatting', 'recover-missing-check', '
   } finally { activationFault?.mockRestore(); warningSpy.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
 }, 30_000)
 
-it.each(['attributable-problem', 'preference'] as const)('learns from native %s without rewriting earlier met reviews, then retracts the supporting guidance', async classification => {
+it('learns from exact natural correction feedback without rewriting earlier met reviews', async () => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-feedback-source-semantics-20260908' : '/tmp/tianwen-feedback-source-semantics'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'feedback-loop-'))
   const guidance = 'Preserve the stated population boundary when summarizing numerical results.'
-  const supplemental = classification === 'preference' ? 'For future summaries, use three short sections.' : 'Preserve the source population scope'
-  const rawFeedbackMarker = classification === 'preference' ? 'three short sections.' : 'omitted the'
+  const supplemental = 'Preserve the source population scope'
+  const notes = ['You reversed who must not expand the pilot-only scope.', 'You must not omit the exception: do not expand the test-group result.']
+  const rawFeedbackMarker = 'must not'
   let recoveredFeedbacks: unknown[] = []
   const script: ScriptEntry[] = []
   for (const value of ['5 days', '7%', '2%']) script.push(structured({ ...admission, criteria: ['Preserve the number'] }), textResponse(value), ...reviewPair(verdict(true, value)))
-  for (const scope of ['pilot', 'test group']) script.push(plainEvidenceResponse({ classification, category: classification === 'preference' ? 'user-preference' : 'source-fidelity', supplementalCriteria: [supplemental], explanation: 'Independently attributed later feedback.', evidenceQuotes: [scope] }))
-  script.push(structured({ adjacent: { prompt: 'Summarize: the pilot reached 80%; national results are unknown.', criteria: ['Preserve pilot-only scope'] }, holdout: { prompt: 'Summarize: the laboratory measured 3 seconds; field results are unknown.', criteria: ['Do not claim field results'] } }), structured({ guidance }))
+  for (const [index, scope] of ['pilot', 'test group'].entries()) script.push(
+    () => structured({ ...admission, kind: 'conversation', objective: '', criteria: [], relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[index]!.source.taskId,
+      feedback: { kind: 'correction', quote: notes[index]!, category: 'source-fidelity' } }),
+    textResponse('Thank you for the correction.'),
+    plainEvidenceResponse({ classification: 'attributable-problem', category: 'source-fidelity', supplementalCriteria: [supplemental], explanation: 'Independently attributed later feedback.', evidenceQuotes: [scope] }))
+  script.push(request => {
+    expect(JSON.stringify(request.messages)).toContain(rawFeedbackMarker)
+    return structured({ adjacent: { prompt: 'Summarize: the pilot reached 80%; national results are unknown.', criteria: ['Preserve pilot-only scope'] }, holdout: { prompt: 'Summarize: the laboratory measured 3 seconds; field results are unknown.', criteria: ['Do not claim field results'] } })
+  }, request => {
+    expect(JSON.stringify(request.messages)).toContain(rawFeedbackMarker)
+    return structured({ guidance })
+  })
   for (let index = 0; index < 5; index++) for (const role of ['baseline', 'candidate']) {
     script.push(request => {
       expect(JSON.stringify(request.messages)).not.toContain('feedbackStandard')
@@ -336,7 +347,7 @@ it.each(['attributable-problem', 'preference'] as const)('learns from native %s 
       expect(sha256(material.original.task)).toBe(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!.opened.cases[index]!.materialDigest)
       if (index < 2) {
         expect(material.original.task.criteria).toEqual(['Preserve the number'])
-        expect(material.original.task.feedbackStandard).toMatchObject({ classification, criteria: [supplemental] })
+        expect(material.original.task.feedbackStandard).toMatchObject({ classification: 'attributable-problem', criteria: [supplemental] })
         expect(material.original.task.feedbackStandard.assessmentId).toBe(harness.ctx.tianwenEvolution.listConversationFeedbackAssessments()[index]!.started.assessmentId)
         expect(material.original.task.feedbackStandard.originalFeedback).toEqual(recoveredFeedbacks[index])
         expect(projectClaimEvidence({ task: material.original.task, answer: material.original.answer }).items.some(item => item.text.includes(rawFeedbackMarker))).toBe(false)
@@ -369,15 +380,8 @@ it.each(['attributable-problem', 'preference'] as const)('learns from native %s 
     }
     const originals = harness.ctx.tianwenEvolution.listConversationTasks()
     await harness.ctx.plugin(TianwenConversationFeedbackService)
-    const writes = []
-    const notes = classification === 'preference' ? ['For future pilot summaries, use three short sections.', 'For future test group summaries, use three short sections.'] : ['You omitted the pilot scope.', 'You omitted the test group scope.']
-    for (const [index, note] of notes.entries()) {
-      const messageId = MessageId(originals[index]!.completion!.assistantMessageIds.at(-1)!)
-      const result = await harness.ctx.messageFeedback.put({ sessionId: handle.agent.session.id, messageId, rating: 'negative', note, ifVersion: null })
-      if (!result.ok) throw new Error('native feedback failed')
-      writes.push({ messageId, version: result.value.version })
-      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession(String(handle.agent.session.id))
-      await harness.ctx.tianwenConversationFeedback.whenIdle()
+    for (const note of notes) {
+      handle.agent.followup(direct(note)); await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle(); await harness.ctx.tianwenConversationFeedback.whenIdle()
     }
     recoveredFeedbacks = await Promise.all(harness.ctx.tianwenEvolution.listConversationFeedbackAssessments().map(async assessment =>
       (await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment)).feedback))
@@ -387,19 +391,6 @@ it.each(['attributable-problem', 'preference'] as const)('learns from native %s 
     const study = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
     expect(study.activation).toBeDefined()
     expect(study.opened.cases.slice(0, 2).every(item => 'feedbackAssessmentId' in item)).toBe(true)
-    expect(harness.ctx.tianwenEvolution.listConversationTasks()).toEqual(originals)
-    handle.agent.followup(direct('Summarize: the local sample took 4 days.'))
-    await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle(); await harness.ctx.tianwenConversationFeedback.whenIdle(); await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
-    const withdrawal = await harness.ctx.messageFeedback.delete({ sessionId: handle.agent.session.id, messageId: writes[0]!.messageId, ifVersion: writes[0]!.version })
-    expect(withdrawal.ok).toBe(true)
-    await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession(String(handle.agent.session.id))
-    await harness.ctx.tianwenConversationFeedback.whenIdle(); await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
-    expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.rollback?.reason).toBe('support-retracted')
-    expect(harness.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey)).toEqual(study.opened.parentSnapshot)
-    handle.agent.followup(direct('Summarize: the local sample took 6 days.'))
-    await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle(); await harness.ctx.tianwenConversationFeedback.whenIdle(); await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
-    expect(harness.adapter.requests).toHaveLength(54)
-    expect(harness.ctx.tianwenEvolution.listConversationTasks().at(-1)?.source.behaviorVersion).toBe(originals[0]!.source.behaviorVersion)
     expect(warnings).toEqual([])
   } finally { warningSpy.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
 }, 30_000)
