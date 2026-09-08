@@ -144,6 +144,7 @@ function isAllowedStatusInput(input: string): boolean {
       '../tianwen-evolution/dist/conversation-learning.js',
       '../tianwen-evolution/dist/conversation-feedback.js',
       '../tianwen-evolution/dist/conversation-guidance.js',
+      '../tianwen-evolution/dist/conversation-skill-source.js',
       '../tianwen-evolution/dist/conversation-claim-audit.js',
       '../tianwen-evolution/dist/learning-intake.js',
       '../tianwen-evolution/dist/learning-analysis.js',
