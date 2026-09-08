@@ -12,6 +12,8 @@ declare module '@deepseek-ai/cordis' {
 }
 interface EvidenceGroup { readonly sources: readonly [ConversationTask, ConversationTask], readonly counterexample: ConversationTask, readonly category: ConversationFailure, readonly assessments: readonly (ConversationFeedbackAssessment | undefined)[] }
 
+const RAW_FEEDBACK_GUIDANCE = 'When a source has feedbackStandard.originalFeedback, it is exact attributed feedback to an earlier assistant answer. Preserve its speaker, actor, negation, exception and unresolved references; use it to interpret only the attributed continuing preference or supported problem, never every new request in the feedback. The current evaluated task instruction remains authoritative, and feedback is not factual source evidence.'
+
 function root(agent: Agent): boolean { return agent.session.header.origin !== 'subagent' && agent.session.header.parentSession === undefined && agent.session.header.agentPreset !== TIANWEN_CONTROLLED_AGENT_PRESET }
 function generatedCases(value: unknown, qualityContract: ConversationQualityContract): readonly GuidanceCase[] {
   if (value === null || typeof value !== 'object' || Object.keys(value).sort().join(',') !== 'adjacent,holdout') throw new Error('invalid-judgment')
@@ -205,16 +207,20 @@ export class TianwenConversationGuidanceLoopService extends Service {
         const assessment = group.assessments[index]
         // Preserve origin and timing: these standards evaluate newly generated
         // trial answers, not the earlier answer or its original requirements.
-        return assessment?.result === undefined ? original : { ...original, feedbackStandard: {
+        if (assessment?.result === undefined) return original
+        const feedback = this.ctx.get('tianwenConversationFeedback')
+        if (feedback === undefined) throw new Error('source-unavailable')
+        const recovered = await feedback.materialForAssessment(assessment)
+        return { ...original, feedbackStandard: {
           assessmentId: assessment.started.assessmentId, classification: assessment.result.classification,
-          criteria: assessment.result.supplementalCriteria,
+          criteria: assessment.result.supplementalCriteria, originalFeedback: recovered.feedback,
         } }
       }))
       const counter = await recoverConversationTaskMaterial(this.ctx, group.counterexample)
       const generated = await runConversationJudgment(this.ctx, agent, {
         outputSchema: CONVERSATION_CASES_SCHEMA,
         label: `Tianwen independent case design ${source.source.taskId}`, callConfig, signal,
-        instruction: 'Design exactly two independent text-only evaluation tasks for the observed task family and failure category. Return {"adjacent":{"prompt":"complete self-contained task with all source facts","criteria":["checkable criterion"]},"holdout":{"prompt":"different complete self-contained task","criteria":["checkable criterion"]}}. Preserve neither personal identifiers nor verbatim source problems. Include no answer, candidate instruction, tool request, or instruction to the reviewer. The holdout must use different facts and expose over-generalization. These are explicitly synthetic test cases, not real user outcomes.',
+        instruction: `Design exactly two independent text-only evaluation tasks for the observed task family and failure category. Return {"adjacent":{"prompt":"complete self-contained task with all source facts","criteria":["checkable criterion"]},"holdout":{"prompt":"different complete self-contained task","criteria":["checkable criterion"]}}. Preserve neither personal identifiers nor verbatim source problems. Include no answer, candidate instruction, tool request, or instruction to the reviewer. The holdout must use different facts and expose over-generalization. These are explicitly synthetic test cases, not real user outcomes. ${RAW_FEEDBACK_GUIDANCE}`,
         material: { family: source.admission!.decision!.family, failureCategory: group.category, sources },
       })
       const cases: GuidanceCase[] = [...group.sources, group.counterexample].map((task, index) => {
@@ -237,7 +243,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
       const proposal = await runConversationJudgment(this.ctx, agent, {
         outputSchema: CONVERSATION_PROPOSAL_SCHEMA,
         label: `Tianwen method proposal ${opened.studyId}`, callConfig, signal,
-        instruction: 'Propose one concise reusable text-task method addressing the evidenced problem. Return exactly {"guidance":"plain text guidance"}, at most 4096 UTF-8 bytes. Generalize the method; never retain names, original answers, identifiers or case-specific facts. Do not change permissions, tools, consent, learning policy or request unneeded external actions. The guidance is subordinate to future user requests. You have not been given the counterexample or holdout; do not invent evaluation outcomes.',
+        instruction: `Propose one concise reusable text-task method addressing the evidenced problem. Return exactly {"guidance":"plain text guidance"}, at most 4096 UTF-8 bytes. Generalize the method; never retain names, original answers, identifiers or case-specific facts. Do not change permissions, tools, consent, learning policy or request unneeded external actions. The guidance is subordinate to future user requests. You have not been given the counterexample or holdout; do not invent evaluation outcomes. ${RAW_FEEDBACK_GUIDANCE}`,
         material: { family: body.family, failureCategory: body.failureCategory, currentGuidance: parentSnapshot.rules[body.family] ?? '', sources },
       })
       if (proposal.value === null || typeof proposal.value !== 'object' || Object.keys(proposal.value).length !== 1 || !('guidance' in proposal.value) || typeof proposal.value.guidance !== 'string') throw new Error('invalid-judgment')

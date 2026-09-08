@@ -310,10 +310,12 @@ it.each(['accepted', 'recover', 'recover-formatting', 'recover-missing-check', '
 }, 30_000)
 
 it.each(['attributable-problem', 'preference'] as const)('learns from native %s without rewriting earlier met reviews, then retracts the supporting guidance', async classification => {
-  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-feedback-source-semantics-20260908' : '/tmp/tianwen-feedback-source-semantics'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'feedback-loop-'))
   const guidance = 'Preserve the stated population boundary when summarizing numerical results.'
   const supplemental = classification === 'preference' ? 'For future summaries, use three short sections.' : 'Preserve the source population scope'
+  const rawFeedbackMarker = classification === 'preference' ? 'three short sections.' : 'omitted the'
+  let recoveredFeedbacks: unknown[] = []
   const script: ScriptEntry[] = []
   for (const value of ['5 days', '7%', '2%']) script.push(structured({ ...admission, criteria: ['Preserve the number'] }), textResponse(value), ...reviewPair(verdict(true, value)))
   for (const scope of ['pilot', 'test group']) script.push(plainEvidenceResponse({ classification, category: classification === 'preference' ? 'user-preference' : 'source-fidelity', supplementalCriteria: [supplemental], explanation: 'Independently attributed later feedback.', evidenceQuotes: [scope] }))
@@ -322,6 +324,7 @@ it.each(['attributable-problem', 'preference'] as const)('learns from native %s 
     script.push(request => {
       expect(JSON.stringify(request.messages)).not.toContain('feedbackStandard')
       expect(JSON.stringify(request.messages)).not.toContain(supplemental)
+      expect(JSON.stringify(request.messages)).not.toContain(rawFeedbackMarker)
       return structured({ answer: `${role} actual answer ${index}` })
     })
     for (let check = 0; check < 2; check++) script.push(request => {
@@ -335,6 +338,8 @@ it.each(['attributable-problem', 'preference'] as const)('learns from native %s 
         expect(material.original.task.criteria).toEqual(['Preserve the number'])
         expect(material.original.task.feedbackStandard).toMatchObject({ classification, criteria: [supplemental] })
         expect(material.original.task.feedbackStandard.assessmentId).toBe(harness.ctx.tianwenEvolution.listConversationFeedbackAssessments()[index]!.started.assessmentId)
+        expect(material.original.task.feedbackStandard.originalFeedback).toEqual(recoveredFeedbacks[index])
+        expect(projectClaimEvidence({ task: material.original.task, answer: material.original.answer }).items.some(item => item.text.includes(rawFeedbackMarker))).toBe(false)
       } else expect(material.original.task.feedbackStandard).toBeUndefined()
       return evidenceResponse(verdict(!(role === 'baseline' && index < 2), `${index}`))(request)
     })
@@ -374,6 +379,8 @@ it.each(['attributable-problem', 'preference'] as const)('learns from native %s 
       await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession(String(handle.agent.session.id))
       await harness.ctx.tianwenConversationFeedback.whenIdle()
     }
+    recoveredFeedbacks = await Promise.all(harness.ctx.tianwenEvolution.listConversationFeedbackAssessments().map(async assessment =>
+      (await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment)).feedback))
     await harness.ctx.plugin(TianwenConversationGuidanceLoopService)
     await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
     expect(warnings).toEqual([])

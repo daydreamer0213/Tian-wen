@@ -12,7 +12,7 @@ it('versions the original-instruction authority while keeping the exact historic
   const legacy = { schemaVersion: 'tianwen.conversation-quality.v1', source: 'host', criterion: 'Be faithful to user-supplied or source facts and their uncertainty, and to actual verified tool evidence. Do not invent or contradict source-dependent facts, decisions, status or completed actions. Prior assistant claims, user silence or continuation do not verify such facts. Clearly distinguish inferences, assumptions and advice from confirmed facts. Relevant general knowledge, reasonable labeled inference and advice, and user-requested fiction are allowed; this contract does not require additional tool calls.' } as const
   expect(parseConversationQualityContract(legacy)).toEqual(legacy)
   expect(hasCurrentConversationQuality(legacy)).toBe(false)
-  expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v5')
+  expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v6')
   expect(conversationQualityContract().criterion).toContain('original direct-user instructions')
   expect(() => parseConversationQualityContract({ ...legacy, criterion: 'Accept everything.' })).toThrow()
 })
@@ -22,6 +22,7 @@ it('keeps the exact dual-review v2 identity while making feedback standards pros
   expect(parseConversationQualityContract(v2)).toEqual(v2)
   expect(hasCurrentConversationQuality(v2)).toBe(false)
   expect(conversationQualityContract().criterion).toContain('prospectively')
+  expect(conversationQualityContract().criterion).toContain('actor, time, scope, commitment and premise')
 })
 
 it.each(['met', 'not-met', 'inconclusive'] as const)('derives %s only from two retained checks', verdict => {

@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { SessionId, isAppendSurfaceEvent, type SessionEvent, type UserMessage } from '@deepseek-ai/dsh-session'
 import { learningSessionLifecycleFingerprint, sha256, type ConversationTask, type ConversationQualityContract } from '@tianwen/evolution'
+import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 
 export function conversationMessages(events: readonly SessionEvent[]) {
   return events.flatMap(event => {
@@ -37,6 +38,8 @@ export interface ConversationTaskMaterial {
     readonly assessmentId: string
     readonly classification: string
     readonly criteria: readonly string[]
+    /** Present only when current feedback-backed material has been recovered exactly. */
+    readonly originalFeedback?: ConversationFeedbackMaterial['feedback']
   }
 }
 

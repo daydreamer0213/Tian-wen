@@ -9,6 +9,7 @@ import { CallId, createToolResultMessage, createUserMessage } from '@deepseek-ai
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
+import { conversationQualityContract } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import { recoverConversationJudgmentRequest, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { projectClaimEvidence, runConversationClaimReview, validateClaimAudit } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 
@@ -167,8 +168,11 @@ describe('claim audit validation', () => {
 it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-status', 'permitted-inference', 'missing', 'provider', 'cancelled'] as const)('composes two isolated native audit-bearing reviews: %s', async mode => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-review-')); roots.push(root)
-  const material = { task: { prompt: '原料已送达。只改写这句话。', criteria: [] }, answer: '原料已送达。' }
+  const originalFeedback = { source: { kind: 'native', sessionId: 'old-feedback-session', sessionLifecycleFingerprint: sha256('old-feedback-lifecycle'), messageId: 'old-answer', feedbackVersion: 'v1', feedbackFingerprint: sha256('negative: raw marker') }, rating: 'negative' as const, note: 'RAW FEEDBACK ONLY: do not reverse the actor or erase the exception.' }
+  const material = { task: { prompt: '原料已送达。只改写这句话。', criteria: [], qualityContract: conversationQualityContract(),
+    feedbackStandard: { assessmentId: 'feedback-assessment', classification: 'preference', criteria: ['Keep the stated exception.'], originalFeedback } }, answer: '原料已送达。' }
   const evidence = projectClaimEvidence(material)
+  expect(evidence.items.some(item => item.text.includes('RAW FEEDBACK ONLY'))).toBe(false)
   const verdicts = mode === 'disagree' ? ['met', 'not-met'] as const : [mode === 'not-met' ? 'not-met' : 'met', mode === 'not-met' ? 'not-met' : 'met'] as const
   const requests: GenerateOptions[] = []
   const controller = new AbortController()
@@ -205,6 +209,8 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-stat
       const recovered = await recoverConversationJudgmentRequest(harness.ctx, checks[0]!)
       expect(recovered.material).toEqual({ original: material, claimEvidence: evidence })
       expect(recovered.instruction).toContain('Review purpose: method-study')
+      expect(recovered.instruction).toContain('originalFeedback takes precedence over a conflicting derived feedback criterion')
+      expect(recovered.instruction).toContain('actor, time, scope, commitment and premise')
       expect(recovered.instruction).toContain('Independently reconstruct all original requirements')
       expect(recovered.modelConfigDigests).toEqual([sha256({ provider: 'tianwen-probe', model: 'scripted', temperature: 0.25, maxTokens: 2048 })])
       if (mode === 'permitted-inference') expect(checks.map(check => check.audit.schemaVersion === 'tianwen.claim-audit.v2' ? check.audit.units['answer-1']!.firstClaim : undefined)).toEqual([

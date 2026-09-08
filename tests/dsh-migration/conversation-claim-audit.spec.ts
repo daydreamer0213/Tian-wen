@@ -15,6 +15,7 @@ import { parseClaimAudit } from '../../packages/tianwen-evolution/src/conversati
 const literalCriterion = 'Be faithful to user-supplied or source facts and their uncertainty, and to actual verified tool evidence. Do not invent or contradict source-dependent facts, decisions, status or completed actions. Prior assistant claims, user silence or continuation do not verify such facts. Clearly distinguish inferences, assumptions and advice from confirmed facts. Relevant general knowledge, reasonable labeled inference and advice, and user-requested fiction are allowed; this contract does not require additional tool calls. The original direct-user instructions remain authoritative even if extracted criteria omit or weaken an explicit requirement. Preserve output-only restrictions, exclusions, conditions, uncertainty and who may decide or act. Distinguish the user\'s instructions from quoted source content. Evaluate the complete answer, including introductions, alternatives and closing offers. Two independent native checks must agree before a conclusive review; neither check may see the other\'s result. Original-result reviews use only requirements applicable when that task ran. For newly generated method-study answers, separately identified host-frozen feedback standards apply prospectively; they do not regrade the old answer or override an explicit instruction in the evaluated user request.'
 const legacyV3 = { schemaVersion: 'tianwen.conversation-quality.v3' as const, source: 'host' as const, criterion: literalCriterion }
 const literalV4 = { schemaVersion: 'tianwen.conversation-quality.v4' as const, source: 'host' as const, criterion: literalCriterion }
+const literalV5 = { schemaVersion: 'tianwen.conversation-quality.v5' as const, source: 'host' as const, criterion: literalCriterion }
 const proof = (sessionId: string) => ({ sessionId, sessionDigest: sha256(`${sessionId}:session`), requestDigest: sha256(`${sessionId}:request`) })
 const legacyPair = ['requirements', 'grounding'].map(focus => ({ focus, verdict: 'met', category: null,
   explanation: 'The answer is supported.', evidenceQuotes: ['supported'], proof: proof(focus) }))
@@ -27,14 +28,17 @@ const v1Pair = legacyPair.map(check => ({ ...check, audit: audit() }))
 const v2Pair = legacyPair.map(check => ({ ...check, audit: auditV2() }))
 
 describe('conversation claim audit domain boundary', () => {
-  it('preserves literal v4 while making only v5 current with identical policy bytes', () => {
-    expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v5')
-    expect(conversationQualityContract().criterion).toBe(literalV4.criterion)
+  it('preserves literal v4/v5 while making only v6 current with semantic clarification', () => {
+    expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v6')
+    expect(conversationQualityContract().criterion).toContain('actor, time, scope, commitment and premise')
     expect(parseConversationQualityContract(literalV4)).toEqual(literalV4)
+    expect(parseConversationQualityContract(literalV5)).toEqual(literalV5)
     expect(hasCurrentConversationQuality(literalV4)).toBe(false)
+    expect(hasCurrentConversationQuality(literalV5)).toBe(false)
     expect(parseConversationQualityContract(legacyV3)).toEqual(legacyV3)
     expect(hasCurrentConversationQuality(legacyV3)).toBe(false)
     expect(sha256(literalV4)).toBe('sha256:5df1526ccccc0139245666bc6a02308a5044ce2da062f0410ac3578d0d43e757')
+    expect(sha256(literalV5)).toBe('sha256:58631dbc1a6b31a6c287f317b8afa8da2316d92e2224354ed452eb8615941bbf')
     expect(sha256(audit())).toBe('sha256:6e8e0d18ec6f648adb1b6d24f56dc73f111823d5907355b387f96462b86e5f90')
     expect(sha256(v1Pair)).toBe('sha256:20a6fb90185504e7ebd66ddf6c2935cfca48ae80467a95e29fbeff89900d2ed1')
   })
@@ -49,6 +53,7 @@ describe('conversation claim audit domain boundary', () => {
     expect(() => parseStoredConversationReviewChecks([{ ...legacyPair[0], audit: undefined }, legacyPair[1]])).toThrow()
     expect(() => parseConversationAuditedReviewChecks([v1Pair[0], v2Pair[1]])).toThrow()
     expect(parseConversationQualityReviewChecks(v1Pair, literalV4)).toEqual(v1Pair)
+    expect(parseConversationQualityReviewChecks(v2Pair, literalV5)).toEqual(v2Pair)
     expect(parseConversationQualityReviewChecks(v2Pair, conversationQualityContract())).toEqual(v2Pair)
     expect(() => parseConversationQualityReviewChecks(v1Pair, conversationQualityContract())).toThrow()
     expect(() => parseConversationQualityReviewChecks(v2Pair, literalV4)).toThrow()

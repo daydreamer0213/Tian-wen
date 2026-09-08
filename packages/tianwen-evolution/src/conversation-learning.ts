@@ -10,7 +10,7 @@ export type ConversationUnavailable = 'model-unavailable' | 'material-too-large'
 
 /** Host policy, not a model-authored criterion or a reinterpretation of old proof. */
 export interface ConversationQualityContract {
-  readonly schemaVersion: 'tianwen.conversation-quality.v1' | 'tianwen.conversation-quality.v2' | 'tianwen.conversation-quality.v3' | 'tianwen.conversation-quality.v4' | 'tianwen.conversation-quality.v5'
+  readonly schemaVersion: 'tianwen.conversation-quality.v1' | 'tianwen.conversation-quality.v2' | 'tianwen.conversation-quality.v3' | 'tianwen.conversation-quality.v4' | 'tianwen.conversation-quality.v5' | 'tianwen.conversation-quality.v6'
   readonly source: 'host'
   readonly criterion: string
 }
@@ -26,15 +26,19 @@ function legacyV3ConversationQualityContract(): ConversationQualityContract {
 function legacyV4ConversationQualityContract(): ConversationQualityContract {
   return { ...legacyV3ConversationQualityContract(), schemaVersion: 'tianwen.conversation-quality.v4' }
 }
-export function conversationQualityContract(): ConversationQualityContract {
+function legacyV5ConversationQualityContract(): ConversationQualityContract {
   return { ...legacyV4ConversationQualityContract(), schemaVersion: 'tianwen.conversation-quality.v5' }
+}
+export function conversationQualityContract(): ConversationQualityContract {
+  return { ...legacyV5ConversationQualityContract(), schemaVersion: 'tianwen.conversation-quality.v6', criterion: `${legacyV5ConversationQualityContract().criterion} Apply source authority to the actor, time, scope, commitment and premise actually asserted. A labeled inference or courtesy does not establish an unverified current state, past event, external effect, decision or commitment; grounded fallible inference, optional advice, fiction and task-compatible courtesy remain permitted.` }
 }
 export function parseConversationQualityContract(value: unknown): ConversationQualityContract {
   const input = object(value, ['schemaVersion', 'source', 'criterion'])
   const contract = input.schemaVersion === 'tianwen.conversation-quality.v1' ? legacyConversationQualityContract()
     : input.schemaVersion === 'tianwen.conversation-quality.v2' ? legacyDualConversationQualityContract()
       : input.schemaVersion === 'tianwen.conversation-quality.v3' ? legacyV3ConversationQualityContract()
-        : input.schemaVersion === 'tianwen.conversation-quality.v4' ? legacyV4ConversationQualityContract() : conversationQualityContract()
+        : input.schemaVersion === 'tianwen.conversation-quality.v4' ? legacyV4ConversationQualityContract()
+          : input.schemaVersion === 'tianwen.conversation-quality.v5' ? legacyV5ConversationQualityContract() : conversationQualityContract()
   if (input.schemaVersion !== contract.schemaVersion || input.source !== contract.source || input.criterion !== contract.criterion) throw new TypeError('conversation quality contract is invalid')
   return contract
 }
@@ -100,7 +104,7 @@ export function parseStoredConversationReviewChecks(value: unknown): Conversatio
 }
 
 export function parseConversationQualityReviewChecks(value: unknown, quality: ConversationQualityContract | undefined): ConversationStoredReviewChecks {
-  if (quality?.schemaVersion !== 'tianwen.conversation-quality.v4' && quality?.schemaVersion !== 'tianwen.conversation-quality.v5') return parseConversationReviewChecks(value)
+  if (quality?.schemaVersion !== 'tianwen.conversation-quality.v4' && quality?.schemaVersion !== 'tianwen.conversation-quality.v5' && quality?.schemaVersion !== 'tianwen.conversation-quality.v6') return parseConversationReviewChecks(value)
   const checks = parseConversationAuditedReviewChecks(value)
   const version = quality.schemaVersion === 'tianwen.conversation-quality.v4' ? 'tianwen.claim-audit.v1' : 'tianwen.claim-audit.v2'
   if (checks.some(check => check.audit.schemaVersion !== version)) throw new TypeError('review audit version does not match its quality contract')
@@ -377,9 +381,9 @@ export class ConversationLearningState {
     if (record.verdict !== 'inconclusive' && (task.admission.decision?.kind !== 'task' || task.completion.status !== 'completed')) throw new Error('incomplete task cannot establish a conclusive review')
     if (record.verdict === 'met' && task.admission.decision?.evaluationMode === 'subjective') throw new Error('a subjective review cannot establish user satisfaction')
     if (record.verdict === 'met' && task.admission.decision?.evaluationMode === 'external') throw new Error('external effects require an independent external evaluator, not a text judgment')
-    if (['tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5'].includes(task.admission.qualityContract?.schemaVersion ?? '') && task.admission.decision?.kind === 'task'
+    if (['tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6'].includes(task.admission.qualityContract?.schemaVersion ?? '') && task.admission.decision?.kind === 'task'
       && task.completion.status === 'completed' && record.proof === null && record.unavailableReason === null) throw new Error('a completed audited task review requires proof or an explicit unavailable reason')
-    if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5'].includes(task.admission.qualityContract?.schemaVersion ?? '') && record.proof !== null && record.reviewChecks === undefined) throw new Error('versioned task reviews require two independent review checks')
+    if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6'].includes(task.admission.qualityContract?.schemaVersion ?? '') && record.proof !== null && record.reviewChecks === undefined) throw new Error('versioned task reviews require two independent review checks')
     if (record.reviewChecks !== undefined) {
       parseConversationQualityReviewChecks(record.reviewChecks, task.admission.qualityContract)
       const expected = conversationReviewConsensus(record.reviewChecks)

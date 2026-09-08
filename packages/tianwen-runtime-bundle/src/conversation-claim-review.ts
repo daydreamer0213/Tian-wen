@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { JsonSchemaNode, ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session'
-import { sha256, parseClaimAudit, parseConversationAuditedReviewChecks, conversationReviewConsensus, type ClaimAudit, type ConversationAuditedReviewCheck } from '@tianwen/evolution'
+import { sha256, parseClaimAudit, parseConversationAuditedReviewChecks, parseConversationQualityContract, conversationReviewConsensus, type ClaimAudit, type ConversationAuditedReviewCheck } from '@tianwen/evolution'
 import { CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationEvidenceSchema, recoverConversationJudgmentRequest, runConversationJudgment } from './conversation-judgment.js'
 
 export type { ClaimAudit } from '@tianwen/evolution'
@@ -187,6 +187,28 @@ const FOCUS = {
   grounding: 'Independently try to falsify a satisfactory verdict without presuming a defect. Audit every claim and its source authority, then check all original requirements.',
 } as const
 
+const V6_PURPOSE = {
+  ...PURPOSE,
+  'method-study': `${PURPOSE['method-study']} When task.feedbackStandard.originalFeedback is present, originalFeedback takes precedence over a conflicting derived feedback criterion for its attributed continuing preference or supported problem. It remains feedback about an earlier assistant answer: preserve its speaker, actor, negation, exception and unresolved references; do not turn every new request in it into a permanent rule.`,
+} as const
+const V6_COMMON = `${COMMON} For current qualityContract, check the actor, time, scope, commitment and premise actually asserted. A labeled inference or courtesy does not establish an unverified current state, past event, external effect, decision or commitment; optional advice, grounded fallible inference, fiction and task-compatible courtesy remain permitted.`
+
+function claimReviewInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS): string {
+  if (!record(material)) throw new Error('invalid-judgment')
+  const source = purpose === 'original-result' ? material.source : material.task
+  if (!record(source)) throw new Error('invalid-judgment')
+  const quality = source.qualityContract
+  if (quality === undefined) return `${PURPOSE[purpose]}\n\n${COMMON}\n\n${FOCUS[focus]}`
+  let contract
+  try { contract = parseConversationQualityContract(quality) }
+  catch { throw new Error('invalid-judgment') }
+  if (contract.schemaVersion !== 'tianwen.conversation-quality.v6') return `${PURPOSE[purpose]}\n\n${COMMON}\n\n${FOCUS[focus]}`
+  if (purpose === 'method-study' && source.feedbackStandard !== undefined) {
+    if (!record(source.feedbackStandard) || !Object.hasOwn(source.feedbackStandard, 'originalFeedback') || source.feedbackStandard.originalFeedback === undefined) throw new Error('invalid-judgment')
+  }
+  return `${V6_PURPOSE[purpose]}\n\n${V6_COMMON}\n\n${FOCUS[focus]}`
+}
+
 type ClaimReviewInput = Omit<Parameters<typeof runConversationJudgment>[2], 'instruction' | 'outputSchema'> & {
   readonly evidence: readonly string[]
   readonly purpose?: 'original-result' | 'method-study'
@@ -202,7 +224,7 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
   for (const focus of ['requirements', 'grounding'] as const) {
     input.signal.throwIfAborted()
     const result = await runConversationJudgment(ctx, parent, { ...input, material, label: `${input.label} ${focus}`,
-      instruction: `${PURPOSE[input.purpose ?? 'original-result']}\n\n${COMMON}\n\n${FOCUS[focus]}`, outputSchema: schema })
+      instruction: claimReviewInstruction(input.material, input.purpose ?? 'original-result', focus), outputSchema: schema })
     if (!record(result.value) || !exactKeys(result.value, ['verdict', 'category', 'explanation', 'evidenceQuotes', 'audit'])
       || !['met', 'not-met', 'inconclusive'].includes(String(result.value.verdict))) throw new Error('invalid-judgment')
     const audit = validateClaimAudit(result.value.audit, evidence, result.value.verdict as 'met' | 'not-met' | 'inconclusive')
@@ -220,11 +242,11 @@ export async function verifyConversationClaimReviewCheck(ctx: Context, check: Co
   readonly modelConfigDigest: string
 }): Promise<void> {
   const recovered = await recoverConversationJudgmentRequest(ctx, check)
-  if (recovered.instruction !== `${PURPOSE[expected.purpose]}\n\n${COMMON}\n\n${FOCUS[check.focus]}`
-    || recovered.modelConfigDigests.some(digest => digest !== expected.modelConfigDigest)
+  if (recovered.modelConfigDigests.some(digest => digest !== expected.modelConfigDigest)
     || !record(recovered.material) || !exactKeys(recovered.material, ['original', 'claimEvidence']) || !record(recovered.material.original)) throw new Error('invalid-judgment')
   const original = recovered.material.original
-  if (!('task' in original) || !('answer' in original) || sha256(original.task) !== expected.materialDigest || sha256(original.answer) !== expected.outputDigest) throw new Error('invalid-judgment')
+  if (!('task' in original) || !('answer' in original) || sha256(original.task) !== expected.materialDigest || sha256(original.answer) !== expected.outputDigest
+    || recovered.instruction !== claimReviewInstruction(original, expected.purpose, check.focus)) throw new Error('invalid-judgment')
   const evidence = projectClaimEvidence(original)
   if (sha256(recovered.material.claimEvidence) !== sha256(evidence)) throw new Error('invalid-judgment')
   validateClaimAudit(check.audit, evidence, check.verdict)
