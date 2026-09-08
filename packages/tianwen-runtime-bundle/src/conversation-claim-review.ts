@@ -196,7 +196,10 @@ const V6_COMMON = `${COMMON} For current qualityContract, check the actor, time,
 function claimReviewInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS): string {
   if (!record(material)) throw new Error('invalid-judgment')
   const source = purpose === 'original-result' ? material.source : material.task
-  if (!record(source)) throw new Error('invalid-judgment')
+  if (!record(source)) {
+    if (purpose === 'original-result' && record(material.task)) return `${PURPOSE[purpose]}\n\n${COMMON}\n\n${FOCUS[focus]}`
+    throw new Error('invalid-judgment')
+  }
   const quality = source.qualityContract
   if (quality === undefined) return `${PURPOSE[purpose]}\n\n${COMMON}\n\n${FOCUS[focus]}`
   let contract
