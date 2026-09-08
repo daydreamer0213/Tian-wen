@@ -32,6 +32,21 @@ R9 final evidence: `docs/operations/tianwen-natural-conversation-acceptance-r9-r
 Parent native-capture Tasks1–3 are closed (Task3 NO-GO); do not redispatch them.
 Fresh data root: `D:/DevData/tianwen-feedback-source-semantics-20260908`.
 
+## Engineering checkpoint — 2026-09-08
+
+Task 1 is independently SPEC/QUALITY approved at `43fde02` after the native
+feedback, persisted historical/current proof, and natural oversize checks.
+Task 2 is independently SPEC/QUALITY approved at `9ec37bc`: Runtime021 and
+Desktop preview.22 identities, explicit supported predecessors, and preserved
+managed-upgrade data. Focused tests/builds and their first failures are retained
+under the fresh data root; no Critical, Important or Minor review finding remains.
+These are engineering approvals, not new model-effectiveness or release evidence.
+The inherited nonfatal declaration-bundler notice and opt-in lifecycle skips are
+recorded. Task 3 exact-source full gates, new candidate artifacts, isolated
+diagnostic/R10 model runs, and Task 4 integration/Daily delivery remain pending.
+R2–R9 inactive Desktop artifacts have been hash-verified and archived to E;
+the current worktree, live Daily target and necessary evidence are unchanged.
+
 ## Environment
 
 Before every pnpm call:
@@ -58,7 +73,7 @@ Record exact BASE before each worker. Use new fixture roots; no old receipt reus
 
 Use a small internal instruction selector in `conversation-claim-review.ts`, called by both producer and recovery. Read the contract from the bound `source.qualityContract` for original results or `task.qualityContract` for studies. Validate known present contracts with `parseConversationQualityContract`; select v6 only for exact v6, and retain the exact previous instruction for historical/absent contracts. A present unknown or mutated contract throws `invalid-judgment`. Audit v2 alone cannot identify the policy version. A v6 feedbackStandard without originalFeedback is invalid; legacy material does not acquire a synthetic originalFeedback.
 
-- [ ] Step1: Record BASE; capture literal exact v5 quality object and old PURPOSE/COMMON/FOCUS from BASE as historical fixtures. Add RED tests for v6 current parsing, v5 unchanged hash/readability, old-quality exclusion/retirement, correct v4/v5/v6 audit-parent rules and current two-check/proof guards. Do not derive historical expectations from the updated current builder.
+- [x] Step1: Record BASE; capture literal exact v5 quality object and old PURPOSE/COMMON/FOCUS from BASE as historical fixtures. Add RED tests for v6 current parsing, v5 unchanged hash/readability, old-quality exclusion/retirement, correct v4/v5/v6 audit-parent rules and current two-check/proof guards. Do not derive historical expectations from the updated current builder.
 
 ```ts
 expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v6')
@@ -70,7 +85,7 @@ expect(parseConversationQualityReviewChecks(v2Checks, literalV5)).toEqual(v2Chec
 
 Here `literalV5` is copied from BASE and `v1Checks`/`v2Checks` use the existing explicit audit-fixture builders. Exercise real ledger append/replay, not only parser functions.
 
-- [ ] Step2: Extend actual native feedback-driven study fixtures to assert all three consumer material paths receive the entire exact verified `.feedback` while worker inputs exclude it. Include natural direct feedback where derived criteria intentionally reverse the actor or omit a negation/exception, plus native notes, source without feedback and existing edited/retracted bindings. Compare objects, not merely presence of a keyword:
+- [x] Step2: Extend actual native feedback-driven study fixtures to assert all three consumer material paths receive the entire exact verified `.feedback` while worker inputs exclude it. Include natural direct feedback where derived criteria intentionally reverse the actor or omit a negation/exception, plus native notes, source without feedback and existing edited/retracted bindings. Compare objects, not merely presence of a keyword:
 
 ```ts
 const recovered = await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment)
@@ -83,7 +98,7 @@ expect(projectClaimEvidence({ task: source, answer }).items.some(item => item.te
 
 Use the existing study fixture request-capture hooks to bind `source`, `workerMaterial`, `recordedCase` and actual `assessment`; `uniqueFeedbackOnlyText` is a test marker not present in original request/answer. Assert `conversationEvidenceTexts` and the evidenceQuotes whitelist also exclude feedback: do not expand one without native recovery's source validation. Test missing/tampered recovery fails without a replacement model call and oversize exact feedback remains unavailable rather than truncated.
 
-- [ ] Step3: Run focused RED gates and preserve expected failing output. Implement the source construction using the existing active service and exact material recovery:
+- [x] Step3: Run focused RED gates and preserve expected failing output. Implement the source construction using the existing active service and exact material recovery:
 
 ```ts
 const recovered = await this.ctx.tianwenConversationFeedback.materialForAssessment(assessment)
@@ -98,7 +113,7 @@ return { ...original, feedbackStandard: {
 Keep the existing no-assessment return, current-activity checks, source material hash and worker request projection. If the service is unavailable, fail the study through existing handling; never silently fall back to criteria-only current material. Add concise raw-feedback precedence/speaker/negation/current-instruction guidance to case design, proposal and feedback assessment. Use one local shared instruction constant for the two learning consumers if it avoids duplicated prose; do not create a generic prompt service.
 Apply only the attributed continuing preference or supported problem, not every new request in the complete feedback. Keep unresolved references ambiguous rather than forwarding old answers or extra transcript history.
 
-- [ ] Step4: Keep explicit legacy v5 builder, make v6 append the spec's semantic clarification, and add v6 at the exact audited/dual-proof guards in both evolution parent state machines. Keep old prompt constants byte-identical and use the shared selector for generation and persisted verification. Current additional instructions must require actor/time/scope/commitment/premise checks while allowing optional advice, grounded fallible inference, fiction and courtesy. No R9 literal answer phrases or expected outcomes go into production. Keep the existing schema, material limits, quote checks, dual consensus, projection bytes and IDs.
+- [x] Step4: Keep explicit legacy v5 builder, make v6 append the spec's semantic clarification, and add v6 at the exact audited/dual-proof guards in both evolution parent state machines. Keep old prompt constants byte-identical and use the shared selector for generation and persisted verification. Current additional instructions must require actor/time/scope/commitment/premise checks while allowing optional advice, grounded fallible inference, fiction and courtesy. No R9 literal answer phrases or expected outcomes go into production. Keep the existing schema, material limits, quote checks, dual consensus, projection bytes and IDs.
 
 ```ts
 // Historical builder remains exactly the old current value.
@@ -109,14 +124,14 @@ function legacyV5ConversationQualityContract(): ConversationQualityContract {
 
 Versioned tests inspect actual producer instructions/materials: v6 contains the new general authority contract and raw-standard precedence; v5 emits exactly its historical instruction. A current instruction substituted into an old proof, old instruction substituted into a current proof, changed raw feedback or unknown quality is rejected on persisted verification. Use real native session capture/restart fixtures, not fabricated success records.
 
-- [ ] Step5: Verify current valid accepted study recovery after two complete-runtime restarts causes zero extra calls and at most one activation; old v5 records replay unchanged but cannot newly activate under v6. Keep historical v1 capture proof tests. Confirm a new ordinary turn remains possible while the earlier review is pending. Run all affected conversation suites, evolution/runtime builds and root typecheck once on the completed task; do not rerun the complete unrelated Python/TS gates here.
+- [x] Step5: Verify current valid accepted study recovery after two complete-runtime restarts causes zero extra calls and at most one activation; old v5 records replay unchanged but cannot newly activate under v6. Keep historical v1 capture proof tests. Confirm a new ordinary turn remains possible while the earlier review is pending. Run all affected conversation suites, evolution/runtime builds and root typecheck once on the completed task; do not rerun the complete unrelated Python/TS gates here.
 
 ```powershell
 . 'D:/DevData/tianwen-natural-acceptance-20260907/evidence/gate-env.ps1'
 & 'D:/hermes/node/node.exe' 'D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs' run typecheck
 ```
 
-- [ ] Step6: Self-review changed call sites and historical behavior; commit only owned code/tests. Write the implementation report with exact RED/GREEN commands/results, skips and warnings. Root generates full BASE..HEAD diff; independent SPEC and QUALITY approval are required. Semantic efficacy remains unproven until real-model acceptance.
+- [x] Step6: Self-review changed call sites and historical behavior; commit only owned code/tests. Write the implementation report with exact RED/GREEN commands/results, skips and warnings. Root generates full BASE..HEAD diff; independent SPEC and QUALITY approval are required. Semantic efficacy remains unproven until real-model acceptance.
 
 ### Task 2: Runtime021 / Desktop preview.22 identity
 
@@ -124,7 +139,7 @@ Versioned tests inspect actual producer instructions/materials: v6 contains the 
 
 **Interfaces:** `tianwen-runtime-bundle-0.1.21.tgz`; Desktop `0.1.0-preview.22` embeds that exact archive. Runtime020 becomes a supported predecessor alongside010–019; unknown022 remains rejected. Normal managed install retains user data/config/shortcut.
 
-- [ ] Step1: Record BASE. Add RED assertions to existing migration/identity tests:
+- [x] Step1: Record BASE. Add RED assertions to existing migration/identity tests:
 
 ```ts
 expect(desktopManifest.version).toBe('0.1.0-preview.22')
@@ -134,8 +149,8 @@ expect(resolveKnownOldDesktopTarget(previous020Target).profileRoot).toBe(previou
 
 Use existing fixture names/builders for the actual modules; include exact020→021 install, malformed/unknown022 rejection and unchanged protected files.
 
-- [ ] Step2: Update current version identities and explicit predecessor allowlists mechanically, separating historical020 literals from current ones. No runtime build output may overwrite the live Desktop path. Register any new Task1 suite beside the existing conversation group and its literal Python test expectation.
-- [ ] Step3: Run existing runtime-bundle, installer, portable/controlled/runtime-profile, Desktop artifact/host/bootstrap/profile-prepare and ordinary goal CLI suites plus affected Python CI contract. Build/typecheck; preserve commands/results. Self-review, commit owned files and obtain independent scoped SPEC/QUALITY review.
+- [x] Step2: Update current version identities and explicit predecessor allowlists mechanically, separating historical020 literals from current ones. No runtime build output may overwrite the live Desktop path. Register any new Task1 suite beside the existing conversation group and its literal Python test expectation.
+- [x] Step3: Run existing runtime-bundle, installer, portable/controlled/runtime-profile, Desktop artifact/host/bootstrap/profile-prepare and ordinary goal CLI suites plus affected Python CI contract. Build/typecheck; preserve commands/results. Self-review, commit owned files and obtain independent scoped SPEC/QUALITY review.
 
 ### Task 3: Prospective evidence and final release decision
 
