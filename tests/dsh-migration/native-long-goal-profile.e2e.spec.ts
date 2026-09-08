@@ -491,6 +491,7 @@ describe('native Long Goal profile execution', () => {
       ))!.seq
       const currentTaskGoal = profile.ctx.goals.get(task)
       if (currentTaskGoal === undefined) throw new Error('expected current Task Goal')
+      const mainSeqBeforeTaskCompletion = profile.main.session.events.at(-1)?.seq ?? -1
       profile.ctx.goals.complete(task, currentTaskGoal)
       profile.releaseTask()
 
@@ -547,7 +548,9 @@ describe('native Long Goal profile execution', () => {
         && event.data.source.kind === 'subagent-settled'
         && String(event.data.source.senderSessionId) === running.planner.sessionId
       ))
-      expect(plannerSettlements.length).toBeGreaterThanOrEqual(2)
+      const terminalPlannerSettlements = plannerSettlements.filter(event =>
+        event.seq > mainSeqBeforeTaskCompletion)
+      expect(terminalPlannerSettlements.length).toBeGreaterThanOrEqual(1)
       expect(plannerSettlements.some(event => event.seq > progressSeq)).toBe(true)
       expect(profile.main.session.events.some(event => event.type === 'assistant/message'
         && event.data.message.content.some(block => block.type === 'text'
