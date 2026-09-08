@@ -51,13 +51,13 @@ conversationContext(events, boundary, projection?: ConversationTaskSource['mater
 
 Consumers must supply `task.source.materialProjection` when recovering an already-started task. Only admission of a brand-new task selects `'surface-text.v1'`. Do not infer a mode from matching hashes: empty/unchanged contexts can have identical native and projected hashes.
 
-- [ ] **1. Write failing behavioral tests before production changes.** Name the break each catches. Include assistant text plus reasoning larger than 96 KiB and a native tool call; keep a real native Session and complete provider fixtures in integration tests. Check actual admission/review/feedback material, not merely a helper's existence.
+- [x] **1. Write failing behavioral tests before production changes.** Name the break each catches. Include assistant text plus reasoning larger than 96 KiB and a native tool call; keep a real native Session and complete provider fixtures in integration tests. Check actual admission/review/feedback material, not merely a helper's existence.
 
   Required literal outcomes: new projection retains exactly the original assistant text, user blocks and message ids; none of the large reasoning/tool-call bytes enters analysis material. A native material with omitted marker stays unchanged. Unknown/null/explicit-undefined markers fail the strict source parser. A truly oversized visible text still produces `material-too-large` before a model call. The existing eight-turn boundary still excludes the current answer from pre-answer context.
 
-- [ ] **2. Record meaningful RED.** Load `D:/DevData/tianwen-natural-acceptance-20260907/evidence/gate-env.ps1`, run the focused suites with `D:/hermes/node/node.exe` and `D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs`. Save first outputs in a new E `visible-material-fix` directory. Compilation/import/fixture errors are not the defect RED.
+- [x] **2. Record meaningful RED.** Load `D:/DevData/tianwen-natural-acceptance-20260907/evidence/gate-env.ps1`, run the focused suites with `D:/hermes/node/node.exe` and `D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs`. Save first outputs in a new E `visible-material-fix` directory. Compilation/import/fixture errors are not the defect RED.
 
-- [ ] **3. Apply the narrow implementation.** Follow the existing optional `qualityContract` strict-parser pattern, not a general parser refactor:
+- [x] **3. Apply the narrow implementation.** Follow the existing optional `qualityContract` strict-parser pattern, not a general parser refactor:
 
 ```ts
 // Add the marker only when explicitly present and validate its exact value.
@@ -70,22 +70,28 @@ Consumers must supply `task.source.materialProjection` when recovering an alread
 
   In `conversationMessages`, select `message.content.filter(block => block.type === 'text')` only for an assistant and explicit surface marker; otherwise keep the prior content. Do not drop empty assistant messages. Pass the marker through `conversationContext`, material recovery, observer review and feedback answer reconstruction. New observer source freezes the marker before requesting admission. Native request/result digests stay on original native material, unchanged.
 
-- [ ] **4. Prove compatibility and GREEN.** Recover legacy source/context and feedback/study materials with reasoning still present and their earlier hashes unchanged. Recover new source/review/feedback with the same explicit projected mode after restart. Mutating native current-task content or the frozen projection marker must not create a valid recovery; keep existing rejection tests. Exercise actual native one-shot admission plus both independent reviews and natural-feedback material using scripted transport only as engineering tests, never as real-model acceptance.
+- [x] **4. Prove compatibility and GREEN.** Recover legacy source/context and feedback/study materials with reasoning still present and their earlier hashes unchanged. Recover new source/review/feedback with the same explicit projected mode after restart. Mutating native current-task content or the frozen projection marker must not create a valid recovery; keep existing rejection tests. Exercise actual native one-shot admission plus both independent reviews and natural-feedback material using scripted transport only as engineering tests, never as real-model acceptance.
 
   Run focused suites, guidance/claim recovery consumers, typecheck and `git diff --check`. Do not weaken old assertions to get green or copy expected values from the helper under test.
 
-- [ ] **5. Commit only assigned production/tests/report.** Record exact RED/GREEN commands and results, legacy-compatibility coverage and any remaining limitations. An independent scoped reviewer must approve this change before it becomes a release candidate.
+- [x] **5. Commit only assigned production/tests/report.** Record exact RED/GREEN commands and results, legacy-compatibility coverage and any remaining limitations. An independent scoped reviewer must approve this change before it becomes a release candidate.
 
 ## Task 2: Verify only the changed connection and finish delivery gates
 
 **Owner:** Main agent after Task 1 review, not the implementation worker.
 
-- [ ] Recompute the retained actual failing materials through the revised production helpers without model calls or historical ledger edits. Preserve the old failed native outcome; a successful replay calculation is not a replacement actual verdict.
-- [ ] At the reviewed fixed commit, perform justified final code validation. New production changes invalidate the previous candidate's code gate as a release claim, but the previous f8 receipts remain valid history. Reuse unchanged environment/dependencies and use distinct result/fixture targets.
-- [ ] Decide the smallest additional real-use check for this now-demonstrated connection defect: one bounded normal work continuation in a separately recorded revised environment, never a rerun of R0–R10 or a search for an optional study/source branch. Clearly distinguish the old failed episode from any corrected-version observation; preserve all outcomes.
-- [ ] Reproduce revised candidate bytes and preserve the old f8 package. Complete real Desktop ownership/page/normal-shutdown evidence without relying solely on GUI stdout. No further blind Profile creation or checker iterations; instrument a concrete mismatch before rerunning.
+- [x] Recompute the retained actual failing materials through the revised production helpers without model calls or historical ledger edits. Preserve the old failed native outcome; a successful replay calculation is not a replacement actual verdict.
+- [x] At the reviewed fixed commit, perform justified final code validation. New production changes invalidate the previous candidate's code gate as a release claim, but the previous f8 receipts remain valid history. Reuse unchanged environment/dependencies and use distinct result/fixture targets.
+- [x] Decide the smallest additional real-use check for this now-demonstrated connection defect: one bounded normal work continuation in a separately recorded revised environment, never a rerun of R0–R10 or a search for an optional study/source branch. Clearly distinguish the old failed episode from any corrected-version observation; preserve all outcomes.
+- [x] Reproduce revised candidate bytes and preserve the old f8 package. Complete real Desktop ownership/page/normal-shutdown evidence without relying solely on GUI stdout. No further blind Profile creation or checker iterations; instrument a concrete mismatch before rerunning.
 - [ ] Only after code, real-use and delivery gates allow it: normal non-forced integration, exact main CI, current E backup, normal Daily upgrade and preservation checks. No tag/npm publication, worktree deletion, credential copying or unbacked overwrite.
 
 ## Self-review
+
+2026-09-09 checkpoint: Task 1 approved at e9b5a02; final code 6367f07 has 2279 TypeScript
+and 609 Python passes, with unchanged production bytes. One real bounded work episode reached
+two admissions, two dual-review panels and one natural correction; all native proof bindings passed.
+No study/source branch was forced. Desktop visible normal shutdown verified. Integration/Daily
+delivery remains unchecked above. See [exact result and limitations](../../operations/tianwen-visible-material-022-results-20260909.md).
 
 This plan addresses only a demonstrated learning-material defect. Explicit source versioning preserves the user's historical-reuse requirement; the safety cap and independent evaluator remain unchanged. No task-specific writing rule is added. The work is authorized as routine correction within the existing route; it is not a strategy change or permission expansion.
