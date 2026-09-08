@@ -84,9 +84,16 @@ Consumers must supply `task.source.materialProjection` when recovering an alread
 - [x] At the reviewed fixed commit, perform justified final code validation. New production changes invalidate the previous candidate's code gate as a release claim, but the previous f8 receipts remain valid history. Reuse unchanged environment/dependencies and use distinct result/fixture targets.
 - [x] Decide the smallest additional real-use check for this now-demonstrated connection defect: one bounded normal work continuation in a separately recorded revised environment, never a rerun of R0–R10 or a search for an optional study/source branch. Clearly distinguish the old failed episode from any corrected-version observation; preserve all outcomes.
 - [x] Reproduce revised candidate bytes and preserve the old f8 package. Complete real Desktop ownership/page/normal-shutdown evidence without relying solely on GUI stdout. No further blind Profile creation or checker iterations; instrument a concrete mismatch before rerunning.
-- [ ] Only after code, real-use and delivery gates allow it: normal non-forced integration, exact main CI, current E backup, normal Daily upgrade and preservation checks. No tag/npm publication, worktree deletion, credential copying or unbacked overwrite.
+- [x] Only after code, real-use and delivery gates allow it: normal non-forced integration, exact main CI, current E backup, normal Daily upgrade and preservation checks. No tag/npm publication, worktree deletion, credential copying or unbacked overwrite.
 
 ## Self-review
+
+2026-09-09 delivered: non-forced main0c52e41 four-job CI passed before normal managed/Web022
+upgrade and Desktoppreview23 replacement. Actual normal UI open/close and process exit passed.
+Original30 files/config/shortcut are unchanged; one exact native-zero-request empty UI Session
+was added and separately audited without deleting it or relabelling the original equality failure.
+E backups verified; D old-program duplicate retained after environment policy rejected removal.
+No tags/npm/worktree deletion/credential copy. See [delivery evidence](../../operations/tianwen-natural-reuse-022-delivery-20260909.md).
 
 2026-09-09 checkpoint: Task 1 approved at e9b5a02; final code 6367f07 has 2279 TypeScript
 and 609 Python passes, with unchanged production bytes. One real bounded work episode reached
