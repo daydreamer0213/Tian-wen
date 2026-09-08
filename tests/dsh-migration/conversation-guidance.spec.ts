@@ -153,7 +153,12 @@ describe('natural guidance domain governance', () => {
   it('rejects recomputed valid requests that bind the wrong study, source, model or quality', () => {
     const wrong = [
       (opened: GuidanceStudyOpened) => explorationIntent(opened, { requestStudyId: `guidance-study:${'a'.repeat(64)}` }),
-      (opened: GuidanceStudyOpened) => explorationIntent(opened, { sourceTaskId: `conversation-task:${'b'.repeat(64)}`, sourceMaterialDigest: sha256('other source material') }),
+      (opened: GuidanceStudyOpened) => {
+        const counterexample = opened.cases.find(item => item.kind === 'counterexample')!
+        if (!('sourceTaskId' in counterexample)) throw new Error('fixture requires a counterexample source')
+        return explorationIntent(opened, { sourceTaskId: counterexample.sourceTaskId as `conversation-task:${string}`, sourceMaterialDigest: counterexample.materialDigest })
+      },
+      (opened: GuidanceStudyOpened) => explorationIntent(opened, { sourceMaterialDigest: sha256('other source material') }),
       (opened: GuidanceStudyOpened) => explorationIntent(opened, { environmentDigest: sha256('other model configuration') }),
       (opened: GuidanceStudyOpened) => explorationIntent(opened, { qualityContractDigest: sha256('other frozen quality') }),
     ]

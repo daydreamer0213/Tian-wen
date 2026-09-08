@@ -130,3 +130,33 @@ withdrawn attributed support, stale current parent, cross-study native Session
 reuse, and completion of all ten formal arms after a natural observation.
 Self-review confirmed exact duplicates return before the mutation-only quality
 gate, and no current-quality rule remains in replay-shared validation.
+
+## Fix round 2 — isolated authorization and binding negatives
+
+No production code changed. The focused tests now separately construct valid,
+recomputed exploration requests for an opened counterexample source and for the
+legitimate source with only its material digest changed. This ensures rejection
+reaches frozen-study binding rather than the request parser or an unknown-source
+shortcut. The ledger test also separately verifies an enabled v3 consent record
+with revision `2` is rejected for an opened study frozen at revision `1`.
+
+Covering files:
+
+- `tests/dsh-migration/conversation-guidance.spec.ts`
+- `tests/dsh-migration/conversation-guidance-ledger.spec.ts`
+
+Command:
+
+```powershell
+. D:/DevData/tianwen-natural-acceptance-20260907/evidence/gate-env.ps1; D:/hermes/node/node.exe D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs exec vitest run tests/dsh-migration/conversation-guidance.spec.ts tests/dsh-migration/conversation-guidance-ledger.spec.ts
+```
+
+Result: exit 0; 2 files passed, 72 tests passed, 0 failed.
+
+Typecheck command:
+
+```powershell
+. D:/DevData/tianwen-natural-acceptance-20260907/evidence/gate-env.ps1; D:/hermes/node/node.exe D:/DevData/corepack-home/v1/pnpm/11.20.0/bin/pnpm.mjs --filter @tianwen/evolution typecheck
+```
+
+Result: exit 0 (`tsc -b --pretty false`); `git diff --check` was exit 0.

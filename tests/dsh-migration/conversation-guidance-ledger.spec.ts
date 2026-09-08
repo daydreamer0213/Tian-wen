@@ -302,6 +302,12 @@ it('requires currently enabled matching consent and active support before reques
   disabled.ledger.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
   expect(() => disabled.ledger.recordConversationGuidance(explorationIntent(disabledStudy))).toThrow(/current v3 consent/i)
 
+  const staleRevision = seeded()
+  const staleRevisionStudy = opening(staleRevision.tasks, 'stale-revision-natural-exploration')
+  staleRevision.ledger.recordConversationGuidance(staleRevisionStudy)
+  staleRevision.ledger.recordLearningAnalysisConsent({ revision: 2, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  expect(() => staleRevision.ledger.recordConversationGuidance(explorationIntent(staleRevisionStudy))).toThrow(/current v3 consent/i)
+
   const withdrawn = seeded('met')
   const assessments = [nativeFeedback(withdrawn.ledger, withdrawn.tasks[0]), nativeFeedback(withdrawn.ledger, withdrawn.tasks[1])]
   const withdrawnStudy = opening(withdrawn.tasks, 'withdrawn-natural-exploration', assessments.map(item => item.started.assessmentId))
