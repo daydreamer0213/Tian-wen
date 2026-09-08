@@ -331,4 +331,22 @@ describe('native feedback assessment adapter', () => {
       expect(harness.adapter.requests).toHaveLength(5)
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
+
+  it('rejects oversize exact native feedback instead of truncating it into an assessment call', async () => {
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), claimReviewResponse(nativeReview), claimReviewResponse(nativeReview)])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const marker = 'OVERSIZE-DIRECT-FEEDBACK-MARKER:'
+      const note = `${marker}${'x'.repeat(96 * 1024)}`
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note, ifVersion: null })
+      const requestCount = harness.adapter.requests.length
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      expect(put).toEqual({ ok: false, error: { code: 'note-too-large', maxBytes: 8192, actualBytes: Buffer.byteLength(note, 'utf8') } })
+      expect(harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)).toEqual([])
+      expect(harness.adapter.requests).toHaveLength(requestCount)
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
 })

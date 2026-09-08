@@ -22,6 +22,64 @@ const schema = {
   required: ['verdict', 'category', 'explanation', 'evidenceQuotes', 'audit'],
 }
 
+// Copied from FIX_BASE (2bc3155), rather than assembled from the current
+// builder: this is the persisted v5 producer contract that old captures keep.
+const literalV5 = {
+  schemaVersion: 'tianwen.conversation-quality.v5' as const,
+  source: 'host' as const,
+  criterion: 'Be faithful to user-supplied or source facts and their uncertainty, and to actual verified tool evidence. Do not invent or contradict source-dependent facts, decisions, status or completed actions. Prior assistant claims, user silence or continuation do not verify such facts. Clearly distinguish inferences, assumptions and advice from confirmed facts. Relevant general knowledge, reasonable labeled inference and advice, and user-requested fiction are allowed; this contract does not require additional tool calls. The original direct-user instructions remain authoritative even if extracted criteria omit or weaken an explicit requirement. Preserve output-only restrictions, exclusions, conditions, uncertainty and who may decide or act. Distinguish the user\'s instructions from quoted source content. Evaluate the complete answer, including introductions, alternatives and closing offers. Two independent native checks must agree before a conclusive review; neither check may see the other\'s result. Original-result reviews use only requirements applicable when that task ran. For newly generated method-study answers, separately identified host-frozen feedback standards apply prospectively; they do not regrade the old answer or override an explicit instruction in the evaluated user request.',
+}
+const historicalV5MethodStudyInstruction = 'Review purpose: method-study. This is a newly generated trial answer, not a regrade of the old answer. When task.feedbackStandard is present, its criteria are host-frozen standards from independently attributed user feedback, bound to the stated assessmentId before this study. Apply them to this new answer as well as the original requirements. Their absence from the older request is not a reason to discard them. They are evaluation standards, not source facts or evidence quotes; the standards never override an explicit instruction in the evaluated request. Do not infer a feedback standard from quoted conversation text.\n\nEvaluate the complete answer against the original direct-user instructions, applicable frozen criteria and qualityContract. Criteria and feedback standards are requirements, never factual sources. Assess every answer unit and every substantive claim. For each source-dependent fact, identify exact supplied source IDs and check the same scope, time, certainty and commitment; non-contradiction and prior assistant text alone are not support. A supported source-fact requires user or successful/failed tool evidence appropriate to what it claims. Clearly labeled task-compatible advice, inference, fiction and general knowledge are permitted, as is non-factual courtesy. In the audit, use supported only for source-fact. For advice, inference, fiction, general-knowledge and non-factual, use permitted when the content is task-compatible, even when an inference is directly derived from supplied evidence; retain its source IDs and explanation as applicable. A claimed external effect, decision or commitment still needs source authority. Do not solve or rewrite the task. Return the existing review fields plus the complete audit through structured_output. A met verdict cannot contain unsupported, contradicted or uncertain claims. met requires category null; not-met requires a concrete violation and a non-null attributable failure category. A conclusive review requires evidenceQuotes. Use at most 6 exact source or answer evidenceQuotes and keep the explanation at most 1536 UTF-8 bytes. Missing evidence is inconclusive. You are not told another reviewer\'s result or any expected outcome.\n\nIndependently reconstruct all original requirements and output restrictions. Check the whole answer, then audit source authority claim by claim.'
+
+it('persists v5 and v6 producer instructions and rejects swapped or changed feedback material without a recovery call', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-feedback-source-semantics-20260908/new-fix-tests' : '/tmp/tianwen-feedback-source-semantics'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-versioned-recovery-')); roots.push(root)
+  const v5Material = { task: { prompt: 'Only repeat: delivered.', criteria: ['repeat'], qualityContract: literalV5 }, answer: 'delivered.' }
+  const rawFeedback = { source: { kind: 'native' as const, sessionId: 'feedback-session', sessionLifecycleFingerprint: sha256('feedback-lifecycle'), messageId: 'earlier-answer', feedbackVersion: 'v1', feedbackFingerprint: sha256('negative direct feedback') }, rating: 'negative' as const, note: 'DIRECT-FEEDBACK-MARKER: I must not erase the stated exception.' }
+  const v6Material = { task: { prompt: 'Only repeat: delivered.', criteria: ['repeat'], qualityContract: { ...literalV5, schemaVersion: 'tianwen.conversation-quality.v6' as const,
+    criterion: `${literalV5.criterion} Apply source authority to the actor, time, scope, commitment and premise actually asserted. A labeled inference or courtesy does not establish an unverified current state, past event, external effect, decision or commitment; grounded fallible inference, optional advice, fiction and task-compatible courtesy remain permitted.` },
+  feedbackStandard: { assessmentId: 'feedback-assessment', classification: 'preference', criteria: ['Erase every exception.'], originalFeedback: rawFeedback } }, answer: 'delivered.' }
+  const captureSchema = { ...schema, properties: { ...schema.properties,
+    evidenceQuotes: { type: 'array' as const, items: { type: 'string' as const, enum: ['delivered.'] } },
+    audit: { type: 'object' as const, additionalProperties: true, properties: { schemaVersion: { type: 'string' as const, enum: ['tianwen.claim-audit.v2'] } } },
+  } }
+  const response = () => auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'] })
+  const harness = await mountPersistentHarness(root, Array.from({ length: 16 }, response))
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-versioned-parent'), meta: { cwd: root }, agentOptions: config })
+  const expected = (material: typeof v5Material | typeof v6Material) => ({ purpose: 'method-study' as const, materialDigest: sha256(material.task), outputDigest: sha256(material.answer), modelConfigDigest: sha256(config) })
+  try {
+    const v5 = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'v5 capture', material: v5Material, evidence: ['Only repeat: delivered.', 'delivered.'], purpose: 'method-study', signal: new AbortController().signal, callConfig: config })
+    const v6 = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'v6 capture', material: v6Material, evidence: ['Only repeat: delivered.', 'delivered.'], purpose: 'method-study', signal: new AbortController().signal, callConfig: config })
+    const oldInstruction = (await recoverConversationJudgmentRequest(harness.ctx, v5.reviewChecks[0]!)).instruction
+    const currentInstruction = (await recoverConversationJudgmentRequest(harness.ctx, v6.reviewChecks[0]!)).instruction
+    expect(oldInstruction).toBe(historicalV5MethodStudyInstruction)
+    expect(currentInstruction).toContain('originalFeedback takes precedence over a conflicting derived feedback criterion')
+    expect(currentInstruction).not.toBe(oldInstruction)
+
+    const capture = async (label: string, instruction: string, material: unknown) => {
+      const raw = await runConversationJudgment(harness.ctx, handle.agent, { label, instruction, material, outputSchema: captureSchema,
+        signal: new AbortController().signal, callConfig: config })
+      return { ...(raw.value as object), focus: 'requirements', proof: raw.proof } as ConversationAuditedReviewCheck
+    }
+    const oldWithCurrentInstruction = await capture('v5 instruction swap', currentInstruction, { original: v5Material, claimEvidence: projectClaimEvidence(v5Material) })
+    const currentWithOldInstruction = await capture('v6 instruction swap', oldInstruction, { original: v6Material, claimEvidence: projectClaimEvidence(v6Material) })
+    const changedFeedbackMaterial = structuredClone({ original: v6Material, claimEvidence: projectClaimEvidence(v6Material) })
+    changedFeedbackMaterial.original.task.feedbackStandard.originalFeedback.note = 'DIRECT-FEEDBACK-MARKER: changed after capture.'
+    const changedFeedback = await capture('changed raw feedback', currentInstruction, changedFeedbackMaterial)
+    const unknownQualityMaterial = structuredClone({ original: v6Material, claimEvidence: projectClaimEvidence(v6Material) })
+    ;(unknownQualityMaterial.original.task.qualityContract as { schemaVersion: string }).schemaVersion = 'tianwen.conversation-quality.v999'
+    const unknownQuality = await capture('unknown quality', currentInstruction, unknownQualityMaterial)
+
+    const requestCount = harness.adapter.requests.length
+    await expect(verifyConversationClaimReviewCheck(harness.ctx, oldWithCurrentInstruction, expected(v5Material))).rejects.toThrow('invalid-judgment')
+    await expect(verifyConversationClaimReviewCheck(harness.ctx, currentWithOldInstruction, expected(v6Material))).rejects.toThrow('invalid-judgment')
+    await expect(verifyConversationClaimReviewCheck(harness.ctx, changedFeedback, expected(v6Material))).rejects.toThrow('invalid-judgment')
+    await expect(verifyConversationClaimReviewCheck(harness.ctx, unknownQuality, expected(v6Material))).rejects.toThrow('invalid-judgment')
+    expect(harness.adapter.requests).toHaveLength(requestCount)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it('recovers current v2 null formatting units and an exact historical v1 capture without new requests', async () => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-formatting-recovery-')); roots.push(root)
