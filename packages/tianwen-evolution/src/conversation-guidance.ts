@@ -2,6 +2,7 @@ import { sha256 } from './learning-intake.js'
 import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, parseConversationQualityContract, parseConversationQualityReviewChecks, parseStoredConversationReviewChecks, conversationReviewConsensus, type ConversationStoredReviewChecks, type ConversationQualityContract, type ConversationFamily, type ConversationFailure, type ConversationJudgmentProof } from './conversation-learning.js'
 import { classifyLearningExploration, parseConversationLearningExplorationRequest, type ConversationLearningExplorationRequest, type LearningExplorationResult } from './learning-exploration.js'
 import type { Sha256Digest } from './ledger.js'
+import { parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceUse } from './conversation-skill-source.js'
 
 /** Data only: the host reads these strings as guidance, never as executable source. */
 export interface GuidanceSnapshot {
@@ -55,6 +56,14 @@ export interface GuidanceCandidateRecord {
   readonly studyId: GuidanceStudyId
   readonly candidateSnapshot: GuidanceSnapshot
   readonly proposalProof: GuidanceProof
+  readonly sourceUse?: GuidanceSourceUse
+}
+export interface GuidanceSourceReferenceReadRecord {
+  readonly kind: 'source-reference-read'
+  readonly studyId: GuidanceStudyId
+  readonly reference: ConversationSkillAdmission
+  readonly definition: Readonly<Record<string, unknown>>
+  readonly selectionProof: GuidanceProof
 }
 export interface GuidanceArmRecord {
   readonly kind: 'arm-recorded'
@@ -115,7 +124,7 @@ export interface GuidanceInsufficientEvidenceStoppedRecord {
   readonly proposalProof: GuidanceProof
 }
 export type GuidanceStoppedRecord = GuidanceHistoricalStoppedRecord | GuidanceInsufficientEvidenceStoppedRecord
-export type ConversationGuidanceRecord = GuidanceStudyOpened | GuidanceCandidateRecord | GuidanceArmRecord | GuidanceExplorationIntentRecord | GuidanceExplorationArmRecord | GuidanceDecisionRecord | GuidanceActivationRecord | GuidanceRollbackRecord | GuidanceStoppedRecord
+export type ConversationGuidanceRecord = GuidanceStudyOpened | GuidanceSourceReferenceReadRecord | GuidanceCandidateRecord | GuidanceArmRecord | GuidanceExplorationIntentRecord | GuidanceExplorationArmRecord | GuidanceDecisionRecord | GuidanceActivationRecord | GuidanceRollbackRecord | GuidanceStoppedRecord
 export interface GuidanceExploration {
   readonly intent: GuidanceExplorationIntentRecord
   readonly arms: readonly GuidanceExplorationArmRecord[]
@@ -124,6 +133,7 @@ export interface GuidanceExploration {
 export interface GuidanceStudy {
   readonly opened: GuidanceStudyOpened
   readonly openedAt: string
+  readonly sourceReference?: GuidanceSourceReferenceReadRecord
   readonly candidate?: GuidanceCandidateRecord
   readonly arms: readonly GuidanceArmRecord[]
   readonly exploration?: GuidanceExploration
@@ -229,9 +239,15 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
   if (typeof input.studyId !== 'string' || !/^guidance-study:[a-f0-9]{64}$/u.test(input.studyId)) throw new TypeError('guidance study identity is invalid')
   const studyId = input.studyId as GuidanceStudyId
   if (input.kind === 'study-opened') return parseOpening(input, studyId)
+  if (input.kind === 'source-reference-read') {
+    object(input, ['kind', 'studyId', 'reference', 'definition', 'selectionProof'])
+    const reference = parseConversationSkillAdmission(input.reference)
+    return { kind: input.kind, studyId, reference, definition: parseConversationSkillDefinition(input.definition, reference), selectionProof: proof(input.selectionProof) }
+  }
   if (input.kind === 'candidate-recorded') {
-    object(input, ['kind', 'studyId', 'candidateSnapshot', 'proposalProof'])
-    return { kind: input.kind, studyId, candidateSnapshot: parseGuidanceSnapshot(input.candidateSnapshot), proposalProof: proof(input.proposalProof) }
+    object(input, ['kind', 'studyId', 'candidateSnapshot', 'proposalProof', ...(Object.hasOwn(input, 'sourceUse') ? ['sourceUse'] : [])])
+    return { kind: input.kind, studyId, candidateSnapshot: parseGuidanceSnapshot(input.candidateSnapshot), proposalProof: proof(input.proposalProof),
+      ...(Object.hasOwn(input, 'sourceUse') ? { sourceUse: parseGuidanceSourceUse(input.sourceUse) } : {}) }
   }
   if (input.kind === 'arm-recorded') {
     object(input, ['kind', 'studyId', 'caseId', 'role', 'materialDigest', 'behaviorVersion', 'executionProof', 'judgeProof', 'outputDigest', 'verdict', ...(Object.hasOwn(input, 'reviewChecks') ? ['reviewChecks'] : [])])
@@ -307,6 +323,7 @@ export class ConversationGuidanceState {
   existing(record: ConversationGuidanceRecord): ConversationGuidanceRecord | undefined {
     const study = this.studies.get(record.studyId)
     const value = record.kind === 'study-opened' ? study?.opened
+      : record.kind === 'source-reference-read' ? study?.sourceReference
       : record.kind === 'candidate-recorded' ? study?.candidate
       : record.kind === 'arm-recorded' ? study?.arms.find(arm => arm.caseId === record.caseId && arm.role === record.role)
       : record.kind === 'exploration-requested' ? study?.exploration?.intent
@@ -349,6 +366,12 @@ export class ConversationGuidanceState {
       return
     }
     const opened = study.opened
+    if (record.kind === 'source-reference-read') {
+      if (study.exploration !== undefined || study.candidate !== undefined || study.decision !== undefined) throw new Error('guidance source must be read before exploration, candidate and decision')
+      if (record.reference.scopeKey !== opened.scopeKey) throw new Error('guidance source scope disagrees with its opened study')
+      if (this.nativeSessions.has(record.selectionProof.sessionId)) throw new Error('guidance source selection requires an independent native Session')
+      return
+    }
     if (record.kind === 'exploration-requested') {
       const request = record.request
       const source = opened.cases.find(item => item.kind === 'source1' && 'sourceTaskId' in item && item.sourceTaskId === request.sourceTaskId)
@@ -373,6 +396,8 @@ export class ConversationGuidanceState {
       return
     }
     if (record.kind === 'candidate-recorded') {
+      if (study.sourceReference === undefined ? record.sourceUse !== undefined
+        : record.sourceUse?.readDigest !== sha256(study.sourceReference)) throw new Error('guidance candidate source use must bind its exact source read')
       if (study.exploration !== undefined && study.exploration.result === undefined) throw new Error('guidance candidate requires both exploration arms when exploration was initiated')
       const next = record.candidateSnapshot
       if (next.scopeKey !== opened.scopeKey || CONVERSATION_FAMILIES.some(family => family !== opened.family && next.rules[family] !== opened.parentSnapshot.rules[family])) throw new Error('guidance candidate changed another family or scope')
@@ -423,7 +448,10 @@ export class ConversationGuidanceState {
       if (record.reason === 'insufficient-evidence') this.nativeSessions.add(record.proposalProof.sessionId)
       this.studies.set(record.studyId, { ...study, stopped: record, stoppedAt: at })
     }
-    else if (record.kind === 'candidate-recorded') {
+    else if (record.kind === 'source-reference-read') {
+      this.nativeSessions.add(record.selectionProof.sessionId)
+      this.studies.set(record.studyId, { ...study, sourceReference: record })
+    } else if (record.kind === 'candidate-recorded') {
       this.nativeSessions.add(record.proposalProof.sessionId)
       this.studies.set(record.studyId, { ...study, candidate: record })
     } else if (record.kind === 'arm-recorded') {

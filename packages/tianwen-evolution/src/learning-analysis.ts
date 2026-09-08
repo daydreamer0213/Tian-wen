@@ -72,7 +72,7 @@ export interface RequestOutcomeLearningAnalysisInput {
 }
 
 /** Host-reviewed source identity; not an instruction or an activation grant. */
-export interface LearningSkillAdmission {
+export interface LearningSkillReference {
   readonly name: string
   readonly provider: string
   readonly digest: Sha256Digest
@@ -82,6 +82,9 @@ export interface LearningSkillAdmission {
   readonly reviewedAt: string
   readonly kind: 'self-contained-text'
   readonly runtime: '0.1.1-rc.2'
+}
+
+export interface LearningSkillAdmission extends LearningSkillReference {
   readonly scopeKey: string
   readonly toolName: string
 }
@@ -535,6 +538,15 @@ export function parseLearningSkillAdmission(value: unknown): LearningSkillAdmiss
   if (!isRecord(value)) throw new TypeError('Skill admission must be an object')
   exactKeys(value, ['name', 'provider', 'digest', 'origin', 'revision', 'license',
     'reviewedAt', 'kind', 'runtime', 'scopeKey', 'toolName'])
+  const { scopeKey, toolName, ...reference } = value
+  return { ...parseLearningSkillReference(reference),
+    scopeKey: safeText(scopeKey, 'source scope'), toolName: safeText(toolName, 'source tool') }
+}
+
+export function parseLearningSkillReference(value: unknown): LearningSkillReference {
+  if (!isRecord(value)) throw new TypeError('Skill reference must be an object')
+  exactKeys(value, ['name', 'provider', 'digest', 'origin', 'revision', 'license',
+    'reviewedAt', 'kind', 'runtime'])
   if (value.kind !== 'self-contained-text' || value.runtime !== '0.1.1-rc.2'
     || !['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC'].includes(String(value.license))
     || typeof value.digest !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(value.digest)
@@ -546,9 +558,8 @@ export function parseLearningSkillAdmission(value: unknown): LearningSkillAdmiss
     name: value.name, provider: safeText(value.provider, 'source provider'),
     digest: value.digest as Sha256Digest,
     origin: safeText(value.origin, 'source origin'), revision: safeText(value.revision, 'source revision'),
-    license: value.license as LearningSkillAdmission['license'], reviewedAt: value.reviewedAt,
+    license: value.license as LearningSkillReference['license'], reviewedAt: value.reviewedAt,
     kind: value.kind, runtime: value.runtime,
-    scopeKey: safeText(value.scopeKey, 'source scope'), toolName: safeText(value.toolName, 'source tool'),
   }
 }
 

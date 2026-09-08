@@ -3041,8 +3041,10 @@ export class EvolutionLedger {
       : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)
     const exploredMutation = record.kind === 'exploration-requested' || record.kind === 'exploration-arm-recorded'
       || (record.kind === 'candidate-recorded' && existingStudy?.exploration !== undefined)
-    if (exploredMutation && !hasCurrentConversationQuality(existingStudy?.opened.qualityContract)) {
-      throw new LedgerIntegrityError('new natural exploration requires the current quality contract')
+    const sourceMutation = record.kind === 'source-reference-read'
+      || (record.kind === 'candidate-recorded' && existingStudy?.sourceReference !== undefined)
+    if ((exploredMutation || sourceMutation) && !hasCurrentConversationQuality(existingStudy?.opened.qualityContract)) {
+      throw new LedgerIntegrityError('new natural exploration or source reference requires the current quality contract')
     }
     this.#validateConversationGuidance(record)
     // Shared content-addressed storage, never the executable plugin Champion.
@@ -3103,12 +3105,14 @@ export class EvolutionLedger {
       : this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)
     const exploredMutation = record.kind === 'exploration-requested' || record.kind === 'exploration-arm-recorded'
       || (record.kind === 'candidate-recorded' && full?.exploration !== undefined)
-    if (record.kind === 'study-opened' || record.kind === 'guidance-activated' || exploredMutation) {
+    const sourceMutation = record.kind === 'source-reference-read'
+      || (record.kind === 'candidate-recorded' && full?.sourceReference !== undefined)
+    if (record.kind === 'study-opened' || record.kind === 'guidance-activated' || exploredMutation || sourceMutation) {
       if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== study.consentRevision) throw new LedgerIntegrityError('natural learning requires current v3 consent')
       this.#validateConversationGuidanceSupport(study)
     }
-    if (exploredMutation) {
-      if (guidanceVersion(this.#conversationGuidance.snapshot(study.scopeKey)) !== study.parentVersion) throw new LedgerIntegrityError('natural exploration requires the current frozen parent guidance')
+    if (exploredMutation || sourceMutation) {
+      if (guidanceVersion(this.#conversationGuidance.snapshot(study.scopeKey)) !== study.parentVersion) throw new LedgerIntegrityError('natural exploration or source reference requires the current frozen parent guidance')
     }
     if (record.kind === 'guidance-activated') {
       const full = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)!

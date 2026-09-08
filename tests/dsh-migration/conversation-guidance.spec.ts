@@ -12,6 +12,7 @@ import {
   type GuidanceSnapshot,
   type GuidanceStudyBody,
   type GuidanceStudyOpened,
+  type GuidanceSourceReferenceReadRecord,
 } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { conversationQualityContract, parseConversationAuditedReviewChecks, parseConversationReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
@@ -114,6 +115,120 @@ function append(state: ConversationGuidanceState, input: ConversationGuidanceRec
   state.apply(record, '2026-09-07T00:00:00.000Z')
   return record
 }
+
+function sourceOpening(label = 'source-reference', explored = false): GuidanceStudyOpened {
+  const { kind: _kind, studyId: _id, ...oldBody } = explored ? explorationOpening(label) : opening(label)
+  const scopeKey = `conversation:${sha256({ cwd: 'source-fixture' })}`
+  const parentSnapshot = baselineGuidanceSnapshot(scopeKey)
+  const body = { ...oldBody, scopeKey, parentSnapshot, parentVersion: guidanceVersion(parentSnapshot) }
+  return { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
+}
+
+function sourceRead(opened: GuidanceStudyOpened): GuidanceSourceReferenceReadRecord {
+  const definition = { name: 'source-audit', provider: 'test-reviewed-source', source: 'bundled',
+    description: 'Separate findings from unknowns.', content: 'Preserve stated uncertainty.',
+    invocation: { modelInvocable: true, userInvocable: true } }
+  return { kind: 'source-reference-read', studyId: opened.studyId, definition,
+    reference: { name: definition.name, provider: definition.provider, digest: sha256(definition),
+      origin: 'https://example.invalid/test-fixture', revision: 'fixture-v1', license: 'MIT',
+      reviewedAt: '2026-09-08T00:00:00.000Z', kind: 'self-contained-text', runtime: '0.1.1-rc.2',
+      scopeKey: opened.scopeKey, purpose: 'conversation-method-reference', environmentDigest: sha256('fixture-root') },
+    selectionProof: proof(`${opened.studyId}:source-selection`) }
+}
+
+describe('natural source reference state binding', () => {
+  it.each(['adapted', 'not-used'] as const)('requires all ten unchanged formal arms after a %s declaration', status => {
+    const state = new ConversationGuidanceState(), opened = sourceOpening(), read = sourceRead(opened)
+    const proposed = { ...candidate(opened), sourceUse: { readDigest: sha256(read), status, rationale: 'Frozen reference considered.' } }
+    append(state, opened); append(state, read); append(state, proposed)
+    const records = arms(opened, proposed)
+    for (const record of records.slice(0, 9)) append(state, record)
+    expect(() => state.decision(opened.studyId)).toThrow(/ten|complete/i)
+    append(state, records[9]!)
+    expect(state.decision(opened.studyId).verdict).toBe('accepted')
+    expect(state.listStudies()[0]?.sourceReference).toEqual(read)
+    expect(state.listStudies()[0]?.arms).toHaveLength(10)
+  })
+  it('permits read then one existing exploration and a source-bound candidate', () => {
+    const state = new ConversationGuidanceState(), opened = sourceOpening('with-exploration', true), read = sourceRead(opened)
+    append(state, opened); append(state, read); append(state, explorationIntent(opened))
+    const proposed = { ...candidate(opened), sourceUse: { readDigest: sha256(read), status: 'adapted' as const, rationale: 'Adapt after observation.' } }
+    expect(() => append(state, proposed)).toThrow(/both exploration arms/i)
+    append(state, explorationArm(opened, 'control', 'not-met')); append(state, explorationArm(opened, 'treatment', 'met'))
+    append(state, proposed)
+    expect(state.listStudies()[0]?.exploration?.result).toBeDefined()
+  })
+  it('rejects unknown/cross-scope reads and reserves one immutable source slot', () => {
+    const state = new ConversationGuidanceState(), opened = sourceOpening(), read = sourceRead(opened)
+    expect(() => append(state, read)).toThrow(/unknown|opened/i)
+    append(state, opened)
+    const otherScope = { ...read, reference: { ...read.reference, scopeKey: `conversation:${sha256('other workspace')}` } }
+    expect(parseConversationGuidanceRecord(otherScope)).toEqual(otherScope)
+    expect(() => append(state, otherScope)).toThrow(/scope/i)
+    append(state, read)
+    expect(state.existing(read)).toEqual(read)
+    expect(() => append(state, { ...read, selectionProof: proof('replacement') })).toThrow(/immutable|history/i)
+    const obtained = state.listStudies()[0]!.sourceReference!.definition as Record<string, unknown>
+    obtained.content = 'caller tamper'
+    expect(state.existing(read)).toEqual(read)
+    const { definition: _definition, ...missing } = read
+    expect(() => parseConversationGuidanceRecord(missing)).toThrow(/fields/i)
+    expect(() => parseConversationGuidanceRecord({ ...read, readDigest: sha256(read) })).toThrow(/fields/i)
+    expect(() => parseConversationGuidanceRecord({ ...read, definition: { ...read.definition, content: 'tampered' } })).toThrow(/reference/i)
+  })
+  it.each(['exploration', 'candidate', 'stop'] as const)('rejects reading after %s', phase => {
+    const state = new ConversationGuidanceState(), opened = sourceOpening('late-read', true)
+    append(state, opened)
+    if (phase === 'exploration') append(state, explorationIntent(opened))
+    else if (phase === 'candidate') append(state, candidate(opened))
+    else append(state, { kind: 'study-stopped', studyId: opened.studyId, reason: 'cancelled' })
+    expect(() => append(state, sourceRead(opened))).toThrow(/before|stopped/i)
+  })
+  it('requires source use iff read exists and binds its exact record digest', () => {
+    const state = new ConversationGuidanceState(), opened = sourceOpening(), read = sourceRead(opened)
+    append(state, opened)
+    const proposed = { ...candidate(opened), sourceUse: { readDigest: sha256(read), status: 'not-used' as const, rationale: 'Not useful for this task.' } }
+    expect(() => append(state, proposed)).toThrow(/source/i)
+    append(state, read)
+    expect(() => append(state, candidate(opened))).toThrow(/source/i)
+    expect(() => append(state, { ...proposed, sourceUse: { ...proposed.sourceUse, readDigest: sha256(read.definition) } })).toThrow(/source/i)
+    append(state, proposed)
+  })
+  it('reserves selection proof against proposal, exploration, execution, reviews and other studies', () => {
+    const state = new ConversationGuidanceState(), opened = sourceOpening('proof-binding', true), read = sourceRead(opened)
+    append(state, opened); append(state, read)
+    const proposed = { ...candidate(opened), sourceUse: { readDigest: sha256(read), status: 'adapted' as const, rationale: 'Adapted.' } }
+    expect(() => append(state, { ...proposed, proposalProof: read.selectionProof })).toThrow(/independent|Session/i)
+    const intent = explorationIntent(opened, { proposalProof: read.selectionProof })
+    expect(parseConversationGuidanceRecord(intent)).toEqual(intent)
+    expect(() => append(state, intent)).toThrow(/independent|Session/i)
+    append(state, proposed)
+    const arm = arms(opened, proposed)[0]!
+    const reviewChecks = explorationArm(opened, 'control', 'not-met').reviewChecks
+    const reviewed = { ...arm, reviewChecks, judgeProof: reviewChecks[0].proof }
+    expect(() => append(state, { ...reviewed, executionProof: read.selectionProof })).toThrow(/independent|Session/i)
+    const reusedChecks = [{ ...reviewChecks[0], proof: read.selectionProof }, reviewChecks[1]]
+    expect(() => append(state, { ...reviewed, judgeProof: read.selectionProof, reviewChecks: reusedChecks })).toThrow(/independent|Session/i)
+    append(state, reviewed)
+    const other = sourceOpening('other-proof-binding')
+    append(state, other)
+    expect(() => append(state, { ...sourceRead(other), selectionProof: read.selectionProof })).toThrow(/independent|Session/i)
+    expect(() => append(state, { ...sourceRead(other), selectionProof: proposed.proposalProof })).toThrow(/independent|Session/i)
+    expect(() => append(state, { ...sourceRead(other), selectionProof: reviewed.executionProof })).toThrow(/independent|Session/i)
+    expect(() => append(state, { ...sourceRead(other), selectionProof: reviewChecks[1].proof })).toThrow(/independent|Session/i)
+  })
+  it('permits insufficient evidence after read only with an independent completed proof', () => {
+    const state = new ConversationGuidanceState(), opened = sourceOpening(), read = sourceRead(opened)
+    append(state, opened); append(state, read)
+    const stop = { kind: 'study-stopped' as const, studyId: opened.studyId, reason: 'insufficient-evidence' as const, proposalProof: read.selectionProof }
+    expect(() => append(state, stop)).toThrow(/independent|Session/i)
+    append(state, { ...stop, proposalProof: proof('independent-stop') })
+    expect(state.listStudies()[0]?.stopped?.reason).toBe('insufficient-evidence')
+    const other = sourceOpening('after-insufficient-stop')
+    append(state, other)
+    expect(() => append(state, { ...sourceRead(other), selectionProof: proof('independent-stop') })).toThrow(/independent|Session/i)
+  })
+})
 
 function evaluated(state: ConversationGuidanceState, opened = opening(), change?: (records: GuidanceArmRecord[]) => void) {
   append(state, opened)

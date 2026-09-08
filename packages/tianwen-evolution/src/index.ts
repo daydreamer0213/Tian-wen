@@ -4,7 +4,9 @@ export type { ConversationReviewCheck, ConversationReviewChecks, ConversationAud
 export { parseClaimAudit } from './conversation-claim-audit.js'
 export type { ClaimAssessment, ClaimAudit, ClaimAuditV1, ClaimAuditV2 } from './conversation-claim-audit.js'
 export { baselineGuidanceSnapshot, guidanceInputDigest, guidanceVersion, guidanceStudyId, parseGuidanceSnapshot, parseConversationGuidanceRecord } from './conversation-guidance.js'
-export type { GuidanceSnapshot, GuidanceStudyId, GuidanceProof, GuidanceStudyBody, GuidanceStudy, GuidanceCase, GuidanceSourceCase, GuidanceGeneratedCase, GuidanceStudyOpened, GuidanceCandidateRecord, GuidanceArmRecord, GuidanceExploration, GuidanceExplorationIntentRecord, GuidanceExplorationArmRecord, GuidanceDecisionRecord, GuidanceActivationRecord, GuidanceRollbackRecord, GuidanceStoppedRecord, ConversationGuidanceRecord } from './conversation-guidance.js'
+export type { GuidanceSnapshot, GuidanceStudyId, GuidanceProof, GuidanceStudyBody, GuidanceStudy, GuidanceCase, GuidanceSourceCase, GuidanceGeneratedCase, GuidanceStudyOpened, GuidanceSourceReferenceReadRecord, GuidanceCandidateRecord, GuidanceArmRecord, GuidanceExploration, GuidanceExplorationIntentRecord, GuidanceExplorationArmRecord, GuidanceDecisionRecord, GuidanceActivationRecord, GuidanceRollbackRecord, GuidanceStoppedRecord, ConversationGuidanceRecord } from './conversation-guidance.js'
+export { parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse } from './conversation-skill-source.js'
+export type { ConversationSkillAdmission, GuidanceSourceUse } from './conversation-skill-source.js'
 export { parseConversationFeedbackRecord, conversationFeedbackAssessmentId } from './conversation-feedback.js'
 export type { ConversationFeedbackRecord, ConversationFeedbackAssessment, ConversationFeedbackSource, ConversationFeedbackStarted, ConversationFeedbackResult } from './conversation-feedback.js'
 
@@ -102,6 +104,7 @@ export {
   learningAnalysisSubmissionPhase,
   parseLearningAnalysisSubmission,
   parseLearningSkillAdmission,
+  parseLearningSkillReference,
   prepareLearningAnalysisRequest,
 } from './learning-analysis.js'
 export type {
@@ -126,6 +129,7 @@ export type {
   LearningAnalysisStatus,
   LearningAnalysisSubmission,
   LearningSkillAdmission,
+  LearningSkillReference,
   RequestLearningAnalysisInput,
   RequestOutcomeLearningAnalysisInput,
   OutcomeLearningAnalysisBinding,
