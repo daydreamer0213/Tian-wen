@@ -39,6 +39,16 @@ export const CONVERSATION_FEEDBACK_SCHEMA = object({
 const generatedCase = object({ prompt: string, criteria: strings })
 export const CONVERSATION_CASES_SCHEMA = object({ adjacent: generatedCase, holdout: generatedCase })
 export const CONVERSATION_PROPOSAL_SCHEMA = object({ guidance: string })
+/** Native capture validates the closed properties; the host enforces exactly
+ * one choice and the domain validates the frozen exploration evidence. */
+export function conversationProposalSchema(sourceTaskIds: readonly string[], allowExploration = true): ObjectJsonSchema {
+  const prediction = object({ control: choices(['met', 'not-met']), treatment: choices(['met', 'not-met']) })
+  return { type: 'object', properties: {
+    guidance: string, insufficientEvidence: string,
+    ...(allowExploration ? { exploration: object({ sourceTaskId: choices(sourceTaskIds), hypothesis: string, alternative: string,
+      temporaryInstruction: string, expectedIfHypothesis: prediction, expectedIfAlternative: prediction }) } : {}),
+  }, required: [], additionalProperties: false }
+}
 export const CONVERSATION_BLIND_REVIEW_SCHEMA = object({ verdict, category: { type: 'null' }, explanation: string, evidenceQuotes: strings })
 const TRIAL_SCHEMA = object({ answer: string })
 

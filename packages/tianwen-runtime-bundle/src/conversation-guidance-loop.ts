@@ -2,9 +2,9 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
-import { hasCurrentConversationQuality, guidanceInputDigest, guidanceStudyId, guidanceVersion, parseConversationGuidanceRecord, sha256, type ConversationQualityContract, type ConversationTask, type ConversationFeedbackAssessment, type ConversationFailure, type GuidanceCase, type GuidanceStudyBody, type GuidanceStudyOpened } from '@tianwen/evolution'
+import { hasCurrentConversationQuality, guidanceInputDigest, guidanceStudyId, guidanceVersion, parseConversationGuidanceRecord, prepareConversationLearningExploration, sha256, type ConversationQualityContract, type ConversationTask, type ConversationFeedbackAssessment, type ConversationFailure, type GuidanceCase, type GuidanceStudyBody, type GuidanceStudyOpened } from '@tianwen/evolution'
 import { conversationEvidenceTexts, conversationTaskModelDigest, recoverConversationTaskModel, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
-import { CONVERSATION_CASES_SCHEMA, CONVERSATION_PROPOSAL_SCHEMA, runConversationJudgment, runConversationTrial } from './conversation-judgment.js'
+import { CONVERSATION_CASES_SCHEMA, conversationProposalSchema, runConversationJudgment, runConversationTrial } from './conversation-judgment.js'
 import { runConversationClaimReview, verifyConversationClaimReviewCheck } from './conversation-claim-review.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -15,6 +15,16 @@ interface EvidenceGroup { readonly sources: readonly [ConversationTask, Conversa
 const RAW_FEEDBACK_GUIDANCE = 'When a source has feedbackStandard.originalFeedback, it is exact attributed feedback to an earlier assistant answer. Preserve its speaker, actor, negation, exception and unresolved references; use it to interpret only the attributed continuing preference or supported problem, never every new request in the feedback. The current evaluated task instruction remains authoritative, and feedback is not factual source evidence.'
 
 function root(agent: Agent): boolean { return agent.session.header.origin !== 'subagent' && agent.session.header.parentSession === undefined && agent.session.header.agentPreset !== TIANWEN_CONTROLLED_AGENT_PRESET }
+function proposalChoice(value: unknown, allowExploration: boolean): { guidance: string } | { insufficientEvidence: string } | { exploration: Record<string, unknown> } {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 1) throw new Error('invalid-judgment')
+  for (const key of ['guidance', 'insufficientEvidence'] as const) if (key in value) {
+    const text = (value as Record<string, unknown>)[key]
+    if (typeof text !== 'string' || text.trim().length === 0 || Buffer.byteLength(text, 'utf8') > 4096) throw new Error('invalid-judgment')
+    return key === 'guidance' ? { guidance: text } : { insufficientEvidence: text }
+  }
+  if (allowExploration && 'exploration' in value && value.exploration !== null && typeof value.exploration === 'object' && !Array.isArray(value.exploration)) return { exploration: value.exploration as Record<string, unknown> }
+  throw new Error('invalid-judgment')
+}
 function generatedCases(value: unknown, qualityContract: ConversationQualityContract): readonly GuidanceCase[] {
   if (value === null || typeof value !== 'object' || Object.keys(value).sort().join(',') !== 'adjacent,holdout') throw new Error('invalid-judgment')
   return (['adjacent', 'holdout'] as const).map(kind => {
@@ -123,11 +133,14 @@ export class TianwenConversationGuidanceLoopService extends Service {
         await this.assertCurrent(study.opened, controller.signal)
         // Only finish a durable accepted decision. Never rerun a worker or judge;
         // missing or changed native evidence leaves it unapplied.
-        for (const proof of [study.candidate.proposalProof, ...study.arms.flatMap(arm => [arm.executionProof, ...(arm.reviewChecks?.map(check => check.proof) ?? [arm.judgeProof])])]) {
+        const explorationArms = study.exploration?.arms ?? []
+        for (const proof of [study.candidate.proposalProof, ...(study.exploration === undefined ? [] : [study.exploration.intent.request.proposalProof]),
+          ...explorationArms.flatMap(arm => [arm.executionProof, ...arm.reviewChecks.map(check => check.proof)]),
+          ...study.arms.flatMap(arm => [arm.executionProof, ...(arm.reviewChecks?.map(check => check.proof) ?? [arm.judgeProof])])]) {
           const saved = await this.ctx.sessionPersistence.inspect(SessionId(proof.sessionId))
           if (saved.meta.origin !== 'subagent' || sha256({ meta: saved.meta, events: saved.events }) !== proof.sessionDigest) throw new Error('source-unavailable')
         }
-        for (const arm of study.arms) {
+        for (const arm of [...explorationArms, ...study.arms]) {
           if (arm.reviewChecks === undefined) throw new Error('source-unavailable')
           for (const check of arm.reviewChecks) {
             if (!('audit' in check)) throw new Error('source-unavailable')
@@ -240,31 +253,77 @@ export class TianwenConversationGuidanceLoopService extends Service {
       }
       opened = { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
       evolution.recordConversationGuidance(opened)
-      const proposal = await runConversationJudgment(this.ctx, agent, {
-        outputSchema: CONVERSATION_PROPOSAL_SCHEMA,
-        label: `Tianwen method proposal ${opened.studyId}`, callConfig, signal,
-        instruction: `Propose one concise reusable text-task method addressing the evidenced problem. Return exactly {"guidance":"plain text guidance"}, at most 4096 UTF-8 bytes. Generalize the method; never retain names, original answers, identifiers or case-specific facts. Do not change permissions, tools, consent, learning policy or request unneeded external actions. The guidance is subordinate to future user requests. You have not been given the counterexample or holdout; do not invent evaluation outcomes. ${RAW_FEEDBACK_GUIDANCE}`,
-        material: { family: body.family, failureCategory: body.failureCategory, currentGuidance: parentSnapshot.rules[body.family] ?? '', sources },
-      })
-      if (proposal.value === null || typeof proposal.value !== 'object' || Object.keys(proposal.value).length !== 1 || !('guidance' in proposal.value) || typeof proposal.value.guidance !== 'string') throw new Error('invalid-judgment')
-      const candidateSnapshot = { ...parentSnapshot, rules: { ...parentSnapshot.rules, [body.family]: proposal.value.guidance } }
+      const studyOpened = opened
+      const executeAndReview = async (material: ConversationTaskMaterial | { readonly prompt: string, readonly criteria: readonly string[], readonly qualityContract: ConversationQualityContract }, guidance: string | undefined) => {
+        await this.assertCurrent(studyOpened, signal)
+        // Workers see the exact original request/context, never old answers,
+        // feedback standards, predictions or reviewer-only criteria.
+        const request = 'request' in material ? { request: material.request, context: material.context } : { prompt: material.prompt }
+        const execution = await runConversationTrial(this.ctx, agent, { label: `Tianwen text trial ${studyOpened.studyId}`, callConfig, signal, material: request, ...(guidance === undefined ? {} : { guidance }) })
+        await this.assertCurrent(studyOpened, signal)
+        const evidence = 'request' in material ? conversationEvidenceTexts(material, [execution.answer]) : [material.prompt, execution.answer]
+        const judged = await runConversationClaimReview(this.ctx, agent, { purpose: 'method-study', evidence,
+          label: `Tianwen blind text review ${studyOpened.studyId}`, callConfig, signal, material: { task: material, answer: execution.answer } })
+        await this.assertCurrent(studyOpened, signal)
+        return { execution, judged }
+      }
+      const propose = async (observation?: unknown) => {
+        await this.assertCurrent(studyOpened, signal)
+        const result = await runConversationJudgment(this.ctx, agent, {
+          outputSchema: conversationProposalSchema(body.sourceTaskIds, observation === undefined),
+          label: `Tianwen method proposal ${studyOpened.studyId}`, callConfig, signal,
+          instruction: `Choose exactly one response: {"guidance":"concise reusable text-task method"} when already supported, or {"insufficientEvidence":"why the evidence is insufficient"}. Each string is nonblank and at most 4096 UTF-8 bytes. ${observation === undefined
+            ? 'Only when two competing explanations predict distinguishable outcomes, you may instead request exactly one control/treatment pair with {"exploration":{"sourceTaskId":"one supplied sourceTaskId aligned with sources","hypothesis":"explanation","alternative":"competing explanation","temporaryInstruction":"targeted temporary method","expectedIfHypothesis":{"control":"met|not-met","treatment":"met|not-met"},"expectedIfAlternative":{"control":"met|not-met","treatment":"met|not-met"}}}. Do not force exploration or invent a conclusion.'
+            : 'The supplied exploration answers, independent reviews and classified observation are limited evidence, not causal proof or acceptance. A second exploration is forbidden; choose guidance or insufficientEvidence.'} Generalize the method; never retain names, original answers, identifiers or case-specific facts. Do not change permissions, tools, consent, learning policy or request unneeded external actions. Guidance is subordinate to future user requests. You have not been given the counterexample or holdout; do not invent evaluation outcomes. ${RAW_FEEDBACK_GUIDANCE}`,
+          material: { studyId: studyOpened.studyId, sourceTaskIds: body.sourceTaskIds, family: body.family, failureCategory: body.failureCategory,
+            currentGuidance: parentSnapshot.rules[body.family] ?? '', sources, ...(observation === undefined ? {} : { exploration: observation }) },
+        })
+        await this.assertCurrent(studyOpened, signal)
+        return { ...result, choice: proposalChoice(result.value, observation === undefined) }
+      }
+      let proposal = await propose()
+      if ('exploration' in proposal.choice) {
+        const exploration = proposal.choice.exploration
+        const index = body.sourceTaskIds.findIndex(id => id === exploration.sourceTaskId)
+        if (index < 0) throw new Error('invalid-judgment')
+        let request
+        try {
+          request = prepareConversationLearningExploration(exploration, {
+            studyId: opened.studyId, sourceTaskId: body.sourceTaskIds[index]! as `conversation-task:${string}`, parentVersion: body.parentVersion,
+            sourceMaterialDigest: cases[index]!.materialDigest, environmentDigest: body.modelConfigDigest,
+            qualityContractDigest: sha256(body.qualityContract), proposalProof: proposal.proof,
+          })
+        } catch { throw new Error('invalid-judgment') }
+        // Only this still-active invocation's fresh append authorizes its pair.
+        // Replayed or duplicate intent must never replenish a missing arm.
+        if (evolution.recordConversationGuidance({ kind: 'exploration-requested', studyId: opened.studyId, request }).duplicate) return
+        const answers = []
+        for (const arm of ['control', 'treatment'] as const) {
+          const guidance = arm === 'control' ? parentSnapshot.rules[body.family]
+            : [parentSnapshot.rules[body.family], request.proposal.temporaryInstruction].filter(value => value !== undefined).join('\n\n')
+          const { execution, judged } = await executeAndReview(sources[index]!, guidance)
+          evolution.recordConversationGuidance({ kind: 'exploration-arm-recorded', studyId: opened.studyId, arm,
+            materialDigest: request.sourceMaterialDigest, parentVersion: body.parentVersion, executionProof: execution.proof,
+            outputDigest: sha256(execution.answer), reviewChecks: judged.reviewChecks })
+          answers.push({ arm, answer: execution.answer, verdict: judged.verdict, reviewChecks: judged.reviewChecks })
+        }
+        const result = evolution.listConversationGuidanceStudies().find(item => item.opened.studyId === opened!.studyId)!.exploration!.result
+        if (result === undefined) throw new Error('invalid-judgment')
+        proposal = await propose({ proposal: request.proposal, answers, ...result })
+      }
+      if ('insufficientEvidence' in proposal.choice) {
+        evolution.recordConversationGuidance({ kind: 'study-stopped', studyId: opened.studyId, reason: 'insufficient-evidence', proposalProof: proposal.proof })
+        return
+      }
+      if (!('guidance' in proposal.choice)) throw new Error('invalid-judgment')
+      const candidateSnapshot = { ...parentSnapshot, rules: { ...parentSnapshot.rules, [body.family]: proposal.choice.guidance } }
       evolution.recordConversationGuidance({ kind: 'candidate-recorded', studyId: opened.studyId, candidateSnapshot, proposalProof: proposal.proof })
       const materialByTask = new Map<string, ConversationTaskMaterial>([[group.sources[0].source.taskId, sources[0]!], [group.sources[1].source.taskId, sources[1]!], [group.counterexample.source.taskId, counter]])
       for (const item of opened.cases) {
         const material = 'sourceTaskId' in item ? materialByTask.get(item.sourceTaskId)! : { prompt: item.prompt, criteria: item.criteria, qualityContract: item.qualityContract! }
         for (const role of ['baseline', 'candidate'] as const) {
-          await this.assertCurrent(opened, signal)
           const snapshot = role === 'baseline' ? parentSnapshot : candidateSnapshot
-          // Workers get the original task, not hidden reviewer criteria or old answers.
-          const request = 'request' in material ? { request: material.request, context: material.context } : { prompt: material.prompt }
-          const execution = await runConversationTrial(this.ctx, agent, { label: `Tianwen text trial ${opened.studyId}`, callConfig, signal, material: request, ...(snapshot.rules[body.family] === undefined ? {} : { guidance: snapshot.rules[body.family] }) })
-          const evidence = 'request' in material ? conversationEvidenceTexts(material, [execution.answer]) : [material.prompt, execution.answer]
-          const judged = await runConversationClaimReview(this.ctx, agent, {
-            purpose: 'method-study',
-            evidence,
-            label: `Tianwen blind text review ${opened.studyId}`, callConfig, signal,
-            material: { task: material, answer: execution.answer },
-          })
+          const { execution, judged } = await executeAndReview(material, snapshot.rules[body.family])
           evolution.recordConversationGuidance(parseConversationGuidanceRecord({ kind: 'arm-recorded', studyId: opened.studyId, caseId: item.id, role,
             materialDigest: item.materialDigest, behaviorVersion: guidanceVersion(snapshot), executionProof: execution.proof, judgeProof: judged.proof, reviewChecks: judged.reviewChecks, outputDigest: sha256(execution.answer), verdict: judged.verdict }))
         }
@@ -286,7 +345,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
     signal.throwIfAborted()
     const consent = this.ctx.tianwenEvolution.getLearningAnalysisConsent()
     if (!hasCurrentConversationQuality(study.qualityContract) || consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== study.consentRevision
-      || guidanceVersion(this.ctx.tianwenEvolution.getConversationGuidance(study.scopeKey)) !== study.parentVersion) throw new Error('scope-changed')
+      || guidanceVersion(this.ctx.tianwenEvolution.getConversationGuidance(study.scopeKey)) !== study.parentVersion
+      || !this.ctx.tianwenEvolution.isConversationGuidanceSupported(study.studyId)) throw new Error('scope-changed')
     for (const item of study.cases) if ('feedbackAssessmentId' in item && item.feedbackAssessmentId !== undefined) {
       const assessment = this.ctx.tianwenEvolution.listConversationFeedbackAssessments().find(value => value.started.assessmentId === item.feedbackAssessmentId)
       const feedback = this.ctx.get('tianwenConversationFeedback')

@@ -7,7 +7,7 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import { assertObjectJsonSchema, validateJsonSchemaValue, type ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { SessionId, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
-import { CONVERSATION_BLIND_REVIEW_SCHEMA, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationEvidenceSchema, runConversationJudgment, runConversationReview, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { CONVERSATION_BLIND_REVIEW_SCHEMA, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationEvidenceSchema, conversationProposalSchema, runConversationJudgment, runConversationReview, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 
 // Resolve the CLI's public provider entry: exercise the installed DSH composition,
 // not a test reimplementation of spawning, restrictions or structured output.
@@ -16,6 +16,19 @@ const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-su
 const roots: string[] = []
 const verdictSchema: ObjectJsonSchema = { type: 'object', properties: { verdict: { type: 'string', enum: ['inconclusive'] } }, required: ['verdict'], additionalProperties: false }
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
+
+it('offers native-supported proposal choices while excluding other sources and a second pair', () => {
+  const explore = { exploration: { sourceTaskId: 'source-1', hypothesis: 'Scope was overlooked.', alternative: 'Facts were misunderstood.', temporaryInstruction: 'Check the source scope.', expectedIfHypothesis: { control: 'not-met', treatment: 'met' }, expectedIfAlternative: { control: 'not-met', treatment: 'not-met' } } }
+  const schema = conversationProposalSchema(['source-1', 'source-2'])
+  expect(() => assertObjectJsonSchema(schema)).not.toThrow()
+  for (const value of [{ guidance: 'Check scope.' }, explore, { insufficientEvidence: 'No distinguishable explanation.' }]) expect(validateJsonSchemaValue(schema, value)).toEqual([])
+  expect(validateJsonSchemaValue(schema, { exploration: { ...explore.exploration, sourceTaskId: 'counterexample' } })).not.toEqual([])
+  expect(validateJsonSchemaValue(schema, { exploration: { ...explore.exploration, extra: true } })).not.toEqual([])
+  const finalSchema = conversationProposalSchema(['source-1', 'source-2'], false)
+  expect(() => assertObjectJsonSchema(finalSchema)).not.toThrow()
+  expect(validateJsonSchemaValue(finalSchema, explore)).not.toEqual([])
+  expect(validateJsonSchemaValue(finalSchema, { guidance: 'Check scope.' })).toEqual([])
+})
 
 it.each(['met', 'not-met', 'inconclusive', 'unavailable'] as const)('keeps review material blind and original constraints authoritative when the second check is %s', async second => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
