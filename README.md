@@ -4,7 +4,7 @@
 
 Tianwen is an auditable learning control plane for long-running agents.
 
-**Current source candidate: Runtime 0.1.20 / Desktop preview.21.** DSH 0.1.1-rc.2 is
+**Current source candidate: Runtime 0.1.21 / Desktop preview.22.** DSH 0.1.1-rc.2 is
 the exact supported Agent Runtime. After one-time consent, ordinary unstructured
 DSH Web/Desktop conversation can be observed and reviewed automatically, including
 later turns and natural feedback. No `/research-summary`, formatted source packet,
@@ -130,7 +130,7 @@ into the Profile selected by the user:
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.20.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.21.tgz
 ```
 
 `--allow-build=koffi` is an explicit pnpm approval recorded in that Profile; it
@@ -163,7 +163,7 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
 The optional Tianwen Desktop reuses the user's existing DSH and Web Profile. It
 is not a second Runtime and does not require the managed Tianwen installation.
 Desktop opens the same DSH conversation UI. With confirmation, it can update the exact
-known Runtime `0.1.10` through `0.1.19` predecessor to its embedded `0.1.20`; unknown or damaged
+known Runtime `0.1.10` through `0.1.20` predecessor to its embedded `0.1.21`; unknown or damaged
 versions are never overwritten automatically.
 
 After installation, chat normally in DSH Web or Tianwen Desktop. Once learning is
