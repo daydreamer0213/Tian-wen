@@ -165,7 +165,7 @@ describe('claim audit validation', () => {
   })
 })
 
-it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-status', 'permitted-inference', 'missing', 'provider', 'cancelled'] as const)('composes two isolated native audit-bearing reviews: %s', async mode => {
+it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-status', 'permitted-inference', 'missing', 'provider', 'cancelled', 'before-first', 'before-second'] as const)('composes two isolated native audit-bearing reviews: %s', async mode => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-review-')); roots.push(root)
   const originalFeedback = { source: { kind: 'native', sessionId: 'old-feedback-session', sessionLifecycleFingerprint: sha256('old-feedback-lifecycle'), messageId: 'old-answer', feedbackVersion: 'v1', feedbackFingerprint: sha256('negative: raw marker') }, rating: 'negative' as const, note: 'RAW FEEDBACK ONLY: do not reverse the actor or erase the exception.' }
@@ -176,6 +176,11 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-stat
   const verdicts = mode === 'disagree' ? ['met', 'not-met'] as const : [mode === 'not-met' ? 'not-met' : 'met', mode === 'not-met' ? 'not-met' : 'met'] as const
   const requests: GenerateOptions[] = []
   const controller = new AbortController()
+  let boundaryCalls = 0
+  const beforeCall = mode.startsWith('before-') ? async () => {
+    boundaryCalls++
+    if (boundaryCalls === (mode === 'before-first' ? 1 : 2)) throw new Error('scope-changed')
+  } : undefined
   const scripted = verdicts.map((verdict, index) => (request: GenerateOptions) => {
     requests.push(request)
     if (mode === 'cancelled' && index === 0) controller.abort()
@@ -196,8 +201,13 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-stat
   try {
     const result = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Claim panel', material,
       evidence: ['原料已送达。'], signal: controller.signal, purpose: 'method-study',
+      ...(beforeCall === undefined ? {} : { beforeCall }),
       callConfig: { provider: 'tianwen-probe', model: 'scripted', temperature: 0.25, maxTokens: 2048 } }).catch((error: unknown) => error)
-    if (mode === 'contradictory') expect(result).toMatchObject({ message: 'successful review check cannot assert a failure category' })
+    if (mode.startsWith('before-')) {
+      expect(result).toMatchObject({ message: 'scope-changed' })
+      expect(harness.adapter.requests).toHaveLength(mode === 'before-first' ? 0 : 1)
+    }
+    else if (mode === 'contradictory') expect(result).toMatchObject({ message: 'successful review check cannot assert a failure category' })
     else if (mode === 'invalid' || mode === 'invalid-status' || mode === 'missing') expect(result).toMatchObject({ message: 'invalid-judgment' })
     else if (mode === 'provider') expect(result).toMatchObject({ message: 'model-unavailable' })
     else if (mode === 'cancelled') expect(result).toMatchObject({ message: 'cancelled' })

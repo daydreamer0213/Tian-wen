@@ -169,11 +169,22 @@ export class TianwenConversationGuidanceLoopService extends Service {
           if (sourceUse.readDigest !== sha256(read)) throw new Error('invalid-judgment')
           const candidate = await recoverConversationStructuredJudgment(this.ctx, study.candidate.proposalProof,
             { guidance: study.candidate.candidateSnapshot.rules[study.opened.family], sourceUse })
+          const assertFrozenProposalInput = (material: Record<string, unknown>) => {
+            if (material.family !== study.opened.family || material.failureCategory !== study.opened.failureCategory
+              || material.currentGuidance !== (study.opened.parentSnapshot.rules[study.opened.family] ?? '')
+              || !Array.isArray(material.sources) || material.sources.length !== 2) throw new Error('invalid-judgment')
+            for (const [index, source] of material.sources.entries()) {
+              const frozen = study.opened.cases.find(item => item.kind === (index === 0 ? 'source1' : 'source2'))
+              if (frozen === undefined || !('sourceTaskId' in frozen) || frozen.sourceTaskId !== study.opened.sourceTaskIds[index]
+                || sha256(source) !== frozen.materialDigest) throw new Error('invalid-judgment')
+            }
+          }
           for (const recovered of [selection, candidate]) {
             const material = recovered.material as Record<string, unknown> | null
             if (material === null || typeof material !== 'object' || material.studyId !== study.opened.studyId
               || sha256(material.sourceTaskIds ?? null) !== sha256(study.opened.sourceTaskIds)
               || recovered.modelConfigDigests.some(digest => digest !== study.opened.modelConfigDigest)) throw new Error('invalid-judgment')
+            assertFrozenProposalInput(material)
           }
           const initial = selection.material as Record<string, unknown>
           const final = candidate.material as Record<string, unknown>
@@ -207,6 +218,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
               || material.exploration !== undefined
               || sha256(material.sources ?? null) !== sha256(initial.sources ?? null)
               || sha256(material.currentGuidance ?? null) !== sha256(initial.currentGuidance ?? null)) throw new Error('invalid-judgment')
+            assertFrozenProposalInput(material)
             // The exploration proposal proves which bounded order actually ran.
             // A source-aware pair follows a selection without observations; a
             // source-free pair precedes a selection with its complete observation.
@@ -358,6 +370,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         await this.assertCurrent(studyOpened, signal)
         const evidence = 'request' in material ? conversationEvidenceTexts(material, [execution.answer]) : [material.prompt, execution.answer]
         const judged = await runConversationClaimReview(this.ctx, agent, { purpose: 'method-study', evidence,
+          beforeCall: () => this.assertCurrent(studyOpened, signal),
           label: `Tianwen blind text review ${studyOpened.studyId}`, callConfig, signal, material: { task: material, answer: execution.answer } })
         await this.assertCurrent(studyOpened, signal)
         return { execution, judged }

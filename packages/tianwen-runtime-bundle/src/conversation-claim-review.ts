@@ -215,6 +215,7 @@ function claimReviewInstruction(material: unknown, purpose: 'original-result' | 
 type ClaimReviewInput = Omit<Parameters<typeof runConversationJudgment>[2], 'instruction' | 'outputSchema'> & {
   readonly evidence: readonly string[]
   readonly purpose?: 'original-result' | 'method-study'
+  readonly beforeCall?: () => void | Promise<void>
 }
 type AuditedCheck = ConversationAuditedReviewCheck
 
@@ -225,6 +226,8 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
   const schema = conversationEvidenceSchema({ ...CONVERSATION_REVIEW_SCHEMA, properties: { ...CONVERSATION_REVIEW_SCHEMA.properties, audit: auditSchema(evidence) }, required: [...CONVERSATION_REVIEW_SCHEMA.required!, 'audit'] }, input.evidence)
   const raw: AuditedCheck[] = []
   for (const focus of ['requirements', 'grounding'] as const) {
+    input.signal.throwIfAborted()
+    await input.beforeCall?.()
     input.signal.throwIfAborted()
     const result = await runConversationJudgment(ctx, parent, { ...input, material, label: `${input.label} ${focus}`,
       instruction: claimReviewInstruction(input.material, input.purpose ?? 'original-result', focus), outputSchema: schema })
