@@ -1,20 +1,21 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { SessionId, isAppendSurfaceEvent, type SessionEvent, type UserMessage } from '@deepseek-ai/dsh-session'
-import { learningSessionLifecycleFingerprint, sha256, type ConversationTask, type ConversationQualityContract } from '@tianwen/evolution'
+import { learningSessionLifecycleFingerprint, sha256, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 
-export function conversationMessages(events: readonly SessionEvent[]) {
+export function conversationMessages(events: readonly SessionEvent[], projection?: ConversationTaskSource['materialProjection']) {
   return events.flatMap(event => {
     if (event.type === 'user/message' && isAppendSurfaceEvent(event) && event.data.source.kind === 'user') return [{ id: String(event.data.id), role: 'user', content: event.data.content }]
-    if (event.type === 'assistant/message' && isAppendSurfaceEvent(event)) return [{ id: String(event.data.message.id), role: 'assistant', content: event.data.message.content }]
+    if (event.type === 'assistant/message' && isAppendSurfaceEvent(event)) return [{ id: String(event.data.message.id), role: 'assistant',
+      content: projection === 'surface-text.v1' ? event.data.message.content.filter(block => block.type === 'text') : event.data.message.content }]
     return []
   })
 }
 
 /** Current-task context is bounded native history, not a backfill of old task
  * reviews. It also covers a follow-up to a legacy or pre-consent conversation. */
-export function conversationContext(events: readonly SessionEvent[], boundary: number) {
+export function conversationContext(events: readonly SessionEvent[], boundary: number, projection?: ConversationTaskSource['materialProjection']) {
   const starts: number[] = []
   let turnStart: number | undefined
   for (const event of events) {
@@ -24,7 +25,7 @@ export function conversationContext(events: readonly SessionEvent[], boundary: n
       && event.data.source.kind === 'user' && starts.at(-1) !== turnStart) starts.push(turnStart)
   }
   const first = starts.at(-8) ?? starts[0]
-  return first === undefined ? [] : conversationMessages(events.filter(event => event.seq >= first && event.seq < boundary))
+  return first === undefined ? [] : conversationMessages(events.filter(event => event.seq >= first && event.seq < boundary), projection)
 }
 
 export interface ConversationTaskMaterial {
@@ -84,7 +85,7 @@ export async function recoverConversationTaskMaterial(ctx: Context, task: Conver
   const requests = saved.events.flatMap(event => event.seq >= source.startSeq && event.seq <= endSeq && event.type === 'user/message'
     && isAppendSurfaceEvent(event) && event.data.source.kind === 'user' && source.userMessageIds.includes(String(event.data.id)) ? [event.data] : [])
   if (sha256(requests) !== source.requestDigest || requests.length !== source.userMessageIds.length) throw new Error('natural task original request drift')
-  const context = conversationContext(saved.events, source.startSeq)
+  const context = conversationContext(saved.events, source.startSeq, source.materialProjection)
   if (sha256(context) !== source.contextDigest) throw new Error('natural task prior context drift')
   return { request: requests, context, objective: task.admission.decision.objective, criteria: task.admission.decision.criteria,
     ...(task.admission.qualityContract === undefined ? {} : { qualityContract: task.admission.qualityContract }) }

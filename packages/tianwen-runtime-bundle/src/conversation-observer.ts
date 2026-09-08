@@ -188,14 +188,15 @@ export class TianwenConversationObserverService extends Service {
     if (boundary === undefined) return
     const earlier = this.ctx.tianwenEvolution.listConversationTasks(String(agent.session.id))
       .filter(task => task.source.consentRevision === consent.revision && task.completion !== undefined).slice(-8)
-    const context = conversationContext(agent.session.events, boundary.seq)
+    const materialProjection = 'surface-text.v1' as const
+    const context = conversationContext(agent.session.events, boundary.seq, materialProjection)
     const scopeKey = `conversation:${sha256({ cwd: agent.session.header.cwd ?? null })}`
     this.ctx.tianwenEvolution.retireIncompatibleConversationGuidance(scopeKey)
     const snapshot = this.ctx.tianwenEvolution.getConversationGuidance(scopeKey)
     const source: ConversationTaskSource = {
       kind: 'task-started', taskId, ...sourceIdentity, startSeq: boundary.seq,
       userMessageIds: direct.map(message => String(message.id)), requestDigest: sha256(direct), contextDigest: sha256(context),
-      scopeKey, consentRevision: consent.revision, behaviorVersion: guidanceVersion(snapshot),
+      scopeKey, consentRevision: consent.revision, behaviorVersion: guidanceVersion(snapshot), materialProjection,
     }
     this.ctx.tianwenEvolution.recordConversationLearning(source)
     const qualityContract = conversationQualityContract()
@@ -240,7 +241,7 @@ export class TianwenConversationObserverService extends Service {
       if (!await this.ctx.sessions.flush(agent.session)) throw new Error('task persistence unavailable')
       const source = await recoverConversationTaskMaterial(this.ctx, task)
       const callConfig = await recoverConversationTaskModel(this.ctx, task)
-      const material = { source, evaluationMode: task.admission.decision.evaluationMode, conversation: visible(events), toolEvidence: events.filter(event => event.type === 'tool/result') }
+      const material = { source, evaluationMode: task.admission.decision.evaluationMode, conversation: visible(events, task.source.materialProjection), toolEvidence: events.filter(event => event.type === 'tool/result') }
       if (material.conversation.some(message => message.role === 'user' && !task.source.userMessageIds.includes(message.id))) throw new TypeError('user request changed after criteria were frozen')
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-review-started', taskId, materialDigest: sha256(material) })
       const judge = async () => {

@@ -36,3 +36,30 @@ it('quotes original text and native tool content without exposing judgment or pr
   ])
   expect(conversationEvidenceTexts(source, ['current answer'], session.events)).not.toContain(source.qualityContract.criterion)
 })
+
+it('projects only surface assistant text from a real native Session while retaining user content and message identities', () => {
+  const session = Session.create(SessionId('surface-projection'))
+  const start = session.append('turn/start', { turn: 1 })
+  session.append('user/message', createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'visible user input' }] }), { surfaceOp: 'append' })
+  session.append('assistant/message', {
+    turn: 1,
+    message: { id: 'answer-1' as never, role: 'assistant', content: [
+      { type: 'text', text: 'visible assistant answer' },
+      { type: 'reasoning', text: 'hidden-reasoning-'.repeat(8_000) },
+      { type: 'tool-call', id: 'native-tool-call' as never, name: 'native_tool', arguments: '{"private":true}' },
+    ] },
+  }, { surfaceOp: 'append' })
+  const boundary = session.append('turn/start', { turn: 2 })
+  const projected = (conversationContext as (events: typeof session.events, boundary: number, projection?: 'surface-text.v1') => ReturnType<typeof conversationContext>)(session.events, boundary.seq, 'surface-text.v1')
+  const legacy = conversationContext(session.events, boundary.seq)
+
+  expect(Buffer.byteLength(JSON.stringify(legacy), 'utf8')).toBeGreaterThan(96 * 1024)
+  expect(legacy[1]?.content.map(block => block.type)).toEqual(['text', 'reasoning', 'tool-call'])
+  expect(projected).toEqual([
+    { id: expect.any(String), role: 'user', content: [{ type: 'text', text: 'visible user input' }] },
+    { id: 'answer-1', role: 'assistant', content: [{ type: 'text', text: 'visible assistant answer' }] },
+  ])
+  expect(JSON.stringify(projected)).not.toContain('hidden-reasoning-')
+  expect(JSON.stringify(projected)).not.toContain('native_tool')
+  expect(start.seq).toBeLessThan(boundary.seq)
+})

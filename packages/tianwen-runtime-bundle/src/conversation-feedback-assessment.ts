@@ -118,7 +118,7 @@ export class TianwenConversationFeedbackService extends Service {
     const saved = await this.ctx.sessionPersistence.inspect(SessionId(target.source.sessionId))
     const events = saved.events.filter(event => event.seq >= target.source.startSeq && event.seq <= target.completion!.endSeq)
     if (sha256(events) !== binding.resultDigest) throw new Error('feedback assessment target answer changed')
-    const answer = conversationMessages(events).filter(message => message.role === 'assistant')
+    const answer = conversationMessages(events, target.source.materialProjection).filter(message => message.role === 'assistant')
     if (sha256(answer.map(message => message.id)) !== sha256(target.completion.assistantMessageIds)) throw new Error('feedback assessment answer identities changed')
     const source = binding.source
     let feedback: ConversationFeedbackMaterial['feedback']

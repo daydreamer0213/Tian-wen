@@ -4,10 +4,11 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
-import { MessageId, type GenerateOptions } from '@deepseek-ai/dsh-llm'
+import { MessageId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId, SkillRegistry, applySkillTool, createUserMessage, mountFeedbackHarness, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
+import { recoverConversationStructuredJudgment } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { recoverConversationTaskMaterial } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
 import { TianwenResearchSummaryAdmissionService } from '../../packages/tianwen-runtime-bundle/src/research-summary-admission.js'
@@ -23,6 +24,13 @@ const admission = { kind: 'task', objective: 'Summarize the supplied facts', cri
 const review = { verdict: 'met', category: null, explanation: 'The facts are preserved.', evidenceQuotes: ['5 天'] }
 const structured = (value: Record<string, unknown>) => toolCallResponse('judgment', 'structured_output', value)
 const evidenceResponse = auditedEvidenceResponse
+const reasoningTextResponse = (reasoning: string, text: string): readonly StreamChunk[] => [
+  { type: 'block-start', index: 0, blockType: 'reasoning' },
+  { type: 'block-end', index: 0, block: { type: 'reasoning', text: reasoning } },
+  { type: 'block-start', index: 1, blockType: 'text' },
+  { type: 'block-end', index: 1, block: { type: 'text', text } },
+  { type: 'finish', reason: { kind: 'stop' } },
+]
 
 const reviewPair = (value: typeof review) => [evidenceResponse(value), evidenceResponse(value)]
 
@@ -115,6 +123,42 @@ it('captures ordinary requests in two native turns before each answer and review
       properties: { relatedTaskId: { oneOf: [{ type: 'string', enum: [tasks[0]!.source.taskId] }, { type: 'null' }] } },
     })
     expect(harness.ctx.tianwenEvolution.listConversationTasks()).toHaveLength(2)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('uses surface-only material for a later admission and both native reviews after an earlier assistant reasoning block exceeds 96 KiB', async () => {
+  const hidden = 'HIDDEN-NATIVE-REASONING-'.repeat(6_000)
+  let harness: Awaited<ReturnType<typeof mount>>
+  harness = await mount([
+    structured(admission), reasoningTextResponse(hidden, '可见保留助手文本：试点耗时 5 天。'), ...reviewPair(review),
+    structured(admission), textResponse('后续仍保留 5 天。'), ...reviewPair(review),
+  ])
+  try {
+    harness.handle.agent.followup(direct('Summarize: the pilot took 5 days.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]?.review?.verdict).toBe('met')
+    harness.handle.agent.followup(direct('Summarize again: keep the 5-day duration.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[1]!
+    expect(task.source.materialProjection).toBe('surface-text.v1')
+    expect(task.admission?.unavailableReason).toBeNull()
+    expect(task.admission?.decision?.kind).toBe('task')
+    expect(task.completion?.status).toBe('completed')
+    expect(task.review?.verdict).toBe('met')
+    const recovered = await recoverConversationTaskMaterial(harness.ctx, task)
+    const admissionMaterial = await recoverConversationStructuredJudgment(harness.ctx, task.admission!.proof!, task.admission!.decision)
+    const reviewMaterials = await Promise.all(task.review!.reviewChecks!.map(check => recoverConversationStructuredJudgment(harness.ctx, check.proof, {
+      verdict: check.verdict, category: check.category, explanation: check.explanation, evidenceQuotes: check.evidenceQuotes, audit: check.audit,
+    })))
+    expect(JSON.stringify(recovered.context)).toContain('可见保留助手文本')
+    expect(JSON.stringify(recovered.context)).not.toContain('HIDDEN-NATIVE-REASONING-')
+    expect(JSON.stringify(admissionMaterial.material)).toContain('可见保留助手文本')
+    expect(JSON.stringify(admissionMaterial.material)).not.toContain('HIDDEN-NATIVE-REASONING-')
+    for (const reviewMaterial of reviewMaterials) {
+      expect(JSON.stringify(reviewMaterial.material)).toContain('可见保留助手文本')
+      expect(JSON.stringify(reviewMaterial.material)).not.toContain('HIDDEN-NATIVE-REASONING-')
+    }
+    expect(harness.adapter.requests).toHaveLength(8)
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 

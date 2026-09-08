@@ -4,11 +4,12 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
-import { MessageId, type GenerateOptions } from '@deepseek-ai/dsh-llm'
+import { MessageId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { SessionId, createUserMessage, mountFeedbackHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
+import { recoverConversationStructuredJudgment } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
 import { TianwenConversationFeedbackService } from '../../packages/tianwen-runtime-bundle/src/conversation-feedback-assessment.js'
@@ -134,6 +135,13 @@ const roots: string[] = []
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 const direct = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
 const structured = (value: object) => toolCallResponse('feedback-judgment', 'structured_output', value)
+const reasoningTextResponse = (reasoning: string, text: string): readonly StreamChunk[] => [
+  { type: 'block-start', index: 0, blockType: 'reasoning' },
+  { type: 'block-end', index: 0, block: { type: 'reasoning', text: reasoning } },
+  { type: 'block-start', index: 1, blockType: 'text' },
+  { type: 'block-end', index: 1, block: { type: 'text', text } },
+  { type: 'finish', reason: { kind: 'stop' } },
+]
 const evidenceResponse = (value: Record<string, unknown> & { evidenceQuotes: readonly string[] }) => (request: GenerateOptions) => {
   const schema = request.tools?.find(tool => tool.name === 'structured_output')?.parameters as ObjectJsonSchema | undefined
   const choices = schema?.properties?.evidenceQuotes?.items?.enum ?? []
@@ -168,6 +176,31 @@ async function mount(script: Parameters<typeof mountFeedbackHarness>[1]) {
 }
 
 describe('native feedback assessment adapter', () => {
+  it('uses the frozen surface projection for actual native feedback material after an oversized assistant reasoning block', async () => {
+    const hidden = 'HIDDEN-FEEDBACK-REASONING-'.repeat(6_000)
+    const harness = await mount([structured(nativeAdmission), reasoningTextResponse(hidden, 'It took 5 days.'),
+      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), evidenceResponse(nativeAssessment)])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note: 'You omitted the pilot scope.', ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+      const material = await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment)
+      const { kind: _kind, assessmentId: _assessmentId, taskId: _taskId, proof: _proof, unavailableReason: _unavailableReason, ...captured } = assessment.result!
+      const judgment = await recoverConversationStructuredJudgment(harness.ctx, assessment.result!.proof!, captured)
+      expect(target.source.materialProjection).toBe('surface-text.v1')
+      expect(JSON.stringify(material.answer)).toContain('It took 5 days.')
+      expect(JSON.stringify(material.answer)).not.toContain('HIDDEN-FEEDBACK-REASONING-')
+      expect(JSON.stringify(judgment.material)).toContain('It took 5 days.')
+      expect(JSON.stringify(judgment.material)).not.toContain('HIDDEN-FEEDBACK-REASONING-')
+      expect(harness.adapter.requests).toHaveLength(5)
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
   it('uses exact native feedback after original met and marks its immutable assessment inactive after retraction', async () => {
     const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), evidenceResponse(nativeAssessment)])
     try {
