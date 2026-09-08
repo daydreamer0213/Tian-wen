@@ -326,6 +326,31 @@ it.each(['adapted', 'not-used'] as const)('persists natural source %s evidence a
   expect(replay.getChampion()).toBeUndefined()
 })
 
+it('persists completed exploration then source read without reducing the formal ten-arm gate', () => {
+  const { root, ledger, tasks } = sourceSeeded()
+  const opened = opening(tasks, 'completed-exploration-before-source'), read = sourceRead(opened), candidate = sourceCandidate(opened)
+  for (const record of [opened, explorationIntent(opened), explorationArm(opened, 'control', 'not-met'), explorationArm(opened, 'treatment', 'met')]) {
+    ledger.recordConversationGuidance(record)
+  }
+  expect(ledger.listConversationGuidanceStudies()[0]?.exploration?.result).toBeDefined()
+  ledger.recordConversationGuidance(read)
+  ledger.recordConversationGuidance(candidate)
+  const arms = proposalPlan(opened).arms
+  for (const arm of arms.slice(0, 9)) ledger.recordConversationGuidance(arm)
+  expect(() => ledger.conversationGuidanceDecision(opened.studyId)).toThrow(/ten|complete/i)
+  ledger.recordConversationGuidance(arms[9]!)
+  const decision = ledger.conversationGuidanceDecision(opened.studyId)
+  expect(decision.verdict).toBe('accepted')
+  ledger.recordConversationGuidance(decision)
+  const history = ledger.listEvents(), studies = ledger.listConversationGuidanceStudies(), replay = new EvolutionLedger(root)
+  expect(replay.listConversationGuidanceStudies()).toEqual(studies)
+  expect(replay.listEvents()).toEqual(history)
+  expect(replay.recordConversationGuidance(read)).toEqual({ duplicate: true })
+  expect(replay.listEvents()).toEqual(history)
+  expect(studies[0]?.sourceReference).toEqual(read)
+  expect(studies[0]?.candidate?.sourceUse?.readDigest).toBe(sha256(read))
+})
+
 it.each(['source-read', 'source-candidate'] as const)('rechecks real support withdrawal for %s', step => {
   const { root, ledger, tasks } = sourceSeeded('met')
   const assessments = [nativeFeedback(ledger, tasks[0]), nativeFeedback(ledger, tasks[1])]

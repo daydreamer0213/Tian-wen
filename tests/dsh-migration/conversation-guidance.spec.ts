@@ -158,6 +158,23 @@ describe('natural source reference state binding', () => {
     append(state, proposed)
     expect(state.listStudies()[0]?.exploration?.result).toBeDefined()
   })
+  it('permits completed exploration then an independent source read and bound candidate', () => {
+    const state = new ConversationGuidanceState(), opened = sourceOpening('exploration-before-source', true), read = sourceRead(opened)
+    const intent = explorationIntent(opened), control = explorationArm(opened, 'control', 'not-met'), treatment = explorationArm(opened, 'treatment', 'met')
+    append(state, opened); append(state, intent); append(state, control); append(state, treatment)
+    expect(state.listStudies()[0]?.exploration?.result).toBeDefined()
+    append(state, read)
+    const proposed = { ...candidate(opened), sourceUse: { readDigest: sha256(read), status: 'adapted' as const, rationale: 'Adapt after completed exploration.' } }
+    append(state, proposed)
+    expect(state.listStudies()[0]?.sourceReference).toEqual(read)
+    expect(state.listStudies()[0]?.candidate).toEqual(proposed)
+
+    const independent = new ConversationGuidanceState()
+    for (const record of [opened, intent, control, treatment]) append(independent, record)
+    for (const selectionProof of [intent.request.proposalProof, control.executionProof, treatment.reviewChecks[1].proof]) {
+      expect(() => append(independent, { ...read, selectionProof })).toThrow(/independent|Session/i)
+    }
+  })
   it('rejects unknown/cross-scope reads and reserves one immutable source slot', () => {
     const state = new ConversationGuidanceState(), opened = sourceOpening(), read = sourceRead(opened)
     expect(() => append(state, read)).toThrow(/unknown|opened/i)
@@ -176,10 +193,14 @@ describe('natural source reference state binding', () => {
     expect(() => parseConversationGuidanceRecord({ ...read, readDigest: sha256(read) })).toThrow(/fields/i)
     expect(() => parseConversationGuidanceRecord({ ...read, definition: { ...read.definition, content: 'tampered' } })).toThrow(/reference/i)
   })
-  it.each(['exploration', 'candidate', 'stop'] as const)('rejects reading after %s', phase => {
+  it.each(['exploration-intent', 'exploration-one-arm', 'candidate', 'stop'] as const)('rejects reading after %s', phase => {
     const state = new ConversationGuidanceState(), opened = sourceOpening('late-read', true)
     append(state, opened)
-    if (phase === 'exploration') append(state, explorationIntent(opened))
+    if (phase === 'exploration-intent' || phase === 'exploration-one-arm') {
+      append(state, explorationIntent(opened))
+      if (phase === 'exploration-one-arm') append(state, explorationArm(opened, 'control', 'not-met'))
+      expect(state.listStudies()[0]?.exploration?.result).toBeUndefined()
+    }
     else if (phase === 'candidate') append(state, candidate(opened))
     else append(state, { kind: 'study-stopped', studyId: opened.studyId, reason: 'cancelled' })
     expect(() => append(state, sourceRead(opened))).toThrow(/before|stopped/i)

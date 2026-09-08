@@ -367,7 +367,8 @@ export class ConversationGuidanceState {
     }
     const opened = study.opened
     if (record.kind === 'source-reference-read') {
-      if (study.exploration !== undefined || study.candidate !== undefined || study.decision !== undefined) throw new Error('guidance source must be read before exploration, candidate and decision')
+      if ((study.exploration !== undefined && study.exploration.result === undefined)
+        || study.candidate !== undefined || study.decision !== undefined) throw new Error('guidance source must be read before candidate and decision, outside incomplete exploration')
       if (record.reference.scopeKey !== opened.scopeKey) throw new Error('guidance source scope disagrees with its opened study')
       if (this.nativeSessions.has(record.selectionProof.sessionId)) throw new Error('guidance source selection requires an independent native Session')
       return
