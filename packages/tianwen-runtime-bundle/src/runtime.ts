@@ -9,6 +9,7 @@ import {
   type LearningAnalysisProgressCursor,
   type LearningAnalysisStatus,
   type LearningSkillAdmission,
+  type ConversationSkillAdmission,
 } from '@tianwen/evolution'
 import {
   RESEARCH_SUMMARY_TOOL_NAME,
@@ -52,6 +53,7 @@ export interface TianwenRuntimeBundleConfig extends TianwenLongGoalHostConfig {
   readonly evolutionRoot?: string
   /** Exact host-reviewed self-contained sources; omitted means no discovery tool. */
   readonly learningSkillSources?: readonly LearningSkillAdmission[]
+  readonly conversationSkillSources?: readonly ConversationSkillAdmission[]
   /** Test/programmatic seam; desktop profiles use learningLoop instead. */
   readonly learningLoopExecutor?: LearningLoopControlledExecutor
   /** Serializable desktop activation for the sole audited explicit-correction protocol. */
@@ -479,7 +481,10 @@ export async function apply(
   ctx.plugin(TianwenMessageFeedbackBridgeService)
   ctx.plugin(TianwenConversationObserverService)
   ctx.plugin(TianwenConversationFeedbackService)
-  ctx.plugin(TianwenConversationGuidanceLoopService)
+  ctx.plugin(TianwenConversationGuidanceLoopService, {
+    ...(config.evolutionRoot === undefined ? {} : { evolutionRoot: config.evolutionRoot }),
+    ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }),
+  })
   ctx.plugin(TianwenLearningExplorationService)
   ctx.plugin(TianwenLearningAnalysisChildService, config)
   const executor = createConfiguredLearningLoopExecutor(ctx, config)

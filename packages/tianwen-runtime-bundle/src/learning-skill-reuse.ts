@@ -1,8 +1,50 @@
 import type { SkillDefinition, SkillRegistry, SkillViewOptions } from '@deepseek-ai/dsh-skill'
-import { parseLearningSkillAdmission, sha256, type LearningSkillAdmission } from '@tianwen/evolution'
+import { parseLearningSkillAdmission, parseConversationSkillAdmission, parseConversationSkillDefinition, sha256, type ConversationSkillAdmission, type LearningSkillAdmission } from '@tianwen/evolution'
 import { RESEARCH_SUMMARY_SCOPE, RESEARCH_SUMMARY_TOOL_NAME } from '@tianwen/runtime'
 
 export const LEARNING_SKILL_INSPECTION_TOOL = 'inspect_tianwen_skills' as const
+
+export interface ConversationSkillOffer {
+  readonly reference: ConversationSkillAdmission
+  readonly description: string
+  readonly whenToUse?: string
+}
+
+/** A catalog offer authorizes no body read; selection happens in a native proposal. */
+export async function listConversationSkillReferences(
+  registry: Pick<SkillRegistry, 'snapshot'> | undefined, admissions: readonly ConversationSkillAdmission[],
+  scopeKey: string, environmentDigest: string, options: SkillViewOptions = {},
+): Promise<{ complete: boolean, skills: readonly ConversationSkillOffer[] }> {
+  options.signal?.throwIfAborted()
+  const eligible = admissions.flatMap(configured => {
+    try {
+      const reference = parseConversationSkillAdmission(configured)
+      return reference.scopeKey === scopeKey && reference.environmentDigest === environmentDigest
+        && admissions.filter(item => item?.name === reference.name).length === 1 ? [reference] : []
+    } catch { return [] }
+  })
+  if (eligible.length === 0) return { complete: true, skills: [] }
+  if (registry === undefined) throw new Error('source-unavailable')
+  const catalog = await registry.snapshot(options)
+  options.signal?.throwIfAborted()
+  if (!catalog.complete) return { complete: false, skills: [] }
+  return { complete: true, skills: eligible.flatMap(reference => {
+    const matching = catalog.skills.filter(item => item.name === reference.name)
+    const summary = matching[0]
+    return matching.length === 1 && summary?.provider === reference.provider && summary.invocation.modelInvocable
+      ? [{ reference, description: summary.description, ...(summary.whenToUse === undefined ? {} : { whenToUse: summary.whenToUse }) }] : []
+  }) }
+}
+
+export async function readConversationSkillReference(
+  registry: Pick<SkillRegistry, 'get'>, selected: ConversationSkillOffer, options: SkillViewOptions = {},
+): Promise<Readonly<Record<string, unknown>>> {
+  const reference = parseConversationSkillAdmission(selected.reference)
+  options.signal?.throwIfAborted()
+  const definition = await registry.get(reference.name, options)
+  options.signal?.throwIfAborted()
+  return parseConversationSkillDefinition(definition, reference)
+}
 
 /** Native registry reads only. Review records come from the host, never Skill metadata. */
 export async function inspectLearningSkills(

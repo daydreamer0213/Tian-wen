@@ -7,7 +7,7 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import { assertObjectJsonSchema, validateJsonSchemaValue, type ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { SessionId, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
-import { CONVERSATION_BLIND_REVIEW_SCHEMA, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationEvidenceSchema, conversationProposalSchema, runConversationJudgment, runConversationReview, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { CONVERSATION_BLIND_REVIEW_SCHEMA, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationEvidenceSchema, conversationProposalSchema, recoverConversationStructuredJudgment, runConversationJudgment, runConversationReview, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 
 // Resolve the CLI's public provider entry: exercise the installed DSH composition,
 // not a test reimplementation of spawning, restrictions or structured output.
@@ -15,7 +15,24 @@ const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepse
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
 const roots: string[] = []
 const verdictSchema: ObjectJsonSchema = { type: 'object', properties: { verdict: { type: 'string', enum: ['inconclusive'] } }, required: ['verdict'], additionalProperties: false }
+it('bounds native source selection and declarations to the supplied name and read digest', () => {
+  const readDigest = `sha256:${'a'.repeat(64)}` as const
+  const initial = conversationProposalSchema(['one'], true, { sourceNames: ['reviewed'] })
+  expect(() => assertObjectJsonSchema(initial)).not.toThrow()
+  expect(validateJsonSchemaValue(initial, { inspectSource: 'reviewed' })).toEqual([])
+  expect(validateJsonSchemaValue(initial, { inspectSource: 'outside' })).not.toEqual([])
+  const following = conversationProposalSchema(['one'], true, { sourceReadDigest: readDigest })
+  expect(validateJsonSchemaValue(following, { inspectSource: 'reviewed' })).not.toEqual([])
+  expect(validateJsonSchemaValue(following, { guidance: 'Check scope', sourceUse: { readDigest, status: 'adapted', rationale: 'Applicable.' } })).toEqual([])
+  expect(validateJsonSchemaValue(following, { guidance: 'Check scope', sourceUse: { readDigest: 'wrong', status: 'adapted', rationale: 'Applicable.' } })).not.toEqual([])
+})
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
+
+it('offers an unread source after complete exploration without offering a second pair', () => {
+  const schema = conversationProposalSchema(['one'], false, { sourceNames: ['reviewed'] })
+  expect(validateJsonSchemaValue(schema, { inspectSource: 'reviewed' })).toEqual([])
+  expect(schema.properties).not.toHaveProperty('exploration')
+})
 
 it('offers native-supported proposal choices while excluding other sources and a second pair', () => {
   const explore = { exploration: { sourceTaskId: 'source-1', hypothesis: 'Scope was overlooked.', alternative: 'Facts were misunderstood.', temporaryInstruction: 'Check the source scope.', expectedIfHypothesis: { control: 'not-met', treatment: 'met' }, expectedIfAlternative: { control: 'not-met', treatment: 'not-met' } } }
@@ -202,6 +219,10 @@ async function checkNativeJudgment(configured: boolean, malformedFirst = false, 
       ...(configured ? { callConfig: { provider: 'tianwen-probe', model: 'scripted', temperature: 0.25, maxTokens: 512 } } : {}),
     })
     expect(result.value).toEqual(value)
+    const recovered = await recoverConversationStructuredJudgment(harness.ctx, result.proof, value)
+    expect(recovered.material).toEqual({ request: '普通自然语言' })
+    expect(recovered.instruction).toBe('Return verdict inconclusive.')
+    await expect(recoverConversationStructuredJudgment(harness.ctx, result.proof, { verdict: 'met' })).rejects.toThrow('invalid-judgment')
     expect(result.proof.sessionId).not.toBe('ordinary-parent')
     const saved = await harness.ctx.sessionPersistence.inspect(SessionId(result.proof.sessionId))
     expect(saved.meta.origin).toBe('subagent')

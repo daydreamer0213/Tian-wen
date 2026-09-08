@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Context, SkillRegistry } from '@tianwen/dsh-compat'
 import { parseLearningAnalysisSubmission, sha256 } from '../../packages/tianwen-evolution/src/index.js'
 import { RESEARCH_SUMMARY_SCOPE, RESEARCH_SUMMARY_TOOL_NAME } from '../../packages/tianwen-runtime/src/index.js'
-import { hasLearningSkillObservation, inspectLearningSkills, LEARNING_SKILL_INSPECTION_TOOL } from '../../packages/tianwen-runtime-bundle/src/learning-skill-reuse.js'
+import { hasLearningSkillObservation, inspectLearningSkills, LEARNING_SKILL_INSPECTION_TOOL, listConversationSkillReferences, readConversationSkillReference } from '../../packages/tianwen-runtime-bundle/src/learning-skill-reuse.js'
 import { createLearningAnalysisTool } from '../../packages/tianwen-runtime-bundle/src/learning-analysis-tool.js'
 
 const source = {
@@ -25,6 +25,46 @@ const submission = {
   supportingEvidenceIds: [sha256('failure')], counterevidenceIds: [],
   reuseSource: { reference: admission, rationale: 'This source addresses the supported omission with no extra permissions.' },
 }
+
+const { toolName: _tool, ...identity } = admission
+const naturalAdmission = { ...identity, scopeKey: `conversation:${sha256('scope')}`, purpose: 'conversation-method-reference' as const, environmentDigest: sha256('environment') }
+describe('natural reference catalog and exact selected read', () => {
+  it.each(['empty', 'scope', 'environment', 'purpose', 'duplicate'] as const)('does no registry work for ineligible admissions: %s', async mode => {
+    const registry = { snapshot: vi.fn(), get: vi.fn() }
+    const references = mode === 'empty' ? [] : mode === 'duplicate' ? [naturalAdmission, naturalAdmission] : [{ ...naturalAdmission,
+      ...(mode === 'scope' ? { scopeKey: `conversation:${sha256('other')}` } : {}),
+      ...(mode === 'environment' ? { environmentDigest: sha256('other') } : {}),
+      ...(mode === 'purpose' ? { purpose: 'other' } : {}),
+    }]
+    expect(await listConversationSkillReferences(registry, references as never, naturalAdmission.scopeKey, naturalAdmission.environmentDigest)).toEqual({ complete: true, skills: [] })
+    expect(registry.snapshot).not.toHaveBeenCalled(); expect(registry.get).not.toHaveBeenCalled()
+  })
+  it('lists metadata only then reads exactly one complete native definition with the same options', async () => {
+    const ctx = new Context(); await ctx.plugin(SkillRegistry); ctx.skills.register(source)
+    const get = vi.spyOn(ctx.skills, 'get')
+    const options = { cwd: 'D:/fixture', signal: new AbortController().signal }
+    try {
+      const listed = await listConversationSkillReferences(ctx.skills, [naturalAdmission], naturalAdmission.scopeKey, naturalAdmission.environmentDigest, options)
+      expect(listed).toEqual({ complete: true, skills: [{ reference: naturalAdmission, description: source.description }] })
+      expect(get).not.toHaveBeenCalled()
+      expect(await readConversationSkillReference(ctx.skills, listed.skills[0]!, options)).toEqual(source)
+      expect(get).toHaveBeenCalledExactlyOnceWith(source.name, options)
+    } finally { await ctx.fiber.dispose() }
+  })
+  it.each(['partial', 'provider', 'disabled'] as const)('does not offer unavailable catalog identity: %s', async mode => {
+    const registry = { snapshot: async () => ({ complete: mode !== 'partial', skills: [{ ...source,
+      ...(mode === 'provider' ? { provider: 'other' } : {}), ...(mode === 'disabled' ? { invocation: { modelInvocable: false, userInvocable: true } } : {}) }] }), get: vi.fn() }
+    expect(await listConversationSkillReferences(registry, [naturalAdmission], naturalAdmission.scopeKey, naturalAdmission.environmentDigest)).toEqual({ complete: mode !== 'partial', skills: [] })
+    expect(registry.get).not.toHaveBeenCalled()
+  })
+  it.each(['missing', 'name', 'provider', 'disabled', 'digest', 'oversize'] as const)('rejects selected definition drift: %s', async mode => {
+    const definition = { ...source, ...(mode === 'name' ? { name: 'other' } : {}), ...(mode === 'provider' ? { provider: 'other' } : {}),
+      ...(mode === 'disabled' ? { invocation: { modelInvocable: false, userInvocable: true } } : {}),
+      ...(mode === 'digest' ? { content: 'changed' } : {}), ...(mode === 'oversize' ? { content: 'x'.repeat(16385) } : {}) }
+    const reference = mode === 'oversize' ? { ...naturalAdmission, digest: sha256(definition) } : naturalAdmission
+    await expect(readConversationSkillReference({ get: async () => mode === 'missing' ? undefined : definition }, { reference, description: source.description })).rejects.toThrow()
+  })
+})
 
 describe('bounded existing Skill discovery and reuse', () => {
   it.each(['flush-failed', 'missing-durable-body', 'withdrawn-during-flush'])('refuses an unsafe source submission: %s', async mode => {
