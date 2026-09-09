@@ -44,6 +44,7 @@ import { TianwenMessageFeedbackBridgeService } from './message-feedback-bridge.j
 import { TianwenResearchSummaryAdmissionService } from './research-summary-admission.js'
 import { TianwenConversationObserverService } from './conversation-observer.js'
 import { TianwenConversationFileObserverService } from './conversation-file-observer.js'
+import { TianwenNativeToolObservationService } from './native-tool-observation.js'
 import { TianwenConversationGuidanceLoopService } from './conversation-guidance-loop.js'
 import { TianwenConversationFeedbackService } from './conversation-feedback-assessment.js'
 import * as controlledSessionArchive from './controlled-session-archive.js'
@@ -481,6 +482,7 @@ export async function apply(
     ? {}
     : { learningSkillSources: config.learningSkillSources })
   ctx.plugin(TianwenMessageFeedbackBridgeService)
+  ctx.plugin(TianwenNativeToolObservationService)
   ctx.plugin(TianwenConversationFileObserverService)
   ctx.plugin(TianwenConversationObserverService)
   ctx.plugin(TianwenConversationFeedbackService)

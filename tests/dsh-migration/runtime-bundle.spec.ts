@@ -40,6 +40,9 @@ const tar = process.platform === 'win32'
   ? resolve(process.env.SystemRoot!, 'System32', 'tar.exe')
   : 'tar'
 const serverPeerDependencies = {
+  '@deepseek-ai/dsh-pwsh-local': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-pwsh-sandbox': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-shell': '0.1.1-rc.2',
   '@deepseek-ai/cordis': '4.0.1',
   '@deepseek-ai/dsh-agent': '0.1.1-rc.2',
   '@deepseek-ai/dsh-agent-presets': '0.1.1-rc.2',
@@ -94,6 +97,7 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/conversation-claim-review.ts',
     'src/conversation-file-material.ts',
     'src/conversation-file-observer.ts',
+    'src/native-tool-observation.ts',
     'src/conversation-file-trial.ts',
     'src/explicit-correction-protocol.ts',
     'src/runtime.ts',
@@ -622,6 +626,10 @@ describe('@tianwen/runtime-bundle', () => {
       'dist/index.js',
       'dist/index.d.ts',
       'dist/runtime.js',
+      'dist/native-pwsh-observer.js',
+      'dist/native-pwsh-observer.d.ts',
+      'dist/native-tool-observation.js',
+      'dist/native-tool-observation.d.ts',
       'dist/smoke.js',
       'dist/status.js',
       'dist/status.d.ts',
@@ -729,6 +737,25 @@ describe('@tianwen/runtime-bundle', () => {
     expect(patch).toContain('goal-round-driver')
     expect(patch).toContain('maxRetries: 0')
     expect(patch).toContain('session-title-llm')
+  })
+
+  it('exports the native observation entries and replaces the existing shell row', async () => {
+    const manifest = json(resolve(packageRoot, 'package.json')) as { exports: Record<string,unknown>; files:string[] }
+    for (const entry of ['native-pwsh-observer','native-tool-observation']) {
+      expect(manifest.exports[`./${entry}`]).toEqual({types:`./dist/${entry}.d.ts`,default:`./dist/${entry}.js`})
+      expect(manifest.files).toContain(`dist/${entry}.d.ts`)
+      const loaded = await import(pathToFileURL(resolve(packageRoot,`dist/${entry}.js`)).href)
+      expect(typeof (entry === 'native-pwsh-observer' ? loaded.default : loaded.parseNativeDirectoryReceipt)).toBe('function')
+    }
+    const fromBundle = createRequire(resolve(packageRoot,'package.json'))
+    const fromDsh = createRequire(fromBundle.resolve('@deepseek-ai/dsh/package.json'))
+    const boot = await import(pathToFileURL(fromDsh.resolve('@deepseek-ai/dsh-app-boot')).href)
+    const patches = boot.loadOverlayPatches('tianwen-test',resolve(packageRoot,'goal-first.patch.yml')) as Array<{id?:string;name?:string;insert?:Array<{id?:string}>}>
+    const base = boot.loadOverlayPatches('tianwen-test',fromDsh.resolve('@deepseek-ai/dsh-base/cordis.patch.yml'))
+    const loader = await import(pathToFileURL(fromDsh.resolve('@deepseek-ai/cordis-plugin-loader')).href)
+    const entries = boot.composeEntries([base,patches]) as Array<{id?:string;name?:string;disabled?:unknown}>
+    const shells = entries.filter(row=>['@deepseek-ai/dsh-pwsh-sandbox','@tianwen/runtime-bundle/native-pwsh-observer'].includes(row.name ?? '') && !loader.interpolate({process},row.disabled))
+    expect(shells.map(row=>row.name)).toEqual(process.platform === 'win32' ? ['@tianwen/runtime-bundle/native-pwsh-observer'] : [])
   })
 
   it('parses Goal-first revision as a scalar expression for start and mutation config', async () => {

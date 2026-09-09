@@ -15,6 +15,14 @@
     "./runtime": {
       "default": "./dist/runtime.js"
     },
+    "./native-pwsh-observer": {
+      "types": "./dist/native-pwsh-observer.d.ts",
+      "default": "./dist/native-pwsh-observer.js"
+    },
+    "./native-tool-observation": {
+      "types": "./dist/native-tool-observation.d.ts",
+      "default": "./dist/native-tool-observation.js"
+    },
     "./smoke": {
       "default": "./dist/smoke.js"
     },
@@ -46,6 +54,10 @@
     "dist/index.js",
     "dist/index.d.ts",
     "dist/runtime.js",
+    "dist/native-pwsh-observer.js",
+    "dist/native-pwsh-observer.d.ts",
+    "dist/native-tool-observation.js",
+    "dist/native-tool-observation.d.ts",
     "dist/smoke.js",
     "dist/status.js",
     "dist/status.d.ts",
@@ -78,6 +90,9 @@
     }
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-pwsh-sandbox": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-pwsh-local": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-shell": "0.1.1-rc.2",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/dsh-agent": "0.1.1-rc.2",
     "@deepseek-ai/dsh-agent-presets": "0.1.1-rc.2",
@@ -110,6 +125,9 @@
     "react": "18.2.0"
   },
   "peerDependencies": {
+    "@deepseek-ai/dsh-pwsh-sandbox": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-pwsh-local": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-shell": "0.1.1-rc.2",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/dsh-agent": "0.1.1-rc.2",
     "@deepseek-ai/dsh-agent-presets": "0.1.1-rc.2",
@@ -157,7 +175,7 @@
   },
   "scripts": {
     "build:types": "dts-bundle-generator --project tsconfig.json --out-file dist/index.d.ts --export-referenced-types false --external-inlines @tianwen/runtime -- src/index.ts",
-    "build": "tsc -b && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/runtime --metafile=dist/index.meta.json --outfile=dist/index.js && esbuild src/runtime.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/runtime --metafile=dist/runtime.meta.json --outfile=dist/runtime.js && esbuild src/smoke.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/smoke.meta.json --outfile=dist/smoke.js && esbuild src/status.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/skill-name --metafile=dist/status.meta.json --outfile=dist/status.js && esbuild src/cli.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/skill-name --metafile=dist/cli.meta.json --outfile=dist/cli.js && esbuild src/model-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/model-runner.meta.json --outfile=dist/model-runner.js && esbuild src/create-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/create-runner.meta.json --outfile=dist/create-runner.js && esbuild src/goal-first-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/runtime --metafile=dist/goal-first-runner.meta.json --outfile=dist/goal-first-runner.js && esbuild src/resume-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/resume-runner.meta.json --outfile=dist/resume-runner.js && esbuild src/controlled-lifecycle-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/controlled-lifecycle-runner.meta.json --outfile=dist/controlled-lifecycle-runner.js && node build-client.mjs && pnpm run build:types",
+    "build": "tsc -b && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/runtime --metafile=dist/index.meta.json --outfile=dist/index.js && esbuild src/runtime.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/runtime --metafile=dist/runtime.meta.json --outfile=dist/runtime.js && esbuild src/smoke.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/smoke.meta.json --outfile=dist/smoke.js && esbuild src/status.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/skill-name --metafile=dist/status.meta.json --outfile=dist/status.js && esbuild src/cli.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/skill-name --metafile=dist/cli.meta.json --outfile=dist/cli.js && esbuild src/model-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/model-runner.meta.json --outfile=dist/model-runner.js && esbuild src/create-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/create-runner.meta.json --outfile=dist/create-runner.js && esbuild src/goal-first-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --alias:@tianwen/dsh-compat=@tianwen/dsh-compat/runtime --metafile=dist/goal-first-runner.meta.json --outfile=dist/goal-first-runner.js && esbuild src/resume-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/resume-runner.meta.json --outfile=dist/resume-runner.js && esbuild src/controlled-lifecycle-runner.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --metafile=dist/controlled-lifecycle-runner.meta.json --outfile=dist/controlled-lifecycle-runner.js && node build-client.mjs && pnpm run build:types && esbuild src/native-pwsh-observer.ts src/native-tool-observation.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true --external:@deepseek-ai/* --outdir=dist",
     "typecheck": "tsc -b --pretty false"
   }
 }
