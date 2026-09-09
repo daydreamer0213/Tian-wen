@@ -44,6 +44,14 @@ lifecycle framework. Exact requirements/tests are in final-fix-brief.md.
 
 ## Remaining gates
 
-One final fix agent owns F1+M2, then one scoped re-review of its exact diff.
+The single final fix wave is committed as5a80a9ffb8000c44a00af3a29086059db9298a0d.
+Original reviewer read the complete29632-byte FIX_BASE6a3b2e7..5a80a9f package,
+brief and root final-fix-report.md. Scoped verdict: Approved; F1 and M2 closed,
+Critical0/Important0/newMinor0; M1 remains deferred. Eligible result is cloned
+before discard/delete on every true terminal, only completed persists files,
+and steering/late-callback guards remain intact. No tests rerun by reviewer.
+Focused3, file-observer11, steering1, fresh Runtime type/build evidence reused.
+Worker's unnecessary native fullfile repeat remains disclosed in its report.
+
 Fresh E candidate/byte audit, actual IAB+DeepSeek, exact-main CI and Daily022
 upgrade are still unexecuted. This review does not substitute for any of them.
