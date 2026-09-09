@@ -2,9 +2,10 @@
 
 Status: Task1 complete/review clean at0c112af, focused36/36 and state17/17
 GREEN plus Evolution tsc. Task2 complete/review clean ataefca18:11selected
-GREEN plus real-loader fix1GREEN and unchanged typecheck/build. Task3 implemented
-at5071d12 and under scoped review: final69/69 covering tests, typecheck/build and
-5packaging checks; prior212 affected regressions reused within scope. Producer task
+GREEN plus real-loader fix1GREEN and unchanged typecheck/build. Task3 complete/
+review clean atb228543: original69 covering + prior212 regressions, then fix1
+60native/observer and7config/export checks, typecheck/build. Default environment
+and consent-disposal findings both closed. Task4 ordinary startup next. Producer task
 review closed atfe84013. Pure v1 compatibility reviewed; native
 registration-time provenance mechanism passed a focused in-memory probe.
 Use a derived ToolRuntime, not late tool wrappers or a new standard preset.
