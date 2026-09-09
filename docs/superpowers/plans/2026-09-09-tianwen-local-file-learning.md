@@ -164,12 +164,12 @@ usable without `files`. A later study must separately require verified `files`.
 Original final artifacts remain separately available on task completion for
 the later original-result evaluator and feedback consumer.
 
-- [ ] Write RED for an actual native file call whose original input survives a later write, plus absent output and capture failure.
-- [ ] Add pre-answer local-file mode while keeping historical admission shapes valid.
-- [ ] Capture first preimages at the approved native tool around-dispatch boundary; bind task/call/path and do not block ordinary work on capture failure.
-- [ ] Persist final actual artifacts and validate their task/native result association; recovery never reconstructs a missing preimage from current files.
-- [ ] Check missing, out-of-scope, mixed-tool and interrupted tasks stay ineligible, and unchanged text/historical fixtures still pass.
-- [ ] Review before opening selection to the new contract.
+- [x] Write RED for an actual native file call whose original input survives a later write, plus absent output and capture failure.
+- [x] Add pre-answer local-file mode while keeping historical admission shapes valid.
+- [x] Capture first preimages at the approved native tool around-dispatch boundary; bind task/call/path and do not block ordinary work on capture failure.
+- [x] Persist final actual artifacts and validate their task/native result association; recovery never reconstructs a missing preimage from current files.
+- [x] Check missing, out-of-scope, mixed-tool and interrupted tasks stay ineligible, and unchanged text/historical fixtures still pass.
+- [x] Review before opening selection to the new contract.
 
 Required assertion: a model saying `saved` with missing `output.md` must not create
 a successful file receipt; re-reading a changed source after restart must not
@@ -432,3 +432,8 @@ narrow extension is finalized from the failing interleaving check, not speculati
   and unchanged domain check was 69/69. This is foundation evidence, not native
   file-learning or actual-model acceptance.
 - No production implementation or new model acceptance is complete at plan creation.
+- Task 2: implementation 3751696, review corrections 5839e10. Original related
+  regression 124/124; fresh final focused checks 14/14 and two package typechecks.
+  Scoped independent re-review confirmed both Important findings addressed,
+  no new issues. Capture is complete; selection/review and actual-model acceptance
+  are still pending downstream tasks.
