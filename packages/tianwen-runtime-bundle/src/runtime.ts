@@ -483,7 +483,7 @@ export async function apply(
     : { learningSkillSources: config.learningSkillSources })
   ctx.plugin(TianwenMessageFeedbackBridgeService)
   ctx.plugin(TianwenNativeToolObservationService)
-  ctx.plugin(TianwenConversationFileObserverService, { ...(config.evolutionRoot === undefined ? {} : { evolutionRoot: config.evolutionRoot }),
+  ctx.plugin(TianwenConversationFileObserverService, { ...(evolutionRoot === undefined ? {} : { evolutionRoot }),
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }) })
   ctx.plugin(TianwenConversationObserverService)
   ctx.plugin(TianwenConversationFeedbackService)

@@ -138,3 +138,101 @@ No unresolved implementation concern remains from self-review. Limitations are i
 - `tests/dsh-migration/conversation-claim-review.spec.ts`
 - `tests/dsh-migration/runtime-bundle.spec.ts`
 - This report.
+
+## Review fix round 1 — default environment and consent disposal
+
+Status: DONE. Review/FIX_BASE `5071d125e3b22b23d1c1c29cc354c9e74eb1e191`; the two Important findings are addressed. Controller documentation commits are preserved. Only three previously owned runtime sources, two previously owned tests and this report changed. No Task 4/5, root documentation, native producer, dependency, startup preset, original source file or historical ledger changes.
+
+### Changes and covering behavior
+
+- `runtime.ts` now forwards its already-resolved `evolutionRoot` to the file observer, matching the guidance-loop consumer. The existing configuration test now covers both explicit configuration and omitted configuration with `ctx.baseUrl`, checking the hand-derived `root/state/evolution` default and zero engineering model requests during configuration.
+- `ConversationFileAncillaryCapture.discard()` invalidates capture, deletes retained method/result/receipt fields (including rows still referenced by an async operation), and clears the pending map. Prepare/result no longer collect after invalidation. Awaited skill resolution and directory capture check validity and row ownership before writing back. Native execution and its original result are not cancelled or replaced.
+- The observer invokes discard on withdrawal and on a subsequent unauthorized dispatch; its result listener does not forward results for revoked states. Repeated discard is harmless. Existing final-value deletion remains.
+- Four new actual-native integration cases cover already-retained and in-flight skill definitions/results and directory receipts/results. They check immediate empty pending storage, deleted fields on previously held row references, no repopulation after async completion, and successful native results. The skill cases additionally verify no subsequent result-capture forwarding after withdrawal. The directory cases require an actual producer receipt to exist, not a fabricated return value.
+- Test-only inspection of the evidence-owning map is deliberate: checking only material eligibility would not establish memory disposal. No test-only API was added to production. These remain fixed-response engineering harness runs, **not real-model acceptance**.
+
+### Exact verification commands and observed output
+
+All commands ran from `D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge`, except the esbuild command which ran from its `packages/tianwen-runtime-bundle` subdirectory. Each validation invocation used this exact environment prefix:
+
+```powershell
+$env:TIANWEN_FILE_TEST_ROOT='E:/待清理/D盘迁移-2026-09-08/Tianwen-本地文件学习-023/consumer-tests'
+$env:TIANWEN_DSH_PROBE_ROOT=$env:TIANWEN_FILE_TEST_ROOT
+$env:TEMP=$env:TIANWEN_FILE_TEST_ROOT
+$env:TMP=$env:TIANWEN_FILE_TEST_ROOT
+```
+
+1. RED before production changes:
+
+```powershell
+& 'D:/hermes/node/node.exe' node_modules/vitest/vitest.mjs run tests/dsh-migration/conversation-guidance-loop.spec.ts tests/dsh-migration/conversation-file-ancillary-runtime.spec.ts -t 'runtime environment and independent|discards .* on withdrawal'
+```
+
+Exit 1, start `01:42:11`, duration `6.87s`; `Test Files 2 failed (2)`, `Tests 5 failed | 1 passed | 128 skipped (134)`. Default-root assertion showed the observer received only `{ skillSources: [] }` while the guidance loop received the expected default root. Retained/in-flight method assertions failed with `expected 2 to be +0` / `expected 1 to be +0` at `expect(pending.size).toBe(0)`.
+
+The two first directory failures (`expected false to be true` for receipt production) were a test-fixture error: the new pwsh calls omitted the native required `description` field. This is not recorded as evidence of the product defect. Added that field and reran only those cases, still before production changes:
+
+```powershell
+& 'D:/hermes/node/node.exe' node_modules/vitest/vitest.mjs run tests/dsh-migration/conversation-file-ancillary-runtime.spec.ts -t 'discards .* directory receipts'
+```
+
+Exit 1, start `01:42:37`, duration `7.35s`; `Test Files 1 failed (1)`, `Tests 2 failed | 47 skipped (49)`. Both produced real receipts, then cleanly failed the pending-empty assertion: retained `expected 2 to be +0`; in-flight `expected 1 to be +0`.
+
+2. GREEN after the minimal production fixes, same combined command as step 1:
+
+```text
+Test Files  2 passed (2)
+     Tests  6 passed | 128 skipped (134)
+  Start at  01:43:32
+  Duration  9.37s
+```
+
+Exit 0. Strengthened the same disposal cases afterward with immediate-clear checks and no-result-forwarding checks, then ran the final covering files:
+
+```powershell
+& 'D:/hermes/node/node.exe' node_modules/vitest/vitest.mjs run tests/dsh-migration/conversation-file-ancillary-runtime.spec.ts tests/dsh-migration/conversation-file-observer.spec.ts
+```
+
+```text
+Test Files  2 passed (2)
+     Tests  60 passed (60)
+  Start at  01:44:38
+  Duration  69.37s
+```
+
+Exit 0: 49 ancillary-native tests plus 11 observer tests. No unrelated 212-test regression rerun and no closed producer suite rerun.
+
+3. Runtime typecheck:
+
+```powershell
+& 'D:/hermes/node/node.exe' node_modules/typescript/bin/tsc -b packages/tianwen-runtime-bundle --pretty false
+```
+
+Exit 0, no diagnostics/output, elapsed `5.95s`.
+
+4. Changed runtime bundle build:
+
+```powershell
+& 'D:/hermes/node/node.exe' node_modules/esbuild/bin/esbuild src/runtime.ts --bundle --platform=node --format=esm --target=node22 --tree-shaking=true '--external:@deepseek-ai/*' '--alias:@tianwen/dsh-compat=@tianwen/dsh-compat/runtime' --metafile=dist/runtime.meta.json --outfile=dist/runtime.js
+```
+
+Exit 0; output `dist\runtime.js 1.6mb`, `Done in 67ms`.
+
+5. Final default/explicit configuration plus necessary existing build/export assertions:
+
+```powershell
+& 'D:/hermes/node/node.exe' node_modules/vitest/vitest.mjs run tests/dsh-migration/conversation-guidance-loop.spec.ts tests/dsh-migration/runtime-bundle.spec.ts -t 'runtime environment and independent|executes the built runtime|bundles Tianwen code|opt-in native observation entries|native registration identity import|bundles the package root'
+```
+
+```text
+Test Files  2 passed (2)
+     Tests  7 passed | 150 skipped (157)
+  Start at  01:45:16
+  Duration  5.40s
+```
+
+Exit 0. `git diff --check` also exited 0 with no output.
+
+### Self-review and boundaries
+
+Both findings have direct failing-then-passing coverage. Late async writes are guarded in addition to clearing the map, and revocation does not cancel the native execution. Original persisted data, v1 material/result/trial formats, guidance digest, limits and worker projections are unchanged. All new local fixtures used the approved E consumer-tests root and test cleanup; no real model/browser/server, installation, push, merge or release occurred. No remaining concern identified within this two-finding fix scope; controller scoped re-review is next.

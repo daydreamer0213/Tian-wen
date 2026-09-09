@@ -190,7 +190,17 @@ export class ConversationFileAncillaryCapture {
   constructor(private readonly ctx: Context, private readonly task: ConversationTask, private readonly cwd: string,
     private readonly config: ConversationFileAncillaryConfig) {}
 
+  discard(): void {
+    this.invalid = true
+    // Async prepare/execute can still hold a row after removal from the map.
+    for (const pending of this.pending.values()) {
+      delete pending.method; delete pending.result; delete pending.receipt
+    }
+    this.pending.clear()
+  }
+
   async prepare(exec: ToolDispatchExecution): Promise<void> {
+    if (this.invalid) return
     try {
       assert(exec.agent !== undefined && exec.parent === undefined && exec.callId === exec.rootCallId
         && String(exec.callId).length > 0 && String(exec.callId).length <= 512)
@@ -211,7 +221,8 @@ export class ConversationFileAncillaryCapture {
         admitted(reference, this.task, this.config)
         const registry = this.ctx.get('skills'); assert(registry !== undefined)
         const definition = parseConversationSkillDefinition(await registry.get(reference.name, { cwd: this.cwd, scope: exec.agent, signal: exec.signal }), reference)
-        pending.method = { tool: 'skill', reference: structuredClone(reference), definition }
+        if (!this.invalid && this.pending.get(String(exec.callId)) === pending)
+          pending.method = { tool: 'skill', reference: structuredClone(reference), definition }
       }
     } catch (error) { this.invalid = true; throw error }
   }
@@ -222,11 +233,12 @@ export class ConversationFileAncillaryCapture {
       const service = exec.name === 'pwsh' ? this.ctx.get('tianwenNativeToolObservation') : undefined
       if (service === undefined) return await next()
       const captured = await service.capture({ taskId: this.task.source.taskId, sessionId: this.task.source.sessionId, callId: String(exec.callId) }, next)
-      if (pending !== undefined && captured.receipt !== undefined) pending.receipt = captured.receipt
+      if (!this.invalid && this.pending.get(String(exec.callId)) === pending && captured.receipt !== undefined) pending.receipt = captured.receipt
       return captured.result
     } finally { if (pending !== undefined) pending.settled = true }
   }
   result(exec: Readonly<ToolExecution>, result: ToolExecutionResult): void {
+    if (this.invalid) return
     const pending = this.pending.get(String(exec.callId))
     if (pending === undefined) { this.invalid = true; return }
     try {

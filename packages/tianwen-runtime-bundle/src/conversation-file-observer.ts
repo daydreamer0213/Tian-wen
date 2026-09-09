@@ -55,7 +55,8 @@ export class TianwenConversationFileObserverService extends Service {
       const call = exec.agent.session.events.findLast(event => event.type === 'tool/call' && String(event.data.callId) === String(exec.callId))
       const current = call?.type === 'tool/call' ? this.ctx.tianwenEvolution.listConversationTasks(String(exec.agent.session.id))
         .find(item => item.source.turn === call.data.turn && item.completion === undefined) : undefined
-      if (current !== undefined) this.states.get(current.source.taskId)?.native.result(exec, result)
+      const state = current === undefined ? undefined : this.states.get(current.source.taskId)
+      if (state !== undefined && !state.revoked) state.native.result(exec, result)
     })
     const offStopping = this.ctx.on('agent/turn-stopping', async ({ agent, turn }) => {
       if (!isRoot(agent)) return
@@ -68,7 +69,7 @@ export class TianwenConversationFileObserverService extends Service {
     })
     const offConsent = this.ctx.on('tianwen/learning-consent-changed', () => {
       for (const state of this.states.values()) {
-        if (!this.authorized(state.consentRevision)) { state.revoked = true; delete state.final }
+        if (!this.authorized(state.consentRevision)) { state.revoked = true; state.native.discard(); delete state.final }
       }
     })
     this.ctx.effect(() => () => { offExecute(); offResult(); offStopping(); offConsent(); this.states.clear() }, 'tianwen-conversation-file-observer.dispose')
@@ -108,7 +109,7 @@ export class TianwenConversationFileObserverService extends Service {
     if (current === undefined) return next()
     const { task, state } = current
     delete state.final
-    if (state.revoked || !this.authorized(state.consentRevision)) { state.revoked = true; return next() }
+    if (state.revoked || !this.authorized(state.consentRevision)) { state.revoked = true; state.native.discard(); return next() }
     try { await state.native.prepare(exec) }
     catch (error) { this.unavailable(state, 'material-unavailable'); this.warn(error) }
     if (isFileAncillaryTool(exec.name)) return state.native.execute(exec, next)

@@ -38,14 +38,15 @@ const reviewPair = (value: ReturnType<typeof verdict>) => [evidenceResponse(valu
 const admission = { kind: 'task', objective: 'Summarize supplied facts', criteria: ['Preserve source scope'], family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
 const verdict = (met: boolean, quote: string) => ({ verdict: met ? 'met' : 'not-met', category: met ? null : 'source-fidelity', explanation: met ? 'Source scope preserved.' : 'Scope expanded beyond source.', evidenceQuotes: [quote] })
 
-it('forwards the actual explicit runtime environment and independent natural admissions', async () => {
+it.each(['explicit', 'default'] as const)('forwards the actual %s runtime environment and independent natural admissions', async setting => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'bundle-config-'))
   const harness = await mountFeedbackHarness(join(root, 'sessions'), [])
   const plugin = vi.spyOn(harness.ctx, 'plugin')
-  const evolutionRoot = join(root, 'evolution')
+  harness.ctx.baseUrl = pathToFileURL(root).href
+  const evolutionRoot = setting === 'explicit' ? join(root, 'evolution') : join(root, 'state', 'evolution')
   try {
-    await applyBundle(harness.ctx, { evolutionRoot, conversationSkillSources: [] })
+    await applyBundle(harness.ctx, { ...(setting === 'explicit' ? { evolutionRoot } : {}), conversationSkillSources: [] })
     expect(plugin).toHaveBeenCalledWith(TianwenConversationGuidanceLoopService, { evolutionRoot, skillSources: [] })
     expect(plugin).toHaveBeenCalledWith(TianwenConversationFileObserverService, { evolutionRoot, skillSources: [] })
     expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])

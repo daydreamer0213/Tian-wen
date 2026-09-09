@@ -366,6 +366,100 @@ it('checks consent before every ancillary append and stops after withdrawal betw
   finally { vi.restoreAllMocks(); await h.handle.dispose(); await h.ctx.fiber.dispose() }
 })
 
+// Inspect only the evidence-owning containers: eligibility alone cannot prove
+// that revoked content was actually released from memory.
+type RetainedEvidence = { method?: unknown; result?: unknown; receipt?: unknown }
+function pendingEvidence(h: Awaited<ReturnType<typeof mount>>): Map<string, RetainedEvidence> {
+  const observer = h.ctx.tianwenConversationFileObserver as unknown as {
+    states: Map<string, { native: { pending: Map<string, RetainedEvidence> } }>
+  }
+  return [...observer.states.values()][0]!.native.pending
+}
+function withdraw(h: Awaited<ReturnType<typeof mount>>): void {
+  h.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+}
+function expectReleased(pending: Map<string, RetainedEvidence>, retained: readonly RetainedEvidence[]): void {
+  expect(pending.size).toBe(0)
+  for (const row of retained) {
+    expect(row.method).toBeUndefined(); expect(row.result).toBeUndefined(); expect(row.receipt).toBeUndefined()
+  }
+}
+
+it.each(['retained', 'in-flight'] as const)('discards %s method evidence on withdrawal while native tools finish', async timing => {
+  let pending: Map<string, RetainedEvidence> | undefined
+  let retained: RetainedEvidence[] = []
+  const results = vi.spyOn(ConversationFileAncillaryCapture.prototype, 'result')
+  let capturedBeforeWithdrawal = 0
+  const h = await runNativeAncillaryTask([toolCallResponse('load-method', 'skill', { name: method.name }), glob(), read()], h => {
+    if (timing === 'in-flight') {
+      const get = h.ctx.skills.get.bind(h.ctx.skills)
+      vi.spyOn(h.ctx.skills, 'get').mockImplementationOnce(async (...args) => {
+        const definition = await get(...args)
+        pending = pendingEvidence(h); retained = [...pending.values()]
+        withdraw(h)
+        expectReleased(pending, retained); capturedBeforeWithdrawal = results.mock.calls.length
+        return definition
+      })
+    } else h.ctx.on('tools/post-execute', async (exec, _result, next) => {
+      if (exec.name === 'glob') {
+        pending = pendingEvidence(h); retained = [...pending.values()]
+        expect(pending.get('load-method')?.method).toBeDefined()
+        expect(pending.get('load-method')?.result).toBeDefined()
+        withdraw(h)
+        expectReleased(pending, retained); capturedBeforeWithdrawal = results.mock.calls.length
+      }
+      return next()
+    })
+  }, { method: true })
+  try {
+    expect(pending).toBeDefined(); expectReleased(pending!, retained)
+    expect(results.mock.calls).toHaveLength(capturedBeforeWithdrawal)
+    for (const id of ['load-method', 'find-input', 'read-input']) {
+      const result = h.handle.agent.session.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === id)
+      expect(result?.type === 'tool/result' && result.data.message.content[0].isError).toBe(false)
+    }
+    expect(h.task.fileAncillary).toBeUndefined(); expect(h.task.completion?.files).toBeUndefined()
+  } finally { vi.restoreAllMocks(); await h.handle.dispose(); await h.ctx.fiber.dispose() }
+})
+
+it.skipIf(process.platform !== 'win32').each(['retained', 'in-flight'] as const)(
+  'discards %s directory receipts on withdrawal while native pwsh finishes', async timing => {
+    let pending: Map<string, RetainedEvidence> | undefined
+    let retained: RetainedEvidence[] = []
+    let receiptProduced = false
+    const h = await runNativeAncillaryTask([toolCallResponse('directory', 'pwsh', { command: 'Get-Location', description: 'Observe the current directory.' }), glob(), read()], h => {
+      const capture = h.ctx.tianwenNativeToolObservation.capture.bind(h.ctx.tianwenNativeToolObservation)
+      vi.spyOn(h.ctx.tianwenNativeToolObservation, 'capture').mockImplementation(async (identity, next) => {
+        const captured = await capture(identity, async () => {
+          if (timing === 'in-flight') {
+            pending = pendingEvidence(h); retained = [...pending.values()]
+            withdraw(h)
+            expectReleased(pending, retained)
+          }
+          return next()
+        })
+        receiptProduced = captured.receipt !== undefined
+        return captured
+      })
+      if (timing === 'retained') h.ctx.on('tools/post-execute', async (exec, _result, next) => {
+        if (exec.name === 'glob') {
+          pending = pendingEvidence(h); retained = [...pending.values()]
+          expect(pending.get('directory')?.receipt).toBeDefined()
+          expect(pending.get('directory')?.result).toBeDefined()
+          withdraw(h)
+          expectReleased(pending, retained)
+        }
+        return next()
+      })
+    }, { pwsh: true })
+    try {
+      expect(receiptProduced).toBe(true); expect(pending).toBeDefined(); expectReleased(pending!, retained)
+      const result = h.handle.agent.session.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === 'directory')
+      expect(result?.type === 'tool/result' && result.data.message.content[0].isError).toBe(false)
+      expect(h.task.fileAncillary).toBeUndefined(); expect(h.task.completion?.files).toBeUndefined()
+    } finally { vi.restoreAllMocks(); await h.handle.dispose(); await h.ctx.fiber.dispose() }
+  })
+
 it.each([false, true])('restores ancillary material in a fresh runtime with zero new model requests, method=%s', async withMethod => {
   const h = await runNativeAncillaryTask([...(withMethod ? [toolCallResponse('load-method', 'skill', { name: method.name })] : []), read(), grep()], undefined, { method: withMethod })
   const expected = await recoverConversationTaskMaterial(h.ctx, h.task)
