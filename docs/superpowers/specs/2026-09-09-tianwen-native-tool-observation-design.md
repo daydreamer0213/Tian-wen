@@ -118,6 +118,13 @@ records/inputs when ancillary is absent, preserving historical digests.
   Reject truncation, unknown paths, mismatch and current-task generated text.
   Keep digest-bound positive locations, not absence/completeness claims.
 
+For grep, complete preimage refers to the host's unchanged first-access snapshot,
+not a demand that the model receive every file line in a single native read.
+Successful offset/partial reads followed by exact positive matches elsewhere in
+that complete snapshot remain eligible when ordering and no-mutation checks pass.
+Native batch scheduling may serialize search calls; persisted event order, not
+membership in the same model batch, determines the required read-before-grep link.
+
 Read/write/edit keep their existing first-access preimage and final-output
 mechanism. Every tool call must be accounted for. Unknown tool effects, missing
 or mismatched receipts make learning unavailable, not normal task execution.

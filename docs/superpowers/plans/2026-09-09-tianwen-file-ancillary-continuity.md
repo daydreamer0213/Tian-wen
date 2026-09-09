@@ -345,6 +345,17 @@ matching that frozen definition. Native skill loads text only; it does not
 authorize later script/tool effects. Pass existing conversationSkillSources to
 the file observer; do not add new sources or global roots.
 
+"Complete inputs" means the existing host-captured complete first-access UTF-8
+preimages, not that the native read presented every line to the model in one call.
+A successful partial/offset read with a complete host preimage, followed by a
+grep of unchanged content outside that read slice, is valid. Add that positive
+case; do not create a model-facing full-read requirement. Missing/incomplete
+host preimages, unsuccessful reads and ordering/mutation failures still refuse.
+Likewise, the installed native search tools can be exclusive barriers: a shared
+model batch can still yield ordered read.result before grep.call. Test the actual
+persisted sequence relationship, not a batch label; use bounded rebind adversaries
+for genuinely invalid simultaneous boundaries where native scheduling serializes.
+
 - [ ] **Step 4: Integrate capture/freeze/recovery and the existing trial path.**
 
 Preserve read/write/edit first-access capture and no task serialization. Track
@@ -396,8 +407,10 @@ conversationEvidenceTexts. Keep historical no-context instructions/digests exact
 
 - [ ] **Step 5: Run affected GREEN and native packaging checks once on final code.**
 
-Run the RED command plus the affected pure ancillary, guidance-loop, claim-review,
-native producer and runtime-bundle test files. Run Evolution/Runtime typechecks
+Run the RED command plus the affected pure ancillary, guidance-loop, claim-review
+and runtime-bundle tests and this task's actual native pwsh consumer-binding case.
+Reuse the closed unchanged producer core gate; do not repeat its full suite solely
+for a new consumer commit. Run Evolution/Runtime typechecks
 and runtime build/export/patch checks with installed tools. Confirm same native
 tool declarations/results without capture and one shell provider in the normal
 composition. Report exact successes, failures and skipped cases, not a vague
@@ -543,9 +556,9 @@ cleanup. Do not modify Daily, old artifacts or old whole-suite results.
 Commit explicit owned files as `feat: wire native observation into desktop startup`.
 Report stock fallback and observed behavior separately, exact native evidence,
 residual risks, privacy/cleanup and packaging outputs. Root performs task review,
-one final new-delta integration review, and freezes a fresh E candidate for the
-already specified bounded real-use increment. Candidate/version coordination
-and that real-use gate follow separately; no adoption-seeking extra cohort.
+the candidate/CI coordination below, then one final new-delta integration review
+before freezing a fresh E candidate for the already specified bounded real-use
+increment. No adoption-seeking extra cohort.
 
 ## Required candidate/CI follow-up after these code tasks
 
@@ -564,6 +577,19 @@ does not warrant repeating model or file-learning cohorts. Task3 uses the same
 portable resolver/root convention in its owned tests. Required new CI coverage
 and the exact-main CI gate remain mandatory before a Daily update.
 
-Coordinate a fresh candidate/version separately; do not overwrite frozen023 or
-blindly replace historical predecessor/version fixtures. Reuse the established
-Task5 delivery/upgrade protocol in the local-file-learning plan.
+The next distinct private candidate is Runtime0.1.24/Desktop0.1.0-preview.25.
+This is routine monotonic version coordination under the owner's standing
+delegation, not a new release approval. Coordinate active manifests, archive
+names, strict current-version checks and their existing tests; do not overwrite
+frozen023 or blindly replace historical predecessor/version fixtures. The
+read-only candidate-ci-preflight.md in this plan's SDD workspace lists the exact
+active sources. Verify frozen023's actual managed profile shape before adding
+its predecessor matcher; current edited source is not frozen023 authority.
+
+Preserve every existing predecessor including Daily022. The required real
+upgrade is from the user's actual Daily022 baseline after all delivery gates;
+new023 predecessor matching needs focused contract coverage, not automatically
+another full installed-upgrade cohort. Add a separate actual upgrade scenario
+only for a concrete unmet upgrade risk. Reuse the established Task5 delivery/
+upgrade protocol in the local-file-learning plan and existing version-coherence
+checks; this inventory is not authority to add redundant generic checks.
