@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -30,6 +30,11 @@ const actualStartupEvidenceRoot = resolve(
 const fixtures: string[] = []
 const actualStartupEnabled = process.platform === 'win32'
   && process.env.TIANWEN_RUN_NATIVE_OBSERVATION_STARTUP === '1'
+const junctionDiagnosticEnabled = process.platform === 'win32'
+  && process.env.TIANWEN_RUN_NATIVE_OBSERVATION_JUNCTION_DIAGNOSTIC === '1'
+const task4EvidenceRoot = resolve(
+  process.env.TIANWEN_TASK4_EVIDENCE_ROOT ?? join(tmpdir(), 'tianwen-task4-evidence'),
+)
 
 interface LaunchModule {
   prepareNativeObservationLaunch(
@@ -163,7 +168,15 @@ function readWindowsAcl(path: string): WindowsAclSnapshot {
   const output = runWindowsAclScript(`
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$acl = [System.IO.DirectoryInfo]::new($env:TIANWEN_ACL_PATH).GetAccessControl()
+$path = $env:TIANWEN_ACL_PATH
+$info = if ([System.IO.Directory]::Exists($path)) {
+  [System.IO.DirectoryInfo]::new($path)
+} elseif ([System.IO.File]::Exists($path)) {
+  [System.IO.FileInfo]::new($path)
+} else {
+  throw 'ACL fixture path does not exist'
+}
+$acl = $info.GetAccessControl()
 $current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {
   [pscustomobject]@{
@@ -638,6 +651,55 @@ describe('Tianwen native observation launch preparation', () => {
     expect(prepared.patchPath).toBeUndefined()
     expect(existsSync(join(visited[1]!, 'observation.patch.yml'))).toBe(false)
     expect(existsSync(visited[1]!)).toBe(false)
+  })
+
+  it.skipIf(!junctionDiagnosticEnabled)('rejects a Windows junction at the dedicated launch root before using its target', async () => {
+    const launch = await loadLaunchModule()
+    expect(launch).toBeDefined()
+    if (launch === undefined) return
+    mkdirSync(fixtureParent, { recursive: true })
+    const targetRoot = mkdtempSync(join(fixtureParent, 'junction-target-'))
+    fixtures.push(targetRoot)
+    const fixture = createFixture()
+    mkdirSync(fixture.paths.stateRoot, { recursive: true })
+    const launchRoot = join(fixture.paths.stateRoot, 'native-observation-launch')
+    const marker = join(targetRoot, 'target-marker.txt')
+    write(marker, 'junction-target-marker')
+    symlinkSync(targetRoot, launchRoot, 'junction')
+    const before = {
+      targetRoot: readWindowsAcl(targetRoot),
+      marker: readWindowsAcl(marker),
+    }
+
+    const prepared = await launch.prepareNativeObservationLaunch(fixture.target, fixture.environment, {
+      nonce: () => 'junction-scope',
+    })
+    const targetChild = join(targetRoot, 'launch-junction-scope')
+    const after = {
+      targetRoot: readWindowsAcl(targetRoot),
+      marker: readWindowsAcl(marker),
+    }
+    const evidence = {
+      schemaVersion: 'tianwen.native-observation-junction-diagnostic.v1',
+      launchRootIsJunction: lstatSync(launchRoot).isSymbolicLink(),
+      status: prepared.status,
+      targetMarkerContent: readFileSync(marker, 'utf8'),
+      targetChildCreated: existsSync(targetChild),
+      targetChildEntries: existsSync(targetChild) ? readdirSync(targetChild).sort() : [],
+      before,
+      after,
+    }
+    const evidencePath = join(task4EvidenceRoot, `${basename(targetRoot)}.json`)
+    const rendered = `${JSON.stringify(evidence)}\n`
+    expect(Buffer.byteLength(rendered)).toBeLessThanOrEqual(128 * 1024)
+    mkdirSync(dirname(evidencePath), { recursive: true })
+    writeFileSync(evidencePath, rendered, { encoding: 'utf8', flag: 'wx' })
+    console.log(`native observation junction evidence path: ${evidencePath}`)
+    expect(prepared.status).toEqual({ kind: 'stock', reason: 'observation-unavailable' })
+    expect(evidence.targetChildCreated).toBe(false)
+    expect(after).toEqual(before)
+    expect(evidence.targetMarkerContent).toBe('junction-target-marker')
+    await prepared.cleanup()
   })
 
   it('does not claim or delete a pre-existing launch folder on a nonce collision', async () => {

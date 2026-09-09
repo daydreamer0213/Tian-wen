@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readSync,
@@ -415,6 +416,7 @@ export async function prepareNativeObservationLaunch(
     const launchRoot = join(stateRoot, 'native-observation-launch')
     const secureDirectory = dependencies.secureLaunchDirectory ?? secureLaunchDirectory
     mkdirSync(launchRoot, { recursive: true, mode: 0o700 })
+    if (lstatSync(launchRoot).isSymbolicLink()) throw new Error('launch root must not be a link')
     secureDirectory(launchRoot)
     launchFolder = join(launchRoot, `launch-${(dependencies.nonce ?? randomUUID)()}`)
     const child = relative(launchRoot, launchFolder)
