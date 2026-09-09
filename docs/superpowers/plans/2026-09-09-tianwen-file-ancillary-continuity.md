@@ -603,6 +603,7 @@ increment. No adoption-seeking extra cohort.
 - Modify `scripts/install-tianwen.mjs`, `scripts/stage-desktop-runtime.mjs`, `scripts/audit-desktop-artifact.mjs`, `scripts/verify-dsh-profile.mjs`, `.github/workflows/ci.yml`.
 - Modify `tests/contracts/test_public_repository_surface.py` and the exact current-version expectations in `tests/dsh-migration/runtime-bundle.spec.ts`, `controlled-lifecycle-command.spec.ts`, `controlled-lifecycle-profile.spec.ts`, `one-shot-profile-lifecycle.spec.ts`, `ordinary-long-goal-cli.spec.ts`, `portable-goal-cli.spec.ts`, `portable-profile-composition.e2e.spec.ts`, `portable-plugin-lifecycle.e2e.spec.ts`, `runtime-profile.spec.ts`, `tianwen-startup.e2e.spec.ts`, `tianwen-version-upgrade.e2e.spec.ts`, `tianwen-installer.spec.ts`, `tianwen-desktop-host.spec.ts`, `tianwen-desktop-profile-prepare.spec.ts`, `tianwen-desktop-artifact.spec.ts`, `tianwen-desktop-distribution.e2e.spec.ts`.
 - Modify only native package resolution/test-root portability in `tests/dsh-migration/native-pwsh-observer.spec.ts`, `native-tools-observer.spec.ts`; use the same test-only override for any Task4 launch fixture that still needs it.
+- Modify the active Runtime dependency version in `tests/dsh-migration/tianwen-native-observation-launch.spec.ts`; Task4 added an actual-profile fixture with the current version, which must follow024 rather than remain a frozen023 predecessor.
 - Root owns status/research docs and candidate construction; do not modify frozen artifacts, runtime behavior or archived version claims in this task.
 
 **Interface:** Existing published versions and CLI/archive names, no new runtime
@@ -661,6 +662,14 @@ existing desktop-windows deterministic command and its exact contract. Keep
 Windows-owned native suites out of Ubuntu's test command. Update stage/audit
 archive names together with the package manifests; do not silently skip new
 native tests because a runner lacks the author's private directories.
+
+Task4's actual startup case is explicitly selected by
+`TIANWEN_RUN_NATIVE_OBSERVATION_STARTUP=1`. Set that flag for the Desktop Windows
+command after building the observer entries and Desktop host; simply appending
+the spec would otherwise skip this case. Run the eventually closed ordinary
+WorkspaceWrite gate, not the earlier unrestricted fixture. Preserve existing
+test-root overrides and portable runner.temp handling. Task4's outstanding
+permission/private-storage issues must close before this CI coordination starts.
 
 - [ ] **Step 4: Run focused current-version/installer/Desktop/CI checks and build.**
 
