@@ -252,7 +252,7 @@ RED/GREEN, native vs unit scope and any missing configuration semantics.
 - Modify: `conversation-file-observer.ts`, `conversation-task-material.ts`, `conversation-file-trial.ts`, `conversation-guidance-loop.ts` within that src directory.
 - Modify: `conversation-claim-review.ts` only if a conditional ancillary authority instruction is needed; preserve historical no-context requests.
 - Create: `tests/dsh-migration/conversation-file-ancillary-runtime.spec.ts`.
-- Modify: `packages/tianwen-evolution/src/conversation-file-ancillary.ts` and its `conversation-file-ancillary.spec.ts` only for the independently confirmed native leading-BOM grep line compatibility described below.
+- Modify: `packages/tianwen-evolution/src/conversation-file-ancillary.ts` and its `conversation-file-ancillary.spec.ts` only for the confirmed leading-BOM comparison and optional glob/grep raw-value preservation described below.
 - Modify: existing `conversation-file-observer.spec.ts`, `conversation-file-trial.spec.ts`, `conversation-guidance-loop.spec.ts`, `conversation-claim-review.spec.ts`, `runtime-bundle.spec.ts` for the affected integration contract.
 
 **Inputs:** Task1 exact public contracts, Task2 native-registration method,
@@ -265,6 +265,17 @@ exact exported interface; do not reconstruct a different receipt schema.
 source branch of ConversationFileTrialMaterial. Historical absent context is
 omitted, not `undefined` serialized as a field or an empty object. Recovery must
 produce the same deterministic context; digests include it only when present.
+
+Native nested-path integration exposed another representation seam: fs-search
+can return backslash paths and retains relative root spelling, while the host's
+payload paths are canonical forward-slash paths. Normalization must not alter
+the actual native valueDigest or reject legitimate nested paths. Extend only
+the glob/grep payload alternatives with `readonly nativeValueJson?: string`.
+Reuse the existing canonical-object JSON validator used by pwsh. New captures
+store the actual final raw value there and separately derive normalized payload
+paths. Its bytes count toward the existing record limit; no separate budget,
+truncation, new envelope, or file/result/trial v1 change. Old absent-field records
+retain exact shape/digests and the old verifiable recovery path; no backfill.
 
 - [ ] **Step 1: Write integration RED using real native tools and fixed model responses.**
 
@@ -355,6 +366,22 @@ Likewise, the installed native search tools can be exclusive barriers: a shared
 model batch can still yield ordered read.result before grep.call. Test the actual
 persisted sequence relationship, not a batch label; use bounded rebind adversaries
 for genuinely invalid simultaneous boundaries where native scheduling serializes.
+
+For glob/grep, validate raw value shape and containment before normalization.
+Preserve relative root spelling under the native parseGlobArgs/toWorkdirRelative
+semantics when binding call/root identity; equivalent separators are not escapes.
+Recovery checks nativeValueJson's valueDigest and normalized payload equality
+alongside existing native event/producer/call binding. Keep realpath/symlink and
+traversal checks intact. Never expose nativeValueJson to worker context. Native
+presentation metadata/text can be sampled or truncated, so do not reconstruct
+the complete native value from those display projections or add a new rejection
+solely because a complete captured value had a bounded UI preview.
+
+Cover actual nested backslash glob/grep results, relative root spelling,
+raw/payload mismatch, old no-raw-field compatibility and raw JSON exclusion from
+trial material. These checks address the new42/43 integration failure; rerun
+the affected ancillary/pure files and build/typecheck, not the unchanged212-case
+regression merely for this representation fix.
 
 - [ ] **Step 4: Integrate capture/freeze/recovery and the existing trial path.**
 

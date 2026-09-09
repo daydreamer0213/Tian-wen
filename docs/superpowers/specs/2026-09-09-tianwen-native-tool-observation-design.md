@@ -125,6 +125,19 @@ that complete snapshot remain eligible when ordering and no-mutation checks pass
 Native batch scheduling may serialize search calls; persisted event order, not
 membership in the same model batch, determines the required read-before-grep link.
 
+Actual Windows nested-path integration showed that canonical host paths cannot
+reconstruct the exact raw native value: native fs-search may retain backslashes
+and relative root spelling. Glob/grep ancillary payloads may therefore retain
+optional nativeValueJson, using the existing bounded canonical-JSON convention
+already used for pwsh. All new captures retain that final native value and derive
+the normalized payload from it; recovery verifies the raw digest and normalized
+payload equality with the existing call/event/producer binding. Old absent fields
+preserve their exact shape and historical verifiable path, with no backfill.
+This raw host proof counts toward the existing record byte limit and never enters
+workers. Native presentation metadata/text can be sampled or truncated and must
+not be treated as a replacement complete-value source. File/result/trial v1,
+path safety, record limits and source independence remain unchanged.
+
 Read/write/edit keep their existing first-access preimage and final-output
 mechanism. Every tool call must be accounted for. Unknown tool effects, missing
 or mismatched receipts make learning unavailable, not normal task execution.
