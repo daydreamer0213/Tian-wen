@@ -34,6 +34,7 @@
       "dist/host.js",
       "dist/bootstrap.js",
       "dist/profile-prepare.js",
+      "dist/native-observation-launch.js",
       "package.json"
     ],
     "extraResources": [

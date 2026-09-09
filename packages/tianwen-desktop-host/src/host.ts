@@ -2,6 +2,11 @@ import { execFileSync, spawn as nodeSpawn } from 'node:child_process'
 import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { SpawnOptions } from 'node:child_process'
+import {
+  prepareNativeObservationLaunch,
+  type NativeObservationLaunchPreparation,
+  type NativeObservationPreparationStatus,
+} from './native-observation-launch.js'
 
 const dshVersion = '0.1.1-rc.2'
 const runtimePackage = '@tianwen/runtime-bundle'
@@ -66,6 +71,7 @@ export interface DesktopTarget extends DesktopBaseTarget {
 export interface DesktopWebHost {
   readonly pid: number
   readonly url: URL
+  readonly observation: NativeObservationPreparationStatus
   readonly exited: Promise<{ readonly code: number | null, readonly signal: NodeJS.Signals | null }>
   stop(): Promise<void>
 }
@@ -75,6 +81,7 @@ export interface DesktopHostDependencies {
   readonly stopTree?: (pid: number) => Promise<void>
   readonly setTimeout?: typeof globalThis.setTimeout
   readonly clearTimeout?: typeof globalThis.clearTimeout
+  readonly prepareObservation?: typeof prepareNativeObservationLaunch
 }
 
 function fail(message: string): never {
@@ -237,37 +244,88 @@ function loopbackUrl(output: string): URL | undefined {
   return undefined
 }
 
-export function startDesktopWebHost(target: DesktopTarget, dependencies: DesktopHostDependencies = {}): Promise<DesktopWebHost> {
+function stockObservationPreparation(): NativeObservationLaunchPreparation {
+  return {
+    status: { kind: 'stock', reason: 'observation-unavailable' },
+    async verify() { return true },
+    async cleanup() {},
+  }
+}
+
+export async function startDesktopWebHost(target: DesktopTarget, dependencies: DesktopHostDependencies = {}): Promise<DesktopWebHost> {
   const spawn = dependencies.spawn ?? nodeSpawn
   const setTimer = dependencies.setTimeout ?? globalThis.setTimeout
   const clearTimer = dependencies.clearTimeout ?? globalThis.clearTimeout
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    DSH_HOME: target.dshHome,
+    DSH_TELEMETRY_DISABLED: '1',
+    TIANWEN_LEARNING_LOOP_ROOT: join(target.dshHome, '..', 'state', 'learning-loop'),
+  }
+  let preparation: NativeObservationLaunchPreparation
+  try {
+    preparation = await (dependencies.prepareObservation ?? prepareNativeObservationLaunch)(
+      target,
+      environment,
+    )
+  } catch {
+    preparation = stockObservationPreparation()
+  }
+  let observation = preparation.status
+  let patchPath = preparation.patchPath
+  if (observation.kind !== 'observed' || patchPath === undefined || !await preparation.verify()) {
+    await preparation.cleanup()
+    observation = { kind: 'stock', reason: 'observation-unavailable' }
+    patchPath = undefined
+  }
   const options: SpawnOptions = {
-    env: {
-      ...process.env,
-      DSH_HOME: target.dshHome,
-      DSH_TELEMETRY_DISABLED: '1',
-      TIANWEN_LEARNING_LOOP_ROOT: join(target.dshHome, '..', 'state', 'learning-loop'),
-    },
+    env: environment,
     shell: false,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   }
-  const child = spawn(target.nodeExecutable, [target.dshBin, 'web', '--host', '127.0.0.1', '--port', '0', '--no-open'], options)
+  let child: ReturnType<typeof nodeSpawn>
+  try {
+    child = spawn(target.nodeExecutable, [
+      target.dshBin,
+      'web',
+      ...(patchPath === undefined ? [] : ['--patch', patchPath]),
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '0',
+      '--no-open',
+    ], options)
+  } catch (error) {
+    await preparation.cleanup()
+    throw error
+  }
   const stdout = child.stdout
   const stderr = child.stderr
-  if (child.pid === undefined || stdout === null || stderr === null) return Promise.reject(new Error('Could not start DSH Web'))
+  if (child.pid === undefined || stdout === null || stderr === null) {
+    await preparation.cleanup()
+    throw new Error('Could not start DSH Web')
+  }
   let exited = false
   let stopPromise: Promise<void> | undefined
+  let cleanupPromise: Promise<void> | undefined
+  const cleanupObservation = (): Promise<void> => {
+    cleanupPromise ??= preparation.cleanup()
+    return cleanupPromise
+  }
   let resolveExited: (result: { readonly code: number | null, readonly signal: NodeJS.Signals | null }) => void
   const exitedPromise = new Promise<{ readonly code: number | null, readonly signal: NodeJS.Signals | null }>(resolve => { resolveExited = resolve })
   child.once('exit', (code, signal) => {
     exited = true
-    resolveExited!({ code, signal })
+    void cleanupObservation().then(
+      () => { resolveExited!({ code, signal }) },
+      () => { resolveExited!({ code, signal }) },
+    )
   })
   const stopOwnedProcess = (): Promise<void> => {
     if (stopPromise !== undefined) return stopPromise
     stopPromise = (async () => {
-      if (exited) return
+      if (exited) return cleanupObservation()
       child.kill()
       if (!exited) {
         await new Promise<void>(resolveWait => {
@@ -282,6 +340,7 @@ export function startDesktopWebHost(target: DesktopTarget, dependencies: Desktop
         })
       }
       if (!exited) await (dependencies.stopTree ?? defaultStopTree)(child.pid!)
+      await cleanupObservation()
     })()
     return stopPromise
   }
@@ -307,6 +366,11 @@ export function startDesktopWebHost(target: DesktopTarget, dependencies: Desktop
       }
       try {
         output += String(chunk)
+        if (observation.kind === 'observed'
+          && /patch: name mismatch for "(?:tools|pwsh-sandbox)"[^\r\n]*skipping/u.test(output)) {
+          reject(new Error('DSH Web rejected the native observation overlay'))
+          return
+        }
         const url = loopbackUrl(output)
         if (url === undefined) return
         ready = true
@@ -315,6 +379,7 @@ export function startDesktopWebHost(target: DesktopTarget, dependencies: Desktop
         resolveHost({
           pid: child.pid!,
           url,
+          observation,
           exited: exitedPromise,
           stop: stopOwnedProcess,
         })

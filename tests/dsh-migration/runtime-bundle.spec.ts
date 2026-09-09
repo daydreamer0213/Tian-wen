@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, posix, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
@@ -33,7 +34,7 @@ const packageRoot = resolve(root, 'packages/tianwen-runtime-bundle')
 const compatPackageRoot = resolve(root, 'packages/tianwen-dsh-compat')
 const hostPackageRoot = resolve(root, 'packages/tianwen-dsh-host')
 const packFixtureBase = resolve(
-  process.env.TIANWEN_DSH_PROBE_ROOT ?? 'D:/DevData/tianwen-test-fixtures',
+  process.env.TIANWEN_DSH_PROBE_ROOT ?? join(tmpdir(), 'tianwen-dsh-probes'),
   'runtime-bundle',
 )
 const tar = process.platform === 'win32'
@@ -1382,6 +1383,12 @@ describe('@tianwen/runtime-bundle', () => {
         'package/dist/index.d.ts',
         'package/dist/index.js',
         'package/dist/model-runner.js',
+        'package/dist/native-pwsh-observer.d.ts',
+        'package/dist/native-pwsh-observer.js',
+        'package/dist/native-tool-observation.d.ts',
+        'package/dist/native-tool-observation.js',
+        'package/dist/native-tools-observer.d.ts',
+        'package/dist/native-tools-observer.js',
         'package/dist/resume-runner.js',
         'package/dist/runtime.js',
         'package/dist/smoke.js',

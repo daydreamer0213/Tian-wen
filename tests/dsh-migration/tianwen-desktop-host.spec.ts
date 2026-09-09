@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -15,7 +16,10 @@ import {
   startDesktopWebHost,
 } from '../../packages/tianwen-desktop-host/src/host.js'
 
-const fixtureRoot = resolve('D:/DevData/tianwen-desktop-host-tests')
+const fixtureRoot = resolve(
+  process.env.TIANWEN_FILE_TEST_ROOT ?? join(tmpdir(), 'tianwen-file-tests'),
+  'desktop-host',
+)
 const dshVersion = '0.1.1-rc.2'
 const runtimePackage = '@tianwen/runtime-bundle'
 const runtimeVersion = '0.1.23'
@@ -65,6 +69,14 @@ function child(exitsOnKill = true): FakeChild {
     return true
   }
   return result
+}
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) return
+    await new Promise<void>(resolveWait => { setImmediate(resolveWait) })
+  }
+  throw new Error('condition did not become true')
 }
 
 afterEach(() => {
@@ -330,6 +342,146 @@ describe('Tianwen Desktop Web host contract', () => {
     await host.stop()
   })
 
+  it('passes a verified native observation overlay to Web and owns its cleanup', async () => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child()
+    const patchPath = join(fixtureRoot, 'owned-observation.patch.yml')
+    const cleanups: string[] = []
+    let spawned: unknown
+    const hostPromise = startDesktopWebHost(target, {
+      prepareObservation: async (_preparedTarget, environment) => ({
+        patchPath,
+        status: { kind: 'observed' },
+        verify: async () => environment.DSH_HOME === target.dshHome,
+        cleanup: async () => { cleanups.push(patchPath) },
+      }),
+      spawn: ((program, args, options) => {
+        spawned = { program, args, options }
+        queueMicrotask(() => fake.stdout.write('ready http://127.0.0.1:4317/\n'))
+        return fake
+      }) as never,
+    })
+
+    const host = await hostPromise
+    expect(spawned).toEqual({
+      program: target.nodeExecutable,
+      args: [
+        target.dshBin,
+        'web',
+        '--patch',
+        patchPath,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '0',
+        '--no-open',
+      ],
+      options: expect.objectContaining({ shell: false, windowsHide: true }),
+    })
+    expect(host.observation).toEqual({ kind: 'observed' })
+    expect(cleanups).toEqual([])
+    await host.stop()
+    expect(cleanups).toEqual([patchPath])
+  })
+
+  it('falls back to the unchanged stock Web command when bound observation sources drift', async () => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child()
+    const cleanups: string[] = []
+    let spawnedArgs: readonly string[] | undefined
+    const host = await startDesktopWebHost(target, {
+      prepareObservation: async () => ({
+        patchPath: join(fixtureRoot, 'drifted.patch.yml'),
+        status: { kind: 'observed' },
+        verify: async () => false,
+        cleanup: async () => { cleanups.push('cleaned') },
+      }),
+      spawn: ((_program, args) => {
+        spawnedArgs = args
+        queueMicrotask(() => fake.stdout.write('ready http://127.0.0.1:4318/\n'))
+        return fake
+      }) as never,
+    })
+
+    expect(spawnedArgs).toEqual([
+      target.dshBin, 'web', '--host', '127.0.0.1', '--port', '0', '--no-open',
+    ])
+    expect(host.observation).toEqual({ kind: 'stock', reason: 'observation-unavailable' })
+    expect(cleanups).toEqual(['cleaned'])
+    await host.stop()
+    expect(cleanups).toEqual(['cleaned', 'cleaned'])
+  })
+
+  it.each(['throw', 'missing-pipes'])('cleans an observed overlay when process startup fails: %s', async scenario => {
+    const target = resolveDesktopTarget(fixture())
+    const cleanups: string[] = []
+    const fake = child()
+    if (scenario === 'missing-pipes') fake.stdout = null as never
+    const pending = startDesktopWebHost(target, {
+      prepareObservation: async () => ({
+        patchPath: join(fixtureRoot, 'startup-failure.patch.yml'),
+        status: { kind: 'observed' },
+        verify: async () => true,
+        cleanup: async () => { cleanups.push('cleaned') },
+      }),
+      spawn: (() => {
+        if (scenario === 'throw') throw new Error('spawn failed')
+        return fake
+      }) as never,
+    })
+
+    await expect(pending).rejects.toThrow()
+    expect(cleanups).toEqual(['cleaned'])
+  })
+
+  it('rejects a skipped native name guard and cleans before exposing a host', async () => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child()
+    const cleanups: string[] = []
+    const pending = startDesktopWebHost(target, {
+      prepareObservation: async () => ({
+        patchPath: join(fixtureRoot, 'guarded.patch.yml'),
+        status: { kind: 'observed' },
+        verify: async () => true,
+        cleanup: async () => { cleanups.push('cleaned') },
+      }),
+      spawn: (() => {
+        queueMicrotask(() => {
+          fake.stderr.write('patch: name mismatch for "tools" (expected "custom", got "@deepseek-ai/dsh-tools"), skipping\n')
+          fake.stdout.write('ready http://127.0.0.1:4319/\n')
+        })
+        return fake
+      }) as never,
+    })
+
+    await expect(pending).rejects.toThrow(/rejected the native observation overlay/u)
+    expect(cleanups).toEqual(['cleaned'])
+  })
+
+  it('keeps the overlay until a normally exited child has released it', async () => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child()
+    const cleanups: string[] = []
+    const host = await startDesktopWebHost(target, {
+      prepareObservation: async () => ({
+        patchPath: join(fixtureRoot, 'until-exit.patch.yml'),
+        status: { kind: 'observed' },
+        verify: async () => true,
+        cleanup: async () => { cleanups.push('cleaned') },
+      }),
+      spawn: (() => {
+        queueMicrotask(() => fake.stdout.write('ready http://127.0.0.1:4320/\n'))
+        return fake
+      }) as never,
+    })
+    expect(cleanups).toEqual([])
+
+    fake.emit('exit', 0, null)
+    await host.exited
+
+    expect(cleanups).toEqual(['cleaned'])
+  })
+
   it('ignores unrelated external URLs before the loopback readiness URL', async () => {
     const target = resolveDesktopTarget(fixture())
     const fake = child()
@@ -381,6 +533,7 @@ describe('Tianwen Desktop Web host contract', () => {
       }) as never,
       clearTimeout: (() => undefined) as never,
     })
+    await waitFor(() => fire !== undefined)
     fire!()
     await expect(pending).rejects.toThrow(/120/u)
   })
@@ -410,12 +563,14 @@ describe('Tianwen Desktop Web host contract', () => {
       if (timer === undefined) throw new Error(`missing ${delay}ms timer`)
       timer.handler()
     }
+    await waitFor(() => [...timers.values()].some(timer => timer.delay === 120_000))
     trigger(fake, fire)
     let rejected = false
     void pending.catch(() => { rejected = true })
     await Promise.resolve()
     expect(rejected).toBe(false)
     expect(fallbackCalls).toBe(0)
+    await waitFor(() => [...timers.values()].some(timer => timer.delay === 5_000))
     fire(5_000)
     await expect(pending).rejects.toThrow()
     expect(fallbackCalls).toBe(1)

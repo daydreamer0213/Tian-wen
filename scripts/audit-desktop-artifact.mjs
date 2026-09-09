@@ -58,6 +58,7 @@ const B1_RESOURCE_FILES = new Set([
 
 const B2_RESOURCE_FILES = new Set([
   ...B1_RESOURCE_FILES,
+  'app/dist/native-observation-launch.js',
   'app/dist/profile-prepare.js',
   `runtime/${RUNTIME_ARCHIVE_NAME}`,
 ])

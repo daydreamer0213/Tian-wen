@@ -14,9 +14,10 @@ import { auditDesktopArtifact } from '../../scripts/audit-desktop-artifact.mjs'
 import { stageDesktopRuntime } from '../../scripts/stage-desktop-runtime.mjs'
 
 const testRoots: string[] = []
-const fixtureParent = process.platform === 'win32'
-  ? 'D:\\DevData\\tianwen-desktop-artifact-tests'
-  : join(tmpdir(), 'tianwen-desktop-artifact-tests')
+const fixtureParent = resolve(
+  process.env.TIANWEN_FILE_TEST_ROOT ?? join(tmpdir(), 'tianwen-file-tests'),
+  'desktop-artifact',
+)
 
 function createTestRoot(): string {
   mkdirSync(fixtureParent, { recursive: true })
@@ -38,6 +39,7 @@ function createUnpackedRoot(runtime?: Buffer): string {
   ]
   if (runtime !== undefined) {
     files.push('resources/app/dist/profile-prepare.js')
+    files.push('resources/app/dist/native-observation-launch.js')
     writeFixture(
       root,
       'resources/runtime/tianwen-runtime-bundle-0.1.23.tgz',
@@ -136,7 +138,7 @@ describe('Tianwen Desktop Runtime distribution', () => {
       'packages/tianwen-desktop-host/package.json',
     ), 'utf8')) as {
       version: string
-      build: { extraResources: Array<{ from: string, to: string }> }
+      build: { files: string[], extraResources: Array<{ from: string, to: string }> }
     }
     const desktopRuntimeArchive = desktopManifest.build.extraResources
       .find(({ to }) => to.startsWith('runtime/'))
@@ -148,6 +150,7 @@ describe('Tianwen Desktop Runtime distribution', () => {
       from: 'dist/runtime/tianwen-runtime-bundle-0.1.23.tgz',
       to: 'runtime/tianwen-runtime-bundle-0.1.23.tgz',
     })
+    expect(desktopManifest.build.files).toContain('dist/native-observation-launch.js')
   })
 
   it('rejects a non-absolute, wrongly named, missing, or non-file Runtime source', () => {
@@ -200,6 +203,10 @@ describe('Tianwen Desktop Runtime distribution', () => {
     rmSync(join(unpackedRoot, 'resources/vendor'), { recursive: true })
 
     rmSync(join(unpackedRoot, 'resources/app/dist/profile-prepare.js'))
+    expect(() => auditDesktopArtifact(unpackedRoot, source)).toThrow(/missing|allowlist/iu)
+
+    writeFixture(unpackedRoot, 'resources/app/dist/profile-prepare.js', 'fixture')
+    rmSync(join(unpackedRoot, 'resources/app/dist/native-observation-launch.js'))
     expect(() => auditDesktopArtifact(unpackedRoot, source)).toThrow(/missing|allowlist/iu)
   })
 
