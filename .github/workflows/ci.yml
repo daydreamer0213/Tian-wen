@@ -76,6 +76,8 @@ jobs:
       - run: pnpm --filter @tianwen/runtime-bundle... build
       - name: Run installer contract
         shell: pwsh
+        env:
+          TIANWEN_FILE_TEST_ROOT: ${{ runner.temp }}\tianwen-native-consumer-fixtures
         run: |
           $mappedDrive = $false
           if (-not (Test-Path -LiteralPath 'D:\')) {
@@ -88,7 +90,7 @@ jobs:
             New-Item -ItemType Directory -Force -Path 'D:\DevData' | Out-Null
             node tests/dsh-migration/profile-concurrent-boot.mjs
             if ($LASTEXITCODE -ne 0) { throw 'Profile concurrent cold-boot check failed' }
-            pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts tests/dsh-migration/controlled-lifecycle-command.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/one-shot-profile-lifecycle.spec.ts tests/dsh-migration/learn-loop-host.spec.ts tests/dsh-migration/conversation-file-material.spec.ts tests/dsh-migration/conversation-file-observer.spec.ts tests/dsh-migration/conversation-file-trial.spec.ts tests/dsh-migration/conversation-guidance-files.spec.ts tests/dsh-migration/conversation-file-learning.spec.ts
+            pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts tests/dsh-migration/controlled-lifecycle-command.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/one-shot-profile-lifecycle.spec.ts tests/dsh-migration/learn-loop-host.spec.ts tests/dsh-migration/conversation-file-material.spec.ts tests/dsh-migration/conversation-file-observer.spec.ts tests/dsh-migration/conversation-file-trial.spec.ts tests/dsh-migration/conversation-guidance-files.spec.ts tests/dsh-migration/conversation-file-learning.spec.ts tests/dsh-migration/native-tool-observation.spec.ts tests/dsh-migration/native-pwsh-observer.spec.ts tests/dsh-migration/native-tools-observer.spec.ts tests/dsh-migration/conversation-file-ancillary.spec.ts tests/dsh-migration/conversation-file-ancillary-runtime.spec.ts
             $testExit = $LASTEXITCODE
           } finally {
             if ($mappedDrive) { & subst.exe D: /D }
@@ -109,10 +111,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter '@tianwen/runtime-bundle...' build
       - run: pnpm --filter '@tianwen/runtime-bundle' pack --pack-destination "${{ runner.temp }}/tianwen-runtime-pack"
-      - run: node scripts/stage-desktop-runtime.mjs "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.23.tgz"
+      - run: node scripts/stage-desktop-runtime.mjs "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.24.tgz"
       - run: pnpm --filter @tianwen/desktop-host build
       - name: Run deterministic Desktop tests
         shell: pwsh
+        env:
+          TIANWEN_FILE_TEST_ROOT: ${{ runner.temp }}\tianwen-native-consumer-fixtures
+          TIANWEN_DSH_PROBE_ROOT: ${{ runner.temp }}\tianwen-native-observation-dsh-probes
+          TIANWEN_TASK4_EVIDENCE_ROOT: ${{ runner.temp }}\tianwen-task4-evidence
+          TIANWEN_RUN_NATIVE_OBSERVATION_STARTUP: '1'
+          TIANWEN_RUN_NATIVE_OBSERVATION_JUNCTION_DIAGNOSTIC: '1'
         run: |
           $mappedDrive = $false
           if (-not (Test-Path -LiteralPath 'D:\')) {
@@ -123,7 +131,7 @@ jobs:
           $testExit = 0
           try {
             New-Item -ItemType Directory -Force -Path 'D:\DevData' | Out-Null
-            pnpm exec vitest run tests/dsh-migration/tianwen-desktop-host.spec.ts tests/dsh-migration/tianwen-desktop-bootstrap.spec.ts tests/dsh-migration/tianwen-desktop-profile-prepare.spec.ts tests/dsh-migration/tianwen-desktop-artifact.spec.ts
+            pnpm exec vitest run tests/dsh-migration/tianwen-desktop-host.spec.ts tests/dsh-migration/tianwen-desktop-bootstrap.spec.ts tests/dsh-migration/tianwen-desktop-profile-prepare.spec.ts tests/dsh-migration/tianwen-desktop-artifact.spec.ts tests/dsh-migration/tianwen-native-observation-launch.spec.ts
             $testExit = $LASTEXITCODE
           } finally {
             if ($mappedDrive) { & subst.exe D: /D }
@@ -137,7 +145,7 @@ jobs:
         env:
           ELECTRON_CACHE: ${{ runner.temp }}\electron
           ELECTRON_BUILDER_CACHE: ${{ runner.temp }}\electron-builder
-      - run: node scripts/audit-desktop-artifact.mjs dist/tianwen-desktop/win-unpacked "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.23.tgz"
+      - run: node scripts/audit-desktop-artifact.mjs dist/tianwen-desktop/win-unpacked "${{ runner.temp }}/tianwen-runtime-pack/tianwen-runtime-bundle-0.1.24.tgz"
       - name: Assert one Desktop installer
         shell: pwsh
         run: |

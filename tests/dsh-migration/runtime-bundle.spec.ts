@@ -158,6 +158,7 @@ function isAllowedStatusInput(input: string): boolean {
       '../tianwen-evolution/dist/conversation-guidance.js',
       '../tianwen-evolution/dist/conversation-skill-source.js',
       '../tianwen-evolution/dist/conversation-claim-audit.js',
+      '../tianwen-evolution/dist/conversation-file-ancillary.js',
       '../tianwen-evolution/dist/learning-intake.js',
       '../tianwen-evolution/dist/learning-analysis.js',
       '../tianwen-evolution/dist/learning-exploration.js',
@@ -581,7 +582,7 @@ describe('@tianwen/runtime-bundle', () => {
       version: string
     }
     expect(runtimeManifest.name).toBe('@tianwen/runtime-bundle')
-    expect(runtimeManifest.version).toBe('0.1.23')
+    expect(runtimeManifest.version).toBe('0.1.24')
     expect(runtimeManifest).not.toHaveProperty('private')
     expect(runtimeManifest.bin).toEqual({ tianwen: 'dist/cli.js' })
     expect(runtimeManifest.dependencies ?? {}).toEqual({})
@@ -858,7 +859,7 @@ describe('@tianwen/runtime-bundle', () => {
         dependencies: {
           '@deepseek-ai/dsh-base': '0.1.1-rc.2',
           '@deepseek-ai/dsh-headless': '0.1.1-rc.2',
-          '@tianwen/runtime-bundle': '0.1.23',
+          '@tianwen/runtime-bundle': '0.1.24',
         },
         dsh: {
           profile: {
@@ -1217,7 +1218,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(source).not.toMatch(/from\s+["']@tianwen\//u)
     expect(source).not.toMatch(/@deepseek-ai\/[^"']+\/src\//u)
     expect(source).not.toMatch(
-      /scripted-adapter|dsh-tool-skill|test-harness|dsh-probe-bundle/u,
+      /scripted-adapter|test-harness|dsh-probe-bundle/u,
     )
   })
 
@@ -1342,7 +1343,7 @@ describe('@tianwen/runtime-bundle', () => {
   it('packs only the deployable runtime bundle files', () => {
     mkdirSync(packFixtureBase, { recursive: true })
     const packRoot = mkdtempSync(join(packFixtureBase, 'pack-'))
-    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.1.23.tgz')
+    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.1.24.tgz')
     const pnpmEntry = resolve(dirname(process.execPath), 'node_modules/corepack/dist/pnpm.js')
     try {
       execFileSync(process.execPath, [

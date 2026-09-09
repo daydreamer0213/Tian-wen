@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -8,11 +9,9 @@ import {
   type NativeToolRegistrationProducer,
 } from '../../packages/tianwen-runtime-bundle/src/native-tools-observer.js'
 
-const nativeRequire = createRequire(
-  'D:/DevData/tianwen-real-user-retest-20260905/node_modules/@deepseek-ai/dsh/package.json',
-)
+const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 const load = (name: string) => import(
-  /* @vite-ignore */ pathToFileURL(nativeRequire.resolve(name)).href
+  /* @vite-ignore */ pathToFileURL(cliRequire.resolve(name)).href
 )
 
 type PluginModule = {
@@ -435,8 +434,9 @@ describe('NativeObservedToolRuntime native registration provenance', () => {
     }
   })
 
-  it('executes one actual native glob search on a new tiny E fixture', async () => {
-    const fixtureBase = 'E:/待清理/D盘迁移-2026-09-08/Tianwen-本地文件学习-023/consumer-tests'
+  it('executes one actual native glob search on a new tiny portable fixture', async () => {
+    const base = process.env.TIANWEN_FILE_TEST_ROOT ?? join(tmpdir(), 'tianwen-native-tests')
+    const fixtureBase = join(base, 'native-tools-observer')
     mkdirSync(fixtureBase, { recursive: true })
     const fixture = mkdtempSync(join(fixtureBase, 'native-tools-observer-'))
     writeFileSync(join(fixture, 'alpha.txt'), 'alpha')

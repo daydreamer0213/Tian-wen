@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { mkdir, mkdtemp, writeFile, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -28,8 +29,8 @@ describe('native pwsh producer export', () => {
   })
 })
 
-const nativeRequire = createRequire('D:/DevData/tianwen-real-user-retest-20260905/node_modules/@deepseek-ai/dsh/package.json')
-const load = (name: string) => import(/* @vite-ignore */ pathToFileURL(nativeRequire.resolve(name)).href)
+const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
+const load = (name: string) => import(/* @vite-ignore */ pathToFileURL(cliRequire.resolve(name)).href)
 describe.skipIf(process.platform !== 'win32')('native product gate', () => {
   let stock: Context, observed: Context, workspace: string
   let compose: (executor: any, config?: Record<string, unknown>) => Promise<Context>
@@ -37,7 +38,8 @@ describe.skipIf(process.platform !== 'win32')('native product gate', () => {
   const originalTemp = { TEMP:process.env.TEMP, TMP:process.env.TMP }
   const identity = {taskId:'native-product',sessionId:'native-session',callId:'native-call'}
   beforeAll(async () => {
-    const root='E:/待清理/D盘迁移-2026-09-08/Tianwen-本地文件学习-023/producer-tests'
+    const base = process.env.TIANWEN_FILE_TEST_ROOT ?? join(tmpdir(), 'tianwen-native-tests')
+    const root=join(base,'native-pwsh-observer')
     await mkdir(root,{recursive:true}); workspace=await mkdtemp(join(root,'product-'))
     const temp=await mkdtemp(join(root,'temp-'))
     process.env.TEMP=temp; process.env.TMP=temp
@@ -115,7 +117,7 @@ describe.skipIf(process.platform !== 'win32')('native product gate', () => {
   it('shares the service capture across independent built entry bundles',async () => {
     const boot=await load('@deepseek-ai/dsh-app-boot')
     const loader=await load('@deepseek-ai/cordis-plugin-loader')
-    const base=boot.loadOverlayPatches('tianwen-test',nativeRequire.resolve('@deepseek-ai/dsh-base/cordis.patch.yml'))
+    const base=boot.loadOverlayPatches('tianwen-test',cliRequire.resolve('@deepseek-ai/dsh-base/cordis.patch.yml'))
     const patch=boot.loadOverlayPatches('tianwen-test',join(import.meta.dirname,'../../packages/tianwen-runtime-bundle/goal-first.patch.yml'))
     const entries=withNativePwshObservation(boot.composeEntries([base,patch]))
     const shells=entries.filter(row=>['@deepseek-ai/dsh-pwsh-sandbox','@tianwen/runtime-bundle/native-pwsh-observer'].includes(row.name ?? '') && !loader.interpolate({process},row.disabled))

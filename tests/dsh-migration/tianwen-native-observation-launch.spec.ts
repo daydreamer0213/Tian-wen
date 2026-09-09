@@ -291,7 +291,7 @@ function createFixture(): {
   writeJson(profileManifest, {
     name: '@fixture/web-profile',
     dsh: { profile: { bundles: [baseBundle, runtimeBundle] } },
-    dependencies: { [baseBundle]: '1.0.0', [runtimeBundle]: '0.1.23' },
+    dependencies: { [baseBundle]: '1.0.0', [runtimeBundle]: '0.1.24' },
   })
   const profilePatch = join(profileRoot, 'cordis.patch.yml')
   write(profilePatch, `- id: tools
@@ -761,7 +761,7 @@ describe('Tianwen native observation launch preparation', () => {
         version: '1.0.0',
         type: 'module',
         main: './probe.mjs',
-        dependencies: { '@tianwen/runtime-bundle': '0.1.23' },
+        dependencies: { '@tianwen/runtime-bundle': '0.1.24' },
         dsh: { bundle: { patch: './cordis.patch.yml' } },
       })
       write(join(probeRoot, 'cordis.patch.yml'), `- insert:
@@ -870,7 +870,7 @@ export function apply(ctx, config) {
       writeJson(join(profileRoot, 'package.json'), {
         name: '@fixture/desktop-web-profile',
         dependencies: {
-          '@tianwen/runtime-bundle': '0.1.23',
+          '@tianwen/runtime-bundle': '0.1.24',
           '@fixture/observation-probe': '1.0.0',
         },
         dsh: {

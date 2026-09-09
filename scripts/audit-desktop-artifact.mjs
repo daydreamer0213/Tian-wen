@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'n
 import { basename, isAbsolute, join, posix, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const RUNTIME_ARCHIVE_NAME = 'tianwen-runtime-bundle-0.1.23.tgz'
+const RUNTIME_ARCHIVE_NAME = 'tianwen-runtime-bundle-0.1.24.tgz'
 
 function tarExecutable() {
   const candidate = process.platform === 'win32'
