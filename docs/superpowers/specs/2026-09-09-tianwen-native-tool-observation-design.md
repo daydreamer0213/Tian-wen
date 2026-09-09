@@ -149,17 +149,25 @@ handlers and child-local registration can bypass inherited restrictions.
 The shared standing preset also has no supported per-agent entry replacement.
 Those routes were rejected before consumer implementation.
 
-Safe ordinary wiring uses the native CLI's public configuration preparation:
-obtain composed raw EntryOptions through --dump-config, preserve their dynamic
-expressions and all metadata, and pass a narrow final --patch selecting derived
-tools/pwsh services at Desktop Web startup. Keep full dump only in memory;
-do not log secrets or overwrite user profile/home patches. Dump itself regenerates
-the native derived cordis.yml anchor, as normal native boot does. It is not a
-fully resolved runtime snapshot. Verify actual service activation/configuration
+Safe ordinary wiring uses public loadProfile/loadOptionalPatches/composeEntries
+after the existing verified profile-ready gate: obtain raw EntryOptions in
+native bundle/profile/home order, preserve dynamic expressions/all metadata,
+and pass a narrow final --patch selecting derived tools/pwsh services at Desktop
+Web startup. Do not run a second CLI dump process, log full configuration or
+overwrite user profile/home patches. Use cordis-plugin-include.entryListSchema
+to serialize the narrow raw overlay. These are not runtime-resolved defaults.
+Verify actual service activation/configuration
 after composition; preserve stock behavior when unsupported/ambiguous, never
 silently discard options. This startup boundary needs its own product gate.
 Direct native-bin launches without the adapter remain stock and cannot claim
 the new ancillary continuity; existing learning paths are not disabled.
+
+Compatibility boundary disclosed to the owner: normal Web hot-reloads profile
+and home patches, but the final startup overlay fixes these two host service
+rows until process exit. Manual changes to these two rows require Desktop
+restart; the next launch recomposes them. Other native rows/settings are not
+frozen by this adapter. No claim of live-reload equivalence for these two rows,
+and no new watcher/restart scheduler or model-task restriction is introduced.
 
 The current native glob value is `{root, paths}`, grep value is `{matches}` with
 `{path,lineNumber,line}`, and skill value is `{name,provider,resourceBase?,content}`.

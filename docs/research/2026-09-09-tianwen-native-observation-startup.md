@@ -5,12 +5,25 @@
 
 ## Decision
 
-The installed DSH `0.1.1-rc.2` CLI provides a supported, narrow startup
-boundary for replacing the two host services needed by native observation.
-Tianwen Desktop can invoke the same native CLI twice: first to dump the Web
-Profile's composed entry list, then to start Web with one generated `--patch`
-overlay. This does not require a DSH boot fork, a second execution kernel, or a
-rewrite of the user's Profile.
+The installed DSH `0.1.1-rc.2` provides a supported narrow startup boundary.
+Use public app-boot loadProfile/loadOptionalPatches/composeEntries to build raw
+entries in memory, then invoke the existing native Web CLI once with a narrow
+final --patch. This supersedes the initially proposed dump subprocess. It needs
+neither a DSH boot fork nor a second execution kernel or profile manager.
+
+Call loadProfile only after the existing verified profile-ready gate; it may
+initialize a missing profile, so it is not a general read-only parser. Public
+Profile.layers exposes packageDir/patchPath for source binding. Desktop's
+host/port/no-open arguments and the native preset-root/telemetry overlays do not
+modify the two target service rows. Compose bundle layers, profile patches and
+home patches in that order; expressions remain unevaluated until native boot.
+
+Normal production Web DOES hot-reload profile/home patches. The fixed final
+overlay pins these two host service rows to the process's startup snapshot;
+manual changes to them require Desktop restart. This is a disclosed bounded
+compatibility tradeoff, not full HMR equivalence. The next launch recomposes
+the new values or uses stock/no-evidence. Other rows/settings retain native
+behavior. No extra watcher, automatic task interruption or scheduler is added.
 
 This route concerns only the host-plane `tools` and `pwsh-sandbox` service
 rows. A native probe has separately established that a candidate agent can use
@@ -24,6 +37,10 @@ current goal-first patch is not the normal Web startup path. This is a proposed
 Desktop integration boundary only; it has not been deployed to Daily.
 
 ## Public CLI contract
+
+The dump contract below was investigated as an alternative and explains native
+serialization; the chosen product helper composes in memory and does not run
+the first command. Only the final native Web launch remains.
 
 The two supported command forms are:
 
@@ -59,8 +76,8 @@ other dynamic values remain expressions in the rendered YAML. The dump is a
 composed `EntryOptions` document, not a snapshot of Schemastery defaults or
 runtime-resolved plugin configuration.
 
-The generated overlay must therefore parse the dump with DSH's exported entry
-list YAML schema, retain the exact unresolved fields for the two target rows,
+The generated overlay must therefore serialize the raw composed entries with
+DSH's exported entry-list YAML schema, retain the exact unresolved fields for the two target rows,
 and pass their configuration through the original native Config schemas. It
 must preserve relevant `config`, `disabled`, `inject`, `isolate`, and
 `intercept` values rather than silently filling defaults. The observer
@@ -75,11 +92,25 @@ user-authored Profile or home `cordis.patch.yml`. Product and evidence wording
 must call this a derived-file rewrite, not claim that the dump performs no
 writes at all.
 
-The dump may contain unrelated user configuration, including literal secrets
-if a user placed them in a patch. Desktop must keep dump output in bounded
+Raw composition may contain unrelated user configuration, including literal secrets
+if a user placed them in a patch. Desktop must keep that data in bounded
 memory, extract only the two target rows, and never log, persist, or include the
-full dump in diagnostics or receipts. The generated temporary patch must
-contain no unrelated configuration and must never contain credentials.
+full configuration in diagnostics or receipts. The generated temporary patch must
+contain no unrelated rows or unknown plugin config keys. Legitimate raw target
+fields can themselves contain private paths, expressions or dependency values;
+treat the entire narrow overlay as sensitive, with private access and bounded
+lifetime. This is not generic secret detection and does not promise that arbitrary
+secret text embedded in an otherwise legitimate field can be recognized.
+
+The installed native config keys are closed: tools has mode and
+maxParallelSubCalls (dsh-tools/lib/types/index.d.ts:449-476); sandbox config is
+LocalConfig with cwd, timeoutMs, maxTimeoutMs, maxOutputBytes, maxSpillBytes,
+graceMs and pwshPath (dsh-pwsh-sandbox/lib/types/index.d.ts:27 and
+dsh-pwsh-local/lib/types/index.d.ts:39-59). Loader EntryOptions allows open config
+and intercept data, but that does not expand the two plugin Config schemas.
+Only known entry fields and native-schema-lossless metadata are adaptable;
+unknown config/outer keys fall back to stock. Do not drop legitimate values,
+evaluate expressions or use secret-field-name regexes to manufacture support.
 
 ## Protected replacement
 
@@ -111,7 +142,7 @@ not invent defaults, silently substitute a wrapper, or remove `glob`, `grep`,
 `skill`, `pwsh`, or other ordinary capabilities merely to make evidence
 collection pass.
 
-The dump inputs and launch must also be bound against time-of-check/time-of-use
+The composition inputs and launch must also be bound against time-of-check/time-of-use
 drift. At minimum, retain and recheck hashes for the Profile manifest, relevant
 bundle patch files, Profile patch, home patch when present, and the generated
 overlay before starting the child. Runtime registration checks remain the
@@ -123,9 +154,9 @@ The existing `startDesktopWebHost()` in
 `packages/tianwen-desktop-host/src/host.ts` already owns the native DSH child
 process and its launch arguments. The smallest product route is:
 
-1. Add a bounded helper beside the existing Desktop host code to invoke
-   `dsh web --dump-config`, parse only the two target rows, and return a
-   redacted in-memory description.
+1. Add a bounded helper beside the existing Desktop host code to call the public
+   native composition helpers, select the two target rows, and return a
+   non-sensitive in-memory description. No complete config stdout is produced.
 2. Add a small renderer for the one temporary launch patch and its exact
    target guards.
 3. Have `startDesktopWebHost()` pass the temporary file through the public
@@ -141,21 +172,29 @@ manager, or changes to the native CLI.
 
 Tests should stay close to the existing Desktop host and packaging tests:
 
-- exact CLI argument order for dump and Web launch;
+- exact native composition order and final Web CLI argument order;
 - bundle/Profile/home/CLI overlay precedence for the two target rows;
 - preservation of unresolved `!!js`, native config, disabled and dependency
   fields;
 - rejection of missing, duplicate, renamed, truncated, or ambiguous targets;
-- rejection on skipped-patch warnings and configuration drift between dump and
+- rejection on skipped-patch warnings and configuration drift between composition and
   launch;
 - proof that unsupported custom composition starts stock Web without evidence
   rather than losing ordinary tools;
-- proof that dump output and credentials never enter logs, receipts, or the
-  generated patch;
+- proof that full configuration and unrelated rows never enter the generated
+  patch, and no selected sensitive values enter logs or receipts;
 - temporary-patch cleanup on launch failure, timeout, and child exit/shutdown;
 - package checks for the two observer entry points; and
 - unchanged ordinary `standard` preset, tool schemas, and native execution
-  behavior when the observation route is admitted.
+  behavior when the observation route is admitted;
+- the two-row startup snapshot boundary and re-composition after restart.
+
+The precise public YAML export is
+`@deepseek-ai/cordis-plugin-include.entryListSchema`, not an app-boot export.
+Root ran one small in-memory native-schema roundtrip:6 checks passed, expression
+counter remained0, config/disabled/inject/isolate/intercept preserved, no artifacts
+or models. Retained source: approved E consumer-tools-probe/raw-overlay-probe.mjs;
+output b88e62. This is serialization evidence, not product startup acceptance.
 
 These tests establish startup wiring only. They do not by themselves prove a
 native tool effect, a successful ordinary task, semantic answer quality, or a

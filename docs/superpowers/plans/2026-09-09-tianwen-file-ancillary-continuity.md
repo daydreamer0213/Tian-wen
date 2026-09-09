@@ -1,11 +1,13 @@
 # Ordinary File Ancillary Continuity Implementation Plan
 
-Status: plan preflight, not dispatched. Pure v1 compatibility reviewed; native
+Status: Task1 implemented at0c112af from BASE06d3e9a; independent task review
+in progress, focused36/36 and state17/17 GREEN plus Evolution tsc. Producer task
+review closed atfe84013. Pure v1 compatibility reviewed; native
 registration-time provenance mechanism passed a focused in-memory probe.
 Use a derived ToolRuntime, not late tool wrappers or a new standard preset.
-Ordinary Desktop startup will use the native CLI's public dump/overlay boundary;
-that configuration preparation still requires its own product gate. Producer
-fix review must close before Task1 starts. See the native observation research
+Ordinary Desktop startup will use public native configuration composition and
+the native CLI's final overlay boundary;
+that configuration preparation still requires its own product gate. See the native observation research
 notes for rejected alternatives and the exact supported seams.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -18,7 +20,7 @@ bounded host ancillary records, independently rebind them to native history,
 and project only verified source locations and approved method definitions to
 the existing worker material. A derived native ToolRuntime observes original
 registrations; tools, prompts, preset identity and permissions remain native.
-An ordinary Desktop startup adapter preserves raw native configuration while
+An ordinary Desktop startup adapter preserves startup raw native configuration while
 selecting the two observation services through a final temporary CLI overlay.
 
 **Tech Stack:** Existing Evolution ledger, Cordis, Node22, DSH0.1.1-rc.2, Vitest,
@@ -395,37 +397,53 @@ non-sensitive observed/stock preparation status and an idempotent cleanup.
 It does not start a model, change user input, grant permissions or change the
 default standard preset. Retain existing host process/readiness/stop ownership.
 
-- [ ] **Step 1: Write RED for the native CLI overlay and cleanup contracts.**
+- [ ] **Step 1: Write RED for native composition, CLI overlay and cleanup.**
 
-Test native `web --dump-config` before `web --patch path --host ...`; capture
-stdout only in bounded memory (at most1MiB,30s timeout) and never log it. Preserve
+Use public loadProfile/loadOptionalPatches/composeEntries from the exact installed
+DSH after the existing profile-ready check; do not run a dump subprocess or
+evaluate expressions in Desktop. Bound configuration input to1MiB in memory
+and never log it. Test final `web --patch path --host ...`. Preserve
 raw `!!js`, config, disabled, inject, isolate/intercept and normal patch order.
 Test profile/home/bundle/overlay drift, duplicate/custom/missing targets,
-unrepresentable metadata, failed/truncated dump, skipped-name-guard warning,
+unrepresentable metadata, failed/oversize configuration input, skipped-name-guard warning,
 shutdown and startup failure. Unsupported observation preparation must use stock
-Web, never empty/default tools. No full dump or unrelated secret can reach a
-temporary patch, receipt, error or logger.
+Web, never empty/default tools. No full profile or unrelated model/provider
+configuration can reach a temporary patch, receipt, error or logger. Necessary
+raw fields in the two selected rows are sensitive configuration, not diagnostic text.
 
 Use new fixtures under the approved E consumer-tests root. Existing host tests
 that must run also use this root for this task, not new D/C fixture folders.
 
 - [ ] **Step 2: Implement only native configuration preparation.**
 
-Resolve DSH's public entry-list schema from the already verified installed DSH,
-not another package copy. Parse/dump raw YAML through that schema; never execute
+Resolve public app-boot composition helpers and
+cordis-plugin-include.entryListSchema from the already verified installed DSH,
+not another package copy. Reuse Profile.layers packageDir/patchPath and its
+user patch, then the home optional patch in native order. Public loadProfile
+may initialize a missing profile, so call only after the existing verified
+profile-ready gate and reject disappearance before invoking it. Serialize the
+narrow final YAML through the native schema; never execute
 its expressions in Desktop. Exact target IDs/names must be unique top-level
 `tools`/`@deepseek-ai/dsh-tools` and
 `pwsh-sandbox`/`@deepseek-ai/dsh-pwsh-sandbox`. Preserve their final raw metadata
 while disabling the exact originals with name guards and inserting unique
-Tianwen names. Copy no unrelated rows. Unknown fields must be retained safely
-or observation preparation is unavailable; never silently drop them.
+Tianwen names. Copy no unrelated rows. Accept only the native closed config
+keys: tools mode/maxParallelSubCalls; pwsh cwd/timeoutMs/maxTimeoutMs/
+maxOutputBytes/maxSpillBytes/graceMs/pwshPath. Preserve valid scalars and native
+JsExpr nodes without evaluating or normalizing them. Unknown config keys or
+outer keys outside id/name/config/group/disabled/inject/isolate/intercept make
+observation preparation unavailable; a target must not be a group. Never drop
+fields and then silently substitute defaults. Known metadata must roundtrip
+losslessly through the native schema; otherwise use stock.
 
 Both new classes inherit native Config/default/injection behavior. Do not
 override user's cwd, interpreter, budgets, disabled gates or permissions. If
 an input cannot be represented safely, clean preparation state and run stock
-Web without an observation claim. Keep target fields within the normal native
-schema; unrecognized credential-bearing config must not be serialized to the
-temporary overlay. Do not claim generic secret detection from field-name regexes.
+Web without an observation claim. Closed-key validation excludes unrelated
+configuration, not arbitrary secret text embedded in legitimate paths,
+expressions or dependency metadata. Treat necessary target-row contents as
+sensitive: preserve privately only for this launch and never log/include them
+in receipts or errors. Do not claim generic secret detection from field-name regexes.
 
 Use a fresh small per-launch folder under the existing owned state directory
 (E fixture root in tests), with private access appropriate to the native host.
@@ -435,11 +453,21 @@ before launch; the programmatic native preset-root/telemetry overlays do not
 touch these two rows. Treat name-guard drift as observer startup failure before
 handing a partially adapted host to the user. Preserve original task capability.
 
-The native dump regenerates its normal derived `cordis.yml` anchor; record this
-truth, but do not back up/rewrite user patch files or create a profile manager.
+Direct composition does not need the CLI dump's derived cordis.yml rewrite.
+The final native launch retains its normal derived-file preparation; do not
+back up/rewrite user patch files or create a profile manager.
 No new generic health/telemetry store is required: actual runtime registration
 and directory receipts remain the execution-time proof. A selected row in a
-dump alone is not proof that it ran.
+configuration document alone is not proof that it ran.
+
+Normal Web has live profile/home reload. The fixed final overlay deliberately
+locks only these two host service rows to this process's startup snapshot;
+manual edits to those rows take effect on Desktop restart. Do not claim full
+live-reload equivalence for them. Other native rows/settings keep native behavior.
+This bounded compatibility choice was disclosed to the owner; no new watcher,
+automatic task interruption or reload scheduler is added. Add a regression that
+same-process raw-row edits do not silently produce a new observation claim,
+and the next launch recomposes the new configuration or falls back to stock.
 
 - [ ] **Step 3: Integrate with the existing Desktop lifecycle and package it.**
 
