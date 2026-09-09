@@ -868,7 +868,12 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
         "tests/dsh-migration/controlled-lifecycle-command.spec.ts "
         "tests/dsh-migration/runtime-bundle.spec.ts "
         "tests/dsh-migration/one-shot-profile-lifecycle.spec.ts "
-        "tests/dsh-migration/learn-loop-host.spec.ts"
+        "tests/dsh-migration/learn-loop-host.spec.ts "
+        "tests/dsh-migration/conversation-file-material.spec.ts "
+        "tests/dsh-migration/conversation-file-observer.spec.ts "
+        "tests/dsh-migration/conversation-file-trial.spec.ts "
+        "tests/dsh-migration/conversation-guidance-files.spec.ts "
+        "tests/dsh-migration/conversation-file-learning.spec.ts"
     )
     expected_installer_job = textwrap.dedent(
         """\
@@ -922,6 +927,11 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
         "tests/dsh-migration/runtime-bundle.spec.ts",
         "tests/dsh-migration/one-shot-profile-lifecycle.spec.ts",
         "tests/dsh-migration/learn-loop-host.spec.ts",
+        "tests/dsh-migration/conversation-file-material.spec.ts",
+        "tests/dsh-migration/conversation-file-observer.spec.ts",
+        "tests/dsh-migration/conversation-file-trial.spec.ts",
+        "tests/dsh-migration/conversation-guidance-files.spec.ts",
+        "tests/dsh-migration/conversation-file-learning.spec.ts",
     ):
         assert windows_owned_spec not in typescript_job
     assert "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts" not in installer_job
