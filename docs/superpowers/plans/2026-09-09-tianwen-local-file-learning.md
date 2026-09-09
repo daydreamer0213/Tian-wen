@@ -310,10 +310,11 @@ a model to reconstruct missing receipt data. Check actual cold inspection after
 Agent disposal, not only a live persistence view. Validate the absolute owned
 replica child target before cleanup and never delete its parent.
 
-- [ ] Write RED that the candidate trial must actually change its own replica,
+- [x] Write RED that the candidate trial must actually change its own replica,
   while baseline and original workspace bytes remain unchanged.
-  Candidate/original trace passes; the explicit paired-baseline assertion is
-  carried to Task 4's native study integration (non-blocking Task 3 review item).
+  Candidate/original trace passes; Task 4's native study integration now asserts
+  retained baseline output, intact original bytes, distinct execution Sessions
+  and distinct replica cwd values. Independently reviewed at 104c1fd.
 - [x] Use `agents.create({ meta: { cwd: replicaRoot, origin: 'subagent', parentSession }, setup })` and native `followup`/`whenIdle`; register no new work tools.
 - [x] Restrict and guard native read/write/edit by exact replica/allowed paths;
   preserve cancellation and exact native model/persistence proof.
@@ -407,16 +408,16 @@ support/consent invalidation in the ledger. Do not silently bypass source gates
 or introduce per-rule history replay at every injection. Exact API for this
 narrow extension is finalized from the failing interleaving check, not speculation.
 
-- [ ] Write RED for file-mode selection and snapshot/hash compatibility before modifying consumers.
-- [ ] Give reviewers original frozen inputs plus actual outputs, never output
+- [x] Write RED for file-mode selection and snapshot/hash compatibility before modifying consumers.
+- [x] Give reviewers original frozen inputs plus actual outputs, never output
   content as its own factual source. Bind file output to recovered audit proof.
-- [ ] Select compatible verified file evidence through existing support and
+- [x] Select compatible verified file evidence through existing support and
   counterexample rules; replay actual files for source/exploration/holdout cases.
   Include the carried Task 3 assertion: an actual baseline and candidate execute
   independent replicas, retained baseline output and original bytes stay intact.
-- [ ] Verify accepted/rejected/unknown, source/reference ordering, withdrawal,
+- [x] Verify accepted/rejected/unknown, source/reference ordering, withdrawal,
   no reapplication on restart and existing text behavior with focused tests.
-- [ ] Independent correctness/scope review; fix only reproduced findings.
+- [x] Independent correctness/scope review; fix only reproduced findings.
 
 ## Task 5: Targeted real-model branches and delivery
 
@@ -449,3 +450,10 @@ narrow extension is finalized from the failing interleaving check, not speculati
   Scoped independent re-review confirmed both Important findings addressed,
   no new issues. Capture is complete; selection/review and actual-model acceptance
   are still pending downstream tasks.
+- Task 4: implementation104c1fd; final327/327 focused regression and strengthened
+  native pair13/13, root changed-boundary119/119. Independent gate found fixed
+  Windows fixture paths incompatible with existing Ubuntu CI; b534667 corrects
+  four tests, root108/108 and scoped re-review passed. Gate closed; Task3 paired
+  isolation carry closed. Actual Linux execution/CI membership, candidate build,
+  real DeepSeek acceptance and delivery remain Task5; seed-failure cleanup remains
+  a final-review Minor. Browser setup remains unavailable, without security changes.
