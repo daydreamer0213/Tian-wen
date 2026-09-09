@@ -42,6 +42,10 @@ export const CONVERSATION_FEEDBACK_SCHEMA = object({
 })
 const generatedCase = object({ prompt: string, criteria: strings })
 export const CONVERSATION_CASES_SCHEMA = object({ adjacent: generatedCase, holdout: generatedCase })
+const generatedFileCase = object({ prompt: string, criteria: strings, files: object({
+  entries: { type: 'array', items: object({ path: string, content: nullable(string) }) }, outputPaths: strings,
+}) })
+export const CONVERSATION_FILE_CASES_SCHEMA = object({ adjacent: generatedFileCase, holdout: generatedFileCase })
 export const CONVERSATION_PROPOSAL_SCHEMA = object({ guidance: string })
 /** Native capture validates the closed properties; the host enforces exactly
  * one choice and the domain validates the frozen exploration evidence. */

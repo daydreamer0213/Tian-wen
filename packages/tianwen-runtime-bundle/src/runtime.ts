@@ -473,7 +473,8 @@ export async function apply(
   ctx: Context,
   config: TianwenRuntimeBundleConfig = {},
 ): Promise<void> {
-  await applyCore(ctx, config.evolutionRoot === undefined ? {} : { evolutionRoot: config.evolutionRoot })
+  const evolutionRoot = config.evolutionRoot ?? (ctx.baseUrl === undefined ? undefined : resolve(fileURLToPath(ctx.baseUrl), 'state', 'evolution'))
+  await applyCore(ctx, evolutionRoot === undefined ? {} : { evolutionRoot })
   ctx.plugin(controlledSessionArchive)
   ctx.plugin(TianwenResearchSummaryAdmissionService)
   ctx.plugin(TianwenLearningConsentAgentService, config.learningSkillSources === undefined
@@ -484,7 +485,7 @@ export async function apply(
   ctx.plugin(TianwenConversationObserverService)
   ctx.plugin(TianwenConversationFeedbackService)
   ctx.plugin(TianwenConversationGuidanceLoopService, {
-    ...(config.evolutionRoot === undefined ? {} : { evolutionRoot: config.evolutionRoot }),
+    ...(evolutionRoot === undefined ? {} : { evolutionRoot }),
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }),
   })
   ctx.plugin(TianwenLearningExplorationService)

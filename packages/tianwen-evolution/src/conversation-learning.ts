@@ -430,7 +430,8 @@ export class ConversationLearningState {
       parseConversationQualityReviewChecks(record.reviewChecks, task.admission.qualityContract)
       const expected = conversationReviewConsensus(record.reviewChecks)
       const mode = task.admission.decision?.evaluationMode
-      const verdict = expected.verdict === 'met' && mode !== 'text' ? 'inconclusive' : expected.verdict
+      const fileCapture = mode === 'local-files' && task.completion.files !== undefined && task.fileUnavailable === undefined
+      const verdict = expected.verdict === 'met' && mode !== 'text' && !fileCapture ? 'inconclusive' : expected.verdict
       if (record.verdict !== verdict || record.category !== expected.category || sha256(record.proof) !== sha256(expected.proof)
         || sha256(record.evidenceQuotes) !== sha256(expected.evidenceQuotes) || record.explanation !== expected.explanation || record.unavailableReason !== null) throw new Error('task review disagrees with its independent check consensus')
       const used = [...this.tasks.values()].flatMap(item => [item.source.sessionId, item.admission?.proof?.sessionId,

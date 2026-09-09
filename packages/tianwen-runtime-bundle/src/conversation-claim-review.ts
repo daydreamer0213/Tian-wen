@@ -3,6 +3,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { JsonSchemaNode, ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session'
 import { sha256, parseClaimAudit, parseConversationAuditedReviewChecks, parseConversationQualityContract, conversationReviewConsensus, type ClaimAudit, type ConversationAuditedReviewCheck } from '@tianwen/evolution'
+import { parseConversationFileMaterial, parseConversationFileEntries, type ConversationFileTrialOutput } from '@tianwen/evolution'
 import { CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationEvidenceSchema, recoverConversationJudgmentRequest, runConversationJudgment } from './conversation-judgment.js'
 
 export type { ClaimAudit } from '@tianwen/evolution'
@@ -13,6 +14,8 @@ export interface ClaimEvidenceItem {
   readonly origin: 'context' | 'request' | 'tool' | 'answer'
   readonly text: string
   readonly toolStatus?: 'success' | 'error'
+  readonly filePath?: string
+  readonly fileStage?: 'initial' | 'final'
 }
 
 export interface ClaimEvidence {
@@ -49,6 +52,22 @@ export function projectClaimEvidence(material: unknown): ClaimEvidence {
   const add = (origin: keyof typeof counters, role: ClaimEvidenceItem['role'], raw: string, toolStatus?: 'success' | 'error') => {
     for (const text of splitText(raw)) items.push({ id: `${origin}-${++counters[origin]}`, role, origin, text, ...(toolStatus === undefined ? {} : { toolStatus }) })
   }
+  const source = record(material.source) ? material.source : record(material.task) ? material.task : undefined
+  const fileMode = material.evaluationMode === 'local-files' || source?.files !== undefined
+  const files = source?.files === undefined ? undefined : parseConversationFileMaterial(source.files)
+  const fileResult = material.fileResult
+  if (files !== undefined && fileResult === undefined) throw new Error('invalid-judgment')
+  if (fileResult !== undefined && (files === undefined || !record(fileResult) || !exactKeys(fileResult, ['answer', 'files', 'outputDigest'])
+    || typeof fileResult.answer !== 'string' || sha256({ answer: fileResult.answer, files: fileResult.files }) !== fileResult.outputDigest)) throw new Error('invalid-judgment')
+  const finalEntries = record(fileResult) ? parseConversationFileEntries(fileResult.files) : undefined
+  if (finalEntries !== undefined && files !== undefined && (sha256(finalEntries.map(entry => entry.path)) !== sha256(files.entries.map(entry => entry.path))
+    || files.outputPaths.some(path => finalEntries.find(entry => entry.path === path)?.content == null))) throw new Error('invalid-judgment')
+  const addFile = (path: string, content: string, stage: 'initial' | 'final') => {
+    const origin = stage === 'initial' ? 'tool' : 'answer'
+    for (const text of content === '' ? [''] : splitText(content)) items.push({ id: `${origin}-${++counters[origin]}`, origin, role: origin,
+      text, filePath: path, fileStage: stage, ...(stage === 'initial' ? { toolStatus: 'success' as const } : {}) })
+  }
+  const preimages = () => { for (const entry of files?.entries ?? []) if (entry.content !== null) addFile(entry.path, entry.content, 'initial') }
   const messages = (value: unknown, origin: 'context' | 'request', fixedRole?: 'user') => {
     if (!Array.isArray(value)) throw new Error('invalid-judgment')
     for (const message of value) {
@@ -62,7 +81,8 @@ export function projectClaimEvidence(material: unknown): ClaimEvidence {
     if (!record(material.source) || !Array.isArray(material.conversation) || !Array.isArray(material.toolEvidence)) throw new Error('invalid-judgment')
     messages(material.source.context, 'context')
     messages(material.source.request, 'request', 'user')
-    for (const event of material.toolEvidence) {
+    preimages()
+    for (const event of fileMode ? [] : material.toolEvidence) {
       if (!record(event) || event.type !== 'tool/result' || !isAppendSurfaceEvent(event as never) || !record(event.data) || !record(event.data.message)) continue
       const message = event.data.message
       const wrapper = Array.isArray(message.content) && record(message.content[0]) ? message.content[0] : undefined
@@ -82,8 +102,11 @@ export function projectClaimEvidence(material: unknown): ClaimEvidence {
       messages(material.task.context, 'context')
       messages(material.task.request, 'request', 'user')
     }
+    preimages()
     add('answer', 'answer', material.answer)
   } else throw new Error('invalid-judgment')
+  if (record(fileResult) && items.filter(item => item.role === 'answer').map(item => item.text).join('') !== fileResult.answer) throw new Error('invalid-judgment')
+  if (files?.outputKind === 'files' && finalEntries !== undefined) for (const path of files.outputPaths) addFile(path, finalEntries.find(entry => entry.path === path)!.content!, 'final')
   const answers = items.filter(item => item.role === 'answer')
   if (answers.length === 0 || answers.length > 128 || Buffer.byteLength(answers.map(item => item.text).join(''), 'utf8') > 32_768) throw new Error('invalid-judgment')
   return { schemaVersion: 'tianwen.claim-evidence.v1', items, evidenceDigest: sha256(items) }
@@ -221,6 +244,8 @@ type AuditedCheck = ConversationAuditedReviewCheck
 
 /** Two isolated native audits for the shared production review path. */
 export async function runConversationClaimReview(ctx: Context, parent: Agent, input: ClaimReviewInput) {
+  // File tool readbacks contain generated output and cannot ground themselves.
+  if (record(input.material) && input.material.evaluationMode === 'local-files' && 'toolEvidence' in input.material) input = { ...input, material: { ...input.material, toolEvidence: [] } }
   const evidence = projectClaimEvidence(input.material)
   const material = { original: structuredClone(input.material), claimEvidence: evidence }
   const schema = conversationEvidenceSchema({ ...CONVERSATION_REVIEW_SCHEMA, properties: { ...CONVERSATION_REVIEW_SCHEMA.properties, audit: auditSchema(evidence) }, required: [...CONVERSATION_REVIEW_SCHEMA.required!, 'audit'] }, input.evidence)
@@ -230,7 +255,7 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
     await input.beforeCall?.()
     input.signal.throwIfAborted()
     const result = await runConversationJudgment(ctx, parent, { ...input, material, label: `${input.label} ${focus}`,
-      instruction: claimReviewInstruction(input.material, input.purpose ?? 'original-result', focus), outputSchema: schema })
+      instruction: fileClaimInstruction(input.material, input.purpose ?? 'original-result', focus), outputSchema: schema })
     if (!record(result.value) || !exactKeys(result.value, ['verdict', 'category', 'explanation', 'evidenceQuotes', 'audit'])
       || !['met', 'not-met', 'inconclusive'].includes(String(result.value.verdict))) throw new Error('invalid-judgment')
     const audit = validateClaimAudit(result.value.audit, evidence, result.value.verdict as 'met' | 'not-met' | 'inconclusive')
@@ -246,15 +271,28 @@ export async function verifyConversationClaimReviewCheck(ctx: Context, check: Co
   readonly materialDigest: string
   readonly outputDigest: string
   readonly modelConfigDigest: string
+  /** Independently verified private receipt/native executor output, not reviewer material. */
+  readonly fileOutput?: ConversationFileTrialOutput
 }): Promise<void> {
   const recovered = await recoverConversationJudgmentRequest(ctx, check)
   if (recovered.modelConfigDigests.some(digest => digest !== expected.modelConfigDigest)
     || !record(recovered.material) || !exactKeys(recovered.material, ['original', 'claimEvidence']) || !record(recovered.material.original)) throw new Error('invalid-judgment')
   const original = recovered.material.original
-  if (!('task' in original) || !('answer' in original) || sha256(original.task) !== expected.materialDigest || sha256(original.answer) !== expected.outputDigest
-    || recovered.instruction !== claimReviewInstruction(original, expected.purpose, check.focus)) throw new Error('invalid-judgment')
+  const fileMode = record(original.task) && original.task.files !== undefined
+  if (!('task' in original) || !('answer' in original) || sha256(original.task) !== expected.materialDigest
+    || (fileMode ? expected.fileOutput === undefined || expected.fileOutput.outputDigest !== expected.outputDigest || sha256(original.fileResult) !== sha256(expected.fileOutput) || original.answer !== expected.fileOutput.answer
+      : original.fileResult !== undefined || sha256(original.answer) !== expected.outputDigest)
+    || recovered.instruction !== fileClaimInstruction(original, expected.purpose, check.focus)) throw new Error('invalid-judgment')
   const evidence = projectClaimEvidence(original)
   if (sha256(recovered.material.claimEvidence) !== sha256(evidence)) throw new Error('invalid-judgment')
   validateClaimAudit(check.audit, evidence, check.verdict)
   if (check.evidenceQuotes.some(quote => !evidence.items.some(item => item.text.includes(quote)))) throw new Error('invalid-judgment')
+}
+
+function fileClaimInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS): string {
+  const base = claimReviewInstruction(material, purpose, focus)
+  if (!record(material)) return base
+  const source = record(material.source) ? material.source : material.task
+  if (material.evaluationMode !== 'local-files' && (!record(source) || source.files === undefined)) return base
+  return `${base}\n\nFile provenance: initial file entries are frozen preimages and may ground facts. Only declared final output paths and the assistant reply are answers; input-only files and chat-mode inputs are not extra answer units. Post-write readback and write-success text never verify generated facts. Host capture proves only file existence and exact bytes, not factual truth. Check every required output exists; absent capture is inconclusive and an absent output is not an empty file. An actual empty file has an explicit empty answer unit with null audit, which establishes coverage only, not task success.`
 }

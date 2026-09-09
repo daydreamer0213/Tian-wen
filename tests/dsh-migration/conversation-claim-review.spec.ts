@@ -26,6 +26,38 @@ const auditFor = (evidence: ReturnType<typeof projectClaimEvidence>, make = (tex
 })
 
 describe('claim evidence projection', () => {
+  const fileMaterial = { schemaVersion: 'tianwen.conversation-file-material.v1', cwd: 'D:/DevData/tianwen-conversation-tests/frozen', outputKind: 'files', entries: [{ path: 'input.txt', content: 'Original fact.' }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] }
+  const fileResult = (content: string | null) => { const output = { answer: '', files: [{ path: 'input.txt', content: 'Original fact.' }, { path: 'output.txt', content }] }; return { ...output, outputDigest: sha256(output) } }
+  it('projects preimages as sources and only declared final files as answers with path membership', () => {
+    const evidence = projectClaimEvidence({ task: { prompt: 'Write the supplied fact.', files: fileMaterial }, answer: '', fileResult: fileResult('Unsupported invention.') })
+    expect(evidence.items.map(item => ({ role: item.role, text: item.text, filePath: item.filePath, fileStage: item.fileStage }))).toEqual([
+      { role: 'user', text: 'Write the supplied fact.', filePath: undefined, fileStage: undefined },
+      { role: 'tool', text: 'Original fact.', filePath: 'input.txt', fileStage: 'initial' },
+      { role: 'answer', text: 'Unsupported invention.', filePath: 'output.txt', fileStage: 'final' },
+    ])
+    expect(evidence.items.map(item => item.id)).toEqual(['request-1', 'tool-1', 'answer-1'])
+  })
+  it('preserves actual empty output membership with null audit but rejects absent output and empty text', () => {
+    const evidence = projectClaimEvidence({ task: { prompt: 'Create an empty file.', files: fileMaterial }, answer: '', fileResult: fileResult('') })
+    expect(evidence.items.at(-1)).toMatchObject({ id: 'answer-1', text: '', filePath: 'output.txt', fileStage: 'final' })
+    expect(validateClaimAudit(auditFor(evidence), evidence, 'met')).toBeDefined()
+    expect(() => projectClaimEvidence({ task: { prompt: 'Create an empty file.', files: fileMaterial }, answer: '', fileResult: fileResult(null) })).toThrow()
+    expect(() => projectClaimEvidence({ task: { prompt: 'x' }, answer: '' })).toThrow()
+    expect(() => projectClaimEvidence({ task: { prompt: 'Write output.txt.', files: fileMaterial }, answer: 'I saved it.' })).toThrow()
+  })
+  it('never treats post-write readback as factual source for original file results', () => {
+    const tool = Session.create(SessionId('file-projection-tool'))
+    tool.append('tool/result', { turn: 1, step: 1, message: createToolResultMessage({ callId: CallId('readback'), isError: false, content: [{ type: 'text', text: 'Unsupported invention.' }] }) }, { surfaceOp: 'append' })
+    const evidence = projectClaimEvidence({ source: { context: [], request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Write the supplied fact.' }] })], files: fileMaterial }, evaluationMode: 'local-files', conversation: [], toolEvidence: tool.events, fileResult: fileResult('Unsupported invention.') })
+    expect(evidence.items.filter(item => item.role !== 'answer').map(item => item.text)).toEqual(['Write the supplied fact.', 'Original fact.'])
+  })
+  it('keeps file chat inputs out of answer units and binds complete output bytes', () => {
+    const files = { ...fileMaterial, outputKind: 'chat', outputPaths: [], entries: [fileMaterial.entries[0]!] }
+    const output = { answer: 'Original fact.', files: files.entries }
+    const evidence = projectClaimEvidence({ task: { prompt: 'Read the file.', files }, answer: output.answer, fileResult: { ...output, outputDigest: sha256(output) } })
+    expect(evidence.items.filter(item => item.role === 'answer')).toEqual([{ id: 'answer-1', role: 'answer', origin: 'answer', text: 'Original fact.' }])
+    expect(() => projectClaimEvidence({ task: { prompt: 'Read the file.', files }, answer: output.answer, fileResult: { ...output, outputDigest: sha256('wrong') } })).toThrow()
+  })
   it('projects study prompts and every answer unit without criteria', () => {
     const material = { task: { prompt: '原料已送达。只改写这句话。', criteria: ['不得作为事实来源'] }, answer: '原料已送达。' }
     const evidence = projectClaimEvidence(material)

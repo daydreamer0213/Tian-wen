@@ -63,7 +63,7 @@ it('keeps the first bytes while an actual approved native write changes the file
     const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
     expect(task.fileInputs?.map(({ path, content }) => ({ path, content }))).toEqual([{ path: 'input.md', content: 'original\r\n' }])
     expect(task.completion?.files).toMatchObject({ outputKind: 'files', outputPaths: ['input.md'], entries: [{ path: 'input.md', content: 'rewritten\r\n' }] })
-    expect(task.review?.verdict).toBe('inconclusive')
+    expect(task.review?.verdict).toBe('met')
     writeFileSync(join(harness.root, 'input.md'), 'later bytes')
     await harness.handle.dispose()
     resumed = await harness.ctx.agents.resume({ resumeSessionId: SessionId('file-chat'), agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })

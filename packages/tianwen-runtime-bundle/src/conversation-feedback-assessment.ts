@@ -11,6 +11,7 @@ import {
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { conversationEvidenceSchema, CONVERSATION_FEEDBACK_SCHEMA, runConversationJudgment } from './conversation-judgment.js'
 import { conversationEvidenceTexts, conversationMessages, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
+import type { ConversationFileTrialOutput } from '@tianwen/evolution'
 
 const ASSESSMENT_INSTRUCTION = `Independently assess user feedback about an exact earlier answer. Do not solve the task, propose guidance, or change the original review or pre-answer criteria. Return exactly {"classification":"attributable-problem|positive|requirement-change|preference|inconclusive","category":null,"supplementalCriteria":[],"explanation":"brief evidence-led explanation","evidenceQuotes":[]} through structured_output.
 The original material may include a separately frozen host qualityContract. Apply it only when present, alongside all original criteria; never backfill it into older tasks or quote it as factual evidence.
@@ -25,6 +26,7 @@ export interface ConversationFeedbackMaterial {
   readonly original: ConversationTaskMaterial
   readonly answer: ReturnType<typeof conversationMessages>
   readonly toolEvidence: readonly SessionEvent[]
+  readonly fileResult?: ConversationFileTrialOutput
   readonly feedback: {
     readonly source: ConversationFeedbackSource
     readonly rating?: 'positive' | 'negative'
@@ -154,7 +156,9 @@ export class TianwenConversationFeedbackService extends Service {
       if (!direct.includes(decision.feedback.quote)) throw new Error('natural feedback quote is not in the direct user input')
       feedback = { source, request, quote: decision.feedback.quote }
     }
-    return { original, answer, toolEvidence: events.filter(event => event.type === 'tool/result'), feedback }
+    const output = original.files === undefined ? undefined : { answer: answer.flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])).join(''), files: target.completion.files!.entries }
+    return { original, answer, toolEvidence: original.files === undefined ? events.filter(event => event.type === 'tool/result') : [], feedback,
+      ...(output === undefined ? {} : { fileResult: { ...output, outputDigest: sha256(output) } }) }
   }
 
   private unavailableResult(started: ConversationFeedbackStarted, reason: ConversationUnavailable): ConversationFeedbackResult {
@@ -213,12 +217,13 @@ export class TianwenConversationFeedbackService extends Service {
     const signal = AbortSignal.any([this.shutdown.signal, controller.signal])
     try {
       const answers = material.answer.flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : []))
-      const evidence = [...conversationEvidenceTexts(material.original, answers, material.toolEvidence),
+      const evidence = [...conversationEvidenceTexts(material.original, answers, material.toolEvidence, material.fileResult?.files),
         ...conversationEvidenceTexts({ request: material.feedback.request ?? [], context: [] },
           material.feedback.note === undefined ? [] : [material.feedback.note])]
       const output = await runConversationJudgment(this.ctx, agent, {
         outputSchema: conversationEvidenceSchema(CONVERSATION_FEEDBACK_SCHEMA, evidence),
-        label: `Tianwen feedback ${assessmentId}`, instruction: ASSESSMENT_INSTRUCTION, material, signal,
+        label: `Tianwen feedback ${assessmentId}`, instruction: material.fileResult === undefined ? ASSESSMENT_INSTRUCTION
+          : `${ASSESSMENT_INSTRUCTION}\nFrozen initial file entries are source preimages. fileResult contains exact captured final bytes and the assistant reply; declared outputPaths are answer artifacts, while input-only files are not answers. Post-write readback or successful writes do not ground generated facts. File existence proves only existence. Attribute feedback against the original request, actual file outputs and exact user feedback.`, material, signal,
       })
       const assessment = { started, startedAt: '' }
       if (signal.aborted || !await this.isAssessmentActive(assessment)) throw new Error('cancelled')

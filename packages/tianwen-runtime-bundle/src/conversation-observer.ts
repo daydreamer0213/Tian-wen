@@ -11,6 +11,7 @@ import { RESEARCH_SUMMARY_SCOPE, RESEARCH_SUMMARY_TOOL_NAME, TIANWEN_CONTROLLED_
 import { conversationAdmissionSchema, runConversationJudgment } from './conversation-judgment.js'
 import { runConversationClaimReview } from './conversation-claim-review.js'
 import { conversationContext, conversationEvidenceTexts, conversationMessages as visible, recoverConversationTaskMaterial, recoverConversationTaskModel } from './conversation-task-material.js'
+import { guidanceRule } from '@tianwen/evolution'
 
 const ADMISSION_INSTRUCTION = `Identify what the direct user is asking BEFORE any answer is produced. Return a JSON object with exactly these fields through structured_output:
 {"kind":"task|conversation","objective":"brief objective","criteria":["observable acceptance condition"],"family":"summarization|writing|planning|code|other","evaluationMode":"text|external|subjective|local-files","relatedTaskId":null,"feedback":null}, adding "fileOutputKind":"files|chat" only when evaluationMode is local-files.
@@ -215,7 +216,7 @@ export class TianwenConversationObserverService extends Service {
       if (decision.relatedTaskId !== null && !earlier.some(task => task.source.taskId === decision.relatedTaskId)) throw new TypeError('feedback target is not an available earlier task')
       if (decision.feedback !== null && !directText(direct).includes(decision.feedback.quote)) throw new TypeError('feedback quote is not in current direct user input')
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-admitted', taskId, decision, proof: result.proof, unavailableReason: null, qualityContract })
-      return { guidance: decision.kind === 'task' ? snapshot.rules[decision.family] : undefined, feedback: decision.feedback !== null, consentRevision: consent.revision }
+      return { guidance: decision.kind === 'task' ? guidanceRule(snapshot, decision.family, decision.evaluationMode, decision.fileOutputKind) : undefined, feedback: decision.feedback !== null, consentRevision: consent.revision }
     } catch (error) {
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-admitted', taskId, decision: null, proof: null, unavailableReason: unavailable(error, signal), qualityContract })
     } finally { this.analyses.delete(controller) }
@@ -244,16 +245,21 @@ export class TianwenConversationObserverService extends Service {
       if (!await this.ctx.sessions.flush(agent.session)) throw new Error('task persistence unavailable')
       const source = await recoverConversationTaskMaterial(this.ctx, task)
       const callConfig = await recoverConversationTaskModel(this.ctx, task)
-      const material = { source, evaluationMode: task.admission.decision.evaluationMode, conversation: visible(events, task.source.materialProjection), toolEvidence: events.filter(event => event.type === 'tool/result') }
+      const conversation = visible(events, task.source.materialProjection)
+      const answer = conversation.filter(message => message.role === 'assistant').flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])).join('')
+      const output = source.files === undefined ? undefined : { answer, files: task.completion!.files!.entries }
+      const material = { source, evaluationMode: task.admission.decision.evaluationMode, conversation,
+        toolEvidence: task.admission.decision.evaluationMode === 'local-files' ? [] : events.filter(event => event.type === 'tool/result'),
+        ...(output === undefined ? {} : { fileResult: { ...output, outputDigest: sha256(output) } }) }
       if (material.conversation.some(message => message.role === 'user' && !task.source.userMessageIds.includes(message.id))) throw new TypeError('user request changed after criteria were frozen')
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-review-started', taskId, materialDigest: sha256(material) })
       const judge = async () => {
         const evidence = conversationEvidenceTexts(source, material.conversation.filter(message => message.role === 'assistant')
-          .flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])), material.toolEvidence)
+          .flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])), material.toolEvidence, material.fileResult?.files)
         const result = await runConversationClaimReview(this.ctx, agent, { label: `Tianwen review ${taskId}`, evidence, material, signal, callConfig })
         if (!this.authorized(task.source.consentRevision)) throw new Error('cancelled')
         const review = { ...result, ...base, unavailableReason: null }
-        if (material.evaluationMode !== 'text' && review.verdict === 'met') {
+        if (material.evaluationMode !== 'text' && material.fileResult === undefined && review.verdict === 'met') {
           this.ctx.tianwenEvolution.recordConversationLearning({ ...review, verdict: 'inconclusive' })
         } else this.ctx.tianwenEvolution.recordConversationLearning(review)
       }

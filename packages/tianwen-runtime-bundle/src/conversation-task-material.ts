@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { SessionId, isAppendSurfaceEvent, type SessionEvent, type UserMessage } from '@deepseek-ai/dsh-session'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
-import { learningSessionLifecycleFingerprint, sha256, type ConversationFileMaterial, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
+import { learningSessionLifecycleFingerprint, sha256, type ConversationFileMaterial, type ConversationFileEntry, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 
 export function conversationMessages(events: readonly SessionEvent[], projection?: ConversationTaskSource['materialProjection']) {
@@ -47,12 +47,14 @@ export interface ConversationTaskMaterial {
 }
 
 /** Quotable source text, excluding judgment-derived fields and native metadata. */
-export function conversationEvidenceTexts(source: Pick<ConversationTaskMaterial, 'request' | 'context'>, answers: readonly string[], toolEvents: readonly SessionEvent[] = []): string[] {
+export function conversationEvidenceTexts(source: Pick<ConversationTaskMaterial, 'request' | 'context' | 'files'>, answers: readonly string[], toolEvents: readonly SessionEvent[] = [], finalEntries?: readonly ConversationFileEntry[]): string[] {
   return [
     ...[...source.request, ...source.context].flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])),
     ...answers,
-    ...toolEvents.flatMap(event => event.type === 'tool/result' && isAppendSurfaceEvent(event)
-      ? event.data.message.content[0].content.flatMap(block => block.type === 'text' ? [block.text] : []) : []),
+    ...(source.files === undefined ? toolEvents.flatMap(event => event.type === 'tool/result' && isAppendSurfaceEvent(event)
+      ? event.data.message.content[0].content.flatMap(block => block.type === 'text' ? [block.text] : []) : [])
+      : [...source.files.entries.flatMap(entry => entry.content === null ? [] : [entry.content]),
+        ...(source.files.outputKind === 'files' ? (finalEntries ?? []).flatMap(entry => source.files!.outputPaths.includes(entry.path) && entry.content !== null ? [entry.content] : []) : [])]),
   ]
 }
 

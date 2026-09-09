@@ -2999,7 +2999,7 @@ export class EvolutionLedger {
     const artifactId = `artifact:${guidanceVersion(snapshot).slice(7)}` as ArtifactId
     if (this.#artifacts.has(artifactId)) {
       if (this.readSource(artifactId) !== canonicalJson(snapshot)) throw new LedgerIntegrityError('conversation guidance source drift')
-    } else if (Object.keys(snapshot.rules).length > 0) throw new LedgerIntegrityError('active conversation guidance artifact is missing')
+    } else if (Object.keys(snapshot.rules).length > 0 || Object.keys(snapshot.fileRules ?? {}).length > 0) throw new LedgerIntegrityError('active conversation guidance artifact is missing')
     return snapshot
   }
 
@@ -3011,9 +3011,16 @@ export class EvolutionLedger {
    * unchanged; walk the exact active parent chain, never the plugin Champion. */
   retireIncompatibleConversationGuidance(scopeKey: string): void {
     let study = this.#conversationGuidance.activeStudy(scopeKey)
-    while (study !== undefined && !hasCurrentConversationQuality(study.opened.qualityContract)) {
+    while (study !== undefined) {
+      const disabled = this.#learningAnalysisConsent?.enabled !== true || this.#learningAnalysisConsent.policyVersion !== 'tianwen-auto-analysis.v3'
+      const ancestor = this.#conversationGuidance.activeStudyChain(scopeKey).slice(1).find(item => disabled || !this.isConversationGuidanceSupported(item.opened.studyId))
+      const reason = !hasCurrentConversationQuality(study.opened.qualityContract) ? 'quality-contract-changed' as const
+        : ancestor !== undefined ? 'ancestor-invalidated' as const : disabled ? 'consent-disabled' as const
+          : !this.isConversationGuidanceSupported(study.opened.studyId) ? 'support-retracted' as const : undefined
+      if (reason === undefined) break
       this.recordConversationGuidance({ kind: 'guidance-rolled-back', studyId: study.opened.studyId,
-        expectedCurrentVersion: guidanceVersion(study.candidate!.candidateSnapshot), reason: 'quality-contract-changed', evidenceTaskIds: [] })
+        expectedCurrentVersion: guidanceVersion(study.candidate!.candidateSnapshot), reason, evidenceTaskIds: [],
+        ...(reason === 'ancestor-invalidated' ? { ancestorStudyId: ancestor!.opened.studyId } : {}) })
       study = this.#conversationGuidance.activeStudy(scopeKey)
     }
   }
@@ -3073,7 +3080,10 @@ export class EvolutionLedger {
       const task = tasks.find(item => item.source.taskId === taskId)
       if (task?.source.scopeKey !== study.scopeKey || task.source.behaviorVersion !== study.parentVersion
         || task.source.consentRevision !== study.consentRevision || task.completion?.status !== 'completed'
-        || task.admission?.decision?.family !== study.family || task.admission.decision.evaluationMode !== 'text') throw new LedgerIntegrityError('natural learning requires exact compatible task support and counterevidence')
+        || task.admission?.decision?.family !== study.family || task.admission.decision.evaluationMode !== (study.evaluationMode ?? 'text')
+        || task.admission.decision.fileOutputKind !== study.fileOutputKind
+        || (study.evaluationMode === 'local-files' && (task.fileUnavailable !== undefined || task.completion.files === undefined || !task.fileInputs?.length
+          || task.completion.files.outputKind !== study.fileOutputKind))) throw new LedgerIntegrityError('natural learning requires exact compatible task support and counterevidence')
       if (sha256(task.admission.qualityContract ?? null) !== sha256(study.qualityContract ?? null)) throw new LedgerIntegrityError('natural learning sources and counterexample require the same frozen quality contract')
       if (task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)) throw new LedgerIntegrityError('natural learning requires the same frozen native model configuration for every source task')
       const sourceCase = study.cases.find(item => 'sourceTaskId' in item && item.sourceTaskId === taskId)
@@ -3093,7 +3103,10 @@ export class EvolutionLedger {
           || assessment.result.category !== study.failureCategory || assessment.result.supplementalCriteria.length === 0) throw new LedgerIntegrityError('natural learning feedback support is absent or retracted')
       } else if (task.review?.proof == null || (isCounterexample ? task.review.verdict !== 'met' : task.review.verdict !== 'not-met' || task.review.category !== study.failureCategory)) throw new LedgerIntegrityError('natural learning requires failed source reviews and a successful counterexample')
     }
-    if (new Set(study.sourceTaskIds.map(id => tasks.find(task => task.source.taskId === id)!.source.requestDigest)).size !== 2) throw new LedgerIntegrityError('repeated natural learning requires distinct requests')
+    if (new Set(study.sourceTaskIds.map(id => {
+      const task = tasks.find(task => task.source.taskId === id)!
+      return study.evaluationMode === 'local-files' ? sha256({ requestDigest: task.source.requestDigest, inputs: task.fileInputs!.map(({ path, content }) => ({ path, content })), outputKind: task.completion!.files!.outputKind, outputPaths: task.completion!.files!.outputPaths }) : task.source.requestDigest
+    })).size !== 2) throw new LedgerIntegrityError('repeated natural learning requires distinct requests')
   }
 
   #validateConversationGuidance(record: ConversationGuidanceRecord): void {
@@ -3107,11 +3120,12 @@ export class EvolutionLedger {
       || (record.kind === 'candidate-recorded' && full?.exploration !== undefined)
     const sourceMutation = record.kind === 'source-reference-read'
       || (record.kind === 'candidate-recorded' && full?.sourceReference !== undefined)
-    if (record.kind === 'study-opened' || record.kind === 'guidance-activated' || exploredMutation || sourceMutation) {
+    const fileMutation = study.evaluationMode === 'local-files' && ['study-file-trial-captured', 'candidate-recorded', 'arm-recorded', 'exploration-arm-recorded'].includes(record.kind)
+    if (record.kind === 'study-opened' || record.kind === 'guidance-activated' || exploredMutation || sourceMutation || fileMutation) {
       if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== study.consentRevision) throw new LedgerIntegrityError('natural learning requires current v3 consent')
       this.#validateConversationGuidanceSupport(study)
     }
-    if (exploredMutation || sourceMutation) {
+    if (exploredMutation || sourceMutation || fileMutation) {
       if (guidanceVersion(this.#conversationGuidance.snapshot(study.scopeKey)) !== study.parentVersion) throw new LedgerIntegrityError('natural exploration or source reference requires the current frozen parent guidance')
     }
     if (record.kind === 'guidance-activated') {
@@ -3120,6 +3134,11 @@ export class EvolutionLedger {
       if (!this.#events.some(event => event.type === 'evaluation-recorded' && event.evaluation.artifactId === artifactId && event.evaluation.receiptDigest === record.decisionDigest && event.evaluation.verdict === 'met')) throw new LedgerIntegrityError('natural guidance activation requires its exact shared evaluation receipt')
     }
     if (record.kind === 'guidance-rolled-back') {
+      if (record.reason === 'ancestor-invalidated') {
+        const ancestor = this.#conversationGuidance.activeStudyChain(study.scopeKey).slice(1).find(item => item.opened.studyId === record.ancestorStudyId)
+        const disabled = consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3'
+        if (ancestor === undefined || (!disabled && this.isConversationGuidanceSupported(ancestor.opened.studyId))) throw new LedgerIntegrityError('ancestor rollback requires actually invalidated ancestor support or consent')
+      }
       if (record.reason === 'quality-contract-changed' && hasCurrentConversationQuality(study.qualityContract)) throw new LedgerIntegrityError('quality contract rollback requires an incompatible historical contract')
       if (record.reason === 'consent-disabled' && consent?.enabled === true && consent.policyVersion === 'tianwen-auto-analysis.v3') throw new LedgerIntegrityError('enabled natural learning cannot claim disabled consent')
       if (record.reason === 'regression') {
@@ -3127,6 +3146,7 @@ export class EvolutionLedger {
         const failures = record.evidenceTaskIds.map(id => this.#conversationLearning.list().find(task => task.source.taskId === id))
         if (failures.length < 2 || failures.some(task => task === undefined || task.source.scopeKey !== study.scopeKey
           || task.source.behaviorVersion !== record.expectedCurrentVersion || task.admission?.decision?.family !== study.family
+          || task.admission.decision.evaluationMode !== (study.evaluationMode ?? 'text') || task.admission.decision.fileOutputKind !== study.fileOutputKind
           || sha256(task.admission.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
           || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)
           || task.review?.verdict !== 'not-met' || task.recordedAt <= full.activatedAt!)
