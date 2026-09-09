@@ -34,6 +34,20 @@ it('captures exact UTF-8 file content and represents an absent file as null', as
   expect(await readConversationFile(root, 'output.md')).toEqual({ path: 'output.md', content: null })
 })
 
+it('preserves UTF-8 BOM bytes through capture, parse and replica seeding', async () => {
+  const source = fixtureRoot('file-bom-source')
+  const replica = fixtureRoot('file-bom-replica')
+  const original = Buffer.from([0xef, 0xbb, 0xbf, 0x61])
+  writeFileSync(join(source, 'input.txt'), original)
+
+  const captured = await readConversationFile(source, 'input.txt')
+  const material = parseConversationFileEntries([captured])
+  await seedConversationFiles(replica, material)
+
+  expect(captured).toEqual({ path: 'input.txt', content: '\uFEFFa' })
+  expect(readFileSync(join(replica, 'input.txt'))).toEqual(original)
+})
+
 it('accepts relative and absolute candidates but returns one canonical slash path', async () => {
   const root = fixtureRoot('file-path')
   mkdirSync(join(root, 'nested'))

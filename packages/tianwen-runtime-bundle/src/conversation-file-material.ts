@@ -85,7 +85,7 @@ export function parseConversationFileEntries(value: unknown): readonly Conversat
     if (entry.content !== null) {
       if (entry.content.includes('\0')) throw new Error('conversation file content contains NUL')
       const bytes = Buffer.from(entry.content, 'utf8')
-      if (new TextDecoder('utf-8', { fatal: true }).decode(bytes) !== entry.content) {
+      if (new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) !== entry.content) {
         throw new Error('conversation file content is not exact UTF-8')
       }
       totalBytes += bytes.byteLength
@@ -148,7 +148,7 @@ export async function readConversationFile(root: string, candidate: string): Pro
       || finalPathStats === undefined || !unchanged(before, after) || !unchanged(before, finalPathStats)) {
       throw new Error('conversation file changed during read')
     }
-    const content = new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length))
+    const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes.subarray(0, length))
     if (content.includes('\0')) throw new Error('conversation file contains NUL')
     return { path, content }
   } finally {
